@@ -558,7 +558,7 @@ public:
     const IPC::Principal& aTriggeringPrincipal,
     const uint32_t& aReferrerPolicy) override;
 
-  static bool AllocateLayerTreeId(TabParent* aTabParent, uint64_t* aId);
+  static bool AllocateLayerTreeId(TabParent* aTabParent, layers::LayersId* aId);
 
   static void
   BroadcastBlobURLRegistration(const nsACString& aURI,
@@ -843,7 +843,7 @@ private:
 
   static bool AllocateLayerTreeId(ContentParent* aContent,
                                   TabParent* aTopLevel, const TabId& aTabId,
-                                  uint64_t* aId);
+                                  layers::LayersId* aId);
 
   /**
    * Get or create the corresponding content parent array to |aContentProcessType|.
@@ -854,7 +854,7 @@ private:
 
   mozilla::ipc::IPCResult RecvAddMemoryReport(const MemoryReport& aReport) override;
   mozilla::ipc::IPCResult RecvFinishMemoryReport(const uint32_t& aGeneration) override;
-  mozilla::ipc::IPCResult RecvAddPerformanceMetrics(const PerformanceInfo& aMetrics) override;
+  mozilla::ipc::IPCResult RecvAddPerformanceMetrics(nsTArray<PerformanceInfo>&& aMetrics) override;
 
   virtual bool
   DeallocPJavaScriptParent(mozilla::jsipc::PJavaScriptParent*) override;
@@ -1020,7 +1020,7 @@ private:
 
   bool HasNotificationPermission(const IPC::Principal& aPrincipal);
 
-  virtual mozilla::ipc::IPCResult RecvShowAlert(const AlertNotificationType& aAlert) override;
+  virtual mozilla::ipc::IPCResult RecvShowAlert(nsIAlertNotification* aAlert) override;
 
   virtual mozilla::ipc::IPCResult RecvCloseAlert(const nsString& aName,
                                                  const IPC::Principal& aPrincipal) override;
@@ -1097,7 +1097,7 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvKeywordToURI(const nsCString& aKeyword,
                                                    nsString* aProviderName,
-                                                   nsCOMPtr<nsIInputStream>* aPostData,
+                                                   RefPtr<nsIInputStream>* aPostData,
                                                    OptionalURIParams* aURI) override;
 
   virtual mozilla::ipc::IPCResult RecvNotifyKeywordSearchLoading(const nsString &aProvider,
@@ -1112,10 +1112,10 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvAllocateLayerTreeId(const ContentParentId& aCpId,
                                                           const TabId& aTabId,
-                                                          uint64_t* aId) override;
+                                                          layers::LayersId* aId) override;
 
   virtual mozilla::ipc::IPCResult RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
-                                                            const uint64_t& aId) override;
+                                                            const layers::LayersId& aId) override;
 
   virtual mozilla::ipc::IPCResult RecvGraphicsError(const nsCString& aError) override;
 

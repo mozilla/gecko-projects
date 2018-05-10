@@ -20,7 +20,7 @@ NS_NewXMLProcessingInstruction(nsNodeInfoManager *aNodeInfoManager,
   using mozilla::dom::ProcessingInstruction;
   using mozilla::dom::XMLStylesheetProcessingInstruction;
 
-  NS_PRECONDITION(aNodeInfoManager, "Missing nodeinfo manager");
+  MOZ_ASSERT(aNodeInfoManager, "Missing nodeinfo manager");
 
   RefPtr<nsAtom> target = NS_Atomize(aTarget);
   MOZ_ASSERT(target);
@@ -77,12 +77,6 @@ ProcessingInstruction::GetAttrValue(nsAtom *aName, nsAString& aValue)
 
   GetData(data);
   return nsContentUtils::GetPseudoAttributeValue(data, aName, aValue);
-}
-
-bool
-ProcessingInstruction::IsNodeOfType(uint32_t aFlags) const
-{
-  return !(aFlags & ~(ePROCESSING_INSTRUCTION | eDATA_NODE));
 }
 
 already_AddRefed<CharacterData>

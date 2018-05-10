@@ -24,7 +24,7 @@ using namespace mozilla;
 
 void nsMenuUtilsX::DispatchCommandTo(nsIContent* aTargetContent)
 {
-  NS_PRECONDITION(aTargetContent, "null ptr");
+  MOZ_ASSERT(aTargetContent, "null ptr");
 
   nsIDocument* doc = aTargetContent->OwnerDoc();
   if (doc) {
@@ -41,8 +41,7 @@ void nsMenuUtilsX::DispatchCommandTo(nsIContent* aTargetContent)
     // pressed keys, but this is a big old edge case anyway. -dwh
     if (!rv.Failed()) {
       event->SetTrusted(true);
-      bool dummy;
-      aTargetContent->DispatchEvent(event, &dummy);
+      aTargetContent->DispatchEvent(*event);
     }
   }
 }

@@ -159,7 +159,7 @@ HTMLSelectOptionAccessible::NativeName(nsString& aName)
   // CASE #2 -- no label parameter, get the first child,
   // use it if it is a text node
   nsIContent* text = mContent->GetFirstChild();
-  if (text && text->IsNodeOfType(nsINode::eTEXT)) {
+  if (text && text->IsText()) {
     nsTextEquivUtils::AppendTextEquivFromTextContent(text, &aName);
     aName.CompressWhitespace();
     return aName.IsEmpty() ? eNameOK : eNameFromSubtree;
@@ -198,7 +198,10 @@ HTMLSelectOptionAccessible::NativeState()
     // visible option
     if (!selected) {
       state |= states::OFFSCREEN;
-      state ^= states::INVISIBLE;
+      // Ensure the invisible state is removed. Otherwise, group info will skip
+      // this option. Furthermore, this gets cached and this doesn't get
+      // invalidated even once the select is expanded.
+      state &= ~states::INVISIBLE;
     } else {
       // Clear offscreen and invisible for currently showing option
       state &= ~(states::OFFSCREEN | states::INVISIBLE);
@@ -317,8 +320,7 @@ HTMLSelectOptGroupAccessible::NativeInteractiveState() const
 bool
 HTMLSelectOptGroupAccessible::IsAcceptableChild(nsIContent* aEl) const
 {
-  return aEl->IsNodeOfType(nsINode::eDATA_NODE) ||
-    aEl->IsHTMLElement(nsGkAtoms::option);
+  return aEl->IsCharacterData() || aEl->IsHTMLElement(nsGkAtoms::option);
 }
 
 uint8_t

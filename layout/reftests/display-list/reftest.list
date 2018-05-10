@@ -7,6 +7,7 @@ skip-if(!retainedDisplayList) == retained-dl-remove-for-ancestor-change-1.html r
 skip-if(!retainedDisplayList) == retained-dl-scroll-out-of-view-1.html retained-dl-scroll-out-of-view-1-ref.html
 skip-if(!retainedDisplayList) == retained-dl-displayport-1.html retained-dl-displayport-1-ref.html
 skip-if(!retainedDisplayList) == retained-dl-prerender-transform-1.html retained-dl-prerender-transform-1-ref.html
+skip-if(!retainedDisplayList) == retained-dl-animation-on-pseudo.html retained-dl-animation-on-pseudo-ref.html
 == retained-dl-wrap-list.html retained-dl-wrap-list-ref.html
 == retained-dl-zindex-1.html retained-dl-zindex-1-ref.html
 == retained-dl-zindex-2.html retained-dl-zindex-2-ref.html
@@ -23,4 +24,10 @@ needs-focus == 1429027-1.html 1429027-1-ref.html
 == 1436189-1.html 1436189-1-ref.html
 skip-if(!asyncPan) == 1437374-1.html 1437374-1-ref.html
 == 1439809-1.html 1439809-1-ref.html
-
+== 1443027-1.html 1443027-ref.html
+== 1443027-2.html 1443027-ref.html
+== 1443027-3.html 1443027-3-ref.html
+== 1451971-1.html 1451971-ref.html
+== 1453541-1.html 1453541-ref.html
+== 1453541-2.html 1453541-ref.html
+== 1452805-1.html 1452805-ref.html

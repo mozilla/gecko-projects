@@ -4,7 +4,7 @@
 
 // Test cancelling add-on update checks while in progress (bug 925389)
 
-ChromeUtils.import("resource://gre/modules/Promise.jsm");
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
 
 // The test extension uses an insecure update url.
 Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
@@ -29,7 +29,7 @@ profileDir.append("extensions");
 // Create an addon update listener containing a promise
 // that resolves when the update is cancelled
 function makeCancelListener() {
-  let updated = Promise.defer();
+  let updated = PromiseUtils.defer();
   return {
     onUpdateAvailable(addon, install) {
       updated.reject("Should not have seen onUpdateAvailable notification");
@@ -44,7 +44,7 @@ function makeCancelListener() {
 }
 
 // Set up the HTTP server so that we can control when it responds
-var httpReceived = Promise.defer();
+var httpReceived = PromiseUtils.defer();
 function dataHandler(aRequest, aResponse) {
   aResponse.processAsync();
   httpReceived.resolve([aRequest, aResponse]);
@@ -56,20 +56,23 @@ testserver.start(-1);
 gPort = testserver.identity.primaryPort;
 
 // Set up an add-on for update check
-writeInstallRDFForExtension({
-  id: "addon1@tests.mozilla.org",
-  version: "1.0",
-  updateURL: "http://localhost:" + gPort + "/data/test_update.json",
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Test Addon 1",
-}, profileDir);
+add_task(async function setup() {
+  await promiseWriteInstallRDFForExtension({
+    id: "addon1@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    updateURL: "http://localhost:" + gPort + "/data/test_update.json",
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Test Addon 1",
+  }, profileDir);
+});
 
 add_task(async function cancel_during_check() {
-  startupManager();
+  await promiseStartupManager();
 
   let a1 = await promiseAddonByID("addon1@tests.mozilla.org");
   Assert.notEqual(a1, null);
@@ -90,7 +93,7 @@ add_task(async function cancel_during_check() {
   let file = do_get_cwd();
   file.append("data");
   file.append("test_update.json");
-  let data = loadFile(file);
+  let data = new TextDecoder().decode(await OS.File.read(file.path));
   response.write(data);
   response.finish();
 
@@ -104,7 +107,7 @@ add_task(async function cancel_during_check() {
 // the update check is in progress
 add_task(async function shutdown_during_check() {
   // Reset our HTTP listener
-  httpReceived = Promise.defer();
+  httpReceived = PromiseUtils.defer();
 
   let a1 = await promiseAddonByID("addon1@tests.mozilla.org");
   Assert.notEqual(a1, null);
@@ -115,7 +118,7 @@ add_task(async function shutdown_during_check() {
   // Wait for the http request to arrive
   let [/* request */, response] = await httpReceived.promise;
 
-  shutdownManager();
+  await promiseShutdownManager();
 
   let updateResult = await listener.promise;
   Assert.equal(AddonManager.UPDATE_STATUS_CANCELLED, updateResult);
@@ -124,9 +127,9 @@ add_task(async function shutdown_during_check() {
   let file = do_get_cwd();
   file.append("data");
   file.append("test_update.json");
-  let data = loadFile(file);
+  let data = await loadFile(file.path);
   response.write(data);
   response.finish();
 
-  await testserver.stop(Promise.defer().resolve);
+  await testserver.stop();
 });

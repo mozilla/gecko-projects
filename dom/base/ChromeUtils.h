@@ -23,6 +23,7 @@ namespace dom {
 class ArrayBufferViewOrArrayBuffer;
 class IdleRequestCallback;
 struct IdleRequestOptions;
+class MozQueryInterface;
 class PrecompiledScript;
 class Promise;
 
@@ -123,6 +124,10 @@ public:
                 const dom::CompileScriptOptionsDictionary& aOptions,
                 ErrorResult& aRv);
 
+  static MozQueryInterface*
+  GenerateQI(const GlobalObject& global, const Sequence<OwningStringOrIID>& interfaces,
+             ErrorResult& aRv);
+
   static void WaiveXrays(GlobalObject& aGlobal,
                          JS::HandleValue aVal,
                          JS::MutableHandleValue aRetval,
@@ -155,9 +160,7 @@ public:
 
   static void ClearRecentJSDevError(GlobalObject& aGlobal);
 
-#ifndef RELEASE_OR_BETA
   static void RequestPerformanceMetrics(GlobalObject& aGlobal);
-#endif
 
   static void Import(const GlobalObject& aGlobal,
                      const nsAString& aResourceURI,

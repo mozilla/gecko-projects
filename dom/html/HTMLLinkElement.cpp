@@ -19,7 +19,6 @@
 #include "nsDOMTokenList.h"
 #include "nsIContentInlines.h"
 #include "nsIDocument.h"
-#include "nsIDOMEvent.h"
 #include "nsINode.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIURL.h"
@@ -28,6 +27,15 @@
 #include "nsStyleConsts.h"
 #include "nsStyleLinkElement.h"
 #include "nsUnicharUtils.h"
+#include "nsWindowSizes.h"
+#include "nsIContentPolicy.h"
+#include "nsMimeTypes.h"
+#include "imgLoader.h"
+#include "MediaContainerType.h"
+#include "DecoderDoctorDiagnostics.h"
+#include "DecoderTraits.h"
+#include "MediaList.h"
+#include "nsAttrValueInlines.h"
 
 #define LINK_ELEMENT_FLAG_BIT(n_) \
   NODE_FLAG_BIT(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + (n_))
@@ -184,7 +192,7 @@ HTMLLinkElement::UnbindFromTree(bool aDeep, bool aNullParent)
   CreateAndDispatchEvent(oldDoc, NS_LITERAL_STRING("DOMLinkRemoved"));
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
 
-  UpdateStyleSheetInternal(oldDoc, oldShadowRoot);
+  Unused << UpdateStyleSheetInternal(oldDoc, oldShadowRoot);
 }
 
 bool
@@ -320,11 +328,13 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
         UpdatePreload(aName, aValue, aOldValue);
       }
 
-      UpdateStyleSheetInternal(nullptr, nullptr,
-                               dropSheet ||
-                               (aName == nsGkAtoms::title ||
-                                aName == nsGkAtoms::media ||
-                                aName == nsGkAtoms::type));
+      const bool forceUpdate = dropSheet ||
+        aName == nsGkAtoms::title ||
+        aName == nsGkAtoms::media ||
+        aName == nsGkAtoms::type;
+
+      Unused << UpdateStyleSheetInternal(
+          nullptr, nullptr, forceUpdate ? ForceUpdate::Yes : ForceUpdate::No);
     }
   } else {
     // Since removing href or rel makes us no longer link to a
@@ -335,7 +345,7 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
           aName == nsGkAtoms::title ||
           aName == nsGkAtoms::media ||
           aName == nsGkAtoms::type) {
-        UpdateStyleSheetInternal(nullptr, nullptr, true);
+        Unused << UpdateStyleSheetInternal(nullptr, nullptr, ForceUpdate::Yes);
       }
       if ((aName == nsGkAtoms::as || aName == nsGkAtoms::type ||
            aName == nsGkAtoms::crossorigin || aName == nsGkAtoms::media) &&
@@ -349,10 +359,10 @@ HTMLLinkElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                             aOldValue, aSubjectPrincipal, aNotify);
 }
 
-nsresult
+void
 HTMLLinkElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
-  return GetEventTargetParentForAnchors(aVisitor);
+  GetEventTargetParentForAnchors(aVisitor);
 }
 
 nsresult
@@ -410,80 +420,50 @@ HTMLLinkElement::GetHrefURI() const
   return GetHrefURIForAnchors();
 }
 
-already_AddRefed<nsIURI>
-HTMLLinkElement::GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal)
+Maybe<nsStyleLinkElement::SheetInfo>
+HTMLLinkElement::GetStyleSheetInfo()
 {
-  *aIsInline = false;
-  *aTriggeringPrincipal = nullptr;
+  nsAutoString rel;
+  GetAttr(kNameSpaceID_None, nsGkAtoms::rel, rel);
+  uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(rel);
+  if (!(linkTypes & nsStyleLinkElement::eSTYLESHEET)) {
+    return Nothing();
+  }
+
+  if (!IsCSSMimeTypeAttribute(*this)) {
+    return Nothing();
+  }
+
+  nsAutoString title;
+  nsAutoString media;
+  GetTitleAndMediaForElement(*this, title, media);
+
+  bool alternate = linkTypes & nsStyleLinkElement::eALTERNATE;
+  if (alternate && title.IsEmpty()) {
+    // alternates must have title.
+    return Nothing();
+  }
 
   nsAutoString href;
   GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
   if (href.IsEmpty()) {
-    return nullptr;
+    return Nothing();
   }
-
-  nsCOMPtr<nsIPrincipal> prin = mTriggeringPrincipal;
-  prin.forget(aTriggeringPrincipal);
 
   nsCOMPtr<nsIURI> uri = Link::GetURI();
-  return uri.forget();
-}
-
-void
-HTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
-                                   nsAString& aType,
-                                   nsAString& aMedia,
-                                   bool* aIsAlternate)
-{
-  aTitle.Truncate();
-  aType.Truncate();
-  aMedia.Truncate();
-  *aIsAlternate = false;
-
-  nsAutoString rel;
-  GetAttr(kNameSpaceID_None, nsGkAtoms::rel, rel);
-  uint32_t linkTypes = nsStyleLinkElement::ParseLinkTypes(rel);
-  // Is it a stylesheet link?
-  if (!(linkTypes & nsStyleLinkElement::eSTYLESHEET)) {
-    return;
-  }
-
-  nsAutoString title;
-  GetAttr(kNameSpaceID_None, nsGkAtoms::title, title);
-  title.CompressWhitespace();
-  aTitle.Assign(title);
-
-  // If alternate, does it have title?
-  if (linkTypes & nsStyleLinkElement::eALTERNATE) {
-    if (aTitle.IsEmpty()) { // alternates must have title
-      return;
-    } else {
-      *aIsAlternate = true;
-    }
-  }
-
-  GetAttr(kNameSpaceID_None, nsGkAtoms::media, aMedia);
-  // The HTML5 spec is formulated in terms of the CSSOM spec, which specifies
-  // that media queries should be ASCII lowercased during serialization.
-  nsContentUtils::ASCIIToLower(aMedia);
-
-  nsAutoString mimeType;
-  nsAutoString notUsed;
-  GetAttr(kNameSpaceID_None, nsGkAtoms::type, aType);
-  nsContentUtils::SplitMimeType(aType, mimeType, notUsed);
-  if (!mimeType.IsEmpty() && !mimeType.LowerCaseEqualsLiteral("text/css")) {
-    return;
-  }
-
-  // If we get here we assume that we're loading a css file, so set the
-  // type to 'text/css'
-  aType.AssignLiteral("text/css");
-}
-
-CORSMode
-HTMLLinkElement::GetCORSMode() const
-{
-  return AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
+  nsCOMPtr<nsIPrincipal> prin = mTriggeringPrincipal;
+  return Some(SheetInfo {
+    *OwnerDoc(),
+    this,
+    uri.forget(),
+    prin.forget(),
+    GetReferrerPolicyAsEnum(),
+    GetCORSMode(),
+    title,
+    media,
+    alternate ? HasAlternateRel::Yes : HasAlternateRel::No,
+    IsInline::No,
+  });
 }
 
 EventStates
@@ -510,6 +490,120 @@ void
 HTMLLinkElement::GetAs(nsAString& aResult)
 {
   GetEnumAttr(nsGkAtoms::as, EmptyCString().get(), aResult);
+}
+
+// We will use official mime-types from:
+// https://www.iana.org/assignments/media-types/media-types.xhtml#font
+// We do not support old deprecated mime-types for preload feature.
+// (We currectly do not support font/collection)
+static uint32_t StyleLinkElementFontMimeTypesNum = 5;
+static const char* StyleLinkElementFontMimeTypes[] = {
+  "font/otf",
+  "font/sfnt",
+  "font/ttf",
+  "font/woff",
+  "font/woff2"
+};
+
+bool
+IsFontMimeType(const nsAString& aType)
+{
+  if (aType.IsEmpty()) {
+    return true;
+  }
+  for (uint32_t i = 0; i < StyleLinkElementFontMimeTypesNum; i++) {
+    if (aType.EqualsASCII(StyleLinkElementFontMimeTypes[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
+HTMLLinkElement::CheckPreloadAttrs(const nsAttrValue& aAs,
+                                   const nsAString& aType,
+                                   const nsAString& aMedia,
+                                   nsIDocument* aDocument)
+{
+  nsContentPolicyType policyType = Link::AsValueToContentPolicy(aAs);
+  if (policyType == nsIContentPolicy::TYPE_INVALID) {
+    return false;
+  }
+
+  // Check if media attribute is valid.
+  if (!aMedia.IsEmpty()) {
+    RefPtr<MediaList> mediaList = MediaList::Create(aMedia);
+    nsPresContext* presContext = aDocument->GetPresContext();
+    if (!presContext) {
+      return false;
+    }
+    if (!mediaList->Matches(presContext)) {
+      return false;
+    }
+  }
+
+  if (aType.IsEmpty()) {
+    return true;
+  }
+
+  nsString type = nsString(aType);
+  ToLowerCase(type);
+
+  if (policyType == nsIContentPolicy::TYPE_OTHER) {
+    return true;
+
+  } else if (policyType == nsIContentPolicy::TYPE_MEDIA) {
+    if (aAs.GetEnumValue() == DESTINATION_TRACK) {
+      if (type.EqualsASCII("text/vtt")) {
+        return true;
+      } else {
+        return false;
+      }
+    }
+    Maybe<MediaContainerType> mimeType = MakeMediaContainerType(aType);
+    if (!mimeType) {
+      return false;
+    }
+    DecoderDoctorDiagnostics diagnostics;
+    CanPlayStatus status = DecoderTraits::CanHandleContainerType(*mimeType,
+                                                                 &diagnostics);
+    // Preload if this return CANPLAY_YES and CANPLAY_MAYBE.
+    if (status == CANPLAY_NO) {
+      return false;
+    } else {
+      return true;
+    }
+
+  } else if (policyType == nsIContentPolicy::TYPE_FONT) {
+    if (IsFontMimeType(type)) {
+      return true;
+    } else {
+      return false;
+    }
+
+  } else if (policyType == nsIContentPolicy::TYPE_IMAGE) {
+    if (imgLoader::SupportImageWithMimeType(NS_ConvertUTF16toUTF8(type).get(),
+                                            AcceptedMimeTypes::IMAGES_AND_DOCUMENTS)) {
+      return true;
+    } else {
+      return false;
+    }
+
+  } else if (policyType == nsIContentPolicy::TYPE_SCRIPT) {
+    if (nsContentUtils::IsJavascriptMIMEType(type)) {
+      return true;
+    } else {
+      return false;
+    }
+
+  } else if (policyType == nsIContentPolicy::TYPE_STYLESHEET) {
+    if (type.EqualsASCII("text/css")) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+  return false;
 }
 
 } // namespace dom

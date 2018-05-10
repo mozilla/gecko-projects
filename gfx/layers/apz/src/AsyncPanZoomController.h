@@ -17,7 +17,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Atomics.h"
 #include "InputData.h"
-#include "Axis.h"
+#include "Axis.h"                       // for Axis, Side, etc.
 #include "InputQueue.h"
 #include "APZUtils.h"
 #include "Layers.h"                     // for Layer::ScrollDirection
@@ -48,8 +48,10 @@ class MetricsSharingController;
 class GestureEventListener;
 struct AsyncTransform;
 class AsyncPanZoomAnimation;
-class AndroidFlingAnimation;
-class GenericFlingAnimation;
+class StackScrollerFlingAnimation;
+template <typename FlingPhysics> class GenericFlingAnimation;
+class AndroidFlingPhysics;
+class DesktopFlingPhysics;
 class InputBlockState;
 struct FlingHandoffState;
 class TouchBlockState;
@@ -67,15 +69,21 @@ struct KeyboardScrollAction;
 // Base class for grouping platform-specific APZC state variables.
 class PlatformSpecificStateBase {
 public:
-  virtual ~PlatformSpecificStateBase() {}
+  virtual ~PlatformSpecificStateBase() = default;
   virtual AndroidSpecificState* AsAndroidSpecificState() { return nullptr; }
+  // PLPPI = "ParentLayer pixels per (Screen) inch"
+  virtual AsyncPanZoomAnimation* CreateFlingAnimation(AsyncPanZoomController& aApzc,
+                                                      const FlingHandoffState& aHandoffState,
+                                                      float aPLPPI);
+
+  static void InitializeGlobalState() {}
 };
 
 /*
  * Represents a transform from the ParentLayer coordinate space of an APZC
  * to the ParentLayer coordinate space of its parent APZC.
- * Each layer along the way contributes to the transform. We track 
- * contributions that are perspective transforms separately, as sometimes 
+ * Each layer along the way contributes to the transform. We track
+ * contributions that are perspective transforms separately, as sometimes
  * these require special handling.
  */
 struct AncestorTransform {
@@ -179,7 +187,7 @@ public:
    */
   ScreenCoord GetSecondTapTolerance() const;
 
-  AsyncPanZoomController(uint64_t aLayersId,
+  AsyncPanZoomController(LayersId aLayersId,
                          APZCTreeManager* aTreeManager,
                          const RefPtr<InputQueue>& aInputQueue,
                          GeckoContentController* aController,
@@ -239,6 +247,10 @@ public:
 
   bool UpdateAnimation(const TimeStamp& aSampleTime,
                        nsTArray<RefPtr<Runnable>>* aOutDeferredTasks);
+
+  // --------------------------------------------------------------------------
+  // These methods must only be called on the updater thread.
+  //
 
   /**
    * A shadow layer update has arrived. |aScrollMetdata| is the new ScrollMetadata
@@ -499,11 +511,18 @@ public:
    * Only the component in the direction of scrolling is returned.
    */
   CSSCoord ConvertScrollbarPoint(const ParentLayerPoint& aScrollbarPoint,
-                                 const ScrollThumbData& aThumbData) const;
+                                 const ScrollbarData& aThumbData) const;
 
   void NotifyMozMouseScrollEvent(const nsString& aString) const;
 
   bool OverscrollBehaviorAllowsSwipe() const;
+
+private:
+  // Get whether the horizontal content of the honoured target of auto-dir
+  // scrolling starts from right to left. If you don't know of auto-dir
+  // scrolling or what a honoured target means,
+  // @see mozilla::WheelDeltaAdjustmentStrategy
+  bool IsContentOfHonouredTargetRightToLeft(bool aHonoursRoot) const;
 
 protected:
   // Protected destructor, to discourage deletion outside of Release():
@@ -571,7 +590,39 @@ protected:
    */
   nsEventStatus OnScrollWheel(const ScrollWheelInput& aEvent);
 
+  /**
+   * Gets the scroll wheel delta's values in parent-layer pixels from the
+   * original delta's values of a wheel input.
+   */
   ParentLayerPoint GetScrollWheelDelta(const ScrollWheelInput& aEvent) const;
+
+  /**
+   * This function is like GetScrollWheelDelta(aEvent).
+   * The difference is the four added parameters provide values as alternatives
+   * to the original wheel input's delta values, so |aEvent|'s delta values are
+   * ignored in this function, we only use some other member variables and
+   * functions of |aEvent|.
+   */
+  ParentLayerPoint
+  GetScrollWheelDelta(const ScrollWheelInput& aEvent,
+                      double aDeltaX,
+                      double aDeltaY,
+                      double aMultiplierX,
+                      double aMultiplierY) const;
+
+  /**
+   * This deleted function is used for:
+   * 1. avoiding accidental implicit value type conversions of input delta
+   *    values when callers intend to call the above function;
+   * 2. decoupling the manual relationship between the delta value type and the
+   *    above function. If by any chance the defined delta value type in
+   *    ScrollWheelInput has changed, this will automatically result in build
+   *    time failure, so we can learn of it the first time and accordingly
+   *    redefine those parameters' value types in the above function.
+   */
+  template <typename T>
+  ParentLayerPoint
+  GetScrollWheelDelta(ScrollWheelInput&, T, T, T, T) = delete;
 
   /**
    * Helper methods for handling keyboard events.
@@ -753,6 +804,9 @@ protected:
    */
   APZCTreeManager* GetApzcTreeManager() const;
 
+  void AssertOnSamplerThread() const;
+  void AssertOnUpdaterThread() const;
+
   /**
    * Convert ScreenPoint relative to the screen to LayoutDevicePoint relative
    * to the parent document. This excludes the transient compositor transform.
@@ -786,13 +840,13 @@ protected:
   // Common processing at the end of a touch block.
   void OnTouchEndOrCancel();
 
-  uint64_t mLayersId;
+  LayersId mLayersId;
   RefPtr<CompositorController> mCompositorController;
   RefPtr<MetricsSharingController> mMetricsSharingController;
 
   /* Access to the following two fields is protected by the mRefPtrMonitor,
      since they are accessed on the UI thread but can be cleared on the
-     sampler thread. */
+     updater thread. */
   RefPtr<GeckoContentController> mGeckoContentController;
   RefPtr<GestureEventListener> mGestureEventListener;
   mutable Monitor mRefPtrMonitor;
@@ -823,6 +877,19 @@ protected:
   // IMPORTANT: See the note about lock ordering at the top of APZCTreeManager.h.
   // This is mutable to allow entering it from 'const' methods; doing otherwise
   // would significantly limit what methods could be 'const'.
+  // FIXME: Please keep in mind that due to some existing coupled relationships
+  // among the class members, we should be aware of indirect usage of the
+  // monitor-protected members. That is, although this monitor isn't required to
+  // be held before manipulating non-protected class members, some functions on
+  // those members might indirectly manipulate the protected members; in such
+  // cases, the monitor should still be held. Let's take mX.CanScroll for
+  // example:
+  // Axis::CanScroll(ParentLayerCoord) calls Axis::CanScroll() which calls
+  // Axis::GetPageLength() which calls Axis::GetFrameMetrics() which calls
+  // AsyncPanZoomController::GetFrameMetrics(), therefore, this monitor should
+  // be held before calling the CanScroll function of |mX| and |mY|. These
+  // coupled relationships bring us the burden of taking care of when the
+  // monitor should be held, so they should be decoupled in the future.
   mutable RecursiveMutex mRecursiveMutex;
 
 private:
@@ -1099,9 +1166,11 @@ public:
   ParentLayerPoint AdjustHandoffVelocityForOverscrollBehavior(ParentLayerPoint& aHandoffVelocity) const;
 
 private:
-  friend class AndroidFlingAnimation;
+  friend class StackScrollerFlingAnimation;
   friend class AutoscrollAnimation;
-  friend class GenericFlingAnimation;
+  template <typename FlingPhysics> friend class GenericFlingAnimation;
+  friend class AndroidFlingPhysics;
+  friend class DesktopFlingPhysics;
   friend class OverscrollAnimation;
   friend class SmoothScrollAnimation;
   friend class GenericScrollAnimation;
@@ -1139,6 +1208,10 @@ private:
 
   // Invoked by the pinch repaint timer.
   void DoDelayedRequestContentRepaint();
+
+  // Compute the number of ParentLayer pixels per (Screen) inch at the given
+  // point and in the given direction.
+  float ComputePLPPI(ParentLayerPoint aPoint, ParentLayerPoint aDirection) const;
 
   /* ===================================================================
    * The functions and members in this section are used to make ancestor chains
@@ -1366,7 +1439,7 @@ public:
     return mAsyncTransformAppliedToContent;
   }
 
-  uint64_t GetLayersId() const
+  LayersId GetLayersId() const
   {
     return mLayersId;
   }

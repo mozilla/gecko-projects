@@ -17,6 +17,7 @@ AnimationFrameBuffer::AnimationFrameBuffer()
   , mInsertIndex(0)
   , mGetIndex(0)
   , mSizeKnown(false)
+  , mRedecodeError(false)
 { }
 
 void
@@ -71,35 +72,49 @@ AnimationFrameBuffer::Insert(RawAccessFrameRef&& aFrame)
     // and we did not keep all of the frames. Replace whatever is there
     // (probably an empty frame) with the new frame.
     MOZ_ASSERT(MayDiscard());
-    MOZ_ASSERT(mInsertIndex < mFrames.Length());
+
+    // The first decode produced fewer frames than the redecodes, presumably
+    // because it hit an out-of-memory error which later attempts avoided. Just
+    // stop the animation because we can't tell the image that we have more
+    // frames now.
+    if (mInsertIndex >= mFrames.Length()) {
+      mRedecodeError = true;
+      mPending = 0;
+      return false;
+    }
 
     if (mInsertIndex > 0) {
       MOZ_ASSERT(!mFrames[mInsertIndex]);
       mFrames[mInsertIndex] = Move(aFrame);
     }
-  } else {
-    if (mInsertIndex == mFrames.Length()) {
-      // We are still on the first pass of the animation decoding, so this is
-      // the first time we have seen this frame.
-      mFrames.AppendElement(Move(aFrame));
-    } else if (mInsertIndex > 0) {
-      // We were forced to restart an animation before we decoded the last
-      // frame. Thus we might need to insert, even on a "first pass."
-      MOZ_ASSERT(mInsertIndex < mFrames.Length());
-      MOZ_ASSERT(!mFrames[mInsertIndex]);
-      mFrames[mInsertIndex] = Move(aFrame);
-    }
+  } else if (mInsertIndex == mFrames.Length()) {
+    // We are still on the first pass of the animation decoding, so this is
+    // the first time we have seen this frame.
+    mFrames.AppendElement(Move(aFrame));
 
     if (mInsertIndex == mThreshold) {
-      // We just tripped over the threshold, and on the first pass of the
-      // decoding; this is our chance to do any clearing of already displayed
-      // frames. After this, we only need to release as we advance.
+      // We just tripped over the threshold for the first time. This is our
+      // chance to do any clearing of already displayed frames. After this,
+      // we only need to release as we advance or force a restart.
       MOZ_ASSERT(MayDiscard());
       MOZ_ASSERT(mGetIndex < mInsertIndex);
       for (size_t i = 1; i < mGetIndex; ++i) {
         RawAccessFrameRef discard = Move(mFrames[i]);
       }
     }
+  } else if (mInsertIndex > 0) {
+    // We were forced to restart an animation before we decoded the last
+    // frame. If we were discarding frames, then we tossed what we had
+    // except for the first frame.
+    MOZ_ASSERT(mInsertIndex < mFrames.Length());
+    MOZ_ASSERT(!mFrames[mInsertIndex]);
+    MOZ_ASSERT(MayDiscard());
+    mFrames[mInsertIndex] = Move(aFrame);
+  } else { // mInsertIndex == 0
+    // We were forced to restart an animation before we decoded the last
+    // frame. We don't need the redecoded first frame because we always keep
+    // the original.
+    MOZ_ASSERT(MayDiscard());
   }
 
   MOZ_ASSERT(mFrames[mInsertIndex]);
@@ -122,9 +137,23 @@ AnimationFrameBuffer::Insert(RawAccessFrameRef&& aFrame)
 bool
 AnimationFrameBuffer::MarkComplete()
 {
+  // We may have stopped decoding at a different point in the animation than we
+  // did previously. That means the decoder likely hit a new error, e.g. OOM.
+  // This will prevent us from advancing as well, because we are missing the
+  // required frames to blend.
+  //
+  // XXX(aosmond): In an ideal world, we would be generating full frames, and
+  // the consumer of our data doesn't care about our internal state. It simply
+  // knows about the first frame, the current frame, and how long to display the
+  // current frame.
+  if (NS_WARN_IF(mInsertIndex != mFrames.Length())) {
+    MOZ_ASSERT(mSizeKnown);
+    mRedecodeError = true;
+    mPending = 0;
+  }
+
   // We reached the end of the animation, the next frame we get, if we get
   // another, will be the first frame again.
-  MOZ_ASSERT(mInsertIndex == mFrames.Length());
   mInsertIndex = 0;
 
   // Since we only request advancing when we want to resume at a certain point
@@ -226,7 +255,7 @@ AnimationFrameBuffer::AdvanceInternal()
     }
   }
 
-  if (!mSizeKnown || MayDiscard()) {
+  if (!mRedecodeError && (!mSizeKnown || MayDiscard())) {
     // Calculate how many frames we have requested ahead of the current frame.
     size_t buffered = mPending;
     if (mGetIndex > mInsertIndex) {
@@ -271,13 +300,6 @@ AnimationFrameBuffer::Reset()
     return false;
   }
 
-  // If we are over the threshold, then we know we will have missing frames in
-  // our buffer. The easiest thing to do is to drop everything but the first
-  // frame and go back to the initial state.
-  bool restartDecoder = mPending == 0;
-  mInsertIndex = 0;
-  mPending = 2 * mBatch;
-
   // Discard all frames besides the first, because the decoder always expects
   // that when it re-inserts a frame, it is not present. (It doesn't re-insert
   // the first frame.)
@@ -285,6 +307,16 @@ AnimationFrameBuffer::Reset()
     RawAccessFrameRef discard = Move(mFrames[i]);
   }
 
+  mInsertIndex = 0;
+
+  // If we hit an error after redecoding, we never want to restart decoding.
+  if (mRedecodeError) {
+    MOZ_ASSERT(mPending == 0);
+    return false;
+  }
+
+  bool restartDecoder = mPending == 0;
+  mPending = 2 * mBatch;
   return restartDecoder;
 }
 

@@ -169,6 +169,18 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             "default": False,
             "help": "Tries to enable the WebRender compositor."}
          ],
+        [["--gpu-required"], {
+            "action": "store_true",
+            "dest": "gpu_required",
+            "default": "False",
+            "help": "Run additional verification on modified tests using gpu instances."}
+         ],
+        [["--run-slower"], {
+            "action": "store_true",
+            "dest": "run_slower",
+            "default": False,
+            "help": "Run additional verification on modified tests using gpu instances."}
+         ],
     ] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(blobupload_config_options) + \
         copy.deepcopy(code_coverage_config_options)
@@ -319,8 +331,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
     def _pre_create_virtualenv(self, action):
         dirs = self.query_abs_dirs()
 
-        self.register_virtualenv_module(name='pip>=1.5')
-        self.register_virtualenv_module('psutil==5.4.3', method='pip')
+        self.register_virtualenv_module('psutil==5.4.3')
         self.register_virtualenv_module(name='mock')
         self.register_virtualenv_module(name='simplejson')
 
@@ -401,7 +412,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             # Ignore chunking if we have user specified test paths
             if os.environ.get('MOZHARNESS_TEST_PATHS'):
                 base_cmd.extend(os.environ['MOZHARNESS_TEST_PATHS'].split(':'))
-            elif c.get('total_chunks') and c.get('this_chunk'):
+            elif c.get('total_chunks') and c.get('this_chunk') and not self.verify_enabled:
                 base_cmd.extend(['--total-chunks', c['total_chunks'],
                                  '--this-chunk', c['this_chunk']])
 
@@ -414,6 +425,13 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
 
             if c['headless']:
                 base_cmd.append('--headless')
+
+            if c['run_slower']:
+                if suite_category == "reftest":
+                    base_cmd.append('--run-slower')
+                else:
+                    self.warning("--run-slow does not currently work with suites other than "
+                                 "reftest.")
 
             # set pluginsPath
             abs_res_plugins_dir = os.path.join(abs_res_dir, 'plugins')
@@ -480,7 +498,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             if c.get('run_all_suites'):  # needed if you dont specify any suites
                 suites = all_suites
             else:
-                suites = self.query_verify_category_suites(category, all_suites)
+                suites = self.query_per_test_category_suites(category, all_suites)
 
         return suites
 
@@ -768,9 +786,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         abs_app_dir = self.query_abs_app_dir()
         abs_res_dir = self.query_abs_res_dir()
 
-        max_verify_time = timedelta(minutes=60)
-        max_verify_tests = 10
-        verified_tests = 0
+        max_per_test_time = timedelta(minutes=60)
+        max_per_test_tests = 10
+        executed_tests = 0
 
         if suites:
             self.info('#### Running %s suites' % suite_category)
@@ -790,7 +808,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                 }
                 if isinstance(suites[suite], dict):
                     options_list = suites[suite].get('options', [])
-                    if self.config.get('verify') is True:
+                    if self.verify_enabled or self.per_test_coverage:
                         tests_list = []
                     else:
                         tests_list = suites[suite].get('tests', [])
@@ -849,32 +867,42 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                 env = self.query_env(partial_env=env, log_level=INFO)
                 cmd_timeout = self.get_timeout_for_category(suite_category)
 
-                for verify_args in self.query_verify_args(suite):
-                    if (datetime.now() - self.start_time) > max_verify_time:
-                        # Verification has run out of time. That is okay! Stop running
-                        # tests so that a task timeout is not triggered, and so that
+                summary = None
+                for per_test_args in self.query_args(suite):
+                    if (datetime.now() - self.start_time) > max_per_test_time:
+                        # Running tests has run out of time. That is okay! Stop running
+                        # them so that a task timeout is not triggered, and so that
                         # (partial) results are made available in a timely manner.
-                        self.info("TinderboxPrint: Verification too long: Not all tests "
-                                  "were verified.<br/>")
-                        # Signal verify time exceeded, to break out of suites and
+                        self.info("TinderboxPrint: Running tests took too long: Not all tests "
+                                  "were executed.<br/>")
+                        # Signal per-test time exceeded, to break out of suites and
                         # suite categories loops also.
                         return False
-                    if verified_tests >= max_verify_tests:
+                    if executed_tests >= max_per_test_tests:
                         # When changesets are merged between trees or many tests are
                         # otherwise updated at once, there probably is not enough time
-                        # to verify all tests, and attempting to do so may cause other
+                        # to run all tests, and attempting to do so may cause other
                         # problems, such as generating too much log output.
                         self.info("TinderboxPrint: Too many modified tests: Not all tests "
-                                  "were verified.<br/>")
+                                  "were executed.<br/>")
                         return False
-                    verified_tests = verified_tests + 1
+                    executed_tests = executed_tests + 1
 
                     final_cmd = copy.copy(cmd)
-                    final_cmd.extend(verify_args)
+                    final_cmd.extend(per_test_args)
+
+                    if self.per_test_coverage:
+                        gcov_dir, jsvm_dir = self.set_coverage_env(env)
+
                     return_code = self.run_command(final_cmd, cwd=dirs['abs_work_dir'],
                                                    output_timeout=cmd_timeout,
                                                    output_parser=parser,
                                                    env=env)
+
+                    if self.per_test_coverage:
+                        self.add_per_test_coverage_report(
+                            gcov_dir, jsvm_dir, suite, per_test_args[-1]
+                        )
 
                     # mochitest, reftest, and xpcshell suites do not return
                     # appropriate return codes. Therefore, we must parse the output
@@ -891,13 +919,14 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                         # bug 1120644
                         success_codes = [0, 1]
 
-                    tbpl_status, log_level = parser.evaluate_parser(return_code,
-                                                                    success_codes=success_codes)
+                    tbpl_status, log_level, summary = parser.evaluate_parser(return_code,
+                                                                             success_codes,
+                                                                             summary)
                     parser.append_tinderboxprint_line(suite_name)
 
                     self.buildbot_status(tbpl_status, level=log_level)
-                    if len(verify_args) > 0:
-                        self.log_verify_status(verify_args[-1], tbpl_status, log_level)
+                    if len(per_test_args) > 0:
+                        self.log_per_test_status(per_test_args[-1], tbpl_status, log_level)
                     else:
                         self.log("The %s suite: %s ran with return status: %s" %
                                  (suite_category, suite, tbpl_status), level=log_level)

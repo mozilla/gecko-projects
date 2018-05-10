@@ -1185,29 +1185,6 @@ MacroAssembler::branchPtr(Condition cond, const BaseIndex& lhs, ImmWord rhs, Lab
     branchPtr(cond, scratch, rhs, label);
 }
 
-template <typename T>
-CodeOffsetJump
-MacroAssembler::branchPtrWithPatch(Condition cond, Register lhs, T rhs, RepatchLabel* label)
-{
-    cmpPtr(lhs, rhs);
-    return jumpWithPatch(label, cond);
-}
-
-template <typename T>
-CodeOffsetJump
-MacroAssembler::branchPtrWithPatch(Condition cond, Address lhs, T rhs, RepatchLabel* label)
-{
-    // The scratch register is unused after the condition codes are set.
-    {
-        vixl::UseScratchRegisterScope temps(this);
-        const Register scratch = temps.AcquireX().asUnsized();
-        MOZ_ASSERT(scratch != lhs.base);
-        loadPtr(lhs, scratch);
-        cmpPtr(scratch, rhs);
-    }
-    return jumpWithPatch(label, cond);
-}
-
 void
 MacroAssembler::branchPrivatePtr(Condition cond, const Address& lhs, Register rhs, Label* label)
 {
@@ -1315,9 +1292,9 @@ MacroAssembler::branchTruncateDoubleToInt32(FloatRegister src, Register dest, La
     convertDoubleToInt32(src, dest, fail);
 }
 
-template <typename T, typename L>
+template <typename T>
 void
-MacroAssembler::branchAdd32(Condition cond, T src, Register dest, L label)
+MacroAssembler::branchAdd32(Condition cond, T src, Register dest, Label* label)
 {
     adds32(src, dest);
     B(label, cond);
@@ -1875,12 +1852,11 @@ MacroAssembler::spectreZeroRegister(Condition cond, Register, Register dest)
 }
 
 void
-MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register scratch,
+MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register maybeScratch,
                                      Label* failure)
 {
-    MOZ_ASSERT(index != length);
-    MOZ_ASSERT(length != scratch);
-    MOZ_ASSERT(index != scratch);
+    MOZ_ASSERT(length != maybeScratch);
+    MOZ_ASSERT(index != maybeScratch);
 
     branch32(Assembler::BelowOrEqual, length, index, failure);
 
@@ -1889,12 +1865,12 @@ MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register s
 }
 
 void
-MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Register scratch,
+MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Register maybeScratch,
                                      Label* failure)
 {
     MOZ_ASSERT(index != length.base);
-    MOZ_ASSERT(length.base != scratch);
-    MOZ_ASSERT(index != scratch);
+    MOZ_ASSERT(length.base != maybeScratch);
+    MOZ_ASSERT(index != maybeScratch);
 
     branch32(Assembler::BelowOrEqual, length, index, failure);
 
@@ -1963,25 +1939,6 @@ MacroAssembler::clampIntToUint8(Register reg)
     Csel(reg32, reg32, vixl::wzr, Assembler::GreaterThanOrEqual);
     Mov(scratch32, Operand(0xff));
     Csel(reg32, reg32, scratch32, Assembler::LessThanOrEqual);
-}
-
-// ========================================================================
-// wasm support
-
-template <class L>
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, L label)
-{
-    // Not used on ARM64, we rely on signal handling instead
-    MOZ_CRASH("NYI - wasmBoundsCheck");
-}
-
-template <class L>
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, L label)
-{
-    // Not used on ARM64, we rely on signal handling instead
-    MOZ_CRASH("NYI - wasmBoundsCheck");
 }
 
 //}}} check_macroassembler_style
@@ -2131,6 +2088,18 @@ MacroAssemblerCompat::branchStackPtrRhs(Condition cond, Address lhs, Label* labe
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch = temps.AcquireX();
     Ldr(scratch, toMemOperand(lhs));
+    // Cmp disallows SP as the rhs, so flip the operands and invert the
+    // condition.
+    Cmp(GetStackPointer64(), scratch);
+    B(label, Assembler::InvertCondition(cond));
+}
+
+void
+MacroAssemblerCompat::branchStackPtrRhs(Condition cond, AbsoluteAddress lhs, Label* label)
+{
+    vixl::UseScratchRegisterScope temps(this);
+    const ARMRegister scratch = temps.AcquireX();
+    movePtr(ImmPtr(lhs.addr), scratch.asUnsized());
     // Cmp disallows SP as the rhs, so flip the operands and invert the
     // condition.
     Cmp(GetStackPointer64(), scratch);

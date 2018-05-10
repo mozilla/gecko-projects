@@ -5,15 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EMEDecoderModule.h"
+
+#include <inttypes.h>
+
 #include "Adts.h"
 #include "GMPDecoderModule.h"
 #include "GMPService.h"
 #include "MediaInfo.h"
-#include "MediaPrefs.h"
 #include "PDMFactory.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/CDMProxy.h"
 #include "mozilla/EMEUtils.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
@@ -21,7 +24,6 @@
 #include "nsServiceManagerUtils.h"
 #include "DecryptThroughputLimit.h"
 #include "ChromiumCDMVideoDecoder.h"
-#include <algorithm>
 
 namespace mozilla {
 
@@ -35,12 +37,23 @@ class ADTSSampleConverter
 public:
   explicit ADTSSampleConverter(const AudioInfo& aInfo)
     : mNumChannels(aInfo.mChannels)
-    // Note: we clamp profile to 4 so that HE-AACv2 (profile 5) can pass
-    // through the conversion to ADTS and back again.
-    , mProfile(
-        std::min<uint8_t>(static_cast<uint8_t>(0xff & aInfo.mProfile), 4))
+    // Note: we set profile to 2 if we encounter an extended profile (which set
+    // mProfile to 0 and then set mExtendedProfile) such as HE-AACv2
+    // (profile 5). These can then pass through conversion to ADTS and back.
+    // This is done as ADTS only has 2 bits for profile, and the transform
+    // subtracts one from the value. We check if the profile supplied is > 4 for
+    // safety. 2 is used as a fallback value, though it seems the CDM doesn't
+    // care what is set.
+    , mProfile(aInfo.mProfile < 1 || aInfo.mProfile > 4 ? 2 : aInfo.mProfile)
     , mFrequencyIndex(Adts::GetFrequencyIndex(aInfo.mRate))
   {
+    EME_LOG("ADTSSampleConvertor(): aInfo.mProfile=%" PRIi8
+            " aInfo.mExtendedProfile=%" PRIi8, aInfo.mProfile,
+            aInfo.mExtendedProfile);
+    if (aInfo.mProfile < 1 || aInfo.mProfile > 4) {
+      EME_LOG("ADTSSampleConvertor(): Profile not in [1, 4]! Samples will "
+              "their profile set to 2!");
+    }
   }
   bool Convert(MediaRawData* aSample) const
   {
@@ -396,7 +409,7 @@ EMEDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
   MOZ_ASSERT(aParams.mConfig.mCrypto.mValid);
 
-  if (MediaPrefs::EMEBlankVideo()) {
+  if (StaticPrefs::MediaEmeVideoBlank()) {
     EME_LOG("EMEDecoderModule::CreateVideoDecoder() creating a blank decoder.");
     RefPtr<PlatformDecoderModule> m(CreateBlankDecoderModule());
     return m->CreateVideoDecoder(aParams);
@@ -432,7 +445,7 @@ EMEDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
   MOZ_ASSERT(!SupportsMimeType(aParams.mConfig.mMimeType, nullptr));
   MOZ_ASSERT(mPDM);
 
-  if (MediaPrefs::EMEBlankAudio()) {
+  if (StaticPrefs::MediaEmeAudioBlank()) {
     EME_LOG("EMEDecoderModule::CreateAudioDecoder() creating a blank decoder.");
     RefPtr<PlatformDecoderModule> m(CreateBlankDecoderModule());
     return m->CreateAudioDecoder(aParams);

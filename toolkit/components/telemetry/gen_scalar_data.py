@@ -43,13 +43,14 @@ def write_scalar_info(scalar, output, name_index, expiration_index):
     if cpp_guard:
         print("#if defined(%s)" % cpp_guard, file=output)
 
-    print("  {{ {}, {}, {}, {}, {}, {} }},"
+    print("  {{ {}, {}, {}, {}, {}, {}, {} }},"
           .format(scalar.nsITelemetry_kind,
                   name_index,
                   expiration_index,
                   scalar.dataset,
                   " | ".join(scalar.record_in_processes_enum),
-                  "true" if scalar.keyed else "false"),
+                  "true" if scalar.keyed else "false",
+                  " | ".join(scalar.products_enum)),
           file=output)
 
     if cpp_guard:
@@ -110,7 +111,7 @@ def generate_JSON_definitions(output, *filenames):
         scalar_definitions[category][scalar.name] = OrderedDict({
             'kind': scalar.nsITelemetry_kind,
             'keyed': scalar.keyed,
-            'record_on_release': True if scalar.dataset == 'opt-out' else False,
+            'record_on_release': True if scalar.dataset_short == 'opt-out' else False,
             # We don't expire dynamic-builtin scalars: they're only meant for
             # use in local developer builds anyway. They will expire when rebuilding.
             'expired': False,

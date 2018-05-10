@@ -75,6 +75,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.default = root;
+exports.example = example;
 
 var _mod = __webpack_require__(1);
 
@@ -128,7 +129,7 @@ function root() {
   console.log(_mod2.default);
   console.log(_mod4.original);
   console.log(_mod3.aNamed);
-  console.log(_mod4.original);
+  console.log(_mod3.aNamed);
   console.log(aNamespace);
 
   try {
@@ -137,17 +138,23 @@ function root() {
     console.log((0, _mod7.default)());
     console.log((0, _mod9.original)());
     console.log((0, _mod8.aNamed2)());
-    console.log((0, _mod9.original)());
+    console.log((0, _mod8.aNamed2)());
     console.log(aNamespace2());
 
     console.log(new _mod12.default());
     console.log(new _mod14.original());
     console.log(new _mod13.aNamed3());
-    console.log(new _mod14.original());
+    console.log(new _mod13.aNamed3());
     console.log(new aNamespace3());
   } catch (e) {}
 }
-module.exports = exports["default"];
+
+function example() {}
+
+// The build harness sets the wrong global, so just override it.
+Promise.resolve().then(function () {
+  window.importedBindings = root;
+});
 
 /***/ }),
 /* 1 */

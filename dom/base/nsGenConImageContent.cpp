@@ -52,15 +52,15 @@ public:
   virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
   virtual EventStates IntrinsicState() const override;
 
-  virtual nsresult GetEventTargetParent(EventChainPreVisitor& aVisitor) override
+  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override
   {
     MOZ_ASSERT(IsInNativeAnonymousSubtree());
     if (aVisitor.mEvent->mMessage == eLoad ||
         aVisitor.mEvent->mMessage == eLoadError) {
       // Don't propagate the events to the parent.
-      return NS_OK;
+      return;
     }
-    return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+    nsGenericHTMLElement::GetEventTargetParent(aVisitor);
   }
 
 protected:
@@ -91,7 +91,7 @@ namespace dom {
 already_AddRefed<nsIContent>
 CreateGenConImageContent(nsIDocument* aDocument, imgRequestProxy* aImageRequest)
 {
-  NS_PRECONDITION(aImageRequest, "Must have request!");
+  MOZ_ASSERT(aImageRequest, "Must have request!");
   RefPtr<NodeInfo> nodeInfo =
     aDocument->NodeInfoManager()->
       GetNodeInfo(nsGkAtoms::mozgeneratedcontentimage,

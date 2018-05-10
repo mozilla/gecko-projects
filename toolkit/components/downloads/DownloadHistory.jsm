@@ -421,8 +421,16 @@ var DownloadHistoryList = function(publicList, place) {
   publicList.addView(this).catch(Cu.reportError);
   let query = {}, options = {};
   PlacesUtils.history.queryStringToQuery(place, query, options);
+
+  // NB: The addObserver call sets our nsINavHistoryResultObserver.result.
   let result = PlacesUtils.history.executeQuery(query.value, options.value);
   result.addObserver(this);
+
+  // Our history result observer is long lived for fast shared views, so free
+  // the reference on shutdown to prevent leaks.
+  Services.obs.addObserver(() => {
+    this.result = null;
+  }, "quit-application-granted");
 };
 
 this.DownloadHistoryList.prototype = {

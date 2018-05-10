@@ -21,7 +21,7 @@ function PromptFactory() {
 PromptFactory.prototype = {
   classID: Components.ID("{076ac188-23c1-4390-aa08-7ef1f78ca5d9}"),
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIPromptFactory, Ci.nsIPromptService]),
 
   handleEvent: function(aEvent) {
@@ -163,7 +163,7 @@ PromptFactory.prototype = {
   },
 
   _handleContextMenu: function(aEvent) {
-    let target = aEvent.target;
+    let target = aEvent.composedTarget;
     if (aEvent.defaultPrevented || target.isContentEditable) {
       return;
     }
@@ -273,20 +273,6 @@ PromptFactory.prototype = {
     aEvent.preventDefault();
   },
 
-  receiveMessage: function(aMsg) {
-    if (aMsg.name !== "GeckoView:Prompt") {
-      return;
-    }
-
-    let prompt = new PromptDelegate(aMsg.target.contentWindow || aMsg.target.ownerGlobal);
-    prompt.asyncShowPrompt(aMsg.data, result => {
-      aMsg.target.messageManager.sendAsyncMessage("GeckoView:PromptClose", {
-        uuid: aMsg.data.uuid,
-        result: result,
-      });
-    });
-  },
-
   /* ----------  nsIPromptFactory  ---------- */
   getPrompt: function(aDOMWin, aIID) {
     // Delegated to login manager here, which in turn calls back into us via nsIPromptService.
@@ -353,21 +339,18 @@ PromptFactory.prototype = {
 function PromptDelegate(aDomWin) {
   this._domWin = aDomWin;
 
-  if (Services.appinfo.processType != Services.appinfo.PROCESS_TYPE_DEFAULT) {
-    return;
-  }
-
   if (aDomWin) {
     this._dispatcher = GeckoViewUtils.getDispatcherForWindow(aDomWin);
   }
 
   if (!this._dispatcher) {
-    this._dispatcher = GeckoViewUtils.getActiveDispatcher();
+    [this._dispatcher, this._domWin] =
+        GeckoViewUtils.getActiveDispatcherAndWindow();
   }
 }
 
 PromptDelegate.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPrompt]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPrompt]),
 
   BUTTON_TYPE_POSITIVE: 0,
   BUTTON_TYPE_NEUTRAL: 1,
@@ -410,14 +393,15 @@ PromptDelegate.prototype = {
    */
   _showPrompt: function(aMsg) {
     let result = undefined;
-    if (!this._changeModalState(/* aEntering */ true)) {
+    if (!this._domWin || !this._changeModalState(/* aEntering */ true)) {
       return;
     }
     try {
       this.asyncShowPrompt(aMsg, res => result = res);
 
       // Spin this thread while we wait for a result
-      Services.tm.spinEventLoopUntil(() => result !== undefined);
+      Services.tm.spinEventLoopUntil(() =>
+          this._domWin.closed || result !== undefined);
     } finally {
       this._changeModalState(/* aEntering */ false);
     }
@@ -425,29 +409,6 @@ PromptDelegate.prototype = {
   },
 
   asyncShowPrompt: function(aMsg, aCallback) {
-    if (Services.appinfo.processType != Services.appinfo.PROCESS_TYPE_DEFAULT) {
-      let docShell = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor)
-                                 .getInterface(Ci.nsIDocShell)
-                                 .QueryInterface(Ci.nsIDocShellTreeItem)
-                                 .rootTreeItem;
-      let messageManager = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                   .getInterface(Ci.nsITabChild)
-                                   .messageManager;
-
-      let uuid = UUIDGen.generateUUID().toString();
-      aMsg.uuid = uuid;
-
-      messageManager.addMessageListener("GeckoView:PromptClose", function listener(msg) {
-        if (msg.data.uuid !== uuid) {
-          return;
-        }
-        messageManager.removeMessageListener(msg.name, listener);
-        aCallback(msg.data.result);
-      });
-      messageManager.sendAsyncMessage("GeckoView:Prompt", aMsg);
-      return;
-    }
-
     let handled = false;
     let onResponse = response => {
       if (handled) {
@@ -730,7 +691,7 @@ PromptDelegate.prototype = {
     this.asyncShowPrompt(this._addCheck(aCheckMsg, aCheckState,
                           this._getAuthMsg(aChannel, aLevel, aAuthInfo)), callback);
     return {
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsICancelable]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsICancelable]),
       cancel: function() {
         if (responded) {
           return;
@@ -817,7 +778,7 @@ function FilePickerDelegate() {
 FilePickerDelegate.prototype = {
   classID: Components.ID("{e4565e36-f101-4bf5-950b-4be0887785a9}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIFilePicker]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIFilePicker]),
 
   /* ----------  nsIFilePicker  ---------- */
   init: function(aParent, aTitle, aMode) {
@@ -910,7 +871,7 @@ FilePickerDelegate.prototype = {
       throw Cr.NS_ERROR_NOT_AVAILABLE;
     }
     return {
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsISimpleEnumerator]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
       _owner: this,
       _index: 0,
       hasMoreElements: function() {
@@ -1007,7 +968,7 @@ function ColorPickerDelegate() {
 ColorPickerDelegate.prototype = {
   classID: Components.ID("{aa0dd6fc-73dd-4621-8385-c0b377e02cee}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIColorPicker]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIColorPicker]),
 
   init: function(aParent, aTitle, aInitialColor) {
     this._prompt = new PromptDelegate(aParent);

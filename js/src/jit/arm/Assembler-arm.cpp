@@ -621,7 +621,7 @@ Imm16::Imm16()
 { }
 
 void
-jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label, ReprotectCode reprotect)
+jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label)
 {
     // We need to determine if this jump can fit into the standard 24+2 bit
     // address or if we need a larger branch (or just need to use our pool
@@ -634,18 +634,11 @@ jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label, ReprotectCode r
     int jumpOffset = label.raw() - jump_.raw();
     if (BOffImm::IsInRange(jumpOffset)) {
         // This instruction started off as a branch, and will remain one.
-        MaybeAutoWritableJitCode awjc(jump, sizeof(Instruction), reprotect);
         Assembler::RetargetNearBranch(jump, jumpOffset, c);
     } else {
         // This instruction started off as a branch, but now needs to be demoted
         // to an ldr.
         uint8_t** slot = reinterpret_cast<uint8_t**>(jump_.jumpTableEntry());
-
-        // Ensure both the branch and the slot are writable.
-        MOZ_ASSERT(uintptr_t(slot) > uintptr_t(jump));
-        size_t size = uintptr_t(slot) - uintptr_t(jump) + sizeof(void*);
-        MaybeAutoWritableJitCode awjc(jump, size, reprotect);
-
         Assembler::RetargetFarBranch(jump, slot, label.raw(), c);
     }
 }
@@ -715,7 +708,7 @@ class RelocationIterator
     uint32_t offset_;
 
   public:
-    RelocationIterator(CompactBufferReader& reader)
+    explicit RelocationIterator(CompactBufferReader& reader)
       : reader_(reader)
     { }
 
@@ -2206,15 +2199,6 @@ Assembler::as_b(Label* l, Condition c)
 }
 
 BufferOffset
-Assembler::as_b(wasm::OldTrapDesc target, Condition c)
-{
-    Label l;
-    BufferOffset ret = as_b(&l, c);
-    bindLater(&l, target);
-    return ret;
-}
-
-BufferOffset
 Assembler::as_b(BOffImm off, Condition c, BufferOffset inst)
 {
     // JS_DISASM_ARM NOTE: Can't disassemble here, because numerous callers use this to
@@ -2647,18 +2631,6 @@ Assembler::bind(Label* label, BufferOffset boff)
 }
 
 void
-Assembler::bindLater(Label* label, wasm::OldTrapDesc target)
-{
-    if (label->used()) {
-        BufferOffset b(label);
-        do {
-            append(wasm::OldTrapSite(target, b.getOffset()));
-        } while (nextLink(b, &b));
-    }
-    label->reset();
-}
-
-void
 Assembler::bind(RepatchLabel* label)
 {
     // It does not seem to be useful to record this label for
@@ -2784,6 +2756,18 @@ Assembler::leaveNoPool()
     m_buffer.leaveNoPool();
 }
 
+void
+Assembler::enterNoNops()
+{
+    m_buffer.enterNoNops();
+}
+
+void
+Assembler::leaveNoNops()
+{
+    m_buffer.leaveNoNops();
+}
+
 ptrdiff_t
 Assembler::GetBranchOffset(const Instruction* i_)
 {
@@ -2843,7 +2827,7 @@ struct PoolHeader : Instruction
             ONES(0xffff)
         { }
 
-        Header(const Instruction* i) {
+        explicit Header(const Instruction* i) {
             JS_STATIC_ASSERT(sizeof(Header) == sizeof(uint32_t));
             memcpy(this, i, sizeof(Header));
             MOZ_ASSERT(ONES == 0xffff);

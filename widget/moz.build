@@ -59,6 +59,7 @@ if toolkit == 'windows':
 elif toolkit == 'cocoa':
     XPIDL_SOURCES += [
         'nsIMacDockSupport.idl',
+        'nsIMacSharingService.idl',
         'nsIMacWebAppUtils.idl',
         'nsIStandaloneNativeMenu.idl',
         'nsISystemStatusBar.idl',
@@ -94,8 +95,6 @@ XPIDL_SOURCES += [
     'nsIBaseWindow.idl',
     'nsIBidiKeyboard.idl',
     'nsIClipboard.idl',
-    'nsIClipboardDragDropHookList.idl',
-    'nsIClipboardDragDropHooks.idl',
     'nsIClipboardHelper.idl',
     'nsIClipboardOwner.idl',
     'nsIColorPicker.idl',

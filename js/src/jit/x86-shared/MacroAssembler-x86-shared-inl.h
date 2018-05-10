@@ -596,22 +596,6 @@ MacroAssembler::branchPtrImpl(Condition cond, const T& lhs, const S& rhs, L labe
     j(cond, label);
 }
 
-template <typename T>
-CodeOffsetJump
-MacroAssembler::branchPtrWithPatch(Condition cond, Register lhs, T rhs, RepatchLabel* label)
-{
-    cmpPtr(lhs, rhs);
-    return jumpWithPatch(label, cond);
-}
-
-template <typename T>
-CodeOffsetJump
-MacroAssembler::branchPtrWithPatch(Condition cond, Address lhs, T rhs, RepatchLabel* label)
-{
-    cmpPtr(lhs, rhs);
-    return jumpWithPatch(label, cond);
-}
-
 void
 MacroAssembler::branchFloat(DoubleCondition cond, FloatRegister lhs, FloatRegister rhs,
                             Label* label)
@@ -659,9 +643,9 @@ MacroAssembler::branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegis
     j(ConditionFromDoubleCondition(cond), label);
 }
 
-template <typename T, typename L>
+template <typename T>
 void
-MacroAssembler::branchAdd32(Condition cond, T src, Register dest, L label)
+MacroAssembler::branchAdd32(Condition cond, T src, Register dest, Label* label)
 {
     addl(src, dest);
     j(cond, label);
@@ -1116,42 +1100,6 @@ MacroAssembler::spectreZeroRegister(Condition cond, Register scratch, Register d
     // Note: use movl instead of move32/xorl to ensure flags are not clobbered.
     movl(Imm32(0), scratch);
     spectreMovePtr(cond, scratch, dest);
-}
-
-void
-MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register scratch,
-                                     Label* failure)
-{
-    MOZ_ASSERT(index != length);
-    MOZ_ASSERT(length != scratch);
-    MOZ_ASSERT(index != scratch);
-
-    if (JitOptions.spectreIndexMasking)
-        move32(Imm32(0), scratch);
-
-    cmp32(index, length);
-    j(Assembler::AboveOrEqual, failure);
-
-    if (JitOptions.spectreIndexMasking)
-        cmovCCl(Assembler::AboveOrEqual, scratch, index);
-}
-
-void
-MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Register scratch,
-                                     Label* failure)
-{
-    MOZ_ASSERT(index != length.base);
-    MOZ_ASSERT(length.base != scratch);
-    MOZ_ASSERT(index != scratch);
-
-    if (JitOptions.spectreIndexMasking)
-        move32(Imm32(0), scratch);
-
-    cmp32(index, Operand(length));
-    j(Assembler::AboveOrEqual, failure);
-
-    if (JitOptions.spectreIndexMasking)
-        cmovCCl(Assembler::AboveOrEqual, scratch, index);
 }
 
 // ========================================================================

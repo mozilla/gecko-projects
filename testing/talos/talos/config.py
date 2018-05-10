@@ -193,8 +193,6 @@ DEFAULTS = dict(
         'browser.snippets.enabled': False,
         'browser.snippets.syncPromo.enabled': False,
         'toolkit.telemetry.server': 'https://127.0.0.1/telemetry-dummy/',
-        'experiments.manifest.uri':
-            'https://127.0.0.1/experiments-dummy/manifest',
         'network.http.speculative-parallel-limit': 0,
         'lightweightThemes.selectedThemeID': "",
         'devtools.chrome.enabled': False,
@@ -324,12 +322,6 @@ def get_counters(config):
 
 def get_active_tests(config):
     activeTests = config.pop('activeTests').strip().split(':')
-
-    # on osx, ARES6 crashes about 50% of the time, bug 1437425
-    if mozinfo.os not in ['linux', 'win'] and \
-       'ARES6' in activeTests and \
-       not config['develop']:
-        activeTests.remove('ARES6')
 
     # ensure tests are available
     availableTests = test.test_dict()

@@ -30,7 +30,7 @@ async function testClearData(clearSiteData, clearCache) {
 
   // Test the initial states.
   let cacheUsage = await SiteDataManager.getCacheSize();
-  let quotaUsage = await getQuotaUsage(TEST_QUOTA_USAGE_ORIGIN);
+  let quotaUsage = await SiteDataTestUtils.getQuotaUsage(TEST_QUOTA_USAGE_ORIGIN);
   let totalUsage = await SiteDataManager.getTotalUsage();
   Assert.greater(cacheUsage, 0, "The cache usage should not be 0");
   Assert.greater(quotaUsage, 0, "The quota usage should not be 0");
@@ -55,20 +55,18 @@ async function testClearData(clearSiteData, clearCache) {
   // since we've had cache intermittently changing under our feet.
   let [, convertedCacheUnit] = DownloadUtils.convertByteUnits(cacheUsage);
 
-  let clearSiteDataLabel = dialogWin.document.getElementById("clearSiteDataLabel");
-  let clearCacheLabel = dialogWin.document.getElementById("clearCacheLabel");
+  let clearSiteDataCheckbox = dialogWin.document.getElementById("clearSiteData");
+  let clearCacheCheckbox = dialogWin.document.getElementById("clearCache");
   // The usage details are filled asynchronously, so we assert that they're present by
   // waiting for them to be filled in.
   await Promise.all([
     TestUtils.waitForCondition(
-      () => clearSiteDataLabel.value && clearSiteDataLabel.value.includes(convertedTotalUsage), "Should show the quota usage"),
+      () => clearSiteDataCheckbox.label && clearSiteDataCheckbox.label.includes(convertedTotalUsage), "Should show the quota usage"),
     TestUtils.waitForCondition(
-      () => clearCacheLabel.value && clearCacheLabel.value.includes(convertedCacheUnit), "Should show the cache usage")
+      () => clearCacheCheckbox.label && clearCacheCheckbox.label.includes(convertedCacheUnit), "Should show the cache usage")
   ]);
 
   // Check the boxes according to our test input.
-  let clearSiteDataCheckbox = dialogWin.document.getElementById("clearSiteData");
-  let clearCacheCheckbox = dialogWin.document.getElementById("clearCache");
   clearSiteDataCheckbox.checked = clearSiteData;
   clearCacheCheckbox.checked = clearCache;
 
@@ -127,7 +125,7 @@ async function testClearData(clearSiteData, clearCache) {
       return usage == 0;
     }, "The total usage should be removed");
   } else {
-    quotaUsage = await getQuotaUsage(TEST_QUOTA_USAGE_ORIGIN);
+    quotaUsage = await SiteDataTestUtils.getQuotaUsage(TEST_QUOTA_USAGE_ORIGIN);
     totalUsage = await SiteDataManager.getTotalUsage();
     Assert.greater(quotaUsage, 0, "The quota usage should not be 0");
     Assert.greater(totalUsage, 0, "The total usage should not be 0");

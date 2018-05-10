@@ -13,7 +13,8 @@ import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.gecko.AppConstants;
-import org.mozilla.gecko.background.testhelpers.TestRunner;
+import org.mozilla.gecko.util.StringUtils;
+import org.robolectric.RobolectricTestRunner;
 
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -25,7 +26,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
-@RunWith(TestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 public class TestDownloadContentCatalog {
     /**
      * Scenario: Create a new, fresh catalog.
@@ -37,7 +38,7 @@ public class TestDownloadContentCatalog {
     @Test
     public void testUntouchedCatalogHasNotChangedAndWillNotBePersisted() throws Exception {
         AtomicFile file = mock(AtomicFile.class);
-        doReturn("{content:[]}".getBytes("UTF-8")).when(file).readFully();
+        doReturn("{content:[]}".getBytes(StringUtils.UTF_8)).when(file).readFully();
 
         DownloadContentCatalog catalog = spy(new DownloadContentCatalog(file));
         catalog.loadFromDisk();

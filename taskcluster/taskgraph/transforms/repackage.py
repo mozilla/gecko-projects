@@ -17,7 +17,7 @@ from taskgraph.util.schema import (
     resolve_keyed_by,
     Schema,
 )
-from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix
+from taskgraph.util.taskcluster import get_taskcluster_artifact_prefix, get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -184,9 +184,12 @@ def make_job_description(config, jobs):
         })
 
         worker = {
-            'env': _generate_task_env(build_platform, build_task_ref,
-                                      signing_task_ref, locale=locale),
-            'artifacts': _generate_task_output_files(build_platform, locale=locale),
+            'env': _generate_task_env(dep_job, build_platform, build_task_ref,
+                                      signing_task_ref, locale=locale,
+                                      project=config.params["project"]),
+            'artifacts': _generate_task_output_files(dep_job, build_platform,
+                                                     locale=locale,
+                                                     project=config.params["project"]),
             'chain-of-trust': True,
             'max-run-time': 7200 if build_platform.startswith('win') else 3600,
         }
@@ -242,9 +245,12 @@ def make_job_description(config, jobs):
         yield task
 
 
-def _generate_task_env(build_platform, build_task_ref, signing_task_ref, locale=None):
-    mar_prefix = get_taskcluster_artifact_prefix(build_task_ref, postfix='host/bin/', locale=None)
-    signed_prefix = get_taskcluster_artifact_prefix(signing_task_ref, locale=locale)
+def _generate_task_env(task, build_platform, build_task_ref, signing_task_ref, locale=None,
+                       project=None):
+    mar_prefix = get_taskcluster_artifact_prefix(
+        task, build_task_ref, postfix='host/bin/', locale=None
+    )
+    signed_prefix = get_taskcluster_artifact_prefix(task, signing_task_ref, locale=locale)
 
     if build_platform.startswith('linux') or build_platform.startswith('macosx'):
         tarball_extension = 'bz2' if build_platform.startswith('linux') else 'gz'
@@ -261,25 +267,31 @@ def _generate_task_env(build_platform, build_task_ref, signing_task_ref, locale=
             'UNSIGNED_MAR': {'task-reference': '{}mar.exe'.format(mar_prefix)},
         }
 
-        # Stub installer is only generated on win32
-        if '32' in build_platform:
-            task_env['SIGNED_SETUP_STUB'] = {
-                'task-reference': '{}setup-stub.exe'.format(signed_prefix),
-            }
+        no_stub = ("mozilla-esr60", "jamun")
+        if project in no_stub:
+            # Stub installer is only generated on win32 and not on esr
+            task_env['NO_STUB_INSTALLER'] = '1'
+        else:
+            # Stub installer is only generated on win32
+            if '32' in build_platform:
+                task_env['SIGNED_SETUP_STUB'] = {
+                    'task-reference': '{}setup-stub.exe'.format(signed_prefix),
+                }
         return task_env
 
     raise NotImplementedError('Unsupported build_platform: "{}"'.format(build_platform))
 
 
-def _generate_task_output_files(build_platform, locale=None):
+def _generate_task_output_files(task, build_platform, locale=None, project=None):
     locale_output_path = '{}/'.format(locale) if locale else ''
+    artifact_prefix = get_artifact_prefix(task)
 
     if build_platform.startswith('linux') or build_platform.startswith('macosx'):
         output_files = [{
             'type': 'file',
             'path': '/builds/worker/workspace/build/artifacts/{}target.complete.mar'
                     .format(locale_output_path),
-            'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
+            'name': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
         }]
 
         if build_platform.startswith('macosx'):
@@ -287,26 +299,31 @@ def _generate_task_output_files(build_platform, locale=None):
                 'type': 'file',
                 'path': '/builds/worker/workspace/build/artifacts/{}target.dmg'
                         .format(locale_output_path),
-                'name': 'public/build/{}target.dmg'.format(locale_output_path),
+                'name': '{}/{}target.dmg'.format(artifact_prefix, locale_output_path),
             })
 
     elif build_platform.startswith('win'):
         output_files = [{
             'type': 'file',
-            'path': 'public/build/{}target.installer.exe'.format(locale_output_path),
-            'name': 'public/build/{}target.installer.exe'.format(locale_output_path),
+            'path': '{}/{}target.installer.exe'.format(artifact_prefix, locale_output_path),
+            'name': '{}/{}target.installer.exe'.format(artifact_prefix, locale_output_path),
         }, {
             'type': 'file',
-            'path': 'public/build/{}target.complete.mar'.format(locale_output_path),
-            'name': 'public/build/{}target.complete.mar'.format(locale_output_path),
+            'path': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
+            'name': '{}/{}target.complete.mar'.format(artifact_prefix, locale_output_path),
         }]
 
-        # Stub installer is only generated on win32
-        if '32' in build_platform:
+        # Stub installer is only generated on win32 and not on esr
+        no_stub = ("mozilla-esr60", "jamun")
+        if 'win32' in build_platform and project not in no_stub:
             output_files.append({
                 'type': 'file',
-                'path': 'public/build/{}target.stub-installer.exe'.format(locale_output_path),
-                'name': 'public/build/{}target.stub-installer.exe'.format(locale_output_path),
+                'path': '{}/{}target.stub-installer.exe'.format(
+                    artifact_prefix, locale_output_path
+                ),
+                'name': '{}/{}target.stub-installer.exe'.format(
+                    artifact_prefix, locale_output_path
+                ),
             })
 
     if output_files:

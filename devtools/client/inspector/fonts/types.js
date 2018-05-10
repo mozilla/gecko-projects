@@ -39,7 +39,7 @@ const fontVariationInstanceValue = exports.fontVariationInstanceValue = {
  */
 const fontVariationInstance = exports.fontVariationInstance = {
   // The variation instance name of the font
-  axis: PropTypes.string,
+  name: PropTypes.string,
 
   // The font variation values for the variation instance of the font
   values: PropTypes.arrayOf(PropTypes.shape(fontVariationInstanceValue)),
@@ -80,11 +80,24 @@ exports.fontOptions = {
 };
 
 exports.fontEditor = {
-  // Font currently being edited
-  font: PropTypes.shape(font),
+  // Variable font axes and their values
+  axes: PropTypes.object,
+
+  // Axes values changed at runtime structured like the "values" property
+  // of a fontVariationInstance
+  customInstanceValues: PropTypes.array,
+
+  // Fonts applicable to selected element
+  fonts: PropTypes.arrayOf(PropTypes.shape(font)),
+
+  // Font variation instance currently selected
+  instance: PropTypes.shape(fontVariationInstance),
 
   // Whether or not the font editor is visible
   isVisible: PropTypes.bool,
+
+  // CSS font properties defined on the element
+  properties: PropTypes.object,
 
   // Selector text of the rule where font properties will be written
   selector: PropTypes.string,

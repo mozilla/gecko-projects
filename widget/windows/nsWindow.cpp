@@ -58,6 +58,7 @@
 #include "gfxEnv.h"
 #include "gfxPlatform.h"
 #include "gfxPrefs.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MiscEvents.h"
@@ -270,9 +271,6 @@ BYTE            nsWindow::sLastMouseButton        = 0;
 bool            nsWindow::sHaveInitializedPrefs   = false;
 
 TriStateBool nsWindow::sHasBogusPopupsDropShadowOnMultiMonitor = TRI_UNKNOWN;
-
-WPARAM nsWindow::sMouseExitwParam = 0;
-LPARAM nsWindow::sMouseExitlParamScreen = 0;
 
 static SystemTimeConverter<DWORD>&
 TimeConverter() {
@@ -613,6 +611,7 @@ nsWindow::nsWindow(bool aIsChildWindow)
   mFullscreenMode       = false;
   mMousePresent         = false;
   mDestroyCalled        = false;
+  mIsEarlyBlankWindow   = false;
   mHasTaskbarIconBeenCreated = false;
   mMouseTransparent     = false;
   mPickerDisplayCount   = 0;
@@ -1274,7 +1273,7 @@ nsWindow::SetParent(nsIWidget *aNewParent)
 void
 nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 {
-  NS_PRECONDITION(aNewParent, "");
+  MOZ_ASSERT(aNewParent, "null widget");
 
   mParent = aNewParent;
   if (mWindowType == eWindowType_popup) {
@@ -1965,8 +1964,6 @@ nsWindow::Resize(double aX, double aY, double aWidth,
       // the system unexpectedly when we leave fullscreen state.
       ::SetWindowPos(mTransitionWnd, HWND_TOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      // Every transition window is only used once.
-      mTransitionWnd = nullptr;
     }
     SetThemeRegion();
   }
@@ -3441,6 +3438,7 @@ nsWindow::PrepareForFullscreenTransition(nsISupports** aData)
   }
 
   mTransitionWnd = initData.mWnd;
+
   auto data = new FullscreenTransitionData(initData.mWnd);
   *aData = data;
   NS_ADDREF(data);
@@ -3458,6 +3456,15 @@ nsWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
     WM_FULLSCREEN_TRANSITION_BEFORE : WM_FULLSCREEN_TRANSITION_AFTER;
   WPARAM wparam = (WPARAM)callback.forget().take();
   ::PostMessage(data->mWnd, msg, wparam, (LPARAM)aDuration);
+}
+
+/* virtual */ void
+nsWindow::CleanupFullscreenTransition()
+{
+  MOZ_ASSERT(NS_IsMainThread(), "CleanupFullscreenTransition "
+             "should only run on the main thread");
+
+  mTransitionWnd = nullptr;
 }
 
 nsresult
@@ -3507,17 +3514,6 @@ nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
   if (mWidgetListener) {
     mWidgetListener->SizeModeChanged(mSizeMode);
     mWidgetListener->FullscreenChanged(aFullScreen);
-  }
-
-  // Send a eMouseEnterIntoWidget event since Windows has already sent
-  // a WM_MOUSELEAVE that caused us to send a eMouseExitFromWidget event.
-  if (aFullScreen && !sCurrentWindow) {
-    sCurrentWindow = this;
-    LPARAM pos = sCurrentWindow->lParamToClient(sMouseExitlParamScreen);
-    sCurrentWindow->DispatchMouseEvent(eMouseEnterIntoWidget,
-                                       sMouseExitwParam, pos, false,
-                                       WidgetMouseEvent::eLeftButton,
-                                       MOUSE_INPUT_SOURCE());
   }
 
   return NS_OK;
@@ -4094,7 +4090,7 @@ nsWindow::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWrBri
       RoundedRect(ThebesRect(mWindowButtonsRect->ToUnknownRect()),
                   RectCornerRadii(0, 0, 3, 3))));
     wr::WrClipId clipId =
-      aBuilder.DefineClip(Nothing(), Nothing(), rect, &roundedClip);
+      aBuilder.DefineClip(Nothing(), rect, &roundedClip);
     aBuilder.PushClip(clipId);
     aBuilder.PushClearRect(rect);
     aBuilder.PopClip();
@@ -4105,6 +4101,12 @@ uint32_t
 nsWindow::GetMaxTouchPoints() const
 {
   return WinUtils::GetMaxTouchPoints();
+}
+
+void
+nsWindow::SetWindowClass(const nsAString& xulWinType)
+{
+  mIsEarlyBlankWindow = xulWinType.EqualsLiteral("navigator:blank");
 }
 
 /**************************************************************
@@ -4656,8 +4658,6 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
         }
       }
     } else if (aEventMessage == eMouseExitFromWidget) {
-      sMouseExitwParam = wParam;
-      sMouseExitlParamScreen = lParamToScreen(lParam);
       if (sCurrentWindow == this) {
         sCurrentWindow = nullptr;
       }
@@ -4710,13 +4710,18 @@ void nsWindow::DispatchFocusToTopLevelWindow(bool aIsActivate)
   }
 }
 
-bool nsWindow::IsTopLevelMouseExit(HWND aWnd)
+HWND nsWindow::WindowAtMouse()
 {
   DWORD pos = ::GetMessagePos();
   POINT mp;
   mp.x = GET_X_LPARAM(pos);
   mp.y = GET_Y_LPARAM(pos);
-  HWND mouseWnd = ::WindowFromPoint(mp);
+  return ::WindowFromPoint(mp);
+}
+
+bool nsWindow::IsTopLevelMouseExit(HWND aWnd)
+{
+  HWND mouseWnd = WindowAtMouse();
 
   // WinUtils::GetTopLevelHWND() will return a HWND for the window frame
   // (which includes the non-client area).  If the mouse has moved into
@@ -5646,6 +5651,14 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         break;
       mMousePresent = false;
 
+      // Check if the mouse is over the fullscreen transition window, if so
+      // clear sLastMouseMovePoint. This way the WM_MOUSEMOVE we get after the
+      // transition window disappears will not be ignored, even if the mouse
+      // hasn't moved.
+      if (mTransitionWnd && WindowAtMouse() == mTransitionWnd) {
+        sLastMouseMovePoint = {0};
+      }
+
       // We need to check mouse button states and put them in for
       // wParam.
       WPARAM mouseState = (GetKeyState(VK_LBUTTON) ? MK_LBUTTON : 0)
@@ -5906,6 +5919,9 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_DISPLAYCHANGE:
     {
       ScreenHelperWin::RefreshScreens();
+      if (mWidgetListener) {
+        mWidgetListener->UIResolutionChanged();
+      }
       break;
     }
 
@@ -7549,18 +7565,20 @@ void nsWindow::SetWindowTranslucencyInner(nsTransparencyMode aMode)
 
   LONG_PTR style = ::GetWindowLongPtrW(hWnd, GWL_STYLE),
     exStyle = ::GetWindowLongPtr(hWnd, GWL_EXSTYLE);
- 
-   if (parent->mIsVisible)
-     style |= WS_VISIBLE;
-   if (parent->mSizeMode == nsSizeMode_Maximized)
-     style |= WS_MAXIMIZE;
-   else if (parent->mSizeMode == nsSizeMode_Minimized)
-     style |= WS_MINIMIZE;
 
-   if (aMode == eTransparencyTransparent)
-     exStyle |= WS_EX_LAYERED;
-   else
-     exStyle &= ~WS_EX_LAYERED;
+  if (parent->mIsVisible) {
+    style |= WS_VISIBLE;
+    if (parent->mSizeMode == nsSizeMode_Maximized) {
+      style |= WS_MAXIMIZE;
+    } else if (parent->mSizeMode == nsSizeMode_Minimized) {
+      style |= WS_MINIMIZE;
+    }
+  }
+
+  if (aMode == eTransparencyTransparent)
+    exStyle |= WS_EX_LAYERED;
+  else
+    exStyle &= ~WS_EX_LAYERED;
 
   VERIFY_WINDOW_STYLE(style);
   ::SetWindowLongPtrW(hWnd, GWL_STYLE, style);

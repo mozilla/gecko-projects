@@ -12,8 +12,6 @@
 #include "nsError.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIContent.h"
-#include "nsIDOMEventTarget.h"
-#include "nsIDOMNode.h"
 #include "nsIHTMLObjectResizer.h"
 #include "nsIPresShell.h"
 #include "nsLiteralString.h"
@@ -90,6 +88,9 @@ HTMLEditor::ShowInlineTableEditingUI(Element* aCell)
   AddMouseClickListener(mAddRowAfterButton);
 
   mInlineEditedCell = aCell;
+
+  mHasShownInlineTableEditor = true;
+
   return RefreshInlineTableEditingUI();
 }
 
@@ -161,6 +162,8 @@ HTMLEditor::DoInlineTableEditingAction(const Element& aElement)
     return NS_OK;
   }
 
+  ++mInlineTableEditorUsedCount;
+
   // InsertTableRow might causes reframe
   if (Destroyed()) {
     return NS_OK;
@@ -179,20 +182,18 @@ HTMLEditor::DoInlineTableEditingAction(const Element& aElement)
 void
 HTMLEditor::AddMouseClickListener(Element* aElement)
 {
-  nsCOMPtr<nsIDOMEventTarget> evtTarget(do_QueryInterface(aElement));
-  if (evtTarget) {
-    evtTarget->AddEventListener(NS_LITERAL_STRING("click"),
-                                mEventListener, true);
+  if (aElement) {
+    aElement->AddEventListener(NS_LITERAL_STRING("click"),
+			       mEventListener, true);
   }
 }
 
 void
 HTMLEditor::RemoveMouseClickListener(Element* aElement)
 {
-  nsCOMPtr<nsIDOMEventTarget> evtTarget(do_QueryInterface(aElement));
-  if (evtTarget) {
-    evtTarget->RemoveEventListener(NS_LITERAL_STRING("click"),
-                                   mEventListener, true);
+  if (aElement) {
+    aElement->RemoveEventListener(NS_LITERAL_STRING("click"),
+                                  mEventListener, true);
   }
 }
 

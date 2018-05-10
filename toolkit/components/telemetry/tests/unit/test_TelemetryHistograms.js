@@ -73,7 +73,6 @@ function check_histogram(histogram_type, name, min, max, bucket_count) {
     Assert.equal(i, 1);
   }
   var hgrams = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            false,
                                             false).parent;
   let gh = hgrams[name];
   Assert.equal(gh.histogram_type, histogram_type);
@@ -117,7 +116,6 @@ function test_instantiate() {
   h.add(1);
   let snapshot = h.snapshot();
   let subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                true /* subsession */,
                                                 false /* clear */).parent;
   Assert.ok(ID in subsession);
   Assert.equal(snapshot.sum, subsession[ID].sum,
@@ -177,7 +175,6 @@ add_task(async function test_noSerialization() {
   // get reflected into JS, as it has no interesting data in it.
   Telemetry.getHistogramById("NEWTAB_PAGE_PINNED_SITES_COUNT");
   let histograms = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                false /* subsession */,
                                                 false /* clear */).parent;
   Assert.equal(false, "NEWTAB_PAGE_PINNED_SITES_COUNT" in histograms);
 });
@@ -446,7 +443,6 @@ add_task(async function test_expired_histogram() {
 
   for (let process of ["main", "content", "gpu", "extension"]) {
     let histograms = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                  false /* subsession */,
                                                   false /* clear */);
     if (!(process in histograms)) {
       info("Nothing present for process " + process);
@@ -455,7 +451,6 @@ add_task(async function test_expired_histogram() {
     Assert.equal(histograms[process].__expired__, undefined);
   }
   let parentHgrams = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                  false /* subsession */,
                                                   false /* clear */).parent;
   Assert.equal(parentHgrams[test_expired_id], undefined);
 });
@@ -514,7 +509,6 @@ add_task(async function test_keyed_boolean_histogram() {
   Assert.deepEqual(h.snapshot(), testSnapShot);
 
   let parentHgrams = Telemetry.snapshotKeyedHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                       false /* subsession */,
                                                        false /* clear */).parent;
   Assert.deepEqual(parentHgrams[KEYED_ID], testSnapShot);
 
@@ -572,7 +566,6 @@ add_task(async function test_keyed_count_histogram() {
   Assert.deepEqual(h.snapshot(), testSnapShot);
 
   let parentHgrams = Telemetry.snapshotKeyedHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                       false /* subsession */,
                                                        false /* clear */).parent;
   Assert.deepEqual(parentHgrams[KEYED_ID], testSnapShot);
 
@@ -647,7 +640,6 @@ add_task(async function test_keyed_flag_histogram() {
   Assert.deepEqual(h.snapshot(), testSnapshot);
 
   let parentHgrams = Telemetry.snapshotKeyedHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                       false /* subsession */,
                                                        false /* clear */).parent;
   Assert.deepEqual(parentHgrams[KEYED_ID], testSnapshot);
 
@@ -799,7 +791,6 @@ add_task(async function test_histogramSnapshots() {
 
   // Check that keyed histograms are not returned
   let parentHgrams = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                  false /* subsession */,
                                                   false /* clear */).parent;
   Assert.ok(!("TELEMETRY_TEST_KEYED_COUNT" in parentHgrams));
 });
@@ -812,14 +803,12 @@ add_task(async function test_datasets() {
 
   // Check that registeredHistogram works properly
   let registered = Telemetry.snapshotHistograms(RELEASE_CHANNEL_OPTIN,
-                                                false /* subsession */,
                                                 false /* clear */);
   registered = new Set(Object.keys(registered.parent));
   Assert.ok(registered.has("TELEMETRY_TEST_FLAG"));
   Assert.ok(registered.has("TELEMETRY_TEST_RELEASE_OPTIN"));
   Assert.ok(registered.has("TELEMETRY_TEST_RELEASE_OPTOUT"));
   registered = Telemetry.snapshotHistograms(RELEASE_CHANNEL_OPTOUT,
-                                            false /* subsession */,
                                             false /* clear */);
   registered = new Set(Object.keys(registered.parent));
   Assert.ok(!registered.has("TELEMETRY_TEST_FLAG"));
@@ -828,186 +817,18 @@ add_task(async function test_datasets() {
 
   // Check that registeredKeyedHistograms works properly
   registered = Telemetry.snapshotKeyedHistograms(RELEASE_CHANNEL_OPTIN,
-                                                 false /* subsession */,
                                                  false /* clear */);
   registered = new Set(Object.keys(registered.parent));
   Assert.ok(registered.has("TELEMETRY_TEST_KEYED_FLAG"));
   Assert.ok(registered.has("TELEMETRY_TEST_KEYED_RELEASE_OPTOUT"));
   registered = Telemetry.snapshotKeyedHistograms(RELEASE_CHANNEL_OPTOUT,
-                                                 false /* subsession */,
                                                  false /* clear */);
   registered = new Set(Object.keys(registered.parent));
   Assert.ok(!registered.has("TELEMETRY_TEST_KEYED_FLAG"));
   Assert.ok(registered.has("TELEMETRY_TEST_KEYED_RELEASE_OPTOUT"));
 });
 
-add_task({
-  skip_if: () => gIsAndroid
-},
-function test_subsession() {
-  const COUNT = "TELEMETRY_TEST_COUNT";
-  const FLAG = "TELEMETRY_TEST_FLAG";
-  let h = Telemetry.getHistogramById(COUNT);
-  let flag = Telemetry.getHistogramById(FLAG);
-
-  // Both original and duplicate should start out the same.
-  h.clear();
-  let snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                              false /* subsession */,
-                                              false /* clear */).parent;
-  let subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                                true /* subsession */,
-                                                false /* clear */).parent;
-  Assert.ok(!(COUNT in snapshot));
-  Assert.ok(!(COUNT in subsession));
-
-  // They should instantiate and pick-up the count.
-  h.add(1);
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            false /* clear */).parent;
-  Assert.ok(COUNT in snapshot);
-  Assert.ok(COUNT in subsession);
-  Assert.equal(snapshot[COUNT].sum, 1);
-  Assert.equal(subsession[COUNT].sum, 1);
-
-  // They should still reset properly.
-  h.clear();
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            false /* clear */).parent;
-  Assert.ok(!(COUNT in snapshot));
-  Assert.ok(!(COUNT in subsession));
-
-  // Both should instantiate and pick-up the count.
-  h.add(1);
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            false /* clear */).parent;
-  Assert.ok(COUNT in snapshot);
-  Assert.ok(COUNT in subsession);
-  Assert.equal(snapshot[COUNT].sum, 1);
-  Assert.equal(subsession[COUNT].sum, 1);
-
-  // Check that we are able to only reset the duplicate histogram.
-  h.clear(true);
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            false /* clear */).parent;
-  Assert.ok(COUNT in snapshot);
-  Assert.ok(!(COUNT in subsession));
-  Assert.equal(snapshot[COUNT].sum, 1);
-
-  // Both should register the next count.
-  h.add(1);
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            false /* clear */).parent;
-  Assert.equal(snapshot[COUNT].sum, 2);
-  Assert.equal(subsession[COUNT].sum, 1);
-
-  // Retrieve a subsession snapshot and pass the flag to
-  // clear subsession histograms too.
-  h.clear();
-  flag.clear();
-  h.add(1);
-  flag.add(1);
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            true /* clear */).parent;
-  Assert.ok(COUNT in snapshot);
-  Assert.ok(COUNT in subsession);
-  Assert.ok(FLAG in snapshot);
-  Assert.ok(FLAG in subsession);
-  Assert.equal(snapshot[COUNT].sum, 1);
-  Assert.equal(subsession[COUNT].sum, 1);
-  Assert.equal(snapshot[FLAG].sum, 1);
-  Assert.equal(subsession[FLAG].sum, 1);
-
-  // The next subsesssion snapshot should show the histograms
-  // got reset.
-  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                          false /* subsession */,
-                                          false /* clear */).parent;
-  subsession = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
-                                            true /* subsession */,
-                                            false /* clear */).parent;
-  Assert.ok(COUNT in snapshot);
-  Assert.ok(!(COUNT in subsession));
-  Assert.ok(FLAG in snapshot);
-  Assert.ok(FLAG in subsession);
-  Assert.equal(snapshot[COUNT].sum, 1);
-  Assert.equal(snapshot[FLAG].sum, 1);
-  Assert.equal(subsession[FLAG].sum, 0);
-});
-
-add_task({
-  skip_if: () => gIsAndroid
-},
-function test_keyed_subsession() {
-  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_FLAG");
-  const KEY = "foo";
-
-  // Both original and subsession should start out the same.
-  h.clear();
-  Assert.ok(!(KEY in h.snapshot()));
-  Assert.ok(!(KEY in h.subsessionSnapshot()));
-  Assert.equal(h.snapshot(KEY).sum, 0);
-  Assert.equal(h.subsessionSnapshot(KEY).sum, 0);
-
-  // Both should register the flag.
-  h.add(KEY, 1);
-  Assert.ok(KEY in h.snapshot());
-  Assert.ok(KEY in h.subsessionSnapshot());
-  Assert.equal(h.snapshot(KEY).sum, 1);
-  Assert.equal(h.subsessionSnapshot(KEY).sum, 1);
-
-  // Check that we are able to only reset the subsession histogram.
-  h.clear(true);
-  Assert.ok(KEY in h.snapshot());
-  Assert.ok(!(KEY in h.subsessionSnapshot()));
-  Assert.equal(h.snapshot(KEY).sum, 1);
-  Assert.equal(h.subsessionSnapshot(KEY).sum, 0);
-
-  // Setting the flag again should make both match again.
-  h.add(KEY, 1);
-  Assert.ok(KEY in h.snapshot());
-  Assert.ok(KEY in h.subsessionSnapshot());
-  Assert.equal(h.snapshot(KEY).sum, 1);
-  Assert.equal(h.subsessionSnapshot(KEY).sum, 1);
-
-  // Check that "snapshot and clear" works properly.
-  let snapshot = h.snapshot();
-  let subsession = h.snapshotSubsessionAndClear();
-  Assert.ok(KEY in snapshot);
-  Assert.ok(KEY in subsession);
-  Assert.equal(snapshot[KEY].sum, 1);
-  Assert.equal(subsession[KEY].sum, 1);
-
-  subsession = h.subsessionSnapshot();
-  Assert.ok(!(KEY in subsession));
-  Assert.equal(h.subsessionSnapshot(KEY).sum, 0);
-});
-
-add_task(function* test_keyed_keys() {
+add_task(async function test_keyed_keys() {
   let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_KEYS");
   h.clear();
   Telemetry.clearScalars();
@@ -1019,7 +840,7 @@ add_task(function* test_keyed_keys() {
 
   // Check that we have the expected keys.
   let snap = h.snapshot();
-  Assert.ok(Object.keys(snap).length, 2, "Only 2 keys must be recorded.");
+  Assert.equal(Object.keys(snap).length, 2, "Only 2 keys must be recorded.");
   Assert.ok("testkey" in snap, "'testkey' must be recorded.");
   Assert.ok("thirdKey" in snap, "'thirdKey' must be recorded.");
   Assert.deepEqual(snap.testkey.counts, [0, 1, 0],
@@ -1125,4 +946,237 @@ add_task(async function test_linear_multiple_samples() {
   Assert.equal(s2.sum, valid.reduce((acc, cur) => acc + cur) - 3);
   Assert.equal(s2.counts[9], 1);
   Assert.deepEqual(s2.counts.slice(0, 3), [1, 3, 2]);
+});
+
+add_task(async function test_keyed_no_arguments() {
+  // Test for no accumulation when add is called with no arguments
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_LINEAR");
+  h.clear();
+
+  h.add();
+
+  // No keys should be added due to no accumulation.
+  Assert.equal(h.keys().length, 0);
+});
+
+add_task(async function test_keyed_categorical_invalid_string() {
+  // Test for no accumulation when add is called on a
+  // keyed categorical histogram with an invalid string label.
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_CATEGORICAL");
+  h.clear();
+
+  h.add("someKey", "#notALabel");
+
+  // No keys should be added due to no accumulation.
+  Assert.equal(h.keys().length, 0);
+});
+
+add_task(async function test_keyed_count_multiple_samples() {
+  let valid = [1, 1, 3, 0];
+  let invalid = ["1", "0", "", "random"];
+  let key = "somekeystring";
+
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_COUNT");
+  h.clear();
+
+  // If the array contains even a single invalid value, no accumulation should take place
+  // Keep the valid values in front of invalid to check if it is simply accumulating as
+  // it's traversing the array and throwing upon first invalid value. That should not happen.
+  h.add(key, valid.concat(invalid));
+  let s1 = h.snapshot(key);
+  Assert.equal(s1.sum, 0);
+  // Ensure that no accumulations of 0-like values took place.
+  // These accumulations won't increase the sum.
+  Assert.equal(s1.counts.reduce((acc, cur) => acc + cur), 0);
+
+  h.add(key, valid);
+  let s2 = h.snapshot(key);
+  Assert.equal(uneval(s2.counts), uneval([4, 0, 0]));
+  Assert.equal(s2.sum, 5);
+});
+
+add_task(async function test_keyed_categorical_multiple_samples() {
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_CATEGORICAL");
+  h.clear();
+  let valid = ["CommonLabel", "Label2", "Label3", "Label3", 0, 0, 1];
+  let invalid = ["", "Label4", "1234", "0", "1", 5000];
+  let key = "somekeystring";
+
+  // At least one invalid parameter, so no accumulation should happen here
+  // Valid values in front of invalid.
+  h.add(key, valid.concat(invalid));
+  let s1 = h.snapshot(key);
+  Assert.equal(s1.sum, 0);
+  Assert.equal(s1.counts.reduce((acc, cur) => acc + cur), 0);
+
+  h.add(key, valid);
+  let snapshot = h.snapshot(key);
+  Assert.equal(snapshot.sum, 6);
+  Assert.deepEqual(snapshot.counts.slice(0, 4), [3, 2, 2, 0]);
+});
+
+add_task(async function test_keyed_boolean_multiple_samples() {
+  let valid = [true, false, 0, 1, 2];
+  let invalid = ["", "0", "1", ",2", "true", "false", "random"];
+  let key = "somekey";
+
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_BOOLEAN");
+  h.clear();
+
+  // At least one invalid parameter, so no accumulation should happen here
+  // Valid values in front of invalid.
+  h.add(key, valid.concat(invalid));
+  let s1 = h.snapshot(key);
+  Assert.equal(s1.sum, 0);
+  Assert.equal(s1.counts.reduce((acc, cur) => acc + cur), 0);
+
+  h.add(key, valid);
+  let s = h.snapshot(key);
+  Assert.deepEqual(s.counts, [2, 3, 0]);
+  Assert.equal(s.sum, 3);
+});
+
+add_task(async function test_keyed_linear_multiple_samples() {
+  // According to telemetry.mozilla.org/histogram-simulator, bucket at
+  // index 1 of TELEMETRY_TEST_LINEAR has max value of 3.13K
+  let valid = [0, 1, 5, 10, 268450000, 268450001, Math.pow(2, 31) + 1];
+  let invalid = ["", "0", "1", "random"];
+  let key = "somestring";
+
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_LINEAR");
+  h.clear();
+
+  // At least one invalid paramater, so no accumulations.
+  // Valid values in front of invalid.
+   h.add(key, valid.concat(invalid));
+   let s1 = h.snapshot(key);
+   Assert.equal(s1.sum, 0);
+   Assert.equal(s1.counts.reduce((acc, cur) => acc + cur), 0);
+
+  h.add(key, valid);
+  let s2 = h.snapshot(key);
+  // Values >= INT32_MAX are accumulated as INT32_MAX - 1
+  Assert.equal(s2.sum, valid.reduce((acc, cur) => acc + cur) - 3);
+  Assert.equal(s2.counts[9], 3);
+  Assert.deepEqual(s2.counts.slice(0, 3), [1, 3, 0]);
+});
+
+add_task(async function test_non_array_non_string_obj() {
+  let invalid_obj = {
+    "prop1": "someValue",
+    "prop2": "someOtherValue"
+    };
+  let key = "someString";
+
+  let h = Telemetry.getKeyedHistogramById("TELEMETRY_TEST_KEYED_LINEAR");
+  h.clear();
+
+  h.add(key, invalid_obj);
+  Assert.equal(h.keys().length, 0);
+});
+
+add_task({
+  skip_if: () => gIsAndroid
+},
+async function test_productSpecificHistograms() {
+  const DEFAULT_PRODUCTS_HISTOGRAM = "TELEMETRY_TEST_DEFAULT_PRODUCTS";
+  const DESKTOP_ONLY_HISTOGRAM = "TELEMETRY_TEST_DESKTOP_ONLY";
+  const MULTIPRODUCT_HISTOGRAM = "TELEMETRY_TEST_MULTIPRODUCT";
+  const MOBILE_ONLY_HISTOGRAM = "TELEMETRY_TEST_MOBILE_ONLY";
+
+  var default_histo = Telemetry.getHistogramById(DEFAULT_PRODUCTS_HISTOGRAM);
+  var desktop_histo = Telemetry.getHistogramById(DESKTOP_ONLY_HISTOGRAM);
+  var multiproduct_histo = Telemetry.getHistogramById(MULTIPRODUCT_HISTOGRAM);
+  var mobile_histo = Telemetry.getHistogramById(MOBILE_ONLY_HISTOGRAM);
+  default_histo.clear();
+  desktop_histo.clear();
+  multiproduct_histo.clear();
+  mobile_histo.clear();
+
+  default_histo.add(42);
+  desktop_histo.add(42);
+  multiproduct_histo.add(42);
+  mobile_histo.add(42);
+
+  let histograms = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
+                                                false /* clear */).parent;
+
+  Assert.ok(DEFAULT_PRODUCTS_HISTOGRAM in histograms, "Should have recorded default products histogram");
+  Assert.ok(DESKTOP_ONLY_HISTOGRAM in histograms, "Should have recorded desktop-only histogram");
+  Assert.ok(MULTIPRODUCT_HISTOGRAM in histograms, "Should have recorded multiproduct histogram");
+
+  Assert.ok(!(MOBILE_ONLY_HISTOGRAM in histograms), "Should not have recorded mobile-only histogram");
+});
+
+add_task({
+  skip_if: () => !gIsAndroid
+},
+async function test_mobileSpecificHistograms() {
+  const DEFAULT_PRODUCTS_HISTOGRAM = "TELEMETRY_TEST_DEFAULT_PRODUCTS";
+  const DESKTOP_ONLY_HISTOGRAM = "TELEMETRY_TEST_DESKTOP_ONLY";
+  const MULTIPRODUCT_HISTOGRAM = "TELEMETRY_TEST_MULTIPRODUCT";
+  const MOBILE_ONLY_HISTOGRAM = "TELEMETRY_TEST_MOBILE_ONLY";
+
+  var default_histo = Telemetry.getHistogramById(DEFAULT_PRODUCTS_HISTOGRAM);
+  var desktop_histo = Telemetry.getHistogramById(DESKTOP_ONLY_HISTOGRAM);
+  var multiproduct_histo = Telemetry.getHistogramById(MULTIPRODUCT_HISTOGRAM);
+  var mobile_histo = Telemetry.getHistogramById(MOBILE_ONLY_HISTOGRAM);
+  default_histo.clear();
+  desktop_histo.clear();
+  multiproduct_histo.clear();
+  mobile_histo.clear();
+
+  default_histo.add(1);
+  desktop_histo.add(1);
+  multiproduct_histo.add(1);
+  mobile_histo.add(1);
+
+  let histograms = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
+                                                false /* clear */).parent;
+
+  Assert.ok(DEFAULT_PRODUCTS_HISTOGRAM in histograms, "Should have recorded default products histogram");
+  Assert.ok(MOBILE_ONLY_HISTOGRAM in histograms, "Should have recorded mobile-only histogram");
+  Assert.ok(MULTIPRODUCT_HISTOGRAM in histograms, "Should have recorded multiproduct histogram");
+
+  Assert.ok(!(DESKTOP_ONLY_HISTOGRAM in histograms), "Should not have recorded desktop-only histogram");
+});
+
+add_task({
+  skip_if: () => gIsAndroid
+},
+async function test_clearHistogramsOnSnapshot() {
+  const COUNT = "TELEMETRY_TEST_COUNT";
+  let h = Telemetry.getHistogramById(COUNT);
+  h.clear();
+  let snapshot;
+
+  // The first snapshot should be empty, nothing recorded.
+  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
+                                              false /* clear */).parent;
+  Assert.ok(!(COUNT in snapshot));
+
+  // After recording into a histogram, the data should be in the snapshot. Don't delete it.
+  h.add(1);
+
+  Assert.equal(h.snapshot().sum, 1);
+  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
+                                              false /* clear */).parent;
+  Assert.ok(COUNT in snapshot);
+  Assert.equal(snapshot[COUNT].sum, 1);
+
+  // After recording into a histogram again, the data should be updated and in the snapshot.
+  // Clean up after.
+  h.add(41);
+
+  Assert.equal(h.snapshot().sum, 42);
+  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
+                                              true /* clear */).parent;
+  Assert.ok(COUNT in snapshot);
+  Assert.equal(snapshot[COUNT].sum, 42);
+
+  // Finally, no data should be in the snapshot.
+  Assert.equal(h.snapshot().sum, 0);
+  snapshot = Telemetry.snapshotHistograms(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN,
+                                              false /* clear */).parent;
+  Assert.ok(!(COUNT in snapshot));
 });

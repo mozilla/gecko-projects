@@ -158,10 +158,7 @@ public:
 
   // Called on the parent thread.
   bool
-  Notify(WorkerStatus aStatus)
-  {
-    return NotifyPrivate(aStatus);
-  }
+  Notify(WorkerStatus aStatus);
 
   bool
   Cancel()
@@ -178,8 +175,7 @@ public:
   bool
   Terminate()
   {
-    AssertIsOnParentThread();
-    return TerminatePrivate();
+    return Notify(Terminating);
   }
 
   bool
@@ -263,12 +259,8 @@ public:
   bool
   IsOnCurrentThread();
 
-  bool
-  CloseInternal()
-  {
-    AssertIsOnWorkerThread();
-    return NotifyInternal(Closing);
-  }
+  void
+  CloseInternal();
 
   bool
   FreezeInternal();
@@ -295,10 +287,7 @@ public:
   PostMessageToParent(JSContext* aCx,
                       JS::Handle<JS::Value> aMessage,
                       const Sequence<JSObject*>& aTransferable,
-                      ErrorResult& aRv)
-  {
-    PostMessageToParentInternal(aCx, aMessage, aTransferable, aRv);
-  }
+                      ErrorResult& aRv);
 
   void
   PostMessageToParentMessagePort(JSContext* aCx,
@@ -527,9 +516,6 @@ public:
     return mWorkerScriptExecutedSuccessfully;
   }
 
-  void
-  MaybeDispatchLoadFailedRunnable();
-
   // Get the event target to use when dispatching to the main thread
   // from this Worker thread.  This may be the main thread itself or
   // a ThrottledEventQueue to the main thread.
@@ -564,14 +550,17 @@ public:
   void
   EnsurePerformanceStorage();
 
-  const ClientInfo&
+  void
+  EnsurePerformanceCounter();
+
+  Maybe<ClientInfo>
   GetClientInfo() const;
 
   const ClientState
   GetClientState() const;
 
   const Maybe<ServiceWorkerDescriptor>
-  GetController() const;
+  GetController();
 
   void
   Control(const ServiceWorkerDescriptor& aServiceWorker);
@@ -582,10 +571,8 @@ public:
   PerformanceStorage*
   GetPerformanceStorage();
 
-#ifndef RELEASE_OR_BETA
   PerformanceCounter*
   GetPerformanceCounter();
-#endif
 
   bool
   IsAcceptingEvents()
@@ -1056,12 +1043,6 @@ public:
     return mLoadInfo.mServiceWorkersTestingInWindow;
   }
 
-  already_AddRefed<nsIRunnable>
-  StealLoadFailedAsyncRunnable()
-  {
-    return mLoadInfo.mLoadFailedAsyncRunnable.forget();
-  }
-
   // This is used to handle importScripts(). When the worker is first loaded
   // and executed, it happens in a sync loop. At this point it sets
   // mLoadingWorkerScript to true. importScripts() calls that occur during the
@@ -1185,10 +1166,8 @@ public:
   OfflineStatusChangeEvent(bool aIsOffline);
 
   nsresult
-  Dispatch(already_AddRefed<WorkerRunnable> aRunnable)
-  {
-    return DispatchPrivate(Move(aRunnable), nullptr);
-  }
+  Dispatch(already_AddRefed<WorkerRunnable> aRunnable,
+           nsIEventTarget* aSyncLoopTarget = nullptr);
 
   nsresult
   DispatchControlRunnable(already_AddRefed<WorkerControlRunnable> aWorkerControlRunnable);
@@ -1217,6 +1196,9 @@ public:
   PrincipalIsValid() const;
 #endif
 
+  void
+  StartCancelingTimer();
+
 private:
   WorkerPrivate(WorkerPrivate* aParent,
                 const nsAString& aScriptURL, bool aIsChromeWorker,
@@ -1225,19 +1207,6 @@ private:
                 WorkerLoadInfo& aLoadInfo);
 
   ~WorkerPrivate();
-
-  nsresult
-  DispatchPrivate(already_AddRefed<WorkerRunnable> aRunnable,
-                  nsIEventTarget* aSyncLoopTarget);
-
-  bool
-  NotifyPrivate(WorkerStatus aStatus);
-
-  bool
-  TerminatePrivate()
-  {
-    return NotifyPrivate(Terminating);
-  }
 
   bool
   MayContinueRunning()
@@ -1288,13 +1257,7 @@ private:
   DisableMemoryReporter();
 
   void
-  WaitForWorkerEvents(PRIntervalTime interval = PR_INTERVAL_NO_TIMEOUT);
-
-  void
-  PostMessageToParentInternal(JSContext* aCx,
-                              JS::Handle<JS::Value> aMessage,
-                              const Sequence<JSObject*>& aTransferable,
-                              ErrorResult& aRv);
+  WaitForWorkerEvents();
 
   // If the worker shutdown status is equal or greater then aFailStatus, this
   // operation will fail and nullptr will be returned. See WorkerHolder.h for
@@ -1429,6 +1392,8 @@ private:
   nsCOMPtr<nsITimer> mTimer;
   nsCOMPtr<nsITimerCallback> mTimerRunnable;
 
+  nsCOMPtr<nsITimer> mCancelingTimer;
+
   nsCOMPtr<nsITimer> mGCTimer;
 
   RefPtr<MemoryReporter> mMemoryReporter;
@@ -1504,9 +1469,9 @@ private:
   // We expose some extra testing functions in that case.
   bool mIsInAutomation;
 
-#ifndef RELEASE_OR_BETA
+  // This pointer will be null if dom.performance.enable_scheduler_timing is
+  // false (default value)
   RefPtr<mozilla::PerformanceCounter> mPerformanceCounter;
-#endif
 };
 
 class AutoSyncLoopHolder

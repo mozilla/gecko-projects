@@ -50,8 +50,6 @@ class nsIStreamLoader;
 class nsIStreamLoaderObserver;
 class nsIIncrementalStreamLoader;
 class nsIIncrementalStreamLoaderObserver;
-class nsIUnicharStreamLoader;
-class nsIUnicharStreamLoaderObserver;
 
 namespace mozilla {
 class Encoding;
@@ -66,9 +64,9 @@ class ServiceWorkerDescriptor;
 template <class> class nsCOMPtr;
 template <typename> struct already_AddRefed;
 
-already_AddRefed<nsIIOService> do_GetIOService(nsresult *error = 0);
+already_AddRefed<nsIIOService> do_GetIOService(nsresult *error = nullptr);
 
-already_AddRefed<nsINetUtil> do_GetNetUtil(nsresult *error = 0);
+already_AddRefed<nsINetUtil> do_GetNetUtil(nsresult *error = nullptr);
 
 // private little helper function... don't call this directly!
 nsresult net_EnsureIOService(nsIIOService **ios, nsCOMPtr<nsIIOService> &grip);
@@ -426,9 +424,6 @@ NS_NewStreamLoader(nsIStreamLoader        **outStream,
                    nsLoadFlags              aLoadFlags = nsIRequest::LOAD_NORMAL,
                    nsIURI                  *aReferrer = nullptr);
 
-nsresult NS_NewUnicharStreamLoader(nsIUnicharStreamLoader        **result,
-                                   nsIUnicharStreamLoaderObserver *observer);
-
 nsresult NS_NewSyncStreamListener(nsIStreamListener **result,
                                   nsIInputStream    **stream);
 
@@ -610,7 +605,7 @@ NS_QueryNotificationCallbacks(T            *channel,
                               const nsIID  &iid,
                               void        **result)
 {
-    NS_PRECONDITION(channel, "null channel");
+    MOZ_ASSERT(channel, "null channel");
     *result = nullptr;
 
     nsCOMPtr<nsIInterfaceRequestor> cbs;
@@ -683,6 +678,18 @@ bool NS_GetOriginAttributes(nsIChannel *aChannel,
  * URLs that it was redirected through.
  */
 bool NS_HasBeenCrossOrigin(nsIChannel* aChannel, bool aReport = false);
+
+/**
+ * Returns true if the channel is a safe top-level navigation.
+ */
+bool NS_IsSafeTopLevelNav(nsIChannel* aChannel);
+
+/**
+ * Returns true if the channel is a foreign with respect to the host-uri.
+ * For loads of TYPE_DOCUMENT, this function returns true if it's a
+ * cross origin navigation.
+ */
+bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI);
 
 // Constants duplicated from nsIScriptSecurityManager so we avoid having necko
 // know about script security manager.
@@ -785,26 +792,6 @@ bool NS_IsOffline();
 nsresult NS_DoImplGetInnermostURI(nsINestedURI *nestedURI, nsIURI **result);
 
 nsresult NS_ImplGetInnermostURI(nsINestedURI *nestedURI, nsIURI **result);
-
-/**
- * Helper function that ensures that |result| is a URI that's safe to
- * return.  If |uri| is immutable, just returns it, otherwise returns
- * a clone.  |uri| must not be null.
- */
-nsresult NS_EnsureSafeToReturn(nsIURI *uri, nsIURI **result);
-
-/**
- * Helper function that tries to set the argument URI to be immutable
- */
-void NS_TryToSetImmutable(nsIURI *uri);
-
-/**
- * Helper function for calling ToImmutableURI.  If all else fails, returns
- * the input URI.  The optional second arg indicates whether we had to fall
- * back to the input URI.  Passing in a null URI is ok.
- */
-already_AddRefed<nsIURI> NS_TryToMakeImmutable(nsIURI *uri,
-                                               nsresult *outRv = nullptr);
 
 /**
  * Helper function for testing whether the given URI, or any of its

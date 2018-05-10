@@ -9,10 +9,9 @@
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
 #include "nsLocalFile.h"
 #include "nsDebug.h"
-#include "nsStaticAtom.h"
+#include "nsGkAtoms.h"
 #include "nsEnumeratorUtils.h"
 
 #include "nsICategoryManager.h"
@@ -40,16 +39,6 @@
 #include "BinaryPath.h"
 
 using namespace mozilla;
-
-// define home directory
-// For Windows platform, We are choosing Appdata folder as HOME
-#if defined (XP_WIN)
-#define HOME_DIR NS_WIN_APPDATA_DIR
-#elif defined (MOZ_WIDGET_COCOA)
-#define HOME_DIR NS_OSX_HOME_DIR
-#elif defined (XP_UNIX)
-#define HOME_DIR NS_UNIX_HOME_DIR
-#endif
 
 //----------------------------------------------------------------------------------------
 nsresult
@@ -105,20 +94,35 @@ nsDirectoryService::Create(nsISupports* aOuter, REFNSIID aIID, void** aResult)
   return gService->QueryInterface(aIID, aResult);
 }
 
-#define DIR_ATOM(name_, value_) NS_STATIC_ATOM_DEFN(nsDirectoryService, name_)
-#include "nsDirectoryServiceAtomList.h"
-#undef DIR_ATOM
+namespace mozilla {
+namespace detail {
 
-#define DIR_ATOM(name_, value_) NS_STATIC_ATOM_BUFFER(name_, value_)
-#include "nsDirectoryServiceAtomList.h"
-#undef DIR_ATOM
-
-static const nsStaticAtomSetup sDirectoryServiceAtomSetup[] = {
-  #define DIR_ATOM(name_, value_) \
-    NS_STATIC_ATOM_SETUP(nsDirectoryService, name_)
+MOZ_PUSH_DISABLE_INTEGRAL_CONSTANT_OVERFLOW_WARNING
+extern constexpr DirectoryAtoms gDirectoryAtoms = {
+  #define DIR_ATOM(name_, value_) NS_STATIC_ATOM_INIT_STRING(value_)
   #include "nsDirectoryServiceAtomList.h"
   #undef DIR_ATOM
+  {
+    #define DIR_ATOM(name_, value_) \
+      NS_STATIC_ATOM_INIT_ATOM(nsStaticAtom, DirectoryAtoms, name_, value_)
+    #include "nsDirectoryServiceAtomList.h"
+    #undef DIR_ATOM
+  }
 };
+MOZ_POP_DISABLE_INTEGRAL_CONSTANT_OVERFLOW_WARNING
+
+} // namespace detail
+} // namespace mozilla
+
+const nsStaticAtom* const nsDirectoryService::sAtoms =
+  mozilla::detail::gDirectoryAtoms.mAtoms;
+
+#define DIR_ATOM(name_, value_) \
+  NS_STATIC_ATOM_DEFN_PTR( \
+    nsStaticAtom, mozilla::detail::DirectoryAtoms, \
+    mozilla::detail::gDirectoryAtoms, nsDirectoryService, name_)
+#include "nsDirectoryServiceAtomList.h"
+#undef DIR_ATOM
 
 NS_IMETHODIMP
 nsDirectoryService::Init()
@@ -135,7 +139,7 @@ nsDirectoryService::RealInit()
 
   gService = new nsDirectoryService();
 
-  NS_RegisterStaticAtoms(sDirectoryServiceAtomSetup);
+  NS_RegisterStaticAtoms(sAtoms, sAtomsLen);
 
   // Let the list hold the only reference to the provider.
   nsAppFileLocationProvider* defaultProvider = new nsAppFileLocationProvider;
@@ -539,16 +543,12 @@ nsDirectoryService::GetFile(const char* aProp, bool* aPersistent,
     rv = GetSpecialSystemDirectory(Win_Personal, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sFavorites) {
     rv = GetSpecialSystemDirectory(Win_Favorites, getter_AddRefs(localFile));
-  } else if (inAtom == nsDirectoryService::sStartup) {
-    rv = GetSpecialSystemDirectory(Win_Startup, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sRecent) {
     rv = GetSpecialSystemDirectory(Win_Recent, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sSendto) {
     rv = GetSpecialSystemDirectory(Win_Sendto, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sBitbucket) {
     rv = GetSpecialSystemDirectory(Win_Bitbucket, getter_AddRefs(localFile));
-  } else if (inAtom == nsDirectoryService::sStartmenu) {
-    rv = GetSpecialSystemDirectory(Win_Startmenu, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sDesktopdirectory ||
              inAtom == nsDirectoryService::sOS_DesktopDirectory) {
     rv = GetSpecialSystemDirectory(Win_Desktopdirectory, getter_AddRefs(localFile));
@@ -562,12 +562,8 @@ nsDirectoryService::GetFile(const char* aProp, bool* aPersistent,
     rv = GetSpecialSystemDirectory(Win_Fonts, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sTemplates) {
     rv = GetSpecialSystemDirectory(Win_Templates, getter_AddRefs(localFile));
-  } else if (inAtom == nsDirectoryService::sCommon_Startmenu) {
-    rv = GetSpecialSystemDirectory(Win_Common_Startmenu, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sCommon_Programs) {
     rv = GetSpecialSystemDirectory(Win_Common_Programs, getter_AddRefs(localFile));
-  } else if (inAtom == nsDirectoryService::sCommon_Startup) {
-    rv = GetSpecialSystemDirectory(Win_Common_Startup, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sCommon_Desktopdirectory) {
     rv = GetSpecialSystemDirectory(Win_Common_Desktopdirectory, getter_AddRefs(localFile));
   } else if (inAtom == nsDirectoryService::sCommon_AppData) {

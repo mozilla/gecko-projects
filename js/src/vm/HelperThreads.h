@@ -49,6 +49,7 @@ enum class ParseTaskKind
     Script,
     Module,
     ScriptDecode,
+    BinAST,
     MultiScriptsDecode
 };
 
@@ -148,6 +149,10 @@ class GlobalHelperThreadState
     ParseTask* removeFinishedParseTask(ParseTaskKind kind, void* token);
 
   public:
+
+    void addSizeOfIncludingThis(JS::GlobalStats* stats,
+                                AutoLockHelperThreadState& lock) const;
+
     size_t maxIonCompilationThreads() const;
     size_t maxWasmCompilationThreads() const;
     size_t maxWasmTier2GeneratorThreads() const;
@@ -166,7 +171,7 @@ class GlobalHelperThreadState
     void lock();
     void unlock();
 #ifdef DEBUG
-    bool isLockedByCurrentThread();
+    bool isLockedByCurrentThread() const;
 #endif
 
     enum CondVar {
@@ -311,15 +316,18 @@ class GlobalHelperThreadState
     bool finishMultiScriptsDecodeTask(JSContext* cx, void* token, MutableHandle<ScriptVector> scripts);
     JSObject* finishModuleParseTask(JSContext* cx, void* token);
 
+#if defined(JS_BUILD_BINAST)
+    JSScript* finishBinASTDecodeTask(JSContext* cx, void* token);
+#endif
+
     bool hasActiveThreads(const AutoLockHelperThreadState&);
+    void waitForAllThreads();
     void waitForAllThreadsLocked(AutoLockHelperThreadState&);
 
     template <typename T>
     bool checkTaskThreadLimit(size_t maxThreads, bool isMaster = false) const;
 
   private:
-    void waitForAllThreads();
-
     /*
      * Lock protecting all mutable shared state accessed by helper threads, and
      * used by all condition variables.
@@ -602,6 +610,15 @@ StartOffThreadDecodeScript(JSContext* cx, const ReadOnlyCompileOptions& options,
                            const JS::TranscodeRange& range,
                            JS::OffThreadCompileCallback callback, void* callbackData);
 
+#if defined(JS_BUILD_BINAST)
+
+bool
+StartOffThreadDecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+                           const uint8_t* buf, size_t length,
+                           JS::OffThreadCompileCallback callback, void* callbackData);
+
+#endif /* JS_BUILD_BINAST */
+
 bool
 StartOffThreadDecodeMultiScripts(JSContext* cx, const ReadOnlyCompileOptions& options,
                                  JS::TranscodeSources& sources,
@@ -702,6 +719,11 @@ struct ParseTask
     }
 
     void trace(JSTracer* trc);
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
+        return mallocSizeOf(this) + sizeOfExcludingThis(mallocSizeOf);
+    }
 };
 
 struct ScriptParseTask : public ParseTask
@@ -730,6 +752,19 @@ struct ScriptDecodeTask : public ParseTask
                      JS::OffThreadCompileCallback callback, void* callbackData);
     void parse(JSContext* cx) override;
 };
+
+#if defined(JS_BUILD_BINAST)
+
+struct BinASTDecodeTask : public ParseTask
+{
+    mozilla::Range<const uint8_t> data;
+
+    BinASTDecodeTask(JSContext* cx, const uint8_t* buf, size_t length,
+                     JS::OffThreadCompileCallback callback, void* callbackData);
+    void parse(JSContext* cx) override;
+};
+
+#endif /* JS_BUILD_BINAST */
 
 struct MultiScriptsDecodeTask : public ParseTask
 {

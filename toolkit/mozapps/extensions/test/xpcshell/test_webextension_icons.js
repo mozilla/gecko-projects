@@ -6,10 +6,9 @@ const ID = "webextension1@tests.mozilla.org";
 
 const profileDir = gProfD.clone();
 profileDir.append("extensions");
-profileDir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+profileDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
 
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
-startupManager();
 
 async function testSimpleIconsetParsing(manifest) {
   await promiseWriteWebManifestForExtension(manifest, profileDir);
@@ -113,6 +112,7 @@ async function testNoIconsParsing(manifest) {
 
 // Test simple icon set parsing
 add_task(async function() {
+  await promiseStartupManager();
   await testSimpleIconsetParsing({
     name: "Web Extension Name",
     version: "1.0",

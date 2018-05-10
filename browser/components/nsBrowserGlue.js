@@ -64,11 +64,16 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
     win.resizeTo(width, height);
   }
 
+  // Set this before showing the window so that graphics code can use it to
+  // decide to skip some expensive code paths (eg. starting the GPU process).
+  docElt.setAttribute("windowtype", "navigator:blank");
+
   // The window becomes visible after OnStopRequest, so make this happen now.
   win.stop();
 
-  // Used in nsBrowserContentHandler.js to close unwanted blank windows.
-  docElt.setAttribute("windowtype", "navigator:blank");
+  let { TelemetryTimestamps } =
+    ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm", {});
+  TelemetryTimestamps.add("blankWindowShown");
 })();
 
 Cu.importGlobalProperties(["fetch"]);
@@ -86,11 +91,13 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AsyncPrefs: "resource://gre/modules/AsyncPrefs.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   AutoCompletePopup: "resource://gre/modules/AutoCompletePopup.jsm",
+  Blocklist: "resource://gre/modules/Blocklist.jsm",
   BookmarkHTMLUtils: "resource://gre/modules/BookmarkHTMLUtils.jsm",
   BookmarkJSONUtils: "resource://gre/modules/BookmarkJSONUtils.jsm",
   BrowserErrorReporter: "resource:///modules/BrowserErrorReporter.jsm",
   BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContentClick: "resource:///modules/ContentClick.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
   CustomizableUI: "resource:///modules/CustomizableUI.jsm",
@@ -109,6 +116,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   Normandy: "resource://normandy/Normandy.jsm",
+  ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   PageActions: "resource:///modules/PageActions.jsm",
   PageThumbs: "resource://gre/modules/PageThumbs.jsm",
@@ -121,7 +129,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   ProcessHangMonitor: "resource:///modules/ProcessHangMonitor.jsm",
   ReaderParent: "resource:///modules/ReaderParent.jsm",
-  RecentWindow: "resource:///modules/RecentWindow.jsm",
   RemotePrompt: "resource:///modules/RemotePrompt.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
@@ -376,7 +383,7 @@ BrowserGlue.prototype = {
   },
 
   // nsIObserver implementation
-  observe: function BG_observe(subject, topic, data) {
+  observe: async function BG_observe(subject, topic, data) {
     switch (topic) {
       case "notifications-open-settings":
         this._openPreferences("privacy", { origin: "notifOpenSettings" });
@@ -438,6 +445,7 @@ BrowserGlue.prototype = {
           this._onDeviceDisconnected();
         }
         break;
+      case "fxaccounts:messages:display-tabs":
       case "weave:engine:clients:display-uris":
         this._onDisplaySyncURIs(subject);
         break;
@@ -483,8 +491,11 @@ BrowserGlue.prototype = {
           if (this._placesBrowserInitComplete) {
             Services.obs.notifyObservers(null, "places-browser-init-complete");
           }
-        } else if (data == "migrateMatchBucketsPrefForUIVersion60") {
-          this._migrateMatchBucketsPrefForUIVersion60(true);
+        } else if (data == "migrateMatchBucketsPrefForUI66") {
+          this._migrateMatchBucketsPrefForUI66().then(() => {
+            Services.obs.notifyObservers(null, "browser-glue-test",
+                                         "migrateMatchBucketsPrefForUI66-done");
+          });
         }
         break;
       case "initial-migration-will-import-default-bookmarks":
@@ -496,7 +507,7 @@ BrowserGlue.prototype = {
       case "handle-xul-text-link":
         let linkHandled = subject.QueryInterface(Ci.nsISupportsPRBool);
         if (!linkHandled.data) {
-          let win = RecentWindow.getMostRecentBrowserWindow();
+          let win = BrowserWindowTracker.getTopWindow();
           if (win) {
             data = JSON.parse(data);
             let where = win.whereToOpenLink(data);
@@ -505,7 +516,7 @@ BrowserGlue.prototype = {
             if (where == "current") {
               where = "tab";
             }
-            win.openUILinkIn(data.href, where);
+            win.openTrustedLinkIn(data.href, where);
             linkHandled.data = true;
           }
         }
@@ -525,7 +536,7 @@ BrowserGlue.prototype = {
         } catch (ex) {
           Cu.reportError(ex);
         }
-        let win = RecentWindow.getMostRecentBrowserWindow();
+        let win = BrowserWindowTracker.getTopWindow();
         win.BrowserSearch.recordSearchInTelemetry(engine, "urlbar");
         break;
       case "browser-search-engine-modified":
@@ -544,14 +555,10 @@ BrowserGlue.prototype = {
         break;
       case "xpi-signature-changed":
         let disabledAddons = JSON.parse(data).disabled;
-        AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
-          for (let addon of addons) {
-            if (addon.type != "experiment") {
-              this._notifyUnsignedAddonsDisabled();
-              break;
-            }
-          }
-        });
+        let addons = await AddonManager.getAddonsByIDs(disabledAddons);
+        if (addons.some(addon => addon)) {
+          this._notifyUnsignedAddonsDisabled();
+        }
         break;
       case "sync-ui-state:update":
         this._updateFxaBadges();
@@ -567,6 +574,7 @@ BrowserGlue.prototype = {
         PdfJs.init(true);
         break;
       case "shield-init-complete":
+        this._shieldInitComplete = true;
         this._sendMainPingCentrePing();
         break;
     }
@@ -592,6 +600,7 @@ BrowserGlue.prototype = {
     os.addObserver(this, "fxaccounts:device_connected");
     os.addObserver(this, "fxaccounts:verify_login");
     os.addObserver(this, "fxaccounts:device_disconnected");
+    os.addObserver(this, "fxaccounts:messages:display-tabs");
     os.addObserver(this, "weave:engine:clients:display-uris");
     os.addObserver(this, "session-save");
     os.addObserver(this, "places-init-complete");
@@ -634,6 +643,7 @@ BrowserGlue.prototype = {
     os.removeObserver(this, "fxaccounts:device_connected");
     os.removeObserver(this, "fxaccounts:verify_login");
     os.removeObserver(this, "fxaccounts:device_disconnected");
+    os.removeObserver(this, "fxaccounts:messages:display-tabs");
     os.removeObserver(this, "weave:engine:clients:display-uris");
     os.removeObserver(this, "session-save");
     if (this._bookmarksBackupIdleTime) {
@@ -705,9 +715,10 @@ BrowserGlue.prototype = {
       iconURL: "resource:///chrome/browser/content/browser/defaultthemes/dark.icon.svg",
       textcolor: "white",
       accentcolor: "black",
-      popup: "hsl(240, 5%, 5%)",
+      popup: "#4a4a4f",
       popup_text: "rgb(249, 249, 250)",
-      popup_border: "rgba(24, 26, 27, 0.14)",
+      popup_border: "#27272b",
+      toolbar_field_text: "rgb(249, 249, 250)",
       author: vendorShortName,
     });
 
@@ -822,7 +833,7 @@ BrowserGlue.prototype = {
     if (profileAge < 90) // 3 months
       return;
 
-    let win = RecentWindow.getMostRecentBrowserWindow();
+    let win = BrowserWindowTracker.getTopWindow();
     if (!win)
       return;
 
@@ -834,7 +845,7 @@ BrowserGlue.prototype = {
         label:     win.gNavigatorBundle.getString("slowStartup.helpButton.label"),
         accessKey: win.gNavigatorBundle.getString("slowStartup.helpButton.accesskey"),
         callback() {
-          win.openUILinkIn("https://support.mozilla.org/kb/reset-firefox-easily-fix-most-problems", "tab");
+          win.openTrustedLinkIn("https://support.mozilla.org/kb/reset-firefox-easily-fix-most-problems", "tab");
         }
       },
       {
@@ -860,7 +871,7 @@ BrowserGlue.prototype = {
    *        why a profile reset is offered.
    */
   _resetProfileNotification(reason) {
-    let win = RecentWindow.getMostRecentBrowserWindow();
+    let win = BrowserWindowTracker.getTopWindow();
     if (!win)
       return;
 
@@ -897,7 +908,7 @@ BrowserGlue.prototype = {
   },
 
   _notifyUnsignedAddonsDisabled() {
-    let win = RecentWindow.getMostRecentBrowserWindow();
+    let win = BrowserWindowTracker.getTopWindow();
     if (!win)
       return;
 
@@ -1092,11 +1103,8 @@ BrowserGlue.prototype = {
 
     if (signingRequired) {
       let disabledAddons = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
-      AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
+      AddonManager.getAddonsByIDs(disabledAddons).then(addons => {
         for (let addon of addons) {
-          if (addon.type == "experiment")
-            continue;
-
           if (addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
             this._notifyUnsignedAddonsDisabled();
             break;
@@ -1217,7 +1225,7 @@ BrowserGlue.prototype = {
     });
 
     Services.tm.idleDispatchToMainThread(() => {
-      Services.blocklist.loadBlocklistAsync();
+      Blocklist.loadBlocklistAsync();
     });
   },
 
@@ -1471,7 +1479,7 @@ BrowserGlue.prototype = {
       let key = getNotifyString({propName: "notificationButtonAccessKey",
                                  stringName: "pu.notifyButton.accesskey"});
 
-      let win = RecentWindow.getMostRecentBrowserWindow();
+      let win = BrowserWindowTracker.getTopWindow();
       let notifyBox = win.document.getElementById("high-priority-global-notificationbox");
 
       let buttons = [
@@ -1480,7 +1488,7 @@ BrowserGlue.prototype = {
                         accessKey: key,
                         popup:     null,
                         callback(aNotificationBar, aButton) {
-                          win.openUILinkIn(url, "tab");
+                          win.openTrustedLinkIn(url, "tab");
                         }
                       }
                     ];
@@ -1506,8 +1514,8 @@ BrowserGlue.prototype = {
       // This callback will be called twice but only once with this topic
       if (topic != "alertclickcallback")
         return;
-      let win = RecentWindow.getMostRecentBrowserWindow();
-      win.openUILinkIn(data, "tab");
+      let win = BrowserWindowTracker.getTopWindow();
+      win.openTrustedLinkIn(data, "tab");
     }
 
     try {
@@ -1767,7 +1775,7 @@ BrowserGlue.prototype = {
     var url = Services.urlFormatter.formatURLPref("app.support.baseURL");
     url += helpTopic;
 
-    var win = RecentWindow.getMostRecentBrowserWindow();
+    var win = BrowserWindowTracker.getTopWindow();
 
     var buttons = [
                     {
@@ -1775,7 +1783,7 @@ BrowserGlue.prototype = {
                       accessKey,
                       popup:     null,
                       callback(aNotificationBar, aButton) {
-                        win.openUILinkIn(url, "tab");
+                        win.openTrustedLinkIn(url, "tab");
                       }
                     }
                   ];
@@ -1833,7 +1841,9 @@ BrowserGlue.prototype = {
 
   // eslint-disable-next-line complexity
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 64;
+    // Use an increasing number to keep track of the current migration state.
+    // Completely unrelated to the current Firefox release number.
+    const UI_VERSION = 68;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -2124,9 +2134,7 @@ BrowserGlue.prototype = {
     }
 
     if (currentUIVersion < 60) {
-      // Set whether search suggestions or history results come first in the
-      // urlbar results.
-      this._migrateMatchBucketsPrefForUIVersion60();
+      // This version is superseded by version 66.  See bug 1444965.
     }
 
     if (currentUIVersion < 61) {
@@ -2145,7 +2153,12 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 63 &&
+    if (currentUIVersion < 64) {
+      OS.File.remove(OS.Path.join(OS.Constants.Path.profileDir,
+                                  "directoryLinks.json"), {ignoreAbsent: true});
+    }
+
+    if (currentUIVersion < 65 &&
         Services.prefs.getCharPref("general.config.filename", "") == "dsengine.cfg") {
       let searchInitializedPromise = new Promise(resolve => {
         if (Services.search.isInitialized) {
@@ -2162,7 +2175,7 @@ BrowserGlue.prototype = {
       });
       searchInitializedPromise.then(() => {
         let engineNames = ["Bing Search Engine",
-                           "Yahoo Search Engine",
+                           "Yahoo! Search Engine",
                            "Yandex Search Engine"];
         for (let engineName of engineNames) {
           let engine = Services.search.getEngineByName(engineName);
@@ -2173,9 +2186,23 @@ BrowserGlue.prototype = {
       });
     }
 
-    if (currentUIVersion < 64) {
+    if (currentUIVersion < 66) {
+      // Set whether search suggestions or history/bookmarks results come first
+      // in the urlbar results, and uninstall a related Shield study.
+      this._migrateMatchBucketsPrefForUI66();
+    }
+
+    if (currentUIVersion < 67) {
+      // Migrate devtools firebug theme users to light theme (bug 1378108):
+      if (Services.prefs.getCharPref("devtools.theme") == "firebug") {
+        Services.prefs.setCharPref("devtools.theme", "light");
+      }
+    }
+
+    if (currentUIVersion < 68) {
+      // Remove blocklists legacy storage, now relying on IndexedDB.
       OS.File.remove(OS.Path.join(OS.Constants.Path.profileDir,
-                                  "directoryLinks.json"), {ignoreAbsent: true});
+                                  "kinto.sqlite"), {ignoreAbsent: true});
     }
 
     // Update the migration version.
@@ -2255,48 +2282,89 @@ BrowserGlue.prototype = {
     } catch (ex) { /* Don't break the default prompt if telemetry is broken. */ }
 
     if (willPrompt) {
-      DefaultBrowserCheck.prompt(RecentWindow.getMostRecentBrowserWindow());
+      DefaultBrowserCheck.prompt(BrowserWindowTracker.getTopWindow());
     }
   },
 
-  _migrateMatchBucketsPrefForUIVersion60(forceCheck = false) {
-    function check() {
-      if (CustomizableUI.getPlacementOfWidget("search-container")) {
-        Services.prefs.setCharPref(prefName,
-                                   "general:5,suggestion:Infinity");
+  async _migrateMatchBucketsPrefForUI66() {
+    // This does two related things.
+    //
+    // (1) Profiles created on or after Firefox 57's release date were eligible
+    // for a Shield study that changed the browser.urlbar.matchBuckets pref in
+    // order to show search suggestions above history/bookmarks in the urlbar
+    // popup.  This uninstalls that study.  (It's actually slightly more
+    // complex.  The study set the pref to several possible values, but the
+    // overwhelming number of profiles in the study got search suggestions
+    // first, followed by history/bookmarks.)
+    //
+    // (2) This also ensures that (a) new users see search suggestions above
+    // history/bookmarks, thereby effectively making the study permanent, and
+    // (b) old users (including those in the study) continue to see whatever
+    // they were seeing before.  This works together with UnifiedComplete.js.
+    // By default, the browser.urlbar.matchBuckets pref does not exist, and
+    // UnifiedComplete.js internally hardcodes a default value for it.  Before
+    // Firefox 60, the hardcoded default was to show history/bookmarks first.
+    // After 60, it's to show search suggestions first.
+
+    // Wait for Shield init to complete.
+    await new Promise(resolve => {
+      if (this._shieldInitComplete) {
+        resolve();
+        return;
       }
-    }
+      let topic = "shield-init-complete";
+      Services.obs.addObserver(function obs() {
+        Services.obs.removeObserver(obs, topic);
+        resolve();
+      }, topic);
+    });
+
+    // Now get the pref's value.  If the study is active, the value will have
+    // just been set (on the default branch) as part of Shield's init.  The pref
+    // should not exist otherwise (normally).
     let prefName = "browser.urlbar.matchBuckets";
-    let pref = Services.prefs.getCharPref(prefName, "");
-    if (!pref) {
-      // Set the pref based on the search bar's current placement.  If it's
-      // placed (the urlbar and search bar are not unified), then set the pref
-      // (so that history results will come before search suggestions).  If it's
-      // not placed (the urlbar and search bar are unified), then leave the pref
-      // cleared so that UnifiedComplete.js uses the default value (so that
-      // search suggestions will come before history results).
-      if (forceCheck) {
-        // This is the case when this is called by the test.
-        check();
-      } else {
-        // This is the normal, non-test case.  At this point the first window
-        // has not been set up yet, so use a CUI listener to get the placement
-        // when the nav-bar is first registered.
-        let listener = {
-          onAreaNodeRegistered(area, container) {
-            if (CustomizableUI.AREA_NAVBAR == area) {
-              check();
-              CustomizableUI.removeListener(listener);
-            }
-          },
-        };
-        CustomizableUI.addListener(listener);
+    let prefValue = Services.prefs.getCharPref(prefName, "");
+
+    // Get the study (aka experiment).  It may not be installed.
+    let experiment = null;
+    let experimentName = "pref-flip-search-composition-57-release-1413565";
+    let {PreferenceExperiments} =
+      ChromeUtils.import("resource://normandy/lib/PreferenceExperiments.jsm", {});
+    try {
+      experiment = await PreferenceExperiments.get(experimentName);
+    } catch (e) {}
+
+    // Uninstall the study, resetting the pref to its state before the study.
+    if (experiment && !experiment.expired) {
+      await PreferenceExperiments.stop(experimentName, {
+        resetValue: true,
+        reason: "external:search-ui-migration",
+      });
+    }
+
+    // At this point, normally the pref should not exist.  If it does, then it
+    // either has a user value, or something unexpectedly set its value on the
+    // default branch.  Either way, preserve that value.
+    if (Services.prefs.getCharPref(prefName, "")) {
+      return;
+    }
+
+    // The new default is "suggestion:4,general:5" (show search suggestions
+    // before history/bookmarks), but we implement that by leaving the pref
+    // undefined, and UnifiedComplete.js hardcodes that value internally.  So if
+    // the pref was "suggestion:4,general:5" (modulo whitespace), we're done.
+    if (prefValue) {
+      let buckets = PlacesUtils.convertMatchBucketsStringToArray(prefValue);
+      if (ObjectUtils.deepEqual(buckets, [["suggestion", 4], ["general", 5]])) {
+        return;
       }
     }
-    // Else, the pref has already been set.  Normally this pref does not exist.
-    // Either the user customized it, or they were enrolled in the Shield study
-    // in Firefox 57 that effectively already migrated the pref.  Either way,
-    // leave it at its current value.
+
+    // Set the pref on the user branch.  If the pref had a value, then preserve
+    // it.  Otherwise, set the previous default value, which was to show history
+    // and bookmarks before search suggestions.
+    prefValue = prefValue || "general:5,suggestion:Infinity";
+    Services.prefs.setCharPref(prefName, prefValue);
   },
 
   async ensurePlacesDefaultQueriesInitialized() {
@@ -2339,7 +2407,7 @@ BrowserGlue.prototype = {
         },
         RecentTags: {
           title: bundle.GetStringFromName("recentTagsTitle"),
-          url: "place:type=" + queryOptions.RESULTS_AS_TAG_QUERY +
+          url: "place:type=" + queryOptions.RESULTS_AS_TAGS_ROOT +
                     "&sort=" + queryOptions.SORT_BY_LASTMODIFIED_DESCENDING +
                     "&maxResults=" + MAX_RESULTS,
           parentGuid: PlacesUtils.bookmarks.menuGuid,
@@ -2436,7 +2504,7 @@ BrowserGlue.prototype = {
       return;
     }
 
-    let chromeWindow = RecentWindow.getMostRecentBrowserWindow();
+    let chromeWindow = BrowserWindowTracker.getTopWindow();
     chromeWindow.openPreferences(...args);
   },
 
@@ -2461,7 +2529,7 @@ BrowserGlue.prototype = {
       const URIs = data.wrappedJSObject.object;
 
       // win can be null, but it's ok, we'll assign it later in openTab()
-      let win = RecentWindow.getMostRecentBrowserWindow({private: false});
+      let win = BrowserWindowTracker.getTopWindow({private: false});
 
       const openTab = async (URI) => {
         let tab;
@@ -2480,7 +2548,7 @@ BrowserGlue.prototype = {
       await Promise.all(URIs.slice(1).map(URI => openTab(URI)));
 
       let title, body;
-      const deviceName = Weave.Service.clientsEngine.getClientName(URIs[0].clientId);
+      const deviceName = URIs[0].sender.name;
       const bundle = Services.strings.createBundle("chrome://browser/locale/accounts.properties");
       if (URIs.length == 1) {
         // Due to bug 1305895, tabs from iOS may not have device information, so
@@ -2504,7 +2572,7 @@ BrowserGlue.prototype = {
         }
       } else {
         title = bundle.GetStringFromName("multipleTabsArrivingNotification.title");
-        const allSameDevice = URIs.every(URI => URI.clientId == URIs[0].clientId);
+        const allSameDevice = URIs.every(URI => URI.sender.id == URIs[0].sender.id);
         const unknownDevice = allSameDevice && !deviceName;
         let tabArrivingBody;
         if (unknownDevice) {
@@ -2544,7 +2612,7 @@ BrowserGlue.prototype = {
     if (AppConstants.platform == "win") {
       imageURL = "chrome://branding/content/icon64.png";
     }
-    let win = RecentWindow.getMostRecentBrowserWindow({private: false});
+    let win = BrowserWindowTracker.getTopWindow({private: false});
     if (!win) {
       win = await this._openURLInNewWindow(url);
       let tabs = win.gBrowser.tabs;
@@ -2579,7 +2647,7 @@ BrowserGlue.prototype = {
       if (topic != "alertclickcallback")
         return;
       let url = await FxAccounts.config.promiseManageDevicesURI("device-connected-notification");
-      let win = RecentWindow.getMostRecentBrowserWindow({private: false});
+      let win = BrowserWindowTracker.getTopWindow({private: false});
       if (!win) {
         this._openURLInNewWindow(url);
       } else {
@@ -2629,7 +2697,7 @@ BrowserGlue.prototype = {
     Services.prefs.setBoolPref("dom.ipc.plugins.flash.disable-protected-mode", true);
     Services.prefs.setBoolPref("browser.flash-protected-mode-flip.done", true);
 
-    let win = RecentWindow.getMostRecentBrowserWindow();
+    let win = BrowserWindowTracker.getTopWindow();
     if (!win) {
       return;
     }
@@ -2640,7 +2708,7 @@ BrowserGlue.prototype = {
       label: win.gNavigatorBundle.getString("flashHang.helpButton.label"),
       accessKey: win.gNavigatorBundle.getString("flashHang.helpButton.accesskey"),
       callback() {
-        win.openUILinkIn("https://support.mozilla.org/kb/flash-protected-mode-autodisabled", "tab");
+        win.openTrustedLinkIn("https://support.mozilla.org/kb/flash-protected-mode-autodisabled", "tab");
       }
     }];
     let nb = win.document.getElementById("global-notificationbox");
@@ -2661,8 +2729,8 @@ BrowserGlue.prototype = {
   // for XPCOM
   classID:          Components.ID("{eab9012e-5f74-4cbc-b2b5-a590235513cc}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 
   _xpcom_factory: XPCOMUtils.generateSingletonFactory(BrowserGlue),
 };
@@ -2706,9 +2774,7 @@ const ContentPermissionIntegration = {
         return new PermissionUI.DesktopNotificationPermissionPrompt(request);
       }
       case "persistent-storage": {
-        if (Services.prefs.getBoolPref("browser.storageManager.enabled")) {
-          return new PermissionUI.PersistentStoragePermissionPrompt(request);
-        }
+        return new PermissionUI.PersistentStoragePermissionPrompt(request);
       }
       case "midi": {
         return new PermissionUI.MIDIPermissionPrompt(request);
@@ -2723,7 +2789,7 @@ function ContentPermissionPrompt() {}
 ContentPermissionPrompt.prototype = {
   classID:          Components.ID("{d8903bf6-68d5-4e97-bcd1-e4d3012f721a}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionPrompt]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIContentPermissionPrompt]),
 
   /**
    * This implementation of nsIContentPermissionPrompt.prompt ensures
@@ -2976,7 +3042,7 @@ var JawsScreenReaderVersionCheck = {
     Services.obs.addObserver(this, "a11y-init-or-shutdown", true);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
 
   observe(subject, topic, data) {
     if (topic == "a11y-init-or-shutdown" && data == "1") {
@@ -2998,7 +3064,7 @@ var JawsScreenReaderVersionCheck = {
       return;
     }
 
-    let win = RecentWindow.getMostRecentBrowserWindow();
+    let win = BrowserWindowTracker.getTopWindow();
     if (!win || !win.gBrowser || !win.gBrowser.selectedBrowser) {
       Services.console.logStringMessage(
           "Content access support for older versions of JAWS is disabled " +

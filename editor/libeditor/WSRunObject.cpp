@@ -22,7 +22,6 @@
 #include "nsDebug.h"
 #include "nsError.h"
 #include "nsIContent.h"
-#include "nsIDOMDocument.h"
 #include "nsISupportsImpl.h"
 #include "nsRange.h"
 #include "nsString.h"
@@ -265,12 +264,13 @@ WSRunObject::InsertBreak(Selection& aSelection,
     }
   }
 
-  RefPtr<Element> newBRElement =
-    mHTMLEditor->CreateBRImpl(aSelection, pointToInsert, aSelect);
-  if (NS_WARN_IF(!newBRElement)) {
+  RefPtr<Element> newBrElement =
+    mHTMLEditor->InsertBrElementWithTransaction(aSelection, pointToInsert,
+                                                aSelect);
+  if (NS_WARN_IF(!newBrElement)) {
     return nullptr;
   }
-  return newBRElement.forget();
+  return newBrElement.forget();
 }
 
 template<typename PT, typename CT>
@@ -411,8 +411,8 @@ WSRunObject::InsertText(nsIDocument& aDocument,
 
   // Ready, aim, fire!
   nsresult rv =
-    mHTMLEditor->InsertTextImpl(aDocument, theString, pointToInsert,
-                                aPointAfterInsertedString);
+    mHTMLEditor->InsertTextWithTransaction(aDocument, theString, pointToInsert,
+                                           aPointAfterInsertedString);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return NS_OK;
   }
@@ -729,8 +729,7 @@ WSRunObject::GetWSNodes()
         mStartOffset = start.Offset();
         mStartReason = WSType::otherBlock;
         mStartReasonNode = priorNode;
-      } else if (priorNode->IsNodeOfType(nsINode::eTEXT) &&
-                 priorNode->IsEditable()) {
+      } else if (priorNode->IsText() && priorNode->IsEditable()) {
         RefPtr<Text> textNode = priorNode->GetAsText();
         mNodeArray.InsertElementAt(0, textNode);
         const nsTextFragment *textFrag;
@@ -838,8 +837,7 @@ WSRunObject::GetWSNodes()
         mEndOffset = end.Offset();
         mEndReason = WSType::otherBlock;
         mEndReasonNode = nextNode;
-      } else if (nextNode->IsNodeOfType(nsINode::eTEXT) &&
-                 nextNode->IsEditable()) {
+      } else if (nextNode->IsText() && nextNode->IsEditable()) {
         RefPtr<Text> textNode = nextNode->GetAsText();
         mNodeArray.AppendElement(textNode);
         const nsTextFragment *textFrag;
@@ -911,7 +909,7 @@ WSRunObject::GetRuns()
   ClearRuns();
 
   // handle some easy cases first
-  mHTMLEditor->IsPreformatted(GetAsDOMNode(mNode), &mPRE);
+  mPRE = EditorBase::IsPreformatted(mNode);
   // if it's preformatedd, or if we are surrounded by text or special, it's all one
   // big normal ws run
   if (mPRE ||
@@ -1365,11 +1363,15 @@ WSRunObject::DeleteRange(const EditorDOMPointBase<PT1, CT1>& aStartPoint,
     return NS_OK;
   }
 
+  MOZ_ASSERT(mHTMLEditor);
+  RefPtr<HTMLEditor> htmlEditor(mHTMLEditor);
+
   if (aStartPoint.GetContainer() == aEndPoint.GetContainer() &&
       aStartPoint.IsInTextNode()) {
-    return mHTMLEditor->DeleteText(*aStartPoint.GetContainerAsText(),
-                                   aStartPoint.Offset(),
-                                   aEndPoint.Offset() - aStartPoint.Offset());
+    return htmlEditor->DeleteTextWithTransaction(
+                         *aStartPoint.GetContainerAsText(),
+                         aStartPoint.Offset(),
+                         aEndPoint.Offset() - aStartPoint.Offset());
   }
 
   RefPtr<nsRange> range;
@@ -1389,16 +1391,18 @@ WSRunObject::DeleteRange(const EditorDOMPointBase<PT1, CT1>& aStartPoint,
     if (node == aStartPoint.GetContainer()) {
       if (!aStartPoint.IsEndOfContainer()) {
         nsresult rv =
-          mHTMLEditor->DeleteText(*node, aStartPoint.Offset(),
-                                  aStartPoint.GetContainer()->Length() -
-                                    aStartPoint.Offset());
+          htmlEditor->DeleteTextWithTransaction(
+                        *node, aStartPoint.Offset(),
+                        aStartPoint.GetContainer()->Length() -
+                          aStartPoint.Offset());
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
       }
     } else if (node == aEndPoint.GetContainer()) {
       if (!aEndPoint.IsStartOfContainer()) {
-        nsresult rv = mHTMLEditor->DeleteText(*node, 0, aEndPoint.Offset());
+        nsresult rv =
+          htmlEditor->DeleteTextWithTransaction(*node, 0, aEndPoint.Offset());
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -1422,7 +1426,7 @@ WSRunObject::DeleteRange(const EditorDOMPointBase<PT1, CT1>& aStartPoint,
         break;
       }
       if (!nodeBefore) {
-        rv = mHTMLEditor->DeleteNode(node);
+        rv = htmlEditor->DeleteNodeWithTransaction(*node);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -1545,9 +1549,9 @@ WSRunObject::InsertNBSPAndRemoveFollowingASCIIWhitespaces(WSPoint aPoint)
  // First, insert an NBSP.
   AutoTransactionsConserveSelection dontChangeMySelection(mHTMLEditor);
   nsresult rv =
-    mHTMLEditor->InsertTextIntoTextNodeImpl(nsDependentSubstring(&kNBSP, 1),
-                                            *aPoint.mTextNode, aPoint.mOffset,
-                                            true);
+    mHTMLEditor->InsertTextIntoTextNodeWithTransaction(
+                   nsDependentSubstring(&kNBSP, 1),
+                   *aPoint.mTextNode, aPoint.mOffset, true);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1845,6 +1849,11 @@ WSRunObject::CheckTrailingNBSPOfRun(WSFragment *aRun)
       }
       if ((aRun->mRightType & WSType::block) &&
           IsBlockNode(GetWSBoundingParent())) {
+        RefPtr<Selection> selection = htmlEditor->GetSelection();
+        if (NS_WARN_IF(!selection)) {
+          return NS_ERROR_FAILURE;
+        }
+
         // We are at a block boundary.  Insert a <br>.  Why?  Well, first note
         // that the br will have no visible effect since it is up against a
         // block boundary.  |foo<br><p>bar| renders like |foo<p>bar| and
@@ -1866,8 +1875,10 @@ WSRunObject::CheckTrailingNBSPOfRun(WSFragment *aRun)
         // beginning of soft wrapped lines, and lets the user see 2 spaces when
         // they type 2 spaces.
 
-        RefPtr<Element> brNode = htmlEditor->CreateBR(aRun->EndPoint());
-        if (NS_WARN_IF(!brNode)) {
+        RefPtr<Element> brElement =
+          htmlEditor->InsertBrElementWithTransaction(*selection,
+                                                     aRun->EndPoint());
+        if (NS_WARN_IF(!brElement)) {
           return NS_ERROR_FAILURE;
         }
 
@@ -1882,8 +1893,10 @@ WSRunObject::CheckTrailingNBSPOfRun(WSFragment *aRun)
       AutoTransactionsConserveSelection dontChangeMySelection(htmlEditor);
       nsAutoString spaceStr(char16_t(32));
       nsresult rv =
-        htmlEditor->InsertTextIntoTextNodeImpl(spaceStr, *thePoint.mTextNode,
-                                               thePoint.mOffset, true);
+        htmlEditor->InsertTextIntoTextNodeWithTransaction(spaceStr,
+                                                          *thePoint.mTextNode,
+                                                          thePoint.mOffset,
+                                                          true);
       NS_ENSURE_SUCCESS(rv, rv);
 
       // Finally, delete that nbsp
@@ -1921,8 +1934,9 @@ WSRunObject::CheckTrailingNBSPOfRun(WSFragment *aRun)
       // Finally, insert that nbsp before the ASCII ws run
       AutoTransactionsConserveSelection dontChangeMySelection(htmlEditor);
       rv =
-        htmlEditor->InsertTextIntoTextNodeImpl(nsDependentSubstring(&kNBSP, 1),
-                                               *startNode, startOffset, true);
+        htmlEditor->InsertTextIntoTextNodeWithTransaction(
+                      nsDependentSubstring(&kNBSP, 1),
+                      *startNode, startOffset, true);
       NS_ENSURE_SUCCESS(rv, rv);
     }
   }
@@ -1974,8 +1988,9 @@ WSRunObject::ReplacePreviousNBSPIfUnncessary(
   AutoTransactionsConserveSelection dontChangeMySelection(mHTMLEditor);
   nsAutoString spaceStr(char16_t(32));
   nsresult rv =
-    mHTMLEditor->InsertTextIntoTextNodeImpl(spaceStr, *thePoint.mTextNode,
-                                            thePoint.mOffset, true);
+    mHTMLEditor->InsertTextIntoTextNodeWithTransaction(spaceStr,
+                                                       *thePoint.mTextNode,
+                                                       thePoint.mOffset, true);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -2022,8 +2037,10 @@ WSRunObject::CheckLeadingNBSP(WSFragment* aRun,
     AutoTransactionsConserveSelection dontChangeMySelection(mHTMLEditor);
     nsAutoString spaceStr(char16_t(32));
     nsresult rv =
-      mHTMLEditor->InsertTextIntoTextNodeImpl(spaceStr, *thePoint.mTextNode,
-                                              thePoint.mOffset, true);
+      mHTMLEditor->InsertTextIntoTextNodeWithTransaction(spaceStr,
+                                                         *thePoint.mTextNode,
+                                                         thePoint.mOffset,
+                                                         true);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Finally, delete that nbsp

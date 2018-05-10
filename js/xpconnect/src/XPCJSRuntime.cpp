@@ -27,6 +27,7 @@
 #include "nsIRunnable.h"
 #include "nsPIDOMWindow.h"
 #include "nsPrintfCString.h"
+#include "nsWindowSizes.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Services.h"
@@ -105,7 +106,8 @@ const char* const XPCJSRuntime::mStrings[] = {
     "stack",                // IDX_STACK
     "message",              // IDX_MESSAGE
     "lastIndex",            // IDX_LASTINDEX
-    "then"                  // IDX_THEN
+    "then",                 // IDX_THEN
+    "isInstance",           // IDX_ISINSTANCE
 };
 
 /***************************************************************************/
@@ -222,8 +224,13 @@ CompartmentPrivate::CompartmentPrivate(JSCompartment* c)
 CompartmentPrivate::~CompartmentPrivate()
 {
     MOZ_COUNT_DTOR(xpc::CompartmentPrivate);
-    mWrappedJSMap->ShutdownMarker();
     delete mWrappedJSMap;
+}
+
+void
+CompartmentPrivate::SystemIsBeingShutDown()
+{
+    mWrappedJSMap->ShutdownMarker();
 }
 
 RealmPrivate::RealmPrivate(JS::Realm* realm)
@@ -1053,6 +1060,14 @@ CompartmentPrivate::SizeOfIncludingThis(MallocSizeOf mallocSizeOf)
 /***************************************************************************/
 
 void
+XPCJSRuntime::SystemIsBeingShutDown()
+{
+    // We don't want to track wrapped JS roots after this point since we're
+    // making them !IsValid anyway through SystemIsBeingShutDown.
+    mWrappedJSRoots = nullptr;
+}
+
+void
 XPCJSRuntime::Shutdown(JSContext* cx)
 {
     // This destructor runs before ~CycleCollectedJSContext, which does the
@@ -1065,10 +1080,6 @@ XPCJSRuntime::Shutdown(JSContext* cx)
     xpc_DelocalizeRuntime(JS_GetRuntime(cx));
 
     JS::SetGCSliceCallback(cx, mPrevGCSliceCallback);
-
-    // We don't want to track wrapped JS roots after this point since we're
-    // making them !IsValid anyway through SystemIsBeingShutDown.
-    mWrappedJSRoots = nullptr;
 
     // clean up and destroy maps...
     mWrappedJSMap->ShutdownMarker();
@@ -1086,9 +1097,6 @@ XPCJSRuntime::Shutdown(JSContext* cx)
 
     delete mNativeSetMap;
     mNativeSetMap = nullptr;
-
-    delete mThisTranslatorMap;
-    mThisTranslatorMap = nullptr;
 
     delete mDyingWrappedNativeProtoMap;
     mDyingWrappedNativeProtoMap = nullptr;
@@ -1931,6 +1939,10 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
         KIND_HEAP, rtStats.runtime.scriptData,
         "The table holding script data shared in the runtime.");
 
+    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/tracelogger"),
+        KIND_HEAP, rtStats.runtime.tracelogger,
+        "The memory used for the tracelogger (per-runtime).");
+
     nsCString nonNotablePath =
         rtPath + nsPrintfCString("runtime/script-sources/source(scripts=%d, <non-notable files>)/",
                                  rtStats.runtime.scriptSourceInfo.numScripts);
@@ -2016,6 +2028,10 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/gc/store-buffer/generics"),
         KIND_HEAP, rtStats.runtime.gc.storeBufferGenerics,
         "Generic things in the store buffer.");
+
+    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/jit-lazylink"),
+        KIND_HEAP, rtStats.runtime.jitLazyLink,
+        "IonMonkey compilations waiting for lazy linking.");
 
     if (rtTotalOut)
         *rtTotalOut = rtTotal;
@@ -2295,7 +2311,12 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
         return;
     }
 
-    JS::CollectTraceLoggerStateStats(&rtStats);
+    // Collect JS stats not associated with a Runtime such as helper threads or
+    // global tracelogger data. We do this here in JSReporter::CollectReports
+    // as this is used for the main Runtime in process.
+    JS::GlobalStats gStats(JSMallocSizeOf);
+    if (!JS::CollectGlobalStats(&gStats))
+        return;
 
     size_t xpcJSRuntimeSize = xpcrt->SizeOfIncludingThis(JSMallocSizeOf);
 
@@ -2333,10 +2354,16 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
         KIND_OTHER, rtTotal,
         "The sum of all measurements under 'explicit/js-non-window/runtime/'.");
 
-    // Report the numbers for memory used by tracelogger.
-    REPORT_BYTES(NS_LITERAL_CSTRING("tracelogger"),
-        KIND_OTHER, rtStats.runtime.tracelogger,
-        "The memory used for the tracelogger, including the graph and events.");
+    // Report the number of HelperThread
+
+    REPORT(NS_LITERAL_CSTRING("js-helper-threads/idle"),
+        KIND_OTHER, UNITS_COUNT, gStats.helperThread.idleThreadCount,
+        "The current number of idle JS HelperThreads.");
+
+    REPORT(NS_LITERAL_CSTRING("js-helper-threads/active"),
+        KIND_OTHER, UNITS_COUNT, gStats.helperThread.activeThreadCount,
+        "The current number of active JS HelperThreads. Memory held by these is"
+        " not reported.");
 
     // Report the numbers for memory used by wasm Runtime state.
     REPORT_BYTES(NS_LITERAL_CSTRING("wasm-runtime"),
@@ -2489,6 +2516,30 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
     REPORT_BYTES(NS_LITERAL_CSTRING("explicit/xpconnect/js-component-loader"),
         KIND_HEAP, jsComponentLoaderSize,
         "XPConnect's JS component loader.");
+
+    // Report tracelogger (global).
+
+    REPORT_BYTES(NS_LITERAL_CSTRING("explicit/js-non-window/tracelogger"),
+        KIND_HEAP, gStats.tracelogger,
+        "The memory used for the tracelogger, including the graph and events.");
+
+    // Report HelperThreadState.
+
+    REPORT_BYTES(NS_LITERAL_CSTRING("explicit/js-non-window/helper-thread/heap-other"),
+        KIND_HEAP, gStats.helperThread.stateData,
+        "Memory used by HelperThreadState.");
+
+    REPORT_BYTES(NS_LITERAL_CSTRING("explicit/js-non-window/helper-thread/parse-task"),
+        KIND_HEAP, gStats.helperThread.parseTask,
+        "The memory used by ParseTasks waiting in HelperThreadState.");
+
+    REPORT_BYTES(NS_LITERAL_CSTRING("explicit/js-non-window/helper-thread/ion-builder"),
+        KIND_HEAP, gStats.helperThread.ionBuilder,
+        "The memory used by IonBuilders waiting in HelperThreadState.");
+
+    REPORT_BYTES(NS_LITERAL_CSTRING("explicit/js-non-window/helper-thread/wasm-compile"),
+        KIND_HEAP, gStats.helperThread.parseTask,
+        "The memory used by Wasm compilations waiting in HelperThreadState.");
 }
 
 static nsresult
@@ -2600,9 +2651,6 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
         break;
       case JS_TELEMETRY_GC_PRETENURE_COUNT:
         Telemetry::Accumulate(Telemetry::GC_PRETENURE_COUNT, sample);
-        break;
-      case JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT:
-        Telemetry::Accumulate(Telemetry::JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT, sample);
         break;
       case JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS:
         Telemetry::Accumulate(Telemetry::JS_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS, sample);
@@ -2791,7 +2839,6 @@ XPCJSRuntime::XPCJSRuntime(JSContext* aCx)
    mIID2NativeInterfaceMap(IID2NativeInterfaceMap::newMap(XPC_NATIVE_INTERFACE_MAP_LENGTH)),
    mClassInfo2NativeSetMap(ClassInfo2NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH)),
    mNativeSetMap(NativeSetMap::newMap(XPC_NATIVE_SET_MAP_LENGTH)),
-   mThisTranslatorMap(IID2ThisTranslatorMap::newMap(XPC_THIS_TRANSLATOR_MAP_LENGTH)),
    mDyingWrappedNativeProtoMap(XPCWrappedNativeProtoMap::newMap(XPC_DYING_NATIVE_PROTO_MAP_LENGTH)),
    mGCIsRunning(false),
    mNativesToReleaseArray(),
@@ -2982,9 +3029,6 @@ XPCJSRuntime::DebugDump(int16_t depth)
         XPC_LOG_ALWAYS(("mClassInfo2NativeSetMap @ %p with %d sets(s)",
                         mClassInfo2NativeSetMap,
                         mClassInfo2NativeSetMap->Count()));
-
-        XPC_LOG_ALWAYS(("mThisTranslatorMap @ %p with %d translator(s)",
-                        mThisTranslatorMap, mThisTranslatorMap->Count()));
 
         XPC_LOG_ALWAYS(("mNativeSetMap @ %p with %d sets(s)",
                         mNativeSetMap, mNativeSetMap->Count()));

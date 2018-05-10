@@ -7,6 +7,7 @@
 #define mozilla_extensions_WebExtensionPolicy_h
 
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/WebExtensionPolicyBinding.h"
 #include "mozilla/extensions/MatchPattern.h"
 
@@ -149,6 +150,12 @@ public:
   static already_AddRefed<WebExtensionPolicy>
   GetByURI(dom::GlobalObject& aGlobal, nsIURI* aURI);
 
+  static bool
+  IsRestrictedURI(dom::GlobalObject& aGlobal, const URLInfo& aURI)
+  {
+    return IsRestrictedURI(aURI);
+  }
+
 
   static bool UseRemoteWebExtensions(dom::GlobalObject& aGlobal);
   static bool IsExtensionProcess(dom::GlobalObject& aGlobal);
@@ -184,7 +191,7 @@ private:
   RefPtr<MatchPatternSet> mHostPermissions;
   MatchGlobSet mWebAccessiblePaths;
 
-  Nullable<nsTArray<nsString>> mBackgroundScripts;
+  dom::Nullable<nsTArray<nsString>> mBackgroundScripts;
 
   nsTArray<RefPtr<WebExtensionContentScript>> mContentScripts;
 };

@@ -46,14 +46,12 @@
         titlemodifier_normal="&mainWindow.titlemodifier;"
         titlemodifier_privatebrowsing="&mainWindow.titlemodifier; &mainWindow.titlePrivateBrowsingSuffix;"
 #endif
-#ifdef CAN_DRAW_IN_TITLEBAR
 #ifdef XP_WIN
         chromemargin="0,2,2,2"
 #else
         chromemargin="0,-1,-1,-1"
 #endif
         tabsintitlebar="true"
-#endif
         titlemenuseparator="&mainWindow.titlemodifiermenuseparator;"
         windowtype="navigator:browser"
         macanimationtype="document"
@@ -334,12 +332,18 @@
     </panel>
 
     <menupopup id="toolbar-context-menu"
-               onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator'));">
+               onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator')); UpdateDownloadsAutoHide(this)">
       <menuitem oncommand="gCustomizeMode.addToPanel(document.popupNode)"
                 accesskey="&customizeMenu.pinToOverflowMenu.accesskey;"
                 label="&customizeMenu.pinToOverflowMenu.label;"
                 contexttype="toolbaritem"
                 class="customize-context-moveToPanel"/>
+      <menuitem oncommand="onDownloadsAutoHideChange(event)"
+                type="checkbox"
+                accesskey="&customizeMenu.autoHideDownloadsButton.accesskey;"
+                label="&customizeMenu.autoHideDownloadsButton.label;"
+                contexttype="toolbaritem"
+                class="customize-context-autoHide"/>
       <menuitem oncommand="gCustomizeMode.removeFromArea(document.popupNode)"
                 accesskey="&customizeMenu.removeFromToolbar.accesskey;"
                 label="&customizeMenu.removeFromToolbar.label;"
@@ -442,7 +446,8 @@
            copyURL-title="&pageAction.copyLink.label;"
            emailLink-title="&emailPageCmd.label;"
            sendToDevice-title="&pageAction.sendTabToDevice.label;"
-           sendToDevice-notReadyTitle="&sendToDevice.syncNotReady.label;">
+           sendToDevice-notReadyTitle="&sendToDevice.syncNotReady.label;"
+           shareURL-title="&pageAction.shareUrl.label;">
       <panelmultiview id="pageActionPanelMultiView"
                       mainViewId="pageActionPanelMainView"
                       viewCacheId="appMenu-viewCache">
@@ -524,15 +529,6 @@
       </vbox>
     </hbox>
 
-    <hbox id="bookmarked-notification-container" mousethrough="always">
-      <vbox id="bookmarked-notification-anchor">
-        <vbox id="bookmarked-notification"/>
-      </vbox>
-      <vbox id="bookmarked-notification-dropmarker-anchor">
-        <image id="bookmarked-notification-dropmarker-icon"/>
-      </vbox>
-    </hbox>
-
     <tooltip id="dynamic-shortcut-tooltip"
              onpopupshowing="UpdateDynamicShortcutTooltipText(this);"/>
 
@@ -598,7 +594,6 @@
   </popupset>
   <box id="appMenu-viewCache" hidden="true"/>
 
-#ifdef CAN_DRAW_IN_TITLEBAR
 <vbox id="titlebar">
   <hbox id="titlebar-content">
     <spacer id="titlebar-spacer" flex="1"/>
@@ -620,7 +615,6 @@
 #endif
   </hbox>
 </vbox>
-#endif
 
   <toolbox id="navigator-toolbox">
     <!-- Menu -->
@@ -640,11 +634,9 @@
 #include browser-menubar.inc
       </toolbaritem>
 
-#ifdef CAN_DRAW_IN_TITLEBAR
 #ifndef XP_MACOSX
       <hbox class="titlebar-placeholder" type="caption-buttons" ordinal="1000"
             skipintoolbarset="true"/>
-#endif
 #endif
     </toolbar>
 
@@ -654,13 +646,9 @@
              customizable="true"
              mode="icons"
              aria-label="&tabsToolbar.label;"
-             context="toolbar-context-menu"
-             collapsed="true">
-
-#ifdef CAN_DRAW_IN_TITLEBAR
+             context="toolbar-context-menu">
       <hbox class="titlebar-placeholder" type="pre-tabs"
             skipintoolbarset="true"/>
-#endif
 
       <tabs id="tabbrowser-tabs"
             flex="1"
@@ -684,7 +672,7 @@
                      removable="true"/>
 
       <toolbarbutton id="alltabs-button"
-                     class="toolbarbutton-1 chromeclass-toolbar-additional tabs-alltabs-button"
+                     class="toolbarbutton-1 chromeclass-toolbar-additional tabs-alltabs-button badged-button"
                      type="menu"
                      label="&listAllTabs.label;"
                      tooltiptext="&listAllTabs.label;"
@@ -701,21 +689,23 @@
             <menupopup id="alltabs_containersMenuTab" />
           </menu>
           <menuseparator id="alltabs-popup-separator-2"/>
+          <menu id="alltabs_hiddenTabs"
+                label="&hiddenTabs.label;">
+            <menupopup id="alltabs_hiddenTabsMenu"/>
+          </menu>
+          <menuseparator id="alltabs-popup-separator-3"/>
         </menupopup>
       </toolbarbutton>
 
-#ifdef CAN_DRAW_IN_TITLEBAR
       <hbox class="titlebar-placeholder" type="post-tabs"
             ordinal="1000"
             skipintoolbarset="true"/>
-#endif
 
       <button class="accessibility-indicator" tooltiptext="&accessibilityIndicator.tooltip;"
               ordinal="1000"
               aria-live="polite" skipintoolbarset="true"/>
       <hbox class="private-browsing-indicator" skipintoolbarset="true"
             ordinal="1000"/>
-#ifdef CAN_DRAW_IN_TITLEBAR
       <hbox class="titlebar-placeholder" type="caption-buttons"
 #ifndef XP_MACOSX
             ordinal="1000"
@@ -725,7 +715,6 @@
 #ifdef XP_MACOSX
       <hbox class="titlebar-placeholder" type="fullscreen-button"
             skipintoolbarset="true"/>
-#endif
 #endif
     </toolbar>
 
@@ -794,6 +783,7 @@
                      class="chromeclass-location" overflows="false">
             <textbox id="urlbar" flex="1"
                      placeholder="&urlbar.placeholder2;"
+                     defaultPlaceholder="&urlbar.placeholder2;"
                      focused="true"
                      type="autocomplete"
                      autocompletesearch="unifiedcomplete"
@@ -884,7 +874,7 @@
                   <image id="midi-notification-icon" class="notification-anchor-icon midi-icon" role="button"
                          tooltiptext="&urlbar.midiNotificationAnchor.tooltip;"/>
                   <image id="webauthn-notification-icon" class="notification-anchor-icon" role="button"
-                         tooltiptext="&urlbar.defaultNotificationAnchor.tooltip;"/>
+                         tooltiptext="&urlbar.webAuthnAnchor.tooltip;"/>
                 </box>
                 <image id="connection-icon"/>
                 <image id="extension-icon"/>
@@ -1126,12 +1116,10 @@
                                    BookmarkingUI.attachPlacesView(event, this);"
                    tooltip="bhTooltip" popupsinherittooltip="true">
           <menuitem id="BMB_viewBookmarksSidebar"
-                    class="subviewbutton"
-                    label="&viewBookmarksSidebar2.label;"
-                    type="checkbox"
-                    oncommand="SidebarUI.toggle('viewBookmarksSidebar');">
-            <observes element="viewBookmarksSidebar" attribute="checked"/>
-          </menuitem>
+                    class="menuitem-iconic subviewbutton"
+                    label-show="&viewBookmarksSidebar2.label;"
+                    label-hide="&hideBookmarksSidebar.label;"
+                    oncommand="SidebarUI.toggle('viewBookmarksSidebar');"/>
           <!-- NB: temporary solution for bug 985024, this should go away soon. -->
           <menuitem id="BMB_bookmarksShowAllTop"
                     class="menuitem-iconic subviewbutton"
@@ -1150,11 +1138,10 @@
                                          new PlacesMenu(event, 'place:folder=TOOLBAR',
                                                         PlacesUIUtils.getViewForNode(this.parentNode.parentNode).options);">
               <menuitem id="BMB_viewBookmarksToolbar"
-                        placesanonid="view-toolbar"
-                        toolbarId="PersonalToolbar"
-                        type="checkbox"
-                        oncommand="onViewToolbarCommand(event)"
-                        label="&viewBookmarksToolbar.label;"/>
+                        class="menuitem-iconic subviewbutton"
+                        label-show="&viewBookmarksToolbar.label;"
+                        label-hide="&hideBookmarksToolbar.label;"
+                        oncommand="BookmarkingUI.toggleBookmarksToolbar();"/>
               <menuseparator/>
               <!-- Bookmarks toolbar items -->
             </menupopup>
@@ -1239,8 +1226,12 @@
                     onselect="if (event.target.localName == 'tabpanels') gBrowser.updateCurrentBrowser();">
           <tabpanels flex="1" class="plain" selectedIndex="0" id="tabbrowser-tabpanels">
             <notificationbox flex="1" notificationside="top">
-              <hbox flex="1" class="browserSidebarContainer">
-                <vbox flex="1" class="browserContainer">
+              <!-- Set large flex to allow the devtools toolbox to set a flex attribute.
+                   We don't want the toolbox to actually take up free space, but we do want it to collapse when the window shrinks, and with flex=0 it can't.
+                   When the toolbox is on the bottom it's a sibling of browserSidebarContainer,
+                   and when it's on the side it's a sibling of browserContainer.  -->
+              <hbox flex="10000" class="browserSidebarContainer">
+                <vbox flex="10000" class="browserContainer">
                   <stack flex="1" class="browserStack">
                     <browser id="tabbrowser-initialBrowser" type="content"
                              message="true" messagemanagergroup="browsers"

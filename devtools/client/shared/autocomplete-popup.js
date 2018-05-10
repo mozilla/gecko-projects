@@ -10,6 +10,7 @@ const Services = require("Services");
 const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {PrefObserver} = require("devtools/client/shared/prefs");
+const {colorUtils} = require("devtools/shared/css/color");
 
 let itemIdCounter = 0;
 /**
@@ -254,11 +255,18 @@ AutocompletePopup.prototype = {
     }
 
     let max = 0;
-    for (let {label, count} of this.items) {
+
+    for (let {label, postLabel, count} of this.items) {
       if (count) {
         label += count + "";
       }
-      max = Math.max(label.length, max);
+
+      if (postLabel) {
+        label += postLabel;
+      }
+
+      const length = label.length + (postLabel ? 3 : 0);
+      max = Math.max(length, max);
     }
 
     this.__maxLabelLength = max;
@@ -274,6 +282,7 @@ AutocompletePopup.prototype = {
     }
 
     this._list.style.width = (this._maxLabelLength + 3) + "ch";
+
     let selectedItem = this.selectedItem;
     if (selectedItem) {
       this._scrollElementIntoViewIfNeeded(this.elements.get(selectedItem));
@@ -422,6 +431,9 @@ AutocompletePopup.prototype = {
    *                   that will be auto completed. When this property is
    *                   present, |preLabel.length| starting characters will be
    *                   removed from label.
+   *        - postLabel {String} [Optional] The string that will be displayed
+   *                  after the label. Currently used to display the value of
+   *                  a desired variable.
    *        - count {Number} [Optional] The number to represent the count of
    *                autocompleted label.
    */
@@ -431,12 +443,15 @@ AutocompletePopup.prototype = {
     listItem.setAttribute("id", "autocomplete-item-" + itemIdCounter++);
     listItem.className = "autocomplete-item";
     listItem.setAttribute("data-index", this.items.length);
+
     if (this.direction) {
       listItem.setAttribute("dir", this.direction);
     }
+
     let label = this._document.createElementNS(HTML_NS, "span");
     label.textContent = item.label;
     label.className = "autocomplete-value";
+
     if (item.preLabel) {
       let preDesc = this._document.createElementNS(HTML_NS, "span");
       preDesc.textContent = item.preLabel;
@@ -444,7 +459,23 @@ AutocompletePopup.prototype = {
       listItem.appendChild(preDesc);
       label.textContent = item.label.slice(item.preLabel.length);
     }
+
     listItem.appendChild(label);
+
+    if (item.postLabel) {
+      let postDesc = this._document.createElementNS(HTML_NS, "span");
+      postDesc.className = "autocomplete-postlabel";
+      postDesc.textContent = item.postLabel;
+      // Determines if the postlabel is a valid colour or other value
+      if (this._isValidColor(item.postLabel)) {
+        let colorSwatch = this._document.createElementNS(HTML_NS, "span");
+        colorSwatch.className = "autocomplete-swatch autocomplete-colorswatch";
+        colorSwatch.style.cssText = "background-color: " + item.postLabel;
+        postDesc.insertBefore(colorSwatch, postDesc.childNodes[0]);
+      }
+      listItem.appendChild(postDesc);
+    }
+
     if (item.count && item.count > 1) {
       let countDesc = this._document.createElementNS(HTML_NS, "span");
       countDesc.textContent = item.count;
@@ -580,6 +611,18 @@ AutocompletePopup.prototype = {
     this._list.classList.toggle(newValue + "-theme", true);
 
     this._currentTheme = newValue;
+  },
+
+  /**
+  * Determines if the specified colour object is a valid colour, and if
+  * it is not a "special value"
+  *
+  * @return {Boolean}
+  *         If the object represents a proper colour or not.
+  */
+  _isValidColor: function(color) {
+    let colorObj = new colorUtils.CssColor(color);
+    return (colorObj.valid && (!colorObj.specialValue));
   },
 
   /**

@@ -76,9 +76,6 @@ JS_NewObjectWithUniqueType(JSContext* cx, const JSClass* clasp, JS::HandleObject
 extern JS_FRIEND_API(JSObject*)
 JS_NewObjectWithoutMetadata(JSContext* cx, const JSClass* clasp, JS::Handle<JSObject*> proto);
 
-extern JS_FRIEND_API(uint32_t)
-JS_ObjectCountDynamicSlots(JS::HandleObject obj);
-
 extern JS_FRIEND_API(bool)
 JS_NondeterministicGetWeakMapKeys(JSContext* cx, JS::HandleObject obj, JS::MutableHandleObject ret);
 
@@ -158,7 +155,6 @@ enum {
     JS_TELEMETRY_GC_MINOR_US,
     JS_TELEMETRY_GC_NURSERY_BYTES,
     JS_TELEMETRY_GC_PRETENURE_COUNT,
-    JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT,
     JS_TELEMETRY_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS,
     JS_TELEMETRY_WEB_PARSER_COMPILE_LAZY_AFTER_MS,
     JS_TELEMETRY_END
@@ -228,9 +224,6 @@ extern JS_FRIEND_API(bool)
 JS_InitializePropertiesFromCompatibleNativeObject(JSContext* cx,
                                                   JS::HandleObject dst,
                                                   JS::HandleObject src);
-
-extern JS_FRIEND_API(JSString*)
-JS_BasicObjectToString(JSContext* cx, JS::HandleObject obj);
 
 namespace js {
 
@@ -389,9 +382,6 @@ JS_DefineFunctionsWithHelp(JSContext* cx, JS::HandleObject obj, const JSFunction
 
 namespace js {
 
-extern JS_FRIEND_API(JSObject*)
-proxy_WeakmapKeyDelegate(JSObject* obj);
-
 /**
  * A class of objects that return source code on demand.
  *
@@ -441,7 +431,7 @@ ForgetSourceHook(JSContext* cx);
  * right time(s), such as after evaluation of a script has run to completion.
  */
 extern JS_FRIEND_API(bool)
-UseInternalJobQueues(JSContext* cx, bool cooperative = false);
+UseInternalJobQueues(JSContext* cx);
 
 /**
  * Enqueue |job| on the internal job queue.
@@ -589,9 +579,10 @@ class Shape {
 public:
     shadow::BaseShape* base;
     jsid              _1;
-    uint32_t          slotInfo;
+    uint32_t          immutableFlags;
 
-    static const uint32_t FIXED_SLOTS_SHIFT = 27;
+    static const uint32_t FIXED_SLOTS_SHIFT = 24;
+    static const uint32_t FIXED_SLOTS_MASK = 0x1f << FIXED_SLOTS_SHIFT;
 };
 
 /**
@@ -607,7 +598,10 @@ struct Object {
 
     static const size_t MAX_FIXED_SLOTS = 16;
 
-    size_t numFixedSlots() const { return shape->slotInfo >> Shape::FIXED_SLOTS_SHIFT; }
+    size_t numFixedSlots() const {
+        return (shape->immutableFlags & Shape::FIXED_SLOTS_MASK) >> Shape::FIXED_SLOTS_SHIFT;
+    }
+
     JS::Value* fixedSlots() const {
         return (JS::Value*)(uintptr_t(this) + sizeof(shadow::Object));
     }
@@ -3135,15 +3129,6 @@ EnableAccessValidation(JSContext* cx, bool enabled);
 // should be made from whichever thread owns |global| at a given time.
 extern JS_FRIEND_API(void)
 SetCompartmentValidAccessPtr(JSContext* cx, JS::HandleObject global, bool* accessp);
-
-// If the JS engine wants to block so that other cooperative threads can run, it
-// will call the yield callback. It may do this if it needs to access a ZoneGroup
-// that is held by another thread (such as the system zone group).
-typedef void
-(* YieldCallback)(JSContext* cx);
-
-extern JS_FRIEND_API(void)
-SetCooperativeYieldCallback(JSContext* cx, YieldCallback callback);
 
 // Returns true if the system zone is available (i.e., if no cooperative contexts
 // are using it now).

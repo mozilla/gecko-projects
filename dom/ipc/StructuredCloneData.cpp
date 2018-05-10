@@ -6,7 +6,6 @@
 
 #include "StructuredCloneData.h"
 
-#include "nsIDOMDOMException.h"
 #include "nsIMutable.h"
 #include "nsIXPConnect.h"
 
@@ -149,7 +148,7 @@ BuildClonedMessageData(M* aManager, StructuredCloneData& aData,
                        ClonedMessageData& aClonedData)
 {
   SerializedStructuredCloneBuffer& buffer = aClonedData.data();
-  auto iter = aData.Data().Iter();
+  auto iter = aData.Data().Start();
   size_t size = aData.Data().Size();
   bool success;
   buffer.data = aData.Data().Borrow<js::SystemAllocPolicy>(iter, size, &success);

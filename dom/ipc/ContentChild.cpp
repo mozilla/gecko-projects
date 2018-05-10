@@ -69,6 +69,7 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/CaptivePortalService.h"
+#include "mozilla/PerformanceUtils.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
 #include "mozilla/recordreplay/ParentIPC.h"
@@ -82,7 +83,6 @@
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
-#include "nsIPerformanceMetrics.h"
 #include "nsISimpleEnumerator.h"
 #include "nsIWorkerDebuggerManager.h"
 
@@ -545,7 +545,6 @@ ContentChild::ContentChild()
 #endif
  , mIsAlive(true)
  , mShuttingDown(false)
- , mShutdownTimeout(0)
 {
   // This process is a content process, so it's clearly running in
   // multiprocess mode!
@@ -560,12 +559,6 @@ ContentChild::ContentChild()
     sShutdownCanary = new ShutdownCanary();
     ClearOnShutdown(&sShutdownCanary, ShutdownPhase::Shutdown);
   }
-  // If a shutdown message is received from within a nested event loop, we set
-  // the timeout for the nested event loop to half the ForceKillTimer timeout
-  // (in ms) to leave enough time to send the FinishShutdown message to the
-  // parent.
-  mShutdownTimeout =
-    Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5) * 1000 / 2;
 }
 
 #ifdef _MSC_VER
@@ -613,6 +606,7 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
 bool
 ContentChild::Init(MessageLoop* aIOLoop,
                    base::ProcessId aParentPid,
+                   const char* aParentBuildID,
                    IPC::Channel* aChannel,
                    uint64_t aChildID,
                    bool aIsForBrowser)
@@ -681,10 +675,15 @@ ContentChild::Init(MessageLoop* aIOLoop,
   GetIPCChannel()->SetChannelFlags(MessageChannel::REQUIRE_A11Y_REENTRY);
 #endif
 
-  // This must be sent before any IPDL message, which may hit sentinel
+  // This must be checked before any IPDL message, which may hit sentinel
   // errors due to parent and content processes having different
   // versions.
-  GetIPCChannel()->SendBuildID();
+  MessageChannel* channel = GetIPCChannel();
+  if (channel && !channel->SendBuildIDsMatchMessage(aParentBuildID)) {
+    // We need to quit this process if the buildID doesn't match the parent's.
+    // This can occur when an update occurred in the background.
+    ProcessChild::QuickExit();
+  }
 
 #ifdef MOZ_X11
   if (!gfxPlatform::IsHeadless()) {
@@ -774,7 +773,7 @@ GetCreateWindowParams(mozIDOMWindowProxy* aParent,
   *aFullZoom = 1.0f;
   auto* opener = nsPIDOMWindowOuter::From(aParent);
   if (!opener) {
-    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::Create();
+    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
     NS_ADDREF(*aTriggeringPrincipal = nullPrincipal);
     return NS_OK;
   }
@@ -972,7 +971,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
     nsTArray<FrameScriptInfo> frameScripts(info.frameScripts());
     nsCString urlToLoad = info.urlToLoad();
     TextureFactoryIdentifier textureFactoryIdentifier = info.textureFactoryIdentifier();
-    uint64_t layersId = info.layersId();
+    layers::LayersId layersId = info.layersId();
     CompositorOptions compositorOptions = info.compositorOptions();
     uint32_t maxTouchPoints = info.maxTouchPoints();
     DimensionInfo dimensionInfo = info.dimensions();
@@ -1001,7 +1000,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
       return;
     }
 
-    if (layersId == 0) { // if renderFrame is invalid.
+    if (!layersId.IsValid()) { // if renderFrame is invalid.
       renderFrame = nullptr;
     }
 
@@ -1408,33 +1407,11 @@ ContentChild::GetResultForRenderingInitFailure(base::ProcessId aOtherPid)
 mozilla::ipc::IPCResult
 ContentChild::RecvRequestPerformanceMetrics()
 {
-#ifndef RELEASE_OR_BETA
-  // iterate on all WorkerDebugger
-  RefPtr<WorkerDebuggerManager> wdm = WorkerDebuggerManager::GetOrCreate();
-  if (NS_WARN_IF(!wdm)) {
-    return IPC_OK();
-  }
-
-  for (uint32_t index = 0; index < wdm->GetDebuggersLength(); index++) {
-    WorkerDebugger* debugger = wdm->GetDebuggerAt(index);
-    MOZ_ASSERT(debugger);
-    SendAddPerformanceMetrics(debugger->ReportPerformanceInfo());
-  }
-
-  // iterate on all DocGroup
-  nsTArray<RefPtr<TabChild>> tabs = TabChild::GetAll();
-  for (const auto& tabChild : tabs) {
-    TabGroup* tabGroup = tabChild->TabGroup();
-    for (auto iter = tabGroup->Iter(); !iter.Done(); iter.Next()) {
-        RefPtr<DocGroup> docGroup = iter.Get()->mDocGroup;
-        SendAddPerformanceMetrics(docGroup->ReportPerformanceInfo());
-    }
-  }
+  MOZ_ASSERT(mozilla::dom::DOMPrefs::SchedulerLoggingEnabled());
+  nsTArray<PerformanceInfo> info;
+  CollectPerformanceInfo(info);
+  SendAddPerformanceMetrics(info);
   return IPC_OK();
-#endif
-#ifdef RELEASE_OR_BETA
-  return IPC_OK();
-#endif
 }
 
 mozilla::ipc::IPCResult
@@ -1481,7 +1458,7 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorManagerChild>&& aComposito
 
   // Zap all the old layer managers we have lying around.
   for (const auto& tabChild : tabs) {
-    if (tabChild->LayersId()) {
+    if (tabChild->GetLayersId().IsValid()) {
       tabChild->InvalidateLayers();
     }
   }
@@ -1503,7 +1480,7 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorManagerChild>&& aComposito
 
   // Establish new PLayerTransactions.
   for (const auto& tabChild : tabs) {
-    if (tabChild->LayersId()) {
+    if (tabChild->GetLayersId().IsValid()) {
       tabChild->ReinitRendering();
     }
   }
@@ -1528,7 +1505,7 @@ ContentChild::RecvReinitRenderingForDeviceReset()
 
   nsTArray<RefPtr<TabChild>> tabs = TabChild::GetAll();
   for (const auto& tabChild : tabs) {
-    if (tabChild->LayersId()) {
+    if (tabChild->GetLayersId().IsValid()) {
       tabChild->ReinitRenderingForDeviceReset();
     }
   }
@@ -2579,23 +2556,21 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
   if (cpm) {
     StructuredCloneData data;
     ipc::UnpackClonedMessageDataForChild(aData, data);
-    cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()),
-                        nullptr, aMsg, false, &data, &cpows, aPrincipal,
-                        nullptr);
+    cpm->ReceiveMessage(cpm, nullptr, aMsg, false, &data, &cpows, aPrincipal, nullptr,
+                        IgnoreErrors());
   }
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvGeolocationUpdate(const GeoPosition& somewhere)
+ContentChild::RecvGeolocationUpdate(nsIDOMGeoPosition* aPosition)
 {
   nsCOMPtr<nsIGeolocationUpdate> gs =
     do_GetService("@mozilla.org/geolocation/service;1");
   if (!gs) {
     return IPC_OK();
   }
-  nsCOMPtr<nsIDOMGeoPosition> position = somewhere;
-  gs->Update(position);
+  gs->Update(aPosition);
   return IPC_OK();
 }
 
@@ -3065,32 +3040,28 @@ ContentChild::RecvShutdown()
 void
 ContentChild::ShutdownInternal()
 {
-  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
-                                     NS_LITERAL_CSTRING("RecvShutdown"));
-
   // If we receive the shutdown message from within a nested event loop, we want
   // to wait for that event loop to finish. Otherwise we could prematurely
   // terminate an "unload" or "pagehide" event handler (which might be doing a
-  // sync XHR, for example). However, we need to strike a balance and shut down
-  // within a reasonable amount of time (mShutdownTimeout) or the ForceKillTimer
-  // in the parent will execute and kill us hard.
+  // sync XHR, for example).
+  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
+                                     NS_LITERAL_CSTRING("RecvShutdown"));
+
+  MOZ_ASSERT(NS_IsMainThread());
+  RefPtr<nsThread> mainThread = nsThreadManager::get().GetCurrentThread();
   // Note that we only have to check the recursion count for the current
   // cooperative thread. Since the Shutdown message is not labeled with a
   // SchedulerGroup, there can be no other cooperative threads doing work while
   // we're running.
-  MOZ_ASSERT(NS_IsMainThread());
-  RefPtr<nsThread> mainThread = nsThreadManager::get().GetCurrentThread();
-  if (mainThread && mainThread->RecursionDepth() > 1 && mShutdownTimeout > 0) {
+  if (mainThread && mainThread->RecursionDepth() > 1) {
     // We're in a nested event loop. Let's delay for an arbitrary period of
     // time (100ms) in the hopes that the event loop will have finished by
     // then.
-    int32_t delay = 100;
     MessageLoop::current()->PostDelayedTask(
       NewRunnableMethod(
         "dom::ContentChild::RecvShutdown", this,
         &ContentChild::ShutdownInternal),
-      delay);
-    mShutdownTimeout -= delay;
+      100);
     return;
   }
 
@@ -3496,8 +3467,7 @@ ContentChild::RecvGetFilesResponse(const nsID& aUUID,
 }
 
 /* static */ void
-ContentChild::FatalErrorIfNotUsingGPUProcess(const char* const aProtocolName,
-                                             const char* const aErrorMsg,
+ContentChild::FatalErrorIfNotUsingGPUProcess(const char* const aErrorMsg,
                                              base::ProcessId aOtherPid)
 {
   // If we're communicating with the same process or the UI process then we
@@ -3505,11 +3475,9 @@ ContentChild::FatalErrorIfNotUsingGPUProcess(const char* const aProtocolName,
   // must be the GPU process and it crashing shouldn't be fatal for us.
   if (aOtherPid == base::GetCurrentProcId() ||
       (GetSingleton() && GetSingleton()->OtherPid() == aOtherPid)) {
-    mozilla::ipc::FatalError(aProtocolName, aErrorMsg, false);
+    mozilla::ipc::FatalError(aErrorMsg, false);
   } else {
-    nsAutoCString formattedMessage("IPDL error [");
-    formattedMessage.AppendASCII(aProtocolName);
-    formattedMessage.AppendLiteral(R"(]: ")");
+    nsAutoCString formattedMessage("IPDL error: \"");
     formattedMessage.AppendASCII(aErrorMsg);
     formattedMessage.AppendLiteral(R"(".)");
     NS_WARNING(formattedMessage.get());

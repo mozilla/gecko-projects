@@ -34,9 +34,10 @@ use dom::promise::Promise;
 use dom::promisenativehandler::{PromiseNativeHandler, Callback};
 use dom::url::URL;
 use dom_struct::dom_struct;
-use js::jsapi::{HandleObject, HandleValue, Heap, JSContext, JSObject};
+use js::jsapi::{Heap, JSContext, JSObject};
 use js::jsapi::{JS_NewPlainObject, JS_NewUint8ClampedArray};
 use js::jsval::{JSVal, NullValue};
+use js::rust::{HandleObject, HandleValue};
 use js::rust::CustomAutoRooterGuard;
 use js::typedarray;
 use script_traits::MsDuration;
@@ -471,6 +472,9 @@ impl TestBindingMethods for TestBinding {
     unsafe fn PassObjectSequence(&self, _: *mut JSContext, _: CustomAutoRooterGuard<Vec<*mut JSObject>>) {}
     fn PassStringSequence(&self, _: Vec<DOMString>) {}
     fn PassInterfaceSequence(&self, _: Vec<DomRoot<Blob>>) {}
+
+    fn PassOverloaded(&self, _: CustomAutoRooterGuard<typedarray::ArrayBuffer>) {}
+    fn PassOverloaded_(&self, _: DOMString) {}
 
     fn PassNullableBoolean(&self, _: Option<bool>) {}
     fn PassNullableByte(&self, _: Option<i8>) {}

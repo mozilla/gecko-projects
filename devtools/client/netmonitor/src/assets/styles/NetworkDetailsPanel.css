@@ -210,10 +210,6 @@
   margin-inline-end: 6px;
 }
 
-.network-monitor .headers-summary .requests-list-status-icon {
-  min-width: 10px;
-}
-
 .network-monitor .headers-summary .raw-headers-container {
   display: flex;
   width: 100%;
@@ -323,10 +319,6 @@
   border: none;
   min-width: 1px;
   transition: width 0.2s ease-out;
-}
-
-.theme-firebug .network-monitor .requests-list-timings-total {
-  color: var(--theme-body-color);
 }
 
 /* Stack trace panel */

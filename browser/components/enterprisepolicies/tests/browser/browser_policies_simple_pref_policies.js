@@ -31,13 +31,28 @@ const POLICIES_TESTS = [
 
    // POLICY: RememberPasswords
   {
-    policies: { "RememberPasswords": false },
+    policies: { "OfferToSaveLogins": false },
     lockedPrefs: { "signon.rememberSignons": false },
   },
   {
-    policies: { "RememberPasswords": true },
+    policies: { "OfferToSaveLogins": true },
     lockedPrefs: { "signon.rememberSignons": true },
   },
+
+  // POLICY: DisableSecurityBypass
+  {
+    policies: {
+      "DisableSecurityBypass": {
+        "InvalidCertificate": true,
+        "SafeBrowsing": true
+      }
+    },
+    lockedPrefs: {
+      "security.certerror.hideAddException": true,
+      "browser.safebrowsing.allowOverride": false,
+    },
+  },
+
 
   // POLICY: DisableFormHistory
   {
@@ -67,6 +82,70 @@ const POLICIES_TESTS = [
     lockedPrefs: {
       "privacy.trackingprotection.enabled": false,
       "privacy.trackingprotection.pbmode.enabled": false,
+    }
+  },
+
+  // POLICY: OverrideFirstRunPage
+  {
+    policies: { "OverrideFirstRunPage": "https://www.example.com/" },
+    lockedPrefs: { "startup.homepage_welcome_url": "https://www.example.com/" },
+  },
+
+  // POLICY: Authentication
+  {
+    policies: {
+      "Authentication": {
+        "SPNEGO": ["a.com", "b.com"],
+        "Delegated": ["a.com", "b.com"],
+        "NTLM": ["a.com", "b.com"],
+      }
+    },
+    lockedPrefs: {
+      "network.negotiate-auth.trusted-uris": "a.com, b.com",
+      "network.negotiate-auth.delegation-uris": "a.com, b.com",
+      "network.automatic-ntlm-auth.trusted-uris": "a.com, b.com",
+    }
+  },
+
+  // POLICY: Certificates
+  {
+    policies: {
+      "Certificates": {
+        "ImportEnterpriseRoots": true,
+      }
+    },
+    lockedPrefs: {
+      "security.enterprise_roots.enabled": true,
+    }
+  },
+
+  // POLICY: InstallAddons.Default (block addon installs)
+  {
+    policies: {
+      "InstallAddonsPermission": {
+        "Default": false,
+      }
+    },
+    lockedPrefs: {
+      "xpinstall.enabled": false,
+    }
+  },
+
+  // POLICY: SanitizeOnShutdown
+  {
+    policies: {
+      "SanitizeOnShutdown": true,
+    },
+    lockedPrefs: {
+      "privacy.sanitize.sanitizeOnShutdown": true,
+      "privacy.clearOnShutdown.cache": true,
+      "privacy.clearOnShutdown.cookies": true,
+      "privacy.clearOnShutdown.downloads": true,
+      "privacy.clearOnShutdown.formdata": true,
+      "privacy.clearOnShutdown.history": true,
+      "privacy.clearOnShutdown.sessions": true,
+      "privacy.clearOnShutdown.siteSettings": true,
+      "privacy.clearOnShutdown.offlineApps": true,
     }
   },
 ];

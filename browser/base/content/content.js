@@ -32,6 +32,13 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ContextMenu: "resource:///modules/ContextMenu.jsm",
 });
 
+XPCOMUtils.defineLazyGetter(this, "gPipNSSBundle", function() {
+  return Services.strings.createBundle("chrome://pipnss/locale/pipnss.properties");
+});
+XPCOMUtils.defineLazyGetter(this, "gNSSErrorsBundle", function() {
+  return Services.strings.createBundle("chrome://pipnss/locale/nsserrors.properties");
+});
+
 // TabChildGlobal
 var global = this;
 
@@ -47,12 +54,12 @@ addMessageListener("RemoteLogins:fillForm", function(message) {
 });
 addEventListener("DOMFormHasPassword", function(event) {
   LoginManagerContent.onDOMFormHasPassword(event, content);
-  let formLike = LoginFormFactory.createFromForm(event.target);
+  let formLike = LoginFormFactory.createFromForm(event.originalTarget);
   InsecurePasswordUtils.reportInsecurePasswords(formLike);
 });
 addEventListener("DOMInputPasswordAdded", function(event) {
   LoginManagerContent.onDOMInputPasswordAdded(event, content);
-  let formLike = LoginFormFactory.createFromField(event.target);
+  let formLike = LoginFormFactory.createFromField(event.originalTarget);
   InsecurePasswordUtils.reportInsecurePasswords(formLike);
 });
 addEventListener("pageshow", function(event) {
@@ -70,11 +77,23 @@ const MOZILLA_PKIX_ERROR_BASE = Ci.nsINSSErrorsService.MOZILLA_PKIX_ERROR_BASE;
 
 const SEC_ERROR_EXPIRED_CERTIFICATE                = SEC_ERROR_BASE + 11;
 const SEC_ERROR_UNKNOWN_ISSUER                     = SEC_ERROR_BASE + 13;
+const SEC_ERROR_UNTRUSTED_ISSUER                   = SEC_ERROR_BASE + 20;
+const SEC_ERROR_UNTRUSTED_CERT                     = SEC_ERROR_BASE + 21;
 const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE         = SEC_ERROR_BASE + 30;
+const SEC_ERROR_CA_CERT_INVALID                    = SEC_ERROR_BASE + 36;
 const SEC_ERROR_OCSP_FUTURE_RESPONSE               = SEC_ERROR_BASE + 131;
 const SEC_ERROR_OCSP_OLD_RESPONSE                  = SEC_ERROR_BASE + 132;
+const SEC_ERROR_REUSED_ISSUER_AND_SERIAL           = SEC_ERROR_BASE + 138;
+const SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED  = SEC_ERROR_BASE + 176;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 5;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
+const MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT          = MOZILLA_PKIX_ERROR_BASE + 14;
+const MOZILLA_PKIX_ERROR_MITM_DETECTED             = MOZILLA_PKIX_ERROR_BASE + 15;
+
+
+const SSL_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SSL_ERROR_BASE;
+const SSL_ERROR_SSL_DISABLED  = SSL_ERROR_BASE + 20;
+const SSL_ERROR_SSL2_DISABLED  = SSL_ERROR_BASE + 14;
 
 const PREF_SERVICES_SETTINGS_CLOCK_SKEW_SECONDS = "services.settings.clock_skew_seconds";
 const PREF_SERVICES_SETTINGS_LAST_FETCHED       = "services.settings.last_update_seconds";
@@ -280,16 +299,198 @@ var AboutNetAndCertErrorListener = {
     return {notBefore, notAfter};
   },
 
+  _setTechDetails(input, doc) {
+    // CSS class and error code are set from nsDocShell.
+    let searchParams = new URLSearchParams(doc.documentURI.split("?")[1]);
+    let cssClass = searchParams.get("s");
+    let error = searchParams.get("e");
+    let technicalInfo = doc.getElementById("badCertTechnicalInfo");
+    technicalInfo.textContent = "";
+
+    let uri = Services.io.newURI(input.data.url);
+    let hostString = uri.host;
+    if (uri.port != 443 && uri.port != -1) {
+      hostString = uri.hostPort;
+    }
+
+    let msg1 = gPipNSSBundle.formatStringFromName("certErrorIntro",
+                                                  [hostString], 1);
+    msg1 += "\n\n";
+
+    if (input.data.certIsUntrusted) {
+      switch (input.data.code) {
+        // We only want to measure MitM rates for now. Treat it as unkown issuer.
+        case MOZILLA_PKIX_ERROR_MITM_DETECTED:
+        case SEC_ERROR_UNKNOWN_ISSUER:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_UnknownIssuer") + "\n";
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_UnknownIssuer2") + "\n";
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_UnknownIssuer3") + "\n";
+          break;
+        case SEC_ERROR_CA_CERT_INVALID:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_CaInvalid") + "\n";
+          break;
+        case SEC_ERROR_UNTRUSTED_ISSUER:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_Issuer") + "\n";
+          break;
+        case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_SignatureAlgorithmDisabled") + "\n";
+          break;
+        case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_ExpiredIssuer") + "\n";
+          break;
+        case MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_SelfSigned") + "\n";
+          break;
+        default:
+          msg1 += gPipNSSBundle.GetStringFromName("certErrorTrust_Untrusted") + "\n";
+      }
+    }
+
+    technicalInfo.appendChild(doc.createTextNode(msg1));
+
+    if (input.data.isDomainMismatch) {
+      let subjectAltNames = input.data.certSubjectAltNames.split(",");
+      let numSubjectAltNames = subjectAltNames.length;
+      let msgPrefix = "";
+      if (numSubjectAltNames != 0) {
+        if (numSubjectAltNames == 1) {
+          msgPrefix = gPipNSSBundle.GetStringFromName("certErrorMismatchSinglePrefix");
+
+          // Let's check if we want to make this a link.
+          let okHost = input.data.certSubjectAltNames;
+          let href = "";
+          let thisHost = doc.location.hostname;
+          let proto = doc.location.protocol + "//";
+          // If okHost is a wildcard domain ("*.example.com") let's
+          // use "www" instead.  "*.example.com" isn't going to
+          // get anyone anywhere useful. bug 432491
+          okHost = okHost.replace(/^\*\./, "www.");
+          /* case #1:
+           * example.com uses an invalid security certificate.
+           *
+           * The certificate is only valid for www.example.com
+           *
+           * Make sure to include the "." ahead of thisHost so that
+           * a MitM attack on paypal.com doesn't hyperlink to "notpaypal.com"
+           *
+           * We'd normally just use a RegExp here except that we lack a
+           * library function to escape them properly (bug 248062), and
+           * domain names are famous for having '.' characters in them,
+           * which would allow spurious and possibly hostile matches.
+           */
+          if (okHost.endsWith("." + thisHost)) {
+            href = proto + okHost;
+          }
+          /* case #2:
+           * browser.garage.maemo.org uses an invalid security certificate.
+           *
+           * The certificate is only valid for garage.maemo.org
+           */
+          if (thisHost.endsWith("." + okHost)) {
+            href = proto + okHost;
+          }
+
+          // If we set a link, meaning there's something helpful for
+          // the user here, expand the section by default
+          if (href && cssClass != "expertBadCert") {
+            doc.getElementById("badCertAdvancedPanel").style.display = "block";
+            if (error == "nssBadCert") {
+              // Toggling the advanced panel must ensure that the debugging
+              // information panel is hidden as well, since it's opened by the
+              // error code link in the advanced panel.
+              var div = doc.getElementById("certificateErrorDebugInformation");
+              div.style.display = "none";
+            }
+          }
+
+          // Set the link if we want it.
+          if (href) {
+            let referrerlink = doc.createElement("a");
+            referrerlink.append(input.data.certSubjectAltNames);
+            referrerlink.title = input.data.certSubjectAltNames;
+            referrerlink.id = "cert_domain_link";
+            referrerlink.href = href;
+            let fragment = BrowserUtils.getLocalizedFragment(doc, msgPrefix,
+                                                             referrerlink);
+            technicalInfo.appendChild(fragment);
+          } else {
+            let fragment = BrowserUtils.getLocalizedFragment(doc,
+                                                             msgPrefix,
+                                                             input.data.certSubjectAltNames);
+            technicalInfo.appendChild(fragment);
+          }
+          technicalInfo.append("\n");
+        } else {
+          let msg = gPipNSSBundle.GetStringFromName("certErrorMismatchMultiple") + "\n";
+          for (let i = 0; i < numSubjectAltNames; i++) {
+            msg += subjectAltNames[i];
+            if (i != (numSubjectAltNames - 1)) {
+              msg += ", ";
+            }
+          }
+          technicalInfo.append(msg + "\n");
+        }
+      } else {
+        let msg = gPipNSSBundle.formatStringFromName("certErrorMismatch",
+                                                     [hostString], 1);
+        technicalInfo.append(msg + "\n");
+      }
+    }
+
+    if (input.data.isNotValidAtThisTime) {
+      let nowTime = new Date().getTime() * 1000;
+      let dateOptions = { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "numeric" };
+      let now = new Services.intl.DateTimeFormat(undefined, dateOptions).format(new Date());
+      let msg = "";
+      if (input.data.validity.notBefore) {
+        if (nowTime > input.data.validity.notAfter) {
+          msg += gPipNSSBundle.formatStringFromName("certErrorExpiredNow",
+                                                    [input.data.validity.notAfterLocalTime, now], 2) + "\n";
+        } else {
+          msg += gPipNSSBundle.formatStringFromName("certErrorNotYetValidNow",
+                                                    [input.data.validity.notBeforeLocalTime, now], 2) + "\n";
+        }
+      } else {
+        // If something goes wrong, we assume the cert expired.
+        msg += gPipNSSBundle.formatStringFromName("certErrorExpiredNow",
+                                                  ["", now], 2) + "\n";
+      }
+      technicalInfo.append(msg);
+    }
+    technicalInfo.append("\n");
+
+    // Add link to certificate and error message.
+    let linkPrefix = gPipNSSBundle.GetStringFromName("certErrorCodePrefix3");
+    let detailLink = doc.createElement("a");
+    detailLink.append(input.data.codeString);
+    detailLink.title = input.data.codeString;
+    detailLink.id = "errorCode";
+    let fragment = BrowserUtils.getLocalizedFragment(doc, linkPrefix, detailLink);
+    technicalInfo.appendChild(fragment);
+    var errorCode = doc.getElementById("errorCode");
+    if (errorCode) {
+      errorCode.href = "javascript:void(0)";
+      errorCode.addEventListener("click", () => {
+        let debugInfo = doc.getElementById("certificateErrorDebugInformation");
+        debugInfo.style.display = "block";
+        debugInfo.scrollIntoView({block: "start", behavior: "smooth"});
+      });
+    }
+  },
+
   onCertErrorDetails(msg, docShell) {
     let doc = docShell.document;
 
     let div = doc.getElementById("certificateErrorText");
     div.textContent = msg.data.info;
+    this._setTechDetails(msg, doc);
     let learnMoreLink = doc.getElementById("learnMoreLink");
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
 
     switch (msg.data.code) {
       case SEC_ERROR_UNKNOWN_ISSUER:
+      case MOZILLA_PKIX_ERROR_MITM_DETECTED:
+      case MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT:
         learnMoreLink.href = baseURL + "security-error";
         break;
 
@@ -410,12 +611,72 @@ var AboutNetAndCertErrorListener = {
     return false;
   },
 
+   _getErrorMessageFromCode(securityInfo, doc) {
+     let uri = Services.io.newURI(doc.location);
+     let hostString = uri.host;
+     if (uri.port != 443 && uri.port != -1) {
+       hostString = uri.hostPort;
+     }
+
+     let id_str = "";
+     switch (securityInfo.errorCode) {
+       case SSL_ERROR_SSL_DISABLED:
+         id_str = "PSMERR_SSL_Disabled";
+         break;
+       case SSL_ERROR_SSL2_DISABLED:
+         id_str = "PSMERR_SSL2_Disabled";
+         break;
+       case SEC_ERROR_REUSED_ISSUER_AND_SERIAL:
+         id_str = "PSMERR_HostReusedIssuerSerial";
+         break;
+     }
+     let nss_error_id_str = securityInfo.errorCodeString;
+     let msg2 = "";
+     if (id_str) {
+       msg2 = gPipNSSBundle.GetStringFromName(id_str) + "\n";
+     } else if (nss_error_id_str) {
+       msg2 = gNSSErrorsBundle.GetStringFromName(nss_error_id_str) + "\n";
+     }
+
+     if (!msg2) {
+       // We couldn't get an error message. Use the error string.
+       // Note that this is different from before where we used PR_ErrorToString.
+       msg2 = nss_error_id_str;
+     }
+     let msg = gPipNSSBundle.formatStringFromName("SSLConnectionErrorPrefix2",
+                                                  [hostString, msg2], 2);
+
+     if (nss_error_id_str) {
+       msg += gPipNSSBundle.formatStringFromName("certErrorCodePrefix3",
+                                                 [nss_error_id_str], 1) + "\n";
+     }
+     return msg;
+   },
+
   onPageLoad(originalTarget, win) {
     // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
     const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
 
+    let hideAddExceptionButton = false;
+
     if (this.isAboutCertError(win.document)) {
       ClickEventHandler.onCertError(originalTarget, win);
+      hideAddExceptionButton =
+        Services.prefs.getBoolPref("security.certerror.hideAddException", false);
+    }
+    if (this.isAboutNetError(win.document)) {
+      let docShell = win.document.docShell;
+      if (docShell) {
+        let {securityInfo} = docShell.failedChannel;
+        // We don't have a securityInfo when this is for example a DNS error.
+        if (securityInfo) {
+          securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+          let msg = this._getErrorMessageFromCode(securityInfo,
+                                                  win.document);
+          let id = win.document.getElementById("errorShortDescText");
+          id.textContent = msg;
+        }
+      }
     }
 
     let automatic = Services.prefs.getBoolPref("security.ssl.errorReporting.automatic");
@@ -423,7 +684,8 @@ var AboutNetAndCertErrorListener = {
       detail: JSON.stringify({
         enabled: Services.prefs.getBoolPref("security.ssl.errorReporting.enabled"),
         changedCertPrefs: this.changedCertPrefs(),
-        automatic
+        automatic,
+        hideAddExceptionButton,
       })
     }));
 
@@ -750,6 +1012,7 @@ var LightWeightThemeWebInstallListener = {
       case "InstallBrowserTheme": {
         sendAsyncMessage("LightWeightThemeWebInstaller:Install", {
           baseURI: event.target.baseURI,
+          principal: event.target.nodePrincipal,
           themeData: event.target.getAttribute("data-browsertheme"),
         });
         break;
@@ -757,6 +1020,7 @@ var LightWeightThemeWebInstallListener = {
       case "PreviewBrowserTheme": {
         sendAsyncMessage("LightWeightThemeWebInstaller:Preview", {
           baseURI: event.target.baseURI,
+          principal: event.target.nodePrincipal,
           themeData: event.target.getAttribute("data-browsertheme"),
         });
         this._previewWindow = event.target.ownerGlobal;
@@ -771,7 +1035,7 @@ var LightWeightThemeWebInstallListener = {
       case "ResetBrowserThemePreview": {
         if (this._previewWindow) {
           sendAsyncMessage("LightWeightThemeWebInstaller:ResetPreview",
-                           {baseURI: event.target.baseURI});
+                           {principal: event.target.nodePrincipal});
           this._resetPreviewWindow();
         }
         break;
@@ -1260,8 +1524,8 @@ let OfflineApps = {
       }
     }
   },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 };
 
 addEventListener("MozApplicationManifest", OfflineApps, false);

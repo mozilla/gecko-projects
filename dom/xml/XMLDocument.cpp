@@ -15,7 +15,6 @@
 #include "nsIDocShell.h"
 #include "nsHTMLParts.h"
 #include "nsIComponentManager.h"
-#include "nsIDOMElement.h"
 #include "nsIBaseWindow.h"
 #include "nsIDOMWindow.h"
 #include "nsCOMPtr.h"
@@ -258,9 +257,6 @@ XMLDocument::~XMLDocument()
   // XXX We rather crash than hang
   mLoopingForSyncLoad = false;
 }
-
-// QueryInterface implementation for XMLDocument
-NS_IMPL_ISUPPORTS_INHERITED(XMLDocument, nsDocument, nsIDOMXMLDocument)
 
 nsresult
 XMLDocument::Init()

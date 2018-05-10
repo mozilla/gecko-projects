@@ -182,8 +182,6 @@ with Files('tests/unit/**'):
 
 with Files('tests/widgets/*audiocontrols*'):
     BUG_COMPONENT = ('Toolkit', 'Video/Audio Controls')
-with Files('tests/widgets/*1319301*'):
-    BUG_COMPONENT = ('Toolkit', 'Video/Audio Controls')
 with Files('tests/widgets/*898940*'):
     BUG_COMPONENT = ('Toolkit', 'Video/Audio Controls')
 
@@ -191,7 +189,7 @@ with Files('tests/widgets/*contextmenu*'):
     BUG_COMPONENT = ('Firefox', 'Menus')
 
 with Files('tests/widgets/*editor*'):
-    BUG_COMPONENT = ('Core', 'XP Toolkit/Widgets: XUL')
+    BUG_COMPONENT = ('Core', 'XUL')
 
 with Files('tests/widgets/*menubar*'):
     BUG_COMPONENT = ('Core', 'XUL')
@@ -257,9 +255,6 @@ with Files('edit*'):
 
 with Files('globalOverlay.*'):
     BUG_COMPONENT = ('Toolkit', 'General')
-
-with Files('menulist.css'):
-    BUG_COMPONENT = ('Toolkit', 'XUL Widgets')
 
 with Files('minimal-xul.css'):
     BUG_COMPONENT = ('Toolkit', 'XUL Widgets')

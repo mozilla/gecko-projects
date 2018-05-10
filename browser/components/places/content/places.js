@@ -4,11 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* import-globals-from editBookmark.js */
-// Via allDownloadsViewOverlay.xul
 /* import-globals-from ../../../../toolkit/content/contentAreaUtils.js */
 /* import-globals-from ../PlacesUIUtils.jsm */
 /* import-globals-from ../../../../toolkit/components/places/PlacesUtils.jsm */
-/* import-globals-from ../../downloads/content/allDownloadsViewOverlay.js */
+/* import-globals-from ../../downloads/content/allDownloadsView.js */
 
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -190,16 +189,14 @@ var PlacesOrganizer = {
     document.getElementById("placesContext")
             .removeChild(document.getElementById("placesContext_show:info"));
 
+    if (!Services.policies.isAllowed("profileImport")) {
+      document.getElementById("OrganizerCommand_browserImport").setAttribute("disabled", true);
+    }
+
     ContentArea.focus();
   },
 
-  QueryInterface: function PO_QueryInterface(aIID) {
-    if (aIID.equals(Ci.nsIDOMEventListener) ||
-        aIID.equals(Ci.nsISupports))
-      return this;
-
-    throw Cr.NS_NOINTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI([]),
 
   handleEvent: function PO_handleEvent(aEvent) {
     if (aEvent.type != "AppCommand")

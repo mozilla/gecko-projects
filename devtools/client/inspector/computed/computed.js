@@ -22,10 +22,11 @@ const {
   VIEW_NODE_IMAGE_URL_TYPE,
   VIEW_NODE_FONT_TYPE,
 } = require("devtools/client/inspector/shared/node-types");
-const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
 const TooltipsOverlay = require("devtools/client/inspector/shared/tooltips-overlay");
-const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
-const clipboardHelper = require("devtools/shared/platform/clipboard");
+
+loader.lazyRequireGetter(this, "StyleInspectorMenu", "devtools/client/inspector/shared/style-inspector-menu");
+loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-shortcuts");
+loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 
 const STYLE_INSPECTOR_PROPERTIES = "devtools/shared/locales/styleinspector.properties";
 const {LocalizationHelper} = require("devtools/shared/l10n");
@@ -203,8 +204,6 @@ function CssComputedView(inspector, document, pageStyle) {
 
   this.createStyleViews();
 
-  this._contextmenu = new StyleInspectorMenu(this, { isRuleView: false });
-
   // Add the tooltips and highlightersoverlay
   this.tooltips = new TooltipsOverlay(this);
 
@@ -242,6 +241,14 @@ CssComputedView.prototype = {
 
   // Number of visible properties
   numVisibleProperties: 0,
+
+  get contextMenu() {
+    if (!this._contextMenu) {
+      this._contextMenu = new StyleInspectorMenu(this, { isRuleView: false });
+    }
+
+    return this._contextMenu;
+  },
 
   setPageStyle: function(pageStyle) {
     this.pageStyle = pageStyle;
@@ -672,7 +679,7 @@ CssComputedView.prototype = {
    * Context menu handler.
    */
   _onContextMenu: function(event) {
-    this._contextmenu.show(event);
+    this.contextMenu.show(event);
   },
 
   _onClick: function(event) {
@@ -682,7 +689,7 @@ CssComputedView.prototype = {
       event.stopPropagation();
       event.preventDefault();
       let browserWin = this.inspector.target.tab.ownerDocument.defaultView;
-      browserWin.openUILinkIn(target.href, "tab");
+      browserWin.openWebLinkIn(target.href, "tab");
     }
   },
 
@@ -733,10 +740,9 @@ CssComputedView.prototype = {
       this._refreshProcess.cancel();
     }
 
-    // Remove context menu
-    if (this._contextmenu) {
-      this._contextmenu.destroy();
-      this._contextmenu = null;
+    if (this._contextMenu) {
+      this._contextMenu.destroy();
+      this._contextMenu = null;
     }
 
     this.tooltips.destroy();
@@ -1167,7 +1173,7 @@ PropertyView.prototype = {
 
     if (inspector.target.tab) {
       let browserWin = inspector.target.tab.ownerDocument.defaultView;
-      browserWin.openUILinkIn(this.link, "tab");
+      browserWin.openWebLinkIn(this.link, "tab");
     }
   },
 
@@ -1414,16 +1420,13 @@ function ComputedViewTool(inspector, window) {
   this.onSelected = this.onSelected.bind(this);
   this.refresh = this.refresh.bind(this);
   this.onPanelSelected = this.onPanelSelected.bind(this);
-  this.onMutations = this.onMutations.bind(this);
-  this.onResized = this.onResized.bind(this);
 
   this.inspector.selection.on("detached-front", this.onDetachedFront);
   this.inspector.selection.on("new-node-front", this.onSelected);
   this.inspector.selection.on("pseudoclass", this.refresh);
   this.inspector.sidebar.on("computedview-selected", this.onPanelSelected);
   this.inspector.pageStyle.on("stylesheet-updated", this.refresh);
-  this.inspector.walker.on("mutations", this.onMutations);
-  this.inspector.walker.on("resize", this.onResized);
+  this.inspector.styleChangeTracker.on("style-changed", this.refresh);
 
   this.computedView.selectElement(null);
 
@@ -1487,31 +1490,8 @@ ComputedViewTool.prototype = {
     }
   },
 
-  /**
-   * When markup mutations occur, if an attribute of the selected node changes,
-   * we need to refresh the view as that might change the node's styles.
-   */
-  onMutations: function(mutations) {
-    for (let {type, target} of mutations) {
-      if (target === this.inspector.selection.nodeFront &&
-          type === "attributes") {
-        this.refresh();
-        break;
-      }
-    }
-  },
-
-  /**
-   * When the window gets resized, this may cause media-queries to match, and
-   * therefore, different styles may apply.
-   */
-  onResized: function() {
-    this.refresh();
-  },
-
   destroy: function() {
-    this.inspector.walker.off("mutations", this.onMutations);
-    this.inspector.walker.off("resize", this.onResized);
+    this.inspector.styleChangeTracker.off("style-changed", this.refresh);
     this.inspector.sidebar.off("computedview-selected", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this.onSelected);

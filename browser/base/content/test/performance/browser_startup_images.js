@@ -61,11 +61,11 @@ const whitelist = [
   {
     file: "chrome://browser/skin/chevron.svg",
     platforms: ["win", "linux", "macosx"],
-    intermittentShown: ["win"],
+    intermittentShown: ["win", "linux"],
   },
 
   {
-    file: "chrome://global/skin/icons/resizer.png",
+    file: "chrome://global/skin/icons/resizer.svg",
     platforms: ["win"],
   },
 

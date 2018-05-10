@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Generated with cbindgen:0.5.2 */
+/* Generated with cbindgen:0.6.0 */
 
 /* DO NOT MODIFY THIS MANUALLY! This file was generated using cbindgen.
  * To generate this file:
@@ -97,31 +97,6 @@ enum class ImageRendering : uint32_t {
   Auto = 0,
   CrispEdges = 1,
   Pixelated = 2,
-
-  Sentinel /* this must be last for serialization purposes. */
-};
-
-// An enum representing the available verbosity level filters of the logger.
-//
-// A `LevelFilter` may be compared directly to a [`Level`]. Use this type
-// to get and set the maximum log level with [`max_level()`] and [`set_max_level`].
-//
-// [`Level`]: enum.Level.html
-// [`max_level()`]: fn.max_level.html
-// [`set_max_level`]: fn.set_max_level.html
-enum class LevelFilter : uintptr_t {
-  // A level lower than all log levels.
-  Off,
-  // Corresponds to the `Error` log level.
-  Error,
-  // Corresponds to the `Warn` log level.
-  Warn,
-  // Corresponds to the `Info` log level.
-  Info,
-  // Corresponds to the `Debug` log level.
-  Debug,
-  // Corresponds to the `Trace` log level.
-  Trace,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -244,8 +219,8 @@ struct DevicePixel;
 
 struct DocumentHandle;
 
-// Geometry in a layer's local coordinate space (logical pixels).
-struct LayerPixel;
+// Geometry in a stacking context's local coordinate space (logical pixels).
+struct LayoutPixel;
 
 // The renderer is responsible for submitting to the GPU the work prepared by the
 // RenderBackend.
@@ -273,8 +248,6 @@ struct Vec;
 
 // Geometry in the document's coordinate space (logical pixels).
 struct WorldPixel;
-
-struct WrPipelineInfo;
 
 struct WrProgramCache;
 
@@ -315,6 +288,91 @@ using VecU8 = Vec<uint8_t>;
 
 using ArcVecU8 = Arc<VecU8>;
 
+using WrIdNamespace = IdNamespace;
+
+struct WrWindowId {
+  uint64_t mHandle;
+
+  bool operator==(const WrWindowId& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  bool operator<(const WrWindowId& aOther) const {
+    return mHandle < aOther.mHandle;
+  }
+  bool operator<=(const WrWindowId& aOther) const {
+    return mHandle <= aOther.mHandle;
+  }
+};
+
+// This type carries no valuable semantics for WR. However, it reflects the fact that
+// clients (Servo) may generate pipelines by different semi-independent sources.
+// These pipelines still belong to the same `IdNamespace` and the same `DocumentId`.
+// Having this extra Id field enables them to generate `PipelineId` without collision.
+using PipelineSourceId = uint32_t;
+
+// From the point of view of WR, `PipelineId` is completely opaque and generic as long as
+// it's clonable, serializable, comparable, and hashable.
+struct PipelineId {
+  PipelineSourceId mNamespace;
+  uint32_t mHandle;
+
+  bool operator==(const PipelineId& aOther) const {
+    return mNamespace == aOther.mNamespace &&
+           mHandle == aOther.mHandle;
+  }
+};
+
+using WrPipelineId = PipelineId;
+
+struct Epoch {
+  uint32_t mHandle;
+
+  bool operator==(const Epoch& aOther) const {
+    return mHandle == aOther.mHandle;
+  }
+  bool operator<(const Epoch& aOther) const {
+    return mHandle < aOther.mHandle;
+  }
+  bool operator<=(const Epoch& aOther) const {
+    return mHandle <= aOther.mHandle;
+  }
+};
+
+using WrEpoch = Epoch;
+
+struct WrPipelineEpoch {
+  WrPipelineId pipeline_id;
+  WrEpoch epoch;
+
+  bool operator==(const WrPipelineEpoch& aOther) const {
+    return pipeline_id == aOther.pipeline_id &&
+           epoch == aOther.epoch;
+  }
+};
+
+template<typename T>
+struct FfiVec {
+  const T *data;
+  uintptr_t length;
+  uintptr_t capacity;
+
+  bool operator==(const FfiVec& aOther) const {
+    return data == aOther.data &&
+           length == aOther.length &&
+           capacity == aOther.capacity;
+  }
+};
+
+struct WrPipelineInfo {
+  FfiVec<WrPipelineEpoch> epochs;
+  FfiVec<PipelineId> removed_pipelines;
+
+  bool operator==(const WrPipelineInfo& aOther) const {
+    return epochs == aOther.epochs &&
+           removed_pipelines == aOther.removed_pipelines;
+  }
+};
+
 template<typename T, typename U>
 struct TypedSize2D {
   T width;
@@ -328,9 +386,7 @@ struct TypedSize2D {
 
 using DeviceUintSize = TypedSize2D<uint32_t, DevicePixel>;
 
-using LayerSize = TypedSize2D<float, LayerPixel>;
-
-using LayoutSize = LayerSize;
+using LayoutSize = TypedSize2D<float, LayoutPixel>;
 
 // Describes the memory layout of a display list.
 //
@@ -366,8 +422,6 @@ struct WrVecU8 {
   }
 };
 
-using WrIdNamespace = IdNamespace;
-
 // A 2d Point tagged with a unit.
 template<typename T, typename U>
 struct TypedPoint2D {
@@ -382,26 +436,6 @@ struct TypedPoint2D {
 
 using WorldPoint = TypedPoint2D<float, WorldPixel>;
 
-// This type carries no valuable semantics for WR. However, it reflects the fact that
-// clients (Servo) may generate pipelines by different semi-independent sources.
-// These pipelines still belong to the same `IdNamespace` and the same `DocumentId`.
-// Having this extra Id field enables them to generate `PipelineId` without collision.
-using PipelineSourceId = uint32_t;
-
-// From the point of view of WR, `PipelineId` is completely opaque and generic as long as
-// it's clonable, serializable, comparable, and hashable.
-struct PipelineId {
-  PipelineSourceId mNamespace;
-  uint32_t mHandle;
-
-  bool operator==(const PipelineId& aOther) const {
-    return mNamespace == aOther.mNamespace &&
-           mHandle == aOther.mHandle;
-  }
-};
-
-using WrPipelineId = PipelineId;
-
 // A 2d Rectangle optionally tagged with a unit.
 template<typename T, typename U>
 struct TypedRect {
@@ -414,9 +448,7 @@ struct TypedRect {
   }
 };
 
-using LayerRect = TypedRect<float, LayerPixel>;
-
-using LayoutRect = LayerRect;
+using LayoutRect = TypedRect<float, LayoutPixel>;
 
 struct BorderRadius {
   LayoutSize top_left;
@@ -505,9 +537,7 @@ struct TypedVector2D {
   }
 };
 
-using LayerVector2D = TypedVector2D<float, LayerPixel>;
-
-using LayoutVector2D = LayerVector2D;
+using LayoutVector2D = TypedVector2D<float, LayoutPixel>;
 
 struct BorderWidths {
   float left;
@@ -551,9 +581,7 @@ struct BorderSide {
   }
 };
 
-using LayerPoint = TypedPoint2D<float, LayerPixel>;
-
-using LayoutPoint = LayerPoint;
+using LayoutPoint = TypedPoint2D<float, LayoutPixel>;
 
 struct GradientStop {
   float offset;
@@ -584,18 +612,6 @@ struct TypedSideOffsets2D {
 template<typename T>
 using SideOffsets2D = TypedSideOffsets2D<T, UnknownUnit>;
 
-struct NinePatchDescriptor {
-  uint32_t width;
-  uint32_t height;
-  SideOffsets2D<uint32_t> slice;
-
-  bool operator==(const NinePatchDescriptor& aOther) const {
-    return width == aOther.width &&
-           height == aOther.height &&
-           slice == aOther.slice;
-  }
-};
-
 struct Shadow {
   LayoutVector2D offset;
   ColorF color;
@@ -617,11 +633,6 @@ struct WrAnimationProperty {
            id == aOther.id;
   }
 };
-
-// Geometry in a stacking context's local coordinate space (logical pixels).
-//
-// For now layout pixels are equivalent to layer pixels, but it may change.
-using LayoutPixel = LayerPixel;
 
 // A 3d transform stored as a 4 by 4 matrix in row-major order in memory.
 //
@@ -683,6 +694,51 @@ struct WrFilterOp {
   float matrix[20];
 };
 
+union GlyphRasterSpace {
+  enum class Tag : uint32_t {
+    Local,
+    Screen,
+
+    Sentinel /* this must be last for serialization purposes. */
+  };
+
+  struct Local_Body {
+    Tag tag;
+    float _0;
+
+    bool operator==(const Local_Body& aOther) const {
+      return tag == aOther.tag &&
+             _0 == aOther._0;
+    }
+  };
+
+  struct {
+    Tag tag;
+  };
+  Local_Body local;
+
+  static GlyphRasterSpace Local(float const& a0) {
+    GlyphRasterSpace result;
+    result.local._0 = a0;
+    result.tag = Tag::Local;
+    return result;
+  }
+
+  static GlyphRasterSpace Screen() {
+    GlyphRasterSpace result;
+    result.tag = Tag::Screen;
+    return result;
+  }
+
+  bool IsLocal() const {
+    return tag == Tag::Local;
+  }
+
+  bool IsScreen() const {
+    return tag == Tag::Screen;
+  }
+};
+
 struct FontInstanceKey {
   IdNamespace mNamespace;
   uint32_t mHandle;
@@ -719,8 +775,6 @@ struct GlyphOptions {
 
 using WrYuvColorSpace = YuvColorSpace;
 
-using WrLogLevelFilter = LevelFilter;
-
 struct ByteSlice {
   const uint8_t *buffer;
   uintptr_t len;
@@ -733,6 +787,8 @@ struct ByteSlice {
 
 using TileOffset = TypedPoint2D<uint16_t, Tiles>;
 
+using DeviceUintRect = TypedRect<uint32_t, DevicePixel>;
+
 struct MutByteSlice {
   uint8_t *buffer;
   uintptr_t len;
@@ -742,36 +798,6 @@ struct MutByteSlice {
            len == aOther.len;
   }
 };
-
-struct WrWindowId {
-  uint64_t mHandle;
-
-  bool operator==(const WrWindowId& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  bool operator<(const WrWindowId& aOther) const {
-    return mHandle < aOther.mHandle;
-  }
-  bool operator<=(const WrWindowId& aOther) const {
-    return mHandle <= aOther.mHandle;
-  }
-};
-
-struct Epoch {
-  uint32_t mHandle;
-
-  bool operator==(const Epoch& aOther) const {
-    return mHandle == aOther.mHandle;
-  }
-  bool operator<(const Epoch& aOther) const {
-    return mHandle < aOther.mHandle;
-  }
-  bool operator<=(const Epoch& aOther) const {
-    return mHandle <= aOther.mHandle;
-  }
-};
-
-using WrEpoch = Epoch;
 
 struct WrDebugFlags {
   uint32_t mBits;
@@ -909,7 +935,10 @@ struct FontInstancePlatformOptions {
 };
 #endif
 
-using DeviceUintRect = TypedRect<uint32_t, DevicePixel>;
+struct WrTransformProperty {
+  uint64_t id;
+  LayoutTransform transform;
+};
 
 struct WrOpacityProperty {
   uint64_t id;
@@ -919,11 +948,6 @@ struct WrOpacityProperty {
     return id == aOther.id &&
            opacity == aOther.opacity;
   }
-};
-
-struct WrTransformProperty {
-  uint64_t id;
-  LayoutTransform transform;
 };
 
 extern "C" {
@@ -945,9 +969,27 @@ extern void AddNativeFontHandle(WrFontKey aKey,
                                 void *aHandle,
                                 uint32_t aIndex);
 
+extern void ClearBlobImageResources(WrIdNamespace aNamespace);
+
 extern void DeleteFontData(WrFontKey aKey);
 
-extern void gecko_printf_stderr_output(const char *aMsg);
+extern void apz_deregister_sampler(WrWindowId aWindowId);
+
+extern void apz_deregister_updater(WrWindowId aWindowId);
+
+extern void apz_post_scene_swap(WrWindowId aWindowId,
+                                WrPipelineInfo aPipelineInfo);
+
+extern void apz_pre_scene_swap(WrWindowId aWindowId);
+
+extern void apz_register_sampler(WrWindowId aWindowId);
+
+extern void apz_register_updater(WrWindowId aWindowId);
+
+extern void apz_run_updater(WrWindowId aWindowId);
+
+extern void apz_sample_transforms(WrWindowId aWindowId,
+                                  Transaction *aTransaction);
 
 extern void gecko_profiler_register_thread(const char *aName);
 
@@ -1009,6 +1051,10 @@ void wr_api_finalize_builder(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
+void wr_api_flush_scene_builder(DocumentHandle *aDh)
+WR_FUNC;
+
+WR_INLINE
 WrIdNamespace wr_api_get_namespace(DocumentHandle *aDh)
 WR_FUNC;
 
@@ -1035,6 +1081,10 @@ void wr_api_shut_down(DocumentHandle *aDh)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
+void wr_api_wake_scene_builder(DocumentHandle *aDh)
+WR_FUNC;
+
+WR_INLINE
 void wr_clear_item_tag(WrState *aState)
 WR_FUNC;
 
@@ -1048,8 +1098,7 @@ WR_FUNC;
 
 WR_INLINE
 uintptr_t wr_dp_define_clip(WrState *aState,
-                            const uintptr_t *aAncestorScrollId,
-                            const uintptr_t *aAncestorClipId,
+                            const uintptr_t *aParentId,
                             LayoutRect aClipRect,
                             const ComplexClipRegion *aComplex,
                             uintptr_t aComplexCount,
@@ -1057,10 +1106,16 @@ uintptr_t wr_dp_define_clip(WrState *aState,
 WR_FUNC;
 
 WR_INLINE
+uint64_t wr_dp_define_clipchain(WrState *aState,
+                                const uint64_t *aParentClipchainId,
+                                const uintptr_t *aClips,
+                                uintptr_t aClipsCount)
+WR_FUNC;
+
+WR_INLINE
 uintptr_t wr_dp_define_scroll_layer(WrState *aState,
                                     uint64_t aScrollId,
-                                    const uintptr_t *aAncestorScrollId,
-                                    const uintptr_t *aAncestorClipId,
+                                    const uintptr_t *aParentId,
                                     LayoutRect aContentRect,
                                     LayoutRect aClipRect)
 WR_FUNC;
@@ -1131,7 +1186,9 @@ void wr_dp_push_border_image(WrState *aState,
                              bool aIsBackfaceVisible,
                              BorderWidths aWidths,
                              WrImageKey aImage,
-                             NinePatchDescriptor aPatch,
+                             uint32_t aWidth,
+                             uint32_t aHeight,
+                             SideOffsets2D<uint32_t> aSlice,
                              SideOffsets2D<float> aOutset,
                              RepeatMode aRepeatHorizontal,
                              RepeatMode aRepeatVertical)
@@ -1178,7 +1235,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_clip_and_scroll_info(WrState *aState,
                                      uintptr_t aScrollId,
-                                     const uintptr_t *aClipId)
+                                     const uint64_t *aClipChainId)
 WR_FUNC;
 
 WR_INLINE
@@ -1263,6 +1320,7 @@ WR_FUNC;
 WR_INLINE
 void wr_dp_push_stacking_context(WrState *aState,
                                  LayoutRect aBounds,
+                                 const uintptr_t *aClipNodeId,
                                  const WrAnimationProperty *aAnimation,
                                  const float *aOpacity,
                                  const LayoutTransform *aTransform,
@@ -1271,7 +1329,10 @@ void wr_dp_push_stacking_context(WrState *aState,
                                  MixBlendMode aMixBlendMode,
                                  const WrFilterOp *aFilters,
                                  uintptr_t aFilterCount,
-                                 bool aIsBackfaceVisible)
+                                 bool aIsBackfaceVisible,
+                                 GlyphRasterSpace aGlyphRasterSpace,
+                                 bool *aOutIsReferenceFrame,
+                                 uintptr_t *aOutReferenceFrameId)
 WR_FUNC;
 
 WR_INLINE
@@ -1334,16 +1395,13 @@ WR_INLINE
 void wr_dump_display_list(WrState *aState)
 WR_FUNC;
 
-WR_INLINE
-void wr_init_external_log_handler(WrLogLevelFilter aLogFilter)
-WR_FUNC;
-
 extern bool wr_moz2d_render_cb(ByteSlice aBlob,
                                uint32_t aWidth,
                                uint32_t aHeight,
                                ImageFormat aFormat,
                                const uint16_t *aTileSize,
                                const TileOffset *aTileOffset,
+                               const DeviceUintRect *aDirtyRect,
                                MutByteSlice aOutput);
 
 extern void wr_notifier_external_event(WrWindowId aWindowId,
@@ -1351,25 +1409,13 @@ extern void wr_notifier_external_event(WrWindowId aWindowId,
 
 extern void wr_notifier_new_frame_ready(WrWindowId aWindowId);
 
-extern void wr_notifier_new_scroll_frame_ready(WrWindowId aWindowId,
-                                               bool aCompositeNeeded);
+extern void wr_notifier_nop_frame_done(WrWindowId aWindowId);
 
 extern void wr_notifier_wake_up(WrWindowId aWindowId);
 
 WR_INLINE
-void wr_pipeline_info_delete(WrPipelineInfo *aInfo)
+void wr_pipeline_info_delete(WrPipelineInfo aInfo)
 WR_DESTRUCTOR_SAFE_FUNC;
-
-WR_INLINE
-bool wr_pipeline_info_next_epoch(WrPipelineInfo *aInfo,
-                                 WrPipelineId *aOutPipeline,
-                                 WrEpoch *aOutEpoch)
-WR_FUNC;
-
-WR_INLINE
-bool wr_pipeline_info_next_removed_pipeline(WrPipelineInfo *aInfo,
-                                            WrPipelineId *aOutPipeline)
-WR_FUNC;
 
 WR_INLINE
 void wr_program_cache_delete(WrProgramCache *aProgramCache)
@@ -1390,7 +1436,7 @@ void wr_renderer_delete(Renderer *aRenderer)
 WR_DESTRUCTOR_SAFE_FUNC;
 
 WR_INLINE
-WrPipelineInfo *wr_renderer_flush_pipeline_info(Renderer *aRenderer)
+WrPipelineInfo wr_renderer_flush_pipeline_info(Renderer *aRenderer)
 WR_FUNC;
 
 WR_INLINE
@@ -1529,13 +1575,13 @@ void wr_resource_updates_update_image(ResourceUpdates *aResources,
 WR_FUNC;
 
 WR_INLINE
-void wr_set_item_tag(WrState *aState,
-                     uint64_t aScrollId,
-                     uint16_t aHitInfo)
+uintptr_t wr_root_scroll_node_id()
 WR_FUNC;
 
 WR_INLINE
-void wr_shutdown_external_log_handler()
+void wr_set_item_tag(WrState *aState,
+                     uint64_t aScrollId,
+                     uint16_t aHitInfo)
 WR_FUNC;
 
 WR_INLINE
@@ -1557,6 +1603,12 @@ WrThreadPool *wr_thread_pool_new()
 WR_FUNC;
 
 WR_INLINE
+void wr_transaction_append_transform_properties(Transaction *aTxn,
+                                                const WrTransformProperty *aTransformArray,
+                                                uintptr_t aTransformCount)
+WR_FUNC;
+
+WR_INLINE
 void wr_transaction_clear_display_list(Transaction *aTxn,
                                        WrEpoch aEpoch,
                                        WrPipelineId aPipelineId)
@@ -1575,7 +1627,7 @@ bool wr_transaction_is_empty(const Transaction *aTxn)
 WR_FUNC;
 
 WR_INLINE
-Transaction *wr_transaction_new()
+Transaction *wr_transaction_new(bool aDoAsync)
 WR_FUNC;
 
 WR_INLINE

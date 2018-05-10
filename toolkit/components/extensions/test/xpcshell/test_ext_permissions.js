@@ -11,6 +11,8 @@ AddonTestUtils.init(this);
 AddonTestUtils.overrideCertDB();
 AddonTestUtils.createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
 
+Services.prefs.setBoolPref("extensions.webextensions.background-delayed-startup", false);
+
 let extensionHandlers = new WeakSet();
 
 function frameScript() {
@@ -137,7 +139,7 @@ add_task(async function test_permissions() {
   }
   for (let origin of OPTIONAL_ORIGINS) {
     result = await call("contains", {origins: [origin]});
-    equal(result, false, `conains() returns false for origin ${origin}`);
+    equal(result, false, `contains() returns false for origin ${origin}`);
   }
 
   result = await call("contains", {
@@ -436,6 +438,38 @@ add_task(function test_permissions_have_localization_strings() {
       }
     }
   }
+});
+
+// Check <all_urls> used as an optional API permission.
+add_task(async function test_optional_all_urls() {
+  let extension = ExtensionTestUtils.loadExtension({
+    manifest: {
+      optional_permissions: ["<all_urls>"],
+    },
+
+    background() {
+      browser.test.onMessage.addListener(async () => {
+        let before = !!browser.tabs.captureVisibleTab;
+        let granted = await browser.permissions.request({origins: ["<all_urls>"]});
+        let after = !!browser.tabs.captureVisibleTab;
+
+        browser.test.sendMessage("results", [before, granted, after]);
+      });
+    },
+  });
+
+  await extension.startup();
+
+  await withHandlingUserInput(extension, async () => {
+    extension.sendMessage("request");
+    let [before, granted, after] = await extension.awaitMessage("results");
+
+    equal(before, false, "captureVisibleTab() unavailable before optional permission request()");
+    equal(granted, true, "request() for optional permissions granted");
+    equal(after, true, "captureVisibleTab() available after optional permission request()");
+  });
+
+  await extension.unload();
 });
 
 // Check that optional permissions are not included in update prompts

@@ -13,6 +13,7 @@ interface nsINode;
 interface nsIPrincipal;
 interface nsIRedirectHistoryEntry;
 interface nsIURI;
+native LoadContextRef(already_AddRefed<nsISupports>);
 %{C++
 #include "nsTArray.h"
 #include "mozilla/BasePrincipal.h"
@@ -73,6 +74,16 @@ interface nsILoadInfo : nsISupports
    * return the correct result principal. If none or more than one of these
    * flags are set AsyncOpen2 will fail.
    */
+
+   /**
+    * Warning: Never use this flag when creating a new channel!
+    * Only use this flag if you have to create a temporary LoadInfo
+    * for performing an explicit nsIContentPolicy check, like e.g.
+    * when loading something from the cache that needs an explicit
+    * nsIContentPolicy check. In all other cases pick one of the
+    * security flags underneath.
+    */
+  const unsigned long SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK = 0;
 
   /*
    * Enforce the same origin policy where data: loads inherit the principal.
@@ -194,7 +205,7 @@ interface nsILoadInfo : nsISupports
 
   /**
    * Load an error page, it should be one of following : about:neterror,
-   * about:certerror, about:blocked, or about:tabcrashed.
+   * about:certerror, about:blocked, about:tabcrashed or about:restartrequired.
    */
   const unsigned long SEC_LOAD_ERROR_PAGE = (1<<13);
 
@@ -359,6 +370,21 @@ interface nsILoadInfo : nsISupports
    */
   [noscript, notxpcom, nostdcall, binaryname(ContextForTopLevelLoad)]
   nsISupports binaryContextForTopLevelLoad();
+
+  /**
+   * For all loads except loads of TYPE_DOCUMENT, the loadingContext
+   * simply returns the loadingNode. For loads of TYPE_DOCUMENT this
+   * will return the context available for top-level loads which
+   * do not have a loadingNode.
+   */
+  [binaryname(LoadingContextXPCOM)]
+  readonly attribute nsISupports loadingContext;
+  
+  /**
+   * A C++ friendly version of the loadingContext.
+   */
+  [noscript, notxpcom, nostdcall, binaryname(GetLoadingContext)]
+  LoadContextRef binaryGetLoadingContext();
 
   /**
    * The securityFlags of that channel.
@@ -550,6 +576,11 @@ interface nsILoadInfo : nsISupports
   [infallible] attribute boolean allowInsecureRedirectToDataURI;
 
   /**
+   * If true, the content policy security check is excluded from web requests.
+   */
+  [infallible] attribute boolean skipContentPolicyCheckForWebRequest;
+
+  /**
    * If true, this is the load of a frame's original src attribute
    */
   [infallible] attribute boolean originalFrameSrcLoad;
@@ -595,18 +626,6 @@ interface nsILoadInfo : nsISupports
    * you are doing!!!
    */
   void resetPrincipalToInheritToNullPrincipal();
-
-  /**
-   * Allows certain top-level channels to be agnostic to CSP. If set,
-   * this attribute needs to be set before the CSP is initialized
-   * within nsDocument. If set after, this attribute has no effect.
-   * Please note, that this logic is only available for loads of TYPE_DOCUMENT,
-   * and is discarded for other loads.
-   *
-   * WARNING: Please only use that function if you know exactly what
-   * you are doing!!!
-   */
-  [infallible] attribute boolean allowDocumentToBeAgnosticToCSP;
 
   /**
    * Customized OriginAttributes within LoadInfo to allow overwriting of the

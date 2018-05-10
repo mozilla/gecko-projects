@@ -15,7 +15,6 @@ function ProtocolHandler() {
                .createInstance(Ci.nsIURIMutator)
                .setSpec(this.scheme + ":dummy")
                .finalize();
-  this.uri.QueryInterface(Ci.nsIMutable).mutable = false;
 }
 
 ProtocolHandler.prototype = {
@@ -126,10 +125,10 @@ ProtocolHandler.prototype = {
   lockFactory: function() {},
 
   /** nsISupports */
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIProtocolHandler,
-                                         Ci.nsIRequest,
-                                         Ci.nsIChannel,
-                                         Ci.nsIFactory]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIProtocolHandler,
+                                          Ci.nsIRequest,
+                                          Ci.nsIChannel,
+                                          Ci.nsIFactory]),
   classID: Components.ID("{16d594bc-d9d8-47ae-a139-ea714dc0c35c}")
 };
 

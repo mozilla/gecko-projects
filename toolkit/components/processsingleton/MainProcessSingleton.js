@@ -13,8 +13,8 @@ ChromeUtils.defineModuleGetter(this, "NetUtil",
 function MainProcessSingleton() {}
 MainProcessSingleton.prototype = {
   classID: Components.ID("{0636a680-45cb-11e4-916c-0800200c9a66}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 
   // Called when a webpage calls window.external.AddSearchProvider
   addSearchEngine({ target: browser, data: { pageURL, engineURL } }) {
@@ -31,10 +31,15 @@ MainProcessSingleton.prototype = {
       let isWeb = ["https", "http", "ftp"];
 
       if (!isWeb.includes(engineURL.scheme))
-        throw "Unsupported search engine URL: " + engineURL;
+        throw "Unsupported search engine URL: " + engineURL.spec;
 
       if (iconURL && !isWeb.includes(iconURL.scheme))
-        throw "Unsupported search icon URL: " + iconURL;
+        throw "Unsupported search icon URL: " + iconURL.spec;
+
+      if (Services.policies &&
+          !Services.policies.isAllowed("installSearchEngine")) {
+        throw "Search Engine installation blocked by the Enterprise Policy Manager.";
+      }
     } catch (ex) {
       Cu.reportError("Invalid argument passed to window.external.AddSearchProvider: " + ex);
 
@@ -60,6 +65,7 @@ MainProcessSingleton.prototype = {
     switch (topic) {
     case "app-startup": {
       Services.obs.addObserver(this, "xpcom-shutdown");
+      Services.obs.addObserver(this, "document-element-inserted");
 
       // Load this script early so that console.* is initialized
       // before other frame scripts.
@@ -70,8 +76,25 @@ MainProcessSingleton.prototype = {
       break;
     }
 
+    case "document-element-inserted":
+      // Set up Custom Elements for XUL windows before anything else happens
+      // in the document. Anything loaded here should be considered part of
+      // core XUL functionality. Any window-specific elements can be registered
+      // via <script> tags at the top of individual documents.
+      const doc = subject;
+      if (doc.nodePrincipal.isSystemPrincipal &&
+          doc.contentType == "application/vnd.mozilla.xul+xml") {
+        for (let script of [
+          "chrome://global/content/elements/stringbundle.js",
+        ]) {
+          Services.scriptloader.loadSubScript(script, doc.ownerGlobal);
+        }
+      }
+      break;
+
     case "xpcom-shutdown":
       Services.mm.removeMessageListener("Search:AddEngine", this.addSearchEngine);
+      Services.obs.removeObserver(this, "document-element-inserted");
       break;
     }
   },

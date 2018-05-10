@@ -444,9 +444,9 @@ public:
     {  return GetSiblingAtOffset(1); }
   inline Accessible* PrevSibling() const
     { return GetSiblingAtOffset(-1); }
-  inline Accessible* FirstChild()
+  inline Accessible* FirstChild() const
     { return GetChildAt(0); }
-  inline Accessible* LastChild()
+  inline Accessible* LastChild() const
   {
     uint32_t childCount = ChildCount();
     return childCount != 0 ? GetChildAt(childCount - 1) : nullptr;
@@ -510,9 +510,19 @@ public:
                             uint32_t aLength = UINT32_MAX);
 
   /**
+   * Return boundaries in screen coordinates in app units.
+   */
+  virtual nsRect BoundsInAppUnits() const;
+
+  /**
    * Return boundaries in screen coordinates.
    */
   virtual nsIntRect Bounds() const;
+
+  /**
+   * Return boundaries in screen coordinates in CSS pixels.
+   */
+  virtual nsIntRect BoundsInCSSPixels() const;
 
   /**
    * Return boundaries rect relative the bounding frame.
@@ -716,7 +726,7 @@ public:
   /**
    * Return true if the accessible is hyper link accessible.
    */
-  virtual bool IsLink();
+  virtual bool IsLink() const;
 
   /**
    * Return the start offset of the link within the parent accessible.
@@ -733,7 +743,7 @@ public:
    */
   inline bool IsLinkValid()
   {
-    NS_PRECONDITION(IsLink(), "IsLinkValid is called on not hyper link!");
+    MOZ_ASSERT(IsLink(), "IsLinkValid is called on not hyper link!");
 
     // XXX In order to implement this we would need to follow every link
     // Perhaps we can get information about invalid links from the cache

@@ -242,11 +242,12 @@ var gSearchResultsPane = {
         rootPreferencesChildren = rootPreferencesChildren.filter(el => !el.hidden);
       }
 
-      // Mark all the children to check be visible to bind JS, Access Keys, etc,
-      // but don't really show them by setting their visibility to hidden in CSS.
+      // Attach the bindings for all children if they were not already visible.
       for (let child of rootPreferencesChildren) {
-        child.classList.add("visually-hidden");
-        child.hidden = false;
+        if (child.hidden) {
+          child.classList.add("visually-hidden");
+          child.hidden = false;
+        }
       }
 
       let ts = performance.now();
@@ -268,7 +269,6 @@ var gSearchResultsPane = {
         if (!child.classList.contains("header") &&
             !child.classList.contains("subcategory") &&
             await this.searchWithinNode(child, this.query)) {
-          child.hidden = false;
           child.classList.remove("visually-hidden");
 
           // Show the preceding search-header if one exists.
@@ -280,7 +280,7 @@ var gSearchResultsPane = {
 
           resultsFound = true;
         } else {
-          child.hidden = true;
+          child.classList.add("visually-hidden");
         }
       }
 
@@ -477,16 +477,24 @@ var gSearchResultsPane = {
       // Map the localized messages taking value or a selected attribute and
       // building a string of concatenated translated strings out of it.
       let keywords = messages.map((msg, i) => {
-        if (msg === null) {
-          console.warn(`Missing search l10n id "${refs[i][0]}"`);
+        let [refId, refAttr] = refs[i];
+        if (!msg) {
+          console.error(`Missing search l10n id "${refId}"`);
           return null;
         }
-        if (refs[i][1]) {
-          let attr = msg.attrs.find(a => a.name === refs[i][1]);
-          if (attr) {
-            return attr.value;
+        if (refAttr) {
+          let attr = msg.attributes && msg.attributes.find(a => a.name === refAttr);
+          if (!attr) {
+            console.error(`Missing search l10n id "${refId}.${refAttr}"`);
+            return null;
           }
-          return null;
+          if (attr.value === "") {
+            console.error(`Empty value added to search-l10n-ids "${refId}.${refAttr}"`);
+          }
+          return attr.value;
+        }
+        if (msg.value === "") {
+          console.error(`Empty value added to search-l10n-ids "${refId}"`);
         }
         return msg.value;
       }).filter(keyword => keyword !== null).join(" ");
@@ -513,7 +521,7 @@ var gSearchResultsPane = {
     }
     let searchTooltip = anchorNode.ownerDocument.createElement("span");
     let searchTooltipText = anchorNode.ownerDocument.createElement("span");
-    searchTooltip.setAttribute("class", "search-tooltip");
+    searchTooltip.className = "search-tooltip";
     searchTooltipText.textContent = query;
     searchTooltip.appendChild(searchTooltipText);
 
@@ -535,15 +543,11 @@ var gSearchResultsPane = {
   },
 
   /**
-   * Remove all search tooltips that were created.
+   * Remove all search tooltips.
    */
   removeAllSearchTooltips() {
-    let searchTooltips = Array.from(document.querySelectorAll(".search-tooltip"));
-    for (let searchTooltip of searchTooltips) {
-      searchTooltip.parentElement.classList.remove("search-tooltip-parent");
-      searchTooltip.remove();
-    }
     for (let anchorNode of this.listSearchTooltips) {
+      anchorNode.parentElement.classList.remove("search-tooltip-parent");
       anchorNode.tooltipNode.remove();
       anchorNode.tooltipNode = null;
     }

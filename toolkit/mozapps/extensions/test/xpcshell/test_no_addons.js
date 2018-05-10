@@ -35,16 +35,14 @@ function check_empty_state() {
 // add-on directory state preference is an empty array
 // no pending operations
 add_task(async function first_run() {
-  startupManager();
+  await promiseStartupManager();
   check_empty_state();
   await true;
 });
 
 // Now do something that causes a DB load, and re-check
 async function trigger_db_load() {
-  let addonList = await new Promise(resolve => {
-    AddonManager.getAddonsByTypes(["extension"], resolve);
-  });
+  let addonList = await AddonManager.getAddonsByTypes(["extension"]);
 
   Assert.equal(addonList.length, 0);
   check_empty_state();
@@ -55,7 +53,7 @@ add_task(trigger_db_load);
 
 // Now restart the manager and check again
 add_task(async function restart_and_recheck() {
-  restartManager();
+  await promiseRestartManager();
   check_empty_state();
   await true;
 });
@@ -65,11 +63,11 @@ add_task(trigger_db_load);
 
 // When we start up with no DB and an old database schema, we should update the
 // schema number but not create a database
-add_task(function upgrade_schema_version() {
-  shutdownManager();
+add_task(async function upgrade_schema_version() {
+  await promiseShutdownManager();
   Services.prefs.setIntPref("extensions.databaseSchema", 1);
 
-  startupManager();
+  await promiseStartupManager();
   Assert.equal(Services.prefs.getIntPref("extensions.databaseSchema"), DB_SCHEMA);
   check_empty_state();
 });

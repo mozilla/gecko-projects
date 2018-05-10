@@ -7,7 +7,7 @@ async function createTabWithRandomValue(url) {
 
   // Set a random value.
   let r = `rand-${Math.random()}`;
-  ss.setTabValue(tab, "foobar", r);
+  ss.setCustomTabValue(tab, "foobar", r);
 
   // Flush to ensure there are no scheduled messages.
   await TabStateFlusher.flush(browser);
@@ -35,7 +35,7 @@ function restoreClosedTabWithValue(rval) {
 function promiseNewLocationAndHistoryEntryReplaced(browser, snippet) {
   return ContentTask.spawn(browser, snippet, async function(codeSnippet) {
     let webNavigation = docShell.QueryInterface(Ci.nsIWebNavigation);
-    let shistory = webNavigation.sessionHistory;
+    let shistory = webNavigation.sessionHistory.legacySHistory;
 
     // Evaluate the snippet that the changes the location.
     // eslint-disable-next-line no-eval
@@ -48,7 +48,7 @@ function promiseNewLocationAndHistoryEntryReplaced(browser, snippet) {
           resolve();
         },
 
-        QueryInterface: XPCOMUtils.generateQI([
+        QueryInterface: ChromeUtils.generateQI([
           Ci.nsISHistoryListener,
           Ci.nsISupportsWeakReference
         ])
@@ -70,7 +70,7 @@ function promiseHistoryEntryReplacedNonRemote(browser) {
   let {listeners} = promiseHistoryEntryReplacedNonRemote;
 
   return new Promise(resolve => {
-    let shistory = browser.webNavigation.sessionHistory;
+    let shistory = browser.webNavigation.sessionHistory.legacySHistory;
 
     let listener = {
       OnHistoryReplaceEntry() {
@@ -78,7 +78,7 @@ function promiseHistoryEntryReplacedNonRemote(browser) {
         executeSoon(resolve);
       },
 
-      QueryInterface: XPCOMUtils.generateQI([
+      QueryInterface: ChromeUtils.generateQI([
         Ci.nsISHistoryListener,
         Ci.nsISupportsWeakReference
       ])

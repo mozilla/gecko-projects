@@ -23,7 +23,6 @@
 #include "nsHTMLParts.h"
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
-#include "nsIDOMEvent.h"
 #include "nsScrollbarButtonFrame.h"
 #include "nsISliderListener.h"
 #include "nsIScrollableFrame.h"
@@ -44,6 +43,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/layers/InputAPZContext.h"
@@ -54,7 +54,7 @@ using mozilla::layers::APZCCallbackHelper;
 using mozilla::layers::AsyncDragMetrics;
 using mozilla::layers::InputAPZContext;
 using mozilla::layers::ScrollDirection;
-using mozilla::layers::ScrollThumbData;
+using mozilla::layers::ScrollbarData;
 
 bool nsSliderFrame::gMiddlePref = false;
 int32_t nsSliderFrame::gSnapMultiplier;
@@ -459,14 +459,16 @@ nsSliderFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
       const ActiveScrolledRoot* ownLayerASR = contASRTracker.GetContainerASR();
       aLists.Content()->AppendToTop(
         MakeDisplayItem<nsDisplayOwnLayer>(aBuilder, this, &masterList, ownLayerASR,
-                                           flags, scrollTargetId,
-                                           ScrollThumbData{scrollDirection,
-                                                           GetThumbRatio(),
-                                                           thumbStart,
-                                                           thumbLength,
-                                                           isAsyncDraggable,
-                                                           sliderTrackStart,
-                                                           sliderTrackLength}));
+                                           flags,
+                                           ScrollbarData{scrollDirection,
+                                                         layers::ScrollbarLayerType::Thumb,
+                                                         GetThumbRatio(),
+                                                         thumbStart,
+                                                         thumbLength,
+                                                         isAsyncDraggable,
+                                                         sliderTrackStart,
+                                                         sliderTrackLength,
+                                                         scrollTargetId}));
 
       return;
     }
@@ -487,15 +489,6 @@ nsSliderFrame::DoXULLayout(nsBoxLayoutState& aState)
   }
 
   EnsureOrient();
-
-#ifdef DEBUG_LAYOUT
-  if (mState & NS_STATE_DEBUG_WAS_SET) {
-      if (mState & NS_STATE_SET_TO_DEBUG)
-          SetXULDebug(aState, true);
-      else
-          SetXULDebug(aState, false);
-  }
-#endif
 
   // get the content area inside our borders
   nsRect clientRect;
@@ -1000,7 +993,7 @@ nsSliderFrame::SetInitialChildList(ChildListID     aListID,
 }
 
 nsresult
-nsSliderMediator::HandleEvent(nsIDOMEvent* aEvent)
+nsSliderMediator::HandleEvent(dom::Event* aEvent)
 {
   // Only process the event if the thumb is not being dragged.
   if (mSlider && !mSlider->isDraggingThumb())
@@ -1160,7 +1153,7 @@ nsSliderFrame::StartAPZDrag(WidgetGUIEvent* aEvent)
 }
 
 nsresult
-nsSliderFrame::StartDrag(nsIDOMEvent* aEvent)
+nsSliderFrame::StartDrag(Event* aEvent)
 {
 #ifdef DEBUG_SLIDER
   printf("Begin dragging\n");

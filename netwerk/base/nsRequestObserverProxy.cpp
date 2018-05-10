@@ -28,7 +28,7 @@ nsARequestObserverEvent::nsARequestObserverEvent(nsIRequest* request)
   : Runnable("net::nsARequestObserverEvent")
   , mRequest(request)
 {
-    NS_PRECONDITION(mRequest, "null pointer");
+    MOZ_ASSERT(mRequest, "null pointer");
 }
 
 //-----------------------------------------------------------------------------
@@ -44,10 +44,10 @@ public:
         : nsARequestObserverEvent(request)
         , mProxy(proxy)
     {
-        NS_PRECONDITION(mProxy, "null pointer");
+        MOZ_ASSERT(mProxy, "null pointer");
     }
 
-    virtual ~nsOnStartRequestEvent() {}
+    virtual ~nsOnStartRequestEvent() = default;
 
     NS_IMETHOD Run() override
     {
@@ -84,10 +84,10 @@ public:
         : nsARequestObserverEvent(request)
         , mProxy(proxy)
     {
-        NS_PRECONDITION(mProxy, "null pointer");
+        MOZ_ASSERT(mProxy, "null pointer");
     }
 
-    virtual ~nsOnStopRequestEvent() {}
+    virtual ~nsOnStopRequestEvent() = default;
 
     NS_IMETHOD Run() override
     {
@@ -99,7 +99,7 @@ public:
             return NS_OK;
         }
         // Do not allow any more events to be handled after OnStopRequest
-        mProxy->mObserver = 0;
+        mProxy->mObserver = nullptr;
 
         nsresult status = NS_OK;
         DebugOnly<nsresult> rv = mRequest->GetStatus(&status);

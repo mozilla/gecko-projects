@@ -14,44 +14,56 @@ describe("SectionsManager", () => {
   let globals;
   let fakeServices;
   let fakePlacesUtils;
+  let sandbox;
+  let storage;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    sandbox = sinon.sandbox.create();
     globals = new GlobalOverrider();
-    fakeServices = {prefs: {getBoolPref: sinon.spy(), addObserver: sinon.spy(), removeObserver: sinon.spy()}};
+    fakeServices = {prefs: {getBoolPref: sandbox.stub(), addObserver: sandbox.stub(), removeObserver: sandbox.stub()}};
     fakePlacesUtils = {history: {update: sinon.stub(), insert: sinon.stub()}};
-    globals.set("Services", fakeServices);
-    globals.set("PlacesUtils", fakePlacesUtils);
+    globals.set({
+      Services: fakeServices,
+      PlacesUtils: fakePlacesUtils
+    });
+    // Redecorate SectionsManager to remove any listeners that have been added
+    EventEmitter.decorate(SectionsManager);
+    storage = {
+      get: sandbox.stub().resolves(),
+      set: sandbox.stub().resolves()
+    };
   });
 
   afterEach(() => {
-    // Redecorate SectionsManager to remove any listeners that have been added
-    EventEmitter.decorate(SectionsManager);
-    SectionsManager.init();
     globals.restore();
+    sandbox.restore();
   });
 
   describe("#init", () => {
-    it("should initialise the sections map with the built in sections", () => {
+    it("should initialise the sections map with the built in sections", async () => {
       SectionsManager.sections.clear();
       SectionsManager.initialized = false;
-      SectionsManager.init();
+      await SectionsManager.init({}, storage);
       assert.equal(SectionsManager.sections.size, 2);
       assert.ok(SectionsManager.sections.has("topstories"));
       assert.ok(SectionsManager.sections.has("highlights"));
     });
-    it("should set .initialized to true", () => {
+    it("should set .initialized to true", async () => {
       SectionsManager.sections.clear();
       SectionsManager.initialized = false;
-      SectionsManager.init();
+      await SectionsManager.init({}, storage);
       assert.ok(SectionsManager.initialized);
     });
-    it("should add observer for context menu prefs", () => {
-      SectionsManager.sections.clear();
-      SectionsManager.initialized = false;
+    it("should add observer for context menu prefs", async () => {
       SectionsManager.CONTEXT_MENU_PREFS = {"MENU_ITEM": "MENU_ITEM_PREF"};
-      SectionsManager.init();
+      await SectionsManager.init({}, storage);
       assert.calledOnce(fakeServices.prefs.addObserver);
       assert.calledWith(fakeServices.prefs.addObserver, "MENU_ITEM_PREF", SectionsManager);
+    });
+    it("should save the reference to `storage` passed in", async () => {
+      await SectionsManager.init({}, storage);
+
+      assert.equal(SectionsManager._storage, storage);
     });
   });
   describe("#uninit", () => {
@@ -65,15 +77,51 @@ describe("SectionsManager", () => {
     });
   });
   describe("#addBuiltInSection", () => {
-    it("should not report an error if options is undefined", () => {
+    it("should not report an error if options is undefined", async () => {
       globals.sandbox.spy(global.Cu, "reportError");
-      SectionsManager.addBuiltInSection("feeds.section.topstories", undefined);
+      SectionsManager._storage.get = sandbox.stub().returns(Promise.resolve());
+      await SectionsManager.addBuiltInSection("feeds.section.topstories", undefined);
+
       assert.notCalled(Cu.reportError);
     });
-    it("should report an error if options is malformed", () => {
+    it("should report an error if options is malformed", async () => {
       globals.sandbox.spy(global.Cu, "reportError");
-      SectionsManager.addBuiltInSection("feeds.section.topstories", "invalid");
+      SectionsManager._storage.get = sandbox.stub().returns(Promise.resolve());
+      await SectionsManager.addBuiltInSection("feeds.section.topstories", "invalid");
+
       assert.calledOnce(Cu.reportError);
+    });
+    it("should not throw if the indexedDB operation fails", async () => {
+      globals.sandbox.spy(global.Cu, "reportError");
+      storage.get.returns(new Error());
+      SectionsManager._storage = storage;
+
+      try {
+        await SectionsManager.addBuiltInSection("feeds.section.topstories");
+      } catch (e) {
+        assert.fail();
+      }
+
+      assert.calledOnce(storage.get);
+      assert.calledOnce(Cu.reportError);
+    });
+  });
+  describe("#updateSectionPrefs", () => {
+    it("should update the collapsed value of the section", async () => {
+      sandbox.stub(SectionsManager, "updateSection");
+      let topstories = SectionsManager.sections.get("topstories");
+      assert.isFalse(topstories.pref.collapsed);
+
+      await SectionsManager.updateSectionPrefs("topstories", {collapsed: true});
+      topstories = SectionsManager.sections.get("topstories");
+
+      assert.isTrue(SectionsManager.updateSection.args[0][1].pref.collapsed);
+    });
+    it("should ignore invalid ids", async () => {
+      sandbox.stub(SectionsManager, "updateSection");
+      await SectionsManager.updateSectionPrefs("foo", {collapsed: true});
+
+      assert.notCalled(SectionsManager.updateSection);
     });
   });
   describe("#addSection", () => {
@@ -163,14 +211,14 @@ describe("SectionsManager", () => {
       assert.calledWith(SectionsManager.updateSection, "ID2", {title: "FAKE_TITLE_2"}, true);
       SectionsManager.updateSection = updateSectionOrig;
     });
-    it("context menu pref change should update sections", () => {
+    it("context menu pref change should update sections", async () => {
       let observer;
       const services = {prefs: {getBoolPref: sinon.spy(), addObserver: (pref, o) => (observer = o), removeObserver: sinon.spy()}};
       globals.set("Services", services);
 
       SectionsManager.updateSections = sinon.spy();
       SectionsManager.CONTEXT_MENU_PREFS = {"MENU_ITEM": "MENU_ITEM_PREF"};
-      SectionsManager.init();
+      await SectionsManager.init({}, storage);
       observer.observe("", "nsPref:changed", "MENU_ITEM_PREF");
 
       assert.calledOnce(SectionsManager.updateSections);
@@ -342,10 +390,17 @@ describe("SectionsManager", () => {
 
 describe("SectionsFeed", () => {
   let feed;
+  let sandbox;
+  let storage;
 
   beforeEach(() => {
+    sandbox = sinon.sandbox.create();
     SectionsManager.sections.clear();
     SectionsManager.initialized = false;
+    storage = {
+      get: sandbox.stub().resolves(),
+      set: sandbox.stub().resolves()
+    };
     feed = new SectionsFeed();
     feed.store = {dispatch: sinon.spy()};
     feed.store = {
@@ -354,12 +409,13 @@ describe("SectionsFeed", () => {
       state: {
         Prefs: {
           values: {
-            sectionOrder: "topsites,topstories,highlights",
-            showTopSites: true
+            "sectionOrder": "topsites,topstories,highlights",
+            "feeds.topsites": true
           }
         },
         Sections: [{initialized: false}]
-      }
+      },
+      dbStorage: {getDbTable: sandbox.stub().returns(storage)}
     };
   });
   afterEach(() => {
@@ -382,8 +438,8 @@ describe("SectionsFeed", () => {
         assert.calledWith(SectionsManager.on, event, listener);
       }
     });
-    it("should call onAddSection for any already added sections in SectionsManager", () => {
-      SectionsManager.init();
+    it("should call onAddSection for any already added sections in SectionsManager", async () => {
+      await SectionsManager.init({}, storage);
       assert.ok(SectionsManager.sections.has("topstories"));
       assert.ok(SectionsManager.sections.has("highlights"));
       const topstories = SectionsManager.sections.get("topstories");
@@ -505,6 +561,8 @@ describe("SectionsFeed", () => {
       feed.onAction({type: "PREFS_INITIAL_VALUES", data: {foo: "bar"}});
       assert.calledOnce(SectionsManager.init);
       assert.calledWith(SectionsManager.init, {foo: "bar"});
+      assert.calledOnce(feed.store.dbStorage.getDbTable);
+      assert.calledWithExactly(feed.store.dbStorage.getDbTable, "sectionPrefs");
     });
     it("should call SectionsManager.addBuiltInSection on suitable PREF_CHANGED events", () => {
       sinon.spy(SectionsManager, "addBuiltInSection");
@@ -566,6 +624,13 @@ describe("SectionsFeed", () => {
       const stub = sinon.stub(SectionsManager, "updateBookmarkMetadata");
 
       feed.onAction({type: "PLACES_BOOKMARK_ADDED", data: {}});
+
+      assert.calledOnce(stub);
+    });
+    it("should call updateSectionPrefs on UPDATE_SECTION_PREFS", () => {
+      const stub = sinon.stub(SectionsManager, "updateSectionPrefs");
+
+      feed.onAction({type: "UPDATE_SECTION_PREFS", data: {}});
 
       assert.calledOnce(stub);
     });

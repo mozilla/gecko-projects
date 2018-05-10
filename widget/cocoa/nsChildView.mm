@@ -17,6 +17,7 @@
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/WheelHandlingHelper.h"    // for WheelDeltaAdjustmentStrategy
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/SimpleGestureEventBinding.h"
@@ -795,7 +796,7 @@ nsChildView::ReparentNativeWidget(nsIWidget* aNewParent)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  NS_PRECONDITION(aNewParent, "");
+  MOZ_ASSERT(aNewParent, "null widget");
 
   if (mOnDestroyCalled)
     return;
@@ -2551,9 +2552,11 @@ nsChildView::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometri
   int32_t titlebarHeight = CocoaPointsToDevPixels([win titlebarHeight]);
   int32_t devUnifiedHeight = titlebarHeight + unifiedToolbarBottom;
   [win setUnifiedToolbarHeight:DevPixelsToCocoaPoints(devUnifiedHeight)];
-  int32_t devSheetPosition = titlebarHeight +
-                             std::max(toolboxBottom, unifiedToolbarBottom);
-  [win setSheetAttachmentPosition:DevPixelsToCocoaPoints(devSheetPosition)];
+
+  int32_t sheetPositionDevPx = std::max(toolboxBottom, unifiedToolbarBottom);
+  NSPoint sheetPositionView = { 0, DevPixelsToCocoaPoints(sheetPositionDevPx) };
+  NSPoint sheetPositionWindow = [mView convertPoint:sheetPositionView toView:nil];
+  [win setSheetAttachmentPosition:sheetPositionWindow.y];
 
   // Update titlebar control offsets.
   LayoutDeviceIntRect windowButtonRect = FindFirstRectOfType(aThemeGeometries, nsNativeThemeCocoa::eThemeGeometryTypeWindowButtons);
@@ -2754,6 +2757,12 @@ void
 nsChildView::SwipeFinished()
 {
   mSwipeTracker = nullptr;
+}
+
+void
+nsChildView::UpdateBoundsFromView()
+{
+  mBounds = CocoaPointsToDevPixels([mView frame]);
 }
 
 already_AddRefed<gfx::DrawTarget>
@@ -3039,37 +3048,6 @@ nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTriggerSwipe
   }
 }
 
-// When using 10.11, calling showDefinitionForAttributedString causes the
-// following exception on LookupViewService. (rdar://26476091)
-//
-// Exception: decodeObjectForKey: class "TitlebarAndBackgroundColor" not
-// loaded or does not exist
-//
-// So we set temporary color that is NSColor before calling it.
-
-class MOZ_RAII AutoBackgroundSetter final {
-public:
-  explicit AutoBackgroundSetter(NSView* aView) {
-    if (nsCocoaFeatures::OnElCapitanOrLater() &&
-        [[aView window] isKindOfClass:[ToolbarWindow class]]) {
-      mWindow = [(ToolbarWindow*)[aView window] retain];
-      [mWindow setTemporaryBackgroundColor];
-    } else {
-      mWindow = nullptr;
-    }
-  }
-
-  ~AutoBackgroundSetter() {
-    if (mWindow) {
-      [mWindow restoreBackgroundColor];
-      [mWindow release];
-    }
-  }
-
-private:
-  ToolbarWindow* mWindow; // strong
-};
-
 void
 nsChildView::LookUpDictionary(
                const nsAString& aText,
@@ -3095,7 +3073,6 @@ nsChildView::LookUpDictionary(
     }
   }
 
-  AutoBackgroundSetter setter(mView);
   [mView showDefinitionForAttributedString:attrStr atPoint:pt];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -3880,8 +3857,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
 {
   CGLLockContext((CGLContextObj)[mGLContext CGLContextObj]);
   // Make the context opaque for fullscreen (since it performs better), and transparent
-  // for windowed (since we need it for rounded corners).
-  GLint opaque = aOpaque ? 1 : 0;
+  // for windowed (since we need it for rounded corners), but allow overriding
+  // it to opaque for testing purposes, even if that breaks the rounded corners.
+  GLint opaque = aOpaque || gfxPrefs::CompositorGLContextOpaque();
   [mGLContext setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
   CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
 }
@@ -5036,7 +5014,17 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
                                 position,
                                 preciseDelta.x,
                                 preciseDelta.y,
-                                false);
+                                false,
+                                // This parameter is used for wheel delta
+                                // adjustment, such as auto-dir scrolling,
+                                // but we do't need to do anything special here
+                                // since this wheel event is sent to
+                                // DispatchAPZWheelInputEvent, which turns this
+                                // ScrollWheelInput back into a WidgetWheelEvent
+                                // and then it goes through the regular handling
+                                // in APZInputBridge. So passing |eNone| won't
+                                // pass up the necessary wheel delta adjustment.
+                                WheelDeltaAdjustmentStrategy::eNone);
     wheelEvent.mLineOrPageDeltaX = lineOrPageDelta.x;
     wheelEvent.mLineOrPageDeltaY = lineOrPageDelta.y;
     wheelEvent.mIsMomentum = nsCocoaUtils::IsMomentumScrollEvent(theEvent);
@@ -5052,7 +5040,17 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
                                 position,
                                 lineOrPageDelta.x,
                                 lineOrPageDelta.y,
-                                false);
+                                false,
+                                // This parameter is used for wheel delta
+                                // adjustment, such as auto-dir scrolling,
+                                // but we do't need to do anything special here
+                                // since this wheel event is sent to
+                                // DispatchAPZWheelInputEvent, which turns this
+                                // ScrollWheelInput back into a WidgetWheelEvent
+                                // and then it goes through the regular handling
+                                // in APZInputBridge. So passing |eNone| won't
+                                // pass up the necessary wheel delta adjustment.
+                                WheelDeltaAdjustmentStrategy::eNone);
     wheelEvent.mLineOrPageDeltaX = lineOrPageDelta.x;
     wheelEvent.mLineOrPageDeltaY = lineOrPageDelta.y;
     geckoChildDeathGrip->DispatchAPZWheelInputEvent(wheelEvent, false);

@@ -62,6 +62,7 @@
 #include "vm/JSAtom-inl.h"
 #include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
+#include "vm/JSFunction-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/Shape-inl.h"
@@ -271,6 +272,9 @@ js::Throw(JSContext* cx, jsid id, unsigned errorNumber, const char* details)
 
 
 /*** PropertyDescriptor operations and DefineProperties ******************************************/
+
+static const char js_getter_str[] = "getter";
+static const char js_setter_str[] = "setter";
 
 static Result<>
 CheckCallable(JSContext* cx, JSObject* obj, const char* fieldName)
@@ -724,7 +728,9 @@ NewObject(JSContext* cx, HandleObjectGroup group, gc::AllocKind kind,
     gc::InitialHeap heap = GetInitialHeap(newKind, clasp);
 
     JSObject* obj;
-    if (MOZ_LIKELY(clasp->isNative())) {
+    if (clasp->isJSFunction()) {
+        JS_TRY_VAR_OR_RETURN_NULL(cx, obj, JSFunction::create(cx, kind, heap, shape, group));
+    } else if (MOZ_LIKELY(clasp->isNative())) {
         JS_TRY_VAR_OR_RETURN_NULL(cx, obj, NativeObject::create(cx, kind, heap, shape, group));
     } else {
         MOZ_ASSERT(IsTypedObjectClass(clasp));
@@ -864,11 +870,16 @@ static bool
 NewObjectWithGroupIsCachable(JSContext* cx, HandleObjectGroup group,
                              NewObjectKind newKind)
 {
-    return group->proto().isObject() &&
-           newKind == GenericObject &&
-           group->clasp()->isNative() &&
-           (!group->newScript() || group->newScript()->analyzed()) &&
-           !cx->helperThread();
+    if (!group->proto().isObject() ||
+        newKind != GenericObject ||
+        !group->clasp()->isNative() ||
+        cx->helperThread())
+    {
+        return false;
+    }
+
+    AutoSweepObjectGroup sweep(group);
+    return !group->newScript(sweep) || group->newScript(sweep)->analyzed();
 }
 
 /*
@@ -946,15 +957,23 @@ static inline JSObject*
 CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
                                NewObjectKind newKind)
 {
-    if (group->maybeUnboxedLayout() && newKind != SingletonObject)
+    bool isUnboxed;
+    TypeNewScript* maybeNewScript;
+    {
+        AutoSweepObjectGroup sweep(group);
+        isUnboxed = group->maybeUnboxedLayout(sweep);
+        maybeNewScript = group->newScript(sweep);
+    }
+
+    if (isUnboxed && newKind != SingletonObject)
         return UnboxedPlainObject::create(cx, group, newKind);
 
-    if (TypeNewScript* newScript = group->newScript()) {
-        if (newScript->analyzed()) {
+    if (maybeNewScript) {
+        if (maybeNewScript->analyzed()) {
             // The definite properties analysis has been performed for this
             // group, so get the shape and alloc kind to use from the
             // TypeNewScript's template.
-            RootedPlainObject templateObject(cx, newScript->templateObject());
+            RootedPlainObject templateObject(cx, maybeNewScript->templateObject());
             MOZ_ASSERT(templateObject->group() == group);
 
             RootedPlainObject res(cx, CopyInitializerObject(cx, templateObject, newKind));
@@ -985,8 +1004,9 @@ CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
             return nullptr;
 
         // Make sure group->newScript is still there.
-        if (newKind != SingletonObject && group->newScript())
-            group->newScript()->registerNewObject(res);
+        AutoSweepObjectGroup sweep(group);
+        if (newKind != SingletonObject && group->newScript(sweep))
+            group->newScript(sweep)->registerNewObject(res);
 
         return res;
     }
@@ -995,7 +1015,7 @@ CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
 
     if (newKind == SingletonObject) {
         Rooted<TaggedProto> protoRoot(cx, group->proto());
-        return NewObjectWithGivenTaggedProto(cx, &PlainObject::class_, protoRoot, allocKind, newKind);
+        return NewObjectWithGivenTaggedProto<PlainObject>(cx, protoRoot, allocKind, newKind);
     }
     return NewObjectWithGroup<PlainObject>(cx, group, allocKind, newKind);
 }
@@ -1012,16 +1032,20 @@ js::CreateThisForFunctionWithProto(JSContext* cx, HandleObject callee, HandleObj
         if (!group)
             return nullptr;
 
-        if (group->newScript() && !group->newScript()->analyzed()) {
-            bool regenerate;
-            if (!group->newScript()->maybeAnalyze(cx, group, &regenerate))
-                return nullptr;
-            if (regenerate) {
-                // The script was analyzed successfully and may have changed
-                // the new type table, so refetch the group.
-                group = ObjectGroup::defaultNewGroup(cx, nullptr, TaggedProto(proto),
-                                                     newTarget);
-                MOZ_ASSERT(group && group->newScript());
+        {
+            AutoSweepObjectGroup sweep(group);
+            if (group->newScript(sweep) && !group->newScript(sweep)->analyzed()) {
+                bool regenerate;
+                if (!group->newScript(sweep)->maybeAnalyze(cx, group, &regenerate))
+                    return nullptr;
+                if (regenerate) {
+                    // The script was analyzed successfully and may have changed
+                    // the new type table, so refetch the group.
+                    group = ObjectGroup::defaultNewGroup(cx, nullptr, TaggedProto(proto),
+                                                         newTarget);
+                    AutoSweepObjectGroup sweepNewGroup(group);
+                    MOZ_ASSERT(group && group->newScript(sweepNewGroup));
+                }
             }
         }
 
@@ -1558,13 +1582,13 @@ JSObject::fixDictionaryShapeAfterSwap()
 }
 
 static MOZ_MUST_USE bool
-CopyProxyValuesBeforeSwap(ProxyObject* proxy, Vector<Value>& values)
+CopyProxyValuesBeforeSwap(JSContext* cx, ProxyObject* proxy, Vector<Value>& values)
 {
     MOZ_ASSERT(values.empty());
 
     // Remove the GCPtrValues we're about to swap from the store buffer, to
     // ensure we don't trace bogus values.
-    StoreBuffer& sb = proxy->zone()->group()->storeBuffer();
+    StoreBuffer& sb = cx->runtime()->gc.storeBuffer();
 
     // Reserve space for the private slot and the reserved slots.
     if (!values.reserve(1 + proxy->numReservedSlots()))
@@ -1635,8 +1659,8 @@ JSObject::swap(JSContext* cx, HandleObject a, HandleObject b)
      * nursery pointers in either object.
      */
     MOZ_ASSERT(!IsInsideNursery(a) && !IsInsideNursery(b));
-    cx->zone()->group()->storeBuffer().putWholeCell(a);
-    cx->zone()->group()->storeBuffer().putWholeCell(b);
+    cx->runtime()->gc.storeBuffer().putWholeCell(a);
+    cx->runtime()->gc.storeBuffer().putWholeCell(b);
 
     unsigned r = NotifyGCPreSwap(a, b);
 
@@ -1722,11 +1746,11 @@ JSObject::swap(JSContext* cx, HandleObject a, HandleObject b)
         ProxyObject* proxyB = b->is<ProxyObject>() ? &b->as<ProxyObject>() : nullptr;
 
         if (aIsProxyWithInlineValues) {
-            if (!CopyProxyValuesBeforeSwap(proxyA, avals))
+            if (!CopyProxyValuesBeforeSwap(cx, proxyA, avals))
                 oomUnsafe.crash("CopyProxyValuesBeforeSwap");
         }
         if (bIsProxyWithInlineValues) {
-            if (!CopyProxyValuesBeforeSwap(proxyB, bvals))
+            if (!CopyProxyValuesBeforeSwap(cx, proxyB, bvals))
                 oomUnsafe.crash("CopyProxyValuesBeforeSwap");
         }
 
@@ -1815,7 +1839,7 @@ DefineConstructorAndPrototype(JSContext* cx, HandleObject obj, JSProtoKey key, H
                               Native constructor, unsigned nargs,
                               const JSPropertySpec* ps, const JSFunctionSpec* fs,
                               const JSPropertySpec* static_ps, const JSFunctionSpec* static_fs,
-                              NativeObject** ctorp, AllocKind ctorKind)
+                              NativeObject** ctorp)
 {
     /*
      * Create a prototype object for this class.
@@ -1871,7 +1895,7 @@ DefineConstructorAndPrototype(JSContext* cx, HandleObject obj, JSProtoKey key, H
 
         ctor = proto;
     } else {
-        RootedFunction fun(cx, NewNativeConstructor(cx, constructor, nargs, atom, ctorKind));
+        RootedFunction fun(cx, NewNativeConstructor(cx, constructor, nargs, atom));
         if (!fun)
             goto bad;
 
@@ -1936,7 +1960,7 @@ js::InitClass(JSContext* cx, HandleObject obj, HandleObject protoProto_,
               const Class* clasp, Native constructor, unsigned nargs,
               const JSPropertySpec* ps, const JSFunctionSpec* fs,
               const JSPropertySpec* static_ps, const JSFunctionSpec* static_fs,
-              NativeObject** ctorp, AllocKind ctorKind)
+              NativeObject** ctorp)
 {
     RootedObject protoProto(cx, protoProto_);
 
@@ -1961,7 +1985,7 @@ js::InitClass(JSContext* cx, HandleObject obj, HandleObject protoProto_,
     }
 
     return DefineConstructorAndPrototype(cx, obj, key, atom, protoProto, clasp, constructor, nargs,
-                                         ps, fs, static_ps, static_fs, ctorp, ctorKind);
+                                         ps, fs, static_ps, static_fs, ctorp);
 }
 
 void
@@ -2081,7 +2105,8 @@ SetClassAndProto(JSContext* cx, HandleObject obj,
     obj->setGroup(newGroup);
 
     // Add the object's property types to the new group.
-    if (!newGroup->unknownProperties()) {
+    AutoSweepObjectGroup sweep(newGroup);
+    if (!newGroup->unknownProperties(sweep)) {
         if (obj->isNative())
             AddPropertyTypesAfterProtoChange(cx, &obj->as<NativeObject>(), oldGroup);
         else
@@ -3552,8 +3577,6 @@ JSObject::dump(js::GenericPrinter& out) const
             out.put(" had_elements_access");
         if (nobj->isIndexed())
             out.put(" indexed");
-        if (nobj->wasNewScriptCleared())
-            out.put(" new_script_cleared");
     } else {
         out.put(" not_native\n");
     }
@@ -3892,7 +3915,7 @@ JSObject::sizeOfIncludingThisInNursery() const
 
     MOZ_ASSERT(!isTenured());
 
-    const Nursery& nursery = zone()->group()->nursery();
+    const Nursery& nursery = runtimeFromMainThread()->gc.nursery();
     size_t size = Arena::thingSize(allocKindForTenure(nursery));
 
     if (is<NativeObject>()) {
@@ -3981,7 +4004,8 @@ JSObject::traceChildren(JSTracer* trc)
 static JSAtom*
 displayAtomFromObjectGroup(ObjectGroup& group)
 {
-    TypeNewScript* script = group.newScript();
+    AutoSweepObjectGroup sweep(&group);
+    TypeNewScript* script = group.newScript(sweep);
     if (!script)
         return nullptr;
 
@@ -4073,9 +4097,9 @@ MOZ_MUST_USE JSObject*
 js::SpeciesConstructor(JSContext* cx, HandleObject obj, JSProtoKey ctorKey,
                        bool (*isDefaultSpecies)(JSContext*, JSFunction*))
 {
-    if (!GlobalObject::ensureConstructor(cx, cx->global(), ctorKey))
+    RootedObject defaultCtor(cx, GlobalObject::getOrCreateConstructor(cx, ctorKey));
+    if (!defaultCtor)
         return nullptr;
-    RootedObject defaultCtor(cx, &cx->global()->getConstructor(ctorKey).toObject());
     return SpeciesConstructor(cx, obj, defaultCtor, isDefaultSpecies);
 }
 
@@ -4120,7 +4144,7 @@ JSObject::debugCheckNewObject(ObjectGroup* group, Shape* shape, js::gc::AllocKin
     }
 
     // Classes with a finalizer must specify whether instances will be finalized
-    // on the active thread or in the background, except proxies whose behaviour
+    // on the main thread or in the background, except proxies whose behaviour
     // depends on the target object.
     static const uint32_t FinalizeMask = JSCLASS_FOREGROUND_FINALIZE | JSCLASS_BACKGROUND_FINALIZE;
     uint32_t flags = clasp->flags;

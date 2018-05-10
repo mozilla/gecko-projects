@@ -81,16 +81,14 @@ static void
 DirectoryMapAttributesIntoRule(const nsMappedAttributes* aAttributes,
                                GenericSpecifiedValues* aData)
 {
-  if (aData->ShouldComputeStyleStruct(NS_STYLE_INHERIT_BIT(List))) {
-    if (!aData->PropertyIsSet(eCSSProperty_list_style_type)) {
-      // type: enum
-      const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
-      if (value) {
-        if (value->Type() == nsAttrValue::eEnum) {
-          aData->SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
-        } else {
-          aData->SetKeywordValue(eCSSProperty_list_style_type, NS_STYLE_LIST_STYLE_DISC);
-        }
+  if (!aData->PropertyIsSet(eCSSProperty_list_style_type)) {
+    // type: enum
+    const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
+    if (value) {
+      if (value->Type() == nsAttrValue::eEnum) {
+        aData->SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
+      } else {
+        aData->SetKeywordValue(eCSSProperty_list_style_type, NS_STYLE_LIST_STYLE_DISC);
       }
     }
   }
@@ -122,7 +120,7 @@ HTMLSharedElement::IsAttributeMapped(const nsAtom* aAttribute) const
 static void
 SetBaseURIUsingFirstBaseWithHref(nsIDocument* aDocument, nsIContent* aMustMatch)
 {
-  NS_PRECONDITION(aDocument, "Need a document!");
+  MOZ_ASSERT(aDocument, "Need a document!");
 
   for (nsIContent* child = aDocument->GetFirstChild(); child;
        child = child->GetNextNode()) {
@@ -175,7 +173,7 @@ static void
 SetBaseTargetUsingFirstBaseWithTarget(nsIDocument* aDocument,
                                       nsIContent* aMustMatch)
 {
-  NS_PRECONDITION(aDocument, "Need a document!");
+  MOZ_ASSERT(aDocument, "Need a document!");
 
   for (nsIContent* child = aDocument->GetFirstChild(); child;
        child = child->GetNextNode()) {

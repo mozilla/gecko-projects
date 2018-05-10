@@ -16,7 +16,9 @@ from taskgraph.util.partials import (get_balrog_platform_name,
 from taskgraph.util.schema import validate_schema, Schema
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
-                                         get_phase)
+                                         get_phase,
+                                         get_worker_type_for_scope)
+from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required, Optional
 
@@ -54,15 +56,6 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     "target_info.txt",
     "target.jsshell.zip",
     "mozharness.zip",
-    "target.langpack.xpi",
-]
-
-# Until bug 1331141 is fixed, if you are adding any new artifacts here that
-# need to be transfered to S3, please be aware you also need to follow-up
-# with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
-# See example in bug 1348286
-_DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
-    "target.langpack.xpi",
 ]
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -75,13 +68,18 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
             'host/bin/mar',
             'host/bin/mbsdiff',
         ],
+    r'^linux64-asan-reporter-nightly$':
+        filter(lambda a: a not in ('target.crashreporter-symbols.zip', 'target.jsshell.zip'),
+               _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+                    "host/bin/mar",
+                    "host/bin/mbsdiff",
+                ]),
     r'^win(32|64)(|-devedition)-nightly$':
         _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
-            "host/bin/mar.exe",
-            "host/bin/mbsdiff.exe",
+            'host/bin/mar.exe',
+            'host/bin/mbsdiff.exe',
         ],
-    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$':
-        _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N,
+    r'^(linux(|64)|macosx64|win(32|64))(|-devedition)-nightly-l10n$': [],
 }
 
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
@@ -89,7 +87,8 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_PATHS = {
-    r'^linux(|64)(|-devedition)-nightly(|-l10n)$': ['target.tar.bz2', 'target.tar.bz2.asc'],
+    r'^linux(|64)(|-devedition|-asan-reporter)-nightly(|-l10n)$':
+        ['target.tar.bz2', 'target.tar.bz2.asc'],
     r'^win(32|64)(|-devedition)-nightly(|-l10n)$': ['target.zip'],
 }
 
@@ -105,13 +104,14 @@ UPSTREAM_ARTIFACT_REPACKAGE_PATHS = {
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS = {
-    r'^(linux(|64)|macosx64)(|-devedition)-nightly(|-l10n)$': ['target.complete.mar'],
+    r'^(linux(|64)|macosx64)(|-devedition|-asan-reporter)-nightly(|-l10n)$':
+        ['target.complete.mar'],
     r'^win64(|-devedition)-nightly(|-l10n)$': ['target.complete.mar', 'target.installer.exe'],
     r'^win32(|-devedition)-nightly(|-l10n)$': [
         'target.complete.mar',
         'target.installer.exe',
         'target.stub-installer.exe'
-    ],
+        ],
 }
 
 # Compile every regex once at import time
@@ -236,7 +236,7 @@ def make_task_description(config, jobs):
         task = {
             'label': label,
             'description': description,
-            'worker-type': 'scriptworker-prov-v1/beetmoverworker-v1',
+            'worker-type': get_worker_type_for_scope(config, bucket_scope),
             'scopes': [bucket_scope, action_scope],
             'dependencies': dependencies,
             'attributes': attributes,
@@ -249,18 +249,18 @@ def make_task_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
+def generate_upstream_artifacts(job, build_task_ref, build_signing_task_ref,
                                 repackage_task_ref, repackage_signing_task_ref,
-                                platform, locale=None):
+                                platform, locale=None, project=None):
 
     build_mapping = UPSTREAM_ARTIFACT_UNSIGNED_PATHS
     build_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_PATHS
     repackage_mapping = UPSTREAM_ARTIFACT_REPACKAGE_PATHS
     repackage_signing_mapping = UPSTREAM_ARTIFACT_SIGNED_REPACKAGE_PATHS
 
-    artifact_prefix = 'public/build'
+    artifact_prefix = get_artifact_prefix(job)
     if locale:
-        artifact_prefix = 'public/build/{}'.format(locale)
+        artifact_prefix = '{}/{}'.format(artifact_prefix, locale)
         platform = "{}-l10n".format(platform)
 
     upstream_artifacts = []
@@ -280,28 +280,37 @@ def generate_upstream_artifacts(build_task_ref, build_signing_task_ref,
     ]
 
     for ref, tasktype, mapping in zip(task_refs, tasktypes, mapping):
-        plarform_was_previously_matched_by_regex = None
+        platform_was_previously_matched_by_regex = None
         for platform_regex, paths in mapping.iteritems():
             if platform_regex.match(platform) is not None:
                 _check_platform_matched_only_one_regex(
-                    tasktype, platform, plarform_was_previously_matched_by_regex, platform_regex
+                    tasktype, platform, platform_was_previously_matched_by_regex, platform_regex
                 )
-                upstream_artifacts.append({
-                    "taskId": {"task-reference": ref},
-                    "taskType": tasktype,
-                    "paths": ["{}/{}".format(artifact_prefix, path) for path in paths],
-                    "locale": locale or "en-US",
-                })
-                plarform_was_previously_matched_by_regex = platform_regex
+                if paths:
+                    usable_paths = paths[:]
+
+                    no_stub = ("mozilla-esr60", "jamun")
+                    if project in no_stub:
+                        # Stub installer is only generated on win32 and not on esr
+                        # XXX We really should have a better solution for this
+                        if 'target.stub-installer.exe' in usable_paths:
+                            usable_paths.remove('target.stub-installer.exe')
+                    upstream_artifacts.append({
+                        "taskId": {"task-reference": ref},
+                        "taskType": tasktype,
+                        "paths": ["{}/{}".format(artifact_prefix, path)
+                                  for path in usable_paths],
+                        "locale": locale or "en-US",
+                    })
+                platform_was_previously_matched_by_regex = platform_regex
 
     return upstream_artifacts
 
 
-def generate_partials_upstream_artifacts(artifacts, platform, locale=None):
-    if not locale or locale == 'en-US':
-        artifact_prefix = 'public/build'
-    else:
-        artifact_prefix = 'public/build/{}'.format(locale)
+def generate_partials_upstream_artifacts(job, artifacts, platform, locale=None):
+    artifact_prefix = get_artifact_prefix(job)
+    if locale and locale != 'en-US':
+        artifact_prefix = '{}/{}'.format(artifact_prefix, locale)
 
     upstream_artifacts = [{
         'taskId': {'task-reference': '<partials-signing>'},
@@ -315,14 +324,14 @@ def generate_partials_upstream_artifacts(artifacts, platform, locale=None):
 
 
 def _check_platform_matched_only_one_regex(
-    task_type, platform, plarform_was_previously_matched_by_regex, platform_regex
+    task_type, platform, platform_was_previously_matched_by_regex, platform_regex
 ):
-    if plarform_was_previously_matched_by_regex is not None:
+    if platform_was_previously_matched_by_regex is not None:
         raise Exception('In task type "{task_type}", platform "{platform}" matches at \
 least 2 regular expressions. First matched: "{first_matched}". Second matched: \
 "{second_matched}"'.format(
             task_type=task_type, platform=platform,
-            first_matched=plarform_was_previously_matched_by_regex.pattern,
+            first_matched=platform_was_previously_matched_by_regex.pattern,
             second_matched=platform_regex.pattern
         ))
 
@@ -375,8 +384,9 @@ def make_task_worker(config, jobs):
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
             'upstream-artifacts': generate_upstream_artifacts(
-                build_task_ref, build_signing_task_ref, repackage_task_ref,
-                repackage_signing_task_ref, platform, locale
+                job, build_task_ref, build_signing_task_ref, repackage_task_ref,
+                repackage_signing_task_ref, platform, locale,
+                project=config.params['project']
             ),
         }
         if locale:
@@ -417,7 +427,7 @@ def make_partials_artifacts(config, jobs):
                 continue
 
         upstream_artifacts = generate_partials_upstream_artifacts(
-            artifacts, balrog_platform, locale
+            job, artifacts, balrog_platform, locale
         )
 
         job['worker']['upstream-artifacts'].extend(upstream_artifacts)

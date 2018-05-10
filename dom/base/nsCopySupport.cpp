@@ -12,7 +12,6 @@
 #include "nsIServiceManager.h"
 #include "nsIClipboard.h"
 #include "nsIFormControl.h"
-#include "nsISelection.h"
 #include "nsWidgetsCID.h"
 #include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
@@ -26,15 +25,12 @@
 
 #include "nsIDocShell.h"
 #include "nsIContentViewerEdit.h"
-#include "nsIClipboardDragDropHooks.h"
-#include "nsIClipboardDragDropHookList.h"
 #include "nsIClipboardHelper.h"
 #include "nsISelectionController.h"
 
 #include "nsPIDOMWindow.h"
 #include "nsIDocument.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMDocument.h"
 #include "nsIHTMLDocument.h"
 #include "nsGkAtoms.h"
@@ -69,8 +65,6 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsresult NS_NewDomSelection(nsISelection **aDomSelection);
-
 static NS_DEFINE_CID(kCClipboardCID,           NS_CLIPBOARD_CID);
 static NS_DEFINE_CID(kCTransferableCID,        NS_TRANSFERABLE_CID);
 static NS_DEFINE_CID(kHTMLConverterCID,        NS_HTMLFORMATCONVERTER_CID);
@@ -94,7 +88,7 @@ static nsresult AppendImagePromise(nsITransferable* aTransferable,
 // Helper used for HTMLCopy and GetTransferableForSelection since both routines
 // share common code.
 static nsresult
-SelectionCopyHelper(nsISelection *aSel, nsIDocument *aDoc,
+SelectionCopyHelper(Selection *aSel, nsIDocument *aDoc,
                     bool doPutOnClipboard, int16_t aClipboardID,
                     uint32_t aFlags, nsITransferable ** aTransferable)
 {
@@ -281,12 +275,8 @@ SelectionCopyHelper(nsISelection *aSel, nsIDocument *aDoc,
       }
 
       if (doPutOnClipboard && clipboard) {
-        bool actuallyPutOnClipboard = true;
-        nsCopySupport::DoHooks(aDoc, trans, &actuallyPutOnClipboard);
-
         // put the transferable on the clipboard
-        if (actuallyPutOnClipboard)
-          clipboard->SetData(trans, nullptr, aClipboardID);
+        clipboard->SetData(trans, nullptr, aClipboardID);
       }
 
       // Return the transferable to the caller if requested.
@@ -299,7 +289,7 @@ SelectionCopyHelper(nsISelection *aSel, nsIDocument *aDoc,
 }
 
 nsresult
-nsCopySupport::HTMLCopy(nsISelection* aSel, nsIDocument* aDoc,
+nsCopySupport::HTMLCopy(Selection* aSel, nsIDocument* aDoc,
                         int16_t aClipboardID, bool aWithRubyAnnotation)
 {
   uint32_t flags = nsIDocumentEncoder::SkipInvisibleContent;
@@ -319,7 +309,7 @@ nsCopySupport::ClearSelectionCache()
 }
 
 nsresult
-nsCopySupport::GetTransferableForSelection(nsISelection* aSel,
+nsCopySupport::GetTransferableForSelection(Selection* aSel,
                                            nsIDocument* aDoc,
                                            nsITransferable** aTransferable)
 {
@@ -333,72 +323,28 @@ nsCopySupport::GetTransferableForNode(nsINode* aNode,
                                       nsIDocument* aDoc,
                                       nsITransferable** aTransferable)
 {
-  nsCOMPtr<nsISelection> selection;
   // Make a temporary selection with aNode in a single range.
   // XXX We should try to get rid of the Selection object here.
   // XXX bug 1245883
-  nsresult rv = NS_NewDomSelection(getter_AddRefs(selection));
-  NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aNode);
-  NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
+  RefPtr<Selection> selection = new Selection();
   RefPtr<nsRange> range = new nsRange(aNode);
-  rv = range->SelectNode(node);
-  NS_ENSURE_SUCCESS(rv, rv);
   ErrorResult result;
-  selection->AsSelection()->AddRangeInternal(*range, aDoc, result);
-  rv = result.StealNSResult();
-  NS_ENSURE_SUCCESS(rv, rv);
+  range->SelectNode(*aNode, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.StealNSResult();
+  }
+  selection->AddRangeInternal(*range, aDoc, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.StealNSResult();
+  }
   // It's not the primary selection - so don't skip invisible content.
   uint32_t flags = 0;
   return SelectionCopyHelper(selection, aDoc, false, 0, flags,
                              aTransferable);
 }
 
-nsresult nsCopySupport::DoHooks(nsIDocument *aDoc, nsITransferable *aTrans,
-                                bool *aDoPutOnClipboard)
-{
-  NS_ENSURE_ARG(aDoc);
-
-  *aDoPutOnClipboard = true;
-
-  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
-  nsCOMPtr<nsIClipboardDragDropHookList> hookObj = do_GetInterface(container);
-  if (!hookObj) return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsISimpleEnumerator> enumerator;
-  hookObj->GetHookEnumerator(getter_AddRefs(enumerator));
-  if (!enumerator) return NS_ERROR_FAILURE;
-
-  // the logic here should follow the behavior specified in
-  // nsIClipboardDragDropHooks.h
-
-  nsCOMPtr<nsIClipboardDragDropHooks> override;
-  nsCOMPtr<nsISupports> isupp;
-  bool hasMoreHooks = false;
-  nsresult rv = NS_OK;
-  while (NS_SUCCEEDED(enumerator->HasMoreElements(&hasMoreHooks))
-         && hasMoreHooks)
-  {
-    rv = enumerator->GetNext(getter_AddRefs(isupp));
-    if (NS_FAILED(rv)) break;
-    override = do_QueryInterface(isupp);
-    if (override)
-    {
-#ifdef DEBUG
-      nsresult hookResult =
-#endif
-      override->OnCopyOrDrag(nullptr, aTrans, aDoPutOnClipboard);
-      NS_ASSERTION(NS_SUCCEEDED(hookResult), "OnCopyOrDrag hook failed");
-      if (!*aDoPutOnClipboard)
-        break;
-    }
-  }
-
-  return rv;
-}
-
 nsresult
-nsCopySupport::GetContents(const nsACString& aMimeType, uint32_t aFlags, nsISelection *aSel, nsIDocument *aDoc, nsAString& outdata)
+nsCopySupport::GetContents(const nsACString& aMimeType, uint32_t aFlags, Selection *aSel, nsIDocument *aDoc, nsAString& outdata)
 {
   nsresult rv = NS_OK;
 
@@ -688,7 +634,7 @@ static nsresult AppendImagePromise(nsITransferable* aTransferable,
 #endif // XP_WIN
 
 nsIContent*
-nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, nsISelection** aSelection)
+nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, Selection** aSelection)
 {
   *aSelection = nullptr;
 
@@ -704,8 +650,9 @@ nsCopySupport::GetSelectionForCopy(nsIDocument* aDocument, nsISelection** aSelec
     return nullptr;
   }
 
-  selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL,
-                                    aSelection);
+  RefPtr<Selection> sel =
+    selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  sel.forget(aSelection);
   return focusedContent;
 }
 
@@ -715,13 +662,11 @@ nsCopySupport::CanCopy(nsIDocument* aDocument)
   if (!aDocument)
     return false;
 
-  nsCOMPtr<nsISelection> sel;
+  RefPtr<Selection> sel;
   GetSelectionForCopy(aDocument, getter_AddRefs(sel));
   NS_ENSURE_TRUE(sel, false);
 
-  bool isCollapsed;
-  sel->GetIsCollapsed(&isCollapsed);
-  return !isCollapsed;
+  return !sel->IsCollapsed();
 }
 
 static bool
@@ -736,20 +681,12 @@ IsInsideRuby(nsINode* aNode)
 }
 
 static bool
-IsSelectionInsideRuby(nsISelection* aSelection)
+IsSelectionInsideRuby(Selection* aSelection)
 {
-  int32_t rangeCount;
-  nsresult rv = aSelection->GetRangeCount(&rangeCount);
-  if (NS_FAILED(rv)) {
-    return false;
-  }
+  uint32_t rangeCount = aSelection->RangeCount();;
   for (auto i : IntegerRange(rangeCount)) {
-    nsCOMPtr<nsIDOMRange> range;
-    aSelection->GetRangeAt(i, getter_AddRefs(range));
-    nsCOMPtr<nsIDOMNode> node;
-    range->GetCommonAncestorContainer(getter_AddRefs(node));
-    nsCOMPtr<nsINode> n = do_QueryInterface(node);
-    if (!IsInsideRuby(n)) {
+    nsRange* range = aSelection->GetRangeAt(i);
+    if (!IsInsideRuby(range->GetCommonAncestor())) {
       return false;
     }
   }
@@ -760,7 +697,7 @@ bool
 nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
                                   int32_t aClipboardType,
                                   nsIPresShell* aPresShell,
-                                  nsISelection* aSelection,
+                                  Selection* aSelection,
                                   bool* aActionTaken)
 {
   if (aActionTaken) {
@@ -790,20 +727,19 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
 
   // if a selection was not supplied, try to find it
   nsCOMPtr<nsIContent> content;
-  nsCOMPtr<nsISelection> sel = aSelection;
-  if (!sel)
+  RefPtr<Selection> sel = aSelection;
+  if (!sel) {
     content = GetSelectionForCopy(doc, getter_AddRefs(sel));
+  }
 
   // retrieve the event target node from the start of the selection
-  nsresult rv;
   if (sel) {
-    nsCOMPtr<nsIDOMRange> range;
-    rv = sel->GetRangeAt(0, getter_AddRefs(range));
-    if (NS_SUCCEEDED(rv) && range) {
-      nsCOMPtr<nsIDOMNode> startContainer;
-      range->GetStartContainer(getter_AddRefs(startContainer));
-      if (startContainer)
+    RefPtr<nsRange> range = sel->GetRangeAt(0);
+    if (range) {
+      nsINode* startContainer = range->GetStartContainer();
+      if (startContainer) {
         content = do_QueryInterface(startContainer);
+      }
     }
   }
 
@@ -897,9 +833,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
     // XXX this is probably the wrong editable flag to check
     if (originalEventMessage != eCut || content->IsEditable()) {
       // get the data from the selection if any
-      bool isCollapsed;
-      sel->GetIsCollapsed(&isCollapsed);
-      if (isCollapsed) {
+      if (sel->IsCollapsed()) {
         if (aActionTaken) {
           *aActionTaken = true;
         }
@@ -911,7 +845,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
       // expose the full functionality in browser. See bug 1130891.
       bool withRubyAnnotation = IsSelectionInsideRuby(sel);
       // call the copy code
-      rv = HTMLCopy(sel, doc, aClipboardType, withRubyAnnotation);
+      nsresult rv = HTMLCopy(sel, doc, aClipboardType, withRubyAnnotation);
       if (NS_FAILED(rv)) {
         return false;
       }
@@ -931,7 +865,7 @@ nsCopySupport::FireClipboardEvent(EventMessage aEventMessage,
       NS_ENSURE_TRUE(transferable, false);
 
       // put the transferable on the clipboard
-      rv = clipboard->SetData(transferable, nullptr, aClipboardType);
+      nsresult rv = clipboard->SetData(transferable, nullptr, aClipboardType);
       if (NS_FAILED(rv)) {
         return false;
       }

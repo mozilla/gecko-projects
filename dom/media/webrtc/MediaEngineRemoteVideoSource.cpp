@@ -42,6 +42,7 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
   , mMutex("MediaEngineRemoteVideoSource::mMutex")
   , mRescalingBufferPool(/* zero_initialize */ false,
                          /* max_number_of_buffers */ 1)
+  , mSettingsUpdatedByFrame(MakeAndAddRef<media::Refcountable<AtomicBool>>())
   , mSettings(MakeAndAddRef<media::Refcountable<MediaTrackSettings>>())
 {
   MOZ_ASSERT(aMediaSource != MediaSourceEnum::Other);
@@ -114,17 +115,17 @@ MediaEngineRemoteVideoSource::SetName(nsString aName)
   // See media/webrtc/trunk/webrtc/modules/video_capture/android/java/src/org/
   // webrtc/videoengine/VideoCaptureDeviceInfoAndroid.java
 
-  if (aName.Find(NS_LITERAL_STRING("Facing back")) != kNotFound) {
+  if (mDeviceName.Find(NS_LITERAL_STRING("Facing back")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::Environment;
-  } else if (aName.Find(NS_LITERAL_STRING("Facing front")) != kNotFound) {
+  } else if (mDeviceName.Find(NS_LITERAL_STRING("Facing front")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::User;
   }
 #endif // ANDROID
 #ifdef XP_MACOSX
   // Kludge to test user-facing cameras on OSX.
-  if (aName.Find(NS_LITERAL_STRING("Face")) != -1) {
+  if (mDeviceName.Find(NS_LITERAL_STRING("Face")) != -1) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::User;
   }
@@ -133,10 +134,10 @@ MediaEngineRemoteVideoSource::SetName(nsString aName)
   // The cameras' name of Surface book are "Microsoft Camera Front" and
   // "Microsoft Camera Rear" respectively.
 
-  if (aName.Find(NS_LITERAL_STRING("Front")) != kNotFound) {
+  if (mDeviceName.Find(NS_LITERAL_STRING("Front")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::User;
-  } else if (aName.Find(NS_LITERAL_STRING("Rear")) != kNotFound) {
+  } else if (mDeviceName.Find(NS_LITERAL_STRING("Rear")) != kNotFound) {
     hasFacingMode = true;
     facingMode = VideoFacingModeEnum::Environment;
   }
@@ -300,6 +301,8 @@ MediaEngineRemoteVideoSource::Start(const RefPtr<const AllocationHandle>& aHandl
     mState = kStarted;
   }
 
+  mSettingsUpdatedByFrame->mValue = false;
+
   if (camera::GetChildAndCall(&camera::CamerasChild::StartCapture,
                               mCapEngine, mCaptureIndex, mCapability, this)) {
     LOG(("StartCapture failed"));
@@ -310,9 +313,29 @@ MediaEngineRemoteVideoSource::Start(const RefPtr<const AllocationHandle>& aHandl
 
   NS_DispatchToMainThread(NS_NewRunnableFunction(
       "MediaEngineRemoteVideoSource::SetLastCapability",
-      [settings = mSettings, cap = mCapability]() mutable {
-    settings->mWidth.Value() = cap.width;
-    settings->mHeight.Value() = cap.height;
+      [settings = mSettings,
+       updated = mSettingsUpdatedByFrame,
+       source = mMediaSource,
+       cap = mCapability]() mutable {
+    switch (source) {
+      case dom::MediaSourceEnum::Screen:
+      case dom::MediaSourceEnum::Window:
+      case dom::MediaSourceEnum::Application:
+        // Undo the hack where ideal and max constraints are crammed together
+        // in mCapability for consumption by low-level code. We don't actually
+        // know the real resolution yet, so report min(ideal, max) for now.
+        // TODO: This can be removed in bug 1453269.
+        cap.width = std::min(cap.width >> 16, cap.width & 0xffff);
+        cap.height = std::min(cap.height >> 16, cap.height & 0xffff);
+        break;
+      default:
+        break;
+    }
+
+    if (!updated->mValue) {
+      settings->mWidth.Value() = cap.width;
+      settings->mHeight.Value() = cap.height;
+    }
     settings->mFrameRate.Value() = cap.maxFPS;
   }));
 
@@ -494,11 +517,16 @@ MediaEngineRemoteVideoSource::DeliverFrame(uint8_t* aBuffer,
   {
     MutexAutoLock lock(mMutex);
     MOZ_ASSERT(mState == kStarted);
+    // TODO: These can be removed in bug 1453269.
     req_max_width = mCapability.width & 0xffff;
     req_max_height = mCapability.height & 0xffff;
     req_ideal_width = (mCapability.width >> 16) & 0xffff;
     req_ideal_height = (mCapability.height >> 16) & 0xffff;
   }
+
+  // This is only used in the case of screen sharing, see bug 1453269.
+  const int32_t target_width = aProps.width();
+  const int32_t target_height = aProps.height();
 
   if (aProps.rotation() == 90 || aProps.rotation() == 270) {
     // This frame is rotated, so what was negotiated as width is now height,
@@ -514,6 +542,33 @@ MediaEngineRemoteVideoSource::DeliverFrame(uint8_t* aBuffer,
   // The following snippet will set dst_width to dst_max_width and dst_height to dst_max_height
   int32_t dst_width = std::min(req_ideal_width > 0 ? req_ideal_width : aProps.width(), dst_max_width);
   int32_t dst_height = std::min(req_ideal_height > 0 ? req_ideal_height : aProps.height(), dst_max_height);
+
+  // Apply scaling for screen sharing, see bug 1453269.
+  switch (mMediaSource) {
+    case MediaSourceEnum::Screen:
+    case MediaSourceEnum::Window:
+    case MediaSourceEnum::Application: {
+      // scale to average of portrait and landscape
+      float scale_width = (float)dst_width / (float)aProps.width();
+      float scale_height = (float)dst_height / (float)aProps.height();
+      float scale = (scale_width + scale_height) / 2;
+      dst_width = (int)(scale * target_width);
+      dst_height = (int)(scale * target_height);
+
+      // if scaled rectangle exceeds max rectangle, scale to minimum of portrait and landscape
+      if (dst_width > dst_max_width || dst_height > dst_max_height) {
+        scale_width = (float)dst_max_width / (float)dst_width;
+        scale_height = (float)dst_max_height / (float)dst_height;
+        scale = std::min(scale_width, scale_height);
+        dst_width = (int32_t)(scale * dst_width);
+        dst_height = (int32_t)(scale * dst_height);
+      }
+      break;
+    }
+    default: {
+      break;
+    }
+  }
 
   rtc::Callback0<void> callback_unused;
   rtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
@@ -574,23 +629,24 @@ MediaEngineRemoteVideoSource::DeliverFrame(uint8_t* aBuffer,
             aProps.renderTimeMs()));
 #endif
 
-  bool sizeChanged = false;
+  if (mImageSize.width != dst_width || mImageSize.height != dst_height) {
+    NS_DispatchToMainThread(NS_NewRunnableFunction(
+        "MediaEngineRemoteVideoSource::FrameSizeChange",
+        [settings = mSettings,
+         updated = mSettingsUpdatedByFrame,
+         dst_width,
+         dst_height]() mutable {
+      settings->mWidth.Value() = dst_width;
+      settings->mHeight.Value() = dst_height;
+      updated->mValue = true;
+    }));
+  }
+
   {
     MutexAutoLock lock(mMutex);
     // implicitly releases last image
-    sizeChanged = (!mImage && image) ||
-                  (mImage && image && mImage->GetSize() != image->GetSize());
     mImage = image.forget();
     mImageSize = mImage->GetSize();
-  }
-
-  if (sizeChanged) {
-    NS_DispatchToMainThread(NS_NewRunnableFunction(
-        "MediaEngineRemoteVideoSource::FrameSizeChange",
-        [settings = mSettings, dst_width, dst_height]() mutable {
-      settings->mWidth.Value() = dst_width;
-      settings->mHeight.Value() = dst_height;
-    }));
   }
 
   // We'll push the frame into the MSG on the next Pull. This will avoid
@@ -826,6 +882,7 @@ MediaEngineRemoteVideoSource::ChooseCapability(
       // time (and may in fact change over time), so as a hack, we push ideal
       // and max constraints down to desktop_capture_impl.cc and finish the
       // algorithm there.
+      // TODO: This can be removed in bug 1453269.
       aCapability.width =
         (c.mWidth.mIdeal.valueOr(0) & 0xffff) << 16 | (c.mWidth.mMax & 0xffff);
       aCapability.height =

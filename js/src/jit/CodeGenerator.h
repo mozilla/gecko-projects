@@ -43,7 +43,6 @@ class OutOfLineTestObject;
 class OutOfLineNewArray;
 class OutOfLineNewObject;
 class CheckOverRecursedFailure;
-class OutOfLineInterruptCheckImplicit;
 class OutOfLineUnboxFloatingPoint;
 class OutOfLineStoreElementHole;
 class OutOfLineTypeOfV;
@@ -107,8 +106,6 @@ class CodeGenerator final : public CodeGeneratorSpecific
 
     void visitOutOfLineICFallback(OutOfLineICFallback* ool);
 
-    void visitOutOfLineInterruptCheckImplicit(OutOfLineInterruptCheckImplicit* ins);
-
     void visitOutOfLineCallPostWriteBarrier(OutOfLineCallPostWriteBarrier* ool);
     void visitOutOfLineCallPostWriteElementBarrier(OutOfLineCallPostWriteElementBarrier* ool);
 
@@ -163,7 +160,8 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void emitArrayPopShift(LInstruction* lir, const MArrayPopShift* mir, Register obj,
                            Register elementsTemp, Register lengthTemp, TypedOrValueRegister out);
     void emitArrayPush(LInstruction* lir, Register obj,
-                       const ConstantOrRegister& value, Register elementsTemp, Register length);
+                       const ConstantOrRegister& value, Register elementsTemp, Register length,
+                       Register spectreTemp);
 
     void emitRest(LInstruction* lir, Register array, Register numActuals,
                   Register temp0, Register temp1, unsigned numFormals,

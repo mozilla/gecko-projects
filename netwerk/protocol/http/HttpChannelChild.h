@@ -196,7 +196,7 @@ protected:
 private:
   // this section is for main-thread-only object
   // all the references need to be proxy released on main thread.
-  nsCOMPtr<nsISupports> mCacheKey;
+  uint32_t mCacheKey;
   nsCOMPtr<nsIChildChannel> mRedirectChannelChild;
   RefPtr<InterceptStreamListener> mInterceptListener;
   // Needed to call AsyncOpen in FinishInterceptedRedirect
@@ -315,6 +315,8 @@ private:
   nsCOMPtr<nsICacheInfoChannel> mSynthesizedCacheInfo;
 
   nsCString mProtocolVersion;
+
+  TimeStamp mLastStatusReported;
 
   // If ResumeAt is called before AsyncOpen, we need to send extra data upstream
   bool mSendResumeAt;
@@ -496,7 +498,7 @@ class InterceptStreamListener : public nsIStreamListener
 {
   RefPtr<HttpChannelChild> mOwner;
   nsCOMPtr<nsISupports> mContext;
-  virtual ~InterceptStreamListener() {}
+  virtual ~InterceptStreamListener() = default;
  public:
   InterceptStreamListener(HttpChannelChild* aOwner, nsISupports* aContext)
   : mOwner(aOwner)

@@ -30,8 +30,6 @@ loader.lazyImporter(this, "BrowserToolboxProcess", "resource://devtools/client/f
 loader.lazyImporter(this, "ScratchpadManager", "resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 
 loader.lazyImporter(this, "CustomizableUI", "resource:///modules/CustomizableUI.jsm");
-loader.lazyImporter(this, "CustomizableWidgets", "resource:///modules/CustomizableWidgets.jsm");
-loader.lazyImporter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm");
 
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
@@ -258,7 +256,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
    *         about:debugging
    * @param {Number} startTime
    *        Optional, indicates the time at which the key event fired. This is a
-   *        `performance.now()` timing.
+   *        `Cu.now()` timing.
    */
   onKeyShortcut(window, key, startTime) {
     // If this is a toolbox's panel key shortcut, delegate to selectToolCommand
@@ -392,6 +390,24 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
     let msg = L10N.getStr("toolbox.noContentProcessForTab.message");
     Services.prompt.alert(null, "", msg);
     return Promise.reject(msg);
+  },
+
+  /**
+   * Open a window-hosted toolbox to debug the worker associated to the provided
+   * worker actor.
+   *
+   * @param  {DebuggerClient} client
+   * @param  {Object} workerActor
+   *         worker actor form to debug
+   */
+  openWorkerToolbox(client, workerActor) {
+    client.attachWorker(workerActor, (response, workerClient) => {
+      let workerTarget = TargetFactory.forWorker(workerClient);
+      gDevTools.showToolbox(workerTarget, null, Toolbox.HostType.WINDOW)
+        .then(toolbox => {
+          toolbox.once("destroy", () => workerClient.detach());
+        });
+    });
   },
 
   /**

@@ -10,6 +10,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ChaosMode.h"
+#include "mozilla/CmdLineAndEnvUtils.h"
 #include "mozilla/IOInterposer.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryChecking.h"
@@ -231,6 +232,9 @@
 #include "mozilla/CodeCoverageHandler.h"
 #endif
 
+#include "mozilla/mozalloc_oom.h"
+#include "SafeMode.h"
+
 extern uint32_t gRestartMode;
 extern void InstallSignalHandlers(const char *ProgramName);
 
@@ -303,25 +307,6 @@ using mozilla::scache::StartupCache;
 using mozilla::dom::ContentParent;
 using mozilla::dom::ContentChild;
 using mozilla::intl::LocaleService;
-
-// Save literal putenv string to environment variable.
-static void
-SaveToEnv(const char *putenv)
-{
-  char *expr = strdup(putenv);
-  if (expr)
-    PR_SetEnv(expr);
-  // We intentionally leak |expr| here since it is required by PR_SetEnv.
-  MOZ_LSAN_INTENTIONALLY_LEAK_OBJECT(expr);
-}
-
-// Tests that an environment variable exists and has a value
-static bool
-EnvHasValue(const char *name)
-{
-  const char *val = PR_GetEnv(name);
-  return (val && *val);
-}
 
 // Save the given word to the specified environment variable.
 static void
@@ -398,22 +383,6 @@ SaveFileToEnvIfUnset(const char *name, nsIFile *file)
     SaveFileToEnv(name, file);
 }
 
-static bool
-strimatch(const char* lowerstr, const char* mixedstr)
-{
-  while(*lowerstr) {
-    if (!*mixedstr) return false; // mixedstr is shorter
-    if (tolower(*mixedstr) != *lowerstr) return false; // no match
-
-    ++lowerstr;
-    ++mixedstr;
-  }
-
-  if (*mixedstr) return false; // lowerstr is shorter
-
-  return true;
-}
-
 static bool gIsExpectedExit = false;
 
 void MozExpectedExit() {
@@ -480,94 +449,22 @@ enum RemoteResult {
   REMOTE_ARG_BAD    = 2
 };
 
-enum ArgResult {
-  ARG_NONE  = 0,
-  ARG_FOUND = 1,
-  ARG_BAD   = 2 // you wanted a param, but there isn't one
-};
-
-static void RemoveArg(char **argv)
-{
-  do {
-    *argv = *(argv + 1);
-    ++argv;
-  } while (*argv);
-
-  --gArgc;
-}
-
 /**
  * Check for a commandline flag. If the flag takes a parameter, the
  * parameter is returned in aParam. Flags may be in the form -arg or
  * --arg (or /arg on win32).
  *
  * @param aArg the parameter to check. Must be lowercase.
- * @param aCheckOSInt if true returns ARG_BAD if the osint argument is present
- *        when aArg is also present.
  * @param aParam if non-null, the -arg <data> will be stored in this pointer.
  *        This is *not* allocated, but rather a pointer to the argv data.
- * @param aRemArg if true, the argument is removed from the gArgv array.
+ * @param aFlags flags @see CheckArgFlag
  */
 static ArgResult
-CheckArg(const char* aArg, bool aCheckOSInt = false, const char **aParam = nullptr, bool aRemArg = true)
+CheckArg(const char* aArg, const char** aParam = nullptr,
+         CheckArgFlag aFlags = CheckArgFlag::RemoveArg)
 {
   MOZ_ASSERT(gArgv, "gArgv must be initialized before CheckArg()");
-
-  char **curarg = gArgv + 1; // skip argv[0]
-  ArgResult ar = ARG_NONE;
-
-  while (*curarg) {
-    char *arg = curarg[0];
-
-    if (arg[0] == '-'
-#if defined(XP_WIN)
-        || *arg == '/'
-#endif
-        ) {
-      ++arg;
-      if (*arg == '-')
-        ++arg;
-
-      if (strimatch(aArg, arg)) {
-        if (aRemArg)
-          RemoveArg(curarg);
-        else
-          ++curarg;
-        if (!aParam) {
-          ar = ARG_FOUND;
-          break;
-        }
-
-        if (*curarg) {
-          if (**curarg == '-'
-#if defined(XP_WIN)
-              || **curarg == '/'
-#endif
-              )
-            return ARG_BAD;
-
-          *aParam = *curarg;
-          if (aRemArg)
-            RemoveArg(curarg);
-          ar = ARG_FOUND;
-          break;
-        }
-        return ARG_BAD;
-      }
-    }
-
-    ++curarg;
-  }
-
-  if (aCheckOSInt && ar == ARG_FOUND) {
-    ArgResult arOSInt = CheckArg("osint");
-    if (arOSInt == ARG_FOUND) {
-      ar = ARG_BAD;
-      PR_fprintf(PR_STDERR, "Error: argument --osint is invalid\n");
-    }
-  }
-
-  return ar;
+  return CheckArg(gArgc, gArgv, aArg, aParam, aFlags);
 }
 
 /**
@@ -580,38 +477,7 @@ CheckArg(const char* aArg, bool aCheckOSInt = false, const char **aParam = nullp
 static ArgResult
 CheckArgExists(const char* aArg)
 {
-  char **curarg = gArgv + 1; // skip argv[0]
-  while (*curarg) {
-    char *arg = curarg[0];
-
-    if (arg[0] == '-'
-#if defined(XP_WIN)
-        || *arg == '/'
-#endif
-        ) {
-      ++arg;
-      if (*arg == '-')
-        ++arg;
-
-      char delimiter = '=';
-#if defined(XP_WIN)
-      delimiter = ':';
-#endif
-      int i;
-      for (i = 0; arg[i] && arg[i] != delimiter; i++) {}
-      char tmp = arg[i];
-      arg[i] = '\0';
-      bool found = strimatch(aArg, arg);
-      arg[i] = tmp;
-      if (found) {
-        return ARG_FOUND;
-      }
-    }
-
-    ++curarg;
-  }
-
-  return ARG_NONE;
+  return CheckArg(aArg, nullptr, CheckArgFlag::None);
 }
 
 #if defined(XP_WIN)
@@ -1715,7 +1581,12 @@ DumpHelp()
          "                     --new-instance.\n"
          "  --new-instance     Open new instance, not a new window in running instance.\n"
          "  --UILocale <locale> Start with <locale> resources as UI Locale.\n"
-         "  --safe-mode        Disables extensions and themes for this session.\n", (const char*) gAppData->name);
+         "  --safe-mode        Disables extensions and themes for this session.\n"
+         "  -MOZ_LOG=<modules> Treated as MOZ_LOG=<modules> environment variable, overrides it.\n"
+         "  -MOZ_LOG_FILE=<file> Treated as MOZ_LOG_FILE=<file> environment variable, overrides it.\n"
+         "                     If MOZ_LOG_FILE is not specified as an argument or as an environment variable,\n"
+         "                     logging will be written to stdout.\n"
+         , (const char*)gAppData->name);
 
 #if defined(XP_WIN)
   printf("  --console          Start %s with a debugging console.\n", (const char*) gAppData->name);
@@ -1792,14 +1663,14 @@ ParseRemoteCommandLine(nsCString& program,
 {
   ArgResult ar;
 
-  ar = CheckArg("p", false, profile, false);
+  ar = CheckArg("p", profile, CheckArgFlag::None);
   if (ar == ARG_BAD) {
     // Leave it to the normal command line handling to handle this situation.
     return REMOTE_NOT_FOUND;
   }
 
   const char *temp = nullptr;
-  ar = CheckArg("a", true, &temp);
+  ar = CheckArg("a", &temp, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument -a requires an application name\n");
     return REMOTE_ARG_BAD;
@@ -1808,7 +1679,7 @@ ParseRemoteCommandLine(nsCString& program,
     program.Assign(temp);
   }
 
-  ar = CheckArg("u", true, username);
+  ar = CheckArg("u", username, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument -u requires a username\n");
     return REMOTE_ARG_BAD;
@@ -2315,7 +2186,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
   *aResult = nullptr;
   *aStartOffline = false;
 
-  ar = CheckArg("offline", true);
+  ar = CheckArg("offline", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --offline is invalid when argument --osint is specified\n");
     return NS_ERROR_FAILURE;
@@ -2337,7 +2208,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
   }
 
   // reset-profile and migration args need to be checked before any profiles are chosen below.
-  ar = CheckArg("reset-profile", true);
+  ar = CheckArg("reset-profile", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --reset-profile is invalid when argument --osint is specified\n");
     return NS_ERROR_FAILURE;
@@ -2346,7 +2217,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
     gDoProfileReset = true;
   }
 
-  ar = CheckArg("migration", true);
+  ar = CheckArg("migration", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --migration is invalid when argument --osint is specified\n");
     return NS_ERROR_FAILURE;
@@ -2373,8 +2244,8 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
 
     // Clear out flags that we handled (or should have handled!) last startup.
     const char *dummy;
-    CheckArg("p", false, &dummy);
-    CheckArg("profile", false, &dummy);
+    CheckArg("p", &dummy);
+    CheckArg("profile", &dummy);
     CheckArg("profilemanager");
 
     if (gDoProfileReset) {
@@ -2403,7 +2274,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
     return NS_LockProfilePath(lf, localDir, nullptr, aResult);
   }
 
-  ar = CheckArg("profile", true, &arg);
+  ar = CheckArg("profile", &arg, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --profile requires a path\n");
     return NS_ERROR_FAILURE;
@@ -2437,7 +2308,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
     return ProfileLockedDialog(lf, lf, unlocker, aNative, aResult);
   }
 
-  ar = CheckArg("createprofile", true, &arg);
+  ar = CheckArg("createprofile", &arg, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --createprofile requires a profile name\n");
     return NS_ERROR_FAILURE;
@@ -2493,7 +2364,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
   rv = aProfileSvc->GetProfileCount(&count);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  ar = CheckArg("p", false, &arg);
+  ar = CheckArg("p", &arg);
   if (ar == ARG_BAD) {
     ar = CheckArg("osint");
     if (ar == ARG_FOUND) {
@@ -2558,7 +2429,7 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
     }
   }
 
-  ar = CheckArg("profilemanager", true);
+  ar = CheckArg("profilemanager", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --profilemanager is invalid when argument --osint is specified\n");
     return NS_ERROR_FAILURE;
@@ -3154,39 +3025,64 @@ public:
 #endif
 };
 
-#ifdef XP_WIN
-namespace {
-
-bool PolicyHasRegValue(HKEY aKey, LPCTSTR aName, DWORD* aValue)
+#if defined(XP_UNIX) && !defined(ANDROID)
+static SmprintfPointer
+FormatUid(uid_t aId)
 {
-  HKEY hkey = NULL;
-  LONG ret = RegOpenKeyExW(aKey,
-    L"SOFTWARE\\Policies\\Mozilla\\Firefox", 0, KEY_READ, &hkey);
-  if (ret != ERROR_SUCCESS) {
-     return false;
+  if (const auto pw = getpwuid(aId)) {
+    return mozilla::Smprintf("%s", pw->pw_name);
   }
-  nsAutoRegKey key(hkey);
-  DWORD len = sizeof(aValue);
-  ret = RegQueryValueExW(hkey, aName, 0, NULL, (LPBYTE)aValue, &len);
-  RegCloseKey(key);
-  return ret == ERROR_SUCCESS;
+  return mozilla::Smprintf("uid %d", static_cast<int>(aId));
 }
 
-bool SafeModeBlockedByPolicy()
+// Bug 1323302: refuse to run under sudo or similar.
+static bool
+CheckForUserMismatch()
 {
-  LPCTSTR policyName = L"DisableSafeMode";
-  DWORD value;
-  if (PolicyHasRegValue(HKEY_LOCAL_MACHINE, policyName, &value)) {
-    return value == 1;
+  static char const * const kVars[] = {
+    "HOME",
+#ifdef MOZ_WIDGET_GTK
+    "XDG_RUNTIME_DIR",
+#endif
+#ifdef MOZ_X11
+    "XAUTHORITY",
+#endif
+  };
+
+  const uid_t euid = geteuid();
+  if (euid != 0) {
+    // On Linux it's possible to have superuser capabilities with a
+    // nonzero uid, but anyone who knows enough to make that happen
+    // probably knows enough to debug the resulting problems.
+    // Otherwise, a non-root user can't cause the problems we're
+    // concerned about.
+    return false;
   }
-  if (PolicyHasRegValue(HKEY_CURRENT_USER, policyName, &value)) {
-    return value == 1;
+
+  for (const auto var : kVars) {
+    if (const auto path = PR_GetEnv(var)) {
+      struct stat st;
+      if (stat(path, &st) == 0) {
+        if (st.st_uid != euid) {
+          const auto owner = FormatUid(st.st_uid);
+          Output(true, "Running " MOZ_APP_DISPLAYNAME " as root in a regular"
+                 " user's session is not supported.  ($%s is %s which is"
+                 " owned by %s.)\n",
+                 var, path, owner.get());
+          return true;
+        }
+      }
+    }
   }
   return false;
 }
-
-} // anonymous namespace
-#endif // XP_WIN
+#else // !XP_UNIX || ANDROID
+static bool
+CheckForUserMismatch()
+{
+  return false;
+}
+#endif
 
 /*
  * XRE_mainInit - Initial setup and command line parameter processing.
@@ -3206,6 +3102,10 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   });
 
   StartupTimeline::Record(StartupTimeline::MAIN);
+
+  if (CheckForUserMismatch()) {
+    return 1;
+  }
 
   if (PR_GetEnv("MOZ_CHAOSMODE")) {
     ChaosFeature feature = ChaosFeature::Any;
@@ -3303,7 +3203,7 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 
   // Check for application.ini overrides
   const char* override = nullptr;
-  ar = CheckArg("override", true, &override);
+  ar = CheckArg("override", &override, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     Output(true, "Incorrect number of arguments passed to --override");
     return 1;
@@ -3523,49 +3423,12 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 
   gRestartArgv[gRestartArgc] = nullptr;
 
-
-  ar = CheckArg("safe-mode", true);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR, "Error: argument --safe-mode is invalid when argument --osint is specified\n");
+  Maybe<bool> safeModeRequested = IsSafeModeRequested(gArgc, gArgv);
+  if (!safeModeRequested) {
     return 1;
   }
-  if (ar == ARG_FOUND) {
-    gSafeMode = true;
-  }
 
-#ifdef XP_WIN
-  // If the shift key is pressed and the ctrl and / or alt keys are not pressed
-  // during startup start in safe mode. GetKeyState returns a short and the high
-  // order bit will be 1 if the key is pressed. By masking the returned short
-  // with 0x8000 the result will be 0 if the key is not pressed and non-zero
-  // otherwise.
-  if ((GetKeyState(VK_SHIFT) & 0x8000) &&
-      !(GetKeyState(VK_CONTROL) & 0x8000) &&
-      !(GetKeyState(VK_MENU) & 0x8000) &&
-      !EnvHasValue("MOZ_DISABLE_SAFE_MODE_KEY")) {
-    gSafeMode = true;
-  }
-#endif
-
-#ifdef XP_MACOSX
-  if ((GetCurrentEventKeyModifiers() & optionKey) &&
-      !EnvHasValue("MOZ_DISABLE_SAFE_MODE_KEY"))
-    gSafeMode = true;
-#endif
-
-#ifdef XP_WIN
-if (gSafeMode && SafeModeBlockedByPolicy()) {
-    gSafeMode = false;
-  }
-#endif
-
-  // The Safe Mode Policy should not be enforced for the env var case
-  // (used by updater and crash-recovery).
-  if (EnvHasValue("MOZ_SAFE_MODE_RESTART")) {
-    gSafeMode = true;
-    // unset the env variable
-    SaveToEnv("MOZ_SAFE_MODE_RESTART=");
-  }
+  gSafeMode = safeModeRequested.value();
 
 #ifdef XP_WIN
   {
@@ -3618,7 +3481,7 @@ if (gSafeMode && SafeModeBlockedByPolicy()) {
   // Handle --no-remote and --new-instance command line arguments. Setup
   // the environment to better accommodate other components and various
   // restart scenarios.
-  ar = CheckArg("no-remote", true);
+  ar = CheckArg("no-remote", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --no-remote is invalid when argument --osint is specified\n");
     return 1;
@@ -3627,7 +3490,7 @@ if (gSafeMode && SafeModeBlockedByPolicy()) {
     SaveToEnv("MOZ_NO_REMOTE=1");
   }
 
-  ar = CheckArg("new-instance", true);
+  ar = CheckArg("new-instance", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --new-instance is invalid when argument --osint is specified\n");
     return 1;
@@ -3654,7 +3517,7 @@ if (gSafeMode && SafeModeBlockedByPolicy()) {
   NS_ENSURE_SUCCESS(rv, 1);
 
   // Check for --register, which registers chrome and then exits immediately.
-  ar = CheckArg("register", true);
+  ar = CheckArg("register", nullptr, CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --register is invalid when argument --osint is specified\n");
     return 1;
@@ -4190,7 +4053,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     // to make sure that the maintenance service successfully launches the
     // callback application.
     const char *logFile = nullptr;
-    if (ARG_FOUND == CheckArg("dump-args", false, &logFile)) {
+    if (ARG_FOUND == CheckArg("dump-args", &logFile)) {
       FILE* logFP = fopen(logFile, "wb");
       if (logFP) {
         for (int i = 1; i < gRestartArgc; ++i) {
@@ -4783,7 +4646,7 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
 {
   ScopedLogging log;
 
-  mozilla::LogModule::Init();
+  mozilla::LogModule::Init(argc, argv);
 
 #ifdef MOZ_CODE_COVERAGE
   CodeCoverageHandler::Init();
@@ -5045,7 +4908,7 @@ XRE_InitCommandLine(int aArgc, char* aArgv[])
 #endif
 
   const char *path = nullptr;
-  ArgResult ar = CheckArg("greomni", false, &path);
+  ArgResult ar = CheckArg("greomni", &path);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --greomni requires a path argument\n");
     return NS_ERROR_FAILURE;
@@ -5061,7 +4924,7 @@ XRE_InitCommandLine(int aArgc, char* aArgv[])
     return rv;
   }
 
-  ar = CheckArg("appomni", false, &path);
+  ar = CheckArg("appomni", &path);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument --appomni requires a path argument\n");
     return NS_ERROR_FAILURE;
@@ -5307,4 +5170,11 @@ XRE_EnableSameExecutableForContentProc() {
   if (!PR_GetEnv("MOZ_SEPARATE_CHILD_PROCESS")) {
     mozilla::ipc::GeckoChildProcessHost::EnableSameExecutableForContentProc();
   }
+}
+
+// Because rust doesn't handle weak symbols, this function wraps the weak
+// malloc_handle_oom for it.
+extern "C" void
+GeckoHandleOOM(size_t size) {
+  mozalloc_handle_oom(size);
 }

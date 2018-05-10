@@ -6,7 +6,7 @@
 
 const { Ci, Cu } = require("chrome");
 
-const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const ChromeUtils = require("ChromeUtils");
 const EventEmitter = require("devtools/shared/event-emitter");
 const protocol = require("devtools/shared/protocol");
 const Services = require("Services");
@@ -579,10 +579,9 @@ HighlighterEnvironment.prototype = {
     // navigated.
     let self = this;
     this.listener = {
-      QueryInterface: XPCOMUtils.generateQI([
+      QueryInterface: ChromeUtils.generateQI([
         Ci.nsIWebProgressListener,
-        Ci.nsISupportsWeakReference,
-        Ci.nsISupports
+        Ci.nsISupportsWeakReference
       ]),
 
       onStateChange: function(progress, request, flag) {
@@ -711,6 +710,7 @@ register("CssGridHighlighter", "css-grid");
 register("CssTransformHighlighter", "css-transform");
 register("EyeDropper", "eye-dropper");
 register("FlexboxHighlighter", "flexbox");
+register("FontsHighlighter", "fonts");
 register("GeometryEditorHighlighter", "geometry-editor");
 register("MeasuringToolHighlighter", "measuring-tool");
 register("PausedDebuggerOverlay", "paused-debugger");

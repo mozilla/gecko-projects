@@ -239,7 +239,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 100000,
     "n_buckets": 50,
@@ -249,7 +249,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 66355200,
     "n_buckets": 50,
@@ -259,7 +259,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 1000000,
     "n_buckets": 50,
@@ -269,7 +269,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1238040],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "kind": "exponential",
     "high": 1073741824,
     "n_buckets": 50,
@@ -291,142 +291,10 @@
     "high": 1000,
     "n_buckets": 50
   },
-  "CONTENT_JS_FOREGROUND_TICK_DELAY_TOTAL_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is (partially) in the foreground. The time is measured from the vsync event's time stamp to when the runnable finishes execution."
-  },
-  "CONTENT_JS_FOREGROUND_TICK_DELAY_EVENTS_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "keyed": true,
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is (partially) in the foreground. The time is measured from the vsync event's time stamp to when the runnable finishes execution. The histogram is keyed by the label of the runnable, indicating which type of task the runnable is performing."
-  },
-  "CONTENT_JS_BACKGROUND_TICK_DELAY_TOTAL_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is completely in the background. The time is measured from the vsync event's time stamp to when the runnable finishes execution."
-  },
-  "CONTENT_JS_BACKGROUND_TICK_DELAY_EVENTS_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "61",
-    "keyed": true,
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description" : "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup that is completely in the background. The time is measured from the vsync event's time stamp to when the runnable finishes execution. The histogram is keyed by the label of the runnable, indicating which type of task the runnable is performing."
-  },
-  "CONTENT_JS_KNOWN_TICK_DELAY_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "65",
-    "kind": "exponential",
-    "high": 100,
-    "n_buckets": 10,
-    "bug_numbers": [1305153, 1296486],
-    "description": "Time (in ms) that a pending vsync gets delayed by a runnable associated with a TabGroup when the vsync event's timestamp is before the starting time of the runnable. The time is measured from the vsync event's time stamp to when the runnable finishes execution."
-  },
-  "COMPOSITOR_ANIMATION_DURATION" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Duration of animations running on the compositor in milliseconds",
-    "kind": "exponential",
-    "high": 20000,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1339220]
-  },
-  "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_APZ" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "For APZ/scrolling compositor animations, the maximum number of contiguous frame drops encountered",
-    "kind": "exponential",
-    "high": 7200,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_CHROME" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "For compositor animations of chrome-process layers, the maximum number of contiguous frame drops encountered",
-    "kind": "exponential",
-    "high": 7200,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_MAX_CONTIGUOUS_DROPS_CONTENT" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "For compositor animations of content-process layers, the maximum number of contiguous frame drops encountered",
-    "kind": "exponential",
-    "high": 7200,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_MAX_LAYER_AREA" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "High-watermark of layer area affected during a compositor animation. Units are layer pixels squared.",
-    "kind": "exponential",
-    "high": 8294400,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1339220]
-  },
-  "COMPOSITOR_ANIMATION_THROUGHPUT_APZ" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Frame throughput ratio (scaled up to 1000) for APZ/scrolling animations in the compositor.",
-    "kind": "linear",
-    "high": 1500,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_THROUGHPUT_CHROME" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Frame throughput ratio (scaled up to 1000) for compositor animations of chrome-process layers.",
-    "kind": "linear",
-    "high": 1500,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
-  "COMPOSITOR_ANIMATION_THROUGHPUT_CONTENT" : {
-    "record_in_processes": ["main", "content", "gpu"],
-    "expires_in_version": "62",
-    "description": "Frame throughput ratio (scaled up to 1000) for compositor animations of content-process layers.",
-    "kind": "linear",
-    "high": 1500,
-    "n_buckets": 50,
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1338347]
-  },
   "CONTENT_PROCESS_LAUNCH_TIME_MS" : {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["bsmedberg@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "57",
+    "alert_emails": ["fgomes@mozilla.com", "mconley@mozilla.com"],
+    "expires_in_version": "67",
     "bug_numbers": [1304790],
     "kind": "exponential",
     "high": 64000,
@@ -438,7 +306,7 @@
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
     "bug_numbers": [1261373],
-    "expires_in_version": "62",
+    "expires_in_version": "70",
     "description": "Main thread response times for APZ notifications about input events (ms)",
     "kind" : "exponential",
     "high": 60000,
@@ -620,15 +488,6 @@
     "kind": "enumerated",
     "n_values": 10,
     "description": "GPU Device Reset Reason (ok, hung, removed, reset, internal error, invalid call, out of memory)"
-  },
-  "FAMILY_SAFETY": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "expires_in_version": "60",
-    "kind": "enumerated",
-    "n_values": 16,
-    "bug_numbers": [1239166],
-    "description": "Status of Family Safety detection and remediation. See nsNSSComponent.cpp."
   },
   "FETCH_IS_MAINTHREAD": {
     "record_in_processes": ["main", "content"],
@@ -1038,14 +897,6 @@
     "n_values":  10,
     "description": "Count how often we use different fallbacks when the GPU process crashes: None=0, GPUProcessDecodingDisabled=1, GPUProcessDisabled=2"
   },
-  "JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["jdemooij@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0 (obsolete), DestructuringForIn=1 (obsolete), LegacyGenerator=2 (obsolete), ExpressionClosure=3, LetBlock=4 (obsolete), LetExpression=5 (obsolete), NoSuchMethod=6 (obsolete), FlagsArgument=7 (obsolete), RegExpSourceProp=8 (obsolete), RestoredRegExpStatics=9 (obsolete), BlockScopeFunRedecl=10 (obsolete)"
-  },
   "JS_PRIVILEGED_PARSER_COMPILE_LAZY_AFTER_MS": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dteller@mozilla.com"],
@@ -1086,7 +937,7 @@
     "description": "Resident memory size (KB)"
   },
   "MEMORY_TOTAL": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1198209],
     "expires_in_version": "never",
@@ -1097,7 +948,7 @@
     "description": "Total Memory Across All Processes (KB)"
   },
   "MEMORY_DISTRIBUTION_AMONG_CONTENT": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "bug_numbers": [1344174],
     "expires_in_version": "never",
@@ -1885,8 +1736,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QSMALL_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1894,8 +1745,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QMED_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1903,8 +1754,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QBIG_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1912,8 +1763,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QSMALL_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1921,8 +1772,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QMED_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1930,8 +1781,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_QBIG_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1939,8 +1790,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QSMALL_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1948,8 +1799,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QMED_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1957,8 +1808,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QBIG_NORMALPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1966,8 +1817,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QSMALL_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1975,8 +1826,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QMED_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1984,8 +1835,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_QBIG_HIGHPRI_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -1993,8 +1844,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_SMALL_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -2002,8 +1853,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_LARGE_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -2011,8 +1862,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_REVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -2020,8 +1871,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTART_NOTREVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -2029,8 +1880,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_REVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -2038,8 +1889,8 @@
   },
   "HTTP_NET_VS_CACHE_ONSTOP_NOTREVALIDATED_V2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "68",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1325322],
       "kind": "enumerated",
       "n_values": 80,
@@ -2047,8 +1898,8 @@
   },
   "HTTP_ONSTART_SUSPEND_TOTAL_TIME": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-      "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "never",
+      "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
       "bug_numbers": [1347948],
       "kind": "exponential",
       "high": 60000,
@@ -2057,8 +1908,8 @@
   },
   "NETWORK_RACE_CACHE_WITH_NETWORK_USAGE_2": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-    "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "never",
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1377340],
     "kind": "categorical",
     "labels": ["NetworkNoRace", "CacheNoRace", "NetworkRace", "CacheRace", "NetworkDelayedRace", "CacheDelayedRace"],
@@ -2066,8 +1917,8 @@
   },
   "NETWORK_RACE_CACHE_WITH_NETWORK_SAVED_TIME": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-    "alert_emails": ["necko@mozilla.com", "bsmedberg@mozilla.com"],
+    "expires_in_version": "never",
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1354407],
     "kind": "exponential",
     "high": 60000,
@@ -2076,8 +1927,8 @@
   },
   "NETWORK_RACE_CACHE_WITH_NETWORK_OCEC_ON_START_DIFF": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
-    "alert_emails": ["necko@mozilla.com", "bsmedberg@mozilla.com"],
+    "expires_in_version": "never",
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1354407],
     "kind": "linear",
     "high": 1000,
@@ -2086,41 +1937,41 @@
   },
   "NETWORK_RACE_CACHE_BANDWIDTH_RACE_NETWORK_WIN": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "never",
     "kind": "exponential",
     "low": 32,
     "high": 16777216,
     "n_buckets": 100,
     "description": "Amount of bytes received when we decide to race cache with network and network wins.",
-    "alert_emails": ["necko@mozilla.com", "bsmedberg@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1354405]
   },
   "NETWORK_RACE_CACHE_BANDWIDTH_RACE_CACHE_WIN": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "never",
     "kind": "exponential",
     "low": 32,
     "high": 16777216,
     "n_buckets": 100,
     "description": "Amount of bytes received when we decide to race cache with network and cache wins.",
-    "alert_emails": ["necko@mozilla.com", "bsmedberg@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1354405]
   },
   "NETWORK_RACE_CACHE_BANDWIDTH_NOT_RACE": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "never",
     "kind": "exponential",
     "low": 32,
     "high": 16777216,
     "n_buckets": 100,
     "description": "Amount of bytes received when we decide not to race cache with network.",
-    "alert_emails": ["necko@mozilla.com", "bsmedberg@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1354405]
   },
   "NETWORK_RACE_CACHE_VALIDATION": {
     "record_in_processes": ["main"],
-    "expires_in_version": "62",
-    "alert_emails": ["necko@mozilla.com"],
+    "expires_in_version": "never",
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
     "bug_numbers": [1377223],
     "kind": "categorical",
     "labels": ["NotSent", "CachedContentUsed", "CachedContentNotUsed"],
@@ -2193,29 +2044,29 @@
   },
   "TLS_EARLY_DATA_NEGOTIATED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "66",
     "kind": "enumerated",
     "n_values": 3,
     "description": "Sending TLS early data was possible: 0 - not possible, 1 - possible but not used, 2 - possible and used.",
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1296288]
   },
   "TLS_EARLY_DATA_ACCEPTED": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "66",
     "kind": "boolean",
     "description": "TLS early data was used and it was accepted (true) or rejected (false) by the remote host.",
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1296288]
   },
   "TLS_EARLY_DATA_BYTES_WRITTEN": {
     "record_in_processes": ["main", "content"],
-    "expires_in_version": "62",
+    "expires_in_version": "66",
     "kind": "exponential",
     "high": 60000,
     "n_buckets": 100,
     "description": "Amount of bytes sent using TLS early data at the start of a TLS connection for a given channel.",
-    "alert_emails": ["necko@mozilla.com"],
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"],
     "bug_numbers": [1296288]
   },
   "SSL_HANDSHAKE_VERSION": {
@@ -3427,6 +3278,14 @@
     "kind": "boolean",
     "description": "DNS check for TRR was blocked by blacklist",
     "bug_numbers": [1434852],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
+  },
+  "DNS_TRR_NS_VERFIFIED": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "TRR managed to verify NS entry",
+    "bug_numbers": [1453825],
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
   },
   "DNS_LOOKUP_ALGORITHM": {
@@ -4936,14 +4795,6 @@
     "kind": "count",
     "description": "Number of unique pages that contain an unsafe-eval CSP directive"
   },
-  "CSP_REFERRER_DIRECTIVE": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "bug_numbers": [1303685],
-    "expires_in_version": "65",
-    "kind": "boolean",
-    "description": "Whether a document with a CSP policy (report-only or enforcing) contains a referrer directive ('true') or not ('false')."
-  },
   "PLACES_DATABASE_CORRUPTION_HANDLING_STAGE": {
     "record_in_processes": ["main"],
     "alert_emails": ["firefox-dev@mozilla.org"],
@@ -5864,9 +5715,10 @@
   },
   "FX_TAB_CLOSE_TIME_ANIM_MS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mconley@mozilla.com", "hkirschner@mozilla.com"],
+    "alert_emails": ["mconley@mozilla.com", "hkirschner@mozilla.com", "sphilp@mozilla.com"],
     "bug_numbers": [1340842],
     "expires_in_version": "65",
+    "releaseChannelCollection": "opt-out",
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 50,
@@ -6024,6 +5876,8 @@
   "FX_NEW_WINDOW_MS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "default",
+    "alert_emails": ["mconley@mozilla.com", "hkirschner@mozilla.com", "sphilp@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 20,
@@ -6404,11 +6258,11 @@
   },
   "FX_PREFERENCES_CATEGORY_OPENED_V2": {
     "record_in_processes": ["main", "content"],
-    "bug_numbers": [1335907, 1425173],
+    "bug_numbers": [1335907, 1425173, 1451006],
     "alert_emails": ["jaws@mozilla.com"],
     "expires_in_version": "66",
     "kind": "categorical",
-    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced", "search"],
+    "labels": ["unknown", "searchresults", "general", "applications", "privacy", "sync", "advanced", "search", "home"],
     "releaseChannelCollection": "opt-out",
     "description": "Count how often each preference category is opened."
   },
@@ -6429,7 +6283,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine", "shareURL"],
     "description": "Count how many times people add items to the url bar"
   },
   "FX_PAGE_ACTION_REMOVED": {
@@ -6439,7 +6293,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine", "shareURL"],
     "description": "Count how many times people remove items from the url bar"
   },
   "FX_PAGE_ACTION_MANAGED": {
@@ -6449,7 +6303,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine", "shareURL"],
     "description": "Count how many times people manage extensions via their actions in the url bar"
   },
   "FX_PAGE_ACTION_URLBAR_USED": {
@@ -6459,7 +6313,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine", "shareURL"],
     "description": "Count how many times people use items in the url bar"
   },
   "FX_PAGE_ACTION_PANEL_USED": {
@@ -6469,7 +6323,7 @@
     "expires_in_version": "64",
     "kind": "categorical",
     "labels": ["bookmark", "pocket", "screenshots", "webcompat", "copyURL", "emailLink",
-               "sendToDevice", "other"],
+               "sendToDevice", "other", "addSearchEngine", "shareURL"],
     "description": "Count how many times people use items from the main page action button"
   },
   "INPUT_EVENT_RESPONSE_MS": {
@@ -6756,10 +6610,11 @@
       "enterSelection",
       "click",
       "arrowEnterSelection",
-      "tabEnterSelection"
+      "tabEnterSelection",
+      "rightClickEnter"
     ],
     "bug_numbers": [1334615],
-    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key."
+    "description": "The input method the user used to select a result in the urlbar. 'enter' => The user hit the Enter key on the heuristic result at index 0. 'enterSelection' => The user chose a non-heuristic result (in exotic ways) and then hit the Enter key. 'click' => The user clicked a result with the mouse. 'arrowEnterSelection' => The user chose a non-heuristic result using arrow keys and then hit the Enter key. 'tabEnterSelection' => The user chose a non-heuristic result using tab at least once and then hit the Enter key. 'rightClickEnter' => The user chose a non-heuristic result using right click and then hit the Enter key."
   },
   "FX_SEARCHBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
@@ -7205,13 +7060,6 @@
     "n_buckets": 29,
     "description": "The size (MB) of the ping data submitted to Telemetry exceeding the maximum size"
   },
-  "TELEMETRY_DISCARDED_CONTENT_PINGS_COUNT": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "count",
-    "description": "Count of discarded content payloads."
-  },
   "TELEMETRY_COMPRESS": {
     "record_in_processes": ["main"],
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
@@ -7255,7 +7103,8 @@
       "eRedirect",
       "abort",
       "timeout",
-      "eTooLate"
+      "eTooLate",
+      "eTerminated"
     ],
     "description": "Counts of the different ways sending a Telemetry ping can fail."
   },
@@ -7637,6 +7486,53 @@
     "n_buckets": 10,
     "bug_numbers": [1335343],
     "description": "a testing histogram; not meant to be touched"
+  },
+  "TELEMETRY_TEST_DEFAULT_PRODUCTS": {
+    "record_in_processes": ["all"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 1,
+    "high": 10000,
+    "n_buckets": 10,
+    "bug_numbers": [1452552],
+    "description": "a testing histogram; not meant to be touched"
+  },
+  "TELEMETRY_TEST_DESKTOP_ONLY": {
+    "record_in_processes": ["all"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 1,
+    "high": 10000,
+    "n_buckets": 10,
+    "bug_numbers": [1452552],
+    "description": "a testing histogram; not meant to be touched",
+    "products": ["firefox"]
+  },
+  "TELEMETRY_TEST_MULTIPRODUCT": {
+    "record_in_processes": ["all"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 1,
+    "high": 10000,
+    "n_buckets": 10,
+    "bug_numbers": [1452552],
+    "description": "a testing histogram; not meant to be touched",
+    "products": ["firefox", "fennec", "geckoview"]
+  },
+  "TELEMETRY_TEST_MOBILE_ONLY": {
+    "record_in_processes": ["all"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 1,
+    "high": 10000,
+    "n_buckets": 10,
+    "bug_numbers": [1452552],
+    "description": "a testing histogram; not meant to be touched",
+    "products": ["fennec", "geckoview"]
   },
   "STARTUP_CRASH_DETECTED": {
     "record_in_processes": ["main", "content"],
@@ -8128,67 +8024,67 @@
   "PLUGINS_NOTIFICATION_SHOWN": {
     "record_in_processes": ["main", "content"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "The number of times the click-to-activate notification was shown: false: shown by in-content activation true: shown by location bar activation",
     "bug_numbers": [902075, 1345894],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "PLUGINS_NOTIFICATION_PLUGIN_COUNT": {
     "record_in_processes": ["main", "content"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 5,
     "description": "The number of plugins present in the click-to-activate notification, minus one (1, 2, 3, 4, more than 4)",
     "bug_numbers": [902075, 1345894],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "PLUGINS_NOTIFICATION_USER_ACTION_2": {
     "record_in_processes": ["main", "content"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 8,
     "description": "User actions taken in the plugin notification: 0: allownow 1: allowalways 2: block 3: blockalways",
     "bug_numbers": [902075, 1345894, 1398972],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "PLUGINS_INFOBAR_SHOWN": {
     "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "Count of when the hidden-plugin infobar was displayed.",
     "bug_numbers": [902075, 1345894],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "PLUGINS_INFOBAR_BLOCK": {
     "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "Count the number of times the user clicked 'block' on the hidden-plugin infobar.",
     "bug_numbers": [902075, 1345894],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "PLUGINS_INFOBAR_ALLOW": {
     "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "Count the number of times the user clicked 'allow' on the hidden-plugin infobar.",
     "bug_numbers": [902075, 1345894],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "PLUGINS_INFOBAR_DISMISSED": {
     "record_in_processes": ["main"],
     "releaseChannelCollection": "opt-out",
-    "expires_in_version": "60",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "Count the number of times the user explicitly dismisses the hidden-plugin infobar without choosing allow or continue-blocking.",
     "bug_numbers": [1368060],
-    "alert_emails": ["bsmedberg@mozilla.com"]
+    "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
   "POPUP_NOTIFICATION_STATS": {
     "record_in_processes": ["main", "content"],
@@ -9604,6 +9500,39 @@
     "description": "Number of times a custom developer tool has been opened.",
     "releaseChannelCollection": "opt-out"
   },
+  "DEVTOOLS_ACCESSIBILITY_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the accessibility panel been active (seconds)."
+  },
+  "DEVTOOLS_ACCESSIBILITY_PICKER_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the picker tool in accessibility panel been active (seconds)."
+  },
+  "DEVTOOLS_ACCESSIBILITY_SERVICE_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "65",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1447302],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the platform accessibility been active (seconds) in accessibility panel."
+  },
   "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -9916,42 +9845,63 @@
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_USB_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE USB runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_WIFI_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE WiFi runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_SIMULATOR_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE simulator runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_REMOTE_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE remote runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_LOCAL_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [916804, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE local runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_OTHER_CONNECTION_RESULT": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "boolean",
+    "bug_numbers": [1069552, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "Did WebIDE other runtime connection succeed?"
   },
   "DEVTOOLS_WEBIDE_CONNECTION_TIME_SECONDS": {
@@ -9979,6 +9929,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime type did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_ID": {
@@ -9986,6 +9939,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime ID did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PROCESSOR": {
@@ -9993,6 +9949,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime processor did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_OS": {
@@ -10000,6 +9959,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime OS did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PLATFORM_VERSION": {
@@ -10007,6 +9969,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime platform version did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_APP_TYPE": {
@@ -10014,6 +9979,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime app type did WebIDE connect to?"
   },
   "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_VERSION": {
@@ -10021,6 +9989,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "keyed": true,
+    "bug_numbers": [1159043, 1448074],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jryans@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
     "description": "What runtime version did WebIDE connect to?"
   },
   "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER": {
@@ -10286,6 +10257,16 @@
     "kind": "enumerated",
     "n_values": 10,
     "description": "How often are first- and third-party cookies set from HTTPS origins? 0=first/http, 1=first/http+secure?!, 2=first/https, 3=first/https+secure, 4=third/http, 5=third/http+secure?!, 6=third/https, 7=third/https+secure"
+  },
+  "COOKIE_TIME_MOVING_MS": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["vgosu@mozilla.com", "necko@mozilla.com"],
+    "bug_numbers": [1454100],
+    "expires_in_version": "64",
+    "kind": "exponential",
+    "high": 3000,
+    "n_buckets": 20,
+    "description": "Time spent moving the cookies from one memory location to another (ms)"
   },
   "NTLM_MODULE_USED_2": {
     "record_in_processes": ["main", "content"],
@@ -11238,6 +11219,18 @@
     "expires_in_version": "never",
     "kind": "count",
     "keyed": true,
+    "keys": [
+      "main-crash",
+      "main-hang",
+      "content-crash",
+      "content-hang",
+      "plugin-crash",
+      "plugin-hang",
+      "gmplugin-crash",
+      "gmplugin-hang",
+      "gpu-crash",
+      "gpu-hang"
+    ],
     "releaseChannelCollection": "opt-out",
     "description": "An attempt to submit a crash. Keyed on the CrashManager Crash.type."
   },
@@ -11442,6 +11435,15 @@
     "description": "720p VP9 decode benchmark measurement in frames per second",
     "releaseChannelCollection": "opt-out"
   },
+  "MEDIA_PLAY_PROMISE_RESOLUTION": {
+    "record_in_processes": ["main", "content"],
+    "bug_numbers": [1453176],
+    "alert_emails": ["cpearce@mozilla.com", "drno@ohlmeier.org"],
+    "expires_in_version": "72",
+    "kind": "categorical",
+    "labels": ["Resolved", "NotAllowedErr", "SrcNotSupportedErr", "PauseAbortErr", "AbortErr", "UnknownErr"],
+    "description": "Records whether promise returned by HTMLMediaElement.play() successfully resolved, or the error code which it was rejected with."
+  },
   "MEDIA_CODEC_USED": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["cpearce@mozilla.com"],
@@ -11532,12 +11534,15 @@
     "description": "Sanitize: Time it takes to sanitize the open windows list (ms). On Android, this is the time it takes to close all open tabs (ms)."
   },
   "PWMGR_BLOCKLIST_NUM_SITES": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 100,
     "n_buckets" : 10,
-    "description": "The number of sites for which the user has explicitly rejected saving logins"
+    "description": "The number of sites for which the user has explicitly rejected saving logins",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_FORM_AUTOFILL_RESULT": {
     "record_in_processes": ["main", "content"],
@@ -11550,12 +11555,15 @@
     "description": "The result of auto-filling a login form. See http://mzl.la/1Mbs6jL for bucket descriptions."
   },
   "PWMGR_LOGIN_LAST_USED_DAYS": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 750,
     "n_buckets" : 40,
-    "description": "Time in days each saved login was last used"
+    "description": "Time in days each saved login was last used",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_LOGIN_PAGE_SAFETY": {
     "record_in_processes": ["main", "content"],
@@ -11571,19 +11579,28 @@
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "count",
-    "description": "Count of passwords copied from the password management interface"
+    "description": "Count of passwords copied from the password management interface",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_COPIED_USERNAME": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "count",
-    "description": "Count of usernames copied from the password management interface"
+    "description": "Count of usernames copied from the password management interface",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_DELETED": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "kind": "count",
-    "description": "Count of passwords deleted from the password management interface (including via Remove All)"
+    "description": "Count of passwords deleted from the password management interface (including via Remove All)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_DELETED_ALL": {
     "record_in_processes": ["main", "content"],
@@ -11592,11 +11609,14 @@
     "description": "Count of times that Remove All was used from the password management interface"
   },
   "PWMGR_MANAGE_OPENED": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values" : 5,
-    "description": "Accumulates how the password management interface was opened. (0=Preferences, 1=Page Info)"
+    "description": "Accumulates how the password management interface was opened. (0=Preferences, 1=Page Info)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_MANAGE_SORTED": {
     "record_in_processes": ["main", "content"],
@@ -11606,26 +11626,35 @@
     "description": "Reports the column that logins are sorted by"
   },
   "PWMGR_MANAGE_VISIBILITY_TOGGLED": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "Whether the visibility of passwords was toggled (0=Hide, 1=Show)"
+    "description": "Whether the visibility of passwords was toggled (0=Hide, 1=Show)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_NUM_PASSWORDS_PER_HOSTNAME": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "linear",
     "high": 21,
     "n_buckets" : 20,
-    "description": "The number of passwords per hostname"
+    "description": "The number of passwords per hostname",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_NUM_SAVED_PASSWORDS": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 750,
     "n_buckets" : 50,
-    "description": "Total number of saved logins, including those that cannot be decrypted"
+    "description": "Total number of saved logins, including those that cannot be decrypted",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_NUM_HTTPAUTH_PASSWORDS": {
     "record_in_processes": ["main", "content"],
@@ -11642,24 +11671,33 @@
     "description": "Whether an <input type=password> is associated with a <form> when it is added to a document"
   },
   "PWMGR_PROMPT_REMEMBER_ACTION" : {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 5,
-    "description": "Action taken by user through prompt for creating a login. (0=Prompt displayed [always recorded], 1=Add login, 2=Don't save now, 3=Never save)"
+    "description": "Action taken by user through prompt for creating a login. (0=Prompt displayed [always recorded], 1=Add login, 2=Don't save now, 3=Never save)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_PROMPT_UPDATE_ACTION" : {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 5,
-    "description": "Action taken by user through prompt for modifying a login. (0=Prompt displayed [always recorded], 1=Update login)"
+    "description": "Action taken by user through prompt for modifying a login. (0=Prompt displayed [always recorded], 1=Update login)",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_SAVING_ENABLED": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "Number of users who have password saving on globally"
+    "description": "Number of users who have password saving on globally",
+    "alert_emails": ["loines@mozilla.com"],
+    "bug_numbers": [1454733],
+    "releaseChannelCollection": "opt-out"
   },
   "PWMGR_USERNAME_PRESENT": {
     "record_in_processes": ["main", "content"],
@@ -12119,16 +12157,6 @@
     "n_values": 10,
     "releaseChannelCollection": "opt-out",
     "description": "Number of mobile devices associated with this Sync account. Recorded each time Sync successfully completes the 'clients' engine."
-  },
-  "WEAVE_ENGINE_SYNC_ERRORS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["sync-dev@mozilla.org"],
-    "bug_numbers": [1236383],
-    "expires_in_version": "never",
-    "kind": "count",
-    "keyed": true,
-    "releaseChannelCollection": "opt-out",
-    "description": "Exceptions thrown by a Sync engine. Keyed on the engine name."
   },
   "CONTENT_DOCUMENTS_DESTROYED": {
     "record_in_processes": ["main", "content"],
@@ -13814,5 +13842,65 @@
     "kind": "boolean",
     "keyed": true,
     "description": "Permission requests (showing a permission prompt) by whether they were requested from code handling a user input event."
+  },
+  "HTMLEDITORS_WITH_RESIZERS": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["mnakano@mozilla.com"],
+    "bug_numbers": [1452538,1449564],
+    "expires_in_version": "65",
+    "kind": "boolean",
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of HTML editors which has shown object resizers."
+  },
+  "HTMLEDITORS_WHOSE_RESIZERS_USED_BY_USER": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["mnakano@mozilla.com"],
+    "bug_numbers": [1452538,1449564],
+    "expires_in_version": "65",
+    "kind": "linear",
+    "high": 50,
+    "n_buckets": 20,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of HTML editors whose object resizers are actually used by users."
+  },
+  "HTMLEDITORS_WITH_ABSOLUTE_POSITIONER": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["mnakano@mozilla.com"],
+    "bug_numbers": [1452538,1449564],
+    "expires_in_version": "65",
+    "kind": "boolean",
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of HTML editors which has shown grabber to move absolute positioned elements."
+  },
+  "HTMLEDITORS_WHOSE_ABSOLUTE_POSITIONER_USED_BY_USER": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["mnakano@mozilla.com"],
+    "bug_numbers": [1452538,1449564],
+    "expires_in_version": "65",
+    "kind": "linear",
+    "high": 50,
+    "n_buckets": 20,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of HTML editors whose grabber to move absolute positioned elements is actually used by users."
+  },
+  "HTMLEDITORS_WITH_INLINE_TABLE_EDITOR": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["mnakano@mozilla.com"],
+    "bug_numbers": [1452538,1449564],
+    "expires_in_version": "65",
+    "kind": "boolean",
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of HTML editors which has shown inline table editing UI."
+  },
+  "HTMLEDITORS_WHOSE_INLINE_TABLE_EDITOR_USED_BY_USER": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["mnakano@mozilla.com"],
+    "bug_numbers": [1452538,1449564],
+    "expires_in_version": "65",
+    "kind": "linear",
+    "high": 50,
+    "n_buckets": 20,
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of HTML editors whose inline table editing UI is actually used by users."
   }
 }

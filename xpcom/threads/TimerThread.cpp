@@ -145,7 +145,9 @@ public:
     return NS_OK;
   }
 
+#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
   NS_IMETHOD GetName(nsACString& aName) override;
+#endif
 
   nsTimerEvent()
     : mozilla::CancelableRunnable("nsTimerEvent")
@@ -265,6 +267,7 @@ nsTimerEvent::DeleteAllocatorIfNeeded()
   }
 }
 
+#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
 NS_IMETHODIMP
 nsTimerEvent::GetName(nsACString& aName)
 {
@@ -274,6 +277,7 @@ nsTimerEvent::GetName(nsACString& aName)
   mTimer->GetName(aName);
   return NS_OK;
 }
+#endif
 
 NS_IMETHODIMP
 nsTimerEvent::Run()
@@ -419,7 +423,7 @@ TimerThread::Run()
 
   while (!mShutdown) {
     // Have to use PRIntervalTime here, since PR_WaitCondVar takes it
-    PRIntervalTime waitFor;
+    TimeDuration waitFor;
     bool forceRunThisTimer = forceRunNextTimer;
     forceRunNextTimer = false;
 
@@ -429,9 +433,9 @@ TimerThread::Run()
       if (ChaosMode::isActive(ChaosFeature::TimerScheduling)) {
         milliseconds = ChaosMode::randomUint32LessThan(200);
       }
-      waitFor = PR_MillisecondsToInterval(milliseconds);
+      waitFor = TimeDuration::FromMilliseconds(milliseconds);
     } else {
-      waitFor = PR_INTERVAL_NO_TIMEOUT;
+      waitFor = TimeDuration::Forever();
       TimeStamp now = TimeStamp::Now();
 
       RemoveLeadingCanceledTimersInternal();
@@ -518,20 +522,20 @@ TimerThread::Run()
           forceRunNextTimer = false;
           goto next; // round down; execute event now
         }
-        waitFor = PR_MicrosecondsToInterval(
-          static_cast<uint32_t>(microseconds)); // Floor is accurate enough.
-        if (waitFor == 0) {
-          waitFor = 1;  // round up, wait the minimum time we can wait
+        waitFor = TimeDuration::FromMicroseconds(microseconds);
+        if (waitFor.IsZero()) {
+          // round up, wait the minimum time we can wait
+          waitFor = TimeDuration::FromMicroseconds(1);
         }
       }
 
       if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
-        if (waitFor == PR_INTERVAL_NO_TIMEOUT)
+        if (waitFor == TimeDuration::Forever())
           MOZ_LOG(GetTimerLog(), LogLevel::Debug,
-                 ("waiting for PR_INTERVAL_NO_TIMEOUT\n"));
+                 ("waiting forever\n"));
         else
           MOZ_LOG(GetTimerLog(), LogLevel::Debug,
-                 ("waiting for %u\n", PR_IntervalToMilliseconds(waitFor)));
+                 ("waiting for %f\n", waitFor.ToMilliseconds()));
       }
     }
 

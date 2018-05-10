@@ -12,7 +12,6 @@ const BAD_CERT = "https://expired.example.com/";
 const UNKNOWN_ISSUER = "https://self-signed.example.com ";
 const BAD_STS_CERT = "https://badchain.include-subdomains.pinning.example.com:443";
 const {TabStateFlusher} = ChromeUtils.import("resource:///modules/sessionstore/TabStateFlusher.jsm", {});
-const ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 
 function injectErrorPageFrame(tab, src) {
   return ContentTask.spawn(tab.linkedBrowser, {frameSrc: src}, async function({frameSrc}) {
@@ -61,7 +60,7 @@ add_task(async function checkReturnToAboutHome() {
     // Populate the shistory entries manually, since it happens asynchronously
     // and the following tests will be too soon otherwise.
     await TabStateFlusher.flush(browser);
-    let {entries} = JSON.parse(ss.getTabState(tab));
+    let {entries} = JSON.parse(SessionStore.getTabState(tab));
     is(entries.length, 1, "there is one shistory entry");
 
     info("Clicking the go back button on about:certerror");
@@ -113,7 +112,7 @@ add_task(async function checkReturnToPreviousPage() {
     // Populate the shistory entries manually, since it happens asynchronously
     // and the following tests will be too soon otherwise.
     await TabStateFlusher.flush(browser);
-    let {entries} = JSON.parse(ss.getTabState(tab));
+    let {entries} = JSON.parse(SessionStore.getTabState(tab));
     is(entries.length, 2, "there are two shistory entries");
 
     info("Clicking the go back button on about:certerror");
@@ -147,6 +146,17 @@ add_task(async function checkBadStsCert() {
     });
 
     ok(exceptionButtonHidden, "Exception button is hidden");
+
+    let message = await ContentTask.spawn(browser, {frame: useFrame}, async function({frame}) {
+      let doc = frame ? content.document.querySelector("iframe").contentDocument : content.document;
+      let advancedButton = doc.getElementById("advancedButton");
+      advancedButton.click();
+      return doc.getElementById("badCertTechnicalInfo").textContent;
+    });
+    ok(message.includes("SSL_ERROR_BAD_CERT_DOMAIN"), "Didn't find SSL_ERROR_BAD_CERT_DOMAIN.");
+    ok(message.includes("The certificate is only valid for"), "Didn't find error message.");
+    ok(message.includes("uses an invalid security certificate"), "Didn't find error message.");
+    ok(message.includes("badchain.include-subdomains.pinning.example.com"), "Didn't find domain in error message.");
 
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }
@@ -279,6 +289,9 @@ add_task(async function checkAdvancedDetails() {
       ok(shortDescText.textContent.includes("expired.example.com"),
          "Should list hostname in error message.");
 
+      let exceptionButton = doc.getElementById("exceptionDialogButton");
+      ok(!exceptionButton.disabled, "Exception button is not disabled by default.");
+
       let advancedButton = doc.getElementById("advancedButton");
       advancedButton.click();
       let el = doc.getElementById("errorCode");
@@ -321,6 +334,27 @@ add_task(async function checkAdvancedDetails() {
 
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }
+});
+
+add_task(async function checkhideAddExceptionButton() {
+  info("Loading a bad cert page and verifying the pref security.certerror.hideAddException");
+  Services.prefs.setBoolPref("security.certerror.hideAddException", true);
+
+  for (let useFrame of [false, true]) {
+    let tab = await openErrorPage(BAD_CERT, useFrame);
+    let browser = tab.linkedBrowser;
+
+    await ContentTask.spawn(browser, {frame: useFrame}, async function({frame}) {
+      let doc = frame ? content.document.querySelector("iframe").contentDocument : content.document;
+
+      let exceptionButton = doc.querySelector(".exceptionDialogButtonContainer");
+      ok(exceptionButton.hidden, "Exception button is hidden.");
+    });
+
+    BrowserTestUtils.removeTab(gBrowser.selectedTab);
+  }
+
+  Services.prefs.clearUserPref("security.certerror.hideAddException");
 });
 
 add_task(async function checkAdvancedDetailsForHSTS() {

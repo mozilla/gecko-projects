@@ -1,4 +1,5 @@
 /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,6 +10,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Unused.h"
 #include "CubebUtils.h"
+#include "Tracing.h"
 
 #ifdef MOZ_WEBRTC
 #include "webrtc/MediaEngineWebRTC.h"
@@ -94,6 +96,16 @@ bool GraphDriver::Switching()
 {
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   return mNextDriver || mPreviousDriver;
+}
+
+void GraphDriver::SwitchToNextDriver()
+{
+  GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
+  MOZ_ASSERT(NextDriver());
+  NextDriver()->SetGraphTime(this, mIterationStart, mIterationEnd);
+  GraphImpl()->SetCurrentDriver(NextDriver());
+  NextDriver()->Start();
+  SetNextDriver(nullptr);
 }
 
 GraphDriver* GraphDriver::NextDriver()
@@ -224,18 +236,11 @@ ThreadedDriver::Revive()
   // loop again.
   MonitorAutoLock mon(mGraphImpl->GetMonitor());
   if (NextDriver()) {
-    NextDriver()->SetGraphTime(this, mIterationStart, mIterationEnd);
-    mGraphImpl->SetCurrentDriver(NextDriver());
-    NextDriver()->Start();
+    SwitchToNextDriver();
   } else {
     nsCOMPtr<nsIRunnable> event = new MediaStreamGraphInitThreadRunnable(this);
     mThread->EventTarget()->Dispatch(event.forget(), NS_DISPATCH_NORMAL);
   }
-}
-
-void
-ThreadedDriver::RemoveCallback()
-{
 }
 
 void
@@ -327,10 +332,7 @@ ThreadedDriver::RunThread()
     MonitorAutoLock lock(GraphImpl()->GetMonitor());
     if (NextDriver()) {
       LOG(LogLevel::Debug, ("Switching to AudioCallbackDriver"));
-      RemoveCallback();
-      NextDriver()->SetGraphTime(this, mIterationStart, mIterationEnd);
-      mGraphImpl->SetCurrentDriver(NextDriver());
-      NextDriver()->Start();
+      SwitchToNextDriver();
       return;
     }
   }
@@ -365,7 +367,7 @@ SystemClockDriver::WaitForNextIteration()
 {
   mGraphImpl->GetMonitor().AssertCurrentThreadOwns();
 
-  PRIntervalTime timeout = PR_INTERVAL_NO_TIMEOUT;
+  TimeDuration timeout = TimeDuration::Forever();
   TimeStamp now = TimeStamp::Now();
 
   // This lets us avoid hitting the Atomic twice when we know we won't sleep
@@ -384,7 +386,7 @@ SystemClockDriver::WaitForNextIteration()
     // Make sure timeoutMS doesn't overflow 32 bits by waking up at
     // least once a minute, if we need to wake up at all
     timeoutMS = std::max<int64_t>(0, std::min<int64_t>(timeoutMS, 60*1000));
-    timeout = PR_MillisecondsToInterval(uint32_t(timeoutMS));
+    timeout = TimeDuration::FromMilliseconds(timeoutMS);
     LOG(LogLevel::Verbose,
         ("Waiting for next iteration; at %f, timeout=%f",
          (now - mInitialTimeStamp).ToSeconds(),
@@ -394,7 +396,7 @@ SystemClockDriver::WaitForNextIteration()
     }
     mWaitState = WAITSTATE_WAITING_FOR_NEXT_ITERATION;
   }
-  if (timeout > 0) {
+  if (!timeout.IsZero()) {
     mGraphImpl->GetMonitor().Wait(timeout);
     LOG(LogLevel::Verbose,
         ("Resuming after timeout; at %f, elapsed=%f",
@@ -538,7 +540,7 @@ AudioCallbackDriver::AudioCallbackDriver(MediaStreamGraphImpl* aGraphImpl)
   , mStarted(false)
   , mAudioInput(nullptr)
   , mAddedMixer(false)
-  , mInCallback(false)
+  , mAudioThreadId(std::thread::id())
   , mMicrophoneActive(false)
   , mShouldFallbackIfError(false)
   , mFromFallback(false)
@@ -609,7 +611,7 @@ AudioCallbackDriver::Init()
   MOZ_ASSERT(!NS_IsMainThread(),
       "This is blocking and should never run on the main thread.");
 
-  mSampleRate = output.rate = CubebUtils::PreferredSampleRate();
+  mSampleRate = output.rate = mGraphImpl->GraphRate();
 
   if (AUDIO_OUTPUT_FORMAT == AUDIO_FORMAT_S16) {
     output.format = CUBEB_SAMPLE_S16NE;
@@ -630,8 +632,8 @@ AudioCallbackDriver::Init()
   mScratchBuffer = SpillBuffer<AudioDataValue, WEBAUDIO_BLOCK_SIZE * 2>(mOutputChannels);
 
   output.channels = mOutputChannels;
-  output.layout = CubebUtils::GetPreferredChannelLayoutOrSMPTE(cubebContext, mOutputChannels);
-  output.prefs = CUBEB_STREAM_PREF_NONE;
+  output.layout = CUBEB_LAYOUT_UNDEFINED;
+  output.prefs = CubebUtils::GetDefaultStreamPrefs();
 
   uint32_t latency_frames = CubebUtils::GetCubebMSGLatencyInFrames(&output);
 
@@ -782,9 +784,7 @@ AudioCallbackDriver::Revive()
   MonitorAutoLock mon(mGraphImpl->GetMonitor());
   if (NextDriver()) {
     RemoveCallback();
-    NextDriver()->SetGraphTime(this, mIterationStart, mIterationEnd);
-    mGraphImpl->SetCurrentDriver(NextDriver());
-    NextDriver()->Start();
+    SwitchToNextDriver();
   } else {
     LOG(LogLevel::Debug,
         ("Starting audio threads for MediaStreamGraph %p from a new thread.",
@@ -863,36 +863,32 @@ AudioCallbackDriver::DeviceChangedCallback_s(void* aUser)
   driver->DeviceChangedCallback();
 }
 
-bool AudioCallbackDriver::InCallback() {
-  return mInCallback;
-}
-
 AudioCallbackDriver::AutoInCallback::AutoInCallback(AudioCallbackDriver* aDriver)
   : mDriver(aDriver)
 {
-  mDriver->mInCallback = true;
+  mDriver->mAudioThreadId = std::this_thread::get_id();
 }
 
 AudioCallbackDriver::AutoInCallback::~AutoInCallback() {
-  mDriver->mInCallback = false;
+  mDriver->mAudioThreadId = std::thread::id();
 }
 
 long
 AudioCallbackDriver::DataCallback(const AudioDataValue* aInputBuffer,
                                   AudioDataValue* aOutputBuffer, long aFrames)
 {
+   TRACE_AUDIO_CALLBACK_BUDGET(aFrames, mSampleRate);
+   TRACE_AUDIO_CALLBACK();
+
+#ifdef DEBUG
+  AutoInCallback aic(this);
+#endif
+
   // Don't add the callback until we're inited and ready
   if (!mAddedMixer) {
     mGraphImpl->mMixer.AddCallback(this);
     mAddedMixer = true;
   }
-
-#ifdef DEBUG
-  // DebugOnly<> doesn't work here... it forces an initialization that will cause
-  // mInCallback to be set back to false before we exit the statement.  Do it by
-  // hand instead.
-  AutoInCallback aic(this);
-#endif
 
   GraphTime stateComputedTime = StateComputedTime();
   if (stateComputedTime == 0) {
@@ -1021,9 +1017,7 @@ AudioCallbackDriver::DataCallback(const AudioDataValue* aInputBuffer,
     }
     LOG(LogLevel::Debug, ("Switching to system driver."));
     RemoveCallback();
-    NextDriver()->SetGraphTime(this, mIterationStart, mIterationEnd);
-    mGraphImpl->SetCurrentDriver(NextDriver());
-    NextDriver()->Start();
+    SwitchToNextDriver();
     // Returning less than aFrames starts the draining and eventually stops the
     // audio thread. This function will never get called again.
     return aFrames - 1;
@@ -1138,7 +1132,6 @@ AudioCallbackDriver::IterationDuration()
 
 bool
 AudioCallbackDriver::IsStarted() {
-  mGraphImpl->GetMonitor().AssertCurrentThreadOwns();
   return mStarted;
 }
 
@@ -1189,14 +1182,12 @@ void AudioCallbackDriver::FallbackToSystemClockDriver()
 {
   GraphImpl()->GetMonitor().AssertCurrentThreadOwns();
   SystemClockDriver* nextDriver = new SystemClockDriver(GraphImpl());
-  SetNextDriver(nextDriver);
   nextDriver->MarkAsFallback();
-  nextDriver->SetGraphTime(this, mIterationStart, mIterationEnd);
+  SetNextDriver(nextDriver);
   // We're not using SwitchAtNextIteration here, because there
   // won't be a next iteration if we don't restart things manually:
   // the audio stream just signaled that it's in error state.
-  mGraphImpl->SetCurrentDriver(nextDriver);
-  nextDriver->Start();
+  SwitchToNextDriver();
 }
 
 } // namespace mozilla

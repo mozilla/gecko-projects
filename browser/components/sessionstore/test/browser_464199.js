@@ -43,7 +43,7 @@ add_task(async function() {
                            formdata: { id: { "url": "http://www.example.net/" } }
                          }] }, title: REMEMBER },
     { state: { entries: [{ url: "http://www.example.org/form" }],
-               extData: { "setTabValue": "http://example.net:80" } }, title: REMEMBER }
+               extData: { "setCustomTabValue": "http://example.net:80" } }, title: REMEMBER }
   ] }] };
   let remember_count = 5;
 
@@ -57,6 +57,7 @@ add_task(async function() {
   Services.prefs.setIntPref("browser.sessionstore.max_tabs_undo",
                             test_state.windows[0]._closedTabs.length);
   ss.setWindowState(newWin, JSON.stringify(test_state), true);
+  await promiseWindowRestored(newWin);
 
   let closedTabs = JSON.parse(ss.getClosedTabData(newWin));
   is(closedTabs.length, test_state.windows[0]._closedTabs.length,

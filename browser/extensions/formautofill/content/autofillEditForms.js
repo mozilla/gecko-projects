@@ -8,21 +8,18 @@
 "use strict";
 
 class EditAutofillForm {
-  constructor(elements, record) {
+  constructor(elements) {
     this._elements = elements;
-    this._record = record;
   }
 
   /**
    * Fill the form with a record object.
-   * @param  {object} record
+   * @param  {object} [record = {}]
    */
-  loadInitialValues(record) {
-    for (let field in record) {
-      let input = document.getElementById(field);
-      if (input) {
-        input.value = record[field];
-      }
+  loadRecord(record = {}) {
+    for (let field of this._elements.form.elements) {
+      let value = record[field.id];
+      field.value = typeof(value) == "undefined" ? "" : value;
     }
   }
 
@@ -32,7 +29,7 @@ class EditAutofillForm {
    */
   buildFormObject() {
     return Array.from(this._elements.form.elements).reduce((obj, input) => {
-      if (input.value) {
+      if (input.value && !input.disabled) {
         obj[input.id] = input.value;
       }
       return obj;
@@ -85,9 +82,7 @@ class EditAddress extends EditAutofillForm {
    * @param {string[]} config.supportedCountries
    */
   constructor(elements, record, config) {
-    let country = record ? record.country :
-                    config.supportedCountries.find(supported => supported == config.DEFAULT_REGION);
-    super(elements, record || {country});
+    super(elements);
 
     Object.assign(this, config);
     Object.assign(this._elements, {
@@ -99,9 +94,19 @@ class EditAddress extends EditAutofillForm {
     this.populateCountries();
     // Need to populate the countries before trying to set the initial country.
     // Also need to use this._record so it has the default country selected.
-    this.loadInitialValues(this._record);
-    this.formatForm(country);
+    this.loadRecord(record);
     this.attachEventListeners();
+  }
+
+  loadRecord(record) {
+    this._record = record;
+    if (!record) {
+      record = {
+        country: this.supportedCountries.find(supported => supported == this.DEFAULT_REGION),
+      };
+    }
+    super.loadRecord(record);
+    this.formatForm(record.country);
   }
 
   /**
@@ -172,26 +177,42 @@ class EditCreditCard extends EditAutofillForm {
   /**
    * @param {HTMLElement[]} elements
    * @param {object} record with a decrypted cc-number
+   * @param {object} addresses in an object with guid keys for the billing address picker.
    * @param {object} config
-   * @param {function} config.isCCNumber Function to determine is a string is a valid CC number.
+   * @param {function} config.isCCNumber Function to determine if a string is a valid CC number.
    */
-  constructor(elements, record, config) {
-    super(elements, record);
+  constructor(elements, record, addresses, config) {
+    super(elements);
 
+    this._addresses = addresses;
     Object.assign(this, config);
     Object.assign(this._elements, {
       ccNumber: this._elements.form.querySelector("#cc-number"),
       year: this._elements.form.querySelector("#cc-exp-year"),
+      billingAddress: this._elements.form.querySelector("#billingAddressGUID"),
+      billingAddressRow: this._elements.form.querySelector(".billingAddressRow"),
     });
-    this.generateYears();
-    this.loadInitialValues(this._record);
+
+    this.loadRecord(record, addresses);
     this.attachEventListeners();
+  }
+
+  loadRecord(record, addresses) {
+    // _record must be updated before generateYears and generateBillingAddressOptions are called.
+    this._record = record;
+    this._addresses = addresses;
+    this.generateYears();
+    this.generateBillingAddressOptions();
+    super.loadRecord(record);
   }
 
   generateYears() {
     const count = 11;
     const currentYear = new Date().getFullYear();
     const ccExpYear = this._record && this._record["cc-exp-year"];
+
+    // Clear the list
+    this._elements.year.textContent = "";
 
     if (ccExpYear && ccExpYear < currentYear) {
       this._elements.year.appendChild(new Option(ccExpYear));
@@ -206,6 +227,24 @@ class EditCreditCard extends EditAutofillForm {
     if (ccExpYear && ccExpYear > currentYear + count) {
       this._elements.year.appendChild(new Option(ccExpYear));
     }
+  }
+
+  generateBillingAddressOptions() {
+    let billingAddressGUID = this._record && this._record.billingAddressGUID;
+
+    this._elements.billingAddress.textContent = "";
+
+    this._elements.billingAddress.appendChild(new Option("", ""));
+
+    let hasAddresses = false;
+    for (let [guid, address] of Object.entries(this._addresses)) {
+      hasAddresses = true;
+      let selected = guid == billingAddressGUID;
+      let option = new Option(this.getAddressLabel(address), guid, selected, selected);
+      this._elements.billingAddress.appendChild(option);
+    }
+
+    this._elements.billingAddressRow.hidden = !hasAddresses;
   }
 
   attachEventListeners() {

@@ -18,7 +18,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocShellLoadInfo.h"
 #include "nsIDocument.h"
-#include "nsIDOMCustomEvent.h"
 #include "nsIDOMDocument.h"
 #include "nsIExternalProtocolHandler.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -71,7 +70,6 @@
 #include "nsIContentSecurityPolicy.h"
 #include "GeckoProfiler.h"
 #include "nsPluginFrame.h"
-#include "nsDOMClassInfo.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsDOMJSUtils.h"
 
@@ -93,6 +91,7 @@
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "mozilla/dom/HTMLEmbedElement.h"
 #include "mozilla/dom/HTMLObjectElement.h"
+#include "mozilla/LoadInfo.h"
 #include "nsChannelClassifier.h"
 #include "nsFocusManager.h"
 
@@ -1464,14 +1463,17 @@ nsObjectLoadingContent::CheckLoadPolicy(int16_t *aContentPolicy)
 
   nsContentPolicyType contentPolicyType = GetContentPolicyType();
 
+  nsCOMPtr<nsILoadInfo> secCheckLoadInfo =
+    new LoadInfo(doc->NodePrincipal(), // loading principal
+                 doc->NodePrincipal(), // triggering principal
+                 thisContent,
+                 nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+                 contentPolicyType);
+
   *aContentPolicy = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentLoadPolicy(contentPolicyType,
-                                          mURI,
-                                          doc->NodePrincipal(), // loading principal
-                                          doc->NodePrincipal(), // triggering principal
-                                          thisContent,
+  nsresult rv = NS_CheckContentLoadPolicy(mURI,
+                                          secCheckLoadInfo,
                                           mContentType,
-                                          nullptr, //extra
                                           aContentPolicy,
                                           nsContentUtils::GetContentPolicy());
   NS_ENSURE_SUCCESS(rv, false);
@@ -1517,15 +1519,18 @@ nsObjectLoadingContent::CheckProcessPolicy(int16_t *aContentPolicy)
       return false;
   }
 
+  nsCOMPtr<nsILoadInfo> secCheckLoadInfo =
+    new LoadInfo(doc->NodePrincipal(), // loading principal
+                 doc->NodePrincipal(), // triggering principal
+                 thisContent,
+                 nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+                 objectType);
+
   *aContentPolicy = nsIContentPolicy::ACCEPT;
   nsresult rv =
-    NS_CheckContentProcessPolicy(objectType,
-                                 mURI ? mURI : mBaseURI,
-                                 doc->NodePrincipal(), // loading principal
-                                 doc->NodePrincipal(), // triggering principal
-                                 static_cast<nsIImageLoadingContent*>(this),
+    NS_CheckContentProcessPolicy(mURI ? mURI : mBaseURI,
+                                 secCheckLoadInfo,
                                  mContentType,
-                                 nullptr, //extra
                                  aContentPolicy,
                                  nsContentUtils::GetContentPolicy());
   NS_ENSURE_SUCCESS(rv, false);
@@ -1572,6 +1577,19 @@ nsObjectLoadingContent::UpdateObjectParameters()
   ///
   /// Initial MIME Type
   ///
+
+
+  if (caps & eFallbackIfClassIDPresent) {
+    nsAutoString classIDAttr;
+    thisElement->GetAttr(kNameSpaceID_None, nsGkAtoms::classid, classIDAttr);
+    // We don't support class ID plugin references, so we should always treat
+    // having class Ids as attributes as invalid, and fallback accordingly.
+    if (!classIDAttr.IsEmpty()) {
+      newMime.Truncate();
+      stateInvalid = true;
+    }
+  }
+
   ///
   /// Codebase
   ///
@@ -1585,9 +1603,7 @@ nsObjectLoadingContent::UpdateObjectParameters()
                                                    codebaseStr,
                                                    thisElement->OwnerDoc(),
                                                    docBaseURI);
-    if (NS_SUCCEEDED(rv)) {
-      NS_TryToSetImmutable(newBaseURI);
-    } else {
+    if (NS_FAILED(rv)) {
       // Malformed URI
       LOG(("OBJLC [%p]: Could not parse plugin's codebase as a URI, "
            "will use document baseURI instead", this));
@@ -1638,9 +1654,7 @@ nsObjectLoadingContent::UpdateObjectParameters()
       newMime = NS_LITERAL_CSTRING("text/html");
     }
 
-    if (NS_SUCCEEDED(rv)) {
-      NS_TryToSetImmutable(newURI);
-    } else {
+    if (NS_FAILED(rv)) {
       stateInvalid = true;
     }
   }

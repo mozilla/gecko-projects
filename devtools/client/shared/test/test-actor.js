@@ -661,7 +661,15 @@ var TestActor = exports.TestActor = protocol.ActorClassWithSpec(testSpec, {
   eval: function(js) {
     // We have to use a sandbox, as CSP prevent us from using eval on apps...
     let sb = Cu.Sandbox(this.content, { sandboxPrototype: this.content });
-    return Cu.evalInSandbox(js, sb);
+    let result = Cu.evalInSandbox(js, sb);
+
+    // Ensure passing only serializable data to RDP
+    if (typeof result == "function") {
+      return null;
+    } else if (typeof result == "object") {
+      return JSON.parse(JSON.stringify(result));
+    }
+    return result;
   },
 
   /**
@@ -1101,6 +1109,11 @@ function isInside(point, polygon) {
   if (polygon.length === 0) {
     return false;
   }
+
+  // Reduce the length of the fractional part because this is likely to cause errors when
+  // the point is on the edge of the polygon.
+  point = point.map(n => n.toFixed(2));
+  polygon = polygon.map(p => p.map(n => n.toFixed(2)));
 
   const n = polygon.length;
   const newPoints = polygon.slice(0);

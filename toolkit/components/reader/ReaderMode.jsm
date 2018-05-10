@@ -32,13 +32,12 @@ const CLASSES_TO_PRESERVE = [
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-Cu.importGlobalProperties(["XMLHttpRequest"]);
+Cu.importGlobalProperties(["XMLHttpRequest", "XMLSerializer"]);
 
 ChromeUtils.defineModuleGetter(this, "CommonUtils", "resource://services-common/utils.js");
 ChromeUtils.defineModuleGetter(this, "EventDispatcher", "resource://gre/modules/Messaging.jsm");
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 ChromeUtils.defineModuleGetter(this, "ReaderWorker", "resource://gre/modules/reader/ReaderWorker.jsm");
-ChromeUtils.defineModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
 ChromeUtils.defineModuleGetter(this, "LanguageDetector", "resource:///modules/translation/LanguageDetector.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "Readability", function() {
@@ -102,7 +101,7 @@ var ReaderMode = {
     let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
     let sh = webNav.sessionHistory;
     if (webNav.canGoForward) {
-      let forwardEntry = sh.getEntryAtIndex(sh.index + 1, false);
+      let forwardEntry = sh.legacySHistory.getEntryAtIndex(sh.index + 1, false);
       let forwardURL = forwardEntry.URI.spec;
       if (forwardURL && (forwardURL == readerURL || !readerURL)) {
         webNav.goForward();
@@ -123,7 +122,7 @@ var ReaderMode = {
     let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
     let sh = webNav.sessionHistory;
     if (webNav.canGoBack) {
-      let prevEntry = sh.getEntryAtIndex(sh.index - 1, false);
+      let prevEntry = sh.legacySHistory.getEntryAtIndex(sh.index - 1, false);
       let prevURL = prevEntry.URI.spec;
       if (prevURL && (prevURL == originalURL || !originalURL)) {
         webNav.goBack();
@@ -131,7 +130,18 @@ var ReaderMode = {
       }
     }
 
-    win.document.location = originalURL;
+    let referrerURI, principal;
+    try {
+      referrerURI = Services.io.newURI(url);
+      principal = Services.scriptSecurityManager.createCodebasePrincipal(
+        referrerURI, win.document.nodePrincipal.originAttributes);
+    } catch (e) {
+      Cu.reportError(e);
+      return;
+    }
+    let flags =  webNav.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL |
+      webNav.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
+    webNav.loadURI(originalURL, flags, referrerURI, null, null, principal);
   },
 
   /**
@@ -471,8 +481,7 @@ var ReaderMode = {
       pathBase: Services.io.newURI(".", null, doc.baseURIObject).spec
     };
 
-    let serializer = Cc["@mozilla.org/xmlextras/xmlserializer;1"].
-                     createInstance(Ci.nsIDOMSerializer);
+    let serializer = new XMLSerializer();
     let serializedDoc = serializer.serializeToString(doc);
 
     let options = {

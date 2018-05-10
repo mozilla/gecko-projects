@@ -5,11 +5,12 @@ package org.mozilla.android.sync.net.test;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.NonObjectJSONException;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.net.BasicAuthHeaderProvider;
+import org.mozilla.gecko.util.StringUtils;
+import org.robolectric.RobolectricTestRunner;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -22,7 +23,7 @@ import static org.junit.Assert.assertEquals;
  * Test the transfer of a UTF-8 string from desktop, and ensure that it results in the
  * correct hashed Basic Auth header.
  */
-@RunWith(TestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 public class TestCredentialsEndToEnd {
 
   public static final String REAL_PASSWORD         = "pïgéons1";
@@ -53,7 +54,7 @@ public class TestCredentialsEndToEnd {
     final String decoded = Utils.decodeUTF8(password);
 
     final byte[] expectedBytes = Utils.decodeBase64(BTOA_PASSWORD);
-    final String expected = new String(expectedBytes, "UTF-8");
+    final String expected = new String(expectedBytes, StringUtils.UTF_8);
 
     assertEquals(DESKTOP_ASSERTED_SIZE, password.length());
     assertEquals(expected, decoded);

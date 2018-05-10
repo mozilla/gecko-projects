@@ -67,9 +67,7 @@ private:
                             Sequence<OwningNonNull<MessagePort>>());
     event->SetTrusted(true);
 
-    nsCOMPtr<nsIDOMEvent> domEvent = do_QueryObject(event);
-    bool dummy;
-    globalScope->DispatchEvent(domEvent, &dummy);
+    globalScope->DispatchEvent(*event);
     return true;
   }
 };
@@ -476,7 +474,6 @@ WorkerDebugger::ReportErrorToDebuggerOnMainThread(const nsAString& aFilename,
   WorkerErrorReport::LogErrorToConsole(report, 0);
 }
 
-#ifndef RELEASE_OR_BETA
 PerformanceInfo
 WorkerDebugger::ReportPerformanceInfo()
 {
@@ -502,18 +499,21 @@ WorkerDebugger::ReportPerformanceInfo()
   uint16_t count =  perf->GetTotalDispatchCount();
   uint64_t duration = perf->GetExecutionDuration();
   RefPtr<nsIURI> uri = mWorkerPrivate->GetResolvedScriptURI();
-  CategoryDispatch item = CategoryDispatch(DispatchCategory::Worker.GetValue(), count);
+
+  // Workers only produce metrics for a single category - DispatchCategory::Worker.
+  // We still return an array of CategoryDispatch so the PerformanceInfo
+  // struct is common to all performance counters throughout Firefox.
   FallibleTArray<CategoryDispatch> items;
+  CategoryDispatch item = CategoryDispatch(DispatchCategory::Worker.GetValue(), count);
   if (!items.AppendElement(item, fallible)) {
     NS_ERROR("Could not complete the operation");
     return PerformanceInfo(uri->GetSpecOrDefault(), pid, wid, pwid, duration,
-                           true, items);
+                            true, items);
   }
   perf->ResetPerformanceCounters();
   return PerformanceInfo(uri->GetSpecOrDefault(), pid, wid, pwid, duration,
                          true, items);
 }
-#endif
 
 } // dom namespace
 } // mozilla namespace

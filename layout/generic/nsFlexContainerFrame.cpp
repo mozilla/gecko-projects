@@ -35,6 +35,7 @@ typedef nsFlexContainerFrame::FlexboxAxisTracker FlexboxAxisTracker;
 typedef nsFlexContainerFrame::StrutInfo StrutInfo;
 typedef nsFlexContainerFrame::CachedMeasuringReflowResult
           CachedMeasuringReflowResult;
+typedef nsLayoutUtils::IntrinsicISizeType IntrinsicISizeType;
 
 static mozilla::LazyLogModule gFlexContainerLog("nsFlexContainerFrame");
 
@@ -553,6 +554,9 @@ public:
   bool NeedsMinSizeAutoResolution() const
     { return mNeedsMinSizeAutoResolution; }
 
+  bool HasAnyAutoMargin() const
+    { return mHasAnyAutoMargin; }
+
   // Indicates whether this item is a "strut" left behind by an element with
   // visibility:collapse.
   bool IsStrut() const             { return mIsStrut; }
@@ -857,6 +861,9 @@ protected:
 
   // Does this item need to resolve a min-[width|height]:auto (in main-axis).
   bool mNeedsMinSizeAutoResolution;
+
+  // Does this item have an auto margin in either main or cross axis?
+  bool mHasAnyAutoMargin;
 
   uint8_t mAlignSelf; // My "align-self" computed value (with "auto"
                       // swapped out for parent"s "align-items" value,
@@ -1663,26 +1670,45 @@ nsFlexContainerFrame::
  */
 class nsFlexContainerFrame::CachedMeasuringReflowResult
 {
-  // Members that are part of the cache key:
-  const LogicalSize mAvailableSize;
-  const nscoord mComputedBSize;
+  struct Key
+  {
+    const LogicalSize mAvailableSize;
+    const nscoord mComputedBSize;
+    const nscoord mComputedMinBSize;
+    const nscoord mComputedMaxBSize;
 
-  // Members that are part of the cache value:
+    explicit Key(const ReflowInput& aRI)
+      : mAvailableSize(aRI.AvailableSize())
+      , mComputedBSize(aRI.ComputedBSize())
+      , mComputedMinBSize(aRI.ComputedMinBSize())
+      , mComputedMaxBSize(aRI.ComputedMaxBSize())
+    { }
+
+    bool operator==(const Key& aOther) const
+    {
+      return mAvailableSize == aOther.mAvailableSize &&
+        mComputedBSize == aOther.mComputedBSize &&
+        mComputedMinBSize == aOther.mComputedMinBSize &&
+        mComputedMaxBSize == aOther.mComputedMaxBSize;
+    }
+  };
+
+  const Key mKey;
+
   const nscoord mBSize;
   const nscoord mAscent;
 
 public:
   CachedMeasuringReflowResult(const ReflowInput& aReflowInput,
                               const ReflowOutput& aDesiredSize)
-    : mAvailableSize(aReflowInput.AvailableSize())
-    , mComputedBSize(aReflowInput.ComputedBSize())
+    : mKey(aReflowInput)
     , mBSize(aDesiredSize.BSize(aReflowInput.GetWritingMode()))
     , mAscent(aDesiredSize.BlockStartAscent())
-  {}
+  { }
 
-  bool IsValidFor(const ReflowInput& aReflowInput) const {
-    return mAvailableSize == aReflowInput.AvailableSize() &&
-      mComputedBSize == aReflowInput.ComputedBSize();
+  bool IsValidFor(const ReflowInput& aReflowInput) const
+  {
+    return mKey == Key(aReflowInput);
   }
 
   nscoord BSize() const { return mBSize; }
@@ -1737,6 +1763,9 @@ nsFlexContainerFrame::MeasureAscentAndBSizeForFlexItem(
 /* virtual */ void
 nsFlexContainerFrame::MarkIntrinsicISizesDirty()
 {
+  mCachedMinISize = NS_INTRINSIC_WIDTH_UNKNOWN;
+  mCachedPrefISize = NS_INTRINSIC_WIDTH_UNKNOWN;
+
   for (nsIFrame* childFrame : mFrames) {
     childFrame->DeleteProperty(CachedFlexMeasuringReflow());
   }
@@ -1816,13 +1845,17 @@ FlexItem::FlexItem(ReflowInput& aFlexItemReflowInput,
     mIsInlineAxisMainAxis(aAxisTracker.IsRowOriented() !=
                           aAxisTracker.GetWritingMode().IsOrthogonalTo(mWM))
     // mNeedsMinSizeAutoResolution is initialized in CheckForMinSizeAuto()
-    // mAlignSelf, see below
+    // mAlignSelf, mHasAnyAutoMargin see below
 {
   MOZ_ASSERT(mFrame, "expecting a non-null child frame");
   MOZ_ASSERT(!mFrame->IsPlaceholderFrame(),
              "placeholder frames should not be treated as flex items");
   MOZ_ASSERT(!(mFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW),
              "out-of-flow frames should not be treated as flex items");
+  MOZ_ASSERT(mIsInlineAxisMainAxis ==
+             nsFlexContainerFrame::IsItemInlineAxisMainAxis(mFrame),
+             "public API should be consistent with internal state (about "
+             "whether flex item's inline axis is flex container's main axis)");
 
   const ReflowInput* containerRS = aFlexItemReflowInput.mParentReflowInput;
   if (IsLegacyBox(containerRS->mFrame)) {
@@ -1849,12 +1882,16 @@ FlexItem::FlexItem(ReflowInput& aFlexItemReflowInput,
   SetFlexBaseSizeAndMainSize(aFlexBaseSize);
   CheckForMinSizeAuto(aFlexItemReflowInput, aAxisTracker);
 
+
+  const nsStyleSides& styleMargin =
+    aFlexItemReflowInput.mStyleMargin->mMargin;
+  mHasAnyAutoMargin = styleMargin.HasInlineAxisAuto(mWM) ||
+                      styleMargin.HasBlockAxisAuto(mWM);
+
   // Assert that any "auto" margin components are set to 0.
   // (We'll resolve them later; until then, we want to treat them as 0-sized.)
 #ifdef DEBUG
   {
-    const nsStyleSides& styleMargin =
-      aFlexItemReflowInput.mStyleMargin->mMargin;
     NS_FOR_CSS_SIDES(side) {
       if (styleMargin.GetUnit(side) == eStyleUnit_Auto) {
         MOZ_ASSERT(GetMarginComponentForSide(side) == 0,
@@ -1871,8 +1908,6 @@ FlexItem::FlexItem(ReflowInput& aFlexItemReflowInput,
   // with special cases elsewhere.
   // We are treating this case as one where it is appropriate to use the
   // fallback values defined at https://www.w3.org/TR/css-align/#baseline-values
-  // XXXdholbert That spec text actually says to fall back to 'start'/'end',
-  // not 'flex-start'/'flex-end'... Probably sort this out in bug 1207698.
   if (!IsBlockAxisCrossAxis()) {
     if (mAlignSelf == NS_STYLE_ALIGN_BASELINE) {
       mAlignSelf = NS_STYLE_ALIGN_FLEX_START;
@@ -1915,6 +1950,7 @@ FlexItem::FlexItem(nsIFrame* aChildFrame, nscoord aCrossSize,
     mIsStrut(true), // (this is the constructor for making struts, after all)
     mIsInlineAxisMainAxis(true), // (doesn't matter b/c we're not doing layout)
     mNeedsMinSizeAutoResolution(false),
+    mHasAnyAutoMargin(false),
     mAlignSelf(NS_STYLE_ALIGN_FLEX_START)
 {
   MOZ_ASSERT(mFrame, "expecting a non-null child frame");
@@ -4381,6 +4417,57 @@ nsFlexContainerFrame::GetFlexFrameWithComputedInfo(nsIFrame* aFrame)
   return flexFrame;
 }
 
+/* static */
+bool
+nsFlexContainerFrame::IsItemInlineAxisMainAxis(nsIFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame && aFrame->IsFlexItem(), "expecting arg to be a flex item");
+  const WritingMode flexItemWM = aFrame->GetWritingMode();
+  const nsIFrame* flexContainer = aFrame->GetParent();
+
+  if (IsLegacyBox(flexContainer)) {
+    // For legacy boxes, the main axis is determined by "box-orient", and we can
+    // just directly check if that's vertical, and compare that to whether the
+    // item's WM is also vertical:
+    bool boxOrientIsVertical =
+      (flexContainer->StyleXUL()->mBoxOrient == StyleBoxOrient::Vertical);
+    return flexItemWM.IsVertical() == boxOrientIsVertical;
+  }
+
+  // For modern CSS flexbox, we get our return value by asking two questions
+  // and comparing their answers.
+  // Question 1: does aFrame have the same inline axis as its flex container?
+  bool itemInlineAxisIsParallelToParent =
+    !flexItemWM.IsOrthogonalTo(flexContainer->GetWritingMode());
+
+  // Question 2: is aFrame's flex container row-oriented? (This tells us
+  // whether the flex container's main axis is its inline axis.)
+  auto flexDirection = flexContainer->StylePosition()->mFlexDirection;
+  bool flexContainerIsRowOriented =
+    flexDirection == NS_STYLE_FLEX_DIRECTION_ROW ||
+    flexDirection == NS_STYLE_FLEX_DIRECTION_ROW_REVERSE;
+
+  // aFrame's inline axis is its flex container's main axis IFF the above
+  // questions have the same answer.
+  return flexContainerIsRowOriented == itemInlineAxisIsParallelToParent;
+}
+
+/* static */
+bool
+nsFlexContainerFrame::IsUsedFlexBasisContent(const nsStyleCoord* aFlexBasis,
+                                             const nsStyleCoord* aMainSize)
+{
+  // We have a used flex-basis of 'content' if flex-basis explicitly has that
+  // value, OR if flex-basis is 'auto' (deferring to the main-size property)
+  // and the main-size property is also 'auto'.
+  // See https://drafts.csswg.org/css-flexbox-1/#valdef-flex-basis-auto
+  return
+    (aFlexBasis->GetUnit() == eStyleUnit_Enumerated &&
+     aFlexBasis->GetIntValue() == NS_STYLE_FLEX_BASIS_CONTENT) ||
+    (aFlexBasis->GetUnit() == eStyleUnit_Auto &&
+     aMainSize->GetUnit() == eStyleUnit_Auto);
+}
+
 void
 nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
                                    ReflowOutput&     aDesiredSize,
@@ -4716,6 +4803,16 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
                        *item, framePos, containerSize);
       }
 
+      // If the item has auto margins, and we were tracking the UsedMargin
+      // property, set the property to the computed margin values.
+      if (item->HasAnyAutoMargin()) {
+        nsMargin* propValue =
+          item->Frame()->GetProperty(nsIFrame::UsedMarginProperty());
+        if (propValue) {
+          *propValue = item->GetMargin();
+        }
+      }
+
       // If this is our first item and we haven't established a baseline for
       // the container yet (i.e. if we don't have 'align-self: baseline' on any
       // children), then use this child's first baseline as the container's
@@ -4916,10 +5013,6 @@ nsFlexContainerFrame::ReflowFlexItem(nsPresContext* aPresContext,
     aItem.Frame()->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
   }
 
-  // XXXdholbert Might need to actually set the correct margins in the
-  // reflow state at some point, so that they can be saved on the frame for
-  // UsedMarginProperty().  Maybe doesn't matter though...?
-
   // If we're overriding the computed width or height, *and* we had an
   // earlier "measuring" reflow, then this upcoming reflow needs to be
   // treated as a resize.
@@ -5003,12 +5096,11 @@ nsFlexContainerFrame::ReflowPlaceholders(nsPresContext* aPresContext,
   }
 }
 
-/* virtual */ nscoord
-nsFlexContainerFrame::GetMinISize(gfxContext* aRenderingContext)
+nscoord
+nsFlexContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
+                                     IntrinsicISizeType aType)
 {
-  nscoord minISize = 0;
-  DISPLAY_MIN_WIDTH(this, minISize);
-
+  nscoord containerISize = 0;
   RenumberList();
 
   const nsStylePosition* stylePos = StylePosition();
@@ -5023,58 +5115,48 @@ nsFlexContainerFrame::GetMinISize(gfxContext* aRenderingContext)
     if (!useMozBoxCollapseBehavior ||
         (NS_STYLE_VISIBILITY_COLLAPSE !=
          childFrame->StyleVisibility()->mVisible)) {
-      nscoord childMinISize =
+      nscoord childISize =
         nsLayoutUtils::IntrinsicForContainer(aRenderingContext, childFrame,
-                                             nsLayoutUtils::MIN_ISIZE);
-      // For a horizontal single-line flex container, the intrinsic min
-      // isize is the sum of its items' min isizes.
-      // For a column-oriented flex container, or for a multi-line row-
-      // oriented flex container, the intrinsic min isize is the max of
-      // its items' min isizes.
+                                             aType);
+      // * For a row-oriented single-line flex container, the intrinsic
+      // {min/pref}-isize is the sum of its items' {min/pref}-isizes.
+      // * For a column-oriented flex container, the intrinsic min isize
+      // is the max of its items' min isizes.
+      // * For a row-oriented multi-line flex container, the intrinsic
+      // pref isize is former (sum), and its min isize is the latter (max).
+      bool isSingleLine = (NS_STYLE_FLEX_WRAP_NOWRAP == stylePos->mFlexWrap);
       if (axisTracker.IsRowOriented() &&
-          NS_STYLE_FLEX_WRAP_NOWRAP == stylePos->mFlexWrap) {
-        minISize += childMinISize;
-      } else {
-        minISize = std::max(minISize, childMinISize);
+          (isSingleLine || aType == nsLayoutUtils::PREF_ISIZE)) {
+        containerISize += childISize;
+      } else { // (col-oriented, or MIN_ISIZE for multi-line row flex container)
+        containerISize = std::max(containerISize, childISize);
       }
     }
   }
-  return minISize;
+
+  return containerISize;
+}
+
+/* virtual */ nscoord
+nsFlexContainerFrame::GetMinISize(gfxContext* aRenderingContext)
+{
+  DISPLAY_MIN_WIDTH(this, mCachedMinISize);
+  if (mCachedMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
+    mCachedMinISize = IntrinsicISize(aRenderingContext,
+                                     nsLayoutUtils::MIN_ISIZE);
+  }
+
+  return mCachedMinISize;
 }
 
 /* virtual */ nscoord
 nsFlexContainerFrame::GetPrefISize(gfxContext* aRenderingContext)
 {
-  nscoord prefISize = 0;
-  DISPLAY_PREF_WIDTH(this, prefISize);
-
-  RenumberList();
-
-  // XXXdholbert Optimization: We could cache our intrinsic widths like
-  // nsBlockFrame does (and return it early from this function if it's set).
-  // Whenever anything happens that might change it, set it to
-  // NS_INTRINSIC_WIDTH_UNKNOWN (like nsBlockFrame::MarkIntrinsicISizesDirty
-  // does)
-  const FlexboxAxisTracker axisTracker(this, GetWritingMode());
-
-  const bool useMozBoxCollapseBehavior =
-    ShouldUseMozBoxCollapseBehavior(StyleDisplay());
-
-  for (nsIFrame* childFrame : mFrames) {
-    // If we're using legacy "visibility:collapse" behavior, then we don't
-    // care about the sizes of any collapsed children.
-    if (!useMozBoxCollapseBehavior ||
-        (NS_STYLE_VISIBILITY_COLLAPSE !=
-         childFrame->StyleVisibility()->mVisible)) {
-      nscoord childPrefISize =
-        nsLayoutUtils::IntrinsicForContainer(aRenderingContext, childFrame,
-                                             nsLayoutUtils::PREF_ISIZE);
-      if (axisTracker.IsRowOriented()) {
-        prefISize += childPrefISize;
-      } else {
-        prefISize = std::max(prefISize, childPrefISize);
-      }
-    }
+  DISPLAY_PREF_WIDTH(this, mCachedPrefISize);
+  if (mCachedPrefISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
+    mCachedPrefISize = IntrinsicISize(aRenderingContext,
+                                      nsLayoutUtils::PREF_ISIZE);
   }
-  return prefISize;
+
+  return mCachedPrefISize;
 }

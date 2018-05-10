@@ -82,6 +82,7 @@ namespace dom {
 
 class MediaError;
 class MediaSource;
+class PlayPromise;
 class Promise;
 class TextTrackList;
 class AudioTrackList;
@@ -143,9 +144,8 @@ public:
                              IsAnyOfHTMLElements(nsGkAtoms::video,
                                                  nsGkAtoms::audio))
 
-  // nsIDOMEventTarget
-  virtual nsresult
-  GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
+  // EventTarget
+  void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
                               nsAtom* aAttribute,
@@ -378,8 +378,6 @@ public:
    */
   void NotifyOutputTrackStopped(DOMMediaStream* aOwningStream,
                                 TrackID aDestinationTrackID);
-
-  virtual bool IsNodeOfType(uint32_t aFlags) const override;
 
   /**
    * Returns the current load ID. Asynchronous events store the ID that was
@@ -1327,7 +1325,7 @@ protected:
 
   // This method moves the mPendingPlayPromises into a temperate object. So the
   // mPendingPlayPromises is cleared after this method call.
-  nsTArray<RefPtr<Promise>> TakePendingPlayPromises();
+  nsTArray<RefPtr<PlayPromise>> TakePendingPlayPromises();
 
   // This method snapshots the mPendingPlayPromises by TakePendingPlayPromises()
   // and queues a task to resolve them.
@@ -1781,6 +1779,9 @@ public:
     uint32_t mCount;
   };
 private:
+
+  already_AddRefed<PlayPromise> CreatePlayPromise(ErrorResult& aRv) const;
+
   /**
    * This function is called by AfterSetAttr and OnAttrSetButNotChanged.
    * It will not be called if the value is being unset.
@@ -1820,6 +1821,13 @@ private:
   // For use by mochitests. Enabling pref "media.test.video-suspend"
   bool mForcedHidden = false;
 
+  // True if we attempted to play before the media element had loaded
+  // metadata, and we need to attempt the play once we reach loaded metadata.
+  // If autoplay is disabled, we can't decide whether to allow a play()
+  // until we've loaded metadata, as we need to know whether the resource
+  // has an audio track.
+  bool mAttemptPlayUponLoadedMetadata = false;
+
   // True if audio tracks and video tracks are constructed and added into the
   // track list, false if all tracks are removed from the track list.
   bool mMediaTracksConstructed = false;
@@ -1835,7 +1843,7 @@ private:
 
   // A list of pending play promises. The elements are pushed during the play()
   // method call and are resolved/rejected during further playback steps.
-  nsTArray<RefPtr<Promise>> mPendingPlayPromises;
+  nsTArray<RefPtr<PlayPromise>> mPendingPlayPromises;
 
   // A list of already-dispatched but not yet run
   // nsResolveOrRejectPendingPlayPromisesRunners.

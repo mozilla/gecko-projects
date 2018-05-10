@@ -14,7 +14,7 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/FocusTarget.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/StyleSetHandle.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/UniquePtr.h"
 #include "nsAutoPtr.h"
 #include "nsContentUtils.h" // For AddScriptBlocker().
@@ -81,14 +81,15 @@ public:
   static bool AccessibleCaretEnabled(nsIDocShell* aDocShell);
 
   void Init(nsIDocument* aDocument, nsPresContext* aPresContext,
-            nsViewManager* aViewManager, StyleSetHandle aStyleSet);
+            nsViewManager* aViewManager,
+            UniquePtr<ServoStyleSet> aStyleSet);
   void Destroy() override;
 
   void UpdatePreferenceStyles() override;
 
-  NS_IMETHOD GetSelection(RawSelectionType aRawSelectionType,
-                          nsISelection** aSelection) override;
-  dom::Selection* GetDOMSelection(RawSelectionType aRawSelectionType) override;
+  NS_IMETHOD GetSelectionFromScript(RawSelectionType aRawSelectionType,
+                                    dom::Selection** aSelection) override;
+  dom::Selection* GetSelection(RawSelectionType aRawSelectionType) override;
 
   dom::Selection* GetCurrentSelection(SelectionType aSelectionType) override;
 
@@ -123,7 +124,6 @@ public:
   void CancelAllPendingReflows() override;
   void DoFlushPendingNotifications(FlushType aType) override;
   void DoFlushPendingNotifications(ChangesToFlush aType) override;
-  void DestroyFramesForAndRestyle(dom::Element* aElement) override;
 
   /**
    * Post a callback that should be handled after reflow has finished.
@@ -170,7 +170,9 @@ public:
                                  nsIContent* aContent,
                                  nsEventStatus* aStatus,
                                  bool aIsHandlingNativeEvent = false,
-                                 nsIContent** aTargetContent = nullptr) override;
+                                 nsIContent** aTargetContent = nullptr,
+                                 nsIContent* aOverrideClickTarget = nullptr)
+                                 override;
   nsIFrame* GetEventTargetFrame() override;
   already_AddRefed<nsIContent>
     GetEventTargetContent(WidgetEvent* aEvent) override;
@@ -195,7 +197,7 @@ public:
              uint32_t aFlags) override;
 
   already_AddRefed<SourceSurface>
-  RenderSelection(nsISelection* aSelection,
+  RenderSelection(dom::Selection* aSelection,
                   const LayoutDeviceIntPoint aPoint,
                   LayoutDeviceIntRect* aScreenRect,
                   uint32_t aFlags) override;
@@ -234,15 +236,13 @@ public:
                                     WidgetEvent* aEvent,
                                     nsEventStatus* aStatus) override;
   nsresult HandleDOMEventWithTarget(nsIContent* aTargetContent,
-                                    nsIDOMEvent* aEvent,
+                                    dom::Event* aEvent,
                                     nsEventStatus* aStatus) override;
   bool ShouldIgnoreInvalidation() override;
   void WillPaint() override;
   void WillPaintWindow() override;
   void DidPaintWindow() override;
   void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) override;
-  void DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
-                              bool aFlushOnHoverChange) override;
   void ClearMouseCaptureOnView(nsView* aView) override;
   bool IsVisible() override;
 
@@ -289,9 +289,6 @@ public:
   NS_DECL_NSIDOCUMENTOBSERVER_ENDLOAD
   NS_DECL_NSIDOCUMENTOBSERVER_CONTENTSTATECHANGED
   NS_DECL_NSIDOCUMENTOBSERVER_DOCUMENTSTATESCHANGED
-  NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETADDED
-  NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETREMOVED
-  NS_DECL_NSIDOCUMENTOBSERVER_STYLESHEETAPPLICABLESTATECHANGED
 
   // nsIMutationObserver
   NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATACHANGED
@@ -320,7 +317,6 @@ public:
   void ListComputedStyles(FILE *out, int32_t aIndent = 0) override;
 
   void ListStyleSheets(FILE *out, int32_t aIndent = 0) override;
-  void VerifyStyleTree() override;
 #endif
 
   static LazyLogModule gLog;
@@ -508,13 +504,11 @@ private:
   bool mCaretEnabled;
 
 #ifdef DEBUG
-  ServoStyleSet* CloneStyleSet(ServoStyleSet* aSet);
+  UniquePtr<ServoStyleSet> CloneStyleSet(ServoStyleSet* aSet);
   bool VerifyIncrementalReflow();
   bool mInVerifyReflow;
   void ShowEventTargetDebug();
 #endif
-
-  void RecordStyleSheetChange(StyleSheet* aStyleSheet, StyleSheet::ChangeType);
 
   void RemovePreferenceStyles();
 
@@ -529,7 +523,7 @@ private:
   // create a RangePaintInfo for the range aRange containing the
   // display list needed to paint the range to a surface
   UniquePtr<RangePaintInfo>
-  CreateRangePaintInfo(nsIDOMRange* aRange,
+  CreateRangePaintInfo(nsRange* aRange,
                        nsRect& aSurfaceRect,
                        bool aForPrimarySelection);
 
@@ -547,7 +541,7 @@ private:
    */
   already_AddRefed<SourceSurface>
   PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems,
-                      nsISelection* aSelection,
+                      dom::Selection* aSelection,
                       nsIntRegion* aRegion,
                       nsRect aArea,
                       const LayoutDeviceIntPoint aPoint,
@@ -674,7 +668,8 @@ private:
    */
   nsresult HandleEventInternal(WidgetEvent* aEvent,
                                nsEventStatus* aStatus,
-                               bool aIsHandlingNativeEvent);
+                               bool aIsHandlingNativeEvent,
+                               nsIContent* aOverrideClickTarget = nullptr);
 
   /*
    * This and the next two helper methods are used to target and position the
@@ -699,7 +694,7 @@ private:
 
   // Get the selected item and coordinates in device pixels relative to root
   // document's root view for element, first ensuring the element is onscreen
-  void GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
+  void GetCurrentItemAndPositionForElement(dom::Element* aFocusedElement,
                                            nsIContent **aTargetToUse,
                                            LayoutDeviceIntPoint& aTargetPt,
                                            nsIWidget *aRootWidget);
@@ -755,6 +750,8 @@ private:
 
   nsresult SetResolutionImpl(float aResolution, bool aScaleToResolution);
 
+  nsIContent* GetOverrideClickTarget(WidgetGUIEvent* aEvent,
+                                     nsIFrame* aFrame);
 #ifdef DEBUG
   // The reflow root under which we're currently reflowing.  Null when
   // not in reflow.
@@ -873,6 +870,14 @@ private:
 
   // Whether we have ever handled a user input event
   bool mHasHandledUserInput : 1;
+
+#ifdef NIGHTLY_BUILD
+  // Whether we should dispatch keypress events even for non-printable keys
+  // for keeping backward compatibility.
+  bool mForceDispatchKeyPressEventsForNonPrintableKeys : 1;
+  // Whether mForceDispatchKeyPressEventsForNonPrintableKeys is initialized.
+  bool mInitializedForceDispatchKeyPressEventsForNonPrintableKeys : 1;
+#endif // #ifdef NIGHTLY_BUILD
 
   static bool sDisableNonTestMouseEvents;
 

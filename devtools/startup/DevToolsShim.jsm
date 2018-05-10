@@ -13,6 +13,16 @@ XPCOMUtils.defineLazyGetter(this, "DevtoolsStartup", () => {
             .wrappedJSObject;
 });
 
+// We don't want to spend time initializing the full loader here so we create
+// our own lazy require.
+XPCOMUtils.defineLazyGetter(this, "Telemetry", function() {
+  const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  // eslint-disable-next-line no-shadow
+  const Telemetry = require("devtools/client/shared/telemetry");
+
+  return Telemetry;
+});
+
 const DEVTOOLS_ENABLED_PREF = "devtools.enabled";
 const DEVTOOLS_POLICY_DISABLED_PREF = "devtools.policy.disabled";
 
@@ -38,6 +48,14 @@ function removeItem(array, callback) {
 this.DevToolsShim = {
   _gDevTools: null,
   listeners: [],
+
+  get telemetry() {
+    if (!this._telemetry) {
+      this._telemetry = new Telemetry();
+      this._telemetry.setEventRecordingEnabled("devtools.main", true);
+    }
+    return this._telemetry;
+  },
 
   /**
    * Returns true if DevTools are enabled for the current profile. If devtools are not
@@ -158,6 +176,38 @@ this.DevToolsShim = {
   },
 
   /**
+   * Called from nsContextMenu.js in mozilla-central when using the Inspect Accessibility
+   * context menu item.
+   *
+   * @param {XULTab} tab
+   *        The browser tab on which inspect accessibility was used.
+   * @param {Array} selectors
+   *        An array of CSS selectors to find the target accessible object. Several
+   *        selectors can be needed if the element is nested in frames and not directly
+   *        in the root document.
+   * @return {Promise} a promise that resolves when the accessible node is selected in the
+   *         accessibility inspector or that resolves immediately if DevTools are not
+   *         enabled.
+   */
+  inspectA11Y: function(tab, selectors) {
+    if (!this.isEnabled()) {
+      if (!this.isDisabledByPolicy()) {
+        DevtoolsStartup.openInstallPage("ContextMenu");
+      }
+      return Promise.resolve();
+    }
+
+    // Record the timing at which this event started in order to compute later in
+    // gDevTools.showToolbox, the complete time it takes to open the toolbox.
+    // i.e. especially take `DevtoolsStartup.initDevTools` into account.
+    let startTime = Cu.now();
+
+    this.initDevTools("ContextMenu");
+
+    return this._gDevTools.inspectA11Y(tab, selectors, startTime);
+  },
+
+  /**
    * Called from nsContextMenu.js in mozilla-central when using the Inspect Element
    * context menu item.
    *
@@ -166,7 +216,8 @@ this.DevToolsShim = {
    * @param {Array} selectors
    *        An array of CSS selectors to find the target node. Several selectors can be
    *        needed if the element is nested in frames and not directly in the root
-   *        document.
+   *        document. The selectors are ordered starting with the root document and
+   *        ending with the deepest nested frame.
    * @return {Promise} a promise that resolves when the node is selected in the inspector
    *         markup view or that resolves immediately if DevTools are not enabled.
    */
@@ -181,8 +232,7 @@ this.DevToolsShim = {
     // Record the timing at which this event started in order to compute later in
     // gDevTools.showToolbox, the complete time it takes to open the toolbox.
     // i.e. especially take `DevtoolsStartup.initDevTools` into account.
-    let { performance } = Services.appShell.hiddenDOMWindow;
-    let startTime = performance.now();
+    let startTime = Cu.now();
 
     this.initDevTools("ContextMenu");
 
@@ -212,10 +262,16 @@ this.DevToolsShim = {
       throw new Error("DevTools are not enabled and can not be initialized.");
     }
 
+    if (reason) {
+      this.telemetry.addEventProperty(
+        "devtools.main", "open", "tools", null, "entrypoint", reason
+      );
+    }
+
     if (!this.isInitialized()) {
       DevtoolsStartup.initDevTools(reason);
     }
-  }
+  },
 };
 
 /**
@@ -230,6 +286,7 @@ let webExtensionsMethods = [
   "getTargetForTab",
   "getTheme",
   "openBrowserConsole",
+  "getToolboxes",
 ];
 
 for (let method of webExtensionsMethods) {

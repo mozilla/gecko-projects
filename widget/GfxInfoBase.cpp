@@ -19,9 +19,7 @@
 #include "mozilla/Observer.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
 #include "nsIXULAppInfo.h"
@@ -32,7 +30,6 @@
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/layers/PaintThread.h"
-#include "MediaPrefs.h"
 #include "gfxPrefs.h"
 #include "gfxPlatform.h"
 #include "gfxConfig.h"
@@ -68,11 +65,15 @@ public:
     delete GfxInfoBase::mFeatureStatus;
     GfxInfoBase::mFeatureStatus = nullptr;
 
-    for (uint32_t i = 0; i < DeviceFamilyMax; i++)
+    for (uint32_t i = 0; i < DeviceFamilyMax; i++) {
       delete GfxDriverInfo::mDeviceFamilies[i];
+      GfxDriverInfo::mDeviceFamilies[i] = nullptr;
+    }
 
-    for (uint32_t i = 0; i < DeviceVendorMax; i++)
+    for (uint32_t i = 0; i < DeviceVendorMax; i++) {
       delete GfxDriverInfo::mDeviceVendors[i];
+      GfxDriverInfo::mDeviceVendors[i] = nullptr;
+    }
 
     GfxInfoBase::mShutdownOccurred = true;
 
@@ -176,6 +177,9 @@ GetPrefNameForFeature(int32_t aFeature)
       break;
     case nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX:
       name = BLACKLIST_PREF_BRANCH "d3d11.keyed.mutex";
+      break;
+    case nsIGfxInfo::FEATURE_WEBRENDER:
+      name = BLACKLIST_PREF_BRANCH "webrender";
       break;
     case nsIGfxInfo::FEATURE_VP8_HW_DECODE:
     case nsIGfxInfo::FEATURE_VP9_HW_DECODE:
@@ -367,6 +371,8 @@ BlacklistFeatureToGfxFeature(const nsAString& aFeature)
     return nsIGfxInfo::FEATURE_ADVANCED_LAYERS;
   else if (aFeature.EqualsLiteral("D3D11_KEYED_MUTEX"))
     return nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX;
+  else if (aFeature.EqualsLiteral("WEBRENDER"))
+    return nsIGfxInfo::FEATURE_WEBRENDER;
   // We do not support FEATURE_VP8_HW_DECODE and FEATURE_VP9_HW_DECODE
   // in downloadable blocklist.
 
@@ -598,10 +604,6 @@ GfxInfoBase::Init()
 {
   InitGfxDriverInfoShutdownObserver();
   gfxPrefs::GetSingleton();
-  if (!XRE_IsGPUProcess()) {
-    // MediaPrefs can't run in the GPU process.
-    MediaPrefs::GetSingleton();
-  }
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
@@ -1000,6 +1002,7 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
     nsIGfxInfo::FEATURE_WEBGL2,
     nsIGfxInfo::FEATURE_ADVANCED_LAYERS,
     nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX,
+    nsIGfxInfo::FEATURE_WEBRENDER,
     0
   };
 
@@ -1484,6 +1487,13 @@ NS_IMETHODIMP
 GfxInfoBase::GetUsesTiling(bool* aUsesTiling)
 {
   *aUsesTiling = gfxPlatform::GetPlatform()->UsesTiling();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfoBase::GetContentUsesTiling(bool* aUsesTiling)
+{
+  *aUsesTiling = gfxPlatform::GetPlatform()->ContentUsesTiling();
   return NS_OK;
 }
 

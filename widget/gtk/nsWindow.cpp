@@ -129,6 +129,7 @@ using namespace mozilla::widget;
 #endif
 
 #include "nsShmImage.h"
+#include "gtkdrawing.h"
 
 #include "NativeKeyBindings.h"
 
@@ -479,8 +480,8 @@ nsWindow::nsWindow()
     mLastScrollEventTime = GDK_CURRENT_TIME;
 #endif
     mPendingConfigures = 0;
-    mIsCSDAvailable = false;
-    mIsCSDEnabled = false;
+    mCSDSupportLevel = CSD_SUPPORT_NONE;
+    mDrawInTitlebar = false;
 }
 
 nsWindow::~nsWindow()
@@ -630,7 +631,7 @@ EnsureInvisibleContainer()
 static void
 CheckDestroyInvisibleContainer()
 {
-    NS_PRECONDITION(gInvisibleContainer, "oh, no");
+    MOZ_ASSERT(gInvisibleContainer, "oh, no");
 
     if (!gdk_window_peek_children(gtk_widget_get_window(gInvisibleContainer))) {
         // No children, so not in use.
@@ -886,7 +887,7 @@ nsWindow::WidgetTypeSupportsAcceleration()
 void
 nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 {
-    NS_PRECONDITION(aNewParent, "");
+    MOZ_ASSERT(aNewParent, "null widget");
     NS_ASSERTION(!mIsDestroyed, "");
     NS_ASSERTION(!static_cast<nsWindow*>(aNewParent)->mIsDestroyed, "");
 
@@ -2819,7 +2820,7 @@ nsWindow::OnButtonReleaseEvent(GdkEventButton *aEvent)
     // Check if mouse position in titlebar and doubleclick happened to
     // trigger restore/maximize.
     if (!defaultPrevented
-             && mIsCSDEnabled
+             && mDrawInTitlebar
              && event.button == WidgetMouseEvent::eLeftButton
              && event.mClickCount == 2
              && mDraggableRegion.Contains(pos.x, pos.y)) {
@@ -3326,6 +3327,33 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
     }
     // else the widget is a shell widget.
 
+    // The block below is a bit evil.
+    //
+    // When a window is resized before it is shown, gtk_window_resize() delays
+    // resizes until the window is shown.  If gtk_window_state_event() sees a
+    // GDK_WINDOW_STATE_MAXIMIZED change [1] before the window is shown, then
+    // gtk_window_compute_configure_request_size() ignores the values from the
+    // resize [2].  See bug 1449166 for an example of how this could happen.
+    //
+    // [1] https://gitlab.gnome.org/GNOME/gtk/blob/3.22.30/gtk/gtkwindow.c#L7967
+    // [2] https://gitlab.gnome.org/GNOME/gtk/blob/3.22.30/gtk/gtkwindow.c#L9377
+    //
+    // In order to provide a sensible size for the window when the user exits
+    // maximized state, we hide the GDK_WINDOW_STATE_MAXIMIZED change from
+    // gtk_window_state_event() so as to trick GTK into using the values from
+    // gtk_window_resize() in its configure request.
+    //
+    // We instead notify gtk_window_state_event() of the maximized state change
+    // once the window is shown.
+    if (!mIsShown) {
+        aEvent->changed_mask = static_cast<GdkWindowState>
+            (aEvent->changed_mask & ~GDK_WINDOW_STATE_MAXIMIZED);
+    } else if (aEvent->changed_mask & GDK_WINDOW_STATE_WITHDRAWN &&
+               aEvent->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) {
+        aEvent->changed_mask = static_cast<GdkWindowState>
+            (aEvent->changed_mask | GDK_WINDOW_STATE_MAXIMIZED);
+    }
+
     // We don't care about anything but changes in the maximized/icon/fullscreen
     // states
     if ((aEvent->changed_mask
@@ -3368,6 +3396,10 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
           aEvent->new_window_state & GDK_WINDOW_STATE_FULLSCREEN);
       }
     }
+
+    if (mDrawInTitlebar && mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
+        UpdateClientOffsetForCSDWindow();
+    }
 }
 
 void
@@ -3406,6 +3438,7 @@ nsWindow::OnDPIChanged()
       // Update menu's font size etc
       presShell->ThemeChanged();
     }
+    mWidgetListener->UIResolutionChanged();
   }
 }
 
@@ -3641,8 +3674,12 @@ nsWindow::Create(nsIWidget* aParent,
         if (Preferences::GetBool("mozilla.widget.use-argb-visuals", false))
             useAlphaVisual = true;
 
-        bool useWebRender = gfxPlatform::Initialized() &&
-            gfx::gfxVars::UseWebRender() &&
+#ifdef GL_PROVIDER_GLX
+        // Ensure gfxPlatform is initialized, since that is what initializes
+        // gfxVars, used below.
+        Unused << gfxPlatform::GetPlatform();
+
+        bool useWebRender = gfx::gfxVars::UseWebRender() &&
             AllowWebRenderForThisWindow();
 
         // If using WebRender on X11, we need to select a visual with a depth buffer,
@@ -3654,7 +3691,6 @@ nsWindow::Create(nsIWidget* aParent,
             auto screen = gtk_widget_get_screen(mShell);
             int screenNumber = GDK_SCREEN_XNUMBER(screen);
             int visualId = 0;
-
             if (GLContextGLX::FindVisual(display, screenNumber,
                                          useWebRender, useAlphaVisual,
                                          &visualId)) {
@@ -3664,11 +3700,15 @@ nsWindow::Create(nsIWidget* aParent,
                                       gdk_x11_screen_lookup_visual(screen,
                                                                    visualId));
             }
-        } else if (useAlphaVisual) {
-            GdkScreen *screen = gtk_widget_get_screen(mShell);
-            if (gdk_screen_is_composited(screen)) {
-                GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
-                gtk_widget_set_visual(mShell, visual);
+        } else
+#endif // GL_PROVIDER_GLX
+        {
+            if (useAlphaVisual) {
+                GdkScreen *screen = gtk_widget_get_screen(mShell);
+                if (gdk_screen_is_composited(screen)) {
+                    GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
+                    gtk_widget_set_visual(mShell, visual);
+                }
             }
         }
 
@@ -3763,12 +3803,8 @@ nsWindow::Create(nsIWidget* aParent,
             gtk_window_group_add_window(group, GTK_WINDOW(mShell));
             g_object_unref(group);
 
-            int32_t isCSDAvailable = false;
-            nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
-                                              &isCSDAvailable);
-            if (NS_SUCCEEDED(rv)) {
-               mIsCSDAvailable = isCSDAvailable;
-            }
+            // We enable titlebar rendering for toplevel windows only.
+            mCSDSupportLevel = GetSystemCSDSupportLevel();
         }
 
         // Create a container to hold child windows and child GtkWidgets.
@@ -3793,7 +3829,7 @@ nsWindow::Create(nsIWidget* aParent,
         GtkStyleContext* style = gtk_widget_get_style_context(mShell);
         drawToContainer =
             !mIsX11Display ||
-            (mIsCSDAvailable && GetCSDSupportLevel() == CSD_SUPPORT_CLIENT) ||
+            (mCSDSupportLevel == CSD_SUPPORT_CLIENT) ||
             gtk_style_context_has_class(style, "csd");
         eventWidget = (drawToContainer) ? container : mShell;
 
@@ -4157,6 +4193,8 @@ nsWindow::NativeResize()
          size.width, size.height));
 
     if (mIsTopLevel) {
+        MOZ_ASSERT(size.width > 0 && size.height > 0,
+                   "Can't resize window smaller than 1x1.");
         gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
@@ -4202,6 +4240,8 @@ nsWindow::NativeMoveResize()
             NativeShow(false);
         }
         NativeMove();
+
+        return;
     }
 
     GdkRectangle size = DevicePixelsToGdkSizeRoundUp(mBounds.Size());
@@ -4214,6 +4254,8 @@ nsWindow::NativeMoveResize()
         // x and y give the position of the window manager frame top-left.
         gtk_window_move(GTK_WINDOW(mShell), topLeft.x, topLeft.y);
         // This sets the client window size.
+        MOZ_ASSERT(size.width > 0 && size.height > 0,
+                   "Can't resize window smaller than 1x1.");
         gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
@@ -4937,6 +4979,8 @@ FullscreenTransitionWindow::FullscreenTransitionWindow(GtkWidget* aWidget)
     gdk_screen_get_monitor_geometry(screen, monitorNum, &monitorRect);
     gtk_window_set_screen(gtkWin, screen);
     gtk_window_move(gtkWin, monitorRect.x, monitorRect.y);
+    MOZ_ASSERT(monitorRect.width > 0 && monitorRect.height > 0,
+               "Can't resize window smaller than 1x1.");
     gtk_window_resize(gtkWin, monitorRect.width, monitorRect.height);
 
     GdkColor bgColor;
@@ -6583,83 +6627,122 @@ nsWindow::ClearCachedResources()
     }
 }
 
+/* nsWindow::UpdateClientOffsetForCSDWindow() is designed to be called from
+ * paint code to update mClientOffset any time. It also propagates
+ * the mClientOffset to child tabs.
+ *
+ * It works only for CSD decorated GtkWindow.
+ */
+void
+nsWindow::UpdateClientOffsetForCSDWindow()
+{
+    // _NET_FRAME_EXTENTS is not set on client decorated windows,
+    // so we need to read offset between mContainer and toplevel mShell
+    // window.
+    if (mSizeState == nsSizeMode_Normal) {
+        GtkBorder decorationSize;
+        GetCSDDecorationSize(GTK_WINDOW(mShell), &decorationSize);
+        mClientOffset = nsIntPoint(decorationSize.left, decorationSize.top);
+    } else {
+        mClientOffset = nsIntPoint(0, 0);
+    }
+
+    // Send a WindowMoved notification. This ensures that TabParent
+    // picks up the new client offset and sends it to the child process
+    // if appropriate.
+    NotifyWindowMoved(mBounds.x, mBounds.y);
+}
+
 nsresult
 nsWindow::SetNonClientMargins(LayoutDeviceIntMargin &aMargins)
 {
-  SetDrawsInTitlebar(aMargins.top == 0);
-  return NS_OK;
+    SetDrawsInTitlebar(aMargins.top == 0);
+    return NS_OK;
 }
 
 void
 nsWindow::SetDrawsInTitlebar(bool aState)
 {
-  if (!mIsCSDAvailable || aState == mIsCSDEnabled)
-      return;
+    if (!mShell ||
+        mCSDSupportLevel == CSD_SUPPORT_NONE ||
+        aState == mDrawInTitlebar) {
+        return;
+    }
 
-  if (mShell) {
-      if (GetCSDSupportLevel() == CSD_SUPPORT_SYSTEM) {
-          SetWindowDecoration(aState ? eBorderStyle_border : mBorderStyle);
-      }
-      else {
-          /* Window manager does not support GDK_DECOR_BORDER,
-           * emulate it by CSD.
-           *
-           * gtk_window_set_titlebar() works on unrealized widgets only,
-           * we need to handle mShell carefully here.
-           * When CSD is enabled mGdkWindow is owned by mContainer which is good
-           * as we can't delete our mGdkWindow. To make mShell unrealized while
-           * mContainer is preserved we temporary reparent mContainer to an
-           * invisible GtkWindow.
-           */
-          NativeShow(false);
+    if (mCSDSupportLevel == CSD_SUPPORT_SYSTEM) {
+        SetWindowDecoration(aState ? eBorderStyle_border : mBorderStyle);
+    }
+    else if (mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
+        /* Window manager does not support GDK_DECOR_BORDER,
+         * emulate it by CSD.
+         *
+         * gtk_window_set_titlebar() works on unrealized widgets only,
+         * we need to handle mShell carefully here.
+         * When CSD is enabled mGdkWindow is owned by mContainer which is good
+         * as we can't delete our mGdkWindow. To make mShell unrealized while
+         * mContainer is preserved we temporary reparent mContainer to an
+         * invisible GtkWindow.
+         */
+        NativeShow(false);
 
-          // Using GTK_WINDOW_POPUP rather than
-          // GTK_WINDOW_TOPLEVEL in the hope that POPUP results in less
-          // initialization and window manager interaction.
-          GtkWidget* tmpWindow = gtk_window_new(GTK_WINDOW_POPUP);
-          gtk_widget_realize(tmpWindow);
+        // Using GTK_WINDOW_POPUP rather than
+        // GTK_WINDOW_TOPLEVEL in the hope that POPUP results in less
+        // initialization and window manager interaction.
+        GtkWidget* tmpWindow = gtk_window_new(GTK_WINDOW_POPUP);
+        gtk_widget_realize(tmpWindow);
 
-          gtk_widget_reparent(GTK_WIDGET(mContainer), tmpWindow);
-          gtk_widget_unrealize(GTK_WIDGET(mShell));
+        gtk_widget_reparent(GTK_WIDGET(mContainer), tmpWindow);
+        gtk_widget_unrealize(GTK_WIDGET(mShell));
 
-          // Available as of GTK 3.10+
-          static auto sGtkWindowSetTitlebar = (void (*)(GtkWindow*, GtkWidget*))
-              dlsym(RTLD_DEFAULT, "gtk_window_set_titlebar");
-          MOZ_ASSERT(sGtkWindowSetTitlebar,
-              "Missing gtk_window_set_titlebar(), old Gtk+ library?");
+        // Available as of GTK 3.10+
+        static auto sGtkWindowSetTitlebar = (void (*)(GtkWindow*, GtkWidget*))
+            dlsym(RTLD_DEFAULT, "gtk_window_set_titlebar");
+        MOZ_ASSERT(sGtkWindowSetTitlebar,
+            "Missing gtk_window_set_titlebar(), old Gtk+ library?");
 
-          if (aState) {
-              // Add a hidden titlebar widget to trigger CSD, but disable the default
-              // titlebar.  GtkFixed is a somewhat random choice for a simple unused
-              // widget. gtk_window_set_titlebar() takes ownership of the titlebar
-              // widget.
-              sGtkWindowSetTitlebar(GTK_WINDOW(mShell), gtk_fixed_new());
-          } else {
-              sGtkWindowSetTitlebar(GTK_WINDOW(mShell), nullptr);
-          }
+        if (aState) {
+            // Add a hidden titlebar widget to trigger CSD, but disable the default
+            // titlebar.  GtkFixed is a somewhat random choice for a simple unused
+            // widget. gtk_window_set_titlebar() takes ownership of the titlebar
+            // widget.
+            sGtkWindowSetTitlebar(GTK_WINDOW(mShell), gtk_fixed_new());
+        } else {
+            sGtkWindowSetTitlebar(GTK_WINDOW(mShell), nullptr);
+        }
 
-          /* A workaround for https://bugzilla.gnome.org/show_bug.cgi?id=791081
-           * gtk_widget_realize() throws:
-           * "In pixman_region32_init_rect: Invalid rectangle passed"
-           * when mShell has default 1x1 size.
-           */
-          GtkAllocation allocation = {0, 0, 0, 0};
-          gtk_widget_get_preferred_width(GTK_WIDGET(mShell), nullptr,
-                                         &allocation.width);
-          gtk_widget_get_preferred_height(GTK_WIDGET(mShell), nullptr,
-                                          &allocation.height);
-          gtk_widget_size_allocate(GTK_WIDGET(mShell), &allocation);
+        /* A workaround for https://bugzilla.gnome.org/show_bug.cgi?id=791081
+         * gtk_widget_realize() throws:
+         * "In pixman_region32_init_rect: Invalid rectangle passed"
+         * when mShell has default 1x1 size.
+         */
+        GtkAllocation allocation = {0, 0, 0, 0};
+        gtk_widget_get_preferred_width(GTK_WIDGET(mShell), nullptr,
+                                       &allocation.width);
+        gtk_widget_get_preferred_height(GTK_WIDGET(mShell), nullptr,
+                                        &allocation.height);
+        gtk_widget_size_allocate(GTK_WIDGET(mShell), &allocation);
 
-          gtk_widget_realize(GTK_WIDGET(mShell));
-          gtk_widget_reparent(GTK_WIDGET(mContainer), GTK_WIDGET(mShell));
-          mNeedsShow = true;
-          NativeResize();
+        gtk_widget_realize(GTK_WIDGET(mShell));
+        gtk_widget_reparent(GTK_WIDGET(mContainer), GTK_WIDGET(mShell));
+        mNeedsShow = true;
+        NativeResize();
 
-          gtk_widget_destroy(tmpWindow);
-      }
-  }
+        // Label mShell toplevel window so property_notify_event_cb callback
+        // can find its way home.
+        g_object_set_data(G_OBJECT(gtk_widget_get_window(mShell)),
+                          "nsWindow", this);
 
-  mIsCSDEnabled = aState;
+        // When we use system titlebar setup managed by Gtk+ we also get
+        // _NET_FRAME_EXTENTS property for our toplevel window so we can't
+        // update the client offset it here.
+        if (aState) {
+            UpdateClientOffsetForCSDWindow();
+        }
+
+        gtk_widget_destroy(tmpWindow);
+    }
+
+    mDrawInTitlebar = aState;
 }
 
 gint
@@ -6928,15 +7011,15 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
 }
 #endif
 
-bool
-nsWindow::DoDrawTitlebar() const
-{
-    return mIsCSDEnabled && mSizeState == nsSizeMode_Normal;
-}
-
 nsWindow::CSDSupportLevel
-nsWindow::GetCSDSupportLevel() {
+nsWindow::GetSystemCSDSupportLevel() {
     if (sCSDSupportLevel != CSD_SUPPORT_UNKNOWN) {
+        return sCSDSupportLevel;
+    }
+
+    // Require GTK 3.10 for GtkHeaderBar support and compatible window manager.
+    if (gtk_check_version(3, 10, 0) != nullptr) {
+        sCSDSupportLevel = CSD_SUPPORT_NONE;
         return sCSDSupportLevel;
     }
 

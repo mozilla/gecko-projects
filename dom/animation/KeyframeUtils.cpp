@@ -19,11 +19,11 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
 #include "mozilla/dom/KeyframeEffectReadOnly.h" // For PropertyValuesPair etc.
+#include "mozilla/dom/Nullable.h"
 #include "jsapi.h" // For ForOfIterator etc.
 #include "nsClassHashtable.h"
 #include "nsContentUtils.h" // For GetContextForContent, and
                             // AnimationsAPICoreEnabled
-#include "nsCSSParser.h"
 #include "nsCSSPropertyIDSet.h"
 #include "nsCSSProps.h"
 #include "nsCSSPseudoElements.h" // For CSSPseudoElementType
@@ -31,6 +31,8 @@
 #include "nsIScriptError.h"
 #include "nsTArray.h"
 #include <algorithm> // For std::stable_sort, std::min
+
+using mozilla::dom::Nullable;
 
 namespace mozilla {
 
@@ -45,183 +47,6 @@ namespace mozilla {
 enum class ListAllowance { eDisallow, eAllow };
 
 /**
- * A comparator to sort nsCSSPropertyID values such that longhands are sorted
- * before shorthands, and shorthands with fewer components are sorted before
- * shorthands with more components.
- *
- * Using this allows us to prioritize values specified by longhands (or smaller
- * shorthand subsets) when longhands and shorthands are both specified
- * on the one keyframe.
- *
- * Example orderings that result from this:
- *
- *   margin-left, margin
- *
- * and:
- *
- *   border-top-color, border-color, border-top, border
- */
-class PropertyPriorityComparator
-{
-public:
-  PropertyPriorityComparator()
-    : mSubpropertyCountInitialized(false) {}
-
-  bool Equals(nsCSSPropertyID aLhs, nsCSSPropertyID aRhs) const
-  {
-    return aLhs == aRhs;
-  }
-
-  bool LessThan(nsCSSPropertyID aLhs,
-                nsCSSPropertyID aRhs) const
-  {
-    bool isShorthandLhs = nsCSSProps::IsShorthand(aLhs);
-    bool isShorthandRhs = nsCSSProps::IsShorthand(aRhs);
-
-    if (isShorthandLhs) {
-      if (isShorthandRhs) {
-        // First, sort shorthands by the number of longhands they have.
-        uint32_t subpropCountLhs = SubpropertyCount(aLhs);
-        uint32_t subpropCountRhs = SubpropertyCount(aRhs);
-        if (subpropCountLhs != subpropCountRhs) {
-          return subpropCountLhs < subpropCountRhs;
-        }
-        // Otherwise, sort by IDL name below.
-      } else {
-        // Put longhands before shorthands.
-        return false;
-      }
-    } else {
-      if (isShorthandRhs) {
-        // Put longhands before shorthands.
-        return true;
-      }
-    }
-    // For two longhand properties, or two shorthand with the same number
-    // of longhand components, sort by IDL name.
-    return nsCSSProps::PropertyIDLNameSortPosition(aLhs) <
-           nsCSSProps::PropertyIDLNameSortPosition(aRhs);
-  }
-
-  uint32_t SubpropertyCount(nsCSSPropertyID aProperty) const
-  {
-    if (!mSubpropertyCountInitialized) {
-      PodZero(&mSubpropertyCount);
-      mSubpropertyCountInitialized = true;
-    }
-    if (mSubpropertyCount[aProperty] == 0) {
-      uint32_t count = 0;
-      CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(
-          p, aProperty, CSSEnabledState::eForAllContent) {
-        ++count;
-      }
-      mSubpropertyCount[aProperty] = count;
-    }
-    return mSubpropertyCount[aProperty];
-  }
-
-private:
-  // Cache of shorthand subproperty counts.
-  mutable RangedArray<
-    uint32_t,
-    eCSSProperty_COUNT_no_shorthands,
-    eCSSProperty_COUNT - eCSSProperty_COUNT_no_shorthands> mSubpropertyCount;
-  mutable bool mSubpropertyCountInitialized;
-};
-
-/**
- * Adaptor for PropertyPriorityComparator to sort objects which have
- * a mProperty member.
- */
-template <typename T>
-class TPropertyPriorityComparator : PropertyPriorityComparator
-{
-public:
-  bool Equals(const T& aLhs, const T& aRhs) const
-  {
-    return PropertyPriorityComparator::Equals(aLhs.mProperty, aRhs.mProperty);
-  }
-  bool LessThan(const T& aLhs, const T& aRhs) const
-  {
-    return PropertyPriorityComparator::LessThan(aLhs.mProperty, aRhs.mProperty);
-  }
-};
-
-/**
- * Iterator to walk through a PropertyValuePair array using the ordering
- * provided by PropertyPriorityComparator.
- */
-class PropertyPriorityIterator
-{
-public:
-  explicit PropertyPriorityIterator(
-    const nsTArray<PropertyValuePair>& aProperties)
-    : mProperties(aProperties)
-  {
-    mSortedPropertyIndices.SetCapacity(mProperties.Length());
-    for (size_t i = 0, len = mProperties.Length(); i < len; ++i) {
-      PropertyAndIndex propertyIndex = { mProperties[i].mProperty, i };
-      mSortedPropertyIndices.AppendElement(propertyIndex);
-    }
-    mSortedPropertyIndices.Sort(PropertyAndIndex::Comparator());
-  }
-
-  class Iter
-  {
-  public:
-    explicit Iter(const PropertyPriorityIterator& aParent)
-      : mParent(aParent)
-      , mIndex(0) { }
-
-    static Iter EndIter(const PropertyPriorityIterator &aParent)
-    {
-      Iter iter(aParent);
-      iter.mIndex = aParent.mSortedPropertyIndices.Length();
-      return iter;
-    }
-
-    bool operator!=(const Iter& aOther) const
-    {
-      return mIndex != aOther.mIndex;
-    }
-
-    Iter& operator++()
-    {
-      MOZ_ASSERT(mIndex + 1 <= mParent.mSortedPropertyIndices.Length(),
-                 "Should not seek past end iterator");
-      mIndex++;
-      return *this;
-    }
-
-    const PropertyValuePair& operator*()
-    {
-      MOZ_ASSERT(mIndex < mParent.mSortedPropertyIndices.Length(),
-                 "Should not try to dereference an end iterator");
-      return mParent.mProperties[mParent.mSortedPropertyIndices[mIndex].mIndex];
-    }
-
-  private:
-    const PropertyPriorityIterator& mParent;
-    size_t mIndex;
-  };
-
-  Iter begin() { return Iter(*this); }
-  Iter end()   { return Iter::EndIter(*this); }
-
-private:
-  struct PropertyAndIndex
-  {
-    nsCSSPropertyID mProperty;
-    size_t mIndex; // Index of mProperty within mProperties
-
-    typedef TPropertyPriorityComparator<PropertyAndIndex> Comparator;
-  };
-
-  const nsTArray<PropertyValuePair>& mProperties;
-  nsTArray<PropertyAndIndex> mSortedPropertyIndices;
-};
-
-/**
  * A property-values pair obtained from the open-ended properties
  * discovered on a regular keyframe or property-indexed keyframe object.
  *
@@ -233,8 +58,6 @@ struct PropertyValuesPair
 {
   nsCSSPropertyID mProperty;
   nsTArray<nsString> mValues;
-
-  typedef TPropertyPriorityComparator<PropertyValuesPair> Comparator;
 };
 
 /**
@@ -339,7 +162,6 @@ static bool
 GetPropertyValuesPairs(JSContext* aCx,
                        JS::Handle<JSObject*> aObject,
                        ListAllowance aAllowLists,
-                       StyleBackendType aBackend,
                        nsTArray<PropertyValuesPair>& aResult);
 
 static bool
@@ -355,7 +177,7 @@ AppendValueAsString(JSContext* aCx,
 
 static Maybe<PropertyValuePair>
 MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
-                      nsCSSParser& aParser, nsIDocument* aDocument);
+                      nsIDocument* aDocument);
 
 static bool
 HasValidOffsets(const nsTArray<Keyframe>& aKeyframes);
@@ -479,12 +301,11 @@ KeyframeUtils::DistributeKeyframes(nsTArray<Keyframe>& aKeyframes)
   }
 }
 
-template<typename StyleType>
 /* static */ nsTArray<AnimationProperty>
 KeyframeUtils::GetAnimationPropertiesFromKeyframes(
   const nsTArray<Keyframe>& aKeyframes,
   dom::Element* aElement,
-  StyleType* aStyle,
+  const ComputedStyle* aStyle,
   dom::CompositeOperation aEffectComposite)
 {
   nsTArray<AnimationProperty> result;
@@ -523,36 +344,15 @@ KeyframeUtils::GetAnimationPropertiesFromKeyframes(
 }
 
 /* static */ bool
-KeyframeUtils::IsAnimatableProperty(nsCSSPropertyID aProperty,
-                                    StyleBackendType aBackend)
+KeyframeUtils::IsAnimatableProperty(nsCSSPropertyID aProperty)
 {
   // Regardless of the backend type, treat the 'display' property as not
-  // animatable. (The Servo backend will report it as being animatable, since
-  // it is in fact animatable by SMIL.)
+  // animatable. (Servo will report it as being animatable, since it is
+  // in fact animatable by SMIL.)
   if (aProperty == eCSSProperty_display) {
     return false;
   }
-
-  if (aBackend == StyleBackendType::Servo) {
-    return Servo_Property_IsAnimatable(aProperty);
-  }
-
-  if (aProperty == eCSSProperty_UNKNOWN) {
-    return false;
-  }
-
-  if (!nsCSSProps::IsShorthand(aProperty)) {
-    return nsCSSProps::kAnimTypeTable[aProperty] != eStyleAnimType_None;
-  }
-
-  CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subprop, aProperty,
-                                       CSSEnabledState::eForAllContent) {
-    if (nsCSSProps::kAnimTypeTable[*subprop] != eStyleAnimType_None) {
-      return true;
-    }
-  }
-
-  return false;
+  return Servo_Property_IsAnimatable(aProperty);
 }
 
 // ------------------------------------------------------------------
@@ -617,7 +417,6 @@ ConvertKeyframeSequence(JSContext* aCx,
                         nsTArray<Keyframe>& aResult)
 {
   JS::Rooted<JS::Value> value(aCx);
-  nsCSSParser parser(aDocument->CSSLoader());
   ErrorResult parseEasingResult;
 
   for (;;) {
@@ -662,7 +461,6 @@ ConvertKeyframeSequence(JSContext* aCx,
       JS::Rooted<JSObject*> object(aCx, &value.toObject());
       if (!GetPropertyValuesPairs(aCx, object,
                                   ListAllowance::eDisallow,
-                                  aDocument->GetStyleBackendType(),
                                   propertyValuePairs)) {
         return false;
       }
@@ -684,8 +482,7 @@ ConvertKeyframeSequence(JSContext* aCx,
       MOZ_ASSERT(pair.mValues.Length() == 1);
 
       Maybe<PropertyValuePair> valuePair =
-        MakePropertyValuePair(pair.mProperty, pair.mValues[0], parser,
-                              aDocument);
+        MakePropertyValuePair(pair.mProperty, pair.mValues[0], aDocument);
       if (!valuePair) {
         continue;
       }
@@ -721,8 +518,6 @@ ConvertKeyframeSequence(JSContext* aCx,
  * @param aAllowLists If eAllow, values will be converted to
  *   (DOMString or sequence<DOMString); if eDisallow, values
  *   will be converted to DOMString.
- * @param aBackend The style backend in use. Used to determine which properties
- *   are animatable since only animatable properties are read.
  * @param aResult The array into which the enumerated property-values
  *   pairs will be stored.
  * @return false on failure or JS exception thrown while interacting
@@ -732,7 +527,6 @@ static bool
 GetPropertyValuesPairs(JSContext* aCx,
                        JS::Handle<JSObject*> aObject,
                        ListAllowance aAllowLists,
-                       StyleBackendType aBackend,
                        nsTArray<PropertyValuesPair>& aResult)
 {
   nsTArray<AdditionalProperty> properties;
@@ -755,7 +549,7 @@ GetPropertyValuesPairs(JSContext* aCx,
     nsCSSPropertyID property =
       nsCSSProps::LookupPropertyByIDLName(propName,
                                           CSSEnabledState::eForAllContent);
-    if (KeyframeUtils::IsAnimatableProperty(property, aBackend)) {
+    if (KeyframeUtils::IsAnimatableProperty(property)) {
       AdditionalProperty* p = properties.AppendElement();
       p->mProperty = property;
       p->mJsidIndex = i;
@@ -865,33 +659,28 @@ ReportInvalidPropertyValueToConsole(nsCSSPropertyID aProperty,
  *
  * @param aProperty The CSS property.
  * @param aStringValue The property value to parse.
- * @param aParser The CSS parser object to use.
  * @param aDocument The document to use when parsing.
  * @return The constructed PropertyValuePair, or Nothing() if |aStringValue| is
  *   an invalid property value.
  */
 static Maybe<PropertyValuePair>
 MakePropertyValuePair(nsCSSPropertyID aProperty, const nsAString& aStringValue,
-                      nsCSSParser& aParser, nsIDocument* aDocument)
+                      nsIDocument* aDocument)
 {
   MOZ_ASSERT(aDocument);
   Maybe<PropertyValuePair> result;
 
-  if (aDocument->GetStyleBackendType() == StyleBackendType::Servo) {
-    ServoCSSParser::ParsingEnvironment env =
-      ServoCSSParser::GetParsingEnvironment(aDocument);
-    RefPtr<RawServoDeclarationBlock> servoDeclarationBlock =
-      ServoCSSParser::ParseProperty(aProperty, aStringValue, env);
+  ServoCSSParser::ParsingEnvironment env =
+    ServoCSSParser::GetParsingEnvironment(aDocument);
+  RefPtr<RawServoDeclarationBlock> servoDeclarationBlock =
+    ServoCSSParser::ParseProperty(aProperty, aStringValue, env);
 
-    if (servoDeclarationBlock) {
-      result.emplace(aProperty, Move(servoDeclarationBlock));
-    } else {
-      ReportInvalidPropertyValueToConsole(aProperty, aStringValue, aDocument);
-    }
-    return result;
+  if (servoDeclarationBlock) {
+    result.emplace(aProperty, Move(servoDeclarationBlock));
+  } else {
+    ReportInvalidPropertyValueToConsole(aProperty, aStringValue, aDocument);
   }
-
-  MOZ_CRASH("old style system disabled");
+  return result;
 }
 
 /**
@@ -948,7 +737,6 @@ GetComputedKeyframeValues(const nsTArray<Keyframe>& aKeyframes,
                           const ComputedStyle* aComputedStyle)
 {
   MOZ_ASSERT(aElement);
-  MOZ_ASSERT(aElement->IsStyledByServo());
 
   nsTArray<ComputedKeyframeValues> result;
 
@@ -961,8 +749,8 @@ GetComputedKeyframeValues(const nsTArray<Keyframe>& aKeyframes,
     return result;
   }
 
-  result = presContext->StyleSet()->AsServo()
-    ->GetComputedKeyframeValuesFor(aKeyframes, aElement, aComputedStyle);
+  result = presContext->StyleSet()->
+    GetComputedKeyframeValuesFor(aKeyframes, aElement, aComputedStyle);
   return result;
 }
 
@@ -1252,14 +1040,12 @@ GetKeyframeListFromPropertyIndexedKeyframe(JSContext* aCx,
   JS::Rooted<JSObject*> object(aCx, &aValue.toObject());
   nsTArray<PropertyValuesPair> propertyValuesPairs;
   if (!GetPropertyValuesPairs(aCx, object, ListAllowance::eAllow,
-                              aDocument->GetStyleBackendType(),
                               propertyValuesPairs)) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
 
   // Create a set of keyframes for each property.
-  nsCSSParser parser(aDocument->CSSLoader());
   nsClassHashtable<nsFloatHashKey, Keyframe> processedKeyframes;
   for (const PropertyValuesPair& pair : propertyValuesPairs) {
     size_t count = pair.mValues.Length();
@@ -1289,7 +1075,7 @@ GetKeyframeListFromPropertyIndexedKeyframe(JSContext* aCx,
       }
 
       Maybe<PropertyValuePair> valuePair =
-        MakePropertyValuePair(pair.mProperty, stringValue, parser, aDocument);
+        MakePropertyValuePair(pair.mProperty, stringValue, aDocument);
       if (!valuePair) {
         continue;
       }
@@ -1468,8 +1254,6 @@ RequiresAdditiveAnimation(const nsTArray<Keyframe>& aKeyframes,
     }
   };
 
-  StyleBackendType styleBackend = aDocument->GetStyleBackendType();
-
   for (size_t i = 0, len = aKeyframes.Length(); i < len; i++) {
     const Keyframe& frame = aKeyframes[i];
 
@@ -1486,12 +1270,7 @@ RequiresAdditiveAnimation(const nsTArray<Keyframe>& aKeyframes,
 
     for (const PropertyValuePair& pair : frame.mPropertyValues) {
       if (nsCSSProps::IsShorthand(pair.mProperty)) {
-        if (styleBackend == StyleBackendType::Gecko) {
-          MOZ_CRASH("old style system disabled");
-        }
-
-        MOZ_ASSERT(styleBackend != StyleBackendType::Servo ||
-                   pair.mServoDeclarationBlock);
+        MOZ_ASSERT(pair.mServoDeclarationBlock);
         CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(
             prop, pair.mProperty, CSSEnabledState::eForAllContent) {
           addToPropertySets(*prop, offsetToUse);
@@ -1527,13 +1306,5 @@ DistributeRange(const Range<Keyframe>& aRange)
   }
 }
 
-
-template
-nsTArray<AnimationProperty>
-KeyframeUtils::GetAnimationPropertiesFromKeyframes(
-  const nsTArray<Keyframe>& aKeyframes,
-  dom::Element* aElement,
-  const ComputedStyle* aStyle,
-  dom::CompositeOperation aEffectComposite);
 
 } // namespace mozilla

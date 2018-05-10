@@ -7,6 +7,7 @@
 #include "EditorEventListener.h"
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc.
+#include "mozilla/AutoRestore.h"
 #include "mozilla/ContentEvents.h"      // for InternalFocusEvent
 #include "mozilla/EditorBase.h"         // for EditorBase, etc.
 #include "mozilla/EventListenerManager.h" // for EventListenerManager
@@ -31,10 +32,6 @@
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DragEvent.h"
-#include "nsIDOMDocument.h"             // for nsIDOMDocument
-#include "nsIDOMEvent.h"                // for nsIDOMEvent
-#include "nsIDOMEventTarget.h"          // for nsIDOMEventTarget
-#include "nsIDOMNode.h"                 // for nsIDOMNode
 #include "nsIDocument.h"                // for nsIDocument
 #include "nsIFocusManager.h"            // for nsIFocusManager
 #include "nsIFormControl.h"             // for nsIFormControl, etc.
@@ -141,7 +138,7 @@ EditorEventListener::Connect(EditorBase* aEditorBase)
 nsresult
 EditorEventListener::InstallToEditor()
 {
-  NS_PRECONDITION(mEditorBase, "The caller must set mEditorBase");
+  MOZ_ASSERT(mEditorBase, "The caller must set mEditorBase");
 
   EventTarget* piTarget = mEditorBase->GetDOMEventTarget();
   NS_ENSURE_TRUE(piTarget, NS_ERROR_FAILURE);
@@ -221,7 +218,7 @@ EditorEventListener::Disconnect()
 
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    nsIContent* focusedContent = fm->GetFocusedContent();
+    nsIContent* focusedContent = fm->GetFocusedElement();
     mozilla::dom::Element* root = mEditorBase->GetRoot();
     if (focusedContent && root &&
         nsContentUtils::ContentIsDescendantOf(focusedContent, root)) {
@@ -367,7 +364,7 @@ EditorEventListener::EnsureCommitCompoisition()
 }
 
 NS_IMETHODIMP
-EditorEventListener::HandleEvent(nsIDOMEvent* aEvent)
+EditorEventListener::HandleEvent(Event* aEvent)
 {
   // Let's handle each event with the message of the internal event of the
   // coming event.  If the DOM event was created with improper interface,
@@ -383,19 +380,19 @@ EditorEventListener::HandleEvent(nsIDOMEvent* aEvent)
   switch (internalEvent->mMessage) {
     // dragenter
     case eDragEnter: {
-      return DragEnter(aEvent->InternalDOMEvent()->AsDragEvent());
+      return DragEnter(aEvent->AsDragEvent());
     }
     // dragover
     case eDragOver: {
-      return DragOver(aEvent->InternalDOMEvent()->AsDragEvent());
+      return DragOver(aEvent->AsDragEvent());
     }
     // dragexit
     case eDragExit: {
-      return DragExit(aEvent->InternalDOMEvent()->AsDragEvent());
+      return DragExit(aEvent->AsDragEvent());
     }
     // drop
     case eDrop: {
-      return Drop(aEvent->InternalDOMEvent()->AsDragEvent());
+      return Drop(aEvent->AsDragEvent());
     }
 #ifdef HANDLE_NATIVE_TEXT_DIRECTION_SWITCH
     // keydown
@@ -423,7 +420,7 @@ EditorEventListener::HandleEvent(nsIDOMEvent* aEvent)
       if (mMouseDownOrUpConsumedByIME) {
         return NS_OK;
       }
-      MouseEvent* mouseEvent = aEvent->InternalDOMEvent()->AsMouseEvent();
+      MouseEvent* mouseEvent = aEvent->AsMouseEvent();
       return NS_WARN_IF(!mouseEvent) ? NS_OK : MouseDown(mouseEvent);
     }
     // mouseup
@@ -444,18 +441,18 @@ EditorEventListener::HandleEvent(nsIDOMEvent* aEvent)
       if (mMouseDownOrUpConsumedByIME) {
         return NS_OK;
       }
-      MouseEvent* mouseEvent = aEvent->InternalDOMEvent()->AsMouseEvent();
+      MouseEvent* mouseEvent = aEvent->AsMouseEvent();
       return NS_WARN_IF(!mouseEvent) ? NS_OK : MouseUp(mouseEvent);
     }
     // click
     case eMouseClick: {
-      MouseEvent* mouseEvent = aEvent->InternalDOMEvent()->AsMouseEvent();
+      MouseEvent* mouseEvent = aEvent->AsMouseEvent();
       NS_ENSURE_TRUE(mouseEvent, NS_OK);
       // If the preceding mousedown event or mouseup event was consumed,
       // editor shouldn't handle this click event.
       if (mMouseDownOrUpConsumedByIME) {
         mMouseDownOrUpConsumedByIME = false;
-        mouseEvent->AsEvent()->PreventDefault();
+        mouseEvent->PreventDefault();
         return NS_OK;
       }
       return MouseClick(mouseEvent);
@@ -694,14 +691,8 @@ EditorEventListener::HandleMiddleClickPaste(MouseEvent* aMouseEvent)
   }
 
   // Set the selection to the point under the mouse cursor:
-  nsCOMPtr<nsIDOMNode> parent;
-  if (NS_FAILED(aMouseEvent->GetRangeParent(getter_AddRefs(parent)))) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  int32_t offset = 0;
-  if (NS_FAILED(aMouseEvent->GetRangeOffset(&offset))) {
-    return NS_ERROR_NULL_POINTER;
-  }
+  nsCOMPtr<nsINode> parent = aMouseEvent->GetRangeParent();
+  int32_t offset = aMouseEvent->RangeOffset();
 
   RefPtr<TextEditor> textEditor = mEditorBase->AsTextEditor();
   MOZ_ASSERT(textEditor);
@@ -769,26 +760,6 @@ EditorEventListener::MouseDown(MouseEvent* aMouseEvent)
   }
   Unused << EnsureCommitCompoisition();
   return NS_OK;
-}
-
-nsresult
-EditorEventListener::HandleChangeComposition(
-                       WidgetCompositionEvent* aCompositionChangeEvent)
-{
-  MOZ_ASSERT(!aCompositionChangeEvent->DefaultPrevented(),
-             "eCompositionChange event shouldn't be cancelable");
-  RefPtr<EditorBase> editorBase(mEditorBase);
-  if (DetachedFromEditor() ||
-      !editorBase->IsAcceptableInputEvent(aCompositionChangeEvent)) {
-    return NS_OK;
-  }
-
-  // if we are readonly or disabled, then do nothing.
-  if (editorBase->IsReadonly() || editorBase->IsDisabled()) {
-    return NS_OK;
-  }
-
-  return editorBase->UpdateIMEComposition(aCompositionChangeEvent);
 }
 
 /**
@@ -920,7 +891,7 @@ EditorEventListener::Drop(DragEvent* aDragEvent)
       // since someone else handling it might be unintentional and the
       // user could probably re-drag to be not over the disabled/readonly
       // editfields if that is what is desired.
-      return aDragEvent->StopPropagation();
+      aDragEvent->StopPropagation();
     }
     return NS_OK;
   }
@@ -994,7 +965,7 @@ EditorEventListener::CanDrop(DragEvent* aEvent)
   }
 
   // If selection is collapsed, allow to drop it always.
-  if (selection->Collapsed()) {
+  if (selection->IsCollapsed()) {
     return true;
   }
 
@@ -1027,6 +998,9 @@ nsresult
 EditorEventListener::HandleStartComposition(
                        WidgetCompositionEvent* aCompositionStartEvent)
 {
+  if (NS_WARN_IF(!aCompositionStartEvent)) {
+    return NS_ERROR_FAILURE;
+  }
   RefPtr<EditorBase> editorBase(mEditorBase);
   if (DetachedFromEditor() ||
       !editorBase->IsAcceptableInputEvent(aCompositionStartEvent)) {
@@ -1036,13 +1010,41 @@ EditorEventListener::HandleStartComposition(
   // eCompositionStart event coming from widget is not cancelable.
   MOZ_ASSERT(!aCompositionStartEvent->DefaultPrevented(),
              "eCompositionStart shouldn't be cancelable");
-  return editorBase->BeginIMEComposition(aCompositionStartEvent);
+  TextEditor* textEditor = editorBase->AsTextEditor();
+  return textEditor->OnCompositionStart(*aCompositionStartEvent);
+}
+
+nsresult
+EditorEventListener::HandleChangeComposition(
+                       WidgetCompositionEvent* aCompositionChangeEvent)
+{
+  if (NS_WARN_IF(!aCompositionChangeEvent)) {
+    return NS_ERROR_FAILURE;
+  }
+  MOZ_ASSERT(!aCompositionChangeEvent->DefaultPrevented(),
+             "eCompositionChange event shouldn't be cancelable");
+  RefPtr<EditorBase> editorBase(mEditorBase);
+  if (DetachedFromEditor() ||
+      !editorBase->IsAcceptableInputEvent(aCompositionChangeEvent)) {
+    return NS_OK;
+  }
+
+  // if we are readonly or disabled, then do nothing.
+  if (editorBase->IsReadonly() || editorBase->IsDisabled()) {
+    return NS_OK;
+  }
+
+  TextEditor* textEditor = editorBase->AsTextEditor();
+  return textEditor->OnCompositionChange(*aCompositionChangeEvent);
 }
 
 void
 EditorEventListener::HandleEndComposition(
                        WidgetCompositionEvent* aCompositionEndEvent)
 {
+  if (NS_WARN_IF(!aCompositionEndEvent)) {
+    return;
+  }
   RefPtr<EditorBase> editorBase(mEditorBase);
   if (DetachedFromEditor() ||
       !editorBase->IsAcceptableInputEvent(aCompositionEndEvent)) {
@@ -1050,7 +1052,9 @@ EditorEventListener::HandleEndComposition(
   }
   MOZ_ASSERT(!aCompositionEndEvent->DefaultPrevented(),
              "eCompositionEnd shouldn't be cancelable");
-  editorBase->EndIMEComposition();
+
+  TextEditor* textEditor = editorBase->AsTextEditor();
+  textEditor->OnCompositionEnd(*aCompositionEndEvent);
 }
 
 nsresult
@@ -1074,14 +1078,13 @@ EditorEventListener::Focus(InternalFocusEvent* aFocusEvent)
     return NS_OK;
   }
 
-  nsIDOMEventTarget* target = aFocusEvent->GetOriginalDOMEventTarget();
+  EventTarget* target = aFocusEvent->GetOriginalDOMEventTarget();
   nsCOMPtr<nsINode> node = do_QueryInterface(target);
   NS_ENSURE_TRUE(node, NS_ERROR_UNEXPECTED);
 
   // If the target is a document node but it's not editable, we should ignore
   // it because actual focused element's event is going to come.
-  if (node->IsNodeOfType(nsINode::eDOCUMENT) &&
-      !node->HasFlag(NODE_IS_EDITABLE)) {
+  if (node->IsDocument() && !node->HasFlag(NODE_IS_EDITABLE)) {
     return NS_OK;
   }
 
@@ -1102,16 +1105,13 @@ EditorEventListener::Focus(InternalFocusEvent* aFocusEvent)
       nsFocusManager* fm = nsFocusManager::GetFocusManager();
       NS_ENSURE_TRUE(fm, NS_OK);
 
-      nsIContent* focusedContent = fm->GetFocusedContent();
+      nsIContent* focusedContent = fm->GetFocusedElement();
       if (!focusedContent) {
         return NS_OK;
       }
 
-      nsCOMPtr<nsIDOMEventTarget> originalTarget =
-        aFocusEvent->GetOriginalDOMEventTarget();
-
       nsCOMPtr<nsIContent> originalTargetAsContent =
-        do_QueryInterface(originalTarget);
+        do_QueryInterface(aFocusEvent->GetOriginalDOMEventTarget());
 
       if (!SameCOMIdentity(
             focusedContent->FindFirstNonChromeOnlyAccessContent(),
@@ -1147,8 +1147,8 @@ EditorEventListener::Blur(InternalFocusEvent* aBlurEvent)
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   NS_ENSURE_TRUE(fm, NS_OK);
 
-  nsIContent* content = fm->GetFocusedContent();
-  if (!content || !content->IsElement()) {
+  Element* focusedElement = fm->GetFocusedElement();
+  if (!focusedElement) {
     RefPtr<EditorBase> editorBase(mEditorBase);
     editorBase->FinalizeSelection();
   }
@@ -1200,8 +1200,8 @@ EditorEventListener::ShouldHandleNativeKeyBindings(
   // unnecessary.  IsAcceptableInputEvent currently makes a similar check for
   // mouse events.
 
-  nsIDOMEventTarget* target = aKeyboardEvent->GetDOMEventTarget();
-  nsCOMPtr<nsIContent> targetContent = do_QueryInterface(target);
+  nsCOMPtr<nsIContent> targetContent =
+    do_QueryInterface(aKeyboardEvent->GetDOMEventTarget());
   if (!targetContent) {
     return false;
   }

@@ -19,6 +19,7 @@
 #ifndef wasm_module_h
 #define wasm_module_h
 
+#include "jit/shared/Assembler-shared.h"
 #include "js/TypeDecls.h"
 #include "threading/ConditionVariable.h"
 #include "threading/Mutex.h"
@@ -149,9 +150,8 @@ class Module : public JS::WasmModule
     bool instantiateTable(JSContext* cx,
                           MutableHandleWasmTableObject table,
                           SharedTableVector* tables) const;
-    bool instantiateGlobalExports(JSContext* cx,
-                                  const ValVector& globalImportValues,
-                                  WasmGlobalObjectVector& globalObjs) const;
+    bool instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
+                            WasmGlobalObjectVector& globalObjs) const;
     bool initSegments(JSContext* cx,
                       HandleWasmInstanceObject instance,
                       Handle<FunctionVector> funcImports,
@@ -257,7 +257,7 @@ CompiledModuleAssumptionsMatch(PRFileDesc* compiled, JS::BuildIdCharVector&& bui
 
 SharedModule
 DeserializeModule(PRFileDesc* bytecode, PRFileDesc* maybeCompiled, JS::BuildIdCharVector&& buildId,
-                  UniqueChars filename, unsigned line, unsigned column);
+                  UniqueChars filename, unsigned line);
 
 } // namespace wasm
 } // namespace js

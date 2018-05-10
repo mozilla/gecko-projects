@@ -10,6 +10,7 @@
 #include "AccessibleCaretEventHub.h"
 #include "AccessibleCaretLogger.h"
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/NodeFilterBinding.h"
@@ -78,8 +79,6 @@ AccessibleCaretManager::sCaretShownWhenLongTappingOnEmptyContent = false;
 /* static */ bool
 AccessibleCaretManager::sCaretsAlwaysTilt = false;
 /* static */ bool
-AccessibleCaretManager::sCaretsAlwaysShowWhenScrolling = true;
-/* static */ bool
 AccessibleCaretManager::sCaretsScriptUpdates = false;
 /* static */ bool
 AccessibleCaretManager::sCaretsAllowDraggingAcrossOtherCaret = true;
@@ -108,8 +107,6 @@ AccessibleCaretManager::AccessibleCaretManager(nsIPresShell* aPresShell)
       "layout.accessiblecaret.caret_shown_when_long_tapping_on_empty_content");
     Preferences::AddBoolVarCache(&sCaretsAlwaysTilt,
                                  "layout.accessiblecaret.always_tilt");
-    Preferences::AddBoolVarCache(&sCaretsAlwaysShowWhenScrolling,
-      "layout.accessiblecaret.always_show_when_scrolling", true);
     Preferences::AddBoolVarCache(&sCaretsScriptUpdates,
       "layout.accessiblecaret.allow_script_change_updates");
     Preferences::AddBoolVarCache(&sCaretsAllowDraggingAcrossOtherCaret,
@@ -139,8 +136,8 @@ AccessibleCaretManager::Terminate()
 }
 
 nsresult
-AccessibleCaretManager::OnSelectionChanged(nsIDOMDocument* aDoc,
-                                           nsISelection* aSel, int16_t aReason)
+AccessibleCaretManager::OnSelectionChanged(nsIDocument* aDoc,
+                                           Selection* aSel, int16_t aReason)
 {
   Selection* selection = GetSelection();
   AC_LOG("%s: aSel: %p, GetSelection(): %p, aReason: %d", __FUNCTION__,
@@ -652,15 +649,6 @@ AccessibleCaretManager::OnScrollStart()
 
   mIsScrollStarted = true;
 
-  if (!sCaretsAlwaysShowWhenScrolling) {
-    // Backup the appearance so that we can restore them after the scrolling
-    // ends.
-    mFirstCaretAppearanceOnScrollStart = mFirstCaret->GetAppearance();
-    mSecondCaretAppearanceOnScrollStart = mSecondCaret->GetAppearance();
-    HideCarets();
-    return;
-  }
-
   if (mFirstCaret->IsLogicallyVisible() || mSecondCaret->IsLogicallyVisible()) {
     // Dispatch the event only if one of the carets is logically visible like in
     // HideCarets().
@@ -676,12 +664,6 @@ AccessibleCaretManager::OnScrollEnd()
   }
 
   mIsScrollStarted = false;
-
-  if (!sCaretsAlwaysShowWhenScrolling) {
-    // Restore the appearance which is saved before the scrolling is started.
-    mFirstCaret->SetAppearance(mFirstCaretAppearanceOnScrollStart);
-    mSecondCaret->SetAppearance(mSecondCaretAppearanceOnScrollStart);
-  }
 
   if (GetCaretMode() == CaretMode::Cursor) {
     if (!mFirstCaret->IsLogicallyVisible()) {
@@ -787,7 +769,7 @@ AccessibleCaretManager::GetFrameSelection() const
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   MOZ_ASSERT(fm);
 
-  nsIContent* focusedContent = fm->GetFocusedContent();
+  nsIContent* focusedContent = fm->GetFocusedElement();
   if (!focusedContent) {
     // For non-editable content
     return mPresShell->FrameSelection();
@@ -879,7 +861,8 @@ AccessibleCaretManager::ChangeFocusToOrClearOldFocus(nsIFrame* aFrame) const
   if (aFrame) {
     nsIContent* focusableContent = aFrame->GetContent();
     MOZ_ASSERT(focusableContent, "Focusable frame must have content!");
-    nsCOMPtr<nsIDOMElement> focusableElement = do_QueryInterface(focusableContent);
+    RefPtr<Element> focusableElement =
+      focusableContent->IsElement() ? focusableContent->AsElement() : nullptr;
     fm->SetFocus(focusableElement, nsIFocusManager::FLAG_BYMOUSE);
   } else {
     nsPIDOMWindowOuter* win = mPresShell->GetDocument()->GetWindow();
@@ -981,7 +964,8 @@ AccessibleCaretManager::ExtendPhoneNumberSelection(const nsAString& aDirection) 
     // Extend the selection by one char.
     selection->Modify(NS_LITERAL_STRING("extend"),
                       aDirection,
-                      NS_LITERAL_STRING("character"));
+                      NS_LITERAL_STRING("character"),
+                      IgnoreErrors());
     if (IsTerminated()) {
       return;
     }

@@ -560,12 +560,10 @@ nsThread::nsThread(NotNull<SynchronizedEventQueue*> aQueue,
   , mIsMainThread(aMainThread)
   , mLastUnlabeledRunnable(TimeStamp::Now())
   , mCanInvokeJS(false)
-#ifndef RELEASE_OR_BETA
   , mCurrentEvent(nullptr)
   , mCurrentEventStart(TimeStamp::Now())
   , mCurrentEventLoopDepth(-1)
   , mCurrentPerformanceCounter(nullptr)
-#endif
 {
 }
 
@@ -586,7 +584,6 @@ nsThread::~nsThread()
 #endif
 }
 
-#ifndef RELEASE_OR_BETA
 bool
 nsThread::GetSchedulerLoggingEnabled() {
   if (!NS_IsMainThread() || !mozilla::Preferences::IsServiceAvailable()) {
@@ -594,7 +591,6 @@ nsThread::GetSchedulerLoggingEnabled() {
   }
   return mozilla::dom::DOMPrefs::SchedulerLoggingEnabled();
 }
-#endif
 
 nsresult
 nsThread::Init(const nsACString& aName)
@@ -900,7 +896,7 @@ void canary_alarm_handler(int signum)
     }                                                                          \
   } while(0)
 
-#ifndef RELEASE_OR_BETA
+#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
 static bool
 GetLabeledRunnableName(nsIRunnable* aEvent,
                        nsACString& aName,
@@ -925,6 +921,7 @@ GetLabeledRunnableName(nsIRunnable* aEvent,
 
   return labeled;
 }
+#endif
 
 mozilla::PerformanceCounter*
 nsThread::GetPerformanceCounter(nsIRunnable* aEvent)
@@ -938,8 +935,6 @@ nsThread::GetPerformanceCounter(nsIRunnable* aEvent)
   }
   return nullptr;
 }
-
-#endif
 
 NS_IMETHODIMP
 nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
@@ -1024,7 +1019,6 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
         HangMonitor::NotifyActivity();
       }
 
-#ifndef RELEASE_OR_BETA
       bool schedulerLoggingEnabled = GetSchedulerLoggingEnabled();
       if (schedulerLoggingEnabled
           && mNestedEventLoopDepth > mCurrentEventLoopDepth
@@ -1035,6 +1029,7 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
           mCurrentPerformanceCounter->IncrementExecutionDuration(duration.ToMicroseconds());
       }
 
+#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
       Maybe<Telemetry::AutoTimer<Telemetry::MAIN_THREAD_RUNNABLE_MS>> timer;
       Maybe<Telemetry::AutoTimer<Telemetry::IDLE_RUNNABLE_BUDGET_OVERUSE_MS>> idleTimer;
 
@@ -1093,7 +1088,6 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
         timeDurationHelper.emplace();
       }
 
-#ifndef RELEASE_OR_BETA
       // The event starts to run, storing the timestamp.
       bool recursiveEvent = false;
       RefPtr<mozilla::PerformanceCounter> currentPerformanceCounter;
@@ -1105,10 +1099,9 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
         mCurrentPerformanceCounter = GetPerformanceCounter(event);
         currentPerformanceCounter = mCurrentPerformanceCounter;
       }
-#endif
+
       event->Run();
 
-#ifndef RELEASE_OR_BETA
       // End of execution, we can send the duration for the group
       if (schedulerLoggingEnabled) {
        if (recursiveEvent) {
@@ -1127,7 +1120,6 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
           mCurrentPerformanceCounter = nullptr;
         }
       }
-#endif
     } else if (aMayWait) {
       MOZ_ASSERT(ShuttingDown(),
                  "This should only happen when shutting down");
@@ -1289,11 +1281,15 @@ nsThread::DoMainThreadSpecificProcessing(bool aReallyWait)
       nsCOMPtr<nsIObserverService> os = services::GetObserverService();
 
       if (os) {
-        // Use no-forward to prevent the notifications from being transferred to
-        // the children of this process.
-        os->NotifyObservers(nullptr, "memory-pressure",
-                            mpPending == MemPressure_New ? u"low-memory-no-forward" :
-                            u"low-memory-ongoing-no-forward");
+        if (mpPending == MemPressure_Stopping) {
+          os->NotifyObservers(nullptr, "memory-pressure-stop", nullptr);
+        } else {
+          // Use no-forward to prevent the notifications from being transferred to
+          // the children of this process.
+          os->NotifyObservers(nullptr, "memory-pressure",
+                              mpPending == MemPressure_New ? u"low-memory-no-forward" :
+                              u"low-memory-ongoing-no-forward");
+        }
       } else {
         NS_WARNING("Can't get observer service!");
       }

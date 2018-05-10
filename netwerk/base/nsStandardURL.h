@@ -65,7 +65,6 @@ public:
     NS_DECL_NSISTANDARDURL
     NS_DECL_NSISERIALIZABLE
     NS_DECL_NSICLASSINFO
-    NS_DECL_NSIMUTABLE
     NS_DECL_NSIIPCSERIALIZABLEURI
     NS_DECL_NSISENSITIVEINFOHIDDENURI
 
@@ -87,7 +86,7 @@ public: /* internal -- HPUX compiler can't handle this being private */
 
         URLSegment() : mPos(0), mLen(-1) {}
         URLSegment(uint32_t pos, int32_t len) : mPos(pos), mLen(len) {}
-        URLSegment(const URLSegment& aCopy) : mPos(aCopy.mPos), mLen(aCopy.mLen) {}
+        URLSegment(const URLSegment& aCopy) = default;
         void Reset() { mPos = 0; mLen = -1; }
         // Merge another segment following this one to it if they're contiguous
         // Assumes we have something like "foo;bar" where this object is 'foo' and right
@@ -300,7 +299,6 @@ private:
     };
 
     uint32_t mURLType         : 2; // nsIStandardURL::URLTYPE_xxx
-    uint32_t mMutable         : 1; // nsIStandardURL::mutable
     uint32_t mSupportsFileURL : 1; // QI to nsIFileURL?
     uint32_t mCheckedIfHostA  : 1; // If set to true, it means either that
                                    // mDisplayHost has a been initialized, or
@@ -465,7 +463,7 @@ public:
                 // We don't need a new URI object if we already have one
                 BaseURIMutator<T>::mURI.swap(uri);
             } else {
-                uri = new T(/* supportsFileURL = */ true);
+                uri = new T(/* aSupportsFileURL = */ true);
             }
 
             nsresult rv = uri->SetFile(aFile);
@@ -476,9 +474,9 @@ public:
             return NS_OK;
         }
 
-        explicit TemplatedMutator() { }
+        explicit TemplatedMutator() = default;
     private:
-        virtual ~TemplatedMutator() { }
+        virtual ~TemplatedMutator() = default;
 
         bool mMarkedFileURL = false;
 

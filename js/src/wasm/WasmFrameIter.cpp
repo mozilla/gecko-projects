@@ -187,7 +187,7 @@ WasmFrameIter::functionDisplayAtom() const
     MOZ_ASSERT(!done());
 
     JSContext* cx = activation_->cx();
-    JSAtom* atom = instance()->getFuncAtom(cx, codeRange_->funcIndex());
+    JSAtom* atom = instance()->getFuncDisplayAtom(cx, codeRange_->funcIndex());
     if (!atom) {
         cx->clearPendingException();
         return cx->names().empty;
@@ -200,6 +200,40 @@ unsigned
 WasmFrameIter::lineOrBytecode() const
 {
     MOZ_ASSERT(!done());
+    return lineOrBytecode_;
+}
+
+uint32_t
+WasmFrameIter::funcIndex() const
+{
+    MOZ_ASSERT(!done());
+    return codeRange_->funcIndex();
+}
+
+unsigned
+WasmFrameIter::computeLine(uint32_t* column) const
+{
+    if (instance()->isAsmJS()) {
+        if (column)
+            *column = 1;
+        return lineOrBytecode_;
+    }
+
+    // As a terrible hack to avoid changing the tons of places that pass around
+    // (url, line, column) tuples to instead passing around a Variant that
+    // stores a (url, func-index, bytecode-offset) tuple for wasm frames,
+    // wasm stuffs its tuple into the existing (url, line, column) tuple,
+    // tagging the high bit of the column to indicate "this is a wasm frame".
+    // When knowing clients see this bit, they shall render the tuple
+    // (url, line, column|bit) as "url:wasm-function[column]:0xline" according
+    // to the WebAssembly Web API's Developer-Facing Display Conventions.
+    //   https://webassembly.github.io/spec/web-api/index.html#conventions
+    // The wasm bytecode offset continues to be passed as the JS line to avoid
+    // breaking existing devtools code written when this used to be the case.
+
+    MOZ_ASSERT(!(codeRange_->funcIndex() & ColumnBit));
+    if (column)
+        *column = codeRange_->funcIndex() | ColumnBit;
     return lineOrBytecode_;
 }
 
@@ -764,7 +798,6 @@ ProfilingFrameIterator::initFromExitFP(const Frame* fp)
       case CodeRange::ImportInterpExit:
       case CodeRange::BuiltinThunk:
       case CodeRange::TrapExit:
-      case CodeRange::OldTrapExit:
       case CodeRange::DebugTrap:
       case CodeRange::OutOfBoundsExit:
       case CodeRange::UnalignedExit:
@@ -842,10 +875,16 @@ js::wasm::StartUnwinding(const RegisterState& registers, UnwindState* unwindStat
       case CodeRange::ImportJitExit:
       case CodeRange::ImportInterpExit:
       case CodeRange::BuiltinThunk:
-      case CodeRange::OldTrapExit:
       case CodeRange::DebugTrap:
 #if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
-        if (offsetFromEntry < PushedFP || codeRange->isThunk()) {
+        if (codeRange->isThunk()) {
+            // The FarJumpIsland sequence temporary scrambles ra.
+            // Don't unwind to caller.
+            fixedPC = pc;
+            fixedFP = fp;
+            *unwoundCaller = false;
+            AssertMatchesCallSite(fp->returnAddress, fp->callerFP);
+        } else if (offsetFromEntry < PushedFP) {
             // On MIPS we rely on register state instead of state saved on
             // stack until the wasm::Frame is completely built.
             // On entry the return address is in ra (registers.lr) and
@@ -1100,7 +1139,6 @@ ProfilingFrameIterator::operator++()
       case CodeRange::ImportInterpExit:
       case CodeRange::BuiltinThunk:
       case CodeRange::TrapExit:
-      case CodeRange::OldTrapExit:
       case CodeRange::DebugTrap:
       case CodeRange::OutOfBoundsExit:
       case CodeRange::UnalignedExit:
@@ -1129,13 +1167,13 @@ ThunkedNativeToDescription(SymbolicAddress func)
       case SymbolicAddress::HandleDebugTrap:
       case SymbolicAddress::HandleThrow:
       case SymbolicAddress::HandleTrap:
-      case SymbolicAddress::OldReportTrap:
       case SymbolicAddress::ReportOutOfBounds:
       case SymbolicAddress::ReportUnalignedAccess:
       case SymbolicAddress::CallImport_Void:
       case SymbolicAddress::CallImport_I32:
       case SymbolicAddress::CallImport_I64:
       case SymbolicAddress::CallImport_F64:
+      case SymbolicAddress::CallImport_Ref:
       case SymbolicAddress::CoerceInPlace_ToInt32:
       case SymbolicAddress::CoerceInPlace_ToNumber:
         MOZ_ASSERT(!NeedsBuiltinThunk(func), "not in sync with NeedsBuiltinThunk");
@@ -1224,6 +1262,10 @@ ThunkedNativeToDescription(SymbolicAddress func)
         return "out-of-line coercion for jit entry arguments (in wasm)";
       case SymbolicAddress::ReportInt64JSCall:
         return "jit call to int64 wasm function";
+      case SymbolicAddress::MemCopy:
+        return "call to native memory.copy function";
+      case SymbolicAddress::MemFill:
+        return "call to native memory.fill function";
 #if defined(JS_CODEGEN_MIPS32)
       case SymbolicAddress::js_jit_gAtomic64Lock:
         MOZ_CRASH();
@@ -1276,7 +1318,6 @@ ProfilingFrameIterator::label() const
       case CodeRange::BuiltinThunk:      return builtinNativeDescription;
       case CodeRange::ImportInterpExit:  return importInterpDescription;
       case CodeRange::TrapExit:          return trapDescription;
-      case CodeRange::OldTrapExit:       return trapDescription;
       case CodeRange::DebugTrap:         return debugTrapDescription;
       case CodeRange::OutOfBoundsExit:   return "out-of-bounds stub (in wasm)";
       case CodeRange::UnalignedExit:     return "unaligned trap stub (in wasm)";

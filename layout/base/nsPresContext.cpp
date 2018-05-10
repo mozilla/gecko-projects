@@ -23,8 +23,7 @@
 #include "nsDocShell.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsIContent.h"
 #include "nsIFrame.h"
 #include "nsIDocument.h"
@@ -39,7 +38,6 @@
 #include "nsLayoutUtils.h"
 #include "nsViewManager.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "SurfaceCacheUtils.h"
 #include "nsMediaFeatures.h"
 #include "gfxPlatform.h"
@@ -88,7 +86,6 @@
 #include "imgIContainer.h"
 #include "nsIImageLoadingContent.h"
 
-#include "nsCSSParser.h"
 #include "nsBidiUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsBidi.h"
@@ -121,22 +118,11 @@ public:
 nscolor
 nsPresContext::MakeColorPref(const nsString& aColor)
 {
-  bool ok;
+  ServoStyleSet* styleSet = mShell ? mShell->StyleSet() : nullptr;
+
   nscolor result;
-
-  ServoStyleSet* servoStyleSet = mShell && mShell->StyleSet()
-    ? mShell->StyleSet()->GetAsServo()
-    : nullptr;
-
-  bool useServoParser =
-    true;
-
-  if (useServoParser) {
-    ok = ServoCSSParser::ComputeColor(servoStyleSet, NS_RGB(0, 0, 0), aColor,
-                                      &result);
-  } else {
-    MOZ_CRASH("old style system disabled");
-  }
+  bool ok = ServoCSSParser::
+    ComputeColor(styleSet, NS_RGB(0, 0, 0), aColor, &result);
 
   if (!ok) {
     // Any better choices?
@@ -157,7 +143,7 @@ nsPresContext::IsDOMPaintEventPending()
     // Since we're promising that there will be a MozAfterPaint event
     // fired, we record an empty invalidation in case display list
     // invalidation doesn't invalidate anything further.
-    NotifyInvalidation(drpc->mRefreshDriver->LastTransactionId() + 1, nsRect(0, 0, 0, 0));
+    NotifyInvalidation(drpc->mRefreshDriver->LastTransactionId().Next(), nsRect(0, 0, 0, 0));
     return true;
   }
   return false;
@@ -278,9 +264,6 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
     mQuirkSheetAdded(false),
     mNeedsPrefUpdate(false),
     mHadNonBlankPaint(false)
-#ifdef RESTYLE_LOGGING
-    , mRestyleLoggingEnabled(false)
-#endif
 #ifdef DEBUG
     , mInitialized(false)
 #endif
@@ -374,7 +357,7 @@ nsPresContext::Destroy()
 
 nsPresContext::~nsPresContext()
 {
-  NS_PRECONDITION(!mShell, "Presshell forgot to clear our mShell pointer");
+  MOZ_ASSERT(!mShell, "Presshell forgot to clear our mShell pointer");
   DetachShell();
 
   Destroy();
@@ -846,11 +829,9 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
   // most of the time.
   //
   // FIXME(emilio): I'm pretty sure this doesn't happen after bug 1414999.
-  if (mDocument->IsStyledByServo()) {
-    Element* root = mDocument->GetRootElement();
-    if (root && root->HasServoData()) {
-      ServoRestyleManager::ClearServoDataFromSubtree(root);
-    }
+  Element* root = mDocument->GetRootElement();
+  if (root && root->HasServoData()) {
+    RestyleManager::ClearServoDataFromSubtree(root);
   }
 
   if (mDeviceContext->SetFullZoom(mFullZoom))
@@ -861,8 +842,8 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 
   mAnimationEventDispatcher = new mozilla::AnimationEventDispatcher(this);
   mEffectCompositor = new mozilla::EffectCompositor(this);
-  mTransitionManager = new nsTransitionManager(this);
-  mAnimationManager = new nsAnimationManager(this);
+  mTransitionManager = MakeUnique<nsTransitionManager>(this);
+  mAnimationManager = MakeUnique<nsAnimationManager>(this);
 
   if (mDocument->GetDisplayDocument()) {
     NS_ASSERTION(mDocument->GetDisplayDocument()->GetPresContext(),
@@ -959,10 +940,6 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 
   mEventManager->SetPresContext(this);
 
-#ifdef RESTYLE_LOGGING
-  mRestyleLoggingEnabled = GeckoRestyleManager::RestyleLoggingInitiallyEnabled();
-#endif
-
 #ifdef DEBUG
   mInitialized = true;
 #endif
@@ -973,16 +950,12 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 // Note: We don't hold a reference on the shell; it has a reference to
 // us
 void
-nsPresContext::AttachShell(nsIPresShell* aShell, StyleBackendType aBackendType)
+nsPresContext::AttachShell(nsIPresShell* aShell)
 {
   MOZ_ASSERT(!mShell);
   mShell = aShell;
 
-  if (aBackendType == StyleBackendType::Servo) {
-    mRestyleManager = new ServoRestyleManager(this);
-  } else {
-    MOZ_CRASH("old style system disabled");
-  }
+  mRestyleManager = MakeUnique<mozilla::RestyleManager>(this);
 
   // Since CounterStyleManager is also the name of a method of
   // nsPresContext, it is necessary to prefix the class with the mozilla
@@ -1076,12 +1049,13 @@ nsPresContext::DoChangeCharSet(NotNull<const Encoding*> aCharSet)
 {
   UpdateCharSet(aCharSet);
   mDeviceContext->FlushFontCache();
-  // In Stylo, if a document contains one or more <script> elements, frame
-  // construction might happen earlier than the UpdateCharSet(), so we need to
-  // restyle descendants to make their style data up-to-date.
-  RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
-                      mDocument->IsStyledByServo()
-                      ? eRestyle_ForceDescendants : nsRestyleHint(0));
+
+  // If a document contains one or more <script> elements, frame construction
+  // might happen earlier than the UpdateCharSet(), so we need to restyle
+  // descendants to make their style data up-to-date.
+  //
+  // FIXME(emilio): Revisit whether this is true after bug 1438911.
+  RebuildAllStyleData(NS_STYLE_HINT_REFLOW, eRestyle_ForceDescendants);
 }
 
 void
@@ -1202,17 +1176,12 @@ nsPresContext::CompatibilityModeChanged()
     return;
   }
 
-  nsIDocument* doc = mShell->GetDocument();
-  if (!doc) {
-    return;
-  }
+  ServoStyleSet* styleSet = mShell->StyleSet();
+  styleSet->CompatibilityModeChanged();
 
-  StyleSetHandle styleSet = mShell->StyleSet();
-  if (styleSet->IsServo()) {
-    styleSet->AsServo()->CompatibilityModeChanged();
-  }
+  mShell->EnsureStyleFlush();
 
-  if (doc->IsSVGDocument()) {
+  if (mDocument->IsSVGDocument()) {
     // SVG documents never load quirk.css.
     return;
   }
@@ -1222,7 +1191,7 @@ nsPresContext::CompatibilityModeChanged()
     return;
   }
 
-  auto cache = nsLayoutStylesheetCache::For(styleSet->BackendType());
+  auto cache = nsLayoutStylesheetCache::Singleton();
   StyleSheet* sheet = cache->QuirkSheet();
 
   if (needsQuirkSheet) {
@@ -1477,7 +1446,7 @@ GetPropagatedScrollbarStylesForViewport(nsPresContext* aPresContext,
   }
 
   // Check the style on the document root element
-  StyleSetHandle styleSet = aPresContext->StyleSet();
+  ServoStyleSet* styleSet = aPresContext->StyleSet();
   RefPtr<ComputedStyle> rootStyle =
     styleSet->ResolveStyleFor(docElement, nullptr, LazyComputeBehavior::Allow);
   if (CheckOverflow(rootStyle->StyleDisplay(), aStyles)) {
@@ -1490,13 +1459,11 @@ GetPropagatedScrollbarStylesForViewport(nsPresContext* aPresContext,
   // XXX this should be earlier; we shouldn't even look at the document root
   // for non-HTML documents. Fix this once we support explicit CSS styling
   // of the viewport
-  // XXX what about XHTML?
-  nsHTMLDocument* htmlDoc = document->AsHTMLDocument();
-  if (!htmlDoc || !docElement->IsHTMLElement()) {
+  if (!document->IsHTMLOrXHTML() || !docElement->IsHTMLElement()) {
     return nullptr;
   }
 
-  Element* bodyElement = htmlDoc->GetBodyElement();
+  Element* bodyElement = document->AsHTMLDocument()->GetBodyElement();
   if (!bodyElement) {
     // No body, nothing to do here.
     return nullptr;
@@ -1806,8 +1773,10 @@ nsPresContext::ThemeChangedInternal()
 
   // Recursively notify all remote leaf descendants that the
   // system theme has changed.
-  nsContentUtils::CallOnAllRemoteChildren(mDocument->GetWindow(),
-                                          NotifyThemeChanged, nullptr);
+  if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
+    nsContentUtils::CallOnAllRemoteChildren(window,
+                                            NotifyThemeChanged, nullptr);
+  }
 }
 
 void
@@ -2018,7 +1987,7 @@ nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint,
   // TODO(emilio): It's unclear to me why would these three calls below be
   // needed. In particular, RebuildAllStyleData doesn't rebuild rules or
   // specified style information and such (note the comment in
-  // ServoRestyleManager::RebuildAllStyleData re. the funny semantics), so I
+  // RestyleManager::RebuildAllStyleData re. the funny semantics), so I
   // don't know why should we rebuild the user font set / counter styles /
   // etc...
   mDocument->MarkUserFontSetDirty();
@@ -2115,7 +2084,8 @@ nsPresContext::FlushPendingMediaFeatureValuesChanged()
   // Copy pointers to all the lists into a new array, in case one of our
   // notifications modifies the list.
   nsTArray<RefPtr<mozilla::dom::MediaQueryList>> localMediaQueryLists;
-  for (auto* mql : mDocument->MediaQueryLists()) {
+  for (MediaQueryList* mql = mDocument->MediaQueryLists().getFirst(); mql;
+       mql = static_cast<LinkedListElement<MediaQueryList>*>(mql)->getNext()) {
     localMediaQueryLists.AppendElement(mql);
   }
 
@@ -2137,9 +2107,11 @@ NotifyTabSizeModeChanged(TabParent* aTab, void* aArg)
 void
 nsPresContext::SizeModeChanged(nsSizeMode aSizeMode)
 {
-  nsContentUtils::CallOnAllRemoteChildren(mDocument->GetWindow(),
-                                          NotifyTabSizeModeChanged,
-                                          &aSizeMode);
+  if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
+    nsContentUtils::CallOnAllRemoteChildren(window,
+                                            NotifyTabSizeModeChanged,
+                                            &aSizeMode);
+  }
   MediaFeatureValuesChangedAllDocuments({ MediaFeatureChangeReason::SizeModeChange });
 }
 
@@ -2220,15 +2192,15 @@ nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
     return false;
   }
 
-  ComputedStyle* styleContext = aFrame->Style();
-  CSSPseudoElementType pseudoType = styleContext->GetPseudoType();
+  ComputedStyle* computedStyle = aFrame->Style();
+  CSSPseudoElementType pseudoType = computedStyle->GetPseudoType();
   // Anonymous boxes are more complicated, and we just assume that they
   // cannot have any author-specified rules here.
   if (pseudoType == CSSPseudoElementType::InheritingAnonBox ||
       pseudoType == CSSPseudoElementType::NonInheritingAnonBox) {
     return false;
   }
-  return Servo_HasAuthorSpecifiedRules(styleContext->AsServo(),
+  return Servo_HasAuthorSpecifiedRules(computedStyle,
                                        elem, pseudoType,
                                        aRuleTypeMask,
                                        UseDocumentColors());
@@ -2354,7 +2326,8 @@ nsPresContext::EnsureSafeToHandOutCSSRules()
 }
 
 void
-nsPresContext::FireDOMPaintEvent(nsTArray<nsRect>* aList, uint64_t aTransactionId,
+nsPresContext::FireDOMPaintEvent(nsTArray<nsRect>* aList,
+                                 TransactionId aTransactionId,
                                  mozilla::TimeStamp aTimeStamp /* = mozilla::TimeStamp() */)
 {
   nsPIDOMWindowInner* ourWindow = mDocument->GetInnerWindow();
@@ -2393,7 +2366,7 @@ nsPresContext::FireDOMPaintEvent(nsTArray<nsRect>* aList, uint64_t aTransactionI
   // it won't be blocking app execution though).
   RefPtr<NotifyPaintEvent> event =
     NS_NewDOMNotifyPaintEvent(eventTarget, this, nullptr, eAfterPaint, aList,
-                              aTransactionId, timeStamp);
+                              uint64_t(aTransactionId), timeStamp);
 
   // Even if we're not telling the window about the event (so eventTarget is
   // the chrome event handler, not the window), the window is still
@@ -2483,7 +2456,7 @@ nsPresContext::MayHavePaintEventListenerInSubDocument()
 }
 
 void
-nsPresContext::NotifyInvalidation(uint64_t aTransactionId, const nsIntRect& aRect)
+nsPresContext::NotifyInvalidation(TransactionId aTransactionId, const nsIntRect& aRect)
 {
   // Prevent values from overflow after DevPixelsToAppUnits().
   //
@@ -2504,7 +2477,7 @@ nsPresContext::NotifyInvalidation(uint64_t aTransactionId, const nsIntRect& aRec
 }
 
 nsPresContext::TransactionInvalidations*
-nsPresContext::GetInvalidations(uint64_t aTransactionId)
+nsPresContext::GetInvalidations(TransactionId aTransactionId)
 {
   for (TransactionInvalidations& t : mTransactions) {
     if (t.mTransactionId == aTransactionId) {
@@ -2515,7 +2488,7 @@ nsPresContext::GetInvalidations(uint64_t aTransactionId)
 }
 
 void
-nsPresContext::NotifyInvalidation(uint64_t aTransactionId, const nsRect& aRect)
+nsPresContext::NotifyInvalidation(TransactionId aTransactionId, const nsRect& aRect)
 {
   MOZ_ASSERT(GetContainerWeak(), "Invalidation in detached pres context");
 
@@ -2558,7 +2531,7 @@ nsPresContext::NotifySubDocInvalidation(ContainerLayer* aContainer,
     return;
   }
 
-  uint64_t transactionId = aContainer->Manager()->GetLastTransactionId();
+  TransactionId transactionId = aContainer->Manager()->GetLastTransactionId();
   IntRect visibleBounds = aContainer->GetVisibleRegion().GetBounds().ToUnknownRect();
 
   if (!aRegion) {
@@ -2593,7 +2566,7 @@ nsPresContext::ClearNotifySubDocInvalidationData(ContainerLayer* aContainer)
 }
 
 struct NotifyDidPaintSubdocumentCallbackClosure {
-  uint64_t mTransactionId;
+  TransactionId mTransactionId;
   const mozilla::TimeStamp& mTimeStamp;
 };
 /* static */ bool
@@ -2614,7 +2587,7 @@ public:
   DelayedFireDOMPaintEvent(
     nsPresContext* aPresContext,
     nsTArray<nsRect>* aList,
-    uint64_t aTransactionId,
+    TransactionId aTransactionId,
     const mozilla::TimeStamp& aTimeStamp = mozilla::TimeStamp())
     : mozilla::Runnable("DelayedFireDOMPaintEvent")
     , mPresContext(aPresContext)
@@ -2636,13 +2609,13 @@ public:
   }
 
   RefPtr<nsPresContext> mPresContext;
-  uint64_t mTransactionId;
+  TransactionId mTransactionId;
   const mozilla::TimeStamp mTimeStamp;
   nsTArray<nsRect> mList;
 };
 
 void
-nsPresContext::NotifyDidPaintForSubtree(uint64_t aTransactionId,
+nsPresContext::NotifyDidPaintForSubtree(TransactionId aTransactionId,
                                         const mozilla::TimeStamp& aTimeStamp)
 {
   if (IsRoot()) {
@@ -2883,7 +2856,7 @@ nsPresContext::CheckForInterrupt(nsIFrame* aFrame)
 nsIFrame*
 nsPresContext::GetPrimaryFrameFor(nsIContent* aContent)
 {
-  NS_PRECONDITION(aContent, "Don't do that");
+  MOZ_ASSERT(aContent, "Don't do that");
   if (GetPresShell() &&
       GetPresShell()->GetDocument() == aContent->GetComposedDoc()) {
     return aContent->GetPrimaryFrame();
@@ -2941,6 +2914,18 @@ nsPresContext::NotifyNonBlankPaint()
     }
 
     mFirstNonBlankPaintTime = TimeStamp::Now();
+  }
+}
+
+void
+nsPresContext::NotifyDOMContentFlushed()
+{
+  NS_ENSURE_TRUE_VOID(mShell);
+  if (IsRootContentDocument()) {
+    RefPtr<nsDOMNavigationTiming> timing = mDocument->GetNavigationTiming();
+    if (timing) {
+      timing->NotifyDOMContentFlushedForRootContentDocument();
+    }
   }
 }
 
@@ -3031,7 +3016,7 @@ nsPresContext::FlushFontFeatureValues()
   }
 
   if (mFontFeatureValuesDirty) {
-    StyleSetHandle styleSet = mShell->StyleSet();
+    ServoStyleSet* styleSet = mShell->StyleSet();
     mFontFeatureValuesLookup = styleSet->BuildFontFeatureValueSet();
     mFontFeatureValuesDirty = false;
   }
@@ -3310,7 +3295,7 @@ nsRootPresContext::CollectPluginGeometryUpdates(LayerManager* aLayerManager)
 }
 
 void
-nsRootPresContext::EnsureEventualDidPaintEvent(uint64_t aTransactionId)
+nsRootPresContext::EnsureEventualDidPaintEvent(TransactionId aTransactionId)
 {
   for (NotifyDidPaintTimer& t : mNotifyDidPaintTimers) {
     if (t.mTransactionId == aTransactionId) {
@@ -3336,7 +3321,7 @@ nsRootPresContext::EnsureEventualDidPaintEvent(uint64_t aTransactionId)
 }
 
 void
-nsRootPresContext::CancelDidPaintTimers(uint64_t aTransactionId)
+nsRootPresContext::CancelDidPaintTimers(TransactionId aTransactionId)
 {
   uint32_t i = 0;
   while (i < mNotifyDidPaintTimers.Length()) {

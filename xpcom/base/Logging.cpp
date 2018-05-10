@@ -20,6 +20,7 @@
 #include "nsClassHashtable.h"
 #include "nsDebug.h"
 #include "NSPRLogModulesParser.h"
+#include "LogCommandLineHandler.h"
 
 #include "prenv.h"
 #ifdef XP_WIN
@@ -192,17 +193,31 @@ public:
   }
 
   /**
-   * Loads config from env vars if present.
+   * Loads config from command line args or env vars if present, in
+   * this specific order of priority.
    *
    * Notes:
    *
    * 1) This function is only intended to be called once per session.
    * 2) None of the functions used in Init should rely on logging.
    */
-  void Init()
+  void Init(int argc, char* argv[])
   {
     MOZ_DIAGNOSTIC_ASSERT(!mInitialized);
     mInitialized = true;
+
+    LoggingHandleCommandLineArgs(argc, static_cast<char const* const*>(argv),
+                                 [](nsACString const& env) {
+      // We deliberately set/rewrite the environment variables
+      // so that when child processes are spawned w/o passing
+      // the arguments they still inherit the logging settings
+      // as well as sandboxing can be correctly set.
+      // Scripts can pass -MOZ_LOG=$MOZ_LOG,modules as an argument
+      // to merge existing settings, if required.
+
+      // PR_SetEnv takes ownership of the string.
+      PR_SetEnv(ToNewCString(env));
+    });
 
     bool shouldAppend = false;
     bool addTimestamp = false;
@@ -576,7 +591,7 @@ LogModule::SetIsSync(bool aIsSync)
 }
 
 void
-LogModule::Init()
+LogModule::Init(int argc, char* argv[])
 {
   // NB: This method is not threadsafe; it is expected to be called very early
   //     in startup prior to any other threads being run.
@@ -594,7 +609,7 @@ LogModule::Init()
   // Don't assign the pointer until after Init is called. This should help us
   // detect if any of the functions called by Init somehow rely on logging.
   auto mgr = new LogModuleManager();
-  mgr->Init();
+  mgr->Init(argc, argv);
   sLogModuleManager = mgr;
 }
 

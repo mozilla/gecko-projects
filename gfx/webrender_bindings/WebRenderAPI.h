@@ -23,14 +23,12 @@
 
 namespace mozilla {
 
-struct DisplayItemClipChain;
-
 namespace widget {
 class CompositorWidget;
 }
 
 namespace layers {
-class CompositorBridgeParentBase;
+class CompositorBridgeParent;
 class WebRenderBridgeParent;
 }
 
@@ -77,6 +75,7 @@ public:
 
   void UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                                const nsTArray<wr::WrTransformProperty>& aTransformArray);
+  void AppendTransformProperties(const nsTArray<wr::WrTransformProperty>& aTransformArray);
 
   void SetWindowParameters(const LayoutDeviceIntSize& aWindowSize,
                            const LayoutDeviceIntRect& aDocRect);
@@ -146,21 +145,31 @@ protected:
   wr::ResourceUpdates* mResourceUpdates;
 };
 
+class TransactionWrapper
+{
+public:
+  explicit TransactionWrapper(Transaction* aTxn);
+
+  void AppendTransformProperties(const nsTArray<wr::WrTransformProperty>& aTransformArray);
+  void UpdateScrollPosition(const wr::WrPipelineId& aPipelineId,
+                            const layers::FrameMetrics::ViewID& aScrollId,
+                            const wr::LayoutPoint& aScrollPosition);
+private:
+  Transaction* mTxn;
+};
+
 class WebRenderAPI
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WebRenderAPI);
 
 public:
   /// This can be called on the compositor thread only.
-  static already_AddRefed<WebRenderAPI> Create(layers::CompositorBridgeParentBase* aBridge,
+  static already_AddRefed<WebRenderAPI> Create(layers::CompositorBridgeParent* aBridge,
                                                RefPtr<widget::CompositorWidget>&& aWidget,
+                                               const wr::WrWindowId& aWindowId,
                                                LayoutDeviceIntSize aSize);
 
   already_AddRefed<WebRenderAPI> CreateDocument(LayoutDeviceIntSize aSize, int8_t aLayerIndex);
-
-  // Redirect the WR's log to gfxCriticalError/Note.
-  static void InitExternalLogHandler();
-  static void ShutdownExternalLogHandler();
 
   already_AddRefed<WebRenderAPI> Clone();
 
@@ -181,6 +190,9 @@ public:
 
   void Pause();
   bool Resume();
+
+  void WakeSceneBuilder();
+  void FlushSceneBuilder();
 
   wr::WrIdNamespace GetNamespace();
   uint32_t GetMaxTextureSize() const { return mMaxTextureSize; }
@@ -223,6 +235,30 @@ protected:
   friend class layers::WebRenderBridgeParent;
 };
 
+// This is a RAII class that automatically sends the transaction on
+// destruction. This is useful for code that has multiple exit points and we
+// want to ensure that the stuff accumulated in the transaction gets sent
+// regardless of which exit we take. Note that if the caller explicitly calls
+// mApi->SendTransaction() that's fine too because that empties out the
+// TransactionBuilder and leaves it as a valid empty transaction, so calling
+// SendTransaction on it again ends up being a no-op.
+class MOZ_RAII AutoTransactionSender
+{
+public:
+  AutoTransactionSender(WebRenderAPI* aApi, TransactionBuilder* aTxn)
+    : mApi(aApi)
+    , mTxn(aTxn)
+  {}
+
+  ~AutoTransactionSender() {
+    mApi->SendTransaction(*mTxn);
+  }
+
+private:
+  WebRenderAPI* mApi;
+  TransactionBuilder* mTxn;
+};
+
 /// This is a simple C++ wrapper around WrState defined in the rust bindings.
 /// We may want to turn this into a direct wrapper on top of WebRenderFrameBuilder
 /// instead, so the interface may change a bit.
@@ -243,49 +279,47 @@ public:
   void Finalize(wr::LayoutSize& aOutContentSize,
                 wr::BuiltDisplayList& aOutDisplayList);
 
-  void PushStackingContext(const wr::LayoutRect& aBounds, // TODO: We should work with strongly typed rects
-                           const wr::WrAnimationProperty* aAnimation,
-                           const float* aOpacity,
-                           const gfx::Matrix4x4* aTransform,
-                           wr::TransformStyle aTransformStyle,
-                           const gfx::Matrix4x4* aPerspective,
-                           const wr::MixBlendMode& aMixBlendMode,
-                           const nsTArray<wr::WrFilterOp>& aFilters,
-                           bool aIsBackfaceVisible);
+  Maybe<wr::WrClipId> PushStackingContext(
+          const wr::LayoutRect& aBounds, // TODO: We should work with strongly typed rects
+          const wr::WrClipId* aClipNodeId,
+          const wr::WrAnimationProperty* aAnimation,
+          const float* aOpacity,
+          const gfx::Matrix4x4* aTransform,
+          wr::TransformStyle aTransformStyle,
+          const gfx::Matrix4x4* aPerspective,
+          const wr::MixBlendMode& aMixBlendMode,
+          const nsTArray<wr::WrFilterOp>& aFilters,
+          bool aIsBackfaceVisible,
+          const wr::GlyphRasterSpace& aRasterSpace);
   void PopStackingContext();
 
-  wr::WrClipId DefineClip(const Maybe<wr::WrScrollId>& aAncestorScrollId,
-                          const Maybe<wr::WrClipId>& aAncestorClipId,
+  wr::WrClipChainId DefineClipChain(const Maybe<wr::WrClipChainId>& aParent,
+                                    const nsTArray<wr::WrClipId>& aClips);
+
+  wr::WrClipId DefineClip(const Maybe<wr::WrClipId>& aParentId,
                           const wr::LayoutRect& aClipRect,
                           const nsTArray<wr::ComplexClipRegion>* aComplex = nullptr,
                           const wr::WrImageMask* aMask = nullptr);
-  void PushClip(const wr::WrClipId& aClipId, const DisplayItemClipChain* aParent = nullptr);
-  void PopClip(const DisplayItemClipChain* aParent = nullptr);
-  Maybe<wr::WrClipId> GetCacheOverride(const DisplayItemClipChain* aParent);
+  void PushClip(const wr::WrClipId& aClipId);
+  void PopClip();
 
-  wr::WrStickyId DefineStickyFrame(const wr::LayoutRect& aContentRect,
-                                   const float* aTopMargin,
-                                   const float* aRightMargin,
-                                   const float* aBottomMargin,
-                                   const float* aLeftMargin,
-                                   const StickyOffsetBounds& aVerticalBounds,
-                                   const StickyOffsetBounds& aHorizontalBounds,
-                                   const wr::LayoutVector2D& aAppliedOffset);
-  void PushStickyFrame(const wr::WrStickyId& aStickyId,
-                       const DisplayItemClipChain* aParent);
-  void PopStickyFrame(const DisplayItemClipChain* aParent);
+  wr::WrClipId DefineStickyFrame(const wr::LayoutRect& aContentRect,
+                                 const float* aTopMargin,
+                                 const float* aRightMargin,
+                                 const float* aBottomMargin,
+                                 const float* aLeftMargin,
+                                 const StickyOffsetBounds& aVerticalBounds,
+                                 const StickyOffsetBounds& aHorizontalBounds,
+                                 const wr::LayoutVector2D& aAppliedOffset);
 
-  Maybe<wr::WrScrollId> GetScrollIdForDefinedScrollLayer(layers::FrameMetrics::ViewID aViewId) const;
-  wr::WrScrollId DefineScrollLayer(const layers::FrameMetrics::ViewID& aViewId,
-                                   const Maybe<wr::WrScrollId>& aAncestorScrollId,
-                                   const Maybe<wr::WrClipId>& aAncestorClipId,
-                                   const wr::LayoutRect& aContentRect, // TODO: We should work with strongly typed rects
-                                   const wr::LayoutRect& aClipRect);
-  void PushScrollLayer(const wr::WrScrollId& aScrollId);
-  void PopScrollLayer();
+  Maybe<wr::WrClipId> GetScrollIdForDefinedScrollLayer(layers::FrameMetrics::ViewID aViewId) const;
+  wr::WrClipId DefineScrollLayer(const layers::FrameMetrics::ViewID& aViewId,
+                                 const Maybe<wr::WrClipId>& aParentId,
+                                 const wr::LayoutRect& aContentRect, // TODO: We should work with strongly typed rects
+                                 const wr::LayoutRect& aClipRect);
 
-  void PushClipAndScrollInfo(const wr::WrScrollId& aScrollId,
-                             const wr::WrClipId* aClipId);
+  void PushClipAndScrollInfo(const wr::WrClipId& aScrollId,
+                             const wr::WrClipChainId* aClipChainId);
   void PopClipAndScrollInfo();
 
   void PushRect(const wr::LayoutRect& aBounds,
@@ -373,7 +407,9 @@ public:
                        bool aIsBackfaceVisible,
                        const wr::BorderWidths& aWidths,
                        wr::ImageKey aImage,
-                       const wr::NinePatchDescriptor& aPatch,
+                       const uint32_t aWidth,
+                       const uint32_t aHeight,
+                       const wr::SideOffsets2D<uint32_t>& aSlice,
                        const wr::SideOffsets2D<float>& aOutset,
                        const wr::RepeatMode& aRepeatHorizontal,
                        const wr::RepeatMode& aRepeatVertical);
@@ -430,15 +466,6 @@ public:
                      const wr::BorderRadius& aBorderRadius,
                      const wr::BoxShadowClipMode& aClipMode);
 
-  // Returns the clip id that was most recently pushed with PushClip and that
-  // has not yet been popped with PopClip. Return Nothing() if the clip stack
-  // is empty.
-  Maybe<wr::WrClipId> TopmostClipId();
-  // Same as TopmostClipId() but for scroll layers.
-  wr::WrScrollId TopmostScrollId();
-  // If the topmost item on the stack is a clip or a scroll layer
-  bool TopmostIsClip();
-
   // Set the hit-test info to be used for all display items until the next call
   // to SetHitTestInfo or ClearHitTestInfo.
   void SetHitTestInfo(const layers::FrameMetrics::ViewID& aScrollId,
@@ -449,40 +476,13 @@ public:
   // Try to avoid using this when possible.
   wr::WrState* Raw() { return mWrState; }
 
-  // Return true if the current clip stack has any extra clip.
-  bool HasExtraClip() { return !mCacheOverride.empty(); }
-
 protected:
-  void PushCacheOverride(const DisplayItemClipChain* aParent,
-                         const wr::WrClipId& aClipId);
-  void PopCacheOverride(const DisplayItemClipChain* aParent);
-
   wr::WrState* mWrState;
-
-  // Track the stack of clip ids and scroll layer ids that have been pushed
-  // (by PushClip and PushScrollLayer/PushClipAndScrollInfo, respectively) and
-  // haven't yet been popped.
-  std::vector<wr::ScrollOrClipId> mClipStack;
 
   // Track each scroll id that we encountered. We use this structure to
   // ensure that we don't define a particular scroll layer multiple times,
   // as that results in undefined behaviour in WR.
-  std::unordered_map<layers::FrameMetrics::ViewID, wr::WrScrollId> mScrollIds;
-
-  // A map that holds the cache overrides creates by "out of band" clips, i.e.
-  // clips that are generated by display items but that ScrollingLayersHelper
-  // doesn't know about. These are called "cache overrides" because while we're
-  // inside one of these clips, the WR clip stack is different from what
-  // ScrollingLayersHelper thinks it actually is (because of the out-of-band
-  // clip that was pushed onto the stack) and so ScrollingLayersHelper cannot
-  // use its clip cache as-is. Instead, any time ScrollingLayersHelper wants
-  // to define a new clip as a child of clip X, it should first check the
-  // cache overrides to see if there is an out-of-band clip Y that is already a
-  // child of X, and then define its clip as a child of Y instead. This map
-  // stores X -> ClipId of Y, which allows ScrollingLayersHelper to do the
-  // necessary lookup. Note that there theoretically might be multiple
-  // different "Y" clips which is why we need a vector.
-  std::unordered_map<const DisplayItemClipChain*, std::vector<wr::WrClipId>> mCacheOverride;
+  std::unordered_map<layers::FrameMetrics::ViewID, wr::WrClipId> mScrollIds;
 
   friend class WebRenderAPI;
 };

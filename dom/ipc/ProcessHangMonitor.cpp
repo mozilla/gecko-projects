@@ -172,21 +172,7 @@ public:
                        ContentParent* aContentParent)
     : mActor(aActor), mContentParent(aContentParent) {}
 
-  NS_IMETHOD GetHangType(uint32_t* aHangType) override;
-  NS_IMETHOD GetScriptBrowser(nsIDOMElement** aBrowser) override;
-  NS_IMETHOD GetScriptFileName(nsACString& aFileName) override;
-  NS_IMETHOD GetAddonId(nsAString& aAddonId) override;
-
-  NS_IMETHOD GetPluginName(nsACString& aPluginName) override;
-
-  NS_IMETHOD TerminateScript() override;
-  NS_IMETHOD TerminateGlobal() override;
-  NS_IMETHOD BeginStartingDebugger() override;
-  NS_IMETHOD EndStartingDebugger() override;
-  NS_IMETHOD TerminatePlugin() override;
-  NS_IMETHOD UserCanceled() override;
-
-  NS_IMETHOD IsReportForBrowser(nsISupports* aFrameLoader, bool* aResult) override;
+  NS_DECL_NSIHANGREPORT
 
   // Called when a content process shuts down.
   void Clear() {
@@ -437,12 +423,6 @@ HangMonitorChild::RecvForcePaint(const TabId& aTabId, const uint64_t& aLayerObse
 
   {
     MonitorAutoLock lock(mMonitor);
-    // If we lose our race, and the main thread has already painted,
-    // the NotifyActivity call below would result in an indefinite
-    // hang, since it wouldn't have a matching NotifyWait()
-    if (mForcePaintEpoch >= aLayerObserverEpoch) {
-      return IPC_OK();
-    }
     MaybeStartForcePaint();
     mForcePaint = true;
     mForcePaintTab = aTabId;
@@ -457,37 +437,22 @@ HangMonitorChild::RecvForcePaint(const TabId& aTabId, const uint64_t& aLayerObse
 void
 HangMonitorChild::MaybeStartForcePaint()
 {
+  // See Bug 1449662. The body of this function other than assertions
+  // has been temporarily removed to diagnose a tab switch spinner
+  // problem.
   if (!NS_IsMainThread()) {
     mMonitor.AssertCurrentThreadOwns();
-  }
-
-  if (!mBHRMonitorActive.exchange(true)) {
-    mForcePaintMonitor->NotifyActivity();
   }
 }
 
 void
 HangMonitorChild::ClearForcePaint(uint64_t aLayerObserverEpoch)
 {
+  // See Bug 1449662. The body of this function other than assertions
+  // has been temporarily removed to diagnose a tab switch spinner
+  // problem.
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(XRE_IsContentProcess());
-
-  {
-    MonitorAutoLock lock(mMonitor);
-    // Set the epoch, so that if the forcepaint loses its race, it
-    // knows it and can exit appropriately. However, ensure we don't
-    // overwrite an even newer mForcePaintEpoch which could have
-    // come in in a ForcePaint notification while we were painting.
-    if (aLayerObserverEpoch > mForcePaintEpoch) {
-      mForcePaintEpoch = aLayerObserverEpoch;
-    }
-    mForcePaintMonitor->NotifyWait();
-
-    // ClearForcePaint must be called on the main thread, and the
-    // hang monitor thread only sets this with mMonitor held, so there
-    // should be no risk of missing NotifyActivity calls here.
-    mBHRMonitorActive = false;
-  }
 }
 
 void
@@ -971,7 +936,7 @@ HangMonitoredProcess::GetHangType(uint32_t* aHangType)
 }
 
 NS_IMETHODIMP
-HangMonitoredProcess::GetScriptBrowser(nsIDOMElement** aBrowser)
+HangMonitoredProcess::GetScriptBrowser(Element** aBrowser)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (mHangData.type() != HangData::TSlowScriptData) {
@@ -988,7 +953,7 @@ HangMonitoredProcess::GetScriptBrowser(nsIDOMElement** aBrowser)
   for (size_t i = 0; i < tabs.Length(); i++) {
     TabParent* tp = TabParent::GetFrom(tabs[i]);
     if (tp->GetTabId() == tabId) {
-      nsCOMPtr<nsIDOMElement> node = do_QueryInterface(tp->GetOwnerElement());
+      RefPtr<Element> node = tp->GetOwnerElement();
       node.forget(aBrowser);
       return NS_OK;
     }
@@ -1147,7 +1112,7 @@ HangMonitoredProcess::TerminatePlugin()
 }
 
 NS_IMETHODIMP
-HangMonitoredProcess::IsReportForBrowser(nsISupports* aFrameLoader, bool* aResult)
+HangMonitoredProcess::IsReportForBrowser(nsFrameLoader* aFrameLoader, bool* aResult)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -1156,10 +1121,9 @@ HangMonitoredProcess::IsReportForBrowser(nsISupports* aFrameLoader, bool* aResul
     return NS_OK;
   }
 
-  RefPtr<nsFrameLoader> frameLoader = do_QueryObject(aFrameLoader);
-  NS_ENSURE_STATE(frameLoader);
+  NS_ENSURE_STATE(aFrameLoader);
 
-  TabParent* tp = TabParent::GetFrom(frameLoader);
+  TabParent* tp = TabParent::GetFrom(aFrameLoader);
   if (!tp) {
     *aResult = false;
     return NS_OK;

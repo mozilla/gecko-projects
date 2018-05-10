@@ -97,9 +97,6 @@ class FullParseHandler
     // to determine whether we need to check these assumptions.
     SourceKind sourceKind() const { return sourceKind_; }
 
-    ParseNode* freeTree(ParseNode* pn) { return allocator.freeTree(pn); }
-    void prepareNodeForMutation(ParseNode* pn) { return allocator.prepareNodeForMutation(pn); }
-
     ParseNode* newName(PropertyName* name, const TokenPos& pos, JSContext* cx)
     {
         return new_<NameNode>(ParseNodeKind::Name, JSOP_GETNAME, name, pos);
@@ -709,32 +706,12 @@ class FullParseHandler
         return new_<CodeNode>(ParseNodeKind::Function, JSOP_LAMBDA_ARROW, pos);
     }
 
-    bool isExpressionClosure(ParseNode* node) const {
-        return node->isKind(ParseNodeKind::Function) &&
-               node->pn_funbox->isExprBody() &&
-               !node->pn_funbox->isArrow();
-    }
-
-    void noteExpressionClosure(Node* funcNode) const {
-        // No need to do anything: |funcNode->pn_funbox| modifications
-        // performed elsewhere in the relevant code path will assure
-        // |isExpressionClosure| above tests true on |*funcNode|.
-    }
-
     ParseNode* newObjectMethodOrPropertyDefinition(ParseNode* key, ParseNode* fn, AccessorType atype) {
         MOZ_ASSERT(isUsableAsObjectPropertyName(key));
 
         return newBinary(ParseNodeKind::Colon, key, fn, AccessorTypeToJSOp(atype));
     }
 
-    bool setComprehensionLambdaBody(ParseNode* pn, ParseNode* body) {
-        MOZ_ASSERT(body->isKind(ParseNodeKind::StatementList));
-        ParseNode* paramsBody = newList(ParseNodeKind::ParamsBody, body);
-        if (!paramsBody)
-            return false;
-        setFunctionFormalParametersAndBody(pn, paramsBody);
-        return true;
-    }
     void setFunctionFormalParametersAndBody(ParseNode* funcNode, ParseNode* kid) {
         MOZ_ASSERT_IF(kid, kid->isKind(ParseNodeKind::ParamsBody));
         funcNode->pn_body = kid;

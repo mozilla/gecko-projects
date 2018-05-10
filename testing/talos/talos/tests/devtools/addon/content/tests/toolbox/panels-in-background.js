@@ -6,7 +6,7 @@
 
 const { EVENTS } = require("devtools/client/netmonitor/src/constants");
 const { openToolbox, closeToolbox, reloadPageAndLog, testSetup,
-        testTeardown, PAGES_BASE_URL } = require("chrome://damp/content/tests/head");
+        testTeardown, PAGES_BASE_URL } = require("../head");
 
 module.exports = async function() {
   await testSetup(PAGES_BASE_URL + "custom/panels-in-background/index.html");
@@ -41,11 +41,11 @@ function waitForPayload(count, panelWin) {
 
     function maybeResolve() {
       if (payloadReady >= count) {
-        panelWin.off(EVENTS.PAYLOAD_READY, onPayloadReady);
+        panelWin.api.off(EVENTS.PAYLOAD_READY, onPayloadReady);
         resolve();
       }
     }
 
-    panelWin.on(EVENTS.PAYLOAD_READY, onPayloadReady);
+    panelWin.api.on(EVENTS.PAYLOAD_READY, onPayloadReady);
   });
 }

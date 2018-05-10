@@ -1259,9 +1259,7 @@ public:
    * Perform an in-place blur operation. This is only supported on data draw
    * targets.
    */
-  virtual void Blur(const AlphaBoxBlur& aBlur) {
-    MOZ_CRASH("GFX: DoBlur");
-  }
+  virtual void Blur(const AlphaBoxBlur& aBlur);
 
   /**
    * Create a SourceSurface optimized for use with this DrawTarget from
@@ -1518,7 +1516,8 @@ class DrawEventRecorder : public RefCounted<DrawEventRecorder>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawEventRecorder)
-  virtual void Finish() = 0;
+  // returns true if there were any items in the recording
+  virtual bool Finish() = 0;
   virtual ~DrawEventRecorder() { }
 };
 
@@ -1554,6 +1553,7 @@ public:
   static void ShutDown();
 
   static bool HasSSE2();
+  static bool HasSSE4();
 
   /**
    * Returns false if any of the following are true:

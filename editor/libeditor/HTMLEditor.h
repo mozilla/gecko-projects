@@ -35,15 +35,14 @@
 #include "nsTArray.h"
 
 class nsDocumentFragment;
+class nsHTMLDocument;
 class nsITransferable;
 class nsIClipboard;
 class nsIDOMDocument;
-class nsIDOMElement;
 class nsILinkHandler;
 class nsTableWrapperFrame;
 class nsIDOMRange;
 class nsRange;
-class nsISelection;
 
 namespace mozilla {
 class AutoSelectionSetterAfterTableEdit;
@@ -57,6 +56,7 @@ struct PropItem;
 template<class T> class OwningNonNull;
 namespace dom {
 class DocumentFragment;
+class Event;
 class MouseEvent;
 } // namespace dom
 namespace widget {
@@ -107,9 +107,7 @@ public:
   Element* GetSelectionContainer();
 
   // nsISelectionListener overrides
-  NS_IMETHOD NotifySelectionChanged(nsIDOMDocument* aDOMDocument,
-                                    nsISelection* aSelection,
-                                    int16_t aReason) override;
+  NS_DECL_NSISELECTIONLISTENER
 
   // TextEditor overrides
   virtual nsresult Init(nsIDocument& aDoc, Element* aRoot,
@@ -157,10 +155,6 @@ public:
   NS_DECL_NSIHTMLINLINETABLEEDITOR
 
   // XXX Following methods are not overriding but defined here...
-  nsresult CopyLastEditableChildStyles(nsINode* aPreviousBlock,
-                                       nsINode* aNewBlock,
-                                       Element** aOutBrNode);
-
   nsresult LoadHTML(const nsAString& aInputString);
 
   nsresult GetCSSBackgroundColorState(bool* aMixed, nsAString& aOutColor,
@@ -176,10 +170,10 @@ public:
   // nsITableEditor methods
   NS_DECL_NSITABLEEDITOR
 
-  nsresult GetLastCellInRow(nsIDOMNode* aRowNode,
-                            nsIDOMNode** aCellNode);
+  nsresult GetLastCellInRow(nsINode* aRowNode,
+                            nsINode** aCellNode);
 
-  nsresult GetCellFromRange(nsRange* aRange, nsIDOMElement** aCell);
+  nsresult GetCellFromRange(nsRange* aRange, Element** aCell);
 
   // Miscellaneous
 
@@ -187,8 +181,8 @@ public:
    * This sets background on the appropriate container element (table, cell,)
    * or calls into nsTextEditor to set the page background.
    */
-  nsresult SetCSSBackgroundColor(const nsAString& aColor);
-  nsresult SetHTMLBackgroundColor(const nsAString& aColor);
+  nsresult SetCSSBackgroundColorWithTransaction(const nsAString& aColor);
+  nsresult SetHTMLBackgroundColorWithTransaction(const nsAString& aColor);
 
   /**
    * GetBlockNodeParent() returns parent or nearest ancestor of aNode if
@@ -229,7 +223,6 @@ public:
    * @param aElement        Must not be null.
    */
   static bool NodeIsBlockStatic(const nsINode* aElement);
-  static nsresult NodeIsBlockStatic(nsIDOMNode *aNode, bool *aIsBlock);
 
   // non-virtual methods of interface methods
   bool AbsolutePositioningEnabled() const
@@ -349,14 +342,14 @@ public:
    * All editor operations which alter the doc should be prefaced
    * with a call to StartOperation, naming the action and direction.
    */
-  NS_IMETHOD StartOperation(EditAction opID,
-                            nsIEditor::EDirection aDirection) override;
+  virtual nsresult StartOperation(EditAction opID,
+                                  nsIEditor::EDirection aDirection) override;
 
   /**
    * All editor operations which alter the doc should be followed
    * with a call to EndOperation.
    */
-  NS_IMETHOD EndOperation() override;
+  virtual nsresult EndOperation() override;
 
   /**
    * returns true if aParentTag can contain a child of type aChildTag.
@@ -382,18 +375,51 @@ public:
   virtual bool AreNodesSameType(nsIContent* aNode1,
                                 nsIContent* aNode2) override;
 
-  NS_IMETHOD DeleteSelectionImpl(EDirection aAction,
-                                 EStripWrappers aStripWrappers) override;
-  nsresult DeleteNode(nsINode* aNode);
-  NS_IMETHOD DeleteNode(nsIDOMNode* aNode) override;
-  nsresult DeleteText(dom::CharacterData& aTextNode, uint32_t aOffset,
-                      uint32_t aLength);
+  /**
+   * DeleteSelectionWithTransaction() removes selected content or content
+   * around caret with transactions.
+   *
+   * @param aDirection          How much range should be removed.
+   * @param aStripWrappers      Whether the parent blocks should be removed
+   *                            when they become empty.
+   */
   virtual nsresult
-  InsertTextImpl(nsIDocument& aDocument,
-                 const nsAString& aStringToInsert,
-                 const EditorRawDOMPoint& aPointToInsert,
-                 EditorRawDOMPoint* aPointAfterInsertedString =
-                   nullptr) override;
+  DeleteSelectionWithTransaction(EDirection aAction,
+                                 EStripWrappers aStripWrappers) override;
+
+  /**
+   * DeleteNodeWithTransaction() removes aNode from the DOM tree if it's
+   * modifiable.  Note that this is not an override of same method of
+   * EditorBase.
+   *
+   * @param aNode       The node to be removed from the DOM tree.
+   */
+  nsresult DeleteNodeWithTransaction(nsINode& aNode);
+
+  NS_IMETHOD DeleteNode(nsIDOMNode* aNode) override;
+
+  /**
+   * DeleteTextWithTransaction() removes text in the range from aCharData if
+   * it's modifiable.  Note that this not an override of same method of
+   * EditorBase.
+   *
+   * @param aCharData           The data node which should be modified.
+   * @param aOffset             Start offset of removing text in aCharData.
+   * @param aLength             Length of removing text.
+   */
+  nsresult DeleteTextWithTransaction(dom::CharacterData& aTextNode,
+                                     uint32_t aOffset, uint32_t aLength);
+
+  /**
+   * InsertTextWithTransaction() inserts aStringToInsert at aPointToInsert.
+   */
+  virtual nsresult
+  InsertTextWithTransaction(nsIDocument& aDocument,
+                            const nsAString& aStringToInsert,
+                            const EditorRawDOMPoint& aPointToInsert,
+                            EditorRawDOMPoint* aPointAfterInsertedString =
+                              nullptr) override;
+
   virtual bool IsModifiableNode(nsINode* aNode) override;
 
   NS_IMETHOD SelectAll() override;
@@ -402,20 +428,22 @@ public:
   NS_IMETHOD StyleSheetLoaded(StyleSheet* aSheet,
                               bool aWasAlternate, nsresult aStatus) override;
 
-  // Utility Routines, not part of public API
-  NS_IMETHOD TypedText(const nsAString& aString,
-                       ETypingAction aAction) override;
+  /**
+   * OnInputLineBreak() is called when user inputs a line break with
+   * Shift + Enter or something.
+   */
+  nsresult OnInputLineBreak();
 
   /**
-   * InsertNodeIntoProperAncestor() attempts to insert aNode into the document,
-   * at aPointToInsert.  Checks with strict dtd to see if containment is
-   * allowed.  If not allowed, will attempt to find a parent in the parent
-   * hierarchy of aPointToInsert.GetContainer() that will accept aNode as a
-   * child.  If such a parent is found, will split the document tree from
-   * aPointToInsert up to parent, and then insert aNode. aPointToInsert is then
-   * adjusted to point to the actual location that aNode was inserted at.
-   * aSplitAtEdges specifies if the splitting process is allowed to result in
-   * empty nodes.
+   * InsertNodeIntoProperAncestorWithTransaction() attempts to insert aNode
+   * into the document, at aPointToInsert.  Checks with strict dtd to see if
+   * containment is allowed.  If not allowed, will attempt to find a parent
+   * in the parent hierarchy of aPointToInsert.GetContainer() that will accept
+   * aNode as a child.  If such a parent is found, will split the document
+   * tree from aPointToInsert up to parent, and then insert aNode.
+   * aPointToInsert is then adjusted to point to the actual location that
+   * aNode was inserted at.  aSplitAtEdges specifies if the splitting process
+   * is allowed to result in empty nodes.
    *
    * @param aNode             Node to insert.
    * @param aPointToInsert    Insertion point.
@@ -425,9 +453,27 @@ public:
    */
   template<typename PT, typename CT>
   EditorDOMPoint
-  InsertNodeIntoProperAncestor(nsIContent& aNode,
-                               const EditorDOMPointBase<PT, CT>& aPointToInsert,
-                               SplitAtEdges aSplitAtEdges);
+  InsertNodeIntoProperAncestorWithTransaction(
+    nsIContent& aNode,
+    const EditorDOMPointBase<PT, CT>& aPointToInsert,
+    SplitAtEdges aSplitAtEdges);
+
+  /**
+   * CopyLastEditableChildStyles() clones inline container elements into
+   * aPreviousBlock to aNewBlock to keep using same style in it.
+   *
+   * @param aPreviousBlock      The previous block element.  All inline
+   *                            elements which are last sibling of each level
+   *                            are cloned to aNewBlock.
+   * @param aNewBlock           New block container element.
+   * @param aNewBrElement       If this method creates a new <br> element for
+   *                            placeholder, this is set to the new <br>
+   *                            element.
+   */
+  nsresult
+  CopyLastEditableChildStylesWithTransaction(Element& aPreviousBlock,
+                                             Element& aNewBlock,
+                                             RefPtr<Element>* aNewBrElement);
 
   /**
    * Use this to assure that selection is set after attribute nodes when
@@ -456,10 +502,6 @@ public:
    * aNode must be a non-null text node.
    * outIsEmptyNode must be non-null.
    */
-  nsresult IsEmptyNode(nsIDOMNode* aNode, bool* outIsEmptyBlock,
-                       bool aMozBRDoesntCount = false,
-                       bool aListOrCellNotEmpty = false,
-                       bool aSafeToAskFrames = false);
   nsresult IsEmptyNode(nsINode* aNode, bool* outIsEmptyBlock,
                        bool aMozBRDoesntCount = false,
                        bool aListOrCellNotEmpty = false,
@@ -521,8 +563,8 @@ public:
    * @param aTarget [IN] the element triggering the event
    * @param aMouseEvent [IN] the event
    */
-  nsresult OnMouseDown(int32_t aX, int32_t aY, nsIDOMElement* aTarget,
-                       nsIDOMEvent* aMouseEvent);
+  nsresult OnMouseDown(int32_t aX, int32_t aY, Element* aTarget,
+                       dom::Event* aMouseEvent);
 
   /**
    * event callback when a mouse button is released
@@ -530,7 +572,7 @@ public:
    * @param aY      [IN] vertical position of the pointer
    * @param aTarget [IN] the element triggering the event
    */
-  nsresult OnMouseUp(int32_t aX, int32_t aY, nsIDOMElement* aTarget);
+  nsresult OnMouseUp(int32_t aX, int32_t aY, Element* aTarget);
 
   /**
    * event callback when the mouse pointer is moved
@@ -571,13 +613,15 @@ public:
   MaybeCollapseSelectionAtFirstEditableNode(
     bool aIgnoreIfSelectionInEditingHost);
 
+  nsHTMLDocument* GetHTMLDocument() const;
+
 protected:
   class BlobReader final : public nsIEditorBlobListener
   {
   public:
     BlobReader(dom::BlobImpl* aBlob, HTMLEditor* aHTMLEditor,
-               bool aIsSafe, nsIDOMDocument* aSourceDoc,
-               nsIDOMNode* aDestinationNode, int32_t aDestOffset,
+               bool aIsSafe, nsIDocument* aSourceDoc,
+               nsINode* aDestinationNode, int32_t aDestOffset,
                bool aDoDeleteSelection);
 
     NS_DECL_ISUPPORTS
@@ -591,8 +635,8 @@ protected:
     RefPtr<dom::BlobImpl> mBlob;
     RefPtr<HTMLEditor> mHTMLEditor;
     bool mIsSafe;
-    nsCOMPtr<nsIDOMDocument> mSourceDoc;
-    nsCOMPtr<nsIDOMNode> mDestinationNode;
+    nsCOMPtr<nsIDocument> mSourceDoc;
+    nsCOMPtr<nsINode> mDestinationNode;
     int32_t mDestOffset;
     bool mDoDeleteSelection;
   };
@@ -617,15 +661,16 @@ protected:
   /**
    * Return TRUE if aElement is a table-related elemet and caret was set.
    */
-  bool SetCaretInTableCell(nsIDOMElement* aElement);
+  bool SetCaretInTableCell(dom::Element* aElement);
 
   nsresult TabInTable(bool inIsShift, bool* outHandled);
 
   /**
-   * InsertBR() inserts a new <br> element at selection.  If there is
-   * non-collapsed selection ranges, the selected ranges is deleted first.
+   * InsertBrElementAtSelectionWithTransaction() inserts a new <br> element at
+   * selection.  If there is non-collapsed selection ranges, the selected
+   * ranges is deleted first.
    */
-  nsresult InsertBR();
+  nsresult InsertBrElementAtSelectionWithTransaction();
 
   // Table Editing (implemented in nsTableEditor.cpp)
 
@@ -635,46 +680,46 @@ protected:
    * of course)
    * This doesn't change or use the current selection.
    */
-  nsresult InsertCell(nsIDOMElement* aCell, int32_t aRowSpan,
+  nsresult InsertCell(Element* aCell, int32_t aRowSpan,
                       int32_t aColSpan, bool aAfter, bool aIsHeader,
-                      nsIDOMElement** aNewCell);
+                      Element** aNewCell);
 
   /**
    * Helpers that don't touch the selection or do batch transactions.
    */
-  nsresult DeleteRow(nsIDOMElement* aTable, int32_t aRowIndex);
-  nsresult DeleteColumn(nsIDOMElement* aTable, int32_t aColIndex);
-  nsresult DeleteCellContents(nsIDOMElement* aCell);
+  nsresult DeleteRow(Element* aTable, int32_t aRowIndex);
+  nsresult DeleteColumn(Element* aTable, int32_t aColIndex);
+  nsresult DeleteCellContents(Element* aCell);
 
   /**
    * Move all contents from aCellToMerge into aTargetCell (append at end).
    */
-  nsresult MergeCells(nsCOMPtr<nsIDOMElement> aTargetCell,
-                      nsCOMPtr<nsIDOMElement> aCellToMerge,
+  nsresult MergeCells(RefPtr<Element> aTargetCell,
+                      RefPtr<Element> aCellToMerge,
                       bool aDeleteCellToMerge);
 
-  nsresult DeleteTable2(nsIDOMElement* aTable, Selection* aSelection);
-  nsresult SetColSpan(nsIDOMElement* aCell, int32_t aColSpan);
-  nsresult SetRowSpan(nsIDOMElement* aCell, int32_t aRowSpan);
+  nsresult DeleteTable2(Element* aTable, Selection* aSelection);
+  nsresult SetColSpan(Element* aCell, int32_t aColSpan);
+  nsresult SetRowSpan(Element* aCell, int32_t aRowSpan);
 
   /**
    * Helper used to get nsTableWrapperFrame for a table.
    */
-  nsTableWrapperFrame* GetTableFrame(nsIDOMElement* aTable);
+  nsTableWrapperFrame* GetTableFrame(Element* aTable);
 
   /**
    * Needed to do appropriate deleting when last cell or row is about to be
    * deleted.  This doesn't count cells that don't start in the given row (are
    * spanning from row above).
    */
-  int32_t GetNumberOfCellsInRow(nsIDOMElement* aTable, int32_t rowIndex);
+  int32_t GetNumberOfCellsInRow(Element* aTable, int32_t rowIndex);
 
   /**
    * Test if all cells in row or column at given index are selected.
    */
-  bool AllCellsInRowSelected(nsIDOMElement* aTable, int32_t aRowIndex,
+  bool AllCellsInRowSelected(Element* aTable, int32_t aRowIndex,
                              int32_t aNumberOfColumns);
-  bool AllCellsInColumnSelected(nsIDOMElement* aTable, int32_t aColIndex,
+  bool AllCellsInColumnSelected(Element* aTable, int32_t aColIndex,
                                 int32_t aNumberOfRows);
 
   bool IsEmptyCell(Element* aCell);
@@ -688,33 +733,33 @@ protected:
    * Returns NS_EDITOR_ELEMENT_NOT_FOUND if cell is not found even if aCell is
    * null.
    */
-  nsresult GetCellContext(Selection** aSelection, nsIDOMElement** aTable,
-                          nsIDOMElement** aCell, nsIDOMNode** aCellParent,
+  nsresult GetCellContext(Selection** aSelection, Element** aTable,
+                          Element** aCell, nsINode** aCellParent,
                           int32_t* aCellOffset, int32_t* aRowIndex,
                           int32_t* aColIndex);
 
-  nsresult GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex,
+  nsresult GetCellSpansAt(Element* aTable, int32_t aRowIndex,
                           int32_t aColIndex, int32_t& aActualRowSpan,
                           int32_t& aActualColSpan);
 
-  nsresult SplitCellIntoColumns(nsIDOMElement* aTable, int32_t aRowIndex,
+  nsresult SplitCellIntoColumns(Element* aTable, int32_t aRowIndex,
                                 int32_t aColIndex, int32_t aColSpanLeft,
                                 int32_t aColSpanRight,
-                                nsIDOMElement** aNewCell);
+                                Element** aNewCell);
 
-  nsresult SplitCellIntoRows(nsIDOMElement* aTable, int32_t aRowIndex,
+  nsresult SplitCellIntoRows(Element* aTable, int32_t aRowIndex,
                              int32_t aColIndex, int32_t aRowSpanAbove,
-                             int32_t aRowSpanBelow, nsIDOMElement** aNewCell);
+                             int32_t aRowSpanBelow, Element** aNewCell);
 
-  nsresult CopyCellBackgroundColor(nsIDOMElement* destCell,
-                                   nsIDOMElement* sourceCell);
+  nsresult CopyCellBackgroundColor(Element* aDestCell,
+                                   Element* aSourceCell);
 
   /**
    * Reduce rowspan/colspan when cells span into nonexistent rows/columns.
    */
-  nsresult FixBadRowSpan(nsIDOMElement* aTable, int32_t aRowIndex,
+  nsresult FixBadRowSpan(Element* aTable, int32_t aRowIndex,
                          int32_t& aNewRowCount);
-  nsresult FixBadColSpan(nsIDOMElement* aTable, int32_t aColIndex,
+  nsresult FixBadColSpan(Element* aTable, int32_t aColIndex,
                          int32_t& aNewColCount);
 
   /**
@@ -722,9 +767,6 @@ protected:
    * failed to set selection to some other content in the document.
    */
   nsresult SetSelectionAtDocumentStart(Selection* aSelection);
-
-  nsresult GetTableSize(Element* aTable,
-                        int32_t* aRowCount, int32_t* aColCount);
 
   // End of Table Editing utilities
 
@@ -774,8 +816,8 @@ protected:
 
   nsresult InsertObject(const nsACString& aType, nsISupports* aObject,
                         bool aIsSafe,
-                        nsIDOMDocument* aSourceDoc,
-                        nsIDOMNode* aDestinationNode,
+                        nsIDocument* aSourceDoc,
+                        nsINode* aDestinationNode,
                         int32_t aDestOffset,
                         bool aDoDeleteSelection);
 
@@ -784,17 +826,15 @@ protected:
   NS_IMETHOD PrepareTransferable(nsITransferable** transferable) override;
   nsresult PrepareHTMLTransferable(nsITransferable** transferable);
   nsresult InsertFromTransferable(nsITransferable* transferable,
-                                    nsIDOMDocument* aSourceDoc,
+                                    nsIDocument* aSourceDoc,
                                     const nsAString& aContextStr,
                                     const nsAString& aInfoStr,
                                     bool havePrivateHTMLFlavor,
-                                    nsIDOMNode *aDestinationNode,
-                                    int32_t aDestinationOffset,
                                     bool aDoDeleteSelection);
   virtual nsresult InsertFromDataTransfer(dom::DataTransfer* aDataTransfer,
                                           int32_t aIndex,
-                                          nsIDOMDocument* aSourceDoc,
-                                          nsIDOMNode* aDestinationNode,
+                                          nsIDocument* aSourceDoc,
+                                          nsINode* aDestinationNode,
                                           int32_t aDestOffset,
                                           bool aDoDeleteSelection) override;
   bool HavePrivateHTMLFlavor(nsIClipboard* clipboard );
@@ -861,10 +901,22 @@ protected:
                              const EditorRawDOMPoint& aPointToInsert);
 
   /**
-   * Helpers for block transformations.
+   * MakeDefinitionListItemWithTransaction() replaces parent list of current
+   * selection with <dl> or create new <dl> element and creates a definition
+   * list item whose name is aTagName.
+   *
+   * @param aTagName            Must be nsGkAtoms::dt or nsGkAtoms::dd.
    */
-  nsresult MakeDefinitionItem(const nsAString& aItemType);
-  nsresult InsertBasicBlock(const nsAString& aBlockType);
+  nsresult MakeDefinitionListItemWithTransaction(nsAtom& aTagName);
+
+  /**
+   * InsertBasicBlockWithTransaction() inserts a block element whose name
+   * is aTagName at selection.
+   *
+   * @param aTagName            A block level element name.  Must NOT be
+   *                            nsGkAtoms::dt nor nsGkAtoms::dd.
+   */
+  nsresult InsertBasicBlockWithTransaction(nsAtom& aTagName);
 
   /**
    * Increase/decrease the font size of selection.
@@ -916,7 +968,15 @@ protected:
   bool IsAtEndOfNode(nsINode& aNode, int32_t aOffset);
   bool IsOnlyAttribute(const Element* aElement, nsAtom* aAttribute);
 
-  nsresult RemoveBlockContainer(nsIContent& aNode);
+  /**
+   * RemoveBlockContainerWithTransaction() removes aElement from the DOM tree
+   * but moves its all children to its parent node and if its parent needs <br>
+   * element to have at least one line-height, this inserts <br> element
+   * automatically.
+   *
+   * @param aElement            Block element to be removed.
+   */
+  nsresult RemoveBlockContainerWithTransaction(Element& aElement);
 
   nsIContent* GetPriorHTMLSibling(nsINode* aNode);
 
@@ -1118,8 +1178,8 @@ protected:
                                    const nsAString& aContextStr,
                                    const nsAString& aInfoStr,
                                    const nsAString& aFlavor,
-                                   nsIDOMDocument* aSourceDoc,
-                                   nsIDOMNode* aDestNode,
+                                   nsIDocument* aSourceDoc,
+                                   nsINode* aDestNode,
                                    int32_t aDestOffset,
                                    bool aDeleteSelection,
                                    bool aTrustedInput,
@@ -1157,7 +1217,7 @@ protected:
    *                    AutoSelectionSetterAfterTableEdit stack-based object to
    *                    insure we reset the caret in a table-editing method.
    */
-  void SetSelectionAfterTableEdit(nsIDOMElement* aTable,
+  void SetSelectionAfterTableEdit(Element* aTable,
                                   int32_t aRow, int32_t aCol,
                                   int32_t aDirection, bool aSelected);
 
@@ -1166,6 +1226,12 @@ protected:
    * that just returns null on errors.
    */
   already_AddRefed<dom::Element> GetSelectedElement(const nsAString& aTagName);
+
+  /**
+   * RemoveStyleSheetWithTransaction() removes the given URL stylesheet
+   * from mStyleSheets and mStyleSheetURLs.
+   */
+  nsresult RemoveStyleSheetWithTransaction(const nsAString& aURL);
 
 protected:
   RefPtr<TypeInState> mTypeInState;
@@ -1216,6 +1282,9 @@ protected:
   void UpdateRootElement();
 
   // resizing
+  // If the instance has shown resizers at least once, mHasShownResizers is
+  // set to true.
+  bool mHasShownResizers;
   bool mIsObjectResizingEnabled;
   bool mIsResizing;
   bool mPreserveRatio;
@@ -1224,13 +1293,18 @@ protected:
   // absolute positioning
   bool mIsAbsolutelyPositioningEnabled;
   bool mResizedObjectIsAbsolutelyPositioned;
-
+  // If the instance has shown grabber at least once, mHasShownGrabber is
+  // set to true.
+  bool mHasShownGrabber;
   bool mGrabberClicked;
   bool mIsMoving;
 
   bool mSnapToGridEnabled;
 
   // inline table editing
+  // If the instance has shown inline table editor at least once,
+  // mHasShownInlineTableEditor is set to true.
+  bool mHasShownInlineTableEditor;
   bool mIsInlineTableEditingEnabled;
 
   // resizing
@@ -1248,7 +1322,7 @@ protected:
   ManualNACPtr mResizingShadow;
   ManualNACPtr mResizingInfo;
 
-  nsCOMPtr<Element> mResizedObject;
+  RefPtr<Element> mResizedObject;
 
   nsCOMPtr<nsIDOMEventListener>  mMouseMotionListenerP;
   nsCOMPtr<nsIDOMEventListener>  mResizeEventListenerP;
@@ -1270,6 +1344,12 @@ protected:
   int32_t mYIncrementFactor;
   int32_t mWidthIncrementFactor;
   int32_t mHeightIncrementFactor;
+
+  // When resizers, grabber and/or inline table editor are operated by user
+  // actually, the following counters are increased.
+  uint32_t mResizerUsedCount;
+  uint32_t mGrabberUsedCount;
+  uint32_t mInlineTableEditorUsedCount;
 
   int8_t  mInfoXIncrement;
   int8_t  mInfoYIncrement;
@@ -1297,7 +1377,7 @@ protected:
                                    int32_t aW, int32_t aH);
 
   int32_t GetNewResizingIncrement(int32_t aX, int32_t aY, int32_t aID);
-  nsresult StartResizing(nsIDOMElement* aHandle);
+  nsresult StartResizing(Element* aHandle);
   int32_t GetNewResizingX(int32_t aX, int32_t aY);
   int32_t GetNewResizingY(int32_t aX, int32_t aY);
   int32_t GetNewResizingWidth(int32_t aX, int32_t aY);

@@ -347,7 +347,7 @@ nsHttpHandler::SetFastOpenOSSupport()
     if (NS_SUCCEEDED(rv)) {
         // set min version minus 1.
 #if XP_MACOSX
-        int min_version[] = {17, 4}; // High Sierra 10.13.4
+        int min_version[] = {17, 5}; // High Sierra 10.13.4
 #elif ANDROID
         int min_version[] = {4, 4};
 #elif XP_LINUX
@@ -468,8 +468,6 @@ nsHttpHandler::Init()
         prefBranch->AddObserver(TCP_FAST_OPEN_STALLS_TIMEOUT, this, true);
         PrefsChanged(prefBranch, nullptr);
     }
-
-    nsHttpChannelAuthProvider::InitializePrefs();
 
     mMisc.AssignLiteral("rv:" MOZILLA_UAVERSION);
 

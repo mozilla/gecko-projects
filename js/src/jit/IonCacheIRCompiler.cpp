@@ -544,6 +544,19 @@ IonCacheIRCompiler::init()
                                                             AnyRegister(ic->rhs())));
         break;
       }
+      case CacheKind::UnaryArith: {
+        IonUnaryArithIC *ic = ic_->asUnaryArithIC();
+        ValueOperand output = ic->output();
+
+        available.add(output);
+
+        liveRegs_.emplace(ic->liveRegs());
+        outputUnchecked_.emplace(TypedOrValueRegister(output));
+
+        MOZ_ASSERT(numInputs == 1);
+        allocator.initInputLocation(0, ic->input());
+        break;
+      }
       case CacheKind::Call:
       case CacheKind::Compare:
       case CacheKind::TypeOf:
@@ -1003,6 +1016,8 @@ IonCacheIRCompiler::emitMegamorphicLoadSlotResult()
     masm.adjustStack(sizeof(Value));
 
     masm.branchIfFalseBool(scratch2, failure->label());
+    if (JitOptions.spectreJitToCxxCalls)
+        masm.speculationBarrier();
     return true;
 }
 
@@ -1196,6 +1211,9 @@ IonCacheIRCompiler::emitCallNativeGetterResult()
     Address outparam(masm.getStackPointer(), IonOOLNativeExitFrameLayout::offsetOfResult());
     masm.loadValue(outparam, output.valueReg());
 
+    if (JitOptions.spectreJitToCxxCalls)
+        masm.speculationBarrier();
+
     masm.adjustStack(IonOOLNativeExitFrameLayout::Size(0));
     return true;
 }
@@ -1254,6 +1272,10 @@ IonCacheIRCompiler::emitCallProxyGetResult()
     // Load the outparam vp[0] into output register(s).
     Address outparam(masm.getStackPointer(), IonOOLProxyExitFrameLayout::offsetOfResult());
     masm.loadValue(outparam, output.valueReg());
+
+    // Spectre mitigation in case of speculative execution within C++ code.
+    if (JitOptions.spectreJitToCxxCalls)
+        masm.speculationBarrier();
 
     // masm.leaveExitFrame & pop locals
     masm.adjustStack(IonOOLProxyExitFrameLayout::Size());
@@ -1464,11 +1486,12 @@ EmitCheckPropertyTypes(MacroAssembler& masm, const PropertyTypeCheckInfo* typeCh
         return;
 
     ObjectGroup* group = typeCheckInfo->group();
-    if (group->unknownProperties())
+    AutoSweepObjectGroup sweep(group);
+    if (group->unknownProperties(sweep))
         return;
 
     jsid id = typeCheckInfo->id();
-    HeapTypeSet* propTypes = group->maybeGetProperty(id);
+    HeapTypeSet* propTypes = group->maybeGetProperty(sweep, id);
     if (propTypes && propTypes->unknown())
         return;
 
@@ -1888,7 +1911,8 @@ IonCacheIRCompiler::emitStoreDenseElement()
     Register index = allocator.useRegister(masm, reader.int32OperandId());
     ConstantOrRegister val = allocator.useConstantOrRegister(masm, reader.valOperandId());
 
-    AutoScratchRegister scratch(allocator, masm);
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
 
     FailurePath* failure;
     if (!addFailurePath(&failure))
@@ -1897,20 +1921,20 @@ IonCacheIRCompiler::emitStoreDenseElement()
     EmitCheckPropertyTypes(masm, typeCheckInfo_, obj, val, *liveRegs_, failure->label());
 
     // Load obj->elements in scratch.
-    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch1);
 
     // Bounds check.
-    Address initLength(scratch, ObjectElements::offsetOfInitializedLength());
-    masm.branch32(Assembler::BelowOrEqual, initLength, index, failure->label());
+    Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
+    masm.spectreBoundsCheck32(index, initLength, scratch2, failure->label());
 
     // Hole check.
-    BaseObjectElementIndex element(scratch, index);
+    BaseObjectElementIndex element(scratch1, index);
     masm.branchTestMagic(Assembler::Equal, element, failure->label());
 
     EmitPreBarrier(masm, element, MIRType::Value);
-    EmitStoreDenseElement(masm, val, scratch, element);
+    EmitStoreDenseElement(masm, val, scratch1, element);
     if (needsPostBarrier())
-        emitPostBarrierElement(obj, val, scratch, index);
+        emitPostBarrierElement(obj, val, scratch1, index);
     return true;
 }
 
@@ -1926,7 +1950,8 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
     // track this.
     reader.readBool();
 
-    AutoScratchRegister scratch(allocator, masm);
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
 
     FailurePath* failure;
     if (!addFailurePath(&failure))
@@ -1934,45 +1959,51 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
 
     EmitCheckPropertyTypes(masm, typeCheckInfo_, obj, val, *liveRegs_, failure->label());
 
-    // Load obj->elements in scratch.
-    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+    // Load obj->elements in scratch1.
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch1);
 
-    Address initLength(scratch, ObjectElements::offsetOfInitializedLength());
-    BaseObjectElementIndex element(scratch, index);
+    Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
+    BaseObjectElementIndex element(scratch1, index);
 
-    Label inBounds, doStore;
-    masm.branch32(Assembler::Above, initLength, index, &inBounds);
+    Label inBounds, outOfBounds;
+    Register spectreTemp = scratch2;
+    masm.spectreBoundsCheck32(index, initLength, spectreTemp, &outOfBounds);
+    masm.jump(&inBounds);
+
+    masm.bind(&outOfBounds);
     masm.branch32(Assembler::NotEqual, initLength, index, failure->label());
 
     // If index < capacity, we can add a dense element inline. If not we
     // need to allocate more elements.
-    Label capacityOk;
-    Address capacity(scratch, ObjectElements::offsetOfCapacity());
-    masm.branch32(Assembler::Above, capacity, index, &capacityOk);
+    Label capacityOk, allocElement;
+    Address capacity(scratch1, ObjectElements::offsetOfCapacity());
+    masm.spectreBoundsCheck32(index, capacity, spectreTemp, &allocElement);
+    masm.jump(&capacityOk);
 
     // Check for non-writable array length. We only have to do this if
     // index >= capacity.
-    Address elementsFlags(scratch, ObjectElements::offsetOfFlags());
+    masm.bind(&allocElement);
+    Address elementsFlags(scratch1, ObjectElements::offsetOfFlags());
     masm.branchTest32(Assembler::NonZero, elementsFlags,
                       Imm32(ObjectElements::NONWRITABLE_ARRAY_LENGTH),
                       failure->label());
 
     LiveRegisterSet save(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
-    save.takeUnchecked(scratch);
+    save.takeUnchecked(scratch1);
     masm.PushRegsInMask(save);
 
-    masm.setupUnalignedABICall(scratch);
-    masm.loadJSContext(scratch);
-    masm.passABIArg(scratch);
+    masm.setupUnalignedABICall(scratch1);
+    masm.loadJSContext(scratch1);
+    masm.passABIArg(scratch1);
     masm.passABIArg(obj);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, NativeObject::addDenseElementDontReportOOM));
-    masm.mov(ReturnReg, scratch);
+    masm.mov(ReturnReg, scratch1);
 
     masm.PopRegsInMask(save);
-    masm.branchIfFalseBool(scratch, failure->label());
+    masm.branchIfFalseBool(scratch1, failure->label());
 
     // Load the reallocated elements pointer.
-    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch);
+    masm.loadPtr(Address(obj, NativeObject::offsetOfElements()), scratch1);
 
     masm.bind(&capacityOk);
 
@@ -1981,12 +2012,13 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
 
     // If length is now <= index, increment length too.
     Label skipIncrementLength;
-    Address length(scratch, ObjectElements::offsetOfLength());
+    Address length(scratch1, ObjectElements::offsetOfLength());
     masm.branch32(Assembler::Above, length, index, &skipIncrementLength);
     masm.add32(Imm32(1), length);
     masm.bind(&skipIncrementLength);
 
     // Skip EmitPreBarrier as the memory is uninitialized.
+    Label doStore;
     masm.jump(&doStore);
 
     masm.bind(&inBounds);
@@ -1994,9 +2026,9 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
     EmitPreBarrier(masm, element, MIRType::Value);
 
     masm.bind(&doStore);
-    EmitStoreDenseElement(masm, val, scratch, element);
+    EmitStoreDenseElement(masm, val, scratch1, element);
     if (needsPostBarrier())
-        emitPostBarrierElement(obj, val, scratch, index);
+        emitPostBarrierElement(obj, val, scratch1, index);
     return true;
 }
 
@@ -2019,10 +2051,7 @@ IonCacheIRCompiler::emitStoreTypedElement()
     bool handleOOB = reader.readBool();
 
     AutoScratchRegister scratch1(allocator, masm);
-
-    Maybe<AutoScratchRegister> scratch2;
-    if (arrayType != Scalar::Float32 && arrayType != Scalar::Float64)
-        scratch2.emplace(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
 
     FailurePath* failure;
     if (!addFailurePath(&failure))
@@ -2031,7 +2060,7 @@ IonCacheIRCompiler::emitStoreTypedElement()
     // Bounds check.
     Label done;
     LoadTypedThingLength(masm, layout, obj, scratch1);
-    masm.branch32(Assembler::BelowOrEqual, scratch1, index, handleOOB ? &done : failure->label());
+    masm.spectreBoundsCheck32(index, scratch1, scratch2, handleOOB ? &done : failure->label());
 
     // Load the elements vector.
     LoadTypedThingData(masm, layout, obj, scratch1);
@@ -2053,7 +2082,7 @@ IonCacheIRCompiler::emitStoreTypedElement()
             return false;
         masm.storeToTypedFloatArray(arrayType, maybeTempDouble, dest);
     } else {
-        Register valueToStore = scratch2.ref();
+        Register valueToStore = scratch2;
         if (arrayType == Scalar::Uint8Clamped) {
             if (!masm.clampConstantOrRegisterToUint8(cx_, val, maybeTempDouble, valueToStore,
                                                      failure->label()))

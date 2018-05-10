@@ -11,9 +11,11 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 
+#include "gc/GCInternals.h"
 #include "gc/Marking.h"
 #include "gc/Nursery.h"
 #include "js/UbiNode.h"
@@ -27,6 +29,7 @@
 
 using namespace js;
 
+using mozilla::IsAsciiDigit;
 using mozilla::IsNegativeZero;
 using mozilla::IsSame;
 using mozilla::PodCopy;
@@ -53,7 +56,7 @@ JSString::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
     // JSExternalString: Ask the embedding to tell us what's going on.  If it
     // doesn't want to say, don't count, the chars could be stored anywhere.
     if (isExternal()) {
-        if (auto* cb = runtimeFromActiveCooperatingThread()->externalStringSizeofCallback.ref()) {
+        if (auto* cb = runtimeFromMainThread()->externalStringSizeofCallback.ref()) {
             // Our callback isn't supposed to cause GC.
             JS::AutoSuppressGCAnalysis nogc;
             return cb(this, mallocSizeOf);
@@ -213,6 +216,7 @@ JSString::dumpRepresentationHeader(js::GenericPrinter& out, const char* subclass
     if (flags & HAS_BASE_BIT)           out.put(" HAS_BASE");
     if (flags & INLINE_CHARS_BIT)       out.put(" INLINE_CHARS");
     if (flags & NON_ATOM_BIT)           out.put(" NON_ATOM");
+    else                                out.put(" (ATOM)");
     if (isPermanentAtom())              out.put(" PERMANENT");
     if (flags & LATIN1_CHARS_BIT)       out.put(" LATIN1");
     if (flags & INDEX_VALUE_BIT)        out.printf(" INDEX_VALUE(%u)", getIndexValue());
@@ -238,6 +242,7 @@ JSString::equals(const char* s)
 {
     JSLinearString* linear = ensureLinear(nullptr);
     if (!linear) {
+        // This is DEBUG-only code.
         fprintf(stderr, "OOM in JSString::equals!\n");
         return false;
     }
@@ -469,6 +474,8 @@ JSRope::flattenInternal(JSContext* maybecx)
 
     AutoCheckCannotGC nogc;
 
+    gc::StoreBuffer* bufferIfNursery = storeBuffer();
+
     /* Find the left most string, containing the first string. */
     JSRope* leftMostRope = this;
     while (leftMostRope->leftChild()->isRope())
@@ -492,7 +499,7 @@ JSRope::flattenInternal(JSContext* maybecx)
                     JSString::writeBarrierPre(str->d.s.u3.right);
                 }
                 JSString* child = str->d.s.u2.left;
-                js::BarrierMethods<JSString*>::postBarrier(&str->d.s.u2.left, child, nullptr);
+                // 'child' will be post-barriered during the later traversal.
                 MOZ_ASSERT(child->isRope());
                 str->setNonInlineChars(wholeChars);
                 child->d.u1.flattenData = uintptr_t(str) | Tag_VisitRightChild;
@@ -509,12 +516,19 @@ JSRope::flattenInternal(JSContext* maybecx)
             else
                 left.d.u1.flags = DEPENDENT_FLAGS | LATIN1_CHARS_BIT;
             left.d.s.u3.base = (JSLinearString*)this;  /* will be true on exit */
-            BarrierMethods<JSString*>::postBarrier((JSString**)&left.d.s.u3.base, nullptr, this);
-            Nursery& nursery = zone()->group()->nursery();
-            if (isTenured() && !left.isTenured())
-                nursery.removeMallocedBuffer(wholeChars);
-            else if (!isTenured() && left.isTenured())
+            Nursery& nursery = runtimeFromMainThread()->gc.nursery();
+            bool inTenured = !bufferIfNursery;
+            if (!inTenured && left.isTenured()) {
+                // tenured leftmost child is giving its chars buffer to the
+                // nursery-allocated root node.
                 nursery.registerMallocedBuffer(wholeChars);
+                // leftmost child -> root is a tenured -> nursery edge.
+                bufferIfNursery->putWholeCell(&left);
+            } else if (inTenured && !left.isTenured()) {
+                // leftmost child is giving its nursery-held chars buffer to a
+                // tenured string.
+                nursery.removeMallocedBuffer(wholeChars);
+            }
             goto visit_right_child;
         }
     }
@@ -526,7 +540,7 @@ JSRope::flattenInternal(JSContext* maybecx)
     }
 
     if (!isTenured()) {
-        Nursery& nursery = zone()->group()->nursery();
+        Nursery& nursery = runtimeFromMainThread()->gc.nursery();
         if (!nursery.registerMallocedBuffer(wholeChars)) {
             js_free(wholeChars);
             if (maybecx)
@@ -543,7 +557,6 @@ JSRope::flattenInternal(JSContext* maybecx)
         }
 
         JSString& left = *str->d.s.u2.left;
-        js::BarrierMethods<JSString*>::postBarrier(&str->d.s.u2.left, &left, nullptr);
         str->setNonInlineChars(pos);
         if (left.isRope()) {
             /* Return to this node when 'left' done, then goto visit_right_child. */
@@ -556,7 +569,6 @@ JSRope::flattenInternal(JSContext* maybecx)
     }
     visit_right_child: {
         JSString& right = *str->d.s.u3.right;
-        BarrierMethods<JSString*>::postBarrier(&str->d.s.u3.right, &right, nullptr);
         if (right.isRope()) {
             /* Return to this node when 'right' done, then goto finish_node. */
             right.d.u1.flattenData = uintptr_t(str) | Tag_FinishNode;
@@ -587,7 +599,19 @@ JSRope::flattenInternal(JSContext* maybecx)
             str->d.u1.flags = DEPENDENT_FLAGS | LATIN1_CHARS_BIT;
         str->d.u1.length = pos - str->asLinear().nonInlineChars<CharT>(nogc);
         str->d.s.u3.base = (JSLinearString*)this;       /* will be true on exit */
-        BarrierMethods<JSString*>::postBarrier((JSString**)&str->d.s.u3.base, nullptr, this);
+
+        // Every interior (rope) node in the rope's tree will be visited during
+        // the traversal and post-barriered here, so earlier additions of
+        // dependent.base -> root pointers are handled by this barrier as well.
+        //
+        // The only time post-barriers need do anything is when the root is in
+        // the nursery. Note that the root was a rope but will be an extensible
+        // string when we return, so it will not point to any strings and need
+        // not be barriered.
+        gc::StoreBuffer* bufferIfNursery = storeBuffer();
+        if (bufferIfNursery && str->isTenured())
+            bufferIfNursery->putWholeCell(str);
+
         str = (JSString*)(flattenData & ~Tag_Mask);
         if ((flattenData & Tag_Mask) == Tag_VisitRightChild)
             goto visit_right_child;
@@ -925,7 +949,7 @@ JSFlatString::isIndexSlow(const CharT* s, size_t length, uint32_t* indexp)
 {
     CharT ch = *s;
 
-    if (!JS7_ISDEC(ch))
+    if (!IsAsciiDigit(ch))
         return false;
 
     if (length > UINT32_CHAR_BUFFER_LENGTH)
@@ -943,7 +967,7 @@ JSFlatString::isIndexSlow(const CharT* s, size_t length, uint32_t* indexp)
     uint32_t c = 0;
 
     if (index != 0) {
-        while (JS7_ISDEC(*cp)) {
+        while (IsAsciiDigit(*cp)) {
             oldIndex = index;
             c = JS7_UNDEC(*cp);
             index = 10 * index + c;
@@ -1899,7 +1923,33 @@ JSString::fillWithRepresentatives(JSContext* cx, HandleArrayObject array)
         return false;
     }
 
-    MOZ_ASSERT(index == 22);
+    // Now create forcibly-tenured versions of each of these string types. Note
+    // that this is best-effort; if nursery strings are disabled, or we GC
+    // midway through here, then we may end up with fewer nursery strings than
+    // desired. Also, some types of strings are not nursery-allocatable, so
+    // this will always produce some number of redundant strings.
+    gc::AutoSuppressNurseryCellAlloc suppress(cx);
+
+    // Append TwoByte strings.
+    if (!FillWithRepresentatives(cx, array, &index,
+                                 twoByteChars, mozilla::ArrayLength(twoByteChars) - 1,
+                                 JSFatInlineString::MAX_LENGTH_TWO_BYTE,
+                                 CheckTwoByte))
+    {
+        return false;
+    }
+
+    // Append Latin1 strings.
+    if (!FillWithRepresentatives(cx, array, &index,
+                                 latin1Chars, mozilla::ArrayLength(latin1Chars) - 1,
+                                 JSFatInlineString::MAX_LENGTH_LATIN1,
+                                 CheckLatin1))
+    {
+        return false;
+    }
+
+    MOZ_ASSERT(index == 44);
+
     return true;
 }
 
@@ -1907,7 +1957,8 @@ JSString::fillWithRepresentatives(JSContext* cx, HandleArrayObject array)
 /*** Conversions *********************************************************************************/
 
 const char*
-js::ValueToPrintable(JSContext* cx, const Value& vArg, JSAutoByteString* bytes, bool asSource)
+js::ValueToPrintableLatin1(JSContext* cx, const Value& vArg, JSAutoByteString* bytes,
+                           bool asSource)
 {
     RootedValue v(cx, vArg);
     JSString* str;
@@ -1921,6 +1972,20 @@ js::ValueToPrintable(JSContext* cx, const Value& vArg, JSAutoByteString* bytes, 
     if (!str)
         return nullptr;
     return bytes->encodeLatin1(cx, str);
+}
+
+const char*
+js::ValueToPrintableUTF8(JSContext* cx, const Value& vArg, JSAutoByteString* bytes, bool asSource)
+{
+    RootedValue v(cx, vArg);
+    JSString* str;
+    if (asSource)
+        str = ValueToSource(cx, v);
+    else
+        str = ToString<CanGC>(cx, v);
+    if (!str)
+        return nullptr;
+    return bytes->encodeUtf8(cx, RootedString(cx, str));
 }
 
 template <AllowGC allowGC>

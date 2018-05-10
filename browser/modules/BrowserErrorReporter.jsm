@@ -55,8 +55,15 @@ const PLATFORM_NAMES = {
 // Filename URI regexes that we are okay with reporting to Telemetry. URIs not
 // matching these patterns may contain local file paths.
 const TELEMETRY_REPORTED_PATTERNS = new Set([
-  /^resource:\/\/(?:\/|gre)/,
+  /^resource:\/\/(?:\/|gre|devtools)/,
   /^chrome:\/\/(?:global|browser|devtools)/,
+]);
+
+// Mapping of regexes to sample rates; if the regex matches the module an error
+// is thrown from, the matching sample rate is used instead of the default.
+// In case of a conflict, the first matching rate by insertion order is used.
+const MODULE_SAMPLE_RATES = new Map([
+  [/^(?:chrome|resource):\/\/devtools/, 1],
 ]);
 
 /**
@@ -91,7 +98,7 @@ class BrowserErrorReporter {
     this.requestBodyTemplate = {
       logger: "javascript",
       platform: "javascript",
-      release: Services.appinfo.version,
+      release: Services.appinfo.appBuildID,
       environment: UpdateUtils.getUpdateChannel(false),
       contexts: {
         os: {
@@ -108,7 +115,6 @@ class BrowserErrorReporter {
         },
       },
       tags: {
-        appBuildID: Services.appinfo.appBuildID,
         changeset: AppConstants.SOURCE_REVISION_URL,
       },
       sdk: {
@@ -177,13 +183,19 @@ class BrowserErrorReporter {
     Services.telemetry.scalarSet(TELEMETRY_ERROR_SAMPLE_RATE, newValue);
   }
 
-  shouldReportFilename(filename) {
+  errorCollectedFilenameKey(filename) {
     for (const pattern of TELEMETRY_REPORTED_PATTERNS) {
       if (filename.match(pattern)) {
-        return true;
+        return filename;
       }
     }
-    return false;
+
+    // WebExtensions get grouped separately from other errors
+    if (filename.startsWith("moz-extension://")) {
+        return "MOZEXTENSION";
+    }
+
+    return "FILTERED";
   }
 
   async observe(message) {
@@ -205,15 +217,18 @@ class BrowserErrorReporter {
       Services.telemetry.scalarAdd(TELEMETRY_ERROR_COLLECTED_STACK, 1);
     }
     if (message.sourceName) {
-      let filename = "FILTERED";
-      if (this.shouldReportFilename(message.sourceName)) {
-        filename = message.sourceName;
-      }
-      Services.telemetry.keyedScalarAdd(TELEMETRY_ERROR_COLLECTED_FILENAME, filename.slice(0, 69), 1);
+      const key = this.errorCollectedFilenameKey(message.sourceName);
+      Services.telemetry.keyedScalarAdd(TELEMETRY_ERROR_COLLECTED_FILENAME, key.slice(0, 69), 1);
     }
 
     // Sample the amount of errors we send out
-    const sampleRate = Number.parseFloat(this.sampleRatePref);
+    let sampleRate = Number.parseFloat(this.sampleRatePref);
+    for (const [regex, rate] of MODULE_SAMPLE_RATES) {
+      if (message.sourceName.match(regex)) {
+        sampleRate = rate;
+        break;
+      }
+    }
     if (!Number.isFinite(sampleRate) || (Math.random() >= sampleRate)) {
       return;
     }
@@ -226,7 +241,6 @@ class BrowserErrorReporter {
       exception: {
         values: [exceptionValue],
       },
-      tags: {},
     };
 
     const transforms = [
@@ -369,7 +383,7 @@ function mangleExtensionUrls(message, exceptionValue) {
 }
 
 function tagExtensionErrors(message, exceptionValue, requestBody) {
-  if (exceptionValue.module && exceptionValue.module.startsWith("moz-extension://")) {
-    requestBody.tags.isExtensionError = true;
-  }
+  requestBody.tags.isExtensionError = !!(
+      exceptionValue.module && exceptionValue.module.startsWith("moz-extension://")
+  );
 }

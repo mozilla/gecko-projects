@@ -22,59 +22,61 @@ function run_test() {
 
 // Use bootstrap extensions so the changes will be immediate.
 // A packed extension, to be enabled
-writeInstallRDFToXPI({
-  id: "packed-enabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Packed, Enabled",
-}, profileDir);
+add_task(async function setup() {
+  await promiseWriteInstallRDFToXPI({
+    id: "packed-enabled@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Packed, Enabled",
+  }, profileDir);
 
-// Packed, will be disabled
-writeInstallRDFToXPI({
-  id: "packed-disabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Packed, Disabled",
-}, profileDir);
+  // Packed, will be disabled
+  await promiseWriteInstallRDFToXPI({
+    id: "packed-disabled@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Packed, Disabled",
+  }, profileDir);
 
-// Unpacked, enabled
-writeInstallRDFToDir({
-  id: "unpacked-enabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  unpack: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Unpacked, Enabled",
-}, profileDir, undefined, "extraFile.js");
+  // Unpacked, enabled
+  await promiseWriteInstallRDFToDir({
+    id: "unpacked-enabled@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    unpack: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Unpacked, Enabled",
+  }, profileDir, undefined, "extraFile.js");
 
 
-// Unpacked, disabled
-writeInstallRDFToDir({
-  id: "unpacked-disabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  unpack: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Unpacked, disabled",
-}, profileDir, undefined, "extraFile.js");
+  // Unpacked, disabled
+  await promiseWriteInstallRDFToDir({
+    id: "unpacked-disabled@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    unpack: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Unpacked, disabled",
+  }, profileDir, undefined, "extraFile.js");
+});
 
 // Keep track of the last time stamp we've used, so that we can keep moving
 // it forward (if we touch two different files in the same add-on with the same
@@ -110,7 +112,7 @@ async function getXSJSON() {
 }
 
 add_task(async function detect_touches() {
-  startupManager();
+  await promiseStartupManager();
   let [/* pe */, pd, /* ue */, ud] = await promiseAddonsByIDs([
          "packed-enabled@tests.mozilla.org",
          "packed-disabled@tests.mozilla.org",
@@ -209,75 +211,4 @@ add_task(async function install_bootstrap() {
   Assert.ok(xState.enabled);
   Assert.equal(xState.mtime, newAddon.updateDate.getTime());
   newAddon.uninstall();
-});
-
-/*
- * Installing an add-on that requires restart doesn't add to XPIState
- * until after the restart; disable and enable happen immediately so that
- * the next restart won't / will scan as necessary on the next restart,
- * uninstalling it marks XPIState as disabled immediately
- * and removes XPIState after restart.
- */
-add_task(async function install_restart() {
-  let XS = getXS();
-
-  let installer = await promiseInstallFile(
-    do_get_addon("test_bootstrap1_4"));
-
-  let newAddon = installer.addon;
-  let newID = newAddon.id;
-  let xState = XS.getAddon("app-profile", newID);
-  Assert.ok(!xState);
-
-  // Now we restart the add-on manager, and we need to get the XPIState again
-  // because the add-on manager reloads it.
-  XS = null;
-  newAddon = null;
-  await promiseRestartManager();
-  XS = getXS();
-
-  newAddon = await promiseAddonByID(newID);
-  xState = XS.getAddon("app-profile", newID);
-  Assert.ok(xState);
-  Assert.ok(xState.enabled);
-  Assert.equal(xState.mtime, newAddon.updateDate.getTime());
-
-  // Check that XPIState enabled flag is updated immediately,
-  // and doesn't change over restart.
-  newAddon.userDisabled = true;
-  Assert.ok(!xState.enabled);
-  XS = null;
-  newAddon = null;
-  await promiseRestartManager();
-  XS = getXS();
-  xState = XS.getAddon("app-profile", newID);
-  Assert.ok(xState);
-  Assert.ok(!xState.enabled);
-
-  newAddon = await promiseAddonByID(newID);
-  newAddon.userDisabled = false;
-  Assert.ok(xState.enabled);
-  XS = null;
-  newAddon = null;
-  await promiseRestartManager();
-  XS = getXS();
-  xState = XS.getAddon("app-profile", newID);
-  Assert.ok(xState);
-  Assert.ok(xState.enabled);
-
-  // Uninstalling immediately marks XPIState disabled,
-  // removes state after restart.
-  newAddon = await promiseAddonByID(newID);
-  newAddon.uninstall();
-  xState = XS.getAddon("app-profile", newID);
-  Assert.ok(xState);
-  Assert.ok(!xState.enabled);
-
-  // Restart to finish uninstall.
-  XS = null;
-  newAddon = null;
-  await promiseRestartManager();
-  XS = getXS();
-  xState = XS.getAddon("app-profile", newID);
-  Assert.ok(!xState);
 });

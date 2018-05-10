@@ -313,6 +313,8 @@ public:
 
   virtual void SetPCHandle(const std::string& aPCHandle) = 0;
 
+  virtual void DeleteStreams() = 0;
+
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaSessionConduit)
 
 };
@@ -383,6 +385,8 @@ public:
    */
   virtual MediaConduitErrorCode AttachRenderer(RefPtr<mozilla::VideoRenderer> aRenderer) = 0;
   virtual void DetachRenderer() = 0;
+
+  virtual void DisableSsrcChanges() = 0;
 
   bool SetRemoteSSRC(unsigned int ssrc) override = 0;
 

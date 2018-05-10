@@ -125,6 +125,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Alignment.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CheckedInt.h"
@@ -4550,7 +4551,6 @@ ArenaCollection::GetById(arena_id_t aArenaId, bool aIsPrivate)
   return result;
 }
 
-#ifdef NIGHTLY_BUILD
 template<>
 inline arena_id_t
 MozJemalloc::moz_create_arena_with_params(arena_params_t* aParams)
@@ -4566,6 +4566,10 @@ template<>
 inline void
 MozJemalloc::moz_dispose_arena(arena_id_t aArenaId)
 {
+  // Until Bug 1364359 is fixed it is unsafe to call moz_dispose_arena.
+  // We want to catch any such occurances of that behavior.
+  MOZ_CRASH("Do not call moz_dispose_arena until Bug 1364359 is fixed.");
+
   arena_t* arena = gArenas.GetById(aArenaId, /* IsPrivate = */ true);
   MOZ_RELEASE_ASSERT(arena);
   gArenas.DisposeArena(arena);
@@ -4582,20 +4586,6 @@ MozJemalloc::moz_dispose_arena(arena_id_t aArenaId)
   }
 #define MALLOC_FUNCS MALLOC_FUNCS_MALLOC_BASE
 #include "malloc_decls.h"
-
-#else
-
-#define MALLOC_DECL(name, return_type, ...)                                    \
-  template<>                                                                   \
-  inline return_type MozJemalloc::name(ARGS_HELPER(TYPED_ARGS, ##__VA_ARGS__)) \
-  {                                                                            \
-    return DummyArenaAllocator<MozJemalloc>::name(                             \
-      ARGS_HELPER(ARGS, ##__VA_ARGS__));                                       \
-  }
-#define MALLOC_FUNCS MALLOC_FUNCS_ARENA
-#include "malloc_decls.h"
-
-#endif
 
 // End non-standard functions.
 // ***************************************************************************
@@ -4697,11 +4687,11 @@ typedef HMODULE replace_malloc_handle_t;
 static replace_malloc_handle_t
 replace_malloc_handle()
 {
-  char replace_malloc_lib[1024];
-  if (GetEnvironmentVariableA("MOZ_REPLACE_MALLOC_LIB",
+  wchar_t replace_malloc_lib[1024];
+  if (GetEnvironmentVariableW(L"MOZ_REPLACE_MALLOC_LIB",
                               replace_malloc_lib,
-                              sizeof(replace_malloc_lib)) > 0) {
-    return LoadLibraryA(replace_malloc_lib);
+                              ArrayLength(replace_malloc_lib)) > 0) {
+    return LoadLibraryW(replace_malloc_lib);
   }
   return nullptr;
 }

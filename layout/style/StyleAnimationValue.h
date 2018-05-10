@@ -17,7 +17,7 @@
 #include "nsStringBuffer.h"
 #include "nsCoord.h"
 #include "nsColor.h"
-#include "nsCSSProps.h"
+#include "nsCSSPropertyID.h"
 #include "nsCSSValue.h"
 #include "nsStyleCoord.h"
 #include "nsStyleTransformMatrix.h"
@@ -28,7 +28,6 @@ class gfx3DMatrix;
 namespace mozilla {
 
 class ComputedStyle;
-class GeckoComputedStyle;
 
 namespace css {
 class StyleRule;
@@ -39,7 +38,6 @@ class Element;
 } // namespace dom
 
 enum class CSSPseudoElementType : uint8_t;
-enum class StyleBackendType : uint8_t;
 struct PropertyStyleAnimationValuePair;
 
 
@@ -83,8 +81,7 @@ struct AnimationValue
   // Return the transform list as a RefPtr.
   already_AddRefed<const nsCSSValueSharedList> GetTransformList() const;
 
-  // Return the scale for mGecko or mServo, which are calculated with
-  // reference to aFrame.
+  // Return the scale for mServo, which is calculated with reference to aFrame.
   mozilla::gfx::Size GetScaleValue(const nsIFrame* aFrame) const;
 
   // Uncompute this AnimationValue and then serialize it.
@@ -110,25 +107,14 @@ struct AnimationValue
                                    dom::Element* aElement);
 
   // Create an AnimationValue from an opacity value.
-  static AnimationValue Opacity(StyleBackendType aBackendType, float aOpacity);
+  static AnimationValue Opacity(float aOpacity);
   // Create an AnimationValue from a transform list.
-  static AnimationValue Transform(StyleBackendType aBackendType,
-                                  nsCSSValueSharedList& aList);
+  static AnimationValue Transform(nsCSSValueSharedList& aList);
 
   static already_AddRefed<nsCSSValue::Array>
   AppendTransformFunction(nsCSSKeyword aTransformFunction,
                           nsCSSValueList**& aListTail);
 
-  // mGecko and mServo are mutually exclusive: only one or the other should
-  // ever be set.
-  // FIXME: After obsoleting StyleAnimationValue, we should remove mGecko, and
-  // make AnimationValue a wrapper of RawServoAnimationValue to hide these
-  // FFIs.
-  // Ideally we would use conditional compilation based on MOZ_OLD_STYLE in the
-  // Servo code that wants to initialize mGecko, but that seems tricky.  So for
-  // now, just define a dummy member variable that its initialization code will
-  // work on, even when the old style system is compiled out.
-  uintptr_t mGecko;
   RefPtr<RawServoAnimationValue> mServo;
 };
 

@@ -44,17 +44,8 @@ typedef Maybe<ExternalImageId> MaybeExternalImageId;
 typedef Maybe<FontInstanceOptions> MaybeFontInstanceOptions;
 typedef Maybe<FontInstancePlatformOptions> MaybeFontInstancePlatformOptions;
 
-inline WindowId NewWindowId(uint64_t aId) {
-  WindowId id;
-  id.mHandle = aId;
-  return id;
-}
-
-inline Epoch NewEpoch(uint32_t aEpoch) {
-  Epoch e;
-  e.mHandle = aEpoch;
-  return e;
-}
+/* Generate a brand new window id and return it. */
+WindowId NewWindowId();
 
 inline DebugFlags NewDebugFlags(uint32_t aFlags) {
   DebugFlags flags;
@@ -192,6 +183,14 @@ inline PipelineId AsPipelineId(const uint64_t& aId) {
   pipeline.mNamespace = aId >> 32;
   pipeline.mHandle = aId;
   return pipeline;
+}
+
+inline mozilla::layers::LayersId AsLayersId(const PipelineId& aId) {
+  return mozilla::layers::LayersId { AsUint64(aId) };
+}
+
+inline PipelineId AsPipelineId(const mozilla::layers::LayersId& aId) {
+  return AsPipelineId(uint64_t(aId));
 }
 
 inline ImageRendering ToImageRendering(gfx::SamplingFilter aFilter)
@@ -341,6 +340,12 @@ static inline wr::LayoutRect ToLayoutRect(const mozilla::LayoutDeviceIntRect& re
   return ToLayoutRect(IntRectToRect(rect));
 }
 
+static inline wr::LayoutRect ToRoundedLayoutRect(const mozilla::LayoutDeviceRect& aRect) {
+  auto rect = aRect;
+  rect.Round();
+  return wr::ToLayoutRect(rect);
+}
+
 static inline wr::LayoutSize ToLayoutSize(const mozilla::LayoutDeviceSize& size)
 {
   wr::LayoutSize ls;
@@ -454,16 +459,6 @@ static inline wr::BorderWidths ToBorderWidths(float top, float right, float bott
   bw.bottom = bottom;
   bw.left = left;
   return bw;
-}
-
-static inline wr::NinePatchDescriptor ToNinePatchDescriptor(uint32_t width, uint32_t height,
-                                                            const wr::SideOffsets2D<uint32_t>& slice)
-{
-  NinePatchDescriptor patch;
-  patch.width = width;
-  patch.height = height;
-  patch.slice = slice;
-  return patch;
 }
 
 static inline wr::SideOffsets2D<uint32_t> ToSideOffsets2D_u32(uint32_t top, uint32_t right, uint32_t bottom, uint32_t left)
@@ -753,7 +748,7 @@ static inline wr::WrFilterOpType ToWrFilterOpType(uint32_t type) {
 // Corresponds to an "internal" webrender clip id. That is, a
 // ClipId::Clip(x,pipeline_id) maps to a WrClipId{x}. We use a struct wrapper
 // instead of a typedef so that this is a distinct type from ids generated
-// by scroll and position:sticky nodes  and the compiler will catch accidental
+// by scroll and position:sticky nodes and the compiler will catch accidental
 // conversions between them.
 struct WrClipId {
   size_t id;
@@ -761,33 +756,33 @@ struct WrClipId {
   bool operator==(const WrClipId& other) const {
     return id == other.id;
   }
+
+  bool operator!=(const WrClipId& other) const {
+    return !(*this == other);
+  }
+
+  static WrClipId RootScrollNode();
+
+  // Helper struct that allows this class to be used as a key in
+  // std::unordered_map like so:
+  //   std::unordered_map<WrClipId, ValueType, WrClipId::HashFn> myMap;
+  struct HashFn {
+    std::size_t operator()(const WrClipId& aKey) const
+    {
+      return std::hash<size_t>{}(aKey.id);
+    }
+  };
 };
 
-// Corresponds to a clip id for for a scroll frame in webrender. Similar
-// to WrClipId but a separate struct so we don't get them mixed up in C++.
-struct WrScrollId {
-  size_t id;
+// Corresponds to a clip id for a clip chain in webrender. Similar to
+// WrClipId but a separate struct so we don't get them mixed up in C++.
+struct WrClipChainId {
+  uint64_t id;
 
-  bool operator==(const WrScrollId& other) const {
+  bool operator==(const WrClipChainId& other) const {
     return id == other.id;
   }
-
-  bool operator!=(const WrScrollId& other) const {
-    return id != other.id;
-  }
 };
-
-// Corresponds to a clip id for a position:sticky clip in webrender. Similar
-// to WrClipId but a separate struct so we don't get them mixed up in C++.
-struct WrStickyId {
-  size_t id;
-
-  bool operator==(const WrStickyId& other) const {
-    return id == other.id;
-  }
-};
-
-typedef Variant<WrScrollId, WrClipId> ScrollOrClipId;
 
 enum class WebRenderError : int8_t {
   INITIALIZE = 0,

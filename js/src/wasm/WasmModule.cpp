@@ -271,8 +271,10 @@ Module::finishTier2(UniqueLinkDataTier linkData2, UniqueCodeTier tier2, ModuleEn
                 return false;
         }
 
+        HasGcTypes gcTypesEnabled = code().metadata().temporaryHasGcTypes;
+
         Maybe<size_t> stub2Index;
-        if (!stubs2->createTier2(funcExportIndices, *tier2, &stub2Index))
+        if (!stubs2->createTier2(gcTypesEnabled, funcExportIndices, *tier2, &stub2Index))
             return false;
 
         // Install the data in the data structures. They will not be visible
@@ -551,7 +553,7 @@ wasm::CompiledModuleAssumptionsMatch(PRFileDesc* compiled, JS::BuildIdCharVector
 SharedModule
 wasm::DeserializeModule(PRFileDesc* bytecodeFile, PRFileDesc* maybeCompiledFile,
                         JS::BuildIdCharVector&& buildId, UniqueChars filename,
-                        unsigned line, unsigned column)
+                        unsigned line)
 {
     PRFileInfo bytecodeInfo;
     UniqueMapping bytecodeMapping = MapFile(bytecodeFile, &bytecodeInfo);
@@ -581,7 +583,6 @@ wasm::DeserializeModule(PRFileDesc* bytecodeFile, PRFileDesc* maybeCompiledFile,
     ScriptedCaller scriptedCaller;
     scriptedCaller.filename = Move(filename);
     scriptedCaller.line = line;
-    scriptedCaller.column = column;
 
     MutableCompileArgs args = js_new<CompileArgs>(Assumptions(Move(buildId)), Move(scriptedCaller));
     if (!args)
@@ -601,7 +602,8 @@ wasm::DeserializeModule(PRFileDesc* bytecodeFile, PRFileDesc* maybeCompiledFile,
     args->sharedMemoryEnabled = true;
 
     UniqueChars error;
-    return CompileBuffer(*args, *bytecode, &error);
+    UniqueCharsVector warnings;
+    return CompileBuffer(*args, *bytecode, &error, &warnings);
 }
 
 /* virtual */ void
@@ -1018,40 +1020,69 @@ ExtractGlobalValue(const ValVector& globalImportValues, uint32_t globalIndex, co
     MOZ_CRASH("Not a global value");
 }
 
+#if defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER)
+static bool
+EnsureGlobalObject(JSContext* cx, const ValVector& globalImportValues, size_t globalIndex,
+                   const GlobalDesc& global, WasmGlobalObjectVector& globalObjs)
+{
+    if (globalIndex < globalObjs.length() && globalObjs[globalIndex])
+        return true;
+
+    Val val = ExtractGlobalValue(globalImportValues, globalIndex, global);
+    RootedWasmGlobalObject go(cx, WasmGlobalObject::create(cx, val, global.isMutable()));
+    if (!go)
+        return false;
+
+    if (globalObjs.length() <= globalIndex && !globalObjs.resize(globalIndex + 1)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    globalObjs[globalIndex] = go;
+    return true;
+}
+#endif
+
 bool
-Module::instantiateGlobalExports(JSContext* cx,
-                                 const ValVector& globalImportValues,
-                                 WasmGlobalObjectVector& globalObjs) const
+Module::instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
+                           WasmGlobalObjectVector& globalObjs) const
 {
 #if defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER)
-    // If there are exported globals that aren't in the globalObjs because they
+    // If there are exported globals that aren't in globalObjs because they
     // originate in this module or because they were immutable imports that came
-    // in as values (not cells) then we must create cells in the globalObjs for
+    // in as primitive values then we must create cells in the globalObjs for
     // them here, as WasmInstanceObject::create() and CreateExportObject() will
     // need the cells to exist.
 
     const GlobalDescVector& globals = metadata().globals;
 
     for (const Export& exp : exports_) {
-        if (exp.kind() == DefinitionKind::Global) {
-            unsigned globalIndex = exp.globalIndex();
-
-            if (globalIndex >= globalObjs.length() || !globalObjs[globalIndex]) {
-                const GlobalDesc& global = globals[globalIndex];
-
-                Val val = ExtractGlobalValue(globalImportValues, globalIndex, global);
-                RootedWasmGlobalObject go(cx, WasmGlobalObject::create(cx, val,
-                                                                       global.isMutable()));
-                if (!go)
-                    return false;
-                if (globalObjs.length() <= globalIndex && !globalObjs.resize(globalIndex+1)) {
-                    ReportOutOfMemory(cx);
-                    return false;
-                }
-                globalObjs[globalIndex] = go;
-            }
-        }
+        if (exp.kind() != DefinitionKind::Global)
+            continue;
+        unsigned globalIndex = exp.globalIndex();
+        const GlobalDesc& global = globals[globalIndex];
+        if (!EnsureGlobalObject(cx, globalImportValues, globalIndex, global, globalObjs))
+            return false;
     }
+
+    // Imported globals that are not re-exported may also have received only a
+    // primitive value; these globals are always immutable.  Assert that we do
+    // not need to create any additional Global objects for such imports.
+
+# ifdef DEBUG
+    size_t numGlobalImports = 0;
+    for (const Import& import : imports_) {
+        if (import.kind != DefinitionKind::Global)
+            continue;
+        size_t globalIndex = numGlobalImports++;
+        const GlobalDesc& global = globals[globalIndex];
+        MOZ_ASSERT(global.importIndex() == globalIndex);
+        MOZ_ASSERT_IF(global.isIndirect(),
+                      globalIndex < globalObjs.length() || globalObjs[globalIndex]);
+    }
+    MOZ_ASSERT_IF(!metadata().isAsmJS(),
+                  numGlobalImports == globals.length() || !globals[numGlobalImports].isImport());
+# endif
 #endif
     return true;
 }
@@ -1196,7 +1227,7 @@ Module::instantiate(JSContext* cx,
     if (!instantiateTable(cx, &table, &tables))
         return false;
 
-    if (!instantiateGlobalExports(cx, globalImportValues, globalObjs))
+    if (!instantiateGlobals(cx, globalImportValues, globalObjs))
         return false;
 
     UniqueTlsData tlsData = CreateTlsData(metadata().globalDataLength);

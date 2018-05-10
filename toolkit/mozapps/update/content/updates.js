@@ -547,12 +547,7 @@ var gCheckingPage = {
     /**
      * See nsISupports.idl
      */
-    QueryInterface(aIID) {
-      if (!aIID.equals(Ci.nsIUpdateCheckListener) &&
-          !aIID.equals(Ci.nsISupports))
-        throw Cr.NS_ERROR_NO_INTERFACE;
-      return this;
-    }
+    QueryInterface: ChromeUtils.generateQI(["nsIUpdateCheckListener"]),
   }
 };
 
@@ -1114,14 +1109,7 @@ var gDownloadingPage = {
   /**
    * See nsISupports.idl
    */
-  QueryInterface(iid) {
-    if (!iid.equals(Ci.nsIRequestObserver) &&
-        !iid.equals(Ci.nsIProgressEventSink) &&
-        !iid.equals(Ci.nsIObserver) &&
-        !iid.equals(Ci.nsISupports))
-      throw Cr.NS_ERROR_NO_INTERFACE;
-    return this;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIRequestObserver", "nsIProgressEventSink", "nsIObserver"])
 };
 
 /**

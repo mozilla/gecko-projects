@@ -24,7 +24,7 @@
 #include "nsISupportsImpl.h"
 #include "nsStyledElement.h"
 #include "nsSVGClass.h"
-#include "nsIDOMElement.h"
+#include "nsIDOMNode.h"
 #include "SVGContentUtils.h"
 #include "gfxMatrix.h"
 
@@ -66,7 +66,7 @@ struct nsSVGEnumMapping;
 typedef nsStyledElement nsSVGElementBase;
 
 class nsSVGElement : public nsSVGElementBase    // nsIContent
-                   , public nsIDOMElement
+                   , public nsIDOMNode
 {
 protected:
   explicit nsSVGElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo);
@@ -127,8 +127,6 @@ public:
   static const MappedAttributeEntry sFEFloodMap[];
   static const MappedAttributeEntry sLightingEffectsMap[];
   static const MappedAttributeEntry sMaskMap[];
-
-  NS_DECL_NSIDOMELEMENT
 
   NS_IMPL_FROMNODE(nsSVGElement, kNameSpaceID_SVG)
 
@@ -319,7 +317,7 @@ public:
   virtual bool IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex);
   virtual bool IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) override;
 
-  void UpdateContentDeclarationBlock(mozilla::StyleBackendType aBackend);
+  void UpdateContentDeclarationBlock();
   const mozilla::DeclarationBlock* GetContentDeclarationBlock() const;
 
 protected:
@@ -516,6 +514,7 @@ protected:
       {}
 
     void Reset(uint8_t aAttrEnum);
+    void SetUnknownValue(uint8_t aAttrEnum);
   };
 
   struct NumberListInfo {

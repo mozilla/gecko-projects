@@ -104,8 +104,8 @@ linux64-qr/debug:
         - linux-qr-tests
         - web-platform-tests
 
-linux64-ccov/opt:
-    build-platform: linux64-ccov/opt
+linux64-ccov/debug:
+    build-platform: linux64-ccov/debug
     test-sets:
         - common-tests
         - web-platform-tests
@@ -199,6 +199,7 @@ windows10-64-nightly/opt:
         - desktop-screenshot-capture
         - desktop-instrumentation
         - windows-tests
+        - windows-talos-profiling
 
 windows10-64-devedition/opt:
     build-platform: win64-devedition-nightly/opt
@@ -241,6 +242,7 @@ macosx64/opt:
         - macosx64-tests
         - desktop-screenshot-capture
         - awsy
+        - macosx64-raptor
 
 macosx64-nightly/opt:
     build-platform: macosx64-nightly/opt
@@ -253,6 +255,15 @@ macosx64-devedition/opt:
     build-platform: macosx64-devedition-nightly/opt
     test-sets:
         - macosx64-tests
+
+macosx64-qr/opt:
+    build-platform: macosx64/opt
+    test-sets:
+        - macosx64-qr-tests
+macosx64-qr/debug:
+    build-platform: macosx64/debug
+    test-sets:
+        - macosx64-qr-tests
 
 ##
 # Android platforms (matching /android.*/)

@@ -125,48 +125,6 @@ private:
   ErrorResult& mRv;
 };
 
-class BCPostMessageRunnable final : public nsIRunnable,
-                                    public nsICancelableRunnable
-{
-public:
-  NS_DECL_ISUPPORTS
-
-  BCPostMessageRunnable(BroadcastChannelChild* aActor,
-                        BroadcastChannelMessage* aData)
-    : mActor(aActor)
-    , mData(aData)
-  {
-    MOZ_ASSERT(mActor);
-  }
-
-  NS_IMETHOD Run() override
-  {
-    MOZ_ASSERT(mActor);
-    if (mActor->IsActorDestroyed()) {
-      return NS_OK;
-    }
-
-    ClonedMessageData message;
-    mData->BuildClonedMessageDataForBackgroundChild(mActor->Manager(), message);
-    mActor->SendPostMessage(message);
-    return NS_OK;
-  }
-
-  nsresult Cancel() override
-  {
-    mActor = nullptr;
-    return NS_OK;
-  }
-
-private:
-  ~BCPostMessageRunnable() {}
-
-  RefPtr<BroadcastChannelChild> mActor;
-  RefPtr<BroadcastChannelMessage> mData;
-};
-
-NS_IMPL_ISUPPORTS(BCPostMessageRunnable, nsICancelableRunnable, nsIRunnable)
-
 class CloseRunnable final : public nsIRunnable,
                             public nsICancelableRunnable
 {
@@ -285,7 +243,6 @@ BroadcastChannel::BroadcastChannel(nsPIDOMWindowInner* aWindow,
                                    const nsAString& aChannel)
   : DOMEventTargetHelper(aWindow)
   , mChannel(aChannel)
-  , mInnerID(0)
   , mState(StateActive)
 {
   // Window can be null in workers
@@ -354,15 +311,15 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
     // We are already shutting down the worker. Let's return a non-active
     // object.
     if (NS_WARN_IF(!workerRef)) {
-      bc->mState = StateClosed;
-      return bc.forget();
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
     }
 
     RefPtr<ThreadSafeWorkerRef> tsr = new ThreadSafeWorkerRef(workerRef);
 
     RefPtr<InitializeRunnable> runnable =
       new InitializeRunnable(tsr, origin, principalInfo, aRv);
-    runnable->Dispatch(Closing, aRv);
+    runnable->Dispatch(Canceling, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
@@ -387,17 +344,6 @@ BroadcastChannel::Constructor(const GlobalObject& aGlobal,
 
   bc->mActor->SetParent(bc);
 
-  if (!bc->mWorkerRef) {
-    MOZ_ASSERT(window);
-    bc->mInnerID = window->WindowID();
-
-    // Register as observer for inner-window-destroyed.
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-      obs->AddObserver(bc, "inner-window-destroyed", false);
-    }
-  }
-
   return bc.forget();
 }
 
@@ -410,14 +356,6 @@ BroadcastChannel::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     return;
   }
 
-  PostMessageInternal(aCx, aMessage, aRv);
-}
-
-void
-BroadcastChannel::PostMessageInternal(JSContext* aCx,
-                                      JS::Handle<JS::Value> aMessage,
-                                      ErrorResult& aRv)
-{
   RefPtr<BroadcastChannelMessage> data = new BroadcastChannelMessage();
 
   data->Write(aCx, aMessage, aRv);
@@ -425,20 +363,11 @@ BroadcastChannel::PostMessageInternal(JSContext* aCx,
     return;
   }
 
-  PostMessageData(data);
-}
-
-void
-BroadcastChannel::PostMessageData(BroadcastChannelMessage* aData)
-{
   RemoveDocFromBFCache();
 
-  RefPtr<BCPostMessageRunnable> runnable =
-    new BCPostMessageRunnable(mActor, aData);
-
-  if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
-    NS_WARNING("Failed to dispatch to the current thread!");
-  }
+  ClonedMessageData message;
+  data->BuildClonedMessageDataForBackgroundChild(mActor->Manager(), message);
+  mActor->SendPostMessage(message);
 }
 
 void
@@ -490,34 +419,6 @@ BroadcastChannel::Shutdown()
   IgnoreKeepAliveIfHasListenersFor(NS_LITERAL_STRING("message"));
 }
 
-NS_IMETHODIMP
-BroadcastChannel::Observe(nsISupports* aSubject, const char* aTopic,
-                          const char16_t* aData)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!strcmp(aTopic, "inner-window-destroyed"));
-
-  // If the window is destroyed we have to release the reference that we are
-  // keeping.
-  nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
-  NS_ENSURE_TRUE(wrapper, NS_ERROR_FAILURE);
-
-  uint64_t innerID;
-  nsresult rv = wrapper->GetData(&innerID);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (innerID == mInnerID) {
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-      obs->RemoveObserver(this, "inner-window-destroyed");
-    }
-
-    Shutdown();
-  }
-
-  return NS_OK;
-}
-
 void
 BroadcastChannel::RemoveDocFromBFCache()
 {
@@ -543,6 +444,13 @@ BroadcastChannel::RemoveDocFromBFCache()
   bfCacheEntry->RemoveFromBFCacheSync();
 }
 
+void
+BroadcastChannel::DisconnectFromOwner()
+{
+  Shutdown();
+  DOMEventTargetHelper::DisconnectFromOwner();
+}
+
 NS_IMPL_CYCLE_COLLECTION_CLASS(BroadcastChannel)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(BroadcastChannel,
@@ -555,7 +463,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(BroadcastChannel,
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BroadcastChannel)
-  NS_INTERFACE_MAP_ENTRY(nsIObserver)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(BroadcastChannel, DOMEventTargetHelper)

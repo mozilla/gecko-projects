@@ -129,6 +129,9 @@ Var AppLaunchWaitTickCount
 ; certificate attribute values were incorrect.
 !define ERR_PREINSTALL_CERT_UNTRUSTED_AND_ATTRIBUTES 23
 
+; Timed out while waiting for the certificate checks to run.
+!define ERR_PREINSTALL_CERT_TIMEOUT 24
+
 /**
  * The following errors prefixed with ERR_INSTALL apply to the install phase.
  */
@@ -153,6 +156,9 @@ Var AppLaunchWaitTickCount
 
 ; Interval for the download timer
 !define DownloadIntervalMS 200
+
+; Timeout for the certificate check
+!define PreinstallCertCheckMaxWaitSec 30
 
 ; Interval for the install timer
 !define InstallIntervalMS 100
@@ -549,14 +555,30 @@ Function .onUserAbort
   ${NSD_KillTimer} ClearBlurb
 
   ${If} "$IsDownloadFinished" != ""
-    Call DisplayDownloadError
+    ; Go ahead and cancel the download so it doesn't keep running while this
+    ; prompt is up. We'll resume it if the user decides to continue.
+    InetBgDL::Get /RESET /END
+
+    ${ShowTaskDialog} $(STUB_CANCEL_PROMPT_HEADING) \
+                      $(STUB_CANCEL_PROMPT_MESSAGE) \
+                      $(STUB_CANCEL_PROMPT_BUTTON_CONTINUE) \
+                      $(STUB_CANCEL_PROMPT_BUTTON_EXIT)
+    Pop $0
+    ${If} $0 == 1002
+      ; The cancel button was clicked
+      Call LaunchHelpPage
+      Call SendPing
+    ${Else}
+      ; Either the continue button was clicked or the dialog was dismissed
+      Call StartDownload
+    ${EndIf}
   ${Else}
     Call SendPing
   ${EndIf}
 
-  ; Aborting the abort will allow SendPing which is called by
-  ; DisplayDownloadError to hide the installer window and close the installer
-  ; after it sends the metrics ping.
+  ; Aborting the abort will allow SendPing to hide the installer window and
+  ; close the installer after it sends the metrics ping, or allow us to just go
+  ; back to installing if that's what the user selected.
   Abort
 FunctionEnd
 
@@ -1084,87 +1106,15 @@ Function OnDownload
 
       ${If} $HandleDownload == ${INVALID_HANDLE_VALUE}
         StrCpy $ExitCode "${ERR_PREINSTALL_INVALID_HANDLE}"
-        StrCpy $0 "0"
-        StrCpy $1 "0"
-      ${Else}
-        CertCheck::VerifyCertTrust "$PLUGINSDIR\download.exe"
-        Pop $0
-        CertCheck::VerifyCertNameIssuer "$PLUGINSDIR\download.exe" \
-                                        "${CertNameDownload}" "${CertIssuerDownload}"
-        Pop $1
-        ${If} $0 == 0
-        ${AndIf} $1 == 0
-          StrCpy $ExitCode "${ERR_PREINSTALL_CERT_UNTRUSTED_AND_ATTRIBUTES}"
-        ${ElseIf} $0 == 0
-          StrCpy $ExitCode "${ERR_PREINSTALL_CERT_UNTRUSTED}"
-        ${ElseIf}  $1 == 0
-          StrCpy $ExitCode "${ERR_PREINSTALL_CERT_ATTRIBUTES}"
-        ${EndIf}
-      ${EndIf}
-
-      System::Call "kernel32::GetTickCount()l .s"
-      Pop $EndPreInstallPhaseTickCount
-
-      ${If} $0 == 0
-      ${OrIf} $1 == 0
+        System::Call "kernel32::GetTickCount()l .s"
+        Pop $EndPreInstallPhaseTickCount
         ; Use a timer so the UI has a chance to update
         ${NSD_CreateTimer} DisplayDownloadError ${InstallIntervalMS}
-        Return
-      ${EndIf}
-
-      ; Instead of extracting the files we use the downloaded installer to
-      ; install in case it needs to perform operations that the stub doesn't
-      ; know about.
-      WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "InstallDirectoryPath" "$INSTDIR"
-      ; Don't create the QuickLaunch or Taskbar shortcut from the launched installer
-      WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "QuickLaunchShortcut" "false"
-
-      ; Always create a start menu shortcut, so the user always has some way
-      ; to access the application.
-      WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "StartMenuShortcuts" "true"
-
-      ; Either avoid or force adding a taskbar pin and desktop shortcut
-      ; based on the checkbox value.
-      ${If} $CheckboxShortcuts == 0
-        WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "TaskbarShortcut" "false"
-        WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "DesktopShortcut" "false"
       ${Else}
-        WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "TaskbarShortcut" "true"
-        WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "DesktopShortcut" "true"
+        CertCheck::CheckPETrustAndInfoAsync "$PLUGINSDIR\download.exe" \
+          "${CertNameDownload}" "${CertIssuerDownload}"
+        ${NSD_CreateTimer} OnCertCheck ${DownloadIntervalMS}
       ${EndIf}
-
-!ifdef MOZ_MAINTENANCE_SERVICE
-      ${If} $CheckboxInstallMaintSvc == 1
-        WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "MaintenanceService" "true"
-      ${Else}
-        WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "MaintenanceService" "false"
-      ${EndIf}
-!else
-      WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "MaintenanceService" "false"
-!endif
-
-      ; Delete the taskbar shortcut history to ensure we do the right thing based on
-      ; the config file above.
-      ${GetShortcutsLogPath} $0
-      Delete "$0"
-
-      ${RemovePrecompleteEntries} "false"
-
-      ; Delete the install.log and let the full installer create it. When the
-      ; installer closes it we can detect that it has completed.
-      Delete "$INSTDIR\install.log"
-
-      ; Delete firefox.exe.moz-upgrade and firefox.exe.moz-delete if it exists
-      ; since it being present will require an OS restart for the full
-      ; installer.
-      Delete "$INSTDIR\${FileMainEXE}.moz-upgrade"
-      Delete "$INSTDIR\${FileMainEXE}.moz-delete"
-
-      System::Call "kernel32::GetTickCount()l .s"
-      Pop $EndPreInstallPhaseTickCount
-
-      Exec "$\"$PLUGINSDIR\download.exe$\" /INI=$PLUGINSDIR\${CONFIG_INI}"
-      ${NSD_CreateTimer} CheckInstall ${InstallIntervalMS}
     ${Else}
       StrCpy $DownloadedBytes "$3"
       System::Int64Op $DownloadedBytes * ${PROGRESS_BAR_DOWNLOAD_END_STEP}
@@ -1174,6 +1124,102 @@ Function OnDownload
       Call SetProgressBars
     ${EndIf}
   ${EndIf}
+FunctionEnd
+
+Function OnCertCheck
+  System::Call "kernel32::GetTickCount()l .s"
+  Pop $EndPreInstallPhaseTickCount
+
+  CertCheck::GetStatus
+  Pop $0
+  ${If} $0 == 0
+    ${GetSecondsElapsed} "$EndDownloadPhaseTickCount" "$EndPreInstallPhaseTickCount" $0
+    ${If} $0 >= ${PreinstallCertCheckMaxWaitSec}
+      ${NSD_KillTimer} OnCertCheck
+      StrCpy $ExitCode "${ERR_PREINSTALL_CERT_TIMEOUT}"
+      ; Use a timer so the UI has a chance to update
+      ${NSD_CreateTimer} DisplayDownloadError ${InstallIntervalMS}
+    ${EndIf}
+    Return
+  ${EndIf}
+  Pop $0
+  Pop $1
+
+  ${If} $0 == 0
+  ${AndIf} $1 == 0
+    StrCpy $ExitCode "${ERR_PREINSTALL_CERT_UNTRUSTED_AND_ATTRIBUTES}"
+  ${ElseIf} $0 == 0
+    StrCpy $ExitCode "${ERR_PREINSTALL_CERT_UNTRUSTED}"
+  ${ElseIf} $1 == 0
+    StrCpy $ExitCode "${ERR_PREINSTALL_CERT_ATTRIBUTES}"
+  ${EndIf}
+
+  ${NSD_KillTimer} OnCertCheck
+
+  ${If} $0 == 0
+  ${OrIf} $1 == 0
+    ; Use a timer so the UI has a chance to update
+    ${NSD_CreateTimer} DisplayDownloadError ${InstallIntervalMS}
+    Return
+  ${EndIf}
+
+  Call LaunchFullInstaller
+FunctionEnd
+
+Function LaunchFullInstaller
+  ; Instead of extracting the files we use the downloaded installer to
+  ; install in case it needs to perform operations that the stub doesn't
+  ; know about.
+  WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "InstallDirectoryPath" "$INSTDIR"
+  ; Don't create the QuickLaunch or Taskbar shortcut from the launched installer
+  WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "QuickLaunchShortcut" "false"
+
+  ; Always create a start menu shortcut, so the user always has some way
+  ; to access the application.
+  WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "StartMenuShortcuts" "true"
+
+  ; Either avoid or force adding a taskbar pin and desktop shortcut
+  ; based on the checkbox value.
+  ${If} $CheckboxShortcuts == 0
+    WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "TaskbarShortcut" "false"
+    WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "DesktopShortcut" "false"
+  ${Else}
+    WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "TaskbarShortcut" "true"
+    WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "DesktopShortcut" "true"
+  ${EndIf}
+
+!ifdef MOZ_MAINTENANCE_SERVICE
+  ${If} $CheckboxInstallMaintSvc == 1
+    WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "MaintenanceService" "true"
+  ${Else}
+    WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "MaintenanceService" "false"
+  ${EndIf}
+!else
+  WriteINIStr "$PLUGINSDIR\${CONFIG_INI}" "Install" "MaintenanceService" "false"
+!endif
+
+  ; Delete the taskbar shortcut history to ensure we do the right thing based on
+  ; the config file above.
+  ${GetShortcutsLogPath} $0
+  Delete "$0"
+
+  ${RemovePrecompleteEntries} "false"
+
+  ; Delete the install.log and let the full installer create it. When the
+  ; installer closes it we can detect that it has completed.
+  Delete "$INSTDIR\install.log"
+
+  ; Delete firefox.exe.moz-upgrade and firefox.exe.moz-delete if it exists
+  ; since it being present will require an OS restart for the full
+  ; installer.
+  Delete "$INSTDIR\${FileMainEXE}.moz-upgrade"
+  Delete "$INSTDIR\${FileMainEXE}.moz-delete"
+
+  System::Call "kernel32::GetTickCount()l .s"
+  Pop $EndPreInstallPhaseTickCount
+
+  Exec "$\"$PLUGINSDIR\download.exe$\" /INI=$PLUGINSDIR\${CONFIG_INI}"
+  ${NSD_CreateTimer} CheckInstall ${InstallIntervalMS}
 FunctionEnd
 
 Function SendPing
@@ -1685,22 +1731,23 @@ Function DisplayDownloadError
   ; value to the total value.
   ${ITBL3SetProgressValue} "100" "100"
   ${ITBL3SetProgressState} "${TBPF_ERROR}"
+
   MessageBox MB_OKCANCEL|MB_ICONSTOP "$(ERROR_DOWNLOAD_CONT)" IDCANCEL +2 IDOK +1
-  StrCpy $OpenedDownloadPage "1" ; Already initialized to 0
-
-  ${If} "$OpenedDownloadPage" == "1"
-    ClearErrors
-    ${GetParameters} $0
-    ${GetOptions} "$0" "/UAC:" $1
-    ${If} ${Errors}
-      Call OpenManualDownloadURL
-    ${Else}
-      GetFunctionAddress $0 OpenManualDownloadURL
-      UAC::ExecCodeSegment $0
-    ${EndIf}
-  ${EndIf}
-
+  Call LaunchHelpPage
   Call SendPing
+FunctionEnd
+
+Function LaunchHelpPage
+  StrCpy $OpenedDownloadPage "1" ; Already initialized to 0
+  ClearErrors
+  ${GetParameters} $0
+  ${GetOptions} "$0" "/UAC:" $1
+  ${If} ${Errors}
+    Call OpenManualDownloadURL
+  ${Else}
+    GetFunctionAddress $0 OpenManualDownloadURL
+    UAC::ExecCodeSegment $0
+  ${EndIf}
 FunctionEnd
 
 Function OpenManualDownloadURL

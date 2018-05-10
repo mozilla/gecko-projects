@@ -34,6 +34,7 @@
 #include "jit/IonInstrumentation.h"
 #include "jit/IonTypes.h"
 #include "jit/JitCompartment.h"
+#include "jit/TemplateObject.h"
 #include "jit/VMFunctions.h"
 #include "vm/ProxyObject.h"
 #include "vm/Shape.h"
@@ -820,10 +821,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void divFloat32(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
     inline void divDouble(FloatRegister src, FloatRegister dest) PER_SHARED_ARCH;
 
-    inline void inc32(RegisterOrInt32Constant* key);
     inline void inc64(AbsoluteAddress dest) PER_ARCH;
-
-    inline void dec32(RegisterOrInt32Constant* key);
 
     inline void neg32(Register reg) PER_SHARED_ARCH;
     inline void neg64(Register64 reg) DEFINED_ON(x86, x64, arm, mips32, mips64);
@@ -938,13 +936,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branch32(Condition cond, Register lhs, Register rhs, L label) PER_SHARED_ARCH;
     template <class L>
     inline void branch32(Condition cond, Register lhs, Imm32 rhs, L label) PER_SHARED_ARCH;
-    inline void branch32(Condition cond, Register length, const RegisterOrInt32Constant& key,
-                         Label* label);
 
     inline void branch32(Condition cond, const Address& lhs, Register rhs, Label* label) PER_SHARED_ARCH;
     inline void branch32(Condition cond, const Address& lhs, Imm32 rhs, Label* label) PER_SHARED_ARCH;
-    inline void branch32(Condition cond, const Address& length, const RegisterOrInt32Constant& key,
-                         Label* label);
 
     inline void branch32(Condition cond, const AbsoluteAddress& lhs, Register rhs, Label* label)
         DEFINED_ON(arm, arm64, mips_shared, x86, x64);
@@ -1005,11 +999,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     // chunk trailer, or nullptr if it is in the tenured heap.
     void loadStoreBuffer(Register ptr, Register buffer) PER_ARCH;
 
-    template <typename T>
-    inline CodeOffsetJump branchPtrWithPatch(Condition cond, Register lhs, T rhs, RepatchLabel* label) PER_SHARED_ARCH;
-    template <typename T>
-    inline CodeOffsetJump branchPtrWithPatch(Condition cond, Address lhs, T rhs, RepatchLabel* label) PER_SHARED_ARCH;
-
     void branchPtrInNurseryChunk(Condition cond, Register ptr, Register temp, Label* label)
         DEFINED_ON(arm, arm64, mips_shared, x86, x64);
     void branchPtrInNurseryChunk(Condition cond, const Address& address, Register temp, Label* label)
@@ -1054,8 +1043,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchFloat32NotInInt64Range(Address src, Register temp, Label* fail);
     inline void branchFloat32NotInUInt64Range(Address src, Register temp, Label* fail);
 
-    template <typename T, typename L>
-    inline void branchAdd32(Condition cond, T src, Register dest, L label) PER_SHARED_ARCH;
+    template <typename T>
+    inline void branchAdd32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
     template <typename T>
     inline void branchSub32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
 
@@ -1278,11 +1267,6 @@ class MacroAssembler : public MacroAssemblerSpecific
 
   private:
 
-    // Implementation for branch* methods.
-    template <typename T>
-    inline void branch32Impl(Condition cond, const T& length, const RegisterOrInt32Constant& key,
-                             Label* label);
-
     template <typename T, typename S, typename L>
     inline void branchPtrImpl(Condition cond, const T& lhs, const S& rhs, L label)
         DEFINED_ON(x86_shared);
@@ -1362,12 +1346,20 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // Performs a bounds check and zeroes the index register if out-of-bounds
     // (to mitigate Spectre).
-    inline void spectreBoundsCheck32(Register index, Register length, Register scratch,
+  private:
+
+    inline void spectreBoundsCheck32(Register index, const Operand& length, Register maybeScratch,
                                      Label* failure)
-        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
-    inline void spectreBoundsCheck32(Register index, const Address& length, Register scratch,
+        DEFINED_ON(x86);
+
+  public:
+
+    inline void spectreBoundsCheck32(Register index, Register length, Register maybeScratch,
                                      Label* failure)
-        DEFINED_ON(arm, arm64, mips_shared, x86_shared);
+        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
+    inline void spectreBoundsCheck32(Register index, const Address& length, Register maybeScratch,
+                                     Label* failure)
+        DEFINED_ON(arm, arm64, mips_shared, x86, x64);
 
     // ========================================================================
     // Canonicalization primitives.
@@ -1465,18 +1457,13 @@ class MacroAssembler : public MacroAssemblerSpecific
     // 'cond' holds. Required when WASM_HUGE_MEMORY is not defined. If
     // JitOptions.spectreMaskIndex is true, in speculative executions 'index' is
     // saturated in-place to 'boundsCheckLimit'.
-    template <class L>
-    inline void wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, L label)
+    void wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, Label* label)
         DEFINED_ON(arm, arm64, mips32, mips64, x86);
 
-    template <class L>
-    inline void wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, L label)
+    void wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, Label* label)
         DEFINED_ON(arm, arm64, mips32, mips64, x86);
 
-    // On x86, each instruction adds its own wasm::MemoryAccess's to the
-    // wasm::MemoryAccessVector (there can be multiple when i64 is involved).
-    // On x64, only some asm.js accesses need a wasm::MemoryAccess so the caller
-    // is responsible for doing this instead.
+    // Each wasm load/store instruction appends its own wasm::Trap::OutOfBounds.
     void wasmLoad(const wasm::MemoryAccessDesc& access, Operand srcAddr, AnyRegister out) DEFINED_ON(x86, x64);
     void wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAddr, Register64 out) DEFINED_ON(x86, x64);
     void wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister value, Operand dstAddr) DEFINED_ON(x86, x64);
@@ -1590,11 +1577,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     // (TLS & pinned regs are non-volatile registers in the system ABI).
     void wasmCallBuiltinInstanceMethod(const wasm::CallSiteDesc& desc, const ABIArg& instanceArg,
                                        wasm::SymbolicAddress builtin);
-
-    // Emit the out-of-line trap code to which trapping jumps/branches are
-    // bound. This should be called once per function after all other codegen,
-    // including "normal" OutOfLineCode.
-    void wasmEmitOldTrapOutOfLineCode();
 
     // As enterFakeExitFrame(), but using register conventions appropriate for
     // wasm stubs.
@@ -2131,14 +2113,6 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void storeCallResultValue(TypedOrValueRegister dest);
 
-    using MacroAssemblerSpecific::store32;
-    void store32(const RegisterOrInt32Constant& key, const Address& dest) {
-        if (key.isRegister())
-            store32(key.reg(), dest);
-        else
-            store32(Imm32(key.constant()), dest);
-    }
-
     template <typename T>
     void guardedCallPreBarrier(const T& address, MIRType type) {
         Label done;
@@ -2264,29 +2238,32 @@ class MacroAssembler : public MacroAssemblerSpecific
     void allocateString(Register result, Register temp, gc::AllocKind allocKind,
                         gc::InitialHeap initialHeap, Label* fail);
     void allocateNonObject(Register result, Register temp, gc::AllocKind allocKind, Label* fail);
-    void copySlotsFromTemplate(Register obj, const NativeObject* templateObj,
+    void copySlotsFromTemplate(Register obj, const NativeTemplateObject& templateObj,
                                uint32_t start, uint32_t end);
     void fillSlotsWithConstantValue(Address addr, Register temp, uint32_t start, uint32_t end,
                                     const Value& v);
     void fillSlotsWithUndefined(Address addr, Register temp, uint32_t start, uint32_t end);
     void fillSlotsWithUninitialized(Address addr, Register temp, uint32_t start, uint32_t end);
 
-    void initGCSlots(Register obj, Register temp, NativeObject* templateObj, bool initContents);
+    void initGCSlots(Register obj, Register temp, const NativeTemplateObject& templateObj,
+                     bool initContents);
 
   public:
     void callMallocStub(size_t nbytes, Register result, Label* fail);
     void callFreeStub(Register slots);
-    void createGCObject(Register result, Register temp, JSObject* templateObj,
-                        gc::InitialHeap initialHeap, Label* fail, bool initContents = true,
-                        bool convertDoubleElements = false);
+    void createGCObject(Register result, Register temp, const TemplateObject& templateObj,
+                        gc::InitialHeap initialHeap, Label* fail, bool initContents = true);
 
-    void initGCThing(Register obj, Register temp, JSObject* templateObj,
-                     bool initContents = true, bool convertDoubleElements = false);
+    void initGCThing(Register obj, Register temp, const TemplateObject& templateObj,
+                     bool initContents = true);
+
+    enum class TypedArrayLength { Fixed, Dynamic };
+
     void initTypedArraySlots(Register obj, Register temp, Register lengthReg,
                              LiveRegisterSet liveRegs, Label* fail,
                              TypedArrayObject* templateObj, TypedArrayLength lengthKind);
 
-    void initUnboxedObjectContents(Register object, UnboxedPlainObject* templateObject);
+    void initUnboxedObjectContents(Register object, const UnboxedLayout& layout);
 
     void newGCString(Register result, Register temp, Label* fail, bool attemptNursery);
     void newGCFatInlineString(Register result, Register temp, Label* fail, bool attemptNursery);

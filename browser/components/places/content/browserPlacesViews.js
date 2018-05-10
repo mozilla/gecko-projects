@@ -19,6 +19,9 @@ function PlacesViewBase(aPlace, aOptions = {}) {
   this._viewElt.controllers.appendController(this._controller);
 }
 
+PlacesViewBase.interfaces = [Ci.nsINavHistoryResultObserver,
+                             Ci.nsISupportsWeakReference];
+
 PlacesViewBase.prototype = {
   // The xul element that holds the entire view.
   _viewElt: null,
@@ -41,9 +44,8 @@ PlacesViewBase.prototype = {
   // the native mac menu).
   _nativeView: false,
 
-  QueryInterface: XPCOMUtils.generateQI(
-    [Ci.nsINavHistoryResultObserver,
-     Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI(
+    PlacesViewBase.interfaces),
 
   _place: "",
   get place() {
@@ -205,10 +207,7 @@ PlacesViewBase.prototype = {
         container = selectedNode.parent;
         index = container.getChildIndex(selectedNode);
         if (PlacesUtils.nodeIsTagQuery(container)) {
-          tagName = container.title;
-          // TODO (Bug 1160193): properly support dropping on a tag root.
-          if (!tagName)
-            return null;
+          tagName = PlacesUtils.asQuery(container).query.tags[0];
         }
       }
     }
@@ -439,7 +438,8 @@ PlacesViewBase.prototype = {
       }
       aPopup._siteURIMenuitem.setAttribute("targetURI", siteUrl);
       aPopup._siteURIMenuitem.setAttribute("oncommand",
-        "openUILink(this.getAttribute('targetURI'), event);");
+        "openUILink(this.getAttribute('targetURI'), event, {" +
+        " triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({})});");
 
       // If a user middle-clicks this item we serve the oncommand event.
       // We are using checkForMiddleClick because of Bug 246720.
@@ -740,7 +740,7 @@ PlacesViewBase.prototype = {
    * Checks whether the popup associated with the provided element is open.
    * This method may be overridden by classes that extend this base class.
    *
-   * @param  {nsIDOMElement} elt
+   * @param  {Element} elt
    * @return {Boolean}
    */
   _isPopupOpen(elt) {
@@ -1010,13 +1010,8 @@ PlacesToolbar.prototype = {
   _cbEvents: ["dragstart", "dragover", "dragexit", "dragend", "drop",
               "mousemove", "mouseover", "mouseout"],
 
-  QueryInterface: function PT_QueryInterface(aIID) {
-    if (aIID.equals(Ci.nsIDOMEventListener) ||
-        aIID.equals(Ci.nsITimerCallback))
-      return this;
-
-    return PlacesViewBase.prototype.QueryInterface.apply(this, arguments);
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsITimerCallback",
+                                          ...PlacesViewBase.interfaces]),
 
   uninit: function PT_uninit() {
     this._removeEventListeners(this._viewElt, this._cbEvents, false);
@@ -1175,11 +1170,15 @@ PlacesToolbar.prototype = {
       case "overflow":
         if (!this._isOverflowStateEventRelevant(aEvent))
           return;
+        // Avoid triggering overflow in containers if possible
+        aEvent.stopPropagation();
         this._onOverflow();
         break;
       case "underflow":
         if (!this._isOverflowStateEventRelevant(aEvent))
           return;
+        // Avoid triggering underflow in containers if possible
+        aEvent.stopPropagation();
         this._onUnderflow();
         break;
       case "TabOpen":
@@ -1913,13 +1912,6 @@ function PlacesMenu(aPopupShowingEvent, aPlace, aOptions) {
 PlacesMenu.prototype = {
   __proto__: PlacesViewBase.prototype,
 
-  QueryInterface: function PM_QueryInterface(aIID) {
-    if (aIID.equals(Ci.nsIDOMEventListener))
-      return this;
-
-    return PlacesViewBase.prototype.QueryInterface.apply(this, arguments);
-  },
-
   _removeChild: function PM_removeChild(aChild) {
     PlacesViewBase.prototype._removeChild.apply(this, arguments);
   },
@@ -1980,10 +1972,6 @@ function PlacesPanelMenuView(aPlace, aViewId, aRootId, aOptions) {
 
 PlacesPanelMenuView.prototype = {
   __proto__: PlacesViewBase.prototype,
-
-  QueryInterface: function PAMV_QueryInterface(aIID) {
-    return PlacesViewBase.prototype.QueryInterface.apply(this, arguments);
-  },
 
   uninit: function PAMV_uninit() {
     PlacesViewBase.prototype.uninit.apply(this, arguments);

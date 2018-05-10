@@ -10,8 +10,6 @@
 var EXPORTED_SYMBOLS = ["AddonTestUtils", "MockAsyncShutdown"];
 
 const CERTDB_CONTRACTID = "@mozilla.org/security/x509certdb;1";
-const CERTDB_CID = Components.ID("{fb0bbc5c-452e-4783-b32c-80124693d871}");
-
 
 Cu.importGlobalProperties(["fetch", "TextEncoder"]);
 
@@ -19,6 +17,7 @@ ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const {EventEmitter} = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
@@ -35,11 +34,14 @@ ChromeUtils.defineModuleGetter(this, "FileTestUtils",
                                "resource://testing-common/FileTestUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "HttpServer",
                                "resource://testing-common/httpd.js");
+ChromeUtils.defineModuleGetter(this, "InstallRDF",
+                               "resource://gre/modules/addons/RDFManifestConverter.jsm");
+ChromeUtils.defineModuleGetter(this, "MockRegistrar",
+                               "resource://testing-common/MockRegistrar.jsm");
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
   proxyService: ["@mozilla.org/network/protocol-proxy-service;1", "nsIProtocolProxyService"],
-  rdfService: ["@mozilla.org/rdf/rdf-service;1", "nsIRDFService"],
   uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
 });
 
@@ -59,14 +61,6 @@ const ArrayBufferInputStream = Components.Constructor(
 const nsFile = Components.Constructor(
   "@mozilla.org/file/local;1",
   "nsIFile", "initWithPath");
-
-const RDFXMLParser = Components.Constructor(
-  "@mozilla.org/rdf/xml-parser;1",
-  "nsIRDFXMLParser", "parseString");
-
-const RDFDataSource = Components.Constructor(
-  "@mozilla.org/rdf/datasource;1?name=in-memory-datasource",
-  "nsIRDFDataSource");
 
 const ZipReader = Components.Constructor(
   "@mozilla.org/libjar/zip-reader;1",
@@ -102,9 +96,71 @@ var MockAsyncShutdown = {
 
 AMscope.AsyncShutdown = MockAsyncShutdown;
 
+class MockBlocklist {
+  constructor(addons) {
+    if (ChromeUtils.getClassName(addons) === "Object") {
+      addons = new Map(Object.entries(addons));
+    }
+    this.addons = addons;
+    this.wrappedJSObject = this;
+
+    // Copy blocklist constants.
+    for (let [k, v] of Object.entries(Ci.nsIBlocklistService)) {
+      if (typeof v === "number") {
+        this[k] = v;
+      }
+    }
+
+    this._xpidb = ChromeUtils.import("resource://gre/modules/addons/XPIDatabase.jsm", null);
+  }
+
+  get contractID() {
+    return "@mozilla.org/extensions/blocklist;1";
+  }
+
+  _reLazifyService() {
+    XPCOMUtils.defineLazyServiceGetter(Services, "blocklist", this.contractID);
+    ChromeUtils.defineModuleGetter(this._xpidb, "Blocklist", "resource://gre/modules/Blocklist.jsm");
+  }
+
+  register() {
+    this.originalCID = MockRegistrar.register(this.contractID, this);
+    this._reLazifyService();
+    this._xpidb.Blocklist = this;
+  }
+
+  unregister() {
+    MockRegistrar.unregister(this.originalCID);
+    this._reLazifyService();
+  }
+
+  async getAddonBlocklistState(addon, appVersion, toolkitVersion) {
+    await new Promise(r => setTimeout(r, 150));
+    return this.addons.get(addon.id) || Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
+  }
+
+  async getAddonBlocklistEntry(addon, appVersion, toolkitVersion) {
+    let state = await this.getAddonBlocklistState(addon, appVersion, toolkitVersion);
+    if (state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
+      return {
+        state,
+        url: "http://example.com/",
+      };
+    }
+    return null;
+  }
+
+  async getPluginBlocklistState(plugin, version, appVersion, toolkitVersion) {
+    await new Promise(r => setTimeout(r, 150));
+    return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
+  }
+}
+
+MockBlocklist.prototype.QueryInterface = ChromeUtils.generateQI(["nsIBlocklistService"]);
+
 
 /**
- * Escapes any occurances of &, ", < or > with XML entities.
+ * Escapes any occurrences of &, ", < or > with XML entities.
  *
  * @param {string} str
  *        The string to escape.
@@ -143,7 +199,9 @@ function escaped(strings, ...values) {
 class AddonsList {
   constructor(file) {
     this.extensions = [];
+    this.bootstrapped = [];
     this.themes = [];
+    this.xpis = [];
 
     if (!file.exists()) {
       return;
@@ -155,23 +213,27 @@ class AddonsList {
       let dir = loc.path && new nsFile(loc.path);
 
       for (let addon of Object.values(loc.addons)) {
-        if (addon.enabled && !addon.bootstrapped) {
-          let file;
-          if (dir) {
-            file = dir.clone();
-            try {
-              file.appendRelativePath(addon.path);
-            } catch (e) {
-              file = new nsFile(addon.path);
-            }
-          } else {
+        let file;
+        if (dir) {
+          file = dir.clone();
+          try {
+            file.appendRelativePath(addon.path);
+          } catch (e) {
             file = new nsFile(addon.path);
           }
+        } else {
+          file = new nsFile(addon.path);
+        }
 
+        this.xpis.push(file);
+
+        if (addon.enabled) {
           addon.type = addon.type || "extension";
 
           if (addon.type == "theme") {
             this.themes.push(file);
+          } else if (addon.bootstrapped) {
+            this.bootstrapped.push(file);
           } else {
             this.extensions.push(file);
           }
@@ -201,6 +263,10 @@ class AddonsList {
 
   hasTheme(dir, id) {
     return this.hasItem("themes", dir, id);
+  }
+
+  hasBootstrapped(dir, id) {
+    return this.hasItem("bootstrapped", dir, id);
   }
 
   hasExtension(dir, id) {
@@ -266,9 +332,6 @@ var AddonTestUtils = {
 
     // By default, don't cache add-ons in AddonRepository.jsm
     Services.prefs.setBoolPref("extensions.getAddons.cache.enabled", false);
-
-    // Disable the compatibility updates window by default
-    Services.prefs.setBoolPref("extensions.showMismatchUI", false);
 
     // Point update checks to the local machine for fast failures
     Services.prefs.setCharPref("extensions.update.url", "http://127.0.0.1/updateURL");
@@ -543,15 +606,8 @@ var AddonTestUtils = {
     let body = await fetch(manifestURI.spec);
 
     if (manifestURI.spec.endsWith(".rdf")) {
-      let data = await body.text();
-
-      let ds = new RDFDataSource();
-      new RDFXMLParser(ds, manifestURI, data);
-
-      let rdfID = ds.GetTarget(rdfService.GetResource("urn:mozilla:install-manifest"),
-                               rdfService.GetResource("http://www.mozilla.org/2004/em-rdf#id"),
-                               true);
-      return rdfID.QueryInterface(Ci.nsIRDFLiteral).Value;
+      let manifest = InstallRDF.loadFromBuffer(await body.arrayBuffer()).decode();
+      return manifest.id;
     }
 
     let manifest = await body.json();
@@ -565,16 +621,6 @@ var AddonTestUtils = {
   },
 
   overrideCertDB() {
-    // Unregister the real database. This only works because the add-ons manager
-    // hasn't started up and grabbed the certificate database yet.
-    let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
-    let factory = registrar.getClassObject(CERTDB_CID, Ci.nsIFactory);
-    registrar.unregisterFactory(CERTDB_CID, factory);
-
-    // Get the real DB
-    let realCertDB = factory.createInstance(null, Ci.nsIX509CertDB);
-
-
     let verifyCert = async (file, result, cert, callback) => {
       if (result == Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED &&
           !this.useRealCertChecks && callback.wrappedJSObject) {
@@ -608,20 +654,20 @@ var AddonTestUtils = {
       return [callback, result, cert];
     };
 
+    let FakeCertDB = {
+      init() {
+        for (let property of Object.keys(this._genuine.QueryInterface(Ci.nsIX509CertDB))) {
+          if (property in this)
+            continue;
 
-    function FakeCertDB() {
-      for (let property of Object.keys(realCertDB)) {
-        if (property in this)
-          continue;
+          if (typeof this._genuine[property] == "function")
+            this[property] = this._genuine[property].bind(this._genuine);
+        }
+      },
 
-        if (typeof realCertDB[property] == "function")
-          this[property] = realCertDB[property].bind(realCertDB);
-      }
-    }
-    FakeCertDB.prototype = {
       openSignedAppFileAsync(root, file, callback) {
         // First try calling the real cert DB
-        realCertDB.openSignedAppFileAsync(root, file, (result, zipReader, cert) => {
+        this._genuine.openSignedAppFileAsync(root, file, (result, zipReader, cert) => {
           verifyCert(file.clone(), result, cert, callback)
             .then(([callback, result, cert]) => {
               callback.openSignedAppFileFinished(result, zipReader, cert);
@@ -631,7 +677,7 @@ var AddonTestUtils = {
 
       verifySignedDirectoryAsync(root, dir, callback) {
         // First try calling the real cert DB
-        realCertDB.verifySignedDirectoryAsync(root, dir, (result, cert) => {
+        this._genuine.verifySignedDirectoryAsync(root, dir, (result, cert) => {
           verifyCert(dir.clone(), result, cert, callback)
             .then(([callback, result, cert]) => {
               callback.verifySignedDirectoryFinished(result, cert);
@@ -639,28 +685,40 @@ var AddonTestUtils = {
         });
       },
 
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIX509CertDB]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIX509CertDB]),
     };
 
-    let certDBFactory = XPCOMUtils.generateSingletonFactory(FakeCertDB);
-    registrar.registerFactory(CERTDB_CID, "CertDB",
-                              CERTDB_CONTRACTID, certDBFactory);
+    // Unregister the real database. This only works because the add-ons manager
+    // hasn't started up and grabbed the certificate database yet.
+    MockRegistrar.register(CERTDB_CONTRACTID, FakeCertDB);
+
+    // Initialize the mock service.
+    Cc[CERTDB_CONTRACTID].getService();
+    FakeCertDB.init();
+  },
+
+  /**
+   * Overrides the blocklist service, and returns the given blocklist
+   * states for the given add-ons.
+   *
+   * @param {object|Map} addons
+   *        A mapping of add-on IDs to their blocklist states.
+   * @returns {MockBlocklist}
+   *        A mock blocklist service, which should be unregistered when
+   *        the test is complete.
+   */
+  overrideBlocklist(addons) {
+    let mock = new MockBlocklist(addons);
+    mock.register();
+    return mock;
   },
 
   /**
    * Starts up the add-on manager as if it was started by the application.
-   *
-   * @param {boolean} [appChanged = true]
-   *        An optional boolean parameter to simulate the case where the
-   *        application has changed version since the last run. If not passed it
-   *        defaults to true
    */
-  async promiseStartupManager(appChanged = true) {
+  async promiseStartupManager() {
     if (this.addonIntegrationService)
       throw new Error("Attempting to startup manager that was already started.");
-
-    if (appChanged && this.addonStartup.exists())
-      this.addonStartup.remove(true);
 
     this.addonIntegrationService = Cc["@mozilla.org/addons/integration;1"]
           .getService(Ci.nsIObserver);
@@ -683,13 +741,19 @@ var AddonTestUtils = {
 
     Services.obs.notifyObservers(null, "quit-application-granted");
     return MockAsyncShutdown.hook()
-      .then(() => {
+      .then(async () => {
         this.emit("addon-manager-shutdown");
 
         this.addonIntegrationService = null;
 
         // Load the add-ons list as it was after application shutdown
-        this.loadAddonsList();
+        await this.loadAddonsList();
+
+        // Flush the jar cache entries for each bootstrapped XPI so that
+        // we don't run into file locking issues on Windows.
+        for (let file of this.addonsList.xpis) {
+          Services.obs.notifyObservers(file, "flush-cache-entry");
+        }
 
         // Clear any crash report annotations
         this.appInfo.annotations = {};
@@ -703,13 +767,8 @@ var AddonTestUtils = {
 
         AddonManagerPrivate.unregisterProvider(XPIscope.XPIProvider);
         Cu.unload("resource://gre/modules/addons/XPIProvider.jsm");
+        Cu.unload("resource://gre/modules/addons/XPIDatabase.jsm");
         Cu.unload("resource://gre/modules/addons/XPIInstall.jsm");
-
-        // We need to set this in order reset the startup service, which
-        // is only possible when running in automation.
-        Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, true);
-
-        aomStartup.reset();
 
         if (shutdownError)
           throw shutdownError;
@@ -718,6 +777,18 @@ var AddonTestUtils = {
       });
   },
 
+  /**
+   * Asynchronously restart the AddonManager.  If newVersion is provided,
+   * simulate an application upgrade (or downgrade) where the version
+   * is changed to newVersion when re-started.
+   *
+   * @param {string} [newVersion]
+   *        If provided, the application version is changed to this string
+   *        after the AddonManager is shut down, before it is re-started.
+   *
+   * @returns {Promise}
+   *          Resolves when the AddonManager has been re-started.
+   */
   promiseRestartManager(newVersion) {
     return this.promiseShutdownManager()
       .then(() => {
@@ -812,7 +883,7 @@ var AddonTestUtils = {
 
     let props = ["id", "version", "type", "internalName", "updateURL",
                  "optionsURL", "optionsType", "aboutURL", "iconURL", "icon64URL",
-                 "skinnable", "bootstrap", "unpack", "strictCompatibility",
+                 "skinnable", "bootstrap", "strictCompatibility",
                  "hasEmbeddedWebExtension"];
     rdf += this._writeProps(data, props);
 
@@ -842,7 +913,7 @@ var AddonTestUtils = {
   },
 
   /**
-   * Recursively create all directories upto and including the given
+   * Recursively create all directories up to and including the given
    * path, if they do not exist.
    *
    * @param {string} path The path of the directory to create.
@@ -875,6 +946,8 @@ var AddonTestUtils = {
     var zipW = ZipWriter(zipFile, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | flags);
 
     for (let [path, data] of Object.entries(files)) {
+      if (typeof data === "object" && ChromeUtils.getClassName(data) === "Object")
+        data = JSON.stringify(data);
       if (!(data instanceof ArrayBuffer))
         data = new TextEncoder("utf-8").encode(data).buffer;
 
@@ -973,6 +1046,18 @@ var AddonTestUtils = {
   },
 
   /**
+   * Creates an XPI with the given files and installs it.
+   *
+   * @param {object} files
+   *        A files object as would be passed to {@see #createTempXPI}.
+   * @returns {Promise}
+   *        A promise which resolves when the add-on is installed.
+   */
+  promiseInstallXPI(files) {
+    return this.promiseInstallFile(this.createTempXPIFile(files));
+  },
+
+  /**
    * Creates an extension proxy file.
    * See: https://developer.mozilla.org/en-US/Add-ons/Setting_up_extension_development_environment#Firefox_extension_proxy_file
    *
@@ -1027,7 +1112,16 @@ var AddonTestUtils = {
         let target = dir.clone();
         for (let part of entry.split("/"))
           target.append(part);
-        zip.extract(entry, target);
+        if (!target.parent.exists())
+          target.parent.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+        try {
+          zip.extract(entry, target);
+        } catch (e) {
+          if (e.result != Cr.NS_ERROR_FILE_DIR_NOT_EMPTY &&
+              !(target.exists() && target.isDirectory())) {
+            throw e;
+          }
+        }
         target.permissions |= FileUtils.PERMS_FILE;
       }
       zip.close();
@@ -1135,7 +1229,7 @@ var AddonTestUtils = {
         return null;
       },
 
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
     };
     Services.dirsvc.registerProvider(dirProvider);
 
@@ -1251,15 +1345,25 @@ var AddonTestUtils = {
   },
 
   /**
+   * @property {number} updateReason
+   *        The default update reason for {@see promiseFindAddonUpdates}
+   *        calls. May be overwritten by tests which primarily check for
+   *        updates with a particular reason.
+   */
+  updateReason: AddonManager.UPDATE_WHEN_PERIODIC_UPDATE,
+
+  /**
    * Returns a promise that will be resolved when an add-on update check is
    * complete. The value resolved will be an AddonInstall if a new version was
    * found.
    *
    * @param {object} addon The add-on to find updates for.
    * @param {integer} reason The type of update to find.
+   * @param {Array} args Additional args to pass to `checkUpdates` after
+   *                     the update reason.
    * @return {Promise<object>} an object containing information about the update.
    */
-  promiseFindAddonUpdates(addon, reason = AddonManager.UPDATE_WHEN_PERIODIC_UPDATE) {
+  promiseFindAddonUpdates(addon, reason = AddonTestUtils.updateReason, ...args) {
     let equal = this.testScope.equal;
     return new Promise((resolve, reject) => {
       let result = {};
@@ -1305,7 +1409,7 @@ var AddonTestUtils = {
             reject(result);
           }
         }
-      }, reason);
+      }, reason, ...args);
     });
   },
 

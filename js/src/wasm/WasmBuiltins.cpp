@@ -239,12 +239,12 @@ CheckInterrupt(JSContext* cx, JitActivation* activation)
 //   - return the (non-null) resumePC that should be jumped if execution should
 //     resume after the trap.
 static void*
-HandleTrap(Trap trap)
+WasmHandleTrap()
 {
     JitActivation* activation = CallingActivation();
     JSContext* cx = activation->cx();
 
-    switch (trap) {
+    switch (activation->wasmTrapData().trap) {
       case Trap::Unreachable:
         return ReportError(cx, JSMSG_WASM_UNREACHABLE);
       case Trap::IntegerOverflow:
@@ -284,20 +284,6 @@ HandleTrap(Trap trap)
     }
 
     MOZ_CRASH("unexpected trap");
-}
-
-static void
-WasmOldReportTrap(int32_t trapIndex)
-{
-    MOZ_ASSERT(trapIndex < int32_t(Trap::Limit) && trapIndex >= 0);
-    DebugOnly<void*> resumePC = HandleTrap(Trap(trapIndex));
-    MOZ_ASSERT(!resumePC);
-}
-
-static void*
-WasmHandleTrap()
-{
-    return HandleTrap(CallingActivation()->wasmTrapData().trap);
 }
 
 static void
@@ -516,8 +502,8 @@ FuncCast(F* funcPtr, ABIFunctionType abiType)
     return pf;
 }
 
-void*
-wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
+static void*
+AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
 {
     switch (imm) {
       case SymbolicAddress::HandleDebugTrap:
@@ -529,9 +515,6 @@ wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::HandleTrap:
         *abiType = Args_General0;
         return FuncCast(WasmHandleTrap, *abiType);
-      case SymbolicAddress::OldReportTrap:
-        *abiType = Args_General1;
-        return FuncCast(WasmOldReportTrap, *abiType);
       case SymbolicAddress::ReportOutOfBounds:
         *abiType = Args_General0;
         return FuncCast(WasmReportOutOfBounds, *abiType);
@@ -553,6 +536,9 @@ wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::CallImport_F64:
         *abiType = Args_General4;
         return FuncCast(Instance::callImport_f64, *abiType);
+      case SymbolicAddress::CallImport_Ref:
+        *abiType = Args_General4;
+        return FuncCast(Instance::callImport_ref, *abiType);
       case SymbolicAddress::CoerceInPlace_ToInt32:
         *abiType = Args_General1;
         return FuncCast(CoerceInPlace_ToInt32, *abiType);
@@ -681,6 +667,12 @@ wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::Wake:
         *abiType = Args_General3;
         return FuncCast(Instance::wake, *abiType);
+      case SymbolicAddress::MemCopy:
+        *abiType = Args_General4;
+        return FuncCast(Instance::memCopy, *abiType);
+      case SymbolicAddress::MemFill:
+        *abiType = Args_General4;
+        return FuncCast(Instance::memFill, *abiType);
 #if defined(JS_CODEGEN_MIPS32)
       case SymbolicAddress::js_jit_gAtomic64Lock:
         return &js::jit::gAtomic64Lock;
@@ -701,13 +693,13 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
       case SymbolicAddress::HandleDebugTrap:          // GenerateDebugTrapStub
       case SymbolicAddress::HandleThrow:              // GenerateThrowStub
       case SymbolicAddress::HandleTrap:               // GenerateTrapExit
-      case SymbolicAddress::OldReportTrap:            // GenerateOldTrapExit
       case SymbolicAddress::ReportOutOfBounds:        // GenerateOutOfBoundsExit
       case SymbolicAddress::ReportUnalignedAccess:    // GenerateUnalignedExit
       case SymbolicAddress::CallImport_Void:          // GenerateImportInterpExit
       case SymbolicAddress::CallImport_I32:
       case SymbolicAddress::CallImport_I64:
       case SymbolicAddress::CallImport_F64:
+      case SymbolicAddress::CallImport_Ref:
       case SymbolicAddress::CoerceInPlace_ToInt32:    // GenerateImportJitExit
       case SymbolicAddress::CoerceInPlace_ToNumber:
 #if defined(JS_CODEGEN_MIPS32)
@@ -757,6 +749,8 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
       case SymbolicAddress::Wake:
       case SymbolicAddress::CoerceInPlace_JitEntry:
       case SymbolicAddress::ReportInt64JSCall:
+      case SymbolicAddress::MemCopy:
+      case SymbolicAddress::MemFill:
         return true;
       case SymbolicAddress::Limit:
         break;
@@ -992,7 +986,8 @@ wasm::EnsureBuiltinThunksInitialized()
     size_t allocSize = AlignBytes(masm.bytesNeeded(), ExecutableCodePageSize);
 
     thunks->codeSize = allocSize;
-    thunks->codeBase = (uint8_t*)AllocateExecutableMemory(allocSize, ProtectionSetting::Writable);
+    thunks->codeBase = (uint8_t*)AllocateExecutableMemory(allocSize, ProtectionSetting::Writable,
+                                                          MemCheckKind::MakeUndefined);
     if (!thunks->codeBase)
         return false;
 
@@ -1005,10 +1000,7 @@ wasm::EnsureBuiltinThunksInitialized()
     MOZ_ASSERT(masm.callSiteTargets().empty());
     MOZ_ASSERT(masm.callFarJumps().empty());
     MOZ_ASSERT(masm.trapSites().empty());
-    MOZ_ASSERT(masm.oldTrapSites().empty());
-    MOZ_ASSERT(masm.oldTrapFarJumps().empty());
     MOZ_ASSERT(masm.callFarJumps().empty());
-    MOZ_ASSERT(masm.memoryAccesses().empty());
     MOZ_ASSERT(masm.symbolicAccesses().empty());
 
     ExecutableAllocator::cacheFlush(thunks->codeBase, thunks->codeSize);

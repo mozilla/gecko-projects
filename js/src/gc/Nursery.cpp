@@ -43,19 +43,21 @@ using mozilla::TimeStamp;
 
 constexpr uintptr_t CanaryMagicValue = 0xDEADB15D;
 
-struct js::Nursery::FreeMallocedBuffersTask : public GCParallelTask
+struct js::Nursery::FreeMallocedBuffersTask : public GCParallelTaskHelper<FreeMallocedBuffersTask>
 {
-    explicit FreeMallocedBuffersTask(FreeOp* fop) : GCParallelTask(fop->runtime()), fop_(fop) {}
+    explicit FreeMallocedBuffersTask(FreeOp* fop)
+      : GCParallelTaskHelper(fop->runtime()),
+        fop_(fop) {}
     bool init() { return buffers_.init(); }
     void transferBuffersToFree(MallocedBuffersSet& buffersToFree,
                                const AutoLockHelperThreadState& lock);
-    ~FreeMallocedBuffersTask() override { join(); }
+    ~FreeMallocedBuffersTask() { join(); }
+
+    void run();
 
   private:
     FreeOp* fop_;
     MallocedBuffersSet buffers_;
-
-    virtual void run() override;
 };
 
 #ifdef JS_GC_ZEAL
@@ -71,8 +73,8 @@ struct NurseryChunk {
     char data[Nursery::NurseryChunkUsableSize];
     gc::ChunkTrailer trailer;
     static NurseryChunk* fromChunk(gc::Chunk* chunk);
-    void init(JSRuntime* rt);
-    void poisonAndInit(JSRuntime* rt, uint8_t poison);
+    void poisonAndInit(JSRuntime* rt);
+    void poisonAfterSweep();
     uintptr_t start() const { return uintptr_t(&data); }
     uintptr_t end() const { return uintptr_t(&trailer); }
     gc::Chunk* toChunk(JSRuntime* rt);
@@ -83,16 +85,23 @@ static_assert(sizeof(js::NurseryChunk) == gc::ChunkSize,
 } /* namespace js */
 
 inline void
-js::NurseryChunk::poisonAndInit(JSRuntime* rt, uint8_t poison)
+js::NurseryChunk::poisonAndInit(JSRuntime* rt)
 {
-    JS_POISON(this, poison, ChunkSize);
-    init(rt);
+    MOZ_MAKE_MEM_UNDEFINED(this, ChunkSize);
+
+    JS_POISON(this, JS_FRESH_NURSERY_PATTERN, ChunkSize, MemCheckKind::MakeUndefined);
+
+    new (&trailer) gc::ChunkTrailer(rt, &rt->gc.storeBuffer());
 }
 
 inline void
-js::NurseryChunk::init(JSRuntime* rt)
+js::NurseryChunk::poisonAfterSweep()
 {
-    new (&trailer) gc::ChunkTrailer(rt, &rt->gc.storeBuffer());
+    // We can poison the same chunk more than once, so first make sure memory
+    // sanitizers will let us poison it.
+    MOZ_MAKE_MEM_UNDEFINED(this, ChunkSize);
+
+    JS_POISON(this, JS_SWEPT_NURSERY_PATTERN, ChunkSize, MemCheckKind::MakeNoAccess);
 }
 
 /* static */ inline js::NurseryChunk*
@@ -380,7 +389,7 @@ js::Nursery::allocate(size_t size)
     void* thing = (void*)position();
     position_ = position() + size;
 
-    JS_EXTRA_POISON(thing, JS_ALLOCATED_NURSERY_PATTERN, size);
+    JS_EXTRA_POISON(thing, JS_ALLOCATED_NURSERY_PATTERN, size, MemCheckKind::MakeUndefined);
 
 #ifdef JS_GC_ZEAL
     if (runtime()->gc.hasZealMode(ZealMode::CheckNursery)) {
@@ -669,6 +678,13 @@ js::Nursery::endProfile(ProfileKey key)
     totalDurations_[key] += profileDurations_[key];
 }
 
+bool
+js::Nursery::needIdleTimeCollection() const {
+    uint32_t threshold =
+        runtime()->gc.tunables.nurseryFreeThresholdForIdleCollection();
+    return minorGCRequested() || freeSpace() < threshold;
+}
+
 static inline bool
 IsFullStoreBufferReason(JS::gcreason::Reason reason)
 {
@@ -683,7 +699,8 @@ IsFullStoreBufferReason(JS::gcreason::Reason reason)
 void
 js::Nursery::collect(JS::gcreason::Reason reason)
 {
-    MOZ_ASSERT(!TlsContext.get()->suppressGC);
+    JSRuntime* rt = runtime();
+    MOZ_ASSERT(!rt->mainContextFromOwnThread()->suppressGC);
 
     mozilla::recordreplay::AutoDisallowThreadEvents disallow;
 
@@ -692,13 +709,11 @@ js::Nursery::collect(JS::gcreason::Reason reason)
         // storebuffer even when the nursery is disabled or empty. It's not safe
         // to keep these entries as they may refer to tenured cells which may be
         // freed after this point.
-        runtime()->gc.storeBuffer().clear();
+        rt->gc.storeBuffer().clear();
     }
 
     if (!isEnabled())
         return;
-
-    JSRuntime* rt = runtime();
 
 #ifdef JS_GC_ZEAL
     if (rt->gc.hasZealMode(ZealMode::CheckNursery)) {
@@ -745,21 +760,25 @@ js::Nursery::collect(JS::gcreason::Reason reason)
         IsFullStoreBufferReason(reason);
 
     if (shouldPretenure) {
-        JSContext* cx = TlsContext.get();
+        JSContext* cx = rt->mainContextFromOwnThread();
         for (auto& entry : tenureCounts.entries) {
             if (entry.count >= 3000) {
                 ObjectGroup* group = entry.group;
-                if (group->canPreTenure() && group->zone()->group()->canEnterWithoutYielding(cx)) {
-                    AutoCompartment ac(cx, group);
-                    group->setShouldPreTenure(cx);
+                AutoCompartment ac(cx, group);
+                AutoSweepObjectGroup sweep(group);
+                if (group->canPreTenure(sweep)) {
+                    group->setShouldPreTenure(sweep, cx);
                     pretenureCount++;
                 }
             }
         }
     }
+
+    mozilla::Maybe<AutoTraceSession> session;
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         if (shouldPretenure && zone->allocNurseryStrings && zone->tenuredStrings >= 30 * 1000) {
-            JSRuntime::AutoProhibitActiveContextChange apacc(rt);
+            if (!session.isSome())
+                session.emplace(rt, JS::HeapState::MinorCollecting);
             CancelOffThreadIonCompile(zone);
             bool preserving = zone->isPreservingCode();
             zone->setPreservingCode(false);
@@ -775,6 +794,7 @@ js::Nursery::collect(JS::gcreason::Reason reason)
         }
         zone->tenuredStrings = 0;
     }
+    session.reset(); // End the minor GC session, if running one.
     endProfile(ProfileKey::Pretenure);
 
     // We ignore gcMaxBytes when allocating for minor collection. However, if we
@@ -816,7 +836,8 @@ js::Nursery::collect(JS::gcreason::Reason reason)
             for (auto& entry : tenureCounts.entries) {
                 if (entry.count >= reportTenurings_) {
                     fprintf(stderr, "  %d x ", entry.count);
-                    entry.group->print();
+                    AutoSweepObjectGroup sweep(entry.group);
+                    entry.group->print(sweep);
                 }
             }
         }
@@ -824,8 +845,7 @@ js::Nursery::collect(JS::gcreason::Reason reason)
 }
 
 void
-js::Nursery::doCollection(JS::gcreason::Reason reason,
-                          TenureCountCache& tenureCounts)
+js::Nursery::doCollection(JS::gcreason::Reason reason, TenureCountCache& tenureCounts)
 {
     JSRuntime* rt = runtime();
     AutoTraceSession session(rt, JS::HeapState::MinorCollecting);
@@ -979,7 +999,7 @@ js::Nursery::freeMallocedBuffers()
     }
 
     if (!started)
-        freeMallocedBuffersTask->runFromActiveCooperatingThread(runtime());
+        freeMallocedBuffersTask->runFromMainThread(runtime());
 
     MOZ_ASSERT(mallocedBuffers.empty());
 }
@@ -1023,13 +1043,18 @@ js::Nursery::clear()
 #if defined(JS_GC_ZEAL) || defined(JS_CRASH_DIAGNOSTICS)
     /* Poison the nursery contents so touching a freed object will crash. */
     for (unsigned i = currentStartChunk_; i < allocatedChunkCount(); ++i)
-        chunk(i).poisonAndInit(runtime(), JS_SWEPT_NURSERY_PATTERN);
+        chunk(i).poisonAfterSweep();
 #endif
 
     if (runtime()->hasZealMode(ZealMode::GenerationalGC)) {
         /* Only reset the alloc point when we are close to the end. */
-        if (currentChunk_ + 1 == maxChunkCount())
+        if (currentChunk_ + 1 == maxChunkCount()) {
             setCurrentChunk(0);
+        } else {
+            // poisonAfterSweep poisons the chunk trailer. Ensure it's
+            // initialized.
+            chunk(currentChunk_).poisonAndInit(runtime());
+        }
     } else {
         setCurrentChunk(0);
     }
@@ -1064,7 +1089,7 @@ js::Nursery::setCurrentChunk(unsigned chunkno)
     currentEnd_ = chunk(chunkno).end();
     if (canAllocateStrings_)
         currentStringEnd_ = currentEnd_;
-    chunk(chunkno).poisonAndInit(runtime(), JS_FRESH_NURSERY_PATTERN);
+    chunk(chunkno).poisonAndInit(runtime());
 }
 
 bool

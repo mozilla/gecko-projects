@@ -12,13 +12,17 @@ var {Toolbox} = require("devtools/client/framework/toolbox");
 const {LocalizationHelper} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper("devtools/client/locales/toolbox.properties");
 
-add_task(async function () {
+add_task(async function() {
   let tab = await addTab("about:blank");
   let target = TargetFactory.forTab(tab);
   await target.makeRemote();
 
   let toolIDs = gDevTools.getToolDefinitionArray()
-                         .filter(def => def.isTargetSupported(target))
+                         .filter(
+                           def =>
+                             def.isTargetSupported(target) &&
+                             def.id !== "options"
+                         )
                          .map(def => def.id);
 
   let toolbox = await gDevTools.showToolbox(target, toolIDs[0], Toolbox.HostType.BOTTOM);

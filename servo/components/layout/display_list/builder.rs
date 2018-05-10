@@ -66,9 +66,9 @@ use style::servo::restyle_damage::ServoRestyleDamage;
 use style::values::{Either, RGBA};
 use style::values::computed::Gradient;
 use style::values::computed::effects::SimpleShadow;
-use style::values::computed::pointing::Cursor;
 use style::values::generics::background::BackgroundSize;
 use style::values::generics::image::{GradientKind, Image, PaintWorklet};
+use style::values::generics::pointing::Cursor;
 use style_traits::CSSPixel;
 use style_traits::ToCss;
 use style_traits::cursor::CursorKind;
@@ -1800,7 +1800,8 @@ impl FragmentDisplayListBuilding for Fragment {
                             let ipc_renderer = ipc_renderer.lock().unwrap();
                             let (sender, receiver) = ipc::channel().unwrap();
                             ipc_renderer
-                                .send(CanvasMsg::FromLayout(FromLayoutMsg::SendData(sender)))
+                                .send(CanvasMsg::FromLayout(FromLayoutMsg::SendData(sender),
+                                canvas_fragment_info.canvas_id.clone()))
                                 .unwrap();
                             (receiver.recv().unwrap().image_key, PixelFormat::BGRA8)
                         },
@@ -2951,11 +2952,11 @@ impl ComputedValuesCursorUtility for ComputedValues {
     fn get_cursor(&self, default_cursor: CursorKind) -> Option<CursorKind> {
         match (
             self.get_pointing().pointer_events,
-            self.get_pointing().cursor,
+            &self.get_pointing().cursor,
         ) {
             (PointerEvents::None, _) => None,
-            (PointerEvents::Auto, Cursor(CursorKind::Auto)) => Some(default_cursor),
-            (PointerEvents::Auto, Cursor(cursor)) => Some(cursor),
+            (PointerEvents::Auto, &Cursor { keyword: CursorKind::Auto, .. }) => Some(default_cursor),
+            (PointerEvents::Auto, &Cursor { keyword, .. }) => Some(keyword),
         }
     }
 }

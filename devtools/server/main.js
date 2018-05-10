@@ -16,9 +16,9 @@ var { LocalDebuggerTransport, ChildDebuggerTransport, WorkerDebuggerTransport } 
   require("devtools/shared/transport/transport");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { dumpn } = DevToolsUtils;
-var flags = require("devtools/shared/flags");
 
 DevToolsUtils.defineLazyGetter(this, "DebuggerSocket", () => {
+  // eslint-disable-next-line no-shadow
   let { DebuggerSocket } = require("devtools/shared/security/socket");
   return DebuggerSocket;
 });
@@ -26,6 +26,7 @@ DevToolsUtils.defineLazyGetter(this, "Authentication", () => {
   return require("devtools/shared/security/auth");
 });
 DevToolsUtils.defineLazyGetter(this, "generateUUID", () => {
+  // eslint-disable-next-line no-shadow
   let { generateUUID } = Cc["@mozilla.org/uuid-generator;1"]
                            .getService(Ci.nsIUUIDGenerator);
   return generateUUID;
@@ -33,24 +34,12 @@ DevToolsUtils.defineLazyGetter(this, "generateUUID", () => {
 
 // Overload `Components` to prevent DevTools loader exception on Components
 // object usage
+// eslint-disable-next-line no-unused-vars
 Object.defineProperty(this, "Components", {
   get() {
     return require("chrome").components;
   }
 });
-
-if (isWorker) {
-  flags.wantLogging = true;
-  flags.wantVerbose = true;
-} else {
-  const LOG_PREF = "devtools.debugger.log";
-  const VERBOSE_PREF = "devtools.debugger.log.verbose";
-
-  flags.wantLogging = Services.prefs.getBoolPref(LOG_PREF);
-  flags.wantVerbose =
-    Services.prefs.getPrefType(VERBOSE_PREF) !== Services.prefs.PREF_INVALID &&
-    Services.prefs.getBoolPref(VERBOSE_PREF);
-}
 
 const CONTENT_PROCESS_SERVER_STARTUP_SCRIPT =
   "resource://devtools/server/startup/content-process.js";
@@ -493,11 +482,6 @@ var DebuggerServer = {
     this.registerModule("devtools/server/actors/framerate", {
       prefix: "framerate",
       constructor: "FramerateActor",
-      type: { tab: true }
-    });
-    this.registerModule("devtools/server/actors/eventlooplag", {
-      prefix: "eventLoopLag",
-      constructor: "EventLoopLagActor",
       type: { tab: true }
     });
     this.registerModule("devtools/server/actors/reflow", {
@@ -986,7 +970,7 @@ var DebuggerServer = {
    *
    * @param object connection
    *        The debugger server connection to use.
-   * @param nsIDOMElement frame
+   * @param Element frame
    *        The frame element with remote content to connect to.
    * @param function [onDestroy]
    *        Optional function to invoke when the child process closes
@@ -1604,10 +1588,9 @@ DebuggerServerConnection.prototype = {
     if (actor instanceof ObservedActorFactory) {
       try {
         actor = actor.createActor();
-      } catch (e) {
-        this.transport.send(this._unknownError(
-          "Error occurred while creating actor '" + actor.name,
-          e));
+      } catch (error) {
+        let prefix = "Error occurred while creating actor '" + actor.name;
+        this.transport.send(this._unknownError(actorID, prefix, error));
       }
     } else if (typeof (actor) !== "object") {
       // ActorPools should now contain only actor instances (i.e. objects)
@@ -1628,11 +1611,12 @@ DebuggerServerConnection.prototype = {
     return null;
   },
 
-  _unknownError(prefix, error) {
+  _unknownError(from, prefix, error) {
     let errorString = prefix + ": " + DevToolsUtils.safeErrorString(error);
     reportError(errorString);
     dumpn(errorString);
     return {
+      from,
       error: "unknownError",
       message: errorString
     };
@@ -1651,15 +1635,14 @@ DebuggerServerConnection.prototype = {
         response.from = from;
       }
       this.transport.send(response);
-    }).catch((e) => {
+    }).catch((error) => {
       if (!this.transport) {
         throw new Error(`Connection closed, pending error from ${from}, ` +
                         `type ${type} failed`);
       }
-      let errorPacket = this._unknownError(
-        "error occurred while processing '" + type, e);
-      errorPacket.from = from;
-      this.transport.send(errorPacket);
+
+      let prefix = "error occurred while processing '" + type;
+      this.transport.send(this._unknownError(from, prefix, error));
     });
 
     this._actorResponses.set(from, responsePromise);
@@ -1776,10 +1759,9 @@ DebuggerServerConnection.prototype = {
       try {
         this.currentPacket = packet;
         ret = actor.requestTypes[packet.type].bind(actor)(packet, this);
-      } catch (e) {
-        this.transport.send(this._unknownError(
-          "error occurred while processing '" + packet.type,
-          e));
+      } catch (error) {
+        let prefix = "error occurred while processing '" + packet.type;
+        this.transport.send(this._unknownError(actor.actorID, prefix, error));
       } finally {
         this.currentPacket = undefined;
       }
@@ -1839,10 +1821,10 @@ DebuggerServerConnection.prototype = {
     if (actor.requestTypes && actor.requestTypes[type]) {
       try {
         ret = actor.requestTypes[type].call(actor, packet);
-      } catch (e) {
-        this.transport.send(this._unknownError(
-          "error occurred while processing bulk packet '" + type, e));
-        packet.done.reject(e);
+      } catch (error) {
+        let prefix = "error occurred while processing bulk packet '" + type;
+        this.transport.send(this._unknownError(actorKey, prefix, error));
+        packet.done.reject(error);
       }
     } else {
       let message = "Actor " + actorKey +

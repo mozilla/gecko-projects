@@ -10,7 +10,6 @@
 #include "BufferReader.h"
 #include "ByteWriter.h"
 #include "MediaData.h"
-#include "nsAutoPtr.h"
 
 namespace mozilla
 {
@@ -55,7 +54,7 @@ AnnexB::ConvertSampleToAnnexB(mozilla::MediaRawData* aSample, bool aAddSPS)
     }
   }
 
-  nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
+  UniquePtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
 
   if (!samplewriter->Replace(tmp.Elements(), tmp.Length())) {
     return Err(NS_ERROR_OUT_OF_MEMORY);
@@ -74,8 +73,13 @@ AnnexB::ConvertSampleToAnnexB(mozilla::MediaRawData* aSample, bool aAddSPS)
     // the length of the first clear data subsample. Otherwise decryption
     // will fail.
     if (aSample->mCrypto.mValid) {
-      MOZ_ASSERT(samplewriter->mCrypto.mPlainSizes.Length() > 0);
-      samplewriter->mCrypto.mPlainSizes[0] += annexB->Length();
+      if (aSample->mCrypto.mPlainSizes.Length() == 0) {
+        samplewriter->mCrypto.mPlainSizes.AppendElement(annexB->Length());
+        samplewriter->mCrypto.mEncryptedSizes.AppendElement(
+          samplewriter->Size() - annexB->Length());
+      } else {
+        samplewriter->mCrypto.mPlainSizes[0] += annexB->Length();
+      }
     }
   }
 
@@ -254,7 +258,7 @@ AnnexB::ConvertSampleToAVCC(mozilla::MediaRawData* aSample)
   if (ParseNALUnits(writer, reader).isErr()) {
     return false;
   }
-  nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
+  UniquePtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
   if (!samplewriter->Replace(nalu.Elements(), nalu.Length())) {
     return false;
   }
@@ -308,7 +312,7 @@ AnnexB::ConvertSampleTo4BytesAVCC(mozilla::MediaRawData* aSample)
       return Err(NS_ERROR_OUT_OF_MEMORY);
     }
   }
-  nsAutoPtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
+  UniquePtr<MediaRawDataWriter> samplewriter(aSample->CreateWriter());
   if (!samplewriter->Replace(dest.Elements(), dest.Length())) {
     return Err(NS_ERROR_OUT_OF_MEMORY);
   }

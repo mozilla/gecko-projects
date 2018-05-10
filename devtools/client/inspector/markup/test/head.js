@@ -19,12 +19,6 @@ var {ActorRegistryFront} = require("devtools/shared/fronts/actor-registry");
 // lines.
 SimpleTest.requestCompleteLog();
 
-// Set the testing flag on DevToolsUtils and reset it when the test ends
-flags.testing = true;
-registerCleanupFunction(() => {
-  flags.testing = false;
-});
-
 // Toggle this pref on to see all DevTools event communication. This is hugely
 // useful for fixing race conditions.
 // Services.prefs.setBoolPref("devtools.dump.emit", true);
@@ -546,14 +540,14 @@ async function simulateNodeDragAndDrop(inspector, selector, xOffset, yOffset) {
 /**
  * Waits until the element has not scrolled for 30 consecutive frames.
  */
-function* waitForScrollStop(doc) {
+async function waitForScrollStop(doc) {
   let el = doc.documentElement;
   let win = doc.defaultView;
   let lastScrollTop = el.scrollTop;
   let stopFrameCount = 0;
   while (stopFrameCount < 30) {
     // Wait for a frame.
-    yield new Promise(resolve => win.requestAnimationFrame(resolve));
+    await new Promise(resolve => win.requestAnimationFrame(resolve));
 
     // Check if the element has scrolled.
     if (lastScrollTop == el.scrollTop) {
@@ -618,17 +612,4 @@ async function checkDeleteAndSelection(inspector, key,
   await undoChange(inspector);
   node = await getNodeFront(selector, inspector);
   ok(node, "The node is back");
-}
-
-/**
- * Expand the provided markup container by clicking on the expand arrow and waiting for
- * inspector and children to update.
- */
-async function expandContainer(inspector, container) {
-  let onChildren = waitForChildrenUpdated(inspector);
-  let onUpdated = inspector.once("inspector-updated");
-  EventUtils.synthesizeMouseAtCenter(container.expander, {},
-    inspector.markup.doc.defaultView);
-  await onChildren;
-  await onUpdated;
 }

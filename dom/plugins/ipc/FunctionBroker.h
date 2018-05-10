@@ -9,6 +9,7 @@
 
 #include <map>
 #include <algorithm>
+#include <utility>
 #include "base/task.h"
 #include "mozilla/ipc/ProcessChild.h"
 #include "FunctionBrokerChild.h"
@@ -1195,6 +1196,22 @@ struct ResponseHandler<functionId, ResultType HOOK_CALL (ParamTypes...)> :
 };
 
 /**
+ * Reference-counted monitor, used to synchronize communication between a
+ * thread using a brokered API and the FunctionDispatch thread.
+ */
+class FDMonitor : public Monitor
+{
+public:
+  FDMonitor() : Monitor("FunctionDispatchThread lock")
+  {}
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FDMonitor)
+
+private:
+  ~FDMonitor() {}
+};
+
+/**
  * Data for hooking a function that we automatically broker in a remote
  * process.
  */
@@ -1263,14 +1280,14 @@ protected:
                         IpdlTuple *aOutTuple) const
   {
     return BrokerCallServer(aClientId, aInTuple, aOutTuple,
-                             typename IndexSequenceFor<ParamTypes...>::Type());
+                             std::index_sequence_for<ParamTypes...>{});
   }
 
   bool BrokerCallClient(uint32_t& aWinError, ResultType& aResult, ParamTypes&... aParameters) const;
   bool PostToDispatchThread(uint32_t& aWinError, ResultType& aRet, ParamTypes&... aParameters) const;
 
   static void
-  PostToDispatchHelper(const SelfType* bmhi, Monitor* monitor, bool* notified,
+  PostToDispatchHelper(const SelfType* bmhi, RefPtr<FDMonitor> monitor, bool* notified,
                        bool* ok, uint32_t* winErr, ResultType* r, ParamTypes*... p)
   {
     // Note: p is also non-null... its just hard to assert that.
@@ -1278,15 +1295,14 @@ protected:
     MOZ_ASSERT(*notified == false);
     *ok = bmhi->BrokerCallClient(*winErr, *r, *p...);
 
-    // We need to grab the lock to make sure that Wait() has been
-    // called in PostToDispatchThread.  We need that since we wake it with
-    // Notify().
-    // We also need to keep the lock until _after_ Notify() has been called
-    // since, after we set notified to true, a spurious wakeup could lead
-    // the other thread to wake and proceed -- and one of its first acts would
-    // be to destroy the Monitor.
-    MonitorAutoLock lock(*monitor);
-    *notified = true;
+    {
+      // We need to grab the lock to make sure that Wait() has been
+      // called in PostToDispatchThread.  We need that since we wake it with
+      // Notify().
+      MonitorAutoLock lock(*monitor);
+      *notified = true;
+    }
+
     monitor->Notify();
   };
 
@@ -1303,7 +1319,7 @@ protected:
 
   template<size_t... Indices>
   bool BrokerCallServer(base::ProcessId aClientId, const IpdlTuple &aInTuple,
-                         IpdlTuple *aOutTuple, IndexSequence<Indices...>) const
+                         IpdlTuple *aOutTuple, std::index_sequence<Indices...>) const
   {
     TupleParamTypes paramTuple;
     return BrokerCallServer(aClientId, aInTuple, aOutTuple,
@@ -1455,19 +1471,19 @@ PostToDispatchThread(uint32_t& aWinError, ResultType& aRet,
 
   // Run PostToDispatchHelper on the dispatch thread.  It will notify our
   // waiting monitor when it is done.
-  Monitor monitor("FunctionDispatchThread Lock");
-  MonitorAutoLock lock(monitor);
+  RefPtr<FDMonitor> monitor(new FDMonitor());
+  MonitorAutoLock lock(*monitor);
   bool success = false;
   bool notified = false;
   FunctionBrokerChild::GetInstance()->PostToDispatchThread(
     NewRunnableFunction("FunctionDispatchThreadRunnable", &PostToDispatchHelper,
-                        this, &monitor, &notified, &success, &aWinError, &aRet,
+                        this, monitor, &notified, &success, &aWinError, &aRet,
                         &aParameters...));
 
   // We wait to be notified, testing that notified was actually set to make
   // sure this isn't a spurious wakeup.
   while (!notified) {
-    monitor.Wait();
+    monitor->Wait();
   }
   return success;
 }

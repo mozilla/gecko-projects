@@ -31,7 +31,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLStyleElement,
                                            nsGenericHTMLElement)
 
-  NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML) override;
+  void GetInnerHTML(nsAString& aInnerHTML, OOMReporter& aError) override;
   using nsGenericHTMLElement::SetInnerHTML;
   virtual void SetInnerHTML(const nsAString& aInnerHTML,
                             nsIPrincipal* aSubjectPrincipal,
@@ -84,12 +84,8 @@ public:
 protected:
   virtual ~HTMLStyleElement();
 
-  already_AddRefed<nsIURI>
-    GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal) final;
-  void GetStyleSheetInfo(nsAString& aTitle,
-                         nsAString& aType,
-                         nsAString& aMedia,
-                         bool* aIsAlternate) final;
+  Maybe<SheetInfo> GetStyleSheetInfo() final;
+
   /**
    * Common method to call from the various mutation observer methods.
    * aContent is a content node that's either the one that changed or its

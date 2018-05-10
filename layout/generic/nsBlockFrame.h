@@ -45,7 +45,7 @@ class nsBulletFrame;
 namespace mozilla {
 class BlockReflowInput;
 class ServoRestyleState;
-class StyleSetHandle;
+class ServoStyleSet;
 } // namespace mozilla
 
 /**
@@ -148,8 +148,8 @@ public:
                nsIFrame::eBlockFrame));
   }
 
-  void InvalidateFrame(uint32_t aDisplayItemKey = 0) override;
-  void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) override;
+  void InvalidateFrame(uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
+  void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0, bool aRebuildDisplayItems = true) override;
 
 #ifdef DEBUG_FRAME_DUMP
   void List(FILE* out = stderr, const char* aPrefix = "", uint32_t aFlags = 0) const override;
@@ -225,7 +225,7 @@ public:
   };
 
   void ChildIsDirty(nsIFrame* aChild) override;
-  bool IsVisibleInSelection(nsISelection* aSelection) override;
+  bool IsVisibleInSelection(mozilla::dom::Selection* aSelection) override;
 
   bool IsEmpty() override;
   bool CachedIsEmpty() override;
@@ -938,12 +938,12 @@ protected:
   // Remove and return the pushed floats list.
   nsFrameList* RemovePushedFloats();
 
-  // Resolve a style context for our bullet frame.  aType should be
+  // Resolve a ComputedStyle for our bullet frame.  aType should be
   // mozListBullet or mozListNumber.  Passing in the style set is an
   // optimization, because all callsites have it.
   already_AddRefed<ComputedStyle> ResolveBulletStyle(
     mozilla::CSSPseudoElementType aType,
-    mozilla::StyleSetHandle aStyleSet);
+    mozilla::ServoStyleSet* aStyleSet);
 
 #ifdef DEBUG
   void VerifyLines(bool aFinalCheckOK);

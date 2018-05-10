@@ -109,7 +109,7 @@ impl RenderNotifier for Notifier {
         self.update(false);
     }
 
-    fn new_document_ready(&self, _: DocumentId, scrolled: bool, _composite_needed: bool) {
+    fn new_frame_ready(&self, _: DocumentId, scrolled: bool, _composite_needed: bool) {
         self.update(!scrolled);
     }
 }
@@ -197,7 +197,7 @@ impl Wrench {
             )) as Box<webrender::ApiRecordingReceiver>,
         });
 
-        let mut debug_flags = DebugFlags::default();
+        let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES;
         debug_flags.set(DebugFlags::DISABLE_BATCHING, no_batch);
         let callbacks = Arc::new(Mutex::new(blob::BlobCallbacks::new()));
 
@@ -283,9 +283,9 @@ impl Wrench {
         render_mode: Option<FontRenderMode>,
         text: &str,
         size: Au,
-        origin: LayerPoint,
+        origin: LayoutPoint,
         flags: FontInstanceFlags,
-    ) -> (Vec<u32>, Vec<LayerPoint>, LayoutRect) {
+    ) -> (Vec<u32>, Vec<LayoutPoint>, LayoutRect) {
         // Map the string codepoints to glyph indices in this font.
         // Just drop any glyph that isn't present in this font.
         let indices: Vec<u32> = self.api
@@ -302,7 +302,7 @@ impl Wrench {
         for glyph_index in &indices {
             keys.push(GlyphKey::new(
                 *glyph_index,
-                LayerPoint::zero(),
+                LayoutPoint::zero(),
                 render_mode,
                 subpx_dir,
             ));
@@ -314,12 +314,12 @@ impl Wrench {
 
         let mut cursor = origin;
         let direction = if flags.contains(FontInstanceFlags::TRANSPOSE) {
-            LayerVector2D::new(
+            LayoutVector2D::new(
                 0.0,
                 if flags.contains(FontInstanceFlags::FLIP_Y) { -1.0 } else { 1.0 },
             )
         } else {
-            LayerVector2D::new(
+            LayoutVector2D::new(
                 if flags.contains(FontInstanceFlags::FLIP_X) { -1.0 } else { 1.0 },
                 0.0,
             )
@@ -467,6 +467,7 @@ impl Wrench {
         size: Au,
         flags: FontInstanceFlags,
         render_mode: Option<FontRenderMode>,
+        bg_color: Option<ColorU>,
     ) -> FontInstanceKey {
         let key = self.api.generate_font_instance_key();
         let mut update = ResourceUpdates::new();
@@ -474,6 +475,9 @@ impl Wrench {
         options.flags |= flags;
         if let Some(render_mode) = render_mode {
             options.render_mode = render_mode;
+        }
+        if let Some(bg_color) = bg_color {
+            options.bg_color = bg_color;
         }
         update.add_font_instance(key, font_key, size, Some(options), None, Vec::new());
         self.api.update_resources(update);
@@ -500,8 +504,8 @@ impl Wrench {
     pub fn send_lists(
         &mut self,
         frame_number: u32,
-        display_lists: Vec<(PipelineId, LayerSize, BuiltDisplayList)>,
-        scroll_offsets: &HashMap<ExternalScrollId, LayerPoint>,
+        display_lists: Vec<(PipelineId, LayoutSize, BuiltDisplayList)>,
+        scroll_offsets: &HashMap<ExternalScrollId, LayoutPoint>,
     ) {
         let root_background_color = Some(ColorF::new(1.0, 1.0, 1.0, 1.0));
 
@@ -515,27 +519,11 @@ impl Wrench {
                 false,
             );
         }
-        // TODO(nical) - Need to separate the set_display_list from the scrolling
-        // operations into separate transactions for mysterious -but probably related
-        // to the other comment below- reasons.
-        self.api.send_transaction(self.document_id, txn);
 
-        let mut txn = Transaction::new();
         for (id, offset) in scroll_offsets {
             txn.scroll_node_with_id(*offset, *id, ScrollClamping::NoClamping);
         }
-        // TODO(nical) - Wrench does not notify frames when there was scrolling
-        // in the transaction (See RenderNotifier implementations). If we don't
-        // generate a frame after scrolling, wrench just stops and some tests
-        // will time out.
-        // I suppose this was to avoid taking the snapshot after scrolling if
-        // there was other updates coming in a subsequent messages but it's very
-        // error-prone with transactions.
-        // For now just send two transactions to avoid the deadlock, but we should
-        // figure this out.
-        self.api.send_transaction(self.document_id, txn);
 
-        let mut txn = Transaction::new();
         txn.generate_frame();
         self.api.send_transaction(self.document_id, txn);
     }
@@ -575,6 +563,7 @@ impl Wrench {
             "M - Trigger memory pressure event",
             "T - Save CPU profile to a file",
             "C - Save a capture to captures/wrench/",
+            "X - Do a hit test at the current cursor position",
         ];
 
         let color_and_offset = [(*BLACK_COLOR, 2.0), (*WHITE_COLOR, 0.0)];

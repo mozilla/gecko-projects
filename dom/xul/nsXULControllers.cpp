@@ -13,7 +13,6 @@
 #include "nsString.h"
 
 #include "nsIControllers.h"
-#include "nsIDOMElement.h"
 #include "nsXULControllers.h"
 #include "nsIController.h"
 
@@ -46,7 +45,7 @@ nsXULControllers::DeleteControllers()
 nsresult
 NS_NewXULControllers(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 {
-  NS_PRECONDITION(aOuter == nullptr, "no aggregation");
+  MOZ_ASSERT(aOuter == nullptr, "no aggregation");
   if (aOuter)
     return NS_ERROR_NO_AGGREGATION;
 

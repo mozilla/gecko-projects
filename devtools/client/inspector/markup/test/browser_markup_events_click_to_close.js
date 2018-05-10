@@ -27,10 +27,10 @@ add_task(async function() {
   await inspector.markup.expandAll();
 
   let container1 = await getContainerForSelector("#d1", inspector);
-  let evHolder1 = container1.elt.querySelector(".markupview-events");
+  let evHolder1 = container1.elt.querySelector(".markupview-event-badge");
 
   let container2 = await getContainerForSelector("#d2", inspector);
-  let evHolder2 = container2.elt.querySelector(".markupview-events");
+  let evHolder2 = container2.elt.querySelector(".markupview-event-badge");
 
   let tooltip = inspector.markup.eventDetailsTooltip;
 
@@ -53,15 +53,15 @@ add_task(async function() {
   await onShown;
   info("event tooltip for the second div is shown");
 
-  info("Click on the animation inspector tab");
+  info("Click on the computed view tab");
   let onHighlighterHidden = toolbox.once("node-unhighlight");
-  let onTabInspectorSelected = inspector.sidebar.once("animationinspector-selected");
-  let animationInspectorTab = inspector.panelDoc.querySelector("#animationinspector-tab");
-  EventUtils.synthesizeMouseAtCenter(animationInspectorTab, {},
+  let onTabComputedViewSelected = inspector.sidebar.once("computedview-selected");
+  let computedViewTab = inspector.panelDoc.querySelector("#computedview-tab");
+  EventUtils.synthesizeMouseAtCenter(computedViewTab, {},
     inspector.panelDoc.defaultView);
 
-  await onTabInspectorSelected;
-  info("animation inspector was selected");
+  await onTabComputedViewSelected;
+  info("computed view was selected");
 
   await onHighlighterHidden;
   info("box model highlighter hidden after moving the mouse out of the markup view");

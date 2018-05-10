@@ -20,6 +20,8 @@ ChromeUtils.defineModuleGetter(this, "Status",
                                "resource://services-sync/status.js");
 ChromeUtils.defineModuleGetter(this, "AddonManager",
                                "resource://gre/modules/AddonManager.jsm");
+ChromeUtils.defineModuleGetter(this, "fxAccounts",
+                               "resource://gre/modules/FxAccounts.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "IdleService",
                                    "@mozilla.org/widget/idleservice;1",
                                    "nsIIdleService");
@@ -202,11 +204,27 @@ SyncScheduler.prototype = {
         }
         break;
       case "network:link-status-changed":
-        if (!this.offline) {
+        // Note: NetworkLinkService is unreliable, we get false negatives for it
+        // in cases such as VMs (bug 1420802), so we don't want to use it in
+        // `get offline`, but we assume that it's probably reliable if we're
+        // getting status changed events. (We might be wrong about this, but
+        // if that's true, then the only downside is that we won't sync as
+        // promptly).
+        let isOffline = this.offline;
+        this._log.debug(`Network link status changed to "${data}". Offline?`,
+                        isOffline);
+        // Data may be one of `up`, `down`, `change`, or `unknown`. We only want
+        // to sync if it's "up".
+        if (data == "up" && !isOffline) {
           this._log.debug("Network link looks up. Syncing.");
           this.scheduleNextSync(0, {why: topic});
+        } else if (data == "down") {
+          // Unschedule pending syncs if we know we're going down. We don't do
+          // this via `checkSyncStatus`, since link status isn't reflected in
+          // `this.offline`.
+          this.clearSyncTriggers();
         }
-        // Intended fallthrough
+        break;
       case "network:offline-status-changed":
       case "captive-portal-detected":
         // Whether online or offline, we'll reschedule syncs
@@ -515,6 +533,11 @@ SyncScheduler.prototype = {
       return;
     }
     Services.tm.dispatchToMainThread(() => {
+      // Terrible hack below: we do the fxa messages polling in the sync
+      // scheduler to get free post-wake/link-state etc detection.
+      fxAccounts.messages.consumeRemoteMessages().catch(e => {
+        this._log.error("Error while polling for FxA messages.", e);
+      });
       this.service.sync({engines, why});
     });
   },
@@ -703,8 +726,6 @@ ErrorHandler.prototype = {
           this._log.debug(engine_name + " was interrupted due to the application shutting down");
         } else {
           this._log.debug(engine_name + " failed", exception);
-          Services.telemetry.getKeyedHistogramById("WEAVE_ENGINE_SYNC_ERRORS")
-                            .add(engine_name);
         }
         break;
       }
@@ -752,7 +773,20 @@ ErrorHandler.prototype = {
         break;
       case "weave:service:start-over:finish":
         // ensure we capture any logs between the last sync and the reset completing.
-        this.resetFileLog();
+        this.resetFileLog().then(() => {
+          // although for privacy reasons we also delete all logs (but we allow
+          // a preference to avoid this to help with debugging.)
+          if (!Svc.Prefs.get("log.keepLogsOnReset", false)) {
+            return this._logManager.removeAllLogs().then(() => {
+              Svc.Obs.notify("weave:service:remove-file-log");
+            });
+          }
+          return null;
+        }).catch(err => {
+          // So we failed to delete the logs - take the ironic option of
+          // writing this error to the logs we failed to delete!
+          this._log.error("Failed to delete logs on reset", err);
+        });
         break;
     }
   },
@@ -768,9 +802,9 @@ ErrorHandler.prototype = {
     }
 
     let relevantAddons = addons.filter(x => x.isActive && !x.hidden);
-    this._log.debug("Addons installed", relevantAddons.length);
+    this._log.trace("Addons installed", relevantAddons.length);
     for (let addon of relevantAddons) {
-      this._log.debug(" - ${name}, version ${version}, id ${id}", addon);
+      this._log.trace(" - ${name}, version ${version}, id ${id}", addon);
     }
   },
 

@@ -4,13 +4,26 @@
 
 "use strict";
 
-var promise = require("promise");
-var defer = require("devtools/shared/defer");
 const { extend } = require("devtools/shared/extend");
 var EventEmitter = require("devtools/shared/event-emitter");
 var {getStack, callFunctionWithAsyncStack} = require("devtools/shared/platform/stack");
 var {settleAll} = require("devtools/shared/DevToolsUtils");
 var {lazyLoadSpec, lazyLoadFront} = require("devtools/shared/specs/index");
+
+// Bug 1454373: devtools/shared/defer still uses Promise.jsm which is slower
+// than DOM Promises. So implement our own copy of `defer` based on DOM Promises.
+function defer() {
+  let resolve, reject;
+  let promise = new Promise(function() {
+    resolve = arguments[0];
+    reject = arguments[1];
+  });
+  return {
+    resolve: resolve,
+    reject: reject,
+    promise: promise
+  };
+}
 
 /**
  * Types: named marshallers/demarshallers.
@@ -114,7 +127,7 @@ function identityWrite(v) {
   }
   // This has to handle iterator->array conversion because arrays of
   // primitive types pass through here.
-  if (v && typeof (v) === "object" && Symbol.iterator in v) {
+  if (v && typeof v.next === "function") {
     return [...v];
   }
   return v;
@@ -202,8 +215,18 @@ types.addArrayType = function(subtype) {
   }
   return types.addType(name, {
     category: "array",
-    read: (v, ctx) => [...v].map(i => subtype.read(i, ctx)),
-    write: (v, ctx) => [...v].map(i => subtype.write(i, ctx))
+    read: (v, ctx) => {
+      if (v && typeof v.next === "function") {
+        v = [...v];
+      }
+      return v.map(i => subtype.read(i, ctx));
+    },
+    write: (v, ctx) => {
+      if (v && typeof v.next === "function") {
+        v = [...v];
+      }
+      return v.map(i => subtype.write(i, ctx));
+    }
   });
 };
 
@@ -218,14 +241,27 @@ types.addArrayType = function(subtype) {
  *    A dict of property names => type
  */
 types.addDictType = function(name, specializations) {
+  let specTypes = {};
+  for (let prop in specializations) {
+    try {
+      specTypes[prop] = types.getType(specializations[prop]);
+    } catch (e) {
+      // Types may not be defined yet. Sometimes, we define the type *after* using it, but
+      // also, we have cyclic definitions on types. So lazily load them when they are not
+      // immediately available.
+      loader.lazyGetter(specTypes, prop, () => {
+        return types.getType(specializations[prop]);
+      });
+    }
+  }
   return types.addType(name, {
     category: "dict",
-    specializations: specializations,
+    specializations,
     read: (v, ctx) => {
       let ret = {};
       for (let prop in v) {
-        if (prop in specializations) {
-          ret[prop] = types.getType(specializations[prop]).read(v[prop], ctx);
+        if (prop in specTypes) {
+          ret[prop] = specTypes[prop].read(v[prop], ctx);
         } else {
           ret[prop] = v[prop];
         }
@@ -236,8 +272,8 @@ types.addDictType = function(name, specializations) {
     write: (v, ctx) => {
       let ret = {};
       for (let prop in v) {
-        if (prop in specializations) {
-          ret[prop] = types.getType(specializations[prop]).write(v[prop], ctx);
+        if (prop in specTypes) {
+          ret[prop] = specTypes[prop].write(v[prop], ctx);
         } else {
           ret[prop] = v[prop];
         }
@@ -653,14 +689,19 @@ Request.prototype = {
    * @returns a request packet.
    */
   write: function(fnArgs, ctx) {
-    let str = JSON.stringify(this.template, (key, value) => {
+    let ret = {};
+    for (let key in this.template) {
+      let value = this.template[key];
       if (value instanceof Arg) {
-        return value.write(value.index in fnArgs ? fnArgs[value.index] : undefined,
-                           ctx, key);
+        ret[key] = value.write(value.index in fnArgs ? fnArgs[value.index] : undefined,
+                               ctx, key);
+      } else if (key == "type") {
+        ret[key] = value;
+      } else {
+        throw new Error("Request can only an object with `Arg` or `Option` properties");
       }
-      return value;
-    });
-    return JSON.parse(str);
+    }
+    return ret;
   },
 
   /**
@@ -718,12 +759,22 @@ Response.prototype = {
    *    The object writing the response.
    */
   write: function(ret, ctx) {
-    return JSON.parse(JSON.stringify(this.template, function(key, value) {
+    // Consider that `template` is either directly a `RetVal`,
+    // or a dictionary with may be one `RetVal`.
+    if (this.template instanceof RetVal) {
+      return this.template.write(ret, ctx);
+    }
+    let result = {};
+    for (let key in this.template) {
+      let value = this.template[key];
       if (value instanceof RetVal) {
-        return value.write(ret, ctx);
+        result[key] = value.write(ret, ctx);
+      } else {
+        throw new Error("Response can only be a `RetVal` instance or an object " +
+                        "with one property being a `RetVal` instance.");
       }
-      return value;
-    }));
+    }
+    return result;
   },
 
   /**
@@ -894,6 +945,13 @@ Pool.prototype = extend(EventEmitter.prototype, {
 exports.Pool = Pool;
 
 /**
+ * Keep track of which actorSpecs have been created. If a replica of a spec
+ * is created, it can be caught, and specs which inherit from other specs will
+ * not overwrite eachother.
+ */
+var actorSpecs = new WeakMap();
+
+/**
  * An actor in the actor tree.
  *
  * @param optional conn
@@ -905,13 +963,12 @@ exports.Pool = Pool;
 var Actor = function(conn) {
   Pool.call(this, conn);
 
+  this._actorSpec = actorSpecs.get(Object.getPrototypeOf(this));
   // Forward events to the connection.
   if (this._actorSpec && this._actorSpec.events) {
-    for (let key of this._actorSpec.events.keys()) {
-      let name = key;
-      let sendEvent = this._sendEvent.bind(this, name);
+    for (let [name, request] of this._actorSpec.events.entries()) {
       this.on(name, (...args) => {
-        sendEvent.apply(null, args);
+        this._sendEvent(name, request, ...args);
       });
     }
   }
@@ -928,12 +985,7 @@ Actor.prototype = extend(Pool.prototype, {
     return "[Actor " + this.typeName + "/" + this.actorID + "]";
   },
 
-  _sendEvent: function(name, ...args) {
-    if (!this._actorSpec.events.has(name)) {
-      // It's ok to emit events that don't go over the wire.
-      return;
-    }
-    let request = this._actorSpec.events.get(name);
+  _sendEvent: function(name, request, ...args) {
     let packet;
     try {
       packet = request.write(args, this);
@@ -973,7 +1025,7 @@ Actor.prototype = extend(Pool.prototype, {
   },
 
   _queueResponse: function(create) {
-    let pending = this._pendingResponse || promise.resolve(null);
+    let pending = this._pendingResponse || Promise.resolve(null);
     let response = create(pending);
     this._pendingResponse = response;
   }
@@ -1084,10 +1136,6 @@ exports.generateActorSpec = generateActorSpec;
  * the given actor prototype. Returns the actor prototype.
  */
 var generateRequestHandlers = function(actorSpec, actorProto) {
-  if (actorProto._actorSpec) {
-    throw new Error("actorProto called twice on the same actor prototype!");
-  }
-
   actorProto.typeName = actorSpec.typeName;
 
   // Generate request handlers for each method definition
@@ -1136,7 +1184,7 @@ var generateRequestHandlers = function(actorSpec, actorProto) {
           return p
             .then(() => ret)
             .then(sendReturn)
-            .catch(this.writeError.bind(this));
+            .catch(e => this.writeError(e));
         });
       } catch (e) {
         this._queueResponse(p => {
@@ -1147,8 +1195,6 @@ var generateRequestHandlers = function(actorSpec, actorProto) {
 
     actorProto.requestTypes[spec.request.type] = handler;
   });
-
-  actorProto._actorSpec = actorSpec;
 
   return actorProto;
 };
@@ -1174,6 +1220,8 @@ var ActorClassWithSpec = function(actorSpec, actorProto) {
     return instance;
   };
   cls.prototype = extend(Actor.prototype, generateRequestHandlers(actorSpec, actorProto));
+
+  actorSpecs.set(cls.prototype, actorSpec);
 
   return cls;
 };
@@ -1238,7 +1286,7 @@ Front.prototype = extend(Pool.prototype, {
    * represents.
    */
   actor: function() {
-    return promise.resolve(this.actorID);
+    return Promise.resolve(this.actorID);
   },
 
   toString: function() {
@@ -1304,7 +1352,7 @@ Front.prototype = extend(Pool.prototype, {
         // Check to see if any of the preEvents returned a promise -- if so,
         // wait for their resolution before emitting. Otherwise, emit synchronously.
         if (results.some(result => result && typeof result.then === "function")) {
-          promise.all(results).then(() => {
+          Promise.all(results).then(() => {
             return EventEmitter.emit.apply(null, [this, event.name].concat(args));
           });
           return;

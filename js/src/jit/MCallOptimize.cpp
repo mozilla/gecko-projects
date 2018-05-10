@@ -26,9 +26,11 @@
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/ArrayBufferObject.h"
 #include "vm/JSObject.h"
 #include "vm/ProxyObject.h"
 #include "vm/SelfHosting.h"
+#include "vm/SharedArrayObject.h"
 #include "vm/TypedArrayObject.h"
 
 #include "jit/shared/Lowering-shared-inl.h"
@@ -117,16 +119,16 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineBoolean(callInfo);
 
       // Intl natives.
-      case InlinableNative::IntlIsCollator:
-        return inlineHasClass(callInfo, &CollatorObject::class_);
-      case InlinableNative::IntlIsDateTimeFormat:
-        return inlineHasClass(callInfo, &DateTimeFormatObject::class_);
-      case InlinableNative::IntlIsNumberFormat:
-        return inlineHasClass(callInfo, &NumberFormatObject::class_);
-      case InlinableNative::IntlIsPluralRules:
-        return inlineHasClass(callInfo, &PluralRulesObject::class_);
-      case InlinableNative::IntlIsRelativeTimeFormat:
-        return inlineHasClass(callInfo, &RelativeTimeFormatObject::class_);
+      case InlinableNative::IntlGuardToCollator:
+        return inlineGuardToClass(callInfo, &CollatorObject::class_);
+      case InlinableNative::IntlGuardToDateTimeFormat:
+        return inlineGuardToClass(callInfo, &DateTimeFormatObject::class_);
+      case InlinableNative::IntlGuardToNumberFormat:
+        return inlineGuardToClass(callInfo, &NumberFormatObject::class_);
+      case InlinableNative::IntlGuardToPluralRules:
+        return inlineGuardToClass(callInfo, &PluralRulesObject::class_);
+      case InlinableNative::IntlGuardToRelativeTimeFormat:
+        return inlineGuardToClass(callInfo, &RelativeTimeFormatObject::class_);
 
       // Math natives.
       case InlinableNative::MathAbs:
@@ -157,6 +159,10 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineMathImul(callInfo);
       case InlinableNative::MathFRound:
         return inlineMathFRound(callInfo);
+      case InlinableNative::MathTrunc:
+        return inlineMathTrunc(callInfo);
+      case InlinableNative::MathSign:
+        return inlineMathSign(callInfo);
       case InlinableNative::MathSin:
         return inlineMathFunction(callInfo, MMathFunction::Sin);
       case InlinableNative::MathTan:
@@ -193,10 +199,6 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineMathFunction(callInfo, MMathFunction::ASinH);
       case InlinableNative::MathATanH:
         return inlineMathFunction(callInfo, MMathFunction::ATanH);
-      case InlinableNative::MathSign:
-        return inlineMathFunction(callInfo, MMathFunction::Sign);
-      case InlinableNative::MathTrunc:
-        return inlineMathFunction(callInfo, MMathFunction::Trunc);
       case InlinableNative::MathCbrt:
         return inlineMathFunction(callInfo, MMathFunction::Cbrt);
 
@@ -317,14 +319,14 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineIsConstructing(callInfo);
       case InlinableNative::IntrinsicSubstringKernel:
         return inlineSubstringKernel(callInfo);
-      case InlinableNative::IntrinsicIsArrayIterator:
-        return inlineHasClass(callInfo, &ArrayIteratorObject::class_);
-      case InlinableNative::IntrinsicIsMapIterator:
-        return inlineHasClass(callInfo, &MapIteratorObject::class_);
-      case InlinableNative::IntrinsicIsSetIterator:
-        return inlineHasClass(callInfo, &SetIteratorObject::class_);
-      case InlinableNative::IntrinsicIsStringIterator:
-        return inlineHasClass(callInfo, &StringIteratorObject::class_);
+      case InlinableNative::IntrinsicGuardToArrayIterator:
+        return inlineGuardToClass(callInfo, &ArrayIteratorObject::class_);
+      case InlinableNative::IntrinsicGuardToMapIterator:
+        return inlineGuardToClass(callInfo, &MapIteratorObject::class_);
+      case InlinableNative::IntrinsicGuardToSetIterator:
+        return inlineGuardToClass(callInfo, &SetIteratorObject::class_);
+      case InlinableNative::IntrinsicGuardToStringIterator:
+        return inlineGuardToClass(callInfo, &StringIteratorObject::class_);
       case InlinableNative::IntrinsicObjectHasPrototype:
         return inlineObjectHasPrototype(callInfo);
       case InlinableNative::IntrinsicFinishBoundFunctionInit:
@@ -333,22 +335,28 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineIsPackedArray(callInfo);
 
       // Map intrinsics.
-      case InlinableNative::IntrinsicIsMapObject:
-        return inlineHasClass(callInfo, &MapObject::class_);
+      case InlinableNative::IntrinsicGuardToMapObject:
+        return inlineGuardToClass(callInfo, &MapObject::class_);
       case InlinableNative::IntrinsicGetNextMapEntryForIterator:
         return inlineGetNextEntryForIterator(callInfo, MGetNextEntryForIterator::Map);
 
       // Set intrinsics.
-      case InlinableNative::IntrinsicIsSetObject:
-        return inlineHasClass(callInfo, &SetObject::class_);
+      case InlinableNative::IntrinsicGuardToSetObject:
+        return inlineGuardToClass(callInfo, &SetObject::class_);
       case InlinableNative::IntrinsicGetNextSetEntryForIterator:
         return inlineGetNextEntryForIterator(callInfo, MGetNextEntryForIterator::Set);
 
       // ArrayBuffer intrinsics.
+      case InlinableNative::IntrinsicGuardToArrayBuffer:
+        return inlineGuardToClass(callInfo, &ArrayBufferObject::class_);
       case InlinableNative::IntrinsicArrayBufferByteLength:
         return inlineArrayBufferByteLength(callInfo);
       case InlinableNative::IntrinsicPossiblyWrappedArrayBufferByteLength:
         return inlinePossiblyWrappedArrayBufferByteLength(callInfo);
+
+      // SharedArrayBuffer intrinsics.
+      case InlinableNative::IntrinsicGuardToSharedArrayBuffer:
+        return inlineGuardToClass(callInfo, &SharedArrayBufferObject::class_);
 
       // TypedArray intrinsics.
       case InlinableNative::TypedArrayConstructor:
@@ -1453,6 +1461,90 @@ IonBuilder::inlineMathFRound(CallInfo& callInfo)
 }
 
 IonBuilder::InliningResult
+IonBuilder::inlineMathTrunc(CallInfo& callInfo)
+{
+    if (callInfo.argc() != 1 || callInfo.constructing()) {
+        trackOptimizationOutcome(TrackedOutcome::CantInlineNativeBadForm);
+        return InliningStatus_NotInlined;
+    }
+
+    MIRType argType = callInfo.getArg(0)->type();
+    MIRType returnType = getInlineReturnType();
+
+    // Math.trunc(int(x)) == int(x)
+    if (argType == MIRType::Int32 && returnType == MIRType::Int32) {
+        callInfo.setImplicitlyUsedUnchecked();
+        // The int operand may be something which bails out if the actual value
+        // is not in the range of the result type of the MIR. We need to tell
+        // the optimizer to preserve this bailout even if the final result is
+        // fully truncated.
+        MLimitedTruncate* ins = MLimitedTruncate::New(alloc(), callInfo.getArg(0),
+                                                      MDefinition::IndirectTruncate);
+        current->add(ins);
+        current->push(ins);
+        return InliningStatus_Inlined;
+    }
+
+    if (IsFloatingPointType(argType)) {
+        if (returnType == MIRType::Int32) {
+            callInfo.setImplicitlyUsedUnchecked();
+            MTrunc* ins = MTrunc::New(alloc(), callInfo.getArg(0));
+            current->add(ins);
+            current->push(ins);
+            return InliningStatus_Inlined;
+        }
+
+        if (returnType == MIRType::Double) {
+            callInfo.setImplicitlyUsedUnchecked();
+
+            MInstruction* ins = nullptr;
+            if (MNearbyInt::HasAssemblerSupport(RoundingMode::TowardsZero)) {
+                ins = MNearbyInt::New(alloc(), callInfo.getArg(0), argType,
+                                      RoundingMode::TowardsZero);
+            } else {
+                ins = MMathFunction::New(alloc(), callInfo.getArg(0), MMathFunction::Trunc,
+                                         /* cache */ nullptr);
+            }
+
+            current->add(ins);
+            current->push(ins);
+            return InliningStatus_Inlined;
+        }
+    }
+
+    return InliningStatus_NotInlined;
+}
+
+IonBuilder::InliningResult
+IonBuilder::inlineMathSign(CallInfo& callInfo)
+{
+    if (callInfo.argc() != 1 || callInfo.constructing()) {
+        trackOptimizationOutcome(TrackedOutcome::CantInlineNativeBadForm);
+        return InliningStatus_NotInlined;
+    }
+
+    MIRType argType = callInfo.getArg(0)->type();
+    MIRType returnType = getInlineReturnType();
+
+    if (returnType != MIRType::Int32 && returnType != MIRType::Double)
+        return InliningStatus_NotInlined;
+
+    if (!IsFloatingPointType(argType) &&
+        !(argType == MIRType::Int32 && returnType == MIRType::Int32))
+    {
+        return InliningStatus_NotInlined;
+    }
+
+    callInfo.setImplicitlyUsedUnchecked();
+
+    auto* ins = MSign::New(alloc(), callInfo.getArg(0), returnType);
+    current->add(ins);
+    current->push(ins);
+
+    return InliningStatus_Inlined;
+}
+
+IonBuilder::InliningResult
 IonBuilder::inlineMathMinMax(CallInfo& callInfo, bool max)
 {
     if (callInfo.argc() < 1 || callInfo.constructing()) {
@@ -1673,7 +1765,8 @@ IonBuilder::inlineStringSplitString(CallInfo& callInfo)
     ObjectGroup* group = ObjectGroupCompartment::getStringSplitStringGroup(cx);
     if (!group)
         return InliningStatus_NotInlined;
-    if (group->maybePreliminaryObjects())
+    AutoSweepObjectGroup sweep(group);
+    if (group->maybePreliminaryObjects(sweep))
         return InliningStatus_NotInlined;
 
     TypeSet::ObjectKey* retKey = TypeSet::ObjectKey::get(group);
@@ -1925,12 +2018,21 @@ IonBuilder::inlineStrFromCharCode(CallInfo& callInfo)
 
     if (getInlineReturnType() != MIRType::String)
         return InliningStatus_NotInlined;
-    if (callInfo.getArg(0)->type() != MIRType::Int32)
-        return InliningStatus_NotInlined;
+
+    MDefinition* codeUnit = callInfo.getArg(0);
+    if (codeUnit->type() != MIRType::Int32) {
+        // MTruncateToInt32 will always bail for objects and symbols, so don't
+        // try to inline String.fromCharCode() for these two value types.
+        if (codeUnit->mightBeType(MIRType::Object) || codeUnit->mightBeType(MIRType::Symbol))
+            return InliningStatus_NotInlined;
+
+        codeUnit = MTruncateToInt32::New(alloc(), codeUnit);
+        current->add(codeUnit->toInstruction());
+    }
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MFromCharCode* string = MFromCharCode::New(alloc(), callInfo.getArg(0));
+    MFromCharCode* string = MFromCharCode::New(alloc(), codeUnit);
     current->add(string);
     current->push(string);
     return InliningStatus_Inlined;
@@ -2540,6 +2642,37 @@ IonBuilder::inlineHasClass(CallInfo& callInfo,
             MDefinition* result = convertToBoolean(last);
             current->push(result);
         }
+    }
+
+    callInfo.setImplicitlyUsedUnchecked();
+    return InliningStatus_Inlined;
+}
+
+IonBuilder::InliningResult
+IonBuilder::inlineGuardToClass(CallInfo& callInfo, const Class* clasp)
+{
+    MOZ_ASSERT(!callInfo.constructing());
+    MOZ_ASSERT(callInfo.argc() == 1);
+
+    if (callInfo.getArg(0)->type() != MIRType::Object)
+        return InliningStatus_NotInlined;
+
+    if (getInlineReturnType() != MIRType::ObjectOrNull &&
+        getInlineReturnType() != MIRType::Object)
+    {
+        return InliningStatus_NotInlined;
+    }
+    
+    TemporaryTypeSet* types = callInfo.getArg(0)->resultTypeSet();
+    const Class* knownClass = types ? types->getKnownClass(constraints()) : nullptr;
+
+    if (knownClass && knownClass == clasp) {
+        current->push(callInfo.getArg(0));
+    } else {
+        MGuardToClass* guardToClass = MGuardToClass::New(alloc(), callInfo.getArg(0),
+                                                         clasp, getInlineReturnType());
+        current->add(guardToClass);
+        current->push(guardToClass);
     }
 
     callInfo.setImplicitlyUsedUnchecked();

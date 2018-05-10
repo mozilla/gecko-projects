@@ -13,7 +13,7 @@
 #include "nsAString.h"                  // for nsAString::IsEmpty
 #include "nsCOMPtr.h"                   // for nsCOMPtr, operator==, etc.
 #include "nsCaseTreatment.h"
-#include "nsDebug.h"                    // for NS_PRECONDITION, etc.
+#include "nsDebug.h"                    // for NS_ASSERTION, etc.
 #include "nsError.h"                    // for NS_SUCCEEDED
 #include "nsGkAtoms.h"                  // for nsGkAtoms, nsGkAtoms::a, etc.
 #include "nsHTMLTags.h"
@@ -374,17 +374,11 @@ HTMLEditUtils::IsDiv(nsIDOMNode* aNode)
  * IsMozDiv() returns true if aNode is an html div node with |type = _moz|.
  */
 bool
-HTMLEditUtils::IsMozDiv(nsIDOMNode* aNode)
-{
-  return IsDiv(aNode) && TextEditUtils::HasMozAttr(aNode);
-}
-
-bool
 HTMLEditUtils::IsMozDiv(nsINode* aNode)
 {
   MOZ_ASSERT(aNode);
   return aNode->IsHTMLElement(nsGkAtoms::div) &&
-         TextEditUtils::HasMozAttr(GetAsDOMNode(aNode));
+         TextEditUtils::HasMozAttr(aNode);
 }
 
 /**

@@ -5,6 +5,9 @@
 
 // Tests for the FxA push service.
 
+/* eslint-disable no-shadow */
+/* eslint-disable mozilla/use-chromeutils-generateqi */
+
 ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 
@@ -193,7 +196,7 @@ add_task(async function observePushTopicDeviceDisconnected_current_device() {
     newAccountState() {
       return {
         async getUserAccountData() {
-          return { deviceId };
+          return {device: {id: deviceId}};
         }
       };
     },
@@ -243,7 +246,7 @@ add_task(async function observePushTopicDeviceDisconnected_another_device() {
     newAccountState() {
       return {
         async getUserAccountData() {
-          return { deviceId: "thelocaldevice" };
+          return {device: {id: "thelocaldevice"}};
         }
       };
     },
@@ -404,6 +407,36 @@ add_test(function observePushTopicPasswordReset() {
   };
 
   pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+});
+
+add_task(async function messagesTickle() {
+  let msg = {
+    data: {
+      json: () => ({
+        topic: "sendtab"
+      })
+    },
+    QueryInterface() {
+      return this;
+    }
+  };
+
+  let fxAccountsMock = {};
+  const promiseConsumeRemoteMessagesCalled = new Promise(res => {
+    fxAccountsMock.messages = {
+      consumeRemoteMessages() {
+        res();
+      }
+    };
+  });
+
+  let pushService = new FxAccountsPushService({
+    pushService: mockPushService,
+    fxAccounts: fxAccountsMock,
+  });
+
+  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  await promiseConsumeRemoteMessagesCalled;
 });
 
 add_test(function observeSubscriptionChangeTopic() {

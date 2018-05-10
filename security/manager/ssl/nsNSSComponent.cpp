@@ -134,6 +134,7 @@ bool EnsureNSSInitializedChromeOrContent()
   }
 
   mozilla::psm::DisableMD5();
+  mozilla::pkix::RegisterErrorTable();
   initialized = true;
   return true;
 }
@@ -146,7 +147,6 @@ static const uint32_t OCSP_TIMEOUT_MILLISECONDS_HARD_MAX = 20000;
 static void
 GetRevocationBehaviorFromPrefs(/*out*/ CertVerifier::OcspDownloadConfig* odc,
                                /*out*/ CertVerifier::OcspStrictConfig* osc,
-                               /*out*/ CertVerifier::OcspGetConfig* ogc,
                                /*out*/ uint32_t* certShortLifetimeInDays,
                                /*out*/ TimeDuration& softTimeout,
                                /*out*/ TimeDuration& hardTimeout,
@@ -155,7 +155,6 @@ GetRevocationBehaviorFromPrefs(/*out*/ CertVerifier::OcspDownloadConfig* odc,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(odc);
   MOZ_ASSERT(osc);
-  MOZ_ASSERT(ogc);
   MOZ_ASSERT(certShortLifetimeInDays);
 
   // 0 = disabled
@@ -171,11 +170,6 @@ GetRevocationBehaviorFromPrefs(/*out*/ CertVerifier::OcspDownloadConfig* odc,
   *osc = Preferences::GetBool("security.OCSP.require", false)
        ? CertVerifier::ocspStrict
        : CertVerifier::ocspRelaxed;
-
-  // XXX: Always use POST for OCSP; see bug 871954 for undoing this.
-  *ogc = Preferences::GetBool("security.OCSP.GET.enabled", false)
-       ? CertVerifier::ocspGetEnabled
-       : CertVerifier::ocspGetDisabled;
 
   // If we pass in just 0 as the second argument to Preferences::GetUint, there
   // are two function signatures that match (given that 0 can be intepreted as
@@ -698,29 +692,22 @@ nsNSSComponent::MaybeEnableFamilySafetyCompatibility()
   if (familySafetyMode > 2) {
     familySafetyMode = 0;
   }
-  Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, familySafetyMode);
   if (familySafetyMode == 0) {
     return;
   }
   bool familySafetyEnabled;
   nsresult rv = AccountHasFamilySafetyEnabled(familySafetyEnabled);
   if (NS_FAILED(rv)) {
-    Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 3);
     return;
   }
   if (!familySafetyEnabled) {
-    Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 4);
     return;
   }
-  Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 5);
   if (familySafetyMode == 2) {
     rv = LoadFamilySafetyRoot();
     if (NS_FAILED(rv)) {
-      Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 6);
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
               ("failed to load Family Safety root"));
-    } else {
-      Telemetry::Accumulate(Telemetry::FAMILY_SAFETY, 7);
     }
   }
 #endif // XP_WIN
@@ -1015,23 +1002,6 @@ LoadLoadableRootsTask::Dispatch()
 NS_IMETHODIMP
 LoadLoadableRootsTask::Run()
 {
-  // First we Run() on the "LoadRoots" thread, do our work, and then we Run()
-  // again on the main thread so we can shut down the thread (since we don't
-  // need it any more). We can't shut down the thread while we're *on* the
-  // thread, which is why we do the dispatch to the main thread. CryptoTask.cpp
-  // (which informs this code) says that we can't null out mThread. This appears
-  // to be because its refcount could be decreased while this dispatch is being
-  // processed, so it might get prematurely destroyed. I'm not sure this makes
-  // sense but it'll get cleaned up in our destructor anyway, so it's fine to
-  // not null it out here (as long as we don't run twice on the main thread,
-  // which shouldn't be possible).
-  if (NS_IsMainThread()) {
-    if (mThread) {
-      mThread->Shutdown();
-    }
-    return NS_OK;
-  }
-
   nsresult rv = LoadLoadableRoots();
   if (NS_FAILED(rv)) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("LoadLoadableRoots failed"));
@@ -1059,9 +1029,7 @@ LoadLoadableRootsTask::Run()
       return rv;
     }
   }
-
-  // Go back to the main thread to clean up this worker thread.
-  return NS_DispatchToMainThread(this);
+  return NS_OK;
 }
 
 nsresult
@@ -1126,10 +1094,7 @@ nsNSSComponent::BlockUntilLoadableRootsLoaded()
 {
   MonitorAutoLock rootsLoadedLock(mLoadableRootsLoadedMonitor);
   while (!mLoadableRootsLoaded) {
-    nsresult rv = rootsLoadedLock.Wait();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    rootsLoadedLock.Wait();
   }
   MOZ_ASSERT(mLoadableRootsLoaded);
 
@@ -1722,6 +1687,7 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting)
   switch(distrustedCAPolicy) {
     case DistrustedCAPolicy::Permit:
     case DistrustedCAPolicy::DistrustSymantecRoots:
+    case DistrustedCAPolicy::DistrustSymantecRootsRegardlessOfDate:
       break;
     default:
       distrustedCAPolicy = defaultCAPolicyMode;
@@ -1730,14 +1696,13 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting)
 
   CertVerifier::OcspDownloadConfig odc;
   CertVerifier::OcspStrictConfig osc;
-  CertVerifier::OcspGetConfig ogc;
   uint32_t certShortLifetimeInDays;
   TimeDuration softTimeout;
   TimeDuration hardTimeout;
 
-  GetRevocationBehaviorFromPrefs(&odc, &osc, &ogc, &certShortLifetimeInDays,
+  GetRevocationBehaviorFromPrefs(&odc, &osc, &certShortLifetimeInDays,
                                  softTimeout, hardTimeout, lock);
-  mDefaultCertVerifier = new SharedCertVerifier(odc, osc, ogc, softTimeout,
+  mDefaultCertVerifier = new SharedCertVerifier(odc, osc, softTimeout,
                                                 hardTimeout,
                                                 certShortLifetimeInDays,
                                                 pinningMode, sha1Mode,
@@ -2219,6 +2184,12 @@ nsNSSComponent::InitializeNSS()
     Preferences::GetString("security.content.signature.root_hash",
                            mContentSigningRootHash);
 
+    mMitmCanaryIssuer.Truncate();
+    Preferences::GetString("security.pki.mitm_canary_issuer",
+                           mMitmCanaryIssuer);
+    mMitmDetecionEnabled =
+      Preferences::GetBool("security.pki.mitm_canary_issuer.enabled", true);
+
     mNSSInitialized = true;
   }
 
@@ -2356,7 +2327,6 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
       ConfigureTLSSessionIdentifiers();
     } else if (prefName.EqualsLiteral("security.OCSP.enabled") ||
                prefName.EqualsLiteral("security.OCSP.require") ||
-               prefName.EqualsLiteral("security.OCSP.GET.enabled") ||
                prefName.EqualsLiteral("security.pki.cert_short_lifetime_in_days") ||
                prefName.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
                prefName.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
@@ -2385,6 +2355,16 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                              mContentSigningRootHash);
     } else if (prefName.Equals(kEnterpriseRootModePref)) {
       MaybeImportEnterpriseRoots();
+    } else if (prefName.EqualsLiteral("security.pki.mitm_canary_issuer")) {
+      MutexAutoLock lock(mMutex);
+      mMitmCanaryIssuer.Truncate();
+      Preferences::GetString("security.pki.mitm_canary_issuer",
+                             mMitmCanaryIssuer);
+    } else if (prefName.EqualsLiteral(
+                 "security.pki.mitm_canary_issuer.enabled")) {
+      MutexAutoLock lock(mMutex);
+      mMitmDetecionEnabled =
+        Preferences::GetBool("security.pki.mitm_canary_issuer.enabled", true);
     } else {
       clearSessionCache = false;
     }
@@ -2511,6 +2491,20 @@ nsNSSComponent::IsCertContentSigningRoot(CERTCertificate* cert, bool& result)
 
   result = mContentSigningRootHash.Equals(certHash);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSComponent::IssuerMatchesMitmCanary(const char* aCertIssuer)
+{
+  MutexAutoLock lock(mMutex);
+  if (mMitmDetecionEnabled && !mMitmCanaryIssuer.IsEmpty()) {
+    nsString certIssuer = NS_ConvertUTF8toUTF16(aCertIssuer);
+    if (mMitmCanaryIssuer.Equals(certIssuer)) {
+      return NS_OK;
+    }
+  }
+
+  return NS_ERROR_FAILURE;
 }
 
 SharedCertVerifier::~SharedCertVerifier() { }

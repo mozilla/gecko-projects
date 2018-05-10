@@ -22,10 +22,10 @@
 #include "nsFrameMessageManager.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ParentSHistory.h"
 #include "mozilla/Attributes.h"
 #include "nsStubMutationObserver.h"
 #include "Units.h"
-#include "nsIWebBrowserPersistable.h"
 #include "nsIFrame.h"
 #include "nsPluginTags.h"
 
@@ -41,6 +41,7 @@ class nsIDocShellTreeOwner;
 class nsILoadContext;
 class nsIMessageSender;
 class nsIPrintSettings;
+class nsIWebBrowserPersistDocumentReceiver;
 class nsIWebProgressListener;
 
 namespace mozilla {
@@ -50,6 +51,7 @@ class OriginAttributes;
 namespace dom {
 class ChromeMessageSender;
 class ContentParent;
+class MessageSender;
 class PBrowserParent;
 class Promise;
 class TabParent;
@@ -75,8 +77,7 @@ typedef struct _GtkWidget GtkWidget;
   { 0x297fd0ea, 0x1b4a, 0x4c9a,                                 \
       { 0xa4, 0x04, 0xe5, 0x8b, 0xe8, 0x95, 0x10, 0x50 } }
 
-class nsFrameLoader final : public nsIWebBrowserPersistable,
-                            public nsStubMutationObserver,
+class nsFrameLoader final : public nsStubMutationObserver,
                             public mozilla::dom::ipc::MessageManagerCallback,
                             public nsWrapperCache
 {
@@ -95,10 +96,9 @@ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_FRAMELOADER_IID)
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsFrameLoader,
-                                                         nsIWebBrowserPersistable)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsFrameLoader)
+
   NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
-  NS_DECL_NSIWEBBROWSERPERSISTABLE
   nsresult CheckForRecursiveLoad(nsIURI* aURI);
   nsresult ReallyStartLoading();
   void StartDestroy();
@@ -171,13 +171,7 @@ public:
 
   // WebIDL getters
 
-  already_AddRefed<nsIMessageSender> GetMessageManager();
-
-  uint32_t EventMode() const { return mEventMode; }
-  void SetEventMode(uint32_t aEventMode)
-  {
-    mEventMode = aEventMode;
-  }
+  already_AddRefed<mozilla::dom::MessageSender> GetMessageManager();
 
   already_AddRefed<Element> GetOwnerElement();
 
@@ -239,6 +233,11 @@ public:
    */
   void Hide();
 
+  // Used when content is causing a FrameLoader to be created, and
+  // needs to try forcing layout to flush in order to get accurate
+  // dimensions for the content area.
+  void ForceLayoutIfNecessary();
+
   // The guts of an nsIFrameLoaderOwner::SwapFrameLoader implementation.  A
   // frame loader owner needs to call this, and pass in the two references to
   // nsRefPtrs for frame loaders that need to be swapped.
@@ -291,6 +290,8 @@ public:
 
   bool ShouldClampScrollPosition() { return mClampScrollPosition; }
 
+  mozilla::dom::ParentSHistory* GetParentSHistory() { return mParentSHistory; }
+
   /**
    * Tell this FrameLoader to use a particular remote browser.
    *
@@ -332,7 +333,7 @@ public:
   // Properly retrieves documentSize of any subdocument type.
   nsresult GetWindowDimensions(nsIntRect& aRect);
 
-  virtual nsIMessageSender* GetProcessMessageManager() const override;
+  virtual mozilla::dom::ChromeMessageSender* GetProcessMessageManager() const override;
 
   // public because a callback needs these.
   RefPtr<mozilla::dom::ChromeMessageSender> mMessageManager;
@@ -479,16 +480,14 @@ private:
 
   int32_t mJSPluginID;
 
-  // See FrameLoader.webidl. EVENT_MODE_NORMAL_DISPATCH automatically
-  // forwards some input events to out-of-process content.
-  uint32_t mEventMode;
-
   // Holds the last known size of the frame.
   mozilla::ScreenIntSize mLazySize;
 
   // A stack-maintained reference to an array of promises which are blocking
   // grouped history navigation
   nsTArray<RefPtr<mozilla::dom::Promise>>* mBrowserChangingProcessBlockers;
+
+  RefPtr<mozilla::dom::ParentSHistory> mParentSHistory;
 
   bool mDepthTooGreat : 1;
   bool mIsTopLevelContent : 1;
@@ -520,7 +519,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsFrameLoader, NS_FRAMELOADER_IID)
 inline nsISupports*
 ToSupports(nsFrameLoader* aFrameLoader)
 {
-  return static_cast<nsIWebBrowserPersistable*>(aFrameLoader);
+  return aFrameLoader;
 }
 
 #endif

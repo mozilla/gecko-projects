@@ -2,6 +2,34 @@
   "$schema": "http://json-schema.org/draft-04/schema#",
   "type": "object",
   "properties": {
+    "Authentication": {
+      "description": "Sites that support integrated authentication. See https://developer.mozilla.org/en-US/docs/Mozilla/Integrated_authentication",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "object",
+      "properties": {
+        "SPNEGO" : {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Delegated" : {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "NTLM" : {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+
     "BlockAboutAddons": {
       "description": "Block access to the Add-ons Mananger (about:addons).",
       "first_available": "60.0",
@@ -25,13 +53,6 @@
 
     "BlockAboutSupport": {
       "description": "Blocks access to the about:support page.",
-      "first_available": "60.0",
-
-      "type": "boolean"
-    },
-
-    "BlockSetDesktopBackground": {
-      "description": "Prevents usage of the \"Set Image as Desktop Background\" feature.",
       "first_available": "60.0",
 
       "type": "boolean"
@@ -70,6 +91,18 @@
       }
     },
 
+    "Certificates": {
+      "description": "Whether or not to use built in certs. This policy is Windows only at this time.",
+      "first_available": "60.0",
+
+      "type": "object",
+      "properties": {
+        "ImportEnterpriseRoots": {
+          "type": "boolean"
+        }
+      }
+    },
+
     "Cookies": {
       "description": "Allow or deny websites to set cookies.",
       "first_available": "60.0",
@@ -88,15 +121,25 @@
           "items": {
             "type": "origin"
           }
+        },
+
+        "Default": {
+          "type": "boolean"
+        },
+
+        "AcceptThirdParty": {
+          "type": "string",
+          "enum": ["always", "never", "from-visited"]
+        },
+
+        "ExpireAtSessionEnd": {
+          "type": "boolean"
+        },
+
+        "Locked": {
+          "type": "boolean"
         }
       }
-    },
-
-    "CreateMasterPassword": {
-      "description": "If false, removes access to create a master password.",
-      "first_available": "60.0",
-
-      "type": "boolean"
     },
 
     "DisableAppUpdate": {
@@ -149,8 +192,22 @@
       "type": "boolean"
     },
 
+    "DisableForgetButton": {
+      "description": "Prevents access to the \"Forget\" button.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
     "DisableFormHistory": {
       "description": "Don't remember search and form history.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableMasterPasswordCreation": {
+      "description": "If true, removes access to create a master password.",
       "first_available": "60.0",
 
       "type": "boolean"
@@ -170,15 +227,60 @@
       "type": "boolean"
     },
 
-    "DisableSafeMode": {
-      "description": "Prevents ability to restart in safe mode.",
+    "DisableProfileImport": {
+      "description": "Disables the Firefox \"Import data from another browser\" button",
       "first_available": "60.0",
 
       "type": "boolean"
     },
 
-    "DisableSysAddonUpdate": {
+    "DisableProfileRefresh": {
+      "description": "Disables the \"Refresh Firefox\" button in about:support",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableSafeMode": {
+      "description": "Prevents ability to restart in safe mode. You can only prevent the Shift key by using GPO on Windows.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableSecurityBypass": {
+      "description": "Prevents the user from bypassing certain security warnings.",
+      "first_available": "60.0",
+
+      "type": "object",
+      "properties": {
+        "InvalidCertificate": {
+          "type": "boolean"
+        },
+
+        "SafeBrowsing": {
+          "type": "boolean"
+        }
+      }
+    },
+
+    "DisableSetDesktopBackground": {
+      "description": "Prevents usage of the \"Set Image as Desktop Background\" feature.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "DisableSystemAddonUpdate": {
       "description": "Prevent the browser from installing and updating system addons.",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "boolean"
+    },
+
+    "DisableTelemetry": {
+      "description": "Turns off telemetry.",
       "first_available": "60.0",
       "enterprise_only": true,
 
@@ -222,6 +324,34 @@
       "required": ["Value"]
     },
 
+    "Extensions": {
+      "description": "Install, uninstall or lock extensions. The Install option takes URLs or paths as parameters. The Uninstall and Locked options take extension IDs.",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "object",
+      "properties": {
+        "Install" : {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Uninstall" : {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Locked" : {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+
     "FlashPlugin": {
       "description": "Allow or deny flash plugin usage.",
       "first_available": "60.0",
@@ -240,6 +370,14 @@
           "items": {
             "type": "origin"
           }
+        },
+
+        "Default": {
+          "type": "boolean"
+        },
+
+        "Locked": {
+          "type": "boolean"
         }
       }
     },
@@ -267,8 +405,8 @@
       "required": ["URL"]
     },
 
-    "InstallAddons": {
-      "description": "Allow or deny popup websites to install webextensions.",
+    "InstallAddonsPermission": {
+      "description": "Allow webites to install add-ons.",
       "first_available": "60.0",
 
       "type": "object",
@@ -278,6 +416,9 @@
           "items": {
             "type": "origin"
           }
+        },
+        "Default": {
+          "type": "boolean"
         }
       }
     },
@@ -289,7 +430,30 @@
       "type": "boolean"
     },
 
-    "Popups": {
+    "OfferToSaveLogins": {
+      "description": "Enforces the setting to allow Firefox to offer to remember saved logins and passwords. Both true and false values are accepted.",
+      "first_available": "60.0",
+
+      "type": "boolean"
+    },
+
+    "OverrideFirstRunPage": {
+      "description": "Override the first run page. Set this policy to blank if you want to disable the first run page.",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "URLorEmpty"
+    },
+
+    "OverridePostUpdatePage": {
+      "description": "Override the post-update \"What's New\" page. Set this policy to blank if you want to disable the post-update page.",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "URLorEmpty"
+    },
+
+    "PopupBlocking": {
       "description": "Allow or deny popup usage.",
       "first_available": "60.0",
 
@@ -300,6 +464,14 @@
           "items": {
             "type": "origin"
           }
+        },
+
+        "Default": {
+          "type": "boolean"
+        },
+
+        "Locked": {
+          "type": "boolean"
         }
       }
     },
@@ -362,11 +534,91 @@
       }
     },
 
-    "RememberPasswords": {
-      "description": "Enforces the setting to allow Firefox to remember saved logins and passwords. Both true and false values are accepted.",
+    "SanitizeOnShutdown": {
+      "description": "Clears ALL browser data on shutdown.",
       "first_available": "60.0",
 
       "type": "boolean"
+    },
+
+    "SearchBar": {
+      "description": "Sets the default location of the search bar. Only applies on firtrun, but can be changed.",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "string",
+      "enum": ["unified", "separate"]
+    },
+
+    "SearchEngines": {
+      "description": "Modifies the list of search engines built into Firefox",
+      "first_available": "60.0",
+      "enterprise_only": true,
+
+      "type": "object",
+      "properties": {
+        "Add": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["Name", "URLTemplate"],
+
+            "properties": {
+              "Name": {
+                "type": "string"
+              },
+              "IconURL": {
+                "type": "URLorEmpty"
+              },
+              "Alias": {
+                "type": "string"
+              },
+              "Description": {
+                "type": "string"
+              },
+              "Method": {
+                "type": "string",
+                "enum": ["GET", "POST"]
+              },
+              "URLTemplate": {
+                "type": "string"
+              },
+              "SuggestURLTemplate": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "Default": {
+          "type": "string"
+        },
+        "PreventInstalls": {
+          "type": "boolean"
+        }
+      }
+    },
+
+    "WebsiteFilter": {
+      "description": "Blocks websites from being visited. The parameters take an array of Match Patterns, as documented in https://developer.mozilla.org/en-US/Add-ons/WebExtensions/Match_patterns. Only http/https accesses are supported at the moment. The arrays are limited to 1000 entries each.",
+      "first_available": "60.0",
+      "enterprise_only": "true",
+
+      "type": "object",
+      "properties": {
+        "Block": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+
+        "Exceptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

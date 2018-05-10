@@ -7,10 +7,10 @@ add_task(async function setup() {
   profileDir.append("extensions");
 
   if (!profileDir.exists())
-    profileDir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    profileDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
 
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
-  startupManager();
+  await promiseStartupManager();
 });
 
 const IMPLICIT_ID_XPI = "data/webext-implicit-id.xpi";

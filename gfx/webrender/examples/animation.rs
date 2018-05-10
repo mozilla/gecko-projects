@@ -49,12 +49,14 @@ impl Example for App {
         let info = LayoutPrimitiveInfo::new(bounds);
         builder.push_stacking_context(
             &info,
+            None,
             ScrollPolicy::Scrollable,
             Some(PropertyBinding::Binding(self.property_key)),
             TransformStyle::Flat,
             None,
             MixBlendMode::Normal,
             filters,
+            GlyphRasterSpace::Screen,
         );
 
         let complex_clip = ComplexClipRegion {

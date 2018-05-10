@@ -138,7 +138,10 @@ lazilyLoadedBrowserScripts.forEach(function (aScript) {
 });
 
 var lazilyLoadedObserverScripts = [
-  ["MemoryObserver", ["memory-pressure", "Memory:Dump"], "chrome://browser/content/MemoryObserver.js"],
+  ["MemoryObserver", ["memory-pressure",
+                      "memory-pressure-stop",
+                      "Memory:Dump"],
+   "chrome://browser/content/MemoryObserver.js"],
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
   ["ExtensionPermissions", ["webextension-permission-prompt",
                             "webextension-update-permissions",
@@ -428,7 +431,7 @@ var BrowserApp = {
     XPInstallObserver.init();
     CharacterEncoding.init();
     ActivityObserver.init();
-    RemoteDebugger.init();
+    RemoteDebugger.init(window);
     DesktopUserAgent.init();
     Distribution.init();
     Tabs.init();
@@ -483,7 +486,14 @@ var BrowserApp = {
     }, NativeWindow, "contextmenus");
 
     if (AppConstants.ACCESSIBILITY) {
-      InitLater(() => AccessFu.attach(window), window, "AccessFu");
+      InitLater(() => GlobalEventDispatcher.dispatch("GeckoView:AccessibilityReady"));
+      GlobalEventDispatcher.registerListener((aEvent, aData, aCallback) => {
+        if (aData.enabled) {
+          AccessFu.attach(window);
+        } else {
+          AccessFu.detach();
+        }
+      }, "GeckoView:AccessibilitySettings");
     }
 
     InitLater(() => {
@@ -1172,7 +1182,12 @@ var BrowserApp = {
     }
 
     try {
-      aBrowser.loadURIWithFlags(aURI, flags, referrerURI, charset, postData);
+      aBrowser.loadURI(aURI, {
+        flags,
+        referrerURI,
+        charset,
+        postData,
+      });
     } catch(e) {
       if (tab) {
         let message = {
@@ -1879,7 +1894,7 @@ var BrowserApp = {
         try {
           let sh = webNav.sessionHistory;
           if (sh)
-            webNav = sh.QueryInterface(Ci.nsIWebNavigation);
+            webNav = sh.legacySHistory.QueryInterface(Ci.nsIWebNavigation);
         } catch (e) {}
         webNav.reload(flags);
         break;
@@ -2235,7 +2250,7 @@ var BrowserApp = {
     }
 
     let browser = this.selectedBrowser;
-    let hist = browser.sessionHistory;
+    let hist = browser.sessionHistory.legacySHistory;
     for (let i = toIndex; i >= fromIndex; i--) {
       let entry = hist.getEntryAtIndex(i, false);
       let item = {
@@ -2860,7 +2875,7 @@ var NativeWindow = {
 
       // Use the highlighted element for the context menu target. When accessibility is
       // enabled, elements may not be highlighted so use the event target instead.
-      this._target = BrowserEventHandler._highlightElement || event.target;
+      this._target = BrowserEventHandler._highlightElement || event.composedTarget;
       if (!this._target) {
         return;
       }
@@ -2892,7 +2907,10 @@ var NativeWindow = {
       if (node.hasAttribute && node.hasAttribute("title")) {
         return node.getAttribute("title");
       }
-      return this._getUrl(node);
+      let url = this._getUrl(node);
+      let readerUrl = ReaderMode.getOriginalUrlObjectForDisplay(url);
+
+      return (readerUrl && readerUrl.displaySpec) || url;
     },
 
     // Returns a url associated with a node
@@ -3429,7 +3447,7 @@ function nsBrowserAccess() {
 }
 
 nsBrowserAccess.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIBrowserDOMWindow]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIBrowserDOMWindow]),
 
   _getBrowser: function _getBrowser(aURI, aOpener, aWhere, aFlags, aTriggeringPrincipal) {
     let isExternal = !!(aFlags & Ci.nsIBrowserDOMWindow.OPEN_EXTERNAL);
@@ -3492,7 +3510,7 @@ nsBrowserAccess.prototype = {
       }
 
       let openerWindow = (aFlags & Ci.nsIBrowserDOMWindow.OPEN_NO_OPENER) ? null : aOpener;
-      // BrowserApp.addTab calls loadURIWithFlags with the appropriate params
+      // BrowserApp.addTab calls loadURI with the appropriate params
       let tab = BrowserApp.addTab(aURI ? aURI.spec : "about:blank", { flags: loadflags,
                                                                       referrerURI: referrer,
                                                                       external: isExternal,
@@ -3509,7 +3527,7 @@ nsBrowserAccess.prototype = {
     // OPEN_CURRENTWINDOW and illegal values
     let browser = BrowserApp.selectedBrowser;
     if (aURI && browser) {
-      browser.loadURIWithFlags(aURI.spec, {
+      browser.loadURI(aURI.spec, {
         flags: loadflags,
         referrerURI: referrer,
         triggeringPrincipal: aTriggeringPrincipal,
@@ -3713,7 +3731,7 @@ Tab.prototype = {
     this.filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"].createInstance(Ci.nsIWebProgress);
     this.filter.addProgressListener(this, flags)
     this.browser.addProgressListener(this.filter, flags);
-    this.browser.sessionHistory.addSHistoryListener(this);
+    this.browser.sessionHistory.legacySHistory.addSHistoryListener(this);
 
     this.browser.addEventListener("DOMContentLoaded", this, true);
     this.browser.addEventListener("DOMFormHasPassword", this, true);
@@ -3775,7 +3793,12 @@ Tab.prototype = {
       this.isSearch = "isSearch" in aParams ? aParams.isSearch : false;
 
       try {
-        this.browser.loadURIWithFlags(aURL, flags, referrerURI, charset, postData);
+        this.browser.loadURI(aURL, {
+          flags,
+          referrerURI,
+          charset,
+          postData,
+        });
       } catch(e) {
         let message = {
           type: "Content:LoadError",
@@ -3832,7 +3855,7 @@ Tab.prototype = {
     this.browser.removeProgressListener(this.filter);
     this.filter.removeProgressListener(this);
     this.filter = null;
-    this.browser.sessionHistory.removeSHistoryListener(this);
+    this.browser.sessionHistory.legacySHistory.removeSHistoryListener(this);
 
     this.browser.removeEventListener("DOMContentLoaded", this, true);
     this.browser.removeEventListener("DOMFormHasPassword", this, true);
@@ -4560,7 +4583,8 @@ Tab.prototype = {
     }
 
     if ((!aRequest || Components.isSuccessCode(aRequest.status)) &&
-        !fixedURI.displaySpec.startsWith("about:neterror") && !this.isSearch) {
+        !(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) &&
+        !this.isSearch) {
       // If this won't end up in an error page and the user isn't searching,
       // don't retain the typed entry.
       this.userRequested = "";
@@ -4785,7 +4809,7 @@ Tab.prototype = {
     return this.browser.contentWindow;
   },
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIWebProgressListener,
     Ci.nsISHistoryListener,
     Ci.nsIObserver,
@@ -4838,7 +4862,7 @@ var BrowserEventHandler = {
       return;
     }
 
-    let target = aEvent.target;
+    let target = aEvent.composedTarget;
     if (!target) {
       return;
     }
@@ -6235,6 +6259,10 @@ var ExternalApps = {
 
   filter: {
     matches: function(aElement) {
+      if (!Services.prefs.getBoolPref("network.protocol-handler.external-default")) {
+        return false;
+      }
+
       let uri = ExternalApps._getMediaLink(aElement);
       let apps = [];
       if (uri) {

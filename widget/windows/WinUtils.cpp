@@ -799,7 +799,7 @@ WinUtils::GetRegistryKey(HKEY aRoot,
                          wchar_t* aBuffer,
                          DWORD aBufferLength)
 {
-  NS_PRECONDITION(aKeyName, "The key name is NULL");
+  MOZ_ASSERT(aKeyName, "The key name is NULL");
 
   HKEY key;
   LONG result =
@@ -1351,7 +1351,7 @@ AsyncEncodeAndWriteIcon::AsyncEncodeAndWriteIcon(const nsAString &aIconPath,
 
 NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run()
 {
-  NS_PRECONDITION(!NS_IsMainThread(), "Should not be called on the main thread.");
+  MOZ_ASSERT(!NS_IsMainThread(), "Should not be called on the main thread.");
 
   // Note that since we're off the main thread we can't use
   // gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget()
@@ -1769,13 +1769,6 @@ WinUtils::SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
   }
 }
 
-/* static */
-bool
-WinUtils::ShouldHideScrollbars()
-{
-  return false;
-}
-
 // This is in use here and in dom/events/TouchEvent.cpp
 /* static */
 uint32_t
@@ -1863,6 +1856,28 @@ WinUtils::ResolveJunctionPointsAndSymLinks(nsIFile* aPath)
   }
 
   return true;
+}
+
+/* static */
+bool
+WinUtils::RunningFromANetworkDrive()
+{
+  wchar_t exePath[MAX_PATH];
+  if (!::GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+    return false;
+  }
+
+  std::wstring exeString(exePath);
+  if (!widget::WinUtils::ResolveJunctionPointsAndSymLinks(exeString)) {
+    return false;
+  }
+
+  wchar_t volPath[MAX_PATH];
+  if (!::GetVolumePathNameW(exeString.c_str(), volPath, MAX_PATH)) {
+    return false;
+  }
+
+  return (::GetDriveTypeW(volPath) == DRIVE_REMOTE);
 }
 
 /* static */

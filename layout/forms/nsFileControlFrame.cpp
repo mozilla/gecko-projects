@@ -16,6 +16,7 @@
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/DragEvent.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/FileList.h"
 #include "mozilla/dom/HTMLButtonElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
@@ -86,6 +87,8 @@ MakeAnonButton(nsIDocument* aDoc, const char* labelKey,
   button->SetIsNativeAnonymousRoot();
   button->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
                   NS_LITERAL_STRING("button"), false);
+  button->SetAttr(kNameSpaceID_None, nsGkAtoms::dir,
+                  NS_LITERAL_STRING("auto"), false);
 
   // Set the file picking button text depending on the current locale.
   nsAutoString buttonTxt;
@@ -233,16 +236,15 @@ AppendBlobImplAsDirectory(nsTArray<OwningFileOrDirectory>& aArray,
  * This is called when we receive a drop or a dragover.
  */
 NS_IMETHODIMP
-nsFileControlFrame::DnDListener::HandleEvent(nsIDOMEvent* aEvent)
+nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent)
 {
   NS_ASSERTION(mFrame, "We should have been unregistered");
 
-  Event* event = aEvent->InternalDOMEvent();
-  if (event->DefaultPrevented()) {
+  if (aEvent->DefaultPrevented()) {
     return NS_OK;
   }
 
-  DragEvent* dragEvent = event->AsDragEvent();
+  DragEvent* dragEvent = aEvent->AsDragEvent();
   if (!dragEvent) {
     return NS_OK;
   }

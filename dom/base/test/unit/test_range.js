@@ -35,7 +35,7 @@ function getFragment(aNode) {
 
 // Goodies from head_content.js
 const serializer = new DOMSerializer();
-const parser = new DOMParser();
+const parser = getParser();
 
 /**
  * Dump the contents of a document fragment to the console.
@@ -56,7 +56,7 @@ function dumpFragment(aFragment) {
  * @return nsIDOMNode  The target node retrieved from the XPath.
  */
 function evalXPathInDocumentFragment(aContextNode, aPath) {
-  Assert.ok(aContextNode instanceof Ci.nsIDOMDocumentFragment);
+  Assert.equal(ChromeUtils.getClassName(aContextNode), "DocumentFragment");
   Assert.ok(aContextNode.childNodes.length > 0);
   if (aPath == ".") {
     return aContextNode;
@@ -148,8 +148,8 @@ function evalXPathInDocumentFragment(aContextNode, aPath) {
  * @return Range object.
  */
 function getRange(aSourceNode, aFragment) {
-  Assert.ok(aSourceNode instanceof Ci.nsIDOMElement);
-  Assert.ok(aFragment instanceof Ci.nsIDOMDocumentFragment);
+  Assert.ok(Element.isInstance(aSourceNode));
+  Assert.equal(ChromeUtils.getClassName(aFragment), "DocumentFragment");
   var doc = aSourceNode.ownerDocument;
 
   var containerPath = aSourceNode.getAttribute("startContainer");

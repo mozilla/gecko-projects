@@ -5,6 +5,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "hasht.h"
+#include "nsHTMLDocument.h"
 #include "nsICryptoHash.h"
 #include "nsNetCID.h"
 #include "nsThreadUtils.h"
@@ -136,10 +137,6 @@ RelaxSameOrigin(nsPIDOMWindowInner* aParent,
     return NS_ERROR_FAILURE;
   }
   nsHTMLDocument* html = document->AsHTMLDocument();
-  if (NS_WARN_IF(!html)) {
-    return NS_ERROR_FAILURE;
-  }
-
   if (!html->IsRegistrableDomainSuffixOfOrEqualTo(aInputRpId, originHost)) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
@@ -763,7 +760,10 @@ WebAuthnManager::FinishMakeCredential(const uint64_t& aTransactionId,
   }
 
   mozilla::dom::CryptoBuffer authDataBuf;
-  rv = AssembleAuthenticatorData(rpIdHashBuf, FLAG_TUP, counterBuf, attDataBuf,
+  // attDataBuf always contains data, so per [1] we have to set the AT flag.
+  // [1] https://w3c.github.io/webauthn/#sec-authenticator-data
+  const uint8_t flags = FLAG_TUP | FLAG_AT;
+  rv = AssembleAuthenticatorData(rpIdHashBuf, flags, counterBuf, attDataBuf,
                                  authDataBuf);
   if (NS_FAILED(rv)) {
     RejectTransaction(rv);
@@ -844,9 +844,13 @@ WebAuthnManager::FinishGetAssertion(const uint64_t& aTransactionId,
     return;
   }
 
+  // Preserve the two LSBs of the flags byte, UP and RFU1.
+  // See <https://github.com/fido-alliance/fido-2-specs/pull/519>
+  flags &= 0b11;
+
   CryptoBuffer attestationDataBuf;
   CryptoBuffer authenticatorDataBuf;
-  rv = AssembleAuthenticatorData(rpIdHashBuf, FLAG_TUP, counterBuf,
+  rv = AssembleAuthenticatorData(rpIdHashBuf, flags, counterBuf,
                                  /* deliberately empty */ attestationDataBuf,
                                  authenticatorDataBuf);
   if (NS_WARN_IF(NS_FAILED(rv))) {

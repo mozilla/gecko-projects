@@ -24,7 +24,6 @@ TASKBAR_AUTOHIDE_REG_PATH = {
 config = {
     "exes": {
         'python': sys.executable,
-        'mozinstall': ['build/venv/scripts/python', 'build/venv/scripts/mozinstall-script.py'],
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg')
     },
     ###
@@ -34,10 +33,6 @@ config = {
     "virtualenv_modules": ['pypiwin32'],
     "virtualenv_path": 'venv',
 
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
     "exe_suffix": EXE_SUFFIX,
     "run_file_names": {
         "mochitest": "runtests.py",
@@ -128,6 +123,7 @@ config = {
                 "--log-errorsummary=%(error_summary_file)s",
                 "--cleanup-crashes",
                 "--marionette-startup-timeout=180",
+                "--sandbox-read-whitelist=%(abs_work_dir)s",
             ],
             "run_filename": "runreftest.py",
             "testsdir": "reftest"
@@ -194,15 +190,29 @@ config = {
             'options': ["--suite=reftest"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
+        "reftest-fonts": {
+            'options': ["--suite=reftest"],
+            'tests': ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
+        },
         "reftest-gpu": {
             'options': ["--suite=reftest",
                         "--setpref=layers.gpu-process.force-enabled=true"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
+        "reftest-gpu-fonts": {
+            'options': ["--suite=reftest",
+                        "--setpref=layers.gpu-process.force-enabled=true"],
+            'tests': ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
+        },
         "reftest-no-accel": {
             "options": ["--suite=reftest",
                         "--setpref=layers.acceleration.disabled=true"],
             "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]
+        },
+        "reftest-no-accel-fonts": {
+            "options": ["--suite=reftest",
+                        "--setpref=layers.acceleration.disabled=true"],
+            "tests": ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
         },
     },
     "all_xpcshell_suites": {

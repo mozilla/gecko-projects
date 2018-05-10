@@ -660,26 +660,21 @@
     <panelview id="PanelUI-bookmarkingTools" class="PanelUI-subView">
       <vbox class="panel-subview-body">
         <toolbarbutton id="panelMenu_toggleBookmarksMenu"
-                       label="&addBookmarksMenu.label;"
-                       label-checked="&removeBookmarksMenu.label;"
                        class="subviewbutton subviewbutton-iconic"
-                       oncommand="BookmarkingUI.toggleMenuButtonInToolbar(this); PanelUI.hide();"/>
+                       label-show="&addBookmarksMenu.label;"
+                       label-hide="&removeBookmarksMenu.label;"
+                       oncommand="BookmarkingUI.toggleMenuButtonInToolbar(this);"/>
         <toolbarbutton id="panelMenu_viewBookmarksSidebar"
-                       label="&viewBookmarksSidebar2.label;"
-                       label-checked="&hideBookmarksSidebar.label;"
                        class="subviewbutton subviewbutton-iconic"
+                       label-show="&viewBookmarksSidebar2.label;"
+                       label-hide="&hideBookmarksSidebar.label;"
                        key="viewBookmarksSidebarKb"
-                       oncommand="SidebarUI.toggle('viewBookmarksSidebar', this); PanelUI.hide();">
-          <observes element="viewBookmarksSidebar" attribute="checked"/>
-        </toolbarbutton>
+                       oncommand="SidebarUI.toggle('viewBookmarksSidebar', this);"/>
         <toolbarbutton id="panelMenu_viewBookmarksToolbar"
                        class="subviewbutton subviewbutton-iconic"
-                       placesanonid="view-toolbar"
-                       toolbarId="PersonalToolbar"
-                       type="checkbox"
-                       oncommand="onViewToolbarCommand(event)"
-                       label="&viewBookmarksToolbar.label;"
-                       label-checked="&hideBookmarksToolbar.label;"/>
+                       label-show="&viewBookmarksToolbar.label;"
+                       label-hide="&hideBookmarksToolbar.label;"
+                       oncommand="BookmarkingUI.toggleBookmarksToolbar();"/>
       </vbox>
     </panelview>
   </panelmultiview>
@@ -707,7 +702,9 @@
        position="bottomcenter topright"
        tabspecific="true">
   <popupnotification id="extension-new-tab-notification"
+                     class="extension-controlled-notification"
                      popupid="extension-new-tab"
+                     hidden="true"
                      label="&newTabControlled.header.message;"
                      buttonlabel="&newTabControlled.keepButton.label;"
                      buttonaccesskey="&newTabControlled.keepButton.accesskey;"
@@ -718,6 +715,38 @@
                      checkboxhidden="true">
     <popupnotificationcontent orient="vertical">
       <description id="extension-new-tab-notification-description"/>
+    </popupnotificationcontent>
+  </popupnotification>
+  <popupnotification id="extension-homepage-notification"
+                     class="extension-controlled-notification"
+                     popupid="extension-homepage"
+                     hidden="true"
+                     label="&homepageControlled.header.message;"
+                     buttonlabel="&homepageControlled.keepButton.label;"
+                     buttonaccesskey="&homepageControlled.keepButton.accesskey;"
+                     secondarybuttonlabel="&homepageControlled.disableButton.label;"
+                     secondarybuttonaccesskey="&homepageControlled.disableButton.accesskey;"
+                     closebuttonhidden="true"
+                     dropmarkerhidden="true"
+                     checkboxhidden="true">
+    <popupnotificationcontent orient="vertical">
+      <description id="extension-homepage-notification-description"/>
+    </popupnotificationcontent>
+  </popupnotification>
+  <popupnotification id="extension-tab-hide-notification"
+                     class="extension-controlled-notification"
+                     popupid="extension-tab-hide"
+                     hidden="true"
+                     label="&tabHideControlled.header.message;"
+                     buttonlabel="&tabHideControlled.keepButton.label;"
+                     buttonaccesskey="&tabHideControlled.keepButton.accesskey;"
+                     secondarybuttonlabel="&tabHideControlled.disableButton.label;"
+                     secondarybuttonaccesskey="&tabHideControlled.disableButton.accesskey;"
+                     closebuttonhidden="true"
+                     dropmarkerhidden="true"
+                     checkboxhidden="true">
+    <popupnotificationcontent orient="vertical">
+      <description id="extension-tab-hide-notification-description"/>
     </popupnotificationcontent>
   </popupnotification>
 </panel>

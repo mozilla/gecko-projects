@@ -5,13 +5,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/ResponsiveImageSelector.h"
-#include "mozilla/ServoStyleSet.h"
+#include "mozilla/ServoStyleSetInlines.h"
+#include "mozilla/TextUtils.h"
 #include "nsIURI.h"
 #include "nsIDocument.h"
 #include "nsContentUtils.h"
 #include "nsPresContext.h"
 
-#include "nsCSSParser.h"
 #include "nsCSSProps.h"
 
 using namespace mozilla;
@@ -55,8 +55,8 @@ ParseFloat(const nsAString& aString, double& aDouble)
     return false;
   }
 
-  if (nsCRT::IsAsciiDigit(*iter)) {
-    for (; iter != end && nsCRT::IsAsciiDigit(*iter) ; ++iter);
+  if (IsAsciiDigit(*iter)) {
+    for (; iter != end && IsAsciiDigit(*iter) ; ++iter);
   } else if (*iter == char16_t('.')) {
     // Do nothing, jumps to fraction part
   } else {
@@ -66,12 +66,12 @@ ParseFloat(const nsAString& aString, double& aDouble)
   // Fraction
   if (*iter == char16_t('.')) {
     ++iter;
-    if (iter == end || !nsCRT::IsAsciiDigit(*iter)) {
+    if (iter == end || !IsAsciiDigit(*iter)) {
       // U+002E FULL STOP character (.) must be followed by one or more ASCII digits
       return false;
     }
 
-    for (; iter != end && nsCRT::IsAsciiDigit(*iter) ; ++iter);
+    for (; iter != end && IsAsciiDigit(*iter) ; ++iter);
   }
 
   if (iter != end && (*iter == char16_t('e') || *iter == char16_t('E'))) {
@@ -80,12 +80,12 @@ ParseFloat(const nsAString& aString, double& aDouble)
       ++iter;
     }
 
-    if (iter == end || !nsCRT::IsAsciiDigit(*iter)) {
+    if (iter == end || !IsAsciiDigit(*iter)) {
       // Should have one or more ASCII digits
       return false;
     }
 
-    for (; iter != end && nsCRT::IsAsciiDigit(*iter) ; ++iter);
+    for (; iter != end && IsAsciiDigit(*iter) ; ++iter);
   }
 
   if (iter != end) {
@@ -240,13 +240,9 @@ ResponsiveImageSelector::SetSizesFromDescriptor(const nsAString & aSizes)
 {
   ClearSelectedCandidate();
 
-  if (Document()->IsStyledByServo()) {
-    NS_ConvertUTF16toUTF8 sizes(aSizes);
-    mServoSourceSizeList.reset(Servo_SourceSizeList_Parse(&sizes));
-    return !!mServoSourceSizeList;
-  }
-
-  MOZ_CRASH("old style system disabled");
+  NS_ConvertUTF16toUTF8 sizes(aSizes);
+  mServoSourceSizeList.reset(Servo_SourceSizeList_Parse(&sizes));
+  return !!mServoSourceSizeList;
 }
 
 void
@@ -444,13 +440,8 @@ ResponsiveImageSelector::ComputeFinalWidthForCurrentViewport(double *aWidth)
   if (!pctx) {
     return false;
   }
-  nscoord effectiveWidth;
-  if (doc->IsStyledByServo()) {
-    effectiveWidth = presShell->StyleSet()->AsServo()->EvaluateSourceSizeList(
-      mServoSourceSizeList.get());
-  } else {
-    MOZ_CRASH("old style system disabled");
-  }
+  nscoord effectiveWidth = presShell->StyleSet()->
+    EvaluateSourceSizeList(mServoSourceSizeList.get());
 
   *aWidth = nsPresContext::AppUnitsToDoubleCSSPixels(std::max(effectiveWidth, 0));
   return true;

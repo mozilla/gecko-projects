@@ -41,7 +41,7 @@ nsInProcessTabChildGlobal::DoSendBlockingMessage(JSContext* aCx,
     RefPtr<nsFrameMessageManager> mm = mChromeMessageManager;
     RefPtr<nsFrameLoader> fl = GetFrameLoader();
     mm->ReceiveMessage(mOwner, fl, aMessage, true, &aData, &cpows, aPrincipal,
-                       aRetVal);
+                       aRetVal, IgnoreErrors());
   }
   return true;
 }
@@ -90,8 +90,8 @@ nsInProcessTabChildGlobal::DoSendAsyncMessage(JSContext* aCx,
 nsInProcessTabChildGlobal::nsInProcessTabChildGlobal(nsIDocShell* aShell,
                                                      nsIContent* aOwner,
                                                      nsFrameMessageManager* aChrome)
-: ContentFrameMessageManager(aChrome),
-  mDocShell(aShell), mInitialized(false), mLoadingScript(false),
+: ContentFrameMessageManager(new nsFrameMessageManager(this)),
+  mDocShell(aShell), mLoadingScript(false),
   mPreventEventsEscaping(false),
   mOwner(aOwner), mChromeMessageManager(aChrome)
 {
@@ -116,24 +116,29 @@ nsInProcessTabChildGlobal::~nsInProcessTabChildGlobal()
 
 // This method isn't automatically forwarded safely because it's notxpcom, so
 // the IDL binding doesn't know what value to return.
-NS_IMETHODIMP_(bool)
+void
 nsInProcessTabChildGlobal::MarkForCC()
 {
   MarkScopesForCC();
-  return MessageManagerGlobal::MarkForCC();
+  MessageManagerGlobal::MarkForCC();
 }
 
-nsresult
+bool
 nsInProcessTabChildGlobal::Init()
 {
-#ifdef DEBUG
-  nsresult rv =
-#endif
-  InitTabChildGlobal();
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
-                       "Couldn't initialize nsInProcessTabChildGlobal");
-  mMessageManager = new nsFrameMessageManager(this);
-  return NS_OK;
+  // If you change this, please change GetCompartmentName() in XPCJSContext.cpp
+  // accordingly.
+  nsAutoCString id;
+  id.AssignLiteral("inProcessTabChildGlobal");
+  nsIURI* uri = mOwner->OwnerDoc()->GetDocumentURI();
+  if (uri) {
+    nsAutoCString u;
+    nsresult rv = uri->GetSpec(u);
+    NS_ENSURE_SUCCESS(rv, false);
+    id.AppendLiteral("?ownedBy=");
+    id.Append(u);
+  }
+  return InitChildGlobalInternal(id);
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsInProcessTabChildGlobal)
@@ -160,9 +165,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsInProcessTabChildGlobal,
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsInProcessTabChildGlobal)
-  NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
   NS_INTERFACE_MAP_ENTRY(nsIMessageSender)
-  NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsIContentFrameMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIInProcessContentFrameMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
@@ -204,34 +207,11 @@ nsInProcessTabChildGlobal::GetContent(ErrorResult& aError)
   return content.forget();
 }
 
-NS_IMETHODIMP
-nsInProcessTabChildGlobal::GetContent(mozIDOMWindowProxy** aContent)
-{
-  ErrorResult rv;
-  *aContent = GetContent(rv).take();
-  return rv.StealNSResult();
-}
-
-NS_IMETHODIMP
-nsInProcessTabChildGlobal::GetDocShell(nsIDocShell** aDocShell)
-{
-  ErrorResult rv;
-  *aDocShell = GetDocShell(rv).take();
-  return rv.StealNSResult();
-}
-
 already_AddRefed<nsIEventTarget>
 nsInProcessTabChildGlobal::GetTabEventTarget()
 {
   nsCOMPtr<nsIEventTarget> target = GetMainThreadEventTarget();
   return target.forget();
-}
-
-NS_IMETHODIMP
-nsInProcessTabChildGlobal::GetTabEventTarget(nsIEventTarget** aTarget)
-{
-  *aTarget = GetTabEventTarget().take();
-  return NS_OK;
 }
 
 void
@@ -282,7 +262,7 @@ nsInProcessTabChildGlobal::GetOwnerContent()
   return mOwner;
 }
 
-nsresult
+void
 nsInProcessTabChildGlobal::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mForceContentDispatch = true;
@@ -303,7 +283,7 @@ nsInProcessTabChildGlobal::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 
   if (mPreventEventsEscaping) {
     aVisitor.SetParentTarget(nullptr, false);
-    return NS_OK;
+    return;
   }
 
   if (mIsBrowserFrame &&
@@ -318,27 +298,6 @@ nsInProcessTabChildGlobal::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   } else {
     aVisitor.SetParentTarget(mOwner, false);
   }
-
-  return NS_OK;
-}
-
-nsresult
-nsInProcessTabChildGlobal::InitTabChildGlobal()
-{
-  // If you change this, please change GetCompartmentName() in XPCJSContext.cpp
-  // accordingly.
-  nsAutoCString id;
-  id.AssignLiteral("inProcessTabChildGlobal");
-  nsIURI* uri = mOwner->OwnerDoc()->GetDocumentURI();
-  if (uri) {
-    nsAutoCString u;
-    nsresult rv = uri->GetSpec(u);
-    NS_ENSURE_SUCCESS(rv, rv);
-    id.AppendLiteral("?ownedBy=");
-    id.Append(u);
-  }
-  NS_ENSURE_STATE(InitChildGlobalInternal(id));
-  return NS_OK;
 }
 
 class nsAsyncScriptLoad : public Runnable
@@ -370,10 +329,6 @@ nsInProcessTabChildGlobal::LoadFrameScript(const nsAString& aURL, bool aRunInGlo
   if (!nsContentUtils::IsSafeToRunScript()) {
     nsContentUtils::AddScriptRunner(new nsAsyncScriptLoad(this, aURL, aRunInGlobalScope));
     return;
-  }
-  if (!mInitialized) {
-    mInitialized = true;
-    Init();
   }
   bool tmp = mLoadingScript;
   mLoadingScript = true;

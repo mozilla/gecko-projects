@@ -17,6 +17,8 @@
 
 namespace js {
 
+class GlobalObject;
+
 class AtomicsObject : public NativeObject
 {
   public:
@@ -138,11 +140,11 @@ public:
                            mozilla::recordreplay::Behavior::DontPreserve> lock_;
 
     // A flag that controls whether waiting is allowed.
-    ThreadLocalData<bool> canWait_;
+    ThreadData<bool> canWait_;
 };
 
 JSObject*
-InitAtomicsClass(JSContext* cx, HandleObject obj);
+InitAtomicsClass(JSContext* cx, Handle<GlobalObject*> global);
 
 // Go to sleep if the int32_t value at the given address equals `value`.
 MOZ_MUST_USE FutexThread::WaitResult

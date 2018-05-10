@@ -1,5 +1,6 @@
 {
   "default": {
+    "searchDefault": "Google",
     "visibleDefaultEngines": [
       "google", "amazondotcom", "bing", "ddg", "ebay", "twitter", "wikipedia"
     ]
@@ -11,21 +12,6 @@
     "CA": {
       "ebay": "ebay-ca",
       "ebay-fr": "ebay-ca"
-    },
-    "KZ": {
-      "google": "google-nocodes"
-    },
-    "BY": {
-      "google": "google-nocodes"
-    },
-    "RU": {
-      "google": "google-nocodes"
-    },
-    "TR": {
-      "google": "google-nocodes"
-    },
-    "CN": {
-      "google": "google-nocodes"
     },
     "AT": {
       "ebay-de": "ebay-at"
@@ -122,6 +108,18 @@
         "visibleDefaultEngines": [
           "yandex-by", "google", "ddg", "wikipedia-be", "wikipedia-be-tarask"
         ]
+      },
+      "BY": {
+        "searchDefault": "Яндекс"
+      },
+      "KZ": {
+        "searchDefault": "Яндекс"
+      },
+      "RU": {
+        "searchDefault": "Яндекс"
+      },
+      "TR": {
+        "searchDefault": "Яндекс"
       }
     },
     "bg": {
@@ -173,6 +171,13 @@
         ]
       }
     },
+    "crh": {
+      "default": {
+        "visibleDefaultEngines": [
+          "google", "ddg", "twitter", "wikipedia-crh"
+        ]
+      }
+    },
     "cs": {
       "default": {
         "visibleDefaultEngines": [
@@ -212,6 +217,13 @@
       "default": {
         "visibleDefaultEngines": [
           "google", "amazon-en-GB", "bing", "ddg", "wikipedia-el"
+        ]
+      }
+    },
+    "en-CA": {
+      "default": {
+        "visibleDefaultEngines": [
+          "google", "amazon-ca", "bing", "ddg", "ebay-ca", "twitter", "wikipedia"
         ]
       }
     },
@@ -466,6 +478,18 @@
         "visibleDefaultEngines": [
           "yandex-kk", "google", "ddg", "flip", "kaz-kk", "twitter", "wikipedia-kk"
         ]
+      },
+      "KZ": {
+        "searchDefault": "Яндекс"
+      },
+      "BY": {
+        "searchDefault": "Яндекс"
+      },
+      "RU": {
+        "searchDefault": "Яндекс"
+      },
+      "TR": {
+        "searchDefault": "Яндекс"
       }
     },
     "km": {
@@ -665,6 +689,18 @@
         "visibleDefaultEngines": [
           "yandex-ru", "google", "ddg", "ozonru", "priceru", "wikipedia-ru", "mailru"
         ]
+      },
+      "RU": {
+        "searchDefault": "Яндекс"
+      },
+      "BY": {
+        "searchDefault": "Яндекс"
+      },
+      "KZ": {
+        "searchDefault": "Яндекс"
+      },
+      "TR": {
+        "searchDefault": "Яндекс"
       }
     },
     "si": {
@@ -749,12 +785,24 @@
         "visibleDefaultEngines": [
           "yandex-tr", "google", "ddg", "twitter", "wikipedia-tr"
         ]
+      },
+      "TR": {
+        "searchDefault": "Yandex"
+      },
+      "BY": {
+        "searchDefault": "Yandex"
+      },
+      "KZ": {
+        "searchDefault": "Yandex"
+      },
+      "RU": {
+        "searchDefault": "Yandex"
       }
     },
     "uk": {
       "default": {
         "visibleDefaultEngines": [
-          "google", "yandex-uk", "meta-ua", "ddg", "wikipedia-uk", "metamarket"
+          "google", "bing", "meta-ua", "ddg", "wikipedia-uk", "metamarket"
         ]
       }
     },
@@ -798,6 +846,9 @@
         "visibleDefaultEngines": [
           "baidu", "google", "bing", "ddg", "wikipedia-zh-CN", "amazondotcn"
         ]
+      },
+      "CN": {
+        "searchDefault": "百度"
       }
     },
     "zh-TW": {

@@ -15,7 +15,10 @@ const REMOVE_DIALOG_URL = "chrome://browser/content/preferences/siteDataRemoveSe
 
 const { DownloadUtils } = ChromeUtils.import("resource://gre/modules/DownloadUtils.jsm", {});
 const { SiteDataManager } = ChromeUtils.import("resource:///modules/SiteDataManager.jsm", {});
-const { OfflineAppCacheHelper } = ChromeUtils.import("resource:///modules/offlineAppCache.jsm", {});
+const { OfflineAppCacheHelper } = ChromeUtils.import("resource://gre/modules/offlineAppCache.jsm", {});
+
+ChromeUtils.defineModuleGetter(this, "SiteDataTestUtils",
+                               "resource://testing-common/SiteDataTestUtils.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "serviceWorkerManager", "@mozilla.org/serviceworkers/manager;1", "nsIServiceWorkerManager");
 
@@ -112,9 +115,22 @@ function openSiteDataSettingsDialog() {
   return fullyLoadPromise;
 }
 
+function promiseSettingsDialogClose() {
+  return new Promise(resolve => {
+    let win = gBrowser.selectedBrowser.contentWindow;
+    let dialogOverlay = win.gSubDialog._topDialog._overlay;
+    let dialogWin = win.gSubDialog._topDialog._frame.contentWindow;
+    dialogWin.addEventListener("unload", function unload() {
+      if (dialogWin.document.documentURI === "chrome://browser/content/preferences/siteDataSettings.xul") {
+        isnot(dialogOverlay.style.visibility, "visible", "The Settings dialog should be hidden");
+        resolve();
+      }
+    }, { once: true });
+  });
+}
+
 function assertSitesListed(doc, hosts) {
   let frameDoc = content.gSubDialog._topDialog._frame.contentDocument;
-  let removeBtn = frameDoc.getElementById("removeSelected");
   let removeAllBtn = frameDoc.getElementById("removeAll");
   let sitesList = frameDoc.getElementById("sitesList");
   let totalSitesNumber = sitesList.getElementsByTagName("richlistitem").length;
@@ -123,7 +139,6 @@ function assertSitesListed(doc, hosts) {
     let site = sitesList.querySelector(`richlistitem[host="${host}"]`);
     ok(site, `Should list the site of ${host}`);
   });
-  is(removeBtn.disabled, true, "Should disable the removeSelected button");
   is(removeAllBtn.disabled, false, "Should enable the removeAllBtn button");
 }
 
@@ -186,14 +201,6 @@ const mockSiteDataManager = {
     this._SiteDataManager._removeQuotaUsage = this._originalRemoveQuotaUsage;
   }
 };
-
-function getQuotaUsage(origin) {
-  return new Promise(resolve => {
-    let uri = NetUtil.newURI(origin);
-    let principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
-    Services.qms.getUsageForPrincipal(principal, request => resolve(request.result.usage));
-  });
-}
 
 function promiseCookiesCleared() {
   return TestUtils.topicObserved("cookie-changed", (subj, data) => {

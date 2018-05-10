@@ -9,7 +9,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.gecko.background.fxa.FxAccountClient;
 import org.mozilla.gecko.background.fxa.FxAccountUtils;
-import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.background.testhelpers.WaitHelper;
 import org.mozilla.gecko.browserid.BrowserIDKeyPair;
 import org.mozilla.gecko.browserid.RSACryptoImplementation;
@@ -17,11 +16,13 @@ import org.mozilla.gecko.fxa.login.FxAccountLoginStateMachine.LoginStateMachineD
 import org.mozilla.gecko.fxa.login.FxAccountLoginTransition.Transition;
 import org.mozilla.gecko.fxa.login.State.StateLabel;
 import org.mozilla.gecko.sync.Utils;
+import org.mozilla.gecko.util.StringUtils;
+import org.robolectric.RobolectricTestRunner;
 
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedList;
 
-@RunWith(TestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 public class TestFxAccountLoginStateMachine {
   // private static final String TEST_AUDIENCE = "http://testAudience.com";
   private static final String TEST_EMAIL = "test@test.com";
@@ -39,10 +40,10 @@ public class TestFxAccountLoginStateMachine {
   @Before
   public void setUp() throws Exception {
     if (TEST_EMAIL_UTF8 == null) {
-      TEST_EMAIL_UTF8 = TEST_EMAIL.getBytes("UTF-8");
+      TEST_EMAIL_UTF8 = TEST_EMAIL.getBytes(StringUtils.UTF_8);
     }
     if (TEST_PASSWORD_UTF8 == null) {
-      TEST_PASSWORD_UTF8 = TEST_PASSWORD.getBytes("UTF-8");
+      TEST_PASSWORD_UTF8 = TEST_PASSWORD.getBytes(StringUtils.UTF_8);
     }
     if (TEST_QUICK_STRETCHED_PW == null) {
       TEST_QUICK_STRETCHED_PW = FxAccountUtils.generateQuickStretchedPW(TEST_EMAIL_UTF8, TEST_PASSWORD_UTF8);

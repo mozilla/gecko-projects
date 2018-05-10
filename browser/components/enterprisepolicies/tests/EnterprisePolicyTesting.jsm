@@ -107,6 +107,8 @@ var PoliciesPrefTracker = {
 
       if (defaults.has(prefName)) {
         stored.originalDefaultValue = defaults.get(prefName);
+      } else {
+        stored.originalDefaultValue = undefined;
       }
 
       if (Preferences.isSet(prefName) &&
@@ -135,11 +137,13 @@ var PoliciesPrefTracker = {
       // unlockPref is harmless
       Preferences.unlock(prefName);
 
-      if (stored.originalDefaultValue) {
+      if (stored.originalDefaultValue !== undefined) {
         defaults.set(prefName, stored.originalDefaultValue);
+      } else {
+        Services.prefs.getDefaultBranch("").deleteBranch(prefName);
       }
 
-      if (stored.originalUserValue) {
+      if (stored.originalUserValue !== undefined) {
         Preferences.set(prefName, stored.originalUserValue);
       }
     }

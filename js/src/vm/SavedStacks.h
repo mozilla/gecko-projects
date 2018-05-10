@@ -11,8 +11,6 @@
 #include "mozilla/FastBernoulliTrial.h"
 #include "mozilla/Maybe.h"
 
-#include "jsmath.h"
-
 #include "js/HashTable.h"
 #include "js/Wrapper.h"
 #include "vm/JSContext.h"
@@ -326,6 +324,9 @@ struct MutableWrappedPtrOperations<SavedStacks::LocationValue, Wrapper>
 
 UTF8CharsZ
 BuildUTF8StackString(JSContext* cx, HandleObject stack);
+
+uint32_t
+FixupColumnForDisplay(uint32_t column);
 
 } /* namespace js */
 

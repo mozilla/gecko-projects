@@ -70,8 +70,6 @@ class nsIContentSecurityPolicy;
 class nsIDocShellTreeItem;
 class nsIDocumentLoaderFactory;
 class nsIDOMDocument;
-class nsIDOMDocumentFragment;
-class nsIDOMEvent;
 class nsIDOMNode;
 class nsIDragSession;
 class nsIEventTarget;
@@ -82,7 +80,6 @@ class nsIInterfaceRequestor;
 class nsIIOService;
 class nsILoadInfo;
 class nsILoadGroup;
-class nsIMessageBroadcaster;
 class nsNameSpaceManager;
 class nsIObserver;
 class nsIParser;
@@ -129,9 +126,11 @@ class EventListenerManager;
 class HTMLEditor;
 
 namespace dom {
+class ChromeMessageBroadcaster;
 struct CustomElementDefinition;
 class DocumentFragment;
 class Element;
+class Event;
 class EventTarget;
 class HTMLInputElement;
 class IPCDataTransfer;
@@ -229,7 +228,8 @@ public:
   // Check whether the caller is system if you know you're on the main thread.
   static bool IsSystemCaller(JSContext* aCx);
 
-  // Check whether the caller is system if you might be on a worker thread.
+  // Check whether the caller is system if you might be on a worker or worklet
+  // thread.
   static bool ThreadsafeIsSystemCaller(JSContext* aCx);
 
   // In the traditional Gecko architecture, both C++ code and untrusted JS code
@@ -509,14 +509,6 @@ public:
   static nsIDocument* GetSubdocumentWithOuterWindowId(nsIDocument *aDocument,
                                                       uint64_t aOuterWindowId);
 
-  static uint32_t CopyNewlineNormalizedUnicodeTo(const nsAString& aSource,
-                                                 uint32_t aSrcOffset,
-                                                 char16_t* aDest,
-                                                 uint32_t aLength,
-                                                 bool& aLastCharCR);
-
-  static uint32_t CopyNewlineNormalizedUnicodeTo(nsReadingIterator<char16_t>& aSrcStart, const nsReadingIterator<char16_t>& aSrcEnd, nsAString& aDest);
-
   static const nsDependentSubstring TrimCharsInSet(const char* aSet,
                                                    const nsAString& aValue);
 
@@ -598,8 +590,6 @@ public:
   /**
    * Checks whether two nodes come from the same origin.
    */
-  static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
-                                  nsIDOMNode* aUnTrustedNode);
   static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
                                   const nsINode* unTrustedNode);
 
@@ -718,7 +708,7 @@ public:
    * Returns true if |aName| is a valid name to be registered via
    * customElements.define.
    */
-  static bool IsCustomElementName(nsAtom* aName);
+  static bool IsCustomElementName(nsAtom* aName, uint32_t aNameSpaceID);
 
   static nsresult CheckQName(const nsAString& aQualifiedName,
                              bool aNamespaceAware = true,
@@ -815,7 +805,7 @@ public:
    * Method to do security and content policy checks on the image URI
    *
    * @param aURI uri of the image to be loaded
-   * @param aContext the context the image is loaded in (eg an element)
+   * @param aNode, the context the image is loaded in (eg an element)
    * @param aLoadingDocument the document we belong to
    * @param aLoadingPrincipal the principal doing the load
    * @param [aContentPolicyType=nsIContentPolicy::TYPE_INTERNAL_IMAGE] (Optional)
@@ -830,7 +820,7 @@ public:
    *         false is returned.
    */
   static bool CanLoadImage(nsIURI* aURI,
-                           nsISupports* aContext,
+                           nsINode* aNode,
                            nsIDocument* aLoadingDocument,
                            nsIPrincipal* aLoadingPrincipal,
                            int16_t* aImageBlockingStatus = nullptr,
@@ -1364,12 +1354,12 @@ public:
    * nsIDOMDocument::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
-   *                       nsIDOMEventTarget.
+   *                       EventTarget.
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
                                        nsISupports* aTarget,
@@ -1387,7 +1377,7 @@ public:
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
   static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
@@ -1411,12 +1401,12 @@ public:
    * nsIDOMDocument::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
-   *                       nsIDOMEventTarget.
+   *                       EventTarget.
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
                                          nsISupports* aTarget,
@@ -1435,7 +1425,7 @@ public:
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
   static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
@@ -1469,7 +1459,7 @@ public:
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchChromeEvent(nsIDocument* aDoc,
                                       nsISupports* aTarget,
@@ -1497,12 +1487,12 @@ public:
    * nsIDOMDocument::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
-   *                       nsIDOMEventTarget.
+   *                       EventTarget.
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchEventOnlyToChrome(nsIDocument* aDoc,
                                             nsISupports* aTarget,
@@ -1637,10 +1627,6 @@ public:
    * @param aSanitize whether the fragment should be sanitized prior to
    *        injection
    */
-  static nsresult CreateContextualFragment(nsINode* aContextNode,
-                                           const nsAString& aFragment,
-                                           bool aPreventScriptExecution,
-                                           nsIDOMDocumentFragment** aReturn);
   static already_AddRefed<mozilla::dom::DocumentFragment>
   CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
                            bool aPreventScriptExecution,
@@ -1697,7 +1683,7 @@ public:
                                    nsIDocument* aDocument,
                                    nsTArray<nsString>& aTagStack,
                                    bool aPreventScriptExecution,
-                                   nsIDOMDocumentFragment** aReturn,
+                                   mozilla::dom::DocumentFragment** aReturn,
                                    SanitizeFragments aSanitize = SanitizeSystemPrivileged);
 
   /**
@@ -1876,16 +1862,12 @@ public:
    * @param aTargetSpec the target (like target=, may be empty).
    * @param aClick whether this was a click or not (if false, this method
    *               assumes you just hovered over the link).
-   * @param aIsUserTriggered whether the user triggered the link. This would be
-   *                         false for loads from auto XLinks or from the
-   *                         click() method if we ever implement it.
    * @param aIsTrusted If false, JS Context will be pushed to stack
    *                   when the link is triggered.
    */
   static void TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
                           nsIURI *aLinkURI, const nsString& aTargetSpec,
-                          bool aClick, bool aIsUserTriggered,
-                          bool aIsTrusted);
+                          bool aClick, bool aIsTrusted);
 
   /**
    * Get the link location.
@@ -1998,6 +1980,8 @@ public:
    * run anything else, when this function returns false, but this is ok.
    */
   static bool IsSafeToRunScript() {
+    MOZ_ASSERT(NS_IsMainThread(),
+               "This static variable only makes sense on the main thread!");
     return sScriptBlockerCount == 0;
   }
 
@@ -2052,11 +2036,7 @@ public:
   static nsresult ProcessViewportInfo(nsIDocument *aDocument,
                                       const nsAString &viewportInfo);
 
-  static nsIScriptContext* GetContextForEventHandlers(nsINode* aNode,
-                                                      nsresult* aRv);
-
   static JSContext *GetCurrentJSContext();
-  static JSContext *GetCurrentJSContextForThread();
 
   /**
    * Case insensitive comparison between two strings. However it only ignores
@@ -2118,7 +2098,7 @@ public:
    */
   static nsresult DispatchXULCommand(nsIContent* aTarget,
                                      bool aTrusted,
-                                     nsIDOMEvent* aSourceEvent = nullptr,
+                                     mozilla::dom::Event* aSourceEvent = nullptr,
                                      nsIPresShell* aShell = nullptr,
                                      bool aCtrl = false,
                                      bool aAlt = false,
@@ -2211,7 +2191,7 @@ public:
   static already_AddRefed<nsContentList>
   GetElementsByClassName(nsINode* aRootNode, const nsAString& aClasses)
   {
-    NS_PRECONDITION(aRootNode, "Must have root node");
+    MOZ_ASSERT(aRootNode, "Must have root node");
 
     return GetFuncStringContentList<nsCacheableFuncStringHTMLCollection>(aRootNode,
                                                                          MatchClassNames,
@@ -3300,6 +3280,8 @@ public:
   // Get the current number of inner or outer windows.
   static int32_t GetCurrentInnerOrOuterWindowCount() { return sInnerOrOuterWindowCount; }
 
+  static bool CanShowPopup(nsIPrincipal* aPrincipal);
+
 private:
   static bool InitializeEventTable();
 
@@ -3351,7 +3333,7 @@ private:
                                                                       mozilla::dom::AutocompleteInfo& aInfo,
                                                                       bool aGrantAllValidValue = false);
 
-  static bool CallOnAllRemoteChildren(nsIMessageBroadcaster* aManager,
+  static bool CallOnAllRemoteChildren(mozilla::dom::ChromeMessageBroadcaster* aManager,
                                       CallOnRemoteChildFunction aCallback,
                                       void* aArg);
 
@@ -3427,6 +3409,7 @@ private:
 
   static bool sIsHandlingKeyBoardEvent;
   static bool sAllowXULXBL_for_file;
+  static bool sDisablePopups;
   static bool sIsFullScreenApiEnabled;
   static bool sIsUnprefixedFullscreenApiEnabled;
   static bool sTrustedFullScreenOnly;

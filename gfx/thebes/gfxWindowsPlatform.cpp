@@ -443,7 +443,7 @@ gfxWindowsPlatform::HandleDeviceReset()
 }
 
 BackendPrefsData
-gfxWindowsPlatform::GetBackendPrefs()
+gfxWindowsPlatform::GetBackendPrefs() const
 {
   BackendPrefsData data;
 
@@ -575,6 +575,10 @@ gfxWindowsPlatform::CreatePlatformFontList()
                    NS_LITERAL_CSTRING("FEATURE_FAILURE_FONT_FAIL"));
     }
 
+    // Ensure this is false, even if the Windows version was recent enough to
+    // permit it, as we're using GDI fonts.
+    mHasVariationFontSupport = false;
+
     pfl = new gfxGDIFontList();
 
     if (NS_SUCCEEDED(pfl->InitFontList())) {
@@ -631,7 +635,6 @@ static const char kFontCambriaMath[] = "Cambria Math";
 static const char kFontEbrima[] = "Ebrima";
 static const char kFontEstrangeloEdessa[] = "Estrangelo Edessa";
 static const char kFontEuphemia[] = "Euphemia";
-static const char kFontEmojiOneMozilla[] = "EmojiOne Mozilla";
 static const char kFontGabriola[] = "Gabriola";
 static const char kFontJavaneseText[] = "Javanese Text";
 static const char kFontKhmerUI[] = "Khmer UI";
@@ -658,6 +661,7 @@ static const char kFontSegoeUIEmoji[] = "Segoe UI Emoji";
 static const char kFontSegoeUISymbol[] = "Segoe UI Symbol";
 static const char kFontSylfaen[] = "Sylfaen";
 static const char kFontTraditionalArabic[] = "Traditional Arabic";
+static const char kFontTwemojiMozilla[] = "Twemoji Mozilla";
 static const char kFontUtsaah[] = "Utsaah";
 static const char kFontYuGothic[] = "Yu Gothic";
 
@@ -673,7 +677,7 @@ gfxWindowsPlatform::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
             emoji == EmojiPresentation::EmojiDefault)) {
             // if char is followed by VS16, try for a color emoji glyph
             aFontList.AppendElement(kFontSegoeUIEmoji);
-            aFontList.AppendElement(kFontEmojiOneMozilla);
+            aFontList.AppendElement(kFontTwemojiMozilla);
         }
     }
 
@@ -2066,4 +2070,11 @@ gfxWindowsPlatform::SupportsPluginDirectDXGIDrawing()
     return false;
   }
   return true;
+}
+
+bool
+gfxWindowsPlatform::CheckVariationFontSupport()
+{
+  // Variation font support is only available on Fall Creators Update or later.
+  return IsWin10FallCreatorsUpdateOrLater();
 }

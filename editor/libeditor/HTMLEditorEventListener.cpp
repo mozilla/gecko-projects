@@ -9,15 +9,12 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/Selection.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMEventTarget.h"
-#include "nsIDOMNode.h"
 #include "nsISupportsImpl.h"
 #include "nsLiteralString.h"
 #include "nsQueryObject.h"
@@ -53,9 +50,9 @@ HTMLEditorEventListener::MouseUp(MouseEvent* aMouseEvent)
   HTMLEditor* htmlEditor = mEditorBase->AsHTMLEditor();
   MOZ_ASSERT(htmlEditor);
 
-  nsCOMPtr<nsIDOMEventTarget> target = aMouseEvent->GetTarget();
+  RefPtr<EventTarget> target = aMouseEvent->GetTarget();
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
+  nsCOMPtr<Element> element = do_QueryInterface(target);
 
   int32_t clientX = aMouseEvent->ClientX();
   int32_t clientY = aMouseEvent->ClientY();
@@ -99,31 +96,25 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
 
   bool isContextClick = buttonNumber == 2;
 
-  int32_t clickCount;
-  nsresult rv = aMouseEvent->GetDetail(&clickCount);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int32_t clickCount = aMouseEvent->Detail();
 
-  nsCOMPtr<nsIDOMEventTarget> target = aMouseEvent->GetExplicitOriginalTarget();
+  RefPtr<EventTarget> target = aMouseEvent->GetExplicitOriginalTarget();
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
+  nsCOMPtr<Element> element = do_QueryInterface(target);
 
   if (isContextClick || (buttonNumber == 0 && clickCount == 2)) {
     RefPtr<Selection> selection = htmlEditor->GetSelection();
     NS_ENSURE_TRUE(selection, NS_OK);
 
     // Get location of mouse within target node
-    nsCOMPtr<nsIDOMNode> parent;
-    rv = aMouseEvent->GetRangeParent(getter_AddRefs(parent));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsINode> parent = aMouseEvent->GetRangeParent();
     NS_ENSURE_TRUE(parent, NS_ERROR_FAILURE);
 
-    int32_t offset = 0;
-    rv = aMouseEvent->GetRangeOffset(&offset);
-    NS_ENSURE_SUCCESS(rv, rv);
+    int32_t offset = aMouseEvent->RangeOffset();
 
     // Detect if mouse point is within current selection for context click
     bool nodeIsInSelection = false;
-    if (isContextClick && !selection->Collapsed()) {
+    if (isContextClick && !selection->IsCollapsed()) {
       uint32_t rangeCount = selection->RangeCount();
 
       for (uint32_t i = 0; i < rangeCount; i++) {
@@ -133,7 +124,9 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
           continue;
         }
 
-        range->IsPointInRange(parent, offset, &nodeIsInSelection);
+        IgnoredErrorResult err;
+        nodeIsInSelection =
+          range->IsPointInRange(*parent, offset, err) && !err.Failed();
 
         // Done when we find a range that we are in
         if (nodeIsInSelection) {
@@ -141,7 +134,7 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
         }
       }
     }
-    nsCOMPtr<nsIDOMNode> node = do_QueryInterface(target);
+    nsCOMPtr<nsINode> node = do_QueryInterface(target);
     if (node && !nodeIsInSelection) {
       if (!element) {
         if (isContextClick) {
@@ -149,11 +142,9 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
           selection->Collapse(parent, offset);
         } else {
           // Get enclosing link if in text so we can select the link
-          nsCOMPtr<nsIDOMElement> linkElement;
-          rv = htmlEditor->GetElementOrParentByTagName(
-                             NS_LITERAL_STRING("href"), node,
-                             getter_AddRefs(linkElement));
-          NS_ENSURE_SUCCESS(rv, rv);
+          RefPtr<Element> linkElement =
+            htmlEditor->GetElementOrParentByTagName(NS_LITERAL_STRING("href"),
+                                                    node);
           if (linkElement) {
             element = linkElement;
           }
@@ -199,7 +190,7 @@ HTMLEditorEventListener::MouseClick(MouseEvent* aMouseEvent)
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMEventTarget> target = aMouseEvent->GetTarget();
+  RefPtr<EventTarget> target = aMouseEvent->GetTarget();
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
   nsCOMPtr<Element> element = do_QueryInterface(target);
   if (NS_WARN_IF(!element)) {

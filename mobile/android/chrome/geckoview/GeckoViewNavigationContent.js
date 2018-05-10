@@ -11,40 +11,38 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   LoadURIDelegate: "resource://gre/modules/LoadURIDelegate.jsm",
 });
 
-XPCOMUtils.defineLazyGetter(this, "dump", () =>
-  ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
-                     {}).AndroidLog.d.bind(null, "ViewNavigation[C]"));
-
-function debug(aMsg) {
-  // dump(aMsg);
-}
-
 // Implements nsILoadURIDelegate.
 class GeckoViewNavigationContent extends GeckoViewContentModule {
-  register() {
-    debug("register");
+  onInit() {
+    this.onEnable();
+  }
+
+  onEnable() {
+    debug `onEnable`;
 
     docShell.loadURIDelegate = this;
   }
 
-  unregister() {
-    debug("unregister");
+  onDisable() {
+    debug `onDisable`;
 
     docShell.loadURIDelegate = null;
   }
 
   // nsILoadURIDelegate.
   loadURI(aUri, aWhere, aFlags, aTriggeringPrincipal) {
-    debug("loadURI " + (aUri && aUri.spec) + " " + aWhere + " " + aFlags);
+    debug `loadURI: uri=${aUri && aUri.spec}
+                    where=${aWhere} flags=${aFlags}`;
 
     // TODO: Remove this when we have a sensible error API.
     if (aUri && aUri.displaySpec.startsWith("about:certerror")) {
       addEventListener("click", ErrorPageEventHandler, true);
     }
 
-    return LoadURIDelegate.load(this.eventDispatcher, aUri, aWhere, aFlags,
-                                aTriggeringPrincipal);
+    return LoadURIDelegate.load(content, this.eventDispatcher,
+                                aUri, aWhere, aFlags);
   }
 }
 
-var navigationListener = new GeckoViewNavigationContent("GeckoViewNavigation", this);
+let {debug, warn} = GeckoViewNavigationContent.initLogging("GeckoViewNavigation");
+let module = GeckoViewNavigationContent.create(this);

@@ -23,7 +23,6 @@
 #include "nsReadableUtils.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "nsIURI.h"
-#include "nsIDOMEvent.h"
 #include "nsCOMPtr.h"
 #include "nsDOMString.h"
 #include "nsChangeHint.h"
@@ -37,6 +36,7 @@
 #include "nsBidiUtils.h"
 #include "PLDHashTable.h"
 #include "mozilla/Sprintf.h"
+#include "nsWindowSizes.h"
 #include "nsWrapperCacheInlines.h"
 
 namespace mozilla {
@@ -66,8 +66,8 @@ CharacterData::CharacterData(already_AddRefed<dom::NodeInfo>&& aNodeInfo)
 
 CharacterData::~CharacterData()
 {
-  NS_PRECONDITION(!IsInUncomposedDoc(),
-                  "Please remove this from the document properly");
+  MOZ_ASSERT(!IsInUncomposedDoc(),
+             "Please remove this from the document properly");
   if (GetParent()) {
     NS_RELEASE(mParent);
   }
@@ -89,6 +89,8 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(CharacterData)
   return Element::CanSkipThis(tmp);
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
+// We purposefully don't TRAVERSE_BEGIN_INHERITED here.  All the bits
+// we should traverse should be added here or in nsINode::Traverse.
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(CharacterData)
   if (MOZ_UNLIKELY(cb.WantDebugInfo())) {
     char name[40];
@@ -104,6 +106,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(CharacterData)
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
+// We purposefully don't UNLINK_BEGIN_INHERITED here.
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CharacterData)
   nsIContent::Unlink(tmp);
 
@@ -118,23 +121,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CharacterData)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN(CharacterData)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(CharacterData)
-  NS_INTERFACE_MAP_ENTRY(nsIContent)
-  NS_INTERFACE_MAP_ENTRY(nsINode)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
-  NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
-  NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
-                                 new nsNodeSupportsWeakRefTearoff(this))
-  // DOM bindings depend on the identity pointer being the
-  // same as nsINode (which nsIContent inherits).
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContent)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_ADDREF(CharacterData)
-NS_IMPL_MAIN_THREAD_ONLY_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(CharacterData,
-                                                                    nsNodeUtils::LastRelease(this))
-
+NS_INTERFACE_MAP_END_INHERITING(nsIContent)
 
 void
 CharacterData::GetNodeValueInternal(nsAString& aNodeValue)
@@ -258,8 +246,8 @@ CharacterData::SetTextInternal(uint32_t aOffset, uint32_t aCount,
                                uint32_t aLength, bool aNotify,
                                CharacterDataChangeInfo::Details* aDetails)
 {
-  NS_PRECONDITION(aBuffer || !aLength,
-                  "Null buffer passed to SetTextInternal!");
+  MOZ_ASSERT(aBuffer || !aLength,
+             "Null buffer passed to SetTextInternal!");
 
   // sanitize arguments
   uint32_t textLength = mText.GetLength();
@@ -425,9 +413,7 @@ CharacterData::ToCString(nsAString& aBuf, int32_t aOffset,
       } else if (ch == '>') {
         aBuf.AppendLiteral("&gt;");
       } else if ((ch < ' ') || (ch >= 127)) {
-        char buf[10];
-        SprintfLiteral(buf, "\\u%04x", ch);
-        AppendASCIItoUTF16(buf, aBuf);
+        aBuf.AppendPrintf("\\u%04x", ch);
       } else {
         aBuf.Append(ch);
       }
@@ -445,9 +431,7 @@ CharacterData::ToCString(nsAString& aBuf, int32_t aOffset,
       } else if (ch == '>') {
         aBuf.AppendLiteral("&gt;");
       } else if ((ch < ' ') || (ch >= 127)) {
-        char buf[10];
-        SprintfLiteral(buf, "\\u%04x", ch);
-        AppendASCIItoUTF16(buf, aBuf);
+        aBuf.AppendPrintf("\\u%04x", ch);
       } else {
         aBuf.Append(ch);
       }
@@ -462,28 +446,28 @@ CharacterData::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                           nsIContent* aBindingParent,
                           bool aCompileEventHandlers)
 {
-  NS_PRECONDITION(aParent || aDocument, "Must have document if no parent!");
-  NS_PRECONDITION(NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc(),
-                  "Must have the same owner document");
-  NS_PRECONDITION(!aParent || aDocument == aParent->GetUncomposedDoc(),
-                  "aDocument must be current doc of aParent");
-  NS_PRECONDITION(!GetUncomposedDoc() && !IsInUncomposedDoc(),
-                  "Already have a document.  Unbind first!");
+  MOZ_ASSERT(aParent || aDocument, "Must have document if no parent!");
+  MOZ_ASSERT(NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc(),
+             "Must have the same owner document");
+  MOZ_ASSERT(!aParent || aDocument == aParent->GetUncomposedDoc(),
+             "aDocument must be current doc of aParent");
+  MOZ_ASSERT(!GetUncomposedDoc() && !IsInUncomposedDoc(),
+             "Already have a document.  Unbind first!");
   // Note that as we recurse into the kids, they'll have a non-null parent.  So
   // only assert if our parent is _changing_ while we have a parent.
-  NS_PRECONDITION(!GetParent() || aParent == GetParent(),
-                  "Already have a parent.  Unbind first!");
-  NS_PRECONDITION(!GetBindingParent() ||
-                  aBindingParent == GetBindingParent() ||
-                  (!aBindingParent && aParent &&
-                   aParent->GetBindingParent() == GetBindingParent()),
-                  "Already have a binding parent.  Unbind first!");
-  NS_PRECONDITION(aBindingParent != this,
-                  "Content must not be its own binding parent");
-  NS_PRECONDITION(!IsRootOfNativeAnonymousSubtree() ||
-                  aBindingParent == aParent,
-                  "Native anonymous content must have its parent as its "
-                  "own binding parent");
+  MOZ_ASSERT(!GetParent() || aParent == GetParent(),
+             "Already have a parent.  Unbind first!");
+  MOZ_ASSERT(!GetBindingParent() ||
+             aBindingParent == GetBindingParent() ||
+             (!aBindingParent && aParent &&
+              aParent->GetBindingParent() == GetBindingParent()),
+             "Already have a binding parent.  Unbind first!");
+  MOZ_ASSERT(aBindingParent != this,
+             "Content must not be its own binding parent");
+  MOZ_ASSERT(!IsRootOfNativeAnonymousSubtree() ||
+             aBindingParent == aParent,
+             "Native anonymous content must have its parent as its "
+             "own binding parent");
 
   if (!aBindingParent && aParent) {
     aBindingParent = aParent->GetBindingParent();
@@ -678,7 +662,7 @@ CharacterData::DoGetXBLBinding() const
 bool
 CharacterData::IsNodeOfType(uint32_t aFlags) const
 {
-  return !(aFlags & ~eDATA_NODE);
+  return false;
 }
 
 void
@@ -787,46 +771,6 @@ CharacterData::ThreadSafeTextIsOnlyWhitespace() const
   }
 
   return true;
-}
-
-bool
-CharacterData::HasTextForTranslation()
-{
-  if (NodeType() != TEXT_NODE &&
-      NodeType() != CDATA_SECTION_NODE) {
-    return false;
-  }
-
-  if (mText.Is2b()) {
-    // The fragment contains non-8bit characters which means there
-    // was at least one "interesting" character to trigger non-8bit.
-    return true;
-  }
-
-  if (HasFlag(NS_CACHED_TEXT_IS_ONLY_WHITESPACE) &&
-      HasFlag(NS_TEXT_IS_ONLY_WHITESPACE)) {
-    return false;
-  }
-
-  const char* cp = mText.Get1b();
-  const char* end = cp + mText.GetLength();
-
-  unsigned char ch;
-  for (; cp < end; cp++) {
-    ch = *cp;
-
-    // These are the characters that are letters
-    // in the first 256 UTF-8 codepoints.
-    if ((ch >= 'a' && ch <= 'z') ||
-       (ch >= 'A' && ch <= 'Z') ||
-       (ch >= 192 && ch <= 214) ||
-       (ch >= 216 && ch <= 246) ||
-       (ch >= 248)) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 void

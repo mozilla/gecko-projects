@@ -9,14 +9,17 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
+Cu.importGlobalProperties(["Element"]);
+
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.jsm",
+  PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
-  RecentWindow: "resource:///modules/RecentWindow.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
-  PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
   Weave: "resource://services-sync/main.js",
 });
 
@@ -333,7 +336,7 @@ var PlacesUIUtils = {
         node.lastChild._placesView)
       return node.lastChild._placesView;
 
-    while (node instanceof Ci.nsIDOMElement) {
+    while (Element.isInstance(node)) {
       if (node._placesView)
         return node._placesView;
       if (node.localName == "tree" && node.getAttribute("type") == "places")
@@ -601,13 +604,7 @@ var PlacesUIUtils = {
     if (!aItemsToOpen.length)
       return;
 
-    // Prefer the caller window if it's a browser window, otherwise use
-    // the top browser window.
-    var browserWindow = null;
-    browserWindow =
-      aWindow && aWindow.document.documentElement.getAttribute("windowtype") == "navigator:browser" ?
-      aWindow : RecentWindow.getMostRecentBrowserWindow();
-
+    let browserWindow = getBrowserWindow(aWindow);
     var urls = [];
     let skipMarking = browserWindow && PrivateBrowsingUtils.isWindowPrivate(browserWindow);
     for (let item of aItemsToOpen) {
@@ -704,10 +701,16 @@ var PlacesUIUtils = {
   function PUIU_openNodeWithEvent(aNode, aEvent) {
     let window = aEvent.target.ownerGlobal;
 
+    let browserWindow = getBrowserWindow(window);
+
     let where = window.whereToOpenLink(aEvent, false, true);
-    if (where == "current" && this.loadBookmarksInTabs &&
-        PlacesUtils.nodeIsBookmark(aNode) && !aNode.uri.startsWith("javascript:")) {
-      where = "tab";
+    if (this.loadBookmarksInTabs && PlacesUtils.nodeIsBookmark(aNode)) {
+      if (where == "current" && !aNode.uri.startsWith("javascript:")) {
+        where = "tab";
+      }
+      if (where == "tab" && browserWindow.isTabEmpty(browserWindow.gBrowser.selectedTab)) {
+        where = "current";
+      }
     }
 
     this._openNodeIn(aNode, where, window);
@@ -744,7 +747,7 @@ var PlacesUIUtils = {
       if (aWhere == "current" && isBookmark) {
         if (PlacesUtils.annotations
                        .itemHasAnnotation(aNode.itemId, this.LOAD_IN_SIDEBAR_ANNO)) {
-          let browserWin = RecentWindow.getMostRecentBrowserWindow();
+          let browserWin = BrowserWindowTracker.getTopWindow();
           if (browserWin) {
             browserWin.openWebPanel(aNode.title, aNode.uri);
             return;
@@ -752,7 +755,7 @@ var PlacesUIUtils = {
         }
       }
 
-      aWindow.openUILinkIn(aNode.uri, aWhere, {
+      aWindow.openTrustedLinkIn(aNode.uri, aWhere, {
         allowPopups: aNode.uri.startsWith("javascript:"),
         inBackground: this.loadBookmarksInBackground,
         private: aPrivate,
@@ -764,14 +767,12 @@ var PlacesUIUtils = {
    * Helper for guessing scheme from an url string.
    * Used to avoid nsIURI overhead in frequently called UI functions.
    *
-   * @param aUrlString the url to guess the scheme from.
-   *
+   * @param {string} href The url to guess the scheme from.
    * @return guessed scheme for this url string.
-   *
    * @note this is not supposed be perfect, so use it only for UI purposes.
    */
-  guessUrlSchemeForUI: function PUIU_guessUrlSchemeForUI(aUrlString) {
-    return aUrlString.substr(0, aUrlString.indexOf(":"));
+  guessUrlSchemeForUI(href) {
+    return href.substr(0, href.indexOf(":"));
   },
 
   getBestTitle: function PUIU_getBestTitle(aNode, aDoNotCutTitle) {
@@ -921,61 +922,6 @@ var PlacesUIUtils = {
   },
 
   /**
-   * Constructs a Places Transaction for the drop or paste of a blob of data
-   * into a container.
-   *
-   * @param   aData
-   *          The unwrapped data blob of dropped or pasted data.
-   * @param   aNewParentGuid
-   *          GUID of the container the data was dropped or pasted into.
-   * @param   aIndex
-   *          The index within the container the item was dropped or pasted at.
-   * @param   aCopy
-   *          The drag action was copy, so don't move folders or links.
-   *
-   * @return  a Places Transaction that can be transacted for performing the
-   *          move/insert command.
-   */
-  getTransactionForData(aData, aNewParentGuid, aIndex, aCopy) {
-    if (!this.SUPPORTED_FLAVORS.includes(aData.type))
-      throw new Error(`Unsupported '${aData.type}' data type`);
-
-    if ("itemGuid" in aData && "instanceId" in aData &&
-        aData.instanceId == PlacesUtils.instanceId) {
-      if (!this.PLACES_FLAVORS.includes(aData.type))
-        throw new Error(`itemGuid unexpectedly set on ${aData.type} data`);
-
-      let info = { guid: aData.itemGuid,
-                   newParentGuid: aNewParentGuid,
-                   newIndex: aIndex };
-      if (aCopy) {
-        info.excludingAnnotation = "Places/SmartBookmark";
-        return PlacesTransactions.Copy(info);
-      }
-      return PlacesTransactions.Move(info);
-    }
-
-    // Since it's cheap and harmless, we allow the paste of separators and
-    // bookmarks from builds that use legacy transactions (i.e. when itemGuid
-    // was not set on PLACES_FLAVORS data). Containers are a different story,
-    // and thus disallowed.
-    if (aData.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER)
-      throw new Error("Can't copy a container from a legacy-transactions build");
-
-    if (aData.type == PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR) {
-      return PlacesTransactions.NewSeparator({ parentGuid: aNewParentGuid,
-                                               index: aIndex });
-    }
-
-    let title = aData.type != PlacesUtils.TYPE_UNICODE ? aData.title
-                                                       : aData.uri;
-    return PlacesTransactions.NewBookmark({ url: Services.io.newURI(aData.uri),
-                                            title,
-                                            parentGuid: aNewParentGuid,
-                                            index: aIndex });
-  },
-
-  /**
    * Processes a set of transfer items that have been dropped or pasted.
    * Batching will be applied where necessary.
    *
@@ -998,7 +944,7 @@ var PlacesUIUtils = {
       let insertionIndex = await insertionPoint.getIndex();
       itemsCount = items.length;
       transactions = await getTransactionsForTransferItems(
-        items, insertionIndex, insertionPoint.guid, doCopy);
+        items, insertionIndex, insertionPoint.guid, !doCopy);
     }
 
     // Check if we actually have something to add, if we don't it probably wasn't
@@ -1031,6 +977,94 @@ var PlacesUIUtils = {
 
     return guidsToSelect;
   },
+
+  onSidebarTreeClick(event) {
+    // right-clicks are not handled here
+    if (event.button == 2)
+      return;
+
+    let tree = event.target.parentNode;
+    let tbo = tree.treeBoxObject;
+    let cell = tbo.getCellAt(event.clientX, event.clientY);
+    if (cell.row == -1 || cell.childElt == "twisty")
+      return;
+
+    // getCoordsForCellItem returns the x coordinate in logical coordinates
+    // (i.e., starting from the left and right sides in LTR and RTL modes,
+    // respectively.)  Therefore, we make sure to exclude the blank area
+    // before the tree item icon (that is, to the left or right of it in
+    // LTR and RTL modes, respectively) from the click target area.
+    let win = tree.ownerGlobal;
+    let rect = tbo.getCoordsForCellItem(cell.row, cell.col, "image");
+    let isRTL = win.getComputedStyle(tree).direction == "rtl";
+    let mouseInGutter = isRTL ? event.clientX > rect.x
+                              : event.clientX < rect.x;
+
+    let metaKey = AppConstants.platform === "macosx" ? event.metaKey
+                                                     : event.ctrlKey;
+    let modifKey = metaKey || event.shiftKey;
+    let isContainer = tbo.view.isContainer(cell.row);
+    let openInTabs = isContainer &&
+                     (event.button == 1 || (event.button == 0 && modifKey)) &&
+                     PlacesUtils.hasChildURIs(tree.view.nodeForTreeIndex(cell.row));
+
+    if (event.button == 0 && isContainer && !openInTabs) {
+      tbo.view.toggleOpenState(cell.row);
+    } else if (!mouseInGutter && openInTabs &&
+               event.originalTarget.localName == "treechildren") {
+      tbo.view.selection.select(cell.row);
+      this.openContainerNodeInTabs(tree.selectedNode, event, tree);
+    } else if (!mouseInGutter && !isContainer &&
+               event.originalTarget.localName == "treechildren") {
+      // Clear all other selection since we're loading a link now. We must
+      // do this *before* attempting to load the link since openURL uses
+      // selection as an indication of which link to load.
+      tbo.view.selection.select(cell.row);
+      this.openNodeWithEvent(tree.selectedNode, event);
+    }
+  },
+
+  onSidebarTreeKeyPress(event) {
+    let node = event.target.selectedNode;
+    if (node) {
+      if (event.keyCode == event.DOM_VK_RETURN)
+        this.openNodeWithEvent(node, event);
+    }
+  },
+
+  /**
+   * The following function displays the URL of a node that is being
+   * hovered over.
+   */
+  onSidebarTreeMouseMove(event) {
+    let treechildren = event.target;
+    if (treechildren.localName != "treechildren")
+      return;
+
+    let tree = treechildren.parentNode;
+    let cell = tree.treeBoxObject.getCellAt(event.clientX, event.clientY);
+
+    // cell.row is -1 when the mouse is hovering an empty area within the tree.
+    // To avoid showing a URL from a previously hovered node for a currently
+    // hovered non-url node, we must clear the moused-over URL in these cases.
+    if (cell.row != -1) {
+      let node = tree.view.nodeForTreeIndex(cell.row);
+      if (PlacesUtils.nodeIsURI(node)) {
+        this.setMouseoverURL(node.uri, tree.ownerGlobal);
+        return;
+      }
+    }
+    this.setMouseoverURL("", tree.ownerGlobal);
+  },
+
+  setMouseoverURL(url, win) {
+    // When the browser window is closed with an open sidebar, the sidebar
+    // unload event happens after the browser's one.  In this case
+    // top.XULBrowserWindow has been nullified already.
+    if (win.top.XULBrowserWindow) {
+      win.top.XULBrowserWindow.setOverLink(url, null);
+    }
+  }
 };
 
 // These are lazy getters to avoid importing PlacesUtils immediately.
@@ -1096,7 +1130,7 @@ function canMoveUnwrappedNode(unwrappedNode) {
  *                  if one could not be found.
  */
 function getResultForBatching(viewOrElement) {
-  if (viewOrElement && viewOrElement instanceof Ci.nsIDOMElement &&
+  if (viewOrElement && Element.isInstance(viewOrElement) &&
       viewOrElement.id === "placesList") {
     // Note: fall back to the existing item if we can't find the right-hane pane.
     viewOrElement = viewOrElement.ownerDocument.getElementById("placeContent") || viewOrElement;
@@ -1109,6 +1143,7 @@ function getResultForBatching(viewOrElement) {
   return null;
 }
 
+
 /**
  * Processes a set of transfer items and returns transactions to insert or
  * move them.
@@ -1117,12 +1152,58 @@ function getResultForBatching(viewOrElement) {
  * @param {Integer} insertionIndex The requested index for insertion.
  * @param {String} insertionParentGuid The guid of the parent folder to insert
  *                                     or move the items to.
- * @param {Boolean} doCopy Set to true to copy the items, false will move them
- *                         if possible.
+ * @param {Boolean} doMove Set to true to MOVE the items if possible, false will
+ *                         copy them.
  * @return {Array} Returns an array of created PlacesTransactions.
  */
 async function getTransactionsForTransferItems(items, insertionIndex,
-                                               insertionParentGuid, doCopy) {
+                                               insertionParentGuid, doMove) {
+  let canMove = true;
+  for (let item of items) {
+    if (!PlacesUIUtils.SUPPORTED_FLAVORS.includes(item.type)) {
+      throw new Error(`Unsupported '${item.type}' data type`);
+    }
+
+    // Work out if this is data from the same app session we're running in.
+    if (!("instanceId" in item) || item.instanceId != PlacesUtils.instanceId) {
+      if (item.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER) {
+        throw new Error("Can't copy a container from a legacy-transactions build");
+      }
+      // Only log if this is one of "our" types as external items, e.g. drag from
+      // url bar to toolbar, shouldn't complain.
+      if (PlacesUIUtils.PLACES_FLAVORS.includes(item.type)) {
+        Cu.reportError("Tried to move an unmovable Places " +
+                       "node, reverting to a copy operation.");
+      }
+
+      // We can never move from an external copy.
+      canMove = false;
+    }
+
+    if (doMove && canMove) {
+      canMove = canMoveUnwrappedNode(item);
+    }
+  }
+
+  if (doMove && !canMove) {
+    doMove = false;
+  }
+
+  return doMove ? getTransactionsForMove(items, insertionIndex, insertionParentGuid) :
+                  getTransactionsForCopy(items, insertionIndex, insertionParentGuid);
+}
+
+/**
+ * Processes a set of transfer items and returns an array of transactions.
+ *
+ * @param {Array} items A list of unwrapped nodes to get transactions for.
+ * @param {Integer} insertionIndex The requested index for insertion.
+ * @param {String} insertionParentGuid The guid of the parent folder to insert
+ *                                     or move the items to.
+ * @return {Array} Returns an array of created PlacesTransactions.
+ */
+async function getTransactionsForMove(items, insertionIndex,
+                                      insertionParentGuid) {
   let transactions = [];
   let index = insertionIndex;
 
@@ -1148,22 +1229,81 @@ async function getTransactionsForTransferItems(items, insertionIndex,
       }
     }
 
-    // If this is not a copy, check for safety that we can move the
-    // source, otherwise report an error and fallback to a copy.
-    if (!doCopy && !canMoveUnwrappedNode(item)) {
-      Cu.reportError("Tried to move an unmovable Places " +
-                     "node, reverting to a copy operation.");
-      doCopy = true;
-    }
-    transactions.push(
-      PlacesUIUtils.getTransactionForData(item,
-                                          insertionParentGuid,
-                                          index,
-                                          doCopy));
+    transactions.push(PlacesTransactions.Move({
+      guid: item.itemGuid,
+      newIndex: index,
+      newParentGuid: insertionParentGuid,
+    }));
 
     if (index != -1 && item.itemGuid) {
       index++;
     }
   }
   return transactions;
+}
+
+/**
+ * Processes a set of transfer items and returns an array of transactions.
+ *
+ * @param {Array} items A list of unwrapped nodes to get transactions for.
+ * @param {Integer} insertionIndex The requested index for insertion.
+ * @param {String} insertionParentGuid The guid of the parent folder to insert
+ *                                     or move the items to.
+ * @return {Array} Returns an array of created PlacesTransactions.
+ */
+async function getTransactionsForCopy(items, insertionIndex,
+                                      insertionParentGuid) {
+  let transactions = [];
+  let index = insertionIndex;
+
+  for (let item of items) {
+    let transaction;
+    let guid = item.itemGuid;
+
+    if (PlacesUIUtils.PLACES_FLAVORS.includes(item.type) &&
+        // For anything that is comming from within this session, we do a
+        // direct copy, otherwise we fallback and form a new item below.
+        "instanceId" in item && item.instanceId == PlacesUtils.instanceId &&
+        // If the Item doesn't have a guid, this could be a virtual tag query or
+        // other item, so fallback to inserting a new bookmark with the URI.
+        guid &&
+        // For virtual root items, we fallback to creating a new bookmark, as
+        // we want a shortcut to be created, not a full tree copy.
+        !PlacesUtils.bookmarks.isVirtualRootItem(guid) &&
+        !PlacesUtils.isVirtualLeftPaneItem(guid)) {
+      transaction = PlacesTransactions.Copy({
+        excludingAnnotation: "Places/SmartBookmark",
+        guid,
+        newIndex: index,
+        newParentGuid: insertionParentGuid,
+      });
+    } else if (item.type == PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR) {
+      transaction = PlacesTransactions.NewSeparator({
+        index,
+        parentGuid: insertionParentGuid,
+      });
+    } else {
+      let title = item.type != PlacesUtils.TYPE_UNICODE ? item.title : item.uri;
+      transaction = PlacesTransactions.NewBookmark({
+        index,
+        parentGuid: insertionParentGuid,
+        title,
+        url: item.uri,
+      });
+    }
+
+    transactions.push(transaction);
+
+    if (index != -1) {
+      index++;
+    }
+  }
+  return transactions;
+}
+
+function getBrowserWindow(aWindow) {
+  // Prefer the caller window if it's a browser window, otherwise use
+  // the top browser window.
+  return aWindow && aWindow.document.documentElement.getAttribute("windowtype") == "navigator:browser" ?
+    aWindow : BrowserWindowTracker.getTopWindow();
 }

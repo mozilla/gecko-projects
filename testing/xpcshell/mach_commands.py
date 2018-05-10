@@ -234,17 +234,21 @@ class MachCommands(MachCommandBase):
         self._ensure_state_subdir_exists('.')
 
         if not params.get('log'):
-            params['log'] = structured.commandline.setup_logging("XPCShellTests",
-                                                                 params,
-                                                                 {"mach": sys.stdout},
-                                                                 {"verbose": True})
+            log_defaults = {self._mach_context.settings['test']['format']: sys.stdout}
+            fmt_defaults = {
+                "level": self._mach_context.settings['test']['level'],
+                "verbose": True
+            }
+            params['log'] = structured.commandline.setup_logging(
+                "XPCShellTests", params, log_defaults, fmt_defaults)
 
         if not params['threadCount']:
             params['threadCount'] = int((cpu_count() * 3) / 2)
 
         if conditions.is_android(self):
             from mozrunner.devices.android_device import verify_android_device, get_adb_path
-            verify_android_device(self)
+            device_serial = params.get('deviceSerial')
+            verify_android_device(self, device_serial=device_serial)
             if not params['adbPath']:
                 params['adbPath'] = get_adb_path(self)
             xpcshell = self._spawn(AndroidXPCShellRunner)

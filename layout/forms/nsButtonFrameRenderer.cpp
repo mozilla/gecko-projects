@@ -9,8 +9,7 @@
 #include "nsGkAtoms.h"
 #include "nsCSSPseudoElements.h"
 #include "nsNameSpaceManager.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/Unused.h"
 #include "nsDisplayList.h"
 #include "nsITheme.h"
@@ -153,11 +152,11 @@ nsDisplayButtonBoxShadowOuter::CreateWebRenderCommands(
   nsRect shadowRect = nsRect(ToReferenceFrame(), mFrame->GetSize());
   LayoutDeviceRect deviceBox =
     LayoutDeviceRect::FromAppUnits(shadowRect, appUnitsPerDevPixel);
-  wr::LayoutRect deviceBoxRect = aSc.ToRelativeLayoutRect(deviceBox);
+  wr::LayoutRect deviceBoxRect = wr::ToRoundedLayoutRect(deviceBox);
 
   LayoutDeviceRect clipRect =
     LayoutDeviceRect::FromAppUnits(mVisibleRect, appUnitsPerDevPixel);
-  wr::LayoutRect deviceClipRect = aSc.ToRelativeLayoutRect(clipRect);
+  wr::LayoutRect deviceClipRect = wr::ToRoundedLayoutRect(clipRect);
 
   bool hasBorderRadius;
   Unused << nsCSSRendering::HasBoxShadowNativeTheme(mFrame, hasBorderRadius);
@@ -462,11 +461,23 @@ nsButtonFrameRenderer::GetButtonInnerFocusRect(const nsRect& aRect, nsRect& aRes
   aResult = aRect;
   aResult.Deflate(mFrame->GetUsedBorderAndPadding());
 
-  nsMargin innerFocusPadding(0,0,0,0);
   if (mInnerFocusStyle) {
+    nsMargin innerFocusPadding(0,0,0,0);
     mInnerFocusStyle->StylePadding()->GetPadding(innerFocusPadding);
+
+    nsMargin framePadding = mFrame->GetUsedPadding();
+
+    innerFocusPadding.top = std::min(innerFocusPadding.top,
+                                     framePadding.top);
+    innerFocusPadding.right = std::min(innerFocusPadding.right,
+                                       framePadding.right);
+    innerFocusPadding.bottom = std::min(innerFocusPadding.bottom,
+                                        framePadding.bottom);
+    innerFocusPadding.left = std::min(innerFocusPadding.left,
+                                      framePadding.left);
+
+    aResult.Inflate(innerFocusPadding);
   }
-  aResult.Inflate(innerFocusPadding);
 }
 
 ImgDrawResult
@@ -559,9 +570,9 @@ nsButtonFrameRenderer::ReResolveStyles(nsPresContext* aPresContext)
 {
   // get all the styles
   ComputedStyle* context = mFrame->Style();
-  StyleSetHandle styleSet = aPresContext->StyleSet();
+  ServoStyleSet* styleSet = aPresContext->StyleSet();
 
-  // get styles assigned to -moz-inner-focus (ie dotted border on Windows)
+  // get styles assigned to -moz-focus-inner (ie dotted border on Windows)
   mInnerFocusStyle =
     styleSet->ProbePseudoElementStyle(mFrame->GetContent()->AsElement(),
                                       CSSPseudoElementType::mozFocusInner,

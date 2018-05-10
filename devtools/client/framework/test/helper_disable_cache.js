@@ -5,6 +5,12 @@
 
 "use strict";
 
+// This file assumes we have head.js globals for the scope where this is loaded.
+/* import-globals-from head.js */
+
+/* exported initTab, checkCacheStateForAllTabs, setDisableCacheCheckboxChecked,
+            finishUp */
+
 // Common code shared by browser_toolbox_options_disable_cache-*.js
 const TEST_URI = URL_ROOT + "browser_toolbox_options_disable_cache.sjs";
 var tabs = [
@@ -50,7 +56,7 @@ async function checkCacheEnabled(tabX, expected) {
 
   await reloadTab(tabX);
 
-  let oldGuid = await ContentTask.spawn(gBrowser.selectedBrowser, {}, function () {
+  let oldGuid = await ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     let doc = content.document;
     let h1 = doc.querySelector("h1");
     return h1.textContent;
@@ -58,7 +64,7 @@ async function checkCacheEnabled(tabX, expected) {
 
   await reloadTab(tabX);
 
-  let guid = await ContentTask.spawn(gBrowser.selectedBrowser, {}, function () {
+  let guid = await ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     let doc = content.document;
     let h1 = doc.querySelector("h1");
     return h1.textContent;
@@ -91,7 +97,7 @@ function reloadTab(tabX) {
   let def = defer();
   let browser = gBrowser.selectedBrowser;
 
-  BrowserTestUtils.browserLoaded(browser).then(function () {
+  BrowserTestUtils.browserLoaded(browser).then(function() {
     info("Reloaded tab " + tabX.title);
     def.resolve();
   });

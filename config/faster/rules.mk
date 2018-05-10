@@ -104,9 +104,6 @@ $(addprefix install-,$(INSTALL_MANIFESTS)): install-%: $(addprefix $(TOPOBJDIR)/
 ifndef FASTER_RECURSIVE_MAKE
 $(TOPOBJDIR)/config/makefiles/xpidl/xpidl: $(TOPOBJDIR)/install-dist_idl
 endif
-# It also requires all the install manifests for dist/bin to have been processed
-# because it adds interfaces.manifest references with buildlist.py.
-$(TOPOBJDIR)/config/makefiles/xpidl/xpidl: $(addprefix install-,$(filter dist/bin%,$(INSTALL_MANIFESTS)))
 
 $(TOPOBJDIR)/build/application.ini: $(TOPOBJDIR)/buildid.h $(TOPOBJDIR)/source-repo.h
 
@@ -114,4 +111,7 @@ $(TOPOBJDIR)/build/application.ini: $(TOPOBJDIR)/buildid.h $(TOPOBJDIR)/source-r
 # "build faster".
 ifeq ($(MOZ_BUILD_APP),browser/app)
 default: $(TOPOBJDIR)/browser/app/features
+endif
+ifeq ($(MOZ_BUILD_APP),mobile/android)
+default: $(TOPOBJDIR)/mobile/android/base/features
 endif

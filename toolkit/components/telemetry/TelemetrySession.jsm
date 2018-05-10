@@ -16,10 +16,8 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   TelemetrySend: "resource://gre/modules/TelemetrySend.jsm",
   AddonManagerPrivate: "resource://gre/modules/AddonManager.jsm",
-  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   TelemetryController: "resource://gre/modules/TelemetryController.jsm",
   TelemetryStorage: "resource://gre/modules/TelemetryStorage.jsm",
-  TelemetryLog: "resource://gre/modules/TelemetryLog.jsm",
   UITelemetry: "resource://gre/modules/UITelemetry.jsm",
   GCTelemetry: "resource://gre/modules/GCTelemetry.jsm",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
@@ -51,16 +49,12 @@ const MIN_SUBSESSION_LENGTH_MS = Services.prefs.getIntPref("toolkit.telemetry.mi
 const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "TelemetrySession" + (Utils.isContentProcess ? "#content::" : "::");
 
-const MESSAGE_TELEMETRY_PAYLOAD = "Telemetry:Payload";
 const MESSAGE_TELEMETRY_USS = "Telemetry:USS";
 const MESSAGE_TELEMETRY_GET_CHILD_USS = "Telemetry:GetChildUSS";
 
 // Whether the FHR/Telemetry unification features are enabled.
 // Changing this pref requires a restart.
 const IS_UNIFIED_TELEMETRY = Services.prefs.getBoolPref(TelemetryUtils.Preferences.Unified, false);
-
-// Maximum number of content payloads that we are willing to store.
-const MAX_NUM_CONTENT_PAYLOADS = 10;
 
 // Do not gather data more than once a minute (ms)
 const TELEMETRY_INTERVAL = 60 * 1000;
@@ -664,11 +658,6 @@ var Impl = {
   // The previous build ID, if this is the first run with a new build.
   // Null if this is the first run, or the previous build ID is unknown.
   _previousBuildId: null,
-  // Telemetry payloads sent by child processes.
-  // Each element is in the format {source: <weak-ref>, payload: <object>},
-  // where source is a weak reference to the child process,
-  // and payload is the telemetry payload from that child process.
-  _childTelemetry: [],
   // Unique id that identifies this session so the server can cope with duplicate
   // submissions, orphaning and other oddities. The id is shared across subsessions.
   _sessionId: null,
@@ -758,7 +747,6 @@ var Impl = {
     if (!Utils.isContentProcess && Telemetry.canRecordExtended) {
       try {
         ret.addonManager = AddonManagerPrivate.getSimpleMeasures();
-        ret.UITelemetry = UITelemetry.getSimpleMeasures();
       } catch (ex) {}
     }
 
@@ -776,8 +764,6 @@ var Impl = {
     }
 
     ret.startupInterrupted = Number(Services.startup.interrupted);
-
-    ret.js = Cu.getJSEngineTelemetryValue();
 
     let maximalNumberOfConcurrentThreads = Telemetry.maximalNumberOfConcurrentThreads;
     if (maximalNumberOfConcurrentThreads) {
@@ -885,8 +871,8 @@ var Impl = {
                                        : Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTOUT;
   },
 
-  getHistograms: function getHistograms(subsession, clearSubsession) {
-    let hls = Telemetry.snapshotHistograms(this.getDatasetType(), subsession, clearSubsession);
+  getHistograms: function getHistograms(clearSubsession) {
+    let hls = Telemetry.snapshotHistograms(this.getDatasetType(), clearSubsession);
     let ret = {};
 
     for (let [process, histograms] of Object.entries(hls)) {
@@ -901,8 +887,8 @@ var Impl = {
     return ret;
   },
 
-  getKeyedHistograms(subsession, clearSubsession) {
-    let khs = Telemetry.snapshotKeyedHistograms(this.getDatasetType(), subsession, clearSubsession);
+  getKeyedHistograms(clearSubsession) {
+    let khs = Telemetry.snapshotKeyedHistograms(this.getDatasetType(), clearSubsession);
     let ret = {};
 
     for (let [process, histograms] of Object.entries(khs)) {
@@ -1193,10 +1179,6 @@ var Impl = {
     Telemetry.getHistogramById(id).add(val);
   },
 
-  getChildPayloads: function getChildPayloads() {
-    return this._childTelemetry.map(child => child.payload);
-  },
-
   /**
    * Get the current session's payload using the provided
    * simpleMeasurements and info, which are typically obtained by a call
@@ -1239,8 +1221,8 @@ var Impl = {
 
     // Additional payload for chrome process.
     let measurements = {
-      histograms: protect(() => this.getHistograms(isSubsession, clearSubsession), {}),
-      keyedHistograms: protect(() => this.getKeyedHistograms(isSubsession, clearSubsession), {}),
+      histograms: protect(() => this.getHistograms(clearSubsession), {}),
+      keyedHistograms: protect(() => this.getKeyedHistograms(clearSubsession), {}),
       scalars: protect(() => this.getScalars(isSubsession, clearSubsession), {}),
       keyedScalars: protect(() => this.getScalars(isSubsession, clearSubsession, true), {}),
       events: protect(() => this.getEvents(isSubsession, clearSubsession)),
@@ -1451,7 +1433,6 @@ var Impl = {
 
     this.attachEarlyObservers();
 
-    Services.ppmm.addMessageListener(MESSAGE_TELEMETRY_PAYLOAD, this);
     Services.ppmm.addMessageListener(MESSAGE_TELEMETRY_USS, this);
   },
 
@@ -1570,24 +1551,6 @@ var Impl = {
   receiveMessage: function receiveMessage(message) {
     this._log.trace("receiveMessage - Message name " + message.name);
     switch (message.name) {
-    case MESSAGE_TELEMETRY_PAYLOAD:
-    {
-      // In parent process, receive Telemetry payload from child
-      let source = message.data.childUUID;
-      delete message.data.childUUID;
-
-      this._childTelemetry.push({
-        source,
-        payload: message.data,
-      });
-
-      if (this._childTelemetry.length == MAX_NUM_CONTENT_PAYLOADS + 1) {
-        this._childTelemetry.shift();
-        Telemetry.getHistogramById("TELEMETRY_DISCARDED_CONTENT_PINGS_COUNT").add();
-      }
-
-      break;
-    }
     case MESSAGE_TELEMETRY_USS:
     {
       // In parent process, receive the USS report from the child
@@ -1649,8 +1612,6 @@ var Impl = {
     }
   },
 
-  _processUUID: generateUUID(),
-
   sendContentProcessUSS: function sendContentProcessUSS(aMessageId) {
     this._log.trace("sendContentProcessUSS");
 
@@ -1669,25 +1630,17 @@ var Impl = {
     );
   },
 
-  sendContentProcessPing: function sendContentProcessPing(reason) {
-    this._log.trace("sendContentProcessPing - Reason " + reason);
-    const isSubsession = !this._isClassicReason(reason);
-    let payload = this.getSessionPayload(reason, isSubsession);
-    payload.childUUID = this._processUUID;
-    Services.cpmm.sendAsyncMessage(MESSAGE_TELEMETRY_PAYLOAD, payload);
-  },
-
    /**
-    * Save both the "saved-session" and the "shutdown" pings to disk.
+    * On Desktop: Save the "shutdown" ping to disk.
+    * On Android: Save the "saved-session" ping to disk.
     * This needs to be called after TelemetrySend shuts down otherwise pings
     * would be sent instead of getting persisted to disk.
     */
   saveShutdownPings() {
     this._log.trace("saveShutdownPings");
 
-    // We don't wait for "shutdown" pings to be written to disk before gathering the
-    // "saved-session" payload. Instead we append the promises to this list and wait
-    // on both to be saved after kicking off their collection.
+    // We append the promises to this list and wait
+    // on all pings to be saved after kicking off their collection.
     let p = [];
 
     if (IS_UNIFIED_TELEMETRY) {
@@ -1727,9 +1680,7 @@ var Impl = {
       }
     }
 
-    // As a temporary measure, we want to submit saved-session too if extended Telemetry is enabled
-    // to keep existing performance analysis working.
-    if (Telemetry.canRecordExtended) {
+    if (AppConstants.platform == "android" && Telemetry.canRecordExtended) {
       let payload = this.getSessionPayload(REASON_SAVED_SESSION, false);
 
       let options = {
@@ -1830,7 +1781,6 @@ var Impl = {
       // content-child-shutdown is only registered for content processes.
       this.uninstall();
       Telemetry.flushBatchedChildTelemetry();
-      this.sendContentProcessPing(REASON_SAVED_SESSION);
       break;
     case TOPIC_CYCLE_COLLECTOR_BEGIN:
       let now = new Date();

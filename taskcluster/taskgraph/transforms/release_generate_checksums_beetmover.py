@@ -12,18 +12,20 @@ from taskgraph.util.schema import validate_schema, Schema, resolve_keyed_by, opt
 from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
                                          get_beetmover_action_scope,
                                          get_phase)
+from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
 
 transforms = TransformSequence()
 
-CHECKSUMS_UNSIGNED_ARTIFACTS = [
+CHECKSUMS_BUILD_ARTIFACTS = [
     "SHA256SUMMARY",
     "SHA512SUMMARY"
 ]
 
-CHECKSUMS_SIGNED_ARTIFACTS = [
+CHECKSUMS_SIGNING_ARTIFACTS = [
+    "KEY",
     "SHA256SUMS",
     "SHA256SUMS.asc",
     "SHA512SUMS",
@@ -122,11 +124,11 @@ def make_task_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(signing_task_ref, build_task_ref):
-    build_mapping = CHECKSUMS_UNSIGNED_ARTIFACTS
-    signing_mapping = CHECKSUMS_SIGNED_ARTIFACTS
+def generate_upstream_artifacts(job, signing_task_ref, build_task_ref):
+    build_mapping = CHECKSUMS_BUILD_ARTIFACTS
+    signing_mapping = CHECKSUMS_SIGNING_ARTIFACTS
 
-    artifact_prefix = 'public/build'
+    artifact_prefix = get_artifact_prefix(job)
 
     upstream_artifacts = [{
         "taskId": {"task-reference": build_task_ref},
@@ -168,7 +170,7 @@ def make_task_worker(config, jobs):
             'implementation': 'beetmover',
             'release-properties': craft_release_properties(config, job),
             'upstream-artifacts': generate_upstream_artifacts(
-                signing_task_ref, build_task_ref
+                job, signing_task_ref, build_task_ref
             )
         }
 

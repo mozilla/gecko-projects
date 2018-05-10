@@ -32,13 +32,7 @@ var WindowWatcher = {
     Services.obs.notifyObservers(null, "addon-blocklist-closed");
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIWindowWatcher)
-     || iid.equals(Ci.nsISupports))
-      return this;
-
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIWindowWatcher"])
 };
 
 MockRegistrar.register("@mozilla.org/embedcomp/window-watcher;1", WindowWatcher);
@@ -69,10 +63,11 @@ function run_test() {
 // Tests that an appDisabled add-on that becomes softBlocked remains disabled
 // when becoming appEnabled
 add_task(async function() {
-  writeInstallRDFForExtension({
+  await promiseWriteInstallRDFForExtension({
     id: "softblock1@tests.mozilla.org",
     version: "1.0",
     name: "Softblocked add-on",
+    bootstrap: true,
     targetApplications: [{
       id: "xpcshell@tests.mozilla.org",
       minVersion: "2",
@@ -80,7 +75,7 @@ add_task(async function() {
     }]
   }, profileDir);
 
-  startupManager();
+  await promiseStartupManager();
 
   let s1 = await promiseAddonByID("softblock1@tests.mozilla.org");
 

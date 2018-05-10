@@ -66,6 +66,12 @@ NullPrincipal::Create(const OriginAttributes& aOriginAttributes, nsIURI* aURI)
   return nullPrin.forget();
 }
 
+/* static */ already_AddRefed<NullPrincipal>
+NullPrincipal::CreateWithoutOriginAttributes()
+{
+  return NullPrincipal::Create(mozilla::OriginAttributes(), nullptr);
+}
+
 nsresult
 NullPrincipal::Init(const OriginAttributes& aOriginAttributes, nsIURI* aURI)
 {
@@ -154,13 +160,17 @@ NullPrincipal::SetCsp(nsIContentSecurityPolicy* aCsp)
 NS_IMETHODIMP
 NullPrincipal::GetURI(nsIURI** aURI)
 {
-  return NS_EnsureSafeToReturn(mURI, aURI);
+  nsCOMPtr<nsIURI> uri = mURI;
+  uri.forget(aURI);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 NullPrincipal::GetDomain(nsIURI** aDomain)
 {
-  return NS_EnsureSafeToReturn(mURI, aDomain);
+  nsCOMPtr<nsIURI> uri = mURI;
+  uri.forget(aDomain);
+  return NS_OK;
 }
 
 NS_IMETHODIMP

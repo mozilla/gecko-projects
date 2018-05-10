@@ -16,16 +16,6 @@ function playAndPostResult(muted, parent_window) {
     );
 }
 
-function nextEvent(eventTarget, eventName) {
-  return new Promise(function(resolve, reject) {
-    let f = function(event) {
-      eventTarget.removeEventListener(eventName, f, false);
-      resolve(event);
-    };
-    eventTarget.addEventListener(eventName, f, false);
-  });
-}
-
 function nextWindowMessage() {
   return nextEvent(window, "message");
 }
@@ -34,4 +24,16 @@ function log(msg) {
   var log_pane = document.body;
   log_pane.appendChild(document.createTextNode(msg));
   log_pane.appendChild(document.createElement("br"));
+}
+
+const autoplayPermission = "autoplay-media";
+
+async function pushAutoplayAllowedPermission() {
+  return new Promise((resolve, reject) => {
+    SpecialPowers.pushPermissions([{
+      'type': autoplayPermission,
+      'allow': true,
+      'context': document
+    }], resolve);
+  });
 }

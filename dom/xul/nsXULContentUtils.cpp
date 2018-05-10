@@ -18,13 +18,10 @@
 #include "nsIContent.h"
 #include "nsICollation.h"
 #include "nsIDocument.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMXULCommandDispatcher.h"
-#include "nsIRDFService.h"
 #include "nsIServiceManager.h"
 #include "nsXULContentUtils.h"
 #include "nsLayoutCID.h"
-#include "nsRDFCID.h"
 #include "nsString.h"
 #include "nsGkAtoms.h"
 #include "XULDocument.h"
@@ -34,7 +31,6 @@ using dom::XULDocument;
 
 //------------------------------------------------------------------------
 
-nsIRDFService* nsXULContentUtils::gRDF;
 nsICollation *nsXULContentUtils::gCollation;
 
 //------------------------------------------------------------------------
@@ -42,22 +38,8 @@ nsICollation *nsXULContentUtils::gCollation;
 //
 
 nsresult
-nsXULContentUtils::Init()
-{
-    static NS_DEFINE_CID(kRDFServiceCID, NS_RDFSERVICE_CID);
-    nsresult rv = CallGetService(kRDFServiceCID, &gRDF);
-    if (NS_FAILED(rv)) {
-        return rv;
-    }
-
-    return NS_OK;
-}
-
-
-nsresult
 nsXULContentUtils::Finish()
 {
-    NS_IF_RELEASE(gRDF);
     NS_IF_RELEASE(gCollation);
 
     return NS_OK;
@@ -111,21 +93,21 @@ nsXULContentUtils::SetCommandUpdater(nsIDocument* aDocument, Element* aElement)
     // Deal with setting up a 'commandupdater'. Pulls the 'events' and
     // 'targets' attributes off of aElement, and adds it to the
     // document's command dispatcher.
-    NS_PRECONDITION(aDocument != nullptr, "null ptr");
+    MOZ_ASSERT(aDocument != nullptr, "null ptr");
     if (! aDocument)
         return NS_ERROR_NULL_POINTER;
 
-    NS_PRECONDITION(aElement != nullptr, "null ptr");
+    MOZ_ASSERT(aElement != nullptr, "null ptr");
     if (! aElement)
         return NS_ERROR_NULL_POINTER;
 
     nsresult rv;
 
-    XULDocument* xuldoc = aDocument->AsXULDocument();
-    NS_ASSERTION(xuldoc != nullptr, "not a xul document");
-    if (! xuldoc)
+    NS_ASSERTION(aDocument->IsXULDocument(), "not a xul document");
+    if (! aDocument->IsXULDocument())
         return NS_ERROR_UNEXPECTED;
 
+    XULDocument* xuldoc = aDocument->AsXULDocument();
     nsCOMPtr<nsIDOMXULCommandDispatcher> dispatcher =
         xuldoc->GetCommandDispatcher();
     NS_ASSERTION(dispatcher != nullptr, "no dispatcher");
@@ -143,12 +125,7 @@ nsXULContentUtils::SetCommandUpdater(nsIDocument* aDocument, Element* aElement)
     if (targets.IsEmpty())
         targets.Assign('*');
 
-    nsCOMPtr<nsIDOMElement> domelement = do_QueryInterface(aElement);
-    NS_ASSERTION(domelement != nullptr, "not a DOM element");
-    if (! domelement)
-        return NS_ERROR_UNEXPECTED;
-
-    rv = dispatcher->AddCommandUpdater(domelement, events, targets);
+    rv = dispatcher->AddCommandUpdater(aElement, events, targets);
     if (NS_FAILED(rv)) return rv;
 
     return NS_OK;

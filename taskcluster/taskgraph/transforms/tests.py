@@ -23,11 +23,14 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
 from taskgraph.util.treeherder import split_symbol, join_symbol
 from taskgraph.util.platforms import platform_family
+from taskgraph import files_changed
+from mozpack.path import match as mozpackmatch
 from taskgraph.util.schema import (
     validate_schema,
     optionally_keyed_by,
     Schema,
 )
+from taskgraph.util.taskcluster import get_artifact_path
 from mozbuild.schedules import INCLUSIVE_COMPONENTS
 
 from voluptuous import (
@@ -39,6 +42,7 @@ from voluptuous import (
 
 import copy
 import logging
+import math
 
 # default worker types keyed by instance-size
 LINUX_WORKER_TYPES = {
@@ -52,22 +56,22 @@ WINDOWS_WORKER_TYPES = {
     'windows7-32': {
       'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-      'hardware': 'releng-hardware/gecko-t-win7-32-hw',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows7-32-pgo': {
       'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-      'hardware': 'releng-hardware/gecko-t-win7-32-hw',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows7-32-nightly': {
       'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-      'hardware': 'releng-hardware/gecko-t-win7-32-hw',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows7-32-devedition': {
       'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
-      'hardware': 'releng-hardware/gecko-t-win7-32-hw',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
@@ -100,22 +104,6 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-qr': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    # These values don't really matter since BBB will be executing them
-    'windows8-64': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    'windows8-64-pgo': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    'windows8-64-nightly': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -485,16 +473,48 @@ def setup_talos(config, tests):
             continue
 
         extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
-        extra_options.append('--add-option')
-        extra_options.append('--webServer,localhost')
         extra_options.append('--use-talos-json')
+        # win7 needs to test skip
+        if test['build-platform'].startswith('win32'):
+            extra_options.append('--add-option')
+            extra_options.append('--setpref,gfx.direct2d.disabled=true')
 
         # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
         # name is only required for try
-        if config.params['project'] == 'try':
+        if config.params.is_try():
             extra_options.append('--branch-name')
             extra_options.append('try')
 
+        yield test
+
+
+@transforms.add
+def setup_raptor(config, tests):
+    """Add options that are specific to raptor jobs (identified by suite=raptor)"""
+    for test in tests:
+        if test['suite'] != 'raptor':
+            yield test
+            continue
+
+        extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
+
+        # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
+        # name is only required for try
+        if config.params.is_try():
+            extra_options.append('--branch-name')
+            extra_options.append('try')
+
+        yield test
+
+
+@transforms.add
+def handle_artifact_prefix(config, tests):
+    """Handle translating `artifact_prefix` appropriately"""
+    for test in tests:
+        if test['build-attributes'].get('artifact_prefix'):
+            test.setdefault("attributes", {}).setdefault(
+                'artifact_prefix', test['build-attributes']['artifact_prefix']
+            )
         yield test
 
 
@@ -515,7 +535,7 @@ def set_target(config, tests):
                 target = 'target.zip'
             else:
                 target = 'target.tar.bz2'
-        test['mozharness']['build-artifact-name'] = 'public/build/' + target
+        test['mozharness']['build-artifact-name'] = get_artifact_path(test, target)
 
         yield test
 
@@ -541,8 +561,18 @@ def set_treeherder_machine_platform(config, tests):
         'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
     }
     for test in tests:
-        test['treeherder-machine-platform'] = translation.get(
-            test['build-platform'], test['test-platform'])
+        # For most desktop platforms, the above table is not used for "regular"
+        # builds, so we'll always pick the test platform here.
+        # On macOS though, the regular builds are in the table.  This causes a
+        # conflict in `verify_task_graph_symbol` once you add a new test
+        # platform based on regular macOS builds, such as for QR.
+        # Since it's unclear if the regular macOS builds can be removed from
+        # the table, workaround the issue for QR.
+        if '-qr' in test['test-platform']:
+            test['treeherder-machine-platform'] = test['test-platform']
+        else:
+            test['treeherder-machine-platform'] = translation.get(
+                test['build-platform'], test['test-platform'])
         yield test
 
 
@@ -596,7 +626,7 @@ def set_expires_after(config, tests):
     keep storage costs low."""
     for test in tests:
         if 'expires-after' not in test:
-            if config.params['project'] == 'try':
+            if config.params.is_try():
                 test['expires-after'] = "14 days"
             else:
                 test['expires-after'] = "1 year"
@@ -661,7 +691,7 @@ def handle_suite_category(config, tests):
 
         script = test['mozharness']['script']
         category_arg = None
-        if suite == 'test-verify':
+        if suite.startswith('test-verify') or suite.startswith('test-coverage'):
             pass
         elif script == 'android_emulator_unittest.py':
             category_arg = '--test-suite'
@@ -679,7 +709,7 @@ def handle_suite_category(config, tests):
 
 @transforms.add
 def enable_code_coverage(config, tests):
-    """Enable code coverage for the linux64-ccov/opt & linux64-jsdcov/opt & win64-ccov/debug
+    """Enable code coverage for the linux64-ccov/.* & linux64-jsdcov/.* & win64-ccov/.*
     build-platforms"""
     for test in tests:
         if 'ccov' in test['build-platform'] and not test['test-name'].startswith('test-verify'):
@@ -708,6 +738,10 @@ def enable_code_coverage(config, tests):
                 test['mozharness']['extra-options'].append('--no-upload-results')
                 test['mozharness']['extra-options'].append('--add-option')
                 test['mozharness']['extra-options'].append('--tptimeout,15000')
+            if 'raptor' in test['test-name']:
+                test['max-run-time'] = 1800
+                if 'linux' in test['build-platform']:
+                    test['docker-image'] = {"in-tree": "desktop1604-test"}
         elif test['build-platform'] == 'linux64-jsdcov/opt':
             # Ensure we don't run on inbound/autoland/beta, but if the test is try only, ignore it
             if 'mozilla-central' in test['run-on-projects'] or \
@@ -746,7 +780,7 @@ def split_e10s(config, tests):
             if group != '?':
                 group += '-e10s'
             test['treeherder-symbol'] = join_symbol(group, symbol)
-            if test['suite'] == 'talos':
+            if test['suite'] == 'talos' or test['suite'] == 'raptor':
                 for i, option in enumerate(test['mozharness']['extra-options']):
                     if option.startswith('--suite='):
                         test['mozharness']['extra-options'][i] += '-e10s'
@@ -761,19 +795,22 @@ def split_chunks(config, tests):
     them and assigning 'this-chunk' appropriately and updating the treeherder
     symbol."""
     for test in tests:
+        if test['suite'].startswith('test-verify'):
+            test['chunks'] = perfile_number_of_chunks(config, test['test-name'])
+            if test['chunks'] == 0:
+                continue
+            # limit the number of chunks we run for test-verify mode because
+            # test-verify is comprehensive and takes a lot of time, if we have
+            # >30 tests changed, this is probably an import of external tests,
+            # or a patch renaming/moving files in bulk
+            maximum_number_verify_chunks = 3
+            if test['chunks'] > maximum_number_verify_chunks:
+                test['chunks'] = maximum_number_verify_chunks
+
         if test['chunks'] == 1:
             test['this-chunk'] = 1
             yield test
             continue
-
-        # HACK: Bug 1373578 appears to pass with more chunks, non-e10s only though
-        if test['test-platform'] == 'windows7-32/debug' and test['test-name'] == 'reftest':
-            test['chunks'] = 32
-
-        if (test['test-platform'] == 'windows7-32/opt' or
-            test['test-platform'] == 'windows7-32-pgo/opt') and \
-                test['test-name'] in ['reftest-e10s', 'reftest-no-accel-e10s', 'reftest-gpu-e10s']:
-            test['chunks'] = 32
 
         for this_chunk in range(1, test['chunks'] + 1):
             # copy the test and update with the chunk number
@@ -788,6 +825,51 @@ def split_chunks(config, tests):
             yield chunked
 
 
+def perfile_number_of_chunks(config, type):
+    # A rough estimate of how many chunks we need based on simple rules
+    # for determining what a test file is.
+
+    # TODO: Make this flexible based on coverage vs verify || test type
+    tests_per_chunk = 10.0
+
+    if type.startswith('test-verify-wpt'):
+        file_patterns = ['testing/web-platform/tests/**']
+    elif type.startswith('test-verify-gpu'):
+        file_patterns = ['**/*webgl*/**/test_*',
+                         '**/dom/canvas/**/test_*',
+                         '**/gfx/tests/**/test_*',
+                         '**/devtools/canvasdebugger/**/browser_*',
+                         '**/reftest*/**']
+    elif type.startswith('test-verify'):
+        file_patterns = ['**/test_*',
+                         '**/browser_*',
+                         '**/crashtest*/**',
+                         'js/src/test/test/',
+                         'js/src/test/non262/',
+                         'js/src/test/test262/']
+
+    changed_files = files_changed.get_changed_files(config.params.get('head_repository'),
+                                                    config.params.get('head_rev'))
+    test_count = 0
+    for pattern in file_patterns:
+        for path in changed_files:
+            if mozpackmatch(path, pattern):
+                gpu = False
+                if type == 'test-verify-e10s':
+                    # file_patterns for test-verify will pick up some gpu tests, lets ignore
+                    # in the case of reftest, we will not have any in the regular case
+                    gpu_dirs = ['dom/canvas', 'gfx/tests', 'devtools/canvasdebugger', 'webgl']
+                    for gdir in gpu_dirs:
+                        if len(path.split(gdir)) > 1:
+                            gpu = True
+
+                if not gpu:
+                    test_count += 1
+
+    chunks = test_count/tests_per_chunk
+    return int(math.ceil(chunks))
+
+
 @transforms.add
 def allow_software_gl_layers(config, tests):
     """
@@ -799,6 +881,20 @@ def allow_software_gl_layers(config, tests):
             # This should be set always once bug 1296086 is resolved.
             test['mozharness'].setdefault('extra-options', [])\
                               .append("--allow-software-gl-layers")
+
+        yield test
+
+
+@transforms.add
+def reftest_win7_slowmode(config, tests):
+    """
+    Win7 needs time to render fonts, so for the reftest-fonts, add --run-slow
+    """
+    for test in tests:
+        if test['build-platform'].startswith('win32') and \
+           'font' in test['suite']:
+            test['mozharness'].setdefault('extra-options', [])\
+                              .append("--run-slower")
 
         yield test
 
@@ -881,27 +977,26 @@ def set_worker_type(config, tests):
         # during the taskcluster migration, this is a bit tortured, but it
         # will get simpler eventually!
         test_platform = test['test-platform']
-        try_options = config.params['try_options'] if config.params['try_options'] else {}
         if test.get('worker-type'):
             # This test already has its worker type defined, so just use that (yields below)
             pass
         elif test_platform.startswith('macosx'):
             test['worker-type'] = MACOSX_WORKER_TYPES['macosx64']
         elif test_platform.startswith('win'):
-            win_worker_type_platform = WINDOWS_WORKER_TYPES[
-                test_platform.split('/')[0]
-            ]
-            if test.get('suite', '') == 'talos' and 'ccov' not in test['build-platform']:
-                if try_options.get('taskcluster_worker'):
-                    test['worker-type'] = win_worker_type_platform['hardware']
-                elif test['virtualization'] == 'virtual':
-                    test['worker-type'] = win_worker_type_platform[test['virtualization']]
-                else:
-                    test['worker-type'] = 'buildbot-bridge/buildbot-bridge'
+            # figure out what platform the job needs to run on
+            if test['virtualization'] == 'hardware':
+                # some jobs like talos and reftest run on real h/w - those are all win10
+                win_worker_type_platform = WINDOWS_WORKER_TYPES['windows10-64']
             else:
-                test['worker-type'] = win_worker_type_platform[test['virtualization']]
+                # the other jobs run on a vm which may or may not be a win10 vm
+                win_worker_type_platform = WINDOWS_WORKER_TYPES[
+                    test_platform.split('/')[0]
+                ]
+            # now we have the right platform set the worker type accordingly
+            test['worker-type'] = win_worker_type_platform[test['virtualization']]
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
-            if test.get('suite', '') == 'talos' and test['build-platform'] != 'linux64-ccov/opt':
+            if test.get('suite', '') == 'talos' and \
+                 not test['build-platform'].startswith('linux64-ccov'):
                 test['worker-type'] = 'releng-hardware/gecko-t-linux-talos'
             else:
                 test['worker-type'] = LINUX_WORKER_TYPES[test['instance-size']]
@@ -909,18 +1004,6 @@ def set_worker_type(config, tests):
             raise Exception("unknown test_platform {}".format(test_platform))
 
         yield test
-
-
-@transforms.add
-def skip_win10_hardware(config, tests):
-    """Windows 10 hardware isn't ready yet, don't even bother scheduling
-    unless we're on try"""
-    for test in tests:
-        if 'releng-hardware/gecko-t-win10-64-hw' not in test['worker-type']:
-            yield test
-        if config.params == 'try':
-            yield test
-        # Silently drop the test on the floor if its win10 hardware and we're not try
 
 
 @transforms.add
@@ -938,6 +1021,8 @@ def make_job_description(config, tests):
         try_name = test['try-name']
         if test['suite'] == 'talos':
             attr_try_name = 'talos_try_name'
+        elif test['suite'] == 'raptor':
+            attr_try_name = 'raptor_try_name'
         else:
             attr_try_name = 'unittest_try_name'
 
@@ -999,7 +1084,7 @@ def make_job_description(config, tests):
             jobdesc['when'] = test['when']
         elif 'optimization' in test:
             jobdesc['optimization'] = test['optimization']
-        elif config.params['project'] != 'try' and suite not in INCLUSIVE_COMPONENTS:
+        elif not config.params.is_try() and suite not in INCLUSIVE_COMPONENTS:
             # for non-try branches and non-inclusive suites, include SETA
             jobdesc['optimization'] = {'skip-unless-schedules-or-seta': schedules}
         else:

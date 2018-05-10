@@ -13,6 +13,7 @@
 #include "mozAutoDocUpdate.h"
 #include "mozilla/IdleTaskRunner.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/css/Loader.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
@@ -762,7 +763,7 @@ nsHtml5TreeOpExecutor::RunScript(nsIContent* aScriptElement)
 void
 nsHtml5TreeOpExecutor::Start()
 {
-  NS_PRECONDITION(!mStarted, "Tried to start when already started.");
+  MOZ_ASSERT(!mStarted, "Tried to start when already started.");
   mStarted = true;
 }
 
@@ -929,18 +930,10 @@ nsHtml5TreeOpExecutor::GetViewSourceBaseURI()
   return mViewSourceBaseURI;
 }
 
-// static
-void
-nsHtml5TreeOpExecutor::InitializeStatics()
-{
-  mozilla::Preferences::AddBoolVarCache(&sExternalViewSource,
-                                        "view_source.editor.external");
-}
-
 bool
 nsHtml5TreeOpExecutor::IsExternalViewSource()
 {
-  if (!sExternalViewSource) {
+  if (!StaticPrefs::view_source_editor_external()) {
     return false;
   }
   bool isViewSource = false;
@@ -1170,15 +1163,6 @@ nsHtml5TreeOpExecutor::AddSpeculationCSP(const nsAString& aCSP)
                              true); // delivered through the meta tag
   NS_ENSURE_SUCCESS_VOID(rv);
 
-  // Record "speculated" referrer policy for preloads
-  bool hasReferrerPolicy = false;
-  uint32_t referrerPolicy = mozilla::net::RP_Unset;
-  rv = preloadCsp->GetReferrerPolicy(&referrerPolicy, &hasReferrerPolicy);
-  NS_ENSURE_SUCCESS_VOID(rv);
-  if (hasReferrerPolicy) {
-    SetSpeculationReferrerPolicy(static_cast<ReferrerPolicy>(referrerPolicy));
-  }
-
   mDocument->ApplySettingsFromCSP(true);
 }
 
@@ -1199,4 +1183,3 @@ uint32_t nsHtml5TreeOpExecutor::sAppendBatchExaminations = 0;
 uint32_t nsHtml5TreeOpExecutor::sLongestTimeOffTheEventLoop = 0;
 uint32_t nsHtml5TreeOpExecutor::sTimesFlushLoopInterrupted = 0;
 #endif
-bool nsHtml5TreeOpExecutor::sExternalViewSource = false;

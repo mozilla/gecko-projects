@@ -1177,7 +1177,7 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
         }
     }
 
-    return !!ValueToPrintable(cx, v, bytes, true);
+    return !!ValueToPrintableLatin1(cx, v, bytes, true);
 }
 
 static bool
@@ -2530,7 +2530,8 @@ js::StopPCCountProfiling(JSContext* cx)
 
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         for (auto script = zone->cellIter<JSScript>(); !script.done(); script.next()) {
-            if (script->hasScriptCounts() && script->types()) {
+            AutoSweepTypeScript sweep(script);
+            if (script->hasScriptCounts() && script->types(sweep)) {
                 if (!vec->append(script))
                     return;
             }

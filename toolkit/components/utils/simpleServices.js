@@ -21,6 +21,11 @@ ChromeUtils.defineModuleGetter(this, "NetUtil",
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(this, "catMan", "@mozilla.org/categorymanager;1",
+                                   "nsICategoryManager");
+XPCOMUtils.defineLazyServiceGetter(this, "streamConv", "@mozilla.org/streamConverters;1",
+                                   "nsIStreamConverterService");
+
 /*
  * This class provides a stream filter for locale messages in CSS files served
  * by the moz-extension: protocol handler.
@@ -33,7 +38,7 @@ function AddonLocalizationConverter() {
 
 AddonLocalizationConverter.prototype = {
   classID: Components.ID("{ded150e3-c92e-4077-a396-0dba9953e39f}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIStreamConverter]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIStreamConverter]),
 
   FROM_TYPE: "application/vnd.mozilla.webext.unlocalized",
   TO_TYPE: "text/css",
@@ -111,4 +116,32 @@ AddonLocalizationConverter.prototype = {
   },
 };
 
-this.NSGetFactory = XPCOMUtils.generateNSGetFactory([AddonLocalizationConverter]);
+function HttpIndexViewer() {
+}
+
+HttpIndexViewer.prototype = {
+  classID: Components.ID("{742ad274-34c5-43d1-a8b7-293eaf8962d6}"),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDocumentLoaderFactory]),
+
+  createInstance(aCommand, aChannel, aLoadGroup, aContentType, aContainer,
+                 aExtraInfo, aDocListenerResult) {
+    aChannel.contentType = "text/html";
+
+    let contract = catMan.getCategoryEntry("Gecko-Content-Viewers", "text/html");
+    let factory = Cc[contract].getService(Ci.nsIDocumentLoaderFactory);
+
+    let listener = {};
+    let res = factory.createInstance("view", aChannel, aLoadGroup,
+                                     "text/html", aContainer, aExtraInfo,
+                                     listener);
+
+    aDocListenerResult.value =
+      streamConv.asyncConvertData("application/http-index-format",
+                                  "text/html", listener.value, null);
+
+    return res;
+  },
+};
+
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([AddonLocalizationConverter,
+                                                     HttpIndexViewer]);

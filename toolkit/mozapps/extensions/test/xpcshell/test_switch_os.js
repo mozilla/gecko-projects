@@ -14,7 +14,7 @@ profileDir.append("extensions");
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
 add_task(async function() {
-  startupManager();
+  await promiseStartupManager();
 
   await promiseInstallFile(do_get_addon("test_bootstrap1_1"));
 
@@ -29,7 +29,7 @@ add_task(async function() {
 
   BootstrapMonitor.checkAddonNotStarted(ID);
 
-  let jData = loadJSON(gExtensionsJSON);
+  let jData = await loadJSON(gExtensionsJSON.path);
 
   for (let addonInstance of jData.addons) {
     if (addonInstance.id == ID) {
@@ -38,9 +38,9 @@ add_task(async function() {
     }
   }
 
-  saveJSON(jData, gExtensionsJSON);
+  await saveJSON(jData, gExtensionsJSON.path);
 
-  startupManager();
+  await promiseStartupManager();
 
   addon = await promiseAddonByID(ID);
   Assert.notEqual(addon, null);

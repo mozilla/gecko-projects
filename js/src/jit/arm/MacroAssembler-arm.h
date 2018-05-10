@@ -364,7 +364,6 @@ class MacroAssemblerARM : public Assembler
 
     // Branches when done from within arm-specific code.
     BufferOffset ma_b(Label* dest, Condition c = Always);
-    BufferOffset ma_b(wasm::OldTrapDesc target, Condition c = Always);
     void ma_b(void* target, Condition c = Always);
     void ma_bx(Register dest, Condition c = Always);
 
@@ -695,9 +694,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
         ma_ldr(addr, scratch, scratch2);
         ma_bx(scratch);
     }
-    void jump(wasm::OldTrapDesc target) {
-        as_b(target);
-    }
 
     void negl(Register reg) {
         ma_neg(reg, reg, SetCC);
@@ -833,12 +829,15 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     // and returns that.
     Register extractObject(const Address& address, Register scratch);
     Register extractObject(const ValueOperand& value, Register scratch) {
+        unboxNonDouble(value, value.payloadReg(), JSVAL_TYPE_OBJECT);
         return value.payloadReg();
     }
     Register extractString(const ValueOperand& value, Register scratch) {
+        unboxNonDouble(value, value.payloadReg(), JSVAL_TYPE_STRING);
         return value.payloadReg();
     }
     Register extractSymbol(const ValueOperand& value, Register scratch) {
+        unboxNonDouble(value, value.payloadReg(), JSVAL_TYPE_SYMBOL);
         return value.payloadReg();
     }
     Register extractInt32(const ValueOperand& value, Register scratch) {
@@ -870,11 +869,7 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void int32ValueToFloat32(const ValueOperand& operand, FloatRegister dest);
     void loadConstantFloat32(float f, FloatRegister dest);
 
-    CodeOffsetJump jumpWithPatch(RepatchLabel* label, Condition cond = Always,
-                                 Label* documentation = nullptr);
-    CodeOffsetJump backedgeJump(RepatchLabel* label, Label* documentation) {
-        return jumpWithPatch(label, Always, documentation);
-    }
+    CodeOffsetJump jumpWithPatch(RepatchLabel* label);
 
     void loadUnboxedValue(Address address, MIRType type, AnyRegister dest) {
         if (dest.isFloat()) {
@@ -1250,6 +1245,8 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void ceilf(FloatRegister input, Register output, Label* handleNotAnInt);
     void round(FloatRegister input, Register output, Label* handleNotAnInt, FloatRegister tmp);
     void roundf(FloatRegister input, Register output, Label* handleNotAnInt, FloatRegister tmp);
+    void trunc(FloatRegister input, Register output, Label* handleNotAnInt);
+    void truncf(FloatRegister input, Register output, Label* handleNotAnInt);
 
     void clampCheck(Register r, Label* handleNotAnInt) {
         // Check explicitly for r == INT_MIN || r == INT_MAX

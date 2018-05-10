@@ -24,7 +24,6 @@
 
 // Interfaces Needed
 #include "nsIBrowserDOMWindow.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIScriptGlobalObject.h"
@@ -317,24 +316,28 @@ public:
   void RecordReplayDirective(long aDirective);
   void SetResizable(bool aResizable) const;
 
-  // nsIDOMEventTarget
-  NS_DECL_NSIDOMEVENTTARGET
-
   virtual mozilla::EventListenerManager*
     GetExistingListenerManager() const override;
 
   virtual mozilla::EventListenerManager*
     GetOrCreateListenerManager() override;
 
-  using mozilla::dom::EventTarget::RemoveEventListener;
-  virtual void AddEventListener(const nsAString& aType,
-                                mozilla::dom::EventListener* aListener,
-                                const mozilla::dom::AddEventListenerOptionsOrBoolean& aOptions,
-                                const mozilla::dom::Nullable<bool>& aWantsUntrusted,
-                                mozilla::ErrorResult& aRv) override;
+  bool ComputeDefaultWantsUntrusted(mozilla::ErrorResult& aRv) final;
+
   virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindings() override;
 
   virtual nsIGlobalObject* GetOwnerGlobal() const override;
+
+  EventTarget* GetTargetForDOMEvent() override;
+
+  using mozilla::dom::EventTarget::DispatchEvent;
+  bool DispatchEvent(mozilla::dom::Event& aEvent,
+                     mozilla::dom::CallerType aCallerType,
+                     mozilla::ErrorResult& aRv) override;
+
+  void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
+
+  nsresult PostHandleEvent(mozilla::EventChainPostVisitor& aVisitor) override;
 
   // nsPIDOMWindow
   virtual nsPIDOMWindowOuter* GetPrivateRoot() override;
@@ -476,7 +479,7 @@ public:
   friend class WindowStateHolder;
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsGlobalWindowInner,
-                                                                   nsIDOMEventTarget)
+                                                                   mozilla::dom::EventTarget)
 
 #ifdef DEBUG
   // Call Unlink on this window. This may cause bad things to happen, so use
@@ -505,16 +508,6 @@ public:
   virtual void EnableOrientationChangeListener() override;
   virtual void DisableOrientationChangeListener() override;
 #endif
-
-  bool IsClosedOrClosing() {
-    return mCleanedUp;
-  }
-
-  bool
-  IsCleanedUp() const
-  {
-    return mCleanedUp;
-  }
 
   virtual uint32_t GetSerial() override {
     return mSerial;
@@ -679,7 +672,7 @@ public:
   mozilla::dom::Element*
   GetFrameElement(nsIPrincipal& aSubjectPrincipal,
                   mozilla::ErrorResult& aError);
-  already_AddRefed<nsIDOMElement> GetFrameElement() override;
+  mozilla::dom::Element* GetFrameElement() override;
   already_AddRefed<nsPIDOMWindowOuter>
   Open(const nsAString& aUrl,
        const nsAString& aName,
@@ -755,11 +748,11 @@ public:
                      mozilla::ErrorResult& aError);
   void ClearTimeout(int32_t aHandle);
   int32_t SetInterval(JSContext* aCx, mozilla::dom::Function& aFunction,
-                      const mozilla::dom::Optional<int32_t>& aTimeout,
+                      const int32_t aTimeout,
                       const mozilla::dom::Sequence<JS::Value>& aArguments,
                       mozilla::ErrorResult& aError);
   int32_t SetInterval(JSContext* aCx, const nsAString& aHandler,
-                      const mozilla::dom::Optional<int32_t>& aTimeout,
+                      const int32_t aTimeout,
                       const mozilla::dom::Sequence<JS::Value>& /* unused */,
                       mozilla::ErrorResult& aError);
   void ClearInterval(int32_t aHandle);
@@ -781,7 +774,6 @@ public:
     mozilla::dom::CallerType aCallerType,
     mozilla::ErrorResult& aError);
   nsScreen* GetScreen(mozilla::ErrorResult& aError);
-  nsIDOMScreen* GetScreen() override;
   void MoveTo(int32_t aXPos, int32_t aYPos,
               mozilla::dom::CallerType aCallerType,
               mozilla::ErrorResult& aError);
@@ -907,7 +899,8 @@ public:
              const nsAString& aOptions,
              const mozilla::dom::Sequence<JS::Value>& aExtraArgument,
              mozilla::ErrorResult& aError);
-  void UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason);
+  void UpdateCommands(const nsAString& anAction, mozilla::dom::Selection* aSel,
+                      int16_t aReason);
 
   void GetContent(JSContext* aCx,
                   JS::MutableHandle<JSObject*> aRetval,
@@ -950,13 +943,9 @@ public:
   void Restore();
   void NotifyDefaultButtonLoaded(mozilla::dom::Element& aDefaultButton,
                                  mozilla::ErrorResult& aError);
-  mozilla::dom::ChromeMessageBroadcaster*
-    GetMessageManager(mozilla::ErrorResult& aError);
-  mozilla::dom::ChromeMessageBroadcaster*
-    GetGroupMessageManager(const nsAString& aGroup,
-                           mozilla::ErrorResult& aError);
+  mozilla::dom::ChromeMessageBroadcaster* MessageManager();
+  mozilla::dom::ChromeMessageBroadcaster* GetGroupMessageManager(const nsAString& aGroup);
   void BeginWindowMove(mozilla::dom::Event& aMouseDownEvent,
-                       mozilla::dom::Element* aPanel,
                        mozilla::ErrorResult& aError);
 
   already_AddRefed<mozilla::dom::Promise>
@@ -1095,7 +1084,6 @@ protected:
 
   // Object Management
   virtual ~nsGlobalWindowInner();
-  void CleanUp();
 
   void FreeInnerObjects();
   nsGlobalWindowInner *CallerInnerWindow();
@@ -1161,6 +1149,8 @@ private:
   CallState ShouldReportForServiceWorkerScopeInternal(const nsACString& aScope,
                                                       bool* aResultOut);
 
+  void
+  MigrateStateForDocumentOpen(nsGlobalWindowInner* aOldInner);
 
 public:
   // Timeout Functions
@@ -1210,9 +1200,9 @@ public:
 
   bool IsInModalState();
 
-  virtual void SetFocusedNode(nsIContent* aNode,
-                              uint32_t aFocusMethod = 0,
-                              bool aNeedsFocus = false) override;
+  virtual void SetFocusedElement(mozilla::dom::Element* aElement,
+                                 uint32_t aFocusMethod = 0,
+                                 bool aNeedsFocus = false) override;
 
   virtual uint32_t GetFocusMethod() override;
 
@@ -1254,10 +1244,6 @@ protected:
                            const nsAString& aPseudoElt,
                            bool aDefaultStylesOnly,
                            mozilla::ErrorResult& aError);
-  nsresult GetComputedStyleHelper(nsIDOMElement* aElt,
-                                  const nsAString& aPseudoElt,
-                                  bool aDefaultStylesOnly,
-                                  nsICSSDeclaration** aReturn);
 
   nsGlobalWindowInner* InnerForSetTimeoutOrInterval(mozilla::ErrorResult& aError);
 
@@ -1427,8 +1413,6 @@ protected:
   nsCOMPtr<nsIURI> mLastOpenedURI;
 #endif
 
-  bool mCleanedUp;
-
   nsCOMPtr<nsIDOMOfflineResourceList> mApplicationCache;
 
   using XBLPrototypeHandlerTable = nsJSThingHashtable<nsPtrHashKey<nsXBLPrototypeHandler>, JSObject*>;
@@ -1519,13 +1503,13 @@ protected:
 inline nsISupports*
 ToSupports(nsGlobalWindowInner *p)
 {
-    return static_cast<nsIDOMEventTarget*>(p);
+  return static_cast<mozilla::dom::EventTarget*>(p);
 }
 
 inline nsISupports*
 ToCanonicalSupports(nsGlobalWindowInner *p)
 {
-    return static_cast<nsIDOMEventTarget*>(p);
+  return static_cast<mozilla::dom::EventTarget*>(p);
 }
 
 // XXX: EWW - This is an awful hack - let's not do this

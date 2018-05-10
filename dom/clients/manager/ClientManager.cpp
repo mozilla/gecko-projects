@@ -45,8 +45,15 @@ ClientManager::ClientManager()
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_DIAGNOSTIC_ASSERT(workerPrivate);
 
+    // Note, it would be nice to replace this with a WorkerRef, but
+    // currently there is no WorkerRef option that matches what we
+    // need here.  We need something like a StrongWorkerRef that will
+    // let us keep the worker alive until our actor is destroyed, but
+    // we also need to use AllowIdleShutdownStart like WeakWorkerRef.
+    // We need AllowIdleShutdownStart since every worker thread will
+    // have a ClientManager to support creating its ClientSource.
     workerHolderToken =
-      WorkerHolderToken::Create(workerPrivate, Closing,
+      WorkerHolderToken::Create(workerPrivate, Terminating,
                                 WorkerHolderToken::AllowIdleShutdownStart);
     if (NS_WARN_IF(!workerHolderToken)) {
       Shutdown();
@@ -158,12 +165,10 @@ ClientManager::StartOp(const ClientOpConstructorArgs& aArgs,
   // the ClientHandle might get de-refed and teardown the actor before we
   // get an answer.
   RefPtr<ClientManager> kungFuGrip = this;
-  promise->Then(aSerialEventTarget, __func__,
-                [kungFuGrip] (const ClientOpResult&) { },
-                [kungFuGrip] (nsresult) { });
 
-  MaybeExecute([aArgs, promise] (ClientManagerChild* aActor) {
-    ClientManagerOpChild* actor = new ClientManagerOpChild(aArgs, promise);
+  MaybeExecute([aArgs, promise, kungFuGrip] (ClientManagerChild* aActor) {
+    ClientManagerOpChild* actor =
+      new ClientManagerOpChild(kungFuGrip, aArgs, promise);
     if (!aActor->SendPClientManagerOpConstructor(actor, aArgs)) {
       // Constructor failure will reject promise via ActorDestroy()
       return;

@@ -28,7 +28,6 @@ from .data import (
     ChromeManifestEntry,
     ComputedFlags,
     ConfigFileSubstitution,
-    ContextWrapped,
     Defines,
     DirectoryTraversal,
     Exports,
@@ -61,7 +60,7 @@ from .data import (
     RustLibrary,
     HostRustLibrary,
     RustProgram,
-    RustTest,
+    RustTests,
     SharedLibrary,
     SimpleProgram,
     Sources,
@@ -1135,8 +1134,8 @@ class TreeMetadataEmitter(LoggingMixin):
             if (full_path == context.config.topsrcdir or
                     full_path == context.config.topobjdir):
                 raise SandboxValidationError('Path specified in LOCAL_INCLUDES '
-                    'is not allowed: %s (resolved to %s)' % (local_include,
-                    full_path), context)
+                    '(%s) resolves to the topsrcdir or topobjdir (%s), which is '
+                    'not allowed' % (local_include, full_path), context)
             include_obj = LocalInclude(context, local_include)
             local_includes.append(include_obj.path.full_path)
             yield include_obj
@@ -1268,22 +1267,19 @@ class TreeMetadataEmitter(LoggingMixin):
                                                    mozpath.basename(c)))
 
         if self.config.substs.get('MOZ_RUST_TESTS', None):
-            rust_test = context.get('RUST_TEST', None)
-            if rust_test:
+            rust_tests = context.get('RUST_TESTS', [])
+            if rust_tests:
                 # TODO: more sophisticated checking of the declared name vs.
                 # contents of the Cargo.toml file.
                 features = context.get('RUST_TEST_FEATURES', [])
 
-                yield RustTest(context, rust_test, features)
+                yield RustTests(context, rust_tests, features)
 
         for obj in self._process_test_manifests(context):
             yield obj
 
         for obj in self._process_jar_manifests(context):
             yield obj
-
-        for name, jar in context.get('JAVA_JAR_TARGETS', {}).items():
-            yield ContextWrapped(context, jar)
 
         computed_as_flags.resolve_flags('MOZBUILD',
                                         context.get('ASFLAGS'))
@@ -1344,7 +1340,7 @@ class TreeMetadataEmitter(LoggingMixin):
 
         for idl in context['XPIDL_SOURCES']:
             yield XPIDLFile(context, mozpath.join(context.srcdir, idl),
-                xpidl_module, add_to_manifest=not context['XPIDL_NO_MANIFEST'])
+                xpidl_module)
 
     def _process_generated_files(self, context):
         for path in context['CONFIGURE_DEFINE_FILES']:

@@ -6,7 +6,7 @@
 use GlyphInstance;
 use euclid::{SideOffsets2D, TypedRect};
 use std::ops::Not;
-use {ColorF, FontInstanceKey, GlyphOptions, ImageKey, LayerPixel, LayoutPixel, LayoutPoint};
+use {ColorF, FontInstanceKey, GlyphOptions, ImageKey, LayoutPixel, LayoutPoint};
 use {LayoutRect, LayoutSize, LayoutTransform, LayoutVector2D, PipelineId, PropertyBinding};
 
 
@@ -69,14 +69,14 @@ pub struct PrimitiveInfo<T> {
     pub tag: Option<ItemTag>,
 }
 
-impl LayerPrimitiveInfo {
-    pub fn new(rect: TypedRect<f32, LayerPixel>) -> Self {
+impl LayoutPrimitiveInfo {
+    pub fn new(rect: TypedRect<f32, LayoutPixel>) -> Self {
         Self::with_clip_rect(rect, rect)
     }
 
     pub fn with_clip_rect(
-        rect: TypedRect<f32, LayerPixel>,
-        clip_rect: TypedRect<f32, LayerPixel>,
+        rect: TypedRect<f32, LayoutPixel>,
+        clip_rect: TypedRect<f32, LayoutPixel>,
     ) -> Self {
         PrimitiveInfo {
             rect,
@@ -88,9 +88,8 @@ impl LayerPrimitiveInfo {
 }
 
 pub type LayoutPrimitiveInfo = PrimitiveInfo<LayoutPixel>;
-pub type LayerPrimitiveInfo = PrimitiveInfo<LayerPixel>;
 
-#[repr(u8)]
+#[repr(u64)]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SpecificDisplayItem {
     Clip(ClipDisplayItem),
@@ -269,26 +268,6 @@ pub enum RepeatMode {
     Space,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct NinePatchDescriptor {
-    pub width: u32,
-    pub height: u32,
-    pub slice: SideOffsets2D<u32>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ImageBorder {
-    pub image_key: ImageKey,
-    pub patch: NinePatchDescriptor,
-    /// Controls whether the center of the 9 patch image is
-    /// rendered or ignored.
-    pub fill: bool,
-    pub outset: SideOffsets2D<f32>,
-    pub repeat_horizontal: RepeatMode,
-    pub repeat_vertical: RepeatMode,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GradientBorder {
     pub gradient: Gradient,
@@ -302,9 +281,54 @@ pub struct RadialGradientBorder {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+/// TODO(mrobinson): Currently only images are supported, but we will
+/// eventually add support for Gradient and RadialGradient.
+pub enum NinePatchBorderSource {
+    Image(ImageKey),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct NinePatchBorder {
+    /// Describes what to use as the 9-patch source image. If this is an image,
+    /// it will be stretched to fill the size given by width x height.
+    pub source: NinePatchBorderSource,
+
+    /// The width of the 9-part image.
+    pub width: u32,
+
+    /// The height of the 9-part image.
+    pub height: u32,
+
+    /// Distances from each edge where the image should be sliced up. These
+    /// values are in 9-part-image space (the same space as width and height),
+    /// and the resulting image parts will be used to fill the corresponding
+    /// parts of the border as given by the border widths. This can lead to
+    /// stretching.
+    /// Slices can be overlapping. In that case, the same pixels from the
+    /// 9-part image will show up in multiple parts of the resulting border.
+    pub slice: SideOffsets2D<u32>,
+
+    /// Controls whether the center of the 9 patch image is rendered or
+    /// ignored. The center is never rendered if the slices are overlapping.
+    pub fill: bool,
+
+    /// Determines what happens if the horizontal side parts of the 9-part
+    /// image have a different size than the horizontal parts of the border.
+    pub repeat_horizontal: RepeatMode,
+
+    /// Determines what happens if the vertical side parts of the 9-part
+    /// image have a different size than the vertical parts of the border.
+    pub repeat_vertical: RepeatMode,
+
+    /// The outset for the border.
+    /// TODO(mrobinson): This should be removed and handled by the client.
+    pub outset: SideOffsets2D<f32>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BorderDetails {
     Normal(NormalBorder),
-    Image(ImageBorder),
+    NinePatch(NinePatchBorder),
     Gradient(GradientBorder),
     RadialGradient(RadialGradientBorder),
 }
@@ -451,6 +475,8 @@ pub struct StackingContext {
     pub perspective: Option<LayoutTransform>,
     pub mix_blend_mode: MixBlendMode,
     pub reference_frame_id: Option<ClipId>,
+    pub clip_node_id: Option<ClipId>,
+    pub glyph_raster_space: GlyphRasterSpace,
 } // IMPLICIT: filters: Vec<FilterOp>
 
 #[repr(u32)]
@@ -465,6 +491,23 @@ pub enum ScrollPolicy {
 pub enum TransformStyle {
     Flat = 0,
     Preserve3D = 1,
+}
+
+// TODO(gw): In the future, we may modify this to apply to all elements
+//           within a stacking context, rather than just the glyphs. If
+//           this change occurs, we'll update the naming of this.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[repr(u32)]
+pub enum GlyphRasterSpace {
+    // Rasterize glyphs in local-space, applying supplied scale to glyph sizes.
+    // Best performance, but lower quality.
+    Local(f32),
+
+    // Rasterize the glyphs in screen-space, including rotation / skew etc in
+    // the rasterized glyph. Best quality, but slower performance. Note that
+    // any stacking context with a perspective transform will be rasterized
+    // in local-space, even if this is set.
+    Screen,
 }
 
 #[repr(u32)]
@@ -627,7 +670,7 @@ impl LocalClip {
     pub fn clip_rect(&self) -> &LayoutRect {
         match *self {
             LocalClip::Rect(ref rect) => rect,
-            LocalClip::RoundedRect(ref rect, _) => &rect,
+            LocalClip::RoundedRect(ref rect, _) => rect,
         }
     }
 
@@ -649,12 +692,12 @@ impl LocalClip {
         match *self {
             LocalClip::Rect(clip_rect) => {
                 LocalClip::Rect(
-                    clip_rect.intersection(rect).unwrap_or(LayoutRect::zero())
+                    clip_rect.intersection(rect).unwrap_or_else(LayoutRect::zero)
                 )
             }
             LocalClip::RoundedRect(clip_rect, complex) => {
                 LocalClip::RoundedRect(
-                    clip_rect.intersection(rect).unwrap_or(LayoutRect::zero()),
+                    clip_rect.intersection(rect).unwrap_or_else(LayoutRect::zero),
                     complex,
                 )
             }

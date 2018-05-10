@@ -174,5 +174,33 @@ AnimationInfo::HasTransformAnimation() const
   return false;
 }
 
+/* static */ Maybe<uint64_t>
+AnimationInfo::GetGenerationFromFrame(nsIFrame* aFrame,
+                                      DisplayItemType aDisplayItemKey)
+{
+  MOZ_ASSERT(aFrame->IsPrimaryFrame() ||
+             nsLayoutUtils::IsFirstContinuationOrIBSplitSibling(aFrame));
+
+  layers::Layer* layer =
+    FrameLayerBuilder::GetDedicatedLayer(aFrame, aDisplayItemKey);
+  if (layer) {
+    return Some(layer->GetAnimationInfo().GetAnimationGeneration());
+  }
+
+  // In case of continuation, KeyframeEffectReadOnly uses its first frame,
+  // whereas nsDisplayItem uses its last continuation, so we have to use the
+  // last continuation frame here.
+  if (nsLayoutUtils::IsFirstContinuationOrIBSplitSibling(aFrame)) {
+    aFrame = nsLayoutUtils::LastContinuationOrIBSplitSibling(aFrame);
+  }
+  RefPtr<WebRenderAnimationData> animationData =
+      GetWebRenderUserData<WebRenderAnimationData>(aFrame, (uint32_t)aDisplayItemKey);
+  if (animationData) {
+    return Some(animationData->GetAnimationInfo().GetAnimationGeneration());
+  }
+
+  return Nothing();
+}
+
 } // namespace layers
 } // namespace mozilla

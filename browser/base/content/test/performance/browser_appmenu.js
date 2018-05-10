@@ -1,6 +1,9 @@
 "use strict";
 /* global PanelUI */
 
+ChromeUtils.import("resource://testing-common/CustomizableUITestUtils.jsm", this);
+let gCUITestUtils = new CustomizableUITestUtils(window);
+
 /**
  * WHOA THERE: We should never be adding new things to
  * EXPECTED_APPMENU_OPEN_REFLOWS. This is a whitelist that should slowly go
@@ -13,14 +16,12 @@
 const EXPECTED_APPMENU_OPEN_REFLOWS = [
   {
     stack: [
-      "openPopup@chrome://global/content/bindings/popup.xml",
       "openPopup/this._openPopupPromise<@resource:///modules/PanelMultiView.jsm",
     ],
   },
 
   {
     stack: [
-      "get_alignmentPosition@chrome://global/content/bindings/popup.xml",
       "adjustArrowPosition@chrome://global/content/bindings/popup.xml",
       "onxblpopuppositioned@chrome://global/content/bindings/popup.xml",
     ],
@@ -30,19 +31,11 @@ const EXPECTED_APPMENU_OPEN_REFLOWS = [
 
   {
     stack: [
-      "get_alignmentPosition@chrome://global/content/bindings/popup.xml",
-      "_calculateMaxHeight@resource:///modules/PanelMultiView.jsm",
-      "handleEvent@resource:///modules/PanelMultiView.jsm",
-    ],
-  },
-
-  {
-    stack: [
       "_calculateMaxHeight@resource:///modules/PanelMultiView.jsm",
       "handleEvent@resource:///modules/PanelMultiView.jsm",
     ],
 
-    maxCount: 6, // This number should only ever go down - never up.
+    maxCount: 7, // This number should only ever go down - never up.
   },
 ];
 
@@ -71,13 +64,10 @@ add_task(async function() {
   };
 
   // First, open the appmenu.
-  await withPerfObserver(async function() {
-    let popupShown =
-      BrowserTestUtils.waitForEvent(PanelUI.panel, "popupshown");
-    await PanelUI.show();
-    await popupShown;
-  }, {expectedReflows: EXPECTED_APPMENU_OPEN_REFLOWS,
-      frames: frameExpectations});
+  await withPerfObserver(() => gCUITestUtils.openMainMenu(), {
+    expectedReflows: EXPECTED_APPMENU_OPEN_REFLOWS,
+    frames: frameExpectations,
+  });
 
   // Now open a series of subviews, and then close the appmenu. We
   // should not reflow during any of this.
@@ -122,8 +112,6 @@ add_task(async function() {
 
     await openSubViewsRecursively(PanelUI.mainView);
 
-    let hidden = BrowserTestUtils.waitForEvent(PanelUI.panel, "popuphidden");
-    PanelUI.hide();
-    await hidden;
+    await gCUITestUtils.hideMainMenu();
   }, {expectedReflows: [], frames: frameExpectations});
 });

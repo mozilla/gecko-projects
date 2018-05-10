@@ -18,19 +18,17 @@
   _(TestMutex,                   100) \
   _(ShellContextWatchdog,        100) \
   _(ShellWorkerThreads,          100) \
-  _(ShellThreadCooperation,      100) \
   _(ShellArrayBufferMailbox,     100) \
                                       \
   _(RuntimeExclusiveAccess,      200) \
                                       \
+  _(WasmInitBuiltinThunks,       250) \
+  _(WasmLazyStubsTier1,          250) \
+  _(WasmLazyStubsTier2,          251) \
+                                      \
   _(GlobalHelperThreadState,     300) \
                                       \
   _(GCLock,                      400) \
-                                      \
-  _(WasmInitBuiltinThunks,       450) \
-                                      \
-  _(WasmLazyStubsTier1,          475) \
-  _(WasmLazyStubsTier2,          476) \
                                       \
   _(SharedImmutableStringsCache, 500) \
   _(FutexThread,                 500) \

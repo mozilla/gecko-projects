@@ -2,16 +2,6 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-XPCOMUtils.defineLazyGetter(this, "Management", () => {
-  const {Management} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
-  return Management;
-});
-
-ChromeUtils.defineModuleGetter(this, "AddonManager",
-                               "resource://gre/modules/AddonManager.jsm");
-ChromeUtils.defineModuleGetter(this, "Preferences",
-                               "resource://gre/modules/Preferences.jsm");
-
 XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "@mozilla.org/browser/aboutnewtab-service;1",
                                    "nsIAboutNewTabService");
@@ -97,7 +87,7 @@ add_task(async function test_url_overrides_newtab_update() {
 
   equal(extension.version, "1.0", "The installed addon has the expected version.");
   ok(aboutNewTabService.newTabURL.endsWith(NEWTAB_URI),
-     "Newtab url is overriden by the extension.");
+     "Newtab url is overridden by the extension.");
 
   let update = await promiseFindAddonUpdates(extension.addon);
   let install = update.updateAvailable;

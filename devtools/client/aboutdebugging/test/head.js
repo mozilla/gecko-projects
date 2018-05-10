@@ -15,11 +15,6 @@ Services.scriptloader.loadSubScript(
 const { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
 const { Management } = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
 
-flags.testing = true;
-registerCleanupFunction(() => {
-  flags.testing = false;
-});
-
 async function openAboutDebugging(page, win) {
   info("opening about:debugging");
   let url = "about:debugging";
@@ -212,21 +207,20 @@ async function installAddon({document, path, name, isWebExtension}) {
 
 async function uninstallAddon({document, id, name}) {
   // Now uninstall this addon
-  await new Promise(done => {
-    AddonManager.getAddonByID(id, addon => {
-      let listener = {
-        onUninstalled: function(uninstalledAddon) {
-          if (uninstalledAddon != addon) {
-            return;
-          }
-          AddonManager.removeAddonListener(listener);
-
-          done();
+  await new Promise(async done => {
+    let addon = await AddonManager.getAddonByID(id);
+    let listener = {
+      onUninstalled: function(uninstalledAddon) {
+        if (uninstalledAddon != addon) {
+          return;
         }
-      };
-      AddonManager.addAddonListener(listener);
-      addon.uninstall();
-    });
+        AddonManager.removeAddonListener(listener);
+
+        done();
+      }
+    };
+    AddonManager.addAddonListener(listener);
+    addon.uninstall();
   });
 
   info("Wait until the addon is removed from about:debugging");
@@ -440,27 +434,24 @@ function promiseAddonEvent(event) {
  * Install an add-on using the AddonManager so it does not show up as temporary.
  */
 function installAddonWithManager(filePath) {
-  return new Promise((resolve, reject) => {
-    AddonManager.getInstallForFile(filePath, install => {
-      if (!install) {
-        throw new Error(`An install was not created for ${filePath}`);
-      }
-      install.addListener({
-        onDownloadFailed: reject,
-        onDownloadCancelled: reject,
-        onInstallFailed: reject,
-        onInstallCancelled: reject,
-        onInstallEnded: resolve
-      });
-      install.install();
+  return new Promise(async (resolve, reject) => {
+    let install = await AddonManager.getInstallForFile(filePath);
+    if (!install) {
+      throw new Error(`An install was not created for ${filePath}`);
+    }
+    install.addListener({
+      onDownloadFailed: reject,
+      onDownloadCancelled: reject,
+      onInstallFailed: reject,
+      onInstallCancelled: reject,
+      onInstallEnded: resolve
     });
+    install.install();
   });
 }
 
 function getAddonByID(addonId) {
-  return new Promise(resolve => {
-    AddonManager.getAddonByID(addonId, addon => resolve(addon));
-  });
+  return AddonManager.getAddonByID(addonId);
 }
 
 /**

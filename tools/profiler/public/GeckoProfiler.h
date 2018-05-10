@@ -44,6 +44,7 @@
 #define AUTO_PROFILER_LABEL_FAST(label, category, ctx)
 
 #define PROFILER_ADD_MARKER(markerName)
+#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, count, timings, redirect)
 
 #define PROFILER_TRACING(category, markerName, kind)
 #define AUTO_PROFILER_TRACING(category, markerName)
@@ -62,11 +63,14 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/ThreadLocal.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/net/TimingStruct.h"
 #include "js/ProfilingStack.h"
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
 #include "nscore.h"
+#include "nsIURI.h"
 
 // Make sure that we can use std::min here without the Windows headers messing
 // with us.
@@ -121,14 +125,20 @@ class TimeStamp;
   /* Restyle profiling. */ \
   macro(6, "restyle", Restyle) \
   \
+  /* Take a snapshot of the window on every composition. */ \
+  macro(7, "screenshots", Screenshots) \
+  \
   /* Walk the C++ stack. Not available on all platforms. */ \
-  macro(7, "stackwalk", StackWalk) \
+  macro(8, "stackwalk", StackWalk) \
   \
   /* Start profiling with feature TaskTracer. */ \
-  macro(8, "tasktracer", TaskTracer) \
+  macro(9, "tasktracer", TaskTracer) \
   \
   /* Profile the registered secondary threads. */ \
-  macro(9, "threads", Threads)
+  macro(10, "threads", Threads) \
+  \
+  /* Have the JavaScript engine track JIT optimizations. */ \
+  macro(11, "trackopts", TrackOptimizations)
 
 struct ProfilerFeature
 {
@@ -144,7 +154,6 @@ struct ProfilerFeature
   #undef DECLARE
 };
 
-#ifdef MOZ_GECKO_PROFILER
 namespace mozilla {
 namespace profiler {
 namespace detail {
@@ -201,7 +210,6 @@ private:
 } // namespace detail
 } // namespace profiler
 } // namespace mozilla
-#endif
 
 //---------------------------------------------------------------------------
 // Start and stop the profiler
@@ -326,11 +334,7 @@ void profiler_clear_js_context();
 // calls.
 inline bool profiler_is_active()
 {
-#ifdef MOZ_GECKO_PROFILER
   return mozilla::profiler::detail::RacyFeatures::IsActive();
-#else
-  return false;
-#endif
 }
 
 // Is the profiler active and paused? Returns false if the profiler is inactive.
@@ -535,6 +539,26 @@ void profiler_add_marker(const char* aMarkerName,
 void profiler_add_marker_for_thread(int aThreadId,
                                     const char* aMarkerName,
                                     mozilla::UniquePtr<ProfilerMarkerPayload> aPayload);
+
+enum class NetworkLoadType {
+  LOAD_START,
+  LOAD_STOP,
+  LOAD_REDIRECT
+};
+
+#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, count, timings, redirect) \
+  profiler_add_network_marker(uri, pri, channel, type, start, end, count, timings, redirect)
+
+void profiler_add_network_marker(nsIURI* aURI,
+                                 int32_t aPriority,
+                                 uint64_t aChannelId,
+                                 NetworkLoadType aType,
+                                 mozilla::TimeStamp aStart,
+                                 mozilla::TimeStamp aEnd,
+                                 int64_t aCount,
+                                 const mozilla::net::TimingStruct* aTimings = nullptr,
+                                 nsIURI* aRedirectURI = nullptr);
+
 
 enum TracingKind {
   TRACING_EVENT,

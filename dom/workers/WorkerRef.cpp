@@ -70,6 +70,10 @@ public:
   {
     MOZ_ASSERT(mWorkerRef);
 
+    if (aStatus < Canceling) {
+      return true;
+    }
+
     // Let's keep this object alive for the whole Notify() execution.
     RefPtr<WorkerRef> workerRef;
     workerRef = mWorkerRef;
@@ -103,8 +107,6 @@ WorkerRef::Notify()
   MOZ_ASSERT(mHolder);
   NS_ASSERT_OWNINGTHREAD(WorkerRef);
 
-  mHolder = nullptr;
-
   if (!mCallback) {
     return;
   }
@@ -130,7 +132,7 @@ WeakWorkerRef::Create(WorkerPrivate* aWorkerPrivate,
   // This holder doesn't keep the worker alive.
   UniquePtr<Holder> holder(new Holder("WeakWorkerRef::Holder", ref,
                                       WorkerHolder::AllowIdleShutdownStart));
-  if (NS_WARN_IF(!holder->HoldWorker(aWorkerPrivate, Closing))) {
+  if (NS_WARN_IF(!holder->HoldWorker(aWorkerPrivate, Canceling))) {
     return nullptr;
   }
 
@@ -150,6 +152,8 @@ void
 WeakWorkerRef::Notify()
 {
   WorkerRef::Notify();
+
+  mHolder = nullptr;
   mWorkerPrivate = nullptr;
 }
 
@@ -182,7 +186,7 @@ StrongWorkerRef::Create(WorkerPrivate* aWorkerPrivate,
   // The worker is kept alive by this holder.
   UniquePtr<Holder> holder(new Holder(aName, ref,
                                       WorkerHolder::PreventIdleShutdownStart));
-  if (NS_WARN_IF(!holder->HoldWorker(aWorkerPrivate, Closing))) {
+  if (NS_WARN_IF(!holder->HoldWorker(aWorkerPrivate, Canceling))) {
     return nullptr;
   }
 
@@ -196,7 +200,10 @@ StrongWorkerRef::StrongWorkerRef(WorkerPrivate* aWorkerPrivate)
   : WorkerRef(aWorkerPrivate)
 {}
 
-StrongWorkerRef::~StrongWorkerRef() = default;
+StrongWorkerRef::~StrongWorkerRef()
+{
+  NS_ASSERT_OWNINGTHREAD(StrongWorkerRef);
+}
 
 WorkerPrivate*
 StrongWorkerRef::Private() const
@@ -205,6 +212,9 @@ StrongWorkerRef::Private() const
   NS_ASSERT_OWNINGTHREAD(StrongWorkerRef);
   return mWorkerPrivate;
 }
+
+// ----------------------------------------------------------------------------
+// ThreadSafeWorkerRef
 
 ThreadSafeWorkerRef::ThreadSafeWorkerRef(StrongWorkerRef* aRef)
   : mRef(aRef)

@@ -460,16 +460,6 @@ JS_GetBoundFunctionTarget(JSFunction* fun)
 
 /************************************************************************/
 
-#ifdef DEBUG
-JS_FRIEND_API(bool)
-JS::isGCEnabled()
-{
-    return !TlsContext.get()->suppressGC;
-}
-#else
-JS_FRIEND_API(bool) JS::isGCEnabled() { return true; }
-#endif
-
 JS_PUBLIC_API(JSContext*)
 JS_NewContext(uint32_t maxbytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime)
 {
@@ -486,19 +476,19 @@ JS_NewContext(uint32_t maxbytes, uint32_t maxNurseryBytes, JSRuntime* parentRunt
 JS_PUBLIC_API(JSContext*)
 JS_NewCooperativeContext(JSContext* siblingContext)
 {
-    return NewCooperativeContext(siblingContext);
+    MOZ_CRASH("Cooperative scheduling is unsupported");
 }
 
 JS_PUBLIC_API(void)
 JS_YieldCooperativeContext(JSContext* cx)
 {
-    YieldCooperativeContext(cx);
+    MOZ_CRASH("Cooperative scheduling is unsupported");
 }
 
 JS_PUBLIC_API(void)
 JS_ResumeCooperativeContext(JSContext* cx)
 {
-    ResumeCooperativeContext(cx);
+    MOZ_CRASH("Cooperative scheduling is unsupported");
 }
 
 JS_PUBLIC_API(void)
@@ -578,15 +568,6 @@ JS_PUBLIC_API(JSRuntime*)
 JS_GetRuntime(JSContext* cx)
 {
     return cx->runtime();
-}
-
-JS_PUBLIC_API(void)
-JS::SetSingleThreadedExecutionCallbacks(JSContext* cx,
-                                        BeginSingleThreadedExecutionCallback begin,
-                                        EndSingleThreadedExecutionCallback end)
-{
-    cx->runtime()->beginSingleThreadedExecutionCallback = begin;
-    cx->runtime()->endSingleThreadedExecutionCallback = end;
 }
 
 JS_PUBLIC_API(JS::ContextOptions&)
@@ -893,6 +874,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
     MOZ_ASSERT(!target->is<CrossCompartmentWrapperObject>());
     MOZ_ASSERT(origobj->getClass() == target->getClass());
     ReleaseAssertObjectHasNoWrappers(cx, target);
+    MOZ_ASSERT(JS::CellIsNotGray(target));
 
     RootedValue origv(cx, ObjectValue(*origobj));
     RootedObject newIdentity(cx);
@@ -909,7 +891,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         // destination, then we know that we won't find a wrapper in the
         // destination's cross compartment map and that the same
         // object will continue to work.
-        AutoCompartment ac(cx, origobj);
+        AutoCompartmentUnchecked ac(cx, origobj->compartment());
         if (!JSObject::swap(cx, origobj, target))
             MOZ_CRASH();
         newIdentity = origobj;
@@ -943,7 +925,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
     // Lastly, update the original object to point to the new one.
     if (origobj->compartment() != destination) {
         RootedObject newIdentityWrapper(cx, newIdentity);
-        AutoCompartment ac(cx, origobj);
+        AutoCompartmentUnchecked ac(cx, origobj->compartment());
         if (!JS_WrapObject(cx, &newIdentityWrapper))
             MOZ_CRASH();
         MOZ_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
@@ -955,6 +937,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
 
     // The new identity object might be one of several things. Return it to avoid
     // ambiguity.
+    MOZ_ASSERT(JS::CellIsNotGray(newIdentity));
     return newIdentity;
 }
 
@@ -981,8 +964,6 @@ JS_InitStandardClasses(JSContext* cx, HandleObject obj)
     Rooted<GlobalObject*> global(cx, &obj->global());
     return GlobalObject::initStandardClasses(cx, global);
 }
-
-#define EAGER_ATOM(name)            NAME_OFFSET(name)
 
 typedef struct JSStdName {
     size_t      atomOffset;     /* offset of atom pointer in JSAtomState */
@@ -1011,7 +992,7 @@ LookupStdName(const JSAtomState& names, JSAtom* name, const JSStdName* table)
  * JSProtoKey does not correspond to a class with a meaningful constructor, we
  * insert a null entry into the table.
  */
-#define STD_NAME_ENTRY(name, init, clasp) { EAGER_ATOM(name), JSProto_##name },
+#define STD_NAME_ENTRY(name, init, clasp) { NAME_OFFSET(name), JSProto_##name },
 #define STD_DUMMY_ENTRY(name, init, dummy) { 0, JSProto_Null },
 static const JSStdName standard_class_names[] = {
   JS_FOR_PROTOTYPES(STD_NAME_ENTRY, STD_DUMMY_ENTRY)
@@ -1023,29 +1004,27 @@ static const JSStdName standard_class_names[] = {
  * standard class that initializes them.
  */
 static const JSStdName builtin_property_names[] = {
-    { EAGER_ATOM(eval), JSProto_Object },
+    { NAME_OFFSET(eval), JSProto_Object },
 
     /* Global properties and functions defined by the Number class. */
-    { EAGER_ATOM(NaN), JSProto_Number },
-    { EAGER_ATOM(Infinity), JSProto_Number },
-    { EAGER_ATOM(isNaN), JSProto_Number },
-    { EAGER_ATOM(isFinite), JSProto_Number },
-    { EAGER_ATOM(parseFloat), JSProto_Number },
-    { EAGER_ATOM(parseInt), JSProto_Number },
+    { NAME_OFFSET(NaN), JSProto_Number },
+    { NAME_OFFSET(Infinity), JSProto_Number },
+    { NAME_OFFSET(isNaN), JSProto_Number },
+    { NAME_OFFSET(isFinite), JSProto_Number },
+    { NAME_OFFSET(parseFloat), JSProto_Number },
+    { NAME_OFFSET(parseInt), JSProto_Number },
 
     /* String global functions. */
-    { EAGER_ATOM(escape), JSProto_String },
-    { EAGER_ATOM(unescape), JSProto_String },
-    { EAGER_ATOM(decodeURI), JSProto_String },
-    { EAGER_ATOM(encodeURI), JSProto_String },
-    { EAGER_ATOM(decodeURIComponent), JSProto_String },
-    { EAGER_ATOM(encodeURIComponent), JSProto_String },
-    { EAGER_ATOM(uneval), JSProto_String },
+    { NAME_OFFSET(escape), JSProto_String },
+    { NAME_OFFSET(unescape), JSProto_String },
+    { NAME_OFFSET(decodeURI), JSProto_String },
+    { NAME_OFFSET(encodeURI), JSProto_String },
+    { NAME_OFFSET(decodeURIComponent), JSProto_String },
+    { NAME_OFFSET(encodeURIComponent), JSProto_String },
+    { NAME_OFFSET(uneval), JSProto_String },
 
     { 0, JSProto_LIMIT }
 };
-
-#undef EAGER_ATOM
 
 JS_PUBLIC_API(bool)
 JS_ResolveStandardClass(JSContext* cx, HandleObject obj, HandleId id, bool* resolved)
@@ -1349,17 +1328,32 @@ JS::CurrentGlobalOrNull(JSContext* cx)
     return cx->global();
 }
 
-JS_PUBLIC_API(Value)
-JS::detail::ComputeThis(JSContext* cx, Value* vp)
+JS_PUBLIC_API(bool)
+JS::detail::ComputeThis(JSContext* cx, Value* vp, MutableHandleObject thisObject)
 {
     AssertHeapIsIdle();
-    assertSameCompartment(cx, JSValueArray(vp, 2));
+    assertSameCompartment(cx, vp[0], vp[1]);
 
     MutableHandleValue thisv = MutableHandleValue::fromMarkedLocation(&vp[1]);
     if (!BoxNonStrictThis(cx, thisv, thisv))
-        return NullValue();
+        return false;
 
-    return thisv;
+    thisObject.set(&thisv.toObject());
+    return true;
+}
+
+static bool gProfileTimelineRecordingEnabled = false;
+
+JS_PUBLIC_API(void)
+JS::SetProfileTimelineRecordingEnabled(bool enabled)
+{
+    gProfileTimelineRecordingEnabled = enabled;
+}
+
+JS_PUBLIC_API(bool)
+JS::IsProfileTimelineRecordingEnabled()
+{
+    return gProfileTimelineRecordingEnabled;
 }
 
 JS_PUBLIC_API(void*)
@@ -1663,7 +1657,7 @@ JS_SetNativeStackQuota(JSContext* cx, size_t systemCodeStackSize, size_t trusted
     SetNativeStackQuotaAndLimit(cx, JS::StackForTrustedScript, trustedScriptStackSize);
     SetNativeStackQuotaAndLimit(cx, JS::StackForUntrustedScript, untrustedScriptStackSize);
 
-    if (cx->isCooperativelyScheduled())
+    if (cx->isMainThreadContext())
         cx->initJitStackLimit();
 }
 
@@ -1861,7 +1855,7 @@ JS::CompartmentCreationOptions&
 JS::CompartmentCreationOptions::setSystemZone()
 {
     zoneSpec_ = JS::SystemZone;
-    zonePointer_ = nullptr;
+    zone_ = nullptr;
     return *this;
 }
 
@@ -1869,31 +1863,15 @@ JS::CompartmentCreationOptions&
 JS::CompartmentCreationOptions::setExistingZone(JSObject* obj)
 {
     zoneSpec_ = JS::ExistingZone;
-    zonePointer_ = obj->zone();
+    zone_ = obj->zone();
     return *this;
 }
 
 JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setNewZoneInNewZoneGroup()
+JS::CompartmentCreationOptions::setNewZone()
 {
-    zoneSpec_ = JS::NewZoneInNewZoneGroup;
-    zonePointer_ = nullptr;
-    return *this;
-}
-
-JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setNewZoneInSystemZoneGroup()
-{
-    zoneSpec_ = JS::NewZoneInSystemZoneGroup;
-    zonePointer_ = nullptr;
-    return *this;
-}
-
-JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setNewZoneInExistingZoneGroup(JSObject* obj)
-{
-    zoneSpec_ = JS::NewZoneInExistingZoneGroup;
-    zonePointer_ = obj->zone()->group();
+    zoneSpec_ = JS::NewZone;
+    zone_ = nullptr;
     return *this;
 }
 
@@ -3878,7 +3856,7 @@ JS_DefineFunctionById(JSContext* cx, HandleObject obj, HandleId id, JSNative cal
 # define fast_getc getc
 #endif
 
-typedef Vector<char, 8, TempAllocPolicy> FileContents;
+using FileContents = Vector<uint8_t, 8, TempAllocPolicy>;
 
 static bool
 ReadCompleteFile(JSContext* cx, FILE* fp, FileContents& buffer)
@@ -4005,6 +3983,14 @@ JS::OwningCompileOptions::~OwningCompileOptions()
     js_free(const_cast<char*>(filename_));
     js_free(const_cast<char16_t*>(sourceMapURL_));
     js_free(const_cast<char*>(introducerFilename_));
+}
+
+size_t
+JS::OwningCompileOptions::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(filename_) +
+           mallocSizeOf(sourceMapURL_) +
+           mallocSizeOf(introducerFilename_);
 }
 
 bool
@@ -4144,7 +4130,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
     if (!ReadCompleteFile(cx, fp, buffer))
         return false;
 
-    return ::Compile(cx, options, buffer.begin(), buffer.length(), script);
+    return ::Compile(cx, options, reinterpret_cast<const char*>(buffer.begin()), buffer.length(), script);
 }
 
 static bool
@@ -4240,6 +4226,47 @@ JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& opt
     return ::Compile(cx, options, filename, script);
 }
 
+#if defined(JS_BUILD_BINAST)
+
+JSScript*
+JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+                 const uint8_t* buf, size_t length)
+{
+    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    AssertHeapIsIdle();
+    CHECK_REQUEST(cx);
+
+    return frontend::CompileGlobalBinASTScript(cx, cx->tempLifoAlloc(), options, buf, length);
+}
+
+JSScript*
+JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options, FILE* file)
+{
+    FileContents fileContents(cx);
+    if (!ReadCompleteFile(cx, file, fileContents))
+        return nullptr;
+
+    return DecodeBinAST(cx, options, fileContents.begin(), fileContents.length());
+}
+
+JS_PUBLIC_API(bool)
+JS::DecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
+                          const uint8_t* buf, size_t length,
+                          OffThreadCompileCallback callback, void* callbackData)
+{
+    return StartOffThreadDecodeBinAST(cx, options, buf, length, callback, callbackData);
+}
+
+JS_PUBLIC_API(JSScript*)
+JS::FinishOffThreadBinASTDecode(JSContext* cx, void* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+    return HelperThreadState().finishBinASTDecodeTask(cx, token);
+}
+
+#endif /* JS_BUILD_BINAST */
+
 enum class OffThread {
     Compile, Decode,
 };
@@ -4254,13 +4281,13 @@ CanDoOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t leng
     // These are heuristics which the caller may choose to ignore (e.g., for
     // testing purposes).
     if (!options.forceAsync) {
-        // Compiling off the active thread inolves creating a new Zone and other
+        // Compiling off the main thread inolves creating a new Zone and other
         // significant overheads.  Don't bother if the script is tiny.
         if (length < TINY_LENGTH)
             return false;
 
         // If the parsing task would have to wait for GC to complete, it'll probably
-        // be faster to just start it synchronously on the active thread unless the
+        // be faster to just start it synchronously on the main thread unless the
         // script is huge.
         if (OffThreadParsingMustWaitForGC(cx->runtime())) {
             if (what == OffThread::Compile && length < HUGE_SRC_LENGTH)
@@ -4659,7 +4686,7 @@ JS::InitScriptSourceElement(JSContext* cx, HandleScript script,
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
 
-    RootedScriptSource sso(cx, &script->sourceObject()->as<ScriptSourceObject>());
+    RootedScriptSourceObject sso(cx, &script->sourceObject()->as<ScriptSourceObject>());
     return ScriptSourceObject::initElementProperties(cx, sso, element, elementAttrName);
 }
 
@@ -4870,7 +4897,7 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
 
     CompileOptions options(cx, optionsArg);
     options.setFileAndLine(filename, 1);
-    return Evaluate(cx, options, buffer.begin(), buffer.length(), rval);
+    return Evaluate(cx, options, reinterpret_cast<const char*>(buffer.begin()), buffer.length(), rval);
 }
 
 JS_PUBLIC_API(bool)
@@ -5248,7 +5275,8 @@ JS::RejectPromise(JSContext* cx, JS::HandleObject promiseObj, JS::HandleValue re
 static bool
 CallOriginalPromiseThenImpl(JSContext* cx, JS::HandleObject promiseObj,
                             JS::HandleObject onResolvedObj_, JS::HandleObject onRejectedObj_,
-                            JS::MutableHandleObject resultObj, bool createDependent)
+                            JS::MutableHandleObject resultObj,
+                            CreateDependentPromise createDependent)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
@@ -5297,8 +5325,11 @@ JS::CallOriginalPromiseThen(JSContext* cx, JS::HandleObject promiseObj,
                             JS::HandleObject onResolvedObj, JS::HandleObject onRejectedObj)
 {
     RootedObject resultPromise(cx);
-    if (!CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj, &resultPromise, true))
+    if (!CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj, &resultPromise,
+                                     CreateDependentPromise::Always))
+    {
         return nullptr;
+    }
     return resultPromise;
 }
 
@@ -5307,7 +5338,8 @@ JS::AddPromiseReactions(JSContext* cx, JS::HandleObject promiseObj,
                         JS::HandleObject onResolvedObj, JS::HandleObject onRejectedObj)
 {
     RootedObject resultPromise(cx);
-    bool result = CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj, &resultPromise, false);
+    bool result = CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj,
+                                              &resultPromise, CreateDependentPromise::Never);
     MOZ_ASSERT(!resultPromise);
     return result;
 }
@@ -5714,13 +5746,13 @@ JS::InitConsumeStreamCallback(JSContext* cx, ConsumeStreamCallback callback)
 JS_PUBLIC_API(void)
 JS_RequestInterruptCallback(JSContext* cx)
 {
-    cx->requestInterrupt(JSContext::RequestInterruptUrgent);
+    cx->requestInterrupt(InterruptReason::CallbackUrgent);
 }
 
 JS_PUBLIC_API(void)
 JS_RequestInterruptCallbackCanWait(JSContext* cx)
 {
-    cx->requestInterrupt(JSContext::RequestInterruptCanWait);
+    cx->requestInterrupt(InterruptReason::CallbackCanWait);
 }
 
 JS::AutoSetAsyncStackForNewCalls::AutoSetAsyncStackForNewCalls(
@@ -6103,13 +6135,6 @@ JS_PutEscapedString(JSContext* cx, char* buffer, size_t size, JSString* str, cha
     return PutEscapedString(buffer, size, linearStr, quote);
 }
 
-JS_PUBLIC_API(bool)
-JS_FileEscapedString(FILE* fp, JSString* str, char quote)
-{
-    JSLinearString* linearStr = str->ensureLinear(nullptr);
-    return linearStr && FileEscapedString(fp, linearStr, quote);
-}
-
 JS_PUBLIC_API(JSString*)
 JS_NewDependentString(JSContext* cx, HandleString str, size_t start, size_t length)
 {
@@ -6278,7 +6303,7 @@ JS::GetSymbolCode(Handle<Symbol*> symbol)
 JS_PUBLIC_API(JS::Symbol*)
 JS::GetWellKnownSymbol(JSContext* cx, JS::SymbolCode which)
 {
-    return cx->wellKnownSymbols().get(uint32_t(which));
+    return cx->wellKnownSymbols().get(which);
 }
 
 #ifdef DEBUG
@@ -7265,6 +7290,9 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
         }
         jit::JitOptions.jumpThreshold = value;
         break;
+      case JSJITCOMPILER_TRACK_OPTIMIZATIONS:
+        jit::JitOptions.disableOptimizationTracking = !value;
+        break;
       case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
         jit::JitOptions.spectreIndexMasking = !!value;
         break;
@@ -7291,9 +7319,6 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
         break;
       case JSJITCOMPILER_WASM_DELAY_TIER2:
         jit::JitOptions.wasmDelayTier2 = !!value;
-        break;
-      case JSJITCOMPILER_ION_INTERRUPT_WITHOUT_SIGNAL:
-        jit::JitOptions.ionInterruptWithoutSignals = !!value;
         break;
 #ifdef DEBUG
       case JSJITCOMPILER_FULL_DEBUG_CHECKS:
@@ -7339,9 +7364,6 @@ JS_GetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t* 
         break;
       case JSJITCOMPILER_WASM_FOLD_OFFSETS:
         *valueOut = jit::JitOptions.wasmFoldOffsets ? 1 : 0;
-        break;
-      case JSJITCOMPILER_ION_INTERRUPT_WITHOUT_SIGNAL:
-        *valueOut = jit::JitOptions.ionInterruptWithoutSignals ? 1 : 0;
         break;
 #ifdef DEBUG
       case JSJITCOMPILER_FULL_DEBUG_CHECKS:
@@ -7723,9 +7745,9 @@ JS::CompiledWasmModuleAssumptionsMatch(PRFileDesc* compiled, JS::BuildIdCharVect
 JS_PUBLIC_API(RefPtr<JS::WasmModule>)
 JS::DeserializeWasmModule(PRFileDesc* bytecode, PRFileDesc* maybeCompiled,
                           JS::BuildIdCharVector&& buildId, UniqueChars file,
-                          unsigned line, unsigned column)
+                          unsigned line)
 {
-    return wasm::DeserializeModule(bytecode, maybeCompiled, Move(buildId), Move(file), line, column);
+    return wasm::DeserializeModule(bytecode, maybeCompiled, Move(buildId), Move(file), line);
 }
 
 JS_PUBLIC_API(void)

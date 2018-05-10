@@ -1218,7 +1218,7 @@ class MInstruction
 
     // Instructions needing to hook into type analysis should return a
     // TypePolicy.
-    virtual TypePolicy* typePolicy() = 0;
+    virtual const TypePolicy* typePolicy() = 0;
     virtual MIRType typePolicySpecialization() = 0;
 };
 
@@ -1230,7 +1230,7 @@ class MInstruction
 
 #define INSTRUCTION_HEADER(opcode)                                          \
     INSTRUCTION_HEADER_WITHOUT_TYPEPOLICY(opcode)                           \
-    virtual TypePolicy* typePolicy() override;                              \
+    virtual const TypePolicy* typePolicy() override;                        \
     virtual MIRType typePolicySpecialization() override;
 
 #define ALLOW_CLONE(typename)                                               \
@@ -1641,11 +1641,12 @@ class MConstant : public MNullaryInstruction
     }
 
     // Try to convert this constant to boolean, similar to js::ToBoolean.
-    // Returns false if the type is MIRType::Magic*.
+    // Returns false if the type is MIRType::Magic* or MIRType::Object.
     bool MOZ_MUST_USE valueToBoolean(bool* res) const;
 
     // Like valueToBoolean, but returns the result directly instead of using
-    // an outparam. Should not be used if this constant might be a magic value.
+    // an outparam. Should not be used if this constant might be a magic value
+    // or an object.
     bool valueToBooleanInfallible() const {
         bool res;
         MOZ_ALWAYS_TRUE(valueToBoolean(&res));
@@ -4185,7 +4186,7 @@ class MInitElemGetterSetter
 };
 
 // WrappedFunction wraps a JSFunction so it can safely be used off-thread.
-// In particular, a function's flags can be modified on the active thread as
+// In particular, a function's flags can be modified on the main thread as
 // functions are relazified and delazified, so we must be careful not to access
 // these flags off-thread.
 class WrappedFunction : public TempObject
@@ -7038,6 +7039,43 @@ class MRandom : public MNullaryInstruction
     ALLOW_CLONE(MRandom)
 };
 
+class MSign
+  : public MUnaryInstruction,
+    public NoFloatPolicy<0>::Data
+{
+  private:
+    MSign(MDefinition* input, MIRType resultType)
+      : MUnaryInstruction(classOpcode, input)
+    {
+        MOZ_ASSERT(IsNumberType(input->type()));
+        MOZ_ASSERT(resultType == MIRType::Int32 || resultType == MIRType::Double);
+        setResultType(resultType);
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(Sign)
+    TRIVIAL_NEW_WRAPPERS
+
+    bool congruentTo(const MDefinition* ins) const override {
+        return congruentIfOperandsEqual(ins);
+    }
+
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+
+    MDefinition* foldsTo(TempAllocator& alloc) override;
+
+    void computeRange(TempAllocator& alloc) override;
+    MOZ_MUST_USE bool writeRecoverData(CompactBufferWriter& writer) const override;
+    bool canRecoverOnBailout() const override {
+        return true;
+    }
+
+    ALLOW_CLONE(MSign)
+};
+
 class MMathFunction
   : public MUnaryInstruction,
     public FloatingPointPolicy<0>::Data
@@ -7062,7 +7100,6 @@ class MMathFunction
         ACosH,
         ASinH,
         ATanH,
-        Sign,
         Trunc,
         Cbrt,
         Floor,
@@ -7118,7 +7155,7 @@ class MMathFunction
     static const char* FunctionName(Function function);
 
     bool isFloat32Commutative() const override {
-        return function_ == Floor || function_ == Ceil || function_ == Round;
+        return function_ == Floor || function_ == Ceil || function_ == Round || function_ == Trunc;
     }
     void trySpecializeFloat32(TempAllocator& alloc) override;
     void computeRange(TempAllocator& alloc) override;
@@ -7132,6 +7169,7 @@ class MMathFunction
           case Ceil:
           case Floor:
           case Round:
+          case Trunc:
             return true;
           default:
             return false;
@@ -7938,7 +7976,7 @@ class MPhi final
 
   public:
     INSTRUCTION_HEADER_WITHOUT_TYPEPOLICY(Phi)
-    virtual TypePolicy* typePolicy();
+    virtual const TypePolicy* typePolicy();
     virtual MIRType typePolicySpecialization();
 
     MPhi(TempAllocator& alloc, MIRType resultType)
@@ -8287,18 +8325,18 @@ class MBinarySharedStub
     TRIVIAL_NEW_WRAPPERS
 };
 
-class MUnarySharedStub
+class MUnaryCache
   : public MUnaryInstruction,
     public BoxPolicy<0>::Data
 {
-    explicit MUnarySharedStub(MDefinition* input)
+    explicit MUnaryCache(MDefinition* input)
       : MUnaryInstruction(classOpcode, input)
     {
         setResultType(MIRType::Value);
     }
 
   public:
-    INSTRUCTION_HEADER(UnarySharedStub)
+    INSTRUCTION_HEADER(UnaryCache)
     TRIVIAL_NEW_WRAPPERS
 };
 
@@ -8872,7 +8910,7 @@ struct LambdaFunctionInfo
 {
     // The functions used in lambdas are the canonical original function in
     // the script, and are immutable except for delazification. Record this
-    // information while still on the active thread to avoid races.
+    // information while still on the main thread to avoid races.
   private:
     CompilerFunction fun_;
 
@@ -10586,73 +10624,6 @@ class MLoadTypedArrayElementHole
     ALLOW_CLONE(MLoadTypedArrayElementHole)
 };
 
-// Load a value fallibly or infallibly from a statically known typed array.
-class MLoadTypedArrayElementStatic
-  : public MUnaryInstruction,
-    public ConvertToInt32Policy<0>::Data
-{
-    MLoadTypedArrayElementStatic(JSObject* someTypedArray, MDefinition* ptr,
-                                 int32_t offset = 0, bool needsBoundsCheck = true)
-      : MUnaryInstruction(classOpcode, ptr), someTypedArray_(someTypedArray), offset_(offset),
-        needsBoundsCheck_(needsBoundsCheck), fallible_(true)
-    {
-        int type = accessType();
-        if (type == Scalar::Float32)
-            setResultType(MIRType::Float32);
-        else if (type == Scalar::Float64)
-            setResultType(MIRType::Double);
-        else
-            setResultType(MIRType::Int32);
-    }
-
-    CompilerObject someTypedArray_;
-
-    // An offset to be encoded in the load instruction - taking advantage of the
-    // addressing modes. This is only non-zero when the access is proven to be
-    // within bounds.
-    int32_t offset_;
-    bool needsBoundsCheck_;
-    bool fallible_;
-
-  public:
-    INSTRUCTION_HEADER(LoadTypedArrayElementStatic)
-    TRIVIAL_NEW_WRAPPERS
-
-    Scalar::Type accessType() const {
-        return someTypedArray_->as<TypedArrayObject>().type();
-    }
-    SharedMem<void*> base() const;
-    size_t length() const;
-
-    MDefinition* ptr() const { return getOperand(0); }
-    int32_t offset() const { return offset_; }
-    void setOffset(int32_t offset) { offset_ = offset; }
-    bool congruentTo(const MDefinition* ins) const override;
-    AliasSet getAliasSet() const override {
-        return AliasSet::Load(AliasSet::UnboxedElement);
-    }
-
-    bool needsBoundsCheck() const { return needsBoundsCheck_; }
-    void setNeedsBoundsCheck(bool v) { needsBoundsCheck_ = v; }
-
-    bool fallible() const {
-        return fallible_;
-    }
-
-    void setInfallible() {
-        fallible_ = false;
-    }
-
-    void computeRange(TempAllocator& alloc) override;
-    bool needTruncation(TruncateKind kind) override;
-    bool canProduceFloat32() const override { return accessType() == Scalar::Float32; }
-    void collectRangeInfoPreTrunc() override;
-
-    bool appendRoots(MRootList& roots) const override {
-        return roots.append(someTypedArray_);
-    }
-};
-
 // Base class for MIR ops that write unboxed scalar values.
 class StoreUnboxedScalarBase
 {
@@ -10810,60 +10781,6 @@ class MStoreTypedArrayElementHole
     }
 
     ALLOW_CLONE(MStoreTypedArrayElementHole)
-};
-
-// Store a value infallibly to a statically known typed array.
-class MStoreTypedArrayElementStatic :
-    public MBinaryInstruction,
-    public StoreUnboxedScalarBase,
-    public StoreTypedArrayElementStaticPolicy::Data
-{
-    MStoreTypedArrayElementStatic(JSObject* someTypedArray, MDefinition* ptr, MDefinition* v,
-                                  int32_t offset = 0, bool needsBoundsCheck = true)
-        : MBinaryInstruction(classOpcode, ptr, v),
-          StoreUnboxedScalarBase(someTypedArray->as<TypedArrayObject>().type()),
-          someTypedArray_(someTypedArray),
-          offset_(offset), needsBoundsCheck_(needsBoundsCheck)
-    {}
-
-    CompilerObject someTypedArray_;
-
-    // An offset to be encoded in the store instruction - taking advantage of the
-    // addressing modes. This is only non-zero when the access is proven to be
-    // within bounds.
-    int32_t offset_;
-    bool needsBoundsCheck_;
-
-  public:
-    INSTRUCTION_HEADER(StoreTypedArrayElementStatic)
-    TRIVIAL_NEW_WRAPPERS
-
-    Scalar::Type accessType() const {
-        return writeType();
-    }
-
-    SharedMem<void*> base() const;
-    size_t length() const;
-
-    MDefinition* ptr() const { return getOperand(0); }
-    MDefinition* value() const { return getOperand(1); }
-    bool needsBoundsCheck() const { return needsBoundsCheck_; }
-    void setNeedsBoundsCheck(bool v) { needsBoundsCheck_ = v; }
-    int32_t offset() const { return offset_; }
-    void setOffset(int32_t offset) { offset_ = offset; }
-    AliasSet getAliasSet() const override {
-        return AliasSet::Store(AliasSet::UnboxedElement);
-    }
-    TruncateKind operandTruncateKind(size_t index) const override;
-
-    bool canConsumeFloat32(MUse* use) const override {
-        return use == getUseFor(1) && accessType() == Scalar::Float32;
-    }
-    void collectRangeInfoPreTrunc() override;
-
-    bool appendRoots(MRootList& roots) const override {
-        return roots.append(someTypedArray_);
-    }
 };
 
 // Compute an "effective address", i.e., a compound computation of the form:
@@ -12801,6 +12718,48 @@ class MRound
     ALLOW_CLONE(MRound)
 };
 
+// Inlined version of Math.trunc(double | float32) -> int32.
+class MTrunc
+  : public MUnaryInstruction,
+    public FloatingPointPolicy<0>::Data
+{
+    explicit MTrunc(MDefinition* num)
+      : MUnaryInstruction(classOpcode, num)
+    {
+        setResultType(MIRType::Int32);
+        specialization_ = MIRType::Double;
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(Trunc)
+    TRIVIAL_NEW_WRAPPERS
+
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+
+    bool isFloat32Commutative() const override {
+        return true;
+    }
+    void trySpecializeFloat32(TempAllocator& alloc) override;
+#ifdef DEBUG
+    bool isConsistentFloat32Use(MUse* use) const override {
+        return true;
+    }
+#endif
+    bool congruentTo(const MDefinition* ins) const override {
+        return congruentIfOperandsEqual(ins);
+    }
+
+    MOZ_MUST_USE bool writeRecoverData(CompactBufferWriter& writer) const override;
+    bool canRecoverOnBailout() const override {
+        return true;
+    }
+
+    ALLOW_CLONE(MTrunc)
+};
+
 // NearbyInt rounds the floating-point input to the nearest integer, according
 // to the RoundingMode.
 class MNearbyInt
@@ -12861,6 +12820,7 @@ class MNearbyInt
         switch (roundingMode_) {
           case RoundingMode::Up:
           case RoundingMode::Down:
+          case RoundingMode::TowardsZero:
             return true;
           default:
             return false;
@@ -13782,6 +13742,48 @@ class MHasClass
     }
 };
 
+class MGuardToClass
+    : public MUnaryInstruction,
+      public SingleObjectPolicy::Data
+{
+    const Class* class_;
+
+    MGuardToClass(MDefinition* object, const Class* clasp, MIRType resultType)
+      : MUnaryInstruction(classOpcode, object)
+      , class_(clasp)
+    {
+        MOZ_ASSERT(object->type() == MIRType::Object ||
+                   (object->type() == MIRType::Value && object->mightBeType(MIRType::Object)));
+        MOZ_ASSERT(resultType == MIRType::Object || resultType == MIRType::ObjectOrNull);
+        setResultType(resultType);
+        setMovable();
+        if (resultType == MIRType::Object) {
+            // We will bail out if the class type is incorrect,
+            // so we need to ensure we don't eliminate this instruction
+            setGuard();
+        }
+    }
+
+  public:
+    INSTRUCTION_HEADER(GuardToClass)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, object))
+
+    const Class* getClass() const {
+        return class_;
+    }
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+    bool congruentTo(const MDefinition* ins) const override {
+        if (!ins->isGuardToClass())
+            return false;
+        if (getClass() != ins->toGuardToClass()->getClass())
+            return false;
+        return congruentIfOperandsEqual(ins);
+    }
+};
+
 // Note: we might call a proxy trap, so this instruction is effectful.
 class MIsArray
   : public MUnaryInstruction,
@@ -14537,7 +14539,7 @@ class MAsmJSMemoryAccess
 
     wasm::MemoryAccessDesc access() const {
         return wasm::MemoryAccessDesc(accessType_, Scalar::byteSize(accessType_), offset_,
-                                      mozilla::Nothing());
+                                      wasm::BytecodeOffset());
     }
 
     void removeBoundsCheck() { needsBoundsCheck_ = false; }

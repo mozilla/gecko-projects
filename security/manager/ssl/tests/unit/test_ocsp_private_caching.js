@@ -23,12 +23,6 @@ function start_ocsp_responder(expectedCertNames, expectedPaths,
                             expectedPaths, expectedMethods);
 }
 
-function check_cert_err(cert_name, expected_error) {
-  let cert = constructCertFromFile("test_ocsp_fetch_method/" + cert_name + ".pem");
-  return checkCertErrorGeneric(certdb, cert, expected_error,
-                               certificateUsageSSLServer);
-}
-
 function add_flush_cache() {
   add_test(() => {
     // This appears to either fire multiple times or fire once for every
@@ -87,12 +81,7 @@ function add_ocsp_necko_cache_test(loadContext, shouldFindEntry) {
                      "should only find a cached entry if we're expecting one");
         run_next_test();
       },
-      QueryInterface(iid) {
-        if (iid.equals(Ci.nsICacheStorageVisitor)) {
-          return this;
-        }
-        throw Cr.NS_ERROR_NO_INTERFACE;
-      },
+      QueryInterface: ChromeUtils.generateQI(["nsICacheStorageVisitor"]),
     };
     Services.cache2.asyncVisitAllStorages(visitor, true);
   });

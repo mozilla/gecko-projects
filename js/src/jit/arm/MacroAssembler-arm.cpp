@@ -1367,12 +1367,6 @@ MacroAssemblerARM::ma_b(Label* dest, Assembler::Condition c)
     return as_b(dest, c);
 }
 
-BufferOffset
-MacroAssemblerARM::ma_b(wasm::OldTrapDesc target, Assembler::Condition c)
-{
-    return as_b(target, c);
-}
-
 void
 MacroAssemblerARM::ma_bx(Register dest, Assembler::Condition c)
 {
@@ -3006,26 +3000,62 @@ MacroAssemblerARMCompat::testGCThing(Condition cond, const BaseIndex& address)
 
 // Unboxing code.
 void
-MacroAssemblerARMCompat::unboxNonDouble(const ValueOperand& operand, Register dest, JSValueType)
+MacroAssemblerARMCompat::unboxNonDouble(const ValueOperand& operand, Register dest, JSValueType type)
 {
-    if (operand.payloadReg() != dest)
-        ma_mov(operand.payloadReg(), dest);
+    auto movPayloadToDest = [&]() {
+        if (operand.payloadReg() != dest)
+            ma_mov(operand.payloadReg(), dest, LeaveCC);
+    };
+    if (!JitOptions.spectreValueMasking) {
+        movPayloadToDest();
+        return;
+    }
+
+    // Spectre mitigation: We zero the payload if the tag does not match the
+    // expected type and if this is a pointer type.
+    if (type == JSVAL_TYPE_INT32 || type == JSVAL_TYPE_BOOLEAN) {
+        movPayloadToDest();
+        return;
+    }
+
+    // We zero the destination register and move the payload into it if
+    // the tag corresponds to the given type.
+    ma_cmp(operand.typeReg(), ImmType(type));
+    movPayloadToDest();
+    ma_mov(Imm32(0), dest, NotEqual);
 }
 
 void
-MacroAssemblerARMCompat::unboxNonDouble(const Address& src, Register dest, JSValueType)
+MacroAssemblerARMCompat::unboxNonDouble(const Address& src, Register dest, JSValueType type)
 {
     ScratchRegisterScope scratch(asMasm());
-    ma_ldr(ToPayload(src), dest, scratch);
+    if (!JitOptions.spectreValueMasking) {
+        ma_ldr(ToPayload(src), dest, scratch);
+        return;
+    }
+
+    // Spectre mitigation: We zero the payload if the tag does not match the
+    // expected type and if this is a pointer type.
+    if (type == JSVAL_TYPE_INT32 || type == JSVAL_TYPE_BOOLEAN) {
+        ma_ldr(ToPayload(src), dest, scratch);
+        return;
+    }
+
+    // We zero the destination register and move the payload into it if
+    // the tag corresponds to the given type.
+    ma_ldr(ToType(src), scratch, scratch);
+    ma_cmp(scratch, ImmType(type));
+    ma_ldr(ToPayload(src), dest, scratch, Offset, Equal);
+    ma_mov(Imm32(0), dest, NotEqual);
 }
 
 void
-MacroAssemblerARMCompat::unboxNonDouble(const BaseIndex& src, Register dest, JSValueType)
+MacroAssemblerARMCompat::unboxNonDouble(const BaseIndex& src, Register dest, JSValueType type)
 {
-    ScratchRegisterScope scratch(asMasm());
     SecondScratchRegisterScope scratch2(asMasm());
-    ma_alu(src.base, lsl(src.index, src.scale), scratch, OpAdd);
-    ma_ldr(Address(scratch, src.offset), dest, scratch2);
+    ma_alu(src.base, lsl(src.index, src.scale), scratch2, OpAdd);
+    Address value(scratch2, src.offset);
+    unboxNonDouble(value, dest, type);
 }
 
 void
@@ -3054,8 +3084,8 @@ MacroAssemblerARMCompat::unboxValue(const ValueOperand& src, AnyRegister dest, J
         bind(&notInt32);
         unboxDouble(src, dest.fpu());
         bind(&end);
-    } else if (src.payloadReg() != dest.gpr()) {
-        as_mov(dest.gpr(), O2Reg(src.payloadReg()));
+    } else {
+        unboxNonDouble(src, dest.gpr(), type);
     }
 }
 
@@ -4113,11 +4143,126 @@ MacroAssemblerARMCompat::roundf(FloatRegister input, Register output, Label* bai
     bind(&fin);
 }
 
+void
+MacroAssemblerARMCompat::trunc(FloatRegister input, Register output, Label* bail)
+{
+    Label handleZero;
+    Label handlePos;
+    Label fin;
+
+    compareDouble(input, NoVFPRegister);
+    // NaN is always a bail condition, just bail directly.
+    ma_b(bail, Assembler::Overflow);
+    ma_b(&handleZero, Assembler::Equal);
+    ma_b(&handlePos, Assembler::NotSigned);
+
+    ScratchDoubleScope scratchDouble(asMasm());
+
+    // We are in the ]-Inf; 0[ range
+    // If we are in the ]-1; 0[ range => bailout
+    loadConstantDouble(-1.0, scratchDouble);
+    compareDouble(input, scratchDouble);
+    ma_b(bail, Assembler::GreaterThan);
+
+    // We are in the ]-Inf; -1] range: trunc(x) == -floor(-x) and floor can be
+    // computed with direct truncation here (x > 0).
+    ma_vneg(input, scratchDouble);
+    ma_vcvt_F64_U32(scratchDouble, scratchDouble.uintOverlay());
+    ma_vxfer(scratchDouble.uintOverlay(), output);
+    ma_neg(output, output, SetCC);
+    ma_b(bail, NotSigned);
+    ma_b(&fin);
+
+    // Test for 0.0 / -0.0: if the top word of the input double is not zero,
+    // then it was -0 and we need to bail out.
+    bind(&handleZero);
+    as_vxfer(output, InvalidReg, input, FloatToCore, Always, 1);
+    as_cmp(output, Imm8(0));
+    ma_b(bail, NonZero);
+    ma_b(&fin);
+
+    // We are in the ]0; +inf] range: truncation is the path to glory. Since
+    // it is known to be > 0.0, explicitly convert to a larger range, then a
+    // value that rounds to INT_MAX is explicitly different from an argument
+    // that clamps to INT_MAX.
+    bind(&handlePos);
+    ma_vcvt_F64_U32(input, scratchDouble.uintOverlay());
+    ma_vxfer(scratchDouble.uintOverlay(), output);
+    ma_mov(output, output, SetCC);
+    ma_b(bail, Signed);
+
+    bind(&fin);
+}
+
+void
+MacroAssemblerARMCompat::truncf(FloatRegister input, Register output, Label* bail)
+{
+    Label handleZero;
+    Label handlePos;
+    Label fin;
+
+    compareFloat(input, NoVFPRegister);
+    // NaN is always a bail condition, just bail directly.
+    ma_b(bail, Assembler::Overflow);
+    ma_b(&handleZero, Assembler::Equal);
+    ma_b(&handlePos, Assembler::NotSigned);
+
+    // We are in the ]-Inf; 0[ range
+    // If we are in the ]-1; 0[ range => bailout
+    {
+        ScratchFloat32Scope scratch(asMasm());
+        loadConstantFloat32(-1.f, scratch);
+        compareFloat(input, scratch);
+        ma_b(bail, Assembler::GreaterThan);
+    }
+
+    // We are in the ]-Inf; -1] range: trunc(x) == -floor(-x) and floor can be
+    // computed with direct truncation here (x > 0).
+    {
+        ScratchDoubleScope scratchDouble(asMasm());
+        FloatRegister scratchFloat = scratchDouble.asSingle();
+        FloatRegister scratchUInt = scratchDouble.uintOverlay();
+
+        ma_vneg_f32(input, scratchFloat);
+        ma_vcvt_F32_U32(scratchFloat, scratchUInt);
+        ma_vxfer(scratchUInt, output);
+        ma_neg(output, output, SetCC);
+        ma_b(bail, NotSigned);
+        ma_b(&fin);
+    }
+
+    // Test for 0.0 / -0.0: if the top word of the input double is not zero,
+    // then it was -0 and we need to bail out.
+    bind(&handleZero);
+    as_vxfer(output, InvalidReg, VFPRegister(input).singleOverlay(), FloatToCore, Always, 0);
+    as_cmp(output, Imm8(0));
+    ma_b(bail, NonZero);
+    ma_b(&fin);
+
+    // We are in the ]0; +inf] range: truncation is the path to glory; Since
+    // it is known to be > 0.0, explicitly convert to a larger range, then a
+    // value that rounds to INT_MAX is explicitly different from an argument
+    bind(&handlePos);
+    {
+        // The argument is a positive number,
+        // that clamps to INT_MAX.
+        {
+            ScratchFloat32Scope scratch(asMasm());
+            ma_vcvt_F32_U32(input, scratch.uintOverlay());
+            ma_vxfer(VFPRegister(scratch).uintOverlay(), output);
+        }
+        ma_mov(output, output, SetCC);
+        ma_b(bail, Signed);
+    }
+
+    bind(&fin);
+}
+
 CodeOffsetJump
-MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label, Condition cond, Label* documentation)
+MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label)
 {
     ARMBuffer::PoolEntry pe;
-    BufferOffset bo = as_BranchPool(0xdeadbeef, label, refLabel(documentation), &pe, cond);
+    BufferOffset bo = as_BranchPool(0xdeadbeef, label, LabelDoc(), &pe);
     // Fill in a new CodeOffset with both the load and the pool entry that the
     // instruction loads from.
     CodeOffsetJump ret(bo.getOffset(), pe.index());
@@ -4487,6 +4632,7 @@ MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset)
 CodeOffset
 MacroAssembler::nopPatchableToCall(const wasm::CallSiteDesc& desc)
 {
+    AutoForbidPools afp(this, /* max number of instructions in scope = */ 1);
     CodeOffset offset(currentOffset());
     ma_nop();
     append(desc, CodeOffset(currentOffset()));
@@ -4882,6 +5028,27 @@ CodeOffset
 MacroAssembler::wasmTrapInstruction()
 {
     return CodeOffset(as_illegal_trap().getOffset());
+}
+
+void
+MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, Label* label)
+{
+    as_cmp(index, O2Reg(boundsCheckLimit));
+    as_b(label, cond);
+    if (JitOptions.spectreIndexMasking)
+        ma_mov(boundsCheckLimit, index, LeaveCC, cond);
+}
+
+void
+MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, Label* label)
+{
+    ScratchRegisterScope scratch(*this);
+    MOZ_ASSERT(boundsCheckLimit.offset == offsetof(wasm::TlsData, boundsCheckLimit));
+    ma_ldr(DTRAddr(boundsCheckLimit.base, DtrOffImm(boundsCheckLimit.offset)), scratch);
+    as_cmp(index, O2Reg(scratch));
+    as_b(label, cond);
+    if (JitOptions.spectreIndexMasking)
+        ma_mov(scratch, index, LeaveCC, cond);
 }
 
 void
@@ -5946,22 +6113,21 @@ MacroAssemblerARM::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register m
 
     asMasm().memoryBarrierBefore(access.sync());
 
-    uint32_t framePushed = asMasm().framePushed();
     BufferOffset load;
     if (out64 != Register64::Invalid()) {
         if (type == Scalar::Int64) {
             MOZ_ASSERT(INT64LOW_OFFSET == 0);
 
             load = ma_dataTransferN(IsLoad, 32, /* signed = */ false, memoryBase, ptr, out64.low);
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
 
             as_add(ptr, ptr, Imm8(INT64HIGH_OFFSET));
 
             load = ma_dataTransferN(IsLoad, 32, isSigned, memoryBase, ptr, out64.high);
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
         } else {
             load = ma_dataTransferN(IsLoad, byteSize * 8, isSigned, memoryBase, ptr, out64.low);
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
 
             if (isSigned)
                 ma_asr(Imm32(31), out64.low, out64.high);
@@ -5976,10 +6142,10 @@ MacroAssemblerARM::wasmLoadImpl(const wasm::MemoryAccessDesc& access, Register m
             ma_add(memoryBase, ptr, scratch);
 
             load = ma_vldr(Operand(Address(scratch, 0)).toVFPAddr(), output.fpu());
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
         } else {
             load = ma_dataTransferN(IsLoad, byteSize * 8, isSigned, memoryBase, ptr, output.gpr());
-            append(access, load.getOffset(), framePushed);
+            append(access, load.getOffset());
         }
     }
 
@@ -6008,21 +6174,19 @@ MacroAssemblerARM::wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegist
 
     asMasm().memoryBarrierAfter(access.sync());
 
-    uint32_t framePushed = asMasm().framePushed();
-
     BufferOffset store;
     if (type == Scalar::Int64) {
         MOZ_ASSERT(INT64LOW_OFFSET == 0);
 
         store = ma_dataTransferN(IsStore, 32 /* bits */, /* signed */ false, memoryBase, ptr,
                                  val64.low);
-        append(access, store.getOffset(), framePushed);
+        append(access, store.getOffset());
 
         as_add(ptr, ptr, Imm8(INT64HIGH_OFFSET));
 
         store = ma_dataTransferN(IsStore, 32 /* bits */, /* signed */ true, memoryBase, ptr,
                                  val64.high);
-        append(access, store.getOffset(), framePushed);
+        append(access, store.getOffset());
     } else {
         if (value.isFloat()) {
             ScratchRegisterScope scratch(asMasm());
@@ -6031,14 +6195,14 @@ MacroAssemblerARM::wasmStoreImpl(const wasm::MemoryAccessDesc& access, AnyRegist
             ma_add(memoryBase, ptr, scratch);
 
             store = ma_vstr(val, Operand(Address(scratch, 0)).toVFPAddr());
-            append(access, store.getOffset(), framePushed);
+            append(access, store.getOffset());
         } else {
             bool isSigned = type == Scalar::Uint32 || type == Scalar::Int32; // see AsmJSStoreHeap;
             Register val = value.gpr();
 
             store = ma_dataTransferN(IsStore, 8 * byteSize /* bits */, isSigned, memoryBase, ptr,
                                      val);
-            append(access, store.getOffset(), framePushed);
+            append(access, store.getOffset());
         }
     }
 

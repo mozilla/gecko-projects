@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://dvcs.w3.org/hg/editing/raw-file/tip/editing.html#concept-selection
+ * https://w3c.github.io/selection-api/#selection-interface
  *
  * Copyright © 2012 W3C® (MIT, ERCIM, Keio), All Rights Reserved. W3C
  * liability, trademark and document use rules apply.
@@ -16,14 +16,30 @@ interface Selection {
   readonly attribute Node?         focusNode;
   readonly attribute unsigned long focusOffset;
   readonly attribute boolean       isCollapsed;
+  /**
+   * Returns the number of ranges in the selection.
+   */
   readonly attribute unsigned long rangeCount;
   readonly attribute DOMString     type;
+  /**
+   * Returns the range at the specified index.  Throws if the index is
+   * out of range.
+   */
   [Throws]
   Range     getRangeAt(unsigned long index);
+  /**
+   * Adds a range to the current selection.
+   */
   [Throws, BinaryName="addRangeJS"]
   void      addRange(Range range);
+  /**
+   * Removes a range from the current selection.
+   */
   [Throws]
   void      removeRange(Range range);
+  /**
+   * Removes all ranges from the current selection.
+   */
   [Throws]
   void      removeAllRanges();
   [Throws, BinaryName="RemoveAllRanges"]
@@ -60,14 +76,13 @@ partial interface Selection {
               DOMString granularity);
 };
 
-// Additional chrome-only methods from nsISelectionPrivate
+// Additional chrome-only methods.
 interface nsISelectionListener;
 partial interface Selection {
-  [ChromeOnly]
-  const short ENDOFPRECEDINGLINE = 0;
-  [ChromeOnly]
-  const short STARTOFNEXTLINE = 1;
-
+  /**
+   * A true value means "selection after newline"; false means "selection before
+   * newline" when a selection is positioned "between lines".
+   */
   [ChromeOnly,Throws]
   attribute boolean interlinePosition;
 
@@ -76,25 +91,64 @@ partial interface Selection {
 
   [ChromeOnly,Throws]
   DOMString  toStringWithFormat(DOMString formatType, unsigned long flags, long wrapColumn);
-  [ChromeOnly,Throws]
+  [ChromeOnly]
   void  addSelectionListener(nsISelectionListener newListener);
-  [ChromeOnly,Throws]
+  [ChromeOnly]
   void  removeSelectionListener(nsISelectionListener listenerToRemove);
 
   [ChromeOnly,BinaryName="rawType"]
   readonly attribute short selectionType;
 
+  /**
+   * Return array of ranges intersecting with the given DOM interval.
+   */  
   [ChromeOnly,Throws,Pref="dom.testing.selection.GetRangesForInterval"]
   sequence<Range> GetRangesForInterval(Node beginNode, long beginOffset, Node endNode, long endOffset,
                                        boolean allowAdjacent);
 
+  /**
+   * Scrolls a region of the selection, so that it is visible in
+   * the scrolled view.
+   *
+   * @param aRegion the region inside the selection to scroll into view
+   *                (see selection region constants defined in
+   *                nsISelectionController).
+   * @param aIsSynchronous when true, scrolls the selection into view
+   *                       before returning. If false, posts a request which
+   *                       is processed at some point after the method returns.
+   * @param aVPercent how to align the frame vertically.
+   * @param aHPercent how to align the frame horizontally.
+   */
   [ChromeOnly,Throws]
   void scrollIntoView(short aRegion, boolean aIsSynchronous, short aVPercent, short aHPercent);
 
+  /**
+   * setColors() sets custom colors for the selection.
+   * Currently, this is supported only when the selection type is SELECTION_FIND.
+   * Otherwise, throws an exception.
+   *
+   * @param aForegroundColor     The foreground color of the selection.
+   *                             If this is "currentColor", foreground color
+   *                             isn't changed by this selection.
+   * @param aBackgroundColor     The background color of the selection.
+   *                             If this is "transparent", background color is
+   *                             never painted.
+   * @param aAltForegroundColor  The alternative foreground color of the
+   *                             selection.
+   *                             If aBackgroundColor doesn't have sufficient
+   *                             contrast with its around or foreground color
+   *                             if "currentColor" is specified, alternative
+   *                             colors are used if it have higher contrast.
+   * @param aAltBackgroundColor  The alternative background color of the
+   *                             selection.
+   */
   [ChromeOnly,Throws]
   void setColors(DOMString aForegroundColor, DOMString aBackgroundColor,
                  DOMString aAltForegroundColor, DOMString aAltBackgroundColor);
 
+  /**
+   * resetColors() forget the customized colors which were set by setColors().
+   */
   [ChromeOnly,Throws]
   void resetColors();
 };

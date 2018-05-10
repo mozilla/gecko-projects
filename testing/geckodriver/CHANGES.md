@@ -3,6 +3,41 @@ Change log
 
 All notable changes to this program is documented in this file.
 
+
+Unreleased
+----------
+
+Note that with geckodriver 'next' the following versions are recommended:
+- Firefox 56.0 (and greater)
+- Selenium 3.11 (and greater)
+
+### Added
+
+- Support for the new chrome element identifier in Marionette.
+
+### Changed
+
+- Updated mapping of all supported commands to the new prefixed commands
+  in Marionette, whereby all WebDriver specific commands make use of the
+  `WebDriver:` prefix.
+
+
+0.20.1 (2018-04-06)
+-------------------
+
+### Fixed
+
+- Avoid attempting to kill Firefox process that has stopped.
+
+  With the change to allow Firefox enough time to shut down in
+  0.20.0, geckodriver started unconditionally killing the process
+  to reap its exit status.  This caused geckodriver to inaccurately
+  report a successful Firefox shutdown as a failure.
+
+  The regression should not have caused any functional problems, but
+  the termination cause and the exit status are now reported correctly.
+
+
 0.20.0 (2018-03-08)
 -------------------
 

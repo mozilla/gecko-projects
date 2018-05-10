@@ -127,13 +127,13 @@ const HistorySyncUtils = PlacesSyncUtils.history = Object.freeze({
           db, HistorySyncUtils.SYNC_ID_META_KEY);
 
         if (existingSyncId == newSyncId) {
-          HistorySyncLog.debug("History sync ID up-to-date",
+          HistorySyncLog.trace("History sync ID up-to-date",
                                { existingSyncId });
           return;
         }
 
-        HistorySyncLog.debug("History sync ID changed; resetting metadata",
-                             { existingSyncId, newSyncId });
+        HistorySyncLog.info("History sync ID changed; resetting metadata",
+                            { existingSyncId, newSyncId });
         await db.executeTransaction(function() {
           return setHistorySyncId(db, newSyncId);
         });
@@ -475,14 +475,14 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
         // If we don't have a sync ID, take the server's without resetting
         // sync statuses.
         if (!existingSyncId) {
-          BookmarkSyncLog.debug("Taking new bookmarks sync ID", { newSyncId });
+          BookmarkSyncLog.info("Taking new bookmarks sync ID", { newSyncId });
           await db.executeTransaction(() => setBookmarksSyncId(db, newSyncId));
           return;
         }
 
         // If the existing sync ID matches the server, great!
         if (existingSyncId == newSyncId) {
-          BookmarkSyncLog.debug("Bookmarks sync ID up-to-date",
+          BookmarkSyncLog.trace("Bookmarks sync ID up-to-date",
                                 { existingSyncId });
           return;
         }
@@ -490,8 +490,8 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
         // Otherwise, we have a sync ID, but it doesn't match, so we were likely
         // node reassigned. Take the server's sync ID and reset all items to
         // "UNKNOWN" so that we can merge.
-        BookmarkSyncLog.debug("Bookmarks sync ID changed; resetting sync " +
-                              "statuses", { existingSyncId, newSyncId });
+        BookmarkSyncLog.info("Bookmarks sync ID changed; resetting sync " +
+                             "statuses", { existingSyncId, newSyncId });
         await db.executeTransaction(async function() {
           await setBookmarksSyncId(db, newSyncId);
           await resetAllSyncStatuses(db,
@@ -1402,10 +1402,10 @@ var GUIDMissing = async function(guid) {
   }
 };
 
-// Tag queries use a `place:` URL that refers to the tag folder ID. When we
-// apply a synced tag query from a remote client, we need to update the URL to
-// point to the local tag folder.
-async function updateTagQueryFolder(db, info) {
+// Legacy tag queries may use a `place:` URL that refers to the tag folder ID.
+// When we apply a synced tag query from a remote client, we need to update the
+// URL to point to the local tag.
+function updateTagQueryFolder(db, info) {
   if (info.kind != BookmarkSyncUtils.KINDS.QUERY || !info.folder || !info.url ||
       info.url.protocol != "place:") {
     return info;
@@ -1413,19 +1413,18 @@ async function updateTagQueryFolder(db, info) {
 
   let params = new URLSearchParams(info.url.pathname);
   let type = +params.get("type");
-
   if (type != Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAG_CONTENTS) {
     return info;
   }
 
-  let id = await getOrCreateTagFolder(db, info.folder);
-  BookmarkSyncLog.debug(`updateTagQueryFolder: Tag query folder: ${
-    info.folder} = ${id}`);
+  BookmarkSyncLog.debug(`updateTagQueryFolder: Tag query folder: ${info.folder}`);
 
-  // Rewrite the query to reference the new ID.
-  params.set("folder", id);
+  // Rewrite the query to directly reference the tag.
+  params.delete("queryType");
+  params.delete("type");
+  params.delete("folder");
+  params.set("tag", info.folder);
   info.url = new URL(info.url.protocol + params);
-
   return info;
 }
 
@@ -1964,35 +1963,6 @@ function shouldUpdateBookmark(bookmarkInfo) {
          bookmarkInfo.hasOwnProperty("url");
 }
 
-// Returns the folder ID for `tag`, or `null` if the tag doesn't exist.
-async function getTagFolder(db, tag) {
-  let results = await db.executeCached(`
-    SELECT id
-    FROM moz_bookmarks
-    WHERE type = :type AND
-          parent = :tagsFolderId AND
-          title = :tag`,
-    { type: PlacesUtils.bookmarks.TYPE_FOLDER,
-      tagsFolderId: PlacesUtils.tagsFolderId, tag });
-  return results.length ? results[0].getResultByName("id") : null;
-}
-
-// Returns the folder ID for `tag`, creating one if it doesn't exist.
-async function getOrCreateTagFolder(db, tag) {
-  let id = await getTagFolder(db, tag);
-  if (id) {
-    return id;
-  }
-  // Create the tag if it doesn't exist.
-  let item = await PlacesUtils.bookmarks.insert({
-    type: PlacesUtils.bookmarks.TYPE_FOLDER,
-    parentGuid: PlacesUtils.bookmarks.tagsGuid,
-    title: tag,
-    source: SOURCE_SYNC,
-  });
-  return PlacesUtils.promiseItemId(item.guid);
-}
-
 // Converts a Places bookmark or livemark to a Sync bookmark. This function
 // maps Places GUIDs to record IDs and filters out extra Places properties like
 // date added, last modified, and index.
@@ -2192,21 +2162,10 @@ async function fetchQueryItem(db, bookmarkItem) {
     item.description = description;
   }
 
-  let folder = null;
   let params = new URLSearchParams(bookmarkItem.url.pathname);
-  let tagFolderId = +params.get("folder");
-  if (tagFolderId) {
-    try {
-      let tagFolderGuid = await PlacesUtils.promiseItemGuid(tagFolderId);
-      let tagFolder = await PlacesUtils.bookmarks.fetch(tagFolderGuid);
-      folder = tagFolder.title;
-    } catch (ex) {
-      BookmarkSyncLog.warn("fetchQueryItem: Query " + bookmarkItem.url.href +
-                           " points to nonexistent folder " + tagFolderId, ex);
-    }
-  }
-  if (folder != null) {
-    item.folder = folder;
+  let tags = params.getAll("tag");
+  if (tags.length == 1) {
+    item.folder = tags[0];
   }
 
   let query = await getAnno(db, bookmarkItem.guid,

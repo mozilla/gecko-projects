@@ -32,7 +32,7 @@ static const char kBackgroundPageHTMLScript[] = "\n\
     <script type=\"text/javascript\" src=\"%s\"></script>";
 
 static const char kBackgroundPageHTMLEnd[] = "\n\
-  <body>\n\
+  </body>\n\
 </html>";
 
 static const char kRestrictedDomainPref[] =
@@ -681,8 +681,7 @@ DocInfo::Principal() const
 const URLInfo&
 DocInfo::PrincipalURL() const
 {
-  if (!URL().InheritsPrincipal() ||
-      !(Principal() && Principal()->GetIsCodebasePrincipal())) {
+  if (!(Principal() && Principal()->GetIsCodebasePrincipal())) {
     return URL();
   }
 

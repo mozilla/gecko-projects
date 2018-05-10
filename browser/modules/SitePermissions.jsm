@@ -600,6 +600,16 @@ var gPermissionObject = {
    *    don't want to expose a "Hide Prompt" button to the user through pageinfo.
    */
 
+  "autoplay-media": {
+    exactHostMatch: true,
+    getDefault() {
+      if (Services.prefs.getBoolPref("media.autoplay.enabled")) {
+        return SitePermissions.ALLOW;
+      }
+      return SitePermissions.BLOCK;
+    }
+  },
+
   "image": {
     states: [ SitePermissions.ALLOW, SitePermissions.BLOCK ],
   },
@@ -683,12 +693,6 @@ var gPermissionObject = {
     exactHostMatch: true
   }
 };
-
-// Delete this entry while being pre-off
-// or the persistent-storage permission would appear in Page info's Permission section
-if (!Services.prefs.getBoolPref("browser.storageManager.enabled")) {
-  delete gPermissionObject["persistent-storage"];
-}
 
 if (!Services.prefs.getBoolPref("dom.webmidi.enabled")) {
   // ESLint gets angry about array versus dot notation here, but some permission

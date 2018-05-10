@@ -303,10 +303,11 @@ impl WebGLProgram {
 
         // Check if the name is reserved
         if name.starts_with("gl_") {
-            return Err(WebGLError::InvalidOperation);
+            return Ok(None);
         }
 
-        if name.starts_with("webgl") || name.starts_with("_webgl_") {
+        // https://www.khronos.org/registry/webgl/specs/latest/1.0/#GLSL_CONSTRUCTS
+        if name.starts_with("webgl_") || name.starts_with("_webgl_") {
             return Ok(None);
         }
 
@@ -366,6 +367,19 @@ impl WebGLProgram {
         let (sender, receiver) = webgl_channel().unwrap();
         self.renderer.send(WebGLCommand::GetProgramParameter(self.id, param_id, sender)).unwrap();
         receiver.recv().unwrap()
+    }
+
+    pub fn attached_shaders(&self) -> WebGLResult<Vec<DomRoot<WebGLShader>>> {
+        if self.is_deleted.get() {
+            return Err(WebGLError::InvalidValue);
+        }
+        Ok(match (self.vertex_shader.get(), self.fragment_shader.get()) {
+            (Some(vertex_shader), Some(fragment_shader)) => {
+                vec![vertex_shader, fragment_shader]
+            }
+            (Some(shader), None) | (None, Some(shader)) => vec![shader],
+            (None, None) => vec![]
+        })
     }
 }
 

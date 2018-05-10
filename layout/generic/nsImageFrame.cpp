@@ -71,8 +71,7 @@
 #include "gfxRect.h"
 #include "ImageLayers.h"
 #include "ImageContainer.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsBlockFrame.h"
 #include "nsStyleStructInlines.h"
 
@@ -237,7 +236,7 @@ nsImageFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 
   nsStyleImageOrientation newOrientation = StyleVisibility()->mImageOrientation;
 
-  // We need to update our orientation either if we had no style context before
+  // We need to update our orientation either if we had no ComputedStyle before
   // because this is the first time it's been set, or if the image-orientation
   // property changed from its previous value.
   bool shouldUpdateOrientation =
@@ -298,7 +297,7 @@ nsImageFrame::Init(nsIContent*       aContent,
 bool
 nsImageFrame::UpdateIntrinsicSize(imgIContainer* aImage)
 {
-  NS_PRECONDITION(aImage, "null image");
+  MOZ_ASSERT(aImage, "null image");
   if (!aImage)
     return false;
 
@@ -328,7 +327,7 @@ nsImageFrame::UpdateIntrinsicSize(imgIContainer* aImage)
 bool
 nsImageFrame::UpdateIntrinsicRatio(imgIContainer* aImage)
 {
-  NS_PRECONDITION(aImage, "null image");
+  MOZ_ASSERT(aImage, "null image");
 
   if (!aImage)
     return false;
@@ -488,7 +487,7 @@ nsImageFrame::ShouldCreateImageFrameFor(Element* aElement,
     // text).
     useSizedBox = true;
   }
-  else if (aComputedStyle->PresContext()->CompatibilityMode() !=
+  else if (aElement->OwnerDoc()->GetCompatibilityMode() !=
            eCompatibility_NavQuirks) {
     useSizedBox = false;
   }
@@ -992,7 +991,7 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
                   ("enter nsImageFrame::Reflow: availSize=%d,%d",
                   aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
 
-  NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
+  MOZ_ASSERT(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   // see if we have a frozen size (i.e. a fixed width and height)
   if (HaveFixedSize(aReflowInput)) {
@@ -1904,14 +1903,10 @@ nsImageFrame::ShouldDisplaySelection()
 
   // If the image is the only selected node, don't draw the selection overlay.
   // This can happen when selecting an image in contenteditable context.
-  if (displaySelection == nsISelectionDisplay::DISPLAY_ALL)
-  {
-    const nsFrameSelection* frameSelection = GetConstFrameSelection();
-    if (frameSelection)
-    {
+  if (displaySelection == nsISelectionDisplay::DISPLAY_ALL) {
+    if (const nsFrameSelection* frameSelection = GetConstFrameSelection()) {
       const Selection* selection = frameSelection->GetSelection(SelectionType::eNormal);
-      if (selection && selection->RangeCount() == 1)
-      {
+      if (selection && selection->RangeCount() == 1) {
         nsINode* parent = mContent->GetParent();
         int32_t thisOffset = parent->ComputeIndexOf(mContent);
         nsRange* range = selection->GetRangeAt(0);
@@ -2094,7 +2089,7 @@ nsImageFrame::HandleEvent(nsPresContext* aPresContext,
             clicked = true;
           }
           nsContentUtils::TriggerLink(anchorNode, aPresContext, uri, target,
-                                      clicked, true, true);
+                                      clicked, /* isTrusted */ true);
         }
       }
     }
@@ -2113,7 +2108,7 @@ nsImageFrame::GetCursor(const nsPoint& aPoint,
     nsCOMPtr<nsIContent> area = map->GetArea(p.x, p.y);
     if (area) {
       // Use the cursor from the style of the *area* element.
-      // XXX Using the image as the parent style context isn't
+      // XXX Using the image as the parent ComputedStyle isn't
       // technically correct, but it's probably the right thing to do
       // here, since it means that areas on which the cursor isn't
       // specified will inherit the style from the image.
@@ -2238,7 +2233,7 @@ nsImageFrame::LoadIcon(const nsAString& aSpec,
                        imgRequestProxy** aRequest)
 {
   nsresult rv = NS_OK;
-  NS_PRECONDITION(!aSpec.IsEmpty(), "What happened??");
+  MOZ_ASSERT(!aSpec.IsEmpty(), "What happened??");
 
   if (!sIOService) {
     rv = CallGetService(NS_IOSERVICE_CONTRACTID, &sIOService);
@@ -2309,7 +2304,7 @@ nsImageFrame::GetLoadGroup(nsPresContext *aPresContext, nsILoadGroup **aLoadGrou
   if (!aPresContext)
     return;
 
-  NS_PRECONDITION(nullptr != aLoadGroup, "null OUT parameter pointer");
+  MOZ_ASSERT(nullptr != aLoadGroup, "null OUT parameter pointer");
 
   nsIPresShell *shell = aPresContext->GetPresShell();
 

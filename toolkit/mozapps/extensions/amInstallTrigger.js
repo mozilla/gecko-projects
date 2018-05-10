@@ -83,8 +83,7 @@ RemoteMediator.prototype = {
         element = element.ownerGlobal.frameElement;
 
       if (element) {
-        let listener = Cc["@mozilla.org/addons/integration;1"].
-                       getService(Ci.nsIMessageListener);
+        let listener = Cc["@mozilla.org/addons/integration;1"].getService();
         return listener.wrappedJSObject.receiveMessage({
           name: MSG_INSTALL_ADDON,
           target: element,
@@ -113,7 +112,7 @@ RemoteMediator.prototype = {
     return callbackID;
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference])
 };
 
 
@@ -216,7 +215,7 @@ InstallTrigger.prototype = {
 
   classID: Components.ID("{9df8ef2b-94da-45c9-ab9f-132eb55fddf1}"),
   contractID: "@mozilla.org/addons/installtrigger;1",
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports, Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
 };
 
 

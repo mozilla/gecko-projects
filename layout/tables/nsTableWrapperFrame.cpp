@@ -150,7 +150,7 @@ nsTableWrapperFrame::RemoveFrame(ChildListID  aListID,
 {
   // We only have two child frames: the inner table and one caption frame.
   // The inner frame can't be removed so this should be the caption
-  NS_PRECONDITION(kCaptionList == aListID, "can't remove inner frame");
+  MOZ_ASSERT(kCaptionList == aListID, "can't remove inner frame");
 
   if (HasSideCaption()) {
     // The old caption isize had an effect on the inner table isize, so
@@ -216,14 +216,14 @@ ComputedStyle*
 nsTableWrapperFrame::GetParentComputedStyle(nsIFrame** aProviderFrame) const
 {
   // The table wrapper frame and the (inner) table frame split the style
-  // data by giving the table frame the style context associated with
-  // the table content node and creating a style context for the wrapper
-  // frame that is a *child* of the table frame's style context,
+  // data by giving the table frame the ComputedStyle associated with
+  // the table content node and creating a ComputedStyle for the wrapper
+  // frame that is a *child* of the table frame's ComputedStyle,
   // matching the ::-moz-table-wrapper pseudo-element. html.css has a
   // rule that causes that pseudo-element (and thus the wrapper table)
   // to inherit *some* style properties from the table frame.  The
   // children of the table inherit directly from the inner table, and
-  // the table wrapper's style context is a leaf.
+  // the table wrapper's ComputedStyle is a leaf.
 
   return (*aProviderFrame = InnerTableFrame())->Style();
 }
@@ -874,10 +874,6 @@ nsTableWrapperFrame::Reflow(nsPresContext*           aPresContext,
   Maybe<ReflowInput> captionRI;
   Maybe<ReflowInput> innerRI;
 
-  nsRect origInnerRect = InnerTableFrame()->GetRect();
-  nsRect origInnerVisualOverflow = InnerTableFrame()->GetVisualOverflowRect();
-  bool innerFirstReflow =
-    InnerTableFrame()->HasAnyStateBits(NS_FRAME_FIRST_REFLOW);
   nsRect origCaptionRect;
   nsRect origCaptionVisualOverflow;
   bool captionFirstReflow = false;
@@ -1040,12 +1036,6 @@ nsTableWrapperFrame::Reflow(nsPresContext*           aPresContext,
   FinishReflowChild(InnerTableFrame(), aPresContext, innerMet, innerRI.ptr(),
                     wm, innerOrigin, containerSize, 0);
   innerRI.reset();
-
-  if (InnerTableFrame()->IsBorderCollapse()) {
-    nsTableFrame::InvalidateTableFrame(InnerTableFrame(), origInnerRect,
-                                       origInnerVisualOverflow,
-                                       innerFirstReflow);
-  }
 
   if (mCaptionFrames.NotEmpty()) {
     nsTableFrame::InvalidateTableFrame(mCaptionFrames.FirstChild(),

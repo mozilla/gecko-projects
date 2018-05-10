@@ -11,8 +11,6 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(this, "Feeds",
   "resource:///modules/Feeds.jsm");
-ChromeUtils.defineModuleGetter(this, "BrowserUtils",
-  "resource://gre/modules/BrowserUtils.jsm");
 
 const SIZES_TELEMETRY_ENUM = {
   NO_SIZES: 0,
@@ -160,6 +158,7 @@ function faviconTimeoutCallback(aFaviconLoads, aPageUrl, aChromeGlobal) {
 
   let preferredIcon;
   let preferredWidth = 16 * Math.ceil(aChromeGlobal.content.devicePixelRatio);
+  let bestSizedIcon;
   // Other links with the "icon" tag are the default icons
   let defaultIcon;
   // Rich icons are either apple-touch or fluid icons, or the ones of the
@@ -178,6 +177,13 @@ function faviconTimeoutCallback(aFaviconLoads, aPageUrl, aChromeGlobal) {
       } else if (guessType(icon) == TYPE_ICO && (!preferredIcon || guessType(preferredIcon) == TYPE_ICO)) {
         preferredIcon = icon;
       }
+
+      // Check for an icon larger yet closest to preferredWidth, that can be
+      // downscaled efficiently.
+      if (icon.width >= preferredWidth &&
+          (!bestSizedIcon || bestSizedIcon.width >= icon.width)) {
+        bestSizedIcon = icon;
+      }
     }
 
     // Note that some sites use hi-res icons without specifying them as
@@ -193,7 +199,8 @@ function faviconTimeoutCallback(aFaviconLoads, aPageUrl, aChromeGlobal) {
 
   // Now set the favicons for the page in the following order:
   // 1. Set the best rich icon if any.
-  // 2. Set the preferred one if any, otherwise use the default one.
+  // 2. Set the preferred one if any, otherwise check if there's a better
+  //    sized fit.
   // This order allows smaller icon frames to eventually override rich icon
   // frames.
   if (largestRichIcon) {
@@ -201,6 +208,8 @@ function faviconTimeoutCallback(aFaviconLoads, aPageUrl, aChromeGlobal) {
   }
   if (preferredIcon) {
     setIconForLink(preferredIcon, aChromeGlobal);
+  } else if (bestSizedIcon) {
+    setIconForLink(bestSizedIcon, aChromeGlobal);
   } else if (defaultIcon) {
     setIconForLink(defaultIcon, aChromeGlobal);
   }
@@ -336,6 +345,10 @@ var ContentLinkHandler = {
           iconAdded = handleFaviconLink(link, isRichIcon, chromeGlobal, faviconLoads);
           break;
         case "search":
+          if (Services.policies &&
+              !Services.policies.isAllowed("installSearchEngine")) {
+            break;
+          }
           if (!searchAdded && event.type == "DOMLinkAdded") {
             var type = link.type && link.type.toLowerCase();
             type = type.replace(/^\s+|\s*(?:;.*)?$/g, "");

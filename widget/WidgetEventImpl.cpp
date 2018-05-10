@@ -16,7 +16,6 @@
 #include "mozilla/dom/KeyboardEventBinding.h"
 #include "nsContentUtils.h"
 #include "nsIContent.h"
-#include "nsIDOMEventTarget.h"
 #include "nsPrintfCString.h"
 
 namespace mozilla {
@@ -459,16 +458,6 @@ WidgetEvent::IsAllowedToDispatchDOMEvent() const
 {
   switch (mClass) {
     case eMouseEventClass:
-      // When content PreventDefault on ePointerDown, we will stop dispatching
-      // the subsequent mouse events (eMouseDown, eMouseUp, eMouseMove). But we
-      // still need the mouse events to be handled in EventStateManager to
-      // generate other events (e.g. eMouseClick). So we only stop dispatching
-      // them to DOM.
-      if (DefaultPreventedByContent() &&
-          (mMessage == eMouseMove || mMessage == eMouseDown ||
-           mMessage == eMouseUp)) {
-        return false;
-      }
       if (mMessage == eMouseTouchDrag) {
         return false;
       }
@@ -536,7 +525,7 @@ WidgetEvent::IsBlockedForFingerprintingResistance() const
  ******************************************************************************/
 
 static dom::EventTarget*
-GetTargetForDOMEvent(nsIDOMEventTarget* aTarget)
+GetTargetForDOMEvent(dom::EventTarget* aTarget)
 {
   return aTarget ? aTarget->GetTargetForDOMEvent() : nullptr;
 }

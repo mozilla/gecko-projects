@@ -114,7 +114,7 @@ function GMPWrapper(aPluginInfo, aRawPluginInfo) {
 }
 
 GMPWrapper.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
 
   // An active task that checks for plugin updates and installs them.
   _updateTask: null,
@@ -625,32 +625,29 @@ var GMPProvider = {
     return shutdownTask;
   },
 
-  getAddonByID(aId, aCallback) {
+  async getAddonByID(aId) {
     if (!this.isEnabled) {
-      aCallback(null);
-      return;
+      return null;
     }
 
     let plugin = this._plugins.get(aId);
     if (plugin && !GMPUtils.isPluginHidden(plugin)) {
-      aCallback(plugin.wrapper);
-    } else {
-      aCallback(null);
+      return plugin.wrapper;
     }
+    return null;
   },
 
-  getAddonsByTypes(aTypes, aCallback) {
+  async getAddonsByTypes(aTypes) {
     if (!this.isEnabled ||
         (aTypes && !aTypes.includes("plugin"))) {
-      aCallback([]);
-      return;
+      return [];
     }
 
     let results = Array.from(this._plugins.values())
       .filter(p => !GMPUtils.isPluginHidden(p))
       .map(p => p.wrapper);
 
-    aCallback(results);
+    return results;
   },
 
   get isEnabled() {

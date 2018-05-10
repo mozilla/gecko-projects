@@ -17,7 +17,6 @@
 #include "celldata.h"
 
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include <algorithm>
 
 #include "nsIScriptError.h"
@@ -448,7 +447,7 @@ ExtractSpacingValues(const nsAString&   aString,
                      float              aFontSizeInflation)
 {
   nsPresContext* presContext = aFrame->PresContext();
-  ComputedStyle* styleContext = aFrame->Style();
+  ComputedStyle* computedStyle = aFrame->Style();
 
   const char16_t* start = aString.BeginReading();
   const char16_t* end = aString.EndReading();
@@ -483,7 +482,7 @@ ExtractSpacingValues(const nsAString&   aString,
       }
       nsMathMLFrame::ParseNumericValue(valueString, &newValue,
                                        nsMathMLElement::PARSE_ALLOW_UNITLESS,
-                                       presContext, styleContext,
+                                       presContext, computedStyle,
                                        aFontSizeInflation);
       aSpacingArray.AppendElement(newValue);
 
@@ -1269,14 +1268,9 @@ NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmtdInnerFrame)
 
 nsMathMLmtdInnerFrame::nsMathMLmtdInnerFrame(ComputedStyle* aStyle)
   : nsBlockFrame(aStyle, kClassID)
-{
   // Make a copy of the parent nsStyleText for later modification.
-  mUniqueStyleText = new (PresContext()) nsStyleText(*StyleText());
-}
-
-nsMathMLmtdInnerFrame::~nsMathMLmtdInnerFrame()
+  , mUniqueStyleText(MakeUnique<nsStyleText>(*StyleText()))
 {
-  mUniqueStyleText->Destroy(PresContext());
 }
 
 void
@@ -1314,13 +1308,12 @@ nsStyleText* nsMathMLmtdInnerFrame::StyleTextForLineLayout()
   }
 
   mUniqueStyleText->mTextAlign = alignment;
-  return mUniqueStyleText;
+  return mUniqueStyleText.get();
 }
 
 /* virtual */ void
 nsMathMLmtdInnerFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
 {
   nsBlockFrame::DidSetComputedStyle(aOldComputedStyle);
-  mUniqueStyleText->Destroy(PresContext());
-  mUniqueStyleText = new (PresContext()) nsStyleText(*StyleText());
+  mUniqueStyleText = MakeUnique<nsStyleText>(*StyleText());
 }

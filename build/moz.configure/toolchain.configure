@@ -491,21 +491,14 @@ def check_compiler(compiler, language, target):
     # Note: MSVC, while supporting C++14, still reports 199711L for __cplusplus.
     # Note: this is a strict version check because we used to always add
     # -std=gnu++14.
-    draft_cxx14_version = 201300
     cxx14_version = 201402
     if info.language == 'C++':
         if info.type == 'clang' and info.language_version != cxx14_version:
             append_flag('-std=gnu++14')
-        # MSVC 2015 headers include C++14 features, but don't guard them
+        # MSVC headers include C++14 features, but don't guard them
         # with appropriate checks.
         elif info.type == 'clang-cl' and info.language_version != cxx14_version:
             append_flag('-std=c++14')
-        # GCC 4.9 indicates that it implements draft C++14 features
-        # instead of the full language.
-        elif info.type == 'gcc' and \
-                info.language_version not in (draft_cxx14_version,
-                                              cxx14_version):
-            append_flag('-std=gnu++14')
 
     # We force clang-cl to emulate Visual C++ 2017 version 15.6.0
     msvc_version = '19.13.26128'
@@ -568,21 +561,6 @@ def get_vc_paths(topsrcdir):
                 'json'
             ] + args).decode(encoding, 'replace'))
 
-    # Can't pass -requires with -legacy, so query each separately.
-    # Legacy versions first (VS2015)
-    for install in vswhere(['-legacy', '-version', '[14.0,15.0)']):
-        version = Version(install['installationVersion'])
-        # Skip anything older than VS2015.
-        if version < '14':
-            continue
-        path = install['installationPath']
-
-        yield (Version(install['installationVersion']), {
-            'x64': [os.path.join(path, r'VC\bin\amd64')],
-            # The x64->x86 cross toolchain requires DLLs from the native x64 toolchain.
-            'x86': [os.path.join(path, r'VC\bin\amd64_x86'), os.path.join(path, r'VC\bin\amd64')],
-        })
-    # Then VS2017 and newer.
     for install in vswhere(['-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64']):
         path = install['installationPath']
         tools_version = open(os.path.join(
@@ -597,15 +575,14 @@ def get_vc_paths(topsrcdir):
 
 
 js_option('--with-visual-studio-version', nargs=1,
-          choices=('2015', '2017'),
+          choices=('2017',),
           help='Select a specific Visual Studio version to use')
 
 
 @depends('--with-visual-studio-version')
 def vs_major_version(value):
     if value:
-        return {'2015': 14,
-                '2017': 15}[value[0]]
+        return {'2017': 15}[value[0]]
 
 
 @depends(host, target, vs_major_version, check_build_environment, '--with-visual-studio-version')
@@ -904,14 +881,14 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
         # Check the compiler version here instead of in `compiler_version` so
         # that the `checking` message doesn't pretend the compiler can be used
         # to then bail out one line later.
-        if info.type == 'gcc' and info.version < '4.9.0':
-            raise FatalCheckError(
-                'Only GCC 4.9 or newer is supported (found version %s).'
-                % info.version)
-
-        if info.type == 'gcc' and host_or_target.os == 'Android':
-            raise FatalCheckError('GCC is not supported on Android.\n'
-                                  'Please use clang from the Android NDK instead.')
+        if info.type == 'gcc':
+            if host_or_target.os == 'Android':
+                raise FatalCheckError('GCC is not supported on Android.\n'
+                                      'Please use clang from the Android NDK instead.')
+            if info.version < '6.1.0':
+                raise FatalCheckError(
+                    'Only GCC 6.1 or newer is supported (found version %s).'
+                    % info.version)
 
         # If you want to bump the version check here search for
         # cxx_alignof above, and see the associated comment.
@@ -924,7 +901,18 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                 raise FatalCheckError(
                     'This version (%s) of the MSVC compiler is not '
                     'supported.\n'
-                    'You must install Visual C++ 2017 Update 6 or newer in '
+                    'You must install Visual C++ 2017 Update 6 in '
+                    'order to build.\n'
+                    'See https://developer.mozilla.org/en/'
+                    'Windows_Build_Prerequisites' % info.version)
+
+            # MSVC version 15.7 and the previews for 15.8, at least,
+            # can't build Firefox.
+            if info.version >= '19.14.0':
+                raise FatalCheckError(
+                    'This version (%s) of the MSVC compiler is not '
+                    'supported due to compiler bugs.\n'
+                    'You must install Visual C++ 2017 Update 6 in '
                     'order to build.\n'
                     'See https://developer.mozilla.org/en/'
                     'Windows_Build_Prerequisites' % info.version)
@@ -1051,8 +1039,6 @@ def msvs_version(info):
     if info.type in ('clang-cl', 'msvc'):
         if info.version >= '19.10':
             return '2017'
-        elif info.version >= '19.00':
-            return '2015'
 
     return ''
 
@@ -1139,7 +1125,7 @@ def color_cflags(info):
     # value changes to e.g. "<x>=always", exact string match may fail and
     # multiple color flags could be added. So examine downstream consumers
     # before adding flags to return values.
-    if info.type == 'gcc' and info.version >= '4.9.0':
+    if info.type == 'gcc':
         return '-fdiagnostics-color'
     elif info.type == 'clang':
         return '-fcolor-diagnostics'
@@ -1507,59 +1493,46 @@ option('--enable-gold',
 
 imply_option('--enable-linker', 'gold', when='--enable-gold')
 
+js_option('--enable-linker', nargs=1,
+          help='Select the linker {bfd, gold, lld, lld-*, other}',
+          when=is_linker_option_enabled)
 
+
+@depends('--enable-linker', c_compiler, developer_options,
+         extra_toolchain_flags, when=is_linker_option_enabled)
+@checking('for linker', lambda x: x.KIND)
 @imports('os')
 @imports('shutil')
-def enable_gnu_linker(enable_gold_option, c_compiler, developer_options, build_env,
-                      toolchain_flags, linker_name):
-    # Used to check the kind of linker
+def select_linker(linker, c_compiler, developer_options, toolchain_flags):
+
+    linker = linker[0] if linker else 'other'
+
+    if linker not in ('bfd', 'gold', 'lld', 'other') and not linker.startswith("lld-"):
+        # Check that we are trying to use a supported linker
+        die('Unsupported linker ' + linker)
+
+    # Check the kind of linker
     version_check = ['-Wl,--version']
     cmd_base = c_compiler.wrapper + [c_compiler.compiler] + c_compiler.flags
+    # Generate the compiler flag
+    linker_flag = ["-fuse-ld=" + linker] if linker != "other" else []
+    cmd = cmd_base + linker_flag + version_check
     if toolchain_flags:
-        cmd_base += toolchain_flags
+        cmd += toolchain_flags
 
-    def resolve_gold():
-        # Try to force the usage of gold
-        targetDir = os.path.join(build_env.topobjdir, 'build', 'unix', 'gold')
-
-        gold_detection_arg = '-print-prog-name=ld.gold'
-        detection_cmd = cmd_base + [gold_detection_arg]
-        gold = check_cmd_output(*detection_cmd).strip()
-        if not gold:
-            return
-
-        goldFullPath = find_program(gold)
-        if goldFullPath is None:
-            return
-
-        if os.path.exists(targetDir):
-            shutil.rmtree(targetDir)
-        os.makedirs(targetDir)
-        os.symlink(goldFullPath, os.path.join(targetDir, 'ld'))
-
-        linker = ['-B', targetDir]
-        cmd = cmd_base + linker + version_check
+    if (linker == 'gold' or developer_options) and linker != 'bfd':
         if 'GNU gold' in check_cmd_output(*cmd).decode('utf-8'):
-            # We have detected gold, will build with the -B workaround
+            # We have detected gold, will build with -fuse-ld=gold
             return namespace(
                 KIND='gold',
-                LINKER_FLAG=linker,
+                LINKER_FLAG=linker_flag,
             )
-        else:
-            # The -B trick didn't work, removing the directory
-            shutil.rmtree(targetDir)
 
-    if (enable_gold_option or developer_options) and linker_name != 'bfd':
-        result = resolve_gold()
-
-        if result:
-            return result
         # gold is only required if --enable-gold is used.
-        elif enable_gold_option:
+        if linker == 'gold':
             die('Could not find gold')
         # Else fallthrough.
 
-    cmd = cmd_base + version_check
     cmd_output = check_cmd_output(*cmd).decode('utf-8')
     # using decode because ld can be localized and python will
     # have problems with french accent for example
@@ -1575,39 +1548,20 @@ def enable_gnu_linker(enable_gold_option, c_compiler, developer_options, build_e
             KIND='gold'
         )
 
+    if 'LLD' in cmd_output:
+        return namespace(
+            KIND='lld',
+            LINKER_FLAG=linker_flag,
+        )
+    elif linker.startswith('lld'):
+        # We forced the lld linker but could not find the string
+        # when checking, fail the build
+        die("Could not use {} as linker".format(linker))
+
     # For other platforms without gold or the GNU linker
     return namespace(
         KIND='other'
     )
-
-
-js_option('--enable-linker', nargs=1,
-          choices=('bfd', 'gold', 'lld', 'other'),
-          help='Select the linker',
-          when=is_linker_option_enabled)
-
-
-@depends('--enable-linker', c_compiler, developer_options, check_build_environment,
-         extra_toolchain_flags, when=is_linker_option_enabled)
-@checking('for linker', lambda x: x.KIND)
-def select_linker(linker, c_compiler, developer_options, build_env, toolchain_flags):
-    linker = linker[0] if linker else 'other'
-    if linker in ('gold', 'bfd', 'other'):
-        return enable_gnu_linker(linker == 'gold', c_compiler, developer_options,
-                                 build_env, toolchain_flags, linker)
-    if linker == 'lld':
-        version_check = ['-Wl,--version']
-        cmd_base = c_compiler.wrapper + \
-            [c_compiler.compiler] + c_compiler.flags
-        lld = ["-fuse-ld=" + linker]
-        cmd = cmd_base + lld + version_check
-        if 'LLD' in check_cmd_output(*cmd).decode('utf-8'):
-            return namespace(
-                KIND='lld',
-                LINKER_FLAG=lld,
-            )
-        else:
-            die("Could not use lld as linker")
 
 
 set_config('LD_IS_BFD', depends(select_linker.KIND)

@@ -7,10 +7,12 @@
 #ifndef mozilla_layers_AnimationHelper_h
 #define mozilla_layers_AnimationHelper_h
 
+#include "mozilla/dom/Nullable.h"
 #include "mozilla/ComputedTimingFunction.h" // for ComputedTimingFunction
 #include "mozilla/layers/LayersMessages.h" // for TransformData, etc
 #include "mozilla/TimeStamp.h"          // for TimeStamp
-
+#include "mozilla/TimingParams.h"
+#include "X11UndefineNone.h"
 
 namespace mozilla {
 struct AnimationValue;
@@ -20,9 +22,19 @@ class Animation;
 typedef InfallibleTArray<layers::Animation> AnimationArray;
 
 struct AnimData {
-  InfallibleTArray<mozilla::AnimationValue> mStartValues;
-  InfallibleTArray<mozilla::AnimationValue> mEndValues;
+  InfallibleTArray<RefPtr<RawServoAnimationValue>> mStartValues;
+  InfallibleTArray<RefPtr<RawServoAnimationValue>> mEndValues;
   InfallibleTArray<Maybe<mozilla::ComputedTimingFunction>> mFunctions;
+  TimingParams mTiming;
+  // These two variables correspond to the variables of the same name in
+  // KeyframeEffectReadOnly and are used for the same purpose: to skip composing
+  // animations whose progress has not changed.
+  dom::Nullable<double> mProgressOnLastCompose;
+  uint64_t mCurrentIterationOnLastCompose = 0;
+  // These two variables are used for a similar optimization above but are
+  // applied to the timing function in each keyframe.
+  uint32_t mSegmentIndexOnLastCompose = 0;
+  dom::Nullable<double> mPortionInSegmentOnLastCompose;
 };
 
 struct AnimationTransform {
@@ -193,18 +205,34 @@ class AnimationHelper
 {
 public:
 
+  enum class SampleResult {
+    None,
+    Skipped,
+    Sampled
+  };
+
   /**
    * Sample animations based on a given time stamp for a element(layer) with
    * its animation data.
-   * Returns true if there exists compositor animation, and stores corresponding
-   * animated value in |aAnimationValue|.
+   * Generally |aPreviousFrameTimeStamp| is used for the sampling if it's
+   * supplied to make the animation more in sync with other animations on the
+   * main-thread.  But in the case where the animation just started at the time
+   * when the animation was sent to the compositor, |aCurrentTime| is used for
+   * the sampling instead to avoid flickering the animation.
+   *
+   * Returns SampleResult::None if none of the animations are producing a result
+   * (e.g. they are in the delay phase with no backwards fill),
+   * SampleResult::Skipped if the animation output did not change since the last
+   * call of this function,
+   * SampleResult::Sampled if the animation output was updated.
    */
-  static bool
-  SampleAnimationForEachNode(TimeStamp aTime,
+  static SampleResult
+  SampleAnimationForEachNode(TimeStamp aPreviousFrameTime,
+                             TimeStamp aCurrentFrameTime,
                              AnimationArray& aAnimations,
                              InfallibleTArray<AnimData>& aAnimationData,
-                             AnimationValue& aAnimationValue,
-                             bool& aHasInEffectAnimations);
+                             RefPtr<RawServoAnimationValue>& aAnimationValue,
+                             const AnimatedValue* aPreviousValue);
   /**
    * Populates AnimData stuctures into |aAnimData| and |aBaseAnimationStyle|
    * based on |aAnimations|.
@@ -212,7 +240,7 @@ public:
   static void
   SetAnimations(AnimationArray& aAnimations,
                 InfallibleTArray<AnimData>& aAnimData,
-                AnimationValue& aBaseAnimationStyle);
+                RefPtr<RawServoAnimationValue>& aBaseAnimationStyle);
 
   /**
    * Get a unique id to represent the compositor animation between child
@@ -227,10 +255,16 @@ public:
    * Sample animation based a given time stamp |aTime| and the animation
    * data inside CompositorAnimationStorage |aStorage|. The animated values
    * after sampling will be stored in CompositorAnimationStorage as well.
+   *
+   * Returns true if there is any animation.
+   * Note that even if there are only in-delay phase animations (i.e. not
+   * visually effective), this function returns true to ensure we composite
+   * again on the next tick.
    */
-  static void
+  static bool
   SampleAnimations(CompositorAnimationStorage* aStorage,
-                   TimeStamp aTime);
+                   TimeStamp aPreviousFrameTime,
+                   TimeStamp aCurrentFrameTime);
 };
 
 } // namespace layers

@@ -201,11 +201,11 @@ function getNodeFront(selector, {walker}) {
  * to highlight the node upon selection
  * @return {Promise} Resolves when the inspector is updated with the new node
  */
-var selectNode = async function(selector, inspector, reason = "test") {
+var selectNode = async function(selector, inspector, reason = "test", isSlotted) {
   info("Selecting the node for '" + selector + "'");
   let nodeFront = await getNodeFront(selector, inspector);
   let updated = inspector.once("inspector-updated");
-  inspector.selection.setNodeFront(nodeFront, reason);
+  inspector.selection.setNodeFront(nodeFront, { reason, isSlotted });
   await updated;
 };
 
@@ -573,16 +573,11 @@ var setSearchFilter = async function(view, searchValue) {
 };
 
 /**
- * Open the style editor context menu and return all of it's items in a flat array
- * @param {CssRuleView} view
- *        The instance of the rule-view panel
- * @return An array of MenuItems
+ * Flatten all context menu items into a single array to make searching through
+ * it easier.
  */
-function openStyleContextMenuAndGetAllItems(view, target) {
-  let menu = view._contextmenu._openMenu({target: target});
-
-  // Flatten all menu items into a single array to make searching through it easier
-  let allItems = [].concat.apply([], menu.items.map(function addItem(item) {
+function buildContextMenuItems(menu) {
+  const allItems = [].concat.apply([], menu.items.map(function addItem(item) {
     if (item.submenu) {
       return addItem(item.submenu.items);
     }
@@ -590,4 +585,26 @@ function openStyleContextMenuAndGetAllItems(view, target) {
   }));
 
   return allItems;
+}
+
+/**
+ * Open the style editor context menu and return all of it's items in a flat array
+ * @param {CssRuleView} view
+ *        The instance of the rule-view panel
+ * @return An array of MenuItems
+ */
+function openStyleContextMenuAndGetAllItems(view, target) {
+  const menu = view.contextMenu._openMenu({target: target});
+  return buildContextMenuItems(menu);
+}
+
+/**
+ * Open the inspector menu and return all of it's items in a flat array
+ * @param {InspectorPanel} inspector
+ * @param {Object} options to pass into openMenu
+ * @return An array of MenuItems
+ */
+function openContextMenuAndGetAllItems(inspector, options) {
+  const menu = inspector._openMenu(options);
+  return buildContextMenuItems(menu);
 }

@@ -11,6 +11,9 @@
 #include "mozilla/ComputedStyle.h"
 
 namespace mozilla {
+namespace dom {
+class Element;
+} // namespace dom
 namespace a11y {
 
 class StyleInfo
@@ -28,7 +31,6 @@ public:
   void MarginBottom(nsAString& aValue) { Margin(eSideBottom, aValue); }
 
   static void FormatColor(const nscolor& aValue, nsString& aFormattedValue);
-  static void FormatFontStyle(const nscoord& aValue, nsAString& aFormattedValue);
   static void FormatTextDecorationStyle(uint8_t aValue, nsAString& aFormattedValue);
 
 private:

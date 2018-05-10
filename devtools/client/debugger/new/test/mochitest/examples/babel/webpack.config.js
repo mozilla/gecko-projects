@@ -5,15 +5,20 @@ const _ = require("lodash");
 const fixtures = path.join(__dirname, "fixtures");
 
 const tests = fs.readdirSync(fixtures).map(name => {
+  if (name[0] === ".") return;
+
   const dirname = path.relative(__dirname, path.join(fixtures, name));
+
+  const inputTS = path.join(dirname, "input.ts");
+  const inputJS = path.join(dirname, "input.js");
 
   return {
     name: _.camelCase(name),
     dirname,
-    input: `./${path.join(dirname, "input.js")}`,
+    input: `./${fs.existsSync(inputTS) ? inputTS : inputJS}`,
     output: path.join(dirname, "output.js")
   };
-});
+}).filter(Boolean);
 
 const html = path.join(__dirname, "..", "doc-babel.html");
 
@@ -49,8 +54,10 @@ module.exports = [
 ].concat(
   tests.map(({ name, dirname, input, output }) => {
     const babelEnabled = name !== "webpackStandalone";
-    const babelEnv = name !== "webpackModulesEs6";
+    const babelEnv = !name.match(/Es6/);
     const babelModules = name !== "webpackModules";
+    const devtool =
+      name === "evalSourceMaps" ? "eval-source-map" : "source-map";
 
     return {
       context: __dirname,
@@ -62,11 +69,11 @@ module.exports = [
         libraryTarget: "var",
         library: name
       },
-      devtool: "sourcemap",
+      devtool,
       module: {
-        loaders: babelEnabled
-          ? [
-              {
+        loaders: [
+          babelEnabled
+            ? {
                 test: /\.js$/,
                 exclude: /node_modules/,
                 loader: "babel-loader",
@@ -81,8 +88,14 @@ module.exports = [
                     ])
                 }
               }
-            ]
-          : []
+            : null,
+          {
+            test: /\.tsx?$/,
+            exclude: /node_modules/,
+            loader: "ts-loader",
+            options: {}
+          }
+        ].filter(Boolean)
       }
     };
   })

@@ -11,14 +11,11 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-ChromeUtils.defineModuleGetter(this, "RecentWindow",
-                               "resource:///modules/RecentWindow.jsm");
-
-ChromeUtils.defineModuleGetter(this, "ShellService",
-                               "resource:///modules/ShellService.jsm");
-
-ChromeUtils.defineModuleGetter(this, "ContextualIdentityService",
-                               "resource://gre/modules/ContextualIdentityService.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+  ShellService: "resource:///modules/ShellService.jsm"
+});
 
 XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "@mozilla.org/browser/aboutnewtab-service;1",
@@ -62,9 +59,10 @@ function getTopWin(skipPopups) {
       (!skipPopups || top.toolbar.visible))
     return top;
 
-  let isPrivate = PrivateBrowsingUtils.isWindowPrivate(window);
-  return RecentWindow.getMostRecentBrowserWindow({private: isPrivate,
-                                                  allowPopups: !skipPopups});
+  return BrowserWindowTracker.getTopWindow({
+    private: PrivateBrowsingUtils.isWindowPrivate(window),
+    allowPopups: !skipPopups
+  });
 }
 
 function getBoolPref(prefname, def) {
@@ -83,10 +81,20 @@ function doGetProtocolFlags(aURI) {
          handler.protocolFlags;
 }
 
-/* openUILink handles clicks on UI elements that cause URLs to load.
+/**
+ * openUILink handles clicks on UI elements that cause URLs to load.
  *
  * As the third argument, you may pass an object with the same properties as
  * accepted by openUILinkIn, plus "ignoreButton" and "ignoreAlt".
+ *
+ * @param url {string}
+ * @param event {Event | Object} Event or JSON object representing an Event
+ * @param {Boolean | Object} aIgnoreButton
+ * @param {Boolean} aIgnoreButton
+ * @param {Boolean} aIgnoreAlt
+ * @param {Boolean} aAllowThirdPartyFixup
+ * @param {Object} aPostData
+ * @param {nsIURI} aReferrerURI
  */
 function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup,
                     aPostData, aReferrerURI) {
@@ -110,12 +118,22 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
     };
   }
 
+  if (!params.triggeringPrincipal) {
+    let dt = event ? event.dataTransfer : null;
+    if (!!dt && dt.mozSourceNode) {
+      params.triggeringPrincipal = dt.mozSourceNode.nodePrincipal;
+    } else {
+      params.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
+    }
+  }
+
   let where = whereToOpenLink(event, aIgnoreButton, aIgnoreAlt);
   openUILinkIn(url, where, params);
 }
 
 
-/* whereToOpenLink() looks at an event to decide where to open a link.
+/**
+ * whereToOpenLink() looks at an event to decide where to open a link.
  *
  * The event may be a mouse event (click, double-click, middle-click) or keypress event (enter).
  *
@@ -133,6 +151,11 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
  * - Alt is hard to use in context menus, because pressing Alt closes the menu.
  * - Alt can't be used on the bookmarks toolbar because Alt is used for "treat this as something draggable".
  * - The button is ignored for the middle-click-paste-URL feature, since it's always a middle-click.
+ *
+ * @param e {Event|Object} Event or JSON Object
+ * @param ignoreButton {Boolean}
+ * @param ignoreAlt {Boolean}
+ * @returns {"current" | "tabshifted" | "tab" | "save" | "window"}
  */
 function whereToOpenLink(e, ignoreButton, ignoreAlt) {
   // This method must treat a null event like a left click without modifier keys (i.e.
@@ -165,6 +188,42 @@ function whereToOpenLink(e, ignoreButton, ignoreAlt) {
   return "current";
 }
 
+/* openTrustedLinkIn will attempt to open the given URI using the SystemPrincipal
+ * as the trigeringPrincipal, unless a more specific Principal is provided.
+ *
+ * See openUILinkIn for a discussion of parameters
+ */
+function openTrustedLinkIn(url, where, aParams) {
+  var params = aParams;
+
+  if (!params) {
+    params = {};
+  }
+
+  if (!params.triggeringPrincipal) {
+    params.triggeringPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
+  }
+
+  openUILinkIn(url, where, params);
+}
+
+/* openWebLinkIn will attempt to open the given URI using the NullPrincipal
+ * as the triggeringPrincipal, unless a more specific Principal is provided.
+ *
+ * See openUILinkIn for a discussion of parameters
+ */
+function openWebLinkIn(url, where, params) {
+  if (!params) {
+    params = {};
+  }
+
+  if (!params.triggeringPrincipal) {
+    params.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
+  }
+
+  openUILinkIn(url, where, params);
+}
+
 /* openUILinkIn opens a URL in a place specified by the parameter |where|.
  *
  * |where| can be:
@@ -174,7 +233,17 @@ function whereToOpenLink(e, ignoreButton, ignoreAlt) {
  *  "window"      new window
  *  "save"        save to disk (with no filename hint!)
  *
- * aAllowThirdPartyFixup controls whether third party services such as Google's
+ * DEPRECATION WARNING:
+ * USE        -> openTrustedLinkIn(url, where, aParams) if the source is always
+ *                     a user event on a user- or product-specified URL (as
+ *                     opposed to URLs provided by a webpage)
+ * USE        -> openWebLinkIn(url, where, aParams) if the URI should be loaded
+ *                     with a specific triggeringPrincipal, for instance, if
+ *                     the url was supplied by web content.
+ * DEPRECATED -> openUILinkIn(url, where, AllowThirdPartyFixup, aPostData, ...)
+ *
+ *
+ * allowThirdPartyFixup controls whether third party services such as Google's
  * I Feel Lucky are allowed to interpret this URL. This parameter may be
  * undefined, which is treated as false.
  *
@@ -196,12 +265,7 @@ function openUILinkIn(url, where, aAllowThirdPartyFixup, aPostData, aReferrerURI
   if (arguments.length == 3 && typeof arguments[2] == "object") {
     params = aAllowThirdPartyFixup;
   } else {
-    params = {
-      allowThirdPartyFixup: aAllowThirdPartyFixup,
-      postData: aPostData,
-      referrerURI: aReferrerURI,
-      referrerPolicy: Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
-    };
+    throw new Error("Required argument triggeringPrincipal missing within openUILinkIn");
   }
 
   params.fromChrome = true;
@@ -448,7 +512,7 @@ function openLinkIn(url, where, params) {
       targetBrowser.createAboutBlankContentViewer(aPrincipal);
     }
 
-    targetBrowser.loadURIWithFlags(url, {
+    targetBrowser.loadURI(url, {
       triggeringPrincipal: aTriggeringPrincipal,
       flags,
       referrerURI: aNoReferrer ? null : aReferrerURI,
@@ -813,7 +877,7 @@ function openPreferences(paneID, extraArgs) {
  * of the application.
  */
 function openTroubleshootingPage() {
-  openUILinkIn("about:support", "tab");
+  openTrustedLinkIn("about:support", "tab");
 }
 
 /**
@@ -821,13 +885,13 @@ function openTroubleshootingPage() {
  */
 function openFeedbackPage() {
   var url = Services.urlFormatter.formatURLPref("app.feedback.baseURL");
-  openUILinkIn(url, "tab");
+  openTrustedLinkIn(url, "tab");
 }
 
 function openTourPage() {
   let scope = {};
   ChromeUtils.import("resource:///modules/UITour.jsm", scope);
-  openUILinkIn(scope.UITour.url, "tab");
+  openTrustedLinkIn(scope.UITour.url, "tab");
 }
 
 function buildHelpMenu() {
@@ -904,7 +968,7 @@ function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
   if (!aWhere)
     where = aCalledFromModal ? "window" : "tab";
 
-  openUILinkIn(url, where);
+  openTrustedLinkIn(url, where);
 }
 
 function openPrefsHelp() {

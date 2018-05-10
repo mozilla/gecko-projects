@@ -40,10 +40,6 @@ nsPartChannel::nsPartChannel(nsIChannel *aMultipartChannel, uint32_t aPartID,
     mMultipartChannel->GetLoadGroup(getter_AddRefs(mLoadGroup));
 }
 
-nsPartChannel::~nsPartChannel()
-{
-}
-
 void nsPartChannel::InitializeByteRange(int64_t aStart, int64_t aEnd)
 {
     mIsByteRangeRequest = true;
@@ -836,8 +832,6 @@ nsMultiMixedConv::nsMultiMixedConv() :
     mRequestListenerNotified = false;
 }
 
-nsMultiMixedConv::~nsMultiMixedConv() {}
-
 nsresult
 nsMultiMixedConv::SendStart()
 {
@@ -1100,7 +1094,7 @@ nsMultiMixedConv::ProcessHeader()
 nsresult
 NS_NewMultiMixedConv(nsMultiMixedConv** aMultiMixedConv)
 {
-    NS_PRECONDITION(aMultiMixedConv != nullptr, "null ptr");
+    MOZ_ASSERT(aMultiMixedConv != nullptr, "null ptr");
     if (! aMultiMixedConv)
         return NS_ERROR_NULL_POINTER;
 

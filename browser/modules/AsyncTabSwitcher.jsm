@@ -102,11 +102,6 @@ class AsyncTabSwitcher {
     // True if we're in the midst of switching tabs.
     this.switchInProgress = false;
 
-    // Keep an exact list of content processes (tabParent) in which
-    // we're actively suppressing the display port. This gives a robust
-    // way to make sure we don't forget to un-suppress.
-    this.activeSuppressDisplayport = new Set();
-
     // Set of tabs that might be visible right now. We maintain
     // this set because we can't be sure when a tab is actually
     // drawn. A tab is added to this set when we ask to make it
@@ -188,11 +183,6 @@ class AsyncTabSwitcher {
     this.window.removeEventListener("EndSwapDocShells", this, true);
 
     this.tabbrowser._switcher = null;
-
-    this.activeSuppressDisplayport.forEach(function(tabParent) {
-      tabParent.suppressDisplayport(false);
-    });
-    this.activeSuppressDisplayport.clear();
   }
 
   // Wraps nsITimer. Must not use the vanilla setTimeout and
@@ -416,13 +406,12 @@ class AsyncTabSwitcher {
 
       this.maybeVisibleTabs.add(showTab);
 
-      let tabs = this.tabbrowser.tabbox.tabs;
-      let tabPanel = this.tabbrowser.tabpanels;
-      let showPanel = tabs.getRelatedElement(showTab);
-      let index = Array.indexOf(tabPanel.childNodes, showPanel);
+      let tabpanels = this.tabbrowser.tabpanels;
+      let showPanel = this.tabbrowser.tabContainer.getRelatedElement(showTab);
+      let index = Array.indexOf(tabpanels.childNodes, showPanel);
       if (index != -1) {
         this.log(`Switch to tab ${index} - ${this.tinfo(showTab)}`);
-        tabPanel.setAttribute("selectedIndex", index);
+        tabpanels.setAttribute("selectedIndex", index);
         if (showTab === this.requestedTab) {
           if (this._requestingTab) {
             /*
@@ -448,6 +437,7 @@ class AsyncTabSwitcher {
         this.lastVisibleTab._visuallySelected = false;
 
       this.visibleTab._visuallySelected = true;
+      this.tabbrowser.tabContainer._setPositionalAttributes();
     }
 
     this.lastVisibleTab = this.visibleTab;
@@ -877,7 +867,7 @@ class AsyncTabSwitcher {
 
     this.warmingTabs.add(tab);
     this.setTabState(tab, this.STATE_LOADING);
-    this.suppressDisplayPortAndQueueUnload(tab, gTabWarmingUnloadDelayMs);
+    this.queueUnload(gTabWarmingUnloadDelayMs);
   }
 
   // Called when the user asks to switch to a given tab.
@@ -923,19 +913,11 @@ class AsyncTabSwitcher {
     }
     this.lastPrimaryTab = tab;
 
-    this.suppressDisplayPortAndQueueUnload(this.requestedTab, this.UNLOAD_DELAY);
+    this.queueUnload(this.UNLOAD_DELAY);
     this._requestingTab = false;
   }
 
-  suppressDisplayPortAndQueueUnload(tab, unloadTimeout) {
-    let browser = tab.linkedBrowser;
-    let fl = browser.frameLoader;
-
-    if (fl && fl.tabParent && !this.activeSuppressDisplayport.has(fl.tabParent)) {
-      fl.tabParent.suppressDisplayport(true);
-      this.activeSuppressDisplayport.add(fl.tabParent);
-    }
-
+  queueUnload(unloadTimeout) {
     this.preActions();
 
     if (this.unloadTimer) {
@@ -959,22 +941,29 @@ class AsyncTabSwitcher {
     this._processing = true;
     this.preActions();
 
-    if (event.type == "MozLayerTreeReady") {
-      this.onLayersReady(event.originalTarget);
-    }
-    if (event.type == "MozAfterPaint") {
-      this.onPaint();
-    } else if (event.type == "MozLayerTreeCleared") {
-      this.onLayersCleared(event.originalTarget);
-    } else if (event.type == "TabRemotenessChange") {
-      this.onRemotenessChange(event.target);
-    } else if (event.type == "sizemodechange" ||
-      event.type == "occlusionstatechange") {
-      this.onSizeModeOrOcclusionStateChange();
-    } else if (event.type == "SwapDocShells") {
-      this.onSwapDocShells(event.originalTarget, event.detail);
-    } else if (event.type == "EndSwapDocShells") {
-      this.onEndSwapDocShells(event.originalTarget, event.detail);
+    switch (event.type) {
+      case "MozLayerTreeReady":
+        this.onLayersReady(event.originalTarget);
+        break;
+      case "MozAfterPaint":
+        this.onPaint();
+        break;
+      case "MozLayerTreeCleared":
+        this.onLayersCleared(event.originalTarget);
+        break;
+      case "TabRemotenessChange":
+        this.onRemotenessChange(event.target);
+        break;
+      case "sizemodechange":
+      case "occlusionstatechange":
+        this.onSizeModeOrOcclusionStateChange();
+        break;
+      case "SwapDocShells":
+        this.onSwapDocShells(event.originalTarget, event.detail);
+        break;
+      case "EndSwapDocShells":
+        this.onEndSwapDocShells(event.originalTarget, event.detail);
+        break;
     }
 
     this.postActions();
@@ -1027,6 +1016,9 @@ class AsyncTabSwitcher {
     Services.telemetry
       .getHistogramById("FX_TAB_SWITCH_SPINNER_VISIBLE_TRIGGER")
       .add(this._loadTimerClearedBy);
+    if (AppConstants.NIGHTLY_BUILD) {
+      Services.obs.notifyObservers(null, "tabswitch-spinner");
+    }
   }
 
   spinnerHidden() {

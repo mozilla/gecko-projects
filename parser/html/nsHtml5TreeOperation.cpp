@@ -14,6 +14,7 @@
 #include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
+#include "mozilla/dom/Text.h"
 #include "nsAttrName.h"
 #include "nsBindingManager.h"
 #include "nsContentCreatorFunctions.h"
@@ -56,8 +57,8 @@ class MOZ_STACK_CLASS nsHtml5OtherDocUpdate
 public:
   nsHtml5OtherDocUpdate(nsIDocument* aCurrentDoc, nsIDocument* aExecutorDoc)
   {
-    NS_PRECONDITION(aCurrentDoc, "Node has no doc?");
-    NS_PRECONDITION(aExecutorDoc, "Executor has no doc?");
+    MOZ_ASSERT(aCurrentDoc, "Node has no doc?");
+    MOZ_ASSERT(aExecutorDoc, "Executor has no doc?");
     if (MOZ_LIKELY(aCurrentDoc == aExecutorDoc)) {
       mDocument = nullptr;
     } else {
@@ -123,10 +124,10 @@ nsHtml5TreeOperation::~nsHtml5TreeOperation()
 nsresult
 nsHtml5TreeOperation::AppendTextToTextNode(const char16_t* aBuffer,
                                            uint32_t aLength,
-                                           nsIContent* aTextNode,
+                                           dom::Text* aTextNode,
                                            nsHtml5DocumentBuilder* aBuilder)
 {
-  NS_PRECONDITION(aTextNode, "Got null text node.");
+  MOZ_ASSERT(aTextNode, "Got null text node.");
   MOZ_ASSERT(aBuilder);
   MOZ_ASSERT(aBuilder->IsInDocUpdate());
   uint32_t oldLength = aTextNode->TextLength();
@@ -148,9 +149,10 @@ nsHtml5TreeOperation::AppendText(const char16_t* aBuffer,
 {
   nsresult rv = NS_OK;
   nsIContent* lastChild = aParent->GetLastChild();
-  if (lastChild && lastChild->IsNodeOfType(nsINode::eTEXT)) {
+  if (lastChild && lastChild->IsText()) {
     nsHtml5OtherDocUpdate update(aParent->OwnerDoc(), aBuilder->GetDocument());
-    return AppendTextToTextNode(aBuffer, aLength, lastChild, aBuilder);
+    return AppendTextToTextNode(aBuffer, aLength, lastChild->GetAsText(),
+                                aBuilder);
   }
 
   nsNodeInfoManager* nodeInfoManager = aParent->OwnerDoc()->NodeInfoManager();
@@ -213,11 +215,10 @@ IsElementOrTemplateContent(nsINode* aNode)
   if (aNode) {
     if (aNode->IsElement()) {
       return true;
-    } else if (aNode->NodeType() == nsINode::DOCUMENT_FRAGMENT_NODE) {
+    }
+    if (aNode->IsDocumentFragment()) {
       // Check if the node is a template content.
-      mozilla::dom::DocumentFragment* frag =
-        static_cast<mozilla::dom::DocumentFragment*>(aNode);
-      nsIContent* fragHost = frag->GetHost();
+      nsIContent* fragHost = aNode->AsDocumentFragment()->GetHost();
       if (fragHost && nsNodeUtils::IsTemplateElement(fragHost)) {
         return true;
       }
@@ -665,8 +666,9 @@ nsHtml5TreeOperation::FosterParentText(nsIContent* aStackParent,
     nsHtml5OtherDocUpdate update(foster->OwnerDoc(), aBuilder->GetDocument());
 
     nsIContent* previousSibling = aTable->GetPreviousSibling();
-    if (previousSibling && previousSibling->IsNodeOfType(nsINode::eTEXT)) {
-      return AppendTextToTextNode(aBuffer, aLength, previousSibling, aBuilder);
+    if (previousSibling && previousSibling->IsText()) {
+      return AppendTextToTextNode(aBuffer, aLength,
+                                  previousSibling->GetAsText(), aBuilder);
     }
 
     nsNodeInfoManager* nodeInfoManager =
@@ -1055,9 +1057,9 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       aBuilder->MaybeComplainAboutCharset(msgId, error, (uint32_t)lineNumber);
       return NS_OK;
     }
-    case eTreeOpDisableEncodingMenu: {
+    case eTreeOpEnableEncodingMenu: {
       nsIDocument* doc = aBuilder->GetDocument();
-      doc->DisableEncodingMenu();
+      doc->EnableEncodingMenu();
       return NS_OK;
     }
     case eTreeOpAddClass: {

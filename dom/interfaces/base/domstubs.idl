@@ -17,10 +17,7 @@ typedef unsigned long long nsViewID;
 
 // Core
 interface nsIDOMDocument;
-interface nsIDOMDocumentFragment;
-interface nsIDOMElement;
 interface nsIDOMNode;
-interface nsIDOMNodeList;
 
 // Needed for raises() in our IDL
 %{C++
@@ -34,11 +31,8 @@ class DOMException;
 // Base
 interface nsIDOMWindow;
 interface nsIDOMWindowCollection;
-interface nsIDOMScreen;
 
 // Events
-interface nsIDOMEvent;
-interface nsIDOMEventTarget;
 interface nsIDOMEventListener;
 
 // HTML

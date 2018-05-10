@@ -17,6 +17,8 @@
 #include "mozilla/dom/StructuredCloneTags.h"
 // for mozilla::dom::workerinternals::kJSPrincipalsDebugToken
 #include "mozilla/dom/workerinternals/JSSettings.h"
+// for mozilla::dom::worklet::kJSPrincipalsDebugToken
+#include "mozilla/dom/WorkletPrincipal.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 
 using namespace mozilla;
@@ -26,7 +28,7 @@ NS_IMETHODIMP_(MozExternalRefCountType)
 nsJSPrincipals::AddRef()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_PRECONDITION(int32_t(refcount) >= 0, "illegal refcnt");
+  MOZ_ASSERT(int32_t(refcount) >= 0, "illegal refcnt");
   nsrefcnt count = ++refcount;
   NS_LOG_ADDREF(this, count, "nsJSPrincipals", sizeof(*this));
   return count;
@@ -36,7 +38,7 @@ NS_IMETHODIMP_(MozExternalRefCountType)
 nsJSPrincipals::Release()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_PRECONDITION(0 != refcount, "dup release");
+  MOZ_ASSERT(0 != refcount, "dup release");
   nsrefcnt count = --refcount;
   NS_LOG_RELEASE(this, count, "nsJSPrincipals");
   if (count == 0) {
@@ -92,6 +94,8 @@ JSPrincipals::dump()
               NS_SUCCEEDED(rv) ? str.get() : "(unknown)");
     } else if (debugToken == dom::workerinternals::kJSPrincipalsDebugToken) {
         fprintf(stderr, "Web Worker principal singleton (%p)\n", this);
+    } else if (debugToken == mozilla::dom::WorkletPrincipal::kJSPrincipalsDebugToken) {
+        fprintf(stderr, "Web Worklet principal singleton (%p)\n", this);
     } else {
         fprintf(stderr,
                 "!!! JSPrincipals (%p) is not nsJSPrincipals instance - bad token: "

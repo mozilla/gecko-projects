@@ -1041,6 +1041,63 @@ MacroAssembler::spectreMovePtr(Condition cond, Register src, Register dest)
     cmovCCl(cond, Operand(src), dest);
 }
 
+void
+MacroAssembler::spectreBoundsCheck32(Register index, const Operand& length, Register maybeScratch,
+                                     Label* failure)
+{
+    Label failurePopValue;
+    bool pushedValue = false;
+    if (JitOptions.spectreIndexMasking) {
+        if (maybeScratch == InvalidReg) {
+            push(Imm32(0));
+            pushedValue = true;
+        } else {
+            move32(Imm32(0), maybeScratch);
+        }
+    }
+
+    cmp32(index, length);
+    j(Assembler::AboveOrEqual, pushedValue ? &failurePopValue : failure);
+
+    if (JitOptions.spectreIndexMasking) {
+        if (maybeScratch == InvalidReg) {
+            Label done;
+            cmovCCl(Assembler::AboveOrEqual, Operand(StackPointer, 0), index);
+            lea(Operand(StackPointer, sizeof(void*)), StackPointer);
+            jump(&done);
+
+            bind(&failurePopValue);
+            lea(Operand(StackPointer, sizeof(void*)), StackPointer);
+            jump(failure);
+
+            bind(&done);
+        } else {
+            cmovCCl(Assembler::AboveOrEqual, maybeScratch, index);
+        }
+    }
+}
+
+void
+MacroAssembler::spectreBoundsCheck32(Register index, Register length, Register maybeScratch,
+                                     Label* failure)
+{
+    MOZ_ASSERT(length != maybeScratch);
+    MOZ_ASSERT(index != maybeScratch);
+
+    spectreBoundsCheck32(index, Operand(length), maybeScratch, failure);
+}
+
+void
+MacroAssembler::spectreBoundsCheck32(Register index, const Address& length, Register maybeScratch,
+                                     Label* failure)
+{
+    MOZ_ASSERT(index != length.base);
+    MOZ_ASSERT(length.base != maybeScratch);
+    MOZ_ASSERT(index != maybeScratch);
+
+    spectreBoundsCheck32(index, Operand(length), maybeScratch, failure);
+}
+
 // ========================================================================
 // Truncate floating point.
 
@@ -1098,29 +1155,6 @@ MacroAssembler::truncateDoubleToUInt64(Address src, Address dest, Register temp,
     store32(temp, HighWord(dest));
 
     bind(&done);
-}
-
-// ========================================================================
-// wasm support
-
-template <class L>
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Register boundsCheckLimit, L label)
-{
-    cmp32(index, boundsCheckLimit);
-    j(cond, label);
-    if (JitOptions.spectreIndexMasking)
-        cmovCCl(cond, Operand(boundsCheckLimit), index);
-}
-
-template <class L>
-void
-MacroAssembler::wasmBoundsCheck(Condition cond, Register index, Address boundsCheckLimit, L label)
-{
-    cmp32(index, Operand(boundsCheckLimit));
-    j(cond, label);
-    if (JitOptions.spectreIndexMasking)
-        cmovCCl(cond, Operand(boundsCheckLimit), index);
 }
 
 //}}} check_macroassembler_style

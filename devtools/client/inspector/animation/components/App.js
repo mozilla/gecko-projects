@@ -4,7 +4,7 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const { Component, createFactory } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
@@ -15,7 +15,7 @@ const AnimationToolbar = createFactory(require("./AnimationToolbar"));
 const NoAnimationPanel = createFactory(require("./NoAnimationPanel"));
 const SplitBox = createFactory(require("devtools/client/shared/components/splitter/SplitBox"));
 
-class App extends PureComponent {
+class App extends Component {
   static get propTypes() {
     return {
       addAnimationsCurrentTimeListener: PropTypes.func.isRequired,
@@ -35,11 +35,13 @@ class App extends PureComponent {
       setAnimationsPlaybackRate: PropTypes.func.isRequired,
       setAnimationsPlayState: PropTypes.func.isRequired,
       setDetailVisibility: PropTypes.func.isRequired,
+      setHighlightedNode: PropTypes.func.isRequired,
       setSelectedNode: PropTypes.func.isRequired,
       simulateAnimation: PropTypes.func.isRequired,
       simulateAnimationForKeyframesProgressBar: PropTypes.func.isRequired,
       timeScale: PropTypes.object.isRequired,
       toggleElementPicker: PropTypes.func.isRequired,
+      toggleLockingHighlight: PropTypes.func.isRequired,
     };
   }
 
@@ -66,6 +68,7 @@ class App extends PureComponent {
       setAnimationsPlaybackRate,
       setAnimationsPlayState,
       setDetailVisibility,
+      setHighlightedNode,
       setSelectedNode,
       simulateAnimation,
       simulateAnimationForKeyframesProgressBar,
@@ -122,6 +125,7 @@ class App extends PureComponent {
               removeAnimationsCurrentTimeListener,
               selectAnimation,
               setAnimationsCurrentTime,
+              setHighlightedNode,
               setSelectedNode,
               simulateAnimation,
               timeScale,

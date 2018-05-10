@@ -1,13 +1,13 @@
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
-		module.exports = factory(require("devtools/client/shared/vendor/react-dom-factories"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"));
+		module.exports = factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"));
 	else if(typeof define === 'function' && define.amd)
-		define(["devtools/client/shared/vendor/react-dom-factories", "devtools/client/shared/vendor/lodash", "devtools/client/shared/vendor/react-prop-types", "devtools/client/shared/vendor/react", "devtools/client/shared/vendor/react-redux", "devtools/client/shared/vendor/redux"], factory);
+		define(["devtools/client/shared/vendor/react", "devtools/client/shared/vendor/react-redux", "devtools/client/shared/vendor/redux", "devtools/client/shared/vendor/react-prop-types", "devtools/client/shared/vendor/react-dom-factories"], factory);
 	else {
-		var a = typeof exports === 'object' ? factory(require("devtools/client/shared/vendor/react-dom-factories"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux")) : factory(root["devtools/client/shared/vendor/react-dom-factories"], root["devtools/client/shared/vendor/lodash"], root["devtools/client/shared/vendor/react-prop-types"], root["devtools/client/shared/vendor/react"], root["devtools/client/shared/vendor/react-redux"], root["devtools/client/shared/vendor/redux"]);
+		var a = typeof exports === 'object' ? factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories")) : factory(root["devtools/client/shared/vendor/react"], root["devtools/client/shared/vendor/react-redux"], root["devtools/client/shared/vendor/redux"], root["devtools/client/shared/vendor/react-prop-types"], root["devtools/client/shared/vendor/react-dom-factories"]);
 		for(var i in a) (typeof exports === 'object' ? exports : root)[i] = a[i];
 	}
-})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_1__, __WEBPACK_EXTERNAL_MODULE_54__, __WEBPACK_EXTERNAL_MODULE_2__, __WEBPACK_EXTERNAL_MODULE_10__, __WEBPACK_EXTERNAL_MODULE_17__, __WEBPACK_EXTERNAL_MODULE_18__) {
+})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_0__, __WEBPACK_EXTERNAL_MODULE_3592__, __WEBPACK_EXTERNAL_MODULE_3593__, __WEBPACK_EXTERNAL_MODULE_3642__, __WEBPACK_EXTERNAL_MODULE_3643__) {
 return /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -70,11 +70,103 @@ return /******/ (function(modules) { // webpackBootstrap
 /******/ 	__webpack_require__.p = "/assets/build";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 22);
+/******/ 	return __webpack_require__(__webpack_require__.s = 3655);
 /******/ })
 /************************************************************************/
-/******/ ([
-/* 0 */
+/******/ ({
+
+/***/ 0:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_0__;
+
+/***/ }),
+
+/***/ 175:
+/***/ (function(module, exports, __webpack_require__) {
+
+var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
+  Copyright (c) 2016 Jed Watson.
+  Licensed under the MIT License (MIT), see
+  http://jedwatson.github.io/classnames
+*/
+/* global define */
+
+(function () {
+	'use strict';
+
+	var hasOwn = {}.hasOwnProperty;
+
+	function classNames () {
+		var classes = [];
+
+		for (var i = 0; i < arguments.length; i++) {
+			var arg = arguments[i];
+			if (!arg) continue;
+
+			var argType = typeof arg;
+
+			if (argType === 'string' || argType === 'number') {
+				classes.push(arg);
+			} else if (Array.isArray(arg)) {
+				classes.push(classNames.apply(null, arg));
+			} else if (argType === 'object') {
+				for (var key in arg) {
+					if (hasOwn.call(arg, key) && arg[key]) {
+						classes.push(key);
+					}
+				}
+			}
+		}
+
+		return classes.join(' ');
+	}
+
+	if (typeof module !== 'undefined' && module.exports) {
+		module.exports = classNames;
+	} else if (true) {
+		// register as 'classnames', consistent with npm package name
+		!(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_RESULT__ = (function () {
+			return classNames;
+		}).apply(exports, __WEBPACK_AMD_DEFINE_ARRAY__),
+				__WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
+	} else {
+		window.classNames = classNames;
+	}
+}());
+
+
+/***/ }),
+
+/***/ 3592:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3592__;
+
+/***/ }),
+
+/***/ 3593:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3593__;
+
+/***/ }),
+
+/***/ 3642:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3642__;
+
+/***/ }),
+
+/***/ 3643:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3643__;
+
+/***/ }),
+
+/***/ 3644:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -82,13 +174,13 @@ return /******/ (function(modules) { // webpackBootstrap
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // Dependencies
-const validProtocols = /^(http|https|ftp|data|resource|chrome):/i;
+const validProtocols = /(http|https|ftp|data|resource|chrome):/i;
 const tokenSplitRegex = /(\s|\'|\"|\\)+/;
 const ELLIPSIS = "\u2026";
-const dom = __webpack_require__(1);
+const dom = __webpack_require__(3643);
 const { span } = dom;
 
 /**
@@ -115,7 +207,7 @@ const escapeMap = {
   // Carriage return.
   0xd: "\\r",
   // Quote.
-  0x22: "\\\"",
+  0x22: '\\"',
   // Backslash.
   0x5c: "\\\\"
 };
@@ -126,7 +218,7 @@ const escapeMap = {
 // the replacement function; see |escapeString|.
 const escapeRegexp = new RegExp("[" +
 // Quote and backslash.
-"\"\\\\" +
+'"\\\\' +
 // Controls.
 "\x00-\x1f" +
 // More controls.
@@ -157,8 +249,8 @@ const escapeRegexp = new RegExp("[" +
  * @return {String} the escaped string
  */
 function escapeString(str, escapeWhitespace) {
-  return "\"" + str.replace(escapeRegexp, (match, offset) => {
-    let c = match.charCodeAt(0);
+  return `"${str.replace(escapeRegexp, (match, offset) => {
+    const c = match.charCodeAt(0);
     if (c in escapeMap) {
       if (!escapeWhitespace && (c === 9 || c === 0xa || c === 0xd)) {
         return match[0];
@@ -172,24 +264,24 @@ function escapeString(str, escapeWhitespace) {
       if (c >= 0xdc00 && offset > 0) {
         --offset;
       }
-      let codePoint = str.codePointAt(offset);
+      const codePoint = str.codePointAt(offset);
       if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
         // Unpaired surrogate.
-        return "\\u" + codePoint.toString(16);
+        return `\\u${codePoint.toString(16)}`;
       } else if (codePoint >= 0xf0000 && codePoint <= 0x10fffd) {
         // Private use area.  Because we visit each pair of a such a
         // character, return the empty string for one half and the
         // real result for the other, to avoid duplication.
         if (c <= 0xdbff) {
-          return "\\u{" + codePoint.toString(16) + "}";
+          return `\\u{${codePoint.toString(16)}}`;
         }
         return "";
       }
       // Other surrogate characters are passed through.
       return match;
     }
-    return "\\u" + ("0000" + c.toString(16)).substr(-4);
-  }) + "\"";
+    return `\\u${`0000${c.toString(16)}`.substr(-4)}`;
+  })}"`;
 }
 
 /**
@@ -231,7 +323,7 @@ function rawCropString(text, limit, alternativeText = ELLIPSIS) {
     limit = alternativeText.length + 1;
   }
 
-  let halfLimit = (limit - alternativeText.length) / 2;
+  const halfLimit = (limit - alternativeText.length) / 2;
 
   if (text.length > limit) {
     return text.substr(0, Math.ceil(halfLimit)) + alternativeText + text.substr(text.length - Math.floor(halfLimit));
@@ -241,7 +333,7 @@ function rawCropString(text, limit, alternativeText = ELLIPSIS) {
 }
 
 function cropString(text, limit, alternativeText) {
-  return rawCropString(sanitizeString(text + ""), limit, alternativeText);
+  return rawCropString(sanitizeString(`${text}`), limit, alternativeText);
 }
 
 function sanitizeString(text) {
@@ -249,7 +341,7 @@ function sanitizeString(text) {
   // (horizontal) tab (HT: \x09) and newline (LF: \x0A, CR: \x0D),
   // with unicode replacement character (u+fffd).
   // eslint-disable-next-line no-control-regex
-  let re = new RegExp("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]", "g");
+  const re = new RegExp("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]", "g");
   return text.replace(re, "\ufffd");
 }
 
@@ -259,15 +351,15 @@ function parseURLParams(url) {
 }
 
 function parseURLEncodedText(text) {
-  let params = [];
+  const params = [];
 
   // In case the text is empty just return the empty parameters
   if (text == "") {
     return params;
   }
 
-  let searchParams = new URLSearchParams(text);
-  let entries = [...searchParams.entries()];
+  const searchParams = new URLSearchParams(text);
+  const entries = [...searchParams.entries()];
   return entries.map(entry => {
     return {
       name: entry[0],
@@ -277,7 +369,7 @@ function parseURLEncodedText(text) {
 }
 
 function getFileName(url) {
-  let split = splitURLBase(url);
+  const split = splitURLBase(url);
   return split.name;
 }
 
@@ -298,7 +390,7 @@ function isDataURL(url) {
 
 function splitURLTrue(url) {
   const reSplitFile = /(.*?):\/{2,3}([^\/]*)(.*?)([^\/]*?)($|\?.*)/;
-  let m = reSplitFile.exec(url);
+  const m = reSplitFile.exec(url);
 
   if (!m) {
     return {
@@ -323,8 +415,8 @@ function splitURLTrue(url) {
 }
 
 /**
- * Wrap the provided render() method of a rep in a try/catch block that will render a
- * fallback rep if the render fails.
+ * Wrap the provided render() method of a rep in a try/catch block that will
+ * render a fallback rep if the render fails.
  */
 function wrapRender(renderMethod) {
   const wrappedFunction = function (props) {
@@ -378,8 +470,8 @@ function getGripPreviewItems(grip) {
 
   // Event Grip
   if (grip.preview && grip.preview.target) {
-    let keys = Object.keys(grip.preview.properties);
-    let values = Object.values(grip.preview.properties);
+    const keys = Object.keys(grip.preview.properties);
+    const values = Object.values(grip.preview.properties);
     return [grip.preview.target, ...keys, ...values];
   }
 
@@ -392,7 +484,7 @@ function getGripPreviewItems(grip) {
   if (grip.preview && grip.preview.ownProperties) {
     let propertiesValues = Object.values(grip.preview.ownProperties).map(property => property.value || property);
 
-    let propertyKeys = Object.keys(grip.preview.ownProperties);
+    const propertyKeys = Object.keys(grip.preview.ownProperties);
     propertiesValues = propertiesValues.concat(propertyKeys);
 
     // ArrayBuffer Grip
@@ -432,12 +524,12 @@ function getGripType(object, noGrip) {
  *         Whether the grip is a string containing a URL.
  */
 function containsURL(grip) {
-  if (typeof grip !== "string") {
+  // An URL can't be shorter than 5 char (e.g. "ftp:").
+  if (typeof grip !== "string" || grip.length < 5) {
     return false;
   }
 
-  let tokens = grip.split(tokenSplitRegex);
-  return tokens.some(isURL);
+  return validProtocols.test(grip);
 }
 
 /**
@@ -461,7 +553,7 @@ function isURL(token) {
 }
 
 /**
- * Returns a new array in which `char` are interleaved between the original items.
+ * Returns new array in which `char` are interleaved between the original items.
  *
  * @param {Array} items
  * @param {String} char
@@ -506,19 +598,8 @@ module.exports = {
 };
 
 /***/ }),
-/* 1 */
-/***/ (function(module, exports) {
 
-module.exports = __WEBPACK_EXTERNAL_MODULE_1__;
-
-/***/ }),
-/* 2 */
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_2__;
-
-/***/ }),
-/* 3 */
+/***/ 3645:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -526,7 +607,7 @@ module.exports = __WEBPACK_EXTERNAL_MODULE_2__;
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 module.exports = {
   MODE: {
@@ -537,7 +618,8 @@ module.exports = {
 };
 
 /***/ }),
-/* 4 */
+
+/***/ 3647:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -545,61 +627,58 @@ module.exports = {
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-__webpack_require__(23);
+__webpack_require__(3672);
 
 // Load all existing rep templates
-const Undefined = __webpack_require__(24);
-const Null = __webpack_require__(25);
-const StringRep = __webpack_require__(7);
-const Number = __webpack_require__(26);
-const ArrayRep = __webpack_require__(5);
-const Obj = __webpack_require__(27);
-const SymbolRep = __webpack_require__(28);
-const InfinityRep = __webpack_require__(29);
-const NaNRep = __webpack_require__(30);
-const Accessor = __webpack_require__(31);
+const Undefined = __webpack_require__(3673);
+const Null = __webpack_require__(3674);
+const StringRep = __webpack_require__(3648);
+const Number = __webpack_require__(3675);
+const ArrayRep = __webpack_require__(3649);
+const Obj = __webpack_require__(3676);
+const SymbolRep = __webpack_require__(3677);
+const InfinityRep = __webpack_require__(3678);
+const NaNRep = __webpack_require__(3679);
+const Accessor = __webpack_require__(3680);
 
 // DOM types (grips)
-const Attribute = __webpack_require__(32);
-const DateTime = __webpack_require__(33);
-const Document = __webpack_require__(34);
-const DocumentType = __webpack_require__(35);
-const Event = __webpack_require__(36);
-const Func = __webpack_require__(12);
-const PromiseRep = __webpack_require__(37);
-const RegExp = __webpack_require__(38);
-const StyleSheet = __webpack_require__(39);
-const CommentNode = __webpack_require__(40);
-const ElementNode = __webpack_require__(41);
-const TextNode = __webpack_require__(42);
-const ErrorRep = __webpack_require__(43);
-const Window = __webpack_require__(44);
-const ObjectWithText = __webpack_require__(45);
-const ObjectWithURL = __webpack_require__(46);
-const GripArray = __webpack_require__(13);
-const GripMap = __webpack_require__(15);
-const GripMapEntry = __webpack_require__(16);
-const Grip = __webpack_require__(8);
+const Attribute = __webpack_require__(3681);
+const DateTime = __webpack_require__(3682);
+const Document = __webpack_require__(3683);
+const DocumentType = __webpack_require__(3684);
+const Event = __webpack_require__(3685);
+const Func = __webpack_require__(3658);
+const PromiseRep = __webpack_require__(3686);
+const RegExp = __webpack_require__(3687);
+const StyleSheet = __webpack_require__(3688);
+const CommentNode = __webpack_require__(3689);
+const ElementNode = __webpack_require__(3690);
+const TextNode = __webpack_require__(3691);
+const ErrorRep = __webpack_require__(3660);
+const Window = __webpack_require__(3692);
+const ObjectWithText = __webpack_require__(3693);
+const ObjectWithURL = __webpack_require__(3694);
+const GripArray = __webpack_require__(3661);
+const GripMap = __webpack_require__(3663);
+const GripMapEntry = __webpack_require__(3664);
+const Grip = __webpack_require__(3656);
 
 // List of all registered template.
 // XXX there should be a way for extensions to register a new
 // or modify an existing rep.
-let reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor];
+const reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor];
 
 /**
- * Generic rep that is using for rendering native JS types or an object.
+ * Generic rep that is used for rendering native JS types or an object.
  * The right template used for rendering is picked automatically according
  * to the current value type. The value must be passed is as 'object'
  * property.
  */
 const Rep = function (props) {
-  let {
-    object,
-    defaultRep
-  } = props;
-  let rep = getRep(object, defaultRep, props.noGrip);
+  const { object, defaultRep } = props;
+  const rep = getRep(object, defaultRep, props.noGrip);
   return rep(props);
 };
 
@@ -613,14 +692,15 @@ const Rep = function (props) {
  * can be generic JS object as well as a grip (handle to a remote
  * debuggee object).
  *
- * @param defaultObject {React.Component} The default template
+ * @param defaultRep {React.Component} The default template
  * that should be used to render given object if none is found.
  *
- * @param noGrip {Boolean} If true, will only check reps not made for remote objects.
+ * @param noGrip {Boolean} If true, will only check reps not made for remote
+ *                         objects.
  */
 function getRep(object, defaultRep = Obj, noGrip = false) {
   for (let i = 0; i < reps.length; i++) {
-    let rep = reps[i];
+    const rep = reps[i];
     try {
       // supportsObject could return weight (not only true/false
       // but a number), which would allow to priorities templates and
@@ -676,7 +756,8 @@ module.exports = {
 };
 
 /***/ }),
-/* 5 */
+
+/***/ 3648:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -684,246 +765,10 @@ module.exports = {
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // Dependencies
-const dom = __webpack_require__(1);
-const PropTypes = __webpack_require__(2);
-const {
-  wrapRender
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-const { span } = dom;
-
-const ModePropType = PropTypes.oneOf(
-// @TODO Change this to Object.values once it's supported in Node's version of V8
-Object.keys(MODE).map(key => MODE[key]));
-
-/**
- * Renders an array. The array is enclosed by left and right bracket
- * and the max number of rendered items depends on the current mode.
- */
-ArrayRep.propTypes = {
-  mode: ModePropType,
-  object: PropTypes.array.isRequired
-};
-
-function ArrayRep(props) {
-  let {
-    object,
-    mode = MODE.SHORT
-  } = props;
-
-  let items;
-  let brackets;
-  let needSpace = function (space) {
-    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
-  };
-
-  if (mode === MODE.TINY) {
-    let isEmpty = object.length === 0;
-    if (isEmpty) {
-      items = [];
-    } else {
-      items = [span({
-        className: "more-ellipsis",
-        title: "more…"
-      }, "…")];
-    }
-    brackets = needSpace(false);
-  } else {
-    items = arrayIterator(props, object, maxLengthMap.get(mode));
-    brackets = needSpace(items.length > 0);
-  }
-
-  return span({
-    className: "objectBox objectBox-array" }, span({
-    className: "arrayLeftBracket"
-  }, brackets.left), ...items, span({
-    className: "arrayRightBracket"
-  }, brackets.right));
-}
-
-function arrayIterator(props, array, max) {
-  let items = [];
-
-  for (let i = 0; i < array.length && i < max; i++) {
-    let config = {
-      mode: MODE.TINY,
-      delim: i == array.length - 1 ? "" : ", "
-    };
-    let item;
-
-    try {
-      item = ItemRep({
-        ...props,
-        ...config,
-        object: array[i]
-      });
-    } catch (exc) {
-      item = ItemRep({
-        ...props,
-        ...config,
-        object: exc
-      });
-    }
-    items.push(item);
-  }
-
-  if (array.length > max) {
-    items.push(span({
-      className: "more-ellipsis",
-      title: "more…"
-    }, "…"));
-  }
-
-  return items;
-}
-
-/**
- * Renders array item. Individual values are separated by a comma.
- */
-ItemRep.propTypes = {
-  object: PropTypes.any.isRequired,
-  delim: PropTypes.string.isRequired,
-  mode: ModePropType
-};
-
-function ItemRep(props) {
-  const { Rep } = __webpack_require__(4);
-
-  let {
-    object,
-    delim,
-    mode
-  } = props;
-  return span({}, Rep({
-    ...props,
-    object: object,
-    mode: mode
-  }), delim);
-}
-
-function getLength(object) {
-  return object.length;
-}
-
-function supportsObject(object) {
-  return Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]";
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ArrayRep),
-  supportsObject,
-  maxLengthMap,
-  getLength,
-  ModePropType
-};
-
-/***/ }),
-/* 6 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-const {
-  maybeEscapePropertyName,
-  wrapRender
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-
-const { span } = __webpack_require__(1);
-
-/**
- * Property for Obj (local JS objects), Grip (remote JS objects)
- * and GripMap (remote JS maps and weakmaps) reps.
- * It's used to render object properties.
- */
-PropRep.propTypes = {
-  // Property name.
-  name: PropTypes.oneOfType([PropTypes.string, PropTypes.object]).isRequired,
-  // Equal character rendered between property name and value.
-  equal: PropTypes.string,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func,
-  // Normally a PropRep will quote a property name that isn't valid
-  // when unquoted; but this flag can be used to suppress the
-  // quoting.
-  suppressQuotes: PropTypes.bool
-};
-
-/**
- * Function that given a name, a delimiter and an object returns an array
- * of React elements representing an object property (e.g. `name: value`)
- *
- * @param {Object} props
- * @return {Array} Array of React elements.
- */
-function PropRep(props) {
-  const Grip = __webpack_require__(8);
-  const { Rep } = __webpack_require__(4);
-
-  let {
-    name,
-    mode,
-    equal,
-    suppressQuotes
-  } = props;
-
-  let key;
-  // The key can be a simple string, for plain objects,
-  // or another object for maps and weakmaps.
-  if (typeof name === "string") {
-    if (!suppressQuotes) {
-      name = maybeEscapePropertyName(name);
-    }
-    key = span({ "className": "nodeName" }, name);
-  } else {
-    key = Rep({
-      ...props,
-      className: "nodeName",
-      object: name,
-      mode: mode || MODE.TINY,
-      defaultRep: Grip
-    });
-  }
-
-  return [key, span({
-    "className": "objectEqual"
-  }, equal), Rep({ ...props })];
-}
-
-// Exports from this module
-module.exports = wrapRender(PropRep);
-
-/***/ }),
-/* 7 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
+const PropTypes = __webpack_require__(3642);
 
 const {
   containsURL,
@@ -936,9 +781,9 @@ const {
   isGrip,
   tokenSplitRegex,
   ELLIPSIS
-} = __webpack_require__(0);
+} = __webpack_require__(3644);
 
-const dom = __webpack_require__(1);
+const dom = __webpack_require__(3643);
 const { a, span } = dom;
 
 /**
@@ -949,14 +794,14 @@ StringRep.propTypes = {
   escapeWhitespace: PropTypes.bool,
   style: PropTypes.object,
   cropLimit: PropTypes.number.isRequired,
-  member: PropTypes.string,
+  member: PropTypes.object,
   object: PropTypes.object.isRequired,
   openLink: PropTypes.func,
   className: PropTypes.string
 };
 
 function StringRep(props) {
-  let {
+  const {
     className,
     style,
     cropLimit,
@@ -970,13 +815,19 @@ function StringRep(props) {
   let text = object;
 
   const isLong = isLongString(object);
-  const shouldCrop = (!member || !member.open) && cropLimit && text.length > cropLimit;
+  const isOpen = member && member.open;
+  const shouldCrop = !isOpen && cropLimit && text.length > cropLimit;
 
   if (isLong) {
     text = maybeCropLongString({
       shouldCrop,
       cropLimit
     }, text);
+
+    const { fullText } = object;
+    if (isOpen && fullText) {
+      text = fullText;
+    }
   }
 
   text = formatText({
@@ -1007,18 +858,11 @@ function StringRep(props) {
 }
 
 function maybeCropLongString(opts, text) {
-  const {
-    shouldCrop,
-    cropLimit
-  } = opts;
+  const { shouldCrop, cropLimit } = opts;
 
-  const {
-    fullText,
-    initial,
-    length
-  } = text;
+  const { initial, length } = text;
 
-  text = shouldCrop ? initial.substring(0, cropLimit) : fullText || initial;
+  text = shouldCrop ? initial.substring(0, cropLimit) : initial;
 
   if (text.length < length) {
     text += ELLIPSIS;
@@ -1028,20 +872,13 @@ function maybeCropLongString(opts, text) {
 }
 
 function formatText(opts, text) {
-  let {
-    useQuotes,
-    escapeWhitespace
-  } = opts;
+  const { useQuotes, escapeWhitespace } = opts;
 
   return useQuotes ? escapeString(text, escapeWhitespace) : sanitizeString(text);
 }
 
 function getElementConfig(opts) {
-  const {
-    className,
-    style,
-    actor
-  } = opts;
+  const { className, style, actor } = opts;
 
   const config = {};
 
@@ -1063,10 +900,7 @@ function getElementConfig(opts) {
 }
 
 function maybeCropString(opts, text) {
-  const {
-    shouldCrop,
-    cropLimit
-  } = opts;
+  const { shouldCrop, cropLimit } = opts;
 
   return shouldCrop ? rawCropString(text, cropLimit) : text;
 }
@@ -1085,11 +919,11 @@ function getLinkifiedElements(text, cropLimit, openLink) {
   const startCropIndex = cropLimit ? halfLimit : null;
   const endCropIndex = cropLimit ? text.length - halfLimit : null;
 
-  // As we walk through the tokens of the source string, we make sure to preserve
-  // the original whitespace that separated the tokens.
+  // As we walk through the tokens of the source string, we make sure to
+  // preserve the original whitespace that separated the tokens.
   let currentIndex = 0;
   const items = [];
-  for (let token of text.split(tokenSplitRegex)) {
+  for (const token of text.split(tokenSplitRegex)) {
     if (isURL(token)) {
       // Let's grab all the non-url strings before the link.
       const tokenStart = text.indexOf(token, currentIndex);
@@ -1102,7 +936,7 @@ function getLinkifiedElements(text, cropLimit, openLink) {
       // Update the index to match the beginning of the token.
       currentIndex = tokenStart;
 
-      let linkText = getCroppedString(token, currentIndex, startCropIndex, endCropIndex);
+      const linkText = getCroppedString(token, currentIndex, startCropIndex, endCropIndex);
       if (linkText) {
         items.push(a({
           className: "url",
@@ -1134,17 +968,18 @@ function getLinkifiedElements(text, cropLimit, openLink) {
 }
 
 /**
- * Returns a cropped substring given an offset, start and end crop indices in a parent
- * string.
+ * Returns a cropped substring given an offset, start and end crop indices in a
+ * parent string.
  *
  * @param {String} text: The substring to crop.
- * @param {Integer} offset: The offset corresponding to the index at which the substring
- *                          is in the parent string.
- * @param {Integer|null} startCropIndex: the index where the start of the crop should
- *                                       happen in the parent string.
- * @param {Integer|null} endCropIndex: the index where the end of the crop should happen
- *                                     in the parent string
- * @returns {String|null} The cropped substring, or null if the text is completly cropped.
+ * @param {Integer} offset: The offset corresponding to the index at which
+ *                          the substring is in the parent string.
+ * @param {Integer|null} startCropIndex: the index where the start of the crop
+ *                                       should happen in the parent string.
+ * @param {Integer|null} endCropIndex: the index where the end of the crop
+ *                                     should happen in the parent string
+ * @returns {String|null} The cropped substring, or null if the text is
+ *                        completly cropped.
  */
 function getCroppedString(text, offset = 0, startCropIndex, endCropIndex) {
   if (!startCropIndex) {
@@ -1191,11 +1026,233 @@ function supportsObject(object, noGrip = false) {
 
 module.exports = {
   rep: wrapRender(StringRep),
-  supportsObject
+  supportsObject,
+  isLongString
 };
 
 /***/ }),
-/* 8 */
+
+/***/ 3649:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const dom = __webpack_require__(3643);
+const PropTypes = __webpack_require__(3642);
+const { wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const { span } = dom;
+
+const ModePropType = PropTypes.oneOf(
+// @TODO Change this to Object.values when supported in Node's version of V8
+Object.keys(MODE).map(key => MODE[key]));
+
+/**
+ * Renders an array. The array is enclosed by left and right bracket
+ * and the max number of rendered items depends on the current mode.
+ */
+ArrayRep.propTypes = {
+  mode: ModePropType,
+  object: PropTypes.array.isRequired
+};
+
+function ArrayRep(props) {
+  const { object, mode = MODE.SHORT } = props;
+
+  let items;
+  let brackets;
+  const needSpace = function (space) {
+    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
+  };
+
+  if (mode === MODE.TINY) {
+    const isEmpty = object.length === 0;
+    if (isEmpty) {
+      items = [];
+    } else {
+      items = [span({
+        className: "more-ellipsis",
+        title: "more…"
+      }, "…")];
+    }
+    brackets = needSpace(false);
+  } else {
+    items = arrayIterator(props, object, maxLengthMap.get(mode));
+    brackets = needSpace(items.length > 0);
+  }
+
+  return span({
+    className: "objectBox objectBox-array"
+  }, span({
+    className: "arrayLeftBracket"
+  }, brackets.left), ...items, span({
+    className: "arrayRightBracket"
+  }, brackets.right));
+}
+
+function arrayIterator(props, array, max) {
+  const items = [];
+
+  for (let i = 0; i < array.length && i < max; i++) {
+    const config = {
+      mode: MODE.TINY,
+      delim: i == array.length - 1 ? "" : ", "
+    };
+    let item;
+
+    try {
+      item = ItemRep(_extends({}, props, config, {
+        object: array[i]
+      }));
+    } catch (exc) {
+      item = ItemRep(_extends({}, props, config, {
+        object: exc
+      }));
+    }
+    items.push(item);
+  }
+
+  if (array.length > max) {
+    items.push(span({
+      className: "more-ellipsis",
+      title: "more…"
+    }, "…"));
+  }
+
+  return items;
+}
+
+/**
+ * Renders array item. Individual values are separated by a comma.
+ */
+ItemRep.propTypes = {
+  object: PropTypes.any.isRequired,
+  delim: PropTypes.string.isRequired,
+  mode: ModePropType
+};
+
+function ItemRep(props) {
+  const { Rep } = __webpack_require__(3647);
+
+  const { object, delim, mode } = props;
+  return span({}, Rep(_extends({}, props, {
+    object: object,
+    mode: mode
+  })), delim);
+}
+
+function getLength(object) {
+  return object.length;
+}
+
+function supportsObject(object) {
+  return Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]";
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ArrayRep),
+  supportsObject,
+  maxLengthMap,
+  getLength,
+  ModePropType
+};
+
+/***/ }),
+
+/***/ 3650:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+const { maybeEscapePropertyName, wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const { span } = __webpack_require__(3643);
+
+/**
+ * Property for Obj (local JS objects), Grip (remote JS objects)
+ * and GripMap (remote JS maps and weakmaps) reps.
+ * It's used to render object properties.
+ */
+PropRep.propTypes = {
+  // Property name.
+  name: PropTypes.oneOfType([PropTypes.string, PropTypes.object]).isRequired,
+  // Equal character rendered between property name and value.
+  equal: PropTypes.string,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func,
+  // Normally a PropRep will quote a property name that isn't valid
+  // when unquoted; but this flag can be used to suppress the
+  // quoting.
+  suppressQuotes: PropTypes.bool
+};
+
+/**
+ * Function that given a name, a delimiter and an object returns an array
+ * of React elements representing an object property (e.g. `name: value`)
+ *
+ * @param {Object} props
+ * @return {Array} Array of React elements.
+ */
+function PropRep(props) {
+  const Grip = __webpack_require__(3656);
+  const { Rep } = __webpack_require__(3647);
+
+  let { name, mode, equal, suppressQuotes } = props;
+
+  let key;
+  // The key can be a simple string, for plain objects,
+  // or another object for maps and weakmaps.
+  if (typeof name === "string") {
+    if (!suppressQuotes) {
+      name = maybeEscapePropertyName(name);
+    }
+    key = span({ className: "nodeName" }, name);
+  } else {
+    key = Rep(_extends({}, props, {
+      className: "nodeName",
+      object: name,
+      mode: mode || MODE.TINY,
+      defaultRep: Grip
+    }));
+  }
+
+  return [key, span({
+    className: "objectEqual"
+  }, equal), Rep(_extends({}, props))];
+}
+
+// Exports from this module
+module.exports = wrapRender(PropRep);
+
+/***/ }),
+
+/***/ 3655:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1203,21 +1260,55 @@ module.exports = {
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { MODE } = __webpack_require__(3645);
+const { REPS, getRep } = __webpack_require__(3647);
+const ObjectInspector = __webpack_require__(3695);
+const ObjectInspectorUtils = __webpack_require__(3657);
+
+const {
+  parseURLEncodedText,
+  parseURLParams,
+  maybeEscapePropertyName,
+  getGripPreviewItems
+} = __webpack_require__(3644);
+
+module.exports = {
+  REPS,
+  getRep,
+  MODE,
+  maybeEscapePropertyName,
+  parseURLEncodedText,
+  parseURLParams,
+  getGripPreviewItems,
+  ObjectInspector,
+  ObjectInspectorUtils
+};
+
+/***/ }),
+
+/***/ 3656:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // ReactJS
-const PropTypes = __webpack_require__(2);
+const PropTypes = __webpack_require__(3642);
 
 // Dependencies
-const {
-  interleave,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-const PropRep = __webpack_require__(6);
-const { MODE } = __webpack_require__(3);
+const { interleave, isGrip, wrapRender } = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
 
-const dom = __webpack_require__(1);
+const dom = __webpack_require__(3643);
 const { span } = dom;
 
 /**
@@ -1227,7 +1318,7 @@ const { span } = dom;
  */
 GripRep.propTypes = {
   object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
+  // @TODO Change this to Object.values when supported in Node's version of V8
   mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
   isInterestingProp: PropTypes.func,
   title: PropTypes.string,
@@ -1240,10 +1331,7 @@ GripRep.propTypes = {
 const DEFAULT_TITLE = "Object";
 
 function GripRep(props) {
-  let {
-    mode = MODE.SHORT,
-    object
-  } = props;
+  const { mode = MODE.SHORT, object } = props;
 
   const config = {
     "data-link-actor-id": object.actor,
@@ -1251,7 +1339,7 @@ function GripRep(props) {
   };
 
   if (mode === MODE.TINY) {
-    let propertiesLength = getPropertiesLength(object);
+    const propertiesLength = getPropertiesLength(object);
 
     const tinyModeItems = [];
     if (getTitle(props, object) !== DEFAULT_TITLE) {
@@ -1271,7 +1359,7 @@ function GripRep(props) {
     return span(config, ...tinyModeItems);
   }
 
-  let propsArray = safePropIterator(props, object, maxLengthMap.get(mode));
+  const propsArray = safePropIterator(props, object, maxLengthMap.get(mode));
 
   return span(config, getTitleElement(props, object), span({
     className: "objectLeftBrace"
@@ -1316,7 +1404,7 @@ function safePropIterator(props, object, max) {
 
 function propIterator(props, object, max) {
   if (object.preview && Object.keys(object.preview).includes("wrappedValue")) {
-    const { Rep } = __webpack_require__(4);
+    const { Rep } = __webpack_require__(3647);
 
     return [Rep({
       object: object.preview.wrappedValue,
@@ -1326,21 +1414,22 @@ function propIterator(props, object, max) {
   }
 
   // Property filter. Show only interesting properties to the user.
-  let isInterestingProp = props.isInterestingProp || ((type, value) => {
+  const isInterestingProp = props.isInterestingProp || ((type, value) => {
     return type == "boolean" || type == "number" || type == "string" && value.length != 0;
   });
 
   let properties = object.preview ? object.preview.ownProperties || {} : {};
 
-  let propertiesLength = getPropertiesLength(object);
+  const propertiesLength = getPropertiesLength(object);
 
   if (object.preview && object.preview.safeGetterValues) {
-    properties = { ...properties, ...object.preview.safeGetterValues };
+    properties = _extends({}, properties, object.preview.safeGetterValues);
   }
 
   let indexes = getPropIndexes(properties, max, isInterestingProp);
   if (indexes.length < max && indexes.length < propertiesLength) {
-    // There are not enough props yet. Then add uninteresting props to display them.
+    // There are not enough props yet.
+    // Then add uninteresting props to display them.
     indexes = indexes.concat(getPropIndexes(properties, max - indexes.length, (t, value, name) => {
       return !isInterestingProp(t, value, name);
     }));
@@ -1351,7 +1440,7 @@ function propIterator(props, object, max) {
   // as synthetic properties, they appear more natural when
   // unquoted.
   const suppressQuotes = object.class === "Proxy";
-  let propsArray = getProps(props, properties, indexes, suppressQuotes);
+  const propsArray = getProps(props, properties, indexes, suppressQuotes);
 
   // Show symbols.
   if (object.preview && object.preview.ownSymbols) {
@@ -1359,8 +1448,7 @@ function propIterator(props, object, max) {
     const length = max - indexes.length;
 
     const symbolsProps = ownSymbols.slice(0, length).map(symbolItem => {
-      return PropRep({
-        ...props,
+      return PropRep(_extends({}, props, {
         mode: MODE.TINY,
         name: symbolItem,
         object: symbolItem.descriptor.value,
@@ -1368,16 +1456,16 @@ function propIterator(props, object, max) {
         defaultRep: Grip,
         title: null,
         suppressQuotes
-      });
+      }));
     });
 
     propsArray.push(...symbolsProps);
   }
 
-  if (Object.keys(properties).length > max || propertiesLength > max
-  // When the object has non-enumerable properties, we don't have them in the packet,
-  // but we might want to show there's something in the object.
-  || propertiesLength > propsArray.length) {
+  if (Object.keys(properties).length > max || propertiesLength > max ||
+  // When the object has non-enumerable properties, we don't have them in the
+  // packet, but we might want to show there's something in the object.
+  propertiesLength > propsArray.length) {
     // There are some undisplayed props. Then display "more...".
     propsArray.push(span({
       key: "more",
@@ -1407,11 +1495,10 @@ function getProps(componentProps, properties, indexes, suppressQuotes) {
 
   const propertiesKeys = Object.keys(properties);
   return indexes.map(i => {
-    let name = propertiesKeys[i];
-    let value = getPropValue(properties[name]);
+    const name = propertiesKeys[i];
+    const value = getPropValue(properties[name]);
 
-    return PropRep({
-      ...componentProps,
+    return PropRep(_extends({}, componentProps, {
       mode: MODE.TINY,
       name,
       object: value,
@@ -1419,7 +1506,7 @@ function getProps(componentProps, properties, indexes, suppressQuotes) {
       defaultRep: Grip,
       title: null,
       suppressQuotes
-    });
+    }));
   });
 }
 
@@ -1432,18 +1519,18 @@ function getProps(componentProps, properties, indexes, suppressQuotes) {
  * @return {Array} Indexes of interesting props in the object.
  */
 function getPropIndexes(properties, max, filter) {
-  let indexes = [];
+  const indexes = [];
 
   try {
     let i = 0;
-    for (let name in properties) {
+    for (const name in properties) {
       if (indexes.length >= max) {
         return indexes;
       }
 
       // Type is specified in grip's "class" field and for primitive
       // values use typeof.
-      let value = getPropValue(properties[name]);
+      const value = getPropValue(properties[name]);
       let type = value.class || typeof value;
       type = type.toLowerCase();
 
@@ -1467,7 +1554,7 @@ function getPropIndexes(properties, max, filter) {
 function getPropValue(property) {
   let value = property;
   if (typeof property === "object") {
-    let keys = Object.keys(property);
+    const keys = Object.keys(property);
     if (keys.includes("value")) {
       value = property.value;
     } else if (keys.includes("getterValue")) {
@@ -1495,7 +1582,7 @@ maxLengthMap.set(MODE.SHORT, 3);
 maxLengthMap.set(MODE.LONG, 10);
 
 // Grip is used in propIterator and has to be defined here.
-let Grip = {
+const Grip = {
   rep: wrapRender(GripRep),
   supportsObject,
   maxLengthMap
@@ -1505,7 +1592,59 @@ let Grip = {
 module.exports = Grip;
 
 /***/ }),
-/* 9 */
+
+/***/ 3657:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const client = __webpack_require__(3665);
+const loadProperties = __webpack_require__(3666);
+const node = __webpack_require__(3667);
+const { nodeIsError, nodeIsPrimitive } = node;
+const selection = __webpack_require__(3698);
+
+const { MODE } = __webpack_require__(3645);
+const { REPS: { Rep, Grip } } = __webpack_require__(3647);
+
+
+function shouldRenderRootsInReps(roots) {
+  if (roots.length > 1) {
+    return false;
+  }
+
+  const root = roots[0];
+  const name = root && root.name;
+  return (name === null || typeof name === "undefined") && (nodeIsPrimitive(root) || nodeIsError(root));
+}
+
+function renderRep(item, props) {
+  return Rep(_extends({}, props, {
+    object: node.getValue(item),
+    mode: props.mode || MODE.TINY,
+    defaultRep: Grip
+  }));
+}
+
+module.exports = {
+  client,
+  loadProperties,
+  node,
+  renderRep,
+  selection,
+  shouldRenderRootsInReps
+};
+
+/***/ }),
+
+/***/ 3658:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1513,7 +1652,169 @@ module.exports = Grip;
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, cropString, wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+const IGNORED_SOURCE_URLS = ["debugger eval code"];
+
+/**
+ * This component represents a template for Function objects.
+ */
+FunctionRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  parameterNames: PropTypes.array,
+  onViewSourceInDebugger: PropTypes.func
+};
+
+function FunctionRep(props) {
+  const { object: grip, onViewSourceInDebugger } = props;
+
+  let jumpToDefinitionButton;
+  if (onViewSourceInDebugger && grip.location && grip.location.url && !IGNORED_SOURCE_URLS.includes(grip.location.url)) {
+    jumpToDefinitionButton = dom.button({
+      className: "jump-definition",
+      draggable: false,
+      title: "Jump to definition",
+      onClick: e => {
+        // Stop the event propagation so we don't trigger ObjectInspector
+        // expand/collapse.
+        e.stopPropagation();
+        onViewSourceInDebugger(grip.location);
+      }
+    });
+  }
+
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-function",
+    // Set dir="ltr" to prevent function parentheses from
+    // appearing in the wrong direction
+    dir: "ltr"
+  }, getTitle(grip, props), getFunctionName(grip, props), "(", ...renderParams(props), ")", jumpToDefinitionButton);
+}
+
+function getTitle(grip, props) {
+  const { mode } = props;
+
+  if (mode === MODE.TINY && !grip.isGenerator && !grip.isAsync) {
+    return null;
+  }
+
+  let title = mode === MODE.TINY ? "" : "function ";
+
+  if (grip.isGenerator) {
+    title = mode === MODE.TINY ? "* " : "function* ";
+  }
+
+  if (grip.isAsync) {
+    title = `${"async" + " "}${title}`;
+  }
+
+  return span({
+    className: "objectTitle"
+  }, title);
+}
+
+/**
+ * Returns a ReactElement representing the function name.
+ *
+ * @param {Object} grip : Function grip
+ * @param {Object} props: Function rep props
+ */
+function getFunctionName(grip, props = {}) {
+  let { functionName } = props;
+  let name;
+
+  if (functionName) {
+    const end = functionName.length - 1;
+    functionName = functionName.startsWith('"') && functionName.endsWith('"') ? functionName.substring(1, end) : functionName;
+  }
+
+  if (grip.displayName != undefined && functionName != undefined && grip.displayName != functionName) {
+    name = `${functionName}:${grip.displayName}`;
+  } else {
+    name = cleanFunctionName(grip.userDisplayName || grip.displayName || grip.name || props.functionName || "");
+  }
+
+  return cropString(name, 100);
+}
+
+const objectProperty = /([\w\d]+)$/;
+const arrayProperty = /\[(.*?)\]$/;
+const functionProperty = /([\w\d]+)[\/\.<]*?$/;
+const annonymousProperty = /([\w\d]+)\(\^\)$/;
+
+/**
+ * Decodes an anonymous naming scheme that
+ * spider monkey implements based on "Naming Anonymous JavaScript Functions"
+ * http://johnjbarton.github.io/nonymous/index.html
+ *
+ * @param {String} name : Function name to clean up
+ * @returns String
+ */
+function cleanFunctionName(name) {
+  for (const reg of [objectProperty, arrayProperty, functionProperty, annonymousProperty]) {
+    const match = reg.exec(name);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return name;
+}
+
+function renderParams(props) {
+  const { parameterNames = [] } = props;
+
+  return parameterNames.filter(param => param).reduce((res, param, index, arr) => {
+    res.push(span({ className: "param" }, param));
+    if (index < arr.length - 1) {
+      res.push(span({ className: "delimiter" }, ", "));
+    }
+    return res;
+  }, []);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  const type = getGripType(grip, noGrip);
+  if (noGrip === true || !isGrip(grip)) {
+    return type == "function";
+  }
+
+  return type == "Function";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(FunctionRep),
+  supportsObject,
+  cleanFunctionName,
+  // exported for testing purpose.
+  getFunctionName
+};
+
+/***/ }),
+
+/***/ 3659:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 module.exports = {
   ELEMENT_NODE: 1,
@@ -1539,13 +1840,8 @@ module.exports = {
 };
 
 /***/ }),
-/* 10 */
-/***/ (function(module, exports) {
 
-module.exports = __WEBPACK_EXTERNAL_MODULE_10__;
-
-/***/ }),
-/* 11 */
+/***/ 3660:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -1553,19 +1849,1018 @@ module.exports = __WEBPACK_EXTERNAL_MODULE_10__;
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-const { get, has } = __webpack_require__(54);
-const { maybeEscapePropertyName } = __webpack_require__(0);
-const ArrayRep = __webpack_require__(5);
-const GripArrayRep = __webpack_require__(13);
-const GripMap = __webpack_require__(15);
-const GripMapEntryRep = __webpack_require__(16);
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+// Utils
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+const { cleanFunctionName } = __webpack_require__(3658);
+const { isLongString } = __webpack_require__(3648);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+const IGNORED_SOURCE_URLS = ["debugger eval code"];
+
+/**
+ * Renders Error objects.
+ */
+ErrorRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
+};
+
+function ErrorRep(props) {
+  const object = props.object;
+  const preview = object.preview;
+
+  let name;
+  if (preview && preview.name && preview.kind) {
+    switch (preview.kind) {
+      case "Error":
+        name = preview.name;
+        break;
+      case "DOMException":
+        name = preview.kind;
+        break;
+      default:
+        throw new Error("Unknown preview kind for the Error rep.");
+    }
+  } else {
+    name = "Error";
+  }
+
+  const content = [];
+
+  if (props.mode === MODE.TINY) {
+    content.push(name);
+  } else {
+    content.push(`${name}: "${preview.message}"`);
+  }
+
+  if (preview.stack && props.mode !== MODE.TINY) {
+    content.push("\n", getStacktraceElements(props, preview));
+  }
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox-stackTrace"
+  }, content);
+}
+
+/**
+ * Returns a React element reprensenting the Error stacktrace, i.e.
+ * transform error.stack from:
+ *
+ * semicolon@debugger eval code:1:109
+ * jkl@debugger eval code:1:63
+ * asdf@debugger eval code:1:28
+ * @debugger eval code:1:227
+ *
+ * Into a column layout:
+ *
+ * semicolon  (<anonymous>:8:10)
+ * jkl        (<anonymous>:5:10)
+ * asdf       (<anonymous>:2:10)
+ *            (<anonymous>:11:1)
+ */
+function getStacktraceElements(props, preview) {
+  const stack = [];
+  if (!preview.stack) {
+    return stack;
+  }
+
+  const isStacktraceALongString = isLongString(preview.stack);
+  const stackString = isStacktraceALongString ? preview.stack.initial : preview.stack;
+
+  stackString.split("\n").forEach((frame, index) => {
+    if (!frame) {
+      // Skip any blank lines
+      return;
+    }
+
+    let functionName;
+    let location;
+
+    // Given the input: "functionName@scriptLocation:2:100"
+    // Result: [
+    //   "functionName@scriptLocation:2:100",
+    //   "functionName",
+    //   "scriptLocation:2:100"
+    // ]
+    const result = frame.match(/^(.*)@(.*)$/);
+    if (result && result.length === 3) {
+      functionName = result[1];
+
+      // If the resource was loaded by base-loader.js, the location looks like:
+      // resource://devtools/shared/base-loader.js -> resource://path/to/file.js .
+      // What's needed is only the last part after " -> ".
+      location = result[2].split(" -> ").pop();
+    }
+
+    if (!functionName) {
+      functionName = "<anonymous>";
+    }
+
+    let onLocationClick;
+    // Given the input: "scriptLocation:2:100"
+    // Result:
+    // ["scriptLocation:2:100", "scriptLocation", "2", "100"]
+    const locationParts = location.match(/^(.*):(\d+):(\d+)$/);
+    if (props.onViewSourceInDebugger && location && !IGNORED_SOURCE_URLS.includes(locationParts[1]) && locationParts) {
+      const [, url, line, column] = locationParts;
+      onLocationClick = e => {
+        // Don't trigger ObjectInspector expand/collapse.
+        e.stopPropagation();
+        props.onViewSourceInDebugger({
+          url,
+          line: Number(line),
+          column: Number(column)
+        });
+      };
+    }
+
+    stack.push(span({
+      key: `fn${index}`,
+      className: "objectBox-stackTrace-fn"
+    }, cleanFunctionName(functionName)), span({
+      key: `location${index}`,
+      className: "objectBox-stackTrace-location",
+      onClick: onLocationClick,
+      title: onLocationClick ? `View source in debugger → ${location}` : undefined
+    }, location));
+  });
+
+  if (isStacktraceALongString) {
+    // Remove the last frame (i.e. 2 last elements in the array, the function
+    // name and the location) which is certainly incomplete.
+    // Can be removed when https://bugzilla.mozilla.org/show_bug.cgi?id=1448833
+    // is fixed.
+    stack.splice(-2);
+  }
+
+  return span({
+    key: "stack",
+    className: "objectBox-stackTrace-grid"
+  }, stack);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return object.preview && getGripType(object, noGrip) === "Error" || object.class === "DOMException";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ErrorRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3661:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { lengthBubble } = __webpack_require__(3662);
+const {
+  interleave,
+  getGripType,
+  isGrip,
+  wrapRender,
+  ellipsisElement
+} = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+const { ModePropType } = __webpack_require__(3649);
+const DEFAULT_TITLE = "Array";
+
+/**
+ * Renders an array. The array is enclosed by left and right bracket
+ * and the max number of rendered items depends on the current mode.
+ */
+GripArray.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: ModePropType,
+  provider: PropTypes.object,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function GripArray(props) {
+  const { object, mode = MODE.SHORT } = props;
+
+  let brackets;
+  const needSpace = function (space) {
+    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
+  };
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-array"
+  };
+
+  const title = getTitle(props, object);
+
+  if (mode === MODE.TINY) {
+    const isEmpty = getLength(object) === 0;
+
+    // Omit bracketed ellipsis for non-empty non-Array arraylikes (f.e: Sets).
+    if (!isEmpty && object.class !== "Array") {
+      return span(config, title);
+    }
+
+    brackets = needSpace(false);
+    return span(config, title, span({
+      className: "arrayLeftBracket"
+    }, brackets.left), isEmpty ? null : ellipsisElement, span({
+      className: "arrayRightBracket"
+    }, brackets.right));
+  }
+
+  const max = maxLengthMap.get(mode);
+  const items = arrayIterator(props, object, max);
+  brackets = needSpace(items.length > 0);
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-array"
+  }, title, span({
+    className: "arrayLeftBracket"
+  }, brackets.left), ...interleave(items, ", "), span({
+    className: "arrayRightBracket"
+  }, brackets.right), span({
+    className: "arrayProperties",
+    role: "group"
+  }));
+}
+
+function getLength(grip) {
+  if (!grip.preview) {
+    return 0;
+  }
+
+  return grip.preview.length || grip.preview.childNodesLength || 0;
+}
+
+function getTitle(props, object) {
+  const objectLength = getLength(object);
+  const isEmpty = objectLength === 0;
+
+  let title = props.title || object.class || DEFAULT_TITLE;
+
+  const length = lengthBubble({
+    object,
+    mode: props.mode,
+    maxLengthMap,
+    getLength
+  });
+
+  if (props.mode === MODE.TINY) {
+    if (isEmpty) {
+      if (object.class === DEFAULT_TITLE) {
+        return null;
+      }
+
+      return span({ className: "objectTitle" }, `${title} `);
+    }
+
+    let trailingSpace;
+    if (object.class === DEFAULT_TITLE) {
+      title = null;
+      trailingSpace = " ";
+    }
+
+    return span({ className: "objectTitle" }, title, length, trailingSpace);
+  }
+
+  return span({ className: "objectTitle" }, title, length, " ");
+}
+
+function getPreviewItems(grip) {
+  if (!grip.preview) {
+    return null;
+  }
+
+  return grip.preview.items || grip.preview.childNodes || [];
+}
+
+function arrayIterator(props, grip, max) {
+  const { Rep } = __webpack_require__(3647);
+
+  let items = [];
+  const gripLength = getLength(grip);
+
+  if (!gripLength) {
+    return items;
+  }
+
+  const previewItems = getPreviewItems(grip);
+  const provider = props.provider;
+
+  let emptySlots = 0;
+  let foldedEmptySlots = 0;
+  items = previewItems.reduce((res, itemGrip) => {
+    if (res.length >= max) {
+      return res;
+    }
+
+    let object;
+    try {
+      if (!provider && itemGrip === null) {
+        emptySlots++;
+        return res;
+      }
+
+      object = provider ? provider.getValue(itemGrip) : itemGrip;
+    } catch (exc) {
+      object = exc;
+    }
+
+    if (emptySlots > 0) {
+      res.push(getEmptySlotsElement(emptySlots));
+      foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
+      emptySlots = 0;
+    }
+
+    if (res.length < max) {
+      res.push(Rep(_extends({}, props, {
+        object,
+        mode: MODE.TINY,
+        // Do not propagate title to array items reps
+        title: undefined
+      })));
+    }
+
+    return res;
+  }, []);
+
+  // Handle trailing empty slots if there are some.
+  if (items.length < max && emptySlots > 0) {
+    items.push(getEmptySlotsElement(emptySlots));
+    foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
+  }
+
+  const itemsShown = items.length + foldedEmptySlots;
+  if (gripLength > itemsShown) {
+    items.push(ellipsisElement);
+  }
+
+  return items;
+}
+
+function getEmptySlotsElement(number) {
+  // TODO: Use l10N - See https://github.com/devtools-html/reps/issues/141
+  return `<${number} empty slot${number > 1 ? "s" : ""}>`;
+}
+
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && (grip.preview.kind == "ArrayLike" || getGripType(grip, noGrip) === "DocumentFragment");
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(GripArray),
+  supportsObject,
+  maxLengthMap,
+  getLength
+};
+
+/***/ }),
+
+/***/ 3662:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const PropTypes = __webpack_require__(3642);
+
+const { wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const { ModePropType } = __webpack_require__(3649);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+GripLengthBubble.propTypes = {
+  object: PropTypes.object.isRequired,
+  maxLengthMap: PropTypes.instanceOf(Map).isRequired,
+  getLength: PropTypes.func.isRequired,
+  mode: ModePropType,
+  visibilityThreshold: PropTypes.number
+};
+
+function GripLengthBubble(props) {
+  const {
+    object,
+    mode = MODE.SHORT,
+    visibilityThreshold = 2,
+    maxLengthMap,
+    getLength,
+    showZeroLength = false
+  } = props;
+
+  const length = getLength(object);
+  const isEmpty = length === 0;
+  const isObvious = [MODE.SHORT, MODE.LONG].includes(mode) && length > 0 && length <= maxLengthMap.get(mode) && length <= visibilityThreshold;
+  if (isEmpty && !showZeroLength || isObvious) {
+    return "";
+  }
+
+  return span({
+    className: "objectLengthBubble"
+  }, `(${length})`);
+}
+
+module.exports = {
+  lengthBubble: wrapRender(GripLengthBubble)
+};
+
+/***/ }),
+
+/***/ 3663:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+
+const { lengthBubble } = __webpack_require__(3662);
+const PropTypes = __webpack_require__(3642);
+const {
+  interleave,
+  isGrip,
+  wrapRender,
+  ellipsisElement
+} = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+const { ModePropType } = __webpack_require__(3649);
+
+const { span } = __webpack_require__(3643);
+
+/**
+ * Renders an map. A map is represented by a list of its
+ * entries enclosed in curly brackets.
+ */
+GripMap.propTypes = {
+  object: PropTypes.object,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: ModePropType,
+  isInterestingEntry: PropTypes.func,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func,
+  title: PropTypes.string
+};
+
+function GripMap(props) {
+  const { mode, object } = props;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-object"
+  };
+
+  const title = getTitle(props, object);
+  const isEmpty = getLength(object) === 0;
+
+  if (isEmpty || mode === MODE.TINY) {
+    return span(config, title);
+  }
+
+  const propsArray = safeEntriesIterator(props, object, maxLengthMap.get(mode));
+
+  return span(config, title, span({
+    className: "objectLeftBrace"
+  }, " { "), ...interleave(propsArray, ", "), span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitle(props, object) {
+  const title = props.title || (object && object.class ? object.class : "Map");
+  return span({
+    className: "objectTitle"
+  }, title, lengthBubble({
+    object,
+    mode: props.mode,
+    maxLengthMap,
+    getLength,
+    showZeroLength: true
+  }));
+}
+
+function safeEntriesIterator(props, object, max) {
+  max = typeof max === "undefined" ? 3 : max;
+  try {
+    return entriesIterator(props, object, max);
+  } catch (err) {
+    console.error(err);
+  }
+  return [];
+}
+
+function entriesIterator(props, object, max) {
+  // Entry filter. Show only interesting entries to the user.
+  const isInterestingEntry = props.isInterestingEntry || ((type, value) => {
+    return type == "boolean" || type == "number" || type == "string" && value.length != 0;
+  });
+
+  const mapEntries = object.preview && object.preview.entries ? object.preview.entries : [];
+
+  let indexes = getEntriesIndexes(mapEntries, max, isInterestingEntry);
+  if (indexes.length < max && indexes.length < mapEntries.length) {
+    // There are not enough entries yet, so we add uninteresting entries.
+    indexes = indexes.concat(getEntriesIndexes(mapEntries, max - indexes.length, (t, value, name) => {
+      return !isInterestingEntry(t, value, name);
+    }));
+  }
+
+  const entries = getEntries(props, mapEntries, indexes);
+  if (entries.length < getLength(object)) {
+    // There are some undisplayed entries. Then display "…".
+    entries.push(ellipsisElement);
+  }
+
+  return entries;
+}
+
+/**
+ * Get entries ordered by index.
+ *
+ * @param {Object} props Component props.
+ * @param {Array} entries Entries array.
+ * @param {Array} indexes Indexes of entries.
+ * @return {Array} Array of PropRep.
+ */
+function getEntries(props, entries, indexes) {
+  const { onDOMNodeMouseOver, onDOMNodeMouseOut, onInspectIconClick } = props;
+
+  // Make indexes ordered by ascending.
+  indexes.sort(function (a, b) {
+    return a - b;
+  });
+
+  return indexes.map((index, i) => {
+    const [key, entryValue] = entries[index];
+    const value = entryValue.value !== undefined ? entryValue.value : entryValue;
+
+    return PropRep({
+      name: key,
+      equal: " \u2192 ",
+      object: value,
+      mode: MODE.TINY,
+      onDOMNodeMouseOver,
+      onDOMNodeMouseOut,
+      onInspectIconClick
+    });
+  });
+}
+
+/**
+ * Get the indexes of entries in the map.
+ *
+ * @param {Array} entries Entries array.
+ * @param {Number} max The maximum length of indexes array.
+ * @param {Function} filter Filter the entry you want.
+ * @return {Array} Indexes of filtered entries in the map.
+ */
+function getEntriesIndexes(entries, max, filter) {
+  return entries.reduce((indexes, [key, entry], i) => {
+    if (indexes.length < max) {
+      const value = entry && entry.value !== undefined ? entry.value : entry;
+      // Type is specified in grip's "class" field and for primitive
+      // values use typeof.
+      const type = (value && value.class ? value.class : typeof value).toLowerCase();
+
+      if (filter(type, value, key)) {
+        indexes.push(i);
+      }
+    }
+
+    return indexes;
+  }, []);
+}
+
+function getLength(grip) {
+  return grip.preview.size || 0;
+}
+
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+  return grip.preview && grip.preview.kind == "MapLike";
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(GripMap),
+  supportsObject,
+  maxLengthMap,
+  getLength
+};
+
+/***/ }),
+
+/***/ 3664:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+// Shortcuts
+const dom = __webpack_require__(3643);
+const { span } = dom;
+const { wrapRender } = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+/**
+ * Renders an map entry. A map entry is represented by its key,
+ * a column and its value.
+ */
+GripMapEntry.propTypes = {
+  object: PropTypes.object,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function GripMapEntry(props) {
+  const { object } = props;
+
+  const { key, value } = object.preview;
+
+  return span({
+    className: "objectBox objectBox-map-entry"
+  }, PropRep(_extends({}, props, {
+    name: key,
+    object: value,
+    equal: " \u2192 ",
+    title: null,
+    suppressQuotes: false
+  })));
+}
+
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true) {
+    return false;
+  }
+  return grip && (grip.type === "mapEntry" || grip.type === "storageEntry") && grip.preview;
+}
+
+function createGripMapEntry(key, value) {
+  return {
+    type: "mapEntry",
+    preview: {
+      key,
+      value
+    }
+  };
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(GripMapEntry),
+  createGripMapEntry,
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3665:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+async function enumIndexedProperties(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumProperties({
+      ignoreNonIndexedProperties: true
+    });
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumIndexedProperties", e);
+    return {};
+  }
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+async function enumNonIndexedProperties(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumProperties({
+      ignoreIndexedProperties: true
+    });
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumNonIndexedProperties", e);
+    return {};
+  }
+}
+
+async function enumEntries(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumEntries();
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumEntries", e);
+    return {};
+  }
+}
+
+async function enumSymbols(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumSymbols();
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumSymbols", e);
+    return {};
+  }
+}
+
+async function getPrototype(objectClient) {
+  if (typeof objectClient.getPrototype !== "function") {
+    console.error("objectClient.getPrototype is not a function");
+    return Promise.resolve({});
+  }
+  return objectClient.getPrototype();
+}
+
+async function getFullText(longStringClient, object) {
+  const { initial, length } = object;
+
+  return new Promise((resolve, reject) => {
+    longStringClient.substring(initial.length, length, response => {
+      if (response.error) {
+        console.error("LongStringClient.substring", `${response.error}: ${response.message}`);
+        reject({});
+        return;
+      }
+
+      resolve({
+        fullText: initial + response.substring
+      });
+    });
+  });
+}
+
+function iteratorSlice(iterator, start, end) {
+  start = start || 0;
+  const count = end ? end - start + 1 : iterator.count;
+
+  if (count === 0) {
+    return Promise.resolve({});
+  }
+  return iterator.slice(start, count);
+}
+
+module.exports = {
+  enumEntries,
+  enumIndexedProperties,
+  enumNonIndexedProperties,
+  enumSymbols,
+  getPrototype,
+  getFullText
+};
+
+/***/ }),
+
+/***/ 3666:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const {
+  enumEntries,
+  enumIndexedProperties,
+  enumNonIndexedProperties,
+  getPrototype,
+  enumSymbols,
+  getFullText
+} = __webpack_require__(3665);
+
+const {
+  getClosestGripNode,
+  getClosestNonBucketNode,
+  getValue,
+  nodeHasAccessors,
+  nodeHasAllEntriesInPreview,
+  nodeHasProperties,
+  nodeIsBucket,
+  nodeIsDefaultProperties,
+  nodeIsEntries,
+  nodeIsMapEntry,
+  nodeIsPrimitive,
+  nodeIsProxy,
+  nodeNeedsNumericalBuckets,
+  nodeIsLongString
+} = __webpack_require__(3667);
+
+function loadItemProperties(item, createObjectClient, createLongStringClient, loadedProperties) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  const [start, end] = item.meta ? [item.meta.startIndex, item.meta.endIndex] : [];
+
+  const promises = [];
+  let objectClient;
+  const getObjectClient = () => objectClient || createObjectClient(value);
+
+  if (shouldLoadItemIndexedProperties(item, loadedProperties)) {
+    promises.push(enumIndexedProperties(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemNonIndexedProperties(item, loadedProperties)) {
+    promises.push(enumNonIndexedProperties(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemEntries(item, loadedProperties)) {
+    promises.push(enumEntries(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemPrototype(item, loadedProperties)) {
+    promises.push(getPrototype(getObjectClient()));
+  }
+
+  if (shouldLoadItemSymbols(item, loadedProperties)) {
+    promises.push(enumSymbols(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemFullText(item, loadedProperties)) {
+    promises.push(getFullText(createLongStringClient(value), value));
+  }
+
+  return Promise.all(promises).then(mergeResponses);
+}
+
+function mergeResponses(responses) {
+  const data = {};
+
+  for (const response of responses) {
+    if (response.hasOwnProperty("ownProperties")) {
+      data.ownProperties = _extends({}, data.ownProperties, response.ownProperties);
+    }
+
+    if (response.ownSymbols && response.ownSymbols.length > 0) {
+      data.ownSymbols = response.ownSymbols;
+    }
+
+    if (response.prototype) {
+      data.prototype = response.prototype;
+    }
+
+    if (response.fullText) {
+      data.fullText = response.fullText;
+    }
+  }
+
+  return data;
+}
+
+function shouldLoadItemIndexedProperties(item, loadedProperties = new Map()) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeNeedsNumericalBuckets(item) && !nodeIsEntries(getClosestNonBucketNode(item)) &&
+  // The data is loaded when expanding the window node.
+  !nodeIsDefaultProperties(item);
+}
+
+function shouldLoadItemNonIndexedProperties(item, loadedProperties = new Map()) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeIsEntries(getClosestNonBucketNode(item)) && !nodeIsBucket(item) &&
+  // The data is loaded when expanding the window node.
+  !nodeIsDefaultProperties(item);
+}
+
+function shouldLoadItemEntries(item, loadedProperties = new Map()) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  return value && nodeIsEntries(getClosestNonBucketNode(item)) && !nodeHasAllEntriesInPreview(gripItem) && !loadedProperties.has(item.path) && !nodeNeedsNumericalBuckets(item);
+}
+
+function shouldLoadItemPrototype(item, loadedProperties = new Map()) {
+  const value = getValue(item);
+
+  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item) && !nodeIsLongString(item);
+}
+
+function shouldLoadItemSymbols(item, loadedProperties = new Map()) {
+  const value = getValue(item);
+
+  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item) && !nodeIsLongString(item) && !nodeIsProxy(item);
+}
+
+function shouldLoadItemFullText(item, loadedProperties = new Map()) {
+  return !loadedProperties.has(item.path) && nodeIsLongString(item);
+}
+
+module.exports = {
+  loadItemProperties,
+  mergeResponses,
+  shouldLoadItemEntries,
+  shouldLoadItemIndexedProperties,
+  shouldLoadItemNonIndexedProperties,
+  shouldLoadItemPrototype,
+  shouldLoadItemSymbols,
+  shouldLoadItemFullText
+};
+
+/***/ }),
+
+/***/ 3667:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { maybeEscapePropertyName } = __webpack_require__(3644);
+const ArrayRep = __webpack_require__(3649);
+const GripArrayRep = __webpack_require__(3661);
+const GripMap = __webpack_require__(3663);
+const GripMapEntryRep = __webpack_require__(3664);
+const ErrorRep = __webpack_require__(3660);
+const { isLongString } = __webpack_require__(3648);
 
 const MAX_NUMERICAL_PROPERTIES = 100;
 
 const NODE_TYPES = {
-  BUCKET: Symbol("[n…n]"),
+  BUCKET: Symbol("[n…m]"),
   DEFAULT_PROPERTIES: Symbol("<default properties>"),
   ENTRIES: Symbol("<entries>"),
   GET: Symbol("<get>"),
@@ -1588,19 +2883,17 @@ if (typeof window === "object") {
   WINDOW_PROPERTIES = Object.getOwnPropertyNames(window);
 }
 
-const SAFE_PATH_PREFIX = "##-";
-
 function getType(item) {
   return item.type;
 }
 
 function getValue(item) {
-  if (has(item, "contents.value")) {
-    return get(item, "contents.value");
+  if (item && item.contents && item.contents.hasOwnProperty("value")) {
+    return item.contents.value;
   }
 
-  if (has(item, "contents.getterValue")) {
-    return get(item, "contents.getterValue", undefined);
+  if (item && item.contents && item.contents.hasOwnProperty("getterValue")) {
+    return item.contents.getterValue;
   }
 
   if (nodeHasAccessors(item)) {
@@ -1677,7 +2970,7 @@ function nodeHasProperties(item) {
 }
 
 function nodeIsPrimitive(item) {
-  return !nodeHasChildren(item) && !nodeHasProperties(item) && !nodeIsEntries(item) && !nodeIsMapEntry(item) && !nodeHasAccessors(item) && !nodeIsBucket(item);
+  return !nodeHasChildren(item) && !nodeHasProperties(item) && !nodeIsEntries(item) && !nodeIsMapEntry(item) && !nodeHasAccessors(item) && !nodeIsBucket(item) && !nodeIsLongString(item);
 }
 
 function nodeIsDefaultProperties(item) {
@@ -1731,6 +3024,19 @@ function nodeIsBlock(item) {
   return getType(item) === NODE_TYPES.BLOCK;
 }
 
+function nodeIsError(item) {
+  return ErrorRep.supportsObject(getValue(item));
+}
+
+function nodeIsLongString(item) {
+  return isLongString(getValue(item));
+}
+
+function nodeHasFullText(item) {
+  const value = getValue(item);
+  return nodeIsLongString(item) && value.hasOwnProperty("fullText");
+}
+
 function nodeHasAccessors(item) {
   return !!getNodeGetter(item) || !!getNodeSetter(item);
 }
@@ -1747,7 +3053,7 @@ function nodeHasEntries(item) {
     return false;
   }
 
-  return value.class === "Map" || value.class === "Set" || value.class === "WeakMap" || value.class === "WeakSet";
+  return value.class === "Map" || value.class === "Set" || value.class === "WeakMap" || value.class === "WeakSet" || value.class === "Storage";
 }
 
 function nodeHasAllEntriesInPreview(item) {
@@ -1756,12 +3062,7 @@ function nodeHasAllEntriesInPreview(item) {
     return false;
   }
 
-  const {
-    entries,
-    items,
-    length,
-    size
-  } = preview;
+  const { entries, items, length, size } = preview;
 
   if (!entries && !items) {
     return false;
@@ -1780,51 +3081,90 @@ function makeNodesForPromiseProperties(item) {
   const properties = [];
 
   if (state) {
-    properties.push(createNode(item, "<state>", `${item.path}/${SAFE_PATH_PREFIX}state`, { value: state }, NODE_TYPES.PROMISE_STATE));
+    properties.push(createNode({
+      parent: item,
+      name: "<state>",
+      contents: { value: state },
+      type: NODE_TYPES.PROMISE_STATE
+    }));
   }
 
   if (reason) {
-    properties.push(createNode(item, "<reason>", `${item.path}/${SAFE_PATH_PREFIX}reason`, { value: reason }, NODE_TYPES.PROMISE_REASON));
+    properties.push(createNode({
+      parent: item,
+      name: "<reason>",
+      contents: { value: reason },
+      type: NODE_TYPES.PROMISE_REASON
+    }));
   }
 
   if (value) {
-    properties.push(createNode(item, "<value>", `${item.path}/${SAFE_PATH_PREFIX}value`, { value: value }, NODE_TYPES.PROMISE_VALUE));
+    properties.push(createNode({
+      parent: item,
+      name: "<value>",
+      contents: { value: value },
+      type: NODE_TYPES.PROMISE_VALUE
+    }));
   }
 
   return properties;
 }
 
 function makeNodesForProxyProperties(item) {
-  const {
-    proxyHandler,
-    proxyTarget
-  } = getValue(item);
+  const { proxyHandler, proxyTarget } = getValue(item);
 
-  return [createNode(item, "<target>", `${item.path}/${SAFE_PATH_PREFIX}target`, { value: proxyTarget }, NODE_TYPES.PROXY_TARGET), createNode(item, "<handler>", `${item.path}/${SAFE_PATH_PREFIX}handler`, { value: proxyHandler }, NODE_TYPES.PROXY_HANDLER)];
+  return [createNode({
+    parent: item,
+    name: "<target>",
+    contents: { value: proxyTarget },
+    type: NODE_TYPES.PROXY_TARGET
+  }), createNode({
+    parent: item,
+    name: "<handler>",
+    contents: { value: proxyHandler },
+    type: NODE_TYPES.PROXY_HANDLER
+  })];
 }
 
 function makeNodesForEntries(item) {
-  const { path } = item;
   const nodeName = "<entries>";
-  const entriesPath = `${path}/${SAFE_PATH_PREFIX}entries`;
+  const entriesPath = "<entries>";
 
   if (nodeHasAllEntriesInPreview(item)) {
     let entriesNodes = [];
     const { preview } = getValue(item);
     if (preview.entries) {
       entriesNodes = preview.entries.map(([key, value], index) => {
-        return createNode(item, index, `${entriesPath}/${index}`, {
-          value: GripMapEntryRep.createGripMapEntry(key, value)
+        return createNode({
+          parent: item,
+          name: index,
+          path: `${entriesPath}/${index}`,
+          contents: { value: GripMapEntryRep.createGripMapEntry(key, value) }
         });
       });
     } else if (preview.items) {
       entriesNodes = preview.items.map((value, index) => {
-        return createNode(item, index, `${entriesPath}/${index}`, { value });
+        return createNode({
+          parent: item,
+          name: index,
+          path: `${entriesPath}/${index}`,
+          contents: { value }
+        });
       });
     }
-    return createNode(item, nodeName, entriesPath, entriesNodes, NODE_TYPES.ENTRIES);
+    return createNode({
+      parent: item,
+      name: nodeName,
+      contents: entriesNodes,
+      type: NODE_TYPES.ENTRIES
+    });
   }
-  return createNode(item, nodeName, entriesPath, null, NODE_TYPES.ENTRIES);
+  return createNode({
+    parent: item,
+    name: nodeName,
+    contents: null,
+    type: NODE_TYPES.ENTRIES
+  });
 }
 
 function makeNodesForMapEntry(item) {
@@ -1834,17 +3174,26 @@ function makeNodesForMapEntry(item) {
   }
 
   const { key, value } = nodeValue.preview;
-  const path = item.path;
 
-  return [createNode(item, "<key>", `${path}/##key`, { value: key }, NODE_TYPES.MAP_ENTRY_KEY), createNode(item, "<value>", `${path}/##value`, { value }, NODE_TYPES.MAP_ENTRY_VALUE)];
+  return [createNode({
+    parent: item,
+    name: "<key>",
+    contents: { value: key },
+    type: NODE_TYPES.MAP_ENTRY_KEY
+  }), createNode({
+    parent: item,
+    name: "<value>",
+    contents: { value },
+    type: NODE_TYPES.MAP_ENTRY_VALUE
+  })];
 }
 
 function getNodeGetter(item) {
-  return get(item, "contents.get", undefined);
+  return item && item.contents ? item.contents.get : undefined;
 }
 
 function getNodeSetter(item) {
-  return get(item, "contents.set", undefined);
+  return item && item.contents ? item.contents.set : undefined;
 }
 
 function makeNodesForAccessors(item) {
@@ -1852,12 +3201,22 @@ function makeNodesForAccessors(item) {
 
   const getter = getNodeGetter(item);
   if (getter && getter.type !== "undefined") {
-    accessors.push(createNode(item, "<get>", `${item.path}/${SAFE_PATH_PREFIX}get`, { value: getter }, NODE_TYPES.GET));
+    accessors.push(createNode({
+      parent: item,
+      name: "<get>",
+      contents: { value: getter },
+      type: NODE_TYPES.GET
+    }));
   }
 
   const setter = getNodeSetter(item);
   if (setter && setter.type !== "undefined") {
-    accessors.push(createNode(item, "<set>", `${item.path}/${SAFE_PATH_PREFIX}set`, { value: setter }, NODE_TYPES.SET));
+    accessors.push(createNode({
+      parent: item,
+      name: "<set>",
+      contents: { value: setter },
+      type: NODE_TYPES.SET
+    }));
   }
 
   return accessors;
@@ -1878,34 +3237,36 @@ function sortProperties(properties) {
 }
 
 function makeNumericalBuckets(parent) {
-  const parentPath = parent.path;
   const numProperties = getNumericalPropertiesCount(parent);
 
   // We want to have at most a hundred slices.
   const bucketSize = 10 ** Math.max(2, Math.ceil(Math.log10(numProperties)) - 2);
   const numBuckets = Math.ceil(numProperties / bucketSize);
 
-  let buckets = [];
+  const buckets = [];
   for (let i = 1; i <= numBuckets; i++) {
     const minKey = (i - 1) * bucketSize;
     const maxKey = Math.min(i * bucketSize - 1, numProperties - 1);
     const startIndex = nodeIsBucket(parent) ? parent.meta.startIndex : 0;
     const minIndex = startIndex + minKey;
     const maxIndex = startIndex + maxKey;
-    const bucketKey = `${SAFE_PATH_PREFIX}bucket_${minIndex}-${maxIndex}`;
     const bucketName = `[${minIndex}…${maxIndex}]`;
 
-    buckets.push(createNode(parent, bucketName, `${parentPath}/${bucketKey}`, null, NODE_TYPES.BUCKET, {
-      startIndex: minIndex,
-      endIndex: maxIndex
+    buckets.push(createNode({
+      parent,
+      name: bucketName,
+      contents: null,
+      type: NODE_TYPES.BUCKET,
+      meta: {
+        startIndex: minIndex,
+        endIndex: maxIndex
+      }
     }));
   }
   return buckets;
 }
 
 function makeDefaultPropsBucket(propertiesNames, parent, ownProperties) {
-  const parentPath = parent.path;
-
   const userPropertiesNames = [];
   const defaultProperties = [];
 
@@ -1917,20 +3278,33 @@ function makeDefaultPropsBucket(propertiesNames, parent, ownProperties) {
     }
   });
 
-  let nodes = makeNodesForOwnProps(userPropertiesNames, parent, ownProperties);
+  const nodes = makeNodesForOwnProps(userPropertiesNames, parent, ownProperties);
 
   if (defaultProperties.length > 0) {
-    const defaultPropertiesNode = createNode(parent, "<default properties>", `${parentPath}/${SAFE_PATH_PREFIX}default`, null, NODE_TYPES.DEFAULT_PROPERTIES);
+    const defaultPropertiesNode = createNode({
+      parent,
+      name: "<default properties>",
+      contents: null,
+      type: NODE_TYPES.DEFAULT_PROPERTIES
+    });
 
-    const defaultNodes = defaultProperties.map((name, index) => createNode(defaultPropertiesNode, maybeEscapePropertyName(name), `${parentPath}/${SAFE_PATH_PREFIX}bucket${index}/${name}`, ownProperties[name]));
+    const defaultNodes = defaultProperties.map((name, index) => createNode({
+      parent: defaultPropertiesNode,
+      name: maybeEscapePropertyName(name),
+      path: `${index}/${name}`,
+      contents: ownProperties[name]
+    }));
     nodes.push(setNodeChildren(defaultPropertiesNode, defaultNodes));
   }
   return nodes;
 }
 
 function makeNodesForOwnProps(propertiesNames, parent, ownProperties) {
-  const parentPath = parent.path;
-  return propertiesNames.map(name => createNode(parent, maybeEscapePropertyName(name), `${parentPath}/${name}`, ownProperties[name]));
+  return propertiesNames.map(name => createNode({
+    parent,
+    name: maybeEscapePropertyName(name),
+    contents: ownProperties[name]
+  }));
 }
 
 function makeNodesForProperties(objProps, parent) {
@@ -1941,10 +3315,9 @@ function makeNodesForProperties(objProps, parent) {
     safeGetterValues
   } = objProps;
 
-  const parentPath = parent.path;
   const parentValue = getValue(parent);
 
-  let allProperties = { ...ownProperties, ...safeGetterValues };
+  const allProperties = _extends({}, ownProperties, safeGetterValues);
 
   // Ignore properties that are neither non-concrete nor getters/setters.
   const propertiesNames = sortProperties(Object.keys(allProperties)).filter(name => {
@@ -1965,7 +3338,12 @@ function makeNodesForProperties(objProps, parent) {
 
   if (Array.isArray(ownSymbols)) {
     ownSymbols.forEach((ownSymbol, index) => {
-      nodes.push(createNode(parent, ownSymbol.name, `${parentPath}/${SAFE_PATH_PREFIX}symbol-${index}`, ownSymbol.descriptor || null));
+      nodes.push(createNode({
+        parent,
+        name: ownSymbol.name,
+        path: `symbol-${index}`,
+        contents: ownSymbol.descriptor || null
+      }));
     }, this);
   }
 
@@ -1985,37 +3363,66 @@ function makeNodesForProperties(objProps, parent) {
   return nodes;
 }
 
+function setNodeFullText(loadedProps, node) {
+  if (nodeHasFullText(node)) {
+    return node;
+  }
+
+  if (nodeIsLongString(node)) {
+    node.contents.value.fullText = loadedProps.fullText;
+  }
+
+  return node;
+}
+
 function makeNodeForPrototype(objProps, parent) {
-  const {
-    prototype
-  } = objProps || {};
+  const { prototype } = objProps || {};
 
   // Add the prototype if it exists and is not null
   if (prototype && prototype.type !== "null") {
-    return createNode(parent, "<prototype>", `${parent.path}/<prototype>`, { value: prototype }, NODE_TYPES.PROTOTYPE);
+    return createNode({
+      parent,
+      name: "<prototype>",
+      contents: { value: prototype },
+      type: NODE_TYPES.PROTOTYPE
+    });
   }
 
   return null;
 }
 
-function createNode(parent, name, path, contents, type = NODE_TYPES.GRIP, meta) {
+function createNode(options) {
+  const {
+    parent,
+    name,
+    path,
+    contents,
+    type = NODE_TYPES.GRIP,
+    meta
+  } = options;
+
   if (contents === undefined) {
     return null;
   }
 
   // The path is important to uniquely identify the item in the entire
   // tree. This helps debugging & optimizes React's rendering of large
-  // lists. The path will be separated by property name,
-  // i.e. `{ foo: { bar: { baz: 5 }}}` will have a path of `foo/bar/baz`
+  // lists. The path will be separated by property name, wrapped in a Symbol
+  // to avoid name clashing,
+  // i.e. `{ foo: { bar: { baz: 5 }}}` will have a path of Symbol(`foo/bar/baz`)
   // for the inner object.
   return {
     parent,
     name,
-    path,
+    path: parent ? Symbol(`${getSymbolDescriptor(parent.path)}/${path || name}`) : Symbol(path || name),
     contents,
     type,
     meta
   };
+}
+
+function getSymbolDescriptor(symbol) {
+  return symbol.toString().replace(/^(Symbol\()(.*)(\))$/, "$2");
 }
 
 function setNodeChildren(node, children) {
@@ -2024,11 +3431,7 @@ function setNodeChildren(node, children) {
 }
 
 function getChildren(options) {
-  const {
-    cachedNodes,
-    loadedProperties = new Map(),
-    item
-  } = options;
+  const { cachedNodes, loadedProperties = new Map(), item } = options;
 
   const key = item.path;
   if (cachedNodes && cachedNodes.has(key)) {
@@ -2036,13 +3439,7 @@ function getChildren(options) {
   }
 
   const loadedProps = loadedProperties.get(key);
-  const {
-    ownProperties,
-    ownSymbols,
-    safeGetterValues,
-    prototype
-  } = loadedProps || {};
-  const hasLoadedProps = ownProperties || ownSymbols || safeGetterValues || prototype;
+  const hasLoadedProps = loadedProperties.has(key);
 
   // Because we are dynamically creating the tree as the user
   // expands it (not precalculated tree structure), we cache child
@@ -2074,25 +3471,19 @@ function getChildren(options) {
   }
 
   if (nodeIsProxy(item)) {
-    const nodes = makeNodesForProxyProperties(item);
-    const protoNode = makeNodeForPrototype(loadedProps, item);
-    if (protoNode) {
-      return addToCache(nodes.concat(protoNode));
-    }
-    return nodes;
+    return addToCache(makeNodesForProxyProperties(item));
   }
 
-  if (nodeNeedsNumericalBuckets(item)) {
-    const bucketNodes = makeNumericalBuckets(item);
-    // Even if we have numerical buckets, we might have loaded non indexed properties,
-    // like length for example.
-    if (hasLoadedProps) {
-      return addToCache(bucketNodes.concat(makeNodesForProperties(loadedProps, item)));
-    }
+  if (nodeIsLongString(item) && hasLoadedProps) {
+    // Set longString object's fullText to fetched one.
+    return addToCache(setNodeFullText(loadedProps, item));
+  }
 
-    // We don't cache the result here so we can have the prototype, properties and symbols
-    // when they are loaded.
-    return bucketNodes;
+  if (nodeNeedsNumericalBuckets(item) && hasLoadedProps) {
+    // Even if we have numerical buckets, we should have loaded non indexed
+    // properties.
+    const bucketNodes = makeNumericalBuckets(item);
+    return addToCache(bucketNodes.concat(makeNodesForProperties(loadedProps, item)));
   }
 
   if (!nodeIsEntries(item) && !nodeIsBucket(item) && !nodeHasProperties(item)) {
@@ -2185,6 +3576,9 @@ module.exports = {
   nodeIsBucket,
   nodeIsDefaultProperties,
   nodeIsEntries,
+  nodeIsError,
+  nodeIsLongString,
+  nodeHasFullText,
   nodeIsFunction,
   nodeIsGetter,
   nodeIsMapEntry,
@@ -2204,3202 +3598,18 @@ module.exports = {
   nodeSupportsNumericalBucketing,
   setNodeChildren,
   sortProperties,
-  NODE_TYPES,
-  // Export for testing purpose.
-  SAFE_PATH_PREFIX
+  NODE_TYPES
 };
 
 /***/ }),
-/* 12 */
+
+/***/ 3669:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  cropString,
-  wrapRender
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-const IGNORED_SOURCE_URLS = ["debugger eval code"];
-
-/**
- * This component represents a template for Function objects.
- */
-FunctionRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  parameterNames: PropTypes.array,
-  onViewSourceInDebugger: PropTypes.func
-};
-
-function FunctionRep(props) {
-  let {
-    object: grip,
-    onViewSourceInDebugger
-  } = props;
-
-  let jumpToDefinitionButton;
-  if (onViewSourceInDebugger && grip.location && grip.location.url && !IGNORED_SOURCE_URLS.includes(grip.location.url)) {
-    jumpToDefinitionButton = dom.button({
-      className: "jump-definition",
-      draggable: false,
-      title: "Jump to definition",
-      onClick: e => {
-        // Stop the event propagation so we don't trigger ObjectInspector expand/collapse.
-        e.stopPropagation();
-        onViewSourceInDebugger(grip.location);
-      }
-    });
-  }
-
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-function",
-    // Set dir="ltr" to prevent function parentheses from
-    // appearing in the wrong direction
-    dir: "ltr"
-  }, getTitle(grip, props), getFunctionName(grip, props), "(", ...renderParams(props), ")", jumpToDefinitionButton);
-}
-
-function getTitle(grip, props) {
-  const {
-    mode
-  } = props;
-
-  if (mode === MODE.TINY && !grip.isGenerator && !grip.isAsync) {
-    return null;
-  }
-
-  let title = mode === MODE.TINY ? "" : "function ";
-
-  if (grip.isGenerator) {
-    title = mode === MODE.TINY ? "* " : "function* ";
-  }
-
-  if (grip.isAsync) {
-    title = "async" + " " + title;
-  }
-
-  return span({
-    className: "objectTitle"
-  }, title);
-}
-
-/**
- * Returns a ReactElement representing the function name.
- *
- * @param {Object} grip : Function grip
- * @param {Object} props: Function rep props
- */
-function getFunctionName(grip, props = {}) {
-  let { functionName } = props;
-  let name;
-
-  if (functionName) {
-    let end = functionName.length - 1;
-    functionName = functionName.startsWith('"') && functionName.endsWith('"') ? functionName.substring(1, end) : functionName;
-  }
-
-  if (grip.displayName != undefined && functionName != undefined && grip.displayName != functionName) {
-    name = functionName + ":" + grip.displayName;
-  } else {
-    name = cleanFunctionName(grip.userDisplayName || grip.displayName || grip.name || props.functionName || "");
-  }
-
-  return cropString(name, 100);
-}
-
-const objectProperty = /([\w\d]+)$/;
-const arrayProperty = /\[(.*?)\]$/;
-const functionProperty = /([\w\d]+)[\/\.<]*?$/;
-const annonymousProperty = /([\w\d]+)\(\^\)$/;
-
-/**
- * Decodes an anonymous naming scheme that
- * spider monkey implements based on "Naming Anonymous JavaScript Functions"
- * http://johnjbarton.github.io/nonymous/index.html
- *
- * @param {String} name : Function name to clean up
- * @returns String
- */
-function cleanFunctionName(name) {
-  for (const reg of [objectProperty, arrayProperty, functionProperty, annonymousProperty]) {
-    const match = reg.exec(name);
-    if (match) {
-      return match[1];
-    }
-  }
-
-  return name;
-}
-
-function renderParams(props) {
-  const {
-    parameterNames = []
-  } = props;
-
-  return parameterNames.filter(param => param).reduce((res, param, index, arr) => {
-    res.push(span({ className: "param" }, param));
-    if (index < arr.length - 1) {
-      res.push(span({ className: "delimiter" }, ", "));
-    }
-    return res;
-  }, []);
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  const type = getGripType(grip, noGrip);
-  if (noGrip === true || !isGrip(grip)) {
-    return type == "function";
-  }
-
-  return type == "Function";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(FunctionRep),
-  supportsObject,
-  cleanFunctionName,
-  // exported for testing purpose.
-  getFunctionName
-};
-
-/***/ }),
-/* 13 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-
-const { lengthBubble } = __webpack_require__(14);
-const {
-  interleave,
-  getGripType,
-  isGrip,
-  wrapRender,
-  ellipsisElement
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-const { ModePropType } = __webpack_require__(5);
-const DEFAULT_TITLE = "Array";
-
-/**
- * Renders an array. The array is enclosed by left and right bracket
- * and the max number of rendered items depends on the current mode.
- */
-GripArray.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: ModePropType,
-  provider: PropTypes.object,
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function GripArray(props) {
-  let {
-    object,
-    mode = MODE.SHORT
-  } = props;
-
-  let items;
-  let brackets;
-  let needSpace = function (space) {
-    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
-  };
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-array"
-  };
-
-  const title = getTitle(props, object);
-
-  if (mode === MODE.TINY) {
-    const isEmpty = getLength(object) === 0;
-
-    // Omit bracketed ellipsis for non-empty non-Array arraylikes (f.e: Sets).
-    if (!isEmpty && object.class !== "Array") {
-      return span(config, title);
-    }
-
-    brackets = needSpace(false);
-    return span(config, title, span({
-      className: "arrayLeftBracket"
-    }, brackets.left), isEmpty ? null : ellipsisElement, span({
-      className: "arrayRightBracket"
-    }, brackets.right));
-  }
-
-  let max = maxLengthMap.get(mode);
-  items = arrayIterator(props, object, max);
-  brackets = needSpace(items.length > 0);
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-array" }, title, span({
-    className: "arrayLeftBracket"
-  }, brackets.left), ...interleave(items, ", "), span({
-    className: "arrayRightBracket"
-  }, brackets.right), span({
-    className: "arrayProperties",
-    role: "group" }));
-}
-
-function getLength(grip) {
-  if (!grip.preview) {
-    return 0;
-  }
-
-  return grip.preview.length || grip.preview.childNodesLength || 0;
-}
-
-function getTitle(props, object) {
-  let objectLength = getLength(object);
-  let isEmpty = objectLength === 0;
-
-  let title = props.title || object.class || DEFAULT_TITLE;
-
-  const length = lengthBubble({
-    object,
-    mode: props.mode,
-    maxLengthMap,
-    getLength
-  });
-
-  if (props.mode === MODE.TINY) {
-    if (isEmpty) {
-      if (object.class === DEFAULT_TITLE) {
-        return null;
-      }
-
-      return span({ className: "objectTitle" }, `${title} `);
-    }
-
-    let trailingSpace;
-    if (object.class === DEFAULT_TITLE) {
-      title = null;
-      trailingSpace = " ";
-    }
-
-    return span({ className: "objectTitle" }, title, length, trailingSpace);
-  }
-
-  return span({ className: "objectTitle" }, title, length, " ");
-}
-
-function getPreviewItems(grip) {
-  if (!grip.preview) {
-    return null;
-  }
-
-  return grip.preview.items || grip.preview.childNodes || [];
-}
-
-function arrayIterator(props, grip, max) {
-  let { Rep } = __webpack_require__(4);
-
-  let items = [];
-  const gripLength = getLength(grip);
-
-  if (!gripLength) {
-    return items;
-  }
-
-  const previewItems = getPreviewItems(grip);
-  let provider = props.provider;
-
-  let emptySlots = 0;
-  let foldedEmptySlots = 0;
-  items = previewItems.reduce((res, itemGrip) => {
-    if (res.length >= max) {
-      return res;
-    }
-
-    let object;
-    try {
-      if (!provider && itemGrip === null) {
-        emptySlots++;
-        return res;
-      }
-
-      object = provider ? provider.getValue(itemGrip) : itemGrip;
-    } catch (exc) {
-      object = exc;
-    }
-
-    if (emptySlots > 0) {
-      res.push(getEmptySlotsElement(emptySlots));
-      foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
-      emptySlots = 0;
-    }
-
-    if (res.length < max) {
-      res.push(Rep({
-        ...props,
-        object,
-        mode: MODE.TINY,
-        // Do not propagate title to array items reps
-        title: undefined
-      }));
-    }
-
-    return res;
-  }, []);
-
-  // Handle trailing empty slots if there are some.
-  if (items.length < max && emptySlots > 0) {
-    items.push(getEmptySlotsElement(emptySlots));
-    foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
-  }
-
-  const itemsShown = items.length + foldedEmptySlots;
-  if (gripLength > itemsShown) {
-    items.push(ellipsisElement);
-  }
-
-  return items;
-}
-
-function getEmptySlotsElement(number) {
-  // TODO: Use l10N - See https://github.com/devtools-html/reps/issues/141
-  return `<${number} empty slot${number > 1 ? "s" : ""}>`;
-}
-
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && (grip.preview.kind == "ArrayLike" || getGripType(grip, noGrip) === "DocumentFragment");
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(GripArray),
-  supportsObject,
-  maxLengthMap,
-  getLength
-};
-
-/***/ }),
-/* 14 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const PropTypes = __webpack_require__(2);
-
-const { wrapRender } = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-const { ModePropType } = __webpack_require__(5);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-GripLengthBubble.propTypes = {
-  object: PropTypes.object.isRequired,
-  maxLengthMap: PropTypes.instanceOf(Map).isRequired,
-  getLength: PropTypes.func.isRequired,
-  mode: ModePropType,
-  visibilityThreshold: PropTypes.number
-};
-
-function GripLengthBubble(props) {
-  const {
-    object,
-    mode = MODE.SHORT,
-    visibilityThreshold = 2,
-    maxLengthMap,
-    getLength,
-    showZeroLength = false
-  } = props;
-
-  const length = getLength(object);
-  const isEmpty = length === 0;
-  const isObvious = [MODE.SHORT, MODE.LONG].includes(mode) && length > 0 && length <= maxLengthMap.get(mode) && length <= visibilityThreshold;
-  if (isEmpty && !showZeroLength || isObvious) {
-    return "";
-  }
-
-  return span({
-    className: "objectLengthBubble"
-  }, `(${length})`);
-}
-
-module.exports = {
-  lengthBubble: wrapRender(GripLengthBubble)
-};
-
-/***/ }),
-/* 15 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-
-const { lengthBubble } = __webpack_require__(14);
-const PropTypes = __webpack_require__(2);
-const {
-  interleave,
-  isGrip,
-  wrapRender,
-  ellipsisElement
-} = __webpack_require__(0);
-const PropRep = __webpack_require__(6);
-const { MODE } = __webpack_require__(3);
-const { ModePropType } = __webpack_require__(5);
-
-const { span } = __webpack_require__(1);
-
-/**
- * Renders an map. A map is represented by a list of its
- * entries enclosed in curly brackets.
- */
-GripMap.propTypes = {
-  object: PropTypes.object,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: ModePropType,
-  isInterestingEntry: PropTypes.func,
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func,
-  title: PropTypes.string
-};
-
-function GripMap(props) {
-  let {
-    mode,
-    object
-  } = props;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-object"
-  };
-
-  const title = getTitle(props, object);
-  const isEmpty = getLength(object) === 0;
-
-  if (isEmpty || mode === MODE.TINY) {
-    return span(config, title);
-  }
-
-  const propsArray = safeEntriesIterator(props, object, maxLengthMap.get(mode));
-
-  return span(config, title, span({
-    className: "objectLeftBrace"
-  }, " { "), ...interleave(propsArray, ", "), span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitle(props, object) {
-  const title = props.title || (object && object.class ? object.class : "Map");
-  return span({
-    className: "objectTitle" }, title, lengthBubble({
-    object,
-    mode: props.mode,
-    maxLengthMap,
-    getLength,
-    showZeroLength: true
-  }));
-}
-
-function safeEntriesIterator(props, object, max) {
-  max = typeof max === "undefined" ? 3 : max;
-  try {
-    return entriesIterator(props, object, max);
-  } catch (err) {
-    console.error(err);
-  }
-  return [];
-}
-
-function entriesIterator(props, object, max) {
-  // Entry filter. Show only interesting entries to the user.
-  let isInterestingEntry = props.isInterestingEntry || ((type, value) => {
-    return type == "boolean" || type == "number" || type == "string" && value.length != 0;
-  });
-
-  let mapEntries = object.preview && object.preview.entries ? object.preview.entries : [];
-
-  let indexes = getEntriesIndexes(mapEntries, max, isInterestingEntry);
-  if (indexes.length < max && indexes.length < mapEntries.length) {
-    // There are not enough entries yet, so we add uninteresting entries.
-    indexes = indexes.concat(getEntriesIndexes(mapEntries, max - indexes.length, (t, value, name) => {
-      return !isInterestingEntry(t, value, name);
-    }));
-  }
-
-  let entries = getEntries(props, mapEntries, indexes);
-  if (entries.length < getLength(object)) {
-    // There are some undisplayed entries. Then display "…".
-    entries.push(ellipsisElement);
-  }
-
-  return entries;
-}
-
-/**
- * Get entries ordered by index.
- *
- * @param {Object} props Component props.
- * @param {Array} entries Entries array.
- * @param {Array} indexes Indexes of entries.
- * @return {Array} Array of PropRep.
- */
-function getEntries(props, entries, indexes) {
-  let {
-    onDOMNodeMouseOver,
-    onDOMNodeMouseOut,
-    onInspectIconClick
-  } = props;
-
-  // Make indexes ordered by ascending.
-  indexes.sort(function (a, b) {
-    return a - b;
-  });
-
-  return indexes.map((index, i) => {
-    let [key, entryValue] = entries[index];
-    let value = entryValue.value !== undefined ? entryValue.value : entryValue;
-
-    return PropRep({
-      name: key,
-      equal: " \u2192 ",
-      object: value,
-      mode: MODE.TINY,
-      onDOMNodeMouseOver,
-      onDOMNodeMouseOut,
-      onInspectIconClick
-    });
-  });
-}
-
-/**
- * Get the indexes of entries in the map.
- *
- * @param {Array} entries Entries array.
- * @param {Number} max The maximum length of indexes array.
- * @param {Function} filter Filter the entry you want.
- * @return {Array} Indexes of filtered entries in the map.
- */
-function getEntriesIndexes(entries, max, filter) {
-  return entries.reduce((indexes, [key, entry], i) => {
-    if (indexes.length < max) {
-      let value = entry && entry.value !== undefined ? entry.value : entry;
-      // Type is specified in grip's "class" field and for primitive
-      // values use typeof.
-      let type = (value && value.class ? value.class : typeof value).toLowerCase();
-
-      if (filter(type, value, key)) {
-        indexes.push(i);
-      }
-    }
-
-    return indexes;
-  }, []);
-}
-
-function getLength(grip) {
-  return grip.preview.size || 0;
-}
-
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-  return grip.preview && grip.preview.kind == "MapLike";
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(GripMap),
-  supportsObject,
-  maxLengthMap,
-  getLength
-};
-
-/***/ }),
-/* 16 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-// Shortcuts
-const dom = __webpack_require__(1);
-const { span } = dom;
-const {
-  wrapRender
-} = __webpack_require__(0);
-const PropRep = __webpack_require__(6);
-const { MODE } = __webpack_require__(3);
-/**
- * Renders an map entry. A map entry is represented by its key, a column and its value.
- */
-GripMapEntry.propTypes = {
-  object: PropTypes.object,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function GripMapEntry(props) {
-  const {
-    object
-  } = props;
-
-  const {
-    key,
-    value
-  } = object.preview;
-
-  return span({
-    className: "objectBox objectBox-map-entry"
-  }, PropRep({
-    ...props,
-    name: key,
-    object: value,
-    equal: " \u2192 ",
-    title: null,
-    suppressQuotes: false
-  }));
-}
-
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true) {
-    return false;
-  }
-  return grip && grip.type === "mapEntry" && grip.preview;
-}
-
-function createGripMapEntry(key, value) {
-  return {
-    type: "mapEntry",
-    preview: {
-      key,
-      value
-    }
-  };
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(GripMapEntry),
-  createGripMapEntry,
-  supportsObject
-};
-
-/***/ }),
-/* 17 */
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_17__;
-
-/***/ }),
-/* 18 */
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_18__;
-
-/***/ }),
-/* 19 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const client = __webpack_require__(20);
-const loadProperties = __webpack_require__(21);
-const node = __webpack_require__(11);
-const selection = __webpack_require__(55);
-
-module.exports = {
-  client,
-  loadProperties,
-  node,
-  selection
-};
-
-/***/ }),
-/* 20 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-async function enumIndexedProperties(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumProperties({ ignoreNonIndexedProperties: true });
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumIndexedProperties", e);
-    return {};
-  }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-async function enumNonIndexedProperties(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumProperties({ ignoreIndexedProperties: true });
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumNonIndexedProperties", e);
-    return {};
-  }
-}
-
-async function enumEntries(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumEntries();
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumEntries", e);
-    return {};
-  }
-}
-
-async function enumSymbols(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumSymbols();
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumSymbols", e);
-    return {};
-  }
-}
-
-async function getPrototype(objectClient) {
-  if (typeof objectClient.getPrototype !== "function") {
-    console.error("objectClient.getPrototype is not a function");
-    return Promise.resolve({});
-  }
-  return objectClient.getPrototype();
-}
-
-function iteratorSlice(iterator, start, end) {
-  start = start || 0;
-  const count = end ? end - start + 1 : iterator.count;
-  return iterator.slice(start, count);
-}
-
-module.exports = {
-  enumEntries,
-  enumIndexedProperties,
-  enumNonIndexedProperties,
-  enumSymbols,
-  getPrototype
-};
-
-/***/ }),
-/* 21 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const {
-  getClosestGripNode,
-  getClosestNonBucketNode,
-  getValue,
-  nodeHasAccessors,
-  nodeHasAllEntriesInPreview,
-  nodeHasProperties,
-  nodeIsBucket,
-  nodeIsDefaultProperties,
-  nodeIsEntries,
-  nodeIsMapEntry,
-  nodeIsPrimitive,
-  nodeIsProxy,
-  nodeNeedsNumericalBuckets
-} = __webpack_require__(11);
-
-function shouldLoadItemIndexedProperties(item, loadedProperties = new Map()) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeNeedsNumericalBuckets(item) && !nodeIsEntries(getClosestNonBucketNode(item))
-  // The data is loaded when expanding the window node.
-  && !nodeIsDefaultProperties(item);
-}
-
-function shouldLoadItemNonIndexedProperties(item, loadedProperties = new Map()) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeIsEntries(getClosestNonBucketNode(item)) && !nodeIsBucket(item)
-  // The data is loaded when expanding the window node.
-  && !nodeIsDefaultProperties(item);
-}
-
-function shouldLoadItemEntries(item, loadedProperties = new Map()) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  return value && nodeIsEntries(getClosestNonBucketNode(item)) && !nodeHasAllEntriesInPreview(gripItem) && !loadedProperties.has(item.path) && !nodeNeedsNumericalBuckets(item);
-}
-
-function shouldLoadItemPrototype(item, loadedProperties = new Map()) {
-  const value = getValue(item);
-
-  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item);
-}
-
-function shouldLoadItemSymbols(item, loadedProperties = new Map()) {
-  const value = getValue(item);
-
-  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item) && !nodeIsProxy(item);
-}
-
-module.exports = {
-  shouldLoadItemEntries,
-  shouldLoadItemIndexedProperties,
-  shouldLoadItemNonIndexedProperties,
-  shouldLoadItemPrototype,
-  shouldLoadItemSymbols
-};
-
-/***/ }),
-/* 22 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { MODE } = __webpack_require__(3);
-const { REPS, getRep } = __webpack_require__(4);
-const ObjectInspector = __webpack_require__(47);
-const ObjectInspectorUtils = __webpack_require__(19);
-
-const {
-  parseURLEncodedText,
-  parseURLParams,
-  maybeEscapePropertyName,
-  getGripPreviewItems
-} = __webpack_require__(0);
-
-module.exports = {
-  REPS,
-  getRep,
-  MODE,
-  maybeEscapePropertyName,
-  parseURLEncodedText,
-  parseURLParams,
-  getGripPreviewItems,
-  ObjectInspector,
-  ObjectInspectorUtils
-};
-
-/***/ }),
-/* 23 */
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-/* 24 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders undefined value
- */
-const Undefined = function () {
-  return span({ className: "objectBox objectBox-undefined" }, "undefined");
-};
-
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true) {
-    return object === undefined;
-  }
-
-  return object && object.type && object.type == "undefined" || getGripType(object, noGrip) == "undefined";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(Undefined),
-  supportsObject
-};
-
-/***/ }),
-/* 25 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const { wrapRender } = __webpack_require__(0);
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders null value
- */
-function Null(props) {
-  return span({ className: "objectBox objectBox-null" }, "null");
-}
-
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true) {
-    return object === null;
-  }
-
-  if (object && object.type && object.type == "null") {
-    return true;
-  }
-
-  return object == null;
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(Null),
-  supportsObject
-};
-
-/***/ }),
-/* 26 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a number
- */
-Number.propTypes = {
-  object: PropTypes.oneOfType([PropTypes.object, PropTypes.number, PropTypes.bool]).isRequired
-};
-
-function Number(props) {
-  let value = props.object;
-
-  return span({ className: "objectBox objectBox-number" }, stringify(value));
-}
-
-function stringify(object) {
-  let isNegativeZero = Object.is(object, -0) || object.type && object.type == "-0";
-
-  return isNegativeZero ? "-0" : String(object);
-}
-
-function supportsObject(object, noGrip = false) {
-  return ["boolean", "number", "-0"].includes(getGripType(object, noGrip));
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(Number),
-  supportsObject
-};
-
-/***/ }),
-/* 27 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-const {
-  wrapRender,
-  ellipsisElement
-} = __webpack_require__(0);
-const PropRep = __webpack_require__(6);
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-const DEFAULT_TITLE = "Object";
-
-/**
- * Renders an object. An object is represented by a list of its
- * properties enclosed in curly brackets.
- */
-ObjectRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  title: PropTypes.string
-};
-
-function ObjectRep(props) {
-  let object = props.object;
-  let propsArray = safePropIterator(props, object);
-
-  if (props.mode === MODE.TINY) {
-    const tinyModeItems = [];
-    if (getTitle(props, object) !== DEFAULT_TITLE) {
-      tinyModeItems.push(getTitleElement(props, object));
-    } else {
-      tinyModeItems.push(span({
-        className: "objectLeftBrace"
-      }, "{"), propsArray.length > 0 ? ellipsisElement : null, span({
-        className: "objectRightBrace"
-      }, "}"));
-    }
-
-    return span({ className: "objectBox objectBox-object" }, ...tinyModeItems);
-  }
-
-  return span({ className: "objectBox objectBox-object" }, getTitleElement(props, object), span({
-    className: "objectLeftBrace"
-  }, " { "), ...propsArray, span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitleElement(props, object) {
-  return span({ className: "objectTitle" }, getTitle(props, object));
-}
-
-function getTitle(props, object) {
-  return props.title || DEFAULT_TITLE;
-}
-
-function safePropIterator(props, object, max) {
-  max = typeof max === "undefined" ? 3 : max;
-  try {
-    return propIterator(props, object, max);
-  } catch (err) {
-    console.error(err);
-  }
-  return [];
-}
-
-function propIterator(props, object, max) {
-  // Work around https://bugzilla.mozilla.org/show_bug.cgi?id=945377
-  if (Object.prototype.toString.call(object) === "[object Generator]") {
-    object = Object.getPrototypeOf(object);
-  }
-
-  const elements = [];
-  const unimportantProperties = [];
-  let propertiesNumber = 0;
-  const propertiesNames = Object.keys(object);
-
-  const pushPropRep = (name, value) => {
-    elements.push(PropRep({
-      ...props,
-      key: name,
-      mode: MODE.TINY,
-      name,
-      object: value,
-      equal: ": "
-    }));
-    propertiesNumber++;
-
-    if (propertiesNumber < propertiesNames.length) {
-      elements.push(", ");
-    }
-  };
-
-  try {
-    for (let name of propertiesNames) {
-      if (propertiesNumber >= max) {
-        break;
-      }
-
-      let value;
-      try {
-        value = object[name];
-      } catch (exc) {
-        continue;
-      }
-
-      // Object members with non-empty values are preferred since it gives the
-      // user a better overview of the object.
-      if (isInterestingProp(value)) {
-        pushPropRep(name, value);
-      } else {
-        // If the property is not important, put its name on an array for later use.
-        unimportantProperties.push(name);
-      }
-    }
-  } catch (err) {
-    console.error(err);
-  }
-
-  if (propertiesNumber < max) {
-    for (let name of unimportantProperties) {
-      if (propertiesNumber >= max) {
-        break;
-      }
-
-      let value;
-      try {
-        value = object[name];
-      } catch (exc) {
-        continue;
-      }
-
-      pushPropRep(name, value);
-    }
-  }
-
-  if (propertiesNumber < propertiesNames.length) {
-    elements.push(ellipsisElement);
-  }
-
-  return elements;
-}
-
-function isInterestingProp(value) {
-  const type = typeof value;
-  return type == "boolean" || type == "number" || type == "string" && value;
-}
-
-function supportsObject(object) {
-  return true;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ObjectRep),
-  supportsObject
-};
-
-/***/ }),
-/* 28 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a symbol.
- */
-SymbolRep.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function SymbolRep(props) {
-  let {
-    className = "objectBox objectBox-symbol",
-    object
-  } = props;
-  let { name } = object;
-
-  return span({
-    className,
-    "data-link-actor-id": object.actor
-  }, `Symbol(${name || ""})`);
-}
-
-function supportsObject(object, noGrip = false) {
-  return getGripType(object, noGrip) == "symbol";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(SymbolRep),
-  supportsObject
-};
-
-/***/ }),
-/* 29 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a Infinity object
- */
-InfinityRep.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function InfinityRep(props) {
-  const {
-    object
-  } = props;
-
-  return span({ className: "objectBox objectBox-number" }, object.type);
-}
-
-function supportsObject(object, noGrip = false) {
-  const type = getGripType(object, noGrip);
-  return type == "Infinity" || type == "-Infinity";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(InfinityRep),
-  supportsObject
-};
-
-/***/ }),
-/* 30 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a NaN object
- */
-function NaNRep(props) {
-  return span({ className: "objectBox objectBox-nan" }, "NaN");
-}
-
-function supportsObject(object, noGrip = false) {
-  return getGripType(object, noGrip) == "NaN";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(NaNRep),
-  supportsObject
-};
-
-/***/ }),
-/* 31 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const dom = __webpack_require__(1);
-const PropTypes = __webpack_require__(2);
-const {
-  wrapRender
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-const { span } = dom;
-
-/**
- * Renders an object. An object is represented by a list of its
- * properties enclosed in curly brackets.
- */
-Accessor.propTypes = {
-  object: PropTypes.object.isRequired,
-  mode: PropTypes.oneOf(Object.values(MODE))
-};
-
-function Accessor(props) {
-  const {
-    object
-  } = props;
-
-  const accessors = [];
-  if (hasGetter(object)) {
-    accessors.push("Getter");
-  }
-  if (hasSetter(object)) {
-    accessors.push("Setter");
-  }
-  const title = accessors.join(" & ");
-
-  return span({ className: "objectBox objectBox-accessor objectTitle" }, title);
-}
-
-function hasGetter(object) {
-  return object && object.get && object.get.type !== "undefined";
-}
-
-function hasSetter(object) {
-  return object && object.set && object.set.type !== "undefined";
-}
-
-function supportsObject(object, noGrip = false) {
-  if (noGrip !== true && (hasGetter(object) || hasSetter(object))) {
-    return true;
-  }
-
-  return false;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(Accessor),
-  supportsObject
-};
-
-/***/ }),
-/* 32 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-const { rep: StringRep } = __webpack_require__(7);
-
-/**
- * Renders DOM attribute
- */
-Attribute.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function Attribute(props) {
-  let {
-    object
-  } = props;
-  let value = object.preview.value;
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox-Attr"
-  }, span({ className: "attrName" }, getTitle(object)), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
-}
-
-function getTitle(grip) {
-  return grip.preview.nodeName;
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return getGripType(grip, noGrip) == "Attr" && grip.preview;
-}
-
-module.exports = {
-  rep: wrapRender(Attribute),
-  supportsObject
-};
-
-/***/ }),
-/* 33 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Used to render JS built-in Date() object.
- */
-DateTime.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function DateTime(props) {
-  let grip = props.object;
-  let date;
-  try {
-    date = span({
-      "data-link-actor-id": grip.actor,
-      className: "objectBox"
-    }, getTitle(grip), span({ className: "Date" }, new Date(grip.preview.timestamp).toISOString()));
-  } catch (e) {
-    date = span({ className: "objectBox" }, "Invalid Date");
-  }
-
-  return date;
-}
-
-function getTitle(grip) {
-  return span({
-    className: "objectTitle"
-  }, grip.class + " ");
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return getGripType(grip, noGrip) == "Date" && grip.preview;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(DateTime),
-  supportsObject
-};
-
-/***/ }),
-/* 34 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders DOM document object.
- */
-Document.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function Document(props) {
-  let grip = props.object;
-  const location = getLocation(grip);
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-document"
-  }, getTitle(grip), location ? span({ className: "location" }, ` ${location}`) : null);
-}
-
-function getLocation(grip) {
-  let location = grip.preview.location;
-  return location ? getURLDisplayString(location) : null;
-}
-
-function getTitle(grip) {
-  return span({
-    className: "objectTitle"
-  }, grip.class);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  const type = getGripType(object, noGrip);
-  return object.preview && (type === "HTMLDocument" || type === "XULDocument");
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(Document),
-  supportsObject
-};
-
-/***/ }),
-/* 35 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders DOM documentType object.
- */
-DocumentType.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function DocumentType(props) {
-  const { object } = props;
-  let name = object && object.preview && object.preview.nodeName ? ` ${object.preview.nodeName}` : "";
-  return span({
-    "data-link-actor-id": props.object.actor,
-    className: "objectBox objectBox-document"
-  }, `<!DOCTYPE${name}>`);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  const type = getGripType(object, noGrip);
-  return object.preview && type === "DocumentType";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(DocumentType),
-  supportsObject
-};
-
-/***/ }),
-/* 36 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-
-const { MODE } = __webpack_require__(3);
-const { rep } = __webpack_require__(8);
-
-/**
- * Renders DOM event objects.
- */
-Event.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function Event(props) {
-  let gripProps = {
-    ...props,
-    title: getTitle(props),
-    object: {
-      ...props.object,
-      preview: {
-        ...props.object.preview,
-        ownProperties: {}
-      }
-    }
-  };
-
-  if (gripProps.object.preview.target) {
-    Object.assign(gripProps.object.preview.ownProperties, {
-      target: gripProps.object.preview.target
-    });
-  }
-  Object.assign(gripProps.object.preview.ownProperties, gripProps.object.preview.properties);
-
-  delete gripProps.object.preview.properties;
-  gripProps.object.ownPropertyLength = Object.keys(gripProps.object.preview.ownProperties).length;
-
-  switch (gripProps.object.class) {
-    case "MouseEvent":
-      gripProps.isInterestingProp = (type, value, name) => {
-        return ["target", "clientX", "clientY", "layerX", "layerY"].includes(name);
-      };
-      break;
-    case "KeyboardEvent":
-      gripProps.isInterestingProp = (type, value, name) => {
-        return ["target", "key", "charCode", "keyCode"].includes(name);
-      };
-      break;
-    case "MessageEvent":
-      gripProps.isInterestingProp = (type, value, name) => {
-        return ["target", "isTrusted", "data"].includes(name);
-      };
-      break;
-    default:
-      gripProps.isInterestingProp = (type, value, name) => {
-        // We want to show the properties in the order they are declared.
-        return Object.keys(gripProps.object.preview.ownProperties).includes(name);
-      };
-  }
-
-  return rep(gripProps);
-}
-
-function getTitle(props) {
-  let preview = props.object.preview;
-  let title = preview.type;
-
-  if (preview.eventKind == "key" && preview.modifiers && preview.modifiers.length) {
-    title = `${title} ${preview.modifiers.join("-")}`;
-  }
-  return title;
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.preview.kind == "DOMEvent";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(Event),
-  supportsObject
-};
-
-/***/ }),
-/* 37 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-// Dependencies
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-
-const PropRep = __webpack_require__(6);
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a DOM Promise object.
- */
-PromiseRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function PromiseRep(props) {
-  const object = props.object;
-  const { promiseState } = object;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-object"
-  };
-
-  if (props.mode === MODE.TINY) {
-    let { Rep } = __webpack_require__(4);
-
-    return span(config, getTitle(object), span({
-      className: "objectLeftBrace"
-    }, " { "), Rep({ object: promiseState.state }), span({
-      className: "objectRightBrace"
-    }, " }"));
-  }
-
-  const propsArray = getProps(props, promiseState);
-  return span(config, getTitle(object), span({
-    className: "objectLeftBrace"
-  }, " { "), ...propsArray, span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitle(object) {
-  return span({
-    className: "objectTitle"
-  }, object.class);
-}
-
-function getProps(props, promiseState) {
-  const keys = ["state"];
-  if (Object.keys(promiseState).includes("value")) {
-    keys.push("value");
-  }
-
-  return keys.reduce((res, key, i) => {
-    let object = promiseState[key];
-    res = res.concat(PropRep({
-      ...props,
-      mode: MODE.TINY,
-      name: `<${key}>`,
-      object,
-      equal: ": ",
-      suppressQuotes: true
-    }));
-
-    // Interleave commas between elements
-    if (i !== keys.length - 1) {
-      res.push(", ");
-    }
-
-    return res;
-  }, []);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return getGripType(object, noGrip) == "Promise";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(PromiseRep),
-  supportsObject
-};
-
-/***/ }),
-/* 38 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a grip object with regular expression.
- */
-RegExp.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function RegExp(props) {
-  let { object } = props;
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-regexp regexpSource"
-  }, getSource(object));
-}
-
-function getSource(grip) {
-  return grip.displayString;
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  return getGripType(object, noGrip) == "RegExp";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(RegExp),
-  supportsObject
-};
-
-/***/ }),
-/* 39 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a grip representing CSSStyleSheet
- */
-StyleSheet.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function StyleSheet(props) {
-  let grip = props.object;
-
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-object"
-  }, getTitle(grip), span({ className: "objectPropValue" }, getLocation(grip)));
-}
-
-function getTitle(grip) {
-  let title = "StyleSheet ";
-  return span({ className: "objectBoxTitle" }, title);
-}
-
-function getLocation(grip) {
-  // Embedded stylesheets don't have URL and so, no preview.
-  let url = grip.preview ? grip.preview.url : "";
-  return url ? getURLDisplayString(url) : "";
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  return getGripType(object, noGrip) == "CSSStyleSheet";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(StyleSheet),
-  supportsObject
-};
-
-/***/ }),
-/* 40 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(2);
-const {
-  isGrip,
-  cropString,
-  cropMultipleLines,
-  wrapRender
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-const nodeConstants = __webpack_require__(9);
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders DOM comment node.
- */
-CommentNode.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
-};
-
-function CommentNode(props) {
-  let {
-    object,
-    mode = MODE.SHORT
-  } = props;
-
-  let { textContent } = object.preview;
-  if (mode === MODE.TINY) {
-    textContent = cropMultipleLines(textContent, 30);
-  } else if (mode === MODE.SHORT) {
-    textContent = cropString(textContent, 50);
-  }
-
-  return span({
-    className: "objectBox theme-comment",
-    "data-link-actor-id": object.actor
-  }, `<!-- ${textContent} -->`);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return object.preview && object.preview.nodeType === nodeConstants.COMMENT_NODE;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(CommentNode),
-  supportsObject
-};
-
-/***/ }),
-/* 41 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Utils
-const {
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-const { rep: StringRep } = __webpack_require__(7);
-const { MODE } = __webpack_require__(3);
-const nodeConstants = __webpack_require__(9);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders DOM element node.
- */
-ElementNode.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function ElementNode(props) {
-  let {
-    object,
-    mode,
-    onDOMNodeMouseOver,
-    onDOMNodeMouseOut,
-    onInspectIconClick
-  } = props;
-  let elements = getElements(object, mode);
-
-  let isInTree = object.preview && object.preview.isConnected === true;
-
-  let baseConfig = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-node"
-  };
-  let inspectIcon;
-  if (isInTree) {
-    if (onDOMNodeMouseOver) {
-      Object.assign(baseConfig, {
-        onMouseOver: _ => onDOMNodeMouseOver(object)
-      });
-    }
-
-    if (onDOMNodeMouseOut) {
-      Object.assign(baseConfig, {
-        onMouseOut: onDOMNodeMouseOut
-      });
-    }
-
-    if (onInspectIconClick) {
-      inspectIcon = dom.button({
-        className: "open-inspector",
-        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
-        title: "Click to select the node in the inspector",
-        onClick: e => onInspectIconClick(object, e)
-      });
-    }
-  }
-
-  return span(baseConfig, ...elements, inspectIcon);
-}
-
-function getElements(grip, mode) {
-  let { attributes, nodeName } = grip.preview;
-  const nodeNameElement = span({
-    className: "tag-name"
-  }, nodeName);
-
-  if (mode === MODE.TINY) {
-    let elements = [nodeNameElement];
-    if (attributes.id) {
-      elements.push(span({ className: "attrName" }, `#${attributes.id}`));
-    }
-    if (attributes.class) {
-      elements.push(span({ className: "attrName" }, attributes.class.trim().split(/\s+/).map(cls => `.${cls}`).join("")));
-    }
-    return elements;
-  }
-  let attributeKeys = Object.keys(attributes);
-  if (attributeKeys.includes("class")) {
-    attributeKeys.splice(attributeKeys.indexOf("class"), 1);
-    attributeKeys.unshift("class");
-  }
-  if (attributeKeys.includes("id")) {
-    attributeKeys.splice(attributeKeys.indexOf("id"), 1);
-    attributeKeys.unshift("id");
-  }
-  const attributeElements = attributeKeys.reduce((arr, name, i, keys) => {
-    let value = attributes[name];
-    let attribute = span({}, span({ className: "attrName" }, name), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
-
-    return arr.concat([" ", attribute]);
-  }, []);
-
-  return [span({ className: "angleBracket" }, "<"), nodeNameElement, ...attributeElements, span({ className: "angleBracket" }, ">")];
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return object.preview && object.preview.nodeType === nodeConstants.ELEMENT_NODE;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ElementNode),
-  supportsObject
-};
-
-/***/ }),
-/* 42 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  isGrip,
-  cropString,
-  wrapRender
-} = __webpack_require__(0);
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders DOM #text node.
- */
-TextNode.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function TextNode(props) {
-  let {
-    object: grip,
-    mode = MODE.SHORT,
-    onDOMNodeMouseOver,
-    onDOMNodeMouseOut,
-    onInspectIconClick
-  } = props;
-
-  let baseConfig = {
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-textNode"
-  };
-  let inspectIcon;
-  let isInTree = grip.preview && grip.preview.isConnected === true;
-
-  if (isInTree) {
-    if (onDOMNodeMouseOver) {
-      Object.assign(baseConfig, {
-        onMouseOver: _ => onDOMNodeMouseOver(grip)
-      });
-    }
-
-    if (onDOMNodeMouseOut) {
-      Object.assign(baseConfig, {
-        onMouseOut: onDOMNodeMouseOut
-      });
-    }
-
-    if (onInspectIconClick) {
-      inspectIcon = dom.button({
-        className: "open-inspector",
-        draggable: false,
-        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
-        title: "Click to select the node in the inspector",
-        onClick: e => onInspectIconClick(grip, e)
-      });
-    }
-  }
-
-  if (mode === MODE.TINY) {
-    return span(baseConfig, getTitle(grip), inspectIcon);
-  }
-
-  return span(baseConfig, getTitle(grip), span({ className: "nodeValue" }, " ", `"${getTextContent(grip)}"`), inspectIcon);
-}
-
-function getTextContent(grip) {
-  return cropString(grip.preview.textContent);
-}
-
-function getTitle(grip) {
-  const title = "#text";
-  return span({}, title);
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.class == "Text";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(TextNode),
-  supportsObject
-};
-
-/***/ }),
-/* 43 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-// Utils
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-const { cleanFunctionName } = __webpack_require__(12);
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders Error objects.
- */
-ErrorRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
-};
-
-function ErrorRep(props) {
-  let object = props.object;
-  let preview = object.preview;
-
-  let name;
-  if (preview && preview.name && preview.kind) {
-    switch (preview.kind) {
-      case "Error":
-        name = preview.name;
-        break;
-      case "DOMException":
-        name = preview.kind;
-        break;
-      default:
-        throw new Error("Unknown preview kind for the Error rep.");
-    }
-  } else {
-    name = "Error";
-  }
-
-  const content = [];
-
-  if (props.mode === MODE.TINY) {
-    content.push(name);
-  } else {
-    content.push(`${name}: "${preview.message}"`);
-  }
-
-  if (preview.stack && props.mode !== MODE.TINY) {
-    content.push("\n", getStacktraceElements(preview));
-  }
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox-stackTrace"
-  }, content);
-}
-
-/**
- * Returns a React element reprensenting the Error stacktrace, i.e. transform error.stack
- * from:
- *
- * semicolon@debugger eval code:1:109
- * jkl@debugger eval code:1:63
- * asdf@debugger eval code:1:28
- * @debugger eval code:1:227
- *
- * Into a column layout:
- *
- * semicolon  (<anonymous>:8:10)
- * jkl        (<anonymous>:5:10)
- * asdf       (<anonymous>:2:10)
- *            (<anonymous>:11:1)
- */
-function getStacktraceElements(preview) {
-  const stack = [];
-  preview.stack.split("\n").forEach((line, index) => {
-    if (!line) {
-      // Skip any blank lines
-      return;
-    }
-
-    let functionName;
-    let location;
-
-    // Given the input: "functionName@scriptLocation:2:100"
-    // Result:
-    // ["functionName@scriptLocation:2:100", "functionName", "scriptLocation:2:100"]
-    const result = line.match(/^(.*)@(.*)$/);
-    if (result && result.length === 3) {
-      functionName = result[1];
-
-      // If the resource was loaded by base-loader.js, the location looks like:
-      // resource://devtools/shared/base-loader.js -> resource://path/to/file.js .
-      // What's needed is only the last part after " -> ".
-      location = result[2].split(" -> ").pop();
-    }
-
-    if (!functionName) {
-      functionName = "<anonymous>";
-    }
-
-    stack.push(span({
-      key: "fn" + index,
-      className: "objectBox-stackTrace-fn"
-    }, cleanFunctionName(functionName)), span({
-      key: "location" + index,
-      className: "objectBox-stackTrace-location"
-    }, ` (${location})`));
-  });
-
-  return span({
-    key: "stack",
-    className: "objectBox-stackTrace-grid"
-  }, stack);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return object.preview && getGripType(object, noGrip) === "Error" || object.class === "DOMException";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ErrorRep),
-  supportsObject
-};
-
-/***/ }),
-/* 44 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(0);
-
-const { MODE } = __webpack_require__(3);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a grip representing a window.
- */
-WindowRep.propTypes = {
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  object: PropTypes.object.isRequired
-};
-
-function WindowRep(props) {
-  let {
-    mode,
-    object
-  } = props;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-Window"
-  };
-
-  if (mode === MODE.TINY) {
-    return span(config, getTitle(object));
-  }
-
-  return span(config, getTitle(object, true), span({ className: "location" }, getLocation(object)));
-}
-
-function getTitle(object, trailingSpace) {
-  let title = object.displayClass || object.class || "Window";
-  if (trailingSpace === true) {
-    title = `${title} `;
-  }
-  return span({ className: "objectTitle" }, title);
-}
-
-function getLocation(object) {
-  return getURLDisplayString(object.preview.url);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  return object.preview && getGripType(object, noGrip) == "Window";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(WindowRep),
-  supportsObject
-};
-
-/***/ }),
-/* 45 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  isGrip,
-  wrapRender
-} = __webpack_require__(0);
-
-const String = __webpack_require__(7).rep;
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a grip object with textual data.
- */
-ObjectWithText.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function ObjectWithText(props) {
-  let grip = props.object;
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectTitle objectBox objectBox-" + getType(grip)
-  }, `${getType(grip)} `, getDescription(grip));
-}
-
-function getType(grip) {
-  return grip.class;
-}
-
-function getDescription(grip) {
-  return String({
-    object: grip.preview.text
-  });
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.preview.kind == "ObjectWithText";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ObjectWithText),
-  supportsObject
-};
-
-/***/ }),
-/* 46 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(2);
-
-// Reps
-const {
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(0);
-
-const dom = __webpack_require__(1);
-const { span } = dom;
-
-/**
- * Renders a grip object with URL data.
- */
-ObjectWithURL.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function ObjectWithURL(props) {
-  let grip = props.object;
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-" + getType(grip)
-  }, getTitle(grip), span({ className: "objectPropValue" }, getDescription(grip)));
-}
-
-function getTitle(grip) {
-  return span({ className: "objectTitle" }, getType(grip) + " ");
-}
-
-function getType(grip) {
-  return grip.class;
-}
-
-function getDescription(grip) {
-  return getURLDisplayString(grip.preview.url);
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.preview.kind == "ObjectWithURL";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ObjectWithURL),
-  supportsObject
-};
-
-/***/ }),
-/* 47 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { createElement, createFactory, PureComponent } = __webpack_require__(10);
-const { Provider } = __webpack_require__(17);
-const ObjectInspector = createFactory(__webpack_require__(48));
-const createStore = __webpack_require__(57);
-
-class OI extends PureComponent {
-
-  constructor(props) {
-    super(props);
-    this.store = createStore(props);
-  }
-
-  getStore() {
-    return this.store;
-  }
-
-  render() {
-    return createElement(Provider, { store: this.store }, ObjectInspector(this.props));
-  }
-}
-
-module.exports = OI;
-
-/***/ }),
-/* 48 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _devtoolsComponents = __webpack_require__(49);
-
-var _devtoolsComponents2 = _interopRequireDefault(_devtoolsComponents);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const {
-  Component,
-  createFactory
-} = __webpack_require__(10);
-const dom = __webpack_require__(1);
-const { connect } = __webpack_require__(17);
-const { bindActionCreators } = __webpack_require__(18);
-
-const Tree = createFactory(_devtoolsComponents2.default.Tree);
-__webpack_require__(52);
-
-const classnames = __webpack_require__(53);
-
-const {
-  REPS: {
-    Rep,
-    Grip
-  }
-} = __webpack_require__(4);
-const {
-  MODE
-} = __webpack_require__(3);
-
-const Utils = __webpack_require__(19);
-
-const {
-  getChildren,
-  getClosestGripNode,
-  getParent,
-  getValue,
-  nodeHasAccessors,
-  nodeHasProperties,
-  nodeIsBlock,
-  nodeIsDefaultProperties,
-  nodeIsFunction,
-  nodeIsGetter,
-  nodeIsMapEntry,
-  nodeIsMissingArguments,
-  nodeIsOptimizedOut,
-  nodeIsPrimitive,
-  nodeIsPrototype,
-  nodeIsSetter,
-  nodeIsUninitializedBinding,
-  nodeIsUnmappedBinding,
-  nodeIsUnscopedBinding,
-  nodeIsWindow
-} = Utils.node;
-
-// This implements a component that renders an interactive inspector
-// for looking at JavaScript objects. It expects descriptions of
-// objects from the protocol, and will dynamically fetch children
-// properties as objects are expanded.
-//
-// If you want to inspect a single object, pass the name and the
-// protocol descriptor of it:
-//
-//  ObjectInspector({
-//    name: "foo",
-//    desc: { writable: true, ..., { value: { actor: "1", ... }}},
-//    ...
-//  })
-//
-// If you want multiple top-level objects (like scopes), you can pass
-// an array of manually constructed nodes as `roots`:
-//
-//  ObjectInspector({
-//    roots: [{ name: ... }, ...],
-//    ...
-//  });
-
-// There are 3 types of nodes: a simple node with a children array, an
-// object that has properties that should be children when they are
-// fetched, and a primitive value that should be displayed with no
-// children.
-
-class ObjectInspector extends Component {
-  constructor(props) {
-    super();
-    this.cachedNodes = new Map();
-
-    const self = this;
-
-    self.getItemChildren = this.getItemChildren.bind(this);
-    self.renderTreeItem = this.renderTreeItem.bind(this);
-    self.setExpanded = this.setExpanded.bind(this);
-    self.focusItem = this.focusItem.bind(this);
-    self.getRoots = this.getRoots.bind(this);
-  }
-
-  shouldComponentUpdate(nextProps) {
-    const {
-      expandedPaths,
-      loadedProperties,
-      roots
-    } = this.props;
-
-    if (roots !== nextProps.roots) {
-      // Since the roots changed, we assume the properties did as well. Thus we can clear
-      // the cachedNodes to avoid bugs and memory leaks.
-      this.cachedNodes.clear();
-      return true;
-    }
-
-    return expandedPaths.size !== nextProps.expandedPaths.size || loadedProperties.size !== nextProps.loadedProperties.size || [...expandedPaths].some(key => !nextProps.expandedPaths.has(key));
-  }
-
-  componentWillUnmount() {
-    const { releaseActor } = this.props;
-    if (typeof releaseActor !== "function") {
-      return;
-    }
-
-    const { actors } = this.props;
-    for (let actor of actors) {
-      releaseActor(actor);
-    }
-  }
-
-  getItemChildren(item) {
-    const {
-      loadedProperties
-    } = this.props;
-    const { cachedNodes } = this;
-
-    return getChildren({
-      loadedProperties,
-      cachedNodes,
-      item
-    });
-  }
-
-  getRoots() {
-    return this.props.roots;
-  }
-
-  getNodeKey(item) {
-    return item.path || JSON.stringify(item);
-  }
-
-  setExpanded(item, expand) {
-    if (nodeIsPrimitive(item)) {
-      return;
-    }
-
-    const {
-      createObjectClient,
-      loadedProperties,
-      nodeExpand,
-      nodeCollapse,
-      roots
-    } = this.props;
-
-    if (expand === true) {
-      const gripItem = getClosestGripNode(item);
-      const value = getValue(gripItem);
-      const isRoot = value && roots.some(root => {
-        const rootValue = getValue(root);
-        return rootValue && rootValue.actor === value.actor;
-      });
-      const actor = isRoot || !value ? null : value.actor;
-      nodeExpand(item, actor, loadedProperties, createObjectClient);
-    } else {
-      nodeCollapse(item);
-    }
-  }
-
-  focusItem(item) {
-    const {
-      focusedItem,
-      onFocus
-    } = this.props;
-
-    if (focusedItem !== item && onFocus) {
-      onFocus(item);
-    }
-  }
-
-  getTreeItemLabelAndValue(item, depth, expanded) {
-    let label = item.name;
-    const isPrimitive = nodeIsPrimitive(item);
-
-    if (nodeIsOptimizedOut(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(optimized away)")
-      };
-    }
-
-    if (nodeIsUninitializedBinding(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(uninitialized)")
-      };
-    }
-
-    if (nodeIsUnmappedBinding(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(unmapped)")
-      };
-    }
-
-    if (nodeIsUnscopedBinding(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(unscoped)")
-      };
-    }
-
-    if (nodeIsOptimizedOut(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(optimized away)")
-      };
-    }
-
-    const itemValue = getValue(item);
-    const unavailable = isPrimitive && itemValue && itemValue.hasOwnProperty && itemValue.hasOwnProperty("unavailable");
-
-    if (nodeIsMissingArguments(item) || unavailable) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(unavailable)")
-      };
-    }
-
-    if (nodeIsFunction(item) && !nodeIsGetter(item) && !nodeIsSetter(item) && (this.props.mode === MODE.TINY || !this.props.mode)) {
-      return {
-        label: this.renderGrip(item, {
-          ...this.props,
-          functionName: label
-        })
-      };
-    }
-
-    if (nodeHasProperties(item) || nodeHasAccessors(item) || nodeIsMapEntry(item) || isPrimitive) {
-      let repsProp = { ...this.props };
-      if (depth > 0) {
-        repsProp.mode = this.props.mode === MODE.LONG ? MODE.SHORT : MODE.TINY;
-      }
-      if (expanded) {
-        repsProp.mode = MODE.TINY;
-      }
-
-      return {
-        label,
-        value: this.renderGrip(item, repsProp)
-      };
-    }
-
-    return {
-      label
-    };
-  }
-
-  renderTreeItemLabel(label, item, depth, focused, expanded) {
-    if (label === null || typeof label === "undefined") {
-      return null;
-    }
-
-    const {
-      onLabelClick
-    } = this.props;
-
-    return dom.span({
-      className: "object-label",
-      onClick: onLabelClick ? event => {
-        event.stopPropagation();
-
-        // If the user selected text, bail out.
-        if (Utils.selection.documentHasSelection()) {
-          return;
-        }
-
-        onLabelClick(item, {
-          depth,
-          focused,
-          expanded,
-          setExpanded: this.setExpanded
-        });
-      } : undefined
-    }, label);
-  }
-
-  getTreeTopElementProps(item, depth, focused, expanded) {
-    const {
-      onDoubleClick,
-      dimTopLevelWindow
-    } = this.props;
-
-    let parentElementProps = {
-      className: classnames("node object-node", {
-        focused,
-        lessen: !expanded && (nodeIsDefaultProperties(item) || nodeIsPrototype(item) || dimTopLevelWindow === true && nodeIsWindow(item) && depth === 0),
-        block: nodeIsBlock(item)
-      }),
-      onClick: e => {
-        e.stopPropagation();
-
-        // If the user selected text, bail out.
-        if (Utils.selection.documentHasSelection()) {
-          return;
-        }
-
-        this.setExpanded(item, !expanded);
-      }
-    };
-
-    if (onDoubleClick) {
-      parentElementProps.onDoubleClick = e => {
-        e.stopPropagation();
-        onDoubleClick(item, {
-          depth,
-          focused,
-          expanded
-        });
-      };
-    }
-
-    return parentElementProps;
-  }
-
-  renderTreeItem(item, depth, focused, arrow, expanded) {
-    const { label, value } = this.getTreeItemLabelAndValue(item, depth, expanded);
-    const labelElement = this.renderTreeItemLabel(label, item, depth, focused, expanded);
-    const delimiter = value && labelElement ? dom.span({ className: "object-delimiter" }, ": ") : null;
-
-    return dom.div(this.getTreeTopElementProps(item, depth, focused, expanded), arrow, labelElement, delimiter, value);
-  }
-
-  renderGrip(item, props) {
-    const object = getValue(item);
-    return Rep({
-      ...props,
-      object,
-      mode: props.mode || MODE.TINY,
-      defaultRep: Grip
-    });
-  }
-
-  render() {
-    const {
-      autoExpandAll = true,
-      autoExpandDepth = 1,
-      disabledFocus,
-      disableWrap = false,
-      expandedPaths,
-      focusedItem,
-      inline
-    } = this.props;
-
-    let roots = this.getRoots();
-    if (roots.length === 1) {
-      const root = roots[0];
-      const name = root && root.name;
-      if (nodeIsPrimitive(root) && (name === null || typeof name === "undefined")) {
-        return this.renderGrip(root, this.props);
-      }
-    }
-
-    return Tree({
-      className: classnames({
-        inline,
-        nowrap: disableWrap,
-        "object-inspector": true
-      }),
-      autoExpandAll,
-      autoExpandDepth,
-      disabledFocus,
-
-      isExpanded: item => expandedPaths && expandedPaths.has(this.getNodeKey(item)),
-      isExpandable: item => nodeIsPrimitive(item) === false,
-      focused: focusedItem,
-
-      getRoots: this.getRoots,
-      getParent,
-      getChildren: this.getItemChildren,
-      getKey: this.getNodeKey,
-
-      onExpand: item => this.setExpanded(item, true),
-      onCollapse: item => this.setExpanded(item, false),
-      onFocus: this.focusItem,
-
-      renderItem: this.renderTreeItem
-    });
-  }
-}
-
-function mapStateToProps(state, props) {
-  return {
-    actors: state.actors,
-    expandedPaths: state.expandedPaths,
-    focusedItem: state.focusedItem,
-    loadedProperties: state.loadedProperties
-  };
-}
-
-function mapDispatchToProps(dispatch) {
-  return bindActionCreators(__webpack_require__(56), dispatch);
-}
-
-module.exports = connect(mapStateToProps, mapDispatchToProps)(ObjectInspector);
-
-/***/ }),
-/* 49 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _tree = __webpack_require__(50);
+var _tree = __webpack_require__(3670);
 
 var _tree2 = _interopRequireDefault(_tree);
 
@@ -5412,7 +3622,8 @@ module.exports = {
     * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /***/ }),
-/* 50 */
+
+/***/ 3670:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -5422,15 +3633,15 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _react = __webpack_require__(10);
+var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _reactDomFactories = __webpack_require__(1);
+var _reactDomFactories = __webpack_require__(3643);
 
 var _reactDomFactories2 = _interopRequireDefault(_reactDomFactories);
 
-var _propTypes = __webpack_require__(2);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -5438,11 +3649,12 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 const { Component, createFactory } = _react2.default; /* This Source Code Form is subject to the terms of the Mozilla Public
                                                        * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                       * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+                                                       * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-__webpack_require__(51);
+__webpack_require__(3671);
 
-const AUTO_EXPAND_DEPTH = 0; // depth
+// depth
+const AUTO_EXPAND_DEPTH = 0;
 
 /**
  * An arrow that displays whether its node is expanded (▼) or collapsed
@@ -5460,9 +3672,7 @@ class ArrowExpander extends Component {
   }
 
   render() {
-    const {
-      expanded
-    } = this.props;
+    const { expanded } = this.props;
 
     const classNames = ["arrow"];
     if (expanded) {
@@ -5520,11 +3730,11 @@ class TreeNode extends Component {
     }
 
     const indents = Array.from({ length: depth }).fill(treeIndent);
-    let items = indents.concat(renderItem(item, depth, focused, arrow, expanded));
+    const items = indents.concat(renderItem(item, depth, focused, arrow, expanded));
 
     return _reactDomFactories2.default.div({
       id,
-      className: "tree-node" + (focused ? " focused" : ""),
+      className: `tree-node${focused ? " focused" : ""}`,
       onClick: this.props.onClick,
       role: "treeitem",
       "aria-level": depth + 1,
@@ -5580,8 +3790,8 @@ function oncePerAnimationFrame(fn) {
  * "traditional" tree or as rows in a table or anything else. It doesn't
  * restrict you to only one certain kind of tree.
  *
- * The tree comes with basic styling for the indent, the arrow, as well as hovered
- * and focused styles which can be override in CSS.
+ * The tree comes with basic styling for the indent, the arrow, as well as
+ * hovered and focused styles which can be override in CSS.
  *
  * ### Example Usage
  *
@@ -5737,15 +3947,15 @@ class Tree extends Component {
 
       // Note: the two properties below are mutually exclusive. Only one of the
       // label properties is necessary.
-      // ID of an element whose textual content serves as an accessible label for
-      // a tree.
+      // ID of an element whose textual content serves as an accessible label
+      // for a tree.
       labelledby: _propTypes2.default.string,
       // Accessibility label for a tree widget.
       label: _propTypes2.default.string,
 
-      // Optional event handlers for when items are expanded or collapsed. Useful
-      // for dispatching redux events and updating application state, maybe lazily
-      // loading subtrees from a worker, etc.
+      // Optional event handlers for when items are expanded or collapsed.
+      // Useful for dispatching redux events and updating application state,
+      // maybe lazily loading subtrees from a worker, etc.
       //
       // Type:
       //     onExpand(item: Item)
@@ -5756,6 +3966,10 @@ class Tree extends Component {
       //     onExpand: item => dispatchExpandActionToRedux(item)
       onExpand: _propTypes2.default.func,
       onCollapse: _propTypes2.default.func,
+      // Optional event handler called with the current focused node when the
+      // Enter key is pressed. Can be useful to allow further keyboard actions
+      // within the tree node.
+      onActivate: _propTypes2.default.func,
       isExpandable: _propTypes2.default.func,
       // Additional classes to add to the root element.
       className: _propTypes2.default.string,
@@ -5783,6 +3997,8 @@ class Tree extends Component {
     this._focusPrevNode = oncePerAnimationFrame(this._focusPrevNode).bind(this);
     this._focusNextNode = oncePerAnimationFrame(this._focusNextNode).bind(this);
     this._focusParentNode = oncePerAnimationFrame(this._focusParentNode).bind(this);
+    this._focusFirstNode = oncePerAnimationFrame(this._focusFirstNode).bind(this);
+    this._focusLastNode = oncePerAnimationFrame(this._focusLastNode).bind(this);
 
     this._autoExpand = this._autoExpand.bind(this);
     this._preventArrowKeyScrolling = this._preventArrowKeyScrolling.bind(this);
@@ -5793,12 +4009,15 @@ class Tree extends Component {
     this._onBlur = this._onBlur.bind(this);
     this._onKeyDown = this._onKeyDown.bind(this);
     this._nodeIsExpandable = this._nodeIsExpandable.bind(this);
+    this._activateNode = oncePerAnimationFrame(this._activateNode).bind(this);
   }
 
   componentDidMount() {
     this._autoExpand();
     if (this.props.focused) {
       this._scrollNodeIntoView(this.props.focused);
+      // Always keep the focus on the tree itself.
+      this.treeRef.focus();
     }
   }
 
@@ -5807,8 +4026,10 @@ class Tree extends Component {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    if (prevProps.focused !== this.props.focused) {
+    if (this.props.focused && prevProps.focused !== this.props.focused) {
       this._scrollNodeIntoView(this.props.focused);
+      // Always keep the focus on the tree itself.
+      this.treeRef.focus();
     }
   }
 
@@ -5944,12 +4165,15 @@ class Tree extends Component {
    *
    * @param {Object|undefined} options
    *        An options object which can contain:
-   *          - dir: "up" or "down" to indicate if we should scroll the element to the
-   *                 top or the bottom of the scrollable container when the element is
-   *                 off canvas.
+   *          - dir: "up" or "down" to indicate if we should scroll the element
+   *                 to the top or the bottom of the scrollable container when
+   *                 the element is off canvas.
    */
-  _focus(item, options) {
-    this._scrollNodeIntoView(item, options);
+  _focus(item, options = {}) {
+    const { preventAutoScroll } = options;
+    if (item && !preventAutoScroll) {
+      this._scrollNodeIntoView(item, options);
+    }
     if (this.props.onFocus) {
       this.props.onFocus(item);
     }
@@ -5963,14 +4187,15 @@ class Tree extends Component {
    *
    * @param {Object|undefined} options
    *        An options object which can contain:
-   *          - dir: "up" or "down" to indicate if we should scroll the element to the
-   *                 top or the bottom of the scrollable container when the element is
-   *                 off canvas.
+   *          - dir: "up" or "down" to indicate if we should scroll the element
+   *                 to the top or the bottom of the scrollable container when
+   *                 the element is off canvas.
    */
   _scrollNodeIntoView(item, options = {}) {
     if (item !== undefined) {
       const treeElement = this.treeRef;
       const element = document.getElementById(this.props.getKey(item));
+
       if (element) {
         const { top, bottom } = element.getBoundingClientRect();
         const closestScrolledParent = node => {
@@ -5984,10 +4209,12 @@ class Tree extends Component {
           return closestScrolledParent(node.parentNode);
         };
         const scrolledParent = closestScrolledParent(treeElement);
-        const isVisible = !scrolledParent || top >= 0 && bottom <= scrolledParent.clientHeight;
+        const scrolledParentRect = scrolledParent ? scrolledParent.getBoundingClientRect() : null;
+        const isVisible = !scrolledParent || top >= scrolledParentRect.top && bottom <= scrolledParentRect.bottom;
 
         if (!isVisible) {
-          let scrollToTop = !options.alignTo && top < 0 || options.alignTo === "top";
+          const { alignTo } = options;
+          const scrollToTop = alignTo ? alignTo === "top" : !scrolledParentRect || top < scrolledParentRect.top;
           element.scrollIntoView(scrollToTop);
         }
       }
@@ -6041,6 +4268,18 @@ class Tree extends Component {
         } else {
           this._focusNextNode();
         }
+        return;
+
+      case "Home":
+        this._focusFirstNode();
+        return;
+
+      case "End":
+        this._focusLastNode();
+        return;
+
+      case "Enter":
+        this._activateNode();
     }
   }
 
@@ -6117,15 +4356,30 @@ class Tree extends Component {
     this._focus(parent, { alignTo: "top" });
   }
 
+  _focusFirstNode() {
+    const traversal = this._dfsFromRoots();
+    this._focus(traversal[0].item, { alignTo: "top" });
+  }
+
+  _focusLastNode() {
+    const traversal = this._dfsFromRoots();
+    const lastIndex = traversal.length - 1;
+    this._focus(traversal[lastIndex].item, { alignTo: "bottom" });
+  }
+
+  _activateNode() {
+    if (this.props.onActivate) {
+      this.props.onActivate(this.props.focused);
+    }
+  }
+
   _nodeIsExpandable(item) {
     return this.props.isExpandable ? this.props.isExpandable(item) : !!this.props.getChildren(item).length;
   }
 
   render() {
     const traversal = this._dfsFromRoots();
-    const {
-      focused
-    } = this.props;
+    const { focused } = this.props;
 
     const nodes = traversal.map((v, i) => {
       const { item, depth } = traversal[i];
@@ -6143,7 +4397,9 @@ class Tree extends Component {
         onExpand: this._onExpand,
         onCollapse: this._onCollapse,
         onClick: e => {
-          this._focus(item);
+          // Since the user just clicked the node, there's no need to check if
+          // it should be scrolled into view.
+          this._focus(item, { preventAutoScroll: true });
           if (this.props.isExpanded(item)) {
             this.props.onCollapse(item);
           } else {
@@ -6173,7 +4429,7 @@ class Tree extends Component {
           return;
         }
 
-        let { explicitOriginalTarget } = nativeEvent;
+        const { explicitOriginalTarget } = nativeEvent;
         // Only set default focus to the first tree node if the focus came
         // from outside the tree (e.g. by tabbing to the tree from other
         // external elements).
@@ -6182,10 +4438,6 @@ class Tree extends Component {
         }
       },
       onBlur: this._onBlur,
-      onClick: () => {
-        // Focus should always remain on the tree container itself.
-        this.treeRef.focus();
-      },
       "aria-label": this.props.label,
       "aria-labelledby": this.props.labelledby,
       "aria-activedescendant": focused && this.props.getKey(focused),
@@ -6197,80 +4449,22 @@ class Tree extends Component {
 exports.default = Tree;
 
 /***/ }),
-/* 51 */
+
+/***/ 3671:
 /***/ (function(module, exports) {
 
 // removed by extract-text-webpack-plugin
 
 /***/ }),
-/* 52 */
+
+/***/ 3672:
 /***/ (function(module, exports) {
 
 // removed by extract-text-webpack-plugin
 
 /***/ }),
-/* 53 */
-/***/ (function(module, exports, __webpack_require__) {
 
-var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
-  Copyright (c) 2016 Jed Watson.
-  Licensed under the MIT License (MIT), see
-  http://jedwatson.github.io/classnames
-*/
-/* global define */
-
-(function () {
-	'use strict';
-
-	var hasOwn = {}.hasOwnProperty;
-
-	function classNames () {
-		var classes = [];
-
-		for (var i = 0; i < arguments.length; i++) {
-			var arg = arguments[i];
-			if (!arg) continue;
-
-			var argType = typeof arg;
-
-			if (argType === 'string' || argType === 'number') {
-				classes.push(arg);
-			} else if (Array.isArray(arg)) {
-				classes.push(classNames.apply(null, arg));
-			} else if (argType === 'object') {
-				for (var key in arg) {
-					if (hasOwn.call(arg, key) && arg[key]) {
-						classes.push(key);
-					}
-				}
-			}
-		}
-
-		return classes.join(' ');
-	}
-
-	if (typeof module !== 'undefined' && module.exports) {
-		module.exports = classNames;
-	} else if (true) {
-		// register as 'classnames', consistent with npm package name
-		!(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_RESULT__ = (function () {
-			return classNames;
-		}).apply(exports, __WEBPACK_AMD_DEFINE_ARRAY__),
-				__WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
-	} else {
-		window.classNames = classNames;
-	}
-}());
-
-
-/***/ }),
-/* 54 */
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_54__;
-
-/***/ }),
-/* 55 */
+/***/ 3673:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -6278,25 +4472,2088 @@ module.exports = __WEBPACK_EXTERNAL_MODULE_54__;
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-const { ELEMENT_NODE } = __webpack_require__(9);
+// Dependencies
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders undefined value
+ */
+const Undefined = function () {
+  return span({ className: "objectBox objectBox-undefined" }, "undefined");
+};
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true) {
+    return object === undefined;
+  }
+
+  return object && object.type && object.type == "undefined" || getGripType(object, noGrip) == "undefined";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(Undefined),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3674:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const { wrapRender } = __webpack_require__(3644);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders null value
+ */
+function Null(props) {
+  return span({ className: "objectBox objectBox-null" }, "null");
+}
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true) {
+    return object === null;
+  }
+
+  if (object && object.type && object.type == "null") {
+    return true;
+  }
+
+  return object == null;
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(Null),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3675:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a number
+ */
+Number.propTypes = {
+  object: PropTypes.oneOfType([PropTypes.object, PropTypes.number, PropTypes.bool]).isRequired
+};
+
+function Number(props) {
+  const value = props.object;
+
+  return span({ className: "objectBox objectBox-number" }, stringify(value));
+}
+
+function stringify(object) {
+  const isNegativeZero = Object.is(object, -0) || object.type && object.type == "-0";
+
+  return isNegativeZero ? "-0" : String(object);
+}
+
+function supportsObject(object, noGrip = false) {
+  return ["boolean", "number", "-0"].includes(getGripType(object, noGrip));
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(Number),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3676:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+const { wrapRender, ellipsisElement } = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+const DEFAULT_TITLE = "Object";
+
+/**
+ * Renders an object. An object is represented by a list of its
+ * properties enclosed in curly brackets.
+ */
+ObjectRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  title: PropTypes.string
+};
+
+function ObjectRep(props) {
+  const object = props.object;
+  const propsArray = safePropIterator(props, object);
+
+  if (props.mode === MODE.TINY) {
+    const tinyModeItems = [];
+    if (getTitle(props, object) !== DEFAULT_TITLE) {
+      tinyModeItems.push(getTitleElement(props, object));
+    } else {
+      tinyModeItems.push(span({
+        className: "objectLeftBrace"
+      }, "{"), propsArray.length > 0 ? ellipsisElement : null, span({
+        className: "objectRightBrace"
+      }, "}"));
+    }
+
+    return span({ className: "objectBox objectBox-object" }, ...tinyModeItems);
+  }
+
+  return span({ className: "objectBox objectBox-object" }, getTitleElement(props, object), span({
+    className: "objectLeftBrace"
+  }, " { "), ...propsArray, span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitleElement(props, object) {
+  return span({ className: "objectTitle" }, getTitle(props, object));
+}
+
+function getTitle(props, object) {
+  return props.title || DEFAULT_TITLE;
+}
+
+function safePropIterator(props, object, max) {
+  max = typeof max === "undefined" ? 3 : max;
+  try {
+    return propIterator(props, object, max);
+  } catch (err) {
+    console.error(err);
+  }
+  return [];
+}
+
+function propIterator(props, object, max) {
+  // Work around https://bugzilla.mozilla.org/show_bug.cgi?id=945377
+  if (Object.prototype.toString.call(object) === "[object Generator]") {
+    object = Object.getPrototypeOf(object);
+  }
+
+  const elements = [];
+  const unimportantProperties = [];
+  let propertiesNumber = 0;
+  const propertiesNames = Object.keys(object);
+
+  const pushPropRep = (name, value) => {
+    elements.push(PropRep(_extends({}, props, {
+      key: name,
+      mode: MODE.TINY,
+      name,
+      object: value,
+      equal: ": "
+    })));
+    propertiesNumber++;
+
+    if (propertiesNumber < propertiesNames.length) {
+      elements.push(", ");
+    }
+  };
+
+  try {
+    for (const name of propertiesNames) {
+      if (propertiesNumber >= max) {
+        break;
+      }
+
+      let value;
+      try {
+        value = object[name];
+      } catch (exc) {
+        continue;
+      }
+
+      // Object members with non-empty values are preferred since it gives the
+      // user a better overview of the object.
+      if (isInterestingProp(value)) {
+        pushPropRep(name, value);
+      } else {
+        // If the property is not important, put its name on an array for later
+        // use.
+        unimportantProperties.push(name);
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  if (propertiesNumber < max) {
+    for (const name of unimportantProperties) {
+      if (propertiesNumber >= max) {
+        break;
+      }
+
+      let value;
+      try {
+        value = object[name];
+      } catch (exc) {
+        continue;
+      }
+
+      pushPropRep(name, value);
+    }
+  }
+
+  if (propertiesNumber < propertiesNames.length) {
+    elements.push(ellipsisElement);
+  }
+
+  return elements;
+}
+
+function isInterestingProp(value) {
+  const type = typeof value;
+  return type == "boolean" || type == "number" || type == "string" && value;
+}
+
+function supportsObject(object) {
+  return true;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ObjectRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3677:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a symbol.
+ */
+SymbolRep.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function SymbolRep(props) {
+  const { className = "objectBox objectBox-symbol", object } = props;
+  const { name } = object;
+
+  return span({
+    className,
+    "data-link-actor-id": object.actor
+  }, `Symbol(${name || ""})`);
+}
+
+function supportsObject(object, noGrip = false) {
+  return getGripType(object, noGrip) == "symbol";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(SymbolRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3678:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a Infinity object
+ */
+InfinityRep.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function InfinityRep(props) {
+  const { object } = props;
+
+  return span({ className: "objectBox objectBox-number" }, object.type);
+}
+
+function supportsObject(object, noGrip = false) {
+  const type = getGripType(object, noGrip);
+  return type == "Infinity" || type == "-Infinity";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(InfinityRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3679:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a NaN object
+ */
+function NaNRep(props) {
+  return span({ className: "objectBox objectBox-nan" }, "NaN");
+}
+
+function supportsObject(object, noGrip = false) {
+  return getGripType(object, noGrip) == "NaN";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(NaNRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3680:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const dom = __webpack_require__(3643);
+const PropTypes = __webpack_require__(3642);
+const { wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const { span } = dom;
+
+/**
+ * Renders an object. An object is represented by a list of its
+ * properties enclosed in curly brackets.
+ */
+Accessor.propTypes = {
+  object: PropTypes.object.isRequired,
+  mode: PropTypes.oneOf(Object.values(MODE))
+};
+
+function Accessor(props) {
+  const { object } = props;
+
+  const accessors = [];
+  if (hasGetter(object)) {
+    accessors.push("Getter");
+  }
+  if (hasSetter(object)) {
+    accessors.push("Setter");
+  }
+  const title = accessors.join(" & ");
+
+  return span({ className: "objectBox objectBox-accessor objectTitle" }, title);
+}
+
+function hasGetter(object) {
+  return object && object.get && object.get.type !== "undefined";
+}
+
+function hasSetter(object) {
+  return object && object.set && object.set.type !== "undefined";
+}
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip !== true && (hasGetter(object) || hasSetter(object))) {
+    return true;
+  }
+
+  return false;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Accessor),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3681:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+const { rep: StringRep } = __webpack_require__(3648);
+
+/**
+ * Renders DOM attribute
+ */
+Attribute.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function Attribute(props) {
+  const { object } = props;
+  const value = object.preview.value;
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox-Attr"
+  }, span({ className: "attrName" }, getTitle(object)), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
+}
+
+function getTitle(grip) {
+  return grip.preview.nodeName;
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return getGripType(grip, noGrip) == "Attr" && grip.preview;
+}
+
+module.exports = {
+  rep: wrapRender(Attribute),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3682:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Used to render JS built-in Date() object.
+ */
+DateTime.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function DateTime(props) {
+  const grip = props.object;
+  let date;
+  try {
+    date = span({
+      "data-link-actor-id": grip.actor,
+      className: "objectBox"
+    }, getTitle(grip), span({ className: "Date" }, new Date(grip.preview.timestamp).toISOString()));
+  } catch (e) {
+    date = span({ className: "objectBox" }, "Invalid Date");
+  }
+
+  return date;
+}
+
+function getTitle(grip) {
+  return span({
+    className: "objectTitle"
+  }, `${grip.class} `);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return getGripType(grip, noGrip) == "Date" && grip.preview;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(DateTime),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3683:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const {
+  getGripType,
+  isGrip,
+  getURLDisplayString,
+  wrapRender
+} = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM document object.
+ */
+Document.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function Document(props) {
+  const grip = props.object;
+  const location = getLocation(grip);
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-document"
+  }, getTitle(grip), location ? span({ className: "location" }, ` ${location}`) : null);
+}
+
+function getLocation(grip) {
+  const location = grip.preview.location;
+  return location ? getURLDisplayString(location) : null;
+}
+
+function getTitle(grip) {
+  return span({
+    className: "objectTitle"
+  }, grip.class);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  const type = getGripType(object, noGrip);
+  return object.preview && (type === "HTMLDocument" || type === "XULDocument");
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Document),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3684:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM documentType object.
+ */
+DocumentType.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function DocumentType(props) {
+  const { object } = props;
+  const name = object && object.preview && object.preview.nodeName ? ` ${object.preview.nodeName}` : "";
+  return span({
+    "data-link-actor-id": props.object.actor,
+    className: "objectBox objectBox-document"
+  }, `<!DOCTYPE${name}>`);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  const type = getGripType(object, noGrip);
+  return object.preview && type === "DocumentType";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(DocumentType),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3685:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, wrapRender } = __webpack_require__(3644);
+
+const { MODE } = __webpack_require__(3645);
+const { rep } = __webpack_require__(3656);
+
+/**
+ * Renders DOM event objects.
+ */
+Event.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function Event(props) {
+  const gripProps = _extends({}, props, {
+    title: getTitle(props),
+    object: _extends({}, props.object, {
+      preview: _extends({}, props.object.preview, {
+        ownProperties: {}
+      })
+    })
+  });
+
+  if (gripProps.object.preview.target) {
+    Object.assign(gripProps.object.preview.ownProperties, {
+      target: gripProps.object.preview.target
+    });
+  }
+  Object.assign(gripProps.object.preview.ownProperties, gripProps.object.preview.properties);
+
+  delete gripProps.object.preview.properties;
+  gripProps.object.ownPropertyLength = Object.keys(gripProps.object.preview.ownProperties).length;
+
+  switch (gripProps.object.class) {
+    case "MouseEvent":
+      gripProps.isInterestingProp = (type, value, name) => {
+        return ["target", "clientX", "clientY", "layerX", "layerY"].includes(name);
+      };
+      break;
+    case "KeyboardEvent":
+      gripProps.isInterestingProp = (type, value, name) => {
+        return ["target", "key", "charCode", "keyCode"].includes(name);
+      };
+      break;
+    case "MessageEvent":
+      gripProps.isInterestingProp = (type, value, name) => {
+        return ["target", "isTrusted", "data"].includes(name);
+      };
+      break;
+    default:
+      gripProps.isInterestingProp = (type, value, name) => {
+        // We want to show the properties in the order they are declared.
+        return Object.keys(gripProps.object.preview.ownProperties).includes(name);
+      };
+  }
+
+  return rep(gripProps);
+}
+
+function getTitle(props) {
+  const preview = props.object.preview;
+  let title = preview.type;
+
+  if (preview.eventKind == "key" && preview.modifiers && preview.modifiers.length) {
+    title = `${title} ${preview.modifiers.join("-")}`;
+  }
+  return title;
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.preview.kind == "DOMEvent";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Event),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3686:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+// Dependencies
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a DOM Promise object.
+ */
+PromiseRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function PromiseRep(props) {
+  const object = props.object;
+  const { promiseState } = object;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-object"
+  };
+
+  if (props.mode === MODE.TINY) {
+    const { Rep } = __webpack_require__(3647);
+
+    return span(config, getTitle(object), span({
+      className: "objectLeftBrace"
+    }, " { "), Rep({ object: promiseState.state }), span({
+      className: "objectRightBrace"
+    }, " }"));
+  }
+
+  const propsArray = getProps(props, promiseState);
+  return span(config, getTitle(object), span({
+    className: "objectLeftBrace"
+  }, " { "), ...propsArray, span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitle(object) {
+  return span({
+    className: "objectTitle"
+  }, object.class);
+}
+
+function getProps(props, promiseState) {
+  const keys = ["state"];
+  if (Object.keys(promiseState).includes("value")) {
+    keys.push("value");
+  }
+
+  return keys.reduce((res, key, i) => {
+    const object = promiseState[key];
+    res = res.concat(PropRep(_extends({}, props, {
+      mode: MODE.TINY,
+      name: `<${key}>`,
+      object,
+      equal: ": ",
+      suppressQuotes: true
+    })));
+
+    // Interleave commas between elements
+    if (i !== keys.length - 1) {
+      res.push(", ");
+    }
+
+    return res;
+  }, []);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return getGripType(object, noGrip) == "Promise";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(PromiseRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3687:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip object with regular expression.
+ */
+RegExp.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function RegExp(props) {
+  const { object } = props;
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-regexp regexpSource"
+  }, getSource(object));
+}
+
+function getSource(grip) {
+  return grip.displayString;
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return getGripType(object, noGrip) == "RegExp";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(RegExp),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3688:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const {
+  getGripType,
+  isGrip,
+  getURLDisplayString,
+  wrapRender
+} = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip representing CSSStyleSheet
+ */
+StyleSheet.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function StyleSheet(props) {
+  const grip = props.object;
+
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-object"
+  }, getTitle(grip), span({ className: "objectPropValue" }, getLocation(grip)));
+}
+
+function getTitle(grip) {
+  const title = "StyleSheet ";
+  return span({ className: "objectBoxTitle" }, title);
+}
+
+function getLocation(grip) {
+  // Embedded stylesheets don't have URL and so, no preview.
+  const url = grip.preview ? grip.preview.url : "";
+  return url ? getURLDisplayString(url) : "";
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return getGripType(object, noGrip) == "CSSStyleSheet";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(StyleSheet),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3689:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+const {
+  isGrip,
+  cropString,
+  cropMultipleLines,
+  wrapRender
+} = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const nodeConstants = __webpack_require__(3659);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM comment node.
+ */
+CommentNode.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
+};
+
+function CommentNode(props) {
+  const { object, mode = MODE.SHORT } = props;
+
+  let { textContent } = object.preview;
+  if (mode === MODE.TINY) {
+    textContent = cropMultipleLines(textContent, 30);
+  } else if (mode === MODE.SHORT) {
+    textContent = cropString(textContent, 50);
+  }
+
+  return span({
+    className: "objectBox theme-comment",
+    "data-link-actor-id": object.actor
+  }, `<!-- ${textContent} -->`);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return object.preview && object.preview.nodeType === nodeConstants.COMMENT_NODE;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(CommentNode),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3690:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Utils
+const { isGrip, wrapRender } = __webpack_require__(3644);
+const { rep: StringRep } = __webpack_require__(3648);
+const { MODE } = __webpack_require__(3645);
+const nodeConstants = __webpack_require__(3659);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM element node.
+ */
+ElementNode.propTypes = {
+  object: PropTypes.object.isRequired,
+  inspectIconTitle: PropTypes.string,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeClick: PropTypes.func,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function ElementNode(props) {
+  const {
+    object,
+    inspectIconTitle,
+    mode,
+    onDOMNodeClick,
+    onDOMNodeMouseOver,
+    onDOMNodeMouseOut,
+    onInspectIconClick
+  } = props;
+  const elements = getElements(object, mode);
+
+  const isInTree = object.preview && object.preview.isConnected === true;
+
+  const baseConfig = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-node"
+  };
+  let inspectIcon;
+  if (isInTree) {
+    if (onDOMNodeClick) {
+      Object.assign(baseConfig, {
+        onClick: _ => onDOMNodeClick(object)
+      });
+    }
+
+    if (onDOMNodeMouseOver) {
+      Object.assign(baseConfig, {
+        onMouseOver: _ => onDOMNodeMouseOver(object)
+      });
+    }
+
+    if (onDOMNodeMouseOut) {
+      Object.assign(baseConfig, {
+        onMouseOut: onDOMNodeMouseOut
+      });
+    }
+
+    if (onInspectIconClick) {
+      inspectIcon = dom.button({
+        className: "open-inspector",
+        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
+        title: inspectIconTitle || "Click to select the node in the inspector",
+        onClick: e => {
+          if (onDOMNodeClick) {
+            e.stopPropagation();
+          }
+
+          onInspectIconClick(object, e);
+        }
+      });
+    }
+  }
+
+  return span(baseConfig, ...elements, inspectIcon);
+}
+
+function getElements(grip, mode) {
+  const {
+    attributes,
+    nodeName,
+    isAfterPseudoElement,
+    isBeforePseudoElement
+  } = grip.preview;
+  const nodeNameElement = span({
+    className: "tag-name"
+  }, nodeName);
+
+  if (isAfterPseudoElement || isBeforePseudoElement) {
+    return [span({ className: "attrName" }, `::${isAfterPseudoElement ? "after" : "before"}`)];
+  }
+
+  if (mode === MODE.TINY) {
+    const elements = [nodeNameElement];
+    if (attributes.id) {
+      elements.push(span({ className: "attrName" }, `#${attributes.id}`));
+    }
+    if (attributes.class) {
+      elements.push(span({ className: "attrName" }, attributes.class.trim().split(/\s+/).map(cls => `.${cls}`).join("")));
+    }
+    return elements;
+  }
+
+  const attributeKeys = Object.keys(attributes);
+  if (attributeKeys.includes("class")) {
+    attributeKeys.splice(attributeKeys.indexOf("class"), 1);
+    attributeKeys.unshift("class");
+  }
+  if (attributeKeys.includes("id")) {
+    attributeKeys.splice(attributeKeys.indexOf("id"), 1);
+    attributeKeys.unshift("id");
+  }
+  const attributeElements = attributeKeys.reduce((arr, name, i, keys) => {
+    const value = attributes[name];
+    const attribute = span({}, span({ className: "attrName" }, name), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
+
+    return arr.concat([" ", attribute]);
+  }, []);
+
+  return [span({ className: "angleBracket" }, "<"), nodeNameElement, ...attributeElements, span({ className: "angleBracket" }, ">")];
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return object.preview && object.preview.nodeType === nodeConstants.ELEMENT_NODE;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ElementNode),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3691:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, cropString, wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM #text node.
+ */
+TextNode.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function TextNode(props) {
+  const {
+    object: grip,
+    mode = MODE.SHORT,
+    onDOMNodeMouseOver,
+    onDOMNodeMouseOut,
+    onInspectIconClick
+  } = props;
+
+  const baseConfig = {
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-textNode"
+  };
+  let inspectIcon;
+  const isInTree = grip.preview && grip.preview.isConnected === true;
+
+  if (isInTree) {
+    if (onDOMNodeMouseOver) {
+      Object.assign(baseConfig, {
+        onMouseOver: _ => onDOMNodeMouseOver(grip)
+      });
+    }
+
+    if (onDOMNodeMouseOut) {
+      Object.assign(baseConfig, {
+        onMouseOut: onDOMNodeMouseOut
+      });
+    }
+
+    if (onInspectIconClick) {
+      inspectIcon = dom.button({
+        className: "open-inspector",
+        draggable: false,
+        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
+        title: "Click to select the node in the inspector",
+        onClick: e => onInspectIconClick(grip, e)
+      });
+    }
+  }
+
+  if (mode === MODE.TINY) {
+    return span(baseConfig, getTitle(grip), inspectIcon);
+  }
+
+  return span(baseConfig, getTitle(grip), span({ className: "nodeValue" }, " ", `"${getTextContent(grip)}"`), inspectIcon);
+}
+
+function getTextContent(grip) {
+  return cropString(grip.preview.textContent);
+}
+
+function getTitle(grip) {
+  const title = "#text";
+  return span({}, title);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.class == "Text";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(TextNode),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3692:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const {
+  getGripType,
+  isGrip,
+  getURLDisplayString,
+  wrapRender
+} = __webpack_require__(3644);
+
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip representing a window.
+ */
+WindowRep.propTypes = {
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  object: PropTypes.object.isRequired
+};
+
+function WindowRep(props) {
+  const { mode, object } = props;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-Window"
+  };
+
+  if (mode === MODE.TINY) {
+    return span(config, getTitle(object));
+  }
+
+  return span(config, getTitle(object, true), span({ className: "location" }, getLocation(object)));
+}
+
+function getTitle(object, trailingSpace) {
+  let title = object.displayClass || object.class || "Window";
+  if (trailingSpace === true) {
+    title = `${title} `;
+  }
+  return span({ className: "objectTitle" }, title);
+}
+
+function getLocation(object) {
+  return getURLDisplayString(object.preview.url);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return object.preview && getGripType(object, noGrip) == "Window";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(WindowRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3693:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, wrapRender } = __webpack_require__(3644);
+
+const String = __webpack_require__(3648).rep;
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip object with textual data.
+ */
+ObjectWithText.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function ObjectWithText(props) {
+  const grip = props.object;
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: `objectTitle objectBox objectBox-${getType(grip)}`
+  }, `${getType(grip)} `, getDescription(grip));
+}
+
+function getType(grip) {
+  return grip.class;
+}
+
+function getDescription(grip) {
+  return String({
+    object: grip.preview.text
+  });
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.preview.kind == "ObjectWithText";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ObjectWithText),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3694:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, getURLDisplayString, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip object with URL data.
+ */
+ObjectWithURL.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function ObjectWithURL(props) {
+  const grip = props.object;
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: `objectBox objectBox-${getType(grip)}`
+  }, getTitle(grip), span({ className: "objectPropValue" }, getDescription(grip)));
+}
+
+function getTitle(grip) {
+  return span({ className: "objectTitle" }, `${getType(grip)} `);
+}
+
+function getType(grip) {
+  return grip.class;
+}
+
+function getDescription(grip) {
+  return getURLDisplayString(grip.preview.url);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.preview.kind == "ObjectWithURL";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ObjectWithURL),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3695:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { createElement, createFactory, PureComponent } = __webpack_require__(0);
+const { Provider } = __webpack_require__(3592);
+const ObjectInspector = createFactory(__webpack_require__(3696));
+const createStore = __webpack_require__(3700);
+const Utils = __webpack_require__(3657);
+const { renderRep, shouldRenderRootsInReps } = Utils;
+
+class OI extends PureComponent {
+  constructor(props) {
+    super(props);
+    this.store = createStore(props);
+  }
+
+  getStore() {
+    return this.store;
+  }
+
+  render() {
+    return createElement(Provider, { store: this.store }, ObjectInspector(this.props));
+  }
+}
+
+module.exports = props => {
+  const { roots } = props;
+  if (shouldRenderRootsInReps(roots)) {
+    return renderRep(roots[0], props);
+  }
+  return new OI(props);
+};
+
+/***/ }),
+
+/***/ 3696:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+var _devtoolsComponents = __webpack_require__(3669);
+
+var _devtoolsComponents2 = _interopRequireDefault(_devtoolsComponents);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { Component, createFactory } = __webpack_require__(0);
+const dom = __webpack_require__(3643);
+const { connect } = __webpack_require__(3592);
+const { bindActionCreators } = __webpack_require__(3593);
+
+const Tree = createFactory(_devtoolsComponents2.default.Tree);
+__webpack_require__(3697);
+
+const classnames = __webpack_require__(175);
+const { MODE } = __webpack_require__(3645);
+
+const Utils = __webpack_require__(3657);
+
+const {
+  getChildren,
+  getClosestGripNode,
+  getParent,
+  getValue,
+  nodeHasAccessors,
+  nodeHasProperties,
+  nodeIsBlock,
+  nodeIsDefaultProperties,
+  nodeIsFunction,
+  nodeIsGetter,
+  nodeIsMapEntry,
+  nodeIsMissingArguments,
+  nodeIsOptimizedOut,
+  nodeIsPrimitive,
+  nodeIsPrototype,
+  nodeIsSetter,
+  nodeIsUninitializedBinding,
+  nodeIsUnmappedBinding,
+  nodeIsUnscopedBinding,
+  nodeIsWindow,
+  nodeIsLongString,
+  nodeHasFullText
+} = Utils.node;
+
+// This implements a component that renders an interactive inspector
+// for looking at JavaScript objects. It expects descriptions of
+// objects from the protocol, and will dynamically fetch children
+// properties as objects are expanded.
+//
+// If you want to inspect a single object, pass the name and the
+// protocol descriptor of it:
+//
+//  ObjectInspector({
+//    name: "foo",
+//    desc: { writable: true, ..., { value: { actor: "1", ... }}},
+//    ...
+//  })
+//
+// If you want multiple top-level objects (like scopes), you can pass
+// an array of manually constructed nodes as `roots`:
+//
+//  ObjectInspector({
+//    roots: [{ name: ... }, ...],
+//    ...
+//  });
+
+// There are 3 types of nodes: a simple node with a children array, an
+// object that has properties that should be children when they are
+// fetched, and a primitive value that should be displayed with no
+// children.
+
+class ObjectInspector extends Component {
+  constructor(props) {
+    super();
+    this.cachedNodes = new Map();
+
+    const self = this;
+
+    self.getItemChildren = this.getItemChildren.bind(this);
+    self.renderTreeItem = this.renderTreeItem.bind(this);
+    self.setExpanded = this.setExpanded.bind(this);
+    self.focusItem = this.focusItem.bind(this);
+    self.getRoots = this.getRoots.bind(this);
+  }
+
+  shouldComponentUpdate(nextProps) {
+    const { expandedPaths, focusedItem, loadedProperties, roots } = this.props;
+
+    if (roots !== nextProps.roots) {
+      // Since the roots changed, we assume the properties did as well,
+      // so we need to cleanup the component internal state.
+
+      // We can clear the cachedNodes to avoid bugs and memory leaks.
+      this.cachedNodes.clear();
+      // The rootsChanged action will be handled in a middleware to release the
+      // actors of the old roots, as well as cleanup the state properties
+      // (expandedPaths, loadedProperties, …).
+      this.props.rootsChanged(nextProps);
+      // We don't render right away since the state is going to be changed by
+      // the rootsChanged action. The `state.forceUpdate` flag will be set
+      // to `true` so we can execute a new render cycle with the cleaned state.
+      return false;
+    }
+
+    if (nextProps.forceUpdate === true) {
+      return true;
+    }
+
+    // We should update if:
+    // - there are new loaded properties
+    // - OR the expanded paths number changed, and all of them have properties
+    //      loaded
+    // - OR the expanded paths number did not changed, but old and new sets
+    //      differ
+    // - OR the focused node changed.
+    return loadedProperties.size !== nextProps.loadedProperties.size || expandedPaths.size !== nextProps.expandedPaths.size && [...nextProps.expandedPaths].every(path => nextProps.loadedProperties.has(path)) || expandedPaths.size === nextProps.expandedPaths.size && [...nextProps.expandedPaths].some(key => !expandedPaths.has(key)) || focusedItem !== nextProps.focusedItem;
+  }
+
+  componentDidUpdate(prevProps) {
+    if (this.props.forceUpdate) {
+      // If the component was updated, we can then reset the forceUpdate flag.
+      this.props.forceUpdated();
+    }
+  }
+
+  componentWillUnmount() {
+    const { releaseActor } = this.props;
+    if (typeof releaseActor !== "function") {
+      return;
+    }
+
+    const { actors } = this.props;
+    for (const actor of actors) {
+      releaseActor(actor);
+    }
+  }
+
+  getItemChildren(item) {
+    const { loadedProperties } = this.props;
+    const { cachedNodes } = this;
+
+    return getChildren({
+      loadedProperties,
+      cachedNodes,
+      item
+    });
+  }
+
+  getRoots() {
+    return this.props.roots;
+  }
+
+  getNodeKey(item) {
+    return item.path && typeof item.path.toString === "function" ? item.path.toString() : JSON.stringify(item);
+  }
+
+  setExpanded(item, expand) {
+    if (nodeIsPrimitive(item)) {
+      return;
+    }
+
+    const {
+      createObjectClient,
+      createLongStringClient,
+      loadedProperties,
+      nodeExpand,
+      nodeCollapse,
+      roots
+    } = this.props;
+
+    if (expand === true) {
+      const gripItem = getClosestGripNode(item);
+      const value = getValue(gripItem);
+      const isRoot = value && roots.some(root => {
+        const rootValue = getValue(root);
+        return rootValue && rootValue.actor === value.actor;
+      });
+      const actor = isRoot || !value ? null : value.actor;
+      nodeExpand(item, actor, loadedProperties, createObjectClient, createLongStringClient);
+    } else {
+      nodeCollapse(item);
+    }
+  }
+
+  focusItem(item) {
+    const { focusable = true, focusedItem, nodeFocus, onFocus } = this.props;
+
+    if (focusable && focusedItem !== item) {
+      nodeFocus(item);
+      if (focusedItem !== item && onFocus) {
+        onFocus(item);
+      }
+    }
+  }
+
+  // eslint-disable-next-line complexity
+  getTreeItemLabelAndValue(item, depth, expanded) {
+    const label = item.name;
+    const isPrimitive = nodeIsPrimitive(item);
+
+    if (nodeIsOptimizedOut(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(optimized away)")
+      };
+    }
+
+    if (nodeIsUninitializedBinding(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(uninitialized)")
+      };
+    }
+
+    if (nodeIsUnmappedBinding(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(unmapped)")
+      };
+    }
+
+    if (nodeIsUnscopedBinding(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(unscoped)")
+      };
+    }
+
+    const itemValue = getValue(item);
+    const unavailable = isPrimitive && itemValue && itemValue.hasOwnProperty && itemValue.hasOwnProperty("unavailable");
+
+    if (nodeIsMissingArguments(item) || unavailable) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(unavailable)")
+      };
+    }
+
+    if (nodeIsFunction(item) && !nodeIsGetter(item) && !nodeIsSetter(item) && (this.props.mode === MODE.TINY || !this.props.mode)) {
+      return {
+        label: Utils.renderRep(item, _extends({}, this.props, {
+          functionName: label
+        }))
+      };
+    }
+
+    if (nodeHasProperties(item) || nodeHasAccessors(item) || nodeIsMapEntry(item) || nodeIsLongString(item) || isPrimitive) {
+      const repProps = _extends({}, this.props);
+      if (depth > 0) {
+        repProps.mode = this.props.mode === MODE.LONG ? MODE.SHORT : MODE.TINY;
+      }
+      if (expanded) {
+        repProps.mode = MODE.TINY;
+      }
+
+      if (nodeIsLongString(item)) {
+        repProps.member = {
+          open: nodeHasFullText(item) && expanded
+        };
+      }
+
+      return {
+        label,
+        value: Utils.renderRep(item, repProps)
+      };
+    }
+
+    return {
+      label
+    };
+  }
+
+  renderTreeItemLabel(label, item, depth, focused, expanded) {
+    if (label === null || typeof label === "undefined") {
+      return null;
+    }
+
+    const { onLabelClick } = this.props;
+
+    return dom.span({
+      className: "object-label",
+      onClick: onLabelClick ? event => {
+        event.stopPropagation();
+
+        // If the user selected text, bail out.
+        if (Utils.selection.documentHasSelection()) {
+          return;
+        }
+
+        onLabelClick(item, {
+          depth,
+          focused,
+          expanded,
+          setExpanded: this.setExpanded
+        });
+      } : undefined
+    }, label);
+  }
+
+  getTreeTopElementProps(item, depth, focused, expanded) {
+    const { onCmdCtrlClick, onDoubleClick, dimTopLevelWindow } = this.props;
+
+    const parentElementProps = {
+      className: classnames("node object-node", {
+        focused,
+        lessen: !expanded && (nodeIsDefaultProperties(item) || nodeIsPrototype(item) || dimTopLevelWindow === true && nodeIsWindow(item) && depth === 0),
+        block: nodeIsBlock(item)
+      }),
+      onClick: e => {
+        if (e.metaKey && onCmdCtrlClick) {
+          onCmdCtrlClick(item, {
+            depth,
+            event: e,
+            focused,
+            expanded
+          });
+          e.stopPropagation();
+          return;
+        }
+
+        // If this click happened because the user selected some text, bail out.
+        // Note that if the user selected some text before and then clicks here,
+        // the previously selected text will be first unselected, unless the
+        // user clicked on the arrow itself. Indeed because the arrow is an
+        // image, clicking on it does not remove any existing text selection.
+        // So we need to also check if the arrow was clicked.
+        if (Utils.selection.documentHasSelection() && !(e.target && e.target.matches && e.target.matches(".arrow"))) {
+          e.stopPropagation();
+        }
+      }
+    };
+
+    if (onDoubleClick) {
+      parentElementProps.onDoubleClick = e => {
+        e.stopPropagation();
+        onDoubleClick(item, {
+          depth,
+          focused,
+          expanded
+        });
+      };
+    }
+
+    return parentElementProps;
+  }
+
+  renderTreeItem(item, depth, focused, arrow, expanded) {
+    const { label, value } = this.getTreeItemLabelAndValue(item, depth, expanded);
+    const labelElement = this.renderTreeItemLabel(label, item, depth, focused, expanded);
+    const delimiter = value && labelElement ? dom.span({ className: "object-delimiter" }, ": ") : null;
+
+    return dom.div(this.getTreeTopElementProps(item, depth, focused, expanded), arrow, labelElement, delimiter, value);
+  }
+
+  render() {
+    const {
+      autoExpandAll = true,
+      autoExpandDepth = 1,
+      focusable = true,
+      disableWrap = false,
+      expandedPaths,
+      focusedItem,
+      inline
+    } = this.props;
+
+    return Tree({
+      className: classnames({
+        inline,
+        nowrap: disableWrap,
+        "object-inspector": true
+      }),
+      autoExpandAll,
+      autoExpandDepth,
+
+      isExpanded: item => expandedPaths && expandedPaths.has(item.path),
+      isExpandable: item => nodeIsPrimitive(item) === false,
+      focused: focusedItem,
+
+      getRoots: this.getRoots,
+      getParent,
+      getChildren: this.getItemChildren,
+      getKey: this.getNodeKey,
+
+      onExpand: item => this.setExpanded(item, true),
+      onCollapse: item => this.setExpanded(item, false),
+      onFocus: focusable ? this.focusItem : null,
+
+      renderItem: this.renderTreeItem
+    });
+  }
+}
+
+function mapStateToProps(state, props) {
+  return {
+    actors: state.actors,
+    expandedPaths: state.expandedPaths,
+    // If the root changes, we want to pass a possibly new focusedItem property
+    focusedItem: state.roots !== props.roots ? props.focusedItem : state.focusedItem,
+    loadedProperties: state.loadedProperties,
+    forceUpdate: state.forceUpdate
+  };
+}
+
+function mapDispatchToProps(dispatch) {
+  return bindActionCreators(__webpack_require__(3699), dispatch);
+}
+
+module.exports = connect(mapStateToProps, mapDispatchToProps)(ObjectInspector);
+
+/***/ }),
+
+/***/ 3697:
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
+
+/***/ 3698:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function documentHasSelection() {
   const selection = getSelection();
   if (!selection) {
-    return false;
-  }
-
-  const {
-    anchorNode,
-    focusNode
-  } = selection;
-
-  // When clicking the arrow, which is an inline svg element, the selection do have a type
-  // of "Range". We need to have an explicit case when the anchor and the focus node are
-  // the same and they have an arrow ancestor.
-  if (focusNode && focusNode === anchorNode && focusNode.nodeType == ELEMENT_NODE && focusNode.closest(".arrow")) {
     return false;
   }
 
@@ -6308,46 +6565,31 @@ module.exports = {
 };
 
 /***/ }),
-/* 56 */
+
+/***/ 3699:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
-const {
-  getClosestGripNode,
-  getValue
-} = __webpack_require__(11); /* This Source Code Form is subject to the terms of the Mozilla Public
-                              * License, v. 2.0. If a copy of the MPL was not distributed with this
-                              * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const {
-  shouldLoadItemEntries,
-  shouldLoadItemIndexedProperties,
-  shouldLoadItemNonIndexedProperties,
-  shouldLoadItemPrototype,
-  shouldLoadItemSymbols
-} = __webpack_require__(21);
-
-const {
-  enumEntries,
-  enumIndexedProperties,
-  enumNonIndexedProperties,
-  getPrototype,
-  enumSymbols
-} = __webpack_require__(20);
+const { loadItemProperties } = __webpack_require__(3666); /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                    * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
- * This action is responsible for expanding a given node,
- * which also means that it will call the action responsible to fetch properties.
+ * This action is responsible for expanding a given node, which also means that
+ * it will call the action responsible to fetch properties.
  */
-function nodeExpand(node, actor, loadedProperties, createObjectClient) {
+function nodeExpand(node, actor, loadedProperties, createObjectClient, createLongStringClient) {
   return async ({ dispatch }) => {
     dispatch({
       type: "NODE_EXPAND",
       data: { node }
     });
-    dispatch(nodeLoadProperties(node, actor, loadedProperties, createObjectClient));
+
+    if (!loadedProperties.has(node.path)) {
+      dispatch(nodeLoadProperties(node, actor, loadedProperties, createObjectClient, createLongStringClient));
+    }
   };
 }
 
@@ -6365,103 +6607,130 @@ function nodeFocus(node) {
   };
 }
 /*
- * This action checks if we need to fetch properties, entries, prototype and symbols
- * for a given node. If we do, it will call the appropriate ObjectClient functions.
+ * This action checks if we need to fetch properties, entries, prototype and
+ * symbols for a given node. If we do, it will call the appropriate ObjectClient
+ * functions.
  */
-function nodeLoadProperties(item, actor, loadedProperties, createObjectClient) {
+function nodeLoadProperties(item, actor, loadedProperties, createObjectClient, createLongStringClient) {
   return async ({ dispatch }) => {
     try {
-      const gripItem = getClosestGripNode(item);
-      const value = getValue(gripItem);
-
-      const [start, end] = item.meta ? [item.meta.startIndex, item.meta.endIndex] : [];
-
-      let promises = [];
-      let objectClient;
-      const getObjectClient = () => objectClient || createObjectClient(value);
-
-      if (shouldLoadItemIndexedProperties(item, loadedProperties)) {
-        promises.push(enumIndexedProperties(getObjectClient(), start, end));
-      }
-
-      if (shouldLoadItemNonIndexedProperties(item, loadedProperties)) {
-        promises.push(enumNonIndexedProperties(getObjectClient(), start, end));
-      }
-
-      if (shouldLoadItemEntries(item, loadedProperties)) {
-        promises.push(enumEntries(getObjectClient(), start, end));
-      }
-
-      if (shouldLoadItemPrototype(item, loadedProperties)) {
-        promises.push(getPrototype(getObjectClient()));
-      }
-
-      if (shouldLoadItemSymbols(item, loadedProperties)) {
-        promises.push(enumSymbols(getObjectClient(), start, end));
-      }
-
-      if (promises.length > 0) {
-        const responses = await Promise.all(promises);
-        dispatch(nodePropertiesLoaded(item, actor, responses));
-      }
+      const properties = await loadItemProperties(item, createObjectClient, createLongStringClient, loadedProperties);
+      dispatch(nodePropertiesLoaded(item, actor, properties));
     } catch (e) {
       console.error(e);
     }
   };
 }
 
-function nodePropertiesLoaded(node, actor, responses) {
+function nodePropertiesLoaded(node, actor, properties) {
   return {
     type: "NODE_PROPERTIES_LOADED",
-    data: { node, actor, responses }
+    data: { node, actor, properties }
+  };
+}
+
+/*
+ * This action is dispatched when the `roots` prop, provided by a consumer of
+ * the ObjectInspector (inspector, console, …), is modified. It will clean the
+ * internal state properties (expandedPaths, loadedProperties, …) and release
+ * the actors consumed with the previous roots.
+ * It takes a props argument which reflects what is passed by the upper-level
+ * consumer.
+ */
+function rootsChanged(props) {
+  return {
+    type: "ROOTS_CHANGED",
+    data: props
+  };
+}
+
+/*
+ * This action will reset the `forceUpdate` flag in the state.
+ */
+function forceUpdated() {
+  return {
+    type: "FORCE_UPDATED"
   };
 }
 
 module.exports = {
+  forceUpdated,
   nodeExpand,
   nodeCollapse,
   nodeFocus,
   nodeLoadProperties,
-  nodePropertiesLoaded
+  nodePropertiesLoaded,
+  rootsChanged
 };
 
 /***/ }),
-/* 57 */
+
+/***/ 3700:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-const { applyMiddleware, createStore } = __webpack_require__(18);
-const { thunk } = __webpack_require__(58);
-const { waitUntilService } = __webpack_require__(59);
-const reducer = __webpack_require__(60);
+const { applyMiddleware, createStore, compose } = __webpack_require__(3593);
+const { thunk } = __webpack_require__(3701);
+const {
+  waitUntilService
+} = __webpack_require__(3702);
+const reducer = __webpack_require__(3703);
 
 function createInitialState(overrides) {
-  return {
+  return _extends({
     actors: new Set(),
     expandedPaths: new Set(),
     focusedItem: null,
     loadedProperties: new Map(),
-    ...overrides
+    forceUpdated: false
+  }, overrides);
+}
+
+function enableStateReinitializer(props) {
+  return next => (innerReducer, initialState, enhancer) => {
+    function reinitializerEnhancer(state, action) {
+      if (action.type !== "ROOTS_CHANGED") {
+        return innerReducer(state, action);
+      }
+
+      if (props.releaseActor && initialState.actors) {
+        initialState.actors.forEach(props.releaseActor);
+      }
+
+      return _extends({}, action.data, {
+        actors: new Set(),
+        expandedPaths: new Set(),
+        loadedProperties: new Map(),
+        // Indicates to the component that we do want to render on the next
+        // render cycle.
+        forceUpdate: true
+      });
+    }
+    return next(reinitializerEnhancer, initialState, enhancer);
   };
 }
 
 module.exports = props => {
   const middlewares = [thunk];
+
   if (props.injectWaitService) {
     middlewares.push(waitUntilService);
   }
 
-  return createStore(reducer, createInitialState(props), applyMiddleware(...middlewares));
+  return createStore(reducer, createInitialState(props), compose(applyMiddleware(...middlewares), enableStateReinitializer(props)));
 };
 
 /***/ }),
-/* 58 */
+
+/***/ 3701:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -6469,7 +6738,7 @@ module.exports = props => {
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
  * A middleware that allows thunks (functions) to be dispatched.
@@ -6485,7 +6754,8 @@ function thunk({ dispatch, getState }) {
 exports.thunk = thunk;
 
 /***/ }),
-/* 59 */
+
+/***/ 3702:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -6493,7 +6763,7 @@ exports.thunk = thunk;
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const WAIT_UNTIL_TYPE = "@@service/waitUntil";
 /**
@@ -6559,19 +6829,19 @@ module.exports = {
 };
 
 /***/ }),
-/* 60 */
+
+/***/ 3703:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
-function reducer(state = {}, action) {
-  const {
-    type,
-    data
-  } = action;
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
-  const cloneState = overrides => ({ ...state, ...overrides });
+function reducer(state = {}, action) {
+  const { type, data } = action;
+
+  const cloneState = overrides => _extends({}, state, overrides);
 
   if (type === "NODE_EXPAND") {
     return cloneState({
@@ -6586,49 +6856,37 @@ function reducer(state = {}, action) {
   }
 
   if (type === "NODE_PROPERTIES_LOADED") {
-    // Let's loop through the responses to build a single object.
-    const properties = mergeResponses(data.responses);
-
     return cloneState({
       actors: data.actor ? new Set(state.actors || []).add(data.actor) : state.actors,
-      loadedProperties: new Map(state.loadedProperties).set(data.node.path, properties)
+      loadedProperties: new Map(state.loadedProperties).set(data.node.path, action.data.properties)
     });
   }
 
   if (type === "NODE_FOCUS") {
+    if (state.focusedItem === data.node) {
+      return state;
+    }
+
     return cloneState({
       focusedItem: data.node
+    });
+  }
+
+  if (type === "FORCE_UPDATED") {
+    return cloneState({
+      forceUpdate: false
     });
   }
 
   return state;
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-
-function mergeResponses(responses) {
-  const data = {};
-
-  for (const response of responses) {
-    if (response.hasOwnProperty("ownProperties")) {
-      data.ownProperties = { ...data.ownProperties, ...response.ownProperties };
-    }
-
-    if (response.ownSymbols && response.ownSymbols.length > 0) {
-      data.ownSymbols = response.ownSymbols;
-    }
-
-    if (response.prototype) {
-      data.prototype = response.prototype;
-    }
-  }
-
-  return data;
-}
 
 module.exports = reducer;
 
 /***/ })
-/******/ ]);
+
+/******/ });
 });

@@ -315,36 +315,6 @@ panelview:not([mainview]) .toolbarbutton-text,
   padding: 4px 0;
 }
 
-/* START notification popups for extension controlled content */
-#extension-notification-panel > .panel-arrowcontainer > .panel-arrowcontent {
-  padding: 0;
-}
-
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-body {
-  width: 30em;
-}
-
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-body > hbox > vbox > .popup-notification-description {
-  font-size: 1.3em;
-  font-weight: lighter;
-}
-
-#extension-new-tab-notification-description {
-  margin-bottom: 0;
-}
-
-#extension-new-tab-notification-description > .extension-controlled-icon {
-  height: 16px;
-  width: 16px;
-  vertical-align: bottom;
-}
-
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-body > .popup-notification-warning,
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-icon {
-  display: none;
-}
-/* END notification popups for extension controlled content */
-
 #appMenu-popup > .panel-arrowcontainer > .panel-arrowcontent,
 panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
   padding: 0;
@@ -765,6 +735,19 @@ toolbarbutton[constrain-size="true"][cui-areatype="menu-panel"] > .toolbarbutton
   background-color: hsl(96,65%,75%);
 }
 
+:root[lwt-popup-brighttext] .panel-banner-item:not([disabled]) {
+  background-color: rgba(48,230,11,.1);
+  color: #F9F9FA;
+}
+
+:root[lwt-popup-brighttext] .panel-banner-item:not([disabled]):hover {
+  background-color: rgba(48,230,11,.15);
+}
+
+:root[lwt-popup-brighttext] .panel-banner-item:not([disabled]):active {
+  background-color: rgba(48,230,11,.2);
+}
+
 #customization-palette .toolbarbutton-multiline-text,
 #customization-palette .toolbarbutton-text {
   display: none;
@@ -788,6 +771,23 @@ panelview .toolbarbutton-1,
 .subviewbutton > .toolbarbutton-text {
   padding: 0;
   padding-inline-start: 24px; /* This is 16px for the icon + 8px for the padding as defined below. */
+}
+
+.subviewbutton > .menu-right {
+  -moz-appearance: none;
+  list-style-image: url(chrome://browser/skin/customizableui/menu-arrow.svg);
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  /* Reset the rect we inherit from the button */
+  -moz-image-region: auto;
+}
+
+.subviewbutton[disabled="true"] > .menu-right {
+  fill-opacity: 0.6;
+}
+
+.subviewbutton > .menu-right:-moz-locale-dir(rtl) {
+  transform: scaleX(-1);
 }
 
 .subviewbutton > .menu-right,
@@ -863,7 +863,7 @@ panelview .toolbarbutton-1,
 .subviewbutton[shortcut]::after {
   content: attr(shortcut);
   float: right;
-  color: GrayText;
+  opacity: 0.5;
 }
 
 .PanelUI-subView .subviewbutton-nav::after {
@@ -1011,15 +1011,17 @@ menu.subviewbutton@menuStateHover@,
 menuitem.subviewbutton@menuStateHover@,
 .widget-overflow-list .toolbarbutton-1@buttonStateHover@,
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton@buttonStateHover@ {
+  color: inherit;
   background-color: var(--arrowpanel-dimmed);
 }
 
-panelview .toolbarbutton-1:-moz-any(@buttonStateActive@,[checked=true]),
+panelview .toolbarbutton-1@buttonStateActive@,
 toolbarbutton.subviewbutton@buttonStateActive@,
 menu.subviewbutton@menuStateActive@,
 menuitem.subviewbutton@menuStateActive@,
 .widget-overflow-list .toolbarbutton-1@buttonStateActive@,
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton@buttonStateActive@ {
+  color: inherit;
   background-color: var(--arrowpanel-dimmed-further);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.03) inset;
 }
@@ -1049,6 +1051,10 @@ menuitem.panel-subview-footer@menuStateActive@,
 
 #BMB_bookmarksPopup .subviewbutton:not([disabled="true"]) {
   color: inherit;
+}
+
+#BMB_bookmarksPopup .subviewbutton > .menu-iconic-left {
+  margin-inline-end: 3px;
 }
 
 #BMB_bookmarksPopup .panel-arrowcontainer > .panel-arrowcontent > .popup-internal-box > .autorepeatbutton-up,
@@ -1154,9 +1160,7 @@ menuitem.panel-subview-footer@menuStateActive@,
 
 toolbarpaletteitem[place="palette"] > .toolbarbutton-1 > .toolbarbutton-menu-dropmarker,
 #bookmarks-menu-button[cui-areatype="menu-panel"] > .toolbarbutton-menu-dropmarker,
-#bookmarks-menu-button[overflowedItem] > .toolbarbutton-menu-dropmarker,
-toolbarpaletteitem[place="palette"] > .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker,
-#bookmarks-menu-button[cui-areatype="menu-panel"] > .toolbarbutton-menubutton-dropmarker {
+#bookmarks-menu-button[overflowedItem] > .toolbarbutton-menu-dropmarker {
   display: none;
 }
 
@@ -1293,10 +1297,6 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
 .subviewbutton > .menu-iconic-left {
   -moz-appearance: none;
   margin-inline-end: 0;
-}
-
-menuitem[checked="true"].subviewbutton > .menu-iconic-left {
-  visibility: hidden;
 }
 
 #PanelUI-panicView > .panel-subview-body,

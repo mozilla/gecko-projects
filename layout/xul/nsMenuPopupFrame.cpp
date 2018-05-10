@@ -18,8 +18,6 @@
 #include "nsMenuBarFrame.h"
 #include "nsPopupSetFrame.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMScreen.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIPresShell.h"
 #include "nsFrameManager.h"
@@ -57,12 +55,11 @@
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/KeyboardEvent.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
-#include "mozilla/dom/PopupBoxObject.h"
 #include <algorithm>
 
 using namespace mozilla;
-using mozilla::dom::PopupBoxObject;
 using mozilla::dom::KeyboardEvent;
+using mozilla::dom::Event;
 
 int8_t nsMenuPopupFrame::sDefaultLevelIsTop = -1;
 
@@ -110,7 +107,6 @@ nsMenuPopupFrame::nsMenuPopupFrame(ComputedStyle* aStyle)
   , mPopupAlignment(POPUPALIGNMENT_NONE)
   , mPopupAnchor(POPUPALIGNMENT_NONE)
   , mPosition(POPUPPOSITION_UNKNOWN)
-  , mConsumeRollupEvent(PopupBoxObject::ROLLUP_DEFAULT)
   , mFlip(FlipType_Default)
   , mIsOpenChanged(false)
   , mIsContextMenu(false)
@@ -159,14 +155,10 @@ nsMenuPopupFrame::Init(nsIContent*       aContent,
   viewManager->SetViewFloating(ourView, true);
 
   mPopupType = ePopupTypePanel;
-  nsIDocument* doc = aContent->OwnerDoc();
-  int32_t namespaceID;
-  RefPtr<nsAtom> tag = doc->BindingManager()->ResolveTag(aContent, &namespaceID);
-  if (namespaceID == kNameSpaceID_XUL) {
-    if (tag == nsGkAtoms::menupopup || tag == nsGkAtoms::popup)
-      mPopupType = ePopupTypeMenu;
-    else if (tag == nsGkAtoms::tooltip)
-      mPopupType = ePopupTypeTooltip;
+  if (aContent->IsAnyOfXULElements(nsGkAtoms::menupopup, nsGkAtoms::popup)) {
+    mPopupType = ePopupTypeMenu;
+  } else if (aContent->IsXULElement(nsGkAtoms::tooltip)) {
+    mPopupType = ePopupTypeTooltip;
   }
 
   nsCOMPtr<nsIDocShellTreeItem> dsti = PresContext()->GetDocShell();
@@ -399,14 +391,12 @@ NS_IMETHODIMP nsXULPopupShownEvent::Run()
   return EventDispatcher::Dispatch(mPopup, mPresContext, &event);
 }
 
-NS_IMETHODIMP nsXULPopupShownEvent::HandleEvent(nsIDOMEvent* aEvent)
+NS_IMETHODIMP nsXULPopupShownEvent::HandleEvent(Event* aEvent)
 {
   nsMenuPopupFrame* popup = do_QueryFrame(mPopup->GetPrimaryFrame());
-  nsCOMPtr<nsIDOMEventTarget> eventTarget;
-  aEvent->GetTarget(getter_AddRefs(eventTarget));
   // Ignore events not targeted at the popup itself (ie targeted at
   // descendants):
-  if (!SameCOMIdentity(mPopup, eventTarget)) {
+  if (mPopup != aEvent->GetTarget()) {
     return NS_OK;
   }
   if (popup) {
@@ -886,42 +876,6 @@ nsMenuPopupFrame::InitializePopupAtRect(nsIContent* aTriggerContent,
   InitializePopup(nullptr, aTriggerContent, aPosition, 0, 0,
                   MenuPopupAnchorType_Rect, aAttributesOverride);
   mScreenRect = aRect;
-}
-
-void
-nsMenuPopupFrame::InitializePopupWithAnchorAlign(nsIContent* aAnchorContent,
-                                                 nsAString& aAnchor,
-                                                 nsAString& aAlign,
-                                                 int32_t aXPos, int32_t aYPos)
-{
-  EnsureWidget();
-
-  mPopupState = ePopupShowing;
-  mAdjustOffsetForContextMenu = false;
-  mFlip = FlipType_Default;
-  mPositionedOffset = 0;
-
-  // this popup opening function is provided for backwards compatibility
-  // only. It accepts either coordinates or an anchor and alignment value
-  // but doesn't use both together.
-  if (aXPos == -1 && aYPos == -1) {
-    mAnchorContent = aAnchorContent;
-    mAnchorType = MenuPopupAnchorType_Node;
-    mScreenRect = nsIntRect(-1, -1, 0, 0);
-    mXPos = 0;
-    mYPos = 0;
-    InitPositionFromAnchorAlign(aAnchor, aAlign);
-  }
-  else {
-    mAnchorContent = nullptr;
-    mAnchorType = MenuPopupAnchorType_Point;
-    mPopupAnchor = POPUPALIGNMENT_NONE;
-    mPopupAlignment = POPUPALIGNMENT_NONE;
-    mPosition = POPUPPOSITION_UNKNOWN;
-    mScreenRect = nsIntRect(aXPos, aYPos, 0, 0);
-    mXPos = aXPos;
-    mYPos = aYPos;
-  }
 }
 
 void
@@ -1817,12 +1771,6 @@ void nsMenuPopupFrame::CanAdjustEdges(Side aHorizontalSide,
 
 ConsumeOutsideClicksResult nsMenuPopupFrame::ConsumeOutsideClicks()
 {
-  // If the popup has explicitly set a consume mode, honor that.
-  if (mConsumeRollupEvent != PopupBoxObject::ROLLUP_DEFAULT) {
-    return (mConsumeRollupEvent == PopupBoxObject::ROLLUP_CONSUME) ?
-           ConsumeOutsideClicks_True : ConsumeOutsideClicks_ParentOnly;
-  }
-
   if (mContent->AsElement()->AttrValueIs(kNameSpaceID_None,
                                          nsGkAtoms::consumeoutsideclicks,
                                          nsGkAtoms::_true, eCaseMatters)) {
@@ -2280,12 +2228,6 @@ nsMenuPopupFrame::GetWidget()
   return view->GetWidget();
 }
 
-void
-nsMenuPopupFrame::AttachedDismissalListener()
-{
-  mConsumeRollupEvent = PopupBoxObject::ROLLUP_DEFAULT;
-}
-
 // helpers /////////////////////////////////////////////////////////////
 
 nsresult
@@ -2345,7 +2287,7 @@ nsMenuPopupFrame::MoveToAttributePosition()
   // Move the widget around when the user sets the |left| and |top| attributes.
   // Note that this is not the best way to move the widget, as it results in lots
   // of FE notifications and is likely to be slow as molasses. Use |moveTo| on
-  // PopupBoxObject if possible.
+  // the element if possible.
   nsAutoString left, top;
   mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::left, left);
   mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::top, top);
@@ -2461,12 +2403,6 @@ nsMenuPopupFrame::SetAutoPosition(bool aShouldAutoPosition)
   if (pm) {
     pm->UpdateFollowAnchor(this);
   }
-}
-
-void
-nsMenuPopupFrame::SetConsumeRollupEvent(uint32_t aConsumeMode)
-{
-  mConsumeRollupEvent = aConsumeMode;
 }
 
 int8_t

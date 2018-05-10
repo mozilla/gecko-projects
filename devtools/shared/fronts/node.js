@@ -295,6 +295,18 @@ const NodeFront = FrontClassWithSpec(nodeSpec, {
     return !!this._form.isDocumentElement;
   },
 
+  get isShadowRoot() {
+    return this._form.isShadowRoot;
+  },
+
+  get isShadowHost() {
+    return this._form.isShadowHost;
+  },
+
+  get isDirectShadowHostChild() {
+    return this._form.isDirectShadowHostChild;
+  },
+
   // doctype properties
   get name() {
     return this._form.name;
@@ -364,20 +376,6 @@ const NodeFront = FrontClassWithSpec(nodeSpec, {
   }, {
     impl: "_getNodeValue"
   }),
-
-  // Accessors for custom form properties.
-
-  getFormProperty: function(name) {
-    return this._form.props ? this._form.props[name] : null;
-  },
-
-  hasFormProperty: function(name) {
-    return this._form.props ? (name in this._form.props) : null;
-  },
-
-  get formProperties() {
-    return this._form.props;
-  },
 
   /**
    * Return a new AttributeModificationList for this node.

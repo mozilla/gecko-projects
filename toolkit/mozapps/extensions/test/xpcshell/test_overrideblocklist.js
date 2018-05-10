@@ -84,111 +84,115 @@ function run_test() {
   run_next_test();
 }
 
+async function isBlocklisted(addon, appVer, toolkitVer) {
+  let state = await Blocklist.getAddonBlocklistState(addon, appVer, toolkitVer);
+  return state != Services.blocklist.STATE_NOT_BLOCKED;
+}
+
 // On first run whataver is in the app dir should get copied to the profile
-add_test(function test_copy() {
+add_test(async function test_copy() {
   clearBlocklists();
   copyToApp(OLD);
 
   incrementAppVersion();
-  startupManager();
+  await promiseStartupManager();
 
   reloadBlocklist();
+  Assert.ok(!(await isBlocklisted(invalidAddon)));
+  Assert.ok(!(await isBlocklisted(ancientAddon)));
+  Assert.ok(await isBlocklisted(oldAddon));
+  Assert.ok(!(await isBlocklisted(newAddon)));
 
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(invalidAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(ancientAddon));
-  Assert.ok(Services.blocklist.isAddonBlocklisted(oldAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(newAddon));
-
-  shutdownManager();
+  await promiseShutdownManager();
 
   run_next_test();
 });
 
 // An ancient blocklist should be ignored
-add_test(function test_ancient() {
+add_test(async function test_ancient() {
   clearBlocklists();
   copyToApp(ANCIENT);
   copyToProfile(OLD, OLD_TSTAMP);
 
   incrementAppVersion();
-  startupManager();
+  await promiseStartupManager();
 
   reloadBlocklist();
 
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(invalidAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(ancientAddon));
-  Assert.ok(Services.blocklist.isAddonBlocklisted(oldAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(newAddon));
+  Assert.ok(!(await isBlocklisted(invalidAddon)));
+  Assert.ok(!(await isBlocklisted(ancientAddon)));
+  Assert.ok(await isBlocklisted(oldAddon));
+  Assert.ok(!(await isBlocklisted(newAddon)));
 
-  shutdownManager();
+  await promiseShutdownManager();
 
   run_next_test();
 });
 
 // A new blocklist should override an old blocklist
-add_test(function test_override() {
+add_test(async function test_override() {
   clearBlocklists();
   copyToApp(NEW);
   copyToProfile(OLD, OLD_TSTAMP);
 
   incrementAppVersion();
-  startupManager();
+  await promiseStartupManager();
 
   reloadBlocklist();
 
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(invalidAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(ancientAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(oldAddon));
-  Assert.ok(Services.blocklist.isAddonBlocklisted(newAddon));
+  Assert.ok(!(await isBlocklisted(invalidAddon)));
+  Assert.ok(!(await isBlocklisted(ancientAddon)));
+  Assert.ok(!(await isBlocklisted(oldAddon)));
+  Assert.ok(await isBlocklisted(newAddon));
 
-  shutdownManager();
+  await promiseShutdownManager();
 
   run_next_test();
 });
 
 // An old blocklist shouldn't override a new blocklist
-add_test(function test_retain() {
+add_test(async function test_retain() {
   clearBlocklists();
   copyToApp(OLD);
   copyToProfile(NEW, NEW_TSTAMP);
 
   incrementAppVersion();
-  startupManager();
+  await promiseStartupManager();
 
   reloadBlocklist();
 
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(invalidAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(ancientAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(oldAddon));
-  Assert.ok(Services.blocklist.isAddonBlocklisted(newAddon));
+  Assert.ok(!(await isBlocklisted(invalidAddon)));
+  Assert.ok(!(await isBlocklisted(ancientAddon)));
+  Assert.ok(!(await isBlocklisted(oldAddon)));
+  Assert.ok(await isBlocklisted(newAddon));
 
-  shutdownManager();
+  await promiseShutdownManager();
 
   run_next_test();
 });
 
 // A missing blocklist in the profile should still load an app-shipped blocklist
-add_test(function test_missing() {
+add_test(async function test_missing() {
   clearBlocklists();
   copyToApp(OLD);
   copyToProfile(NEW, NEW_TSTAMP);
 
   incrementAppVersion();
-  startupManager();
-  shutdownManager();
+  await promiseStartupManager();
+  await promiseShutdownManager();
 
   let blocklist = FileUtils.getFile(KEY_PROFILEDIR, [FILE_BLOCKLIST]);
   blocklist.remove(true);
-  startupManager(false);
+  await promiseStartupManager();
 
   reloadBlocklist();
 
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(invalidAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(ancientAddon));
-  Assert.ok(Services.blocklist.isAddonBlocklisted(oldAddon));
-  Assert.ok(!Services.blocklist.isAddonBlocklisted(newAddon));
+  Assert.ok(!(await isBlocklisted(invalidAddon)));
+  Assert.ok(!(await isBlocklisted(ancientAddon)));
+  Assert.ok(await isBlocklisted(oldAddon));
+  Assert.ok(!(await isBlocklisted(newAddon)));
 
-  shutdownManager();
+  await promiseShutdownManager();
 
   run_next_test();
 });

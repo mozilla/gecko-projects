@@ -192,6 +192,7 @@ public:
                                            uint16_t aDuration,
                                            nsISupports* aData,
                                            nsIRunnable* aCallback) override;
+  virtual void CleanupFullscreenTransition() override {};
   virtual already_AddRefed<nsIScreen> GetWidgetScreen() override;
   virtual nsresult        MakeFullScreen(bool aFullScreen,
                                          nsIScreen* aScreen = nullptr) override;
@@ -256,8 +257,6 @@ public:
                           { return NS_OK; }
   virtual bool            HasPendingInputEvent() override;
   virtual void            SetIcon(const nsAString &aIconSpec) override {}
-  virtual void            SetWindowTitlebarColor(nscolor aColor, bool aActive)
-                            override {}
   virtual void            SetDrawsInTitlebar(bool aState) override {}
   virtual bool            ShowsResizeIndicator(LayoutDeviceIntRect* aResizerRect) override;
   virtual void            FreeNativeData(void * data, uint32_t aDataType) override {}

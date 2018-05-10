@@ -64,7 +64,6 @@ UNIFIED_SOURCES += [
     'skia/src/core/SkDeferredDisplayListRecorder.cpp',
     'skia/src/core/SkDeque.cpp',
     'skia/src/core/SkDevice.cpp',
-    'skia/src/core/SkDeviceLooper.cpp',
     'skia/src/core/SkDeviceProfile.cpp',
     'skia/src/core/SkDistanceFieldGen.cpp',
     'skia/src/core/SkDither.cpp',
@@ -752,6 +751,14 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     UNIFIED_SOURCES += [
         'skia/src/fonts/SkFontMgr_indirect.cpp',
         'skia/src/fonts/SkRemotableFontMgr.cpp',
+    ]
+
+# Work around a crash when jumping into assembly on platforms where
+# Clang has 4-byte stack alignment.
+if CONFIG['CPU_ARCH'] == 'x86' and CONFIG['CC_TYPE'] == 'clang':
+    SOURCES['skia/src/jumper/SkJumper.cpp'].flags += [
+        '-mstack-alignment=16',
+        '-mstackrealign'
     ]
 
 # We should autogenerate these SSE related flags.

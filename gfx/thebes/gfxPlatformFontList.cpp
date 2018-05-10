@@ -161,6 +161,7 @@ gfxPlatformFontList::MemoryReporter::CollectReports(
     sizes.mFontListSize = 0;
     sizes.mFontTableCacheSize = 0;
     sizes.mCharMapsSize = 0;
+    sizes.mLoaderSize = 0;
 
     gfxPlatformFontList::PlatformFontList()->AddSizeOfIncludingThis(&FontListMallocSizeOf,
                                                                     &sizes);
@@ -180,6 +181,13 @@ gfxPlatformFontList::MemoryReporter::CollectReports(
             "explicit/gfx/font-tables", KIND_HEAP, UNITS_BYTES,
             sizes.mFontTableCacheSize,
             "Memory used for cached font metrics and layout tables.");
+    }
+
+    if (sizes.mLoaderSize) {
+        MOZ_COLLECT_REPORT(
+            "explicit/gfx/font-loader", KIND_HEAP, UNITS_BYTES,
+            sizes.mLoaderSize,
+            "Memory used for (platform-specific) font loader.");
     }
 
     return NS_OK;
@@ -566,11 +574,8 @@ gfxPlatformFontList::SystemFindFontForChar(uint32_t aCh, uint32_t aNextCh,
     // This helps speed up pages with lots of encoding errors, binary-as-text,
     // etc.
     if (aCh == 0xFFFD && mReplacementCharFallbackFamily) {
-        bool needsBold;  // ignored in the system fallback case
-
         fontEntry =
-            mReplacementCharFallbackFamily->FindFontForStyle(*aStyle,
-                                                             needsBold);
+            mReplacementCharFallbackFamily->FindFontForStyle(*aStyle);
 
         // this should never fail, as we must have found U+FFFD in order to set
         // mReplacementCharFallbackFamily at all, but better play it safe
@@ -663,10 +668,9 @@ gfxPlatformFontList::CommonFontFallback(uint32_t aCh, uint32_t aNextCh,
         }
 
         gfxFontEntry *fontEntry;
-        bool needsBold;  // ignored in the system fallback case
 
         // use first font in list that supports a given character
-        fontEntry = fallback->FindFontForStyle(*aMatchStyle, needsBold);
+        fontEntry = fallback->FindFontForStyle(*aMatchStyle);
         if (fontEntry) {
             if (fontEntry->HasCharacter(aCh)) {
                 *aMatchedFamily = fallback;
@@ -822,14 +826,13 @@ gfxPlatformFontList::FindAndAddFamilies(const nsAString& aFamily,
 }
 
 gfxFontEntry*
-gfxPlatformFontList::FindFontForFamily(const nsAString& aFamily, const gfxFontStyle* aStyle, bool& aNeedsBold)
+gfxPlatformFontList::FindFontForFamily(const nsAString& aFamily,
+                                       const gfxFontStyle* aStyle)
 {
     gfxFontFamily *familyEntry = FindFamily(aFamily);
 
-    aNeedsBold = false;
-
     if (familyEntry)
-        return familyEntry->FindFontForStyle(*aStyle, aNeedsBold);
+        return familyEntry->FindFontForStyle(*aStyle);
 
     return nullptr;
 }

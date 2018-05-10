@@ -12,10 +12,7 @@
 #include "nsDebug.h"
 #include "nsAtom.h"
 #include "nsComponentManagerUtils.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMRange.h"
 #include "nsIEditor.h"
-#include "nsIDOMNode.h"
 #include "nsUnicodeProperties.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIContent.h"
@@ -62,7 +59,6 @@ mozInlineSpellWordUtil::Init(TextEditor* aTextEditor)
   if (NS_WARN_IF(!mDocument)) {
     return NS_ERROR_FAILURE;
   }
-  mDOMDocument = do_QueryInterface(mDocument);
 
   // Find the root node for the editor. For contenteditable we'll need something
   // cleverer here.
@@ -79,7 +75,7 @@ IsSpellCheckingTextNode(nsINode* aNode)
   nsIContent *parent = aNode->GetParent();
   if (parent && parent->IsAnyOfHTMLElements(nsGkAtoms::script, nsGkAtoms::style))
       return false;
-  return aNode->IsNodeOfType(nsINode::eTEXT);
+  return aNode->IsText();
 }
 
 typedef void (* OnLeaveNodeFunPtr)(nsINode* aNode, void* aClosure);
@@ -91,7 +87,7 @@ static nsINode*
 FindNextNode(nsINode* aNode, nsINode* aRoot,
              OnLeaveNodeFunPtr aOnLeaveNode, void* aClosure)
 {
-  NS_PRECONDITION(aNode, "Null starting node?");
+  MOZ_ASSERT(aNode, "Null starting node?");
 
   nsINode* next = aNode->GetFirstChild();
   if (next)
@@ -127,7 +123,7 @@ FindNextNode(nsINode* aNode, nsINode* aRoot,
 static nsINode*
 FindNextTextNode(nsINode* aNode, int32_t aOffset, nsINode* aRoot)
 {
-  NS_PRECONDITION(aNode, "Null starting node?");
+  MOZ_ASSERT(aNode, "Null starting node?");
   NS_ASSERTION(!IsSpellCheckingTextNode(aNode), "FindNextTextNode should start with a non-text node");
 
   nsINode* checkNode;
@@ -169,7 +165,7 @@ FindNextTextNode(nsINode* aNode, int32_t aOffset, nsINode* aRoot)
 nsresult
 mozInlineSpellWordUtil::SetEnd(nsINode* aEndNode, int32_t aEndOffset)
 {
-  NS_PRECONDITION(aEndNode, "Null end node?");
+  MOZ_ASSERT(aEndNode, "Null end node?");
 
   NS_ASSERTION(mRootNode, "Not initialized");
 
@@ -242,13 +238,12 @@ mozInlineSpellWordUtil::MakeNodeOffsetRangeForWord(const RealWord& aWord,
 // mozInlineSpellWordUtil::GetRangeForWord
 
 nsresult
-mozInlineSpellWordUtil::GetRangeForWord(nsIDOMNode* aWordNode,
+mozInlineSpellWordUtil::GetRangeForWord(nsINode* aWordNode,
                                         int32_t aWordOffset,
                                         nsRange** aRange)
 {
   // Set our soft end and start
-  nsCOMPtr<nsINode> wordNode = do_QueryInterface(aWordNode);
-  NodeOffset pt = NodeOffset(wordNode, aWordOffset);
+  NodeOffset pt(aWordNode, aWordOffset);
 
   if (!mSoftTextValid || pt != mSoftBegin || pt != mSoftEnd) {
     InvalidateWords();
@@ -335,8 +330,9 @@ mozInlineSpellWordUtil::MakeRange(NodeOffset aBegin, NodeOffset aEnd,
                                   nsRange** aRange)
 {
   NS_ENSURE_ARG_POINTER(aBegin.mNode);
-  if (!mDOMDocument)
+  if (!mDocument) {
     return NS_ERROR_NOT_INITIALIZED;
+  }
 
   RefPtr<nsRange> range = new nsRange(aBegin.mNode);
   nsresult rv = range->SetStartAndEnd(aBegin.mNode, aBegin.mOffset,

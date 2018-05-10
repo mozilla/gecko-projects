@@ -33,6 +33,7 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/Unused.h"
 
 #include "jit/arm/Assembler-arm.h"
 #include "jit/arm/disasm/Constants-arm.h"
@@ -406,8 +407,6 @@ class AutoLockSimulatorCache : public LockGuard<Mutex>
 
 mozilla::Atomic<size_t, mozilla::ReleaseAcquire>
     SimulatorProcess::ICacheCheckingDisableCount(1); // Checking is disabled by default.
-mozilla::Atomic<bool, mozilla::ReleaseAcquire>
-    SimulatorProcess::cacheInvalidatedBySignalHandler_(false);
 SimulatorProcess* SimulatorProcess::singleton_ = nullptr;
 
 int64_t Simulator::StopSimAt = -1L;
@@ -1093,26 +1092,13 @@ SimulatorProcess::checkICacheLocked(SimInstruction* instr)
     bool cache_hit = (*cache_valid_byte == CachePage::LINE_VALID);
     char* cached_line = cache_page->cachedData(offset & ~CachePage::kLineMask);
 
-    // Read all state before considering signal handler effects.
-    int cmpret = 0;
     if (cache_hit) {
         // Check that the data in memory matches the contents of the I-cache.
-        cmpret = memcmp(reinterpret_cast<void*>(instr),
-                        cache_page->cachedData(offset),
-                        SimInstruction::kInstrSize);
-    }
-
-    // Check for signal handler interruption between reading state and asserting.
-    // It is safe for the signal to arrive during the !cache_hit path, since it
-    // will be cleared the next time this function is called.
-    if (cacheInvalidatedBySignalHandler_) {
-        icache().clear();
-        cacheInvalidatedBySignalHandler_ = false;
-        return;
-    }
-
-    if (cache_hit) {
+        int cmpret = memcmp(reinterpret_cast<void*>(instr),
+                            cache_page->cachedData(offset),
+                            SimInstruction::kInstrSize);
         MOZ_ASSERT(cmpret == 0);
+        mozilla::Unused << cmpret;
     } else {
         // Cache miss. Load memory into the cache.
         memcpy(cached_line, line, CachePage::kLineLength);
@@ -1637,15 +1623,16 @@ Simulator::handleWasmSegFault(int32_t addr, unsigned numBytes)
     if (!instance->memoryAccessInGuardRegion((uint8_t*)addr, numBytes))
         return false;
 
-    const wasm::MemoryAccess* memoryAccess = instance->code().lookupMemoryAccess(pc);
-    if (!memoryAccess) {
-        act->asJit()->startWasmTrap(wasm::Trap::OutOfBounds, 0, registerState());
+    wasm::Trap trap;
+    wasm::BytecodeOffset bytecode;
+    if (!moduleSegment->code().lookupTrap(pc, &trap, &bytecode)) {
+        act->startWasmTrap(wasm::Trap::OutOfBounds, 0, registerState());
         set_pc(int32_t(moduleSegment->outOfBoundsCode()));
         return true;
     }
 
-    MOZ_ASSERT(memoryAccess->hasTrapOutOfLineCode());
-    set_pc(int32_t(memoryAccess->trapOutOfLineCode(moduleSegment->base())));
+    act->startWasmTrap(wasm::Trap::OutOfBounds, bytecode.offset(), registerState());
+    set_pc(int32_t(moduleSegment->trapCode()));
     return true;
 }
 
@@ -1668,7 +1655,7 @@ Simulator::handleWasmIllFault()
     if (!moduleSegment->code().lookupTrap(pc, &trap, &bytecode))
         return false;
 
-    act->startWasmTrap(trap, bytecode.offset, registerState());
+    act->startWasmTrap(trap, bytecode.offset(), registerState());
     set_pc(int32_t(moduleSegment->trapCode()));
     return true;
 }
@@ -2563,7 +2550,7 @@ typedef float (*Prototype_Float32_Float32)(float arg0);
 typedef float (*Prototype_Float32_Float32Float32)(float arg0, float arg1);
 typedef float (*Prototype_Float32_IntInt)(int arg0, int arg1);
 
-typedef double (*Prototype_DoubleInt)(double arg0, int32_t arg1);
+typedef double (*Prototype_Double_DoubleInt)(double arg0, int32_t arg1);
 typedef double (*Prototype_Double_IntDouble)(int32_t arg0, double arg1);
 typedef double (*Prototype_Double_DoubleDouble)(double arg0, double arg1);
 typedef int32_t (*Prototype_Int_IntDouble)(int32_t arg0, double arg1);
@@ -2813,7 +2800,7 @@ Simulator::softwareInterrupt(SimInstruction* instr)
             double dval0, dval1;
             int32_t ival;
             getFpArgs(&dval0, &dval1, &ival);
-            Prototype_DoubleInt target = reinterpret_cast<Prototype_DoubleInt>(external);
+            Prototype_Double_DoubleInt target = reinterpret_cast<Prototype_Double_DoubleInt>(external);
             double dresult = target(dval0, ival);
             scratchVolatileRegisters(/* scratchFloat = true */);
             setCallResultDouble(dresult);

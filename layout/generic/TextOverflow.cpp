@@ -23,7 +23,7 @@
 #include "nsIFrameInlines.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Likely.h"
-#include "nsISelection.h"
+#include "mozilla/dom/Selection.h"
 #include "TextDrawTarget.h"
 
 using mozilla::layout::TextDrawTarget;
@@ -74,11 +74,10 @@ GetSelfOrNearestBlock(nsIFrame* aFrame)
 static bool
 IsAtomicElement(nsIFrame* aFrame, LayoutFrameType aFrameType)
 {
-  NS_PRECONDITION(!nsLayoutUtils::GetAsBlock(aFrame) ||
-                  !aFrame->IsBlockOutside(),
-                  "unexpected block frame");
-  NS_PRECONDITION(aFrameType != LayoutFrameType::Placeholder,
-                  "unexpected placeholder frame");
+  MOZ_ASSERT(!nsLayoutUtils::GetAsBlock(aFrame) || !aFrame->IsBlockOutside(),
+             "unexpected block frame");
+  MOZ_ASSERT(aFrameType != LayoutFrameType::Placeholder,
+             "unexpected placeholder frame");
   return !aFrame->IsFrameOfType(nsIFrame::eLineParticipant);
 }
 
@@ -98,8 +97,8 @@ IsFullyClipped(nsTextFrame* aFrame, nscoord aLeft, nscoord aRight,
 static bool
 IsInlineAxisOverflowVisible(nsIFrame* aFrame)
 {
-  NS_PRECONDITION(nsLayoutUtils::GetAsBlock(aFrame) != nullptr,
-                  "expected a block frame");
+  MOZ_ASSERT(nsLayoutUtils::GetAsBlock(aFrame) != nullptr,
+             "expected a block frame");
 
   nsIFrame* f = aFrame;
   while (f && f->Style()->IsAnonBox() && !f->IsScrollFrame()) {
@@ -172,7 +171,7 @@ public:
                               uint32_t aLineNumber,
                               uint32_t aIndex)
     : nsDisplayItem(aBuilder, aFrame), mRect(aRect),
-      mStyle(aStyle), mAscent(aAscent), mIndex((aLineNumber << 1) + aIndex) {
+      mStyle(*aStyle), mAscent(aAscent), mIndex((aLineNumber << 1) + aIndex) {
     MOZ_COUNT_CTOR(nsDisplayTextOverflowMarker);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -221,7 +220,7 @@ public:
   NS_DISPLAY_DECL_NAME("TextOverflow", TYPE_TEXT_OVERFLOW)
 private:
   nsRect          mRect;   // in reference frame coordinates
-  const nsStyleTextOverflowSide* mStyle;
+  const nsStyleTextOverflowSide mStyle;
   nscoord         mAscent; // baseline for the marker text in mRect
   uint32_t        mIndex;
 };
@@ -274,7 +273,7 @@ nsDisplayTextOverflowMarker::PaintTextToContext(gfxContext* aCtx,
   }
   pt += aOffsetFromRect;
 
-  if (mStyle->mType == NS_STYLE_TEXT_OVERFLOW_ELLIPSIS) {
+  if (mStyle.mType == NS_STYLE_TEXT_OVERFLOW_ELLIPSIS) {
     gfxTextRun* textRun = GetEllipsisTextRun(mFrame);
     if (textRun) {
       NS_ASSERTION(!textRun->IsRightToLeft(),
@@ -286,8 +285,8 @@ nsDisplayTextOverflowMarker::PaintTextToContext(gfxContext* aCtx,
   } else {
     RefPtr<nsFontMetrics> fm =
       nsLayoutUtils::GetInflatedFontMetricsForFrame(mFrame);
-    nsLayoutUtils::DrawString(mFrame, *fm, aCtx, mStyle->mString.get(),
-                              mStyle->mString.Length(), pt);
+    nsLayoutUtils::DrawString(mFrame, *fm, aCtx, mStyle.mString.get(),
+                              mStyle.mString.Length(), pt);
   }
 }
 
@@ -829,11 +828,10 @@ TextOverflow::CanHaveTextOverflow(nsIFrame* aBlockFrame)
   // Inhibit the markers if a descendant content owns the caret.
   RefPtr<nsCaret> caret = aBlockFrame->PresShell()->GetCaret();
   if (caret && caret->IsVisible()) {
-    nsCOMPtr<nsISelection> domSelection = caret->GetSelection();
+    RefPtr<dom::Selection> domSelection = caret->GetSelection();
     if (domSelection) {
-      nsCOMPtr<nsIDOMNode> node;
-      domSelection->GetFocusNode(getter_AddRefs(node));
-      nsCOMPtr<nsIContent> content = do_QueryInterface(node);
+      nsCOMPtr<nsIContent> content =
+        nsIContent::FromNodeOrNull(domSelection->GetFocusNode());
       if (content && nsContentUtils::ContentIsDescendantOf(content,
                        aBlockFrame->GetContent())) {
         return false;

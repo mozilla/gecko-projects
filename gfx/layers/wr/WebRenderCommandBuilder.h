@@ -8,7 +8,7 @@
 #define GFX_WEBRENDERCOMMANDBUILDER_H
 
 #include "mozilla/webrender/WebRenderAPI.h"
-#include "mozilla/layers/ScrollingLayersHelper.h"
+#include "mozilla/layers/ClipManager.h"
 #include "mozilla/layers/WebRenderMessages.h"
 #include "mozilla/layers/WebRenderScrollData.h"
 #include "mozilla/layers/WebRenderUserData.h"
@@ -38,6 +38,7 @@ public:
   explicit WebRenderCommandBuilder(WebRenderLayerManager* aManager)
   : mManager(aManager)
   , mLastAsr(nullptr)
+  , mDoGrouping(false)
   {}
 
   void Destroy();
@@ -53,6 +54,10 @@ public:
                               WebRenderScrollData& aScrollData,
                               wr::LayoutSize& aContentSize,
                               const nsTArray<wr::WrFilterOp>& aFilters);
+
+  void PushOverrideForASR(const ActiveScrolledRoot* aASR,
+                          const Maybe<wr::WrClipId>& aClipId);
+  void PopOverrideForASR(const ActiveScrolledRoot* aASR);
 
   Maybe<wr::ImageKey> CreateImageKey(nsDisplayItem* aItem,
                                      ImageContainer* aContainer,
@@ -85,10 +90,19 @@ public:
                        nsDisplayListBuilder* aDisplayListBuilder);
 
   void CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDisplayList,
+                                              nsDisplayItem* aOuterItem,
                                               nsDisplayListBuilder* aDisplayListBuilder,
                                               const StackingContextHelper& aSc,
                                               wr::DisplayListBuilder& aBuilder,
                                               wr::IpcResourceUpdateQueue& aResources);
+
+  // aWrappingItem has to be non-null.
+  void DoGroupingForDisplayList(nsDisplayList* aDisplayList,
+                                nsDisplayItem* aWrappingItem,
+                                nsDisplayListBuilder* aDisplayListBuilder,
+                                const StackingContextHelper& aSc,
+                                wr::DisplayListBuilder& aBuilder,
+                                wr::IpcResourceUpdateQueue& aResources);
 
   already_AddRefed<WebRenderFallbackData> GenerateFallbackData(nsDisplayItem* aItem,
                                                                wr::DisplayListBuilder& aBuilder,
@@ -123,7 +137,7 @@ public:
     }
 
     RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(WebRenderUserDataKey(aItem->GetPerFrameKey(), T::Type()));
-    if (!data || (data->GetType() != T::Type())) {
+    if (!data) {
       // To recreate a new user data, we should remove the data from the table first.
       if (data) {
         data->RemoveFromTable();
@@ -148,13 +162,10 @@ public:
     return res.forget();
   }
 
-private:
   WebRenderLayerManager* mManager;
-  ScrollingLayersHelper mScrollingHelper;
 
-  // These fields are used to save a copy of the display list for
-  // empty transactions in layers-free mode.
-  nsTArray<WebRenderParentCommand> mParentCommands;
+private:
+  ClipManager mClipManager;
 
   // We use this as a temporary data structure while building the mScrollData
   // inside a layers-free transaction.
@@ -170,6 +181,10 @@ private:
 
   // Store of WebRenderCanvasData objects for use in empty transactions
   CanvasDataSet mLastCanvasDatas;
+
+  // Whether consecutive inactive display items should be grouped into one
+  // blob image.
+  bool mDoGrouping;
 };
 
 } // namespace layers

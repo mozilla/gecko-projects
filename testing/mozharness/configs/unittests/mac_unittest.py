@@ -9,11 +9,6 @@ ADJUST_MOUSE_AND_SCREEN = False
 #####
 config = {
     "buildbot_json_path": "buildprops.json",
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
     ###
     "installer_path": INSTALLER_PATH,
     "xpcshell_name": XPCSHELL_NAME,
@@ -171,6 +166,10 @@ config = {
             'options': ["--suite=reftest"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
+        "reftest-fonts": {
+            'options': ["--suite=reftest"],
+            'tests': ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
+        },
     },
     "all_xpcshell_suites": {
         "xpcshell": {
@@ -192,7 +191,8 @@ config = {
         "gtest": []
     },
     "all_jittest_suites": {
-        "jittest": []
+        "jittest": [],
+        "jittest-chunked": []
     },
     "all_mozbase_suites": {
         "mozbase": []

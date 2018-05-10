@@ -2,28 +2,16 @@
 const LEGACY_PREF = "extensions.legacy.enabled";
 
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1");
-startupManager();
 
 add_task(async function test_disable() {
+  await promiseStartupManager();
+
   let legacy = [
     {
       id: "bootstrap@tests.mozilla.org",
       name: "Bootstrap add-on",
       version: "1.0",
       bootstrap: true,
-    },
-    {
-      id: "apiexperiment@tests.mozilla.org",
-      name: "WebExtension Experiment",
-      version: "1.0",
-      type: 256,
-    },
-    {
-      id: "theme@tests.mozilla.org",
-      name: "Theme",
-      version: "1.0",
-      type: 4,
-      internalName: "mytheme/1.0",
     },
   ];
 
@@ -88,7 +76,7 @@ add_task(async function test_disable() {
   // Yuck, the AddonInstall API is atrocious.  Installs of incompatible
   // extensions are detected when the install reaches the DOWNLOADED state
   // and the install is abandoned at that point.  Since this is a local file
-  // install we just start out in the DONWLOADED state.
+  // install we just start out in the DOWNLOADED state.
   for (let install of installs) {
     Assert.equal(install.state, AddonManager.STATE_DOWNLOADED);
     Assert.equal(install.addon.appDisabled, true);

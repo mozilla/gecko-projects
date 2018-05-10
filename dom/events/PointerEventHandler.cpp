@@ -388,6 +388,7 @@ PointerEventHandler::PreHandlePointerEventsPreventDefault(
     return;
   }
   aMouseOrTouchEvent->PreventDefault(false);
+  aMouseOrTouchEvent->mFlags.mOnlyChromeDispatch = true;
   if (aPointerEvent->mMessage == ePointerUp) {
     pointerInfo->mPreventMouseEventByContent = false;
   }
@@ -417,6 +418,7 @@ PointerEventHandler::PostHandlePointerEventsPreventDefault(
     return;
   }
   aMouseOrTouchEvent->PreventDefault(false);
+  aMouseOrTouchEvent->mFlags.mOnlyChromeDispatch = true;
   pointerInfo->mPreventMouseEventByContent = true;
 }
 
@@ -643,8 +645,7 @@ PointerEventHandler::DispatchGotOrLostPointerCaptureEvent(
     event = PointerEvent::Constructor(aCaptureTarget,
                                       NS_LITERAL_STRING("lostpointercapture"),
                                       init);
-    bool dummy;
-    targetDoc->DispatchEvent(event->InternalDOMEvent(), &dummy);
+    targetDoc->DispatchEvent(*event);
     return;
   }
   nsEventStatus status = nsEventStatus_eIgnore;

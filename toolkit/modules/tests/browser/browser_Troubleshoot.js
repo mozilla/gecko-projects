@@ -348,6 +348,9 @@ const SNAPSHOT_SCHEMA = {
         usesTiling: {
           type: "boolean",
         },
+        contentUsesTiling: {
+          type: "boolean",
+        },
         offMainThreadPaintEnabled: {
           type: "boolean",
         },
@@ -424,10 +427,6 @@ const SNAPSHOT_SCHEMA = {
         currentMaxAudioChannels: {
           required: true,
           type: "number",
-        },
-        currentPreferredChannelLayout: {
-          required: true,
-          type: "string",
         },
         currentPreferredSampleRate: {
           required: true,
@@ -678,9 +677,6 @@ const SNAPSHOT_SCHEMA = {
           type: "boolean",
         },
       },
-    },
-    experiments: {
-      type: "array",
     },
     sandbox: {
       required: false,

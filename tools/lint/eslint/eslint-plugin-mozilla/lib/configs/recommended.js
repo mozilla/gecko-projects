@@ -24,6 +24,7 @@ module.exports = {
     "DOMRequest": false,
     "Debugger": false,
     "DedicatedWorkerGlobalScope": false,
+    "DominatorTree": false,
     "HeapSnapshot": false,
     "IDBFileRequest": false,
     "IDBLocaleAwareKeyRange": false,
@@ -55,6 +56,7 @@ module.exports = {
     "console": true,
     "dump": true,
     "openDialog": false,
+    "saveStack": false,
     "sizeToContent": false,
     // Specific to Firefox
     // eslint-disable-next-line max-len
@@ -175,6 +177,7 @@ module.exports = {
     "mozilla/no-useless-parameters": "error",
     "mozilla/no-useless-removeEventListener": "error",
     "mozilla/use-cc-etc": "error",
+    "mozilla/use-chromeutils-generateqi": "error",
     "mozilla/use-chromeutils-import": "error",
     "mozilla/use-default-preference-values": "error",
     "mozilla/use-includes-instead-of-indexOf": "error",

@@ -14,8 +14,6 @@ loader.lazyRequireGetter(this, "DeferredTask",
 loader.lazyRequireGetter(this, "StackFrameCache",
   "devtools/server/actors/utils/stack", true);
 loader.lazyRequireGetter(this, "ChromeUtils");
-loader.lazyRequireGetter(this, "HeapSnapshotFileUtils",
-  "devtools/shared/heapsnapshot/HeapSnapshotFileUtils");
 loader.lazyRequireGetter(this, "ChromeActor", "devtools/server/actors/chrome",
                          true);
 loader.lazyRequireGetter(this, "ChildProcessActor",
@@ -76,6 +74,7 @@ Memory.prototype = {
     this.dbg.addDebuggees();
     this.dbg.memory.onGarbageCollection = this._onGarbageCollection.bind(this);
     this.state = "attached";
+    return this.state;
   }, "attaching to the debugger"),
 
   /**
@@ -86,6 +85,7 @@ Memory.prototype = {
     this.dbg.enabled = false;
     this._dbg = null;
     this.state = "detached";
+    return this.state;
   }, "detaching from the debugger"),
 
   /**

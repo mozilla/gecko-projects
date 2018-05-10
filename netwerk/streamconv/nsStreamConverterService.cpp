@@ -49,11 +49,6 @@ NS_IMPL_ISUPPORTS(nsStreamConverterService, nsIStreamConverterService)
 
 ////////////////////////////////////////////////////////////
 // nsStreamConverterService methods
-nsStreamConverterService::nsStreamConverterService()
-{
-}
-
-nsStreamConverterService::~nsStreamConverterService() = default;
 
 // Builds the graph represented as an adjacency list (and built up in
 // memory using an nsObjectHashtable and nsCOMArray combination).
@@ -533,7 +528,7 @@ nsStreamConverterService::AsyncConvertData(const char *aFromType,
 nsresult
 NS_NewStreamConv(nsStreamConverterService** aStreamConv)
 {
-    NS_PRECONDITION(aStreamConv != nullptr, "null ptr");
+    MOZ_ASSERT(aStreamConv != nullptr, "null ptr");
     if (!aStreamConv) return NS_ERROR_NULL_POINTER;
 
     *aStreamConv = new nsStreamConverterService();

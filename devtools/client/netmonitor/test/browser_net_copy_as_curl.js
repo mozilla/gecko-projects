@@ -25,10 +25,14 @@ add_task(async function() {
   }
 
   // Construct the expected command
+  const SIMPLE_BASE = [
+    "curl " + quote(SIMPLE_SJS)
+  ];
+  const SLOW_BASE = [
+    "curl " + quote(SLOW_SJS)
+  ];
   const BASE_RESULT = [
-    "curl " + quote(SIMPLE_SJS),
     "--compressed",
-    header("Host: example.com"),
     header("User-Agent: " + navigator.userAgent),
     header("Accept: */*"),
     header("Accept-Language: " + navigator.language),
@@ -51,35 +55,73 @@ add_task(async function() {
     header("Content-Type: text/plain;charset=UTF-8")
   ];
 
+  const HEAD_PARTIAL_RESULT = [
+    "-I"
+  ];
+
   // GET request, no cookies (first request)
-  await performRequest(null);
-  await testClipboardContent(BASE_RESULT);
+  await performRequest("GET");
+  await testClipboardContent([
+    ...SIMPLE_BASE,
+    ...BASE_RESULT
+  ]);
+  // Check to make sure it is still OK after we view the response (bug#1452442)
+  await selectIndexAndWaitForSourceEditor(monitor, 0);
+  await testClipboardContent([
+    ...SIMPLE_BASE,
+    ...BASE_RESULT
+  ]);
 
   // GET request, cookies set by previous response
-  await performRequest(null);
+  await performRequest("GET");
   await testClipboardContent([
+    ...SIMPLE_BASE,
+    ...BASE_RESULT,
+    ...COOKIE_PARTIAL_RESULT
+  ]);
+
+  // Unfinished request (bug#1378464, bug#1420513)
+  let waitSlow = waitForNetworkEvents(monitor, 0);
+  await ContentTask.spawn(tab.linkedBrowser, SLOW_SJS, async function(url) {
+    content.wrappedJSObject.performRequest(url, "GET", null);
+  });
+  await waitSlow;
+  await testClipboardContent([
+    ...SLOW_BASE,
     ...BASE_RESULT,
     ...COOKIE_PARTIAL_RESULT
   ]);
 
   // POST request
-  await performRequest(POST_PAYLOAD);
+  await performRequest("POST", POST_PAYLOAD);
   await testClipboardContent([
+    ...SIMPLE_BASE,
     ...BASE_RESULT,
     ...COOKIE_PARTIAL_RESULT,
     ...POST_PARTIAL_RESULT
   ]);
 
+  // HEAD request
+  await performRequest("HEAD");
+  await testClipboardContent([
+    ...SIMPLE_BASE,
+    ...BASE_RESULT,
+    ...COOKIE_PARTIAL_RESULT,
+    ...HEAD_PARTIAL_RESULT
+  ]);
+
   await teardown(monitor);
 
-  async function performRequest(payload) {
-    let wait = waitForNetworkEvents(monitor, 1);
+  async function performRequest(method, payload) {
+    let waitRequest = waitForNetworkEvents(monitor, 1);
     await ContentTask.spawn(tab.linkedBrowser, {
-      url: SIMPLE_SJS, payload_: payload
-    }, async function({url, payload_}) {
-      content.wrappedJSObject.performRequest(url, payload_);
+      url: SIMPLE_SJS,
+      method_: method,
+      payload_: payload
+    }, async function({url, method_, payload_}) {
+      content.wrappedJSObject.performRequest(url, method_, payload_);
     });
-    await wait;
+    await waitRequest;
   }
 
   async function testClipboardContent(expectedResult) {
@@ -90,9 +132,14 @@ add_task(async function() {
     EventUtils.sendMouseEvent({ type: "contextmenu" },
       document.querySelectorAll(".request-list-item")[0]);
 
+    /* Ensure that the copy as cURL option is always visible */
+    let copyUrlParamsNode = monitor.panelWin.parent.document
+      .querySelector("#request-list-context-copy-as-curl");
+    is(!!copyUrlParamsNode, true,
+      "The \"Copy as cURL\" context menu item should not be hidden.");
+
     await waitForClipboardPromise(function setup() {
-      monitor.panelWin.parent.document
-        .querySelector("#request-list-context-copy-as-curl").click();
+      copyUrlParamsNode.click();
     }, function validate(result) {
       if (typeof result !== "string") {
         return false;
@@ -118,6 +165,6 @@ add_task(async function() {
         expectedResult.every(param => actual.includes(param));
     });
 
-    info("Clipboard contains a cURL command for the currently selected item's url.");
+    info("Clipboard contains a cURL command for item " + (items.length - 1));
   }
 });

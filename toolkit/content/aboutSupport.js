@@ -201,22 +201,6 @@ var snapshotFormatters = {
     }));
   },
 
-  experiments: function experiments(data) {
-    $.append($("experiments-tbody"), data.map(function(experiment) {
-      return $.new("tr", [
-        $.new("td", experiment.name),
-        $.new("td", experiment.id),
-        $.new("td", experiment.description),
-        $.new("td", experiment.active),
-        $.new("td", experiment.endDate),
-        $.new("td", [
-          $.new("a", experiment.detailURL, null, {href: experiment.detailURL, })
-        ]),
-        $.new("td", experiment.branch),
-      ]);
-    }));
-  },
-
   modifiedPreferences: function modifiedPreferences(data) {
     $.append($("prefs-tbody"), sortedArrayFromObject(data).map(
       function([name, value]) {
@@ -466,6 +450,7 @@ var snapshotFormatters = {
     addRowFromKey("features", "supportsHardwareH264", "hardwareH264");
     addRowFromKey("features", "direct2DEnabled", "#Direct2D");
     addRowFromKey("features", "usesTiling");
+    addRowFromKey("features", "contentUsesTiling");
     addRowFromKey("features", "offMainThreadPaintEnabled");
     addRowFromKey("features", "offMainThreadPaintWorkerCount");
 
@@ -711,7 +696,6 @@ var snapshotFormatters = {
     // Basic information
     insertBasicInfo("audioBackend", data.currentAudioBackend);
     insertBasicInfo("maxAudioChannels", data.currentMaxAudioChannels);
-    insertBasicInfo("channelLayout", data.currentPreferredChannelLayout);
     insertBasicInfo("sampleRate", data.currentPreferredSampleRate);
 
     // Output devices information
@@ -913,13 +897,10 @@ function copyRawDataToClipboard(button) {
       transferable.setTransferData("text/unicode", str, str.data.length * 2);
       Services.clipboard.setData(transferable, null, Ci.nsIClipboard.kGlobalClipboard);
       if (AppConstants.platform == "android") {
-        // Present a toast notification.
-        let message = {
-          type: "Toast:Show",
-          message: stringBundle().GetStringFromName("rawDataCopied"),
-          duration: "short"
-        };
-        Services.androidBridge.handleGeckoMessage(message);
+        // Present a snackbar notification.
+        ChromeUtils.import("resource://gre/modules/Snackbars.jsm");
+        Snackbars.show(stringBundle().GetStringFromName("rawDataCopied"),
+                       Snackbars.LENGTH_SHORT);
       }
     });
   } catch (err) {
@@ -964,13 +945,10 @@ function copyContentsToClipboard() {
   Services.clipboard.setData(transferable, null, Services.clipboard.kGlobalClipboard);
 
   if (AppConstants.platform == "android") {
-    // Present a toast notification.
-    let message = {
-      type: "Toast:Show",
-      message: stringBundle().GetStringFromName("textCopied"),
-      duration: "short"
-    };
-    Services.androidBridge.handleGeckoMessage(message);
+    // Present a snackbar notification.
+    ChromeUtils.import("resource://gre/modules/Snackbars.jsm");
+    Snackbars.show(stringBundle().GetStringFromName("textCopied"),
+                   Snackbars.LENGTH_SHORT);
   }
 }
 

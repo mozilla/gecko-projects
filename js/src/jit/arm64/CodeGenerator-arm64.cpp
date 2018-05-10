@@ -346,6 +346,18 @@ CodeGenerator::visitRoundF(LRoundF* lir)
 }
 
 void
+CodeGenerator::visitTrunc(LTrunc* lir)
+{
+    MOZ_CRASH("visitTrunc");
+}
+
+void
+CodeGenerator::visitTruncF(LTruncF* lir)
+{
+    MOZ_CRASH("visitTruncF");
+}
+
+void
 CodeGenerator::visitClzI(LClzI* lir)
 {
     MOZ_CRASH("visitClzI");
@@ -566,18 +578,6 @@ getBase(U* mir)
       case U::Heap: return HeapReg;
     }
     return InvalidReg;
-}
-
-void
-CodeGenerator::visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic* ins)
-{
-    MOZ_CRASH("CodeGenerator::visitLoadTypedArrayElementStatic");
-}
-
-void
-CodeGenerator::visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic* ins)
-{
-    MOZ_CRASH("CodeGenerator::visitStoreTypedArrayElementStatic");
 }
 
 void

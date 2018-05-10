@@ -128,8 +128,7 @@ CompositionTransaction::DoTransaction()
     if (replaceableLength < mReplaceLength) {
       int32_t remainLength = mReplaceLength - replaceableLength;
       nsCOMPtr<nsINode> node = mTextNode->GetNextSibling();
-      while (node && node->IsNodeOfType(nsINode::eTEXT) &&
-             remainLength > 0) {
+      while (node && node->IsText() && remainLength > 0) {
         Text* text = static_cast<Text*>(node.get());
         uint32_t textLength = text->TextLength();
         text->DeleteData(0, remainLength, IgnoreErrors());
@@ -245,14 +244,11 @@ CompositionTransaction::SetIMESelection(EditorBase& aEditorBase,
 
   nsresult rv = NS_OK;
   for (uint32_t i = 0; i < ArrayLength(kIMESelections); ++i) {
-    nsCOMPtr<nsISelection> selectionOfIME;
-    if (NS_FAILED(selCon->GetSelection(kIMESelections[i],
-                                       getter_AddRefs(selectionOfIME)))) {
+    RefPtr<Selection> selectionOfIME = selCon->GetSelection(kIMESelections[i]);
+    if (!selectionOfIME) {
       continue;
     }
-    rv = selectionOfIME->RemoveAllRanges();
-    NS_ASSERTION(NS_SUCCEEDED(rv),
-                 "Failed to remove all ranges of IME selection");
+    selectionOfIME->RemoveAllRanges(IgnoreErrors());
   }
 
   // Set caret position and selection of IME composition with TextRangeArray.
@@ -319,14 +315,15 @@ CompositionTransaction::SetIMESelection(EditorBase& aEditorBase,
 
     // Set the range of the clause to selection.
     RefPtr<Selection> selectionOfIME =
-      selCon->GetDOMSelection(ToRawSelectionType(textRange.mRangeType));
+      selCon->GetSelection(ToRawSelectionType(textRange.mRangeType));
     if (!selectionOfIME) {
       NS_WARNING("Failed to get IME selection");
       break;
     }
 
-    rv = selectionOfIME->AddRange(clauseRange);
-    if (NS_FAILED(rv)) {
+    IgnoredErrorResult err;
+    selectionOfIME->AddRange(*clauseRange, err);
+    if (err.Failed()) {
       NS_WARNING("Failed to add selection range for a clause of composition");
       break;
     }

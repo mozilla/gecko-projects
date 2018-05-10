@@ -158,7 +158,7 @@
 }
 
 #customization-lwtheme-button > .box-inherit > .box-inherit > .button-icon {
-  background-image: url("chrome://browser/content/default-theme-icon.svg");
+  background-image: url("chrome://mozapps/content/extensions/default-theme-icon.svg");
 }
 
 #customization-uidensity-button > .box-inherit > .box-inherit > .button-icon {
@@ -334,10 +334,6 @@ toolbarpaletteitem[place=toolbar] > toolbarspring {
   color: inherit;
 }
 
-.customization-lwtheme-menu-theme[defaulttheme] {
-  list-style-image: url(chrome://browser/content/default-theme-icon.svg);
-}
-
 #customization-uidensity-menuitem-normal {
   list-style-image: url("chrome://browser/skin/customizableui/density-normal.svg");
 }
@@ -429,8 +425,7 @@ toolbarpaletteitem[place=toolbar] > toolbarspring {
 %ifdef XP_MACOSX
   /* Native styling adds more 'oompf' to the popup box-shadow, so simulate that
    * as best as we can here: */
-  border: 1px solid var(--arrowpanel-dimmed-even-further);
-  box-shadow: 0 4px 10px hsla(0,0%,0%,.3);
+  box-shadow: 0 0 1px hsla(0,0%,0%,.3), 0 4px 10px hsla(0,0%,0%,.3);
   -moz-appearance: none;
   border-radius: var(--arrowpanel-border-radius);
 %else

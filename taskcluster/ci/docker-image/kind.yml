@@ -34,6 +34,8 @@ jobs:
       - deb7-make
       - deb7-mercurial
       - deb7-python
+      - deb7-python3.5
+      - deb7-python3-defaults
       - deb7-xz-utils
   toolchain-build:
     symbol: I(toolchain)
@@ -90,12 +92,14 @@ jobs:
     symbol: I(gps)
   funsize-balrog-submitter:
     symbol: I(fbs)
-  beet-mover:
-    symbol: I(bm)
   update-verify:
     symbol: I(uv)
   diffoscope:
     symbol: I(diff)
+  partner-repack:
+    symbol: I(PR)
+    parent: debian9-base
+    definition: partner-repack
   periodic-updates:
     symbol: I(file)
   firefox-snap:

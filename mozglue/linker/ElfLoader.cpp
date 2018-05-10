@@ -16,7 +16,13 @@
 #include "CustomElf.h"
 #include "Mappable.h"
 #include "Logging.h"
+#include "Utils.h"
 #include <inttypes.h>
+
+using namespace mozilla;
+
+// From Utils.h
+Atomic<size_t, ReleaseAcquire> gPageSize;
 
 #if defined(ANDROID)
 #include <sys/syscall.h>
@@ -51,7 +57,6 @@ dl_iterate_phdr(dl_phdr_cb callback, void *data) __attribute__((weak));
  * containing this code. */
 extern "C" Elf::Dyn _DYNAMIC[];
 
-using namespace mozilla;
 
 /**
  * dlfcn.h replacements functions
@@ -85,7 +90,11 @@ __wrap_dlsym(void *handle, const char *symbol)
     LibHandle *h = reinterpret_cast<LibHandle *>(handle);
     return h->GetSymbolPtr(symbol);
   }
-  return dlsym(handle, symbol);
+
+  void* sym = dlsym(handle, symbol);
+  ElfLoader::Singleton.lastError = dlerror();
+
+  return sym;
 }
 
 int
@@ -356,6 +365,7 @@ SystemElf::Load(const char *path, int flags)
    * already loaded library, even when the full path doesn't exist */
   if (path && path[0] == '/' && (access(path, F_OK) == -1)){
     DEBUG_LOG("dlopen(\"%s\", 0x%x) = %p", path, flags, (void *)nullptr);
+    ElfLoader::Singleton.lastError = "Specified file does not exist";
     return nullptr;
   }
 
@@ -878,7 +888,7 @@ class EnsureWritable
 {
 public:
   template <typename T>
-  EnsureWritable(T *ptr, size_t length_ = sizeof(T))
+  explicit EnsureWritable(T *ptr, size_t length_ = sizeof(T))
   {
     MOZ_ASSERT(length_ < PageSize());
     prot = -1;
@@ -894,16 +904,28 @@ public:
     if (prot == -1 || (start + length) > end)
       MOZ_CRASH();
 
-    if (prot & PROT_WRITE)
+    if (prot & PROT_WRITE) {
+      success = true;
       return;
+    }
 
     page = firstPage;
-    mprotect(page, length, prot | PROT_WRITE);
+    int ret = mprotect(page, length, prot | PROT_WRITE);
+    success = ret == 0;
+    if (!success) {
+      ERROR("mprotect(%p, %zu, %d) = %d (errno=%d; %s)",
+            page, length, prot | PROT_WRITE, ret,
+            errno, strerror(errno));
+    }
+  }
+
+  bool IsWritable() const {
+    return success;
   }
 
   ~EnsureWritable()
   {
-    if (page != MAP_FAILED) {
+    if (success && page != MAP_FAILED) {
       mprotect(page, length, prot);
 }
   }
@@ -943,6 +965,7 @@ private:
   int prot;
   void *page;
   size_t length;
+  bool success;
 };
 
 /**
@@ -966,18 +989,28 @@ ElfLoader::DebuggerHelper::Add(ElfLoader::link_map *map)
 {
   if (!dbg->r_brk)
     return;
+
   dbg->r_state = r_debug::RT_ADD;
   dbg->r_brk();
-  map->l_prev = nullptr;
-  map->l_next = dbg->r_map;
+
   if (!firstAdded) {
-    firstAdded = map;
     /* When adding a library for the first time, r_map points to data
      * handled by the system linker, and that data may be read-only */
     EnsureWritable w(&dbg->r_map->l_prev);
+    if (!w.IsWritable()) {
+      dbg->r_state = r_debug::RT_CONSISTENT;
+      dbg->r_brk();
+      return;
+    }
+
+    firstAdded = map;
     dbg->r_map->l_prev = map;
   } else
     dbg->r_map->l_prev = map;
+
+  map->l_prev = nullptr;
+  map->l_next = dbg->r_map;
+
   dbg->r_map = map;
   dbg->r_state = r_debug::RT_CONSISTENT;
   dbg->r_brk();
@@ -988,21 +1021,30 @@ ElfLoader::DebuggerHelper::Remove(ElfLoader::link_map *map)
 {
   if (!dbg->r_brk)
     return;
+
   dbg->r_state = r_debug::RT_DELETE;
   dbg->r_brk();
+
+  if (map == firstAdded) {
+    /* When removing the first added library, its l_next is going to be
+     * data handled by the system linker, and that data may be read-only */
+    EnsureWritable w(&map->l_next->l_prev);
+    if (!w.IsWritable()) {
+      dbg->r_state = r_debug::RT_CONSISTENT;
+      dbg->r_brk();
+      return;
+    }
+
+    firstAdded = map->l_prev;
+    map->l_next->l_prev = map->l_prev;
+  } else if (map->l_next) {
+    map->l_next->l_prev = map->l_prev;
+  }
+
   if (dbg->r_map == map)
     dbg->r_map = map->l_next;
   else if (map->l_prev) {
     map->l_prev->l_next = map->l_next;
-  }
-  if (map == firstAdded) {
-    firstAdded = map->l_prev;
-    /* When removing the first added library, its l_next is going to be
-     * data handled by the system linker, and that data may be read-only */
-    EnsureWritable w(&map->l_next->l_prev);
-    map->l_next->l_prev = map->l_prev;
-  } else if (map->l_next) {
-    map->l_next->l_prev = map->l_prev;
   }
   dbg->r_state = r_debug::RT_CONSISTENT;
   dbg->r_brk();

@@ -5,9 +5,9 @@ def execute_script(session, script, args=None):
     if args is None:
         args = []
     body = {"script": script, "args": args}
+
     return session.transport.send(
-        "POST",
-        "/session/{session_id}/execute/sync".format(
+        "POST", "/session/{session_id}/execute/sync".format(
             session_id=session.session_id),
         body)
 
@@ -34,7 +34,7 @@ def test_array_in_object(session):
     response = execute_script(session, """
         let arr = [];
         arr.push(arr);
-        return {arr};
+        return {'arrayValue': arr};
         """)
     assert_error(response, "javascript error")
 

@@ -17,7 +17,6 @@ config = {
     "buildbot_json_path": "buildprops.json",
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
     # decides whether we want to use moz_sign_cmd in env
-    'enable_signing': True,
     'secret_files': [
         {'filename': '/builds/gapi.data',
          'secret_name': 'project/releng/gecko/build/level-%(scm-level)s/gapi.data',
@@ -52,10 +51,9 @@ config = {
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'LC_ALL': 'C',
         ## 64 bit specific
-        'PATH': '/usr/local/bin:/usr/lib64/ccache:/bin:\
-/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/tools/git/bin:/tools/python27/bin:\
-/tools/python27-mercurial/bin:/home/cltbld/bin',
-        'LD_LIBRARY_PATH': "/tools/gcc-4.3.3/installed/lib64",
+        'PATH': '/usr/local/bin:/bin:'
+                '/usr/bin:/usr/local/sbin:/usr/sbin:'
+                '/sbin'
         ##
     },
     "check_test_env": {

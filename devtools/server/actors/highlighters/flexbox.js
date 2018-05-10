@@ -33,6 +33,9 @@ const FLEXBOX_LINES_PROPERTIES = {
   },
   "item": {
     lineDash: [0, 0]
+  },
+  "alignItems": {
+    lineDash: [0, 0]
   }
 };
 
@@ -253,19 +256,57 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   /**
    * The AutoRefreshHighlighter's _hasMoved method returns true only if the
    * element's quads have changed. Override it so it also returns true if the
-   * element and its flex items have changed.
+   * flex container and its flex items have changed.
    */
   _hasMoved() {
     let hasMoved = AutoRefreshHighlighter.prototype._hasMoved.call(this);
 
-    // TODO: Implement a check of old and new flex container and flex items to react
-    // to any alignment and size changes. This is blocked on Bug 1414920 that implements
-    // a platform API to retrieve the flex container and flex item information.
+    if (!this.computedStyle) {
+      this.computedStyle = getComputedStyle(this.currentNode);
+    }
 
-    return hasMoved;
+    let oldFlexData = this.flexData;
+    this.flexData = this.currentNode.getAsFlexContainer();
+    let hasFlexDataChanged = compareFlexData(oldFlexData, this.flexData);
+
+    let oldAlignItems = this.alignItemsValue;
+    this.alignItemsValue = this.computedStyle.alignItems;
+    let newAlignItems = this.alignItemsValue;
+
+    let oldFlexBasis = this.flexBasis;
+    this.flexBasis = this.computedStyle.flexBasis;
+    let newFlexBasis = this.flexBasis;
+
+    let oldFlexDirection = this.flexDirection;
+    this.flexDirection = this.computedStyle.flexDirection;
+    let newFlexDirection = this.flexDirection;
+
+    let oldFlexWrap = this.flexWrap;
+    this.flexWrap = this.computedStyle.flexWrap;
+    let newFlexWrap = this.flexWrap;
+
+    let oldJustifyContent = this.justifyContentValue;
+    this.justifyContentValue = this.computedStyle.justifyContent;
+    let newJustifyContent = this.justifyContentValue;
+
+    return hasMoved ||
+           hasFlexDataChanged ||
+           oldAlignItems !== newAlignItems ||
+           oldFlexBasis !== newFlexBasis ||
+           oldFlexDirection !== newFlexDirection ||
+           oldFlexWrap !== newFlexWrap ||
+           oldJustifyContent !== newJustifyContent;
   }
 
   _hide() {
+    this.alignItemsValue = null;
+    this.computedStyle = null;
+    this.flexBasis = null;
+    this.flexData = null;
+    this.flexDirection = null;
+    this.flexWrap = null;
+    this.justifyContentValue = null;
+
     setIgnoreLayoutChanges(true);
     this._hideFlexbox();
     setIgnoreLayoutChanges(false, this.highlighterEnv.document.documentElement);
@@ -318,6 +359,107 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     if (isTopLevel) {
       this.hide();
     }
+  }
+
+  renderAlignItemLine() {
+    if (!this.flexData || !this.currentQuads.content || !this.currentQuads.content[0]) {
+      return;
+    }
+
+    let { devicePixelRatio } = this.win;
+    let lineWidth = getDisplayPixelRatio(this.win);
+    let offset = (lineWidth / 2) % 1;
+    let canvasX = Math.round(this._canvasPosition.x * devicePixelRatio);
+    let canvasY = Math.round(this._canvasPosition.y * devicePixelRatio);
+
+    this.ctx.save();
+    this.ctx.translate(offset - canvasX, offset - canvasY);
+    this.ctx.setLineDash(FLEXBOX_LINES_PROPERTIES.alignItems.lineDash);
+    this.ctx.lineWidth = lineWidth * 3;
+    this.ctx.strokeStyle = DEFAULT_COLOR;
+
+    let { bounds } = this.currentQuads.content[0];
+    let flexLines = this.flexData.getLines();
+    let isColumn = this.flexDirection.startsWith("column");
+    let options = { matrix: this.currentMatrix };
+
+    for (let flexLine of flexLines) {
+      let { crossStart, crossSize } = flexLine;
+
+      switch (this.alignItemsValue) {
+        case "baseline":
+        case "first baseline":
+          let { firstBaselineOffset } = flexLine;
+
+          if (firstBaselineOffset < 0) {
+            break;
+          }
+
+          if (isColumn) {
+            drawLine(this.ctx, crossStart + firstBaselineOffset, 0,
+              crossStart + firstBaselineOffset, bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart + firstBaselineOffset, bounds.width,
+              crossStart + firstBaselineOffset, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "center":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart + crossSize / 2, 0, crossStart + crossSize / 2,
+              bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart + crossSize / 2, bounds.width,
+              crossStart + crossSize / 2, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "flex-start":
+        case "start":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart, 0, crossStart, bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart, bounds.width, crossStart, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "flex-end":
+        case "end":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
+              bounds.height, options);
+          } else {
+            drawLine(this.ctx, 0, crossStart + crossSize, bounds.width,
+              crossStart + crossSize, options);
+          }
+
+          this.ctx.stroke();
+          break;
+        case "stretch":
+          if (isColumn) {
+            drawLine(this.ctx, crossStart, 0, crossStart, bounds.height, options);
+            this.ctx.stroke();
+            drawLine(this.ctx, crossStart + crossSize, 0, crossStart + crossSize,
+              bounds.height, options);
+            this.ctx.stroke();
+          } else {
+            drawLine(this.ctx, 0, crossStart, bounds.width, crossStart, options);
+            this.ctx.stroke();
+            drawLine(this.ctx, 0, crossStart + crossSize, bounds.width,
+              crossStart + crossSize, options);
+            this.ctx.stroke();
+          }
+
+          break;
+        default:
+          break;
+      }
+    }
+
+    this.ctx.restore();
   }
 
   renderFlexContainerBorder() {
@@ -381,13 +523,11 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
    * Renders the flex basis for a given flex item.
    */
   renderFlexItemBasis(flexItem, left, top, right, bottom, boundsWidth) {
-    let computedStyle = getComputedStyle(flexItem);
-
-    if (!computedStyle) {
+    if (!this.computedStyle) {
       return;
     }
 
-    let basis = computedStyle.getPropertyValue("flex-basis");
+    let basis = this.flexBasis;
 
     if (basis.endsWith("px")) {
       right = Math.round(left + parseFloat(basis));
@@ -402,7 +542,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   }
 
   renderFlexItems() {
-    if (!this.currentQuads.content || !this.currentQuads.content[0]) {
+    if (!this.flexData || !this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
     }
 
@@ -419,7 +559,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.strokeStyle = DEFAULT_COLOR;
 
     let { bounds } = this.currentQuads.content[0];
-    let flexLines = this.currentNode.getAsFlexContainer().getLines();
+    let flexLines = this.flexData.getLines();
 
     for (let flexLine of flexLines) {
       let flexItems = flexLine.getItems();
@@ -451,7 +591,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   }
 
   renderFlexLines() {
-    if (!this.currentQuads.content || !this.currentQuads.content[0]) {
+    if (!this.flexData || !this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
     }
 
@@ -467,9 +607,8 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.ctx.strokeStyle = DEFAULT_COLOR;
 
     let { bounds } = this.currentQuads.content[0];
-    let flexLines = this.currentNode.getAsFlexContainer().getLines();
-    let computedStyle = getComputedStyle(this.currentNode);
-    let isColumn = computedStyle.getPropertyValue("flex-direction").startsWith("column");
+    let flexLines = this.flexData.getLines();
+    let isColumn = this.flexDirection.startsWith("column");
     let options = { matrix: this.currentMatrix };
 
     for (let flexLine of flexLines) {
@@ -514,14 +653,13 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
   }
 
   renderJustifyContent() {
-    if (!this.currentQuads.content || !this.currentQuads.content[0]) {
+    if (!this.flexData || !this.currentQuads.content || !this.currentQuads.content[0]) {
       return;
     }
 
     let { bounds } = this.currentQuads.content[0];
-    let flexLines = this.currentNode.getAsFlexContainer().getLines();
-    let computedStyle = getComputedStyle(this.currentNode);
-    let isColumn = computedStyle.getPropertyValue("flex-direction").startsWith("column");
+    let flexLines = this.flexData.getLines();
+    let isColumn = this.flexDirection.startsWith("column");
 
     for (let flexLine of flexLines) {
       let { crossStart, crossSize } = flexLine;
@@ -590,6 +728,7 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     this.renderJustifyContent();
     this.renderFlexItems();
     this.renderFlexContainerBorder();
+    this.renderAlignItemLine();
 
     this._showFlexbox();
 
@@ -599,6 +738,64 @@ class FlexboxHighlighter extends AutoRefreshHighlighter {
     setIgnoreLayoutChanges(false, this.highlighterEnv.document.documentElement);
     return true;
   }
+}
+
+/**
+ * Returns whether or not the flex data has changed.
+ *
+ * @param  {Flex} oldFlexData
+ *         The old Flex data object.
+ * @param  {Flex} newFlexData
+ *         The new Flex data object.
+ * @return {Boolean} true if the flex data has changed and false otherwise.
+ */
+function compareFlexData(oldFlexData, newFlexData) {
+  if (!oldFlexData || !newFlexData) {
+    return true;
+  }
+
+  const oldLines = oldFlexData.getLines();
+  const newLines = newFlexData.getLines();
+
+  if (oldLines.length !== newLines.length) {
+    return true;
+  }
+
+  for (let i = 0; i < oldLines.length; i++) {
+    let oldLine = oldLines[i];
+    let newLine = newLines[i];
+
+    if (oldLine.crossSize !== newLine.crossSize ||
+        oldLine.crossStart !== newLine.crossStart ||
+        oldLine.firstBaselineOffset !== newLine.firstBaselineOffset ||
+        oldLine.growthState !== newLine.growthState ||
+        oldLine.lastBaselineOffset !== newLine.lastBaselineOffset) {
+      return true;
+    }
+
+    let oldItems = oldLine.getItems();
+    let newItems = newLine.getItems();
+
+    if (oldItems.length !== newItems.length) {
+      return true;
+    }
+
+    for (let j = 0; j < oldItems.length; j++) {
+      let oldItem = oldItems[j];
+      let newItem = newItems[j];
+
+      if (oldItem.crossMaxSize !== newItem.crossMaxSize ||
+          oldItem.crossMinSize !== newItem.crossMinSize ||
+          oldItem.mainBaseSize !== newItem.mainBaseSize ||
+          oldItem.mainDeltaSize !== newItem.mainDeltaSize ||
+          oldItem.mainMaxSize !== newItem.mainMaxSize ||
+          oldItem.mainMinSize !== newItem.mainMinSize) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 exports.FlexboxHighlighter = FlexboxHighlighter;

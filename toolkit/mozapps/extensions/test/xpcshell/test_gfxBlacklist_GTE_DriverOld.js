@@ -7,12 +7,9 @@
 // blacklist entry is allowed.
 // Uses test_gfxBlacklist.xml
 
-ChromeUtils.import("resource://testing-common/httpd.js");
-
-var gTestserver = new HttpServer();
-gTestserver.start(-1);
+var gTestserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 gPort = gTestserver.identity.primaryPort;
-mapFile("/data/test_gfxBlacklist.xml", gTestserver);
+gTestserver.registerDirectory("/data/", do_get_file("data"));
 
 function load_blocklist(file) {
   Services.prefs.setCharPref("extensions.blocklist.url", "http://localhost:" +
@@ -23,7 +20,7 @@ function load_blocklist(file) {
 }
 
 // Performs the initial setup
-function run_test() {
+async function run_test() {
   var gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
 
   // We can't do anything if we can't spoof the stuff we need.
@@ -58,10 +55,10 @@ function run_test() {
       break;
   }
 
-  createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "3", "8");
-  startupManager();
-
   do_test_pending();
+
+  createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "3", "8");
+  await promiseStartupManager();
 
   function checkBlacklist() {
     var status = gfxInfo.getFeatureStatus(Ci.nsIGfxInfo.FEATURE_DIRECT2D);
@@ -71,7 +68,7 @@ function run_test() {
     status = gfxInfo.getFeatureStatus(Ci.nsIGfxInfo.FEATURE_DIRECT3D_9_LAYERS);
     Assert.equal(status, Ci.nsIGfxInfo.FEATURE_STATUS_OK);
 
-    gTestserver.stop(do_test_finished);
+    do_test_finished();
   }
 
   Services.obs.addObserver(function(aSubject, aTopic, aData) {

@@ -406,9 +406,9 @@ TraceInterpreterActivation(JSTracer* trc, InterpreterActivation* act)
 }
 
 void
-js::TraceInterpreterActivations(JSContext* cx, const CooperatingContext& target, JSTracer* trc)
+js::TraceInterpreterActivations(JSContext* cx, JSTracer* trc)
 {
-    for (ActivationIterator iter(cx, target); !iter.done(); ++iter) {
+    for (ActivationIterator iter(cx); !iter.done(); ++iter) {
         Activation* act = iter.activation();
         if (act->isInterpreter())
             TraceInterpreterActivation(trc, act->asInterpreter());
@@ -735,19 +735,6 @@ FrameIter::Data::Data(JSContext* cx, DebuggerEvalOption debuggerEvalOption,
 {
 }
 
-FrameIter::Data::Data(JSContext* cx, const CooperatingContext& target,
-                      DebuggerEvalOption debuggerEvalOption)
-  : cx_(cx),
-    debuggerEvalOption_(debuggerEvalOption),
-    principals_(nullptr),
-    state_(DONE),
-    pc_(nullptr),
-    interpFrames_(nullptr),
-    activations_(cx, target),
-    ionInlineFrameNo_(0)
-{
-}
-
 FrameIter::Data::Data(const FrameIter::Data& other)
   : cx_(other.cx_),
     debuggerEvalOption_(other.debuggerEvalOption_),
@@ -759,16 +746,6 @@ FrameIter::Data::Data(const FrameIter::Data& other)
     jitFrames_(other.jitFrames_),
     ionInlineFrameNo_(other.ionInlineFrameNo_)
 {
-}
-
-FrameIter::FrameIter(JSContext* cx, const CooperatingContext& target,
-                     DebuggerEvalOption debuggerEvalOption)
-  : data_(cx, target, debuggerEvalOption),
-    ionInlineFrames_(cx, (js::jit::JSJitFrameIter*) nullptr)
-{
-    // settleOnActivation can only GC if principals are given.
-    JS::AutoSuppressGCAnalysis nogc;
-    settleOnActivation();
 }
 
 FrameIter::FrameIter(JSContext* cx, DebuggerEvalOption debuggerEvalOption)
@@ -965,7 +942,7 @@ FrameIter::isFunctionFrame() const
 }
 
 JSAtom*
-FrameIter::functionDisplayAtom() const
+FrameIter::maybeFunctionDisplayAtom() const
 {
     switch (data_.state_) {
       case DONE:
@@ -974,8 +951,9 @@ FrameIter::functionDisplayAtom() const
       case JIT:
         if (isWasm())
             return wasmFrame().functionDisplayAtom();
-        MOZ_ASSERT(isFunctionFrame());
-        return calleeTemplate()->displayAtom();
+        if (isFunctionFrame())
+            return calleeTemplate()->displayAtom();
+        return nullptr;
     }
 
     MOZ_CRASH("Unexpected state");
@@ -1035,11 +1013,8 @@ FrameIter::computeLine(uint32_t* column) const
         break;
       case INTERP:
       case JIT:
-        if (isWasm()) {
-            if (column)
-                *column = 0;
-            return wasmFrame().lineOrBytecode();
-        }
+        if (isWasm())
+            return wasmFrame().computeLine(column);
         return PCToLineNumber(script(), pc(), column);
     }
 
@@ -1169,8 +1144,12 @@ FrameIter::updatePcQuadratic()
 
             // Look for the current frame.
             data_.jitFrames_ = JitFrameIter(data_.activations_->asJit());
-            while (!jsJitFrame().isBaselineJS() || jsJitFrame().baselineFrame() != frame)
+            while (!isJSJit() ||
+                   !jsJitFrame().isBaselineJS() ||
+                   jsJitFrame().baselineFrame() != frame)
+            {
                 ++data_.jitFrames_;
+            }
 
             // Update the pc.
             MOZ_ASSERT(jsJitFrame().baselineFrame() == frame);
@@ -1808,22 +1787,6 @@ ActivationIterator::ActivationIterator(JSContext* cx)
   : activation_(cx->activation_)
 {
     MOZ_ASSERT(cx == TlsContext.get());
-}
-
-ActivationIterator::ActivationIterator(JSContext* cx, const CooperatingContext& target)
-{
-    MOZ_ASSERT(cx == TlsContext.get());
-
-    // If target was specified --- even if it is the same as cx itself --- then
-    // we must be in a scope where changes of the active context are prohibited.
-    // Otherwise our state would be corrupted if the target thread resumed
-    // execution while we are iterating over its state.
-    MOZ_ASSERT(cx->runtime()->activeContextChangeProhibited() ||
-               !cx->runtime()->gc.canChangeActiveContext(cx));
-
-    // Tolerate a null target context, in case we are iterating over the
-    // activations for a zone group that is not in use by any thread.
-    activation_ = target.context() ? target.context()->activation_.ref() : nullptr;
 }
 
 ActivationIterator&

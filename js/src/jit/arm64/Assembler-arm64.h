@@ -199,7 +199,6 @@ class Assembler : public vixl::Assembler
     void bind(Label* label) { bind(label, nextOffset()); }
     void bind(Label* label, BufferOffset boff);
     void bind(RepatchLabel* label);
-    void bindLater(Label* label, wasm::OldTrapDesc target);
 
     bool oom() const {
         return AssemblerShared::oom() ||
@@ -516,29 +515,35 @@ Imm64::secondHalf() const
     return hi();
 }
 
-void PatchJump(CodeLocationJump& jump_, CodeLocationLabel label,
-               ReprotectCode reprotect = DontReprotect);
-
-static inline void
-PatchBackedge(CodeLocationJump& jump_, CodeLocationLabel label, JitZoneGroup::BackedgeTarget target)
-{
-    PatchJump(jump_, label);
-}
+void PatchJump(CodeLocationJump& jump_, CodeLocationLabel label);
 
 // Forbids pool generation during a specified interval. Not nestable.
 class AutoForbidPools
 {
     Assembler* asm_;
-
   public:
     AutoForbidPools(Assembler* asm_, size_t maxInst)
       : asm_(asm_)
     {
         asm_->enterNoPool(maxInst);
     }
-
     ~AutoForbidPools() {
         asm_->leaveNoPool();
+    }
+};
+
+// Forbids nop filling for testing purposes. Not nestable.
+class AutoForbidNops
+{
+    Assembler* asm_;
+  public:
+    explicit AutoForbidNops(Assembler* asm_)
+      : asm_(asm_)
+    {
+        asm_->enterNoNops();
+    }
+    ~AutoForbidNops() {
+        asm_->leaveNoNops();
     }
 };
 

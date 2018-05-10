@@ -547,6 +547,27 @@ nsHttpTransaction::OnActivated()
         return;
     }
 
+    if (mConnection && mRequestHead) {
+        // So this is fun. On http/2, we want to send TE: Trailers, to be
+        // spec-compliant. So we add it to the request head here. The fun part
+        // is that adding a header to the request head at this point has no
+        // effect on what we send on the wire, as the headers are already
+        // flattened (in Init()) by the time we get here. So the *real* adding
+        // of the header happens in the h2 compression code. We still have to
+        // add the header to the request head here, though, so that devtools can
+        // show that we sent the header. FUN!
+        // Oh, and we can't just check for version >= NS_HTTP_VERSION_2_0 because
+        // right now, mConnection->Version() returns HTTP_VERSION_2 (=5) instead
+        // of NS_HTTP_VERSION_2_0 (=20) for... reasons.
+        bool isOldHttp = (mConnection->Version() == NS_HTTP_VERSION_0_9 ||
+                          mConnection->Version() == NS_HTTP_VERSION_1_0 ||
+                          mConnection->Version() == NS_HTTP_VERSION_1_1 ||
+                          mConnection->Version() == NS_HTTP_VERSION_UNKNOWN);
+        if (!isOldHttp) {
+            Unused << mRequestHead->SetHeader(nsHttp::TE, NS_LITERAL_CSTRING("Trailers"));
+        }
+    }
+
     mActivated = true;
     gHttpHandler->ConnMgr()->AddActiveTransaction(this);
 }
@@ -1333,7 +1354,7 @@ nsHttpTransaction::LocateHttpStart(char *buf, uint32_t len,
                 return (buf + checkChars);
             }
             // Response matches pattern but is still incomplete.
-            return 0;
+            return nullptr;
         }
         // Previous partial match together with new data doesn't match the
         // pattern. Start the search again.
@@ -1347,7 +1368,7 @@ nsHttpTransaction::LocateHttpStart(char *buf, uint32_t len,
                 // partial HTTPHeader sequence found
                 // save partial match to mLineBuf
                 mLineBuf.Assign(buf, len);
-                return 0;
+                return nullptr;
             }
 
             // whole HTTPHeader sequence found
@@ -1380,7 +1401,7 @@ nsHttpTransaction::LocateHttpStart(char *buf, uint32_t len,
         buf++;
         len--;
     }
-    return 0;
+    return nullptr;
 }
 
 nsresult
@@ -1405,7 +1426,7 @@ nsHttpTransaction::ParseLine(nsACString &line)
 nsresult
 nsHttpTransaction::ParseLineSegment(char *segment, uint32_t len)
 {
-    NS_PRECONDITION(!mHaveAllHeaders, "already have all headers");
+    MOZ_ASSERT(!mHaveAllHeaders, "already have all headers");
 
     if (!mLineBuf.IsEmpty() && mLineBuf.Last() == '\n') {
         // trim off the new line char, and if this segment is
@@ -1456,7 +1477,7 @@ nsHttpTransaction::ParseHead(char *buf,
 
     *countRead = 0;
 
-    NS_PRECONDITION(!mHaveAllHeaders, "oops");
+    MOZ_ASSERT(!mHaveAllHeaders, "oops");
 
     // allocate the response head object if necessary
     if (!mResponseHead) {
@@ -2275,7 +2296,7 @@ NS_IMETHODIMP_(MozExternalRefCountType)
 nsHttpTransaction::Release()
 {
     nsrefcnt count;
-    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    MOZ_ASSERT(0 != mRefCnt, "dup release");
     count = --mRefCnt;
     NS_LOG_RELEASE(this, count, "nsHttpTransaction");
     if (0 == count) {

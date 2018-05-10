@@ -307,8 +307,9 @@ public:
   // nsITimerCallback
   NS_IMETHOD Notify(nsITimer *timer) override
   {
-    if (mRequest)
-      mRequest->Cancel(NS_ERROR_NET_TIMEOUT);
+    nsCOMPtr<nsICancelable> request(mRequest);
+    if (request)
+      request->Cancel(NS_ERROR_NET_TIMEOUT);
     mTimer = nullptr;
     return NS_OK;
   }
@@ -327,7 +328,7 @@ public:
   nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
 
 private:
-  ~PACResolver() {}
+  ~PACResolver() = default;
 };
 NS_IMPL_ISUPPORTS(PACResolver, nsIDNSListener, nsITimerCallback, nsINamed)
 

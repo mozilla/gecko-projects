@@ -76,7 +76,7 @@ $(syms_targets): %/syms: %/target
 
 # Only hook symbols targets into the main compile graph in automation.
 ifdef MOZ_AUTOMATION
-ifdef MOZ_CRASHREPORTER
+ifeq (1,$(MOZ_AUTOMATION_BUILD_SYMBOLS))
 recurse_compile: $(syms_targets)
 endif
 endif
@@ -165,11 +165,20 @@ ifeq (.,$(DEPTH))
 js/xpconnect/src/export: dom/bindings/export xpcom/xpidl/export
 accessible/xpcom/export: xpcom/xpidl/export
 
-# The widget binding generator code is part of the annotationProcessors.
-widget/android/bindings/export: build/annotationProcessors/export
+# The Android SDK bindings needs to build the Java generator code
+# source code in order to write the SDK bindings.
+widget/android/bindings/export: mobile/android/base/export
+
+# The widget JNI wrapper generator code needs to build the GeckoView
+# and Fennec source code in order to find JNI wrapper annotations.
+widget/android/fennec/export: mobile/android/base/export
+widget/android/export: mobile/android/base/export
 
 # .xpt generation needs the xpidl lex/yacc files
 xpcom/xpidl/export: xpcom/idl-parser/xpidl/export
+
+# CSS2Properties.webidl needs ServoCSSPropList.py from layout/style
+dom/bindings/export: layout/style/export
 
 ifdef ENABLE_CLANG_PLUGIN
 $(filter-out config/host build/unix/stdc++compat/% build/clang-plugin/%,$(compile_targets)): build/clang-plugin/target build/clang-plugin/tests/target

@@ -229,6 +229,8 @@ GetPropIRGenerator::tryAttachStub()
                 return true;
             if (tryAttachDenseElementHole(obj, objId, index, indexId))
                 return true;
+            if (tryAttachUnboxedElementHole(obj, objId, index, indexId))
+                return true;
             if (tryAttachArgumentsObjectArg(obj, objId, indexId))
                 return true;
 
@@ -442,11 +444,12 @@ IsPreliminaryObject(JSObject* obj)
     if (obj->isSingleton())
         return false;
 
-    TypeNewScript* newScript = obj->group()->newScript();
+    AutoSweepObjectGroup sweep(obj->group());
+    TypeNewScript* newScript = obj->group()->newScript(sweep);
     if (newScript && !newScript->analyzed())
         return true;
 
-    if (obj->group()->maybePreliminaryObjects())
+    if (obj->group()->maybePreliminaryObjects(sweep))
         return true;
 
     return false;
@@ -2013,6 +2016,46 @@ GetPropIRGenerator::tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
         writer.returnFromIC();
 
     trackAttached("TypedElement");
+    return true;
+}
+
+bool
+GetPropIRGenerator::tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId objId,
+                                                uint32_t index, Int32OperandId indexId)
+{
+    if (!obj->is<UnboxedPlainObject>())
+        return false;
+
+    // Only support unboxed objects with no elements (i.e. no expando)
+    UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando();
+    if (expando)
+        return false;
+
+    if (JSObject* proto = obj->staticPrototype()) {
+        // Start the check at the first object on the [[Prototype]],
+        // which must be native now.
+        if (!proto->isNative())
+            return false;
+
+        if (proto->as<NativeObject>().getDenseInitializedLength() != 0)
+            return false;
+
+        if (!CanAttachDenseElementHole(&proto->as<NativeObject>(), false))
+            return false;
+    }
+
+    // Guard on the group and prevent expandos from appearing.
+    Maybe<ObjOperandId> tempId;
+    TestMatchingReceiver(writer, obj, objId, &tempId);
+
+    // Guard that the prototype chain has no elements.
+    GeneratePrototypeHoleGuards(writer, obj, objId);
+
+    writer.loadUndefinedResult();
+    // No monitor: We know undefined must be in the typeset already.
+    writer.returnFromIC();
+
+    trackAttached("UnboxedElementHole");
     return true;
 }
 
@@ -3989,7 +4032,8 @@ SetPropIRGenerator::tryAttachAddSlotStub(HandleObjectGroup oldGroup, HandleShape
     // after we run the analysis as a group change may be required here. The
     // group change is not required for correctness but improves type
     // information elsewhere.
-    if (oldGroup->newScript() && !oldGroup->newScript()->analyzed()) {
+    AutoSweepObjectGroup sweep(oldGroup);
+    if (oldGroup->newScript(sweep) && !oldGroup->newScript(sweep)->analyzed()) {
         writer.guardGroupHasUnanalyzedNewScript(oldGroup);
         MOZ_ASSERT(IsPreliminaryObject(obj));
         preliminaryObjectAction_ = PreliminaryObjectAction::NotePreliminary;
@@ -4333,7 +4377,8 @@ CallIRGenerator::tryAttachArrayPush()
     RootedArrayObject thisarray(cx_, &thisobj->as<ArrayObject>());
 
     // And the object group for the array is not collecting preliminary objects.
-    if (thisobj->group()->maybePreliminaryObjects())
+    AutoSweepObjectGroup sweep(thisobj->group());
+    if (thisobj->group()->maybePreliminaryObjects(sweep))
         return false;
 
     // Check for other indexed properties or class hooks.
@@ -4837,5 +4882,87 @@ GetIntrinsicIRGenerator::tryAttachStub()
     writer.loadValueResult(val_);
     writer.returnFromIC();
     trackAttached("GetIntrinsic");
+    return true;
+}
+UnaryArithIRGenerator::UnaryArithIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc, ICState::Mode mode,
+                                             JSOp op, HandleValue val, HandleValue res)
+  : IRGenerator(cx, script, pc, CacheKind::UnaryArith, mode),
+    op_(op),
+    val_(val),
+    res_(res)
+{ }
+
+void
+UnaryArithIRGenerator::trackAttached(const char* name)
+{
+#ifdef JS_CACHEIR_SPEW
+    if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
+        sp.valueProperty("val", val_);
+    }
+#endif
+}
+
+bool
+UnaryArithIRGenerator::tryAttachStub()
+{
+    if (tryAttachInt32())
+        return true;
+    if (tryAttachNumber())
+        return true;
+
+    trackAttached(IRGenerator::NotAttached);
+    return false;
+}
+
+bool
+UnaryArithIRGenerator::tryAttachInt32()
+{
+    if (!val_.isInt32() || !res_.isInt32())
+        return false;
+
+    ValOperandId valId(writer.setInputOperandId(0));
+
+    Int32OperandId intId = writer.guardIsInt32(valId);
+    switch (op_) {
+      case JSOP_BITNOT:
+        writer.int32NotResult(intId);
+        trackAttached("UnaryArith.Int32Not");
+        break;
+      case JSOP_NEG:
+        writer.int32NegationResult(intId);
+        trackAttached("UnaryArith.Int32Neg");
+        break;
+      default:
+        MOZ_CRASH("Unexected OP");
+    }
+
+    writer.returnFromIC();
+    return true;
+}
+
+bool
+UnaryArithIRGenerator::tryAttachNumber()
+{
+    if (!val_.isNumber() || !res_.isNumber() || !cx_->runtime()->jitSupportsFloatingPoint)
+        return false;
+
+    ValOperandId valId(writer.setInputOperandId(0));
+    writer.guardType(valId, JSVAL_TYPE_DOUBLE);
+    Int32OperandId truncatedId;
+    switch (op_) {
+      case JSOP_BITNOT:
+        truncatedId = writer.truncateDoubleToUInt32(valId);
+        writer.int32NotResult(truncatedId);
+        trackAttached("UnaryArith.DoubleNot");
+        break;
+      case JSOP_NEG:
+        writer.doubleNegationResult(valId);
+        trackAttached("UnaryArith.DoubleNeg");
+        break;
+      default:
+        MOZ_CRASH("Unexpected OP");
+    }
+
+    writer.returnFromIC();
     return true;
 }

@@ -309,8 +309,8 @@ this.TopStoriesFeed = class TopStoriesFeed {
         }
 
         // Create a new array with a spoc inserted at index 2
-        const position = SectionsManager.sections.get(SECTION_ID).order;
-        let rows = this.store.getState().Sections[position].rows.slice(0, this.stories.length);
+        const section = this.store.getState().Sections.find(s => s.id === SECTION_ID);
+        let rows = section.rows.slice(0, this.stories.length);
         rows.splice(2, 0, Object.assign(spocs[0], {pinned: true}));
 
         // Send a content update to the target tab
@@ -440,6 +440,14 @@ this.TopStoriesFeed = class TopStoriesFeed {
     this._prefs.set(pref, JSON.stringify(impressions));
   }
 
+  removeSpocs() {
+    // Quick hack so that SPOCS are removed from all open and preloaded tabs when
+    // they are disabled. The longer term fix should probably be to remove them
+    // in the Reducer.
+    this.uninit();
+    this.init();
+  }
+
   onAction(action) {
     switch (action.type) {
       case at.INIT:
@@ -495,6 +503,12 @@ this.TopStoriesFeed = class TopStoriesFeed {
         }
         break;
       }
+      case at.PREF_CHANGED:
+        // Check if spocs was disabled. Remove them if they were.
+        if (action.data.name === "showSponsored" && !action.data.value) {
+          this.removeSpocs();
+        }
+        break;
     }
   }
 };

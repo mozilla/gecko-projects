@@ -214,7 +214,7 @@ var NetworkHelper = {
    * the content/chrome boundary.
    *
    * @param nsIHttpChannel request
-   * @returns nsIDOMElement|null
+   * @returns Element|null
    *          The top frame element for the given request.
    */
   getTopFrameForRequest: function(request) {
@@ -525,8 +525,7 @@ var NetworkHelper = {
    *                    * "broken": secure connection failed (e.g. expired cert)
    *                    * "secure": the connection was properly secured.
    *          If state == broken:
-   *            - errorMessage: full error message from
-   *                            nsITransportSecurityInfo.
+   *            - errorMessage: error code string.
    *          If state == secure:
    *            - protocolVersion: one of TLSv1, TLSv1.1, TLSv1.2, TLSv1.3.
    *            - cipherSuite: the cipher suite used in this connection.
@@ -710,7 +709,7 @@ var NetworkHelper = {
     } else {
       // The connection failed.
       info.state = "broken";
-      info.errorMessage = securityInfo.errorMessage;
+      info.errorMessage = securityInfo.errorCodeString;
     }
 
     return info;

@@ -21,7 +21,9 @@
 #include "mozilla/BinarySearch.h"
 
 #include "vm/MutexIDs.h"
+#include "wasm/WasmBuiltins.h"
 #include "wasm/WasmCode.h"
+#include "wasm/WasmInstance.h"
 
 using namespace js;
 using namespace wasm;
@@ -246,7 +248,14 @@ wasm::LookupCode(const void* pc, const CodeRange** cr /* = nullptr */)
 }
 
 void
-wasm::ShutDownProcessStaticData()
+wasm::ShutDown()
 {
+    // If there are live runtimes then we are already pretty much leaking the
+    // world, so to avoid spurious assertions (which are valid and valuable when
+    // there are not live JSRuntimes), don't bother releasing anything here.
+    if (JSRuntime::hasLiveRuntimes())
+        return;
+
+    ReleaseBuiltinThunks();
     processCodeSegmentMap.freeAll();
 }

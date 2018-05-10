@@ -19,6 +19,7 @@
 #include "nsIDocShell.h"
 #include "nsIScriptError.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "nsHtml5Highlighter.h"
@@ -35,19 +36,6 @@
 #include "nsJSEnvironment.h"
 
 using namespace mozilla;
-
-int32_t nsHtml5StreamParser::sTimerInitialDelay = 120;
-int32_t nsHtml5StreamParser::sTimerSubsequentDelay = 120;
-
-// static
-void
-nsHtml5StreamParser::InitializeStatics()
-{
-  Preferences::AddIntVarCache(&sTimerInitialDelay,
-                              "html5.flushtimer.initialdelay");
-  Preferences::AddIntVarCache(&sTimerSubsequentDelay,
-                              "html5.flushtimer.subsequentdelay");
-}
 
 /*
  * Note that nsHtml5StreamParser implements cycle collecting AddRef and
@@ -857,7 +845,12 @@ nsHtml5StreamParser::WriteStreamBytes(const uint8_t* aFromSegment,
     bool hadErrors;
     Tie(result, read, written, hadErrors) =
       mUnicodeDecoder->DecodeToUTF16(src, dst, false);
-    mHasHadErrors |= hadErrors;
+    if (hadErrors && !mHasHadErrors) {
+      mHasHadErrors = true;
+      if (mEncoding == UTF_8_ENCODING) {
+        mTreeBuilder->TryToEnableEncodingMenu();
+      }
+    }
     src = src.From(read);
     totalRead += read;
     mLastBuffer->AdvanceEnd(written);
@@ -903,7 +896,7 @@ nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
 {
   MOZ_RELEASE_ASSERT(STREAM_NOT_STARTED == mStreamState,
                      "Got OnStartRequest when the stream had already started.");
-  NS_PRECONDITION(
+  MOZ_ASSERT(
     !mExecutor->HasStarted(),
     "Got OnStartRequest at the wrong stage in the executor life cycle.");
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
@@ -1108,7 +1101,12 @@ nsHtml5StreamParser::DoStopRequest()
     bool hadErrors;
     Tie(result, read, written, hadErrors) =
       mUnicodeDecoder->DecodeToUTF16(src, dst, true);
-    mHasHadErrors |= hadErrors;
+    if (hadErrors && !mHasHadErrors) {
+      mHasHadErrors = true;
+      if (mEncoding == UTF_8_ENCODING) {
+        mTreeBuilder->TryToEnableEncodingMenu();
+      }
+    }
     MOZ_ASSERT(read == 0, "How come an empty span was read form?");
     mLastBuffer->AdvanceEnd(written);
     if (result == kOutputFull) {
@@ -1218,7 +1216,8 @@ nsHtml5StreamParser::DoDataAvailable(const uint8_t* aBuffer, uint32_t aLength)
     mFlushTimer->InitWithNamedFuncCallback(
       nsHtml5StreamParser::TimerCallback,
       static_cast<void*>(this),
-      mFlushTimerEverFired ? sTimerInitialDelay : sTimerSubsequentDelay,
+      mFlushTimerEverFired ? StaticPrefs::html5_flushtimer_initialdelay()
+                           : StaticPrefs::html5_flushtimer_subsequentdelay(),
       nsITimer::TYPE_ONE_SHOT,
       "nsHtml5StreamParser::DoDataAvailable");
   }
@@ -1467,9 +1466,6 @@ nsHtml5StreamParser::ParseAvailableData()
               return;
             }
             mAtEOF = true;
-            if (mEncoding == UTF_8_ENCODING && !mHasHadErrors) {
-              mTreeBuilder->TryToDisableEncodingMenu();
-            }
             if (mCharsetSource < kCharsetFromMetaTag) {
               if (mInitialEncodingWasFromParentFrame) {
                 // Unfortunately, this check doesn't take effect for

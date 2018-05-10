@@ -398,48 +398,6 @@ nsCSPContext::GetEnforcesFrameAncestors(bool *outEnforcesFrameAncestors)
 }
 
 NS_IMETHODIMP
-nsCSPContext::GetReferrerPolicy(uint32_t* outPolicy, bool* outIsSet)
-{
-  *outIsSet = false;
-  *outPolicy = mozilla::net::RP_Unset;
-  nsAutoString refpol;
-  mozilla::net::ReferrerPolicy previousPolicy = mozilla::net::RP_Unset;
-  for (uint32_t i = 0; i < mPolicies.Length(); i++) {
-    mPolicies[i]->getReferrerPolicy(refpol);
-    // only set the referrer policy if not delievered through a CSPRO and
-    // note that and an empty string in refpol means it wasn't set
-    // (that's the default in nsCSPPolicy).
-    if (!mPolicies[i]->getReportOnlyFlag() && !refpol.IsEmpty()) {
-      // Referrer Directive in CSP is no more used and going to be replaced by
-      // Referrer-Policy HTTP header. But we still keep using referrer directive,
-      // and would remove it later.
-      // Referrer Directive specs is not fully compliant with new referrer policy
-      // specs. What we are using here:
-      // - If the value of the referrer directive is invalid, the user agent
-      // should set the referrer policy to no-referrer.
-      // - If there are two policies that specify a referrer policy, then they
-      // must agree or the employed policy is no-referrer.
-      if (!mozilla::net::IsValidReferrerPolicy(refpol)) {
-        *outPolicy = mozilla::net::RP_No_Referrer;
-        *outIsSet = true;
-        return NS_OK;
-      }
-
-      uint32_t currentPolicy = mozilla::net::ReferrerPolicyFromString(refpol);
-      if (*outIsSet && previousPolicy != currentPolicy) {
-        *outPolicy = mozilla::net::RP_No_Referrer;
-        return NS_OK;
-      }
-
-      *outPolicy = currentPolicy;
-      *outIsSet = true;
-    }
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsCSPContext::AppendPolicy(const nsAString& aPolicyString,
                            bool aReportOnly,
                            bool aDeliveredViaMetaTag)
@@ -734,8 +692,8 @@ NS_IMETHODIMP
 nsCSPContext::SetRequestContext(nsIDOMDocument* aDOMDocument,
                                 nsIPrincipal* aPrincipal)
 {
-  NS_PRECONDITION(aDOMDocument || aPrincipal,
-                  "Can't set context without doc or principal");
+  MOZ_ASSERT(aDOMDocument || aPrincipal,
+             "Can't set context without doc or principal");
   NS_ENSURE_ARG(aDOMDocument || aPrincipal);
 
   if (aDOMDocument) {
@@ -897,7 +855,7 @@ StripURIForReporting(nsIURI* aURI,
 
 nsresult
 nsCSPContext::GatherSecurityPolicyViolationEventData(
-  nsISupports* aBlockedContentSource,
+  nsIURI* aBlockedURI,
   nsIURI* aOriginalURI,
   nsAString& aViolatedDirective,
   uint32_t aViolatedPolicyIndex,
@@ -921,23 +879,9 @@ nsCSPContext::GatherSecurityPolicyViolationEventData(
   aViolationEventInit.mReferrer = mReferrer;
 
   // blocked-uri
-  if (aBlockedContentSource) {
+  if (aBlockedURI) {
     nsAutoCString reportBlockedURI;
-    nsCOMPtr<nsIURI> uri = do_QueryInterface(aBlockedContentSource);
-    // could be a string or URI
-    if (uri) {
-      StripURIForReporting(uri, mSelfURI, reportBlockedURI);
-    } else {
-      nsCOMPtr<nsISupportsCString> cstr = do_QueryInterface(aBlockedContentSource);
-      if (cstr) {
-        cstr->GetData(reportBlockedURI);
-      }
-    }
-    if (reportBlockedURI.IsEmpty()) {
-      // this can happen for frame-ancestors violation where the violating
-      // ancestor is cross-origin.
-      NS_WARNING("No blocked URI (null aBlockedContentSource) for CSP violation report.");
-    }
+    StripURIForReporting(aBlockedURI, mSelfURI, reportBlockedURI);
     aViolationEventInit.mBlockedURI = NS_ConvertUTF8toUTF16(reportBlockedURI);
   }
 
@@ -1212,8 +1156,9 @@ nsCSPContext::FireViolationEvent(
       aViolationEventInit);
   event->SetTrusted(true);
 
-  bool rv;
-  return doc->DispatchEvent(event, &rv);
+  ErrorResult rv;
+  doc->DispatchEvent(*event, rv);
+  return rv.StealNSResult();
 }
 
 /**
@@ -1266,8 +1211,10 @@ class CSPReportSenderRunnable final : public Runnable
 
       // 0) prepare violation data
       mozilla::dom::SecurityPolicyViolationEventInit init;
+      // mBlockedContentSource could be a URI or a string.
+      nsCOMPtr<nsIURI> blockedURI = do_QueryInterface(mBlockedContentSource);
       rv = mCSPContext->GatherSecurityPolicyViolationEventData(
-        mBlockedContentSource, mOriginalURI,
+        blockedURI, mOriginalURI,
         mViolatedDirective, mViolatedPolicyIndex,
         mSourceFile, mScriptSample, mLineNum,
         init);
@@ -1285,8 +1232,6 @@ class CSPReportSenderRunnable final : public Runnable
       mCSPContext->SendReports(init, mViolatedPolicyIndex);
 
       // 3) log to console (one per policy violation)
-      // mBlockedContentSource could be a URI or a string.
-      nsCOMPtr<nsIURI> blockedURI = do_QueryInterface(mBlockedContentSource);
       // if mBlockedContentSource is not a URI, it could be a string
       nsCOMPtr<nsISupportsCString> blockedString = do_QueryInterface(mBlockedContentSource);
 
@@ -1383,14 +1328,6 @@ nsCSPContext::AsyncReportViolation(nsISupports* aBlockedContentSource,
                                 aScriptSample,
                                 aLineNum,
                                 this);
-
-  // If the document is currently buffering up CSP violation reports, send the
-  // runnable to it instead of dispatching it immediately.
-  nsCOMPtr<nsIDocument> doc = do_QueryReferent(mLoadingContext);
-  if (doc && doc->ShouldBufferCSPViolations()) {
-    doc->BufferCSPViolation(task);
-    return NS_OK;
-  }
 
   if (XRE_IsContentProcess()) {
     if (mEventTarget) {

@@ -1388,11 +1388,52 @@ GfxInfo::GetGfxDriverInfo()
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_BUG_1359416");
 
     // bug 1419264
-    APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::Windows7,
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows7,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       nsIGfxInfo::FEATURE_ADVANCED_LAYERS, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_GREATER_THAN_OR_EQUAL, V(23,21,13,8813),
+      DRIVER_BETWEEN_INCLUSIVE, V(23,21,13,8569), V(23,21,13,9135),
       "FEATURE_FAILURE_BUG_1419264", "Windows 10");
+
+    // Bug 1447141, for causing device creation crashes.
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorATI), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(Bug1447141),
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_EQUAL, V(15, 201, 2201, 0), "FEATURE_FAILURE_BUG_1447141_1");
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorATI), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(Bug1447141),
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_EQUAL, V(15, 201, 1701, 0), "FEATURE_FAILURE_BUG_1447141_1");
+
+
+    ////////////////////////////////////
+    // FEATURE_WEBRENDER
+
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_UNQUALIFIED_WEBRENDER_WIN_INTEL");
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_UNQUALIFIED_WEBRENDER_WIN_ATI");
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_UNQUALIFIED_WEBRENDER_WIN_AMD");
+
+    // Allow Nvidia on Windows 10
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_UNQUALIFIED_WEBRENDER_NVIDIA_7");
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows8,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_UNQUALIFIED_WEBRENDER_NVIDIA_8");
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows8_1,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_UNQUALIFIED_WEBRENDER_NVIDIA_8_1");
   }
   return *mDriverInfo;
 }
@@ -1411,6 +1452,10 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
   *aStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
   if (aOS)
     *aOS = os;
+
+  if (mShutdownOccurred) {
+    return NS_OK;
+  }
 
   // Don't evaluate special cases if we're checking the downloaded blocklist.
   if (!aDriverInfo.Length()) {

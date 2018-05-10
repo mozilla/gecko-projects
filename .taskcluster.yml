@@ -52,19 +52,25 @@ tasks:
             kind: 'action-callback'
 
       routes:
-        $if: 'tasks_for == "hg-push"'
-        then:
-          - "index.gecko.v2.${repository.project}.latest.firefox.decision"
-          - "index.gecko.v2.${repository.project}.revision.${push.revision}.firefox.decision"
-          - "index.gecko.v2.${repository.project}.pushlog-id.${push.pushlog_id}.decision"
+        $flatten:
           - "tc-treeherder.v2.${repository.project}.${push.revision}.${push.pushlog_id}"
-          - "notify.email.${ownerEmail}.on-failed"
-          - "notify.email.${ownerEmail}.on-exception"
-        else:
-          - "tc-treeherder.v2.${repository.project}.${push.revision}.${push.pushlog_id}"
-          - $if: 'tasks_for == "action"'
-            then: "index.gecko.v2.${repository.project}.pushlog-id.${push.pushlog_id}.actions.${ownTaskId}"
-            else: "index.gecko.v2.${repository.project}.latest.firefox.decision-${cron.job_name}"
+          - $if: 'tasks_for == "hg-push"'
+            then:
+              - "index.gecko.v2.${repository.project}.latest.taskgraph.decision"
+              - "index.gecko.v2.${repository.project}.revision.${push.revision}.taskgraph.decision"
+              - "index.gecko.v2.${repository.project}.pushlog-id.${push.pushlog_id}.decision"
+              - "notify.email.${ownerEmail}.on-failed"
+              - "notify.email.${ownerEmail}.on-exception"
+              # These are the old index routes for the decision task.
+              # They are still here so external tools that referenced them continue to work.
+              - "index.gecko.v2.${repository.project}.latest.firefox.decision"
+              - "index.gecko.v2.${repository.project}.revision.${push.revision}.firefox.decision"
+            else:
+              $if: 'tasks_for == "action"'
+              then: "index.gecko.v2.${repository.project}.pushlog-id.${push.pushlog_id}.actions.${ownTaskId}"
+              else:
+              - "index.gecko.v2.${repository.project}.latest.taskgraph.decision-${cron.job_name}"
+              - "index.gecko.v2.${repository.project}.latest.firefox.decision-${cron.job_name}"
 
       scopes:
         $if: 'tasks_for == "hg-push"'
@@ -106,7 +112,7 @@ tasks:
                 ACTION_PARAMETERS: {$json: {$eval: 'parameters'}}
 
         cache:
-          level-${repository.level}-checkouts-sparse-v1: /builds/worker/checkouts
+          level-${repository.level}-checkouts-sparse-v2: /builds/worker/checkouts
 
         features:
           taskclusterProxy: true
@@ -116,7 +122,7 @@ tasks:
         # exist in tree so we must hard code the hash
         # XXX Changing this will break Chain of Trust without an associated puppet and
         # scriptworker patch!
-        image: 'taskcluster/decision:2.0.0@sha256:4039fd878e5700b326d4a636e28c595c053fbcb53909c1db84ad1f513cf644ef'
+        image: 'taskcluster/decision:2.1.0@sha256:6db3b697d7a3c7aba440d72f04199331b872111cefff57206b8b8b1d53230360'
 
         maxRunTime: 1800
 

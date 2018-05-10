@@ -2,11 +2,19 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 add_task(async function test_duping_local_newer() {
-  let buf = await openMirror("duping_local_newer");
+  let mergeTelemetryEvents = [];
+  let buf = await openMirror("duping_local_newer", {
+    recordTelemetryEvent(object, method, value, extra) {
+      equal(object, "mirror", "Wrong object for telemetry event");
+      if (method == "merge") {
+        mergeTelemetryEvents.push({ value, extra });
+      }
+    },
+  });
   let localModified = new Date();
 
   info("Start with empty local and mirror with merged items");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "menu",
     type: "folder",
     children: ["bookmarkAAA5"],
@@ -51,7 +59,7 @@ add_task(async function test_duping_local_newer() {
   });
 
   info("Add older remote dupes");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "menu",
     type: "folder",
     children: ["bookmarkAAAA", "bookmarkAAA4", "bookmarkAAA5"],
@@ -77,6 +85,13 @@ add_task(async function test_duping_local_newer() {
     remoteTimeSeconds: localModified / 1000,
   });
   deepEqual(await buf.fetchUnmergedGuids(), [], "Should merge all items");
+  deepEqual(mergeTelemetryEvents, [{
+    value: "dupes",
+    extra: { count: "2" },
+  }, {
+    value: "structure",
+    extra: { new: "1" },
+  }], "Should record telemetry with dupe counts");
 
   let menuInfo = await PlacesUtils.bookmarks.fetch(
     PlacesUtils.bookmarks.menuGuid);
@@ -205,7 +220,7 @@ add_task(async function test_duping_remote_newer() {
       }],
     }],
   });
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "menu",
     type: "folder",
     children: ["folderAAAAAA"],
@@ -290,7 +305,7 @@ add_task(async function test_duping_remote_newer() {
   });
 
   info("Make remote changes");
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "menu",
     type: "folder",
     children: ["folderAAAAAA", "folderB11111", "folderA11111",
@@ -540,7 +555,7 @@ add_task(async function test_duping_both() {
   });
 
   info("Add remote dupes");
-  await buf.store([{
+  await storeRecords(buf, [{
     id: "menu",
     type: "folder",
     children: ["folderAAAAAA", "folderDDDDDD", "folderFFFFFF"],
@@ -733,7 +748,7 @@ add_task(async function test_applying_two_empty_folders_doesnt_smush() {
   await PlacesTestUtils.markBookmarksAsSynced();
 
   info("Make remote changes");
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "mobile",
     type: "folder",
     children: ["emptyempty01", "emptyempty02"],
@@ -801,7 +816,7 @@ add_task(async function test_applying_two_empty_folders_matches_only_one() {
   });
 
   info("Make remote changes");
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "mobile",
     type: "folder",
     children: ["emptyempty01", "emptyempty02", "emptyempty03"],
@@ -879,7 +894,7 @@ add_task(async function test_duping_mobile_bookmarks() {
   });
 
   info("Make remote changes");
-  await buf.store(shuffle([{
+  await storeRecords(buf, shuffle([{
     id: "mobile",
     type: "folder",
     children: ["bookmarkAAAA"],

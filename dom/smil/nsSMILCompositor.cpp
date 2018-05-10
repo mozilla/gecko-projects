@@ -55,7 +55,7 @@ nsSMILCompositor::ComposeAttribute(bool& aMightHavePendingStyleUpdates)
   if (!mKey.mElement)
     return;
 
-  // If we might need to resolve base styles, grab a suitable style context
+  // If we might need to resolve base styles, grab a suitable ComputedStyle
   // for initializing our nsISMILAttr with.
   RefPtr<ComputedStyle> baseComputedStyle;
   if (MightNeedBaseStyle()) {
@@ -158,8 +158,7 @@ nsSMILCompositor::GetCSSPropertyToAnimate() const
     nsCSSProps::LookupProperty(nsDependentAtomString(mKey.mAttributeName),
                                CSSEnabledState::eForAllContent);
 
-  if (!nsSMILCSSProperty::IsPropertyAnimatable(propID,
-        mKey.mElement->OwnerDoc()->GetStyleBackendType())) {
+  if (!nsSMILCSSProperty::IsPropertyAnimatable(propID)) {
     return eCSSProperty_UNKNOWN;
   }
 

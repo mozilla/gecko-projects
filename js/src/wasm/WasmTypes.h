@@ -71,7 +71,7 @@ typedef Handle<WasmTableObject*> HandleWasmTableObject;
 typedef MutableHandle<WasmTableObject*> MutableHandleWasmTableObject;
 
 class WasmGlobalObject;
-typedef GCVector<HeapPtr<WasmGlobalObject*>, 8, SystemAllocPolicy> WasmGlobalObjectVector;
+typedef GCVector<WasmGlobalObject*, 0, SystemAllocPolicy> WasmGlobalObjectVector;
 typedef Rooted<WasmGlobalObject*> RootedWasmGlobalObject;
 
 namespace wasm {
@@ -108,6 +108,7 @@ typedef UniquePtr<Bytes> UniqueBytes;
 typedef UniquePtr<const Bytes> UniqueConstBytes;
 typedef Vector<char, 0, SystemAllocPolicy> UTF8Bytes;
 typedef Vector<Instance*, 0, SystemAllocPolicy> InstanceVector;
+typedef Vector<UniqueChars, 0, SystemAllocPolicy> UniqueCharsVector;
 
 // To call Vector::podResizeToFit, a type must specialize mozilla::IsPod
 // which is pretty verbose to do within js::wasm, so factor that process out
@@ -183,9 +184,10 @@ SizeOf(ValType vt)
       case ValType::B16x8:
       case ValType::B32x4:
         return 16;
-      default:
-        MOZ_CRASH("Invalid ValType");
+      case ValType::AnyRef:
+        MOZ_CRASH("unexpected anyref");
     }
+    MOZ_CRASH("Invalid ValType");
 }
 
 static inline bool
@@ -275,19 +277,32 @@ static inline jit::MIRType
 ToMIRType(ValType vt)
 {
     switch (vt) {
-      case ValType::I32: return jit::MIRType::Int32;
-      case ValType::I64: return jit::MIRType::Int64;
-      case ValType::F32: return jit::MIRType::Float32;
-      case ValType::F64: return jit::MIRType::Double;
-      case ValType::I8x16: return jit::MIRType::Int8x16;
-      case ValType::I16x8: return jit::MIRType::Int16x8;
-      case ValType::I32x4: return jit::MIRType::Int32x4;
-      case ValType::F32x4: return jit::MIRType::Float32x4;
-      case ValType::B8x16: return jit::MIRType::Bool8x16;
-      case ValType::B16x8: return jit::MIRType::Bool16x8;
-      case ValType::B32x4: return jit::MIRType::Bool32x4;
+      case ValType::I32:    return jit::MIRType::Int32;
+      case ValType::I64:    return jit::MIRType::Int64;
+      case ValType::F32:    return jit::MIRType::Float32;
+      case ValType::F64:    return jit::MIRType::Double;
+      case ValType::AnyRef: return jit::MIRType::Pointer;
+      case ValType::I8x16:  return jit::MIRType::Int8x16;
+      case ValType::I16x8:  return jit::MIRType::Int16x8;
+      case ValType::I32x4:  return jit::MIRType::Int32x4;
+      case ValType::F32x4:  return jit::MIRType::Float32x4;
+      case ValType::B8x16:  return jit::MIRType::Bool8x16;
+      case ValType::B16x8:  return jit::MIRType::Bool16x8;
+      case ValType::B32x4:  return jit::MIRType::Bool32x4;
     }
     MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("bad type");
+}
+
+static inline bool
+IsRefType(ValType vt)
+{
+    return vt == ValType::AnyRef;
+}
+
+static inline bool
+IsNumberType(ValType vt)
+{
+    return !IsRefType(vt);
 }
 
 // The ExprType enum represents the type of a WebAssembly expression or return
@@ -297,22 +312,23 @@ ToMIRType(ValType vt)
 
 enum class ExprType
 {
-    Void  = uint8_t(TypeCode::BlockVoid),
+    Void   = uint8_t(TypeCode::BlockVoid),
 
-    I32   = uint8_t(TypeCode::I32),
-    I64   = uint8_t(TypeCode::I64),
-    F32   = uint8_t(TypeCode::F32),
-    F64   = uint8_t(TypeCode::F64),
+    I32    = uint8_t(TypeCode::I32),
+    I64    = uint8_t(TypeCode::I64),
+    F32    = uint8_t(TypeCode::F32),
+    F64    = uint8_t(TypeCode::F64),
+    AnyRef = uint8_t(TypeCode::AnyRef),
 
-    I8x16 = uint8_t(TypeCode::I8x16),
-    I16x8 = uint8_t(TypeCode::I16x8),
-    I32x4 = uint8_t(TypeCode::I32x4),
-    F32x4 = uint8_t(TypeCode::F32x4),
-    B8x16 = uint8_t(TypeCode::B8x16),
-    B16x8 = uint8_t(TypeCode::B16x8),
-    B32x4 = uint8_t(TypeCode::B32x4),
+    I8x16  = uint8_t(TypeCode::I8x16),
+    I16x8  = uint8_t(TypeCode::I16x8),
+    I32x4  = uint8_t(TypeCode::I32x4),
+    F32x4  = uint8_t(TypeCode::F32x4),
+    B8x16  = uint8_t(TypeCode::B8x16),
+    B16x8  = uint8_t(TypeCode::B16x8),
+    B32x4  = uint8_t(TypeCode::B32x4),
 
-    Limit = uint8_t(TypeCode::Limit)
+    Limit  = uint8_t(TypeCode::Limit)
 };
 
 static inline bool
@@ -350,18 +366,19 @@ static inline const char*
 ToCString(ExprType type)
 {
     switch (type) {
-      case ExprType::Void:  return "void";
-      case ExprType::I32:   return "i32";
-      case ExprType::I64:   return "i64";
-      case ExprType::F32:   return "f32";
-      case ExprType::F64:   return "f64";
-      case ExprType::I8x16: return "i8x16";
-      case ExprType::I16x8: return "i16x8";
-      case ExprType::I32x4: return "i32x4";
-      case ExprType::F32x4: return "f32x4";
-      case ExprType::B8x16: return "b8x16";
-      case ExprType::B16x8: return "b16x8";
-      case ExprType::B32x4: return "b32x4";
+      case ExprType::Void:    return "void";
+      case ExprType::I32:     return "i32";
+      case ExprType::I64:     return "i64";
+      case ExprType::F32:     return "f32";
+      case ExprType::F64:     return "f64";
+      case ExprType::AnyRef:  return "anyref";
+      case ExprType::I8x16:   return "i8x16";
+      case ExprType::I16x8:   return "i16x8";
+      case ExprType::I32x4:   return "i32x4";
+      case ExprType::F32x4:   return "f32x4";
+      case ExprType::B8x16:   return "b8x16";
+      case ExprType::B16x8:   return "b16x8";
+      case ExprType::B32x4:   return "b32x4";
       case ExprType::Limit:;
     }
     MOZ_CRASH("bad expression type");
@@ -450,6 +467,12 @@ enum class Shareable
     True
 };
 
+enum class HasGcTypes
+{
+    False,
+    True
+};
+
 // The Val class represents a single WebAssembly value of a given value type,
 // mostly for the purpose of numeric literals and initializers. A Val does not
 // directly map to a JS value since there is not (currently) a precise
@@ -469,7 +492,6 @@ class Val
         I16x8 i16x8_;
         I32x4 i32x4_;
         F32x4 f32x4_;
-        U() {}
     } u;
 
   public:
@@ -569,8 +591,17 @@ class Sig
     bool hasI64ArgOrRet() const {
         if (ret() == ExprType::I64)
             return true;
-        for (ValType a : args()) {
-            if (a == ValType::I64)
+        for (ValType arg : args()) {
+            if (arg == ValType::I64)
+                return true;
+        }
+        return false;
+    }
+    bool temporarilyUnsupportedAnyRef() const {
+        if (ret() == ExprType::AnyRef)
+            return true;
+        for (ValType arg : args()) {
+            if (arg == ValType::AnyRef)
                 return true;
         }
         return false;
@@ -806,7 +837,11 @@ class GlobalDesc
     //
     // We don't want to indirect unless we must, so only mutable, exposed
     // globals are indirected - in all other cases we copy values into and out
-    // of them module.
+    // of their module.
+    //
+    // Note that isIndirect() isn't equivalent to getting a WasmGlobalObject:
+    // an immutable exported global will still get an object, but will not be
+    // indirect.
     bool isIndirect() const { return isMutable() && isWasm() && (isImport() || isExport()); }
 
     ValType type() const {
@@ -991,15 +1026,17 @@ enum class Trap
 // the first byte of the instruction that triggered the trap / did the call and
 // should ultimately derive from OpIter::bytecodeOffset.
 
-struct BytecodeOffset
+class BytecodeOffset
 {
     static const uint32_t INVALID = -1;
-    uint32_t offset;
+    uint32_t offset_;
 
-    BytecodeOffset() : offset(INVALID) {}
-    explicit BytecodeOffset(uint32_t offset) : offset(offset) {}
+  public:
+    BytecodeOffset() : offset_(INVALID) {}
+    explicit BytecodeOffset(uint32_t offset) : offset_(offset) {}
 
-    bool isValid() const { return offset != INVALID; }
+    bool isValid() const { return offset_ != INVALID; }
+    uint32_t offset() const { MOZ_ASSERT(isValid()); return offset_; }
 };
 
 // A TrapSite (in the TrapSiteVector for a given Trap code) represents a wasm
@@ -1110,7 +1147,6 @@ class CodeRange
         ImportJitExit,     // fast-path calling from wasm into jit code
         BuiltinThunk,      // fast-path calling from wasm into a C++ native
         TrapExit,          // calls C++ to report and jumps to throw stub
-        OldTrapExit,       // calls C++ to report and jumps to throw stub
         DebugTrap,         // calls C++ to handle debug event
         FarJumpIsland,     // inserted to connect otherwise out-of-range insns
         OutOfBoundsExit,   // stub jumped to by non-standard asm.js SIMD/Atomics
@@ -1150,7 +1186,6 @@ class CodeRange
     CodeRange(Kind kind, CallableOffsets offsets);
     CodeRange(Kind kind, uint32_t funcIndex, CallableOffsets);
     CodeRange(uint32_t funcIndex, JitExitOffsets offsets);
-    CodeRange(Trap trap, CallableOffsets offsets);
     CodeRange(uint32_t funcIndex, uint32_t lineOrBytecode, FuncOffsets offsets);
 
     void offsetBy(uint32_t offset) {
@@ -1188,7 +1223,7 @@ class CodeRange
         return kind() == ImportJitExit;
     }
     bool isTrapExit() const {
-        return kind() == OldTrapExit || kind() == TrapExit;
+        return kind() == TrapExit;
     }
     bool isDebugTrap() const {
         return kind() == DebugTrap;
@@ -1202,7 +1237,7 @@ class CodeRange
     // the return instruction to calculate the frame pointer.
 
     bool hasReturn() const {
-        return isFunction() || isImportExit() || kind() == OldTrapExit || isDebugTrap();
+        return isFunction() || isImportExit() || isDebugTrap();
     }
     uint32_t ret() const {
         MOZ_ASSERT(hasReturn());
@@ -1304,7 +1339,6 @@ class CallSiteDesc
         Func,       // pc-relative call to a specific function
         Dynamic,    // dynamic callee called via register
         Symbolic,   // call to a single symbolic callee
-        OldTrapExit,// call to a trap exit (being removed)
         EnterFrame, // call to a enter frame handler
         LeaveFrame, // call to a leave frame handler
         Breakpoint  // call to instruction breakpoint
@@ -1427,7 +1461,6 @@ enum class SymbolicAddress
     HandleDebugTrap,
     HandleThrow,
     HandleTrap,
-    OldReportTrap,
     ReportOutOfBounds,
     ReportUnalignedAccess,
     ReportInt64JSCall,
@@ -1435,6 +1468,7 @@ enum class SymbolicAddress
     CallImport_I32,
     CallImport_I64,
     CallImport_F64,
+    CallImport_Ref,
     CoerceInPlace_ToInt32,
     CoerceInPlace_ToNumber,
     CoerceInPlace_JitEntry,
@@ -1455,6 +1489,8 @@ enum class SymbolicAddress
     WaitI32,
     WaitI64,
     Wake,
+    MemCopy,
+    MemFill,
 #if defined(JS_CODEGEN_MIPS32)
     js_jit_gAtomic64Lock,
 #endif
@@ -1869,46 +1905,6 @@ ComputeMappedSize(uint32_t maxSize);
 
 #endif // WASM_HUGE_MEMORY
 
-// Metadata for memory accesses. On WASM_HUGE_MEMORY platforms, only
-// (non-SIMD/Atomic) asm.js loads and stores create a MemoryAccess so that the
-// signal handler can implement the semantically-correct wraparound logic; the
-// rest simply redirect to the out-of-bounds stub in the signal handler. On x86,
-// the base address of memory is baked into each memory access instruction so
-// the MemoryAccess records the location of each for patching. On all other
-// platforms, no MemoryAccess is created.
-
-class MemoryAccess
-{
-    uint32_t insnOffset_;
-    uint32_t trapOutOfLineOffset_;
-
-  public:
-    MemoryAccess() = default;
-    explicit MemoryAccess(uint32_t insnOffset, uint32_t trapOutOfLineOffset = UINT32_MAX)
-      : insnOffset_(insnOffset),
-        trapOutOfLineOffset_(trapOutOfLineOffset)
-    {}
-
-    uint32_t insnOffset() const {
-        return insnOffset_;
-    }
-    bool hasTrapOutOfLineCode() const {
-        return trapOutOfLineOffset_ != UINT32_MAX;
-    }
-    uint8_t* trapOutOfLineCode(uint8_t* code) const {
-        MOZ_ASSERT(hasTrapOutOfLineCode());
-        return code + trapOutOfLineOffset_;
-    }
-
-    void offsetBy(uint32_t delta) {
-        insnOffset_ += delta;
-        if (hasTrapOutOfLineCode())
-            trapOutOfLineOffset_ += delta;
-    }
-};
-
-WASM_DECLARE_POD_VECTOR(MemoryAccess, MemoryAccessVector)
-
 // wasm::Frame represents the bytes pushed by the call instruction and the fixed
 // prologue generated by wasm::GenerateCallablePrologue.
 //
@@ -2049,6 +2045,7 @@ class DebugFrame
 
     bool hasCachedSavedFrame() const { return hasCachedSavedFrame_; }
     void setHasCachedSavedFrame() { hasCachedSavedFrame_ = true; }
+    void clearHasCachedSavedFrame() { hasCachedSavedFrame_ = false; }
 
     // DebugFrame is accessed directly by JIT code.
 

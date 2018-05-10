@@ -50,7 +50,6 @@
 #include "mozilla/NotNull.h"
 #include "mozilla/SegmentedVector.h"
 #include "mozilla/ServoBindingTypes.h"
-#include "mozilla/StyleBackendType.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
@@ -95,8 +94,6 @@ class nsIDocShellTreeItem;
 class nsIDocumentEncoder;
 class nsIDocumentObserver;
 class nsIDOMDocument;
-class nsIDOMElement;
-class nsIDOMNodeList;
 class nsIHTMLCollection;
 class nsILayoutHistoryState;
 class nsILoadContext;
@@ -121,7 +118,6 @@ class nsWindowSizes;
 class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
-struct nsCSSSelectorList;
 
 namespace mozilla {
 class AbstractThread;
@@ -131,7 +127,7 @@ class ErrorResult;
 class EventStates;
 class EventListenerManager;
 class PendingAnimationTracker;
-class StyleSetHandle;
+class ServoStyleSet;
 template<typename> class OwningNonNull;
 struct URLExtraData;
 
@@ -1009,14 +1005,6 @@ public:
   }
 
   /**
-  * Set referrer policy CSP flag for this document.
-  */
-  void SetHasReferrerPolicyCSP(bool aHasReferrerPolicyCSP)
-  {
-    mHasReferrerPolicyCSP = aHasReferrerPolicyCSP;
-  }
-
-  /**
    * Set the mixed display content blocked flag for this document.
    */
   void SetHasMixedDisplayContentBlocked(bool aHasMixedDisplayContentBlocked)
@@ -1112,60 +1100,12 @@ public:
   }
 
   /**
-   * After calling this function, any CSP violation reports will be buffered up
-   * by the document (by calling BufferCSPViolation) instead of being sent
-   * immediately.
-   *
-   * This facility is used by the user font cache, which wants to pre-emptively
-   * check whether a given font load would violate CSP directives, and so
-   * shouldn't immediately send the report.
-   */
-  void StartBufferingCSPViolations()
-  {
-    MOZ_ASSERT(!mBufferingCSPViolations);
-    mBufferingCSPViolations = true;
-  }
-
-  /**
-   * Stops buffering CSP violation reports, and stores any buffered reports in
-   * aResult.
-   */
-  void StopBufferingCSPViolations(nsTArray<nsCOMPtr<nsIRunnable>>& aResult)
-  {
-    MOZ_ASSERT(mBufferingCSPViolations);
-    mBufferingCSPViolations = false;
-
-    aResult.SwapElements(mBufferedCSPViolations);
-    mBufferedCSPViolations.Clear();
-  }
-
-  /**
-   * Returns whether we are currently buffering CSP violation reports.
-   */
-  bool ShouldBufferCSPViolations() const
-  {
-    return mBufferingCSPViolations;
-  }
-
-  /**
-   * Called when a CSP violation is encountered that would generate a report
-   * while buffering is enabled.
-   */
-  void BufferCSPViolation(nsIRunnable* aReportingRunnable)
-  {
-    MOZ_ASSERT(mBufferingCSPViolations);
-
-    // Dropping the CSP violation report seems preferable to OOMing.
-    mBufferedCSPViolations.AppendElement(aReportingRunnable, mozilla::fallible);
-  }
-
-  /**
    * Called when the document was decoded as UTF-8 and decoder encountered no
    * errors.
    */
-  void DisableEncodingMenu()
+  void EnableEncodingMenu()
   {
-    mEncodingMenuDisabled = true;
+    mEncodingMenuDisabled = false;
   }
 
   /**
@@ -1182,9 +1122,10 @@ public:
    * method is responsible for calling BeginObservingDocument() on the
    * presshell if the presshell should observe document mutations.
    */
-  already_AddRefed<nsIPresShell> CreateShell(nsPresContext* aContext,
-                                             nsViewManager* aViewManager,
-                                             mozilla::StyleSetHandle aStyleSet);
+  already_AddRefed<nsIPresShell> CreateShell(
+    nsPresContext* aContext,
+    nsViewManager* aViewManager,
+    mozilla::UniquePtr<mozilla::ServoStyleSet> aStyleSet);
   void DeleteShell();
 
   nsIPresShell* GetShell() const
@@ -1500,112 +1441,46 @@ public:
   class SelectorCache final
     : public nsExpirationTracker<SelectorCacheKey, 4>
   {
-    public:
-      class SelectorList
-      {
-      public:
-        SelectorList()
-          : mIsServo(false)
-          , mGecko(nullptr)
-        {}
+  public:
+    using SelectorList = mozilla::UniquePtr<RawServoSelectorList>;
 
-        SelectorList(SelectorList&& aOther)
-        {
-          *this = mozilla::Move(aOther);
-        }
+    explicit SelectorCache(nsIEventTarget* aEventTarget);
 
-        SelectorList& operator=(SelectorList&& aOther)
-        {
-          Reset();
-          mIsServo = aOther.mIsServo;
-          if (mIsServo) {
-            mServo = aOther.mServo;
-            aOther.mServo = nullptr;
-          } else {
-            MOZ_CRASH("old style system disabled");
-          }
-          return *this;
-        }
+    void CacheList(const nsAString& aSelector, SelectorList aSelectorList)
+    {
+      MOZ_ASSERT(NS_IsMainThread());
+      SelectorCacheKey* key = new SelectorCacheKey(aSelector);
+      mTable.Put(key->mKey, Move(aSelectorList));
+      AddObject(key);
+    }
 
-        SelectorList(const SelectorList& aOther) = delete;
+    void NotifyExpired(SelectorCacheKey* aSelector) final;
 
-        explicit SelectorList(mozilla::UniquePtr<RawServoSelectorList>&& aList)
-          : mIsServo(true)
-          , mServo(aList.release())
-        {}
+    // We do not call MarkUsed because it would just slow down lookups and
+    // because we're OK expiring things after a few seconds even if they're
+    // being used.  Returns whether we actually had an entry for aSelector.
+    //
+    // If we have an entry and the selector list returned has a null
+    // RawServoSelectorList*, that indicates that aSelector has already been
+    // parsed and is not a syntactically valid selector.
+    SelectorList* GetList(const nsAString& aSelector)
+    {
+      return mTable.GetValue(aSelector);
+    }
 
+    ~SelectorCache();
 
-        ~SelectorList() {
-          Reset();
-        }
-
-        bool IsServo() const { return mIsServo; }
-        bool IsGecko() const { return !IsServo(); }
-
-        explicit operator bool() const
-        {
-          return IsServo() ? !!AsServo() : !!AsGecko();
-        }
-
-        nsCSSSelectorList* AsGecko() const
-        {
-          MOZ_ASSERT(IsGecko());
-          return mGecko;
-        }
-
-        RawServoSelectorList* AsServo() const
-        {
-          MOZ_ASSERT(IsServo());
-          return mServo;
-        }
-
-      private:
-        void Reset();
-
-        bool mIsServo;
-
-        union {
-          nsCSSSelectorList* mGecko;
-          RawServoSelectorList* mServo;
-        };
-      };
-
-      explicit SelectorCache(nsIEventTarget* aEventTarget);
-
-      // CacheList takes ownership of aSelectorList.
-      void CacheList(const nsAString& aSelector,
-                     mozilla::UniquePtr<nsCSSSelectorList>&& aSelectorList);
-      void CacheList(const nsAString& aSelector,
-                     mozilla::UniquePtr<RawServoSelectorList>&& aSelectorList);
-
-      virtual void NotifyExpired(SelectorCacheKey* aSelector) override;
-
-      // We do not call MarkUsed because it would just slow down lookups and
-      // because we're OK expiring things after a few seconds even if they're
-      // being used.  Returns whether we actually had an entry for aSelector.
-      //
-      // If we have an entry and the selector list returned has a null
-      // nsCSSSelectorList*/RawServoSelectorList*, that indicates that aSelector
-      // has already been parsed and is not a syntactically valid selector.
-      SelectorList* GetList(const nsAString& aSelector)
-      {
-        return mTable.GetValue(aSelector);
-      }
-
-      ~SelectorCache();
-
-    private:
-      nsDataHashtable<nsStringHashKey, SelectorList> mTable;
+  private:
+    nsDataHashtable<nsStringHashKey, SelectorList> mTable;
   };
 
-  SelectorCache& GetSelectorCache(mozilla::StyleBackendType aBackendType) {
-    mozilla::UniquePtr<SelectorCache>& cache =
-      aBackendType == mozilla::StyleBackendType::Servo
-        ? mServoSelectorCache : mGeckoSelectorCache;
-    if (!cache) {
-      cache.reset(new SelectorCache(EventTargetFor(mozilla::TaskCategory::Other)));
+  SelectorCache& GetSelectorCache() {
+    if (!mSelectorCache) {
+      mSelectorCache =
+        mozilla::MakeUnique<SelectorCache>(
+          EventTargetFor(mozilla::TaskCategory::Other));
     }
-    return *cache;
+    return *mSelectorCache;
   }
   // Get the root <html> element, or return null if there isn't one (e.g.
   // if the root isn't <html>)
@@ -1735,16 +1610,6 @@ public:
    */
   mozilla::css::Loader* CSSLoader() const {
     return mCSSLoader;
-  }
-
-  mozilla::StyleBackendType GetStyleBackendType() const
-  {
-    return mozilla::StyleBackendType::Servo;
-  }
-
-  bool IsStyledByServo() const
-  {
-    return GetStyleBackendType() == mozilla::StyleBackendType::Servo;
   }
 
   /**
@@ -1916,7 +1781,7 @@ public:
    * aFrameElement is the frame element which contains the child-process
    * fullscreen document.
    */
-  nsresult RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement);
+  nsresult RemoteFrameFullscreenChanged(mozilla::dom::Element* aFrameElement);
 
   /**
    * Called when a frame in a remote child document has rolled back fullscreen
@@ -2492,7 +2357,7 @@ public:
                                float aBottomSize, float aLeftSize,
                                bool aIgnoreRootScrollFrame,
                                bool aFlushLayout,
-                               nsIDOMNodeList** aReturn);
+                               nsINodeList** aReturn);
 
   /**
    * See FlushSkinBindings on nsBindingManager
@@ -3092,6 +2957,33 @@ public:
     mResponsiveContent.RemoveEntry(aContent);
   }
 
+  void AddComposedDocShadowRoot(mozilla::dom::ShadowRoot& aShadowRoot)
+  {
+    MOZ_ASSERT(IsShadowDOMEnabled());
+    mComposedShadowRoots.PutEntry(&aShadowRoot);
+  }
+
+  using ShadowRootSet = nsTHashtable<nsPtrHashKey<mozilla::dom::ShadowRoot>>;
+
+  void RemoveComposedDocShadowRoot(mozilla::dom::ShadowRoot& aShadowRoot)
+  {
+    MOZ_ASSERT(IsShadowDOMEnabled());
+    mComposedShadowRoots.RemoveEntry(&aShadowRoot);
+  }
+
+  // If you're considering using this, you probably want to use
+  // ShadowRoot::IsComposedDocParticipant instead. This is just for
+  // sanity-checking.
+  bool IsComposedDocShadowRoot(mozilla::dom::ShadowRoot& aShadowRoot)
+  {
+    return mComposedShadowRoots.Contains(&aShadowRoot);
+  }
+
+  const ShadowRootSet& ComposedShadowRoots() const
+  {
+    return mComposedShadowRoots;
+  }
+
   // Notifies any responsive content added by AddResponsiveContent upon media
   // features values changing.
   void NotifyMediaFeatureValuesChanged();
@@ -3288,8 +3180,6 @@ public:
     CreateAttributeNS(const nsAString& aNamespaceURI,
                       const nsAString& aQualifiedName,
                       mozilla::ErrorResult& rv);
-  void SetAllowUnsafeHTML(bool aAllow) { mAllowUnsafeHTML = aAllow; }
-  bool AllowUnsafeHTML() const;
   void GetInputEncoding(nsAString& aInputEncoding) const;
   already_AddRefed<mozilla::dom::Location> GetLocation() const;
   void GetReferrer(nsAString& aReferrer) const;
@@ -3366,8 +3256,21 @@ public:
 #endif
   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
   void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
-  void GetLastStyleSheetSet(nsAString& aSheetSet);
-  void GetPreferredStyleSheetSet(nsAString& aSheetSet);
+  void GetLastStyleSheetSet(nsAString& aSheetSet)
+  {
+    aSheetSet = mLastStyleSheetSet;
+  }
+  const nsString& GetCurrentStyleSheetSet() const
+  {
+    return mLastStyleSheetSet.IsEmpty()
+      ? mPreferredStyleSheetSet
+      : mLastStyleSheetSet;
+  }
+  void SetPreferredStyleSheetSet(const nsAString&);
+  void GetPreferredStyleSheetSet(nsAString& aSheetSet)
+  {
+    aSheetSet = mPreferredStyleSheetSet;
+  }
   mozilla::dom::DOMStringList* StyleSheetSets();
   void EnableStyleSheetsForSet(const nsAString& aSheetSet);
 
@@ -3448,9 +3351,23 @@ public:
   nsIHTMLCollection* Children();
   uint32_t ChildElementCount();
 
-  virtual nsHTMLDocument* AsHTMLDocument() { return nullptr; }
-  virtual mozilla::dom::SVGDocument* AsSVGDocument() { return nullptr; }
-  virtual mozilla::dom::XULDocument* AsXULDocument() { return nullptr; }
+  /**
+   * Asserts IsHTMLOrXHTML, and can't return null.
+   * Defined inline in nsHTMLDocument.h
+   */
+  inline nsHTMLDocument* AsHTMLDocument();
+
+  /**
+   * Asserts IsSVGDocument, and can't return null.
+   * Defined inline in SVGDocument.h
+   */
+  inline mozilla::dom::SVGDocument* AsSVGDocument();
+
+  /**
+   * Asserts IsXULDocument, and can't return null.
+   * Defined inline in XULDocument.h
+   */
+  inline mozilla::dom::XULDocument* AsXULDocument();
 
   /*
    * Given a node, get a weak reference to it and append that reference to
@@ -3742,7 +3659,7 @@ protected:
       const nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets,
       mozilla::SheetType aType);
   void ResetStylesheetsToURI(nsIURI* aURI);
-  void FillStyleSet(mozilla::StyleSetHandle aStyleSet);
+  void FillStyleSet(mozilla::ServoStyleSet* aStyleSet);
   void AddStyleSheetToStyleSets(mozilla::StyleSheet* aSheet);
   void RemoveStyleSheetFromStyleSets(mozilla::StyleSheet* aSheet);
   void NotifyStyleSheetAdded(mozilla::StyleSheet* aSheet, bool aDocumentSheet);
@@ -3760,10 +3677,7 @@ private:
 
   // Lazy-initialization to have mDocGroup initialized in prior to the
   // SelectorCaches.
-  // FIXME(emilio): We can use a single cache when all CSSOM methods are
-  // implemented for the Servo backend.
-  mozilla::UniquePtr<SelectorCache> mServoSelectorCache;
-  mozilla::UniquePtr<SelectorCache> mGeckoSelectorCache;
+  mozilla::UniquePtr<SelectorCache> mSelectorCache;
 
 protected:
   friend class nsDocumentOnStack;
@@ -3888,6 +3802,11 @@ protected:
   // Tracking for images in the document.
   RefPtr<mozilla::dom::ImageTracker> mImageTracker;
 
+  // A hashtable of ShadowRoots belonging to the composed doc.
+  //
+  // See ShadowRoot::SetIsComposedDocParticipant.
+  ShadowRootSet mComposedShadowRoots;
+
   // The set of all object, embed, video/audio elements or
   // nsIObjectLoadingContent or nsIDocumentActivity for which this is the owner
   // document. (They might not be in the document.)
@@ -3986,9 +3905,6 @@ protected:
   // OnPageHide happens, and becomes true again when OnPageShow happens.  So
   // it's false only when we're in bfcache or unloaded.
   bool mVisible : 1;
-
-  // True if a document load has a CSP with referrer attached.
-  bool mHasReferrerPolicyCSP : 1;
 
   // True if our content viewer has been removed from the docshell
   // (it may still be displayed, but in zombie state). Form control data
@@ -4107,10 +4023,6 @@ protected:
   // True if we have called BeginLoad and are expecting a paired EndLoad call.
   bool mDidCallBeginLoad : 1;
 
-  // True if any CSP violation reports for this doucment will be buffered in
-  // mBufferedCSPViolations instead of being sent immediately.
-  bool mBufferingCSPViolations : 1;
-
   // True if the document is allowed to use PaymentRequest.
   bool mAllowPaymentRequest : 1;
 
@@ -4123,10 +4035,6 @@ protected:
 
   // True if this document is for an SVG-in-OpenType font.
   bool mIsSVGGlyphsDocument : 1;
-
-  // True if unsafe HTML fragments should be allowed in chrome-privileged
-  // documents.
-  bool mAllowUnsafeHTML : 1;
 
   // True if the document is being destroyed.
   bool mInDestructor: 1;
@@ -4269,6 +4177,8 @@ protected:
 private:
   nsCString mContentType;
 protected:
+  // For document.write() we may need a different content type than mContentType.
+  nsCString mContentTypeForWriteCalls;
 
   // The document's security info
   nsCOMPtr<nsISupports> mSecurityInfo;
@@ -4394,10 +4304,6 @@ protected:
   // calling NoteScriptTrackingStatus().  Currently we assume that a URL not
   // existing in the set means the corresponding script isn't a tracking script.
   nsTHashtable<nsCStringHashKey> mTrackingScripts;
-
-  // CSP violation reports that have been buffered up due to a call to
-  // StartBufferingCSPViolations.
-  nsTArray<nsCOMPtr<nsIRunnable>> mBufferedCSPViolations;
 
   // List of ancestor principals.  This is set at the point a document
   // is connected to a docshell and not mutated thereafter.
@@ -4533,6 +4439,8 @@ protected:
 
   // Member to store out last-selected stylesheet set.
   nsString mLastStyleSheetSet;
+  nsString mPreferredStyleSheetSet;
+
   RefPtr<nsDOMStyleSheetSetList> mStyleSheetSetList;
 
   // We lazily calculate declaration blocks for SVG elements with mapped
@@ -4713,6 +4621,20 @@ nsINode::GetParentObject() const
     // don't use XBL scopes.
   p.mUseXBLScope = IsInAnonymousSubtree() && !IsAnonymousContentInSVGUseSubtree();
   return p;
+}
+
+inline nsIDocument*
+nsINode::AsDocument()
+{
+  MOZ_ASSERT(IsDocument());
+  return static_cast<nsIDocument*>(this);
+}
+
+inline const nsIDocument*
+nsINode::AsDocument() const
+{
+  MOZ_ASSERT(IsDocument());
+  return static_cast<const nsIDocument*>(this);
 }
 
 #endif /* nsIDocument_h___ */

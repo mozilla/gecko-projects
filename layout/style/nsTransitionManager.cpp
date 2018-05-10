@@ -34,7 +34,6 @@
 #include "nsRFPService.h"
 #include "nsStyleChangeList.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "nsDOMMutationObserver.h"
 
 using mozilla::TimeStamp;
@@ -80,7 +79,7 @@ ElementPropertyTransition::UpdateStartValueFromReplacedTransition()
     return;
   }
   MOZ_ASSERT(nsCSSProps::PropHasFlags(TransitionProperty(),
-                                      CSS_PROPERTY_CAN_ANIMATE_ON_COMPOSITOR),
+                                      CSSPropFlags::CanAnimateOnCompositor),
              "The transition property should be able to be run on the "
              "compositor");
   MOZ_ASSERT(mTarget && mTarget->mElement->OwnerDoc(),
@@ -113,18 +112,14 @@ ElementPropertyTransition::UpdateStartValueFromReplacedTransition()
     const AnimationValue& replacedFrom = mReplacedTransition->mFromValue;
     const AnimationValue& replacedTo = mReplacedTransition->mToValue;
     AnimationValue startValue;
-    if (mDocument->IsStyledByServo()) {
-      startValue.mServo =
-        Servo_AnimationValues_Interpolate(replacedFrom.mServo,
-                                          replacedTo.mServo,
-                                          valuePosition).Consume();
-      if (startValue.mServo) {
-        mKeyframes[0].mPropertyValues[0].mServoDeclarationBlock =
-          Servo_AnimationValue_Uncompute(startValue.mServo).Consume();
-        mProperties[0].mSegments[0].mFromValue = Move(startValue);
-      }
-    } else {
-      MOZ_CRASH("old style system disabled");
+    startValue.mServo =
+      Servo_AnimationValues_Interpolate(replacedFrom.mServo,
+                                        replacedTo.mServo,
+                                        valuePosition).Consume();
+    if (startValue.mServo) {
+      mKeyframes[0].mPropertyValues[0].mServoDeclarationBlock =
+        Servo_AnimationValue_Uncompute(startValue.mServo).Consume();
+      mProperties[0].mSegments[0].mFromValue = Move(startValue);
     }
   }
 
@@ -151,7 +146,7 @@ CSSTransition::GetTransitionProperty(nsString& aRetVal) const
 AnimationPlayState
 CSSTransition::PlayStateFromJS() const
 {
-  FlushStyle();
+  FlushUnanimatedStyle();
   return Animation::PlayStateFromJS();
 }
 
@@ -163,7 +158,7 @@ CSSTransition::PendingFromJS() const
   // that the transition will be canceled, we need to report false here.
   // Hence we need to flush, but only when we're pending.
   if (Pending()) {
-    FlushStyle();
+    FlushUnanimatedStyle();
   }
   return Animation::PendingFromJS();
 }
@@ -171,7 +166,7 @@ CSSTransition::PendingFromJS() const
 void
 CSSTransition::PlayFromJS(ErrorResult& aRv)
 {
-  FlushStyle();
+  FlushUnanimatedStyle();
   Animation::PlayFromJS(aRv);
 }
 
@@ -416,7 +411,7 @@ CSSTransition::SetEffectFromStyle(dom::AnimationEffectReadOnly* aEffect)
 
 static inline bool
 ExtractNonDiscreteComputedValue(nsCSSPropertyID aProperty,
-                                const ComputedStyle* aComputedStyle,
+                                const ComputedStyle& aComputedStyle,
                                 AnimationValue& aAnimationValue)
 {
   if (Servo_Property_IsDiscreteAnimatable(aProperty) &&
@@ -425,7 +420,7 @@ ExtractNonDiscreteComputedValue(nsCSSPropertyID aProperty,
   }
 
   aAnimationValue.mServo =
-    Servo_ComputedValues_ExtractAnimationValue(aComputedStyle,
+    Servo_ComputedValues_ExtractAnimationValue(&aComputedStyle,
                                                aProperty).Consume();
   return !!aAnimationValue.mServo;
 }
@@ -435,8 +430,8 @@ bool
 nsTransitionManager::UpdateTransitions(
   dom::Element *aElement,
   CSSPseudoElementType aPseudoType,
-  const ComputedStyle* aOldStyle,
-  const ComputedStyle* aNewStyle)
+  const ComputedStyle& aOldStyle,
+  const ComputedStyle& aNewStyle)
 {
   if (!mPresContext->IsDynamic()) {
     // For print or print preview, ignore transitions.
@@ -446,22 +441,21 @@ nsTransitionManager::UpdateTransitions(
   CSSTransitionCollection* collection =
     CSSTransitionCollection::GetAnimationCollection(aElement, aPseudoType);
   const nsStyleDisplay* disp =
-      aNewStyle->ComputedData()->GetStyleDisplay();
+      aNewStyle.ComputedData()->GetStyleDisplay();
   return DoUpdateTransitions(*disp,
                              aElement, aPseudoType,
                              collection,
                              aOldStyle, aNewStyle);
 }
 
-template<typename StyleType>
 bool
 nsTransitionManager::DoUpdateTransitions(
   const nsStyleDisplay& aDisp,
   dom::Element* aElement,
   CSSPseudoElementType aPseudoType,
   CSSTransitionCollection*& aElementTransitions,
-  StyleType aOldStyle,
-  StyleType aNewStyle)
+  const ComputedStyle& aOldStyle,
+  const ComputedStyle& aNewStyle)
 {
   MOZ_ASSERT(!aElementTransitions ||
              aElementTransitions->mElement == aElement, "Element mismatch");
@@ -633,17 +627,11 @@ GetTransitionKeyframes(nsCSSPropertyID aProperty,
 }
 
 static bool
-IsTransitionable(nsCSSPropertyID aProperty, bool aIsServo)
+IsTransitionable(nsCSSPropertyID aProperty)
 {
-  if (aIsServo) {
-    return Servo_Property_IsTransitionable(aProperty);
-  }
-
-  // FIXME: This should also exclude discretely-animated properties.
-  return nsCSSProps::kAnimTypeTable[aProperty] != eStyleAnimType_None;
+  return Servo_Property_IsTransitionable(aProperty);
 }
 
-template<typename StyleType>
 void
 nsTransitionManager::ConsiderInitiatingTransition(
   nsCSSPropertyID aProperty,
@@ -652,8 +640,8 @@ nsTransitionManager::ConsiderInitiatingTransition(
   dom::Element* aElement,
   CSSPseudoElementType aPseudoType,
   CSSTransitionCollection*& aElementTransitions,
-  StyleType aOldStyle,
-  StyleType aNewStyle,
+  const ComputedStyle& aOldStyle,
+  const ComputedStyle& aNewStyle,
   bool* aStartedAny,
   nsCSSPropertyIDSet* aWhichStarted)
 {
@@ -678,7 +666,7 @@ nsTransitionManager::ConsiderInitiatingTransition(
     return;
   }
 
-  if (!IsTransitionable(aProperty, aElement->IsStyledByServo())) {
+  if (!IsTransitionable(aProperty)) {
     return;
   }
 
@@ -833,7 +821,7 @@ nsTransitionManager::ConsiderInitiatingTransition(
 
   pt->SetKeyframes(GetTransitionKeyframes(aProperty,
                                           Move(startValue), Move(endValue), tf),
-                   aNewStyle);
+                   &aNewStyle);
 
   RefPtr<CSSTransition> animation =
     new CSSTransition(mPresContext->Document()->GetScopeObject());

@@ -51,13 +51,13 @@ const storageItemsForDefault = [
     ]
   ],
   [["localStorage", "http://test1.example.org"],
-   ["ls1", "ls2"]],
+   ["key", "ls1", "ls2"]],
   [["localStorage", "http://sectest1.example.org"],
    ["iframe-u-ls1"]],
   [["localStorage", "https://sectest1.example.org"],
    ["iframe-s-ls1"]],
   [["sessionStorage", "http://test1.example.org"],
-   ["ss1"]],
+   ["key", "ss1"]],
   [["sessionStorage", "http://sectest1.example.org"],
    ["iframe-u-ss1", "iframe-u-ss2"]],
   [["sessionStorage", "https://sectest1.example.org"],
@@ -98,7 +98,7 @@ function testTree(tests) {
   let doc = gPanelWindow.document;
   for (let [item] of tests) {
     ok(doc.querySelector("[data-id='" + JSON.stringify(item) + "']"),
-       "Tree item " + item[0] + " should be present in the storage tree");
+      `Tree item ${item.toSource()} should be present in the storage tree`);
   }
 }
 

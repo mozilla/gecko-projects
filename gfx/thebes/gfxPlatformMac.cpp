@@ -18,6 +18,7 @@
 #include "nsTArray.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/VsyncDispatcher.h"
+#include "nsCocoaFeatures.h"
 #include "nsUnicodeProperties.h"
 #include "qcms.h"
 #include "gfx2DGlue.h"
@@ -101,7 +102,7 @@ gfxPlatformMac::~gfxPlatformMac()
 }
 
 BackendPrefsData
-gfxPlatformMac::GetBackendPrefs()
+gfxPlatformMac::GetBackendPrefs() const
 {
   BackendPrefsData data;
 
@@ -119,6 +120,12 @@ gfxPlatformMac::UsesTiling() const
     // The non-tiling ContentClient requires CrossProcessSemaphore which
     // isn't implemented for OSX.
     return true;
+}
+
+bool
+gfxPlatformMac::ContentUsesTiling() const
+{
+    return UsesTiling();
 }
 
 gfxPlatformFontList*
@@ -633,4 +640,14 @@ gfxPlatformMac::GetPlatformCMSOutputProfile(void* &mem, size_t &size)
     }
 
     ::CFRelease(iccp);
+}
+
+bool
+gfxPlatformMac::CheckVariationFontSupport()
+{
+    // We don't allow variation fonts to be enabled before 10.13,
+    // as although the Core Text APIs existed, they are known to be
+    // fairly buggy.
+    // (Note that Safari also requires 10.13 for variation-font support.)
+    return nsCocoaFeatures::OnHighSierraOrLater();
 }

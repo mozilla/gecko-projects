@@ -17,6 +17,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/CanvasCaptureMediaStream.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/HTMLCanvasElementBinding.h"
 #include "mozilla/dom/MediaStreamTrack.h"
@@ -375,7 +376,7 @@ HTMLCanvasElementObserver::Observe(nsISupports*, const char* aTopic, const char1
 }
 
 NS_IMETHODIMP
-HTMLCanvasElementObserver::HandleEvent(nsIDOMEvent* aEvent)
+HTMLCanvasElementObserver::HandleEvent(Event* aEvent)
 {
   nsAutoString type;
   aEvent->GetType(type);
@@ -607,14 +608,16 @@ HTMLCanvasElement::CopyInnerTo(Element* aDest,
   return rv;
 }
 
-nsresult HTMLCanvasElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
+void
+HTMLCanvasElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   if (aVisitor.mEvent->mClass == eMouseEventClass) {
     WidgetMouseEventBase* evt = (WidgetMouseEventBase*)aVisitor.mEvent;
     if (mCurrentContext) {
       nsIFrame *frame = GetPrimaryFrame();
-      if (!frame)
-        return NS_OK;
+      if (!frame) {
+        return;
+      }
       nsPoint ptInRoot = nsLayoutUtils::GetEventCoordinatesRelativeTo(evt, frame);
       nsRect paddingRect = frame->GetContentRectRelativeToSelf();
       Point hitpoint;
@@ -625,7 +628,7 @@ nsresult HTMLCanvasElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
       aVisitor.mCanHandle = true;
     }
   }
-  return nsGenericHTMLElement::GetEventTargetParent(aVisitor);
+  nsGenericHTMLElement::GetEventTargetParent(aVisitor);
 }
 
 nsChangeHint

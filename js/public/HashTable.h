@@ -12,6 +12,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Casting.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/MemoryChecking.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Move.h"
 #include "mozilla/Opaque.h"
@@ -822,17 +823,22 @@ class HashTableEntry
     void operator=(const HashTableEntry&) = delete;
     ~HashTableEntry() = delete;
 
+    void destroyStoredT() {
+        mem.addr()->~T();
+        MOZ_MAKE_MEM_UNDEFINED(mem.addr(), sizeof(*mem.addr()));
+    }
+
   public:
     // NB: HashTableEntry is treated as a POD: no constructor or destructor calls.
 
     void destroyIfLive() {
         if (isLive())
-            mem.addr()->~T();
+            destroyStoredT();
     }
 
     void destroy() {
         MOZ_ASSERT(isLive());
-        mem.addr()->~T();
+        destroyStoredT();
     }
 
     void swap(HashTableEntry* other) {
@@ -848,20 +854,68 @@ class HashTableEntry
         mozilla::Swap(keyHash, other->keyHash);
     }
 
-    T& get() { MOZ_ASSERT(isLive()); return *mem.addr(); }
-    NonConstT& getMutable() { MOZ_ASSERT(isLive()); return *mem.addr(); }
+    T& get() {
+        MOZ_ASSERT(isLive());
+        return *mem.addr();
+    }
 
-    bool isFree() const    { return keyHash == sFreeKey; }
-    void clearLive()       { MOZ_ASSERT(isLive()); keyHash = sFreeKey; mem.addr()->~T(); }
-    void clear()           { if (isLive()) mem.addr()->~T(); keyHash = sFreeKey; }
-    bool isRemoved() const { return keyHash == sRemovedKey; }
-    void removeLive()      { MOZ_ASSERT(isLive()); keyHash = sRemovedKey; mem.addr()->~T(); }
-    bool isLive() const    { return isLiveHash(keyHash); }
-    void setCollision()               { MOZ_ASSERT(isLive()); keyHash |= sCollisionBit; }
-    void unsetCollision()             { keyHash &= ~sCollisionBit; }
-    bool hasCollision() const         { return keyHash & sCollisionBit; }
-    bool matchHash(HashNumber hn)     { return (keyHash & ~sCollisionBit) == hn; }
-    HashNumber getKeyHash() const     { return keyHash & ~sCollisionBit; }
+    NonConstT& getMutable() {
+        MOZ_ASSERT(isLive());
+        return *mem.addr();
+    }
+
+    bool isFree() const {
+        return keyHash == sFreeKey;
+    }
+
+    void clearLive() {
+        MOZ_ASSERT(isLive());
+        keyHash = sFreeKey;
+        destroyStoredT();
+    }
+
+    void clear() {
+        if (isLive())
+            destroyStoredT();
+
+        MOZ_MAKE_MEM_UNDEFINED(this, sizeof(*this));
+        keyHash = sFreeKey;
+    }
+
+    bool isRemoved() const {
+        return keyHash == sRemovedKey;
+    }
+
+    void removeLive() {
+        MOZ_ASSERT(isLive());
+        keyHash = sRemovedKey;
+        destroyStoredT();
+    }
+
+    bool isLive() const {
+        return isLiveHash(keyHash);
+    }
+
+    void setCollision() {
+        MOZ_ASSERT(isLive());
+        keyHash |= sCollisionBit;
+    }
+
+    void unsetCollision() {
+        keyHash &= ~sCollisionBit;
+    }
+
+    bool hasCollision() const {
+        return keyHash & sCollisionBit;
+    }
+
+    bool matchHash(HashNumber hn) {
+        return (keyHash & ~sCollisionBit) == hn;
+    }
+
+    HashNumber getKeyHash() const {
+        return keyHash & ~sCollisionBit;
+    }
 
     template <typename... Args>
     void setLive(HashNumber hn, Args&&... args)
@@ -1695,14 +1749,10 @@ class HashTable : private AllocPolicy
   public:
     void clear()
     {
-        if (mozilla::IsPod<Entry>::value) {
-            memset(table, 0, sizeof(*table) * capacity());
-        } else {
-            uint32_t tableCapacity = capacity();
-            Entry* end = table + tableCapacity;
-            for (Entry* e = table; e < end; ++e)
-                e->clear();
-        }
+        Entry* end = table + capacity();
+        for (Entry* e = table; e < end; ++e)
+            e->clear();
+
         removedCount = 0;
         entryCount = 0;
 #ifdef JS_DEBUG
@@ -1797,15 +1847,10 @@ class HashTable : private AllocPolicy
         if (!EnsureHash<HashPolicy>(l))
             return AddPtr();
         HashNumber keyHash = prepareHash(l);
-        // Calling constructor in return statement here avoid excess copying
-        // when build with Visual Studio 2015 and 2017, but it triggers a bug in
-        // gcc which is fixed in gcc-6. See bug 1385181.
-#if MOZ_IS_GCC && __GNUC__ < 6
-        AddPtr p(lookup(l, keyHash, sCollisionBit), *this, keyHash);
-        return p;
-#else
+        // Directly call the constructor in the return statement to avoid
+        // excess copying when building with Visual Studio 2017.
+        // See bug 1385181.
         return AddPtr(lookup(l, keyHash, sCollisionBit), *this, keyHash);
-#endif
     }
 
     template <typename... Args>

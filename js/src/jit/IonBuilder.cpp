@@ -3537,11 +3537,6 @@ IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
     if (actualOp == JSOP_POS)
         return Ok();
 
-    // FIXME: The JSOP_BITNOT path doesn't track optimizations yet.
-    if (actualOp != JSOP_BITNOT) {
-        trackOptimizationAttempt(TrackedStrategy::BinaryArith_SharedCache);
-        trackOptimizationSuccess();
-    }
 
     MInstruction* stub = nullptr;
     switch (actualOp) {
@@ -3550,8 +3545,7 @@ IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
         MOZ_ASSERT_IF(op == JSOP_MUL,
                       left->maybeConstantValue() && left->maybeConstantValue()->toInt32() == -1);
         MOZ_ASSERT_IF(op != JSOP_MUL, !left);
-
-        stub = MUnarySharedStub::New(alloc(), right);
+        stub = MUnaryCache::New(alloc(), right);
         break;
       case JSOP_ADD:
       case JSOP_SUB:
@@ -6194,8 +6188,9 @@ IonBuilder::jsop_newarray_copyonwrite()
     // with the copy on write flag set already. During the arguments usage
     // analysis the baseline compiler hasn't run yet, however, though in this
     // case the template object's type doesn't matter.
+    ObjectGroup* group = templateObject->group();
     MOZ_ASSERT_IF(info().analysisMode() != Analysis_ArgumentsUsage,
-                  templateObject->group()->hasAnyFlags(OBJECT_FLAG_COPY_ON_WRITE));
+                  group->hasAllFlagsDontCheckGeneration(OBJECT_FLAG_COPY_ON_WRITE));
 
 
     MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject);
@@ -6203,7 +6198,7 @@ IonBuilder::jsop_newarray_copyonwrite()
 
     MNewArrayCopyOnWrite* ins =
         MNewArrayCopyOnWrite::New(alloc(), constraints(), templateConst,
-                                  templateObject->group()->initialHeap(constraints()));
+                                  group->initialHeap(constraints()));
 
     current->add(ins);
     current->push(ins);
@@ -7330,7 +7325,7 @@ static size_t
 NumFixedSlots(JSObject* object)
 {
     // Note: we can't use object->numFixedSlots() here, as this will read the
-    // shape and can race with the active thread if we are building off thread.
+    // shape and can race with the main thread if we are building off thread.
     // The allocation kind and object class (which goes through the type) can
     // be read freely, however.
     gc::AllocKind kind = object->asTenured().getAllocKind();
@@ -7802,13 +7797,13 @@ IonBuilder::jsop_getelem()
         if (emitted)
             return Ok();
 
-        trackOptimizationAttempt(TrackedStrategy::GetElem_Dense);
-        MOZ_TRY(getElemTryDense(&emitted, obj, index));
+        trackOptimizationAttempt(TrackedStrategy::GetElem_CallSiteObject);
+        MOZ_TRY(getElemTryCallSiteObject(&emitted, obj, index));
         if (emitted)
             return Ok();
 
-        trackOptimizationAttempt(TrackedStrategy::GetElem_TypedStatic);
-        MOZ_TRY(getElemTryTypedStatic(&emitted, obj, index));
+        trackOptimizationAttempt(TrackedStrategy::GetElem_Dense);
+        MOZ_TRY(getElemTryDense(&emitted, obj, index));
         if (emitted)
             return Ok();
 
@@ -8235,102 +8230,6 @@ IonBuilder::getElemTryDense(bool* emitted, MDefinition* obj, MDefinition* index)
     return Ok();
 }
 
-AbortReasonOr<JSObject*>
-IonBuilder::getStaticTypedArrayObject(MDefinition* obj, MDefinition* index)
-{
-    Scalar::Type arrayType;
-    if (!ElementAccessIsTypedArray(constraints(), obj, index, &arrayType)) {
-        trackOptimizationOutcome(TrackedOutcome::AccessNotTypedArray);
-        return nullptr;
-    }
-
-    if (!LIRGenerator::allowStaticTypedArrayAccesses()) {
-        trackOptimizationOutcome(TrackedOutcome::Disabled);
-        return nullptr;
-    }
-
-    bool hasExtraIndexedProperty;
-    MOZ_TRY_VAR(hasExtraIndexedProperty, ElementAccessHasExtraIndexedProperty(this, obj));
-    if (hasExtraIndexedProperty) {
-        trackOptimizationOutcome(TrackedOutcome::ProtoIndexedProps);
-        return nullptr;
-    }
-
-    if (!obj->resultTypeSet()) {
-        trackOptimizationOutcome(TrackedOutcome::NoTypeInfo);
-        return nullptr;
-    }
-
-    JSObject* tarrObj = obj->resultTypeSet()->maybeSingleton();
-    if (!tarrObj) {
-        trackOptimizationOutcome(TrackedOutcome::NotSingleton);
-        return nullptr;
-    }
-
-    TypeSet::ObjectKey* tarrKey = TypeSet::ObjectKey::get(tarrObj);
-    if (tarrKey->unknownProperties()) {
-        trackOptimizationOutcome(TrackedOutcome::UnknownProperties);
-        return nullptr;
-    }
-
-    return tarrObj;
-}
-
-AbortReasonOr<Ok>
-IonBuilder::getElemTryTypedStatic(bool* emitted, MDefinition* obj, MDefinition* index)
-{
-    MOZ_ASSERT(*emitted == false);
-
-    JSObject* tarrObj;
-    MOZ_TRY_VAR(tarrObj, getStaticTypedArrayObject(obj, index));
-    if (!tarrObj)
-        return Ok();
-
-    // LoadTypedArrayElementStatic currently treats uint32 arrays as int32.
-    Scalar::Type viewType = tarrObj->as<TypedArrayObject>().type();
-    if (viewType == Scalar::Uint32) {
-        trackOptimizationOutcome(TrackedOutcome::StaticTypedArrayUint32);
-        return Ok();
-    }
-
-    MDefinition* ptr = convertShiftToMaskForStaticTypedArray(index, viewType);
-    if (!ptr)
-        return Ok();
-
-    // Emit LoadTypedArrayElementStatic.
-
-    if (tarrObj->is<TypedArrayObject>()) {
-        TypeSet::ObjectKey* tarrKey = TypeSet::ObjectKey::get(tarrObj);
-        tarrKey->watchStateChangeForTypedArrayData(constraints());
-    }
-
-    obj->setImplicitlyUsedUnchecked();
-    index->setImplicitlyUsedUnchecked();
-
-    MLoadTypedArrayElementStatic* load = MLoadTypedArrayElementStatic::New(alloc(), tarrObj, ptr);
-    current->add(load);
-    current->push(load);
-
-    // The load is infallible if an undefined result will be coerced to the
-    // appropriate numeric type if the read is out of bounds. The truncation
-    // analysis picks up some of these cases, but is incomplete with respect
-    // to others. For now, sniff the bytecode for simple patterns following
-    // the load which guarantee a truncation or numeric conversion.
-    if (viewType == Scalar::Float32 || viewType == Scalar::Float64) {
-        jsbytecode* next = pc + JSOP_GETELEM_LENGTH;
-        if (*next == JSOP_POS)
-            load->setInfallible();
-    } else {
-        jsbytecode* next = pc + JSOP_GETELEM_LENGTH;
-        if (*next == JSOP_ZERO && *(next + JSOP_ZERO_LENGTH) == JSOP_BITOR)
-            load->setInfallible();
-    }
-
-    trackOptimizationSuccess();
-    *emitted = true;
-    return Ok();
-}
-
 AbortReasonOr<Ok>
 IonBuilder::getElemTryTypedArray(bool* emitted, MDefinition* obj, MDefinition* index)
 {
@@ -8344,6 +8243,52 @@ IonBuilder::getElemTryTypedArray(bool* emitted, MDefinition* obj, MDefinition* i
 
     // Emit typed getelem variant.
     MOZ_TRY(jsop_getelem_typed(obj, index, arrayType));
+
+    trackOptimizationSuccess();
+    *emitted = true;
+    return Ok();
+}
+
+AbortReasonOr<Ok>
+IonBuilder::getElemTryCallSiteObject(bool* emitted, MDefinition* obj, MDefinition* index)
+{
+    MOZ_ASSERT(*emitted == false);
+
+    if (!obj->isConstant() || obj->type() != MIRType::Object) {
+        trackOptimizationOutcome(TrackedOutcome::NotObject);
+        return Ok();
+    }
+
+    if (!index->isConstant() || index->type() != MIRType::Int32) {
+        trackOptimizationOutcome(TrackedOutcome::IndexType);
+        return Ok();
+    }
+
+    JSObject* cst = &obj->toConstant()->toObject();
+    if (!cst->is<ArrayObject>()) {
+        trackOptimizationOutcome(TrackedOutcome::GenericFailure);
+        return Ok();
+    }
+
+    // Technically this code would work with any kind of frozen array,
+    // in pratice only CallSiteObjects can be constant and frozen.
+
+    ArrayObject* array = &cst->as<ArrayObject>();
+    if (array->lengthIsWritable() || array->hasEmptyElements() || !array->denseElementsAreFrozen()) {
+        trackOptimizationOutcome(TrackedOutcome::GenericFailure);
+        return Ok();
+    }
+
+    int32_t idx = index->toConstant()->toInt32();
+    if (idx < 0 || !array->containsDenseElement(uint32_t(idx))) {
+        trackOptimizationOutcome(TrackedOutcome::OutOfBounds);
+        return Ok();
+    }
+
+    obj->setImplicitlyUsedUnchecked();
+    index->setImplicitlyUsedUnchecked();
+
+    pushConstant(array->getDenseElement(uint32_t(idx)));
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -8754,7 +8699,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
         SharedMem<void*> data = tarr->as<TypedArrayObject>().viewDataEither();
         // Bug 979449 - Optimistically embed the elements and use TI to
         //              invalidate if we move them.
-        bool isTenured = !tarr->zone()->group()->nursery().isInside(data);
+        bool isTenured = !tarr->runtimeFromMainThread()->gc.nursery().isInside(data);
         if (isTenured && tarr->isSingleton()) {
             // The 'data' pointer of TypedArrayObject can change in rare circumstances
             // (ArrayBufferObject::changeContents).
@@ -8791,50 +8736,6 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
         *elements = MTypedArrayElements::New(alloc(), obj);
         current->add(*elements);
     }
-}
-
-MDefinition*
-IonBuilder::convertShiftToMaskForStaticTypedArray(MDefinition* id,
-                                                  Scalar::Type viewType)
-{
-    trackOptimizationOutcome(TrackedOutcome::StaticTypedArrayCantComputeMask);
-
-    // No shifting is necessary if the typed array has single byte elements.
-    if (TypedArrayShift(viewType) == 0)
-        return id;
-
-    // If the index is an already shifted constant, undo the shift to get the
-    // absolute offset being accessed.
-    if (MConstant* idConst = id->maybeConstantValue()) {
-        if (idConst->type() == MIRType::Int32) {
-            int32_t index = idConst->toInt32();
-            MConstant* offset = MConstant::New(alloc(), Int32Value(index << TypedArrayShift(viewType)));
-            current->add(offset);
-            return offset;
-        }
-    }
-
-    if (!id->isRsh() || id->isEffectful())
-        return nullptr;
-
-    MConstant* shiftAmount = id->toRsh()->rhs()->maybeConstantValue();
-    if (!shiftAmount || shiftAmount->type() != MIRType::Int32)
-        return nullptr;
-    if (uint32_t(shiftAmount->toInt32()) != TypedArrayShift(viewType))
-        return nullptr;
-
-    // Instead of shifting, mask off the low bits of the index so that
-    // a non-scaled access on the typed array can be performed.
-    MConstant* mask = MConstant::New(alloc(), Int32Value(~((1 << shiftAmount->toInt32()) - 1)));
-    MBitAnd* ptr = MBitAnd::New(alloc(), id->getOperand(0), mask);
-
-    ptr->infer(nullptr, nullptr);
-    MOZ_ASSERT(!ptr->isEffectful());
-
-    current->add(mask);
-    current->add(ptr);
-
-    return ptr;
 }
 
 AbortReasonOr<Ok>
@@ -8939,11 +8840,6 @@ IonBuilder::jsop_setelem()
     }
 
     if (!forceInlineCaches()) {
-        trackOptimizationAttempt(TrackedStrategy::SetElem_TypedStatic);
-        MOZ_TRY(setElemTryTypedStatic(&emitted, object, index, value));
-        if (emitted)
-            return Ok();
-
         trackOptimizationAttempt(TrackedStrategy::SetElem_TypedArray);
         MOZ_TRY(setElemTryTypedArray(&emitted, object, index, value));
         if (emitted)
@@ -9078,54 +8974,6 @@ IonBuilder::setElemTryScalarElemOfTypedObject(bool* emitted,
         return Ok();
 
     return setPropTryScalarTypedObjectValue(emitted, obj, indexAsByteOffset, elemType, value);
-}
-
-AbortReasonOr<Ok>
-IonBuilder::setElemTryTypedStatic(bool* emitted, MDefinition* object,
-                                  MDefinition* index, MDefinition* value)
-{
-    MOZ_ASSERT(*emitted == false);
-
-    JSObject* tarrObj;
-    MOZ_TRY_VAR(tarrObj, getStaticTypedArrayObject(object, index));
-    if (!tarrObj)
-        return Ok();
-
-    SharedMem<void*> viewData = tarrObj->as<TypedArrayObject>().viewDataEither();
-    if (tarrObj->zone()->group()->nursery().isInside(viewData))
-        return Ok();
-
-    Scalar::Type viewType = tarrObj->as<TypedArrayObject>().type();
-    MDefinition* ptr = convertShiftToMaskForStaticTypedArray(index, viewType);
-    if (!ptr)
-        return Ok();
-
-    // Emit StoreTypedArrayElementStatic.
-
-    if (tarrObj->is<TypedArrayObject>()) {
-        TypeSet::ObjectKey* tarrKey = TypeSet::ObjectKey::get(tarrObj);
-        tarrKey->watchStateChangeForTypedArrayData(constraints());
-    }
-
-    object->setImplicitlyUsedUnchecked();
-    index->setImplicitlyUsedUnchecked();
-
-    // Clamp value to [0, 255] for Uint8ClampedArray.
-    MDefinition* toWrite = value;
-    if (viewType == Scalar::Uint8Clamped) {
-        toWrite = MClampToUint8::New(alloc(), value);
-        current->add(toWrite->toInstruction());
-    }
-
-    MInstruction* store = MStoreTypedArrayElementStatic::New(alloc(), tarrObj, ptr, toWrite);
-    current->add(store);
-    current->push(value);
-
-    MOZ_TRY(resumeAfter(store));
-
-    trackOptimizationSuccess();
-    *emitted = true;
-    return Ok();
 }
 
 AbortReasonOr<Ok>
@@ -9737,8 +9585,10 @@ IonBuilder::getDefiniteSlot(TemporaryTypeSet* types, jsid id, uint32_t* pnfixed)
         // allowable range for fixed slots, except for objects which were
         // converted from unboxed objects and have a smaller allocation size.
         size_t nfixed = NativeObject::MAX_FIXED_SLOTS;
-        if (ObjectGroup* group = key->group()->maybeOriginalUnboxedGroup())
-            nfixed = gc::GetGCKindSlots(group->unboxedLayout().getAllocKind());
+        if (ObjectGroup* group = key->group()->maybeOriginalUnboxedGroup()) {
+            AutoSweepObjectGroup sweepGroup(group);
+            nfixed = gc::GetGCKindSlots(group->unboxedLayout(sweepGroup).getAllocKind());
+        }
 
         uint32_t propertySlot = property.maybeTypes()->definiteSlot();
         if (slot == UINT32_MAX) {
@@ -9778,7 +9628,8 @@ IonBuilder::getUnboxedOffset(TemporaryTypeSet* types, jsid id, JSValueType* punb
             return UINT32_MAX;
         }
 
-        UnboxedLayout* layout = key->group()->maybeUnboxedLayout();
+        AutoSweepObjectGroup sweep(key->group());
+        UnboxedLayout* layout = key->group()->maybeUnboxedLayout(sweep);
         if (!layout) {
             trackOptimizationOutcome(TrackedOutcome::NotUnboxed);
             return UINT32_MAX;
@@ -10801,7 +10652,8 @@ IonBuilder::convertUnboxedObjects(MDefinition* obj)
         if (!key || !key->isGroup())
             continue;
 
-        if (UnboxedLayout* layout = key->group()->maybeUnboxedLayout()) {
+        AutoSweepObjectGroup sweep(key->group());
+        if (UnboxedLayout* layout = key->group()->maybeUnboxedLayout(sweep)) {
             AutoEnterOOMUnsafeRegion oomUnsafe;
             if (layout->nativeGroup() && !list.append(key->group()))
                 oomUnsafe.crash("IonBuilder::convertUnboxedObjects");
@@ -11314,7 +11166,8 @@ IonBuilder::getPropTryInlineAccess(bool* emitted, MDefinition* obj, PropertyName
 
         obj = addGroupGuard(obj, group, Bailout_ShapeGuard);
 
-        const UnboxedLayout::Property* property = group->unboxedLayout().lookup(name);
+        AutoSweepObjectGroup sweep(group);
+        const UnboxedLayout::Property* property = group->unboxedLayout(sweep).lookup(name);
         MInstruction* load = loadUnboxedProperty(obj, property->offset, property->type, barrier, types);
         current->push(load);
 
@@ -12122,7 +11975,8 @@ IonBuilder::setPropTryInlineAccess(bool* emitted, MDefinition* obj,
         if (needsPostBarrier(value))
             current->add(MPostWriteBarrier::New(alloc(), obj, value));
 
-        const UnboxedLayout::Property* property = group->unboxedLayout().lookup(name);
+        AutoSweepObjectGroup sweep(group);
+        const UnboxedLayout::Property* property = group->unboxedLayout(sweep).lookup(name);
         MInstruction* store = storeUnboxedProperty(obj, property->offset, property->type, value);
 
         current->push(value);
@@ -13748,7 +13602,7 @@ JSObject*
 IonBuilder::checkNurseryObject(JSObject* obj)
 {
     // If we try to use any nursery pointers during compilation, make sure that
-    // the active thread will cancel this compilation before performing a minor
+    // the main thread will cancel this compilation before performing a minor
     // GC. All constants used during compilation should either go through this
     // function or should come from a type set (which has a similar barrier).
     if (obj && IsInsideNursery(obj)) {
@@ -13869,4 +13723,19 @@ IonBuilder::trace(JSTracer* trc)
 
     MOZ_ASSERT(rootList_);
     rootList_->trace(trc);
+}
+
+size_t
+IonBuilder::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    // See js::jit::FreeIonBuilder.
+    // The IonBuilder and most of its contents live in the LifoAlloc we point
+    // to. Note that this is only true for background IonBuilders.
+
+    size_t result = alloc_->lifoAlloc()->sizeOfIncludingThis(mallocSizeOf);
+
+    if (backgroundCodegen_)
+        result += mallocSizeOf(backgroundCodegen_);
+
+    return result;
 }

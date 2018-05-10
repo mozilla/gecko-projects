@@ -34,7 +34,10 @@
 #include "mozilla/dom/CSSBinding.h"
 #include "mozilla/dom/CSSRuleBinding.h"
 #include "mozilla/dom/DirectoryBinding.h"
+#include "mozilla/dom/DOMParserBinding.h"
 #include "mozilla/dom/DOMPrefs.h"
+#include "mozilla/dom/ElementBinding.h"
+#include "mozilla/dom/EventBinding.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FileBinding.h"
@@ -56,6 +59,7 @@
 #include "mozilla/dom/URLBinding.h"
 #include "mozilla/dom/URLSearchParamsBinding.h"
 #include "mozilla/dom/XMLHttpRequest.h"
+#include "mozilla/dom/XMLSerializerBinding.h"
 #include "mozilla/dom/FormDataBinding.h"
 #include "mozilla/DeferredFinalize.h"
 
@@ -215,11 +219,11 @@ SandboxImport(JSContext* cx, unsigned argc, Value* vp)
 
     // We need to resolve the this object, because this function is used
     // unbound and should still work and act on the original sandbox.
-    RootedObject thisObject(cx, JS_THIS_OBJECT(cx, vp));
-    if (!thisObject) {
-        XPCThrower::Throw(NS_ERROR_UNEXPECTED, cx);
+
+    RootedObject thisObject(cx);
+    if (!args.computeThis(cx, &thisObject))
         return false;
-    }
+
     if (!JS_SetPropertyById(cx, thisObject, id, args[0]))
         return false;
 
@@ -560,7 +564,15 @@ xpc::SandboxCallableProxyHandler::call(JSContext* cx, JS::Handle<JSObject*> prox
     // if the sandboxPrototype is an Xray Wrapper, which lets us appropriately
     // remap |this|.
     bool isXray = WrapperFactory::IsXrayWrapper(sandboxProxy);
-    RootedValue thisVal(cx, isXray ? args.computeThis(cx) : args.thisv());
+    RootedValue thisVal(cx, args.thisv());
+    if (isXray) {
+        RootedObject thisObject(cx);
+        if (!args.computeThis(cx, &thisObject)) {
+            return false;
+        }
+        thisVal.setObject(*thisObject);
+    }
+
     if (thisVal == ObjectValue(*sandboxGlobal)) {
         thisVal = ObjectValue(*js::GetProxyTargetObject(sandboxProxy));
     }
@@ -802,6 +814,12 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             CSSRule = true;
         } else if (!strcmp(name.ptr(), "Directory")) {
             Directory = true;
+        } else if (!strcmp(name.ptr(), "DOMParser")) {
+            DOMParser = true;
+        } else if (!strcmp(name.ptr(), "Element")) {
+            Element = true;
+        } else if (!strcmp(name.ptr(), "Event")) {
+            Event = true;
         } else if (!strcmp(name.ptr(), "File")) {
             File = true;
         } else if (!strcmp(name.ptr(), "FileReader")) {
@@ -824,6 +842,8 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             URLSearchParams = true;
         } else if (!strcmp(name.ptr(), "XMLHttpRequest")) {
             XMLHttpRequest = true;
+        } else if (!strcmp(name.ptr(), "XMLSerializer")) {
+            XMLSerializer = true;
         } else if (!strcmp(name.ptr(), "atob")) {
             atob = true;
         } else if (!strcmp(name.ptr(), "btoa")) {
@@ -874,6 +894,18 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
         !dom::DirectoryBinding::GetConstructorObject(cx))
         return false;
 
+    if (DOMParser &&
+        !dom::DOMParserBinding::GetConstructorObject(cx))
+        return false;
+
+    if (Element &&
+        !dom::ElementBinding::GetConstructorObject(cx))
+        return false;
+
+    if (Event &&
+        !dom::EventBinding::GetConstructorObject(cx))
+        return false;
+
     if (File &&
         !dom::FileBinding::GetConstructorObject(cx))
         return false;
@@ -915,6 +947,10 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
 
     if (XMLHttpRequest &&
         !dom::XMLHttpRequestBinding::GetConstructorObject(cx))
+        return false;
+
+    if (XMLSerializer &&
+        !dom::XMLSerializerBinding::GetConstructorObject(cx))
         return false;
 
     if (atob &&
@@ -977,7 +1013,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
         if (sop) {
             principal = sop->GetPrincipal();
         } else {
-            RefPtr<NullPrincipal> nullPrin = NullPrincipal::Create();
+            RefPtr<NullPrincipal> nullPrin = NullPrincipal::CreateWithoutOriginAttributes();
             principal = nullPrin;
         }
     }
@@ -1000,7 +1036,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     if (options.sameZoneAs)
         creationOptions.setExistingZone(js::UncheckedUnwrap(options.sameZoneAs));
     else if (options.freshZone)
-        creationOptions.setNewZoneInSystemZoneGroup();
+        creationOptions.setNewZone();
     else
         creationOptions.setSystemZone();
 
@@ -1087,8 +1123,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
                 return NS_ERROR_XPC_UNEXPECTED;
         }
 
-        bool allowComponents = principal == nsXPConnect::SystemPrincipal() ||
-                               nsContentUtils::IsExpandedPrincipal(principal);
+        bool allowComponents = principal == nsXPConnect::SystemPrincipal();
         if (options.wantComponents && allowComponents &&
             !ObjectScope(sandbox)->AttachComponentsObject(cx))
             return NS_ERROR_XPC_UNEXPECTED;

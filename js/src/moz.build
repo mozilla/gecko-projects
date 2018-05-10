@@ -49,13 +49,29 @@ if not CONFIG['JS_DISABLE_SHELL']:
 TEST_DIRS += ['jsapi-tests', 'tests', 'gdb']
 
 if CONFIG['FUZZING_INTERFACES']:
-    if CONFIG['LIBFUZZER']:
-        # Add trace-pc coverage for libfuzzer
-        CFLAGS += ['-fsanitize-coverage=trace-pc-guard']
-        CXXFLAGS += ['-fsanitize-coverage=trace-pc-guard']
-
     TEST_DIRS += [
         'fuzz-tests',
+    ]
+
+if CONFIG['FUZZING_INTERFACES'] and CONFIG['LIBFUZZER']:
+    # In addition to regular coverage provided by trace-pc-guard,
+    # LibFuzzer can use trace-cmp to instrument various compare instructions.
+    # Only use this feature on source files that do a lot of constant
+    # comparisons that would otherwise be hard to guess by LibFuzzer,
+    # as it comes with a larger overhead (requires -use_value_profile=1).
+    libfuzzer_flags = ['-fsanitize-coverage=trace-pc-guard']
+    libfuzzer_flags_cmp = ['-fsanitize-coverage=trace-pc-guard', '-fsanitize-coverage=trace-cmp']
+
+    # Any files that are targeted by LibFuzzer should be added here so they can
+    # be built with the necessary instrumentation flags, rather than just building
+    # the whole JS engine with instrumentation, to reduce the amount of noise.
+    SOURCES += [
+        'vm/StructuredClone.cpp',
+    ]
+    SOURCES['vm/StructuredClone.cpp'].flags += libfuzzer_flags_cmp
+else:
+    UNIFIED_SOURCES += [
+        'vm/StructuredClone.cpp',
     ]
 
 CONFIGURE_SUBST_FILES += [
@@ -215,7 +231,6 @@ UNIFIED_SOURCES += [
     'gc/WeakMap.cpp',
     'gc/WeakMapPtr.cpp',
     'gc/Zone.cpp',
-    'gc/ZoneGroup.cpp',
     'irregexp/NativeRegExpMacroAssembler.cpp',
     'irregexp/RegExpAST.cpp',
     'irregexp/RegExpCharacters.cpp',
@@ -251,7 +266,6 @@ UNIFIED_SOURCES += [
     'jit/EdgeCaseAnalysis.cpp',
     'jit/EffectiveAddressAnalysis.cpp',
     'jit/ExecutableAllocator.cpp',
-    'jit/FlowAliasAnalysis.cpp',
     'jit/FoldLinearArithConstants.cpp',
     'jit/InstructionReordering.cpp',
     'jit/Ion.cpp',
@@ -377,7 +391,6 @@ UNIFIED_SOURCES += [
     'vm/Stack.cpp',
     'vm/Stopwatch.cpp',
     'vm/StringType.cpp',
-    'vm/StructuredClone.cpp',
     'vm/SymbolType.cpp',
     'vm/TaggedProto.cpp',
     'vm/Time.cpp',
@@ -391,7 +404,6 @@ UNIFIED_SOURCES += [
     'vm/Xdr.cpp',
     'wasm/AsmJS.cpp',
     'wasm/WasmBaselineCompile.cpp',
-    'wasm/WasmBinaryIterator.cpp',
     'wasm/WasmBinaryToAST.cpp',
     'wasm/WasmBinaryToText.cpp',
     'wasm/WasmBuiltins.cpp',
@@ -405,6 +417,7 @@ UNIFIED_SOURCES += [
     'wasm/WasmIonCompile.cpp',
     'wasm/WasmJS.cpp',
     'wasm/WasmModule.cpp',
+    'wasm/WasmOpIter.cpp',
     'wasm/WasmProcess.cpp',
     'wasm/WasmSignalHandlers.cpp',
     'wasm/WasmStubs.cpp',
@@ -428,6 +441,9 @@ UNIFIED_SOURCES += [
 # StoreBuffer.cpp cannot be built in unified because its template
 #   instantiations may or may not be needed depending on what it gets bundled
 #   with.
+# perf/ProfilingStack.cpp cannot be built in unified mode because we want to
+#   suppress warnings due to usage of the system allocator, and this allows it
+#   to have a deterministic object name.
 # util/DoubleToString.cpp cannot be built in unified mode because we want to
 #   suppress compiler warnings in third-party dtoa.c.
 # vm/Interpreter.cpp is gigantic and destroys incremental build times for any
@@ -442,6 +458,7 @@ SOURCES += [
     'util/DoubleToString.cpp',
     'vm/Interpreter.cpp',
     'vm/JSAtom.cpp',
+    'vm/ProfilingStack.cpp',
 ]
 
 if CONFIG['JS_POSIX_NSPR']:
@@ -676,9 +693,11 @@ FINAL_LIBRARY = 'js'
 if CONFIG['NIGHTLY_BUILD']:
     DEFINES['ENABLE_BINARYDATA'] = True
     DEFINES['ENABLE_SIMD'] = True
+    DEFINES['ENABLE_WASM_BULKMEM_OPS'] = True
     DEFINES['ENABLE_WASM_SATURATING_TRUNC_OPS'] = True
     DEFINES['ENABLE_WASM_SIGNEXTEND_OPS'] = True
     DEFINES['ENABLE_WASM_THREAD_OPS'] = True
+    DEFINES['ENABLE_WASM_GC'] = True
 
 # An experiment we want to run on Nightly and early Beta: Can we change the JS
 # representation of an exported global from the global's value to an instance
@@ -688,21 +707,24 @@ if CONFIG['NIGHTLY_BUILD']:
 DEFINES['ENABLE_WASM_GLOBAL'] = True
 
 if CONFIG['JS_BUILD_BINAST']:
-    # Using SOURCES as UNIFIED_SOURCES causes mysterious bugs on 32-bit platforms.
+    # Using SOURCES, as UNIFIED_SOURCES causes mysterious bugs on 32-bit platforms.
     # These parts of BinAST are designed only to test evolutions of the
     # specification.
     SOURCES += ['frontend/BinTokenReaderTester.cpp']
     # These parts of BinAST should eventually move to release.
     SOURCES += [
+        'frontend/BinSource-auto.cpp',
         'frontend/BinSource.cpp',
-        'frontend/BinToken.cpp'
+        'frontend/BinToken.cpp',
+        'frontend/BinTokenReaderBase.cpp',
+        'frontend/BinTokenReaderMultipart.cpp',
     ]
 
     # Instrument BinAST files for fuzzing as we have a fuzzing target for BinAST.
     if CONFIG['FUZZING_INTERFACES'] and CONFIG['LIBFUZZER']:
-        SOURCES['frontend/BinSource.cpp'].flags += ['-fsanitize-coverage=trace-pc-guard']
-        SOURCES['frontend/BinToken.cpp'].flags += ['-fsanitize-coverage=trace-pc-guard']
-        SOURCES['frontend/BinTokenReaderTester.cpp'].flags += ['-fsanitize-coverage=trace-pc-guard']
+        SOURCES['frontend/BinSource.cpp'].flags += libfuzzer_flags_cmp
+        SOURCES['frontend/BinToken.cpp'].flags += libfuzzer_flags_cmp
+        SOURCES['frontend/BinTokenReaderTester.cpp'].flags += libfuzzer_flags_cmp
 
 # Wasm code should use WASM_HUGE_MEMORY instead of JS_CODEGEN_X64
 # so that it is easy to use the huge-mapping optimization for other

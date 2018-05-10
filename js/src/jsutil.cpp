@@ -67,7 +67,7 @@ GetThreadType(void) {
 static inline bool
 IsHelperThreadType(uint32_t thread)
 {
-    return thread != THREAD_TYPE_NONE && thread != THREAD_TYPE_COOPERATING;
+    return thread != THREAD_TYPE_NONE && thread != THREAD_TYPE_MAIN;
 }
 
 void
@@ -175,7 +175,8 @@ js::InitMallocAllocator()
 void
 js::ShutDownMallocAllocator()
 {
-    moz_dispose_arena(MallocArena);
+    // Until Bug 1364359 is fixed it is unsafe to call moz_dispose_arena.
+    // moz_dispose_arena(MallocArena);
 }
 
 JS_PUBLIC_API(void)

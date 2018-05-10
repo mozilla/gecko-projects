@@ -481,7 +481,7 @@ public:
   { }
 
   /**
-   * Construct writing mode based on a style context
+   * Construct writing mode based on a ComputedStyle.
    */
   explicit WritingMode(ComputedStyle* aComputedStyle)
   {
@@ -1930,7 +1930,7 @@ public:
       mBSize = 0;
     }
 
-    MOZ_ASSERT(rectDebug.IsEqualEdges(nsRect(mIStart, mBStart, mISize, mBSize)));
+    MOZ_ASSERT((rectDebug.IsEmpty() && (mISize == 0 || mBSize == 0)) || rectDebug.IsEqualEdges(nsRect(mIStart, mBStart, mISize, mBSize)));
     return mISize > 0 && mBSize > 0;
   }
 

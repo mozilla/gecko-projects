@@ -7,6 +7,7 @@
 #ifndef nsLayoutUtils_h__
 #define nsLayoutUtils_h__
 
+#include "LayoutConstants.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/LookAndFeel.h"
@@ -43,7 +44,6 @@ class nsPresContext;
 class nsIContent;
 class nsAtom;
 class nsIScrollableFrame;
-class nsIDOMEvent;
 class nsRegion;
 class nsDisplayListBuilder;
 enum class nsDisplayListBuilderMode : uint8_t;
@@ -79,6 +79,7 @@ namespace dom {
 class CanvasRenderingContext2D;
 class DOMRectList;
 class Element;
+class Event;
 class HTMLImageElement;
 class HTMLCanvasElement;
 class HTMLVideoElement;
@@ -175,6 +176,7 @@ public:
   typedef mozilla::LayoutDeviceRect LayoutDeviceRect;
   typedef mozilla::StyleGeometryBox StyleGeometryBox;
   typedef mozilla::SVGImageContext SVGImageContext;
+  typedef mozilla::LogicalSize LogicalSize;
 
   /**
    * Finds previously assigned ViewID for the given content element, if any.
@@ -369,7 +371,7 @@ public:
 
   /**
    * Given a frame which is the primary frame for an element,
-   * return the frame that has the non-pseudoelement style context for
+   * return the frame that has the non-pseudoelement ComputedStyle for
    * the content.
    * This is aPrimaryFrame itself except for tableWrapper frames.
    *
@@ -381,7 +383,7 @@ public:
 
   /**
    * Given a content node,
-   * return the frame that has the non-pseudoelement style context for
+   * return the frame that has the non-pseudoelement ComputedStyle for
    * the content.  May return null.
    * This is aContent->GetPrimaryFrame() except for tableWrapper frames.
    */
@@ -677,7 +679,7 @@ public:
    * attached to it; returns false otherwise.
    *
    * @param aContent the content node we're looking at
-   * @param aComputedStyle aContent's style context
+   * @param aComputedStyle aContent's ComputedStyle
    * @param aPseudoElement the id of the pseudo style we care about
    * @param aPresContext the presentation context
    * @return whether aContent has aPseudoElement style attached to it
@@ -707,7 +709,7 @@ public:
    * for some reason the coordinates for the mouse are not known (e.g.,
    * the event is not a GUI event).
    */
-  static nsPoint GetDOMEventCoordinatesRelativeTo(nsIDOMEvent* aDOMEvent,
+  static nsPoint GetDOMEventCoordinatesRelativeTo(mozilla::dom::Event* aDOMEvent,
                                                   nsIFrame* aFrame);
 
   /**
@@ -1303,6 +1305,7 @@ public:
    */
   static already_AddRefed<nsFontMetrics> GetFontMetricsForComputedStyle(
       ComputedStyle* aComputedStyle,
+      nsPresContext* aPresContext,
       float aSizeInflation = 1.0f,
       uint8_t aVariantWidth = NS_FONT_VARIANT_WIDTH_NORMAL);
 
@@ -1315,9 +1318,12 @@ public:
    */
   static already_AddRefed<nsFontMetrics> GetFontMetricsOfEmphasisMarks(
       ComputedStyle* aComputedStyle,
+      nsPresContext* aPresContext,
       float aInflation)
   {
-    return GetFontMetricsForComputedStyle(aComputedStyle, aInflation * 0.5f);
+    return GetFontMetricsForComputedStyle(aComputedStyle,
+                                          aPresContext,
+                                          aInflation * 0.5f);
   }
 
   /**
@@ -1405,7 +1411,8 @@ public:
    * variations if that's what matches aAxis) and its padding, border and margin
    * in the corresponding dimension.
    * @param aPercentageBasis an optional percentage basis (in aFrame's WM).
-   *   Pass NS_UNCONSTRAINEDSIZE if the basis is indefinite in either/both axes.
+   *   If the basis is indefinite in a given axis, pass a size with
+   *   NS_UNCONSTRAINEDSIZE in that component.
    *   If you pass Nothing() a percentage basis will be calculated from aFrame's
    *   ancestors' computed size in the relevant axis, if needed.
    * @param aMarginBoxMinSizeClamp make the result fit within this margin-box
@@ -1419,14 +1426,13 @@ public:
     IGNORE_PADDING = 0x01,
     BAIL_IF_REFLOW_NEEDED = 0x02, // returns NS_INTRINSIC_WIDTH_UNKNOWN if so
     MIN_INTRINSIC_ISIZE = 0x04, // use min-width/height instead of width/height
-    ADD_PERCENTS = 0x08, // apply AddPercents also for MIN_ISIZE
   };
   static nscoord
   IntrinsicForAxis(mozilla::PhysicalAxis aAxis,
                    gfxContext*           aRenderingContext,
                    nsIFrame*             aFrame,
                    IntrinsicISizeType    aType,
-                   const mozilla::Maybe<mozilla::LogicalSize>& aPercentageBasis = mozilla::Nothing(),
+                   const mozilla::Maybe<LogicalSize>& aPercentageBasis = mozilla::Nothing(),
                    uint32_t              aFlags = 0,
                    nscoord               aMarginBoxMinSizeClamp = NS_MAXSIZE);
   /**
@@ -1451,31 +1457,18 @@ public:
    * calculates the result as if the 'min-' computed value is zero.
    * Otherwise, return NS_UNCONSTRAINEDSIZE.
    *
+   * @param aPercentageBasis the percentage basis (in aFrame's WM).
+   *   Pass NS_UNCONSTRAINEDSIZE if the basis is indefinite in either/both axes.
    * @note this behavior is specific to Grid/Flexbox (currently) so aFrame
    * should be a grid/flex item.
    */
-  static nscoord MinSizeContributionForAxis(mozilla::PhysicalAxis aAxis,
-                                            gfxContext*           aRC,
-                                            nsIFrame*             aFrame,
-                                            IntrinsicISizeType    aType,
-                                            uint32_t              aFlags = 0);
-
-  /**
-   * This function increases an initial intrinsic size, 'aCurrent', according
-   * to the given 'aPercent', such that the size-increase makes up exactly
-   * 'aPercent' percent of the returned value.  If 'aPercent' or 'aCurrent' are
-   * less than or equal to zero the original 'aCurrent' value is returned.
-   * If 'aPercent' is greater than or equal to 1.0 the value nscoord_MAX is
-   * returned.
-   */
-  static nscoord AddPercents(nscoord aCurrent, float aPercent)
-  {
-    if (aPercent > 0.0f && aCurrent > 0) {
-      return MOZ_UNLIKELY(aPercent >= 1.0f) ? nscoord_MAX
-        : NSToCoordRound(float(aCurrent) / (1.0f - aPercent));
-    }
-    return aCurrent;
-  }
+  static nscoord
+  MinSizeContributionForAxis(mozilla::PhysicalAxis aAxis,
+                            gfxContext*            aRC,
+                            nsIFrame*              aFrame,
+                            IntrinsicISizeType     aType,
+                            const LogicalSize&     aPercentageBasis,
+                            uint32_t               aFlags = 0);
 
   /*
    * Convert nsStyleCoord to nscoord when percentages depend on the
@@ -1835,7 +1828,7 @@ public:
    *   @param aRenderingContext Where to draw the image, set up with an
    *                            appropriate scale and transform for drawing in
    *                            app units.
-   *   @param aComputedStyle     The style context of the nsIFrame (or
+   *   @param aComputedStyle    The ComputedStyle of the nsIFrame (or
    *                            pseudo-element) for which this image is being
    *                            drawn.
    *   @param aImage            The image.
@@ -1869,6 +1862,14 @@ public:
    *   @param aDest             The top-left where the image should be drawn.
    *   @param aDirty            If non-null, then pixels outside this area may
    *                            be skipped.
+   *   @param aSVGContext       Optionally provides an SVGImageContext.
+   *                            Callers should pass an SVGImageContext with at
+   *                            least the viewport size set if aImage may be of
+   *                            type imgIContainer::TYPE_VECTOR, or pass
+   *                            Nothing() if it is of type
+   *                            imgIContainer::TYPE_RASTER (to save cycles
+   *                            constructing an SVGImageContext, since this
+   *                            argument will be ignored for raster images).
    *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety
    *   @param aSourceArea       If non-null, this area is extracted from
    *                            the image and drawn at aDest. It's
@@ -1881,6 +1882,7 @@ public:
                                             const SamplingFilter aSamplingFilter,
                                             const nsPoint&       aDest,
                                             const nsRect*        aDirty,
+                                            const mozilla::Maybe<SVGImageContext>& aSVGContext,
                                             uint32_t             aImageFlags,
                                             const nsRect*        aSourceArea = nullptr);
 
@@ -2057,6 +2059,7 @@ public:
    */
   static mozilla::gfx::ShapedTextFlags
   GetTextRunFlagsForStyle(ComputedStyle* aComputedStyle,
+                          nsPresContext* aPresContext,
                           const nsStyleFont* aStyleFont,
                           const nsStyleText* aStyleText,
                           nscoord aLetterSpacing);
@@ -2394,12 +2397,6 @@ public:
    * Checks whether support for the CSS-wide "unset" value is enabled.
    */
   static bool UnsetValueEnabled();
-
-  /**
-   * Checks whether support for the CSS text-align (and text-align-last)
-   * 'true' value is enabled.
-   */
-  static bool IsTextAlignUnsafeValueEnabled();
 
   /**
    * Checks whether support for inter-character ruby is enabled.
@@ -3053,6 +3050,62 @@ public:
                                     nsTArray<gfxFontVariation>& aVariationSettings);
 
   static uint32_t ParseFontLanguageOverride(const nsAString& aLangTag);
+
+  /**
+   * Resolve a CSS <length-percentage> value to a definite size.
+   */
+  template<bool clampNegativeResultToZero>
+  static nscoord ResolveToLength(const nsStyleCoord& aCoord,
+                                 nscoord aPercentageBasis)
+  {
+    NS_WARNING_ASSERTION(aPercentageBasis >= nscoord(0), "nscoord overflow?");
+
+    switch (aCoord.GetUnit()) {
+      case eStyleUnit_Coord:
+        MOZ_ASSERT(!clampNegativeResultToZero || aCoord.GetCoordValue() >= 0,
+                   "This value should have been rejected by the style system");
+        return aCoord.GetCoordValue();
+      case eStyleUnit_Percent:
+        if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
+          return nscoord(0);
+        }
+        MOZ_ASSERT(!clampNegativeResultToZero || aCoord.GetPercentValue() >= 0,
+                   "This value should have been rejected by the style system");
+        return NSToCoordFloorClamped(aPercentageBasis *
+                                     aCoord.GetPercentValue());
+      case eStyleUnit_Calc: {
+        nsStyleCoord::Calc* calc = aCoord.GetCalcValue();
+        nscoord result;
+        if (aPercentageBasis == NS_UNCONSTRAINEDSIZE) {
+          result = calc->mLength;
+        } else {
+          result = calc->mLength +
+            NSToCoordFloorClamped(aPercentageBasis * calc->mPercent);
+        }
+        if (clampNegativeResultToZero && result < 0) {
+          return nscoord(0);
+        }
+        return result;
+      }
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unexpected unit!");
+        return nscoord(0);
+    }
+  }
+
+  /**
+   * Resolve a column-gap/row-gap to a definite size.
+   * @note This method resolves 'normal' to zero.
+   *   Callers who want different behavior should handle 'normal' on their own.
+   */
+  static nscoord ResolveGapToLength(const nsStyleCoord& aGap,
+                                    nscoord aPercentageBasis)
+  {
+    if (aGap.GetUnit() == eStyleUnit_Normal) {
+      return nscoord(0);
+    }
+    return ResolveToLength<true>(aGap, aPercentageBasis);
+  }
 
 private:
   static uint32_t sFontSizeInflationEmPerLine;

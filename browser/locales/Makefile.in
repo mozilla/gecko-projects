@@ -20,7 +20,11 @@ PWD := $(CURDIR)
 # pulls. You may override them if you provide your own files.
 ZIP_IN ?= $(ABS_DIST)/$(PACKAGE)
 
+ifdef MOZ_DEV_EDITION
+MOZ_LANGPACK_EID=langpack-$(AB_CD)@devedition.mozilla.org
+else
 MOZ_LANGPACK_EID=langpack-$(AB_CD)@firefox.mozilla.org
+endif
 # For Nightly, we know where to get the builds from to do local repacks
 ifdef NIGHTLY_BUILD
 export EN_US_BINARY_URL ?= https://archive.mozilla.org/pub/firefox/nightly/latest-mozilla-central
@@ -34,7 +38,6 @@ MOZ_PKG_MAC_EXTRA=--symlink '/Applications:/ '
 endif
 
 MOZ_SFX_PACKAGE=$(topsrcdir)/other-licenses/7zstub/firefox/7zSD.sfx
-MOZ_INSTALLER_PATH=$(topsrcdir)/browser/installer/windows
 
 SEARCHPLUGINS_FILENAMES := $(or $(shell $(call py_action,output_searchplugins_list,$(srcdir)/search/list.json $(AB_CD))), $(error Missing search plugins))
 SEARCHPLUGINS_PATH := .deps/generated_$(AB_CD)
@@ -76,12 +79,7 @@ ifneq (,$(wildcard ../extensions/formautofill/locales))
 endif
 	@$(MAKE) -C ../extensions/onboarding/locales AB_CD=$* XPI_NAME=locale-$*
 	@$(MAKE) -C ../extensions/pocket/locale AB_CD=$* XPI_NAME=locale-$*
-ifndef RELEASE_OR_BETA
-	@$(MAKE) -C ../extensions/presentation/locale AB_CD=$* XPI_NAME=locale-$*
-endif
-ifneq '$(or $(MOZ_DEV_EDITION),$(NIGHTLY_BUILD))' ''
 	@$(MAKE) -C ../extensions/webcompat-reporter/locales AB_CD=$* XPI_NAME=locale-$*
-endif
 	@$(MAKE) -C ../../devtools/client/locales AB_CD=$* XPI_NAME=locale-$* XPI_ROOT_APPID='$(XPI_ROOT_APPID)'
 	@$(MAKE) -C ../../devtools/startup/locales AB_CD=$* XPI_NAME=locale-$* XPI_ROOT_APPID='$(XPI_ROOT_APPID)'
 	@$(MAKE) -B searchplugins AB_CD=$* XPI_NAME=locale-$*
@@ -100,37 +98,14 @@ ifneq (,$(wildcard ../extensions/formautofill/locales))
 	@$(MAKE) -C ../extensions/formautofill/locales chrome AB_CD=$*
 endif
 	@$(MAKE) -C ../extensions/pocket/locale chrome AB_CD=$*
-ifndef RELEASE_OR_BETA
-	@$(MAKE) -C ../extensions/presentation/locale chrome AB_CD=$*
-endif
 	@$(MAKE) -C ../../devtools/client/locales chrome AB_CD=$*
 	@$(MAKE) -C ../../devtools/startup/locales chrome AB_CD=$*
 	@$(MAKE) chrome AB_CD=$*
 	@$(MAKE) -C $(DEPTH)/$(MOZ_BRANDING_DIRECTORY)/locales chrome AB_CD=$*
-ifdef NIGHTLY_BUILD
 	@$(MAKE) -C ../extensions/webcompat-reporter/locales chrome AB_CD=$*
-endif
 
-package-win32-installer: WIN32_INSTALLER_OUT=$(ABS_DIST)/$(PKG_INST_PATH)$(PKG_INST_BASENAME).exe
 package-win32-installer: $(SUBMAKEFILES)
-	@echo 'Packaging $(WIN32_INSTALLER_OUT).'
-	$(MAKE) -C ../installer/windows CONFIG_DIR=l10ngen l10ngen/setup.exe l10ngen/7zSD.sfx
-	$(RM) -r $(STAGEDIST)/uninstall
-	$(NSINSTALL) -D $(STAGEDIST)/uninstall
-	cp ../installer/windows/l10ngen/helper.exe $(STAGEDIST)/uninstall
-	$(RM) $(ABS_DIST)/l10n-stage/setup.exe
-	cp ../installer/windows/l10ngen/setup.exe $(ABS_DIST)/l10n-stage
-	$(NSINSTALL) -D '$(ABS_DIST)/$(PKG_INST_PATH)'
-	(cd $(DIST)/l10n-stage; \
-	  $(MAKE_PACKAGE))
-	mv -f '$(DIST)/l10n-stage/$(PACKAGE)' '$(WIN32_INSTALLER_OUT)'
-	if test -f '$(DIST)/l10n-stage/$(PACKAGE).asc'; then mv -f '$(DIST)/l10n-stage/$(PACKAGE).asc' '$(WIN32_INSTALLER_OUT).asc'; fi
-ifdef MOZ_STUB_INSTALLER
-	$(RM) '$(ABS_DIST)/$(PKG_INST_PATH)$(PKG_STUB_BASENAME).exe'
-	cp ../installer/windows/l10ngen/stub.exe '$(ABS_DIST)/$(PKG_INST_PATH)$(PKG_STUB_BASENAME).exe'
-	chmod 0755 '$(ABS_DIST)/$(PKG_INST_PATH)$(PKG_STUB_BASENAME).exe'
-endif
-
+	$(MAKE) -C ../installer/windows CONFIG_DIR=l10ngen ZIP_IN='$(ZIP_OUT)' installer
 
 langpack: langpack-$(AB_CD)
 
@@ -145,7 +120,7 @@ installers-%:
 	@$(MAKE) package-langpack-$*
 	@$(MAKE) repackage-zip-$*
 ifeq (WINNT,$(OS_ARCH))
-	@$(MAKE) package-win32-installer AB_CD=$* MOZ_PKG_FORMAT=SFX7Z
+	@$(MAKE) package-win32-installer AB_CD=$*
 endif
 	@echo 'repackaging done'
 

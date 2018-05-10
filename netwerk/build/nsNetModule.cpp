@@ -22,7 +22,6 @@
 #include "nsLoadGroup.h"
 #include "nsStreamLoader.h"
 #include "nsIncrementalStreamLoader.h"
-#include "nsUnicharStreamLoader.h"
 #include "nsFileStreams.h"
 #include "nsBufferedStreams.h"
 #include "nsMIMEInputStream.h"
@@ -403,13 +402,6 @@ nsresult NS_NewFTPDirListingConv(nsFTPDirListingConv** result);
 #include "mozTXTToHTMLConv.h"
 #include "nsUnknownDecoder.h"
 
-#include "nsTXTToHTMLConv.h"
-namespace mozilla {
-namespace net {
-NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsTXTToHTMLConv, Init)
-} // namespace net
-} // namespace mozilla
-
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef BUILD_NETWORK_INFO_SERVICE
@@ -438,7 +430,6 @@ nsresult NS_NewStreamConv(nsStreamConverterService **aStreamConv);
 #define COMPRESS_TO_UNCOMPRESSED     "?from=compress&to=uncompressed"
 #define XCOMPRESS_TO_UNCOMPRESSED    "?from=x-compress&to=uncompressed"
 #define DEFLATE_TO_UNCOMPRESSED      "?from=deflate&to=uncompressed"
-#define PLAIN_TO_HTML                "?from=text/plain&to=text/html"
 
 static const mozilla::Module::CategoryEntry kNeckoCategories[] = {
     { NS_ISTREAMCONVERTER_KEY, FTP_TO_INDEX, "" },
@@ -453,7 +444,6 @@ static const mozilla::Module::CategoryEntry kNeckoCategories[] = {
     { NS_ISTREAMCONVERTER_KEY, COMPRESS_TO_UNCOMPRESSED, "" },
     { NS_ISTREAMCONVERTER_KEY, XCOMPRESS_TO_UNCOMPRESSED, "" },
     { NS_ISTREAMCONVERTER_KEY, DEFLATE_TO_UNCOMPRESSED, "" },
-    { NS_ISTREAMCONVERTER_KEY, PLAIN_TO_HTML, "" },
     NS_BINARYDETECTOR_CATEGORYENTRY,
     { nullptr }
 };
@@ -685,7 +675,6 @@ NS_DEFINE_NAMED_CID(NS_INPUTSTREAMPUMP_CID);
 NS_DEFINE_NAMED_CID(NS_INPUTSTREAMCHANNEL_CID);
 NS_DEFINE_NAMED_CID(NS_STREAMLOADER_CID);
 NS_DEFINE_NAMED_CID(NS_INCREMENTALSTREAMLOADER_CID);
-NS_DEFINE_NAMED_CID(NS_UNICHARSTREAMLOADER_CID);
 NS_DEFINE_NAMED_CID(NS_DOWNLOADER_CID);
 NS_DEFINE_NAMED_CID(NS_BACKGROUNDFILESAVEROUTPUTSTREAM_CID);
 NS_DEFINE_NAMED_CID(NS_BACKGROUNDFILESAVERSTREAMLISTENER_CID);
@@ -722,7 +711,6 @@ NS_DEFINE_NAMED_CID(NS_MULTIMIXEDCONVERTER_CID);
 NS_DEFINE_NAMED_CID(NS_UNKNOWNDECODER_CID);
 NS_DEFINE_NAMED_CID(NS_BINARYDETECTOR_CID);
 NS_DEFINE_NAMED_CID(NS_HTTPCOMPRESSCONVERTER_CID);
-NS_DEFINE_NAMED_CID(NS_NSTXTTOHTMLCONVERTER_CID);
 NS_DEFINE_NAMED_CID(MOZITXTTOHTMLCONV_CID);
 NS_DEFINE_NAMED_CID(NS_DIRINDEX_CID);
 NS_DEFINE_NAMED_CID(NS_MIMEHEADERPARAM_CID);
@@ -808,7 +796,6 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_INPUTSTREAMCHANNEL_CID, false, nullptr, nsInputStreamChannelConstructor },
     { &kNS_STREAMLOADER_CID, false, nullptr, mozilla::net::nsStreamLoader::Create },
     { &kNS_INCREMENTALSTREAMLOADER_CID, false, nullptr, nsIncrementalStreamLoader::Create },
-    { &kNS_UNICHARSTREAMLOADER_CID, false, nullptr, nsUnicharStreamLoader::Create },
     { &kNS_DOWNLOADER_CID, false, nullptr, nsDownloaderConstructor },
     { &kNS_BACKGROUNDFILESAVEROUTPUTSTREAM_CID, false, nullptr,
       mozilla::net::BackgroundFileSaverOutputStreamConstructor },
@@ -847,7 +834,6 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_UNKNOWNDECODER_CID, false, nullptr, CreateNewUnknownDecoderFactory },
     { &kNS_BINARYDETECTOR_CID, false, nullptr, CreateNewBinaryDetectorFactory },
     { &kNS_HTTPCOMPRESSCONVERTER_CID, false, nullptr, CreateNewHTTPCompressConvFactory },
-    { &kNS_NSTXTTOHTMLCONVERTER_CID, false, nullptr, mozilla::net::nsTXTToHTMLConvConstructor },
     { &kMOZITXTTOHTMLCONV_CID, false, nullptr, CreateNewTXTToHTMLConvFactory },
     { &kNS_DIRINDEX_CID, false, nullptr, nsDirIndexConstructor },
     { &kNS_MIMEHEADERPARAM_CID, false, nullptr, nsMIMEHeaderParamImplConstructor },
@@ -935,7 +921,6 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_INPUTSTREAMCHANNEL_CONTRACTID, &kNS_INPUTSTREAMCHANNEL_CID },
     { NS_STREAMLOADER_CONTRACTID, &kNS_STREAMLOADER_CID },
     { NS_INCREMENTALSTREAMLOADER_CONTRACTID, &kNS_INCREMENTALSTREAMLOADER_CID },
-    { NS_UNICHARSTREAMLOADER_CONTRACTID, &kNS_UNICHARSTREAMLOADER_CID },
     { NS_DOWNLOADER_CONTRACTID, &kNS_DOWNLOADER_CID },
     { NS_BACKGROUNDFILESAVEROUTPUTSTREAM_CONTRACTID, &kNS_BACKGROUNDFILESAVEROUTPUTSTREAM_CID },
     { NS_BACKGROUNDFILESAVERSTREAMLISTENER_CONTRACTID, &kNS_BACKGROUNDFILESAVERSTREAMLISTENER_CID },
@@ -979,7 +964,6 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_ISTREAMCONVERTER_KEY COMPRESS_TO_UNCOMPRESSED, &kNS_HTTPCOMPRESSCONVERTER_CID },
     { NS_ISTREAMCONVERTER_KEY XCOMPRESS_TO_UNCOMPRESSED, &kNS_HTTPCOMPRESSCONVERTER_CID },
     { NS_ISTREAMCONVERTER_KEY DEFLATE_TO_UNCOMPRESSED, &kNS_HTTPCOMPRESSCONVERTER_CID },
-    { NS_ISTREAMCONVERTER_KEY PLAIN_TO_HTML, &kNS_NSTXTTOHTMLCONVERTER_CID },
     { MOZ_TXTTOHTMLCONV_CONTRACTID, &kMOZITXTTOHTMLCONV_CID },
     { "@mozilla.org/dirIndex;1", &kNS_DIRINDEX_CID },
     { NS_MIMEHEADERPARAM_CONTRACTID, &kNS_MIMEHEADERPARAM_CID },

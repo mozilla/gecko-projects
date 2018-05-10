@@ -49,7 +49,7 @@ exports.testTeardown = function() {
 };
 
 exports.logTestResult = function(name, value) {
-  damp._results.push(name, value);
+  damp._results.push({ name, value });
 };
 
 function getBrowserWindow() {
@@ -117,7 +117,7 @@ exports.closeToolbox =  async function() {
 };
 
 exports.openToolboxAndLog = async function(name, tool, onLoad) {
-let test = runTest(name + ".open.DAMP");
+  let test = runTest(name + ".open.DAMP");
   let toolbox = await openToolbox(tool, onLoad);
   test.done();
 

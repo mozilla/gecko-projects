@@ -30,7 +30,6 @@
 #include "nsGkAtoms.h"
 #include "nsIPluginInstanceOwner.h"
 #include "nsNPAPIPluginInstance.h"
-#include "nsIDOMElement.h"
 #include "npapi.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsContentUtils.h"
@@ -1594,15 +1593,16 @@ nsPluginFrame::HandleEvent(nsPresContext* aPresContext,
 
   if (anEvent->mMessage == ePluginActivate) {
     nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-    nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(GetContent());
-    if (fm && elem)
+    if (fm) {
+      RefPtr<Element> elem = GetContent()->AsElement();
       return fm->SetFocus(elem, 0);
+    }
   }
   else if (anEvent->mMessage == ePluginFocus) {
     nsIFocusManager* fm = nsFocusManager::GetFocusManager();
     if (fm) {
-      nsCOMPtr<nsIContent> content = GetContent();
-      return fm->FocusPlugin(content);
+      RefPtr<Element> elem = GetContent()->AsElement();
+      return fm->FocusPlugin(elem);
     }
   }
 
@@ -1762,7 +1762,7 @@ nsPluginFrame::GetNextObjectFrame(nsPresContext* aPresContext, nsIFrame* aRoot)
 /*static*/ void
 nsPluginFrame::BeginSwapDocShells(nsISupports* aSupports, void*)
 {
-  NS_PRECONDITION(aSupports, "");
+  MOZ_ASSERT(aSupports, "null parameter");
   nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
   if (!content) {
     return;
@@ -1783,7 +1783,7 @@ nsPluginFrame::BeginSwapDocShells(nsISupports* aSupports, void*)
 /*static*/ void
 nsPluginFrame::EndSwapDocShells(nsISupports* aSupports, void*)
 {
-  NS_PRECONDITION(aSupports, "");
+  MOZ_ASSERT(aSupports, "null parameter");
   nsCOMPtr<nsIContent> content(do_QueryInterface(aSupports));
   if (!content) {
     return;

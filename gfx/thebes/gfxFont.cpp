@@ -7,6 +7,7 @@
 
 #include "mozilla/BinarySearch.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/FontPropertyTypes.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/SVGContextPaint.h"
@@ -750,6 +751,32 @@ gfxShapedText::AdjustAdvancesForSyntheticBold(float aSynBoldOffset,
     }
 }
 
+float
+gfxFont::SkewForSyntheticOblique() const
+{
+    // Precomputed value of tan(14deg), the default italic/oblique slant;
+    // avoids calling tan() at runtime except for custom oblique values.
+    const float kTan14deg = 0.249328f;
+
+    // If the style doesn't call for italic/oblique, or if the face already
+    // provides it, no synthetic style should be added.
+    if (mStyle.style == FontSlantStyle::Normal() ||
+        !mStyle.allowSyntheticStyle ||
+        !mFontEntry->IsUpright()) {
+        return 0.0f;
+    }
+
+    // If style calls for italic, and face doesn't support it, use default
+    // oblique angle as a simulation.
+    if (mStyle.style.IsItalic()) {
+        return mFontEntry->SupportsItalic() ? 0.0f : kTan14deg;
+    }
+
+    // Default oblique angle
+    return mStyle.style == FontSlantStyle::Oblique()
+           ? kTan14deg : tan(mStyle.style.ObliqueAngle() * (M_PI / 180.0));
+}
+
 void
 gfxFont::RunMetrics::CombineWith(const RunMetrics& aOther, bool aOtherIsOnLeft)
 {
@@ -769,14 +796,15 @@ gfxFont::gfxFont(const RefPtr<UnscaledFont>& aUnscaledFont,
                  gfxFontEntry *aFontEntry, const gfxFontStyle *aFontStyle,
                  AntialiasOption anAAOption, cairo_scaled_font_t *aScaledFont) :
     mScaledFont(aScaledFont),
-    mFontEntry(aFontEntry), mIsValid(true),
-    mApplySyntheticBold(false),
-    mMathInitialized(false),
+    mFontEntry(aFontEntry),
+    mUnscaledFont(aUnscaledFont),
     mStyle(*aFontStyle),
     mAdjustedSize(0.0),
     mFUnitsConvFactor(-1.0f), // negative to indicate "not yet initialized"
     mAntialiasOption(anAAOption),
-    mUnscaledFont(aUnscaledFont)
+    mIsValid(true),
+    mApplySyntheticBold(false),
+    mMathInitialized(false)
 {
 #ifdef DEBUG_TEXT_RUN_STORAGE_METRICS
     ++gFontCount;
@@ -1979,7 +2007,8 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
 
         gfxContextMatrixAutoSaveRestore matrixRestore;
 
-        if (fontParams.needsOblique && fontParams.isVerticalFont && !textDrawer) {
+        if (fontParams.obliqueSkew != 0.0f &&
+            fontParams.isVerticalFont && !textDrawer) {
             // We have to flush each glyph individually when doing
             // synthetic-oblique for vertical-upright text, because
             // the skew transform needs to be applied to a separate
@@ -1989,7 +2018,7 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
             gfx::Matrix mat =
                 runParams.context->CurrentMatrix().
                 PreTranslate(devPt).
-                PreMultiply(gfx::Matrix(1, 0, -OBLIQUE_SKEW_FACTOR, 1, 0, 0)).
+                PreMultiply(gfx::Matrix(1, 0, -fontParams.obliqueSkew, 1, 0, 0)).
                 PreTranslate(-devPt);
             runParams.context->SetMatrix(mat);
         }
@@ -2029,7 +2058,8 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
             aBuffer.OutputGlyph(aGlyphID, devPt);
         }
 
-        if (fontParams.needsOblique && fontParams.isVerticalFont && !textDrawer) {
+        if (fontParams.obliqueSkew != 0.0f &&
+            fontParams.isVerticalFont && !textDrawer) {
             aBuffer.Flush();
         }
     } else {
@@ -2080,12 +2110,13 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         // of the drawTarget's transform, we need to undo
         // this before drawing the hexbox. (Bug 983985)
         gfxContextMatrixAutoSaveRestore matrixRestore;
-        if (aFontParams.needsOblique && !aFontParams.isVerticalFont && !textDrawer) {
+        if (aFontParams.obliqueSkew != 0.0f &&
+            !aFontParams.isVerticalFont && !textDrawer) {
             matrixRestore.SetContext(aRunParams.context);
             gfx::Matrix mat =
                 aRunParams.context->CurrentMatrix().
                 PreTranslate(pt).
-                PreMultiply(gfx::Matrix(1, 0, OBLIQUE_SKEW_FACTOR, 1, 0, 0)).
+                PreMultiply(gfx::Matrix(1, 0, aFontParams.obliqueSkew, 1, 0, 0)).
                 PreTranslate(-pt);
             aRunParams.context->SetMatrix(mat);
         }
@@ -2164,18 +2195,20 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
 
     auto* textDrawer = aRunParams.context->GetTextDrawer();
 
-    fontParams.needsOblique = IsSyntheticOblique();
+    fontParams.obliqueSkew = SkewForSyntheticOblique();
     fontParams.haveSVGGlyphs = GetFontEntry()->TryGetSVGData(this);
-
-    if (fontParams.haveSVGGlyphs && textDrawer) {
-        textDrawer->FoundUnsupportedFeature();
-        return;
-    }
-
     fontParams.haveColorGlyphs = GetFontEntry()->TryGetColorGlyphs();
     fontParams.contextPaint = aRunParams.runContextPaint;
 
     if (textDrawer) {
+        Color color;
+        if (fontParams.haveSVGGlyphs ||
+            (fontParams.haveColorGlyphs &&
+             aRunParams.context->HasNonOpaqueNonTransparentColor(color))) {
+            textDrawer->FoundUnsupportedFeature();
+            return;
+        }
+
         fontParams.isVerticalFont = aRunParams.isVerticalRun;
     } else {
         fontParams.isVerticalFont =
@@ -2270,7 +2303,7 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
         }
     }
 
-    if (fontParams.needsOblique) {
+    if (fontParams.obliqueSkew != 0.0f) {
         if (textDrawer) {
             glyphFlagsRestore.Save(textDrawer);
             textDrawer->SetWRGlyphFlags(textDrawer->GetWRGlyphFlags() |
@@ -2287,7 +2320,7 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
             gfx::Matrix mat =
                 aRunParams.context->CurrentMatrix().
                 PreTranslate(p).
-                PreMultiply(gfx::Matrix(1, 0, -OBLIQUE_SKEW_FACTOR, 1, 0, 0)).
+                PreMultiply(gfx::Matrix(1, 0, -fontParams.obliqueSkew, 1, 0, 0)).
                 PreTranslate(-p);
             aRunParams.context->SetMatrix(mat);
         }
@@ -2346,7 +2379,8 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
         GlyphBufferAzure buffer(aRunParams, fontParams);
         if (fontParams.haveSVGGlyphs || fontParams.haveColorGlyphs ||
             fontParams.extraStrikes ||
-            (fontParams.needsOblique && fontParams.isVerticalFont && !textDrawer)) {
+            (fontParams.obliqueSkew != 0.0f &&
+             fontParams.isVerticalFont && !textDrawer)) {
             if (aRunParams.spacing) {
                 emittedGlyphs =
                     DrawGlyphs<FontComplexityT::ComplexFont,
@@ -2674,14 +2708,18 @@ gfxFont::Measure(const gfxTextRun *aTextRun,
     // If the font may be rendered with a fake-italic effect, we need to allow
     // for the top-right of the glyphs being skewed to the right, and the
     // bottom-left being skewed further left.
-    if (mStyle.style != NS_FONT_STYLE_NORMAL &&
-        mFontEntry->IsUpright() &&
-        mStyle.allowSyntheticStyle) {
+    gfx::Float obliqueSkew = SkewForSyntheticOblique();
+    if (obliqueSkew != 0.0f) {
         gfxFloat extendLeftEdge =
-            ceil(OBLIQUE_SKEW_FACTOR * metrics.mBoundingBox.YMost());
+            obliqueSkew < 0.0f
+                ? ceil(-obliqueSkew * -metrics.mBoundingBox.Y())
+                : ceil(obliqueSkew * metrics.mBoundingBox.YMost());
         gfxFloat extendRightEdge =
-            ceil(OBLIQUE_SKEW_FACTOR * -metrics.mBoundingBox.Y());
-        metrics.mBoundingBox.SetWidth(metrics.mBoundingBox.Width() + extendLeftEdge + extendRightEdge);
+            obliqueSkew < 0.0f
+                ? ceil(-obliqueSkew * metrics.mBoundingBox.YMost())
+                : ceil(obliqueSkew * -metrics.mBoundingBox.Y());
+        metrics.mBoundingBox.SetWidth(metrics.mBoundingBox.Width() +
+                                      extendLeftEdge + extendRightEdge);
         metrics.mBoundingBox.MoveByX(-extendLeftEdge);
     }
 
@@ -3521,8 +3559,7 @@ gfxFont::GetSmallCapsFont()
     style.size *= SMALL_CAPS_SCALE_FACTOR;
     style.variantCaps = NS_FONT_VARIANT_CAPS_NORMAL;
     gfxFontEntry* fe = GetFontEntry();
-    bool needsBold = style.weight >= 600 && !fe->IsBold();
-    return fe->FindOrMakeFont(&style, needsBold, mUnicodeRangeMap);
+    return fe->FindOrMakeFont(&style, mUnicodeRangeMap);
 }
 
 gfxFont*
@@ -3531,8 +3568,7 @@ gfxFont::GetSubSuperscriptFont(int32_t aAppUnitsPerDevPixel)
     gfxFontStyle style(*GetStyle());
     style.AdjustForSubSuperscript(aAppUnitsPerDevPixel);
     gfxFontEntry* fe = GetFontEntry();
-    bool needsBold = style.weight >= 600 && !fe->IsBold();
-    return fe->FindOrMakeFont(&style, needsBold, mUnicodeRangeMap);
+    return fe->FindOrMakeFont(&style, mUnicodeRangeMap);
 }
 
 static void
@@ -4110,8 +4146,9 @@ gfxFontStyle::gfxFontStyle() :
     size(DEFAULT_PIXEL_FONT_SIZE), sizeAdjust(-1.0f), baselineOffset(0.0f),
     languageOverride(NO_FONT_LANGUAGE_OVERRIDE),
     fontSmoothingBackgroundColor(NS_RGBA(0, 0, 0, 0)),
-    weight(NS_FONT_WEIGHT_NORMAL), stretch(NS_FONT_STRETCH_NORMAL),
-    style(NS_FONT_STYLE_NORMAL),
+    weight(FontWeight::Normal()),
+    stretch(FontStretch::Normal()),
+    style(FontSlantStyle::Normal()),
     variantCaps(NS_FONT_VARIANT_CAPS_NORMAL),
     variantSubSuper(NS_FONT_VARIANT_POSITION_NORMAL),
     systemFont(true), printerFont(false), useGrayscaleAntialiasing(false),
@@ -4121,7 +4158,9 @@ gfxFontStyle::gfxFontStyle() :
 {
 }
 
-gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
+gfxFontStyle::gfxFontStyle(FontSlantStyle aStyle,
+                           FontWeight aWeight,
+                           FontStretch aStretch,
                            gfxFloat aSize,
                            nsAtom *aLanguage, bool aExplicitLanguage,
                            float aSizeAdjust, bool aSystemFont,
@@ -4133,7 +4172,8 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
     size(aSize), sizeAdjust(aSizeAdjust), baselineOffset(0.0f),
     languageOverride(aLanguageOverride),
     fontSmoothingBackgroundColor(NS_RGBA(0, 0, 0, 0)),
-    weight(aWeight), stretch(aStretch),
+    weight(aWeight),
+    stretch(aStretch),
     style(aStyle),
     variantCaps(NS_FONT_VARIANT_CAPS_NORMAL),
     variantSubSuper(NS_FONT_VARIANT_POSITION_NORMAL),
@@ -4147,10 +4187,12 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
     MOZ_ASSERT(!mozilla::IsNaN(size));
     MOZ_ASSERT(!mozilla::IsNaN(sizeAdjust));
 
-    if (weight > 900)
-        weight = 900;
-    if (weight < 100)
-        weight = 100;
+    if (weight > FontWeight(900)) {
+        weight = FontWeight(900);
+    }
+    if (weight < FontWeight(100)) {
+        weight = FontWeight(100);
+    }
 
     if (size >= FONT_MAX_SIZE) {
         size = FONT_MAX_SIZE;
@@ -4166,25 +4208,26 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
     }
 }
 
-int8_t
-gfxFontStyle::ComputeWeight() const
+PLDHashNumber
+gfxFontStyle::Hash() const
 {
-    int8_t baseWeight = (weight + 50) / 100;
-
-    if (baseWeight < 0)
-        baseWeight = 0;
-    if (baseWeight > 9)
-        baseWeight = 9;
-
-    return baseWeight;
+    return mozilla::HashGeneric(systemFont, style.ForHash(),
+                                stretch.ForHash(), weight.ForHash(),
+                                size, sizeAdjust,
+                                nsRefPtrHashKey<nsAtom>::HashKey(language));
+    /* XXX
+    return (style + (systemFont << 7) + (weight.ForHash() << 8) +
+            uint32_t(size*1000) + int32_t(sizeAdjust*1000)) ^
+            nsRefPtrHashKey<nsAtom>::HashKey(language);
+    */
 }
 
 void
 gfxFontStyle::AdjustForSubSuperscript(int32_t aAppUnitsPerDevPixel)
 {
-    NS_PRECONDITION(variantSubSuper != NS_FONT_VARIANT_POSITION_NORMAL &&
-                    baselineOffset == 0,
-                    "can't adjust this style for sub/superscript");
+    MOZ_ASSERT(variantSubSuper != NS_FONT_VARIANT_POSITION_NORMAL &&
+               baselineOffset == 0,
+               "can't adjust this style for sub/superscript");
 
     // calculate the baseline offset (before changing the size)
     if (variantSubSuper == NS_FONT_VARIANT_POSITION_SUPER) {

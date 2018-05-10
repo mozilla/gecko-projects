@@ -20,6 +20,10 @@
 #include "nsHTMLParts.h"
 #include "nsISelectionDisplay.h"
 
+namespace mozilla {
+enum class TableSelection : uint32_t;
+} // namespace mozilla
+
 /**
  * nsFrame logging constants. We redefine the nspr
  * PRLogModuleInfo.level field to be a bitfield.  Each bit controls a
@@ -250,17 +254,17 @@ public:
   }
 
   /**
-   * Do the work for getting the parent style context frame so that
+   * Do the work for getting the parent ComputedStyle frame so that
    * other frame's |GetParentComputedStyle| methods can call this
    * method on *another* frame.  (This function handles out-of-flow
    * frames by using the frame manager's placeholder map and it also
    * handles block-within-inline and generated content wrappers.)
    *
    * @param aProviderFrame (out) the frame associated with the returned value
-   *     or null if the style context is for display:contents content.
-   * @return The style context that should be the parent of this frame's
-   *         style context.  Null is permitted, and means that this frame's
-   *         style context should be the root of the style context tree.
+   *   or null if the ComputedStyle is for display:contents content.
+   * @return The ComputedStyle that should be the parent of this frame's
+   *   ComputedStyle.  Null is permitted, and means that this frame's
+   *   ComputedStyle should be the root of the ComputedStyle tree.
    */
   ComputedStyle* DoGetParentComputedStyle(nsIFrame** aProviderFrame) const;
 
@@ -274,7 +278,8 @@ public:
                          InlineMinISizeData *aData) override;
   void AddInlinePrefISize(gfxContext *aRenderingContext,
                           InlinePrefISizeData *aData) override;
-  IntrinsicISizeOffsetData IntrinsicISizeOffsets() override;
+  IntrinsicISizeOffsetData
+  IntrinsicISizeOffsets(nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE) override;
   mozilla::IntrinsicSize GetIntrinsicSize() override;
   nsSize GetIntrinsicRatio() override;
 
@@ -556,7 +561,7 @@ public:
                       const nsDisplayListSet& aLists);
 
   /**
-   * Adjust the given parent frame to the right style context parent frame for
+   * Adjust the given parent frame to the right ComputedStyle parent frame for
    * the child, given the pseudo-type of the prospective child.  This handles
    * things like walking out of table pseudos and so forth.
    *
@@ -666,21 +671,17 @@ protected:
   //   of the enclosing cell or table (if not inside a cell)
   //  aTarget tells us what table element to select (currently only cell and table supported)
   //  (enums for this are defined in nsIFrame.h)
-  NS_IMETHOD GetDataForTableSelection(const nsFrameSelection* aFrameSelection,
-                                      nsIPresShell* aPresShell,
-                                      mozilla::WidgetMouseEvent* aMouseEvent,
-                                      nsIContent** aParentContent,
-                                      int32_t* aContentOffset,
-                                      int32_t* aTarget);
+  nsresult GetDataForTableSelection(const nsFrameSelection* aFrameSelection,
+                                    nsIPresShell* aPresShell,
+                                    mozilla::WidgetMouseEvent* aMouseEvent,
+                                    nsIContent** aParentContent,
+                                    int32_t* aContentOffset,
+                                    mozilla::TableSelection* aTarget);
 
   // Fills aCursor with the appropriate information from ui
   static void FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
                                              nsIFrame::Cursor& aCursor);
   NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
-
-#ifdef DEBUG_LAYOUT
-  void GetBoxName(nsAutoString& aName) override;
-#endif
 
   nsBoxLayoutMetrics* BoxMetrics() const;
 
@@ -706,8 +707,9 @@ private:
   // Returns true if this frame has any kind of CSS transitions.
   bool HasCSSTransitions();
 
-#ifdef DEBUG_FRAME_DUMP
 public:
+
+#ifdef DEBUG_FRAME_DUMP
   /**
    * Get a printable from of the name of the frame type.
    * XXX This should be eliminated and we use GetType() instead...
@@ -720,20 +722,6 @@ public:
 #endif
 
 #ifdef DEBUG
-public:
-  /**
-   * See if style tree verification is enabled. To enable style tree
-   * verification add "styleverifytree:1" to your MOZ_LOG
-   * environment variable (any non-zero debug level will work). Or,
-   * call SetVerifyStyleTreeEnable with true.
-   */
-  static bool GetVerifyStyleTreeEnable();
-
-  /**
-   * Set the verify-style-tree enable flag.
-   */
-  static void SetVerifyStyleTreeEnable(bool aEnabled);
-
   static mozilla::LazyLogModule sFrameLogModule;
 
   // Show frame borders when rendering
@@ -743,10 +731,7 @@ public:
   // Show frame border of event target
   static void ShowEventTargetFrameBorder(bool aEnable);
   static bool GetShowEventTargetFrameBorder();
-
 #endif
-
-public:
 
   static void PrintDisplayList(nsDisplayListBuilder* aBuilder,
                                const nsDisplayList& aList,

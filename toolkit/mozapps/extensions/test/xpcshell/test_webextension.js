@@ -10,11 +10,12 @@ const profileDir = gProfD.clone();
 profileDir.append("extensions");
 
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
-startupManager();
 
 const { GlobalManager } = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
 
 add_task(async function() {
+  await promiseStartupManager();
+
   equal(GlobalManager.extensionMap.size, 0);
 
   await Promise.all([
@@ -25,8 +26,8 @@ add_task(async function() {
   equal(GlobalManager.extensionMap.size, 1);
   ok(GlobalManager.extensionMap.has(ID));
 
-  let chromeReg = AM_Cc["@mozilla.org/chrome/chrome-registry;1"].
-                  getService(AM_Ci.nsIChromeRegistry);
+  let chromeReg = Cc["@mozilla.org/chrome/chrome-registry;1"].
+                  getService(Ci.nsIChromeRegistry);
   try {
     chromeReg.convertChromeURL(NetUtil.newURI("chrome://webex/content/webex.xul"));
     do_throw("Chrome manifest should not have been registered");
@@ -56,7 +57,7 @@ add_task(async function() {
 
   equal(GlobalManager.extensionMap.size, 0);
 
-  startupManager();
+  await promiseStartupManager();
   await promiseWebExtensionStartup();
 
   equal(GlobalManager.extensionMap.size, 1);
@@ -112,7 +113,7 @@ add_task(async function() {
     }
   }, profileDir);
 
-  startupManager();
+  await promiseStartupManager();
   await promiseWebExtensionStartup();
 
   let addon = await promiseAddonByID(ID);
@@ -212,29 +213,6 @@ add_task(async function() {
   await promiseRestartManager();
 });
 
-// install.rdf should be read before manifest.json
-add_task(async function() {
-
-  await Promise.all([
-    promiseInstallAllFiles([do_get_addon("webextension_2")], true)
-  ]);
-
-  await promiseRestartManager();
-
-  let installrdf_id = "first-webextension2@tests.mozilla.org";
-  let first_addon = await promiseAddonByID(installrdf_id);
-  Assert.notEqual(first_addon, null);
-  Assert.ok(!first_addon.appDisabled);
-  Assert.ok(first_addon.isActive);
-  Assert.ok(!first_addon.isSystem);
-
-  let manifestjson_id = "last-webextension2@tests.mozilla.org";
-  let last_addon = await promiseAddonByID(manifestjson_id);
-  Assert.equal(last_addon, null);
-
-  await promiseRestartManager();
-});
-
 // Test that the "options_ui" manifest section is processed correctly.
 add_task(async function test_options_ui() {
   let OPTIONS_RE = /^moz-extension:\/\/[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\/options\.html$/;
@@ -296,29 +274,6 @@ add_task(async function test_experiments_dependencies() {
             "Addon should have the expected dependencies");
 
   equal(addon.appDisabled, true, "Add-on should be app disabled due to missing dependencies");
-
-  addon.uninstall();
-});
-
-// Test that experiments API extensions install correctly.
-add_task(async function test_experiments_api() {
-  const extensionId = "meh@experiments.addons.mozilla.org";
-
-  let addonFile = createTempXPIFile({
-    id: extensionId,
-    type: 256,
-    version: "0.1",
-    name: "Meh API",
-  });
-
-  await promiseInstallAllFiles([addonFile]);
-
-  let addons = await AddonManager.getAddonsByTypes(["extension"]);
-  let addon = addons.pop();
-  equal(addon.id, extensionId, "Add-on should be installed as an API extension");
-
-  addons = await AddonManager.getAddonsByTypes(["extension"]);
-  equal(addons.pop().id, extensionId, "Add-on type should be aliased to extension");
 
   addon.uninstall();
 });

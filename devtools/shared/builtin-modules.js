@@ -15,12 +15,13 @@
 
 const { Cu, CC, Cc, Ci } = require("chrome");
 const promise = require("resource://gre/modules/Promise.jsm").Promise;
-const jsmScope = require("resource://gre/modules/Services.jsm");
+const jsmScope = require("resource://devtools/shared/Loader.jsm");
 const { Services } = jsmScope;
 // Steal various globals only available in JSM scope (and not Sandbox one)
 const {
   console,
   HeapSnapshot,
+  StructuredCloneHolder,
 } = Cu.getGlobalForObject(jsmScope);
 
 // Create a single Sandbox to access global properties needed in this module.
@@ -31,6 +32,9 @@ const {
   ChromeUtils,
   CSS,
   CSSRule,
+  DOMParser,
+  Element,
+  Event,
   FileReader,
   FormData,
   indexedDB,
@@ -46,6 +50,9 @@ const {
     "ChromeUtils",
     "CSS",
     "CSSRule",
+    "DOMParser",
+    "Element",
+    "Event",
     "FileReader",
     "FormData",
     "indexedDB",
@@ -261,8 +268,9 @@ exports.globals = {
   define(factory) {
     factory(this.require, this.exports, this.module);
   },
-  DocumentFragment: Ci.nsIDOMDocumentFragment,
-  Element: Ci.nsIDOMElement,
+  DOMParser,
+  Element,
+  Event,
   FormData,
   isWorker: false,
   loader: {
@@ -275,6 +283,7 @@ exports.globals = {
   },
   Node: Ci.nsIDOMNode,
   reportError: Cu.reportError,
+  StructuredCloneHolder,
   TextDecoder,
   TextEncoder,
   URL,
@@ -310,9 +319,6 @@ lazyGlobal("clearInterval", () => {
 });
 lazyGlobal("setInterval", () => {
   return require("resource://gre/modules/Timer.jsm").setInterval;
-});
-lazyGlobal("DOMParser", () => {
-  return CC("@mozilla.org/xmlextras/domparser;1", "nsIDOMParser");
 });
 lazyGlobal("WebSocket", () => {
   return Services.appShell.hiddenDOMWindow.WebSocket;

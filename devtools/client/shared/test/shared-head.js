@@ -25,7 +25,6 @@ const {loader, require} = scopedCuImport("resource://devtools/shared/Loader.jsm"
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {TargetFactory} = require("devtools/client/framework/target");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
 let promise = require("promise");
 let defer = require("devtools/shared/defer");
 const Services = require("Services");
@@ -37,6 +36,9 @@ const URL_ROOT = CHROME_URL_ROOT.replace("chrome://mochitests/content/",
                                          "http://example.com/");
 const URL_ROOT_SSL = CHROME_URL_ROOT.replace("chrome://mochitests/content/",
                                              "https://example.com/");
+
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/devtools/client/shared/test/telemetry-test-helpers.js", this);
 
 // Force devtools to be initialized so menu items and keyboard shortcuts get installed
 require("devtools/client/framework/devtools-browser");
@@ -63,7 +65,7 @@ registerCleanupFunction(function() {
  * Watch console messages for failed propType definitions in React components.
  */
 const ConsoleObserver = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 
   observe: function(subject) {
     let message = subject.wrappedJSObject.arguments[0];
@@ -109,10 +111,10 @@ function loadFrameScriptUtils(browser = gBrowser.selectedBrowser) {
   return mm;
 }
 
-flags.testing = true;
+Services.prefs.setBoolPref("devtools.inspector.show-three-pane-tooltip", false);
 registerCleanupFunction(() => {
-  flags.testing = false;
   Services.prefs.clearUserPref("devtools.dump.emit");
+  Services.prefs.clearUserPref("devtools.inspector.show-three-pane-tooltip");
   Services.prefs.clearUserPref("devtools.toolbox.host");
   Services.prefs.clearUserPref("devtools.toolbox.previousHost");
   Services.prefs.clearUserPref("devtools.toolbox.splitconsoleEnabled");
@@ -256,30 +258,29 @@ function synthesizeKeyShortcut(key, target) {
 function waitForNEvents(target, eventName, numTimes, useCapture = false) {
   info("Waiting for event: '" + eventName + "' on " + target + ".");
 
-  let deferred = defer();
   let count = 0;
 
-  for (let [add, remove] of [
-    ["on", "off"],
-    ["addEventListener", "removeEventListener"],
-    ["addListener", "removeListener"],
-  ]) {
-    if ((add in target) && (remove in target)) {
-      target[add](eventName, function onEvent(...aArgs) {
-        if (typeof info === "function") {
-          info("Got event: '" + eventName + "' on " + target + ".");
-        }
+  return new Promise(resolve => {
+    for (let [add, remove] of [
+      ["on", "off"],
+      ["addEventListener", "removeEventListener"],
+      ["addListener", "removeListener"],
+    ]) {
+      if ((add in target) && (remove in target)) {
+        target[add](eventName, function onEvent(...args) {
+          if (typeof info === "function") {
+            info("Got event: '" + eventName + "' on " + target + ".");
+          }
 
-        if (++count == numTimes) {
-          target[remove](eventName, onEvent, useCapture);
-          deferred.resolve.apply(deferred, aArgs);
-        }
-      }, useCapture);
-      break;
+          if (++count == numTimes) {
+            target[remove](eventName, onEvent, useCapture);
+            resolve(...args);
+          }
+        }, useCapture);
+        break;
+      }
     }
-  }
-
-  return deferred.promise;
+  });
 }
 
 /**
@@ -353,9 +354,7 @@ function loadHelperScript(filePath) {
  * @return {Promise}
  */
 function waitForTick() {
-  let deferred = defer();
-  executeSoon(deferred.resolve);
-  return deferred.promise;
+  return new Promise(resolve => executeSoon(resolve));
 }
 
 /**
@@ -492,9 +491,9 @@ function evalInDebuggee(script, browser = gBrowser.selectedBrowser) {
 /**
  * Wait for a context menu popup to open.
  *
- * @param nsIDOMElement popup
+ * @param Element popup
  *        The XUL popup you expect to open.
- * @param nsIDOMElement button
+ * @param Element button
  *        The button/element that receives the contextmenu event. This is
  *        expected to open the popup.
  * @param function onShown
@@ -506,32 +505,31 @@ function evalInDebuggee(script, browser = gBrowser.selectedBrowser) {
  *         callback is invoked.
  */
 function waitForContextMenu(popup, button, onShown, onHidden) {
-  let deferred = defer();
+  return new Promise(resolve => {
+    function onPopupShown() {
+      info("onPopupShown");
+      popup.removeEventListener("popupshown", onPopupShown);
 
-  function onPopupShown() {
-    info("onPopupShown");
-    popup.removeEventListener("popupshown", onPopupShown);
+      onShown && onShown();
 
-    onShown && onShown();
+      // Use executeSoon() to get out of the popupshown event.
+      popup.addEventListener("popuphidden", onPopupHidden);
+      executeSoon(() => popup.hidePopup());
+    }
+    function onPopupHidden() {
+      info("onPopupHidden");
+      popup.removeEventListener("popuphidden", onPopupHidden);
 
-    // Use executeSoon() to get out of the popupshown event.
-    popup.addEventListener("popuphidden", onPopupHidden);
-    executeSoon(() => popup.hidePopup());
-  }
-  function onPopupHidden() {
-    info("onPopupHidden");
-    popup.removeEventListener("popuphidden", onPopupHidden);
+      onHidden && onHidden();
 
-    onHidden && onHidden();
+      resolve(popup);
+    }
 
-    deferred.resolve(popup);
-  }
+    popup.addEventListener("popupshown", onPopupShown);
 
-  popup.addEventListener("popupshown", onPopupShown);
-
-  info("wait for the context menu to open");
-  synthesizeContextMenuEvent(button);
-  return deferred.promise;
+    info("wait for the context menu to open");
+    synthesizeContextMenuEvent(button);
+  });
 }
 
 function synthesizeContextMenuEvent(el) {
@@ -587,57 +585,6 @@ var closeToolbox = async function() {
 };
 
 /**
- * Load the Telemetry utils, then stub Telemetry.prototype.log and
- * Telemetry.prototype.logKeyed in order to record everything that's logged in
- * it.
- * Store all recordings in Telemetry.telemetryInfo.
- * @return {Telemetry}
- */
-function loadTelemetryAndRecordLogs() {
-  info("Mock the Telemetry log function to record logged information");
-
-  let Telemetry = require("devtools/client/shared/telemetry");
-  Telemetry.prototype.telemetryInfo = {};
-  Telemetry.prototype._oldlog = Telemetry.prototype.log;
-  Telemetry.prototype.log = function(histogramId, value) {
-    if (!this.telemetryInfo) {
-      // Telemetry instance still in use after stopRecordingTelemetryLogs
-      return;
-    }
-    if (histogramId) {
-      if (!this.telemetryInfo[histogramId]) {
-        this.telemetryInfo[histogramId] = [];
-      }
-      this.telemetryInfo[histogramId].push(value);
-    }
-  };
-  Telemetry.prototype._oldlogScalar = Telemetry.prototype.logScalar;
-  Telemetry.prototype.logScalar = Telemetry.prototype.log;
-  Telemetry.prototype._oldlogKeyed = Telemetry.prototype.logKeyed;
-  Telemetry.prototype.logKeyed = function(histogramId, key, value) {
-    this.log(`${histogramId}|${key}`, value);
-  };
-
-  return Telemetry;
-}
-
-/**
- * Stop recording the Telemetry logs and put back the utils as it was before.
- * @param {Telemetry} Required Telemetry
- *        Telemetry object that needs to be stopped.
- */
-function stopRecordingTelemetryLogs(Telemetry) {
-  info("Stopping Telemetry");
-  Telemetry.prototype.log = Telemetry.prototype._oldlog;
-  Telemetry.prototype.logScalar = Telemetry.prototype._oldlogScalar;
-  Telemetry.prototype.logKeyed = Telemetry.prototype._oldlogKeyed;
-  delete Telemetry.prototype._oldlog;
-  delete Telemetry.prototype._oldlogScalar;
-  delete Telemetry.prototype._oldlogKeyed;
-  delete Telemetry.prototype.telemetryInfo;
-}
-
-/**
  * Clean the logical clipboard content. This method only clears the OS clipboard on
  * Windows (see Bug 666254).
  */
@@ -657,14 +604,14 @@ function isWindows() {
  * Wait for a given toolbox to get its title updated.
  */
 function waitForTitleChange(toolbox) {
-  let deferred = defer();
-  toolbox.win.parent.addEventListener("message", function onmessage(event) {
-    if (event.data.name == "set-host-title") {
-      toolbox.win.parent.removeEventListener("message", onmessage);
-      deferred.resolve();
-    }
+  return new Promise(resolve => {
+    toolbox.win.parent.addEventListener("message", function onmessage(event) {
+      if (event.data.name == "set-host-title") {
+        toolbox.win.parent.removeEventListener("message", onmessage);
+        resolve();
+      }
+    });
   });
-  return deferred.promise;
 }
 
 /**
@@ -687,11 +634,7 @@ function createTestHTTPServer() {
   let server = new HttpServer();
 
   registerCleanupFunction(async function cleanup() {
-    let destroyed = defer();
-    server.stop(() => {
-      destroyed.resolve();
-    });
-    await destroyed.promise;
+    await new Promise(resolve => server.stop(resolve));
   });
 
   server.start(-1);

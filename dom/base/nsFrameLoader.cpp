@@ -35,7 +35,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIScrollable.h"
 #include "nsFrameLoader.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsSubDocumentFrame.h"
@@ -98,6 +97,8 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/GroupedHistoryEvent.h"
+#include "mozilla/dom/ParentSHistory.h"
+#include "mozilla/dom/ChildSHistory.h"
 
 #include "mozilla/dom/HTMLBodyElement.h"
 
@@ -146,7 +147,8 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsFrameLoader,
                                       mDocShell,
                                       mMessageManager,
                                       mChildMessageManager,
-                                      mOpener)
+                                      mOpener,
+                                      mParentSHistory)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameLoader)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameLoader)
 
@@ -157,8 +159,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFrameLoader)
       // from nsISupports* to nsFrameLoader* and end up with |this|.
       foundInterface = reinterpret_cast<nsISupports*>(this);
   } else
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIWebBrowserPersistable)
-  NS_INTERFACE_MAP_ENTRY(nsIWebBrowserPersistable)
+  NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 nsFrameLoader::nsFrameLoader(Element* aOwner, nsPIDOMWindowOuter* aOpener,
@@ -169,7 +171,6 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, nsPIDOMWindowOuter* aOpener,
   , mRemoteBrowser(nullptr)
   , mChildID(0)
   , mJSPluginID(aJSPluginID)
-  , mEventMode(FrameLoaderBinding::EVENT_MODE_NORMAL_DISPATCH)
   , mBrowserChangingProcessBlockers(nullptr)
   , mDepthTooGreat(false)
   , mIsTopLevelContent(false)
@@ -380,8 +381,7 @@ nsFrameLoader::SwapBrowsersAndNotify(nsFrameLoader* aOther)
                                      NS_LITERAL_STRING("BrowserChangedProcess"),
                                      eventInit);
   event->SetTrusted(true);
-  bool dummy;
-  primaryContent->DispatchEvent(event, &dummy);
+  primaryContent->DispatchEvent(*event);
 
   return true;
 }
@@ -394,8 +394,6 @@ nsFrameLoader::FireWillChangeProcessEvent()
     return nullptr;
   }
   JSContext* cx = jsapi.cx();
-  GlobalObject global(cx, mOwnerContent->GetOwnerGlobal()->GetGlobalJSObject());
-  MOZ_ASSERT(!global.Failed());
 
   // Set our mBrowserChangingProcessBlockers property to refer to the blockers
   // list. We will synchronously dispatch a DOM event to collect this list of
@@ -412,13 +410,12 @@ nsFrameLoader::FireWillChangeProcessEvent()
                                      NS_LITERAL_STRING("BrowserWillChangeProcess"),
                                      eventInit);
   event->SetTrusted(true);
-  bool dummy;
-  mOwnerContent->DispatchEvent(event, &dummy);
+  mOwnerContent->DispatchEvent(*event);
 
   mBrowserChangingProcessBlockers = nullptr;
 
   ErrorResult rv;
-  RefPtr<Promise> allPromise = Promise::All(global, blockers, rv);
+  RefPtr<Promise> allPromise = Promise::All(cx, blockers, rv);
   return allPromise.forget();
 }
 
@@ -633,7 +630,7 @@ SetTreeOwnerAndChromeEventHandlerOnDocshellTree(nsIDocShellTreeItem* aItem,
                                                 nsIDocShellTreeOwner* aOwner,
                                                 EventTarget* aHandler)
 {
-  NS_PRECONDITION(aItem, "Must have item");
+  MOZ_ASSERT(aItem, "Must have item");
 
   aItem->SetTreeOwner(aOwner);
 
@@ -665,8 +662,8 @@ nsFrameLoader::AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
                                       int32_t aParentType,
                                       nsIDocShell* aParentNode)
 {
-  NS_PRECONDITION(aItem, "Must have docshell treeitem");
-  NS_PRECONDITION(mOwnerContent, "Must have owning content");
+  MOZ_ASSERT(aItem, "Must have docshell treeitem");
+  MOZ_ASSERT(mOwnerContent, "Must have owning content");
 
   nsAutoString value;
   bool isContent = mOwnerContent->AttrValueIs(
@@ -846,7 +843,8 @@ nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
   presShell = mDocShell->GetPresShell();
   if (presShell) {
     nsIDocument* doc = presShell->GetDocument();
-    nsHTMLDocument* htmlDoc = doc ? doc->AsHTMLDocument() : nullptr;
+    nsHTMLDocument* htmlDoc =
+      doc && doc->IsHTMLOrXHTML() ? doc->AsHTMLDocument() : nullptr;
 
     if (htmlDoc) {
       nsAutoString designMode;
@@ -906,13 +904,9 @@ nsFrameLoader::MarginsChanged(uint32_t aMarginWidth,
   // There's a cached property declaration block
   // that needs to be updated
   if (nsIDocument* doc = mDocShell->GetDocument()) {
-    // We don't need to do anything for Gecko here because
-    // we plan to RebuildAllStyleData anyway.
-    if (doc->GetStyleBackendType() == StyleBackendType::Servo) {
-      for (nsINode* cur = doc; cur; cur = cur->GetNextNode()) {
-        if (cur->IsHTMLElement(nsGkAtoms::body)) {
-          static_cast<HTMLBodyElement*>(cur)->ClearMappedServoStyle();
-        }
+    for (nsINode* cur = doc; cur; cur = cur->GetNextNode()) {
+      if (cur->IsHTMLElement(nsGkAtoms::body)) {
+        static_cast<HTMLBodyElement*>(cur)->ClearMappedServoStyle();
       }
     }
   }
@@ -1009,6 +1003,28 @@ nsFrameLoader::Hide()
                "Found an nsIDocShell which doesn't implement nsIBaseWindow.");
   baseWin->SetVisibility(false);
   baseWin->SetParentWidget(nullptr);
+}
+
+void
+nsFrameLoader::ForceLayoutIfNecessary()
+{
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (!frame) {
+    return;
+  }
+
+  nsPresContext* presContext = frame->PresContext();
+  if (!presContext) {
+    return;
+  }
+
+  // Only force the layout flush if the frameloader hasn't ever been
+  // run through layout.
+  if (frame->GetStateBits() & NS_FRAME_FIRST_REFLOW) {
+    if (nsCOMPtr<nsIPresShell> shell = presContext->GetPresShell()) {
+      shell->FlushPendingNotifications(FlushType::Layout);
+    }
+  }
 }
 
 nsresult
@@ -1383,10 +1399,8 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
-  nsCOMPtr<nsISHistory> ourHistory;
-  nsCOMPtr<nsISHistory> otherHistory;
-  ourRootWebnav->GetSessionHistory(getter_AddRefs(ourHistory));
-  otherRootWebnav->GetSessionHistory(getter_AddRefs(otherHistory));
+  RefPtr<ChildSHistory> ourHistory = ourRootWebnav->GetSessionHistory();
+  RefPtr<ChildSHistory> otherHistory = otherRootWebnav->GetSessionHistory();
 
   if ((ourRootTreeItem != ourDocshell || otherRootTreeItem != otherDocshell) &&
       (ourHistory || otherHistory)) {
@@ -1616,15 +1630,11 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   aOtherOwner->InternalSetFrameLoader(kungFuDeathGrip);
 
   // Drop any cached content viewers in the two session histories.
-  nsCOMPtr<nsISHistoryInternal> ourInternalHistory =
-    do_QueryInterface(ourHistory);
-  nsCOMPtr<nsISHistoryInternal> otherInternalHistory =
-    do_QueryInterface(otherHistory);
-  if (ourInternalHistory) {
-    ourInternalHistory->EvictAllContentViewers();
+  if (ourHistory) {
+    ourHistory->EvictLocalContentViewers();
   }
-  if (otherInternalHistory) {
-    otherInternalHistory->EvictAllContentViewers();
+  if (otherHistory) {
+    otherHistory->EvictLocalContentViewers();
   }
 
   NS_ASSERTION(ourFrame == ourContent->GetPrimaryFrame() &&
@@ -2066,13 +2076,13 @@ nsFrameLoader::MaybeCreateDocShell()
 
   // Make sure all shells have links back to the content element
   // in the nearest enclosing chrome shell.
-  nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
+  RefPtr<EventTarget> chromeEventHandler;
 
   if (parentType == nsIDocShellTreeItem::typeChrome) {
     // Our parent shell is a chrome shell. It is therefore our nearest
     // enclosing chrome shell.
 
-    chromeEventHandler = do_QueryInterface(mOwnerContent);
+    chromeEventHandler = mOwnerContent;
     NS_ASSERTION(chromeEventHandler,
                  "This mContent should implement this.");
   } else {
@@ -2114,16 +2124,16 @@ nsFrameLoader::MaybeCreateDocShell()
     return NS_ERROR_FAILURE;
   }
 
+  // If we are an in-process browser, we want to set up our session history. We
+  // do this by creating both the child SHistory (which is in the nsDocShell),
+  // and creating the corresponding in-process ParentSHistory.
   if (mIsTopLevelContent &&
       mOwnerContent->IsXULElement(nsGkAtoms::browser) &&
       !mOwnerContent->HasAttr(kNameSpaceID_None, nsGkAtoms::disablehistory)) {
-    nsresult rv;
-    nsCOMPtr<nsISHistory> sessionHistory =
-      do_CreateInstance(NS_SHISTORY_CONTRACTID, &rv);
+    // XXX(nika): Set this up more explicitly?
+    nsresult rv = mDocShell->InitSessionHistory();
     NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(mDocShell));
-    webNav->SetSessionHistory(sessionHistory);
+    mParentSHistory = new ParentSHistory(this);
   }
 
   OriginAttributes attrs;
@@ -2534,9 +2544,8 @@ GetContentParent(Element* aBrowser)
     return ReturnTuple(nullptr, nullptr);
   }
 
-  nsCOMPtr<nsISupports> otherLoaderAsSupports;
-  browser->GetSameProcessAsFrameLoader(getter_AddRefs(otherLoaderAsSupports));
-  RefPtr<nsFrameLoader> otherLoader = do_QueryObject(otherLoaderAsSupports);
+  RefPtr<nsFrameLoader> otherLoader;
+  browser->GetSameProcessAsFrameLoader(getter_AddRefs(otherLoader));
   if (!otherLoader) {
     return ReturnTuple(nullptr, nullptr);
   }
@@ -2685,6 +2694,14 @@ nsFrameLoader::TryRemoteBrowser()
     nsCOMPtr<nsIBrowserDOMWindow> browserDOMWin;
     rootChromeWin->GetBrowserDOMWindow(getter_AddRefs(browserDOMWin));
     mRemoteBrowser->SetBrowserDOMWindow(browserDOMWin);
+  }
+
+  // Set up a parent SHistory
+  if (XRE_IsParentProcess()) {
+    // XXX(nika): Once we get out of process iframes we won't want to
+    // unconditionally set this up. What do we do for iframes in a chrome loaded
+    // document for example?
+    mParentSHistory = new ParentSHistory(this);
   }
 
   // Send down the name of the browser through mRemoteBrowser if it is set.
@@ -2888,7 +2905,7 @@ nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
   return NS_ERROR_UNEXPECTED;
 }
 
-already_AddRefed<nsIMessageSender>
+already_AddRefed<MessageSender>
 nsFrameLoader::GetMessageManager()
 {
   EnsureMessageManager();
@@ -2914,28 +2931,27 @@ nsFrameLoader::EnsureMessageManager()
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMChromeWindow> chromeWindow =
-    do_QueryInterface(GetOwnerDoc()->GetWindow());
-  nsCOMPtr<nsIMessageBroadcaster> parentManager;
+  RefPtr<nsGlobalWindowOuter> window =
+    nsGlobalWindowOuter::Cast(GetOwnerDoc()->GetWindow());
+  RefPtr<ChromeMessageBroadcaster> parentManager;
 
-  if (chromeWindow) {
+  if (window && window->IsChromeWindow()) {
     nsAutoString messagemanagergroup;
     if (mOwnerContent->IsXULElement() &&
         mOwnerContent->GetAttr(kNameSpaceID_None,
                                nsGkAtoms::messagemanagergroup,
                                messagemanagergroup)) {
-      chromeWindow->GetGroupMessageManager(messagemanagergroup, getter_AddRefs(parentManager));
+      parentManager = window->GetGroupMessageManager(messagemanagergroup);
     }
 
     if (!parentManager) {
-      chromeWindow->GetMessageManager(getter_AddRefs(parentManager));
+      parentManager = window->GetMessageManager();
     }
   } else {
-    parentManager = do_GetService("@mozilla.org/globalmessagemanager;1");
+    parentManager = nsFrameMessageManager::GetGlobalMessageManager();
   }
 
-  mMessageManager = new ChromeMessageSender(nullptr,
-                                            static_cast<nsFrameMessageManager*>(parentManager.get()));
+  mMessageManager = new ChromeMessageSender(nullptr, parentManager);
   if (!IsRemoteFrame()) {
     nsresult rv = MaybeCreateDocShell();
     if (NS_FAILED(rv)) {
@@ -2947,7 +2963,8 @@ nsFrameLoader::EnsureMessageManager()
       return NS_ERROR_FAILURE;
     }
     mChildMessageManager =
-      new nsInProcessTabChildGlobal(mDocShell, mOwnerContent, mMessageManager);
+      nsInProcessTabChildGlobal::Create(mDocShell, mOwnerContent, mMessageManager);
+    NS_ENSURE_TRUE(mChildMessageManager, NS_ERROR_UNEXPECTED);
   }
   return NS_OK;
 }
@@ -3211,7 +3228,8 @@ nsFrameLoader::InitializeBrowserAPI()
       mMessageManager->LoadFrameScript(
         NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js"),
         /* allowDelayedLoad = */ true,
-        /* aRunInGlobalScope */ true);
+        /* aRunInGlobalScope */ true,
+        IgnoreErrors());
     }
   }
   nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(mOwnerContent);
@@ -3237,22 +3255,11 @@ nsFrameLoader::StartPersistence(uint64_t aOuterWindowID,
                                 nsIWebBrowserPersistDocumentReceiver* aRecv,
                                 ErrorResult& aRv)
 {
-  nsresult rv = StartPersistence(aOuterWindowID, aRecv);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-  }
-}
-
-NS_IMETHODIMP
-nsFrameLoader::StartPersistence(uint64_t aOuterWindowID,
-                                nsIWebBrowserPersistDocumentReceiver* aRecv)
-{
-  if (!aRecv) {
-    return NS_ERROR_INVALID_POINTER;
-  }
+  MOZ_ASSERT(aRecv);
 
   if (mRemoteBrowser) {
-    return mRemoteBrowser->StartPersistence(aOuterWindowID, aRecv);
+    mRemoteBrowser->StartPersistence(aOuterWindowID, aRecv, aRv);
+    return;
   }
 
   nsCOMPtr<nsIDocument> rootDoc =
@@ -3271,7 +3278,6 @@ nsFrameLoader::StartPersistence(uint64_t aOuterWindowID,
       new mozilla::WebBrowserPersistLocalDocument(foundDoc);
     aRecv->OnDocumentReady(pdoc);
   }
-  return NS_OK;
 }
 
 void
@@ -3386,7 +3392,7 @@ nsFrameLoader::PopulateUserContextIdFromAttribute(OriginAttributes& aAttr)
   return NS_OK;
 }
 
-nsIMessageSender*
+ChromeMessageSender*
 nsFrameLoader::GetProcessMessageManager() const
 {
   return mRemoteBrowser ? mRemoteBrowser->Manager()->GetMessageManager()

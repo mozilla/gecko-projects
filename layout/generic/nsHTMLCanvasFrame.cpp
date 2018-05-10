@@ -153,7 +153,6 @@ public:
         // Push IFrame for async image pipeline.
         // XXX Remove this once partial display list update is supported.
 
-        /* ScrollingLayersHelper scroller(this, aBuilder, aResources, aSc); */
         nsIntSize canvasSizeInPx = data->GetSize();
         IntrinsicSize intrinsicSize = IntrinsicSizeFromCanvasSize(canvasSizeInPx);
         nsSize intrinsicRatio = IntrinsicRatioFromCanvasSize(canvasSizeInPx);
@@ -173,7 +172,7 @@ public:
         // where it will be done when we build the display list for the iframe.
         // That happens in WebRenderCompositableHolder.
 
-        wr::LayoutRect r = aSc.ToRelativeLayoutRect(bounds);
+        wr::LayoutRect r = wr::ToRoundedLayoutRect(bounds);
         aBuilder.PushIFrame(r, !BackfaceIsHidden(), data->GetPipelineId().ref());
 
         gfx::Matrix4x4 scTransform;
@@ -351,7 +350,7 @@ nsHTMLCanvasFrame::Reflow(nsPresContext*           aPresContext,
                   ("enter nsHTMLCanvasFrame::Reflow: availSize=%d,%d",
                   aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
 
-  NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
+  MOZ_ASSERT(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   WritingMode wm = aReflowInput.GetWritingMode();
   LogicalSize finalSize(wm,

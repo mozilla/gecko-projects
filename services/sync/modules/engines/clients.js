@@ -114,6 +114,10 @@ ClientEngine.prototype = {
     Services.prefs.setIntPref(LAST_MODIFIED_ON_PROCESS_COMMAND_PREF, value);
   },
 
+  get isFirstSync() {
+    return !this.lastRecordUpload;
+  },
+
   // Always sync client data as it controls other sync behavior
   get enabled() {
     return true;
@@ -228,10 +232,15 @@ ClientEngine.prototype = {
     return null;
   },
 
-  isMobile: function isMobile(id) {
-    if (this._store._remoteClients[id])
-      return this._store._remoteClients[id].type == DEVICE_TYPE_MOBILE;
-    return false;
+  getClientType(id) {
+    const client = this._store._remoteClients[id];
+    if (client.type == DEVICE_TYPE_DESKTOP) {
+      return "desktop";
+    }
+    if (client.formfactor && client.formfactor.includes("tablet")) {
+      return "tablet";
+    }
+    return "phone";
   },
 
   async _readCommands() {
@@ -363,18 +372,16 @@ ClientEngine.prototype = {
   },
 
   async _syncStartup() {
-    this.isFirstSync = !this.lastRecordUpload;
     // Reupload new client record periodically.
     if (Date.now() / 1000 - this.lastRecordUpload > CLIENTS_TTL_REFRESH) {
       await this._tracker.addChangedID(this.localID);
-      this.lastRecordUpload = Date.now() / 1000;
     }
     return SyncEngine.prototype._syncStartup.call(this);
   },
 
   async _processIncoming() {
     // Fetch all records from the server.
-    await this.setLastSync(0);
+    await this.resetLastSync();
     this._incomingClients = {};
     try {
       await SyncEngine.prototype._processIncoming.call(this);
@@ -453,7 +460,9 @@ ClientEngine.prototype = {
     // Record the response time as the server time for each item we uploaded.
     let lastSync = await this.getLastSync();
     for (let id of updatedIDs) {
-      if (id != this.localID) {
+      if (id == this.localID) {
+        this.lastRecordUpload = lastSync;
+      } else {
         this._store._remoteClients[id].serverLastModified = lastSync;
       }
     }
@@ -894,9 +903,10 @@ ClientEngine.prototype = {
    * topic. The callback will receive an array as the subject parameter
    * containing objects with the following keys:
    *
-   *   uri       URI (string) that is requested for display.
-   *   clientId  ID of client that sent the command.
-   *   title     Title of page that loaded URI (likely) corresponds to.
+   *   uri         URI (string) that is requested for display.
+   *   sender.id   ID of client that sent the command.
+   *   sender.name Name of client that sent the command.
+   *   title       Title of page that loaded URI (likely) corresponds to.
    *
    * The 'data' parameter to the callback will not be defined.
    *
@@ -910,7 +920,13 @@ ClientEngine.prototype = {
    *        String title of page that URI corresponds to. Older clients may not
    *        send this.
    */
-  _handleDisplayURIs: function _handleDisplayURIs(uris) {
+  _handleDisplayURIs(uris) {
+    uris.forEach(uri => {
+      uri.sender = {
+        id: uri.clientId,
+        name: this.getClientName(uri.clientId)
+      };
+    });
     Svc.Obs.notify("weave:engine:clients:display-uris", uris);
   },
 

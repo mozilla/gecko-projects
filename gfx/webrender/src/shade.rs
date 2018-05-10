@@ -23,7 +23,7 @@ use time::precise_time_ns;
 
 
 impl ImageBufferKind {
-    fn get_feature_string(&self) -> &'static str {
+    pub(crate) fn get_feature_string(&self) -> &'static str {
         match *self {
             ImageBufferKind::Texture2D => "TEXTURE_2D",
             ImageBufferKind::Texture2DArray => "",
@@ -53,13 +53,18 @@ pub const IMAGE_BUFFER_KINDS: [ImageBufferKind; 4] = [
 const TRANSFORM_FEATURE: &str = "TRANSFORM";
 const ALPHA_FEATURE: &str = "ALPHA_PASS";
 const DITHERING_FEATURE: &str = "DITHERING";
+const DUAL_SOURCE_FEATURE: &str = "DUAL_SOURCE_BLENDING";
 
-enum ShaderKind {
+pub(crate) enum ShaderKind {
     Primitive,
     Cache(VertexArrayKind),
     ClipCache,
     Brush,
     Text,
+    #[allow(dead_code)]
+    VectorStencil,
+    #[allow(dead_code)]
+    VectorCover,
 }
 
 pub struct LazilyCompiledShader {
@@ -70,7 +75,7 @@ pub struct LazilyCompiledShader {
 }
 
 impl LazilyCompiledShader {
-    fn new(
+    pub(crate) fn new(
         kind: ShaderKind,
         name: &'static str,
         features: &[&'static str],
@@ -134,6 +139,18 @@ impl LazilyCompiledShader {
                                        &self.features,
                                        format)
                 }
+                ShaderKind::VectorStencil => {
+                    create_prim_shader(self.name,
+                                       device,
+                                       &self.features,
+                                       VertexArrayKind::VectorStencil)
+                }
+                ShaderKind::VectorCover => {
+                    create_prim_shader(self.name,
+                                       device,
+                                       &self.features,
+                                       VertexArrayKind::VectorCover)
+                }
                 ShaderKind::ClipCache => {
                     create_clip_shader(self.name, device)
                 }
@@ -165,6 +182,7 @@ impl LazilyCompiledShader {
 struct BrushShader {
     opaque: LazilyCompiledShader,
     alpha: LazilyCompiledShader,
+    dual_source: Option<LazilyCompiledShader>,
 }
 
 impl BrushShader {
@@ -173,6 +191,7 @@ impl BrushShader {
         device: &mut Device,
         features: &[&'static str],
         precache: bool,
+        dual_source: bool,
     ) -> Result<Self, ShaderError> {
         let opaque = LazilyCompiledShader::new(
             ShaderKind::Brush,
@@ -193,7 +212,28 @@ impl BrushShader {
             precache,
         )?;
 
-        Ok(BrushShader { opaque, alpha })
+        let dual_source = if dual_source {
+            let mut dual_source_features = alpha_features.to_vec();
+            dual_source_features.push(DUAL_SOURCE_FEATURE);
+
+            let shader = LazilyCompiledShader::new(
+                ShaderKind::Brush,
+                name,
+                &dual_source_features,
+                device,
+                precache,
+            )?;
+
+            Some(shader)
+        } else {
+            None
+        };
+
+        Ok(BrushShader {
+            opaque,
+            alpha,
+            dual_source,
+        })
     }
 
     fn get(&mut self, blend_mode: BlendMode) -> &mut LazilyCompiledShader {
@@ -202,16 +242,22 @@ impl BrushShader {
             BlendMode::Alpha |
             BlendMode::PremultipliedAlpha |
             BlendMode::PremultipliedDestOut |
-            BlendMode::SubpixelDualSource |
             BlendMode::SubpixelConstantTextColor(..) |
-            BlendMode::SubpixelVariableTextColor |
             BlendMode::SubpixelWithBgColor => &mut self.alpha,
+            BlendMode::SubpixelDualSource => {
+                self.dual_source
+                    .as_mut()
+                    .expect("bug: no dual source shader loaded")
+            }
         }
     }
 
     fn deinit(self, device: &mut Device) {
         self.opaque.deinit(device);
         self.alpha.deinit(device);
+        if let Some(dual_source) = self.dual_source {
+            dual_source.deinit(device);
+        }
     }
 }
 
@@ -354,6 +400,9 @@ fn create_prim_shader(
         VertexArrayKind::Primitive => desc::PRIM_INSTANCES,
         VertexArrayKind::Blur => desc::BLUR,
         VertexArrayKind::Clip => desc::CLIP,
+        VertexArrayKind::DashAndDot => desc::BORDER_CORNER_DASH_AND_DOT,
+        VertexArrayKind::VectorStencil => desc::VECTOR_STENCIL,
+        VertexArrayKind::VectorCover => desc::VECTOR_COVER,
     };
 
     let program = device.create_program(name, &prefix, &vertex_descriptor);
@@ -418,7 +467,6 @@ pub struct Shaders {
 
     // Brush shaders
     brush_solid: BrushShader,
-    brush_line: BrushShader,
     brush_image: Vec<Option<BrushShader>>,
     brush_blend: BrushShader,
     brush_mix_blend: BrushShader,
@@ -433,6 +481,7 @@ pub struct Shaders {
     pub cs_clip_box_shadow: LazilyCompiledShader,
     pub cs_clip_image: LazilyCompiledShader,
     pub cs_clip_border: LazilyCompiledShader,
+    pub cs_clip_line: LazilyCompiledShader,
 
     // The are "primitive shaders". These shaders draw and blend
     // final results on screen. They are aware of tile boundaries.
@@ -447,7 +496,6 @@ pub struct Shaders {
     ps_border_corner: PrimitiveShader,
     ps_border_edge: PrimitiveShader,
 
-    ps_hw_composite: LazilyCompiledShader,
     ps_split_composite: LazilyCompiledShader,
 }
 
@@ -457,18 +505,21 @@ impl Shaders {
         gl_type: GlType,
         options: &RendererOptions,
     ) -> Result<Self, ShaderError> {
+        // needed for the precache fake draws
+        let dummy_vao = if options.precache_shaders {
+            let vao = device.create_custom_vao(&[]);
+            device.bind_custom_vao(&vao);
+            Some(vao)
+        } else {
+            None
+        };
+
         let brush_solid = BrushShader::new(
             "brush_solid",
             device,
             &[],
             options.precache_shaders,
-        )?;
-
-        let brush_line = BrushShader::new(
-            "brush_line",
-            device,
-            &[],
-            options.precache_shaders,
+            false,
         )?;
 
         let brush_blend = BrushShader::new(
@@ -476,6 +527,7 @@ impl Shaders {
             device,
             &[],
             options.precache_shaders,
+            false,
         )?;
 
         let brush_mix_blend = BrushShader::new(
@@ -483,6 +535,7 @@ impl Shaders {
             device,
             &[],
             options.precache_shaders,
+            false,
         )?;
 
         let brush_radial_gradient = BrushShader::new(
@@ -494,6 +547,7 @@ impl Shaders {
                &[]
             },
             options.precache_shaders,
+            false,
         )?;
 
         let brush_linear_gradient = BrushShader::new(
@@ -505,6 +559,7 @@ impl Shaders {
                &[]
             },
             options.precache_shaders,
+            false,
         )?;
 
         let cs_blur_a8 = LazilyCompiledShader::new(
@@ -534,6 +589,14 @@ impl Shaders {
         let cs_clip_box_shadow = LazilyCompiledShader::new(
             ShaderKind::ClipCache,
             "cs_clip_box_shadow",
+            &[],
+            device,
+            options.precache_shaders,
+        )?;
+
+        let cs_clip_line = LazilyCompiledShader::new(
+            ShaderKind::ClipCache,
+            "cs_clip_line",
             &[],
             device,
             options.precache_shaders,
@@ -593,6 +656,7 @@ impl Shaders {
                     device,
                     &image_features,
                     options.precache_shaders,
+                    true,
                 )?);
             }
             image_features.clear();
@@ -606,20 +670,19 @@ impl Shaders {
         for _ in 0 .. yuv_shader_num {
             brush_yuv_image.push(None);
         }
-        for buffer_kind in 0 .. IMAGE_BUFFER_KINDS.len() {
-            if IMAGE_BUFFER_KINDS[buffer_kind].has_platform_support(&gl_type) {
-                for format_kind in 0 .. YUV_FORMATS.len() {
-                    for color_space_kind in 0 .. YUV_COLOR_SPACES.len() {
-                        let feature_string = IMAGE_BUFFER_KINDS[buffer_kind].get_feature_string();
+        for image_buffer_kind in &IMAGE_BUFFER_KINDS {
+            if image_buffer_kind.has_platform_support(&gl_type) {
+                for format_kind in &YUV_FORMATS {
+                    for color_space_kind in &YUV_COLOR_SPACES {
+                        let feature_string = image_buffer_kind.get_feature_string();
                         if feature_string != "" {
                             yuv_features.push(feature_string);
                         }
-                        let feature_string = YUV_FORMATS[format_kind].get_feature_string();
+                        let feature_string = format_kind.get_feature_string();
                         if feature_string != "" {
                             yuv_features.push(feature_string);
                         }
-                        let feature_string =
-                            YUV_COLOR_SPACES[color_space_kind].get_feature_string();
+                        let feature_string = color_space_kind.get_feature_string();
                         if feature_string != "" {
                             yuv_features.push(feature_string);
                         }
@@ -629,11 +692,12 @@ impl Shaders {
                             device,
                             &yuv_features,
                             options.precache_shaders,
+                            false,
                         )?;
                         let index = Self::get_yuv_shader_index(
-                            IMAGE_BUFFER_KINDS[buffer_kind],
-                            YUV_FORMATS[format_kind],
-                            YUV_COLOR_SPACES[color_space_kind],
+                            *image_buffer_kind,
+                            *format_kind,
+                            *color_space_kind,
                         );
                         brush_yuv_image[index] = Some(shader);
                         yuv_features.clear();
@@ -656,14 +720,6 @@ impl Shaders {
              options.precache_shaders,
         )?;
 
-        let ps_hw_composite = LazilyCompiledShader::new(
-            ShaderKind::Primitive,
-            "ps_hardware_composite",
-            &[],
-            device,
-            options.precache_shaders,
-        )?;
-
         let ps_split_composite = LazilyCompiledShader::new(
             ShaderKind::Primitive,
             "ps_split_composite",
@@ -672,11 +728,14 @@ impl Shaders {
             options.precache_shaders,
         )?;
 
+        if let Some(vao) = dummy_vao {
+            device.delete_custom_vao(vao);
+        }
+
         Ok(Shaders {
             cs_blur_a8,
             cs_blur_rgba8,
             brush_solid,
-            brush_line,
             brush_image,
             brush_blend,
             brush_mix_blend,
@@ -687,12 +746,12 @@ impl Shaders {
             cs_clip_box_shadow,
             cs_clip_border,
             cs_clip_image,
+            cs_clip_line,
             ps_text_run,
             ps_text_run_dual_source,
             ps_image,
             ps_border_corner,
             ps_border_edge,
-            ps_hw_composite,
             ps_split_composite,
         })
     }
@@ -708,9 +767,6 @@ impl Shaders {
 
     pub fn get(&mut self, key: &BatchKey) -> &mut LazilyCompiledShader {
         match key.kind {
-            BatchKind::HardwareComposite => {
-                &mut self.ps_hw_composite
-            }
             BatchKind::SplitComposite => {
                 &mut self.ps_split_composite
             }
@@ -723,9 +779,6 @@ impl Shaders {
                         self.brush_image[image_buffer_kind as usize]
                             .as_mut()
                             .expect("Unsupported image shader kind")
-                    }
-                    BrushBatchKind::Line => {
-                        &mut self.brush_line
                     }
                     BrushBatchKind::Blend => {
                         &mut self.brush_blend
@@ -751,8 +804,16 @@ impl Shaders {
             }
             BatchKind::Transformable(transform_kind, batch_kind) => {
                 let prim_shader = match batch_kind {
-                    TransformBatchKind::TextRun(..) => {
-                        unreachable!("bug: text batches are special cased");
+                    TransformBatchKind::TextRun(glyph_format) => {
+                        let text_shader = match key.blend_mode {
+                            BlendMode::SubpixelDualSource => {
+                                &mut self.ps_text_run_dual_source
+                            }
+                            _ => {
+                                &mut self.ps_text_run
+                            }
+                        };
+                        return text_shader.get(glyph_format, transform_kind);
                     }
                     TransformBatchKind::Image(image_buffer_kind) => {
                         self.ps_image[image_buffer_kind as usize]
@@ -775,7 +836,6 @@ impl Shaders {
         self.cs_blur_a8.deinit(device);
         self.cs_blur_rgba8.deinit(device);
         self.brush_solid.deinit(device);
-        self.brush_line.deinit(device);
         self.brush_blend.deinit(device);
         self.brush_mix_blend.deinit(device);
         self.brush_radial_gradient.deinit(device);
@@ -784,6 +844,7 @@ impl Shaders {
         self.cs_clip_box_shadow.deinit(device);
         self.cs_clip_image.deinit(device);
         self.cs_clip_border.deinit(device);
+        self.cs_clip_line.deinit(device);
         self.ps_text_run.deinit(device);
         self.ps_text_run_dual_source.deinit(device);
         for shader in self.brush_image {
@@ -803,7 +864,6 @@ impl Shaders {
         }
         self.ps_border_corner.deinit(device);
         self.ps_border_edge.deinit(device);
-        self.ps_hw_composite.deinit(device);
         self.ps_split_composite.deinit(device);
     }
 }

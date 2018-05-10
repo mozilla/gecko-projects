@@ -2,8 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define VECS_PER_SPECIFIC_BRUSH 2
-#define FORCE_NO_PERSPECTIVE
+#define VECS_PER_SPECIFIC_BRUSH 3
 
 #include shared,prim_shared,brush
 
@@ -21,8 +20,12 @@ void brush_vs(
     VertexInfo vi,
     int prim_address,
     RectWithSize local_rect,
+    RectWithSize segment_rect,
     ivec3 user_data,
-    PictureTask pic_task
+    mat4 transform,
+    PictureTask pic_task,
+    int brush_flags,
+    vec4 unused
 ) {
     PictureTask src_task = fetch_picture_task(user_data.x);
     vec2 texture_size = vec2(textureSize(sColor0, 0).xy);
@@ -120,11 +123,11 @@ vec3 Brightness(vec3 Cs, float amount) {
     return clamp(Cs.rgb * amount, vec3(0.0), vec3(1.0));
 }
 
-vec4 brush_fs() {
+Fragment brush_fs() {
     vec4 Cs = texture(sColor0, vUv);
 
     if (Cs.a == 0.0) {
-        return vec4(0.0); // could also `discard`
+        return Fragment(vec4(0.0)); // could also `discard`
     }
 
     // Un-premultiply the input.
@@ -155,6 +158,6 @@ vec4 brush_fs() {
     alpha *= point_inside_rect(vUv.xy, vUvClipBounds.xy, vUvClipBounds.zw);
 
     // Pre-multiply the alpha into the output value.
-    return alpha * vec4(color, 1.0);
+    return Fragment(alpha * vec4(color, 1.0));
 }
 #endif

@@ -7,7 +7,7 @@
 
 const PAGE_URL = "data:text/html;charset=utf-8,<body><div></div></body>";
 
-add_task(async function () {
+add_task(async function() {
   let tab = await addTab(PAGE_URL);
   let toolbox = await openToolboxForTab(tab, "inspector", "bottom");
   let inspector = toolbox.getCurrentPanel();
@@ -22,7 +22,7 @@ add_task(async function () {
   let onSelectionChanged = toolbox.once("selection-changed");
 
   info("Select the div and wait for the selection-changed event to be fired.");
-  inspector.selection.setNodeFront(node, "browser-context-menu");
+  inspector.selection.setNodeFront(node, { reason: "browser-context-menu" });
 
   await onSelectionChanged;
 
@@ -32,7 +32,7 @@ add_task(async function () {
   let onClearSelectionChanged = toolbox.once("selection-changed");
 
   info("Clear the selection and wait for the selection-changed event to be fired.");
-  inspector.selection.setNodeFront(undefined, "browser-context-menu");
+  inspector.selection.setNodeFront(undefined, { reason: "browser-context-menu" });
 
   await onClearSelectionChanged;
 

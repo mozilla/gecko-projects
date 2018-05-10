@@ -17,10 +17,14 @@
 #include "mozilla/NotNull.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SharedThreadPool.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "nsContentUtils.h"
 #include "nsPrintfCString.h"
+#ifdef MOZ_WIDGET_ANDROID
+#include "mozilla/jni/Utils.h"
+#endif
 
 #include <algorithm>
 #include <map>
@@ -1305,8 +1309,10 @@ MediaFormatReader::MediaFormatReader(MediaFormatReaderInit& aInit,
   : mTaskQueue(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
                              "MediaFormatReader::mTaskQueue",
                              /* aSupportsTailDispatch = */ true))
-  , mAudio(this, MediaData::AUDIO_DATA, MediaPrefs::MaxAudioDecodeError())
-  , mVideo(this, MediaData::VIDEO_DATA, MediaPrefs::MaxVideoDecodeError())
+  , mAudio(this, MediaData::AUDIO_DATA,
+           StaticPrefs::MediaAudioMaxDecodeError())
+  , mVideo(this, MediaData::VIDEO_DATA,
+           StaticPrefs::MediaVideoMaxDecodeError())
   , mDemuxer(new DemuxerProxy(aDemuxer))
   , mDemuxerInitDone(false)
   , mPendingNotifyDataArrived(false)
@@ -1582,7 +1588,7 @@ MediaFormatReader::OnDemuxerInitDone(const MediaResult& aResult)
   MOZ_ASSERT(OnTaskQueue());
   mDemuxerInitRequest.Complete();
 
-  if (NS_FAILED(aResult) && MediaPrefs::MediaWarningsAsErrors()) {
+  if (NS_FAILED(aResult) && StaticPrefs::MediaPlaybackWarningsAsErrors()) {
     mMetadataPromise.Reject(aResult, __func__);
     return;
   }
@@ -1782,7 +1788,7 @@ MediaFormatReader::ShouldSkip(TimeUnit aTimeThreshold)
 {
   MOZ_ASSERT(HasVideo());
 
-  if (!MediaPrefs::MFRSkipToNextKeyFrameEnabled()) {
+  if (!StaticPrefs::MediaDecoderSkipToNextKeyFrameEnabled()) {
     return false;
   }
 
@@ -2403,7 +2409,7 @@ MediaFormatReader::HandleDemuxedSamples(
   if (info && decoder.mLastStreamSourceID != info->GetID()) {
     nsTArray<RefPtr<MediaRawData>> samples;
     if (decoder.mDecoder) {
-      bool recyclable = MediaPrefs::MediaDecoderCheckRecycling() &&
+      bool recyclable = StaticPrefs::MediaDecoderRecycleEnabled() &&
                         decoder.mDecoder->SupportDecoderRecycling();
       if (!recyclable && decoder.mTimeThreshold.isNothing() &&
           (decoder.mNextStreamSourceID.isNothing() ||
@@ -3516,18 +3522,25 @@ MediaFormatReader::GetMozDebugReaderData(nsACString& aString)
     audioDecoderName = mAudio.mDecoder
                        ? mAudio.mDecoder->GetDescriptionName()
                        : mAudio.mDescription;
-    audioType = mInfo.mAudio.mMimeType;
+    audioType = mAudio.mInfo ? mAudio.mInfo->mMimeType : mInfo.mAudio.mMimeType;
   }
   if (HasVideo()) {
     MutexAutoLock mon(mVideo.mMutex);
     videoDecoderName = mVideo.mDecoder
                        ? mVideo.mDecoder->GetDescriptionName()
                        : mVideo.mDescription;
-    videoType = mInfo.mVideo.mMimeType;
+    videoType = mVideo.mInfo ? mVideo.mInfo->mMimeType : mInfo.mVideo.mMimeType;
   }
 
-  result += nsPrintfCString(
-    "Audio Decoder(%s): %s\n", audioType.get(), audioDecoderName.get());
+  result +=
+    nsPrintfCString("Audio Decoder(%s, %u channels @ %0.1fkHz): %s\n",
+                    audioType.get(),
+                    mAudio.mInfo ? mAudio.mInfo->GetAsAudioInfo()->mChannels
+                                 : mInfo.mAudio.mChannels,
+                    (mAudio.mInfo ? mAudio.mInfo->GetAsAudioInfo()->mRate
+                                  : mInfo.mAudio.mRate) /
+                      1000.0f,
+                    audioDecoderName.get());
   result += nsPrintfCString("Audio Frames Decoded: %" PRIu64 "\n",
                             mAudio.mNumSamplesOutputTotal);
   if (HasAudio()) {

@@ -676,10 +676,10 @@ const AutoMigrate = {
 
     let url = Services.urlFormatter.formatURL(rawURL);
     url = url.replace("%IMPORTEDBROWSER%", encodeURIComponent(migrationBrowser));
-    chromeWindow.openUILinkIn(url, "tab");
+    chromeWindow.openTrustedLinkIn(url, "tab");
   },
 
-  QueryInterface: XPCOMUtils.generateQI(
+  QueryInterface: ChromeUtils.generateQI(
     [Ci.nsIObserver, Ci.nsINavBookmarkObserver, Ci.nsISupportsWeakReference]
   ),
 

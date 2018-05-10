@@ -447,9 +447,6 @@ typedef void
                                       JS::PromiseRejectionHandlingState state,
                                       void* data);
 
-typedef void
-(* JSProcessPromiseCallback)(JSContext* cx, JS::HandleObject promise);
-
 /**
  * Possible exception types. These types are part of a JSErrorFormatString
  * structure. They define which error to throw in case of a runtime error.
@@ -865,23 +862,6 @@ JS_ResumeCooperativeContext(JSContext* cx);
 extern JS_PUBLIC_API(JSContext*)
 JS_NewCooperativeContext(JSContext* siblingContext);
 
-namespace JS {
-
-// Class to relinquish exclusive access to all zone groups in use by this
-// thread. This allows other cooperative threads to enter the zone groups
-// and modify their contents.
-struct AutoRelinquishZoneGroups
-{
-    explicit AutoRelinquishZoneGroups(JSContext* cx);
-    ~AutoRelinquishZoneGroups();
-
-  private:
-    JSContext* cx;
-    mozilla::Vector<void*> enterList;
-};
-
-} // namespace JS
-
 // Destroy a context allocated with JS_NewContext or JS_NewCooperativeContext.
 // The context must be the current active context in the runtime, and after
 // this call the runtime will have no active context.
@@ -908,31 +888,6 @@ JS_EndRequest(JSContext* cx);
 
 extern JS_PUBLIC_API(void)
 JS_SetFutexCanWait(JSContext* cx);
-
-namespace JS {
-
-// Single threaded execution callbacks are used to notify API clients that a
-// feature is in use on a context's runtime that is not yet compatible with
-// cooperatively multithreaded execution.
-//
-// Between a call to BeginSingleThreadedExecutionCallback and a corresponding
-// call to EndSingleThreadedExecutionCallback, only one thread at a time may
-// enter compartments in the runtime. The begin callback may yield as necessary
-// to permit other threads to finish up what they're doing, while the end
-// callback may not yield or otherwise operate on the runtime (it may be called
-// during GC).
-//
-// These callbacks may be left unspecified for runtimes which only ever have a
-// single context.
-typedef void (*BeginSingleThreadedExecutionCallback)(JSContext* cx);
-typedef void (*EndSingleThreadedExecutionCallback)(JSContext* cx);
-
-extern JS_PUBLIC_API(void)
-SetSingleThreadedExecutionCallbacks(JSContext* cx,
-                                    BeginSingleThreadedExecutionCallback begin,
-                                    EndSingleThreadedExecutionCallback end);
-
-} // namespace JS
 
 namespace js {
 
@@ -977,6 +932,9 @@ class JS_PUBLIC_API(ContextOptions) {
         wasm_(true),
         wasmBaseline_(true),
         wasmIon_(true),
+#ifdef ENABLE_WASM_GC
+        wasmGc_(false),
+#endif
         testWasmAwaitTier2_(false),
         throwOnAsmJSValidationFailure_(false),
         nativeRegExp_(true),
@@ -1074,6 +1032,14 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
+#ifdef ENABLE_WASM_GC
+    bool wasmGc() const { return wasmGc_; }
+    ContextOptions& setWasmGc(bool flag) {
+        wasmGc_ = flag;
+        return *this;
+    }
+#endif
+
     bool throwOnAsmJSValidationFailure() const { return throwOnAsmJSValidationFailure_; }
     ContextOptions& setThrowOnAsmJSValidationFailure(bool flag) {
         throwOnAsmJSValidationFailure_ = flag;
@@ -1159,6 +1125,9 @@ class JS_PUBLIC_API(ContextOptions) {
         setWasm(false);
         setWasmBaseline(false);
         setWasmIon(false);
+#ifdef ENABLE_WASM_GC
+        setWasmGc(false);
+#endif
         setNativeRegExp(false);
     }
 
@@ -1169,6 +1138,9 @@ class JS_PUBLIC_API(ContextOptions) {
     bool wasm_ : 1;
     bool wasmBaseline_ : 1;
     bool wasmIon_ : 1;
+#ifdef ENABLE_WASM_GC
+    bool wasmGc_ : 1;
+#endif
     bool testWasmAwaitTier2_ : 1;
     bool throwOnAsmJSValidationFailure_ : 1;
     bool nativeRegExp_ : 1;
@@ -1529,6 +1501,22 @@ JS_DefineProfilingFunctions(JSContext* cx, JS::HandleObject obj);
 /* Defined in vm/Debugger.cpp. */
 extern JS_PUBLIC_API(bool)
 JS_DefineDebuggerObject(JSContext* cx, JS::HandleObject obj);
+
+namespace JS {
+
+/**
+ * Tell JS engine whether Profile Timeline Recording is enabled or not.
+ * If Profile Timeline Recording is enabled, data shown there like stack won't
+ * be optimized out.
+ * This is global state and not associated with specific runtime or context.
+ */
+extern JS_PUBLIC_API(void)
+SetProfileTimelineRecordingEnabled(bool enabled);
+
+extern JS_PUBLIC_API(bool)
+IsProfileTimelineRecordingEnabled();
+
+} // namespace JS
 
 #ifdef JS_HAS_CTYPES
 /**
@@ -1956,14 +1944,8 @@ enum ZoneSpecifier {
     // Use a particular existing zone.
     ExistingZone,
 
-    // Create a new zone with its own new zone group.
-    NewZoneInNewZoneGroup,
-
-    // Create a new zone in the same zone group as the system zone.
-    NewZoneInSystemZoneGroup,
-
-    // Create a new zone in the same zone group as another existing zone.
-    NewZoneInExistingZoneGroup
+    // Create a new zone.
+    NewZone
 };
 
 /**
@@ -1979,8 +1961,8 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
   public:
     CompartmentCreationOptions()
       : traceGlobal_(nullptr),
-        zoneSpec_(NewZoneInSystemZoneGroup),
-        zonePointer_(nullptr),
+        zoneSpec_(NewZone),
+        zone_(nullptr),
         invisibleToDebugger_(false),
         mergeable_(false),
         preserveJitCode_(false),
@@ -1998,15 +1980,13 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
         return *this;
     }
 
-    void* zonePointer() const { return zonePointer_; }
+    JS::Zone* zone() const { return zone_; }
     ZoneSpecifier zoneSpecifier() const { return zoneSpec_; }
 
     // Set the zone to use for the compartment. See ZoneSpecifier above.
     CompartmentCreationOptions& setSystemZone();
     CompartmentCreationOptions& setExistingZone(JSObject* obj);
-    CompartmentCreationOptions& setNewZoneInNewZoneGroup();
-    CompartmentCreationOptions& setNewZoneInSystemZoneGroup();
-    CompartmentCreationOptions& setNewZoneInExistingZoneGroup(JSObject* obj);
+    CompartmentCreationOptions& setNewZone();
 
     // Certain scopes (i.e. XBL compilation scopes) are implementation details
     // of the embedding, and references to them should never leak out to script.
@@ -2064,7 +2044,7 @@ class JS_PUBLIC_API(CompartmentCreationOptions)
   private:
     JSTraceOp traceGlobal_;
     ZoneSpecifier zoneSpec_;
-    void* zonePointer_; // Per zoneSpec_, either a Zone, ZoneGroup, or null.
+    JS::Zone* zone_;
     bool invisibleToDebugger_;
     bool mergeable_;
     bool preserveJitCode_;
@@ -3658,7 +3638,8 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
         scriptSourceOffset(0),
         isRunOnce(false),
         nonSyntacticScope(false),
-        noScriptRval(false)
+        noScriptRval(false),
+        allowSyntaxParser(true)
     { }
 
     // Set all POD options (those not requiring reference counts, copies,
@@ -3695,6 +3676,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
     bool isRunOnce;
     bool nonSyntacticScope;
     bool noScriptRval;
+    bool allowSyntaxParser;
 
   private:
     void operator=(const ReadOnlyCompileOptions&) = delete;
@@ -3762,6 +3744,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     OwningCompileOptions& setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
     OwningCompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     OwningCompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
+    OwningCompileOptions& setAllowSyntaxParser(bool clp) { allowSyntaxParser = clp; return *this; }
     OwningCompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
     OwningCompileOptions& setNonSyntacticScope(bool n) { nonSyntacticScope = n; return *this; }
     OwningCompileOptions& setIntroductionType(const char* t) { introductionType = t; return *this; }
@@ -3777,6 +3760,8 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
         hasIntroductionInfo = true;
         return true;
     }
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
   private:
     void operator=(const CompileOptions& rhs) = delete;
@@ -3855,6 +3840,7 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) final : public ReadOnlyCompi
     CompileOptions& setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
     CompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
+    CompileOptions& setAllowSyntaxParser(bool clp) { allowSyntaxParser = clp; return *this; }
     CompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
     CompileOptions& setNonSyntacticScope(bool n) { nonSyntacticScope = n; return *this; }
     CompileOptions& setIntroductionType(const char* t) { introductionType = t; return *this; }
@@ -3934,7 +3920,7 @@ CanDecodeOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t 
  * callback will eventually be invoked with the specified data and a token
  * for the compilation. The callback will be invoked while off thread,
  * so must ensure that its operations are thread safe. Afterwards, one of the
- * following functions must be invoked on the runtime's active thread:
+ * following functions must be invoked on the runtime's main thread:
  *
  * - FinishOffThreadScript, to get the result script (or nullptr on failure).
  * - CancelOffThreadScript, to free the resources without creating a script.
@@ -4259,6 +4245,30 @@ extern JS_PUBLIC_API(JSScript*)
 GetModuleScript(JS::HandleObject moduleRecord);
 
 } /* namespace JS */
+
+#if defined(JS_BUILD_BINAST)
+
+namespace JS {
+
+extern JS_PUBLIC_API(JSScript*)
+DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+             FILE* file);
+
+extern JS_PUBLIC_API(JSScript*)
+DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+             const uint8_t* buf, size_t length);
+
+extern JS_PUBLIC_API(bool)
+DecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
+                      const uint8_t* buf, size_t length,
+                      OffThreadCompileCallback callback, void* callbackData);
+
+extern JS_PUBLIC_API(JSScript*)
+FinishOffThreadBinASTDecode(JSContext* cx, void* token);
+
+} /* namespace JS */
+
+#endif /* JS_BUILD_BINAST */
 
 extern JS_PUBLIC_API(bool)
 JS_CheckForInterrupt(JSContext* cx);
@@ -4749,9 +4759,6 @@ JS_StringEqualsAscii(JSContext* cx, JSString* str, const char* asciiBytes, bool*
 
 extern JS_PUBLIC_API(size_t)
 JS_PutEscapedString(JSContext* cx, char* buffer, size_t size, JSString* str, char quote);
-
-extern JS_PUBLIC_API(bool)
-JS_FileEscapedString(FILE* fp, JSString* str, char quote);
 
 /*
  * Extracting string characters and length.
@@ -5339,7 +5346,7 @@ JS_ReportErrorFlagsAndNumberUC(JSContext* cx, unsigned flags,
 /**
  * Complain when out of memory.
  */
-extern JS_PUBLIC_API(void)
+extern MOZ_COLD JS_PUBLIC_API(void)
 JS_ReportOutOfMemory(JSContext* cx);
 
 /**
@@ -5878,12 +5885,12 @@ JS_SetOffthreadIonCompilationEnabled(JSContext* cx, bool enabled);
     Register(ION_GVN_ENABLE, "ion.gvn.enable")                              \
     Register(ION_FORCE_IC, "ion.forceinlineCaches")                         \
     Register(ION_ENABLE, "ion.enable")                                      \
-    Register(ION_INTERRUPT_WITHOUT_SIGNAL, "ion.interrupt-without-signals") \
     Register(ION_CHECK_RANGE_ANALYSIS, "ion.check-range-analysis")          \
     Register(BASELINE_ENABLE, "baseline.enable")                            \
     Register(OFFTHREAD_COMPILATION_ENABLE, "offthread-compilation.enable")  \
     Register(FULL_DEBUG_CHECKS, "jit.full-debug-checks")                    \
     Register(JUMP_THRESHOLD, "jump-threshold")                              \
+    Register(TRACK_OPTIMIZATIONS, "jit.track-optimizations")                \
     Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt")      \
     Register(SPECTRE_INDEX_MASKING, "spectre.index-masking")                \
     Register(SPECTRE_OBJECT_MITIGATIONS_BARRIERS, "spectre.object-mitigations.barriers") \
@@ -6081,7 +6088,7 @@ DecodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer, JS::MutableHan
 
 // Register an encoder on the given script source, such that all functions can
 // be encoded as they are parsed. This strategy is used to avoid blocking the
-// active thread in a non-interruptible way.
+// main thread in a non-interruptible way.
 //
 // The |script| argument of |StartIncrementalEncoding| and
 // |FinishIncrementalEncoding| should be the top-level script returned either as
@@ -6279,7 +6286,7 @@ CompiledWasmModuleAssumptionsMatch(PRFileDesc* compiled, BuildIdCharVector&& bui
 
 extern JS_PUBLIC_API(RefPtr<WasmModule>)
 DeserializeWasmModule(PRFileDesc* bytecode, PRFileDesc* maybeCompiled, BuildIdCharVector&& buildId,
-                      JS::UniqueChars filename, unsigned line, unsigned column);
+                      JS::UniqueChars filename, unsigned line);
 
 /**
  * Convenience class for imitating a JS level for-of loop. Typical usage:

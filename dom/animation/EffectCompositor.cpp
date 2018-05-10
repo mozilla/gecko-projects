@@ -21,7 +21,6 @@
 #include "mozilla/EffectSet.h"
 #include "mozilla/LayerAnimationInfo.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "mozilla/ServoBindings.h" // Servo_GetProperties_Overriding_Animation
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleAnimationValue.h"
@@ -166,13 +165,11 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
   // basically a no-op.
   Maybe<NonOwningAnimationTarget> pseudoElement =
     EffectCompositor::GetAnimationElementAndPseudoForFrame(aFrame);
-  if (pseudoElement) {
-    StyleBackendType backend = StyleBackendType::Servo;
-    EffectCompositor::MaybeUpdateCascadeResults(backend,
-                                                pseudoElement->mElement,
-                                                pseudoElement->mPseudoType,
-                                                aFrame->Style());
-  }
+  MOZ_ASSERT(pseudoElement,
+             "We have a valid element for the frame, if we don't we should "
+             "have bailed out at above the call to EffectSet::GetEffectSet");
+  EffectCompositor::MaybeUpdateCascadeResults(pseudoElement->mElement,
+                                              pseudoElement->mPseudoType);
 
   if (!nsLayoutUtils::AreAsyncAnimationsEnabled()) {
     if (nsLayoutUtils::IsAnimationLoggingEnabled()) {
@@ -311,27 +308,26 @@ EffectCompositor::PostRestyleForAnimation(dom::Element* aElement,
                                         eRestyle_CSSTransitions :
                                         eRestyle_CSSAnimations;
 
-  if (mPresContext->StyleSet()->IsServo()) {
-    MOZ_ASSERT(NS_IsMainThread(),
-               "Restyle request during restyling should be requested only on "
-               "the main-thread. e.g. after the parallel traversal");
-    if (ServoStyleSet::IsInServoTraversal() || mIsInPreTraverse) {
-      MOZ_ASSERT(hint == eRestyle_CSSAnimations ||
-                 hint == eRestyle_CSSTransitions);
+  MOZ_ASSERT(NS_IsMainThread(),
+             "Restyle request during restyling should be requested only on "
+             "the main-thread. e.g. after the parallel traversal");
+  if (ServoStyleSet::IsInServoTraversal() || mIsInPreTraverse) {
+    MOZ_ASSERT(hint == eRestyle_CSSAnimations ||
+               hint == eRestyle_CSSTransitions);
 
-      // We can't call Servo_NoteExplicitHints here since AtomicRefCell does not
-      // allow us mutate ElementData of the |aElement| in SequentialTask.
-      // Instead we call Servo_NoteExplicitHints for the element in PreTraverse()
-      // which will be called right before the second traversal that we do for
-      // updating CSS animations.
-      // In that case PreTraverse() will return true so that we know to do the
-      // second traversal so we don't need to post any restyle requests to the
-      // PresShell.
-      return;
-    } else {
-      MOZ_ASSERT(!mPresContext->RestyleManager()->IsInStyleRefresh());
-    }
+    // We can't call Servo_NoteExplicitHints here since AtomicRefCell does not
+    // allow us mutate ElementData of the |aElement| in SequentialTask.
+    // Instead we call Servo_NoteExplicitHints for the element in PreTraverse()
+    // which will be called right before the second traversal that we do for
+    // updating CSS animations.
+    // In that case PreTraverse() will return true so that we know to do the
+    // second traversal so we don't need to post any restyle requests to the
+    // PresShell.
+    return;
   }
+
+  MOZ_ASSERT(!mPresContext->RestyleManager()->IsInStyleRefresh());
+
   mPresContext->PresShell()->RestyleForAnimation(element, hint);
 }
 
@@ -384,9 +380,8 @@ EffectCompositor::ClearRestyleRequestsFor(Element* aElement)
   }
 }
 
-template<typename StyleType>
 void
-EffectCompositor::UpdateEffectProperties(StyleType* aStyleType,
+EffectCompositor::UpdateEffectProperties(const ComputedStyle* aStyle,
                                          Element* aElement,
                                          CSSPseudoElementType aPseudoType)
 {
@@ -401,7 +396,7 @@ EffectCompositor::UpdateEffectProperties(StyleType* aStyleType,
   effectSet->MarkCascadeNeedsUpdate();
 
   for (KeyframeEffectReadOnly* effect : *effectSet) {
-    effect->UpdateProperties(aStyleType);
+    effect->UpdateProperties(aStyle);
   }
 }
 
@@ -544,18 +539,15 @@ EffectCompositor::ClearIsRunningOnCompositor(const nsIFrame *aFrame,
 }
 
 /* static */ void
-EffectCompositor::MaybeUpdateCascadeResults(StyleBackendType aBackendType,
-                                            Element* aElement,
-                                            CSSPseudoElementType aPseudoType,
-                                            ComputedStyle* aComputedStyle)
+EffectCompositor::MaybeUpdateCascadeResults(Element* aElement,
+                                            CSSPseudoElementType aPseudoType)
 {
   EffectSet* effects = EffectSet::GetEffectSet(aElement, aPseudoType);
   if (!effects || !effects->CascadeNeedsUpdate()) {
     return;
   }
 
-  UpdateCascadeResults(aBackendType, *effects, aElement, aPseudoType,
-                       aComputedStyle);
+  UpdateCascadeResults(*effects, aElement, aPseudoType);
 
   MOZ_ASSERT(!effects->CascadeNeedsUpdate(), "Failed to update cascade state");
 }
@@ -599,22 +591,16 @@ EffectCompositor::GetAnimationElementAndPseudoForFrame(const nsIFrame* aFrame)
 
 
 /* static */ nsCSSPropertyIDSet
-EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
-                                          EffectSet& aEffectSet,
+EffectCompositor::GetOverriddenProperties(EffectSet& aEffectSet,
                                           Element* aElement,
-                                          CSSPseudoElementType aPseudoType,
-                                          ComputedStyle* aComputedStyle)
+                                          CSSPseudoElementType aPseudoType)
 {
-  MOZ_ASSERT(aBackendType != StyleBackendType::Servo || aElement,
-             "Should have an element to get style data from if we are using"
-             " the Servo backend");
+  MOZ_ASSERT(aElement, "Should have an element to get style data from");
 
   nsCSSPropertyIDSet result;
 
   Element* elementToRestyle = GetElementToRestyle(aElement, aPseudoType);
-  if (aBackendType == StyleBackendType::Gecko && !aComputedStyle) {
-    MOZ_CRASH("old style system disabled");
-  } else if (aBackendType == StyleBackendType::Servo && !elementToRestyle) {
+  if (!elementToRestyle) {
     return result;
   }
 
@@ -624,7 +610,7 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
     for (KeyframeEffectReadOnly* effect : aEffectSet) {
       for (const AnimationProperty& property : effect->Properties()) {
         if (nsCSSProps::PropHasFlags(property.mProperty,
-                                     CSS_PROPERTY_CAN_ANIMATE_ON_COMPOSITOR) &&
+                                     CSSPropFlags::CanAnimateOnCompositor) &&
             !propertiesToTrackAsSet.HasProperty(property.mProperty)) {
           propertiesToTrackAsSet.AddProperty(property.mProperty);
           propertiesToTrack.AppendElement(property.mProperty);
@@ -642,29 +628,16 @@ EffectCompositor::GetOverriddenProperties(StyleBackendType aBackendType,
     return result;
   }
 
-  switch (aBackendType) {
-    case StyleBackendType::Servo:
-      Servo_GetProperties_Overriding_Animation(elementToRestyle,
-                                               &propertiesToTrack,
-                                               &result);
-      break;
-    case StyleBackendType::Gecko:
-      MOZ_CRASH("old style system disabled");
-      break;
-
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unsupported style backend");
-  }
-
+  Servo_GetProperties_Overriding_Animation(elementToRestyle,
+                                           &propertiesToTrack,
+                                           &result);
   return result;
 }
 
 /* static */ void
-EffectCompositor::UpdateCascadeResults(StyleBackendType aBackendType,
-                                       EffectSet& aEffectSet,
+EffectCompositor::UpdateCascadeResults(EffectSet& aEffectSet,
                                        Element* aElement,
-                                       CSSPseudoElementType aPseudoType,
-                                       ComputedStyle* aComputedStyle)
+                                       CSSPseudoElementType aPseudoType)
 {
   MOZ_ASSERT(EffectSet::GetEffectSet(aElement, aPseudoType) == &aEffectSet,
              "Effect set should correspond to the specified (pseudo-)element");
@@ -686,10 +659,7 @@ EffectCompositor::UpdateCascadeResults(StyleBackendType aBackendType,
   // since we will apply other properties on the main thread where the usual
   // cascade applies.
   nsCSSPropertyIDSet overriddenProperties =
-    GetOverriddenProperties(aBackendType,
-                            aEffectSet,
-                            aElement, aPseudoType,
-                            aComputedStyle);
+    GetOverriddenProperties(aEffectSet, aElement, aPseudoType);
 
   // Returns a bitset the represents which properties from
   // LayerAnimationInfo::sRecords are present in |aPropertySet|.
@@ -812,7 +782,6 @@ EffectCompositor::PreTraverseInSubtree(ServoTraversalFlags aFlags,
                                        Element* aRoot)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mPresContext->RestyleManager()->IsServo());
   MOZ_ASSERT(!aRoot || nsContentUtils::GetPresShellForContent(aRoot),
              "Traversal root, if provided, should be bound to a display "
              "document");
@@ -898,10 +867,7 @@ EffectCompositor::PreTraverseInSubtree(ServoTraversalFlags aFlags,
   }
 
   for (const NonOwningAnimationTarget& target: elementsWithCascadeUpdates) {
-      MaybeUpdateCascadeResults(StyleBackendType::Servo,
-                                target.mElement,
-                                target.mPseudoType,
-                                nullptr);
+      MaybeUpdateCascadeResults(target.mElement, target.mPseudoType);
   }
   elementsWithCascadeUpdates.Clear();
 
@@ -918,7 +884,7 @@ EffectCompositor::PreTraverseInSubtree(ServoTraversalFlags aFlags,
       // ensure the final restyling for removed animations.
       // We can't call PostRestyleEvent directly here since we are still in the
       // middle of the servo traversal.
-      mPresContext->RestyleManager()->AsServo()->
+      mPresContext->RestyleManager()->
         PostRestyleEventForAnimations(target.mElement,
                                       target.mPseudoType,
                                       cascadeLevel == CascadeLevel::Transitions
@@ -961,7 +927,6 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
                               CSSPseudoElementType aPseudoType)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mPresContext->RestyleManager()->IsServo());
 
   // If |aElement|'s document does not have a pres shell, e.g. it is document
   // without a browsing context such as we might get from an XMLHttpRequest, we
@@ -1001,7 +966,7 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
       continue;
     }
 
-    mPresContext->RestyleManager()->AsServo()->
+    mPresContext->RestyleManager()->
       PostRestyleEventForAnimations(aElement,
                                     aPseudoType,
                                     cascadeLevel == CascadeLevel::Transitions
@@ -1010,9 +975,7 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
 
     EffectSet* effects = EffectSet::GetEffectSet(aElement, aPseudoType);
     if (effects) {
-      MaybeUpdateCascadeResults(StyleBackendType::Servo,
-                                aElement, aPseudoType,
-                                nullptr);
+      MaybeUpdateCascadeResults(aElement, aPseudoType);
 
       for (KeyframeEffectReadOnly* effect : *effects) {
         effect->GetAnimation()->WillComposeStyle();
@@ -1025,12 +988,5 @@ EffectCompositor::PreTraverse(dom::Element* aElement,
   return found;
 }
 
-
-template
-void
-EffectCompositor::UpdateEffectProperties(
-  const ComputedStyle* aComputedStyle,
-  Element* aElement,
-  CSSPseudoElementType aPseudoType);
 
 } // namespace mozilla

@@ -13,7 +13,6 @@ kind-dependencies:
 transforms:
    - taskgraph.transforms.release_deps:transforms
    - taskgraph.transforms.update_verify:transforms
-   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.task:transforms
 
 job-defaults:
@@ -22,6 +21,10 @@ job-defaults:
    shipping-phase: promote
    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
    worker:
+      artifacts:
+         - name: 'public/build/diff-summary.log'
+           path: '/builds/worker/tools/release/updates/diff-summary.log'
+           type: file
       implementation: docker-worker
       os: linux
       docker-image:
@@ -60,7 +63,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64
+         build_platform: linux64-nightly
 
    firefox-linux:
       description: linux update verify
@@ -81,7 +84,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux
+         build_platform: linux-nightly
 
    firefox-win64:
       description: win64 update verify
@@ -102,7 +105,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64
+         build_platform: win64-nightly
 
    firefox-win32:
       description: win32 update verify
@@ -123,7 +126,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32
+         build_platform: win32-nightly
 
    firefox-macosx64:
       description: macosx64 update verify
@@ -144,7 +147,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64
+         build_platform: macosx64-nightly
 
    devedition-linux64:
       description: linux64 update verify
@@ -158,7 +161,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-devedition
+         build_platform: linux64-devedition-nightly
 
    devedition-linux:
       description: linux update verify
@@ -172,7 +175,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-devedition
+         build_platform: linux-devedition-nightly
 
    devedition-win64:
       description: win64 update verify
@@ -186,7 +189,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-devedition
+         build_platform: win64-devedition-nightly
 
    devedition-win32:
       description: win32 update verify
@@ -200,7 +203,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-devedition
+         build_platform: win32-devedition-nightly
 
    devedition-macosx64:
       description: macosx64 update verify
@@ -214,4 +217,4 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-devedition
+         build_platform: macosx64-devedition-nightly

@@ -19,6 +19,7 @@
 class nsIGlobalObject;
 class ServoComputedData;
 struct nsStyleDisplay;
+class ServoCSSAnimationBuilder;
 
 namespace mozilla {
 class ComputedStyle;
@@ -30,8 +31,6 @@ class KeyframeEffectReadOnly;
 class Promise;
 } /* namespace dom */
 
-class GeckoComputedStyle;
-class ComputedStyle;
 enum class CSSPseudoElementType : uint8_t;
 struct NonOwningAnimationTarget;
 
@@ -283,13 +282,12 @@ public:
   {
   }
 
-  NS_INLINE_DECL_REFCOUNTING(nsAnimationManager)
-
   typedef mozilla::AnimationCollection<mozilla::dom::CSSAnimation>
     CSSAnimationCollection;
   typedef nsTArray<RefPtr<mozilla::dom::CSSAnimation>>
     OwningCSSAnimationPtrArray;
 
+  ~nsAnimationManager() override = default;
 
   /**
    * This function does the same thing as the above UpdateAnimations()
@@ -299,6 +297,7 @@ public:
     mozilla::dom::Element* aElement,
     mozilla::CSSPseudoElementType aPseudoType,
     const mozilla::ComputedStyle* aComputedValues);
+
 
   // Utility function to walk through |aIter| to find the Keyframe with
   // matching offset and timing function but stopping as soon as the offset
@@ -338,9 +337,6 @@ public:
     return mMaybeReferencedAnimations.Contains(aName);
   }
 
-protected:
-  ~nsAnimationManager() override = default;
-
 private:
   // This includes all animation names referenced regardless of whether a
   // corresponding `@keyframes` rule is available.
@@ -350,11 +346,10 @@ private:
   // style invalidation.
   nsTHashtable<nsRefPtrHashKey<nsAtom>> mMaybeReferencedAnimations;
 
-  template<class BuilderType>
   void DoUpdateAnimations(
     const mozilla::NonOwningAnimationTarget& aTarget,
     const nsStyleDisplay& aStyleDisplay,
-    BuilderType& aBuilder);
+    ServoCSSAnimationBuilder& aBuilder);
 };
 
 #endif /* !defined(nsAnimationManager_h_) */

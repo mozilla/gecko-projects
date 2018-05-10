@@ -9,9 +9,10 @@ from distutils.spawn import find_executable
 import os
 import posixpath
 
-from mozdevice import DeviceManagerADB, DroidADB
+from mozdevice import ADBAndroid
 from mozprofile import (
     Profile,
+    ChromeProfile,
     FirefoxProfile,
     ThunderbirdProfile
 )
@@ -20,10 +21,13 @@ here = os.path.abspath(os.path.dirname(__file__))
 
 
 def get_app_context(appname):
-    context_map = {'default': DefaultContext,
-                   'firefox': FirefoxContext,
-                   'thunderbird': ThunderbirdContext,
-                   'fennec': FennecContext}
+    context_map = {
+        'chrome': ChromeContext,
+        'default': DefaultContext,
+        'fennec': FennecContext,
+        'firefox': FirefoxContext,
+        'thunderbird': ThunderbirdContext,
+    }
     if appname not in context_map:
         raise KeyError("Application '%s' not supported!" % appname)
     return context_map[appname]
@@ -35,11 +39,10 @@ class DefaultContext(object):
 
 class RemoteContext(object):
     __metaclass__ = ABCMeta
-    _dm = None
+    device = None
     _remote_profile = None
     _adb = None
     profile_class = Profile
-    dm_class = DeviceManagerADB
     _bindir = None
     remote_test_root = ''
     remote_process = None
@@ -70,12 +73,6 @@ class RemoteContext(object):
         return self._adb
 
     @property
-    def dm(self):
-        if not self._dm:
-            self._dm = self.dm_class(adbPath=self.adb, autoconnect=False)
-        return self._dm
-
-    @property
     def remote_profile(self):
         if not self._remote_profile:
             self._remote_profile = posixpath.join(self.remote_test_root,
@@ -100,26 +97,27 @@ class FennecContext(RemoteContext):
     _remote_profiles_ini = None
     _remote_test_root = None
 
-    def __init__(self, app=None, adb_path=None, avd_home=None):
+    def __init__(self, app=None, adb_path=None, avd_home=None, device_serial=None):
         self._adb = adb_path
         self.avd_home = avd_home
-        self.dm_class = DroidADB
-        self.remote_process = app or self.dm._packageName
+        self.remote_process = app
+        self.device_serial = device_serial
+        self.device = ADBAndroid(adb=self.adb, device=device_serial)
 
     def stop_application(self):
-        self.dm.stopApplication(self.remote_process)
+        self.device.stop_application(self.remote_process)
 
     @property
     def remote_test_root(self):
         if not self._remote_test_root:
-            self._remote_test_root = self.dm.getDeviceRoot()
+            self._remote_test_root = self.device.test_root
         return self._remote_test_root
 
     @property
     def remote_profiles_ini(self):
         if not self._remote_profiles_ini:
             self._remote_profiles_ini = posixpath.join(
-                self.dm.getAppRoot(self.remote_process),
+                '/data', 'data', self.remote_process,
                 'files', 'mozilla', 'profiles.ini'
             )
         return self._remote_profiles_ini
@@ -131,3 +129,7 @@ class FirefoxContext(object):
 
 class ThunderbirdContext(object):
     profile_class = ThunderbirdProfile
+
+
+class ChromeContext(object):
+    profile_class = ChromeProfile

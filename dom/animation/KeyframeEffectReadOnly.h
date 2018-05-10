@@ -46,7 +46,6 @@ struct AnimationRule;
 struct TimingParams;
 class EffectSet;
 class ComputedStyle;
-class GeckoComputedStyle;
 
 namespace dom {
 class ElementOrCSSPseudoElement;
@@ -166,7 +165,7 @@ public:
   void SetKeyframes(JSContext* aContext, JS::Handle<JSObject*> aKeyframes,
                     ErrorResult& aRv);
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
-                    const ComputedStyle* aComputedValues);
+                    const ComputedStyle* aStyle);
 
   // Returns true if the effect includes |aProperty| regardless of whether the
   // property is overridden by !important rule.
@@ -204,8 +203,7 @@ public:
   // Updates |aComposeResult| with the animation values produced by this
   // AnimationEffect for the current time except any properties contained
   // in |aPropertiesToSkip|.
-  template<typename ComposeAnimationResult>
-  void ComposeStyle(ComposeAnimationResult&& aRestultContainer,
+  void ComposeStyle(RawServoAnimationValueMap& aComposeResult,
                     const nsCSSPropertyIDSet& aPropertiesToSkip);
 
 
@@ -244,8 +242,7 @@ public:
 
   // Cumulative change hint on each segment for each property.
   // This is used for deciding the animation is paint-only.
-  template<typename StyleType>
-  void CalculateCumulativeChangeHint(StyleType* aComputedStyle);
+  void CalculateCumulativeChangeHint(const ComputedStyle* aStyle);
 
   // Returns true if all of animation properties' change hints
   // can ignore painting if the animation is not visible.
@@ -261,17 +258,19 @@ public:
   {
     AnimationValue result;
     bool hasProperty = false;
-    if (mDocument->IsStyledByServo()) {
-      // We cannot use getters_AddRefs on RawServoAnimationValue because it is
-      // an incomplete type, so Get() doesn't work. Instead, use GetWeak, and
-      // then assign the raw pointer to a RefPtr.
-      result.mServo = mBaseStyleValuesForServo.GetWeak(aProperty, &hasProperty);
-    } else {
-      MOZ_CRASH("old style system disabled");
-    }
+    // We cannot use getters_AddRefs on RawServoAnimationValue because it is
+    // an incomplete type, so Get() doesn't work. Instead, use GetWeak, and
+    // then assign the raw pointer to a RefPtr.
+    result.mServo = mBaseStyleValuesForServo.GetWeak(aProperty, &hasProperty);
     MOZ_ASSERT(hasProperty || result.IsNull());
     return result;
   }
+
+  static bool HasComputedTimingChanged(
+    const ComputedTiming& aComputedTiming,
+    IterationCompositeOperation aIterationComposite,
+    const Nullable<double>& aProgressOnLastCompose,
+    uint64_t aCurrentIterationOnLastCompose);
 
 protected:
   KeyframeEffectReadOnly(nsIDocument* aDocument,
@@ -301,8 +300,7 @@ protected:
   // Build properties by recalculating from |mKeyframes| using |aComputedStyle|
   // to resolve specified values. This function also applies paced spacing if
   // needed.
-  template<typename StyleType>
-  nsTArray<AnimationProperty> BuildProperties(StyleType* aStyle);
+  nsTArray<AnimationProperty> BuildProperties(const ComputedStyle* aStyle);
 
   // This effect is registered with its target element so long as:
   //
@@ -324,10 +322,10 @@ protected:
   // have changed, or when the target frame might have changed.
   void MaybeUpdateFrameForCompositor();
 
-  // Looks up the style context associated with the target element, if any.
+  // Looks up the ComputedStyle associated with the target element, if any.
   // We need to be careful to *not* call this when we are updating the style
   // context. That's because calling GetComputedStyle when we are in the process
-  // of building a style context may trigger various forms of infinite
+  // of building a ComputedStyle may trigger various forms of infinite
   // recursion.
   already_AddRefed<ComputedStyle> GetTargetComputedStyle();
 
@@ -383,13 +381,6 @@ protected:
 private:
   nsChangeHint mCumulativeChangeHint;
 
-  template<typename StyleType>
-  void DoSetKeyframes(nsTArray<Keyframe>&& aKeyframes, StyleType* aStyle);
-
-  template<typename StyleType>
-  void DoUpdateProperties(StyleType* aStyle);
-
-
   void ComposeStyleRule(RawServoAnimationValueMap& aAnimationValues,
                         const AnimationProperty& aProperty,
                         const AnimationPropertySegment& aSegment,
@@ -399,9 +390,13 @@ private:
   already_AddRefed<ComputedStyle> CreateComputedStyleForAnimationValue(
     nsCSSPropertyID aProperty,
     const AnimationValue& aValue,
+    nsPresContext* aPresContext,
     const ComputedStyle* aBaseComputedStyle);
 
-  nsIFrame* GetAnimationFrame() const;
+  // Return the primary frame for the target (pseudo-)element.
+  nsIFrame* GetPrimaryFrame() const;
+  // Returns the frame which is used for styling.
+  nsIFrame* GetStyleFrame() const;
 
   bool CanThrottle() const;
   bool CanThrottleTransformChanges(const nsIFrame& aFrame) const;
@@ -434,8 +429,12 @@ private:
                                     nsChangeHint_UpdateTransformLayer);
   }
 
-  // FIXME: This flag will be removed in bug 1324966.
-  bool mIsComposingStyle = false;
+  // Returns true if this effect causes visibility change.
+  // (i.e. 'visibility: hidden' -> 'visibility: visible' and vice versa.)
+  bool HasVisibilityChange() const
+  {
+    return mCumulativeChangeHint & nsChangeHint_VisibilityChange;
+  }
 };
 
 } // namespace dom

@@ -7,11 +7,12 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.NonArrayJSONException;
 import org.mozilla.gecko.sync.NonObjectJSONException;
 import org.mozilla.gecko.sync.UnexpectedJSONException.BadRequiredFieldJSONException;
+import org.mozilla.gecko.util.StringUtils;
+import org.robolectric.RobolectricTestRunner;
 
 import java.io.IOException;
 
@@ -27,7 +28,7 @@ import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-@RunWith(TestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 public class TestExtendedJSONObject {
   public static String exampleJSON = "{\"modified\":1233702554.25,\"success\":[\"{GXS58IDC}12\",\"{GXS58IDC}13\",\"{GXS58IDC}15\",\"{GXS58IDC}16\",\"{GXS58IDC}18\",\"{GXS58IDC}19\"],\"failed\":{\"{GXS58IDC}11\":[\"invalid parentid\"],\"{GXS58IDC}14\":[\"invalid parentid\"],\"{GXS58IDC}17\":[\"invalid parentid\"],\"{GXS58IDC}20\":[\"invalid parentid\"]}}";
   public static String exampleIntegral = "{\"modified\":1233702554,}";
@@ -102,7 +103,7 @@ public class TestExtendedJSONObject {
   public void testParseUTF8AsJSONObject() throws Exception {
     String TEST = "{\"key\":\"value\"}";
 
-    ExtendedJSONObject o = ExtendedJSONObject.parseUTF8AsJSONObject(TEST.getBytes("UTF-8"));
+    ExtendedJSONObject o = ExtendedJSONObject.parseUTF8AsJSONObject(TEST.getBytes(StringUtils.UTF_8));
     assertNotNull(o);
     assertEquals("value", o.getString("key"));
   }
@@ -117,7 +118,7 @@ public class TestExtendedJSONObject {
     }
 
     try {
-      ExtendedJSONObject.parseUTF8AsJSONObject("{".getBytes("UTF-8"));
+      ExtendedJSONObject.parseUTF8AsJSONObject("{".getBytes(StringUtils.UTF_8));
       fail();
     } catch (NonObjectJSONException e) {
       // Do nothing.

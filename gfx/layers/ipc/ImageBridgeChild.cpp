@@ -496,11 +496,6 @@ ImageBridgeChild::EndTransaction()
   }
 }
 
-void
-ImageBridgeChild::SendImageBridgeThreadId()
-{
-}
-
 bool
 ImageBridgeChild::InitForContent(Endpoint<PImageBridgeChild>&& aEndpoint, uint32_t aNamespace)
 {
@@ -557,7 +552,6 @@ ImageBridgeChild::Bind(Endpoint<PImageBridgeChild>&& aEndpoint)
   this->AddRef();
 
   mCanSend = true;
-  SendImageBridgeThreadId();
 }
 
 void
@@ -571,7 +565,6 @@ ImageBridgeChild::BindSameProcess(RefPtr<ImageBridgeParent> aParent)
   this->AddRef();
 
   mCanSend = true;
-  SendImageBridgeThreadId();
 }
 
 /* static */ void
@@ -1119,9 +1112,9 @@ ImageBridgeChild::CanSend() const
 }
 
 void
-ImageBridgeChild::HandleFatalError(const char* aName, const char* aMsg) const
+ImageBridgeChild::HandleFatalError(const char* aMsg) const
 {
-  dom::ContentChild::FatalErrorIfNotUsingGPUProcess(aName, aMsg, OtherPid());
+  dom::ContentChild::FatalErrorIfNotUsingGPUProcess(aMsg, OtherPid());
 }
 
 wr::MaybeExternalImageId

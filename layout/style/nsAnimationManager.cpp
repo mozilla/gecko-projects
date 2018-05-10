@@ -53,7 +53,7 @@ CSSAnimation::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 mozilla::dom::Promise*
 CSSAnimation::GetReady(ErrorResult& aRv)
 {
-  FlushStyle();
+  FlushUnanimatedStyle();
   return Animation::GetReady(aRv);
 }
 
@@ -76,7 +76,7 @@ CSSAnimation::PlayStateFromJS() const
 {
   // Flush style to ensure that any properties controlling animation state
   // (e.g. animation-play-state) are fully updated.
-  FlushStyle();
+  FlushUnanimatedStyle();
   return Animation::PlayStateFromJS();
 }
 
@@ -85,7 +85,7 @@ CSSAnimation::PendingFromJS() const
 {
   // Flush style since, for example, if the animation-play-state was just
   // changed its possible we should now be pending.
-  FlushStyle();
+  FlushUnanimatedStyle();
   return Animation::PendingFromJS();
 }
 
@@ -94,7 +94,7 @@ CSSAnimation::PlayFromJS(ErrorResult& aRv)
 {
   // Note that flushing style below might trigger calls to
   // PlayFromStyle()/PauseFromStyle() on this object.
-  FlushStyle();
+  FlushUnanimatedStyle();
   Animation::PlayFromJS(aRv);
 }
 
@@ -357,14 +357,16 @@ public:
     MOZ_ASSERT(aComputedStyle);
   }
 
-  bool BuildKeyframes(nsPresContext* aPresContext,
+  bool BuildKeyframes(const Element& aElement,
+                      nsPresContext* aPresContext,
                       nsAtom* aName,
                       const nsTimingFunction& aTimingFunction,
                       nsTArray<Keyframe>& aKeyframes)
   {
-    ServoStyleSet* styleSet = aPresContext->StyleSet()->AsServo();
+    ServoStyleSet* styleSet = aPresContext->StyleSet();
     MOZ_ASSERT(styleSet);
-    return styleSet->GetKeyframesForName(aName,
+    return styleSet->GetKeyframesForName(aElement,
+                                         aName,
                                          aTimingFunction,
                                          aKeyframes);
   }
@@ -418,14 +420,13 @@ private:
 };
 
 
-template<class BuilderType>
 static void
 UpdateOldAnimationPropertiesWithNew(
     CSSAnimation& aOld,
     TimingParams& aNewTiming,
     nsTArray<Keyframe>&& aNewKeyframes,
     bool aNewIsStylePaused,
-    BuilderType& aBuilder)
+    ServoCSSAnimationBuilder& aBuilder)
 {
   bool animationChanged = false;
 
@@ -472,20 +473,20 @@ UpdateOldAnimationPropertiesWithNew(
 // Returns a new animation set up with given StyleAnimation.
 // Or returns an existing animation matching StyleAnimation's name updated
 // with the new StyleAnimation.
-template<class BuilderType>
 static already_AddRefed<CSSAnimation>
 BuildAnimation(nsPresContext* aPresContext,
                const NonOwningAnimationTarget& aTarget,
                const nsStyleDisplay& aStyleDisplay,
                uint32_t animIdx,
-               BuilderType& aBuilder,
+               ServoCSSAnimationBuilder& aBuilder,
                nsAnimationManager::CSSAnimationCollection* aCollection)
 {
   MOZ_ASSERT(aPresContext);
 
   nsAtom* animationName = aStyleDisplay.GetAnimationName(animIdx);
   nsTArray<Keyframe> keyframes;
-  if (!aBuilder.BuildKeyframes(aPresContext,
+  if (!aBuilder.BuildKeyframes(*aTarget.mElement,
+                               aPresContext,
                                animationName,
                                aStyleDisplay.GetAnimationTimingFunction(animIdx),
                                keyframes)) {
@@ -555,12 +556,11 @@ BuildAnimation(nsPresContext* aPresContext,
 }
 
 
-template<class BuilderType>
 static nsAnimationManager::OwningCSSAnimationPtrArray
 BuildAnimations(nsPresContext* aPresContext,
                 const NonOwningAnimationTarget& aTarget,
                 const nsStyleDisplay& aStyleDisplay,
-                BuilderType& aBuilder,
+                ServoCSSAnimationBuilder& aBuilder,
                 nsAnimationManager::CSSAnimationCollection* aCollection,
                 nsTHashtable<nsRefPtrHashKey<nsAtom>>& aReferencedAnimations)
 {
@@ -628,12 +628,11 @@ nsAnimationManager::UpdateAnimations(
   DoUpdateAnimations(target, *disp, builder);
 }
 
-template<class BuilderType>
 void
 nsAnimationManager::DoUpdateAnimations(
   const NonOwningAnimationTarget& aTarget,
   const nsStyleDisplay& aStyleDisplay,
-  BuilderType& aBuilder)
+  ServoCSSAnimationBuilder& aBuilder)
 {
   // Everything that causes our animation data to change triggers a
   // style change, which in turn triggers a non-animation restyle.

@@ -88,8 +88,8 @@ function installAddonEngine(name = "engine-addon") {
   do_get_file("data/" + name + ".xml").copyTo(dir, "bug645970.xml");
 
   Services.dirsvc.registerProvider({
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIDirectoryServiceProvider,
-                                           Ci.nsIDirectoryServiceProvider2]),
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIDirectoryServiceProvider,
+                                            Ci.nsIDirectoryServiceProvider2]),
 
     getFile(prop, persistant) {
       throw Cr.NS_ERROR_FAILURE;
@@ -107,7 +107,7 @@ function installAddonEngine(name = "engine-addon") {
       }
 
       return {
-        QueryInterface: XPCOMUtils.generateQI([Ci.nsISimpleEnumerator]),
+        QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
         hasMoreElements: () => result.length > 0,
         getNext: () => result.shift()
       };
@@ -235,15 +235,22 @@ const kTestEngineName = "Test search engine";
 const REQ_LOCALES_CHANGED_TOPIC = "intl:requested-locales-changed";
 
 function getDefaultEngineName(isUS) {
-  const nsIPLS = Ci.nsIPrefLocalizedString;
-  // Copy the logic from nsSearchService
-  let pref = kDefaultenginenamePref;
+  // The list of visibleDefaultEngines needs to match or the cache will be ignored.
+  let chan = NetUtil.newChannel({
+    uri: "resource://search-plugins/list.json",
+    loadUsingSystemPrincipal: true
+  });
+  let searchSettings = parseJsonFromStream(chan.open2());
+  let defaultEngineName = searchSettings.default.searchDefault;
+
   if (isUS === undefined)
     isUS = Services.locale.getRequestedLocale() == "en-US" && isUSTimezone();
-  if (isUS) {
-    pref += ".US";
+
+  if (isUS && ("US" in searchSettings &&
+               "searchDefault" in searchSettings.US)) {
+    defaultEngineName = searchSettings.US.searchDefault;
   }
-  return Services.prefs.getComplexValue(pref, nsIPLS).data;
+  return defaultEngineName;
 }
 
 /**
@@ -405,7 +412,6 @@ function setLocalizedDefaultPref(aPrefName, aValue) {
   Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF)
           .setCharPref(aPrefName, value);
 }
-
 
 /**
  * Installs two test engines, sets them as default for US vs. general.

@@ -32,6 +32,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/Unused.h"
 #include "nsCOMPtr.h"
+#include "nsDebug.h"
 #include "nsIGfxInfo.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
@@ -86,20 +87,61 @@ IsDisplayLocal()
       return false;
     }
     MOZ_RELEASE_ASSERT(static_cast<size_t>(optlen) == sizeof(domain));
-    // There's one more wrinkle here: the network namespace also
-    // controls "abstract namespace" addresses in the Unix domain.
-    // Xorg seems to listen on both abstract and normal addresses, but
-    // prefers abstract. This mean that if there exists a server that
-    // uses only the abstract namespace, then it will break and we
-    // won't be able to detect that ahead of time.  So, hopefully it
-    // does not exist.
-    return domain == AF_LOCAL;
+    if (domain != AF_LOCAL) {
+      return false;
+    }
+    // There's one more complication: Xorg listens on named sockets
+    // (actual filesystem nodes) as well as abstract addresses (opaque
+    // octet strings scoped to the network namespace; this is a Linux
+    // extension).
+    //
+    // Inside a container environment (e.g., when running as a Snap
+    // package), it's possible that only the abstract addresses are
+    // accessible.  In that case, the display must be considered
+    // remote.  See also bug 1450740.
+    //
+    // Unfortunately, the Xorg client libraries prefer the abstract
+    // addresses, so this isn't directly detectable by inspecting the
+    // parent process's socket.  Instead, this checks for the
+    // directory the sockets are stored in, which typically won't
+    // exist in a container with a private /tmp that isn't running its
+    // own X server.
+    if (access("/tmp/.X11-unix", X_OK) != 0) {
+      NS_ERROR("/tmp/.X11-unix is inaccessible; can't isolate network"
+               " namespace in content processes");
+      return false;
+    }
   }
 #endif
 
   // Assume that other backends (e.g., Wayland) will not use the
   // network namespace.
   return true;
+}
+
+bool HasAtiDrivers()
+{
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+  nsAutoString vendorID;
+  static const Array<nsresult (nsIGfxInfo::*)(nsAString&), 2> kMethods = {
+    &nsIGfxInfo::GetAdapterVendorID,
+    &nsIGfxInfo::GetAdapterVendorID2,
+  };
+  for (const auto method : kMethods) {
+    if (NS_SUCCEEDED((gfxInfo->*method)(vendorID))) {
+      // This test is based on telemetry data.  The proprietary ATI
+      // drivers seem to use this vendor string, including for some
+      // newer devices that have AMD branding in the device name, such
+      // as those using AMDGPU-PRO drivers.
+      // The open-source drivers integrated into Mesa appear to use
+      // the vendor ID "X.Org" instead.
+      if (vendorID.EqualsLiteral("ATI Technologies Inc.")) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // Content processes may need direct access to SysV IPC in certain
@@ -121,24 +163,10 @@ ContentNeedsSysVIPC()
   }
 
   // The fglrx (ATI Catalyst) GPU drivers use SysV IPC.
-  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
-  nsAutoString vendorID;
-  static const Array<nsresult (nsIGfxInfo::*)(nsAString&), 2> kMethods = {
-    &nsIGfxInfo::GetAdapterVendorID,
-    &nsIGfxInfo::GetAdapterVendorID2,
-  };
-  for (const auto method : kMethods) {
-    if (NS_SUCCEEDED((gfxInfo->*method)(vendorID))) {
-      // This test is based on telemetry data.  The proprietary ATI
-      // drivers seem to use this vendor string, including for some
-      // newer devices that have AMD branding in the device name.
-      // The open-source drivers integrated into Mesa appear to use
-      // the vendor ID "X.Org" instead.
-      if (vendorID.EqualsLiteral("ATI Technologies Inc.")) {
-        return true;
-      }
-    }
+  if (HasAtiDrivers()) {
+    return true;
   }
+
   return false;
 }
 

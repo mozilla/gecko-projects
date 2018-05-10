@@ -78,7 +78,6 @@
 #include "nsURLHelper.h"
 #include "nsNetUtil.h"
 #include "nsIURLParser.h"
-#include "nsIDOMDataChannel.h"
 #include "NullPrincipal.h"
 #include "mozilla/PeerIdentity.h"
 #include "mozilla/dom/RTCCertificate.h"
@@ -102,7 +101,6 @@
 #include "rlogconnector.h"
 #include "WebrtcGlobalInformation.h"
 #include "mozilla/dom/Event.h"
-#include "nsIDOMCustomEvent.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/net/DataChannelProtocol.h"
 
@@ -224,8 +222,6 @@ static nsresult InitNSSInContent()
 namespace mozilla {
   class DataChannel;
 }
-
-class nsIDOMDataChannel;
 
 // XXX Workaround for bug 998092 to maintain the existing broken semantics
 template<>
@@ -1370,12 +1366,13 @@ PeerConnectionImpl::CreateDataChannel(const nsAString& aLabel,
         new JsepTransceiver(SdpMediaSection::MediaType::kApplication));
     mHaveDataStream = true;
   }
-  nsIDOMDataChannel *retval;
-  rv = NS_NewDOMDataChannel(dataChannel.forget(), mWindow, &retval);
+  RefPtr<nsDOMDataChannel> retval;
+  rv = NS_NewDOMDataChannel(dataChannel.forget(), mWindow,
+			    getter_AddRefs(retval));
   if (NS_FAILED(rv)) {
     return rv;
   }
-  *aRetval = static_cast<nsDOMDataChannel*>(retval);
+  retval.forget(aRetval);
   return NS_OK;
 }
 
@@ -1406,14 +1403,13 @@ do_QueryObjectReferent(nsIWeakReference* aRawPtr) {
 
 
 // Not a member function so that we don't need to keep the PC live.
-static void NotifyDataChannel_m(RefPtr<nsIDOMDataChannel> aChannel,
+static void NotifyDataChannel_m(RefPtr<nsDOMDataChannel> aChannel,
                                 RefPtr<PeerConnectionObserver> aObserver)
 {
   MOZ_ASSERT(NS_IsMainThread());
   JSErrorResult rv;
-  RefPtr<nsDOMDataChannel> channel = static_cast<nsDOMDataChannel*>(&*aChannel);
-  aObserver->NotifyDataChannel(*channel, rv);
-  NS_DataChannelAppReady(aChannel);
+  aObserver->NotifyDataChannel(*aChannel, rv);
+  aChannel->AppReady();
 }
 
 void
@@ -1425,7 +1421,7 @@ PeerConnectionImpl::NotifyDataChannel(already_AddRefed<DataChannel> aChannel)
   MOZ_ASSERT(channel);
   CSFLogDebug(LOGTAG, "%s: channel: %p", __FUNCTION__, channel.get());
 
-  nsCOMPtr<nsIDOMDataChannel> domchannel;
+  RefPtr<nsDOMDataChannel> domchannel;
   nsresult rv = NS_NewDOMDataChannel(channel.forget(),
                                      mWindow, getter_AddRefs(domchannel));
   NS_ENSURE_SUCCESS_VOID(rv);
@@ -2348,7 +2344,8 @@ PeerConnectionImpl::CreateReceiveTrack(SdpMediaSection::MediaType type)
       audio ?
         MediaStreamGraph::AUDIO_THREAD_DRIVER :
         MediaStreamGraph::SYSTEM_THREAD_DRIVER,
-      GetWindow());
+      GetWindow(),
+      MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE);
 
   RefPtr<DOMMediaStream> stream =
     DOMMediaStream::CreateSourceStreamAsInput(GetWindow(), graph);

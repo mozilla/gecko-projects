@@ -257,7 +257,7 @@ protected:
 
   void SetFrame(nsIFrame* aFrame)
   {
-    NS_PRECONDITION(aFrame, "Need a frame");
+    MOZ_ASSERT(aFrame, "Need a frame");
     NS_ASSERTION(gFrameTreeLockCount > 0,
                  "Can't call this when frame tree is not locked");
 
@@ -800,9 +800,6 @@ ConstructBorderRenderer(nsPresContext* aPresContext,
 {
   nsMargin border = aStyleBorder.GetComputedBorder();
 
-  // Get our style context's color struct.
-  const nsStyleColor* ourColor = aComputedStyle->StyleColor();
-
   // In NavQuirks mode we want to use the parent's context as a starting point
   // for determining the background color.
   bool quirks = aPresContext->CompatibilityMode() == eCompatibility_NavQuirks;
@@ -861,7 +858,7 @@ ConstructBorderRenderer(nsPresContext* aPresContext,
   // pull out styles, colors
   NS_FOR_CSS_SIDES (i) {
     borderStyles[i] = aStyleBorder.GetBorderStyle(i);
-    borderColors[i] = ourColor->CalcComplexColor(aStyleBorder.mBorderColor[i]);
+    borderColors[i] = aStyleBorder.mBorderColor[i].CalcColor(aComputedStyle);
   }
 
   PrintAsFormatString(" borderStyles: %d %d %d %d\n", borderStyles[0], borderStyles[1], borderStyles[2], borderStyles[3]);
@@ -903,8 +900,8 @@ nsCSSRendering::PaintBorderWithStyleBorder(nsPresContext* aPresContext,
   PrintAsStringNewline("++ PaintBorder");
 
   // Check to see if we have an appearance defined.  If so, we let the theme
-  // renderer draw the border.  DO not get the data from aForFrame, since the passed in style context
-  // may be different!  Always use |aComputedStyle|!
+  // renderer draw the border.  DO not get the data from aForFrame, since the
+  // passed in ComputedStyle may be different!  Always use |aComputedStyle|!
   const nsStyleDisplay* displayData = aComputedStyle->StyleDisplay();
   if (displayData->mAppearance) {
     nsITheme *theme = aPresContext->GetTheme();
@@ -1051,7 +1048,7 @@ nsCSSRendering::CreateBorderRendererForOutline(nsPresContext* aPresContext,
 {
   nscoord             twipsRadii[8];
 
-  // Get our style context's color struct.
+  // Get our ComputedStyle's color struct.
   const nsStyleOutline* ourOutline = aComputedStyle->StyleOutline();
 
   if (!ourOutline->ShouldPaintOutline()) {
@@ -1224,7 +1221,7 @@ nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
   // should not be used.  Therefore, we provide a value that will
   // be blatantly wrong if it ever does get used.  (If this becomes
   // something that CSS can style, this function will then have access
-  // to a style context and can use the same logic that PaintBorder
+  // to a ComputedStyle and can use the same logic that PaintBorder
   // and PaintOutline do.)
   //
   // WebRender layers-free mode don't use PaintFocus function. Just assign
@@ -1408,7 +1405,7 @@ nsCSSRendering::FindBackgroundStyleFrame(nsIFrame* aForFrame)
  *    and for SGML-based HTML documents only.
  *
  * |FindBackground| returns true if a background should be painted, and
- * the resulting style context to use for the background information
+ * the resulting ComputedStyle to use for the background information
  * will be filled in to |aBackground|.
  */
 ComputedStyle*
@@ -2023,8 +2020,8 @@ nsCSSRendering::PaintStyleImageLayer(const PaintBGParams& aParams,
 {
   AUTO_PROFILER_LABEL("nsCSSRendering::PaintStyleImageLayer", GRAPHICS);
 
-  NS_PRECONDITION(aParams.frame,
-                  "Frame is expected to be provided to PaintStyleImageLayer");
+  MOZ_ASSERT(aParams.frame,
+             "Frame is expected to be provided to PaintStyleImageLayer");
 
   ComputedStyle *sc;
   if (!FindBackground(aParams.frame, &sc)) {
@@ -2116,7 +2113,7 @@ nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayer(const PaintBGParams
                                                              mozilla::layers::WebRenderLayerManager* aManager,
                                                              nsDisplayItem* aItem)
 {
-  NS_PRECONDITION(aParams.frame,
+  MOZ_ASSERT(aParams.frame,
                   "Frame is expected to be provided to BuildWebRenderDisplayItemsForStyleImageLayer");
 
   ComputedStyle *sc;
@@ -2621,8 +2618,8 @@ nsCSSRendering::PaintStyleImageLayerWithSC(const PaintBGParams& aParams,
                                            ComputedStyle *aBackgroundSC,
                                            const nsStyleBorder& aBorder)
 {
-  NS_PRECONDITION(aParams.frame,
-                  "Frame is expected to be provided to PaintStyleImageLayerWithSC");
+  MOZ_ASSERT(aParams.frame,
+             "Frame is expected to be provided to PaintStyleImageLayerWithSC");
 
   // If we're drawing all layers, aCompositonOp is ignored, so make sure that
   // it was left at its default value.
@@ -2745,7 +2742,7 @@ nsCSSRendering::PaintStyleImageLayerWithSC(const PaintBGParams& aParams,
     NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT_WITH_RANGE(i, layers, startLayer,
                                                          count) {
       aParams.frame->AssociateImage(layers.mLayers[i].mImage,
-                                    &aParams.presCtx);
+                                    &aParams.presCtx, 0);
     }
   }
 

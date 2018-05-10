@@ -6,7 +6,6 @@ loader: taskgraph.loader.transform:loader
 
 transforms:
    - taskgraph.transforms.update_verify_config:transforms
-   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.job:transforms
    - taskgraph.transforms.task:transforms
 
@@ -25,7 +24,7 @@ job-defaults:
            type: file
    run:
       using: run-task
-      sparse-profile: update-verify
+      sparse-profile: mozharness
    extra:
       app-name: browser
       archive-prefix:
@@ -61,28 +60,33 @@ job-defaults:
             default: null
       last-watershed:
          by-project:
-            # TODO: add esr here when setting up mozilla-esr60
-            # let's put mozilla-esr52 in this comment as well, in case
-            # somebody is grepping the tree for things they need to do.
             birch:
                by-build-platform:
-                  linux: "57.0"
-                  linux64: "57.0"
-                  macosx64: "57.0"
-                  win32: "56.0"
-                  win64: "56.0"
+                  linux*: "57.0"
+                  linux64*: "57.0"
+                  macosx64*: "57.0"
+                  win32*: "56.0"
+                  win64*: "56.0"
                   default: null
             jamun: "56.0b3"
             maple: "56.0b3"
             mozilla-beta: "56.0b3"
             mozilla-release:
                by-build-platform:
-                  linux: "57.0"
-                  linux64: "57.0"
-                  macosx64: "57.0"
-                  win32: "56.0"
-                  win64: "56.0"
+                  linux*: "57.0"
+                  linux64*: "57.0"
+                  macosx64*: "57.0"
+                  win32*: "56.0"
+                  win64*: "56.0"
                   default: null
+            mozilla-esr52:
+               by-build-platform:
+                  macosx64: "45.9.0esr"
+                  win32: "45.3.0esr"
+                  win64: "45.3.0esr"
+                  default: null
+            # TODO add bz2 -> lzma watershed when we ship the first ESR 52 -> 60 update
+            mozilla-esr60: "60.0esr"
             default: null
 
 jobs:
@@ -94,7 +98,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux
+         build_platform: linux-nightly
       extra:
          product: firefox
          platform: linux-i686
@@ -122,7 +126,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64
+         build_platform: linux64-nightly
       extra:
          product: firefox
          platform: linux-x86_64
@@ -150,7 +154,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64
+         build_platform: macosx64-nightly
       extra:
          product: firefox
          platform: mac
@@ -178,7 +182,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32
+         build_platform: win32-nightly
       extra:
          product: firefox
          platform: win32
@@ -206,7 +210,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64
+         build_platform: win64-nightly
       extra:
          product: firefox
          platform: win64
@@ -234,7 +238,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux-devedition
+         build_platform: linux-devedition-nightly
       extra:
          product: firefox
          platform: linux-i686
@@ -250,7 +254,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: linux64-devedition
+         build_platform: linux64-devedition-nightly
       extra:
          product: firefox
          platform: linux-x86_64
@@ -266,7 +270,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: macosx64-devedition
+         build_platform: macosx64-devedition-nightly
       extra:
          product: firefox
          platform: mac
@@ -282,7 +286,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win32-devedition
+         build_platform: win32-devedition-nightly
       extra:
          product: firefox
          platform: win32
@@ -298,7 +302,7 @@ jobs:
          kind: test
          tier: 1
       attributes:
-         build_platform: win64-devedition
+         build_platform: win64-devedition-nightly
       extra:
          product: firefox
          platform: win64

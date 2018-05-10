@@ -87,16 +87,12 @@ DispatchCustomDOMEvent(Element* aFrameElement, const nsAString& aEventName,
   RefPtr<CustomEvent> event =
     NS_NewDOMCustomEvent(aFrameElement, presContext, nullptr);
 
-  ErrorResult res;
   event->InitCustomEvent(cx,
                          aEventName,
                          /* aCanBubble = */ true,
                          /* aCancelable = */ true,
-                         aDetailValue,
-                         res);
-  if (res.Failed()) {
-    return false;
-  }
+                         aDetailValue);
+
   event->SetTrusted(true);
   // Dispatch the event.
   // We don't initialize aStatus here, as our callers have already done so.
@@ -186,7 +182,7 @@ BrowserElementParent::OpenWindowOOP(TabParent* aOpenerTabParent,
                                     const nsAString& aName,
                                     const nsAString& aFeatures,
                                     TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                    uint64_t* aLayersId)
+                                    layers::LayersId* aLayersId)
 {
   // Create an iframe owned by the same document which owns openerFrameElement.
   nsCOMPtr<Element> openerFrameElement = aOpenerTabParent->GetOwnerElement();

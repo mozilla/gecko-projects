@@ -6,19 +6,13 @@
 ChromeUtils.import("resource:///modules/SitePermissions.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-const STORAGE_MANAGER_ENABLED = Services.prefs.getBoolPref("browser.storageManager.enabled");
 const RESIST_FINGERPRINTING_ENABLED = Services.prefs.getBoolPref("privacy.resistFingerprinting");
 const MIDI_ENABLED = Services.prefs.getBoolPref("dom.webmidi.enabled");
 
 add_task(async function testPermissionsListing() {
-  let expectedPermissions = ["camera", "cookie", "desktop-notification", "focus-tab-by-prompt",
-     "geo", "image", "install", "microphone", "plugin:flash", "popup", "screen", "shortcuts"];
-  if (STORAGE_MANAGER_ENABLED) {
-    // The persistent-storage permission is still only pref-on on Nightly
-    // so we add it only when it's pref-on.
-    // Should remove this checking and add it as default after it is fully pref-on.
-    expectedPermissions.push("persistent-storage");
-  }
+  let expectedPermissions = ["autoplay-media", "camera", "cookie", "desktop-notification", "focus-tab-by-prompt",
+     "geo", "image", "install", "microphone", "plugin:flash", "popup", "screen", "shortcuts",
+     "persistent-storage"];
   if (RESIST_FINGERPRINTING_ENABLED) {
     // Canvas permission should be hidden unless privacy.resistFingerprinting
     // is true.
@@ -112,14 +106,8 @@ add_task(async function testExactHostMatch() {
   let uri = Services.io.newURI("https://example.com");
   let subUri = Services.io.newURI("https://test1.example.com");
 
-  let exactHostMatched = ["desktop-notification", "focus-tab-by-prompt", "camera",
-                          "microphone", "screen", "geo"];
-  if (STORAGE_MANAGER_ENABLED) {
-    // The persistent-storage permission is still only pref-on on Nightly
-    // so we add it only when it's pref-on.
-    // Should remove this checking and add it as default after it is fully pref-on.
-    exactHostMatched.push("persistent-storage");
-  }
+  let exactHostMatched = ["autoplay-media", "desktop-notification", "focus-tab-by-prompt", "camera",
+                          "microphone", "screen", "geo", "persistent-storage"];
   if (RESIST_FINGERPRINTING_ENABLED) {
     // Canvas permission should be hidden unless privacy.resistFingerprinting
     // is true.
@@ -139,7 +127,7 @@ add_task(async function testExactHostMatch() {
 
     if (exactHostMatched.includes(permission)) {
       // Check that the sub-origin does not inherit the permission from its parent.
-      Assert.equal(SitePermissions.get(subUri, permission).state, SitePermissions.UNKNOWN,
+      Assert.equal(SitePermissions.get(subUri, permission).state, SitePermissions.getDefault(permission),
         `${permission} should exact-host match`);
     } else if (nonExactHostMatched.includes(permission)) {
       // Check that the sub-origin does inherit the permission from its parent.
@@ -160,7 +148,7 @@ add_task(async function testExactHostMatch() {
   }
 });
 
-add_task(function* testDefaultPrefs() {
+add_task(async function testDefaultPrefs() {
   let uri = Services.io.newURI("https://example.com");
 
   // Check that without a pref the default return value is UNKNOWN.

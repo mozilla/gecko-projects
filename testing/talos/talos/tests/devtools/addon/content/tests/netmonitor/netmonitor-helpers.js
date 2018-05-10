@@ -5,7 +5,7 @@
 "use strict";
 
 const { EVENTS } = require("devtools/client/netmonitor/src/constants");
-const { getToolbox, runTest } = require("chrome://damp/content/tests/head");
+const { getToolbox, runTest } = require("../head");
 
 /**
  * Start monitoring all incoming update events about network requests and wait until
@@ -46,14 +46,14 @@ function waitForAllRequestsFinished(expectedRequests) {
       // Have all the requests finished yet?
       if (payloadReady >= expectedRequests && timingsUpdated >= expectedRequests) {
         // All requests are done - unsubscribe from events and resolve!
-        window.off(EVENTS.PAYLOAD_READY, onPayloadReady);
-        window.off(EVENTS.RECEIVED_EVENT_TIMINGS, onTimingsUpdated);
+        window.api.off(EVENTS.PAYLOAD_READY, onPayloadReady);
+        window.api.off(EVENTS.RECEIVED_EVENT_TIMINGS, onTimingsUpdated);
         resolve();
       }
     }
 
-    window.on(EVENTS.PAYLOAD_READY, onPayloadReady);
-    window.on(EVENTS.RECEIVED_EVENT_TIMINGS, onTimingsUpdated);
+    window.api.on(EVENTS.PAYLOAD_READY, onPayloadReady);
+    window.api.on(EVENTS.RECEIVED_EVENT_TIMINGS, onTimingsUpdated);
   });
 }
 

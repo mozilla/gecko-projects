@@ -16,10 +16,12 @@
 #include "mozilla/TouchEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/MouseEventBinding.h"
+#include "mozilla/dom/Selection.h"
 #include "nsCanvasFrame.h"
 #include "nsDocShell.h"
 #include "nsFocusManager.h"
 #include "nsFrameSelection.h"
+#include "nsIDocument.h"
 #include "nsITimer.h"
 #include "nsPresContext.h"
 
@@ -81,8 +83,8 @@ public:
 
   MOZ_CAN_RUN_SCRIPT
   void OnSelectionChanged(AccessibleCaretEventHub* aContext,
-                          nsIDOMDocument* aDoc,
-                          nsISelection* aSel,
+                          nsIDocument* aDoc,
+                          dom::Selection* aSel,
                           int16_t aReason) override
   {
     aContext->mManager->OnSelectionChanged(aDoc, aSel, aReason);
@@ -229,8 +231,8 @@ public:
 
   MOZ_CAN_RUN_SCRIPT
   void OnSelectionChanged(AccessibleCaretEventHub* aContext,
-                          nsIDOMDocument* aDoc,
-                          nsISelection* aSel,
+                          nsIDocument* aDoc,
+                          dom::Selection* aSel,
                           int16_t aReason) override
   {
     aContext->mManager->OnSelectionChanged(aDoc, aSel, aReason);
@@ -400,8 +402,15 @@ AccessibleCaretEventHub::Init()
     return;
   }
 
-  docShell->AddWeakReflowObserver(this);
-  docShell->AddWeakScrollObserver(this);
+  nsCOMPtr<nsIDocShell> curDocShell = docShell;
+  do {
+    curDocShell->AddWeakReflowObserver(this);
+    curDocShell->AddWeakScrollObserver(this);
+
+    nsCOMPtr<nsIDocShellTreeItem> tmp;
+    curDocShell->GetSameTypeParent(getter_AddRefs(tmp));
+    curDocShell = do_QueryInterface(tmp);
+  } while (curDocShell);
 
   mDocShell = static_cast<nsDocShell*>(docShell);
 
@@ -421,10 +430,14 @@ AccessibleCaretEventHub::Terminate()
     return;
   }
 
-  RefPtr<nsDocShell> docShell(mDocShell.get());
-  if (docShell) {
-    docShell->RemoveWeakReflowObserver(this);
-    docShell->RemoveWeakScrollObserver(this);
+  nsCOMPtr<nsIDocShell> curDocShell = mDocShell.get();
+  while (curDocShell) {
+    curDocShell->RemoveWeakReflowObserver(this);
+    curDocShell->RemoveWeakScrollObserver(this);
+
+    nsCOMPtr<nsIDocShellTreeItem> tmp;
+    curDocShell->GetSameTypeParent(getter_AddRefs(tmp));
+    curDocShell = do_QueryInterface(tmp);
   }
 
   if (mLongTapInjectorTimer) {
@@ -712,8 +725,8 @@ AccessibleCaretEventHub::ScrollPositionChanged()
 }
 
 nsresult
-AccessibleCaretEventHub::NotifySelectionChanged(nsIDOMDocument* aDoc,
-                                                nsISelection* aSel,
+AccessibleCaretEventHub::NotifySelectionChanged(nsIDocument* aDoc,
+                                                dom::Selection* aSel,
                                                 int16_t aReason)
 {
   if (!mInitialized) {

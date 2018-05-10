@@ -469,10 +469,7 @@ Error(JSContext* cx, unsigned argc, Value* vp)
             return false;
     } else {
         lineNumber = iter.done() ? 0 : iter.computeLine(&columnNumber);
-        // XXX: Make the column 1-based as in other browsers, instead of 0-based
-        // which is how SpiderMonkey stores it internally. This will be
-        // unnecessary once bug 1144340 is fixed.
-        ++columnNumber;
+        columnNumber = FixupColumnForDisplay(columnNumber);
     }
 
     RootedObject stack(cx);
@@ -589,8 +586,7 @@ ErrorObject::createProto(JSContext* cx, JSProtoKey key)
     if (!protoProto)
         return nullptr;
 
-    return GlobalObject::createBlankPrototypeInheriting(cx, cx->global(),
-                                                        &ErrorObject::protoClasses[type],
+    return GlobalObject::createBlankPrototypeInheriting(cx, &ErrorObject::protoClasses[type],
                                                         protoProto);
 }
 
@@ -974,11 +970,9 @@ ErrorReport::populateUncaughtExceptionReportUTF8VA(JSContext* cx, va_list ap)
     NonBuiltinFrameIter iter(cx, cx->compartment()->principals());
     if (!iter.done()) {
         ownedReport.filename = iter.filename();
-        ownedReport.lineno = iter.computeLine(&ownedReport.column);
-        // XXX: Make the column 1-based as in other browsers, instead of 0-based
-        // which is how SpiderMonkey stores it internally. This will be
-        // unnecessary once bug 1144340 is fixed.
-        ++ownedReport.column;
+        uint32_t column;
+        ownedReport.lineno = iter.computeLine(&column);
+        ownedReport.column = FixupColumnForDisplay(column);
         ownedReport.isMuted = iter.mutedErrors();
     }
 

@@ -253,9 +253,13 @@ PaymentRequestService::RequestPayment(nsIPaymentActionRequest* aRequest)
       rv = request->GetOptions(getter_AddRefs(options));
       NS_ENSURE_SUCCESS(rv, rv);
 
+      nsAutoString shippingOption;
+      rv = request->GetShippingOption(shippingOption);
+      NS_ENSURE_SUCCESS(rv, rv);
+
       nsCOMPtr<nsIPaymentRequest> payment =
         new payments::PaymentRequest(tabId, requestId, topLevelPrincipal,
-                                     methodData, details, options);
+                                     methodData, details, options, shippingOption);
 
       if (!mRequestQueue.AppendElement(payment, mozilla::fallible)) {
         return NS_ERROR_OUT_OF_MEMORY;
@@ -357,6 +361,10 @@ PaymentRequestService::RequestPayment(nsIPaymentActionRequest* aRequest)
       rv = request->GetDetails(getter_AddRefs(details));
       NS_ENSURE_SUCCESS(rv, rv);
 
+      nsAutoString shippingOption;
+      rv = request->GetShippingOption(shippingOption);
+      NS_ENSURE_SUCCESS(rv, rv);
+
       rv = request->GetRequestId(requestId);
       NS_ENSURE_SUCCESS(rv, rv);
       nsCOMPtr<nsIPaymentRequest> payment;
@@ -364,11 +372,17 @@ PaymentRequestService::RequestPayment(nsIPaymentActionRequest* aRequest)
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      rv = payment->UpdatePaymentDetails(details);
+      rv = payment->UpdatePaymentDetails(details, shippingOption);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      rv = LaunchUIAction(requestId, type);
+      if (mShowingRequest) {
+        MOZ_ASSERT(mShowingRequest == payment);
+        rv = LaunchUIAction(requestId, type);
+      } else {
+        mShowingRequest = payment;
+        rv = LaunchUIAction(requestId, nsIPaymentActionRequest::SHOW_ACTION);
+      }
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return NS_ERROR_FAILURE;
       }
@@ -420,8 +434,8 @@ PaymentRequestService::RespondPayment(nsIPaymentActionResponse* aResponse)
       bool isSucceeded;
       rv = response->IsSucceeded(&isSucceeded);
       NS_ENSURE_SUCCESS(rv, rv);
+      mShowingRequest = nullptr;
       if (isSucceeded) {
-        mShowingRequest = nullptr;
         mRequestQueue.RemoveElement(request);
       }
       break;

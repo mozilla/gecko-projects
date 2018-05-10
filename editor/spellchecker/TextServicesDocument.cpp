@@ -6,6 +6,7 @@
 #include "TextServicesDocument.h"
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "mozilla/TextEditor.h"         // for TextEditor
@@ -19,19 +20,16 @@
 #include "nsIContent.h"                 // for nsIContent, etc
 #include "nsIContentIterator.h"         // for nsIContentIterator
 #include "nsID.h"                       // for NS_GET_IID
-#include "nsIDOMDocument.h"             // for nsIDOMDocument
 #include "nsIDOMNode.h"                 // for nsIDOMNode, etc
 #include "nsIEditor.h"                  // for nsIEditor, etc
 #include "nsINode.h"                    // for nsINode
 #include "nsIPlaintextEditor.h"         // for nsIPlaintextEditor
-#include "nsISelection.h"               // for nsISelection
 #include "nsISelectionController.h"     // for nsISelectionController, etc
 #include "nsISupportsBase.h"            // for nsISupports
 #include "nsISupportsUtils.h"           // for NS_IF_ADDREF, NS_ADDREF, etc
 #include "nsITextServicesFilter.h"      // for nsITextServicesFilter
 #include "mozilla/intl/WordBreaker.h"   // for WordRange, WordBreaker
 #include "nsRange.h"                    // for nsRange
-#include "nsStaticAtom.h"               // for NS_STATIC_ATOM_SETUP, etc
 #include "nsString.h"                   // for nsString, nsAutoString
 #include "nscore.h"                     // for nsresult, NS_IMETHODIMP, etc
 
@@ -99,7 +97,7 @@ NS_INTERFACE_MAP_BEGIN(TextServicesDocument)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION(TextServicesDocument,
-                         mDOMDocument,
+                         mDocument,
                          mSelCon,
                          mTextEditor,
                          mIterator,
@@ -112,7 +110,6 @@ nsresult
 TextServicesDocument::InitWithEditor(nsIEditor* aEditor)
 {
   nsCOMPtr<nsISelectionController> selCon;
-  nsCOMPtr<nsIDOMDocument> doc;
 
   NS_ENSURE_TRUE(aEditor, NS_ERROR_NULL_POINTER);
 
@@ -137,23 +134,17 @@ TextServicesDocument::InitWithEditor(nsIEditor* aEditor)
     mSelCon = selCon;
   }
 
-  // Check to see if we already have an mDOMDocument. If we do, it
+  // Check to see if we already have an mDocument. If we do, it
   // better be the same one the editor uses!
 
-  rv = aEditor->GetDocument(getter_AddRefs(doc));
-
-  if (NS_FAILED(rv)) {
-    UNLOCK_DOC(this);
-    return rv;
-  }
-
-  if (!doc || (mDOMDocument && doc != mDOMDocument)) {
+  nsCOMPtr<nsIDocument> doc = aEditor->AsEditorBase()->GetDocument();
+  if (!doc || (mDocument && doc != mDocument)) {
     UNLOCK_DOC(this);
     return NS_ERROR_FAILURE;
   }
 
-  if (!mDOMDocument) {
-    mDOMDocument = doc;
+  if (!mDocument) {
+    mDocument = doc;
 
     rv = CreateDocumentContentIterator(getter_AddRefs(mIterator));
 
@@ -182,24 +173,10 @@ TextServicesDocument::InitWithEditor(nsIEditor* aEditor)
 }
 
 nsresult
-TextServicesDocument::GetDocument(nsIDOMDocument** aDoc)
-{
-  NS_ENSURE_TRUE(aDoc, NS_ERROR_NULL_POINTER);
-
-  *aDoc = nullptr; // init out param
-  NS_ENSURE_TRUE(mDOMDocument, NS_ERROR_NOT_INITIALIZED);
-
-  *aDoc = mDOMDocument;
-  NS_ADDREF(*aDoc);
-
-  return NS_OK;
-}
-
-nsresult
 TextServicesDocument::SetExtent(nsRange* aRange)
 {
   NS_ENSURE_ARG_POINTER(aRange);
-  NS_ENSURE_TRUE(mDOMDocument, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
 
   LOCK_DOC(this);
 
@@ -463,7 +440,7 @@ TextServicesDocument::LastSelectedBlock(BlockSelectionStatus* aSelStatus,
   }
 
   RefPtr<Selection> selection =
-    mSelCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+    mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
   if (NS_WARN_IF(!selection)) {
     UNLOCK_DOC(this);
     return NS_ERROR_FAILURE;
@@ -493,7 +470,7 @@ TextServicesDocument::LastSelectedBlock(BlockSelectionStatus* aSelStatus,
     }
 
     nsresult rv;
-    if (parent->IsNodeOfType(nsINode::eTEXT)) {
+    if (parent->IsText()) {
       // The caret is in a text node. Find the beginning
       // of the text block containing this text node and
       // return.
@@ -566,7 +543,7 @@ TextServicesDocument::LastSelectedBlock(BlockSelectionStatus* aSelStatus,
       nsIContent* content = nullptr;
       while (!iter->IsDone()) {
         nsINode* currentNode = iter->GetCurrentNode();
-        if (currentNode->IsNodeOfType(nsINode::eTEXT)) {
+        if (currentNode->IsText()) {
           content = currentNode->AsContent();
           break;
         }
@@ -1121,7 +1098,8 @@ TextServicesDocument::DeleteSelection()
   // Now delete the actual content!
   RefPtr<TextEditor> textEditor = mTextEditor;
   nsresult rv =
-    textEditor->DeleteSelection(nsIEditor::ePrevious, nsIEditor::eStrip);
+    textEditor->DeleteSelectionAsAction(nsIEditor::ePrevious,
+                                        nsIEditor::eStrip);
   if (NS_FAILED(rv)) {
     UNLOCK_DOC(this);
     return rv;
@@ -1280,7 +1258,7 @@ TextServicesDocument::InsertText(const nsString* aText)
     return rv;
   }
 
-  rv = textEditor->InsertText(*aText);
+  rv = textEditor->InsertTextAsAction(*aText);
   if (NS_FAILED(rv)) {
     textEditor->EndTransaction();
     UNLOCK_DOC(this);
@@ -1379,7 +1357,7 @@ TextServicesDocument::InsertText(const nsString* aText)
     mSelStartIndex = mSelEndIndex = i;
 
     RefPtr<Selection> selection =
-      mSelCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+      mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
     if (NS_WARN_IF(!selection)) {
       textEditor->EndTransaction();
       UNLOCK_DOC(this);
@@ -1538,8 +1516,7 @@ TextServicesDocument::DidJoinNodes(nsINode& aLeftNode,
                                    nsINode& aRightNode)
 {
   // Make sure that both nodes are text nodes -- otherwise we don't care.
-  if (!aLeftNode.IsNodeOfType(nsINode::eTEXT) ||
-      !aRightNode.IsNodeOfType(nsINode::eTEXT)) {
+  if (!aLeftNode.IsText() || !aRightNode.IsText()) {
     return;
   }
 
@@ -1645,24 +1622,20 @@ TextServicesDocument::CreateContentIterator(nsRange* aRange,
   return NS_OK;
 }
 
-already_AddRefed<nsINode>
-TextServicesDocument::GetDocumentContentRootNode()
+Element*
+TextServicesDocument::GetDocumentContentRootNode() const
 {
-  if (NS_WARN_IF(!mDOMDocument)) {
+  if (NS_WARN_IF(!mDocument)) {
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(mDOMDocument);
-
-  if (doc->IsHTMLOrXHTML()) {
+  if (mDocument->IsHTMLOrXHTML()) {
     // For HTML documents, the content root node is the body.
-    nsCOMPtr<nsINode> node = doc->GetBody();
-    return node.forget();
+    return mDocument->GetBody();
   }
 
   // For non-HTML documents, the content root node will be the document element.
-  nsCOMPtr<nsINode> node = doc->GetDocumentElement();
-  return node.forget();
+  return mDocument->GetDocumentElement();
 }
 
 already_AddRefed<nsRange>
@@ -2017,17 +1990,13 @@ TextServicesDocument::SetSelectionInternal(int32_t aOffset,
   // XXX: If we ever get a SetSelection() method in nsIEditor, we should
   //      use it.
 
-  nsCOMPtr<nsISelection> selection;
+  RefPtr<Selection> selection;
 
   if (aDoUpdate) {
-    nsresult rv =
-      mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL,
-                            getter_AddRefs(selection));
+    selection = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
+    NS_ENSURE_STATE(selection);
 
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = selection->AsSelection()->Collapse(startNode, startNodeOffset);
-
+    nsresult rv = selection->Collapse(startNode, startNodeOffset);
     NS_ENSURE_SUCCESS(rv, rv);
    }
 
@@ -2074,7 +2043,7 @@ TextServicesDocument::SetSelectionInternal(int32_t aOffset,
   }
 
   if (aDoUpdate && endNode) {
-    nsresult rv = selection->AsSelection()->Extend(endNode, endNodeOffset);
+    nsresult rv = selection->Extend(endNode, endNodeOffset);
 
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -2097,14 +2066,14 @@ TextServicesDocument::GetSelection(BlockSelectionStatus* aSelStatus,
   *aSelOffset = -1;
   *aSelLength = -1;
 
-  NS_ENSURE_TRUE(mDOMDocument && mSelCon, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(mDocument && mSelCon, NS_ERROR_FAILURE);
 
   if (mIteratorStatus == IteratorStatus::eDone) {
     return NS_OK;
   }
 
   RefPtr<Selection> selection =
-    mSelCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+    mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
   // XXX: If we expose this method publicly, we need to
@@ -2130,14 +2099,9 @@ TextServicesDocument::GetCollapsedSelection(BlockSelectionStatus* aSelStatus,
                                             int32_t* aSelOffset,
                                             int32_t* aSelLength)
 {
-  nsCOMPtr<nsISelection> domSelection;
-  nsresult rv =
-    mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL,
-                          getter_AddRefs(domSelection));
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(domSelection, NS_ERROR_FAILURE);
-
-  RefPtr<Selection> selection = domSelection->AsSelection();
+  RefPtr<Selection> selection =
+    mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
   // The calling function should have done the GetIsCollapsed()
   // check already. Just assume it's collapsed!
@@ -2217,8 +2181,8 @@ TextServicesDocument::GetCollapsedSelection(BlockSelectionStatus* aSelStatus,
   // child of this non-text node. Then look for the closest text
   // node.
 
-  rv = nsRange::CreateRange(eStart->mNode, eStartOffset, eEnd->mNode,
-                            eEndOffset, getter_AddRefs(range));
+  nsresult rv = nsRange::CreateRange(eStart->mNode, eStartOffset, eEnd->mNode,
+                                     eEndOffset, getter_AddRefs(range));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIContentIterator> iter;
@@ -2337,13 +2301,9 @@ TextServicesDocument::GetUncollapsedSelection(
   RefPtr<nsRange> range;
   OffsetEntry *entry;
 
-  nsCOMPtr<nsISelection> domSelection;
-  nsresult rv = mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL,
-                                      getter_AddRefs(domSelection));
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(domSelection, NS_ERROR_FAILURE);
-
-  RefPtr<Selection> selection = domSelection->AsSelection();
+  RefPtr<Selection> selection =
+    mSelCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
   // It is assumed that the calling function has made sure that the
   // selection is not collapsed, and that the input params to this
@@ -2382,9 +2342,11 @@ TextServicesDocument::GetUncollapsedSelection(
     range = selection->GetRangeAt(i);
     NS_ENSURE_STATE(range);
 
-    rv = GetRangeEndPoints(range,
-                           getter_AddRefs(startContainer), &startOffset,
-                           getter_AddRefs(endContainer), &endOffset);
+    nsresult rv = GetRangeEndPoints(range,
+                                    getter_AddRefs(startContainer),
+                                    &startOffset,
+                                    getter_AddRefs(endContainer),
+                                    &endOffset);
 
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2461,7 +2423,7 @@ TextServicesDocument::GetUncollapsedSelection(
     o2 = endOffset;
   }
 
-  rv = nsRange::CreateRange(p1, o1, p2, o2, getter_AddRefs(range));
+  nsresult rv = nsRange::CreateRange(p1, o1, p2, o2, getter_AddRefs(range));
 
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2481,13 +2443,13 @@ TextServicesDocument::GetUncollapsedSelection(
 
   iter->First();
 
-  if (!p1->IsNodeOfType(nsINode::eTEXT)) {
+  if (!p1->IsText()) {
     found = false;
 
     while (!iter->IsDone()) {
       nsINode* node = iter->GetCurrentNode();
 
-      if (node->IsNodeOfType(nsINode::eTEXT)) {
+      if (node->IsText()) {
         p1 = node;
         o1 = 0;
         found = true;
@@ -2505,11 +2467,11 @@ TextServicesDocument::GetUncollapsedSelection(
 
   iter->Last();
 
-  if (!p2->IsNodeOfType(nsINode::eTEXT)) {
+  if (!p2->IsText()) {
     found = false;
     while (!iter->IsDone()) {
       nsINode* node = iter->GetCurrentNode();
-      if (node->IsNodeOfType(nsINode::eTEXT)) {
+      if (node->IsText()) {
         p2 = node;
         o2 = p2->Length();
         found = true;
@@ -3247,7 +3209,7 @@ TextServicesDocument::DidCreateNode(const nsAString& aTag,
 }
 
 NS_IMETHODIMP
-TextServicesDocument::DidInsertText(nsISupports* aTextNode,
+TextServicesDocument::DidInsertText(CharacterData* aTextNode,
                                     int32_t aOffset,
                                     const nsAString& aString,
                                     nsresult aResult)
@@ -3256,7 +3218,7 @@ TextServicesDocument::DidInsertText(nsISupports* aTextNode,
 }
 
 NS_IMETHODIMP
-TextServicesDocument::WillDeleteText(nsISupports* aTextNode,
+TextServicesDocument::WillDeleteText(CharacterData* aTextNode,
                                      int32_t aOffset,
                                      int32_t aLength)
 {
@@ -3264,7 +3226,7 @@ TextServicesDocument::WillDeleteText(nsISupports* aTextNode,
 }
 
 NS_IMETHODIMP
-TextServicesDocument::DidDeleteText(nsISupports* aTextNode,
+TextServicesDocument::DidDeleteText(CharacterData* aTextNode,
                                     int32_t aOffset,
                                     int32_t aLength,
                                     nsresult aResult)
@@ -3273,13 +3235,13 @@ TextServicesDocument::DidDeleteText(nsISupports* aTextNode,
 }
 
 NS_IMETHODIMP
-TextServicesDocument::WillDeleteSelection(nsISelection* aSelection)
+TextServicesDocument::WillDeleteSelection(Selection* aSelection)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TextServicesDocument::DidDeleteSelection(nsISelection* aSelection)
+TextServicesDocument::DidDeleteSelection(Selection* aSelection)
 {
   return NS_OK;
 }

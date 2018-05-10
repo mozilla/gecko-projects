@@ -16,15 +16,138 @@ module.exports = {
     // XXX Bug 1230193. We're still working on enabling no-undef for these test
     // directories.
     "files": [
-      "client/memory/test/**",
-      "server/tests/browser/**",
       "server/tests/mochitest/**",
-      "shared/heapsnapshot/tests/unit/**",
-      "shared/tests/unit/**",
-      "shared/webconsole/test/**",
     ],
     "rules": {
       "no-undef": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+    ],
+    "rules": {
+      "no-return-assign": "off",
+    }
+  }, {
+    "files": [
+      "client/scratchpad/scratchpad-manager.jsm",
+      "client/scratchpad/scratchpad.js",
+      "client/shared/*.jsm",
+    ],
+    "rules": {
+      "camelcase": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+      "client/shared/*.jsm",
+      "client/shared/widgets/*.jsm",
+      "client/webide/**",
+    ],
+    "rules": {
+      "consistent-return": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+      "client/shared/AppCacheUtils.jsm",
+      "client/webide/**",
+    ],
+    "rules": {
+      "max-nested-callbacks": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+      "client/shared/*.jsm",
+      "client/shared/widgets/*.jsm",
+      "client/webide/**",
+    ],
+    "rules": {
+      "max-len": "off",
+    }
+  }, {
+    "files": [
+      "client/scratchpad/test/browser_scratchpad_inspect.js",
+      "client/scratchpad/test/browser_scratchpad_inspect_primitives.js",
+    ],
+    "rules": {
+      "no-labels": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+      "client/shared/*.jsm",
+      "client/shared/widgets/*.jsm",
+      "client/webide/**",
+    ],
+    "rules": {
+      "mozilla/no-aArgs": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/test/**",
+      "client/scratchpad/**",
+    ],
+    "rules": {
+      "mozilla/var-only-at-top-level": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+      "client/shared/AppCacheUtils.jsm",
+      "client/shared/widgets/*.jsm",
+      "client/webide/**",
+    ],
+    "rules": {
+      "no-shadow": "off",
+    }
+  }, {
+    "files": [
+      "client/framework/**",
+      "client/scratchpad/**",
+      "client/webide/**",
+    ],
+    "rules": {
+      "strict": "off",
+    }
+  }, {
+    "files": [
+      // Note: Bug 1403938 may be removing canvasdebugger, check before
+      // doing more work on enabling these rules.
+      "client/canvasdebugger/**",
+      // Note: Bug 1342237 may be removing shadereditor, check before
+      // doing more work on enabling these rules.
+      "client/shadereditor/**",
+      // Note: Bug 1403944 may be removing webaudioeditor, check before
+      // doing more work on enabling these rules.
+      "client/webaudioeditor/**",
+    ],
+    "rules": {
+      "consistent-return": "off",
+      "max-len": "off",
+      "mozilla/no-aArgs": "off",
+      "mozilla/var-only-at-top-level": "off",
+      "no-redeclare": "off",
+      "no-return-assign": "off",
+      "no-shadow": "off",
+      "no-undef": "off",
+      "no-unused-vars": "off",
+      "no-useless-call": "off",
+      "strict": "off",
+    }
+  }, {
+    // For all head*.js files, turn off no-unused-vars at a global level
+    "files": [
+      "**/head*.js",
+    ],
+    "rules": {
+      "no-unused-vars": ["error", {"args": "none", "vars": "local"}],
     }
   }],
   "rules": {
@@ -268,7 +391,7 @@ module.exports = {
     // Warn about invalid JSDoc comments.
     // Disabled for now because of https://github.com/eslint/eslint/issues/2270
     // The rule fails on some jsdoc comments like in:
-    // devtools/client/webconsole/console-output.js
+    // devtools/client/webconsole/old/console-output.js
     "valid-jsdoc": "off",
     // Allow vars to be declared anywhere in the scope.
     "vars-on-top": "off",

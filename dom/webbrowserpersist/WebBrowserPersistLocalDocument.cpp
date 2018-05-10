@@ -32,7 +32,6 @@
 #include "nsIContent.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
@@ -168,23 +167,12 @@ WebBrowserPersistLocalDocument::GetContentDisposition(nsAString& aCD)
 NS_IMETHODIMP
 WebBrowserPersistLocalDocument::GetCacheKey(uint32_t* aKey)
 {
+    *aKey = 0;
     nsCOMPtr<nsISHEntry> history = GetHistory();
-    if (!history) {
-        *aKey = 0;
-        return NS_OK;
+    if (history) {
+        history->GetCacheKey(aKey);
     }
-    nsCOMPtr<nsISupports> abstractKey;
-    nsresult rv = history->GetCacheKey(getter_AddRefs(abstractKey));
-    if (NS_WARN_IF(NS_FAILED(rv)) || !abstractKey) {
-        *aKey = 0;
-        return NS_OK;
-    }
-    nsCOMPtr<nsISupportsPRUint32> u32 = do_QueryInterface(abstractKey);
-    if (NS_WARN_IF(!u32)) {
-        *aKey = 0;
-        return NS_OK;
-    }
-    return u32->GetData(aKey);
+    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -329,7 +317,9 @@ ResourceReader::OnWalkSubframe(nsIDOMNode* aNode)
     // Pass in 0 as the outer window ID so that we start
     // persisting the root of this subframe, and not some other
     // subframe child of this subframe.
-    nsresult rv = loader->StartPersistence(0, this);
+    ErrorResult err;
+    loader->StartPersistence(0, this, err);
+    nsresult rv = err.StealNSResult();
     if (NS_FAILED(rv)) {
         if (rv == NS_ERROR_NO_CONTENT) {
             // Just ignore frames with no content document.

@@ -62,6 +62,9 @@ enum class TypeCode
     // A function pointer with any signature
     AnyFunc                              = 0x70,  // SLEB128(-0x10)
 
+    // A reference to any type.
+    AnyRef                               = 0x6f,
+
     // Type constructor for function types
     Func                                 = 0x60,  // SLEB128(-0x20)
 
@@ -78,6 +81,8 @@ enum class ValType
     F32                                  = uint8_t(TypeCode::F32),
     F64                                  = uint8_t(TypeCode::F64),
 
+    AnyRef                               = uint8_t(TypeCode::AnyRef),
+
     // ------------------------------------------------------------------------
     // The rest of these types are currently only emitted internally when
     // compiling asm.js and are rejected by wasm validation.
@@ -92,6 +97,10 @@ enum class ValType
 };
 
 typedef Vector<ValType, 8, SystemAllocPolicy> ValTypeVector;
+
+// The representation of a null reference value throughout the compiler.
+
+static const intptr_t NULLREF_VALUE = intptr_t((void*)nullptr);
 
 enum class DefinitionKind
 {
@@ -323,7 +332,12 @@ enum class Op
     I64Extend32S                         = 0xc4,
 #endif
 
-    FirstPrefix                          = 0xfc,
+    // GC ops
+    RefNull                              = 0xd0,
+    RefIsNull                            = 0xd1,
+
+    FirstPrefix                          = 0xfb,
+    CopyOrFillPrefix                     = 0xfb,
     NumericPrefix                        = 0xfc,
     ThreadPrefix                         = 0xfe,
     MozPrefix                            = 0xff,
@@ -434,6 +448,17 @@ enum class ThreadOp
     I64AtomicCmpXchg8U                   = 0x4c,
     I64AtomicCmpXchg16U                  = 0x4d,
     I64AtomicCmpXchg32U                  = 0x4e,
+
+    Limit
+};
+
+// Opcodes from Bulk Memory Operations proposal as at 2 Feb 2018.  Note,
+// the opcodes are not actually assigned in that proposal.  This is just
+// an interim assignment.
+enum class CopyOrFillOp
+{
+    Copy                                 = 0x01,
+    Fill                                 = 0x02,
 
     Limit
 };
@@ -579,14 +604,14 @@ struct OpBytes
     OpBytes() = default;
 };
 
-static const char NameSectionName[]      = "name";
+static const char NameSectionName[]             = "name";
 static const char SourceMappingURLSectionName[] = "sourceMappingURL";
 
 enum class NameType
 {
-    Module                               = 0,
-    Function                             = 1,
-    Local                                = 2
+    Module   = 0,
+    Function = 1,
+    Local    = 2
 };
 
 // These limits are agreed upon with other engines for consistency.

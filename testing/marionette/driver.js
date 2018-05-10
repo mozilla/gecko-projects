@@ -6,12 +6,11 @@
 /* global XPCNativeWrapper */
 
 ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 ChromeUtils.import("chrome://marionette/content/accessibility.js");
-ChromeUtils.import("chrome://marionette/content/addon.js");
+const {Addon} = ChromeUtils.import("chrome://marionette/content/addon.js", {});
 ChromeUtils.import("chrome://marionette/content/assert.js");
 ChromeUtils.import("chrome://marionette/content/atom.js");
 const {
@@ -20,7 +19,10 @@ const {
   WindowState,
 } = ChromeUtils.import("chrome://marionette/content/browser.js", {});
 ChromeUtils.import("chrome://marionette/content/capture.js");
-ChromeUtils.import("chrome://marionette/content/cert.js");
+const {
+  CertificateOverrideManager,
+  InsecureSweepingOverride,
+} = ChromeUtils.import("chrome://marionette/content/cert.js", {});
 ChromeUtils.import("chrome://marionette/content/cookie.js");
 const {
   ChromeWebElement,
@@ -46,6 +48,7 @@ ChromeUtils.import("chrome://marionette/content/interaction.js");
 ChromeUtils.import("chrome://marionette/content/l10n.js");
 ChromeUtils.import("chrome://marionette/content/legacyaction.js");
 ChromeUtils.import("chrome://marionette/content/modal.js");
+const {MarionettePrefs} = ChromeUtils.import("chrome://marionette/content/prefs.js", {});
 ChromeUtils.import("chrome://marionette/content/proxy.js");
 ChromeUtils.import("chrome://marionette/content/reftest.js");
 ChromeUtils.import("chrome://marionette/content/session.js");
@@ -62,9 +65,6 @@ const APP_ID_FIREFOX = "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}";
 
 const FRAME_SCRIPT = "chrome://marionette/content/listener.js";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-
-const CLICK_TO_START_PREF = "marionette.debugging.clicktostart";
-const CONTENT_LISTENER_PREF = "marionette.contentListener";
 
 const SUPPORTED_STRATEGIES = new Set([
   element.Strategy.ClassName,
@@ -269,8 +269,7 @@ Object.defineProperty(GeckoDriver.prototype, "chromeWindowHandles", {
   },
 });
 
-GeckoDriver.prototype.QueryInterface = XPCOMUtils.generateQI([
-  Ci.nsIMessageListener,
+GeckoDriver.prototype.QueryInterface = ChromeUtils.generateQI([
   Ci.nsIObserver,
   Ci.nsISupportsWeakReference,
 ]);
@@ -475,12 +474,12 @@ GeckoDriver.prototype.whenBrowserStarted = function(window, isNewSession) {
       }
     }
 
-    if (!Preferences.get(CONTENT_LISTENER_PREF) || !isNewSession) {
+    if (!MarionettePrefs.contentListener || !isNewSession) {
       // load listener into the remote frame
       // and any applicable new frames
       // opened after this call
       mm.loadFrameScript(FRAME_SCRIPT, true);
-      Preferences.set(CONTENT_LISTENER_PREF, true);
+      MarionettePrefs.contentListener = true;
     }
   } else {
     logger.error("Unable to load content frame script");
@@ -693,8 +692,8 @@ GeckoDriver.prototype.newSession = async function(cmd) {
 
     if (!this.secureTLS) {
       logger.warn("TLS certificate errors will be ignored for this session");
-      let acceptAllCerts = new cert.InsecureSweepingOverride();
-      cert.installOverride(acceptAllCerts);
+      let acceptAllCerts = new InsecureSweepingOverride();
+      CertificateOverrideManager.install(acceptAllCerts);
     }
 
     if (this.proxy.init()) {
@@ -734,15 +733,14 @@ GeckoDriver.prototype.newSession = async function(cmd) {
       };
       win.addEventListener("load", listener, true);
     } else {
-      let clickToStart = Preferences.get(CLICK_TO_START_PREF);
-      if (clickToStart) {
+      if (MarionettePrefs.clickToStart) {
         Services.prompt.alert(win, "", "Click to start execution of marionette tests");
       }
       this.startBrowser(win, true);
     }
   };
 
-  if (!Preferences.get(CONTENT_LISTENER_PREF)) {
+  if (!MarionettePrefs.contentListener) {
     waitForWindow.call(this);
   } else if (this.appId != APP_ID_FIREFOX && this.curBrowser === null) {
     // if there is a content listener, then we just wake it up
@@ -855,11 +853,6 @@ GeckoDriver.prototype.getContext = function() {
  *     Filename of the client's program where this script is evaluated.
  * @param {number=} line
  *     Line in the client's program where this script is evaluated.
- * @param {boolean=} debug_script
- *     Attach an <code>onerror</code> event handler on the {@link Window}
- *     object.  It does not differentiate content errors from chrome errors.
- * @param {boolean=} directInject
- *     Evaluate the script without wrapping it in a function.
  *
  * @return {(string|boolean|number|object|WebElement)}
  *     Return value from the script, or null which signifies either the
@@ -881,7 +874,6 @@ GeckoDriver.prototype.executeScript = async function(cmd, resp) {
     newSandbox: cmd.parameters.newSandbox,
     file: cmd.parameters.filename,
     line: cmd.parameters.line,
-    debug: cmd.parameters.debug_script,
   };
   resp.body.value = await this.execute_(script, args, opts);
 };
@@ -929,11 +921,6 @@ GeckoDriver.prototype.executeScript = async function(cmd, resp) {
  *     Filename of the client's program where this script is evaluated.
  * @param {number=} line
  *     Line in the client's program where this script is evaluated.
- * @param {boolean=} debug_script
- *     Attach an <code>onerror</code> event handler on the {@link Window}
- *     object.  It does not differentiate content errors from chrome errors.
- * @param {boolean=} directInject
- *     Evaluate the script without wrapping it in a function.
  *
  * @return {(string|boolean|number|object|WebElement)}
  *     Return value from the script, or null which signifies either the
@@ -955,7 +942,6 @@ GeckoDriver.prototype.executeAsyncScript = async function(cmd, resp) {
     newSandbox: cmd.parameters.newSandbox,
     file: cmd.parameters.filename,
     line: cmd.parameters.line,
-    debug: cmd.parameters.debug_script,
     async: true,
   };
   resp.body.value = await this.execute_(script, args, opts);
@@ -970,7 +956,6 @@ GeckoDriver.prototype.execute_ = async function(
       newSandbox = false,
       file = "",
       line = 0,
-      debug = false,
       async = false,
     } = {}) {
 
@@ -989,7 +974,6 @@ GeckoDriver.prototype.execute_ = async function(
   assert.boolean(newSandbox, pprint`Expected newSandbox to be boolean: ${newSandbox}`);
   assert.string(file, pprint`Expected file to be a string: ${file}`);
   assert.number(line, pprint`Expected line to be a number: ${line}`);
-  assert.boolean(debug, pprint`Expected debug_script to be boolean: ${debug}`);
 
   let opts = {
     timeout,
@@ -997,7 +981,6 @@ GeckoDriver.prototype.execute_ = async function(
     newSandbox,
     file,
     line,
-    debug,
     async,
   };
 
@@ -2796,7 +2779,7 @@ GeckoDriver.prototype.closeChromeWindow = async function() {
 GeckoDriver.prototype.deleteSession = function() {
   if (this.curBrowser !== null) {
     // frame scripts can be safely reused
-    Preferences.set(CONTENT_LISTENER_PREF, false);
+    MarionettePrefs.contentListener = false;
 
     globalMessageManager.broadcastAsyncMessage("Marionette:Session:Delete");
     globalMessageManager.broadcastAsyncMessage("Marionette:Deregister");
@@ -2831,7 +2814,7 @@ GeckoDriver.prototype.deleteSession = function() {
   modal.removeHandler(this.dialogHandler);
 
   this.sandboxes.clear();
-  cert.uninstallOverride();
+  CertificateOverrideManager.uninstall();
 
   this.sessionID = null;
   this.capabilities = new session.Capabilities();
@@ -3312,7 +3295,7 @@ GeckoDriver.prototype.installAddon = function(cmd) {
     throw new InvalidArgumentError();
   }
 
-  return addon.install(path, temp);
+  return Addon.install(path, temp);
 };
 
 GeckoDriver.prototype.uninstallAddon = function(cmd) {
@@ -3323,7 +3306,7 @@ GeckoDriver.prototype.uninstallAddon = function(cmd) {
     throw new InvalidArgumentError();
   }
 
-  return addon.uninstall(id);
+  return Addon.uninstall(id);
 };
 
 /** Receives all messages from content messageManager. */
@@ -3496,27 +3479,46 @@ GeckoDriver.prototype.teardownReftest = function() {
 
 GeckoDriver.prototype.commands = {
   // Marionette service
-  "Marionette:SetContext": GeckoDriver.prototype.setContext,
-  "setContext": GeckoDriver.prototype.setContext,  // deprecated, remove in Firefox 60
-  "Marionette:GetContext": GeckoDriver.prototype.getContext,
-  "getContext": GeckoDriver.prototype.getContext,
   "Marionette:AcceptConnections": GeckoDriver.prototype.acceptConnections,
-  "acceptConnections": GeckoDriver.prototype.acceptConnections,  // deprecated, remove in Firefox 60
+  "Marionette:GetContext": GeckoDriver.prototype.getContext,
+  "Marionette:GetScreenOrientation": GeckoDriver.prototype.getScreenOrientation,
+  "Marionette:GetWindowType": GeckoDriver.prototype.getWindowType,
   "Marionette:Quit": GeckoDriver.prototype.quit,
-  "quit": GeckoDriver.prototype.quit,  // deprecated, remove in Firefox 60
-  "quitApplication": GeckoDriver.prototype.quit,  // deprecated, remove in Firefox 60
+  "Marionette:SetContext": GeckoDriver.prototype.setContext,
+  "Marionette:SetScreenOrientation": GeckoDriver.prototype.setScreenOrientation,
+  // Bug 1354578 - Remove legacy action commands
+  "Marionette:ActionChain": GeckoDriver.prototype.actionChain,
+  "Marionette:MultiAction": GeckoDriver.prototype.multiAction,
+  "Marionette:SingleTap": GeckoDriver.prototype.singleTap,
+  // deprecated Marionette commands, remove in Firefox 63
+  "actionChain": GeckoDriver.prototype.actionChain,
+  "acceptConnections": GeckoDriver.prototype.acceptConnections,
+  "closeChromeWindow": GeckoDriver.prototype.closeChromeWindow,
+  "getChromeWindowHandles": GeckoDriver.prototype.getChromeWindowHandles,
+  "getContext": GeckoDriver.prototype.getContext,
+  "getCurrentChromeWindowHandle": GeckoDriver.prototype.getChromeWindowHandle,
+  "getScreenOrientation": GeckoDriver.prototype.getScreenOrientation,
+  "getWindowType": GeckoDriver.prototype.getWindowType,
+  "multiAction": GeckoDriver.prototype.multiAction,
+  "quit": GeckoDriver.prototype.quit,
+  "quitApplication": GeckoDriver.prototype.quit,
+  "setContext": GeckoDriver.prototype.setContext,
+  "setScreenOrientation": GeckoDriver.prototype.setScreenOrientation,
+  "singleTap": GeckoDriver.prototype.singleTap,
 
   // Addon service
   "Addon:Install": GeckoDriver.prototype.installAddon,
-  "addon:install": GeckoDriver.prototype.installAddon,  // deprecated, remove in Firefox 60
   "Addon:Uninstall": GeckoDriver.prototype.uninstallAddon,
-  "addon:uninstall": GeckoDriver.prototype.uninstallAddon,  // deprecated, remove in Firefox 60
+  // deprecated Addon commands, remove in Firefox 63
+  "addon:install": GeckoDriver.prototype.installAddon,
+  "addon:uninstall": GeckoDriver.prototype.uninstallAddon,
 
   // L10n service
   "L10n:LocalizeEntity": GeckoDriver.prototype.localizeEntity,
-  "localization:l10n:localizeEntity": GeckoDriver.prototype.localizeEntity,  // deprecated, remove in Firefox 60
   "L10n:LocalizeProperty": GeckoDriver.prototype.localizeProperty,
-  "localization:l10n:localizeProperty": GeckoDriver.prototype.localizeProperty,  // deprecated, remove in Firefox 60
+  // deprecated L10n commands, remove in Firefox 63
+  "localization:l10n:localizeEntity": GeckoDriver.prototype.localizeEntity,
+  "localization:l10n:localizeProperty": GeckoDriver.prototype.localizeProperty,
 
   // Reftest service
   "reftest:setup": GeckoDriver.prototype.setupReftest,
@@ -3524,7 +3526,8 @@ GeckoDriver.prototype.commands = {
   "reftest:teardown": GeckoDriver.prototype.teardownReftest,
 
   // WebDriver service
-  "WebDriver:AcceptDialog": GeckoDriver.prototype.acceptDialog,
+  "WebDriver:AcceptAlert": GeckoDriver.prototype.acceptDialog,
+  "WebDriver:AcceptDialog": GeckoDriver.prototype.acceptDialog,  // deprecated, remove in Firefox 63
   "WebDriver:AddCookie": GeckoDriver.prototype.addCookie,
   "WebDriver:Back": GeckoDriver.prototype.goBack,
   "WebDriver:CloseChromeWindow": GeckoDriver.prototype.closeChromeWindow,
@@ -3558,13 +3561,11 @@ GeckoDriver.prototype.commands = {
   "WebDriver:GetElementTagName": GeckoDriver.prototype.getElementTagName,
   "WebDriver:GetElementText": GeckoDriver.prototype.getElementText,
   "WebDriver:GetPageSource": GeckoDriver.prototype.getPageSource,
-  "WebDriver:GetScreenOrientation": GeckoDriver.prototype.getScreenOrientation,
   "WebDriver:GetTimeouts": GeckoDriver.prototype.getTimeouts,
   "WebDriver:GetTitle": GeckoDriver.prototype.getTitle,
   "WebDriver:GetWindowHandle": GeckoDriver.prototype.getWindowHandle,
   "WebDriver:GetWindowHandles": GeckoDriver.prototype.getWindowHandles,
   "WebDriver:GetWindowRect": GeckoDriver.prototype.getWindowRect,
-  "WebDriver:GetWindowType": GeckoDriver.prototype.getWindowType,
   "WebDriver:IsElementDisplayed": GeckoDriver.prototype.isElementDisplayed,
   "WebDriver:IsElementEnabled": GeckoDriver.prototype.isElementEnabled,
   "WebDriver:IsElementSelected": GeckoDriver.prototype.isElementSelected,
@@ -3576,7 +3577,6 @@ GeckoDriver.prototype.commands = {
   "WebDriver:Refresh":  GeckoDriver.prototype.refresh,
   "WebDriver:ReleaseActions": GeckoDriver.prototype.releaseActions,
   "WebDriver:SendAlertText": GeckoDriver.prototype.sendKeysToDialog,
-  "WebDriver:SetScreenOrientation": GeckoDriver.prototype.setScreenOrientation,
   "WebDriver:SetTimeouts": GeckoDriver.prototype.setTimeouts,
   "WebDriver:SetWindowRect": GeckoDriver.prototype.setWindowRect,
   "WebDriver:SwitchToFrame": GeckoDriver.prototype.switchToFrame,
@@ -3585,13 +3585,11 @@ GeckoDriver.prototype.commands = {
   "WebDriver:SwitchToWindow": GeckoDriver.prototype.switchToWindow,
   "WebDriver:TakeScreenshot": GeckoDriver.prototype.takeScreenshot,
 
-  // deprecated WebDriver commands, remove in Firefox 60
+  // deprecated WebDriver commands, remove in Firefox 63
   "acceptDialog": GeckoDriver.prototype.acceptDialog,
-  "actionChain": GeckoDriver.prototype.actionChain,
   "addCookie": GeckoDriver.prototype.addCookie,
   "clearElement": GeckoDriver.prototype.clearElement,
   "clickElement": GeckoDriver.prototype.clickElement,
-  "closeChromeWindow": GeckoDriver.prototype.closeChromeWindow,
   "close": GeckoDriver.prototype.close,
   "deleteAllCookies": GeckoDriver.prototype.deleteAllCookies,
   "deleteCookie": GeckoDriver.prototype.deleteCookie,
@@ -3604,10 +3602,7 @@ GeckoDriver.prototype.commands = {
   "fullscreen": GeckoDriver.prototype.fullscreenWindow,
   "getActiveElement": GeckoDriver.prototype.getActiveElement,
   "getActiveFrame": GeckoDriver.prototype.getActiveFrame,
-  "getChromeWindowHandle": GeckoDriver.prototype.getChromeWindowHandle,
-  "getChromeWindowHandles": GeckoDriver.prototype.getChromeWindowHandles,
   "getCookies": GeckoDriver.prototype.getCookies,
-  "getCurrentChromeWindowHandle": GeckoDriver.prototype.getChromeWindowHandle,
   "getCurrentUrl": GeckoDriver.prototype.getCurrentUrl,
   "getElementAttribute": GeckoDriver.prototype.getElementAttribute,
   "getElementProperty": GeckoDriver.prototype.getElementProperty,
@@ -3617,7 +3612,6 @@ GeckoDriver.prototype.commands = {
   "getElementValueOfCssProperty": GeckoDriver.prototype.getElementValueOfCssProperty,
   "get": GeckoDriver.prototype.get,
   "getPageSource": GeckoDriver.prototype.getPageSource,
-  "getScreenOrientation": GeckoDriver.prototype.getScreenOrientation,
   "getSessionCapabilities": GeckoDriver.prototype.getSessionCapabilities,
   "getTextFromDialog": GeckoDriver.prototype.getTextFromDialog,
   "getTimeouts": GeckoDriver.prototype.getTimeouts,
@@ -3627,26 +3621,22 @@ GeckoDriver.prototype.commands = {
   "getWindowPosition": GeckoDriver.prototype.getWindowRect, // redirect for compatibility
   "getWindowRect": GeckoDriver.prototype.getWindowRect,
   "getWindowSize": GeckoDriver.prototype.getWindowRect, // redirect for compatibility
-  "getWindowType": GeckoDriver.prototype.getWindowType,
   "goBack": GeckoDriver.prototype.goBack,
   "goForward": GeckoDriver.prototype.goForward,
   "isElementDisplayed": GeckoDriver.prototype.isElementDisplayed,
   "isElementEnabled": GeckoDriver.prototype.isElementEnabled,
   "isElementSelected": GeckoDriver.prototype.isElementSelected,
   "maximizeWindow": GeckoDriver.prototype.maximizeWindow,
-  "multiAction": GeckoDriver.prototype.multiAction,
   "newSession": GeckoDriver.prototype.newSession,
   "performActions": GeckoDriver.prototype.performActions,
   "refresh":  GeckoDriver.prototype.refresh,
   "releaseActions": GeckoDriver.prototype.releaseActions,
   "sendKeysToDialog": GeckoDriver.prototype.sendKeysToDialog,
   "sendKeysToElement": GeckoDriver.prototype.sendKeysToElement,
-  "setScreenOrientation": GeckoDriver.prototype.setScreenOrientation,
   "setTimeouts": GeckoDriver.prototype.setTimeouts,
   "setWindowPosition": GeckoDriver.prototype.setWindowRect, // redirect for compatibility
   "setWindowRect": GeckoDriver.prototype.setWindowRect,
   "setWindowSize": GeckoDriver.prototype.setWindowRect, // redirect for compatibility
-  "singleTap": GeckoDriver.prototype.singleTap,
   "switchToFrame": GeckoDriver.prototype.switchToFrame,
   "switchToParentFrame": GeckoDriver.prototype.switchToParentFrame,
   "switchToShadowRoot": GeckoDriver.prototype.switchToShadowRoot,

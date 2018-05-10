@@ -7,71 +7,62 @@
 var EXPORTED_SYMBOLS = ["GeckoViewModule"];
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+ChromeUtils.import("resource://gre/modules/GeckoViewUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "dump", () =>
-    ChromeUtils.import("resource://gre/modules/AndroidLog.jsm",
-                       {}).AndroidLog.d.bind(null, "ViewModule"));
-
-// function debug(aMsg) {
-//   dump(aMsg);
-// }
+GeckoViewUtils.initLogging("GeckoView.Module", this);
 
 class GeckoViewModule {
-  constructor(aModuleName, aWindow, aBrowser, aEventDispatcher) {
-    this.isRegistered = false;
-    this.window = aWindow;
-    this.browser = aBrowser;
-    this.eventDispatcher = aEventDispatcher;
-    this.moduleName = aModuleName;
+  constructor(aModuleInfo) {
+    this._info = aModuleInfo;
+
     this._isContentLoaded = false;
     this._eventProxy = new EventProxy(this, this.eventDispatcher);
 
-    this.eventDispatcher.registerListener(
-      (aEvent, aData, aCallback) => {
-        this.messageManager.sendAsyncMessage("GeckoView:UpdateSettings",
-                                             this.settings);
-        this.onSettingsUpdate();
-      }, "GeckoView:UpdateSettings"
-    );
-
-    this.eventDispatcher.registerListener(
-      (aEvent, aData, aCallback) => {
-        if (aData.module == this.moduleName) {
-          this._register();
-          aData.settings = this.settings;
-          this.messageManager.sendAsyncMessage("GeckoView:Register", aData);
-        }
-      }, "GeckoView:Register"
-    );
-
-    this.eventDispatcher.registerListener(
-      (aEvent, aData, aCallback) => {
-        if (aData.module == this.moduleName) {
-          this.messageManager.sendAsyncMessage("GeckoView:Unregister", aData);
-          this._unregister();
-        }
-      }, "GeckoView:Unregister"
-    );
-
-    this.init();
-    this.onSettingsUpdate();
+    this.onInitBrowser();
   }
 
-  // Override this with module initialization.
-  init() {}
+  get name() {
+    return this._info.name;
+  }
 
-  // Called when settings have changed. Access settings via this.settings.
+  get enabled() {
+    return this._info.enabled;
+  }
+
+  get window() {
+    return this._info.manager.window;
+  }
+
+  get browser() {
+    return this._info.manager.browser;
+  }
+
+  get messageManager() {
+    return this._info.manager.messageManager;
+  }
+
+  get eventDispatcher() {
+    return this._info.manager.eventDispatcher;
+  }
+
+  get settings() {
+    return this._info.manager.settings;
+  }
+
+  // Override to initialize the browser before it is bound to the window.
+  onInitBrowser() {}
+
+  // Override to initialize module.
+  onInit() {}
+
+  // Override to detect settings change. Access settings via this.settings.
   onSettingsUpdate() {}
 
-  _register() {
-    if (this.isRegistered) {
-      return;
-    }
-    this.register();
-    this.isRegistered = true;
-  }
+  // Override to enable module after setting a Java delegate.
+  onEnable() {}
 
-  register() {}
+  // Override to disable module after clearing the Java delegate.
+  onDisable() {}
 
   registerContent(aUri) {
     if (this._isContentLoaded) {
@@ -83,13 +74,15 @@ class GeckoViewModule {
     let self = this;
     this.messageManager.addMessageListener("GeckoView:ContentRegistered",
       function listener(aMsg) {
-        if (aMsg.data.module !== self.moduleName) {
+        if (aMsg.data.module !== self.name) {
           return;
         }
         self.messageManager.removeMessageListener("GeckoView:ContentRegistered",
                                                   listener);
-        self._eventProxy.dispatchQueuedEvents();
+        self.messageManager.sendAsyncMessage("GeckoView:UpdateSettings",
+                                             self.settings);
         self._eventProxy.enableQueuing(false);
+        self._eventProxy.dispatchQueuedEvents();
     });
     this.messageManager.loadFrameScript(aUri, true);
   }
@@ -98,24 +91,8 @@ class GeckoViewModule {
     this._eventProxy.registerListener(aEventList);
   }
 
-  _unregister() {
-    if (!this.isRegistered) {
-      return;
-    }
+  unregisterListener() {
     this._eventProxy.unregisterListener();
-    this.unregister();
-    this.isRegistered = false;
-  }
-
-  unregister() {}
-
-  get settings() {
-    let view = this.window.arguments[0].QueryInterface(Ci.nsIAndroidView);
-    return Object.freeze(view.settings);
-  }
-
-  get messageManager() {
-    return this.browser.messageManager;
   }
 }
 
@@ -129,13 +106,13 @@ class EventProxy {
   }
 
   registerListener(aEventList) {
-    debug("rabbit register " + aEventList);
+    debug `registerListener ${aEventList}`;
     this.eventDispatcher.registerListener(this, aEventList);
     this._registeredEvents = this._registeredEvents.concat(aEventList);
   }
 
   unregisterListener() {
-    debug("rabbit unregister");
+    debug `unregisterListener`;
     if (this._registeredEvents.length === 0) {
       return;
     }
@@ -145,28 +122,32 @@ class EventProxy {
 
   onEvent(aEvent, aData, aCallback) {
     if (this._enableQueuing) {
-      debug("rabbit queue " + aEvent + ", aData=" + JSON.stringify(aData));
+      debug `queue ${aEvent}, data=${aData}`;
       this._eventQueue.unshift(arguments);
     } else {
-      this._dispatch.apply(this, arguments);
+      this._dispatch(...arguments);
     }
   }
 
   enableQueuing(aEnable) {
-    debug("enableQueuing " + aEnable);
+    debug `enableQueuing ${aEnable}`;
     this._enableQueuing = aEnable;
   }
 
   _dispatch(aEvent, aData, aCallback) {
-    debug("rabbit dispatch " + aEvent + ", aData=" + JSON.stringify(aData));
-    this.listener.onEvent.apply(this.listener, arguments);
+    debug `dispatch ${aEvent}, data=${aData}`;
+    if (this.listener.onEvent) {
+      this.listener.onEvent(...arguments);
+    } else {
+      this.listener(...arguments);
+    }
   }
 
   dispatchQueuedEvents() {
-    debug("rabbit dispatchQueued");
+    debug `dispatchQueued`;
     while (this._eventQueue.length) {
-      const e = this._eventQueue.pop();
-      this._dispatch.apply(this, e);
+      const args = this._eventQueue.pop();
+      this._dispatch(...args);
     }
   }
 }

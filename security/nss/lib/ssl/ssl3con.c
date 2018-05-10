@@ -6157,6 +6157,38 @@ ssl_ClientSetCipherSuite(sslSocket *ss, SSL3ProtocolVersion version,
     return ssl3_SetupCipherSuite(ss, initHashes);
 }
 
+/* Check that session ID we received from the server, if any, matches our
+ * expectations, depending on whether we're in compat mode and whether we
+ * negotiated TLS 1.3+ or TLS 1.2-.
+ */
+static PRBool
+ssl_CheckServerSessionIdCorrectness(sslSocket *ss, SECItem *sidBytes)
+{
+    PRBool sid_match = PR_FALSE;
+    PRBool sent_fake_sid = ss->opt.enableTls13CompatMode && !IS_DTLS(ss);
+
+    /* If in compat mode and we received a session ID with the right length
+     * then compare it to the fake one we sent in the ClientHello. */
+    if (sent_fake_sid && sidBytes->len == SSL3_SESSIONID_BYTES) {
+        PRUint8 buf[SSL3_SESSIONID_BYTES];
+        ssl_MakeFakeSid(ss, buf);
+        sid_match = PORT_Memcmp(buf, sidBytes->data, sidBytes->len) == 0;
+    }
+
+    /* TLS 1.2: SessionID shouldn't match the fake one. */
+    if (ss->version < SSL_LIBRARY_VERSION_TLS_1_3) {
+        return !sid_match;
+    }
+
+    /* TLS 1.3: [Compat Mode] Session ID should match the fake one. */
+    if (sent_fake_sid) {
+        return sid_match;
+    }
+
+    /* TLS 1.3: [Non-Compat Mode] Server shouldn't send a session ID. */
+    return sidBytes->len == 0;
+}
+
 /* Called from ssl3_HandleHandshakeMessage() when it has deciphered a complete
  * ssl3 ServerHello message.
  * Caller must hold Handshake and RecvBuf locks.
@@ -6288,7 +6320,7 @@ ssl3_HandleServerHello(sslSocket *ss, PRUint8 *b, PRUint32 length)
     /* The server didn't pick 1.3 although we either received a
      * HelloRetryRequest, or we prepared to send early app data. */
     if (ss->version < SSL_LIBRARY_VERSION_TLS_1_3) {
-        if (ss->ssl3.hs.helloRetry) {
+        if (isHelloRetry || ss->ssl3.hs.helloRetry) {
             /* SSL3_SendAlert() will uncache the SID. */
             desc = illegal_parameter;
             errCode = SSL_ERROR_RX_MALFORMED_SERVER_HELLO;
@@ -6358,22 +6390,10 @@ ssl3_HandleServerHello(sslSocket *ss, PRUint8 *b, PRUint32 length)
     }
 
     /* Check that the session ID is as expected. */
-    if (ss->version >= SSL_LIBRARY_VERSION_TLS_1_3) {
-        PRUint8 buf[SSL3_SESSIONID_BYTES];
-        unsigned int expectedSidLen;
-        if (ss->opt.enableTls13CompatMode && !IS_DTLS(ss)) {
-            expectedSidLen = SSL3_SESSIONID_BYTES;
-            ssl_MakeFakeSid(ss, buf);
-        } else {
-            expectedSidLen = 0;
-        }
-        if (sidBytes.len != expectedSidLen ||
-            (expectedSidLen > 0 &&
-             PORT_Memcmp(buf, sidBytes.data, expectedSidLen) != 0)) {
-            desc = illegal_parameter;
-            errCode = SSL_ERROR_RX_MALFORMED_SERVER_HELLO;
-            goto alert_loser;
-        }
+    if (!ssl_CheckServerSessionIdCorrectness(ss, &sidBytes)) {
+        desc = illegal_parameter;
+        errCode = SSL_ERROR_RX_MALFORMED_SERVER_HELLO;
+        goto alert_loser;
     }
 
     /* Only initialize hashes if this isn't a Hello Retry. */
@@ -7301,10 +7321,6 @@ ssl3_SendClientSecondRound(sslSocket *ss)
      * certificate to an attacker that does not have a valid cert for the
      * domain we are connecting to.
      *
-     * XXX: We should do the same for the NPN extension, but for that we
-     * need an option to give the application the ability to leak the NPN
-     * information to get better performance.
-     *
      * During the initial handshake on a connection, we never send/receive
      * application data until we have authenticated the server's certificate;
      * i.e. we have fully authenticated the handshake before using the cipher
@@ -7378,14 +7394,6 @@ ssl3_SendClientSecondRound(sslSocket *ss)
     ss->enoughFirstHsDone = PR_TRUE;
 
     if (!ss->firstHsDone) {
-        /* XXX: If the server's certificate hasn't been authenticated by this
-         * point, then we may be leaking this NPN message to an attacker.
-         */
-        rv = ssl3_SendNextProto(ss);
-        if (rv != SECSuccess) {
-            goto loser; /* err code was set. */
-        }
-
         if (ss->opt.enableFalseStart) {
             if (!ss->ssl3.hs.authCertificatePending) {
                 /* When we fix bug 589047, we will need to know whether we are

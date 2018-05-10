@@ -94,14 +94,21 @@ nsresult
 nsNameSpaceManager::RegisterNameSpace(const nsAString& aURI,
                                       int32_t& aNameSpaceID)
 {
-  if (aURI.IsEmpty()) {
-    aNameSpaceID = kNameSpaceID_None; // xmlns="", see bug 75700 for details
+  RefPtr<nsAtom> atom = NS_Atomize(aURI);
+  return RegisterNameSpace(atom.forget(), aNameSpaceID);
+}
 
+nsresult
+nsNameSpaceManager::RegisterNameSpace(already_AddRefed<nsAtom> aURI,
+                                      int32_t& aNameSpaceID)
+{
+  RefPtr<nsAtom> atom = aURI;
+  nsresult rv = NS_OK;
+  if (atom == nsGkAtoms::_empty) {
+    aNameSpaceID = kNameSpaceID_None; // xmlns="", see bug 75700 for details
     return NS_OK;
   }
 
-  RefPtr<nsAtom> atom = NS_Atomize(aURI);
-  nsresult rv = NS_OK;
   if (!mURIToIDTable.Get(atom, &aNameSpaceID)) {
     aNameSpaceID = mURIArray.Length();
 
@@ -119,7 +126,7 @@ nsNameSpaceManager::RegisterNameSpace(const nsAString& aURI,
 nsresult
 nsNameSpaceManager::GetNameSpaceURI(int32_t aNameSpaceID, nsAString& aURI)
 {
-  NS_PRECONDITION(aNameSpaceID >= 0, "Bogus namespace ID");
+  MOZ_ASSERT(aNameSpaceID >= 0, "Bogus namespace ID");
 
   // We have historically treated GetNameSpaceURI calls for kNameSpaceID_None
   // as erroneous.

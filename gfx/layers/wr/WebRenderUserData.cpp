@@ -67,7 +67,15 @@ WebRenderImageData::WebRenderImageData(WebRenderLayerManager* aWRManager, nsDisp
 
 WebRenderImageData::~WebRenderImageData()
 {
-  DoClearCachedResources();
+  ClearImageKey();
+
+  if (mExternalImageId) {
+    WrBridge()->DeallocExternalImageId(mExternalImageId.ref());
+  }
+
+  if (mPipelineId) {
+    WrBridge()->RemovePipelineIdForCompositable(mPipelineId.ref());
+  }
 }
 
 void
@@ -82,32 +90,6 @@ WebRenderImageData::ClearImageKey()
     mKey.reset();
   }
   mOwnsKey = false;
-}
-
-void
-WebRenderImageData::ClearCachedResources()
-{
-  DoClearCachedResources();
-}
-
-void
-WebRenderImageData::DoClearCachedResources()
-{
-  ClearImageKey();
-
-  if (mExternalImageId) {
-    WrBridge()->DeallocExternalImageId(mExternalImageId.ref());
-    mExternalImageId.reset();
-  }
-
-  if (mPipelineId) {
-    WrBridge()->RemovePipelineIdForCompositable(mPipelineId.ref());
-    mPipelineId.reset();
-  }
-
-  if (mImageClient) {
-    mImageClient = nullptr;
-  }
 }
 
 Maybe<wr::ImageKey>
@@ -231,7 +213,7 @@ WebRenderImageData::CreateAsyncImageWebRenderCommands(mozilla::wr::DisplayListBu
   // context need to be done manually and pushed over to the parent side,
   // where it will be done when we build the display list for the iframe.
   // That happens in AsyncImagePipelineManager.
-  wr::LayoutRect r = aSc.ToRelativeLayoutRect(aBounds);
+  wr::LayoutRect r = wr::ToRoundedLayoutRect(aBounds);
   aBuilder.PushIFrame(r, aIsBackfaceVisible, mPipelineId.ref());
 
   WrBridge()->AddWebRenderParentCommand(OpUpdateAsyncImagePipeline(mPipelineId.value(),
@@ -275,14 +257,6 @@ WebRenderFallbackData::~WebRenderFallbackData()
 {
 }
 
-void
-WebRenderFallbackData::ClearCachedResources()
-{
-  WebRenderImageData::ClearCachedResources();
-  mBasicLayerManager = nullptr;
-  mInvalid = true;
-}
-
 nsDisplayItemGeometry*
 WebRenderFallbackData::GetGeometry()
 {
@@ -319,18 +293,6 @@ WebRenderCanvasData::WebRenderCanvasData(WebRenderLayerManager* aWRManager, nsDi
 }
 
 WebRenderCanvasData::~WebRenderCanvasData()
-{
-  DoClearCachedResources();
-}
-
-void
-WebRenderCanvasData::ClearCachedResources()
-{
-  DoClearCachedResources();
-}
-
-void
-WebRenderCanvasData::DoClearCachedResources()
 {
   if (mCanvasRenderer) {
     mCanvasRenderer->ClearCachedResources();

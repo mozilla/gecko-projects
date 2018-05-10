@@ -7,6 +7,7 @@
 #include "nsStyleUtil.h"
 #include "nsStyleConsts.h"
 
+#include "mozilla/FontPropertyTypes.h"
 #include "nsIContent.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
@@ -88,8 +89,9 @@ void nsStyleUtil::AppendEscapedCSSString(const nsAString& aString,
                                          nsAString& aReturn,
                                          char16_t quoteChar)
 {
-  NS_PRECONDITION(quoteChar == '\'' || quoteChar == '"',
-                  "CSS strings must be quoted with ' or \"");
+  MOZ_ASSERT(quoteChar == '\'' || quoteChar == '"',
+             "CSS strings must be quoted with ' or \"");
+
   aReturn.Append(quoteChar);
 
   const char16_t* in = aString.BeginReading();
@@ -251,7 +253,7 @@ nsStyleUtil::AppendEscapedCSSFontFamilyList(
 
 
 /* static */ void
-nsStyleUtil::AppendBitmaskCSSValue(nsCSSPropertyID aProperty,
+nsStyleUtil::AppendBitmaskCSSValue(const nsCSSKTableEntry aTable[],
                                    int32_t aMaskedValue,
                                    int32_t aFirstMask,
                                    int32_t aLastMask,
@@ -259,8 +261,7 @@ nsStyleUtil::AppendBitmaskCSSValue(nsCSSPropertyID aProperty,
 {
   for (int32_t mask = aFirstMask; mask <= aLastMask; mask <<= 1) {
     if (mask & aMaskedValue) {
-      AppendASCIItoUTF16(nsCSSProps::LookupPropertyValue(aProperty, mask),
-                         aResult);
+      AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(mask, aTable), aResult);
       aMaskedValue &= ~mask;
       if (aMaskedValue) { // more left
         aResult.Append(char16_t(' '));
@@ -399,8 +400,8 @@ nsStyleUtil::AppendFontFeatureSettings(const nsCSSValue& aSrc,
     return;
   }
 
-  NS_PRECONDITION(unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep,
-                  "improper value unit for font-feature-settings:");
+  MOZ_ASSERT(unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep,
+             "improper value unit for font-feature-settings:");
 
   nsTArray<gfxFontFeature> featureSettings;
   nsLayoutUtils::ComputeFontFeatures(aSrc.GetPairListValue(), featureSettings);
@@ -438,8 +439,8 @@ nsStyleUtil::AppendFontVariationSettings(const nsCSSValue& aSrc,
     return;
   }
 
-  NS_PRECONDITION(unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep,
-                  "improper value unit for font-variation-settings:");
+  MOZ_ASSERT(unit == eCSSUnit_PairList || unit == eCSSUnit_PairListDep,
+             "improper value unit for font-variation-settings:");
 
   nsTArray<gfxFontVariation> variationSettings;
   nsLayoutUtils::ComputeFontVariations(aSrc.GetPairListValue(),
@@ -571,9 +572,10 @@ AppendSerializedUnicodePoint(uint32_t aCode, nsACString& aBuf)
 /* static */ void
 nsStyleUtil::AppendUnicodeRange(const nsCSSValue& aValue, nsAString& aResult)
 {
-  NS_PRECONDITION(aValue.GetUnit() == eCSSUnit_Null ||
-                  aValue.GetUnit() == eCSSUnit_Array,
-                  "improper value unit for unicode-range:");
+  MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Null ||
+             aValue.GetUnit() == eCSSUnit_Array,
+             "improper value unit for unicode-range:");
+
   aResult.Truncate();
   if (aValue.GetUnit() != eCSSUnit_Array)
     return;
@@ -612,8 +614,8 @@ nsStyleUtil::AppendSerializedFontSrc(const nsCSSValue& aValue,
   // only after one of the first two.  (css3-fonts only contemplates
   // annotating URLs with formats, but we handle the general case.)
 
-  NS_PRECONDITION(aValue.GetUnit() == eCSSUnit_Array,
-                  "improper value unit for src:");
+  MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Array,
+             "improper value unit for src:");
 
   const nsCSSValue::Array& sources = *aValue.GetArrayValue();
   size_t i = 0;
@@ -623,8 +625,8 @@ nsStyleUtil::AppendSerializedFontSrc(const nsCSSValue& aValue,
 
     if (sources[i].GetUnit() == eCSSUnit_URL) {
       aResult.AppendLiteral("url(");
-      nsDependentString url(sources[i].GetOriginalURLValue());
-      nsStyleUtil::AppendEscapedCSSString(url, aResult);
+      nsDependentCSubstring url(sources[i].GetURLStructValue()->GetString());
+      nsStyleUtil::AppendEscapedCSSString(NS_ConvertUTF8toUTF16(url), aResult);
       aResult.Append(')');
     } else if (sources[i].GetUnit() == eCSSUnit_Local_Font) {
       aResult.AppendLiteral("local(");
@@ -744,10 +746,9 @@ nsStyleUtil::ColorComponentToFloat(uint8_t aAlpha)
 nsStyleUtil::IsSignificantChild(nsIContent* aChild,
                                 bool aWhitespaceIsSignificant)
 {
-  bool isText = aChild->IsNodeOfType(nsINode::eTEXT);
+  bool isText = aChild->IsText();
 
-  if (!isText && !aChild->IsNodeOfType(nsINode::eCOMMENT) &&
-      !aChild->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
+  if (!isText && !aChild->IsComment() && !aChild->IsProcessingInstruction()) {
     return true;
   }
 
@@ -760,10 +761,9 @@ nsStyleUtil::IsSignificantChild(nsIContent* aChild,
 nsStyleUtil::ThreadSafeIsSignificantChild(const nsIContent* aChild,
                                           bool aWhitespaceIsSignificant)
 {
-  bool isText = aChild->IsNodeOfType(nsINode::eTEXT);
+  bool isText = aChild->IsText();
 
-  if (!isText && !aChild->IsNodeOfType(nsINode::eCOMMENT) &&
-      !aChild->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
+  if (!isText && !aChild->IsComment() && !aChild->IsProcessingInstruction()) {
     return true;
   }
 
@@ -881,4 +881,21 @@ nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
   NS_ENSURE_SUCCESS(rv, false);
 
   return allowInlineStyle;
+}
+
+void
+nsStyleUtil::AppendFontSlantStyle(const FontSlantStyle& aStyle, nsAString& aOut)
+{
+  if (aStyle.IsNormal()) {
+    aOut.AppendLiteral("normal");
+  } else if (aStyle.IsItalic()) {
+    aOut.AppendLiteral("italic");
+  } else {
+    aOut.AppendLiteral("oblique");
+    auto angle = aStyle.ObliqueAngle();
+    if (angle != FontSlantStyle::kDefaultAngle) {
+      aOut.AppendLiteral(" ");
+      AppendAngleValue(nsStyleCoord(angle, eStyleUnit_Degree), aOut);
+    }
+  }
 }

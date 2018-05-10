@@ -30,7 +30,6 @@
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
 #include "nsIDocumentEncoder.h"
-#include "nsIDOMDocument.h"
 #include "nsNameSpaceManager.h"
 #include "nsINode.h"
 #include "nsIPlaintextEditor.h"
@@ -231,7 +230,7 @@ TextEditRules::AfterEdit(EditAction aAction,
 
   AutoLockRulesSniffing lockIt(this);
 
-  NS_PRECONDITION(mActionNesting>0, "bad action nesting!");
+  MOZ_ASSERT(mActionNesting>0, "bad action nesting!");
   if (!--mActionNesting) {
     NS_ENSURE_STATE(mTextEditor);
     RefPtr<Selection> selection = mTextEditor->GetSelection();
@@ -239,7 +238,7 @@ TextEditRules::AfterEdit(EditAction aAction,
 
     NS_ENSURE_STATE(mTextEditor);
     nsresult rv =
-      mTextEditor->HandleInlineSpellCheck(aAction, selection,
+      mTextEditor->HandleInlineSpellCheck(aAction, *selection,
                                           mCachedSelectionNode,
                                           mCachedSelectionOffset,
                                           nullptr, 0, nullptr, 0);
@@ -388,8 +387,13 @@ TextEditRules::WillInsert(Selection& aSelection, bool* aCancel)
 
   // check for the magic content node and delete it if it exists
   if (mBogusNode) {
-    NS_ENSURE_TRUE_VOID(mTextEditor);
-    mTextEditor->DeleteNode(mBogusNode);
+    if (NS_WARN_IF(!mTextEditor)) {
+      return; // XXX Shouldn't we release mBogusNode now?
+    }
+    RefPtr<TextEditor> textEditor(mTextEditor);
+    DebugOnly<nsresult> rv = textEditor->DeleteNodeWithTransaction(*mBogusNode);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+      "Failed to remove the bogus node");
     mBogusNode = nullptr;
   }
 }
@@ -434,7 +438,8 @@ TextEditRules::WillInsertBreak(Selection* aSelection,
     // if the selection isn't collapsed, delete it.
     if (!aSelection->IsCollapsed()) {
       NS_ENSURE_STATE(mTextEditor);
-      rv = mTextEditor->DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);
+      rv = mTextEditor->DeleteSelectionAsAction(nsIEditor::eNone,
+                                                nsIEditor::eStrip);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
@@ -681,7 +686,8 @@ TextEditRules::WillInsertText(EditAction aAction,
   // if the selection isn't collapsed, delete it.
   if (!aSelection->IsCollapsed()) {
     NS_ENSURE_STATE(mTextEditor);
-    rv = mTextEditor->DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);
+    rv = mTextEditor->DeleteSelectionAsAction(nsIEditor::eNone,
+                                              nsIEditor::eStrip);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -772,7 +778,8 @@ TextEditRules::WillInsertText(EditAction aAction,
       betterInsertionPoint.Set(betterInsertionPoint.GetContainer(),
                                IMESelectionOffset);
     }
-    rv = mTextEditor->InsertTextImpl(*doc, *outString, betterInsertionPoint);
+    rv = mTextEditor->InsertTextWithTransaction(*doc, *outString,
+                                                betterInsertionPoint);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
     // aAction == EditAction::insertText
@@ -782,16 +789,19 @@ TextEditRules::WillInsertText(EditAction aAction,
     AutoTransactionsConserveSelection dontChangeMySelection(mTextEditor);
 
     EditorRawDOMPoint pointAfterStringInserted;
-    rv = mTextEditor->InsertTextImpl(*doc, *outString, atStartOfSelection,
-                                     &pointAfterStringInserted);
-    NS_ENSURE_SUCCESS(rv, rv);
+    rv = mTextEditor->InsertTextWithTransaction(*doc, *outString,
+                                                atStartOfSelection,
+                                                &pointAfterStringInserted);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
 
     if (pointAfterStringInserted.IsSet()) {
       // Make the caret attach to the inserted text, unless this text ends with a LF,
       // in which case make the caret attach to the next line.
       bool endsWithLF =
         !outString->IsEmpty() && outString->Last() == nsCRT::LF;
-      aSelection->SetInterlinePosition(endsWithLF);
+      aSelection->SetInterlinePosition(endsWithLF, IgnoreErrors());
 
       MOZ_ASSERT(!pointAfterStringInserted.GetChild(),
         "After inserting text into a text node, pointAfterStringInserted."
@@ -883,7 +893,8 @@ TextEditRules::WillSetText(Selection& aSelection,
       return NS_OK;
     }
     nsresult rv =
-      textEditor->InsertNode(*newNode, EditorRawDOMPoint(rootElement, 0));
+      textEditor->InsertNodeWithTransaction(*newNode,
+                                            EditorRawDOMPoint(rootElement, 0));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1063,7 +1074,8 @@ TextEditRules::WillDeleteSelection(Selection* aSelection,
 
   NS_ENSURE_STATE(mTextEditor);
   nsresult rv =
-    mTextEditor->DeleteSelectionImpl(aCollapsedAction, nsIEditor::eStrip);
+    mTextEditor->DeleteSelectionWithTransaction(aCollapsedAction,
+                                                nsIEditor::eStrip);
   NS_ENSURE_SUCCESS(rv, rv);
 
   *aHandled = true;
@@ -1088,7 +1100,9 @@ TextEditRules::DidDeleteSelection(Selection* aSelection,
       return NS_ERROR_NOT_AVAILABLE;
     }
     RefPtr<TextEditor> textEditor(mTextEditor);
-    nsresult rv = textEditor->DeleteNode(selectionStartPoint.GetContainer());
+    nsresult rv =
+      textEditor->DeleteNodeWithTransaction(
+                    *selectionStartPoint.GetContainer());
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -1100,7 +1114,9 @@ TextEditRules::DidDeleteSelection(Selection* aSelection,
   }
   // We prevent the caret from sticking on the left of prior BR
   // (i.e. the end of previous line) after this deletion.  Bug 92124
-  return aSelection->SetInterlinePosition(true);
+  ErrorResult err;
+  aSelection->SetInterlinePosition(true, err);
+  return err.StealNSResult();
 }
 
 nsresult
@@ -1459,7 +1475,8 @@ TextEditRules::CreateBogusNodeIfNeeded(Selection* aSelection)
 
   // Put the node in the document.
   nsresult rv =
-    mTextEditor->InsertNode(*mBogusNode, EditorRawDOMPoint(body, 0));
+    mTextEditor->InsertNodeWithTransaction(*mBogusNode,
+                                           EditorRawDOMPoint(body, 0));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1661,7 +1678,13 @@ TextEditRules::CreateBRInternal(const EditorRawDOMPoint& aPointToInsert,
   }
   RefPtr<TextEditor> textEditor = mTextEditor;
 
-  RefPtr<Element> brElement = textEditor->CreateBR(aPointToInsert);
+  RefPtr<Selection> selection = textEditor->GetSelection();
+  if (NS_WARN_IF(!selection)) {
+    return nullptr;
+  }
+
+  RefPtr<Element> brElement =
+    textEditor->InsertBrElementWithTransaction(*selection, aPointToInsert);
   if (NS_WARN_IF(!brElement)) {
     return nullptr;
   }
@@ -1669,8 +1692,9 @@ TextEditRules::CreateBRInternal(const EditorRawDOMPoint& aPointToInsert,
   // give it special moz attr
   if (aCreateMozBR) {
     // XXX Why do we need to set this attribute with transaction?
-    nsresult rv = textEditor->SetAttribute(brElement, nsGkAtoms::type,
-                                           NS_LITERAL_STRING("_moz"));
+    nsresult rv =
+      textEditor->SetAttributeWithTransaction(*brElement, *nsGkAtoms::type,
+                                              NS_LITERAL_STRING("_moz"));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       // XXX Don't we need to remove the new <br> element from the DOM tree
       //     in this case?

@@ -12,7 +12,9 @@ const Services = require("Services");
 const { Cc, Ci, Cu } = require("chrome");
 const { DebuggerServer, ActorPool } = require("devtools/server/main");
 const { ThreadActor } = require("devtools/server/actors/thread");
-const { ObjectActor, LongStringActor, createValueGrip, stringIsLong } = require("devtools/server/actors/object");
+const { ObjectActor } = require("devtools/server/actors/object");
+const { LongStringActor } = require("devtools/server/actors/object/long-string");
+const { createValueGrip, stringIsLong } = require("devtools/server/actors/object/utils");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const ErrorDocs = require("devtools/server/actors/errordocs");
 
@@ -20,7 +22,6 @@ loader.lazyRequireGetter(this, "NetworkMonitor", "devtools/shared/webconsole/net
 loader.lazyRequireGetter(this, "NetworkMonitorChild", "devtools/shared/webconsole/network-monitor", true);
 loader.lazyRequireGetter(this, "ConsoleProgressListener", "devtools/shared/webconsole/network-monitor", true);
 loader.lazyRequireGetter(this, "StackTraceCollector", "devtools/shared/webconsole/network-monitor", true);
-loader.lazyRequireGetter(this, "ServerLoggingListener", "devtools/shared/webconsole/server-logger", true);
 loader.lazyRequireGetter(this, "JSPropertyProvider", "devtools/shared/webconsole/js-property-provider", true);
 loader.lazyRequireGetter(this, "Parser", "resource://devtools/shared/Parser.jsm", true);
 loader.lazyRequireGetter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm", true);
@@ -89,6 +90,7 @@ function WebConsoleActor(connection, parentActor) {
     evaluateJSAsync: true,
     transferredResponseSize: true,
     selectedObjectActor: true, // 44+
+    fetchCacheDescriptor: true,
   };
 }
 
@@ -369,10 +371,6 @@ WebConsoleActor.prototype =
     if (this.consoleReflowListener) {
       this.consoleReflowListener.destroy();
       this.consoleReflowListener = null;
-    }
-    if (this.serverLoggingListener) {
-      this.serverLoggingListener.destroy();
-      this.serverLoggingListener = null;
     }
     if (this.contentProcessListener) {
       this.contentProcessListener.destroy();
@@ -670,17 +668,6 @@ WebConsoleActor.prototype =
           }
           startedListeners.push(listener);
           break;
-        case "ServerLogging":
-          // Workers don't support this message type
-          if (isWorker) {
-            break;
-          }
-          if (!this.serverLoggingListener) {
-            this.serverLoggingListener =
-              new ServerLoggingListener(this.window, this);
-          }
-          startedListeners.push(listener);
-          break;
         case "ContentProcessMessages":
           // Workers don't support this message type
           if (isWorker) {
@@ -730,7 +717,7 @@ WebConsoleActor.prototype =
     // listeners.
     let toDetach = request.listeners ||
       ["PageError", "ConsoleAPI", "NetworkActivity",
-       "FileActivity", "ServerLogging", "ContentProcessMessages"];
+       "FileActivity", "ContentProcessMessages"];
 
     while (toDetach.length > 0) {
       let listener = toDetach.shift();
@@ -776,13 +763,6 @@ WebConsoleActor.prototype =
           if (this.consoleReflowListener) {
             this.consoleReflowListener.destroy();
             this.consoleReflowListener = null;
-          }
-          stoppedListeners.push(listener);
-          break;
-        case "ServerLogging":
-          if (this.serverLoggingListener) {
-            this.serverLoggingListener.destroy();
-            this.serverLoggingListener = null;
           }
           stoppedListeners.push(listener);
           break;
@@ -1822,39 +1802,6 @@ WebConsoleActor.prototype =
     this.conn.send(packet);
   },
 
-  /**
-   * Handler for server logging. This method forwards log events to the
-   * remote Web Console client.
-   *
-   * @see ServerLoggingListener
-   * @param object message
-   *        The console API call on the server we need to send to the remote client.
-   */
-  onServerLogCall: function(message) {
-    // Clone all data into the content scope (that's where
-    // passed arguments comes from).
-    let msg = Cu.cloneInto(message, this.window);
-
-    // All arguments within the message need to be converted into
-    // debuggees to properly send it to the client side.
-    // Use the default target: this.window as the global object
-    // since that's the correct scope for data in the message.
-    // The 'false' argument passed into prepareConsoleMessageForRemote()
-    // ensures that makeDebuggeeValue uses content debuggee.
-    // See also:
-    // * makeDebuggeeValue()
-    // * prepareConsoleMessageForRemote()
-    msg = this.prepareConsoleMessageForRemote(msg, false);
-
-    let packet = {
-      from: this.actorID,
-      type: "serverLogCall",
-      message: msg,
-    };
-
-    this.conn.send(packet);
-  },
-
   // End of event handlers for various listeners.
 
   /**
@@ -2176,6 +2123,19 @@ NetworkEventActor.prototype =
   },
 
   /**
+   * The "getResponseCache" packet type handler.
+   *
+   * @return object
+   *         The cache packet - network cache information.
+   */
+  onGetResponseCache: function() {
+    return {
+      from: this.actorID,
+      cache: this._response.responseCache,
+    };
+  },
+
+  /**
    * The "getResponseCookies" packet type handler.
    *
    * @return object
@@ -2431,6 +2391,16 @@ NetworkEventActor.prototype =
     this.conn.send(packet);
   },
 
+  addResponseCache: function(content) {
+    this._response.responseCache = content.responseCache;
+    let packet = {
+      from: this.actorID,
+      type: "networkEventUpdate",
+      updateType: "responseCache",
+    };
+    this.conn.send(packet);
+  },
+
   /**
    * Add network event timing information.
    *
@@ -2479,6 +2449,7 @@ NetworkEventActor.prototype.requestTypes =
   "getRequestPostData": NetworkEventActor.prototype.onGetRequestPostData,
   "getResponseHeaders": NetworkEventActor.prototype.onGetResponseHeaders,
   "getResponseCookies": NetworkEventActor.prototype.onGetResponseCookies,
+  "getResponseCache": NetworkEventActor.prototype.onGetResponseCache,
   "getResponseContent": NetworkEventActor.prototype.onGetResponseContent,
   "getEventTimings": NetworkEventActor.prototype.onGetEventTimings,
   "getSecurityInfo": NetworkEventActor.prototype.onGetSecurityInfo,

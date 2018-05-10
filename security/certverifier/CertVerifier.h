@@ -66,6 +66,7 @@ enum class SHA1ModeResult {
 enum class DistrustedCAPolicy : uint32_t {
   Permit = 0,
   DistrustSymantecRoots = 1,
+  DistrustSymantecRootsRegardlessOfDate = 2,
 };
 
 enum class NetscapeStepUpPolicy : uint32_t;
@@ -187,14 +188,13 @@ public:
     ocspEVOnly = 2
   };
   enum OcspStrictConfig { ocspRelaxed = 0, ocspStrict };
-  enum OcspGetConfig { ocspGetDisabled = 0, ocspGetEnabled = 1 };
 
   enum class CertificateTransparencyMode {
     Disabled = 0,
     TelemetryOnly = 1,
   };
 
-  CertVerifier(OcspDownloadConfig odc, OcspStrictConfig osc, OcspGetConfig ogc,
+  CertVerifier(OcspDownloadConfig odc, OcspStrictConfig osc,
                mozilla::TimeDuration ocspTimeoutSoft,
                mozilla::TimeDuration ocspTimeoutHard,
                uint32_t certShortLifetimeInDays,
@@ -209,7 +209,6 @@ public:
 
   const OcspDownloadConfig mOCSPDownloadConfig;
   const bool mOCSPStrict;
-  const bool mOCSPGETEnabled;
   const mozilla::TimeDuration mOCSPTimeoutSoft;
   const mozilla::TimeDuration mOCSPTimeoutHard;
   const uint32_t mCertShortLifetimeInDays;

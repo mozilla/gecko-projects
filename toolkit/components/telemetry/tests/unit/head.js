@@ -341,11 +341,11 @@ if (runningInParent) {
   Services.prefs.setBoolPref(TelemetryUtils.Preferences.ShutdownPingSenderFirstSession, false);
   Services.prefs.setBoolPref("toolkit.telemetry.newProfilePing.enabled", false);
   Services.prefs.setBoolPref(TelemetryUtils.Preferences.FirstShutdownPingEnabled, false);
-  // Ensure browser experiments are also disabled, to avoid network activity
-  // when toggling PREF_ENABLED.
-  Services.prefs.setBoolPref("experiments.enabled", false);
   // Turn off Health Ping submission.
   Services.prefs.setBoolPref(TelemetryUtils.Preferences.HealthPingEnabled, false);
+
+  // Ensure we're not in a GeckoView-like environment by default
+  Services.prefs.setBoolPref("toolkit.telemetry.isGeckoViewMode", false);
 
   // Non-unified Telemetry (e.g. Fennec on Android) needs the preference to be set
   // in order to enable Telemetry.

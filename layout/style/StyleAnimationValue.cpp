@@ -10,10 +10,8 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/RuleNodeCacheConditions.h"
 #include "mozilla/ServoBindings.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/UniquePtr.h"
 #include "nsAutoPtr.h"
@@ -22,7 +20,6 @@
 #include "mozilla/ComputedStyle.h"
 #include "nsComputedDOMStyle.h"
 #include "nsContentUtils.h"
-#include "nsCSSParser.h"
 #include "nsCSSPseudoElements.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/FloatingPoint.h"
@@ -121,10 +118,7 @@ float
 AnimationValue::GetOpacity() const
 {
   MOZ_ASSERT(mServo);
-  if (mServo) {
-    return Servo_AnimationValue_GetOpacity(mServo);
-  }
-  MOZ_CRASH("old style system disabled");
+  return Servo_AnimationValue_GetOpacity(mServo);
 }
 
 already_AddRefed<const nsCSSValueSharedList>
@@ -133,11 +127,7 @@ AnimationValue::GetTransformList() const
   MOZ_ASSERT(mServo);
 
   RefPtr<nsCSSValueSharedList> transform;
-  if (mServo) {
-    Servo_AnimationValue_GetTransform(mServo, &transform);
-  } else {
-    MOZ_CRASH("old style system disabled");
-  }
+  Servo_AnimationValue_GetTransform(mServo, &transform);
   return transform.forget();
 }
 
@@ -145,13 +135,9 @@ Size
 AnimationValue::GetScaleValue(const nsIFrame* aFrame) const
 {
   MOZ_ASSERT(mServo);
-
-  if (mServo) {
-    RefPtr<nsCSSValueSharedList> list;
-    Servo_AnimationValue_GetTransform(mServo, &list);
-    return nsStyleTransformMatrix::GetScaleValue(list, aFrame);
-  }
-  MOZ_CRASH("old style system disabled");
+  RefPtr<nsCSSValueSharedList> list;
+  Servo_AnimationValue_GetTransform(mServo, &list);
+  return nsStyleTransformMatrix::GetScaleValue(list, aFrame);
 }
 
 void
@@ -159,13 +145,7 @@ AnimationValue::SerializeSpecifiedValue(nsCSSPropertyID aProperty,
                                         nsAString& aString) const
 {
   MOZ_ASSERT(mServo);
-
-  if (mServo) {
-    Servo_AnimationValue_Serialize(mServo, aProperty, &aString);
-    return;
-  }
-
-  MOZ_CRASH("old style system disabled");
+  Servo_AnimationValue_Serialize(mServo, aProperty, &aString);
 }
 
 bool
@@ -178,12 +158,7 @@ AnimationValue::IsInterpolableWith(nsCSSPropertyID aProperty,
 
   MOZ_ASSERT(mServo);
   MOZ_ASSERT(aToValue.mServo);
-
-  if (mServo) {
-    return Servo_AnimationValues_IsInterpolable(mServo, aToValue.mServo);
-  }
-
-  MOZ_CRASH("old style system disabled");
+  return Servo_AnimationValues_IsInterpolable(mServo, aToValue.mServo);
 }
 
 double
@@ -198,15 +173,11 @@ AnimationValue::ComputeDistance(nsCSSPropertyID aProperty,
   MOZ_ASSERT(mServo);
   MOZ_ASSERT(aOther.mServo);
 
-  double distance= 0.0;
-  if (mServo) {
-    distance = Servo_AnimationValues_ComputeDistance(mServo, aOther.mServo);
-    return distance < 0.0
-           ? 0.0
-           : distance;
-  }
-
-  MOZ_CRASH("old style system disabled");
+  double distance =
+    Servo_AnimationValues_ComputeDistance(mServo, aOther.mServo);
+  return distance < 0.0
+         ? 0.0
+         : distance;
 }
 
 /* static */ AnimationValue
@@ -230,9 +201,9 @@ AnimationValue::FromString(nsCSSPropertyID aProperty,
 
   // GetComputedStyle() flushes style, so we shouldn't assume that any
   // non-owning references we have are still valid.
-  RefPtr<ComputedStyle> styleContext =
+  RefPtr<ComputedStyle> computedStyle =
     nsComputedDOMStyle::GetComputedStyle(aElement, nullptr);
-  MOZ_ASSERT(styleContext);
+  MOZ_ASSERT(computedStyle);
 
   RefPtr<RawServoDeclarationBlock> declarations =
     ServoCSSParser::ParseProperty(aProperty, aValue,
@@ -242,47 +213,24 @@ AnimationValue::FromString(nsCSSPropertyID aProperty,
     return result;
   }
 
-  result.mServo =
-    shell->StyleSet()->AsServo()->ComputeAnimationValue(aElement,
-                                                        declarations,
-                                                        styleContext);
+  result.mServo = shell->StyleSet()->
+    ComputeAnimationValue(aElement, declarations, computedStyle);
   return result;
 }
 
 /* static */ AnimationValue
-AnimationValue::Opacity(StyleBackendType aBackendType, float aOpacity)
+AnimationValue::Opacity(float aOpacity)
 {
   AnimationValue result;
-
-  switch (aBackendType) {
-    case StyleBackendType::Servo:
-      result.mServo = Servo_AnimationValue_Opacity(aOpacity).Consume();
-      break;
-    case StyleBackendType::Gecko:
-      MOZ_CRASH("old style system disabled");
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unsupported style backend");
-  }
+  result.mServo = Servo_AnimationValue_Opacity(aOpacity).Consume();
   return result;
 }
 
 /* static */ AnimationValue
-AnimationValue::Transform(StyleBackendType aBackendType,
-                          nsCSSValueSharedList& aList)
+AnimationValue::Transform(nsCSSValueSharedList& aList)
 {
   AnimationValue result;
-
-  switch (aBackendType) {
-    case StyleBackendType::Servo:
-      result.mServo = Servo_AnimationValue_Transform(aList).Consume();
-      break;
-    case StyleBackendType::Gecko:
-      MOZ_CRASH("old style system disabled");
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unsupported style backend");
-  }
+  result.mServo = Servo_AnimationValue_Transform(aList).Consume();
   return result;
 }
 

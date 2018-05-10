@@ -29,7 +29,7 @@ const BinaryInputStream = Components.Constructor(
   "@mozilla.org/binaryinputstream;1",
   "nsIBinaryInputStream", "setInputStream");
 
-Cu.importGlobalProperties(["XMLHttpRequest"]);
+Cu.importGlobalProperties(["DOMParser", "XMLHttpRequest"]);
 
 // A text encoder to UTF8, used whenever we commit the cache to disk.
 XPCOMUtils.defineLazyGetter(this, "gEncoder",
@@ -274,7 +274,7 @@ loadListener.prototype = {
   _engine: null,
   _stream: null,
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIRequestObserver,
     Ci.nsIStreamListener,
     Ci.nsIChannelEventSink,
@@ -1339,8 +1339,7 @@ Engine.prototype = {
 
     fileInStream.init(file, MODE_RDONLY, PERMS_FILE, false);
 
-    var domParser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                    createInstance(Ci.nsIDOMParser);
+    var domParser = new DOMParser();
     var doc = domParser.parseFromStream(fileInStream, "UTF-8",
                                         file.fileSize,
                                         "text/xml");
@@ -1450,8 +1449,7 @@ Engine.prototype = {
     var chan = makeChannel(uri);
 
     var stream = chan.open2();
-    var parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                 createInstance(Ci.nsIDOMParser);
+    var parser = new DOMParser();
     var doc = parser.parseFromStream(stream, "UTF-8", stream.available(), "text/xml");
 
     this._data = doc.documentElement;
@@ -1558,9 +1556,8 @@ Engine.prototype = {
       return;
     }
 
-    var parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                 createInstance(Ci.nsIDOMParser);
-    var doc = parser.parseFromBuffer(aBytes, aBytes.length, "text/xml");
+    var parser = new DOMParser();
+    var doc = parser.parseFromBuffer(aBytes, "text/xml");
     aEngine._data = doc.documentElement;
 
     try {
@@ -2457,7 +2454,7 @@ Engine.prototype = {
   },
 
   // nsISupports
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISearchEngine]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISearchEngine]),
 
   get wrappedJSObject() {
     return this;
@@ -2574,7 +2571,7 @@ Submission.prototype = {
   get postData() {
     return this._postData;
   },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISearchSubmission])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISearchSubmission])
 };
 
 // nsISearchParseSubmissionResult
@@ -2597,7 +2594,7 @@ ParseSubmissionResult.prototype = {
   get termsLength() {
     return this._termsLength;
   },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISearchParseSubmissionResult]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISearchParseSubmissionResult]),
 };
 
 const gEmptyParseSubmissionResult =
@@ -2781,6 +2778,7 @@ SearchService.prototype = {
   _engines: { },
   __sortedEngines: null,
   _visibleDefaultEngines: [],
+  _searchDefault: null,
   get _sortedEngines() {
     if (!this.__sortedEngines)
       return this._buildSortedEngineList();
@@ -2792,15 +2790,26 @@ SearchService.prototype = {
   get originalDefaultEngine() {
     let defaultEngine = this.getVerifiedGlobalAttr("searchDefault");
     if (!defaultEngine) {
-      let defaultPrefB = Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF);
-      let nsIPLS = Ci.nsIPrefLocalizedString;
+      // We only allow the old defaultenginename pref for distributions
+      // We can't use isPartnerBuild because we need to allow reading
+      // of the defaultengine name pref for funnelcakes.
+      if (Services.prefs.getCharPref("distribution.id", "")) {
+        let defaultPrefB = Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF);
+        let nsIPLS = Ci.nsIPrefLocalizedString;
 
-      let defPref = getGeoSpecificPrefName("defaultenginename");
-      try {
-        defaultEngine = defaultPrefB.getComplexValue(defPref, nsIPLS).data;
-      } catch (ex) {
-        // If the default pref is invalid (e.g. an add-on set it to a bogus value)
-        // getEngineByName will just return null, which is the best we can do.
+        let defPref = getGeoSpecificPrefName("defaultenginename");
+        try {
+          defaultEngine = defaultPrefB.getComplexValue(defPref, nsIPLS).data;
+        } catch (ex) {
+          // If the default pref is invalid (e.g. an add-on set it to a bogus value)
+          // use the default engine from the list.json.
+          // This should eventually be the common case. We should only have the
+          // defaultenginename pref for distributions.
+          // Worst case, getEngineByName will just return null, which is the best we can do.
+          defaultEngine = this._searchDefault;
+        }
+      } else {
+        defaultEngine = this._searchDefault;
       }
     }
 
@@ -3012,6 +3021,7 @@ SearchService.prototype = {
         this.__sortedEngines = null;
         this._currentEngine = null;
         this._visibleDefaultEngines = [];
+        this._searchDefault = null;
         this._metaData = {};
         this._cacheFileJSON = null;
 
@@ -3486,16 +3496,17 @@ SearchService.prototype = {
       }
     }
 
+    let searchRegion;
+    if (Services.prefs.prefHasUserValue("browser.search.region")) {
+      searchRegion = Services.prefs.getCharPref("browser.search.region");
+    }
+    if (!searchRegion || !(searchRegion in searchSettings)) {
+      searchRegion = "default";
+    }
+
     // Fallback to building a list based on the regions in the JSON
     if (!engineNames || !engineNames.length) {
-      let region;
-      if (Services.prefs.prefHasUserValue("browser.search.region")) {
-        region = Services.prefs.getCharPref("browser.search.region");
-      }
-      if (!region || !(region in searchSettings)) {
-        region = "default";
-      }
-      engineNames = searchSettings[region].visibleDefaultEngines;
+      engineNames = searchSettings[searchRegion].visibleDefaultEngines;
     }
 
     // Remove any engine names that are supposed to be ignored.
@@ -3518,6 +3529,12 @@ SearchService.prototype = {
 
     // Store this so that it can be used while writing the cache file.
     this._visibleDefaultEngines = engineNames;
+
+    if ("searchDefault" in searchSettings[searchRegion]) {
+      this._searchDefault = searchSettings[searchRegion].searchDefault;
+    } else {
+      this._searchDefault = searchSettings.default.searchDefault;
+    }
   },
 
   _parseListTxt: function SRCH_SVC_parseListTxt(list, uris) {
@@ -4576,7 +4593,7 @@ SearchService.prototype = {
     }
   },
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIBrowserSearchService,
     Ci.nsIObserver,
     Ci.nsITimerCallback

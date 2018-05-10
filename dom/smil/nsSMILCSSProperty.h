@@ -10,7 +10,6 @@
 #define NS_SMILCSSPROPERTY_H_
 
 #include "mozilla/Attributes.h"
-#include "mozilla/StyleBackendType.h"
 #include "nsISMILAttr.h"
 #include "nsAtom.h"
 #include "nsCSSPropertyID.h"
@@ -35,7 +34,7 @@ public:
    * Constructs a new nsSMILCSSProperty.
    * @param  aPropID   The CSS property we're interested in animating.
    * @param  aElement  The element whose CSS property is being animated.
-   * @param  aBaseComputedStyle  The style context to use when getting the base
+   * @param  aBaseComputedStyle  The ComputedStyle to use when getting the base
    *                             value. If this is nullptr and GetBaseValue is
    *                             called, an empty nsSMILValue initialized with
    *                             the nsSMILCSSValueType will be returned.
@@ -64,8 +63,7 @@ public:
    * @return  true if the given property is supported for SMIL animation, or
    *          false otherwise
    */
-  static bool IsPropertyAnimatable(nsCSSPropertyID aPropID,
-                                   mozilla::StyleBackendType aBackend);
+  static bool IsPropertyAnimatable(nsCSSPropertyID aPropID);
 
 protected:
   nsCSSPropertyID mPropID;
@@ -79,7 +77,7 @@ protected:
   //
   // As with mElement, since an nsISMILAttr only lives as long as the
   // compositing step and since ComposeAttribute holds an owning reference to
-  // the base style context, we can use a non-owning reference here.
+  // the base ComputedStyle, we can use a non-owning reference here.
   mozilla::ComputedStyle* mBaseComputedStyle;
 };
 

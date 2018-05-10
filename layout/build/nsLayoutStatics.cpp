@@ -19,14 +19,11 @@
 #include "nsCSSAnonBoxes.h"
 #include "mozilla/css/ErrorReporter.h"
 #include "nsCSSKeywords.h"
-#include "nsCSSParser.h"
 #include "nsCSSProps.h"
-#include "nsCSSPseudoClasses.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
 #include "nsGenericHTMLFrameElement.h"
 #include "mozilla/dom/Attr.h"
-#include "nsDOMClassInfo.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsFrame.h"
 #include "nsGlobalWindow.h"
@@ -52,7 +49,6 @@
 #include "nsHTMLDNSPrefetch.h"
 #include "nsHtml5Module.h"
 #include "nsHTMLTags.h"
-#include "nsIRDFContentSink.h"	// for RDF atom initialization
 #include "mozilla/dom/FallbackEncoding.h"
 #include "nsFocusManager.h"
 #include "nsListControlFrame.h"
@@ -79,8 +75,6 @@
 #include "nsXULContentUtils.h"
 #include "nsXULPrototypeCache.h"
 #include "nsXULTooltipListener.h"
-
-#include "inDOMView.h"
 
 #include "nsMenuBarListener.h"
 #endif
@@ -109,10 +103,8 @@
 #include "TouchManager.h"
 #include "DecoderDoctorLogger.h"
 #include "MediaDecoder.h"
-#include "MediaPrefs.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
-#include "mozilla/StylePrefs.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/ipc/IPCBlobInputStreamStorage.h"
 #include "mozilla/dom/U2FTokenManager.h"
@@ -144,7 +136,6 @@ nsLayoutStatics::Initialize()
   // Register static atoms. Note that nsGkAtoms must be initialized earlier
   // than here, so it's done in NS_InitAtomTable() instead.
   nsCSSAnonBoxes::RegisterStaticAtoms();
-  nsCSSPseudoClasses::RegisterStaticAtoms();
   nsCSSPseudoElements::RegisterStaticAtoms();
   nsCSSKeywords::AddRefTable();
   nsCSSProps::AddRefTable();
@@ -189,15 +180,6 @@ nsLayoutStatics::Initialize()
     return rv;
   }
 
-#ifdef MOZ_XUL
-  rv = nsXULContentUtils::Init();
-  if (NS_FAILED(rv)) {
-    NS_ERROR("Could not initialize nsXULContentUtils");
-    return rv;
-  }
-
-#endif
-
   nsMathMLOperators::AddRefTable();
 
 #ifdef DEBUG
@@ -222,8 +204,6 @@ nsLayoutStatics::Initialize()
     NS_ERROR("Could not initialize nsCCUncollectableMarker");
     return rv;
   }
-
-  StylePrefs::Init();
 
 #ifdef MOZ_XUL
   rv = nsXULPopupManager::Init();
@@ -290,11 +270,6 @@ nsLayoutStatics::Initialize()
   if (XRE_IsParentProcess() || XRE_IsContentProcess()) {
     InitializeServo();
   }
-
-#ifndef MOZ_WIDGET_ANDROID
-  // On Android, we instantiate it when constructing AndroidBridge.
-  MediaPrefs::GetSingleton();
-#endif
 
   // This must be initialized on the main-thread.
   mozilla::dom::IPCBlobInputStreamStorage::Initialize();
@@ -374,7 +349,6 @@ nsLayoutStatics::Shutdown()
   ShutdownJSEnvironment();
   nsGlobalWindowInner::ShutDown();
   nsGlobalWindowOuter::ShutDown();
-  nsDOMClassInfo::ShutDown();
   WebIDLGlobalNameHash::Shutdown();
   nsListControlFrame::Shutdown();
   nsXBLService::Shutdown();

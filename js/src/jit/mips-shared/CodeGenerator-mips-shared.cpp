@@ -82,33 +82,11 @@ CodeGeneratorMIPSShared::branchToBlock(Assembler::FloatFormat fmt, FloatRegister
                                        MBasicBlock* mir, Assembler::DoubleCondition cond)
 {
     // Skip past trivial blocks.
-    mir = skipTrivialBlocks(mir);
-
-    Label* label = mir->lir()->label();
-    if (Label* oolEntry = labelForBackedgeWithImplicitCheck(mir)) {
-        // Note: the backedge is initially a jump to the next instruction.
-        // It will be patched to the target block's label during link().
-        RepatchLabel rejoin;
-
-        CodeOffsetJump backedge;
-        Label skip;
-        if (fmt == Assembler::DoubleFloat)
-            masm.ma_bc1d(lhs, rhs, &skip, Assembler::InvertCondition(cond), ShortJump);
-        else
-            masm.ma_bc1s(lhs, rhs, &skip, Assembler::InvertCondition(cond), ShortJump);
-
-        backedge = masm.backedgeJump(&rejoin);
-        masm.bind(&rejoin);
-        masm.bind(&skip);
-
-        if (!patchableBackedges_.append(PatchableBackedgeInfo(backedge, label, oolEntry)))
-            MOZ_CRASH();
-    } else {
-        if (fmt == Assembler::DoubleFloat)
-            masm.branchDouble(cond, lhs, rhs, mir->lir()->label());
-        else
-            masm.branchFloat(cond, lhs, rhs, mir->lir()->label());
-    }
+    Label* label = skipTrivialBlocks(mir)->lir()->label();
+    if (fmt == Assembler::DoubleFloat)
+        masm.branchDouble(cond, lhs, rhs, label);
+    else
+        masm.branchFloat(cond, lhs, rhs, label);
 }
 
 FrameSizeClass
@@ -1475,6 +1453,18 @@ CodeGenerator::visitRoundF(LRoundF* lir)
 }
 
 void
+CodeGenerator::visitTrunc(LTrunc* lir)
+{
+    MOZ_CRASH("visitTrunc");
+}
+
+void
+CodeGenerator::visitTruncF(LTruncF* lir)
+{
+    MOZ_CRASH("visitTruncF");
+}
+
+void
 CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins)
 {
     emitTruncateDouble(ToFloatRegister(ins->input()), ToRegister(ins->output()),
@@ -1798,18 +1788,6 @@ CodeGeneratorMIPSShared::generateInvalidateEpilogue()
     // We should never reach this point in JIT code -- the invalidation thunk
     // should pop the invalidated JS frame and return directly to its caller.
     masm.assumeUnreachable("Should have returned directly to its caller instead of here.");
-}
-
-void
-CodeGenerator::visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-CodeGenerator::visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic* ins)
-{
-    MOZ_CRASH("NYI");
 }
 
 class js::jit::OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorMIPSShared>
@@ -2388,7 +2366,10 @@ CodeGenerator::visitWasmAddOffset(LWasmAddOffset* lir)
     Register base = ToRegister(lir->base());
     Register out = ToRegister(lir->output());
 
-    masm.ma_addTestCarry(out, base, Imm32(mir->offset()), oldTrap(mir, wasm::Trap::OutOfBounds));
+    Label ok;
+    masm.ma_addTestCarry(Assembler::CarryClear, out, base, Imm32(mir->offset()), &ok);
+    masm.wasmTrap(wasm::Trap::OutOfBounds, mir->bytecodeOffset());
+    masm.bind(&ok);
 }
 
 

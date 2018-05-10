@@ -694,7 +694,7 @@ NS_IMETHODIMP_(MozExternalRefCountType) _class::AddRef(void)                  \
 NS_IMETHODIMP_(MozExternalRefCountType) _class::AddRef(void)                  \
 {                                                                             \
   MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                  \
-  NS_PRECONDITION(_aggregator, "null aggregator");                            \
+  MOZ_ASSERT(_aggregator, "null aggregator");                                 \
   return (_aggregator)->AddRef();                                             \
 }
 
@@ -781,7 +781,7 @@ NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void)                 \
 #define NS_IMPL_RELEASE_USING_AGGREGATOR(_class, _aggregator)                 \
 NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void)                 \
 {                                                                             \
-  NS_PRECONDITION(_aggregator, "null aggregator");                            \
+  MOZ_ASSERT(_aggregator, "null aggregator");                                 \
   return (_aggregator)->Release();                                            \
 }
 

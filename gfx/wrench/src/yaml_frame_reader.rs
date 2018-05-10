@@ -193,12 +193,12 @@ pub struct YamlFrameReader {
 
     /// A HashMap of offsets which specify what scroll offsets particular
     /// scroll layers should be initialized with.
-    scroll_offsets: HashMap<ExternalScrollId, LayerPoint>,
+    scroll_offsets: HashMap<ExternalScrollId, LayoutPoint>,
 
     image_map: HashMap<(PathBuf, Option<i64>), (ImageKey, LayoutSize)>,
 
     fonts: HashMap<FontDescriptor, FontKey>,
-    font_instances: HashMap<(FontKey, Au, FontInstanceFlags), FontInstanceKey>,
+    font_instances: HashMap<(FontKey, Au, FontInstanceFlags, Option<ColorU>), FontInstanceKey>,
     font_render_mode: Option<FontRenderMode>,
     allow_mipmaps: bool,
 
@@ -373,6 +373,19 @@ impl YamlFrameReader {
         }
     }
 
+    fn to_hit_testing_tag(&self, item: &Yaml) -> Option<ItemTag> {
+        match *item {
+            Yaml::Array(ref array) if array.len() == 2 => {
+                match (array[0].as_i64(), array[1].as_i64()) {
+                    (Some(first), Some(second)) => Some((first as u64, second as u16)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+
+    }
+
     pub fn add_or_get_image(
             &mut self,
             file: &Path,
@@ -387,7 +400,7 @@ impl YamlFrameReader {
         if self.list_resources { println!("{}", file.to_string_lossy()); }
         let (descriptor, image_data) = match image::open(file) {
             Ok(image) => {
-                let image_dims = image.dimensions();
+                let (image_width, image_height) = image.dimensions();
                 let (format, bytes) = match image {
                     image::ImageLuma8(_) => {
                         (ImageFormat::R8, image.raw_pixels())
@@ -399,7 +412,7 @@ impl YamlFrameReader {
                     }
                     image::ImageRgb8(_) => {
                         let bytes = image.raw_pixels();
-                        let mut pixels = Vec::new();
+                        let mut pixels = Vec::with_capacity(image_width as usize * image_height as usize * 4);
                         for bgr in bytes.chunks(3) {
                             pixels.extend_from_slice(&[
                                 bgr[2],
@@ -413,8 +426,8 @@ impl YamlFrameReader {
                     _ => panic!("We don't support whatever your crazy image type is, come on"),
                 };
                 let descriptor = ImageDescriptor::new(
-                    image_dims.0,
-                    image_dims.1,
+                    image_width,
+                    image_height,
                     format,
                     is_image_opaque(format, &bytes[..]),
                     self.allow_mipmaps,
@@ -531,19 +544,21 @@ impl YamlFrameReader {
         &mut self,
         font_key: FontKey,
         size: Au,
+        bg_color: Option<ColorU>,
         flags: FontInstanceFlags,
         wrench: &mut Wrench,
     ) -> FontInstanceKey {
         let font_render_mode = self.font_render_mode;
 
         *self.font_instances
-            .entry((font_key, size, flags))
+            .entry((font_key, size, flags, bg_color))
             .or_insert_with(|| {
                 wrench.add_font_instance(
                     font_key,
                     size,
                     flags,
                     font_render_mode,
+                    bg_color,
                 )
             })
     }
@@ -886,17 +901,15 @@ impl YamlFrameReader {
                         "space" => RepeatMode::Space,
                         s => panic!("Unknown box border image repeat mode {}", s),
                     };
-                    Some(BorderDetails::Image(ImageBorder {
-                        image_key,
-                        patch: NinePatchDescriptor {
-                            width: image_width as u32,
-                            height: image_height as u32,
-                            slice: SideOffsets2D::new(slice[0], slice[1], slice[2], slice[3]),
-                        },
+                    Some(BorderDetails::NinePatch(NinePatchBorder {
+                        source: NinePatchBorderSource::Image(image_key),
+                        width: image_width as u32,
+                        height: image_height as u32,
+                        slice: SideOffsets2D::new(slice[0], slice[1], slice[2], slice[3]),
                         fill,
-                        outset: SideOffsets2D::new(outset[0], outset[1], outset[2], outset[3]),
                         repeat_horizontal,
                         repeat_vertical,
+                        outset: SideOffsets2D::new(outset[0], outset[1], outset[2], outset[3]),
                     }))
                 }
                 "gradient" => {
@@ -1104,6 +1117,8 @@ impl YamlFrameReader {
     ) {
         let size = item["size"].as_pt_to_au().unwrap_or(Au::from_f32_px(16.0));
         let color = item["color"].as_colorf().unwrap_or(*BLACK_COLOR);
+        let bg_color = item["bg-color"].as_colorf().map(|c| c.into());
+
         let mut flags = FontInstanceFlags::empty();
         if item["synthetic-italics"].as_bool().unwrap_or(false) {
             flags |= FontInstanceFlags::SYNTHETIC_ITALICS;
@@ -1133,6 +1148,7 @@ impl YamlFrameReader {
         let font_key = self.get_or_create_font(desc, wrench);
         let font_instance_key = self.get_or_create_font_instance(font_key,
                                                                  size,
+                                                                 bg_color,
                                                                  flags,
                                                                  wrench);
 
@@ -1290,6 +1306,8 @@ impl YamlFrameReader {
 
             let mut info = LayoutPrimitiveInfo::with_clip_rect(LayoutRect::zero(), clip_rect);
             info.is_backface_visible = item["backface-visible"].as_bool().unwrap_or(true);;
+            info.tag = self.to_hit_testing_tag(&item["hit-testing-tag"]);
+
             match item_type {
                 "rect" => self.handle_rect(dl, item, &mut info),
                 "clear-rect" => self.handle_clear_rect(dl, item, &mut info),
@@ -1336,7 +1354,7 @@ impl YamlFrameReader {
             .as_rect()
             .expect("scroll frame must have a bounds");
         let content_size = yaml["content-size"].as_size().unwrap_or(clip_rect.size);
-        let content_rect = LayerRect::new(clip_rect.origin, content_size);
+        let content_rect = LayoutRect::new(clip_rect.origin, content_size);
 
         let numeric_id = yaml["id"].as_i64().map(|id| id as u64);
 
@@ -1345,7 +1363,7 @@ impl YamlFrameReader {
 
         let external_id =  yaml["scroll-offset"].as_point().map(|size| {
             let id = ExternalScrollId((self.scroll_offsets.len() + 1) as u64, dl.pipeline_id);
-            self.scroll_offsets.insert(id, LayerPoint::new(size.x, size.y));
+            self.scroll_offsets.insert(id, LayoutPoint::new(size.x, size.y));
             id
         });
 
@@ -1499,6 +1517,9 @@ impl YamlFrameReader {
             .as_transform(&transform_origin)
             .map(|transform| transform.into());
 
+        let clip_node_id =
+            yaml["clip-node"].as_i64().map(|id| self.to_clip_id(id as u64, dl.pipeline_id));
+
         let perspective = match yaml["perspective"].as_f32() {
             Some(value) if value != 0.0 => {
                 Some(make_perspective(perspective_origin, value as f32))
@@ -1516,11 +1537,14 @@ impl YamlFrameReader {
         let scroll_policy = yaml["scroll-policy"]
             .as_scroll_policy()
             .unwrap_or(ScrollPolicy::Scrollable);
+        let glyph_raster_space = yaml["glyph-raster-space"]
+            .as_glyph_raster_space()
+            .unwrap_or(GlyphRasterSpace::Screen);
 
         if is_root {
             if let Some(size) = yaml["scroll-offset"].as_point() {
                 let external_id = ExternalScrollId(0, dl.pipeline_id);
-                self.scroll_offsets.insert(external_id, LayerPoint::new(size.x, size.y));
+                self.scroll_offsets.insert(external_id, LayoutPoint::new(size.x, size.y));
             }
         }
 
@@ -1530,12 +1554,14 @@ impl YamlFrameReader {
 
         dl.push_stacking_context(
             &info,
+            clip_node_id,
             scroll_policy,
             transform.into(),
             transform_style,
             perspective,
             mix_blend_mode,
             filters,
+            glyph_raster_space,
         );
 
         if !yaml["items"].is_badvalue() {

@@ -40,7 +40,7 @@ describe("Top Stories Feed", () => {
       enableSection: sinon.spy(),
       disableSection: sinon.spy(),
       updateSection: sinon.spy(),
-      sections: new Map([["topstories", {order: 0, options: FAKE_OPTIONS}]])
+      sections: new Map([["topstories", {options: FAKE_OPTIONS}]])
     };
 
     class FakeUserDomainAffinityProvider {
@@ -483,7 +483,7 @@ describe("Top Stories Feed", () => {
       fetchStub.resolves({ok: true, status: 200, json: () => Promise.resolve(response)});
       await instance.fetchStories();
 
-      instance.store.getState = () => ({Sections: [{rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
+      instance.store.getState = () => ({Sections: [{id: "topstories", rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
 
       globals.set("Math", {random: () => 0.4});
       instance.onAction({type: at.NEW_TAB_REHYDRATED, meta: {fromTarget: {}}});
@@ -531,14 +531,14 @@ describe("Top Stories Feed", () => {
       instance.show_spocs = true;
       instance.spocsPerNewTabs = 0.5;
       instance.stories_endpoint = "stories-endpoint";
-      instance.store.getState = () => ({Sections: [{rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
+      instance.store.getState = () => ({Sections: [{id: "topstories", rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
       fetchStub.resolves({ok: true, status: 200, json: () => Promise.resolve(response)});
 
       instance.onAction({type: at.NEW_TAB_REHYDRATED, meta: {fromTarget: {}}});
       assert.notCalled(instance.store.dispatch);
       assert.equal(instance.contentUpdateQueue.length, 1);
 
-      instance.store.getState = () => ({Sections: [{rows: response.recommendations}]});
+      instance.store.getState = () => ({Sections: [{id: "topstories", rows: response.recommendations}]});
 
       await instance.fetchStories();
       assert.equal(instance.contentUpdateQueue.length, 0);
@@ -578,7 +578,7 @@ describe("Top Stories Feed", () => {
       instance.personalized = true;
       instance.show_spocs = true;
       instance.stories_endpoint = "stories-endpoint";
-      instance.store.getState = () => ({Sections: [{rows: response.recommendations}], Prefs: {values: {showSponsored: false}}});
+      instance.store.getState = () => ({Sections: [{id: "topstories", rows: response.recommendations}], Prefs: {values: {showSponsored: false}}});
       fetchStub.resolves({ok: true, status: 200, json: () => Promise.resolve(response)});
       await instance.fetchStories();
 
@@ -715,7 +715,7 @@ describe("Top Stories Feed", () => {
       instance.personalized = true;
       instance.show_spocs = true;
       instance.stories_endpoint = "stories-endpoint";
-      instance.store.getState = () => ({Sections: [{rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
+      instance.store.getState = () => ({Sections: [{id: "topstories", rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
       fetchStub.resolves({ok: true, status: 200, json: () => Promise.resolve(response)});
       await instance.fetchStories();
       instance.spocsPerNewTabs = 1;
@@ -774,7 +774,7 @@ describe("Top Stories Feed", () => {
       instance.personalized = true;
       instance.show_spocs = true;
       instance.stories_endpoint = "stories-endpoint";
-      instance.store.getState = () => ({Sections: [{rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
+      instance.store.getState = () => ({Sections: [{id: "topstories", rows: response.recommendations}], Prefs: {values: {showSponsored: true}}});
       fetchStub.resolves({ok: true, status: 200, json: () => Promise.resolve(response)});
       await instance.fetchStories();
 
@@ -973,5 +973,12 @@ describe("Top Stories Feed", () => {
       assert.calledWith(instance.cache.set, "domainAffinities", {});
       assert.isUndefined(instance.affinityProvider);
     });
+  });
+  it("should call uninit and init on disabling of showSponsored pref", () => {
+    sinon.stub(instance, "uninit");
+    sinon.stub(instance, "init");
+    instance.onAction({type: at.PREF_CHANGED, data: {name: "showSponsored", value: false}});
+    assert.calledOnce(instance.uninit);
+    assert.calledOnce(instance.init);
   });
 });

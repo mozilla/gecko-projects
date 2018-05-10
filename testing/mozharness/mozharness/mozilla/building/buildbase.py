@@ -370,9 +370,11 @@ class BuildingConfig(BaseConfig):
             all_config_dicts.append(
                 (variant_cfg_file, parse_config_file(variant_cfg_file))
             )
+        config_paths = options.config_paths or ['.']
         if branch_cfg_file:
             # take only the specific branch, if present
-            branch_configs = parse_config_file(branch_cfg_file)
+            branch_configs = parse_config_file(branch_cfg_file,
+                                               search_path=config_paths + [DEFAULT_CONFIG_PATH])
             if branch_configs.get(options.branch or ""):
                 all_config_dicts.append(
                     (branch_cfg_file, branch_configs[options.branch])
@@ -380,7 +382,8 @@ class BuildingConfig(BaseConfig):
         if pool_cfg_file:
             # take only the specific pool. If we are here, the pool
             # must be present
-            build_pool_configs = parse_config_file(pool_cfg_file)
+            build_pool_configs = parse_config_file(pool_cfg_file,
+                                                   search_path=config_paths + [DEFAULT_CONFIG_PATH])
             all_config_dicts.append(
                 (pool_cfg_file, build_pool_configs[options.build_pool])
             )
@@ -422,7 +425,6 @@ class BuildOptionParser(object):
         'noopt-debug': 'builds/releng_sub_%s_configs/%s_noopt_debug.py',
         'api-16-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_16_gradle_dependencies.py',
         'api-16': 'builds/releng_sub_%s_configs/%s_api_16.py',
-        'api-16-old-id': 'builds/releng_sub_%s_configs/%s_api_16_old_id.py',
         'api-16-artifact': 'builds/releng_sub_%s_configs/%s_api_16_artifact.py',
         'api-16-debug': 'builds/releng_sub_%s_configs/%s_api_16_debug.py',
         'api-16-debug-artifact': 'builds/releng_sub_%s_configs/%s_api_16_debug_artifact.py',
@@ -432,7 +434,6 @@ class BuildOptionParser(object):
         'rusttests': 'builds/releng_sub_%s_configs/%s_rusttests.py',
         'rusttests-debug': 'builds/releng_sub_%s_configs/%s_rusttests_debug.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
-        'x86-old-id': 'builds/releng_sub_%s_configs/%s_x86_old_id.py',
         'x86-artifact': 'builds/releng_sub_%s_configs/%s_x86_artifact.py',
         'api-16-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_16_partner_sample1.py',
         'aarch64': 'builds/releng_sub_%s_configs/%s_aarch64.py',
@@ -446,6 +447,7 @@ class BuildOptionParser(object):
         'debug-artifact': 'builds/releng_sub_%s_configs/%s_debug_artifact.py',
         'devedition': 'builds/releng_sub_%s_configs/%s_devedition.py',
         'dmd': 'builds/releng_sub_%s_configs/%s_dmd.py',
+        'tup': 'builds/releng_sub_%s_configs/%s_tup.py',
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
     branch_cfg_file = 'builds/branch_specifics.py'
@@ -1259,6 +1261,15 @@ or run without that action (ie: --no-{action})"
 
     def build(self):
         """builds application."""
+
+        # This will error on non-0 exit code.
+        self._run_mach_command_in_build_env(['build', '-v'])
+
+        self.generate_build_props(console_output=True, halt_on_failure=True)
+        self._generate_build_stats()
+
+    def _run_mach_command_in_build_env(self, args):
+        """Run a mach command in a build context."""
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
 
@@ -1285,21 +1296,19 @@ or run without that action (ie: --no-{action})"
             mach = [sys.executable, 'mach']
 
         return_code = self.run_command(
-            command=mach + ['--log-no-times', 'build', '-v'],
+            command=mach + ['--log-no-times'] + args,
             cwd=dirs['abs_src_dir'],
             env=env,
             output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
         )
+
         if return_code:
             self.return_code = self.worst_level(
-                EXIT_STATUS_DICT[TBPL_FAILURE],  self.return_code,
+                EXIT_STATUS_DICT[TBPL_FAILURE], self.return_code,
                 AUTOMATION_EXIT_CODES[::-1]
             )
-            self.fatal("'mach build' did not run successfully. Please check "
-                       "log for errors.")
-
-        self.generate_build_props(console_output=True, halt_on_failure=True)
-        self._generate_build_stats()
+            self.fatal("'mach %s' did not run successfully. Please check "
+                       "log for errors." % ' '.join(args))
 
     def multi_l10n(self):
         if not self.query_is_nightly():
@@ -1771,7 +1780,14 @@ or run without that action (ie: --no-{action})"
             self.fatal("'mach valgrind-test' did not run successfully. Please check "
                        "log for errors.")
 
+    def ensure_upload_path(self):
+        env = self.query_mach_build_env()
 
+        # Some Taskcluster workers don't like it if an artifacts directory
+        # is defined but no artifacts are uploaded. Guard against this by always
+        # ensuring the artifacts directory exists.
+        if 'UPLOAD_PATH' in env and not os.path.exists(env['UPLOAD_PATH']):
+            os.makedirs(env['UPLOAD_PATH'])
 
     def _post_fatal(self, message=None, exit_code=None):
         if not self.return_code:  # only overwrite return_code if it's 0

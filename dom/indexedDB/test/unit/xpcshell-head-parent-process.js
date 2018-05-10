@@ -14,24 +14,22 @@ if (!("self" in this)) {
   this.self = this;
 }
 
-const DOMException = Ci.nsIDOMDOMException;
-
 var bufferCache = [];
 
 function is(a, b, msg) {
-  Assert.equal(a, b, Components.stack.caller);
+  Assert.equal(a, b, msg);
 }
 
 function ok(cond, msg) {
-  Assert.ok(!!cond, Components.stack.caller);
+  Assert.ok(!!cond, msg);
 }
 
 function isnot(a, b, msg) {
-  Assert.notEqual(a, b, Components.stack.caller);
+  Assert.notEqual(a, b, msg);
 }
 
 function todo(condition, name, diag) {
-  todo_check_true(condition, Components.stack.caller);
+  todo_check_true(condition);
 }
 
 function run_test() {

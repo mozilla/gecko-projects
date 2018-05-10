@@ -474,11 +474,6 @@ with modules["LAYOUT"]:
     errors["NS_OK_PARSE_SHEET"] = SUCCESS(1)
     # Return code for nsFrame::GetNextPrevLineFromeBlockFrame
     errors["NS_POSITION_BEFORE_TABLE"] = SUCCESS(3)
-    # Return codes for nsPresState::GetProperty()
-    # Returned if the property exists
-    errors["NS_STATE_PROPERTY_EXISTS"] = errors["NS_OK"]
-    # Returned if the property does not exist
-    errors["NS_STATE_PROPERTY_NOT_THERE"] = SUCCESS(5)
 
 
 
@@ -868,6 +863,9 @@ with modules["CONTENT"]:
     errors["NS_ERROR_XBL_BLOCKED"] = FAILURE(15)
     # Error code for when the content process crashed
     errors["NS_ERROR_CONTENT_CRASHED"] = FAILURE(16)
+    # Error code for when the content process had a different buildID than the
+    # parent
+    errors["NS_ERROR_BUILDID_MISMATCH"] = FAILURE(17)
 
     # XXX this is not really used
     errors["NS_HTML_STYLE_PROPERTY_NOT_THERE"] = SUCCESS(2)

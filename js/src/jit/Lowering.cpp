@@ -91,52 +91,9 @@ LIRGenerator::visitIsConstructing(MIsConstructing* ins)
     define(new(alloc()) LIsConstructing(), ins);
 }
 
-static void
-TryToUseImplicitInterruptCheck(MIRGraph& graph, MBasicBlock* backedge)
-{
-    // Implicit interrupt checks require JIT async interrupt support.
-    if (!jit::HaveAsyncInterrupt() || JitOptions.ionInterruptWithoutSignals)
-        return;
-
-    // To avoid triggering expensive interrupts (backedge patching) in
-    // requestMajorGC and requestMinorGC, use an implicit interrupt check only
-    // if the loop body can not trigger GC or affect GC state like the store
-    // buffer. We do this by checking there are no safepoints attached to LIR
-    // instructions inside the loop.
-
-    MBasicBlockIterator block = graph.begin(backedge->loopHeaderOfBackedge());
-    LInterruptCheck* check = nullptr;
-    while (true) {
-        LBlock* lir = block->lir();
-        for (LInstructionIterator iter = lir->begin(); iter != lir->end(); iter++) {
-            if (iter->isInterruptCheck()) {
-                if (!check) {
-                    MOZ_ASSERT(*block == backedge->loopHeaderOfBackedge());
-                    check = iter->toInterruptCheck();
-                }
-                continue;
-            }
-
-            MOZ_ASSERT_IF(iter->isPostWriteBarrierO() || iter->isPostWriteBarrierV() || iter->isPostWriteBarrierS(),
-                          iter->safepoint());
-
-            if (iter->safepoint())
-                return;
-        }
-        if (*block == backedge)
-            break;
-        block++;
-    }
-
-    check->setImplicit();
-}
-
 void
 LIRGenerator::visitGoto(MGoto* ins)
 {
-    if (!gen->compilingWasm() && ins->block()->isLoopBackedge())
-        TryToUseImplicitInterruptCheck(graph, ins->block());
-
     add(new(alloc()) LGoto(ins->target()));
 }
 
@@ -184,7 +141,7 @@ LIRGenerator::visitTableSwitch(MTableSwitch* tableswitch)
 void
 LIRGenerator::visitCheckOverRecursed(MCheckOverRecursed* ins)
 {
-    LCheckOverRecursed* lir = new(alloc()) LCheckOverRecursed(temp());
+    LCheckOverRecursed* lir = new(alloc()) LCheckOverRecursed();
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -1468,6 +1425,22 @@ LIRGenerator::visitRound(MRound* ins)
 }
 
 void
+LIRGenerator::visitTrunc(MTrunc* ins)
+{
+    MIRType type = ins->input()->type();
+    MOZ_ASSERT(IsFloatingPointType(type));
+
+    LInstructionHelper<1, 1, 0>* lir;
+    if (type == MIRType::Double)
+        lir = new (alloc()) LTrunc(useRegister(ins->input()));
+    else
+        lir = new (alloc()) LTruncF(useRegister(ins->input()));
+
+    assignSnapshot(lir, Bailout_Round);
+    define(lir, ins);
+}
+
+void
 LIRGenerator::visitNearbyInt(MNearbyInt* ins)
 {
     MIRType inputType = ins->input()->type();
@@ -1679,6 +1652,28 @@ LIRGenerator::visitPow(MPow* ins)
                                  tempFixed(CallTempReg0));
     }
     defineReturn(lir, ins);
+}
+
+void
+LIRGenerator::visitSign(MSign* ins)
+{
+    if (ins->type() == ins->input()->type()) {
+        LInstructionHelper<1, 1, 0>* lir;
+        if (ins->type() == MIRType::Int32) {
+            lir = new(alloc()) LSignI(useRegister(ins->input()));
+        } else {
+            MOZ_ASSERT(ins->type() == MIRType::Double);
+            lir = new(alloc()) LSignD(useRegister(ins->input()));
+        }
+        define(lir, ins);
+    } else {
+        MOZ_ASSERT(ins->type() == MIRType::Int32);
+        MOZ_ASSERT(ins->input()->type() == MIRType::Double);
+
+        auto* lir = new(alloc()) LSignDI(useRegister(ins->input()), tempDouble());
+        assignSnapshot(lir, Bailout_PrecisionLoss);
+        define(lir, ins);
+    }
 }
 
 void
@@ -2533,13 +2528,13 @@ LIRGenerator::visitBinarySharedStub(MBinarySharedStub* ins)
 }
 
 void
-LIRGenerator::visitUnarySharedStub(MUnarySharedStub* ins)
+LIRGenerator::visitUnaryCache(MUnaryCache* ins)
 {
     MDefinition* input = ins->getOperand(0);
     MOZ_ASSERT(ins->type() == MIRType::Value);
 
-    LUnarySharedStub* lir = new(alloc()) LUnarySharedStub(useBoxFixedAtStart(input, R0));
-    defineSharedStubReturn(lir, ins);
+    LUnaryCache* lir = new(alloc()) LUnaryCache(useBox(input));
+    defineBox(lir, ins);
     assignSafepoint(lir, ins);
 }
 
@@ -2733,7 +2728,7 @@ LIRGenerator::visitHomeObjectSuperBase(MHomeObjectSuperBase* ins)
 void
 LIRGenerator::visitInterruptCheck(MInterruptCheck* ins)
 {
-    LInstruction* lir = new(alloc()) LInterruptCheck(temp());
+    LInstruction* lir = new(alloc()) LInterruptCheck();
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -3419,6 +3414,18 @@ LIRGenerator::visitStoreElement(MStoreElement* ins)
     }
 }
 
+static bool
+BoundsCheckNeedsSpectreTemp()
+{
+    // On x86, spectreBoundsCheck32 can emit better code if it has a scratch
+    // register and index masking is enabled.
+#ifdef JS_CODEGEN_X86
+    return JitOptions.spectreIndexMasking;
+#else
+    return false;
+#endif
+}
+
 void
 LIRGenerator::visitStoreElementHole(MStoreElementHole* ins)
 {
@@ -3427,18 +3434,21 @@ LIRGenerator::visitStoreElementHole(MStoreElementHole* ins)
 
     const LUse object = useRegister(ins->object());
     const LUse elements = useRegister(ins->elements());
-    const LAllocation index = useRegisterOrConstant(ins->index());
+    const LAllocation index = useRegister(ins->index());
+
+    LDefinition spectreTemp = BoundsCheckNeedsSpectreTemp() ? temp() : LDefinition::BogusTemp();
 
     LInstruction* lir;
     switch (ins->value()->type()) {
       case MIRType::Value:
-        lir = new(alloc()) LStoreElementHoleV(object, elements, index, useBox(ins->value()));
+        lir = new(alloc()) LStoreElementHoleV(object, elements, index, useBox(ins->value()),
+                                              spectreTemp);
         break;
 
       default:
       {
         const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
-        lir = new(alloc()) LStoreElementHoleT(object, elements, index, value);
+        lir = new(alloc()) LStoreElementHoleT(object, elements, index, value, spectreTemp);
         break;
       }
     }
@@ -3455,16 +3465,20 @@ LIRGenerator::visitFallibleStoreElement(MFallibleStoreElement* ins)
 
     const LUse object = useRegister(ins->object());
     const LUse elements = useRegister(ins->elements());
-    const LAllocation index = useRegisterOrConstant(ins->index());
+    const LAllocation index = useRegister(ins->index());
+
+    LDefinition spectreTemp = BoundsCheckNeedsSpectreTemp() ? temp() : LDefinition::BogusTemp();
 
     LInstruction* lir;
     switch (ins->value()->type()) {
       case MIRType::Value:
-        lir = new(alloc()) LFallibleStoreElementV(object, elements, index, useBox(ins->value()));
+        lir = new(alloc()) LFallibleStoreElementV(object, elements, index, useBox(ins->value()),
+                                                  spectreTemp);
         break;
       default:
         const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
-        lir = new(alloc()) LFallibleStoreElementT(object, elements, index, value);
+        lir = new(alloc()) LFallibleStoreElementT(object, elements, index, value,
+                                                  spectreTemp);
         break;
     }
 
@@ -3563,10 +3577,13 @@ LIRGenerator::visitArrayPush(MArrayPush* ins)
 
     LUse object = useRegister(ins->object());
 
+    LDefinition spectreTemp = BoundsCheckNeedsSpectreTemp() ? temp() : LDefinition::BogusTemp();
+
     switch (ins->value()->type()) {
       case MIRType::Value:
       {
-        LArrayPushV* lir = new(alloc()) LArrayPushV(object, useBox(ins->value()), temp());
+        LArrayPushV* lir = new(alloc()) LArrayPushV(object, useBox(ins->value()), temp(),
+                                                    spectreTemp);
         define(lir, ins);
         assignSafepoint(lir, ins);
         break;
@@ -3575,7 +3592,7 @@ LIRGenerator::visitArrayPush(MArrayPush* ins)
       default:
       {
         const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
-        LArrayPushT* lir = new(alloc()) LArrayPushT(object, value, temp());
+        LArrayPushT* lir = new(alloc()) LArrayPushT(object, value, temp(), spectreTemp);
         define(lir, ins);
         assignSafepoint(lir, ins);
         break;
@@ -3731,18 +3748,6 @@ LIRGenerator::visitLoadTypedArrayElementHole(MLoadTypedArrayElementHole* ins)
 }
 
 void
-LIRGenerator::visitLoadTypedArrayElementStatic(MLoadTypedArrayElementStatic* ins)
-{
-    LLoadTypedArrayElementStatic* lir =
-        new(alloc()) LLoadTypedArrayElementStatic(useRegisterAtStart(ins->ptr()));
-
-    // In case of out of bounds, may bail out, or may jump to ool code.
-    if (ins->fallible())
-        assignSnapshot(lir, Bailout_BoundsCheck);
-    define(lir, ins);
-}
-
-void
 LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins)
 {
     MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
@@ -3801,16 +3806,19 @@ LIRGenerator::visitStoreTypedArrayElementHole(MStoreTypedArrayElementHole* ins)
     }
 
     LUse elements = useRegister(ins->elements());
-    LAllocation length = useAnyOrConstant(ins->length());
-    LAllocation index = useRegisterOrConstant(ins->index());
-    LAllocation value;
-
+    LAllocation length = useAny(ins->length());
+    LAllocation index = useRegister(ins->index());
     // For byte arrays, the value has to be in a byte register on x86.
+    LAllocation value;
     if (ins->isByteWrite())
         value = useByteOpRegisterOrNonDoubleConstant(ins->value());
     else
         value = useRegisterOrNonDoubleConstant(ins->value());
-    add(new(alloc()) LStoreTypedArrayElementHole(elements, length, index, value), ins);
+
+    LDefinition spectreTemp = BoundsCheckNeedsSpectreTemp() ? temp() : LDefinition::BogusTemp();
+    auto* lir =
+        new(alloc()) LStoreTypedArrayElementHole(elements, length, index, value, spectreTemp);
+    add(lir, ins);
 }
 
 void
@@ -4539,6 +4547,16 @@ LIRGenerator::visitHasClass(MHasClass* ins)
     MOZ_ASSERT(ins->object()->type() == MIRType::Object);
     MOZ_ASSERT(ins->type() == MIRType::Boolean);
     define(new(alloc()) LHasClass(useRegister(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitGuardToClass(MGuardToClass* ins)
+{
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
+    MOZ_ASSERT(ins->type() == MIRType::ObjectOrNull|| ins->type() == MIRType::Object);
+    LGuardToClass* lir = new(alloc()) LGuardToClass(useRegister(ins->object()), temp());
+    assignSnapshot(lir, Bailout_TypeBarrierO);
+    define(lir, ins);
 }
 
 void

@@ -24,7 +24,6 @@ let gSiteDataSettings = {
 
   _list: null,
   _searchBox: null,
-  _prefStrBundle: null,
 
   _createSiteListItem(site) {
     let item = document.createElement("richlistitem");
@@ -32,31 +31,38 @@ let gSiteDataSettings = {
     let container = document.createElement("hbox");
 
     // Creates a new column item with the specified relative width.
-    function addColumnItem(value, flexWidth) {
+    function addColumnItem(l10n, flexWidth) {
       let box = document.createElement("hbox");
       box.className = "item-box";
       box.setAttribute("flex", flexWidth);
       let label = document.createElement("label");
       label.setAttribute("crop", "end");
-      if (value) {
-        box.setAttribute("tooltiptext", value);
-        label.setAttribute("value", value);
+      if (l10n) {
+        if (l10n.raw) {
+          box.setAttribute("tooltiptext", l10n.raw);
+          label.setAttribute("value", l10n.raw);
+        } else {
+          document.l10n.setAttributes(label, l10n.id, l10n.args);
+        }
       }
       box.appendChild(label);
       container.appendChild(box);
     }
 
     // Add "Host" column.
-    addColumnItem(site.host, "4");
+    addColumnItem({raw: site.host}, "4");
 
     // Add "Cookies" column.
-    addColumnItem(site.cookies.length, "1");
+    addColumnItem({raw: site.cookies.length}, "1");
 
     // Add "Storage" column
     if (site.usage > 0 || site.persisted) {
-      let size = DownloadUtils.convertByteUnits(site.usage);
-      let strName = site.persisted ? "siteUsagePersistent" : "siteUsage";
-      addColumnItem(this._prefStrBundle.getFormattedString(strName, size), "2");
+      let [value, unit] = DownloadUtils.convertByteUnits(site.usage);
+      let strName = site.persisted ? "site-usage-persistent" : "site-usage-pattern";
+      addColumnItem({
+        id: strName,
+        args: { value, unit }
+      }, "2");
     } else {
       // Pass null to avoid showing "0KB" when there is no site data stored.
       addColumnItem(null, "2");
@@ -64,7 +70,7 @@ let gSiteDataSettings = {
 
     // Add "Last Used" column.
     addColumnItem(site.lastAccessed > 0 ?
-      this._formatter.format(site.lastAccessed) : null, "2");
+      {raw: this._formatter.format(site.lastAccessed)} : null, "2");
 
     item.appendChild(container);
     return item;
@@ -82,7 +88,6 @@ let gSiteDataSettings = {
 
     this._list = document.getElementById("sitesList");
     this._searchBox = document.getElementById("searchBox");
-    this._prefStrBundle = document.getElementById("bundlePreferences");
     SiteDataManager.getSites().then(sites => {
       this._sites = sites;
       let sortCol = document.querySelector("treecol[data-isCurrentSortCol=true]");
@@ -90,10 +95,6 @@ let gSiteDataSettings = {
       this._buildSitesList(this._sites);
       Services.obs.notifyObservers(null, "sitedata-settings-init");
     });
-
-    let brandShortName = document.getElementById("bundle_brand").getString("brandShortName");
-    let settingsDescription = document.getElementById("settingsDescription");
-    settingsDescription.textContent = this._prefStrBundle.getFormattedString("siteDataSettings3.description", [brandShortName]);
 
     setEventListener("sitesList", "select", this.onSelect);
     setEventListener("hostCol", "click", this.onClickTreeCol);
@@ -114,14 +115,8 @@ let gSiteDataSettings = {
     removeSelectedBtn.disabled = this._list.selectedItems.length == 0;
     removeAllBtn.disabled = items.length == 0;
 
-    let removeAllBtnLabelStringID = "removeAllSiteData.label";
-    let removeAllBtnAccesskeyStringID = "removeAllSiteData.accesskey";
-    if (this._searchBox.value) {
-      removeAllBtnLabelStringID = "removeAllSiteDataShown.label";
-      removeAllBtnAccesskeyStringID = "removeAllSiteDataShown.accesskey";
-    }
-    removeAllBtn.setAttribute("label", this._prefStrBundle.getString(removeAllBtnLabelStringID));
-    removeAllBtn.setAttribute("accesskey", this._prefStrBundle.getString(removeAllBtnAccesskeyStringID));
+    let l10nId = this._searchBox.value ? "site-data-remove-shown" : "site-data-remove-all";
+    document.l10n.setAttributes(removeAllBtn, l10nId);
   },
 
   /**
@@ -229,22 +224,9 @@ let gSiteDataSettings = {
           SiteDataManager.removeAll();
         }
       } else {
-        let args = {
-          hosts: removals,
-          allowed: false
-        };
-        let features = "centerscreen,chrome,modal,resizable=no";
-        window.openDialog("chrome://browser/content/preferences/siteDataRemoveSelected.xul", "", features, args);
-        allowed = args.allowed;
+        allowed = SiteDataManager.promptSiteDataRemoval(window, removals);
         if (allowed) {
-          try {
-            SiteDataManager.remove(removals);
-          } catch (e) {
-            // Hit error, maybe remove unknown site.
-            // Let's print out the error, then proceed to close this settings dialog.
-            // When we next open again we will once more get sites from the SiteDataManager and refresh the list.
-            Cu.reportError(e);
-          }
+          SiteDataManager.remove(removals).catch(Cu.reportError);
         }
       }
     }
@@ -263,6 +245,7 @@ let gSiteDataSettings = {
   onClickTreeCol(e) {
     this._sortSites(this._sites, e.target);
     this._buildSitesList(this._sites);
+    this._list.clearSelection();
   },
 
   onCommandSearch() {
@@ -271,11 +254,19 @@ let gSiteDataSettings = {
   },
 
   onClickRemoveSelected() {
-    let selected = this._list.selectedItem;
-    if (selected) {
-      this._removeSiteItems([selected]);
-    }
+    let lastIndex = this._list.selectedItems.length - 1;
+    let lastSelectedItem = this._list.selectedItems[lastIndex];
+    let lastSelectedItemPosition = this._list.getIndexOfItem(lastSelectedItem);
+    let nextSelectedItem = this._list.getItemAtIndex(lastSelectedItemPosition + 1);
+
+    this._removeSiteItems(this._list.selectedItems);
     this._list.clearSelection();
+
+    if (nextSelectedItem) {
+      this._list.selectedItem = nextSelectedItem;
+    } else {
+      this._list.selectedIndex = this._list.itemCount - 1;
+    }
   },
 
   onClickRemoveAll() {

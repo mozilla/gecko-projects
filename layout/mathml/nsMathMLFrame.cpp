@@ -17,8 +17,7 @@
 #include "gfxMathTable.h"
 
 // used to map attributes into CSS rules
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsDisplayList.h"
 
 using namespace mozilla;
@@ -90,9 +89,9 @@ nsMathMLFrame::UpdatePresentationData(uint32_t        aFlagsValues,
   return NS_OK;
 }
 
-// Helper to give a style context suitable for doing the stretching of
+// Helper to give a ComputedStyle suitable for doing the stretching of
 // a MathMLChar. Frame classes that use this should ensure that the
-// extra leaf style contexts given to the MathMLChars are accessible to
+// extra leaf ComputedStyle given to the MathMLChars are accessible to
 // the Style System via the Get/Set AdditionalComputedStyle() APIs.
 /* static */ void
 nsMathMLFrame::ResolveMathMLCharStyle(nsPresContext*  aPresContext,
@@ -232,7 +231,9 @@ nsMathMLFrame::CalcLength(nsPresContext*   aPresContext,
   else if (eCSSUnit_XHeight == unit) {
     aPresContext->SetUsesExChUnits(true);
     RefPtr<nsFontMetrics> fm = nsLayoutUtils::
-      GetFontMetricsForComputedStyle(aComputedStyle, aFontSizeInflation);
+      GetFontMetricsForComputedStyle(aComputedStyle,
+                                     aPresContext,
+                                     aFontSizeInflation);
     nscoord xHeight = fm->XHeight();
     return NSToCoordRound(aCSSValue.GetFloatValue() * (float)xHeight);
   }

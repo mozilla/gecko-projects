@@ -13,6 +13,8 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
+bool ProcessGlobal::sWasCreated = false;
+
 ProcessGlobal::ProcessGlobal(nsFrameMessageManager* aMessageManager)
  : MessageManagerGlobal(aMessageManager),
    mInitialized(false)
@@ -59,20 +61,28 @@ ProcessGlobal::GetOwnPropertyNames(JSContext* aCx, JS::AutoIdVector& aNames,
 ProcessGlobal*
 ProcessGlobal::Get()
 {
-  nsCOMPtr<nsISyncMessageSender> service = do_GetService(NS_CHILDPROCESSMESSAGEMANAGER_CONTRACTID);
+  nsCOMPtr<nsIGlobalObject> service = do_GetService(NS_CHILDPROCESSMESSAGEMANAGER_CONTRACTID);
   if (!service) {
     return nullptr;
   }
-  return static_cast<ProcessGlobal*>(service.get());
+  ProcessGlobal* global = static_cast<ProcessGlobal*>(service.get());
+  if (global) {
+    sWasCreated = true;
+  }
+  return global;
 }
 
-// This method isn't automatically forwarded safely because it's notxpcom, so
-// the IDL binding doesn't know what value to return.
-NS_IMETHODIMP_(bool)
+bool
+ProcessGlobal::WasCreated()
+{
+  return sWasCreated;
+}
+
+void
 ProcessGlobal::MarkForCC()
 {
   MarkScopesForCC();
-  return MessageManagerGlobal::MarkForCC();
+  MessageManagerGlobal::MarkForCC();
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(ProcessGlobal)
@@ -96,11 +106,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ProcessGlobal)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContentProcessMessageManager)
-  NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsIMessageSender)
-  NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
-  NS_INTERFACE_MAP_ENTRY(nsIContentProcessMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)

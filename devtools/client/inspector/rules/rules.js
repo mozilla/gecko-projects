@@ -15,7 +15,6 @@ const {PrefObserver} = require("devtools/client/shared/prefs");
 const ElementStyle = require("devtools/client/inspector/rules/models/element-style");
 const Rule = require("devtools/client/inspector/rules/models/rule");
 const RuleEditor = require("devtools/client/inspector/rules/views/rule-editor");
-const ClassListPreviewer = require("devtools/client/inspector/rules/views/class-list-previewer");
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 const {
   VIEW_NODE_SELECTOR_TYPE,
@@ -24,17 +23,20 @@ const {
   VIEW_NODE_IMAGE_URL_TYPE,
   VIEW_NODE_LOCATION_TYPE,
   VIEW_NODE_SHAPE_POINT_TYPE,
+  VIEW_NODE_SHAPE_SWATCH,
   VIEW_NODE_VARIABLE_TYPE,
   VIEW_NODE_FONT_TYPE,
 } = require("devtools/client/inspector/shared/node-types");
-const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
 const TooltipsOverlay = require("devtools/client/inspector/shared/tooltips-overlay");
 const {createChild, promiseWarn} = require("devtools/client/inspector/shared/utils");
 const {debounce} = require("devtools/shared/debounce");
 const EventEmitter = require("devtools/shared/event-emitter");
-const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
-const clipboardHelper = require("devtools/shared/platform/clipboard");
 const AutocompletePopup = require("devtools/client/shared/autocomplete-popup");
+
+loader.lazyRequireGetter(this, "ClassListPreviewer", "devtools/client/inspector/rules/views/class-list-previewer");
+loader.lazyRequireGetter(this, "StyleInspectorMenu", "devtools/client/inspector/shared/style-inspector-menu");
+loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-shortcuts");
+loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const PREF_UA_STYLES = "devtools.inspector.showUserAgentStyles";
@@ -182,14 +184,10 @@ function CssRuleView(inspector, document, store, pageStyle) {
 
   this._showEmpty();
 
-  this._contextmenu = new StyleInspectorMenu(this, { isRuleView: true });
-
   // Add the tooltips and highlighters to the view
   this.tooltips = new TooltipsOverlay(this);
 
   this.highlighters.addToView(this);
-
-  this.classListPreviewer = new ClassListPreviewer(this.inspector, this.classPanel);
 }
 
 CssRuleView.prototype = {
@@ -203,6 +201,22 @@ CssRuleView.prototype = {
   // to figure out how shorthand properties will be parsed.
   _dummyElement: null,
 
+  get classListPreviewer() {
+    if (!this._classListPreviewer) {
+      this._classListPreviewer = new ClassListPreviewer(this.inspector, this.classPanel);
+    }
+
+    return this._classListPreviewer;
+  },
+
+  get contextMenu() {
+    if (!this._contextMenu) {
+      this._contextMenu = new StyleInspectorMenu(this, { isRuleView: true });
+    }
+
+    return this._contextMenu;
+  },
+
   // Get the dummy elemenet.
   get dummyElement() {
     return this._dummyElement;
@@ -211,6 +225,10 @@ CssRuleView.prototype = {
   // Get the filter search value.
   get searchValue() {
     return this.searchField.value.toLowerCase();
+  },
+
+  get rules() {
+    return this._elementStyle ? this._elementStyle.rules : [];
   },
 
   /**
@@ -225,16 +243,12 @@ CssRuleView.prototype = {
       return null;
     }
 
-    let utils = this.inspector.toolbox.highlighterUtils;
-    if (!utils.supportsCustomHighlighters()) {
-      return null;
-    }
-
     if (this.selectorHighlighter) {
       return this.selectorHighlighter;
     }
 
     try {
+      let utils = this.inspector.toolbox.highlighterUtils;
       let h = await utils.getHighlighterByType("SelectorHighlighter");
       this.selectorHighlighter = h;
       return h;
@@ -361,6 +375,13 @@ CssRuleView.prototype = {
         toggleActive: getShapeToggleActive(node),
         point: getShapePoint(node)
       };
+    } else if (classes.contains("ruleview-shapeswatch") && prop) {
+      type = VIEW_NODE_SHAPE_SWATCH;
+      value = {
+        enabled: prop.enabled,
+        overridden: prop.overridden,
+        textProperty: prop,
+      };
     } else if ((classes.contains("ruleview-variable") ||
                 classes.contains("ruleview-unmatched-variable")) && prop) {
       type = VIEW_NODE_VARIABLE_TYPE;
@@ -437,7 +458,7 @@ CssRuleView.prototype = {
     event.stopPropagation();
     event.preventDefault();
 
-    this._contextmenu.show(event);
+    this.contextMenu.show(event);
   },
 
   /**
@@ -524,12 +545,7 @@ CssRuleView.prototype = {
   _onAddRule: function() {
     let elementStyle = this._elementStyle;
     let element = elementStyle.element;
-    let client = this.inspector.target.client;
     let pseudoClasses = element.pseudoClassLocks;
-
-    if (!client.traits.addNewRule) {
-      return;
-    }
 
     if (!this.pageStyle.supportsAuthoredStyles) {
       // We're talking to an old server.
@@ -717,15 +733,18 @@ CssRuleView.prototype = {
 
     this._outputParser = null;
 
-    // Remove context menu
-    if (this._contextmenu) {
-      this._contextmenu.destroy();
-      this._contextmenu = null;
+    if (this._classListPreviewer) {
+      this._classListPreviewer.destroy();
+      this._classListPreviewer = null;
+    }
+
+    if (this._contextMenu) {
+      this._contextMenu.destroy();
+      this._contextMenu = null;
     }
 
     this.tooltips.destroy();
     this.highlighters.removeFromView(this);
-    this.classListPreviewer.destroy();
     this.unselectAllRules();
 
     // Remove bound listeners
@@ -1748,9 +1767,9 @@ function RuleViewTool(inspector, window) {
 
   this.clearUserProperties = this.clearUserProperties.bind(this);
   this.refresh = this.refresh.bind(this);
-  this.onMutations = this.onMutations.bind(this);
+  this.onDetachedFront = this.onDetachedFront.bind(this);
   this.onPanelSelected = this.onPanelSelected.bind(this);
-  this.onResized = this.onResized.bind(this);
+  this.onDetachedFront = this.onDetachedFront.bind(this);
   this.onSelected = this.onSelected.bind(this);
   this.onViewRefreshed = this.onViewRefreshed.bind(this);
 
@@ -1762,8 +1781,7 @@ function RuleViewTool(inspector, window) {
   this.inspector.ruleViewSideBar.on("ruleview-selected", this.onPanelSelected);
   this.inspector.sidebar.on("ruleview-selected", this.onPanelSelected);
   this.inspector.pageStyle.on("stylesheet-updated", this.refresh);
-  this.inspector.walker.on("mutations", this.onMutations);
-  this.inspector.walker.on("resize", this.onResized);
+  this.inspector.styleChangeTracker.on("style-changed", this.refresh);
 
   this.onSelected();
 }
@@ -1774,7 +1792,7 @@ RuleViewTool.prototype = {
       return false;
     }
 
-    return this.inspector.isSplitRuleViewEnabled ?
+    return this.inspector.is3PaneModeEnabled ?
       true : this.inspector.sidebar.getCurrentTabID() == "ruleview";
   },
 
@@ -1836,31 +1854,8 @@ RuleViewTool.prototype = {
     this.inspector.emit("rule-view-refreshed");
   },
 
-  /**
-   * When markup mutations occur, if an attribute of the selected node changes,
-   * we need to refresh the view as that might change the node's styles.
-   */
-  onMutations: function(mutations) {
-    for (let {type, target} of mutations) {
-      if (target === this.inspector.selection.nodeFront &&
-          type === "attributes") {
-        this.refresh();
-        break;
-      }
-    }
-  },
-
-  /**
-   * When the window gets resized, this may cause media-queries to match, and
-   * therefore, different styles may apply.
-   */
-  onResized: function() {
-    this.refresh();
-  },
-
   destroy: function() {
-    this.inspector.walker.off("mutations", this.onMutations);
-    this.inspector.walker.off("resize", this.onResized);
+    this.inspector.styleChangeTracker.off("style-changed", this.refresh);
     this.inspector.selection.off("detached-front", this.onDetachedFront);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this.onSelected);

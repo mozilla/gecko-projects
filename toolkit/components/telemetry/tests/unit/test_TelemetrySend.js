@@ -22,6 +22,8 @@ ChromeUtils.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 ChromeUtils.defineModuleGetter(this, "TelemetryHealthPing",
   "resource://gre/modules/TelemetryHealthPing.jsm");
 
+XPCOMUtils.defineLazyServiceGetter(Services, "cookies", "@mozilla.org/cookieService;1", "nsICookieService");
+
 const MS_IN_A_MINUTE = 60 * 1000;
 
 function countPingTypes(pings) {
@@ -206,6 +208,8 @@ add_task(async function test_sendPendingPings() {
 
   await TelemetrySend.testWaitOnOutgoingPings();
   PingServer.resetPingHandler();
+  // Restore the default ping id generator.
+  fakeGeneratePingId(() => TelemetryUtils.generateUUID());
 });
 
 add_task(async function test_sendDateHeader() {
@@ -313,6 +317,9 @@ add_task(async function test_backoffTimeout() {
                "Should have recorded sending success in histograms.");
   Assert.equal(histogramValueCount(histSendTimeFail.snapshot()), sendAttempts,
                "Should have recorded send failure times in histograms.");
+
+  // Restore the default ping id generator.
+  fakeGeneratePingId(() => TelemetryUtils.generateUUID());
 });
 
 add_task(async function test_discardBigPings() {
@@ -328,7 +335,7 @@ add_task(async function test_discardBigPings() {
   }
 
   // Generate a 2MB string and create an oversized payload.
-  const OVERSIZED_PAYLOAD = {"data": generateRandomString(2 * 1024 * 1024)};
+  const OVERSIZED_PAYLOAD = {"data": generateRandomString(4 * 1024 * 1024)};
 
   // Submit a ping of a normal size and check that we don't count it in the histogram.
   await TelemetryController.submitExternalPing(TEST_PING_TYPE, { test: "test" });
@@ -480,6 +487,9 @@ add_task(async function test_persistCurrentPingsOnShutdown() {
   // After a restart the pings should have been found when scanning.
   await TelemetrySend.reset();
   Assert.equal(TelemetrySend.pendingPingCount, PING_COUNT, "Should have the correct pending ping count");
+
+  // Restore the default ping id generator.
+  fakeGeneratePingId(() => TelemetryUtils.generateUUID());
 });
 
 add_task(async function test_sendCheckOverride() {
@@ -520,6 +530,26 @@ add_task(async function test_sendCheckOverride() {
   // Restore the test mode and disable the override.
   TelemetrySend.setTestModeEnabled(true);
   Services.prefs.clearUserPref(TelemetryUtils.Preferences.OverrideOfficialCheck);
+});
+
+add_task(async function testCookies() {
+  const TEST_TYPE = "test-cookies";
+
+  await TelemetrySend.reset();
+  PingServer.clearRequests();
+
+  let uri = Services.io.newURI("http://localhost:" + PingServer.port);
+  Services.cookies.setCookieString(uri, null, "cookie-time=yes", null);
+
+  const id = await TelemetryController.submitExternalPing(TEST_TYPE, {});
+  let foundit = false;
+  while (!foundit) {
+    var request = await PingServer.promiseNextRequest();
+    var ping = decodeRequestPayload(request);
+    foundit = id === ping.id;
+  }
+  Assert.equal(id, ping.id, "We're testing the right ping's request, right?");
+  Assert.equal(false, request.hasHeader("Cookie"), "Request should not have Cookie header");
 });
 
 add_task(async function test_measurePingsSize() {
@@ -594,7 +624,7 @@ add_task(async function test_pref_observer() {
       let keys = new Set(["TelemetryClientId", "TelemetryServerURL"]);
 
       let crs = {
-        QueryInterface: XPCOMUtils.generateQI([Ci.nsICrashReporter]),
+        QueryInterface: ChromeUtils.generateQI([Ci.nsICrashReporter]),
         annotateCrashReport(key, value) {
           if (!keys.delete(key)) {
             MockRegistrar.unregister(gMockCrs);

@@ -27,11 +27,12 @@ public:
   static GPUParent* GetSingleton();
 
   bool Init(base::ProcessId aParentPid,
+            const char* aParentBuildID,
             MessageLoop* aIOLoop,
             IPC::Channel* aChannel);
   void NotifyDeviceReset();
 
-  PAPZInputBridgeParent* AllocPAPZInputBridgeParent(const uint64_t& aLayersId) override;
+  PAPZInputBridgeParent* AllocPAPZInputBridgeParent(const LayersId& aLayersId) override;
   bool DeallocPAPZInputBridgeParent(PAPZInputBridgeParent* aActor) override;
 
   mozilla::ipc::IPCResult RecvInit(nsTArray<GfxPrefSetting>&& prefs,
@@ -42,7 +43,7 @@ public:
   mozilla::ipc::IPCResult RecvInitVsyncBridge(Endpoint<PVsyncBridgeParent>&& aVsyncEndpoint) override;
   mozilla::ipc::IPCResult RecvInitImageBridge(Endpoint<PImageBridgeParent>&& aEndpoint) override;
   mozilla::ipc::IPCResult RecvInitVRManager(Endpoint<PVRManagerParent>&& aEndpoint) override;
-  mozilla::ipc::IPCResult RecvInitUiCompositorController(const uint64_t& aRootLayerTreeId, Endpoint<PUiCompositorControllerParent>&& aEndpoint) override;
+  mozilla::ipc::IPCResult RecvInitUiCompositorController(const LayersId& aRootLayerTreeId, Endpoint<PUiCompositorControllerParent>&& aEndpoint) override;
   mozilla::ipc::IPCResult RecvInitProfiler(Endpoint<PProfilerChild>&& aEndpoint) override;
   mozilla::ipc::IPCResult RecvUpdatePref(const GfxPrefSetting& pref) override;
   mozilla::ipc::IPCResult RecvUpdateVar(const GfxVarUpdate& pref) override;

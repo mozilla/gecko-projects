@@ -45,6 +45,13 @@ class PaintedLayerData;
 class ContainerState;
 class PaintedDisplayItemLayerUserData;
 
+enum class DisplayItemEntryType {
+  ITEM,
+  PUSH_OPACITY,
+  PUSH_OPACITY_WITH_BG,
+  POP_OPACITY
+};
+
 /**
   * Retained data storage:
   *
@@ -213,13 +220,13 @@ public:
 struct AssignedDisplayItem
 {
   AssignedDisplayItem(nsDisplayItem* aItem,
-                      const DisplayItemClip& aClip,
                       LayerState aLayerState,
-                      DisplayItemData* aData);
+                      DisplayItemData* aData,
+                      DisplayItemEntryType aType,
+                      const bool aHasOpacity);
   ~AssignedDisplayItem();
 
   nsDisplayItem* mItem;
-  DisplayItemClip mClip;
   LayerState mLayerState;
   DisplayItemData* mDisplayItemData;
 
@@ -232,6 +239,9 @@ struct AssignedDisplayItem
 
   bool mReused;
   bool mMerged;
+
+  DisplayItemEntryType mType;
+  bool mHasOpacity;
 };
 
 
@@ -666,8 +676,7 @@ protected:
                   nsDisplayListBuilder* aBuilder,
                   nsPresContext* aPresContext,
                   const nsIntPoint& aOffset,
-                  float aXScale, float aYScale,
-                  int32_t aCommonClipCount);
+                  float aXScale, float aYScale);
 
   /**
    * We accumulate ClippedDisplayItem elements in a hashtable during

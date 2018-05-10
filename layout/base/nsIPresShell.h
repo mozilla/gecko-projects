@@ -13,9 +13,10 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/FlushType.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSheet.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "GeckoProfiler.h"
 #include "gfxPoint.h"
@@ -56,7 +57,7 @@ class nsCanvasFrame;
 class nsCaret;
 namespace mozilla {
 class AccessibleCaretEventHub;
-class CSSStyleSheet;
+class StyleSheet;
 } // namespace mozilla
 class nsFrameSelection;
 class nsFrameManager;
@@ -64,12 +65,10 @@ class nsILayoutHistoryState;
 class nsIReflowCallback;
 class nsIDOMNode;
 class nsCSSFrameConstructor;
-class nsISelection;
 template<class E> class nsCOMArray;
 class AutoWeakFrame;
 class WeakFrame;
 class nsIScrollableFrame;
-class nsIDOMEvent;
 class nsDisplayList;
 class nsDisplayListBuilder;
 class nsPIDOMWindowOuter;
@@ -95,6 +94,8 @@ class EventStates;
 
 namespace dom {
 class Element;
+class Event;
+class HTMLSlotElement;
 class Touch;
 class Selection;
 class ShadowRoot;
@@ -278,7 +279,7 @@ public:
   }
 #endif
 
-  mozilla::StyleSetHandle StyleSet() const { return mStyleSet; }
+  mozilla::ServoStyleSet* StyleSet() const { return mStyleSet.get(); }
 
   nsCSSFrameConstructor* FrameConstructor() const { return mFrameConstructor; }
 
@@ -524,7 +525,18 @@ public:
    *
    * Note that this may destroy frames for an ancestor instead.
    */
-  virtual void DestroyFramesForAndRestyle(mozilla::dom::Element* aElement) = 0;
+  void DestroyFramesForAndRestyle(mozilla::dom::Element* aElement);
+
+  /**
+   * Handles all the layout stuff needed when the slot assignment for an element
+   * is about to change.
+   *
+   * Only called when the slot attribute of the element changes, the rest of
+   * the changes should be handled in ShadowRoot.
+   */
+  void SlotAssignmentWillChange(mozilla::dom::Element& aElement,
+                                mozilla::dom::HTMLSlotElement* aOldSlot,
+                                mozilla::dom::HTMLSlotElement* aNewSlot);
 
   void PostRecreateFramesFor(mozilla::dom::Element* aElement);
   void RestyleForAnimation(mozilla::dom::Element* aElement,
@@ -817,17 +829,23 @@ public:
 
   /**
    * Determine if a rectangle specified in the frame's coordinate system
-   * intersects the viewport "enough" to be considered visible.
+   * intersects "enough" with the viewport to be considered visible. This
+   * is not a strict test against the viewport -- it's a test against
+   * the intersection of the viewport and the frame's ancestor scrollable
+   * frames. If it doesn't intersect enough, return a value indicating
+   * which direction the frame's topmost ancestor scrollable frame would
+   * need to be scrolled to bring the frame into view.
    * @param aFrame frame that aRect coordinates are specified relative to
    * @param aRect rectangle in twips to test for visibility
-   * @param aMinTwips is the minimum distance in from the edge of the viewport
-   *                  that an object must be to be counted visible
+   * @param aMinTwips is the minimum distance in from the edge of the
+   *                  visible area that an object must be to be counted
+   *                  visible
    * @return nsRectVisibility_kVisible if the rect is visible
    *         nsRectVisibility_kAboveViewport
    *         nsRectVisibility_kBelowViewport
    *         nsRectVisibility_kLeftOfViewport
-   *         nsRectVisibility_kRightOfViewport rectangle is outside the viewport
-   *         in the specified direction
+   *         nsRectVisibility_kRightOfViewport rectangle is outside the
+   *         topmost ancestor scrollable frame in the specified direction
    */
   virtual nsRectVisibility GetRectVisibility(nsIFrame *aFrame,
                                              const nsRect &aRect,
@@ -915,7 +933,8 @@ public:
                                  nsIContent* aContent,
                                  nsEventStatus* aStatus,
                                  bool aIsHandlingNativeEvent = false,
-                                 nsIContent** aTargetContent = nullptr) = 0;
+                                 nsIContent** aTargetContent = nullptr,
+                                 nsIContent* aOverrideClickTarget = nullptr) = 0;
 
   /**
    * Dispatch event to content only (NOT full processing)
@@ -931,8 +950,8 @@ public:
    * @note The caller must have a strong reference to the PresShell.
    */
   virtual nsresult HandleDOMEventWithTarget(nsIContent* aTargetContent,
-                                                        nsIDOMEvent* aEvent,
-                                                        nsEventStatus* aStatus) = 0;
+                                            mozilla::dom::Event* aEvent,
+                                            nsEventStatus* aStatus) = 0;
 
   /**
    * Return whether or not the event is valid to be dispatched
@@ -1055,7 +1074,6 @@ public:
   virtual void ListComputedStyles(FILE *out, int32_t aIndent = 0) = 0;
 
   virtual void ListStyleSheets(FILE *out, int32_t aIndent = 0) = 0;
-  virtual void VerifyStyleTree() = 0;
 #endif
 
 #ifdef ACCESSIBILITY
@@ -1180,7 +1198,7 @@ public:
    * frames.
    */
   virtual already_AddRefed<mozilla::gfx::SourceSurface>
-  RenderSelection(nsISelection* aSelection,
+  RenderSelection(mozilla::dom::Selection* aSelection,
                   const mozilla::LayoutDeviceIntPoint aPoint,
                   mozilla::LayoutDeviceIntRect* aScreenRect,
                   uint32_t aFlags) = 0;
@@ -1501,8 +1519,7 @@ public:
   virtual void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) = 0;
   virtual void ClearMouseCaptureOnView(nsView* aView) = 0;
   virtual bool IsVisible() = 0;
-  virtual void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent,
-                                      bool aFlushOnHoverChange) = 0;
+  void DispatchSynthMouseMove(mozilla::WidgetGUIEvent* aEvent);
 
   virtual void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const = 0;
 
@@ -1694,7 +1711,7 @@ protected:
   // we must share ownership.
   nsCOMPtr<nsIDocument>     mDocument;
   RefPtr<nsPresContext>   mPresContext;
-  mozilla::StyleSetHandle   mStyleSet;      // [OWNS]
+  mozilla::UniquePtr<mozilla::ServoStyleSet> mStyleSet;
   nsCSSFrameConstructor*    mFrameConstructor; // [OWNS]
   nsViewManager*           mViewManager;   // [WEAK] docViewer owns it so I don't have to
   nsPresArena               mFrameArena;

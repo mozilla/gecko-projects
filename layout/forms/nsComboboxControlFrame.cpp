@@ -21,7 +21,7 @@
 #include "nsIListControlFrame.h"
 #include "nsPIDOMWindow.h"
 #include "nsIPresShell.h"
-#include "nsPresState.h"
+#include "mozilla/PresState.h"
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIContentInlines.h"
@@ -29,12 +29,12 @@
 #include "nsIDOMNode.h"
 #include "nsISelectControlFrame.h"
 #include "nsContentUtils.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/HTMLSelectElement.h"
 #include "nsIDocument.h"
 #include "nsIScrollableFrame.h"
 #include "nsListControlFrame.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsLayoutUtils.h"
@@ -51,6 +51,7 @@
 #include "mozilla/Unused.h"
 #include "gfx2DGlue.h"
 #include "mozilla/widget/nsAutoRollup.h"
+#include "nsILayoutHistoryState.h"
 
 #ifdef XP_WIN
 #define COMBOBOX_ROLLUP_CONSUME_EVENT 0
@@ -69,7 +70,6 @@ nsComboboxControlFrame::RedisplayTextEvent::Run()
   return NS_OK;
 }
 
-class nsPresState;
 
 #define FIX_FOR_BUG_53259
 
@@ -98,7 +98,7 @@ private:
 public:
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD HandleEvent(nsIDOMEvent*) override
+  NS_IMETHOD HandleEvent(dom::Event*) override
   {
     mComboBox->ShowDropDown(!mComboBox->IsDroppedDown());
     return NS_OK;
@@ -955,7 +955,7 @@ nsComboboxControlFrame::ShowDropDown(bool aDoDropDown)
 
   if (!mDroppedDown && aDoDropDown) {
     nsFocusManager* fm = nsFocusManager::GetFocusManager();
-    if (!fm || fm->GetFocusedContent() == GetContent()) {
+    if (!fm || fm->GetFocusedElement() == GetContent()) {
       DropDownPositionState state = AbsolutelyPositionDropDown();
       if (state == eDropDownPositionFinal) {
         ShowList(aDoDropDown); // might destroy us
@@ -1061,7 +1061,7 @@ nsComboboxControlFrame::HandleRedisplayTextEvent()
   // Redirect frame insertions during this method (see GetContentInsertionFrame())
   // so that any reframing that the frame constructor forces upon us is inserted
   // into the correct parent (mDisplayFrame). See bug 282607.
-  NS_PRECONDITION(!mInRedisplayText, "Nested RedisplayText");
+  MOZ_ASSERT(!mInRedisplayText, "Nested RedisplayText");
   mInRedisplayText = true;
   mRedisplayTextEvent.Forget();
 
@@ -1297,6 +1297,12 @@ nsComboboxControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElement
   }
 }
 
+nsIContent*
+nsComboboxControlFrame::GetDisplayNode() const
+{
+  return mDisplayContent;
+}
+
 // XXXbz this is a for-now hack.  Now that display:inline-block works,
 // need to revisit this.
 class nsComboboxDisplayFrame : public nsBlockFrame {
@@ -1384,11 +1390,11 @@ nsComboboxControlFrame::CreateFrameForDisplayNode()
 
   // Get PresShell
   nsIPresShell *shell = PresShell();
-  StyleSetHandle styleSet = shell->StyleSet();
+  ServoStyleSet* styleSet = shell->StyleSet();
 
-  // create the style contexts for the anonymous block frame and text frame
-  RefPtr<ComputedStyle> styleContext;
-  styleContext = styleSet->
+  // create the ComputedStyle for the anonymous block frame and text frame
+  RefPtr<ComputedStyle> computedStyle;
+  computedStyle = styleSet->
     ResolveInheritingAnonymousBoxStyle(nsCSSAnonBoxes::mozDisplayComboboxControlFrame,
                                        mComputedStyle);
 
@@ -1397,7 +1403,7 @@ nsComboboxControlFrame::CreateFrameForDisplayNode()
     styleSet->ResolveStyleForText(mDisplayContent, mComputedStyle);
 
   // Start by creating our anonymous block frame
-  mDisplayFrame = new (shell) nsComboboxDisplayFrame(styleContext, this);
+  mDisplayFrame = new (shell) nsComboboxDisplayFrame(computedStyle, this);
   mDisplayFrame->Init(mContent, this, nullptr);
 
   // Create a text frame and put it inside the block frame
@@ -1689,22 +1695,21 @@ nsComboboxControlFrame::OnContentReset()
 //--------------------------------------------------------
 // nsIStatefulFrame
 //--------------------------------------------------------
-NS_IMETHODIMP
-nsComboboxControlFrame::SaveState(nsPresState** aState)
+UniquePtr<PresState>
+nsComboboxControlFrame::SaveState()
 {
-  MOZ_ASSERT(!(*aState));
-  (*aState) = new nsPresState();
-  (*aState)->SetDroppedDown(mDroppedDown);
-  return NS_OK;
+  UniquePtr<PresState> state = NewPresState();
+  state->droppedDown() = mDroppedDown;
+  return state;
 }
 
 NS_IMETHODIMP
-nsComboboxControlFrame::RestoreState(nsPresState* aState)
+nsComboboxControlFrame::RestoreState(PresState* aState)
 {
   if (!aState) {
     return NS_ERROR_FAILURE;
   }
-  ShowList(aState->GetDroppedDown()); // might destroy us
+  ShowList(aState->droppedDown()); // might destroy us
   return NS_OK;
 }
 

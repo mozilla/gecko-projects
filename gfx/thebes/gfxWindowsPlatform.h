@@ -233,7 +233,9 @@ protected:
     void ImportContentDeviceData(const mozilla::gfx::ContentDeviceData& aData) override;
     void BuildContentDeviceData(mozilla::gfx::ContentDeviceData* aOut) override;
 
-    BackendPrefsData GetBackendPrefs() override;
+    BackendPrefsData GetBackendPrefs() const override;
+
+    bool CheckVariationFontSupport() override;
 
 protected:
     RenderMode mRenderMode;

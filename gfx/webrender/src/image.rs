@@ -2,22 +2,44 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{TileOffset, LayerRect, LayerSize, LayerVector2D, DeviceUintSize};
+use api::{TileOffset, LayoutRect, LayoutSize, LayoutVector2D, DeviceUintSize};
 use euclid::rect;
 
+/// If repetitions are far enough apart that only one is within
+/// the primitive rect, then we can simplify the parameters and
+/// treat the primitive as not repeated.
+/// This can let us avoid unnecessary work later to handle some
+/// of the parameters.
+pub fn simplify_repeated_primitive(
+    stretch_size: &LayoutSize,
+    tile_spacing: &mut LayoutSize,
+    prim_rect: &mut LayoutRect,
+) {
+    let stride = *stretch_size + *tile_spacing;
+
+    if stride.width >= prim_rect.size.width {
+        tile_spacing.width = 0.0;
+        prim_rect.size.width = f32::min(prim_rect.size.width, stretch_size.width);
+    }
+    if stride.height >= prim_rect.size.height {
+        tile_spacing.height = 0.0;
+        prim_rect.size.height = f32::min(prim_rect.size.height, stretch_size.height);
+    }
+}
+
 pub struct DecomposedTile {
-    pub rect: LayerRect,
-    pub stretch_size: LayerSize,
+    pub rect: LayoutRect,
+    pub stretch_size: LayoutSize,
     pub tile_offset: TileOffset,
 }
 
 pub struct TiledImageInfo {
     /// The bounds of the item in layout space.
-    pub rect: LayerRect,
+    pub rect: LayoutRect,
     /// The space between each repeated pattern in layout space.
-    pub tile_spacing: LayerSize,
+    pub tile_spacing: LayoutSize,
     /// The size in layout space of each repetition of the image.
-    pub stretch_size: LayerSize,
+    pub stretch_size: LayoutSize,
 
     /// The size the image occupies in the cache in device space.
     pub device_image_size: DeviceUintSize,
@@ -69,7 +91,7 @@ pub fn decompose_image(info: &TiledImageInfo, callback: &mut FnMut(&DecomposedTi
 }
 
 
-fn decompose_row(item_rect: &LayerRect, info: &TiledImageInfo, callback: &mut FnMut(&DecomposedTile)) {
+fn decompose_row(item_rect: &LayoutRect, info: &TiledImageInfo, callback: &mut FnMut(&DecomposedTile)) {
 
     let no_horizontal_tiling = info.device_image_size.width <= info.device_tile_size;
     let no_horizontal_spacing = info.tile_spacing.width == 0.0;
@@ -89,7 +111,7 @@ fn decompose_row(item_rect: &LayerRect, info: &TiledImageInfo, callback: &mut Fn
             item_rect.origin.y,
             info.stretch_size.width,
             item_rect.size.height,
-        ).intersection(&item_rect);
+        ).intersection(item_rect);
 
         if let Some(decomposed_rect) = decomposed_rect {
             decompose_cache_tiles(&decomposed_rect, info, callback);
@@ -98,7 +120,7 @@ fn decompose_row(item_rect: &LayerRect, info: &TiledImageInfo, callback: &mut Fn
 }
 
 fn decompose_cache_tiles(
-    item_rect: &LayerRect,
+    item_rect: &LayoutRect,
     info: &TiledImageInfo,
     callback: &mut FnMut(&DecomposedTile),
 ) {
@@ -155,7 +177,7 @@ fn decompose_cache_tiles(
     let img_dh = tile_size_f32 / (info.device_image_size.height as f32);
 
     // Stretched size of the tile in layout space.
-    let stretched_tile_size = LayerSize::new(
+    let stretched_tile_size = LayoutSize::new(
         img_dw * info.stretch_size.width,
         img_dh * info.stretch_size.height,
     );
@@ -228,8 +250,8 @@ fn decompose_cache_tiles(
 }
 
 fn add_device_tile(
-    item_rect: &LayerRect,
-    stretched_tile_size: LayerSize,
+    item_rect: &LayoutRect,
+    stretched_tile_size: LayoutSize,
     tile_offset: TileOffset,
     tile_ratio_width: f32,
     tile_ratio_height: f32,
@@ -246,13 +268,13 @@ fn add_device_tile(
     // axis).
     // See the shader_repeat_x/y code below.
 
-    let stretch_size = LayerSize::new(
+    let stretch_size = LayoutSize::new(
         stretched_tile_size.width * tile_ratio_width,
         stretched_tile_size.height * tile_ratio_height,
     );
 
-    let mut prim_rect = LayerRect::new(
-        item_rect.origin + LayerVector2D::new(
+    let mut prim_rect = LayoutRect::new(
+        item_rect.origin + LayoutVector2D::new(
             tile_offset.x as f32 * stretched_tile_size.width,
             tile_offset.y as f32 * stretched_tile_size.height,
         ),
@@ -270,7 +292,7 @@ fn add_device_tile(
     }
 
     // Fix up the primitive's rect if it overflows the original item rect.
-    if let Some(rect) = prim_rect.intersection(&item_rect) {
+    if let Some(rect) = prim_rect.intersection(item_rect) {
         callback(&DecomposedTile {
             tile_offset,
             rect,

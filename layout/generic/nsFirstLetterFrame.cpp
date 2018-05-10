@@ -12,11 +12,9 @@
 #include "nsIContent.h"
 #include "nsLineLayout.h"
 #include "nsGkAtoms.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsFrameManager.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "nsPlaceholderFrame.h"
 #include "nsCSSFrameConstructor.h"
 
@@ -57,9 +55,9 @@ nsFirstLetterFrame::Init(nsIContent*       aContent,
 {
   RefPtr<ComputedStyle> newSC;
   if (aPrevInFlow) {
-    // Get proper style context for ourselves.  We're creating the frame
+    // Get proper ComputedStyle for ourselves.  We're creating the frame
     // that represents everything *except* the first letter, so just create
-    // a style context that inherits from our style parent, with no extra rules.
+    // a ComputedStyle that inherits from our style parent, with no extra rules.
     nsIFrame* styleParent =
       CorrectStyleParentFrame(aParent, nsCSSPseudoElements::firstLetter);
     ComputedStyle* parentComputedStyle = styleParent->Style();
@@ -310,7 +308,7 @@ nsFirstLetterFrame::CreateContinuationForFloatingParent(nsPresContext* aPresCont
 {
   NS_ASSERTION(IsFloating(),
                "can only call this on floating first letter frames");
-  NS_PRECONDITION(aContinuation, "bad args");
+  MOZ_ASSERT(aContinuation, "bad args");
 
   *aContinuation = nullptr;
 
@@ -322,11 +320,11 @@ nsFirstLetterFrame::CreateContinuationForFloatingParent(nsPresContext* aPresCont
     CreateContinuingFrame(aPresContext, aChild, parent, aIsFluid);
 
   // The continuation will have gotten the first letter style from its
-  // prev continuation, so we need to repair the style context so it
+  // prev continuation, so we need to repair the ComputedStyle so it
   // doesn't have the first letter styling.
   //
-  // Note that getting parent frame's style context is different from getting
-  // this frame's style context's parent in the presence of ::first-line,
+  // Note that getting parent frame's ComputedStyle is different from getting
+  // this frame's ComputedStyle's parent in the presence of ::first-line,
   // which we do want the continuation to inherit from.
   ComputedStyle* parentSC = parent->Style();
   if (parentSC) {
@@ -373,14 +371,14 @@ nsFirstLetterFrame::DrainOverflowFrames(nsPresContext* aPresContext)
     mFrames.AppendFrames(nullptr, *overflowFrames);
   }
 
-  // Now repair our first frames style context (since we only reflow
+  // Now repair our first frames ComputedStyle (since we only reflow
   // one frame there is no point in doing any other ones until they
   // are reflowed)
   nsIFrame* kid = mFrames.FirstChild();
   if (kid) {
     nsIContent* kidContent = kid->GetContent();
     if (kidContent) {
-      NS_ASSERTION(kidContent->IsNodeOfType(nsINode::eTEXT),
+      NS_ASSERTION(kidContent->IsText(),
                    "should contain only text nodes");
       ComputedStyle* parentSC;
       if (prevInFlow) {
@@ -412,7 +410,7 @@ nsFirstLetterFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
 {
   if (GetPrevContinuation()) {
     // We shouldn't get calls to GetSkipSides for later continuations since
-    // they have separate style contexts with initial values for all the
+    // they have separate ComputedStyles with initial values for all the
     // properties that could trigger a call to GetSkipSides.  Then again,
     // it's not really an error to call GetSkipSides on any frame, so
     // that's why we handle it properly.

@@ -481,9 +481,13 @@ public:
   static bool ResolveJunctionPointsAndSymLinks(std::wstring& aPath);
   static bool ResolveJunctionPointsAndSymLinks(nsIFile* aPath);
 
-  static void Initialize();
 
-  static bool ShouldHideScrollbars();
+  /**
+   * Returns true if executable's path is on a network drive.
+   */
+  static bool RunningFromANetworkDrive();
+
+  static void Initialize();
 
   /**
    * This function normalizes the input path, converts short filenames to long

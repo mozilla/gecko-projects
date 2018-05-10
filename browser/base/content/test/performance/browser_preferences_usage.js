@@ -78,7 +78,7 @@ add_task(async function startup() {
       max: 350,
     },
     "layout.css.prefixes.webkit": {
-      min: 140,
+      min: 135,
       max: 150,
     },
     "browser.search.log": {
@@ -92,14 +92,6 @@ add_task(async function startup() {
     "extensions.getAddons.cache.enabled": {
       min: 10,
       max: 55,
-    },
-    "dom.max_chrome_script_run_time": {
-      min: 30,
-      max: 55,
-    },
-    // This seems to get called frequently only on infra.
-    "network.jar.block-remote-files": {
-      max: 500,
     },
   };
 
@@ -161,8 +153,6 @@ add_task(async function open_10_tabs() {
       min: 5,
       max: 20,
     },
-    // This seems to get called frequently only on infra.
-    "network.jar.block-remote-files": { },
   };
 
   Services.prefs.resetStats();

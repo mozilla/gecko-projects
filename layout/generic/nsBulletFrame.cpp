@@ -148,7 +148,7 @@ nsBulletFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
       RegisterImageRequest(/* aKnownToBeAnimated = */ false);
     }
   } else {
-    // No image request on the new style context.
+    // No image request on the new ComputedStyle.
     DeregisterAndCancelImageRequest();
   }
 
@@ -525,7 +525,7 @@ BulletRenderer::CreateWebRenderCommandsForImage(nsDisplayItem* aItem,
     return true;  // Nothing to do
   }
 
-  wr::LayoutRect dest = aSc.ToRelativeLayoutRect(destRect);
+  wr::LayoutRect dest = wr::ToRoundedLayoutRect(destRect);
 
   aBuilder.PushImage(dest,
                      dest,
@@ -545,7 +545,7 @@ BulletRenderer::CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
                                                nsDisplayListBuilder* aDisplayListBuilder)
 {
   MOZ_ASSERT(IsPathType());
-  wr::LayoutRect dest = aSc.ToRelativeLayoutRect(mPathRect);
+  wr::LayoutRect dest = wr::ToRoundedLayoutRect(mPathRect);
   auto color = wr::ToColorF(ToDeviceColor(mColor));
   bool isBackfaceVisible = !aItem->BackfaceIsHidden();
   switch (mListStyleType) {
@@ -566,7 +566,7 @@ BulletRenderer::CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
         RoundedRect(ThebesRect(mPathRect.ToUnknownRect()),
                     RectCornerRadii(dest.size.width / 2.0))
       ));
-      auto clipId = aBuilder.DefineClip(Nothing(), Nothing(), dest, &clips, nullptr);
+      auto clipId = aBuilder.DefineClip(Nothing(), dest, &clips, nullptr);
       aBuilder.PushClip(clipId);
       aBuilder.PushRect(dest, dest, isBackfaceVisible, color);
       aBuilder.PopClip();
@@ -1286,7 +1286,7 @@ nsBulletFrame::GetLoadGroup(nsPresContext *aPresContext, nsILoadGroup **aLoadGro
   if (!aPresContext)
     return;
 
-  NS_PRECONDITION(nullptr != aLoadGroup, "null OUT parameter pointer");
+  MOZ_ASSERT(nullptr != aLoadGroup, "null OUT parameter pointer");
 
   nsIPresShell *shell = aPresContext->GetPresShell();
 

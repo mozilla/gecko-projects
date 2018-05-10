@@ -400,16 +400,21 @@ struct MetadataCacheablePod
 {
     ModuleKind            kind;
     MemoryUsage           memoryUsage;
+    HasGcTypes            temporaryHasGcTypes;
     uint32_t              minMemoryLength;
     uint32_t              globalDataLength;
     Maybe<uint32_t>       maxMemoryLength;
     Maybe<uint32_t>       startFuncIndex;
+    Maybe<NameInBytecode> moduleName;
+    bool                  filenameIsURL;
 
     explicit MetadataCacheablePod(ModuleKind kind)
       : kind(kind),
         memoryUsage(MemoryUsage::None),
+        temporaryHasGcTypes(HasGcTypes::False),
         minMemoryLength(0),
-        globalDataLength(0)
+        globalDataLength(0),
+        filenameIsURL(false)
     {}
 };
 
@@ -423,7 +428,6 @@ struct Metadata : public ShareableBase<Metadata>, public MetadataCacheablePod
     NameInBytecodeVector  funcNames;
     CustomSectionVector   customSections;
     CacheableChars        filename;
-    CacheableChars        baseURL;
     CacheableChars        sourceMapURL;
 
     // Debug-enabled code is not serialized.
@@ -466,7 +470,23 @@ struct Metadata : public ShareableBase<Metadata>, public MetadataCacheablePod
     virtual ScriptSource* maybeScriptSource() const {
         return nullptr;
     }
-    virtual bool getFuncName(const Bytes* maybeBytecode, uint32_t funcIndex, UTF8Bytes* name) const;
+
+    // The Developer-Facing Display Conventions section of the WebAssembly Web
+    // API spec defines two cases for displaying a wasm function name:
+    //  1. the function name stands alone
+    //  2. the function name precedes the location
+
+    enum NameContext { Standalone, BeforeLocation };
+
+    virtual bool getFuncName(NameContext ctx, const Bytes* maybeBytecode, uint32_t funcIndex,
+                             UTF8Bytes* name) const;
+
+    bool getFuncNameStandalone(const Bytes* maybeBytecode, uint32_t funcIndex, UTF8Bytes* name) const {
+        return getFuncName(NameContext::Standalone, maybeBytecode, funcIndex, name);
+    }
+    bool getFuncNameBeforeLocation(const Bytes* maybeBytecode, uint32_t funcIndex, UTF8Bytes* name) const {
+        return getFuncName(NameContext::BeforeLocation, maybeBytecode, funcIndex, name);
+    }
 
     WASM_DECLARE_SERIALIZABLE_VIRTUAL(Metadata);
 };
@@ -480,7 +500,6 @@ struct MetadataTier
 
     const Tier            tier;
 
-    MemoryAccessVector    memoryAccesses;
     CodeRangeVector       codeRanges;
     CallSiteVector        callSites;
     TrapSiteVectorArray   trapSites;
@@ -573,8 +592,8 @@ class LazyStubTier
     LazyFuncExportVector exports_;
     size_t lastStubSegmentIndex_;
 
-    bool createMany(const Uint32Vector& funcExportIndices, const CodeTier& codeTier,
-                    size_t* stubSegmentIndex);
+    bool createMany(HasGcTypes gcTypesEnabled, const Uint32Vector& funcExportIndices,
+                    const CodeTier& codeTier, size_t* stubSegmentIndex);
 
   public:
     LazyStubTier() : lastStubSegmentIndex_(0) {}
@@ -594,8 +613,8 @@ class LazyStubTier
     // them in a single stub. Jit entries won't be used until
     // setJitEntries() is actually called, after the Code owner has committed
     // tier2.
-    bool createTier2(const Uint32Vector& funcExportIndices, const CodeTier& codeTier,
-                     Maybe<size_t>* stubSegmentIndex);
+    bool createTier2(HasGcTypes gcTypesEnabled, const Uint32Vector& funcExportIndices,
+                     const CodeTier& codeTier, Maybe<size_t>* stubSegmentIndex);
     void setJitEntries(const Maybe<size_t>& stubSegmentIndex, const Code& code);
 
     void addSizeOfMisc(MallocSizeOf mallocSizeOf, size_t* code, size_t* data) const;
@@ -773,7 +792,6 @@ class Code : public ShareableBase<Code>
 
     const CallSite* lookupCallSite(void* returnAddress) const;
     const CodeRange* lookupFuncRange(void* pc) const;
-    const MemoryAccess* lookupMemoryAccess(void* pc) const;
     bool containsCodePC(const void* pc) const;
     bool lookupTrap(void* pc, Trap* trap, BytecodeOffset* bytecode) const;
 

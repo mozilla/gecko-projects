@@ -75,6 +75,7 @@ const int kNumFPURegisters = 32;
 const int kFCSRRegister = 31;
 const int kInvalidFPUControlRegister = -1;
 const uint32_t kFPUInvalidResult = static_cast<uint32_t>(1 << 31) - 1;
+const uint64_t kFPUInvalidResult64 = static_cast<uint64_t>(1ULL << 63) - 1;
 
 // FCSR constants.
 const uint32_t kFCSRInexactFlagBit = 2;
@@ -197,6 +198,7 @@ class Simulator {
     double getFpuRegisterDouble(int fpureg) const;
     void setFCSRBit(uint32_t cc, bool value);
     bool testFCSRBit(uint32_t cc);
+    template <typename T>
     bool setFCSRRoundError(double original, double rounded);
 
     // Special case of set_register and get_register to access the raw PC value.
@@ -420,12 +422,6 @@ class SimulatorProcess
 
     static mozilla::Atomic<size_t, mozilla::ReleaseAcquire> ICacheCheckingDisableCount;
     static void FlushICache(void* start, size_t size);
-
-    // Jitcode may be rewritten from a signal handler, but is prevented from
-    // calling FlushICache() because the signal may arrive within the critical
-    // area of an AutoLockSimulatorCache. This flag instructs the Simulator
-    // to remove all cache entries the next time it checks, avoiding false negatives.
-    static mozilla::Atomic<bool, mozilla::ReleaseAcquire> cacheInvalidatedBySignalHandler_;
 
     static void checkICacheLocked(SimInstruction* instr);
 

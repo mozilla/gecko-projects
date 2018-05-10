@@ -60,11 +60,10 @@ let searchIcon;
 let goButton;
 
 add_task(async function init() {
-  await SpecialPowers.pushPrefEnv({ set: [
-    ["browser.search.widget.inNavBar", true],
-  ]});
-
-  searchbar = document.getElementById("searchbar");
+  searchbar = await gCUITestUtils.addSearchBar();
+  registerCleanupFunction(() => {
+    gCUITestUtils.removeSearchBar();
+  });
   textbox = searchbar._textbox;
   searchIcon = document.getAnonymousElementByAttribute(
     searchbar, "anonid", "searchbar-search-button"
@@ -91,19 +90,7 @@ add_task(async function init() {
                                              value};
                                    });
     searchbar.FormHistory.update(addOps, {
-      handleCompletion() {
-        registerCleanupFunction(() => {
-          info("removing search history values: " + kValues);
-          let removeOps =
-            kValues.map(value => {
- return {op: "remove",
-                                           fieldname: "searchbar-history",
-                                           value};
-                                 });
-          searchbar.FormHistory.update(removeOps);
-        });
-        resolve();
-      },
+      handleCompletion: resolve,
       handleError: reject
     });
   });
@@ -570,7 +557,7 @@ add_task(async function dont_open_in_customization() {
     sawPopup = true;
   }
   searchPopup.addEventListener("popupshowing", listener);
-  await PanelUI.show();
+  await gCUITestUtils.openMainMenu();
   promise =  promiseEvent(searchPopup, "popuphidden");
   await startCustomizing();
   await promise;
@@ -580,4 +567,12 @@ add_task(async function dont_open_in_customization() {
 
   await endCustomizing();
   textbox.value = "";
+});
+
+add_task(async function cleanup() {
+  info("removing search history values: " + kValues);
+  let removeOps = kValues.map(value => {
+    return {op: "remove", fieldname: "searchbar-history", value};
+  });
+  searchbar.FormHistory.update(removeOps);
 });

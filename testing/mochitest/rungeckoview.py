@@ -39,7 +39,7 @@ class GeckoviewOptions(OptionParser):
                         help="serial ID of remote device to test")
         self.add_option("--adbpath",
                         action="store", type="string", dest="adbPath",
-                        default="adb",
+                        default=None,
                         help="Path to adb binary.")
         self.add_option("--remoteTestRoot",
                         action="store", type="string", dest="remoteTestRoot",
@@ -56,7 +56,7 @@ class GeckoviewTestRunner:
 
     def __init__(self, log, options):
         self.log = log
-        self.device = ADBAndroid(adb=options.adbPath,
+        self.device = ADBAndroid(adb=options.adbPath or 'adb',
                                  device=options.deviceSerial,
                                  test_root=options.remoteTestRoot)
         self.options = options
@@ -102,8 +102,9 @@ class GeckoviewTestRunner:
             env["R_LOG_VERBOSE"] = "1"
             env["R_LOG_LEVEL"] = "6"
             env["R_LOG_DESTINATION"] = "stderr"
-            self.device.launch_geckoview_example("org.mozilla.geckoview_example",
-                                                 extra_args=args, moz_env=env)
+            self.device.launch_activity("org.mozilla.geckoview_example",
+                                        "GeckoViewActivity",
+                                        extra_args=args, moz_env=env)
         except Exception:
             return (False, "Exception during %s startup" % self.appname)
         return (True, "%s started" % self.appname)
@@ -146,9 +147,9 @@ class GeckoviewTestRunner:
             expected = 'PASS'
             (passed, message) = test()
             if passed:
-                pass_count = pass_count + 1
+                pass_count += 1
             else:
-                fail_count = fail_count + 1
+                fail_count += 1
             status = 'PASS' if passed else 'FAIL'
 
             self.log.test_end(self.test_name, status, expected, message)
@@ -194,7 +195,7 @@ class GeckoviewTestRunner:
             try:
                 shutil.rmtree(dump_dir)
             except Exception:
-                self.log.warn("unable to remove directory: %s" % dump_dir)
+                self.log.warning("unable to remove directory: %s" % dump_dir)
         return crashed
 
     def cleanup(self):
@@ -225,7 +226,7 @@ def run_test_harness(log, parser, options):
             runner.cleanup()
         except Exception:
             # ignore device error while cleaning up
-            pass
+            traceback.print_exc()
     return result
 
 

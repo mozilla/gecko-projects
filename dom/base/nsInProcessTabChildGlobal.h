@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "nsCOMPtr.h"
 #include "nsFrameMessageManager.h"
@@ -17,7 +18,6 @@
 #include "nsIScriptContext.h"
 #include "nsIClassInfo.h"
 #include "nsIDocShell.h"
-#include "nsIDOMElement.h"
 #include "nsCOMArray.h"
 #include "nsIRunnable.h"
 #include "nsIGlobalObject.h"
@@ -28,24 +28,40 @@ namespace mozilla {
 class EventChainPreVisitor;
 } // namespace mozilla
 
-class nsInProcessTabChildGlobal : public mozilla::dom::ContentFrameMessageManager,
-                                  public nsMessageManagerScriptExecutor,
-                                  public nsIInProcessContentFrameMessageManager,
-                                  public nsIGlobalObject,
-                                  public nsIScriptObjectPrincipal,
-                                  public nsSupportsWeakReference,
-                                  public mozilla::dom::ipc::MessageManagerCallback
+class nsInProcessTabChildGlobal final : public mozilla::dom::ContentFrameMessageManager,
+                                        public nsMessageManagerScriptExecutor,
+                                        public nsIInProcessContentFrameMessageManager,
+                                        public nsIGlobalObject,
+                                        public nsIScriptObjectPrincipal,
+                                        public nsSupportsWeakReference,
+                                        public mozilla::dom::ipc::MessageManagerCallback
 {
   typedef mozilla::dom::ipc::StructuredCloneData StructuredCloneData;
 
-  using mozilla::dom::ipc::MessageManagerCallback::GetProcessMessageManager;
-
-public:
+private:
   nsInProcessTabChildGlobal(nsIDocShell* aShell, nsIContent* aOwner,
                             nsFrameMessageManager* aChrome);
+
+  bool Init();
+
+public:
+  static already_AddRefed<nsInProcessTabChildGlobal> Create(nsIDocShell* aShell,
+                                                            nsIContent* aOwner,
+                                                            nsFrameMessageManager* aChrome)
+  {
+    RefPtr<nsInProcessTabChildGlobal> global =
+      new nsInProcessTabChildGlobal(aShell, aOwner, aChrome);
+
+    NS_ENSURE_TRUE(global->Init(), nullptr);
+
+    return global.forget();
+  }
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(nsInProcessTabChildGlobal,
                                                          mozilla::DOMEventTargetHelper)
+
+  void MarkForCC();
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override
@@ -66,13 +82,12 @@ public:
   }
   virtual already_AddRefed<nsIEventTarget> GetTabEventTarget() override;
 
-  NS_FORWARD_SAFE_NSIMESSAGELISTENERMANAGER(mMessageManager)
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
-  NS_FORWARD_SAFE_NSISYNCMESSAGESENDER(mMessageManager);
-  NS_FORWARD_SAFE_NSIMESSAGEMANAGERGLOBAL(mMessageManager)
   NS_DECL_NSICONTENTFRAMEMESSAGEMANAGER
 
   NS_DECL_NSIINPROCESSCONTENTFRAMEMESSAGEMANAGER
+
+  void CacheFrameLoader(nsFrameLoader* aFrameLoader);
 
   /**
    * MessageManagerCallback methods that we override.
@@ -90,8 +105,7 @@ public:
                                       JS::Handle<JSObject *> aCpows,
                                       nsIPrincipal* aPrincipal) override;
 
-  virtual nsresult GetEventTargetParent(
-                     mozilla::EventChainPreVisitor& aVisitor) override;
+  void GetEventTargetParent(mozilla::EventChainPreVisitor& aVisitor) override;
 
   virtual nsIPrincipal* GetPrincipal() override { return mPrincipal; }
   void LoadFrameScript(const nsAString& aURL, bool aRunInGlobalScope);
@@ -126,10 +140,7 @@ public:
 protected:
   virtual ~nsInProcessTabChildGlobal();
 
-  nsresult Init();
-  nsresult InitTabChildGlobal();
   nsCOMPtr<nsIDocShell> mDocShell;
-  bool mInitialized;
   bool mLoadingScript;
 
   // Is this the message manager for an in-process <iframe mozbrowser>? This

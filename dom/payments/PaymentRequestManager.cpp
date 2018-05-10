@@ -374,7 +374,7 @@ PaymentRequestManager::GetPaymentRequestById(const nsAString& aRequestId)
 }
 
 void
-GetSelectedShippingOption(const PaymentDetailsInit& aDetails,
+GetSelectedShippingOption(const PaymentDetailsBase& aDetails,
                           nsAString& aOption)
 {
   SetDOMStringToNull(aOption);
@@ -467,7 +467,8 @@ PaymentRequestManager::CreatePayment(JSContext* aCx,
                                        IPC::Principal(aTopLevelPrincipal),
                                        methodData,
                                        details,
-                                       options);
+                                       options,
+				       shippingOption);
 
   rv = SendRequestPayment(request, action, true);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -502,10 +503,12 @@ PaymentRequestManager::ShowPayment(const nsAString& aRequestId)
   if (!request) {
     return NS_ERROR_FAILURE;
   }
-
-  nsAutoString requestId(aRequestId);
-  IPCPaymentShowActionRequest action(requestId);
-  nsresult rv = SendRequestPayment(request, action);
+  nsresult rv = NS_OK;
+  if (!request->IsUpdating()) {
+    nsAutoString requestId(aRequestId);
+    IPCPaymentShowActionRequest action(requestId);
+    rv = SendRequestPayment(request, action);
+  }
   mShowingRequest = request;
   return rv;
 }
@@ -557,21 +560,21 @@ PaymentRequestManager::UpdatePayment(JSContext* aCx,
   if (!request) {
     return NS_ERROR_UNEXPECTED;
   }
-
-  // [TODO] Process details.shippingOptions if presented.
-  //        1) Check if there are duplicate IDs in details.shippingOptions,
-  //           if so, reset details.shippingOptions to an empty sequence.
-  //        2) Set request's selectedShippingOption to the ID of last selected
-  //           option.
-
   IPCPaymentDetails details;
   nsresult rv = ConvertDetailsUpdate(aCx, aDetails, details, aRequestShipping);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
+  nsAutoString shippingOption;
+  SetDOMStringToNull(shippingOption);
+  if (aRequestShipping) {
+    GetSelectedShippingOption(aDetails, shippingOption);
+    request->SetShippingOption(shippingOption);
+  }
+
   nsAutoString requestId(aRequestId);
-  IPCPaymentUpdateActionRequest action(requestId, details);
+  IPCPaymentUpdateActionRequest action(requestId, details, shippingOption);
   return SendRequestPayment(request, action);
 }
 
@@ -643,12 +646,12 @@ PaymentRequestManager::RespondPayment(const IPCPaymentActionResponse& aResponse)
       request->RespondAbortPayment(response.isSucceeded());
       if (response.isSucceeded()) {
         MOZ_ASSERT(mShowingRequest == request);
-        mShowingRequest = nullptr;
         mRequestQueue.RemoveElement(request);
-        nsresult rv = ReleasePaymentChild(request);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return rv;
-        }
+      }
+      mShowingRequest = nullptr;
+      nsresult rv = ReleasePaymentChild(request);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
       }
       break;
     }

@@ -835,12 +835,12 @@ EventSourceImpl::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
     return NS_ERROR_ABORT;
   }
   nsCOMPtr<nsIRequest> aOldRequest = do_QueryInterface(aOldChannel);
-  NS_PRECONDITION(aOldRequest, "Redirect from a null request?");
+  MOZ_ASSERT(aOldRequest, "Redirect from a null request?");
 
   nsresult rv = CheckHealthOfRequestCallback(aOldRequest);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  NS_PRECONDITION(aNewChannel, "Redirect without a channel?");
+  MOZ_ASSERT(aNewChannel, "Redirect without a channel?");
 
   nsCOMPtr<nsIURI> newURI;
   rv = NS_GetFinalChannelURI(aNewChannel, getter_AddRefs(newURI));
@@ -1331,7 +1331,11 @@ EventSourceImpl::DispatchFailConnection()
                                   this,
                                   &EventSourceImpl::FailConnection),
                 NS_DISPATCH_NORMAL);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // if the worker is shutting down, the dispatching of normal WorkerRunnables
+    // fails.
+    return;
+  }
 }
 
 void
@@ -1369,8 +1373,7 @@ EventSourceImpl::TimerCallback(nsITimer* aTimer, void* aClosure)
     return;
   }
 
-  NS_PRECONDITION(!thisObject->mHttpChannel,
-                  "the channel hasn't been cancelled!!");
+  MOZ_ASSERT(!thisObject->mHttpChannel, "the channel hasn't been cancelled!!");
 
   if (!thisObject->IsFrozen()) {
     nsresult rv = thisObject->InitChannelAndRequestEventSource();
@@ -1450,11 +1453,7 @@ EventSourceImpl::DispatchCurrentMessageEvent()
     message->mLastEventID.Assign(mLastEventID);
   }
 
-  size_t sizeBefore = mMessagesToDispatch.GetSize();
   mMessagesToDispatch.Push(message.release());
-  NS_ENSURE_TRUE(mMessagesToDispatch.GetSize() == sizeBefore + 1,
-                 NS_ERROR_OUT_OF_MEMORY);
-
 
   if (!mGoingToDispatchAllMessages) {
     nsCOMPtr<nsIRunnable> event =
@@ -1524,9 +1523,9 @@ EventSourceImpl::DispatchAllMessageEvents()
                             Sequence<OwningNonNull<MessagePort>>());
     event->SetTrusted(true);
 
-    bool dummy;
-    rv = mEventSource->DispatchEvent(static_cast<Event*>(event), &dummy);
-    if (NS_FAILED(rv)) {
+    IgnoredErrorResult err;
+    mEventSource->DispatchEvent(*event, err);
+    if (err.Failed()) {
       NS_WARNING("Failed to dispatch the message event!!!");
       return;
     }
@@ -1946,8 +1945,9 @@ EventSource::CreateAndDispatchSimpleEvent(const nsAString& aName)
   // it doesn't bubble, and it isn't cancelable
   event->InitEvent(aName, false, false);
   event->SetTrusted(true);
-  bool dummy;
-  return DispatchEvent(event, &dummy);
+  ErrorResult rv;
+  DispatchEvent(*event, rv);
+  return rv.StealNSResult();
 }
 
 /* static */ already_AddRefed<EventSource>

@@ -27,7 +27,6 @@ const COLOR_SWATCH_CLASS = "ruleview-colorswatch";
 const BEZIER_SWATCH_CLASS = "ruleview-bezierswatch";
 const FILTER_SWATCH_CLASS = "ruleview-filterswatch";
 const ANGLE_SWATCH_CLASS = "ruleview-angleswatch";
-const INSET_POINT_TYPES = ["top", "right", "bottom", "left"];
 const FONT_FAMILY_CLASS = "ruleview-font-family";
 const SHAPE_SWATCH_CLASS = "ruleview-shapeswatch";
 
@@ -85,18 +84,18 @@ function TextPropertyEditor(ruleEditor, property) {
   const toolbox = this.ruleView.inspector.toolbox;
   this.cssProperties = getCssProperties(toolbox);
 
+  this.getGridlineNames = this.getGridlineNames.bind(this);
+  this.update = this.update.bind(this);
+  this.updatePropertyState = this.updatePropertyState.bind(this);
   this._onEnableClicked = this._onEnableClicked.bind(this);
   this._onExpandClicked = this._onExpandClicked.bind(this);
-  this._onStartEditing = this._onStartEditing.bind(this);
   this._onNameDone = this._onNameDone.bind(this);
-  this._onValueDone = this._onValueDone.bind(this);
+  this._onStartEditing = this._onStartEditing.bind(this);
   this._onSwatchCommit = this._onSwatchCommit.bind(this);
   this._onSwatchPreview = this._onSwatchPreview.bind(this);
   this._onSwatchRevert = this._onSwatchRevert.bind(this);
   this._onValidate = this.ruleView.debounce(this._previewValue, 10, this);
-  this.update = this.update.bind(this);
-  this.updatePropertyState = this.updatePropertyState.bind(this);
-  this._onHoverShapePoint = this._onHoverShapePoint.bind(this);
+  this._onValueDone = this._onValueDone.bind(this);
 
   this._create();
   this.update();
@@ -299,7 +298,7 @@ TextPropertyEditor.prototype = {
           event.stopPropagation();
           event.preventDefault();
           let browserWin = this.ruleView.inspector.target.tab.ownerDocument.defaultView;
-          browserWin.openUILinkIn(target.href, "tab");
+          browserWin.openWebLinkIn(target.href, "tab");
         }
       });
 
@@ -318,10 +317,40 @@ TextPropertyEditor.prototype = {
         maxWidth: () => this.container.getBoundingClientRect().width,
         cssProperties: this.cssProperties,
         cssVariables: this.rule.elementStyle.variables,
+        getGridLineNames: this.getGridlineNames,
       });
-
-      this.ruleView.highlighters.on("hover-shape-point", this._onHoverShapePoint);
     }
+  },
+
+  /**
+   * Get the grid line names of the grid that the currently selected element is
+   * contained in.
+   *
+   * @return {Object} Contains the names of the cols and rows as arrays
+   * {cols: [], rows: []}.
+   */
+  getGridlineNames: async function() {
+    let gridLineNames = {cols: [], rows: []};
+    let layoutInspector = await this.ruleView.inspector.walker.getLayoutInspector();
+    let gridFront = await layoutInspector.getCurrentGrid(
+      this.ruleView.inspector.selection.nodeFront);
+
+    if (gridFront) {
+      let gridFragments = gridFront.gridFragments;
+
+      for (let gridFragment of gridFragments) {
+        for (let rowLine of gridFragment.rows.lines) {
+          gridLineNames.rows = gridLineNames.rows.concat(rowLine.names);
+        }
+        for (let colLine of gridFragment.cols.lines) {
+          gridLineNames.cols = gridLineNames.cols.concat(colLine.names);
+        }
+      }
+    }
+
+    // Emit message for test files
+    this.ruleView.inspector.emit("grid-line-names-updated");
+    return gridLineNames;
   },
 
   /**
@@ -515,13 +544,6 @@ TextPropertyEditor.prototype = {
         return s[0].toUpperCase() + s.slice(1);
       }).join("");
       shapeToggle.setAttribute("data-mode", mode);
-
-      let { highlighters, inspector } = this.ruleView;
-      if (highlighters.shapesHighlighterShown === inspector.selection.nodeFront &&
-          highlighters.state.shapes.options.mode === mode) {
-        shapeToggle.classList.add("active");
-        highlighters.highlightRuleViewShapePoint(highlighters.state.shapes.hoverPoint);
-      }
     }
 
     // Now that we have updated the property's value, we might have a pending
@@ -571,6 +593,10 @@ TextPropertyEditor.prototype = {
       this.enable.style.visibility = "visible";
       this.enable.removeAttribute("checked");
     }
+
+    this.warning.title = !this.isNameValid()
+      ? l10n("rule.warningName.title")
+      : l10n("rule.warning.title");
 
     this.warning.hidden = this.editing || this.isValid();
     this.filterProperty.hidden = this.editing ||
@@ -1008,10 +1034,18 @@ TextPropertyEditor.prototype = {
    * Validate this property. Does it make sense for this value to be assigned
    * to this property name? This does not apply the property value
    *
-   * @return {Boolean} true if the property value is valid, false otherwise.
+   * @return {Boolean} true if the property name + value pair is valid, false otherwise.
    */
   isValid: function() {
     return this.prop.isValid();
+  },
+
+  /**
+   * Validate the name of this property.
+   * @return {Boolean} true if the property name is valid, false otherwise.
+   */
+  isNameValid: function() {
+    return this.prop.isNameValid();
   },
 
   /**
@@ -1032,67 +1066,6 @@ TextPropertyEditor.prototype = {
   isDisplayGrid: function() {
     return this.prop.name === "display" &&
       (this.prop.value === "grid" || this.prop.value === "inline-grid");
-  },
-
-  /**
-   * Highlight the given shape point in the rule view. Called when "hover-shape-point"
-   * event is emitted.
-   *
-   * @param {Event} event
-   *        The "hover-shape-point" event.
-   * @param {String} point
-   *        The point to highlight.
-   */
-  _onHoverShapePoint: function(point) {
-    // If there is no shape toggle, or it is not active, return.
-    let shapeToggle = this.valueSpan.querySelector(".ruleview-shapeswatch.active");
-    if (!shapeToggle) {
-      return;
-    }
-
-    let view = this.ruleView;
-    let { highlighters } = view;
-    let ruleViewEl = view.element;
-    let selector = `.ruleview-shape-point.active`;
-    for (let pointNode of ruleViewEl.querySelectorAll(selector)) {
-      this._toggleShapePointActive(pointNode, false);
-    }
-
-    if (typeof point === "string") {
-      if (point.includes(",")) {
-        point = point.split(",")[0];
-      }
-      // Because one inset value can represent multiple points, inset points use classes
-      // instead of data.
-      selector = (INSET_POINT_TYPES.includes(point)) ?
-                 `.ruleview-shape-point.${point}` :
-                 `.ruleview-shape-point[data-point='${point}']`;
-      for (let pointNode of this.valueSpan.querySelectorAll(selector)) {
-        let nodeInfo = view.getNodeInfo(pointNode);
-        if (highlighters.isRuleViewShapePoint(nodeInfo)) {
-          this._toggleShapePointActive(pointNode, true);
-        }
-      }
-    }
-  },
-
-  /**
-   * Toggle the class "active" on the given shape point in the rule view if the current
-   * inspector selection is highlighted by the shapes highlighter.
-   *
-   * @param {NodeFront} node
-   *        The NodeFront of the shape point to toggle
-   * @param {Boolean} active
-   *        Whether the shape point should be active
-   */
-  _toggleShapePointActive: function(node, active) {
-    let { highlighters } = this.ruleView;
-    if (highlighters.inspector.selection.nodeFront !=
-        highlighters.shapesHighlighterShown) {
-      return;
-    }
-
-    node.classList.toggle("active", active);
   },
 };
 

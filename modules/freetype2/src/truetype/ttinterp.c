@@ -2165,7 +2165,7 @@
       val = ADD_LONG( distance,
                       exc->threshold - exc->phase + compensation ) &
               -exc->period;
-      val += exc->phase;
+      val = ADD_LONG( val, exc->phase );
       if ( val < 0 )
         val = exc->phase;
     }
@@ -2174,7 +2174,7 @@
       val = NEG_LONG( SUB_LONG( exc->threshold - exc->phase + compensation,
                                 distance ) &
                         -exc->period );
-      val -= exc->phase;
+      val = SUB_LONG( val, exc->phase );
       if ( val > 0 )
         val = -exc->phase;
     }
@@ -2216,7 +2216,7 @@
       val = ( ADD_LONG( distance,
                         exc->threshold - exc->phase + compensation ) /
                 exc->period ) * exc->period;
-      val += exc->phase;
+      val = ADD_LONG( val, exc->phase );
       if ( val < 0 )
         val = exc->phase;
     }
@@ -2225,7 +2225,7 @@
       val = NEG_LONG( ( SUB_LONG( exc->threshold - exc->phase + compensation,
                                   distance ) /
                           exc->period ) * exc->period );
-      val -= exc->phase;
+      val = SUB_LONG( val, exc->phase );
       if ( val > 0 )
         val = -exc->phase;
     }
@@ -2954,7 +2954,7 @@
   static void
   Ins_CEILING( FT_Long*  args )
   {
-    args[0] = FT_PIX_CEIL( args[0] );
+    args[0] = FT_PIX_CEIL_LONG( args[0] );
   }
 
 
@@ -3289,7 +3289,10 @@
     if ( args[0] < 0 )
       exc->error = FT_THROW( Bad_Argument );
     else
-      exc->GS.loop = args[0];
+    {
+      /* we heuristically limit the number of loops to 16 bits */
+      exc->GS.loop = args[0] > 0xFFFFL ? 0xFFFFL : args[0];
+    }
   }
 
 
@@ -5874,16 +5877,18 @@
       if ( SUBPIXEL_HINTING_INFINALITY &&
            exc->ignore_x_mode          &&
            exc->GS.freeVector.x != 0   )
-        distance = Round_None(
-                     exc,
-                     cur_dist,
-                     exc->tt_metrics.compensations[0] ) - cur_dist;
+        distance = SUB_LONG(
+                     Round_None( exc,
+                                 cur_dist,
+                                 exc->tt_metrics.compensations[0] ),
+                     cur_dist );
       else
 #endif
-        distance = exc->func_round(
-                     exc,
-                     cur_dist,
-                     exc->tt_metrics.compensations[0] ) - cur_dist;
+        distance = SUB_LONG(
+                     exc->func_round( exc,
+                                      cur_dist,
+                                      exc->tt_metrics.compensations[0] ),
+                     cur_dist );
     }
     else
       distance = 0;
@@ -6188,7 +6193,7 @@
     minimum_distance    = exc->GS.minimum_distance;
     control_value_cutin = exc->GS.control_value_cutin;
     point               = (FT_UShort)args[0];
-    cvtEntry            = (FT_ULong)( args[1] + 1 );
+    cvtEntry            = (FT_ULong)( ADD_LONG( args[1], 1 ) );
 
 #ifdef TT_SUPPORT_SUBPIXEL_HINTING_INFINALITY
     if ( SUBPIXEL_HINTING_INFINALITY                        &&
@@ -8521,8 +8526,8 @@
 
   LNo_Error_:
     FT_TRACE4(( "  %d instruction%s executed\n",
-                ins_counter == 1 ? "" : "s",
-                ins_counter ));
+                ins_counter,
+                ins_counter == 1 ? "" : "s" ));
     return FT_Err_Ok;
 
   LErrorCodeOverflow_:

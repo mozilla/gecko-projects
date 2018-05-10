@@ -30,7 +30,6 @@
 
 #include "nsDOMMutationObserver.h"
 #include "nsICycleCollectorListener.h"
-#include "mozilla/XPTInterfaceInfoManager.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsScriptSecurityManager.h"
@@ -97,6 +96,7 @@ nsXPConnect::~nsXPConnect()
 
     mShuttingDown = true;
     XPCWrappedNativeScope::SystemIsBeingShutDown();
+    mRuntime->SystemIsBeingShutDown();
 
     // The above causes us to clean up a bunch of XPConnect data structures,
     // after which point we need to GC to clean everything up. We need to do
@@ -177,12 +177,9 @@ nsXPConnect::GetRuntimeInstance()
 
 // static
 bool
-nsXPConnect::IsISupportsDescendant(nsIInterfaceInfo* info)
+nsXPConnect::IsISupportsDescendant(const nsXPTInterfaceInfo* info)
 {
-    bool found = false;
-    if (info)
-        info->HasAncestor(&NS_GET_IID(nsISupports), &found);
-    return found;
+    return info && info->HasAncestor(NS_GET_IID(nsISupports));
 }
 
 void
@@ -399,12 +396,6 @@ xpc::ErrorReport::ErrorReportToMessageString(JSErrorReport* aReport,
 
 /***************************************************************************/
 
-
-nsresult
-nsXPConnect::GetInfoForIID(const nsIID * aIID, nsIInterfaceInfo** info)
-{
-  return XPTInterfaceInfoManager::GetSingleton()->GetInfoForIID(aIID, info);
-}
 
 void
 xpc_TryUnmarkWrappedGrayObject(nsISupports* aWrappedJS)
@@ -681,7 +672,7 @@ nsXPConnect::JSValToVariant(JSContext* cx,
                             HandleValue aJSVal,
                             nsIVariant** aResult)
 {
-    NS_PRECONDITION(aResult, "bad param");
+    MOZ_ASSERT(aResult, "bad param");
 
     RefPtr<XPCVariant> variant = XPCVariant::newVariant(cx, aJSVal);
     variant.forget(aResult);
@@ -756,16 +747,6 @@ xpc::UnwrapReflectorToISupports(JSObject* reflector)
     nsCOMPtr<nsISupports> canonical =
         do_QueryInterface(mozilla::dom::UnwrapDOMObjectToISupports(reflector));
     return canonical.forget();
-}
-
-NS_IMETHODIMP
-nsXPConnect::SetFunctionThisTranslator(const nsIID & aIID,
-                                       nsIXPCFunctionThisTranslator* aTranslator)
-{
-    XPCJSRuntime* rt = GetRuntimeInstance();
-    IID2ThisTranslatorMap* map = rt->GetThisTranslatorMap();
-    map->Add(aIID, aTranslator);
-    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -903,9 +884,9 @@ NS_IMETHODIMP
 nsXPConnect::VariantToJS(JSContext* ctx, JSObject* scopeArg, nsIVariant* value,
                          MutableHandleValue _retval)
 {
-    NS_PRECONDITION(ctx, "bad param");
-    NS_PRECONDITION(scopeArg, "bad param");
-    NS_PRECONDITION(value, "bad param");
+    MOZ_ASSERT(ctx, "bad param");
+    MOZ_ASSERT(scopeArg, "bad param");
+    MOZ_ASSERT(value, "bad param");
 
     RootedObject scope(ctx, scopeArg);
     MOZ_ASSERT(js::IsObjectInContextCompartment(scope, ctx));
@@ -923,8 +904,8 @@ nsXPConnect::VariantToJS(JSContext* ctx, JSObject* scopeArg, nsIVariant* value,
 NS_IMETHODIMP
 nsXPConnect::JSToVariant(JSContext* ctx, HandleValue value, nsIVariant** _retval)
 {
-    NS_PRECONDITION(ctx, "bad param");
-    NS_PRECONDITION(_retval, "bad param");
+    MOZ_ASSERT(ctx, "bad param");
+    MOZ_ASSERT(_retval, "bad param");
 
     RefPtr<XPCVariant> variant = XPCVariant::newVariant(ctx, value);
     variant.forget(_retval);

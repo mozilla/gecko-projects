@@ -20,6 +20,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/DataTransfer.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/dom/MessageManagerBinding.h"
 #include "mozilla/dom/MouseEventBinding.h"
@@ -70,7 +71,6 @@
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsFocusManager.h"
@@ -244,7 +244,8 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
     // content manipulate the frame state.
     RefPtr<nsFrameMessageManager> mm = mTabChildGlobal->GetMessageManager();
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
-                       aMessageName, false, &data, nullptr, nullptr, nullptr);
+                       aMessageName, false, &data, nullptr, nullptr, nullptr,
+                       IgnoreErrors());
 }
 
 bool
@@ -283,10 +284,10 @@ TabChildBase::ProcessUpdateFrame(const FrameMetrics& aFrameMetrics)
 }
 
 NS_IMETHODIMP
-ContentListener::HandleEvent(nsIDOMEvent* aEvent)
+ContentListener::HandleEvent(Event* aEvent)
 {
   RemoteDOMEvent remoteEvent;
-  remoteEvent.mEvent = do_QueryInterface(aEvent);
+  remoteEvent.mEvent = aEvent;
   NS_ENSURE_STATE(remoteEvent.mEvent);
   mTabChild->SendEvent(remoteEvent);
   return NS_OK;
@@ -406,7 +407,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mChromeFlags(aChromeFlags)
   , mMaxTouchPoints(0)
   , mActiveSuppressDisplayport(0)
-  , mLayersId(0)
+  , mLayersId{0}
   , mBeforeUnloadListeners(0)
   , mDidFakeShow(false)
   , mNotified(false)
@@ -1092,16 +1093,16 @@ TabChild::DestroyWindow()
     }
 
 
-    if (mLayersId != 0) {
+    if (mLayersId.IsValid()) {
       StaticMutexAutoLock lock(sTabChildrenMutex);
 
       MOZ_ASSERT(sTabChildren);
-      sTabChildren->Remove(mLayersId);
+      sTabChildren->Remove(uint64_t(mLayersId));
       if (!sTabChildren->Count()) {
         delete sTabChildren;
         sTabChildren = nullptr;
       }
-      mLayersId = 0;
+      mLayersId = layers::LayersId{0};
     }
 }
 
@@ -1185,7 +1186,7 @@ TabChild::RecvLoadURL(const nsCString& aURI,
 
 void
 TabChild::DoFakeShow(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
-                     const uint64_t& aLayersId,
+                     const layers::LayersId& aLayersId,
                      const CompositorOptions& aCompositorOptions,
                      PRenderFrameChild* aRenderFrame, const ShowInfo& aShowInfo)
 {
@@ -1281,7 +1282,7 @@ TabChild::RecvShow(const ScreenIntSize& aSize,
 
 mozilla::ipc::IPCResult
 TabChild::RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
-                            const uint64_t& aLayersId,
+                            const layers::LayersId& aLayersId,
                             const CompositorOptions& aCompositorOptions,
                             const bool& aLayersConnected,
                             PRenderFrameChild* aRenderFrame)
@@ -1494,6 +1495,12 @@ TabChild::ZoomToRect(const uint32_t& aPresShellId,
 mozilla::ipc::IPCResult
 TabChild::RecvActivate()
 {
+  // Ensure that the PresShell exists, otherwise focusing
+  // is definitely not going to work. GetPresShell should
+  // create a PresShell if one doesn't exist yet.
+  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  MOZ_ASSERT(presShell);
+
   nsCOMPtr<nsIWebBrowserFocus> browser = do_QueryInterface(WebNavigation());
   browser->Activate();
   return IPC_OK();
@@ -2329,7 +2336,8 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
   StructuredCloneData data;
   UnpackClonedMessageDataForChild(aData, data);
   mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
-                     aMessage, false, &data, &cpows, aPrincipal, nullptr);
+                     aMessage, false, &data, &cpows, aPrincipal, nullptr,
+                     IgnoreErrors());
   return IPC_OK();
 }
 
@@ -2685,7 +2693,7 @@ TabChild::RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNaviga
 {
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    nsCOMPtr<nsIDOMElement> result;
+    RefPtr<Element> result;
     nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
 
     // Move to the first or last document.
@@ -2776,7 +2784,7 @@ TabChild::InitTabChildGlobal()
 
 void
 TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
-                             const uint64_t& aLayersId,
+                             const layers::LayersId& aLayersId,
                              const CompositorOptions& aCompositorOptions,
                              PRenderFrameChild* aRenderFrame)
 {
@@ -2788,7 +2796,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       return;
     }
 
-    MOZ_ASSERT(aLayersId != 0);
+    MOZ_ASSERT(aLayersId.IsValid());
     mTextureFactoryIdentifier = aTextureFactoryIdentifier;
 
     // Pushing layers transactions directly to a separate
@@ -2803,14 +2811,14 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
     mCompositorOptions = Some(aCompositorOptions);
 
     mRemoteFrame = static_cast<RenderFrameChild*>(aRenderFrame);
-    if (aLayersId != 0) {
+    if (aLayersId.IsValid()) {
       StaticMutexAutoLock lock(sTabChildrenMutex);
 
       if (!sTabChildren) {
         sTabChildren = new TabChildMap;
       }
-      MOZ_ASSERT(!sTabChildren->Get(aLayersId));
-      sTabChildren->Put(aLayersId, this);
+      MOZ_ASSERT(!sTabChildren->Get(uint64_t(aLayersId)));
+      sTabChildren->Put(uint64_t(aLayersId), this);
       mLayersId = aLayersId;
     }
 
@@ -2859,7 +2867,7 @@ TabChild::CreateRemoteLayerManager(mozilla::layers::PCompositorBridgeChild* aCom
     });
   } else {
     nsTArray<LayersBackend> ignored;
-    PLayerTransactionChild* shadowManager = aCompositorChild->SendPLayerTransactionConstructor(ignored, LayersId());
+    PLayerTransactionChild* shadowManager = aCompositorChild->SendPLayerTransactionConstructor(ignored, GetLayersId());
     if (shadowManager &&
         shadowManager->SendGetTextureFactoryIdentifier(&mTextureFactoryIdentifier) &&
         mTextureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_NONE)
@@ -3123,17 +3131,17 @@ TabChild::GetFrom(nsIPresShell* aPresShell)
 }
 
 TabChild*
-TabChild::GetFrom(uint64_t aLayersId)
+TabChild::GetFrom(layers::LayersId aLayersId)
 {
   StaticMutexAutoLock lock(sTabChildrenMutex);
   if (!sTabChildren) {
     return nullptr;
   }
-  return sTabChildren->Get(aLayersId);
+  return sTabChildren->Get(uint64_t(aLayersId));
 }
 
 void
-TabChild::DidComposite(uint64_t aTransactionId,
+TabChild::DidComposite(mozilla::layers::TransactionId aTransactionId,
                        const TimeStamp& aCompositeStart,
                        const TimeStamp& aCompositeEnd)
 {
@@ -3193,7 +3201,7 @@ TabChild::InvalidateLayers()
 void
 TabChild::ReinitRendering()
 {
-  MOZ_ASSERT(mLayersId);
+  MOZ_ASSERT(mLayersId.IsValid());
 
   // Before we establish a new PLayerTransaction, we must connect our layer tree
   // id, CompositorBridge, and the widget compositor all together again.
@@ -3532,9 +3540,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(TabChildGlobal,
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabChildGlobal)
-  NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)
   NS_INTERFACE_MAP_ENTRY(nsIMessageSender)
-  NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsIContentFrameMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
@@ -3559,9 +3565,7 @@ TabChildGlobal::WrapGlobalObject(JSContext* aCx,
   return ok;
 }
 
-// This method isn't automatically forwarded safely because it's notxpcom, so
-// the IDL binding doesn't know what value to return.
-NS_IMETHODIMP_(bool)
+void
 TabChildGlobal::MarkForCC()
 {
   if (mTabChild) {
@@ -3571,7 +3575,7 @@ TabChildGlobal::MarkForCC()
   if (elm) {
     elm->MarkForCC();
   }
-  return MessageManagerGlobal::MarkForCC();
+  MessageManagerGlobal::MarkForCC();
 }
 
 already_AddRefed<nsPIDOMWindowOuter>
@@ -3586,14 +3590,6 @@ TabChildGlobal::GetContent(ErrorResult& aError)
   return window.forget();
 }
 
-NS_IMETHODIMP
-TabChildGlobal::GetContent(mozIDOMWindowProxy** aContent)
-{
-  ErrorResult rv;
-  *aContent = GetContent(rv).take();
-  return rv.StealNSResult();
-}
-
 already_AddRefed<nsIDocShell>
 TabChildGlobal::GetDocShell(ErrorResult& aError)
 {
@@ -3605,26 +3601,11 @@ TabChildGlobal::GetDocShell(ErrorResult& aError)
   return window.forget();
 }
 
-NS_IMETHODIMP
-TabChildGlobal::GetDocShell(nsIDocShell** aDocShell)
-{
-  ErrorResult rv;
-  *aDocShell = GetDocShell(rv).take();
-  return rv.StealNSResult();
-}
-
 already_AddRefed<nsIEventTarget>
 TabChildGlobal::GetTabEventTarget()
 {
   nsCOMPtr<nsIEventTarget> target = EventTargetFor(TaskCategory::Other);
   return target.forget();
-}
-
-NS_IMETHODIMP
-TabChildGlobal::GetTabEventTarget(nsIEventTarget** aTarget)
-{
-  *aTarget = GetTabEventTarget().take();
-  return NS_OK;
 }
 
 nsIPrincipal*

@@ -48,14 +48,12 @@ SimpleTest.waitForExplicitFinish();
 // should be enough.
 requestLongerTimeout(2);
 
-flags.testing = true;
 Services.prefs.setCharPref("devtools.devices.url", TEST_URI_ROOT + "devices.json");
 // The appearance of this notification causes intermittent behavior in some tests that
 // send mouse events, since it causes the content to shift when it appears.
 Services.prefs.setBoolPref("devtools.responsive.reloadNotification.enabled", false);
 
 registerCleanupFunction(async () => {
-  flags.testing = false;
   Services.prefs.clearUserPref("devtools.devices.url");
   Services.prefs.clearUserPref("devtools.responsive.reloadNotification.enabled");
   Services.prefs.clearUserPref("devtools.responsive.html.displayedDeviceList");
@@ -148,7 +146,7 @@ function waitForViewportResizeTo(ui, width, height) {
     // hang forever. See bug 1302879.
     let browser = ui.getViewportBrowser();
 
-    let onResize = (_, data) => {
+    let onResize = data => {
       if (!isSizeMatching(data)) {
         return;
       }
@@ -315,7 +313,7 @@ function waitForViewportLoad(ui) {
 
 function load(browser, url) {
   let loaded = BrowserTestUtils.browserLoaded(browser, false, url);
-  browser.loadURI(url, null, null);
+  browser.loadURI(url);
   return loaded;
 }
 

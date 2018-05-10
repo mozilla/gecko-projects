@@ -15,7 +15,6 @@
 
 #include "PLDHashTable.h"
 #include "nsIHttpChannel.h"
-#include "nsHTMLStyleSheet.h"
 #include "nsThreadUtils.h"
 #include "nsICommandManager.h"
 #include "mozilla/dom/HTMLSharedElement.h"
@@ -167,7 +166,7 @@ public:
                    mozilla::ErrorResult& rv);
   void GetSupportedNames(nsTArray<nsString>& aNames);
   already_AddRefed<nsIDocument> Open(JSContext* cx,
-                                     const nsAString& aType,
+                                     const mozilla::dom::Optional<nsAString>& /* unused */,
                                      const nsAString& aReplace,
                                      mozilla::ErrorResult& aError);
   already_AddRefed<nsPIDOMWindowOuter>
@@ -224,8 +223,6 @@ public:
   {
     return nsIDocument::GetLocation();
   }
-
-  virtual nsHTMLDocument* AsHTMLDocument() override { return this; }
 
   static bool MatchFormControls(Element* aElement, int32_t aNamespaceID,
                                 nsAtom* aAtom, void* aData);
@@ -366,6 +363,13 @@ protected:
    */
   bool mPendingMaybeEditingStateChanged;
 };
+
+inline nsHTMLDocument*
+nsIDocument::AsHTMLDocument()
+{
+  MOZ_ASSERT(IsHTMLOrXHTML());
+  return static_cast<nsHTMLDocument*>(this);
+}
 
 #define NS_HTML_DOCUMENT_INTERFACE_TABLE_BEGIN(_class)                        \
     NS_DOCUMENT_INTERFACE_TABLE_BEGIN(_class)                                 \

@@ -4,7 +4,7 @@
 "use strict";
 
 const EventEmitter = require("devtools/shared/event-emitter");
-const {createNode} = require("devtools/client/animationinspector/utils");
+const {createNode} = require("devtools/client/inspector/animation-old/utils");
 const { LocalizationHelper } = require("devtools/shared/l10n");
 
 const STRINGS_URI = "devtools/client/locales/inspector.properties";
@@ -232,7 +232,7 @@ DomNodePreview.prototype = {
     if (!this.nodeFront) {
       return;
     }
-    this.inspector.selection.setNodeFront(this.nodeFront, "dom-node-preview");
+    this.inspector.selection.setNodeFront(this.nodeFront, { reason: "dom-node-preview" });
   },
 
   onHighlightElClick: function(e) {

@@ -50,15 +50,11 @@ var whitelist = [
   // security/manager/pki/resources/content/device_manager.js
   {file: "chrome://pippki/content/load_device.xul"},
 
-  // Add-on compat
-  {file: "chrome://global/content/XPCNativeWrapper.js"},
-  {file: "chrome://global/locale/brand.dtd"},
-
   // The l10n build system can't package string files only for some platforms.
   // See bug 1339424 for why this is hard to fix.
   {file: "chrome://global/locale/fallbackMenubar.properties",
    platforms: ["linux", "win"]},
-  {file: "chrome://global/locale/printPageSetup.dtd", platforms: ["macosx"]},
+  {file: "chrome://global/locale/printPageSetup.dtd", platforms: ["linux", "macosx"]},
   {file: "chrome://global/locale/printPreviewProgress.dtd",
    platforms: ["macosx"]},
   {file: "chrome://global/locale/printProgress.dtd", platforms: ["macosx"]},
@@ -156,6 +152,9 @@ var whitelist = [
   {file: "resource://gre/modules/PerformanceWatcher.jsm"},
   // Bug 1378173 (warning: still used by devtools)
   {file: "resource://gre/modules/Promise.jsm"},
+
+  // Still used by WebIDE, which is going away but not entirely gone.
+  {file: "resource://gre/modules/ZipUtils.jsm"},
 ];
 
 whitelist = new Set(whitelist.filter(item =>

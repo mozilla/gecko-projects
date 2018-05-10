@@ -16,8 +16,6 @@
 #include "nsIContent.h"
 #include "nsNameSpaceManager.h"
 #include "nsIDocument.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMNodeList.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsIScrollableFrame.h"
 #include "nsScrollbarFrame.h"
@@ -26,8 +24,9 @@
 #include "mozilla/ComputedStyle.h"
 #include "nsFontMetrics.h"
 #include "nsITimer.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
+#include "mozilla/ServoStyleSet.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/Text.h"
 #include "nsPIBoxObject.h"
 #include "nsLayoutUtils.h"
 #include "nsPIListBoxObject.h"
@@ -587,18 +586,17 @@ nsListBoxBodyFrame::ScrollByLines(int32_t aNumLines)
 
 // walks the DOM to get the zero-based row index of the content
 nsresult
-nsListBoxBodyFrame::GetIndexOfItem(nsIDOMElement* aItem, int32_t* _retval)
+nsListBoxBodyFrame::GetIndexOfItem(Element* aItem, int32_t* _retval)
 {
   if (aItem) {
     *_retval = 0;
-    nsCOMPtr<nsIContent> itemContent(do_QueryInterface(aItem));
 
     FlattenedChildIterator iter(mContent);
     for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
       // we hit a list row, count it
       if (child->IsXULElement(nsGkAtoms::listitem)) {
         // is this it?
-        if (child == itemContent)
+        if (child == aItem)
           return NS_OK;
 
         ++(*_retval);
@@ -612,7 +610,7 @@ nsListBoxBodyFrame::GetIndexOfItem(nsIDOMElement* aItem, int32_t* _retval)
 }
 
 nsresult
-nsListBoxBodyFrame::GetItemAtIndex(int32_t aIndex, nsIDOMElement** aItem)
+nsListBoxBodyFrame::GetItemAtIndex(int32_t aIndex, Element** aItem)
 {
   *aItem = nullptr;
   if (aIndex < 0)
@@ -625,7 +623,8 @@ nsListBoxBodyFrame::GetItemAtIndex(int32_t aIndex, nsIDOMElement** aItem)
     if (child->IsXULElement(nsGkAtoms::listitem)) {
       // is this it?
       if (itemCount == aIndex) {
-        return CallQueryInterface(child, aItem);
+        *aItem = do_AddRef(child->AsElement()).take();
+        return NS_OK;
       }
       ++itemCount;
     }
@@ -708,23 +707,22 @@ nsListBoxBodyFrame::ComputeIntrinsicISize(nsBoxLayoutState& aBoxLayoutState)
   nscoord largestWidth = 0;
 
   int32_t index = 0;
-  nsCOMPtr<nsIDOMElement> firstRowEl;
+  RefPtr<Element> firstRowEl;
   GetItemAtIndex(index, getter_AddRefs(firstRowEl));
-  nsCOMPtr<nsIContent> firstRowContent(do_QueryInterface(firstRowEl));
 
-  if (firstRowContent) {
+  if (firstRowEl) {
     nsPresContext* presContext = aBoxLayoutState.PresContext();
-    RefPtr<ComputedStyle> styleContext =
+    RefPtr<ComputedStyle> computedStyle =
       presContext->StyleSet()->ResolveStyleFor(
-          firstRowContent->AsElement(), nullptr, LazyComputeBehavior::Allow);
+          firstRowEl, nullptr, LazyComputeBehavior::Allow);
 
     nscoord width = 0;
     nsMargin margin(0,0,0,0);
 
-    if (styleContext->StylePadding()->GetPadding(margin))
+    if (computedStyle->StylePadding()->GetPadding(margin))
       width += margin.LeftRight();
-    width += styleContext->StyleBorder()->GetComputedBorder().LeftRight();
-    if (styleContext->StyleMargin()->GetMargin(margin))
+    width += computedStyle->StyleBorder()->GetComputedBorder().LeftRight();
+    if (computedStyle->StyleMargin()->GetMargin(margin))
       width += margin.LeftRight();
 
     FlattenedChildIterator iter(mContent);
@@ -733,15 +731,16 @@ nsListBoxBodyFrame::ComputeIntrinsicISize(nsBoxLayoutState& aBoxLayoutState)
         gfxContext* rendContext = aBoxLayoutState.GetRenderingContext();
         if (rendContext) {
           nsAutoString value;
-          for (nsIContent* text = child->GetFirstChild();
-               text; text = text->GetNextSibling()) {
-            if (text->IsNodeOfType(nsINode::eTEXT)) {
+          for (nsIContent* content = child->GetFirstChild();
+               content; content = content->GetNextSibling()) {
+            if (Text* text = content->GetAsText()) {
               text->AppendTextTo(value);
             }
           }
 
           RefPtr<nsFontMetrics> fm =
-            nsLayoutUtils::GetFontMetricsForComputedStyle(styleContext);
+            nsLayoutUtils::GetFontMetricsForComputedStyle(computedStyle,
+                                                          presContext);
 
           nscoord textWidth =
             nsLayoutUtils::AppUnitWidthOfStringBidi(value, this, *fm,
@@ -1401,7 +1400,7 @@ nsListBoxBodyFrame::OnContentRemoved(nsPresContext* aPresContext,
       // if the row being removed is off-screen and above the top frame, we need to
       // adjust our top index and tell the scrollbar to shift up one row.
       if (siblingIndex >= 0 && siblingIndex-1 < mCurrentIndex) {
-        NS_PRECONDITION(mCurrentIndex > 0, "mCurrentIndex > 0");
+        MOZ_ASSERT(mCurrentIndex > 0, "mCurrentIndex > 0");
         --mCurrentIndex;
         mYPosition = mCurrentIndex*mRowHeight;
         AutoWeakFrame weakChildFrame(aChildFrame);

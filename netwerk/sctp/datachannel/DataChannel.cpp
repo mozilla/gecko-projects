@@ -112,7 +112,7 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  DataChannelShutdown() {}
+  DataChannelShutdown() = default;
 
   void Init()
     {
@@ -675,7 +675,7 @@ DataChannelConnection::ConnectViaTransportFlow(TransportFlow *aFlow, uint16_t lo
 {
   LOG(("Connect DTLS local %u, remote %u", localport, remoteport));
 
-  NS_PRECONDITION(mMasterSocket, "SCTP wasn't initialized before ConnectViaTransportFlow!");
+  MOZ_ASSERT(mMasterSocket, "SCTP wasn't initialized before ConnectViaTransportFlow!");
   if (NS_WARN_IF(!aFlow)) {
     return false;
   }
@@ -2977,10 +2977,9 @@ DataChannelConnection::SendDataMsgCommon(uint16_t stream, const nsACString &aMsg
   if (isBinary) {
     return SendDataMsg(channel, data, len,
                        DATA_CHANNEL_PPID_BINARY_PARTIAL, DATA_CHANNEL_PPID_BINARY);
-  } else {
-    return SendDataMsg(channel, data, len,
-                       DATA_CHANNEL_PPID_DOMSTRING_PARTIAL, DATA_CHANNEL_PPID_DOMSTRING);
   }
+  return SendDataMsg(channel, data, len,
+                     DATA_CHANNEL_PPID_DOMSTRING_PARTIAL, DATA_CHANNEL_PPID_DOMSTRING);
 }
 
 void
@@ -3252,10 +3251,9 @@ DataChannel::EnsureValidStream(ErrorResult& aRv)
   MOZ_ASSERT(mConnection);
   if (mConnection && mStream != INVALID_STREAM) {
     return true;
-  } else {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-    return false;
   }
+  aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+  return false;
 }
 
 } // namespace mozilla

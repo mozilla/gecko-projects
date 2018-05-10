@@ -232,6 +232,8 @@ public:
     mPCHandle = aPCHandle;
   }
 
+  virtual void DeleteStreams() override;
+
   unsigned int SendingMaxFs() override {
     if(mCurSendCodecConfig) {
       return mCurSendCodecConfig->mEncodingConstraints.maxFs;
@@ -268,7 +270,6 @@ public:
 
   MediaConduitErrorCode InitMain();
   virtual MediaConduitErrorCode Init();
-  virtual void Destroy();
 
   std::vector<unsigned int> GetLocalSSRCs() const override;
   bool SetLocalSSRCs(const std::vector<unsigned int> & ssrcs) override;
@@ -309,6 +310,10 @@ public:
                            unsigned int* packetsSent,
                            uint64_t* bytesSent) override;
   uint64_t MozVideoLatencyAvg();
+
+  void DisableSsrcChanges() override {
+    mAllowSsrcChange = false;
+  }
 
 private:
   // Don't allow copying/assigning.
@@ -536,6 +541,10 @@ private:
   VideoEncoderConfigBuilder mEncoderConfig;
 
   webrtc::VideoReceiveStream::Config mRecvStreamConfig;
+
+  // Are SSRC changes without signaling allowed or not
+  bool mAllowSsrcChange;
+  bool mWaitingForInitialSsrc;
 
   // accessed on creation, and when receiving packets
   uint32_t mRecvSSRC; // this can change during a stream!

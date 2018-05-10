@@ -16,6 +16,7 @@
 #include "nsCookieService.h"
 #include "nsContentUtils.h"
 #include "nsNetCID.h"
+#include "nsNetUtil.h"
 #include "nsIChannel.h"
 #include "nsICookiePermission.h"
 #include "nsIEffectiveTLDService.h"
@@ -23,6 +24,8 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsServiceManagerUtils.h"
+#include "mozilla/Telemetry.h"
+#include "mozilla/TimeStamp.h"
 
 using namespace mozilla::ipc;
 using mozilla::OriginAttributes;
@@ -38,8 +41,10 @@ static const char kPrefThirdPartyNonsecureSession[] =
   "network.cookie.thirdparty.nonsecureSessionOnly";
 static const char kPrefCookieIPCSync[] = "network.cookie.ipc.sync";
 static const char kCookieLeaveSecurityAlone[] = "network.cookie.leave-secure-alone";
+static const char kCookieMoveIntervalSecs[] = "network.cookie.move.interval_sec";
 
 static StaticRefPtr<CookieServiceChild> gCookieService;
+static uint32_t gMoveCookiesIntervalSeconds = 10;
 
 already_AddRefed<CookieServiceChild>
 CookieServiceChild::GetSingleton()
@@ -55,6 +60,7 @@ CookieServiceChild::GetSingleton()
 NS_IMPL_ISUPPORTS(CookieServiceChild,
                   nsICookieService,
                   nsIObserver,
+                  nsITimerCallback,
                   nsISupportsWeakReference)
 
 CookieServiceChild::CookieServiceChild()
@@ -96,8 +102,55 @@ CookieServiceChild::CookieServiceChild()
     prefBranch->AddObserver(kPrefThirdPartyNonsecureSession, this, true);
     prefBranch->AddObserver(kPrefCookieIPCSync, this, true);
     prefBranch->AddObserver(kCookieLeaveSecurityAlone, this, true);
+    prefBranch->AddObserver(kCookieMoveIntervalSecs, this, true);
     PrefChanged(prefBranch);
   }
+
+  nsCOMPtr<nsIObserverService> observerService
+    = mozilla::services::GetObserverService();
+  if (observerService) {
+    observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
+  }
+}
+
+void
+CookieServiceChild::MoveCookies()
+{
+  TimeStamp start = TimeStamp::Now();
+  for (auto iter = mCookiesMap.Iter(); !iter.Done(); iter.Next()) {
+    CookiesList *cookiesList = iter.UserData();
+    CookiesList newCookiesList;
+    for (uint32_t i = 0; i < cookiesList->Length(); ++i) {
+      nsCookie *cookie = cookiesList->ElementAt(i);
+      RefPtr<nsCookie> newCookie = nsCookie::Create(cookie->Name(),
+                                                    cookie->Value(),
+                                                    cookie->Host(),
+                                                    cookie->Path(),
+                                                    cookie->Expiry(),
+                                                    cookie->LastAccessed(),
+                                                    cookie->CreationTime(),
+                                                    cookie->IsSession(),
+                                                    cookie->IsSecure(),
+                                                    cookie->IsHttpOnly(),
+                                                    cookie->OriginAttributesRef(),
+                                                    cookie->SameSite());
+      newCookiesList.AppendElement(newCookie);
+    }
+    cookiesList->SwapElements(newCookiesList);
+  }
+
+  Telemetry::AccumulateTimeDelta(Telemetry::COOKIE_TIME_MOVING_MS, start);
+}
+
+NS_IMETHODIMP
+CookieServiceChild::Notify(nsITimer *aTimer)
+{
+  if (aTimer == mCookieTimer) {
+    MoveCookies();
+  } else {
+    MOZ_CRASH("Unknown timer");
+  }
+  return NS_OK;
 }
 
 CookieServiceChild::~CookieServiceChild()
@@ -131,7 +184,10 @@ CookieServiceChild::TrackCookieLoad(nsIChannel *aChannel)
   }
   URIParams uriParams;
   SerializeURI(uri, uriParams);
-  SendPrepareCookieList(uriParams, isForeign, attrs);
+  bool isSafeTopLevelNav = NS_IsSafeTopLevelNav(aChannel);
+  bool isSameSiteForeign = NS_IsSameSiteForeign(aChannel, uri);
+  SendPrepareCookieList(uriParams, isForeign, isSafeTopLevelNav,
+                        isSameSiteForeign, attrs);
 }
 
 mozilla::ipc::IPCResult
@@ -251,11 +307,29 @@ CookieServiceChild::PrefChanged(nsIPrefBranch *aPrefBranch)
     mThirdPartyUtil = do_GetService(THIRDPARTYUTIL_CONTRACTID);
     NS_ASSERTION(mThirdPartyUtil, "require ThirdPartyUtil service");
   }
+
+  if (NS_SUCCEEDED(aPrefBranch->GetIntPref(kCookieMoveIntervalSecs, &val))) {
+    gMoveCookiesIntervalSeconds = clamped<uint32_t>(val, 0, 3600);
+    if (gMoveCookiesIntervalSeconds && !mCookieTimer) {
+      NS_NewTimerWithCallback(getter_AddRefs(mCookieTimer),
+                              this, gMoveCookiesIntervalSeconds * 1000,
+                              nsITimer::TYPE_REPEATING_SLACK_LOW_PRIORITY);
+    }
+    if (!gMoveCookiesIntervalSeconds && mCookieTimer) {
+      mCookieTimer->Cancel();
+      mCookieTimer = nullptr;
+    }
+    if (mCookieTimer) {
+      mCookieTimer->SetDelay(gMoveCookiesIntervalSeconds * 1000);
+    }
+  }
 }
 
 void
 CookieServiceChild::GetCookieStringFromCookieHashTable(nsIURI                 *aHostURI,
                                                        bool                   aIsForeign,
+                                                       bool                   aIsSafeTopLevelNav,
+                                                       bool                   aIsSameSiteForeign,
                                                        const OriginAttributes &aOriginAttrs,
                                                        nsCString              &aCookieString)
 {
@@ -306,6 +380,21 @@ CookieServiceChild::GetCookieStringFromCookieHashTable(nsIURI                 *a
     if (cookie->IsSecure() && !isSecure)
       continue;
 
+    int32_t sameSiteAttr = 0;
+    cookie->GetSameSite(&sameSiteAttr);
+    if (aIsSameSiteForeign && nsCookieService::IsSameSiteEnabled()) {
+      // it if's a cross origin request and the cookie is same site only (strict)
+      // don't send it
+      if (sameSiteAttr == nsICookie2::SAMESITE_STRICT) {
+        continue;
+      }
+      // if it's a cross origin request, the cookie is same site lax, but it's not
+      // a top-level navigation, don't send it
+      if (sameSiteAttr == nsICookie2::SAMESITE_LAX && !aIsSafeTopLevelNav) {
+        continue;
+      }
+    }
+
     // if the nsIURI path doesn't match the cookie path, don't send it back
     if (!nsCookieService::PathMatches(cookie, pathFromURI))
       continue;
@@ -333,13 +422,15 @@ CookieServiceChild::GetCookieStringFromCookieHashTable(nsIURI                 *a
 void
 CookieServiceChild::GetCookieStringSyncIPC(nsIURI                 *aHostURI,
                                            bool                   aIsForeign,
+                                           bool                   aIsSafeTopLevelNav,
+                                           bool                   aIsSameSiteForeign,
                                            const OriginAttributes &aAttrs,
                                            nsAutoCString          &aCookieString)
 {
   URIParams uriParams;
   SerializeURI(aHostURI, uriParams);
 
-  SendGetCookieString(uriParams, aIsForeign, aAttrs, &aCookieString);
+  SendGetCookieString(uriParams, aIsForeign, aIsSafeTopLevelNav, aIsSameSiteForeign, aAttrs, &aCookieString);
 }
 
 uint32_t
@@ -412,6 +503,7 @@ CookieServiceChild::RecordDocumentCookie(nsCookie               *aCookie,
       if (cookie->Value().Equals(aCookie->Value()) &&
           cookie->Expiry() == aCookie->Expiry() &&
           cookie->IsSecure() == aCookie->IsSecure() &&
+          cookie->SameSite() == aCookie->SameSite() &&
           cookie->IsSession() == aCookie->IsSession() &&
           cookie->IsHttpOnly() == aCookie->IsHttpOnly()) {
         cookie->SetLastAccessed(aCookie->LastAccessed());
@@ -461,14 +553,20 @@ CookieServiceChild::GetCookieStringInternal(nsIURI *aHostURI,
   bool isForeign = true;
   if (RequireThirdPartyCheck())
     mThirdPartyUtil->IsThirdPartyChannel(aChannel, aHostURI, &isForeign);
+
+  bool isSafeTopLevelNav = NS_IsSafeTopLevelNav(aChannel);
+  bool isSameSiteForeign = NS_IsSameSiteForeign(aChannel, aHostURI);
+
   nsAutoCString result;
   if (!mIPCSync) {
-    GetCookieStringFromCookieHashTable(aHostURI, !!isForeign, attrs, result);
+    GetCookieStringFromCookieHashTable(aHostURI, !!isForeign, isSafeTopLevelNav,
+                                       isSameSiteForeign, attrs, result);
   } else {
     if (!mIPCOpen) {
       return NS_ERROR_NOT_AVAILABLE;
     }
-    GetCookieStringSyncIPC(aHostURI, !!isForeign, attrs, result);
+    GetCookieStringSyncIPC(aHostURI, !!isForeign, isSafeTopLevelNav,
+                           isSameSiteForeign, attrs, result);
   }
 
   if (!result.IsEmpty())
@@ -504,8 +602,13 @@ CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
   if (aServerTime)
     stringServerTime.Rebind(aServerTime);
 
-  URIParams uriParams;
-  SerializeURI(aHostURI, uriParams);
+  URIParams hostURIParams;
+  SerializeURI(aHostURI, hostURIParams);
+
+  nsCOMPtr<nsIURI> channelURI;
+  aChannel->GetURI(getter_AddRefs(channelURI));
+  URIParams channelURIParams;
+  SerializeURI(channelURI, channelURIParams);
 
   mozilla::OriginAttributes attrs;
   if (aChannel) {
@@ -517,7 +620,8 @@ CookieServiceChild::SetCookieStringInternal(nsIURI *aHostURI,
 
   // Asynchronously call the parent.
   if (mIPCOpen) {
-    SendSetCookieString(uriParams, !!isForeign, cookieString,
+    SendSetCookieString(hostURIParams, channelURIParams,
+                        !!isForeign, cookieString,
                         stringServerTime, attrs, aFromHttp);
   }
 
@@ -576,12 +680,25 @@ CookieServiceChild::Observe(nsISupports     *aSubject,
                             const char      *aTopic,
                             const char16_t *aData)
 {
-  NS_ASSERTION(strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0,
-               "not a pref change topic!");
+  if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+    if (mCookieTimer) {
+      mCookieTimer->Cancel();
+      mCookieTimer = nullptr;
+    }
+    nsCOMPtr<nsIObserverService> observerService
+      = mozilla::services::GetObserverService();
+    if (observerService) {
+      observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
+    }
+  } else if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
+    nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(aSubject);
+    if (prefBranch) {
+      PrefChanged(prefBranch);
+    }
+  } else {
+    MOZ_ASSERT(false, "unexpected topic!");
+  }
 
-  nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(aSubject);
-  if (prefBranch)
-    PrefChanged(prefBranch);
   return NS_OK;
 }
 

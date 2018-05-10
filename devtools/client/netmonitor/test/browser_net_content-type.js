@@ -25,7 +25,7 @@ add_task(async function() {
   await performRequests(monitor, tab, CONTENT_TYPE_WITHOUT_CACHE_REQUESTS);
 
   for (let requestItem of document.querySelectorAll(".request-list-item")) {
-    let requestsListStatus = requestItem.querySelector(".requests-list-status");
+    let requestsListStatus = requestItem.querySelector(".status-code");
     requestItem.scrollIntoView();
     EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
     await waitUntil(() => requestsListStatus.title);
@@ -268,7 +268,7 @@ add_task(async function() {
   }
 
   async function selectIndexAndWaitForJSONView(index) {
-    let onResponseContent = monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    let onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
     let tabpanel = document.querySelector("#response-panel");
     let waitDOM = waitForDOM(tabpanel, ".treeTable");
     store.dispatch(Actions.selectRequestByIndex(index));
@@ -281,7 +281,7 @@ add_task(async function() {
   }
 
   async function selectIndexAndWaitForImageView(index) {
-    let onResponseContent = monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+    let onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
     let tabpanel = document.querySelector("#response-panel");
     let waitDOM = waitForDOM(tabpanel, ".response-image");
     store.dispatch(Actions.selectRequestByIndex(index));

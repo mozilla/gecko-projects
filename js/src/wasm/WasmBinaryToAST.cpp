@@ -23,7 +23,7 @@
 
 #include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
-#include "wasm/WasmBinaryIterator.h"
+#include "wasm/WasmOpIter.h"
 #include "wasm/WasmValidate.h"
 
 using namespace js;
@@ -102,7 +102,7 @@ class AstDecodeContext
        lifo(lifo),
        d(d),
        generateNames(generateNames),
-       env_(CompileMode::Once, Tier::Ion, DebugEnabled::False,
+       env_(CompileMode::Once, Tier::Ion, DebugEnabled::False, HasGcTypes::False,
             cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()
             ? Shareable::True
             : Shareable::False),
@@ -1249,6 +1249,50 @@ AstDecodeWake(AstDecodeContext& c)
     return true;
 }
 
+#ifdef ENABLE_WASM_BULKMEM_OPS
+static bool
+AstDecodeMemCopy(AstDecodeContext& c)
+{
+    if (!c.iter().readMemCopy(ValType::I32, nullptr, nullptr, nullptr))
+        return false;
+
+    AstDecodeStackItem dest = c.popCopy();
+    AstDecodeStackItem src  = c.popCopy();
+    AstDecodeStackItem len  = c.popCopy();
+
+    AstMemCopy* mc = new(c.lifo) AstMemCopy(dest.expr, src.expr, len.expr);
+
+    if (!mc)
+        return false;
+
+    if (!c.push(AstDecodeStackItem(mc)))
+        return false;
+
+    return true;
+}
+
+static bool
+AstDecodeMemFill(AstDecodeContext& c)
+{
+    if (!c.iter().readMemFill(ValType::I32, nullptr, nullptr, nullptr))
+        return false;
+
+    AstDecodeStackItem len   = c.popCopy();
+    AstDecodeStackItem val   = c.popCopy();
+    AstDecodeStackItem start = c.popCopy();
+
+    AstMemFill* mf = new(c.lifo) AstMemFill(start.expr, val.expr, len.expr);
+
+    if (!mf)
+        return false;
+
+    if (!c.push(AstDecodeStackItem(mf)))
+        return false;
+
+    return true;
+}
+#endif
+
 static bool
 AstDecodeExpr(AstDecodeContext& c)
 {
@@ -1668,6 +1712,22 @@ AstDecodeExpr(AstDecodeContext& c)
         if (!c.push(AstDecodeStackItem(tmp)))
             return false;
         break;
+#ifdef ENABLE_WASM_BULKMEM_OPS
+      case uint16_t(Op::CopyOrFillPrefix):
+        switch (op.b1) {
+          case uint16_t(CopyOrFillOp::Copy):
+            if (!AstDecodeMemCopy(c))
+                return false;
+            break;
+          case uint16_t(CopyOrFillOp::Fill):
+            if (!AstDecodeMemFill(c))
+                return false;
+            break;
+          default:
+            return c.iter().unrecognizedOpcode(&op);
+        }
+        break;
+#endif
 #ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
       case uint16_t(Op::NumericPrefix):
         switch (op.b1) {
@@ -1824,7 +1884,7 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     if (!locals.appendAll(sig->args()))
         return false;
 
-    if (!DecodeLocalEntries(c.d, ModuleKind::Wasm, &locals))
+    if (!DecodeLocalEntries(c.d, ModuleKind::Wasm, c.env().gcTypesEnabled, &locals))
         return false;
 
     AstDecodeOpIter iter(c.env(), c.d);
@@ -2244,8 +2304,11 @@ AstDecodeModuleTail(AstDecodeContext& c)
         return false;
 
     for (DataSegment& s : c.env().dataSegments) {
-        const uint8_t* src = c.d.begin() + s.bytecodeOffset;
         char16_t* buffer = static_cast<char16_t*>(c.lifo.alloc(s.length * sizeof(char16_t)));
+        if (!buffer)
+            return false;
+
+        const uint8_t* src = c.d.begin() + s.bytecodeOffset;
         for (size_t i = 0; i < s.length; i++)
             buffer[i] = src[i];
 
@@ -2277,7 +2340,7 @@ wasm::BinaryToAst(JSContext* cx, const uint8_t* bytes, uint32_t length, LifoAllo
         return false;
 
     UniqueChars error;
-    Decoder d(bytes, bytes + length, 0, &error, /* resilient */ true);
+    Decoder d(bytes, bytes + length, 0, &error, nullptr, /* resilient */ true);
     AstDecodeContext c(cx, lifo, d, *result, true);
 
     if (!AstDecodeEnvironment(c) ||

@@ -16,12 +16,12 @@ async function testTarget(client, target) {
   is(target.hasActor("webaudio"), true, "target.hasActor() true when actor exists.");
   is(target.hasActor("notreal"), false, "target.hasActor() false when actor does not exist.");
   // Create a front to ensure the actor is loaded
-  let front = new WebAudioFront(target.client, target.form);
+  new WebAudioFront(target.client, target.form);
 
   let desc = await target.getActorDescription("webaudio");
   is(desc.typeName, "webaudio",
     "target.getActorDescription() returns definition data for corresponding actor");
-  is(desc.events["start-context"]["type"], "startContext",
+  is(desc.events["start-context"].type, "startContext",
     "target.getActorDescription() returns event data for corresponding actor");
 
   desc = await target.getActorDescription("nope");
@@ -42,8 +42,6 @@ async function testTarget(client, target) {
   is(hasMethod, false,
     "target.actorHasMethod() returns false for undefined params");
 
-  is(target.getTrait("customHighlighters"), true,
-    "target.getTrait() returns boolean when trait exists");
   is(target.getTrait("giddyup"), undefined,
     "target.getTrait() returns undefined when trait does not exist");
 
@@ -61,7 +59,7 @@ function test() {
       chrome: true
     };
 
-    TargetFactory.forRemoteTab(options).then(Task.async(testTarget).bind(null, client));
+    TargetFactory.forRemoteTab(options).then(testTarget.bind(null, client));
   });
 }
 

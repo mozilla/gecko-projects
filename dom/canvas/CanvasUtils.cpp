@@ -55,11 +55,24 @@ bool IsImageExtractionAllowed(nsIDocument *aDocument, JSContext *aCx)
         return false;
     }
 
-    // Documents with system principal can always extract canvas data.
     nsPIDOMWindowOuter *win = aDocument->GetWindow();
     nsCOMPtr<nsIScriptObjectPrincipal> sop(do_QueryInterface(win));
-    if (sop && nsContentUtils::IsSystemPrincipal(sop->GetPrincipal())) {
-        return true;
+
+    if (sop) {
+        // Documents with system principal can always extract canvas data.
+        nsIPrincipal *principal = sop->GetPrincipal();
+        if (nsContentUtils::IsSystemPrincipal(principal)) {
+            return true;
+        }
+
+        if (principal) {
+            // Allow extension principals
+            nsAutoString addonId;
+            Unused << NS_WARN_IF(NS_FAILED(principal->GetAddonId(addonId)));
+            if (!addonId.IsEmpty()) {
+                return true;
+            }
+        }
     }
 
     // Always give permission to chrome scripts (e.g. Page Inspector).
@@ -244,7 +257,7 @@ DoDrawImageSecurityCheck(dom::HTMLCanvasElement *aCanvasElement,
     if (CORSUsed)
         return;
 
-    NS_PRECONDITION(aPrincipal, "Must have a principal here");
+    MOZ_ASSERT(aPrincipal, "Must have a principal here");
 
     if (aCanvasElement->NodePrincipal()->Subsumes(aPrincipal)) {
         // This canvas has access to that image anyway

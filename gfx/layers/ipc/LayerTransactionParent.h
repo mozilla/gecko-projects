@@ -48,7 +48,7 @@ public:
   LayerTransactionParent(HostLayerManager* aManager,
                          CompositorBridgeParentBase* aBridge,
                          CompositorAnimationStorage* aAnimStorage,
-                         uint64_t aId);
+                         LayersId aId);
 
 protected:
   ~LayerTransactionParent();
@@ -58,7 +58,7 @@ public:
 
   void SetLayerManager(HostLayerManager* aLayerManager, CompositorAnimationStorage* aAnimStorage);
 
-  uint64_t GetId() const { return mId; }
+  LayersId GetId() const { return mId; }
   Layer* GetRoot() const { return mRoot; }
 
   uint64_t GetChildEpoch() const { return mChildEpoch; }
@@ -78,14 +78,14 @@ public:
 
   bool IsSameProcess() const override;
 
-  const uint64_t& GetPendingTransactionId() { return mPendingTransaction; }
-  void SetPendingTransactionId(uint64_t aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
+  const TransactionId& GetPendingTransactionId() { return mPendingTransaction; }
+  void SetPendingTransactionId(TransactionId aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
   {
     mPendingTransaction = aId;
     mTxnStartTime = aTxnStartTime;
     mFwdTime = aFwdTime;
   }
-  uint64_t FlushTransactionId(TimeStamp& aCompositeEnd);
+  TransactionId FlushTransactionId(TimeStamp& aCompositeEnd);
 
   // CompositableParentManager
   void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) override;
@@ -105,7 +105,7 @@ protected:
   mozilla::ipc::IPCResult RecvShutdown() override;
   mozilla::ipc::IPCResult RecvShutdownSync() override;
 
-  mozilla::ipc::IPCResult RecvPaintTime(const uint64_t& aTransactionId,
+  mozilla::ipc::IPCResult RecvPaintTime(const TransactionId& aTransactionId,
                                         const TimeDuration& aPaintTime) override;
 
   mozilla::ipc::IPCResult RecvUpdate(const TransactionInfo& aInfo) override;
@@ -185,7 +185,7 @@ private:
   // Mapping from LayerHandles to Layers.
   nsRefPtrHashtable<nsUint64HashKey, Layer> mLayerMap;
 
-  uint64_t mId;
+  LayersId mId;
 
   // These fields keep track of the latest epoch values in the child and the
   // parent. mChildEpoch is the latest epoch value received from the child.
@@ -194,7 +194,7 @@ private:
   uint64_t mChildEpoch;
   uint64_t mParentEpoch;
 
-  uint64_t mPendingTransaction;
+  TransactionId mPendingTransaction;
   TimeStamp mTxnStartTime;
   TimeStamp mFwdTime;
 

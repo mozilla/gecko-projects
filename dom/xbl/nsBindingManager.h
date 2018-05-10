@@ -125,17 +125,9 @@ public:
   nsresult GetBindingImplementation(nsIContent* aContent, REFNSIID aIID, void** aResult);
 
 
-  // Do any processing that needs to happen as a result of a change in the
-  // characteristics of the medium, and return whether this rule processor's
-  // rules or the servo style set have changed (e.g., because of media
-  // queries).
-  bool MediumFeaturesChanged(nsPresContext* aPresContext,
-                             mozilla::MediaFeatureChangeReason);
-
   void AppendAllSheets(nsTArray<mozilla::StyleSheet*>& aArray);
 
-  void Traverse(nsIContent *aContent,
-                            nsCycleCollectionTraversalCallback &cb);
+  void Traverse(nsIContent *aContent, nsCycleCollectionTraversalCallback &cb);
 
   NS_DECL_CYCLE_COLLECTION_CLASS(nsBindingManager)
 
@@ -167,9 +159,11 @@ public:
 
   // Enumerate each bound content's bindings (including its base bindings)
   // in mBoundContentSet. Return false from the callback to stop enumeration.
-  using BoundContentBindingCallback = std::function<bool (nsXBLBinding*)>;
-  bool EnumerateBoundContentBindings(
-    const BoundContentBindingCallback& aCallback) const;
+  using BoundContentProtoBindingCallback =
+    std::function<bool (nsXBLPrototypeBinding*)>;
+
+  bool EnumerateBoundContentProtoBindings(
+      const BoundContentProtoBindingCallback&) const;
 
 protected:
   nsIXPConnectWrappedJS* GetWrappedJS(nsIContent* aContent);

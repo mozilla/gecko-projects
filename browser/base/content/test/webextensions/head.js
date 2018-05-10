@@ -4,10 +4,13 @@ const BASE = getRootDirectory(gTestPath)
 
 ChromeUtils.import("resource:///modules/ExtensionsUI.jsm");
 XPCOMUtils.defineLazyGetter(this, "Management", () => {
+  // eslint-disable-next-line no-shadow
   const {Management} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
   return Management;
 });
 
+ChromeUtils.import("resource://testing-common/CustomizableUITestUtils.jsm", this);
+let gCUITestUtils = new CustomizableUITestUtils(window);
 
 /**
  * Wait for the given PopupNotification to display
@@ -71,7 +74,7 @@ function promiseInstallEvent(addon, event) {
  *          object as the resolution value.
  */
 async function promiseInstallAddon(url) {
-  let install = await AddonManager.getInstallForURL(url, null, "application/x-xpinstall");
+  let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall");
   install.install();
 
   let addon = await new Promise(resolve => {

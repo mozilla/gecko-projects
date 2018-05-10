@@ -30,7 +30,7 @@
 //! `JSTraceable` to a datatype.
 
 use app_units::Au;
-use canvas_traits::canvas::{CanvasGradientStop, LinearGradientStyle, RadialGradientStyle};
+use canvas_traits::canvas::{CanvasGradientStop, CanvasId, LinearGradientStyle, RadialGradientStyle};
 use canvas_traits::canvas::{CompositionOrBlending, LineCapStyle, LineJoinStyle, RepetitionStyle};
 use canvas_traits::webgl::{WebGLBufferId, WebGLFramebufferId, WebGLProgramId, WebGLRenderbufferId};
 use canvas_traits::webgl::{WebGLChan, WebGLContextShareMode, WebGLError, WebGLPipeline, WebGLMsgSender};
@@ -47,7 +47,7 @@ use dom::bindings::root::{Dom, DomRoot};
 use dom::bindings::str::{DOMString, USVString};
 use dom::bindings::utils::WindowProxyHandler;
 use dom::document::PendingRestyle;
-use encoding_rs::Encoding;
+use encoding_rs::{Decoder, Encoding};
 use euclid::{Transform2D, Transform3D, Point2D, Vector2D, Rect, TypedSize2D, TypedScale};
 use euclid::Length as EuclidLength;
 use html5ever::{Prefix, LocalName, Namespace, QualName};
@@ -59,9 +59,9 @@ use hyper::mime::Mime;
 use hyper::status::StatusCode;
 use ipc_channel::ipc::{IpcReceiver, IpcSender};
 use js::glue::{CallObjectTracer, CallValueTracer};
-use js::jsapi::{GCTraceKindToAscii, Heap, Handle, JSObject, JSTracer, TraceKind};
+use js::jsapi::{GCTraceKindToAscii, Heap, JSObject, JSTracer, TraceKind};
 use js::jsval::JSVal;
-use js::rust::{GCMethods, Runtime};
+use js::rust::{GCMethods, Handle, Runtime};
 use js::typedarray::TypedArray;
 use js::typedarray::TypedArrayElement;
 use metrics::{InteractiveMetrics, InteractiveWindow};
@@ -126,6 +126,9 @@ pub unsafe trait JSTraceable {
 unsafe_no_jsmanaged_fields!(CSSError);
 
 unsafe_no_jsmanaged_fields!(&'static Encoding);
+
+unsafe_no_jsmanaged_fields!(RefCell<Decoder>);
+unsafe_no_jsmanaged_fields!(RefCell<Vec<u8>>);
 
 unsafe_no_jsmanaged_fields!(Reflector);
 
@@ -420,6 +423,7 @@ unsafe_no_jsmanaged_fields!(WebVRGamepadHand);
 unsafe_no_jsmanaged_fields!(ScriptToConstellationChan);
 unsafe_no_jsmanaged_fields!(InteractiveMetrics);
 unsafe_no_jsmanaged_fields!(InteractiveWindow);
+unsafe_no_jsmanaged_fields!(CanvasId);
 
 unsafe impl<'a> JSTraceable for &'a str {
     #[inline]

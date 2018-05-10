@@ -470,7 +470,7 @@ public:
   // The delta value of mouse scroll event.
   // If the event message is eLegacyMouseLineOrPageScroll, the value indicates
   // scroll amount in lines.  However, if the value is
-  // nsIDOMUIEvent::SCROLL_PAGE_UP or nsIDOMUIEvent::SCROLL_PAGE_DOWN, the
+  // UIEvent::SCROLL_PAGE_UP or UIEvent::SCROLL_PAGE_DOWN, the
   // value inducates one page scroll.  If the event message is
   // eLegacyMousePixelScroll, the value indicates scroll amount in pixels.
   int32_t mDelta;
@@ -517,7 +517,7 @@ private:
     , mViewPortIsOverscrolled(false)
     , mCanTriggerSwipe(false)
     , mAllowToOverrideSystemScrollSpeed(false)
-    , mDeltaValuesAdjustedForDefaultHandler(false)
+    , mDeltaValuesHorizontalizedForDefaultHandler(false)
   {
   }
 
@@ -544,7 +544,7 @@ public:
     , mViewPortIsOverscrolled(false)
     , mCanTriggerSwipe(false)
     , mAllowToOverrideSystemScrollSpeed(true)
-    , mDeltaValuesAdjustedForDefaultHandler(false)
+    , mDeltaValuesHorizontalizedForDefaultHandler(false)
   {
   }
 
@@ -578,8 +578,8 @@ public:
   double mDeltaZ;
 
   // overflowed delta values for scroll, these values are set by
-  // nsEventStateManger.  If the default action of the wheel event isn't scroll,
-  // these values always zero.  Otherwise, remaning delta values which are
+  // EventStateManger.  If the default action of the wheel event isn't scroll,
+  // these values are always zero.  Otherwise, remaining delta values which are
   // not used by scroll are set.
   // NOTE: mDeltaX, mDeltaY and mDeltaZ may be modified by EventStateManager.
   //       However, mOverflowDeltaX and mOverflowDeltaY indicate unused original
@@ -662,9 +662,10 @@ public:
   // it's enabled by the pref.
   bool mAllowToOverrideSystemScrollSpeed;
 
-  // While default handler handles a wheel event specially (e.g., treating
-  // mDeltaY as horizontal scroll), this is set to true.
-  bool mDeltaValuesAdjustedForDefaultHandler;
+  // After the event's default action handler has adjusted its delta's values
+  // for horizontalizing a vertical wheel scroll, this variable will be set to
+  // true.
+  bool mDeltaValuesHorizontalizedForDefaultHandler;
 
   void AssignWheelEventData(const WidgetWheelEvent& aEvent, bool aCopyTargets)
   {
@@ -687,8 +688,8 @@ public:
     mCanTriggerSwipe = aEvent.mCanTriggerSwipe;
     mAllowToOverrideSystemScrollSpeed =
       aEvent.mAllowToOverrideSystemScrollSpeed;
-    mDeltaValuesAdjustedForDefaultHandler =
-      aEvent.mDeltaValuesAdjustedForDefaultHandler;
+    mDeltaValuesHorizontalizedForDefaultHandler =
+      aEvent.mDeltaValuesHorizontalizedForDefaultHandler;
   }
 
   // System scroll speed settings may be too slow at using Gecko.  In such

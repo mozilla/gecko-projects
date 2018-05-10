@@ -156,8 +156,7 @@ private:
                             EmptyString(), nullptr, ports);
     event->SetTrusted(true);
 
-    bool dummy;
-    mPort->DispatchEvent(static_cast<dom::Event*>(event.get()), &dummy);
+    mPort->DispatchEvent(*event);
 
     return NS_OK;
   }
@@ -204,6 +203,7 @@ MessagePort::MessagePort(nsIGlobalObject* aGlobal)
   , mInnerID(0)
   , mMessageQueueEnabled(false)
   , mIsKeptAlive(false)
+  , mHasBeenTransferredOrClosed(false)
 {
   MOZ_ASSERT(aGlobal);
 
@@ -297,8 +297,8 @@ MessagePort::Initialize(const nsID& aUUID,
       StrongWorkerRef::Create(workerPrivate, "MessagePort",
                               [self]() { self->CloseForced(); });
     if (NS_WARN_IF(!strongWorkerRef)) {
-      // The worker is shutting down. Let's return an already closed port.
-      mState = eStateDisentangledForClose;
+      // The worker is shutting down.
+      aRv.Throw(NS_ERROR_FAILURE);
       return;
     }
 
@@ -501,6 +501,7 @@ MessagePort::Dispatch()
 void
 MessagePort::Close()
 {
+  mHasBeenTransferredOrClosed = true;
   CloseInternal(true /* aSoftly */);
 }
 
@@ -725,6 +726,9 @@ void
 MessagePort::CloneAndDisentangle(MessagePortIdentifier& aIdentifier)
 {
   MOZ_ASSERT(mIdentifier);
+  MOZ_ASSERT(!mHasBeenTransferredOrClosed);
+
+  mHasBeenTransferredOrClosed = true;
 
   // We can clone a port that has already been transfered. In this case, on the
   // otherside will have a neutered port. Here we set neutered to true so that
@@ -949,8 +953,7 @@ MessagePort::DispatchError()
     MessageEvent::Constructor(this, NS_LITERAL_STRING("messageerror"), init);
   event->SetTrusted(true);
 
-  bool dummy;
-  DispatchEvent(event, &dummy);
+  DispatchEvent(*event);
 }
 
 } // namespace dom

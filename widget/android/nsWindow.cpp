@@ -15,6 +15,7 @@
 #include "mozilla/TouchEvents.h"
 #include "mozilla/TypeTraits.h"
 #include "mozilla/WeakPtr.h"
+#include "mozilla/WheelHandlingHelper.h"    // for WheelDeltaAdjustmentStrategy
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
@@ -147,7 +148,7 @@ public:
         , mInstance(Forward<InstanceType>(aInstance))
     {}
 
-    WindowEvent(Lambda&& aLambda)
+    explicit WindowEvent(Lambda&& aLambda)
         : Runnable("nsWindowEvent")
         , mLambda(mozilla::Move(aLambda))
         , mInstance(mLambda.GetThisArg())
@@ -229,7 +230,7 @@ class nsWindow::NativePtr<Impl>::Locked final : private MutexAutoLock
     Impl* const mImpl;
 
 public:
-    Locked(NativePtr<Impl>& aPtr)
+    explicit Locked(NativePtr<Impl>& aPtr)
         : MutexAutoLock(aPtr.mImplLock)
         , mImpl(aPtr.mImpl)
     {}
@@ -283,7 +284,7 @@ public:
                      jni::Object::Param aQueue,
                      jni::Object::Param aCompositor,
                      jni::Object::Param aDispatcher,
-                     jni::Object::Param aSettings,
+                     jni::Object::Param aInitData,
                      jni::String::Param aId,
                      jni::String::Param aChromeURI,
                      int32_t aScreenId,
@@ -297,7 +298,7 @@ public:
                   jni::Object::Param aQueue,
                   jni::Object::Param aCompositor,
                   jni::Object::Param aDispatcher,
-                  jni::Object::Param aSettings);
+                  jni::Object::Param aInitData);
 
     void AttachEditable(const GeckoSession::Window::LocalRef& inst,
                         jni::Object::Param aEditableParent,
@@ -488,7 +489,13 @@ public:
                                ScrollWheelInput::SCROLLDELTA_PIXEL,
                                origin,
                                aHScroll, aVScroll,
-                               false);
+                               false,
+                               // XXX Do we need to support auto-dir scrolling
+                               // for Android widgets with a wheel device?
+                               // Currently, I just leave it unimplemented. If
+                               // we need to implement it, what's the extra work
+                               // to do?
+                               WheelDeltaAdjustmentStrategy::eNone);
 
         ScrollableLayerGuid guid;
         uint64_t blockId;
@@ -756,16 +763,14 @@ NS_IMPL_ISUPPORTS(nsWindow::AndroidView,
 
 
 nsresult
-nsWindow::AndroidView::GetSettings(JSContext* aCx, JS::MutableHandleValue aOut)
+nsWindow::AndroidView::GetInitData(JSContext* aCx, JS::MutableHandleValue aOut)
 {
-    if (!mSettings) {
+    if (!mInitData) {
         aOut.setNull();
         return NS_OK;
     }
 
-    // Lock to prevent races with UI thread.
-    auto lock = mSettings.Lock();
-    return widget::EventDispatcher::UnboxBundle(aCx, mSettings, aOut);
+    return widget::EventDispatcher::UnboxBundle(aCx, mInitData, aOut);
 }
 
 /**
@@ -795,7 +800,7 @@ class nsWindow::LayerViewSupport final
             return MakeUnique<LayerViewEvent>(mozilla::Move(event));
         }
 
-        LayerViewEvent(UniquePtr<Event>&& event)
+        explicit LayerViewEvent(UniquePtr<Event>&& event)
             : nsAppShell::ProxyEvent(mozilla::Move(event))
         {}
 
@@ -978,7 +983,7 @@ public:
             LayerSession::Compositor::GlobalRef mCompositor;
 
         public:
-            OnResumedEvent(LayerSession::Compositor::GlobalRef&& aCompositor)
+            explicit OnResumedEvent(LayerSession::Compositor::GlobalRef&& aCompositor)
                 : mCompositor(mozilla::Move(aCompositor))
             {}
 
@@ -1164,7 +1169,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                                  jni::Object::Param aQueue,
                                  jni::Object::Param aCompositor,
                                  jni::Object::Param aDispatcher,
-                                 jni::Object::Param aSettings,
+                                 jni::Object::Param aInitData,
                                  jni::String::Param aId,
                                  jni::String::Param aChromeURI,
                                  int32_t aScreenId,
@@ -1191,7 +1196,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     RefPtr<AndroidView> androidView = new AndroidView();
     androidView->mEventDispatcher->Attach(
             java::EventDispatcher::Ref::From(aDispatcher), nullptr);
-    androidView->mSettings = java::GeckoBundle::Ref::From(aSettings);
+    androidView->mInitData = java::GeckoBundle::Ref::From(aInitData);
 
     nsAutoCString chromeFlags("chrome,dialog=0,resizable,scrollbars");
     if (aPrivateMode) {
@@ -1219,7 +1224,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
 
     // Attach other session support objects.
     window->mGeckoViewSupport->Transfer(
-            sessionWindow, aQueue, aCompositor, aDispatcher, aSettings);
+            sessionWindow, aQueue, aCompositor, aDispatcher, aInitData);
 
     if (window->mWidgetListener) {
         nsCOMPtr<nsIXULWindow> xulWindow(
@@ -1253,7 +1258,7 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
                                      jni::Object::Param aQueue,
                                      jni::Object::Param aCompositor,
                                      jni::Object::Param aDispatcher,
-                                     jni::Object::Param aSettings)
+                                     jni::Object::Param aInitData)
 {
     if (window.mNPZCSupport) {
         MOZ_ASSERT(window.mLayerViewSupport);
@@ -1271,10 +1276,14 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
     MOZ_ASSERT(window.mAndroidView);
     window.mAndroidView->mEventDispatcher->Attach(
             java::EventDispatcher::Ref::From(aDispatcher), mDOMWindow);
-    window.mAndroidView->mSettings = java::GeckoBundle::Ref::From(aSettings);
 
     if (mIsReady) {
+        // We're in a transfer; update init-data and notify JS code.
+        window.mAndroidView->mInitData =
+                java::GeckoBundle::Ref::From(aInitData);
         OnReady(aQueue);
+        window.mAndroidView->mEventDispatcher->Dispatch(
+                u"GeckoView:UpdateInitData");
     }
 
     DispatchToUiThread(
@@ -1489,10 +1498,10 @@ nsWindow::GetUiCompositorControllerChild()
     return mCompositorSession ? mCompositorSession->GetUiCompositorControllerChild() : nullptr;
 }
 
-int64_t
+mozilla::layers::LayersId
 nsWindow::GetRootLayerId() const
 {
-    return mCompositorSession ? mCompositorSession->RootLayerTreeId() : 0;
+    return mCompositorSession ? mCompositorSession->RootLayerTreeId() : mozilla::layers::LayersId{0};
 }
 
 void

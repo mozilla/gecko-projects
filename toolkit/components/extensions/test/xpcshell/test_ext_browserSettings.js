@@ -2,8 +2,6 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-ChromeUtils.defineModuleGetter(this, "ExtensionPreferencesManager",
-                               "resource://gre/modules/ExtensionPreferencesManager.jsm");
 ChromeUtils.defineModuleGetter(this, "Preferences",
                                "resource://gre/modules/Preferences.jsm");
 
@@ -18,7 +16,6 @@ AddonTestUtils.init(this);
 createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "42");
 
 add_task(async function test_browser_settings() {
-  const proxySvc = Ci.nsIProtocolProxyService;
   const PERM_DENY_ACTION = Services.perms.DENY_ACTION;
   const PERM_UNKNOWN_ACTION = Services.perms.UNKNOWN_ACTION;
 
@@ -30,23 +27,13 @@ add_task(async function test_browser_settings() {
     "image.animation_mode": "none",
     "permissions.default.desktop-notification": PERM_UNKNOWN_ACTION,
     "ui.context_menus.after_mouseup": false,
+    "browser.tabs.closeTabByDblclick": false,
     "browser.tabs.loadBookmarksInTabs": false,
     "browser.search.openintab": false,
-    "network.proxy.type": proxySvc.PROXYCONFIG_SYSTEM,
-    "network.proxy.http": "",
-    "network.proxy.http_port": 0,
-    "network.proxy.share_proxy_settings": false,
-    "network.proxy.ftp": "",
-    "network.proxy.ftp_port": 0,
-    "network.proxy.ssl": "",
-    "network.proxy.ssl_port": 0,
-    "network.proxy.socks": "",
-    "network.proxy.socks_port": 0,
-    "network.proxy.socks_version": 5,
-    "network.proxy.socks_remote_dns": false,
-    "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
-    "network.proxy.autoconfig_url": "",
-    "signon.autologin.proxy": false,
+    "browser.tabs.insertRelatedAfterCurrent": true,
+    "browser.tabs.insertAfterCurrent": false,
+    "browser.display.document_color_use": 1,
+    "browser.display.use_document_fonts": 1,
   };
 
   async function background() {
@@ -164,6 +151,34 @@ add_task(async function test_browser_settings() {
       {"ui.context_menus.after_mouseup": false});
   }
 
+  if (AppConstants.platform !== "android") {
+    await testSetting(
+      "closeTabsByDoubleClick", true,
+      {"browser.tabs.closeTabByDblclick": true});
+    await testSetting(
+      "closeTabsByDoubleClick", false,
+      {"browser.tabs.closeTabByDblclick": false});
+  }
+
+  await testSetting(
+    "newTabPosition", "afterCurrent",
+    {
+      "browser.tabs.insertRelatedAfterCurrent": false,
+      "browser.tabs.insertAfterCurrent": true,
+    });
+  await testSetting(
+    "newTabPosition", "atEnd",
+    {
+      "browser.tabs.insertRelatedAfterCurrent": false,
+      "browser.tabs.insertAfterCurrent": false,
+    });
+  await testSetting(
+    "newTabPosition", "relatedAfterCurrent",
+    {
+      "browser.tabs.insertRelatedAfterCurrent": true,
+      "browser.tabs.insertAfterCurrent": false,
+    });
+
   await testSetting(
     "openBookmarksInNewTabs", true,
     {"browser.tabs.loadBookmarksInTabs": true});
@@ -178,152 +193,29 @@ add_task(async function test_browser_settings() {
     "openSearchResultsInNewTabs", false,
     {"browser.search.openintab": false});
 
-  async function testProxy(config, expectedPrefs) {
-    // proxyConfig is not supported on Android.
-    if (AppConstants.platform === "android") {
-      return Promise.resolve();
-    }
+  await testSetting(
+    "openUrlbarResultsInNewTabs", true,
+    {"browser.urlbar.openintab": true});
+  await testSetting(
+    "openUrlbarResultsInNewTabs", false,
+    {"browser.urlbar.openintab": false});
 
-    let proxyConfig = {
-      proxyType: "system",
-      autoConfigUrl: "",
-      autoLogin: false,
-      proxyDNS: false,
-      httpProxyAll: false,
-      socksVersion: 5,
-      passthrough: "localhost, 127.0.0.1",
-      http: "",
-      ftp: "",
-      ssl: "",
-      socks: "",
-    };
-    return testSetting(
-      "proxyConfig", config, expectedPrefs, Object.assign(proxyConfig, config)
-    );
-  }
+  await testSetting(
+    "overrideDocumentColors", "high-contrast-only",
+    {"browser.display.document_color_use": 0});
+  await testSetting(
+    "overrideDocumentColors", "never",
+    {"browser.display.document_color_use": 1});
+  await testSetting(
+    "overrideDocumentColors", "always",
+    {"browser.display.document_color_use": 2});
 
-  await testProxy(
-    {proxyType: "none"},
-    {"network.proxy.type": proxySvc.PROXYCONFIG_DIRECT},
-  );
-
-  await testProxy(
-    {
-      proxyType: "autoDetect",
-      autoLogin: true,
-      proxyDNS: true,
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_WPAD,
-      "signon.autologin.proxy": true,
-      "network.proxy.socks_remote_dns": true,
-    },
-  );
-
-  await testProxy(
-    {
-      proxyType: "system",
-      autoLogin: false,
-      proxyDNS: false,
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_SYSTEM,
-      "signon.autologin.proxy": false,
-      "network.proxy.socks_remote_dns": false,
-    },
-  );
-
-  await testProxy(
-    {
-      proxyType: "autoConfig",
-      autoConfigUrl: "http://mozilla.org",
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_PAC,
-      "network.proxy.autoconfig_url": "http://mozilla.org",
-    },
-  );
-
-  await testProxy(
-    {
-      proxyType: "manual",
-      http: "http://www.mozilla.org",
-      autoConfigUrl: "",
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_MANUAL,
-      "network.proxy.http": "http://www.mozilla.org",
-      "network.proxy.http_port": 0,
-      "network.proxy.autoconfig_url": "",
-    }
-  );
-
-  await testProxy(
-    {
-      proxyType: "manual",
-      http: "http://www.mozilla.org:8080",
-      httpProxyAll: true,
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_MANUAL,
-      "network.proxy.http": "http://www.mozilla.org",
-      "network.proxy.http_port": 8080,
-      "network.proxy.share_proxy_settings": true,
-    }
-  );
-
-  await testProxy(
-    {
-      proxyType: "manual",
-      http: "http://www.mozilla.org:8080",
-      httpProxyAll: false,
-      ftp: "http://www.mozilla.org:8081",
-      ssl: "http://www.mozilla.org:8082",
-      socks: "mozilla.org:8083",
-      socksVersion: 4,
-      passthrough: ".mozilla.org",
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_MANUAL,
-      "network.proxy.http": "http://www.mozilla.org",
-      "network.proxy.http_port": 8080,
-      "network.proxy.share_proxy_settings": false,
-      "network.proxy.ftp": "http://www.mozilla.org",
-      "network.proxy.ftp_port": 8081,
-      "network.proxy.ssl": "http://www.mozilla.org",
-      "network.proxy.ssl_port": 8082,
-      "network.proxy.socks": "mozilla.org",
-      "network.proxy.socks_port": 8083,
-      "network.proxy.socks_version": 4,
-      "network.proxy.no_proxies_on": ".mozilla.org",
-    }
-  );
-
-  // Test resetting values.
-  await testProxy(
-    {
-      proxyType: "none",
-      http: "",
-      ftp: "",
-      ssl: "",
-      socks: "",
-      socksVersion: 5,
-      passthrough: "",
-    },
-    {
-      "network.proxy.type": proxySvc.PROXYCONFIG_DIRECT,
-      "network.proxy.http": "",
-      "network.proxy.http_port": 0,
-      "network.proxy.ftp": "",
-      "network.proxy.ftp_port": 0,
-      "network.proxy.ssl": "",
-      "network.proxy.ssl_port": 0,
-      "network.proxy.socks": "",
-      "network.proxy.socks_port": 0,
-      "network.proxy.socks_version": 5,
-      "network.proxy.no_proxies_on": "",
-    }
-  );
+  await testSetting(
+    "useDocumentFonts", false,
+    {"browser.display.use_document_fonts": 0});
+  await testSetting(
+    "useDocumentFonts", true,
+    {"browser.display.use_document_fonts": 1});
 
   await extension.unload();
   await promiseShutdownManager();
@@ -335,6 +227,16 @@ add_task(async function test_bad_value() {
       browser.browserSettings.contextMenuShowEvent.set({value: "bad"}),
       /bad is not a valid value for contextMenuShowEvent/,
       "contextMenuShowEvent.set rejects with an invalid value.");
+
+    await browser.test.assertRejects(
+      browser.browserSettings.overrideDocumentColors.set({value: 2}),
+      /2 is not a valid value for overrideDocumentColors/,
+      "overrideDocumentColors.set rejects with an invalid value.");
+
+    await browser.test.assertRejects(
+      browser.browserSettings.overrideDocumentColors.set({value: "bad"}),
+      /bad is not a valid value for overrideDocumentColors/,
+      "overrideDocumentColors.set rejects with an invalid value.");
 
     browser.test.sendMessage("done");
   }
@@ -351,78 +253,29 @@ add_task(async function test_bad_value() {
   await extension.unload();
 });
 
-add_task(async function test_bad_value_proxy_config() {
-  let background = AppConstants.platform === "android" ?
-    async () => {
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.set({value: {
-          proxyType: "none",
-        }}),
-        /proxyConfig is not supported on android/,
-        "proxyConfig.set rejects on Android.");
+add_task(async function test_bad_value_android() {
+  if (AppConstants.platform !== "android") {
+    return;
+  }
 
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.get({}),
-        /android is not a supported platform for the proxyConfig setting/,
-        "proxyConfig.get rejects on Android.");
+  async function background() {
+    await browser.test.assertRejects(
+      browser.browserSettings.closeTabsByDoubleClick.set({value: true}),
+      /android is not a supported platform for the closeTabsByDoubleClick setting/,
+      "closeTabsByDoubleClick.set rejects on Android.");
 
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.clear({}),
-        /android is not a supported platform for the proxyConfig setting/,
-        "proxyConfig.clear rejects on Android.");
+    await browser.test.assertRejects(
+      browser.browserSettings.closeTabsByDoubleClick.get({}),
+      /android is not a supported platform for the closeTabsByDoubleClick setting/,
+      "closeTabsByDoubleClick.get rejects on Android.");
 
-      browser.test.sendMessage("done");
-    } :
-    async () => {
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.set({value: {
-          proxyType: "abc",
-        }}),
-        /abc is not a valid value for proxyType/,
-        "proxyConfig.set rejects with an invalid proxyType value.");
+    await browser.test.assertRejects(
+      browser.browserSettings.closeTabsByDoubleClick.clear({}),
+      /android is not a supported platform for the closeTabsByDoubleClick setting/,
+      "closeTabsByDoubleClick.clear rejects on Android.");
 
-      for (let protocol of ["http", "ftp", "ssl"]) {
-        let value = {proxyType: "manual"};
-        value[protocol] = "abc";
-        await browser.test.assertRejects(
-          browser.browserSettings.proxyConfig.set({value}),
-          `abc is not a valid value for ${protocol}.`,
-          `proxyConfig.set rejects with an invalid ${protocol} value.`);
-      }
-
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.set({value: {
-          proxyType: "autoConfig",
-        }}),
-        /undefined is not a valid value for autoConfigUrl/,
-        "proxyConfig.set for type autoConfig rejects with an empty autoConfigUrl value.");
-
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.set({value: {
-          proxyType: "autoConfig",
-          autoConfigUrl: "abc",
-        }}),
-        /abc is not a valid value for autoConfigUrl/,
-        "proxyConfig.set rejects with an invalid autoConfigUrl value.");
-
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.set({value: {
-          proxyType: "manual",
-          socksVersion: "abc",
-        }}),
-        /abc is not a valid value for socksVersion/,
-        "proxyConfig.set rejects with an invalid socksVersion value.");
-
-      await browser.test.assertRejects(
-        browser.browserSettings.proxyConfig.set({value: {
-          proxyType: "manual",
-          socksVersion: 3,
-        }}),
-        /3 is not a valid value for socksVersion/,
-        "proxyConfig.set rejects with an invalid socksVersion value.");
-
-      browser.test.sendMessage("done");
-    };
+    browser.test.sendMessage("done");
+  }
 
   let extension = ExtensionTestUtils.loadExtension({
     background,

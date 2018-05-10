@@ -16,6 +16,7 @@
 #include "nsLayoutCID.h"
 #include "mozilla/dom/URL.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/ServoStyleRuleMap.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 
@@ -105,17 +106,10 @@ nsXBLPrototypeResources::FlushSkinSheets()
     mStyleSheetList.AppendElement(newSheet);
   }
 
-  if (doc->IsStyledByServo()) {
-    // There may be no shell during unlink.
-    //
-    // FIXME(emilio): We shouldn't skip shadow root style updates just because?
-    // Though during unlink is fine I guess...
-    if (auto* shell = doc->GetShell()) {
-      MOZ_ASSERT(shell->GetPresContext());
-      ComputeServoStyles(*shell->StyleSet()->AsServo());
-    }
-  } else {
-    MOZ_CRASH("old style system disabled");
+  // There may be no shell during unlink.
+  if (auto* shell = doc->GetShell()) {
+    MOZ_ASSERT(shell->GetPresContext());
+    ComputeServoStyles(*shell->StyleSet());
   }
 
   return NS_OK;
@@ -157,7 +151,7 @@ nsXBLPrototypeResources::SyncServoStyles()
   mStyleRuleMap.reset(nullptr);
   mServoStyles.reset(Servo_AuthorStyles_Create());
   for (auto& sheet : mStyleSheetList) {
-    Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), sheet->AsServo());
+    Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), sheet);
   }
 }
 

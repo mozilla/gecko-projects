@@ -443,7 +443,7 @@ FileReaderSync::SyncRead(nsIInputStream* aStream, char* aBuffer,
   WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
 
-  AutoSyncLoopHolder syncLoop(workerPrivate, Closing);
+  AutoSyncLoopHolder syncLoop(workerPrivate, Terminating);
 
   nsCOMPtr<nsIEventTarget> syncLoopTarget = syncLoop.GetEventTarget();
   if (!syncLoopTarget) {
@@ -500,7 +500,7 @@ FileReaderSync::ConvertAsyncToSyncStream(uint64_t aStreamSize,
     return NS_ERROR_FAILURE;
   }
 
-  rv = NS_NewCStringInputStream(aSyncStream, buffer);
+  rv = NS_NewCStringInputStream(aSyncStream, Move(buffer));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

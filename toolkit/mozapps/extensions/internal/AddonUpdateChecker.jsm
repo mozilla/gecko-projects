@@ -25,18 +25,14 @@ ChromeUtils.defineModuleGetter(this, "AddonManagerPrivate",
                                "resource://gre/modules/AddonManager.jsm");
 ChromeUtils.defineModuleGetter(this, "AddonRepository",
                                "resource://gre/modules/addons/AddonRepository.jsm");
+ChromeUtils.defineModuleGetter(this, "Blocklist",
+                               "resource://gre/modules/Blocklist.jsm");
+ChromeUtils.defineModuleGetter(this, "CertUtils",
+                               "resource://gre/modules/CertUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "ServiceRequest",
                                "resource://gre/modules/ServiceRequest.jsm");
 ChromeUtils.defineModuleGetter(this, "UpdateRDFConverter",
-                               "resource://gre/modules/addons/UpdateRDFConverter.jsm");
-
-
-// Shared code for suppressing bad cert dialogs.
-XPCOMUtils.defineLazyGetter(this, "CertUtils", function() {
-  let certUtils = {};
-  ChromeUtils.import("resource://gre/modules/CertUtils.jsm", certUtils);
-  return certUtils;
-});
+                               "resource://gre/modules/addons/RDFManifestConverter.jsm");
 
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 const LOGGER_ID = "addons.update-checker";
@@ -365,7 +361,7 @@ UpdateParser.prototype = {
   },
 
   /**
-   * Helper method to notify the observer that an error occured.
+   * Helper method to notify the observer that an error occurred.
    */
   notifyError(aStatus) {
     if ("onUpdateCheckError" in this.observer) {
@@ -486,7 +482,7 @@ var AddonUpdateChecker = {
   },
 
   /**
-   * Returns the newest available update from a list of update objects.
+   * Asynchronously returns the newest available update from a list of update objects.
    *
    * @param  aUpdates
    *         An array of update objects
@@ -502,9 +498,9 @@ var AddonUpdateChecker = {
    *         Array of AddonCompatibilityOverride to take into account. Optional.
    * @return an update object if one matches or null if not
    */
-  getNewestCompatibleUpdate(aUpdates, aAppVersion, aPlatformVersion,
-                                      aIgnoreMaxVersion, aIgnoreStrictCompat,
-                                      aCompatOverrides) {
+  async getNewestCompatibleUpdate(aUpdates, aAppVersion, aPlatformVersion,
+                                  aIgnoreMaxVersion, aIgnoreStrictCompat,
+                                  aCompatOverrides) {
     if (!aAppVersion)
       aAppVersion = Services.appinfo.version;
     if (!aPlatformVersion)
@@ -514,7 +510,7 @@ var AddonUpdateChecker = {
     for (let update of aUpdates) {
       if (!update.updateURL)
         continue;
-      let state = Services.blocklist.getAddonBlocklistState(update, aAppVersion, aPlatformVersion);
+      let state = await Blocklist.getAddonBlocklistState(update, aAppVersion, aPlatformVersion);
       if (state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED)
         continue;
       if ((newest == null || (Services.vc.compare(newest.version, update.version) < 0)) &&

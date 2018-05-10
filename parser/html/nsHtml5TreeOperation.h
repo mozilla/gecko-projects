@@ -15,7 +15,11 @@ class nsHtml5TreeOpExecutor;
 class nsHtml5DocumentBuilder;
 namespace mozilla {
 class Encoding;
-}
+
+namespace dom {
+class Text;
+} // namespace dom
+} // namespace mozilla
 
 enum eHtml5TreeOperation
 {
@@ -65,7 +69,7 @@ enum eHtml5TreeOperation
   eTreeOpAddError,
   eTreeOpAddLineNumberId,
   eTreeOpStartLayout,
-  eTreeOpDisableEncodingMenu
+  eTreeOpEnableEncodingMenu
 };
 
 class nsHtml5TreeOperationStringPair
@@ -126,7 +130,7 @@ public:
 
   static nsresult AppendTextToTextNode(const char16_t* aBuffer,
                                        uint32_t aLength,
-                                       nsIContent* aTextNode,
+                                       mozilla::dom::Text* aTextNode,
                                        nsHtml5DocumentBuilder* aBuilder);
 
   static nsresult AppendText(const char16_t* aBuffer,
@@ -227,16 +231,16 @@ public:
 
   inline void Init(eHtml5TreeOperation aOpCode)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
     mOpCode = aOpCode;
   }
 
   inline void Init(eHtml5TreeOperation aOpCode, nsIContentHandle* aNode)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
     mOpCode = aOpCode;
     mOne.node = static_cast<nsIContent**>(aNode);
   }
@@ -245,10 +249,10 @@ public:
                    nsIContentHandle* aNode,
                    nsIContentHandle* aParent)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
-    NS_PRECONDITION(aParent, "Initialized tree op with null parent.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(aParent, "Initialized tree op with null parent.");
     mOpCode = aOpCode;
     mOne.node = static_cast<nsIContent**>(aNode);
     mTwo.node = static_cast<nsIContent**>(aParent);
@@ -258,8 +262,8 @@ public:
                    const nsACString& aString,
                    int32_t aInt32)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
 
     int32_t len = aString.Length();
     char* str = new char[len + 1];
@@ -287,8 +291,8 @@ public:
                    NotNull<const Encoding*> aEncoding,
                    int32_t aInt32)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
 
     mOpCode = aOpCode;
     mOne.encoding = aEncoding;
@@ -309,11 +313,11 @@ public:
                    nsIContentHandle* aParent,
                    nsIContentHandle* aTable)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
-    NS_PRECONDITION(aParent, "Initialized tree op with null parent.");
-    NS_PRECONDITION(aTable, "Initialized tree op with null table.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(aParent, "Initialized tree op with null parent.");
+    MOZ_ASSERT(aTable, "Initialized tree op with null table.");
     mOpCode = aOpCode;
     mOne.node = static_cast<nsIContent**>(aNode);
     mTwo.node = static_cast<nsIContent**>(aParent);
@@ -322,17 +326,17 @@ public:
 
   inline void Init(nsHtml5DocumentMode aMode)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
     mOpCode = eTreeOpDocumentMode;
     mOne.mode = aMode;
   }
 
   inline void InitScript(nsIContentHandle* aNode)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
     mOpCode = eTreeOpRunScript;
     mOne.node = static_cast<nsIContent**>(aNode);
     mTwo.state = nullptr;
@@ -346,10 +350,11 @@ public:
                    bool aFromNetwork,
                    nsHtml5ContentCreatorFunction aCreator)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aName, "Initialized tree op with null name.");
-    NS_PRECONDITION(aTarget, "Initialized tree op with null target node.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aName, "Initialized tree op with null name.");
+    MOZ_ASSERT(aTarget, "Initialized tree op with null target node.");
+
     if (aNamespace == kNameSpaceID_XHTML) {
       mOpCode = aFromNetwork ? eTreeOpCreateHTMLElementNetwork
                              : eTreeOpCreateHTMLElementNotNetwork;
@@ -378,9 +383,9 @@ public:
                    nsIContentHandle* aStackParent,
                    nsIContentHandle* aTable)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aBuffer, "Initialized tree op with null buffer.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aBuffer, "Initialized tree op with null buffer.");
     mOpCode = aOpCode;
     mOne.node = static_cast<nsIContent**>(aStackParent);
     mTwo.unicharPtr = aBuffer;
@@ -393,9 +398,9 @@ public:
                    int32_t aLength,
                    nsIContentHandle* aParent)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aBuffer, "Initialized tree op with null buffer.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aBuffer, "Initialized tree op with null buffer.");
     mOpCode = aOpCode;
     mOne.node = static_cast<nsIContent**>(aParent);
     mTwo.unicharPtr = aBuffer;
@@ -406,9 +411,9 @@ public:
                    char16_t* aBuffer,
                    int32_t aLength)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aBuffer, "Initialized tree op with null buffer.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aBuffer, "Initialized tree op with null buffer.");
     mOpCode = aOpCode;
     mTwo.unicharPtr = aBuffer;
     mFour.integer = aLength;
@@ -417,9 +422,9 @@ public:
   inline void Init(nsIContentHandle* aElement,
                    nsHtml5HtmlAttributes* aAttributes)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aElement, "Initialized tree op with null element.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aElement, "Initialized tree op with null element.");
     mOpCode = eTreeOpAddAttributes;
     mOne.node = static_cast<nsIContent**>(aElement);
     mTwo.attributes = aAttributes;
@@ -429,8 +434,8 @@ public:
                    const nsAString& aPublicId,
                    const nsAString& aSystemId)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
     mOpCode = eTreeOpAppendDoctypeToDocument;
     mOne.atom = aName;
     mTwo.stringPair = new nsHtml5TreeOperationStringPair(aPublicId, aSystemId);
@@ -441,8 +446,8 @@ public:
                    nsAtom* aAtom,
                    nsAtom* aOtherAtom)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
     mOpCode = eTreeOpAddError;
     mOne.node = static_cast<nsIContent**>(aElement);
     mTwo.charPtr = (char*)aMsgId;
@@ -464,8 +469,8 @@ public:
 
   inline void Init(const char* aMsgId, bool aError, int32_t aLineNumber)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
     mOpCode = eTreeOpMaybeComplainAboutCharset;
     mOne.charPtr = const_cast<char*>(aMsgId);
     mTwo.integer = aError;
@@ -474,8 +479,8 @@ public:
 
   inline void Init(eHtml5TreeOperation aOpCode, const nsAString& aString)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
 
     char16_t* str = ToNewUnicode(aString);
     mOpCode = aOpCode;
@@ -486,9 +491,9 @@ public:
                    nsIContentHandle* aNode,
                    int32_t aInt)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
     mOpCode = aOpCode;
     mOne.node = static_cast<nsIContent**>(aNode);
     mFour.integer = aInt;
@@ -496,19 +501,19 @@ public:
 
   inline void Init(nsresult aRv)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(NS_FAILED(aRv), "Initialized tree op with non-failure.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(NS_FAILED(aRv), "Initialized tree op with non-failure.");
     mOpCode = eTreeOpMarkAsBroken;
     mOne.result = aRv;
   }
 
   inline void InitAddClass(nsIContentHandle* aNode, const char16_t* aClass)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
-    NS_PRECONDITION(aClass, "Initialized tree op with null string.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(aClass, "Initialized tree op with null string.");
     // aClass must be a literal string that does not need freeing
     mOpCode = eTreeOpAddClass;
     mOne.node = static_cast<nsIContent**>(aNode);
@@ -518,10 +523,10 @@ public:
   inline void InitAddLineNumberId(nsIContentHandle* aNode,
                                   const int32_t aLineNumber)
   {
-    NS_PRECONDITION(mOpCode == eTreeOpUninitialized,
-                    "Op code must be uninitialized when initializing.");
-    NS_PRECONDITION(aNode, "Initialized tree op with null node.");
-    NS_PRECONDITION(aLineNumber > 0, "Initialized tree op with line number.");
+    MOZ_ASSERT(mOpCode == eTreeOpUninitialized,
+               "Op code must be uninitialized when initializing.");
+    MOZ_ASSERT(aNode, "Initialized tree op with null node.");
+    MOZ_ASSERT(aLineNumber > 0, "Initialized tree op with line number.");
     // aClass must be a literal string that does not need freeing
     mOpCode = eTreeOpAddLineNumberId;
     mOne.node = static_cast<nsIContent**>(aNode);
@@ -537,7 +542,7 @@ public:
     NS_ASSERTION(
       IsRunScript(),
       "Setting a snapshot for a tree operation other than eTreeOpRunScript!");
-    NS_PRECONDITION(aSnapshot, "Initialized tree op with null snapshot.");
+    MOZ_ASSERT(aSnapshot, "Initialized tree op with null snapshot.");
     mTwo.state = aSnapshot;
     mFour.integer = aLine;
   }

@@ -34,10 +34,6 @@
 #include "nsIContent.h"
 #include "mozilla/ComputedStyle.h"
 #include "nsIBoxObject.h"
-#include "nsIDOMCustomEvent.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMNodeList.h"
-#include "nsIDOMXULElement.h"
 #include "nsIDocument.h"
 #include "nsCSSRendering.h"
 #include "nsString.h"
@@ -61,7 +57,10 @@
 #include "nsLayoutUtils.h"
 #include "nsIScrollableFrame.h"
 #include "nsDisplayList.h"
+#include "mozilla/dom/CustomEvent.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/TreeBoxObject.h"
 #include "nsIScriptableRegion.h"
 #include <algorithm>
@@ -553,13 +552,15 @@ nsTreeBodyFrame::SetFocused(bool aFocused)
 }
 
 nsresult
-nsTreeBodyFrame::GetTreeBody(nsIDOMElement** aElement)
+nsTreeBodyFrame::GetTreeBody(Element** aElement)
 {
   //NS_ASSERTION(mContent, "no content, see bug #104878");
   if (!mContent)
     return NS_ERROR_NULL_POINTER;
 
-  return mContent->QueryInterface(NS_GET_IID(nsIDOMElement), (void**)aElement);
+  RefPtr<Element> element = mContent->AsElement();
+  element.forget(aElement);
+  return NS_OK;
 }
 
 int32_t
@@ -1250,7 +1251,7 @@ nsTreeBodyFrame::GetCoordsForCellItem(int32_t aRow, nsITreeColumn* aCol, const n
     ComputedStyle* textContext = GetPseudoComputedStyle(nsCSSAnonBoxes::mozTreeCellText);
 
     RefPtr<nsFontMetrics> fm =
-      nsLayoutUtils::GetFontMetricsForComputedStyle(textContext);
+      nsLayoutUtils::GetFontMetricsForComputedStyle(textContext, presContext);
     nscoord height = fm->MaxHeight();
 
     nsMargin textMargin;
@@ -1318,7 +1319,7 @@ nsTreeBodyFrame::AdjustForCellText(nsAutoString& aText,
                                    nsFontMetrics& aFontMetrics,
                                    nsRect& aTextRect)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   DrawTarget* drawTarget = aRenderingContext.GetDrawTarget();
 
@@ -1490,7 +1491,7 @@ nsTreeBodyFrame::GetItemWithinCellAt(nscoord aX, const nsRect& aCellRect,
                                      int32_t aRowIndex,
                                      nsTreeColumn* aColumn)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   // Obtain the properties for our cell.
   PrefillPropertyArray(aRowIndex, aColumn);
@@ -1624,7 +1625,7 @@ nsTreeBodyFrame::GetItemWithinCellAt(nscoord aX, const nsRect& aCellRect,
   AdjustForBorderPadding(textContext, textRect);
 
   RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForComputedStyle(textContext);
+    nsLayoutUtils::GetFontMetricsForComputedStyle(textContext, presContext);
   AdjustForCellText(cellText, aRowIndex, aColumn, *rc, *fm, textRect);
 
   if (aX >= textRect.x && aX < textRect.x + textRect.width)
@@ -1681,8 +1682,8 @@ nsTreeBodyFrame::GetCellWidth(int32_t aRow, nsTreeColumn* aCol,
                               gfxContext* aRenderingContext,
                               nscoord& aDesiredSize, nscoord& aCurrentSize)
 {
-  NS_PRECONDITION(aCol, "aCol must not be null");
-  NS_PRECONDITION(aRenderingContext, "aRenderingContext must not be null");
+  MOZ_ASSERT(aCol, "aCol must not be null");
+  MOZ_ASSERT(aRenderingContext, "aRenderingContext must not be null");
 
   // The rect for the current cell.
   nscoord colWidth;
@@ -1752,7 +1753,7 @@ nsTreeBodyFrame::GetCellWidth(int32_t aRow, nsTreeColumn* aCol,
   GetBorderPadding(textContext, bp);
 
   RefPtr<nsFontMetrics> fm =
-    nsLayoutUtils::GetFontMetricsForComputedStyle(textContext);
+    nsLayoutUtils::GetFontMetricsForComputedStyle(textContext, PresContext());
   // Get the width of the text itself
   nscoord width = nsLayoutUtils::AppUnitWidthOfStringBidi(cellText, this, *fm,
                                                           *aRenderingContext);
@@ -1924,7 +1925,7 @@ nsTreeBodyFrame::EndUpdateBatch()
 void
 nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
 {
-  NS_PRECONDITION(!aCol || aCol->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(!aCol || aCol->GetFrame(), "invalid column passed");
   mScratchArray.Clear();
 
   // focus
@@ -2055,7 +2056,7 @@ nsTreeBodyFrame::GetTwistyRect(int32_t aRowIndex,
                                ComputedStyle* aTwistyContext)
 {
   // The twisty rect extends all the way to the end of the cell.  This is incorrect.  We need to
-  // determine the twisty rect's true width.  This is done by examining the style context for
+  // determine the twisty rect's true width.  This is done by examining the ComputedStyle for
   // a width first.  If it has one, we use that.  If it doesn't, we use the image's natural width.
   // If the image hasn't loaded and if no width is specified, then we just bail. If there is
   // a -moz-appearance involved, adjust the rect by the minimum widget size provided by
@@ -2108,7 +2109,7 @@ nsTreeBodyFrame::GetImage(int32_t aRowIndex, nsTreeColumn* aCol, bool aUseContex
     aAllowImageRegions = false;
   }
   else {
-    // Obtain the URL from the style context.
+    // Obtain the URL from the ComputedStyle.
     aAllowImageRegions = true;
     styleRequest = aComputedStyle->StyleList()->GetListStyleImage();
     if (!styleRequest)
@@ -2220,7 +2221,7 @@ nsRect nsTreeBodyFrame::GetImageSize(int32_t aRowIndex, nsTreeColumn* aCol, bool
   // XXX We should respond to visibility rules for collapsed vs. hidden.
 
   // This method returns the width of the twisty INCLUDING borders and padding.
-  // It first checks the style context for a width.  If none is found, it tries to
+  // It first checks the ComputedStyle for a width.  If none is found, it tries to
   // use the default image width for the twisty.  If no image is found, it defaults
   // to border+padding.
   nsRect r(0,0,0,0);
@@ -2983,7 +2984,7 @@ nsTreeBodyFrame::PaintColumn(nsTreeColumn*        aColumn,
                              gfxContext&          aRenderingContext,
                              const nsRect&        aDirtyRect)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   // Now obtain the properties for our cell.
   PrefillPropertyArray(-1, aColumn);
@@ -3234,7 +3235,7 @@ nsTreeBodyFrame::PaintCell(int32_t               aRowIndex,
                            nsPoint               aPt,
                            nsDisplayListBuilder* aBuilder)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   // Now obtain the properties for our cell.
   // XXX Automatically fill in the following props: open, closed, container, leaf, selected, focused, and the col ID.
@@ -3306,8 +3307,7 @@ nsTreeBodyFrame::PaintCell(int32_t               aRowIndex,
 
       const nsStyleBorder* borderStyle = lineContext->StyleBorder();
       // Resolve currentcolor values against the treeline context
-      nscolor color = lineContext->StyleColor()->
-        CalcComplexColor(borderStyle->mBorderLeftColor);
+      nscolor color = borderStyle->mBorderLeftColor.CalcColor(lineContext);
       ColorPattern colorPatt(ToDeviceColor(color));
 
       uint8_t style = borderStyle->GetBorderStyle(eSideLeft);
@@ -3421,7 +3421,7 @@ nsTreeBodyFrame::PaintTwisty(int32_t              aRowIndex,
                              nscoord&             aRemainingWidth,
                              nscoord&             aCurrX)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
   nscoord rightEdge = aCurrX + aRemainingWidth;
@@ -3492,19 +3492,24 @@ nsTreeBodyFrame::PaintTwisty(int32_t              aRowIndex,
       bool useImageRegion = true;
       GetImage(aRowIndex, aColumn, true, twistyContext, useImageRegion, getter_AddRefs(image));
       if (image) {
-        nsPoint pt = twistyRect.TopLeft();
+        nsPoint anchorPoint = twistyRect.TopLeft();
 
         // Center the image. XXX Obey vertical-align style prop?
         if (imageSize.height < twistyRect.height) {
-          pt.y += (twistyRect.height - imageSize.height)/2;
+          anchorPoint.y += (twistyRect.height - imageSize.height)/2;
         }
+
+        // Apply context paint if applicable
+        Maybe<SVGImageContext> svgContext;
+        SVGImageContext::MaybeStoreContextPaint(svgContext, twistyContext,
+                                                image);
 
         // Paint the image.
         result &=
           nsLayoutUtils::DrawSingleUnscaledImage(
               aRenderingContext, aPresContext, image,
-              SamplingFilter::POINT, pt, &aDirtyRect,
-              imgIContainer::FLAG_NONE, &imageSize);
+              SamplingFilter::POINT, anchorPoint, &aDirtyRect,
+              svgContext, imgIContainer::FLAG_NONE, &imageSize);
       }
     }
   }
@@ -3523,7 +3528,7 @@ nsTreeBodyFrame::PaintImage(int32_t               aRowIndex,
                             nscoord&              aCurrX,
                             nsDisplayListBuilder* aBuilder)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
   nscoord rightEdge = aCurrX + aRemainingWidth;
@@ -3698,7 +3703,7 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
                            const nsRect&        aDirtyRect,
                            nscoord&             aCurrX)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
 
@@ -3745,7 +3750,7 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
 
   // Compute our text size.
   RefPtr<nsFontMetrics> fontMet =
-    nsLayoutUtils::GetFontMetricsForComputedStyle(textContext);
+    nsLayoutUtils::GetFontMetricsForComputedStyle(textContext, PresContext());
 
   nscoord height = fontMet->MaxHeight();
   nscoord baseline = fontMet->MaxAscent();
@@ -3829,7 +3834,7 @@ nsTreeBodyFrame::PaintCheckbox(int32_t              aRowIndex,
                                gfxContext&          aRenderingContext,
                                const nsRect&        aDirtyRect)
 {
-  NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
+  MOZ_ASSERT(aColumn && aColumn->GetFrame(), "invalid column passed");
 
   // Resolve style for the checkbox.
   ComputedStyle* checkboxContext = GetPseudoComputedStyle(nsCSSAnonBoxes::mozTreeCheckbox);
@@ -3879,12 +3884,16 @@ nsTreeBodyFrame::PaintCheckbox(int32_t              aRowIndex,
       pt.x += (checkboxRect.width - imageSize.width)/2;
     }
 
+    // Apply context paint if applicable
+    Maybe<SVGImageContext> svgContext;
+    SVGImageContext::MaybeStoreContextPaint(svgContext, checkboxContext,
+                                            image);
     // Paint the image.
     result &=
       nsLayoutUtils::DrawSingleUnscaledImage(aRenderingContext,
         aPresContext,
         image, SamplingFilter::POINT, pt, &aDirtyRect,
-        imgIContainer::FLAG_NONE, &imageSize);
+        svgContext, imgIContainer::FLAG_NONE, &imageSize);
   }
 
   return result;
@@ -4644,6 +4653,26 @@ nsTreeBodyFrame::RemoveTreeImageListener(nsTreeImageListener* aListener)
 }
 
 #ifdef ACCESSIBILITY
+static void
+InitCustomEvent(CustomEvent* aEvent, const nsAString& aType,
+                nsIWritablePropertyBag2* aDetail)
+{
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(aEvent->GetParentObject())) {
+    return;
+  }
+
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JS::Value> detail(cx);
+  if (!ToJSValue(cx, aDetail, &detail)) {
+    jsapi.ClearException();
+    return;
+  }
+
+  aEvent->InitCustomEvent(cx, aType, /* aCanBubble = */ true,
+                          /* aCancelable = */ false, detail);
+}
+
 void
 nsTreeBodyFrame::FireRowCountChangedEvent(int32_t aIndex, int32_t aCount)
 {
@@ -4654,18 +4683,19 @@ nsTreeBodyFrame::FireRowCountChangedEvent(int32_t aIndex, int32_t aCount)
   nsCOMPtr<nsIDocument> doc = content->OwnerDoc();
   MOZ_ASSERT(doc);
 
-  IgnoredErrorResult ignored;
   RefPtr<Event> event = doc->CreateEvent(NS_LITERAL_STRING("customevent"),
-                                         CallerType::System, ignored);
+                                         CallerType::System, IgnoreErrors());
 
-  nsCOMPtr<nsIDOMCustomEvent> treeEvent(do_QueryInterface(event));
-  if (!treeEvent)
+  CustomEvent* treeEvent = event->AsCustomEvent();
+  if (!treeEvent) {
     return;
+  }
 
   nsCOMPtr<nsIWritablePropertyBag2> propBag(
     do_CreateInstance("@mozilla.org/hash-property-bag;1"));
-  if (!propBag)
+  if (!propBag) {
     return;
+  }
 
   // Set 'index' data - the row index rows are changed from.
   propBag->SetPropertyAsInt32(NS_LITERAL_STRING("index"), aIndex);
@@ -4673,11 +4703,8 @@ nsTreeBodyFrame::FireRowCountChangedEvent(int32_t aIndex, int32_t aCount)
   // Set 'count' data - the number of changed rows.
   propBag->SetPropertyAsInt32(NS_LITERAL_STRING("count"), aCount);
 
-  RefPtr<nsVariant> detailVariant(new nsVariant());
-
-  detailVariant->SetAsISupports(propBag);
-  treeEvent->InitCustomEvent(NS_LITERAL_STRING("TreeRowCountChanged"),
-                             true, false, detailVariant);
+  InitCustomEvent(treeEvent, NS_LITERAL_STRING("TreeRowCountChanged"),
+                  propBag);
 
   event->SetTrusted(true);
 
@@ -4697,18 +4724,19 @@ nsTreeBodyFrame::FireInvalidateEvent(int32_t aStartRowIdx, int32_t aEndRowIdx,
 
   nsCOMPtr<nsIDocument> doc = content->OwnerDoc();
 
-  IgnoredErrorResult ignored;
   RefPtr<Event> event = doc->CreateEvent(NS_LITERAL_STRING("customevent"),
-                                         CallerType::System, ignored);
+                                         CallerType::System, IgnoreErrors());
 
-  nsCOMPtr<nsIDOMCustomEvent> treeEvent(do_QueryInterface(event));
-  if (!treeEvent)
+  CustomEvent* treeEvent = event->AsCustomEvent();
+  if (!treeEvent) {
     return;
+  }
 
   nsCOMPtr<nsIWritablePropertyBag2> propBag(
     do_CreateInstance("@mozilla.org/hash-property-bag;1"));
-  if (!propBag)
+  if (!propBag){
     return;
+  }
 
   if (aStartRowIdx != -1 && aEndRowIdx != -1) {
     // Set 'startrow' data - the start index of invalidated rows.
@@ -4740,11 +4768,8 @@ nsTreeBodyFrame::FireInvalidateEvent(int32_t aStartRowIdx, int32_t aEndRowIdx,
                                 endColIdx);
   }
 
-  RefPtr<nsVariant> detailVariant(new nsVariant());
-
-  detailVariant->SetAsISupports(propBag);
-  treeEvent->InitCustomEvent(NS_LITERAL_STRING("TreeInvalidated"),
-                             true, false, detailVariant);
+  InitCustomEvent(treeEvent, NS_LITERAL_STRING("TreeInvalidated"),
+                  propBag);
 
   event->SetTrusted(true);
 

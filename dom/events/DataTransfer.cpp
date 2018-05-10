@@ -6,6 +6,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/CheckedInt.h"
 
 #include "DataTransfer.h"
 
@@ -898,7 +899,7 @@ DataTransfer::GetTransferable(uint32_t aIndex, nsILoadContext* aLoadContext)
     kPNGImageMime, kJPEGImageMime, kGIFImageMime, kNativeImageMime,
     kFileMime, kFilePromiseMime, kFilePromiseURLMime,
     kFilePromiseDestFilename, kFilePromiseDirectoryMime,
-    kMozTextInternal, kHTMLContext, kHTMLInfo };
+    kMozTextInternal, kHTMLContext, kHTMLInfo, kImageRequestMime };
 
   /*
    * Two passes are made here to iterate over all of the types. First, look for
@@ -1202,7 +1203,8 @@ nsresult
 DataTransfer::SetDataWithPrincipal(const nsAString& aFormat,
                                    nsIVariant* aData,
                                    uint32_t aIndex,
-                                   nsIPrincipal* aPrincipal)
+                                   nsIPrincipal* aPrincipal,
+                                   bool aHidden)
 {
   nsAutoString format;
   GetRealFormat(aFormat, format);
@@ -1211,7 +1213,7 @@ DataTransfer::SetDataWithPrincipal(const nsAString& aFormat,
   RefPtr<DataTransferItem> item =
     mItems->SetDataWithPrincipal(format, aData, aIndex, aPrincipal,
                                  /* aInsertOnly = */ false,
-                                 /* aHidden= */ false,
+                                 aHidden,
                                  rv);
   return rv.StealNSResult();
 }
@@ -1469,11 +1471,14 @@ DataTransfer::FillInExternalCustomTypes(nsIVariant* aData, uint32_t aIndex,
     return;
   }
 
-  nsAutoCString str;
-  str.Adopt(chrs, len);
+  CheckedInt<int32_t> checkedLen(len);
+  if (!checkedLen.isValid()) {
+    return;
+  }
 
   nsCOMPtr<nsIInputStream> stringStream;
-  NS_NewCStringInputStream(getter_AddRefs(stringStream), str);
+  NS_NewByteInputStream(getter_AddRefs(stringStream), chrs, checkedLen.value(),
+                        NS_ASSIGNMENT_ADOPT);
 
   nsCOMPtr<nsIObjectInputStream> stream =
     NS_NewObjectInputStream(stringStream);

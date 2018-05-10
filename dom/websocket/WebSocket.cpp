@@ -23,6 +23,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "nsAutoPtr.h"
+#include "mozilla/LoadInfo.h"
 #include "nsGlobalWindow.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIDOMWindow.h"
@@ -571,7 +572,7 @@ class DisconnectInternalRunnable final : public WorkerMainThreadRunnable
 {
 public:
   explicit DisconnectInternalRunnable(WebSocketImpl* aImpl)
-    : WorkerMainThreadRunnable(aImpl->mWorkerRef->Private(),
+    : WorkerMainThreadRunnable(GetCurrentThreadWorkerPrivate(),
                                NS_LITERAL_CSTRING("WebSocket :: disconnect"))
     , mImpl(aImpl)
   { }
@@ -619,7 +620,7 @@ WebSocketImpl::Disconnect()
     if (mWebSocket->GetOwner()) {
       mWebSocket->GetOwner()->UpdateWebSocketCount(-1);
     }
-  } else if (mWorkerRef) {
+  } else {
     RefPtr<DisconnectInternalRunnable> runnable =
       new DisconnectInternalRunnable(this);
     ErrorResult rv;
@@ -951,6 +952,30 @@ JSObject*
 WebSocket::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
   return WebSocketBinding::Wrap(cx, this, aGivenProto);
+}
+
+void
+WebSocket::BindToOwner(nsIGlobalObject* aNew)
+{
+  auto scopeExit = MakeScopeExit([&] {
+    DOMEventTargetHelper::BindToOwner(aNew);
+  });
+
+  // If we're disconnected, then there is no state to update.
+  if (!mImpl || mImpl->mDisconnectingOrDisconnected) {
+    return;
+  }
+
+  // Update state on the old window.
+  if (GetOwner()) {
+    GetOwner()->UpdateWebSocketCount(-1);
+  }
+
+  // Update state on the new window
+  nsCOMPtr<nsPIDOMWindowInner> newWindow = do_QueryInterface(aNew);
+  if (newWindow) {
+    newWindow->UpdateWebSocketCount(1);
+  }
 }
 
 //---------------------------------------------------------------------------
@@ -1378,18 +1403,14 @@ WebSocket::ConstructorCommon(const GlobalObject& aGlobal,
     }
 
     if (NS_WARN_IF(!webSocketImpl->RegisterWorkerRef(workerPrivate))) {
-      // The worker is shutting down. We cannot proceed but we return a
-      // 'connecting' object.
-      webSocketImpl->mWorkerShuttingDown = true;
-      webSocketImpl->Disconnect();
-      return webSocket.forget();
+      // The worker is shutting down.
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
     }
 
     RefPtr<ConnectRunnable> connectRunnable =
       new ConnectRunnable(workerPrivate, webSocketImpl);
-    // We can use Closing because we have a WorkerRef and that is enough to be
-    // sure that the worker is up and running.
-    connectRunnable->Dispatch(Closing, aRv);
+    connectRunnable->Dispatch(Canceling, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -1652,14 +1673,17 @@ WebSocketImpl::Init(JSContext* aCx,
     // AsyncOpen2().
     // Please note that websockets can't follow redirects, hence there is no
     // need to perform a CSP check after redirects.
+    nsCOMPtr<nsILoadInfo> secCheckLoadInfo =
+      new net::LoadInfo(aPrincipal, // loading principal
+                        aPrincipal, // triggering principal
+                        originDoc,
+                        nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK,
+                        nsIContentPolicy::TYPE_WEBSOCKET);
+
     int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-    rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_WEBSOCKET,
-                                   uri,
-                                   aPrincipal, // loading principal
-                                   aPrincipal, // triggering principal
-                                   originDoc,
+    rv = NS_CheckContentLoadPolicy(uri,
+                                   secCheckLoadInfo,
                                    EmptyCString(),
-                                   nullptr,
                                    &shouldLoad,
                                    nsContentUtils::GetContentPolicy());
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1920,8 +1944,9 @@ WebSocket::CreateAndDispatchSimpleEvent(const nsAString& aName)
   event->InitEvent(aName, false, false);
   event->SetTrusted(true);
 
-  bool dummy;
-  return DispatchEvent(event, &dummy);
+  ErrorResult err;
+  DispatchEvent(*event, err);
+  return err.StealNSResult();
 }
 
 nsresult
@@ -2004,8 +2029,9 @@ WebSocket::CreateAndDispatchMessageEvent(const nsACString& aData,
                           Sequence<OwningNonNull<MessagePort>>());
   event->SetTrusted(true);
 
-  bool dummy;
-  return DispatchEvent(static_cast<Event*>(event), &dummy);
+  ErrorResult err;
+  DispatchEvent(*event, err);
+  return err.StealNSResult();
 }
 
 nsresult
@@ -2039,8 +2065,9 @@ WebSocket::CreateAndDispatchCloseEvent(bool aWasClean,
     CloseEvent::Constructor(this, CLOSE_EVENT_STRING, init);
   event->SetTrusted(true);
 
-  bool dummy;
-  return DispatchEvent(event, &dummy);
+  ErrorResult err;
+  DispatchEvent(*event, err);
+  return err.StealNSResult();
 }
 
 nsresult

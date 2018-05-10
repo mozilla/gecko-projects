@@ -777,6 +777,9 @@ class InterpreterFrame
     void setHasCachedSavedFrame() {
         flags_ |= HAS_CACHED_SAVED_FRAME;
     }
+    void clearHasCachedSavedFrame() {
+        flags_ &= ~HAS_CACHED_SAVED_FRAME;
+    }
 
   public:
     void trace(JSTracer* trc, Value* sp, jsbytecode* pc);
@@ -913,24 +916,7 @@ class InterpreterStack
     }
 };
 
-// CooperatingContext is a wrapper for a JSContext that is participating in
-// cooperative scheduling and may be different from the current thread. It is
-// in place to make it clearer when we might be operating on another thread,
-// and harder to accidentally pass in another thread's context to an API that
-// expects the current thread's context.
-class CooperatingContext
-{
-    JSContext* cx;
-
-  public:
-    explicit CooperatingContext(JSContext* cx) : cx(cx) {}
-    JSContext* context() const { return cx; }
-
-    // For &cx. The address should not be taken for other CooperatingContexts.
-    friend class ZoneGroup;
-};
-
-void TraceInterpreterActivations(JSContext* cx, const CooperatingContext& target, JSTracer* trc);
+void TraceInterpreterActivations(JSContext* cx, JSTracer* trc);
 
 /*****************************************************************************/
 
@@ -1212,7 +1198,7 @@ struct DefaultHasher<AbstractFramePtr> {
 //   recently. When we find a cache hit, we check the entry's SavedFrame's
 //   compartment against the current compartment; if they do not match, we flush
 //   the entire cache. This means that it is not always true that, if a frame's
-//   bit it set, it must have an entry in the cache. But we can still assert
+//   bit is set, it must have an entry in the cache. But we can still assert
 //   that, if a frame's bit is set and the cache is not completely empty, the
 //   frame will have an entry. When the cache is flushed, it will be repopulated
 //   immediately with the new capture's frames.
@@ -1265,6 +1251,7 @@ class LiveSavedFrameCache
 
         struct HasCachedMatcher;
         struct SetHasCachedMatcher;
+        struct ClearHasCachedMatcher;
 
       public:
         // If iter's frame is of a type that can be cached, construct a FramePtr
@@ -1276,6 +1263,7 @@ class LiveSavedFrameCache
 
         inline bool hasCachedSavedFrame() const;
         inline void setHasCachedSavedFrame();
+        inline void clearHasCachedSavedFrame();
 
         // Return true if this FramePtr refers to an interpreter frame.
         inline bool isInterpreterFrame() const { return ptr.is<InterpreterFrame*>(); }
@@ -1606,11 +1594,6 @@ class ActivationIterator
   public:
     explicit ActivationIterator(JSContext* cx);
 
-    // ActivationIterator can be used to iterate over a different thread's
-    // activations, for use by the GC, invalidation, and other operations that
-    // don't have a user-visible effect on the target thread's JS behavior.
-    ActivationIterator(JSContext* cx, const CooperatingContext& target);
-
     ActivationIterator& operator++();
 
     Activation* operator->() const {
@@ -1852,12 +1835,6 @@ class JitActivationIterator : public ActivationIterator
         settle();
     }
 
-    JitActivationIterator(JSContext* cx, const CooperatingContext& target)
-      : ActivationIterator(cx, target)
-    {
-        settle();
-    }
-
     JitActivationIterator& operator++() {
         ActivationIterator::operator++();
         settle();
@@ -2048,13 +2025,11 @@ class FrameIter
         unsigned ionInlineFrameNo_;
 
         Data(JSContext* cx, DebuggerEvalOption debuggerEvalOption, JSPrincipals* principals);
-        Data(JSContext* cx, const CooperatingContext& target, DebuggerEvalOption debuggerEvalOption);
         Data(const Data& other);
     };
 
     explicit FrameIter(JSContext* cx,
                        DebuggerEvalOption = FOLLOW_DEBUGGER_EVAL_PREV_LINK);
-    FrameIter(JSContext* cx, const CooperatingContext&, DebuggerEvalOption);
     FrameIter(JSContext* cx, DebuggerEvalOption, JSPrincipals*);
     FrameIter(const FrameIter& iter);
     MOZ_IMPLICIT FrameIter(const Data& data);
@@ -2096,7 +2071,7 @@ class FrameIter
     const char* filename() const;
     const char16_t* displayURL() const;
     unsigned computeLine(uint32_t* column = nullptr) const;
-    JSAtom* functionDisplayAtom() const;
+    JSAtom* maybeFunctionDisplayAtom() const;
     bool mutedErrors() const;
 
     bool hasScript() const { return !isWasm(); }
@@ -2107,6 +2082,7 @@ class FrameIter
 
     inline bool wasmDebugEnabled() const;
     inline wasm::Instance* wasmInstance() const;
+    inline uint32_t wasmFuncIndex() const;
     inline unsigned wasmBytecodeOffset() const;
     void wasmUpdateBytecodeOffset();
 
@@ -2217,14 +2193,6 @@ class ScriptFrameIter : public FrameIter
     explicit ScriptFrameIter(JSContext* cx,
                              DebuggerEvalOption debuggerEvalOption = FOLLOW_DEBUGGER_EVAL_PREV_LINK)
       : FrameIter(cx, debuggerEvalOption)
-    {
-        settle();
-    }
-
-    ScriptFrameIter(JSContext* cx,
-                     const CooperatingContext& target,
-                     DebuggerEvalOption debuggerEvalOption)
-       : FrameIter(cx, target, debuggerEvalOption)
     {
         settle();
     }
@@ -2351,10 +2319,6 @@ class AllScriptFramesIter : public ScriptFrameIter
     explicit AllScriptFramesIter(JSContext* cx)
       : ScriptFrameIter(cx, ScriptFrameIter::IGNORE_DEBUGGER_EVAL_PREV_LINK)
     {}
-
-    explicit AllScriptFramesIter(JSContext* cx, const CooperatingContext& target)
-      : ScriptFrameIter(cx, target, ScriptFrameIter::IGNORE_DEBUGGER_EVAL_PREV_LINK)
-    {}
 };
 
 /* Popular inline definitions. */
@@ -2383,7 +2347,7 @@ inline wasm::Instance*
 FrameIter::wasmInstance() const
 {
     MOZ_ASSERT(!done());
-    MOZ_ASSERT(isWasm() && wasmDebugEnabled());
+    MOZ_ASSERT(isWasm());
     return wasmFrame().instance();
 }
 
@@ -2393,6 +2357,14 @@ FrameIter::wasmBytecodeOffset() const
     MOZ_ASSERT(!done());
     MOZ_ASSERT(isWasm());
     return wasmFrame().lineOrBytecode();
+}
+
+inline uint32_t
+FrameIter::wasmFuncIndex() const
+{
+    MOZ_ASSERT(!done());
+    MOZ_ASSERT(isWasm());
+    return wasmFrame().funcIndex();
 }
 
 inline bool

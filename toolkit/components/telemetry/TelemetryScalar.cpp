@@ -18,6 +18,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/PContent.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Unused.h"
@@ -28,6 +29,7 @@
 #include "ipc/TelemetryComms.h"
 #include "ipc/TelemetryIPCAccumulator.h"
 
+using mozilla::Preferences;
 using mozilla::StaticAutoPtr;
 using mozilla::StaticMutex;
 using mozilla::StaticMutexNotRecorded;
@@ -35,11 +37,14 @@ using mozilla::StaticMutexAutoLock;
 using mozilla::Telemetry::Common::AutoHashtable;
 using mozilla::Telemetry::Common::IsExpiredVersion;
 using mozilla::Telemetry::Common::CanRecordDataset;
+using mozilla::Telemetry::Common::CanRecordProduct;
 using mozilla::Telemetry::Common::IsInDataset;
 using mozilla::Telemetry::Common::LogToBrowserConsole;
 using mozilla::Telemetry::Common::GetNameForProcessID;
 using mozilla::Telemetry::Common::RecordedProcessType;
 using mozilla::Telemetry::Common::IsValidIdentifierString;
+using mozilla::Telemetry::Common::GetCurrentProduct;
+using mozilla::Telemetry::Common::SupportedProduct;
 using mozilla::Telemetry::ScalarActionType;
 using mozilla::Telemetry::ScalarID;
 using mozilla::Telemetry::DynamicScalarDefinition;
@@ -89,7 +94,7 @@ namespace TelemetryIPCAccumulator = mozilla::TelemetryIPCAccumulator;
 namespace {
 
 const uint32_t kMaximumNumberOfKeys = 100;
-const uint32_t kMaximumKeyStringLength = 70;
+const uint32_t kMaximumKeyStringLength = 72;
 const uint32_t kMaximumStringValueLength = 50;
 // The category and scalar name maximum lengths are used by the dynamic
 // scalar registration function and must match the constants used by
@@ -145,6 +150,7 @@ struct DynamicScalarInfo : BaseScalarInfo {
                      nsITelemetry::DATASET_RELEASE_CHANNEL_OPTIN,
                      RecordedProcessType::All,
                      aKeyed,
+                     GetCurrentProduct(),
                      aBuiltin)
     , mDynamicName(aName)
     , mDynamicExpiration(aExpired)
@@ -629,7 +635,10 @@ class KeyedScalar
 public:
   typedef mozilla::Pair<nsCString, nsCOMPtr<nsIVariant>> KeyValuePair;
 
-  explicit KeyedScalar(uint32_t aScalarKind) : mScalarKind(aScalarKind) {};
+  explicit KeyedScalar(uint32_t aScalarKind)
+    : mScalarKind(aScalarKind)
+    , mMaximumNumberOfKeys(kMaximumNumberOfKeys)
+  { };
   ~KeyedScalar() = default;
 
   // Set, Add and SetMaximum functions as described in the Telemetry IDL.
@@ -651,11 +660,18 @@ public:
   // To measure the memory stats.
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
+  // To permit more keys than normal.
+  void SetMaximumNumberOfKeys(uint32_t aMaximumNumberOfKeys)
+  {
+    mMaximumNumberOfKeys = aMaximumNumberOfKeys;
+  };
+
 private:
   typedef nsClassHashtable<nsCStringHashKey, ScalarBase> ScalarKeysMapType;
 
   ScalarKeysMapType mScalarKeys;
   const uint32_t mScalarKind;
+  uint32_t mMaximumNumberOfKeys;
 
   ScalarResult GetScalarForKey(const nsAString& aKey, ScalarBase** aRet);
 };
@@ -787,12 +803,8 @@ KeyedScalar::GetScalarForKey(const nsAString& aKey, ScalarBase** aRet)
     return ScalarResult::KeyIsEmpty;
   }
 
-  if (aKey.Length() >= kMaximumKeyStringLength) {
+  if (aKey.Length() > kMaximumKeyStringLength) {
     return ScalarResult::KeyTooLong;
-  }
-
-  if (mScalarKeys.Count() >= kMaximumNumberOfKeys) {
-    return ScalarResult::TooManyKeys;
   }
 
   NS_ConvertUTF16toUTF8 utf8Key(aKey);
@@ -801,6 +813,10 @@ KeyedScalar::GetScalarForKey(const nsAString& aKey, ScalarBase** aRet)
   if (mScalarKeys.Get(utf8Key, &scalar)) {
     *aRet = scalar;
     return ScalarResult::Ok;
+  }
+
+  if (mScalarKeys.Count() >= mMaximumNumberOfKeys) {
+    return ScalarResult::TooManyKeys;
   }
 
   scalar = internal_ScalarAllocate(mScalarKind);
@@ -917,16 +933,16 @@ internal_LogScalarError(const nsACString& aScalarName, ScalarResult aSr)
       errorMessage.AppendLiteral(u" - Attempted to set the scalar to an incompatible value.");
       break;
     case ScalarResult::StringTooLong:
-      errorMessage.AppendLiteral(u" - Truncating scalar value to 50 characters.");
+      AppendUTF8toUTF16(nsPrintfCString(" - Truncating scalar value to %d characters.", kMaximumStringValueLength), errorMessage);
       break;
     case ScalarResult::KeyIsEmpty:
       errorMessage.AppendLiteral(u" - The key must not be empty.");
       break;
     case ScalarResult::KeyTooLong:
-      errorMessage.AppendLiteral(u" - The key length must be limited to 70 characters.");
+      AppendUTF8toUTF16(nsPrintfCString(" - The key length must be limited to %d characters.", kMaximumKeyStringLength), errorMessage);
       break;
     case ScalarResult::TooManyKeys:
-      errorMessage.AppendLiteral(u" - Keyed scalars cannot have more than 100 keys.");
+      AppendUTF8toUTF16(nsPrintfCString(" - Keyed scalars cannot have more than %d keys.", kMaximumNumberOfKeys), errorMessage);
       break;
     case ScalarResult::UnsignedNegativeValue:
       errorMessage.AppendLiteral(u" - Trying to set an unsigned scalar to a negative number.");
@@ -994,6 +1010,14 @@ internal_CanRecordProcess(const StaticMutexAutoLock& lock,
 }
 
 bool
+internal_CanRecordProduct(const StaticMutexAutoLock& lock,
+                          const ScalarKey& aId)
+{
+  const BaseScalarInfo &info = internal_GetScalarInfo(lock, aId);
+  return CanRecordProduct(info.products);
+}
+
+bool
 internal_CanRecordForScalarID(const StaticMutexAutoLock& lock,
                               const ScalarKey& aId)
 {
@@ -1042,6 +1066,11 @@ internal_CanRecordScalar(const StaticMutexAutoLock& lock, const ScalarKey& aId,
   // Can we record in this process?
   if (!internal_CanRecordProcess(lock, aId)) {
     return ScalarResult::CannotRecordInProcess;
+  }
+
+  // Can we record on this product?
+  if (!internal_CanRecordProduct(lock, aId)) {
+    return ScalarResult::CannotRecordDataset;
   }
 
   return ScalarResult::Ok;
@@ -1497,6 +1526,19 @@ TelemetryScalar::InitializeGlobalState(bool aCanRecordBase, bool aCanRecordExten
     CharPtrEntryType *entry = gScalarNameIDMap.PutEntry(gScalars[i].name());
     entry->mData = ScalarKey{i, false};
   }
+
+  // To summarize dynamic events we need a dynamic scalar.
+  const nsTArray<DynamicScalarInfo> initialDynamicScalars({
+    DynamicScalarInfo{
+      nsITelemetry::SCALAR_TYPE_COUNT,
+      true /* recordOnRelease */,
+      false /* expired */,
+      nsAutoCString("telemetry.dynamic_event_counts"),
+      true /* keyed */,
+      false /* built-in */,
+    },
+  });
+  internal_RegisterScalars(locker, initialDynamicScalars);
 
   gInitDone = true;
 }
@@ -2512,6 +2554,56 @@ TelemetryScalar::RegisterScalars(const nsACString& aCategoryName,
     ::internal_BroadcastDefinitions(locker, newScalarInfos);
   }
   return NS_OK;
+}
+
+/**
+ * Count in Scalars how many of which events were recorded. See bug 1440673
+ *
+ * Event Telemetry unfortunately cannot use vanilla ScalarAdd because it needs
+ * to summarize events recorded in different processes to the
+ * telemetry.event_counts of the same process. Including "dynamic".
+ *
+ * @param aUniqueEventName - expected to be category#object#method
+ * @param aProcessType - the process of the event being summarized
+ * @param aDynamic - whether the event being summarized was dynamic
+ */
+void
+TelemetryScalar::SummarizeEvent(const nsCString& aUniqueEventName,
+                                ProcessID aProcessType, bool aDynamic)
+{
+  MOZ_ASSERT(XRE_IsParentProcess(), "Only summarize events in the parent process");
+  if (!XRE_IsParentProcess()) {
+    return;
+  }
+
+  StaticMutexAutoLock lock(gTelemetryScalarsMutex);
+
+  ScalarKey scalarKey{static_cast<uint32_t>(ScalarID::TELEMETRY_EVENT_COUNTS), aDynamic};
+  if (aDynamic) {
+    nsresult rv = internal_GetEnumByScalarName(lock,
+                                               nsAutoCString("telemetry.dynamic_event_counts"),
+                                               &scalarKey);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("NS_FAILED getting ScalarKey for telemetry.dynamic_event_counts");
+      return;
+    }
+  }
+
+  KeyedScalar* scalar = nullptr;
+  nsresult rv = internal_GetKeyedScalarByEnum(lock, scalarKey, aProcessType, &scalar);
+
+  if (NS_FAILED(rv)) {
+    NS_WARNING("NS_FAILED getting keyed scalar for event summary. Wut.");
+    return;
+  }
+
+  static uint32_t sMaxEventSummaryKeys =
+    Preferences::GetUint("toolkit.telemetry.maxEventSummaryKeys", 500);
+
+  // Set this each time as it may have been cleared and recreated between calls
+  scalar->SetMaximumNumberOfKeys(sMaxEventSummaryKeys);
+
+  scalar->AddValue(NS_ConvertASCIItoUTF16(aUniqueEventName), 1);
 }
 
 /**

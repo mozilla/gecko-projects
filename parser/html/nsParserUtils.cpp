@@ -6,6 +6,7 @@
 #include "nsParserUtils.h"
 #include "NullPrincipal.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "nsAttrName.h"
 #include "nsAutoPtr.h"
@@ -19,10 +20,7 @@
 #include "nsIContent.h"
 #include "nsIContentSink.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMDocumentFragment.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsIDTD.h"
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
@@ -70,7 +68,7 @@ nsParserUtils::Sanitize(const nsAString& aFromStr,
 {
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), "about:blank");
-  nsCOMPtr<nsIPrincipal> principal = NullPrincipal::Create();
+  nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithoutOriginAttributes();
   nsCOMPtr<nsIDOMDocument> domDocument;
   nsresult rv = NS_NewDOMDocument(getter_AddRefs(domDocument),
                                   EmptyString(),
@@ -109,8 +107,8 @@ NS_IMETHODIMP
 nsParserUtils::ParseFragment(const nsAString& aFragment,
                              bool aIsXML,
                              nsIURI* aBaseURI,
-                             nsIDOMElement* aContextElement,
-                             nsIDOMDocumentFragment** aReturn)
+                             Element* aContextElement,
+                             DocumentFragment** aReturn)
 {
   return nsParserUtils::ParseFragment(
     aFragment, 0, aIsXML, aBaseURI, aContextElement, aReturn);
@@ -121,16 +119,14 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
                              uint32_t aFlags,
                              bool aIsXML,
                              nsIURI* aBaseURI,
-                             nsIDOMElement* aContextElement,
-                             nsIDOMDocumentFragment** aReturn)
+                             Element* aContextElement,
+                             DocumentFragment** aReturn)
 {
   NS_ENSURE_ARG(aContextElement);
   *aReturn = nullptr;
 
   nsCOMPtr<nsIDocument> document;
-  nsCOMPtr<nsINode> contextNode;
-  contextNode = do_QueryInterface(aContextElement);
-  document = contextNode->OwnerDoc();
+  document = aContextElement->OwnerDoc();
 
   nsAutoScriptBlockerSuppressNodeRemoved autoBlocker;
 
@@ -149,16 +145,14 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
   // the fragment.
   nsresult rv = NS_OK;
   AutoTArray<nsString, 2> tagStack;
-  nsCOMPtr<nsIContent> fragment;
+  RefPtr<DocumentFragment> fragment;
   if (aIsXML) {
     // XHTML
     tagStack.AppendElement(NS_LITERAL_STRING(XHTML_DIV_TAG));
     rv = nsContentUtils::ParseFragmentXML(
-      aFragment, document, tagStack, true, aReturn);
-    fragment = do_QueryInterface(*aReturn);
+      aFragment, document, tagStack, true, getter_AddRefs(fragment));
   } else {
-    NS_ADDREF(*aReturn = new DocumentFragment(document->NodeInfoManager()));
-    fragment = do_QueryInterface(*aReturn);
+    fragment = new DocumentFragment(document->NodeInfoManager());
     rv = nsContentUtils::ParseFragmentHTML(
       aFragment, fragment, nsGkAtoms::body, kNameSpaceID_XHTML, false, true);
   }
@@ -171,5 +165,6 @@ nsParserUtils::ParseFragment(const nsAString& aFragment,
     loader->SetEnabled(true);
   }
 
+  fragment.forget(aReturn);
   return rv;
 }

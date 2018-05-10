@@ -12,17 +12,14 @@ const nsIProperties        = I.nsIProperties;
 const nsIFileInputStream   = I.nsIFileInputStream;
 const nsIInputStream       = I.nsIInputStream;
 
-const nsIDOMParser         = I.nsIDOMParser;
-const nsIDOMSerializer     = I.nsIDOMSerializer;
 const nsIDOMDocument       = I.nsIDOMDocument;
-const nsIDOMElement        = I.nsIDOMElement;
 const nsIDOMNode           = I.nsIDOMNode;
-const nsIDOMNodeList       = I.nsIDOMNodeList;
-const nsIDOMXULElement     = I.nsIDOMXULElement;
 
-function DOMParser() {
-  var parser = C["@mozilla.org/xmlextras/domparser;1"].createInstance(nsIDOMParser);
-  parser.init();
+Cu.importGlobalProperties(["DOMParser", "Element", "XMLSerializer"]);
+
+function getParser() {
+  var parser = new DOMParser();
+  parser.forceEnableXULXBL();
   return parser;
 }
 
@@ -49,18 +46,17 @@ function ParseFile(file) {
 
 function ParseXML(data) {
   if (typeof(data) == "string") {
-    return DOMParser().parseFromString(data, "application/xml");
+    return getParser().parseFromString(data, "application/xml");
   }
 
   Assert.equal(data instanceof nsIInputStream, true);
   
-  return DOMParser().parseFromStream(data, "UTF-8", data.available(),
+  return getParser().parseFromStream(data, "UTF-8", data.available(),
                                      "application/xml");
 }
 
 function DOMSerializer() {
-  return C["@mozilla.org/xmlextras/xmlserializer;1"]
-          .createInstance(nsIDOMSerializer);
+  return new XMLSerializer();
 }
 
 function SerializeXML(node) {

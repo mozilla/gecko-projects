@@ -26,7 +26,6 @@
 #endif
 
 class nsAtom;
-class nsIDOMDocument;
 
 namespace mozilla {
 
@@ -70,7 +69,7 @@ TypeInState::UpdateSelState(Selection* aSelection)
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (!aSelection->Collapsed()) {
+  if (!aSelection->IsCollapsed()) {
     return NS_OK;
   }
 

@@ -18,8 +18,19 @@
 
 namespace mozilla {
   struct AudioChunk;
+  class AudioSegment;
 }
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioChunk)
+
+/**
+ * This allows compilation of nsTArray<AudioSegment> and
+ * AutoTArray<AudioSegment> since without it, static analysis fails on the
+ * mChunks member being a non-memmovable AutoTArray.
+ *
+ * Note that AudioSegment(const AudioSegment&) is deleted, so this should
+ * never come into effect.
+ */
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::AudioSegment)
 
 namespace mozilla {
 
@@ -170,19 +181,26 @@ struct AudioChunk {
     if (aOther.mBuffer != mBuffer) {
       return false;
     }
-    if (mBuffer) {
-      NS_ASSERTION(aOther.mBufferFormat == mBufferFormat,
-                   "Wrong metadata about buffer");
-      NS_ASSERTION(aOther.mChannelData.Length() == mChannelData.Length(),
-                   "Mismatched channel count");
-      if (mDuration > INT32_MAX) {
+    if (!mBuffer) {
+      return true;
+    }
+    if (aOther.mVolume != mVolume) {
+      return false;
+    }
+    if (aOther.mPrincipalHandle != mPrincipalHandle) {
+      return false;
+    }
+    NS_ASSERTION(aOther.mBufferFormat == mBufferFormat,
+                 "Wrong metadata about buffer");
+    NS_ASSERTION(aOther.mChannelData.Length() == mChannelData.Length(),
+                 "Mismatched channel count");
+    if (mDuration > INT32_MAX) {
+      return false;
+    }
+    for (uint32_t channel = 0; channel < mChannelData.Length(); ++channel) {
+      if (aOther.mChannelData[channel] != AddAudioSampleOffset(mChannelData[channel],
+          mBufferFormat, int32_t(mDuration))) {
         return false;
-      }
-      for (uint32_t channel = 0; channel < mChannelData.Length(); ++channel) {
-        if (aOther.mChannelData[channel] != AddAudioSampleOffset(mChannelData[channel],
-            mBufferFormat, int32_t(mDuration))) {
-          return false;
-        }
       }
     }
     return true;
@@ -245,7 +263,7 @@ struct AudioChunk {
     return static_cast<T*>(const_cast<void*>(mChannelData[aChannel]));
   }
 
-  PrincipalHandle GetPrincipalHandle() const { return mPrincipalHandle; }
+  const PrincipalHandle& GetPrincipalHandle() const { return mPrincipalHandle; }
 
   StreamTime mDuration = 0; // in frames within the buffer
   RefPtr<ThreadSharedObject> mBuffer; // the buffer object whose lifetime is managed; null means data is all zeroes

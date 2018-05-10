@@ -74,6 +74,8 @@ IDBFactory::IDBFactory()
   : mOwningObject(nullptr)
   , mBackgroundActor(nullptr)
   , mInnerWindowID(0)
+  , mActiveTransactionCount(0)
+  , mActiveDatabaseCount(0)
   , mBackgroundActorFailed(false)
   , mPrivateBrowsingMode(false)
 {
@@ -396,6 +398,9 @@ void
 IDBFactory::UpdateActiveTransactionCount(int32_t aDelta)
 {
   AssertIsOnOwningThread();
+  MOZ_DIAGNOSTIC_ASSERT(aDelta > 0 ||
+                        (mActiveTransactionCount + aDelta) < mActiveTransactionCount);
+  mActiveTransactionCount += aDelta;
   if (mWindow) {
     mWindow->UpdateActiveIndexedDBTransactionCount(aDelta);
   }
@@ -405,6 +410,9 @@ void
 IDBFactory::UpdateActiveDatabaseCount(int32_t aDelta)
 {
   AssertIsOnOwningThread();
+  MOZ_DIAGNOSTIC_ASSERT(aDelta > 0 ||
+                        (mActiveDatabaseCount + aDelta) < mActiveDatabaseCount);
+  mActiveDatabaseCount += aDelta;
   if (mWindow) {
     mWindow->UpdateActiveIndexedDBDatabaseCount(aDelta);
   }
@@ -693,11 +701,27 @@ IDBFactory::OpenInternal(JSContext* aCx,
     isInternal = QuotaManager::IsOriginInternal(origin);
   }
 
+  // Allow storage attributes for add-ons independent of the pref.
+  // This works in the main thread only, workers don't have the principal.
+  bool isAddon = false;
+  if (NS_IsMainThread()) {
+    // aPrincipal is passed inconsistently, so even when we are already on
+    // the main thread, we may have been passed a null aPrincipal.
+    nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(principalInfo);
+    if (principal) {
+      nsAutoString addonId;
+      Unused << NS_WARN_IF(NS_FAILED(principal->GetAddonId(addonId)));
+      isAddon = !addonId.IsEmpty();
+    }
+  }
+
   if (isInternal) {
     // Chrome privilege and internal origins always get persistent storage.
     persistenceType = PERSISTENCE_TYPE_PERSISTENT;
-  } else {
+  } else if (isAddon || DOMPrefs::IndexedDBStorageOptionsEnabled()) {
     persistenceType = PersistenceTypeFromStorage(aStorageType);
+  } else {
+    persistenceType = PERSISTENCE_TYPE_DEFAULT;
   }
 
   DatabaseMetadata& metadata = commonParams.metadata();
@@ -868,6 +892,33 @@ IDBFactory::InitiateRequest(IDBOpenDBRequest* aRequest,
     "The event target shall be inherited from its manager actor.");
 
   return NS_OK;
+}
+
+void
+IDBFactory::RebindToNewWindow(nsPIDOMWindowInner* aNewWindow)
+{
+  MOZ_DIAGNOSTIC_ASSERT(aNewWindow);
+  MOZ_DIAGNOSTIC_ASSERT(mWindow);
+  MOZ_DIAGNOSTIC_ASSERT(aNewWindow != mWindow);
+
+  mWindow->UpdateActiveIndexedDBTransactionCount(-1 * mActiveTransactionCount);
+  mWindow->UpdateActiveIndexedDBDatabaseCount(-1 * mActiveDatabaseCount);
+
+  mWindow = aNewWindow;
+
+  mInnerWindowID = aNewWindow->WindowID();
+  mWindow->UpdateActiveIndexedDBTransactionCount(mActiveTransactionCount);
+  mWindow->UpdateActiveIndexedDBDatabaseCount(mActiveDatabaseCount);
+}
+
+void
+IDBFactory::DisconnectFromWindow(nsPIDOMWindowInner* aOldWindow)
+{
+  MOZ_DIAGNOSTIC_ASSERT(aOldWindow);
+  // If CC unlinks us first, then mWindow might be nullptr
+  MOZ_DIAGNOSTIC_ASSERT(!mWindow || mWindow == aOldWindow);
+
+  mWindow = nullptr;
 }
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBFactory)

@@ -8,14 +8,21 @@ void brush_vs(
     VertexInfo vi,
     int prim_address,
     RectWithSize local_rect,
+    RectWithSize segment_rect,
     ivec3 user_data,
-    PictureTask pic_task
+    mat4 transform,
+    PictureTask pic_task,
+    int brush_flags,
+    vec4 segment_data
 );
 
 #define VECS_PER_BRUSH_PRIM                 2
 #define VECS_PER_SEGMENT                    2
 
 #define BRUSH_FLAG_PERSPECTIVE_INTERPOLATION    1
+#define BRUSH_FLAG_SEGMENT_RELATIVE             2
+#define BRUSH_FLAG_SEGMENT_REPEAT_X             4
+#define BRUSH_FLAG_SEGMENT_REPEAT_Y             8
 
 struct BrushInstance {
     int picture_address;
@@ -102,14 +109,14 @@ void main(void) {
             brush_prim.local_rect
         );
 
-        // TODO(gw): vLocalBounds may be referenced by
+        // TODO(gw): transform bounds may be referenced by
         //           the fragment shader when running in
         //           the alpha pass, even on non-transformed
         //           items. For now, just ensure it has no
         //           effect. We can tidy this up as we move
         //           more items to be brush shaders.
 #ifdef WR_FEATURE_ALPHA_PASS
-        vLocalBounds = vec4(vec2(-1000000.0), vec2(1000000.0));
+        init_transform_vs(vec4(vec2(-1000000.0), vec2(1000000.0)));
 #endif
     } else {
         bvec4 edge_mask = notEqual(brush.edge_mask & ivec4(1, 2, 4, 8), ivec4(0));
@@ -145,26 +152,43 @@ void main(void) {
         vi,
         brush.prim_address + VECS_PER_BRUSH_PRIM,
         brush_prim.local_rect,
+        local_segment_rect,
         brush.user_data,
-        pic_task
+        scroll_node.transform,
+        pic_task,
+        brush.flags,
+        segment_data[1]
     );
 }
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
 
-vec4 brush_fs();
+struct Fragment {
+    vec4 color;
+#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+    vec4 blend;
+#endif
+};
+
+Fragment brush_fs();
 
 void main(void) {
     // Run the specific brush FS code to output the color.
-    vec4 color = brush_fs();
+    Fragment frag = brush_fs();
 
 #ifdef WR_FEATURE_ALPHA_PASS
     // Apply the clip mask
-    color *= do_clip();
+    float clip_alpha = do_clip();
+
+    frag.color *= clip_alpha;
+
+    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+        oFragBlend = frag.blend * clip_alpha;
+    #endif
 #endif
 
     // TODO(gw): Handle pre-multiply common code here as required.
-    oFragColor = color;
+    oFragColor = frag.color;
 }
 #endif

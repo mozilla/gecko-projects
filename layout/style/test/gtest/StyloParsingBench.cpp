@@ -10,7 +10,6 @@
 #include "ExampleStylesheet.h"
 #include "ServoBindings.h"
 #include "NullPrincipalURI.h"
-#include "nsCSSParser.h"
 #include "mozilla/Encoding.h"
 
 using namespace mozilla;
@@ -24,18 +23,20 @@ using namespace mozilla::net;
 
 
 static void ServoParsingBench() {
+
   auto css = AsBytes(MakeStringSpan(EXAMPLE_STYLESHEET));
+  nsCString cssStr;
+  cssStr.Append(css);
   ASSERT_EQ(Encoding::UTF8ValidUpTo(css), css.Length());
 
   RefPtr<URLExtraData> data = new URLExtraData(
-    NullPrincipalURI::Create(), nullptr, NullPrincipal::Create());
+    NullPrincipalURI::Create(), nullptr, NullPrincipal::CreateWithoutOriginAttributes());
   for (int i = 0; i < PARSING_REPETITIONS; i++) {
     RefPtr<RawServoStyleSheetContents> stylesheet =
       Servo_StyleSheet_FromUTF8Bytes(nullptr,
                                      nullptr,
                                      nullptr,
-                                     css.Elements(),
-                                     css.Length(),
+                                     &cssStr,
                                      eAuthorSheetFeatures,
                                      data,
                                      0,
@@ -45,17 +46,10 @@ static void ServoParsingBench() {
   }
 }
 
-MOZ_GTEST_BENCH(Stylo, Servo_StyleSheet_FromUTF8Bytes_Bench, ServoParsingBench);
-
-
-
-
-
-
 static void ServoSetPropertyByIdBench(const nsACString& css) {
   RefPtr<RawServoDeclarationBlock> block = Servo_DeclarationBlock_CreateEmpty().Consume();
   RefPtr<URLExtraData> data = new URLExtraData(
-    NullPrincipalURI::Create(), nullptr, NullPrincipal::Create());
+    NullPrincipalURI::Create(), nullptr, NullPrincipal::CreateWithoutOriginAttributes());
 
   ASSERT_TRUE(IsUTF8(css));
 
@@ -73,18 +67,10 @@ static void ServoSetPropertyByIdBench(const nsACString& css) {
   }
 }
 
-MOZ_GTEST_BENCH(Stylo, Servo_DeclarationBlock_SetPropertyById_Bench, [] {
-  ServoSetPropertyByIdBench(NS_LITERAL_CSTRING("10px"));
-});
-
-MOZ_GTEST_BENCH(Stylo, Servo_DeclarationBlock_SetPropertyById_WithInitialSpace_Bench, [] {
-  ServoSetPropertyByIdBench(NS_LITERAL_CSTRING(" 10px"));
-});
-
 static void ServoGetPropertyValueById() {
   RefPtr<RawServoDeclarationBlock> block = Servo_DeclarationBlock_CreateEmpty().Consume();
   RefPtr<URLExtraData> data = new URLExtraData(
-    NullPrincipalURI::Create(), nullptr, NullPrincipal::Create());
+    NullPrincipalURI::Create(), nullptr, NullPrincipal::CreateWithoutOriginAttributes());
   NS_NAMED_LITERAL_CSTRING(css_, "10px");
   const nsACString& css = css_;
   Servo_DeclarationBlock_SetPropertyById(
@@ -110,6 +96,17 @@ static void ServoGetPropertyValueById() {
   }
 }
 
+// Bug 1436018 - Disable Stylo microbenchmark on Windows
+#if !defined(_WIN32) && !defined(_WIN64)
+MOZ_GTEST_BENCH(Stylo, Servo_StyleSheet_FromUTF8Bytes_Bench, ServoParsingBench);
+
+MOZ_GTEST_BENCH(Stylo, Servo_DeclarationBlock_SetPropertyById_Bench, [] {
+  ServoSetPropertyByIdBench(NS_LITERAL_CSTRING("10px"));
+});
+
+MOZ_GTEST_BENCH(Stylo, Servo_DeclarationBlock_SetPropertyById_WithInitialSpace_Bench, [] {
+  ServoSetPropertyByIdBench(NS_LITERAL_CSTRING(" 10px"));
+});
+
 MOZ_GTEST_BENCH(Stylo, Servo_DeclarationBlock_GetPropertyById_Bench, ServoGetPropertyValueById);
-
-
+#endif

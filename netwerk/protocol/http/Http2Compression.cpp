@@ -30,7 +30,7 @@ class HpackStaticTableReporter final : public nsIMemoryReporter
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  HpackStaticTableReporter() {}
+  HpackStaticTableReporter() = default;
 
   NS_IMETHOD
   CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData,
@@ -47,7 +47,7 @@ public:
 private:
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
 
-  ~HpackStaticTableReporter() {}
+  ~HpackStaticTableReporter() = default;
 };
 
 NS_IMPL_ISUPPORTS(HpackStaticTableReporter, nsIMemoryReporter)
@@ -77,7 +77,7 @@ public:
 private:
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
 
-  ~HpackDynamicTableReporter() {}
+  ~HpackDynamicTableReporter() = default;
 
   Http2BaseCompressor* mCompressor;
 
@@ -1207,6 +1207,17 @@ Http2Compressor::EncodeHeaderBlock(const nsCString &nvInput,
       ProcessHeader(nvPair(name, value), false,
                     name.EqualsLiteral("authorization"));
     }
+  }
+
+  // NB: This is a *really* ugly hack, but to do this in the right place (the
+  // transaction) would require totally reworking how/when the transaction
+  // creates its request stream, which is not worth the effort and risk of
+  // breakage just to add one header only to h2 connections.
+  if (!connectForm) {
+    // Add in TE: trailers for regular requests
+    nsAutoCString te("te");
+    nsAutoCString trailers("trailers");
+    ProcessHeader(nvPair(te, trailers), false, false);
   }
 
   mOutput = nullptr;

@@ -7,6 +7,7 @@
 #include "mozilla/ComposerCommandsUpdater.h"
 
 #include "mozilla/mozalloc.h"           // for operator new
+#include "mozilla/TransactionManager.h" // for TransactionManager
 #include "mozilla/dom/Selection.h"
 #include "nsAString.h"
 #include "nsComponentManagerUtils.h"    // for do_CreateInstance
@@ -17,7 +18,6 @@
 #include "nsIDOMWindow.h"               // for nsIDOMWindow
 #include "nsIDocShell.h"                // for nsIDocShell
 #include "nsIInterfaceRequestorUtils.h"  // for do_GetInterface
-#include "nsISelection.h"               // for nsISelection
 #include "nsITransactionManager.h"      // for nsITransactionManager
 #include "nsLiteralString.h"            // for NS_LITERAL_STRING
 #include "nsPICommandUpdater.h"         // for nsPICommandUpdater
@@ -116,8 +116,7 @@ ComposerCommandsUpdater::DidDo(nsITransactionManager* aManager,
                                nsresult aDoResult)
 {
   // only need to update if the status of the Undo menu item changes.
-  int32_t undoCount;
-  aManager->GetNumberOfUndoItems(&undoCount);
+  size_t undoCount = aManager->AsTransactionManager()->NumberOfUndoItems();
   if (undoCount == 1) {
     if (mFirstDoOfFirstUndo) {
       UpdateCommandGroup(NS_LITERAL_STRING("undo"));
@@ -142,11 +141,10 @@ ComposerCommandsUpdater::DidUndo(nsITransactionManager* aManager,
                                  nsITransaction* aTransaction,
                                  nsresult aUndoResult)
 {
-  int32_t undoCount;
-  aManager->GetNumberOfUndoItems(&undoCount);
-  if (undoCount == 0)
+  size_t undoCount = aManager->AsTransactionManager()->NumberOfUndoItems();
+  if (!undoCount) {
     mFirstDoOfFirstUndo = true;    // reset the state for the next do
-
+  }
   UpdateCommandGroup(NS_LITERAL_STRING("undo"));
   return NS_OK;
 }
@@ -351,12 +349,12 @@ ComposerCommandsUpdater::SelectionIsCollapsed()
     return true;
   }
 
-  nsCOMPtr<nsISelection> domSelection = mDOMWindow->GetSelection();
+  RefPtr<dom::Selection> domSelection = mDOMWindow->GetSelection();
   if (NS_WARN_IF(!domSelection)) {
     return false;
   }
 
-  return domSelection->AsSelection()->IsCollapsed();
+  return domSelection->IsCollapsed();
 }
 
 already_AddRefed<nsPICommandUpdater>

@@ -957,6 +957,12 @@ InterceptedHttpChannel::SetChannelResetEnd(mozilla::TimeStamp aTimeStamp)
 NS_IMETHODIMP
 InterceptedHttpChannel::SaveTimeStamps(void)
 {
+  // If we were not able to start the fetch event for some reason (like
+  // corrupted scripts), then just do nothing here.
+  if (mHandleFetchEventStart.IsNull()) {
+    return NS_OK;
+  }
+
   bool isNonSubresourceRequest = nsContentUtils::IsNonSubresourceRequest(this);
   nsCString navigationOrSubresource = isNonSubresourceRequest ?
     NS_LITERAL_CSTRING("navigation") : NS_LITERAL_CSTRING("subresource");
@@ -1078,10 +1084,7 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest,
   mIsPending = false;
 
   // Register entry to the PerformanceStorage resource timing
-  mozilla::dom::PerformanceStorage* performanceStorage = GetPerformanceStorage();
-  if (performanceStorage) {
-    performanceStorage->AddEntry(this, this);
-  }
+  MaybeReportTimingData();
 
   if (mListener) {
     mListener->OnStopRequest(this, mListenerContext, mStatus);
@@ -1315,16 +1318,16 @@ InterceptedHttpChannel::GetAlternativeDataType(nsACString & aType)
 }
 
 NS_IMETHODIMP
-InterceptedHttpChannel::OpenAlternativeOutputStream(const nsACString & type, nsIOutputStream * *_retval)
+InterceptedHttpChannel::OpenAlternativeOutputStream(const nsACString & type, int64_t predictedSize, nsIOutputStream * *_retval)
 {
   if (mSynthesizedCacheInfo) {
-    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(type, _retval);
+    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(type, predictedSize, _retval);
   }
   return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
-InterceptedHttpChannel::GetCacheKey(nsISupports **key)
+InterceptedHttpChannel::GetCacheKey(uint32_t* key)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->GetCacheKey(key);
@@ -1333,7 +1336,7 @@ InterceptedHttpChannel::GetCacheKey(nsISupports **key)
 }
 
 NS_IMETHODIMP
-InterceptedHttpChannel::SetCacheKey(nsISupports *key)
+InterceptedHttpChannel::SetCacheKey(uint32_t key)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->SetCacheKey(key);

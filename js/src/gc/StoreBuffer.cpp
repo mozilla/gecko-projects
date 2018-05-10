@@ -115,31 +115,23 @@ StoreBuffer::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::GCSi
 
 ArenaCellSet ArenaCellSet::Empty;
 
-ArenaCellSet::ArenaCellSet()
-  : arena(nullptr)
-  , next(nullptr)
-#ifdef DEBUG
-  , minorGCNumberAtCreation(0)
-#endif
-{}
-
 ArenaCellSet::ArenaCellSet(Arena* arena, ArenaCellSet* next)
   : arena(arena)
   , next(next)
 #ifdef DEBUG
-  , minorGCNumberAtCreation(arena->zone->runtimeFromActiveCooperatingThread()->gc.minorGCCount())
+  , minorGCNumberAtCreation(arena->zone->runtimeFromMainThread()->gc.minorGCCount())
 #endif
 {
     MOZ_ASSERT(arena);
-    bits.clear(false);
+    MOZ_ASSERT(bits.isAllClear());
 }
 
 ArenaCellSet*
 StoreBuffer::WholeCellBuffer::allocateCellSet(Arena* arena)
 {
     Zone* zone = arena->zone;
-    Nursery& nursery = zone->group()->nursery();
-    if (!nursery.isEnabled())
+    JSRuntime* rt = zone->runtimeFromMainThread();
+    if (!rt->gc.nursery().isEnabled())
         return nullptr;
 
     AutoEnterOOMUnsafeRegion oomUnsafe;
@@ -151,7 +143,7 @@ StoreBuffer::WholeCellBuffer::allocateCellSet(Arena* arena)
     head_ = cells;
 
     if (isAboutToOverflow())
-        zone->group()->storeBuffer().setAboutToOverflow(JS::gcreason::FULL_WHOLE_CELL_BUFFER);
+        rt->gc.storeBuffer().setAboutToOverflow(JS::gcreason::FULL_WHOLE_CELL_BUFFER);
 
     return cells;
 }

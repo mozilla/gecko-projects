@@ -67,6 +67,7 @@ BottomHost.prototype = {
     this._splitter.setAttribute("resizebefore", "flex");
 
     this.frame = ownerDocument.createElement("iframe");
+    this.frame.flex = 1; // Required to be able to shrink when the window shrinks
     this.frame.className = "devtools-toolbox-bottom-iframe";
     this.frame.height = Math.min(
       Services.prefs.getIntPref(this.heightPref),
@@ -99,63 +100,6 @@ BottomHost.prototype = {
    */
   raise: function() {
     focusTab(this.hostTab);
-  },
-
-  /**
-   * Minimize this host so that only the toolbox tabbar remains visible.
-   * @param {Number} height The height to minimize to. Defaults to 0, which
-   * means that the toolbox won't be visible at all once minimized.
-   */
-  minimize: function(height = 0) {
-    if (this.isMinimized) {
-      return;
-    }
-    this.isMinimized = true;
-
-    let onTransitionEnd = event => {
-      if (event.propertyName !== "margin-bottom") {
-        // Ignore transitionend on unrelated properties.
-        return;
-      }
-
-      this.frame.removeEventListener("transitionend", onTransitionEnd);
-      this.emit("minimized");
-    };
-    this.frame.addEventListener("transitionend", onTransitionEnd);
-    this.frame.style.marginBottom = -this.frame.height + height + "px";
-    this._splitter.classList.add("disabled");
-  },
-
-  /**
-   * If the host was minimized before, maximize it again (the host will be
-   * maximized to the height it previously had).
-   */
-  maximize: function() {
-    if (!this.isMinimized) {
-      return;
-    }
-    this.isMinimized = false;
-
-    let onTransitionEnd = event => {
-      if (event.propertyName !== "margin-bottom") {
-        // Ignore transitionend on unrelated properties.
-        return;
-      }
-
-      this.frame.removeEventListener("transitionend", onTransitionEnd);
-      this.emit("maximized");
-    };
-    this.frame.addEventListener("transitionend", onTransitionEnd);
-    this.frame.style.marginBottom = "0";
-    this._splitter.classList.remove("disabled");
-  },
-
-  /**
-   * Toggle the minimize mode.
-   * @param {Number} minHeight The height to minimize to.
-   */
-  toggleMinimizeMode: function(minHeight) {
-    this.isMinimized ? this.maximize() : this.minimize(minHeight);
   },
 
   /**
@@ -211,6 +155,7 @@ SidebarHost.prototype = {
     this._splitter.setAttribute("class", "devtools-side-splitter");
 
     this.frame = ownerDocument.createElement("iframe");
+    this.frame.flex = 1; // Required to be able to shrink when the window shrinks
     this.frame.className = "devtools-toolbox-side-iframe";
 
     this.frame.width = Math.min(

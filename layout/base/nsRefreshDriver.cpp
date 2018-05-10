@@ -47,11 +47,11 @@
 #include "nsViewManager.h"
 #include "GeckoProfiler.h"
 #include "nsNPAPIPluginInstance.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/RestyleManager.h"
-#include "mozilla/RestyleManagerInlines.h"
 #include "Layers.h"
 #include "imgIContainer.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -69,7 +69,6 @@
 #include "mozilla/Unused.h"
 #include "mozilla/TimelineConsumers.h"
 #include "nsAnimationManager.h"
-#include "nsIDOMEvent.h"
 #include "nsDisplayList.h"
 #include "nsTransitionManager.h"
 
@@ -1149,8 +1148,8 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
   : mActiveTimer(nullptr),
     mPresContext(aPresContext),
     mRootRefresh(nullptr),
-    mPendingTransaction(0),
-    mCompletedTransaction(0),
+    mPendingTransaction{0},
+    mCompletedTransaction{0},
     mFreezeCount(0),
     mThrottledFrameRequestInterval(TimeDuration::FromMilliseconds(
                                      GetThrottledTimerInterval())),
@@ -1164,6 +1163,7 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     mWaitingForTransaction(false),
     mSkippedPaints(false),
     mResizeSuppressed(false),
+    mNotifyDOMContentFlushed(false),
     mWarningThreshold(REFRESH_WAIT_WARNING)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -1236,7 +1236,7 @@ TimeStamp
 nsRefreshDriver::MostRecentRefresh() const
 {
   // In case of stylo traversal, we have already activated the refresh driver in
-  // ServoRestyleManager::ProcessPendingRestyles().
+  // RestyleManager::ProcessPendingRestyles().
   if (!ServoStyleSet::IsInServoTraversal()) {
     const_cast<nsRefreshDriver*>(this)->EnsureTimerStarted();
   }
@@ -1332,6 +1332,19 @@ nsRefreshDriver::RemoveImageRequest(imgIRequest* aRequest)
     if (start) {
       start->mEntries.RemoveEntry(aRequest);
     }
+  }
+}
+
+void
+nsRefreshDriver::NotifyDOMContentLoaded()
+{
+  // If the refresh driver is going to tick, we mark the timestamp after
+  // everything is flushed in the next tick. If it isn't, mark ourselves as
+  // flushed now.
+  if (!HasObservers()) {
+      GetPresContext()->NotifyDOMContentFlushed();
+  } else {
+    mNotifyDOMContentFlushed = true;
   }
 }
 
@@ -1498,10 +1511,10 @@ nsRefreshDriver::ArrayFor(FlushType aFlushType)
 void
 nsRefreshDriver::DoTick()
 {
-  NS_PRECONDITION(!IsFrozen(), "Why are we notified while frozen?");
-  NS_PRECONDITION(mPresContext, "Why are we notified after disconnection?");
-  NS_PRECONDITION(!nsContentUtils::GetCurrentJSContext(),
-                  "Shouldn't have a JSContext on the stack");
+  MOZ_ASSERT(!IsFrozen(), "Why are we notified while frozen?");
+  MOZ_ASSERT(mPresContext, "Why are we notified after disconnection?");
+  MOZ_ASSERT(!nsContentUtils::GetCurrentJSContext(),
+             "Shouldn't have a JSContext on the stack");
 
   if (mTestControllingRefreshes) {
     Tick(mMostRecentRefreshEpochTime, mMostRecentRefresh);
@@ -1598,8 +1611,7 @@ nsRefreshDriver::DispatchPendingEvents()
   // Swap out the current pending events
   nsTArray<PendingEvent> pendingEvents(Move(mPendingEvents));
   for (PendingEvent& event : pendingEvents) {
-    bool dummy;
-    event.mTarget->DispatchEvent(event.mEvent, &dummy);
+    event.mTarget->DispatchEvent(*event.mEvent);
   }
 }
 
@@ -1770,8 +1782,8 @@ nsRefreshDriver::CancelIdleRunnable(nsIRunnable* aRunnable)
 void
 nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
 {
-  NS_PRECONDITION(!nsContentUtils::GetCurrentJSContext(),
-                  "Shouldn't have a JSContext on the stack");
+  MOZ_ASSERT(!nsContentUtils::GetCurrentJSContext(),
+             "Shouldn't have a JSContext on the stack");
 
   if (nsNPAPIPluginInstance::InPluginCallUnsafeForReentry()) {
     NS_ERROR("Refresh driver should not run during plugin call!");
@@ -2075,6 +2087,11 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
   mozilla::Telemetry::AccumulateTimeDelta(mozilla::Telemetry::REFRESH_DRIVER_TICK, mTickStart);
 #endif
 
+  if (mNotifyDOMContentFlushed) {
+    mNotifyDOMContentFlushed = false;
+    mPresContext->NotifyDOMContentFlushed();
+  }
+
   nsTObserverArray<nsAPostRefreshObserver*>::ForwardIterator iter(mPostRefreshObservers);
   while (iter.HasMore()) {
     nsAPostRefreshObserver* observer = iter.GetNext();
@@ -2166,13 +2183,13 @@ nsRefreshDriver::FinishedWaitingForTransaction()
   mWarningThreshold = 1;
 }
 
-uint64_t
+mozilla::layers::TransactionId
 nsRefreshDriver::GetTransactionId(bool aThrottle)
 {
-  ++mPendingTransaction;
+  mPendingTransaction = mPendingTransaction.Next();
 
   if (aThrottle &&
-      mPendingTransaction >= mCompletedTransaction + 2 &&
+      mPendingTransaction - mCompletedTransaction >= 2 &&
       !mWaitingForTransaction &&
       !mTestControllingRefreshes) {
     mWaitingForTransaction = true;
@@ -2183,22 +2200,22 @@ nsRefreshDriver::GetTransactionId(bool aThrottle)
   return mPendingTransaction;
 }
 
-uint64_t
+mozilla::layers::TransactionId
 nsRefreshDriver::LastTransactionId() const
 {
   return mPendingTransaction;
 }
 
 void
-nsRefreshDriver::RevokeTransactionId(uint64_t aTransactionId)
+nsRefreshDriver::RevokeTransactionId(mozilla::layers::TransactionId aTransactionId)
 {
   MOZ_ASSERT(aTransactionId == mPendingTransaction);
-  if (mPendingTransaction == mCompletedTransaction + 2 &&
+  if (mPendingTransaction - mCompletedTransaction == 2 &&
       mWaitingForTransaction) {
     MOZ_ASSERT(!mSkippedPaints, "How did we skip a paint when we're in the middle of one?");
     FinishedWaitingForTransaction();
   }
-  mPendingTransaction--;
+  mPendingTransaction = mPendingTransaction.Prev();
 }
 
 void
@@ -2209,7 +2226,7 @@ nsRefreshDriver::ClearPendingTransactions()
 }
 
 void
-nsRefreshDriver::ResetInitialTransactionId(uint64_t aTransactionId)
+nsRefreshDriver::ResetInitialTransactionId(mozilla::layers::TransactionId aTransactionId)
 {
   mCompletedTransaction = mPendingTransaction = aTransactionId;
 }
@@ -2221,10 +2238,10 @@ nsRefreshDriver::GetTransactionStart()
 }
 
 void
-nsRefreshDriver::NotifyTransactionCompleted(uint64_t aTransactionId)
+nsRefreshDriver::NotifyTransactionCompleted(mozilla::layers::TransactionId aTransactionId)
 {
   if (aTransactionId > mCompletedTransaction) {
-    if (mPendingTransaction > mCompletedTransaction + 1 &&
+    if (mPendingTransaction - mCompletedTransaction > 1 &&
         mWaitingForTransaction) {
       mCompletedTransaction = aTransactionId;
       FinishedWaitingForTransaction();
@@ -2374,7 +2391,7 @@ nsRefreshDriver::RevokeFrameRequestCallbacks(nsIDocument* aDocument)
 }
 
 void
-nsRefreshDriver::ScheduleEventDispatch(nsINode* aTarget, nsIDOMEvent* aEvent)
+nsRefreshDriver::ScheduleEventDispatch(nsINode* aTarget, dom::Event* aEvent)
 {
   mPendingEvents.AppendElement(PendingEvent{aTarget, aEvent});
   // make sure that the timer is running

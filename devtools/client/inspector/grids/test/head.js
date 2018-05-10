@@ -3,6 +3,7 @@
  http://creativecommons.org/publicdomain/zero/1.0/ */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
 /* import-globals-from ../../../shared/test/shared-head.js */
+/* import-globals-from ../../../shared/test/telemetry-test-helpers.js */
 /* import-globals-from ../../test/head.js */
 "use strict";
 
@@ -27,7 +28,7 @@ const HIGHLIGHTER_TYPE = "CssGridHighlighter";
 /**
  * Simulate a color change in a given color picker tooltip.
  *
- * @param  {Spectrum|ColorWidget} colorPicker
+ * @param  {Spectrum} colorPicker
  *         The color picker widget.
  * @param  {Array} newRgba
  *         Array of the new rgba values to be set in the color widget.

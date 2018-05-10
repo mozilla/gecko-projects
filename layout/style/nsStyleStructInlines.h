@@ -17,7 +17,6 @@
 #include "nsIContent.h" // for GetParent()
 #include "nsTextFrame.h" // for nsTextFrame::ShouldSuppressLineBreak
 #include "nsSVGUtils.h" // for nsSVGUtils::IsInSVGTextSubtree
-#include "mozilla/ServoStyleSet.h"
 
 inline void
 nsStyleImage::EnsureCachedBIData() const
@@ -153,7 +152,7 @@ nsStyleDisplay::HasFixedPosContainingBlockStyleInternal(
                   ComputedStyleLike* aComputedStyle) const
 {
   // NOTE: Any CSS properties that influence the output of this function
-  // should have the CSS_PROPERTY_FIXPOS_CB set on them.
+  // should have the FIXPOS_CB flag set on them.
   NS_ASSERTION(aComputedStyle->ThreadsafeStyleDisplay() == this,
                "unexpected aComputedStyle");
 
@@ -174,7 +173,7 @@ nsStyleDisplay::IsFixedPosContainingBlockForAppropriateFrame(
                   ComputedStyleLike* aComputedStyle) const
 {
   // NOTE: Any CSS properties that influence the output of this function
-  // should have the CSS_PROPERTY_FIXPOS_CB set on them.
+  // should have the FIXPOS_CB flag set on them.
   return HasFixedPosContainingBlockStyleInternal(aComputedStyle) ||
          HasTransformStyle();
 }
@@ -183,7 +182,7 @@ bool
 nsStyleDisplay::IsFixedPosContainingBlock(const nsIFrame* aContextFrame) const
 {
   // NOTE: Any CSS properties that influence the output of this function
-  // should have the CSS_PROPERTY_FIXPOS_CB set on them.
+  // should have the FIXPOS_CB flag set on them.
   if (!HasFixedPosContainingBlockStyleInternal(aContextFrame->Style()) &&
       !HasTransform(aContextFrame)) {
     return false;
@@ -197,7 +196,7 @@ nsStyleDisplay::HasAbsPosContainingBlockStyleInternal(
                   ComputedStyleLike* aComputedStyle) const
 {
   // NOTE: Any CSS properties that influence the output of this function
-  // should have the CSS_PROPERTY_ABSPOS_CB set on them.
+  // should have the ABSPOS_CB set on them.
   NS_ASSERTION(aComputedStyle->ThreadsafeStyleDisplay() == this,
                "unexpected aComputedStyle");
   return IsAbsolutelyPositionedStyle() ||
@@ -210,7 +209,7 @@ bool
 nsStyleDisplay::IsAbsPosContainingBlockForAppropriateFrame(ComputedStyleLike* aComputedStyle) const
 {
   // NOTE: Any CSS properties that influence the output of this function
-  // should have the CSS_PROPERTY_ABSPOS_CB set on them.
+  // should have the ABSPOS_CB set on them.
   return HasAbsPosContainingBlockStyleInternal(aComputedStyle) ||
          IsFixedPosContainingBlockForAppropriateFrame(aComputedStyle);
 }
@@ -219,7 +218,7 @@ bool
 nsStyleDisplay::IsAbsPosContainingBlock(const nsIFrame* aContextFrame) const
 {
   // NOTE: Any CSS properties that influence the output of this function
-  // should have the CSS_PROPERTY_ABSPOS_CB set on them.
+  // should have the ABSPOS_CB set on them.
   mozilla::ComputedStyle* sc = aContextFrame->Style();
   if (!HasAbsPosContainingBlockStyleInternal(sc) &&
       !HasFixedPosContainingBlockStyleInternal(sc) &&

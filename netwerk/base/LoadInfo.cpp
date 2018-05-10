@@ -69,9 +69,9 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   , mBrowserWouldUpgradeInsecureRequests(false)
   , mVerifySignedContent(false)
   , mEnforceSRI(false)
-  , mAllowDocumentToBeAgnosticToCSP(false)
   , mForceAllowDataURI(false)
   , mAllowInsecureRedirectToDataURI(false)
+  , mSkipContentPolicyCheckForWebRequest(false)
   , mOriginalFrameSrcLoad(false)
   , mForceInheritPrincipalDropped(false)
   , mInnerWindowID(0)
@@ -101,7 +101,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
 
   // This constructor shouldn't be used for TYPE_DOCUMENT loads that don't
   // have a loadingPrincipal
-  MOZ_ASSERT(skipContentTypeCheck ||
+  MOZ_ASSERT(skipContentTypeCheck || mLoadingPrincipal ||
              mInternalContentPolicyType != nsIContentPolicy::TYPE_DOCUMENT);
 
   // We should only get an explicit controller for subresource requests.
@@ -295,9 +295,9 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
   , mBrowserWouldUpgradeInsecureRequests(false)
   , mVerifySignedContent(false)
   , mEnforceSRI(false)
-  , mAllowDocumentToBeAgnosticToCSP(false)
   , mForceAllowDataURI(false)
   , mAllowInsecureRedirectToDataURI(false)
+  , mSkipContentPolicyCheckForWebRequest(false)
   , mOriginalFrameSrcLoad(false)
   , mForceInheritPrincipalDropped(false)
   , mInnerWindowID(0)
@@ -373,9 +373,9 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
   , mBrowserWouldUpgradeInsecureRequests(rhs.mBrowserWouldUpgradeInsecureRequests)
   , mVerifySignedContent(rhs.mVerifySignedContent)
   , mEnforceSRI(rhs.mEnforceSRI)
-  , mAllowDocumentToBeAgnosticToCSP(rhs.mAllowDocumentToBeAgnosticToCSP)
   , mForceAllowDataURI(rhs.mForceAllowDataURI)
   , mAllowInsecureRedirectToDataURI(rhs.mAllowInsecureRedirectToDataURI)
+  , mSkipContentPolicyCheckForWebRequest(rhs.mSkipContentPolicyCheckForWebRequest)
   , mOriginalFrameSrcLoad(rhs.mOriginalFrameSrcLoad)
   , mForceInheritPrincipalDropped(rhs.mForceInheritPrincipalDropped)
   , mInnerWindowID(rhs.mInnerWindowID)
@@ -418,9 +418,9 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
                    bool aBrowserWouldUpgradeInsecureRequests,
                    bool aVerifySignedContent,
                    bool aEnforceSRI,
-                   bool aAllowDocumentToBeAgnosticToCSP,
                    bool aForceAllowDataURI,
                    bool aAllowInsecureRedirectToDataURI,
+                   bool aSkipContentPolicyCheckForWebRequest,
                    bool aForceInheritPrincipalDropped,
                    uint64_t aInnerWindowID,
                    uint64_t aOuterWindowID,
@@ -457,9 +457,9 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   , mBrowserWouldUpgradeInsecureRequests(aBrowserWouldUpgradeInsecureRequests)
   , mVerifySignedContent(aVerifySignedContent)
   , mEnforceSRI(aEnforceSRI)
-  , mAllowDocumentToBeAgnosticToCSP(aAllowDocumentToBeAgnosticToCSP)
   , mForceAllowDataURI(aForceAllowDataURI)
   , mAllowInsecureRedirectToDataURI(aAllowInsecureRedirectToDataURI)
+  , mSkipContentPolicyCheckForWebRequest(aSkipContentPolicyCheckForWebRequest)
   , mOriginalFrameSrcLoad(false)
   , mForceInheritPrincipalDropped(aForceInheritPrincipalDropped)
   , mInnerWindowID(aInnerWindowID)
@@ -488,10 +488,6 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
     aRedirectChainIncludingInternalRedirects);
 
   mRedirectChain.SwapElements(aRedirectChain);
-}
-
-LoadInfo::~LoadInfo()
-{
 }
 
 void
@@ -656,6 +652,27 @@ LoadInfo::ContextForTopLevelLoad()
             "should only query this context for top level document loads");
   nsCOMPtr<nsISupports> context = do_QueryReferent(mContextForTopLevelLoad);
   return context;
+}
+
+already_AddRefed<nsISupports>
+LoadInfo::GetLoadingContext()
+{
+  nsCOMPtr<nsISupports> context;
+  if (mInternalContentPolicyType == nsIContentPolicy::TYPE_DOCUMENT) {
+    context = ContextForTopLevelLoad();
+  }
+  else {
+    context = LoadingNode();
+  }
+  return context.forget();
+}
+
+NS_IMETHODIMP
+LoadInfo::GetLoadingContextXPCOM(nsISupports** aResult)
+{
+  nsCOMPtr<nsISupports> context = GetLoadingContext();
+  context.forget(aResult);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -888,6 +905,20 @@ LoadInfo::GetAllowInsecureRedirectToDataURI(bool* aAllowInsecureRedirectToDataUR
 }
 
 NS_IMETHODIMP
+LoadInfo::SetSkipContentPolicyCheckForWebRequest(bool aSkip)
+{
+  mSkipContentPolicyCheckForWebRequest = aSkip;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetSkipContentPolicyCheckForWebRequest(bool* aSkip)
+{
+  *aSkip = mSkipContentPolicyCheckForWebRequest;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 LoadInfo::SetOriginalFrameSrcLoad(bool aOriginalFrameSrcLoad)
 {
   mOriginalFrameSrcLoad = aOriginalFrameSrcLoad;
@@ -970,25 +1001,6 @@ LoadInfo::ResetPrincipalToInheritToNullPrincipal()
 
   return NS_OK;
 }
-
-NS_IMETHODIMP
-LoadInfo::SetAllowDocumentToBeAgnosticToCSP(bool aAllowDocumentToBeAgnosticToCSP)
-{
-  if (mInternalContentPolicyType != nsIContentPolicy::TYPE_DOCUMENT) {
-    MOZ_ASSERT(false, "not available for loads other than TYPE_DOCUMENT");
-    return NS_ERROR_UNEXPECTED;
-  }
-  mAllowDocumentToBeAgnosticToCSP = aAllowDocumentToBeAgnosticToCSP;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::GetAllowDocumentToBeAgnosticToCSP(bool* aAllowDocumentToBeAgnosticToCSP)
-{
-  *aAllowDocumentToBeAgnosticToCSP = mAllowDocumentToBeAgnosticToCSP;
-  return NS_OK;
-}
-
 
 NS_IMETHODIMP
 LoadInfo::SetScriptableOriginAttributes(JSContext* aCx,

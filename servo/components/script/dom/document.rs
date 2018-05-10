@@ -109,7 +109,7 @@ use num_traits::ToPrimitive;
 use profile_traits::ipc;
 use profile_traits::time::{TimerMetadata, TimerMetadataFrameType, TimerMetadataReflowType};
 use ref_slice::ref_slice;
-use script_layout_interface::message::{Msg, NodesFromPointQueryType, ReflowGoal};
+use script_layout_interface::message::{Msg, NodesFromPointQueryType, QueryMsg, ReflowGoal};
 use script_runtime::{CommonScriptMsg, ScriptThreadEventCategory};
 use script_thread::{MainThreadScriptMsg, ScriptThread};
 use script_traits::{AnimationState, DocumentActivity, MouseButton, MouseEventType};
@@ -135,7 +135,7 @@ use style::selector_parser::{RestyleDamage, Snapshot};
 use style::shared_lock::{SharedRwLock as StyleSharedRwLock, SharedRwLockReadGuard};
 use style::str::{split_html_space_chars, str_join};
 use style::stylesheet_set::DocumentStylesheetSet;
-use style::stylesheets::{Stylesheet, StylesheetContents, Origin, OriginSet};
+use style::stylesheets::{CssRule, Stylesheet, Origin, OriginSet};
 use task_source::TaskSource;
 use time;
 use timers::OneshotTimerCallback;
@@ -216,16 +216,24 @@ impl PartialEq for StyleSheetInDocument {
 }
 
 impl ::style::stylesheets::StylesheetInDocument for StyleSheetInDocument {
-    fn contents(&self, guard: &SharedRwLockReadGuard) -> &StylesheetContents {
-        self.sheet.contents(guard)
+    fn origin(&self, guard: &SharedRwLockReadGuard) -> Origin {
+        self.sheet.origin(guard)
+    }
+
+    fn quirks_mode(&self, guard: &SharedRwLockReadGuard) -> QuirksMode {
+        self.sheet.quirks_mode(guard)
+    }
+
+    fn enabled(&self) -> bool {
+        self.sheet.enabled()
     }
 
     fn media<'a>(&'a self, guard: &'a SharedRwLockReadGuard) -> Option<&'a MediaList> {
         self.sheet.media(guard)
     }
 
-    fn enabled(&self) -> bool {
-        self.sheet.enabled()
+    fn rules<'a, 'b: 'a>(&'a self, guard: &'b SharedRwLockReadGuard) -> &'a [CssRule] {
+        self.sheet.rules(guard)
     }
 }
 
@@ -1969,8 +1977,7 @@ impl Document {
                             client_point: &Point2D<f32>,
                             reflow_goal: NodesFromPointQueryType)
                             -> Vec<UntrustedNodeAddress> {
-        if !self.window.reflow(ReflowGoal::NodesFromPointQuery(*client_point, reflow_goal),
-                               ReflowReason::Query) {
+        if !self.window.layout_reflow(QueryMsg::NodesFromPointQuery(*client_point, reflow_goal)) {
             return vec!();
         };
 

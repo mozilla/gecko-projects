@@ -14,6 +14,7 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/RangedPtr.h"
+#include "mozilla/TextUtils.h"
 
 #ifdef HAVE_LOCALECONV
 #include <locale.h>
@@ -41,6 +42,8 @@ using namespace js;
 
 using mozilla::Abs;
 using mozilla::ArrayLength;
+using mozilla::AsciiAlphanumericToNumber;
+using mozilla::IsAsciiAlphanumeric;
 using mozilla::Maybe;
 using mozilla::MinNumberValue;
 using mozilla::NegativeInfinity;
@@ -53,6 +56,8 @@ using JS::ToInt8;
 using JS::ToInt16;
 using JS::ToInt32;
 using JS::ToInt64;
+using JS::ToUint8;
+using JS::ToUint16;
 using JS::ToUint32;
 using JS::ToUint64;
 
@@ -84,7 +89,7 @@ ComputeAccurateDecimalInteger(JSContext* cx, const CharT* start, const CharT* en
 
     for (size_t i = 0; i < length; i++) {
         char c = char(start[i]);
-        MOZ_ASSERT(('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'));
+        MOZ_ASSERT(IsAsciiAlphanumeric(c));
         cstr[i] = c;
     }
     cstr[length] = 0;
@@ -122,13 +127,8 @@ class BinaryDigitReader
                 return -1;
 
             int c = *start++;
-            MOZ_ASSERT(('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z'));
-            if ('0' <= c && c <= '9')
-                digit = c - '0';
-            else if ('a' <= c && c <= 'z')
-                digit = c - 'a' + 10;
-            else
-                digit = c - 'A' + 10;
+            MOZ_ASSERT(IsAsciiAlphanumeric(c));
+            digit = AsciiAlphanumericToNumber(c);
             digitMask = base >> 1;
         }
 
@@ -226,18 +226,14 @@ js::GetPrefixInteger(JSContext* cx, const CharT* start, const CharT* end, int ba
     const CharT* s = start;
     double d = 0.0;
     for (; s < end; s++) {
-        int digit;
         CharT c = *s;
-        if ('0' <= c && c <= '9')
-            digit = c - '0';
-        else if ('a' <= c && c <= 'z')
-            digit = c - 'a' + 10;
-        else if ('A' <= c && c <= 'Z')
-            digit = c - 'A' + 10;
-        else
+        if (!IsAsciiAlphanumeric(c))
             break;
+
+        uint8_t digit = AsciiAlphanumericToNumber(c);
         if (digit >= base)
             break;
+
         d = d * base + digit;
     }
 
@@ -1194,17 +1190,13 @@ js::FinishRuntimeNumberState(JSRuntime* rt)
 #endif
 
 JSObject*
-js::InitNumberClass(JSContext* cx, HandleObject obj)
+js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global)
 {
-    MOZ_ASSERT(obj->isNative());
-
-    Handle<GlobalObject*> global = obj.as<GlobalObject>();
-
-    RootedObject numberProto(cx, GlobalObject::createBlankPrototype(cx, global,
-                                                                    &NumberObject::class_));
+    Rooted<NumberObject*> numberProto(cx);
+    numberProto = GlobalObject::createBlankPrototype<NumberObject>(cx, global);
     if (!numberProto)
         return nullptr;
-    numberProto->as<NumberObject>().setPrimitiveValue(0);
+    numberProto->setPrimitiveValue(0);
 
     RootedFunction ctor(cx);
     ctor = GlobalObject::createConstructor(cx, Number, cx->names().Number, 1);
@@ -1290,7 +1282,7 @@ FracNumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d, int base = 10)
 #ifdef DEBUG
     {
         int32_t _;
-        MOZ_ASSERT(!mozilla::NumberIsInt32(d, &_));
+        MOZ_ASSERT(!mozilla::NumberEqualsInt32(d, &_));
     }
 #endif
 
@@ -1321,7 +1313,7 @@ js::NumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d, int base/* = 10
 {
     int32_t i;
     size_t len;
-    return mozilla::NumberIsInt32(d, &i)
+    return mozilla::NumberEqualsInt32(d, &i)
            ? Int32ToCString(cbuf, i, &len, base)
            : FracNumberToCString(cx, cbuf, d, base);
 }
@@ -1330,22 +1322,16 @@ template <AllowGC allowGC>
 static JSString*
 NumberToStringWithBase(JSContext* cx, double d, int base)
 {
+    MOZ_ASSERT(2 <= base && base <= 36);
+
     ToCStringBuf cbuf;
     char* numStr;
-
-    /*
-     * Caller is responsible for error reporting. When called from trace,
-     * returning nullptr here will cause us to fall of trace and then retry
-     * from the interpreter (which will report the error).
-     */
-    if (base < 2 || base > 36)
-        return nullptr;
 
     JSCompartment* comp = cx->compartment();
 
     int32_t i;
     bool isBase10Int = false;
-    if (mozilla::NumberIsInt32(d, &i)) {
+    if (mozilla::NumberEqualsInt32(d, &i)) {
         isBase10Int = (base == 10);
         if (isBase10Int && StaticStrings::hasInt(i))
             return cx->staticStrings().getInt(i);
@@ -1406,7 +1392,7 @@ JSAtom*
 js::NumberToAtom(JSContext* cx, double d)
 {
     int32_t si;
-    if (mozilla::NumberIsInt32(d, &si))
+    if (mozilla::NumberEqualsInt32(d, &si))
         return Int32ToAtom(cx, si);
 
     if (JSFlatString* str = LookupDtoaCache(cx, d))
@@ -1644,7 +1630,7 @@ js::ToUint8Slow(JSContext *cx, const HandleValue v, uint8_t *out)
         if (!ToNumberSlow(cx, v, &d))
             return false;
     }
-    *out = ToInt8(d);
+    *out = ToUint8(d);
     return true;
 }
 
@@ -1745,33 +1731,16 @@ js::ToUint16Slow(JSContext* cx, const HandleValue v, uint16_t* out)
     } else if (!ToNumberSlow(cx, v, &d)) {
         return false;
     }
-
-    if (d == 0 || !mozilla::IsFinite(d)) {
-        *out = 0;
-        return true;
-    }
-
-    uint16_t u = (uint16_t) d;
-    if ((double)u == d) {
-        *out = u;
-        return true;
-    }
-
-    bool neg = (d < 0);
-    d = floor(neg ? -d : d);
-    d = neg ? -d : d;
-    unsigned m = JS_BIT(16);
-    d = fmod(d, (double) m);
-    if (d < 0)
-        d += m;
-    *out = (uint16_t) d;
+    *out = ToUint16(d);
     return true;
 }
 
 // ES2017 draft 7.1.17 ToIndex
 bool
-js::ToIndex(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index)
+js::ToIndexSlow(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index)
 {
+    MOZ_ASSERT_IF(v.isInt32(), v.toInt32() < 0);
+
     // Step 1.
     if (v.isUndefined()) {
         *index = 0;

@@ -7,6 +7,7 @@
 #include "nsBidiPresUtils.h"
 
 #include "mozilla/IntegerRange.h"
+#include "mozilla/dom/Text.h"
 
 #include "gfxContext.h"
 #include "nsAutoPtr.h"
@@ -626,8 +627,8 @@ CreateContinuation(nsIFrame*  aFrame,
                    nsIFrame** aNewFrame,
                    bool       aIsFluid)
 {
-  NS_PRECONDITION(aNewFrame, "null OUT ptr");
-  NS_PRECONDITION(aFrame, "null ptr");
+  MOZ_ASSERT(aNewFrame, "null OUT ptr");
+  MOZ_ASSERT(aFrame, "null ptr");
 
   *aNewFrame = nullptr;
 
@@ -1136,14 +1137,14 @@ nsBidiPresUtils::TraverseFrames(nsBlockInFlowLineIterator* aLineIter,
           aBpd->mPrevContent = content;
           if (!frame->StyleText()->NewlineIsSignificant(
                 static_cast<nsTextFrame*>(frame))) {
-            content->AppendTextTo(aBpd->mBuffer);
+            content->GetAsText()->AppendTextTo(aBpd->mBuffer);
           } else {
             /*
              * For preformatted text we have to do bidi resolution on each line
              * separately.
              */
             nsAutoString text;
-            content->AppendTextTo(text);
+            content->GetAsText()->AppendTextTo(text);
             nsIFrame* next;
             do {
               next = nullptr;
@@ -1866,8 +1867,8 @@ nsBidiPresUtils::EnsureBidiContinuation(nsIFrame*       aFrame,
                                         int32_t         aStart,
                                         int32_t         aEnd)
 {
-  NS_PRECONDITION(aNewFrame, "null OUT ptr");
-  NS_PRECONDITION(aFrame, "aFrame is null");
+  MOZ_ASSERT(aNewFrame, "null OUT ptr");
+  MOZ_ASSERT(aFrame, "aFrame is null");
 
   aFrame->AdjustOffsetsForBidi(aStart, aEnd);
   return CreateContinuation(aFrame, aNewFrame, false);

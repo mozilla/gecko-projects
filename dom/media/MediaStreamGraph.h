@@ -12,7 +12,6 @@
 #include "StreamTracks.h"
 #include "VideoSegment.h"
 #include "mozilla/LinkedList.h"
-#include "mozilla/MozPromise.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/TaskQueue.h"
 #include "nsAutoPtr.h"
@@ -24,6 +23,13 @@
 class nsIRunnable;
 class nsIGlobalObject;
 class nsPIDOMWindowInner;
+
+namespace mozilla {
+  class AsyncLogger;
+};
+
+extern mozilla::AsyncLogger gMSGTraceLogger;
+
 
 template <>
 class nsAutoRefTraits<SpeexResamplerState> : public nsPointerRefTraits<SpeexResamplerState>
@@ -428,6 +434,12 @@ public:
   void RemoveVideoOutputImpl(MediaStreamVideoSink* aSink, TrackID aID);
   void AddListenerImpl(already_AddRefed<MediaStreamListener> aListener);
   void RemoveListenerImpl(MediaStreamListener* aListener);
+
+  /**
+   * Removes all direct listeners and signals to them that they have been
+   * uninstalled.
+   */
+  virtual void RemoveAllDirectListenersImpl() {}
   void RemoveAllListenersImpl();
   virtual void AddTrackListenerImpl(already_AddRefed<MediaStreamTrackListener> aListener,
                                     TrackID aTrackID);
@@ -704,13 +716,10 @@ public:
    * Call all MediaStreamListeners to request new data via the NotifyPull API
    * (if enabled).
    * aDesiredUpToTime (in): end time of new data requested.
-   * aPromises (out): NotifyPullPromises if async API is enabled.
    *
    * Returns true if new data is about to be added.
    */
-  typedef MozPromise<bool, bool, true /* is exclusive */ > NotifyPullPromise;
-  bool PullNewData(StreamTime aDesiredUpToTime,
-                   nsTArray<RefPtr<NotifyPullPromise>>& aPromises);
+  bool PullNewData(StreamTime aDesiredUpToTime);
 
   /**
    * Extract any state updates pending in the stream, and apply them.
@@ -801,17 +810,13 @@ public:
     MediaStream::ApplyTrackDisabling(aTrackID, aSegment, aRawSegment);
   }
 
+  void RemoveAllDirectListenersImpl() override;
+
   /**
    * End all tracks and Finish() this stream.  Used to voluntarily revoke access
    * to a LocalMediaStream.
    */
   void EndAllTrackAndFinish();
-
-  /**
-   * Removes all direct listeners and signals to them that they have been
-   * uninstalled.
-   */
-  void RemoveAllDirectListeners();
 
   void RegisterForAudioMixing();
 
@@ -1295,11 +1300,14 @@ public:
     OFFLINE_THREAD_DRIVER
   };
   static const uint32_t AUDIO_CALLBACK_DRIVER_SHUTDOWN_TIMEOUT = 20*1000;
+  static const TrackRate REQUEST_DEFAULT_SAMPLE_RATE = 0;
 
   // Main thread only
-  static MediaStreamGraph* GetInstanceIfExists(nsPIDOMWindowInner* aWindow);
+  static MediaStreamGraph* GetInstanceIfExists(nsPIDOMWindowInner* aWindow,
+                                               TrackRate aSampleRate);
   static MediaStreamGraph* GetInstance(GraphDriverType aGraphDriverRequested,
-                                       nsPIDOMWindowInner* aWindow);
+                                       nsPIDOMWindowInner* aWindow,
+                                       TrackRate aSampleRate);
   static MediaStreamGraph* CreateNonRealtimeInstance(
     TrackRate aSampleRate,
     nsPIDOMWindowInner* aWindowId);

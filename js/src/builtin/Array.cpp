@@ -10,6 +10,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/TextUtils.h"
 
 #include <algorithm>
 
@@ -55,6 +56,7 @@ using mozilla::ArrayLength;
 using mozilla::CeilingLog2;
 using mozilla::CheckedInt;
 using mozilla::DebugOnly;
+using mozilla::IsAsciiDigit;
 
 using JS::AutoCheckCannotGC;
 using JS::IsArrayAnswer;
@@ -217,7 +219,7 @@ StringIsArrayIndex(const CharT* s, uint32_t length, uint32_t* indexp)
 {
     const CharT* end = s + length;
 
-    if (length == 0 || length > (sizeof("4294967294") - 1) || !JS7_ISDEC(*s))
+    if (length == 0 || length > (sizeof("4294967294") - 1) || !IsAsciiDigit(*s))
         return false;
 
     uint32_t c = 0, previous = 0;
@@ -228,7 +230,7 @@ StringIsArrayIndex(const CharT* s, uint32_t length, uint32_t* indexp)
         return false;
 
     for (; s < end; s++) {
-        if (!JS7_ISDEC(*s))
+        if (!IsAsciiDigit(*s))
             return false;
 
         previous = index;
@@ -677,7 +679,8 @@ MaybeInIteration(HandleObject obj, JSContext* cx)
         return true;
     }
 
-    if (MOZ_UNLIKELY(group->hasAllFlags(OBJECT_FLAG_ITERATED)))
+    AutoSweepObjectGroup sweep(group);
+    if (MOZ_UNLIKELY(group->hasAllFlags(sweep, OBJECT_FLAG_ITERATED)))
         return true;
 
     return false;
@@ -3195,7 +3198,7 @@ SliceArguments(JSContext* cx, Handle<ArgumentsObject*> argsobj, uint32_t begin, 
         return nullptr;
     result->setDenseInitializedLength(count);
 
-    MOZ_ASSERT(result->group()->unknownProperties(),
+    MOZ_ASSERT(result->group()->unknownPropertiesDontCheckGeneration(),
                "The default array group has unknown properties, so we can directly initialize the"
                "dense elements without needing to update the indexed type set.");
 
@@ -3958,8 +3961,11 @@ NewArrayTryUseGroup(JSContext* cx, HandleObjectGroup group, size_t length,
 {
     MOZ_ASSERT(newKind != SingletonObject);
 
-    if (group->shouldPreTenure())
-        newKind = TenuredObject;
+    {
+        AutoSweepObjectGroup sweep(group);
+        if (group->shouldPreTenure(sweep))
+            newKind = TenuredObject;
+    }
 
     RootedObject proto(cx, group->proto().toObject());
     ArrayObject* res = NewArray<maxLength>(cx, length, proto, newKind);

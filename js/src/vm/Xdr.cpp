@@ -125,7 +125,7 @@ VersionCheck(XDRState<mode>* xdr)
 
 template<XDRMode mode>
 XDRResult
-XDRState<mode>::codeFunction(MutableHandleFunction funp, HandleScriptSource sourceObject)
+XDRState<mode>::codeFunction(MutableHandleFunction funp, HandleScriptSourceObject sourceObject)
 {
     TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx());
     TraceLoggerTextId event =
@@ -230,10 +230,10 @@ AutoXDRTree::Key
 XDRIncrementalEncoder::getTreeKey(JSFunction* fun) const
 {
     if (fun->isInterpretedLazy()) {
-        static_assert(sizeof(fun->lazyScript()->begin()) == 4 ||
-                      sizeof(fun->lazyScript()->end()) == 4,
+        static_assert(sizeof(fun->lazyScript()->sourceStart()) == 4 ||
+                      sizeof(fun->lazyScript()->sourceEnd()) == 4,
                       "AutoXDRTree key requires LazyScripts positions to be uint32");
-        return uint64_t(fun->lazyScript()->begin()) << 32 | fun->lazyScript()->end();
+        return uint64_t(fun->lazyScript()->sourceStart()) << 32 | fun->lazyScript()->sourceEnd();
     }
 
     if (fun->isInterpreted()) {

@@ -178,12 +178,32 @@ fn maybe_radius_yaml(radius: &BorderRadius) -> Option<Yaml> {
     }
 }
 
-fn write_sc(parent: &mut Table, sc: &StackingContext, properties: &SceneProperties, filter_iter: AuxIter<FilterOp>) {
+fn write_stacking_context(
+    parent: &mut Table,
+    sc: &StackingContext,
+    properties: &SceneProperties,
+    filter_iter: AuxIter<FilterOp>,
+    clip_id_mapper: &ClipIdMapper,
+) {
     enum_node(parent, "scroll-policy", sc.scroll_policy);
 
     matrix4d_node(parent, "transform", &properties.resolve_layout_transform(&sc.transform));
 
     enum_node(parent, "transform-style", sc.transform_style);
+
+    let glyph_raster_space = match sc.glyph_raster_space {
+        GlyphRasterSpace::Local(scale) => {
+            format!("local({})", scale)
+        }
+        GlyphRasterSpace::Screen => {
+            "screen".to_owned()
+        }
+    };
+    str_node(parent, "glyph-raster-space", &glyph_raster_space);
+
+    if let Some(clip_node_id) = sc.clip_node_id {
+        yaml_node(parent, "clip-node", Yaml::Integer(clip_id_mapper.map_id(&clip_node_id) as i64));
+    }
 
     if let Some(perspective) = sc.perspective {
         matrix4d_node(parent, "perspective", &perspective);
@@ -687,9 +707,17 @@ impl YamlFrameWriter {
             };
 
             let mut v = new_table();
-            rect_node(&mut v, "bounds", &base.rect());
+            let info = base.get_layout_primitive_info(&LayoutVector2D::zero());
+            rect_node(&mut v, "bounds", &info.rect);
+            rect_node(&mut v, "clip-rect", &info.clip_rect);
 
-            rect_node(&mut v, "clip-rect", base.clip_rect());
+            if let Some(tag) = info.tag {
+                yaml_node(
+                    &mut v,
+                    "hit-testing-tag",
+                     Yaml::Array(vec![Yaml::Integer(tag.0 as i64), Yaml::Integer(tag.1 as i64)])
+                );
+            }
 
             let clip_and_scroll_yaml = match clip_id_mapper.map_info(&base.clip_and_scroll()) {
                 (scroll_id, Some(clip_id)) => {
@@ -837,7 +865,7 @@ impl YamlFrameWriter {
                                 yaml_node(&mut v, "radius", radius_node);
                             }
                         }
-                        BorderDetails::Image(ref details) => {
+                        BorderDetails::NinePatch(ref details) => {
                             let widths: Vec<f32> = vec![
                                 item.widths.top,
                                 item.widths.right,
@@ -852,16 +880,22 @@ impl YamlFrameWriter {
                             ];
                             yaml_node(&mut v, "width", f32_vec_yaml(&widths, true));
                             str_node(&mut v, "border-type", "image");
-                            if let Some(path) = self.path_for_image(details.image_key) {
-                                path_node(&mut v, "image", &path);
+
+                            match details.source {
+                                NinePatchBorderSource::Image(image_key) => {
+                                    if let Some(path) = self.path_for_image(image_key) {
+                                        path_node(&mut v, "image", &path);
+                                    }
+                                }
                             }
-                            u32_node(&mut v, "image-width", details.patch.width);
-                            u32_node(&mut v, "image-height", details.patch.height);
+
+                            u32_node(&mut v, "image-width", details.width);
+                            u32_node(&mut v, "image-height", details.height);
                             let slice: Vec<u32> = vec![
-                                details.patch.slice.top,
-                                details.patch.slice.right,
-                                details.patch.slice.bottom,
-                                details.patch.slice.left,
+                                details.slice.top,
+                                details.slice.right,
+                                details.slice.bottom,
+                                details.slice.left,
                             ];
                             yaml_node(&mut v, "slice", u32_vec_yaml(&slice, true));
                             yaml_node(&mut v, "outset", f32_vec_yaml(&outset, true));
@@ -991,7 +1025,13 @@ impl YamlFrameWriter {
                 PushStackingContext(item) => {
                     str_node(&mut v, "type", "stacking-context");
                     let filters = display_list.get(base.filters());
-                    write_sc(&mut v, &item.stacking_context, &scene.properties, filters);
+                    write_stacking_context(
+                        &mut v,
+                        &item.stacking_context,
+                        &scene.properties,
+                        filters,
+                        clip_id_mapper,
+                    );
 
                     let mut sub_iter = base.sub_iter();
                     self.write_display_list(&mut v, display_list, scene, &mut sub_iter, clip_id_mapper);
@@ -1000,7 +1040,6 @@ impl YamlFrameWriter {
                 Clip(item) => {
                     str_node(&mut v, "type", "clip");
                     usize_node(&mut v, "id", clip_id_mapper.add_id(item.id));
-                    size_node(&mut v, "content-size", &base.rect().size);
 
                     let (complex_clips, complex_clip_count) = base.complex_clip();
                     if let Some(complex) = self.make_complex_clips_node(

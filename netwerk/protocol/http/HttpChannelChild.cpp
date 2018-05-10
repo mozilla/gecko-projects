@@ -63,6 +63,10 @@
 #include "GeckoTaskTracer.h"
 #endif
 
+#ifdef MOZ_GECKO_PROFILER
+#include "ProfilerMarkerPayload.h"
+#endif
+
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
 
@@ -161,6 +165,7 @@ InterceptStreamListener::Cleanup()
 HttpChannelChild::HttpChannelChild()
   : HttpAsyncAborter<HttpChannelChild>(this)
   , NeckoTargetHolder(nullptr)
+  , mCacheKey(0)
   , mSynthesizedStreamLength(0)
   , mIsFromCache(false)
   , mCacheEntryAvailable(false)
@@ -190,6 +195,7 @@ HttpChannelChild::HttpChannelChild()
 
   mChannelCreationTime = PR_Now();
   mChannelCreationTimestamp = TimeStamp::Now();
+  mLastStatusReported = mChannelCreationTimestamp; // in case we enable the profiler after Init()
   mAsyncOpenTime = TimeStamp::Now();
   mEventQ = new ChannelEventQueue(static_cast<nsIHttpChannel*>(this));
 
@@ -226,7 +232,6 @@ HttpChannelChild::ReleaseMainThreadOnlyReferences()
   }
 
   nsTArray<nsCOMPtr<nsISupports>> arrayToRelease;
-  arrayToRelease.AppendElement(mCacheKey.forget());
   arrayToRelease.AppendElement(mRedirectChannelChild.forget());
 
   // To solve multiple inheritence of nsISupports in InterceptStreamListener
@@ -652,20 +657,7 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
 
   AutoEventEnqueuer ensureSerialDispatch(mEventQ);
 
-  nsresult rv;
-  nsCOMPtr<nsISupportsPRUint32> container =
-    do_CreateInstance(NS_SUPPORTS_PRUINT32_CONTRACTID, &rv);
-  if (NS_FAILED(rv)) {
-    Cancel(rv);
-    return;
-  }
-
-  rv = container->SetData(cacheKey);
-  if (NS_FAILED(rv)) {
-    Cancel(rv);
-    return;
-  }
-  mCacheKey = container;
+  mCacheKey = cacheKey;
 
   // replace our request headers with what actually got sent in the parent
   mRequestHead.SetHeaders(requestHeaders);
@@ -684,9 +676,7 @@ class SyntheticDiversionListener final : public nsIStreamListener
 {
   RefPtr<HttpChannelChild> mChannel;
 
-  ~SyntheticDiversionListener()
-  {
-  }
+  ~SyntheticDiversionListener() = default;
 
 public:
   explicit SyntheticDiversionListener(HttpChannelChild* aChannel)
@@ -1164,6 +1154,17 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
   mCacheReadStart = timing.cacheReadStart;
   mCacheReadEnd = timing.cacheReadEnd;
 
+#ifdef MOZ_GECKO_PROFILER
+  if (profiler_is_active()) {
+    int32_t priority = PRIORITY_NORMAL;
+    GetPriority(&priority);
+    profiler_add_network_marker(mURI, priority, mChannelId, NetworkLoadType::LOAD_STOP,
+                                mLastStatusReported, TimeStamp::Now(),
+                                mTransferSize,
+                                &mTransactionTimings);
+  }
+#endif
+
   mResponseTrailers = new nsHttpHeaderArray(aResponseTrailers);
 
   DoPreOnStopRequest(channelStatus);
@@ -1226,10 +1227,7 @@ HttpChannelChild::DoPreOnStopRequest(nsresult aStatus)
 
   MaybeCallSynthesizedCallback();
 
-  PerformanceStorage* performanceStorage = GetPerformanceStorage();
-  if (performanceStorage) {
-      performanceStorage->AddEntry(this, this);
-  }
+  MaybeReportTimingData();
 
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
     mStatus = aStatus;
@@ -1795,6 +1793,12 @@ HttpChannelChild::Redirect1Begin(const uint32_t& registrarId,
   ipc::MergeParentLoadInfoForwarder(loadInfoForwarder, mLoadInfo);
 
   nsCOMPtr<nsIURI> uri = DeserializeURI(newOriginalURI);
+
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, channelId, NetworkLoadType::LOAD_REDIRECT,
+                              mLastStatusReported, TimeStamp::Now(),
+                              0,
+                              &mTransactionTimings,
+                              uri);
 
   if (!securityInfoSerialization.IsEmpty()) {
     NS_DeserializeObject(securityInfoSerialization,
@@ -2521,6 +2525,11 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   // other http-* notifications are disabled in child processes.
   gHttpHandler->OnOpeningRequest(this);
 
+  mLastStatusReported = TimeStamp::Now();
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+                              mChannelCreationTimestamp, mLastStatusReported,
+                              0, nullptr, nullptr);
+
   mIsPending = true;
   mWasOpened = true;
   mListener = listener;
@@ -2735,19 +2744,7 @@ HttpChannelChild::ContinueAsyncOpen()
   openArgs.tlsFlags() = mTlsFlags;
   openArgs.initialRwin() = mInitialRwin;
 
-  uint32_t cacheKey = 0;
-  if (mCacheKey) {
-    nsCOMPtr<nsISupportsPRUint32> container = do_QueryInterface(mCacheKey);
-    if (!container) {
-      return NS_ERROR_ILLEGAL_VALUE;
-    }
-
-    nsresult rv = container->GetData(&cacheKey);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-  openArgs.cacheKey() = cacheKey;
+  openArgs.cacheKey() = mCacheKey;
 
   openArgs.blockAuthPrompt() = mBlockAuthPrompt;
 
@@ -3048,17 +3045,17 @@ HttpChannelChild::GetCacheEntryId(uint64_t *aCacheEntryId)
 }
 
 NS_IMETHODIMP
-HttpChannelChild::GetCacheKey(nsISupports **cacheKey)
+HttpChannelChild::GetCacheKey(uint32_t *cacheKey)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->GetCacheKey(cacheKey);
   }
 
-  NS_IF_ADDREF(*cacheKey = mCacheKey);
+  *cacheKey = mCacheKey;
   return NS_OK;
 }
 NS_IMETHODIMP
-HttpChannelChild::SetCacheKey(nsISupports *cacheKey)
+HttpChannelChild::SetCacheKey(uint32_t cacheKey)
 {
   if (mSynthesizedCacheInfo) {
     return mSynthesizedCacheInfo->SetCacheKey(cacheKey);
@@ -3129,12 +3126,12 @@ HttpChannelChild::GetAlternativeDataType(nsACString & aType)
 }
 
 NS_IMETHODIMP
-HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, nsIOutputStream * *_retval)
+HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, int64_t aPredictedSize, nsIOutputStream * *_retval)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
   if (mSynthesizedCacheInfo) {
-    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(aType, _retval);
+    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(aType, aPredictedSize, _retval);
   }
 
   if (!mIPCOpen) {
@@ -3154,6 +3151,7 @@ HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, nsIOutpu
 
   if (!gNeckoChild->SendPAltDataOutputStreamConstructor(stream,
                                                         nsCString(aType),
+                                                        aPredictedSize,
                                                         this)) {
     return NS_ERROR_FAILURE;
   }

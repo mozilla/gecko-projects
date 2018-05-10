@@ -52,7 +52,7 @@ static bool sShowPreviousPage = true;
 static nsIDocument*
 GetDocumentFromView(nsView* aView)
 {
-  NS_PRECONDITION(aView, "");
+  MOZ_ASSERT(aView, "null view");
 
   nsViewManager* vm = aView->GetViewManager();
   nsIPresShell* ps =  vm ? vm->GetPresShell() : nullptr;
@@ -447,18 +447,6 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 
   if (aBuilder->IsRetainingDisplayList()) {
-    // The value of needsOwnLayer can change between builds without
-    // an invalidation recorded for this frame (like if the root
-    // scrollframe becomes active). If this happens,
-    // then we need to notify the builder so that merging can
-    // happen correctly.
-    if (!mPreviouslyNeededLayer ||
-        mPreviouslyNeededLayer.value() != needsOwnLayer) {
-      dirty = visible;
-      aBuilder->MarkCurrentFrameModifiedDuringBuilding();
-    }
-    mPreviouslyNeededLayer = Some(needsOwnLayer);
-
     // Caret frame changed, rebuild the entire subdoc.
     // We could just invalidate the old and new frame
     // areas and save some work here. RetainedDisplayListBuilder
@@ -466,7 +454,14 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // subdocs in advance.
     if (mPreviousCaret != aBuilder->GetCaretFrame()) {
       dirty = visible;
-      aBuilder->MarkCurrentFrameModifiedDuringBuilding();
+      aBuilder->RebuildAllItemsInCurrentSubtree();
+      // Mark the old caret frame as invalid so that we remove the
+      // old nsDisplayCaret. We don't mark the current frame as invalid
+      // since we want the nsDisplaySubdocument to retain it's place
+      // in the retained display list.
+      if (mPreviousCaret) {
+        aBuilder->MarkFrameModifiedDuringBuilding(mPreviousCaret);
+      }
     }
     mPreviousCaret = aBuilder->GetCaretFrame();
   }
@@ -1102,7 +1097,7 @@ DestroyDisplayItemDataForFrames(nsIFrame* aFrame)
 static bool
 BeginSwapDocShellsForDocument(nsIDocument* aDocument, void*)
 {
-  NS_PRECONDITION(aDocument, "");
+  MOZ_ASSERT(aDocument, "null document");
 
   nsIPresShell* shell = aDocument->GetShell();
   if (shell) {
@@ -1142,8 +1137,8 @@ BeginSwapDocShellsForViews(nsView* aSibling)
 static void
 InsertViewsInReverseOrder(nsView* aSibling, nsView* aParent)
 {
-  NS_PRECONDITION(aParent, "");
-  NS_PRECONDITION(!aParent->GetFirstChild(), "inserting into non-empty list");
+  MOZ_ASSERT(aParent, "null view");
+  MOZ_ASSERT(!aParent->GetFirstChild(), "inserting into non-empty list");
 
   nsViewManager* vm = aParent->GetViewManager();
   while (aSibling) {
@@ -1185,7 +1180,7 @@ nsSubDocumentFrame::BeginSwapDocShells(nsIFrame* aOther)
 static bool
 EndSwapDocShellsForDocument(nsIDocument* aDocument, void*)
 {
-  NS_PRECONDITION(aDocument, "");
+  MOZ_ASSERT(aDocument, "null document");
 
   // Our docshell and view trees have been updated for the new hierarchy.
   // Now also update all nsDeviceContext::mWidget to that of the

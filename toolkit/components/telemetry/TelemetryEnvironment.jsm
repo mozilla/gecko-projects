@@ -214,9 +214,9 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["devtools.debugger.enabled", {what: RECORD_PREF_VALUE}],
   ["devtools.debugger.remote-enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
+  ["dom.ipc.plugins.sandbox-level.flash", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
-  ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
   ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.blocklist.enabled", {what: RECORD_PREF_VALUE}],
@@ -276,7 +276,6 @@ const PREF_SEARCH_COHORT = "browser.search.cohort";
 const COMPOSITOR_CREATED_TOPIC = "compositor:created";
 const COMPOSITOR_PROCESS_ABORTED_TOPIC = "compositor:process-aborted";
 const DISTRIBUTION_CUSTOMIZATION_COMPLETE_TOPIC = "distribution-customization-complete";
-const EXPERIMENTS_CHANGED_TOPIC = "experiments-changed";
 const GFX_FEATURES_READY_TOPIC = "gfx-features-ready";
 const SEARCH_ENGINE_MODIFIED_TOPIC = "browser-search-engine-modified";
 const SEARCH_SERVICE_TOPIC = "browser-search-service";
@@ -514,7 +513,7 @@ EnvironmentAddonBuilder.prototype = {
     this._pendingTask = (async () => {
       try {
         // Gather initial addons details
-        await this._updateAddons();
+        await this._updateAddons(true);
 
         if (!this._environment._addonsAreFull) {
           // The addon database has not been loaded, so listen for the event
@@ -549,7 +548,6 @@ EnvironmentAddonBuilder.prototype = {
   watchForChanges() {
     this._loaded = true;
     AddonManager.addAddonListener(this);
-    Services.obs.addObserver(this, EXPERIMENTS_CHANGED_TOPIC);
   },
 
   // AddonListener
@@ -574,9 +572,7 @@ EnvironmentAddonBuilder.prototype = {
   // nsIObserver
   observe(aSubject, aTopic, aData) {
     this._environment._log.trace("observe - Topic " + aTopic);
-    if (aTopic == "experiment-changed") {
-      this._checkForChanges("experiment-changed");
-    } else if (aTopic == BLOCKLIST_LOADED_TOPIC) {
+    if (aTopic == BLOCKLIST_LOADED_TOPIC) {
       Services.obs.removeObserver(this, BLOCKLIST_LOADED_TOPIC);
       this._blocklistObserverAdded = false;
       let plugins = this._getActivePlugins();
@@ -613,7 +609,6 @@ EnvironmentAddonBuilder.prototype = {
   _shutdownBlocker() {
     if (this._loaded) {
       AddonManager.removeAddonListener(this);
-      Services.obs.removeObserver(this, EXPERIMENTS_CHANGED_TOPIC);
       if (this._blocklistObserverAdded) {
         Services.obs.removeObserver(this, BLOCKLIST_LOADED_TOPIC);
       }
@@ -633,11 +628,15 @@ EnvironmentAddonBuilder.prototype = {
    * This should only be called from _pendingTask; otherwise we risk
    * running this during addon manager shutdown.
    *
+   * @param {boolean} [atStartup]
+   *        True if this is the first check we're performing at startup. In that
+   *        situation, we defer some more expensive initialization.
+   *
    * @returns Promise<Object> This returns a Promise resolved with a status object with the following members:
    *   changed - Whether the environment changed.
    *   oldEnvironment - Only set if a change occured, contains the environment data before the change.
    */
-  async _updateAddons() {
+  async _updateAddons(atStartup) {
     this._environment._log.trace("_updateAddons");
     let personaId = null;
     let theme = LightweightThemeManager.currentTheme;
@@ -648,9 +647,8 @@ EnvironmentAddonBuilder.prototype = {
     let addons = {
       activeAddons: await this._getActiveAddons(),
       theme: await this._getActiveTheme(),
-      activePlugins: this._getActivePlugins(),
-      activeGMPlugins: await this._getActiveGMPlugins(),
-      activeExperiment: this._getActiveExperiment(),
+      activePlugins: this._getActivePlugins(atStartup),
+      activeGMPlugins: await this._getActiveGMPlugins(atStartup),
       persona: personaId,
     };
 
@@ -757,12 +755,17 @@ EnvironmentAddonBuilder.prototype = {
 
   /**
    * Get the plugins data in object form.
+   *
+   * @param {boolean} [atStartup]
+   *        True if this is the first check we're performing at startup. In that
+   *        situation, we defer some more expensive initialization.
+   *
    * @return Object containing the plugins data.
    */
-  _getActivePlugins() {
+  _getActivePlugins(atStartup) {
     // If we haven't yet loaded the blocklist, pass back dummy data for now,
     // and add an observer to update this data as soon as we get it.
-    if (!Services.blocklist.isLoaded) {
+    if (atStartup || !Services.blocklist.isLoaded) {
       if (!this._blocklistObserverAdded) {
         Services.obs.addObserver(this, BLOCKLIST_LOADED_TOPIC);
         this._blocklistObserverAdded = true;
@@ -809,21 +812,26 @@ EnvironmentAddonBuilder.prototype = {
 
   /**
    * Get the GMPlugins data in object form.
+   *
+   * @param {boolean} [atStartup]
+   *        True if this is the first check we're performing at startup. In that
+   *        situation, we defer some more expensive initialization.
+   *
    * @return Object containing the GMPlugins data.
    *
    * This should only be called from _pendingTask; otherwise we risk
    * running this during addon manager shutdown.
    */
-  async _getActiveGMPlugins() {
+  async _getActiveGMPlugins(atStartup) {
     // If we haven't yet loaded the blocklist, pass back dummy data for now,
     // and add an observer to update this data as soon as we get it.
-    if (!Services.blocklist.isLoaded) {
+    if (atStartup || !Services.blocklist.isLoaded) {
       if (!this._blocklistObserverAdded) {
         Services.obs.addObserver(this, BLOCKLIST_LOADED_TOPIC);
         this._blocklistObserverAdded = true;
       }
       return {
-        "dummy-gmp": {version: "0.1", userDisabled: false, applyBackgroundUpdates: true}
+        "dummy-gmp": {version: "0.1", userDisabled: false, applyBackgroundUpdates: 1}
       };
     }
     // Request plugins, asynchronously.
@@ -849,14 +857,6 @@ EnvironmentAddonBuilder.prototype = {
     }
 
     return activeGMPlugins;
-  },
-
-  /**
-   * Get the active experiment data in object form.
-   * @return Object containing the active experiment data.
-   */
-  _getActiveExperiment() {
-    return {};
   },
 };
 
@@ -1116,7 +1116,7 @@ EnvironmentCache.prototype = {
     throw new Error(`Unexpected preference type ("${prefType}") for "${pref}".`);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference]),
 
   /**
    * Start watching the preferences.
@@ -1344,6 +1344,7 @@ EnvironmentCache.prototype = {
       buildId: Services.appinfo.appBuildID || null,
       version: Services.appinfo.version || null,
       vendor: Services.appinfo.vendor || null,
+      displayVersion: AppConstants.MOZ_APP_VERSION_DISPLAY || null,
       platformVersion: Services.appinfo.platformVersion || null,
       xpcomAbi: Services.appinfo.XPCOMABI,
       updaterAvailable: AppConstants.MOZ_UPDATER,

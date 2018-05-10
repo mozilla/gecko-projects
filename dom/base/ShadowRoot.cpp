@@ -15,6 +15,7 @@
 #include "mozilla/dom/HTMLSlotElement.h"
 #include "nsXBLPrototypeBinding.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/ServoStyleRuleMap.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 
@@ -23,8 +24,15 @@ using namespace mozilla::dom;
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(ShadowRoot)
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ShadowRoot,
-                                                  DocumentFragment)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ShadowRoot, DocumentFragment)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleSheets)
+  for (StyleSheet* sheet : tmp->mStyleSheets) {
+    // mServoStyles keeps another reference to it if applicable.
+    if (sheet->IsApplicable()) {
+      NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mServoStyles->sheets[i]");
+      cb.NoteXPCOMChild(sheet);
+    }
+  }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDOMStyleSheets)
   for (auto iter = tmp->mIdentifierMap.ConstIter(); !iter.Done();
        iter.Next()) {
@@ -81,10 +89,33 @@ ShadowRoot::~ShadowRoot()
     host->RemoveMutationObserver(this);
   }
 
+  if (IsComposedDocParticipant()) {
+    OwnerDoc()->RemoveComposedDocShadowRoot(*this);
+  }
+
+  MOZ_DIAGNOSTIC_ASSERT(!OwnerDoc()->IsComposedDocShadowRoot(*this));
+
   UnsetFlags(NODE_IS_IN_SHADOW_TREE);
 
   // nsINode destructor expects mSubtreeRoot == this.
   SetSubtreeRootPointer(this);
+}
+
+void
+ShadowRoot::SetIsComposedDocParticipant(bool aIsComposedDocParticipant)
+{
+  bool changed = mIsComposedDocParticipant != aIsComposedDocParticipant;
+  mIsComposedDocParticipant = aIsComposedDocParticipant;
+  if (!changed) {
+    return;
+  }
+
+  nsIDocument* doc = OwnerDoc();
+  if (IsComposedDocParticipant()) {
+    doc->AddComposedDocShadowRoot(*this);
+  } else {
+    doc->RemoveComposedDocShadowRoot(*this);
+  }
 }
 
 JSObject*
@@ -244,7 +275,7 @@ void
 ShadowRoot::RuleAdded(StyleSheet& aSheet, css::Rule& aRule)
 {
   if (mStyleRuleMap) {
-    mStyleRuleMap->RuleAdded(*aSheet.AsServo(), aRule);
+    mStyleRuleMap->RuleAdded(aSheet, aRule);
   }
 
   Servo_AuthorStyles_ForceDirty(mServoStyles.get());
@@ -255,7 +286,7 @@ void
 ShadowRoot::RuleRemoved(StyleSheet& aSheet, css::Rule& aRule)
 {
   if (mStyleRuleMap) {
-    mStyleRuleMap->RuleRemoved(*aSheet.AsServo(), aRule);
+    mStyleRuleMap->RuleRemoved(aSheet, aRule);
   }
 
   Servo_AuthorStyles_ForceDirty(mServoStyles.get());
@@ -271,10 +302,6 @@ ShadowRoot::RuleChanged(StyleSheet&, css::Rule*) {
 void
 ShadowRoot::ApplicableRulesChanged()
 {
-  if (!IsComposedDocParticipant()) {
-    return;
-  }
-
   if (!IsComposedDocParticipant()) {
     return;
   }
@@ -301,9 +328,9 @@ ShadowRoot::AppendStyleSheet(StyleSheet& aSheet)
 {
   DocumentOrShadowRoot::AppendStyleSheet(aSheet);
   if (aSheet.IsApplicable()) {
-    Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), aSheet.AsServo());
+    Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), &aSheet);
     if (mStyleRuleMap) {
-      mStyleRuleMap->SheetAdded(*aSheet.AsServo());
+      mStyleRuleMap->SheetAdded(aSheet);
     }
     ApplicableRulesChanged();
   }
@@ -345,7 +372,7 @@ ShadowRoot::InsertSheetIntoAuthorData(size_t aIndex, StyleSheet& aSheet)
   MOZ_ASSERT(aSheet.IsApplicable());
 
   if (mStyleRuleMap) {
-    mStyleRuleMap->SheetAdded(*aSheet.AsServo());
+    mStyleRuleMap->SheetAdded(aSheet);
   }
 
   for (size_t i = aIndex + 1; i < SheetCount(); ++i) {
@@ -355,12 +382,12 @@ ShadowRoot::InsertSheetIntoAuthorData(size_t aIndex, StyleSheet& aSheet)
     }
 
     Servo_AuthorStyles_InsertStyleSheetBefore(
-      mServoStyles.get(), aSheet.AsServo(), beforeSheet->AsServo());
+      mServoStyles.get(), &aSheet, beforeSheet);
     ApplicableRulesChanged();
     return;
   }
 
-  Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), aSheet.AsServo());
+  Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), &aSheet);
   ApplicableRulesChanged();
 }
 
@@ -374,9 +401,9 @@ ShadowRoot::StyleSheetApplicableStateChanged(StyleSheet& aSheet, bool aApplicabl
     InsertSheetIntoAuthorData(size_t(index), aSheet);
   } else {
     if (mStyleRuleMap) {
-      mStyleRuleMap->SheetRemoved(*aSheet.AsServo());
+      mStyleRuleMap->SheetRemoved(aSheet);
     }
-    Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), aSheet.AsServo());
+    Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), &aSheet);
     ApplicableRulesChanged();
   }
 }
@@ -387,9 +414,9 @@ ShadowRoot::RemoveSheet(StyleSheet* aSheet)
   DocumentOrShadowRoot::RemoveSheet(*aSheet);
   if (aSheet->IsApplicable()) {
     if (mStyleRuleMap) {
-      mStyleRuleMap->SheetRemoved(*aSheet->AsServo());
+      mStyleRuleMap->SheetRemoved(*aSheet);
     }
-    Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), aSheet->AsServo());
+    Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), aSheet);
     ApplicableRulesChanged();
   }
 }
@@ -415,7 +442,7 @@ ShadowRoot::RemoveFromIdTable(Element* aElement, nsAtom* aId)
   }
 }
 
-nsresult
+void
 ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
   aVisitor.mCanHandle = true;
@@ -437,7 +464,7 @@ ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
         ? win->GetParentTarget() : nullptr;
 
       aVisitor.SetParentTarget(parentTarget, true);
-      return NS_OK;
+      return;
     }
   }
 
@@ -448,8 +475,6 @@ ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   if (content && content->GetBindingParent() == shadowHost) {
     aVisitor.mEventTargetAtParent = shadowHost;
   }
-
-  return NS_OK;
 }
 
 ShadowRoot::SlotAssignment
@@ -507,19 +532,11 @@ ShadowRoot::MaybeReassignElement(Element* aElement)
     return;
   }
 
-  // If the old slot is about to become empty, let layout know that it needs to
-  // do work.
-  if (oldSlot && oldSlot->AssignedNodes().Length() == 1) {
-    InvalidateStyleAndLayoutOnSubtree(oldSlot);
+  if (IsComposedDocParticipant()) {
+    if (nsIPresShell* shell = OwnerDoc()->GetShell()) {
+      shell->SlotAssignmentWillChange(*aElement, oldSlot, assignment.mSlot);
+    }
   }
-  // Ditto if the new slot will stop showing fallback content.
-  if (assignment.mSlot && assignment.mSlot->AssignedNodes().IsEmpty()) {
-    InvalidateStyleAndLayoutOnSubtree(assignment.mSlot);
-  }
-
-  // Otherwise we only need to care about the reassigned element. Note that this
-  // is a no-op if we hit the `oldSlot` path above.
-  InvalidateStyleAndLayoutOnSubtree(aElement);
 
   if (oldSlot) {
     oldSlot->RemoveAssignedNode(aElement);

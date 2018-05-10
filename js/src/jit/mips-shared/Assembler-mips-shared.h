@@ -719,11 +719,7 @@ Imm64::secondHalf() const
 }
 
 void
-PatchJump(CodeLocationJump& jump_, CodeLocationLabel label,
-          ReprotectCode reprotect = DontReprotect);
-
-void
-PatchBackedge(CodeLocationJump& jump_, CodeLocationLabel label, JitZoneGroup::BackedgeTarget target);
+PatchJump(CodeLocationJump& jump_, CodeLocationLabel label);
 
 static constexpr int32_t SliceSize = 1024;
 typedef js::jit::AssemblerBuffer<SliceSize, Instruction> MIPSBuffer;
@@ -1252,7 +1248,6 @@ class AssemblerMIPSShared : public AssemblerShared
 
     // label operations
     void bind(Label* label, BufferOffset boff = BufferOffset());
-    void bindLater(Label* label, wasm::OldTrapDesc target);
     virtual void bind(InstImm* inst, uintptr_t branch, uintptr_t target) = 0;
     void bind(CodeLabel* label) {
         label->target()->bind(currentOffset());

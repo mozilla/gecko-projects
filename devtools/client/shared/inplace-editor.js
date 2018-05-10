@@ -26,6 +26,8 @@
 const Services = require("Services");
 const focusManager = Services.focus;
 const {KeyCodes} = require("devtools/client/shared/keycodes");
+const EventEmitter = require("devtools/shared/event-emitter");
+const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
 
 loader.lazyRequireGetter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm", true);
 
@@ -44,8 +46,18 @@ const MAX_POPUP_ENTRIES = 500;
 const FOCUS_FORWARD = focusManager.MOVEFOCUS_FORWARD;
 const FOCUS_BACKWARD = focusManager.MOVEFOCUS_BACKWARD;
 
-const EventEmitter = require("devtools/shared/event-emitter");
-const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
+const WORD_REGEXP = /\w/;
+const isWordChar = function(str) {
+  return str && WORD_REGEXP.test(str);
+};
+
+const GRID_PROPERTY_NAMES = ["grid-area", "grid-row", "grid-row-start",
+                             "grid-row-end", "grid-column", "grid-column-start",
+                             "grid-column-end"];
+const GRID_ROW_PROPERTY_NAMES = ["grid-area", "grid-row", "grid-row-start",
+                                 "grid-row-end"];
+const GRID_COL_PROPERTY_NAMES = ["grid-area", "grid-column", "grid-column-start",
+                                 "grid-column-end"];
 
 /**
  * Helper to check if the provided key matches one of the expected keys.
@@ -127,6 +139,9 @@ function isKeyIn(key, ...keys) {
  *    {Object} cssVariables: A Map object containing all CSS variables.
  *    {Number} defaultIncrement: The value by which the input is incremented
  *      or decremented by default (0.1 for properties like opacity and 1 by default)
+ *    {Function} getGridLineNames:
+ *       Will be called before offering autocomplete sugestions, if the property is
+ *       a member of GRID_PROPERTY_NAMES.
  */
 function editableField(options) {
   return editableItem(options, function(element, event) {
@@ -291,10 +306,6 @@ function InplaceEditor(options, event) {
     this.input.select();
   }
 
-  if (this.contentType == CONTENT_TYPES.CSS_VALUE && this.input.value == "") {
-    this._maybeSuggestCompletion(false);
-  }
-
   this.input.addEventListener("blur", this._onBlur);
   this.input.addEventListener("keypress", this._onKeyPress);
   this.input.addEventListener("input", this._onInput);
@@ -317,6 +328,8 @@ function InplaceEditor(options, event) {
   if (options.start) {
     options.start(this, event);
   }
+
+  this._getGridNamesBeforeCompletion(options.getGridLineNames);
 }
 
 exports.InplaceEditor = InplaceEditor;
@@ -989,6 +1002,25 @@ InplaceEditor.prototype = {
   },
 
   /**
+   * Before offering autocomplete, set this.gridLineNames as the line names
+   * of the current grid, if they exist.
+   *
+   * @param {Function} getGridLineNames
+   *        A function which gets the line names of the current grid.
+   */
+  _getGridNamesBeforeCompletion: async function(getGridLineNames) {
+    if (getGridLineNames && this.property &&
+        GRID_PROPERTY_NAMES.includes(this.property.name)) {
+      this.gridLineNames = await getGridLineNames();
+    }
+
+    if (this.contentType == CONTENT_TYPES.CSS_VALUE && this.input &&
+        this.input.value == "") {
+      this._maybeSuggestCompletion(false);
+    }
+  },
+
+  /**
    * Event handler called by the autocomplete popup when receiving a click
    * event.
    */
@@ -1050,6 +1082,10 @@ InplaceEditor.prototype = {
 
     let key = event.keyCode;
     let input = this.input;
+
+    // We want to autoclose some characters, remember the pressed key in order to process
+    // it later on in maybeSuggestionCompletion().
+    this._pressedKey = event.key;
 
     let multilineNavigation = !this._isSingleLine() &&
       isKeyIn(key, "UP", "DOWN", "LEFT", "RIGHT");
@@ -1293,6 +1329,7 @@ InplaceEditor.prototype = {
     if (!this.input) {
       return;
     }
+
     let preTimeoutQuery = this.input.value;
 
     // Since we are calling this method from a keypress event handler, the
@@ -1332,7 +1369,10 @@ InplaceEditor.prototype = {
           return;
         }
       }
+
       let list = [];
+      let postLabelValues = [];
+
       if (this.contentType == CONTENT_TYPES.CSS_PROPERTY) {
         list = this._getCSSPropertyList();
       } else if (this.contentType == CONTENT_TYPES.CSS_VALUE) {
@@ -1350,6 +1390,7 @@ InplaceEditor.prototype = {
         if (varMatch && varMatch.length == 2) {
           startCheckQuery = varMatch[1];
           list = this._getCSSVariableNames();
+          postLabelValues = list.map(varName => this._getCSSVariableValue(varName));
         } else {
           list = ["!important",
                   ...this._getCSSValuesForPropertyName(this.property.name)];
@@ -1415,7 +1456,8 @@ InplaceEditor.prototype = {
           count++;
           finalList.push({
             preLabel: startCheckQuery,
-            label: list[i]
+            label: list[i],
+            postLabel: postLabelValues[i] ? postLabelValues[i] : ""
           });
         } else if (count > 0) {
           // Since count was incremented, we had already crossed the entries
@@ -1472,10 +1514,56 @@ InplaceEditor.prototype = {
       } else {
         this._hideAutocompletePopup();
       }
+
+      this._autocloseParenthesis();
+
       // This emit is mainly for the purpose of making the test flow simpler.
       this.emit("after-suggest");
       this._doValidation();
     }, 0);
+  },
+
+  /**
+   * Automatically add closing parenthesis and skip closing parenthesis when needed.
+   */
+  _autocloseParenthesis: function() {
+    // Split the current value at the cursor index to rebuild the string.
+    let parts = this._splitStringAt(this.input.value, this.input.selectionStart);
+
+    // Lookup the character following the caret to know if the string should be modified.
+    let nextChar = parts[1][0];
+
+    // Autocomplete closing parenthesis if the last key pressed was "(" and the next
+    // character is not a "word" character.
+    if (this._pressedKey == "(" && !isWordChar(nextChar)) {
+      this._updateValue(parts[0] + ")" + parts[1]);
+    }
+
+    // Skip inserting ")" if the next character is already a ")" (note that we actually
+    // insert and remove the extra ")" here, as the input has already been modified).
+    if (this._pressedKey == ")" && nextChar == ")") {
+      this._updateValue(parts[0] + parts[1].substring(1));
+    }
+
+    this._pressedKey = null;
+  },
+
+  /**
+   * Update the current value of the input while preserving the caret position.
+   */
+  _updateValue: function(str) {
+    let start = this.input.selectionStart;
+    this.input.value = str;
+    this.input.setSelectionRange(start, start);
+    this._updateSize();
+  },
+
+  /**
+   * Split the provided string at the provided index. Returns an array of two strings.
+   * _splitStringAt("1234567", 3) will return ["123", "4567"]
+   */
+  _splitStringAt: function(str, index) {
+    return [str.substring(0, index), str.substring(index, str.length)];
   },
 
   /**
@@ -1507,7 +1595,18 @@ InplaceEditor.prototype = {
    * @return {Array} array of CSS property values (Strings)
    */
   _getCSSValuesForPropertyName: function(propertyName) {
-    return this.cssProperties.getValues(propertyName);
+    let gridLineList = [];
+    if (this.gridLineNames) {
+      if (GRID_ROW_PROPERTY_NAMES.includes(this.property.name)) {
+        gridLineList.push(...this.gridLineNames.rows);
+      }
+      if (GRID_COL_PROPERTY_NAMES.includes(this.property.name)) {
+        gridLineList.push(...this.gridLineNames.cols);
+      }
+    }
+    // Must be alphabetically sorted before comparing the results with
+    // the user input, otherwise we will lose some results.
+    return gridLineList.concat(this.cssProperties.getValues(propertyName)).sort();
   },
 
   /**
@@ -1517,6 +1616,17 @@ InplaceEditor.prototype = {
    */
   _getCSSVariableNames: function() {
     return Array.from(this.cssVariables.keys()).sort();
+  },
+
+  /**
+  * Returns the variable's value for the given CSS variable name.
+  *
+  * @param {String} varName
+  *        The variable name to retrieve the value of
+  * @return {String} the variable value to the given CSS variable name
+  */
+  _getCSSVariableValue: function(varName) {
+    return this.cssVariables.get(varName);
   },
 };
 

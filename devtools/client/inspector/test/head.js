@@ -32,11 +32,6 @@ const {LocalizationHelper} = require("devtools/shared/l10n");
 const INSPECTOR_L10N =
       new LocalizationHelper("devtools/client/locales/inspector.properties");
 
-flags.testing = true;
-registerCleanupFunction(() => {
-  flags.testing = false;
-});
-
 registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.inspector.activeSidebar");
 });
@@ -750,26 +745,6 @@ async function assertTooltipHiddenOnMouseOut(tooltip, target) {
 }
 
 /**
- * Open the inspector menu and return all of it's items in a flat array
- * @param {InspectorPanel} inspector
- * @param {Object} options to pass into openMenu
- * @return An array of MenuItems
- */
-function openContextMenuAndGetAllItems(inspector, options) {
-  let menu = inspector._openMenu(options);
-
-  // Flatten all menu items into a single array to make searching through it easier
-  let allItems = [].concat.apply([], menu.items.map(function addItem(item) {
-    if (item.submenu) {
-      return addItem(item.submenu.items);
-    }
-    return item;
-  }));
-
-  return allItems;
-}
-
-/**
  * Get the rule editor from the rule-view given its index
  *
  * @param {CssRuleView} view
@@ -815,26 +790,57 @@ async function getDisplayedNodeTextContent(selector, inspector) {
  *
  * @param {CssRuleView} view
  *        The instance of the rule-view panel
- * @param {Object} highlighters
- *        The highlighters instance of the rule-view panel
  * @param {String} selector
  *        The selector in the rule-view to look for the property in
  * @param {String} property
  *        The name of the property
  * @param {Boolean} show
  *        If true, the shapes highlighter is being shown. If false, it is being hidden
+ * @param {Options} options
+ *        Config option for the shapes highlighter. Contains:
+ *        - {Boolean} transformMode: wether to show the highlighter in transforms mode
  */
-async function toggleShapesHighlighter(view, highlighters, selector, property, show) {
-  info("Toggle shapes highlighter");
-  let container = getRuleViewProperty(view, selector, property).valueSpan;
-  let shapesToggle = container.querySelector(".ruleview-shapeswatch");
+async function toggleShapesHighlighter(view, selector, property, show, options = {}) {
+  info(`Toggle shapes highlighter ${show ? "on" : "off"} for ${property} on ${selector}`);
+  const highlighters = view.highlighters;
+  const container = getRuleViewProperty(view, selector, property).valueSpan;
+  const shapesToggle = container.querySelector(".ruleview-shapeswatch");
+
+  let metaKey = options.transformMode;
+  let ctrlKey = options.transformMode;
+
   if (show) {
     let onHighlighterShown = highlighters.once("shapes-highlighter-shown");
-    shapesToggle.click();
+    EventUtils.sendMouseEvent({type: "click", metaKey, ctrlKey },
+      shapesToggle, view.styleWindow);
     await onHighlighterShown;
   } else {
     let onHighlighterHidden = highlighters.once("shapes-highlighter-hidden");
-    shapesToggle.click();
+    EventUtils.sendMouseEvent({type: "click", metaKey, ctrlKey },
+      shapesToggle, view.styleWindow);
     await onHighlighterHidden;
   }
+}
+
+/**
+ * Expand the provided markup container programatically and  wait for all children to
+ * update.
+ */
+async function expandContainer(inspector, container) {
+  await inspector.markup.expandNode(container.node);
+  await waitForMultipleChildrenUpdates(inspector);
+}
+
+/**
+ * Expand the provided markup container by clicking on the expand arrow and waiting for
+ * inspector and children to update. Similar to expandContainer helper, but this method
+ * uses a click rather than programatically calling expandNode().
+ */
+async function expandContainerByClick(inspector, container) {
+  let onChildren = waitForChildrenUpdated(inspector);
+  let onUpdated = inspector.once("inspector-updated");
+  EventUtils.synthesizeMouseAtCenter(container.expander, {},
+    inspector.markup.doc.defaultView);
+  await onChildren;
+  await onUpdated;
 }

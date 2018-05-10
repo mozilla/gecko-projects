@@ -125,8 +125,7 @@ class Instance
     // Return the name associated with a given function index, or generate one
     // if none was given by the module.
 
-    bool getFuncName(uint32_t funcIndex, UTF8Bytes* name) const;
-    JSAtom* getFuncAtom(JSContext* cx, uint32_t funcIndex) const;
+    JSAtom* getFuncDisplayAtom(JSContext* cx, uint32_t funcIndex) const;
     void ensureProfilingLabels(bool profilingEnabled) const;
 
     // Initially, calls to imports in wasm code call out through the generic
@@ -164,17 +163,17 @@ class Instance
     static int32_t callImport_i32(Instance*, int32_t, int32_t, uint64_t*);
     static int32_t callImport_i64(Instance*, int32_t, int32_t, uint64_t*);
     static int32_t callImport_f64(Instance*, int32_t, int32_t, uint64_t*);
+    static int32_t callImport_ref(Instance*, int32_t, int32_t, uint64_t*);
     static uint32_t growMemory_i32(Instance* instance, uint32_t delta);
     static uint32_t currentMemory_i32(Instance* instance);
     static int32_t wait_i32(Instance* instance, uint32_t byteOffset, int32_t value, int64_t timeout);
     static int32_t wait_i64(Instance* instance, uint32_t byteOffset, int64_t value, int64_t timeout);
     static int32_t wake(Instance* instance, uint32_t byteOffset, int32_t count);
+    static int32_t memCopy(Instance* instance, uint32_t destByteOffset, uint32_t srcByteOffset, uint32_t len);
+    static int32_t memFill(Instance* instance, uint32_t byteOffset, uint32_t value, uint32_t len);
 };
 
 typedef UniquePtr<Instance> UniqueInstance;
-
-bool InitInstanceStaticData();
-void ShutDownInstanceStaticData();
 
 } // namespace wasm
 } // namespace js

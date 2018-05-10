@@ -68,6 +68,12 @@ interface nsIX509Cert : nsISupports {
   readonly attribute AString subjectName;
 
   /**
+   *  The subject alternative names of the certificate.
+   *  It's a comma separated string of subject alt names.
+   */
+  readonly attribute AString subjectAltNames;
+
+  /**
    *  The subject's common name.
    */
   readonly attribute AString commonName;
@@ -131,12 +137,6 @@ interface nsIX509Cert : nsISupports {
   readonly attribute AString issuerOrganizationUnit;
 
   /**
-   *  The certificate used by the issuer to sign this certificate.
-   */
-  [must_use]
-  readonly attribute nsIX509Cert issuer;
-
-  /**
    *  This certificate's validity period.
    */
   readonly attribute nsIX509CertValidity validity;
@@ -174,23 +174,6 @@ interface nsIX509Cert : nsISupports {
    */
   [must_use]
   readonly attribute boolean isSelfSigned;
-
-  /**
-   *  Constants for specifying the chain mode when exporting a certificate
-   */
-  const unsigned long CMS_CHAIN_MODE_CertOnly = 1;
-  const unsigned long CMS_CHAIN_MODE_CertChain = 2;
-  const unsigned long CMS_CHAIN_MODE_CertChainWithRoot = 3;
-
-  /**
-   *  Obtain a list of certificates that contains this certificate
-   *  and the issuing certificates of all involved issuers,
-   *  up to the root issuer.
-   *
-   *  @return The chain of certifficates including the issuers.
-   */
-  [must_use]
-  nsIArray getChain();
 
   /**
    * A comma separated list of localized strings representing the contents of
@@ -234,20 +217,6 @@ interface nsIX509Cert : nsISupports {
    */
   [must_use]
   readonly attribute ACString sha256SubjectPublicKeyInfoDigest;
-
-  /**
-   *  Obtain the certificate wrapped in a PKCS#7 SignedData structure,
-   *  with or without the certificate chain
-   *
-   *  @param chainMode Whether to include the chain (with or without the root),
-                       see CMS_CHAIN_MODE constants.
-   *  @param length The number of bytes of the PKCS#7 data.
-   *  @param data The bytes representing the PKCS#7 wrapped certificate.
-   */
-  [must_use]
-  void exportAsCMS(in unsigned long chainMode,
-                   out unsigned long length,
-                   [retval, array, size_is(length)] out octet data);
 
   /**
    * Retrieves the NSS certificate object wrapped by this interface

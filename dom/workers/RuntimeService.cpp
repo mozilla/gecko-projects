@@ -294,6 +294,9 @@ LoadContextOptions(const char* aPrefName, void* /* aClosure */)
                 .setWasm(GetWorkerPref<bool>(NS_LITERAL_CSTRING("wasm")))
                 .setWasmBaseline(GetWorkerPref<bool>(NS_LITERAL_CSTRING("wasm_baselinejit")))
                 .setWasmIon(GetWorkerPref<bool>(NS_LITERAL_CSTRING("wasm_ionjit")))
+#ifdef ENABLE_WASM_GC
+                .setWasmGc(GetWorkerPref<bool>(NS_LITERAL_CSTRING("wasm_gc")))
+#endif
                 .setThrowOnAsmJSValidationFailure(GetWorkerPref<bool>(
                       NS_LITERAL_CSTRING("throw_on_asmjs_validation_failure")))
                 .setBaseline(GetWorkerPref<bool>(NS_LITERAL_CSTRING("baselinejit")))
@@ -1154,6 +1157,11 @@ public:
     }
 
     microTaskQueue->push(runnable.forget());
+  }
+
+  bool IsSystemCaller() const override
+  {
+    return mWorkerPrivate->UsesSystemPrincipal();
   }
 
 private:

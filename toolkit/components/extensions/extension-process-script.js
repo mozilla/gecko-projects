@@ -346,7 +346,7 @@ ExtensionManager = {
 
       policy.debugName = `${JSON.stringify(policy.name)} (ID: ${policy.id}, ${policy.getURL()})`;
 
-      // Register any existent dinamically registered content script for the extension
+      // Register any existent dynamically registered content script for the extension
       // when a content process is started for the first time (which also cover
       // a content process that crashed and it has been recreated).
       const registeredContentScripts = this.registeredContentScripts.get(policy);
@@ -482,7 +482,7 @@ ExtensionProcessScript.singleton = null;
 
 ExtensionProcessScript.prototype = {
   classID: Components.ID("{21f9819e-4cdf-49f9-85a0-850af91a5058}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.mozIExtensionProcessScript]),
+  QueryInterface: ChromeUtils.generateQI([Ci.mozIExtensionProcessScript]),
 
   get wrappedJSObject() { return this; },
 

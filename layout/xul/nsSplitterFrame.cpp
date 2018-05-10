@@ -14,7 +14,6 @@
 #include "gfxContext.h"
 #include "nsSplitterFrame.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMElement.h"
 #include "nsXULElement.h"
 #include "nsPresContext.h"
 #include "nsIDocument.h"
@@ -29,8 +28,6 @@
 #include "nsIServiceManager.h"
 #include "nsContainerFrame.h"
 #include "nsContentCID.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsContentUtils.h"
@@ -72,9 +69,9 @@ public:
 
   void Disconnect() { mOuter = nullptr; }
 
-  nsresult MouseDown(nsIDOMEvent* aMouseEvent);
-  nsresult MouseUp(nsIDOMEvent* aMouseEvent);
-  nsresult MouseMove(nsIDOMEvent* aMouseEvent);
+  nsresult MouseDown(Event* aMouseEvent);
+  nsresult MouseUp(Event* aMouseEvent);
+  nsresult MouseMove(Event* aMouseEvent);
 
   void MouseDrag(nsPresContext* aPresContext, WidgetGUIEvent* aEvent);
   void MouseUp(nsPresContext* aPresContext, WidgetGUIEvent* aEvent);
@@ -569,7 +566,7 @@ nsSplitterFrameInner::RemoveListener()
 }
 
 nsresult
-nsSplitterFrameInner::HandleEvent(nsIDOMEvent* aEvent)
+nsSplitterFrameInner::HandleEvent(dom::Event* aEvent)
 {
   nsAutoString eventType;
   aEvent->GetType(eventType);
@@ -586,7 +583,7 @@ nsSplitterFrameInner::HandleEvent(nsIDOMEvent* aEvent)
 }
 
 nsresult
-nsSplitterFrameInner::MouseUp(nsIDOMEvent* aMouseEvent)
+nsSplitterFrameInner::MouseUp(Event* aMouseEvent)
 {
   NS_ENSURE_TRUE(mOuter, NS_OK);
   mPressed = false;
@@ -597,10 +594,10 @@ nsSplitterFrameInner::MouseUp(nsIDOMEvent* aMouseEvent)
 }
 
 nsresult
-nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
+nsSplitterFrameInner::MouseDown(Event* aMouseEvent)
 {
   NS_ENSURE_TRUE(mOuter, NS_OK);
-  dom::MouseEvent* mouseEvent = aMouseEvent->InternalDOMEvent()->AsMouseEvent();
+  dom::MouseEvent* mouseEvent = aMouseEvent->AsMouseEvent();
   if (!mouseEvent) {
     return NS_OK;
   }
@@ -744,7 +741,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
      mChildInfosAfterCount = 0;
 
   int32_t c;
-  nsPoint pt = nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(mouseEvent->AsEvent(),
+  nsPoint pt = nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(mouseEvent,
                                                                mParentBox);
   if (isHorizontal) {
      c = pt.x;
@@ -764,7 +761,7 @@ nsSplitterFrameInner::MouseDown(nsIDOMEvent* aMouseEvent)
 }
 
 nsresult
-nsSplitterFrameInner::MouseMove(nsIDOMEvent* aMouseEvent)
+nsSplitterFrameInner::MouseMove(Event* aMouseEvent)
 {
   NS_ENSURE_TRUE(mOuter, NS_OK);
   if (!mPressed)

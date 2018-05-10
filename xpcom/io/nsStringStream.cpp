@@ -54,6 +54,8 @@ public:
     Clear();
   }
 
+  nsresult Init(nsCString&& aString);
+
 private:
   ~nsStringInputStream()
   {
@@ -82,6 +84,17 @@ private:
   nsDependentCSubstring mData;
   uint32_t mOffset;
 };
+
+nsresult
+nsStringInputStream::Init(nsCString&& aString)
+{
+  if (!mData.Assign(Move(aString), fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  mOffset = 0;
+  return NS_OK;
+}
 
 // This class needs to support threadsafe refcounting since people often
 // allocate a string stream, and then read it from a background thread.
@@ -401,7 +414,7 @@ NS_NewByteInputStream(nsIInputStream** aStreamResult,
                       const char* aStringToRead, int32_t aLength,
                       nsAssignmentType aAssignment)
 {
-  NS_PRECONDITION(aStreamResult, "null out ptr");
+  MOZ_ASSERT(aStreamResult, "null out ptr");
 
   RefPtr<nsStringInputStream> stream = new nsStringInputStream();
 
@@ -433,11 +446,28 @@ nsresult
 NS_NewCStringInputStream(nsIInputStream** aStreamResult,
                          const nsACString& aStringToRead)
 {
-  NS_PRECONDITION(aStreamResult, "null out ptr");
+  MOZ_ASSERT(aStreamResult, "null out ptr");
 
   RefPtr<nsStringInputStream> stream = new nsStringInputStream();
 
   nsresult rv = stream->SetData(aStringToRead);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  stream.forget(aStreamResult);
+  return NS_OK;
+}
+
+nsresult
+NS_NewCStringInputStream(nsIInputStream** aStreamResult,
+                         nsCString&& aStringToRead)
+{
+  MOZ_ASSERT(aStreamResult, "null out ptr");
+
+  RefPtr<nsStringInputStream> stream = new nsStringInputStream();
+
+  nsresult rv = stream->Init(Move(aStringToRead));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

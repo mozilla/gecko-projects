@@ -29,7 +29,7 @@ add_task(async function() {
   await performRequests(monitor, tab, BROTLI_REQUESTS);
 
   let requestItem = document.querySelector(".request-list-item");
-  let requestsListStatus = requestItem.querySelector(".requests-list-status");
+  let requestsListStatus = requestItem.querySelector(".status-code");
   EventUtils.sendMouseEvent({ type: "mouseover" }, requestsListStatus);
   await waitUntil(() => requestsListStatus.title);
 
@@ -48,9 +48,8 @@ add_task(async function() {
     });
 
   wait = waitForDOM(document, ".CodeMirror-code");
-  let onResponseContent = monitor.panelWin.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
-  EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector(".network-details-panel-toggle"));
+  let onResponseContent = monitor.panelWin.api.once(EVENTS.RECEIVED_RESPONSE_CONTENT);
+  store.dispatch(Actions.toggleNetworkDetails());
   EventUtils.sendMouseEvent({ type: "click" },
     document.querySelector("#response-tab"));
   await wait;

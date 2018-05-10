@@ -14,6 +14,7 @@ from mozhttpd import MozHttpd
 from mozprofile import FirefoxProfile, Profile, Preferences
 from mozprofile.permissions import ServerLocations
 from mozrunner import FirefoxRunner, CLI
+from six import string_types
 
 PORT = 8888
 
@@ -43,20 +44,24 @@ if __name__ == '__main__':
 
     with TemporaryDirectory() as profilePath:
         # TODO: refactor this into mozprofile
-        prefpath = os.path.join(
-            build.topsrcdir, "testing", "profiles", "prefs_general.js")
-        overridepath = os.path.join(
-            build.topsrcdir, "build", "pgo", "prefs_override.js")
+        profile_data_dir = os.path.join(build.topsrcdir, 'testing', 'profiles')
+        with open(os.path.join(profile_data_dir, 'profiles.json'), 'r') as fh:
+            base_profiles = json.load(fh)['profileserver']
+
+        prefpaths = [os.path.join(profile_data_dir, profile, 'user.js')
+                     for profile in base_profiles]
+        prefpaths.append(os.path.join(build.topsrcdir, "build", "pgo", "prefs_override.js"))
 
         prefs = {}
-        prefs.update(Preferences.read_prefs(prefpath))
-        prefs.update(Preferences.read_prefs(overridepath))
+        for path in prefpaths:
+            prefs.update(Preferences.read_prefs(path))
 
         interpolation = {"server": "%s:%d" % httpd.httpd.server_address,
                          "OOP": "false"}
-        prefs = json.loads(json.dumps(prefs) % interpolation)
-        for pref in prefs:
-            prefs[pref] = Preferences.cast(prefs[pref])
+        for k, v in prefs.items():
+            if isinstance(v, string_types):
+                v = v.format(**interpolation)
+            prefs[k] = Preferences.cast(v)
 
         profile = FirefoxProfile(profile=profilePath,
                                  preferences=prefs,

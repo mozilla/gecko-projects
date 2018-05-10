@@ -445,7 +445,7 @@ public:
     RefPtr<ReleasingTimerHolder> holder =
       new ReleasingTimerHolder(aURI, aBroadcastToOtherProcesses);
 
-    auto raii = mozilla::MakeScopeExit([&] {
+    auto raii = mozilla::MakeScopeExit([holder] {
       holder->CancelTimerAndRevokeURI();
     });
 
@@ -832,7 +832,8 @@ nsHostObjectProtocolHandler::Traverse(const nsACString& aUri,
 // -----------------------------------------------------------------------
 // Protocol handler
 
-NS_IMPL_ISUPPORTS(nsHostObjectProtocolHandler, nsIProtocolHandler)
+NS_IMPL_ISUPPORTS(nsHostObjectProtocolHandler, nsIProtocolHandler,
+    nsISupportsWeakReference)
 
 NS_IMETHODIMP
 nsHostObjectProtocolHandler::GetDefaultPort(int32_t *result)

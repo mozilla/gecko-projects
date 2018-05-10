@@ -65,7 +65,11 @@ Clients::Get(const nsAString& aClientID, ErrorResult& aRv)
   }
 
   nsID id;
-  if (!id.Parse(NS_ConvertUTF16toUTF8(aClientID).get())) {
+  // nsID::Parse accepts both "{...}" and "...", but we only emit the latter, so
+  // forbid strings that start with "{" to avoid inconsistency and bugs like
+  // bug 1446225.
+  if (aClientID.IsEmpty() || aClientID.CharAt(0) == '{' ||
+      !id.Parse(NS_ConvertUTF16toUTF8(aClientID).get())) {
     // Invalid ID means we will definitely not find a match, so just
     // resolve with undefined indicating "not found".
     outerPromise->MaybeResolveWithUndefined();
@@ -80,27 +84,31 @@ Clients::Get(const nsAString& aClientID, ErrorResult& aRv)
     ClientManager::GetInfoAndState(ClientGetInfoAndStateArgs(id, principalInfo),
                                    target);
 
-  nsCOMPtr<nsIGlobalObject> global = mGlobal;
   nsCString scope = workerPrivate->ServiceWorkerScope();
+  auto holder = MakeRefPtr<DOMMozPromiseRequestHolder<ClientOpPromise>>(mGlobal);
 
   innerPromise->Then(target, __func__,
-    [outerPromise, global, scope] (const ClientOpResult& aResult) {
-      RefPtr<Client> client = new Client(global, aResult.get_ClientInfoAndState());
+    [outerPromise, holder, scope] (const ClientOpResult& aResult) {
+      holder->Complete();
+      NS_ENSURE_TRUE_VOID(holder->GetParentObject());
+      RefPtr<Client> client = new Client(holder->GetParentObject(),
+                                         aResult.get_ClientInfoAndState());
       if (client->GetStorageAccess() == nsContentUtils::StorageAccess::eAllow) {
         outerPromise->MaybeResolve(Move(client));
         return;
       }
       nsCOMPtr<nsIRunnable> r =
-        NS_NewRunnableFunction("Clients::MatchAll() storage denied",
+        NS_NewRunnableFunction("Clients::Get() storage denied",
         [scope] {
           ServiceWorkerManager::LocalizeAndReportToAllClients(
             scope, "ServiceWorkerGetClientStorageError", nsTArray<nsString>());
         });
       SystemGroup::Dispatch(TaskCategory::Other, r.forget());
       outerPromise->MaybeResolveWithUndefined();
-    }, [outerPromise] (nsresult aResult) {
+    }, [outerPromise, holder] (nsresult aResult) {
+      holder->Complete();
       outerPromise->MaybeResolveWithUndefined();
-    });
+    })->Track(*holder);
 
   return outerPromise.forget();
 }
@@ -162,8 +170,7 @@ Clients::MatchAll(const ClientQueryOptions& aOptions, ErrorResult& aRv)
   ClientMatchAllArgs args(workerPrivate->GetServiceWorkerDescriptor().ToIPC(),
                           aOptions.mType,
                           aOptions.mIncludeUncontrolled);
-  StartClientManagerOp(&ClientManager::MatchAll, args,
-    mGlobal->EventTargetFor(TaskCategory::Other),
+  StartClientManagerOp(&ClientManager::MatchAll, args, mGlobal,
     [outerPromise, global, scope] (const ClientOpResult& aResult) {
       nsTArray<RefPtr<Client>> clientList;
       bool storageDenied = false;
@@ -225,8 +232,7 @@ Clients::OpenWindow(const nsAString& aURL, ErrorResult& aRv)
 
   nsCOMPtr<nsIGlobalObject> global = mGlobal;
 
-  StartClientManagerOp(&ClientManager::OpenWindow, args,
-    mGlobal->EventTargetFor(TaskCategory::Other),
+  StartClientManagerOp(&ClientManager::OpenWindow, args, mGlobal,
     [outerPromise, global] (const ClientOpResult& aResult) {
       if (aResult.type() != ClientOpResult::TClientInfoAndState) {
         outerPromise->MaybeResolve(JS::NullHandleValue);
@@ -267,8 +273,8 @@ Clients::Claim(ErrorResult& aRv)
     return outerPromise.forget();
   }
 
-  StartClientManagerOp(&ClientManager::Claim, ClientClaimArgs(serviceWorker.ToIPC()),
-    mGlobal->EventTargetFor(TaskCategory::Other),
+  StartClientManagerOp(
+    &ClientManager::Claim, ClientClaimArgs(serviceWorker.ToIPC()), mGlobal,
     [outerPromise] (const ClientOpResult& aResult) {
       outerPromise->MaybeResolveWithUndefined();
     }, [outerPromise] (nsresult aResult) {

@@ -110,7 +110,7 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext()
   sample->mOffset = s->mByteRange.mStart;
   sample->mKeyframe = s->mSync;
 
-  nsAutoPtr<MediaRawDataWriter> writer(sample->CreateWriter());
+  UniquePtr<MediaRawDataWriter> writer(sample->CreateWriter());
   // Do the blocking read
   if (!writer->SetSize(s->mByteRange.Length())) {
     return nullptr;
@@ -166,7 +166,7 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext()
     }
 
     auto res = reader.ReadU16();
-    if (res.isOk()) {
+    if (res.isOk() && res.unwrap() > 0) {
       uint16_t count = res.unwrap();
 
       if (reader.Remaining() < count * 6) {

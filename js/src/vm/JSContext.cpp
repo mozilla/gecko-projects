@@ -100,21 +100,7 @@ bool
 JSContext::init(ContextKind kind)
 {
     // Skip most of the initialization if this thread will not be running JS.
-    if (kind == ContextKind::Cooperative) {
-        // Get a platform-native handle for this thread, used by jit::InterruptRunningCode.
-#ifdef XP_WIN
-        size_t openFlags = THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME |
-                           THREAD_QUERY_INFORMATION;
-        HANDLE self = OpenThread(openFlags, false, GetCurrentThreadId());
-        if (!self)
-        return false;
-        static_assert(sizeof(HANDLE) <= sizeof(threadNative_), "need bigger field");
-        threadNative_ = (size_t)self;
-#else
-        static_assert(sizeof(pthread_t) <= sizeof(threadNative_), "need bigger field");
-        threadNative_ = (size_t)pthread_self();
-#endif
-
+    if (kind == ContextKind::MainThread) {
         if (!regexpStack.ref().init())
             return false;
 
@@ -127,7 +113,6 @@ JSContext::init(ContextKind kind)
             return false;
 #endif
 
-        jit::EnsureAsyncInterrupt(this);
         if (!wasm::EnsureSignalHandlers(this))
             return false;
     }
@@ -147,7 +132,7 @@ js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRun
     MOZ_RELEASE_ASSERT(!TlsContext.get());
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
-    js::oom::SetThreadType(!parentRuntime ? js::THREAD_TYPE_COOPERATING
+    js::oom::SetThreadType(!parentRuntime ? js::THREAD_TYPE_MAIN
                                           : js::THREAD_TYPE_WORKER);
 #endif
 
@@ -168,7 +153,7 @@ js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRun
         return nullptr;
     }
 
-    if (!cx->init(ContextKind::Cooperative)) {
+    if (!cx->init(ContextKind::MainThread)) {
         runtime->destroyRuntime();
         js_delete(cx);
         js_delete(runtime);
@@ -176,39 +161,6 @@ js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRun
     }
 
     return cx;
-}
-
-JSContext*
-js::NewCooperativeContext(JSContext* siblingContext)
-{
-    MOZ_RELEASE_ASSERT(!TlsContext.get());
-
-    JSRuntime* runtime = siblingContext->runtime();
-
-    JSContext* cx = js_new<JSContext>(runtime, JS::ContextOptions());
-    if (!cx || !cx->init(ContextKind::Cooperative)) {
-        js_delete(cx);
-        return nullptr;
-    }
-
-    runtime->setNewbornActiveContext(cx);
-    return cx;
-}
-
-void
-js::YieldCooperativeContext(JSContext* cx)
-{
-    MOZ_ASSERT(cx == TlsContext.get());
-    MOZ_ASSERT(cx->runtime()->activeContext() == cx);
-    cx->runtime()->setActiveContext(nullptr);
-}
-
-void
-js::ResumeCooperativeContext(JSContext* cx)
-{
-    MOZ_ASSERT(cx == TlsContext.get());
-    MOZ_ASSERT(cx->runtime()->activeContext() == nullptr);
-    cx->runtime()->setActiveContext(cx);
 }
 
 static void
@@ -235,37 +187,20 @@ js::DestroyContext(JSContext* cx)
 
     cx->checkNoGCRooters();
 
-    // Cancel all off thread Ion compiles before destroying a cooperative
-    // context. Completed Ion compiles may try to interrupt arbitrary
-    // cooperative contexts which they have read off the owner context of a
-    // zone group. See HelperThread::handleIonWorkload.
+    // Cancel all off thread Ion compiles. Completed Ion compiles may try to
+    // interrupt this context. See HelperThread::handleIonWorkload.
     CancelOffThreadIonCompile(cx->runtime());
 
     FreeJobQueueHandling(cx);
 
-    if (cx->runtime()->cooperatingContexts().length() == 1) {
-        // Flush promise tasks executing in helper threads early, before any parts
-        // of the JSRuntime that might be visible to helper threads are torn down.
-        cx->runtime()->offThreadPromiseState.ref().shutdown(cx);
+    // Flush promise tasks executing in helper threads early, before any parts
+    // of the JSRuntime that might be visible to helper threads are torn down.
+    cx->runtime()->offThreadPromiseState.ref().shutdown(cx);
 
-        // Destroy the runtime along with its last context.
-        cx->runtime()->destroyRuntime();
-        js_delete(cx->runtime());
-        js_delete_poison(cx);
-    } else {
-        DebugOnly<bool> found = false;
-        for (size_t i = 0; i < cx->runtime()->cooperatingContexts().length(); i++) {
-            CooperatingContext& target = cx->runtime()->cooperatingContexts()[i];
-            if (cx == target.context()) {
-                cx->runtime()->cooperatingContexts().erase(&target);
-                found = true;
-                break;
-            }
-        }
-        MOZ_ASSERT(found);
-
-        cx->runtime()->deleteActiveContext(cx);
-    }
+    // Destroy the runtime along with its last context.
+    cx->runtime()->destroyRuntime();
+    js_delete(cx->runtime());
+    js_delete_poison(cx);
 }
 
 void
@@ -334,11 +269,9 @@ PopulateReportBlame(JSContext* cx, JSErrorReport* report)
         return;
 
     report->filename = iter.filename();
-    report->lineno = iter.computeLine(&report->column);
-    // XXX: Make the column 1-based as in other browsers, instead of 0-based
-    // which is how SpiderMonkey stores it internally. This will be
-    // unnecessary once bug 1144340 is fixed.
-    report->column++;
+    uint32_t column;
+    report->lineno = iter.computeLine(&column);
+    report->column = FixupColumnForDisplay(column);
     report->isMuted = iter.mutedErrors();
 }
 
@@ -947,22 +880,20 @@ js::ReportErrorNumberUCArray(JSContext* cx, unsigned flags, JSErrorCallback call
     return warning;
 }
 
-bool
+void
 js::ReportIsNotDefined(JSContext* cx, HandleId id)
 {
     JSAutoByteString printable;
-    if (ValueToPrintable(cx, IdToValue(id), &printable)) {
-        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NOT_DEFINED,
-                                   printable.ptr());
-    }
-    return false;
+    if (!ValueToPrintableUTF8(cx, IdToValue(id), &printable))
+        return;
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_NOT_DEFINED, printable.ptr());
 }
 
-bool
+void
 js::ReportIsNotDefined(JSContext* cx, HandlePropertyName name)
 {
     RootedId id(cx, NameToId(name));
-    return ReportIsNotDefined(cx, id);
+    ReportIsNotDefined(cx, id);
 }
 
 bool
@@ -1140,11 +1071,11 @@ class MOZ_STACK_CLASS ReportExceptionClosure : public ScriptEnvironmentPreparer:
 } // anonymous namespace
 
 JS_FRIEND_API(bool)
-js::UseInternalJobQueues(JSContext* cx, bool cooperative)
+js::UseInternalJobQueues(JSContext* cx)
 {
     // Internal job queue handling must be set up very early. Self-hosting
     // initialization is as good a marker for that as any.
-    MOZ_RELEASE_ASSERT(cooperative || !cx->runtime()->hasInitializedSelfHosting(),
+    MOZ_RELEASE_ASSERT(!cx->runtime()->hasInitializedSelfHosting(),
                        "js::UseInternalJobQueues must be called early during runtime startup.");
     MOZ_ASSERT(!cx->jobQueue);
     auto* queue = js_new<PersistentRooted<JobQueue>>(cx, JobQueue(SystemAllocPolicy()));
@@ -1153,8 +1084,7 @@ js::UseInternalJobQueues(JSContext* cx, bool cooperative)
 
     cx->jobQueue = queue;
 
-    if (!cooperative)
-        cx->runtime()->offThreadPromiseState.ref().initInternalDispatchQueue();
+    cx->runtime()->offThreadPromiseState.ref().initInternalDispatchQueue();
     MOZ_ASSERT(cx->runtime()->offThreadPromiseState.ref().initialized());
 
     JS::SetEnqueuePromiseJobCallback(cx, InternalEnqueuePromiseJobCallback);
@@ -1287,8 +1217,7 @@ JSContext::alreadyReportedError()
 
 JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
   : runtime_(runtime),
-    kind_(ContextKind::Background),
-    threadNative_(0),
+    kind_(ContextKind::HelperThread),
     helperThread_(nullptr),
     options_(options),
     arenas_(nullptr),
@@ -1357,9 +1286,7 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
     asyncCauseForNewActivations(nullptr),
     asyncCallIsExplicit(false),
     interruptCallbackDisabled(false),
-    interrupt_(false),
-    interruptRegExpJit_(false),
-    handlingJitInterrupt_(false),
+    interruptBits_(0),
     osrTempData_(nullptr),
     ionReturnOverride_(MagicValue(JS_ARG_POISON)),
     jitStackLimit(UINTPTR_MAX),
@@ -1387,12 +1314,7 @@ JSContext::~JSContext()
 {
     // Clear the ContextKind first, so that ProtectedData checks will allow us to
     // destroy this context even if the runtime is already gone.
-    kind_ = ContextKind::Background;
-
-#ifdef XP_WIN
-    if (threadNative_)
-        CloseHandle((HANDLE)threadNative_.ref());
-#endif
+    kind_ = ContextKind::HelperThread;
 
     /* Free the stuff hanging off of cx. */
     MOZ_ASSERT(!resolvingList);

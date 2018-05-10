@@ -65,7 +65,7 @@ ReflowInput::ReflowInput(nsPresContext*       aPresContext,
   , mContainingBlockSize(mWritingMode)
   , mReflowDepth(0)
 {
-  NS_PRECONDITION(aRenderingContext, "no rendering context");
+  MOZ_ASSERT(aRenderingContext, "no rendering context");
   MOZ_ASSERT(aPresContext, "no pres context");
   MOZ_ASSERT(aFrame, "no frame");
   MOZ_ASSERT(aPresContext == aFrame->PresContext(), "wrong pres context");
@@ -190,9 +190,9 @@ ReflowInput::ReflowInput(
   MOZ_ASSERT(aPresContext, "no pres context");
   MOZ_ASSERT(aFrame, "no frame");
   MOZ_ASSERT(aPresContext == aFrame->PresContext(), "wrong pres context");
-  NS_PRECONDITION(!mFlags.mSpecialBSizeReflow ||
+  MOZ_ASSERT(!mFlags.mSpecialBSizeReflow ||
                   !NS_SUBTREE_DIRTY(aFrame),
-                  "frame should be clean when getting special bsize reflow");
+             "frame should be clean when getting special bsize reflow");
 
   mParentReflowInput = &aParentReflowInput;
 
@@ -309,7 +309,7 @@ ReflowInput::SetComputedWidth(nscoord aComputedWidth)
   //    (like a text control, for example), we'll end up creating a reflow
   //    state for the parent while the parent is reflowing.
 
-  NS_PRECONDITION(aComputedWidth >= 0, "Invalid computed width");
+  MOZ_ASSERT(aComputedWidth >= 0, "Invalid computed width");
   if (ComputedWidth() != aComputedWidth) {
     ComputedWidth() = aComputedWidth;
     recordreplay::RecordReplayAssert("SetComputedWidth %d", (int) aComputedWidth);
@@ -334,7 +334,7 @@ ReflowInput::SetComputedHeight(nscoord aComputedHeight)
   //    (like a text control, for example), we'll end up creating a reflow
   //    state for the parent while the parent is reflowing.
 
-  NS_PRECONDITION(aComputedHeight >= 0, "Invalid computed height");
+  MOZ_ASSERT(aComputedHeight >= 0, "Invalid computed height");
   if (ComputedHeight() != aComputedHeight) {
     ComputedHeight() = aComputedHeight;
     LayoutFrameType frameType = mFrame->Type();
@@ -1391,7 +1391,8 @@ ReflowInput::CalculateHypotheticalPosition(
     ? aReflowInput->ComputedSizeAsContainerIfConstrained()
     : containingBlock->GetSize();
   LogicalPoint
-    placeholderOffset(wm, aPlaceholderFrame->GetOffsetTo(containingBlock),
+    placeholderOffset(wm,
+                      aPlaceholderFrame->GetOffsetToIgnoringScrolling(containingBlock),
                       containerSize);
 
   // First, determine the hypothetical box's mBStart.  We want to check the
@@ -1404,7 +1405,8 @@ ReflowInput::CalculateHypotheticalPosition(
     // Use a null containerSize to convert a LogicalPoint functioning as a
     // vector into a physical nsPoint vector.
     const nsSize nullContainerSize;
-    LogicalPoint blockOffset(wm, blockFrame->GetOffsetTo(containingBlock),
+    LogicalPoint blockOffset(wm,
+                             blockFrame->GetOffsetToIgnoringScrolling(containingBlock),
                              nullContainerSize);
     bool isValid;
     nsBlockInFlowLineIterator iter(blockFrame, aPlaceholderFrame, &isValid);
@@ -1501,42 +1503,10 @@ ReflowInput::CalculateHypotheticalPosition(
   }
 
   // The current coordinate space is that of the nearest block to the placeholder.
-  // Convert to the coordinate space of the absolute containing block
-  // One weird thing here is that for fixed-positioned elements we want to do
-  // the conversion incorrectly; specifically we want to ignore any scrolling
-  // that may have happened;
-  nsPoint cbOffset;
-  if (mStyleDisplay->mPosition == NS_STYLE_POSITION_FIXED &&
-      // Exclude cases inside -moz-transform where fixed is like absolute.
-      nsLayoutUtils::IsReallyFixedPos(mFrame)) {
-    // In this case, aReflowInput->frame will likely be an ancestor of
-    // containingBlock, so can just walk our way up the frame tree.
-    // Make sure to not add positions of frames whose parent is a
-    // scrollFrame, since we're doing fixed positioning, which assumes
-    // everything is scrolled to (0,0).
-    cbOffset.MoveTo(0, 0);
-    do {
-      cbOffset += containingBlock->GetPositionIgnoringScrolling();
-      nsContainerFrame* parent = containingBlock->GetParent();
-      if (!parent) {
-        // Oops, our absolute containing block isn't an ancestor of the
-        // placeholder's containing block. This can happen if the placeholder
-        // is pushed to a different page in a printing context.  'cbOffset' is
-        // currently relative to the root frame (containingBlock) - so just
-        // subtract the offset to the absolute containing block to make it
-        // relative to that.
-        cbOffset -= containingBlock->GetOffsetTo(aReflowInput->mFrame);
-        break;
-      }
-      containingBlock = parent;
-    } while (containingBlock != aReflowInput->mFrame);
-  } else {
-    // XXXldb We need to either ignore scrolling for the absolute
-    // positioning case too (and take the incompatibility) or figure out
-    // how to make these positioned elements actually *move* when we
-    // scroll, and thus avoid the resulting incremental reflow bugs.
-    cbOffset = containingBlock->GetOffsetTo(aReflowInput->mFrame);
-  }
+  // Convert to the coordinate space of the absolute containing block.
+  nsPoint cbOffset =
+    containingBlock->GetOffsetToIgnoringScrolling(aReflowInput->mFrame);
+
   nsSize reflowSize = aReflowInput->ComputedSizeAsContainerIfConstrained();
   LogicalPoint logCBOffs(wm, cbOffset, reflowSize - containerSize);
   aHypotheticalPos.mIStart += logCBOffs.I(wm);
@@ -1624,8 +1594,8 @@ ReflowInput::InitAbsoluteConstraints(nsPresContext* aPresContext,
 {
   WritingMode wm = GetWritingMode();
   WritingMode cbwm = aReflowInput->GetWritingMode();
-  NS_PRECONDITION(aCBSize.BSize(cbwm) != NS_AUTOHEIGHT,
-                  "containing block bsize must be constrained");
+  MOZ_ASSERT(aCBSize.BSize(cbwm) != NS_AUTOHEIGHT,
+             "containing block bsize must be constrained");
 
   NS_ASSERTION(aFrameType != LayoutFrameType::Table,
                "InitAbsoluteConstraints should not be called on table frames");
@@ -2564,7 +2534,7 @@ static void
 UpdateProp(nsIFrame* aFrame,
            const FramePropertyDescriptor<nsMargin>* aProperty,
            bool aNeeded,
-           nsMargin& aNewValue)
+           const nsMargin& aNewValue)
 {
   if (aNeeded) {
     nsMargin* propValue = aFrame->GetProperty(aProperty);
@@ -2599,10 +2569,10 @@ SizeComputationInput::InitOffsets(WritingMode aWM,
   // XXX fix to provide 0,0 for the top&bottom margins for
   // inline-non-replaced elements
   bool needMarginProp = ComputeMargin(aWM, aPercentBasis);
-  // XXX We need to include 'auto' horizontal margins in this too!
-  // ... but if we did that, we'd need to fix nsFrame::GetUsedMargin
-  // to use it even when the margins are all zero (since sometimes
-  // they get treated as auto)
+  // Note that ComputeMargin() simplistically resolves 'auto' margins to 0.
+  // In formatting contexts where this isn't correct, some later code will
+  // need to update the UsedMargin() property with the actual resolved value.
+  // One example of this is ::CalculateBlockSideMargins().
   ::UpdateProp(mFrame, nsIFrame::UsedMarginProperty(), needMarginProp,
                ComputedPhysicalMargin());
 
@@ -2833,7 +2803,16 @@ ReflowInput::CalculateBlockSideMargins(LayoutFrameType aFrameType)
   } else if (isAutoEndMargin) {
     margin.IEnd(cbWM) += availMarginSpace;
   }
-  SetComputedLogicalMargin(margin.ConvertTo(mWritingMode, cbWM));
+  LogicalMargin marginInOurWM = margin.ConvertTo(mWritingMode, cbWM);
+  SetComputedLogicalMargin(marginInOurWM);
+
+  if (isAutoStartMargin || isAutoEndMargin) {
+    // Update the UsedMargin property if we were tracking it already.
+    nsMargin* propValue = mFrame->GetProperty(nsIFrame::UsedMarginProperty());
+    if (propValue) {
+      *propValue = marginInOurWM.GetPhysicalMargin(mWritingMode);
+    }
+  }
 }
 
 #define NORMAL_LINE_HEIGHT_FACTOR 1.2f    // in term of emHeight
@@ -2848,7 +2827,7 @@ ReflowInput::CalculateBlockSideMargins(LayoutFrameType aFrameType)
 static nscoord
 GetNormalLineHeight(nsFontMetrics* aFontMetrics)
 {
-  NS_PRECONDITION(nullptr != aFontMetrics, "no font metrics");
+  MOZ_ASSERT(nullptr != aFontMetrics, "no font metrics");
 
   nscoord normalLineHeight;
 
@@ -2874,6 +2853,7 @@ GetNormalLineHeight(nsFontMetrics* aFontMetrics)
 
 static inline nscoord
 ComputeLineHeight(ComputedStyle* aComputedStyle,
+                  nsPresContext* aPresContext,
                   nscoord aBlockBSize,
                   float aFontSizeInflation)
 {
@@ -2907,7 +2887,7 @@ ComputeLineHeight(ComputedStyle* aComputedStyle,
   }
 
   RefPtr<nsFontMetrics> fm = nsLayoutUtils::
-    GetFontMetricsForComputedStyle(aComputedStyle, aFontSizeInflation);
+    GetFontMetricsForComputedStyle(aComputedStyle, aPresContext, aFontSizeInflation);
   return GetNormalLineHeight(fm);
 }
 
@@ -2918,20 +2898,27 @@ ReflowInput::CalcLineHeight() const
     nsLayoutUtils::IsNonWrapperBlock(mFrame) ? ComputedBSize() :
     (mCBReflowInput ? mCBReflowInput->ComputedBSize() : NS_AUTOHEIGHT);
 
-  return CalcLineHeight(mFrame->GetContent(), mFrame->Style(), blockBSize,
+  return CalcLineHeight(mFrame->GetContent(),
+                        mFrame->Style(),
+                        mFrame->PresContext(),
+                        blockBSize,
                         nsLayoutUtils::FontSizeInflationFor(mFrame));
 }
 
 /* static */ nscoord
 ReflowInput::CalcLineHeight(nsIContent* aContent,
-                                  ComputedStyle* aComputedStyle,
-                                  nscoord aBlockBSize,
-                                  float aFontSizeInflation)
+                            ComputedStyle* aComputedStyle,
+                            nsPresContext* aPresContext,
+                            nscoord aBlockBSize,
+                            float aFontSizeInflation)
 {
-  NS_PRECONDITION(aComputedStyle, "Must have a style context");
+  MOZ_ASSERT(aComputedStyle, "Must have a ComputedStyle");
 
   nscoord lineHeight =
-    ComputeLineHeight(aComputedStyle, aBlockBSize, aFontSizeInflation);
+    ComputeLineHeight(aComputedStyle,
+                      aPresContext,
+                      aBlockBSize,
+                      aFontSizeInflation);
 
   NS_ASSERTION(lineHeight >= 0, "ComputeLineHeight screwed up");
 

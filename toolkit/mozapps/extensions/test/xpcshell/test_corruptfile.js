@@ -7,22 +7,19 @@
 const profileDir = gProfD.clone();
 profileDir.append("extensions");
 
-function run_test() {
+add_task(async function setup() {
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1");
 
-  startupManager();
+  await promiseStartupManager();
 
   if (TEST_UNPACKED)
-    run_test_unpacked();
-  else
-    run_test_packed();
-}
+    return run_test_unpacked();
+  return run_test_packed();
+});
 
 // When installing packed we won't detect corruption in the XPI until we attempt
 // to load bootstrap.js so everything will look normal from the outside.
-function run_test_packed() {
-  do_test_pending();
-
+async function run_test_packed() {
   prepare_test({
     "corrupt@tests.mozilla.org": [
       ["onInstalling", false],
@@ -34,22 +31,16 @@ function run_test_packed() {
     "onInstallEnded"
   ]);
 
-  installAllFiles([do_get_file("data/corruptfile.xpi")], function() {
-    ensure_test_completed();
+  await promiseInstallAllFiles([do_get_file("data/corruptfile.xpi")]);
+  ensure_test_completed();
 
-    AddonManager.getAddonByID("corrupt@tests.mozilla.org", function(addon) {
-      Assert.notEqual(addon, null);
-
-      do_test_finished();
-    });
-  });
+  let addon = await AddonManager.getAddonByID("corrupt@tests.mozilla.org");
+  Assert.notEqual(addon, null);
 }
 
 // When extracting the corruption will be detected and the add-on fails to
 // install
-function run_test_unpacked() {
-  do_test_pending();
-
+async function run_test_unpacked() {
   prepare_test({
     "corrupt@tests.mozilla.org": [
       ["onInstalling", false],
@@ -61,23 +52,19 @@ function run_test_unpacked() {
     "onInstallFailed"
   ]);
 
-  installAllFiles([do_get_file("data/corruptfile.xpi")], function() {
-    ensure_test_completed();
+  await promiseInstallAllFiles([do_get_file("data/corruptfile.xpi")]);
+  ensure_test_completed();
 
-    // Check the add-on directory isn't left over
-    var addonDir = profileDir.clone();
-    addonDir.append("corrupt@tests.mozilla.org");
-    pathShouldntExist(addonDir);
+  // Check the add-on directory isn't left over
+  var addonDir = profileDir.clone();
+  addonDir.append("corrupt@tests.mozilla.org");
+  pathShouldntExist(addonDir);
 
-    // Check the staging directory isn't left over
-    var stageDir = profileDir.clone();
-    stageDir.append("staged");
-    pathShouldntExist(stageDir);
+  // Check the staging directory isn't left over
+  var stageDir = profileDir.clone();
+  stageDir.append("staged");
+  pathShouldntExist(stageDir);
 
-    AddonManager.getAddonByID("corrupt@tests.mozilla.org", function(addon) {
-      Assert.equal(addon, null);
-
-      do_test_finished();
-    });
-  });
+  let addon = await AddonManager.getAddonByID("corrupt@tests.mozilla.org");
+  Assert.equal(addon, null);
 }

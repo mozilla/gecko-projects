@@ -68,6 +68,7 @@ TrackUnionStream::TrackUnionStream()
   }
   void TrackUnionStream::ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags)
   {
+    TRACE();
     if (IsFinishedOnGraphThread()) {
       return;
     }
@@ -481,4 +482,24 @@ TrackUnionStream::RemoveDirectTrackListenerImpl(DirectMediaStreamTrackListener* 
     }
   }
 }
+
+void TrackUnionStream::RemoveAllDirectListenersImpl()
+{
+  for (TrackMapEntry& entry : mTrackMap) {
+    nsTArray<RefPtr<DirectMediaStreamTrackListener>>
+      listeners(entry.mOwnedDirectListeners);
+    for (const auto& listener : listeners) {
+      RemoveDirectTrackListenerImpl(listener, entry.mOutputTrackID);
+    }
+    MOZ_DIAGNOSTIC_ASSERT(entry.mOwnedDirectListeners.IsEmpty());
+  }
+
+  nsTArray<TrackBound<DirectMediaStreamTrackListener>>
+    boundListeners(mPendingDirectTrackListeners);
+  for (const auto& binding : boundListeners) {
+    RemoveDirectTrackListenerImpl(binding.mListener, binding.mTrackID);
+  }
+  MOZ_DIAGNOSTIC_ASSERT(mPendingDirectTrackListeners.IsEmpty());
+}
+
 } // namespace mozilla

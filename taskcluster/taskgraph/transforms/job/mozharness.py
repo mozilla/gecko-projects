@@ -21,9 +21,9 @@ from taskgraph.transforms.job.common import (
     docker_worker_add_workspace_cache,
     docker_worker_add_gecko_vcs_env_vars,
     docker_worker_setup_secrets,
-    docker_worker_add_public_artifacts,
+    docker_worker_add_artifacts,
     docker_worker_add_tooltool,
-    generic_worker_add_public_artifacts,
+    generic_worker_add_artifacts,
     support_vcs_checkout,
 )
 
@@ -139,7 +139,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     worker['taskcluster-proxy'] = run.get('taskcluster-proxy')
 
-    docker_worker_add_public_artifacts(config, job, taskdesc)
+    docker_worker_add_artifacts(config, job, taskdesc)
     docker_worker_add_workspace_cache(config, job, taskdesc,
                                       extra=run.get('extra-workspace-cache-key'))
     support_vcs_checkout(config, job, taskdesc)
@@ -149,6 +149,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
         'MOZHARNESS_CONFIG': ' '.join(run['config']),
         'MOZHARNESS_SCRIPT': run['script'],
         'MH_BRANCH': config.params['project'],
+        'MOZ_SOURCE_CHANGESET': env['GECKO_HEAD_REV'],
         'MH_BUILD_POOL': 'taskcluster',
         'MOZ_BUILD_DATE': config.params['moz_build_date'],
         'MOZ_SCM_LEVEL': config.params['level'],
@@ -236,7 +237,7 @@ def mozharness_on_generic_worker(config, job, taskdesc):
 
     worker = taskdesc['worker']
 
-    generic_worker_add_public_artifacts(config, job, taskdesc)
+    generic_worker_add_artifacts(config, job, taskdesc)
 
     docker_worker_add_gecko_vcs_env_vars(config, job, taskdesc)
 
@@ -245,6 +246,8 @@ def mozharness_on_generic_worker(config, job, taskdesc):
         'MOZ_BUILD_DATE': config.params['moz_build_date'],
         'MOZ_SCM_LEVEL': config.params['level'],
         'MOZ_AUTOMATION': '1',
+        'MH_BRANCH': config.params['project'],
+        'MOZ_SOURCE_CHANGESET': env['GECKO_HEAD_REV'],
     })
     if run['use-simple-package']:
         env.update({'MOZ_SIMPLE_PACKAGE_NAME': 'target'})

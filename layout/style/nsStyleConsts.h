@@ -231,21 +231,6 @@ enum class StyleOrient : uint8_t {
   Vertical,
 };
 
-
-// See nsStyleColor
-#define NS_STYLE_COLOR_INHERIT_FROM_BODY  2  /* Can't come from CSS directly */
-
-// See nsStyleColor
-#define NS_COLOR_CURRENTCOLOR                   -1
-#define NS_COLOR_MOZ_DEFAULT_COLOR              -2
-#define NS_COLOR_MOZ_DEFAULT_BACKGROUND_COLOR   -3
-#define NS_COLOR_MOZ_HYPERLINKTEXT              -4
-#define NS_COLOR_MOZ_VISITEDHYPERLINKTEXT       -5
-#define NS_COLOR_MOZ_ACTIVEHYPERLINKTEXT        -6
-// Only valid as paints in SVG glyphs
-#define NS_COLOR_CONTEXT_FILL                   -7
-#define NS_COLOR_CONTEXT_STROKE                 -8
-
 // See nsStyleDisplay
 #define NS_STYLE_WILL_CHANGE_STACKING_CONTEXT   (1<<0)
 #define NS_STYLE_WILL_CHANGE_TRANSFORM          (1<<1)
@@ -573,9 +558,6 @@ enum class StyleDisplay : uint8_t {
 #define NS_STYLE_FONT_STYLE_OBLIQUE             NS_FONT_STYLE_OBLIQUE
 
 // See nsStyleFont
-// We should eventually stop using the NS_STYLE_* variants here.
-#define NS_STYLE_FONT_WEIGHT_NORMAL             NS_FONT_WEIGHT_NORMAL
-#define NS_STYLE_FONT_WEIGHT_BOLD               NS_FONT_WEIGHT_BOLD
 // The constants below appear only in style sheets and not computed style.
 #define NS_STYLE_FONT_WEIGHT_BOLDER             (-1)
 #define NS_STYLE_FONT_WEIGHT_LIGHTER            (-2)
@@ -592,18 +574,6 @@ enum class StyleDisplay : uint8_t {
 #define NS_STYLE_FONT_SIZE_LARGER               8
 #define NS_STYLE_FONT_SIZE_SMALLER              9
 #define NS_STYLE_FONT_SIZE_NO_KEYWORD          10 // Used by Servo to track the "no keyword" case
-
-// See nsStyleFont
-// We should eventually stop using the NS_STYLE_* variants here.
-#define NS_STYLE_FONT_STRETCH_ULTRA_CONDENSED   NS_FONT_STRETCH_ULTRA_CONDENSED
-#define NS_STYLE_FONT_STRETCH_EXTRA_CONDENSED   NS_FONT_STRETCH_EXTRA_CONDENSED
-#define NS_STYLE_FONT_STRETCH_CONDENSED         NS_FONT_STRETCH_CONDENSED
-#define NS_STYLE_FONT_STRETCH_SEMI_CONDENSED    NS_FONT_STRETCH_SEMI_CONDENSED
-#define NS_STYLE_FONT_STRETCH_NORMAL            NS_FONT_STRETCH_NORMAL
-#define NS_STYLE_FONT_STRETCH_SEMI_EXPANDED     NS_FONT_STRETCH_SEMI_EXPANDED
-#define NS_STYLE_FONT_STRETCH_EXPANDED          NS_FONT_STRETCH_EXPANDED
-#define NS_STYLE_FONT_STRETCH_EXTRA_EXPANDED    NS_FONT_STRETCH_EXTRA_EXPANDED
-#define NS_STYLE_FONT_STRETCH_ULTRA_EXPANDED    NS_FONT_STRETCH_ULTRA_EXPANDED
 
 // See nsStyleFont - system fonts
 #define NS_STYLE_FONT_CAPTION                   1   // css2
@@ -676,6 +646,12 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_WIDTH_MIN_CONTENT              1
 #define NS_STYLE_WIDTH_FIT_CONTENT              2
 #define NS_STYLE_WIDTH_AVAILABLE                3
+// The 'content' keyword is only valid for 'flex-basis' (not for 'width').  But
+// aside from that, the 'flex-basis' property accepts exactly the same values
+// as 'width'. So I'm listing this one 'flex-basis'-specific enumerated value
+// alongside the 'width' ones, to be sure we don't accidentally overload this
+// numeric value with two different meanings if new 'width' keywords are added.
+#define NS_STYLE_FLEX_BASIS_CONTENT             4
 
 // See nsStyleDisplay.mPosition
 #define NS_STYLE_POSITION_STATIC                0

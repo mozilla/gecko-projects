@@ -22,6 +22,7 @@
 
 class nsFrameSelection;
 class nsIContent;
+class nsIDocument;
 class nsIPresShell;
 struct nsPoint;
 
@@ -105,8 +106,8 @@ public:
 
   // Handle NotifySelectionChanged event from nsISelectionListener.
   MOZ_CAN_RUN_SCRIPT
-  virtual nsresult OnSelectionChanged(nsIDOMDocument* aDoc,
-                                      nsISelection* aSel,
+  virtual nsresult OnSelectionChanged(nsIDocument* aDoc,
+                                      dom::Selection* aSel,
                                       int16_t aReason);
   // Handle key event.
   MOZ_CAN_RUN_SCRIPT
@@ -310,13 +311,6 @@ protected:
   // The caret mode since last update carets.
   CaretMode mLastUpdateCaretMode = CaretMode::None;
 
-  // Store the appearance of the carets when calling OnScrollStart() so that it
-  // can be restored in OnScrollEnd().
-  AccessibleCaret::Appearance mFirstCaretAppearanceOnScrollStart =
-                                 AccessibleCaret::Appearance::None;
-  AccessibleCaret::Appearance mSecondCaretAppearanceOnScrollStart =
-                                 AccessibleCaret::Appearance::None;
-
   // The last input source that the event hub saw. We use this to decide whether
   // or not show the carets when the selection is updated, as we want to hide
   // the carets for mouse-triggered selection changes but show them for other
@@ -354,11 +348,6 @@ protected:
   // Preference to make carets always tilt in selection mode. By default, the
   // carets become tilt only when they are overlapping.
   static bool sCaretsAlwaysTilt;
-
-  // Preference to allow carets always show when scrolling (either panning or
-  // zooming) the page. When set to false, carets will hide during scrolling,
-  // and show again after the user lifts the finger off the screen.
-  static bool sCaretsAlwaysShowWhenScrolling;
 
   // By default, javascript content selection changes closes AccessibleCarets and
   // UI interactions. Optionally, we can try to maintain the active UI, keeping

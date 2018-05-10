@@ -30,9 +30,7 @@
 #include "TreeWalker.h"
 #include "XULDocument.h"
 
-#include "nsIDOMElement.h"
 #include "nsIDOMXULButtonElement.h"
-#include "nsIDOMXULElement.h"
 #include "nsIDOMXULLabelElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
 #include "nsIDOMXULSelectCntrlItemEl.h"
@@ -71,6 +69,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MouseEvents.h"
@@ -185,7 +184,7 @@ Accessible::Description(nsString& aDescription)
   // 3. it doesn't have an accName; or
   // 4. its title attribute already equals to its accName nsAutoString name;
 
-  if (!HasOwnContent() || mContent->IsNodeOfType(nsINode::eTEXT))
+  if (!HasOwnContent() || mContent->IsText())
     return;
 
   nsTextEquivUtils::
@@ -562,6 +561,11 @@ Accessible::ChildAtPoint(int32_t aX, int32_t aY,
   nsRect screenRect = startFrame->GetScreenRectInAppUnits();
   nsPoint offset(presContext->DevPixelsToAppUnits(aX) - screenRect.X(),
                  presContext->DevPixelsToAppUnits(aY) - screenRect.Y());
+
+  // We need to take into account a non-1 resolution set on the presshell.
+  // This happens in mobile platforms with async pinch zooming.
+  offset = offset.RemoveResolution(presContext->PresShell()->GetResolution());
+
   nsIFrame* foundFrame = nsLayoutUtils::GetFrameForPoint(startFrame, offset);
 
   nsIContent* content = nullptr;
@@ -665,28 +669,37 @@ Accessible::RelativeBounds(nsIFrame** aBoundingFrame) const
   return nsRect();
 }
 
-nsIntRect
-Accessible::Bounds() const
+nsRect
+Accessible::BoundsInAppUnits() const
 {
   nsIFrame* boundingFrame = nullptr;
   nsRect unionRectTwips = RelativeBounds(&boundingFrame);
-  if (!boundingFrame)
-    return nsIntRect();
+  if (!boundingFrame) {
+    return nsRect();
+  }
 
-  nsIntRect screenRect;
-  nsPresContext* presContext = mDoc->PresContext();
-  screenRect.SetRect(presContext->AppUnitsToDevPixels(unionRectTwips.X()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Y()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Width()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Height()));
-
+  // We need to take into account a non-1 resolution set on the presshell.
+  // This happens in mobile platforms with async pinch zooming. Here we
+  // scale the bounds before adding the screen-relative offset.
+  unionRectTwips.ScaleRoundOut(mDoc->PresContext()->PresShell()->GetResolution());
   // We have the union of the rectangle, now we need to put it in absolute
   // screen coords.
-  nsIntRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits().
-    ToNearestPixels(presContext->AppUnitsPerDevPixel());
-  screenRect.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
+  nsRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits();
+  unionRectTwips.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
 
-  return screenRect;
+  return unionRectTwips;
+}
+
+nsIntRect
+Accessible::Bounds() const
+{
+  return BoundsInAppUnits().ToNearestPixels(mDoc->PresContext()->AppUnitsPerDevPixel());
+}
+
+nsIntRect
+Accessible::BoundsInCSSPixels() const
+{
+  return BoundsInAppUnits().ToNearestPixels(mDoc->PresContext()->AppUnitsPerCSSPixel());
 }
 
 void
@@ -750,10 +763,14 @@ Accessible::TakeFocus()
     }
   }
 
-  nsCOMPtr<nsIDOMElement> element(do_QueryInterface(focusContent));
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (fm)
+  if (fm) {
+    AutoHandlingUserInputStatePusher inputStatePusher(true, nullptr, focusContent->OwnerDoc());
+    // XXXbz: Can we actually have a non-element content here?
+    RefPtr<Element> element =
+      focusContent->IsElement() ? focusContent->AsElement() : nullptr;
     fm->SetFocus(element, 0);
+  }
 }
 
 void
@@ -1746,9 +1763,10 @@ Accessible::RelationByType(RelationType aType)
         }
       } else {
         // In XUL, use first <button default="true" .../> in the document
-        dom::XULDocument* xulDoc = mContent->OwnerDoc()->AsXULDocument();
+        nsIDocument* doc = mContent->OwnerDoc();
         nsCOMPtr<nsIDOMXULButtonElement> buttonEl;
-        if (xulDoc) {
+        if (doc->IsXULDocument()) {
+          dom::XULDocument* xulDoc = doc->AsXULDocument();
           nsCOMPtr<nsINodeList> possibleDefaultButtons =
             xulDoc->GetElementsByAttribute(NS_LITERAL_STRING("default"),
                                            NS_LITERAL_STRING("true"));
@@ -2328,7 +2346,7 @@ Accessible::GetIndexOfEmbeddedChild(Accessible* aChild)
 // HyperLinkAccessible methods
 
 bool
-Accessible::IsLink()
+Accessible::IsLink() const
 {
   // Every embedded accessible within hypertext accessible implements
   // hyperlink interface.
@@ -2338,7 +2356,7 @@ Accessible::IsLink()
 uint32_t
 Accessible::StartOffset()
 {
-  NS_PRECONDITION(IsLink(), "StartOffset is called not on hyper link!");
+  MOZ_ASSERT(IsLink(), "StartOffset is called not on hyper link!");
 
   HyperTextAccessible* hyperText = mParent ? mParent->AsHyperText() : nullptr;
   return hyperText ? hyperText->GetChildOffset(this) : 0;
@@ -2347,7 +2365,7 @@ Accessible::StartOffset()
 uint32_t
 Accessible::EndOffset()
 {
-  NS_PRECONDITION(IsLink(), "EndOffset is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "EndOffset is called on not hyper link!");
 
   HyperTextAccessible* hyperText = mParent ? mParent->AsHyperText() : nullptr;
   return hyperText ? (hyperText->GetChildOffset(this) + 1) : 0;
@@ -2356,21 +2374,21 @@ Accessible::EndOffset()
 uint32_t
 Accessible::AnchorCount()
 {
-  NS_PRECONDITION(IsLink(), "AnchorCount is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "AnchorCount is called on not hyper link!");
   return 1;
 }
 
 Accessible*
 Accessible::AnchorAt(uint32_t aAnchorIndex)
 {
-  NS_PRECONDITION(IsLink(), "GetAnchor is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "GetAnchor is called on not hyper link!");
   return aAnchorIndex == 0 ? this : nullptr;
 }
 
 already_AddRefed<nsIURI>
 Accessible::AnchorURIAt(uint32_t aAnchorIndex)
 {
-  NS_PRECONDITION(IsLink(), "AnchorURIAt is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "AnchorURIAt is called on not hyper link!");
   return nullptr;
 }
 

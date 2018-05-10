@@ -8,7 +8,6 @@ import org.json.simple.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mozilla.apache.commons.codec.binary.Base64;
-import org.mozilla.gecko.background.testhelpers.TestRunner;
 import org.mozilla.gecko.sync.CryptoRecord;
 import org.mozilla.gecko.sync.ExtendedJSONObject;
 import org.mozilla.gecko.sync.NonObjectJSONException;
@@ -18,6 +17,8 @@ import org.mozilla.gecko.sync.crypto.KeyBundle;
 import org.mozilla.gecko.sync.repositories.domain.ClientRecord;
 import org.mozilla.gecko.sync.repositories.domain.HistoryRecord;
 import org.mozilla.gecko.sync.repositories.domain.Record;
+import org.mozilla.gecko.util.StringUtils;
+import org.robolectric.RobolectricTestRunner;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -28,7 +29,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-@RunWith(TestRunner.class)
+@RunWith(RobolectricTestRunner.class)
 public class TestCryptoRecord {
   String base64EncryptionKey = "9K/wLdXdw+nrTtXo4ZpECyHFNr4d7aYHqeg3KW9+m6Q=";
   String base64HmacKey = "MMntEfutgLTc8FlTLQFms8/xMPmCldqPlq/QQXEjx70=";
@@ -109,8 +110,8 @@ public class TestCryptoRecord {
     payload.put("hmac", base16Hmac);
     body.put("payload", payload.toJSONString());
     CryptoRecord record = CryptoRecord.fromJSONRecord(body);
-    byte[] decodedKey  = Base64.decodeBase64(base64EncryptionKey.getBytes("UTF-8"));
-    byte[] decodedHMAC = Base64.decodeBase64(base64HmacKey.getBytes("UTF-8")); 
+    byte[] decodedKey  = Base64.decodeBase64(base64EncryptionKey.getBytes(StringUtils.UTF_8));
+    byte[] decodedHMAC = Base64.decodeBase64(base64HmacKey.getBytes(StringUtils.UTF_8)); 
     record.keyBundle = new KeyBundle(decodedKey, decodedHMAC);
 
     record.decrypt();
@@ -125,14 +126,14 @@ public class TestCryptoRecord {
     String user = "c6o7dvmr2c4ud2fyv6woz2u4zi22bcyd";
     
     // Check our friendly base32 decoding.
-    assertTrue(Arrays.equals(Utils.decodeFriendlyBase32(key), Base64.decodeBase64("8xbKrJfQYwbFkguKmlSm/g==".getBytes("UTF-8"))));
+    assertTrue(Arrays.equals(Utils.decodeFriendlyBase32(key), Base64.decodeBase64("8xbKrJfQYwbFkguKmlSm/g==".getBytes(StringUtils.UTF_8))));
     KeyBundle bundle = new KeyBundle(user, key);
     String expectedEncryptKeyBase64 = "/8RzbFT396htpZu5rwgIg2WKfyARgm7dLzsF5pwrVz8=";
     String expectedHMACKeyBase64    = "NChGjrqoXYyw8vIYP2334cvmMtsjAMUZNqFwV2LGNkM=";
     byte[] computedEncryptKey       = bundle.getEncryptionKey();
     byte[] computedHMACKey          = bundle.getHMACKey();
-    assertTrue(Arrays.equals(computedEncryptKey, Base64.decodeBase64(expectedEncryptKeyBase64.getBytes("UTF-8"))));
-    assertTrue(Arrays.equals(computedHMACKey,    Base64.decodeBase64(expectedHMACKeyBase64.getBytes("UTF-8"))));
+    assertTrue(Arrays.equals(computedEncryptKey, Base64.decodeBase64(expectedEncryptKeyBase64.getBytes(StringUtils.UTF_8))));
+    assertTrue(Arrays.equals(computedHMACKey,    Base64.decodeBase64(expectedHMACKeyBase64.getBytes(StringUtils.UTF_8))));
   }
 
   @Test
@@ -264,8 +265,8 @@ public class TestCryptoRecord {
     JSONArray keys = new ExtendedJSONObject(decrypted.payload.toJSONString()).getArray("default");
     KeyBundle keyBundle = KeyBundle.fromBase64EncodedKeys((String)keys.get(0), (String)keys.get(1));
 
-    assertArrayEquals(Base64.decodeBase64(expectedBase64EncryptionKey.getBytes("UTF-8")), keyBundle.getEncryptionKey());
-    assertArrayEquals(Base64.decodeBase64(expectedBase64HmacKey.getBytes("UTF-8")), keyBundle.getHMACKey());
+    assertArrayEquals(Base64.decodeBase64(expectedBase64EncryptionKey.getBytes(StringUtils.UTF_8)), keyBundle.getEncryptionKey());
+    assertArrayEquals(Base64.decodeBase64(expectedBase64HmacKey.getBytes(StringUtils.UTF_8)), keyBundle.getHMACKey());
   }
 
   @Test

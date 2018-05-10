@@ -16,11 +16,9 @@
 
 class nsIContent;
 class nsIContentIterator;
-class nsIDOMDocument;
 class nsIDOMNode;
 class nsIEditor;
 class nsINode;
-class nsISelection;
 class nsISelectionController;
 class nsITextServicesFilter;
 class nsRange;
@@ -29,6 +27,10 @@ namespace mozilla {
 
 class OffsetEntry;
 class TextEditor;
+
+namespace dom {
+class Elemenent;
+};
 
 /**
  * The TextServicesDocument presents the document in as a bunch of flattened
@@ -49,7 +51,7 @@ private:
     eNext,
   };
 
-  nsCOMPtr<nsIDOMDocument> mDOMDocument;
+  nsCOMPtr<nsIDocument> mDocument;
   nsCOMPtr<nsISelectionController> mSelCon;
   RefPtr<TextEditor> mTextEditor;
   nsCOMPtr<nsIContentIterator> mIterator;
@@ -83,13 +85,6 @@ public:
    * @param aEditor             The editor to use.
    */
   nsresult InitWithEditor(nsIEditor* aEditor);
-
-  /**
-   * Get the DOM document for the document in use.
-   *
-   * @return aDOMDocument       The dom document.
-   */
-  nsresult GetDocument(nsIDOMDocument** aDOMDocument);
 
   /**
    * Sets the range/extent over which the text services document will iterate.
@@ -243,7 +238,7 @@ private:
   nsresult CreateContentIterator(nsRange* aRange,
                                  nsIContentIterator** aIterator);
 
-  already_AddRefed<nsINode> GetDocumentContentRootNode();
+  dom::Element* GetDocumentContentRootNode() const;
   already_AddRefed<nsRange> CreateDocumentContentRange();
   already_AddRefed<nsRange> CreateDocumentContentRootToNodeOffsetRange(
                               nsINode* aParent,
