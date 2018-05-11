@@ -370,7 +370,7 @@ def get_partial_updates(product, project, version):
     for release in partials:
         l10n = get_l10n(release["product"], release["branch"], release["revision"])
         ret[release["version"]] = {
-            "build_number": release["build_number"],
+            "buildNumber": str(release["build_number"]),
             "locales": l10n,
         }
     return ret
