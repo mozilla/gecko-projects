@@ -50,14 +50,11 @@
 #include "TextOverflow.h"
 #include "nsIFrameInlines.h"
 #include "CounterStyleManager.h"
-#include "nsISelection.h"
 #include "mozilla/dom/HTMLDetailsElement.h"
 #include "mozilla/dom/HTMLSummaryElement.h"
-#include "mozilla/RestyleManagerInlines.h"
-#include "mozilla/ServoRestyleManager.h"
+#include "mozilla/dom/Selection.h"
+#include "mozilla/RestyleManager.h"
 #include "mozilla/ServoStyleSet.h"
-#include "mozilla/StyleSetHandle.h"
-#include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/Telemetry.h"
 
 #include "nsBidiPresUtils.h"
@@ -464,7 +461,7 @@ nsBlockFrame::GetFrameName(nsAString& aResult) const
 #endif
 
 void
-nsBlockFrame::InvalidateFrame(uint32_t aDisplayItemKey)
+nsBlockFrame::InvalidateFrame(uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
   if (nsSVGUtils::IsInSVGTextSubtree(this)) {
     NS_ASSERTION(GetParent()->IsSVGTextFrame(),
@@ -472,11 +469,11 @@ nsBlockFrame::InvalidateFrame(uint32_t aDisplayItemKey)
     GetParent()->InvalidateFrame();
     return;
   }
-  nsContainerFrame::InvalidateFrame(aDisplayItemKey);
+  nsContainerFrame::InvalidateFrame(aDisplayItemKey, aRebuildDisplayItems);
 }
 
 void
-nsBlockFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey)
+nsBlockFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
   if (nsSVGUtils::IsInSVGTextSubtree(this)) {
     NS_ASSERTION(GetParent()->IsSVGTextFrame(),
@@ -484,7 +481,7 @@ nsBlockFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItem
     GetParent()->InvalidateFrame();
     return;
   }
-  nsContainerFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey);
+  nsContainerFrame::InvalidateFrameWithRect(aRect, aDisplayItemKey, aRebuildDisplayItems);
 }
 
 nscoord
@@ -545,8 +542,11 @@ nsBlockFrame::GetCaretBaseline() const
   RefPtr<nsFontMetrics> fm =
     nsLayoutUtils::GetFontMetricsForFrame(this, inflation);
   nscoord lineHeight =
-    ReflowInput::CalcLineHeight(GetContent(), Style(),
-                                      contentRect.height, inflation);
+    ReflowInput::CalcLineHeight(GetContent(),
+                                Style(),
+                                PresContext(),
+                                contentRect.height,
+                                inflation);
   const WritingMode wm = GetWritingMode();
   return nsLayoutUtils::GetCenteredFontBaseline(fm, lineHeight,
                                                 wm.IsLineInverted()) + bp.top;
@@ -2832,7 +2832,7 @@ nsBlockFrame::DeleteLine(BlockReflowInput& aState,
                          nsLineList::iterator aLine,
                          nsLineList::iterator aLineEnd)
 {
-  NS_PRECONDITION(0 == aLine->GetChildCount(), "can't delete !empty line");
+  MOZ_ASSERT(0 == aLine->GetChildCount(), "can't delete !empty line");
   if (0 == aLine->GetChildCount()) {
     NS_ASSERTION(aState.mCurrentLine == aLine,
                  "using function more generally than designed, "
@@ -3006,7 +3006,7 @@ void
 nsBlockFrame::SlideLine(BlockReflowInput& aState,
                         nsLineBox* aLine, nscoord aDeltaBCoord)
 {
-  NS_PRECONDITION(aDeltaBCoord != 0, "why slide a line nowhere?");
+  MOZ_ASSERT(aDeltaBCoord != 0, "why slide a line nowhere?");
 
   // Adjust line state
   aLine->SlideBy(aDeltaBCoord, aState.ContainerSize());
@@ -3258,9 +3258,7 @@ nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
                                LineIterator aLine,
                                bool* aKeepReflowGoing)
 {
-  recordreplay::RecordReplayAssert("nsBlockFrame::ReflowBlockFrame");
-
-  NS_PRECONDITION(*aKeepReflowGoing, "bad caller");
+  MOZ_ASSERT(*aKeepReflowGoing, "bad caller");
 
   nsIFrame* frame = aLine->mFirstChild;
   if (!frame) {
@@ -5221,8 +5219,8 @@ void
 nsBlockFrame::SetOverflowOutOfFlows(const nsFrameList& aList,
                                     nsFrameList* aPropValue)
 {
-  NS_PRECONDITION(!!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS) ==
-                  !!aPropValue, "state does not match value");
+  MOZ_ASSERT(!!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS) ==
+             !!aPropValue, "state does not match value");
 
   if (aList.IsEmpty()) {
     if (!(GetStateBits() & NS_BLOCK_HAS_OVERFLOW_OUT_OF_FLOWS)) {
@@ -5741,7 +5739,7 @@ nsBlockFrame::UpdateFirstLetterStyle(ServoRestyleState& aRestyleState)
   nsIFrame* styleParent =
     CorrectStyleParentFrame(inFlowFrame->GetParent(),
                             nsCSSPseudoElements::firstLetter);
-  ComputedStyle* parentStyle = styleParent->Style()->AsServo();
+  ComputedStyle* parentStyle = styleParent->Style();
   RefPtr<ComputedStyle> firstLetterStyle =
     aRestyleState.StyleSet()
                  .ResolvePseudoElementStyle(mContent->AsElement(),
@@ -5761,7 +5759,7 @@ nsBlockFrame::UpdateFirstLetterStyle(ServoRestyleState& aRestyleState)
   nsIFrame* textFrame = letterFrame->PrincipalChildList().FirstChild();
   RefPtr<ComputedStyle> firstTextStyle =
     aRestyleState.StyleSet().ResolveStyleForText(textFrame->GetContent(),
-                                                 firstLetterStyle->AsServo());
+                                                 firstLetterStyle);
   textFrame->SetComputedStyle(firstTextStyle);
 
   // We don't need to update style for textFrame's continuations: it's already
@@ -6321,7 +6319,7 @@ void
 nsBlockFrame::DeleteNextInFlowChild(nsIFrame* aNextInFlow,
                                     bool      aDeletingEmptyFrames)
 {
-  NS_PRECONDITION(aNextInFlow->GetPrevInFlow(), "bad next-in-flow");
+  MOZ_ASSERT(aNextInFlow->GetPrevInFlow(), "bad next-in-flow");
 
   if (aNextInFlow->GetStateBits() &
       (NS_FRAME_OUT_OF_FLOW | NS_FRAME_IS_OVERFLOW_CONTAINER)) {
@@ -6394,8 +6392,9 @@ nsBlockFrame::ComputeFloatISize(BlockReflowInput& aState,
                                 const LogicalRect&  aFloatAvailableSpace,
                                 nsIFrame*           aFloat)
 {
-  NS_PRECONDITION(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
-                  "aFloat must be an out-of-flow frame");
+  MOZ_ASSERT(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
+             "aFloat must be an out-of-flow frame");
+
   // Reflow the float.
   LogicalRect availSpace = AdjustFloatAvailableSpace(aState,
                                                      aFloatAvailableSpace,
@@ -6419,8 +6418,9 @@ nsBlockFrame::ReflowFloat(BlockReflowInput& aState,
                           bool                aFloatPushedDown,
                           nsReflowStatus&     aReflowStatus)
 {
-  NS_PRECONDITION(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
-                  "aFloat must be an out-of-flow frame");
+  MOZ_ASSERT(aFloat->GetStateBits() & NS_FRAME_OUT_OF_FLOW,
+             "aFloat must be an out-of-flow frame");
+
   // Reflow the float.
   aReflowStatus.Reset();
 
@@ -6659,7 +6659,8 @@ nsBlockFrame::RecoverFloatsFor(nsIFrame*       aFrame,
                                WritingMode     aWM,
                                const nsSize&   aContainerSize)
 {
-  NS_PRECONDITION(aFrame, "null frame");
+  MOZ_ASSERT(aFrame, "null frame");
+
   // Only blocks have floats
   nsBlockFrame* block = nsLayoutUtils::GetAsBlock(aFrame);
   // Don't recover any state inside a block that has its own space manager
@@ -6720,15 +6721,14 @@ static void ComputeVisualOverflowArea(nsLineList& aLines,
 #endif
 
 bool
-nsBlockFrame::IsVisibleInSelection(nsISelection* aSelection)
+nsBlockFrame::IsVisibleInSelection(Selection* aSelection)
 {
   if (mContent->IsAnyOfHTMLElements(nsGkAtoms::html, nsGkAtoms::body))
     return true;
 
-  nsCOMPtr<nsIDOMNode> node(do_QueryInterface(mContent));
-  bool visible;
-  nsresult rv = aSelection->ContainsNode(node, true, &visible);
-  return NS_SUCCEEDED(rv) && visible;
+  IgnoredErrorResult rv;
+  bool visible = aSelection->ContainsNode(*mContent, true, rv);
+  return !rv.Failed() && visible;
 }
 
 #ifdef DEBUG
@@ -7508,7 +7508,7 @@ nsBlockFrame::IsMarginRoot(bool* aBStartMarginRoot, bool* aBEndMarginRoot)
 bool
 nsBlockFrame::BlockNeedsFloatManager(nsIFrame* aBlock)
 {
-  NS_PRECONDITION(aBlock, "Must have a frame");
+  MOZ_ASSERT(aBlock, "Must have a frame");
   NS_ASSERTION(nsLayoutUtils::GetAsBlock(aBlock), "aBlock must be a block");
 
   nsIFrame* parent = aBlock->GetParent();
@@ -7672,7 +7672,7 @@ nsBlockFrame::UpdatePseudoElementStyles(ServoRestyleState& aRestyleState)
       CorrectStyleParentFrame(firstLineFrame->GetParent(),
                               nsCSSPseudoElements::firstLine);
 
-    ComputedStyle* parentStyle = styleParent->Style()->AsServo();
+    ComputedStyle* parentStyle = styleParent->Style();
     RefPtr<ComputedStyle> firstLineStyle =
       aRestyleState.StyleSet()
                    .ResolvePseudoElementStyle(mContent->AsElement(),
@@ -7692,16 +7692,16 @@ nsBlockFrame::UpdatePseudoElementStyles(ServoRestyleState& aRestyleState)
     // We also want to update the styles of the first-line's descendants.  We
     // don't need to compute a changehint for this, though, since any changes to
     // them are handled by the first-line anyway.
-    ServoRestyleManager* manager = PresContext()->RestyleManager()->AsServo();
+    RestyleManager* manager = PresContext()->RestyleManager();
     for (nsIFrame* kid : firstLineFrame->PrincipalChildList()) {
-      manager->ReparentComputedStyle(kid);
+      manager->ReparentComputedStyleForFirstLine(kid);
     }
   }
 }
 
 already_AddRefed<ComputedStyle>
 nsBlockFrame::ResolveBulletStyle(CSSPseudoElementType aType,
-                                 StyleSetHandle aStyleSet)
+                                 ServoStyleSet* aStyleSet)
 {
   ComputedStyle* parentStyle =
     CorrectStyleParentFrame(this,

@@ -14,6 +14,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/MemoryChecking.h"
 #include "mozilla/PodOperations.h"
 
 #include <limits.h>
@@ -258,14 +259,15 @@ PodSet(T* aDst, const T& aSrc, size_t aNElem)
  *
  * Note: new patterns should also be added to the array in IsThingPoisoned!
  */
-#define JS_FRESH_NURSERY_PATTERN 0x2F
-#define JS_SWEPT_NURSERY_PATTERN 0x2B
-#define JS_ALLOCATED_NURSERY_PATTERN 0x2D
-#define JS_FRESH_TENURED_PATTERN 0x4F
-#define JS_MOVED_TENURED_PATTERN 0x49
-#define JS_SWEPT_TENURED_PATTERN 0x4B
-#define JS_ALLOCATED_TENURED_PATTERN 0x4D
-#define JS_FREED_HEAP_PTR_PATTERN 0x6B
+const uint8_t JS_FRESH_NURSERY_PATTERN     = 0x2F;
+const uint8_t JS_SWEPT_NURSERY_PATTERN     = 0x2B;
+const uint8_t JS_ALLOCATED_NURSERY_PATTERN = 0x2D;
+const uint8_t JS_FRESH_TENURED_PATTERN     = 0x4F;
+const uint8_t JS_MOVED_TENURED_PATTERN     = 0x49;
+const uint8_t JS_SWEPT_TENURED_PATTERN     = 0x4B;
+const uint8_t JS_ALLOCATED_TENURED_PATTERN = 0x4D;
+const uint8_t JS_FREED_HEAP_PTR_PATTERN    = 0x6B;
+const uint8_t JS_FREED_CHUNK_PATTERN       = 0x8B;
 #define JS_SWEPT_TI_PATTERN 0x6F
 
 /*
@@ -283,16 +285,36 @@ PodSet(T* aDst, const T& aSrc, size_t aNElem)
 # error "JS_SWEPT_CODE_PATTERN not defined for this platform"
 #endif
 
-static inline void*
-Poison(void* ptr, uint8_t value, size_t num)
-{
-    // Don't check the environment when recording or replaying and we might be
-    // under the GC.
-    static bool disablePoison =
-        !mozilla::recordreplay::IsRecordingOrReplaying() && bool(getenv("JSGC_DISABLE_POISONING"));
-    if (disablePoison)
-        return ptr;
+enum class MemCheckKind : uint8_t {
+    // Marks a region as poisoned. Memory sanitizers like ASan will crash when
+    // accessing it (both reads and writes).
+    MakeNoAccess,
 
+    // Marks a region as having undefined contents. In ASan builds this just
+    // unpoisons the memory. MSan and Valgrind can also use this to find
+    // reads of uninitialized memory.
+    MakeUndefined,
+};
+
+static MOZ_ALWAYS_INLINE void
+SetMemCheckKind(void* ptr, size_t bytes, MemCheckKind kind)
+{
+    switch (kind) {
+      case MemCheckKind::MakeUndefined:
+        MOZ_MAKE_MEM_UNDEFINED(ptr, bytes);
+        return;
+      case MemCheckKind::MakeNoAccess:
+        MOZ_MAKE_MEM_NOACCESS(ptr, bytes);
+        return;
+    }
+    MOZ_CRASH("Invalid kind");
+}
+
+namespace js {
+
+static inline void
+AlwaysPoison(void* ptr, uint8_t value, size_t num, MemCheckKind kind)
+{
     // Without a valid Value tag, a poisoned Value may look like a valid
     // floating point number. To ensure that we crash more readily when
     // observing a poisoned Value, we make the poison an invalid ObjectValue.
@@ -317,27 +339,38 @@ Poison(void* ptr, uint8_t value, size_t num)
 #else // !DEBUG
     memset(ptr, value, num);
 #endif // !DEBUG
-    return ptr;
+
+    SetMemCheckKind(ptr, num, kind);
 }
 
+static inline void
+Poison(void* ptr, uint8_t value, size_t num, MemCheckKind kind)
+{
+    static bool disablePoison = bool(getenv("JSGC_DISABLE_POISONING"));
+    if (!disablePoison)
+        AlwaysPoison(ptr, value, num, kind);
+}
+
+} // namespace js
+
 /* Crash diagnostics by default in debug and on nightly channel. */
-#if (defined(DEBUG) || defined(NIGHTLY_BUILD)) && !defined(MOZ_ASAN)
+#if defined(DEBUG) || defined(NIGHTLY_BUILD)
 # define JS_CRASH_DIAGNOSTICS 1
 #endif
 
 /* Enable poisoning in crash-diagnostics and zeal builds. */
 #if defined(JS_CRASH_DIAGNOSTICS) || defined(JS_GC_ZEAL)
-# define JS_POISON(p, val, size) Poison(p, val, size)
+# define JS_POISON(p, val, size, kind) js::Poison(p, val, size, kind)
 # define JS_GC_POISONING 1
 #else
-# define JS_POISON(p, val, size) ((void) 0)
+# define JS_POISON(p, val, size, kind) ((void) 0)
 #endif
 
 /* Enable even more poisoning in purely debug builds. */
 #if defined(DEBUG)
-# define JS_EXTRA_POISON(p, val, size) Poison(p, val, size)
+# define JS_EXTRA_POISON(p, val, size, kind) js::Poison(p, val, size, kind)
 #else
-# define JS_EXTRA_POISON(p, val, size) ((void) 0)
+# define JS_EXTRA_POISON(p, val, size, kind) ((void) 0)
 #endif
 
 #endif /* jsutil_h */

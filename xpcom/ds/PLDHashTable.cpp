@@ -224,8 +224,7 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
     return *this;
   }
 
-  // |mOps| and |mEntrySize| are const so we can't assign them. Instead, we
-  // require that they are equal. The justification for this is that they're
+  // |mOps| and |mEntrySize| are required to stay the same, they're
   // conceptually part of the type -- indeed, if PLDHashTable was a templated
   // type like nsTHashtable, they *would* be part of the type -- so it only
   // makes sense to assign in cases where they match. An exception is when we
@@ -238,6 +237,10 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
   const PLDHashTableOps* ops = recordreplay::UnwrapPLDHashTableCallbacks(aOther.mOps);
   this->~PLDHashTable();
   new (KnownNotNull, this) PLDHashTable(ops, aOther.mEntrySize, 0);
+
+  // Reconstruct |this|.
+  this->~PLDHashTable();
+  new (KnownNotNull, this) PLDHashTable(aOther.mOps, aOther.mEntrySize, 0);
 
   // Move non-const pieces over.
   mHashShift = Move(aOther.mHashShift);
@@ -485,7 +488,7 @@ PLDHashTable::ChangeTable(int32_t aDeltaLog2)
     return false;   // overflowed
   }
 
-  char* newEntryStore = (char*)malloc(nbytes);
+  char* newEntryStore = (char*)calloc(1, nbytes);
   if (!newEntryStore) {
     return false;
   }
@@ -495,7 +498,6 @@ PLDHashTable::ChangeTable(int32_t aDeltaLog2)
   mRemovedCount = 0;
 
   // Assign the new entry store to table.
-  memset(newEntryStore, 0, nbytes);
   char* oldEntryStore;
   char* oldEntryAddr;
   oldEntryAddr = oldEntryStore = mEntryStore.Get();
@@ -564,11 +566,10 @@ PLDHashTable::Add(const void* aKey, const mozilla::fallible_t&)
     // We already checked this in the constructor, so it must still be true.
     MOZ_RELEASE_ASSERT(SizeOfEntryStore(CapacityFromHashShift(), mEntrySize,
                                         &nbytes));
-    mEntryStore.Set((char*)malloc(nbytes), &mGeneration);
+    mEntryStore.Set((char*)calloc(1, nbytes), &mGeneration);
     if (!mEntryStore.Get()) {
       return nullptr;
     }
-    memset(mEntryStore.Get(), 0, nbytes);
   }
 
   // If alpha is >= .75, grow or compress the table. If aKey is already in the

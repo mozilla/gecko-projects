@@ -1,13 +1,13 @@
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
-		module.exports = factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/shared/vendor/react-dom"), require("Services"), require("devtools/shared/flags"), require("devtools/client/sourceeditor/editor"), require("devtools/client/shared/vendor/WasmParser"), require("devtools/client/shared/vendor/WasmDis"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/immutable"));
+		module.exports = factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/shared/vendor/react-dom"), require("Services"), require("devtools/shared/flags"), require("devtools/client/sourceeditor/editor"), require("devtools/client/shared/vendor/WasmParser"), require("devtools/client/shared/vendor/WasmDis"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/immutable"), require("devtools/shared/fronts/device"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"));
 	else if(typeof define === 'function' && define.amd)
-		define(["devtools/client/shared/vendor/react", "devtools/client/shared/vendor/lodash", "devtools/client/shared/vendor/react-dom", "Services", "devtools/shared/flags", "devtools/client/sourceeditor/editor", "devtools/client/shared/vendor/WasmParser", "devtools/client/shared/vendor/WasmDis", "devtools/client/shared/vendor/react-redux", "devtools/client/shared/vendor/redux", "devtools/client/shared/vendor/immutable"], factory);
+		define(["devtools/client/shared/vendor/react", "devtools/client/shared/vendor/lodash", "devtools/client/shared/vendor/react-dom", "Services", "devtools/shared/flags", "devtools/client/sourceeditor/editor", "devtools/client/shared/vendor/WasmParser", "devtools/client/shared/vendor/WasmDis", "devtools/client/shared/vendor/react-redux", "devtools/client/shared/vendor/redux", "devtools/client/shared/vendor/immutable", "devtools/shared/fronts/device", "devtools/client/shared/vendor/react-prop-types", "devtools/client/shared/vendor/react-dom-factories"], factory);
 	else {
-		var a = typeof exports === 'object' ? factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/shared/vendor/react-dom"), require("Services"), require("devtools/shared/flags"), require("devtools/client/sourceeditor/editor"), require("devtools/client/shared/vendor/WasmParser"), require("devtools/client/shared/vendor/WasmDis"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/immutable")) : factory(root["devtools/client/shared/vendor/react"], root["devtools/client/shared/vendor/lodash"], root["devtools/client/shared/vendor/react-dom"], root["Services"], root["devtools/shared/flags"], root["devtools/client/sourceeditor/editor"], root["devtools/client/shared/vendor/WasmParser"], root["devtools/client/shared/vendor/WasmDis"], root["devtools/client/shared/vendor/react-redux"], root["devtools/client/shared/vendor/redux"], root["devtools/client/shared/vendor/immutable"]);
+		var a = typeof exports === 'object' ? factory(require("devtools/client/shared/vendor/react"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/shared/vendor/react-dom"), require("Services"), require("devtools/shared/flags"), require("devtools/client/sourceeditor/editor"), require("devtools/client/shared/vendor/WasmParser"), require("devtools/client/shared/vendor/WasmDis"), require("devtools/client/shared/vendor/react-redux"), require("devtools/client/shared/vendor/redux"), require("devtools/client/shared/vendor/immutable"), require("devtools/shared/fronts/device"), require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories")) : factory(root["devtools/client/shared/vendor/react"], root["devtools/client/shared/vendor/lodash"], root["devtools/client/shared/vendor/react-dom"], root["Services"], root["devtools/shared/flags"], root["devtools/client/sourceeditor/editor"], root["devtools/client/shared/vendor/WasmParser"], root["devtools/client/shared/vendor/WasmDis"], root["devtools/client/shared/vendor/react-redux"], root["devtools/client/shared/vendor/redux"], root["devtools/client/shared/vendor/immutable"], root["devtools/shared/fronts/device"], root["devtools/client/shared/vendor/react-prop-types"], root["devtools/client/shared/vendor/react-dom-factories"]);
 		for(var i in a) (typeof exports === 'object' ? exports : root)[i] = a[i];
 	}
-})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_0__, __WEBPACK_EXTERNAL_MODULE_2__, __WEBPACK_EXTERNAL_MODULE_4__, __WEBPACK_EXTERNAL_MODULE_22__, __WEBPACK_EXTERNAL_MODULE_52__, __WEBPACK_EXTERNAL_MODULE_197__, __WEBPACK_EXTERNAL_MODULE_677__, __WEBPACK_EXTERNAL_MODULE_678__, __WEBPACK_EXTERNAL_MODULE_3592__, __WEBPACK_EXTERNAL_MODULE_3593__, __WEBPACK_EXTERNAL_MODULE_3594__) {
+})(typeof self !== 'undefined' ? self : this, function(__WEBPACK_EXTERNAL_MODULE_0__, __WEBPACK_EXTERNAL_MODULE_2__, __WEBPACK_EXTERNAL_MODULE_4__, __WEBPACK_EXTERNAL_MODULE_22__, __WEBPACK_EXTERNAL_MODULE_52__, __WEBPACK_EXTERNAL_MODULE_197__, __WEBPACK_EXTERNAL_MODULE_677__, __WEBPACK_EXTERNAL_MODULE_678__, __WEBPACK_EXTERNAL_MODULE_3592__, __WEBPACK_EXTERNAL_MODULE_3593__, __WEBPACK_EXTERNAL_MODULE_3594__, __WEBPACK_EXTERNAL_MODULE_3626__, __WEBPACK_EXTERNAL_MODULE_3642__, __WEBPACK_EXTERNAL_MODULE_3643__) {
 return /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -135,39 +135,6 @@ module.exports = getRawTag;
 
 /***/ }),
 
-/***/ 100:
-/***/ (function(module, exports, __webpack_require__) {
-
-var assocIndexOf = __webpack_require__(96);
-
-/**
- * Sets the list cache `key` to `value`.
- *
- * @private
- * @name set
- * @memberOf ListCache
- * @param {string} key The key of the value to set.
- * @param {*} value The value to set.
- * @returns {Object} Returns the list cache instance.
- */
-function listCacheSet(key, value) {
-  var data = this.__data__,
-      index = assocIndexOf(data, key);
-
-  if (index < 0) {
-    ++this.size;
-    data.push([key, value]);
-  } else {
-    data[index][1] = value;
-  }
-  return this;
-}
-
-module.exports = listCacheSet;
-
-
-/***/ }),
-
 /***/ 1000:
 /***/ (function(module, exports) {
 
@@ -203,92 +170,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 101:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getNative = __webpack_require__(81),
-    root = __webpack_require__(8);
-
-/* Built-in method references that are verified to be native. */
-var Map = getNative(root, 'Map');
-
-module.exports = Map;
-
-
-/***/ }),
-
-/***/ 102:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getMapData = __webpack_require__(103);
-
-/**
- * Removes `key` and its value from the map.
- *
- * @private
- * @name delete
- * @memberOf MapCache
- * @param {string} key The key of the value to remove.
- * @returns {boolean} Returns `true` if the entry was removed, else `false`.
- */
-function mapCacheDelete(key) {
-  var result = getMapData(this, key)['delete'](key);
-  this.size -= result ? 1 : 0;
-  return result;
-}
-
-module.exports = mapCacheDelete;
-
-
-/***/ }),
-
-/***/ 103:
-/***/ (function(module, exports, __webpack_require__) {
-
-var isKeyable = __webpack_require__(104);
-
-/**
- * Gets the data for `map`.
- *
- * @private
- * @param {Object} map The map to query.
- * @param {string} key The reference key.
- * @returns {*} Returns the map data.
- */
-function getMapData(map, key) {
-  var data = map.__data__;
-  return isKeyable(key)
-    ? data[typeof key == 'string' ? 'string' : 'hash']
-    : data.map;
-}
-
-module.exports = getMapData;
-
-
-/***/ }),
-
-/***/ 104:
-/***/ (function(module, exports) {
-
-/**
- * Checks if `value` is suitable for use as unique object key.
- *
- * @private
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is suitable, else `false`.
- */
-function isKeyable(value) {
-  var type = typeof value;
-  return (type == 'string' || type == 'number' || type == 'symbol' || type == 'boolean')
-    ? (value !== '__proto__')
-    : (value === null);
-}
-
-module.exports = isKeyable;
-
-
-/***/ }),
-
 /***/ 1043:
 /***/ (function(module, exports) {
 
@@ -307,81 +188,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 /***/ (function(module, exports) {
 
 module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 14 5\" version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\"><desc>Created with Sketch.</desc><defs></defs><g id=\"Symbols\" stroke=\"none\" stroke-width=\"1\" fill=\"none\" fill-rule=\"evenodd\" stroke-linecap=\"square\"><g id=\"outline\" transform=\"translate(0.000000, -2.000000)\" stroke=\"#DDE1E5\"><path d=\"M1.25,2.25 L1.25,2.75\" id=\"Line\" transform=\"translate(1.250000, 2.500000) rotate(90.000000) translate(-1.250000, -2.500000) \"></path><path d=\"M1.25,4.25 L1.25,4.75\" id=\"Line\" transform=\"translate(1.250000, 4.500000) rotate(90.000000) translate(-1.250000, -4.500000) \"></path><path d=\"M8.5,-3.5 L8.5,6.5\" id=\"Line\" transform=\"translate(8.000000, 2.000000) rotate(90.000000) translate(-8.000000, -2.000000) \"></path><path d=\"M8.5,-0.5 L8.5,9.5\" id=\"Line\" transform=\"translate(8.500000, 4.500000) rotate(90.000000) translate(-8.500000, -4.500000) \"></path><path d=\"M1.25,6.25 L1.25,6.75\" id=\"Line\" transform=\"translate(1.250000, 6.500000) rotate(90.000000) translate(-1.250000, -6.500000) \"></path><path d=\"M8.5,1.5 L8.5,11.5\" id=\"Line\" transform=\"translate(8.500000, 6.500000) rotate(90.000000) translate(-8.500000, -6.500000) \"></path></g></g></svg>"
-
-/***/ }),
-
-/***/ 105:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getMapData = __webpack_require__(103);
-
-/**
- * Gets the map value for `key`.
- *
- * @private
- * @name get
- * @memberOf MapCache
- * @param {string} key The key of the value to get.
- * @returns {*} Returns the entry value.
- */
-function mapCacheGet(key) {
-  return getMapData(this, key).get(key);
-}
-
-module.exports = mapCacheGet;
-
-
-/***/ }),
-
-/***/ 106:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getMapData = __webpack_require__(103);
-
-/**
- * Checks if a map value for `key` exists.
- *
- * @private
- * @name has
- * @memberOf MapCache
- * @param {string} key The key of the entry to check.
- * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
- */
-function mapCacheHas(key) {
-  return getMapData(this, key).has(key);
-}
-
-module.exports = mapCacheHas;
-
-
-/***/ }),
-
-/***/ 107:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getMapData = __webpack_require__(103);
-
-/**
- * Sets the map `key` to `value`.
- *
- * @private
- * @name set
- * @memberOf MapCache
- * @param {string} key The key of the value to set.
- * @param {*} value The value to set.
- * @returns {Object} Returns the map cache instance.
- */
-function mapCacheSet(key, value) {
-  var data = getMapData(this, key),
-      size = data.size;
-
-  data.set(key, value);
-  this.size += data.size == size ? 0 : 1;
-  return this;
-}
-
-module.exports = mapCacheSet;
-
 
 /***/ }),
 
@@ -521,34 +327,6 @@ module.exports = arrayMap;
 
 /***/ }),
 
-/***/ 111:
-/***/ (function(module, exports, __webpack_require__) {
-
-var isSymbol = __webpack_require__(72);
-
-/** Used as references for various `Number` constants. */
-var INFINITY = 1 / 0;
-
-/**
- * Converts `value` to a string key if it's not a string or symbol.
- *
- * @private
- * @param {*} value The value to inspect.
- * @returns {string|symbol} Returns the key.
- */
-function toKey(value) {
-  if (typeof value == 'string' || isSymbol(value)) {
-    return value;
-  }
-  var result = (value + '');
-  return (result == '0' && (1 / value) == -INFINITY) ? '-0' : result;
-}
-
-module.exports = toKey;
-
-
-/***/ }),
-
 /***/ 1117:
 /***/ (function(module, exports) {
 
@@ -570,462 +348,10 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 112:
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseSet = __webpack_require__(113);
-
-/**
- * Sets the value at `path` of `object`. If a portion of `path` doesn't exist,
- * it's created. Arrays are created for missing index properties while objects
- * are created for all other missing properties. Use `_.setWith` to customize
- * `path` creation.
- *
- * **Note:** This method mutates `object`.
- *
- * @static
- * @memberOf _
- * @since 3.7.0
- * @category Object
- * @param {Object} object The object to modify.
- * @param {Array|string} path The path of the property to set.
- * @param {*} value The value to set.
- * @returns {Object} Returns `object`.
- * @example
- *
- * var object = { 'a': [{ 'b': { 'c': 3 } }] };
- *
- * _.set(object, 'a[0].b.c', 4);
- * console.log(object.a[0].b.c);
- * // => 4
- *
- * _.set(object, ['x', '0', 'y', 'z'], 5);
- * console.log(object.x[0].y.z);
- * // => 5
- */
-function set(object, path, value) {
-  return object == null ? object : baseSet(object, path, value);
-}
-
-module.exports = set;
-
-
-/***/ }),
-
-/***/ 113:
-/***/ (function(module, exports, __webpack_require__) {
-
-var assignValue = __webpack_require__(114),
-    castPath = __webpack_require__(69),
-    isIndex = __webpack_require__(117),
-    isObject = __webpack_require__(84),
-    toKey = __webpack_require__(111);
-
-/**
- * The base implementation of `_.set`.
- *
- * @private
- * @param {Object} object The object to modify.
- * @param {Array|string} path The path of the property to set.
- * @param {*} value The value to set.
- * @param {Function} [customizer] The function to customize path creation.
- * @returns {Object} Returns `object`.
- */
-function baseSet(object, path, value, customizer) {
-  if (!isObject(object)) {
-    return object;
-  }
-  path = castPath(path, object);
-
-  var index = -1,
-      length = path.length,
-      lastIndex = length - 1,
-      nested = object;
-
-  while (nested != null && ++index < length) {
-    var key = toKey(path[index]),
-        newValue = value;
-
-    if (index != lastIndex) {
-      var objValue = nested[key];
-      newValue = customizer ? customizer(objValue, key, nested) : undefined;
-      if (newValue === undefined) {
-        newValue = isObject(objValue)
-          ? objValue
-          : (isIndex(path[index + 1]) ? [] : {});
-      }
-    }
-    assignValue(nested, key, newValue);
-    nested = nested[key];
-  }
-  return object;
-}
-
-module.exports = baseSet;
-
-
-/***/ }),
-
-/***/ 114:
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseAssignValue = __webpack_require__(115),
-    eq = __webpack_require__(97);
-
-/** Used for built-in method references. */
-var objectProto = Object.prototype;
-
-/** Used to check objects for own properties. */
-var hasOwnProperty = objectProto.hasOwnProperty;
-
-/**
- * Assigns `value` to `key` of `object` if the existing value is not equivalent
- * using [`SameValueZero`](http://ecma-international.org/ecma-262/7.0/#sec-samevaluezero)
- * for equality comparisons.
- *
- * @private
- * @param {Object} object The object to modify.
- * @param {string} key The key of the property to assign.
- * @param {*} value The value to assign.
- */
-function assignValue(object, key, value) {
-  var objValue = object[key];
-  if (!(hasOwnProperty.call(object, key) && eq(objValue, value)) ||
-      (value === undefined && !(key in object))) {
-    baseAssignValue(object, key, value);
-  }
-}
-
-module.exports = assignValue;
-
-
-/***/ }),
-
-/***/ 115:
-/***/ (function(module, exports, __webpack_require__) {
-
-var defineProperty = __webpack_require__(116);
-
-/**
- * The base implementation of `assignValue` and `assignMergeValue` without
- * value checks.
- *
- * @private
- * @param {Object} object The object to modify.
- * @param {string} key The key of the property to assign.
- * @param {*} value The value to assign.
- */
-function baseAssignValue(object, key, value) {
-  if (key == '__proto__' && defineProperty) {
-    defineProperty(object, key, {
-      'configurable': true,
-      'enumerable': true,
-      'value': value,
-      'writable': true
-    });
-  } else {
-    object[key] = value;
-  }
-}
-
-module.exports = baseAssignValue;
-
-
-/***/ }),
-
-/***/ 116:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getNative = __webpack_require__(81);
-
-var defineProperty = (function() {
-  try {
-    var func = getNative(Object, 'defineProperty');
-    func({}, '', {});
-    return func;
-  } catch (e) {}
-}());
-
-module.exports = defineProperty;
-
-
-/***/ }),
-
-/***/ 117:
-/***/ (function(module, exports) {
-
-/** Used as references for various `Number` constants. */
-var MAX_SAFE_INTEGER = 9007199254740991;
-
-/** Used to detect unsigned integer values. */
-var reIsUint = /^(?:0|[1-9]\d*)$/;
-
-/**
- * Checks if `value` is a valid array-like index.
- *
- * @private
- * @param {*} value The value to check.
- * @param {number} [length=MAX_SAFE_INTEGER] The upper bounds of a valid index.
- * @returns {boolean} Returns `true` if `value` is a valid index, else `false`.
- */
-function isIndex(value, length) {
-  var type = typeof value;
-  length = length == null ? MAX_SAFE_INTEGER : length;
-
-  return !!length &&
-    (type == 'number' ||
-      (type != 'symbol' && reIsUint.test(value))) &&
-        (value > -1 && value % 1 == 0 && value < length);
-}
-
-module.exports = isIndex;
-
-
-/***/ }),
-
 /***/ 1174:
 /***/ (function(module, exports) {
 
 module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:cc=\"http://creativecommons.org/ns#\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:svg=\"http://www.w3.org/2000/svg\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 400 400\" xml:space=\"preserve\" id=\"svg2\" version=\"1.1\"><metadata id=\"metadata8\"><rdf:RDF><cc:Work rdf:about><dc:format>image/svg+xml</dc:format><dc:type rdf:resource=\"http://purl.org/dc/dcmitype/StillImage\"></dc></cc:Work></rdf:RDF></metadata><defs id=\"defs6\"></defs><g transform=\"matrix(1.3333333,0,0,-1.3333333,0,400)\" id=\"g10\"><g transform=\"translate(178.0626,235.0086)\" id=\"g12\"><path id=\"path14\" style=\"fill:#41b883;fill-opacity:1;fill-rule:nonzero;stroke:none\" d=\"M 0,0 -22.669,-39.264 -45.338,0 h -75.491 L -22.669,-170.017 75.491,0 Z\"></path></g><g transform=\"translate(178.0626,235.0086)\" id=\"g16\"><path id=\"path18\" style=\"fill:#34495e;fill-opacity:1;fill-rule:nonzero;stroke:none\" d=\"M 0,0 -22.669,-39.264 -45.338,0 H -81.565 L -22.669,-102.01 36.227,0 Z\"></path></g></g></svg>"
-
-/***/ }),
-
-/***/ 118:
-/***/ (function(module, exports) {
-
-
-
-/***/ }),
-
-/***/ 119:
-/***/ (function(module, exports, __webpack_require__) {
-
-/* WEBPACK VAR INJECTION */(function(process) {// Copyright Joyent, Inc. and other Node contributors.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to permit
-// persons to whom the Software is furnished to do so, subject to the
-// following conditions:
-//
-// The above copyright notice and this permission notice shall be included
-// in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-// USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-// resolves . and .. elements in a path array with directory names there
-// must be no slashes, empty elements, or device names (c:\) in the array
-// (so also no leading and trailing slashes - it does not distinguish
-// relative and absolute paths)
-function normalizeArray(parts, allowAboveRoot) {
-  // if the path tries to go above the root, `up` ends up > 0
-  var up = 0;
-  for (var i = parts.length - 1; i >= 0; i--) {
-    var last = parts[i];
-    if (last === '.') {
-      parts.splice(i, 1);
-    } else if (last === '..') {
-      parts.splice(i, 1);
-      up++;
-    } else if (up) {
-      parts.splice(i, 1);
-      up--;
-    }
-  }
-
-  // if the path is allowed to go above the root, restore leading ..s
-  if (allowAboveRoot) {
-    for (; up--; up) {
-      parts.unshift('..');
-    }
-  }
-
-  return parts;
-}
-
-// Split a filename into [root, dir, basename, ext], unix version
-// 'root' is just a slash, or nothing.
-var splitPathRe =
-    /^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;
-var splitPath = function(filename) {
-  return splitPathRe.exec(filename).slice(1);
-};
-
-// path.resolve([from ...], to)
-// posix version
-exports.resolve = function() {
-  var resolvedPath = '',
-      resolvedAbsolute = false;
-
-  for (var i = arguments.length - 1; i >= -1 && !resolvedAbsolute; i--) {
-    var path = (i >= 0) ? arguments[i] : process.cwd();
-
-    // Skip empty and invalid entries
-    if (typeof path !== 'string') {
-      throw new TypeError('Arguments to path.resolve must be strings');
-    } else if (!path) {
-      continue;
-    }
-
-    resolvedPath = path + '/' + resolvedPath;
-    resolvedAbsolute = path.charAt(0) === '/';
-  }
-
-  // At this point the path should be resolved to a full absolute path, but
-  // handle relative paths to be safe (might happen when process.cwd() fails)
-
-  // Normalize the path
-  resolvedPath = normalizeArray(filter(resolvedPath.split('/'), function(p) {
-    return !!p;
-  }), !resolvedAbsolute).join('/');
-
-  return ((resolvedAbsolute ? '/' : '') + resolvedPath) || '.';
-};
-
-// path.normalize(path)
-// posix version
-exports.normalize = function(path) {
-  var isAbsolute = exports.isAbsolute(path),
-      trailingSlash = substr(path, -1) === '/';
-
-  // Normalize the path
-  path = normalizeArray(filter(path.split('/'), function(p) {
-    return !!p;
-  }), !isAbsolute).join('/');
-
-  if (!path && !isAbsolute) {
-    path = '.';
-  }
-  if (path && trailingSlash) {
-    path += '/';
-  }
-
-  return (isAbsolute ? '/' : '') + path;
-};
-
-// posix version
-exports.isAbsolute = function(path) {
-  return path.charAt(0) === '/';
-};
-
-// posix version
-exports.join = function() {
-  var paths = Array.prototype.slice.call(arguments, 0);
-  return exports.normalize(filter(paths, function(p, index) {
-    if (typeof p !== 'string') {
-      throw new TypeError('Arguments to path.join must be strings');
-    }
-    return p;
-  }).join('/'));
-};
-
-
-// path.relative(from, to)
-// posix version
-exports.relative = function(from, to) {
-  from = exports.resolve(from).substr(1);
-  to = exports.resolve(to).substr(1);
-
-  function trim(arr) {
-    var start = 0;
-    for (; start < arr.length; start++) {
-      if (arr[start] !== '') break;
-    }
-
-    var end = arr.length - 1;
-    for (; end >= 0; end--) {
-      if (arr[end] !== '') break;
-    }
-
-    if (start > end) return [];
-    return arr.slice(start, end - start + 1);
-  }
-
-  var fromParts = trim(from.split('/'));
-  var toParts = trim(to.split('/'));
-
-  var length = Math.min(fromParts.length, toParts.length);
-  var samePartsLength = length;
-  for (var i = 0; i < length; i++) {
-    if (fromParts[i] !== toParts[i]) {
-      samePartsLength = i;
-      break;
-    }
-  }
-
-  var outputParts = [];
-  for (var i = samePartsLength; i < fromParts.length; i++) {
-    outputParts.push('..');
-  }
-
-  outputParts = outputParts.concat(toParts.slice(samePartsLength));
-
-  return outputParts.join('/');
-};
-
-exports.sep = '/';
-exports.delimiter = ':';
-
-exports.dirname = function(path) {
-  var result = splitPath(path),
-      root = result[0],
-      dir = result[1];
-
-  if (!root && !dir) {
-    // No dirname whatsoever
-    return '.';
-  }
-
-  if (dir) {
-    // It has a dirname, strip trailing slash
-    dir = dir.substr(0, dir.length - 1);
-  }
-
-  return root + dir;
-};
-
-
-exports.basename = function(path, ext) {
-  var f = splitPath(path)[2];
-  // TODO: make this comparison case-insensitive on windows?
-  if (ext && f.substr(-1 * ext.length) === ext) {
-    f = f.substr(0, f.length - ext.length);
-  }
-  return f;
-};
-
-
-exports.extname = function(path) {
-  return splitPath(path)[3];
-};
-
-function filter (xs, f) {
-    if (xs.filter) return xs.filter(f);
-    var res = [];
-    for (var i = 0; i < xs.length; i++) {
-        if (f(xs[i], i, xs)) res.push(xs[i]);
-    }
-    return res;
-}
-
-// String.prototype.substr - negative index don't work in IE8
-var substr = 'ab'.substr(-1) === 'b'
-    ? function (str, start, len) { return str.substr(start, len) }
-    : function (str, start, len) {
-        if (start < 0) start = str.length + start;
-        return str.substr(start, len);
-    }
-;
-
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(120)))
 
 /***/ }),
 
@@ -1573,20 +899,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 1324:
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-
-/***/ 1325:
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-
 /***/ 1326:
 /***/ (function(module, exports) {
 
@@ -1609,13 +921,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 /***/ }),
 
 /***/ 1329:
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-
-/***/ 1330:
 /***/ (function(module, exports) {
 
 // removed by extract-text-webpack-plugin
@@ -1741,439 +1046,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 1353:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const validProtocols = /^(http|https|ftp|data|resource|chrome):/i;
-const tokenSplitRegex = /(\s|\'|\"|\\)+/;
-const ELLIPSIS = "\u2026";
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Returns true if the given object is a grip (see RDP protocol)
- */
-function isGrip(object) {
-  return object && object.actor;
-}
-
-function escapeNewLines(value) {
-  return value.replace(/\r/gm, "\\r").replace(/\n/gm, "\\n");
-}
-
-// Map from character code to the corresponding escape sequence.  \0
-// isn't here because it would require special treatment in some
-// situations.  \b, \f, and \v aren't here because they aren't very
-// common.  \' isn't here because there's no need, we only
-// double-quote strings.
-const escapeMap = {
-  // Tab.
-  9: "\\t",
-  // Newline.
-  0xa: "\\n",
-  // Carriage return.
-  0xd: "\\r",
-  // Quote.
-  0x22: "\\\"",
-  // Backslash.
-  0x5c: "\\\\"
-};
-
-// Regexp that matches any character we might possibly want to escape.
-// Note that we over-match here, because it's difficult to, say, match
-// an unpaired surrogate with a regexp.  The details are worked out by
-// the replacement function; see |escapeString|.
-const escapeRegexp = new RegExp("[" +
-// Quote and backslash.
-"\"\\\\" +
-// Controls.
-"\x00-\x1f" +
-// More controls.
-"\x7f-\x9f" +
-// BOM
-"\ufeff" +
-// Specials, except for the replacement character.
-"\ufff0-\ufffc\ufffe\uffff" +
-// Surrogates.
-"\ud800-\udfff" +
-// Mathematical invisibles.
-"\u2061-\u2064" +
-// Line and paragraph separators.
-"\u2028-\u2029" +
-// Private use area.
-"\ue000-\uf8ff" + "]", "g");
-
-/**
- * Escape a string so that the result is viewable and valid JS.
- * Control characters, other invisibles, invalid characters,
- * backslash, and double quotes are escaped.  The resulting string is
- * surrounded by double quotes.
- *
- * @param {String} str
- *        the input
- * @param {Boolean} escapeWhitespace
- *        if true, TAB, CR, and NL characters will be escaped
- * @return {String} the escaped string
- */
-function escapeString(str, escapeWhitespace) {
-  return "\"" + str.replace(escapeRegexp, (match, offset) => {
-    let c = match.charCodeAt(0);
-    if (c in escapeMap) {
-      if (!escapeWhitespace && (c === 9 || c === 0xa || c === 0xd)) {
-        return match[0];
-      }
-      return escapeMap[c];
-    }
-    if (c >= 0xd800 && c <= 0xdfff) {
-      // Find the full code point containing the surrogate, with a
-      // special case for a trailing surrogate at the start of the
-      // string.
-      if (c >= 0xdc00 && offset > 0) {
-        --offset;
-      }
-      let codePoint = str.codePointAt(offset);
-      if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
-        // Unpaired surrogate.
-        return "\\u" + codePoint.toString(16);
-      } else if (codePoint >= 0xf0000 && codePoint <= 0x10fffd) {
-        // Private use area.  Because we visit each pair of a such a
-        // character, return the empty string for one half and the
-        // real result for the other, to avoid duplication.
-        if (c <= 0xdbff) {
-          return "\\u{" + codePoint.toString(16) + "}";
-        }
-        return "";
-      }
-      // Other surrogate characters are passed through.
-      return match;
-    }
-    return "\\u" + ("0000" + c.toString(16)).substr(-4);
-  }) + "\"";
-}
-
-/**
- * Escape a property name, if needed.  "Escaping" in this context
- * means surrounding the property name with quotes.
- *
- * @param {String}
- *        name the property name
- * @return {String} either the input, or the input surrounded by
- *                  quotes, properly quoted in JS syntax.
- */
-function maybeEscapePropertyName(name) {
-  // Quote the property name if it needs quoting.  This particular
-  // test is an approximation; see
-  // https://mathiasbynens.be/notes/javascript-properties.  However,
-  // the full solution requires a fair amount of Unicode data, and so
-  // let's defer that until either it's important, or the \p regexp
-  // syntax lands, see
-  // https://github.com/tc39/proposal-regexp-unicode-property-escapes.
-  if (!/^\w+$/.test(name)) {
-    name = escapeString(name);
-  }
-  return name;
-}
-
-function cropMultipleLines(text, limit) {
-  return escapeNewLines(cropString(text, limit));
-}
-
-function rawCropString(text, limit, alternativeText = ELLIPSIS) {
-  // Crop the string only if a limit is actually specified.
-  if (!limit || limit <= 0) {
-    return text;
-  }
-
-  // Set the limit at least to the length of the alternative text
-  // plus one character of the original text.
-  if (limit <= alternativeText.length) {
-    limit = alternativeText.length + 1;
-  }
-
-  let halfLimit = (limit - alternativeText.length) / 2;
-
-  if (text.length > limit) {
-    return text.substr(0, Math.ceil(halfLimit)) + alternativeText + text.substr(text.length - Math.floor(halfLimit));
-  }
-
-  return text;
-}
-
-function cropString(text, limit, alternativeText) {
-  return rawCropString(sanitizeString(text + ""), limit, alternativeText);
-}
-
-function sanitizeString(text) {
-  // Replace all non-printable characters, except of
-  // (horizontal) tab (HT: \x09) and newline (LF: \x0A, CR: \x0D),
-  // with unicode replacement character (u+fffd).
-  // eslint-disable-next-line no-control-regex
-  let re = new RegExp("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]", "g");
-  return text.replace(re, "\ufffd");
-}
-
-function parseURLParams(url) {
-  url = new URL(url);
-  return parseURLEncodedText(url.searchParams);
-}
-
-function parseURLEncodedText(text) {
-  let params = [];
-
-  // In case the text is empty just return the empty parameters
-  if (text == "") {
-    return params;
-  }
-
-  let searchParams = new URLSearchParams(text);
-  let entries = [...searchParams.entries()];
-  return entries.map(entry => {
-    return {
-      name: entry[0],
-      value: entry[1]
-    };
-  });
-}
-
-function getFileName(url) {
-  let split = splitURLBase(url);
-  return split.name;
-}
-
-function splitURLBase(url) {
-  if (!isDataURL(url)) {
-    return splitURLTrue(url);
-  }
-  return {};
-}
-
-function getURLDisplayString(url) {
-  return cropString(url);
-}
-
-function isDataURL(url) {
-  return url && url.substr(0, 5) == "data:";
-}
-
-function splitURLTrue(url) {
-  const reSplitFile = /(.*?):\/{2,3}([^\/]*)(.*?)([^\/]*?)($|\?.*)/;
-  let m = reSplitFile.exec(url);
-
-  if (!m) {
-    return {
-      name: url,
-      path: url
-    };
-  } else if (m[4] == "" && m[5] == "") {
-    return {
-      protocol: m[1],
-      domain: m[2],
-      path: m[3],
-      name: m[3] != "/" ? m[3] : m[2]
-    };
-  }
-
-  return {
-    protocol: m[1],
-    domain: m[2],
-    path: m[2] + m[3],
-    name: m[4] + m[5]
-  };
-}
-
-/**
- * Wrap the provided render() method of a rep in a try/catch block that will render a
- * fallback rep if the render fails.
- */
-function wrapRender(renderMethod) {
-  const wrappedFunction = function (props) {
-    try {
-      return renderMethod.call(this, props);
-    } catch (e) {
-      console.error(e);
-      return span({
-        className: "objectBox objectBox-failure",
-        title: "This object could not be rendered, " + "please file a bug on bugzilla.mozilla.org"
-      },
-      /* Labels have to be hardcoded for reps, see Bug 1317038. */
-      "Invalid object");
-    }
-  };
-  wrappedFunction.propTypes = renderMethod.propTypes;
-  return wrappedFunction;
-}
-
-/**
- * Get preview items from a Grip.
- *
- * @param {Object} Grip from which we want the preview items
- * @return {Array} Array of the preview items of the grip, or an empty array
- *                 if the grip does not have preview items
- */
-function getGripPreviewItems(grip) {
-  if (!grip) {
-    return [];
-  }
-
-  // Promise resolved value Grip
-  if (grip.promiseState && grip.promiseState.value) {
-    return [grip.promiseState.value];
-  }
-
-  // Array Grip
-  if (grip.preview && grip.preview.items) {
-    return grip.preview.items;
-  }
-
-  // Node Grip
-  if (grip.preview && grip.preview.childNodes) {
-    return grip.preview.childNodes;
-  }
-
-  // Set or Map Grip
-  if (grip.preview && grip.preview.entries) {
-    return grip.preview.entries.reduce((res, entry) => res.concat(entry), []);
-  }
-
-  // Event Grip
-  if (grip.preview && grip.preview.target) {
-    let keys = Object.keys(grip.preview.properties);
-    let values = Object.values(grip.preview.properties);
-    return [grip.preview.target, ...keys, ...values];
-  }
-
-  // RegEx Grip
-  if (grip.displayString) {
-    return [grip.displayString];
-  }
-
-  // Generic Grip
-  if (grip.preview && grip.preview.ownProperties) {
-    let propertiesValues = Object.values(grip.preview.ownProperties).map(property => property.value || property);
-
-    let propertyKeys = Object.keys(grip.preview.ownProperties);
-    propertiesValues = propertiesValues.concat(propertyKeys);
-
-    // ArrayBuffer Grip
-    if (grip.preview.safeGetterValues) {
-      propertiesValues = propertiesValues.concat(Object.values(grip.preview.safeGetterValues).map(property => property.getterValue || property));
-    }
-
-    return propertiesValues;
-  }
-
-  return [];
-}
-
-/**
- * Get the type of an object.
- *
- * @param {Object} Grip from which we want the type.
- * @param {boolean} noGrip true if the object is not a grip.
- * @return {boolean}
- */
-function getGripType(object, noGrip) {
-  if (noGrip || Object(object) !== object) {
-    return typeof object;
-  }
-  if (object.type === "object") {
-    return object.class;
-  }
-  return object.type;
-}
-
-/**
- * Determines whether a grip is a string containing a URL.
- *
- * @param string grip
- *        The grip, which may contain a URL.
- * @return boolean
- *         Whether the grip is a string containing a URL.
- */
-function containsURL(grip) {
-  if (typeof grip !== "string") {
-    return false;
-  }
-
-  let tokens = grip.split(tokenSplitRegex);
-  return tokens.some(isURL);
-}
-
-/**
- * Determines whether a string token is a valid URL.
- *
- * @param string token
- *        The token.
- * @return boolean
- *         Whenther the token is a URL.
- */
-function isURL(token) {
-  try {
-    if (!validProtocols.test(token)) {
-      return false;
-    }
-    new URL(token);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-/**
- * Returns a new array in which `char` are interleaved between the original items.
- *
- * @param {Array} items
- * @param {String} char
- * @returns Array
- */
-function interleave(items, char) {
-  return items.reduce((res, item, index) => {
-    if (index !== items.length - 1) {
-      return res.concat(item, char);
-    }
-    return res.concat(item);
-  }, []);
-}
-
-const ellipsisElement = span({
-  key: "more",
-  className: "more-ellipsis",
-  title: `more${ELLIPSIS}`
-}, ELLIPSIS);
-
-module.exports = {
-  interleave,
-  isGrip,
-  isURL,
-  cropString,
-  containsURL,
-  rawCropString,
-  sanitizeString,
-  escapeString,
-  wrapRender,
-  cropMultipleLines,
-  parseURLParams,
-  parseURLEncodedText,
-  getFileName,
-  getURLDisplayString,
-  maybeEscapePropertyName,
-  getGripPreviewItems,
-  getGripType,
-  tokenSplitRegex,
-  ellipsisElement,
-  ELLIPSIS
-};
-
-/***/ }),
-
 /***/ 1354:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -2262,18 +1134,6 @@ exports.default = _extends({}, navigation, breakpoints, expressions, eventListen
 
 /***/ }),
 
-/***/ 1355:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const feature = __webpack_require__(1461);
-
-module.exports = feature;
-
-/***/ }),
-
 /***/ 1356:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -2283,7 +1143,7 @@ module.exports = feature;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.isMinified = undefined;
+exports.sourceTypes = exports.isMinified = undefined;
 
 var _isMinified = __webpack_require__(1778);
 
@@ -2309,14 +1169,25 @@ exports.getSourceLineCount = getSourceLineCount;
 exports.getMode = getMode;
 exports.isLoaded = isLoaded;
 exports.isLoading = isLoading;
+exports.getTextAtPosition = getTextAtPosition;
+exports.getSourceClassnames = getSourceClassnames;
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _utils = __webpack_require__(1366);
 
 var _path = __webpack_require__(1393);
 
 var _url = __webpack_require__(334);
+
+var _sourcesTree = __webpack_require__(1442);
+
+const sourceTypes = exports.sourceTypes = {
+  coffee: "coffeescript",
+  js: "javascript",
+  jsx: "react",
+  ts: "typescript"
+};
 
 /**
  * Trims the query part or reference identifier of a url string, if necessary.
@@ -2340,7 +1211,7 @@ function shouldPrettyPrint(source) {
   }
   const _isPretty = isPretty(source);
   const _isJavaScript = isJavaScript(source);
-  const isOriginal = (0, _devtoolsSourceMap.isOriginalId)(source.get("id"));
+  const isOriginal = (0, _devtoolsSourceMap.isOriginalId)(source.id);
   const hasSourceMap = source.get("sourceMapURL");
 
   if (_isPretty || isOriginal || hasSourceMap || !_isJavaScript) {
@@ -2361,8 +1232,8 @@ function shouldPrettyPrint(source) {
  * @static
  */
 function isJavaScript(source) {
-  const url = source.get("url");
-  const contentType = source.get("contentType");
+  const url = source.url;
+  const contentType = source.contentType;
   return url && /\.(jsm|js)?$/.test(trimUrlQuery(url)) || !!(contentType && contentType.includes("javascript"));
 }
 
@@ -2371,7 +1242,7 @@ function isJavaScript(source) {
  * @static
  */
 function isPretty(source) {
-  const url = source.get("url");
+  const url = source.url;
   return isPrettyURL(url);
 }
 
@@ -2380,7 +1251,7 @@ function isPrettyURL(url) {
 }
 
 function isThirdParty(source) {
-  const url = source.get("url");
+  const url = source.url;
   if (!source || !url) {
     return false;
   }
@@ -2592,25 +1463,29 @@ function isLoading(source) {
   return source.get("loadedState") === "loading";
 }
 
-/***/ }),
-
-/***/ 1357:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-module.exports = {
-  MODE: {
-    TINY: Symbol("TINY"),
-    SHORT: Symbol("SHORT"),
-    LONG: Symbol("LONG")
+function getTextAtPosition(source, location) {
+  if (!source || !source.text) {
+    return "";
   }
-};
+
+  const line = location.line;
+  const column = location.column || 0;
+
+  const lineText = source.text.split("\n")[line - 1];
+  if (!lineText) {
+    return "";
+  }
+
+  return lineText.slice(column, column + 100).trim();
+}
+
+function getSourceClassnames(source) {
+  if (source && source.isBlackBoxed) {
+    return "blackBox";
+  }
+
+  return sourceTypes[(0, _sourcesTree.getExtension)(source)] || "file";
+}
 
 /***/ }),
 
@@ -2687,6 +1562,9 @@ Object.keys(_createEditor).forEach(function (key) {
     }
   });
 });
+exports.setEditor = setEditor;
+exports.getEditor = getEditor;
+exports.removeEditor = removeEditor;
 exports.shouldShowPrettyPrint = shouldShowPrettyPrint;
 exports.shouldShowFooter = shouldShowFooter;
 exports.traverseResults = traverseResults;
@@ -2695,7 +1573,6 @@ exports.toEditorPosition = toEditorPosition;
 exports.toEditorRange = toEditorRange;
 exports.toSourceLine = toSourceLine;
 exports.scrollToColumn = scrollToColumn;
-exports.toSourceLocation = toSourceLocation;
 exports.markText = markText;
 exports.lineAtHeight = lineAtHeight;
 exports.getSourceLocationFromMouseEvent = getSourceLocationFromMouseEvent;
@@ -2709,7 +1586,21 @@ var _source = __webpack_require__(1356);
 
 var _wasm = __webpack_require__(1401);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
+
+let editor;
+
+function setEditor(_editor) {
+  editor = _editor;
+}
+
+function getEditor() {
+  return editor;
+}
+
+function removeEditor() {
+  editor = null;
+}
 
 function shouldShowPrettyPrint(selectedSource) {
   if (!selectedSource) {
@@ -2796,24 +1687,17 @@ function isVisible(codeMirror, top, left) {
   return inXView && inYView;
 }
 
-function toSourceLocation(sourceId, location) {
-  return {
-    line: toSourceLine(sourceId, location.line),
-    column: (0, _wasm.isWasm)(sourceId) ? undefined : location.column
-  };
+function markText(_editor, className, { start, end }) {
+  return _editor.codeMirror.markText({ ch: start.column, line: start.line }, { ch: end.column, line: end.line }, { className });
 }
 
-function markText(editor, className, { start, end }) {
-  return editor.codeMirror.markText({ ch: start.column, line: start.line }, { ch: end.column, line: end.line }, { className });
+function lineAtHeight(_editor, sourceId, event) {
+  const _editorLine = _editor.codeMirror.lineAtHeight(event.clientY);
+  return toSourceLine(sourceId, _editorLine);
 }
 
-function lineAtHeight(editor, sourceId, event) {
-  const editorLine = editor.codeMirror.lineAtHeight(event.clientY);
-  return toSourceLine(sourceId, editorLine);
-}
-
-function getSourceLocationFromMouseEvent(editor, selectedLocation, e) {
-  const { line, ch } = editor.codeMirror.coordsChar({
+function getSourceLocationFromMouseEvent(_editor, selectedLocation, e) {
+  const { line, ch } = _editor.codeMirror.coordsChar({
     left: e.clientX,
     top: e.clientY
   });
@@ -2878,52 +1762,6 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  */
 
 exports.default = _Svg2.default;
-
-/***/ }),
-
-/***/ 1360:
-/***/ (function(module, exports, __webpack_require__) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const {
-  originalToGeneratedId,
-  generatedToOriginalId,
-  isGeneratedId,
-  isOriginalId
-} = __webpack_require__(1389);
-
-const { workerUtils: { WorkerDispatcher } } = __webpack_require__(1363);
-
-const dispatcher = new WorkerDispatcher();
-
-const getOriginalURLs = dispatcher.task("getOriginalURLs");
-const getGeneratedLocation = dispatcher.task("getGeneratedLocation");
-const getOriginalLocation = dispatcher.task("getOriginalLocation");
-const getLocationScopes = dispatcher.task("getLocationScopes");
-const getOriginalSourceText = dispatcher.task("getOriginalSourceText");
-const applySourceMap = dispatcher.task("applySourceMap");
-const clearSourceMaps = dispatcher.task("clearSourceMaps");
-const hasMappedSource = dispatcher.task("hasMappedSource");
-
-module.exports = {
-  originalToGeneratedId,
-  generatedToOriginalId,
-  isGeneratedId,
-  isOriginalId,
-  hasMappedSource,
-  getOriginalURLs,
-  getGeneratedLocation,
-  getOriginalLocation,
-  getLocationScopes,
-  getOriginalSourceText,
-  applySourceMap,
-  clearSourceMaps,
-  startSourceMapWorker: dispatcher.start.bind(dispatcher),
-  stopSourceMapWorker: dispatcher.stop.bind(dispatcher)
-};
 
 /***/ }),
 
@@ -3001,7 +1839,16 @@ module.exports = {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.findScopeByName = exports.getASTLocation = undefined;
+exports.findScopeByName = exports.getASTLocation = exports.createEditor = undefined;
+
+var _createEditor = __webpack_require__(3628);
+
+Object.defineProperty(exports, "createEditor", {
+  enumerable: true,
+  get: function () {
+    return _createEditor.createEditor;
+  }
+});
 
 var _astBreakpointLocation = __webpack_require__(1416);
 
@@ -3127,7 +1974,9 @@ function createBreakpoint(location, overrides = {}) {
     hidden,
     generatedLocation,
     astLocation,
-    id
+    id,
+    text,
+    originalText
   } = overrides;
 
   const defaultASTLocation = { name: undefined, offset: location };
@@ -3137,10 +1986,11 @@ function createBreakpoint(location, overrides = {}) {
     disabled: disabled || false,
     hidden: hidden || false,
     loading: false,
-    text: "",
     astLocation: astLocation || defaultASTLocation,
     generatedLocation: generatedLocation || location,
-    location
+    location,
+    text,
+    originalText
   };
 
   return properties;
@@ -3177,7 +2027,7 @@ function createPendingBreakpoint(bp) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.replaceOriginalVariableName = exports.getPausePoints = exports.getFramework = exports.mapOriginalExpression = exports.hasSyntaxError = exports.clearSources = exports.setSource = exports.hasSource = exports.isInvalidPauseLocation = exports.getNextStep = exports.clearASTs = exports.clearScopes = exports.clearSymbols = exports.findOutOfScopeLocations = exports.getScopes = exports.getSymbols = exports.getClosestExpression = exports.stopParserWorker = exports.startParserWorker = undefined;
+exports.replaceOriginalVariableName = exports.getPausePoints = exports.getFramework = exports.mapOriginalExpression = exports.hasSyntaxError = exports.clearSources = exports.setSource = exports.hasSource = exports.getNextStep = exports.clearASTs = exports.clearScopes = exports.clearSymbols = exports.findOutOfScopeLocations = exports.getScopes = exports.getSymbols = exports.getClosestExpression = exports.stop = exports.start = undefined;
 
 var _devtoolsUtils = __webpack_require__(1363);
 
@@ -3186,8 +2036,8 @@ const { WorkerDispatcher } = _devtoolsUtils.workerUtils; /* This Source Code For
                                                           * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const dispatcher = new WorkerDispatcher();
-const startParserWorker = exports.startParserWorker = dispatcher.start.bind(dispatcher);
-const stopParserWorker = exports.stopParserWorker = dispatcher.stop.bind(dispatcher);
+const start = exports.start = dispatcher.start.bind(dispatcher);
+const stop = exports.stop = dispatcher.stop.bind(dispatcher);
 
 const getClosestExpression = exports.getClosestExpression = dispatcher.task("getClosestExpression");
 const getSymbols = exports.getSymbols = dispatcher.task("getSymbols");
@@ -3197,7 +2047,6 @@ const clearSymbols = exports.clearSymbols = dispatcher.task("clearSymbols");
 const clearScopes = exports.clearScopes = dispatcher.task("clearScopes");
 const clearASTs = exports.clearASTs = dispatcher.task("clearASTs");
 const getNextStep = exports.getNextStep = dispatcher.task("getNextStep");
-const isInvalidPauseLocation = exports.isInvalidPauseLocation = dispatcher.task("isInvalidPauseLocation");
 const hasSource = exports.hasSource = dispatcher.task("hasSource");
 const setSource = exports.setSource = dispatcher.task("setSource");
 const clearSources = exports.clearSources = dispatcher.task("clearSources");
@@ -3325,53 +2174,81 @@ WorkerDispatcher.prototype = {
     this.worker = null;
   },
 
-  task(method) {
-    return (...args) => {
+  task(method, { queue = false } = {}) {
+    const calls = [];
+    const push = args => {
       return new Promise((resolve, reject) => {
-        const id = this.msgId++;
-        this.worker.postMessage({ id, method, args });
+        if (queue && calls.length === 0) {
+          Promise.resolve().then(flush);
+        }
 
-        const listener = ({ data: result }) => {
-          if (result.id !== id) {
-            return;
-          }
+        calls.push([args, resolve, reject]);
 
-          if (!this.worker) {
-            return;
-          }
-
-          this.worker.removeEventListener("message", listener);
-          if (result.error) {
-            reject(result.error);
-          } else {
-            resolve(result.response);
-          }
-        };
-
-        this.worker.addEventListener("message", listener);
+        if (!queue) {
+          flush();
+        }
       });
     };
+
+    const flush = () => {
+      const items = calls.slice();
+      calls.length = 0;
+
+      const id = this.msgId++;
+      this.worker.postMessage({ id, method, calls: items.map(item => item[0]) });
+
+      const listener = ({ data: result }) => {
+        if (result.id !== id) {
+          return;
+        }
+
+        if (!this.worker) {
+          return;
+        }
+
+        this.worker.removeEventListener("message", listener);
+
+        result.results.forEach((resultData, i) => {
+          const [, resolve, reject] = items[i];
+
+          if (resultData.error) {
+            reject(resultData.error);
+          } else {
+            resolve(resultData.response);
+          }
+        });
+      };
+
+      this.worker.addEventListener("message", listener);
+    };
+
+    return (...args) => push(args);
   }
 };
 
 function workerHandler(publicInterface) {
   return function (msg) {
-    const { id, method, args } = msg.data;
-    try {
-      const response = publicInterface[method].apply(undefined, args);
-      if (response instanceof Promise) {
-        response.then(val => self.postMessage({ id, response: val }),
-        // Error can't be sent via postMessage, so be sure to
-        // convert to string.
-        err => self.postMessage({ id, error: err.toString() }));
-      } else {
-        self.postMessage({ id, response });
+    const { id, method, calls } = msg.data;
+
+    Promise.all(calls.map(args => {
+      try {
+        const response = publicInterface[method].apply(undefined, args);
+        if (response instanceof Promise) {
+          return response.then(val => ({ response: val }),
+          // Error can't be sent via postMessage, so be sure to
+          // convert to string.
+          err => ({ error: err.toString() }));
+        } else {
+          return { response };
+        }
+      } catch (error) {
+        // Error can't be sent via postMessage, so be sure to convert to
+        // string.
+        return { error: error.toString() };
       }
-    } catch (error) {
-      // Error can't be sent via postMessage, so be sure to convert to
-      // string.
-      self.postMessage({ id, error: error.toString() });
-    }
+    })).then(results => {
+      self.postMessage({ id, results });
+    });
   };
 }
 
@@ -3480,7 +2357,7 @@ var _makeRecord2 = _interopRequireDefault(_makeRecord);
 
 var _source = __webpack_require__(1356);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _prefs = __webpack_require__(226);
 
@@ -3581,7 +2458,7 @@ function update(state = initialSourcesState(), action) {
     case "BLACKBOX":
       if (action.status === "done") {
         const url = action.source.url;
-        const isBlackBoxed = action.value.isBlackBoxed;
+        const { isBlackBoxed } = action.value;
         updateBlackBoxList(url, isBlackBoxed);
         return state.setIn(["sources", action.source.id, "isBlackBoxed"], isBlackBoxed);
       }
@@ -3632,7 +2509,7 @@ function updateSource(state, source) {
     return state;
   }
 
-  const existingSource = state.getIn(["sources", source.id]);
+  const existingSource = state.sources.get(source.id);
 
   if (existingSource) {
     const updatedSource = existingSource.merge(source);
@@ -3733,11 +2610,11 @@ function getNewSelectedSourceId(state, availableTabs) {
     return "";
   }
 
-  const tabUrls = state.sources.tabs.toJS();
+  const tabUrls = state.sources.tabs;
   const leftNeighborIndex = Math.max(tabUrls.indexOf(selectedTabUrl) - 1, 0);
   const lastAvailbleTabIndex = availableTabs.size - 1;
   const newSelectedTabIndex = Math.min(leftNeighborIndex, lastAvailbleTabIndex);
-  const availableTab = availableTabs.toJS()[newSelectedTabIndex];
+  const availableTab = availableTabs.get(newSelectedTabIndex);
   const tabSource = getSourceByUrlInSources(state.sources.sources, availableTab);
 
   if (tabSource) {
@@ -3885,7 +2762,8 @@ function isDirectory(url) {
 }
 
 function getExtension(source) {
-  const parsedUrl = (0, _url.parse)(source.get("url")).pathname;
+  const url = source.get ? source.get("url") : source.url;
+  const parsedUrl = (0, _url.parse)(url).pathname;
   if (!parsedUrl) {
     return "";
   }
@@ -3943,146 +2821,6 @@ function getRelativePath(url) {
 
 /***/ }),
 
-/***/ 1372:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-__webpack_require__(1324);
-
-// Load all existing rep templates
-const Undefined = __webpack_require__(1560);
-const Null = __webpack_require__(1561);
-const StringRep = __webpack_require__(1447);
-const Number = __webpack_require__(1563);
-const ArrayRep = __webpack_require__(1448);
-const Obj = __webpack_require__(1564);
-const SymbolRep = __webpack_require__(1565);
-const InfinityRep = __webpack_require__(1566);
-const NaNRep = __webpack_require__(1567);
-const Accessor = __webpack_require__(1568);
-
-// DOM types (grips)
-const Attribute = __webpack_require__(1569);
-const DateTime = __webpack_require__(1570);
-const Document = __webpack_require__(1571);
-const DocumentType = __webpack_require__(3614);
-const Event = __webpack_require__(1572);
-const Func = __webpack_require__(1573);
-const PromiseRep = __webpack_require__(1574);
-const RegExp = __webpack_require__(1575);
-const StyleSheet = __webpack_require__(1576);
-const CommentNode = __webpack_require__(1577);
-const ElementNode = __webpack_require__(1578);
-const TextNode = __webpack_require__(1579);
-const ErrorRep = __webpack_require__(1580);
-const Window = __webpack_require__(1581);
-const ObjectWithText = __webpack_require__(1582);
-const ObjectWithURL = __webpack_require__(1583);
-const GripArray = __webpack_require__(1450);
-const GripMap = __webpack_require__(1584);
-const GripMapEntry = __webpack_require__(1451);
-const Grip = __webpack_require__(1409);
-
-// List of all registered template.
-// XXX there should be a way for extensions to register a new
-// or modify an existing rep.
-let reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor];
-
-/**
- * Generic rep that is using for rendering native JS types or an object.
- * The right template used for rendering is picked automatically according
- * to the current value type. The value must be passed is as 'object'
- * property.
- */
-const Rep = function (props) {
-  let {
-    object,
-    defaultRep
-  } = props;
-  let rep = getRep(object, defaultRep, props.noGrip);
-  return rep(props);
-};
-
-// Helpers
-
-/**
- * Return a rep object that is responsible for rendering given
- * object.
- *
- * @param object {Object} Object to be rendered in the UI. This
- * can be generic JS object as well as a grip (handle to a remote
- * debuggee object).
- *
- * @param defaultObject {React.Component} The default template
- * that should be used to render given object if none is found.
- *
- * @param noGrip {Boolean} If true, will only check reps not made for remote objects.
- */
-function getRep(object, defaultRep = Obj, noGrip = false) {
-  for (let i = 0; i < reps.length; i++) {
-    let rep = reps[i];
-    try {
-      // supportsObject could return weight (not only true/false
-      // but a number), which would allow to priorities templates and
-      // support better extensibility.
-      if (rep.supportsObject(object, noGrip)) {
-        return rep.rep;
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  return defaultRep.rep;
-}
-
-module.exports = {
-  Rep,
-  REPS: {
-    Accessor,
-    ArrayRep,
-    Attribute,
-    CommentNode,
-    DateTime,
-    Document,
-    DocumentType,
-    ElementNode,
-    ErrorRep,
-    Event,
-    Func,
-    Grip,
-    GripArray,
-    GripMap,
-    GripMapEntry,
-    InfinityRep,
-    NaNRep,
-    Null,
-    Number,
-    Obj,
-    ObjectWithText,
-    ObjectWithURL,
-    PromiseRep,
-    RegExp,
-    Rep,
-    StringRep,
-    StyleSheet,
-    SymbolRep,
-    TextNode,
-    Undefined,
-    Window
-  },
-  // Exporting for tests
-  getRep
-};
-
-/***/ }),
-
 /***/ 1374:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -4107,7 +2845,7 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 function CloseButton({ handleClick, buttonClass, tooltip }) {
   return _react2.default.createElement(
-    "div",
+    "button",
     {
       className: buttonClass ? `close-btn ${buttonClass}` : "close-btn",
       onClick: handleClick,
@@ -4138,6 +2876,8 @@ const Services = __webpack_require__(22);
 const KeyShortcuts = __webpack_require__(1468);
 const { ZoomKeys } = __webpack_require__(1469);
 const EventEmitter = __webpack_require__(1382);
+const SourceUtils = __webpack_require__(3637);
+const { getUnicodeHostname, getUnicodeUrlPath, getUnicodeUrl } = __webpack_require__(3638);
 
 module.exports = {
   KeyShortcuts,
@@ -4146,7 +2886,11 @@ module.exports = {
   PrefsHelper,
   Services,
   ZoomKeys,
-  EventEmitter
+  EventEmitter,
+  SourceUtils,
+  getUnicodeHostname,
+  getUnicodeUrlPath,
+  getUnicodeUrl
 };
 
 /***/ }),
@@ -4188,7 +2932,7 @@ var _makeRecord = __webpack_require__(1361);
 
 var _makeRecord2 = _interopRequireDefault(_makeRecord);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _breakpoint = __webpack_require__(1364);
 
@@ -4268,7 +3012,8 @@ function addBreakpoint(state, action) {
 
   // when the action completes, we can commit the breakpoint
   if (action.status === "done") {
-    return syncBreakpoint(state, action.value);
+    const { value } = action;
+    return syncBreakpoint(state, value);
   }
 
   // Remove the optimistic update
@@ -4400,6 +3145,10 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
+var _Close = __webpack_require__(1374);
+
+var _Close2 = _interopRequireDefault(_Close);
+
 var _Svg = __webpack_require__(1359);
 
 var _Svg2 = _interopRequireDefault(_Svg);
@@ -4407,10 +3156,6 @@ var _Svg2 = _interopRequireDefault(_Svg);
 var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
-
-var _Close = __webpack_require__(1374);
-
-var _Close2 = _interopRequireDefault(_Close);
 
 __webpack_require__(1313);
 
@@ -4435,6 +3180,32 @@ const arrowBtn = (onClick, type, className, tooltip) => {
     * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class SearchInput extends _react.Component {
+
+  constructor(props) {
+    super(props);
+
+    this.onFocus = e => {
+      const { onFocus } = this.props;
+
+      this.setState({ inputFocused: true });
+      if (onFocus) {
+        onFocus(e);
+      }
+    };
+
+    this.onBlur = e => {
+      const { onBlur } = this.props;
+
+      this.setState({ inputFocused: false });
+      if (onBlur) {
+        onBlur(e);
+      }
+    };
+
+    this.state = {
+      inputFocused: false
+    };
+  }
 
   componentDidMount() {
     this.setFocus();
@@ -4489,9 +3260,7 @@ class SearchInput extends _react.Component {
     const {
       expanded,
       handleClose,
-      onBlur,
       onChange,
-      onFocus,
       onKeyDown,
       onKeyUp,
       placeholder,
@@ -4509,8 +3278,8 @@ class SearchInput extends _react.Component {
       onChange,
       onKeyDown,
       onKeyUp,
-      onFocus,
-      onBlur,
+      onFocus: e => this.onFocus(e),
+      onBlur: e => this.onBlur(e),
       "aria-autocomplete": "list",
       "aria-controls": "result-list",
       "aria-activedescendant": expanded && selectedItemId ? `${selectedItemId}-title` : "",
@@ -4523,21 +3292,29 @@ class SearchInput extends _react.Component {
     return _react2.default.createElement(
       "div",
       {
-        className: (0, _classnames2.default)("search-field", size),
-        role: "combobox",
-        "aria-haspopup": "listbox",
-        "aria-owns": "result-list",
-        "aria-expanded": expanded
+        className: (0, _classnames2.default)("search-shadow", {
+          focused: this.state.inputFocused
+        })
       },
-      this.renderSvg(),
-      _react2.default.createElement("input", inputProps),
-      summaryMsg && _react2.default.createElement(
+      _react2.default.createElement(
         "div",
-        { className: "summary" },
-        summaryMsg
-      ),
-      this.renderNav(),
-      _react2.default.createElement(_Close2.default, { handleClick: handleClose, buttonClass: size })
+        {
+          className: (0, _classnames2.default)("search-field", size),
+          role: "combobox",
+          "aria-haspopup": "listbox",
+          "aria-owns": "result-list",
+          "aria-expanded": expanded
+        },
+        this.renderSvg(),
+        _react2.default.createElement("input", inputProps),
+        summaryMsg && _react2.default.createElement(
+          "div",
+          { className: "summary" },
+          summaryMsg
+        ),
+        this.renderNav(),
+        _react2.default.createElement(_Close2.default, { handleClick: handleClose, buttonClass: size })
+      )
     );
   }
 }
@@ -4549,93 +3326,6 @@ SearchInput.defaultProps = {
   size: ""
 };
 exports.default = SearchInput;
-
-/***/ }),
-
-/***/ 1381:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-const {
-  maybeEscapePropertyName,
-  wrapRender
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-
-const { span } = __webpack_require__(1758);
-
-/**
- * Property for Obj (local JS objects), Grip (remote JS objects)
- * and GripMap (remote JS maps and weakmaps) reps.
- * It's used to render object properties.
- */
-PropRep.propTypes = {
-  // Property name.
-  name: PropTypes.oneOfType([PropTypes.string, PropTypes.object]).isRequired,
-  // Equal character rendered between property name and value.
-  equal: PropTypes.string,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func,
-  // Normally a PropRep will quote a property name that isn't valid
-  // when unquoted; but this flag can be used to suppress the
-  // quoting.
-  suppressQuotes: PropTypes.bool
-};
-
-/**
- * Function that given a name, a delimiter and an object returns an array
- * of React elements representing an object property (e.g. `name: value`)
- *
- * @param {Object} props
- * @return {Array} Array of React elements.
- */
-function PropRep(props) {
-  const Grip = __webpack_require__(1409);
-  const { Rep } = __webpack_require__(1372);
-
-  let {
-    name,
-    mode,
-    equal,
-    suppressQuotes
-  } = props;
-
-  let key;
-  // The key can be a simple string, for plain objects,
-  // or another object for maps and weakmaps.
-  if (typeof name === "string") {
-    if (!suppressQuotes) {
-      name = maybeEscapePropertyName(name);
-    }
-    key = span({ "className": "nodeName" }, name);
-  } else {
-    key = Rep({
-      ...props,
-      className: "nodeName",
-      object: name,
-      mode: mode || MODE.TINY,
-      defaultRep: Grip
-    });
-  }
-
-  return [key, span({
-    "className": "objectEqual"
-  }, equal), Rep({ ...props })];
-}
-
-// Exports from this module
-module.exports = wrapRender(PropRep);
 
 /***/ }),
 
@@ -4797,9 +3487,12 @@ exports.isSymbolsLoading = isSymbolsLoading;
 exports.isEmptyLineInSource = isEmptyLineInSource;
 exports.getEmptyLines = getEmptyLines;
 exports.getPausePoints = getPausePoints;
+exports.getPausePoint = getPausePoint;
+exports.hasPausePoints = hasPausePoints;
 exports.getOutOfScopeLocations = getOutOfScopeLocations;
 exports.getPreview = getPreview;
 exports.getSourceMetaData = getSourceMetaData;
+exports.hasSourceMetaData = hasSourceMetaData;
 exports.getInScopeLines = getInScopeLines;
 exports.isLineInScope = isLineInScope;
 
@@ -4833,11 +3526,13 @@ function update(state = initialASTState(), action) {
   switch (action.type) {
     case "SET_SYMBOLS":
       {
-        const { source } = action;
+        const { sourceId } = action;
         if (action.status === "start") {
-          return state.setIn(["symbols", source.id], { loading: true });
+          return state.setIn(["symbols", sourceId], { loading: true });
         }
-        return state.setIn(["symbols", source.id], action.value);
+
+        const value = action.value;
+        return state.setIn(["symbols", sourceId], value);
       }
 
     case "SET_PAUSE_POINTS":
@@ -4907,7 +3602,7 @@ function getSymbols(state, source) {
     return null;
   }
 
-  return state.ast.getIn(["symbols", source.id]) || null;
+  return state.ast.symbols.get(source.id) || null;
 }
 
 function hasSymbols(state, source) {
@@ -4917,7 +3612,7 @@ function hasSymbols(state, source) {
     return false;
   }
 
-  return !symbols.loading;
+  return !symbols.hasOwnProperty("loading");
 }
 
 function isSymbolsLoading(state, source) {
@@ -4926,7 +3621,7 @@ function isSymbolsLoading(state, source) {
     return false;
   }
 
-  return !!symbols.loading;
+  return symbols.hasOwnProperty("loading");
 }
 
 function isEmptyLineInSource(state, line, selectedSource) {
@@ -4939,15 +3634,31 @@ function getEmptyLines(state, source) {
     return null;
   }
 
-  return state.ast.getIn(["emptyLines", source.id]);
+  return state.ast.emptyLines.get(source.id);
 }
 
-function getPausePoints(state, source) {
-  if (!source) {
-    return null;
+function getPausePoints(state, sourceId) {
+  return state.ast.pausePoints.get(sourceId);
+}
+
+function getPausePoint(state, location) {
+  if (!location) {
+    return;
   }
 
-  return state.ast.getIn(["pausePoints", source.id]);
+  const { column, line, sourceId } = location;
+  const pausePoints = getPausePoints(state, sourceId);
+  if (!pausePoints) {
+    return;
+  }
+
+  const linePoints = pausePoints[line];
+  return linePoints && linePoints[column];
+}
+
+function hasPausePoints(state, sourceId) {
+  const pausePoints = getPausePoints(state, sourceId);
+  return !!pausePoints;
 }
 
 function getOutOfScopeLocations(state) {
@@ -4960,7 +3671,11 @@ function getPreview(state) {
 
 const emptySourceMetaData = {};
 function getSourceMetaData(state, sourceId) {
-  return state.ast.getIn(["sourceMetaData", sourceId]) || emptySourceMetaData;
+  return state.ast.sourceMetaData.get(sourceId) || emptySourceMetaData;
+}
+
+function hasSourceMetaData(state, sourceId) {
+  return state.ast.hasIn(["sourceMetaData", sourceId]);
 }
 
 function getInScopeLines(state) {
@@ -4987,10 +3702,10 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.default = assert;
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
 function assert(condition, message) {
-  if ((0, _devtoolsConfig.isDevelopment)() && !condition) {
+  if ((0, _devtoolsEnvironment.isDevelopment)() && !condition) {
     throw new Error(`Assertion failure: ${message}`);
   }
 } /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -5080,6 +3795,14 @@ function showSource(sourceId) {
   return ({ dispatch, getState }) => {
     const source = (0, _selectors.getSource)(getState(), sourceId);
 
+    if ((0, _selectors.getPaneCollapse)(getState(), "start")) {
+      dispatch({
+        type: "TOGGLE_PANE",
+        position: "start",
+        paneCollapsed: false
+      });
+    }
+
     dispatch(setPrimaryPaneTab("sources"));
     dispatch({
       type: "SHOW_SOURCE",
@@ -5164,9 +3887,12 @@ function setProjectDirectoryRoot(newRoot) {
   return ({ dispatch, getState }) => {
     const curRoot = (0, _ui.getProjectDirectoryRoot)(getState());
     if (newRoot && curRoot) {
-      const temp = newRoot.split("/");
-      temp.splice(0, 2);
-      newRoot = `${curRoot}/${temp.join("/")}`;
+      const newRootArr = newRoot.replace(/\/+/g, "/").split("/");
+      const curRootArr = curRoot.replace(/^\//, "").replace(/\/+/g, "/").split("/");
+      if (newRootArr[0] !== curRootArr[0]) {
+        newRootArr.splice(0, 2);
+        newRoot = `${curRoot}/${newRootArr.join("/")}`;
+      }
     }
 
     dispatch({
@@ -5249,6 +3975,7 @@ exports.copyToTheClipboard = copyToTheClipboard;
  * Clipboard function taken from
  * https://dxr.mozilla.org/mozilla-central/source/devtools/shared/platform/content/clipboard.js
  */
+
 function copyToTheClipboard(string) {
   const doCopy = function (e) {
     e.clipboardData.setData("text/plain", string);
@@ -5259,87 +3986,6 @@ function copyToTheClipboard(string) {
   document.execCommand("copy", false, null);
   document.removeEventListener("copy", doCopy);
 }
-
-/***/ }),
-
-/***/ 1389:
-/***/ (function(module, exports, __webpack_require__) {
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const md5 = __webpack_require__(248);
-
-function originalToGeneratedId(originalId) {
-  const match = originalId.match(/(.*)\/originalSource/);
-  return match ? match[1] : "";
-}
-
-function generatedToOriginalId(generatedId, url) {
-  return `${generatedId}/originalSource-${md5(url)}`;
-}
-
-function isOriginalId(id) {
-  return !!id.match(/\/originalSource/);
-}
-
-function isGeneratedId(id) {
-  return !isOriginalId(id);
-}
-
-/**
- * Trims the query part or reference identifier of a URL string, if necessary.
- */
-function trimUrlQuery(url) {
-  let length = url.length;
-  let q1 = url.indexOf("?");
-  let q2 = url.indexOf("&");
-  let q3 = url.indexOf("#");
-  let q = Math.min(q1 != -1 ? q1 : length, q2 != -1 ? q2 : length, q3 != -1 ? q3 : length);
-
-  return url.slice(0, q);
-}
-
-// Map suffix to content type.
-const contentMap = {
-  "js": "text/javascript",
-  "jsm": "text/javascript",
-  "ts": "text/typescript",
-  "tsx": "text/typescript-jsx",
-  "jsx": "text/jsx",
-  "coffee": "text/coffeescript",
-  "elm": "text/elm",
-  "cljs": "text/x-clojure"
-};
-
-/**
- * Returns the content type for the specified URL.  If no specific
- * content type can be determined, "text/plain" is returned.
- *
- * @return String
- *         The content type.
- */
-function getContentType(url) {
-  url = trimUrlQuery(url);
-  let dot = url.lastIndexOf(".");
-  if (dot >= 0) {
-    let name = url.substring(dot + 1);
-    if (name in contentMap) {
-      return contentMap[name];
-    }
-  }
-  return "text/plain";
-}
-
-module.exports = {
-  originalToGeneratedId,
-  generatedToOriginalId,
-  isOriginalId,
-  isGeneratedId,
-  getContentType,
-  contentMapForTesting: contentMap
-};
 
 /***/ }),
 
@@ -5408,6 +4054,7 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
  */
 
 exports.getPauseReason = getPauseReason;
+exports.getPauseCommand = getPauseCommand;
 exports.isStepping = isStepping;
 exports.isPaused = isPaused;
 exports.getPreviousPauseFrameLocation = getPreviousPauseFrameLocation;
@@ -5415,8 +4062,9 @@ exports.isEvaluatingExpression = isEvaluatingExpression;
 exports.getPopupObjectProperties = getPopupObjectProperties;
 exports.getIsWaitingOnBreak = getIsWaitingOnBreak;
 exports.getShouldPauseOnExceptions = getShouldPauseOnExceptions;
-exports.getShouldIgnoreCaughtExceptions = getShouldIgnoreCaughtExceptions;
+exports.getShouldPauseOnCaughtExceptions = getShouldPauseOnCaughtExceptions;
 exports.getCanRewind = getCanRewind;
+exports.getExtra = getExtra;
 exports.getFrames = getFrames;
 exports.getGeneratedFrameScope = getGeneratedFrameScope;
 exports.getOriginalFrameScope = getOriginalFrameScope;
@@ -5427,17 +4075,19 @@ exports.getSelectedScopeMappings = getSelectedScopeMappings;
 exports.getSelectedFrameId = getSelectedFrameId;
 exports.getTopFrame = getTopFrame;
 exports.getDebuggeeUrl = getDebuggeeUrl;
+exports.getSkipPausing = getSkipPausing;
 exports.getChromeScopes = getChromeScopes;
 
 var _reselect = __webpack_require__(993);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _prefs = __webpack_require__(226);
 
 var _sources = __webpack_require__(1369);
 
 const createPauseState = exports.createPauseState = () => ({
+  extra: {},
   why: null,
   isWaitingOnBreak: false,
   frames: undefined,
@@ -5449,15 +4099,15 @@ const createPauseState = exports.createPauseState = () => ({
   },
   loadedObjects: {},
   shouldPauseOnExceptions: _prefs.prefs.pauseOnExceptions,
-  shouldIgnoreCaughtExceptions: _prefs.prefs.ignoreCaughtExceptions,
+  shouldPauseOnCaughtExceptions: _prefs.prefs.pauseOnCaughtExceptions,
   canRewind: false,
   debuggeeUrl: "",
-  command: "",
-  previousLocation: null
+  command: null,
+  previousLocation: null,
+  skipPausing: _prefs.prefs.skipPausing
 });
 
 const emptyPauseState = {
-  pause: null,
   frames: null,
   frameScopes: {
     generated: {},
@@ -5466,7 +4116,7 @@ const emptyPauseState = {
   },
   selectedFrameId: null,
   loadedObjects: {},
-  previousLocation: null
+  why: null
 };
 
 function update(state = createPauseState(), action) {
@@ -5494,6 +4144,11 @@ function update(state = createPauseState(), action) {
     case "MAP_FRAMES":
       {
         return _extends({}, state, { frames: action.frames });
+      }
+
+    case "ADD_EXTRA":
+      {
+        return _extends({}, state, { extra: action.extra });
       }
 
     case "ADD_SCOPES":
@@ -5566,14 +4221,17 @@ function update(state = createPauseState(), action) {
       });
 
     case "PAUSE_ON_EXCEPTIONS":
-      const { shouldPauseOnExceptions, shouldIgnoreCaughtExceptions } = action;
+      const { shouldPauseOnExceptions, shouldPauseOnCaughtExceptions } = action;
 
       _prefs.prefs.pauseOnExceptions = shouldPauseOnExceptions;
-      _prefs.prefs.ignoreCaughtExceptions = shouldIgnoreCaughtExceptions;
+      _prefs.prefs.pauseOnCaughtExceptions = shouldPauseOnCaughtExceptions;
+
+      // Preserving for the old debugger
+      _prefs.prefs.ignoreCaughtExceptions = !shouldPauseOnCaughtExceptions;
 
       return _extends({}, state, {
         shouldPauseOnExceptions,
-        shouldIgnoreCaughtExceptions
+        shouldPauseOnCaughtExceptions
       });
 
     case "COMMAND":
@@ -5581,21 +4239,27 @@ function update(state = createPauseState(), action) {
         return action.status === "start" ? _extends({}, state, emptyPauseState, {
           command: action.command,
           previousLocation: buildPreviousLocation(state, action)
-        }) : _extends({}, state, { command: "" });
+        }) : _extends({}, state, { command: null });
       }
 
     case "RESUME":
-      // We clear why on resume because we need it to decide if
-      // we shoul re-evaluate watch expressions.
-      return _extends({}, state, { why: null });
+      return _extends({}, state, emptyPauseState);
 
     case "EVALUATE_EXPRESSION":
       return _extends({}, state, {
-        command: action.status === "start" ? "expression" : ""
+        command: action.status === "start" ? "expression" : null
       });
 
     case "NAVIGATE":
       return _extends({}, state, emptyPauseState, { debuggeeUrl: action.url });
+
+    case "TOGGLE_SKIP_PAUSING":
+      {
+        const { skipPausing } = action;
+        _prefs.prefs.skipPausing = skipPausing;
+
+        return _extends({}, state, { skipPausing });
+      }
   }
 
   return state;
@@ -5638,8 +4302,12 @@ function getPauseReason(state) {
   return state.pause.why;
 }
 
+function getPauseCommand(state) {
+  return state.pause && state.pause.command;
+}
+
 function isStepping(state) {
-  return ["stepIn", "stepOver", "stepOut"].includes(state.pause.command);
+  return ["stepIn", "stepOver", "stepOut"].includes(getPauseCommand(state));
 }
 
 function isPaused(state) {
@@ -5666,12 +4334,16 @@ function getShouldPauseOnExceptions(state) {
   return state.pause.shouldPauseOnExceptions;
 }
 
-function getShouldIgnoreCaughtExceptions(state) {
-  return state.pause.shouldIgnoreCaughtExceptions;
+function getShouldPauseOnCaughtExceptions(state) {
+  return state.pause.shouldPauseOnCaughtExceptions;
 }
 
 function getCanRewind(state) {
   return state.pause.canRewind;
+}
+
+function getExtra(state) {
+  return state.pause.extra;
 }
 
 function getFrames(state) {
@@ -5745,6 +4417,10 @@ function getDebuggeeUrl(state) {
   return state.pause.debuggeeUrl;
 }
 
+function getSkipPausing(state) {
+  return state.pause.skipPausing;
+}
+
 // NOTE: currently only used for chrome
 function getChromeScopes(state) {
   const frame = getSelectedFrame(state);
@@ -5764,7 +4440,7 @@ exports.default = update;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.findSourceMatches = exports.searchSources = exports.getMatches = exports.stopSearchWorker = exports.startSearchWorker = undefined;
+exports.findSourceMatches = exports.getMatches = exports.stop = exports.start = undefined;
 
 var _devtoolsUtils = __webpack_require__(1363);
 
@@ -5773,11 +4449,10 @@ const { WorkerDispatcher } = _devtoolsUtils.workerUtils; /* This Source Code For
                                                           * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const dispatcher = new WorkerDispatcher();
-const startSearchWorker = exports.startSearchWorker = dispatcher.start.bind(dispatcher);
-const stopSearchWorker = exports.stopSearchWorker = dispatcher.stop.bind(dispatcher);
+const start = exports.start = dispatcher.start.bind(dispatcher);
+const stop = exports.stop = dispatcher.stop.bind(dispatcher);
 
 const getMatches = exports.getMatches = dispatcher.task("getMatches");
-const searchSources = exports.searchSources = dispatcher.task("searchSources");
 const findSourceMatches = exports.findSourceMatches = dispatcher.task("findSourceMatches");
 
 /***/ }),
@@ -5873,9 +4548,11 @@ function syncBreakpoint(sourceId, pendingBreakpoint) {
 function addBreakpoint(location, { condition, hidden } = {}) {
   const breakpoint = (0, _breakpoint.createBreakpoint)(location, { condition, hidden });
   return ({ dispatch, getState, sourceMaps, client }) => {
-    const action = { type: "ADD_BREAKPOINT", breakpoint };
-    const promise = (0, _addBreakpoint2.default)(getState, client, sourceMaps, action);
-    return dispatch(_extends({}, action, { [_promise.PROMISE]: promise }));
+    return dispatch({
+      type: "ADD_BREAKPOINT",
+      breakpoint,
+      [_promise.PROMISE]: (0, _addBreakpoint2.default)(getState, client, sourceMaps, breakpoint)
+    });
   };
 }
 
@@ -5919,6 +4596,7 @@ function removeBreakpoint(location) {
     return dispatch({
       type: "REMOVE_BREAKPOINT",
       breakpoint: bp,
+      disabled: false,
       [_promise.PROMISE]: client.removeBreakpoint(bp.generatedLocation)
     });
   };
@@ -5939,12 +4617,10 @@ function enableBreakpoint(location) {
       return;
     }
 
-    const action = { type: "ENABLE_BREAKPOINT", breakpoint };
-    const promise = (0, _addBreakpoint2.default)(getState, client, sourceMaps, action);
     return dispatch({
       type: "ENABLE_BREAKPOINT",
       breakpoint,
-      [_promise.PROMISE]: promise
+      [_promise.PROMISE]: (0, _addBreakpoint2.default)(getState, client, sourceMaps, breakpoint)
     });
   };
 }
@@ -5996,8 +4672,15 @@ function toggleAllBreakpoints(shouldDisableBreakpoints) {
       }
     }
 
+    if (shouldDisableBreakpoints) {
+      return dispatch({
+        type: "DISABLE_ALL_BREAKPOINTS",
+        breakpoints: modifiedBreakpoints
+      });
+    }
+
     return dispatch({
-      type: shouldDisableBreakpoints ? "DISABLE_ALL_BREAKPOINTS" : "ENABLE_ALL_BREAKPOINTS",
+      type: "ENABLE_ALL_BREAKPOINTS",
       breakpoints: modifiedBreakpoints
     });
   };
@@ -6112,7 +4795,7 @@ function toggleBreakpoint(line, column) {
     const state = getState();
     const selectedSource = (0, _selectors.getSelectedSource)(state);
     const bp = (0, _selectors.getBreakpointAtLocation)(state, { line, column });
-    const isEmptyLine = (0, _ast.isEmptyLineInSource)(state, line, selectedSource.toJS());
+    const isEmptyLine = (0, _ast.isEmptyLineInSource)(state, line, selectedSource);
 
     if (!bp && isEmptyLine || bp && bp.loading) {
       return;
@@ -6197,15 +4880,18 @@ async function getGeneratedLocation(state, source, location, sourceMaps) {
     return location;
   }
 
-  const { line, sourceId, column } = await sourceMaps.getGeneratedLocation(location, source);
+  const { line, sourceId, column } = await sourceMaps.getGeneratedLocation(location, source.toJS());
 
   const generatedSource = (0, _selectors.getSource)(state, sourceId);
-  const sourceUrl = generatedSource.get("url");
+  if (!generatedSource) {
+    return location;
+  }
+
   return {
     line,
     sourceId,
     column: column === 0 ? undefined : column,
-    sourceUrl
+    sourceUrl: generatedSource.url
   };
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6223,6 +4909,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.addExpression = addExpression;
+exports.autocomplete = autocomplete;
 exports.clearExpressionError = clearExpressionError;
 exports.updateExpression = updateExpression;
 exports.deleteExpression = deleteExpression;
@@ -6233,7 +4920,7 @@ var _selectors = __webpack_require__(3590);
 
 var _promise = __webpack_require__(1653);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _expressions = __webpack_require__(1437);
 
@@ -6275,13 +4962,24 @@ function addExpression(input) {
    * License, v. 2.0. If a copy of the MPL was not distributed with this
    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+function autocomplete(input, cursor) {
+  return async ({ dispatch, getState, client }) => {
+    if (!input) {
+      return;
+    }
+    const frameId = (0, _selectors.getSelectedFrameId)(getState());
+    const result = await client.autocomplete(input, cursor, frameId);
+    await dispatch({ type: "AUTOCOMPLETE", input, result });
+  };
+}
+
 function clearExpressionError() {
   return { type: "CLEAR_EXPRESSION_ERROR" };
 }
 
 function updateExpression(input, expression) {
   return async ({ dispatch, getState }) => {
-    if (!input || input == expression.input) {
+    if (!input) {
       return;
     }
 
@@ -6322,9 +5020,10 @@ function deleteExpression(expression) {
 function evaluateExpressions() {
   return async function ({ dispatch, getState, client }) {
     const expressions = (0, _selectors.getExpressions)(getState()).toJS();
-    for (const expression of expressions) {
-      await dispatch(evaluateExpression(expression));
-    }
+    const inputs = expressions.map(({ input }) => input);
+    const frameId = (0, _selectors.getSelectedFrameId)(getState());
+    const results = await client.evaluateExpressions(inputs, frameId);
+    dispatch({ type: "EVALUATE_EXPRESSIONS", inputs, results });
   };
 }
 
@@ -6339,14 +5038,14 @@ function evaluateExpression(expression) {
     const frame = (0, _selectors.getSelectedFrame)(getState());
 
     if (frame) {
-      const { location, generatedLocation } = frame;
+      const { location } = frame;
       const source = (0, _selectors.getSource)(getState(), location.sourceId);
       const sourceId = source.get("id");
 
       const selectedSource = (0, _selectors.getSelectedSource)(getState());
 
       if (selectedSource && !(0, _devtoolsSourceMap.isGeneratedId)(sourceId) && !(0, _devtoolsSourceMap.isGeneratedId)(selectedSource.get("id"))) {
-        input = await getMappedExpression({ getState, sourceMaps }, generatedLocation, input);
+        input = await dispatch(getMappedExpression(input));
       }
     }
 
@@ -6355,7 +5054,7 @@ function evaluateExpression(expression) {
     return dispatch({
       type: "EVALUATE_EXPRESSION",
       input: expression.input,
-      [_promise.PROMISE]: client.evaluate((0, _expressions.wrapExpression)(input), { frameId })
+      [_promise.PROMISE]: client.evaluateInFrame((0, _expressions.wrapExpression)(input), frameId)
     });
   };
 }
@@ -6364,13 +5063,15 @@ function evaluateExpression(expression) {
  * Gets information about original variable names from the source map
  * and replaces all posible generated names.
  */
-async function getMappedExpression({ getState, sourceMaps }, generatedLocation, expression) {
-  const mappings = (0, _selectors.getSelectedScopeMappings)(getState());
-  if (!mappings) {
-    return expression;
-  }
+function getMappedExpression(expression) {
+  return async function ({ dispatch, getState, client, sourceMaps }) {
+    const mappings = (0, _selectors.getSelectedScopeMappings)(getState());
+    if (!mappings) {
+      return expression;
+    }
 
-  return await parser.mapOriginalExpression(expression, mappings);
+    return parser.mapOriginalExpression(expression, mappings);
+  };
 }
 
 /***/ }),
@@ -6391,29 +5092,27 @@ exports.setPausePoints = setPausePoints;
 
 var _selectors = __webpack_require__(3590);
 
+var _pause = __webpack_require__(1639);
+
 var _setInScopeLines = __webpack_require__(1781);
 
 var _parser = __webpack_require__(1365);
 
 var _promise = __webpack_require__(1653);
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+var _devtoolsSourceMap = __webpack_require__(3646);
+
+var _prefs = __webpack_require__(226);
 
 function setSourceMetaData(sourceId) {
   return async ({ dispatch, getState }) => {
-    const sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
-    if (!sourceRecord) {
-      return;
-    }
-
-    const source = sourceRecord.toJS();
-    if (!source.text || source.isWasm) {
+    const source = (0, _selectors.getSource)(getState(), sourceId);
+    if (!source || !source.text || source.isWasm) {
       return;
     }
 
     const framework = await (0, _parser.getFramework)(source.id);
+
     dispatch({
       type: "SET_SOURCE_METADATA",
       sourceId: source.id,
@@ -6422,25 +5121,27 @@ function setSourceMetaData(sourceId) {
       }
     });
   };
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function setSymbols(sourceId) {
   return async ({ dispatch, getState }) => {
-    const sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
-    if (!sourceRecord) {
-      return;
-    }
-
-    const source = sourceRecord.toJS();
-    if (!source.text || source.isWasm || (0, _selectors.hasSymbols)(getState(), source)) {
+    const source = (0, _selectors.getSource)(getState(), sourceId);
+    if (!source || !source.text || source.isWasm || (0, _selectors.hasSymbols)(getState(), source)) {
       return;
     }
 
     await dispatch({
       type: "SET_SYMBOLS",
-      source,
-      [_promise.PROMISE]: (0, _parser.getSymbols)(source.id)
+      sourceId,
+      [_promise.PROMISE]: (0, _parser.getSymbols)(sourceId)
     });
+
+    if ((0, _selectors.isPaused)(getState())) {
+      await dispatch((0, _pause.fetchExtra)());
+      await dispatch((0, _pause.mapFrames)());
+    }
 
     await dispatch(setPausePoints(sourceId));
     await dispatch(setSourceMetaData(sourceId));
@@ -6465,27 +5166,26 @@ function setOutOfScopeLocations() {
       type: "OUT_OF_SCOPE_LOCATIONS",
       locations
     });
-
     dispatch((0, _setInScopeLines.setInScopeLines)());
   };
 }
 
 function setPausePoints(sourceId) {
-  return async ({ dispatch, getState }) => {
-    const sourceRecord = (0, _selectors.getSource)(getState(), sourceId);
-    if (!sourceRecord) {
-      return;
-    }
-
-    const source = sourceRecord.toJS();
-    if (!source.text || source.isWasm) {
+  return async ({ dispatch, getState, client }) => {
+    const source = (0, _selectors.getSource)(getState(), sourceId);
+    if (!_prefs.features.pausePoints || !source || !source.text || source.isWasm) {
       return;
     }
 
     const pausePoints = await (0, _parser.getPausePoints)(source.id);
+
+    if ((0, _devtoolsSourceMap.isGeneratedId)(source.id)) {
+      await client.setPausePoints(source.id, pausePoints);
+    }
+
     dispatch({
       type: "SET_PAUSE_POINTS",
-      source,
+      source: source.toJS(),
       pausePoints
     });
   };
@@ -6550,14 +5250,31 @@ var _WasmDis = __webpack_require__(678);
 
 var wasmStates = Object.create(null);
 
+function maybeWasmSectionNameResolver(data) {
+  try {
+    const parser = new _WasmParser.BinaryReader();
+    parser.setData(data.buffer, 0, data.length);
+    const reader = new _WasmDis.NameSectionReader();
+    reader.read(parser);
+    return reader.hasValidNames() ? reader.getNameResolver() : null;
+  } catch (ex) {
+    // Ignoring any errors during names section retrival.
+    return null;
+  }
+}
+
 /**
  * @memberof utils/wasm
  * @static
  */
 function getWasmText(sourceId, data) {
+  const nameResolver = maybeWasmSectionNameResolver(data);
   const parser = new _WasmParser.BinaryReader();
   parser.setData(data.buffer, 0, data.length);
   const dis = new _WasmDis.WasmDisassembler();
+  if (nameResolver) {
+    dis.nameResolver = nameResolver;
+  }
   dis.addOffsets = true;
   const done = dis.disassembleChunk(parser);
   let result = dis.getResult();
@@ -6766,7 +5483,7 @@ Object.defineProperty(exports, "__esModule", {
 exports.Modal = exports.transitionTimeout = undefined;
 exports.default = Slide;
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -6800,18 +5517,18 @@ class Modal extends _react2.default.Component {
   }
 
   render() {
-    const { status } = this.props;
+    const { additionalClass, children, handleClose, status } = this.props;
 
     return _react2.default.createElement(
       "div",
-      { className: "modal-wrapper", onClick: this.props.handleClose },
+      { className: "modal-wrapper", onClick: handleClose },
       _react2.default.createElement(
         "div",
         {
-          className: (0, _classnames2.default)("modal", this.props.additionalClass, status),
+          className: (0, _classnames2.default)("modal", additionalClass, status),
           onClick: this.onClick
         },
-        this.props.children
+        children
       )
     );
   }
@@ -6867,7 +5584,7 @@ __webpack_require__(1311);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-const { Tree } = __webpack_require__(1441);
+const { Tree } = __webpack_require__(3669);
 
 class ManagedTree extends _react.Component {
   constructor(props) {
@@ -7037,7 +5754,7 @@ function getURL(sourceUrl, debuggeeUrl = "") {
       // A Webpack source is a special case
       return (0, _lodash.merge)(def, {
         path: path,
-        group: "Webpack",
+        group: "webpack://",
         filename: filename
       });
 
@@ -7045,7 +5762,7 @@ function getURL(sourceUrl, debuggeeUrl = "") {
       // An Angular source is a special case
       return (0, _lodash.merge)(def, {
         path: path,
-        group: "Angular",
+        group: "ng://",
         filename: filename
       });
 
@@ -7113,7 +5830,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.scrollList = undefined;
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
 var _Modal = __webpack_require__(1403);
 
@@ -7129,7 +5846,7 @@ function scrollList(resultList, index, delayed = false) {
   const resultEl = resultList[index];
 
   const scroll = () => {
-    if ((0, _devtoolsConfig.isFirefox)()) {
+    if ((0, _devtoolsEnvironment.isFirefox)()) {
       resultEl.scrollIntoView({ block: "center", behavior: "smooth" });
     } else {
       chromeScrollList(resultEl, index);
@@ -7225,353 +5942,6 @@ exports.default = PaneToggleButton;
 
 /***/ }),
 
-/***/ 1408:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { MODE } = __webpack_require__(1357);
-const { REPS, getRep } = __webpack_require__(1372);
-const ObjectInspector = __webpack_require__(1585);
-const ObjectInspectorUtils = __webpack_require__(1938);
-
-const {
-  parseURLEncodedText,
-  parseURLParams,
-  maybeEscapePropertyName,
-  getGripPreviewItems
-} = __webpack_require__(1353);
-
-module.exports = {
-  REPS,
-  getRep,
-  MODE,
-  maybeEscapePropertyName,
-  parseURLEncodedText,
-  parseURLParams,
-  getGripPreviewItems,
-  ObjectInspector,
-  ObjectInspectorUtils
-};
-
-/***/ }),
-
-/***/ 1409:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Dependencies
-const {
-  interleave,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-const PropRep = __webpack_require__(1381);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders generic grip. Grip is client representation
- * of remote JS object and is used as an input object
- * for this rep component.
- */
-GripRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  isInterestingProp: PropTypes.func,
-  title: PropTypes.string,
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func,
-  noGrip: PropTypes.bool
-};
-
-const DEFAULT_TITLE = "Object";
-
-function GripRep(props) {
-  let {
-    mode = MODE.SHORT,
-    object
-  } = props;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-object"
-  };
-
-  if (mode === MODE.TINY) {
-    let propertiesLength = getPropertiesLength(object);
-
-    const tinyModeItems = [];
-    if (getTitle(props, object) !== DEFAULT_TITLE) {
-      tinyModeItems.push(getTitleElement(props, object));
-    } else {
-      tinyModeItems.push(span({
-        className: "objectLeftBrace"
-      }, "{"), propertiesLength > 0 ? span({
-        key: "more",
-        className: "more-ellipsis",
-        title: "more…"
-      }, "…") : null, span({
-        className: "objectRightBrace"
-      }, "}"));
-    }
-
-    return span(config, ...tinyModeItems);
-  }
-
-  let propsArray = safePropIterator(props, object, maxLengthMap.get(mode));
-
-  return span(config, getTitleElement(props, object), span({
-    className: "objectLeftBrace"
-  }, " { "), ...interleave(propsArray, ", "), span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitleElement(props, object) {
-  return span({
-    className: "objectTitle"
-  }, getTitle(props, object));
-}
-
-function getTitle(props, object) {
-  return props.title || object.class || DEFAULT_TITLE;
-}
-
-function getPropertiesLength(object) {
-  let propertiesLength = object.preview && object.preview.ownPropertiesLength ? object.preview.ownPropertiesLength : object.ownPropertyLength;
-
-  if (object.preview && object.preview.safeGetterValues) {
-    propertiesLength += Object.keys(object.preview.safeGetterValues).length;
-  }
-
-  if (object.preview && object.preview.ownSymbols) {
-    propertiesLength += object.preview.ownSymbolsLength;
-  }
-
-  return propertiesLength;
-}
-
-function safePropIterator(props, object, max) {
-  max = typeof max === "undefined" ? maxLengthMap.get(MODE.SHORT) : max;
-  try {
-    return propIterator(props, object, max);
-  } catch (err) {
-    console.error(err);
-  }
-  return [];
-}
-
-function propIterator(props, object, max) {
-  if (object.preview && Object.keys(object.preview).includes("wrappedValue")) {
-    const { Rep } = __webpack_require__(1372);
-
-    return [Rep({
-      object: object.preview.wrappedValue,
-      mode: props.mode || MODE.TINY,
-      defaultRep: Grip
-    })];
-  }
-
-  // Property filter. Show only interesting properties to the user.
-  let isInterestingProp = props.isInterestingProp || ((type, value) => {
-    return type == "boolean" || type == "number" || type == "string" && value.length != 0;
-  });
-
-  let properties = object.preview ? object.preview.ownProperties || {} : {};
-
-  let propertiesLength = getPropertiesLength(object);
-
-  if (object.preview && object.preview.safeGetterValues) {
-    properties = { ...properties, ...object.preview.safeGetterValues };
-  }
-
-  let indexes = getPropIndexes(properties, max, isInterestingProp);
-  if (indexes.length < max && indexes.length < propertiesLength) {
-    // There are not enough props yet. Then add uninteresting props to display them.
-    indexes = indexes.concat(getPropIndexes(properties, max - indexes.length, (t, value, name) => {
-      return !isInterestingProp(t, value, name);
-    }));
-  }
-
-  // The server synthesizes some property names for a Proxy, like
-  // <target> and <handler>; we don't want to quote these because,
-  // as synthetic properties, they appear more natural when
-  // unquoted.
-  const suppressQuotes = object.class === "Proxy";
-  let propsArray = getProps(props, properties, indexes, suppressQuotes);
-
-  // Show symbols.
-  if (object.preview && object.preview.ownSymbols) {
-    const { ownSymbols } = object.preview;
-    const length = max - indexes.length;
-
-    const symbolsProps = ownSymbols.slice(0, length).map(symbolItem => {
-      return PropRep({
-        ...props,
-        mode: MODE.TINY,
-        name: symbolItem,
-        object: symbolItem.descriptor.value,
-        equal: ": ",
-        defaultRep: Grip,
-        title: null,
-        suppressQuotes
-      });
-    });
-
-    propsArray.push(...symbolsProps);
-  }
-
-  if (Object.keys(properties).length > max || propertiesLength > max
-  // When the object has non-enumerable properties, we don't have them in the packet,
-  // but we might want to show there's something in the object.
-  || propertiesLength > propsArray.length) {
-    // There are some undisplayed props. Then display "more...".
-    propsArray.push(span({
-      key: "more",
-      className: "more-ellipsis",
-      title: "more…"
-    }, "…"));
-  }
-
-  return propsArray;
-}
-
-/**
- * Get props ordered by index.
- *
- * @param {Object} componentProps Grip Component props.
- * @param {Object} properties Properties of the object the Grip describes.
- * @param {Array} indexes Indexes of properties.
- * @param {Boolean} suppressQuotes true if we should suppress quotes
- *                  on property names.
- * @return {Array} Props.
- */
-function getProps(componentProps, properties, indexes, suppressQuotes) {
-  // Make indexes ordered by ascending.
-  indexes.sort(function (a, b) {
-    return a - b;
-  });
-
-  const propertiesKeys = Object.keys(properties);
-  return indexes.map(i => {
-    let name = propertiesKeys[i];
-    let value = getPropValue(properties[name]);
-
-    return PropRep({
-      ...componentProps,
-      mode: MODE.TINY,
-      name,
-      object: value,
-      equal: ": ",
-      defaultRep: Grip,
-      title: null,
-      suppressQuotes
-    });
-  });
-}
-
-/**
- * Get the indexes of props in the object.
- *
- * @param {Object} properties Props object.
- * @param {Number} max The maximum length of indexes array.
- * @param {Function} filter Filter the props you want.
- * @return {Array} Indexes of interesting props in the object.
- */
-function getPropIndexes(properties, max, filter) {
-  let indexes = [];
-
-  try {
-    let i = 0;
-    for (let name in properties) {
-      if (indexes.length >= max) {
-        return indexes;
-      }
-
-      // Type is specified in grip's "class" field and for primitive
-      // values use typeof.
-      let value = getPropValue(properties[name]);
-      let type = value.class || typeof value;
-      type = type.toLowerCase();
-
-      if (filter(type, value, name)) {
-        indexes.push(i);
-      }
-      i++;
-    }
-  } catch (err) {
-    console.error(err);
-  }
-  return indexes;
-}
-
-/**
- * Get the actual value of a property.
- *
- * @param {Object} property
- * @return {Object} Value of the property.
- */
-function getPropValue(property) {
-  let value = property;
-  if (typeof property === "object") {
-    let keys = Object.keys(property);
-    if (keys.includes("value")) {
-      value = property.value;
-    } else if (keys.includes("getterValue")) {
-      value = property.getterValue;
-    }
-  }
-  return value;
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  if (object.class === "DeadObject") {
-    return true;
-  }
-
-  return object.preview ? typeof object.preview.ownProperties !== "undefined" : typeof object.ownPropertyLength !== "undefined";
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Grip is used in propIterator and has to be defined here.
-let Grip = {
-  rep: wrapRender(GripRep),
-  supportsObject,
-  maxLengthMap
-};
-
-// Exports from this module
-module.exports = Grip;
-
-/***/ }),
-
 /***/ 1413:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -7582,7 +5952,7 @@ module.exports = Grip;
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { Menu, MenuItem } = __webpack_require__(1767);
+const { Menu, MenuItem } = __webpack_require__(1376);
 
 function inToolbox() {
   return window.parent.document.documentURI == "about:devtools-toolbox";
@@ -7728,51 +6098,23 @@ module.exports = {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.containsPosition = containsPosition;
-exports.findClosestScope = findClosestScope;
 exports.getASTLocation = getASTLocation;
 exports.findScopeByName = findScopeByName;
 
 var _parser = __webpack_require__(1365);
 
-function containsPosition(a, b) {
-  const startsBefore = a.start.line < b.line || a.start.line === b.line && a.start.column <= b.column;
-  const endsAfter = a.end.line > b.line || a.end.line === b.line && a.end.column >= b.column;
+var _ast = __webpack_require__(1638);
 
-  return startsBefore && endsAfter;
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-function findClosestScope(functions, location) {
-  return functions.reduce((found, currNode) => {
-    if (currNode.name === "anonymous" || !containsPosition(currNode.location, location)) {
-      return found;
-    }
-
-    if (!found) {
-      return currNode;
-    }
-
-    if (found.location.start.line > currNode.location.start.line) {
-      return found;
-    }
-    if (found.location.start.line === currNode.location.start.line && found.location.start.column > currNode.location.start.column) {
-      return found;
-    }
-
-    return currNode;
-  }, null);
-}
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function getASTLocation(source, symbols, location) {
   if (source.isWasm || !symbols || symbols.loading) {
     return { name: undefined, offset: location };
   }
 
-  const functions = [...symbols.functions];
-
-  const scope = findClosestScope(functions, location);
+  const scope = (0, _ast.findClosestFunction)(symbols, location);
   if (scope) {
     // we only record the line, but at some point we may
     // also do column offsets
@@ -7803,8 +6145,9 @@ async function findScopeByName(source, name) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.getExpressionError = exports.getExpressions = exports.createExpressionState = undefined;
+exports.getExpressionError = exports.getAutocompleteMatches = exports.getExpressions = exports.createExpressionState = undefined;
 exports.getExpression = getExpression;
+exports.getAutocompleteMatchset = getAutocompleteMatchset;
 
 var _makeRecord = __webpack_require__(1361);
 
@@ -7822,7 +6165,8 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 const createExpressionState = exports.createExpressionState = (0, _makeRecord2.default)({
   expressions: (0, _immutable.List)(restoreExpressions()),
-  expressionError: false
+  expressionError: false,
+  autocompleteMatches: (0, _immutable.Map)({})
 }); /* This Source Code Form is subject to the terms of the Mozilla Public
      * License, v. 2.0. If a copy of the MPL was not distributed with this
      * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -7838,34 +6182,49 @@ function update(state = createExpressionState(), action) {
       if (action.expressionError) {
         return state.set("expressionError", !!action.expressionError);
       }
-      return appendToList(state, ["expressions"], {
+      return appendExpressionToList(state, {
         input: action.input,
         value: null,
         updating: true
       });
+
     case "UPDATE_EXPRESSION":
       const key = action.expression.input;
-      return updateItemInList(state, ["expressions"], key, {
+      return updateExpressionInList(state, key, {
         input: action.input,
         value: null,
         updating: true
       }).set("expressionError", !!action.expressionError);
+
     case "EVALUATE_EXPRESSION":
-      return updateItemInList(state, ["expressions"], action.input, {
+      return updateExpressionInList(state, action.input, {
         input: action.input,
         value: action.value,
         updating: false
       });
+
+    case "EVALUATE_EXPRESSIONS":
+      const { inputs, results } = action;
+
+      return (0, _lodash.zip)(inputs, results).reduce((newState, [input, result]) => updateExpressionInList(newState, input, {
+        input: input,
+        value: result,
+        updating: false
+      }), state);
+
     case "DELETE_EXPRESSION":
       return deleteExpression(state, action.input);
+
     case "CLEAR_EXPRESSION_ERROR":
       return state.set("expressionError", false);
 
     // respond to time travel
     case "TRAVEL_TO":
-      {
-        return travelTo(state, action);
-      }
+      return travelTo(state, action);
+
+    case "AUTOCOMPLETE":
+      const { matchProp, matches } = action.result;
+      return state.updateIn(["autocompleteMatches", matchProp], list => matches);
   }
 
   return state;
@@ -7876,7 +6235,7 @@ function travelTo(state, action) {
   if (!expressions) {
     return state;
   }
-  return expressions.reduce((finalState, previousState) => updateItemInList(finalState, ["expressions"], previousState.input, {
+  return expressions.reduce((finalState, previousState) => updateExpressionInList(finalState, previousState.input, {
     input: previousState.input,
     value: previousState.value,
     updating: false
@@ -7891,26 +6250,26 @@ function restoreExpressions() {
   return exprs;
 }
 
-function storeExpressions(state) {
-  const expressions = state.getIn(["expressions"]).map(expression => (0, _lodash.omit)(expression, "value")).toJS();
-
-  _prefs.prefs.expressions = expressions;
+function storeExpressions({ expressions }) {
+  _prefs.prefs.expressions = expressions.map(expression => (0, _lodash.omit)(expression, "value")).toJS();
 }
 
-function appendToList(state, path, value) {
-  const newState = state.updateIn(path, () => {
-    return state.getIn(path).push(value);
+function appendExpressionToList(state, value) {
+  const newState = state.update("expressions", () => {
+    return state.expressions.push(value);
   });
+
   storeExpressions(newState);
   return newState;
 }
 
-function updateItemInList(state, path, key, value) {
-  const newState = state.updateIn(path, () => {
-    const list = state.getIn(path);
+function updateExpressionInList(state, key, value) {
+  const newState = state.update("expressions", () => {
+    const list = state.expressions;
     const index = list.findIndex(e => e.input == key);
     return list.update(index, () => value);
   });
+
   storeExpressions(newState);
   return newState;
 }
@@ -7924,13 +6283,19 @@ function deleteExpression(state, input) {
 
 const getExpressionsWrapper = state => state.expressions;
 
-const getExpressions = exports.getExpressions = (0, _reselect.createSelector)(getExpressionsWrapper, expressions => expressions.get("expressions"));
+const getExpressions = exports.getExpressions = (0, _reselect.createSelector)(getExpressionsWrapper, expressions => expressions.expressions);
+
+const getAutocompleteMatches = exports.getAutocompleteMatches = (0, _reselect.createSelector)(getExpressionsWrapper, expressions => expressions.autocompleteMatches);
 
 function getExpression(state, input) {
   return getExpressions(state).find(exp => exp.input == input);
 }
 
-const getExpressionError = exports.getExpressionError = (0, _reselect.createSelector)(getExpressionsWrapper, expressions => expressions.get("expressionError"));
+function getAutocompleteMatchset(state, input) {
+  return getAutocompleteMatches(state).get(input);
+}
+
+const getExpressionError = exports.getExpressionError = (0, _reselect.createSelector)(getExpressionsWrapper, expressions => expressions.expressionError);
 
 exports.default = update;
 
@@ -8090,7 +6455,7 @@ function addBreakpoint(state, action) {
     return state;
   }
   // when the action completes, we can commit the breakpoint
-  const { value: { breakpoint } } = action;
+  const { breakpoint } = action.value;
   const locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
   const pendingBreakpoint = (0, _breakpoint.createPendingBreakpoint)(breakpoint);
 
@@ -8135,7 +6500,7 @@ function removeBreakpoint(state, action) {
   const { breakpoint } = action;
 
   const locationId = (0, _breakpoint.makePendingLocationId)(breakpoint.location);
-  const pendingBp = state.getIn(["pendingBreakpoints", locationId]);
+  const pendingBp = state.pendingBreakpoints.get(locationId);
 
   if (!pendingBp && action.status == "start") {
     return state.set("pendingBreakpoints", I.Map());
@@ -8176,7 +6541,7 @@ Object.defineProperty(exports, "__esModule", {
 exports.getEventListeners = getEventListeners;
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
  * Event listeners reducer
@@ -8461,7 +6826,7 @@ function update(state = createFileSearchState(), action) {
 
     case "TOGGLE_FILE_SEARCH_MODIFIER":
       {
-        const actionVal = !state.getIn(["modifiers", action.modifier]);
+        const actionVal = !state.modifiers[action.modifier];
 
         if (action.modifier == "caseSensitive") {
           _prefs.prefs.fileSearchCaseSensitive = actionVal;
@@ -8488,15 +6853,15 @@ function update(state = createFileSearchState(), action) {
 // NOTE: we'd like to have the app state fully typed
 // https://github.com/devtools-html/debugger.html/blob/master/src/reducers/sources.js#L179-L185
 function getFileSearchQuery(state) {
-  return state.fileSearch.get("query");
+  return state.fileSearch.query;
 }
 
 function getFileSearchModifiers(state) {
-  return state.fileSearch.get("modifiers");
+  return state.fileSearch.modifiers;
 }
 
 function getFileSearchResults(state) {
-  return state.fileSearch.get("searchResults");
+  return state.fileSearch.searchResults;
 }
 
 exports.default = update;
@@ -8736,7 +7101,7 @@ var _breakpoints = __webpack_require__(1378);
 
 var _sources = __webpack_require__(1369);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 function getLocation(breakpoint, isGeneratedSource) {
   return isGeneratedSource ? breakpoint.generatedLocation || breakpoint.location : breakpoint.location;
@@ -8765,6 +7130,7 @@ function isVisible(breakpoint, selectedSource) {
   const location = getLocation(breakpoint, isGeneratedSource);
   return location.sourceId === sourceId;
 }
+
 /*
  * Finds the breakpoints, which appear in the selected source.
  *
@@ -8871,64 +7237,6 @@ function createBreakpointLocation(location, actualLocation) {
 
 /***/ }),
 
-/***/ 1429:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.fromServerLocation = fromServerLocation;
-exports.toServerLocation = toServerLocation;
-exports.createFrame = createFrame;
-exports.createLoadedObject = createLoadedObject;
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-function fromServerLocation(serverLocation) {
-  if (serverLocation) {
-    return {
-      sourceId: serverLocation.scriptId,
-      line: serverLocation.lineNumber + 1,
-      column: serverLocation.columnNumber,
-      sourceUrl: ""
-    };
-  }
-}
-
-function toServerLocation(location) {
-  return {
-    scriptId: location.sourceId,
-    lineNumber: location.line - 1
-  };
-}
-
-function createFrame(frame) {
-  return {
-    id: frame.callFrameId,
-    displayName: frame.functionName,
-    scopeChain: frame.scopeChain,
-    generatedLocation: frame.location,
-    location: fromServerLocation(frame.location)
-  };
-}
-
-function createLoadedObject(serverObject, parentId) {
-  const { value, name } = serverObject;
-
-  return {
-    objectId: value.objectId,
-    parentId,
-    name,
-    value
-  };
-}
-
-/***/ }),
-
 /***/ 1430:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -8958,15 +7266,21 @@ var _reactDom = __webpack_require__(4);
 
 var _reactDom2 = _interopRequireDefault(_reactDom);
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _search = __webpack_require__(1395);
 
+var search = _interopRequireWildcard(_search);
+
 var _prettyPrint = __webpack_require__(1431);
 
+var prettyPrint = _interopRequireWildcard(_prettyPrint);
+
 var _parser = __webpack_require__(1365);
+
+var parser = _interopRequireWildcard(_parser);
 
 var _createStore = __webpack_require__(1658);
 
@@ -8995,8 +7309,11 @@ const { Provider } = __webpack_require__(3592);
 function renderPanel(component, store) {
   const root = document.createElement("div");
   root.className = "launchpad-root theme-body";
-  root.style.setProperty("flex", 1);
+  root.style.setProperty("flex", "1");
   const mount = document.querySelector("#mount");
+  if (!mount) {
+    return;
+  }
   mount.appendChild(root);
 
   _reactDom2.default.render(_react2.default.createElement(Provider, { store }, _react2.default.createElement(component)), root);
@@ -9004,8 +7321,8 @@ function renderPanel(component, store) {
 
 function bootstrapStore(client, { services, toolboxActions }) {
   const createStore = (0, _createStore2.default)({
-    log: (0, _devtoolsConfig.isTesting)() || (0, _devtoolsConfig.getValue)("logging.actions"),
-    timing: (0, _devtoolsConfig.isDevelopment)(),
+    log: (0, _devtoolsEnvironment.isTesting)(),
+    timing: (0, _devtoolsEnvironment.isDevelopment)(),
     makeThunkArgs: (args, state) => {
       return _extends({}, args, { client }, services, toolboxActions);
     }
@@ -9020,27 +7337,31 @@ function bootstrapStore(client, { services, toolboxActions }) {
 }
 
 function bootstrapWorkers() {
-  if (!(0, _devtoolsConfig.isFirefoxPanel)()) {
+  const workerPath = (0, _devtoolsEnvironment.isDevelopment)() ? "assets/build" : "resource://devtools/client/debugger/new";
+
+  if ((0, _devtoolsEnvironment.isDevelopment)()) {
     // When used in Firefox, the toolbox manages the source map worker.
-    (0, _devtoolsSourceMap.startSourceMapWorker)((0, _devtoolsConfig.getValue)("workers.sourceMapURL"));
+    (0, _devtoolsSourceMap.startSourceMapWorker)(`${workerPath}/source-map-worker.js`);
   }
-  (0, _prettyPrint.startPrettyPrintWorker)((0, _devtoolsConfig.getValue)("workers.prettyPrintURL"));
-  (0, _parser.startParserWorker)((0, _devtoolsConfig.getValue)("workers.parserURL"));
-  (0, _search.startSearchWorker)((0, _devtoolsConfig.getValue)("workers.searchURL"));
+
+  prettyPrint.start(`${workerPath}/pretty-print-worker.js`);
+  parser.start(`${workerPath}/parser-worker.js`);
+  search.start(`${workerPath}/search-worker.js`);
+  return { prettyPrint, parser, search };
 }
 
 function teardownWorkers() {
-  if (!(0, _devtoolsConfig.isFirefoxPanel)()) {
+  if (!(0, _devtoolsEnvironment.isFirefoxPanel)()) {
     // When used in Firefox, the toolbox manages the source map worker.
     (0, _devtoolsSourceMap.stopSourceMapWorker)();
   }
-  (0, _prettyPrint.stopPrettyPrintWorker)();
-  (0, _parser.stopParserWorker)();
-  (0, _search.stopSearchWorker)();
+  prettyPrint.stop();
+  parser.stop();
+  search.stop();
 }
 
 function bootstrapApp(store) {
-  if ((0, _devtoolsConfig.isFirefoxPanel)()) {
+  if ((0, _devtoolsEnvironment.isFirefoxPanel)()) {
     renderPanel(_App2.default, store);
   } else {
     const { renderRoot } = __webpack_require__(52);
@@ -9067,7 +7388,7 @@ function updatePrefs(state) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.stopPrettyPrintWorker = exports.startPrettyPrintWorker = undefined;
+exports.stop = exports.start = undefined;
 exports.prettyPrint = prettyPrint;
 
 var _devtoolsUtils = __webpack_require__(1363);
@@ -9085,8 +7406,8 @@ const { WorkerDispatcher } = _devtoolsUtils.workerUtils; /* This Source Code For
                                                           * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const dispatcher = new WorkerDispatcher();
-const startPrettyPrintWorker = exports.startPrettyPrintWorker = dispatcher.start.bind(dispatcher);
-const stopPrettyPrintWorker = exports.stopPrettyPrintWorker = dispatcher.stop.bind(dispatcher);
+const start = exports.start = dispatcher.start.bind(dispatcher);
+const stop = exports.stop = dispatcher.stop.bind(dispatcher);
 const _prettyPrint = dispatcher.task("prettyPrint");
 
 async function prettyPrint({ source, url }) {
@@ -9097,7 +7418,7 @@ async function prettyPrint({ source, url }) {
   return await _prettyPrint({
     url,
     indent,
-    sourceText: source.get("text")
+    sourceText: source.text
   });
 }
 
@@ -9160,7 +7481,7 @@ var _selectors = __webpack_require__(3590);
 
 var _source = __webpack_require__(1356);
 
-var _sources = __webpack_require__(1797);
+var _loadSourceText = __webpack_require__(1435);
 
 var _projectTextSearch = __webpack_require__(1424);
 
@@ -9201,10 +7522,10 @@ function searchSources(query) {
     await dispatch(addSearchQuery(query));
     dispatch(updateSearchStatus(_projectTextSearch.statusType.fetching));
     const sources = (0, _selectors.getSources)(getState());
-    const validSources = sources.valueSeq().filter(source => !(0, _selectors.hasPrettySource)(getState(), source.get("id")) && !(0, _source.isThirdParty)(source));
+    const validSources = sources.valueSeq().filter(source => !(0, _selectors.hasPrettySource)(getState(), source.id) && !(0, _source.isThirdParty)(source));
     for (const source of validSources) {
-      await dispatch((0, _sources.loadSourceText)(source));
-      await dispatch(searchSource(source.get("id"), query));
+      await dispatch((0, _loadSourceText.loadSourceText)(source));
+      await dispatch(searchSource(source.id, query));
     }
     dispatch(updateSearchStatus(_projectTextSearch.statusType.done));
   };
@@ -9224,8 +7545,8 @@ function searchSource(sourceId, query) {
     dispatch({
       type: "ADD_SEARCH_RESULT",
       result: {
-        sourceId: sourceRecord.get("id"),
-        filepath: sourceRecord.get("url"),
+        sourceId: sourceRecord.id,
+        filepath: sourceRecord.url,
         matches
       }
     });
@@ -9245,7 +7566,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.loadSourceText = loadSourceText;
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _promise = __webpack_require__(1653);
 
@@ -9561,6 +7882,14 @@ function wrapExpression(input) {
   `);
 }
 
+function isUnavailable(value) {
+  if (!value.preview || !value.preview.name) {
+    return false;
+  }
+
+  return ["ReferenceError", "TypeError"].includes(value.preview.name);
+}
+
 function getValue(expression) {
   const value = expression.value;
   if (!value) {
@@ -9571,6 +7900,9 @@ function getValue(expression) {
   }
 
   if (value.exception) {
+    if (isUnavailable(value.exception)) {
+      return { value: { unavailable: true } };
+    }
     return {
       path: value.from,
       value: value.exception
@@ -9586,8 +7918,11 @@ function getValue(expression) {
 
   if (value.result && value.result.class == "Error") {
     const { name, message } = value.result.preview;
-    const newValue = name === "ReferenceError" ? { unavailable: true } : `${name}: ${message}`;
+    if (isUnavailable(value.result)) {
+      return { value: { unavailable: true } };
+    }
 
+    const newValue = `${name}: ${message}`;
     return { path: value.input, value: newValue };
   }
 
@@ -9665,6 +8000,7 @@ exports.resizeToggleButton = resizeToggleButton;
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+
 /* Checks to see if the root element is available and
  * if the element is visible. We check the width of the element
  * because it is more reliable than either checking a focus state or
@@ -9716,26 +8052,6 @@ function resizeToggleButton(editor) {
 const SplitBox = __webpack_require__(1536);
 
 module.exports = SplitBox;
-
-/***/ }),
-
-/***/ 1441:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _tree = __webpack_require__(1541);
-
-var _tree2 = _interopRequireDefault(_tree);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-module.exports = {
-  Tree: _tree2.default
-}; /* This Source Code Form is subject to the terms of the Mozilla Public
-    * License, v. 2.0. If a copy of the MPL was not distributed with this
-    * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /***/ }),
 
@@ -9908,7 +8224,7 @@ function isUnderRoot(url, projectRoot) {
     return true;
   }
 
-  return `/${url.group}${url.path}`.startsWith(projectRoot);
+  return `${url.group}${url.path}`.startsWith(projectRoot);
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -9974,7 +8290,7 @@ function traverseTree(url, tree, debuggeeHost, projectRoot) {
 
   let path = "";
   return parts.reduce((subTree, part, index) => {
-    path = `${path}/${part}`;
+    path = path ? `${path}/${part}` : part;
     const debuggeeHostIfRoot = index === 0 ? debuggeeHost : null;
     return findOrCreateNode(parts, subTree, path, part, index, url, debuggeeHostIfRoot);
   }, tree);
@@ -10122,6 +8438,10 @@ ResultList.defaultProps = {
 
 var _initialiseProps = function () {
   this.renderListItem = (item, index) => {
+    if (item.value === "/" && item.title === "") {
+      item.title = "(index)";
+    }
+
     const { selectItem, selected } = this.props;
     const props = {
       onClick: event => selectItem(event, item, index),
@@ -10139,6 +8459,11 @@ var _initialiseProps = function () {
     return _react2.default.createElement(
       "li",
       props,
+      item.icon && _react2.default.createElement(
+        "div",
+        null,
+        _react2.default.createElement("img", { className: item.icon })
+      ),
       _react2.default.createElement(
         "div",
         { id: `${item.id}-title`, className: "title" },
@@ -10233,790 +8558,6 @@ class PreviewFunction extends _react.Component {
   }
 }
 exports.default = PreviewFunction;
-
-/***/ }),
-
-/***/ 1447:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-
-const {
-  containsURL,
-  isURL,
-  escapeString,
-  getGripType,
-  rawCropString,
-  sanitizeString,
-  wrapRender,
-  isGrip,
-  tokenSplitRegex,
-  ELLIPSIS
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { a, span } = dom;
-
-/**
- * Renders a string. String value is enclosed within quotes.
- */
-StringRep.propTypes = {
-  useQuotes: PropTypes.bool,
-  escapeWhitespace: PropTypes.bool,
-  style: PropTypes.object,
-  cropLimit: PropTypes.number.isRequired,
-  member: PropTypes.string,
-  object: PropTypes.object.isRequired,
-  openLink: PropTypes.func,
-  className: PropTypes.string
-};
-
-function StringRep(props) {
-  let {
-    className,
-    style,
-    cropLimit,
-    object,
-    useQuotes = true,
-    escapeWhitespace = true,
-    member,
-    openLink
-  } = props;
-
-  let text = object;
-
-  const isLong = isLongString(object);
-  const shouldCrop = (!member || !member.open) && cropLimit && text.length > cropLimit;
-
-  if (isLong) {
-    text = maybeCropLongString({
-      shouldCrop,
-      cropLimit
-    }, text);
-  }
-
-  text = formatText({
-    useQuotes,
-    escapeWhitespace
-  }, text);
-
-  const config = getElementConfig({
-    className,
-    style,
-    actor: object.actor
-  });
-
-  if (!isLong) {
-    if (containsURL(text)) {
-      return span(config, ...getLinkifiedElements(text, shouldCrop && cropLimit, openLink));
-    }
-
-    // Cropping of longString has been handled before formatting.
-    text = maybeCropString({
-      isLong,
-      shouldCrop,
-      cropLimit
-    }, text);
-  }
-
-  return span(config, text);
-}
-
-function maybeCropLongString(opts, text) {
-  const {
-    shouldCrop,
-    cropLimit
-  } = opts;
-
-  const {
-    fullText,
-    initial,
-    length
-  } = text;
-
-  text = shouldCrop ? initial.substring(0, cropLimit) : fullText || initial;
-
-  if (text.length < length) {
-    text += ELLIPSIS;
-  }
-
-  return text;
-}
-
-function formatText(opts, text) {
-  let {
-    useQuotes,
-    escapeWhitespace
-  } = opts;
-
-  return useQuotes ? escapeString(text, escapeWhitespace) : sanitizeString(text);
-}
-
-function getElementConfig(opts) {
-  const {
-    className,
-    style,
-    actor
-  } = opts;
-
-  const config = {};
-
-  if (actor) {
-    config["data-link-actor-id"] = actor;
-  }
-
-  const classNames = ["objectBox", "objectBox-string"];
-  if (className) {
-    classNames.push(className);
-  }
-  config.className = classNames.join(" ");
-
-  if (style) {
-    config.style = style;
-  }
-
-  return config;
-}
-
-function maybeCropString(opts, text) {
-  const {
-    shouldCrop,
-    cropLimit
-  } = opts;
-
-  return shouldCrop ? rawCropString(text, cropLimit) : text;
-}
-
-/**
- * Get an array of the elements representing the string, cropped if needed,
- * with actual links.
- *
- * @param {String} text: The actual string to linkify.
- * @param {Integer | null} cropLimit
- * @param {Function} openLink: Function handling the link opening.
- * @returns {Array<String|ReactElement>}
- */
-function getLinkifiedElements(text, cropLimit, openLink) {
-  const halfLimit = Math.ceil((cropLimit - ELLIPSIS.length) / 2);
-  const startCropIndex = cropLimit ? halfLimit : null;
-  const endCropIndex = cropLimit ? text.length - halfLimit : null;
-
-  // As we walk through the tokens of the source string, we make sure to preserve
-  // the original whitespace that separated the tokens.
-  let currentIndex = 0;
-  const items = [];
-  for (let token of text.split(tokenSplitRegex)) {
-    if (isURL(token)) {
-      // Let's grab all the non-url strings before the link.
-      const tokenStart = text.indexOf(token, currentIndex);
-      let nonUrlText = text.slice(currentIndex, tokenStart);
-      nonUrlText = getCroppedString(nonUrlText, currentIndex, startCropIndex, endCropIndex);
-      if (nonUrlText) {
-        items.push(nonUrlText);
-      }
-
-      // Update the index to match the beginning of the token.
-      currentIndex = tokenStart;
-
-      let linkText = getCroppedString(token, currentIndex, startCropIndex, endCropIndex);
-      if (linkText) {
-        items.push(a({
-          className: "url",
-          title: token,
-          draggable: false,
-          onClick: openLink ? e => {
-            e.preventDefault();
-            openLink(token);
-          } : null
-        }, linkText));
-      }
-
-      currentIndex = tokenStart + token.length;
-    }
-  }
-
-  // Clean up any non-URL text at the end of the source string,
-  // i.e. not handled in the loop.
-  if (currentIndex !== text.length) {
-    let nonUrlText = text.slice(currentIndex, text.length);
-    if (currentIndex < endCropIndex) {
-      const cutIndex = endCropIndex - currentIndex;
-      nonUrlText = nonUrlText.substring(cutIndex);
-    }
-    items.push(nonUrlText);
-  }
-
-  return items;
-}
-
-/**
- * Returns a cropped substring given an offset, start and end crop indices in a parent
- * string.
- *
- * @param {String} text: The substring to crop.
- * @param {Integer} offset: The offset corresponding to the index at which the substring
- *                          is in the parent string.
- * @param {Integer|null} startCropIndex: the index where the start of the crop should
- *                                       happen in the parent string.
- * @param {Integer|null} endCropIndex: the index where the end of the crop should happen
- *                                     in the parent string
- * @returns {String|null} The cropped substring, or null if the text is completly cropped.
- */
-function getCroppedString(text, offset = 0, startCropIndex, endCropIndex) {
-  if (!startCropIndex) {
-    return text;
-  }
-
-  const start = offset;
-  const end = offset + text.length;
-
-  const shouldBeVisible = !(start >= startCropIndex && end <= endCropIndex);
-  if (!shouldBeVisible) {
-    return null;
-  }
-
-  const shouldCropEnd = start < startCropIndex && end > startCropIndex;
-  const shouldCropStart = start < endCropIndex && end > endCropIndex;
-  if (shouldCropEnd) {
-    const cutIndex = startCropIndex - start;
-    return text.substring(0, cutIndex) + ELLIPSIS + (shouldCropStart ? text.substring(endCropIndex - start) : "");
-  }
-
-  if (shouldCropStart) {
-    // The string should be cropped at the beginning.
-    const cutIndex = endCropIndex - start;
-    return text.substring(cutIndex);
-  }
-
-  return text;
-}
-
-function isLongString(object) {
-  return object && object.type === "longString";
-}
-
-function supportsObject(object, noGrip = false) {
-  if (noGrip === false && isGrip(object)) {
-    return isLongString(object);
-  }
-
-  return getGripType(object, noGrip) == "string";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(StringRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1448:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const dom = __webpack_require__(1758);
-const PropTypes = __webpack_require__(20);
-const {
-  wrapRender
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-const { span } = dom;
-
-const ModePropType = PropTypes.oneOf(
-// @TODO Change this to Object.values once it's supported in Node's version of V8
-Object.keys(MODE).map(key => MODE[key]));
-
-/**
- * Renders an array. The array is enclosed by left and right bracket
- * and the max number of rendered items depends on the current mode.
- */
-ArrayRep.propTypes = {
-  mode: ModePropType,
-  object: PropTypes.array.isRequired
-};
-
-function ArrayRep(props) {
-  let {
-    object,
-    mode = MODE.SHORT
-  } = props;
-
-  let items;
-  let brackets;
-  let needSpace = function (space) {
-    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
-  };
-
-  if (mode === MODE.TINY) {
-    let isEmpty = object.length === 0;
-    if (isEmpty) {
-      items = [];
-    } else {
-      items = [span({
-        className: "more-ellipsis",
-        title: "more…"
-      }, "…")];
-    }
-    brackets = needSpace(false);
-  } else {
-    items = arrayIterator(props, object, maxLengthMap.get(mode));
-    brackets = needSpace(items.length > 0);
-  }
-
-  return span({
-    className: "objectBox objectBox-array" }, span({
-    className: "arrayLeftBracket"
-  }, brackets.left), ...items, span({
-    className: "arrayRightBracket"
-  }, brackets.right));
-}
-
-function arrayIterator(props, array, max) {
-  let items = [];
-
-  for (let i = 0; i < array.length && i < max; i++) {
-    let config = {
-      mode: MODE.TINY,
-      delim: i == array.length - 1 ? "" : ", "
-    };
-    let item;
-
-    try {
-      item = ItemRep({
-        ...props,
-        ...config,
-        object: array[i]
-      });
-    } catch (exc) {
-      item = ItemRep({
-        ...props,
-        ...config,
-        object: exc
-      });
-    }
-    items.push(item);
-  }
-
-  if (array.length > max) {
-    items.push(span({
-      className: "more-ellipsis",
-      title: "more…"
-    }, "…"));
-  }
-
-  return items;
-}
-
-/**
- * Renders array item. Individual values are separated by a comma.
- */
-ItemRep.propTypes = {
-  object: PropTypes.any.isRequired,
-  delim: PropTypes.string.isRequired,
-  mode: ModePropType
-};
-
-function ItemRep(props) {
-  const { Rep } = __webpack_require__(1372);
-
-  let {
-    object,
-    delim,
-    mode
-  } = props;
-  return span({}, Rep({
-    ...props,
-    object: object,
-    mode: mode
-  }), delim);
-}
-
-function getLength(object) {
-  return object.length;
-}
-
-function supportsObject(object) {
-  return Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]";
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ArrayRep),
-  supportsObject,
-  maxLengthMap,
-  getLength,
-  ModePropType
-};
-
-/***/ }),
-
-/***/ 1449:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-module.exports = {
-  ELEMENT_NODE: 1,
-  ATTRIBUTE_NODE: 2,
-  TEXT_NODE: 3,
-  CDATA_SECTION_NODE: 4,
-  ENTITY_REFERENCE_NODE: 5,
-  ENTITY_NODE: 6,
-  PROCESSING_INSTRUCTION_NODE: 7,
-  COMMENT_NODE: 8,
-  DOCUMENT_NODE: 9,
-  DOCUMENT_TYPE_NODE: 10,
-  DOCUMENT_FRAGMENT_NODE: 11,
-  NOTATION_NODE: 12,
-
-  // DocumentPosition
-  DOCUMENT_POSITION_DISCONNECTED: 0x01,
-  DOCUMENT_POSITION_PRECEDING: 0x02,
-  DOCUMENT_POSITION_FOLLOWING: 0x04,
-  DOCUMENT_POSITION_CONTAINS: 0x08,
-  DOCUMENT_POSITION_CONTAINED_BY: 0x10,
-  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 0x20
-};
-
-/***/ }),
-
-/***/ 1450:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-
-const { lengthBubble } = __webpack_require__(2249);
-const {
-  interleave,
-  getGripType,
-  isGrip,
-  wrapRender,
-  ellipsisElement
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-const { ModePropType } = __webpack_require__(1448);
-const DEFAULT_TITLE = "Array";
-
-/**
- * Renders an array. The array is enclosed by left and right bracket
- * and the max number of rendered items depends on the current mode.
- */
-GripArray.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: ModePropType,
-  provider: PropTypes.object,
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function GripArray(props) {
-  let {
-    object,
-    mode = MODE.SHORT
-  } = props;
-
-  let items;
-  let brackets;
-  let needSpace = function (space) {
-    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
-  };
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-array"
-  };
-
-  const title = getTitle(props, object);
-
-  if (mode === MODE.TINY) {
-    const isEmpty = getLength(object) === 0;
-
-    // Omit bracketed ellipsis for non-empty non-Array arraylikes (f.e: Sets).
-    if (!isEmpty && object.class !== "Array") {
-      return span(config, title);
-    }
-
-    brackets = needSpace(false);
-    return span(config, title, span({
-      className: "arrayLeftBracket"
-    }, brackets.left), isEmpty ? null : ellipsisElement, span({
-      className: "arrayRightBracket"
-    }, brackets.right));
-  }
-
-  let max = maxLengthMap.get(mode);
-  items = arrayIterator(props, object, max);
-  brackets = needSpace(items.length > 0);
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-array" }, title, span({
-    className: "arrayLeftBracket"
-  }, brackets.left), ...interleave(items, ", "), span({
-    className: "arrayRightBracket"
-  }, brackets.right), span({
-    className: "arrayProperties",
-    role: "group" }));
-}
-
-function getLength(grip) {
-  if (!grip.preview) {
-    return 0;
-  }
-
-  return grip.preview.length || grip.preview.childNodesLength || 0;
-}
-
-function getTitle(props, object) {
-  let objectLength = getLength(object);
-  let isEmpty = objectLength === 0;
-
-  let title = props.title || object.class || DEFAULT_TITLE;
-
-  const length = lengthBubble({
-    object,
-    mode: props.mode,
-    maxLengthMap,
-    getLength
-  });
-
-  if (props.mode === MODE.TINY) {
-    if (isEmpty) {
-      if (object.class === DEFAULT_TITLE) {
-        return null;
-      }
-
-      return span({ className: "objectTitle" }, `${title} `);
-    }
-
-    let trailingSpace;
-    if (object.class === DEFAULT_TITLE) {
-      title = null;
-      trailingSpace = " ";
-    }
-
-    return span({ className: "objectTitle" }, title, length, trailingSpace);
-  }
-
-  return span({ className: "objectTitle" }, title, length, " ");
-}
-
-function getPreviewItems(grip) {
-  if (!grip.preview) {
-    return null;
-  }
-
-  return grip.preview.items || grip.preview.childNodes || [];
-}
-
-function arrayIterator(props, grip, max) {
-  let { Rep } = __webpack_require__(1372);
-
-  let items = [];
-  const gripLength = getLength(grip);
-
-  if (!gripLength) {
-    return items;
-  }
-
-  const previewItems = getPreviewItems(grip);
-  let provider = props.provider;
-
-  let emptySlots = 0;
-  let foldedEmptySlots = 0;
-  items = previewItems.reduce((res, itemGrip) => {
-    if (res.length >= max) {
-      return res;
-    }
-
-    let object;
-    try {
-      if (!provider && itemGrip === null) {
-        emptySlots++;
-        return res;
-      }
-
-      object = provider ? provider.getValue(itemGrip) : itemGrip;
-    } catch (exc) {
-      object = exc;
-    }
-
-    if (emptySlots > 0) {
-      res.push(getEmptySlotsElement(emptySlots));
-      foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
-      emptySlots = 0;
-    }
-
-    if (res.length < max) {
-      res.push(Rep({
-        ...props,
-        object,
-        mode: MODE.TINY,
-        // Do not propagate title to array items reps
-        title: undefined
-      }));
-    }
-
-    return res;
-  }, []);
-
-  // Handle trailing empty slots if there are some.
-  if (items.length < max && emptySlots > 0) {
-    items.push(getEmptySlotsElement(emptySlots));
-    foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
-  }
-
-  const itemsShown = items.length + foldedEmptySlots;
-  if (gripLength > itemsShown) {
-    items.push(ellipsisElement);
-  }
-
-  return items;
-}
-
-function getEmptySlotsElement(number) {
-  // TODO: Use l10N - See https://github.com/devtools-html/reps/issues/141
-  return `<${number} empty slot${number > 1 ? "s" : ""}>`;
-}
-
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && (grip.preview.kind == "ArrayLike" || getGripType(grip, noGrip) === "DocumentFragment");
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(GripArray),
-  supportsObject,
-  maxLengthMap,
-  getLength
-};
-
-/***/ }),
-
-/***/ 1451:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-// Shortcuts
-const dom = __webpack_require__(1758);
-const { span } = dom;
-const {
-  wrapRender
-} = __webpack_require__(1353);
-const PropRep = __webpack_require__(1381);
-const { MODE } = __webpack_require__(1357);
-/**
- * Renders an map entry. A map entry is represented by its key, a column and its value.
- */
-GripMapEntry.propTypes = {
-  object: PropTypes.object,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function GripMapEntry(props) {
-  const {
-    object
-  } = props;
-
-  const {
-    key,
-    value
-  } = object.preview;
-
-  return span({
-    className: "objectBox objectBox-map-entry"
-  }, PropRep({
-    ...props,
-    name: key,
-    object: value,
-    equal: " \u2192 ",
-    title: null,
-    suppressQuotes: false
-  }));
-}
-
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true) {
-    return false;
-  }
-  return grip && grip.type === "mapEntry" && grip.preview;
-}
-
-function createGripMapEntry(key, value) {
-  return {
-    type: "mapEntry",
-    preview: {
-      key,
-      value
-    }
-  };
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(GripMapEntry),
-  createGripMapEntry,
-  supportsObject
-};
 
 /***/ }),
 
@@ -11248,7 +8789,7 @@ var _reactDom = __webpack_require__(4);
 
 var _reactDom2 = _interopRequireDefault(_reactDom);
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
 var _client = __webpack_require__(1499);
 
@@ -11264,17 +8805,12 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-/* global DebuggerConfig */
-
 function unmountRoot() {
   const mount = document.querySelector("#mount .launchpad-root");
   _reactDom2.default.unmountComponentAtNode(mount);
 }
 
-if ((0, _devtoolsConfig.isFirefoxPanel)()) {
-  // $FlowIgnore
-  (0, _devtoolsConfig.setConfig)({"environment":"firefox-panel","logging":false,"clientLogging":false,"firefox":{"mcPath":"./firefox"},"workers":{"parserURL":"resource://devtools/client/debugger/new/parser-worker.js","prettyPrintURL":"resource://devtools/client/debugger/new/pretty-print-worker.js","searchURL":"resource://devtools/client/debugger/new/search-worker.js"},"features":{}});
-
+if ((0, _devtoolsEnvironment.isFirefoxPanel)()) {
   module.exports = {
     bootstrap: ({
       threadClient,
@@ -11310,110 +8846,11 @@ if ((0, _devtoolsConfig.isFirefoxPanel)()) {
 
   bootstrap(_react2.default, _reactDom2.default).then(connection => {
     (0, _client.onConnect)(connection, {
-      services: { sourceMaps: __webpack_require__(1360) },
+      services: { sourceMaps: __webpack_require__(3646) },
       toolboxActions: {}
     });
   });
 }
-
-/***/ }),
-
-/***/ 1461:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const pick = __webpack_require__(67);
-const put = __webpack_require__(112);
-const fs = __webpack_require__(118);
-const path = __webpack_require__(119);
-
-let config;
-
-const flag = __webpack_require__(52);
-
-function isBrowser() {
-  return typeof window == "object" && typeof module == "undefined";
-}
-
-/**
- * Gets a config value for a given key
- * e.g "chrome.webSocketPort"
- */
-function getValue(key) {
-  return pick(config, key);
-}
-
-function setValue(key, value) {
-  return put(config, key, value);
-}
-
-function isEnabled(key) {
-  return config.features && typeof config.features[key] == "object" ? config.features[key].enabled : config.features[key];
-}
-
-function isDevelopment() {
-  if (isBrowser()) {
-    if (true) {
-      return false;
-    }
-    const href = window.location ? window.location.href : "";
-    return href.match(/^file:/) || href.match(/localhost:/);
-  }
-
-  if (isFirefoxPanel()) {
-    // Default to production if compiling for the Firefox panel
-    return "production" === "development";
-  }
-  return "production" !== "production";
-}
-
-function isTesting() {
-  return flag.testing;
-}
-
-function isFirefoxPanel() {
-  return "firefox-panel" == "firefox-panel";
-}
-
-function isApplication() {
-  return "firefox-panel" == "application";
-}
-
-function isFirefox() {
-  return (/firefox/i.test(navigator.userAgent)
-  );
-}
-
-function setConfig(value) {
-  config = value;
-}
-
-function getConfig() {
-  return config;
-}
-
-function updateLocalConfig(relativePath) {
-  const localConfigPath = path.resolve(relativePath, "../configs/local.json");
-  const output = JSON.stringify(config, null, 2);
-  fs.writeFileSync(localConfigPath, output, { flag: "w" });
-  return output;
-}
-
-module.exports = {
-  isEnabled,
-  getValue,
-  setValue,
-  isDevelopment,
-  isTesting,
-  isFirefoxPanel,
-  isApplication,
-  isFirefox,
-  getConfig,
-  setConfig,
-  updateLocalConfig
-};
 
 /***/ }),
 
@@ -12189,13 +9626,13 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.onConnect = undefined;
 
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 var _firefox = __webpack_require__(1500);
 
 var firefox = _interopRequireWildcard(_firefox);
-
-var _chrome = __webpack_require__(1507);
-
-var chrome = _interopRequireWildcard(_chrome);
 
 var _prefs = __webpack_require__(226);
 
@@ -12206,17 +9643,10 @@ var _bootstrap = __webpack_require__(1430);
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 function loadFromPrefs(actions) {
-  const { pauseOnExceptions, ignoreCaughtExceptions } = _prefs.prefs;
-  if (pauseOnExceptions || ignoreCaughtExceptions) {
-    return actions.pauseOnExceptions(pauseOnExceptions, ignoreCaughtExceptions);
+  const { pauseOnExceptions, pauseOnCaughtExceptions } = _prefs.prefs;
+  if (pauseOnExceptions || pauseOnCaughtExceptions) {
+    return actions.pauseOnExceptions(pauseOnExceptions, pauseOnCaughtExceptions);
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-function getClient(connection) {
-  const { tab: { clientType } } = connection;
-  return clientType == "firefox" ? firefox : chrome;
 }
 
 async function onConnect(connection, { services, toolboxActions }) {
@@ -12225,22 +9655,23 @@ async function onConnect(connection, { services, toolboxActions }) {
     return;
   }
 
-  const client = getClient(connection);
-  const commands = client.clientCommands;
+  const commands = firefox.clientCommands;
   const { store, actions, selectors } = (0, _bootstrap.bootstrapStore)(commands, {
     services,
     toolboxActions
   });
 
-  (0, _bootstrap.bootstrapWorkers)();
-  await client.onConnect(connection, actions);
+  const workers = (0, _bootstrap.bootstrapWorkers)();
+  await firefox.onConnect(connection, actions);
   await loadFromPrefs(actions);
 
   (0, _dbg.setupHelper)({
     store,
     actions,
     selectors,
-    client: client.clientCommands
+    workers: _extends({}, workers, services),
+    connection,
+    client: firefox.clientCommands
   });
 
   (0, _bootstrap.bootstrapApp)(store);
@@ -12351,11 +9782,14 @@ var _breakpoint = __webpack_require__(1364);
 
 var _create = __webpack_require__(1428);
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+var _frontsDevice = __webpack_require__(3626);
 
-let bpClients;
+var _devtoolsModules = __webpack_require__(1376);
+
+let bpClients; /* This Source Code Form is subject to the terms of the Mozilla Public
+                * License, v. 2.0. If a copy of the MPL was not distributed with this
+                * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 let threadClient;
 let tabTarget;
 let debuggerClient;
@@ -12369,6 +9803,10 @@ function setupCommands(dependencies) {
   bpClients = {};
 
   return { bpClients };
+}
+
+function sendPacket(packet, callback = r => r) {
+  return debuggerClient.request(packet).then(callback);
 }
 
 function resume() {
@@ -12493,18 +9931,31 @@ function setBreakpointCondition(breakpointId, location, condition, noSliding) {
   });
 }
 
-function evaluateInFrame(frameId, script) {
+async function evaluateInFrame(script, frameId) {
   return evaluate(script, { frameId });
+}
+
+async function evaluateExpressions(scripts, frameId) {
+  return Promise.all(scripts.map(script => evaluate(script, { frameId })));
 }
 
 function evaluate(script, { frameId } = {}) {
   const params = frameId ? { frameActor: frameId } : {};
   if (!tabTarget || !tabTarget.activeConsole || !script) {
-    return Promise.resolve();
+    return Promise.resolve({});
   }
 
   return new Promise(resolve => {
-    tabTarget.activeConsole.evaluateJS(script, result => resolve(result), params);
+    tabTarget.activeConsole.evaluateJSAsync(script, result => resolve(result), params);
+  });
+}
+
+function autocomplete(input, cursor, frameId) {
+  if (!tabTarget || !tabTarget.activeConsole || !input) {
+    return Promise.resolve({});
+  }
+  return new Promise(resolve => {
+    tabTarget.activeConsole.autocomplete(input, cursor, result => resolve(result), frameId);
   });
 }
 
@@ -12552,8 +10003,11 @@ async function getFrameScopes(frame) {
   return threadClient.getEnvironment(frame.id);
 }
 
-function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  return threadClient.pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions);
+function pauseOnExceptions(shouldPauseOnExceptions, shouldPauseOnCaughtExceptions) {
+  return threadClient.pauseOnExceptions(shouldPauseOnExceptions,
+  // Providing opposite value because server
+  // uses "shouldIgnoreCaughtExceptions"
+  !shouldPauseOnCaughtExceptions);
 }
 
 function prettyPrint(sourceId, indentSize) {
@@ -12577,6 +10031,18 @@ function disablePrettyPrint(sourceId) {
   return sourceClient.disablePrettyPrint();
 }
 
+async function setPausePoints(sourceId, pausePoints) {
+  return sendPacket({ to: sourceId, type: "setPausePoints", pausePoints });
+}
+
+async function setSkipPausing(shouldSkip) {
+  return threadClient.request({
+    skip: shouldSkip,
+    to: threadClient.actor,
+    type: "skipPausing"
+  });
+}
+
 function interrupt() {
   return threadClient.interrupt();
 }
@@ -12594,12 +10060,48 @@ async function fetchSources() {
   return sources.map(source => (0, _create.createSource)(source, { supportsWasm }));
 }
 
+/**
+ * Temporary helper to check if the current server will support a call to
+ * listWorkers. On Fennec 60 or older, the call will silently crash and prevent
+ * the client from resuming.
+ * XXX: Remove when FF60 for Android is no longer used or available.
+ *
+ * See https://bugzilla.mozilla.org/show_bug.cgi?id=1443550 for more details.
+ */
+async function checkServerSupportsListWorkers() {
+  const root = await tabTarget.root;
+  // root is not available on all debug targets.
+  if (!root) {
+    return false;
+  }
+
+  const deviceFront = await (0, _frontsDevice.getDeviceFront)(debuggerClient, root);
+  const description = await deviceFront.getDescription();
+
+  const isFennec = description.apptype === "mobile/android";
+  if (!isFennec) {
+    // Explicitly return true early to avoid calling Services.vs.compare.
+    // This would force us to extent the Services shim provided by
+    // devtools-modules, used when this code runs in a tab.
+    return true;
+  }
+
+  // We are only interested in Fennec release versions here.
+  // We assume that the server fix for Bug 1443550 will land in FF61.
+  const version = description.platformversion;
+  return _devtoolsModules.Services.vc.compare(version, "61.0") >= 0;
+}
+
 async function fetchWorkers() {
+  // Temporary workaround for Bug 1443550
+  // XXX: Remove when FF60 for Android is no longer used or available.
+  const supportsListWorkers = await checkServerSupportsListWorkers();
+
   // NOTE: The Worker and Browser Content toolboxes do not have a parent
   // with a listWorkers function
   // TODO: there is a listWorkers property, but it is not a function on the
   // parent. Investigate what it is
-  if (!threadClient._parent || typeof threadClient._parent.listWorkers != "function") {
+  if (!threadClient._parent || typeof threadClient._parent.listWorkers != "function" || !supportsListWorkers) {
     return Promise.resolve({ workers: [] });
   }
 
@@ -12607,6 +10109,7 @@ async function fetchWorkers() {
 }
 
 const clientCommands = {
+  autocomplete,
   blackBox,
   interrupt,
   eventListeners,
@@ -12627,6 +10130,7 @@ const clientCommands = {
   setBreakpointCondition,
   evaluate,
   evaluateInFrame,
+  evaluateExpressions,
   debuggeeCommand,
   navigate,
   reload,
@@ -12636,7 +10140,10 @@ const clientCommands = {
   prettyPrint,
   disablePrettyPrint,
   fetchSources,
-  fetchWorkers
+  fetchWorkers,
+  sendPacket,
+  setPausePoints,
+  setSkipPausing
 };
 
 exports.setupCommands = setupCommands;
@@ -12770,7 +10277,7 @@ var _sources = __webpack_require__(1369);
 
 var _breakpoints = __webpack_require__(1378);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 function isGenerated(selectedSource) {
   const sourceId = selectedSource.get("id");
@@ -12843,9 +10350,19 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.isSelectedFrameVisible = isSelectedFrameVisible;
 
+var _devtoolsSourceMap = __webpack_require__(3646);
+
 var _pause = __webpack_require__(1394);
 
 var _sources = __webpack_require__(1369);
+
+function getGeneratedId(sourceId) {
+  if ((0, _devtoolsSourceMap.isOriginalId)(sourceId)) {
+    return (0, _devtoolsSourceMap.originalToGeneratedId)(sourceId);
+  }
+
+  return sourceId;
+}
 
 /*
  * Checks to if the selected frame's source is currently
@@ -12859,7 +10376,15 @@ function isSelectedFrameVisible(state) {
   const selectedLocation = (0, _sources.getSelectedLocation)(state);
   const selectedFrame = (0, _pause.getSelectedFrame)(state);
 
-  return selectedFrame && selectedLocation && selectedFrame.location.sourceId == selectedLocation.sourceId;
+  if (!selectedFrame || !selectedLocation) {
+    return false;
+  }
+
+  if ((0, _devtoolsSourceMap.isOriginalId)(selectedLocation.sourceId)) {
+    return selectedLocation.sourceId === selectedFrame.location.sourceId;
+  }
+
+  return selectedLocation.sourceId === getGeneratedId(selectedFrame.location.sourceId);
 }
 
 /***/ }),
@@ -12968,317 +10493,6 @@ exports.clientEvents = clientEvents;
 
 /***/ }),
 
-/***/ 1507:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.clientEvents = exports.clientCommands = undefined;
-exports.onConnect = onConnect;
-
-var _commands = __webpack_require__(1508);
-
-var _events = __webpack_require__(1509);
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-async function onConnect(connection, actions) {
-  const { tabConnection, connTarget: { type } } = connection;
-  const { Debugger, Runtime, Page } = tabConnection;
-
-  Debugger.enable();
-  Debugger.setPauseOnExceptions({ state: "none" });
-  Debugger.setAsyncCallStackDepth({ maxDepth: 0 });
-
-  if (type == "chrome") {
-    Page.frameNavigated(_events.pageEvents.frameNavigated);
-    Page.frameStartedLoading(_events.pageEvents.frameStartedLoading);
-    Page.frameStoppedLoading(_events.pageEvents.frameStoppedLoading);
-  }
-
-  Debugger.scriptParsed(_events.clientEvents.scriptParsed);
-  Debugger.scriptFailedToParse(_events.clientEvents.scriptFailedToParse);
-  Debugger.paused(_events.clientEvents.paused);
-  Debugger.resumed(_events.clientEvents.resumed);
-
-  (0, _commands.setupCommands)({ Debugger, Runtime, Page });
-  (0, _events.setupEvents)({ actions, Page, type, Runtime });
-  return {};
-}
-
-exports.clientCommands = _commands.clientCommands;
-exports.clientEvents = _events.clientEvents;
-
-/***/ }),
-
-/***/ 1508:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.clientCommands = exports.setupCommands = undefined;
-
-var _create = __webpack_require__(1429);
-
-let debuggerAgent; /* This Source Code Form is subject to the terms of the Mozilla Public
-                    * License, v. 2.0. If a copy of the MPL was not distributed with this
-                    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-let runtimeAgent;
-let pageAgent;
-
-function setupCommands({ Debugger, Runtime, Page }) {
-  debuggerAgent = Debugger;
-  runtimeAgent = Runtime;
-  pageAgent = Page;
-}
-
-function resume() {
-  return debuggerAgent.resume();
-}
-
-function stepIn() {
-  return debuggerAgent.stepInto();
-}
-
-function stepOver() {
-  return debuggerAgent.stepOver();
-}
-
-function stepOut() {
-  return debuggerAgent.stepOut();
-}
-
-function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  if (!shouldPauseOnExceptions) {
-    return debuggerAgent.setPauseOnExceptions({ state: "none" });
-  }
-  const state = shouldIgnoreCaughtExceptions ? "uncaught" : "all";
-  return debuggerAgent.setPauseOnExceptions({ state });
-}
-
-function breakOnNext() {
-  return debuggerAgent.pause();
-}
-
-function sourceContents(sourceId) {
-  return debuggerAgent.getScriptSource({ scriptId: sourceId }).then(({ scriptSource }) => ({
-    source: scriptSource,
-    contentType: null
-  }));
-}
-
-async function setBreakpoint(location, condition) {
-  const {
-    breakpointId,
-    serverLocation
-  } = await debuggerAgent.setBreakpoint({
-    location: (0, _create.toServerLocation)(location),
-    columnNumber: location.column
-  });
-
-  const actualLocation = (0, _create.fromServerLocation)(serverLocation) || location;
-
-  return {
-    id: breakpointId,
-    actualLocation: actualLocation
-  };
-}
-
-function removeBreakpoint(breakpointId) {
-  return debuggerAgent.removeBreakpoint({ breakpointId });
-}
-
-async function getProperties(object) {
-  const { result } = await runtimeAgent.getProperties({
-    objectId: object.objectId
-  });
-
-  const loadedObjects = result.map(_create.createLoadedObject);
-
-  return { loadedObjects };
-}
-
-function evaluate(script) {
-  return runtimeAgent.evaluate({ expression: script });
-}
-
-function debuggeeCommand(script) {
-  evaluate(script);
-  return Promise.resolve();
-}
-
-function navigate(url) {
-  return pageAgent.navigate({ url });
-}
-
-const clientCommands = {
-  resume,
-  stepIn,
-  stepOut,
-  stepOver,
-  pauseOnExceptions,
-  breakOnNext,
-  sourceContents,
-  setBreakpoint,
-  removeBreakpoint,
-  evaluate,
-  debuggeeCommand,
-  navigate,
-  getProperties
-};
-
-exports.setupCommands = setupCommands;
-exports.clientCommands = clientCommands;
-
-/***/ }),
-
-/***/ 1509:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.clientEvents = exports.pageEvents = exports.setupEvents = undefined;
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-var _create = __webpack_require__(1429);
-
-let actions;
-let pageAgent;
-let clientType;
-let runtimeAgent;
-
-function setupEvents(dependencies) {
-  actions = dependencies.actions;
-  pageAgent = dependencies.Page;
-  clientType = dependencies.clientType;
-  runtimeAgent = dependencies.Runtime;
-}
-
-// Debugger Events
-function scriptParsed({
-  scriptId,
-  url,
-  startLine,
-  startColumn,
-  endLine,
-  endColumn,
-  executionContextId,
-  hash,
-  isContentScript,
-  isInternalScript,
-  isLiveEdit,
-  sourceMapURL,
-  hasSourceURL,
-  deprecatedCommentWasUsed
-}) {
-  if (isContentScript) {
-    return;
-  }
-
-  if (clientType == "node") {
-    sourceMapURL = undefined;
-  }
-
-  actions.newSource({
-    id: scriptId,
-    url,
-    sourceMapURL,
-    isPrettyPrinted: false
-  });
-}
-
-function scriptFailedToParse() {}
-
-async function paused({
-  callFrames,
-  reason,
-  data,
-  hitBreakpoints,
-  asyncStackTrace
-}) {
-  const frames = callFrames.map(_create.createFrame);
-  const frame = frames[0];
-  const why = _extends({ type: reason }, data);
-
-  const objectId = frame.scopeChain[0].object.objectId;
-  const { result } = await runtimeAgent.getProperties({
-    objectId
-  });
-
-  const loadedObjects = result.map(_create.createLoadedObject);
-
-  if (clientType == "chrome") {
-    pageAgent.configureOverlay({ message: "Paused in debugger.html" });
-  }
-
-  await actions.paused({ frame, why, frames, loadedObjects });
-}
-
-function resumed() {
-  if (clientType == "chrome") {
-    pageAgent.configureOverlay({ suspended: false });
-  }
-
-  actions.resumed();
-}
-
-function globalObjectCleared() {}
-
-// Page Events
-function frameNavigated(frame) {
-  actions.navigated();
-}
-
-function frameStartedLoading() {
-  actions.willNavigate();
-}
-
-function domContentEventFired() {}
-
-function loadEventFired() {}
-
-function frameStoppedLoading() {}
-
-const clientEvents = {
-  scriptParsed,
-  scriptFailedToParse,
-  paused,
-  resumed,
-  globalObjectCleared
-};
-
-const pageEvents = {
-  frameNavigated,
-  frameStartedLoading,
-  domContentEventFired,
-  loadEventFired,
-  frameStoppedLoading
-};
-
-exports.setupEvents = setupEvents;
-exports.pageEvents = pageEvents;
-exports.clientEvents = clientEvents;
-
-/***/ }),
-
 /***/ 1516:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -13357,7 +10571,7 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
  * Reducer index
@@ -13396,7 +10610,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
  * Async request reducer
@@ -13438,7 +10652,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -13448,8 +10662,6 @@ var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
 
-var _redux = __webpack_require__(3593);
-
 var _prefs = __webpack_require__(226);
 
 var _actions = __webpack_require__(1354);
@@ -13457,10 +10669,6 @@ var _actions = __webpack_require__(1354);
 var _actions2 = _interopRequireDefault(_actions);
 
 var _ShortcutsModal = __webpack_require__(1535);
-
-var _VisibilityHandler = __webpack_require__(3611);
-
-var _VisibilityHandler2 = _interopRequireDefault(_VisibilityHandler);
 
 var _selectors = __webpack_require__(3590);
 
@@ -13535,9 +10743,9 @@ class App extends _react.Component {
     this.onEscape = (_, e) => {
       const {
         activeSearch,
-        quickOpenEnabled,
         closeActiveSearch,
-        closeQuickOpen
+        closeQuickOpen,
+        quickOpenEnabled
       } = this.props;
 
       if (activeSearch) {
@@ -13545,7 +10753,8 @@ class App extends _react.Component {
         closeActiveSearch();
       }
 
-      if (quickOpenEnabled === true) {
+      if (quickOpenEnabled) {
+        e.preventDefault();
         closeQuickOpen();
       }
     };
@@ -13714,36 +10923,30 @@ class App extends _react.Component {
   render() {
     const { quickOpenEnabled } = this.props;
     return _react2.default.createElement(
-      _VisibilityHandler2.default,
-      null,
-      _react2.default.createElement(
-        "div",
-        { className: "debugger" },
-        this.renderLayout(),
-        quickOpenEnabled === true && _react2.default.createElement(_QuickOpenModal2.default, {
-          shortcutsModalEnabled: this.state.shortcutsModalEnabled,
-          toggleShortcutsModal: () => this.toggleShortcutsModal()
-        }),
-        this.renderShortcutsModal()
-      )
+      "div",
+      { className: "debugger" },
+      this.renderLayout(),
+      quickOpenEnabled === true && _react2.default.createElement(_QuickOpenModal2.default, {
+        shortcutsModalEnabled: this.state.shortcutsModalEnabled,
+        toggleShortcutsModal: () => this.toggleShortcutsModal()
+      }),
+      this.renderShortcutsModal()
     );
   }
 }
 
 App.childContextTypes = { shortcuts: _propTypes2.default.object };
 
-function mapStateToProps(state) {
-  return {
-    selectedSource: (0, _selectors.getSelectedSource)(state),
-    startPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "start"),
-    endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end"),
-    activeSearch: (0, _selectors.getActiveSearch)(state),
-    quickOpenEnabled: (0, _selectors.getQuickOpenEnabled)(state),
-    orientation: (0, _selectors.getOrientation)(state)
-  };
-}
+const mapStateToProps = state => ({
+  selectedSource: (0, _selectors.getSelectedSource)(state),
+  startPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "start"),
+  endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end"),
+  activeSearch: (0, _selectors.getActiveSearch)(state),
+  quickOpenEnabled: (0, _selectors.getQuickOpenEnabled)(state),
+  orientation: (0, _selectors.getOrientation)(state)
+});
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(App);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(App);
 
 /***/ }),
 
@@ -13767,13 +10970,16 @@ var _selectors = __webpack_require__(3590);
 
 var _sourceMaps = __webpack_require__(1397);
 
-exports.default = async function addBreakpoint(getState, client, sourceMaps, { breakpoint }) {
-  const state = getState();
+var _source = __webpack_require__(1356);
 
+exports.default = async function addBreakpoint(getState, client, sourceMaps, breakpoint) {
+  const state = getState();
   const source = (0, _selectors.getSource)(state, breakpoint.location.sourceId);
-  const sourceRecord = source.toJS();
-  const location = _extends({}, breakpoint.location, { sourceUrl: source.get("url") });
-  const generatedLocation = await (0, _sourceMaps.getGeneratedLocation)(state, sourceRecord, location, sourceMaps);
+
+  const location = _extends({}, breakpoint.location, { sourceUrl: source.url });
+  const generatedLocation = await (0, _sourceMaps.getGeneratedLocation)(state, source, location, sourceMaps);
+
+  const generatedSource = (0, _selectors.getSource)(state, generatedLocation.sourceId);
 
   (0, _breakpoint.assertLocation)(location);
   (0, _breakpoint.assertLocation)(generatedLocation);
@@ -13789,8 +10995,11 @@ exports.default = async function addBreakpoint(getState, client, sourceMaps, { b
   const newGeneratedLocation = actualLocation || generatedLocation;
   const newLocation = await sourceMaps.getOriginalLocation(newGeneratedLocation);
 
-  const symbols = (0, _selectors.getSymbols)(getState(), sourceRecord);
-  const astLocation = await (0, _breakpoint.getASTLocation)(sourceRecord, symbols, newLocation);
+  const symbols = (0, _selectors.getSymbols)(getState(), source);
+  const astLocation = await (0, _breakpoint.getASTLocation)(source, symbols, newLocation);
+
+  const originalText = (0, _source.getTextAtPosition)(source, location);
+  const text = (0, _source.getTextAtPosition)(generatedSource, actualLocation);
 
   const newBreakpoint = {
     id,
@@ -13801,7 +11010,9 @@ exports.default = async function addBreakpoint(getState, client, sourceMaps, { b
     location: newLocation,
     astLocation,
     hitCount,
-    generatedLocation: newGeneratedLocation
+    generatedLocation: newGeneratedLocation,
+    text,
+    originalText
   };
 
   (0, _breakpoint.assertBreakpoint)(newBreakpoint);
@@ -13867,7 +11078,9 @@ var _breakpoint = __webpack_require__(1364);
 
 var _sourceMaps = __webpack_require__(1397);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _source = __webpack_require__(1356);
+
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _selectors = __webpack_require__(3590);
 
@@ -13885,8 +11098,13 @@ async function makeScopedLocation({ name, offset }, location, source) {
   };
 }
 
-function createSyncData(id, pendingBreakpoint, location, generatedLocation, previousLocation) {
-  const overrides = _extends({}, pendingBreakpoint, { generatedLocation, id });
+function createSyncData(id, pendingBreakpoint, location, generatedLocation, previousLocation, text, originalText) {
+  const overrides = _extends({}, pendingBreakpoint, {
+    generatedLocation,
+    id,
+    text,
+    originalText
+  });
   const breakpoint = (0, _breakpoint.createBreakpoint)(location, overrides);
 
   (0, _breakpoint.assertBreakpoint)(breakpoint);
@@ -13898,8 +11116,11 @@ function createSyncData(id, pendingBreakpoint, location, generatedLocation, prev
 async function syncClientBreakpoint(getState, client, sourceMaps, sourceId, pendingBreakpoint) {
   (0, _breakpoint.assertPendingBreakpoint)(pendingBreakpoint);
 
-  const source = (0, _selectors.getSource)(getState(), sourceId).toJS();
+  const source = (0, _selectors.getSource)(getState(), sourceId);
+
   const generatedSourceId = sourceMaps.isOriginalId(sourceId) ? (0, _devtoolsSourceMap.originalToGeneratedId)(sourceId) : sourceId;
+
+  const generatedSource = (0, _selectors.getSource)(getState(), generatedSourceId);
 
   const { location, astLocation } = pendingBreakpoint;
   const previousLocation = _extends({}, location, { sourceId });
@@ -13923,7 +11144,10 @@ async function syncClientBreakpoint(getState, client, sourceMaps, sourceId, pend
   // send update only to redux
   if (pendingBreakpoint.disabled || existingClient && isSameLocation) {
     const id = pendingBreakpoint.disabled ? "" : existingClient.id;
-    return createSyncData(id, pendingBreakpoint, scopedLocation, scopedGeneratedLocation, previousLocation);
+    const originalText = (0, _source.getTextAtPosition)(source, previousLocation);
+    const text = (0, _source.getTextAtPosition)(generatedSource, generatedLocation);
+
+    return createSyncData(id, pendingBreakpoint, scopedLocation, scopedGeneratedLocation, previousLocation, text, originalText);
   }
 
   // clear server breakpoints if they exist and we have moved
@@ -13946,7 +11170,10 @@ async function syncClientBreakpoint(getState, client, sourceMaps, sourceId, pend
   const newGeneratedLocation = actualLocation;
   const newLocation = await sourceMaps.getOriginalLocation(newGeneratedLocation);
 
-  return createSyncData(id, pendingBreakpoint, newLocation, newGeneratedLocation, previousLocation);
+  const originalText = (0, _source.getTextAtPosition)(source, newLocation);
+  const text = (0, _source.getTextAtPosition)(generatedSource, newGeneratedLocation);
+
+  return createSyncData(id, pendingBreakpoint, newLocation, newGeneratedLocation, previousLocation, text, originalText);
 }
 
 /***/ }),
@@ -13962,6 +11189,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.buildQuery = undefined;
 exports.getMatchIndex = getMatchIndex;
+exports.searchSourceForHighlight = searchSourceForHighlight;
 exports.removeOverlay = removeOverlay;
 exports.find = find;
 exports.findNext = findNext;
@@ -14000,7 +11228,7 @@ function SearchState() {
  * @memberof utils/source-search
  * @static
  */
-function getSearchState(cm, query, modifiers) {
+function getSearchState(cm, query) {
   const state = cm.state.search || (cm.state.search = new SearchState());
   return state;
 }
@@ -14106,11 +11334,11 @@ function doSearch(ctx, rev, query, keepSelection, modifiers) {
 
   return cm.operation(function () {
     if (!query || isWhitespace(query)) {
-      clearSearch(cm, query, modifiers);
+      clearSearch(cm, query);
       return;
     }
 
-    const state = getSearchState(cm, query, modifiers);
+    const state = getSearchState(cm, query);
     const isNewQuery = state.query !== query;
     state.query = query;
 
@@ -14119,6 +11347,23 @@ function doSearch(ctx, rev, query, keepSelection, modifiers) {
     const searchLocation = searchNext(ctx, rev, query, isNewQuery, modifiers);
 
     return searchLocation ? searchLocation.from : defaultIndex;
+  });
+}
+
+function searchSourceForHighlight(ctx, rev, query, keepSelection, modifiers, line, ch) {
+  const { cm } = ctx;
+  if (!cm) {
+    return;
+  }
+
+  return cm.operation(function () {
+    const state = getSearchState(cm, query);
+    const isNewQuery = state.query !== query;
+    state.query = query;
+
+    updateOverlay(cm, state, query, modifiers);
+    updateCursor(cm, state, keepSelection);
+    findNextOnLine(ctx, rev, query, isNewQuery, modifiers, line, ch);
   });
 }
 
@@ -14140,7 +11385,7 @@ function searchNext(ctx, rev, query, newQuery, modifiers) {
   const { cm, ed } = ctx;
   let nextMatch;
   cm.operation(function () {
-    const state = getSearchState(cm, query, modifiers);
+    const state = getSearchState(cm, query);
     const pos = getCursorPos(newQuery, rev, state);
 
     if (!state.query) {
@@ -14171,14 +11416,36 @@ function searchNext(ctx, rev, query, newQuery, modifiers) {
   return nextMatch;
 }
 
+function findNextOnLine(ctx, rev, query, newQuery, modifiers, line, ch) {
+  const { cm, ed } = ctx;
+  cm.operation(function () {
+    const pos = { line: line - 1, ch };
+    let cursor = getSearchCursor(cm, query, pos, modifiers);
+
+    if (!cursor.find(rev) && query) {
+      cursor = getSearchCursor(cm, query, pos, modifiers);
+      if (!cursor.find(rev)) {
+        return;
+      }
+    }
+
+    // We don't want to jump the editor
+    // when we're selecting text
+    if (!cm.state.selectingText) {
+      ed.alignLine(cursor.from().line, "center");
+      cm.setSelection(cursor.from(), cursor.to());
+    }
+  });
+}
+
 /**
  * Remove overlay.
  *
  * @memberof utils/source-search
  * @static
  */
-function removeOverlay(ctx, query, modifiers) {
-  const state = getSearchState(ctx.cm, query, modifiers);
+function removeOverlay(ctx, query) {
+  const state = getSearchState(ctx.cm, query);
   ctx.cm.removeOverlay(state.overlay);
   const { line, ch } = ctx.cm.getCursor();
   ctx.cm.doc.setSelection({ line, ch }, { line, ch }, { scroll: false });
@@ -14190,8 +11457,8 @@ function removeOverlay(ctx, query, modifiers) {
  * @memberof utils/source-search
  * @static
  */
-function clearSearch(cm, query, modifiers) {
-  const state = getSearchState(cm, query, modifiers);
+function clearSearch(cm, query) {
+  const state = getSearchState(cm, query);
 
   state.results = [];
 
@@ -14209,7 +11476,7 @@ function clearSearch(cm, query, modifiers) {
  * @static
  */
 function find(ctx, query, keepSelection, modifiers) {
-  clearSearch(ctx.cm, query, modifiers);
+  clearSearch(ctx.cm, query);
   return doSearch(ctx, false, query, keepSelection, modifiers);
 }
 
@@ -14258,7 +11525,7 @@ var _waitService = __webpack_require__(1659);
 // delay is in ms
 const FETCH_EVENT_LISTENERS_DELAY = 200; /* This Source Code Form is subject to the terms of the Mozilla Public
                                           * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                          * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+                                          * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /* global window gThreadClient setNamedTimeout EVENTS */
 /* eslint no-shadow: 0  */
@@ -14469,6 +11736,7 @@ function willNavigate(event) {
     await sourceMaps.clearSourceMaps();
     (0, _wasm.clearWasmStates)();
     (0, _editor.clearDocuments)();
+    (0, _editor.removeEditor)();
     (0, _parser.clearSymbols)();
     (0, _parser.clearASTs)();
     (0, _parser.clearScopes)();
@@ -14519,10 +11787,12 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.doSearch = doSearch;
+exports.doSearchForHighlight = doSearchForHighlight;
 exports.setFileSearchQuery = setFileSearchQuery;
 exports.toggleFileSearchModifier = toggleFileSearchModifier;
 exports.updateSearchResults = updateSearchResults;
 exports.searchContents = searchContents;
+exports.searchContentsForHighlight = searchContentsForHighlight;
 exports.traverseResults = traverseResults;
 exports.closeFileSearch = closeFileSearch;
 
@@ -14541,12 +11811,22 @@ var _ui = __webpack_require__(1385);
 function doSearch(query, editor) {
   return ({ getState, dispatch }) => {
     const selectedSource = (0, _selectors.getSelectedSource)(getState());
-    if (!selectedSource || !selectedSource.get("text")) {
+    if (!selectedSource || !selectedSource.text) {
       return;
     }
 
     dispatch(setFileSearchQuery(query));
     dispatch(searchContents(query, editor));
+  };
+}
+
+function doSearchForHighlight(query, editor, line, ch) {
+  return async ({ getState, dispatch }) => {
+    const selectedSource = (0, _selectors.getSelectedSource)(getState());
+    if (!selectedSource || !selectedSource.text) {
+      return;
+    }
+    dispatch(searchContentsForHighlight(query, editor, line, ch));
   };
 }
 
@@ -14580,13 +11860,13 @@ function searchContents(query, editor) {
     const modifiers = (0, _selectors.getFileSearchModifiers)(getState());
     const selectedSource = (0, _selectors.getSelectedSource)(getState());
 
-    if (!query || !editor || !selectedSource || !selectedSource.get("text") || !modifiers) {
+    if (!query || !editor || !selectedSource || !selectedSource.text || !modifiers) {
       return;
     }
 
     const ctx = { ed: editor, cm: editor.codeMirror };
     const _modifiers = modifiers.toJS();
-    const matches = await (0, _search.getMatches)(query, selectedSource.get("text"), _modifiers);
+    const matches = await (0, _search.getMatches)(query, selectedSource.text, _modifiers);
 
     const res = (0, _editor.find)(ctx, query, true, _modifiers);
     if (!res) {
@@ -14596,6 +11876,22 @@ function searchContents(query, editor) {
     const { ch, line } = res;
 
     dispatch(updateSearchResults(ch, line, matches));
+  };
+}
+
+function searchContentsForHighlight(query, editor, line, ch) {
+  return async ({ getState, dispatch }) => {
+    const modifiers = (0, _selectors.getFileSearchModifiers)(getState());
+    const selectedSource = (0, _selectors.getSelectedSource)(getState());
+
+    if (!query || !editor || !selectedSource || !selectedSource.text || !modifiers) {
+      return;
+    }
+
+    const ctx = { ed: editor, cm: editor.codeMirror };
+    const _modifiers = modifiers.toJS();
+
+    (0, _editor.searchSourceForHighlight)(ctx, false, query, true, _modifiers, line, ch);
   };
 }
 
@@ -14630,12 +11926,11 @@ function traverseResults(rev, editor) {
 
 function closeFileSearch(editor) {
   return ({ getState, dispatch }) => {
-    const modifiers = (0, _selectors.getFileSearchModifiers)(getState());
     const query = (0, _selectors.getFileSearchQuery)(getState());
 
-    if (editor && modifiers) {
+    if (editor) {
       const ctx = { ed: editor, cm: editor.codeMirror };
-      (0, _editor.removeOverlay)(ctx, query, modifiers.toJS());
+      (0, _editor.removeOverlay)(ctx, query);
     }
 
     dispatch(setFileSearchQuery(""));
@@ -14731,7 +12026,7 @@ exports.evaluateInConsole = evaluateInConsole;
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-const { isDevelopment } = __webpack_require__(1355);
+const { isDevelopment } = __webpack_require__(3721);
 const { getSelectedFrameId } = __webpack_require__(3590);
 
 /**
@@ -14932,8 +12227,8 @@ const React = __webpack_require__(0);
 const ReactDOM = __webpack_require__(4);
 const Draggable = React.createFactory(__webpack_require__(1537));
 const { Component } = React;
-const PropTypes = __webpack_require__(20);
-const dom = __webpack_require__(1758);
+const PropTypes = __webpack_require__(3642);
+const dom = __webpack_require__(3643);
 
 __webpack_require__(1309);
 
@@ -15181,8 +12476,8 @@ module.exports = SplitBox;
 const React = __webpack_require__(0);
 const ReactDOM = __webpack_require__(4);
 const { Component } = React;
-const PropTypes = __webpack_require__(20);
-const dom = __webpack_require__(1758);
+const PropTypes = __webpack_require__(3642);
+const dom = __webpack_require__(3643);
 
 class Draggable extends Component {
   static get propTypes() {
@@ -15250,9 +12545,12 @@ var _svgInlineReact2 = _interopRequireDefault(_svgInlineReact);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 const React = __webpack_require__(0);
 
-const { isDevelopment } = __webpack_require__(1355);
 
 const svg = {
   "angle-brackets": __webpack_require__(347),
@@ -15270,6 +12568,7 @@ const svg = {
   coffeescript: __webpack_require__(2250),
   dojo: __webpack_require__(806),
   domain: __webpack_require__(353),
+  extension: __webpack_require__(3632),
   file: __webpack_require__(354),
   folder: __webpack_require__(355),
   globe: __webpack_require__(356),
@@ -15299,6 +12598,7 @@ const svg = {
   stepOut: __webpack_require__(366),
   stepOver: __webpack_require__(367),
   subSettings: __webpack_require__(368),
+  tab: __webpack_require__(3631),
   toggleBreakpoints: __webpack_require__(369),
   togglePanes: __webpack_require__(370),
   typescript: __webpack_require__(2252),
@@ -15323,10 +12623,6 @@ const svg = {
 function Svg({ name, className, onClick, "aria-label": ariaLabel }) {
   if (!svg[name]) {
     const error = `Unknown SVG: ${name}`;
-    if (isDevelopment()) {
-      throw new Error(error);
-    }
-
     console.warn(error);
     return null;
   }
@@ -15349,792 +12645,6 @@ function Svg({ name, className, onClick, "aria-label": ariaLabel }) {
 Svg.displayName = "Svg";
 
 module.exports = Svg;
-
-/***/ }),
-
-/***/ 1541:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-
-var _react = __webpack_require__(0);
-
-var _react2 = _interopRequireDefault(_react);
-
-var _reactDomFactories = __webpack_require__(1758);
-
-var _reactDomFactories2 = _interopRequireDefault(_reactDomFactories);
-
-var _propTypes = __webpack_require__(20);
-
-var _propTypes2 = _interopRequireDefault(_propTypes);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-const { Component, createFactory } = _react2.default; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                       * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                       * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-__webpack_require__(2248);
-
-const AUTO_EXPAND_DEPTH = 0; // depth
-
-/**
- * An arrow that displays whether its node is expanded (▼) or collapsed
- * (▶). When its node has no children, it is hidden.
- */
-class ArrowExpander extends Component {
-  static get propTypes() {
-    return {
-      expanded: _propTypes2.default.bool
-    };
-  }
-
-  shouldComponentUpdate(nextProps, nextState) {
-    return this.props.expanded !== nextProps.expanded;
-  }
-
-  render() {
-    const {
-      expanded
-    } = this.props;
-
-    const classNames = ["arrow"];
-    if (expanded) {
-      classNames.push("expanded");
-    }
-    return _reactDomFactories2.default.img({
-      className: classNames.join(" ")
-    });
-  }
-}
-
-const treeIndent = _reactDomFactories2.default.span({ className: "tree-indent" }, "\u200B");
-
-class TreeNode extends Component {
-  static get propTypes() {
-    return {
-      id: _propTypes2.default.any.isRequired,
-      index: _propTypes2.default.number.isRequired,
-      depth: _propTypes2.default.number.isRequired,
-      focused: _propTypes2.default.bool.isRequired,
-      expanded: _propTypes2.default.bool.isRequired,
-      item: _propTypes2.default.any.isRequired,
-      isExpandable: _propTypes2.default.bool.isRequired,
-      onClick: _propTypes2.default.func,
-      renderItem: _propTypes2.default.func.isRequired
-    };
-  }
-
-  shouldComponentUpdate(nextProps) {
-    return this.props.item !== nextProps.item || this.props.focused !== nextProps.focused || this.props.expanded !== nextProps.expanded;
-  }
-
-  render() {
-    const {
-      depth,
-      id,
-      item,
-      focused,
-      expanded,
-      renderItem,
-      isExpandable
-    } = this.props;
-
-    const arrow = isExpandable ? ArrowExpanderFactory({
-      item,
-      expanded
-    }) : null;
-
-    let ariaExpanded;
-    if (this.props.isExpandable) {
-      ariaExpanded = false;
-    }
-    if (this.props.expanded) {
-      ariaExpanded = true;
-    }
-
-    const indents = Array.from({ length: depth }).fill(treeIndent);
-    let items = indents.concat(renderItem(item, depth, focused, arrow, expanded));
-
-    return _reactDomFactories2.default.div({
-      id,
-      className: "tree-node" + (focused ? " focused" : ""),
-      onClick: this.props.onClick,
-      role: "treeitem",
-      "aria-level": depth + 1,
-      "aria-expanded": ariaExpanded,
-      "data-expandable": this.props.isExpandable
-    }, ...items);
-  }
-}
-
-const ArrowExpanderFactory = createFactory(ArrowExpander);
-const TreeNodeFactory = createFactory(TreeNode);
-
-/**
- * Create a function that calls the given function `fn` only once per animation
- * frame.
- *
- * @param {Function} fn
- * @returns {Function}
- */
-function oncePerAnimationFrame(fn) {
-  let animationId = null;
-  let argsToPass = null;
-  return function (...args) {
-    argsToPass = args;
-    if (animationId !== null) {
-      return;
-    }
-
-    animationId = requestAnimationFrame(() => {
-      fn.call(this, ...argsToPass);
-      animationId = null;
-      argsToPass = null;
-    });
-  };
-}
-
-/**
- * A generic tree component. See propTypes for the public API.
- *
- * This tree component doesn't make any assumptions about the structure of your
- * tree data. Whether children are computed on demand, or stored in an array in
- * the parent's `_children` property, it doesn't matter. We only require the
- * implementation of `getChildren`, `getRoots`, `getParent`, and `isExpanded`
- * functions.
- *
- * This tree component is well tested and reliable. See the tests in ./tests
- * and its usage in the performance and memory panels in mozilla-central.
- *
- * This tree component doesn't make any assumptions about how to render items in
- * the tree. You provide a `renderItem` function, and this component will ensure
- * that only those items whose parents are expanded and which are visible in the
- * viewport are rendered. The `renderItem` function could render the items as a
- * "traditional" tree or as rows in a table or anything else. It doesn't
- * restrict you to only one certain kind of tree.
- *
- * The tree comes with basic styling for the indent, the arrow, as well as hovered
- * and focused styles which can be override in CSS.
- *
- * ### Example Usage
- *
- * Suppose we have some tree data where each item has this form:
- *
- *     {
- *       id: Number,
- *       label: String,
- *       parent: Item or null,
- *       children: Array of child items,
- *       expanded: bool,
- *     }
- *
- * Here is how we could render that data with this component:
- *
- *     class MyTree extends Component {
- *       static get propTypes() {
- *         // The root item of the tree, with the form described above.
- *         return {
- *           root: PropTypes.object.isRequired
- *         };
- *       },
- *
- *       render() {
- *         return Tree({
- *           itemHeight: 20, // px
- *
- *           getRoots: () => [this.props.root],
- *
- *           getParent: item => item.parent,
- *           getChildren: item => item.children,
- *           getKey: item => item.id,
- *           isExpanded: item => item.expanded,
- *
- *           renderItem: (item, depth, isFocused, arrow, isExpanded) => {
- *             let className = "my-tree-item";
- *             if (isFocused) {
- *               className += " focused";
- *             }
- *             return dom.div({
- *               className,
- *             },
- *               arrow,
- *               // And here is the label for this item.
- *               dom.span({ className: "my-tree-item-label" }, item.label)
- *             );
- *           },
- *
- *           onExpand: item => dispatchExpandActionToRedux(item),
- *           onCollapse: item => dispatchCollapseActionToRedux(item),
- *         });
- *       }
- *     }
- */
-class Tree extends Component {
-  static get propTypes() {
-    return {
-      // Required props
-
-      // A function to get an item's parent, or null if it is a root.
-      //
-      // Type: getParent(item: Item) -> Maybe<Item>
-      //
-      // Example:
-      //
-      //     // The parent of this item is stored in its `parent` property.
-      //     getParent: item => item.parent
-      getParent: _propTypes2.default.func.isRequired,
-
-      // A function to get an item's children.
-      //
-      // Type: getChildren(item: Item) -> [Item]
-      //
-      // Example:
-      //
-      //     // This item's children are stored in its `children` property.
-      //     getChildren: item => item.children
-      getChildren: _propTypes2.default.func.isRequired,
-
-      // A function which takes an item and ArrowExpander component instance and
-      // returns a component, or text, or anything else that React considers
-      // renderable.
-      //
-      // Type: renderItem(item: Item,
-      //                  depth: Number,
-      //                  isFocused: Boolean,
-      //                  arrow: ReactComponent,
-      //                  isExpanded: Boolean) -> ReactRenderable
-      //
-      // Example:
-      //
-      //     renderItem: (item, depth, isFocused, arrow, isExpanded) => {
-      //       let className = "my-tree-item";
-      //       if (isFocused) {
-      //         className += " focused";
-      //       }
-      //       return dom.div(
-      //         {
-      //           className,
-      //           style: { marginLeft: depth * 10 + "px" }
-      //         },
-      //         arrow,
-      //         dom.span({ className: "my-tree-item-label" }, item.label)
-      //       );
-      //     },
-      renderItem: _propTypes2.default.func.isRequired,
-
-      // A function which returns the roots of the tree (forest).
-      //
-      // Type: getRoots() -> [Item]
-      //
-      // Example:
-      //
-      //     // In this case, we only have one top level, root item. You could
-      //     // return multiple items if you have many top level items in your
-      //     // tree.
-      //     getRoots: () => [this.props.rootOfMyTree]
-      getRoots: _propTypes2.default.func.isRequired,
-
-      // A function to get a unique key for the given item. This helps speed up
-      // React's rendering a *TON*.
-      //
-      // Type: getKey(item: Item) -> String
-      //
-      // Example:
-      //
-      //     getKey: item => `my-tree-item-${item.uniqueId}`
-      getKey: _propTypes2.default.func.isRequired,
-
-      // A function to get whether an item is expanded or not. If an item is not
-      // expanded, then it must be collapsed.
-      //
-      // Type: isExpanded(item: Item) -> Boolean
-      //
-      // Example:
-      //
-      //     isExpanded: item => item.expanded,
-      isExpanded: _propTypes2.default.func.isRequired,
-
-      // Optional props
-
-      // The currently focused item, if any such item exists.
-      focused: _propTypes2.default.any,
-
-      // Handle when a new item is focused.
-      onFocus: _propTypes2.default.func,
-
-      // The depth to which we should automatically expand new items.
-      autoExpandDepth: _propTypes2.default.number,
-      // Should auto expand all new items or just the new items under the first
-      // root item.
-      autoExpandAll: _propTypes2.default.bool,
-
-      // Note: the two properties below are mutually exclusive. Only one of the
-      // label properties is necessary.
-      // ID of an element whose textual content serves as an accessible label for
-      // a tree.
-      labelledby: _propTypes2.default.string,
-      // Accessibility label for a tree widget.
-      label: _propTypes2.default.string,
-
-      // Optional event handlers for when items are expanded or collapsed. Useful
-      // for dispatching redux events and updating application state, maybe lazily
-      // loading subtrees from a worker, etc.
-      //
-      // Type:
-      //     onExpand(item: Item)
-      //     onCollapse(item: Item)
-      //
-      // Example:
-      //
-      //     onExpand: item => dispatchExpandActionToRedux(item)
-      onExpand: _propTypes2.default.func,
-      onCollapse: _propTypes2.default.func,
-      isExpandable: _propTypes2.default.func,
-      // Additional classes to add to the root element.
-      className: _propTypes2.default.string,
-      // style object to be applied to the root element.
-      style: _propTypes2.default.object
-    };
-  }
-
-  static get defaultProps() {
-    return {
-      autoExpandDepth: AUTO_EXPAND_DEPTH,
-      autoExpandAll: true
-    };
-  }
-
-  constructor(props) {
-    super(props);
-
-    this.state = {
-      seen: new Set()
-    };
-
-    this._onExpand = oncePerAnimationFrame(this._onExpand).bind(this);
-    this._onCollapse = oncePerAnimationFrame(this._onCollapse).bind(this);
-    this._focusPrevNode = oncePerAnimationFrame(this._focusPrevNode).bind(this);
-    this._focusNextNode = oncePerAnimationFrame(this._focusNextNode).bind(this);
-    this._focusParentNode = oncePerAnimationFrame(this._focusParentNode).bind(this);
-
-    this._autoExpand = this._autoExpand.bind(this);
-    this._preventArrowKeyScrolling = this._preventArrowKeyScrolling.bind(this);
-    this._dfs = this._dfs.bind(this);
-    this._dfsFromRoots = this._dfsFromRoots.bind(this);
-    this._focus = this._focus.bind(this);
-    this._scrollNodeIntoView = this._scrollNodeIntoView.bind(this);
-    this._onBlur = this._onBlur.bind(this);
-    this._onKeyDown = this._onKeyDown.bind(this);
-    this._nodeIsExpandable = this._nodeIsExpandable.bind(this);
-  }
-
-  componentDidMount() {
-    this._autoExpand();
-    if (this.props.focused) {
-      this._scrollNodeIntoView(this.props.focused);
-    }
-  }
-
-  componentWillReceiveProps(nextProps) {
-    this._autoExpand();
-  }
-
-  componentDidUpdate(prevProps, prevState) {
-    if (prevProps.focused !== this.props.focused) {
-      this._scrollNodeIntoView(this.props.focused);
-    }
-  }
-
-  _autoExpand() {
-    if (!this.props.autoExpandDepth) {
-      return;
-    }
-
-    // Automatically expand the first autoExpandDepth levels for new items. Do
-    // not use the usual DFS infrastructure because we don't want to ignore
-    // collapsed nodes.
-    const autoExpand = (item, currentDepth) => {
-      if (currentDepth >= this.props.autoExpandDepth || this.state.seen.has(item)) {
-        return;
-      }
-
-      this.props.onExpand(item);
-      this.state.seen.add(item);
-
-      const children = this.props.getChildren(item);
-      const length = children.length;
-      for (let i = 0; i < length; i++) {
-        autoExpand(children[i], currentDepth + 1);
-      }
-    };
-
-    const roots = this.props.getRoots();
-    const length = roots.length;
-    if (this.props.autoExpandAll) {
-      for (let i = 0; i < length; i++) {
-        autoExpand(roots[i], 0);
-      }
-    } else if (length != 0) {
-      autoExpand(roots[0], 0);
-    }
-  }
-
-  _preventArrowKeyScrolling(e) {
-    switch (e.key) {
-      case "ArrowUp":
-      case "ArrowDown":
-      case "ArrowLeft":
-      case "ArrowRight":
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.nativeEvent) {
-          if (e.nativeEvent.preventDefault) {
-            e.nativeEvent.preventDefault();
-          }
-          if (e.nativeEvent.stopPropagation) {
-            e.nativeEvent.stopPropagation();
-          }
-        }
-    }
-  }
-
-  /**
-   * Perform a pre-order depth-first search from item.
-   */
-  _dfs(item, maxDepth = Infinity, traversal = [], _depth = 0) {
-    traversal.push({ item, depth: _depth });
-
-    if (!this.props.isExpanded(item)) {
-      return traversal;
-    }
-
-    const nextDepth = _depth + 1;
-
-    if (nextDepth > maxDepth) {
-      return traversal;
-    }
-
-    const children = this.props.getChildren(item);
-    const length = children.length;
-    for (let i = 0; i < length; i++) {
-      this._dfs(children[i], maxDepth, traversal, nextDepth);
-    }
-
-    return traversal;
-  }
-
-  /**
-   * Perform a pre-order depth-first search over the whole forest.
-   */
-  _dfsFromRoots(maxDepth = Infinity) {
-    const traversal = [];
-
-    const roots = this.props.getRoots();
-    const length = roots.length;
-    for (let i = 0; i < length; i++) {
-      this._dfs(roots[i], maxDepth, traversal);
-    }
-
-    return traversal;
-  }
-
-  /**
-   * Expands current row.
-   *
-   * @param {Object} item
-   * @param {Boolean} expandAllChildren
-   */
-  _onExpand(item, expandAllChildren) {
-    if (this.props.onExpand) {
-      this.props.onExpand(item);
-
-      if (expandAllChildren) {
-        const children = this._dfs(item);
-        const length = children.length;
-        for (let i = 0; i < length; i++) {
-          this.props.onExpand(children[i].item);
-        }
-      }
-    }
-  }
-
-  /**
-   * Collapses current row.
-   *
-   * @param {Object} item
-   */
-  _onCollapse(item) {
-    if (this.props.onCollapse) {
-      this.props.onCollapse(item);
-    }
-  }
-
-  /**
-   * Sets the passed in item to be the focused item.
-   *
-   * @param {Object|undefined} item
-   *        The item to be focused, or undefined to focus no item.
-   *
-   * @param {Object|undefined} options
-   *        An options object which can contain:
-   *          - dir: "up" or "down" to indicate if we should scroll the element to the
-   *                 top or the bottom of the scrollable container when the element is
-   *                 off canvas.
-   */
-  _focus(item, options) {
-    this._scrollNodeIntoView(item, options);
-    if (this.props.onFocus) {
-      this.props.onFocus(item);
-    }
-  }
-
-  /**
-   * Sets the passed in item to be the focused item.
-   *
-   * @param {Object|undefined} item
-   *        The item to be scrolled to.
-   *
-   * @param {Object|undefined} options
-   *        An options object which can contain:
-   *          - dir: "up" or "down" to indicate if we should scroll the element to the
-   *                 top or the bottom of the scrollable container when the element is
-   *                 off canvas.
-   */
-  _scrollNodeIntoView(item, options = {}) {
-    if (item !== undefined) {
-      const treeElement = this.treeRef;
-      const element = document.getElementById(this.props.getKey(item));
-      if (element) {
-        const { top, bottom } = element.getBoundingClientRect();
-        const closestScrolledParent = node => {
-          if (node == null) {
-            return null;
-          }
-
-          if (node.scrollHeight > node.clientHeight) {
-            return node;
-          }
-          return closestScrolledParent(node.parentNode);
-        };
-        const scrolledParent = closestScrolledParent(treeElement);
-        const isVisible = !scrolledParent || top >= 0 && bottom <= scrolledParent.clientHeight;
-
-        if (!isVisible) {
-          let scrollToTop = !options.alignTo && top < 0 || options.alignTo === "top";
-          element.scrollIntoView(scrollToTop);
-        }
-      }
-    }
-  }
-
-  /**
-   * Sets the state to have no focused item.
-   */
-  _onBlur() {
-    this._focus(undefined);
-  }
-
-  /**
-   * Handles key down events in the tree's container.
-   *
-   * @param {Event} e
-   */
-  _onKeyDown(e) {
-    if (this.props.focused == null) {
-      return;
-    }
-
-    // Allow parent nodes to use navigation arrows with modifiers.
-    if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) {
-      return;
-    }
-
-    this._preventArrowKeyScrolling(e);
-
-    switch (e.key) {
-      case "ArrowUp":
-        this._focusPrevNode();
-        return;
-
-      case "ArrowDown":
-        this._focusNextNode();
-        return;
-
-      case "ArrowLeft":
-        if (this.props.isExpanded(this.props.focused) && this._nodeIsExpandable(this.props.focused)) {
-          this._onCollapse(this.props.focused);
-        } else {
-          this._focusParentNode();
-        }
-        return;
-
-      case "ArrowRight":
-        if (this._nodeIsExpandable(this.props.focused) && !this.props.isExpanded(this.props.focused)) {
-          this._onExpand(this.props.focused);
-        } else {
-          this._focusNextNode();
-        }
-    }
-  }
-
-  /**
-   * Sets the previous node relative to the currently focused item, to focused.
-   */
-  _focusPrevNode() {
-    // Start a depth first search and keep going until we reach the currently
-    // focused node. Focus the previous node in the DFS, if it exists. If it
-    // doesn't exist, we're at the first node already.
-
-    let prev;
-
-    const traversal = this._dfsFromRoots();
-    const length = traversal.length;
-    for (let i = 0; i < length; i++) {
-      const item = traversal[i].item;
-      if (item === this.props.focused) {
-        break;
-      }
-      prev = item;
-    }
-    if (prev === undefined) {
-      return;
-    }
-
-    this._focus(prev, { alignTo: "top" });
-  }
-
-  /**
-   * Handles the down arrow key which will focus either the next child
-   * or sibling row.
-   */
-  _focusNextNode() {
-    // Start a depth first search and keep going until we reach the currently
-    // focused node. Focus the next node in the DFS, if it exists. If it
-    // doesn't exist, we're at the last node already.
-    const traversal = this._dfsFromRoots();
-    const length = traversal.length;
-    let i = 0;
-
-    while (i < length) {
-      if (traversal[i].item === this.props.focused) {
-        break;
-      }
-      i++;
-    }
-
-    if (i + 1 < traversal.length) {
-      this._focus(traversal[i + 1].item, { alignTo: "bottom" });
-    }
-  }
-
-  /**
-   * Handles the left arrow key, going back up to the current rows'
-   * parent row.
-   */
-  _focusParentNode() {
-    const parent = this.props.getParent(this.props.focused);
-    if (!parent) {
-      this._focusPrevNode(this.props.focused);
-      return;
-    }
-
-    const traversal = this._dfsFromRoots();
-    const length = traversal.length;
-    let parentIndex = 0;
-    for (; parentIndex < length; parentIndex++) {
-      if (traversal[parentIndex].item === parent) {
-        break;
-      }
-    }
-
-    this._focus(parent, { alignTo: "top" });
-  }
-
-  _nodeIsExpandable(item) {
-    return this.props.isExpandable ? this.props.isExpandable(item) : !!this.props.getChildren(item).length;
-  }
-
-  render() {
-    const traversal = this._dfsFromRoots();
-    const {
-      focused
-    } = this.props;
-
-    const nodes = traversal.map((v, i) => {
-      const { item, depth } = traversal[i];
-      const key = this.props.getKey(item, i);
-      return TreeNodeFactory({
-        key,
-        id: key,
-        index: i,
-        item,
-        depth,
-        renderItem: this.props.renderItem,
-        focused: focused === item,
-        expanded: this.props.isExpanded(item),
-        isExpandable: this._nodeIsExpandable(item),
-        onExpand: this._onExpand,
-        onCollapse: this._onCollapse,
-        onClick: e => {
-          this._focus(item);
-          if (this.props.isExpanded(item)) {
-            this.props.onCollapse(item);
-          } else {
-            this.props.onExpand(item, e.altKey);
-          }
-        }
-      });
-    });
-
-    const style = Object.assign({}, this.props.style || {}, {
-      padding: 0,
-      margin: 0
-    });
-
-    return _reactDomFactories2.default.div({
-      className: `tree ${this.props.className ? this.props.className : ""}`,
-      ref: el => {
-        this.treeRef = el;
-      },
-      role: "tree",
-      tabIndex: "0",
-      onKeyDown: this._onKeyDown,
-      onKeyPress: this._preventArrowKeyScrolling,
-      onKeyUp: this._preventArrowKeyScrolling,
-      onFocus: ({ nativeEvent }) => {
-        if (focused || !nativeEvent || !this.treeRef) {
-          return;
-        }
-
-        let { explicitOriginalTarget } = nativeEvent;
-        // Only set default focus to the first tree node if the focus came
-        // from outside the tree (e.g. by tabbing to the tree from other
-        // external elements).
-        if (explicitOriginalTarget !== this.treeRef && !this.treeRef.contains(explicitOriginalTarget)) {
-          this._focus(traversal[0].item);
-        }
-      },
-      onBlur: this._onBlur,
-      onClick: () => {
-        // Focus should always remain on the tree container itself.
-        this.treeRef.focus();
-      },
-      "aria-label": this.props.label,
-      "aria-labelledby": this.props.labelledby,
-      "aria-activedescendant": focused && this.props.getKey(focused),
-      style
-    }, nodes);
-  }
-}
-
-exports.default = Tree;
 
 /***/ }),
 
@@ -16412,7 +12922,7 @@ function findSource(sourceTree, sourceUrl) {
 
 function getDirectories(sourceUrl, sourceTree) {
   const url = (0, _getURL.getURL)(sourceUrl);
-  const fullUrl = `/${url.group}${url.path}`;
+  const fullUrl = `${url.group}${url.path}`;
   const parentMap = (0, _utils.createParentMap)(sourceTree);
   const source = findSource(sourceTree, fullUrl);
   if (!source) {
@@ -16484,8 +12994,6 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _redux = __webpack_require__(3593);
-
 var _reactRedux = __webpack_require__(3592);
 
 var _text = __webpack_require__(1387);
@@ -16513,6 +13021,10 @@ var _SourcesTree = __webpack_require__(1553);
 var _SourcesTree2 = _interopRequireDefault(_SourcesTree);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class PrimaryPanes extends _react.Component {
 
@@ -16603,15 +13115,15 @@ class PrimaryPanes extends _react.Component {
       })
     );
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
-exports.default = (0, _reactRedux.connect)(state => ({
+const mapStateToProps = state => ({
   selectedTab: (0, _selectors.getSelectedPrimaryPaneTab)(state),
   sources: (0, _selectors.getSources)(state),
   sourceSearchOn: (0, _selectors.getActiveSearch)(state) === "source"
-}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(PrimaryPanes);
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(PrimaryPanes);
 
 /***/ }),
 
@@ -16630,9 +13142,13 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _redux = __webpack_require__(3593);
+var _devtoolsContextmenu = __webpack_require__(1413);
 
 var _reactRedux = __webpack_require__(3592);
+
+var _clipboard = __webpack_require__(1388);
+
+var _function = __webpack_require__(1597);
 
 var _actions = __webpack_require__(1354);
 
@@ -16665,6 +13181,45 @@ class Outline extends _react.Component {
     selectLocation({ sourceId: selectedSourceId, line: startLine });
   }
 
+  onContextMenu(event, func) {
+    event.stopPropagation();
+    event.preventDefault();
+
+    const {
+      selectedSource,
+      getFunctionText,
+      flashLineRange,
+      selectedLocation
+    } = this.props;
+
+    const copyFunctionKey = L10N.getStr("copyFunction.accesskey");
+    const copyFunctionLabel = L10N.getStr("copyFunction.label");
+
+    if (!selectedSource) {
+      return;
+    }
+
+    const sourceLine = func.location.start.line;
+    const functionText = getFunctionText(sourceLine);
+
+    const copyFunctionItem = {
+      id: "node-menu-copy-function",
+      label: copyFunctionLabel,
+      accesskey: copyFunctionKey,
+      disabled: !functionText,
+      click: () => {
+        flashLineRange({
+          start: func.location.start.line,
+          end: func.location.end.line,
+          sourceId: selectedLocation.sourceId
+        });
+        return (0, _clipboard.copyToTheClipboard)(functionText);
+      }
+    };
+    const menuOptions = [copyFunctionItem];
+    (0, _devtoolsContextmenu.showMenu)(event, menuOptions);
+  }
+
   renderPlaceholder() {
     const placeholderMessage = this.props.selectedSource ? L10N.getStr("outline.noFunctions") : L10N.getStr("outline.noFileSelected");
 
@@ -16691,7 +13246,8 @@ class Outline extends _react.Component {
       {
         key: `${name}:${location.start.line}:${location.start.column}`,
         className: "outline-list__element",
-        onClick: () => this.selectItem(location)
+        onClick: () => this.selectItem(location),
+        onContextMenu: e => this.onContextMenu(e, func)
       },
       _react2.default.createElement(
         "span",
@@ -16797,13 +13353,18 @@ class Outline extends _react.Component {
 }
 
 exports.Outline = Outline;
-exports.default = (0, _reactRedux.connect)(state => {
+const mapStateToProps = state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
+  const symbols = (0, _selectors.getSymbols)(state, selectedSource);
   return {
-    symbols: (0, _selectors.getSymbols)(state, selectedSource && selectedSource.toJS()),
-    selectedSource
+    symbols,
+    selectedSource,
+    selectedLocation: (0, _selectors.getSelectedLocation)(state),
+    getFunctionText: line => (0, _function.findFunctionText)(line, selectedSource, symbols)
   };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Outline);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Outline);
 
 /***/ }),
 
@@ -16867,16 +13428,6 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // Dependencies
-const sourceTypes = {
-  coffee: "coffeescript",
-  js: "javascript",
-  jsx: "react",
-  ts: "typescript"
-};
-
-// Actions
-
-
 class SourcesTree extends _react.Component {
 
   constructor(props) {
@@ -16943,6 +13494,24 @@ class SourcesTree extends _react.Component {
     }
   }
 
+  renderItemName(name) {
+    const hosts = {
+      "ng://": "Angular",
+      "webpack://": "Webpack",
+      "moz-extension://": L10N.getStr("extensionsText")
+    };
+
+    return hosts[name] || name;
+  }
+
+  renderEmptyElement(message) {
+    return _react2.default.createElement(
+      "div",
+      { className: "no-sources-message" },
+      message
+    );
+  }
+
   render() {
     const { expanded, projectRoot } = this.props;
     const {
@@ -16961,6 +13530,8 @@ class SourcesTree extends _react.Component {
       this.props.setExpandedState(expandedState);
     };
 
+    const isEmpty = sourceTree.contents.length === 0;
+
     const isCustomRoot = projectRoot !== "";
     let roots = () => sourceTree.contents;
 
@@ -16968,7 +13539,15 @@ class SourcesTree extends _react.Component {
 
     // The "sourceTree.contents[0]" check ensures that there are contents
     // A custom root with no existing sources will be ignored
-    if (isCustomRoot && sourceTree.contents[0]) {
+    if (isCustomRoot) {
+      const sourceContents = sourceTree.contents[0];
+      let rootLabel = projectRoot.split("/").pop();
+      roots = () => sourceContents.contents;
+      if (sourceContents && sourceContents.name !== rootLabel) {
+        rootLabel = sourceContents.contents[0].name;
+        roots = () => sourceContents.contents[0].contents;
+      }
+
       clearProjectRootButton = _react2.default.createElement(
         "button",
         {
@@ -16981,13 +13560,15 @@ class SourcesTree extends _react.Component {
         _react2.default.createElement(
           "span",
           { className: "sources-clear-root-label" },
-          sourceTree.contents[0].name
+          rootLabel
         )
       );
-      roots = () => sourceTree.contents[0].contents;
     }
 
-    const isEmpty = sourceTree.contents.length === 0;
+    if (isEmpty && !isCustomRoot) {
+      return this.renderEmptyElement(L10N.getStr("sources.noSourcesAvailable"));
+    }
+
     const treeProps = {
       autoExpandAll: false,
       autoExpandDepth: expanded ? 0 : 1,
@@ -17008,14 +13589,6 @@ class SourcesTree extends _react.Component {
 
     const tree = _react2.default.createElement(_ManagedTree2.default, treeProps);
 
-    if (isEmpty) {
-      return _react2.default.createElement(
-        "div",
-        { className: "no-sources-message" },
-        L10N.getStr("sources.noSourcesAvailable")
-      );
-    }
-
     const onKeyDown = e => {
       if (e.keyCode === 13 && focusedItem) {
         this.selectItem(focusedItem);
@@ -17034,7 +13607,7 @@ class SourcesTree extends _react.Component {
         { className: "sources-clear-root-container" },
         clearProjectRootButton
       ) : null,
-      _react2.default.createElement(
+      isEmpty ? this.renderEmptyElement(L10N.getStr("sources.noSourcesAvailableRoot")) : _react2.default.createElement(
         "div",
         { className: "sources-list", onKeyDown: onKeyDown },
         tree
@@ -17042,6 +13615,8 @@ class SourcesTree extends _react.Component {
     );
   }
 }
+
+// Actions
 
 var _initialiseProps = function () {
   this.focusItem = item => {
@@ -17070,11 +13645,12 @@ var _initialiseProps = function () {
   this.getIcon = (sources, item, depth) => {
     const { debuggeeUrl, projectRoot } = this.props;
 
-    if (item.path === "/Webpack") {
+    if (item.path === "webpack://") {
       return _react2.default.createElement(_Svg2.default, { name: "webpack" });
-    }
-    if (item.path === "/Angular") {
+    } else if (item.path === "ng://") {
       return _react2.default.createElement(_Svg2.default, { name: "angular" });
+    } else if (item.path === "moz-extension://") {
+      return _react2.default.createElement("img", { className: "extension" });
     }
 
     if (depth === 0 && projectRoot === "") {
@@ -17088,14 +13664,9 @@ var _initialiseProps = function () {
     if (!(0, _sourcesTree.nodeHasChildren)(item)) {
       const obj = item.contents.get("id");
       const source = sources.get(obj);
-      if (source && source.get("isBlackBoxed")) {
-        return _react2.default.createElement("img", { className: "blackBox" });
-      }
-
-      const sourceType = sourceTypes[(0, _sourcesTree.getExtension)(source)];
-      return _react2.default.createElement("img", { className: sourceType || "file" });
+      const className = (0, _classnames2.default)((0, _source.getSourceClassnames)(source), "source-icon");
+      return _react2.default.createElement("img", { className: className });
     }
-
     return _react2.default.createElement("img", { className: "folder" });
   };
 
@@ -17181,7 +13752,7 @@ var _initialiseProps = function () {
         "span",
         { className: "label" },
         " ",
-        item.name,
+        this.renderItemName(item.name),
         " "
       )
     );
@@ -17220,7 +13791,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -17240,15 +13811,13 @@ var _classnames2 = _interopRequireDefault(_classnames);
 
 var _source = __webpack_require__(1356);
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
 var _prefs = __webpack_require__(226);
 
 var _indentation = __webpack_require__(1438);
 
 var _selectors = __webpack_require__(3590);
-
-var _redux = __webpack_require__(3593);
 
 var _actions = __webpack_require__(1354);
 
@@ -17316,16 +13885,16 @@ __webpack_require__(1333);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+// Redux actions
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 const cssVars = {
   searchbarHeight: "var(--editor-searchbar-height)",
   secondSearchbarHeight: "var(--editor-second-searchbar-height)",
   footerHeight: "var(--editor-footer-height)"
 };
-
-// Redux actions
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class Editor extends _react.PureComponent {
   constructor(props) {
@@ -17386,7 +13955,7 @@ class Editor extends _react.PureComponent {
       } = this.props;
 
       // ignore right clicks in the gutter
-      if (ev.ctrlKey && ev.button === 0 || ev.which === 3 || selectedSource && selectedSource.get("isBlackBoxed") || !selectedSource) {
+      if (ev.ctrlKey && ev.button === 0 || ev.which === 3 || selectedSource && selectedSource.isBlackBoxed || !selectedSource) {
         return;
       }
 
@@ -17493,7 +14062,7 @@ class Editor extends _react.PureComponent {
     codeMirrorGutter.addEventListener("mouseleave", toggleFoldMarkerVisibility);
     codeMirrorGutter.addEventListener("mouseenter", toggleFoldMarkerVisibility);
 
-    if (!(0, _devtoolsConfig.isFirefox)()) {
+    if (!(0, _devtoolsEnvironment.isFirefox)()) {
       codeMirror.on("gutterContextMenu", (cm, line, eventName, event) => this.onGutterContextMenu(event));
       codeMirror.on("contextmenu", (cm, event) => this.openMenu(event));
     } else {
@@ -17501,13 +14070,11 @@ class Editor extends _react.PureComponent {
     }
 
     this.setState({ editor });
+    (0, _editor.setEditor)(editor);
     return editor;
   }
 
   componentDidMount() {
-    const editor = this.setupEditor();
-
-    const { selectedSource } = this.props;
     const { shortcuts } = this.context;
 
     const searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
@@ -17518,8 +14085,6 @@ class Editor extends _react.PureComponent {
     shortcuts.on("Esc", this.onEscape);
     shortcuts.on(searchAgainPrevKey, this.onSearchAgain);
     shortcuts.on(searchAgainKey, this.onSearchAgain);
-
-    (0, _editor.updateDocument)(editor, selectedSource);
   }
 
   componentWillUnmount() {
@@ -17538,12 +14103,18 @@ class Editor extends _react.PureComponent {
   }
 
   componentDidUpdate(prevProps, prevState) {
+    const { selectedSource } = this.props;
     // NOTE: when devtools are opened, the editor is not set when
     // the source loads so we need to wait until the editor is
     // set to update the text and size.
-    if (!prevState.editor && this.state.editor) {
-      this.setText(this.props);
-      this.setSize(this.props);
+    if (!prevState.editor && selectedSource) {
+      if (!this.state.editor) {
+        const editor = this.setupEditor();
+        (0, _editor.updateDocument)(editor, selectedSource);
+      } else {
+        this.setText(this.props);
+        this.setSize(this.props);
+      }
     }
   }
 
@@ -17655,6 +14226,7 @@ class Editor extends _react.PureComponent {
       return;
     }
 
+    // check if we previously had a selected source
     if (!selectedSource) {
       return this.clearEditor();
     }
@@ -17787,6 +14359,7 @@ Editor.contextTypes = {
 const mapStateToProps = state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
   const sourceId = selectedSource ? selectedSource.get("id") : "";
+
   return {
     selectedLocation: (0, _selectors.getSelectedLocation)(state),
     selectedSource,
@@ -17798,7 +14371,7 @@ const mapStateToProps = state => {
   };
 };
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Editor);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Editor);
 
 /***/ }),
 
@@ -17817,8 +14390,6 @@ var _react = __webpack_require__(0);
 var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
-
-var _redux = __webpack_require__(3593);
 
 var _actions = __webpack_require__(1354);
 
@@ -17845,10 +14416,6 @@ var _PaneToggle2 = _interopRequireDefault(_PaneToggle);
 __webpack_require__(1322);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class SourceFooter extends _react.PureComponent {
   prettyPrintButton() {
@@ -17886,7 +14453,7 @@ class SourceFooter extends _react.PureComponent {
       return;
     }
 
-    const blackboxed = selectedSource.get("isBlackBoxed");
+    const blackboxed = selectedSource.isBlackBoxed;
 
     const tooltip = L10N.getStr("sourceFooter.blackbox");
     const type = "black-box";
@@ -17910,7 +14477,7 @@ class SourceFooter extends _react.PureComponent {
   blackBoxSummary() {
     const { selectedSource } = this.props;
 
-    if (!selectedSource || !selectedSource.get("isBlackBoxed")) {
+    if (!selectedSource || !selectedSource.isBlackBoxed) {
       return;
     }
 
@@ -18008,19 +14575,24 @@ class SourceFooter extends _react.PureComponent {
       this.renderToggleButton()
     );
   }
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-exports.default = (0, _reactRedux.connect)(state => {
+const mapStateToProps = state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
   const selectedId = selectedSource.get("id");
   const source = selectedSource.toJS();
+
   return {
     selectedSource,
     mappedSource: (0, _sources.getGeneratedSource)(state, source),
     prettySource: (0, _selectors.getPrettySource)(state, selectedId),
     endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end")
   };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SourceFooter);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(SourceFooter);
 
 /***/ }),
 
@@ -18034,7 +14606,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -18043,8 +14615,6 @@ var _react = __webpack_require__(0);
 var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
-
-var _redux = __webpack_require__(3593);
 
 var _Svg = __webpack_require__(1359);
 
@@ -18074,6 +14644,10 @@ __webpack_require__(1323);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 function getShortcuts() {
   const searchAgainKey = L10N.getStr("sourceSearch.search.again.key2");
   const searchAgainPrevKey = L10N.getStr("sourceSearch.search.againPrev.key2");
@@ -18084,9 +14658,7 @@ function getShortcuts() {
     searchAgainShortcut: searchAgainKey,
     searchShortcut: searchKey
   };
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
 class SearchBar extends _react.Component {
   constructor(props) {
@@ -18097,10 +14669,10 @@ class SearchBar extends _react.Component {
     };
 
     this.clearSearch = () => {
-      const { editor: ed, query, modifiers } = this.props;
-      if (ed && modifiers) {
+      const { editor: ed, query } = this.props;
+      if (ed) {
         const ctx = { ed, cm: ed.codeMirror };
-        (0, _editor.removeOverlay)(ctx, query, modifiers.toJS());
+        (0, _editor.removeOverlay)(ctx, query);
       }
     };
 
@@ -18346,17 +14918,17 @@ SearchBar.contextTypes = {
   shortcuts: _propTypes2.default.object
 };
 
-exports.default = (0, _reactRedux.connect)(state => {
-  return {
-    searchOn: (0, _selectors.getActiveSearch)(state) === "file",
-    selectedSource: (0, _selectors.getSelectedSource)(state),
-    selectedLocation: (0, _selectors.getSelectedLocation)(state),
-    query: (0, _selectors.getFileSearchQuery)(state),
-    modifiers: (0, _selectors.getFileSearchModifiers)(state),
-    highlightedLineRange: (0, _selectors.getHighlightedLineRange)(state),
-    searchResults: (0, _selectors.getFileSearchResults)(state)
-  };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SearchBar);
+const mapStateToProps = state => ({
+  searchOn: (0, _selectors.getActiveSearch)(state) === "file",
+  selectedSource: (0, _selectors.getSelectedSource)(state),
+  selectedLocation: (0, _selectors.getSelectedLocation)(state),
+  query: (0, _selectors.getFileSearchQuery)(state),
+  modifiers: (0, _selectors.getFileSearchModifiers)(state),
+  highlightedLineRange: (0, _selectors.getHighlightedLineRange)(state),
+  searchResults: (0, _selectors.getFileSearchResults)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(SearchBar);
 
 /***/ }),
 
@@ -18468,8 +15040,6 @@ var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
 
-var _lodash = __webpack_require__(2);
-
 var _Popup = __webpack_require__(1559);
 
 var _Popup2 = _interopRequireDefault(_Popup);
@@ -18484,15 +15054,17 @@ var _editor = __webpack_require__(1358);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 class Preview extends _react.PureComponent {
   constructor(props) {
     super(props);
 
     this.onMouseOver = e => {
       const { target } = e;
-      if (this.props.selectedFrameVisible) {
-        this.props.updatePreview(target, this.props.editor);
-      }
+      this.props.updatePreview(target, this.props.editor);
     };
 
     this.onMouseUp = () => {
@@ -18505,26 +15077,33 @@ class Preview extends _react.PureComponent {
       return true;
     };
 
-    this.onScroll = () => {
+    this.onMouseLeave = e => {
+      const target = e.target;
+      if (target.classList.contains("CodeMirror")) {
+        return;
+      }
+
       this.props.clearPreview();
     };
 
-    this.onClose = e => {
+    this.onClose = () => {
       this.props.clearPreview();
     };
 
     this.state = { selecting: false };
-    self.onMouseOver = (0, _lodash.debounce)(this.onMouseOver, 40);
   }
 
   componentDidMount() {
     const { codeMirror } = this.props.editor;
     const codeMirrorWrapper = codeMirror.getWrapperElement();
 
-    codeMirror.on("scroll", this.onScroll);
     codeMirrorWrapper.addEventListener("mouseover", this.onMouseOver);
     codeMirrorWrapper.addEventListener("mouseup", this.onMouseUp);
     codeMirrorWrapper.addEventListener("mousedown", this.onMouseDown);
+    codeMirrorWrapper.addEventListener("mouseleave", this.onMouseLeave);
+    if (document.body) {
+      document.body.addEventListener("mouseleave", this.onMouseLeave);
+    }
   }
 
   componentWillUnmount() {
@@ -18533,7 +15112,10 @@ class Preview extends _react.PureComponent {
     codeMirrorWrapper.removeEventListener("mouseover", this.onMouseOver);
     codeMirrorWrapper.removeEventListener("mouseup", this.onMouseUp);
     codeMirrorWrapper.removeEventListener("mousedown", this.onMouseDown);
-    codeMirror.off("scroll", this.onScroll);
+    codeMirrorWrapper.removeEventListener("mouseleave", this.onMouseLeave);
+    if (document.body) {
+      document.body.removeEventListener("mouseleave", this.onMouseLeave);
+    }
   }
 
   render() {
@@ -18563,12 +15145,15 @@ class Preview extends _react.PureComponent {
       expression: expression,
       popoverPos: cursorPos,
       extra: extra,
-      onClose: e => this.onClose(e)
+      onClose: this.onClose
     });
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
+
+const mapStateToProps = state => ({
+  preview: (0, _selectors.getPreview)(state),
+  selectedSource: (0, _selectors.getSelectedSource)(state)
+});
 
 const {
   addExpression,
@@ -18577,16 +15162,14 @@ const {
   clearPreview
 } = _actions2.default;
 
-exports.default = (0, _reactRedux.connect)(state => ({
-  preview: (0, _selectors.getPreview)(state),
-  selectedSource: (0, _selectors.getSelectedSource)(state),
-  selectedFrameVisible: (0, _selectors.isSelectedFrameVisible)(state)
-}), {
+const mapDispatchToProps = {
   addExpression,
   setPopupObjectProperties,
   updatePreview,
   clearPreview
-})(Preview);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, mapDispatchToProps)(Preview);
 
 /***/ }),
 
@@ -18607,7 +15190,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
 
-var _devtoolsReps = __webpack_require__(1408);
+var _devtoolsReps = __webpack_require__(3655);
 
 var _devtoolsReps2 = _interopRequireDefault(_devtoolsReps);
 
@@ -18627,8 +15210,6 @@ var _PreviewFunction2 = _interopRequireDefault(_PreviewFunction);
 
 var _editor = __webpack_require__(1358);
 
-var _preview = __webpack_require__(1807);
-
 var _Svg = __webpack_require__(1359);
 
 var _Svg2 = _interopRequireDefault(_Svg);
@@ -18647,26 +15228,40 @@ const {
   createNode,
   getChildren,
   getValue,
-  nodeIsPrimitive
+  nodeIsPrimitive,
+  NODE_TYPES
 } = ObjectInspectorUtils.node;
 const { loadItemProperties } = ObjectInspectorUtils.loadProperties;
 
 class Popup extends _react.Component {
+  constructor(...args) {
+    var _temp;
+
+    return _temp = super(...args), this.onMouseLeave = e => {
+      const relatedTarget = e.relatedTarget;
+
+      if (relatedTarget && (relatedTarget.classList.contains("popover") || relatedTarget.classList.contains("debug-expression") || relatedTarget.classList.contains("editor-mount"))) {
+        return;
+      }
+
+      this.props.onClose();
+    }, _temp;
+  }
 
   async componentWillMount() {
     const {
       value,
-      expression,
       setPopupObjectProperties,
       popupObjectProperties
     } = this.props;
-    const root = createNode(null, expression, expression, { value });
+
+    const root = this.getRoot();
 
     if (!nodeIsPrimitive(root) && value && value.actor && !popupObjectProperties[value.actor]) {
       const onLoadItemProperties = loadItemProperties(root, _firefox.createObjectClient);
       if (onLoadItemProperties !== null) {
         const properties = await onLoadItemProperties;
-        setPopupObjectProperties(value, properties);
+        setPopupObjectProperties(root.contents.value, properties);
       }
     }
   }
@@ -18688,13 +15283,18 @@ class Popup extends _react.Component {
   }
 
   getRoot() {
-    const { expression, value } = this.props;
+    const { expression, value, extra } = this.props;
 
-    return {
+    let rootValue = value;
+    if (extra.immutable) {
+      rootValue = extra.immutable.entries;
+    }
+
+    return createNode({
       name: expression,
       path: expression,
-      contents: { value }
-    };
+      contents: { value: rootValue }
+    });
   }
 
   getChildren() {
@@ -18741,75 +15341,61 @@ class Popup extends _react.Component {
   renderReact(react, roots) {
     const reactHeader = react.displayName || "React Component";
 
-    const header = _react2.default.createElement(
+    return _react2.default.createElement(
       "div",
       { className: "header-container" },
+      _react2.default.createElement(_Svg2.default, { name: "react", className: "logo" }),
       _react2.default.createElement(
         "h3",
         null,
         reactHeader
       )
     );
-
-    roots = roots.filter(r => ["state", "props"].includes(r.name));
-    return _react2.default.createElement(
-      "div",
-      { className: "preview-popup" },
-      header,
-      this.renderObjectInspector(roots)
-    );
   }
 
   renderImmutable(immutable) {
     const immutableHeader = immutable.type || "Immutable";
 
-    const header = _react2.default.createElement(
+    return _react2.default.createElement(
       "div",
       { className: "header-container" },
-      _react2.default.createElement(_Svg2.default, { name: "immutable", className: "immutable-logo" }),
+      _react2.default.createElement(_Svg2.default, { name: "immutable", className: "logo" }),
       _react2.default.createElement(
         "h3",
         null,
         immutableHeader
       )
     );
-
-    const roots = [createNode(null, "entries", "entries", { value: immutable.entries })];
-
-    return _react2.default.createElement(
-      "div",
-      { className: "preview-popup" },
-      header,
-      this.renderObjectInspector(roots)
-    );
   }
 
   renderObjectPreview() {
+    const { extra } = this.props;
     const root = this.getRoot();
 
     if (nodeIsPrimitive(root)) {
       return null;
     }
 
-    const roots = this.getChildren();
+    let roots = this.getChildren();
     if (!Array.isArray(roots) || roots.length === 0) {
       return null;
     }
 
-    const { extra: { react, immutable } } = this.props;
-    const grip = getValue(root);
-
-    if ((0, _preview.isReactComponent)(grip)) {
-      return this.renderReact(react, roots);
+    let header = null;
+    if (extra.immutable) {
+      header = this.renderImmutable(extra.immutable);
+      roots = roots.filter(r => r.type != NODE_TYPES.PROTOTYPE);
     }
 
-    if ((0, _preview.isImmutable)(grip)) {
-      return this.renderImmutable(immutable);
+    if (extra.react) {
+      header = this.renderReact(extra.react);
+      roots = roots.filter(r => ["state", "props"].includes(r.name));
     }
 
     return _react2.default.createElement(
       "div",
       { className: "preview-popup" },
+      header,
       this.renderObjectInspector(roots)
     );
   }
@@ -18834,7 +15420,7 @@ class Popup extends _react.Component {
       roots: roots,
       autoExpandDepth: 0,
       disableWrap: true,
-      disabledFocus: true,
+      focusable: false,
       openLink: openLink,
       createObjectClient: grip => (0, _firefox.createObjectClient)(grip)
     });
@@ -18870,7 +15456,7 @@ class Popup extends _react.Component {
   }
 
   render() {
-    const { popoverPos, onClose, value, editorRef } = this.props;
+    const { popoverPos, value, editorRef } = this.props;
     const type = this.getPreviewType(value);
 
     if (value && value.type === "object" && !this.getChildren()) {
@@ -18881,7 +15467,7 @@ class Popup extends _react.Component {
       _Popover2.default,
       {
         targetPosition: popoverPos,
-        onMouseLeave: onClose,
+        onMouseLeave: this.onMouseLeave,
         type: type,
         editorRef: editorRef
       },
@@ -18891,6 +15477,10 @@ class Popup extends _react.Component {
 }
 
 exports.Popup = Popup;
+const mapStateToProps = state => ({
+  popupObjectProperties: (0, _selectors.getAllPopupObjectProperties)(state)
+});
+
 const {
   addExpression,
   selectSourceURL,
@@ -18899,2163 +15489,15 @@ const {
   openLink
 } = _actions2.default;
 
-exports.default = (0, _reactRedux.connect)(state => ({
-  popupObjectProperties: (0, _selectors.getAllPopupObjectProperties)(state)
-}), {
+const mapDispatchToProps = {
   addExpression,
   selectSourceURL,
   selectLocation,
   setPopupObjectProperties,
   openLink
-})(Popup);
-
-/***/ }),
-
-/***/ 1560:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders undefined value
- */
-const Undefined = function () {
-  return span({ className: "objectBox objectBox-undefined" }, "undefined");
 };
 
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true) {
-    return object === undefined;
-  }
-
-  return object && object.type && object.type == "undefined" || getGripType(object, noGrip) == "undefined";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(Undefined),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1561:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const { wrapRender } = __webpack_require__(1353);
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders null value
- */
-function Null(props) {
-  return span({ className: "objectBox objectBox-null" }, "null");
-}
-
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true) {
-    return object === null;
-  }
-
-  if (object && object.type && object.type == "null") {
-    return true;
-  }
-
-  return object == null;
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(Null),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1563:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a number
- */
-Number.propTypes = {
-  object: PropTypes.oneOfType([PropTypes.object, PropTypes.number, PropTypes.bool]).isRequired
-};
-
-function Number(props) {
-  let value = props.object;
-
-  return span({ className: "objectBox objectBox-number" }, stringify(value));
-}
-
-function stringify(object) {
-  let isNegativeZero = Object.is(object, -0) || object.type && object.type == "-0";
-
-  return isNegativeZero ? "-0" : String(object);
-}
-
-function supportsObject(object, noGrip = false) {
-  return ["boolean", "number", "-0"].includes(getGripType(object, noGrip));
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(Number),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1564:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-const {
-  wrapRender,
-  ellipsisElement
-} = __webpack_require__(1353);
-const PropRep = __webpack_require__(1381);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-const DEFAULT_TITLE = "Object";
-
-/**
- * Renders an object. An object is represented by a list of its
- * properties enclosed in curly brackets.
- */
-ObjectRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  title: PropTypes.string
-};
-
-function ObjectRep(props) {
-  let object = props.object;
-  let propsArray = safePropIterator(props, object);
-
-  if (props.mode === MODE.TINY) {
-    const tinyModeItems = [];
-    if (getTitle(props, object) !== DEFAULT_TITLE) {
-      tinyModeItems.push(getTitleElement(props, object));
-    } else {
-      tinyModeItems.push(span({
-        className: "objectLeftBrace"
-      }, "{"), propsArray.length > 0 ? ellipsisElement : null, span({
-        className: "objectRightBrace"
-      }, "}"));
-    }
-
-    return span({ className: "objectBox objectBox-object" }, ...tinyModeItems);
-  }
-
-  return span({ className: "objectBox objectBox-object" }, getTitleElement(props, object), span({
-    className: "objectLeftBrace"
-  }, " { "), ...propsArray, span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitleElement(props, object) {
-  return span({ className: "objectTitle" }, getTitle(props, object));
-}
-
-function getTitle(props, object) {
-  return props.title || DEFAULT_TITLE;
-}
-
-function safePropIterator(props, object, max) {
-  max = typeof max === "undefined" ? 3 : max;
-  try {
-    return propIterator(props, object, max);
-  } catch (err) {
-    console.error(err);
-  }
-  return [];
-}
-
-function propIterator(props, object, max) {
-  // Work around https://bugzilla.mozilla.org/show_bug.cgi?id=945377
-  if (Object.prototype.toString.call(object) === "[object Generator]") {
-    object = Object.getPrototypeOf(object);
-  }
-
-  const elements = [];
-  const unimportantProperties = [];
-  let propertiesNumber = 0;
-  const propertiesNames = Object.keys(object);
-
-  const pushPropRep = (name, value) => {
-    elements.push(PropRep({
-      ...props,
-      key: name,
-      mode: MODE.TINY,
-      name,
-      object: value,
-      equal: ": "
-    }));
-    propertiesNumber++;
-
-    if (propertiesNumber < propertiesNames.length) {
-      elements.push(", ");
-    }
-  };
-
-  try {
-    for (let name of propertiesNames) {
-      if (propertiesNumber >= max) {
-        break;
-      }
-
-      let value;
-      try {
-        value = object[name];
-      } catch (exc) {
-        continue;
-      }
-
-      // Object members with non-empty values are preferred since it gives the
-      // user a better overview of the object.
-      if (isInterestingProp(value)) {
-        pushPropRep(name, value);
-      } else {
-        // If the property is not important, put its name on an array for later use.
-        unimportantProperties.push(name);
-      }
-    }
-  } catch (err) {
-    console.error(err);
-  }
-
-  if (propertiesNumber < max) {
-    for (let name of unimportantProperties) {
-      if (propertiesNumber >= max) {
-        break;
-      }
-
-      let value;
-      try {
-        value = object[name];
-      } catch (exc) {
-        continue;
-      }
-
-      pushPropRep(name, value);
-    }
-  }
-
-  if (propertiesNumber < propertiesNames.length) {
-    elements.push(ellipsisElement);
-  }
-
-  return elements;
-}
-
-function isInterestingProp(value) {
-  const type = typeof value;
-  return type == "boolean" || type == "number" || type == "string" && value;
-}
-
-function supportsObject(object) {
-  return true;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ObjectRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1565:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a symbol.
- */
-SymbolRep.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function SymbolRep(props) {
-  let {
-    className = "objectBox objectBox-symbol",
-    object
-  } = props;
-  let { name } = object;
-
-  return span({
-    className,
-    "data-link-actor-id": object.actor
-  }, `Symbol(${name || ""})`);
-}
-
-function supportsObject(object, noGrip = false) {
-  return getGripType(object, noGrip) == "symbol";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(SymbolRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1566:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a Infinity object
- */
-InfinityRep.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function InfinityRep(props) {
-  const {
-    object
-  } = props;
-
-  return span({ className: "objectBox objectBox-number" }, object.type);
-}
-
-function supportsObject(object, noGrip = false) {
-  const type = getGripType(object, noGrip);
-  return type == "Infinity" || type == "-Infinity";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(InfinityRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1567:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const {
-  getGripType,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a NaN object
- */
-function NaNRep(props) {
-  return span({ className: "objectBox objectBox-nan" }, "NaN");
-}
-
-function supportsObject(object, noGrip = false) {
-  return getGripType(object, noGrip) == "NaN";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(NaNRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1568:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const dom = __webpack_require__(1758);
-const PropTypes = __webpack_require__(20);
-const {
-  wrapRender
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-const { span } = dom;
-
-/**
- * Renders an object. An object is represented by a list of its
- * properties enclosed in curly brackets.
- */
-Accessor.propTypes = {
-  object: PropTypes.object.isRequired,
-  mode: PropTypes.oneOf(Object.values(MODE))
-};
-
-function Accessor(props) {
-  const {
-    object
-  } = props;
-
-  const accessors = [];
-  if (hasGetter(object)) {
-    accessors.push("Getter");
-  }
-  if (hasSetter(object)) {
-    accessors.push("Setter");
-  }
-  const title = accessors.join(" & ");
-
-  return span({ className: "objectBox objectBox-accessor objectTitle" }, title);
-}
-
-function hasGetter(object) {
-  return object && object.get && object.get.type !== "undefined";
-}
-
-function hasSetter(object) {
-  return object && object.set && object.set.type !== "undefined";
-}
-
-function supportsObject(object, noGrip = false) {
-  if (noGrip !== true && (hasGetter(object) || hasSetter(object))) {
-    return true;
-  }
-
-  return false;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(Accessor),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1569:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-const { rep: StringRep } = __webpack_require__(1447);
-
-/**
- * Renders DOM attribute
- */
-Attribute.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function Attribute(props) {
-  let {
-    object
-  } = props;
-  let value = object.preview.value;
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox-Attr"
-  }, span({ className: "attrName" }, getTitle(object)), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
-}
-
-function getTitle(grip) {
-  return grip.preview.nodeName;
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return getGripType(grip, noGrip) == "Attr" && grip.preview;
-}
-
-module.exports = {
-  rep: wrapRender(Attribute),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1570:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Used to render JS built-in Date() object.
- */
-DateTime.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function DateTime(props) {
-  let grip = props.object;
-  let date;
-  try {
-    date = span({
-      "data-link-actor-id": grip.actor,
-      className: "objectBox"
-    }, getTitle(grip), span({ className: "Date" }, new Date(grip.preview.timestamp).toISOString()));
-  } catch (e) {
-    date = span({ className: "objectBox" }, "Invalid Date");
-  }
-
-  return date;
-}
-
-function getTitle(grip) {
-  return span({
-    className: "objectTitle"
-  }, grip.class + " ");
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return getGripType(grip, noGrip) == "Date" && grip.preview;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(DateTime),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1571:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders DOM document object.
- */
-Document.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function Document(props) {
-  let grip = props.object;
-  const location = getLocation(grip);
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-document"
-  }, getTitle(grip), location ? span({ className: "location" }, ` ${location}`) : null);
-}
-
-function getLocation(grip) {
-  let location = grip.preview.location;
-  return location ? getURLDisplayString(location) : null;
-}
-
-function getTitle(grip) {
-  return span({
-    className: "objectTitle"
-  }, grip.class);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  const type = getGripType(object, noGrip);
-  return object.preview && (type === "HTMLDocument" || type === "XULDocument");
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(Document),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1572:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-
-const { MODE } = __webpack_require__(1357);
-const { rep } = __webpack_require__(1409);
-
-/**
- * Renders DOM event objects.
- */
-Event.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function Event(props) {
-  let gripProps = {
-    ...props,
-    title: getTitle(props),
-    object: {
-      ...props.object,
-      preview: {
-        ...props.object.preview,
-        ownProperties: {}
-      }
-    }
-  };
-
-  if (gripProps.object.preview.target) {
-    Object.assign(gripProps.object.preview.ownProperties, {
-      target: gripProps.object.preview.target
-    });
-  }
-  Object.assign(gripProps.object.preview.ownProperties, gripProps.object.preview.properties);
-
-  delete gripProps.object.preview.properties;
-  gripProps.object.ownPropertyLength = Object.keys(gripProps.object.preview.ownProperties).length;
-
-  switch (gripProps.object.class) {
-    case "MouseEvent":
-      gripProps.isInterestingProp = (type, value, name) => {
-        return ["target", "clientX", "clientY", "layerX", "layerY"].includes(name);
-      };
-      break;
-    case "KeyboardEvent":
-      gripProps.isInterestingProp = (type, value, name) => {
-        return ["target", "key", "charCode", "keyCode"].includes(name);
-      };
-      break;
-    case "MessageEvent":
-      gripProps.isInterestingProp = (type, value, name) => {
-        return ["target", "isTrusted", "data"].includes(name);
-      };
-      break;
-    default:
-      gripProps.isInterestingProp = (type, value, name) => {
-        // We want to show the properties in the order they are declared.
-        return Object.keys(gripProps.object.preview.ownProperties).includes(name);
-      };
-  }
-
-  return rep(gripProps);
-}
-
-function getTitle(props) {
-  let preview = props.object.preview;
-  let title = preview.type;
-
-  if (preview.eventKind == "key" && preview.modifiers && preview.modifiers.length) {
-    title = `${title} ${preview.modifiers.join("-")}`;
-  }
-  return title;
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.preview.kind == "DOMEvent";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(Event),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1573:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  cropString,
-  wrapRender
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-const IGNORED_SOURCE_URLS = ["debugger eval code"];
-
-/**
- * This component represents a template for Function objects.
- */
-FunctionRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  parameterNames: PropTypes.array,
-  onViewSourceInDebugger: PropTypes.func
-};
-
-function FunctionRep(props) {
-  let {
-    object: grip,
-    onViewSourceInDebugger
-  } = props;
-
-  let jumpToDefinitionButton;
-  if (onViewSourceInDebugger && grip.location && grip.location.url && !IGNORED_SOURCE_URLS.includes(grip.location.url)) {
-    jumpToDefinitionButton = dom.button({
-      className: "jump-definition",
-      draggable: false,
-      title: "Jump to definition",
-      onClick: e => {
-        // Stop the event propagation so we don't trigger ObjectInspector expand/collapse.
-        e.stopPropagation();
-        onViewSourceInDebugger(grip.location);
-      }
-    });
-  }
-
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-function",
-    // Set dir="ltr" to prevent function parentheses from
-    // appearing in the wrong direction
-    dir: "ltr"
-  }, getTitle(grip, props), getFunctionName(grip, props), "(", ...renderParams(props), ")", jumpToDefinitionButton);
-}
-
-function getTitle(grip, props) {
-  const {
-    mode
-  } = props;
-
-  if (mode === MODE.TINY && !grip.isGenerator && !grip.isAsync) {
-    return null;
-  }
-
-  let title = mode === MODE.TINY ? "" : "function ";
-
-  if (grip.isGenerator) {
-    title = mode === MODE.TINY ? "* " : "function* ";
-  }
-
-  if (grip.isAsync) {
-    title = "async" + " " + title;
-  }
-
-  return span({
-    className: "objectTitle"
-  }, title);
-}
-
-/**
- * Returns a ReactElement representing the function name.
- *
- * @param {Object} grip : Function grip
- * @param {Object} props: Function rep props
- */
-function getFunctionName(grip, props = {}) {
-  let { functionName } = props;
-  let name;
-
-  if (functionName) {
-    let end = functionName.length - 1;
-    functionName = functionName.startsWith('"') && functionName.endsWith('"') ? functionName.substring(1, end) : functionName;
-  }
-
-  if (grip.displayName != undefined && functionName != undefined && grip.displayName != functionName) {
-    name = functionName + ":" + grip.displayName;
-  } else {
-    name = cleanFunctionName(grip.userDisplayName || grip.displayName || grip.name || props.functionName || "");
-  }
-
-  return cropString(name, 100);
-}
-
-const objectProperty = /([\w\d]+)$/;
-const arrayProperty = /\[(.*?)\]$/;
-const functionProperty = /([\w\d]+)[\/\.<]*?$/;
-const annonymousProperty = /([\w\d]+)\(\^\)$/;
-
-/**
- * Decodes an anonymous naming scheme that
- * spider monkey implements based on "Naming Anonymous JavaScript Functions"
- * http://johnjbarton.github.io/nonymous/index.html
- *
- * @param {String} name : Function name to clean up
- * @returns String
- */
-function cleanFunctionName(name) {
-  for (const reg of [objectProperty, arrayProperty, functionProperty, annonymousProperty]) {
-    const match = reg.exec(name);
-    if (match) {
-      return match[1];
-    }
-  }
-
-  return name;
-}
-
-function renderParams(props) {
-  const {
-    parameterNames = []
-  } = props;
-
-  return parameterNames.filter(param => param).reduce((res, param, index, arr) => {
-    res.push(span({ className: "param" }, param));
-    if (index < arr.length - 1) {
-      res.push(span({ className: "delimiter" }, ", "));
-    }
-    return res;
-  }, []);
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  const type = getGripType(grip, noGrip);
-  if (noGrip === true || !isGrip(grip)) {
-    return type == "function";
-  }
-
-  return type == "Function";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(FunctionRep),
-  supportsObject,
-  cleanFunctionName,
-  // exported for testing purpose.
-  getFunctionName
-};
-
-/***/ }),
-
-/***/ 1574:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-// Dependencies
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-
-const PropRep = __webpack_require__(1381);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a DOM Promise object.
- */
-PromiseRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function PromiseRep(props) {
-  const object = props.object;
-  const { promiseState } = object;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-object"
-  };
-
-  if (props.mode === MODE.TINY) {
-    let { Rep } = __webpack_require__(1372);
-
-    return span(config, getTitle(object), span({
-      className: "objectLeftBrace"
-    }, " { "), Rep({ object: promiseState.state }), span({
-      className: "objectRightBrace"
-    }, " }"));
-  }
-
-  const propsArray = getProps(props, promiseState);
-  return span(config, getTitle(object), span({
-    className: "objectLeftBrace"
-  }, " { "), ...propsArray, span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitle(object) {
-  return span({
-    className: "objectTitle"
-  }, object.class);
-}
-
-function getProps(props, promiseState) {
-  const keys = ["state"];
-  if (Object.keys(promiseState).includes("value")) {
-    keys.push("value");
-  }
-
-  return keys.reduce((res, key, i) => {
-    let object = promiseState[key];
-    res = res.concat(PropRep({
-      ...props,
-      mode: MODE.TINY,
-      name: `<${key}>`,
-      object,
-      equal: ": ",
-      suppressQuotes: true
-    }));
-
-    // Interleave commas between elements
-    if (i !== keys.length - 1) {
-      res.push(", ");
-    }
-
-    return res;
-  }, []);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return getGripType(object, noGrip) == "Promise";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(PromiseRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1575:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a grip object with regular expression.
- */
-RegExp.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function RegExp(props) {
-  let { object } = props;
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-regexp regexpSource"
-  }, getSource(object));
-}
-
-function getSource(grip) {
-  return grip.displayString;
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  return getGripType(object, noGrip) == "RegExp";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(RegExp),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1576:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a grip representing CSSStyleSheet
- */
-StyleSheet.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function StyleSheet(props) {
-  let grip = props.object;
-
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-object"
-  }, getTitle(grip), span({ className: "objectPropValue" }, getLocation(grip)));
-}
-
-function getTitle(grip) {
-  let title = "StyleSheet ";
-  return span({ className: "objectBoxTitle" }, title);
-}
-
-function getLocation(grip) {
-  // Embedded stylesheets don't have URL and so, no preview.
-  let url = grip.preview ? grip.preview.url : "";
-  return url ? getURLDisplayString(url) : "";
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  return getGripType(object, noGrip) == "CSSStyleSheet";
-}
-
-// Exports from this module
-
-module.exports = {
-  rep: wrapRender(StyleSheet),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1577:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-const PropTypes = __webpack_require__(20);
-const {
-  isGrip,
-  cropString,
-  cropMultipleLines,
-  wrapRender
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-const nodeConstants = __webpack_require__(1449);
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders DOM comment node.
- */
-CommentNode.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
-};
-
-function CommentNode(props) {
-  let {
-    object,
-    mode = MODE.SHORT
-  } = props;
-
-  let { textContent } = object.preview;
-  if (mode === MODE.TINY) {
-    textContent = cropMultipleLines(textContent, 30);
-  } else if (mode === MODE.SHORT) {
-    textContent = cropString(textContent, 50);
-  }
-
-  return span({
-    className: "objectBox theme-comment",
-    "data-link-actor-id": object.actor
-  }, `<!-- ${textContent} -->`);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return object.preview && object.preview.nodeType === nodeConstants.COMMENT_NODE;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(CommentNode),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1578:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Utils
-const {
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-const { rep: StringRep } = __webpack_require__(1447);
-const { MODE } = __webpack_require__(1357);
-const nodeConstants = __webpack_require__(1449);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders DOM element node.
- */
-ElementNode.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function ElementNode(props) {
-  let {
-    object,
-    mode,
-    onDOMNodeMouseOver,
-    onDOMNodeMouseOut,
-    onInspectIconClick
-  } = props;
-  let elements = getElements(object, mode);
-
-  let isInTree = object.preview && object.preview.isConnected === true;
-
-  let baseConfig = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-node"
-  };
-  let inspectIcon;
-  if (isInTree) {
-    if (onDOMNodeMouseOver) {
-      Object.assign(baseConfig, {
-        onMouseOver: _ => onDOMNodeMouseOver(object)
-      });
-    }
-
-    if (onDOMNodeMouseOut) {
-      Object.assign(baseConfig, {
-        onMouseOut: onDOMNodeMouseOut
-      });
-    }
-
-    if (onInspectIconClick) {
-      inspectIcon = dom.button({
-        className: "open-inspector",
-        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
-        title: "Click to select the node in the inspector",
-        onClick: e => onInspectIconClick(object, e)
-      });
-    }
-  }
-
-  return span(baseConfig, ...elements, inspectIcon);
-}
-
-function getElements(grip, mode) {
-  let { attributes, nodeName } = grip.preview;
-  const nodeNameElement = span({
-    className: "tag-name"
-  }, nodeName);
-
-  if (mode === MODE.TINY) {
-    let elements = [nodeNameElement];
-    if (attributes.id) {
-      elements.push(span({ className: "attrName" }, `#${attributes.id}`));
-    }
-    if (attributes.class) {
-      elements.push(span({ className: "attrName" }, attributes.class.trim().split(/\s+/).map(cls => `.${cls}`).join("")));
-    }
-    return elements;
-  }
-  let attributeKeys = Object.keys(attributes);
-  if (attributeKeys.includes("class")) {
-    attributeKeys.splice(attributeKeys.indexOf("class"), 1);
-    attributeKeys.unshift("class");
-  }
-  if (attributeKeys.includes("id")) {
-    attributeKeys.splice(attributeKeys.indexOf("id"), 1);
-    attributeKeys.unshift("id");
-  }
-  const attributeElements = attributeKeys.reduce((arr, name, i, keys) => {
-    let value = attributes[name];
-    let attribute = span({}, span({ className: "attrName" }, name), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
-
-    return arr.concat([" ", attribute]);
-  }, []);
-
-  return [span({ className: "angleBracket" }, "<"), nodeNameElement, ...attributeElements, span({ className: "angleBracket" }, ">")];
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return object.preview && object.preview.nodeType === nodeConstants.ELEMENT_NODE;
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ElementNode),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1579:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  isGrip,
-  cropString,
-  wrapRender
-} = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders DOM #text node.
- */
-TextNode.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func
-};
-
-function TextNode(props) {
-  let {
-    object: grip,
-    mode = MODE.SHORT,
-    onDOMNodeMouseOver,
-    onDOMNodeMouseOut,
-    onInspectIconClick
-  } = props;
-
-  let baseConfig = {
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-textNode"
-  };
-  let inspectIcon;
-  let isInTree = grip.preview && grip.preview.isConnected === true;
-
-  if (isInTree) {
-    if (onDOMNodeMouseOver) {
-      Object.assign(baseConfig, {
-        onMouseOver: _ => onDOMNodeMouseOver(grip)
-      });
-    }
-
-    if (onDOMNodeMouseOut) {
-      Object.assign(baseConfig, {
-        onMouseOut: onDOMNodeMouseOut
-      });
-    }
-
-    if (onInspectIconClick) {
-      inspectIcon = dom.button({
-        className: "open-inspector",
-        draggable: false,
-        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
-        title: "Click to select the node in the inspector",
-        onClick: e => onInspectIconClick(grip, e)
-      });
-    }
-  }
-
-  if (mode === MODE.TINY) {
-    return span(baseConfig, getTitle(grip), inspectIcon);
-  }
-
-  return span(baseConfig, getTitle(grip), span({ className: "nodeValue" }, " ", `"${getTextContent(grip)}"`), inspectIcon);
-}
-
-function getTextContent(grip) {
-  return cropString(grip.preview.textContent);
-}
-
-function getTitle(grip) {
-  const title = "#text";
-  return span({}, title);
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.class == "Text";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(TextNode),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1580:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-// Utils
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-const { cleanFunctionName } = __webpack_require__(1573);
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders Error objects.
- */
-ErrorRep.propTypes = {
-  object: PropTypes.object.isRequired,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
-};
-
-function ErrorRep(props) {
-  let object = props.object;
-  let preview = object.preview;
-
-  let name;
-  if (preview && preview.name && preview.kind) {
-    switch (preview.kind) {
-      case "Error":
-        name = preview.name;
-        break;
-      case "DOMException":
-        name = preview.kind;
-        break;
-      default:
-        throw new Error("Unknown preview kind for the Error rep.");
-    }
-  } else {
-    name = "Error";
-  }
-
-  const content = [];
-
-  if (props.mode === MODE.TINY) {
-    content.push(name);
-  } else {
-    content.push(`${name}: "${preview.message}"`);
-  }
-
-  if (preview.stack && props.mode !== MODE.TINY) {
-    content.push("\n", getStacktraceElements(preview));
-  }
-
-  return span({
-    "data-link-actor-id": object.actor,
-    className: "objectBox-stackTrace"
-  }, content);
-}
-
-/**
- * Returns a React element reprensenting the Error stacktrace, i.e. transform error.stack
- * from:
- *
- * semicolon@debugger eval code:1:109
- * jkl@debugger eval code:1:63
- * asdf@debugger eval code:1:28
- * @debugger eval code:1:227
- *
- * Into a column layout:
- *
- * semicolon  (<anonymous>:8:10)
- * jkl        (<anonymous>:5:10)
- * asdf       (<anonymous>:2:10)
- *            (<anonymous>:11:1)
- */
-function getStacktraceElements(preview) {
-  const stack = [];
-  preview.stack.split("\n").forEach((line, index) => {
-    if (!line) {
-      // Skip any blank lines
-      return;
-    }
-
-    let functionName;
-    let location;
-
-    // Given the input: "functionName@scriptLocation:2:100"
-    // Result:
-    // ["functionName@scriptLocation:2:100", "functionName", "scriptLocation:2:100"]
-    const result = line.match(/^(.*)@(.*)$/);
-    if (result && result.length === 3) {
-      functionName = result[1];
-
-      // If the resource was loaded by base-loader.js, the location looks like:
-      // resource://devtools/shared/base-loader.js -> resource://path/to/file.js .
-      // What's needed is only the last part after " -> ".
-      location = result[2].split(" -> ").pop();
-    }
-
-    if (!functionName) {
-      functionName = "<anonymous>";
-    }
-
-    stack.push(span({
-      key: "fn" + index,
-      className: "objectBox-stackTrace-fn"
-    }, cleanFunctionName(functionName)), span({
-      key: "location" + index,
-      className: "objectBox-stackTrace-location"
-    }, ` (${location})`));
-  });
-
-  return span({
-    key: "stack",
-    className: "objectBox-stackTrace-grid"
-  }, stack);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-  return object.preview && getGripType(object, noGrip) === "Error" || object.class === "DOMException";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ErrorRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1581:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(1353);
-
-const { MODE } = __webpack_require__(1357);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a grip representing a window.
- */
-WindowRep.propTypes = {
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
-  object: PropTypes.object.isRequired
-};
-
-function WindowRep(props) {
-  let {
-    mode,
-    object
-  } = props;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-Window"
-  };
-
-  if (mode === MODE.TINY) {
-    return span(config, getTitle(object));
-  }
-
-  return span(config, getTitle(object, true), span({ className: "location" }, getLocation(object)));
-}
-
-function getTitle(object, trailingSpace) {
-  let title = object.displayClass || object.class || "Window";
-  if (trailingSpace === true) {
-    title = `${title} `;
-  }
-  return span({ className: "objectTitle" }, title);
-}
-
-function getLocation(object) {
-  return getURLDisplayString(object.preview.url);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  return object.preview && getGripType(object, noGrip) == "Window";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(WindowRep),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1582:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-
-const String = __webpack_require__(1447).rep;
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a grip object with textual data.
- */
-ObjectWithText.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function ObjectWithText(props) {
-  let grip = props.object;
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectTitle objectBox objectBox-" + getType(grip)
-  }, `${getType(grip)} `, getDescription(grip));
-}
-
-function getType(grip) {
-  return grip.class;
-}
-
-function getDescription(grip) {
-  return String({
-    object: grip.preview.text
-  });
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.preview.kind == "ObjectWithText";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ObjectWithText),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1583:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  isGrip,
-  getURLDisplayString,
-  wrapRender
-} = __webpack_require__(1353);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders a grip object with URL data.
- */
-ObjectWithURL.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function ObjectWithURL(props) {
-  let grip = props.object;
-  return span({
-    "data-link-actor-id": grip.actor,
-    className: "objectBox objectBox-" + getType(grip)
-  }, getTitle(grip), span({ className: "objectPropValue" }, getDescription(grip)));
-}
-
-function getTitle(grip) {
-  return span({ className: "objectTitle" }, getType(grip) + " ");
-}
-
-function getType(grip) {
-  return grip.class;
-}
-
-function getDescription(grip) {
-  return getURLDisplayString(grip.preview.url);
-}
-
-// Registration
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-
-  return grip.preview && grip.preview.kind == "ObjectWithURL";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(ObjectWithURL),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 1584:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// Dependencies
-
-const { lengthBubble } = __webpack_require__(2249);
-const PropTypes = __webpack_require__(20);
-const {
-  interleave,
-  isGrip,
-  wrapRender,
-  ellipsisElement
-} = __webpack_require__(1353);
-const PropRep = __webpack_require__(1381);
-const { MODE } = __webpack_require__(1357);
-const { ModePropType } = __webpack_require__(1448);
-
-const { span } = __webpack_require__(1758);
-
-/**
- * Renders an map. A map is represented by a list of its
- * entries enclosed in curly brackets.
- */
-GripMap.propTypes = {
-  object: PropTypes.object,
-  // @TODO Change this to Object.values once it's supported in Node's version of V8
-  mode: ModePropType,
-  isInterestingEntry: PropTypes.func,
-  onDOMNodeMouseOver: PropTypes.func,
-  onDOMNodeMouseOut: PropTypes.func,
-  onInspectIconClick: PropTypes.func,
-  title: PropTypes.string
-};
-
-function GripMap(props) {
-  let {
-    mode,
-    object
-  } = props;
-
-  const config = {
-    "data-link-actor-id": object.actor,
-    className: "objectBox objectBox-object"
-  };
-
-  const title = getTitle(props, object);
-  const isEmpty = getLength(object) === 0;
-
-  if (isEmpty || mode === MODE.TINY) {
-    return span(config, title);
-  }
-
-  const propsArray = safeEntriesIterator(props, object, maxLengthMap.get(mode));
-
-  return span(config, title, span({
-    className: "objectLeftBrace"
-  }, " { "), ...interleave(propsArray, ", "), span({
-    className: "objectRightBrace"
-  }, " }"));
-}
-
-function getTitle(props, object) {
-  const title = props.title || (object && object.class ? object.class : "Map");
-  return span({
-    className: "objectTitle" }, title, lengthBubble({
-    object,
-    mode: props.mode,
-    maxLengthMap,
-    getLength,
-    showZeroLength: true
-  }));
-}
-
-function safeEntriesIterator(props, object, max) {
-  max = typeof max === "undefined" ? 3 : max;
-  try {
-    return entriesIterator(props, object, max);
-  } catch (err) {
-    console.error(err);
-  }
-  return [];
-}
-
-function entriesIterator(props, object, max) {
-  // Entry filter. Show only interesting entries to the user.
-  let isInterestingEntry = props.isInterestingEntry || ((type, value) => {
-    return type == "boolean" || type == "number" || type == "string" && value.length != 0;
-  });
-
-  let mapEntries = object.preview && object.preview.entries ? object.preview.entries : [];
-
-  let indexes = getEntriesIndexes(mapEntries, max, isInterestingEntry);
-  if (indexes.length < max && indexes.length < mapEntries.length) {
-    // There are not enough entries yet, so we add uninteresting entries.
-    indexes = indexes.concat(getEntriesIndexes(mapEntries, max - indexes.length, (t, value, name) => {
-      return !isInterestingEntry(t, value, name);
-    }));
-  }
-
-  let entries = getEntries(props, mapEntries, indexes);
-  if (entries.length < getLength(object)) {
-    // There are some undisplayed entries. Then display "…".
-    entries.push(ellipsisElement);
-  }
-
-  return entries;
-}
-
-/**
- * Get entries ordered by index.
- *
- * @param {Object} props Component props.
- * @param {Array} entries Entries array.
- * @param {Array} indexes Indexes of entries.
- * @return {Array} Array of PropRep.
- */
-function getEntries(props, entries, indexes) {
-  let {
-    onDOMNodeMouseOver,
-    onDOMNodeMouseOut,
-    onInspectIconClick
-  } = props;
-
-  // Make indexes ordered by ascending.
-  indexes.sort(function (a, b) {
-    return a - b;
-  });
-
-  return indexes.map((index, i) => {
-    let [key, entryValue] = entries[index];
-    let value = entryValue.value !== undefined ? entryValue.value : entryValue;
-
-    return PropRep({
-      name: key,
-      equal: " \u2192 ",
-      object: value,
-      mode: MODE.TINY,
-      onDOMNodeMouseOver,
-      onDOMNodeMouseOut,
-      onInspectIconClick
-    });
-  });
-}
-
-/**
- * Get the indexes of entries in the map.
- *
- * @param {Array} entries Entries array.
- * @param {Number} max The maximum length of indexes array.
- * @param {Function} filter Filter the entry you want.
- * @return {Array} Indexes of filtered entries in the map.
- */
-function getEntriesIndexes(entries, max, filter) {
-  return entries.reduce((indexes, [key, entry], i) => {
-    if (indexes.length < max) {
-      let value = entry && entry.value !== undefined ? entry.value : entry;
-      // Type is specified in grip's "class" field and for primitive
-      // values use typeof.
-      let type = (value && value.class ? value.class : typeof value).toLowerCase();
-
-      if (filter(type, value, key)) {
-        indexes.push(i);
-      }
-    }
-
-    return indexes;
-  }, []);
-}
-
-function getLength(grip) {
-  return grip.preview.size || 0;
-}
-
-function supportsObject(grip, noGrip = false) {
-  if (noGrip === true || !isGrip(grip)) {
-    return false;
-  }
-  return grip.preview && grip.preview.kind == "MapLike";
-}
-
-const maxLengthMap = new Map();
-maxLengthMap.set(MODE.SHORT, 3);
-maxLengthMap.set(MODE.LONG, 10);
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(GripMap),
-  supportsObject,
-  maxLengthMap,
-  getLength
-};
-
-/***/ }),
-
-/***/ 1585:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { createElement, createFactory, PureComponent } = __webpack_require__(0);
-const { Provider } = __webpack_require__(3592);
-const ObjectInspector = createFactory(__webpack_require__(3615));
-const createStore = __webpack_require__(3618);
-
-class OI extends PureComponent {
-
-  constructor(props) {
-    super(props);
-    this.store = createStore(props);
-  }
-
-  getStore() {
-    return this.store;
-  }
-
-  render() {
-    return createElement(Provider, { store: this.store }, ObjectInspector(this.props));
-  }
-}
-
-module.exports = OI;
+exports.default = (0, _reactRedux.connect)(mapStateToProps, mapDispatchToProps)(Popup);
 
 /***/ }),
 
@@ -21093,19 +15535,45 @@ class Popover extends _react.Component {
   constructor(props) {
     super(props);
 
+    this.calculateTopForRightOrientation = (target, editor, popover) => {
+      if (popover.height < editor.height) {
+        const rightOrientationTop = target.top - popover.height / 2;
+        if (rightOrientationTop < editor.top) {
+          return editor.top;
+        }
+        const rightOrientationBottom = rightOrientationTop + popover.height;
+        if (rightOrientationBottom > editor.bottom) {
+          return editor.bottom - popover.height;
+        }
+        return rightOrientationTop;
+      }
+      return 0;
+    };
+
+    this.calculateTop = (target, editor, popover, orientation) => {
+      if (orientation === "down") {
+        return target.bottom;
+      }
+      if (orientation === "up") {
+        return target.top - popover.height;
+      }
+
+      return this.calculateTopForRightOrientation(target, editor, popover);
+    };
+
     this.onMouseLeave = e => {
       const { onMouseLeave } = this.props;
       if (/^(bracket-arrow|gap)$/.test(e.currentTarget.className)) {
         return;
       }
 
-      onMouseLeave();
+      onMouseLeave(e);
     };
 
     this.state = {
       left: 0,
       top: 0,
-      targetMid: 0,
+      targetMid: { x: 0, y: 0 },
       orientation: "up"
     };
   }
@@ -21115,13 +15583,21 @@ class Popover extends _react.Component {
     const { left, top, orientation, targetMid } = type == "popover" ? this.getPopoverCoords() : this.getTooltipCoords();
 
     // eslint-disable-next-line react/no-did-mount-set-state
-    this.setState({ left, top, orientation, targetMid });
+    this.setState({
+      left,
+      top,
+      orientation,
+      targetMid
+    });
   }
 
-  calculateLeft(target, editor, popover) {
+  calculateLeft(target, editor, popover, orientation) {
     const estimatedLeft = target.left;
     const estimatedRight = estimatedLeft + popover.width;
     const isOverflowingRight = estimatedRight > editor.right;
+    if (orientation === "right") {
+      return target.left + target.width + 10;
+    }
     if (isOverflowingRight) {
       const adjustedLeft = editor.right - popover.width - 8;
       return adjustedLeft;
@@ -21129,10 +15605,17 @@ class Popover extends _react.Component {
     return estimatedLeft;
   }
 
-  calculateVerticalOrientation(target, editor, popover) {
+  calculateOrientation(target, editor, popover) {
     const estimatedBottom = target.bottom + popover.height;
+    if (editor.bottom > estimatedBottom) {
+      return "down";
+    }
+    const upOrientationTop = target.top - popover.height;
+    if (upOrientationTop > editor.top) {
+      return "up";
+    }
 
-    return estimatedBottom > editor.bottom ? "up" : "down";
+    return "right";
   }
 
   getPopoverCoords() {
@@ -21142,15 +15625,35 @@ class Popover extends _react.Component {
       const popoverRect = popover.getBoundingClientRect();
       const editorRect = editor.getBoundingClientRect();
       const targetRect = this.props.targetPosition;
-      const popoverLeft = this.calculateLeft(targetRect, editorRect, popoverRect);
-      const orientation = this.calculateVerticalOrientation(targetRect, editorRect, popoverRect);
-      const top = orientation == "down" ? targetRect.bottom : targetRect.top - popoverRect.height;
+      const orientation = this.calculateOrientation(targetRect, editorRect, popoverRect);
+      const top = this.calculateTop(targetRect, editorRect, popoverRect, orientation);
+      const popoverLeft = this.calculateLeft(targetRect, editorRect, popoverRect, orientation);
+      let targetMid;
+      if (orientation === "right") {
+        targetMid = {
+          x: -14,
+          y: targetRect.top - top - 2
+        };
+      } else {
+        targetMid = {
+          x: targetRect.left - popoverLeft + targetRect.width / 2 - 8,
+          y: 0
+        };
+      }
 
-      const targetMid = targetRect.left - popoverLeft + targetRect.width / 2 - 8;
-
-      return { left: popoverLeft, top, orientation, targetMid };
+      return {
+        left: popoverLeft,
+        top,
+        orientation,
+        targetMid
+      };
     }
-    return { left: 0, top: 0, orientation: "down", targetMid: 0 };
+    return {
+      left: 0,
+      top: 0,
+      orientation: "down",
+      targetMid: { x: 0, y: 0 }
+    };
   }
 
   getTooltipCoords() {
@@ -21163,9 +15666,19 @@ class Popover extends _react.Component {
       const left = this.calculateLeft(targetRect, editorRect, tooltipRect);
       const top = targetRect.top - tooltipRect.height;
 
-      return { left, top, orientation: "up", targetMid: 0 };
+      return {
+        left,
+        top,
+        orientation: "up",
+        targetMid: { x: 0, y: 0 }
+      };
     }
-    return { left: 0, top: 0, orientation: "up", targetMid: 0 };
+    return {
+      left: 0,
+      top: 0,
+      orientation: "up",
+      targetMid: { x: 0, y: 0 }
+    };
   }
 
   getChildren() {
@@ -21175,29 +15688,29 @@ class Popover extends _react.Component {
     return orientation === "up" ? [children, gap] : [gap, children];
   }
 
-  getPopoverArrow(orientation, left) {
-    const arrowOrientation = orientation === "up" ? "down" : "up";
-
-    const arrowProp = arrowOrientation === "up" ? "top" : "bottom";
-    const arrowPropValue = arrowOrientation === "up" ? -7 : 5;
-
-    const arrowProps = {
-      orientation: arrowOrientation,
-      left,
-      [arrowProp]: arrowPropValue
-    };
+  getPopoverArrow(orientation, left, top) {
+    const arrowProps = {};
+    if (orientation === "up") {
+      Object.assign(arrowProps, { orientation: "down", bottom: 5, left });
+    } else if (orientation === "down") {
+      Object.assign(arrowProps, { orientation: "up", top: -7, left });
+    } else {
+      Object.assign(arrowProps, { orientation: "left", top, left: -14 });
+    }
 
     return _react2.default.createElement(_BracketArrow2.default, arrowProps);
   }
 
   renderPopover() {
     const { top, left, orientation, targetMid } = this.state;
-    const arrow = this.getPopoverArrow(orientation, targetMid);
+    const arrow = this.getPopoverArrow(orientation, targetMid.x, targetMid.y);
 
     return _react2.default.createElement(
       "div",
       {
-        className: (0, _classnames2.default)("popover", { up: orientation === "up" }),
+        className: (0, _classnames2.default)("popover", `orientation-${orientation}`, {
+          up: orientation === "up"
+        }),
         onMouseLeave: this.onMouseLeave,
         style: { top, left },
         ref: c => this.$popover = c
@@ -21420,7 +15933,7 @@ class Breakpoint extends _react.Component {
         return;
       }
 
-      const sourceId = selectedSource.get("id");
+      const sourceId = selectedSource.id;
       const line = (0, _editor.toEditorLine)(sourceId, breakpoint.location.line);
 
       editor.codeMirror.setGutterMarker(line, "breakpoints", makeMarker(breakpoint.disabled));
@@ -21458,7 +15971,7 @@ class Breakpoint extends _react.Component {
       return;
     }
 
-    const sourceId = selectedSource.get("id");
+    const sourceId = selectedSource.id;
     const doc = (0, _editor.getDocument)(sourceId);
     if (!doc) {
       return;
@@ -21748,15 +16261,11 @@ function getCallSites(symbols, breakpoints) {
   return callSites.filter(({ location }) => location.start.line === location.end.line).map(callSite => _extends({}, callSite, { breakpoint: findBreakpoint(callSite) }));
 }
 
-const { addBreakpoint, removeBreakpoint } = _actions2.default;
-
-exports.default = (0, _reactRedux.connect)(state => {
+const mapStateToProps = state => {
   const selectedLocation = (0, _selectors.getSelectedLocation)(state);
   const selectedSource = (0, _selectors.getSelectedSource)(state);
   const sourceId = selectedLocation && selectedLocation.sourceId;
-  const source = selectedSource && selectedSource.toJS();
-
-  const symbols = (0, _selectors.getSymbols)(state, source);
+  const symbols = (0, _selectors.getSymbols)(state, selectedSource);
   const breakpoints = (0, _selectors.getBreakpointsForSource)(state, sourceId);
 
   return {
@@ -21765,10 +16274,12 @@ exports.default = (0, _reactRedux.connect)(state => {
     callSites: getCallSites(symbols, breakpoints),
     breakpoints: breakpoints
   };
-}, {
-  addBreakpoint,
-  removeBreakpoint
-})(CallSites);
+};
+
+const { addBreakpoint, removeBreakpoint } = _actions2.default;
+const mapDispatchToProps = { addBreakpoint, removeBreakpoint };
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, mapDispatchToProps)(CallSites);
 
 /***/ }),
 
@@ -21965,13 +16476,13 @@ class DebugLine extends _react.Component {
 }
 
 exports.DebugLine = DebugLine;
-exports.default = (0, _reactRedux.connect)(state => {
-  return {
-    selectedFrame: (0, _selectors.getVisibleSelectedFrame)(state),
-    selectedSource: (0, _selectors.getSelectedSource)(state),
-    why: (0, _selectors.getPauseReason)(state)
-  };
-})(DebugLine);
+const mapStateToProps = state => ({
+  selectedFrame: (0, _selectors.getVisibleSelectedFrame)(state),
+  selectedSource: (0, _selectors.getSelectedSource)(state),
+  why: (0, _selectors.getPauseReason)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps)(DebugLine);
 
 /***/ }),
 
@@ -21993,7 +16504,9 @@ var _selectors = __webpack_require__(3590);
 
 var _editor = __webpack_require__(1358);
 
-__webpack_require__(1330);
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class EmptyLines extends _react.Component {
 
@@ -22011,6 +16524,7 @@ class EmptyLines extends _react.Component {
     if (!emptyLines) {
       return;
     }
+
     editor.codeMirror.operation(() => {
       emptyLines.forEach(emptyLine => {
         const line = (0, _editor.toEditorLine)(selectedSource.get("id"), emptyLine);
@@ -22036,17 +16550,19 @@ class EmptyLines extends _react.Component {
   render() {
     return null;
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
-exports.default = (0, _reactRedux.connect)(state => {
+const mapStateToProps = state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
+  const foundEmptyLines = (0, _selectors.getEmptyLines)(state, selectedSource.toJS());
+
   return {
     selectedSource,
-    emptyLines: selectedSource ? (0, _selectors.getEmptyLines)(state, selectedSource.toJS()) : []
+    emptyLines: selectedSource ? foundEmptyLines : []
   };
-})(EmptyLines);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps)(EmptyLines);
 
 /***/ }),
 
@@ -22069,8 +16585,6 @@ exports.gutterMenu = gutterMenu;
 var _react = __webpack_require__(0);
 
 var _devtoolsContextmenu = __webpack_require__(1413);
-
-var _redux = __webpack_require__(3593);
 
 var _reactRedux = __webpack_require__(3592);
 
@@ -22208,8 +16722,9 @@ class GutterContextMenuComponent extends _react.Component {
   }
 }
 
-exports.default = (0, _reactRedux.connect)(state => {
+const mapStateToProps = state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
+
   return {
     selectedLocation: (0, _selectors.getSelectedLocation)(state),
     selectedSource: selectedSource,
@@ -22218,7 +16733,9 @@ exports.default = (0, _reactRedux.connect)(state => {
     contextMenu: (0, _selectors.getContextMenu)(state),
     emptyLines: (0, _selectors.getEmptyLines)(state, selectedSource.toJS())
   };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(GutterContextMenuComponent);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(GutterContextMenuComponent);
 
 /***/ }),
 
@@ -22238,13 +16755,13 @@ var _reactRedux = __webpack_require__(3592);
 
 var _devtoolsContextmenu = __webpack_require__(1413);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _clipboard = __webpack_require__(1388);
 
 var _function = __webpack_require__(1597);
 
-var _astBreakpointLocation = __webpack_require__(1416);
+var _ast = __webpack_require__(1638);
 
 var _editor = __webpack_require__(1358);
 
@@ -22295,7 +16812,7 @@ function getMenuItems(event, {
   const blackboxKey = L10N.getStr("sourceFooter.blackbox.accesskey");
   const blackboxLabel = L10N.getStr("sourceFooter.blackbox");
   const unblackboxLabel = L10N.getStr("sourceFooter.unblackbox");
-  const toggleBlackBoxLabel = selectedSource.get("isBlackBoxed") ? unblackboxLabel : blackboxLabel;
+  const toggleBlackBoxLabel = selectedSource.isBlackBoxed ? unblackboxLabel : blackboxLabel;
   const copyFunctionKey = L10N.getStr("copyFunction.accesskey");
   const copyFunctionLabel = L10N.getStr("copyFunction.label");
   const copySourceKey = L10N.getStr("copySource.accesskey");
@@ -22319,7 +16836,7 @@ function getMenuItems(event, {
     label: copyToClipboardLabel,
     accesskey: copyToClipboardKey,
     disabled: false,
-    click: () => (0, _clipboard.copyToTheClipboard)(selectedSource.get("text"))
+    click: () => (0, _clipboard.copyToTheClipboard)(selectedSource.text)
   };
 
   const copySourceItem = {
@@ -22335,7 +16852,7 @@ function getMenuItems(event, {
     label: copySourceUri2Label,
     accesskey: copySourceUri2Key,
     disabled: false,
-    click: () => (0, _clipboard.copyToTheClipboard)((0, _source.getRawSourceURL)(selectedSource.get("url")))
+    click: () => (0, _clipboard.copyToTheClipboard)((0, _source.getRawSourceURL)(selectedSource.url))
   };
 
   const sourceId = selectedSource.get("id");
@@ -22435,6 +16952,23 @@ class EditorMenu extends _react.Component {
   }
 }
 
+const mapStateToProps = state => {
+  const selectedSource = (0, _selectors.getSelectedSource)(state);
+  const symbols = (0, _selectors.getSymbols)(state, selectedSource);
+
+  return {
+    selectedLocation: (0, _selectors.getSelectedLocation)(state),
+    selectedSource,
+    hasPrettyPrint: !!(0, _selectors.getPrettySource)(state, selectedSource.get("id")),
+    contextMenu: (0, _selectors.getContextMenu)(state),
+    getFunctionText: line => (0, _function.findFunctionText)(line, selectedSource.toJS(), symbols),
+    getFunctionLocation: line => (0, _ast.findClosestFunction)(symbols, {
+      line,
+      column: Infinity
+    })
+  };
+};
+
 const {
   addExpression,
   evaluateInConsole,
@@ -22445,20 +16979,7 @@ const {
   toggleBlackBox
 } = _actions2.default;
 
-exports.default = (0, _reactRedux.connect)(state => {
-  const selectedSource = (0, _selectors.getSelectedSource)(state);
-  return {
-    selectedLocation: (0, _selectors.getSelectedLocation)(state),
-    selectedSource,
-    hasPrettyPrint: !!(0, _selectors.getPrettySource)(state, selectedSource.get("id")),
-    contextMenu: (0, _selectors.getContextMenu)(state),
-    getFunctionText: line => (0, _function.findFunctionText)(line, selectedSource.toJS(), (0, _selectors.getSymbols)(state, selectedSource.toJS())),
-    getFunctionLocation: line => (0, _astBreakpointLocation.findClosestScope)((0, _selectors.getSymbols)(state, selectedSource.toJS()).functions, {
-      line,
-      column: Infinity
-    })
-  };
-}, {
+const mapDispatchToProps = {
   addExpression,
   evaluateInConsole,
   flashLineRange,
@@ -22466,7 +16987,9 @@ exports.default = (0, _reactRedux.connect)(state => {
   setContextMenu,
   showSource,
   toggleBlackBox
-})(EditorMenu);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, mapDispatchToProps)(EditorMenu);
 
 /***/ }),
 
@@ -22481,7 +17004,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.findFunctionText = findFunctionText;
 
-var _astBreakpointLocation = __webpack_require__(1416);
+var _ast = __webpack_require__(1638);
 
 var _indentation = __webpack_require__(1438);
 
@@ -22490,8 +17013,13 @@ var _indentation = __webpack_require__(1438);
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function findFunctionText(line, source, symbols) {
-  const func = (0, _astBreakpointLocation.findClosestScope)(symbols.functions, { line, column: Infinity });
-  if (!func) {
+  const func = (0, _ast.findClosestFunction)(symbols, {
+    sourceId: source.id,
+    line,
+    column: Infinity
+  });
+
+  if (!func || !source.text) {
     return null;
   }
 
@@ -22689,25 +17217,30 @@ exports.ConditionalPanel = ConditionalPanel; /* This Source Code Form is subject
                                               * License, v. 2.0. If a copy of the MPL was not distributed with this
                                               * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+const mapStateToProps = state => {
+  const line = (0, _selectors.getConditionalPanelLine)(state);
+  const selectedLocation = (0, _selectors.getSelectedLocation)(state);
+
+  return {
+    selectedLocation,
+    breakpoint: (0, _selectors.getBreakpointForLine)(state, selectedLocation.sourceId, line),
+    line
+  };
+};
+
 const {
   setBreakpointCondition,
   openConditionalPanel,
   closeConditionalPanel
 } = _actions2.default;
 
-exports.default = (0, _reactRedux.connect)(state => {
-  const line = (0, _selectors.getConditionalPanelLine)(state);
-  const selectedLocation = (0, _selectors.getSelectedLocation)(state);
-  return {
-    selectedLocation,
-    breakpoint: (0, _selectors.getBreakpointForLine)(state, selectedLocation.sourceId, line),
-    line
-  };
-}, {
+const mapDispatchToProps = {
   setBreakpointCondition,
   openConditionalPanel,
   closeConditionalPanel
-})(ConditionalPanel);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, mapDispatchToProps)(ConditionalPanel);
 
 /***/ }),
 
@@ -22721,7 +17254,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -22731,7 +17264,7 @@ var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
 
-var _redux = __webpack_require__(3593);
+var _immutable = __webpack_require__(3594);
 
 var _actions = __webpack_require__(1354);
 
@@ -22781,27 +17314,21 @@ var _UtilsBar = __webpack_require__(1609);
 
 var _UtilsBar2 = _interopRequireDefault(_UtilsBar);
 
-var _BreakpointsDropdown = __webpack_require__(1790);
+var _FrameworkComponent = __webpack_require__(3623);
 
-var _BreakpointsDropdown2 = _interopRequireDefault(_BreakpointsDropdown);
+var _FrameworkComponent2 = _interopRequireDefault(_FrameworkComponent);
 
-var _ChromeScopes = __webpack_require__(1610);
+var _ReactComponentStack = __webpack_require__(3639);
 
-var _ChromeScopes2 = _interopRequireDefault(_ChromeScopes);
+var _ReactComponentStack2 = _interopRequireDefault(_ReactComponentStack);
 
-var _Scopes2 = __webpack_require__(1611);
+var _Scopes = __webpack_require__(1611);
 
-var _Scopes3 = _interopRequireDefault(_Scopes2);
+var _Scopes2 = _interopRequireDefault(_Scopes);
 
 __webpack_require__(1342);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-const Scopes = _prefs.features.chromeScopes ? _ChromeScopes2.default : _Scopes3.default;
 
 function debugBtn(onClick, type, className, tooltip) {
   return _react2.default.createElement(
@@ -22814,9 +17341,23 @@ function debugBtn(onClick, type, className, tooltip) {
     },
     _react2.default.createElement(_Svg2.default, { name: type, title: tooltip, "aria-label": tooltip })
   );
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class SecondaryPanes extends _react.Component {
+  constructor(props) {
+    super(props);
+
+    this.onExpressionAdded = () => {
+      this.setState({ showExpressionsInput: false });
+    };
+
+    this.state = {
+      showExpressionsInput: false
+    };
+  }
+
   renderBreakpointsToggle() {
     const {
       toggleAllBreakpoints,
@@ -22826,7 +17367,7 @@ class SecondaryPanes extends _react.Component {
     } = this.props;
     const isIndeterminate = !breakpointsDisabled && breakpoints.some(x => x.disabled);
 
-    if (breakpoints.size == 0) {
+    if (_prefs.features.skipPausing || breakpoints.size == 0) {
       return null;
     }
 
@@ -22854,20 +17395,60 @@ class SecondaryPanes extends _react.Component {
   }
 
   watchExpressionHeaderButtons() {
-    return [debugBtn(evt => {
-      evt.stopPropagation();
-      this.props.evaluateExpressions();
-    }, "refresh", "refresh", L10N.getStr("watchExpressions.refreshButton"))];
+    const { expressions } = this.props;
+
+    const buttons = [];
+
+    if (expressions.size) {
+      buttons.push(debugBtn(evt => {
+        evt.stopPropagation();
+        this.props.evaluateExpressions();
+      }, "refresh", "refresh", L10N.getStr("watchExpressions.refreshButton")));
+    }
+
+    buttons.push(debugBtn(evt => {
+      if (_prefs.prefs.expressionsVisible) {
+        evt.stopPropagation();
+      }
+      this.setState({ showExpressionsInput: true });
+    }, "plus", "plus", L10N.getStr("expressions.placeholder")));
+
+    return buttons;
   }
 
   getScopeItem() {
     return {
       header: L10N.getStr("scopes.header"),
       className: "scopes-pane",
-      component: _react2.default.createElement(Scopes, null),
+      component: _react2.default.createElement(_Scopes2.default, null),
       opened: _prefs.prefs.scopesVisible,
       onToggle: opened => {
         _prefs.prefs.scopesVisible = opened;
+      }
+    };
+  }
+
+  getComponentStackItem() {
+    return {
+      header: L10N.getStr("components.header"),
+      component: _react2.default.createElement(_ReactComponentStack2.default, null),
+      opened: _prefs.prefs.componentStackVisible,
+      onToggle: opened => {
+        _prefs.prefs.componentStackVisible = opened;
+      }
+    };
+  }
+
+  getComponentItem() {
+    const { extra: { react } } = this.props;
+
+    return {
+      header: react.displayName,
+      className: "component-pane",
+      component: _react2.default.createElement(_FrameworkComponent2.default, null),
+      opened: _prefs.prefs.componentVisible,
+      onToggle: opened => {
+        _prefs.prefs.componentVisible = opened;
       }
     };
   }
@@ -22877,7 +17458,10 @@ class SecondaryPanes extends _react.Component {
       header: L10N.getStr("watchExpressions.header"),
       className: "watch-expressions-pane",
       buttons: this.watchExpressionHeaderButtons(),
-      component: _react2.default.createElement(_Expressions2.default, null),
+      component: _react2.default.createElement(_Expressions2.default, {
+        showInput: this.state.showExpressionsInput,
+        onExpressionAdded: this.onExpressionAdded
+      }),
       opened: _prefs.prefs.expressionsVisible,
       onToggle: opened => {
         _prefs.prefs.expressionsVisible = opened;
@@ -22910,11 +17494,21 @@ class SecondaryPanes extends _react.Component {
   }
 
   getBreakpointsItem() {
+    const {
+      shouldPauseOnExceptions,
+      shouldPauseOnCaughtExceptions,
+      pauseOnExceptions
+    } = this.props;
+
     return {
       header: L10N.getStr("breakpoints.header"),
       className: "breakpoints-pane",
-      buttons: [this.breakpointDropdown(), this.renderBreakpointsToggle()],
-      component: _react2.default.createElement(_Breakpoints2.default, null),
+      buttons: [this.renderBreakpointsToggle()],
+      component: _react2.default.createElement(_Breakpoints2.default, {
+        shouldPauseOnExceptions: shouldPauseOnExceptions,
+        shouldPauseOnCaughtExceptions: shouldPauseOnCaughtExceptions,
+        pauseOnExceptions: pauseOnExceptions
+      }),
       opened: _prefs.prefs.breakpointsVisible,
       onToggle: opened => {
         _prefs.prefs.breakpointsVisible = opened;
@@ -22922,24 +17516,8 @@ class SecondaryPanes extends _react.Component {
     };
   }
 
-  breakpointDropdown() {
-    if (!_prefs.features.breakpointsDropdown) {
-      return;
-    }
-
-    const {
-      breakOnNext,
-      pauseOnExceptions,
-      shouldPauseOnExceptions,
-      shouldIgnoreCaughtExceptions,
-      isWaitingOnBreak
-    } = this.props;
-
-    return (0, _BreakpointsDropdown2.default)(breakOnNext, pauseOnExceptions, shouldPauseOnExceptions, shouldIgnoreCaughtExceptions, isWaitingOnBreak);
-  }
-
   getStartItems() {
-    const { workers } = this.props;
+    const { extra, workers } = this.props;
 
     const items = [];
     if (this.props.horizontal) {
@@ -22954,7 +17532,15 @@ class SecondaryPanes extends _react.Component {
 
     if (this.props.hasFrames) {
       items.push(this.getCallStackItem());
+
       if (this.props.horizontal) {
+        if (extra && extra.react) {
+          if (_prefs.features.componentStack && extra.react.componentStack.length > 1) {
+            items.push(this.getComponentStackItem());
+          }
+          items.push(this.getComponentItem());
+        }
+
         items.push(this.getScopeItem());
       }
     }
@@ -22975,7 +17561,7 @@ class SecondaryPanes extends _react.Component {
   }
 
   getEndItems() {
-    const { workers } = this.props;
+    const { extra, workers } = this.props;
 
     let items = [];
 
@@ -22988,6 +17574,10 @@ class SecondaryPanes extends _react.Component {
     }
 
     items.push(this.getWatchItem());
+
+    if (extra && extra.react) {
+      items.push(this.getComponentItem());
+    }
 
     if (this.props.hasFrames) {
       items = [...items, this.getScopeItem()];
@@ -23041,16 +17631,20 @@ SecondaryPanes.contextTypes = {
   shortcuts: _propTypes2.default.object
 };
 
-exports.default = (0, _reactRedux.connect)(state => ({
+const mapStateToProps = state => ({
+  expressions: (0, _selectors.getExpressions)(state),
+  extra: (0, _selectors.getExtra)(state),
   hasFrames: !!(0, _selectors.getTopFrame)(state),
   breakpoints: (0, _selectors.getBreakpoints)(state),
   breakpointsDisabled: (0, _selectors.getBreakpointsDisabled)(state),
   breakpointsLoading: (0, _selectors.getBreakpointsLoading)(state),
   isWaitingOnBreak: (0, _selectors.getIsWaitingOnBreak)(state),
   shouldPauseOnExceptions: (0, _selectors.getShouldPauseOnExceptions)(state),
-  shouldIgnoreCaughtExceptions: (0, _selectors.getShouldIgnoreCaughtExceptions)(state),
+  shouldPauseOnCaughtExceptions: (0, _selectors.getShouldPauseOnCaughtExceptions)(state),
   workers: (0, _selectors.getWorkers)(state)
-}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(SecondaryPanes);
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(SecondaryPanes);
 
 /***/ }),
 
@@ -23072,7 +17666,9 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _redux = __webpack_require__(3593);
+var _classnames = __webpack_require__(175);
+
+var _classnames2 = _interopRequireDefault(_classnames);
 
 var _reactRedux = __webpack_require__(3592);
 
@@ -23080,25 +17676,17 @@ var _immutable = __webpack_require__(3594);
 
 var I = _interopRequireWildcard(_immutable);
 
-var _classnames = __webpack_require__(175);
-
-var _classnames2 = _interopRequireDefault(_classnames);
-
 var _reselect = __webpack_require__(993);
 
 var _lodash = __webpack_require__(2);
 
+var _Breakpoint = __webpack_require__(3634);
+
+var _Breakpoint2 = _interopRequireDefault(_Breakpoint);
+
 var _actions = __webpack_require__(1354);
 
 var _actions2 = _interopRequireDefault(_actions);
-
-var _Close = __webpack_require__(1374);
-
-var _Close2 = _interopRequireDefault(_Close);
-
-var _utils = __webpack_require__(1366);
-
-var _prefs = __webpack_require__(226);
 
 var _source = __webpack_require__(1356);
 
@@ -23128,34 +17716,39 @@ function isCurrentlyPausedAtBreakpoint(frame, why, breakpoint) {
   return bpId === pausedId;
 }
 
-function getBreakpointFilename(source) {
-  return source && source.toJS ? (0, _source.getFilename)(source.toJS()) : "";
-}
-
-function renderSourceLocation(source, line, column) {
-  const filename = getBreakpointFilename(source);
-  const isWasm = source && source.get("isWasm");
-  const columnVal = _prefs.features.columnBreakpoints && column ? `:${column}` : "";
-  const bpLocation = isWasm ? `0x${line.toString(16).toUpperCase()}` : `${line}${columnVal}`;
-
-  if (!filename) {
-    return null;
-  }
-
+function createExceptionOption(label, value, onChange, className) {
   return _react2.default.createElement(
     "div",
-    { className: "location" },
-    `${(0, _utils.endTruncateStr)(filename, 30)}: ${bpLocation}`
+    { className: className, onClick: onChange },
+    _react2.default.createElement("input", {
+      type: "checkbox",
+      checked: value ? "checked" : "",
+      onChange: e => e.stopPropagation() && onChange()
+    }),
+    _react2.default.createElement(
+      "div",
+      { className: "breakpoint-exceptions-label" },
+      label
+    )
   );
 }
 
-class Breakpoints extends _react.Component {
-  shouldComponentUpdate(nextProps, nextState) {
-    const { breakpoints } = this.props;
-    return breakpoints !== nextProps.breakpoints;
+function sortFilenames(urlA, urlB) {
+  const filenameA = (0, _source.getFilenameFromURL)(urlA);
+  const filenameB = (0, _source.getFilenameFromURL)(urlB);
+
+  if (filenameA > filenameB) {
+    return 1;
+  }
+  if (filenameA < filenameB) {
+    return -1;
   }
 
-  handleCheckbox(breakpoint) {
+  return 0;
+}
+
+class Breakpoints extends _react.Component {
+  handleBreakpointCheckbox(breakpoint) {
     if (breakpoint.loading) {
       return;
     }
@@ -23177,68 +17770,80 @@ class Breakpoints extends _react.Component {
   }
 
   renderBreakpoint(breakpoint) {
-    const snippet = breakpoint.text || "";
-    const locationId = breakpoint.locationId;
-    const line = breakpoint.location.line;
-    const column = breakpoint.location.column;
-    const isCurrentlyPaused = breakpoint.isCurrentlyPaused;
-    const isDisabled = breakpoint.disabled;
-    const isConditional = !!breakpoint.condition;
-    const isHidden = breakpoint.hidden;
+    const { selectedSource } = this.props;
 
-    if (isHidden) {
-      return;
-    }
+    return _react2.default.createElement(_Breakpoint2.default, {
+      key: breakpoint.locationId,
+      breakpoint: breakpoint,
+      selectedSource: selectedSource,
+      onClick: () => this.selectBreakpoint(breakpoint),
+      onContextMenu: e => (0, _BreakpointsContextMenu2.default)(_extends({}, this.props, { breakpoint, contextMenuEvent: e })),
+      onChange: () => this.handleBreakpointCheckbox(breakpoint),
+      onCloseClick: ev => this.removeBreakpoint(ev, breakpoint)
+    });
+  }
+
+  renderExceptionsOptions() {
+    const {
+      breakpoints,
+      shouldPauseOnExceptions,
+      shouldPauseOnCaughtExceptions,
+      pauseOnExceptions
+    } = this.props;
+
+    const isEmpty = breakpoints.size == 0;
+
+    const exceptionsBox = createExceptionOption(L10N.getStr("pauseOnExceptionsItem2"), shouldPauseOnExceptions, () => pauseOnExceptions(!shouldPauseOnExceptions, false), "breakpoints-exceptions");
+
+    const ignoreCaughtBox = createExceptionOption(L10N.getStr("pauseOnCaughtExceptionsItem"), shouldPauseOnCaughtExceptions, () => pauseOnExceptions(true, !shouldPauseOnCaughtExceptions), "breakpoints-exceptions-caught");
 
     return _react2.default.createElement(
       "div",
       {
-        className: (0, _classnames2.default)({
-          breakpoint,
-          paused: isCurrentlyPaused,
-          disabled: isDisabled,
-          "is-conditional": isConditional
-        }),
-        key: locationId,
-        onClick: () => this.selectBreakpoint(breakpoint),
-        onContextMenu: e => (0, _BreakpointsContextMenu2.default)(_extends({}, this.props, { breakpoint, contextMenuEvent: e }))
+        className: (0, _classnames2.default)("breakpoints-exceptions-options", {
+          empty: isEmpty
+        })
       },
-      _react2.default.createElement("input", {
-        type: "checkbox",
-        className: "breakpoint-checkbox",
-        checked: !isDisabled,
-        onChange: () => this.handleCheckbox(breakpoint),
-        onClick: ev => ev.stopPropagation()
-      }),
-      _react2.default.createElement(
-        "label",
-        { className: "breakpoint-label", title: breakpoint.text },
-        renderSourceLocation(breakpoint.location.source, line, column)
-      ),
-      _react2.default.createElement(
-        "div",
-        { className: "breakpoint-snippet" },
-        snippet
-      ),
-      _react2.default.createElement(_Close2.default, {
-        handleClick: ev => this.removeBreakpoint(ev, breakpoint),
-        tooltip: L10N.getStr("breakpoints.removeBreakpointTooltip")
-      })
+      exceptionsBox,
+      shouldPauseOnExceptions ? ignoreCaughtBox : null
     );
   }
 
-  render() {
+  renderBreakpoints() {
     const { breakpoints } = this.props;
-    const children = breakpoints.size === 0 ? _react2.default.createElement(
-      "div",
-      { className: "pane-info" },
-      L10N.getStr("breakpoints.none")
-    ) : (0, _lodash.sortBy)([...breakpoints.valueSeq()], [bp => getBreakpointFilename(bp.location.source), bp => bp.location.line]).map(bp => this.renderBreakpoint(bp));
+    if (breakpoints.size == 0) {
+      return;
+    }
 
+    const groupedBreakpoints = (0, _lodash.groupBy)((0, _lodash.sortBy)([...breakpoints.valueSeq()], bp => bp.location.line), bp => (0, _source.getRawSourceURL)(bp.source.url));
+
+    return [...Object.keys(groupedBreakpoints).sort(sortFilenames).map(url => {
+      const file = (0, _source.getFilenameFromURL)(url);
+      const groupBreakpoints = groupedBreakpoints[url].filter(bp => !bp.hidden && (bp.text || bp.originalText));
+
+      if (!groupBreakpoints.length) {
+        return null;
+      }
+
+      return [_react2.default.createElement(
+        "div",
+        {
+          className: "breakpoint-heading",
+          title: url,
+          key: url,
+          onClick: () => this.props.selectSource(groupBreakpoints[0].source.id)
+        },
+        file
+      ), ...groupBreakpoints.map(bp => this.renderBreakpoint(bp))];
+    })];
+  }
+
+  render() {
     return _react2.default.createElement(
       "div",
       { className: "pane breakpoints-list" },
-      children
+      this.renderExceptionsOptions(),
+      this.renderBreakpoints()
     );
   }
 }
@@ -23247,16 +17852,19 @@ function updateLocation(sources, frame, why, bp) {
   const source = (0, _selectors.getSourceInSources)(sources, bp.location.sourceId);
   const isCurrentlyPaused = isCurrentlyPausedAtBreakpoint(frame, why, bp);
   const locationId = (0, _breakpoint.makeLocationId)(bp.location);
-
-  const location = _extends({}, bp.location, { source });
-  const localBP = _extends({}, bp, { location, locationId, isCurrentlyPaused });
+  const localBP = _extends({}, bp, { locationId, isCurrentlyPaused, source });
 
   return localBP;
 }
 
-const _getBreakpoints = (0, _reselect.createSelector)(_selectors.getBreakpoints, _selectors.getSources, _selectors.getTopFrame, _selectors.getPauseReason, (breakpoints, sources, frame, why) => breakpoints.map(bp => updateLocation(sources, frame, why, bp)).filter(bp => bp.location.source && !bp.location.source.get("isBlackBoxed")));
+const _getBreakpoints = (0, _reselect.createSelector)(_selectors.getBreakpoints, _selectors.getSources, _selectors.getTopFrame, _selectors.getPauseReason, (breakpoints, sources, frame, why) => breakpoints.map(bp => updateLocation(sources, frame, why, bp)).filter(bp => bp.source && !bp.source.isBlackBoxed));
 
-exports.default = (0, _reactRedux.connect)((state, props) => ({ breakpoints: _getBreakpoints(state) }), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Breakpoints);
+const mapStateToProps = state => ({
+  breakpoints: _getBreakpoints(state),
+  selectedSource: (0, _selectors.getSelectedSource)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Breakpoints);
 
 /***/ }),
 
@@ -23280,7 +17888,7 @@ var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
 
-var _devtoolsReps = __webpack_require__(1408);
+var _devtoolsReps = __webpack_require__(3655);
 
 var _actions = __webpack_require__(1354);
 
@@ -23326,11 +17934,21 @@ class Expressions extends _react.Component {
       }
     };
 
+    this.hideInput = () => {
+      this.setState({ focused: false });
+      this.props.onExpressionAdded();
+    };
+
+    this.onFocus = () => {
+      this.setState({ focused: true });
+    };
+
     this.handleExistingSubmit = async (e, expression) => {
       e.preventDefault();
       e.stopPropagation();
 
       this.props.updateExpression(this.state.inputValue, expression);
+      this.hideInput();
     };
 
     this.handleNewSubmit = async e => {
@@ -23345,6 +17963,10 @@ class Expressions extends _react.Component {
         editIndex: -1,
         inputValue: this.props.expressionError ? inputValue : ""
       });
+
+      if (!this.props.expressionError) {
+        this.hideInput();
+      }
     };
 
     this.renderExpression = (expression, index) => {
@@ -23382,7 +18004,7 @@ class Expressions extends _react.Component {
             roots: [root],
             autoExpandDepth: 0,
             disableWrap: true,
-            disabledFocus: true,
+            focusable: false,
             openLink: openLink,
             createObjectClient: grip => (0, _firefox.createObjectClient)(grip)
           }),
@@ -23397,7 +18019,12 @@ class Expressions extends _react.Component {
       );
     };
 
-    this.state = { editing: false, editIndex: -1, inputValue: "" };
+    this.state = {
+      editing: false,
+      editIndex: -1,
+      inputValue: "",
+      focused: false
+    };
   }
 
   componentDidMount() {
@@ -23414,15 +18041,23 @@ class Expressions extends _react.Component {
   }
 
   shouldComponentUpdate(nextProps, nextState) {
-    const { editing, inputValue } = this.state;
-    const { expressions, expressionError } = this.props;
-    return expressions !== nextProps.expressions || expressionError !== nextProps.expressionError || editing !== nextState.editing || inputValue !== nextState.inputValue;
+    const { editing, inputValue, focused } = this.state;
+    const { expressions, expressionError, showInput } = this.props;
+
+    return expressions !== nextProps.expressions || expressionError !== nextProps.expressionError || editing !== nextState.editing || inputValue !== nextState.inputValue || nextProps.showInput !== showInput || focused !== nextState.focused;
   }
 
   componentDidUpdate(prevProps, prevState) {
-    if (this._input && !prevState.editing) {
-      const input = this._input;
+    const input = this._input;
+
+    if (!input) {
+      return;
+    }
+
+    if (!prevState.editing && this.state.editing) {
       input.setSelectionRange(0, input.value.length);
+      input.focus();
+    } else if (this.props.showInput && !this.state.focused) {
       input.focus();
     }
   }
@@ -23441,25 +18076,36 @@ class Expressions extends _react.Component {
     deleteExpression(expression);
   }
 
+  onBlur() {
+    this.clear();
+    this.hideInput();
+  }
+
   renderNewExpressionInput() {
-    const { expressionError } = this.props;
-    const { editing, inputValue } = this.state;
+    const { expressionError, showInput } = this.props;
+    const { editing, inputValue, focused } = this.state;
     const error = editing === false && expressionError === true;
     const placeholder = error ? L10N.getStr("expressions.errorMsg") : L10N.getStr("expressions.placeholder");
+
     return _react2.default.createElement(
       "li",
-      { className: "expression-input-container" },
+      {
+        className: (0, _classnames2.default)("expression-input-container", { focused, error })
+      },
       _react2.default.createElement(
         "form",
         { className: "expression-input-form", onSubmit: this.handleNewSubmit },
         _react2.default.createElement("input", {
-          className: (0, _classnames2.default)("input-expression", { error }),
+          className: "input-expression",
           type: "text",
           placeholder: placeholder,
           onChange: this.handleChange,
-          onBlur: this.clear,
+          onBlur: this.hideInput,
           onKeyDown: this.handleKeyDown,
-          value: !editing ? inputValue : ""
+          onFocus: this.onFocus,
+          autoFocus: showInput,
+          value: !editing ? inputValue : "",
+          ref: c => this._input = c
         }),
         _react2.default.createElement("input", { type: "submit", style: { display: "none" } })
       )
@@ -23468,11 +18114,15 @@ class Expressions extends _react.Component {
 
   renderExpressionEditInput(expression) {
     const { expressionError } = this.props;
-    const { inputValue, editing } = this.state;
+    const { inputValue, editing, focused } = this.state;
     const error = editing === true && expressionError === true;
+
     return _react2.default.createElement(
       "span",
-      { className: "expression-input-container", key: expression.input },
+      {
+        className: (0, _classnames2.default)("expression-input-container", { focused, error }),
+        key: expression.input
+      },
       _react2.default.createElement(
         "form",
         {
@@ -23485,6 +18135,7 @@ class Expressions extends _react.Component {
           onChange: this.handleChange,
           onBlur: this.clear,
           onKeyDown: this.handleKeyDown,
+          onFocus: this.onFocus,
           value: editing ? inputValue : expression.input,
           ref: c => this._input = c
         }),
@@ -23494,20 +18145,23 @@ class Expressions extends _react.Component {
   }
 
   render() {
-    const { expressions } = this.props;
+    const { expressions, showInput } = this.props;
+
     return _react2.default.createElement(
       "ul",
       { className: "pane expressions-list" },
       expressions.map(this.renderExpression),
-      this.renderNewExpressionInput()
+      (showInput || !expressions.size) && this.renderNewExpressionInput()
     );
   }
 }
 
-exports.default = (0, _reactRedux.connect)(state => ({
+const mapStateToProps = state => ({
   expressions: (0, _selectors.getExpressions)(state),
   expressionError: (0, _selectors.getExpressionError)(state)
-}), _actions2.default)(Expressions);
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Expressions);
 
 /***/ }),
 
@@ -23524,8 +18178,6 @@ Object.defineProperty(exports, "__esModule", {
 var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
-
-var _redux = __webpack_require__(3593);
 
 var _reactRedux = __webpack_require__(3592);
 
@@ -23555,9 +18207,11 @@ __webpack_require__(1338);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-const NUM_FRAMES_SHOWN = 7; /* This Source Code Form is subject to the terms of the Mozilla Public
-                             * License, v. 2.0. If a copy of the MPL was not distributed with this
-                             * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const NUM_FRAMES_SHOWN = 7;
 
 class Frames extends _react.Component {
 
@@ -23582,7 +18236,7 @@ class Frames extends _react.Component {
     };
 
     this.state = {
-      showAllFrames: false
+      showAllFrames: !!props.disableFrameTruncate
     };
   }
 
@@ -23663,7 +18317,7 @@ class Frames extends _react.Component {
   }
 
   render() {
-    const { frames, why } = this.props;
+    const { frames, disableFrameTruncate, why } = this.props;
 
     if (!frames) {
       return _react2.default.createElement(
@@ -23682,18 +18336,20 @@ class Frames extends _react.Component {
       { className: "pane frames" },
       this.renderFrames(frames),
       (0, _WhyPaused2.default)(why),
-      this.renderToggleButton(frames)
+      disableFrameTruncate ? null : this.renderToggleButton(frames)
     );
   }
 }
 
-exports.default = (0, _reactRedux.connect)(state => ({
+const mapStateToProps = state => ({
   frames: (0, _selectors.getCallStackFrames)(state),
   why: (0, _selectors.getPauseReason)(state),
   frameworkGroupingOn: (0, _selectors.getFrameworkGroupingState)(state),
   selectedFrame: (0, _selectors.getSelectedFrame)(state),
   pause: (0, _selectors.isPaused)(state)
-}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Frames);
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Frames);
 
 /***/ }),
 
@@ -23959,8 +18615,6 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _redux = __webpack_require__(3593);
-
 var _reactRedux = __webpack_require__(3592);
 
 var _actions = __webpack_require__(1354);
@@ -24034,7 +18688,9 @@ class EventListeners extends _react.Component {
 
   removeBreakpoint(event, breakpoint) {
     event.stopPropagation();
-    this.props.removeBreakpoint(breakpoint.location);
+    if (breakpoint) {
+      this.props.removeBreakpoint(breakpoint.location);
+    }
   }
 
   render() {
@@ -24047,19 +18703,21 @@ class EventListeners extends _react.Component {
   }
 }
 
-exports.default = (0, _reactRedux.connect)(state => {
-  const listeners = (0, _selectors.getEventListeners)(state).map(l => {
-    return _extends({}, l, {
+const mapStateToProps = state => {
+  const listeners = (0, _selectors.getEventListeners)(state).map(listener => {
+    return _extends({}, listener, {
       breakpoint: (0, _selectors.getBreakpoint)(state, {
-        sourceId: l.sourceId,
-        line: l.line,
+        sourceId: listener.sourceId,
+        line: listener.line,
         column: null
       })
     });
   });
 
   return { listeners };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(EventListeners);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(EventListeners);
 
 /***/ }),
 
@@ -24078,8 +18736,6 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _redux = __webpack_require__(3593);
-
 var _reactRedux = __webpack_require__(3592);
 
 __webpack_require__(1340);
@@ -24093,6 +18749,10 @@ var _selectors = __webpack_require__(3590);
 var _path = __webpack_require__(1393);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class Workers extends _react.PureComponent {
 
@@ -24128,13 +18788,12 @@ class Workers extends _react.PureComponent {
   }
 }
 
-exports.Workers = Workers; /* This Source Code Form is subject to the terms of the Mozilla Public
-                            * License, v. 2.0. If a copy of the MPL was not distributed with this
-                            * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+exports.Workers = Workers;
+const mapStateToProps = state => ({
+  workers: (0, _selectors.getWorkers)(state)
+});
 
-exports.default = (0, _reactRedux.connect)(state => {
-  return { workers: (0, _selectors.getWorkers)(state) };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Workers);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Workers);
 
 /***/ }),
 
@@ -24168,16 +18827,20 @@ class Accordion extends _react.Component {
       const { opened } = item;
 
       return _react2.default.createElement(
-        "div",
-        { className: item.className, key: i },
+        "li",
+        { role: "listitem", className: item.className, key: i },
         _react2.default.createElement(
-          "div",
-          { className: "_header", onClick: () => this.handleHeaderClick(i) },
+          "h2",
+          {
+            className: "_header",
+            tabIndex: "0",
+            onClick: () => this.handleHeaderClick(i)
+          },
           _react2.default.createElement(_Svg2.default, { name: "arrow", className: opened ? "expanded" : "" }),
           item.header,
           item.buttons ? _react2.default.createElement(
             "div",
-            { className: "header-buttons" },
+            { className: "header-buttons", tabIndex: "-1" },
             item.buttons
           ) : null
         ),
@@ -24211,8 +18874,8 @@ class Accordion extends _react.Component {
 
   render() {
     return _react2.default.createElement(
-      "div",
-      { className: "accordion" },
+      "ul",
+      { role: "list", className: "accordion" },
       this.props.items.map(this.renderContainer)
     );
   }
@@ -24234,7 +18897,7 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -24243,8 +18906,6 @@ var _react = __webpack_require__(0);
 var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
-
-var _redux = __webpack_require__(3593);
 
 var _classnames = __webpack_require__(175);
 
@@ -24262,20 +18923,16 @@ var _actions2 = _interopRequireDefault(_actions);
 
 var _CommandBarButton = __webpack_require__(1764);
 
-var _CommandBarButton2 = _interopRequireDefault(_CommandBarButton);
-
 __webpack_require__(1295);
 
 var _devtoolsModules = __webpack_require__(1376);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
+const { appinfo } = _devtoolsModules.Services; /* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-const { appinfo } = _devtoolsModules.Services;
 
 const isMacOS = appinfo.OS === "Darwin";
 
@@ -24325,21 +18982,6 @@ function formatKey(action) {
   return (0, _text.formatKeyShortcut)(key);
 }
 
-function debugBtn(onClick, type, className, tooltip, disabled = false, ariaPressed = false) {
-  return _react2.default.createElement(
-    _CommandBarButton2.default,
-    {
-      className: (0, _classnames2.default)(type, className),
-      disabled: disabled,
-      key: type,
-      onClick: onClick,
-      pressed: ariaPressed,
-      title: tooltip
-    },
-    _react2.default.createElement("img", { className: type })
-  );
-}
-
 class CommandBar extends _react.Component {
   componentWillUnmount() {
     const shortcuts = this.context.shortcuts;
@@ -24381,7 +19023,7 @@ class CommandBar extends _react.Component {
       return;
     }
 
-    return [debugBtn(this.props.stepOver, "stepOver", className, L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), debugBtn(this.props.stepIn, "stepIn", className, L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled), debugBtn(this.props.stepOut, "stepOut", className, L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled)];
+    return [(0, _CommandBarButton.debugBtn)(this.props.stepOver, "stepOver", className, L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), (0, _CommandBarButton.debugBtn)(this.props.stepIn, "stepIn", className, L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled), (0, _CommandBarButton.debugBtn)(this.props.stepOut, "stepOut", className, L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled)];
   }
 
   resume() {
@@ -24396,7 +19038,7 @@ class CommandBar extends _react.Component {
       if (canRewind) {
         return;
       }
-      return debugBtn(() => this.resume(), "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume")));
+      return (0, _CommandBarButton.debugBtn)(() => this.resume(), "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume")));
     }
 
     if (_prefs.features.removeCommandBarOptions && !this.props.canRewind) {
@@ -24404,39 +19046,10 @@ class CommandBar extends _react.Component {
     }
 
     if (isWaitingOnBreak) {
-      return debugBtn(null, "pause", "disabled", L10N.getStr("pausePendingButtonTooltip"), true);
+      return (0, _CommandBarButton.debugBtn)(null, "pause", "disabled", L10N.getStr("pausePendingButtonTooltip"), true);
     }
 
-    return debugBtn(breakOnNext, "pause", "active", L10N.getFormatStr("pauseButtonTooltip", formatKey("pause")));
-  }
-
-  /*
-   * The pause on exception button has three states in this order:
-   *  1. don't pause on exceptions      [false, false]
-   *  2. pause on uncaught exceptions   [true, true]
-   *  3. pause on all exceptions        [true, false]
-  */
-  renderPauseOnExceptions() {
-    const {
-      shouldPauseOnExceptions,
-      shouldIgnoreCaughtExceptions,
-      pauseOnExceptions,
-      canRewind
-    } = this.props;
-
-    if (canRewind || _prefs.features.breakpointsDropdown) {
-      return;
-    }
-
-    if (!shouldPauseOnExceptions && !shouldIgnoreCaughtExceptions) {
-      return debugBtn(() => pauseOnExceptions(true, true), "pause-exceptions", "enabled", L10N.getStr("ignoreExceptions"), false, false);
-    }
-
-    if (shouldPauseOnExceptions && shouldIgnoreCaughtExceptions) {
-      return debugBtn(() => pauseOnExceptions(true, false), "pause-exceptions", "uncaught enabled", L10N.getStr("pauseOnUncaughtExceptions"), false, true);
-    }
-
-    return debugBtn(() => pauseOnExceptions(false, false), "pause-exceptions", "all enabled", L10N.getStr("pauseOnExceptions"), false, true);
+    return (0, _CommandBarButton.debugBtn)(breakOnNext, "pause", "active", L10N.getFormatStr("pauseButtonTooltip", formatKey("pause")));
   }
 
   renderTimeTravelButtons() {
@@ -24448,7 +19061,7 @@ class CommandBar extends _react.Component {
 
     const isDisabled = !isPaused;
 
-    return [debugBtn(this.props.rewind, "rewind", "active", "Rewind Execution"), debugBtn(this.props.resume, "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume"))), _react2.default.createElement("div", { className: "divider" }), debugBtn(this.props.reverseStepOver, "reverseStepOver", "active", "Reverse step over"), debugBtn(this.props.stepOver, "stepOver", "active", L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), _react2.default.createElement("div", { className: "divider" }), debugBtn(this.props.stepOut, "stepOut", "active", L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled), debugBtn(this.props.stepIn, "stepIn", "active", L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled)];
+    return [(0, _CommandBarButton.debugBtn)(this.props.rewind, "rewind", "active", "Rewind Execution"), (0, _CommandBarButton.debugBtn)(() => this.props.resume, "resume", "active", L10N.getFormatStr("resumeButtonTooltip", formatKey("resume"))), _react2.default.createElement("div", { className: "divider" }), (0, _CommandBarButton.debugBtn)(this.props.reverseStepOver, "reverseStepOver", "active", "Reverse step over"), (0, _CommandBarButton.debugBtn)(this.props.stepOver, "stepOver", "active", L10N.getFormatStr("stepOverTooltip", formatKey("stepOver")), isDisabled), _react2.default.createElement("div", { className: "divider" }), (0, _CommandBarButton.debugBtn)(this.props.stepOut, "stepOut", "active", L10N.getFormatStr("stepOutTooltip", formatKey("stepOut")), isDisabled), (0, _CommandBarButton.debugBtn)(this.props.stepIn, "stepIn", "active", L10N.getFormatStr("stepInTooltip", formatKey("stepIn")), isDisabled)];
   }
 
   replayPreviousButton() {
@@ -24461,7 +19074,7 @@ class CommandBar extends _react.Component {
 
     const enabled = historyPosition === 0;
     const activeClass = enabled ? "replay-inactive" : "";
-    return debugBtn(() => this.setHistory(-1), `replay-previous ${activeClass}`, "active", L10N.getStr("replayPrevious"), enabled);
+    return (0, _CommandBarButton.debugBtn)(() => this.setHistory(-1), `replay-previous ${activeClass}`, "active", L10N.getStr("replayPrevious"), enabled);
   }
 
   replayNextButton() {
@@ -24474,7 +19087,7 @@ class CommandBar extends _react.Component {
 
     const enabled = historyPosition + 1 === historyLength;
     const activeClass = enabled ? "replay-inactive" : "";
-    return debugBtn(() => this.setHistory(1), `replay-next ${activeClass}`, "active", L10N.getStr("replayNext"), enabled);
+    return (0, _CommandBarButton.debugBtn)(() => this.setHistory(1), `replay-next ${activeClass}`, "active", L10N.getStr("replayNext"), enabled);
   }
 
   renderStepPosition() {
@@ -24510,6 +19123,26 @@ class CommandBar extends _react.Component {
     );
   }
 
+  renderSkipPausingButton() {
+    const { skipPausing, toggleSkipPausing } = this.props;
+
+    if (!_prefs.features.skipPausing) {
+      return null;
+    }
+
+    return _react2.default.createElement(
+      "button",
+      {
+        className: (0, _classnames2.default)("command-bar-button", {
+          active: skipPausing
+        }),
+        title: L10N.getStr("skipPausingTooltip"),
+        onClick: toggleSkipPausing
+      },
+      _react2.default.createElement("img", { className: "skipPausing" })
+    );
+  }
+
   render() {
     return _react2.default.createElement(
       "div",
@@ -24520,12 +19153,12 @@ class CommandBar extends _react.Component {
       },
       this.renderPauseButton(),
       this.renderStepButtons(),
-      this.renderPauseOnExceptions(),
       this.renderTimeTravelButtons(),
       _react2.default.createElement("div", { className: "filler" }),
       this.replayPreviousButton(),
       this.renderStepPosition(),
-      this.replayNextButton()
+      this.replayNextButton(),
+      this.renderSkipPausingButton()
     );
   }
 }
@@ -24534,17 +19167,16 @@ CommandBar.contextTypes = {
   shortcuts: _propTypes2.default.object
 };
 
-exports.default = (0, _reactRedux.connect)(state => {
-  return {
-    isPaused: (0, _selectors.isPaused)(state),
-    history: (0, _selectors.getHistory)(state),
-    historyPosition: (0, _selectors.getHistoryPosition)(state),
-    isWaitingOnBreak: (0, _selectors.getIsWaitingOnBreak)(state),
-    shouldPauseOnExceptions: (0, _selectors.getShouldPauseOnExceptions)(state),
-    shouldIgnoreCaughtExceptions: (0, _selectors.getShouldIgnoreCaughtExceptions)(state),
-    canRewind: (0, _selectors.getCanRewind)(state)
-  };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(CommandBar);
+const mapStateToProps = state => ({
+  isPaused: (0, _selectors.isPaused)(state),
+  history: (0, _selectors.getHistory)(state),
+  historyPosition: (0, _selectors.getHistoryPosition)(state),
+  isWaitingOnBreak: (0, _selectors.getIsWaitingOnBreak)(state),
+  canRewind: (0, _selectors.getCanRewind)(state),
+  skipPausing: (0, _selectors.getSkipPausing)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(CommandBar);
 
 /***/ }),
 
@@ -24558,10 +19190,6 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
@@ -24570,29 +19198,19 @@ var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
 
+var _CommandBarButton = __webpack_require__(1764);
+
 __webpack_require__(1295);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-function debugBtn(onClick, type, className, tooltip, disabled = false) {
-  const props = {
-    onClick,
-    key: type,
-    "aria-label": tooltip,
-    title: tooltip,
-    disabled
-  };
-
-  return _react2.default.createElement(
-    "button",
-    _extends({ className: (0, _classnames2.default)(type, className) }, props),
-    "?"
-  );
-}
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class UtilsBar extends _react.Component {
   renderUtilButtons() {
-    return [debugBtn(this.props.toggleShortcutsModal, "shortcut", "active", L10N.getStr("shortcuts.buttonName"), false)];
+    return [(0, _CommandBarButton.debugBtn)(this.props.toggleShortcutsModal, "shortcuts", "active", L10N.getStr("shortcuts.buttonName"), false)];
   }
 
   render() {
@@ -24731,244 +19349,6 @@ exports.default = UtilsBar;
 
 /***/ }),
 
-/***/ 1610:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-
-var _react = __webpack_require__(0);
-
-var _react2 = _interopRequireDefault(_react);
-
-var _redux = __webpack_require__(3593);
-
-var _reactRedux = __webpack_require__(3592);
-
-var _classnames = __webpack_require__(175);
-
-var _classnames2 = _interopRequireDefault(_classnames);
-
-var _actions = __webpack_require__(1354);
-
-var _actions2 = _interopRequireDefault(_actions);
-
-var _selectors = __webpack_require__(3590);
-
-var _Svg = __webpack_require__(1359);
-
-var _Svg2 = _interopRequireDefault(_Svg);
-
-var _ManagedTree = __webpack_require__(1404);
-
-var _ManagedTree2 = _interopRequireDefault(_ManagedTree);
-
-__webpack_require__(1296);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-// check to see if its an object with propertie
-function nodeHasProperties(item) {
-  return !nodeHasChildren(item) && item.contents.value.type === "object";
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-function nodeIsPrimitive(item) {}
-
-function nodeHasChildren(item) {
-  return Array.isArray(item.contents);
-}
-
-function createNode(name, path, contents) {
-  // The path is important to uniquely identify the item in the entire
-  // tree. This helps debugging & optimizes React's rendering of large
-  // lists. The path will be separated by property name,
-  // i.e. `{ foo: { bar: { baz: 5 }}}` will have a path of `foo/bar/baz`
-  // for the inner object.
-  return { name, path, contents };
-}
-
-class Scopes extends _react.Component {
-
-  constructor(...args) {
-    super(...args);
-
-    // Cache of dynamically built nodes. We shouldn't need to clear
-    // this out ever, since we don't ever "switch out" the object
-    // being inspected.
-
-    this.renderItem = (item, depth, focused, _, expanded, { setExpanded }) => {
-      const notEnumberable = false;
-      const objectValue = "";
-
-      return _react2.default.createElement(
-        "div",
-        {
-          className: (0, _classnames2.default)("node object-node", {
-            focused: false,
-            "not-enumerable": notEnumberable
-          }),
-          style: { marginLeft: depth * 15 },
-          key: item.path,
-          onClick: e => {
-            e.stopPropagation();
-            setExpanded(item, !expanded);
-          }
-        },
-        _react2.default.createElement(_Svg2.default, {
-          name: "arrow",
-          className: (0, _classnames2.default)({
-            expanded,
-            hidden: nodeIsPrimitive(item)
-          })
-        }),
-        _react2.default.createElement(
-          "span",
-          { className: "object-label" },
-          item.name
-        ),
-        _react2.default.createElement(
-          "span",
-          { className: "object-delimiter" },
-          objectValue ? ": " : ""
-        ),
-        _react2.default.createElement(
-          "span",
-          { className: "object-value" },
-          objectValue || ""
-        )
-      );
-    };
-
-    this.getChildren = item => {
-      const obj = item.contents;
-
-      // Nodes can either have children already, or be an object with
-      // properties that we need to go and fetch.
-      if (nodeHasChildren(item)) {
-        return item.contents;
-      } else if (nodeHasProperties(item)) {
-        const objectId = obj.value.objectId;
-
-        // Because we are dynamically creating the tree as the user
-        // expands it (not precalcuated tree structure), we cache child
-        // arrays. This not only helps performance, but is necessary
-        // because the expanded state depends on instances of nodes
-        // being the same across renders. If we didn't do this, each
-        // node would be a new instance every render.
-        const key = item.path;
-        if (this.objectCache[key]) {
-          return this.objectCache[key];
-        }
-
-        const loadedProps = this.getObjectProperties(item);
-        if (loadedProps) {
-          const children = this.makeNodesForProperties(loadedProps, item.path);
-          this.objectCache[objectId] = children;
-          return children;
-        }
-        return [];
-      }
-      return [];
-    };
-
-    this.onExpand = item => {
-      const { loadObjectProperties } = this.props;
-
-      if (nodeHasProperties(item)) {
-        loadObjectProperties(item.contents.value);
-      }
-    };
-
-    this.objectCache = {};
-  }
-
-  makeNodesForProperties(objProps, parentPath) {
-    const { ownProperties, prototype } = objProps;
-
-    const nodes = Object.keys(ownProperties).sort()
-    // Ignore non-concrete values like getters and setters
-    // for now by making sure we have a value.
-    .filter(name => "value" in ownProperties[name]).map(name => createNode(name, `${parentPath}/${name}`, ownProperties[name]));
-
-    // Add the prototype if it exists and is not null
-    if (prototype && prototype.type !== "null") {
-      nodes.push(createNode("__proto__", `${parentPath}/__proto__`, {
-        value: prototype
-      }));
-    }
-
-    return nodes;
-  }
-
-  getObjectProperties(item) {
-    this.props.loadedObjects[item.contents.value.objectId];
-  }
-
-  getRoots() {
-    return this.props.scopes.map(scope => {
-      const name = scope.name || (scope.type == "global" ? "Window" : "");
-
-      return {
-        name: name,
-        path: name,
-        contents: { value: scope.object }
-      };
-    });
-  }
-
-  render() {
-    const { isPaused } = this.props;
-
-    if (!isPaused) {
-      return _react2.default.createElement(
-        "div",
-        { className: (0, _classnames2.default)("pane", "scopes-list") },
-        _react2.default.createElement(
-          "div",
-          { className: "pane-info" },
-          L10N.getStr("scopes.notPaused")
-        )
-      );
-    }
-
-    const roots = this.getRoots();
-
-    return _react2.default.createElement(
-      "div",
-      { className: (0, _classnames2.default)("pane", "scopes-list") },
-      _react2.default.createElement(_ManagedTree2.default, {
-        itemHeight: 20,
-        getParent: item => null,
-        getChildren: this.getChildren,
-        getRoots: () => roots,
-        getPath: item => item.path,
-        autoExpand: 0,
-        autoExpandDepth: 1,
-        autoExpandAll: false,
-        disabledFocus: true,
-        onExpand: this.onExpand,
-        renderItem: this.renderItem
-      })
-    );
-  }
-}
-
-exports.default = (0, _reactRedux.connect)(state => ({
-  isPaused: (0, _selectors.isPaused)(state),
-  loadedObjects: () => {
-    throw new Error("This is not implemented.");
-  },
-  scopes: (0, _selectors.getChromeScopes)(state)
-}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Scopes);
-
-/***/ }),
-
 /***/ 1611:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -24983,8 +19363,6 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _redux = __webpack_require__(3593);
-
 var _reactRedux = __webpack_require__(3592);
 
 var _actions = __webpack_require__(1354);
@@ -24997,11 +19375,15 @@ var _selectors = __webpack_require__(3590);
 
 var _scopes = __webpack_require__(1792);
 
-var _devtoolsReps = __webpack_require__(1408);
+var _devtoolsReps = __webpack_require__(3655);
 
 __webpack_require__(1296);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class Scopes extends _react.PureComponent {
   constructor(props, ...args) {
@@ -25056,7 +19438,7 @@ class Scopes extends _react.PureComponent {
           autoExpandAll: false,
           autoExpandDepth: 1,
           disableWrap: true,
-          disabledFocus: true,
+          focusable: false,
           dimTopLevelWindow: true,
           createObjectClient: grip => (0, _firefox.createObjectClient)(grip)
         }),
@@ -25097,11 +19479,9 @@ class Scopes extends _react.PureComponent {
       )
     );
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
-exports.default = (0, _reactRedux.connect)(state => {
+const mapStateToProps = state => {
   const selectedFrame = (0, _selectors.getSelectedFrame)(state);
   const selectedSource = (0, _selectors.getSelectedSource)(state);
 
@@ -25126,7 +19506,9 @@ exports.default = (0, _reactRedux.connect)(state => {
     originalFrameScopes,
     generatedFrameScopes
   };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Scopes);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Scopes);
 
 /***/ }),
 
@@ -25139,14 +19521,13 @@ exports.default = (0, _reactRedux.connect)(state => {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+exports.WelcomeBox = undefined;
 
 var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
-
-var _redux = __webpack_require__(3593);
 
 var _actions = __webpack_require__(1354);
 
@@ -25163,10 +19544,6 @@ var _PaneToggle2 = _interopRequireDefault(_PaneToggle);
 __webpack_require__(1343);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 class WelcomeBox extends _react.Component {
   renderToggleButton() {
@@ -25203,7 +19580,10 @@ class WelcomeBox extends _react.Component {
           { className: "shortcutFunction" },
           _react2.default.createElement(
             "p",
-            { onClick: () => openQuickOpen() },
+            {
+              className: "welcomebox__searchSources",
+              onClick: () => openQuickOpen()
+            },
             _react2.default.createElement(
               "span",
               { className: "shortcutKey" },
@@ -25217,7 +19597,10 @@ class WelcomeBox extends _react.Component {
           ),
           _react2.default.createElement(
             "p",
-            { onClick: setActiveSearch.bind(null, "project") },
+            {
+              className: "welcomebox__searchProject",
+              onClick: setActiveSearch.bind(null, "project")
+            },
             _react2.default.createElement(
               "span",
               { className: "shortcutKey" },
@@ -25236,9 +19619,15 @@ class WelcomeBox extends _react.Component {
   }
 }
 
-exports.default = (0, _reactRedux.connect)(state => ({
+exports.WelcomeBox = WelcomeBox; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                  * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const mapStateToProps = state => ({
   endPanelCollapsed: (0, _selectors.getPaneCollapse)(state, "end")
-}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(WelcomeBox);
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(WelcomeBox);
 
 /***/ }),
 
@@ -25257,8 +19646,6 @@ var _react = __webpack_require__(0);
 var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
-
-var _redux = __webpack_require__(3593);
 
 var _immutable = __webpack_require__(3594);
 
@@ -25296,23 +19683,34 @@ function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj;
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 class Tabs extends _react.PureComponent {
 
   constructor(props) {
     super(props);
 
+    this.updateHiddenTabs = () => {
+      if (!this.refs.sourceTabs) {
+        return;
+      }
+      const { selectedSource, tabSources, moveTab } = this.props;
+      const sourceTabEls = this.refs.sourceTabs.children;
+      const hiddenTabs = (0, _tabs.getHiddenTabs)(tabSources, sourceTabEls);
+
+      if ((0, _ui.isVisible)() && hiddenTabs.indexOf(selectedSource) !== -1) {
+        return moveTab(selectedSource.url, 0);
+      }
+
+      this.setState({ hiddenTabs });
+    };
+
     this.renderDropdownSource = source => {
-      const { selectSource } = this.props;
+      const { selectSpecificSource } = this.props;
       const filename = (0, _source.getFilename)(source.toJS());
 
-      const onClick = () => selectSource(source.get("id"));
+      const onClick = () => selectSpecificSource(source.id);
       return _react2.default.createElement(
         "li",
-        { key: source.get("id"), onClick: onClick },
+        { key: source.id, onClick: onClick },
         _react2.default.createElement("img", { className: `dropdown-icon ${this.getIconClass(source)}` }),
         filename
       );
@@ -25335,7 +19733,7 @@ class Tabs extends _react.PureComponent {
   }
 
   componentDidMount() {
-    this.updateHiddenTabs();
+    window.requestIdleCallback(this.updateHiddenTabs);
     window.addEventListener("resize", this.onResize);
   }
 
@@ -25347,20 +19745,7 @@ class Tabs extends _react.PureComponent {
    * Updates the hiddenSourceTabs state, by
    * finding the source tabs which are wrapped and are not on the top row.
    */
-  updateHiddenTabs() {
-    if (!this.refs.sourceTabs) {
-      return;
-    }
-    const { selectedSource, tabSources, moveTab } = this.props;
-    const sourceTabEls = this.refs.sourceTabs.children;
-    const hiddenTabs = (0, _tabs.getHiddenTabs)(tabSources, sourceTabEls);
 
-    if ((0, _ui.isVisible)() && hiddenTabs.indexOf(selectedSource) !== -1) {
-      return moveTab(selectedSource.get("url"), 0);
-    }
-
-    this.setState({ hiddenTabs });
-  }
 
   toggleSourcesDropdown(e) {
     this.setState(prevState => ({
@@ -25372,7 +19757,7 @@ class Tabs extends _react.PureComponent {
     if ((0, _source.isPretty)(source)) {
       return "prettyPrint";
     }
-    if (source.get("isBlackBoxed")) {
+    if (source.isBlackBoxed) {
       return "blackBox";
     }
     return "file";
@@ -25402,8 +19787,9 @@ class Tabs extends _react.PureComponent {
       null,
       hiddenTabs.map(this.renderDropdownSource)
     );
+    const icon = _react2.default.createElement("img", { className: "moreTabs" });
 
-    return _react2.default.createElement(_Dropdown2.default, { panel: Panel, icon: "»" });
+    return _react2.default.createElement(_Dropdown2.default, { panel: Panel, icon: icon });
   }
 
   renderStartPanelToggleButton() {
@@ -25438,14 +19824,16 @@ class Tabs extends _react.PureComponent {
       this.renderEndPanelToggleButton()
     );
   }
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-exports.default = (0, _reactRedux.connect)(state => {
-  return {
-    selectedSource: (0, _selectors.getSelectedSource)(state),
-    tabSources: (0, _selectors.getSourcesForTabs)(state)
-  };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Tabs);
+const mapStateToProps = state => ({
+  selectedSource: (0, _selectors.getSelectedSource)(state),
+  tabSources: (0, _selectors.getSourcesForTabs)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Tabs);
 
 /***/ }),
 
@@ -25931,35 +20319,21 @@ exports.default = Dropdown;
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-// eslint-disable-next-line max-len
-
-
 exports.mapScopes = mapScopes;
 
 var _selectors = __webpack_require__(3590);
 
 var _loadSourceText = __webpack_require__(1435);
 
-var _parser = __webpack_require__(1365);
-
 var _promise = __webpack_require__(1653);
-
-var _locColumn = __webpack_require__(2349);
-
-var _findGeneratedBindingFromPosition = __webpack_require__(2358);
 
 var _prefs = __webpack_require__(226);
 
 var _log = __webpack_require__(2359);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
-function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; }
+var _mapScopes = __webpack_require__(3723);
 
 function mapScopes(scopes, frame) {
   return async function ({ dispatch, getState, client, sourceMaps }) {
@@ -25967,7 +20341,7 @@ function mapScopes(scopes, frame) {
 
     const sourceRecord = (0, _selectors.getSource)(getState(), frame.location.sourceId);
 
-    const shouldMapScopes = _prefs.features.mapScopes && !generatedSourceRecord.get("isWasm") && !sourceRecord.get("isPrettyPrinted") && !(0, _devtoolsSourceMap.isGeneratedId)(frame.location.sourceId);
+    const shouldMapScopes = _prefs.features.mapScopes && !generatedSourceRecord.isWasm && !sourceRecord.isPrettyPrinted && !(0, _devtoolsSourceMap.isGeneratedId)(frame.location.sourceId);
 
     await dispatch({
       type: "MAP_SCOPES",
@@ -25980,7 +20354,7 @@ function mapScopes(scopes, frame) {
         await dispatch((0, _loadSourceText.loadSourceText)(sourceRecord));
 
         try {
-          return await buildMappedScopes(sourceRecord.toJS(), frame, (await scopes), sourceMaps, client);
+          return await (0, _mapScopes.buildMappedScopes)(sourceRecord.toJS(), frame, (await scopes), sourceMaps, client);
         } catch (e) {
           (0, _log.log)(e);
           return null;
@@ -25988,264 +20362,9 @@ function mapScopes(scopes, frame) {
       }()
     });
   };
-}
-
-async function buildMappedScopes(source, frame, scopes, sourceMaps, client) {
-  const originalAstScopes = await (0, _parser.getScopes)(frame.location);
-  const generatedAstScopes = await (0, _parser.getScopes)(frame.generatedLocation);
-
-  if (!originalAstScopes || !generatedAstScopes) {
-    return null;
-  }
-
-  const generatedAstBindings = buildGeneratedBindingList(scopes, generatedAstScopes, frame.this);
-
-  const expressionLookup = {};
-  const mappedOriginalScopes = [];
-
-  for (const item of originalAstScopes) {
-    const generatedBindings = {};
-
-    for (const name of Object.keys(item.bindings)) {
-      const binding = item.bindings[name];
-
-      const result = await findGeneratedBinding(sourceMaps, client, source, name, binding, generatedAstBindings);
-
-      if (result) {
-        generatedBindings[name] = result.grip;
-
-        if (binding.refs.length !== 0 &&
-        // These are assigned depth-first, so we don't want shadowed
-        // bindings in parent scopes overwriting the expression.
-        !Object.prototype.hasOwnProperty.call(expressionLookup, name)) {
-          expressionLookup[name] = result.expression;
-        }
-      }
-    }
-
-    mappedOriginalScopes.push(_extends({}, item, {
-      generatedBindings
-    }));
-  }
-
-  const mappedGeneratedScopes = generateClientScope(scopes, mappedOriginalScopes);
-
-  return isReliableScope(mappedGeneratedScopes) ? { mappings: expressionLookup, scope: mappedGeneratedScopes } : null;
-}
-
-/**
- * Consider a scope and its parents reliable if the vast majority of its
- * bindings were successfully mapped to generated scope bindings.
- */
-function isReliableScope(scope) {
-  let totalBindings = 0;
-  let unknownBindings = 0;
-
-  for (let s = scope; s; s = s.parent) {
-    const vars = s.bindings && s.bindings.variables || {};
-    for (const key of Object.keys(vars)) {
-      const binding = vars[key];
-
-      totalBindings += 1;
-      if (binding.value && typeof binding.value === "object" && (binding.value.type === "unscoped" || binding.value.type === "unmapped")) {
-        unknownBindings += 1;
-      }
-    }
-  }
-
-  // As determined by fair dice roll.
-  return totalBindings === 0 || unknownBindings / totalBindings < 0.9;
-}
-
-function generateClientScope(scopes, originalScopes) {
-  // Pull the root object scope and root lexical scope to reuse them in
-  // our mapped scopes. This assumes that file file being processed is
-  // a CommonJS or ES6 module, which might not be ideal. Potentially
-  let globalLexicalScope = null;
-  for (let s = scopes; s.parent; s = s.parent) {
-    // $FlowIgnore - Flow doesn't like casting 'parent'.
-    globalLexicalScope = s;
-  }
-  if (!globalLexicalScope) {
-    throw new Error("Assertion failure - there should always be a scope");
-  }
-
-  // Build a structure similar to the client's linked scope object using
-  // the original AST scopes, but pulling in the generated bindings
-  // linked to each scope.
-  const result = originalScopes.slice(0, -2).reverse().reduce((acc, orig, i) => {
-    const _orig$generatedBindin = orig.generatedBindings,
-          {
-      // The 'this' binding data we have is handled independently, so
-      // the binding data is not included here.
-      // eslint-disable-next-line no-unused-vars
-      this: _this
-    } = _orig$generatedBindin,
-          variables = _objectWithoutProperties(_orig$generatedBindin, ["this"]);
-
-    return _extends({
-      // Flow doesn't like casting 'parent'.
-      parent: acc,
-      actor: `originalActor${i}`,
-      type: orig.type,
-      bindings: {
-        arguments: [],
-        variables
-      }
-    }, orig.type === "function" ? {
-      function: {
-        displayName: orig.displayName
-      }
-    } : null, orig.type === "block" ? {
-      block: {
-        displayName: orig.displayName
-      }
-    } : null);
-  }, globalLexicalScope);
-
-  // The rendering logic in getScope 'this' bindings only runs on the current
-  // selected frame scope, so we pluck out the 'this' binding that was mapped,
-  // and put it in a special location
-  const thisScope = originalScopes.find(scope => scope.bindings.this);
-  if (thisScope) {
-    result.bindings.this = thisScope.generatedBindings.this || null;
-  }
-
-  return result;
-}
-
-async function findGeneratedBinding(sourceMaps, client, source, name, originalBinding, generatedAstBindings) {
-  // If there are no references to the implicits, then we have no way to
-  // even attempt to map it back to the original since there is no location
-  // data to use. Bail out instead of just showing it as unmapped.
-  if (originalBinding.type === "implicit" && !originalBinding.refs.some(item => item.type === "ref")) {
-    return null;
-  }
-
-  const { refs } = originalBinding;
-
-  const genContent = await refs.reduce(async (acc, pos) => {
-    const result = await acc;
-    if (result) {
-      return result;
-    }
-
-    return await (0, _findGeneratedBindingFromPosition.findGeneratedBindingFromPosition)(sourceMaps, client, source, pos, name, originalBinding.type, generatedAstBindings);
-  }, null);
-
-  if (genContent && genContent.desc) {
-    return {
-      grip: genContent.desc,
-      expression: genContent.expression
-    };
-  } else if (genContent) {
-    // If there is no descriptor for 'this', then this is not the top-level
-    // 'this' that the server gave us a binding for, and we can just ignore it.
-    if (name === "this") {
-      return null;
-    }
-
-    // If the location is found but the descriptor is not, then it
-    // means that the server scope information didn't match the scope
-    // information from the DevTools parsed scopes.
-    return {
-      grip: {
-        configurable: false,
-        enumerable: true,
-        writable: false,
-        value: {
-          type: "unscoped",
-          unscoped: true,
-
-          // HACK: Until support for "unscoped" lands in devtools-reps,
-          // this will make these show as (unavailable).
-          missingArguments: true
-        }
-      },
-      expression: null
-    };
-  }
-
-  // If no location mapping is found, then the map is bad, or
-  // the map is okay but it original location is inside
-  // of some scope, but the generated location is outside, leading
-  // us to search for bindings that don't technically exist.
-  return {
-    grip: {
-      configurable: false,
-      enumerable: true,
-      writable: false,
-      value: {
-        type: "unmapped",
-        unmapped: true,
-
-        // HACK: Until support for "unmapped" lands in devtools-reps,
-        // this will make these show as (unavailable).
-        missingArguments: true
-      }
-    },
-    expression: null
-  };
-}
-
-function buildGeneratedBindingList(scopes, generatedAstScopes, thisBinding) {
-  const clientScopes = [];
-  for (let s = scopes; s; s = s.parent) {
-    clientScopes.push(s);
-  }
-
-  // The server's binding data doesn't include general 'this' binding
-  // information, so we manually inject the one 'this' binding we have into
-  // the normal binding data we are working with.
-  const frameThisOwner = generatedAstScopes.find(generated => "this" in generated.bindings);
-
-  const generatedBindings = clientScopes.reverse().map((s, i) => {
-    const generated = generatedAstScopes[generatedAstScopes.length - 1 - i];
-
-    const bindings = s.bindings ? Object.assign({}, ...s.bindings.arguments, s.bindings.variables) : {};
-
-    if (generated === frameThisOwner && thisBinding) {
-      bindings.this = {
-        value: thisBinding
-      };
-    }
-
-    return {
-      generated,
-      client: _extends({}, s, {
-        bindings
-      })
-    };
-  }).slice(2).reduce((acc, { client: { bindings }, generated }) => {
-    // If the parser worker's result didn't match the client scopes,
-    // there might not be a generated scope that matches.
-    if (generated) {
-      for (const name of Object.keys(generated.bindings)) {
-        const { refs } = generated.bindings[name];
-        for (const loc of refs) {
-          acc.push({
-            name,
-            loc,
-            desc: bindings[name] || null
-          });
-        }
-      }
-    }
-    return acc;
-  }, [])
-  // Sort so we can binary-search.
-  .sort((a, b) => {
-    const aStart = a.loc.start;
-    const bStart = a.loc.start;
-
-    if (aStart.line === bStart.line) {
-      return (0, _locColumn.locColumn)(aStart) - (0, _locColumn.locColumn)(bStart);
-    }
-    return aStart.line - bStart.line;
-  });
-
-  return generatedBindings;
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /***/ }),
 
@@ -26274,7 +20393,7 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /**
  * Quick Open reducer
@@ -26341,14 +20460,21 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
 
 exports.parseQuickOpenQuery = parseQuickOpenQuery;
 exports.parseLineColumn = parseLineColumn;
+exports.formatSourcesForList = formatSourcesForList;
 exports.formatSymbol = formatSymbol;
 exports.formatSymbols = formatSymbols;
 exports.formatShortcutResults = formatShortcutResults;
 exports.formatSources = formatSources;
 
+var _classnames = __webpack_require__(175);
+
+var _classnames2 = _interopRequireDefault(_classnames);
+
 var _utils = __webpack_require__(1366);
 
 var _source = __webpack_require__(1356);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 const MODIFIERS = exports.MODIFIERS = {
   "@": "functions",
@@ -26386,6 +20512,19 @@ function parseLineColumn(query) {
   }
 }
 
+function formatSourcesForList(source, tabs) {
+  const title = (0, _source.getFilename)(source);
+  const subtitle = (0, _utils.endTruncateStr)(source.relativeUrl, 100);
+  return {
+    value: source.relativeUrl,
+    title,
+    subtitle,
+    icon: tabs.includes(source.url) ? "tab result-item-icon" : (0, _classnames2.default)((0, _source.getSourceClassnames)(source), "result-item-icon"),
+    id: source.id,
+    url: source.url
+  };
+}
+
 function formatSymbol(symbol) {
   return {
     id: `${symbol.name}:${symbol.location.start.line}`,
@@ -26397,7 +20536,7 @@ function formatSymbol(symbol) {
 }
 
 function formatSymbols(symbols) {
-  if (!symbols) {
+  if (!symbols || symbols.loading) {
     return { variables: [], functions: [] };
   }
 
@@ -26425,17 +20564,8 @@ function formatShortcutResults() {
   }];
 }
 
-function formatSources(sources) {
-  return sources.valueSeq().filter(source => !(0, _source.isPretty)(source)).map(source => {
-    const sourcePath = (0, _source.getSourcePath)(source.get("url"));
-    return {
-      value: sourcePath,
-      title: sourcePath.split("/").pop(),
-      subtitle: (0, _utils.endTruncateStr)(sourcePath, 100),
-      id: source.get("id"),
-      url: source.get("url")
-    };
-  }).filter(({ value }) => value != "").toJS();
+function formatSources(sources, tabs) {
+  return sources.filter(source => !(0, _source.isPretty)(source)).map(source => formatSourcesForList(source, tabs)).filter(({ value }) => value != "");
 }
 
 /***/ }),
@@ -26669,14 +20799,29 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.findBestMatchExpression = findBestMatchExpression;
 exports.findEmptyLines = findEmptyLines;
+exports.containsPosition = containsPosition;
+exports.findClosestFunction = findClosestFunction;
+exports.findClosestClass = findClosestClass;
 
 var _lodash = __webpack_require__(2);
 
+var _pausePoints = __webpack_require__(3622);
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 function findBestMatchExpression(symbols, tokenPos) {
-  const { memberExpressions, identifiers } = symbols;
+  if (symbols.loading) {
+    return null;
+  }
+
   const { line, column } = tokenPos;
-  return identifiers.concat(memberExpressions).reduce((found, expression) => {
-    const overlaps = expression.location.start.line == line && expression.location.start.column <= column && expression.location.end.column >= column && !expression.computed;
+  const { memberExpressions, identifiers, literals } = symbols;
+  const members = memberExpressions.filter(({ computed }) => !computed);
+
+  return [].concat(identifiers, members, literals).reduce((found, expression) => {
+    const overlaps = expression.location.start.line == line && expression.location.start.column <= column && expression.location.end.column >= column;
 
     if (overlaps) {
       return expression;
@@ -26684,24 +20829,76 @@ function findBestMatchExpression(symbols, tokenPos) {
 
     return found;
   }, null);
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
 function findEmptyLines(selectedSource, pausePoints) {
   if (!pausePoints || !selectedSource) {
     return [];
   }
 
-  const breakpoints = pausePoints.filter(point => point.types.breakpoint);
+  const pausePointsList = (0, _pausePoints.convertToList)(pausePoints);
+
+  const breakpoints = pausePointsList.filter(point => point.types.break);
   const breakpointLines = breakpoints.map(point => point.location.line);
 
-  if (!selectedSource.text) {
+  if (!selectedSource.text || breakpointLines.length == 0) {
     return [];
   }
+
   const lineCount = selectedSource.text.split("\n").length;
-  const sourceLines = (0, _lodash.range)(1, lineCount);
-  return (0, _lodash.without)(sourceLines, ...breakpointLines);
+  const sourceLines = (0, _lodash.range)(1, lineCount + 1);
+  return (0, _lodash.xor)(sourceLines, breakpointLines);
+}
+
+function containsPosition(a, b) {
+  const startsBefore = a.start.line < b.line || a.start.line === b.line && a.start.column <= b.column;
+  const endsAfter = a.end.line > b.line || a.end.line === b.line && a.end.column >= b.column;
+
+  return startsBefore && endsAfter;
+}
+
+function findClosestofSymbol(declarations, location) {
+  if (!declarations) {
+    return null;
+  }
+
+  return declarations.reduce((found, currNode) => {
+    if (currNode.name === "anonymous" || !containsPosition(currNode.location, {
+      line: location.line,
+      column: location.column || 0
+    })) {
+      return found;
+    }
+
+    if (!found) {
+      return currNode;
+    }
+
+    if (found.location.start.line > currNode.location.start.line) {
+      return found;
+    }
+    if (found.location.start.line === currNode.location.start.line && found.location.start.column > currNode.location.start.column) {
+      return found;
+    }
+
+    return currNode;
+  }, null);
+}
+
+function findClosestFunction(symbols, location) {
+  if (!symbols || symbols.loading) {
+    return null;
+  }
+
+  return findClosestofSymbol(symbols.functions, location);
+}
+
+function findClosestClass(symbols, location) {
+  if (!symbols || symbols.loading) {
+    return null;
+  }
+
+  return findClosestofSymbol(symbols.functions, location);
 }
 
 /***/ }),
@@ -26821,6 +21018,21 @@ Object.defineProperty(exports, "mapFrames", {
   }
 });
 
+var _extra = __webpack_require__(3636);
+
+Object.defineProperty(exports, "fetchExtra", {
+  enumerable: true,
+  get: function () {
+    return _extra.fetchExtra;
+  }
+});
+Object.defineProperty(exports, "getExtra", {
+  enumerable: true,
+  get: function () {
+    return _extra.getExtra;
+  }
+});
+
 var _setPopupObjectProperties = __webpack_require__(2008);
 
 Object.defineProperty(exports, "setPopupObjectProperties", {
@@ -26845,6 +21057,15 @@ Object.defineProperty(exports, "selectFrame", {
   enumerable: true,
   get: function () {
     return _selectFrame.selectFrame;
+  }
+});
+
+var _skipPausing = __webpack_require__(3640);
+
+Object.defineProperty(exports, "toggleSkipPausing", {
+  enumerable: true,
+  get: function () {
+    return _skipPausing.toggleSkipPausing;
   }
 });
 
@@ -26978,7 +21199,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.paused = paused;
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _selectors = __webpack_require__(3590);
 
@@ -26990,6 +21211,8 @@ var _expressions = __webpack_require__(1398);
 
 var _sources = __webpack_require__(1797);
 
+var _loadSourceText = __webpack_require__(1435);
+
 var _ui = __webpack_require__(1385);
 
 var _commands = __webpack_require__(1637);
@@ -26999,6 +21222,10 @@ var _pause = __webpack_require__(2419);
 var _mapFrames = __webpack_require__(1804);
 
 var _fetchScopes = __webpack_require__(1655);
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 async function getOriginalSourceForFrame(state, frame) {
   return (0, _selectors.getSources)(state).get(frame.location.sourceId);
@@ -27010,10 +21237,6 @@ async function getOriginalSourceForFrame(state, frame) {
  * @memberof actions/pause
  * @static
  */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 function paused(pauseInfo) {
   return async function ({ dispatch, getState, client, sourceMaps }) {
     const { frames, why, loadedObjects } = pauseInfo;
@@ -27024,9 +21247,9 @@ function paused(pauseInfo) {
       const source = await getOriginalSourceForFrame(getState(), mappedFrame);
 
       // Ensure that the original file has loaded if there is one.
-      await dispatch((0, _sources.loadSourceText)(source));
+      await dispatch((0, _loadSourceText.loadSourceText)(source));
 
-      if (await (0, _pause.shouldStep)(mappedFrame, getState(), sourceMaps)) {
+      if ((0, _pause.shouldStep)(mappedFrame, getState(), sourceMaps)) {
         dispatch((0, _commands.command)("stepOver"));
         return;
       }
@@ -27059,8 +21282,9 @@ function paused(pauseInfo) {
 
     // Run after fetching scoping data so that it may make use of the sourcemap
     // expression mappings for local variables.
-    if (!(0, _selectors.isEvaluatingExpression)(getState())) {
-      dispatch((0, _expressions.evaluateExpressions)());
+    const atException = why.type == "exception";
+    if (!atException || !(0, _selectors.isEvaluatingExpression)(getState())) {
+      await dispatch((0, _expressions.evaluateExpressions)());
     }
   };
 }
@@ -27094,14 +21318,13 @@ function resumed() {
   return async ({ dispatch, client, getState }) => {
     const why = (0, _selectors.getPauseReason)(getState());
     const wasPausedInEval = (0, _pause.inDebuggerEval)(why);
+    const wasStepping = (0, _selectors.isStepping)(getState());
 
-    if (!(0, _selectors.isStepping)(getState()) && !wasPausedInEval) {
+    dispatch({ type: "RESUME" });
+
+    if (!wasStepping && !wasPausedInEval) {
       await dispatch((0, _expressions.evaluateExpressions)());
     }
-
-    dispatch({
-      type: "RESUME"
-    });
   };
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -27128,9 +21351,9 @@ var _commands = __webpack_require__(1637);
 
 function continueToHere(line) {
   return async function ({ dispatch, getState }) {
-    const source = (0, _selectors.getSelectedSource)(getState()).toJS();
+    const selectedSource = (0, _selectors.getSelectedSource)(getState());
 
-    if (!(0, _selectors.isPaused)(getState())) {
+    if (!(0, _selectors.isPaused)(getState()) || !selectedSource) {
       return;
     }
 
@@ -27145,7 +21368,7 @@ function continueToHere(line) {
     await dispatch((0, _breakpoints.addHiddenBreakpoint)({
       line,
       column: undefined,
-      sourceId: source.id
+      sourceId: selectedSource.id
     }));
 
     dispatch(action());
@@ -27209,13 +21432,13 @@ var _promise = __webpack_require__(1653);
  * @memberof actions/pause
  * @static
  */
-function pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
+function pauseOnExceptions(shouldPauseOnExceptions, shouldPauseOnCaughtExceptions) {
   return ({ dispatch, client }) => {
-    dispatch({
+    return dispatch({
       type: "PAUSE_ON_EXCEPTIONS",
       shouldPauseOnExceptions,
-      shouldIgnoreCaughtExceptions,
-      [_promise.PROMISE]: client.pauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions)
+      shouldPauseOnCaughtExceptions,
+      [_promise.PROMISE]: client.pauseOnExceptions(shouldPauseOnExceptions, shouldPauseOnCaughtExceptions)
     });
   };
 } /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -27473,7 +21696,10 @@ class QuickOpenModal extends _react.Component {
       let results = functions;
       if (this.isVariableQuery()) {
         results = variables;
+      } else {
+        results = results.filter(result => result.title !== "anonymous");
       }
+
       if (query === "@" || query === "#") {
         return this.setState({ results });
       }
@@ -27637,6 +21863,7 @@ class QuickOpenModal extends _react.Component {
       }
 
       if (["ArrowUp", "ArrowDown"].includes(e.key)) {
+        e.preventDefault();
         return this.traverseResults(e);
       }
     };
@@ -27683,9 +21910,7 @@ class QuickOpenModal extends _react.Component {
       return results.map(result => {
         return _extends({}, result, {
           title: this.renderHighlight(result.title, (0, _path.basename)(newQuery), "title")
-        }, result.subtitle != null && !this.isSymbolSearch() ? {
-          subtitle: this.renderHighlight(result.subtitle, newQuery, "subtitle")
-        } : null);
+        });
       });
     };
 
@@ -27787,7 +22012,7 @@ function mapStateToProps(state) {
 
   return {
     enabled: (0, _selectors.getQuickOpenEnabled)(state),
-    sources: (0, _quickOpen.formatSources)((0, _selectors.getSources)(state)),
+    sources: (0, _quickOpen.formatSources)((0, _selectors.getRelativeSources)(state), (0, _selectors.getTabs)(state).toArray()),
     selectedSource,
     symbols: (0, _quickOpen.formatSymbols)((0, _selectors.getSymbols)(state, selectedSource)),
     symbolsLoading: (0, _selectors.isSymbolsLoading)(state, selectedSource),
@@ -27892,6 +22117,12 @@ var _mapScopes = __webpack_require__(1634);
 
 var _promise = __webpack_require__(1653);
 
+var _extra = __webpack_require__(3636);
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 function fetchScopes() {
   return async function ({ dispatch, getState, client, sourceMaps }) {
     const frame = (0, _selectors.getSelectedFrame)(getState());
@@ -27905,11 +22136,10 @@ function fetchScopes() {
       [_promise.PROMISE]: client.getFrameScopes(frame)
     });
 
+    await dispatch((0, _extra.fetchExtra)());
     await dispatch((0, _mapScopes.mapScopes)(scopes, frame));
   };
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
 /***/ }),
 
@@ -28362,14 +22592,14 @@ Object.defineProperty(exports, "__esModule", {
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
                                                                                                                                                                                                                                                                    * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 /* global window */
 
 exports.log = log;
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
-const blacklist = ["SET_POPUP_OBJECT_PROPERTIES", "SET_PAUSE_POINTS", "SET_SYMBOLS", "OUT_OF_SCOPE_LOCATIONS", "MAP_SCOPES", "ADD_SCOPES", "IN_SCOPE_LINES", "SET_EMPTY_LINES"];
+const blacklist = ["SET_POPUP_OBJECT_PROPERTIES", "SET_PAUSE_POINTS", "SET_SYMBOLS", "OUT_OF_SCOPE_LOCATIONS", "MAP_SCOPES", "MAP_FRAMES", "ADD_SCOPES", "IN_SCOPE_LINES", "REMOVE_BREAKPOINT", "ADD_BREAKPOINT"];
 
 function cloneAction(action) {
   action = action || {};
@@ -28442,7 +22672,7 @@ function log({ dispatch, getState }) {
   return next => action => {
     const asyncMsg = !action.status ? "" : `[${action.status}]`;
 
-    if ((0, _devtoolsConfig.isTesting)()) {
+    if ((0, _devtoolsEnvironment.isTesting)()) {
       dump(`[ACTION] ${action.type} ${asyncMsg} - ${serializeAction(action)}\n`);
     } else {
       console.log(action, asyncMsg);
@@ -28465,7 +22695,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.history = undefined;
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
 /**
  * A middleware that stores every action coming through the store in the passed
@@ -28477,7 +22707,7 @@ const history = exports.history = (log = []) => ({
   getState
 }) => {
   return next => action => {
-    if ((0, _devtoolsConfig.isDevelopment)()) {
+    if ((0, _devtoolsEnvironment.isDevelopment)()) {
       log.push(action);
     }
 
@@ -28538,7 +22768,7 @@ Object.defineProperty(exports, "__esModule", {
 exports.timing = timing;
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /* global window */
 
@@ -28580,6 +22810,10 @@ var _react2 = _interopRequireDefault(_react);
 __webpack_require__(1705);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const Badge = ({ children }) => _react2.default.createElement(
   "div",
@@ -28661,341 +22895,6 @@ var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
 
 /***/ }),
 
-/***/ 1758:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/**
- * Copyright (c) 2015-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-(function(f) {
-  if (true) {
-    module.exports = f(__webpack_require__(0));
-    /* global define */
-  } else if (typeof define === 'function' && define.amd) {
-    define(['react'], f);
-  } else {
-    var g;
-    if (typeof window !== 'undefined') {
-      g = window;
-    } else if (typeof global !== 'undefined') {
-      g = global;
-    } else if (typeof self !== 'undefined') {
-      g = self;
-    } else {
-      g = this;
-    }
-
-    if (typeof g.React === 'undefined') {
-      throw Error('React module should be required before ReactDOMFactories');
-    }
-
-    g.ReactDOMFactories = f(g.React);
-  }
-})(function(React) {
-  /**
-   * Create a factory that creates HTML tag elements.
-   */
-  function createDOMFactory(type) {
-    var factory = React.createElement.bind(null, type);
-    // Expose the type on the factory and the prototype so that it can be
-    // easily accessed on elements. E.g. `<Foo />.type === Foo`.
-    // This should not be named `constructor` since this may not be the function
-    // that created the element, and it may not even be a constructor.
-    factory.type = type;
-    return factory;
-  };
-
-  /**
-   * Creates a mapping from supported HTML tags to `ReactDOMComponent` classes.
-   */
-  var ReactDOMFactories = {
-    a: createDOMFactory('a'),
-    abbr: createDOMFactory('abbr'),
-    address: createDOMFactory('address'),
-    area: createDOMFactory('area'),
-    article: createDOMFactory('article'),
-    aside: createDOMFactory('aside'),
-    audio: createDOMFactory('audio'),
-    b: createDOMFactory('b'),
-    base: createDOMFactory('base'),
-    bdi: createDOMFactory('bdi'),
-    bdo: createDOMFactory('bdo'),
-    big: createDOMFactory('big'),
-    blockquote: createDOMFactory('blockquote'),
-    body: createDOMFactory('body'),
-    br: createDOMFactory('br'),
-    button: createDOMFactory('button'),
-    canvas: createDOMFactory('canvas'),
-    caption: createDOMFactory('caption'),
-    cite: createDOMFactory('cite'),
-    code: createDOMFactory('code'),
-    col: createDOMFactory('col'),
-    colgroup: createDOMFactory('colgroup'),
-    data: createDOMFactory('data'),
-    datalist: createDOMFactory('datalist'),
-    dd: createDOMFactory('dd'),
-    del: createDOMFactory('del'),
-    details: createDOMFactory('details'),
-    dfn: createDOMFactory('dfn'),
-    dialog: createDOMFactory('dialog'),
-    div: createDOMFactory('div'),
-    dl: createDOMFactory('dl'),
-    dt: createDOMFactory('dt'),
-    em: createDOMFactory('em'),
-    embed: createDOMFactory('embed'),
-    fieldset: createDOMFactory('fieldset'),
-    figcaption: createDOMFactory('figcaption'),
-    figure: createDOMFactory('figure'),
-    footer: createDOMFactory('footer'),
-    form: createDOMFactory('form'),
-    h1: createDOMFactory('h1'),
-    h2: createDOMFactory('h2'),
-    h3: createDOMFactory('h3'),
-    h4: createDOMFactory('h4'),
-    h5: createDOMFactory('h5'),
-    h6: createDOMFactory('h6'),
-    head: createDOMFactory('head'),
-    header: createDOMFactory('header'),
-    hgroup: createDOMFactory('hgroup'),
-    hr: createDOMFactory('hr'),
-    html: createDOMFactory('html'),
-    i: createDOMFactory('i'),
-    iframe: createDOMFactory('iframe'),
-    img: createDOMFactory('img'),
-    input: createDOMFactory('input'),
-    ins: createDOMFactory('ins'),
-    kbd: createDOMFactory('kbd'),
-    keygen: createDOMFactory('keygen'),
-    label: createDOMFactory('label'),
-    legend: createDOMFactory('legend'),
-    li: createDOMFactory('li'),
-    link: createDOMFactory('link'),
-    main: createDOMFactory('main'),
-    map: createDOMFactory('map'),
-    mark: createDOMFactory('mark'),
-    menu: createDOMFactory('menu'),
-    menuitem: createDOMFactory('menuitem'),
-    meta: createDOMFactory('meta'),
-    meter: createDOMFactory('meter'),
-    nav: createDOMFactory('nav'),
-    noscript: createDOMFactory('noscript'),
-    object: createDOMFactory('object'),
-    ol: createDOMFactory('ol'),
-    optgroup: createDOMFactory('optgroup'),
-    option: createDOMFactory('option'),
-    output: createDOMFactory('output'),
-    p: createDOMFactory('p'),
-    param: createDOMFactory('param'),
-    picture: createDOMFactory('picture'),
-    pre: createDOMFactory('pre'),
-    progress: createDOMFactory('progress'),
-    q: createDOMFactory('q'),
-    rp: createDOMFactory('rp'),
-    rt: createDOMFactory('rt'),
-    ruby: createDOMFactory('ruby'),
-    s: createDOMFactory('s'),
-    samp: createDOMFactory('samp'),
-    script: createDOMFactory('script'),
-    section: createDOMFactory('section'),
-    select: createDOMFactory('select'),
-    small: createDOMFactory('small'),
-    source: createDOMFactory('source'),
-    span: createDOMFactory('span'),
-    strong: createDOMFactory('strong'),
-    style: createDOMFactory('style'),
-    sub: createDOMFactory('sub'),
-    summary: createDOMFactory('summary'),
-    sup: createDOMFactory('sup'),
-    table: createDOMFactory('table'),
-    tbody: createDOMFactory('tbody'),
-    td: createDOMFactory('td'),
-    textarea: createDOMFactory('textarea'),
-    tfoot: createDOMFactory('tfoot'),
-    th: createDOMFactory('th'),
-    thead: createDOMFactory('thead'),
-    time: createDOMFactory('time'),
-    title: createDOMFactory('title'),
-    tr: createDOMFactory('tr'),
-    track: createDOMFactory('track'),
-    u: createDOMFactory('u'),
-    ul: createDOMFactory('ul'),
-    var: createDOMFactory('var'),
-    video: createDOMFactory('video'),
-    wbr: createDOMFactory('wbr'),
-
-    // SVG
-    circle: createDOMFactory('circle'),
-    clipPath: createDOMFactory('clipPath'),
-    defs: createDOMFactory('defs'),
-    ellipse: createDOMFactory('ellipse'),
-    g: createDOMFactory('g'),
-    image: createDOMFactory('image'),
-    line: createDOMFactory('line'),
-    linearGradient: createDOMFactory('linearGradient'),
-    mask: createDOMFactory('mask'),
-    path: createDOMFactory('path'),
-    pattern: createDOMFactory('pattern'),
-    polygon: createDOMFactory('polygon'),
-    polyline: createDOMFactory('polyline'),
-    radialGradient: createDOMFactory('radialGradient'),
-    rect: createDOMFactory('rect'),
-    stop: createDOMFactory('stop'),
-    svg: createDOMFactory('svg'),
-    text: createDOMFactory('text'),
-    tspan: createDOMFactory('tspan'),
-  };
-
-  // due to wrapper and conditionals at the top, this will either become
-  // `module.exports ReactDOMFactories` if that is available,
-  // otherwise it will be defined via `define(['react'], ReactDOMFactories)`
-  // if that is available,
-  // otherwise it will be defined as global variable.
-  return ReactDOMFactories;
-});
-
-
-
-/***/ }),
-
-/***/ 1759:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-var EventEmitter = function EventEmitter() {};
-module.exports = EventEmitter;
-
-const promise = __webpack_require__(1769);
-
-/**
- * Decorate an object with event emitter functionality.
- *
- * @param Object aObjectToDecorate
- *        Bind all public methods of EventEmitter to
- *        the aObjectToDecorate object.
- */
-EventEmitter.decorate = function EventEmitter_decorate(aObjectToDecorate) {
-  let emitter = new EventEmitter();
-  aObjectToDecorate.on = emitter.on.bind(emitter);
-  aObjectToDecorate.off = emitter.off.bind(emitter);
-  aObjectToDecorate.once = emitter.once.bind(emitter);
-  aObjectToDecorate.emit = emitter.emit.bind(emitter);
-};
-
-EventEmitter.prototype = {
-  /**
-   * Connect a listener.
-   *
-   * @param string aEvent
-   *        The event name to which we're connecting.
-   * @param function aListener
-   *        Called when the event is fired.
-   */
-  on: function EventEmitter_on(aEvent, aListener) {
-    if (!this._eventEmitterListeners) this._eventEmitterListeners = new Map();
-    if (!this._eventEmitterListeners.has(aEvent)) {
-      this._eventEmitterListeners.set(aEvent, []);
-    }
-    this._eventEmitterListeners.get(aEvent).push(aListener);
-  },
-
-  /**
-   * Listen for the next time an event is fired.
-   *
-   * @param string aEvent
-   *        The event name to which we're connecting.
-   * @param function aListener
-   *        (Optional) Called when the event is fired. Will be called at most
-   *        one time.
-   * @return promise
-   *        A promise which is resolved when the event next happens. The
-   *        resolution value of the promise is the first event argument. If
-   *        you need access to second or subsequent event arguments (it's rare
-   *        that this is needed) then use aListener
-   */
-  once: function EventEmitter_once(aEvent, aListener) {
-    let deferred = promise.defer();
-
-    let handler = (aEvent, aFirstArg, ...aRest) => {
-      this.off(aEvent, handler);
-      if (aListener) {
-        aListener.apply(null, [aEvent, aFirstArg, ...aRest]);
-      }
-      deferred.resolve(aFirstArg);
-    };
-
-    handler._originalListener = aListener;
-    this.on(aEvent, handler);
-
-    return deferred.promise;
-  },
-
-  /**
-   * Remove a previously-registered event listener.  Works for events
-   * registered with either on or once.
-   *
-   * @param string aEvent
-   *        The event name whose listener we're disconnecting.
-   * @param function aListener
-   *        The listener to remove.
-   */
-  off: function EventEmitter_off(aEvent, aListener) {
-    if (!this._eventEmitterListeners) return;
-    let listeners = this._eventEmitterListeners.get(aEvent);
-    if (listeners) {
-      this._eventEmitterListeners.set(aEvent, listeners.filter(l => {
-        return l !== aListener && l._originalListener !== aListener;
-      }));
-    }
-  },
-
-  /**
-   * Emit an event.  All arguments to this method will
-   * be sent to listener functions.
-   */
-  emit: function EventEmitter_emit(aEvent) {
-    if (!this._eventEmitterListeners || !this._eventEmitterListeners.has(aEvent)) {
-      return;
-    }
-
-    let originalListeners = this._eventEmitterListeners.get(aEvent);
-    for (let listener of this._eventEmitterListeners.get(aEvent)) {
-      // If the object was destroyed during event emission, stop
-      // emitting.
-      if (!this._eventEmitterListeners) {
-        break;
-      }
-
-      // If listeners were removed during emission, make sure the
-      // event handler we're going to fire wasn't removed.
-      if (originalListeners === this._eventEmitterListeners.get(aEvent) || this._eventEmitterListeners.get(aEvent).some(l => l === listener)) {
-        try {
-          listener.apply(null, arguments);
-        } catch (ex) {
-          // Prevent a bad listener from interfering with the others.
-          let msg = ex + ": " + ex.stack;
-          //console.error(msg);
-          console.log(msg);
-        }
-      }
-    }
-  }
-};
-
-/***/ }),
-
 /***/ 1763:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -29014,7 +22913,7 @@ var _react = __webpack_require__(0);
 
 var _react2 = _interopRequireDefault(_react);
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _util = __webpack_require__(1777);
 
@@ -29107,6 +23006,8 @@ Object.defineProperty(exports, "__esModule", {
 
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
+exports.debugBtn = debugBtn;
+
 var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
@@ -29122,6 +23023,21 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; } /* This Source Code Form is subject to the terms of the Mozilla Public
                                                                                                                                                                                                                               * License, v. 2.0. If a copy of the MPL was not distributed with this
                                                                                                                                                                                                                               * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function debugBtn(onClick, type, className, tooltip, disabled = false, ariaPressed = false) {
+  return _react2.default.createElement(
+    CommandBarButton,
+    {
+      className: (0, _classnames2.default)(type, className),
+      disabled: disabled,
+      key: type,
+      onClick: onClick,
+      pressed: ariaPressed,
+      title: tooltip
+    },
+    _react2.default.createElement("img", { className: type })
+  );
+}
 
 const CommandBarButton = props => {
   const { children, className, pressed = false } = props,
@@ -29245,863 +23161,6 @@ function getThisVariable(this_, path) {
 
 /***/ }),
 
-/***/ 1767:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const Menu = __webpack_require__(1768);
-const MenuItem = __webpack_require__(1770);
-const { PrefsHelper } = __webpack_require__(1771);
-const Services = __webpack_require__(22);
-const KeyShortcuts = __webpack_require__(1772);
-const { ZoomKeys } = __webpack_require__(1773);
-const EventEmitter = __webpack_require__(1759);
-
-module.exports = {
-  KeyShortcuts,
-  Menu,
-  MenuItem,
-  PrefsHelper,
-  Services,
-  ZoomKeys,
-  EventEmitter
-};
-
-/***/ }),
-
-/***/ 1768:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const EventEmitter = __webpack_require__(1759);
-
-function inToolbox() {
-  return window.parent.document.documentURI == "about:devtools-toolbox";
-}
-
-/**
- * A partial implementation of the Menu API provided by electron:
- * https://github.com/electron/electron/blob/master/docs/api/menu.md.
- *
- * Extra features:
- *  - Emits an 'open' and 'close' event when the menu is opened/closed
-
- * @param String id (non standard)
- *        Needed so tests can confirm the XUL implementation is working
- */
-function Menu({ id = null } = {}) {
-  this.menuitems = [];
-  this.id = id;
-
-  Object.defineProperty(this, "items", {
-    get() {
-      return this.menuitems;
-    }
-  });
-
-  EventEmitter.decorate(this);
-}
-
-/**
- * Add an item to the end of the Menu
- *
- * @param {MenuItem} menuItem
- */
-Menu.prototype.append = function (menuItem) {
-  this.menuitems.push(menuItem);
-};
-
-/**
- * Add an item to a specified position in the menu
- *
- * @param {int} pos
- * @param {MenuItem} menuItem
- */
-Menu.prototype.insert = function (pos, menuItem) {
-  throw Error("Not implemented");
-};
-
-/**
- * Show the Menu at a specified location on the screen
- *
- * Missing features:
- *   - browserWindow - BrowserWindow (optional) - Default is null.
- *   - positioningItem Number - (optional) OS X
- *
- * @param {int} screenX
- * @param {int} screenY
- * @param Toolbox toolbox (non standard)
- *        Needed so we in which window to inject XUL
- */
-Menu.prototype.popup = function (screenX, screenY, toolbox) {
-  let doc = toolbox.doc;
-  let popupset = doc.querySelector("popupset");
-  // See bug 1285229, on Windows, opening the same popup multiple times in a
-  // row ends up duplicating the popup. The newly inserted popup doesn't
-  // dismiss the old one. So remove any previously displayed popup before
-  // opening a new one.
-  let popup = popupset.querySelector("menupopup[menu-api=\"true\"]");
-  if (popup) {
-    popup.hidePopup();
-  }
-
-  popup = this.createPopup(doc);
-  popup.setAttribute("menu-api", "true");
-
-  if (this.id) {
-    popup.id = this.id;
-  }
-  this._createMenuItems(popup);
-
-  // Remove the menu from the DOM once it's hidden.
-  popup.addEventListener("popuphidden", e => {
-    if (e.target === popup) {
-      popup.remove();
-      this.emit("close", popup);
-    }
-  });
-
-  popup.addEventListener("popupshown", e => {
-    if (e.target === popup) {
-      this.emit("open", popup);
-    }
-  });
-
-  popupset.appendChild(popup);
-  popup.openPopupAtScreen(screenX, screenY, true);
-};
-
-Menu.prototype.createPopup = function (doc) {
-  return doc.createElement("menupopup");
-};
-
-Menu.prototype._createMenuItems = function (parent) {
-  let doc = parent.ownerDocument;
-  this.menuitems.forEach(item => {
-    if (!item.visible) {
-      return;
-    }
-
-    if (item.submenu) {
-      let menupopup = doc.createElement("menupopup");
-      item.submenu._createMenuItems(menupopup);
-
-      let menuitem = doc.createElement("menuitem");
-      menuitem.setAttribute("label", item.label);
-      if (!inToolbox()) {
-        menuitem.textContent = item.label;
-      }
-
-      let menu = doc.createElement("menu");
-      menu.appendChild(menuitem);
-      menu.appendChild(menupopup);
-      if (item.disabled) {
-        menu.setAttribute("disabled", "true");
-      }
-      if (item.accesskey) {
-        menu.setAttribute("accesskey", item.accesskey);
-      }
-      if (item.id) {
-        menu.id = item.id;
-      }
-      parent.appendChild(menu);
-    } else if (item.type === "separator") {
-      let menusep = doc.createElement("menuseparator");
-      parent.appendChild(menusep);
-    } else {
-      let menuitem = doc.createElement("menuitem");
-      menuitem.setAttribute("label", item.label);
-
-      if (!inToolbox()) {
-        menuitem.textContent = item.label;
-      }
-
-      menuitem.addEventListener("command", () => item.click());
-
-      if (item.type === "checkbox") {
-        menuitem.setAttribute("type", "checkbox");
-      }
-      if (item.type === "radio") {
-        menuitem.setAttribute("type", "radio");
-      }
-      if (item.disabled) {
-        menuitem.setAttribute("disabled", "true");
-      }
-      if (item.checked) {
-        menuitem.setAttribute("checked", "true");
-      }
-      if (item.accesskey) {
-        menuitem.setAttribute("accesskey", item.accesskey);
-      }
-      if (item.id) {
-        menuitem.id = item.id;
-      }
-
-      parent.appendChild(menuitem);
-    }
-  });
-};
-
-Menu.setApplicationMenu = () => {
-  throw Error("Not implemented");
-};
-
-Menu.sendActionToFirstResponder = () => {
-  throw Error("Not implemented");
-};
-
-Menu.buildFromTemplate = () => {
-  throw Error("Not implemented");
-};
-
-module.exports = Menu;
-
-/***/ }),
-
-/***/ 1769:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/*
- * A sham for https://dxr.mozilla.org/mozilla-central/source/toolkit/modules/Promise.jsm
- */
-
-/**
- * Promise.jsm is mostly the Promise web API with a `defer` method. Just drop this in here,
- * and use the native web API (although building with webpack/babel, it may replace this
- * with it's own version if we want to target environments that do not have `Promise`.
- */
-
-let p = typeof window != "undefined" ? window.Promise : Promise;
-p.defer = function defer() {
-  var resolve, reject;
-  var promise = new Promise(function () {
-    resolve = arguments[0];
-    reject = arguments[1];
-  });
-  return {
-    resolve: resolve,
-    reject: reject,
-    promise: promise
-  };
-};
-
-module.exports = p;
-
-/***/ }),
-
-/***/ 177:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-
-
-var emptyFunction = __webpack_require__(178);
-var invariant = __webpack_require__(180);
-var ReactPropTypesSecret = __webpack_require__(187);
-
-module.exports = function() {
-  function shim(props, propName, componentName, location, propFullName, secret) {
-    if (secret === ReactPropTypesSecret) {
-      // It is still safe when called from React.
-      return;
-    }
-    invariant(
-      false,
-      'Calling PropTypes validators directly is not supported by the `prop-types` package. ' +
-      'Use PropTypes.checkPropTypes() to call them. ' +
-      'Read more at http://fb.me/use-check-prop-types'
-    );
-  };
-  shim.isRequired = shim;
-  function getShim() {
-    return shim;
-  };
-  // Important!
-  // Keep this list in sync with production version in `./factoryWithTypeCheckers.js`.
-  var ReactPropTypes = {
-    array: shim,
-    bool: shim,
-    func: shim,
-    number: shim,
-    object: shim,
-    string: shim,
-    symbol: shim,
-
-    any: shim,
-    arrayOf: getShim,
-    element: shim,
-    instanceOf: getShim,
-    node: shim,
-    objectOf: getShim,
-    oneOf: getShim,
-    oneOfType: getShim,
-    shape: getShim,
-    exact: getShim
-  };
-
-  ReactPropTypes.checkPropTypes = emptyFunction;
-  ReactPropTypes.PropTypes = ReactPropTypes;
-
-  return ReactPropTypes;
-};
-
-
-/***/ }),
-
-/***/ 1770:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/**
- * A partial implementation of the MenuItem API provided by electron:
- * https://github.com/electron/electron/blob/master/docs/api/menu-item.md.
- *
- * Missing features:
- *   - id String - Unique within a single menu. If defined then it can be used
- *                 as a reference to this item by the position attribute.
- *   - role String - Define the action of the menu item; when specified the
- *                   click property will be ignored
- *   - sublabel String
- *   - accelerator Accelerator
- *   - icon NativeImage
- *   - position String - This field allows fine-grained definition of the
- *                       specific location within a given menu.
- *
- * Implemented features:
- *  @param Object options
- *    Function click
- *      Will be called with click(menuItem, browserWindow) when the menu item
- *       is clicked
- *    String type
- *      Can be normal, separator, submenu, checkbox or radio
- *    String label
- *    Boolean enabled
- *      If false, the menu item will be greyed out and unclickable.
- *    Boolean checked
- *      Should only be specified for checkbox or radio type menu items.
- *    Menu submenu
- *      Should be specified for submenu type menu items. If submenu is specified,
- *      the type: 'submenu' can be omitted. If the value is not a Menu then it
- *      will be automatically converted to one using Menu.buildFromTemplate.
- *    Boolean visible
- *      If false, the menu item will be entirely hidden.
- */
-function MenuItem({
-  accesskey = null,
-  checked = false,
-  click = () => {},
-  disabled = false,
-  label = "",
-  id = null,
-  submenu = null,
-  type = "normal",
-  visible = true
-} = {}) {
-  this.accesskey = accesskey;
-  this.checked = checked;
-  this.click = click;
-  this.disabled = disabled;
-  this.id = id;
-  this.label = label;
-  this.submenu = submenu;
-  this.type = type;
-  this.visible = visible;
-}
-
-module.exports = MenuItem;
-
-/***/ }),
-
-/***/ 1771:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const Services = __webpack_require__(22);
-const EventEmitter = __webpack_require__(1759);
-
-/**
- * Shortcuts for lazily accessing and setting various preferences.
- * Usage:
- *   let prefs = new Prefs("root.path.to.branch", {
- *     myIntPref: ["Int", "leaf.path.to.my-int-pref"],
- *     myCharPref: ["Char", "leaf.path.to.my-char-pref"],
- *     myJsonPref: ["Json", "leaf.path.to.my-json-pref"],
- *     myFloatPref: ["Float", "leaf.path.to.my-float-pref"]
- *     ...
- *   });
- *
- * Get/set:
- *   prefs.myCharPref = "foo";
- *   let aux = prefs.myCharPref;
- *
- * Observe:
- *   prefs.registerObserver();
- *   prefs.on("pref-changed", (prefName, prefValue) => {
- *     ...
- *   });
- *
- * @param string prefsRoot
- *        The root path to the required preferences branch.
- * @param object prefsBlueprint
- *        An object containing { accessorName: [prefType, prefName, prefDefault] } keys.
- */
-function PrefsHelper(prefsRoot = "", prefsBlueprint = {}) {
-  EventEmitter.decorate(this);
-
-  let cache = new Map();
-
-  for (let accessorName in prefsBlueprint) {
-    let [prefType, prefName, prefDefault] = prefsBlueprint[accessorName];
-    map(this, cache, accessorName, prefType, prefsRoot, prefName, prefDefault);
-  }
-
-  let observer = makeObserver(this, cache, prefsRoot, prefsBlueprint);
-  this.registerObserver = () => observer.register();
-  this.unregisterObserver = () => observer.unregister();
-}
-
-/**
- * Helper method for getting a pref value.
- *
- * @param Map cache
- * @param string prefType
- * @param string prefsRoot
- * @param string prefName
- * @return any
- */
-function get(cache, prefType, prefsRoot, prefName) {
-  let cachedPref = cache.get(prefName);
-  if (cachedPref !== undefined) {
-    return cachedPref;
-  }
-  let value = Services.prefs["get" + prefType + "Pref"]([prefsRoot, prefName].join("."));
-  cache.set(prefName, value);
-  return value;
-}
-
-/**
- * Helper method for setting a pref value.
- *
- * @param Map cache
- * @param string prefType
- * @param string prefsRoot
- * @param string prefName
- * @param any value
- */
-function set(cache, prefType, prefsRoot, prefName, value) {
-  Services.prefs["set" + prefType + "Pref"]([prefsRoot, prefName].join("."), value);
-  cache.set(prefName, value);
-}
-
-/**
- * Maps a property name to a pref, defining lazy getters and setters.
- * Supported types are "Bool", "Char", "Int", "Float" (sugar around "Char"
- * type and casting), and "Json" (which is basically just sugar for "Char"
- * using the standard JSON serializer).
- *
- * @param PrefsHelper self
- * @param Map cache
- * @param string accessorName
- * @param string prefType
- * @param string prefsRoot
- * @param string prefName
- * @param string prefDefault
- * @param array serializer [optional]
- */
-function map(self, cache, accessorName, prefType, prefsRoot, prefName, prefDefault, serializer = { in: e => e, out: e => e }) {
-  if (prefName in self) {
-    throw new Error(`Can't use ${prefName} because it overrides a property` + "on the instance.");
-  }
-  if (prefType == "Json") {
-    map(self, cache, accessorName, "String", prefsRoot, prefName, prefDefault, {
-      in: JSON.parse,
-      out: JSON.stringify
-    });
-    return;
-  }
-  if (prefType == "Float") {
-    map(self, cache, accessorName, "Char", prefsRoot, prefName, prefDefault, {
-      in: Number.parseFloat,
-      out: n => n + ""
-    });
-    return;
-  }
-
-  Object.defineProperty(self, accessorName, {
-    get: () => {
-      try {
-        return serializer.in(get(cache, prefType, prefsRoot, prefName));
-      } catch (e) {
-        if (typeof prefDefault !== 'undefined') {
-          return prefDefault;
-        }
-        throw e;
-      }
-    },
-    set: e => set(cache, prefType, prefsRoot, prefName, serializer.out(e))
-  });
-}
-
-/**
- * Finds the accessor for the provided pref, based on the blueprint object
- * used in the constructor.
- *
- * @param PrefsHelper self
- * @param object prefsBlueprint
- * @return string
- */
-function accessorNameForPref(somePrefName, prefsBlueprint) {
-  for (let accessorName in prefsBlueprint) {
-    let [, prefName] = prefsBlueprint[accessorName];
-    if (somePrefName == prefName) {
-      return accessorName;
-    }
-  }
-  return "";
-}
-
-/**
- * Creates a pref observer for `self`.
- *
- * @param PrefsHelper self
- * @param Map cache
- * @param string prefsRoot
- * @param object prefsBlueprint
- * @return object
- */
-function makeObserver(self, cache, prefsRoot, prefsBlueprint) {
-  return {
-    register: function () {
-      this._branch = Services.prefs.getBranch(prefsRoot + ".");
-      this._branch.addObserver("", this);
-    },
-    unregister: function () {
-      this._branch.removeObserver("", this);
-    },
-    observe: function (subject, topic, prefName) {
-      // If this particular pref isn't handled by the blueprint object,
-      // even though it's in the specified branch, ignore it.
-      let accessorName = accessorNameForPref(prefName, prefsBlueprint);
-      if (!(accessorName in self)) {
-        return;
-      }
-      cache.delete(prefName);
-      self.emit("pref-changed", accessorName, self[accessorName]);
-    }
-  };
-}
-
-exports.PrefsHelper = PrefsHelper;
-
-/***/ }),
-
-/***/ 1772:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { appinfo } = __webpack_require__(22);
-const EventEmitter = __webpack_require__(1759);
-const isOSX = appinfo.OS === "Darwin";
-
-// List of electron keys mapped to DOM API (DOM_VK_*) key code
-const ElectronKeysMapping = {
-  "F1": "DOM_VK_F1",
-  "F2": "DOM_VK_F2",
-  "F3": "DOM_VK_F3",
-  "F4": "DOM_VK_F4",
-  "F5": "DOM_VK_F5",
-  "F6": "DOM_VK_F6",
-  "F7": "DOM_VK_F7",
-  "F8": "DOM_VK_F8",
-  "F9": "DOM_VK_F9",
-  "F10": "DOM_VK_F10",
-  "F11": "DOM_VK_F11",
-  "F12": "DOM_VK_F12",
-  "F13": "DOM_VK_F13",
-  "F14": "DOM_VK_F14",
-  "F15": "DOM_VK_F15",
-  "F16": "DOM_VK_F16",
-  "F17": "DOM_VK_F17",
-  "F18": "DOM_VK_F18",
-  "F19": "DOM_VK_F19",
-  "F20": "DOM_VK_F20",
-  "F21": "DOM_VK_F21",
-  "F22": "DOM_VK_F22",
-  "F23": "DOM_VK_F23",
-  "F24": "DOM_VK_F24",
-  "Space": "DOM_VK_SPACE",
-  "Backspace": "DOM_VK_BACK_SPACE",
-  "Delete": "DOM_VK_DELETE",
-  "Insert": "DOM_VK_INSERT",
-  "Return": "DOM_VK_RETURN",
-  "Enter": "DOM_VK_RETURN",
-  "Up": "DOM_VK_UP",
-  "Down": "DOM_VK_DOWN",
-  "Left": "DOM_VK_LEFT",
-  "Right": "DOM_VK_RIGHT",
-  "Home": "DOM_VK_HOME",
-  "End": "DOM_VK_END",
-  "PageUp": "DOM_VK_PAGE_UP",
-  "PageDown": "DOM_VK_PAGE_DOWN",
-  "Escape": "DOM_VK_ESCAPE",
-  "Esc": "DOM_VK_ESCAPE",
-  "Tab": "DOM_VK_TAB",
-  "VolumeUp": "DOM_VK_VOLUME_UP",
-  "VolumeDown": "DOM_VK_VOLUME_DOWN",
-  "VolumeMute": "DOM_VK_VOLUME_MUTE",
-  "PrintScreen": "DOM_VK_PRINTSCREEN"
-};
-
-/**
- * Helper to listen for keyboard events decribed in .properties file.
- *
- * let shortcuts = new KeyShortcuts({
- *   window
- * });
- * shortcuts.on("Ctrl+F", event => {
- *   // `event` is the KeyboardEvent which relates to the key shortcuts
- * });
- *
- * @param DOMWindow window
- *        The window object of the document to listen events from.
- * @param DOMElement target
- *        Optional DOM Element on which we should listen events from.
- *        If omitted, we listen for all events fired on `window`.
- */
-function KeyShortcuts({ window, target }) {
-  this.window = window;
-  this.target = target || window;
-  this.keys = new Map();
-  this.eventEmitter = new EventEmitter();
-  this.target.addEventListener("keydown", this);
-}
-
-/*
- * Parse an electron-like key string and return a normalized object which
- * allow efficient match on DOM key event. The normalized object matches DOM
- * API.
- *
- * @param DOMWindow window
- *        Any DOM Window object, just to fetch its `KeyboardEvent` object
- * @param String str
- *        The shortcut string to parse, following this document:
- *        https://github.com/electron/electron/blob/master/docs/api/accelerator.md
- */
-KeyShortcuts.parseElectronKey = function (window, str) {
-  let modifiers = str.split("+");
-  let key = modifiers.pop();
-
-  let shortcut = {
-    ctrl: false,
-    meta: false,
-    alt: false,
-    shift: false,
-    // Set for character keys
-    key: undefined,
-    // Set for non-character keys
-    keyCode: undefined
-  };
-  for (let mod of modifiers) {
-    if (mod === "Alt") {
-      shortcut.alt = true;
-    } else if (["Command", "Cmd"].includes(mod)) {
-      shortcut.meta = true;
-    } else if (["CommandOrControl", "CmdOrCtrl"].includes(mod)) {
-      if (isOSX) {
-        shortcut.meta = true;
-      } else {
-        shortcut.ctrl = true;
-      }
-    } else if (["Control", "Ctrl"].includes(mod)) {
-      shortcut.ctrl = true;
-    } else if (mod === "Shift") {
-      shortcut.shift = true;
-    } else {
-      console.error("Unsupported modifier:", mod, "from key:", str);
-      return null;
-    }
-  }
-
-  // Plus is a special case. It's a character key and shouldn't be matched
-  // against a keycode as it is only accessible via Shift/Capslock
-  if (key === "Plus") {
-    key = "+";
-  }
-
-  if (typeof key === "string" && key.length === 1) {
-    // Match any single character
-    shortcut.key = key.toLowerCase();
-  } else if (key in ElectronKeysMapping) {
-    // Maps the others manually to DOM API DOM_VK_*
-    key = ElectronKeysMapping[key];
-    shortcut.keyCode = window.KeyboardEvent[key];
-    // Used only to stringify the shortcut
-    shortcut.keyCodeString = key;
-    shortcut.key = key;
-  } else {
-    console.error("Unsupported key:", key);
-    return null;
-  }
-
-  return shortcut;
-};
-
-KeyShortcuts.stringify = function (shortcut) {
-  let list = [];
-  if (shortcut.alt) {
-    list.push("Alt");
-  }
-  if (shortcut.ctrl) {
-    list.push("Ctrl");
-  }
-  if (shortcut.meta) {
-    list.push("Cmd");
-  }
-  if (shortcut.shift) {
-    list.push("Shift");
-  }
-  let key;
-  if (shortcut.key) {
-    key = shortcut.key.toUpperCase();
-  } else {
-    key = shortcut.keyCodeString;
-  }
-  list.push(key);
-  return list.join("+");
-};
-
-KeyShortcuts.prototype = {
-  destroy() {
-    this.target.removeEventListener("keydown", this);
-    this.keys.clear();
-  },
-
-  doesEventMatchShortcut(event, shortcut) {
-    if (shortcut.meta != event.metaKey) {
-      return false;
-    }
-    if (shortcut.ctrl != event.ctrlKey) {
-      return false;
-    }
-    if (shortcut.alt != event.altKey) {
-      return false;
-    }
-    // Shift is a special modifier, it may implicitely be required if the
-    // expected key is a special character accessible via shift.
-    if (shortcut.shift != event.shiftKey && event.key && event.key.match(/[a-zA-Z]/)) {
-      return false;
-    }
-    if (shortcut.keyCode) {
-      return event.keyCode == shortcut.keyCode;
-    } else if (event.key in ElectronKeysMapping) {
-      return ElectronKeysMapping[event.key] === shortcut.key;
-    }
-
-    // get the key from the keyCode if key is not provided.
-    let key = event.key || String.fromCharCode(event.keyCode);
-
-    // For character keys, we match if the final character is the expected one.
-    // But for digits we also accept indirect match to please azerty keyboard,
-    // which requires Shift to be pressed to get digits.
-    return key.toLowerCase() == shortcut.key || shortcut.key.match(/^[0-9]$/) && event.keyCode == shortcut.key.charCodeAt(0);
-  },
-
-  handleEvent(event) {
-    for (let [key, shortcut] of this.keys) {
-      if (this.doesEventMatchShortcut(event, shortcut)) {
-        this.eventEmitter.emit(key, event);
-      }
-    }
-  },
-
-  on(key, listener) {
-    if (typeof listener !== "function") {
-      throw new Error("KeyShortcuts.on() expects a function as " + "second argument");
-    }
-    if (!this.keys.has(key)) {
-      let shortcut = KeyShortcuts.parseElectronKey(this.window, key);
-      // The key string is wrong and we were unable to compute the key shortcut
-      if (!shortcut) {
-        return;
-      }
-      this.keys.set(key, shortcut);
-    }
-    this.eventEmitter.on(key, listener);
-  },
-
-  off(key, listener) {
-    this.eventEmitter.off(key, listener);
-  }
-};
-module.exports = KeyShortcuts;
-
-/***/ }),
-
-/***/ 1773:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-
-
-/**
- * Empty shim for "devtools/client/shared/zoom-keys" module
- *
- * Based on nsIMarkupDocumentViewer.fullZoom API
- * https://developer.mozilla.org/en-US/Firefox/Releases/3/Full_page_zoom
- */
-
-exports.register = function (window) {};
-
-/***/ }),
-
 /***/ 1777:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -30180,8 +23239,8 @@ const CHARACTER_LIMIT = 250;
 const _minifiedCache = new Map();
 
 function isMinified(source) {
-  if (_minifiedCache.has(source.get("id"))) {
-    return _minifiedCache.get(source.get("id"));
+  if (_minifiedCache.has(source.id)) {
+    return _minifiedCache.get(source.id);
   }
 
   let text = source.get("text");
@@ -30245,7 +23304,7 @@ var _pause = __webpack_require__(1394);
 
 var _frames = __webpack_require__(3605);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _lodash = __webpack_require__(2);
 
@@ -30282,49 +23341,6 @@ const getCallStackFrames = exports.getCallStackFrames = (0, _reselect.createSele
 
 /***/ }),
 
-/***/ 178:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
- * 
- */
-
-function makeEmptyFunction(arg) {
-  return function () {
-    return arg;
-  };
-}
-
-/**
- * This function accepts and discards inputs; it has no side effects. This is
- * primarily useful idiomatically for overridable function endpoints which
- * always need to be callable, since JS lacks a null-call idiom ala Cocoa.
- */
-var emptyFunction = function emptyFunction() {};
-
-emptyFunction.thatReturns = makeEmptyFunction;
-emptyFunction.thatReturnsFalse = makeEmptyFunction(false);
-emptyFunction.thatReturnsTrue = makeEmptyFunction(true);
-emptyFunction.thatReturnsNull = makeEmptyFunction(null);
-emptyFunction.thatReturnsThis = function () {
-  return this;
-};
-emptyFunction.thatReturnsArgument = function (arg) {
-  return arg;
-};
-
-module.exports = emptyFunction;
-
-/***/ }),
-
 /***/ 1780:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -30340,7 +23356,7 @@ var _sources = __webpack_require__(1369);
 
 var _pause = __webpack_require__(1394);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _reselect = __webpack_require__(993);
 
@@ -30433,6 +23449,10 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.createLocation = createLocation;
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 function createLocation({
   sourceId,
   line,
@@ -30458,22 +23478,17 @@ function createLocation({
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
-                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 exports.updatePreview = updatePreview;
 exports.setPreview = setPreview;
 exports.clearPreview = clearPreview;
+
+var _preview = __webpack_require__(1807);
 
 var _ast = __webpack_require__(1638);
 
 var _editor = __webpack_require__(1358);
 
-var _preview = __webpack_require__(1807);
-
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _promise = __webpack_require__(1653);
 
@@ -30483,39 +23498,13 @@ var _selectors = __webpack_require__(3590);
 
 var _expressions = __webpack_require__(1398);
 
+var _pause = __webpack_require__(1639);
+
 var _lodash = __webpack_require__(2);
 
-async function getReactProps(evaluate) {
-  const reactDisplayName = await evaluate("this.hasOwnProperty('_reactInternalFiber') ? " + "this._reactInternalFiber.type.name : " + "this._reactInternalInstance.getName()");
-
-  return {
-    displayName: reactDisplayName.result
-  };
-}
-
-async function getImmutableProps(expression, evaluate) {
-  const immutableEntries = await evaluate((exp => `${exp}.toJS()`)(expression));
-
-  const immutableType = await evaluate((exp => `${exp}.constructor.name`)(expression));
-
-  return {
-    type: immutableType.result,
-    entries: immutableEntries.result
-  };
-}
-
-async function getExtraProps(expression, result, evaluate) {
-  const props = {};
-  if ((0, _preview.isReactComponent)(result)) {
-    props.react = await getReactProps(evaluate);
-  }
-
-  if ((0, _preview.isImmutable)(result)) {
-    props.immutable = await getImmutableProps(expression, evaluate);
-  }
-
-  return props;
-}
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 function isInvalidTarget(target) {
   if (!target || !target.innerText) {
@@ -30526,15 +23515,17 @@ function isInvalidTarget(target) {
   const cursorPos = target.getBoundingClientRect();
 
   // exclude literal tokens where it does not make sense to show a preview
-  const invaildType = ["cm-string", "cm-number", "cm-atom"].includes(target.className);
+  const invalidType = ["cm-atom", ""].includes(target.className);
 
   // exclude syntax where the expression would be a syntax error
-  const invalidToken = tokenText === "" || tokenText.match(/[(){}\|&%,.;=<>\+-/\*\s]/);
+  const invalidToken = tokenText === "" || tokenText.match(/^[(){}\|&%,.;=<>\+-/\*\s](?=)/);
+
+  const isPresentation = target.attributes.role && target.attributes.getNamedItem("role").value == "presentation";
 
   // exclude codemirror elements that are not tokens
   const invalidTarget = target.parentElement && !target.parentElement.closest(".CodeMirror-line") || cursorPos.top == 0;
 
-  return invalidTarget || invalidToken || invaildType;
+  return invalidTarget || invalidToken || invalidType || isPresentation;
 }
 
 function updatePreview(target, editor) {
@@ -30561,15 +23552,16 @@ function updatePreview(target, editor) {
     }
 
     if (isInvalidTarget(target)) {
+      dispatch(clearPreview());
       return;
     }
 
-    if (!(0, _selectors.isLineInScope)(getState(), tokenPos.line)) {
+    if (!(0, _selectors.isSelectedFrameVisible)(getState()) || !(0, _selectors.isLineInScope)(getState(), tokenPos.line)) {
       return;
     }
 
     const source = (0, _selectors.getSelectedSource)(getState());
-    const symbols = (0, _selectors.getSymbols)(getState(), source.toJS());
+    const symbols = (0, _selectors.getSymbols)(getState(), source);
 
     let match;
     if (!symbols || symbols.loading) {
@@ -30583,6 +23575,11 @@ function updatePreview(target, editor) {
     }
 
     const { expression, location } = match;
+
+    if ((0, _preview.isConsole)(expression)) {
+      return;
+    }
+
     dispatch(setPreview(expression, location, tokenPos, cursorPos));
   };
 }
@@ -30593,26 +23590,24 @@ function setPreview(expression, location, tokenPos, cursorPos) {
       type: "SET_PREVIEW",
       [_promise.PROMISE]: async function () {
         const source = (0, _selectors.getSelectedSource)(getState());
+        const sourceId = source.id;
+        const selectedFrame = (0, _selectors.getSelectedFrame)(getState());
 
-        const sourceId = source.get("id");
         if (location && !(0, _devtoolsSourceMap.isGeneratedId)(sourceId)) {
-          const generatedLocation = await sourceMaps.getGeneratedLocation(_extends({}, location.start, { sourceId }), source.toJS());
-
-          expression = await (0, _expressions.getMappedExpression)({ sourceMaps, getState }, generatedLocation, expression);
+          expression = await dispatch((0, _expressions.getMappedExpression)(expression));
         }
 
-        const selectedFrame = (0, _selectors.getSelectedFrame)(getState());
         if (!selectedFrame) {
           return;
         }
 
-        const { result } = await client.evaluateInFrame(selectedFrame.id, expression);
+        const { result } = await client.evaluateInFrame(expression, selectedFrame.id);
 
         if (result === undefined) {
           return;
         }
 
-        const extra = await getExtraProps(expression, result, expr => client.evaluateInFrame(selectedFrame.id, expr));
+        const extra = await dispatch((0, _pause.getExtra)(expression, result));
 
         return {
           expression,
@@ -30643,175 +23638,6 @@ function clearPreview() {
 /***/ }),
 
 /***/ 1788:
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-
-/***/ 1790:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.default = renderBreakpointsDropdown;
-
-var _react = __webpack_require__(0);
-
-var _react2 = _interopRequireDefault(_react);
-
-var _Svg = __webpack_require__(1359);
-
-var _Svg2 = _interopRequireDefault(_Svg);
-
-var _Dropdown = __webpack_require__(1615);
-
-var _Dropdown2 = _interopRequireDefault(_Dropdown);
-
-var _classnames = __webpack_require__(175);
-
-var _classnames2 = _interopRequireDefault(_classnames);
-
-__webpack_require__(1791);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-function renderPause(isWaitingOnBreak) {
-  const active = isWaitingOnBreak;
-  return _react2.default.createElement(
-    "div",
-    {
-      className: (0, _classnames2.default)("pause-next", {
-        active: active,
-        inactive: !active
-      })
-    },
-    _react2.default.createElement("img", { className: "pause-next" }),
-    _react2.default.createElement(
-      "span",
-      { className: "icon-spacer" },
-      L10N.getStr("pauseButtonItem")
-    )
-  );
-}
-
-function renderPauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  const active = (shouldPauseOnExceptions || shouldIgnoreCaughtExceptions) && (!shouldPauseOnExceptions || !shouldIgnoreCaughtExceptions);
-  return _react2.default.createElement(
-    "div",
-    {
-      className: (0, _classnames2.default)("pause-on-exceptions", {
-        active: active,
-        inactive: !active
-      })
-    },
-    _react2.default.createElement("img", { className: "pause-on-exceptions" }),
-    _react2.default.createElement(
-      "span",
-      { className: "icon-spacer" },
-      L10N.getStr("pauseOnExceptionsItem")
-    )
-  );
-}
-
-function renderPauseOnUncaughtExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  const active = shouldPauseOnExceptions && shouldIgnoreCaughtExceptions;
-  return _react2.default.createElement(
-    "div",
-    {
-      className: (0, _classnames2.default)("pause-uncaught-exceptions", {
-        active: active,
-        inactive: !active
-      })
-    },
-    _react2.default.createElement("img", { className: "pause-uncaught-exceptions" }),
-    _react2.default.createElement(
-      "span",
-      { className: "icon-spacer" },
-      L10N.getStr("pauseOnUncaughtExceptionsItem")
-    )
-  );
-}
-
-function renderIgnoreExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions) {
-  const active = !shouldPauseOnExceptions && !shouldIgnoreCaughtExceptions;
-  return _react2.default.createElement(
-    "div",
-    {
-      className: (0, _classnames2.default)("ignore-exceptions", {
-        active: active,
-        inactive: !active
-      })
-    },
-    _react2.default.createElement("img", { className: "ignore-exceptions" }),
-    _react2.default.createElement(
-      "span",
-      { className: "icon-spacer" },
-      L10N.getStr("ignoreExceptionsItem")
-    )
-  );
-}
-
-function handleClick(e) {
-  e.stopPropagation();
-}
-
-function renderBreakpointsDropdown(breakOnNext, pauseOnExceptions, shouldPauseOnExceptions, shouldIgnoreCaughtExceptions, isWaitingOnBreak) {
-  const Panel = _react2.default.createElement(
-    "ul",
-    null,
-    _react2.default.createElement(
-      "li",
-      { onClick: () => breakOnNext(), className: "first" },
-      renderPause(isWaitingOnBreak)
-    ),
-    _react2.default.createElement(
-      "li",
-      { onClick: () => pauseOnExceptions(false, false) },
-      renderIgnoreExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions)
-    ),
-    _react2.default.createElement(
-      "li",
-      { onClick: () => pauseOnExceptions(true, true) },
-      renderPauseOnUncaughtExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions)
-    ),
-    _react2.default.createElement(
-      "li",
-      { onClick: () => pauseOnExceptions(true, false) },
-      renderPauseOnExceptions(shouldPauseOnExceptions, shouldIgnoreCaughtExceptions)
-    )
-  );
-
-  const active = shouldPauseOnExceptions || shouldIgnoreCaughtExceptions || isWaitingOnBreak;
-
-  return _react2.default.createElement(
-    "div",
-    {
-      className: "breakpoints-dropdown",
-      onClick: e => handleClick(e),
-      key: "breakpoints-dropdown"
-    },
-    _react2.default.createElement(_Dropdown2.default, {
-      className: "dropdown",
-      panel: Panel,
-      icon: _react2.default.createElement(_Svg2.default, {
-        name: "plus",
-        className: (0, _classnames2.default)("plus", {
-          active: active,
-          inactive: !active
-        })
-      })
-    })
-  );
-}
-
-/***/ }),
-
-/***/ 1791:
 /***/ (function(module, exports) {
 
 // removed by extract-text-webpack-plugin
@@ -30878,7 +23704,7 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
 
 exports.getScope = getScope;
 
-var _devtoolsReps = __webpack_require__(1408);
+var _devtoolsReps = __webpack_require__(3655);
 
 var _getVariables = __webpack_require__(1765);
 
@@ -30969,7 +23795,10 @@ Object.defineProperty(exports, "__esModule", {
 
 var _lodash = __webpack_require__(2);
 
-let newSources;
+let newSources; /* This Source Code Form is subject to the terms of the Mozilla Public
+                 * License, v. 2.0. If a copy of the MPL was not distributed with this
+                 * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 let createSource;
 let supportsWasm = false;
 let queuedSources;
@@ -31040,27 +23869,61 @@ function isDocumentReady(selectedSource, selectedLocation) {
   return selectedLocation && (0, _source.isLoaded)(selectedSource) && (0, _sourceDocuments.hasDocument)(selectedLocation.sourceId);
 }
 
-class HighlightLine extends _react.PureComponent {
+class HighlightLine extends _react.Component {
+  constructor(...args) {
+    var _temp;
+
+    return _temp = super(...args), this.isStepping = false, this.previousEditorLine = null, _temp;
+  }
+
+  shouldComponentUpdate(nextProps) {
+    const { selectedLocation, selectedSource } = nextProps;
+    return this.shouldSetHighlightLine(selectedLocation, selectedSource);
+  }
+
+  shouldSetHighlightLine(selectedLocation, selectedSource) {
+    const { sourceId, line } = selectedLocation;
+    const editorLine = (0, _editor.toEditorLine)(sourceId, line);
+
+    if (!isDocumentReady(selectedSource, selectedLocation)) {
+      return false;
+    }
+
+    if (this.isStepping && editorLine === this.previousEditorLine) {
+      return false;
+    }
+
+    return true;
+  }
+
   componentDidUpdate(prevProps) {
-    const { selectedLocation, selectedFrame, selectedSource } = this.props;
+    const {
+      pauseCommand,
+      selectedLocation,
+      selectedFrame,
+      selectedSource
+    } = this.props;
+    if (pauseCommand) {
+      this.isStepping = true;
+    }
 
     this.clearHighlightLine(prevProps.selectedLocation, prevProps.selectedSource);
-
     this.setHighlightLine(selectedLocation, selectedFrame, selectedSource);
   }
 
   setHighlightLine(selectedLocation, selectedFrame, selectedSource) {
-    if (!isDocumentReady(selectedSource, selectedLocation)) {
+    const { sourceId, line } = selectedLocation;
+    if (!this.shouldSetHighlightLine(selectedLocation, selectedSource)) {
       return;
     }
-
-    const { sourceId, line } = selectedLocation;
+    this.isStepping = false;
+    const editorLine = (0, _editor.toEditorLine)(sourceId, line);
+    this.previousEditorLine = editorLine;
 
     if (!line || isDebugLine(selectedFrame, selectedLocation)) {
       return;
     }
 
-    const editorLine = (0, _editor.toEditorLine)(sourceId, line);
     const doc = (0, _sourceDocuments.getDocument)(sourceId);
     doc.addLineClass(editorLine, "line", "highlight-line");
   }
@@ -31083,6 +23946,7 @@ class HighlightLine extends _react.PureComponent {
 
 exports.HighlightLine = HighlightLine;
 exports.default = (0, _reactRedux.connect)(state => ({
+  pauseCommand: (0, _selectors.getPauseCommand)(state),
   selectedFrame: (0, _selectors.getVisibleSelectedFrame)(state),
   selectedLocation: (0, _selectors.getSelectedLocation)(state),
   selectedSource: (0, _selectors.getSelectedSource)(state)
@@ -31218,20 +24082,22 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 function createPrettySource(sourceId) {
   return async ({ dispatch, getState, sourceMaps }) => {
     const source = (0, _selectors.getSource)(getState(), sourceId);
-    const url = (0, _source.getPrettySourceURL)(source.get("url"));
+    const url = (0, _source.getPrettySourceURL)(source.url);
     const id = await sourceMaps.generatedToOriginalId(sourceId, url);
 
     const prettySource = {
       url,
       id,
+      isBlackBoxed: false,
       isPrettyPrinted: true,
+      isWasm: false,
       contentType: "text/javascript",
       loadedState: "loading"
     };
     dispatch({ type: "ADD_SOURCE", source: prettySource });
 
     const { code, mappings } = await (0, _prettyPrint.prettyPrint)({ source, url });
-    await sourceMaps.applySourceMap(source.get("id"), url, code, mappings);
+    await sourceMaps.applySourceMap(source.id, url, code, mappings);
 
     const loadedPrettySource = _extends({}, prettySource, {
       text: code,
@@ -31272,7 +24138,7 @@ function togglePrettyPrint(sourceId) {
     (0, _assert2.default)(sourceMaps.isGeneratedId(sourceId), "Pretty-printing only allowed on generated sources");
 
     const selectedLocation = (0, _selectors.getSelectedLocation)(getState());
-    const url = (0, _source.getPrettySourceURL)(source.get("url"));
+    const url = (0, _source.getPrettySourceURL)(source.url);
     const prettySource = (0, _selectors.getSourceByURL)(getState(), url);
 
     const options = {};
@@ -31378,66 +24244,6 @@ function closeTabs(urls) {
 
 /***/ }),
 
-/***/ 180:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
- */
-
-
-
-/**
- * Use invariant() to assert state which your program assumes to be true.
- *
- * Provide sprintf-style format (only %s is supported) and arguments
- * to provide information about what broke and what you were
- * expecting.
- *
- * The invariant message will be stripped in production, but the invariant
- * will remain to ensure logic does not differ in production.
- */
-
-var validateFormat = function validateFormat(format) {};
-
-if (false) {
-  validateFormat = function validateFormat(format) {
-    if (format === undefined) {
-      throw new Error('invariant requires an error message argument');
-    }
-  };
-}
-
-function invariant(condition, format, a, b, c, d, e, f) {
-  validateFormat(format);
-
-  if (!condition) {
-    var error;
-    if (format === undefined) {
-      error = new Error('Minified exception occurred; use the non-minified dev environment ' + 'for the full error message and additional helpful warnings.');
-    } else {
-      var args = [a, b, c, d, e, f];
-      var argIndex = 0;
-      error = new Error(format.replace(/%s/g, function () {
-        return args[argIndex++];
-      }));
-      error.name = 'Invariant Violation';
-    }
-
-    error.framesToPop = 1; // we don't care about invariant's own frame
-    throw error;
-  }
-}
-
-module.exports = invariant;
-
-/***/ }),
-
 /***/ 1800:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -31487,7 +24293,7 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
 exports.newSource = newSource;
 exports.newSources = newSources;
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _lodash = __webpack_require__(2);
 
@@ -31517,7 +24323,11 @@ function createOriginalSource(originalUrl, generatedSource, sourceMaps) {
 }
 
 function loadSourceMaps(sources) {
-  return async function ({ dispatch, getState, sourceMaps }) {
+  return async function ({ dispatch, sourceMaps }) {
+    if (!sourceMaps) {
+      return;
+    }
+
     const originalSources = await Promise.all(sources.map(source => dispatch(loadSourceMap(source.id))));
 
     await dispatch(newSources((0, _lodash.flatten)(originalSources)));
@@ -31532,7 +24342,7 @@ function loadSourceMap(sourceId) {
   return async function ({ dispatch, getState, sourceMaps }) {
     const source = (0, _selectors.getSource)(getState(), sourceId).toJS();
 
-    if (!(0, _devtoolsSourceMap.isGeneratedId)(sourceId) || !source.sourceMapURL) {
+    if (!sourceMaps || !(0, _devtoolsSourceMap.isGeneratedId)(sourceId) || !source.sourceMapURL) {
       return;
     }
 
@@ -31560,7 +24370,7 @@ function loadSourceMap(sourceId) {
 // select it.
 function checkSelectedSource(sourceId) {
   return async ({ dispatch, getState }) => {
-    const source = (0, _selectors.getSource)(getState(), sourceId).toJS();
+    const source = (0, _selectors.getSource)(getState(), sourceId);
 
     const pendingLocation = (0, _selectors.getPendingSelectedLocation)(getState());
 
@@ -31711,10 +24521,12 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
 exports.selectSourceURL = selectSourceURL;
 exports.selectSource = selectSource;
 exports.selectLocation = selectLocation;
+exports.selectSpecificLocation = selectSpecificLocation;
+exports.selectSpecificSource = selectSpecificSource;
 exports.jumpToMappedLocation = jumpToMappedLocation;
 exports.jumpToMappedSelectedLocation = jumpToMappedSelectedLocation;
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _ast = __webpack_require__(1399);
 
@@ -31749,20 +24561,14 @@ function selectSourceURL(url, options = {}) {
   return async ({ dispatch, getState }) => {
     const source = (0, _selectors.getSourceByURL)(getState(), url);
     if (source) {
-      const sourceId = source.get("id");
+      const sourceId = source.id;
       const location = (0, _location.createLocation)(_extends({}, options.location, { sourceId }));
-      // flow is unable to comprehend that if an options.location object
-      // exists, that we have a valid Location object, and if it doesnt,
-      // we have a valid { sourceId: string } object. So we are overriding
-      // the error
-      // $FlowIgnore
-      await dispatch(selectLocation(location, options.tabIndex));
+      await dispatch(selectLocation(location));
     } else {
       dispatch({
         type: "SELECT_SOURCE_URL",
         url: url,
-        tabIndex: options.tabIndex,
-        location: options.location
+        line: options.location ? options.location.line : null
       });
     }
   };
@@ -31772,10 +24578,10 @@ function selectSourceURL(url, options = {}) {
  * @memberof actions/sources
  * @static
  */
-function selectSource(sourceId, tabIndex = "") {
+function selectSource(sourceId) {
   return async ({ dispatch }) => {
     const location = (0, _location.createLocation)({ sourceId });
-    return await dispatch(selectLocation(location, tabIndex));
+    return await dispatch(selectLocation(location));
   };
 }
 
@@ -31783,7 +24589,7 @@ function selectSource(sourceId, tabIndex = "") {
  * @memberof actions/sources
  * @static
  */
-function selectLocation(location, tabIndex = "") {
+function selectLocation(location) {
   return async ({ dispatch, getState, client }) => {
     if (!client) {
       // No connection, do nothing. This happens when the debugger is
@@ -31791,8 +24597,8 @@ function selectLocation(location, tabIndex = "") {
       return;
     }
 
-    const source = (0, _selectors.getSource)(getState(), location.sourceId);
-    if (!source) {
+    const sourceRecord = (0, _selectors.getSource)(getState(), location.sourceId);
+    if (!sourceRecord) {
       // If there is no source we deselect the current selected source
       return dispatch({ type: "CLEAR_SELECTED_SOURCE" });
     }
@@ -31802,29 +24608,85 @@ function selectLocation(location, tabIndex = "") {
       dispatch((0, _ui.closeActiveSearch)());
     }
 
-    dispatch((0, _tabs.addTab)(source.toJS(), 0));
+    const source = sourceRecord.toJS();
 
+    dispatch((0, _tabs.addTab)(source, 0));
     dispatch({
       type: "SELECT_SOURCE",
-      source: source.toJS(),
-      tabIndex,
+      source,
       location
     });
 
-    await dispatch((0, _loadSourceText.loadSourceText)(source));
+    await dispatch((0, _loadSourceText.loadSourceText)(sourceRecord));
     const selectedSource = (0, _selectors.getSelectedSource)(getState());
     if (!selectedSource) {
       return;
     }
 
-    const sourceId = selectedSource.get("id");
+    const sourceId = selectedSource.id;
+
     if (_prefs.prefs.autoPrettyPrint && !(0, _selectors.getPrettySource)(getState(), sourceId) && (0, _source.shouldPrettyPrint)(selectedSource) && (0, _source.isMinified)(selectedSource)) {
       await dispatch((0, _prettyPrint.togglePrettyPrint)(sourceId));
-      dispatch((0, _tabs.closeTab)(source.get("url")));
+      dispatch((0, _tabs.closeTab)(source.url));
     }
 
     dispatch((0, _ast.setSymbols)(sourceId));
     dispatch((0, _ast.setOutOfScopeLocations)());
+  };
+}
+
+/**
+ * @memberof actions/sources
+ * @static
+ */
+function selectSpecificLocation(location) {
+  return async ({ dispatch, getState, client }) => {
+    if (!client) {
+      // No connection, do nothing. This happens when the debugger is
+      // shut down too fast and it tries to display a default source.
+      return;
+    }
+
+    const sourceRecord = (0, _selectors.getSource)(getState(), location.sourceId);
+    if (!sourceRecord) {
+      // If there is no source we deselect the current selected source
+      return dispatch({ type: "CLEAR_SELECTED_SOURCE" });
+    }
+
+    const activeSearch = (0, _selectors.getActiveSearch)(getState());
+    if (activeSearch !== "file") {
+      dispatch((0, _ui.closeActiveSearch)());
+    }
+
+    const source = sourceRecord.toJS();
+
+    dispatch((0, _tabs.addTab)(source, 0));
+    dispatch({
+      type: "SELECT_SOURCE",
+      source,
+      location
+    });
+
+    await dispatch((0, _loadSourceText.loadSourceText)(sourceRecord));
+    const selectedSource = (0, _selectors.getSelectedSource)(getState());
+    if (!selectedSource) {
+      return;
+    }
+
+    const sourceId = selectedSource.id;
+    dispatch((0, _ast.setSymbols)(sourceId));
+    dispatch((0, _ast.setOutOfScopeLocations)());
+  };
+}
+
+/**
+ * @memberof actions/sources
+ * @static
+ */
+function selectSpecificSource(sourceId) {
+  return async ({ dispatch }) => {
+    const location = (0, _location.createLocation)({ sourceId });
+    return await dispatch(selectSpecificLocation(location));
   };
 }
 
@@ -31841,7 +24703,7 @@ function jumpToMappedLocation(location) {
     const source = (0, _selectors.getSource)(getState(), location.sourceId);
     let pairedLocation;
     if ((0, _devtoolsSourceMap.isOriginalId)(location.sourceId)) {
-      pairedLocation = await (0, _sourceMaps.getGeneratedLocation)(getState(), source.toJS(), location, sourceMaps);
+      pairedLocation = await (0, _sourceMaps.getGeneratedLocation)(getState(), source, location, sourceMaps);
     } else {
       pairedLocation = await sourceMaps.getOriginalLocation(location, source.toJS());
     }
@@ -31869,12 +24731,17 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 exports.updateFrameLocation = updateFrameLocation;
+exports.mapDisplayNames = mapDisplayNames;
 exports.mapFrames = mapFrames;
 
 var _selectors = __webpack_require__(3590);
+
+var _ast = __webpack_require__(1638);
 
 function updateFrameLocation(frame, sourceMaps) {
   return sourceMaps.getOriginalLocation(frame.location).then(loc => _extends({}, frame, {
@@ -31891,12 +24758,32 @@ function updateFrameLocations(frames, sourceMaps) {
   return Promise.all(frames.map(frame => updateFrameLocation(frame, sourceMaps)));
 }
 
+function mapDisplayNames(frames, getState) {
+  return frames.map(frame => {
+    const source = (0, _selectors.getSource)(getState(), frame.location.sourceId);
+    const symbols = (0, _selectors.getSymbols)(getState(), source);
+
+    if (!symbols || !symbols.functions) {
+      return frame;
+    }
+
+    const originalFunction = (0, _ast.findClosestFunction)(symbols, frame.location);
+
+    if (!originalFunction) {
+      return frame;
+    }
+
+    const originalDisplayName = originalFunction.name;
+    return _extends({}, frame, { originalDisplayName });
+  });
+}
+
 /**
- * Map call stack frame locations to original locations.
+ * Map call stack frame locations and display names to originals.
  * e.g.
  * 1. When the debuggee pauses
  * 2. When a source is pretty printed
- *
+ * 3. When symbols are loaded
  * @memberof actions/pause
  * @static
  */
@@ -31907,7 +24794,8 @@ function mapFrames() {
       return;
     }
 
-    const mappedFrames = await updateFrameLocations(frames, sourceMaps);
+    let mappedFrames = await updateFrameLocations(frames, sourceMaps);
+    mappedFrames = mapDisplayNames(mappedFrames, getState);
 
     dispatch({
       type: "MAP_FRAMES",
@@ -32107,7 +24995,9 @@ function showContextMenu(props) {
   }];
 
   (0, _devtoolsContextmenu.showMenu)(contextMenuEvent, (0, _devtoolsContextmenu.buildMenu)(items));
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /***/ }),
 
@@ -32178,6 +25068,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.isImmutable = isImmutable;
 exports.isReactComponent = isReactComponent;
+exports.isConsole = isConsole;
 
 
 const IMMUTABLE_FIELDS = ["_root", "__ownerID", "__altered", "__hash"]; /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -32210,798 +25101,17 @@ function isReactComponent(result) {
   return Object.keys(ownProperties).includes("_reactInternalInstance") || Object.keys(ownProperties).includes("_reactInternalFiber");
 }
 
+function isConsole(expression) {
+  return (/^console/.test(expression)
+  );
+}
+
 /***/ }),
 
 /***/ 1808:
 /***/ (function(module, exports) {
 
 module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 256 247\" version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" preserveAspectRatio=\"xMidYMid\"><defs><radialGradient cx=\"78.7636112%\" cy=\"37.8476394%\" fx=\"78.7636112%\" fy=\"37.8476394%\" r=\"89.8725577%\" id=\"radialGradient-1\"><stop stop-color=\"#F80090\" offset=\"0%\"></stop><stop stop-color=\"#4D008E\" offset=\"100%\"></stop></radialGradient><radialGradient cx=\"68.7389016%\" cy=\"4.39833672%\" fx=\"68.7389016%\" fy=\"4.39833672%\" r=\"81.7284786%\" id=\"radialGradient-2\"><stop stop-color=\"#57008E\" offset=\"0%\"></stop><stop stop-color=\"#5C008E\" offset=\"29.1746283%\"></stop><stop stop-color=\"#F80090\" offset=\"100%\"></stop></radialGradient><linearGradient x1=\"18.2386532%\" y1=\"0%\" x2=\"81.1591125%\" y2=\"84.3374763%\" id=\"linearGradient-3\"><stop stop-color=\"#F70090\" offset=\"0%\"></stop><stop stop-color=\"#E50090\" offset=\"66.9712865%\"></stop><stop stop-color=\"#D6008F\" stop-opacity=\"0.2\" offset=\"82.7147533%\"></stop><stop stop-color=\"#C10090\" stop-opacity=\"0\" offset=\"100%\"></stop></linearGradient><linearGradient x1=\"64.9060589%\" y1=\"71.5585538%\" x2=\"44.2897699%\" y2=\"50%\" id=\"linearGradient-4\"><stop stop-color=\"#B2008F\" stop-opacity=\"0.151340138\" offset=\"0%\"></stop><stop stop-color=\"#F70090\" stop-opacity=\"0.4\" offset=\"40.0350765%\"></stop><stop stop-color=\"#F60090\" stop-opacity=\"0.891668\" offset=\"64.8995536%\"></stop><stop stop-color=\"#FF0090\" offset=\"100%\"></stop></linearGradient></defs><g><path d=\"M16.6852208,157.125328 C3.56690702,87.3798324 38.2363025,20.1145078 117.808706,11.1662199 C106.835616,-0.558801732 91.8452087,-0.646905628 84.9481697,0.779380087 C72.770288,4.66044372 73.1525932,12.540855 59.3390152,22.7199675 C45.6064437,30.5634307 38.7094156,24.5568182 28.7057455,32.6879515 C18.7234849,40.7583874 25.6888528,59.2851732 21.5022823,62.8870857 C17.3464381,70.0905489 4.45500952,76.5077264 2.10834286,85.6062545 C0.168948918,97.2420641 7.37241212,105.553752 7.09535584,115.527778 C7.92652468,123.839467 -1.17920693,128.539449 0.129052814,135.275796 C4.0477368,146.281025 11.600845,152.904887 15.1615723,155.958047 C15.9781085,156.533531 16.8404881,157.95083 16.6852208,157.125328 L16.6852208,157.125328 Z\" fill=\"#FF0090\"></path><path d=\"M158.275491,60.578542 C155.368486,60.578542 153.011422,58.2214776 153.011422,55.3144727 C153.011422,52.4074679 155.368486,50.0504035 158.275491,50.0504035 C161.182496,50.0504035 163.53956,52.4074679 163.53956,55.3144727 C163.53956,58.2214776 161.182496,60.578542 158.275491,60.578542 L158.275491,60.578542 Z M19.7566405,164.732808 C7.1500258,104.116773 46.1602355,53.4676156 121.704062,78.4026805 C166.031404,104.334594 221.793282,102.646102 224.307422,85.8832 C230.514061,65.7878769 196.047681,24.3767065 144.515214,13.5715117 C42.2814476,-6.37654026 -12.8335943,104.116774 19.7566405,164.732808 L19.7566405,164.732808 Z\" fill=\"url(#radialGradient-1)\"></path><path d=\"M187.458604,171.493257 C202.639072,173.137863 217.048769,169.494573 230.402327,158.61014 C210.228197,181.112651 185.002777,192.426521 156.059262,195.505171 C169.878829,207.254019 183.20579,212.546348 195.955366,210.281136 C160.528734,220.05679 130.847947,209.296529 94.7424273,173.340673 C92.8517347,183.020022 103.074741,198.100667 113.611745,207.727264 C52.4742909,181.221845 47.1143627,98.6544556 121.66531,78.3442237 C44.3844415,41.214641 0.686373501,113.357693 22.1558444,172.485931 C43.1623368,218.026693 99.1402667,253.085223 160.492163,245.3753 C190.292928,241.7251 234.79401,221.178935 252.973664,172.485931 C240.160919,183.983766 217.257941,193.997836 207.037617,194.765984 C241.628648,177.478781 260.301586,148.103896 255.060336,107.955387 C247.895106,125.013742 238.441392,138.114625 226.616076,147.112305 C251.735653,107.955387 247.425219,87.716426 228.832526,65.4732398 C242.131228,102.044668 224.928249,142.633967 187.458604,171.493257 L187.458604,171.493257 Z\" fill=\"url(#radialGradient-2)\"></path><path d=\"M169.707072,213.625541 C167.082407,213.13513 175.656929,217.098842 159.079366,212.710316 C142.501804,208.32179 125.622502,204.092744 94.7424273,173.340673 C92.8517347,183.020022 103.074741,198.100667 113.611745,207.727264 C142.056275,227.564927 122.711866,218.286797 166.051946,233.269481 C169.52976,226.346862 169.707072,220.195346 169.707072,213.625541 L169.707072,213.625541 Z\" fill=\"url(#linearGradient-3)\"></path><path d=\"M114.601372,57.8510108 C114.601372,57.8510108 118.369452,52.2893628 119.836219,49.7810251 C121.633641,46.7072319 124.393939,41.104618 124.393939,41.104618 C124.393939,41.104618 95.389611,31.6417749 88.2716448,30.4871665 C66.1450215,36.2308801 66.0645022,45.5009559 78.435065,59.690116 C79.8114806,61.2693368 114.601372,57.8510108 114.601372,57.8510108 L114.601372,57.8510108 Z\" fill=\"url(#linearGradient-4)\"></path></g></svg>"
-
-/***/ }),
-
-/***/ 187:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-
-
-var ReactPropTypesSecret = 'SECRET_DO_NOT_PASS_THIS_OR_YOU_WILL_BE_FIRED';
-
-module.exports = ReactPropTypesSecret;
-
-
-/***/ }),
-
-/***/ 1938:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const client = __webpack_require__(1939);
-const loadProperties = __webpack_require__(2017);
-const node = __webpack_require__(1940);
-const selection = __webpack_require__(3616);
-
-module.exports = {
-  client,
-  loadProperties,
-  node,
-  selection
-};
-
-/***/ }),
-
-/***/ 1939:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-async function enumIndexedProperties(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumProperties({ ignoreNonIndexedProperties: true });
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumIndexedProperties", e);
-    return {};
-  }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-async function enumNonIndexedProperties(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumProperties({ ignoreIndexedProperties: true });
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumNonIndexedProperties", e);
-    return {};
-  }
-}
-
-async function enumEntries(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumEntries();
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumEntries", e);
-    return {};
-  }
-}
-
-async function enumSymbols(objectClient, start, end) {
-  try {
-    const { iterator } = await objectClient.enumSymbols();
-    const response = await iteratorSlice(iterator, start, end);
-    return response;
-  } catch (e) {
-    console.error("Error in enumSymbols", e);
-    return {};
-  }
-}
-
-async function getPrototype(objectClient) {
-  if (typeof objectClient.getPrototype !== "function") {
-    console.error("objectClient.getPrototype is not a function");
-    return Promise.resolve({});
-  }
-  return objectClient.getPrototype();
-}
-
-function iteratorSlice(iterator, start, end) {
-  start = start || 0;
-  const count = end ? end - start + 1 : iterator.count;
-  return iterator.slice(start, count);
-}
-
-module.exports = {
-  enumEntries,
-  enumIndexedProperties,
-  enumNonIndexedProperties,
-  enumSymbols,
-  getPrototype
-};
-
-/***/ }),
-
-/***/ 1940:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { get, has } = __webpack_require__(2);
-const { maybeEscapePropertyName } = __webpack_require__(1353);
-const ArrayRep = __webpack_require__(1448);
-const GripArrayRep = __webpack_require__(1450);
-const GripMap = __webpack_require__(1584);
-const GripMapEntryRep = __webpack_require__(1451);
-
-const MAX_NUMERICAL_PROPERTIES = 100;
-
-const NODE_TYPES = {
-  BUCKET: Symbol("[n…n]"),
-  DEFAULT_PROPERTIES: Symbol("<default properties>"),
-  ENTRIES: Symbol("<entries>"),
-  GET: Symbol("<get>"),
-  GRIP: Symbol("GRIP"),
-  MAP_ENTRY_KEY: Symbol("<key>"),
-  MAP_ENTRY_VALUE: Symbol("<value>"),
-  PROMISE_REASON: Symbol("<reason>"),
-  PROMISE_STATE: Symbol("<state>"),
-  PROMISE_VALUE: Symbol("<value>"),
-  PROXY_HANDLER: Symbol("<handler>"),
-  PROXY_TARGET: Symbol("<target>"),
-  SET: Symbol("<set>"),
-  PROTOTYPE: Symbol("<prototype>"),
-  BLOCK: Symbol("☲")
-};
-
-let WINDOW_PROPERTIES = {};
-
-if (typeof window === "object") {
-  WINDOW_PROPERTIES = Object.getOwnPropertyNames(window);
-}
-
-const SAFE_PATH_PREFIX = "##-";
-
-function getType(item) {
-  return item.type;
-}
-
-function getValue(item) {
-  if (has(item, "contents.value")) {
-    return get(item, "contents.value");
-  }
-
-  if (has(item, "contents.getterValue")) {
-    return get(item, "contents.getterValue", undefined);
-  }
-
-  if (nodeHasAccessors(item)) {
-    return item.contents;
-  }
-
-  return undefined;
-}
-
-function nodeIsBucket(item) {
-  return getType(item) === NODE_TYPES.BUCKET;
-}
-
-function nodeIsEntries(item) {
-  return getType(item) === NODE_TYPES.ENTRIES;
-}
-
-function nodeIsMapEntry(item) {
-  return GripMapEntryRep.supportsObject(getValue(item));
-}
-
-function nodeHasChildren(item) {
-  return Array.isArray(item.contents);
-}
-
-function nodeIsObject(item) {
-  const value = getValue(item);
-  return value && value.type === "object";
-}
-
-function nodeIsArrayLike(item) {
-  const value = getValue(item);
-  return GripArrayRep.supportsObject(value) || ArrayRep.supportsObject(value);
-}
-
-function nodeIsFunction(item) {
-  const value = getValue(item);
-  return value && value.class === "Function";
-}
-
-function nodeIsOptimizedOut(item) {
-  const value = getValue(item);
-  return !nodeHasChildren(item) && value && value.optimizedOut;
-}
-
-function nodeIsUninitializedBinding(item) {
-  const value = getValue(item);
-  return value && value.uninitialized;
-}
-
-// Used to check if an item represents a binding that exists in a sourcemap's
-// original file content, but does not match up with a binding found in the
-// generated code.
-function nodeIsUnmappedBinding(item) {
-  const value = getValue(item);
-  return value && value.unmapped;
-}
-
-// Used to check if an item represents a binding that exists in the debugger's
-// parser result, but does not match up with a binding returned by the
-// debugger server.
-function nodeIsUnscopedBinding(item) {
-  const value = getValue(item);
-  return value && value.unscoped;
-}
-
-function nodeIsMissingArguments(item) {
-  const value = getValue(item);
-  return !nodeHasChildren(item) && value && value.missingArguments;
-}
-
-function nodeHasProperties(item) {
-  return !nodeHasChildren(item) && nodeIsObject(item);
-}
-
-function nodeIsPrimitive(item) {
-  return !nodeHasChildren(item) && !nodeHasProperties(item) && !nodeIsEntries(item) && !nodeIsMapEntry(item) && !nodeHasAccessors(item) && !nodeIsBucket(item);
-}
-
-function nodeIsDefaultProperties(item) {
-  return getType(item) === NODE_TYPES.DEFAULT_PROPERTIES;
-}
-
-function isDefaultWindowProperty(name) {
-  return WINDOW_PROPERTIES.includes(name);
-}
-
-function nodeIsPromise(item) {
-  const value = getValue(item);
-  if (!value) {
-    return false;
-  }
-
-  return value.class == "Promise";
-}
-
-function nodeIsProxy(item) {
-  const value = getValue(item);
-  if (!value) {
-    return false;
-  }
-
-  return value.class == "Proxy";
-}
-
-function nodeIsPrototype(item) {
-  return getType(item) === NODE_TYPES.PROTOTYPE;
-}
-
-function nodeIsWindow(item) {
-  const value = getValue(item);
-  if (!value) {
-    return false;
-  }
-
-  return value.class == "Window";
-}
-
-function nodeIsGetter(item) {
-  return getType(item) === NODE_TYPES.GET;
-}
-
-function nodeIsSetter(item) {
-  return getType(item) === NODE_TYPES.SET;
-}
-
-function nodeIsBlock(item) {
-  return getType(item) === NODE_TYPES.BLOCK;
-}
-
-function nodeHasAccessors(item) {
-  return !!getNodeGetter(item) || !!getNodeSetter(item);
-}
-
-function nodeSupportsNumericalBucketing(item) {
-  // We exclude elements with entries since it's the <entries> node
-  // itself that can have buckets.
-  return nodeIsArrayLike(item) && !nodeHasEntries(item) || nodeIsEntries(item) || nodeIsBucket(item);
-}
-
-function nodeHasEntries(item) {
-  const value = getValue(item);
-  if (!value) {
-    return false;
-  }
-
-  return value.class === "Map" || value.class === "Set" || value.class === "WeakMap" || value.class === "WeakSet";
-}
-
-function nodeHasAllEntriesInPreview(item) {
-  const { preview } = getValue(item) || {};
-  if (!preview) {
-    return false;
-  }
-
-  const {
-    entries,
-    items,
-    length,
-    size
-  } = preview;
-
-  if (!entries && !items) {
-    return false;
-  }
-
-  return entries ? entries.length === size : items.length === length;
-}
-
-function nodeNeedsNumericalBuckets(item) {
-  return nodeSupportsNumericalBucketing(item) && getNumericalPropertiesCount(item) > MAX_NUMERICAL_PROPERTIES;
-}
-
-function makeNodesForPromiseProperties(item) {
-  const { promiseState: { reason, value, state } } = getValue(item);
-
-  const properties = [];
-
-  if (state) {
-    properties.push(createNode(item, "<state>", `${item.path}/${SAFE_PATH_PREFIX}state`, { value: state }, NODE_TYPES.PROMISE_STATE));
-  }
-
-  if (reason) {
-    properties.push(createNode(item, "<reason>", `${item.path}/${SAFE_PATH_PREFIX}reason`, { value: reason }, NODE_TYPES.PROMISE_REASON));
-  }
-
-  if (value) {
-    properties.push(createNode(item, "<value>", `${item.path}/${SAFE_PATH_PREFIX}value`, { value: value }, NODE_TYPES.PROMISE_VALUE));
-  }
-
-  return properties;
-}
-
-function makeNodesForProxyProperties(item) {
-  const {
-    proxyHandler,
-    proxyTarget
-  } = getValue(item);
-
-  return [createNode(item, "<target>", `${item.path}/${SAFE_PATH_PREFIX}target`, { value: proxyTarget }, NODE_TYPES.PROXY_TARGET), createNode(item, "<handler>", `${item.path}/${SAFE_PATH_PREFIX}handler`, { value: proxyHandler }, NODE_TYPES.PROXY_HANDLER)];
-}
-
-function makeNodesForEntries(item) {
-  const { path } = item;
-  const nodeName = "<entries>";
-  const entriesPath = `${path}/${SAFE_PATH_PREFIX}entries`;
-
-  if (nodeHasAllEntriesInPreview(item)) {
-    let entriesNodes = [];
-    const { preview } = getValue(item);
-    if (preview.entries) {
-      entriesNodes = preview.entries.map(([key, value], index) => {
-        return createNode(item, index, `${entriesPath}/${index}`, {
-          value: GripMapEntryRep.createGripMapEntry(key, value)
-        });
-      });
-    } else if (preview.items) {
-      entriesNodes = preview.items.map((value, index) => {
-        return createNode(item, index, `${entriesPath}/${index}`, { value });
-      });
-    }
-    return createNode(item, nodeName, entriesPath, entriesNodes, NODE_TYPES.ENTRIES);
-  }
-  return createNode(item, nodeName, entriesPath, null, NODE_TYPES.ENTRIES);
-}
-
-function makeNodesForMapEntry(item) {
-  const nodeValue = getValue(item);
-  if (!nodeValue || !nodeValue.preview) {
-    return [];
-  }
-
-  const { key, value } = nodeValue.preview;
-  const path = item.path;
-
-  return [createNode(item, "<key>", `${path}/##key`, { value: key }, NODE_TYPES.MAP_ENTRY_KEY), createNode(item, "<value>", `${path}/##value`, { value }, NODE_TYPES.MAP_ENTRY_VALUE)];
-}
-
-function getNodeGetter(item) {
-  return get(item, "contents.get", undefined);
-}
-
-function getNodeSetter(item) {
-  return get(item, "contents.set", undefined);
-}
-
-function makeNodesForAccessors(item) {
-  const accessors = [];
-
-  const getter = getNodeGetter(item);
-  if (getter && getter.type !== "undefined") {
-    accessors.push(createNode(item, "<get>", `${item.path}/${SAFE_PATH_PREFIX}get`, { value: getter }, NODE_TYPES.GET));
-  }
-
-  const setter = getNodeSetter(item);
-  if (setter && setter.type !== "undefined") {
-    accessors.push(createNode(item, "<set>", `${item.path}/${SAFE_PATH_PREFIX}set`, { value: setter }, NODE_TYPES.SET));
-  }
-
-  return accessors;
-}
-
-function sortProperties(properties) {
-  return properties.sort((a, b) => {
-    // Sort numbers in ascending order and sort strings lexicographically
-    const aInt = parseInt(a, 10);
-    const bInt = parseInt(b, 10);
-
-    if (isNaN(aInt) || isNaN(bInt)) {
-      return a > b ? 1 : -1;
-    }
-
-    return aInt - bInt;
-  });
-}
-
-function makeNumericalBuckets(parent) {
-  const parentPath = parent.path;
-  const numProperties = getNumericalPropertiesCount(parent);
-
-  // We want to have at most a hundred slices.
-  const bucketSize = 10 ** Math.max(2, Math.ceil(Math.log10(numProperties)) - 2);
-  const numBuckets = Math.ceil(numProperties / bucketSize);
-
-  let buckets = [];
-  for (let i = 1; i <= numBuckets; i++) {
-    const minKey = (i - 1) * bucketSize;
-    const maxKey = Math.min(i * bucketSize - 1, numProperties - 1);
-    const startIndex = nodeIsBucket(parent) ? parent.meta.startIndex : 0;
-    const minIndex = startIndex + minKey;
-    const maxIndex = startIndex + maxKey;
-    const bucketKey = `${SAFE_PATH_PREFIX}bucket_${minIndex}-${maxIndex}`;
-    const bucketName = `[${minIndex}…${maxIndex}]`;
-
-    buckets.push(createNode(parent, bucketName, `${parentPath}/${bucketKey}`, null, NODE_TYPES.BUCKET, {
-      startIndex: minIndex,
-      endIndex: maxIndex
-    }));
-  }
-  return buckets;
-}
-
-function makeDefaultPropsBucket(propertiesNames, parent, ownProperties) {
-  const parentPath = parent.path;
-
-  const userPropertiesNames = [];
-  const defaultProperties = [];
-
-  propertiesNames.forEach(name => {
-    if (isDefaultWindowProperty(name)) {
-      defaultProperties.push(name);
-    } else {
-      userPropertiesNames.push(name);
-    }
-  });
-
-  let nodes = makeNodesForOwnProps(userPropertiesNames, parent, ownProperties);
-
-  if (defaultProperties.length > 0) {
-    const defaultPropertiesNode = createNode(parent, "<default properties>", `${parentPath}/${SAFE_PATH_PREFIX}default`, null, NODE_TYPES.DEFAULT_PROPERTIES);
-
-    const defaultNodes = defaultProperties.map((name, index) => createNode(defaultPropertiesNode, maybeEscapePropertyName(name), `${parentPath}/${SAFE_PATH_PREFIX}bucket${index}/${name}`, ownProperties[name]));
-    nodes.push(setNodeChildren(defaultPropertiesNode, defaultNodes));
-  }
-  return nodes;
-}
-
-function makeNodesForOwnProps(propertiesNames, parent, ownProperties) {
-  const parentPath = parent.path;
-  return propertiesNames.map(name => createNode(parent, maybeEscapePropertyName(name), `${parentPath}/${name}`, ownProperties[name]));
-}
-
-function makeNodesForProperties(objProps, parent) {
-  const {
-    ownProperties = {},
-    ownSymbols,
-    prototype,
-    safeGetterValues
-  } = objProps;
-
-  const parentPath = parent.path;
-  const parentValue = getValue(parent);
-
-  let allProperties = { ...ownProperties, ...safeGetterValues };
-
-  // Ignore properties that are neither non-concrete nor getters/setters.
-  const propertiesNames = sortProperties(Object.keys(allProperties)).filter(name => {
-    if (!allProperties[name]) {
-      return false;
-    }
-
-    const properties = Object.getOwnPropertyNames(allProperties[name]);
-    return properties.some(property => ["value", "getterValue", "get", "set"].includes(property));
-  });
-
-  let nodes = [];
-  if (parentValue && parentValue.class == "Window") {
-    nodes = makeDefaultPropsBucket(propertiesNames, parent, allProperties);
-  } else {
-    nodes = makeNodesForOwnProps(propertiesNames, parent, allProperties);
-  }
-
-  if (Array.isArray(ownSymbols)) {
-    ownSymbols.forEach((ownSymbol, index) => {
-      nodes.push(createNode(parent, ownSymbol.name, `${parentPath}/${SAFE_PATH_PREFIX}symbol-${index}`, ownSymbol.descriptor || null));
-    }, this);
-  }
-
-  if (nodeIsPromise(parent)) {
-    nodes.push(...makeNodesForPromiseProperties(parent));
-  }
-
-  if (nodeHasEntries(parent)) {
-    nodes.push(makeNodesForEntries(parent));
-  }
-
-  // Add the prototype if it exists and is not null
-  if (prototype && prototype.type !== "null") {
-    nodes.push(makeNodeForPrototype(objProps, parent));
-  }
-
-  return nodes;
-}
-
-function makeNodeForPrototype(objProps, parent) {
-  const {
-    prototype
-  } = objProps || {};
-
-  // Add the prototype if it exists and is not null
-  if (prototype && prototype.type !== "null") {
-    return createNode(parent, "<prototype>", `${parent.path}/<prototype>`, { value: prototype }, NODE_TYPES.PROTOTYPE);
-  }
-
-  return null;
-}
-
-function createNode(parent, name, path, contents, type = NODE_TYPES.GRIP, meta) {
-  if (contents === undefined) {
-    return null;
-  }
-
-  // The path is important to uniquely identify the item in the entire
-  // tree. This helps debugging & optimizes React's rendering of large
-  // lists. The path will be separated by property name,
-  // i.e. `{ foo: { bar: { baz: 5 }}}` will have a path of `foo/bar/baz`
-  // for the inner object.
-  return {
-    parent,
-    name,
-    path,
-    contents,
-    type,
-    meta
-  };
-}
-
-function setNodeChildren(node, children) {
-  node.contents = children;
-  return node;
-}
-
-function getChildren(options) {
-  const {
-    cachedNodes,
-    loadedProperties = new Map(),
-    item
-  } = options;
-
-  const key = item.path;
-  if (cachedNodes && cachedNodes.has(key)) {
-    return cachedNodes.get(key);
-  }
-
-  const loadedProps = loadedProperties.get(key);
-  const {
-    ownProperties,
-    ownSymbols,
-    safeGetterValues,
-    prototype
-  } = loadedProps || {};
-  const hasLoadedProps = ownProperties || ownSymbols || safeGetterValues || prototype;
-
-  // Because we are dynamically creating the tree as the user
-  // expands it (not precalculated tree structure), we cache child
-  // arrays. This not only helps performance, but is necessary
-  // because the expanded state depends on instances of nodes
-  // being the same across renders. If we didn't do this, each
-  // node would be a new instance every render.
-  // If the node needs properties, we only add children to
-  // the cache if the properties are loaded.
-  const addToCache = children => {
-    if (cachedNodes) {
-      cachedNodes.set(item.path, children);
-    }
-    return children;
-  };
-
-  // Nodes can either have children already, or be an object with
-  // properties that we need to go and fetch.
-  if (nodeHasChildren(item)) {
-    return addToCache(item.contents);
-  }
-
-  if (nodeHasAccessors(item)) {
-    return addToCache(makeNodesForAccessors(item));
-  }
-
-  if (nodeIsMapEntry(item)) {
-    return addToCache(makeNodesForMapEntry(item));
-  }
-
-  if (nodeIsProxy(item)) {
-    const nodes = makeNodesForProxyProperties(item);
-    const protoNode = makeNodeForPrototype(loadedProps, item);
-    if (protoNode) {
-      return addToCache(nodes.concat(protoNode));
-    }
-    return nodes;
-  }
-
-  if (nodeNeedsNumericalBuckets(item)) {
-    const bucketNodes = makeNumericalBuckets(item);
-    // Even if we have numerical buckets, we might have loaded non indexed properties,
-    // like length for example.
-    if (hasLoadedProps) {
-      return addToCache(bucketNodes.concat(makeNodesForProperties(loadedProps, item)));
-    }
-
-    // We don't cache the result here so we can have the prototype, properties and symbols
-    // when they are loaded.
-    return bucketNodes;
-  }
-
-  if (!nodeIsEntries(item) && !nodeIsBucket(item) && !nodeHasProperties(item)) {
-    return [];
-  }
-
-  if (!hasLoadedProps) {
-    return [];
-  }
-
-  return addToCache(makeNodesForProperties(loadedProps, item));
-}
-
-function getParent(item) {
-  return item.parent;
-}
-
-function getNumericalPropertiesCount(item) {
-  if (nodeIsBucket(item)) {
-    return item.meta.endIndex - item.meta.startIndex + 1;
-  }
-
-  const value = getValue(getClosestGripNode(item));
-  if (!value) {
-    return 0;
-  }
-
-  if (GripArrayRep.supportsObject(value)) {
-    return GripArrayRep.getLength(value);
-  }
-
-  if (GripMap.supportsObject(value)) {
-    return GripMap.getLength(value);
-  }
-
-  // TODO: We can also have numerical properties on Objects, but at the
-  // moment we don't have a way to distinguish them from non-indexed properties,
-  // as they are all computed in a ownPropertiesLength property.
-
-  return 0;
-}
-
-function getClosestGripNode(item) {
-  const type = getType(item);
-  if (type !== NODE_TYPES.BUCKET && type !== NODE_TYPES.DEFAULT_PROPERTIES && type !== NODE_TYPES.ENTRIES) {
-    return item;
-  }
-
-  const parent = getParent(item);
-  if (!parent) {
-    return null;
-  }
-
-  return getClosestGripNode(parent);
-}
-
-function getClosestNonBucketNode(item) {
-  const type = getType(item);
-
-  if (type !== NODE_TYPES.BUCKET) {
-    return item;
-  }
-
-  const parent = getParent(item);
-  if (!parent) {
-    return null;
-  }
-
-  return getClosestNonBucketNode(parent);
-}
-
-module.exports = {
-  createNode,
-  getChildren,
-  getClosestGripNode,
-  getClosestNonBucketNode,
-  getParent,
-  getNumericalPropertiesCount,
-  getValue,
-  makeNodesForEntries,
-  makeNodesForPromiseProperties,
-  makeNodesForProperties,
-  makeNumericalBuckets,
-  nodeHasAccessors,
-  nodeHasAllEntriesInPreview,
-  nodeHasChildren,
-  nodeHasEntries,
-  nodeHasProperties,
-  nodeIsBlock,
-  nodeIsBucket,
-  nodeIsDefaultProperties,
-  nodeIsEntries,
-  nodeIsFunction,
-  nodeIsGetter,
-  nodeIsMapEntry,
-  nodeIsMissingArguments,
-  nodeIsObject,
-  nodeIsOptimizedOut,
-  nodeIsPrimitive,
-  nodeIsPromise,
-  nodeIsPrototype,
-  nodeIsProxy,
-  nodeIsSetter,
-  nodeIsUninitializedBinding,
-  nodeIsUnmappedBinding,
-  nodeIsUnscopedBinding,
-  nodeIsWindow,
-  nodeNeedsNumericalBuckets,
-  nodeSupportsNumericalBucketing,
-  setNodeChildren,
-  sortProperties,
-  NODE_TYPES,
-  // Export for testing purpose.
-  SAFE_PATH_PREFIX
-};
 
 /***/ }),
 
@@ -33070,7 +25180,7 @@ function getSourceAnnotation(source, sourceMetaData) {
   if ((0, _source.isPretty)(source)) {
     return _react2.default.createElement("img", { className: "prettyPrint" });
   }
-  if (source.get("isBlackBoxed")) {
+  if (source.isBlackBoxed) {
     return _react2.default.createElement("img", { className: "blackBox" });
   }
 }
@@ -33144,41 +25254,6 @@ module.exports = __WEBPACK_EXTERNAL_MODULE_2__;
 
 /***/ }),
 
-/***/ 20:
-/***/ (function(module, exports, __webpack_require__) {
-
-/**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-if (false) {
-  var REACT_ELEMENT_TYPE = (typeof Symbol === 'function' &&
-    Symbol.for &&
-    Symbol.for('react.element')) ||
-    0xeac7;
-
-  var isValidElement = function(object) {
-    return typeof object === 'object' &&
-      object !== null &&
-      object.$$typeof === REACT_ELEMENT_TYPE;
-  };
-
-  // By explicitly using `prop-types` you are opting into new development behavior.
-  // http://fb.me/prop-types-in-prod
-  var throwOnDirectAccess = true;
-  module.exports = require('./factoryWithTypeCheckers')(isValidElement, throwOnDirectAccess);
-} else {
-  // By explicitly using `prop-types` you are opting into new production behavior.
-  // http://fb.me/prop-types-in-prod
-  module.exports = __webpack_require__(177)();
-}
-
-
-/***/ }),
-
 /***/ 2008:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -33231,7 +25306,7 @@ var _extends = Object.assign || function (target) { for (var i = 1; i < argument
                                                                                                                                                                                                                                                                    * License, v. 2.0. If a copy of the MPL was not distributed with this
                                                                                                                                                                                                                                                                    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -33245,11 +25320,11 @@ var _classnames = __webpack_require__(175);
 
 var _classnames2 = _interopRequireDefault(_classnames);
 
-var _redux = __webpack_require__(3593);
-
 var _actions = __webpack_require__(1354);
 
 var _actions2 = _interopRequireDefault(_actions);
+
+var _editor = __webpack_require__(1358);
 
 var _projectSearch = __webpack_require__(2010);
 
@@ -33305,6 +25380,7 @@ class ProjectSearch extends _react.Component {
 
     this.selectMatchItem = matchItem => {
       this.props.selectLocation(_extends({}, matchItem));
+      this.props.doSearchForHighlight(this.state.inputValue, (0, _editor.getEditor)(), matchItem.line, matchItem.column);
     };
 
     this.getResults = () => {
@@ -33507,13 +25583,15 @@ ProjectSearch.contextTypes = {
   shortcuts: _propTypes2.default.object
 };
 
-exports.default = (0, _reactRedux.connect)(state => ({
+const mapStateToProps = state => ({
   sources: (0, _selectors.getSources)(state),
   activeSearch: (0, _selectors.getActiveSearch)(state),
   results: (0, _selectors.getTextSearchResults)(state),
   query: (0, _selectors.getTextSearchQuery)(state),
   status: (0, _selectors.getTextSearchStatus)(state)
-}), dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(ProjectSearch);
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(ProjectSearch);
 
 /***/ }),
 
@@ -33572,142 +25650,6 @@ function highlightMatches(lineMatch) {
 
 /***/ }),
 
-/***/ 2017:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const {
-  enumEntries,
-  enumIndexedProperties,
-  enumNonIndexedProperties,
-  getPrototype,
-  enumSymbols
-} = __webpack_require__(1939);
-
-const {
-  getClosestGripNode,
-  getClosestNonBucketNode,
-  getValue,
-  nodeHasAccessors,
-  nodeHasAllEntriesInPreview,
-  nodeHasProperties,
-  nodeIsBucket,
-  nodeIsDefaultProperties,
-  nodeIsEntries,
-  nodeIsMapEntry,
-  nodeIsPrimitive,
-  nodeIsProxy,
-  nodeNeedsNumericalBuckets
-} = __webpack_require__(1940);
-
-function loadItemProperties(item, createObjectClient, loadedProperties) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  const [start, end] = item.meta ? [item.meta.startIndex, item.meta.endIndex] : [];
-
-  let promises = [];
-  let objectClient;
-  const getObjectClient = () => objectClient || createObjectClient(value);
-
-  if (shouldLoadItemIndexedProperties(item, loadedProperties)) {
-    promises.push(enumIndexedProperties(getObjectClient(), start, end));
-  }
-
-  if (shouldLoadItemNonIndexedProperties(item, loadedProperties)) {
-    promises.push(enumNonIndexedProperties(getObjectClient(), start, end));
-  }
-
-  if (shouldLoadItemEntries(item, loadedProperties)) {
-    promises.push(enumEntries(getObjectClient(), start, end));
-  }
-
-  if (shouldLoadItemPrototype(item, loadedProperties)) {
-    promises.push(getPrototype(getObjectClient()));
-  }
-
-  if (shouldLoadItemSymbols(item, loadedProperties)) {
-    promises.push(enumSymbols(getObjectClient(), start, end));
-  }
-
-  return Promise.all(promises).then(mergeResponses);
-}
-
-function mergeResponses(responses) {
-  const data = {};
-
-  for (const response of responses) {
-    if (response.hasOwnProperty("ownProperties")) {
-      data.ownProperties = { ...data.ownProperties, ...response.ownProperties };
-    }
-
-    if (response.ownSymbols && response.ownSymbols.length > 0) {
-      data.ownSymbols = response.ownSymbols;
-    }
-
-    if (response.prototype) {
-      data.prototype = response.prototype;
-    }
-  }
-
-  return data;
-}
-
-function shouldLoadItemIndexedProperties(item, loadedProperties = new Map()) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeNeedsNumericalBuckets(item) && !nodeIsEntries(getClosestNonBucketNode(item))
-  // The data is loaded when expanding the window node.
-  && !nodeIsDefaultProperties(item);
-}
-
-function shouldLoadItemNonIndexedProperties(item, loadedProperties = new Map()) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeIsEntries(getClosestNonBucketNode(item)) && !nodeIsBucket(item)
-  // The data is loaded when expanding the window node.
-  && !nodeIsDefaultProperties(item);
-}
-
-function shouldLoadItemEntries(item, loadedProperties = new Map()) {
-  const gripItem = getClosestGripNode(item);
-  const value = getValue(gripItem);
-
-  return value && nodeIsEntries(getClosestNonBucketNode(item)) && !nodeHasAllEntriesInPreview(gripItem) && !loadedProperties.has(item.path) && !nodeNeedsNumericalBuckets(item);
-}
-
-function shouldLoadItemPrototype(item, loadedProperties = new Map()) {
-  const value = getValue(item);
-
-  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item);
-}
-
-function shouldLoadItemSymbols(item, loadedProperties = new Map()) {
-  const value = getValue(item);
-
-  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item) && !nodeIsProxy(item);
-}
-
-module.exports = {
-  loadItemProperties,
-  mergeResponses,
-  shouldLoadItemEntries,
-  shouldLoadItemIndexedProperties,
-  shouldLoadItemNonIndexedProperties,
-  shouldLoadItemPrototype,
-  shouldLoadItemSymbols
-};
-
-/***/ }),
-
 /***/ 2018:
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -33727,8 +25669,6 @@ var _react = __webpack_require__(0);
 var _react2 = _interopRequireDefault(_react);
 
 var _reactRedux = __webpack_require__(3592);
-
-var _redux = __webpack_require__(3593);
 
 var _devtoolsContextmenu = __webpack_require__(1413);
 
@@ -33807,7 +25747,7 @@ class Tab extends _react.PureComponent {
     }, { item: { type: "separator" } }, {
       item: _extends({}, tabMenuItems.copyToClipboard, {
         disabled: selectedSource.get("id") !== tab,
-        click: () => (0, _clipboard.copyToTheClipboard)(sourceTab.get("text"))
+        click: () => (0, _clipboard.copyToTheClipboard)(sourceTab.text)
       })
     }, {
       item: _extends({}, tabMenuItems.copySourceUri2, {
@@ -33841,21 +25781,21 @@ class Tab extends _react.PureComponent {
   render() {
     const {
       selectedSource,
-      selectSource,
+      selectSpecificSource,
       closeTab,
       source,
       sourceMetaData
     } = this.props;
     const src = source.toJS();
     const filename = (0, _source.getFilename)(src);
-    const sourceId = source.get("id");
+    const sourceId = source.id;
     const active = selectedSource && sourceId == selectedSource.get("id") && !this.isProjectSearchEnabled() && !this.isSourceSearchEnabled();
     const isPrettyCode = (0, _source.isPretty)(source);
     const sourceAnnotation = (0, _tabs.getSourceAnnotation)(source, sourceMetaData);
 
     function onClickClose(e) {
       e.stopPropagation();
-      closeTab(source.get("url"));
+      closeTab(source.url);
     }
 
     function handleTabClick(e) {
@@ -33864,10 +25804,10 @@ class Tab extends _react.PureComponent {
 
       // Accommodate middle click to close tab
       if (e.button === 1) {
-        return closeTab(source.get("url"));
+        return closeTab(source.url);
       }
 
-      return selectSource(sourceId);
+      return selectSpecificSource(sourceId);
     }
 
     const className = (0, _classnames2.default)("source-tab", {
@@ -33897,16 +25837,19 @@ class Tab extends _react.PureComponent {
     );
   }
 }
-exports.default = (0, _reactRedux.connect)((state, props) => {
+
+const mapStateToProps = (state, { source }) => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
-  const { source } = props;
+
   return {
     tabSources: (0, _selectors.getSourcesForTabs)(state),
     selectedSource: selectedSource,
-    sourceMetaData: (0, _selectors.getSourceMetaData)(state, source.get("id")),
+    sourceMetaData: (0, _selectors.getSourceMetaData)(state, source.id),
     activeSearch: (0, _selectors.getActiveSearch)(state)
   };
-}, dispatch => (0, _redux.bindActionCreators)(_actions2.default, dispatch))(Tab);
+};
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Tab);
 
 /***/ }),
 
@@ -33927,10 +25870,6 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports.getTokenLocation = getTokenLocation;
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
 function getTokenLocation(codeMirror, tokenEl) {
   const { left, top, width, height } = tokenEl.getBoundingClientRect();
   const { line, ch } = codeMirror.coordsChar({
@@ -33942,7 +25881,9 @@ function getTokenLocation(codeMirror, tokenEl) {
     line: line + 1,
     column: ch
   };
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /***/ }),
 
@@ -34007,11 +25948,11 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 exports.setupHelper = setupHelper;
-
-var _redux = __webpack_require__(3593);
 
 var _timings = __webpack_require__(1657);
 
@@ -34019,7 +25960,9 @@ var timings = _interopRequireWildcard(_timings);
 
 var _prefs = __webpack_require__(226);
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
+
+var _pausePoints = __webpack_require__(3622);
 
 function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
@@ -34035,7 +25978,11 @@ function findSource(dbg, url) {
 }
 
 function sendPacket(dbg, packet, callback) {
-  dbg.connection.tabConnection.debuggerClient.request(packet).then(callback || console.log);
+  dbg.client.sendPacket(packet, callback || console.log);
+}
+
+function sendPacketToThread(dbg, packet, callback) {
+  sendPacket(dbg, _extends({ to: dbg.connection.tabConnection.threadClient.actor }, packet), callback);
 }
 
 function evaluate(dbg, expression, callback) {
@@ -34054,12 +26001,16 @@ function getCM() {
   return cm && cm.CodeMirror;
 }
 
+function _formatPausePoints(dbg, url) {
+  const source = dbg.helpers.findSource(url);
+  const pausePoints = dbg.selectors.getPausePoints(source);
+  console.log((0, _pausePoints.formatPausePoints)(source.text, pausePoints));
+}
+
 function setupHelper(obj) {
   const selectors = bindSelectors(obj);
-  const actions = (0, _redux.bindActionCreators)(obj.actions, obj.store.dispatch);
   const dbg = _extends({}, obj, {
     selectors,
-    actions,
     prefs: _prefs.prefs,
     features: _prefs.features,
     timings,
@@ -34067,13 +26018,17 @@ function setupHelper(obj) {
     helpers: {
       findSource: url => findSource(dbg, url),
       evaluate: (expression, cbk) => evaluate(dbg, expression, cbk),
+      sendPacketToThread: (packet, cbk) => sendPacketToThread(dbg, packet, cbk),
       sendPacket: (packet, cbk) => sendPacket(dbg, packet, cbk)
+    },
+    formatters: {
+      pausePoints: url => _formatPausePoints(dbg, url)
     }
   });
 
   window.dbg = dbg;
 
-  if ((0, _devtoolsConfig.isDevelopment)()) {
+  if ((0, _devtoolsEnvironment.isDevelopment)()) {
     console.group("Development Notes");
     const baseUrl = "https://devtools-html.github.io/debugger.html";
     const localDevelopmentUrl = `${baseUrl}/docs/dbg.html`;
@@ -34082,64 +26037,6 @@ function setupHelper(obj) {
     console.groupEnd();
   }
 }
-
-/***/ }),
-
-/***/ 2248:
-/***/ (function(module, exports) {
-
-// removed by extract-text-webpack-plugin
-
-/***/ }),
-
-/***/ 2249:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const PropTypes = __webpack_require__(20);
-
-const { wrapRender } = __webpack_require__(1353);
-const { MODE } = __webpack_require__(1357);
-const { ModePropType } = __webpack_require__(1448);
-
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-GripLengthBubble.propTypes = {
-  object: PropTypes.object.isRequired,
-  maxLengthMap: PropTypes.instanceOf(Map).isRequired,
-  getLength: PropTypes.func.isRequired,
-  mode: ModePropType,
-  visibilityThreshold: PropTypes.number
-};
-
-function GripLengthBubble(props) {
-  const {
-    object,
-    mode = MODE.SHORT,
-    visibilityThreshold = 2,
-    maxLengthMap,
-    getLength,
-    showZeroLength = false
-  } = props;
-
-  const length = getLength(object);
-  const isEmpty = length === 0;
-  const isObvious = [MODE.SHORT, MODE.LONG].includes(mode) && length > 0 && length <= maxLengthMap.get(mode) && length <= visibilityThreshold;
-  if (isEmpty && !showZeroLength || isObvious) {
-    return "";
-  }
-
-  return span({
-    className: "objectLengthBubble"
-  }, `(${length})`);
-}
-
-module.exports = {
-  lengthBubble: wrapRender(GripLengthBubble)
-};
 
 /***/ }),
 
@@ -34160,7 +26057,7 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 /***/ 2252:
 /***/ (function(module, exports) {
 
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 128 128\"><path xmlns=\"http://www.w3.org/2000/svg\" class=\"cls-2\" id=\"original-2\" d=\"M 1.5 63.91 v 62.5 h 125 V 1.41 H 1.5 Z m 100.73 -5 a 15.56 15.56 0 0 1 7.82 4.5 a 20.58 20.58 0 0 1 3 4 c 0 0.16 -5.4 3.81 -8.69 5.85 c -0.12 0.08 -0.6 -0.44 -1.13 -1.23 a 7.09 7.09 0 0 0 -5.87 -3.53 c -3.79 -0.26 -6.23 1.73 -6.21 5 a 4.58 4.58 0 0 0 0.54 2.34 c 0.83 1.73 2.38 2.76 7.24 4.86 c 8.95 3.85 12.78 6.39 15.16 10 c 2.66 4 3.25 10.46 1.45 15.24 c -2 5.2 -6.9 8.73 -13.83 9.9 a 38.32 38.32 0 0 1 -9.52 -0.1 a 23 23 0 0 1 -12.72 -6.63 c -1.15 -1.27 -3.39 -4.58 -3.25 -4.82 a 9.34 9.34 0 0 1 1.15 -0.73 L 82 101 l 3.59 -2.08 l 0.75 1.11 a 16.78 16.78 0 0 0 4.74 4.54 c 4 2.1 9.46 1.81 12.16 -0.62 a 5.43 5.43 0 0 0 0.69 -6.92 c -1 -1.39 -3 -2.56 -8.59 -5 c -6.45 -2.78 -9.23 -4.5 -11.77 -7.24 a 16.48 16.48 0 0 1 -3.43 -6.25 a 25 25 0 0 1 -0.22 -8 c 1.33 -6.23 6 -10.58 12.82 -11.87 A 31.66 31.66 0 0 1 102.23 58.93 Z M 72.89 64.15 l 0 5.12 H 56.66 V 115.5 H 45.15 V 69.26 H 28.88 v -5 A 49.19 49.19 0 0 1 29 59.09 C 29.08 59 39 59 51 59 L 72.83 59 Z\" data-name=\"original\"></path></svg>"
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 128 128\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M 1.5 63.91 v 62.5 h 125 V 1.41 H 1.5 Z m 100.73 -5 a 15.56 15.56 0 0 1 7.82 4.5 a 20.58 20.58 0 0 1 3 4 c 0 0.16 -5.4 3.81 -8.69 5.85 c -0.12 0.08 -0.6 -0.44 -1.13 -1.23 a 7.09 7.09 0 0 0 -5.87 -3.53 c -3.79 -0.26 -6.23 1.73 -6.21 5 a 4.58 4.58 0 0 0 0.54 2.34 c 0.83 1.73 2.38 2.76 7.24 4.86 c 8.95 3.85 12.78 6.39 15.16 10 c 2.66 4 3.25 10.46 1.45 15.24 c -2 5.2 -6.9 8.73 -13.83 9.9 a 38.32 38.32 0 0 1 -9.52 -0.1 a 23 23 0 0 1 -12.72 -6.63 c -1.15 -1.27 -3.39 -4.58 -3.25 -4.82 a 9.34 9.34 0 0 1 1.15 -0.73 L 82 101 l 3.59 -2.08 l 0.75 1.11 a 16.78 16.78 0 0 0 4.74 4.54 c 4 2.1 9.46 1.81 12.16 -0.62 a 5.43 5.43 0 0 0 0.69 -6.92 c -1 -1.39 -3 -2.56 -8.59 -5 c -6.45 -2.78 -9.23 -4.5 -11.77 -7.24 a 16.48 16.48 0 0 1 -3.43 -6.25 a 25 25 0 0 1 -0.22 -8 c 1.33 -6.23 6 -10.58 12.82 -11.87 A 31.66 31.66 0 0 1 102.23 58.93 Z M 72.89 64.15 l 0 5.12 H 56.66 V 115.5 H 45.15 V 69.26 H 28.88 v -5 A 49.19 49.19 0 0 1 29 59.09 C 29.08 59 39 59 51 59 L 72.83 59 Z\" data-name=\"original\"></path></svg>"
 
 /***/ }),
 
@@ -34182,7 +26079,7 @@ Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
 
 // @flow
 
-const { isDevelopment } = __webpack_require__(1355);
+const { isDevelopment } = __webpack_require__(3721);
 const { Services, PrefsHelper } = __webpack_require__(1376);
 
 const prefsSchemaVersion = "1.0.3";
@@ -34191,12 +26088,15 @@ const pref = Services.pref;
 
 if (isDevelopment()) {
   pref("devtools.debugger.alphabetize-outline", false);
-  pref("devtools.debugger.auto-pretty-print", true);
+  pref("devtools.debugger.auto-pretty-print", false);
   pref("devtools.source-map.client-service.enabled", true);
   pref("devtools.debugger.pause-on-exceptions", false);
-  pref("devtools.debugger.ignore-caught-exceptions", false);
+  pref("devtools.debugger.pause-on-caught-exceptions", false);
+  pref("devtools.debugger.ignore-caught-exceptions", true);
   pref("devtools.debugger.call-stack-visible", true);
   pref("devtools.debugger.scopes-visible", true);
+  pref("devtools.debugger.component-visible", true);
+  pref("devtools.debugger.component-stack-visible", false);
   pref("devtools.debugger.workers-visible", true);
   pref("devtools.debugger.expressions-visible", true);
   pref("devtools.debugger.breakpoints-visible", true);
@@ -34213,15 +26113,14 @@ if (isDevelopment()) {
   pref("devtools.debugger.file-search-regex-match", false);
   pref("devtools.debugger.project-directory-root", "");
   pref("devtools.debugger.prefs-schema-version", "1.0.1");
+  pref("devtools.debugger.skip-pausing", false);
   pref("devtools.debugger.features.workers", true);
   pref("devtools.debugger.features.async-stepping", true);
   pref("devtools.debugger.features.wasm", true);
   pref("devtools.debugger.features.shortcuts", true);
   pref("devtools.debugger.features.root", true);
   pref("devtools.debugger.features.column-breakpoints", false);
-  pref("devtools.debugger.features.chrome-scopes", false);
   pref("devtools.debugger.features.map-scopes", true);
-  pref("devtools.debugger.features.breakpoints-dropdown", true);
   pref("devtools.debugger.features.remove-command-bar-options", true);
   pref("devtools.debugger.features.code-coverage", false);
   pref("devtools.debugger.features.event-listeners", false);
@@ -34229,6 +26128,9 @@ if (isDevelopment()) {
   pref("devtools.debugger.features.outline", true);
   pref("devtools.debugger.features.column-breakpoints", true);
   pref("devtools.debugger.features.replay", true);
+  pref("devtools.debugger.features.pause-points", true);
+  pref("devtools.debugger.features.component-stack", true);
+  pref("devtools.debugger.features.skip-pausing", false);
 }
 
 const prefs = new PrefsHelper("devtools", {
@@ -34236,9 +26138,12 @@ const prefs = new PrefsHelper("devtools", {
   autoPrettyPrint: ["Bool", "debugger.auto-pretty-print"],
   clientSourceMapsEnabled: ["Bool", "source-map.client-service.enabled"],
   pauseOnExceptions: ["Bool", "debugger.pause-on-exceptions"],
+  pauseOnCaughtExceptions: ["Bool", "debugger.pause-on-caught-exceptions"],
   ignoreCaughtExceptions: ["Bool", "debugger.ignore-caught-exceptions"],
   callStackVisible: ["Bool", "debugger.call-stack-visible"],
   scopesVisible: ["Bool", "debugger.scopes-visible"],
+  componentVisible: ["Bool", "debugger.component-visible"],
+  componentStackVisible: ["Bool", "debugger.component-stack-visible"],
   workersVisible: ["Bool", "debugger.workers-visible"],
   breakpointsVisible: ["Bool", "debugger.breakpoints-visible"],
   expressionsVisible: ["Bool", "debugger.expressions-visible"],
@@ -34254,7 +26159,8 @@ const prefs = new PrefsHelper("devtools", {
   fileSearchWholeWord: ["Bool", "debugger.file-search-whole-word"],
   fileSearchRegexMatch: ["Bool", "debugger.file-search-regex-match"],
   debuggerPrefsSchemaVersion: ["Char", "debugger.prefs-schema-version"],
-  projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""]
+  projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""],
+  skipPausing: ["Bool", "debugger.skip-pausing"]
 });
 /* harmony export (immutable) */ __webpack_exports__["prefs"] = prefs;
 
@@ -34265,16 +26171,17 @@ const features = new PrefsHelper("devtools.debugger.features", {
   shortcuts: ["Bool", "shortcuts"],
   root: ["Bool", "root"],
   columnBreakpoints: ["Bool", "column-breakpoints"],
-  chromeScopes: ["Bool", "chrome-scopes"],
   mapScopes: ["Bool", "map-scopes"],
-  breakpointsDropdown: ["Bool", "breakpoints-dropdown"],
   removeCommandBarOptions: ["Bool", "remove-command-bar-options"],
   workers: ["Bool", "workers"],
   codeCoverage: ["Bool", "code-coverage"],
   eventListeners: ["Bool", "event-listeners"],
   outline: ["Bool", "outline"],
   codeFolding: ["Bool", "code-folding"],
-  replay: ["Bool", "replay"]
+  replay: ["Bool", "replay"],
+  pausePoints: ["Bool", "pause-points"],
+  componentStack: ["Bool", "component-stack"],
+  skipPausing: ["Bool", "skip-pausing"]
 });
 /* harmony export (immutable) */ __webpack_exports__["features"] = features;
 
@@ -34543,7 +26450,9 @@ function locColumn(loc) {
   }
 
   return loc.column;
-}
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /***/ }),
 
@@ -34556,72 +26465,115 @@ function locColumn(loc) {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-
-var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
-// eslint-disable-next-line max-len
-
-
-exports.findGeneratedBindingFromPosition = findGeneratedBindingFromPosition;
-
-var _lodash = __webpack_require__(2);
+exports.findGeneratedBindingForStandardBinding = findGeneratedBindingForStandardBinding;
+exports.findGeneratedBindingForImportBinding = findGeneratedBindingForImportBinding;
+exports.findGeneratedBindingForNormalDeclaration = findGeneratedBindingForNormalDeclaration;
+exports.findGeneratedBindingForImportDeclaration = findGeneratedBindingForImportDeclaration;
 
 var _locColumn = __webpack_require__(2349);
 
+var _mappingContains = __webpack_require__(3722);
+
+var _getGeneratedLocationRanges = __webpack_require__(3724);
+
 var _firefox = __webpack_require__(1500);
 
-async function findGeneratedBindingFromPosition(sourceMaps, client, source, pos, name, type, generatedAstBindings) {
-  const range = await getGeneratedLocationRange(pos, source, sourceMaps);
+/**
+ * Find a simple 1-1 match of a binding in the original code to a binding
+ * in the generated code.
+ */
+async function findGeneratedBindingForStandardBinding(sourceMaps, client, source, pos, name, bindingType, generatedAstBindings) {
+  return await findGeneratedReference((await (0, _getGeneratedLocationRanges.getGeneratedLocationRanges)(generatedAstBindings, source, pos, bindingType, pos.type, sourceMaps)));
+}
 
-  if (range) {
-    const result = await findGeneratedReference(type, generatedAstBindings, _extends({
-      type: pos.type
-    }, range));
+/**
+ * Find a simple 1-1 match of a binding in the original code to an
+ * expression in the generated code.
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-    if (result) {
-      return result;
-    }
+async function findGeneratedBindingForImportBinding(sourceMaps, client, source, pos, name, bindingType, generatedAstBindings) {
+  return await findGeneratedImportReference((await (0, _getGeneratedLocationRanges.getGeneratedLocationRanges)(generatedAstBindings, source, pos, bindingType, pos.type, sourceMaps)));
+}
+
+/**
+ * Find a simple 1-1 match of a binding's declaration in the original code to a
+ * binding in the generated code.
+ */
+async function findGeneratedBindingForNormalDeclaration(sourceMaps, client, source, pos, name, bindingType, generatedAstBindings) {
+  return await findGeneratedReference((await (0, _getGeneratedLocationRanges.getGeneratedLocationRanges)(generatedAstBindings, source, pos.declaration, bindingType, pos.type, sourceMaps)));
+}
+
+/**
+ * Find a simple 1-1 match of an import binding's declaration in the original
+ * code to an expression in the generated code.
+ */
+async function findGeneratedBindingForImportDeclaration(sourceMaps, client, source, pos, name, bindingType, generatedAstBindings) {
+  const importName = pos.importName;
+  if (typeof importName !== "string") {
+    // Should never happen, just keeping Flow happy.
+    return null;
   }
 
-  if (type === "import" && pos.type === "decl") {
-    let importRange = range;
-    if (!importRange) {
-      // If the imported name itself does not map to a useful range, fall back
-      // to resolving the bindinding using the location of the overall
-      // import declaration.
-      importRange = await getGeneratedLocationRange(pos.declaration, source, sourceMaps);
-
-      if (!importRange) {
-        return null;
-      }
-    }
-
-    const importName = pos.importName;
-    if (typeof importName !== "string") {
-      // Should never happen, just keeping Flow happy.
-      return null;
-    }
-
-    return await findGeneratedImportDeclaration(generatedAstBindings, _extends({
-      importName
-    }, importRange));
-  }
-
-  return null;
+  return await findGeneratedImportDeclaration((await (0, _getGeneratedLocationRanges.getGeneratedLocationRanges)(generatedAstBindings, source, pos.declaration, bindingType, pos.type, sourceMaps)), importName);
 }
 
 /**
  * Given a mapped range over the generated source, attempt to resolve a real
  * binding descriptor that can be used to access the value.
  */
-async function findGeneratedReference(type, generatedAstBindings, mapped) {
-  return generatedAstBindings.reduce(async (acc, val) => {
-    const accVal = await acc;
-    if (accVal) {
-      return accVal;
+async function findGeneratedReference(applicableBindings) {
+  // We can adjust this number as we go, but these are a decent start as a
+  // general heuristic to assume the bindings were bad or just map a chunk of
+  // whole line or something.
+  if (applicableBindings.length > 4) {
+    // Babel's for..of generates at least 3 bindings inside one range for
+    // block-scoped loop variables, so we shouldn't go below that.
+    applicableBindings = [];
+  }
+
+  for (const applicable of applicableBindings) {
+    const result = await mapBindingReferenceToDescriptor(applicable);
+    if (result) {
+      return result;
+    }
+  }
+  return null;
+}
+
+async function findGeneratedImportReference(applicableBindings) {
+  // When wrapped, for instance as `Object(ns.default)`, the `Object` binding
+  // will be the first in the list. To avoid resolving `Object` as the
+  // value of the import itself, we potentially skip the first binding.
+  applicableBindings = applicableBindings.filter((applicable, i) => {
+    if (!applicable.firstInRange || applicable.binding.loc.type !== "ref" || applicable.binding.loc.meta) {
+      return true;
     }
 
-    return type === "import" ? await mapImportReferenceToDescriptor(val, mapped) : await mapBindingReferenceToDescriptor(val, mapped);
-  }, null);
+    const next = i + 1 < applicableBindings.length ? applicableBindings[i + 1] : null;
+
+    return !next || next.binding.loc.type !== "ref" || !next.binding.loc.meta;
+  });
+
+  // We can adjust this number as we go, but these are a decent start as a
+  // general heuristic to assume the bindings were bad or just map a chunk of
+  // whole line or something.
+  if (applicableBindings.length > 2) {
+    // Babel's for..of generates at least 3 bindings inside one range for
+    // block-scoped loop variables, so we shouldn't go below that.
+    applicableBindings = [];
+  }
+
+  for (const applicable of applicableBindings) {
+    const result = await mapImportReferenceToDescriptor(applicable);
+    if (result) {
+      return result;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -34629,31 +26581,86 @@ async function findGeneratedReference(type, generatedAstBindings, mapped) {
  * value that is referenced, attempt to resolve a binding descriptor for
  * the import's value.
  */
-async function findGeneratedImportDeclaration(generatedAstBindings, mapped) {
-  return generatedAstBindings.reduce(async (acc, val) => {
-    const accVal = await acc;
-    if (accVal) {
-      return accVal;
+async function findGeneratedImportDeclaration(applicableBindings, importName) {
+  // We can adjust this number as we go, but these are a decent start as a
+  // general heuristic to assume the bindings were bad or just map a chunk of
+  // whole line or something.
+  if (applicableBindings.length > 10) {
+    // Import declarations tend to have a large number of bindings for
+    // for things like 'require' and 'interop', so this number is larger
+    // than other binding count checks.
+    applicableBindings = [];
+  }
+
+  let result = null;
+
+  for (const _ref of applicableBindings) {
+    const { binding } = _ref;
+
+    if (binding.loc.type === "ref") {
+      continue;
     }
 
-    return await mapImportDeclarationToDescriptor(val, mapped);
-  }, null);
+    const namespaceDesc = await binding.desc();
+    if (isPrimitiveValue(namespaceDesc)) {
+      continue;
+    }
+    if (!isObjectValue(namespaceDesc)) {
+      // We want to handle cases like
+      //
+      //   var _mod = require(...);
+      //   var _mod2 = _interopRequire(_mod);
+      //
+      // where "_mod" is optimized out because it is only referenced once. To
+      // allow that, we track the optimized-out value as a possible result,
+      // but allow later binding values to overwrite the result.
+      result = {
+        name: binding.name,
+        desc: namespaceDesc,
+        expression: binding.name
+      };
+      continue;
+    }
+
+    const desc = await readDescriptorProperty(namespaceDesc, importName);
+    const expression = `${binding.name}.${importName}`;
+
+    if (desc) {
+      result = {
+        name: binding.name,
+        desc,
+        expression
+      };
+      break;
+    }
+  }
+
+  return result;
 }
 
 /**
  * Given a generated binding, and a range over the generated code, statically
  * check if the given binding matches the range.
  */
-async function mapBindingReferenceToDescriptor(binding, mapped) {
+async function mapBindingReferenceToDescriptor({
+  binding,
+  range,
+  firstInRange,
+  firstOnLine
+}) {
   // Allow the mapping to point anywhere within the generated binding
   // location to allow for less than perfect sourcemaps. Since you also
   // need at least one character between identifiers, we also give one
   // characters of space at the front the generated binding in order
   // to increase the probability of finding the right mapping.
-  if (mapped.start.line === binding.loc.start.line && (0, _locColumn.locColumn)(mapped.start) >= (0, _locColumn.locColumn)(binding.loc.start) - 1 && (0, _locColumn.locColumn)(mapped.start) <= (0, _locColumn.locColumn)(binding.loc.end)) {
+  if (range.start.line === binding.loc.start.line && (
+  // If a binding is the first on a line, Babel will extend the mapping to
+  // include the whitespace between the newline and the binding. To handle
+  // that, we skip the range requirement for starting location.
+  firstInRange || firstOnLine || (0, _locColumn.locColumn)(range.start) >= (0, _locColumn.locColumn)(binding.loc.start)) && (0, _locColumn.locColumn)(range.start) <= (0, _locColumn.locColumn)(binding.loc.end)) {
     return {
       name: binding.name,
-      desc: binding.desc,
+      desc: await binding.desc(),
       expression: binding.name
     };
   }
@@ -34663,45 +26670,14 @@ async function mapBindingReferenceToDescriptor(binding, mapped) {
 
 /**
  * Given an generated binding, and a range over the generated code, statically
- * resolve the module namespace object and attempt to access the imported
- * property on the namespace.
- *
- * This is mostly hard-coded to work for Babel 6's imports.
- */
-async function mapImportDeclarationToDescriptor(binding, mapped) {
-  // When trying to map an actual import declaration binding, we can try
-  // to map it back to the namespace object in the original code.
-  if (!mappingContains(mapped, binding.loc)) {
-    return null;
-  }
-
-  const desc = await readDescriptorProperty(binding.desc, mapped.importName,
-  // If the value was optimized out or otherwise unavailable, we skip it
-  // entirely because there is a good chance that this means that this
-  // isn't the right binding. This allows us to catch cases like
-  //
-  //   var _mod = require(...);
-  //   var _mod2 = _interopRequire(_mod);
-  //
-  // where "_mod" is optimized out because it is only referenced once, and
-  // we want to continue searching to try to find "_mod2".
-  true);
-  const expression = `${binding.name}.${mapped.importName}`;
-
-  return desc ? {
-    name: binding.name,
-    desc,
-    expression
-  } : null;
-}
-
-/**
- * Given an generated binding, and a range over the generated code, statically
  * evaluate accessed properties within the mapped range to resolve the actual
  * imported value.
  */
-async function mapImportReferenceToDescriptor(binding, mapped) {
-  if (mapped.type !== "ref") {
+async function mapImportReferenceToDescriptor({
+  binding,
+  range
+}) {
+  if (binding.loc.type !== "ref") {
     return null;
   }
 
@@ -34732,12 +26708,12 @@ async function mapImportReferenceToDescriptor(binding, mapped) {
   //   ^^^^^^^^^^^^^^^^^
   //   ^                 // wrapped to column 0 of next line
 
-  if (!mappingContains(mapped, binding.loc)) {
+  if (!(0, _mappingContains.mappingContains)(range, binding.loc)) {
     return null;
   }
 
   let expression = binding.name;
-  let desc = binding.desc;
+  let desc = await binding.desc();
 
   if (binding.loc.type === "ref") {
     const { meta } = binding.loc;
@@ -34746,7 +26722,7 @@ async function mapImportReferenceToDescriptor(binding, mapped) {
     // just be more work to search more and it is very unlikely that
     // bindings would be mapped to more than a single member + inherits
     // wrapper.
-    for (let op = meta, index = 0; op && mappingContains(mapped, op) && desc && index < 2; index++, op = op && op.parent) {
+    for (let op = meta, index = 0; op && (0, _mappingContains.mappingContains)(range, op) && desc && index < 2; index++, op = op && op.parent) {
       // Calling could potentially trigger side-effects, which would not
       // be ideal for this case.
       if (op.type === "call") {
@@ -34769,16 +26745,22 @@ async function mapImportReferenceToDescriptor(binding, mapped) {
   } : null;
 }
 
-async function readDescriptorProperty(desc, property, requireValidObject = false) {
+function isPrimitiveValue(desc) {
+  return desc && (!desc.value || typeof desc.value !== "object");
+}
+function isObjectValue(desc) {
+  return desc && !isPrimitiveValue(desc) && desc.value.type === "object" &&
+  // Note: The check for `.type` might already cover the optimizedOut case
+  // but not 100% sure, so just being cautious.
+  !desc.value.optimizedOut;
+}
+
+async function readDescriptorProperty(desc, property) {
   if (!desc) {
     return null;
   }
 
   if (typeof desc.value !== "object" || !desc.value) {
-    if (requireValidObject) {
-      return null;
-    }
-
     // If accessing a property on a primitive type, just return 'undefined'
     // as the value.
     return {
@@ -34788,13 +26770,7 @@ async function readDescriptorProperty(desc, property, requireValidObject = false
     };
   }
 
-  // Note: The check for `.type` might already cover the optimizedOut case
-  // but not 100% sure, so just being cautious.
-  if (desc.value.type !== "object" || desc.value.optimizedOut) {
-    if (requireValidObject) {
-      return null;
-    }
-
+  if (!isObjectValue(desc)) {
     // If we got a non-primitive descriptor but it isn't an object, then
     // it's definitely not the namespace and it is probably an error.
     return desc;
@@ -34802,25 +26778,6 @@ async function readDescriptorProperty(desc, property, requireValidObject = false
 
   const objectClient = (0, _firefox.createObjectClient)(desc.value);
   return (await objectClient.getProperty(property)).descriptor;
-}
-
-function mappingContains(mapped, item) {
-  return (item.start.line > mapped.start.line || item.start.line === mapped.start.line && (0, _locColumn.locColumn)(item.start) >= (0, _locColumn.locColumn)(mapped.start)) && (item.end.line < mapped.end.line || item.end.line === mapped.end.line && (0, _locColumn.locColumn)(item.end) <= (0, _locColumn.locColumn)(mapped.end));
-}
-
-async function getGeneratedLocationRange(pos, source, sourceMaps) {
-  const start = await sourceMaps.getGeneratedLocation(pos.start, source);
-  const end = await sourceMaps.getGeneratedLocation(pos.end, source);
-
-  // Since the map takes the closest location, sometimes mapping a
-  // binding's location can point at the start of a binding listed after
-  // it, so we need to make sure it maps to a location that actually has
-  // a size in order to avoid picking up the wrong descriptor.
-  if ((0, _lodash.isEqual)(start, end)) {
-    return null;
-  }
-
-  return { start, end };
 }
 
 /***/ }),
@@ -34836,7 +26793,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.log = log;
 
-var _devtoolsConfig = __webpack_require__(1355);
+var _devtoolsEnvironment = __webpack_require__(3721);
 
 /**
  * Produces a formatted console log line by imploding args, prefixed by [log]
@@ -34848,7 +26805,7 @@ var _devtoolsConfig = __webpack_require__(1355);
  * @static
  */
 function log(...args) {
-  if (!(0, _devtoolsConfig.isDevelopment)()) {
+  if (!(0, _devtoolsEnvironment.isDevelopment)()) {
     return;
   }
 
@@ -34919,7 +26876,8 @@ function getExpressionFromCoords(cm, coord) {
 
     startHighlight = tokenBefore.startColumn;
   }
-  const expression = line.substring(startHighlight, endHighlight);
+
+  const expression = line.substring(startHighlight, endHighlight) || "";
 
   if (!expression) {
     return null;
@@ -35052,36 +27010,41 @@ exports.shouldStep = shouldStep;
 
 var _lodash = __webpack_require__(2);
 
-var _devtoolsSourceMap = __webpack_require__(1360);
+var _devtoolsSourceMap = __webpack_require__(3646);
 
 var _selectors = __webpack_require__(3590);
 
-var _parser = __webpack_require__(1365);
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-async function shouldStep(rootFrame, state, sourceMaps) {
-  if (!rootFrame) {
-    return false;
+function getFrameLocation(source, frame) {
+  if (!frame) {
+    return null;
   }
 
+  return (0, _devtoolsSourceMap.isOriginalId)(source.id) ? frame.location : frame.generatedLocation;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function shouldStep(rootFrame, state, sourceMaps) {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
   const previousFrameInfo = (0, _selectors.getPreviousPauseFrameLocation)(state);
 
-  let previousFrameLoc;
-  let currentFrameLoc;
-
-  if (selectedSource && (0, _devtoolsSourceMap.isOriginalId)(selectedSource.get("id"))) {
-    currentFrameLoc = rootFrame.location;
-    previousFrameLoc = previousFrameInfo && previousFrameInfo.location;
-  } else {
-    currentFrameLoc = rootFrame.generatedLocation;
-    previousFrameLoc = previousFrameInfo && previousFrameInfo.generatedLocation;
+  if (!rootFrame || !selectedSource) {
+    return false;
   }
 
-  return (0, _devtoolsSourceMap.isOriginalId)(currentFrameLoc.sourceId) && (previousFrameLoc && (0, _lodash.isEqual)(previousFrameLoc, currentFrameLoc) || (await (0, _parser.isInvalidPauseLocation)(currentFrameLoc)));
+  const previousFrameLoc = getFrameLocation(selectedSource, previousFrameInfo);
+  const frameLoc = getFrameLocation(selectedSource, rootFrame);
+
+  const sameLocation = previousFrameLoc && (0, _lodash.isEqual)(previousFrameLoc, frameLoc);
+  const pausePoint = (0, _selectors.getPausePoint)(state, frameLoc);
+  const invalidPauseLocation = pausePoint && !pausePoint.step;
+
+  // We always want to pause in generated locations
+  if (!frameLoc || (0, _devtoolsSourceMap.isGeneratedId)(frameLoc.sourceId)) {
+    return false;
+  }
+
+  return sameLocation || invalidPauseLocation;
 }
 
 /***/ }),
@@ -35493,7 +27456,7 @@ module.exports = escapeRegExp;
 exports.__esModule = true;
 exports.EXITING = exports.ENTERED = exports.ENTERING = exports.EXITED = exports.UNMOUNTED = undefined;
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var PropTypes = _interopRequireWildcard(_propTypes);
 
@@ -35558,7 +27521,7 @@ var EXITING = exports.EXITING = 'exiting';
  *         ...defaultStyle,
  *         ...transitionStyles[state]
  *       }}>
- *         I'm A fade Transition!
+ *         I'm a fade Transition!
  *       </div>
  *     )}
  *   </Transition>
@@ -35570,10 +27533,10 @@ var EXITING = exports.EXITING = 'exiting';
  * component (such as by adding styles or classes) when it changes states.
  *
  * There are 4 main states a Transition can be in:
- *  - `ENTERING`
- *  - `ENTERED`
- *  - `EXITING`
- *  - `EXITED`
+ *  - `'entering'`
+ *  - `'entered'`
+ *  - `'exiting'`
+ *  - `'exited'`
  *
  * Transition state is toggled via the `in` prop. When `true` the component begins the
  * "Enter" stage. During this stage, the component will shift from its current transition state,
@@ -35581,7 +27544,7 @@ var EXITING = exports.EXITING = 'exiting';
  * it's complete. Let's take the following example:
  *
  * ```jsx
- * state= { in: false };
+ * state = { in: false };
  *
  * toggleEnterState = () => {
  *   this.setState({ in: true });
@@ -35598,9 +27561,32 @@ var EXITING = exports.EXITING = 'exiting';
  * ```
  *
  * When the button is clicked the component will shift to the `'entering'` state and
- * stay there for 500ms (the value of `timeout`) when finally switches to `'entered'`.
+ * stay there for 500ms (the value of `timeout`) before it finally switches to `'entered'`.
  *
  * When `in` is `false` the same thing happens except the state moves from `'exiting'` to `'exited'`.
+ *
+ * ## Timing
+ *
+ * Timing is often the trickiest part of animation, mistakes can result in slight delays
+ * that are hard to pin down. A common example is when you want to add an exit transition,
+ * you should set the desired final styles when the state is `'exiting'`. That's when the
+ * transition to those styles will start and, if you matched the `timeout` prop with the
+ * CSS Transition duration, it will end exactly when the state changes to `'exited'`.
+ *
+ * > **Note**: For simpler transitions the `Transition` component might be enough, but
+ * > take into account that it's platform-agnostic, while the `CSSTransition` component
+ * > [forces reflows](https://github.com/reactjs/react-transition-group/blob/5007303e729a74be66a21c3e2205e4916821524b/src/CSSTransition.js#L208-L215)
+ * > in order to make more complex transitions more predictable. For example, even though
+ * > classes `example-enter` and `example-enter-active` are applied immediately one after
+ * > another, you can still transition from one to the other because of the forced reflow
+ * > (read [this issue](https://github.com/reactjs/react-transition-group/issues/159#issuecomment-322761171)
+ * > for more info). Take this into account when choosing between `Transition` and
+ * > `CSSTransition`.
+ *
+ * ## Example
+ *
+ * <iframe src="https://codesandbox.io/embed/741op4mmj0?fontsize=14" style="width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;" sandbox="allow-modals allow-forms allow-popups allow-scripts allow-same-origin"></iframe>
+ *
  */
 
 var Transition = function (_React$Component) {
@@ -35881,7 +27867,7 @@ Transition.propTypes =  false ? {
   /**
    * A `function` child can be used instead of a React element.
    * This function is called with the current transition status
-   * ('entering', 'entered', 'exiting', 'exited', 'unmounted'), which can used
+   * ('entering', 'entered', 'exiting', 'exited', 'unmounted'), which can be used
    * to apply context specific props to a component.
    *
    * ```jsx
@@ -35934,7 +27920,7 @@ Transition.propTypes =  false ? {
 
   /**
    * The duration of the transition, in milliseconds.
-   * Required unless `addEventListener` is provided
+   * Required unless `addEndListener` is provided
    *
    * You may specify a single timeout for all transitions like: `timeout={500}`,
    * or individually like:
@@ -36075,7 +28061,7 @@ exports.default = Transition;
 
 
 
-var punycode = __webpack_require__(916);
+var punycode = __webpack_require__(3641);
 var util = __webpack_require__(336);
 
 exports.parse = urlParse;
@@ -36798,7 +28784,7 @@ exports.__esModule = true;
 exports.classNamesShape = exports.timeoutsShape = undefined;
 exports.transitionTimeout = transitionTimeout;
 
-var _propTypes = __webpack_require__(20);
+var _propTypes = __webpack_require__(3642);
 
 var _propTypes2 = _interopRequireDefault(_propTypes);
 
@@ -36836,8 +28822,10 @@ var classNamesShape = exports.classNamesShape = _propTypes2.default.oneOfType([_
   active: _propTypes2.default.string
 }), _propTypes2.default.shape({
   enter: _propTypes2.default.string,
+  enterDone: _propTypes2.default.string,
   enterActive: _propTypes2.default.string,
   exit: _propTypes2.default.string,
+  exitDone: _propTypes2.default.string,
   exitActive: _propTypes2.default.string
 })]);
 
@@ -37199,6 +29187,15 @@ Object.defineProperty(exports, "getVisibleSelectedFrame", {
   }
 });
 
+var _getRelativeSources = __webpack_require__(3625);
+
+Object.defineProperty(exports, "getRelativeSources", {
+  enumerable: true,
+  get: function () {
+    return _getRelativeSources.getRelativeSources;
+  }
+});
+
 /***/ }),
 
 /***/ 3592:
@@ -37492,9 +29489,22 @@ function annotateBabelAsyncFrames(frames) {
 // Receives an array of frames and looks for babel async
 // call stack groups.
 function getBabelFrameIndexes(frames) {
-  const startIndexes = getFrameIndices(frames, (displayName, url) => url.match(/regenerator-runtime/i) && displayName === "tryCatch");
+  const startIndexes = frames.reduce((accumulator, frame, index) => {
+    if ((0, _getFrameUrl.getFrameUrl)(frame).match(/regenerator-runtime/i) && frame.displayName === "tryCatch") {
+      return [...accumulator, index];
+    }
+    return accumulator;
+  }, []);
 
-  const endIndexes = getFrameIndices(frames, (displayName, url) => displayName === "_asyncToGenerator/<" || url.match(/_microtask/i) && displayName === "flush");
+  const endIndexes = frames.reduce((accumulator, frame, index) => {
+    if ((0, _getFrameUrl.getFrameUrl)(frame).match(/_microtask/i) && frame.displayName === "flush") {
+      return [...accumulator, index];
+    }
+    if (frame.displayName === "_asyncToGenerator/<") {
+      return [...accumulator, index + 1];
+    }
+    return accumulator;
+  }, []);
 
   if (startIndexes.length != endIndexes.length || startIndexes.length === 0) {
     return frames;
@@ -37504,10 +29514,6 @@ function getBabelFrameIndexes(frames) {
   // an array of async call stack index ranges.
   // e.g. [[1,3], [5,7]] => [[1,2,3], [5,6,7]]
   return (0, _lodash.flatMap)((0, _lodash.zip)(startIndexes, endIndexes), ([startIndex, endIndex]) => (0, _lodash.range)(startIndex, endIndex + 1));
-}
-
-function getFrameIndices(frames, predicate) {
-  return frames.reduce((accumulator, frame, index) => predicate(frame.displayName, (0, _getFrameUrl.getFrameUrl)(frame)) ? [...accumulator, index] : accumulator, []);
 }
 
 /***/ }),
@@ -37673,7 +29679,8 @@ function mapDisplayNames(frame, library) {
 }
 
 function formatDisplayName(frame, { shouldMapDisplayName = true } = {}) {
-  let { displayName, library } = frame;
+  let { displayName, originalDisplayName, library } = frame;
+  displayName = originalDisplayName || displayName;
   if (library && shouldMapDisplayName) {
     displayName = mapDisplayNames(frame, library);
   }
@@ -37692,725 +29699,6 @@ function formatCopyName(frame) {
 
 /***/ }),
 
-/***/ 3611:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _propTypes = __webpack_require__(20);
-
-var _propTypes2 = _interopRequireDefault(_propTypes);
-
-var _react = __webpack_require__(0);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/**
- * Helper class to disable panel rendering when it is in background.
- *
- * Toolbox code hides the iframes when switching to another panel
- * and triggers `visibilitychange` events.
- *
- * See devtools/client/framework/toolbox.js:setIframeVisible().
- */
-
-class VisibilityHandler extends _react.Component {
-  static get propTypes() {
-    return {
-      children: _propTypes2.default.element.isRequired
-    };
-  }
-
-  constructor(props) {
-    super(props);
-    this.isVisible = true;
-    this.onVisibilityChange = this.onVisibilityChange.bind(this);
-  }
-
-  componentDidMount() {
-    window.addEventListener("visibilitychange", this.onVisibilityChange);
-  }
-
-  shouldComponentUpdate() {
-    return document.visibilityState == "visible";
-  }
-
-  componentWillUnmount() {
-    window.removeEventListener("visibilitychange", this.onVisibilityChange);
-  }
-
-  onVisibilityChange() {
-    this.isVisible = false;
-    if (document.visibilityState == "visible") {
-      this.isVisible = true;
-    }
-    this.forceUpdate();
-  }
-
-  render() {
-    return this.isVisible ? this.props.children : null;
-  }
-}
-
-module.exports = VisibilityHandler;
-
-/***/ }),
-
-/***/ 3614:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-// ReactJS
-const PropTypes = __webpack_require__(20);
-
-// Reps
-const {
-  getGripType,
-  isGrip,
-  wrapRender
-} = __webpack_require__(1353);
-const dom = __webpack_require__(1758);
-const { span } = dom;
-
-/**
- * Renders DOM documentType object.
- */
-DocumentType.propTypes = {
-  object: PropTypes.object.isRequired
-};
-
-function DocumentType(props) {
-  const { object } = props;
-  let name = object && object.preview && object.preview.nodeName ? ` ${object.preview.nodeName}` : "";
-  return span({
-    "data-link-actor-id": props.object.actor,
-    className: "objectBox objectBox-document"
-  }, `<!DOCTYPE${name}>`);
-}
-
-// Registration
-function supportsObject(object, noGrip = false) {
-  if (noGrip === true || !isGrip(object)) {
-    return false;
-  }
-
-  const type = getGripType(object, noGrip);
-  return object.preview && type === "DocumentType";
-}
-
-// Exports from this module
-module.exports = {
-  rep: wrapRender(DocumentType),
-  supportsObject
-};
-
-/***/ }),
-
-/***/ 3615:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-var _devtoolsComponents = __webpack_require__(1441);
-
-var _devtoolsComponents2 = _interopRequireDefault(_devtoolsComponents);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const {
-  Component,
-  createFactory
-} = __webpack_require__(0);
-const dom = __webpack_require__(1758);
-const { connect } = __webpack_require__(3592);
-const { bindActionCreators } = __webpack_require__(3593);
-
-const Tree = createFactory(_devtoolsComponents2.default.Tree);
-__webpack_require__(1325);
-
-const classnames = __webpack_require__(175);
-
-const {
-  REPS: {
-    Rep,
-    Grip
-  }
-} = __webpack_require__(1372);
-const {
-  MODE
-} = __webpack_require__(1357);
-
-const Utils = __webpack_require__(1938);
-
-const {
-  getChildren,
-  getClosestGripNode,
-  getParent,
-  getValue,
-  nodeHasAccessors,
-  nodeHasProperties,
-  nodeIsBlock,
-  nodeIsDefaultProperties,
-  nodeIsFunction,
-  nodeIsGetter,
-  nodeIsMapEntry,
-  nodeIsMissingArguments,
-  nodeIsOptimizedOut,
-  nodeIsPrimitive,
-  nodeIsPrototype,
-  nodeIsSetter,
-  nodeIsUninitializedBinding,
-  nodeIsUnmappedBinding,
-  nodeIsUnscopedBinding,
-  nodeIsWindow
-} = Utils.node;
-
-// This implements a component that renders an interactive inspector
-// for looking at JavaScript objects. It expects descriptions of
-// objects from the protocol, and will dynamically fetch children
-// properties as objects are expanded.
-//
-// If you want to inspect a single object, pass the name and the
-// protocol descriptor of it:
-//
-//  ObjectInspector({
-//    name: "foo",
-//    desc: { writable: true, ..., { value: { actor: "1", ... }}},
-//    ...
-//  })
-//
-// If you want multiple top-level objects (like scopes), you can pass
-// an array of manually constructed nodes as `roots`:
-//
-//  ObjectInspector({
-//    roots: [{ name: ... }, ...],
-//    ...
-//  });
-
-// There are 3 types of nodes: a simple node with a children array, an
-// object that has properties that should be children when they are
-// fetched, and a primitive value that should be displayed with no
-// children.
-
-class ObjectInspector extends Component {
-  constructor(props) {
-    super();
-    this.cachedNodes = new Map();
-
-    const self = this;
-
-    self.getItemChildren = this.getItemChildren.bind(this);
-    self.renderTreeItem = this.renderTreeItem.bind(this);
-    self.setExpanded = this.setExpanded.bind(this);
-    self.focusItem = this.focusItem.bind(this);
-    self.getRoots = this.getRoots.bind(this);
-  }
-
-  shouldComponentUpdate(nextProps) {
-    const {
-      expandedPaths,
-      loadedProperties,
-      roots
-    } = this.props;
-
-    if (roots !== nextProps.roots) {
-      // Since the roots changed, we assume the properties did as well. Thus we can clear
-      // the cachedNodes to avoid bugs and memory leaks.
-      this.cachedNodes.clear();
-      return true;
-    }
-
-    return expandedPaths.size !== nextProps.expandedPaths.size || loadedProperties.size !== nextProps.loadedProperties.size || [...expandedPaths].some(key => !nextProps.expandedPaths.has(key));
-  }
-
-  componentWillUnmount() {
-    const { releaseActor } = this.props;
-    if (typeof releaseActor !== "function") {
-      return;
-    }
-
-    const { actors } = this.props;
-    for (let actor of actors) {
-      releaseActor(actor);
-    }
-  }
-
-  getItemChildren(item) {
-    const {
-      loadedProperties
-    } = this.props;
-    const { cachedNodes } = this;
-
-    return getChildren({
-      loadedProperties,
-      cachedNodes,
-      item
-    });
-  }
-
-  getRoots() {
-    return this.props.roots;
-  }
-
-  getNodeKey(item) {
-    return item.path || JSON.stringify(item);
-  }
-
-  setExpanded(item, expand) {
-    if (nodeIsPrimitive(item)) {
-      return;
-    }
-
-    const {
-      createObjectClient,
-      loadedProperties,
-      nodeExpand,
-      nodeCollapse,
-      roots
-    } = this.props;
-
-    if (expand === true) {
-      const gripItem = getClosestGripNode(item);
-      const value = getValue(gripItem);
-      const isRoot = value && roots.some(root => {
-        const rootValue = getValue(root);
-        return rootValue && rootValue.actor === value.actor;
-      });
-      const actor = isRoot || !value ? null : value.actor;
-      nodeExpand(item, actor, loadedProperties, createObjectClient);
-    } else {
-      nodeCollapse(item);
-    }
-  }
-
-  focusItem(item) {
-    const {
-      focusedItem,
-      onFocus
-    } = this.props;
-
-    if (focusedItem !== item && onFocus) {
-      onFocus(item);
-    }
-  }
-
-  getTreeItemLabelAndValue(item, depth, expanded) {
-    let label = item.name;
-    const isPrimitive = nodeIsPrimitive(item);
-
-    if (nodeIsOptimizedOut(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(optimized away)")
-      };
-    }
-
-    if (nodeIsUninitializedBinding(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(uninitialized)")
-      };
-    }
-
-    if (nodeIsUnmappedBinding(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(unmapped)")
-      };
-    }
-
-    if (nodeIsUnscopedBinding(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(unscoped)")
-      };
-    }
-
-    if (nodeIsOptimizedOut(item)) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(optimized away)")
-      };
-    }
-
-    const itemValue = getValue(item);
-    const unavailable = isPrimitive && itemValue && itemValue.hasOwnProperty && itemValue.hasOwnProperty("unavailable");
-
-    if (nodeIsMissingArguments(item) || unavailable) {
-      return {
-        label,
-        value: dom.span({ className: "unavailable" }, "(unavailable)")
-      };
-    }
-
-    if (nodeIsFunction(item) && !nodeIsGetter(item) && !nodeIsSetter(item) && (this.props.mode === MODE.TINY || !this.props.mode)) {
-      return {
-        label: this.renderGrip(item, {
-          ...this.props,
-          functionName: label
-        })
-      };
-    }
-
-    if (nodeHasProperties(item) || nodeHasAccessors(item) || nodeIsMapEntry(item) || isPrimitive) {
-      let repsProp = { ...this.props };
-      if (depth > 0) {
-        repsProp.mode = this.props.mode === MODE.LONG ? MODE.SHORT : MODE.TINY;
-      }
-      if (expanded) {
-        repsProp.mode = MODE.TINY;
-      }
-
-      return {
-        label,
-        value: this.renderGrip(item, repsProp)
-      };
-    }
-
-    return {
-      label
-    };
-  }
-
-  renderTreeItemLabel(label, item, depth, focused, expanded) {
-    if (label === null || typeof label === "undefined") {
-      return null;
-    }
-
-    const {
-      onLabelClick
-    } = this.props;
-
-    return dom.span({
-      className: "object-label",
-      onClick: onLabelClick ? event => {
-        event.stopPropagation();
-
-        // If the user selected text, bail out.
-        if (Utils.selection.documentHasSelection()) {
-          return;
-        }
-
-        onLabelClick(item, {
-          depth,
-          focused,
-          expanded,
-          setExpanded: this.setExpanded
-        });
-      } : undefined
-    }, label);
-  }
-
-  getTreeTopElementProps(item, depth, focused, expanded) {
-    const {
-      onDoubleClick,
-      dimTopLevelWindow
-    } = this.props;
-
-    let parentElementProps = {
-      className: classnames("node object-node", {
-        focused,
-        lessen: !expanded && (nodeIsDefaultProperties(item) || nodeIsPrototype(item) || dimTopLevelWindow === true && nodeIsWindow(item) && depth === 0),
-        block: nodeIsBlock(item)
-      }),
-      onClick: e => {
-        e.stopPropagation();
-
-        // If the user selected text, bail out.
-        if (Utils.selection.documentHasSelection()) {
-          return;
-        }
-
-        this.setExpanded(item, !expanded);
-      }
-    };
-
-    if (onDoubleClick) {
-      parentElementProps.onDoubleClick = e => {
-        e.stopPropagation();
-        onDoubleClick(item, {
-          depth,
-          focused,
-          expanded
-        });
-      };
-    }
-
-    return parentElementProps;
-  }
-
-  renderTreeItem(item, depth, focused, arrow, expanded) {
-    const { label, value } = this.getTreeItemLabelAndValue(item, depth, expanded);
-    const labelElement = this.renderTreeItemLabel(label, item, depth, focused, expanded);
-    const delimiter = value && labelElement ? dom.span({ className: "object-delimiter" }, ": ") : null;
-
-    return dom.div(this.getTreeTopElementProps(item, depth, focused, expanded), arrow, labelElement, delimiter, value);
-  }
-
-  renderGrip(item, props) {
-    const object = getValue(item);
-    return Rep({
-      ...props,
-      object,
-      mode: props.mode || MODE.TINY,
-      defaultRep: Grip
-    });
-  }
-
-  render() {
-    const {
-      autoExpandAll = true,
-      autoExpandDepth = 1,
-      disabledFocus,
-      disableWrap = false,
-      expandedPaths,
-      focusedItem,
-      inline
-    } = this.props;
-
-    let roots = this.getRoots();
-    if (roots.length === 1) {
-      const root = roots[0];
-      const name = root && root.name;
-      if (nodeIsPrimitive(root) && (name === null || typeof name === "undefined")) {
-        return this.renderGrip(root, this.props);
-      }
-    }
-
-    return Tree({
-      className: classnames({
-        inline,
-        nowrap: disableWrap,
-        "object-inspector": true
-      }),
-      autoExpandAll,
-      autoExpandDepth,
-      disabledFocus,
-
-      isExpanded: item => expandedPaths && expandedPaths.has(this.getNodeKey(item)),
-      isExpandable: item => nodeIsPrimitive(item) === false,
-      focused: focusedItem,
-
-      getRoots: this.getRoots,
-      getParent,
-      getChildren: this.getItemChildren,
-      getKey: this.getNodeKey,
-
-      onExpand: item => this.setExpanded(item, true),
-      onCollapse: item => this.setExpanded(item, false),
-      onFocus: this.focusItem,
-
-      renderItem: this.renderTreeItem
-    });
-  }
-}
-
-function mapStateToProps(state, props) {
-  return {
-    actors: state.actors,
-    expandedPaths: state.expandedPaths,
-    focusedItem: state.focusedItem,
-    loadedProperties: state.loadedProperties
-  };
-}
-
-function mapDispatchToProps(dispatch) {
-  return bindActionCreators(__webpack_require__(3617), dispatch);
-}
-
-module.exports = connect(mapStateToProps, mapDispatchToProps)(ObjectInspector);
-
-/***/ }),
-
-/***/ 3616:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { ELEMENT_NODE } = __webpack_require__(1449);
-
-function documentHasSelection() {
-  const selection = getSelection();
-  if (!selection) {
-    return false;
-  }
-
-  const {
-    anchorNode,
-    focusNode
-  } = selection;
-
-  // When clicking the arrow, which is an inline svg element, the selection do have a type
-  // of "Range". We need to have an explicit case when the anchor and the focus node are
-  // the same and they have an arrow ancestor.
-  if (focusNode && focusNode === anchorNode && focusNode.nodeType == ELEMENT_NODE && focusNode.closest(".arrow")) {
-    return false;
-  }
-
-  return selection.type === "Range";
-}
-
-module.exports = {
-  documentHasSelection
-};
-
-/***/ }),
-
-/***/ 3617:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const {
-  loadItemProperties
-} = __webpack_require__(2017); /* This Source Code Form is subject to the terms of the Mozilla Public
-                                         * License, v. 2.0. If a copy of the MPL was not distributed with this
-                                         * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/**
- * This action is responsible for expanding a given node,
- * which also means that it will call the action responsible to fetch properties.
- */
-function nodeExpand(node, actor, loadedProperties, createObjectClient) {
-  return async ({ dispatch }) => {
-    dispatch({
-      type: "NODE_EXPAND",
-      data: { node }
-    });
-    dispatch(nodeLoadProperties(node, actor, loadedProperties, createObjectClient));
-  };
-}
-
-function nodeCollapse(node) {
-  return {
-    type: "NODE_COLLAPSE",
-    data: { node }
-  };
-}
-
-function nodeFocus(node) {
-  return {
-    type: "NODE_FOCUS",
-    data: { node }
-  };
-}
-/*
- * This action checks if we need to fetch properties, entries, prototype and symbols
- * for a given node. If we do, it will call the appropriate ObjectClient functions.
- */
-function nodeLoadProperties(item, actor, loadedProperties, createObjectClient) {
-  return async ({ dispatch }) => {
-    try {
-      const properties = await loadItemProperties(item, createObjectClient, loadedProperties);
-      if (Object.keys(properties).length > 0) {
-        dispatch(nodePropertiesLoaded(item, actor, properties));
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-}
-
-function nodePropertiesLoaded(node, actor, properties) {
-  return {
-    type: "NODE_PROPERTIES_LOADED",
-    data: { node, actor, properties }
-  };
-}
-
-module.exports = {
-  nodeExpand,
-  nodeCollapse,
-  nodeFocus,
-  nodeLoadProperties,
-  nodePropertiesLoaded
-};
-
-/***/ }),
-
-/***/ 3618:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-const { applyMiddleware, createStore } = __webpack_require__(3593);
-const { thunk } = __webpack_require__(3619);
-const { waitUntilService } = __webpack_require__(3620);
-const reducer = __webpack_require__(3621);
-
-function createInitialState(overrides) {
-  return {
-    actors: new Set(),
-    expandedPaths: new Set(),
-    focusedItem: null,
-    loadedProperties: new Map(),
-    ...overrides
-  };
-}
-
-module.exports = props => {
-  const middlewares = [thunk];
-  if (props.injectWaitService) {
-    middlewares.push(waitUntilService);
-  }
-
-  return createStore(reducer, createInitialState(props), applyMiddleware(...middlewares));
-};
-
-/***/ }),
-
-/***/ 3619:
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/**
- * A middleware that allows thunks (functions) to be dispatched.
- * If it's a thunk, it is called with `dispatch` and `getState`,
- * allowing the action to create multiple actions (most likely
- * asynchronously).
- */
-function thunk({ dispatch, getState }) {
-  return next => action => {
-    return typeof action === "function" ? action({ dispatch, getState }) : next(action);
-  };
-}
-exports.thunk = thunk;
-
-/***/ }),
-
 /***/ 362:
 /***/ (function(module, exports) {
 
@@ -38418,127 +29706,253 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 3620:
+/***/ 3622:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.convertToList = convertToList;
+exports.formatPausePoints = formatPausePoints;
 
-const WAIT_UNTIL_TYPE = "@@service/waitUntil";
-/**
- * A middleware which acts like a service, because it is stateful
- * and "long-running" in the background. It provides the ability
- * for actions to install a function to be run once when a specific
- * condition is met by an action coming through the system. Think of
- * it as a thunk that blocks until the condition is met. Example:
- *
- * ```js
- * const services = { WAIT_UNTIL: require('wait-service').NAME };
- *
- * { type: services.WAIT_UNTIL,
- *   predicate: action => action.type === "ADD_ITEM",
- *   run: (dispatch, getState, action) => {
- *     // Do anything here. You only need to accept the arguments
- *     // if you need them. `action` is the action that satisfied
- *     // the predicate.
- *   }
- * }
- * ```
- */
-function waitUntilService({ dispatch, getState }) {
-  let pending = [];
+var _lodash = __webpack_require__(2);
 
-  function checkPending(action) {
-    const readyRequests = [];
-    const stillPending = [];
+function insertStrtAt(string, index, newString) {
+  const start = string.slice(0, index);
+  const end = string.slice(index);
+  return `${start}${newString}${end}`;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-    // Find the pending requests whose predicates are satisfied with
-    // this action. Wait to run the requests until after we update the
-    // pending queue because the request handler may synchronously
-    // dispatch again and run this service (that use case is
-    // completely valid).
-    for (const request of pending) {
-      if (request.predicate(action)) {
-        readyRequests.push(request);
-      } else {
-        stillPending.push(request);
-      }
-    }
-
-    pending = stillPending;
-    for (const request of readyRequests) {
-      request.run(dispatch, getState, action);
+function convertToList(pausePoints) {
+  const list = [];
+  for (const line in pausePoints) {
+    for (const column in pausePoints[line]) {
+      const point = pausePoints[line][column];
+      list.push({
+        location: { line: parseInt(line, 10), column: parseInt(column, 10) },
+        types: point
+      });
     }
   }
-
-  return next => action => {
-    if (action.type === WAIT_UNTIL_TYPE) {
-      pending.push(action);
-      return null;
-    }
-    const result = next(action);
-    checkPending(action);
-    return result;
-  };
+  return list;
 }
 
-module.exports = {
-  WAIT_UNTIL_TYPE,
-  waitUntilService
-};
+function formatPausePoints(text, pausePoints) {
+  const nodes = (0, _lodash.reverse)(convertToList(pausePoints));
+  const lines = text.split("\n");
+  nodes.forEach((node, index) => {
+    const { line, column } = node.location;
+    const { break: breakPoint, step } = node.types;
+    const num = nodes.length - index;
+    const types = `${breakPoint ? "b" : ""}${step ? "s" : ""}`;
+    const spacer = breakPoint || step ? " " : "";
+    lines[line - 1] = insertStrtAt(lines[line - 1], column, `/*${types}${spacer}${num}*/`);
+  });
+
+  return lines.join("\n");
+}
 
 /***/ }),
 
-/***/ 3621:
+/***/ 3623:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
-function reducer(state = {}, action) {
-  const {
-    type,
-    data
-  } = action;
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
 
-  const cloneState = overrides => ({ ...state, ...overrides });
+var _react = __webpack_require__(0);
 
-  if (type === "NODE_EXPAND") {
-    return cloneState({
-      expandedPaths: new Set(state.expandedPaths).add(data.node.path)
+var _react2 = _interopRequireDefault(_react);
+
+var _reactRedux = __webpack_require__(3592);
+
+var _actions = __webpack_require__(1354);
+
+var _actions2 = _interopRequireDefault(_actions);
+
+var _firefox = __webpack_require__(1500);
+
+var _selectors = __webpack_require__(3590);
+
+var _devtoolsReps = __webpack_require__(3655);
+
+var _preview = __webpack_require__(1807);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+const { createNode, getChildren } = _devtoolsReps.ObjectInspectorUtils.node; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                              * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                              * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { loadItemProperties } = _devtoolsReps.ObjectInspectorUtils.loadProperties;
+
+class FrameworkComponent extends _react.PureComponent {
+  async componentWillMount() {
+    const expression = "this;";
+    const { selectedFrame, setPopupObjectProperties } = this.props;
+    const value = selectedFrame.this;
+
+    const root = createNode({ name: expression, contents: { value } });
+    const properties = await loadItemProperties(root, _firefox.createObjectClient);
+    if (properties) {
+      setPopupObjectProperties(value, properties);
+    }
+  }
+
+  renderReactComponent() {
+    const { selectedFrame, popupObjectProperties } = this.props;
+    const expression = "this;";
+    const value = selectedFrame.this;
+    const root = {
+      name: expression,
+      path: expression,
+      contents: { value }
+    };
+
+    const loadedRootProperties = popupObjectProperties[value.actor];
+    if (!loadedRootProperties) {
+      return null;
+    }
+
+    let roots = getChildren({
+      item: root,
+      loadedProperties: new Map([[root.path, loadedRootProperties]])
     });
+
+    roots = roots.filter(r => ["state", "props"].includes(r.name));
+
+    return _react2.default.createElement(
+      "div",
+      { className: "pane framework-component" },
+      _react2.default.createElement(_devtoolsReps.ObjectInspector, {
+        roots: roots,
+        autoExpandAll: false,
+        autoExpandDepth: 0,
+        disableWrap: true,
+        focusable: false,
+        dimTopLevelWindow: true,
+        createObjectClient: grip => (0, _firefox.createObjectClient)(grip)
+      })
+    );
   }
 
-  if (type === "NODE_COLLAPSE") {
-    const expandedPaths = new Set(state.expandedPaths);
-    expandedPaths.delete(data.node.path);
-    return cloneState({ expandedPaths });
+  render() {
+    const { selectedFrame } = this.props;
+    if (selectedFrame && (0, _preview.isReactComponent)(selectedFrame.this)) {
+      return this.renderReactComponent();
+    }
+
+    return null;
+  }
+}
+
+const mapStateToProps = state => ({
+  selectedFrame: (0, _selectors.getSelectedFrame)(state),
+  popupObjectProperties: (0, _selectors.getAllPopupObjectProperties)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(FrameworkComponent);
+
+/***/ }),
+
+/***/ 3625:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+exports.getRelativeSources = getRelativeSources;
+
+var _selectors = __webpack_require__(3590);
+
+var _source = __webpack_require__(1356);
+
+function getRelativeUrl(url, root) {
+  if (!root) {
+    return (0, _source.getSourcePath)(url);
   }
 
-  if (type === "NODE_PROPERTIES_LOADED") {
-    return cloneState({
-      actors: data.actor ? new Set(state.actors || []).add(data.actor) : state.actors,
-      loadedProperties: new Map(state.loadedProperties).set(data.node.path, action.data.properties)
-    });
-  }
+  // + 1 removes the leading "/"
+  return url.slice(url.indexOf(root) + root.length + 1);
+}
 
-  if (type === "NODE_FOCUS") {
-    return cloneState({
-      focusedItem: data.node
-    });
-  }
+function formatSource(source, root) {
+  return _extends({}, source, {
+    relativeUrl: getRelativeUrl(source.url, root)
+  });
+}
 
-  return state;
+/*
+ * Gets the sources that are below a project root
+ */
+function getRelativeSources(state) {
+  const sources = (0, _selectors.getSources)(state);
+  const root = (0, _selectors.getProjectDirectoryRoot)(state);
+  return sources.valueSeq().toJS().filter(({ url }) => url && url.includes(root)).map(source => formatSource(source, root));
+}
+
+/***/ }),
+
+/***/ 3626:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3626__;
+
+/***/ }),
+
+/***/ 3628:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.createEditor = createEditor;
+
+var _sourceEditor = __webpack_require__(197);
+
+var _sourceEditor2 = _interopRequireDefault(_sourceEditor);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function createEditor(value) {
+  return new _sourceEditor2.default({
+    mode: "javascript",
+    foldGutter: false,
+    enableCodeFolding: false,
+    readOnly: "nocursor",
+    lineNumbers: false,
+    theme: "mozilla mozilla-breakpoint",
+    styleActiveLine: false,
+    lineWrapping: false,
+    matchBrackets: false,
+    showAnnotationRuler: false,
+    gutters: false,
+    value: value || "",
+    scrollbarStyle: null
+  });
 } /* This Source Code Form is subject to the terms of the Mozilla Public
    * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-
-module.exports = reducer;
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 /***/ }),
 
@@ -38549,6 +29963,873 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
+/***/ 3631:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 28 28\"><path fill=\"context-fill\" d=\"M15 11h-1V5a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v6H1a1 1 0 0 0 0 2h14a1 1 0 1 0 0-2z\"></path></svg>"
+
+/***/ }),
+
+/***/ 3632:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><path fill=\"context-fill\" d=\"M14.5 8c-.971 0-1 1-1.75 1a.765.765 0 0 1-.75-.75V5a1 1 0 0 0-1-1H7.75A.765.765 0 0 1 7 3.25c0-.75 1-.779 1-1.75C8 .635 7.1 0 6 0S4 .635 4 1.5c0 .971 1 1 1 1.75a.765.765 0 0 1-.75.75H1a1 1 0 0 0-1 1v2.25A.765.765 0 0 0 .75 8c.75 0 .779-1 1.75-1C3.365 7 4 7.9 4 9s-.635 2-1.5 2c-.971 0-1-1-1.75-1a.765.765 0 0 0-.75.75V15a1 1 0 0 0 1 1h3.25a.765.765 0 0 0 .75-.75c0-.75-1-.779-1-1.75 0-.865.9-1.5 2-1.5s2 .635 2 1.5c0 .971-1 1-1 1.75a.765.765 0 0 0 .75.75H11a1 1 0 0 0 1-1v-3.25a.765.765 0 0 1 .75-.75c.75 0 .779 1 1.75 1 .865 0 1.5-.9 1.5-2s-.635-2-1.5-2z\"></path></svg>"
+
+/***/ }),
+
+/***/ 3634:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _reactDom = __webpack_require__(4);
+
+var _reactDom2 = _interopRequireDefault(_reactDom);
+
+var _classnames = __webpack_require__(175);
+
+var _classnames2 = _interopRequireDefault(_classnames);
+
+var _devtoolsSourceMap = __webpack_require__(3646);
+
+var _Close = __webpack_require__(1374);
+
+var _Close2 = _interopRequireDefault(_Close);
+
+var _breakpoint = __webpack_require__(1364);
+
+var _prefs = __webpack_require__(226);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function getBreakpointLocation(source, line, column) {
+  const isWasm = source && source.isWasm;
+  const columnVal = _prefs.features.columnBreakpoints && column ? `:${column}` : "";
+  const bpLocation = isWasm ? `0x${line.toString(16).toUpperCase()}` : `${line}${columnVal}`;
+
+  return bpLocation;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function getBreakpointText(selectedSource, breakpoint) {
+  const { condition, text, originalText } = breakpoint;
+
+  if (condition) {
+    return condition;
+  }
+
+  if (!selectedSource || (0, _devtoolsSourceMap.isGeneratedId)(selectedSource.id) || originalText.length == 0) {
+    return text;
+  }
+
+  return originalText;
+}
+
+class Breakpoint extends _react.Component {
+
+  componentDidMount() {
+    this.setupEditor();
+  }
+
+  componentDidUpdate(prevProps) {
+    if (getBreakpointText(this.props.selectedSource, this.props.breakpoint) != getBreakpointText(prevProps.selectedSource, prevProps.breakpoint)) {
+      this.destroyEditor();
+    }
+    this.setupEditor();
+  }
+
+  componentWillUnmount() {
+    this.destroyEditor();
+  }
+
+  shouldComponentUpdate(nextProps) {
+    const prevBreakpoint = this.props.breakpoint;
+    const nextBreakpoint = nextProps.breakpoint;
+
+    return !prevBreakpoint || this.props.selectedSource != nextProps.selectedSource || prevBreakpoint.text != nextBreakpoint.text || prevBreakpoint.disabled != nextBreakpoint.disabled || prevBreakpoint.condition != nextBreakpoint.condition || prevBreakpoint.hidden != nextBreakpoint.hidden || prevBreakpoint.isCurrentlyPaused != nextBreakpoint.isCurrentlyPaused;
+  }
+
+  destroyEditor() {
+    if (this.editor) {
+      this.editor.destroy();
+      this.editor = null;
+    }
+  }
+
+  setupEditor() {
+    if (this.editor) {
+      return;
+    }
+
+    const { selectedSource, breakpoint } = this.props;
+
+    this.editor = (0, _breakpoint.createEditor)(getBreakpointText(selectedSource, breakpoint));
+
+    // disables the default search shortcuts
+    // $FlowIgnore
+    this.editor._initShortcuts = () => {};
+
+    const node = _reactDom2.default.findDOMNode(this);
+    if (node instanceof HTMLElement) {
+      const mountNode = node.querySelector(".breakpoint-label");
+      if (node instanceof HTMLElement) {
+        // $FlowIgnore
+        mountNode.innerHTML = "";
+        this.editor.appendToLocalElement(mountNode);
+        this.editor.codeMirror.on("mousedown", (_, e) => e.preventDefault());
+      }
+    }
+  }
+
+  renderCheckbox() {
+    const { onChange, breakpoint } = this.props;
+    const { disabled } = breakpoint;
+
+    return _react2.default.createElement("input", {
+      type: "checkbox",
+      className: "breakpoint-checkbox",
+      checked: !disabled,
+      onChange: onChange,
+      onClick: ev => ev.stopPropagation()
+    });
+  }
+
+  renderText() {
+    const { selectedSource, breakpoint } = this.props;
+    const text = getBreakpointText(selectedSource, breakpoint);
+
+    return _react2.default.createElement(
+      "label",
+      { className: "breakpoint-label", title: text },
+      text
+    );
+  }
+
+  renderLineClose() {
+    const { breakpoint, onCloseClick, selectedSource } = this.props;
+    const { location } = breakpoint;
+
+    let { line, column } = location;
+    if (selectedSource && (0, _devtoolsSourceMap.isGeneratedId)(selectedSource.id) && breakpoint.generatedLocation) {
+      line = breakpoint.generatedLocation.line;
+      column = breakpoint.generatedLocation.column;
+    }
+
+    return _react2.default.createElement(
+      "div",
+      { className: "breakpoint-line-close" },
+      _react2.default.createElement(
+        "div",
+        { className: "breakpoint-line" },
+        getBreakpointLocation(breakpoint.source, line, column)
+      ),
+      _react2.default.createElement(_Close2.default, {
+        handleClick: onCloseClick,
+        tooltip: L10N.getStr("breakpoints.removeBreakpointTooltip")
+      })
+    );
+  }
+
+  render() {
+    const { breakpoint, onClick, onContextMenu } = this.props;
+
+    const locationId = breakpoint.locationId;
+    const isCurrentlyPaused = breakpoint.isCurrentlyPaused;
+    const isDisabled = breakpoint.disabled;
+    const isConditional = !!breakpoint.condition;
+
+    return _react2.default.createElement(
+      "div",
+      {
+        className: (0, _classnames2.default)({
+          breakpoint,
+          paused: isCurrentlyPaused,
+          disabled: isDisabled,
+          "is-conditional": isConditional
+        }),
+        key: locationId,
+        onClick: onClick,
+        onContextMenu: onContextMenu
+      },
+      this.renderCheckbox(),
+      this.renderText(),
+      this.renderLineClose()
+    );
+  }
+}
+
+exports.default = Breakpoint;
+
+/***/ }),
+
+/***/ 3635:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.filterSortedArray = filterSortedArray;
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function findInsertionLocation(array, callback) {
+  let left = 0;
+  let right = array.length;
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    const item = array[mid];
+
+    const result = callback(item);
+    if (result === 0) {
+      left = mid;
+      break;
+    }
+    if (result >= 0) {
+      right = mid;
+    } else {
+      left = mid + 1;
+    }
+  }
+
+  // Ensure the value is the start of any set of matches.
+  let i = left;
+  if (i < array.length) {
+    while (i >= 0 && callback(array[i]) >= 0) {
+      i--;
+    }
+    return i + 1;
+  }
+
+  return i;
+}
+
+function filterSortedArray(array, callback) {
+  const start = findInsertionLocation(array, callback);
+
+  const results = [];
+  for (let i = start; i < array.length && callback(array[i]) === 0; i++) {
+    results.push(array[i]);
+  }
+
+  return results;
+}
+
+/***/ }),
+
+/***/ 3636:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+exports.fetchExtra = fetchExtra;
+exports.getExtra = getExtra;
+
+var _selectors = __webpack_require__(3590);
+
+var _preview = __webpack_require__(1807);
+
+var _ast = __webpack_require__(1638);
+
+async function getReactProps(evaluate) {
+  const componentNames = await evaluate(`
+    if(this.hasOwnProperty('_reactInternalFiber')) {
+      let componentNames = []; 
+      let componentNode = this._reactInternalFiber; 
+      while(componentNode) { 
+        componentNames.push(componentNode.type.name); 
+        componentNode = componentNode._debugOwner
+      }
+      componentNames;
+    }
+    else {
+      [this._reactInternalInstance.getName()];
+    }
+    `);
+  const items = componentNames.result.preview && componentNames.result.preview.items;
+  if (items) {
+    return {
+      displayName: items[0],
+      componentStack: items
+    };
+  }
+}
+
+async function getImmutableProps(expression, evaluate) {
+  const immutableEntries = await evaluate((exp => `${exp}.toJS()`)(expression));
+
+  const immutableType = await evaluate((exp => `${exp}.constructor.name`)(expression));
+
+  return {
+    type: immutableType.result,
+    entries: immutableEntries.result
+  };
+}
+
+async function getExtraProps(getState, expression, result, evaluate) {
+  const props = {};
+  if ((0, _preview.isReactComponent)(result)) {
+    const selectedFrame = (0, _selectors.getSelectedFrame)(getState());
+    const source = (0, _selectors.getSource)(getState(), selectedFrame.location.sourceId);
+    const symbols = (0, _selectors.getSymbols)(getState(), source);
+
+    if (symbols && symbols.classes) {
+      const originalClass = (0, _ast.findClosestClass)(symbols, selectedFrame.location);
+
+      if (originalClass) {
+        props.react = { displayName: originalClass.name };
+      }
+    }
+
+    props.react = _extends({}, (await getReactProps(evaluate)), props.react);
+  }
+
+  if ((0, _preview.isImmutable)(result)) {
+    props.immutable = await getImmutableProps(expression, evaluate);
+  }
+
+  return props;
+}
+
+function fetchExtra() {
+  return async function ({ dispatch, getState }) {
+    const frame = (0, _selectors.getSelectedFrame)(getState());
+    const extra = await dispatch(getExtra("this;", frame.this));
+    dispatch({
+      type: "ADD_EXTRA",
+      extra: extra
+    });
+  };
+}
+
+function getExtra(expression, result) {
+  return async ({ dispatch, getState, client, sourceMaps }) => {
+    const selectedFrame = (0, _selectors.getSelectedFrame)(getState());
+    if (!selectedFrame) {
+      return;
+    }
+
+    const extra = await getExtraProps(getState, expression, result, expr => client.evaluateInFrame(expr, selectedFrame.id));
+
+    return extra;
+  };
+}
+
+/***/ }),
+
+/***/ 3637:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+* License, v. 2.0. If a copy of the MPL was not distributed with this
+* file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// TODO : Localize this (was l10n.getStr("frame.unknownSource"))
+const UNKNOWN_SOURCE_STRING = "(unknown)";
+
+// Character codes used in various parsing helper functions.
+const CHAR_CODE_A = "a".charCodeAt(0);
+const CHAR_CODE_B = "b".charCodeAt(0);
+const CHAR_CODE_C = "c".charCodeAt(0);
+const CHAR_CODE_D = "d".charCodeAt(0);
+const CHAR_CODE_E = "e".charCodeAt(0);
+const CHAR_CODE_F = "f".charCodeAt(0);
+const CHAR_CODE_H = "h".charCodeAt(0);
+const CHAR_CODE_I = "i".charCodeAt(0);
+const CHAR_CODE_J = "j".charCodeAt(0);
+const CHAR_CODE_L = "l".charCodeAt(0);
+const CHAR_CODE_M = "m".charCodeAt(0);
+const CHAR_CODE_N = "n".charCodeAt(0);
+const CHAR_CODE_O = "o".charCodeAt(0);
+const CHAR_CODE_P = "p".charCodeAt(0);
+const CHAR_CODE_R = "r".charCodeAt(0);
+const CHAR_CODE_S = "s".charCodeAt(0);
+const CHAR_CODE_T = "t".charCodeAt(0);
+const CHAR_CODE_U = "u".charCodeAt(0);
+const CHAR_CODE_W = "w".charCodeAt(0);
+const CHAR_CODE_COLON = ":".charCodeAt(0);
+const CHAR_CODE_DASH = "-".charCodeAt(0);
+const CHAR_CODE_L_SQUARE_BRACKET = "[".charCodeAt(0);
+const CHAR_CODE_SLASH = "/".charCodeAt(0);
+const CHAR_CODE_CAP_S = "S".charCodeAt(0);
+
+// The cache used in the `parseURL` function.
+const gURLStore = new Map();
+// The cache used in the `getSourceNames` function.
+const gSourceNamesStore = new Map();
+
+/**
+* Takes a string and returns an object containing all the properties
+* available on an URL instance, with additional properties (fileName),
+* Leverages caching.
+*
+* @param {String} location
+* @return {Object?} An object containing most properties available
+*                   in https://developer.mozilla.org/en-US/docs/Web/API/URL
+*/
+
+function parseURL(location) {
+  let url = gURLStore.get(location);
+
+  if (url !== void 0) {
+    return url;
+  }
+
+  try {
+    url = new URL(location);
+    // The callers were generally written to expect a URL from
+    // sdk/url, which is subtly different.  So, work around some
+    // important differences here.
+    url = {
+      href: url.href,
+      protocol: url.protocol,
+      host: url.host,
+      hostname: url.hostname,
+      port: url.port || null,
+      pathname: url.pathname,
+      search: url.search,
+      hash: url.hash,
+      username: url.username,
+      password: url.password,
+      origin: url.origin
+    };
+
+    // Definitions:
+    // Example: https://foo.com:8888/file.js
+    // `hostname`: "foo.com"
+    // `host`: "foo.com:8888"
+    let isChrome = isChromeScheme(location);
+
+    url.fileName = url.pathname ? url.pathname.slice(url.pathname.lastIndexOf("/") + 1) || "/" : "/";
+
+    if (isChrome) {
+      url.hostname = null;
+      url.host = null;
+    }
+
+    gURLStore.set(location, url);
+    return url;
+  } catch (e) {
+    gURLStore.set(location, null);
+    return null;
+  }
+}
+
+/**
+* Parse a source into a short and long name as well as a host name.
+*
+* @param {String} source
+*        The source to parse. Can be a URI or names like "(eval)" or
+*        "self-hosted".
+* @return {Object}
+*         An object with the following properties:
+*           - {String} short: A short name for the source.
+*             - "http://page.com/test.js#go?q=query" -> "test.js"
+*           - {String} long: The full, long name for the source, with
+              hash/query stripped.
+*             - "http://page.com/test.js#go?q=query" -> "http://page.com/test.js"
+*           - {String?} host: If available, the host name for the source.
+*             - "http://page.com/test.js#go?q=query" -> "page.com"
+*/
+function getSourceNames(source) {
+  let data = gSourceNamesStore.get(source);
+
+  if (data) {
+    return data;
+  }
+
+  let short, long, host;
+  const sourceStr = source ? String(source) : "";
+
+  // If `data:...` uri
+  if (isDataScheme(sourceStr)) {
+    let commaIndex = sourceStr.indexOf(",");
+    if (commaIndex > -1) {
+      // The `short` name for a data URI becomes `data:` followed by the actual
+      // encoded content, omitting the MIME type, and charset.
+      short = `data:${sourceStr.substring(commaIndex + 1)}`.slice(0, 100);
+      let result = { short, long: sourceStr };
+      gSourceNamesStore.set(source, result);
+      return result;
+    }
+  }
+
+  // If Scratchpad URI, like "Scratchpad/1"; no modifications,
+  // and short/long are the same.
+  if (isScratchpadScheme(sourceStr)) {
+    let result = { short: sourceStr, long: sourceStr };
+    gSourceNamesStore.set(source, result);
+    return result;
+  }
+
+  const parsedUrl = parseURL(sourceStr);
+
+  if (!parsedUrl) {
+    // Malformed URI.
+    long = sourceStr;
+    short = sourceStr.slice(0, 100);
+  } else {
+    host = parsedUrl.host;
+
+    long = parsedUrl.href;
+    if (parsedUrl.hash) {
+      long = long.replace(parsedUrl.hash, "");
+    }
+    if (parsedUrl.search) {
+      long = long.replace(parsedUrl.search, "");
+    }
+
+    short = parsedUrl.fileName;
+    // If `short` is just a slash, and we actually have a path,
+    // strip the slash and parse again to get a more useful short name.
+    // e.g. "http://foo.com/bar/" -> "bar", rather than "/"
+    if (short === "/" && parsedUrl.pathname !== "/") {
+      short = parseURL(long.replace(/\/$/, "")).fileName;
+    }
+  }
+
+  if (!short) {
+    if (!long) {
+      long = UNKNOWN_SOURCE_STRING;
+    }
+    short = long.slice(0, 100);
+  }
+
+  let result = { short, long, host };
+  gSourceNamesStore.set(source, result);
+  return result;
+}
+
+// For the functions below, we assume that we will never access the location
+// argument out of bounds, which is indeed the vast majority of cases.
+//
+// They are written this way because they are hot. Each frame is checked for
+// being content or chrome when processing the profile.
+
+function isColonSlashSlash(location, i = 0) {
+  return location.charCodeAt(++i) === CHAR_CODE_COLON && location.charCodeAt(++i) === CHAR_CODE_SLASH && location.charCodeAt(++i) === CHAR_CODE_SLASH;
+}
+
+/**
+* Checks for a Scratchpad URI, like "Scratchpad/1"
+*/
+function isScratchpadScheme(location, i = 0) {
+  return location.charCodeAt(i) === CHAR_CODE_CAP_S && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_H && location.charCodeAt(++i) === CHAR_CODE_P && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_D && location.charCodeAt(++i) === CHAR_CODE_SLASH;
+}
+
+function isDataScheme(location, i = 0) {
+  return location.charCodeAt(i) === CHAR_CODE_D && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_COLON;
+}
+
+function isContentScheme(location, i = 0) {
+  let firstChar = location.charCodeAt(i);
+
+  switch (firstChar) {
+    // "http://" or "https://"
+    case CHAR_CODE_H:
+      if (location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_P) {
+        if (location.charCodeAt(i + 1) === CHAR_CODE_S) {
+          ++i;
+        }
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "file://"
+    case CHAR_CODE_F:
+      if (location.charCodeAt(++i) === CHAR_CODE_I && location.charCodeAt(++i) === CHAR_CODE_L && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "app://"
+    case CHAR_CODE_A:
+      if (location.charCodeAt(++i) == CHAR_CODE_P && location.charCodeAt(++i) == CHAR_CODE_P) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "blob:"
+    case CHAR_CODE_B:
+      if (location.charCodeAt(++i) == CHAR_CODE_L && location.charCodeAt(++i) == CHAR_CODE_O && location.charCodeAt(++i) == CHAR_CODE_B && location.charCodeAt(++i) == CHAR_CODE_COLON) {
+        return isContentScheme(location, i + 1);
+      }
+      return false;
+
+    default:
+      return false;
+  }
+}
+
+function isChromeScheme(location, i = 0) {
+  let firstChar = location.charCodeAt(i);
+
+  switch (firstChar) {
+    // "chrome://"
+    case CHAR_CODE_C:
+      if (location.charCodeAt(++i) === CHAR_CODE_H && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_O && location.charCodeAt(++i) === CHAR_CODE_M && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "resource://"
+    case CHAR_CODE_R:
+      if (location.charCodeAt(++i) === CHAR_CODE_E && location.charCodeAt(++i) === CHAR_CODE_S && location.charCodeAt(++i) === CHAR_CODE_O && location.charCodeAt(++i) === CHAR_CODE_U && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    // "jar:file://"
+    case CHAR_CODE_J:
+      if (location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_COLON && location.charCodeAt(++i) === CHAR_CODE_F && location.charCodeAt(++i) === CHAR_CODE_I && location.charCodeAt(++i) === CHAR_CODE_L && location.charCodeAt(++i) === CHAR_CODE_E) {
+        return isColonSlashSlash(location, i);
+      }
+      return false;
+
+    default:
+      return false;
+  }
+}
+
+function isWASM(location, i = 0) {
+  return (
+    // "wasm-function["
+    location.charCodeAt(i) === CHAR_CODE_W && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_S && location.charCodeAt(++i) === CHAR_CODE_M && location.charCodeAt(++i) === CHAR_CODE_DASH && location.charCodeAt(++i) === CHAR_CODE_F && location.charCodeAt(++i) === CHAR_CODE_U && location.charCodeAt(++i) === CHAR_CODE_N && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_I && location.charCodeAt(++i) === CHAR_CODE_O && location.charCodeAt(++i) === CHAR_CODE_N && location.charCodeAt(++i) === CHAR_CODE_L_SQUARE_BRACKET
+  );
+}
+
+/**
+* A utility method to get the file name from a sourcemapped location
+* The sourcemap location can be in any form. This method returns a
+* formatted file name for different cases like Windows or OSX.
+* @param source
+* @returns String
+*/
+function getSourceMappedFile(source) {
+  // If sourcemapped source is a OSX path, return
+  // the characters after last "/".
+  // If sourcemapped source is a Windowss path, return
+  // the characters after last "\\".
+  if (source.lastIndexOf("/") >= 0) {
+    source = source.slice(source.lastIndexOf("/") + 1);
+  } else if (source.lastIndexOf("\\") >= 0) {
+    source = source.slice(source.lastIndexOf("\\") + 1);
+  }
+  return source;
+}
+
+module.exports = {
+  parseURL,
+  getSourceNames,
+  isScratchpadScheme,
+  isChromeScheme,
+  isContentScheme,
+  isWASM,
+  isDataScheme,
+  getSourceMappedFile
+};
+
+/***/ }),
+
+/***/ 3638:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+// This file is a chrome-API-free version of the module
+// devtools/client/shared/unicode-url.js in the mozilla-central repository, so
+// that it can be used in Chrome-API-free applications, such as the Launchpad.
+// But because of this, it cannot take advantage of utilizing chrome APIs and
+// should implement the similar functionalities on its own.
+//
+// Please keep in mind that if the feature in this file has changed, don't
+// forget to also change that accordingly in
+// devtools/client/shared/unicode-url.js in the mozilla-central repository.
+
+
+
+const punycode = __webpack_require__(3641);
+
+/**
+ * Gets a readble Unicode hostname from a hostname.
+ *
+ * If the `hostname` is a readable ASCII hostname, such as example.org, then
+ * this function will simply return the original `hostname`.
+ *
+ * If the `hostname` is a Punycode hostname representing a Unicode domain name,
+ * such as xn--g6w.xn--8pv, then this function will return the readable Unicode
+ * domain name by decoding the Punycode hostname.
+ *
+ * @param {string}  hostname
+ *                  the hostname from which the Unicode hostname will be
+ *                  parsed, such as example.org, xn--g6w.xn--8pv.
+ * @return {string} The Unicode hostname. It may be the same as the `hostname`
+ *                  passed to this function if the `hostname` itself is
+ *                  a readable ASCII hostname or a Unicode hostname.
+ */
+function getUnicodeHostname(hostname) {
+  try {
+    return punycode.toUnicode(hostname);
+  } catch (err) {}
+  return hostname;
+}
+
+/**
+ * Gets a readble Unicode URL pathname from a URL pathname.
+ *
+ * If the `urlPath` is a readable ASCII URL pathname, such as /a/b/c.js, then
+ * this function will simply return the original `urlPath`.
+ *
+ * If the `urlPath` is a URI-encoded pathname, such as %E8%A9%A6/%E6%B8%AC.js,
+ * then this function will return the readable Unicode pathname.
+ *
+ * If the `urlPath` is a malformed URL pathname, then this function will simply
+ * return the original `urlPath`.
+ *
+ * @param {string}  urlPath
+ *                  the URL path from which the Unicode URL path will be parsed,
+ *                  such as /a/b/c.js, %E8%A9%A6/%E6%B8%AC.js.
+ * @return {string} The Unicode URL Path. It may be the same as the `urlPath`
+ *                  passed to this function if the `urlPath` itself is a readable
+ *                  ASCII url or a Unicode url.
+ */
+function getUnicodeUrlPath(urlPath) {
+  try {
+    return decodeURIComponent(urlPath);
+  } catch (err) {}
+  return urlPath;
+}
+
+/**
+ * Gets a readable Unicode URL from a URL.
+ *
+ * If the `url` is a readable ASCII URL, such as http://example.org/a/b/c.js,
+ * then this function will simply return the original `url`.
+ *
+ * If the `url` includes either an unreadable Punycode domain name or an
+ * unreadable URI-encoded pathname, such as
+ * http://xn--g6w.xn--8pv/%E8%A9%A6/%E6%B8%AC.js, then this function will return
+ * the readable URL by decoding all its unreadable URL components to Unicode
+ * characters.
+ *
+ * If the `url` is a malformed URL, then this function will return the original
+ * `url`.
+ *
+ * If the `url` is a data: URI, then this function will return the original
+ * `url`.
+ *
+ * @param {string}  url
+ *                  the full URL, or a data: URI. from which the readable URL
+ *                  will be parsed, such as, http://example.org/a/b/c.js,
+ *                  http://xn--g6w.xn--8pv/%E8%A9%A6/%E6%B8%AC.js
+ * @return {string} The readable URL. It may be the same as the `url` passed to
+ *                  this function if the `url` itself is readable.
+ */
+function getUnicodeUrl(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol === "data:") {
+      // Never convert a data: URI.
+      return url;
+    }
+    const readableHostname = getUnicodeHostname(hostname);
+    url = decodeURIComponent(url);
+    return url.replace(hostname, readableHostname);
+  } catch (err) {}
+  return url;
+}
+
+module.exports = {
+  getUnicodeHostname,
+  getUnicodeUrlPath,
+  getUnicodeUrl
+};
+
+/***/ }),
+
+/***/ 3639:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _reactRedux = __webpack_require__(3592);
+
+var _actions = __webpack_require__(1354);
+
+var _actions2 = _interopRequireDefault(_actions);
+
+var _selectors = __webpack_require__(3590);
+
+__webpack_require__(1338);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+class ReactComponentStack extends _react.PureComponent {
+  render() {
+    const { componentStack } = this.props.extra.react;
+    return _react2.default.createElement(
+      "div",
+      { className: "pane frames" },
+      _react2.default.createElement(
+        "ul",
+        null,
+        componentStack.slice().reverse().map((component, index) => _react2.default.createElement(
+          "li",
+          { key: index },
+          component
+        ))
+      )
+    );
+  }
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const mapStateToProps = state => ({
+  extra: (0, _selectors.getExtra)(state)
+});
+
+exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(ReactComponentStack);
+
+/***/ }),
+
 /***/ 364:
 /***/ (function(module, exports) {
 
@@ -38556,1087 +30837,41 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 365:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M1.5 14.042h4.095a.5.5 0 0 0 0-1H1.5a.5.5 0 1 0 0 1zM7.983 2a.5.5 0 0 1 .517.5v7.483l3.136-3.326a.5.5 0 1 1 .728.686l-4 4.243a.499.499 0 0 1-.73-.004L3.635 7.343a.5.5 0 0 1 .728-.686L7.5 9.983V3H1.536C1.24 3 1 2.776 1 2.5s.24-.5.536-.5h6.447zM10.5 14.042h4.095a.5.5 0 0 0 0-1H10.5a.5.5 0 1 0 0 1z\"></path></g></svg>"
-
-/***/ }),
-
-/***/ 366:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M5 13.5H1a.5.5 0 1 0 0 1h4a.5.5 0 1 0 0-1zM12 13.5H8a.5.5 0 1 0 0 1h4a.5.5 0 1 0 0-1zM6.11 5.012A.427.427 0 0 1 6.21 5h7.083L9.646 1.354a.5.5 0 1 1 .708-.708l4.5 4.5a.498.498 0 0 1 0 .708l-4.5 4.5a.5.5 0 0 1-.708-.708L13.293 6H6.5v5.5a.5.5 0 1 1-1 0v-6a.5.5 0 0 1 .61-.488z\"></path></g></svg>"
-
-/***/ }),
-
-/***/ 367:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M13.297 6.912C12.595 4.39 10.167 2.5 7.398 2.5A5.898 5.898 0 0 0 1.5 8.398a.5.5 0 0 0 1 0A4.898 4.898 0 0 1 7.398 3.5c2.75 0 5.102 2.236 5.102 4.898v.004L8.669 7.029a.5.5 0 0 0-.338.942l4.462 1.598a.5.5 0 0 0 .651-.34.506.506 0 0 0 .02-.043l2-5a.5.5 0 1 0-.928-.372l-1.24 3.098z\"></path><circle cx=\"7\" cy=\"12\" r=\"1\"></circle></g></svg>"
-
-/***/ }),
-
-/***/ 368:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M12.219 7c.345 0 .635.117.869.352.234.234.351.524.351.869 0 .351-.118.652-.356.903-.238.25-.526.376-.864.376-.332 0-.615-.125-.85-.376a1.276 1.276 0 0 1-.351-.903A1.185 1.185 0 0 1 12.218 7zM8.234 7c.345 0 .635.117.87.352.234.234.351.524.351.869 0 .351-.119.652-.356.903-.238.25-.526.376-.865.376-.332 0-.613-.125-.844-.376a1.286 1.286 0 0 1-.347-.903c0-.352.114-.643.342-.874.228-.231.51-.347.85-.347zM4.201 7c.339 0 .627.117.864.352.238.234.357.524.357.869 0 .351-.119.652-.357.903-.237.25-.525.376-.864.376-.338 0-.623-.125-.854-.376A1.286 1.286 0 0 1 3 8.221 1.185 1.185 0 0 1 4.201 7z\" fill-rule=\"evenodd\"></path></svg>"
-
-/***/ }),
-
-/***/ 369:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M3.233 11.25l-.417 1H1.712C.763 12.25 0 11.574 0 10.747V6.503C0 5.675.755 5 1.712 5h4.127l-.417 1H1.597C1.257 6 1 6.225 1 6.503v4.244c0 .277.267.503.597.503h1.636zM7.405 11.27L7 12.306c.865.01 2.212-.024 2.315-.04.112-.016.112-.016.185-.035.075-.02.156-.046.251-.082.152-.056.349-.138.592-.244.415-.182.962-.435 1.612-.744l.138-.066a179.35 179.35 0 0 0 2.255-1.094c1.191-.546 1.191-2.074-.025-2.632l-.737-.34a3547.554 3547.554 0 0 0-3.854-1.78c-.029.11-.065.222-.11.336l-.232.596c.894.408 4.56 2.107 4.56 2.107.458.21.458.596 0 .806L9.197 11.27H7.405zM4.462 14.692l5-12a.5.5 0 1 0-.924-.384l-5 12a.5.5 0 1 0 .924.384z\"></path></g></svg>"
-
-/***/ }),
-
-/***/ 370:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"#0b0b0b\"><path fill-opacity=\".3\" d=\"M12,3h2v10h-2V3z M5,9.9V6.1L8,8L5,9.9z\"></path><path d=\"M14,2H2C1.4,2,1,2.4,1,3v10c0,0.6,0.4,1,1,1h12c0.6,0,1-0.4,1-1V3C15,2.4,14.6,2,14,2z M2,13L2,13V3h0h9v10 H2L2,13z M14,13C14,13,14,13,14,13h-2V3h2c0,0,0,0,0,0V13z M8.5,7.2l-3-1.9C4.6,4.7,4,5,4,6.1v3.8c0,1.1,0.6,1.4,1.5,0.8l3-1.9 C9.5,8.3,9.5,7.8,8.5,7.2z M5,9.9V6.1L8,8L5,9.9z\"></path></svg>"
-
-/***/ }),
-
-/***/ 371:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 16 16\" stroke=\"none\" fillrule=\"evenodd\"><rect opacity=\"0.6\" x=\"1\" y=\"3\" width=\"2\" height=\"6\"></rect><rect opacity=\"0.6\" x=\"17\" y=\"3\" width=\"2\" height=\"6\"></rect><rect x=\"6\" y=\"3\" width=\"2\" height=\"6\"></rect><rect x=\"12\" y=\"3\" width=\"2\" height=\"6\"></rect><rect x=\"9\" y=\"3\" width=\"2\" height=\"6\"></rect><path d=\"M4.5,13 L15.5,13 L16,13 L16,12 L15.5,12 L4.5,12 L4,12 L4,13 L4.5,13 L4.5,13 Z\"></path><path d=\"M4,10.5 L4,12.5 L4,13 L5,13 L5,12.5 L5,10.5 L5,10 L4,10 L4,10.5 L4,10.5 Z\"></path><path d=\"M15,10.5 L15,12.5 L15,13 L16,13 L16,12.5 L16,10.5 L16,10 L15,10 L15,10.5 L15,10.5 Z\"></path></svg>"
-
-/***/ }),
-
-/***/ 372:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" d=\"M8.5 8.793L5.854 6.146l-.04-.035L7.5 4.426c.2-.2.3-.4.3-.6 0-.2-.1-.4-.2-.6l-1-1c-.4-.3-.9-.3-1.2 0l-4.1 4.1c-.2.2-.3.4-.3.6 0 .2.1.4.2.6l1 1c.3.3.9.3 1.2 0l1.71-1.71.036.04L7.793 9.5l-3.647 3.646c-.195.196-.195.512 0 .708.196.195.512.195.708 0L8.5 10.207l3.646 3.647c.196.195.512.195.708 0 .195-.196.195-.512 0-.708L9.207 9.5l2.565-2.565L13.3 8.5c.1.1 2.3 1.1 2.7.7.4-.4-.3-2.7-.5-2.9l-1.1-1.1c.1-.1.2-.4.2-.6 0-.2-.1-.4-.2-.6l-.4-.4c-.3-.3-.8-.3-1.1 0l-1.5-1.4c-.2-.2-.3-.2-.5-.2s-.3.1-.5.2L9.2 3.4c-.2.1-.2.2-.2.4s.1.4.2.5l1.874 1.92L8.5 8.792z\"></path></svg>"
-
-/***/ }),
-
-/***/ 4:
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_4__;
-
-/***/ }),
-
-/***/ 46:
-/***/ (function(module, exports, __webpack_require__) {
-
-module.exports = __webpack_require__(1459);
-
-
-/***/ }),
-
-/***/ 52:
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_52__;
-
-/***/ }),
-
-/***/ 6:
-/***/ (function(module, exports, __webpack_require__) {
-
-var Symbol = __webpack_require__(7),
-    getRawTag = __webpack_require__(10),
-    objectToString = __webpack_require__(11);
-
-/** `Object#toString` result references. */
-var nullTag = '[object Null]',
-    undefinedTag = '[object Undefined]';
-
-/** Built-in value references. */
-var symToStringTag = Symbol ? Symbol.toStringTag : undefined;
-
-/**
- * The base implementation of `getTag` without fallbacks for buggy environments.
- *
- * @private
- * @param {*} value The value to query.
- * @returns {string} Returns the `toStringTag`.
- */
-function baseGetTag(value) {
-  if (value == null) {
-    return value === undefined ? undefinedTag : nullTag;
-  }
-  return (symToStringTag && symToStringTag in Object(value))
-    ? getRawTag(value)
-    : objectToString(value);
-}
-
-module.exports = baseGetTag;
-
-
-/***/ }),
-
-/***/ 66:
+/***/ 3640:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
 
 
-exports.decode = exports.parse = __webpack_require__(121);
-exports.encode = exports.stringify = __webpack_require__(122);
-
-
-/***/ }),
-
-/***/ 67:
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseGet = __webpack_require__(68);
-
-/**
- * Gets the value at `path` of `object`. If the resolved value is
- * `undefined`, the `defaultValue` is returned in its place.
- *
- * @static
- * @memberOf _
- * @since 3.7.0
- * @category Object
- * @param {Object} object The object to query.
- * @param {Array|string} path The path of the property to get.
- * @param {*} [defaultValue] The value returned for `undefined` resolved values.
- * @returns {*} Returns the resolved value.
- * @example
- *
- * var object = { 'a': [{ 'b': { 'c': 3 } }] };
- *
- * _.get(object, 'a[0].b.c');
- * // => 3
- *
- * _.get(object, ['a', '0', 'b', 'c']);
- * // => 3
- *
- * _.get(object, 'a.b.c', 'default');
- * // => 'default'
- */
-function get(object, path, defaultValue) {
-  var result = object == null ? undefined : baseGet(object, path);
-  return result === undefined ? defaultValue : result;
-}
-
-module.exports = get;
-
-
-/***/ }),
-
-/***/ 677:
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_677__;
-
-/***/ }),
-
-/***/ 678:
-/***/ (function(module, exports) {
-
-module.exports = __WEBPACK_EXTERNAL_MODULE_678__;
-
-/***/ }),
-
-/***/ 68:
-/***/ (function(module, exports, __webpack_require__) {
-
-var castPath = __webpack_require__(69),
-    toKey = __webpack_require__(111);
-
-/**
- * The base implementation of `_.get` without support for default values.
- *
- * @private
- * @param {Object} object The object to query.
- * @param {Array|string} path The path of the property to get.
- * @returns {*} Returns the resolved value.
- */
-function baseGet(object, path) {
-  path = castPath(path, object);
-
-  var index = 0,
-      length = path.length;
-
-  while (object != null && index < length) {
-    object = object[toKey(path[index++])];
-  }
-  return (index && index == length) ? object : undefined;
-}
-
-module.exports = baseGet;
-
-
-/***/ }),
-
-/***/ 69:
-/***/ (function(module, exports, __webpack_require__) {
-
-var isArray = __webpack_require__(70),
-    isKey = __webpack_require__(71),
-    stringToPath = __webpack_require__(73),
-    toString = __webpack_require__(108);
-
-/**
- * Casts `value` to a path array if it's not one.
- *
- * @private
- * @param {*} value The value to inspect.
- * @param {Object} [object] The object to query keys on.
- * @returns {Array} Returns the cast property path array.
- */
-function castPath(value, object) {
-  if (isArray(value)) {
-    return value;
-  }
-  return isKey(value, object) ? [value] : stringToPath(toString(value));
-}
-
-module.exports = castPath;
-
-
-/***/ }),
-
-/***/ 7:
-/***/ (function(module, exports, __webpack_require__) {
-
-var root = __webpack_require__(8);
-
-/** Built-in value references. */
-var Symbol = root.Symbol;
-
-module.exports = Symbol;
-
-
-/***/ }),
-
-/***/ 70:
-/***/ (function(module, exports) {
-
-/**
- * Checks if `value` is classified as an `Array` object.
- *
- * @static
- * @memberOf _
- * @since 0.1.0
- * @category Lang
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is an array, else `false`.
- * @example
- *
- * _.isArray([1, 2, 3]);
- * // => true
- *
- * _.isArray(document.body.children);
- * // => false
- *
- * _.isArray('abc');
- * // => false
- *
- * _.isArray(_.noop);
- * // => false
- */
-var isArray = Array.isArray;
-
-module.exports = isArray;
-
-
-/***/ }),
-
-/***/ 71:
-/***/ (function(module, exports, __webpack_require__) {
-
-var isArray = __webpack_require__(70),
-    isSymbol = __webpack_require__(72);
-
-/** Used to match property names within property paths. */
-var reIsDeepProp = /\.|\[(?:[^[\]]*|(["'])(?:(?!\1)[^\\]|\\.)*?\1)\]/,
-    reIsPlainProp = /^\w*$/;
-
-/**
- * Checks if `value` is a property name and not a property path.
- *
- * @private
- * @param {*} value The value to check.
- * @param {Object} [object] The object to query keys on.
- * @returns {boolean} Returns `true` if `value` is a property name, else `false`.
- */
-function isKey(value, object) {
-  if (isArray(value)) {
-    return false;
-  }
-  var type = typeof value;
-  if (type == 'number' || type == 'symbol' || type == 'boolean' ||
-      value == null || isSymbol(value)) {
-    return true;
-  }
-  return reIsPlainProp.test(value) || !reIsDeepProp.test(value) ||
-    (object != null && value in Object(object));
-}
-
-module.exports = isKey;
-
-
-/***/ }),
-
-/***/ 72:
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseGetTag = __webpack_require__(6),
-    isObjectLike = __webpack_require__(14);
-
-/** `Object#toString` result references. */
-var symbolTag = '[object Symbol]';
-
-/**
- * Checks if `value` is classified as a `Symbol` primitive or object.
- *
- * @static
- * @memberOf _
- * @since 4.0.0
- * @category Lang
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is a symbol, else `false`.
- * @example
- *
- * _.isSymbol(Symbol.iterator);
- * // => true
- *
- * _.isSymbol('abc');
- * // => false
- */
-function isSymbol(value) {
-  return typeof value == 'symbol' ||
-    (isObjectLike(value) && baseGetTag(value) == symbolTag);
-}
-
-module.exports = isSymbol;
-
-
-/***/ }),
-
-/***/ 73:
-/***/ (function(module, exports, __webpack_require__) {
-
-var memoizeCapped = __webpack_require__(74);
-
-/** Used to match property names within property paths. */
-var rePropName = /[^.[\]]+|\[(?:(-?\d+(?:\.\d+)?)|(["'])((?:(?!\2)[^\\]|\\.)*?)\2)\]|(?=(?:\.|\[\])(?:\.|\[\]|$))/g;
-
-/** Used to match backslashes in property paths. */
-var reEscapeChar = /\\(\\)?/g;
-
-/**
- * Converts `string` to a property path array.
- *
- * @private
- * @param {string} string The string to convert.
- * @returns {Array} Returns the property path array.
- */
-var stringToPath = memoizeCapped(function(string) {
-  var result = [];
-  if (string.charCodeAt(0) === 46 /* . */) {
-    result.push('');
-  }
-  string.replace(rePropName, function(match, number, quote, subString) {
-    result.push(quote ? subString.replace(reEscapeChar, '$1') : (number || match));
-  });
-  return result;
+Object.defineProperty(exports, "__esModule", {
+  value: true
 });
+exports.toggleSkipPausing = toggleSkipPausing;
 
-module.exports = stringToPath;
-
-
-/***/ }),
-
-/***/ 74:
-/***/ (function(module, exports, __webpack_require__) {
-
-var memoize = __webpack_require__(75);
-
-/** Used as the maximum memoize cache size. */
-var MAX_MEMOIZE_SIZE = 500;
+var _selectors = __webpack_require__(3590);
 
 /**
- * A specialized version of `_.memoize` which clears the memoized function's
- * cache when it exceeds `MAX_MEMOIZE_SIZE`.
- *
- * @private
- * @param {Function} func The function to have its output memoized.
- * @returns {Function} Returns the new memoized function.
- */
-function memoizeCapped(func) {
-  var result = memoize(func, function(key) {
-    if (cache.size === MAX_MEMOIZE_SIZE) {
-      cache.clear();
-    }
-    return key;
-  });
-
-  var cache = result.cache;
-  return result;
-}
-
-module.exports = memoizeCapped;
-
-
-/***/ }),
-
-/***/ 75:
-/***/ (function(module, exports, __webpack_require__) {
-
-var MapCache = __webpack_require__(76);
-
-/** Error message constants. */
-var FUNC_ERROR_TEXT = 'Expected a function';
-
-/**
- * Creates a function that memoizes the result of `func`. If `resolver` is
- * provided, it determines the cache key for storing the result based on the
- * arguments provided to the memoized function. By default, the first argument
- * provided to the memoized function is used as the map cache key. The `func`
- * is invoked with the `this` binding of the memoized function.
- *
- * **Note:** The cache is exposed as the `cache` property on the memoized
- * function. Its creation may be customized by replacing the `_.memoize.Cache`
- * constructor with one whose instances implement the
- * [`Map`](http://ecma-international.org/ecma-262/7.0/#sec-properties-of-the-map-prototype-object)
- * method interface of `clear`, `delete`, `get`, `has`, and `set`.
- *
+ * @memberof actions/pause
  * @static
- * @memberOf _
- * @since 0.1.0
- * @category Function
- * @param {Function} func The function to have its output memoized.
- * @param {Function} [resolver] The function to resolve the cache key.
- * @returns {Function} Returns the new memoized function.
- * @example
- *
- * var object = { 'a': 1, 'b': 2 };
- * var other = { 'c': 3, 'd': 4 };
- *
- * var values = _.memoize(_.values);
- * values(object);
- * // => [1, 2]
- *
- * values(other);
- * // => [3, 4]
- *
- * object.a = 2;
- * values(object);
- * // => [1, 2]
- *
- * // Modify the result cache.
- * values.cache.set(object, ['a', 'b']);
- * values(object);
- * // => ['a', 'b']
- *
- * // Replace `_.memoize.Cache`.
- * _.memoize.Cache = WeakMap;
  */
-function memoize(func, resolver) {
-  if (typeof func != 'function' || (resolver != null && typeof resolver != 'function')) {
-    throw new TypeError(FUNC_ERROR_TEXT);
-  }
-  var memoized = function() {
-    var args = arguments,
-        key = resolver ? resolver.apply(this, args) : args[0],
-        cache = memoized.cache;
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-    if (cache.has(key)) {
-      return cache.get(key);
-    }
-    var result = func.apply(this, args);
-    memoized.cache = cache.set(key, result) || cache;
-    return result;
-  };
-  memoized.cache = new (memoize.Cache || MapCache);
-  return memoized;
-}
+function toggleSkipPausing() {
+  return async ({ dispatch, client, getState, sourceMaps }) => {
+    const skipPausing = !(0, _selectors.getSkipPausing)(getState());
 
-// Expose `MapCache`.
-memoize.Cache = MapCache;
+    // NOTE: enable this when we land the endpoint in m-c
+    // await client.setSkipPausing(skipPausing);
 
-module.exports = memoize;
-
-
-/***/ }),
-
-/***/ 76:
-/***/ (function(module, exports, __webpack_require__) {
-
-var mapCacheClear = __webpack_require__(77),
-    mapCacheDelete = __webpack_require__(102),
-    mapCacheGet = __webpack_require__(105),
-    mapCacheHas = __webpack_require__(106),
-    mapCacheSet = __webpack_require__(107);
-
-/**
- * Creates a map cache object to store key-value pairs.
- *
- * @private
- * @constructor
- * @param {Array} [entries] The key-value pairs to cache.
- */
-function MapCache(entries) {
-  var index = -1,
-      length = entries == null ? 0 : entries.length;
-
-  this.clear();
-  while (++index < length) {
-    var entry = entries[index];
-    this.set(entry[0], entry[1]);
-  }
-}
-
-// Add methods to `MapCache`.
-MapCache.prototype.clear = mapCacheClear;
-MapCache.prototype['delete'] = mapCacheDelete;
-MapCache.prototype.get = mapCacheGet;
-MapCache.prototype.has = mapCacheHas;
-MapCache.prototype.set = mapCacheSet;
-
-module.exports = MapCache;
-
-
-/***/ }),
-
-/***/ 77:
-/***/ (function(module, exports, __webpack_require__) {
-
-var Hash = __webpack_require__(78),
-    ListCache = __webpack_require__(93),
-    Map = __webpack_require__(101);
-
-/**
- * Removes all key-value entries from the map.
- *
- * @private
- * @name clear
- * @memberOf MapCache
- */
-function mapCacheClear() {
-  this.size = 0;
-  this.__data__ = {
-    'hash': new Hash,
-    'map': new (Map || ListCache),
-    'string': new Hash
+    dispatch({ type: "TOGGLE_SKIP_PAUSING", skipPausing });
   };
 }
 
-module.exports = mapCacheClear;
-
-
 /***/ }),
 
-/***/ 78:
-/***/ (function(module, exports, __webpack_require__) {
-
-var hashClear = __webpack_require__(79),
-    hashDelete = __webpack_require__(89),
-    hashGet = __webpack_require__(90),
-    hashHas = __webpack_require__(91),
-    hashSet = __webpack_require__(92);
-
-/**
- * Creates a hash object.
- *
- * @private
- * @constructor
- * @param {Array} [entries] The key-value pairs to cache.
- */
-function Hash(entries) {
-  var index = -1,
-      length = entries == null ? 0 : entries.length;
-
-  this.clear();
-  while (++index < length) {
-    var entry = entries[index];
-    this.set(entry[0], entry[1]);
-  }
-}
-
-// Add methods to `Hash`.
-Hash.prototype.clear = hashClear;
-Hash.prototype['delete'] = hashDelete;
-Hash.prototype.get = hashGet;
-Hash.prototype.has = hashHas;
-Hash.prototype.set = hashSet;
-
-module.exports = Hash;
-
-
-/***/ }),
-
-/***/ 79:
-/***/ (function(module, exports, __webpack_require__) {
-
-var nativeCreate = __webpack_require__(80);
-
-/**
- * Removes all key-value entries from the hash.
- *
- * @private
- * @name clear
- * @memberOf Hash
- */
-function hashClear() {
-  this.__data__ = nativeCreate ? nativeCreate(null) : {};
-  this.size = 0;
-}
-
-module.exports = hashClear;
-
-
-/***/ }),
-
-/***/ 792:
-/***/ (function(module, exports) {
-
-var g;
-
-// This works in non-strict mode
-g = (function() {
-	return this;
-})();
-
-try {
-	// This works if eval is allowed (see CSP)
-	g = g || Function("return this")() || (1,eval)("this");
-} catch(e) {
-	// This works if the window reference is available
-	if(typeof window === "object")
-		g = window;
-}
-
-// g can still be undefined, but nothing to do about it...
-// We return undefined, instead of nothing here, so it's
-// easier to handle this case. if(!global) { ...}
-
-module.exports = g;
-
-
-/***/ }),
-
-/***/ 793:
-/***/ (function(module, exports) {
-
-module.exports = function(module) {
-	if(!module.webpackPolyfill) {
-		module.deprecate = function() {};
-		module.paths = [];
-		// module.parent = undefined by default
-		if(!module.children) module.children = [];
-		Object.defineProperty(module, "loaded", {
-			enumerable: true,
-			get: function() {
-				return module.l;
-			}
-		});
-		Object.defineProperty(module, "id", {
-			enumerable: true,
-			get: function() {
-				return module.i;
-			}
-		});
-		module.webpackPolyfill = 1;
-	}
-	return module;
-};
-
-
-/***/ }),
-
-/***/ 8:
-/***/ (function(module, exports, __webpack_require__) {
-
-var freeGlobal = __webpack_require__(9);
-
-/** Detect free variable `self`. */
-var freeSelf = typeof self == 'object' && self && self.Object === Object && self;
-
-/** Used as a reference to the global object. */
-var root = freeGlobal || freeSelf || Function('return this')();
-
-module.exports = root;
-
-
-/***/ }),
-
-/***/ 80:
-/***/ (function(module, exports, __webpack_require__) {
-
-var getNative = __webpack_require__(81);
-
-/* Built-in method references that are verified to be native. */
-var nativeCreate = getNative(Object, 'create');
-
-module.exports = nativeCreate;
-
-
-/***/ }),
-
-/***/ 806:
-/***/ (function(module, exports) {
-
-module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 256 256\"><defs><style>.cls-1{isolation:isolate;}.cls-17,.cls-2,.cls-25{fill:none;}.cls-17,.cls-2{stroke-miterlimit:10;}.cls-2{stroke-width:0.75px;stroke:url(#linear-gradient);}.cls-3{fill:url(#linear-gradient-2);}.cls-4{fill:#f15a24;}.cls-5{fill:#ed1c24;}.cls-6{fill:#c1272d;}.cls-7{fill:url(#linear-gradient-3);}.cls-8{fill:url(#linear-gradient-4);}.cls-9{fill:url(#linear-gradient-5);}.cls-10{fill:url(#linear-gradient-6);}.cls-11{opacity:0.49;fill:url(#linear-gradient-7);}.cls-12{fill:url(#linear-gradient-8);}.cls-13{fill:#2db5f9;}.cls-13,.cls-14{mix-blend-mode:screen;}.cls-14{fill:#5fd2ff;}.cls-15{fill:#219058;}.cls-16{fill:url(#linear-gradient-9);}.cls-17{stroke:#fff;stroke-width:1.87px;}.cls-18{fill:#f7b852;}.cls-19{fill:#ff8431;}.cls-20{fill:#fffb69;}.cls-21{fill:#44c688;}.cls-22{fill:#29b36e;}.cls-23{fill:#6fd191;}.cls-24{fill:#c83ad7;}.cls-26{fill:#fba9ff;}.cls-27{fill:#ff737d;}.cls-28{fill:#fdc666;}</style><linearGradient id=\"linear-gradient\" x1=\"67.45\" y1=\"154.72\" x2=\"67.29\" y2=\"155.43\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#ff1d25\" stop-opacity=\"0.5\"></stop><stop offset=\"0.06\" stop-color=\"#ff1d25\" stop-opacity=\"0.54\"></stop><stop offset=\"0.37\" stop-color=\"#ff1d25\" stop-opacity=\"0.74\"></stop><stop offset=\"0.64\" stop-color=\"#ff1d25\" stop-opacity=\"0.88\"></stop><stop offset=\"0.86\" stop-color=\"#ff1d25\" stop-opacity=\"0.97\"></stop><stop offset=\"1\" stop-color=\"#ff1d25\"></stop></linearGradient><linearGradient id=\"linear-gradient-2\" x1=\"73.09\" y1=\"170.74\" x2=\"73.09\" y2=\"153.5\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#ffdd42\"></stop><stop offset=\"1\" stop-color=\"#fb784b\"></stop></linearGradient><linearGradient id=\"linear-gradient-3\" x1=\"201.52\" y1=\"95.13\" x2=\"207.88\" y2=\"89.89\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#5bcb99\"></stop><stop offset=\"1\" stop-color=\"#85a8e8\"></stop></linearGradient><linearGradient id=\"linear-gradient-4\" x1=\"81.17\" y1=\"158.3\" x2=\"279.32\" y2=\"55.49\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#34e28b\"></stop><stop offset=\"1\"></stop></linearGradient><linearGradient id=\"linear-gradient-5\" x1=\"117.57\" y1=\"178.22\" x2=\"133.15\" y2=\"178.22\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#c297ff\"></stop><stop offset=\"1\" stop-color=\"#ae31bb\"></stop></linearGradient><linearGradient id=\"linear-gradient-6\" x1=\"54.05\" y1=\"253.29\" x2=\"251.08\" y2=\"99.63\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\"></stop><stop offset=\"1\" stop-color=\"#d23de2\"></stop></linearGradient><linearGradient id=\"linear-gradient-7\" x1=\"199.8\" y1=\"86.45\" x2=\"191.83\" y2=\"113.37\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\"></stop><stop offset=\"1\" stop-opacity=\"0\"></stop></linearGradient><linearGradient id=\"linear-gradient-8\" x1=\"126.87\" y1=\"190.63\" x2=\"182.9\" y2=\"204.2\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#2db5f9\"></stop><stop offset=\"1\" stop-color=\"#092432\"></stop></linearGradient><linearGradient id=\"linear-gradient-9\" x1=\"83.08\" y1=\"49.55\" x2=\"46.06\" y2=\"151.24\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\"></stop><stop offset=\"0.21\" stop-color=\"#48080a\"></stop><stop offset=\"0.42\" stop-color=\"#891014\"></stop><stop offset=\"0.61\" stop-color=\"#bc151b\"></stop><stop offset=\"0.78\" stop-color=\"#e01a21\"></stop><stop offset=\"0.91\" stop-color=\"#f71c24\"></stop><stop offset=\"1\" stop-color=\"#ff1d25\"></stop></linearGradient></defs><title>dojo_square</title><g class=\"cls-1\"><g id=\"Layer_1\" data-name=\"Layer 1\"><line class=\"cls-2\" x1=\"67.37\" y1=\"155.08\" x2=\"67.37\" y2=\"155.08\"></line><path class=\"cls-3\" d=\"M42.28,150.4l.52.82A58,58,0,0,0,52,161.49a45.23,45.23,0,0,0,28.74,10.25c.65,0,1.31,0,2,0a67.32,67.32,0,0,0,21.13-5.26,67.38,67.38,0,0,1-9.09.83,36.92,36.92,0,0,1-27.44-12.17A66.82,66.82,0,0,1,42.28,150.4Z\"></path><path class=\"cls-4\" d=\"M80.79,80.88a45.4,45.4,0,0,1,38.89,21.94A37,37,0,0,0,84.43,94.7c8.29,4,19.66,7.08,35.28,8.15,0,0-.77-14.87-19.8-22.64-26.57-10.84-30.33-8.69-37.06-19.9a30.09,30.09,0,0,0,6,22.15A45.45,45.45,0,0,1,80.79,80.88Z\"></path><path class=\"cls-5\" d=\"M99.92,80.21c-9.1-3.71-15.52-5.9-20.3-7.62A33.4,33.4,0,0,0,84.54,81a45.42,45.42,0,0,1,35.13,21.78,36.87,36.87,0,0,0-20.54-9.34,109,109,0,0,0,20,9.32l.59,0S118.94,88,99.92,80.21Z\"></path><path class=\"cls-6\" d=\"M119.69,102.85h.1c.29-1.62,2.07-14.46-12.4-25.7C85.78,60.37,81.56,58.82,80.53,49.94a27.8,27.8,0,0,0-.91,22.65c4.78,1.72,11.21,3.91,20.3,7.62,19,7.77,19.8,22.64,19.8,22.64Z\"></path><path class=\"cls-7\" d=\"M185.28,88.22a33.64,33.64,0,0,1,22.08,8.23,29.8,29.8,0,0,1,19,8S208.22,78,176.19,89a41.72,41.72,0,0,0-8.2,4A33.64,33.64,0,0,1,185.28,88.22Z\"></path><path class=\"cls-8\" d=\"M185.28,88.22A33.62,33.62,0,0,0,168,93l.93-.56c-25.88,15.24-57.6,62.06-101.56,62.65h0a36.92,36.92,0,0,0,27.44,12.17,67.38,67.38,0,0,0,9.09-.83c28.6-11.79,56.09-40,68.55-53.64,11.56-12.67,24.22-17,34.91-16.34A33.64,33.64,0,0,0,185.28,88.22Z\"></path><path class=\"cls-9\" d=\"M118.48,179a20.94,20.94,0,0,0-.92,5.86,22.25,22.25,0,0,0,1,6.74,16.56,16.56,0,0,1,5.5-14.74c0-.17.09-.34.14-.51a20.37,20.37,0,0,1,8.91-11.47l-.08,0a37.84,37.84,0,0,0-4,1.53A20.87,20.87,0,0,0,118.48,179Z\"></path><path class=\"cls-10\" d=\"M234.26,129.11a42.41,42.41,0,0,0-7.94-24.76,29.82,29.82,0,0,0-19-7.9A33.69,33.69,0,0,1,219.06,122c0,11.34-4.12,24.3-17.45,31.28-19.42,10.16-49.21,5.33-68.54,11.6l.08,0a20.37,20.37,0,0,0-8.91,11.47c-.05.17-.09.34-.14.51h0c5.67-5,16.84-8.54,38.63-5.73,15.56,2,27.93,2.55,38.54-.5a41.2,41.2,0,0,0,25.23-17h0A42.41,42.41,0,0,0,234.26,129.11Z\"></path><path class=\"cls-11\" d=\"M234.26,129.11a42.41,42.41,0,0,0-7.94-24.76,29.82,29.82,0,0,0-19-7.9A33.69,33.69,0,0,1,219.06,122c0,11.34-4.12,24.3-17.45,31.28-19.42,10.16-49.21,5.33-68.54,11.6l.08,0a20.37,20.37,0,0,0-8.91,11.47c-.05.17-.09.34-.14.51h0c5.67-5,16.84-8.54,38.63-5.73,15.56,2,27.93,2.55,38.54-.5a41.2,41.2,0,0,0,25.23-17h0A42.41,42.41,0,0,0,234.26,129.11Z\"></path><path class=\"cls-12\" d=\"M137.8,201.88a20.44,20.44,0,0,1-13.68-25.12h0l0,.08a16.56,16.56,0,0,0-5.5,14.73,20.94,20.94,0,0,0,33.63,9.38A20.37,20.37,0,0,1,137.8,201.88Z\"></path><path class=\"cls-13\" d=\"M144.91,200.4c2.12-6.17,9-15.7,16.33-11.34,0,0,6,3.36,7.23-6.11,0,0,4.49,22.28-17.1,21.53,0,0,4.86-3.55,4.81-7.2A24.73,24.73,0,0,1,144.91,200.4Z\"></path><path class=\"cls-14\" d=\"M153.52,186.75c2.14-1.09,4.16-2.18,8.08-.44,3,1.35,6.88-3.94,3.56-8.66,0,0,.21,4.88-3.72,4.84A8.81,8.81,0,0,0,153.52,186.75Z\"></path><path class=\"cls-15\" d=\"M175.21,115.88c-5.17,7-12.75,12.95-13.64,14.39s1.5,6.11,5,6.45.82-1.36.52-3,1.06,1,5.27.42-1.53-2.2-1.14-4.33,4.74-6.17,6.47-10.25,4.7,0,3.18,3.18c-.6,1.26,4.81-3.54,2.08-7.21S178.22,111.77,175.21,115.88Z\"></path><path class=\"cls-15\" d=\"M160.47,131.28c-.76.73-3,2.37-3,2.37s2.19,3.05,5,3c0,0,.61-.29-.27-1.18S160.27,131.82,160.47,131.28Z\"></path><path class=\"cls-16\" d=\"M84.43,94.7c-7.35-3.56-12.27-7.88-15.54-12.24A45.42,45.42,0,0,0,42.28,150.4a66.82,66.82,0,0,0,25.09,4.67h0A37,37,0,0,1,84.43,94.7Z\"></path><line class=\"cls-17\" x1=\"67.37\" y1=\"155.08\" x2=\"67.37\" y2=\"155.08\"></line><path class=\"cls-18\" d=\"M84.52,81c2,2.91,7.81,7.94,14.63,12.44a36.87,36.87,0,0,1,20.52,9.33A45.42,45.42,0,0,0,84.52,81Z\"></path><path class=\"cls-19\" d=\"M84.52,81c-1.23-.1-2.48-.16-3.74-.16a45.45,45.45,0,0,0-11.89,1.58c3.27,4.36,8.19,8.67,15.54,12.24a36.72,36.72,0,0,1,14.72-1.22C92.33,89,86.54,83.95,84.52,81Z\"></path><path class=\"cls-20\" d=\"M109.73,91.38a33.29,33.29,0,0,0-12.21-7.29C100.46,89.66,103,91.38,109.73,91.38Z\"></path><path class=\"cls-6\" d=\"M96.89,67.66a63.16,63.16,0,0,1,6.54,4.58c.52.39-.93-3.55-2.62-4.3A7.5,7.5,0,0,0,96.89,67.66Z\"></path><path class=\"cls-6\" d=\"M105,73.37a70.75,70.75,0,0,1,6.5,4.64c.53.38-.9-3.56-2.57-4.33A7.5,7.5,0,0,0,105,73.37Z\"></path><path class=\"cls-6\" d=\"M112.55,79a19.59,19.59,0,0,1,3.52,4.39c.26.38.07-2.58-.92-3.42A5.28,5.28,0,0,0,112.55,79Z\"></path><path class=\"cls-21\" d=\"M77.55,151c-.2-.65,2.35-1.48,3-1.51a11.91,11.91,0,0,1,3.57,1.19,16.34,16.34,0,0,1-4.89,1A4.46,4.46,0,0,1,77.55,151Z\"></path><path class=\"cls-21\" d=\"M86.73,148.78c-.22-.51,1.75-1.38,2.29-1.46a9.58,9.58,0,0,1,3,.65,13.15,13.15,0,0,1-3.83,1.23A3.59,3.59,0,0,1,86.73,148.78Z\"></path><path class=\"cls-21\" d=\"M94.41,146c-.22-.4,1.32-1.29,1.76-1.41a7.92,7.92,0,0,1,2.48.27,10.87,10.87,0,0,1-3,1.35A3,3,0,0,1,94.41,146Z\"></path><path class=\"cls-21\" d=\"M100.52,143.19c-.23-.35,1.11-1.27,1.5-1.41a7.25,7.25,0,0,1,2.29.07,10,10,0,0,1-2.67,1.45A2.72,2.72,0,0,1,100.52,143.19Z\"></path><path class=\"cls-21\" d=\"M106.23,140.07c-.22-.29.9-1.16,1.24-1.3a6.31,6.31,0,0,1,2,0,8.66,8.66,0,0,1-2.25,1.39A2.36,2.36,0,0,1,106.23,140.07Z\"></path><path class=\"cls-21\" d=\"M68.34,151.69c-.11-.73,2.73-1.16,3.46-1.09a12.76,12.76,0,0,1,3.57,1.86,17.51,17.51,0,0,1-5.35.26A4.78,4.78,0,0,1,68.34,151.69Z\"></path><path class=\"cls-6\" d=\"M70.08,65.82c2,2.27,6.68,3.74,6.68,3.74A19,19,0,0,1,75.83,62c0-.18-5.75-.09-6.73-4.81C68.91,56.23,68.1,63.55,70.08,65.82Z\"></path><path class=\"cls-4\" d=\"M50.54,174.68a5.49,5.49,0,0,1,2.24-3.88l.19-.11a14,14,0,0,0-1.43-.25c-6.85-1-8.59,3.06-8.95,7.64,0,.26,0,.53,0,.78a8.31,8.31,0,0,1,7.89-4.2Z\"></path><path class=\"cls-4\" d=\"M58.88,173.19c-6.81-4.13-10.63-4.43-12.15,7.14,0,0,7.17-5.67,10.55-1.92,3.68,4.07,8.68.32,6.05-2.06A18.77,18.77,0,0,0,58.88,173.19Z\"></path><path class=\"cls-4\" d=\"M56.06,174.53c-3.86,2.57-3.86,8.62-3.86,8.62s7-3.81,6.5-6.19A2.93,2.93,0,0,0,56.06,174.53Z\"></path><path class=\"cls-4\" d=\"M24,127a5.49,5.49,0,0,1,4.43-.68l.2.08a14,14,0,0,0-.7-1.27c-3.49-6-7.76-4.79-11.56-2.21-.22.15-.43.31-.63.47a8.31,8.31,0,0,1,8.21,3.53Z\"></path><path class=\"cls-4\" d=\"M31.29,134.08c-2.48-9.82-4.47-13.62-14-6.83,0,0,8.13-2.34,9.06,9.22.44,5.47,5.69,6.57,5.63,3A18.77,18.77,0,0,0,31.29,134.08Z\"></path><path class=\"cls-4\" d=\"M27.83,128.82c-4.52-1.07-8.94,3.06-8.94,3.06s6.94-.24,7.78,4C27.14,138.23,27.83,128.82,27.83,128.82Z\"></path><path class=\"cls-22\" d=\"M172.45,112.79a55.39,55.39,0,0,1,15.49-12.5c5.64-3,13.66-4.84,18.5-4.61l1.85,1.59-1-.08a37.75,37.75,0,0,0-19,3.76A55,55,0,0,0,172.45,112.79Z\"></path><path class=\"cls-23\" d=\"M207.12,95.74a34.5,34.5,0,0,1,10.45,2.68,27.42,27.42,0,0,1,8.81,6,27.05,27.05,0,0,0-9.09-5.29,43.65,43.65,0,0,0-9-1.84l-1.84-1.59Z\"></path><path class=\"cls-24\" d=\"M124.52,175.47a27.43,27.43,0,0,1,3.11-1.9,25.35,25.35,0,0,1,2.31-1c.78-.34,1.58-.58,2.38-.84a45.63,45.63,0,0,1,9.84-1.81,95.67,95.67,0,0,1,19.84.78,194.33,194.33,0,0,0,19.66,1.89,66.25,66.25,0,0,0,19.6-1.93,66.44,66.44,0,0,1-19.6,2.3,194.82,194.82,0,0,1-19.75-1.52,94.77,94.77,0,0,0-19.65-.41,44.43,44.43,0,0,0-9.55,1.94c-.76.27-1.53.52-2.27.85a24,24,0,0,0-2.18,1,21.38,21.38,0,0,0-3.93,2.7l-.53.47A18.42,18.42,0,0,1,124.52,175.47Z\"></path><line class=\"cls-25\" x1=\"124.09\" y1=\"176.84\" x2=\"124.09\" y2=\"176.84\"></line><path class=\"cls-6\" d=\"M85.66,97.64c-6.36,1.4-5.37,6.45-5.37,6.45s2-2.43,13.09-3.74A52.36,52.36,0,0,1,85.66,97.64Z\"></path><path class=\"cls-26\" d=\"M118.59,191.58a16.4,16.4,0,0,1-.08-4.24,18.64,18.64,0,0,1,.91-4.18,18.86,18.86,0,0,1,1.87-3.9,19.81,19.81,0,0,1,2.78-3.38l.46-.42s-.63,2-.7,2.51a19.27,19.27,0,0,0-1.61,1.93,17.84,17.84,0,0,0-3.33,7.5A16.22,16.22,0,0,0,118.59,191.58Z\"></path><path class=\"cls-27\" d=\"M65.89,155.08c-3.61-4-6.65-10.29-7.95-16.2a36.79,36.79,0,0,1-.82-9.49l.14-2.38.33-2.36a23,23,0,0,1,.47-2.33,19.65,19.65,0,0,1,.6-2.3,35.6,35.6,0,0,1,3.83-8.64,39.45,39.45,0,0,1,2.68-3.89l1.53-1.8c.51-.6,1.1-1.13,1.64-1.69a37.2,37.2,0,0,1,7.47-5.68,39.82,39.82,0,0,1,8.62-3.62A39.67,39.67,0,0,0,76,98.56a36.78,36.78,0,0,0-7.22,5.83c-.52.57-1.08,1.11-1.56,1.71l-1.45,1.81a38.67,38.67,0,0,0-2.51,3.89,34.62,34.62,0,0,0-3.48,8.52,18.77,18.77,0,0,0-.52,2.24,21.9,21.9,0,0,0-.38,2.27l-.25,2.28-.06,2.3a35.25,35.25,0,0,0,1.06,9.07,36.17,36.17,0,0,0,8.62,15.83l.66.71S66.44,155.12,65.89,155.08Z\"></path><path class=\"cls-28\" d=\"M103.89,166.42A47.14,47.14,0,0,1,94,167.55,37.09,37.09,0,0,1,84,165.91,46.7,46.7,0,0,1,74.71,162a34.57,34.57,0,0,1-8.12-6.17l-.69-.74s2.38,0,3-.06a33.57,33.57,0,0,0,6.72,5.5,45.26,45.26,0,0,0,8.82,4.27A36.2,36.2,0,0,0,94,166.91,47.78,47.78,0,0,0,103.89,166.42Z\"></path></g></g></svg>"
-
-/***/ }),
-
-/***/ 81:
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseIsNative = __webpack_require__(82),
-    getValue = __webpack_require__(88);
-
-/**
- * Gets the native function at `key` of `object`.
- *
- * @private
- * @param {Object} object The object to query.
- * @param {string} key The key of the method to get.
- * @returns {*} Returns the function if it's native, else `undefined`.
- */
-function getNative(object, key) {
-  var value = getValue(object, key);
-  return baseIsNative(value) ? value : undefined;
-}
-
-module.exports = getNative;
-
-
-/***/ }),
-
-/***/ 82:
-/***/ (function(module, exports, __webpack_require__) {
-
-var isFunction = __webpack_require__(83),
-    isMasked = __webpack_require__(85),
-    isObject = __webpack_require__(84),
-    toSource = __webpack_require__(87);
-
-/**
- * Used to match `RegExp`
- * [syntax characters](http://ecma-international.org/ecma-262/7.0/#sec-patterns).
- */
-var reRegExpChar = /[\\^$.*+?()[\]{}|]/g;
-
-/** Used to detect host constructors (Safari). */
-var reIsHostCtor = /^\[object .+?Constructor\]$/;
-
-/** Used for built-in method references. */
-var funcProto = Function.prototype,
-    objectProto = Object.prototype;
-
-/** Used to resolve the decompiled source of functions. */
-var funcToString = funcProto.toString;
-
-/** Used to check objects for own properties. */
-var hasOwnProperty = objectProto.hasOwnProperty;
-
-/** Used to detect if a method is native. */
-var reIsNative = RegExp('^' +
-  funcToString.call(hasOwnProperty).replace(reRegExpChar, '\\$&')
-  .replace(/hasOwnProperty|(function).*?(?=\\\()| for .+?(?=\\\])/g, '$1.*?') + '$'
-);
-
-/**
- * The base implementation of `_.isNative` without bad shim checks.
- *
- * @private
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is a native function,
- *  else `false`.
- */
-function baseIsNative(value) {
-  if (!isObject(value) || isMasked(value)) {
-    return false;
-  }
-  var pattern = isFunction(value) ? reIsNative : reIsHostCtor;
-  return pattern.test(toSource(value));
-}
-
-module.exports = baseIsNative;
-
-
-/***/ }),
-
-/***/ 83:
-/***/ (function(module, exports, __webpack_require__) {
-
-var baseGetTag = __webpack_require__(6),
-    isObject = __webpack_require__(84);
-
-/** `Object#toString` result references. */
-var asyncTag = '[object AsyncFunction]',
-    funcTag = '[object Function]',
-    genTag = '[object GeneratorFunction]',
-    proxyTag = '[object Proxy]';
-
-/**
- * Checks if `value` is classified as a `Function` object.
- *
- * @static
- * @memberOf _
- * @since 0.1.0
- * @category Lang
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is a function, else `false`.
- * @example
- *
- * _.isFunction(_);
- * // => true
- *
- * _.isFunction(/abc/);
- * // => false
- */
-function isFunction(value) {
-  if (!isObject(value)) {
-    return false;
-  }
-  // The use of `Object#toString` avoids issues with the `typeof` operator
-  // in Safari 9 which returns 'object' for typed arrays and other constructors.
-  var tag = baseGetTag(value);
-  return tag == funcTag || tag == genTag || tag == asyncTag || tag == proxyTag;
-}
-
-module.exports = isFunction;
-
-
-/***/ }),
-
-/***/ 84:
-/***/ (function(module, exports) {
-
-/**
- * Checks if `value` is the
- * [language type](http://www.ecma-international.org/ecma-262/7.0/#sec-ecmascript-language-types)
- * of `Object`. (e.g. arrays, functions, objects, regexes, `new Number(0)`, and `new String('')`)
- *
- * @static
- * @memberOf _
- * @since 0.1.0
- * @category Lang
- * @param {*} value The value to check.
- * @returns {boolean} Returns `true` if `value` is an object, else `false`.
- * @example
- *
- * _.isObject({});
- * // => true
- *
- * _.isObject([1, 2, 3]);
- * // => true
- *
- * _.isObject(_.noop);
- * // => true
- *
- * _.isObject(null);
- * // => false
- */
-function isObject(value) {
-  var type = typeof value;
-  return value != null && (type == 'object' || type == 'function');
-}
-
-module.exports = isObject;
-
-
-/***/ }),
-
-/***/ 85:
-/***/ (function(module, exports, __webpack_require__) {
-
-var coreJsData = __webpack_require__(86);
-
-/** Used to detect methods masquerading as native. */
-var maskSrcKey = (function() {
-  var uid = /[^.]+$/.exec(coreJsData && coreJsData.keys && coreJsData.keys.IE_PROTO || '');
-  return uid ? ('Symbol(src)_1.' + uid) : '';
-}());
-
-/**
- * Checks if `func` has its source masked.
- *
- * @private
- * @param {Function} func The function to check.
- * @returns {boolean} Returns `true` if `func` is masked, else `false`.
- */
-function isMasked(func) {
-  return !!maskSrcKey && (maskSrcKey in func);
-}
-
-module.exports = isMasked;
-
-
-/***/ }),
-
-/***/ 86:
-/***/ (function(module, exports, __webpack_require__) {
-
-var root = __webpack_require__(8);
-
-/** Used to detect overreaching core-js shims. */
-var coreJsData = root['__core-js_shared__'];
-
-module.exports = coreJsData;
-
-
-/***/ }),
-
-/***/ 87:
-/***/ (function(module, exports) {
-
-/** Used for built-in method references. */
-var funcProto = Function.prototype;
-
-/** Used to resolve the decompiled source of functions. */
-var funcToString = funcProto.toString;
-
-/**
- * Converts `func` to its source code.
- *
- * @private
- * @param {Function} func The function to convert.
- * @returns {string} Returns the source code.
- */
-function toSource(func) {
-  if (func != null) {
-    try {
-      return funcToString.call(func);
-    } catch (e) {}
-    try {
-      return (func + '');
-    } catch (e) {}
-  }
-  return '';
-}
-
-module.exports = toSource;
-
-
-/***/ }),
-
-/***/ 88:
-/***/ (function(module, exports) {
-
-/**
- * Gets the value at `key` of `object`.
- *
- * @private
- * @param {Object} [object] The object to query.
- * @param {string} key The key of the property to get.
- * @returns {*} Returns the property value.
- */
-function getValue(object, key) {
-  return object == null ? undefined : object[key];
-}
-
-module.exports = getValue;
-
-
-/***/ }),
-
-/***/ 89:
-/***/ (function(module, exports) {
-
-/**
- * Removes `key` and its value from the hash.
- *
- * @private
- * @name delete
- * @memberOf Hash
- * @param {Object} hash The hash to modify.
- * @param {string} key The key of the value to remove.
- * @returns {boolean} Returns `true` if the entry was removed, else `false`.
- */
-function hashDelete(key) {
-  var result = this.has(key) && delete this.__data__[key];
-  this.size -= result ? 1 : 0;
-  return result;
-}
-
-module.exports = hashDelete;
-
-
-/***/ }),
-
-/***/ 9:
-/***/ (function(module, exports, __webpack_require__) {
-
-/* WEBPACK VAR INJECTION */(function(global) {/** Detect free variable `global` from Node.js. */
-var freeGlobal = typeof global == 'object' && global && global.Object === Object && global;
-
-module.exports = freeGlobal;
-
-/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(792)))
-
-/***/ }),
-
-/***/ 90:
-/***/ (function(module, exports, __webpack_require__) {
-
-var nativeCreate = __webpack_require__(80);
-
-/** Used to stand-in for `undefined` hash values. */
-var HASH_UNDEFINED = '__lodash_hash_undefined__';
-
-/** Used for built-in method references. */
-var objectProto = Object.prototype;
-
-/** Used to check objects for own properties. */
-var hasOwnProperty = objectProto.hasOwnProperty;
-
-/**
- * Gets the hash value for `key`.
- *
- * @private
- * @name get
- * @memberOf Hash
- * @param {string} key The key of the value to get.
- * @returns {*} Returns the entry value.
- */
-function hashGet(key) {
-  var data = this.__data__;
-  if (nativeCreate) {
-    var result = data[key];
-    return result === HASH_UNDEFINED ? undefined : result;
-  }
-  return hasOwnProperty.call(data, key) ? data[key] : undefined;
-}
-
-module.exports = hashGet;
-
-
-/***/ }),
-
-/***/ 91:
-/***/ (function(module, exports, __webpack_require__) {
-
-var nativeCreate = __webpack_require__(80);
-
-/** Used for built-in method references. */
-var objectProto = Object.prototype;
-
-/** Used to check objects for own properties. */
-var hasOwnProperty = objectProto.hasOwnProperty;
-
-/**
- * Checks if a hash value for `key` exists.
- *
- * @private
- * @name has
- * @memberOf Hash
- * @param {string} key The key of the entry to check.
- * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
- */
-function hashHas(key) {
-  var data = this.__data__;
-  return nativeCreate ? (data[key] !== undefined) : hasOwnProperty.call(data, key);
-}
-
-module.exports = hashHas;
-
-
-/***/ }),
-
-/***/ 916:
+/***/ 3641:
 /***/ (function(module, exports, __webpack_require__) {
 
 /* WEBPACK VAR INJECTION */(function(module, global) {var __WEBPACK_AMD_DEFINE_RESULT__;/*! https://mths.be/punycode v1.4.1 by @mathias */
@@ -40176,6 +31411,8095 @@ module.exports = hashHas;
 
 /***/ }),
 
+/***/ 3642:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3642__;
+
+/***/ }),
+
+/***/ 3643:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_3643__;
+
+/***/ }),
+
+/***/ 3644:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const validProtocols = /(http|https|ftp|data|resource|chrome):/i;
+const tokenSplitRegex = /(\s|\'|\"|\\)+/;
+const ELLIPSIS = "\u2026";
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Returns true if the given object is a grip (see RDP protocol)
+ */
+function isGrip(object) {
+  return object && object.actor;
+}
+
+function escapeNewLines(value) {
+  return value.replace(/\r/gm, "\\r").replace(/\n/gm, "\\n");
+}
+
+// Map from character code to the corresponding escape sequence.  \0
+// isn't here because it would require special treatment in some
+// situations.  \b, \f, and \v aren't here because they aren't very
+// common.  \' isn't here because there's no need, we only
+// double-quote strings.
+const escapeMap = {
+  // Tab.
+  9: "\\t",
+  // Newline.
+  0xa: "\\n",
+  // Carriage return.
+  0xd: "\\r",
+  // Quote.
+  0x22: '\\"',
+  // Backslash.
+  0x5c: "\\\\"
+};
+
+// Regexp that matches any character we might possibly want to escape.
+// Note that we over-match here, because it's difficult to, say, match
+// an unpaired surrogate with a regexp.  The details are worked out by
+// the replacement function; see |escapeString|.
+const escapeRegexp = new RegExp("[" +
+// Quote and backslash.
+'"\\\\' +
+// Controls.
+"\x00-\x1f" +
+// More controls.
+"\x7f-\x9f" +
+// BOM
+"\ufeff" +
+// Specials, except for the replacement character.
+"\ufff0-\ufffc\ufffe\uffff" +
+// Surrogates.
+"\ud800-\udfff" +
+// Mathematical invisibles.
+"\u2061-\u2064" +
+// Line and paragraph separators.
+"\u2028-\u2029" +
+// Private use area.
+"\ue000-\uf8ff" + "]", "g");
+
+/**
+ * Escape a string so that the result is viewable and valid JS.
+ * Control characters, other invisibles, invalid characters,
+ * backslash, and double quotes are escaped.  The resulting string is
+ * surrounded by double quotes.
+ *
+ * @param {String} str
+ *        the input
+ * @param {Boolean} escapeWhitespace
+ *        if true, TAB, CR, and NL characters will be escaped
+ * @return {String} the escaped string
+ */
+function escapeString(str, escapeWhitespace) {
+  return `"${str.replace(escapeRegexp, (match, offset) => {
+    const c = match.charCodeAt(0);
+    if (c in escapeMap) {
+      if (!escapeWhitespace && (c === 9 || c === 0xa || c === 0xd)) {
+        return match[0];
+      }
+      return escapeMap[c];
+    }
+    if (c >= 0xd800 && c <= 0xdfff) {
+      // Find the full code point containing the surrogate, with a
+      // special case for a trailing surrogate at the start of the
+      // string.
+      if (c >= 0xdc00 && offset > 0) {
+        --offset;
+      }
+      const codePoint = str.codePointAt(offset);
+      if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+        // Unpaired surrogate.
+        return `\\u${codePoint.toString(16)}`;
+      } else if (codePoint >= 0xf0000 && codePoint <= 0x10fffd) {
+        // Private use area.  Because we visit each pair of a such a
+        // character, return the empty string for one half and the
+        // real result for the other, to avoid duplication.
+        if (c <= 0xdbff) {
+          return `\\u{${codePoint.toString(16)}}`;
+        }
+        return "";
+      }
+      // Other surrogate characters are passed through.
+      return match;
+    }
+    return `\\u${`0000${c.toString(16)}`.substr(-4)}`;
+  })}"`;
+}
+
+/**
+ * Escape a property name, if needed.  "Escaping" in this context
+ * means surrounding the property name with quotes.
+ *
+ * @param {String}
+ *        name the property name
+ * @return {String} either the input, or the input surrounded by
+ *                  quotes, properly quoted in JS syntax.
+ */
+function maybeEscapePropertyName(name) {
+  // Quote the property name if it needs quoting.  This particular
+  // test is an approximation; see
+  // https://mathiasbynens.be/notes/javascript-properties.  However,
+  // the full solution requires a fair amount of Unicode data, and so
+  // let's defer that until either it's important, or the \p regexp
+  // syntax lands, see
+  // https://github.com/tc39/proposal-regexp-unicode-property-escapes.
+  if (!/^\w+$/.test(name)) {
+    name = escapeString(name);
+  }
+  return name;
+}
+
+function cropMultipleLines(text, limit) {
+  return escapeNewLines(cropString(text, limit));
+}
+
+function rawCropString(text, limit, alternativeText = ELLIPSIS) {
+  // Crop the string only if a limit is actually specified.
+  if (!limit || limit <= 0) {
+    return text;
+  }
+
+  // Set the limit at least to the length of the alternative text
+  // plus one character of the original text.
+  if (limit <= alternativeText.length) {
+    limit = alternativeText.length + 1;
+  }
+
+  const halfLimit = (limit - alternativeText.length) / 2;
+
+  if (text.length > limit) {
+    return text.substr(0, Math.ceil(halfLimit)) + alternativeText + text.substr(text.length - Math.floor(halfLimit));
+  }
+
+  return text;
+}
+
+function cropString(text, limit, alternativeText) {
+  return rawCropString(sanitizeString(`${text}`), limit, alternativeText);
+}
+
+function sanitizeString(text) {
+  // Replace all non-printable characters, except of
+  // (horizontal) tab (HT: \x09) and newline (LF: \x0A, CR: \x0D),
+  // with unicode replacement character (u+fffd).
+  // eslint-disable-next-line no-control-regex
+  const re = new RegExp("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]", "g");
+  return text.replace(re, "\ufffd");
+}
+
+function parseURLParams(url) {
+  url = new URL(url);
+  return parseURLEncodedText(url.searchParams);
+}
+
+function parseURLEncodedText(text) {
+  const params = [];
+
+  // In case the text is empty just return the empty parameters
+  if (text == "") {
+    return params;
+  }
+
+  const searchParams = new URLSearchParams(text);
+  const entries = [...searchParams.entries()];
+  return entries.map(entry => {
+    return {
+      name: entry[0],
+      value: entry[1]
+    };
+  });
+}
+
+function getFileName(url) {
+  const split = splitURLBase(url);
+  return split.name;
+}
+
+function splitURLBase(url) {
+  if (!isDataURL(url)) {
+    return splitURLTrue(url);
+  }
+  return {};
+}
+
+function getURLDisplayString(url) {
+  return cropString(url);
+}
+
+function isDataURL(url) {
+  return url && url.substr(0, 5) == "data:";
+}
+
+function splitURLTrue(url) {
+  const reSplitFile = /(.*?):\/{2,3}([^\/]*)(.*?)([^\/]*?)($|\?.*)/;
+  const m = reSplitFile.exec(url);
+
+  if (!m) {
+    return {
+      name: url,
+      path: url
+    };
+  } else if (m[4] == "" && m[5] == "") {
+    return {
+      protocol: m[1],
+      domain: m[2],
+      path: m[3],
+      name: m[3] != "/" ? m[3] : m[2]
+    };
+  }
+
+  return {
+    protocol: m[1],
+    domain: m[2],
+    path: m[2] + m[3],
+    name: m[4] + m[5]
+  };
+}
+
+/**
+ * Wrap the provided render() method of a rep in a try/catch block that will
+ * render a fallback rep if the render fails.
+ */
+function wrapRender(renderMethod) {
+  const wrappedFunction = function (props) {
+    try {
+      return renderMethod.call(this, props);
+    } catch (e) {
+      console.error(e);
+      return span({
+        className: "objectBox objectBox-failure",
+        title: "This object could not be rendered, " + "please file a bug on bugzilla.mozilla.org"
+      },
+      /* Labels have to be hardcoded for reps, see Bug 1317038. */
+      "Invalid object");
+    }
+  };
+  wrappedFunction.propTypes = renderMethod.propTypes;
+  return wrappedFunction;
+}
+
+/**
+ * Get preview items from a Grip.
+ *
+ * @param {Object} Grip from which we want the preview items
+ * @return {Array} Array of the preview items of the grip, or an empty array
+ *                 if the grip does not have preview items
+ */
+function getGripPreviewItems(grip) {
+  if (!grip) {
+    return [];
+  }
+
+  // Promise resolved value Grip
+  if (grip.promiseState && grip.promiseState.value) {
+    return [grip.promiseState.value];
+  }
+
+  // Array Grip
+  if (grip.preview && grip.preview.items) {
+    return grip.preview.items;
+  }
+
+  // Node Grip
+  if (grip.preview && grip.preview.childNodes) {
+    return grip.preview.childNodes;
+  }
+
+  // Set or Map Grip
+  if (grip.preview && grip.preview.entries) {
+    return grip.preview.entries.reduce((res, entry) => res.concat(entry), []);
+  }
+
+  // Event Grip
+  if (grip.preview && grip.preview.target) {
+    const keys = Object.keys(grip.preview.properties);
+    const values = Object.values(grip.preview.properties);
+    return [grip.preview.target, ...keys, ...values];
+  }
+
+  // RegEx Grip
+  if (grip.displayString) {
+    return [grip.displayString];
+  }
+
+  // Generic Grip
+  if (grip.preview && grip.preview.ownProperties) {
+    let propertiesValues = Object.values(grip.preview.ownProperties).map(property => property.value || property);
+
+    const propertyKeys = Object.keys(grip.preview.ownProperties);
+    propertiesValues = propertiesValues.concat(propertyKeys);
+
+    // ArrayBuffer Grip
+    if (grip.preview.safeGetterValues) {
+      propertiesValues = propertiesValues.concat(Object.values(grip.preview.safeGetterValues).map(property => property.getterValue || property));
+    }
+
+    return propertiesValues;
+  }
+
+  return [];
+}
+
+/**
+ * Get the type of an object.
+ *
+ * @param {Object} Grip from which we want the type.
+ * @param {boolean} noGrip true if the object is not a grip.
+ * @return {boolean}
+ */
+function getGripType(object, noGrip) {
+  if (noGrip || Object(object) !== object) {
+    return typeof object;
+  }
+  if (object.type === "object") {
+    return object.class;
+  }
+  return object.type;
+}
+
+/**
+ * Determines whether a grip is a string containing a URL.
+ *
+ * @param string grip
+ *        The grip, which may contain a URL.
+ * @return boolean
+ *         Whether the grip is a string containing a URL.
+ */
+function containsURL(grip) {
+  // An URL can't be shorter than 5 char (e.g. "ftp:").
+  if (typeof grip !== "string" || grip.length < 5) {
+    return false;
+  }
+
+  return validProtocols.test(grip);
+}
+
+/**
+ * Determines whether a string token is a valid URL.
+ *
+ * @param string token
+ *        The token.
+ * @return boolean
+ *         Whenther the token is a URL.
+ */
+function isURL(token) {
+  try {
+    if (!validProtocols.test(token)) {
+      return false;
+    }
+    new URL(token);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Returns new array in which `char` are interleaved between the original items.
+ *
+ * @param {Array} items
+ * @param {String} char
+ * @returns Array
+ */
+function interleave(items, char) {
+  return items.reduce((res, item, index) => {
+    if (index !== items.length - 1) {
+      return res.concat(item, char);
+    }
+    return res.concat(item);
+  }, []);
+}
+
+const ellipsisElement = span({
+  key: "more",
+  className: "more-ellipsis",
+  title: `more${ELLIPSIS}`
+}, ELLIPSIS);
+
+module.exports = {
+  interleave,
+  isGrip,
+  isURL,
+  cropString,
+  containsURL,
+  rawCropString,
+  sanitizeString,
+  escapeString,
+  wrapRender,
+  cropMultipleLines,
+  parseURLParams,
+  parseURLEncodedText,
+  getFileName,
+  getURLDisplayString,
+  maybeEscapePropertyName,
+  getGripPreviewItems,
+  getGripType,
+  tokenSplitRegex,
+  ellipsisElement,
+  ELLIPSIS
+};
+
+/***/ }),
+
+/***/ 3645:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+module.exports = {
+  MODE: {
+    TINY: Symbol("TINY"),
+    SHORT: Symbol("SHORT"),
+    LONG: Symbol("LONG")
+  }
+};
+
+/***/ }),
+
+/***/ 3646:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const {
+  originalToGeneratedId,
+  generatedToOriginalId,
+  isGeneratedId,
+  isOriginalId
+} = __webpack_require__(3652);
+
+const { workerUtils: { WorkerDispatcher } } = __webpack_require__(3651);
+
+const dispatcher = new WorkerDispatcher();
+
+const getOriginalURLs = dispatcher.task("getOriginalURLs");
+const getGeneratedRanges = dispatcher.task("getGeneratedRanges", {
+  queue: true
+});
+const getGeneratedLocation = dispatcher.task("getGeneratedLocation", {
+  queue: true
+});
+const getAllGeneratedLocations = dispatcher.task("getAllGeneratedLocations", {
+  queue: true
+});
+const getOriginalLocation = dispatcher.task("getOriginalLocation");
+const getLocationScopes = dispatcher.task("getLocationScopes");
+const getOriginalSourceText = dispatcher.task("getOriginalSourceText");
+const applySourceMap = dispatcher.task("applySourceMap");
+const clearSourceMaps = dispatcher.task("clearSourceMaps");
+const hasMappedSource = dispatcher.task("hasMappedSource");
+
+module.exports = {
+  originalToGeneratedId,
+  generatedToOriginalId,
+  isGeneratedId,
+  isOriginalId,
+  hasMappedSource,
+  getOriginalURLs,
+  getGeneratedRanges,
+  getGeneratedLocation,
+  getAllGeneratedLocations,
+  getOriginalLocation,
+  getLocationScopes,
+  getOriginalSourceText,
+  applySourceMap,
+  clearSourceMaps,
+  startSourceMapWorker: dispatcher.start.bind(dispatcher),
+  stopSourceMapWorker: dispatcher.stop.bind(dispatcher)
+};
+
+/***/ }),
+
+/***/ 3647:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+__webpack_require__(3672);
+
+// Load all existing rep templates
+const Undefined = __webpack_require__(3673);
+const Null = __webpack_require__(3674);
+const StringRep = __webpack_require__(3648);
+const Number = __webpack_require__(3675);
+const ArrayRep = __webpack_require__(3649);
+const Obj = __webpack_require__(3676);
+const SymbolRep = __webpack_require__(3677);
+const InfinityRep = __webpack_require__(3678);
+const NaNRep = __webpack_require__(3679);
+const Accessor = __webpack_require__(3680);
+
+// DOM types (grips)
+const Attribute = __webpack_require__(3681);
+const DateTime = __webpack_require__(3682);
+const Document = __webpack_require__(3683);
+const DocumentType = __webpack_require__(3684);
+const Event = __webpack_require__(3685);
+const Func = __webpack_require__(3658);
+const PromiseRep = __webpack_require__(3686);
+const RegExp = __webpack_require__(3687);
+const StyleSheet = __webpack_require__(3688);
+const CommentNode = __webpack_require__(3689);
+const ElementNode = __webpack_require__(3690);
+const TextNode = __webpack_require__(3691);
+const ErrorRep = __webpack_require__(3660);
+const Window = __webpack_require__(3692);
+const ObjectWithText = __webpack_require__(3693);
+const ObjectWithURL = __webpack_require__(3694);
+const GripArray = __webpack_require__(3661);
+const GripMap = __webpack_require__(3663);
+const GripMapEntry = __webpack_require__(3664);
+const Grip = __webpack_require__(3656);
+
+// List of all registered template.
+// XXX there should be a way for extensions to register a new
+// or modify an existing rep.
+const reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor];
+
+/**
+ * Generic rep that is used for rendering native JS types or an object.
+ * The right template used for rendering is picked automatically according
+ * to the current value type. The value must be passed is as 'object'
+ * property.
+ */
+const Rep = function (props) {
+  const { object, defaultRep } = props;
+  const rep = getRep(object, defaultRep, props.noGrip);
+  return rep(props);
+};
+
+// Helpers
+
+/**
+ * Return a rep object that is responsible for rendering given
+ * object.
+ *
+ * @param object {Object} Object to be rendered in the UI. This
+ * can be generic JS object as well as a grip (handle to a remote
+ * debuggee object).
+ *
+ * @param defaultRep {React.Component} The default template
+ * that should be used to render given object if none is found.
+ *
+ * @param noGrip {Boolean} If true, will only check reps not made for remote
+ *                         objects.
+ */
+function getRep(object, defaultRep = Obj, noGrip = false) {
+  for (let i = 0; i < reps.length; i++) {
+    const rep = reps[i];
+    try {
+      // supportsObject could return weight (not only true/false
+      // but a number), which would allow to priorities templates and
+      // support better extensibility.
+      if (rep.supportsObject(object, noGrip)) {
+        return rep.rep;
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  return defaultRep.rep;
+}
+
+module.exports = {
+  Rep,
+  REPS: {
+    Accessor,
+    ArrayRep,
+    Attribute,
+    CommentNode,
+    DateTime,
+    Document,
+    DocumentType,
+    ElementNode,
+    ErrorRep,
+    Event,
+    Func,
+    Grip,
+    GripArray,
+    GripMap,
+    GripMapEntry,
+    InfinityRep,
+    NaNRep,
+    Null,
+    Number,
+    Obj,
+    ObjectWithText,
+    ObjectWithURL,
+    PromiseRep,
+    RegExp,
+    Rep,
+    StringRep,
+    StyleSheet,
+    SymbolRep,
+    TextNode,
+    Undefined,
+    Window
+  },
+  // Exporting for tests
+  getRep
+};
+
+/***/ }),
+
+/***/ 3648:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const {
+  containsURL,
+  isURL,
+  escapeString,
+  getGripType,
+  rawCropString,
+  sanitizeString,
+  wrapRender,
+  isGrip,
+  tokenSplitRegex,
+  ELLIPSIS
+} = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { a, span } = dom;
+
+/**
+ * Renders a string. String value is enclosed within quotes.
+ */
+StringRep.propTypes = {
+  useQuotes: PropTypes.bool,
+  escapeWhitespace: PropTypes.bool,
+  style: PropTypes.object,
+  cropLimit: PropTypes.number.isRequired,
+  member: PropTypes.object,
+  object: PropTypes.object.isRequired,
+  openLink: PropTypes.func,
+  className: PropTypes.string
+};
+
+function StringRep(props) {
+  const {
+    className,
+    style,
+    cropLimit,
+    object,
+    useQuotes = true,
+    escapeWhitespace = true,
+    member,
+    openLink
+  } = props;
+
+  let text = object;
+
+  const isLong = isLongString(object);
+  const isOpen = member && member.open;
+  const shouldCrop = !isOpen && cropLimit && text.length > cropLimit;
+
+  if (isLong) {
+    text = maybeCropLongString({
+      shouldCrop,
+      cropLimit
+    }, text);
+
+    const { fullText } = object;
+    if (isOpen && fullText) {
+      text = fullText;
+    }
+  }
+
+  text = formatText({
+    useQuotes,
+    escapeWhitespace
+  }, text);
+
+  const config = getElementConfig({
+    className,
+    style,
+    actor: object.actor
+  });
+
+  if (!isLong) {
+    if (containsURL(text)) {
+      return span(config, ...getLinkifiedElements(text, shouldCrop && cropLimit, openLink));
+    }
+
+    // Cropping of longString has been handled before formatting.
+    text = maybeCropString({
+      isLong,
+      shouldCrop,
+      cropLimit
+    }, text);
+  }
+
+  return span(config, text);
+}
+
+function maybeCropLongString(opts, text) {
+  const { shouldCrop, cropLimit } = opts;
+
+  const { initial, length } = text;
+
+  text = shouldCrop ? initial.substring(0, cropLimit) : initial;
+
+  if (text.length < length) {
+    text += ELLIPSIS;
+  }
+
+  return text;
+}
+
+function formatText(opts, text) {
+  const { useQuotes, escapeWhitespace } = opts;
+
+  return useQuotes ? escapeString(text, escapeWhitespace) : sanitizeString(text);
+}
+
+function getElementConfig(opts) {
+  const { className, style, actor } = opts;
+
+  const config = {};
+
+  if (actor) {
+    config["data-link-actor-id"] = actor;
+  }
+
+  const classNames = ["objectBox", "objectBox-string"];
+  if (className) {
+    classNames.push(className);
+  }
+  config.className = classNames.join(" ");
+
+  if (style) {
+    config.style = style;
+  }
+
+  return config;
+}
+
+function maybeCropString(opts, text) {
+  const { shouldCrop, cropLimit } = opts;
+
+  return shouldCrop ? rawCropString(text, cropLimit) : text;
+}
+
+/**
+ * Get an array of the elements representing the string, cropped if needed,
+ * with actual links.
+ *
+ * @param {String} text: The actual string to linkify.
+ * @param {Integer | null} cropLimit
+ * @param {Function} openLink: Function handling the link opening.
+ * @returns {Array<String|ReactElement>}
+ */
+function getLinkifiedElements(text, cropLimit, openLink) {
+  const halfLimit = Math.ceil((cropLimit - ELLIPSIS.length) / 2);
+  const startCropIndex = cropLimit ? halfLimit : null;
+  const endCropIndex = cropLimit ? text.length - halfLimit : null;
+
+  // As we walk through the tokens of the source string, we make sure to
+  // preserve the original whitespace that separated the tokens.
+  let currentIndex = 0;
+  const items = [];
+  for (const token of text.split(tokenSplitRegex)) {
+    if (isURL(token)) {
+      // Let's grab all the non-url strings before the link.
+      const tokenStart = text.indexOf(token, currentIndex);
+      let nonUrlText = text.slice(currentIndex, tokenStart);
+      nonUrlText = getCroppedString(nonUrlText, currentIndex, startCropIndex, endCropIndex);
+      if (nonUrlText) {
+        items.push(nonUrlText);
+      }
+
+      // Update the index to match the beginning of the token.
+      currentIndex = tokenStart;
+
+      const linkText = getCroppedString(token, currentIndex, startCropIndex, endCropIndex);
+      if (linkText) {
+        items.push(a({
+          className: "url",
+          title: token,
+          draggable: false,
+          onClick: openLink ? e => {
+            e.preventDefault();
+            openLink(token);
+          } : null
+        }, linkText));
+      }
+
+      currentIndex = tokenStart + token.length;
+    }
+  }
+
+  // Clean up any non-URL text at the end of the source string,
+  // i.e. not handled in the loop.
+  if (currentIndex !== text.length) {
+    let nonUrlText = text.slice(currentIndex, text.length);
+    if (currentIndex < endCropIndex) {
+      const cutIndex = endCropIndex - currentIndex;
+      nonUrlText = nonUrlText.substring(cutIndex);
+    }
+    items.push(nonUrlText);
+  }
+
+  return items;
+}
+
+/**
+ * Returns a cropped substring given an offset, start and end crop indices in a
+ * parent string.
+ *
+ * @param {String} text: The substring to crop.
+ * @param {Integer} offset: The offset corresponding to the index at which
+ *                          the substring is in the parent string.
+ * @param {Integer|null} startCropIndex: the index where the start of the crop
+ *                                       should happen in the parent string.
+ * @param {Integer|null} endCropIndex: the index where the end of the crop
+ *                                     should happen in the parent string
+ * @returns {String|null} The cropped substring, or null if the text is
+ *                        completly cropped.
+ */
+function getCroppedString(text, offset = 0, startCropIndex, endCropIndex) {
+  if (!startCropIndex) {
+    return text;
+  }
+
+  const start = offset;
+  const end = offset + text.length;
+
+  const shouldBeVisible = !(start >= startCropIndex && end <= endCropIndex);
+  if (!shouldBeVisible) {
+    return null;
+  }
+
+  const shouldCropEnd = start < startCropIndex && end > startCropIndex;
+  const shouldCropStart = start < endCropIndex && end > endCropIndex;
+  if (shouldCropEnd) {
+    const cutIndex = startCropIndex - start;
+    return text.substring(0, cutIndex) + ELLIPSIS + (shouldCropStart ? text.substring(endCropIndex - start) : "");
+  }
+
+  if (shouldCropStart) {
+    // The string should be cropped at the beginning.
+    const cutIndex = endCropIndex - start;
+    return text.substring(cutIndex);
+  }
+
+  return text;
+}
+
+function isLongString(object) {
+  return object && object.type === "longString";
+}
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip === false && isGrip(object)) {
+    return isLongString(object);
+  }
+
+  return getGripType(object, noGrip) == "string";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(StringRep),
+  supportsObject,
+  isLongString
+};
+
+/***/ }),
+
+/***/ 3649:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const dom = __webpack_require__(3643);
+const PropTypes = __webpack_require__(3642);
+const { wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const { span } = dom;
+
+const ModePropType = PropTypes.oneOf(
+// @TODO Change this to Object.values when supported in Node's version of V8
+Object.keys(MODE).map(key => MODE[key]));
+
+/**
+ * Renders an array. The array is enclosed by left and right bracket
+ * and the max number of rendered items depends on the current mode.
+ */
+ArrayRep.propTypes = {
+  mode: ModePropType,
+  object: PropTypes.array.isRequired
+};
+
+function ArrayRep(props) {
+  const { object, mode = MODE.SHORT } = props;
+
+  let items;
+  let brackets;
+  const needSpace = function (space) {
+    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
+  };
+
+  if (mode === MODE.TINY) {
+    const isEmpty = object.length === 0;
+    if (isEmpty) {
+      items = [];
+    } else {
+      items = [span({
+        className: "more-ellipsis",
+        title: "more…"
+      }, "…")];
+    }
+    brackets = needSpace(false);
+  } else {
+    items = arrayIterator(props, object, maxLengthMap.get(mode));
+    brackets = needSpace(items.length > 0);
+  }
+
+  return span({
+    className: "objectBox objectBox-array"
+  }, span({
+    className: "arrayLeftBracket"
+  }, brackets.left), ...items, span({
+    className: "arrayRightBracket"
+  }, brackets.right));
+}
+
+function arrayIterator(props, array, max) {
+  const items = [];
+
+  for (let i = 0; i < array.length && i < max; i++) {
+    const config = {
+      mode: MODE.TINY,
+      delim: i == array.length - 1 ? "" : ", "
+    };
+    let item;
+
+    try {
+      item = ItemRep(_extends({}, props, config, {
+        object: array[i]
+      }));
+    } catch (exc) {
+      item = ItemRep(_extends({}, props, config, {
+        object: exc
+      }));
+    }
+    items.push(item);
+  }
+
+  if (array.length > max) {
+    items.push(span({
+      className: "more-ellipsis",
+      title: "more…"
+    }, "…"));
+  }
+
+  return items;
+}
+
+/**
+ * Renders array item. Individual values are separated by a comma.
+ */
+ItemRep.propTypes = {
+  object: PropTypes.any.isRequired,
+  delim: PropTypes.string.isRequired,
+  mode: ModePropType
+};
+
+function ItemRep(props) {
+  const { Rep } = __webpack_require__(3647);
+
+  const { object, delim, mode } = props;
+  return span({}, Rep(_extends({}, props, {
+    object: object,
+    mode: mode
+  })), delim);
+}
+
+function getLength(object) {
+  return object.length;
+}
+
+function supportsObject(object) {
+  return Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]";
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ArrayRep),
+  supportsObject,
+  maxLengthMap,
+  getLength,
+  ModePropType
+};
+
+/***/ }),
+
+/***/ 365:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M1.5 14.042h4.095a.5.5 0 0 0 0-1H1.5a.5.5 0 1 0 0 1zM7.983 2a.5.5 0 0 1 .517.5v7.483l3.136-3.326a.5.5 0 1 1 .728.686l-4 4.243a.499.499 0 0 1-.73-.004L3.635 7.343a.5.5 0 0 1 .728-.686L7.5 9.983V3H1.536C1.24 3 1 2.776 1 2.5s.24-.5.536-.5h6.447zM10.5 14.042h4.095a.5.5 0 0 0 0-1H10.5a.5.5 0 1 0 0 1z\"></path></g></svg>"
+
+/***/ }),
+
+/***/ 3650:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+const { maybeEscapePropertyName, wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const { span } = __webpack_require__(3643);
+
+/**
+ * Property for Obj (local JS objects), Grip (remote JS objects)
+ * and GripMap (remote JS maps and weakmaps) reps.
+ * It's used to render object properties.
+ */
+PropRep.propTypes = {
+  // Property name.
+  name: PropTypes.oneOfType([PropTypes.string, PropTypes.object]).isRequired,
+  // Equal character rendered between property name and value.
+  equal: PropTypes.string,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func,
+  // Normally a PropRep will quote a property name that isn't valid
+  // when unquoted; but this flag can be used to suppress the
+  // quoting.
+  suppressQuotes: PropTypes.bool
+};
+
+/**
+ * Function that given a name, a delimiter and an object returns an array
+ * of React elements representing an object property (e.g. `name: value`)
+ *
+ * @param {Object} props
+ * @return {Array} Array of React elements.
+ */
+function PropRep(props) {
+  const Grip = __webpack_require__(3656);
+  const { Rep } = __webpack_require__(3647);
+
+  let { name, mode, equal, suppressQuotes } = props;
+
+  let key;
+  // The key can be a simple string, for plain objects,
+  // or another object for maps and weakmaps.
+  if (typeof name === "string") {
+    if (!suppressQuotes) {
+      name = maybeEscapePropertyName(name);
+    }
+    key = span({ className: "nodeName" }, name);
+  } else {
+    key = Rep(_extends({}, props, {
+      className: "nodeName",
+      object: name,
+      mode: mode || MODE.TINY,
+      defaultRep: Grip
+    }));
+  }
+
+  return [key, span({
+    className: "objectEqual"
+  }, equal), Rep(_extends({}, props))];
+}
+
+// Exports from this module
+module.exports = wrapRender(PropRep);
+
+/***/ }),
+
+/***/ 3651:
+/***/ (function(module, exports, __webpack_require__) {
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+const networkRequest = __webpack_require__(3653);
+const workerUtils = __webpack_require__(3654);
+
+module.exports = {
+  networkRequest,
+  workerUtils
+};
+
+/***/ }),
+
+/***/ 3652:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const md5 = __webpack_require__(248);
+
+function originalToGeneratedId(originalId) {
+  const match = originalId.match(/(.*)\/originalSource/);
+  return match ? match[1] : "";
+}
+
+function generatedToOriginalId(generatedId, url) {
+  return `${generatedId}/originalSource-${md5(url)}`;
+}
+
+function isOriginalId(id) {
+  return !!id.match(/\/originalSource/);
+}
+
+function isGeneratedId(id) {
+  return !isOriginalId(id);
+}
+
+/**
+ * Trims the query part or reference identifier of a URL string, if necessary.
+ */
+function trimUrlQuery(url) {
+  const length = url.length;
+  const q1 = url.indexOf("?");
+  const q2 = url.indexOf("&");
+  const q3 = url.indexOf("#");
+  const q = Math.min(q1 != -1 ? q1 : length, q2 != -1 ? q2 : length, q3 != -1 ? q3 : length);
+
+  return url.slice(0, q);
+}
+
+// Map suffix to content type.
+const contentMap = {
+  js: "text/javascript",
+  jsm: "text/javascript",
+  mjs: "text/javascript",
+  ts: "text/typescript",
+  tsx: "text/typescript-jsx",
+  jsx: "text/jsx",
+  vue: "text/vue",
+  coffee: "text/coffeescript",
+  elm: "text/elm",
+  cljs: "text/x-clojure"
+};
+
+/**
+ * Returns the content type for the specified URL.  If no specific
+ * content type can be determined, "text/plain" is returned.
+ *
+ * @return String
+ *         The content type.
+ */
+function getContentType(url) {
+  url = trimUrlQuery(url);
+  const dot = url.lastIndexOf(".");
+  if (dot >= 0) {
+    const name = url.substring(dot + 1);
+    if (name in contentMap) {
+      return contentMap[name];
+    }
+  }
+  return "text/plain";
+}
+
+module.exports = {
+  originalToGeneratedId,
+  generatedToOriginalId,
+  isOriginalId,
+  isGeneratedId,
+  getContentType,
+  contentMapForTesting: contentMap
+};
+
+/***/ }),
+
+/***/ 3653:
+/***/ (function(module, exports) {
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function networkRequest(url, opts) {
+  return fetch(url, {
+    cache: opts.loadFromCache ? "default" : "no-cache"
+  }).then(res => {
+    if (res.status >= 200 && res.status < 300) {
+      return res.text().then(text => ({ content: text }));
+    }
+    return Promise.reject(`request failed with status ${res.status}`);
+  });
+}
+
+module.exports = networkRequest;
+
+/***/ }),
+
+/***/ 3654:
+/***/ (function(module, exports) {
+
+function _asyncToGenerator(fn) { return function () { var gen = fn.apply(this, arguments); return new Promise(function (resolve, reject) { function step(key, arg) { try { var info = gen[key](arg); var value = info.value; } catch (error) { reject(error); return; } if (info.done) { resolve(value); } else { return Promise.resolve(value).then(function (value) { step("next", value); }, function (err) { step("throw", err); }); } } return step("next"); }); }; }
+
+function WorkerDispatcher() {
+  this.msgId = 1;
+  this.worker = null;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+WorkerDispatcher.prototype = {
+  start(url) {
+    this.worker = new Worker(url);
+    this.worker.onerror = () => {
+      console.error(`Error in worker ${url}`);
+    };
+  },
+
+  stop() {
+    if (!this.worker) {
+      return;
+    }
+
+    this.worker.terminate();
+    this.worker = null;
+  },
+
+  task(method, { queue = false } = {}) {
+    const calls = [];
+    const push = args => {
+      return new Promise((resolve, reject) => {
+        if (queue && calls.length === 0) {
+          Promise.resolve().then(flush);
+        }
+
+        calls.push([args, resolve, reject]);
+
+        if (!queue) {
+          flush();
+        }
+      });
+    };
+
+    const flush = () => {
+      const items = calls.slice();
+      calls.length = 0;
+
+      if (!this.worker) {
+        return;
+      }
+
+      const id = this.msgId++;
+      this.worker.postMessage({
+        id,
+        method,
+        calls: items.map(item => item[0])
+      });
+
+      const listener = ({ data: result }) => {
+        if (result.id !== id) {
+          return;
+        }
+
+        if (!this.worker) {
+          return;
+        }
+
+        this.worker.removeEventListener("message", listener);
+
+        result.results.forEach((resultData, i) => {
+          const [, resolve, reject] = items[i];
+
+          if (resultData.error) {
+            reject(resultData.error);
+          } else {
+            resolve(resultData.response);
+          }
+        });
+      };
+
+      this.worker.addEventListener("message", listener);
+    };
+
+    return (...args) => push(args);
+  }
+};
+
+function workerHandler(publicInterface) {
+  return function (msg) {
+    const { id, method, calls } = msg.data;
+
+    Promise.all(calls.map(args => {
+      try {
+        const response = publicInterface[method].apply(undefined, args);
+        if (response instanceof Promise) {
+          return response.then(val => ({ response: val }),
+          // Error can't be sent via postMessage, so be sure to
+          // convert to string.
+          err => ({ error: err.toString() }));
+        }
+        return { response };
+      } catch (error) {
+        // Error can't be sent via postMessage, so be sure to convert to
+        // string.
+        return { error: error.toString() };
+      }
+    })).then(results => {
+      self.postMessage({ id, results });
+    });
+  };
+}
+
+function streamingWorkerHandler(publicInterface, { timeout = 100 } = {}, worker = self) {
+  let streamingWorker = (() => {
+    var _ref = _asyncToGenerator(function* (id, tasks) {
+      let isWorking = true;
+
+      const timeoutId = setTimeout(function () {
+        isWorking = false;
+      }, timeout);
+
+      const results = [];
+      while (tasks.length !== 0 && isWorking) {
+        const { callback, context, args } = tasks.shift();
+        const result = yield callback.call(context, args);
+        results.push(result);
+      }
+      worker.postMessage({ id, status: "pending", data: results });
+      clearTimeout(timeoutId);
+
+      if (tasks.length !== 0) {
+        yield streamingWorker(id, tasks);
+      }
+    });
+
+    return function streamingWorker(_x, _x2) {
+      return _ref.apply(this, arguments);
+    };
+  })();
+
+  return (() => {
+    var _ref2 = _asyncToGenerator(function* (msg) {
+      const { id, method, args } = msg.data;
+      const workerMethod = publicInterface[method];
+      if (!workerMethod) {
+        console.error(`Could not find ${method} defined in worker.`);
+      }
+      worker.postMessage({ id, status: "start" });
+
+      try {
+        const tasks = workerMethod(args);
+        yield streamingWorker(id, tasks);
+        worker.postMessage({ id, status: "done" });
+      } catch (error) {
+        worker.postMessage({ id, status: "error", error });
+      }
+    });
+
+    return function (_x3) {
+      return _ref2.apply(this, arguments);
+    };
+  })();
+}
+
+module.exports = {
+  WorkerDispatcher,
+  workerHandler,
+  streamingWorkerHandler
+};
+
+/***/ }),
+
+/***/ 3655:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { MODE } = __webpack_require__(3645);
+const { REPS, getRep } = __webpack_require__(3647);
+const ObjectInspector = __webpack_require__(3695);
+const ObjectInspectorUtils = __webpack_require__(3657);
+
+const {
+  parseURLEncodedText,
+  parseURLParams,
+  maybeEscapePropertyName,
+  getGripPreviewItems
+} = __webpack_require__(3644);
+
+module.exports = {
+  REPS,
+  getRep,
+  MODE,
+  maybeEscapePropertyName,
+  parseURLEncodedText,
+  parseURLParams,
+  getGripPreviewItems,
+  ObjectInspector,
+  ObjectInspectorUtils
+};
+
+/***/ }),
+
+/***/ 3656:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Dependencies
+const { interleave, isGrip, wrapRender } = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders generic grip. Grip is client representation
+ * of remote JS object and is used as an input object
+ * for this rep component.
+ */
+GripRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  isInterestingProp: PropTypes.func,
+  title: PropTypes.string,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func,
+  noGrip: PropTypes.bool
+};
+
+const DEFAULT_TITLE = "Object";
+
+function GripRep(props) {
+  const { mode = MODE.SHORT, object } = props;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-object"
+  };
+
+  if (mode === MODE.TINY) {
+    const propertiesLength = getPropertiesLength(object);
+
+    const tinyModeItems = [];
+    if (getTitle(props, object) !== DEFAULT_TITLE) {
+      tinyModeItems.push(getTitleElement(props, object));
+    } else {
+      tinyModeItems.push(span({
+        className: "objectLeftBrace"
+      }, "{"), propertiesLength > 0 ? span({
+        key: "more",
+        className: "more-ellipsis",
+        title: "more…"
+      }, "…") : null, span({
+        className: "objectRightBrace"
+      }, "}"));
+    }
+
+    return span(config, ...tinyModeItems);
+  }
+
+  const propsArray = safePropIterator(props, object, maxLengthMap.get(mode));
+
+  return span(config, getTitleElement(props, object), span({
+    className: "objectLeftBrace"
+  }, " { "), ...interleave(propsArray, ", "), span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitleElement(props, object) {
+  return span({
+    className: "objectTitle"
+  }, getTitle(props, object));
+}
+
+function getTitle(props, object) {
+  return props.title || object.class || DEFAULT_TITLE;
+}
+
+function getPropertiesLength(object) {
+  let propertiesLength = object.preview && object.preview.ownPropertiesLength ? object.preview.ownPropertiesLength : object.ownPropertyLength;
+
+  if (object.preview && object.preview.safeGetterValues) {
+    propertiesLength += Object.keys(object.preview.safeGetterValues).length;
+  }
+
+  if (object.preview && object.preview.ownSymbols) {
+    propertiesLength += object.preview.ownSymbolsLength;
+  }
+
+  return propertiesLength;
+}
+
+function safePropIterator(props, object, max) {
+  max = typeof max === "undefined" ? maxLengthMap.get(MODE.SHORT) : max;
+  try {
+    return propIterator(props, object, max);
+  } catch (err) {
+    console.error(err);
+  }
+  return [];
+}
+
+function propIterator(props, object, max) {
+  if (object.preview && Object.keys(object.preview).includes("wrappedValue")) {
+    const { Rep } = __webpack_require__(3647);
+
+    return [Rep({
+      object: object.preview.wrappedValue,
+      mode: props.mode || MODE.TINY,
+      defaultRep: Grip
+    })];
+  }
+
+  // Property filter. Show only interesting properties to the user.
+  const isInterestingProp = props.isInterestingProp || ((type, value) => {
+    return type == "boolean" || type == "number" || type == "string" && value.length != 0;
+  });
+
+  let properties = object.preview ? object.preview.ownProperties || {} : {};
+
+  const propertiesLength = getPropertiesLength(object);
+
+  if (object.preview && object.preview.safeGetterValues) {
+    properties = _extends({}, properties, object.preview.safeGetterValues);
+  }
+
+  let indexes = getPropIndexes(properties, max, isInterestingProp);
+  if (indexes.length < max && indexes.length < propertiesLength) {
+    // There are not enough props yet.
+    // Then add uninteresting props to display them.
+    indexes = indexes.concat(getPropIndexes(properties, max - indexes.length, (t, value, name) => {
+      return !isInterestingProp(t, value, name);
+    }));
+  }
+
+  // The server synthesizes some property names for a Proxy, like
+  // <target> and <handler>; we don't want to quote these because,
+  // as synthetic properties, they appear more natural when
+  // unquoted.
+  const suppressQuotes = object.class === "Proxy";
+  const propsArray = getProps(props, properties, indexes, suppressQuotes);
+
+  // Show symbols.
+  if (object.preview && object.preview.ownSymbols) {
+    const { ownSymbols } = object.preview;
+    const length = max - indexes.length;
+
+    const symbolsProps = ownSymbols.slice(0, length).map(symbolItem => {
+      return PropRep(_extends({}, props, {
+        mode: MODE.TINY,
+        name: symbolItem,
+        object: symbolItem.descriptor.value,
+        equal: ": ",
+        defaultRep: Grip,
+        title: null,
+        suppressQuotes
+      }));
+    });
+
+    propsArray.push(...symbolsProps);
+  }
+
+  if (Object.keys(properties).length > max || propertiesLength > max ||
+  // When the object has non-enumerable properties, we don't have them in the
+  // packet, but we might want to show there's something in the object.
+  propertiesLength > propsArray.length) {
+    // There are some undisplayed props. Then display "more...".
+    propsArray.push(span({
+      key: "more",
+      className: "more-ellipsis",
+      title: "more…"
+    }, "…"));
+  }
+
+  return propsArray;
+}
+
+/**
+ * Get props ordered by index.
+ *
+ * @param {Object} componentProps Grip Component props.
+ * @param {Object} properties Properties of the object the Grip describes.
+ * @param {Array} indexes Indexes of properties.
+ * @param {Boolean} suppressQuotes true if we should suppress quotes
+ *                  on property names.
+ * @return {Array} Props.
+ */
+function getProps(componentProps, properties, indexes, suppressQuotes) {
+  // Make indexes ordered by ascending.
+  indexes.sort(function (a, b) {
+    return a - b;
+  });
+
+  const propertiesKeys = Object.keys(properties);
+  return indexes.map(i => {
+    const name = propertiesKeys[i];
+    const value = getPropValue(properties[name]);
+
+    return PropRep(_extends({}, componentProps, {
+      mode: MODE.TINY,
+      name,
+      object: value,
+      equal: ": ",
+      defaultRep: Grip,
+      title: null,
+      suppressQuotes
+    }));
+  });
+}
+
+/**
+ * Get the indexes of props in the object.
+ *
+ * @param {Object} properties Props object.
+ * @param {Number} max The maximum length of indexes array.
+ * @param {Function} filter Filter the props you want.
+ * @return {Array} Indexes of interesting props in the object.
+ */
+function getPropIndexes(properties, max, filter) {
+  const indexes = [];
+
+  try {
+    let i = 0;
+    for (const name in properties) {
+      if (indexes.length >= max) {
+        return indexes;
+      }
+
+      // Type is specified in grip's "class" field and for primitive
+      // values use typeof.
+      const value = getPropValue(properties[name]);
+      let type = value.class || typeof value;
+      type = type.toLowerCase();
+
+      if (filter(type, value, name)) {
+        indexes.push(i);
+      }
+      i++;
+    }
+  } catch (err) {
+    console.error(err);
+  }
+  return indexes;
+}
+
+/**
+ * Get the actual value of a property.
+ *
+ * @param {Object} property
+ * @return {Object} Value of the property.
+ */
+function getPropValue(property) {
+  let value = property;
+  if (typeof property === "object") {
+    const keys = Object.keys(property);
+    if (keys.includes("value")) {
+      value = property.value;
+    } else if (keys.includes("getterValue")) {
+      value = property.getterValue;
+    }
+  }
+  return value;
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  if (object.class === "DeadObject") {
+    return true;
+  }
+
+  return object.preview ? typeof object.preview.ownProperties !== "undefined" : typeof object.ownPropertyLength !== "undefined";
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Grip is used in propIterator and has to be defined here.
+const Grip = {
+  rep: wrapRender(GripRep),
+  supportsObject,
+  maxLengthMap
+};
+
+// Exports from this module
+module.exports = Grip;
+
+/***/ }),
+
+/***/ 3657:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const client = __webpack_require__(3665);
+const loadProperties = __webpack_require__(3666);
+const node = __webpack_require__(3667);
+const { nodeIsError, nodeIsPrimitive } = node;
+const selection = __webpack_require__(3698);
+
+const { MODE } = __webpack_require__(3645);
+const { REPS: { Rep, Grip } } = __webpack_require__(3647);
+
+
+function shouldRenderRootsInReps(roots) {
+  if (roots.length > 1) {
+    return false;
+  }
+
+  const root = roots[0];
+  const name = root && root.name;
+  return (name === null || typeof name === "undefined") && (nodeIsPrimitive(root) || nodeIsError(root));
+}
+
+function renderRep(item, props) {
+  return Rep(_extends({}, props, {
+    object: node.getValue(item),
+    mode: props.mode || MODE.TINY,
+    defaultRep: Grip
+  }));
+}
+
+module.exports = {
+  client,
+  loadProperties,
+  node,
+  renderRep,
+  selection,
+  shouldRenderRootsInReps
+};
+
+/***/ }),
+
+/***/ 3658:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, cropString, wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+const IGNORED_SOURCE_URLS = ["debugger eval code"];
+
+/**
+ * This component represents a template for Function objects.
+ */
+FunctionRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  parameterNames: PropTypes.array,
+  onViewSourceInDebugger: PropTypes.func
+};
+
+function FunctionRep(props) {
+  const { object: grip, onViewSourceInDebugger } = props;
+
+  let jumpToDefinitionButton;
+  if (onViewSourceInDebugger && grip.location && grip.location.url && !IGNORED_SOURCE_URLS.includes(grip.location.url)) {
+    jumpToDefinitionButton = dom.button({
+      className: "jump-definition",
+      draggable: false,
+      title: "Jump to definition",
+      onClick: e => {
+        // Stop the event propagation so we don't trigger ObjectInspector
+        // expand/collapse.
+        e.stopPropagation();
+        onViewSourceInDebugger(grip.location);
+      }
+    });
+  }
+
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-function",
+    // Set dir="ltr" to prevent function parentheses from
+    // appearing in the wrong direction
+    dir: "ltr"
+  }, getTitle(grip, props), getFunctionName(grip, props), "(", ...renderParams(props), ")", jumpToDefinitionButton);
+}
+
+function getTitle(grip, props) {
+  const { mode } = props;
+
+  if (mode === MODE.TINY && !grip.isGenerator && !grip.isAsync) {
+    return null;
+  }
+
+  let title = mode === MODE.TINY ? "" : "function ";
+
+  if (grip.isGenerator) {
+    title = mode === MODE.TINY ? "* " : "function* ";
+  }
+
+  if (grip.isAsync) {
+    title = `${"async" + " "}${title}`;
+  }
+
+  return span({
+    className: "objectTitle"
+  }, title);
+}
+
+/**
+ * Returns a ReactElement representing the function name.
+ *
+ * @param {Object} grip : Function grip
+ * @param {Object} props: Function rep props
+ */
+function getFunctionName(grip, props = {}) {
+  let { functionName } = props;
+  let name;
+
+  if (functionName) {
+    const end = functionName.length - 1;
+    functionName = functionName.startsWith('"') && functionName.endsWith('"') ? functionName.substring(1, end) : functionName;
+  }
+
+  if (grip.displayName != undefined && functionName != undefined && grip.displayName != functionName) {
+    name = `${functionName}:${grip.displayName}`;
+  } else {
+    name = cleanFunctionName(grip.userDisplayName || grip.displayName || grip.name || props.functionName || "");
+  }
+
+  return cropString(name, 100);
+}
+
+const objectProperty = /([\w\d]+)$/;
+const arrayProperty = /\[(.*?)\]$/;
+const functionProperty = /([\w\d]+)[\/\.<]*?$/;
+const annonymousProperty = /([\w\d]+)\(\^\)$/;
+
+/**
+ * Decodes an anonymous naming scheme that
+ * spider monkey implements based on "Naming Anonymous JavaScript Functions"
+ * http://johnjbarton.github.io/nonymous/index.html
+ *
+ * @param {String} name : Function name to clean up
+ * @returns String
+ */
+function cleanFunctionName(name) {
+  for (const reg of [objectProperty, arrayProperty, functionProperty, annonymousProperty]) {
+    const match = reg.exec(name);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return name;
+}
+
+function renderParams(props) {
+  const { parameterNames = [] } = props;
+
+  return parameterNames.filter(param => param).reduce((res, param, index, arr) => {
+    res.push(span({ className: "param" }, param));
+    if (index < arr.length - 1) {
+      res.push(span({ className: "delimiter" }, ", "));
+    }
+    return res;
+  }, []);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  const type = getGripType(grip, noGrip);
+  if (noGrip === true || !isGrip(grip)) {
+    return type == "function";
+  }
+
+  return type == "Function";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(FunctionRep),
+  supportsObject,
+  cleanFunctionName,
+  // exported for testing purpose.
+  getFunctionName
+};
+
+/***/ }),
+
+/***/ 3659:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+module.exports = {
+  ELEMENT_NODE: 1,
+  ATTRIBUTE_NODE: 2,
+  TEXT_NODE: 3,
+  CDATA_SECTION_NODE: 4,
+  ENTITY_REFERENCE_NODE: 5,
+  ENTITY_NODE: 6,
+  PROCESSING_INSTRUCTION_NODE: 7,
+  COMMENT_NODE: 8,
+  DOCUMENT_NODE: 9,
+  DOCUMENT_TYPE_NODE: 10,
+  DOCUMENT_FRAGMENT_NODE: 11,
+  NOTATION_NODE: 12,
+
+  // DocumentPosition
+  DOCUMENT_POSITION_DISCONNECTED: 0x01,
+  DOCUMENT_POSITION_PRECEDING: 0x02,
+  DOCUMENT_POSITION_FOLLOWING: 0x04,
+  DOCUMENT_POSITION_CONTAINS: 0x08,
+  DOCUMENT_POSITION_CONTAINED_BY: 0x10,
+  DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC: 0x20
+};
+
+/***/ }),
+
+/***/ 366:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M5 13.5H1a.5.5 0 1 0 0 1h4a.5.5 0 1 0 0-1zM12 13.5H8a.5.5 0 1 0 0 1h4a.5.5 0 1 0 0-1zM6.11 5.012A.427.427 0 0 1 6.21 5h7.083L9.646 1.354a.5.5 0 1 1 .708-.708l4.5 4.5a.498.498 0 0 1 0 .708l-4.5 4.5a.5.5 0 0 1-.708-.708L13.293 6H6.5v5.5a.5.5 0 1 1-1 0v-6a.5.5 0 0 1 .61-.488z\"></path></g></svg>"
+
+/***/ }),
+
+/***/ 3660:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+// Utils
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+const { cleanFunctionName } = __webpack_require__(3658);
+const { isLongString } = __webpack_require__(3648);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+const IGNORED_SOURCE_URLS = ["debugger eval code"];
+
+/**
+ * Renders Error objects.
+ */
+ErrorRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
+};
+
+function ErrorRep(props) {
+  const object = props.object;
+  const preview = object.preview;
+
+  let name;
+  if (preview && preview.name && preview.kind) {
+    switch (preview.kind) {
+      case "Error":
+        name = preview.name;
+        break;
+      case "DOMException":
+        name = preview.kind;
+        break;
+      default:
+        throw new Error("Unknown preview kind for the Error rep.");
+    }
+  } else {
+    name = "Error";
+  }
+
+  const content = [];
+
+  if (props.mode === MODE.TINY) {
+    content.push(name);
+  } else {
+    content.push(`${name}: "${preview.message}"`);
+  }
+
+  if (preview.stack && props.mode !== MODE.TINY) {
+    content.push("\n", getStacktraceElements(props, preview));
+  }
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox-stackTrace"
+  }, content);
+}
+
+/**
+ * Returns a React element reprensenting the Error stacktrace, i.e.
+ * transform error.stack from:
+ *
+ * semicolon@debugger eval code:1:109
+ * jkl@debugger eval code:1:63
+ * asdf@debugger eval code:1:28
+ * @debugger eval code:1:227
+ *
+ * Into a column layout:
+ *
+ * semicolon  (<anonymous>:8:10)
+ * jkl        (<anonymous>:5:10)
+ * asdf       (<anonymous>:2:10)
+ *            (<anonymous>:11:1)
+ */
+function getStacktraceElements(props, preview) {
+  const stack = [];
+  if (!preview.stack) {
+    return stack;
+  }
+
+  const isStacktraceALongString = isLongString(preview.stack);
+  const stackString = isStacktraceALongString ? preview.stack.initial : preview.stack;
+
+  stackString.split("\n").forEach((frame, index) => {
+    if (!frame) {
+      // Skip any blank lines
+      return;
+    }
+
+    let functionName;
+    let location;
+
+    // Given the input: "functionName@scriptLocation:2:100"
+    // Result: [
+    //   "functionName@scriptLocation:2:100",
+    //   "functionName",
+    //   "scriptLocation:2:100"
+    // ]
+    const result = frame.match(/^(.*)@(.*)$/);
+    if (result && result.length === 3) {
+      functionName = result[1];
+
+      // If the resource was loaded by base-loader.js, the location looks like:
+      // resource://devtools/shared/base-loader.js -> resource://path/to/file.js .
+      // What's needed is only the last part after " -> ".
+      location = result[2].split(" -> ").pop();
+    }
+
+    if (!functionName) {
+      functionName = "<anonymous>";
+    }
+
+    let onLocationClick;
+    // Given the input: "scriptLocation:2:100"
+    // Result:
+    // ["scriptLocation:2:100", "scriptLocation", "2", "100"]
+    const locationParts = location.match(/^(.*):(\d+):(\d+)$/);
+    if (props.onViewSourceInDebugger && location && !IGNORED_SOURCE_URLS.includes(locationParts[1]) && locationParts) {
+      const [, url, line, column] = locationParts;
+      onLocationClick = e => {
+        // Don't trigger ObjectInspector expand/collapse.
+        e.stopPropagation();
+        props.onViewSourceInDebugger({
+          url,
+          line: Number(line),
+          column: Number(column)
+        });
+      };
+    }
+
+    stack.push(span({
+      key: `fn${index}`,
+      className: "objectBox-stackTrace-fn"
+    }, cleanFunctionName(functionName)), span({
+      key: `location${index}`,
+      className: "objectBox-stackTrace-location",
+      onClick: onLocationClick,
+      title: onLocationClick ? `View source in debugger → ${location}` : undefined
+    }, location));
+  });
+
+  if (isStacktraceALongString) {
+    // Remove the last frame (i.e. 2 last elements in the array, the function
+    // name and the location) which is certainly incomplete.
+    // Can be removed when https://bugzilla.mozilla.org/show_bug.cgi?id=1448833
+    // is fixed.
+    stack.splice(-2);
+  }
+
+  return span({
+    key: "stack",
+    className: "objectBox-stackTrace-grid"
+  }, stack);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return object.preview && getGripType(object, noGrip) === "Error" || object.class === "DOMException";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ErrorRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3661:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { lengthBubble } = __webpack_require__(3662);
+const {
+  interleave,
+  getGripType,
+  isGrip,
+  wrapRender,
+  ellipsisElement
+} = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+const { ModePropType } = __webpack_require__(3649);
+const DEFAULT_TITLE = "Array";
+
+/**
+ * Renders an array. The array is enclosed by left and right bracket
+ * and the max number of rendered items depends on the current mode.
+ */
+GripArray.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: ModePropType,
+  provider: PropTypes.object,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function GripArray(props) {
+  const { object, mode = MODE.SHORT } = props;
+
+  let brackets;
+  const needSpace = function (space) {
+    return space ? { left: "[ ", right: " ]" } : { left: "[", right: "]" };
+  };
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-array"
+  };
+
+  const title = getTitle(props, object);
+
+  if (mode === MODE.TINY) {
+    const isEmpty = getLength(object) === 0;
+
+    // Omit bracketed ellipsis for non-empty non-Array arraylikes (f.e: Sets).
+    if (!isEmpty && object.class !== "Array") {
+      return span(config, title);
+    }
+
+    brackets = needSpace(false);
+    return span(config, title, span({
+      className: "arrayLeftBracket"
+    }, brackets.left), isEmpty ? null : ellipsisElement, span({
+      className: "arrayRightBracket"
+    }, brackets.right));
+  }
+
+  const max = maxLengthMap.get(mode);
+  const items = arrayIterator(props, object, max);
+  brackets = needSpace(items.length > 0);
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-array"
+  }, title, span({
+    className: "arrayLeftBracket"
+  }, brackets.left), ...interleave(items, ", "), span({
+    className: "arrayRightBracket"
+  }, brackets.right), span({
+    className: "arrayProperties",
+    role: "group"
+  }));
+}
+
+function getLength(grip) {
+  if (!grip.preview) {
+    return 0;
+  }
+
+  return grip.preview.length || grip.preview.childNodesLength || 0;
+}
+
+function getTitle(props, object) {
+  const objectLength = getLength(object);
+  const isEmpty = objectLength === 0;
+
+  let title = props.title || object.class || DEFAULT_TITLE;
+
+  const length = lengthBubble({
+    object,
+    mode: props.mode,
+    maxLengthMap,
+    getLength
+  });
+
+  if (props.mode === MODE.TINY) {
+    if (isEmpty) {
+      if (object.class === DEFAULT_TITLE) {
+        return null;
+      }
+
+      return span({ className: "objectTitle" }, `${title} `);
+    }
+
+    let trailingSpace;
+    if (object.class === DEFAULT_TITLE) {
+      title = null;
+      trailingSpace = " ";
+    }
+
+    return span({ className: "objectTitle" }, title, length, trailingSpace);
+  }
+
+  return span({ className: "objectTitle" }, title, length, " ");
+}
+
+function getPreviewItems(grip) {
+  if (!grip.preview) {
+    return null;
+  }
+
+  return grip.preview.items || grip.preview.childNodes || [];
+}
+
+function arrayIterator(props, grip, max) {
+  const { Rep } = __webpack_require__(3647);
+
+  let items = [];
+  const gripLength = getLength(grip);
+
+  if (!gripLength) {
+    return items;
+  }
+
+  const previewItems = getPreviewItems(grip);
+  const provider = props.provider;
+
+  let emptySlots = 0;
+  let foldedEmptySlots = 0;
+  items = previewItems.reduce((res, itemGrip) => {
+    if (res.length >= max) {
+      return res;
+    }
+
+    let object;
+    try {
+      if (!provider && itemGrip === null) {
+        emptySlots++;
+        return res;
+      }
+
+      object = provider ? provider.getValue(itemGrip) : itemGrip;
+    } catch (exc) {
+      object = exc;
+    }
+
+    if (emptySlots > 0) {
+      res.push(getEmptySlotsElement(emptySlots));
+      foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
+      emptySlots = 0;
+    }
+
+    if (res.length < max) {
+      res.push(Rep(_extends({}, props, {
+        object,
+        mode: MODE.TINY,
+        // Do not propagate title to array items reps
+        title: undefined
+      })));
+    }
+
+    return res;
+  }, []);
+
+  // Handle trailing empty slots if there are some.
+  if (items.length < max && emptySlots > 0) {
+    items.push(getEmptySlotsElement(emptySlots));
+    foldedEmptySlots = foldedEmptySlots + emptySlots - 1;
+  }
+
+  const itemsShown = items.length + foldedEmptySlots;
+  if (gripLength > itemsShown) {
+    items.push(ellipsisElement);
+  }
+
+  return items;
+}
+
+function getEmptySlotsElement(number) {
+  // TODO: Use l10N - See https://github.com/devtools-html/reps/issues/141
+  return `<${number} empty slot${number > 1 ? "s" : ""}>`;
+}
+
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && (grip.preview.kind == "ArrayLike" || getGripType(grip, noGrip) === "DocumentFragment");
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(GripArray),
+  supportsObject,
+  maxLengthMap,
+  getLength
+};
+
+/***/ }),
+
+/***/ 3662:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const PropTypes = __webpack_require__(3642);
+
+const { wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const { ModePropType } = __webpack_require__(3649);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+GripLengthBubble.propTypes = {
+  object: PropTypes.object.isRequired,
+  maxLengthMap: PropTypes.instanceOf(Map).isRequired,
+  getLength: PropTypes.func.isRequired,
+  mode: ModePropType,
+  visibilityThreshold: PropTypes.number
+};
+
+function GripLengthBubble(props) {
+  const {
+    object,
+    mode = MODE.SHORT,
+    visibilityThreshold = 2,
+    maxLengthMap,
+    getLength,
+    showZeroLength = false
+  } = props;
+
+  const length = getLength(object);
+  const isEmpty = length === 0;
+  const isObvious = [MODE.SHORT, MODE.LONG].includes(mode) && length > 0 && length <= maxLengthMap.get(mode) && length <= visibilityThreshold;
+  if (isEmpty && !showZeroLength || isObvious) {
+    return "";
+  }
+
+  return span({
+    className: "objectLengthBubble"
+  }, `(${length})`);
+}
+
+module.exports = {
+  lengthBubble: wrapRender(GripLengthBubble)
+};
+
+/***/ }),
+
+/***/ 3663:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+
+const { lengthBubble } = __webpack_require__(3662);
+const PropTypes = __webpack_require__(3642);
+const {
+  interleave,
+  isGrip,
+  wrapRender,
+  ellipsisElement
+} = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+const { ModePropType } = __webpack_require__(3649);
+
+const { span } = __webpack_require__(3643);
+
+/**
+ * Renders an map. A map is represented by a list of its
+ * entries enclosed in curly brackets.
+ */
+GripMap.propTypes = {
+  object: PropTypes.object,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: ModePropType,
+  isInterestingEntry: PropTypes.func,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func,
+  title: PropTypes.string
+};
+
+function GripMap(props) {
+  const { mode, object } = props;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-object"
+  };
+
+  const title = getTitle(props, object);
+  const isEmpty = getLength(object) === 0;
+
+  if (isEmpty || mode === MODE.TINY) {
+    return span(config, title);
+  }
+
+  const propsArray = safeEntriesIterator(props, object, maxLengthMap.get(mode));
+
+  return span(config, title, span({
+    className: "objectLeftBrace"
+  }, " { "), ...interleave(propsArray, ", "), span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitle(props, object) {
+  const title = props.title || (object && object.class ? object.class : "Map");
+  return span({
+    className: "objectTitle"
+  }, title, lengthBubble({
+    object,
+    mode: props.mode,
+    maxLengthMap,
+    getLength,
+    showZeroLength: true
+  }));
+}
+
+function safeEntriesIterator(props, object, max) {
+  max = typeof max === "undefined" ? 3 : max;
+  try {
+    return entriesIterator(props, object, max);
+  } catch (err) {
+    console.error(err);
+  }
+  return [];
+}
+
+function entriesIterator(props, object, max) {
+  // Entry filter. Show only interesting entries to the user.
+  const isInterestingEntry = props.isInterestingEntry || ((type, value) => {
+    return type == "boolean" || type == "number" || type == "string" && value.length != 0;
+  });
+
+  const mapEntries = object.preview && object.preview.entries ? object.preview.entries : [];
+
+  let indexes = getEntriesIndexes(mapEntries, max, isInterestingEntry);
+  if (indexes.length < max && indexes.length < mapEntries.length) {
+    // There are not enough entries yet, so we add uninteresting entries.
+    indexes = indexes.concat(getEntriesIndexes(mapEntries, max - indexes.length, (t, value, name) => {
+      return !isInterestingEntry(t, value, name);
+    }));
+  }
+
+  const entries = getEntries(props, mapEntries, indexes);
+  if (entries.length < getLength(object)) {
+    // There are some undisplayed entries. Then display "…".
+    entries.push(ellipsisElement);
+  }
+
+  return entries;
+}
+
+/**
+ * Get entries ordered by index.
+ *
+ * @param {Object} props Component props.
+ * @param {Array} entries Entries array.
+ * @param {Array} indexes Indexes of entries.
+ * @return {Array} Array of PropRep.
+ */
+function getEntries(props, entries, indexes) {
+  const { onDOMNodeMouseOver, onDOMNodeMouseOut, onInspectIconClick } = props;
+
+  // Make indexes ordered by ascending.
+  indexes.sort(function (a, b) {
+    return a - b;
+  });
+
+  return indexes.map((index, i) => {
+    const [key, entryValue] = entries[index];
+    const value = entryValue.value !== undefined ? entryValue.value : entryValue;
+
+    return PropRep({
+      name: key,
+      equal: " \u2192 ",
+      object: value,
+      mode: MODE.TINY,
+      onDOMNodeMouseOver,
+      onDOMNodeMouseOut,
+      onInspectIconClick
+    });
+  });
+}
+
+/**
+ * Get the indexes of entries in the map.
+ *
+ * @param {Array} entries Entries array.
+ * @param {Number} max The maximum length of indexes array.
+ * @param {Function} filter Filter the entry you want.
+ * @return {Array} Indexes of filtered entries in the map.
+ */
+function getEntriesIndexes(entries, max, filter) {
+  return entries.reduce((indexes, [key, entry], i) => {
+    if (indexes.length < max) {
+      const value = entry && entry.value !== undefined ? entry.value : entry;
+      // Type is specified in grip's "class" field and for primitive
+      // values use typeof.
+      const type = (value && value.class ? value.class : typeof value).toLowerCase();
+
+      if (filter(type, value, key)) {
+        indexes.push(i);
+      }
+    }
+
+    return indexes;
+  }, []);
+}
+
+function getLength(grip) {
+  return grip.preview.size || 0;
+}
+
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+  return grip.preview && grip.preview.kind == "MapLike";
+}
+
+const maxLengthMap = new Map();
+maxLengthMap.set(MODE.SHORT, 3);
+maxLengthMap.set(MODE.LONG, 10);
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(GripMap),
+  supportsObject,
+  maxLengthMap,
+  getLength
+};
+
+/***/ }),
+
+/***/ 3664:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+// Shortcuts
+const dom = __webpack_require__(3643);
+const { span } = dom;
+const { wrapRender } = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+/**
+ * Renders an map entry. A map entry is represented by its key,
+ * a column and its value.
+ */
+GripMapEntry.propTypes = {
+  object: PropTypes.object,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function GripMapEntry(props) {
+  const { object } = props;
+
+  const { key, value } = object.preview;
+
+  return span({
+    className: "objectBox objectBox-map-entry"
+  }, PropRep(_extends({}, props, {
+    name: key,
+    object: value,
+    equal: " \u2192 ",
+    title: null,
+    suppressQuotes: false
+  })));
+}
+
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true) {
+    return false;
+  }
+  return grip && (grip.type === "mapEntry" || grip.type === "storageEntry") && grip.preview;
+}
+
+function createGripMapEntry(key, value) {
+  return {
+    type: "mapEntry",
+    preview: {
+      key,
+      value
+    }
+  };
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(GripMapEntry),
+  createGripMapEntry,
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3665:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+async function enumIndexedProperties(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumProperties({
+      ignoreNonIndexedProperties: true
+    });
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumIndexedProperties", e);
+    return {};
+  }
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+async function enumNonIndexedProperties(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumProperties({
+      ignoreIndexedProperties: true
+    });
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumNonIndexedProperties", e);
+    return {};
+  }
+}
+
+async function enumEntries(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumEntries();
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumEntries", e);
+    return {};
+  }
+}
+
+async function enumSymbols(objectClient, start, end) {
+  try {
+    const { iterator } = await objectClient.enumSymbols();
+    const response = await iteratorSlice(iterator, start, end);
+    return response;
+  } catch (e) {
+    console.error("Error in enumSymbols", e);
+    return {};
+  }
+}
+
+async function getPrototype(objectClient) {
+  if (typeof objectClient.getPrototype !== "function") {
+    console.error("objectClient.getPrototype is not a function");
+    return Promise.resolve({});
+  }
+  return objectClient.getPrototype();
+}
+
+async function getFullText(longStringClient, object) {
+  const { initial, length } = object;
+
+  return new Promise((resolve, reject) => {
+    longStringClient.substring(initial.length, length, response => {
+      if (response.error) {
+        console.error("LongStringClient.substring", `${response.error}: ${response.message}`);
+        reject({});
+        return;
+      }
+
+      resolve({
+        fullText: initial + response.substring
+      });
+    });
+  });
+}
+
+function iteratorSlice(iterator, start, end) {
+  start = start || 0;
+  const count = end ? end - start + 1 : iterator.count;
+
+  if (count === 0) {
+    return Promise.resolve({});
+  }
+  return iterator.slice(start, count);
+}
+
+module.exports = {
+  enumEntries,
+  enumIndexedProperties,
+  enumNonIndexedProperties,
+  enumSymbols,
+  getPrototype,
+  getFullText
+};
+
+/***/ }),
+
+/***/ 3666:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const {
+  enumEntries,
+  enumIndexedProperties,
+  enumNonIndexedProperties,
+  getPrototype,
+  enumSymbols,
+  getFullText
+} = __webpack_require__(3665);
+
+const {
+  getClosestGripNode,
+  getClosestNonBucketNode,
+  getValue,
+  nodeHasAccessors,
+  nodeHasAllEntriesInPreview,
+  nodeHasProperties,
+  nodeIsBucket,
+  nodeIsDefaultProperties,
+  nodeIsEntries,
+  nodeIsMapEntry,
+  nodeIsPrimitive,
+  nodeIsProxy,
+  nodeNeedsNumericalBuckets,
+  nodeIsLongString
+} = __webpack_require__(3667);
+
+function loadItemProperties(item, createObjectClient, createLongStringClient, loadedProperties) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  const [start, end] = item.meta ? [item.meta.startIndex, item.meta.endIndex] : [];
+
+  const promises = [];
+  let objectClient;
+  const getObjectClient = () => objectClient || createObjectClient(value);
+
+  if (shouldLoadItemIndexedProperties(item, loadedProperties)) {
+    promises.push(enumIndexedProperties(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemNonIndexedProperties(item, loadedProperties)) {
+    promises.push(enumNonIndexedProperties(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemEntries(item, loadedProperties)) {
+    promises.push(enumEntries(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemPrototype(item, loadedProperties)) {
+    promises.push(getPrototype(getObjectClient()));
+  }
+
+  if (shouldLoadItemSymbols(item, loadedProperties)) {
+    promises.push(enumSymbols(getObjectClient(), start, end));
+  }
+
+  if (shouldLoadItemFullText(item, loadedProperties)) {
+    promises.push(getFullText(createLongStringClient(value), value));
+  }
+
+  return Promise.all(promises).then(mergeResponses);
+}
+
+function mergeResponses(responses) {
+  const data = {};
+
+  for (const response of responses) {
+    if (response.hasOwnProperty("ownProperties")) {
+      data.ownProperties = _extends({}, data.ownProperties, response.ownProperties);
+    }
+
+    if (response.ownSymbols && response.ownSymbols.length > 0) {
+      data.ownSymbols = response.ownSymbols;
+    }
+
+    if (response.prototype) {
+      data.prototype = response.prototype;
+    }
+
+    if (response.fullText) {
+      data.fullText = response.fullText;
+    }
+  }
+
+  return data;
+}
+
+function shouldLoadItemIndexedProperties(item, loadedProperties = new Map()) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeNeedsNumericalBuckets(item) && !nodeIsEntries(getClosestNonBucketNode(item)) &&
+  // The data is loaded when expanding the window node.
+  !nodeIsDefaultProperties(item);
+}
+
+function shouldLoadItemNonIndexedProperties(item, loadedProperties = new Map()) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  return value && nodeHasProperties(gripItem) && !loadedProperties.has(item.path) && !nodeIsProxy(item) && !nodeIsEntries(getClosestNonBucketNode(item)) && !nodeIsBucket(item) &&
+  // The data is loaded when expanding the window node.
+  !nodeIsDefaultProperties(item);
+}
+
+function shouldLoadItemEntries(item, loadedProperties = new Map()) {
+  const gripItem = getClosestGripNode(item);
+  const value = getValue(gripItem);
+
+  return value && nodeIsEntries(getClosestNonBucketNode(item)) && !nodeHasAllEntriesInPreview(gripItem) && !loadedProperties.has(item.path) && !nodeNeedsNumericalBuckets(item);
+}
+
+function shouldLoadItemPrototype(item, loadedProperties = new Map()) {
+  const value = getValue(item);
+
+  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item) && !nodeIsLongString(item);
+}
+
+function shouldLoadItemSymbols(item, loadedProperties = new Map()) {
+  const value = getValue(item);
+
+  return value && !loadedProperties.has(item.path) && !nodeIsBucket(item) && !nodeIsMapEntry(item) && !nodeIsEntries(item) && !nodeIsDefaultProperties(item) && !nodeHasAccessors(item) && !nodeIsPrimitive(item) && !nodeIsLongString(item) && !nodeIsProxy(item);
+}
+
+function shouldLoadItemFullText(item, loadedProperties = new Map()) {
+  return !loadedProperties.has(item.path) && nodeIsLongString(item);
+}
+
+module.exports = {
+  loadItemProperties,
+  mergeResponses,
+  shouldLoadItemEntries,
+  shouldLoadItemIndexedProperties,
+  shouldLoadItemNonIndexedProperties,
+  shouldLoadItemPrototype,
+  shouldLoadItemSymbols,
+  shouldLoadItemFullText
+};
+
+/***/ }),
+
+/***/ 3667:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { maybeEscapePropertyName } = __webpack_require__(3644);
+const ArrayRep = __webpack_require__(3649);
+const GripArrayRep = __webpack_require__(3661);
+const GripMap = __webpack_require__(3663);
+const GripMapEntryRep = __webpack_require__(3664);
+const ErrorRep = __webpack_require__(3660);
+const { isLongString } = __webpack_require__(3648);
+
+const MAX_NUMERICAL_PROPERTIES = 100;
+
+const NODE_TYPES = {
+  BUCKET: Symbol("[n…m]"),
+  DEFAULT_PROPERTIES: Symbol("<default properties>"),
+  ENTRIES: Symbol("<entries>"),
+  GET: Symbol("<get>"),
+  GRIP: Symbol("GRIP"),
+  MAP_ENTRY_KEY: Symbol("<key>"),
+  MAP_ENTRY_VALUE: Symbol("<value>"),
+  PROMISE_REASON: Symbol("<reason>"),
+  PROMISE_STATE: Symbol("<state>"),
+  PROMISE_VALUE: Symbol("<value>"),
+  PROXY_HANDLER: Symbol("<handler>"),
+  PROXY_TARGET: Symbol("<target>"),
+  SET: Symbol("<set>"),
+  PROTOTYPE: Symbol("<prototype>"),
+  BLOCK: Symbol("☲")
+};
+
+let WINDOW_PROPERTIES = {};
+
+if (typeof window === "object") {
+  WINDOW_PROPERTIES = Object.getOwnPropertyNames(window);
+}
+
+function getType(item) {
+  return item.type;
+}
+
+function getValue(item) {
+  if (item && item.contents && item.contents.hasOwnProperty("value")) {
+    return item.contents.value;
+  }
+
+  if (item && item.contents && item.contents.hasOwnProperty("getterValue")) {
+    return item.contents.getterValue;
+  }
+
+  if (nodeHasAccessors(item)) {
+    return item.contents;
+  }
+
+  return undefined;
+}
+
+function nodeIsBucket(item) {
+  return getType(item) === NODE_TYPES.BUCKET;
+}
+
+function nodeIsEntries(item) {
+  return getType(item) === NODE_TYPES.ENTRIES;
+}
+
+function nodeIsMapEntry(item) {
+  return GripMapEntryRep.supportsObject(getValue(item));
+}
+
+function nodeHasChildren(item) {
+  return Array.isArray(item.contents);
+}
+
+function nodeIsObject(item) {
+  const value = getValue(item);
+  return value && value.type === "object";
+}
+
+function nodeIsArrayLike(item) {
+  const value = getValue(item);
+  return GripArrayRep.supportsObject(value) || ArrayRep.supportsObject(value);
+}
+
+function nodeIsFunction(item) {
+  const value = getValue(item);
+  return value && value.class === "Function";
+}
+
+function nodeIsOptimizedOut(item) {
+  const value = getValue(item);
+  return !nodeHasChildren(item) && value && value.optimizedOut;
+}
+
+function nodeIsUninitializedBinding(item) {
+  const value = getValue(item);
+  return value && value.uninitialized;
+}
+
+// Used to check if an item represents a binding that exists in a sourcemap's
+// original file content, but does not match up with a binding found in the
+// generated code.
+function nodeIsUnmappedBinding(item) {
+  const value = getValue(item);
+  return value && value.unmapped;
+}
+
+// Used to check if an item represents a binding that exists in the debugger's
+// parser result, but does not match up with a binding returned by the
+// debugger server.
+function nodeIsUnscopedBinding(item) {
+  const value = getValue(item);
+  return value && value.unscoped;
+}
+
+function nodeIsMissingArguments(item) {
+  const value = getValue(item);
+  return !nodeHasChildren(item) && value && value.missingArguments;
+}
+
+function nodeHasProperties(item) {
+  return !nodeHasChildren(item) && nodeIsObject(item);
+}
+
+function nodeIsPrimitive(item) {
+  return !nodeHasChildren(item) && !nodeHasProperties(item) && !nodeIsEntries(item) && !nodeIsMapEntry(item) && !nodeHasAccessors(item) && !nodeIsBucket(item) && !nodeIsLongString(item);
+}
+
+function nodeIsDefaultProperties(item) {
+  return getType(item) === NODE_TYPES.DEFAULT_PROPERTIES;
+}
+
+function isDefaultWindowProperty(name) {
+  return WINDOW_PROPERTIES.includes(name);
+}
+
+function nodeIsPromise(item) {
+  const value = getValue(item);
+  if (!value) {
+    return false;
+  }
+
+  return value.class == "Promise";
+}
+
+function nodeIsProxy(item) {
+  const value = getValue(item);
+  if (!value) {
+    return false;
+  }
+
+  return value.class == "Proxy";
+}
+
+function nodeIsPrototype(item) {
+  return getType(item) === NODE_TYPES.PROTOTYPE;
+}
+
+function nodeIsWindow(item) {
+  const value = getValue(item);
+  if (!value) {
+    return false;
+  }
+
+  return value.class == "Window";
+}
+
+function nodeIsGetter(item) {
+  return getType(item) === NODE_TYPES.GET;
+}
+
+function nodeIsSetter(item) {
+  return getType(item) === NODE_TYPES.SET;
+}
+
+function nodeIsBlock(item) {
+  return getType(item) === NODE_TYPES.BLOCK;
+}
+
+function nodeIsError(item) {
+  return ErrorRep.supportsObject(getValue(item));
+}
+
+function nodeIsLongString(item) {
+  return isLongString(getValue(item));
+}
+
+function nodeHasFullText(item) {
+  const value = getValue(item);
+  return nodeIsLongString(item) && value.hasOwnProperty("fullText");
+}
+
+function nodeHasAccessors(item) {
+  return !!getNodeGetter(item) || !!getNodeSetter(item);
+}
+
+function nodeSupportsNumericalBucketing(item) {
+  // We exclude elements with entries since it's the <entries> node
+  // itself that can have buckets.
+  return nodeIsArrayLike(item) && !nodeHasEntries(item) || nodeIsEntries(item) || nodeIsBucket(item);
+}
+
+function nodeHasEntries(item) {
+  const value = getValue(item);
+  if (!value) {
+    return false;
+  }
+
+  return value.class === "Map" || value.class === "Set" || value.class === "WeakMap" || value.class === "WeakSet" || value.class === "Storage";
+}
+
+function nodeHasAllEntriesInPreview(item) {
+  const { preview } = getValue(item) || {};
+  if (!preview) {
+    return false;
+  }
+
+  const { entries, items, length, size } = preview;
+
+  if (!entries && !items) {
+    return false;
+  }
+
+  return entries ? entries.length === size : items.length === length;
+}
+
+function nodeNeedsNumericalBuckets(item) {
+  return nodeSupportsNumericalBucketing(item) && getNumericalPropertiesCount(item) > MAX_NUMERICAL_PROPERTIES;
+}
+
+function makeNodesForPromiseProperties(item) {
+  const { promiseState: { reason, value, state } } = getValue(item);
+
+  const properties = [];
+
+  if (state) {
+    properties.push(createNode({
+      parent: item,
+      name: "<state>",
+      contents: { value: state },
+      type: NODE_TYPES.PROMISE_STATE
+    }));
+  }
+
+  if (reason) {
+    properties.push(createNode({
+      parent: item,
+      name: "<reason>",
+      contents: { value: reason },
+      type: NODE_TYPES.PROMISE_REASON
+    }));
+  }
+
+  if (value) {
+    properties.push(createNode({
+      parent: item,
+      name: "<value>",
+      contents: { value: value },
+      type: NODE_TYPES.PROMISE_VALUE
+    }));
+  }
+
+  return properties;
+}
+
+function makeNodesForProxyProperties(item) {
+  const { proxyHandler, proxyTarget } = getValue(item);
+
+  return [createNode({
+    parent: item,
+    name: "<target>",
+    contents: { value: proxyTarget },
+    type: NODE_TYPES.PROXY_TARGET
+  }), createNode({
+    parent: item,
+    name: "<handler>",
+    contents: { value: proxyHandler },
+    type: NODE_TYPES.PROXY_HANDLER
+  })];
+}
+
+function makeNodesForEntries(item) {
+  const nodeName = "<entries>";
+  const entriesPath = "<entries>";
+
+  if (nodeHasAllEntriesInPreview(item)) {
+    let entriesNodes = [];
+    const { preview } = getValue(item);
+    if (preview.entries) {
+      entriesNodes = preview.entries.map(([key, value], index) => {
+        return createNode({
+          parent: item,
+          name: index,
+          path: `${entriesPath}/${index}`,
+          contents: { value: GripMapEntryRep.createGripMapEntry(key, value) }
+        });
+      });
+    } else if (preview.items) {
+      entriesNodes = preview.items.map((value, index) => {
+        return createNode({
+          parent: item,
+          name: index,
+          path: `${entriesPath}/${index}`,
+          contents: { value }
+        });
+      });
+    }
+    return createNode({
+      parent: item,
+      name: nodeName,
+      contents: entriesNodes,
+      type: NODE_TYPES.ENTRIES
+    });
+  }
+  return createNode({
+    parent: item,
+    name: nodeName,
+    contents: null,
+    type: NODE_TYPES.ENTRIES
+  });
+}
+
+function makeNodesForMapEntry(item) {
+  const nodeValue = getValue(item);
+  if (!nodeValue || !nodeValue.preview) {
+    return [];
+  }
+
+  const { key, value } = nodeValue.preview;
+
+  return [createNode({
+    parent: item,
+    name: "<key>",
+    contents: { value: key },
+    type: NODE_TYPES.MAP_ENTRY_KEY
+  }), createNode({
+    parent: item,
+    name: "<value>",
+    contents: { value },
+    type: NODE_TYPES.MAP_ENTRY_VALUE
+  })];
+}
+
+function getNodeGetter(item) {
+  return item && item.contents ? item.contents.get : undefined;
+}
+
+function getNodeSetter(item) {
+  return item && item.contents ? item.contents.set : undefined;
+}
+
+function makeNodesForAccessors(item) {
+  const accessors = [];
+
+  const getter = getNodeGetter(item);
+  if (getter && getter.type !== "undefined") {
+    accessors.push(createNode({
+      parent: item,
+      name: "<get>",
+      contents: { value: getter },
+      type: NODE_TYPES.GET
+    }));
+  }
+
+  const setter = getNodeSetter(item);
+  if (setter && setter.type !== "undefined") {
+    accessors.push(createNode({
+      parent: item,
+      name: "<set>",
+      contents: { value: setter },
+      type: NODE_TYPES.SET
+    }));
+  }
+
+  return accessors;
+}
+
+function sortProperties(properties) {
+  return properties.sort((a, b) => {
+    // Sort numbers in ascending order and sort strings lexicographically
+    const aInt = parseInt(a, 10);
+    const bInt = parseInt(b, 10);
+
+    if (isNaN(aInt) || isNaN(bInt)) {
+      return a > b ? 1 : -1;
+    }
+
+    return aInt - bInt;
+  });
+}
+
+function makeNumericalBuckets(parent) {
+  const numProperties = getNumericalPropertiesCount(parent);
+
+  // We want to have at most a hundred slices.
+  const bucketSize = 10 ** Math.max(2, Math.ceil(Math.log10(numProperties)) - 2);
+  const numBuckets = Math.ceil(numProperties / bucketSize);
+
+  const buckets = [];
+  for (let i = 1; i <= numBuckets; i++) {
+    const minKey = (i - 1) * bucketSize;
+    const maxKey = Math.min(i * bucketSize - 1, numProperties - 1);
+    const startIndex = nodeIsBucket(parent) ? parent.meta.startIndex : 0;
+    const minIndex = startIndex + minKey;
+    const maxIndex = startIndex + maxKey;
+    const bucketName = `[${minIndex}…${maxIndex}]`;
+
+    buckets.push(createNode({
+      parent,
+      name: bucketName,
+      contents: null,
+      type: NODE_TYPES.BUCKET,
+      meta: {
+        startIndex: minIndex,
+        endIndex: maxIndex
+      }
+    }));
+  }
+  return buckets;
+}
+
+function makeDefaultPropsBucket(propertiesNames, parent, ownProperties) {
+  const userPropertiesNames = [];
+  const defaultProperties = [];
+
+  propertiesNames.forEach(name => {
+    if (isDefaultWindowProperty(name)) {
+      defaultProperties.push(name);
+    } else {
+      userPropertiesNames.push(name);
+    }
+  });
+
+  const nodes = makeNodesForOwnProps(userPropertiesNames, parent, ownProperties);
+
+  if (defaultProperties.length > 0) {
+    const defaultPropertiesNode = createNode({
+      parent,
+      name: "<default properties>",
+      contents: null,
+      type: NODE_TYPES.DEFAULT_PROPERTIES
+    });
+
+    const defaultNodes = defaultProperties.map((name, index) => createNode({
+      parent: defaultPropertiesNode,
+      name: maybeEscapePropertyName(name),
+      path: `${index}/${name}`,
+      contents: ownProperties[name]
+    }));
+    nodes.push(setNodeChildren(defaultPropertiesNode, defaultNodes));
+  }
+  return nodes;
+}
+
+function makeNodesForOwnProps(propertiesNames, parent, ownProperties) {
+  return propertiesNames.map(name => createNode({
+    parent,
+    name: maybeEscapePropertyName(name),
+    contents: ownProperties[name]
+  }));
+}
+
+function makeNodesForProperties(objProps, parent) {
+  const {
+    ownProperties = {},
+    ownSymbols,
+    prototype,
+    safeGetterValues
+  } = objProps;
+
+  const parentValue = getValue(parent);
+
+  const allProperties = _extends({}, ownProperties, safeGetterValues);
+
+  // Ignore properties that are neither non-concrete nor getters/setters.
+  const propertiesNames = sortProperties(Object.keys(allProperties)).filter(name => {
+    if (!allProperties[name]) {
+      return false;
+    }
+
+    const properties = Object.getOwnPropertyNames(allProperties[name]);
+    return properties.some(property => ["value", "getterValue", "get", "set"].includes(property));
+  });
+
+  let nodes = [];
+  if (parentValue && parentValue.class == "Window") {
+    nodes = makeDefaultPropsBucket(propertiesNames, parent, allProperties);
+  } else {
+    nodes = makeNodesForOwnProps(propertiesNames, parent, allProperties);
+  }
+
+  if (Array.isArray(ownSymbols)) {
+    ownSymbols.forEach((ownSymbol, index) => {
+      nodes.push(createNode({
+        parent,
+        name: ownSymbol.name,
+        path: `symbol-${index}`,
+        contents: ownSymbol.descriptor || null
+      }));
+    }, this);
+  }
+
+  if (nodeIsPromise(parent)) {
+    nodes.push(...makeNodesForPromiseProperties(parent));
+  }
+
+  if (nodeHasEntries(parent)) {
+    nodes.push(makeNodesForEntries(parent));
+  }
+
+  // Add the prototype if it exists and is not null
+  if (prototype && prototype.type !== "null") {
+    nodes.push(makeNodeForPrototype(objProps, parent));
+  }
+
+  return nodes;
+}
+
+function setNodeFullText(loadedProps, node) {
+  if (nodeHasFullText(node)) {
+    return node;
+  }
+
+  if (nodeIsLongString(node)) {
+    node.contents.value.fullText = loadedProps.fullText;
+  }
+
+  return node;
+}
+
+function makeNodeForPrototype(objProps, parent) {
+  const { prototype } = objProps || {};
+
+  // Add the prototype if it exists and is not null
+  if (prototype && prototype.type !== "null") {
+    return createNode({
+      parent,
+      name: "<prototype>",
+      contents: { value: prototype },
+      type: NODE_TYPES.PROTOTYPE
+    });
+  }
+
+  return null;
+}
+
+function createNode(options) {
+  const {
+    parent,
+    name,
+    path,
+    contents,
+    type = NODE_TYPES.GRIP,
+    meta
+  } = options;
+
+  if (contents === undefined) {
+    return null;
+  }
+
+  // The path is important to uniquely identify the item in the entire
+  // tree. This helps debugging & optimizes React's rendering of large
+  // lists. The path will be separated by property name, wrapped in a Symbol
+  // to avoid name clashing,
+  // i.e. `{ foo: { bar: { baz: 5 }}}` will have a path of Symbol(`foo/bar/baz`)
+  // for the inner object.
+  return {
+    parent,
+    name,
+    path: parent ? Symbol(`${getSymbolDescriptor(parent.path)}/${path || name}`) : Symbol(path || name),
+    contents,
+    type,
+    meta
+  };
+}
+
+function getSymbolDescriptor(symbol) {
+  return symbol.toString().replace(/^(Symbol\()(.*)(\))$/, "$2");
+}
+
+function setNodeChildren(node, children) {
+  node.contents = children;
+  return node;
+}
+
+function getChildren(options) {
+  const { cachedNodes, loadedProperties = new Map(), item } = options;
+
+  const key = item.path;
+  if (cachedNodes && cachedNodes.has(key)) {
+    return cachedNodes.get(key);
+  }
+
+  const loadedProps = loadedProperties.get(key);
+  const hasLoadedProps = loadedProperties.has(key);
+
+  // Because we are dynamically creating the tree as the user
+  // expands it (not precalculated tree structure), we cache child
+  // arrays. This not only helps performance, but is necessary
+  // because the expanded state depends on instances of nodes
+  // being the same across renders. If we didn't do this, each
+  // node would be a new instance every render.
+  // If the node needs properties, we only add children to
+  // the cache if the properties are loaded.
+  const addToCache = children => {
+    if (cachedNodes) {
+      cachedNodes.set(item.path, children);
+    }
+    return children;
+  };
+
+  // Nodes can either have children already, or be an object with
+  // properties that we need to go and fetch.
+  if (nodeHasChildren(item)) {
+    return addToCache(item.contents);
+  }
+
+  if (nodeHasAccessors(item)) {
+    return addToCache(makeNodesForAccessors(item));
+  }
+
+  if (nodeIsMapEntry(item)) {
+    return addToCache(makeNodesForMapEntry(item));
+  }
+
+  if (nodeIsProxy(item)) {
+    return addToCache(makeNodesForProxyProperties(item));
+  }
+
+  if (nodeIsLongString(item) && hasLoadedProps) {
+    // Set longString object's fullText to fetched one.
+    return addToCache(setNodeFullText(loadedProps, item));
+  }
+
+  if (nodeNeedsNumericalBuckets(item) && hasLoadedProps) {
+    // Even if we have numerical buckets, we should have loaded non indexed
+    // properties.
+    const bucketNodes = makeNumericalBuckets(item);
+    return addToCache(bucketNodes.concat(makeNodesForProperties(loadedProps, item)));
+  }
+
+  if (!nodeIsEntries(item) && !nodeIsBucket(item) && !nodeHasProperties(item)) {
+    return [];
+  }
+
+  if (!hasLoadedProps) {
+    return [];
+  }
+
+  return addToCache(makeNodesForProperties(loadedProps, item));
+}
+
+function getParent(item) {
+  return item.parent;
+}
+
+function getNumericalPropertiesCount(item) {
+  if (nodeIsBucket(item)) {
+    return item.meta.endIndex - item.meta.startIndex + 1;
+  }
+
+  const value = getValue(getClosestGripNode(item));
+  if (!value) {
+    return 0;
+  }
+
+  if (GripArrayRep.supportsObject(value)) {
+    return GripArrayRep.getLength(value);
+  }
+
+  if (GripMap.supportsObject(value)) {
+    return GripMap.getLength(value);
+  }
+
+  // TODO: We can also have numerical properties on Objects, but at the
+  // moment we don't have a way to distinguish them from non-indexed properties,
+  // as they are all computed in a ownPropertiesLength property.
+
+  return 0;
+}
+
+function getClosestGripNode(item) {
+  const type = getType(item);
+  if (type !== NODE_TYPES.BUCKET && type !== NODE_TYPES.DEFAULT_PROPERTIES && type !== NODE_TYPES.ENTRIES) {
+    return item;
+  }
+
+  const parent = getParent(item);
+  if (!parent) {
+    return null;
+  }
+
+  return getClosestGripNode(parent);
+}
+
+function getClosestNonBucketNode(item) {
+  const type = getType(item);
+
+  if (type !== NODE_TYPES.BUCKET) {
+    return item;
+  }
+
+  const parent = getParent(item);
+  if (!parent) {
+    return null;
+  }
+
+  return getClosestNonBucketNode(parent);
+}
+
+module.exports = {
+  createNode,
+  getChildren,
+  getClosestGripNode,
+  getClosestNonBucketNode,
+  getParent,
+  getNumericalPropertiesCount,
+  getValue,
+  makeNodesForEntries,
+  makeNodesForPromiseProperties,
+  makeNodesForProperties,
+  makeNumericalBuckets,
+  nodeHasAccessors,
+  nodeHasAllEntriesInPreview,
+  nodeHasChildren,
+  nodeHasEntries,
+  nodeHasProperties,
+  nodeIsBlock,
+  nodeIsBucket,
+  nodeIsDefaultProperties,
+  nodeIsEntries,
+  nodeIsError,
+  nodeIsLongString,
+  nodeHasFullText,
+  nodeIsFunction,
+  nodeIsGetter,
+  nodeIsMapEntry,
+  nodeIsMissingArguments,
+  nodeIsObject,
+  nodeIsOptimizedOut,
+  nodeIsPrimitive,
+  nodeIsPromise,
+  nodeIsPrototype,
+  nodeIsProxy,
+  nodeIsSetter,
+  nodeIsUninitializedBinding,
+  nodeIsUnmappedBinding,
+  nodeIsUnscopedBinding,
+  nodeIsWindow,
+  nodeNeedsNumericalBuckets,
+  nodeSupportsNumericalBucketing,
+  setNodeChildren,
+  sortProperties,
+  NODE_TYPES
+};
+
+/***/ }),
+
+/***/ 3669:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _tree = __webpack_require__(3670);
+
+var _tree2 = _interopRequireDefault(_tree);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+module.exports = {
+  Tree: _tree2.default
+}; /* This Source Code Form is subject to the terms of the Mozilla Public
+    * License, v. 2.0. If a copy of the MPL was not distributed with this
+    * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/***/ }),
+
+/***/ 367:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M13.297 6.912C12.595 4.39 10.167 2.5 7.398 2.5A5.898 5.898 0 0 0 1.5 8.398a.5.5 0 0 0 1 0A4.898 4.898 0 0 1 7.398 3.5c2.75 0 5.102 2.236 5.102 4.898v.004L8.669 7.029a.5.5 0 0 0-.338.942l4.462 1.598a.5.5 0 0 0 .651-.34.506.506 0 0 0 .02-.043l2-5a.5.5 0 1 0-.928-.372l-1.24 3.098z\"></path><circle cx=\"7\" cy=\"12\" r=\"1\"></circle></g></svg>"
+
+/***/ }),
+
+/***/ 3670:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _react = __webpack_require__(0);
+
+var _react2 = _interopRequireDefault(_react);
+
+var _reactDomFactories = __webpack_require__(3643);
+
+var _reactDomFactories2 = _interopRequireDefault(_reactDomFactories);
+
+var _propTypes = __webpack_require__(3642);
+
+var _propTypes2 = _interopRequireDefault(_propTypes);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+const { Component, createFactory } = _react2.default; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                       * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                       * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+__webpack_require__(3671);
+
+// depth
+const AUTO_EXPAND_DEPTH = 0;
+
+/**
+ * An arrow that displays whether its node is expanded (▼) or collapsed
+ * (▶). When its node has no children, it is hidden.
+ */
+class ArrowExpander extends Component {
+  static get propTypes() {
+    return {
+      expanded: _propTypes2.default.bool
+    };
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    return this.props.expanded !== nextProps.expanded;
+  }
+
+  render() {
+    const { expanded } = this.props;
+
+    const classNames = ["arrow"];
+    if (expanded) {
+      classNames.push("expanded");
+    }
+    return _reactDomFactories2.default.img({
+      className: classNames.join(" ")
+    });
+  }
+}
+
+const treeIndent = _reactDomFactories2.default.span({ className: "tree-indent" }, "\u200B");
+
+class TreeNode extends Component {
+  static get propTypes() {
+    return {
+      id: _propTypes2.default.any.isRequired,
+      index: _propTypes2.default.number.isRequired,
+      depth: _propTypes2.default.number.isRequired,
+      focused: _propTypes2.default.bool.isRequired,
+      expanded: _propTypes2.default.bool.isRequired,
+      item: _propTypes2.default.any.isRequired,
+      isExpandable: _propTypes2.default.bool.isRequired,
+      onClick: _propTypes2.default.func,
+      renderItem: _propTypes2.default.func.isRequired
+    };
+  }
+
+  shouldComponentUpdate(nextProps) {
+    return this.props.item !== nextProps.item || this.props.focused !== nextProps.focused || this.props.expanded !== nextProps.expanded;
+  }
+
+  render() {
+    const {
+      depth,
+      id,
+      item,
+      focused,
+      expanded,
+      renderItem,
+      isExpandable
+    } = this.props;
+
+    const arrow = isExpandable ? ArrowExpanderFactory({
+      item,
+      expanded
+    }) : null;
+
+    let ariaExpanded;
+    if (this.props.isExpandable) {
+      ariaExpanded = false;
+    }
+    if (this.props.expanded) {
+      ariaExpanded = true;
+    }
+
+    const indents = Array.from({ length: depth }).fill(treeIndent);
+    const items = indents.concat(renderItem(item, depth, focused, arrow, expanded));
+
+    return _reactDomFactories2.default.div({
+      id,
+      className: `tree-node${focused ? " focused" : ""}`,
+      onClick: this.props.onClick,
+      role: "treeitem",
+      "aria-level": depth + 1,
+      "aria-expanded": ariaExpanded,
+      "data-expandable": this.props.isExpandable
+    }, ...items);
+  }
+}
+
+const ArrowExpanderFactory = createFactory(ArrowExpander);
+const TreeNodeFactory = createFactory(TreeNode);
+
+/**
+ * Create a function that calls the given function `fn` only once per animation
+ * frame.
+ *
+ * @param {Function} fn
+ * @returns {Function}
+ */
+function oncePerAnimationFrame(fn) {
+  let animationId = null;
+  let argsToPass = null;
+  return function (...args) {
+    argsToPass = args;
+    if (animationId !== null) {
+      return;
+    }
+
+    animationId = requestAnimationFrame(() => {
+      fn.call(this, ...argsToPass);
+      animationId = null;
+      argsToPass = null;
+    });
+  };
+}
+
+/**
+ * A generic tree component. See propTypes for the public API.
+ *
+ * This tree component doesn't make any assumptions about the structure of your
+ * tree data. Whether children are computed on demand, or stored in an array in
+ * the parent's `_children` property, it doesn't matter. We only require the
+ * implementation of `getChildren`, `getRoots`, `getParent`, and `isExpanded`
+ * functions.
+ *
+ * This tree component is well tested and reliable. See the tests in ./tests
+ * and its usage in the performance and memory panels in mozilla-central.
+ *
+ * This tree component doesn't make any assumptions about how to render items in
+ * the tree. You provide a `renderItem` function, and this component will ensure
+ * that only those items whose parents are expanded and which are visible in the
+ * viewport are rendered. The `renderItem` function could render the items as a
+ * "traditional" tree or as rows in a table or anything else. It doesn't
+ * restrict you to only one certain kind of tree.
+ *
+ * The tree comes with basic styling for the indent, the arrow, as well as
+ * hovered and focused styles which can be override in CSS.
+ *
+ * ### Example Usage
+ *
+ * Suppose we have some tree data where each item has this form:
+ *
+ *     {
+ *       id: Number,
+ *       label: String,
+ *       parent: Item or null,
+ *       children: Array of child items,
+ *       expanded: bool,
+ *     }
+ *
+ * Here is how we could render that data with this component:
+ *
+ *     class MyTree extends Component {
+ *       static get propTypes() {
+ *         // The root item of the tree, with the form described above.
+ *         return {
+ *           root: PropTypes.object.isRequired
+ *         };
+ *       },
+ *
+ *       render() {
+ *         return Tree({
+ *           itemHeight: 20, // px
+ *
+ *           getRoots: () => [this.props.root],
+ *
+ *           getParent: item => item.parent,
+ *           getChildren: item => item.children,
+ *           getKey: item => item.id,
+ *           isExpanded: item => item.expanded,
+ *
+ *           renderItem: (item, depth, isFocused, arrow, isExpanded) => {
+ *             let className = "my-tree-item";
+ *             if (isFocused) {
+ *               className += " focused";
+ *             }
+ *             return dom.div({
+ *               className,
+ *             },
+ *               arrow,
+ *               // And here is the label for this item.
+ *               dom.span({ className: "my-tree-item-label" }, item.label)
+ *             );
+ *           },
+ *
+ *           onExpand: item => dispatchExpandActionToRedux(item),
+ *           onCollapse: item => dispatchCollapseActionToRedux(item),
+ *         });
+ *       }
+ *     }
+ */
+class Tree extends Component {
+  static get propTypes() {
+    return {
+      // Required props
+
+      // A function to get an item's parent, or null if it is a root.
+      //
+      // Type: getParent(item: Item) -> Maybe<Item>
+      //
+      // Example:
+      //
+      //     // The parent of this item is stored in its `parent` property.
+      //     getParent: item => item.parent
+      getParent: _propTypes2.default.func.isRequired,
+
+      // A function to get an item's children.
+      //
+      // Type: getChildren(item: Item) -> [Item]
+      //
+      // Example:
+      //
+      //     // This item's children are stored in its `children` property.
+      //     getChildren: item => item.children
+      getChildren: _propTypes2.default.func.isRequired,
+
+      // A function which takes an item and ArrowExpander component instance and
+      // returns a component, or text, or anything else that React considers
+      // renderable.
+      //
+      // Type: renderItem(item: Item,
+      //                  depth: Number,
+      //                  isFocused: Boolean,
+      //                  arrow: ReactComponent,
+      //                  isExpanded: Boolean) -> ReactRenderable
+      //
+      // Example:
+      //
+      //     renderItem: (item, depth, isFocused, arrow, isExpanded) => {
+      //       let className = "my-tree-item";
+      //       if (isFocused) {
+      //         className += " focused";
+      //       }
+      //       return dom.div(
+      //         {
+      //           className,
+      //           style: { marginLeft: depth * 10 + "px" }
+      //         },
+      //         arrow,
+      //         dom.span({ className: "my-tree-item-label" }, item.label)
+      //       );
+      //     },
+      renderItem: _propTypes2.default.func.isRequired,
+
+      // A function which returns the roots of the tree (forest).
+      //
+      // Type: getRoots() -> [Item]
+      //
+      // Example:
+      //
+      //     // In this case, we only have one top level, root item. You could
+      //     // return multiple items if you have many top level items in your
+      //     // tree.
+      //     getRoots: () => [this.props.rootOfMyTree]
+      getRoots: _propTypes2.default.func.isRequired,
+
+      // A function to get a unique key for the given item. This helps speed up
+      // React's rendering a *TON*.
+      //
+      // Type: getKey(item: Item) -> String
+      //
+      // Example:
+      //
+      //     getKey: item => `my-tree-item-${item.uniqueId}`
+      getKey: _propTypes2.default.func.isRequired,
+
+      // A function to get whether an item is expanded or not. If an item is not
+      // expanded, then it must be collapsed.
+      //
+      // Type: isExpanded(item: Item) -> Boolean
+      //
+      // Example:
+      //
+      //     isExpanded: item => item.expanded,
+      isExpanded: _propTypes2.default.func.isRequired,
+
+      // Optional props
+
+      // The currently focused item, if any such item exists.
+      focused: _propTypes2.default.any,
+
+      // Handle when a new item is focused.
+      onFocus: _propTypes2.default.func,
+
+      // The depth to which we should automatically expand new items.
+      autoExpandDepth: _propTypes2.default.number,
+      // Should auto expand all new items or just the new items under the first
+      // root item.
+      autoExpandAll: _propTypes2.default.bool,
+
+      // Note: the two properties below are mutually exclusive. Only one of the
+      // label properties is necessary.
+      // ID of an element whose textual content serves as an accessible label
+      // for a tree.
+      labelledby: _propTypes2.default.string,
+      // Accessibility label for a tree widget.
+      label: _propTypes2.default.string,
+
+      // Optional event handlers for when items are expanded or collapsed.
+      // Useful for dispatching redux events and updating application state,
+      // maybe lazily loading subtrees from a worker, etc.
+      //
+      // Type:
+      //     onExpand(item: Item)
+      //     onCollapse(item: Item)
+      //
+      // Example:
+      //
+      //     onExpand: item => dispatchExpandActionToRedux(item)
+      onExpand: _propTypes2.default.func,
+      onCollapse: _propTypes2.default.func,
+      // Optional event handler called with the current focused node when the
+      // Enter key is pressed. Can be useful to allow further keyboard actions
+      // within the tree node.
+      onActivate: _propTypes2.default.func,
+      isExpandable: _propTypes2.default.func,
+      // Additional classes to add to the root element.
+      className: _propTypes2.default.string,
+      // style object to be applied to the root element.
+      style: _propTypes2.default.object
+    };
+  }
+
+  static get defaultProps() {
+    return {
+      autoExpandDepth: AUTO_EXPAND_DEPTH,
+      autoExpandAll: true
+    };
+  }
+
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      seen: new Set()
+    };
+
+    this._onExpand = oncePerAnimationFrame(this._onExpand).bind(this);
+    this._onCollapse = oncePerAnimationFrame(this._onCollapse).bind(this);
+    this._focusPrevNode = oncePerAnimationFrame(this._focusPrevNode).bind(this);
+    this._focusNextNode = oncePerAnimationFrame(this._focusNextNode).bind(this);
+    this._focusParentNode = oncePerAnimationFrame(this._focusParentNode).bind(this);
+    this._focusFirstNode = oncePerAnimationFrame(this._focusFirstNode).bind(this);
+    this._focusLastNode = oncePerAnimationFrame(this._focusLastNode).bind(this);
+
+    this._autoExpand = this._autoExpand.bind(this);
+    this._preventArrowKeyScrolling = this._preventArrowKeyScrolling.bind(this);
+    this._dfs = this._dfs.bind(this);
+    this._dfsFromRoots = this._dfsFromRoots.bind(this);
+    this._focus = this._focus.bind(this);
+    this._scrollNodeIntoView = this._scrollNodeIntoView.bind(this);
+    this._onBlur = this._onBlur.bind(this);
+    this._onKeyDown = this._onKeyDown.bind(this);
+    this._nodeIsExpandable = this._nodeIsExpandable.bind(this);
+    this._activateNode = oncePerAnimationFrame(this._activateNode).bind(this);
+  }
+
+  componentDidMount() {
+    this._autoExpand();
+    if (this.props.focused) {
+      this._scrollNodeIntoView(this.props.focused);
+      // Always keep the focus on the tree itself.
+      this.treeRef.focus();
+    }
+  }
+
+  componentWillReceiveProps(nextProps) {
+    this._autoExpand();
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    if (this.props.focused && prevProps.focused !== this.props.focused) {
+      this._scrollNodeIntoView(this.props.focused);
+      // Always keep the focus on the tree itself.
+      this.treeRef.focus();
+    }
+  }
+
+  _autoExpand() {
+    if (!this.props.autoExpandDepth) {
+      return;
+    }
+
+    // Automatically expand the first autoExpandDepth levels for new items. Do
+    // not use the usual DFS infrastructure because we don't want to ignore
+    // collapsed nodes.
+    const autoExpand = (item, currentDepth) => {
+      if (currentDepth >= this.props.autoExpandDepth || this.state.seen.has(item)) {
+        return;
+      }
+
+      this.props.onExpand(item);
+      this.state.seen.add(item);
+
+      const children = this.props.getChildren(item);
+      const length = children.length;
+      for (let i = 0; i < length; i++) {
+        autoExpand(children[i], currentDepth + 1);
+      }
+    };
+
+    const roots = this.props.getRoots();
+    const length = roots.length;
+    if (this.props.autoExpandAll) {
+      for (let i = 0; i < length; i++) {
+        autoExpand(roots[i], 0);
+      }
+    } else if (length != 0) {
+      autoExpand(roots[0], 0);
+    }
+  }
+
+  _preventArrowKeyScrolling(e) {
+    switch (e.key) {
+      case "ArrowUp":
+      case "ArrowDown":
+      case "ArrowLeft":
+      case "ArrowRight":
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.nativeEvent) {
+          if (e.nativeEvent.preventDefault) {
+            e.nativeEvent.preventDefault();
+          }
+          if (e.nativeEvent.stopPropagation) {
+            e.nativeEvent.stopPropagation();
+          }
+        }
+    }
+  }
+
+  /**
+   * Perform a pre-order depth-first search from item.
+   */
+  _dfs(item, maxDepth = Infinity, traversal = [], _depth = 0) {
+    traversal.push({ item, depth: _depth });
+
+    if (!this.props.isExpanded(item)) {
+      return traversal;
+    }
+
+    const nextDepth = _depth + 1;
+
+    if (nextDepth > maxDepth) {
+      return traversal;
+    }
+
+    const children = this.props.getChildren(item);
+    const length = children.length;
+    for (let i = 0; i < length; i++) {
+      this._dfs(children[i], maxDepth, traversal, nextDepth);
+    }
+
+    return traversal;
+  }
+
+  /**
+   * Perform a pre-order depth-first search over the whole forest.
+   */
+  _dfsFromRoots(maxDepth = Infinity) {
+    const traversal = [];
+
+    const roots = this.props.getRoots();
+    const length = roots.length;
+    for (let i = 0; i < length; i++) {
+      this._dfs(roots[i], maxDepth, traversal);
+    }
+
+    return traversal;
+  }
+
+  /**
+   * Expands current row.
+   *
+   * @param {Object} item
+   * @param {Boolean} expandAllChildren
+   */
+  _onExpand(item, expandAllChildren) {
+    if (this.props.onExpand) {
+      this.props.onExpand(item);
+
+      if (expandAllChildren) {
+        const children = this._dfs(item);
+        const length = children.length;
+        for (let i = 0; i < length; i++) {
+          this.props.onExpand(children[i].item);
+        }
+      }
+    }
+  }
+
+  /**
+   * Collapses current row.
+   *
+   * @param {Object} item
+   */
+  _onCollapse(item) {
+    if (this.props.onCollapse) {
+      this.props.onCollapse(item);
+    }
+  }
+
+  /**
+   * Sets the passed in item to be the focused item.
+   *
+   * @param {Object|undefined} item
+   *        The item to be focused, or undefined to focus no item.
+   *
+   * @param {Object|undefined} options
+   *        An options object which can contain:
+   *          - dir: "up" or "down" to indicate if we should scroll the element
+   *                 to the top or the bottom of the scrollable container when
+   *                 the element is off canvas.
+   */
+  _focus(item, options = {}) {
+    const { preventAutoScroll } = options;
+    if (item && !preventAutoScroll) {
+      this._scrollNodeIntoView(item, options);
+    }
+    if (this.props.onFocus) {
+      this.props.onFocus(item);
+    }
+  }
+
+  /**
+   * Sets the passed in item to be the focused item.
+   *
+   * @param {Object|undefined} item
+   *        The item to be scrolled to.
+   *
+   * @param {Object|undefined} options
+   *        An options object which can contain:
+   *          - dir: "up" or "down" to indicate if we should scroll the element
+   *                 to the top or the bottom of the scrollable container when
+   *                 the element is off canvas.
+   */
+  _scrollNodeIntoView(item, options = {}) {
+    if (item !== undefined) {
+      const treeElement = this.treeRef;
+      const element = document.getElementById(this.props.getKey(item));
+
+      if (element) {
+        const { top, bottom } = element.getBoundingClientRect();
+        const closestScrolledParent = node => {
+          if (node == null) {
+            return null;
+          }
+
+          if (node.scrollHeight > node.clientHeight) {
+            return node;
+          }
+          return closestScrolledParent(node.parentNode);
+        };
+        const scrolledParent = closestScrolledParent(treeElement);
+        const scrolledParentRect = scrolledParent ? scrolledParent.getBoundingClientRect() : null;
+        const isVisible = !scrolledParent || top >= scrolledParentRect.top && bottom <= scrolledParentRect.bottom;
+
+        if (!isVisible) {
+          const { alignTo } = options;
+          const scrollToTop = alignTo ? alignTo === "top" : !scrolledParentRect || top < scrolledParentRect.top;
+          element.scrollIntoView(scrollToTop);
+        }
+      }
+    }
+  }
+
+  /**
+   * Sets the state to have no focused item.
+   */
+  _onBlur() {
+    this._focus(undefined);
+  }
+
+  /**
+   * Handles key down events in the tree's container.
+   *
+   * @param {Event} e
+   */
+  _onKeyDown(e) {
+    if (this.props.focused == null) {
+      return;
+    }
+
+    // Allow parent nodes to use navigation arrows with modifiers.
+    if (e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) {
+      return;
+    }
+
+    this._preventArrowKeyScrolling(e);
+
+    switch (e.key) {
+      case "ArrowUp":
+        this._focusPrevNode();
+        return;
+
+      case "ArrowDown":
+        this._focusNextNode();
+        return;
+
+      case "ArrowLeft":
+        if (this.props.isExpanded(this.props.focused) && this._nodeIsExpandable(this.props.focused)) {
+          this._onCollapse(this.props.focused);
+        } else {
+          this._focusParentNode();
+        }
+        return;
+
+      case "ArrowRight":
+        if (this._nodeIsExpandable(this.props.focused) && !this.props.isExpanded(this.props.focused)) {
+          this._onExpand(this.props.focused);
+        } else {
+          this._focusNextNode();
+        }
+        return;
+
+      case "Home":
+        this._focusFirstNode();
+        return;
+
+      case "End":
+        this._focusLastNode();
+        return;
+
+      case "Enter":
+        this._activateNode();
+    }
+  }
+
+  /**
+   * Sets the previous node relative to the currently focused item, to focused.
+   */
+  _focusPrevNode() {
+    // Start a depth first search and keep going until we reach the currently
+    // focused node. Focus the previous node in the DFS, if it exists. If it
+    // doesn't exist, we're at the first node already.
+
+    let prev;
+
+    const traversal = this._dfsFromRoots();
+    const length = traversal.length;
+    for (let i = 0; i < length; i++) {
+      const item = traversal[i].item;
+      if (item === this.props.focused) {
+        break;
+      }
+      prev = item;
+    }
+    if (prev === undefined) {
+      return;
+    }
+
+    this._focus(prev, { alignTo: "top" });
+  }
+
+  /**
+   * Handles the down arrow key which will focus either the next child
+   * or sibling row.
+   */
+  _focusNextNode() {
+    // Start a depth first search and keep going until we reach the currently
+    // focused node. Focus the next node in the DFS, if it exists. If it
+    // doesn't exist, we're at the last node already.
+    const traversal = this._dfsFromRoots();
+    const length = traversal.length;
+    let i = 0;
+
+    while (i < length) {
+      if (traversal[i].item === this.props.focused) {
+        break;
+      }
+      i++;
+    }
+
+    if (i + 1 < traversal.length) {
+      this._focus(traversal[i + 1].item, { alignTo: "bottom" });
+    }
+  }
+
+  /**
+   * Handles the left arrow key, going back up to the current rows'
+   * parent row.
+   */
+  _focusParentNode() {
+    const parent = this.props.getParent(this.props.focused);
+    if (!parent) {
+      this._focusPrevNode(this.props.focused);
+      return;
+    }
+
+    const traversal = this._dfsFromRoots();
+    const length = traversal.length;
+    let parentIndex = 0;
+    for (; parentIndex < length; parentIndex++) {
+      if (traversal[parentIndex].item === parent) {
+        break;
+      }
+    }
+
+    this._focus(parent, { alignTo: "top" });
+  }
+
+  _focusFirstNode() {
+    const traversal = this._dfsFromRoots();
+    this._focus(traversal[0].item, { alignTo: "top" });
+  }
+
+  _focusLastNode() {
+    const traversal = this._dfsFromRoots();
+    const lastIndex = traversal.length - 1;
+    this._focus(traversal[lastIndex].item, { alignTo: "bottom" });
+  }
+
+  _activateNode() {
+    if (this.props.onActivate) {
+      this.props.onActivate(this.props.focused);
+    }
+  }
+
+  _nodeIsExpandable(item) {
+    return this.props.isExpandable ? this.props.isExpandable(item) : !!this.props.getChildren(item).length;
+  }
+
+  render() {
+    const traversal = this._dfsFromRoots();
+    const { focused } = this.props;
+
+    const nodes = traversal.map((v, i) => {
+      const { item, depth } = traversal[i];
+      const key = this.props.getKey(item, i);
+      return TreeNodeFactory({
+        key,
+        id: key,
+        index: i,
+        item,
+        depth,
+        renderItem: this.props.renderItem,
+        focused: focused === item,
+        expanded: this.props.isExpanded(item),
+        isExpandable: this._nodeIsExpandable(item),
+        onExpand: this._onExpand,
+        onCollapse: this._onCollapse,
+        onClick: e => {
+          // Since the user just clicked the node, there's no need to check if
+          // it should be scrolled into view.
+          this._focus(item, { preventAutoScroll: true });
+          if (this.props.isExpanded(item)) {
+            this.props.onCollapse(item);
+          } else {
+            this.props.onExpand(item, e.altKey);
+          }
+        }
+      });
+    });
+
+    const style = Object.assign({}, this.props.style || {}, {
+      padding: 0,
+      margin: 0
+    });
+
+    return _reactDomFactories2.default.div({
+      className: `tree ${this.props.className ? this.props.className : ""}`,
+      ref: el => {
+        this.treeRef = el;
+      },
+      role: "tree",
+      tabIndex: "0",
+      onKeyDown: this._onKeyDown,
+      onKeyPress: this._preventArrowKeyScrolling,
+      onKeyUp: this._preventArrowKeyScrolling,
+      onFocus: ({ nativeEvent }) => {
+        if (focused || !nativeEvent || !this.treeRef) {
+          return;
+        }
+
+        const { explicitOriginalTarget } = nativeEvent;
+        // Only set default focus to the first tree node if the focus came
+        // from outside the tree (e.g. by tabbing to the tree from other
+        // external elements).
+        if (explicitOriginalTarget !== this.treeRef && !this.treeRef.contains(explicitOriginalTarget)) {
+          this._focus(traversal[0].item);
+        }
+      },
+      onBlur: this._onBlur,
+      "aria-label": this.props.label,
+      "aria-labelledby": this.props.labelledby,
+      "aria-activedescendant": focused && this.props.getKey(focused),
+      style
+    }, nodes);
+  }
+}
+
+exports.default = Tree;
+
+/***/ }),
+
+/***/ 3671:
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
+
+/***/ 3672:
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
+
+/***/ 3673:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders undefined value
+ */
+const Undefined = function () {
+  return span({ className: "objectBox objectBox-undefined" }, "undefined");
+};
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true) {
+    return object === undefined;
+  }
+
+  return object && object.type && object.type == "undefined" || getGripType(object, noGrip) == "undefined";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(Undefined),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3674:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const { wrapRender } = __webpack_require__(3644);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders null value
+ */
+function Null(props) {
+  return span({ className: "objectBox objectBox-null" }, "null");
+}
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true) {
+    return object === null;
+  }
+
+  if (object && object.type && object.type == "null") {
+    return true;
+  }
+
+  return object == null;
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(Null),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3675:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a number
+ */
+Number.propTypes = {
+  object: PropTypes.oneOfType([PropTypes.object, PropTypes.number, PropTypes.bool]).isRequired
+};
+
+function Number(props) {
+  const value = props.object;
+
+  return span({ className: "objectBox objectBox-number" }, stringify(value));
+}
+
+function stringify(object) {
+  const isNegativeZero = Object.is(object, -0) || object.type && object.type == "-0";
+
+  return isNegativeZero ? "-0" : String(object);
+}
+
+function supportsObject(object, noGrip = false) {
+  return ["boolean", "number", "-0"].includes(getGripType(object, noGrip));
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(Number),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3676:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+const { wrapRender, ellipsisElement } = __webpack_require__(3644);
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+const DEFAULT_TITLE = "Object";
+
+/**
+ * Renders an object. An object is represented by a list of its
+ * properties enclosed in curly brackets.
+ */
+ObjectRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  title: PropTypes.string
+};
+
+function ObjectRep(props) {
+  const object = props.object;
+  const propsArray = safePropIterator(props, object);
+
+  if (props.mode === MODE.TINY) {
+    const tinyModeItems = [];
+    if (getTitle(props, object) !== DEFAULT_TITLE) {
+      tinyModeItems.push(getTitleElement(props, object));
+    } else {
+      tinyModeItems.push(span({
+        className: "objectLeftBrace"
+      }, "{"), propsArray.length > 0 ? ellipsisElement : null, span({
+        className: "objectRightBrace"
+      }, "}"));
+    }
+
+    return span({ className: "objectBox objectBox-object" }, ...tinyModeItems);
+  }
+
+  return span({ className: "objectBox objectBox-object" }, getTitleElement(props, object), span({
+    className: "objectLeftBrace"
+  }, " { "), ...propsArray, span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitleElement(props, object) {
+  return span({ className: "objectTitle" }, getTitle(props, object));
+}
+
+function getTitle(props, object) {
+  return props.title || DEFAULT_TITLE;
+}
+
+function safePropIterator(props, object, max) {
+  max = typeof max === "undefined" ? 3 : max;
+  try {
+    return propIterator(props, object, max);
+  } catch (err) {
+    console.error(err);
+  }
+  return [];
+}
+
+function propIterator(props, object, max) {
+  // Work around https://bugzilla.mozilla.org/show_bug.cgi?id=945377
+  if (Object.prototype.toString.call(object) === "[object Generator]") {
+    object = Object.getPrototypeOf(object);
+  }
+
+  const elements = [];
+  const unimportantProperties = [];
+  let propertiesNumber = 0;
+  const propertiesNames = Object.keys(object);
+
+  const pushPropRep = (name, value) => {
+    elements.push(PropRep(_extends({}, props, {
+      key: name,
+      mode: MODE.TINY,
+      name,
+      object: value,
+      equal: ": "
+    })));
+    propertiesNumber++;
+
+    if (propertiesNumber < propertiesNames.length) {
+      elements.push(", ");
+    }
+  };
+
+  try {
+    for (const name of propertiesNames) {
+      if (propertiesNumber >= max) {
+        break;
+      }
+
+      let value;
+      try {
+        value = object[name];
+      } catch (exc) {
+        continue;
+      }
+
+      // Object members with non-empty values are preferred since it gives the
+      // user a better overview of the object.
+      if (isInterestingProp(value)) {
+        pushPropRep(name, value);
+      } else {
+        // If the property is not important, put its name on an array for later
+        // use.
+        unimportantProperties.push(name);
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  if (propertiesNumber < max) {
+    for (const name of unimportantProperties) {
+      if (propertiesNumber >= max) {
+        break;
+      }
+
+      let value;
+      try {
+        value = object[name];
+      } catch (exc) {
+        continue;
+      }
+
+      pushPropRep(name, value);
+    }
+  }
+
+  if (propertiesNumber < propertiesNames.length) {
+    elements.push(ellipsisElement);
+  }
+
+  return elements;
+}
+
+function isInterestingProp(value) {
+  const type = typeof value;
+  return type == "boolean" || type == "number" || type == "string" && value;
+}
+
+function supportsObject(object) {
+  return true;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ObjectRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3677:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a symbol.
+ */
+SymbolRep.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function SymbolRep(props) {
+  const { className = "objectBox objectBox-symbol", object } = props;
+  const { name } = object;
+
+  return span({
+    className,
+    "data-link-actor-id": object.actor
+  }, `Symbol(${name || ""})`);
+}
+
+function supportsObject(object, noGrip = false) {
+  return getGripType(object, noGrip) == "symbol";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(SymbolRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3678:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a Infinity object
+ */
+InfinityRep.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function InfinityRep(props) {
+  const { object } = props;
+
+  return span({ className: "objectBox objectBox-number" }, object.type);
+}
+
+function supportsObject(object, noGrip = false) {
+  const type = getGripType(object, noGrip);
+  return type == "Infinity" || type == "-Infinity";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(InfinityRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3679:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const { getGripType, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a NaN object
+ */
+function NaNRep(props) {
+  return span({ className: "objectBox objectBox-nan" }, "NaN");
+}
+
+function supportsObject(object, noGrip = false) {
+  return getGripType(object, noGrip) == "NaN";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(NaNRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 368:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M12.219 7c.345 0 .635.117.869.352.234.234.351.524.351.869 0 .351-.118.652-.356.903-.238.25-.526.376-.864.376-.332 0-.615-.125-.85-.376a1.276 1.276 0 0 1-.351-.903A1.185 1.185 0 0 1 12.218 7zM8.234 7c.345 0 .635.117.87.352.234.234.351.524.351.869 0 .351-.119.652-.356.903-.238.25-.526.376-.865.376-.332 0-.613-.125-.844-.376a1.286 1.286 0 0 1-.347-.903c0-.352.114-.643.342-.874.228-.231.51-.347.85-.347zM4.201 7c.339 0 .627.117.864.352.238.234.357.524.357.869 0 .351-.119.652-.357.903-.237.25-.525.376-.864.376-.338 0-.623-.125-.854-.376A1.286 1.286 0 0 1 3 8.221 1.185 1.185 0 0 1 4.201 7z\" fill-rule=\"evenodd\"></path></svg>"
+
+/***/ }),
+
+/***/ 3680:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const dom = __webpack_require__(3643);
+const PropTypes = __webpack_require__(3642);
+const { wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const { span } = dom;
+
+/**
+ * Renders an object. An object is represented by a list of its
+ * properties enclosed in curly brackets.
+ */
+Accessor.propTypes = {
+  object: PropTypes.object.isRequired,
+  mode: PropTypes.oneOf(Object.values(MODE))
+};
+
+function Accessor(props) {
+  const { object } = props;
+
+  const accessors = [];
+  if (hasGetter(object)) {
+    accessors.push("Getter");
+  }
+  if (hasSetter(object)) {
+    accessors.push("Setter");
+  }
+  const title = accessors.join(" & ");
+
+  return span({ className: "objectBox objectBox-accessor objectTitle" }, title);
+}
+
+function hasGetter(object) {
+  return object && object.get && object.get.type !== "undefined";
+}
+
+function hasSetter(object) {
+  return object && object.set && object.set.type !== "undefined";
+}
+
+function supportsObject(object, noGrip = false) {
+  if (noGrip !== true && (hasGetter(object) || hasSetter(object))) {
+    return true;
+  }
+
+  return false;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Accessor),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3681:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+const { rep: StringRep } = __webpack_require__(3648);
+
+/**
+ * Renders DOM attribute
+ */
+Attribute.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function Attribute(props) {
+  const { object } = props;
+  const value = object.preview.value;
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox-Attr"
+  }, span({ className: "attrName" }, getTitle(object)), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
+}
+
+function getTitle(grip) {
+  return grip.preview.nodeName;
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return getGripType(grip, noGrip) == "Attr" && grip.preview;
+}
+
+module.exports = {
+  rep: wrapRender(Attribute),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3682:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Used to render JS built-in Date() object.
+ */
+DateTime.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function DateTime(props) {
+  const grip = props.object;
+  let date;
+  try {
+    date = span({
+      "data-link-actor-id": grip.actor,
+      className: "objectBox"
+    }, getTitle(grip), span({ className: "Date" }, new Date(grip.preview.timestamp).toISOString()));
+  } catch (e) {
+    date = span({ className: "objectBox" }, "Invalid Date");
+  }
+
+  return date;
+}
+
+function getTitle(grip) {
+  return span({
+    className: "objectTitle"
+  }, `${grip.class} `);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return getGripType(grip, noGrip) == "Date" && grip.preview;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(DateTime),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3683:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const {
+  getGripType,
+  isGrip,
+  getURLDisplayString,
+  wrapRender
+} = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM document object.
+ */
+Document.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function Document(props) {
+  const grip = props.object;
+  const location = getLocation(grip);
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-document"
+  }, getTitle(grip), location ? span({ className: "location" }, ` ${location}`) : null);
+}
+
+function getLocation(grip) {
+  const location = grip.preview.location;
+  return location ? getURLDisplayString(location) : null;
+}
+
+function getTitle(grip) {
+  return span({
+    className: "objectTitle"
+  }, grip.class);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  const type = getGripType(object, noGrip);
+  return object.preview && (type === "HTMLDocument" || type === "XULDocument");
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Document),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3684:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM documentType object.
+ */
+DocumentType.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function DocumentType(props) {
+  const { object } = props;
+  const name = object && object.preview && object.preview.nodeName ? ` ${object.preview.nodeName}` : "";
+  return span({
+    "data-link-actor-id": props.object.actor,
+    className: "objectBox objectBox-document"
+  }, `<!DOCTYPE${name}>`);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  const type = getGripType(object, noGrip);
+  return object.preview && type === "DocumentType";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(DocumentType),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3685:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, wrapRender } = __webpack_require__(3644);
+
+const { MODE } = __webpack_require__(3645);
+const { rep } = __webpack_require__(3656);
+
+/**
+ * Renders DOM event objects.
+ */
+Event.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function Event(props) {
+  const gripProps = _extends({}, props, {
+    title: getTitle(props),
+    object: _extends({}, props.object, {
+      preview: _extends({}, props.object.preview, {
+        ownProperties: {}
+      })
+    })
+  });
+
+  if (gripProps.object.preview.target) {
+    Object.assign(gripProps.object.preview.ownProperties, {
+      target: gripProps.object.preview.target
+    });
+  }
+  Object.assign(gripProps.object.preview.ownProperties, gripProps.object.preview.properties);
+
+  delete gripProps.object.preview.properties;
+  gripProps.object.ownPropertyLength = Object.keys(gripProps.object.preview.ownProperties).length;
+
+  switch (gripProps.object.class) {
+    case "MouseEvent":
+      gripProps.isInterestingProp = (type, value, name) => {
+        return ["target", "clientX", "clientY", "layerX", "layerY"].includes(name);
+      };
+      break;
+    case "KeyboardEvent":
+      gripProps.isInterestingProp = (type, value, name) => {
+        return ["target", "key", "charCode", "keyCode"].includes(name);
+      };
+      break;
+    case "MessageEvent":
+      gripProps.isInterestingProp = (type, value, name) => {
+        return ["target", "isTrusted", "data"].includes(name);
+      };
+      break;
+    default:
+      gripProps.isInterestingProp = (type, value, name) => {
+        // We want to show the properties in the order they are declared.
+        return Object.keys(gripProps.object.preview.ownProperties).includes(name);
+      };
+  }
+
+  return rep(gripProps);
+}
+
+function getTitle(props) {
+  const preview = props.object.preview;
+  let title = preview.type;
+
+  if (preview.eventKind == "key" && preview.modifiers && preview.modifiers.length) {
+    title = `${title} ${preview.modifiers.join("-")}`;
+  }
+  return title;
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.preview.kind == "DOMEvent";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(Event),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3686:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+// Dependencies
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+
+const PropRep = __webpack_require__(3650);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a DOM Promise object.
+ */
+PromiseRep.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function PromiseRep(props) {
+  const object = props.object;
+  const { promiseState } = object;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-object"
+  };
+
+  if (props.mode === MODE.TINY) {
+    const { Rep } = __webpack_require__(3647);
+
+    return span(config, getTitle(object), span({
+      className: "objectLeftBrace"
+    }, " { "), Rep({ object: promiseState.state }), span({
+      className: "objectRightBrace"
+    }, " }"));
+  }
+
+  const propsArray = getProps(props, promiseState);
+  return span(config, getTitle(object), span({
+    className: "objectLeftBrace"
+  }, " { "), ...propsArray, span({
+    className: "objectRightBrace"
+  }, " }"));
+}
+
+function getTitle(object) {
+  return span({
+    className: "objectTitle"
+  }, object.class);
+}
+
+function getProps(props, promiseState) {
+  const keys = ["state"];
+  if (Object.keys(promiseState).includes("value")) {
+    keys.push("value");
+  }
+
+  return keys.reduce((res, key, i) => {
+    const object = promiseState[key];
+    res = res.concat(PropRep(_extends({}, props, {
+      mode: MODE.TINY,
+      name: `<${key}>`,
+      object,
+      equal: ": ",
+      suppressQuotes: true
+    })));
+
+    // Interleave commas between elements
+    if (i !== keys.length - 1) {
+      res.push(", ");
+    }
+
+    return res;
+  }, []);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return getGripType(object, noGrip) == "Promise";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(PromiseRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3687:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { getGripType, isGrip, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip object with regular expression.
+ */
+RegExp.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function RegExp(props) {
+  const { object } = props;
+
+  return span({
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-regexp regexpSource"
+  }, getSource(object));
+}
+
+function getSource(grip) {
+  return grip.displayString;
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return getGripType(object, noGrip) == "RegExp";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(RegExp),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3688:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const {
+  getGripType,
+  isGrip,
+  getURLDisplayString,
+  wrapRender
+} = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip representing CSSStyleSheet
+ */
+StyleSheet.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function StyleSheet(props) {
+  const grip = props.object;
+
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-object"
+  }, getTitle(grip), span({ className: "objectPropValue" }, getLocation(grip)));
+}
+
+function getTitle(grip) {
+  const title = "StyleSheet ";
+  return span({ className: "objectBoxTitle" }, title);
+}
+
+function getLocation(grip) {
+  // Embedded stylesheets don't have URL and so, no preview.
+  const url = grip.preview ? grip.preview.url : "";
+  return url ? getURLDisplayString(url) : "";
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return getGripType(object, noGrip) == "CSSStyleSheet";
+}
+
+// Exports from this module
+
+module.exports = {
+  rep: wrapRender(StyleSheet),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3689:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// Dependencies
+const PropTypes = __webpack_require__(3642);
+const {
+  isGrip,
+  cropString,
+  cropMultipleLines,
+  wrapRender
+} = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+const nodeConstants = __webpack_require__(3659);
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM comment node.
+ */
+CommentNode.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key]))
+};
+
+function CommentNode(props) {
+  const { object, mode = MODE.SHORT } = props;
+
+  let { textContent } = object.preview;
+  if (mode === MODE.TINY) {
+    textContent = cropMultipleLines(textContent, 30);
+  } else if (mode === MODE.SHORT) {
+    textContent = cropString(textContent, 50);
+  }
+
+  return span({
+    className: "objectBox theme-comment",
+    "data-link-actor-id": object.actor
+  }, `<!-- ${textContent} -->`);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return object.preview && object.preview.nodeType === nodeConstants.COMMENT_NODE;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(CommentNode),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 369:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><g fill-rule=\"evenodd\"><path d=\"M3.233 11.25l-.417 1H1.712C.763 12.25 0 11.574 0 10.747V6.503C0 5.675.755 5 1.712 5h4.127l-.417 1H1.597C1.257 6 1 6.225 1 6.503v4.244c0 .277.267.503.597.503h1.636zM7.405 11.27L7 12.306c.865.01 2.212-.024 2.315-.04.112-.016.112-.016.185-.035.075-.02.156-.046.251-.082.152-.056.349-.138.592-.244.415-.182.962-.435 1.612-.744l.138-.066a179.35 179.35 0 0 0 2.255-1.094c1.191-.546 1.191-2.074-.025-2.632l-.737-.34a3547.554 3547.554 0 0 0-3.854-1.78c-.029.11-.065.222-.11.336l-.232.596c.894.408 4.56 2.107 4.56 2.107.458.21.458.596 0 .806L9.197 11.27H7.405zM4.462 14.692l5-12a.5.5 0 1 0-.924-.384l-5 12a.5.5 0 1 0 .924.384z\"></path></g></svg>"
+
+/***/ }),
+
+/***/ 3690:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Utils
+const { isGrip, wrapRender } = __webpack_require__(3644);
+const { rep: StringRep } = __webpack_require__(3648);
+const { MODE } = __webpack_require__(3645);
+const nodeConstants = __webpack_require__(3659);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM element node.
+ */
+ElementNode.propTypes = {
+  object: PropTypes.object.isRequired,
+  inspectIconTitle: PropTypes.string,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeClick: PropTypes.func,
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function ElementNode(props) {
+  const {
+    object,
+    inspectIconTitle,
+    mode,
+    onDOMNodeClick,
+    onDOMNodeMouseOver,
+    onDOMNodeMouseOut,
+    onInspectIconClick
+  } = props;
+  const elements = getElements(object, mode);
+
+  const isInTree = object.preview && object.preview.isConnected === true;
+
+  const baseConfig = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-node"
+  };
+  let inspectIcon;
+  if (isInTree) {
+    if (onDOMNodeClick) {
+      Object.assign(baseConfig, {
+        onClick: _ => onDOMNodeClick(object)
+      });
+    }
+
+    if (onDOMNodeMouseOver) {
+      Object.assign(baseConfig, {
+        onMouseOver: _ => onDOMNodeMouseOver(object)
+      });
+    }
+
+    if (onDOMNodeMouseOut) {
+      Object.assign(baseConfig, {
+        onMouseOut: onDOMNodeMouseOut
+      });
+    }
+
+    if (onInspectIconClick) {
+      inspectIcon = dom.button({
+        className: "open-inspector",
+        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
+        title: inspectIconTitle || "Click to select the node in the inspector",
+        onClick: e => {
+          if (onDOMNodeClick) {
+            e.stopPropagation();
+          }
+
+          onInspectIconClick(object, e);
+        }
+      });
+    }
+  }
+
+  return span(baseConfig, ...elements, inspectIcon);
+}
+
+function getElements(grip, mode) {
+  const {
+    attributes,
+    nodeName,
+    isAfterPseudoElement,
+    isBeforePseudoElement
+  } = grip.preview;
+  const nodeNameElement = span({
+    className: "tag-name"
+  }, nodeName);
+
+  if (isAfterPseudoElement || isBeforePseudoElement) {
+    return [span({ className: "attrName" }, `::${isAfterPseudoElement ? "after" : "before"}`)];
+  }
+
+  if (mode === MODE.TINY) {
+    const elements = [nodeNameElement];
+    if (attributes.id) {
+      elements.push(span({ className: "attrName" }, `#${attributes.id}`));
+    }
+    if (attributes.class) {
+      elements.push(span({ className: "attrName" }, attributes.class.trim().split(/\s+/).map(cls => `.${cls}`).join("")));
+    }
+    return elements;
+  }
+
+  const attributeKeys = Object.keys(attributes);
+  if (attributeKeys.includes("class")) {
+    attributeKeys.splice(attributeKeys.indexOf("class"), 1);
+    attributeKeys.unshift("class");
+  }
+  if (attributeKeys.includes("id")) {
+    attributeKeys.splice(attributeKeys.indexOf("id"), 1);
+    attributeKeys.unshift("id");
+  }
+  const attributeElements = attributeKeys.reduce((arr, name, i, keys) => {
+    const value = attributes[name];
+    const attribute = span({}, span({ className: "attrName" }, name), span({ className: "attrEqual" }, "="), StringRep({ className: "attrValue", object: value }));
+
+    return arr.concat([" ", attribute]);
+  }, []);
+
+  return [span({ className: "angleBracket" }, "<"), nodeNameElement, ...attributeElements, span({ className: "angleBracket" }, ">")];
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+  return object.preview && object.preview.nodeType === nodeConstants.ELEMENT_NODE;
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ElementNode),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3691:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, cropString, wrapRender } = __webpack_require__(3644);
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders DOM #text node.
+ */
+TextNode.propTypes = {
+  object: PropTypes.object.isRequired,
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  onDOMNodeMouseOver: PropTypes.func,
+  onDOMNodeMouseOut: PropTypes.func,
+  onInspectIconClick: PropTypes.func
+};
+
+function TextNode(props) {
+  const {
+    object: grip,
+    mode = MODE.SHORT,
+    onDOMNodeMouseOver,
+    onDOMNodeMouseOut,
+    onInspectIconClick
+  } = props;
+
+  const baseConfig = {
+    "data-link-actor-id": grip.actor,
+    className: "objectBox objectBox-textNode"
+  };
+  let inspectIcon;
+  const isInTree = grip.preview && grip.preview.isConnected === true;
+
+  if (isInTree) {
+    if (onDOMNodeMouseOver) {
+      Object.assign(baseConfig, {
+        onMouseOver: _ => onDOMNodeMouseOver(grip)
+      });
+    }
+
+    if (onDOMNodeMouseOut) {
+      Object.assign(baseConfig, {
+        onMouseOut: onDOMNodeMouseOut
+      });
+    }
+
+    if (onInspectIconClick) {
+      inspectIcon = dom.button({
+        className: "open-inspector",
+        draggable: false,
+        // TODO: Localize this with "openNodeInInspector" when Bug 1317038 lands
+        title: "Click to select the node in the inspector",
+        onClick: e => onInspectIconClick(grip, e)
+      });
+    }
+  }
+
+  if (mode === MODE.TINY) {
+    return span(baseConfig, getTitle(grip), inspectIcon);
+  }
+
+  return span(baseConfig, getTitle(grip), span({ className: "nodeValue" }, " ", `"${getTextContent(grip)}"`), inspectIcon);
+}
+
+function getTextContent(grip) {
+  return cropString(grip.preview.textContent);
+}
+
+function getTitle(grip) {
+  const title = "#text";
+  return span({}, title);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.class == "Text";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(TextNode),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3692:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const {
+  getGripType,
+  isGrip,
+  getURLDisplayString,
+  wrapRender
+} = __webpack_require__(3644);
+
+const { MODE } = __webpack_require__(3645);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip representing a window.
+ */
+WindowRep.propTypes = {
+  // @TODO Change this to Object.values when supported in Node's version of V8
+  mode: PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+  object: PropTypes.object.isRequired
+};
+
+function WindowRep(props) {
+  const { mode, object } = props;
+
+  const config = {
+    "data-link-actor-id": object.actor,
+    className: "objectBox objectBox-Window"
+  };
+
+  if (mode === MODE.TINY) {
+    return span(config, getTitle(object));
+  }
+
+  return span(config, getTitle(object, true), span({ className: "location" }, getLocation(object)));
+}
+
+function getTitle(object, trailingSpace) {
+  let title = object.displayClass || object.class || "Window";
+  if (trailingSpace === true) {
+    title = `${title} `;
+  }
+  return span({ className: "objectTitle" }, title);
+}
+
+function getLocation(object) {
+  return getURLDisplayString(object.preview.url);
+}
+
+// Registration
+function supportsObject(object, noGrip = false) {
+  if (noGrip === true || !isGrip(object)) {
+    return false;
+  }
+
+  return object.preview && getGripType(object, noGrip) == "Window";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(WindowRep),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3693:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, wrapRender } = __webpack_require__(3644);
+
+const String = __webpack_require__(3648).rep;
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip object with textual data.
+ */
+ObjectWithText.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function ObjectWithText(props) {
+  const grip = props.object;
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: `objectTitle objectBox objectBox-${getType(grip)}`
+  }, `${getType(grip)} `, getDescription(grip));
+}
+
+function getType(grip) {
+  return grip.class;
+}
+
+function getDescription(grip) {
+  return String({
+    object: grip.preview.text
+  });
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.preview.kind == "ObjectWithText";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ObjectWithText),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3694:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// ReactJS
+const PropTypes = __webpack_require__(3642);
+
+// Reps
+const { isGrip, getURLDisplayString, wrapRender } = __webpack_require__(3644);
+
+const dom = __webpack_require__(3643);
+const { span } = dom;
+
+/**
+ * Renders a grip object with URL data.
+ */
+ObjectWithURL.propTypes = {
+  object: PropTypes.object.isRequired
+};
+
+function ObjectWithURL(props) {
+  const grip = props.object;
+  return span({
+    "data-link-actor-id": grip.actor,
+    className: `objectBox objectBox-${getType(grip)}`
+  }, getTitle(grip), span({ className: "objectPropValue" }, getDescription(grip)));
+}
+
+function getTitle(grip) {
+  return span({ className: "objectTitle" }, `${getType(grip)} `);
+}
+
+function getType(grip) {
+  return grip.class;
+}
+
+function getDescription(grip) {
+  return getURLDisplayString(grip.preview.url);
+}
+
+// Registration
+function supportsObject(grip, noGrip = false) {
+  if (noGrip === true || !isGrip(grip)) {
+    return false;
+  }
+
+  return grip.preview && grip.preview.kind == "ObjectWithURL";
+}
+
+// Exports from this module
+module.exports = {
+  rep: wrapRender(ObjectWithURL),
+  supportsObject
+};
+
+/***/ }),
+
+/***/ 3695:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { createElement, createFactory, PureComponent } = __webpack_require__(0);
+const { Provider } = __webpack_require__(3592);
+const ObjectInspector = createFactory(__webpack_require__(3696));
+const createStore = __webpack_require__(3700);
+const Utils = __webpack_require__(3657);
+const { renderRep, shouldRenderRootsInReps } = Utils;
+
+class OI extends PureComponent {
+  constructor(props) {
+    super(props);
+    this.store = createStore(props);
+  }
+
+  getStore() {
+    return this.store;
+  }
+
+  render() {
+    return createElement(Provider, { store: this.store }, ObjectInspector(this.props));
+  }
+}
+
+module.exports = props => {
+  const { roots } = props;
+  if (shouldRenderRootsInReps(roots)) {
+    return renderRep(roots[0], props);
+  }
+  return new OI(props);
+};
+
+/***/ }),
+
+/***/ 3696:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+var _devtoolsComponents = __webpack_require__(3669);
+
+var _devtoolsComponents2 = _interopRequireDefault(_devtoolsComponents);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { Component, createFactory } = __webpack_require__(0);
+const dom = __webpack_require__(3643);
+const { connect } = __webpack_require__(3592);
+const { bindActionCreators } = __webpack_require__(3593);
+
+const Tree = createFactory(_devtoolsComponents2.default.Tree);
+__webpack_require__(3697);
+
+const classnames = __webpack_require__(175);
+const { MODE } = __webpack_require__(3645);
+
+const Utils = __webpack_require__(3657);
+
+const {
+  getChildren,
+  getClosestGripNode,
+  getParent,
+  getValue,
+  nodeHasAccessors,
+  nodeHasProperties,
+  nodeIsBlock,
+  nodeIsDefaultProperties,
+  nodeIsFunction,
+  nodeIsGetter,
+  nodeIsMapEntry,
+  nodeIsMissingArguments,
+  nodeIsOptimizedOut,
+  nodeIsPrimitive,
+  nodeIsPrototype,
+  nodeIsSetter,
+  nodeIsUninitializedBinding,
+  nodeIsUnmappedBinding,
+  nodeIsUnscopedBinding,
+  nodeIsWindow,
+  nodeIsLongString,
+  nodeHasFullText
+} = Utils.node;
+
+// This implements a component that renders an interactive inspector
+// for looking at JavaScript objects. It expects descriptions of
+// objects from the protocol, and will dynamically fetch children
+// properties as objects are expanded.
+//
+// If you want to inspect a single object, pass the name and the
+// protocol descriptor of it:
+//
+//  ObjectInspector({
+//    name: "foo",
+//    desc: { writable: true, ..., { value: { actor: "1", ... }}},
+//    ...
+//  })
+//
+// If you want multiple top-level objects (like scopes), you can pass
+// an array of manually constructed nodes as `roots`:
+//
+//  ObjectInspector({
+//    roots: [{ name: ... }, ...],
+//    ...
+//  });
+
+// There are 3 types of nodes: a simple node with a children array, an
+// object that has properties that should be children when they are
+// fetched, and a primitive value that should be displayed with no
+// children.
+
+class ObjectInspector extends Component {
+  constructor(props) {
+    super();
+    this.cachedNodes = new Map();
+
+    const self = this;
+
+    self.getItemChildren = this.getItemChildren.bind(this);
+    self.renderTreeItem = this.renderTreeItem.bind(this);
+    self.setExpanded = this.setExpanded.bind(this);
+    self.focusItem = this.focusItem.bind(this);
+    self.getRoots = this.getRoots.bind(this);
+  }
+
+  shouldComponentUpdate(nextProps) {
+    const { expandedPaths, focusedItem, loadedProperties, roots } = this.props;
+
+    if (roots !== nextProps.roots) {
+      // Since the roots changed, we assume the properties did as well,
+      // so we need to cleanup the component internal state.
+
+      // We can clear the cachedNodes to avoid bugs and memory leaks.
+      this.cachedNodes.clear();
+      // The rootsChanged action will be handled in a middleware to release the
+      // actors of the old roots, as well as cleanup the state properties
+      // (expandedPaths, loadedProperties, …).
+      this.props.rootsChanged(nextProps);
+      // We don't render right away since the state is going to be changed by
+      // the rootsChanged action. The `state.forceUpdate` flag will be set
+      // to `true` so we can execute a new render cycle with the cleaned state.
+      return false;
+    }
+
+    if (nextProps.forceUpdate === true) {
+      return true;
+    }
+
+    // We should update if:
+    // - there are new loaded properties
+    // - OR the expanded paths number changed, and all of them have properties
+    //      loaded
+    // - OR the expanded paths number did not changed, but old and new sets
+    //      differ
+    // - OR the focused node changed.
+    return loadedProperties.size !== nextProps.loadedProperties.size || expandedPaths.size !== nextProps.expandedPaths.size && [...nextProps.expandedPaths].every(path => nextProps.loadedProperties.has(path)) || expandedPaths.size === nextProps.expandedPaths.size && [...nextProps.expandedPaths].some(key => !expandedPaths.has(key)) || focusedItem !== nextProps.focusedItem;
+  }
+
+  componentDidUpdate(prevProps) {
+    if (this.props.forceUpdate) {
+      // If the component was updated, we can then reset the forceUpdate flag.
+      this.props.forceUpdated();
+    }
+  }
+
+  componentWillUnmount() {
+    const { releaseActor } = this.props;
+    if (typeof releaseActor !== "function") {
+      return;
+    }
+
+    const { actors } = this.props;
+    for (const actor of actors) {
+      releaseActor(actor);
+    }
+  }
+
+  getItemChildren(item) {
+    const { loadedProperties } = this.props;
+    const { cachedNodes } = this;
+
+    return getChildren({
+      loadedProperties,
+      cachedNodes,
+      item
+    });
+  }
+
+  getRoots() {
+    return this.props.roots;
+  }
+
+  getNodeKey(item) {
+    return item.path && typeof item.path.toString === "function" ? item.path.toString() : JSON.stringify(item);
+  }
+
+  setExpanded(item, expand) {
+    if (nodeIsPrimitive(item)) {
+      return;
+    }
+
+    const {
+      createObjectClient,
+      createLongStringClient,
+      loadedProperties,
+      nodeExpand,
+      nodeCollapse,
+      roots
+    } = this.props;
+
+    if (expand === true) {
+      const gripItem = getClosestGripNode(item);
+      const value = getValue(gripItem);
+      const isRoot = value && roots.some(root => {
+        const rootValue = getValue(root);
+        return rootValue && rootValue.actor === value.actor;
+      });
+      const actor = isRoot || !value ? null : value.actor;
+      nodeExpand(item, actor, loadedProperties, createObjectClient, createLongStringClient);
+    } else {
+      nodeCollapse(item);
+    }
+  }
+
+  focusItem(item) {
+    const { focusable = true, focusedItem, nodeFocus, onFocus } = this.props;
+
+    if (focusable && focusedItem !== item) {
+      nodeFocus(item);
+      if (focusedItem !== item && onFocus) {
+        onFocus(item);
+      }
+    }
+  }
+
+  // eslint-disable-next-line complexity
+  getTreeItemLabelAndValue(item, depth, expanded) {
+    const label = item.name;
+    const isPrimitive = nodeIsPrimitive(item);
+
+    if (nodeIsOptimizedOut(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(optimized away)")
+      };
+    }
+
+    if (nodeIsUninitializedBinding(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(uninitialized)")
+      };
+    }
+
+    if (nodeIsUnmappedBinding(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(unmapped)")
+      };
+    }
+
+    if (nodeIsUnscopedBinding(item)) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(unscoped)")
+      };
+    }
+
+    const itemValue = getValue(item);
+    const unavailable = isPrimitive && itemValue && itemValue.hasOwnProperty && itemValue.hasOwnProperty("unavailable");
+
+    if (nodeIsMissingArguments(item) || unavailable) {
+      return {
+        label,
+        value: dom.span({ className: "unavailable" }, "(unavailable)")
+      };
+    }
+
+    if (nodeIsFunction(item) && !nodeIsGetter(item) && !nodeIsSetter(item) && (this.props.mode === MODE.TINY || !this.props.mode)) {
+      return {
+        label: Utils.renderRep(item, _extends({}, this.props, {
+          functionName: label
+        }))
+      };
+    }
+
+    if (nodeHasProperties(item) || nodeHasAccessors(item) || nodeIsMapEntry(item) || nodeIsLongString(item) || isPrimitive) {
+      const repProps = _extends({}, this.props);
+      if (depth > 0) {
+        repProps.mode = this.props.mode === MODE.LONG ? MODE.SHORT : MODE.TINY;
+      }
+      if (expanded) {
+        repProps.mode = MODE.TINY;
+      }
+
+      if (nodeIsLongString(item)) {
+        repProps.member = {
+          open: nodeHasFullText(item) && expanded
+        };
+      }
+
+      return {
+        label,
+        value: Utils.renderRep(item, repProps)
+      };
+    }
+
+    return {
+      label
+    };
+  }
+
+  renderTreeItemLabel(label, item, depth, focused, expanded) {
+    if (label === null || typeof label === "undefined") {
+      return null;
+    }
+
+    const { onLabelClick } = this.props;
+
+    return dom.span({
+      className: "object-label",
+      onClick: onLabelClick ? event => {
+        event.stopPropagation();
+
+        // If the user selected text, bail out.
+        if (Utils.selection.documentHasSelection()) {
+          return;
+        }
+
+        onLabelClick(item, {
+          depth,
+          focused,
+          expanded,
+          setExpanded: this.setExpanded
+        });
+      } : undefined
+    }, label);
+  }
+
+  getTreeTopElementProps(item, depth, focused, expanded) {
+    const { onCmdCtrlClick, onDoubleClick, dimTopLevelWindow } = this.props;
+
+    const parentElementProps = {
+      className: classnames("node object-node", {
+        focused,
+        lessen: !expanded && (nodeIsDefaultProperties(item) || nodeIsPrototype(item) || dimTopLevelWindow === true && nodeIsWindow(item) && depth === 0),
+        block: nodeIsBlock(item)
+      }),
+      onClick: e => {
+        if (e.metaKey && onCmdCtrlClick) {
+          onCmdCtrlClick(item, {
+            depth,
+            event: e,
+            focused,
+            expanded
+          });
+          e.stopPropagation();
+          return;
+        }
+
+        // If this click happened because the user selected some text, bail out.
+        // Note that if the user selected some text before and then clicks here,
+        // the previously selected text will be first unselected, unless the
+        // user clicked on the arrow itself. Indeed because the arrow is an
+        // image, clicking on it does not remove any existing text selection.
+        // So we need to also check if the arrow was clicked.
+        if (Utils.selection.documentHasSelection() && !(e.target && e.target.matches && e.target.matches(".arrow"))) {
+          e.stopPropagation();
+        }
+      }
+    };
+
+    if (onDoubleClick) {
+      parentElementProps.onDoubleClick = e => {
+        e.stopPropagation();
+        onDoubleClick(item, {
+          depth,
+          focused,
+          expanded
+        });
+      };
+    }
+
+    return parentElementProps;
+  }
+
+  renderTreeItem(item, depth, focused, arrow, expanded) {
+    const { label, value } = this.getTreeItemLabelAndValue(item, depth, expanded);
+    const labelElement = this.renderTreeItemLabel(label, item, depth, focused, expanded);
+    const delimiter = value && labelElement ? dom.span({ className: "object-delimiter" }, ": ") : null;
+
+    return dom.div(this.getTreeTopElementProps(item, depth, focused, expanded), arrow, labelElement, delimiter, value);
+  }
+
+  render() {
+    const {
+      autoExpandAll = true,
+      autoExpandDepth = 1,
+      focusable = true,
+      disableWrap = false,
+      expandedPaths,
+      focusedItem,
+      inline
+    } = this.props;
+
+    return Tree({
+      className: classnames({
+        inline,
+        nowrap: disableWrap,
+        "object-inspector": true
+      }),
+      autoExpandAll,
+      autoExpandDepth,
+
+      isExpanded: item => expandedPaths && expandedPaths.has(item.path),
+      isExpandable: item => nodeIsPrimitive(item) === false,
+      focused: focusedItem,
+
+      getRoots: this.getRoots,
+      getParent,
+      getChildren: this.getItemChildren,
+      getKey: this.getNodeKey,
+
+      onExpand: item => this.setExpanded(item, true),
+      onCollapse: item => this.setExpanded(item, false),
+      onFocus: focusable ? this.focusItem : null,
+
+      renderItem: this.renderTreeItem
+    });
+  }
+}
+
+function mapStateToProps(state, props) {
+  return {
+    actors: state.actors,
+    expandedPaths: state.expandedPaths,
+    // If the root changes, we want to pass a possibly new focusedItem property
+    focusedItem: state.roots !== props.roots ? props.focusedItem : state.focusedItem,
+    loadedProperties: state.loadedProperties,
+    forceUpdate: state.forceUpdate
+  };
+}
+
+function mapDispatchToProps(dispatch) {
+  return bindActionCreators(__webpack_require__(3699), dispatch);
+}
+
+module.exports = connect(mapStateToProps, mapDispatchToProps)(ObjectInspector);
+
+/***/ }),
+
+/***/ 3697:
+/***/ (function(module, exports) {
+
+// removed by extract-text-webpack-plugin
+
+/***/ }),
+
+/***/ 3698:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function documentHasSelection() {
+  const selection = getSelection();
+  if (!selection) {
+    return false;
+  }
+
+  return selection.type === "Range";
+}
+
+module.exports = {
+  documentHasSelection
+};
+
+/***/ }),
+
+/***/ 3699:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+const { loadItemProperties } = __webpack_require__(3666); /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                    * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                    * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+/**
+ * This action is responsible for expanding a given node, which also means that
+ * it will call the action responsible to fetch properties.
+ */
+function nodeExpand(node, actor, loadedProperties, createObjectClient, createLongStringClient) {
+  return async ({ dispatch }) => {
+    dispatch({
+      type: "NODE_EXPAND",
+      data: { node }
+    });
+
+    if (!loadedProperties.has(node.path)) {
+      dispatch(nodeLoadProperties(node, actor, loadedProperties, createObjectClient, createLongStringClient));
+    }
+  };
+}
+
+function nodeCollapse(node) {
+  return {
+    type: "NODE_COLLAPSE",
+    data: { node }
+  };
+}
+
+function nodeFocus(node) {
+  return {
+    type: "NODE_FOCUS",
+    data: { node }
+  };
+}
+/*
+ * This action checks if we need to fetch properties, entries, prototype and
+ * symbols for a given node. If we do, it will call the appropriate ObjectClient
+ * functions.
+ */
+function nodeLoadProperties(item, actor, loadedProperties, createObjectClient, createLongStringClient) {
+  return async ({ dispatch }) => {
+    try {
+      const properties = await loadItemProperties(item, createObjectClient, createLongStringClient, loadedProperties);
+      dispatch(nodePropertiesLoaded(item, actor, properties));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+}
+
+function nodePropertiesLoaded(node, actor, properties) {
+  return {
+    type: "NODE_PROPERTIES_LOADED",
+    data: { node, actor, properties }
+  };
+}
+
+/*
+ * This action is dispatched when the `roots` prop, provided by a consumer of
+ * the ObjectInspector (inspector, console, …), is modified. It will clean the
+ * internal state properties (expandedPaths, loadedProperties, …) and release
+ * the actors consumed with the previous roots.
+ * It takes a props argument which reflects what is passed by the upper-level
+ * consumer.
+ */
+function rootsChanged(props) {
+  return {
+    type: "ROOTS_CHANGED",
+    data: props
+  };
+}
+
+/*
+ * This action will reset the `forceUpdate` flag in the state.
+ */
+function forceUpdated() {
+  return {
+    type: "FORCE_UPDATED"
+  };
+}
+
+module.exports = {
+  forceUpdated,
+  nodeExpand,
+  nodeCollapse,
+  nodeFocus,
+  nodeLoadProperties,
+  nodePropertiesLoaded,
+  rootsChanged
+};
+
+/***/ }),
+
+/***/ 370:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"#0b0b0b\"><path fill-opacity=\".3\" d=\"M12,3h2v10h-2V3z M5,9.9V6.1L8,8L5,9.9z\"></path><path d=\"M14,2H2C1.4,2,1,2.4,1,3v10c0,0.6,0.4,1,1,1h12c0.6,0,1-0.4,1-1V3C15,2.4,14.6,2,14,2z M2,13L2,13V3h0h9v10 H2L2,13z M14,13C14,13,14,13,14,13h-2V3h2c0,0,0,0,0,0V13z M8.5,7.2l-3-1.9C4.6,4.7,4,5,4,6.1v3.8c0,1.1,0.6,1.4,1.5,0.8l3-1.9 C9.5,8.3,9.5,7.8,8.5,7.2z M5,9.9V6.1L8,8L5,9.9z\"></path></svg>"
+
+/***/ }),
+
+/***/ 3700:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const { applyMiddleware, createStore, compose } = __webpack_require__(3593);
+const { thunk } = __webpack_require__(3701);
+const {
+  waitUntilService
+} = __webpack_require__(3702);
+const reducer = __webpack_require__(3703);
+
+function createInitialState(overrides) {
+  return _extends({
+    actors: new Set(),
+    expandedPaths: new Set(),
+    focusedItem: null,
+    loadedProperties: new Map(),
+    forceUpdated: false
+  }, overrides);
+}
+
+function enableStateReinitializer(props) {
+  return next => (innerReducer, initialState, enhancer) => {
+    function reinitializerEnhancer(state, action) {
+      if (action.type !== "ROOTS_CHANGED") {
+        return innerReducer(state, action);
+      }
+
+      if (props.releaseActor && initialState.actors) {
+        initialState.actors.forEach(props.releaseActor);
+      }
+
+      return _extends({}, action.data, {
+        actors: new Set(),
+        expandedPaths: new Set(),
+        loadedProperties: new Map(),
+        // Indicates to the component that we do want to render on the next
+        // render cycle.
+        forceUpdate: true
+      });
+    }
+    return next(reinitializerEnhancer, initialState, enhancer);
+  };
+}
+
+module.exports = props => {
+  const middlewares = [thunk];
+
+  if (props.injectWaitService) {
+    middlewares.push(waitUntilService);
+  }
+
+  return createStore(reducer, createInitialState(props), compose(applyMiddleware(...middlewares), enableStateReinitializer(props)));
+};
+
+/***/ }),
+
+/***/ 3701:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+/**
+ * A middleware that allows thunks (functions) to be dispatched.
+ * If it's a thunk, it is called with `dispatch` and `getState`,
+ * allowing the action to create multiple actions (most likely
+ * asynchronously).
+ */
+function thunk({ dispatch, getState }) {
+  return next => action => {
+    return typeof action === "function" ? action({ dispatch, getState }) : next(action);
+  };
+}
+exports.thunk = thunk;
+
+/***/ }),
+
+/***/ 3702:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const WAIT_UNTIL_TYPE = "@@service/waitUntil";
+/**
+ * A middleware which acts like a service, because it is stateful
+ * and "long-running" in the background. It provides the ability
+ * for actions to install a function to be run once when a specific
+ * condition is met by an action coming through the system. Think of
+ * it as a thunk that blocks until the condition is met. Example:
+ *
+ * ```js
+ * const services = { WAIT_UNTIL: require('wait-service').NAME };
+ *
+ * { type: services.WAIT_UNTIL,
+ *   predicate: action => action.type === "ADD_ITEM",
+ *   run: (dispatch, getState, action) => {
+ *     // Do anything here. You only need to accept the arguments
+ *     // if you need them. `action` is the action that satisfied
+ *     // the predicate.
+ *   }
+ * }
+ * ```
+ */
+function waitUntilService({ dispatch, getState }) {
+  let pending = [];
+
+  function checkPending(action) {
+    const readyRequests = [];
+    const stillPending = [];
+
+    // Find the pending requests whose predicates are satisfied with
+    // this action. Wait to run the requests until after we update the
+    // pending queue because the request handler may synchronously
+    // dispatch again and run this service (that use case is
+    // completely valid).
+    for (const request of pending) {
+      if (request.predicate(action)) {
+        readyRequests.push(request);
+      } else {
+        stillPending.push(request);
+      }
+    }
+
+    pending = stillPending;
+    for (const request of readyRequests) {
+      request.run(dispatch, getState, action);
+    }
+  }
+
+  return next => action => {
+    if (action.type === WAIT_UNTIL_TYPE) {
+      pending.push(action);
+      return null;
+    }
+    const result = next(action);
+    checkPending(action);
+    return result;
+  };
+}
+
+module.exports = {
+  WAIT_UNTIL_TYPE,
+  waitUntilService
+};
+
+/***/ }),
+
+/***/ 3703:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
+
+function reducer(state = {}, action) {
+  const { type, data } = action;
+
+  const cloneState = overrides => _extends({}, state, overrides);
+
+  if (type === "NODE_EXPAND") {
+    return cloneState({
+      expandedPaths: new Set(state.expandedPaths).add(data.node.path)
+    });
+  }
+
+  if (type === "NODE_COLLAPSE") {
+    const expandedPaths = new Set(state.expandedPaths);
+    expandedPaths.delete(data.node.path);
+    return cloneState({ expandedPaths });
+  }
+
+  if (type === "NODE_PROPERTIES_LOADED") {
+    return cloneState({
+      actors: data.actor ? new Set(state.actors || []).add(data.actor) : state.actors,
+      loadedProperties: new Map(state.loadedProperties).set(data.node.path, action.data.properties)
+    });
+  }
+
+  if (type === "NODE_FOCUS") {
+    if (state.focusedItem === data.node) {
+      return state;
+    }
+
+    return cloneState({
+      focusedItem: data.node
+    });
+  }
+
+  if (type === "FORCE_UPDATED") {
+    return cloneState({
+      forceUpdate: false
+    });
+  }
+
+  return state;
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+
+module.exports = reducer;
+
+/***/ }),
+
+/***/ 371:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 16 16\" stroke=\"none\" fillrule=\"evenodd\"><rect opacity=\"0.6\" x=\"1\" y=\"3\" width=\"2\" height=\"6\"></rect><rect opacity=\"0.6\" x=\"17\" y=\"3\" width=\"2\" height=\"6\"></rect><rect x=\"6\" y=\"3\" width=\"2\" height=\"6\"></rect><rect x=\"12\" y=\"3\" width=\"2\" height=\"6\"></rect><rect x=\"9\" y=\"3\" width=\"2\" height=\"6\"></rect><path d=\"M4.5,13 L15.5,13 L16,13 L16,12 L15.5,12 L4.5,12 L4,12 L4,13 L4.5,13 L4.5,13 Z\"></path><path d=\"M4,10.5 L4,12.5 L4,13 L5,13 L5,12.5 L5,10.5 L5,10 L4,10 L4,10.5 L4,10.5 Z\"></path><path d=\"M15,10.5 L15,12.5 L15,13 L16,13 L16,12.5 L16,10.5 L16,10 L15,10 L15,10.5 L15,10.5 Z\"></path></svg>"
+
+/***/ }),
+
+/***/ 372:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" d=\"M8.5 8.793L5.854 6.146l-.04-.035L7.5 4.426c.2-.2.3-.4.3-.6 0-.2-.1-.4-.2-.6l-1-1c-.4-.3-.9-.3-1.2 0l-4.1 4.1c-.2.2-.3.4-.3.6 0 .2.1.4.2.6l1 1c.3.3.9.3 1.2 0l1.71-1.71.036.04L7.793 9.5l-3.647 3.646c-.195.196-.195.512 0 .708.196.195.512.195.708 0L8.5 10.207l3.646 3.647c.196.195.512.195.708 0 .195-.196.195-.512 0-.708L9.207 9.5l2.565-2.565L13.3 8.5c.1.1 2.3 1.1 2.7.7.4-.4-.3-2.7-.5-2.9l-1.1-1.1c.1-.1.2-.4.2-.6 0-.2-.1-.4-.2-.6l-.4-.4c-.3-.3-.8-.3-1.1 0l-1.5-1.4c-.2-.2-.3-.2-.5-.2s-.3.1-.5.2L9.2 3.4c-.2.1-.2.2-.2.4s.1.4.2.5l1.874 1.92L8.5 8.792z\"></path></svg>"
+
+/***/ }),
+
+/***/ 3720:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.positionCmp = positionCmp;
+
+var _locColumn = __webpack_require__(2349);
+
+/**
+ * * === 0 - Positions are equal.
+ * * < 0 - first position before second position
+ * * > 0 - first position after second position
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function positionCmp(p1, p2) {
+  if (p1.line === p2.line) {
+    const l1 = (0, _locColumn.locColumn)(p1);
+    const l2 = (0, _locColumn.locColumn)(p2);
+
+    if (l1 === l2) {
+      return 0;
+    }
+    return l1 < l2 ? -1 : 1;
+  }
+
+  return p1.line < p2.line ? -1 : 1;
+}
+
+/***/ }),
+
+/***/ 3721:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/* WEBPACK VAR INJECTION */(function(process) {
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.isDevelopment = isDevelopment;
+exports.isTesting = isTesting;
+exports.isFirefoxPanel = isFirefoxPanel;
+exports.isFirefox = isFirefox;
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+const flag = __webpack_require__(52);
+
+function isBrowser() {
+  return typeof window == "object";
+}
+
+function isNode() {
+  return process && process.release && process.release.name == 'node';
+}
+
+function isDevelopment() {
+  if (!isNode && isBrowser()) {
+    const href = window.location ? window.location.href : "";
+    return href.match(/^file:/) || href.match(/localhost:/);
+  }
+
+  return "production" != "production";
+}
+
+function isTesting() {
+  return flag.testing;
+}
+
+function isFirefoxPanel() {
+  return !isDevelopment();
+}
+
+function isFirefox() {
+  return (/firefox/i.test(navigator.userAgent)
+  );
+}
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(120)))
+
+/***/ }),
+
+/***/ 3722:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.mappingContains = mappingContains;
+
+var _positionCmp = __webpack_require__(3720);
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+function mappingContains(mapped, item) {
+  return (0, _positionCmp.positionCmp)(item.start, mapped.start) >= 0 && (0, _positionCmp.positionCmp)(item.end, mapped.end) <= 0;
+}
+
+/***/ }),
+
+/***/ 3723:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                                                                                                                                                                                                                   * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                                                                                                                                                                                                                   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+// eslint-disable-next-line max-len
+
+
+exports.buildMappedScopes = buildMappedScopes;
+
+var _parser = __webpack_require__(1365);
+
+var _locColumn = __webpack_require__(2349);
+
+var _findGeneratedBindingFromPosition = __webpack_require__(2358);
+
+var _buildGeneratedBindingList = __webpack_require__(3725);
+
+var _log = __webpack_require__(2359);
+
+function _objectWithoutProperties(obj, keys) { var target = {}; for (var i in obj) { if (keys.indexOf(i) >= 0) continue; if (!Object.prototype.hasOwnProperty.call(obj, i)) continue; target[i] = obj[i]; } return target; }
+
+async function buildMappedScopes(source, frame, scopes, sourceMaps, client) {
+  const originalAstScopes = await (0, _parser.getScopes)(frame.location);
+  const generatedAstScopes = await (0, _parser.getScopes)(frame.generatedLocation);
+
+  if (!originalAstScopes || !generatedAstScopes) {
+    return null;
+  }
+
+  const generatedAstBindings = (0, _buildGeneratedBindingList.buildGeneratedBindingList)(scopes, generatedAstScopes, frame.this);
+
+  const {
+    mappedOriginalScopes,
+    expressionLookup
+  } = await mapOriginalBindingsToGenerated(source, originalAstScopes, generatedAstBindings, client, sourceMaps);
+
+  const mappedGeneratedScopes = generateClientScope(scopes, mappedOriginalScopes);
+
+  return isReliableScope(mappedGeneratedScopes) ? { mappings: expressionLookup, scope: mappedGeneratedScopes } : null;
+}
+
+async function mapOriginalBindingsToGenerated(source, originalAstScopes, generatedAstBindings, client, sourceMaps) {
+  const expressionLookup = {};
+  const mappedOriginalScopes = [];
+
+  const cachedSourceMaps = batchScopeMappings(originalAstScopes, source, sourceMaps);
+
+  for (const item of originalAstScopes) {
+    const generatedBindings = {};
+
+    for (const name of Object.keys(item.bindings)) {
+      const binding = item.bindings[name];
+
+      const result = await findGeneratedBinding(cachedSourceMaps, client, source, name, binding, generatedAstBindings);
+
+      if (result) {
+        generatedBindings[name] = result.grip;
+
+        if (binding.refs.length !== 0 &&
+        // These are assigned depth-first, so we don't want shadowed
+        // bindings in parent scopes overwriting the expression.
+        !Object.prototype.hasOwnProperty.call(expressionLookup, name)) {
+          expressionLookup[name] = result.expression;
+        }
+      }
+    }
+
+    mappedOriginalScopes.push(_extends({}, item, {
+      generatedBindings
+    }));
+  }
+
+  return {
+    mappedOriginalScopes,
+    expressionLookup
+  };
+}
+
+/**
+ * Consider a scope and its parents reliable if the vast majority of its
+ * bindings were successfully mapped to generated scope bindings.
+ */
+function isReliableScope(scope) {
+  let totalBindings = 0;
+  let unknownBindings = 0;
+
+  for (let s = scope; s; s = s.parent) {
+    const vars = s.bindings && s.bindings.variables || {};
+    for (const key of Object.keys(vars)) {
+      const binding = vars[key];
+
+      totalBindings += 1;
+      if (binding.value && typeof binding.value === "object" && (binding.value.type === "unscoped" || binding.value.type === "unmapped")) {
+        unknownBindings += 1;
+      }
+    }
+  }
+
+  // As determined by fair dice roll.
+  return totalBindings === 0 || unknownBindings / totalBindings < 0.1;
+}
+
+function batchScopeMappings(originalAstScopes, source, sourceMaps) {
+  const precalculatedRanges = new Map();
+  const precalculatedLocations = new Map();
+
+  // Explicitly dispatch all of the sourcemap requests synchronously up front so
+  // that they will be batched into a single request for the worker to process.
+  for (const item of originalAstScopes) {
+    for (const name of Object.keys(item.bindings)) {
+      for (const ref of item.bindings[name].refs) {
+        const locs = [ref];
+        if (ref.type !== "ref") {
+          locs.push(ref.declaration);
+        }
+
+        for (const loc of locs) {
+          precalculatedRanges.set(buildLocationKey(loc.start), sourceMaps.getGeneratedRanges(loc.start, source));
+          precalculatedLocations.set(buildLocationKey(loc.start), sourceMaps.getGeneratedLocation(loc.start, source));
+          precalculatedLocations.set(buildLocationKey(loc.end), sourceMaps.getGeneratedLocation(loc.end, source));
+        }
+      }
+    }
+  }
+
+  return {
+    async getGeneratedRanges(pos, s) {
+      const key = buildLocationKey(pos);
+
+      if (s !== source || !precalculatedRanges.has(key)) {
+        (0, _log.log)("Bad precalculated mapping");
+        return sourceMaps.getGeneratedRanges(pos, s);
+      }
+      return precalculatedRanges.get(key);
+    },
+    async getGeneratedLocation(pos, s) {
+      const key = buildLocationKey(pos);
+
+      if (s !== source || !precalculatedLocations.has(key)) {
+        (0, _log.log)("Bad precalculated mapping");
+        return sourceMaps.getGeneratedLocation(pos, s);
+      }
+      return precalculatedLocations.get(key);
+    }
+  };
+}
+function buildLocationKey(loc) {
+  return `${loc.line}:${(0, _locColumn.locColumn)(loc)}`;
+}
+
+function generateClientScope(scopes, originalScopes) {
+  // Pull the root object scope and root lexical scope to reuse them in
+  // our mapped scopes. This assumes that file file being processed is
+  // a CommonJS or ES6 module, which might not be ideal. Potentially
+  let globalLexicalScope = null;
+  for (let s = scopes; s.parent; s = s.parent) {
+    // $FlowIgnore - Flow doesn't like casting 'parent'.
+    globalLexicalScope = s;
+  }
+  if (!globalLexicalScope) {
+    throw new Error("Assertion failure - there should always be a scope");
+  }
+
+  // Build a structure similar to the client's linked scope object using
+  // the original AST scopes, but pulling in the generated bindings
+  // linked to each scope.
+  const result = originalScopes.slice(0, -2).reverse().reduce((acc, orig, i) => {
+    const _orig$generatedBindin = orig.generatedBindings,
+          {
+      // The 'this' binding data we have is handled independently, so
+      // the binding data is not included here.
+      // eslint-disable-next-line no-unused-vars
+      this: _this
+    } = _orig$generatedBindin,
+          variables = _objectWithoutProperties(_orig$generatedBindin, ["this"]);
+
+    return _extends({
+      // Flow doesn't like casting 'parent'.
+      parent: acc,
+      actor: `originalActor${i}`,
+      type: orig.type,
+      bindings: {
+        arguments: [],
+        variables
+      }
+    }, orig.type === "function" ? {
+      function: {
+        displayName: orig.displayName
+      }
+    } : null, orig.type === "block" ? {
+      block: {
+        displayName: orig.displayName
+      }
+    } : null);
+  }, globalLexicalScope);
+
+  // The rendering logic in getScope 'this' bindings only runs on the current
+  // selected frame scope, so we pluck out the 'this' binding that was mapped,
+  // and put it in a special location
+  const thisScope = originalScopes.find(scope => scope.bindings.this);
+  if (thisScope) {
+    result.bindings.this = thisScope.generatedBindings.this || null;
+  }
+
+  return result;
+}
+
+async function findGeneratedBinding(sourceMaps, client, source, name, originalBinding, generatedAstBindings) {
+  // If there are no references to the implicits, then we have no way to
+  // even attempt to map it back to the original since there is no location
+  // data to use. Bail out instead of just showing it as unmapped.
+  if (originalBinding.type === "implicit" && !originalBinding.refs.some(item => item.type === "ref")) {
+    return null;
+  }
+
+  const { refs } = originalBinding;
+
+  let genContent = null;
+  for (const pos of refs) {
+    if (originalBinding.type === "import") {
+      genContent = await (0, _findGeneratedBindingFromPosition.findGeneratedBindingForImportBinding)(sourceMaps, client, source, pos, name, originalBinding.type, generatedAstBindings);
+    } else {
+      genContent = await (0, _findGeneratedBindingFromPosition.findGeneratedBindingForStandardBinding)(sourceMaps, client, source, pos, name, originalBinding.type, generatedAstBindings);
+    }
+
+    if ((pos.type === "class-decl" || pos.type === "class-inner") && source.contentType && source.contentType.match(/\/typescript/)) {
+      // Resolve to first binding in the range
+      const declContent = await (0, _findGeneratedBindingFromPosition.findGeneratedBindingForNormalDeclaration)(sourceMaps, client, source, pos, name, originalBinding.type, generatedAstBindings);
+
+      if (declContent) {
+        // Prefer the declaration mapping in this case because TS sometimes
+        // maps class declaration names to "export.Foo = Foo;" or to
+        // the decorator logic itself
+        genContent = declContent;
+      }
+    }
+
+    if (!genContent && (pos.type === "import-decl" || pos.type === "import-ns-decl")) {
+      // match the import declaration location
+      genContent = await (0, _findGeneratedBindingFromPosition.findGeneratedBindingForImportDeclaration)(sourceMaps, client, source, pos, name, originalBinding.type, generatedAstBindings);
+    }
+
+    if (genContent) {
+      break;
+    }
+  }
+
+  if (genContent && genContent.desc) {
+    return {
+      grip: genContent.desc,
+      expression: genContent.expression
+    };
+  } else if (genContent) {
+    // If there is no descriptor for 'this', then this is not the top-level
+    // 'this' that the server gave us a binding for, and we can just ignore it.
+    if (name === "this") {
+      return null;
+    }
+
+    // If the location is found but the descriptor is not, then it
+    // means that the server scope information didn't match the scope
+    // information from the DevTools parsed scopes.
+    return {
+      grip: {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: {
+          type: "unscoped",
+          unscoped: true,
+
+          // HACK: Until support for "unscoped" lands in devtools-reps,
+          // this will make these show as (unavailable).
+          missingArguments: true
+        }
+      },
+      expression: null
+    };
+  }
+
+  // If no location mapping is found, then the map is bad, or
+  // the map is okay but it original location is inside
+  // of some scope, but the generated location is outside, leading
+  // us to search for bindings that don't technically exist.
+  return {
+    grip: {
+      configurable: false,
+      enumerable: true,
+      writable: false,
+      value: {
+        type: "unmapped",
+        unmapped: true,
+
+        // HACK: Until support for "unmapped" lands in devtools-reps,
+        // this will make these show as (unavailable).
+        missingArguments: true
+      }
+    },
+    expression: null
+  };
+}
+
+/***/ }),
+
+/***/ 3724:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.getGeneratedLocationRanges = getGeneratedLocationRanges;
+
+var _positionCmp = __webpack_require__(3720);
+
+var _filtering = __webpack_require__(3635);
+
+var _mappingContains = __webpack_require__(3722);
+
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+async function getGeneratedLocationRanges(generatedAstBindings, source, {
+  start,
+  end
+}, bindingType, locationType, sourceMaps) {
+  const endPosition = await sourceMaps.getGeneratedLocation(end, source);
+  const startPosition = await sourceMaps.getGeneratedLocation(start, source);
+
+  // If the start and end positions collapse into eachother, it means that
+  // the range in the original content didn't _start_ at the start position.
+  // Since this likely means that the range doesn't logically apply to this
+  // binding location, we skip it.
+  if ((0, _positionCmp.positionCmp)(startPosition, endPosition) === 0) {
+    return [];
+  }
+
+  const ranges = await sourceMaps.getGeneratedRanges(start, source);
+
+  const resultRanges = ranges.reduce((acc, mapRange) => {
+    // Some tooling creates ranges that map a line as a whole, which is useful
+    // for step-debugging, but can easily lead to finding the wrong binding.
+    // To avoid these false-positives, we entirely ignore ranges that cover
+    // full lines.
+    if (locationType === "ref" && mapRange.columnStart === 0 && mapRange.columnEnd === Infinity) {
+      return acc;
+    }
+
+    const range = {
+      start: {
+        line: mapRange.line,
+        column: mapRange.columnStart
+      },
+      end: {
+        line: mapRange.line,
+        // SourceMapConsumer's 'lastColumn' is inclusive, so we add 1 to make
+        // it exclusive like all other locations.
+        column: mapRange.columnEnd + 1
+      }
+    };
+
+    const previous = acc[acc.length - 1];
+
+    if (previous && (previous.end.line === range.start.line && previous.end.column === range.start.column || previous.end.line + 1 === range.start.line && previous.end.column === Infinity && range.start.column === 0)) {
+      previous.end.line = range.end.line;
+      previous.end.column = range.end.column;
+    } else {
+      acc.push(range);
+    }
+
+    return acc;
+  }, []);
+
+  // When searching for imports, we expand the range to up to the next available
+  // mapping to allow for import declarations that are composed of multiple
+  // variable statements, where the later ones are entirely unmapped.
+  // Babel 6 produces imports in this style, e.g.
+  //
+  // var _mod = require("mod"); // mapped from import statement
+  // var _mod2 = interop(_mod); // entirely unmapped
+  if (bindingType === "import" && locationType !== "ref") {
+    for (const range of resultRanges) {
+      if ((0, _mappingContains.mappingContains)(range, { start: startPosition, end: startPosition }) && (0, _positionCmp.positionCmp)(range.end, endPosition) < 0) {
+        range.end.line = endPosition.line;
+        range.end.column = endPosition.column;
+        break;
+      }
+    }
+  }
+
+  return filterApplicableBindings(generatedAstBindings, resultRanges);
+}
+
+function filterApplicableBindings(bindings, ranges) {
+  const result = [];
+  for (const range of ranges) {
+    // Any binding overlapping a part of the mapping range.
+    const filteredBindings = (0, _filtering.filterSortedArray)(bindings, binding => {
+      if ((0, _positionCmp.positionCmp)(binding.loc.end, range.start) <= 0) {
+        return -1;
+      }
+      if ((0, _positionCmp.positionCmp)(binding.loc.start, range.end) >= 0) {
+        return 1;
+      }
+
+      return 0;
+    });
+
+    let firstInRange = true;
+    let firstOnLine = true;
+    let line = -1;
+
+    for (const binding of filteredBindings) {
+      if (binding.loc.start.line === line) {
+        firstOnLine = false;
+      } else {
+        line = binding.loc.start.line;
+        firstOnLine = true;
+      }
+
+      result.push({
+        binding,
+        range,
+        firstOnLine,
+        firstInRange
+      });
+
+      firstInRange = false;
+    }
+  }
+
+  return result;
+}
+
+/***/ }),
+
+/***/ 3725:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.buildGeneratedBindingList = buildGeneratedBindingList;
+
+var _lodash = __webpack_require__(2);
+
+var _firefox = __webpack_require__(1500);
+
+var _locColumn = __webpack_require__(2349);
+
+function buildGeneratedBindingList(scopes, generatedAstScopes, thisBinding) {
+  // The server's binding data doesn't include general 'this' binding
+  // information, so we manually inject the one 'this' binding we have into
+  // the normal binding data we are working with.
+  const frameThisOwner = generatedAstScopes.find(generated => "this" in generated.bindings);
+
+  let globalScope = null;
+  const clientScopes = [];
+  for (let s = scopes; s; s = s.parent) {
+    const bindings = s.bindings ? Object.assign({}, ...s.bindings.arguments, s.bindings.variables) : {};
+
+    clientScopes.push(bindings);
+    globalScope = s;
+  }
+
+  const generatedMainScopes = generatedAstScopes.slice(0, -2);
+  const generatedGlobalScopes = generatedAstScopes.slice(-2);
+
+  const clientMainScopes = clientScopes.slice(0, generatedMainScopes.length);
+  const clientGlobalScopes = clientScopes.slice(generatedMainScopes.length);
+
+  // Map the main parsed script body using the nesting hierarchy of the
+  // generated and client scopes.
+  const generatedBindings = generatedMainScopes.reduce((acc, generated, i) => {
+    const bindings = clientMainScopes[i];
+
+    if (generated === frameThisOwner && thisBinding) {
+      bindings.this = {
+        value: thisBinding
+      };
+    }
+
+    for (const name of Object.keys(generated.bindings)) {
+      // If there is no 'this' value, we exclude the binding entirely.
+      // Otherwise it would pass through as found, but "(unscoped)", causing
+      // the search logic to stop with a match.
+      if (name === "this" && !bindings[name]) {
+        continue;
+      }
+
+      const { refs } = generated.bindings[name];
+      for (const loc of refs) {
+        acc.push({
+          name,
+          loc,
+          desc: () => Promise.resolve(bindings[name] || null)
+        });
+      }
+    }
+    return acc;
+  }, []);
+
+  // Bindings in the global/lexical global of the generated code may or
+  // may not be the real global if the generated code is running inside
+  // of an evaled context. To handle this, we just look up the client scope
+  // hierarchy to find the closest binding with that name.
+  for (const generated of generatedGlobalScopes) {
+    for (const name of Object.keys(generated.bindings)) {
+      const { refs } = generated.bindings[name];
+      const bindings = clientGlobalScopes.find(b => (0, _lodash.has)(b, name));
+
+      for (const loc of refs) {
+        if (bindings) {
+          generatedBindings.push({
+            name,
+            loc,
+            desc: () => Promise.resolve(bindings[name])
+          });
+        } else {
+          const globalGrip = globalScope && globalScope.object;
+          if (globalGrip) {
+            // Should always exist, just checking to keep Flow happy.
+
+            generatedBindings.push({
+              name,
+              loc,
+              desc: async () => {
+                const objectClient = (0, _firefox.createObjectClient)(globalGrip);
+                return (await objectClient.getProperty(name)).descriptor;
+              }
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Sort so we can binary-search.
+  return generatedBindings.sort((a, b) => {
+    const aStart = a.loc.start;
+    const bStart = b.loc.start;
+
+    if (aStart.line === bStart.line) {
+      return (0, _locColumn.locColumn)(aStart) - (0, _locColumn.locColumn)(bStart);
+    }
+    return aStart.line - bStart.line;
+  });
+} /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this
+   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+/***/ }),
+
+/***/ 4:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_4__;
+
+/***/ }),
+
+/***/ 46:
+/***/ (function(module, exports, __webpack_require__) {
+
+module.exports = __webpack_require__(1459);
+
+
+/***/ }),
+
+/***/ 52:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_52__;
+
+/***/ }),
+
+/***/ 6:
+/***/ (function(module, exports, __webpack_require__) {
+
+var Symbol = __webpack_require__(7),
+    getRawTag = __webpack_require__(10),
+    objectToString = __webpack_require__(11);
+
+/** `Object#toString` result references. */
+var nullTag = '[object Null]',
+    undefinedTag = '[object Undefined]';
+
+/** Built-in value references. */
+var symToStringTag = Symbol ? Symbol.toStringTag : undefined;
+
+/**
+ * The base implementation of `getTag` without fallbacks for buggy environments.
+ *
+ * @private
+ * @param {*} value The value to query.
+ * @returns {string} Returns the `toStringTag`.
+ */
+function baseGetTag(value) {
+  if (value == null) {
+    return value === undefined ? undefinedTag : nullTag;
+  }
+  return (symToStringTag && symToStringTag in Object(value))
+    ? getRawTag(value)
+    : objectToString(value);
+}
+
+module.exports = baseGetTag;
+
+
+/***/ }),
+
+/***/ 66:
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+exports.decode = exports.parse = __webpack_require__(121);
+exports.encode = exports.stringify = __webpack_require__(122);
+
+
+/***/ }),
+
+/***/ 677:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_677__;
+
+/***/ }),
+
+/***/ 678:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_678__;
+
+/***/ }),
+
+/***/ 7:
+/***/ (function(module, exports, __webpack_require__) {
+
+var root = __webpack_require__(8);
+
+/** Built-in value references. */
+var Symbol = root.Symbol;
+
+module.exports = Symbol;
+
+
+/***/ }),
+
+/***/ 70:
+/***/ (function(module, exports) {
+
+/**
+ * Checks if `value` is classified as an `Array` object.
+ *
+ * @static
+ * @memberOf _
+ * @since 0.1.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is an array, else `false`.
+ * @example
+ *
+ * _.isArray([1, 2, 3]);
+ * // => true
+ *
+ * _.isArray(document.body.children);
+ * // => false
+ *
+ * _.isArray('abc');
+ * // => false
+ *
+ * _.isArray(_.noop);
+ * // => false
+ */
+var isArray = Array.isArray;
+
+module.exports = isArray;
+
+
+/***/ }),
+
+/***/ 72:
+/***/ (function(module, exports, __webpack_require__) {
+
+var baseGetTag = __webpack_require__(6),
+    isObjectLike = __webpack_require__(14);
+
+/** `Object#toString` result references. */
+var symbolTag = '[object Symbol]';
+
+/**
+ * Checks if `value` is classified as a `Symbol` primitive or object.
+ *
+ * @static
+ * @memberOf _
+ * @since 4.0.0
+ * @category Lang
+ * @param {*} value The value to check.
+ * @returns {boolean} Returns `true` if `value` is a symbol, else `false`.
+ * @example
+ *
+ * _.isSymbol(Symbol.iterator);
+ * // => true
+ *
+ * _.isSymbol('abc');
+ * // => false
+ */
+function isSymbol(value) {
+  return typeof value == 'symbol' ||
+    (isObjectLike(value) && baseGetTag(value) == symbolTag);
+}
+
+module.exports = isSymbol;
+
+
+/***/ }),
+
+/***/ 792:
+/***/ (function(module, exports) {
+
+var g;
+
+// This works in non-strict mode
+g = (function() {
+	return this;
+})();
+
+try {
+	// This works if eval is allowed (see CSP)
+	g = g || Function("return this")() || (1,eval)("this");
+} catch(e) {
+	// This works if the window reference is available
+	if(typeof window === "object")
+		g = window;
+}
+
+// g can still be undefined, but nothing to do about it...
+// We return undefined, instead of nothing here, so it's
+// easier to handle this case. if(!global) { ...}
+
+module.exports = g;
+
+
+/***/ }),
+
+/***/ 793:
+/***/ (function(module, exports) {
+
+module.exports = function(module) {
+	if(!module.webpackPolyfill) {
+		module.deprecate = function() {};
+		module.paths = [];
+		// module.parent = undefined by default
+		if(!module.children) module.children = [];
+		Object.defineProperty(module, "loaded", {
+			enumerable: true,
+			get: function() {
+				return module.l;
+			}
+		});
+		Object.defineProperty(module, "id", {
+			enumerable: true,
+			get: function() {
+				return module.i;
+			}
+		});
+		module.webpackPolyfill = 1;
+	}
+	return module;
+};
+
+
+/***/ }),
+
+/***/ 8:
+/***/ (function(module, exports, __webpack_require__) {
+
+var freeGlobal = __webpack_require__(9);
+
+/** Detect free variable `self`. */
+var freeSelf = typeof self == 'object' && self && self.Object === Object && self;
+
+/** Used as a reference to the global object. */
+var root = freeGlobal || freeSelf || Function('return this')();
+
+module.exports = root;
+
+
+/***/ }),
+
+/***/ 806:
+/***/ (function(module, exports) {
+
+module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 256 256\"><defs><style>.cls-1{isolation:isolate;}.cls-17,.cls-2,.cls-25{fill:none;}.cls-17,.cls-2{stroke-miterlimit:10;}.cls-2{stroke-width:0.75px;stroke:url(#linear-gradient);}.cls-3{fill:url(#linear-gradient-2);}.cls-4{fill:#f15a24;}.cls-5{fill:#ed1c24;}.cls-6{fill:#c1272d;}.cls-7{fill:url(#linear-gradient-3);}.cls-8{fill:url(#linear-gradient-4);}.cls-9{fill:url(#linear-gradient-5);}.cls-10{fill:url(#linear-gradient-6);}.cls-11{opacity:0.49;fill:url(#linear-gradient-7);}.cls-12{fill:url(#linear-gradient-8);}.cls-13{fill:#2db5f9;}.cls-13,.cls-14{mix-blend-mode:screen;}.cls-14{fill:#5fd2ff;}.cls-15{fill:#219058;}.cls-16{fill:url(#linear-gradient-9);}.cls-17{stroke:#fff;stroke-width:1.87px;}.cls-18{fill:#f7b852;}.cls-19{fill:#ff8431;}.cls-20{fill:#fffb69;}.cls-21{fill:#44c688;}.cls-22{fill:#29b36e;}.cls-23{fill:#6fd191;}.cls-24{fill:#c83ad7;}.cls-26{fill:#fba9ff;}.cls-27{fill:#ff737d;}.cls-28{fill:#fdc666;}</style><linearGradient id=\"linear-gradient\" x1=\"67.45\" y1=\"154.72\" x2=\"67.29\" y2=\"155.43\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#ff1d25\" stop-opacity=\"0.5\"></stop><stop offset=\"0.06\" stop-color=\"#ff1d25\" stop-opacity=\"0.54\"></stop><stop offset=\"0.37\" stop-color=\"#ff1d25\" stop-opacity=\"0.74\"></stop><stop offset=\"0.64\" stop-color=\"#ff1d25\" stop-opacity=\"0.88\"></stop><stop offset=\"0.86\" stop-color=\"#ff1d25\" stop-opacity=\"0.97\"></stop><stop offset=\"1\" stop-color=\"#ff1d25\"></stop></linearGradient><linearGradient id=\"linear-gradient-2\" x1=\"73.09\" y1=\"170.74\" x2=\"73.09\" y2=\"153.5\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#ffdd42\"></stop><stop offset=\"1\" stop-color=\"#fb784b\"></stop></linearGradient><linearGradient id=\"linear-gradient-3\" x1=\"201.52\" y1=\"95.13\" x2=\"207.88\" y2=\"89.89\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#5bcb99\"></stop><stop offset=\"1\" stop-color=\"#85a8e8\"></stop></linearGradient><linearGradient id=\"linear-gradient-4\" x1=\"81.17\" y1=\"158.3\" x2=\"279.32\" y2=\"55.49\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#34e28b\"></stop><stop offset=\"1\"></stop></linearGradient><linearGradient id=\"linear-gradient-5\" x1=\"117.57\" y1=\"178.22\" x2=\"133.15\" y2=\"178.22\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#c297ff\"></stop><stop offset=\"1\" stop-color=\"#ae31bb\"></stop></linearGradient><linearGradient id=\"linear-gradient-6\" x1=\"54.05\" y1=\"253.29\" x2=\"251.08\" y2=\"99.63\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\"></stop><stop offset=\"1\" stop-color=\"#d23de2\"></stop></linearGradient><linearGradient id=\"linear-gradient-7\" x1=\"199.8\" y1=\"86.45\" x2=\"191.83\" y2=\"113.37\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\"></stop><stop offset=\"1\" stop-opacity=\"0\"></stop></linearGradient><linearGradient id=\"linear-gradient-8\" x1=\"126.87\" y1=\"190.63\" x2=\"182.9\" y2=\"204.2\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\" stop-color=\"#2db5f9\"></stop><stop offset=\"1\" stop-color=\"#092432\"></stop></linearGradient><linearGradient id=\"linear-gradient-9\" x1=\"83.08\" y1=\"49.55\" x2=\"46.06\" y2=\"151.24\" gradientUnits=\"userSpaceOnUse\"><stop offset=\"0\"></stop><stop offset=\"0.21\" stop-color=\"#48080a\"></stop><stop offset=\"0.42\" stop-color=\"#891014\"></stop><stop offset=\"0.61\" stop-color=\"#bc151b\"></stop><stop offset=\"0.78\" stop-color=\"#e01a21\"></stop><stop offset=\"0.91\" stop-color=\"#f71c24\"></stop><stop offset=\"1\" stop-color=\"#ff1d25\"></stop></linearGradient></defs><title>dojo_square</title><g class=\"cls-1\"><g id=\"Layer_1\" data-name=\"Layer 1\"><line class=\"cls-2\" x1=\"67.37\" y1=\"155.08\" x2=\"67.37\" y2=\"155.08\"></line><path class=\"cls-3\" d=\"M42.28,150.4l.52.82A58,58,0,0,0,52,161.49a45.23,45.23,0,0,0,28.74,10.25c.65,0,1.31,0,2,0a67.32,67.32,0,0,0,21.13-5.26,67.38,67.38,0,0,1-9.09.83,36.92,36.92,0,0,1-27.44-12.17A66.82,66.82,0,0,1,42.28,150.4Z\"></path><path class=\"cls-4\" d=\"M80.79,80.88a45.4,45.4,0,0,1,38.89,21.94A37,37,0,0,0,84.43,94.7c8.29,4,19.66,7.08,35.28,8.15,0,0-.77-14.87-19.8-22.64-26.57-10.84-30.33-8.69-37.06-19.9a30.09,30.09,0,0,0,6,22.15A45.45,45.45,0,0,1,80.79,80.88Z\"></path><path class=\"cls-5\" d=\"M99.92,80.21c-9.1-3.71-15.52-5.9-20.3-7.62A33.4,33.4,0,0,0,84.54,81a45.42,45.42,0,0,1,35.13,21.78,36.87,36.87,0,0,0-20.54-9.34,109,109,0,0,0,20,9.32l.59,0S118.94,88,99.92,80.21Z\"></path><path class=\"cls-6\" d=\"M119.69,102.85h.1c.29-1.62,2.07-14.46-12.4-25.7C85.78,60.37,81.56,58.82,80.53,49.94a27.8,27.8,0,0,0-.91,22.65c4.78,1.72,11.21,3.91,20.3,7.62,19,7.77,19.8,22.64,19.8,22.64Z\"></path><path class=\"cls-7\" d=\"M185.28,88.22a33.64,33.64,0,0,1,22.08,8.23,29.8,29.8,0,0,1,19,8S208.22,78,176.19,89a41.72,41.72,0,0,0-8.2,4A33.64,33.64,0,0,1,185.28,88.22Z\"></path><path class=\"cls-8\" d=\"M185.28,88.22A33.62,33.62,0,0,0,168,93l.93-.56c-25.88,15.24-57.6,62.06-101.56,62.65h0a36.92,36.92,0,0,0,27.44,12.17,67.38,67.38,0,0,0,9.09-.83c28.6-11.79,56.09-40,68.55-53.64,11.56-12.67,24.22-17,34.91-16.34A33.64,33.64,0,0,0,185.28,88.22Z\"></path><path class=\"cls-9\" d=\"M118.48,179a20.94,20.94,0,0,0-.92,5.86,22.25,22.25,0,0,0,1,6.74,16.56,16.56,0,0,1,5.5-14.74c0-.17.09-.34.14-.51a20.37,20.37,0,0,1,8.91-11.47l-.08,0a37.84,37.84,0,0,0-4,1.53A20.87,20.87,0,0,0,118.48,179Z\"></path><path class=\"cls-10\" d=\"M234.26,129.11a42.41,42.41,0,0,0-7.94-24.76,29.82,29.82,0,0,0-19-7.9A33.69,33.69,0,0,1,219.06,122c0,11.34-4.12,24.3-17.45,31.28-19.42,10.16-49.21,5.33-68.54,11.6l.08,0a20.37,20.37,0,0,0-8.91,11.47c-.05.17-.09.34-.14.51h0c5.67-5,16.84-8.54,38.63-5.73,15.56,2,27.93,2.55,38.54-.5a41.2,41.2,0,0,0,25.23-17h0A42.41,42.41,0,0,0,234.26,129.11Z\"></path><path class=\"cls-11\" d=\"M234.26,129.11a42.41,42.41,0,0,0-7.94-24.76,29.82,29.82,0,0,0-19-7.9A33.69,33.69,0,0,1,219.06,122c0,11.34-4.12,24.3-17.45,31.28-19.42,10.16-49.21,5.33-68.54,11.6l.08,0a20.37,20.37,0,0,0-8.91,11.47c-.05.17-.09.34-.14.51h0c5.67-5,16.84-8.54,38.63-5.73,15.56,2,27.93,2.55,38.54-.5a41.2,41.2,0,0,0,25.23-17h0A42.41,42.41,0,0,0,234.26,129.11Z\"></path><path class=\"cls-12\" d=\"M137.8,201.88a20.44,20.44,0,0,1-13.68-25.12h0l0,.08a16.56,16.56,0,0,0-5.5,14.73,20.94,20.94,0,0,0,33.63,9.38A20.37,20.37,0,0,1,137.8,201.88Z\"></path><path class=\"cls-13\" d=\"M144.91,200.4c2.12-6.17,9-15.7,16.33-11.34,0,0,6,3.36,7.23-6.11,0,0,4.49,22.28-17.1,21.53,0,0,4.86-3.55,4.81-7.2A24.73,24.73,0,0,1,144.91,200.4Z\"></path><path class=\"cls-14\" d=\"M153.52,186.75c2.14-1.09,4.16-2.18,8.08-.44,3,1.35,6.88-3.94,3.56-8.66,0,0,.21,4.88-3.72,4.84A8.81,8.81,0,0,0,153.52,186.75Z\"></path><path class=\"cls-15\" d=\"M175.21,115.88c-5.17,7-12.75,12.95-13.64,14.39s1.5,6.11,5,6.45.82-1.36.52-3,1.06,1,5.27.42-1.53-2.2-1.14-4.33,4.74-6.17,6.47-10.25,4.7,0,3.18,3.18c-.6,1.26,4.81-3.54,2.08-7.21S178.22,111.77,175.21,115.88Z\"></path><path class=\"cls-15\" d=\"M160.47,131.28c-.76.73-3,2.37-3,2.37s2.19,3.05,5,3c0,0,.61-.29-.27-1.18S160.27,131.82,160.47,131.28Z\"></path><path class=\"cls-16\" d=\"M84.43,94.7c-7.35-3.56-12.27-7.88-15.54-12.24A45.42,45.42,0,0,0,42.28,150.4a66.82,66.82,0,0,0,25.09,4.67h0A37,37,0,0,1,84.43,94.7Z\"></path><line class=\"cls-17\" x1=\"67.37\" y1=\"155.08\" x2=\"67.37\" y2=\"155.08\"></line><path class=\"cls-18\" d=\"M84.52,81c2,2.91,7.81,7.94,14.63,12.44a36.87,36.87,0,0,1,20.52,9.33A45.42,45.42,0,0,0,84.52,81Z\"></path><path class=\"cls-19\" d=\"M84.52,81c-1.23-.1-2.48-.16-3.74-.16a45.45,45.45,0,0,0-11.89,1.58c3.27,4.36,8.19,8.67,15.54,12.24a36.72,36.72,0,0,1,14.72-1.22C92.33,89,86.54,83.95,84.52,81Z\"></path><path class=\"cls-20\" d=\"M109.73,91.38a33.29,33.29,0,0,0-12.21-7.29C100.46,89.66,103,91.38,109.73,91.38Z\"></path><path class=\"cls-6\" d=\"M96.89,67.66a63.16,63.16,0,0,1,6.54,4.58c.52.39-.93-3.55-2.62-4.3A7.5,7.5,0,0,0,96.89,67.66Z\"></path><path class=\"cls-6\" d=\"M105,73.37a70.75,70.75,0,0,1,6.5,4.64c.53.38-.9-3.56-2.57-4.33A7.5,7.5,0,0,0,105,73.37Z\"></path><path class=\"cls-6\" d=\"M112.55,79a19.59,19.59,0,0,1,3.52,4.39c.26.38.07-2.58-.92-3.42A5.28,5.28,0,0,0,112.55,79Z\"></path><path class=\"cls-21\" d=\"M77.55,151c-.2-.65,2.35-1.48,3-1.51a11.91,11.91,0,0,1,3.57,1.19,16.34,16.34,0,0,1-4.89,1A4.46,4.46,0,0,1,77.55,151Z\"></path><path class=\"cls-21\" d=\"M86.73,148.78c-.22-.51,1.75-1.38,2.29-1.46a9.58,9.58,0,0,1,3,.65,13.15,13.15,0,0,1-3.83,1.23A3.59,3.59,0,0,1,86.73,148.78Z\"></path><path class=\"cls-21\" d=\"M94.41,146c-.22-.4,1.32-1.29,1.76-1.41a7.92,7.92,0,0,1,2.48.27,10.87,10.87,0,0,1-3,1.35A3,3,0,0,1,94.41,146Z\"></path><path class=\"cls-21\" d=\"M100.52,143.19c-.23-.35,1.11-1.27,1.5-1.41a7.25,7.25,0,0,1,2.29.07,10,10,0,0,1-2.67,1.45A2.72,2.72,0,0,1,100.52,143.19Z\"></path><path class=\"cls-21\" d=\"M106.23,140.07c-.22-.29.9-1.16,1.24-1.3a6.31,6.31,0,0,1,2,0,8.66,8.66,0,0,1-2.25,1.39A2.36,2.36,0,0,1,106.23,140.07Z\"></path><path class=\"cls-21\" d=\"M68.34,151.69c-.11-.73,2.73-1.16,3.46-1.09a12.76,12.76,0,0,1,3.57,1.86,17.51,17.51,0,0,1-5.35.26A4.78,4.78,0,0,1,68.34,151.69Z\"></path><path class=\"cls-6\" d=\"M70.08,65.82c2,2.27,6.68,3.74,6.68,3.74A19,19,0,0,1,75.83,62c0-.18-5.75-.09-6.73-4.81C68.91,56.23,68.1,63.55,70.08,65.82Z\"></path><path class=\"cls-4\" d=\"M50.54,174.68a5.49,5.49,0,0,1,2.24-3.88l.19-.11a14,14,0,0,0-1.43-.25c-6.85-1-8.59,3.06-8.95,7.64,0,.26,0,.53,0,.78a8.31,8.31,0,0,1,7.89-4.2Z\"></path><path class=\"cls-4\" d=\"M58.88,173.19c-6.81-4.13-10.63-4.43-12.15,7.14,0,0,7.17-5.67,10.55-1.92,3.68,4.07,8.68.32,6.05-2.06A18.77,18.77,0,0,0,58.88,173.19Z\"></path><path class=\"cls-4\" d=\"M56.06,174.53c-3.86,2.57-3.86,8.62-3.86,8.62s7-3.81,6.5-6.19A2.93,2.93,0,0,0,56.06,174.53Z\"></path><path class=\"cls-4\" d=\"M24,127a5.49,5.49,0,0,1,4.43-.68l.2.08a14,14,0,0,0-.7-1.27c-3.49-6-7.76-4.79-11.56-2.21-.22.15-.43.31-.63.47a8.31,8.31,0,0,1,8.21,3.53Z\"></path><path class=\"cls-4\" d=\"M31.29,134.08c-2.48-9.82-4.47-13.62-14-6.83,0,0,8.13-2.34,9.06,9.22.44,5.47,5.69,6.57,5.63,3A18.77,18.77,0,0,0,31.29,134.08Z\"></path><path class=\"cls-4\" d=\"M27.83,128.82c-4.52-1.07-8.94,3.06-8.94,3.06s6.94-.24,7.78,4C27.14,138.23,27.83,128.82,27.83,128.82Z\"></path><path class=\"cls-22\" d=\"M172.45,112.79a55.39,55.39,0,0,1,15.49-12.5c5.64-3,13.66-4.84,18.5-4.61l1.85,1.59-1-.08a37.75,37.75,0,0,0-19,3.76A55,55,0,0,0,172.45,112.79Z\"></path><path class=\"cls-23\" d=\"M207.12,95.74a34.5,34.5,0,0,1,10.45,2.68,27.42,27.42,0,0,1,8.81,6,27.05,27.05,0,0,0-9.09-5.29,43.65,43.65,0,0,0-9-1.84l-1.84-1.59Z\"></path><path class=\"cls-24\" d=\"M124.52,175.47a27.43,27.43,0,0,1,3.11-1.9,25.35,25.35,0,0,1,2.31-1c.78-.34,1.58-.58,2.38-.84a45.63,45.63,0,0,1,9.84-1.81,95.67,95.67,0,0,1,19.84.78,194.33,194.33,0,0,0,19.66,1.89,66.25,66.25,0,0,0,19.6-1.93,66.44,66.44,0,0,1-19.6,2.3,194.82,194.82,0,0,1-19.75-1.52,94.77,94.77,0,0,0-19.65-.41,44.43,44.43,0,0,0-9.55,1.94c-.76.27-1.53.52-2.27.85a24,24,0,0,0-2.18,1,21.38,21.38,0,0,0-3.93,2.7l-.53.47A18.42,18.42,0,0,1,124.52,175.47Z\"></path><line class=\"cls-25\" x1=\"124.09\" y1=\"176.84\" x2=\"124.09\" y2=\"176.84\"></line><path class=\"cls-6\" d=\"M85.66,97.64c-6.36,1.4-5.37,6.45-5.37,6.45s2-2.43,13.09-3.74A52.36,52.36,0,0,1,85.66,97.64Z\"></path><path class=\"cls-26\" d=\"M118.59,191.58a16.4,16.4,0,0,1-.08-4.24,18.64,18.64,0,0,1,.91-4.18,18.86,18.86,0,0,1,1.87-3.9,19.81,19.81,0,0,1,2.78-3.38l.46-.42s-.63,2-.7,2.51a19.27,19.27,0,0,0-1.61,1.93,17.84,17.84,0,0,0-3.33,7.5A16.22,16.22,0,0,0,118.59,191.58Z\"></path><path class=\"cls-27\" d=\"M65.89,155.08c-3.61-4-6.65-10.29-7.95-16.2a36.79,36.79,0,0,1-.82-9.49l.14-2.38.33-2.36a23,23,0,0,1,.47-2.33,19.65,19.65,0,0,1,.6-2.3,35.6,35.6,0,0,1,3.83-8.64,39.45,39.45,0,0,1,2.68-3.89l1.53-1.8c.51-.6,1.1-1.13,1.64-1.69a37.2,37.2,0,0,1,7.47-5.68,39.82,39.82,0,0,1,8.62-3.62A39.67,39.67,0,0,0,76,98.56a36.78,36.78,0,0,0-7.22,5.83c-.52.57-1.08,1.11-1.56,1.71l-1.45,1.81a38.67,38.67,0,0,0-2.51,3.89,34.62,34.62,0,0,0-3.48,8.52,18.77,18.77,0,0,0-.52,2.24,21.9,21.9,0,0,0-.38,2.27l-.25,2.28-.06,2.3a35.25,35.25,0,0,0,1.06,9.07,36.17,36.17,0,0,0,8.62,15.83l.66.71S66.44,155.12,65.89,155.08Z\"></path><path class=\"cls-28\" d=\"M103.89,166.42A47.14,47.14,0,0,1,94,167.55,37.09,37.09,0,0,1,84,165.91,46.7,46.7,0,0,1,74.71,162a34.57,34.57,0,0,1-8.12-6.17l-.69-.74s2.38,0,3-.06a33.57,33.57,0,0,0,6.72,5.5,45.26,45.26,0,0,0,8.82,4.27A36.2,36.2,0,0,0,94,166.91,47.78,47.78,0,0,0,103.89,166.42Z\"></path></g></g></svg>"
+
+/***/ }),
+
+/***/ 9:
+/***/ (function(module, exports, __webpack_require__) {
+
+/* WEBPACK VAR INJECTION */(function(global) {/** Detect free variable `global` from Node.js. */
+var freeGlobal = typeof global == 'object' && global && global.Object === Object && global;
+
+module.exports = freeGlobal;
+
+/* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(792)))
+
+/***/ }),
+
 /***/ 919:
 /***/ (function(module, exports) {
 
@@ -40183,262 +39507,10 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 
 /***/ }),
 
-/***/ 92:
-/***/ (function(module, exports, __webpack_require__) {
-
-var nativeCreate = __webpack_require__(80);
-
-/** Used to stand-in for `undefined` hash values. */
-var HASH_UNDEFINED = '__lodash_hash_undefined__';
-
-/**
- * Sets the hash `key` to `value`.
- *
- * @private
- * @name set
- * @memberOf Hash
- * @param {string} key The key of the value to set.
- * @param {*} value The value to set.
- * @returns {Object} Returns the hash instance.
- */
-function hashSet(key, value) {
-  var data = this.__data__;
-  this.size += this.has(key) ? 0 : 1;
-  data[key] = (nativeCreate && value === undefined) ? HASH_UNDEFINED : value;
-  return this;
-}
-
-module.exports = hashSet;
-
-
-/***/ }),
-
 /***/ 920:
 /***/ (function(module, exports) {
 
 module.exports = "<!-- This Source Code Form is subject to the terms of the Mozilla Public - License, v. 2.0. If a copy of the MPL was not distributed with this - file, You can obtain one at http://mozilla.org/MPL/2.0/. --><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1792 1792\"><path d=\"M1395 736q0 13-10 23l-466 466q-10 10-23 10t-23-10l-466-466q-10-10-10-23t10-23l50-50q10-10 23-10t23 10l393 393 393-393q10-10 23-10t23 10l50 50q10 10 10 23z\" fill=\"#696969\"></path></svg>"
-
-/***/ }),
-
-/***/ 93:
-/***/ (function(module, exports, __webpack_require__) {
-
-var listCacheClear = __webpack_require__(94),
-    listCacheDelete = __webpack_require__(95),
-    listCacheGet = __webpack_require__(98),
-    listCacheHas = __webpack_require__(99),
-    listCacheSet = __webpack_require__(100);
-
-/**
- * Creates an list cache object.
- *
- * @private
- * @constructor
- * @param {Array} [entries] The key-value pairs to cache.
- */
-function ListCache(entries) {
-  var index = -1,
-      length = entries == null ? 0 : entries.length;
-
-  this.clear();
-  while (++index < length) {
-    var entry = entries[index];
-    this.set(entry[0], entry[1]);
-  }
-}
-
-// Add methods to `ListCache`.
-ListCache.prototype.clear = listCacheClear;
-ListCache.prototype['delete'] = listCacheDelete;
-ListCache.prototype.get = listCacheGet;
-ListCache.prototype.has = listCacheHas;
-ListCache.prototype.set = listCacheSet;
-
-module.exports = ListCache;
-
-
-/***/ }),
-
-/***/ 94:
-/***/ (function(module, exports) {
-
-/**
- * Removes all key-value entries from the list cache.
- *
- * @private
- * @name clear
- * @memberOf ListCache
- */
-function listCacheClear() {
-  this.__data__ = [];
-  this.size = 0;
-}
-
-module.exports = listCacheClear;
-
-
-/***/ }),
-
-/***/ 95:
-/***/ (function(module, exports, __webpack_require__) {
-
-var assocIndexOf = __webpack_require__(96);
-
-/** Used for built-in method references. */
-var arrayProto = Array.prototype;
-
-/** Built-in value references. */
-var splice = arrayProto.splice;
-
-/**
- * Removes `key` and its value from the list cache.
- *
- * @private
- * @name delete
- * @memberOf ListCache
- * @param {string} key The key of the value to remove.
- * @returns {boolean} Returns `true` if the entry was removed, else `false`.
- */
-function listCacheDelete(key) {
-  var data = this.__data__,
-      index = assocIndexOf(data, key);
-
-  if (index < 0) {
-    return false;
-  }
-  var lastIndex = data.length - 1;
-  if (index == lastIndex) {
-    data.pop();
-  } else {
-    splice.call(data, index, 1);
-  }
-  --this.size;
-  return true;
-}
-
-module.exports = listCacheDelete;
-
-
-/***/ }),
-
-/***/ 96:
-/***/ (function(module, exports, __webpack_require__) {
-
-var eq = __webpack_require__(97);
-
-/**
- * Gets the index at which the `key` is found in `array` of key-value pairs.
- *
- * @private
- * @param {Array} array The array to inspect.
- * @param {*} key The key to search for.
- * @returns {number} Returns the index of the matched value, else `-1`.
- */
-function assocIndexOf(array, key) {
-  var length = array.length;
-  while (length--) {
-    if (eq(array[length][0], key)) {
-      return length;
-    }
-  }
-  return -1;
-}
-
-module.exports = assocIndexOf;
-
-
-/***/ }),
-
-/***/ 97:
-/***/ (function(module, exports) {
-
-/**
- * Performs a
- * [`SameValueZero`](http://ecma-international.org/ecma-262/7.0/#sec-samevaluezero)
- * comparison between two values to determine if they are equivalent.
- *
- * @static
- * @memberOf _
- * @since 4.0.0
- * @category Lang
- * @param {*} value The value to compare.
- * @param {*} other The other value to compare.
- * @returns {boolean} Returns `true` if the values are equivalent, else `false`.
- * @example
- *
- * var object = { 'a': 1 };
- * var other = { 'a': 1 };
- *
- * _.eq(object, object);
- * // => true
- *
- * _.eq(object, other);
- * // => false
- *
- * _.eq('a', 'a');
- * // => true
- *
- * _.eq('a', Object('a'));
- * // => false
- *
- * _.eq(NaN, NaN);
- * // => true
- */
-function eq(value, other) {
-  return value === other || (value !== value && other !== other);
-}
-
-module.exports = eq;
-
-
-/***/ }),
-
-/***/ 98:
-/***/ (function(module, exports, __webpack_require__) {
-
-var assocIndexOf = __webpack_require__(96);
-
-/**
- * Gets the list cache value for `key`.
- *
- * @private
- * @name get
- * @memberOf ListCache
- * @param {string} key The key of the value to get.
- * @returns {*} Returns the entry value.
- */
-function listCacheGet(key) {
-  var data = this.__data__,
-      index = assocIndexOf(data, key);
-
-  return index < 0 ? undefined : data[index][1];
-}
-
-module.exports = listCacheGet;
-
-
-/***/ }),
-
-/***/ 99:
-/***/ (function(module, exports, __webpack_require__) {
-
-var assocIndexOf = __webpack_require__(96);
-
-/**
- * Checks if a list cache value for `key` exists.
- *
- * @private
- * @name has
- * @memberOf ListCache
- * @param {string} key The key of the entry to check.
- * @returns {boolean} Returns `true` if an entry for `key` exists, else `false`.
- */
-function listCacheHas(key) {
-  return assocIndexOf(this.__data__, key) > -1;
-}
-
-module.exports = listCacheHas;
-
 
 /***/ }),
 

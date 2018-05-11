@@ -159,6 +159,7 @@
 #include "nsThread.h"
 #include "nsWindowWatcher.h"
 #include "nsIXULRuntime.h"
+#include "mozilla/dom/ChromeMessageBroadcaster.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "nsMemoryInfoDumper.h"
 #include "nsMemoryReporterManager.h"
@@ -185,6 +186,7 @@
 #include "private/pprio.h"
 #include "ContentProcessManager.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/PerformanceUtils.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "nsPluginHost.h"
 #include "nsPluginTags.h"
@@ -194,10 +196,7 @@
 #include "nsHostObjectProtocolHandler.h"
 #include "nsICaptivePortalService.h"
 #include "nsIObjectLoadingContent.h"
-#include "nsPerformanceMetrics.h"
-
 #include "nsIBidiKeyboard.h"
-
 #include "nsLayoutStylesheetCache.h"
 
 #include "mozilla/Sprintf.h"
@@ -537,7 +536,7 @@ ScriptableCPInfo::GetMessageManager(nsISupports** aMessenger)
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  nsCOMPtr<nsIMessageSender> manager = mContentParent->GetMessageManager();
+  RefPtr<ChromeMessageSender> manager = mContentParent->GetMessageManager();
   manager.forget(aMessenger);
   return NS_OK;
 }
@@ -593,7 +592,8 @@ static const char* sObserverTopics[] = {
   "cacheservice:empty-cache",
   "intl:app-locales-changed",
   "intl:requested-locales-changed",
-  "non-js-cookie-changed",
+  "cookie-changed",
+  "private-cookie-changed",
 };
 
 // PreallocateProcess is called by the PreallocatedProcessManager.
@@ -1469,10 +1469,9 @@ ContentParent::ShutDownMessageManager()
   return;
   }
 
-  mMessageManager->ReceiveMessage(
-      static_cast<nsIContentFrameMessageManager*>(mMessageManager.get()), nullptr,
+  mMessageManager->ReceiveMessage(mMessageManager, nullptr,
       CHILD_PROCESS_SHUTDOWN_MESSAGE, false,
-      nullptr, nullptr, nullptr, nullptr);
+      nullptr, nullptr, nullptr, nullptr, IgnoreErrors());
 
   mMessageManager->Disconnect();
   mMessageManager = nullptr;
@@ -1580,7 +1579,7 @@ ContentParent::ProcessingError(Result aCode, const char* aReason)
 
 /* static */
 bool
-ContentParent::AllocateLayerTreeId(TabParent* aTabParent, uint64_t* aId)
+ContentParent::AllocateLayerTreeId(TabParent* aTabParent, layers::LayersId* aId)
 {
   return AllocateLayerTreeId(aTabParent->Manager()->AsContentParent(),
                              aTabParent, aTabParent->GetTabId(), aId);
@@ -1590,7 +1589,7 @@ ContentParent::AllocateLayerTreeId(TabParent* aTabParent, uint64_t* aId)
 bool
 ContentParent::AllocateLayerTreeId(ContentParent* aContent,
                                    TabParent* aTopLevel, const TabId& aTabId,
-                                   uint64_t* aId)
+                                   layers::LayersId* aId)
 {
   GPUProcessManager* gpu = GPUProcessManager::Get();
 
@@ -1607,7 +1606,7 @@ ContentParent::AllocateLayerTreeId(ContentParent* aContent,
 
 mozilla::ipc::IPCResult
 ContentParent::RecvAllocateLayerTreeId(const ContentParentId& aCpId,
-                                       const TabId& aTabId, uint64_t* aId)
+                                       const TabId& aTabId, layers::LayersId* aId)
 {
   // Protect against spoofing by a compromised child. aCpId must either
   // correspond to the process that this ContentParent represents or be a
@@ -1632,7 +1631,7 @@ ContentParent::RecvAllocateLayerTreeId(const ContentParentId& aCpId,
 
 mozilla::ipc::IPCResult
 ContentParent::RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
-                                         const uint64_t& aId)
+                                         const layers::LayersId& aId)
 {
   GPUProcessManager* gpu = GPUProcessManager::Get();
 
@@ -2073,6 +2072,10 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
     extraArgs.push_back("-safeMode");
   }
 
+  nsCString parentBuildID(mozilla::PlatformBuildID());
+  extraArgs.push_back("-parentBuildID");
+  extraArgs.push_back(parentBuildID.get());
+
   // Specify whether the process is recording or replaying an execution.
   if (mRecordExecution.Length() || mReplayExecution.Length()) {
     char buf[20];
@@ -2195,60 +2198,6 @@ ContentParent::~ContentParent()
                !sBrowserContentParents->Contains(mRemoteType) ||
                !sBrowserContentParents->Get(mRemoteType)->Contains(this));
   }
-#ifdef NIGHTLY_BUILD
-  MessageChannel* channel = GetIPCChannel();
-
-  if (channel && !channel->Unsound_IsClosed()) {
-    nsString friendlyName;
-    FriendlyName(friendlyName, false);
-
-    AddRef();
-    nsrefcnt refcnt = Release();
-    uint32_t numQueuedMessages = 0;
-    numQueuedMessages = channel->Unsound_NumQueuedMessages();
-
-    nsPrintfCString msg("queued-ipc-messages/content-parent"
-                        "(%s, pid=%d, %s, 0x%p, refcnt=%" PRIuPTR
-                        ", numQueuedMessages=%d, remoteType=%s, "
-                        "mCalledClose=%s, mCalledKillHard=%s, "
-                        "mShutdownPending=%s, mIPCOpen=%s)",
-                        NS_ConvertUTF16toUTF8(friendlyName).get(),
-                        Pid(), "open channel",
-                        static_cast<nsIContentParent*>(this), refcnt,
-                        numQueuedMessages,
-                        NS_ConvertUTF16toUTF8(mRemoteType).get(),
-                        mCalledClose ? "true" : "false",
-                        mCalledKillHard ? "true" : "false",
-                        mShutdownPending ? "true" : "false",
-                        mIPCOpen ? "true" : "false");
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCFatalErrorMsg"),
-                                       msg);
-    switch (channel->GetChannelState__TotallyRacy()) {
-        case ChannelOpening:
-            MOZ_CRASH("MessageChannel destroyed without being closed " \
-                      "(mChannelState == ChannelOpening).");
-            break;
-        case ChannelConnected:
-            MOZ_CRASH("MessageChannel destroyed without being closed " \
-                      "(mChannelState == ChannelConnected).");
-            break;
-        case ChannelTimeout:
-            MOZ_CRASH("MessageChannel destroyed without being closed " \
-                      "(mChannelState == ChannelTimeout).");
-            break;
-        case ChannelClosing:
-            MOZ_CRASH("MessageChannel destroyed without being closed " \
-                      "(mChannelState == ChannelClosing).");
-            break;
-        case ChannelError:
-            MOZ_CRASH("MessageChannel destroyed without being closed " \
-                      "(mChannelState == ChannelError).");
-            break;
-        default:
-            MOZ_CRASH("MessageChannel destroyed without being closed.");
-    }
-  }
-#endif
 }
 
 void
@@ -2306,21 +2255,22 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
   if (ssm) {
     ssm->CloneDomainPolicy(&xpcomInit.domainPolicy());
 
-    if (nsFrameMessageManager* mm = nsFrameMessageManager::sParentProcessManager) {
+    if (ChromeMessageBroadcaster* mm = nsFrameMessageManager::sParentProcessManager) {
       AutoJSAPI jsapi;
       if (NS_WARN_IF(!jsapi.Init(xpc::PrivilegedJunkScope()))) {
         MOZ_CRASH();
       }
       JS::RootedValue init(jsapi.cx());
-      nsresult result = mm->GetInitialProcessData(jsapi.cx(), &init);
-      if (NS_FAILED(result)) {
+      // We'll crash on failure, so use a IgnoredErrorResult (which also auto-suppresses
+      // exceptions).
+      IgnoredErrorResult rv;
+      mm->GetInitialProcessData(jsapi.cx(), &init, rv);
+      if (NS_WARN_IF(rv.Failed())) {
         MOZ_CRASH();
       }
 
-      ErrorResult rv;
       initialData.Write(jsapi.cx(), init, rv);
       if (NS_WARN_IF(rv.Failed())) {
-        rv.SuppressException();
         MOZ_CRASH();
       }
     }
@@ -2333,9 +2283,7 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
 
   // Content processes have no permission to access profile directory, so we
   // send the file URL instead.
-  StyleBackendType backendType =
-    StyleBackendType::Servo;
-  StyleSheet* ucs = nsLayoutStylesheetCache::For(backendType)->UserContentSheet();
+  StyleSheet* ucs = nsLayoutStylesheetCache::Singleton()->UserContentSheet();
   if (ucs) {
     SerializeURI(ucs->GetSheetURI(), xpcomInit.userContentSheetURL());
   } else {
@@ -2451,19 +2399,19 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
     // The URIs of the Gecko and Servo sheets should be the same, so it
     // shouldn't matter which we look at.
 
-    for (StyleSheet* sheet : *sheetService->AgentStyleSheets(backendType)) {
+    for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
       URIParams uri;
       SerializeURI(sheet->GetSheetURI(), uri);
       Unused << SendLoadAndRegisterSheet(uri, nsIStyleSheetService::AGENT_SHEET);
     }
 
-    for (StyleSheet* sheet : *sheetService->UserStyleSheets(backendType)) {
+    for (StyleSheet* sheet : *sheetService->UserStyleSheets()) {
       URIParams uri;
       SerializeURI(sheet->GetSheetURI(), uri);
       Unused << SendLoadAndRegisterSheet(uri, nsIStyleSheetService::USER_SHEET);
     }
 
-    for (StyleSheet* sheet : *sheetService->AuthorStyleSheets(backendType)) {
+    for (StyleSheet* sheet : *sheetService->AuthorStyleSheets()) {
       URIParams uri;
       SerializeURI(sheet->GetSheetURI(), uri);
       Unused << SendLoadAndRegisterSheet(uri, nsIStyleSheetService::AUTHOR_SHEET);
@@ -2771,8 +2719,8 @@ ContentParent::RecvPlaySound(const URIParams& aURI)
   bool isChrome = false;
   // If the check here fails, it can only mean that this message was spoofed.
   if (!soundURI || NS_FAILED(soundURI->SchemeIs("chrome", &isChrome)) || !isChrome) {
-    KillHard("PlaySound only accepts a valid chrome URI.");
-    return IPC_OK();
+    // PlaySound only accepts a valid chrome URI.
+    return IPC_FAIL_NO_REASON(this);
   }
   nsCOMPtr<nsIURL> soundURL(do_QueryInterface(soundURI));
   if (!soundURL) {
@@ -3000,9 +2948,6 @@ ContentParent::Observe(nsISupports* aSubject,
 #ifdef ACCESSIBILITY
   else if (aData && !strcmp(aTopic, "a11y-init-or-shutdown")) {
     if (*aData == '1') {
-      // Shut down the preallocated process manager to avoid recycled
-      // content processes.
-      PreallocatedProcessManager::Disable();
       // Make sure accessibility is running in content process when
       // accessibility gets initiated in chrome process.
 #if defined(XP_WIN)
@@ -3034,7 +2979,8 @@ ContentParent::Observe(nsISupports* aSubject,
     LocaleService::GetInstance()->GetRequestedLocales(requestedLocales);
     Unused << SendUpdateRequestedLocales(requestedLocales);
   }
-  else if (!strcmp(aTopic, "non-js-cookie-changed")) {
+  else if (!strcmp(aTopic, "cookie-changed") ||
+           !strcmp(aTopic, "private-cookie-changed")) {
     if (!aData) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -3047,6 +2993,10 @@ ContentParent::Observe(nsISupports* aSubject,
       return NS_OK;
     }
     auto *cs = static_cast<CookieServiceParent*>(csParent);
+    // Do not push these cookie updates to the same process they originated from.
+    if (cs->ProcessingCookie()) {
+      return NS_OK;
+    }
     if (!nsCRT::strcmp(aData, u"batch-deleted")) {
       nsCOMPtr<nsIArray> cookieList = do_QueryInterface(aSubject);
       NS_ASSERTION(cookieList, "couldn't get cookie list");
@@ -3204,6 +3154,11 @@ ContentParent::KillHard(const char* aReason)
   mCalledKillHard = true;
   mForceKillTimer = nullptr;
 
+  MessageChannel* channel = GetIPCChannel();
+  if (channel) {
+    channel->SetInKillHardShutdown();
+  }
+
   // We're about to kill the child process associated with this content.
   // Something has gone wrong to get us here, so we generate a minidump
   // of the parent and child for submission to the crash server.
@@ -3359,41 +3314,15 @@ ContentParent::RecvFinishMemoryReport(const uint32_t& aGeneration)
 }
 
 mozilla::ipc::IPCResult
-ContentParent::RecvAddPerformanceMetrics(const PerformanceInfo& aMetrics)
+ContentParent::RecvAddPerformanceMetrics(nsTArray<PerformanceInfo>&& aMetrics)
 {
-#ifndef RELEASE_OR_BETA
-  // converting the data we get from a child as a notification
-  if (aMetrics.items().IsEmpty()) {
-      return IPC_OK();
+  if (!mozilla::dom::DOMPrefs::SchedulerLoggingEnabled()) {
+    // The pref is off, we should not get a performance metrics from the content
+    // child
+    return IPC_OK();
   }
-
-  nsCOMPtr<nsIMutableArray> xpItems = do_CreateInstance(NS_ARRAY_CONTRACTID);
-  if (NS_WARN_IF(!xpItems)) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-
-  for (uint32_t i = 0; i<aMetrics.items().Length(); i++) {
-       const CategoryDispatch& entry = aMetrics.items()[i];
-       nsCOMPtr<nsIPerformanceMetricsDispatchCategory> item =
-           new PerformanceMetricsDispatchCategory(entry.category(),
-                                                  entry.count());
-       xpItems->AppendElement(item);
-  }
-
-  nsCOMPtr<nsIPerformanceMetricsData> data =
-      new PerformanceMetricsData(aMetrics.pid(), aMetrics.wid(), aMetrics.pwid(),
-                                 aMetrics.host(), aMetrics.duration(),
-                                 aMetrics.worker(), xpItems);
-  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-  if (!obs) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  obs->NotifyObservers(data, "performance-metrics", nullptr);
+  Unused << NS_WARN_IF(NS_FAILED(mozilla::NotifyPerformanceInfo(aMetrics)));
   return IPC_OK();
-#endif
-#ifdef RELEASE_OR_BETA
-  return IPC_OK();
-#endif
 }
 
 PCycleCollectWithLogsParent*
@@ -3465,11 +3394,17 @@ PPrintingParent*
 ContentParent::AllocPPrintingParent()
 {
 #ifdef NS_PRINTING
-  MOZ_ASSERT(!mPrintingParent,
-             "Only one PrintingParent should be created per process.");
+  if (mPrintingParent) {
+    // Only one PrintingParent should be created per process.
+    return nullptr;
+  }
 
   // Create the printing singleton for this process.
   mPrintingParent = new PrintingParent();
+
+  // Take another reference for IPDL code.
+  mPrintingParent.get()->AddRef();
+
   return mPrintingParent.get();
 #else
   MOZ_ASSERT_UNREACHABLE("Should never be created if no printing.");
@@ -3481,8 +3416,11 @@ bool
 ContentParent::DeallocPPrintingParent(PPrintingParent* printing)
 {
 #ifdef NS_PRINTING
-  MOZ_ASSERT(mPrintingParent == printing,
-             "Only one PrintingParent should have been created per process.");
+  MOZ_RELEASE_ASSERT(mPrintingParent == printing,
+    "Only one PrintingParent should have been created per process.");
+
+  // Release reference taken for IPDL code.
+  static_cast<PrintingParent*>(printing)->Release();
 
   mPrintingParent = nullptr;
 #else
@@ -3815,15 +3753,13 @@ ContentParent::HasNotificationPermission(const IPC::Principal& aPrincipal)
 }
 
 mozilla::ipc::IPCResult
-ContentParent::RecvShowAlert(const AlertNotificationType& aAlert)
+ContentParent::RecvShowAlert(nsIAlertNotification* aAlert)
 {
-  nsCOMPtr<nsIAlertNotification> alert(dont_AddRef(aAlert));
-  if (NS_WARN_IF(!alert)) {
-    return IPC_OK();
+  if (!aAlert) {
+    return IPC_FAIL_NO_REASON(this);
   }
-
   nsCOMPtr<nsIPrincipal> principal;
-  nsresult rv = alert->GetPrincipal(getter_AddRefs(principal));
+  nsresult rv = aAlert->GetPrincipal(getter_AddRefs(principal));
   if (NS_WARN_IF(NS_FAILED(rv)) ||
       !HasNotificationPermission(IPC::Principal(principal))) {
 
@@ -3832,7 +3768,7 @@ ContentParent::RecvShowAlert(const AlertNotificationType& aAlert)
 
   nsCOMPtr<nsIAlertsService> sysAlerts(do_GetService(NS_ALERTSERVICE_CONTRACTID));
   if (sysAlerts) {
-      sysAlerts->ShowAlert(alert, this);
+      sysAlerts->ShowAlert(aAlert, this);
   }
   return IPC_OK();
 }
@@ -3962,7 +3898,7 @@ ContentParent::RecvSetGeolocationHigherAccuracy(const bool& aEnable)
 NS_IMETHODIMP
 ContentParent::HandleEvent(nsIDOMGeoPosition* postion)
 {
-  Unused << SendGeolocationUpdate(GeoPosition(postion));
+  Unused << SendGeolocationUpdate(postion);
   return NS_OK;
 }
 
@@ -4174,7 +4110,7 @@ ContentParent::SendPBrowserConstructor(PBrowserParent* aActor,
 mozilla::ipc::IPCResult
 ContentParent::RecvKeywordToURI(const nsCString& aKeyword,
                                 nsString* aProviderName,
-                                nsCOMPtr<nsIInputStream>* aPostData,
+                                RefPtr<nsIInputStream>* aPostData,
                                 OptionalURIParams* aURI)
 {
   *aPostData = nullptr;
@@ -4374,7 +4310,7 @@ ContentParent::RecvRequestAnonymousTemporaryFile(const uint64_t& aID)
   // Make sure to send a callback to the child if we bail out early.
   nsresult rv = NS_OK;
   RefPtr<ContentParent> self(this);
-  auto autoNotifyChildOnError = MakeScopeExit([&]() {
+  auto autoNotifyChildOnError = MakeScopeExit([&, self]() {
     if (NS_FAILED(rv)) {
       FileDescOrError result(rv);
       Unused << self->SendProvideAnonymousTemporaryFile(aID, result);
@@ -4511,6 +4447,10 @@ ContentParent::UnregisterRemoteFrame(const TabId& aTabId,
   if (XRE_IsParentProcess()) {
     ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
     ContentParent* cp = cpm->GetContentProcessById(aCpId);
+
+    if (!cp) {
+      return;
+    }
 
     cp->NotifyTabDestroyed(aTabId, aMarkedDestroying);
 
@@ -4840,6 +4780,12 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
       RefPtr<nsFrameLoader> frameLoader = frameLoaderOwner->GetFrameLoader();
       if (frameLoader) {
         aNewTabParent = frameLoader->GetTabParent();
+        // At this point, it's possible the inserted frameloader hasn't gone through
+        // layout yet. To ensure that the dimensions that we send down when telling the
+        // frameloader to display will be correct (instead of falling back to a 10x10
+        // default), we force layout if necessary to get the most up-to-date dimensions.
+        // See bug 1358712 for details.
+        frameLoader->ForceLayoutIfNecessary();
       }
     } else if (NS_SUCCEEDED(aResult) && !frameLoaderOwner) {
       // Fall through to the normal window opening code path when there is no
@@ -4871,6 +4817,26 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
   }
 
   MOZ_ASSERT(aNewTabParent);
+
+  // At this point, it's possible the inserted frameloader hasn't gone through
+  // layout yet. To ensure that the dimensions that we send down when telling the
+  // frameloader to display will be correct (instead of falling back to a 10x10
+  // default), we force layout if necessary to get the most up-to-date dimensions.
+  // See bug 1358712 for details.
+  //
+  // This involves doing a bit of gymnastics in order to get at the FrameLoader,
+  // so we scope this to avoid polluting the main function scope.
+  {
+    nsCOMPtr<Element> frameElement =
+      TabParent::GetFrom(aNewTabParent)->GetOwnerElement();
+    MOZ_ASSERT(frameElement);
+    nsCOMPtr<nsIFrameLoaderOwner> frameLoaderOwner = do_QueryInterface(frameElement);
+    MOZ_ASSERT(frameLoaderOwner);
+    RefPtr<nsFrameLoader> frameLoader = frameLoaderOwner->GetFrameLoader();
+    MOZ_ASSERT(frameLoader);
+    frameLoader->ForceLayoutIfNecessary();
+  }
+
   // If we were passed a name for the window which would override the default,
   // we should send it down to the new tab.
   if (nsContentUtils::IsOverridingWindowName(aName)) {
@@ -4930,7 +4896,7 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
 
   // We always expect to open a new window here. If we don't, it's an error.
   cwi.windowOpened() = true;
-  cwi.layersId() = 0;
+  cwi.layersId() = LayersId{0};
   cwi.maxTouchPoints() = 0;
 
   // Make sure to resolve the resolver when this function exits, even if we
@@ -5331,6 +5297,14 @@ ContentParent::RecvGetFilesRequest(const nsID& aUUID,
 {
   MOZ_ASSERT(!mGetFilesPendingRequests.GetWeak(aUUID));
 
+  if (!mozilla::Preferences::GetBool("dom.filesystem.pathcheck.disabled", false)) {
+    RefPtr<FileSystemSecurity> fss = FileSystemSecurity::Get();
+    if (NS_WARN_IF(!fss ||
+                   !fss->ContentProcessHasAccessTo(ChildID(), aDirectoryPath))) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+  }
+
   ErrorResult rv;
   RefPtr<GetFilesHelper> helper =
     GetFilesHelperParent::Create(aUUID, aDirectoryPath, aRecursiveFlag, this,
@@ -5675,7 +5649,6 @@ ContentParent::RecvFileCreationRequest(const nsID& aID,
   // or for testing.
   if (!mRemoteType.EqualsLiteral(FILE_REMOTE_TYPE) &&
       !Preferences::GetBool("dom.file.createInChild", false)) {
-    KillHard("FileCreationRequest is not supported.");
     return IPC_FAIL_NO_REASON(this);
   }
 

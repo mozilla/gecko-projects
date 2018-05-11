@@ -9,12 +9,10 @@
 #include "jsdate.h"
 #include "jsexn.h"
 #include "jsfriendapi.h"
-#include "jsmath.h"
 
 #include "builtin/AtomicsObject.h"
 #include "builtin/DataViewObject.h"
 #include "builtin/Eval.h"
-#include "builtin/JSON.h"
 #include "builtin/MapObject.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/Object.h"
@@ -36,7 +34,6 @@
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
 #include "vm/ReplayDebugger.h"
-#include "wasm/WasmJS.h"
 
 #include "vm/JSCompartment-inl.h"
 #include "vm/JSObject-inl.h"
@@ -52,15 +49,20 @@ struct ProtoTableEntry {
 
 namespace js {
 
+extern const Class IntlClass;
+extern const Class JSONClass;
+extern const Class MathClass;
+extern const Class WebAssemblyClass;
+
 #define DECLARE_PROTOTYPE_CLASS_INIT(name,init,clasp) \
-    extern JSObject* init(JSContext* cx, Handle<JSObject*> obj);
+    extern JSObject* init(JSContext* cx, Handle<GlobalObject*> global);
 JS_FOR_EACH_PROTOTYPE(DECLARE_PROTOTYPE_CLASS_INIT)
 #undef DECLARE_PROTOTYPE_CLASS_INIT
 
 } // namespace js
 
 JSObject*
-js::InitViaClassSpec(JSContext* cx, Handle<JSObject*> obj)
+js::InitViaClassSpec(JSContext* cx, Handle<GlobalObject*> global)
 {
     MOZ_CRASH("InitViaClassSpec() should not be called.");
 }
@@ -122,7 +124,7 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
 {
     MOZ_ASSERT(!global->isStandardClassResolved(key));
 
-    if (global->zone()->group()->createdForHelperThread())
+    if (global->zone()->createdForHelperThread())
         return resolveOffThreadConstructor(cx, global, key);
 
     MOZ_ASSERT(!cx->helperThread());
@@ -281,7 +283,7 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
 /* static */ JSObject*
 GlobalObject::createObject(JSContext* cx, Handle<GlobalObject*> global, unsigned slot, ObjectInitOp init)
 {
-    if (global->zone()->group()->createdForHelperThread())
+    if (global->zone()->createdForHelperThread())
         return createOffThreadObject(cx, global, slot);
 
     MOZ_ASSERT(!cx->helperThread());
@@ -325,7 +327,7 @@ GlobalObject::resolveOffThreadConstructor(JSContext* cx,
     // prototype when the off-thread compartment is merged back into the target
     // compartment.
 
-    MOZ_ASSERT(global->zone()->group()->createdForHelperThread());
+    MOZ_ASSERT(global->zone()->createdForHelperThread());
     MOZ_ASSERT(key == JSProto_Object ||
                key == JSProto_Function ||
                key == JSProto_Array ||
@@ -355,7 +357,7 @@ GlobalObject::createOffThreadObject(JSContext* cx, Handle<GlobalObject*> global,
     // when the off-thread compartment is merged back into the target
     // compartment.
 
-    MOZ_ASSERT(global->zone()->group()->createdForHelperThread());
+    MOZ_ASSERT(global->zone()->createdForHelperThread());
     MOZ_ASSERT(slot == GENERATOR_FUNCTION_PROTO ||
                slot == MODULE_PROTO ||
                slot == IMPORT_ENTRY_PROTO ||
@@ -702,7 +704,7 @@ GlobalObject::createConstructor(JSContext* cx, Native ctor, JSAtom* nameArg, uns
 }
 
 static NativeObject*
-CreateBlankProto(JSContext* cx, const Class* clasp, HandleObject proto, HandleObject global)
+CreateBlankProto(JSContext* cx, const Class* clasp, HandleObject proto)
 {
     MOZ_ASSERT(clasp != &JSFunction::class_);
 
@@ -721,14 +723,14 @@ GlobalObject::createBlankPrototype(JSContext* cx, Handle<GlobalObject*> global, 
     if (!objectProto)
         return nullptr;
 
-    return CreateBlankProto(cx, clasp, objectProto, global);
+    return CreateBlankProto(cx, clasp, objectProto);
 }
 
 /* static */ NativeObject*
-GlobalObject::createBlankPrototypeInheriting(JSContext* cx, Handle<GlobalObject*> global,
-                                             const Class* clasp, HandleObject proto)
+GlobalObject::createBlankPrototypeInheriting(JSContext* cx, const Class* clasp,
+                                             HandleObject proto)
 {
-    return CreateBlankProto(cx, clasp, proto, global);
+    return CreateBlankProto(cx, clasp, proto);
 }
 
 bool
