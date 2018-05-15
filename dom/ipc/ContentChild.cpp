@@ -663,6 +663,12 @@ ContentChild::Init(MessageLoop* aIOLoop,
     return false;
   }
 
+  // Middleman processes use a special channel for forwarding messages to
+  // their own children.
+  if (recordreplay::IsMiddleman()) {
+    SetIPCChannel(recordreplay::parent::ChannelToUIProcess());
+  }
+
   if (!Open(aChannel, aParentPid, aIOLoop)) {
     return false;
   }
@@ -1330,24 +1336,6 @@ ContentChild::DeallocPCycleCollectWithLogsChild(PCycleCollectWithLogsChild* /* a
   // Also, we're already in ~CycleCollectWithLogsChild (q.v.) at
   // this point, so we shouldn't touch the actor in any case.
   return true;
-}
-
-const MessageChannel*
-ContentChild::GetIPCChannel() const
-{
-  if (recordreplay::IsMiddleman()) {
-    return recordreplay::parent::ChannelToUIProcess();
-  }
-  return PContentChild::GetIPCChannel();
-}
-
-MessageChannel*
-ContentChild::GetIPCChannel()
-{
-  if (recordreplay::IsMiddleman()) {
-    return recordreplay::parent::ChannelToUIProcess();
-  }
-  return PContentChild::GetIPCChannel();
 }
 
 mozilla::ipc::IPCResult

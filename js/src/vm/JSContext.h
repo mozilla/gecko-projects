@@ -798,7 +798,8 @@ struct JSContext : public JS::RootingContext,
     js::ThreadData<bool> interruptCallbackDisabled;
 
     // Bitfield storing InterruptReason values.
-    mozilla::Atomic<uint32_t, mozilla::Relaxed> interruptBits_;
+    mozilla::Atomic<uint32_t, mozilla::Relaxed,
+                    mozilla::recordreplay::Behavior::DontPreserve> interruptBits_;
 
     // Any thread can call requestInterrupt() to request that this thread
     // stop running. To stop this thread, requestInterrupt sets two fields:

@@ -7,10 +7,10 @@
 #ifndef vm_Time_h
 #define vm_Time_h
 
+#include "mozilla/TimeStamp.h"
+
 #include <stddef.h>
 #include <stdint.h>
-
-#include "mozilla/TimeStamp.h"
 
 /*
  * Broken down form of 64 bit time value.

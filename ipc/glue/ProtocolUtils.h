@@ -288,6 +288,10 @@ public:
     {
         return mState->GetIPCChannel();
     }
+    void SetIPCChannel(MessageChannel* aChannel)
+    {
+        mState->SetIPCChannel(aChannel);
+    }
 
     // XXX odd ducks, acknowledged
     virtual ProcessId OtherPid() const;

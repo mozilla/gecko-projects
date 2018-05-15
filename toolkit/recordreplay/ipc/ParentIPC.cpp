@@ -877,32 +877,24 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
 class MiddlemanProtocol : public ipc::IToplevelProtocol
 {
 public:
-  ipc::MessageChannel mChannel;
   ipc::Side mSide;
   MiddlemanProtocol* mOpposite;
   MessageLoop* mOppositeMessageLoop;
 
   explicit MiddlemanProtocol(ipc::Side aSide)
-    : ipc::IToplevelProtocol(PContentMsgStart, aSide)
-    , mChannel("MiddlemanProtocol", this)
+    : ipc::IToplevelProtocol("MiddlemanProtocol", PContentMsgStart, aSide)
     , mSide(aSide)
     , mOpposite(nullptr)
-  {
-    SetIPCChannel(&mChannel);
-  }
+  {}
 
   virtual void RemoveManagee(int32_t, IProtocol*) override {
     MOZ_CRASH("MiddlemanProtocol::RemoveManagee");
   }
 
-  virtual const char* ProtocolName() const override {
-    MOZ_CRASH("MiddlemanProtocol::ProtocolName");
-  }
-
   static void ForwardMessageAsync(MiddlemanProtocol* aProtocol, Message* aMessage) {
     if (gActiveChild->IsRecording()) {
       PrintSpew("ForwardAsyncMsg %s\n", IPC::StringFromIPCMessageType(aMessage->type()));
-      if (!aProtocol->mChannel.Send(aMessage)) {
+      if (!aProtocol->GetIPCChannel()->Send(aMessage)) {
         MOZ_CRASH("MiddlemanProtocol::ForwardMessageAsync");
       }
     } else {
@@ -939,7 +931,7 @@ public:
 
     MOZ_RELEASE_ASSERT(!*aReply);
     Message* nReply = new Message();
-    if (!aProtocol->mChannel.Send(aMessage, nReply)) {
+    if (!aProtocol->GetIPCChannel()->Send(aMessage, nReply)) {
       MOZ_CRASH("MiddlemanProtocol::ForwardMessageSync");
     }
 
@@ -969,7 +961,7 @@ public:
 
     MOZ_RELEASE_ASSERT(!*aReply);
     Message* nReply = new Message();
-    if (!aProtocol->mChannel.Call(aMessage, nReply)) {
+    if (!aProtocol->GetIPCChannel()->Call(aMessage, nReply)) {
       MOZ_CRASH("MiddlemanProtocol::ForwardCallMessage");
     }
 
@@ -1063,8 +1055,7 @@ NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen)
 }
 
 void
-Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
-           dom::ContentChild* aContentChild)
+Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(gShmemPrefs);
@@ -1112,11 +1103,6 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChild
         gCommunicationMonitor->Wait();
       }
     }
-  }
-
-  if (!aContentChild->Init(ipc::IOThreadChild::message_loop(), aParentPid,
-                           ipc::IOThreadChild::channel(), aChildID, /* aIsForBrowser = */ true)) {
-    MOZ_CRASH("parent::Initialize");
   }
 }
 

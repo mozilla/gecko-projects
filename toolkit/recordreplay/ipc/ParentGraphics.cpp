@@ -57,7 +57,7 @@ UpdateBrowserTitle(dom::TabChild* aBrowser)
 // Information about a layer tree we have retained for future paints.
 struct LayerTreeInfo
 {
-  uint64_t mLayerTreeId;
+  layers::LayersId mLayerTreeId;
   layers::PLayerTransactionChild* mLayerTransactionChild;
 
   // Action to clean up the current paint, to be performed after the next paint.
@@ -74,7 +74,7 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
 
   LayerTreeInfo* layersInfo = nullptr;
   for (LayerTreeInfo& existing : gLayerTrees) {
-    if (existing.mLayerTreeId == aBrowser->LayersId()) {
+    if (existing.mLayerTreeId == aBrowser->GetLayersId()) {
       layersInfo = &existing;
       break;
     }
@@ -83,12 +83,12 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
     gLayerTrees.emplaceBack();
     layersInfo = &gLayerTrees.back();
 
-    layersInfo->mLayerTreeId = aBrowser->LayersId();
+    layersInfo->mLayerTreeId = aBrowser->GetLayersId();
 
     nsTArray<layers::LayersBackend> backends;
     backends.AppendElement(layers::LayersBackend::LAYERS_BASIC);
     layersInfo->mLayerTransactionChild =
-      CBC->SendPLayerTransactionConstructor(backends, aBrowser->LayersId());
+      CBC->SendPLayerTransactionConstructor(backends, aBrowser->GetLayersId());
     MOZ_RELEASE_ASSERT(layersInfo->mLayerTransactionChild);
   }
 
@@ -203,7 +203,7 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
   TimeStamp now = TimeStamp::Now();
 
   static uint64_t FwdTransactionId = 2;
-  static uint64_t TransactionId = 1;
+  static layers::TransactionId TransactionId = { 1 };
   static uint32_t PaintSequenceNumber = 0;
 
   layers::TargetConfig targetConfig(gfx::IntRect(0, 0, width, height),
@@ -242,7 +242,7 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
   };
 
   FwdTransactionId++;
-  TransactionId++;
+  TransactionId = TransactionId.Next();
   PaintSequenceNumber++;
 }
 

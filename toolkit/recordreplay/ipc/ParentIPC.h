@@ -37,8 +37,7 @@ void SaveRecording(const nsCString& aFilename);
 // Get the message channel used to communicate with the UI process.
 ipc::MessageChannel* ChannelToUIProcess();
 
-void Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid, uint64_t aChildID,
-                dom::ContentChild* aContentChild);
+void Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid);
 
 // Note the contents of the prefs shmem for use by the child process.
 void NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen);

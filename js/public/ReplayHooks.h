@@ -9,9 +9,9 @@
 #ifndef js_ReplayHooks_h
 #define js_ReplayHooks_h
 
-#include "jsapi.h"
-
 #include "mozilla/Vector.h"
+
+#include "jsapi.h"
 
 namespace JS {
 namespace replay {

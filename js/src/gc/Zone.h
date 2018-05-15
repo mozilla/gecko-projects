@@ -157,7 +157,8 @@ struct Zone : public JS::shadow::Zone,
         Pending,
         Active
     };
-    mozilla::Atomic<HelperThreadUse> helperThreadUse_;
+    mozilla::Atomic<HelperThreadUse, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> helperThreadUse_;
 
     // The helper thread context with exclusive access to this zone, if
     // usedByHelperThread(), or nullptr when on the main thread.

@@ -404,7 +404,8 @@ class PseudoStack final
     // current thread.
     //
     // This is effectively a unique pointer.
-    mozilla::Atomic<js::ProfileEntry*> entries { nullptr };
+    mozilla::Atomic<js::ProfileEntry*, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> entries { nullptr };
 
     // This may exceed the entry capacity, so instead use the stackSize() method to
     // determine the number of valid samples in entries. When this is less

@@ -46,17 +46,17 @@ ImageLoader::DropDocumentReference()
   mDocument = nullptr;
 }
 
-template <typename Elem, typename Comparator = nsDefaultComparator<Elem, Elem>()>
-static uint32_t
-GetMaybeSortedIndex(const nsTArray<Elem>& aArray, const Elem& aItem, bool* aFound,
+template <typename Elem, typename Item, typename Comparator = nsDefaultComparator<Elem, Item>>
+static size_t
+GetMaybeSortedIndex(const nsTArray<Elem>& aArray, const Item& aItem, bool* aFound,
                     Comparator aComparator = Comparator())
 {
   if (recordreplay::IsRecordingOrReplaying()) {
-    uint32_t index = aArray.IndexOf(aItem, 0, aComparator);
+    size_t index = aArray.IndexOf(aItem, 0, aComparator);
     *aFound = index != nsTArray<Elem>::NoIndex;
     return *aFound ? index + 1 : aArray.Length();
   }
-  uint32_t index = aArray.IndexOfFirstElementGt(aItem, aComparator);
+  size_t index = aArray.IndexOfFirstElementGt(aItem, aComparator);
   *aFound = index > 0 && aComparator.Equals(aItem, aArray.ElementAt(index - 1));
   return index;
 }

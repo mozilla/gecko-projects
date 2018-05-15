@@ -19,6 +19,7 @@
 #include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/recordreplay/ChildIPC.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/Unused.h"
@@ -1070,13 +1071,13 @@ IToplevelProtocol::ToplevelState::ReplaceEventTargetForActor(
 const MessageChannel*
 IToplevelProtocol::ToplevelState::GetIPCChannel() const
 {
-  return &mChannel;
+  return ProtocolState::mChannel ? ProtocolState::mChannel : &mChannel;
 }
 
 MessageChannel*
 IToplevelProtocol::ToplevelState::GetIPCChannel()
 {
-  return &mChannel;
+  return ProtocolState::mChannel ? ProtocolState::mChannel : &mChannel;
 }
 
 } // namespace ipc

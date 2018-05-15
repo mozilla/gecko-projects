@@ -236,15 +236,15 @@ ContentProcess::Init(int aArgc, char* aArgv[])
   Scheduler::SetPrefs(*schedulerPrefs);
 
   if (recordreplay::IsMiddleman()) {
-    recordreplay::parent::Initialize(aArgc, aArgv, ParentPid(), *childID, &mContent);
-  } else {
-    mContent.Init(IOThreadChild::message_loop(),
-                  ParentPid(),
-                  *parentBuildID,
-                  IOThreadChild::channel(),
-                  *childID,
-                  *isForBrowser);
+    recordreplay::parent::Initialize(aArgc, aArgv, ParentPid());
   }
+
+  mContent.Init(IOThreadChild::message_loop(),
+                ParentPid(),
+                *parentBuildID,
+                IOThreadChild::channel(),
+                *childID,
+                *isForBrowser);
 
   mXREEmbed.Start();
 #if (defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)

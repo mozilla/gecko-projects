@@ -8858,7 +8858,7 @@ DebuggerArguments::create(JSContext* cx, HandleObject proto, HandleDebuggerFrame
         getobj->setExtendedSlot(0, Int32Value(i));
     }
 
-    return obj;
+    return &obj->as<DebuggerArguments>();
 }
 
 /* static */ bool

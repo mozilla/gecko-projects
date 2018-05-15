@@ -36,7 +36,8 @@
 // CPU count. Read concurrently from multiple threads. Written once during the
 // first mutex initialization; re-initialization is safe hence relaxed ordering
 // is OK.
-static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed> sCPUCount(0);
+static mozilla::Atomic<uint32_t, mozilla::MemoryOrdering::Relaxed,
+                       mozilla::recordreplay::Behavior::DontPreserve> sCPUCount(0);
 
 static void
 EnsureCPUCount()
@@ -154,7 +155,7 @@ mozilla::detail::MutexImpl::lock()
   // feature.
 
   MOZ_ASSERT(sCPUCount);
-  if (sCPUCount == 1) {
+  if (sCPUCount == 1 || recordreplay::IsRecordingOrReplaying()) {
     mutexLock();
     return;
   }
