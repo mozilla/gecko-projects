@@ -14,7 +14,7 @@ from .registry import register_callback_action
 from .util import (find_decision_task, find_existing_tasks_from_previous_kinds,
                    find_hg_revision_pushlog_id)
 from taskgraph.util.taskcluster import get_artifact
-from taskgraph.util.partials import populate_release_history, get_partial_updates
+from taskgraph.util.partials import populate_release_history
 from taskgraph.util.partners import (
     EMEFREE_BRANCHES,
     PARTNER_BRANCHES,
@@ -226,29 +226,17 @@ def release_promotion_action(parameters, graph_config, input, task_group_id, tas
 
     if product in ('firefox', 'devedition'):
         if release_promotion_flavor in PARTIAL_UPDATES_FLAVORS:
-            partial_updates = input.get('partial_updates', {})
-            if not partial_updates:
-
-                # TODO: quick hack
-                def get_current_version():
-                    from os import path
-                    curdir = path.dirname(__file__)
-                    version_file = path.join(curdir, "../../../browser/config/version_display.txt")
-                    with open(version_file) as f:
-                        return f.read().strip()
-
-                version = input.get("version") or get_current_version()
-                partial_updates = get_partial_updates(
-                    product=product, project=parameters['project'], version=version)
-                # raise Exception(
-                #     "`partial_updates` property needs to be provided for %s "
-                #     "targets." % ', '.join(PARTIAL_UPDATES_FLAVORS)
-                # )
+            partial_updates = json.dumps(input.get('partial_updates', {}))
+            if partial_updates == "{}":
+                raise Exception(
+                    "`partial_updates` property needs to be provided for %s "
+                    "targets." % ', '.join(PARTIAL_UPDATES_FLAVORS)
+                )
             balrog_prefix = product.title()
-            os.environ['PARTIAL_UPDATES'] = json.dumps(partial_updates)
+            os.environ['PARTIAL_UPDATES'] = partial_updates
             release_history = populate_release_history(
                 balrog_prefix, parameters['project'],
-                partial_updates=partial_updates
+                partial_updates=input['partial_updates']
             )
 
     target_tasks_method = promotion_config['target-tasks-method'].format(
