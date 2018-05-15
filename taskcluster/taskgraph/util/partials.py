@@ -4,18 +4,13 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import itertools
-import re
-
 import requests
 import redo
 
 import logging
 logger = logging.getLogger(__name__)
 
-# BALROG_API_ROOT = 'https://aus5.mozilla.org/api/v1'
-# TODO: should be per project
-BALROG_API_ROOT = 'https://aus4.stage.mozaws.net/api/v1'
+BALROG_API_ROOT = 'https://aus5.mozilla.org/api/v1'
 
 PLATFORM_RENAMES = {
     'windows2012-32': 'win32',
@@ -274,110 +269,3 @@ def _populate_release_history(product, branch, partial_updates):
                     'product': product,
                 }
     return builds
-
-
-def get_releases(product, branch, version=None):
-    url = "https://shipit-workflow.staging.mozilla-releng.net/releases"
-    params = {
-        "product": product,
-        "branch": branch,
-        "status": "shipped",
-    }
-    if version:
-        params["version"] = version
-    req = _retry_on_http_errors(url=url, verify=True, params=params, errors=[500])
-    return req.json()
-
-
-def get_l10n(product, branch, revision):
-    # TODO: look if there is something like this function already
-    # TODO: Add support for other products
-    app = "browser"
-    if product == "fennec":
-        app = "mobile"
-
-    try:
-        url = "https://hg.mozilla.org/{branch}/raw-file/{rev}/{app}/locales/l10n-changesets.json"
-        url = url.format(branch=branch, rev=revision, app=app)
-        req = _retry_on_http_errors(url=url, verify=True, params=None, errors=[500])
-        return req.json().keys()
-    except requests.exceptions.HTTPError:
-        url = "https://hg.mozilla.org/{branch}/raw-file/{rev}/{app}/locales/shipped-locales"
-        url = url.format(branch=branch, rev=revision, app=app)
-        req = _retry_on_http_errors(url=url, verify=True, params=None, errors=[500])
-        # some lines contain platforms, ignore them
-        return [line.split()[0] for line in req.content.splitlines()]
-
-
-def get_partial_updates(product, project, version):
-    # TODO: move to config
-    config = {
-        "mozilla-release": {
-            "watershed": "57.0",
-            "include_watershed": True,
-            "branches": [
-                {"branch": "releases/mozilla-release", "partial_number": 5},
-                {"branch": "releases/mozilla-beta", "partial_number": 2,
-                 "only-version": r"^\d+\.0$"},
-            ]
-        },
-        "mozilla-beta": {
-            "watershed": "58.0b8",
-            "include_watershed": False,
-            "branches": [
-                {"branch": "releases/mozilla-beta", "partial_number": 2}
-            ]
-        },
-        "mozilla-esr60": {
-            "watershed": "52.1.0",
-            "include_watershed": True,
-            "branches": [
-                {"branch": "releases/mozilla-esr52", "partial_number": 2},
-                {"branch": "releases/mozilla-esr60", "partial_number": 3},
-            ]
-        },
-        "maple": {
-            "watershed": "58.0b8",
-            "include_watershed": False,
-            "branches": [
-                {"branch": "projects/maple", "partial_number": 2}
-            ]
-        },
-    }
-
-    partials = []
-    for cfg in config[project]["branches"]:
-        if "only-version" in cfg and not re.match(cfg["only-version"], version):
-            continue
-        releases = get_releases(product, cfg["branch"])
-        releases = sorted(releases,
-                          key=lambda r: r["version"],  # TODO: use proper sorting fuction
-                          reverse=True)
-        if "watershed" in config[project]:
-            releases = list(
-                itertools.takewhile(
-                    lambda r: r["version"] >= config[project]["watershed"],  #TODO: use comparator
-                    releases)
-            )
-        # releases = sorted(releases, key=ADI)
-        if releases:
-            releases = releases[:cfg["partial_number"]]
-            partials.extend(releases)
-        if config[project].get("include_watershed") and "watershed" in config[project]:
-            releases = get_releases(product, cfg["branch"], config[project]["watershed"])
-            if releases:
-                partials.append(releases[0])
-
-    ret = {}
-    for release in partials:
-        l10n = get_l10n(release["product"], release["branch"], release["revision"])
-        ret[release["version"]] = {
-            "buildNumber": str(release["build_number"]),
-            "locales": l10n,
-        }
-    return ret
-
-if __name__ == "__main__":
-    p = get_partial_updates("firefox", "projects/maple", "61.0b9")
-    import pprint
-    pprint.pprint(p)
