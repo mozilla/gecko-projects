@@ -212,6 +212,9 @@ RecordReplayInterface_InternalInvalidateRecording(const char* aWhy)
 
 } // extern "C"
 
+// How many recording endpoints have been flushed to the recording.
+static size_t gNumEndpoints;
+
 void
 FlushRecording()
 {
@@ -219,13 +222,10 @@ FlushRecording()
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
   // Save the endpoint of the recording.
-  JS::replay::ExecutionPoint<JS::replay::Hooks::TrackedAllocPolicy> endpoint;
-  JS::replay::hooks.getRecordingEndpoint(&endpoint);
+  JS::replay::ExecutionPoint endpoint = JS::replay::hooks.getRecordingEndpoint();
   Stream* endpointStream = gRecordingFile->OpenStream(StreamName::Main, 0);
-  endpointStream->WriteScalar(endpoint.checkpoint.mNormal);
-  endpointStream->WriteScalar(endpoint.positions.length());
-  endpointStream->WriteBytes(endpoint.positions.begin(),
-                             endpoint.positions.length() * sizeof(JS::replay::ExecutionPosition));
+  endpointStream->WriteScalar(++gNumEndpoints);
+  endpointStream->WriteBytes(&endpoint, sizeof(endpoint));
 
   gRecordingFile->PreventStreamWrites();
 
@@ -275,17 +275,10 @@ HitRecordingEndpoint()
   // Check if there is a new endpoint in the endpoint data stream.
   Stream* endpointStream = gRecordingFile->OpenStream(StreamName::Main, 0);
   if (!endpointStream->AtEnd()) {
-    JS::replay::ExecutionPoint<JS::replay::Hooks::TrackedAllocPolicy> endpoint;
-    endpoint.checkpoint = CheckpointId(endpointStream->ReadScalar());
-    size_t numPositions = endpointStream->ReadScalar();
-    for (size_t i = 0; i < numPositions; i++) {
-      JS::replay::ExecutionPosition pos;
-      endpointStream->ReadBytes(&pos, sizeof(pos));
-      if (!endpoint.positions.append(pos)) {
-        MOZ_CRASH("OOM");
-      }
-    }
-    JS::replay::hooks.setRecordingEndpoint(endpoint);
+    JS::replay::ExecutionPoint endpoint;
+    size_t index = endpointStream->ReadScalar();
+    endpointStream->ReadBytes(&endpoint, sizeof(endpoint));
+    JS::replay::hooks.setRecordingEndpoint(index, endpoint);
     return true;
   }
 

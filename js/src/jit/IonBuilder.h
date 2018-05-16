@@ -125,7 +125,7 @@ class IonBuilder
     // Restarts processing of a loop if the type information at its header was
     // incomplete.
     AbortReasonOr<Ok> restartLoop(const CFGBlock* header);
-    bool initLoopEntry();
+    bool initLoopEntry(jsbytecode* loopEntryPc);
 
     // Please see the Big Honkin' Comment about how resume points work in
     // IonBuilder.cpp, near the definition for this function.

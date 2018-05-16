@@ -2159,6 +2159,11 @@ ReplayDebugger::onNewScript(JSContext* cx, HandleScript script, bool toplevel)
     if (cx->runtime() != gMainRuntime || !ConsiderScript(script))
         return;
 
+    // Each onNewScript call advances the progress counter, to preserve the
+    // ProgressCounter invariant when onNewScript is called multiple times
+    // without executing any scripts.
+    gProgressCounter++;
+
     AutoEnterOOMUnsafeRegion oomUnsafe;
 
     if (script->hasObjects()) {

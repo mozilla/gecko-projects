@@ -156,7 +156,7 @@ static PRThread* gChannelThread = nullptr;
 // Initialize hooks used by the replay debugger.
 static void InitDebuggerHooks();
 
-static void HitCheckpoint(size_t aId);
+static void HitCheckpoint(size_t aId, bool aRecordingEndpoint);
 
 // Main routine for a thread whose sole purpose is to listen to requests from
 // the middleman process to create a new checkpoint. This is separate from the
@@ -211,8 +211,8 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
   InitDebuggerHooks();
 
   // We are ready to receive initialization messages from the middleman, pause
-  // to indicate this.
-  HitCheckpoint(InvalidCheckpointId);
+  // so they can be sent.
+  HitCheckpoint(InvalidCheckpointId, /* aRecordingEndpoint = */ false);
 
   // Process the introduction message to fill in arguments.
   MOZ_RELEASE_ASSERT(!gShmemPrefs);
@@ -268,8 +268,6 @@ ParentProcessId()
   return gParentPid;
 }
 
-static Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> gSentFatalErrorMessage;
-
 void
 ReportFatalError(const char* aFormat, ...)
 {
@@ -279,26 +277,23 @@ ReportFatalError(const char* aFormat, ...)
   VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
 
-  // Only send one fatal error message per child process.
-  if (!gSentFatalErrorMessage.exchange(true)) {
-    // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
-    char msgBuf[4096];
-    size_t header = sizeof(FatalErrorMessage);
-    size_t len = std::min(strlen(buf) + 1, sizeof(msgBuf) - header);
-    FatalErrorMessage* msg = new(msgBuf) FatalErrorMessage(header + len);
-    memcpy(&msgBuf[header], buf, len);
-    msgBuf[sizeof(msgBuf) - 1] = 0;
+  // Construct a FatalErrorMessage on the stack, to avoid touching the heap.
+  char msgBuf[4096];
+  size_t header = sizeof(FatalErrorMessage);
+  size_t len = std::min(strlen(buf) + 1, sizeof(msgBuf) - header);
+  FatalErrorMessage* msg = new(msgBuf) FatalErrorMessage(header + len);
+  memcpy(&msgBuf[header], buf, len);
+  msgBuf[sizeof(msgBuf) - 1] = 0;
 
-    // Don't take the message lock when sending this, to avoid touching the heap.
-    gChannel->SendMessage(*msg);
+  // Don't take the message lock when sending this, to avoid touching the heap.
+  gChannel->SendMessage(*msg);
 
-    DirectPrint("***** Fatal Record/Replay Error *****\n");
-    DirectPrint(buf);
-    DirectPrint("\n");
+  DirectPrint("***** Fatal Record/Replay Error *****\n");
+  DirectPrint(buf);
+  DirectPrint("\n");
 
-    DeleteSnapshotFiles();
-    UnrecoverableSnapshotFailure();
-  }
+  DeleteSnapshotFiles();
+  UnrecoverableSnapshotFailure();
 
   // Block until we get a terminate message and die.
   Thread::WaitForeverNoIdle();
@@ -316,16 +311,6 @@ NotifyAlwaysMarkMajorCheckpoints()
   if (IsActiveChild()) {
     gChannel->SendMessage(AlwaysMarkMajorCheckpointsMessage());
   }
-}
-
-void
-NotifyHitRecordingEndpoint()
-{
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  MOZ_RELEASE_ASSERT(IsReplaying());
-  PauseMainThreadAndInvokeCallback([=]() {
-      gChannel->SendMessage(HitRecordingEndpointMessage());
-    });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -458,7 +443,7 @@ EndIdleTime()
 }
 
 static void
-HitCheckpoint(size_t aId)
+HitCheckpoint(size_t aId, bool aRecordingEndpoint)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   PauseMainThreadAndInvokeCallback([=]() {
@@ -469,7 +454,7 @@ HitCheckpoint(size_t aId)
         MOZ_RELEASE_ASSERT(duration > 0);
       }
       gLastCheckpointTime = time;
-      gChannel->SendMessage(HitCheckpointMessage(aId, duration));
+      gChannel->SendMessage(HitCheckpointMessage(aId, aRecordingEndpoint, duration));
     });
 }
 
@@ -487,10 +472,11 @@ DebuggerResponseHook(const JS::replay::CharBuffer& aBuffer)
 }
 
 static void
-HitBreakpoint(const uint32_t* aBreakpoints, size_t aNumBreakpoints)
+HitBreakpoint(bool aRecordingEndpoint, const uint32_t* aBreakpoints, size_t aNumBreakpoints)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  HitBreakpointMessage* msg = HitBreakpointMessage::New(aBreakpoints, aNumBreakpoints);
+  HitBreakpointMessage* msg =
+    HitBreakpointMessage::New(aRecordingEndpoint, aBreakpoints, aNumBreakpoints);
   PauseMainThreadAndInvokeCallback([=]() {
       gChannel->SendMessage(*msg);
       free(msg);
@@ -514,7 +500,6 @@ InitDebuggerHooks()
   JS::replay::hooks.debugResponseReplay = DebuggerResponseHook;
   JS::replay::hooks.pauseAndRespondAfterRecoveringFromDivergence = PauseAfterRecoveringFromDivergence;
   JS::replay::hooks.hitCurrentRecordingEndpointReplay = HitRecordingEndpoint;
-  JS::replay::hooks.hitLastRecordingEndpointReplay = NotifyHitRecordingEndpoint;
   JS::replay::hooks.canRewindReplay = HasSavedCheckpoint;
 }
 

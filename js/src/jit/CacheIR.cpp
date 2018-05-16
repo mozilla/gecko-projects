@@ -12,6 +12,7 @@
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/BaselineIC.h"
 #include "jit/CacheIRSpewer.h"
+#include "vm/ReplayDebugger.h"
 #include "vm/SelfHosting.h"
 
 #include "jit/MacroAssembler-inl.h"

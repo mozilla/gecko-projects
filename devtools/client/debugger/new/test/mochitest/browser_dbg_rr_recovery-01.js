@@ -24,5 +24,5 @@ function test() {
   addMessageListener("RecordingFinished", () => runTest(tab));
 
   gBrowser.selectedTab = tab;
-  openUILinkIn(EXAMPLE_URL + "doc_rr_recovery.html", "current");
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_recovery.html", "current");
 }

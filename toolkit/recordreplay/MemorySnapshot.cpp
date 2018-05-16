@@ -490,6 +490,7 @@ RecordReplayInterface_InternalRecordReplayDirective(long aDirective)
     break;
   case Directive::MaybeCrash:
     if (gMemoryInfo->mIntentionalCrashesAllowed && gMemoryInfo->mCrashSoon) {
+      PrintSpew("Intentionally Crashing!\n");
       MOZ_CRASH("RecordReplayDirective intentional crash");
     }
     gMemoryInfo->mCrashSoon = false;

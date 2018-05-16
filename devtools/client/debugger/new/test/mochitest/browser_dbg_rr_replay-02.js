@@ -12,6 +12,7 @@ async function runRecordingTest(tab) {
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_continuous.html", 14);
   await resumeToLine(client, 14);
+  await resumeToLine(client, 14);
   await reverseStepOverToLine(client, 13);
   lastNumberValue = await evaluateInTopFrame(client, "number");
   let tabParent = tab.linkedBrowser.frameLoader.tabParent;
@@ -44,7 +45,7 @@ function test() {
 
   let recordingTab = gBrowser.addTab(null, { recordExecution: "*" });
   gBrowser.selectedTab = recordingTab;
-  openUILinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
 
   runRecordingTest(recordingTab);
 }

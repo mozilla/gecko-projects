@@ -25,7 +25,7 @@ function test() {
   var tab = gBrowser.addTab(null, { recordExecution: "*" });
 
   gBrowser.selectedTab = tab;
-  openUILinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
 
   runTest(tab);
 }

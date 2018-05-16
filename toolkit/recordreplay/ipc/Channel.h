@@ -102,11 +102,10 @@ namespace recordreplay {
   /* The child's graphics were repainted. */                   \
   Macro(Paint)                                                 \
                                                                \
-  /* Notify the middleman that a checkpoint, breakpoint, or recording endpoint */ \
-  /* was hit. The child will pause after sending these messages. */ \
+  /* Notify the middleman that a checkpoint or breakpoint was hit. */ \
+  /* The child will pause after sending these messages. */     \
   Macro(HitCheckpoint)                                         \
   Macro(HitBreakpoint)                                         \
-  Macro(HitRecordingEndpoint)                                  \
                                                                \
   /* Send a response to a DebuggerRequest message. */          \
   Macro(DebuggerResponse)                                      \
@@ -354,36 +353,42 @@ struct PaintMessage : public Message
 struct HitCheckpointMessage : public Message
 {
   uint32_t mCheckpointId;
+  bool mRecordingEndpoint;
 
   // When recording, the amount of non-idle time taken to get to this
   // checkpoint from the previous one.
   double mDurationMicroseconds;
 
-  HitCheckpointMessage(uint32_t aCheckpointId, double aDurationMicroseconds)
+  HitCheckpointMessage(uint32_t aCheckpointId, bool aRecordingEndpoint, double aDurationMicroseconds)
     : Message(MessageType::HitCheckpoint, sizeof(*this))
     , mCheckpointId(aCheckpointId)
+    , mRecordingEndpoint(aRecordingEndpoint)
     , mDurationMicroseconds(aDurationMicroseconds)
   {}
 };
 
 struct HitBreakpointMessage : public Message
 {
-  explicit HitBreakpointMessage(uint32_t aSize)
+  bool mRecordingEndpoint;
+
+  HitBreakpointMessage(uint32_t aSize, bool aRecordingEndpoint)
     : Message(MessageType::HitBreakpoint, aSize)
+    , mRecordingEndpoint(aRecordingEndpoint)
   {}
 
   const uint32_t* Breakpoints() const { return Data<HitBreakpointMessage, uint32_t>(); }
   uint32_t NumBreakpoints() const { return DataSize<HitBreakpointMessage, uint32_t>(); }
 
-  static HitBreakpointMessage* New(const uint32_t* aBreakpoints, size_t aNumBreakpoints) {
-    HitBreakpointMessage* res = NewWithData<HitBreakpointMessage, uint32_t>(aNumBreakpoints);
+  static HitBreakpointMessage* New(bool aRecordingEndpoint,
+                                   const uint32_t* aBreakpoints, size_t aNumBreakpoints) {
+    HitBreakpointMessage* res =
+      NewWithData<HitBreakpointMessage, uint32_t>(aNumBreakpoints, aRecordingEndpoint);
     MOZ_RELEASE_ASSERT(res->NumBreakpoints() == aNumBreakpoints);
     PodCopy(res->Data<HitBreakpointMessage, uint32_t>(), aBreakpoints, aNumBreakpoints);
     return res;
   }
 };
 
-typedef EmptyMessage<MessageType::HitRecordingEndpoint> HitRecordingEndpointMessage;
 typedef EmptyMessage<MessageType::AlwaysMarkMajorCheckpoints> AlwaysMarkMajorCheckpointsMessage;
 
 class Channel

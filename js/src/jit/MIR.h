@@ -8374,8 +8374,13 @@ class MCheckOverRecursed
 // Check whether we need to fire the interrupt handler.
 class MInterruptCheck : public MNullaryInstruction
 {
-    MInterruptCheck()
-      : MNullaryInstruction(classOpcode)
+    CompilerScript script_;
+    jsbytecode* pc_;
+
+    MInterruptCheck(JSScript* script, jsbytecode* pc)
+      : MNullaryInstruction(classOpcode),
+        script_(script),
+        pc_(pc)
     {
         setGuard();
     }
@@ -8386,6 +8391,13 @@ class MInterruptCheck : public MNullaryInstruction
 
     AliasSet getAliasSet() const override {
         return AliasSet::None();
+    }
+
+    JSScript* script() const {
+        return script_;
+    }
+    jsbytecode* pc() const {
+        return pc_;
     }
 };
 

@@ -935,7 +935,7 @@ ControlFlowGenerator::processWhileOrForInLoop(jssrcnote* sn)
 
     CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
 
-    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, stackPhiCount);
+    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, stackPhiCount, loopEntry);
     if (LoopEntryCanIonOsr(loopEntry))
         ins->setCanOsr();
 
@@ -967,8 +967,12 @@ ControlFlowGenerator::processBrokenLoop(CFGState& state)
     MOZ_ASSERT(!current);
 
     {
+        MOZ_RELEASE_ASSERT(state.loop.entry->stopIns()->isLoopEntry());
+        jsbytecode* loopEntryPc = state.loop.entry->stopIns()->toLoopEntry()->loopEntryPc();
+
         state.loop.entry->setStopIns(
-            CFGGoto::New(alloc(), state.loop.entry->stopIns()->toLoopEntry()->successor()));
+            CFGGoto::New(alloc(), state.loop.entry->stopIns()->toLoopEntry()->successor(),
+                         /* popAmount = */ 0, /* brokenLoopEntry = */ loopEntryPc));
     }
 
     // If the loop started with a condition (while/for) then even if the
@@ -1483,7 +1487,7 @@ ControlFlowGenerator::processForLoop(JSOp op, jssrcnote* sn)
 
     CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
 
-    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0);
+    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0, loopEntry);
     if (LoopEntryCanIonOsr(loopEntry))
         ins->setCanOsr();
 
@@ -1551,7 +1555,7 @@ ControlFlowGenerator::processDoWhileLoop(jssrcnote* sn)
 
     CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
 
-    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0);
+    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0, loopEntry);
     if (LoopEntryCanIonOsr(loopEntry))
         ins->setCanOsr();
 

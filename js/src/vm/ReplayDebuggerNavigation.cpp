@@ -32,6 +32,7 @@ static JSContext* gHookContext;
 static PersistentRootedObject* gHookDebugger;
 
 JSRuntime* ReplayDebugger::gMainRuntime;
+JS::replay::ProgressCounter ReplayDebugger::gProgressCounter;
 PersistentRootedObject* ReplayDebugger::gHookGlobal;
 
 // These are set whenever we stop on exit from a frame, and indicate the
@@ -66,13 +67,38 @@ ReplayDebugger::NoteNewGlobalObject(JSContext* cx, GlobalObject* global)
     }
 }
 
+/* static */ bool
+ReplayDebugger::trackProgressSlow(JSScript* script)
+{
+    // Only code that executes in the main runtime may be debugged, so only its
+    // progress is tracked.
+    if (script->runtimeFromAnyThread() != gMainRuntime)
+        return false;
+    // Whether self hosted scripts execute may depend on compilation mode and
+    // performed optimizations.
+    if (script->selfHosted())
+        return false;
+    return true;
+}
+
+/* static */ const char*
+ReplayDebugger::progressString(const char* why, JSScript* script, jsbytecode* pc)
+{
+#if 0
+    Sprinter sp(nullptr);
+    TRY(sp.init());
+    sp.printf("Progress: %s:%d:%d %s\n", script->filename(), (int) script->lineno(),
+              (int) (pc ? pc - script->code() : 0), why);
+    return strdup(sp.string());
+#endif
+    return nullptr;
+}
+
 typedef AllocPolicy<TrackedMemoryKind> TrackedAllocPolicy;
 typedef AllocPolicy<DebuggerAllocatedMemoryKind> UntrackedAllocPolicy;
 
 typedef JS::replay::ExecutionPosition ExecutionPosition;
-typedef JS::replay::ExecutionPoint<TrackedAllocPolicy> ExecutionPoint;
-typedef JS::replay::ExecutionPoint<UntrackedAllocPolicy> UntrackedExecutionPoint;
-typedef Vector<ExecutionPosition, 4, UntrackedAllocPolicy> UntrackedExecutionPositionVector;
+typedef JS::replay::ExecutionPoint ExecutionPoint;
 
 template <typename T>
 static inline void
@@ -83,35 +109,21 @@ CopyVector(T& dst, const T& src)
 }
 
 static void
-CheckpointToString(const CheckpointId& checkpoint, Sprinter& sp)
-{
-    sp.printf("%d:%d", (int) checkpoint.mNormal, (int) checkpoint.mTemporary);
-}
-
-static void
 ExecutionPositionToString(const ExecutionPosition& pos, Sprinter& sp)
 {
     sp.printf("{ Kind: %s, Script: %d, Offset: %d, Frame: %d }",
               pos.kindString(), (int) pos.script, (int) pos.offset, (int) pos.frameIndex);
 }
 
-template <typename ExecutionPoint>
 static void
 ExecutionPointToString(const ExecutionPoint& point, Sprinter& sp)
 {
-    sp.printf("Checkpoint ");
-    CheckpointToString(point.checkpoint, sp);
-    sp.printf(" Positions %d:", (int) point.positions.length());
-    for (const ExecutionPosition& pos : point.positions) {
-        sp.printf(" ");
-        ExecutionPositionToString(pos, sp);
+    sp.printf("{ Checkpoint %d", (int) point.checkpoint);
+    if (point.hasPosition()) {
+        sp.printf(" Progress %llu Position ", point.progress);
+        ExecutionPositionToString(point.position, sp);
     }
-}
-
-static bool
-CheckpointPrecedes(const CheckpointId& first, const CheckpointId& second)
-{
-    return first.mNormal < second.mNormal || first.mTemporary < second.mTemporary;
+    sp.printf(" }");
 }
 
 static CheckpointId
@@ -152,7 +164,7 @@ class NavigationPhase
     }
 
     // Called when some position with an installed handler has been reached.
-    virtual void positionHit(const std::function<bool(const ExecutionPosition&)>& match) {
+    virtual void positionHit(const ExecutionPoint& point) {
         unsupported("positionHit");
     }
 
@@ -182,13 +194,13 @@ class NavigationPhase
         unsupported("maybeDivergeFromRecording");
     }
 
-    // Save the current execution point when recording.
-    virtual void getRecordingEndpoint(ExecutionPoint* endpoint) {
+    // Get the current execution point when recording.
+    virtual ExecutionPoint getRecordingEndpoint() {
         unsupported("getRecordingEndpoint");
     }
 
     // Called when execution reaches the endpoint of the recording.
-    virtual void hitRecordingEndpoint() {
+    virtual void hitRecordingEndpoint(const ExecutionPoint& point) {
         unsupported("hitRecordingEndpoint");
     }
 };
@@ -219,7 +231,7 @@ typedef Vector<uint32_t, 0, SystemAllocPolicy> BreakpointVector;
 class BreakpointPausedPhase : public NavigationPhase
 {
     // Where the pause is at.
-    UntrackedExecutionPoint mPoint;
+    ExecutionPoint mPoint;
 
     // All debugger requests we have seen while paused here.
     UntrackedRequestVector mRequests;
@@ -237,22 +249,20 @@ class BreakpointPausedPhase : public NavigationPhase
     bool mResumeForward;
 
   public:
-    void enter(const ExecutionPoint& point, const BreakpointVector& breakpoints,
-               const std::function<bool(const ExecutionPosition&)>& match);
-    void enterAtEndpoint(const ExecutionPoint& point);
+    void enter(const ExecutionPoint& point, const BreakpointVector& breakpoints);
 
     void toString(Sprinter& sp) override {
         sp.printf("BreakpointPaused RecoveringFromDivergence %d", mRecoveringFromDivergence);
     }
 
     void afterCheckpoint(const CheckpointId& checkpoint) override;
-    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
+    void positionHit(const ExecutionPoint& point) override;
     void resume(bool forward) override;
     void restoreCheckpoint(size_t checkpoint) override;
     void getPoppedFrameResult(bool* throwing, MutableHandleValue result) override;
     void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) override;
     bool maybeDivergeFromRecording() override;
-    void getRecordingEndpoint(ExecutionPoint* endpoint) override;
+    ExecutionPoint getRecordingEndpoint() override;
 
     void respondAfterRecoveringFromDivergence();
 };
@@ -260,21 +270,22 @@ class BreakpointPausedPhase : public NavigationPhase
 // Phase when the replaying process is paused at a normal checkpoint.
 class CheckpointPausedPhase : public NavigationPhase
 {
-    CheckpointId mCheckpoint;
+    size_t mCheckpoint;
+    bool mAtRecordingEndpoint;
 
   public:
-    void enter(size_t checkpoint, bool rewind);
+    void enter(size_t checkpoint, bool rewind, bool atRecordingEndpoint);
 
     void toString(Sprinter& sp) override {
         sp.printf("CheckpointPaused");
     }
 
     void afterCheckpoint(const CheckpointId& checkpoint) override;
-    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
+    void positionHit(const ExecutionPoint& point) override;
     void resume(bool forward) override;
     void restoreCheckpoint(size_t checkpoint) override;
     void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) override;
-    void getRecordingEndpoint(ExecutionPoint* endpoint) override;
+    ExecutionPoint getRecordingEndpoint() override;
 };
 
 // Phase when execution is proceeding forwards in search of breakpoint hits.
@@ -282,7 +293,7 @@ class ForwardPhase : public NavigationPhase
 {
     // Some execution point in the recent past. There are no checkpoints or
     // breakpoint hits between this point and the current point of execution.
-    UntrackedExecutionPoint mPoint;
+    ExecutionPoint mPoint;
 
   public:
     void enter(const ExecutionPoint& point);
@@ -292,8 +303,8 @@ class ForwardPhase : public NavigationPhase
     }
 
     void afterCheckpoint(const CheckpointId& checkpoint) override;
-    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
-    void hitRecordingEndpoint() override;
+    void positionHit(const ExecutionPoint& point) override;
+    void hitRecordingEndpoint(const ExecutionPoint& point) override;
 };
 
 // Phase when the replaying process is running forward from a checkpoint to a
@@ -301,16 +312,16 @@ class ForwardPhase : public NavigationPhase
 class ReachBreakpointPhase : public NavigationPhase
 {
   private:
+    // Where to start running from.
+    CheckpointId mStart;
+
     // The point we are running to.
-    UntrackedExecutionPoint mPoint;
+    ExecutionPoint mPoint;
 
-    // How much of the point we have reached so far.
-    ExecutionPoint::Prefix mReached;
+    // Point at which to decide whether to save a temporary checkpoint.
+    Maybe<ExecutionPoint> mTemporaryCheckpoint;
 
-    // Prefix after which to decide whether to save a temporary checkpoint.
-    Maybe<ExecutionPoint::Prefix> mTemporaryCheckpointPrefix;
-
-    // Whether we have saved a temporary checkpoint at the specified prefix.
+    // Whether we have saved a temporary checkpoint at the specified point.
     bool mSavedTemporaryCheckpoint;
 
     // The time at which we started running forward from the initial
@@ -319,56 +330,67 @@ class ReachBreakpointPhase : public NavigationPhase
 
   public:
     // Note: this always rewinds.
-    void enter(const ExecutionPoint& point,
-               const Maybe<ExecutionPoint::Prefix>& temporaryCheckpointPrefix);
+    void enter(const CheckpointId& start,
+               const ExecutionPoint& point,
+               const Maybe<ExecutionPoint>& temporaryCheckpoint);
 
     void toString(Sprinter& sp) override {
         sp.printf("ReachBreakpoint: ");
         ExecutionPointToString(mPoint, sp);
-        if (mTemporaryCheckpointPrefix.isSome())
-            sp.printf(" TemporaryCheckpointPrefix %d", (int) mTemporaryCheckpointPrefix.ref());
+        if (mTemporaryCheckpoint.isSome()) {
+            sp.printf(" TemporaryCheckpoint: ");
+            ExecutionPointToString(mTemporaryCheckpoint.ref(), sp);
+        }
     }
 
     void afterCheckpoint(const CheckpointId& checkpoint) override;
-    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
+    void positionHit(const ExecutionPoint& point) override;
 };
 
 // Phase when the replaying process is searching forward from a checkpoint to
 // find the last point a breakpoint is hit before reaching an execution point.
 class FindLastHitPhase : public NavigationPhase
 {
-    // Endpoint of the search. The positions in this may be empty, in which
-    // case the endpoint is the following checkpoint.
-    UntrackedExecutionPoint mPoint;
+    // Where we started searching from.
+    CheckpointId mStart;
 
-    // How much of the endpoint we have reached so far.
-    ExecutionPoint::Prefix mReached;
+    // Endpoint of the search, nothing if the endpoint is the next checkpoint.
+    Maybe<ExecutionPoint> mEnd;
+
+    // Counter that increases as we run forward, for ordering hits.
+    size_t mCounter;
 
     // All positions we are interested in hits for, including all breakpoint
     // positions (and possibly other positions).
-    UntrackedExecutionPositionVector mTrackedPositions;
+    struct TrackedPosition {
+        ExecutionPosition position;
 
-    // Tracked positions that have been reached since the checkpoint, in the
-    // order they were reached.
-    UntrackedExecutionPositionVector mTrackedHits;
+        // The last time this was hit so far, or invalid.
+        ExecutionPoint lastHit;
 
-    void addTrackedPosition(const ExecutionPosition& position, bool allowSubsumeExisting);
-    size_t countTrackedHitsInRange(const ExecutionPosition& pos, size_t start, size_t end);
-    Maybe<size_t> lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)>& match,
-                                         size_t start, size_t end);
+        // The value of the counter when the last hit occurred.
+        size_t lastHitCount;
+
+        explicit TrackedPosition(const ExecutionPosition& position)
+          : position(position), lastHitCount(0)
+        {}
+    };
+    Vector<TrackedPosition, 4, UntrackedAllocPolicy> mTrackedPositions;
+
+    TrackedPosition findTrackedPosition(const ExecutionPosition& pos);
     void onRegionEnd();
 
   public:
     // Note: this always rewinds.
-    void enter(const ExecutionPoint& point);
+    void enter(const CheckpointId& start, const Maybe<ExecutionPoint>& end);
 
     void toString(Sprinter& sp) override {
         sp.printf("FindLastHit");
     }
 
     void afterCheckpoint(const CheckpointId& checkpoint) override;
-    void positionHit(const std::function<bool(const ExecutionPosition&)>& match) override;
-    void hitRecordingEndpoint() override;
+    void positionHit(const ExecutionPoint& point) override;
+    void hitRecordingEndpoint(const ExecutionPoint& point) override;
 };
 
 // Make sure the positionHit() method will be called whenever |position| is
@@ -381,38 +403,30 @@ static void EnsurePositionHandler(const ExecutionPosition& position);
 // checkpoint.
 class NavigationState
 {
-    // When replaying, any recording endpoint which we cannot run past.
-    UntrackedExecutionPoint mRecordingEndpoint;
+    // When replaying, the last known recording endpoint. There may be other,
+    // later endpoints we haven't been informed about.
+    ExecutionPoint mRecordingEndpoint;
+    size_t mRecordingEndpointIndex;
 
-    // How much of mRecordingEndpoint we have consumed, or nothing if we have
-    // not reached the last checkpoint in the recording.
-    Maybe<ExecutionPoint::Prefix> mRecordingEndpointConsumed;
+    // The last checkpoint we ran forward or rewound to.
+    CheckpointId mLastCheckpoint;
 
-    // All temporary checkpoints we have saved. All temporary checkpoints
-    // are between two adjacent normal checkpoints.
-    struct TemporaryCheckpoint {
-        // The location of the checkpoint, expressed in relation to the
-        // previous temporary or normal checkpoint.
-        UntrackedExecutionPoint mPoint;
-
-        // How much of mRecordingEndpoint was consumed when this checkpoint was
-        // taken.
-        Maybe<ExecutionPoint::Prefix> mRecordingEndpointConsumed;
-
-        CheckpointId GetCheckpointId() {
-            return NextTemporaryCheckpoint(mPoint.checkpoint);
-        }
-    };
-    Vector<TemporaryCheckpoint, 0, UntrackedAllocPolicy> mTemporaryCheckpoints;
+    // The locations of all temporary checkpoints we have saved. Temporary
+    // checkpoints are taken immediately prior to reaching these points.
+    Vector<ExecutionPoint, 0, UntrackedAllocPolicy> mTemporaryCheckpoints;
 
   public:
     // All the currently installed breakpoints, indexed by their ID.
-    UntrackedExecutionPositionVector mBreakpoints;
+    Vector<ExecutionPosition, 4, UntrackedAllocPolicy> mBreakpoints;
 
     ExecutionPosition& getBreakpoint(size_t id) {
         while (id >= mBreakpoints.length())
             TRY(mBreakpoints.emplaceBack());
         return mBreakpoints[id];
+    }
+
+    CheckpointId lastCheckpoint() {
+        return mLastCheckpoint;
     }
 
     // The current phase of the process.
@@ -448,58 +462,37 @@ class NavigationState
             // The recording must include everything up to the first
             // checkpoint. After that point we will ask the record/replay
             // system to notify us about any further endpoints.
-            mRecordingEndpoint.checkpoint = CheckpointId(FirstCheckpointId);
+            mRecordingEndpoint = ExecutionPoint(FirstCheckpointId);
         }
     }
 
     void afterCheckpoint(const CheckpointId& checkpoint) {
+        mLastCheckpoint = checkpoint;
+
         // Forget any temporary checkpoints we just rewound past, or made
         // obsolete by reaching the next normal checkpoint.
-        while (!mTemporaryCheckpoints.empty() &&
-               mTemporaryCheckpoints.back().GetCheckpointId() != checkpoint)
-        {
+        while (mTemporaryCheckpoints.length() > checkpoint.mTemporary)
             mTemporaryCheckpoints.popBack();
-        }
 
         mPhase->afterCheckpoint(checkpoint);
 
-        // We will be running forward from this checkpoint. Keep track of how
-        // much of the recording endpoint has been consumed as we run forward.
-        if (!mTemporaryCheckpoints.empty()) {
-            MOZ_RELEASE_ASSERT(checkpoint == mTemporaryCheckpoints.back().GetCheckpointId());
-            mRecordingEndpointConsumed = mTemporaryCheckpoints.back().mRecordingEndpointConsumed;
-        } else if (checkpoint == mRecordingEndpoint.checkpoint) {
-            mRecordingEndpointConsumed.emplace(0);
-            checkForRecordingEndpoint();
-        } else {
-            MOZ_RELEASE_ASSERT(IsRecording() ||
-                               CheckpointPrecedes(checkpoint, mRecordingEndpoint.checkpoint));
-            mRecordingEndpointConsumed.reset();
+        // Make sure we don't run past the end of the recording.
+        if (!checkpoint.mTemporary) {
+            ExecutionPoint point(checkpoint.mNormal);
+            checkForRecordingEndpoint(point);
         }
 
-        ensureRecordingEndpointHandlers();
-    }
-
-    void ensureRecordingEndpointHandlers() {
-        if (mRecordingEndpointConsumed.isSome()) {
-            for (const ExecutionPosition& pos : mRecordingEndpoint.positions)
-                EnsurePositionHandler(pos);
+        MOZ_RELEASE_ASSERT(IsRecording() ||
+                           checkpoint.mNormal <= mRecordingEndpoint.checkpoint);
+        if (checkpoint.mNormal == mRecordingEndpoint.checkpoint) {
+            MOZ_RELEASE_ASSERT(mRecordingEndpoint.hasPosition());
+            EnsurePositionHandler(mRecordingEndpoint.position);
         }
     }
 
-    void positionHit(const std::function<bool(const ExecutionPosition&)>& match,
-                     bool updateEndpointConsumed) {
-        mPhase->positionHit(match);
-
-        // The updateEndpointConsumed flag avoids double-counting when the
-        // above call reenters this method.
-        if (updateEndpointConsumed &&
-            mRecordingEndpointConsumed.isSome() &&
-            match(mRecordingEndpoint.positions[mRecordingEndpointConsumed.ref()]))
-        {
-            ++mRecordingEndpointConsumed.ref();
-            checkForRecordingEndpoint();
-        }
+    void positionHit(const ExecutionPoint& point) {
+        mPhase->positionHit(point);
+        checkForRecordingEndpoint(point);
     }
 
     void resume(bool forward) {
@@ -522,45 +515,29 @@ class NavigationState
         return mPhase->maybeDivergeFromRecording();
     }
 
-    void getRecordingEndpoint(ExecutionPoint* endpoint) {
-        mPhase->getRecordingEndpoint(endpoint);
+    ExecutionPoint getRecordingEndpoint() {
+        return mPhase->getRecordingEndpoint();
     }
 
-    void setRecordingEndpoint(const ExecutionPoint& endpoint) {
-        // Update the recording endpoint, ignoring endpoints that come prior to
-        // the latest endpoint we know about.
-        if (CheckpointPrecedes(mRecordingEndpoint.checkpoint, endpoint.checkpoint)) {
-            mRecordingEndpoint.copyFrom(endpoint);
-            mRecordingEndpointConsumed.reset();
-            for (TemporaryCheckpoint& temporaryCheckpoint : mTemporaryCheckpoints)
-                temporaryCheckpoint.mRecordingEndpointConsumed.reset();
-        } else if (endpoint.checkpoint == mRecordingEndpoint.checkpoint) {
-            // Make sure the two endpoints share a common prefix, which should
-            // be the case because the recording process only runs forward.
-            // This ensures any prefixes we compute for the old endpoint are
-            // still valid for the new endpoint.
-            size_t oldPositions = mRecordingEndpoint.positions.length();
-            size_t newPositions = endpoint.positions.length();
-            for (size_t i = 0; i < std::min(oldPositions, newPositions); i++)
-                MOZ_RELEASE_ASSERT(endpoint.positions[i] == mRecordingEndpoint.positions[i]);
-            if (newPositions > oldPositions) {
-                TRY(mRecordingEndpoint.positions.append(&endpoint.positions[oldPositions],
-                                                        newPositions - oldPositions));
-                ensureRecordingEndpointHandlers();
-            }
-        }
+    void setRecordingEndpoint(size_t index, const ExecutionPoint& endpoint) {
+        // Ignore endpoints older than the last one we know about.
+        if (index <= mRecordingEndpointIndex)
+            return;
+        MOZ_RELEASE_ASSERT(mRecordingEndpoint.checkpoint <= endpoint.checkpoint);
+        mRecordingEndpointIndex = index;
+        mRecordingEndpoint = endpoint;
+        if (endpoint.hasPosition())
+            EnsurePositionHandler(endpoint.position);
     }
 
-    void checkForRecordingEndpoint() {
-        while (mRecordingEndpointConsumed.isSome() &&
-               mRecordingEndpointConsumed.ref() == mRecordingEndpoint.positions.length())
-        {
+    void checkForRecordingEndpoint(const ExecutionPoint& point) {
+        while (point == mRecordingEndpoint) {
             // The recording ended after the checkpoint, but maybe there is
             // another, later endpoint now. This may call back into
             // setRecordingEndpoint and notify us there is more recording data
             // available.
             if (!JS::replay::hooks.hitCurrentRecordingEndpointReplay())
-                mPhase->hitRecordingEndpoint();
+                mPhase->hitRecordingEndpoint(mRecordingEndpoint);
         }
     }
 
@@ -569,27 +546,33 @@ class NavigationState
     }
 
     bool saveTemporaryCheckpoint(const ExecutionPoint& point) {
-        TRY(mTemporaryCheckpoints.emplaceBack());
-        TRY(mTemporaryCheckpoints.back().mPoint.copyFrom(point));
-        mTemporaryCheckpoints.back().mRecordingEndpointConsumed = mRecordingEndpointConsumed;
+        MOZ_RELEASE_ASSERT(point.checkpoint == mLastCheckpoint.mNormal);
+        TRY(mTemporaryCheckpoints.append(point));
         return NewCheckpoint(/* aTemporary = */ true);
     }
 
-    void lastTemporaryCheckpoint(ExecutionPoint* point) {
+    ExecutionPoint lastTemporaryCheckpointLocation() {
         MOZ_RELEASE_ASSERT(!mTemporaryCheckpoints.empty());
-        point->copyFrom(mTemporaryCheckpoints.back().mPoint);
+        return mTemporaryCheckpoints.back();
+    }
+
+    CheckpointId lastTemporaryCheckpointId() {
+        MOZ_RELEASE_ASSERT(!mTemporaryCheckpoints.empty());
+        size_t normal = mTemporaryCheckpoints.back().checkpoint;
+        size_t temporary = mTemporaryCheckpoints.length();
+        return CheckpointId(normal, temporary);
     }
 };
 
 static NavigationState* gNavigation;
 
 static void
-GetAllBreakpointHits(const std::function<bool(const ExecutionPosition&)>& match,
-                     BreakpointVector& hitBreakpoints)
+GetAllBreakpointHits(const ExecutionPoint& point, BreakpointVector& hitBreakpoints)
 {
+    MOZ_RELEASE_ASSERT(point.hasPosition());
     for (size_t id = 0; id < gNavigation->mBreakpoints.length(); id++) {
         const ExecutionPosition& breakpoint = gNavigation->mBreakpoints[id];
-        if (breakpoint.isValid() && match(breakpoint))
+        if (breakpoint.isValid() && breakpoint.subsumes(point.position))
             TRY(hitBreakpoints.append(id));
     }
 }
@@ -605,19 +588,11 @@ ThisProcessCanRewind()
 }
 
 void
-BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector& breakpoints,
-                             const std::function<bool(const ExecutionPosition&)>& match)
+BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector& breakpoints)
 {
-    ExecutionPosition breakpointPosition;
-    if (!breakpoints.empty()) {
-        MOZ_RELEASE_ASSERT(!point.positions.empty());
-        breakpointPosition = point.positions.back();
-        MOZ_RELEASE_ASSERT(match(breakpointPosition));
-    } else {
-        // We are at the endpoint of the recording.
-    }
+    MOZ_RELEASE_ASSERT(point.hasPosition());
 
-    mPoint.clear();
+    mPoint = point;
     mRequests.clear();
     mRecoveringFromDivergence = false;
     mRequestIndex = 0;
@@ -629,22 +604,15 @@ BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector
         // Immediately save a temporary checkpoint and upate the point to be
         // in relation to this checkpoint. If we rewind due to a recording
         // divergence we will end up here.
-        mPoint.checkpoint = NextTemporaryCheckpoint(point.checkpoint);
         if (!gNavigation->saveTemporaryCheckpoint(point)) {
             // We just restored the checkpoint, and could be in any phase,
             // including this one.
             if (gNavigation->mPhase == this) {
                 MOZ_RELEASE_ASSERT(!mRecoveringFromDivergence);
                 // If we are transitioning to the forward phase, avoid hitting
-                // breakpoints at this point but update the new phase's point
-                // to reflect that.
+                // breakpoints at this point.
                 if (mResumeForward) {
-                    MOZ_RELEASE_ASSERT(mResumeForward);
-                    ExecutionPoint newPoint;
-                    newPoint.checkpoint = mPoint.checkpoint;
-                    if (!breakpoints.empty())
-                        TRY(newPoint.positions.append(breakpointPosition));
-                    gNavigation->mForwardPhase.enter(newPoint);
+                    gNavigation->mForwardPhase.enter(point);
                     return;
                 }
                 // Otherwise we restored after hitting an unhandled recording
@@ -653,27 +621,16 @@ BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector
                 JS::replay::hooks.pauseAndRespondAfterRecoveringFromDivergence();
                 MOZ_CRASH("Unreachable");
             }
-            gNavigation->positionHit(match, /* updateEndpointConsumed = */ false);
+            gNavigation->positionHit(point);
             return;
         }
-    } else {
-        TRY(mPoint.copyFrom(point));
     }
 
-    if (!breakpoints.empty())
-        JS::replay::hooks.hitBreakpointReplay(breakpoints.begin(), breakpoints.length());
-    else
-        JS::replay::hooks.hitLastRecordingEndpointReplay();
+    bool endpoint = breakpoints.empty();
+    JS::replay::hooks.hitBreakpointReplay(endpoint, breakpoints.begin(), breakpoints.length());
 
     // When rewinding is allowed we will rewind before resuming to erase side effects.
     MOZ_RELEASE_ASSERT(!ThisProcessCanRewind());
-}
-
-void
-BreakpointPausedPhase::enterAtEndpoint(const ExecutionPoint& point)
-{
-    BreakpointVector breakpoints;
-    enter(point, breakpoints, [=](const ExecutionPosition& position) { return false; });
 }
 
 void
@@ -681,12 +638,12 @@ BreakpointPausedPhase::afterCheckpoint(const CheckpointId& checkpoint)
 {
     // We just saved or restored the temporary checkpoint before reaching the
     // breakpoint.
-    MOZ_RELEASE_ASSERT(IsReplaying());
-    MOZ_RELEASE_ASSERT(checkpoint == mPoint.checkpoint);
+    MOZ_RELEASE_ASSERT(ThisProcessCanRewind());
+    MOZ_RELEASE_ASSERT(checkpoint == gNavigation->lastTemporaryCheckpointId());
 }
 
 void
-BreakpointPausedPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+BreakpointPausedPhase::positionHit(const ExecutionPoint& point)
 {
     // Ignore positions hit while paused (we're probably doing an eval).
 }
@@ -697,36 +654,35 @@ BreakpointPausedPhase::resume(bool forward)
     MOZ_RELEASE_ASSERT(!mRecoveringFromDivergence);
 
     if (forward) {
-        // If we are paused at a breakpoint and are replaying, we may have
+        // If we are paused at a breakpoint and can rewind, we may have
         // diverged from the recording. We have to clear any unwanted changes
         // induced by evals and so forth by restoring the temporary checkpoint
         // we saved before pausing here.
-        if (IsReplaying()) {
+        if (ThisProcessCanRewind()) {
             mResumeForward = true;
-            RestoreCheckpointAndResume(mPoint.checkpoint);
+            RestoreCheckpointAndResume(gNavigation->lastTemporaryCheckpointId());
             MOZ_CRASH("Unreachable");
         }
 
         ReplayDebugger::ClearDebuggerPausedObjects();
 
         // Run forward from the current execution point.
-        ExecutionPoint point;
-        TRY(point.copyFrom(mPoint));
-        gNavigation->mForwardPhase.enter(point);
+        gNavigation->mForwardPhase.enter(mPoint);
         return;
     }
 
     // Search backwards in the execution space.
-    ExecutionPoint newPoint;
-    gNavigation->lastTemporaryCheckpoint(&newPoint);
-    gNavigation->mFindLastHitPhase.enter(newPoint);
+    CheckpointId start = gNavigation->lastTemporaryCheckpointId();
+    start.mTemporary--;
+    gNavigation->mFindLastHitPhase.enter(start, Some(mPoint));
     MOZ_CRASH("Unreachable");
 }
 
 void
 BreakpointPausedPhase::restoreCheckpoint(size_t checkpoint)
 {
-    gNavigation->mCheckpointPausedPhase.enter(checkpoint, /* rewind = */ true);
+    gNavigation->mCheckpointPausedPhase.enter(checkpoint, /* rewind = */ true,
+                                              /* atRecordingEndpoint = */ false);
 }
 
 void
@@ -809,13 +765,11 @@ BreakpointPausedPhase::maybeDivergeFromRecording()
     return true;
 }
 
-void
-BreakpointPausedPhase::getRecordingEndpoint(ExecutionPoint* endpoint)
+ExecutionPoint
+BreakpointPausedPhase::getRecordingEndpoint()
 {
     MOZ_RELEASE_ASSERT(IsRecording());
-    MOZ_RELEASE_ASSERT(!gNavigation->numTemporaryCheckpoints());
-    endpoint->checkpoint = mPoint.checkpoint;
-    TRY(endpoint->positions.append(mPoint.positions.begin(), mPoint.positions.length()));
+    return mPoint;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -823,29 +777,30 @@ BreakpointPausedPhase::getRecordingEndpoint(ExecutionPoint* endpoint)
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-CheckpointPausedPhase::enter(size_t checkpoint, bool rewind)
+CheckpointPausedPhase::enter(size_t checkpoint, bool rewind, bool atRecordingEndpoint)
 {
-    mCheckpoint = CheckpointId(checkpoint);
+    mCheckpoint = checkpoint;
+    mAtRecordingEndpoint = atRecordingEndpoint;
 
     gNavigation->setPhase(this);
 
     if (rewind) {
-        RestoreCheckpointAndResume(mCheckpoint);
+        RestoreCheckpointAndResume(CheckpointId(mCheckpoint));
         MOZ_CRASH("Unreachable");
     }
 
-    afterCheckpoint(mCheckpoint);
+    afterCheckpoint(CheckpointId(mCheckpoint));
 }
 
 void
 CheckpointPausedPhase::afterCheckpoint(const CheckpointId& checkpoint)
 {
-    MOZ_RELEASE_ASSERT(checkpoint == mCheckpoint);
-    JS::replay::hooks.hitCheckpointReplay(mCheckpoint.mNormal);
+    MOZ_RELEASE_ASSERT(checkpoint == CheckpointId(mCheckpoint));
+    JS::replay::hooks.hitCheckpointReplay(mCheckpoint, mAtRecordingEndpoint);
 }
 
 void
-CheckpointPausedPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+CheckpointPausedPhase::positionHit(const ExecutionPoint& point)
 {
     // Ignore positions hit while paused (we're probably doing an eval).
 }
@@ -854,18 +809,16 @@ void
 CheckpointPausedPhase::resume(bool forward)
 {
     // We can't rewind past the beginning of the replay.
-    MOZ_RELEASE_ASSERT(forward || mCheckpoint.mNormal != FirstCheckpointId);
+    MOZ_RELEASE_ASSERT(forward || mCheckpoint != FirstCheckpointId);
 
     if (forward) {
         // Run forward from the current execution point.
         ReplayDebugger::ClearDebuggerPausedObjects();
-        ExecutionPoint search;
-        search.checkpoint = mCheckpoint;
+        ExecutionPoint search(mCheckpoint);
         gNavigation->mForwardPhase.enter(search);
     } else {
-        ExecutionPoint search;
-        search.checkpoint = CheckpointId(mCheckpoint.mNormal - 1);
-        gNavigation->mFindLastHitPhase.enter(search);
+        CheckpointId start(mCheckpoint - 1);
+        gNavigation->mFindLastHitPhase.enter(start, Nothing());
         MOZ_CRASH("Unreachable");
     }
 }
@@ -873,7 +826,7 @@ CheckpointPausedPhase::resume(bool forward)
 void
 CheckpointPausedPhase::restoreCheckpoint(size_t checkpoint)
 {
-    enter(checkpoint, /* rewind = */ true);
+    enter(checkpoint, /* rewind = */ true, /* atRecordingEndpoint = */ false);
 }
 
 void
@@ -887,10 +840,10 @@ CheckpointPausedPhase::handleDebuggerRequest(JS::replay::CharBuffer* requestBuff
     JS::replay::hooks.debugResponseReplay(responseBuffer);
 }
 
-void
-CheckpointPausedPhase::getRecordingEndpoint(ExecutionPoint* endpoint)
+ExecutionPoint
+CheckpointPausedPhase::getRecordingEndpoint()
 {
-    endpoint->checkpoint = mCheckpoint;
+    return ExecutionPoint(mCheckpoint);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -900,7 +853,7 @@ CheckpointPausedPhase::getRecordingEndpoint(ExecutionPoint* endpoint)
 void
 ForwardPhase::enter(const ExecutionPoint& point)
 {
-    TRY(mPoint.copyFrom(point));
+    mPoint = point;
 
     gNavigation->setPhase(this);
 
@@ -917,30 +870,31 @@ void
 ForwardPhase::afterCheckpoint(const CheckpointId& checkpoint)
 {
     MOZ_RELEASE_ASSERT(!checkpoint.mTemporary &&
-                       checkpoint.mNormal == mPoint.checkpoint.mNormal + 1);
-    gNavigation->mCheckpointPausedPhase.enter(checkpoint.mNormal, /* rewind = */ false);
+                       checkpoint.mNormal == mPoint.checkpoint + 1);
+    gNavigation->mCheckpointPausedPhase.enter(checkpoint.mNormal, /* rewind = */ false,
+                                              /* atRecordingEndpoint = */ false);
 }
 
 void
-ForwardPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+ForwardPhase::positionHit(const ExecutionPoint& point)
 {
     BreakpointVector hitBreakpoints;
-    GetAllBreakpointHits(match, hitBreakpoints);
+    GetAllBreakpointHits(point, hitBreakpoints);
 
-    if (!hitBreakpoints.empty()) {
-        ExecutionPoint point;
-        TRY(point.copyFrom(mPoint));
-        TRY(point.positions.append(gNavigation->getBreakpoint(hitBreakpoints[0])));
-        gNavigation->mBreakpointPausedPhase.enter(point, hitBreakpoints, match);
-    }
+    if (!hitBreakpoints.empty())
+        gNavigation->mBreakpointPausedPhase.enter(point, hitBreakpoints);
 }
 
 void
-ForwardPhase::hitRecordingEndpoint()
+ForwardPhase::hitRecordingEndpoint(const ExecutionPoint& point)
 {
-    ExecutionPoint point;
-    TRY(point.copyFrom(mPoint));
-    gNavigation->mBreakpointPausedPhase.enterAtEndpoint(point);
+    if (point.hasPosition()) {
+        BreakpointVector emptyBreakpoints;
+        gNavigation->mBreakpointPausedPhase.enter(point, emptyBreakpoints);
+    } else {
+        gNavigation->mCheckpointPausedPhase.enter(point.checkpoint, /* rewind = */ false,
+                                                  /* atRecordingEndpoint = */ true);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -948,34 +902,40 @@ ForwardPhase::hitRecordingEndpoint()
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-ReachBreakpointPhase::enter(const ExecutionPoint& point,
-                            const Maybe<ExecutionPoint::Prefix>& temporaryCheckpointPrefix)
+ReachBreakpointPhase::enter(const CheckpointId& start,
+                            const ExecutionPoint& point,
+                            const Maybe<ExecutionPoint>& temporaryCheckpoint)
 {
-    MOZ_RELEASE_ASSERT(!point.positions.empty());
-
-    TRY(mPoint.copyFrom(point));
-    mReached = 0;
-    mTemporaryCheckpointPrefix = temporaryCheckpointPrefix;
+    MOZ_RELEASE_ASSERT(point.hasPosition());
+    MOZ_RELEASE_ASSERT(temporaryCheckpoint.isNothing() ||
+                       (temporaryCheckpoint.ref().hasPosition() &&
+                        temporaryCheckpoint.ref() != point));
+    mStart = start;
+    mPoint = point;
+    mTemporaryCheckpoint = temporaryCheckpoint;
     mSavedTemporaryCheckpoint = false;
 
     gNavigation->setPhase(this);
 
-    RestoreCheckpointAndResume(mPoint.checkpoint);
+    RestoreCheckpointAndResume(start);
     MOZ_CRASH("Unreachable");
 }
 
 void
 ReachBreakpointPhase::afterCheckpoint(const CheckpointId& checkpoint)
 {
-    MOZ_RELEASE_ASSERT(checkpoint == mPoint.checkpoint);
+    if (checkpoint == mStart && mTemporaryCheckpoint.isSome()) {
+        EnsurePositionHandler(mTemporaryCheckpoint.ref().position);
 
-    for (const ExecutionPosition& pos : mPoint.positions)
-        EnsurePositionHandler(pos);
-
-    if (mTemporaryCheckpointPrefix.isSome()) {
         // Remember the time we started running forwards from the initial checkpoint.
         mStartTime = ReallyNow();
+    } else {
+        MOZ_RELEASE_ASSERT((checkpoint == mStart && mTemporaryCheckpoint.isNothing()) ||
+                           (checkpoint == NextTemporaryCheckpoint(mStart) &&
+                            mSavedTemporaryCheckpoint));
     }
+
+    EnsurePositionHandler(mPoint.position);
 }
 
 // The number of milliseconds to elapse during a ReachBreakpoint search before
@@ -989,14 +949,9 @@ AlwaysSaveTemporaryCheckpointsHook()
 }
 
 void
-ReachBreakpointPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+ReachBreakpointPhase::positionHit(const ExecutionPoint& point)
 {
-    if (!match(mPoint.positions[mReached]))
-        return;
-
-    ++mReached;
-
-    if (mTemporaryCheckpointPrefix.isSome() && mTemporaryCheckpointPrefix.ref() == mReached) {
+    if (mTemporaryCheckpoint.isSome() && mTemporaryCheckpoint.ref() == point) {
         // We've reached the point at which we have the option of saving a
         // temporary checkpoint.
         double elapsedMs = (ReallyNow() - mStartTime).ToMilliseconds();
@@ -1006,63 +961,26 @@ ReachBreakpointPhase::positionHit(const std::function<bool(const ExecutionPositi
             MOZ_RELEASE_ASSERT(!mSavedTemporaryCheckpoint);
             mSavedTemporaryCheckpoint = true;
 
-            ExecutionPoint temporaryCheckpoint;
-            temporaryCheckpoint.checkpoint = mPoint.checkpoint;
-            TRY(temporaryCheckpoint.positions.append(mPoint.positions.begin(), mReached));
-
-            // Update our state to be in relation to the temporary checkpoint.
-            ExecutionPoint newPoint;
-            newPoint.checkpoint = NextTemporaryCheckpoint(mPoint.checkpoint);
-            if (mReached < mPoint.positions.length()) {
-                TRY(newPoint.positions.append(&mPoint.positions[mReached],
-                                              mPoint.positions.length() - mReached));
-            }
-            TRY(mPoint.copyFrom(newPoint));
-            mReached = 0;
-            mTemporaryCheckpointPrefix = Nothing();
-
-            if (!gNavigation->saveTemporaryCheckpoint(temporaryCheckpoint)) {
+            if (!gNavigation->saveTemporaryCheckpoint(point)) {
                 // We just restored the checkpoint, and could be in any phase.
-                gNavigation->positionHit(match, /* updateEndpointConsumed = */ false);
+                gNavigation->positionHit(point);
                 return;
             }
         }
     }
 
-    if (mReached < mPoint.positions.length())
-        return;
+    if (mPoint == point) {
+        BreakpointVector hitBreakpoints;
+        GetAllBreakpointHits(point, hitBreakpoints);
+        MOZ_RELEASE_ASSERT(!hitBreakpoints.empty());
 
-    BreakpointVector hitBreakpoints;
-    GetAllBreakpointHits(match, hitBreakpoints);
-    MOZ_RELEASE_ASSERT(!hitBreakpoints.empty());
-
-    ExecutionPoint point;
-    TRY(point.copyFrom(mPoint));
-    gNavigation->mBreakpointPausedPhase.enter(point, hitBreakpoints, match);
+        gNavigation->mBreakpointPausedPhase.enter(point, hitBreakpoints);
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // FindLastHitPhase
 ///////////////////////////////////////////////////////////////////////////////
-
-void
-FindLastHitPhase::addTrackedPosition(const ExecutionPosition& position,
-                                     bool allowSubsumeExisting)
-{
-    // Maintain an invariant that no tracked positions subsume one other.
-    // Whenever we hit a position, there can be at most one tracked position
-    // which matches it.
-    for (ExecutionPosition& existing : mTrackedPositions) {
-        if (existing.subsumes(position))
-            return;
-        if (position.subsumes(existing)) {
-            if (allowSubsumeExisting)
-                existing = position;
-            return;
-        }
-    }
-    TRY(mTrackedPositions.append(position));
-}
 
 static Maybe<ExecutionPosition>
 GetEntryPosition(const ExecutionPosition& position)
@@ -1080,140 +998,124 @@ GetEntryPosition(const ExecutionPosition& position)
 }
 
 void
-FindLastHitPhase::enter(const ExecutionPoint& point)
+FindLastHitPhase::enter(const CheckpointId& start, const Maybe<ExecutionPoint>& end)
 {
-    TRY(mPoint.copyFrom(point));
+    MOZ_RELEASE_ASSERT(end.isNothing() || end.ref().hasPosition());
 
+    mStart = start;
+    mEnd = end;
+    mCounter = 0;
     mTrackedPositions.clear();
-    mReached = 0;
 
     gNavigation->setPhase(this);
 
     // All breakpoints are tracked positions.
     for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
         if (breakpoint.isValid())
-            addTrackedPosition(breakpoint, /* allowSubsumeExisting = */ true);
+            TRY(mTrackedPositions.emplaceBack(breakpoint));
     }
 
-    // All entry points to scripts containing breakpoints are tracked
-    // positions, unless there is a breakpoint which the entry point subsumes.
-    // We don't want hits on the entry point to mask hits on real breakpoints.
+    // Entry points to scripts containing breakpoints are tracked positions.
     for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
         Maybe<ExecutionPosition> entry = GetEntryPosition(breakpoint);
         if (entry.isSome())
-            addTrackedPosition(entry.ref(), /* allowSubsumeExisting = */ false);
+            TRY(mTrackedPositions.emplaceBack(entry.ref()));
     }
 
-    RestoreCheckpointAndResume(mPoint.checkpoint);
+    RestoreCheckpointAndResume(mStart);
     MOZ_CRASH("Unreachable");
 }
 
 void
 FindLastHitPhase::afterCheckpoint(const CheckpointId& checkpoint)
 {
-    if (checkpoint == NextNormalCheckpoint(mPoint.checkpoint)) {
+    if (checkpoint == NextNormalCheckpoint(mStart)) {
         // We reached the next checkpoint, and are done searching.
-        MOZ_RELEASE_ASSERT(mPoint.positions.empty());
+        MOZ_RELEASE_ASSERT(!mEnd.isSome());
         onRegionEnd();
         MOZ_CRASH("Unreachable");
     }
 
     // We are at the start of the search.
-    MOZ_RELEASE_ASSERT(checkpoint == mPoint.checkpoint);
-    mTrackedHits.clear();
+    MOZ_RELEASE_ASSERT(checkpoint == mStart);
 
-    for (const ExecutionPosition& pos : mTrackedPositions)
-        EnsurePositionHandler(pos);
+    for (const TrackedPosition& tracked : mTrackedPositions)
+        EnsurePositionHandler(tracked.position);
 
-    for (const ExecutionPosition& pos : mPoint.positions)
-        EnsurePositionHandler(pos);
+    if (mEnd.isSome())
+        EnsurePositionHandler(mEnd.ref().position);
 }
 
 void
-FindLastHitPhase::positionHit(const std::function<bool(const ExecutionPosition&)>& match)
+FindLastHitPhase::positionHit(const ExecutionPoint& point)
 {
-    if (!mPoint.positions.empty()) {
-        if (match(mPoint.positions[mReached])) {
-            if (++mReached == mPoint.positions.length()) {
-                onRegionEnd();
-                MOZ_CRASH("Unreachable");
-            }
-        }
+    if (mEnd.isSome() && mEnd.ref() == point) {
+        onRegionEnd();
+        MOZ_CRASH("Unreachable");
     }
 
-    for (const ExecutionPosition& position : mTrackedPositions) {
-        if (match(position)) {
-            TRY(mTrackedHits.append(position));
+    ++mCounter;
+
+    for (TrackedPosition& tracked : mTrackedPositions) {
+        if (tracked.position.subsumes(point.position)) {
+            tracked.lastHit = point;
+            tracked.lastHitCount = mCounter;
             break;
         }
     }
 }
 
 void
-FindLastHitPhase::hitRecordingEndpoint()
+FindLastHitPhase::hitRecordingEndpoint(const ExecutionPoint& point)
 {
     onRegionEnd();
     MOZ_CRASH("Unreachable");
 }
 
-size_t
-FindLastHitPhase::countTrackedHitsInRange(const ExecutionPosition& pos, size_t start, size_t end)
+FindLastHitPhase::TrackedPosition
+FindLastHitPhase::findTrackedPosition(const ExecutionPosition& pos)
 {
-    size_t count = 0;
-    for (size_t i = start; i <= end; i++) {
-        if (pos == mTrackedHits[i])
-            count++;
+    for (const TrackedPosition& tracked : mTrackedPositions) {
+        if (tracked.position == pos)
+            return tracked;
     }
-    return count;
-}
-
-Maybe<size_t>
-FindLastHitPhase::lastMatchingTrackedHit(const std::function<bool(const ExecutionPosition&)>& match,
-                                         size_t start, size_t end)
-{
-    for (int i = end; i >= (int) start; i--) {
-        if (match(mTrackedHits[i]))
-            return Some((size_t) i);
-    }
-    return Nothing();
-}
-
-static bool
-PositionMatchesBreakpoint(const ExecutionPosition& pos)
-{
-    for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
-        if (breakpoint == pos)
-            return true;
-    }
-    return false;
+    MOZ_CRASH("Could not find tracked position");
 }
 
 void
 FindLastHitPhase::onRegionEnd()
 {
-    // Find the index of the last hit which coincides with a breakpoint.
-    Maybe<size_t> lastBreakpointHit =
-        lastMatchingTrackedHit(PositionMatchesBreakpoint, 0, mTrackedHits.length() - 1);
-
-    if (lastBreakpointHit.isNothing()) {
-        // No breakpoints were encountered up until the execution point.
-        if (gNavigation->numTemporaryCheckpoints()) {
-            // The last checkpoint is a temporary one. Continue searching
-            // backwards without notifying the middleman.
-            ExecutionPoint point;
-            gNavigation->lastTemporaryCheckpoint(&point);
-            gNavigation->mFindLastHitPhase.enter(point);
-            MOZ_CRASH("Unreachable");
-        } else {
-            // Rewind to the last checkpoint and pause.
-            MOZ_RELEASE_ASSERT(!mPoint.checkpoint.mTemporary);
-            gNavigation->mCheckpointPausedPhase.enter(mPoint.checkpoint.mNormal,
-                                                      /* rewind = */ true);
-            MOZ_CRASH("Unreachable");
+    // Find the point of the last hit which coincides with a breakpoint.
+    Maybe<TrackedPosition> lastBreakpoint;
+    for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
+        if (!breakpoint.isValid())
+            continue;
+        TrackedPosition tracked = findTrackedPosition(breakpoint);
+        if (tracked.lastHit.hasPosition() &&
+            (lastBreakpoint.isNothing() ||
+             lastBreakpoint.ref().lastHitCount < tracked.lastHitCount))
+        {
+            lastBreakpoint = Some(tracked);
         }
     }
 
-    const ExecutionPosition& breakpoint = mTrackedHits[lastBreakpointHit.ref()];
+    if (lastBreakpoint.isNothing()) {
+        // No breakpoints were encountered in the search space.
+        if (mStart.mTemporary) {
+            // We started searching forwards from a temporary checkpoint.
+            // Continue searching backwards without notifying the middleman.
+            CheckpointId start = mStart;
+            start.mTemporary--;
+            ExecutionPoint end = gNavigation->lastTemporaryCheckpointLocation();
+            gNavigation->mFindLastHitPhase.enter(start, Some(end));
+            MOZ_CRASH("Unreachable");
+        } else {
+            // Rewind to the last normal checkpoint and pause.
+            gNavigation->mCheckpointPausedPhase.enter(mStart.mNormal, /* rewind = */ true,
+                                                      /* atRecordingEndpoint = */ false);
+            MOZ_CRASH("Unreachable");
+        }
+    }
 
     // When running backwards, we don't want to place temporary checkpoints at
     // the breakpoint where we are going to stop at. If the user continues
@@ -1223,46 +1125,21 @@ FindLastHitPhase::onRegionEnd()
     // Instead, try to place a temporary checkpoint at the last time the
     // breakpoint's script was entered. This optimizes for the case of stepping
     // around within a frame.
-    Maybe<ExecutionPosition> baseEntry = GetEntryPosition(breakpoint);
-    if (baseEntry.isSome() && baseEntry.ref().offset != breakpoint.offset) {
-        Maybe<size_t> lastEntryHit =
-            lastMatchingTrackedHit([=](const ExecutionPosition& pos) {
-                return baseEntry.ref().subsumes(pos);
-            }, 0, lastBreakpointHit.ref() - 1);
-        if (lastEntryHit.isSome()) {
-            // The hit we found might not be identical to |baseEntry|
-            // if there is an OnStep breakpoint at the script's entry point.
-            ExecutionPosition entry = mTrackedHits[lastEntryHit.ref()];
-            MOZ_RELEASE_ASSERT(baseEntry.ref().subsumes(entry));
-
-            size_t entryHits = countTrackedHitsInRange(entry, 0, lastBreakpointHit.ref() - 1);
-            MOZ_RELEASE_ASSERT(entryHits);
-
-            size_t breakpointHitsAfterEntry =
-                countTrackedHitsInRange(breakpoint,
-                                        lastEntryHit.ref() + 1, lastBreakpointHit.ref());
-            MOZ_RELEASE_ASSERT(breakpointHitsAfterEntry);
-
-            ExecutionPoint newPoint;
-            newPoint.checkpoint = mPoint.checkpoint;
-            TRY(newPoint.positions.appendN(entry, entryHits));
-            TRY(newPoint.positions.appendN(breakpoint, breakpointHitsAfterEntry));
-
-            gNavigation->mReachBreakpointPhase.enter(newPoint, Some(entryHits));
+    Maybe<ExecutionPosition> baseEntry = GetEntryPosition(lastBreakpoint.ref().position);
+    if (baseEntry.isSome()) {
+        TrackedPosition tracked = findTrackedPosition(baseEntry.ref());
+        if (tracked.lastHit.hasPosition() &&
+            tracked.lastHitCount < lastBreakpoint.ref().lastHitCount)
+        {
+            gNavigation->mReachBreakpointPhase.enter(mStart, lastBreakpoint.ref().lastHit,
+                                                     Some(tracked.lastHit));
             MOZ_CRASH("Unreachable");
         }
     }
 
     // There was no suitable place for a temporary checkpoint, so rewind to the
     // last checkpoint and play forward to the last breakpoint hit we found.
-    size_t breakpointHits = countTrackedHitsInRange(breakpoint, 0, lastBreakpointHit.ref());
-    MOZ_RELEASE_ASSERT(breakpointHits);
-
-    ExecutionPoint newPoint;
-    newPoint.checkpoint = mPoint.checkpoint;
-    TRY(newPoint.positions.appendN(breakpoint, breakpointHits));
-
-    gNavigation->mReachBreakpointPhase.enter(newPoint, Nothing());
+    gNavigation->mReachBreakpointPhase.enter(mStart, lastBreakpoint.ref().lastHit, Nothing());
     MOZ_CRASH("Unreachable");
 }
 
@@ -1272,6 +1149,13 @@ FindLastHitPhase::onRegionEnd()
 
 // Replay phases can install handlers on ExecutionPositions that call back
 // into the phase's positionHit method when the position is reached.
+
+static ExecutionPoint
+NewExecutionPoint(const ExecutionPosition& pos)
+{
+    return ExecutionPoint(gNavigation->lastCheckpoint().mNormal,
+                          ReplayDebugger::gProgressCounter, pos);
+}
 
 // Handler installed for hits on a script/pc.
 static bool
@@ -1289,13 +1173,8 @@ ScriptPcHandler(JSContext* cx, unsigned argc, Value* vp)
     size_t offset = pc - script->code();
     size_t frameIndex = ReplayDebugger::CountScriptFrames(cx) - 1;
 
-    gNavigation->positionHit(
-        [=](const ExecutionPosition& position) {
-            return position.script == scriptId
-                && position.offset == offset
-                && (position.kind == ExecutionPosition::Break ||
-                    position.frameIndex == frameIndex);
-        }, /* updateEndpointConsumed = */ true);
+    ExecutionPosition pos(ExecutionPosition::OnStep, scriptId, offset, frameIndex);
+    gNavigation->positionHit(NewExecutionPoint(pos));
 
     args.rval().setUndefined();
     return true;
@@ -1306,10 +1185,8 @@ EnterFrameHandler(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    gNavigation->positionHit(
-        [=](const ExecutionPosition& position) {
-            return position.kind == ExecutionPosition::EnterFrame;
-        }, /* updateEndpointConsumed = */ true);
+    ExecutionPosition pos(ExecutionPosition::EnterFrame);
+    gNavigation->positionHit(NewExecutionPoint(pos));
 
     args.rval().setUndefined();
     return true;
@@ -1327,16 +1204,15 @@ ReplayDebugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* 
     if (!scriptId)
         return ok;
 
+    size_t frameIndex = ReplayDebugger::CountScriptFrames(cx) - 1;
+
     // Update the frame return state in case we hit a breakpoint here.
     gPopFrameThrowing = !ok;
     *gPopFrameResult = frame.returnValue();
 
-    gNavigation->positionHit(
-        [=](const ExecutionPosition& position) {
-            return position.kind == ExecutionPosition::OnPop
-                && (position.script == ExecutionPosition::EMPTY_SCRIPT ||
-                    position.script == scriptId);
-        }, /* updateEndpointConsumed = */ true);
+    ExecutionPosition pos(ExecutionPosition::OnPop, scriptId,
+                          ExecutionPosition::EMPTY_OFFSET, frameIndex);
+    gNavigation->positionHit(NewExecutionPoint(pos));
 
     gPopFrameThrowing = false;
     *gPopFrameResult = UndefinedValue();
@@ -1481,10 +1357,8 @@ ReplayDebugger::HandleBreakpointsForNewScript(JSScript* script, size_t scriptId,
     // NewScript breakpoints are only hit for top level scripts (as for the
     // normal debugger).
     if (toplevel) {
-        gNavigation->positionHit(
-            [=](const ExecutionPosition& position) {
-                return position.kind == ExecutionPosition::NewScript;
-            }, /* updateEndpointConsumed = */ true);
+        ExecutionPosition pos(ExecutionPosition::NewScript);
+        gNavigation->positionHit(NewExecutionPoint(pos));
     }
 }
 
@@ -1576,22 +1450,18 @@ RespondAfterRecoveringFromDivergenceHook()
     gNavigation->mBreakpointPausedPhase.respondAfterRecoveringFromDivergence();
 }
 
-static void
-GetRecordingEndpointHook(JS::replay::ExecutionPoint<JS::replay::Hooks::TrackedAllocPolicy>* endpoint)
+static ExecutionPoint
+GetRecordingEndpointHook()
 {
     MOZ_RELEASE_ASSERT(IsRecording());
-    ExecutionPoint newEndpoint;
-    gNavigation->getRecordingEndpoint(&newEndpoint);
-    endpoint->copyFrom(newEndpoint);
+    return gNavigation->getRecordingEndpoint();
 }
 
 static void
-SetRecordingEndpointHook(const JS::replay::ExecutionPoint<JS::replay::Hooks::TrackedAllocPolicy>& endpoint)
+SetRecordingEndpointHook(size_t index, const ExecutionPoint& endpoint)
 {
     MOZ_RELEASE_ASSERT(IsReplaying());
-    ExecutionPoint newEndpoint;
-    newEndpoint.copyFrom(endpoint);
-    gNavigation->setRecordingEndpoint(newEndpoint);
+    gNavigation->setRecordingEndpoint(index, endpoint);
 }
 
 /* static */ void

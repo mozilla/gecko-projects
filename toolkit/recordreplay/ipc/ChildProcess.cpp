@@ -92,6 +92,27 @@ ChildProcess::GetDisposition()
 }
 
 bool
+ChildProcess::IsPausedAtCheckpoint()
+{
+  return IsPaused() && mPausedMessage->mType == MessageType::HitCheckpoint;
+}
+
+bool
+ChildProcess::IsPausedAtRecordingEndpoint()
+{
+  if (!IsPaused()) {
+    return false;
+  }
+  if (mPausedMessage->mType == MessageType::HitCheckpoint) {
+    return ((HitCheckpointMessage*) mPausedMessage)->mRecordingEndpoint;
+  }
+  if (mPausedMessage->mType == MessageType::HitBreakpoint) {
+    return ((HitBreakpointMessage*) mPausedMessage)->mRecordingEndpoint;
+  }
+  return false;
+}
+
+bool
 ChildProcess::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
 {
   if (!IsPaused() || mPausedMessage->mType != MessageType::HitBreakpoint) {
@@ -173,7 +194,6 @@ ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
   switch (aMsg.mType) {
   case MessageType::HitCheckpoint:
   case MessageType::HitBreakpoint:
-  case MessageType::HitRecordingEndpoint:
     MOZ_RELEASE_ASSERT(!mPausedMessage);
     mPausedMessage = aMsg.Clone();
     MOZ_FALLTHROUGH;
@@ -341,7 +361,10 @@ ChildProcess::Recover(ChildProcess* aTargetProcess)
 void
 ChildProcess::RecoverToCheckpoint(size_t aCheckpoint)
 {
-  Recover(true, HitCheckpointMessage(aCheckpoint, 0).Clone(), aCheckpoint, nullptr, 0);
+  HitCheckpointMessage pausedMessage(aCheckpoint,
+                                     /* aRecordingEndpoint = */ false,
+                                     /* aDuration = */ 0);
+  Recover(true, pausedMessage.Clone(), aCheckpoint, nullptr, 0);
 }
 
 void
@@ -361,7 +384,6 @@ ChildProcess::OnIncomingRecoveryMessage(const Message& aMsg)
     break;
   }
   case MessageType::HitBreakpoint:
-  case MessageType::HitRecordingEndpoint:
   case MessageType::DebuggerResponse:
     SendNextRecoveryMessage();
     break;

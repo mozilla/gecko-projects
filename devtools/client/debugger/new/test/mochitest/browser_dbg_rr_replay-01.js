@@ -35,5 +35,5 @@ function test() {
   });
 
   gBrowser.selectedTab = recordingTab;
-  openUILinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
 }

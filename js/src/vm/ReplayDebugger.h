@@ -32,6 +32,14 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     ~ReplayDebugger();
     bool init();
 
+    static bool trackProgress(JSScript* script) {
+        if (!mozilla::recordreplay::IsRecordingOrReplaying())
+            return false;
+        return trackProgressSlow(script);
+    }
+
+    static const char* progressString(const char* why, JSScript* script, jsbytecode* pc = nullptr);
+
     static void onNewScript(JSContext* cx, HandleScript script, bool toplevel = true);
 
     // Debugger methods.
@@ -159,6 +167,8 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     struct Activity;
 
   private:
+    static bool trackProgressSlow(JSScript* script);
+
     JSObject* addScript(JSContext* cx, size_t id, HandleObject data);
 
     HandleObject getScript(Activity& a, size_t id);
@@ -196,6 +206,9 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     // Runtime which all data considered in the replaying process is associated
     // with. Worker runtimes are ignored entirely.
     static JSRuntime* gMainRuntime;
+
+    // How much progress has been made in executing code in the main runtime.
+    static JS::replay::ProgressCounter gProgressCounter;
 
     // Global in which the debugger is installed in the replaying process.
     static PersistentRootedObject* gHookGlobal;

@@ -226,7 +226,6 @@ PokeChildren()
 
 static void RecvHitCheckpoint(const HitCheckpointMessage& aMsg);
 static void RecvHitBreakpoint(const HitBreakpointMessage& aMsg);
-static void RecvHitRecordingEndpoint();
 static void RecvDebuggerResponse(const DebuggerResponseMessage& aMsg);
 static void RecvRecordingFlushed();
 static void RecvAlwaysMarkMajorCheckpoints();
@@ -265,9 +264,6 @@ public:
       break;
     case MessageType::HitBreakpoint:
       RecvHitBreakpoint((const HitBreakpointMessage&) aMsg);
-      break;
-    case MessageType::HitRecordingEndpoint:
-      RecvHitRecordingEndpoint();
       break;
     case MessageType::DebuggerResponse:
       RecvDebuggerResponse((const DebuggerResponseMessage&) aMsg);
@@ -885,6 +881,7 @@ public:
     : ipc::IToplevelProtocol("MiddlemanProtocol", PContentMsgStart, aSide)
     , mSide(aSide)
     , mOpposite(nullptr)
+    , mOppositeMessageLoop(nullptr)
   {}
 
   virtual void RemoveManagee(int32_t, IProtocol*) override {
@@ -1209,6 +1206,7 @@ HookResume(bool aForward)
     // Don't send a replaying process past the recording endpoint.
     if (gActiveChild->IsPausedAtRecordingEndpoint()) {
       // Look for a recording child we can transition into.
+      MOZ_RELEASE_ASSERT(!gActiveChild->IsRecording());
       if (!gRecordingChild) {
         MarkActiveChildExplicitPause();
         SendMessageToUIProcess("HitRecordingEndpoint");
@@ -1253,8 +1251,10 @@ ResumeForwardOrBackward()
 }
 
 static void
-ResumeForwardOrBackwardSoon()
+RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
 {
+  UpdateCheckpointTimes(aMsg);
+
   // Resume either forwards or backwards. Break the resume off into a separate
   // runnable, to avoid starving any code already on the stack and waiting for
   // the process to pause.
@@ -1263,13 +1263,6 @@ ResumeForwardOrBackwardSoon()
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",
                                                          ResumeForwardOrBackward));
   }
-}
-
-static void
-RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
-{
-  UpdateCheckpointTimes(aMsg);
-  ResumeForwardOrBackwardSoon();
 }
 
 static void
@@ -1304,14 +1297,6 @@ RecvHitBreakpoint(const HitBreakpointMessage& aMsg)
   PodCopy(breakpoints, aMsg.Breakpoints(), aMsg.NumBreakpoints());
   gMainThreadMessageLoop->PostTask(NewRunnableFunction("HitBreakpoint", HitBreakpoint,
                                                        breakpoints, aMsg.NumBreakpoints()));
-}
-
-static void
-RecvHitRecordingEndpoint()
-{
-  // The active replaying child tried to run off the end of the recording.
-  MOZ_RELEASE_ASSERT(!gActiveChild->IsRecording());
-  ResumeForwardOrBackwardSoon();
 }
 
 static void

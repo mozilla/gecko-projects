@@ -1015,6 +1015,13 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
 
     insertRecompileCheck();
 
+    // Insert an interrupt check when recording or replaying, which will bump
+    // the debugger's progress counter.
+    if (ReplayDebugger::trackProgress(script())) {
+        MInstruction* check = MInterruptCheck::New(alloc(), script(), nullptr);
+        current->add(check);
+    }
+
     // Initialize the env chain now that all resume points operands are
     // initialized.
     MOZ_TRY(initEnvironmentChain(callInfo.fun()));
@@ -1646,6 +1653,7 @@ IonBuilder::visitGoto(CFGGoto* ins)
     // the case.
     const CFGBlock* successor = ins->getSuccessor(0);
     if (blockIsOSREntry(successor, cfgCurrent)) {
+        MOZ_ASSERT(ins->brokenLoopEntry());
         MBasicBlock* preheader;
         MOZ_TRY_VAR(preheader, newOsrPreheader(current, successor->startPc(), pc));
         current->end(MGoto::New(alloc(), preheader));
@@ -1666,6 +1674,12 @@ IonBuilder::visitGoto(CFGGoto* ins)
     if (!create) {
         if (!succ->addPredecessor(alloc(), current))
             return abort(AbortReason::Alloc);
+    }
+
+    if (ins->brokenLoopEntry()) {
+        MOZ_RELEASE_ASSERT(!succ->hasAnyIns());
+        if (ReplayDebugger::trackProgress(script()))
+            succ->add(MInterruptCheck::New(alloc(), script(), ins->brokenLoopEntry()));
     }
 
     return Ok();
@@ -1741,14 +1755,14 @@ IonBuilder::visitLoopEntry(CFGLoopEntry* loopEntry)
     setCurrent(header);
     pc = header->pc();
 
-    initLoopEntry();
+    initLoopEntry(loopEntry->loopEntryPc());
     return Ok();
 }
 
 bool
-IonBuilder::initLoopEntry()
+IonBuilder::initLoopEntry(jsbytecode* loopEntryPc)
 {
-    current->add(MInterruptCheck::New(alloc()));
+    current->add(MInterruptCheck::New(alloc(), script(), loopEntryPc));
     insertRecompileCheck();
 
     return true;
@@ -2490,6 +2504,16 @@ IonBuilder::restartLoop(const CFGBlock* cfgHeader)
         return abort(AbortReason::Alloc);
     graph().removeBlockFromList(header);
 
+    // Find the LOOPENTRY pc for this loop.
+    jsbytecode* loopEntryPc = nullptr;
+    for (MInstructionIterator iter = header->begin(); iter != header->end(); iter++) {
+        if (iter->isInterruptCheck()) {
+            loopEntryPc = iter->toInterruptCheck()->pc();
+            break;
+        }
+    }
+    MOZ_RELEASE_ASSERT(loopEntryPc);
+
     // Remove all instructions from the header itself, and all resume points
     // except the entry resume point.
     header->discardAllInstructions();
@@ -2503,7 +2527,7 @@ IonBuilder::restartLoop(const CFGBlock* cfgHeader)
     setCurrent(header);
     pc = header->pc();
 
-    initLoopEntry();
+    initLoopEntry(loopEntryPc);
     return Ok();
 }
 
@@ -5729,10 +5753,13 @@ IonBuilder::jsop_eval(uint32_t argc)
 
         // Try to pattern match 'eval(v + "()")'. In this case v is likely a
         // name on the env chain and the eval is performing a call on that
-        // value. Use an env chain lookup rather than a full eval.
+        // value. Use an env chain lookup rather than a full eval. Avoid this
+        // optimization if we're tracking script progress, as this will not
+        // execute the script and give an inconsistent progress count.
         if (string->isConcat() &&
             string->getOperand(1)->type() == MIRType::String &&
-            string->getOperand(1)->maybeConstantValue())
+            string->getOperand(1)->maybeConstantValue() &&
+            !ReplayDebugger::trackProgress(script()))
         {
             JSAtom* atom = &string->getOperand(1)->maybeConstantValue()->toString()->asAtom();
 
@@ -6633,14 +6660,15 @@ IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry,
                             jsbytecode* beforeLoopEntry)
 {
     MOZ_ASSERT(loopEntry == GetNextPc(info().osrPc()));
+    MOZ_ASSERT(*info().osrPc() == JSOP_LOOPENTRY);
 
     // Create two blocks: one for the OSR entry with no predecessors, one for
     // the preheader, which has the OSR entry block as a predecessor. The
     // OSR block is always the second block (with id 1).
     MBasicBlock* osrBlock;
-    MOZ_TRY_VAR(osrBlock, newBlockAfter(*graph().begin(), predecessor->stackDepth(), loopEntry));
+    MOZ_TRY_VAR(osrBlock, newBlockAfter(*graph().begin(), predecessor->stackDepth(), info().osrPc()));
     MBasicBlock* preheader;
-    MOZ_TRY_VAR(preheader, newBlock(predecessor, loopEntry));
+    MOZ_TRY_VAR(preheader, newBlock(predecessor, info().osrPc()));
 
     graph().addBlock(preheader);
 
@@ -6760,7 +6788,7 @@ IonBuilder::newOsrPreheader(MBasicBlock* predecessor, jsbytecode* loopEntry,
 
     // MOsrValue instructions are infallible, so the first MResumePoint must
     // occur after they execute, at the point of the MStart.
-    MOZ_TRY(resumeAt(start, loopEntry));
+    MOZ_TRY(resumeAt(start, info().osrPc()));
 
     // Link the same MResumePoint from the MStart to each MOsrValue.
     // This causes logic in ShouldSpecializeInput() to not replace Uses with

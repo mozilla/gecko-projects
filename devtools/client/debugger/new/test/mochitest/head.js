@@ -82,7 +82,7 @@ function attachDebugger(tab) {
   let target = TargetFactory.forTab(tab);
   return new Promise(function(resolve) {
     gDevTools.showToolbox(target, "jsdebugger").then(aToolbox => {
-      ok(aToolbox.threadClient.state == "attached", "Thread is attached");
+      ok(aToolbox.threadClient.state == "resuming", "Thread is attached");
       resolve(aToolbox.threadClient);
     });
   });

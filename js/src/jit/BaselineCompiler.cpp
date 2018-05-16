@@ -26,6 +26,7 @@
 #include "vm/EnvironmentObject.h"
 #include "vm/Interpreter.h"
 #include "vm/JSFunction.h"
+#include "vm/ReplayDebugger.h"
 #include "vm/TraceLogging.h"
 #include "vtune/VTuneWrapper.h"
 
@@ -360,6 +361,12 @@ BaselineCompiler::emitPrologue()
     masm.checkStackAlignment();
 #endif
     emitProfilerEnterFrame();
+
+    if (ReplayDebugger::trackProgress(script)) {
+        if (const char* str = ReplayDebugger::progressString("Baseline", script))
+            masm.printf(str);
+        masm.inc64(AbsoluteAddress(&ReplayDebugger::gProgressCounter));
+    }
 
     masm.push(BaselineFrameReg);
     masm.moveStackPtrTo(BaselineFrameReg);
@@ -1028,6 +1035,7 @@ BaselineCompiler::emitBody()
 
 #define EMIT_OP(OP)                            \
           case OP:                             \
+              /*masm.printf("BaselineOp: " #OP "\n");*/ \
             if (MOZ_UNLIKELY(!this->emit_##OP())) \
                 return Method_Error;           \
             break;
@@ -1345,7 +1353,14 @@ BaselineCompiler::emit_JSOP_LOOPENTRY()
     if (!emit_JSOP_JUMPTARGET())
         return false;
     frame.syncStack(0);
-    return emitWarmUpCounterIncrement(LoopEntryCanIonOsr(pc));
+    if (!emitWarmUpCounterIncrement(LoopEntryCanIonOsr(pc)))
+        return false;
+    if (ReplayDebugger::trackProgress(script)) {
+        if (const char* str = ReplayDebugger::progressString("Baseline", script, pc))
+            masm.printf(str);
+        masm.inc64(AbsoluteAddress(&ReplayDebugger::gProgressCounter));
+    }
+    return true;
 }
 
 bool

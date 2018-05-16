@@ -58,6 +58,8 @@ struct ExecutionPosition
             && frameIndex == o.frameIndex;
     }
 
+    inline bool operator !=(const ExecutionPosition& o) const { return !(*this == o); }
+
     // Return whether an execution point matching |o| also matches this.
     inline bool subsumes(const ExecutionPosition& o) const {
         return (*this == o)
@@ -78,39 +80,55 @@ struct ExecutionPosition
     }
 };
 
-// Identification for a particular point in the JS execution of a process.
-template <typename AllocPolicy>
+// Progress counters increment as a runtime executes code, and provide a basis
+// for identifying points in the JS execution of a runtime. A given
+// ExecutionPosition may not be reached twice without an intervening increment
+// of the runtime's progress counter.
+typedef uint64_t ProgressCounter;
+
+// Identification for an execution point where a process may pause.
 struct ExecutionPoint
 {
-    // Most recent checkpoint prior to the execution point.
-    mozilla::recordreplay::CheckpointId checkpoint;
+    // ID of the last normal checkpoint prior to this position.
+    size_t checkpoint;
 
-    // When starting at |checkpoint|, the positions to reach, in sequence,
-    // before arriving at the execution point.
-    mozilla::Vector<ExecutionPosition, 4, AllocPolicy> positions;
+    // How much progress JS has made prior to reaching the position, or zero
+    // if the execution point refers to the checkpoint itself.
+    uint64_t progress;
+
+    // The position reached after making the specified amount of progress,
+    // invalid if the execution point refers to the checkpoint itself.
+    ExecutionPosition position;
 
     ExecutionPoint()
+      : checkpoint(mozilla::recordreplay::InvalidCheckpointId)
+      , progress(0)
     {}
 
-    ExecutionPoint(ExecutionPoint&& o)
-      : checkpoint(o.checkpoint), positions(Move(o.positions))
+    explicit ExecutionPoint(size_t checkpoint)
+      : checkpoint(checkpoint)
+      , progress(0)
     {}
 
-    void clear() {
-        checkpoint = mozilla::recordreplay::CheckpointId();
-        positions.clear();
+    ExecutionPoint(size_t checkpoint, uint64_t progress, const ExecutionPosition& pos)
+      : checkpoint(checkpoint), progress(progress), position(pos)
+    {
+        // ExecutionPoint positions must be as precise as possible, and cannot
+        // subsume other positions.
+        MOZ_RELEASE_ASSERT(pos.kind != ExecutionPosition::OnPop ||
+                           pos.script != ExecutionPosition::EMPTY_SCRIPT);
+        MOZ_RELEASE_ASSERT(pos.kind != ExecutionPosition::Break);
     }
 
-    template <typename OtherAllocPolicy>
-    bool copyFrom(const ExecutionPoint<OtherAllocPolicy>& o) {
-        checkpoint = o.checkpoint;
-        positions.clear();
-        return positions.append(o.positions.begin(), o.positions.length());
+    bool hasPosition() const { return position.isValid(); }
+
+    inline bool operator ==(const ExecutionPoint& o) const {
+        return checkpoint == o.checkpoint
+            && progress == o.progress
+            && position == o.position;
     }
 
-    // A prefix of an ExecutionPoint is the number of positions which have been
-    // consumed so far.
-    typedef size_t Prefix;
+    inline bool operator !=(const ExecutionPoint& o) const { return !(*this == o); }
 };
 
 // These hooks are used for transmitting messages between a ReplayDebugger in
@@ -132,11 +150,11 @@ struct Hooks
     void (*pauseMiddleman)();
 
     // Notify the middleman about breakpoints that were hit.
-    void (*hitBreakpointReplay)(const uint32_t* breakpoints, size_t numBreakpoints);
+    void (*hitBreakpointReplay)(bool endpoint, const uint32_t* breakpoints, size_t numBreakpoints);
     bool (*hitBreakpointMiddleman)(JSContext* cx, size_t id);
 
     // Notify the middleman about a checkpoint that was hit.
-    void (*hitCheckpointReplay)(size_t id);
+    void (*hitCheckpointReplay)(size_t id, bool endpoint);
 
     // Direct the child process to rewind to a specific checkpoint.
     void (*restoreCheckpointReplay)(size_t id);
@@ -156,12 +174,9 @@ struct Hooks
 
     // Keep track of the recording endpoint while recording, and notify the
     // middleman when it has been hit while replaying.
-    typedef mozilla::recordreplay::AllocPolicy<mozilla::recordreplay::TrackedMemoryKind>
-        TrackedAllocPolicy;
-    void (*getRecordingEndpoint)(ExecutionPoint<TrackedAllocPolicy>* endpoint);
-    void (*setRecordingEndpoint)(const ExecutionPoint<TrackedAllocPolicy>& endpoint);
+    ExecutionPoint (*getRecordingEndpoint)();
+    void (*setRecordingEndpoint)(size_t index, const ExecutionPoint& endpoint);
     bool (*hitCurrentRecordingEndpointReplay)();
-    void (*hitLastRecordingEndpointReplay)();
 
     // Notify the debugger that it should always save temporary checkpoints,
     // for testing.

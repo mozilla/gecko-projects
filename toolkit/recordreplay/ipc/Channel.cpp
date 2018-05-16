@@ -222,15 +222,15 @@ Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
   case MessageType::HitCheckpoint: {
     const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
     data = new char[128];
-    snprintf(data, 128, "Id %d", (int) nmsg.mCheckpointId);
+    snprintf(data, 128, "Id %d Endpoint %d", (int) nmsg.mCheckpointId, nmsg.mRecordingEndpoint);
     break;
   }
   case MessageType::HitBreakpoint: {
     const HitBreakpointMessage& nmsg = (const HitBreakpointMessage&) aMsg;
-    data = new char[nmsg.NumBreakpoints() * 32];
-    int pos = 0;
+    data = new char[(1 + nmsg.NumBreakpoints()) * 32];
+    int pos = snprintf(data, 32, "Endpoint %d", nmsg.mRecordingEndpoint);
     for (size_t i = 0; i < nmsg.NumBreakpoints(); i++) {
-      pos += snprintf(data + pos, 32, "Id %d", nmsg.Breakpoints()[i]);
+      pos += snprintf(data + pos, 32, " Id %d", nmsg.Breakpoints()[i]);
     }
     break;
   }

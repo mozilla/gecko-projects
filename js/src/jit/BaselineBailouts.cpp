@@ -484,13 +484,18 @@ GetStubReturnAddress(JSContext* cx, jsbytecode* pc)
 }
 
 static inline jsbytecode*
-GetNextNonLoopEntryPc(jsbytecode* pc)
+GetNextNonLoopEntryPc(jsbytecode* pc, jsbytecode** skippedLoopEntry)
 {
     JSOp op = JSOp(*pc);
     if (op == JSOP_GOTO)
         return pc + GET_JUMP_OFFSET(pc);
-    if (op == JSOP_LOOPENTRY || op == JSOP_NOP || op == JSOP_LOOPHEAD)
+    if (op == JSOP_LOOPENTRY || op == JSOP_NOP || op == JSOP_LOOPHEAD) {
+        if (op == JSOP_LOOPENTRY) {
+            MOZ_RELEASE_ASSERT(*skippedLoopEntry == nullptr || *skippedLoopEntry == pc);
+            *skippedLoopEntry = pc;
+        }
         return GetNextPc(pc);
+    }
     return pc;
 }
 
@@ -1016,15 +1021,21 @@ InitFromBailout(JSContext* cx, size_t frameNo,
     //
     // The algorithm below is the "tortoise and the hare" algorithm. See bug
     // 994444 for more explanation.
+    jsbytecode* skippedLoopEntry = nullptr;
     if (!resumeAfter) {
         jsbytecode* fasterPc = pc;
         while (true) {
-            pc = GetNextNonLoopEntryPc(pc);
-            fasterPc = GetNextNonLoopEntryPc(GetNextNonLoopEntryPc(fasterPc));
+            pc = GetNextNonLoopEntryPc(pc, &skippedLoopEntry);
+            fasterPc = GetNextNonLoopEntryPc(GetNextNonLoopEntryPc(fasterPc, &skippedLoopEntry), &skippedLoopEntry);
             if (fasterPc == pc)
                 break;
         }
         op = JSOp(*pc);
+        if (skippedLoopEntry && ReplayDebugger::trackProgress(script)) {
+            if (const char* str = ReplayDebugger::progressString("SkippedLoopEntry", script, skippedLoopEntry))
+                fprintf(stderr, "%s", str);
+            ReplayDebugger::gProgressCounter++;
+        }
     }
 
     const uint32_t pcOff = script->pcToOffset(pc);
@@ -1223,6 +1234,17 @@ InitFromBailout(JSContext* cx, size_t frameNo,
                 opReturnAddr = baselineScript->prologueEntryAddr();
                 JitSpew(JitSpew_BaselineBailouts, "      Resuming into prologue.");
 
+                // The comment above is wrong and there are times when we end
+                // up here even though the script has started executing. Undo
+                // the progress for any loop entry we thought we were skipping
+                // over earlier.
+                if (skippedLoopEntry && ReplayDebugger::trackProgress(script)) {
+                    if (const char* str = ReplayDebugger::progressString("UndoSkippedLoopEntry",
+                                                                         script, skippedLoopEntry)) {
+                        fprintf(stderr, "%s", str);
+                    }
+                    ReplayDebugger::gProgressCounter--;
+                }
             } else {
                 opReturnAddr = nativeCodeForPC;
             }

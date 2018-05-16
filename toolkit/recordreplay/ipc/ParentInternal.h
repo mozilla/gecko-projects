@@ -195,12 +195,8 @@ public:
   const InfallibleVector<size_t>& MajorCheckpoints() { return mMajorCheckpoints; }
 
   bool IsPaused() { return mPaused; }
-  bool IsPausedAtCheckpoint() {
-    return IsPaused() && mPausedMessage->mType == MessageType::HitCheckpoint;
-  }
-  bool IsPausedAtRecordingEndpoint() {
-    return IsPaused() && mPausedMessage->mType == MessageType::HitRecordingEndpoint;
-  }
+  bool IsPausedAtCheckpoint();
+  bool IsPausedAtRecordingEndpoint();
 
   // Return whether this process is paused at a breakpoint whose kind matches
   // the supplied filter.
