@@ -10,7 +10,9 @@ import redo
 import logging
 logger = logging.getLogger(__name__)
 
-BALROG_API_ROOT = 'https://aus5.mozilla.org/api/v1'
+# BALROG_API_ROOT = 'https://aus5.mozilla.org/api/v1'
+# TODO: should be per project
+BALROG_API_ROOT = 'https://aus4.stage.mozaws.net/api/v1'
 
 PLATFORM_RENAMES = {
     'windows2012-32': 'win32',
