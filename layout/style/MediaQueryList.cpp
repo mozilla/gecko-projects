@@ -12,7 +12,6 @@
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/EventTargetBinding.h"
 #include "nsPresContext.h"
-#include "nsCSSParser.h"
 #include "nsIDocument.h"
 
 #define ONCHANGE_STRING NS_LITERAL_STRING("change")
@@ -46,7 +45,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MediaQueryList,
                                                 DOMEventTargetHelper)
   if (tmp->mDocument) {
-    tmp->remove();
+    static_cast<LinkedListElement<MediaQueryList>*>(tmp)->remove();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
   }
   tmp->Disconnect();

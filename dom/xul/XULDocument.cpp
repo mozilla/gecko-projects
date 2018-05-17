@@ -40,6 +40,7 @@
 #include "nsXULContentUtils.h"
 #include "nsIXULOverlayProvider.h"
 #include "nsIStringEnumerator.h"
+#include "nsDocElementCreatedNotificationRunner.h"
 #include "nsNetUtil.h"
 #include "nsParserCIID.h"
 #include "nsPIBoxObject.h"
@@ -218,7 +219,7 @@ XULDocument::~XULDocument()
 nsresult
 NS_NewXULDocument(nsIDocument** result)
 {
-    NS_PRECONDITION(result != nullptr, "null ptr");
+    MOZ_ASSERT(result != nullptr, "null ptr");
     if (! result)
         return NS_ERROR_NULL_POINTER;
 
@@ -1056,7 +1057,7 @@ XULDocument::ResolveForwardReferences()
 
 //----------------------------------------------------------------------
 //
-// nsIDOMDocument interface
+// nsIDocument interface
 //
 
 already_AddRefed<nsINodeList>
@@ -1160,41 +1161,6 @@ XULDocument::Persist(const nsAString& aID,
     aRv = Persist(element, nameSpaceID, tag);
 }
 
-enum class ConversionDirection {
-    InnerToOuter,
-    OuterToInner,
-};
-
-static void
-ConvertWindowSize(nsIXULWindow* aWin,
-                  nsAtom* aAttr,
-                  ConversionDirection aDirection,
-                  nsAString& aInOutString)
-{
-    MOZ_ASSERT(aWin);
-    MOZ_ASSERT(aAttr == nsGkAtoms::width || aAttr == nsGkAtoms::height);
-
-    nsresult rv;
-    int32_t size = aInOutString.ToInteger(&rv);
-    if (NS_FAILED(rv)) {
-        return;
-    }
-
-    int32_t sizeDiff = aAttr == nsGkAtoms::width
-        ? aWin->GetOuterToInnerWidthDifferenceInCSSPixels()
-        : aWin->GetOuterToInnerHeightDifferenceInCSSPixels();
-
-    if (!sizeDiff) {
-        return;
-    }
-
-    int32_t multiplier =
-        aDirection == ConversionDirection::InnerToOuter ? 1 : - 1;
-
-    CopyASCIItoUTF16(nsPrintfCString("%d", size + multiplier * sizeDiff),
-                     aInOutString);
-}
-
 nsresult
 XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
                      nsAtom* aAttribute)
@@ -1235,16 +1201,9 @@ XULDocument::Persist(Element* aElement, int32_t aNameSpaceID,
         return mLocalStore->RemoveValue(uri, id, attrstr);
     }
 
-    // Make sure we store the <window> attributes as outer window size, see
-    // bug 1444525 & co.
-    if (aElement->IsXULElement(nsGkAtoms::window) &&
-        (aAttribute == nsGkAtoms::width || aAttribute == nsGkAtoms::height)) {
-        if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-            ConvertWindowSize(win,
-                              aAttribute,
-                              ConversionDirection::InnerToOuter,
-                              valuestr);
-        }
+    // Persisting attributes to windows is handled by nsXULWindow.
+    if (aElement->IsXULElement(nsGkAtoms::window)) {
+        return NS_OK;
     }
 
     return mLocalStore->SetValue(uri, id, attrstr, valuestr);
@@ -1526,12 +1485,7 @@ XULDocument::RemoveSubtreeFromDocument(nsIContent* aContent)
     // element from the document's command dispatcher.
     if (aElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::commandupdater,
                               nsGkAtoms::_true, eCaseMatters)) {
-        nsCOMPtr<nsIDOMElement> domelement = do_QueryInterface(aElement);
-        NS_ASSERTION(domelement != nullptr, "not a DOM element");
-        if (! domelement)
-            return NS_ERROR_UNEXPECTED;
-
-        rv = mCommandDispatcher->RemoveCommandUpdater(domelement);
+        rv = mCommandDispatcher->RemoveCommandUpdater(aElement);
         if (NS_FAILED(rv)) return rv;
     }
 
@@ -1626,7 +1580,7 @@ XULDocument::MatchAttribute(Element* aElement,
                             nsAtom* aAttrName,
                             void* aData)
 {
-    NS_PRECONDITION(aElement, "Must have content node to work with!");
+    MOZ_ASSERT(aElement, "Must have content node to work with!");
     nsString* attrValue = static_cast<nsString*>(aData);
     if (aNamespaceID != kNameSpaceID_Unknown &&
         aNamespaceID != kNameSpaceID_Wildcard) {
@@ -1841,21 +1795,9 @@ XULDocument::ApplyPersistentAttributesToElements(const nsAString &aID,
                  continue;
             }
 
-            // Convert attributes from outer size to inner size for top-level
-            // windows, see bug 1444525 & co.
-            if (element->IsXULElement(nsGkAtoms::window) &&
-                (attr == nsGkAtoms::width || attr == nsGkAtoms::height)) {
-                if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
-                    nsAutoString maybeConvertedValue = value;
-                    ConvertWindowSize(win,
-                                      attr,
-                                      ConversionDirection::OuterToInner,
-                                      maybeConvertedValue);
-                    Unused <<
-                        element->SetAttr(kNameSpaceID_None, attr, maybeConvertedValue, true);
-
-                    continue;
-                }
+            // Applying persistent attributes to windows is handled by nsXULWindow.
+            if (element->IsXULElement(nsGkAtoms::window)) {
+                continue;
             }
 
             Unused << element->SetAttr(kNameSpaceID_None, attr, value, true);
@@ -2026,6 +1968,9 @@ XULDocument::PrepareToWalk()
         // Block onload until we've finished building the complete
         // document content model.
         BlockOnload();
+
+        nsContentUtils::AddScriptRunner(
+            new nsDocElementCreatedNotificationRunner(this));
     }
 
     // There'd better not be anything on the context stack at this
@@ -2049,8 +1994,8 @@ nsresult
 XULDocument::CreateAndInsertPI(const nsXULPrototypePI* aProtoPI,
                                nsINode* aParent, nsINode* aBeforeThis)
 {
-    NS_PRECONDITION(aProtoPI, "null ptr");
-    NS_PRECONDITION(aParent, "null ptr");
+    MOZ_ASSERT(aProtoPI, "null ptr");
+    MOZ_ASSERT(aParent, "null ptr");
 
     RefPtr<ProcessingInstruction> node =
         NS_NewXMLProcessingInstruction(mNodeInfoManager, aProtoPI->mTarget,
@@ -2100,18 +2045,20 @@ XULDocument::InsertXMLStylesheetPI(const nsXULPrototypePI* aProtoPI,
 
     // load the stylesheet if necessary, passing ourselves as
     // nsICSSObserver
-    bool willNotify;
-    bool isAlternate;
-    rv = ssle->UpdateStyleSheet(this, &willNotify, &isAlternate);
-    if (NS_SUCCEEDED(rv) && willNotify && !isAlternate) {
-        ++mPendingSheets;
+    auto result = ssle->UpdateStyleSheet(this);
+    if (result.isErr()) {
+        // Ignore errors from UpdateStyleSheet; we don't want failure to
+        // do that to break the XUL document load.  But do propagate out
+        // NS_ERROR_OUT_OF_MEMORY.
+        if (result.unwrapErr() == NS_ERROR_OUT_OF_MEMORY) {
+            return result.unwrapErr();
+        }
+        return NS_OK;
     }
 
-    // Ignore errors from UpdateStyleSheet; we don't want failure to
-    // do that to break the XUL document load.  But do propagate out
-    // NS_ERROR_OUT_OF_MEMORY.
-    if (rv == NS_ERROR_OUT_OF_MEMORY) {
-        return rv;
+    auto update = result.unwrap();
+    if (update.ShouldBlock()) {
+        ++mPendingSheets;
     }
 
     return NS_OK;
@@ -2488,10 +2435,7 @@ XULDocument::ResumeWalk()
                                 do_QueryInterface(element);
                             NS_ASSERTION(ssle, "<html:style> doesn't implement "
                                                "nsIStyleSheetLinkingElement?");
-                            bool willNotify;
-                            bool isAlternate;
-                            ssle->UpdateStyleSheet(nullptr, &willNotify,
-                                                   &isAlternate);
+                            Unused << ssle->UpdateStyleSheet(nullptr);
                         }
                     }
                 }
@@ -2741,14 +2685,13 @@ XULDocument::GetXULWindowIfToplevelChrome() const
 nsresult
 XULDocument::DoneWalking()
 {
-    NS_PRECONDITION(mPendingSheets == 0, "there are sheets to be loaded");
-    NS_PRECONDITION(!mStillWalking, "walk not done");
+    MOZ_ASSERT(mPendingSheets == 0, "there are sheets to be loaded");
+    MOZ_ASSERT(!mStillWalking, "walk not done");
 
     // XXXldb This is where we should really be setting the chromehidden
     // attribute.
 
     {
-        mozAutoDocUpdate updateBatch(this, UPDATE_STYLE, true);
         uint32_t count = mOverlaySheets.Length();
         for (uint32_t i = 0; i < count; ++i) {
             AddStyleSheet(mOverlaySheets[i]);
@@ -2876,14 +2819,13 @@ XULDocument::DoneWalking()
 
 NS_IMETHODIMP
 XULDocument::StyleSheetLoaded(StyleSheet* aSheet,
-                              bool aWasAlternate,
+                              bool aWasDeferred,
                               nsresult aStatus)
 {
-    if (!aWasAlternate) {
+    if (!aWasDeferred) {
         // Don't care about when alternate sheets finish loading
-
-        NS_ASSERTION(mPendingSheets > 0,
-            "Unexpected StyleSheetLoaded notification");
+        MOZ_ASSERT(mPendingSheets > 0,
+                   "Unexpected StyleSheetLoaded notification");
 
         --mPendingSheets;
 
@@ -2952,17 +2894,16 @@ XULDocument::MaybeBroadcast()
 }
 
 void
-XULDocument::EndUpdate(nsUpdateType aUpdateType)
+XULDocument::EndUpdate()
 {
-    XMLDocument::EndUpdate(aUpdateType);
-
+    XMLDocument::EndUpdate();
     MaybeBroadcast();
 }
 
 void
 XULDocument::ReportMissingOverlay(nsIURI* aURI)
 {
-    NS_PRECONDITION(aURI, "Must have a URI");
+    MOZ_ASSERT(aURI, "Must have a URI");
 
     NS_ConvertUTF8toUTF16 utfSpec(aURI->GetSpecOrDefault());
     const char16_t* params[] = { utfSpec.get() };
@@ -3268,7 +3209,7 @@ XULDocument::OnScriptCompileComplete(JSScript* aScript, nsresult aStatus)
 nsresult
 XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
 {
-    NS_PRECONDITION(aScript != nullptr, "null ptr");
+    MOZ_ASSERT(aScript != nullptr, "null ptr");
     NS_ENSURE_TRUE(aScript, NS_ERROR_NULL_POINTER);
     NS_ENSURE_TRUE(mScriptGlobalObject, NS_ERROR_NOT_INITIALIZED);
 
@@ -3291,7 +3232,7 @@ XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
     NS_ENSURE_TRUE(xpc::Scriptability::Get(global).Allowed(), NS_OK);
 
     JS::ExposeObjectToActiveJS(global);
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
 
     // The script is in the compilation scope. Clone it into the target scope
     // and execute it. On failure, ~AutoScriptEntry will handle exceptions, so
@@ -3309,7 +3250,7 @@ XULDocument::CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
                                         bool aIsRoot)
 {
     // Create a content model element from a prototype element.
-    NS_PRECONDITION(aPrototype != nullptr, "null ptr");
+    MOZ_ASSERT(aPrototype != nullptr, "null ptr");
     if (! aPrototype)
         return NS_ERROR_NULL_POINTER;
 
@@ -3327,7 +3268,7 @@ XULDocument::CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
     if (aPrototype->mNodeInfo->NamespaceEquals(kNameSpaceID_XUL)) {
         // If it's a XUL element, it'll be lightweight until somebody
         // monkeys with it.
-        rv = nsXULElement::Create(aPrototype, this, true, aIsRoot, getter_AddRefs(result));
+        rv = nsXULElement::CreateFromPrototype(aPrototype, this, true, aIsRoot, getter_AddRefs(result));
         if (NS_FAILED(rv)) return rv;
     }
     else {

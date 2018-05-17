@@ -3,7 +3,8 @@
 // Tests the update RDF to JSON converter.
 
 ChromeUtils.import("resource://gre/modules/addons/AddonUpdateChecker.jsm");
-ChromeUtils.import("resource://gre/modules/addons/UpdateRDFConverter.jsm");
+ChromeUtils.defineModuleGetter(this, "UpdateRDFConverter",
+                               "resource://gre/modules/addons/RDFManifestConverter.jsm");
 
 var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 
@@ -65,7 +66,7 @@ add_task(async function test_update_check() {
     let updates = await checkUpdates("updatecheck1@tests.mozilla.org", file);
 
     equal(updates.length, 5);
-    let update = AddonUpdateChecker.getNewestCompatibleUpdate(updates);
+    let update = await AddonUpdateChecker.getNewestCompatibleUpdate(updates);
     notEqual(update, null);
     equal(update.version, "3.0");
     update = AddonUpdateChecker.getCompatibilityUpdate(updates, "2");

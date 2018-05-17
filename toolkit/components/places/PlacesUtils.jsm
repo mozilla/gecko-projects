@@ -13,11 +13,9 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
-  OS: "resource://gre/modules/osfile.jsm",
   Sqlite: "resource://gre/modules/Sqlite.jsm",
   Bookmarks: "resource://gre/modules/Bookmarks.jsm",
   History: "resource://gre/modules/History.jsm",
-  AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   PlacesSyncUtils: "resource://gre/modules/PlacesSyncUtils.jsm",
 });
 
@@ -326,7 +324,6 @@ var PlacesUtils = {
 
   LMANNO_FEEDURI: "livemark/feedURI",
   LMANNO_SITEURI: "livemark/siteURI",
-  READ_ONLY_ANNO: "placesInternal/READ_ONLY",
   CHARSET_ANNO: "URIProperties/characterSet",
   // Deprecated: This is only used for supporting import from older datasets.
   MOBILE_ROOT_ANNO: "mobile/bookmarksRoot",
@@ -695,7 +692,7 @@ var PlacesUtils = {
   SYNC_BOOKMARK_VALIDATORS,
   SYNC_CHANGE_RECORD_VALIDATORS,
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 
   _shutdownFunctions: [],
   registerShutdownFunction: function PU_registerShutdownFunction(aFunc) {
@@ -1528,29 +1525,6 @@ var PlacesUtils = {
     });
   },
 
-  /**
-   * Gets the favicon link url (moz-anno:) for a given page url.
-   *
-   * @param aPageURL url of the page to lookup the favicon for.
-   * @resolves to the nsIURL of the favicon link
-   * @rejects if the given url has no associated favicon.
-   */
-  promiseFaviconLinkUrl(aPageUrl) {
-    return new Promise((resolve, reject) => {
-      if (!(aPageUrl instanceof Ci.nsIURI))
-        aPageUrl = NetUtil.newURI(aPageUrl);
-
-      PlacesUtils.favicons.getFaviconURLForPage(aPageUrl, uri => {
-        if (uri) {
-          uri = PlacesUtils.favicons.getFaviconLinkForIcon(uri);
-          resolve(uri);
-        } else {
-          reject("favicon not found for uri");
-        }
-      });
-    });
-  },
-
    /**
    * Returns the passed URL with a #size ref for the specified size and
    * devicePixelRatio.
@@ -1877,9 +1851,7 @@ var PlacesUtils = {
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "history", function() {
   let hs = Cc["@mozilla.org/browser/nav-history-service;1"]
-             .getService(Ci.nsINavHistoryService)
-             .QueryInterface(Ci.nsIBrowserHistory)
-             .QueryInterface(Ci.nsPIPlacesDatabase);
+             .getService(Ci.nsINavHistoryService);
   return Object.freeze(new Proxy(hs, {
     get(target, name) {
       let property, object;
@@ -1898,13 +1870,9 @@ XPCOMUtils.defineLazyGetter(PlacesUtils, "history", function() {
   }));
 });
 
-XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "asyncHistory",
-                                   "@mozilla.org/browser/history;1",
-                                   "mozIAsyncHistory");
-
 XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "favicons",
                                    "@mozilla.org/browser/favicon-service;1",
-                                   "mozIAsyncFavicons");
+                                   "nsIFaviconService");
 
 XPCOMUtils.defineLazyServiceGetter(this, "bmsvc",
                                    "@mozilla.org/browser/nav-bookmarks-service;1",
@@ -2273,7 +2241,7 @@ PlacesUtils.keywords = {
                               GENERATE_GUID()))
               `, { url: url.href, rev_host: PlacesUtils.getReversedHost(url),
                    frecency: url.protocol == "place:" ? 0 : -1 });
-            await db.executeCached("DELETE FROM moz_updatehostsinsert_temp");
+            await db.executeCached("DELETE FROM moz_updateoriginsinsert_temp");
 
             // A new keyword could be assigned to an url that already has one,
             // then we must replace the old keyword with the new one.
@@ -2709,7 +2677,7 @@ var GuidHelper = {
           this.updateCache(aParentId, aParentGuid);
         },
 
-        QueryInterface: XPCOMUtils.generateQI(Ci.nsINavBookmarkObserver),
+        QueryInterface: ChromeUtils.generateQI([Ci.nsINavBookmarkObserver]),
 
         onBeginUpdateBatch() {},
         onEndUpdateBatch() {},

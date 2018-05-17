@@ -20,7 +20,7 @@ const PREF_COMPAT_OVERRIDES              = "extensions.getAddons.compatOverides.
 const PREF_XPI_SIGNATURES_REQUIRED    = "xpinstall.signatures.required";
 const PREF_SYSTEM_ADDON_SET           = "extensions.systemAddonSet";
 const PREF_SYSTEM_ADDON_UPDATE_URL    = "extensions.systemAddon.update.url";
-const PREF_APP_UPDATE_ENABLED         = "app.update.enabled";
+const PREF_SYSTEM_ADDON_UPDATE_ENABLED = "extensions.systemAddon.update.enabled";
 const PREF_DISABLE_SECURITY = ("security.turn_off_all_security_so_that_" +
                                "viruses_can_take_over_this_computer");
 
@@ -46,6 +46,8 @@ ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm");
 
+ChromeUtils.defineModuleGetter(this, "Blocklist",
+                               "resource://gre/modules/Blocklist.jsm");
 ChromeUtils.defineModuleGetter(this, "Extension",
                                "resource://gre/modules/Extension.jsm");
 ChromeUtils.defineModuleGetter(this, "ExtensionTestUtils",
@@ -60,6 +62,8 @@ ChromeUtils.defineModuleGetter(this, "MockRegistrar",
                                "resource://testing-common/MockRegistrar.jsm");
 ChromeUtils.defineModuleGetter(this, "MockRegistry",
                                "resource://testing-common/MockRegistry.jsm");
+ChromeUtils.defineModuleGetter(this, "PromiseTestUtils",
+                               "resource://testing-common/PromiseTestUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "TestUtils",
                                "resource://testing-common/TestUtils.jsm");
 
@@ -68,13 +72,13 @@ XPCOMUtils.defineLazyServiceGetter(this, "aomStartup",
                                    "amIAddonManagerStartup");
 
 const {
-  awaitPromise,
   createAppInfo,
   createHttpServer,
   createInstallRDF,
   createTempWebExtensionFile,
   createUpdateRDF,
   getFileForAddon,
+  manuallyInstall,
   manuallyUninstall,
   overrideBuiltIns,
   promiseAddonEvent,
@@ -94,11 +98,6 @@ const {
   setExtensionModifiedTime,
   writeFilesToZip
 } = AddonTestUtils;
-
-function manuallyInstall(...args) {
-  return AddonTestUtils.awaitPromise(
-    AddonTestUtils.manuallyInstall(...args));
-}
 
 // WebExtension wrapper for ease of testing
 ExtensionTestUtils.init(this);
@@ -667,36 +666,12 @@ function do_check_icons(aActual, aExpected) {
   }
 }
 
-function startupManager(aAppChanged) {
-  promiseStartupManager(aAppChanged);
-}
-
-/**
- * Restarts the add-on manager as if the host application was restarted.
- *
- * @param  aNewVersion
- *         An optional new version to use for the application. Passing this
- *         will change nsIXULAppInfo.version and make the startup appear as if
- *         the application version has changed.
- */
-function restartManager(aNewVersion) {
-  awaitPromise(promiseRestartManager(aNewVersion));
-}
-
-function shutdownManager() {
-  awaitPromise(promiseShutdownManager());
-}
-
 function isThemeInAddonsList(aDir, aId) {
   return AddonTestUtils.addonsList.hasTheme(aDir, aId);
 }
 
-function isExtensionInAddonsList(aDir, aId) {
-  return AddonTestUtils.addonsList.hasExtension(aDir, aId);
-}
-
 function isExtensionInBootstrappedList(aDir, aId) {
-  return AddonTestUtils.addonsList.hasBootstrapped(aDir, aId);
+  return AddonTestUtils.addonsList.hasExtension(aDir, aId);
 }
 
 function check_startup_changes(aType, aIds) {
@@ -726,9 +701,6 @@ function check_startup_changes(aType, aIds) {
  *          An optional dummy file to create in the directory
  * @return  An nsIFile for the directory in which the add-on is installed.
  */
-function writeInstallRDFToDir(aData, aDir, aId = aData.id, aExtraFile = null) {
-  return awaitPromise(promiseWriteInstallRDFToDir(aData, aDir, aId, aExtraFile));
-}
 async function promiseWriteInstallRDFToDir(aData, aDir, aId = aData.id, aExtraFile = null) {
   let files = {
     "install.rdf": AddonTestUtils.createInstallRDF(aData),
@@ -762,7 +734,7 @@ async function promiseWriteInstallRDFToDir(aData, aDir, aId = aData.id, aExtraFi
  *          An optional dummy file to create in the extension
  * @return  A file pointing to where the extension was installed
  */
-function writeInstallRDFToXPI(aData, aDir, aId = aData.id, aExtraFile = null) {
+async function promiseWriteInstallRDFToXPI(aData, aDir, aId = aData.id, aExtraFile = null) {
   let files = {
     "install.rdf": AddonTestUtils.createInstallRDF(aData),
   };
@@ -782,9 +754,6 @@ function writeInstallRDFToXPI(aData, aDir, aId = aData.id, aExtraFile = null) {
 
   return file;
 }
-async function promiseWriteInstallRDFToXPI(aData, aDir, aId = aData.id, aExtraFile = null) {
-  return writeInstallRDFToXPI(aData, aDir, aId, aExtraFile);
-}
 
 /**
  * Writes an install.rdf manifest into an extension using the properties passed
@@ -803,13 +772,6 @@ async function promiseWriteInstallRDFToXPI(aData, aDir, aId = aData.id, aExtraFi
  *          An optional dummy file to create in the extension
  * @return  A file pointing to where the extension was installed
  */
-function writeInstallRDFForExtension(aData, aDir, aId, aExtraFile) {
-  if (TEST_UNPACKED) {
-    return writeInstallRDFToDir(aData, aDir, aId, aExtraFile);
-  }
-  return writeInstallRDFToXPI(aData, aDir, aId, aExtraFile);
-}
-
 function promiseWriteInstallRDFForExtension(aData, aDir, aId, aExtraFile) {
   if (TEST_UNPACKED) {
     return promiseWriteInstallRDFToDir(aData, aDir, aId, aExtraFile);
@@ -1108,7 +1070,7 @@ function check_test_completed(aArgs) {
 function ensure_test_completed() {
   for (let i in gExpectedEvents) {
     if (gExpectedEvents[i].length > 0)
-      do_throw("Didn't see all the expected events for " + i);
+      do_throw(`Didn't see all the expected events for ${i}: Still expecting ${gExpectedEvents[i].map(([k]) => k)}`);
   }
   gExpectedEvents = {};
   if (gExpectedInstalls)
@@ -1151,12 +1113,13 @@ gExtensionsJSON.append(EXTENSIONS_DB);
 function promiseInstallWebExtension(aData) {
   let addonFile = createTempWebExtensionFile(aData);
 
+  let promise = promiseWebExtensionStartup();
   return promiseInstallAllFiles([addonFile]).then(installs => {
     Services.obs.notifyObservers(addonFile, "flush-cache-entry");
     // Since themes are disabled by default, it won't start up.
     if (aData.manifest.theme)
       return installs[0].addon;
-    return promiseWebExtensionStartup();
+    return promise.then(() => installs[0].addon);
   });
 }
 
@@ -1263,14 +1226,6 @@ function callback_soon(aFunction) {
       aFunction.apply(null, args);
     }, aFunction.name ? "delayed callback " + aFunction.name : "delayed callback");
   };
-}
-
-function writeProxyFileToDir(aDir, aAddon, aId) {
-  awaitPromise(promiseWriteProxyFileToDir(aDir, aAddon, aId));
-
-  let file = aDir.clone();
-  file.append(aId);
-  return file;
 }
 
 async function serveSystemUpdate(xml, perform_update, testserver) {
@@ -1499,8 +1454,8 @@ async function setupSystemAddonConditions(setup, distroDir) {
   distroDir.leafName = "empty";
 
   let updateList = [];
-  awaitPromise(overrideBuiltIns({ "system": updateList }));
-  startupManager(false);
+  await overrideBuiltIns({ "system": updateList });
+  await promiseStartupManager();
   await promiseShutdownManager();
 
   info("Setting up conditions.");
@@ -1513,8 +1468,8 @@ async function setupSystemAddonConditions(setup, distroDir) {
       updateList = ["system2@tests.mozilla.org", "system3@tests.mozilla.org"];
     }
   }
-  awaitPromise(overrideBuiltIns({ "system": updateList }));
-  startupManager(false);
+  await overrideBuiltIns({ "system": updateList });
+  await promiseStartupManager();
 
   // Make sure the initial state is correct
   info("Checking initial state.");
@@ -1570,8 +1525,8 @@ async function verifySystemAddonState(initialState, finalState = undefined, alre
       updateList = ["system2@tests.mozilla.org", "system3@tests.mozilla.org"];
     }
   }
-  awaitPromise(overrideBuiltIns({ "system": updateList }));
-  startupManager();
+  await overrideBuiltIns({ "system": updateList });
+  await promiseStartupManager();
   await checkInstalledSystemAddons(finalState, distroDir);
 }
 
@@ -1625,4 +1580,51 @@ async function execSystemAddonTest(setupName, setup, test, distroDir, root, test
   }
 
   await promiseShutdownManager();
+}
+
+XPCOMUtils.defineLazyServiceGetter(this, "pluginHost",
+                                  "@mozilla.org/plugin/host;1", "nsIPluginHost");
+
+class MockPluginTag {
+  constructor(opts, enabledState = Ci.nsIPluginTag.STATE_ENABLED) {
+    this.pluginTag = pluginHost.createFakePlugin({
+      handlerURI: "resource://fake-plugin/${Math.random()}.xhtml",
+      mimeEntries: [{type: "application/x-fake-plugin"}],
+      fileName: `${opts.name}.so`,
+      ...opts,
+    });
+    this.pluginTag.enabledState = enabledState;
+
+    this.name = opts.name;
+    this.version = opts.version;
+  }
+  async isBlocklisted() {
+    let state = await Blocklist.getPluginBlocklistState(this.pluginTag);
+    return state == Services.blocklist.STATE_BLOCKED;
+  }
+  get disabled() {
+    return this.pluginTag.enabledState == Ci.nsIPluginTag.STATE_DISABLED;
+  }
+  set disabled(val) {
+    this.enabledState = Ci.nsIPluginTag[val ? "STATE_DISABLED" : "STATE_ENABLED"];
+  }
+  get enabledState() {
+    return this.pluginTag.enabledState;
+  }
+  set enabledState(val) {
+    this.pluginTag.enabledState = val;
+  }
+}
+
+function mockPluginHost(plugins) {
+  let PluginHost = {
+    getPluginTags(count) {
+      count.value = plugins.length;
+      return plugins.map(p => p.pluginTag);
+    },
+
+    QueryInterface: ChromeUtils.generateQI(["nsIPluginHost"]),
+  };
+
+  MockRegistrar.register("@mozilla.org/plugin/host;1", PluginHost);
 }

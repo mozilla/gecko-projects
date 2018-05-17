@@ -8,11 +8,7 @@
 #include "nsError.h"
 #include "nsIChannel.h"
 #include "mozilla/dom/Element.h"
-#include "nsIDOMElement.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMDocumentFragment.h"
-#include "nsIDOMNodeList.h"
 #include "nsIIOService.h"
 #include "nsILoadGroup.h"
 #include "nsIStringBundle.h"
@@ -71,7 +67,7 @@ private:
 class txToFragmentHandlerFactory : public txAOutputHandlerFactory
 {
 public:
-    explicit txToFragmentHandlerFactory(nsIDOMDocumentFragment* aFragment)
+    explicit txToFragmentHandlerFactory(DocumentFragment* aFragment)
         : mFragment(aFragment)
     {
     }
@@ -79,7 +75,7 @@ public:
     TX_DECL_TXAOUTPUTHANDLERFACTORY
 
 private:
-    nsCOMPtr<nsIDOMDocumentFragment> mFragment;
+    RefPtr<DocumentFragment> mFragment;
 };
 
 nsresult
@@ -191,8 +187,7 @@ txToFragmentHandlerFactory::createHandlerWith(txOutputFormat* aFormat,
         {
             txOutputFormat format;
             format.merge(*aFormat);
-            nsCOMPtr<nsINode> node = do_QueryInterface(mFragment);
-            nsCOMPtr<nsIDocument> doc = node->OwnerDoc();
+            nsCOMPtr<nsIDocument> doc = mFragment->OwnerDoc();
 
             if (doc->IsHTMLDocument()) {
                 format.mMethod = eHTMLOutput;
@@ -595,8 +590,7 @@ txMozillaXSLTProcessor::ImportStylesheet(nsINode& aStyle,
         return;
     }
 
-    if (NS_WARN_IF(!aStyle.IsElement() &&
-                   !aStyle.IsNodeOfType(nsINode::eDOCUMENT))) {
+    if (NS_WARN_IF(!aStyle.IsElement() && !aStyle.IsDocument())) {
         aRv.Throw(NS_ERROR_INVALID_ARG);
         return;
     }
@@ -682,9 +676,8 @@ txMozillaXSLTProcessor::TransformToDoc(nsIDocument **aResult,
         if (aResult) {
             txAOutputXMLEventHandler* handler =
                 static_cast<txAOutputXMLEventHandler*>(es.mOutputHandler);
-            nsCOMPtr<nsIDOMDocument> result;
-            handler->getOutputDocument(getter_AddRefs(result));
-            nsCOMPtr<nsIDocument> doc = do_QueryInterface(result);
+            nsCOMPtr<nsIDocument> doc;
+            handler->getOutputDocument(getter_AddRefs(doc));
             MOZ_ASSERT(doc->GetReadyStateEnum() ==
                        nsIDocument::READYSTATE_INTERACTIVE, "Bad readyState");
             doc->SetReadyStateInternal(nsIDocument::READYSTATE_COMPLETE);
@@ -807,7 +800,7 @@ txMozillaXSLTProcessor::SetParameter(const nsAString& aNamespaceURI,
             nsresult rv = value->GetAsISupports(getter_AddRefs(supports));
             NS_ENSURE_SUCCESS(rv, rv);
 
-            nsCOMPtr<nsIDOMNode> node = do_QueryInterface(supports);
+            nsCOMPtr<nsINode> node = do_QueryInterface(supports);
             if (node) {
                 if (!nsContentUtils::CanCallerAccess(node)) {
                     return NS_ERROR_DOM_SECURITY_ERR;
@@ -1395,7 +1388,7 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
             nsresult rv = aValue->GetAsISupports(getter_AddRefs(supports));
             NS_ENSURE_SUCCESS(rv, rv);
 
-            nsCOMPtr<nsIDOMNode> node = do_QueryInterface(supports);
+            nsCOMPtr<nsINode> node = do_QueryInterface(supports);
             if (node) {
                 nsAutoPtr<txXPathNode> xpathNode(txXPathNativeNode::createXPathNode(node));
                 if (!xpathNode) {
@@ -1493,7 +1486,7 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
             uint32_t i;
             for (i = 0; i < count; ++i) {
                 nsISupports *supports = values[i];
-                nsCOMPtr<nsIDOMNode> node = do_QueryInterface(supports);
+                nsCOMPtr<nsINode> node = do_QueryInterface(supports);
                 NS_ASSERTION(node, "Huh, we checked this in SetParameter?");
 
                 nsAutoPtr<txXPathNode> xpathNode(

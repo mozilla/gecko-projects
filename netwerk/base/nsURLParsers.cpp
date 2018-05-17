@@ -224,9 +224,9 @@ nsBaseURLParser::ParsePath(const char *path, int32_t pathLen,
     // XXX PL_strnpbrk would be nice, but it's buggy
 
     // search for first occurrence of either ? or #
-    const char *query_beg = 0, *query_end = 0;
-    const char *ref_beg = 0;
-    const char *p = 0;
+    const char *query_beg = nullptr, *query_end = nullptr;
+    const char *ref_beg = nullptr;
+    const char *p = nullptr;
     for (p = path; p < path + pathLen; ++p) {
         // only match the query string if it precedes the reference fragment
         if (!ref_beg && !query_beg && *p == '?')
@@ -368,7 +368,7 @@ nsNoAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
                                     uint32_t *authPos, int32_t *authLen,
                                     uint32_t *pathPos, int32_t *pathLen)
 {
-    NS_PRECONDITION(specLen >= 0, "unexpected");
+    MOZ_ASSERT(specLen >= 0, "unexpected");
 
     // everything is the path
     uint32_t pos = 0;
@@ -631,7 +631,7 @@ nsAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
                                   uint32_t *authPos, int32_t *authLen,
                                   uint32_t *pathPos, int32_t *pathLen)
 {
-    NS_PRECONDITION(specLen >= 0, "unexpected");
+    MOZ_ASSERT(specLen >= 0, "unexpected");
 
     uint32_t nslash = CountConsecutiveSlashes(spec, specLen);
 
@@ -663,7 +663,7 @@ nsStdURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
                                  uint32_t *authPos, int32_t *authLen,
                                  uint32_t *pathPos, int32_t *pathLen)
 {
-    NS_PRECONDITION(specLen >= 0, "unexpected");
+    MOZ_ASSERT(specLen >= 0, "unexpected");
 
     uint32_t nslash = CountConsecutiveSlashes(spec, specLen);
 

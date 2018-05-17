@@ -57,20 +57,20 @@ class MOZ_STACK_CLASS nsHtml5OtherDocUpdate
 public:
   nsHtml5OtherDocUpdate(nsIDocument* aCurrentDoc, nsIDocument* aExecutorDoc)
   {
-    NS_PRECONDITION(aCurrentDoc, "Node has no doc?");
-    NS_PRECONDITION(aExecutorDoc, "Executor has no doc?");
+    MOZ_ASSERT(aCurrentDoc, "Node has no doc?");
+    MOZ_ASSERT(aExecutorDoc, "Executor has no doc?");
     if (MOZ_LIKELY(aCurrentDoc == aExecutorDoc)) {
       mDocument = nullptr;
     } else {
       mDocument = aCurrentDoc;
-      aCurrentDoc->BeginUpdate(UPDATE_CONTENT_MODEL);
+      aCurrentDoc->BeginUpdate();
     }
   }
 
   ~nsHtml5OtherDocUpdate()
   {
     if (MOZ_UNLIKELY(mDocument)) {
-      mDocument->EndUpdate(UPDATE_CONTENT_MODEL);
+      mDocument->EndUpdate();
     }
   }
 
@@ -127,7 +127,7 @@ nsHtml5TreeOperation::AppendTextToTextNode(const char16_t* aBuffer,
                                            dom::Text* aTextNode,
                                            nsHtml5DocumentBuilder* aBuilder)
 {
-  NS_PRECONDITION(aTextNode, "Got null text node.");
+  MOZ_ASSERT(aTextNode, "Got null text node.");
   MOZ_ASSERT(aBuilder);
   MOZ_ASSERT(aBuilder->IsInDocUpdate());
   uint32_t oldLength = aTextNode->TextLength();
@@ -215,11 +215,10 @@ IsElementOrTemplateContent(nsINode* aNode)
   if (aNode) {
     if (aNode->IsElement()) {
       return true;
-    } else if (aNode->NodeType() == nsINode::DOCUMENT_FRAGMENT_NODE) {
+    }
+    if (aNode->IsDocumentFragment()) {
       // Check if the node is a template content.
-      mozilla::dom::DocumentFragment* frag =
-        static_cast<mozilla::dom::DocumentFragment*>(aNode);
-      nsIContent* fragHost = frag->GetHost();
+      nsIContent* fragHost = aNode->AsDocumentFragment()->GetHost();
       if (fragHost && nsNodeUtils::IsTemplateElement(fragHost)) {
         return true;
       }

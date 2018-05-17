@@ -107,6 +107,7 @@ The following is a sample histogram declaration from ``Histograms.json`` for a h
 
 .. code-block:: json
 
+  {
     "MEMORY_RESIDENT": {
       "record_in_processes": ["main", "content"],
       "alert_emails": ["team@mozilla.xyz"],
@@ -117,7 +118,8 @@ The following is a sample histogram declaration from ``Histograms.json`` for a h
       "n_buckets": 50,
       "bug_numbers": [12345],
       "description": "Resident memory size (KB)"
-    },
+    }
+  }
 
 Histograms which track timings in milliseconds or microseconds should suffix their names with ``"_MS"`` and ``"_US"`` respectively. Flag-type histograms should have the suffix ``"_FLAG"`` in their name.
 
@@ -199,6 +201,17 @@ Optional. This is one of:
 
 
     **Every** new data collection in Firefox needs a `data collection review <https://wiki.mozilla.org/Firefox/Data_Collection#Requesting_Approval>`_ from a data collection peer. Just set the feedback? flag for one of the data peers.
+
+``products``
+-------------
+Optional. This field is a list of products this histogram can be recorded on. Currently-supported values are:
+
+- ``firefox``
+- ``fennec``
+- ``geckoview``
+- ``all`` (record on all products)
+
+If this field is left out it defaults to ``firefox, fennec``.
 
 Changing a histogram
 ====================

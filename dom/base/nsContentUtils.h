@@ -69,9 +69,6 @@ class nsIContentPolicy;
 class nsIContentSecurityPolicy;
 class nsIDocShellTreeItem;
 class nsIDocumentLoaderFactory;
-class nsIDOMDocument;
-class nsIDOMDocumentFragment;
-class nsIDOMEvent;
 class nsIDOMNode;
 class nsIDragSession;
 class nsIEventTarget;
@@ -132,6 +129,7 @@ class ChromeMessageBroadcaster;
 struct CustomElementDefinition;
 class DocumentFragment;
 class Element;
+class Event;
 class EventTarget;
 class HTMLInputElement;
 class IPCDataTransfer;
@@ -591,8 +589,6 @@ public:
   /**
    * Checks whether two nodes come from the same origin.
    */
-  static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
-                                  nsIDOMNode* aUnTrustedNode);
   static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
                                   const nsINode* unTrustedNode);
 
@@ -1346,23 +1342,21 @@ public:
    *
    * @param aChild    The node to fire DOMNodeRemoved at.
    * @param aParent   The parent of aChild.
-   * @param aOwnerDoc The ownerDocument of aChild.
    */
-  static void MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
-                                   nsIDocument* aOwnerDoc);
+  static void MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent);
 
   /**
    * This method creates and dispatches a trusted event.
    * Works only with events which can be created by calling
-   * nsIDOMDocument::CreateEvent() with parameter "Events".
+   * nsIDocument::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
-   *                       nsIDOMEventTarget.
+   *                       EventTarget.
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
                                        nsISupports* aTarget,
@@ -1380,7 +1374,7 @@ public:
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
   static nsresult DispatchTrustedEvent(nsIDocument* aDoc,
@@ -1401,15 +1395,15 @@ public:
   /**
    * This method creates and dispatches a untrusted event.
    * Works only with events which can be created by calling
-   * nsIDOMDocument::CreateEvent() with parameter "Events".
+   * nsIDocument::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
-   *                       nsIDOMEventTarget.
+   *                       EventTarget.
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
                                          nsISupports* aTarget,
@@ -1428,7 +1422,7 @@ public:
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   template <class WidgetEventType>
   static nsresult DispatchUntrustedEvent(nsIDocument* aDoc,
@@ -1453,7 +1447,7 @@ public:
    * object. Use DispatchEventOnlyToChrome if the normal event dispatching is
    * wanted in case aTarget is a chrome object.
    * Works only with events which can be created by calling
-   * nsIDOMDocument::CreateEvent() with parameter "Events".
+   * nsIDocument::CreateEvent() with parameter "Events".
    * @param aDocument      The document which will be used to create the event,
    *                       and whose window's chrome handler will be used to
    *                       dispatch the event.
@@ -1462,7 +1456,7 @@ public:
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchChromeEvent(nsIDocument* aDoc,
                                       nsISupports* aTarget,
@@ -1487,15 +1481,15 @@ public:
    * events to chrome event handler. DispatchEventOnlyToChrome works like
    * DispatchTrustedEvent in the case aTarget is a chrome object.
    * Works only with events which can be created by calling
-   * nsIDOMDocument::CreateEvent() with parameter "Events".
+   * nsIDocument::CreateEvent() with parameter "Events".
    * @param aDoc           The document which will be used to create the event.
    * @param aTarget        The target of the event, should be QIable to
-   *                       nsIDOMEventTarget.
+   *                       EventTarget.
    * @param aEventName     The name of the event.
    * @param aCanBubble     Whether the event can bubble.
    * @param aCancelable    Is the event cancelable.
    * @param aDefaultAction Set to true if default action should be taken,
-   *                       see nsIDOMEventTarget::DispatchEvent.
+   *                       see EventTarget::DispatchEvent.
    */
   static nsresult DispatchEventOnlyToChrome(nsIDocument* aDoc,
                                             nsISupports* aTarget,
@@ -1630,10 +1624,6 @@ public:
    * @param aSanitize whether the fragment should be sanitized prior to
    *        injection
    */
-  static nsresult CreateContextualFragment(nsINode* aContextNode,
-                                           const nsAString& aFragment,
-                                           bool aPreventScriptExecution,
-                                           nsIDOMDocumentFragment** aReturn);
   static already_AddRefed<mozilla::dom::DocumentFragment>
   CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
                            bool aPreventScriptExecution,
@@ -1690,7 +1680,7 @@ public:
                                    nsIDocument* aDocument,
                                    nsTArray<nsString>& aTagStack,
                                    bool aPreventScriptExecution,
-                                   nsIDOMDocumentFragment** aReturn,
+                                   mozilla::dom::DocumentFragment** aReturn,
                                    SanitizeFragments aSanitize = SanitizeSystemPrivileged);
 
   /**
@@ -1869,16 +1859,12 @@ public:
    * @param aTargetSpec the target (like target=, may be empty).
    * @param aClick whether this was a click or not (if false, this method
    *               assumes you just hovered over the link).
-   * @param aIsUserTriggered whether the user triggered the link. This would be
-   *                         false for loads from auto XLinks or from the
-   *                         click() method if we ever implement it.
    * @param aIsTrusted If false, JS Context will be pushed to stack
    *                   when the link is triggered.
    */
   static void TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
                           nsIURI *aLinkURI, const nsString& aTargetSpec,
-                          bool aClick, bool aIsUserTriggered,
-                          bool aIsTrusted);
+                          bool aClick, bool aIsTrusted);
 
   /**
    * Get the link location.
@@ -2109,7 +2095,7 @@ public:
    */
   static nsresult DispatchXULCommand(nsIContent* aTarget,
                                      bool aTrusted,
-                                     nsIDOMEvent* aSourceEvent = nullptr,
+                                     mozilla::dom::Event* aSourceEvent = nullptr,
                                      nsIPresShell* aShell = nullptr,
                                      bool aCtrl = false,
                                      bool aAlt = false,
@@ -2202,7 +2188,7 @@ public:
   static already_AddRefed<nsContentList>
   GetElementsByClassName(nsINode* aRootNode, const nsAString& aClasses)
   {
-    NS_PRECONDITION(aRootNode, "Must have root node");
+    MOZ_ASSERT(aRootNode, "Must have root node");
 
     return GetFuncStringContentList<nsCacheableFuncStringHTMLCollection>(aRootNode,
                                                                          MatchClassNames,
@@ -3130,12 +3116,6 @@ public:
    * to their target. Instead, the key event should be handled by chrome only.
    */
   static bool ShouldBlockReservedKeys(mozilla::WidgetKeyboardEvent* aKeyEvent);
-
-  /**
-   * Walks up the tree from aElement until it finds an element that is
-   * not native anonymous content.  aElement must be NAC itself.
-   */
-  static Element* GetClosestNonNativeAnonymousAncestor(Element* aElement);
 
   /**
    * Returns the nsIPluginTag for the plugin we should try to use for a given

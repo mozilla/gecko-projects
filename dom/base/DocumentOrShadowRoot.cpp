@@ -34,6 +34,35 @@ DocumentOrShadowRoot::EnsureDOMStyleSheets()
   return *mDOMStyleSheets;
 }
 
+void
+DocumentOrShadowRoot::AppendSheet(StyleSheet& aSheet)
+{
+  aSheet.SetAssociatedDocumentOrShadowRoot(
+    this, StyleSheet::OwnedByDocumentOrShadowRoot);
+  mStyleSheets.AppendElement(&aSheet);
+}
+
+void
+DocumentOrShadowRoot::InsertSheetAt(size_t aIndex, StyleSheet& aSheet)
+{
+  aSheet.SetAssociatedDocumentOrShadowRoot(
+    this, StyleSheet::OwnedByDocumentOrShadowRoot);
+  mStyleSheets.InsertElementAt(aIndex, &aSheet);
+}
+
+already_AddRefed<StyleSheet>
+DocumentOrShadowRoot::RemoveSheet(StyleSheet& aSheet)
+{
+  auto index = mStyleSheets.IndexOf(&aSheet);
+  if (index == mStyleSheets.NoIndex) {
+    return nullptr;
+  }
+  RefPtr<StyleSheet> sheet = Move(mStyleSheets[index]);
+  mStyleSheets.RemoveElementAt(index);
+  sheet->ClearAssociatedDocumentOrShadowRoot();
+  return sheet.forget();
+}
+
 Element*
 DocumentOrShadowRoot::GetElementById(const nsAString& aElementId)
 {
@@ -281,6 +310,49 @@ DocumentOrShadowRoot::ElementsFromPointHelper(float aX, float aY,
       }
     }
   }
+}
+
+Element*
+DocumentOrShadowRoot::AddIDTargetObserver(nsAtom* aID,
+                                          IDTargetObserver aObserver,
+                                          void* aData, bool aForImage)
+{
+  nsDependentAtomString id(aID);
+
+  if (!CheckGetElementByIdArg(id)) {
+    return nullptr;
+  }
+
+  nsIdentifierMapEntry* entry = mIdentifierMap.PutEntry(aID);
+  NS_ENSURE_TRUE(entry, nullptr);
+
+  entry->AddContentChangeCallback(aObserver, aData, aForImage);
+  return aForImage ? entry->GetImageIdElement() : entry->GetIdElement();
+}
+
+void
+DocumentOrShadowRoot::RemoveIDTargetObserver(nsAtom* aID,
+                                             IDTargetObserver aObserver,
+                                             void* aData, bool aForImage)
+{
+  nsDependentAtomString id(aID);
+
+  if (!CheckGetElementByIdArg(id)) {
+    return;
+  }
+
+  nsIdentifierMapEntry* entry = mIdentifierMap.GetEntry(aID);
+  if (!entry) {
+    return;
+  }
+
+  entry->RemoveContentChangeCallback(aObserver, aData, aForImage);
+}
+
+void
+DocumentOrShadowRoot::ReportEmptyGetElementByIdArg()
+{
+  nsContentUtils::ReportEmptyGetElementByIdArg(AsNode().OwnerDoc());
 }
 
 }

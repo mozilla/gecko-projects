@@ -1,6 +1,9 @@
 job-defaults:
+    target:
+        by-test-platform:
+            android-7.0-x86/opt: geckoview-androidTest.apk
+            default: null
     mozharness:
-        no-read-buildbot-config: true
         script:
             by-test-platform:
                 android.*: android_emulator_unittest.py
@@ -10,6 +13,9 @@ job-defaults:
                 android-4.2-x86/opt:
                     - android/android_common.py
                     - android/androidx86.py
+                android-7.0-x86/opt:
+                    - android/android_common.py
+                    - android/androidx86_7_0.py
                 android.*:
                     - android/android_common.py
                     - android/androidarm_4_3.py
@@ -29,10 +35,7 @@ mochitest:
             default: mochitest/plain-chunked
     treeherder-symbol: M()
     loopback-video: true
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
-            default: built-projects
+    run-on-projects: built-projects
     instance-size:
         by-test-platform:
             linux64-jsdcov/opt: xlarge
@@ -41,6 +44,7 @@ mochitest:
     chunks:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 48
+            android-7.0-x86/opt: 4
             android.*: 24
             linux.*/debug: 16
             linux64-asan/opt: 10
@@ -78,10 +82,7 @@ mochitest-a11y:
     treeherder-symbol: M(a11y)
     loopback-video: true
     e10s: false
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['mozilla-central', 'try']
-            default: built-projects
+    run-on-projects: built-projects
     mozharness:
         mochitest-flavor: a11y
     tier:
@@ -167,6 +168,7 @@ mochitest-chrome:
     chunks:
         by-test-platform:
             android-4.3-arm7-api-16/debug: 8
+            android-7.0-x86/opt: 1
             android.*: 4
             default: 3
     max-run-time:
@@ -256,10 +258,7 @@ mochitest-gpu:
     description: "Mochitest GPU run"
     suite: mochitest/gpu
     treeherder-symbol: M(gpu)
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
-            default: built-projects
+    run-on-projects: built-projects
     loopback-video: true
     instance-size:
         by-test-platform:
@@ -293,10 +292,7 @@ mochitest-media:
         by-test-platform:
             windows10-64-ccov/debug: 7200
             default: 5400
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
-            default: built-projects
+    run-on-projects: built-projects
     loopback-video: true
     virtualization:
         by-test-platform:
@@ -308,6 +304,7 @@ mochitest-media:
             default: large
     chunks:
         by-test-platform:
+            android-7.0-x86/opt: 1
             macosx64.*: 1
             windows10-64.*: 1
             default: 3
@@ -368,7 +365,6 @@ mochitest-webgl:
     run-on-projects:
         by-test-platform:
             windows10-64-ccov/.*: []  # Do not run on Windows ccov, see bug 1419475.
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
             default: built-projects
     virtualization: virtual-with-gpu
     chunks:

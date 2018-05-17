@@ -12,7 +12,7 @@ ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 ChromeUtils.import("resource://gre/modules/ctypes.jsm", this);
 ChromeUtils.import("resource://gre/modules/UpdateTelemetry.jsm", this);
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm", this);
-Cu.importGlobalProperties(["XMLHttpRequest"]);
+Cu.importGlobalProperties(["DOMParser", "XMLHttpRequest"]);
 
 const UPDATESERVICE_CID = Components.ID("{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}");
 const UPDATESERVICE_CONTRACTID = "@mozilla.org/updates/update-service;1";
@@ -1228,9 +1228,9 @@ UpdatePatch.prototype = {
     this._properties.state = val;
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIUpdatePatch,
-                                         Ci.nsIPropertyBag,
-                                         Ci.nsIWritablePropertyBag])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdatePatch,
+                                          Ci.nsIPropertyBag,
+                                          Ci.nsIWritablePropertyBag])
 };
 
 /**
@@ -1266,7 +1266,6 @@ function Update(update) {
       continue;
     }
 
-    patchElement.QueryInterface(Ci.nsIDOMElement);
     try {
       patch = new UpdatePatch(patchElement);
     } catch (e) {
@@ -1531,9 +1530,9 @@ Update.prototype = {
     return null;
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIUpdate,
-                                         Ci.nsIPropertyBag,
-                                         Ci.nsIWritablePropertyBag])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdate,
+                                          Ci.nsIPropertyBag,
+                                          Ci.nsIWritablePropertyBag])
 };
 
 const UpdateServiceFactory = {
@@ -2481,10 +2480,10 @@ UpdateService.prototype = {
                                     flags: Ci.nsIClassInfo.SINGLETON}),
 
   _xpcom_factory: UpdateServiceFactory,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIApplicationUpdateService,
-                                         Ci.nsIUpdateCheckListener,
-                                         Ci.nsITimerCallback,
-                                         Ci.nsIObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIApplicationUpdateService,
+                                          Ci.nsIUpdateCheckListener,
+                                          Ci.nsITimerCallback,
+                                          Ci.nsIObserver])
 };
 
 /**
@@ -2586,8 +2585,7 @@ UpdateManager.prototype = {
                      createInstance(Ci.nsIFileInputStream);
     fileStream.init(file, FileUtils.MODE_RDONLY, FileUtils.PERMS_FILE, 0);
     try {
-      var parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                   createInstance(Ci.nsIDOMParser);
+      var parser = new DOMParser();
       var doc = parser.parseFromStream(fileStream, "UTF-8",
                                        fileStream.available(), "text/xml");
 
@@ -2599,7 +2597,6 @@ UpdateManager.prototype = {
             updateElement.localName != "update")
           continue;
 
-        updateElement.QueryInterface(Ci.nsIDOMElement);
         let update;
         try {
           update = new Update(updateElement);
@@ -2697,8 +2694,7 @@ UpdateManager.prototype = {
     const EMPTY_UPDATES_DOCUMENT_OPEN = "<?xml version=\"1.0\"?><updates xmlns=\"http://www.mozilla.org/2005/app-update\">";
     const EMPTY_UPDATES_DOCUMENT_CLOSE = "</updates>";
     try {
-      var parser = Cc["@mozilla.org/xmlextras/domparser;1"].
-                   createInstance(Ci.nsIDOMParser);
+      var parser = new DOMParser();
       var doc = parser.parseFromString(EMPTY_UPDATES_DOCUMENT_OPEN + EMPTY_UPDATES_DOCUMENT_CLOSE, "text/xml");
 
       for (var i = 0; i < updates.length; ++i) {
@@ -2858,7 +2854,7 @@ UpdateManager.prototype = {
   },
 
   classID: Components.ID("{093C2356-4843-4C65-8709-D7DBCBBE7DFB}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIUpdateManager, Ci.nsIObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdateManager, Ci.nsIObserver])
 };
 
 /**
@@ -3034,7 +3030,6 @@ Checker.prototype = {
           updateElement.localName != "update")
         continue;
 
-      updateElement.QueryInterface(Ci.nsIDOMElement);
       let update;
       try {
         update = new Update(updateElement);
@@ -3072,7 +3067,7 @@ Checker.prototype = {
   /**
    * The XMLHttpRequest succeeded and the document was loaded.
    * @param   event
-   *          The nsIDOMEvent for the load
+   *          The Event for the load
    */
   onLoad: function UC_onLoad(event) {
     LOG("Checker:onLoad - request completed downloading document");
@@ -3113,7 +3108,7 @@ Checker.prototype = {
   /**
    * There was an error of some kind during the XMLHttpRequest
    * @param   event
-   *          The nsIDOMEvent for the error
+   *          The Event for the error
    */
   onError: function UC_onError(event) {
     var request = event.target;
@@ -3182,7 +3177,7 @@ Checker.prototype = {
   },
 
   classID: Components.ID("{898CDC9B-E43F-422F-9CC4-2F6291B415A3}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIUpdateChecker])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdateChecker])
 };
 
 /**
@@ -3825,9 +3820,9 @@ Downloader.prototype = {
     throw Cr.NS_NOINTERFACE;
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIRequestObserver,
-                                         Ci.nsIProgressEventSink,
-                                         Ci.nsIInterfaceRequestor])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIRequestObserver,
+                                          Ci.nsIProgressEventSink,
+                                          Ci.nsIInterfaceRequestor])
 };
 
 /**
@@ -4121,7 +4116,7 @@ UpdatePrompt.prototype = {
   classDescription: "Update Prompt",
   contractID: "@mozilla.org/updates/update-prompt;1",
   classID: Components.ID("{27ABA825-35B5-4018-9FDD-F99250A0E722}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIUpdatePrompt])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdatePrompt])
 };
 
 var components = [UpdateService, Checker, UpdatePrompt, UpdateManager];

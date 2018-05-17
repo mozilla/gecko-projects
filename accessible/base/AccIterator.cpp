@@ -18,7 +18,7 @@ using namespace mozilla::a11y;
 // AccIterator
 ////////////////////////////////////////////////////////////////////////////////
 
-AccIterator::AccIterator(Accessible* aAccessible,
+AccIterator::AccIterator(const Accessible* aAccessible,
                          filters::FilterFuncPtr aFilterFunc) :
   mFilterFunc(aFilterFunc)
 {
@@ -63,7 +63,7 @@ AccIterator::Next()
 ////////////////////////////////////////////////////////////////////////////////
 // nsAccIterator::IteratorState
 
-AccIterator::IteratorState::IteratorState(Accessible* aParent,
+AccIterator::IteratorState::IteratorState(const Accessible* aParent,
                                           IteratorState *mParentState) :
   mParent(aParent), mIndex(0), mParentState(mParentState)
 {
@@ -382,7 +382,7 @@ ItemIterator::Next()
 // XULTreeItemIterator
 ////////////////////////////////////////////////////////////////////////////////
 
-XULTreeItemIterator::XULTreeItemIterator(XULTreeAccessible* aXULTree,
+XULTreeItemIterator::XULTreeItemIterator(const XULTreeAccessible* aXULTree,
                                          nsITreeView* aTreeView,
                                          int32_t aRowIdx) :
   mXULTree(aXULTree), mTreeView(aTreeView), mRowCount(-1),

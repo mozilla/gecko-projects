@@ -76,6 +76,47 @@ should-restart-ok = Restart { -brand-short-name } now
 cancel-no-restart-button = Cancel
 restart-later = Restart Later
 
+## Extension Control Notifications
+##
+## These strings are used to inform the user
+## about changes made by extensions to browser settings.
+##
+## <img data-l10n-name="icon"/> is going to be replaced by the extension icon.
+##
+## Variables:
+##   $name (String): name of the extension
+
+# This string is shown to notify the user that their home page
+# is being controlled by an extension.
+extension-controlled-homepage-override = An extension, <img data-l10n-name="icon"/> { $name }, is controlling your home page.
+
+# This string is shown to notify the user that their new tab page
+# is being controlled by an extension.
+extension-controlled-new-tab-url = An extension, <img data-l10n-name="icon"/> { $name }, is controlling your New Tab page.
+
+# This string is shown to notify the user that the default search engine
+# is being controlled by an extension.
+extension-controlled-default-search = An extension, <img data-l10n-name="icon"/> { $name }, has set your default search engine.
+
+# This string is shown to notify the user that Container Tabs
+# are being enabled by an extension.
+extension-controlled-privacy-containers = An extension, <img data-l10n-name="icon"/> { $name }, requires Container Tabs.
+
+# This string is shown to notify the user that their tracking protection preferences
+# are being controlled by an extension.
+extension-controlled-websites-tracking-protection-mode = An extension, <img data-l10n-name="icon"/> { $name }, is controlling tracking protection.
+
+# This string is shown to notify the user that their proxy configuration preferences
+# are being controlled by an extension.
+extension-controlled-proxy-config = An extension, <img data-l10n-name="icon"/> { $name }, is controlling how { -brand-short-name } connects to the internet.
+
+# This string is shown after the user disables an extension to notify the user
+# how to enable an extension that they disabled.
+#
+# <img data-l10n-name="addons-icon"/> will be replaced with Add-ons icon
+# <img data-l10n-name="menu-icon"/> will be replaced with Menu icon
+extension-controlled-enable = To enable the extension go to <img data-l10n-name="addons-icon"/> Add-ons in the <img data-l10n-name="menu-icon"/> menu.
+
 ## Preferences UI Search Results
 
 search-results-header = Search Results
@@ -112,15 +153,9 @@ set-as-my-default-browser =
     .label = Make Default…
     .accesskey = D
 
-startup-page = When { -brand-short-name } starts
+startup-restore-previous-session =
+    .label = Restore previous session
     .accesskey = s
-
-startup-user-homepage =
-    .label = Show your home page
-startup-blank-page =
-    .label = Show a blank page
-startup-prev-session =
-    .label = Show your windows and tabs from last time
 
 disable-extension =
     .label = Disable Extension
@@ -219,6 +254,10 @@ choose-button =
 translate-web-pages =
     .label = Translate web content
     .accesskey = T
+
+# The <img> element is replaced by the logo of the provider
+# used to provide machine translations for web pages.
+translate-attribution = Translations by <img data-l10n-name="logo"/>
 
 translate-exceptions =
     .label = Exceptions…
@@ -364,6 +403,8 @@ browsing-search-on-start-typing =
 
 network-proxy-title = Network Proxy
 
+network-proxy-connection-description = Configure how { -brand-short-name } connects to the internet.
+
 network-proxy-connection-learn-more = Learn More
 
 network-proxy-connection-settings =
@@ -498,6 +539,16 @@ sync-signedout-account-signin =
     .label = Sign In…
     .accesskey = I
 
+# This message contains two links and two icon images.
+#   `<img data-l10n-name="android-icon"/>` - Android logo icon
+#   `<a data-l10n-name="android-link">` - Link to Android Download
+#   `<img data-l10n-name="ios-icon">` - iOS logo icon
+#   `<a data-l10n-name="ios-link">` - Link to iOS Download
+#
+# They can be moved within the sentence as needed to adapt
+# to your language, but should not be changed or translated.
+sync-mobile-promo = Download Firefox for <img data-l10n-name="android-icon"/> <a data-l10n-name="android-link">Android</a> or <img data-l10n-name="ios-icon"/> <a data-l10n-name="ios-link">iOS</a> to sync with your mobile device.
+
 ## Sync Section - Signed in
 
 sync-profile-picture =
@@ -619,6 +670,25 @@ forms-master-pw-change =
 
 history-header = History
 
+# This label is followed, on the same line, by a dropdown list of options
+# (Remember history, etc.).
+# In English it visually creates a full sentence, e.g.
+# "Firefox will" + "Remember history".
+#
+# If this doesn't work for your language, you can translate this message:
+#   - Simply as "Firefox", moving the verb into each option.
+#     This will result in "Firefox" + "Will remember history", etc.
+#   - As a stand-alone message, for example "Firefox history settings:".
+history-remember-label = { -brand-short-name } will
+    .accesskey = w
+
+history-remember-option-all =
+    .label = Remember history
+history-remember-option-never =
+    .label = Never remember history
+history-remember-option-custom =
+    .label = Use custom settings for history
+
 history-remember-description = { -brand-short-name } will remember your browsing, download, form and search history.
 history-dontremember-description = { -brand-short-name } will use the same settings as private browsing, and will not remember any history as you browse the Web.
 
@@ -626,8 +696,8 @@ history-private-browsing-permanent =
     .label = Always use private browsing mode
     .accesskey = p
 
-history-remember-option =
-    .label = Remember my browsing and download history
+history-remember-browser-option =
+    .label = Remember browsing and download history
     .accesskey = b
 
 history-remember-search-option =
@@ -649,6 +719,13 @@ history-clear-button =
 ## Privacy Section - Site Data
 
 sitedata-header = Cookies and Site Data
+
+sitedata-total-size-calculating = Calculating site data and cache size…
+
+# Variables:
+#   $value (Number) - Value of the unit (for example: 4.6, 500)
+#   $unit (String) - Name of the unit (for example: "bytes", "KB")
+sitedata-total-size = Your stored cookies, site data and cache are currently using { $value } { $unit } of disk space.
 
 sitedata-learn-more = Learn more
 
@@ -801,6 +878,10 @@ collection-health-report =
     .label = Allow { -brand-short-name } to send technical and interaction data to { -vendor-short-name }
     .accesskey = r
 collection-health-report-link = Learn more
+
+collection-studies =
+    .label = Allow { -brand-short-name } to install and run studies
+collection-studies-link = View { -brand-short-name } studies
 
 # This message is displayed above disabled data sharing options in developer builds
 # or builds with no Telemetry support available.

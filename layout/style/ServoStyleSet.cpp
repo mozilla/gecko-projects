@@ -195,15 +195,6 @@ ServoStyleSet::Shutdown()
 }
 
 void
-ServoStyleSet::InvalidateStyleForCSSRuleChanges()
-{
-  MOZ_ASSERT(StylistNeedsUpdate());
-  if (nsPresContext* pc = GetPresContext()) {
-    pc->RestyleManager()->PostRestyleEventForCSSRuleChanges();
-  }
-}
-
-void
 ServoStyleSet::RecordShadowStyleChange(ShadowRoot& aShadowRoot)
 {
   // TODO(emilio): We could keep track of the actual shadow roots that need
@@ -384,17 +375,6 @@ ServoStyleSet::SetAuthorStyleDisabled(bool aStyleDisabled)
   // to rebuild stylist for this change. But we have bug around this, and we
   // may want to rethink how things should work. See bug 1437785.
   SetStylistStyleSheetsDirty();
-}
-
-void
-ServoStyleSet::BeginUpdate()
-{
-}
-
-nsresult
-ServoStyleSet::EndUpdate()
-{
-  return NS_OK;
 }
 
 already_AddRefed<ComputedStyle>
@@ -713,8 +693,7 @@ ServoStyleSet::ResolveXULTreePseudoStyle(dom::Element* aParentElement,
 
 // manage the set of style sheets in the style set
 nsresult
-ServoStyleSet::AppendStyleSheet(SheetType aType,
-                                ServoStyleSheet* aSheet)
+ServoStyleSet::AppendStyleSheet(SheetType aType, StyleSheet* aSheet)
 {
   MOZ_ASSERT(aSheet);
   MOZ_ASSERT(aSheet->IsApplicable());
@@ -740,8 +719,7 @@ ServoStyleSet::AppendStyleSheet(SheetType aType,
 }
 
 nsresult
-ServoStyleSet::PrependStyleSheet(SheetType aType,
-                                 ServoStyleSheet* aSheet)
+ServoStyleSet::PrependStyleSheet(SheetType aType, StyleSheet* aSheet)
 {
   MOZ_ASSERT(aSheet);
   MOZ_ASSERT(aSheet->IsApplicable());
@@ -768,8 +746,7 @@ ServoStyleSet::PrependStyleSheet(SheetType aType,
 }
 
 nsresult
-ServoStyleSet::RemoveStyleSheet(SheetType aType,
-                                ServoStyleSheet* aSheet)
+ServoStyleSet::RemoveStyleSheet(SheetType aType, StyleSheet* aSheet)
 {
   MOZ_ASSERT(aSheet);
   MOZ_ASSERT(IsCSSSheetType(aType));
@@ -790,7 +767,7 @@ ServoStyleSet::RemoveStyleSheet(SheetType aType,
 
 nsresult
 ServoStyleSet::ReplaceSheets(SheetType aType,
-                             const nsTArray<RefPtr<ServoStyleSheet>>& aNewSheets)
+                             const nsTArray<RefPtr<StyleSheet>>& aNewSheets)
 {
   // Gecko uses a two-dimensional array keyed by sheet type, whereas Servo
   // stores a flattened list. This makes ReplaceSheets a pretty clunky thing
@@ -825,8 +802,8 @@ ServoStyleSet::ReplaceSheets(SheetType aType,
 
 nsresult
 ServoStyleSet::InsertStyleSheetBefore(SheetType aType,
-                                      ServoStyleSheet* aNewSheet,
-                                      ServoStyleSheet* aReferenceSheet)
+                                      StyleSheet* aNewSheet,
+                                      StyleSheet* aReferenceSheet)
 {
   MOZ_ASSERT(aNewSheet);
   MOZ_ASSERT(aReferenceSheet);
@@ -861,7 +838,7 @@ ServoStyleSet::SheetCount(SheetType aType) const
   return mSheets[aType].Length();
 }
 
-ServoStyleSheet*
+StyleSheet*
 ServoStyleSet::StyleSheetAt(SheetType aType, int32_t aIndex) const
 {
   MOZ_ASSERT(IsCSSSheetType(aType));
@@ -882,14 +859,13 @@ ServoStyleSet::AppendAllNonDocumentAuthorSheets(nsTArray<StyleSheet*>& aArray) c
 }
 
 nsresult
-ServoStyleSet::RemoveDocStyleSheet(ServoStyleSheet* aSheet)
+ServoStyleSet::RemoveDocStyleSheet(StyleSheet* aSheet)
 {
   return RemoveStyleSheet(SheetType::Doc, aSheet);
 }
 
 nsresult
-ServoStyleSet::AddDocStyleSheet(ServoStyleSheet* aSheet,
-                                nsIDocument* aDocument)
+ServoStyleSet::AddDocStyleSheet(StyleSheet* aSheet, nsIDocument* aDocument)
 {
   MOZ_ASSERT(aSheet->IsApplicable());
   MOZ_ASSERT(aSheet->RawContents(), "Raw sheet should be in place by this point.");
@@ -903,7 +879,7 @@ ServoStyleSet::AddDocStyleSheet(ServoStyleSheet* aSheet,
 
   if (index < mSheets[SheetType::Doc].Length()) {
     // This case is insert before.
-    ServoStyleSheet *beforeSheet = mSheets[SheetType::Doc][index];
+    StyleSheet *beforeSheet = mSheets[SheetType::Doc][index];
     InsertSheetOfType(SheetType::Doc, aSheet, beforeSheet);
 
     if (mRawSet) {
@@ -1067,6 +1043,8 @@ ServoStyleSet::StyleNewSubtree(Element* aRoot)
 {
   MOZ_ASSERT(GetPresContext());
   MOZ_ASSERT(!aRoot->HasServoData());
+  MOZ_ASSERT(aRoot->GetFlattenedTreeParentNodeForStyle(),
+             "Not in the flat tree? Fishy!");
   PreTraverseSync();
   AutoPrepareTraversal guard(this);
 
@@ -1139,7 +1117,7 @@ ServoStyleSet::SetStylistXBLStyleSheetsDirty()
 }
 
 void
-ServoStyleSet::RuleAdded(ServoStyleSheet& aSheet, css::Rule& aRule)
+ServoStyleSet::RuleAdded(StyleSheet& aSheet, css::Rule& aRule)
 {
   if (mStyleRuleMap) {
     mStyleRuleMap->RuleAdded(aSheet, aRule);
@@ -1150,7 +1128,7 @@ ServoStyleSet::RuleAdded(ServoStyleSheet& aSheet, css::Rule& aRule)
 }
 
 void
-ServoStyleSet::RuleRemoved(ServoStyleSheet& aSheet, css::Rule& aRule)
+ServoStyleSet::RuleRemoved(StyleSheet& aSheet, css::Rule& aRule)
 {
   if (mStyleRuleMap) {
     mStyleRuleMap->RuleRemoved(aSheet, aRule);
@@ -1161,7 +1139,7 @@ ServoStyleSet::RuleRemoved(ServoStyleSheet& aSheet, css::Rule& aRule)
 }
 
 void
-ServoStyleSet::RuleChanged(ServoStyleSheet& aSheet, css::Rule* aRule)
+ServoStyleSet::RuleChanged(StyleSheet& aSheet, css::Rule* aRule)
 {
   // FIXME(emilio): Could be more granular based on aRule.
   MarkOriginsDirty(aSheet.GetOrigin());
@@ -1179,14 +1157,14 @@ ServoStyleSet::AssertTreeIsClean()
 #endif
 
 bool
-ServoStyleSet::GetKeyframesForName(nsAtom* aName,
+ServoStyleSet::GetKeyframesForName(const Element& aElement,
+                                   nsAtom* aName,
                                    const nsTimingFunction& aTimingFunction,
                                    nsTArray<Keyframe>& aKeyframes)
 {
-  // TODO(emilio): This may need to look at the element itself for handling
-  // @keyframes properly in Shadow DOM.
   MOZ_ASSERT(!StylistNeedsUpdate());
   return Servo_StyleSet_GetKeyframesForName(mRawSet.get(),
+                                            &aElement,
                                             aName,
                                             &aTimingFunction,
                                             &aKeyframes);
@@ -1520,7 +1498,7 @@ ServoStyleSet::MayTraverseFrom(const Element* aElement)
   }
 
   if (!parent->IsElement()) {
-    MOZ_ASSERT(parent->IsNodeOfType(nsINode::eDOCUMENT));
+    MOZ_ASSERT(parent->IsDocument());
     return true;
   }
 
@@ -1539,16 +1517,14 @@ ServoStyleSet::ShouldTraverseInParallel() const
 }
 
 void
-ServoStyleSet::PrependSheetOfType(SheetType aType,
-                                  ServoStyleSheet* aSheet)
+ServoStyleSet::PrependSheetOfType(SheetType aType, StyleSheet* aSheet)
 {
   aSheet->AddStyleSet(this);
   mSheets[aType].InsertElementAt(0, aSheet);
 }
 
 void
-ServoStyleSet::AppendSheetOfType(SheetType aType,
-                                 ServoStyleSheet* aSheet)
+ServoStyleSet::AppendSheetOfType(SheetType aType, StyleSheet* aSheet)
 {
   aSheet->AddStyleSet(this);
   mSheets[aType].AppendElement(aSheet);
@@ -1556,8 +1532,8 @@ ServoStyleSet::AppendSheetOfType(SheetType aType,
 
 void
 ServoStyleSet::InsertSheetOfType(SheetType aType,
-                                 ServoStyleSheet* aSheet,
-                                 ServoStyleSheet* aBeforeSheet)
+                                 StyleSheet* aSheet,
+                                 StyleSheet* aBeforeSheet)
 {
   for (uint32_t i = 0; i < mSheets[aType].Length(); ++i) {
     if (mSheets[aType][i] == aBeforeSheet) {
@@ -1569,8 +1545,7 @@ ServoStyleSet::InsertSheetOfType(SheetType aType,
 }
 
 void
-ServoStyleSet::RemoveSheetOfType(SheetType aType,
-                                 ServoStyleSheet* aSheet)
+ServoStyleSet::RemoveSheetOfType(SheetType aType, StyleSheet* aSheet)
 {
   for (uint32_t i = 0; i < mSheets[aType].Length(); ++i) {
     if (mSheets[aType][i] == aSheet) {

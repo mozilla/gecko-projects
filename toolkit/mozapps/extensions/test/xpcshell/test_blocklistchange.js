@@ -518,13 +518,7 @@ var WindowWatcher = {
 
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIWindowWatcher)
-     || iid.equals(Ci.nsISupports))
-      return this;
-
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIWindowWatcher"])
 };
 
 MockRegistrar.register("@mozilla.org/embedcomp/window-watcher;1", WindowWatcher);
@@ -536,13 +530,7 @@ var InstallConfirm = {
     });
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.amIWebInstallPrompt)
-     || iid.equals(Ci.nsISupports))
-      return this;
-
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["amIWebInstallPrompt"])
 };
 
 var InstallConfirmFactory = {
@@ -629,8 +617,7 @@ function Pmanual_update(aVersion) {
   for (let name of ["soft1", "soft2", "soft3", "soft4", "hard1", "regexp1"]) {
     Pinstalls.push(
       AddonManager.getInstallForURL(
-        `http://example.com/addons/blocklist_${name}_${aVersion}.xpi`,
-        null, "application/x-xpinstall"));
+        `http://example.com/addons/blocklist_${name}_${aVersion}.xpi`, "application/x-xpinstall"));
   }
 
   return Promise.all(Pinstalls).then(installs => {
@@ -704,13 +691,13 @@ function run_test() {
 }
 
 add_task(async function init() {
-  writeInstallRDFForExtension(softblock1_1, profileDir);
-  writeInstallRDFForExtension(softblock2_1, profileDir);
-  writeInstallRDFForExtension(softblock3_1, profileDir);
-  writeInstallRDFForExtension(softblock4_1, profileDir);
-  writeInstallRDFForExtension(hardblock_1, profileDir);
-  writeInstallRDFForExtension(regexpblock_1, profileDir);
-  startupManager();
+  await promiseWriteInstallRDFForExtension(softblock1_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_1, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_1, profileDir);
+  await promiseStartupManager();
 
   let [/* s1 */, /* s2 */, /* s3 */, s4, /* h, r */] = await promiseAddonsByIDs(ADDON_IDS);
   s4.userDisabled = true;
@@ -804,7 +791,7 @@ add_task(async function update_schema_2() {
 
   await changeXPIDBVersion(100);
   gAppInfo.version = "2";
-  await promiseStartupManager(true);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -828,7 +815,7 @@ add_task(async function update_schema_3() {
   await promiseShutdownManager();
   await changeXPIDBVersion(100);
   gAppInfo.version = "2.5";
-  await promiseStartupManager(true);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -844,7 +831,7 @@ add_task(async function update_schema_4() {
   await promiseShutdownManager();
 
   await changeXPIDBVersion(100);
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -861,7 +848,7 @@ add_task(async function update_schema_5() {
 
   await changeXPIDBVersion(100);
   gAppInfo.version = "1";
-  await promiseStartupManager(true);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -958,20 +945,20 @@ add_task(async function run_addon_change_test() {
 add_task(async function run_addon_change_2() {
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_2, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock1_2.id), Date.now() + 10000);
-  writeInstallRDFForExtension(softblock2_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_2, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock2_2.id), Date.now() + 10000);
-  writeInstallRDFForExtension(softblock3_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_2, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock3_2.id), Date.now() + 10000);
-  writeInstallRDFForExtension(softblock4_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_2, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock4_2.id), Date.now() + 10000);
-  writeInstallRDFForExtension(hardblock_2, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_2, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, hardblock_2.id), Date.now() + 10000);
-  writeInstallRDFForExtension(regexpblock_2, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_2, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, regexpblock_2.id), Date.now() + 10000);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -994,20 +981,20 @@ add_task(async function run_addon_change_3() {
 
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock1_3.id), Date.now() + 20000);
-  writeInstallRDFForExtension(softblock2_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock2_3.id), Date.now() + 20000);
-  writeInstallRDFForExtension(softblock3_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock3_3.id), Date.now() + 20000);
-  writeInstallRDFForExtension(softblock4_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock4_3.id), Date.now() + 20000);
-  writeInstallRDFForExtension(hardblock_3, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, hardblock_3.id), Date.now() + 20000);
-  writeInstallRDFForExtension(regexpblock_3, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, regexpblock_3.id), Date.now() + 20000);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1022,20 +1009,20 @@ add_task(async function run_addon_change_3() {
 add_task(async function run_addon_change_4() {
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock1_1.id), Date.now() + 30000);
-  writeInstallRDFForExtension(softblock2_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock2_1.id), Date.now() + 30000);
-  writeInstallRDFForExtension(softblock3_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock3_1.id), Date.now() + 30000);
-  writeInstallRDFForExtension(softblock4_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock4_1.id), Date.now() + 30000);
-  writeInstallRDFForExtension(hardblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, hardblock_1.id), Date.now() + 30000);
-  writeInstallRDFForExtension(regexpblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, regexpblock_1.id), Date.now() + 30000);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1062,17 +1049,17 @@ add_task(async function run_addon_change_2_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_2, profileDir);
-  writeInstallRDFForExtension(softblock2_2, profileDir);
-  writeInstallRDFForExtension(softblock3_2, profileDir);
-  writeInstallRDFForExtension(softblock4_2, profileDir);
-  writeInstallRDFForExtension(hardblock_2, profileDir);
-  writeInstallRDFForExtension(regexpblock_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_2, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_2, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_2, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_2, profileDir);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, /* s4 */, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1094,20 +1081,20 @@ add_task(async function addon_change_2_test_2() {
 
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock1_3.id), Date.now() + 10000);
-  writeInstallRDFForExtension(softblock2_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock2_3.id), Date.now() + 10000);
-  writeInstallRDFForExtension(softblock3_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock3_3.id), Date.now() + 10000);
-  writeInstallRDFForExtension(softblock4_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock4_3.id), Date.now() + 10000);
-  writeInstallRDFForExtension(hardblock_3, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, hardblock_3.id), Date.now() + 10000);
-  writeInstallRDFForExtension(regexpblock_3, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_3, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, regexpblock_3.id), Date.now() + 10000);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, /* s4 */, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1121,20 +1108,20 @@ add_task(async function addon_change_2_test_2() {
 add_task(async function addon_change_2_test_3() {
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock1_1.id), Date.now() + 20000);
-  writeInstallRDFForExtension(softblock2_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock2_1.id), Date.now() + 20000);
-  writeInstallRDFForExtension(softblock3_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock3_1.id), Date.now() + 20000);
-  writeInstallRDFForExtension(softblock4_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, softblock4_1.id), Date.now() + 20000);
-  writeInstallRDFForExtension(hardblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, hardblock_1.id), Date.now() + 20000);
-  writeInstallRDFForExtension(regexpblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_1, profileDir);
   setExtensionModifiedTime(getFileForAddon(profileDir, regexpblock_1.id), Date.now() + 20000);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1188,17 +1175,17 @@ add_task(async function run_background_update_2_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_3, profileDir);
-  writeInstallRDFForExtension(softblock2_3, profileDir);
-  writeInstallRDFForExtension(softblock3_3, profileDir);
-  writeInstallRDFForExtension(softblock4_3, profileDir);
-  writeInstallRDFForExtension(hardblock_3, profileDir);
-  writeInstallRDFForExtension(regexpblock_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_3, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_3, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_3, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_3, profileDir);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1294,17 +1281,17 @@ add_task(async function run_manual_update_2_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
   await promiseShutdownManager();
 
-  writeInstallRDFForExtension(softblock1_1, profileDir);
-  writeInstallRDFForExtension(softblock2_1, profileDir);
-  writeInstallRDFForExtension(softblock3_1, profileDir);
-  writeInstallRDFForExtension(softblock4_1, profileDir);
-  writeInstallRDFForExtension(hardblock_1, profileDir);
-  writeInstallRDFForExtension(regexpblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock1_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock2_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock3_1, profileDir);
+  await promiseWriteInstallRDFForExtension(softblock4_1, profileDir);
+  await promiseWriteInstallRDFForExtension(hardblock_1, profileDir);
+  await promiseWriteInstallRDFForExtension(regexpblock_1, profileDir);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   let [s1, s2, s3, s4, h, r] = await promiseAddonsByIDs(ADDON_IDS);
 
@@ -1362,7 +1349,7 @@ add_task(async function run_local_install_test() {
   getFileForAddon(profileDir, hardblock_1.id).remove(true);
   getFileForAddon(profileDir, regexpblock_1.id).remove(true);
 
-  startupManager(false);
+  await promiseStartupManager();
 
   await promiseInstallAllFiles([
     XPIS.blocklist_soft1_1,

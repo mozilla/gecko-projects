@@ -594,7 +594,7 @@ public:
   static nsresult Start(nsIURI* aURI,
                         mozIVisitedStatusCallback* aCallback=nullptr)
   {
-    NS_PRECONDITION(aURI, "Null URI");
+    MOZ_ASSERT(aURI, "Null URI");
 
     // If we are a content process, always remote the request to the
     // parent process.
@@ -1270,7 +1270,7 @@ public:
 
     {
       // Trigger an update for all the hosts of the places we inserted
-      nsAutoCString query("DELETE FROM moz_updatehostsinsert_temp");
+      nsAutoCString query("DELETE FROM moz_updateoriginsinsert_temp");
       nsCOMPtr<mozIStorageStatement> stmt = mHistory->GetStatement(query);
       NS_ENSURE_STATE(stmt);
       mozStorageStatementScoper scoper(stmt);
@@ -2065,7 +2065,7 @@ private:
     {
       // Hosts accumulated during the places delete are updated through a trigger
       // (see nsPlacesTriggers.h).
-      nsAutoCString query("DELETE FROM moz_updatehostsdelete_temp");
+      nsAutoCString query("DELETE FROM moz_updateoriginsdelete_temp");
       nsCOMPtr<mozIStorageStatement> stmt = mHistory->GetStatement(query);
       NS_ENSURE_STATE(stmt);
       mozStorageStatementScoper scoper(stmt);
@@ -2878,7 +2878,7 @@ History::RegisterVisitedCallback(nsIURI* aURI,
   MOZ_ASSERT(NS_IsMainThread());
   NS_ASSERTION(aURI, "Must pass a non-null URI!");
   if (XRE_IsContentProcess()) {
-    NS_PRECONDITION(aLink, "Must pass a non-null Link!");
+    MOZ_ASSERT(aLink, "Must pass a non-null Link!");
   }
 
   // Obtain our array of observers for this URI.

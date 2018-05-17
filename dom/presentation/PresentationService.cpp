@@ -107,7 +107,7 @@ public:
               const nsAString& aId,
               const nsAString& aOrigin,
               uint64_t aWindowId,
-              nsIDOMEventTarget* aEventTarget,
+              EventTarget* aEventTarget,
               nsIPrincipal* aPrincipal,
               nsIPresentationServiceCallback* aCallback,
               nsIPresentationTransportBuilderConstructor* aBuilderConstructor);
@@ -136,7 +136,7 @@ PresentationDeviceRequest::PresentationDeviceRequest(
                const nsAString& aId,
                const nsAString& aOrigin,
                uint64_t aWindowId,
-               nsIDOMEventTarget* aEventTarget,
+               EventTarget* aEventTarget,
                nsIPrincipal* aPrincipal,
                nsIPresentationServiceCallback* aCallback,
                nsIPresentationTransportBuilderConstructor* aBuilderConstructor)
@@ -170,9 +170,9 @@ PresentationDeviceRequest::GetRequestURLs(nsIArray** aUrls)
 }
 
 NS_IMETHODIMP
-PresentationDeviceRequest::GetChromeEventHandler(nsIDOMEventTarget** aChromeEventHandler)
+PresentationDeviceRequest::GetChromeEventHandler(EventTarget** aChromeEventHandler)
 {
-  nsCOMPtr<nsIDOMEventTarget> handler(do_QueryReferent(mChromeEventHandler));
+  RefPtr<EventTarget> handler(do_QueryReferent(mChromeEventHandler));
   handler.forget(aChromeEventHandler);
   return NS_OK;
 }
@@ -541,14 +541,13 @@ PresentationService::HandleSessionRequest(nsIPresentationSessionRequest* aReques
     ctrlChannel->Disconnect(NS_ERROR_DOM_OPERATION_ERR);
     return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
-  nsCOMPtr<nsISupports> promise;
+  RefPtr<Promise> promise;
   rv = glue->SendRequest(url, sessionId, device, getter_AddRefs(promise));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     ctrlChannel->Disconnect(rv);
     return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
-  nsCOMPtr<Promise> realPromise = do_QueryInterface(promise);
-  static_cast<PresentationPresentingInfo*>(info.get())->SetPromise(realPromise);
+  static_cast<PresentationPresentingInfo*>(info.get())->SetPromise(promise);
 
   return NS_OK;
 }
@@ -664,7 +663,7 @@ PresentationService::StartSession(
                const nsAString& aOrigin,
                const nsAString& aDeviceId,
                uint64_t aWindowId,
-               nsIDOMEventTarget* aEventTarget,
+               EventTarget* aEventTarget,
                nsIPrincipal* aPrincipal,
                nsIPresentationServiceCallback* aCallback,
                nsIPresentationTransportBuilderConstructor* aBuilderConstructor)

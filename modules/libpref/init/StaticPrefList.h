@@ -88,6 +88,16 @@ VARCACHE_PREF(
 )
 
 //---------------------------------------------------------------------------
+// DOM prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "dom.webcomponents.shadowdom.report_usage",
+   dom_webcomponents_shadowdom_report_usage,
+  bool, false
+)
+
+//---------------------------------------------------------------------------
 // Full-screen prefs
 //---------------------------------------------------------------------------
 
@@ -144,6 +154,13 @@ VARCACHE_PREF(
 //---------------------------------------------------------------------------
 // Layout prefs
 //---------------------------------------------------------------------------
+
+// Is parallel CSS parsing enabled?
+VARCACHE_PREF(
+  "layout.css.parsing.parallel",
+   layout_css_parsing_parallel,
+  bool, true
+)
 
 // Is support for the font-display @font-face descriptor enabled?
 VARCACHE_PREF(
@@ -517,6 +534,14 @@ VARCACHE_PREF(
   bool, false
 )
 #endif // MOZ_WEBRTC
+
+#ifdef MOZ_OMX
+VARCACHE_PREF(
+  "media.omx.enabled",
+   MediaOmxEnabled,
+  bool, false
+)
+#endif
 
 #ifdef MOZ_FFMPEG
 

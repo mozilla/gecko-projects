@@ -122,10 +122,6 @@ PaintThread::AddRef()
 /* static */ int32_t
 PaintThread::CalculatePaintWorkerCount()
 {
-  if (!gfxPlatform::GetPlatform()->UsesTiling()) {
-    return 0;
-  }
-
   int32_t cpuCores = 1;
   nsCOMPtr<nsIPropertyBag2> systemInfo = do_GetService(NS_SYSTEMINFO_CONTRACTID);
   if (systemInfo) {
@@ -169,9 +165,10 @@ PaintThread::Init()
   }
   sThread = thread;
 
+  // Only create paint workers for tiling if we are using tiling or could
+  // expect to dynamically switch to tiling in the future
   if (gfxPlatform::GetPlatform()->UsesTiling()) {
-    int32_t paintWorkerCount = PaintThread::CalculatePaintWorkerCount();
-    mPaintWorkers = SharedThreadPool::Get(NS_LITERAL_CSTRING("PaintWorker"), paintWorkerCount);
+    InitPaintWorkers();
   }
 
   nsCOMPtr<nsIRunnable> paintInitTask =
@@ -186,6 +183,14 @@ PaintThread::InitOnPaintThread()
 {
   MOZ_ASSERT(!NS_IsMainThread());
   sThreadId = PlatformThread::CurrentId();
+}
+
+void
+PaintThread::InitPaintWorkers()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  int32_t count = PaintThread::CalculatePaintWorkerCount();
+  mPaintWorkers = SharedThreadPool::Get(NS_LITERAL_CSTRING("PaintWorker"), count);
 }
 
 void
@@ -235,6 +240,18 @@ bool
 PaintThread::IsOnPaintWorkerThread()
 {
   return mPaintWorkers && mPaintWorkers->IsOnCurrentThread();
+}
+
+void
+PaintThread::UpdateRenderMode()
+{
+  if (!!mPaintWorkers != gfxPlatform::GetPlatform()->UsesTiling()) {
+    if (mPaintWorkers) {
+      mPaintWorkers = nullptr;
+    } else {
+      InitPaintWorkers();
+    }
+  }
 }
 
 void
@@ -364,6 +381,7 @@ PaintThread::PaintTiledContents(CapturedTiledPaintState* aState)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aState);
+  MOZ_ASSERT(mPaintWorkers);
 
   if (gfxPrefs::LayersOMTPDumpCapture() && aState->mCapture) {
     aState->mCapture->Dump();

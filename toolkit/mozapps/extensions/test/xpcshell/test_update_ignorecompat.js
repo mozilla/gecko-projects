@@ -26,8 +26,8 @@ const appId = "toolkit@mozilla.org";
 
 // Test that the update check correctly observes the
 // extensions.strictCompatibility pref and compatibility overrides.
-add_test(function() {
-  writeInstallRDFForExtension({
+add_test(async function() {
+  await promiseWriteInstallRDFForExtension({
     id: "addon9@tests.mozilla.org",
     version: "1.0",
     updateURL: "http://example.com/data/" + updateFile,
@@ -39,7 +39,7 @@ add_test(function() {
     name: "Test Addon 9",
   }, profileDir);
 
-  restartManager();
+  await promiseRestartManager();
 
   AddonManager.addInstallListener({
     onNewInstall(aInstall) {
@@ -63,8 +63,8 @@ add_test(function() {
 
 // Test that the update check correctly observes when an addon opts-in to
 // strict compatibility checking.
-add_test(function() {
-  writeInstallRDFForExtension({
+add_test(async function() {
+  await promiseWriteInstallRDFForExtension({
     id: "addon11@tests.mozilla.org",
     version: "1.0",
     updateURL: "http://example.com/data/" + updateFile,
@@ -76,23 +76,22 @@ add_test(function() {
     name: "Test Addon 11",
   }, profileDir);
 
-  restartManager();
+  await promiseRestartManager();
 
-  AddonManager.getAddonByID("addon11@tests.mozilla.org", function(a11) {
-    Assert.notEqual(a11, null);
+  let a11 = await AddonManager.getAddonByID("addon11@tests.mozilla.org");
+  Assert.notEqual(a11, null);
 
-    a11.findUpdates({
-      onCompatibilityUpdateAvailable() {
-        do_throw("Should not have seen compatibility information");
-      },
+  a11.findUpdates({
+    onCompatibilityUpdateAvailable() {
+      do_throw("Should not have seen compatibility information");
+    },
 
-      onUpdateAvailable() {
-        do_throw("Should not have seen an available update");
-      },
+    onUpdateAvailable() {
+      do_throw("Should not have seen an available update");
+    },
 
-      onUpdateFinished() {
-        run_next_test();
-      }
-    }, AddonManager.UPDATE_WHEN_USER_REQUESTED);
-  });
+    onUpdateFinished() {
+      run_next_test();
+    }
+  }, AddonManager.UPDATE_WHEN_USER_REQUESTED);
 });

@@ -19,6 +19,8 @@ ChromeUtils.defineModuleGetter(this, "CanonicalJSON",
                                "resource://gre/modules/CanonicalJSON.jsm");
 ChromeUtils.defineModuleGetter(this, "UptakeTelemetry",
                                "resource://services-common/uptake-telemetry.js");
+ChromeUtils.defineModuleGetter(this, "ClientEnvironmentBase",
+                               "resource://gre/modules/components-utils/ClientEnvironment.jsm");
 
 const PREF_SETTINGS_SERVER             = "services.settings.server";
 const PREF_SETTINGS_DEFAULT_BUCKET     = "services.settings.default_bucket";
@@ -35,6 +37,30 @@ const PREF_SETTINGS_LOAD_DUMP          = "services.settings.load_dump";
 const TELEMETRY_HISTOGRAM_KEY = "settings-changes-monitoring";
 
 const INVALID_SIGNATURE = "Invalid content/signature";
+const MISSING_SIGNATURE = "Missing signature";
+
+/**
+ * cacheProxy returns an object Proxy that will memoize properties of the target.
+ */
+function cacheProxy(target) {
+  const cache = new Map();
+  return new Proxy(target, {
+    get(target, prop, receiver) {
+      if (!cache.has(prop)) {
+        cache.set(prop, target[prop]);
+      }
+      return cache.get(prop);
+    }
+  });
+}
+
+class ClientEnvironment extends ClientEnvironmentBase {
+  static get appID() {
+    // eg. Firefox is "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}".
+    Services.appinfo.QueryInterface(Ci.nsIXULAppInfo);
+    return Services.appinfo.ID;
+  }
+}
 
 
 function mergeChanges(collection, localRecords, changes) {
@@ -57,15 +83,15 @@ function mergeChanges(collection, localRecords, changes) {
 }
 
 
-function fetchCollectionMetadata(remote, collection) {
+async function fetchCollectionMetadata(remote, collection) {
   const client = new KintoHttpClient(remote);
-  return client.bucket(collection.bucket).collection(collection.name).getData()
-    .then(result => {
-      return result.signature;
-    });
+  const { signature } = await client.bucket(collection.bucket)
+                                    .collection(collection.name)
+                                    .getData();
+  return signature;
 }
 
-function fetchRemoteCollection(remote, collection) {
+async function fetchRemoteCollection(remote, collection) {
   const client = new KintoHttpClient(remote);
   return client.bucket(collection.bucket)
            .collection(collection.name)
@@ -124,14 +150,15 @@ async function fetchLatestChanges(url, lastEtag) {
 
 class RemoteSettingsClient {
 
-  constructor(collectionName, { lastCheckTimePref, bucketName, signerName }) {
+  constructor(collectionName, { bucketName, signerName, filterFunc, lastCheckTimePref }) {
     this.collectionName = collectionName;
-    this.lastCheckTimePref = lastCheckTimePref;
     this.bucketName = bucketName;
     this.signerName = signerName;
+    this.filterFunc = filterFunc;
+    this._lastCheckTimePref = lastCheckTimePref;
 
     this._callbacks = new Map();
-    this._callbacks.set("change", []);
+    this._callbacks.set("sync", []);
 
     this._kinto = null;
   }
@@ -144,6 +171,10 @@ class RemoteSettingsClient {
     // Replace slash by OS specific path separator (eg. Windows)
     const identifier = OS.Path.join(...this.identifier.split("/"));
     return `${identifier}.json`;
+  }
+
+  get lastCheckTimePref() {
+    return this._lastCheckTimePref || `services.settings.${this.bucketName}.${this.collectionName}.last_check`;
   }
 
   on(event, callback) {
@@ -182,8 +213,23 @@ class RemoteSettingsClient {
     // whose target is matched.
     const { filters = {}, order } = options;
     const c = await this.openCollection();
+
+    const timestamp = await c.db.getLastModified();
+    // If the local database was never synchronized, then we attempt to load
+    // a packaged JSON dump.
+    if (timestamp == null) {
+      try {
+        const { data } = await this._loadDumpFile();
+        await c.loadDump(data);
+      } catch (e) {
+        // Report but return an empty list since there will be no data anyway.
+        Cu.reportError(e);
+        return [];
+      }
+    }
+
     const { data } = await c.list({ filters, order });
-    return data;
+    return this._filterEntries(data);
   }
 
   /**
@@ -242,10 +288,12 @@ class RemoteSettingsClient {
       }
 
       // Fetch changes from server.
+      let syncResult;
       try {
         // Server changes have priority during synchronization.
         const strategy = Kinto.syncStrategy.SERVER_WINS;
-        const { ok } = await collection.sync({remote, strategy});
+        syncResult = await collection.sync({remote, strategy});
+        const { ok } = syncResult;
         if (!ok) {
           // Some synchronization conflicts occured.
           reportStatus = UptakeTelemetry.STATUS.CONFLICT_ERROR;
@@ -266,17 +314,45 @@ class RemoteSettingsClient {
             reportStatus = UptakeTelemetry.STATUS.SIGNATURE_RETRY_ERROR;
             throw e;
           }
-          // if the signature is good (we haven't thrown), and the remote
-          // last_modified is newer than the local last_modified, replace the
-          // local data
+
+          // The signature is good (we haven't thrown).
+          // Now we will Inspect what we had locally.
+          const { data: oldData } = await collection.list();
+
+          // We build a sync result as if a diff-based sync was performed.
+          syncResult = { created: [], updated: [], deleted: [] };
+
+          // If the remote last_modified is newer than the local last_modified,
+          // replace the local data
           const localLastModified = await collection.db.getLastModified();
           if (payload.last_modified >= localLastModified) {
+            const { data: newData } = payload;
             await collection.clear();
-            await collection.loadDump(payload.data);
+            await collection.loadDump(newData);
+
+            // Compare local and remote to populate the sync result
+            const oldById = new Map(oldData.map(e => [e.id, e]));
+            for (const r of newData) {
+              const old = oldById.get(r.id);
+              if (old) {
+                if (old.last_modified != r.last_modified) {
+                  syncResult.updated.push({ old, new: r });
+                }
+                oldById.delete(r.id);
+              } else {
+                syncResult.created.push(r);
+              }
+            }
+            // Records that remain in our map now are those missing from remote
+            syncResult.deleted = Array.from(oldById.values());
           }
+
         } else {
-          // The sync has thrown, it can be a network or a general error.
-          if (/NetworkError/.test(e.message)) {
+          // The sync has thrown, it can be related to metadata, network or a general error.
+          if (e.message == MISSING_SIGNATURE) {
+            // Collection metadata has no signature info, no need to retry.
+            reportStatus = UptakeTelemetry.STATUS.SIGNATURE_ERROR;
+          } else if (/NetworkError/.test(e.message)) {
             reportStatus = UptakeTelemetry.STATUS.NETWORK_ERROR;
           } else if (/Backoff/.test(e.message)) {
             reportStatus = UptakeTelemetry.STATUS.BACKOFF;
@@ -286,20 +362,34 @@ class RemoteSettingsClient {
           throw e;
         }
       }
-      // Read local collection of records.
-      const { data } = await collection.list();
 
-      // Handle the obtained records (ie. apply locally).
-      try {
-        // Execute callbacks in order and sequentially.
+      // Handle the obtained records (ie. apply locally through events).
+      // Build the event data list. It should be filtered (ie. by application target)
+      const { created: allCreated, updated: allUpdated, deleted: allDeleted } = syncResult;
+      const [created, deleted, updatedFiltered] = await Promise.all(
+          [allCreated, allDeleted, allUpdated.map(e => e.new)].map(this._filterEntries.bind(this))
+        );
+      // For updates, keep entries whose updated form is matches the target.
+      const updatedFilteredIds = new Set(updatedFiltered.map(e => e.id));
+      const updated = allUpdated.filter(({ new: { id } }) => updatedFilteredIds.has(id));
+
+      // If every changed entry is filtered, we don't even fire the event.
+      if (created.length || updated.length || deleted.length) {
+        // Read local collection of records (also filtered).
+        const { data: allData } = await collection.list();
+        const current = await this._filterEntries(allData);
+        // Fire the event: execute callbacks in order and sequentially.
         // If one fails everything fails.
-        const callbacks = this._callbacks.get("change");
-        for (const cb of callbacks) {
-          await cb({ data });
+        const event = { data: { current, created, updated, deleted } };
+        const callbacks = this._callbacks.get("sync");
+        try {
+          for (const cb of callbacks) {
+            await cb(event);
+          }
+        } catch (e) {
+          reportStatus = UptakeTelemetry.STATUS.APPLY_ERROR;
+          throw e;
         }
-      } catch (e) {
-        reportStatus = UptakeTelemetry.STATUS.APPLY_ERROR;
-        throw e;
       }
 
       // Track last update.
@@ -327,7 +417,7 @@ class RemoteSettingsClient {
   async _loadDumpFile() {
     // Replace OS specific path separator by / for URI.
     const { components: folderFile } = OS.Path.split(this.filename);
-    const fileURI = `resource://app/defaults/${folderFile.join("/")}`;
+    const fileURI = `resource://app/defaults/settings/${folderFile.join("/")}`;
     const response = await fetch(fileURI);
     if (!response.ok) {
       throw new Error(`Could not read from '${fileURI}'`);
@@ -338,9 +428,12 @@ class RemoteSettingsClient {
 
   async _validateCollectionSignature(remote, payload, collection, options = {}) {
     const {ignoreLocal} = options;
-
     // this is a content-signature field from an autograph response.
-    const {x5u, signature} = await fetchCollectionMetadata(remote, collection);
+    const signaturePayload = await fetchCollectionMetadata(remote, collection);
+    if (!signaturePayload) {
+      throw new Error(MISSING_SIGNATURE);
+    }
+    const {x5u, signature} = signaturePayload;
     const certChainResponse = await fetch(x5u);
     const certChain = await certChainResponse.text();
 
@@ -379,14 +472,19 @@ class RemoteSettingsClient {
    * @param {Date} serverTime   the current date return by server.
    */
   _updateLastCheck(serverTime) {
-    if (!this.lastCheckTimePref) {
-      // If not set (default), it is not necessary to store the last check timestamp.
-      return;
-    }
-    // Storing the last check time is mainly a matter of retro-compatibility with
-    // the blocklists clients.
     const checkedServerTimeInSeconds = Math.round(serverTime / 1000);
     Services.prefs.setIntPref(this.lastCheckTimePref, checkedServerTimeInSeconds);
+  }
+
+  async _filterEntries(data) {
+    // Filter entries for which calls to `this.filterFunc` returns null.
+    if (!this.filterFunc) {
+      return data;
+    }
+    const environment = cacheProxy(ClientEnvironment);
+    const dataPromises = data.map(e => this.filterFunc(e, environment));
+    const results = await Promise.all(dataPromises);
+    return results.filter(v => !!v);
   }
 }
 

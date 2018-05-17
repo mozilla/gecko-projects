@@ -15,6 +15,7 @@
 #include "nsIObjectLoadingContent.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGForeignObjectFrame.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/SVGSVGElement.h"
 #include "mozilla/dom/SVGViewElement.h"
 #include "nsSubDocumentFrame.h"
@@ -373,7 +374,7 @@ nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
                   ("enter nsSVGOuterSVGFrame::Reflow: availSize=%d,%d",
                   aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
 
-  NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
+  MOZ_ASSERT(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aDesiredSize.Width()  = aReflowInput.ComputedWidth() +
                           aReflowInput.ComputedPhysicalBorderPadding().LeftRight();
@@ -615,7 +616,7 @@ nsDisplayOuterSVG::Paint(nsDisplayListBuilder* aBuilder,
   nsRect viewportRect =
     mFrame->GetContentRectRelativeToSelf() + ToReferenceFrame();
 
-  nsRect clipRect = mVisibleRect.Intersect(viewportRect);
+  nsRect clipRect = GetPaintRect().Intersect(viewportRect);
 
   uint32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
 
@@ -927,14 +928,14 @@ nsSVGOuterSVGFrame::IsRootOfReplacedElementSubDoc(nsIFrame **aEmbeddingFrame)
     }
 
     if (window) {
-      nsCOMPtr<nsIDOMElement> frameElement = window->GetFrameElement();
-      nsCOMPtr<nsIContent> content = do_QueryInterface(frameElement);
-      if (content && content->IsAnyOfHTMLElements(nsGkAtoms::object,
-                                                  nsGkAtoms::embed,
-                                                  nsGkAtoms::iframe)) {
+      RefPtr<Element> frameElement = window->GetFrameElement();
+      if (frameElement &&
+          frameElement->IsAnyOfHTMLElements(nsGkAtoms::object,
+                                            nsGkAtoms::embed,
+                                            nsGkAtoms::iframe)) {
         // Our document is inside an HTML 'object', 'embed' or 'iframe' element
         if (aEmbeddingFrame) {
-          *aEmbeddingFrame = content->GetPrimaryFrame();
+          *aEmbeddingFrame = frameElement->GetPrimaryFrame();
           NS_ASSERTION(*aEmbeddingFrame, "Yikes, no embedding frame!");
         }
         return true;

@@ -92,22 +92,12 @@ _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
 # with a beetmover patch in https://github.com/mozilla-releng/beetmoverscript/.
 # See example in bug 1348286
 _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_MULTI = [
-    "target.common.tests.zip",
-    "target.cppunittest.tests.zip",
     "target.json",
-    "target.mochitest.tests.zip",
     "target.mozinfo.json",
-    "target.reftest.tests.zip",
-    "target.talos.tests.zip",
-    "target.awsy.tests.zip",
     "target.test_packages.json",
     "target.txt",
-    "target.web-platform.tests.tar.gz",
-    "target.xpcshell.tests.zip",
     "target_info.txt",
-    "mozharness.zip",
     "robocop.apk",
-    "target.jsshell.zip",
 ]
 # Until bug 1331141 is fixed, if you are adding any new artifacts here that
 # need to be transfered to S3, please be aware you also need to follow-up
@@ -146,6 +136,14 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
         "host/bin/mar",
         "host/bin/mbsdiff",
     ],
+    'linux64-asan-reporter-nightly':
+        # ASan reporter builds don't generate the regular crashreporter symbol
+        # packages, so we shouldn't try to beetmove them
+        filter(lambda a: a != 'target.crashreporter-symbols.zip',
+               _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US + [
+                    "host/bin/mar",
+                    "host/bin/mbsdiff",
+                ]),
     'android-x86-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-aarch64-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
     'android-api-16-nightly': _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US,
@@ -206,6 +204,10 @@ UPSTREAM_ARTIFACT_SIGNED_PATHS = {
         "target.tar.bz2.asc",
     ],
     'linux-devedition-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
+        "target.tar.bz2",
+        "target.tar.bz2.asc",
+    ],
+    'linux64-asan-reporter-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
         "target.tar.bz2",
         "target.tar.bz2.asc",
     ],

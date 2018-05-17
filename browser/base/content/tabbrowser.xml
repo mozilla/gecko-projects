@@ -104,6 +104,7 @@
       <constructor>
         <![CDATA[
           this._tabClipWidth = Services.prefs.getIntPref("browser.tabs.tabClipWidth");
+          this._hiddenSoundPlayingTabs = new Set();
 
           let strId = PrivateBrowsingUtils.isWindowPrivate(window) ?
               "emptyPrivateTabTitle" : "emptyTabTitle";
@@ -265,7 +266,7 @@
             this._beforeSelectedTab.removeAttribute("beforeselected-visible");
           }
 
-          if (this.selectedItem.closing || selectedIndex == 0) {
+          if (this.selectedItem.closing || selectedIndex <= 0) {
             this._beforeSelectedTab = null;
           } else {
             let beforeSelectedTab = visibleTabs[selectedIndex - 1];
@@ -863,10 +864,21 @@
           let wrap = n => n.parentNode.localName == "toolbarpaletteitem" ? n.parentNode : n;
           let unwrap = n => n && n.localName == "toolbarpaletteitem" ? n.firstElementChild : n;
 
+          // Starting from the tabs element, find the next sibling that:
+          // - isn't hidden; and
+          // - isn't one of the titlebar placeholder elements; and
+          // - isn't the all-tabs button.
+          // If it's the new tab button, consider the new tab button adjacent to the tabs.
+          // If the new tab button is marked as adjacent and the tabstrip doesn't
+          // overflow, we'll display the 'new tab' button inline in the tabstrip.
+          // In all other cases, the separate new tab button is displayed in its
+          // customized location.
           let sib = this;
           do {
             sib = unwrap(wrap(sib).nextElementSibling);
-          } while (sib && sib.hidden);
+          } while (sib && (sib.hidden ||
+                           sib.getAttribute("skipintoolbarset") == "true" ||
+                           sib.id == "alltabs-button"));
 
           const kAttr = "hasadjacentnewtabbutton";
           if (sib && sib.id == "new-tab-button") {
@@ -907,10 +919,49 @@
           this.onAreaNodeRegistered(aArea, aContainer);
         ]]></body>
       </method>
+
+      <method name="_hiddenSoundPlayingStatusChanged">
+        <parameter name="tab"/>
+        <parameter name="opts"/>
+        <body><![CDATA[
+          let closed = opts && opts.closed;
+          if (!closed && tab.soundPlaying && tab.hidden) {
+            this._hiddenSoundPlayingTabs.add(tab);
+            this.setAttribute("hiddensoundplaying", "true");
+          } else {
+            this._hiddenSoundPlayingTabs.delete(tab);
+            if (this._hiddenSoundPlayingTabs.size == 0) {
+              this.removeAttribute("hiddensoundplaying");
+            }
+          }
+        ]]></body>
+      </method>
     </implementation>
 
     <handlers>
       <handler event="TabSelect" action="this._handleTabSelect();"/>
+
+      <handler event="TabClose"><![CDATA[
+        this._hiddenSoundPlayingStatusChanged(event.target, {closed: true});
+      ]]></handler>
+
+      <handler event="TabAttrModified"><![CDATA[
+        if (event.detail.changed.includes("soundplaying") && event.target.hidden) {
+          this._hiddenSoundPlayingStatusChanged(event.target);
+        }
+      ]]></handler>
+
+      <handler event="TabHide"><![CDATA[
+        if (event.target.soundPlaying) {
+          this._hiddenSoundPlayingStatusChanged(event.target);
+        }
+      ]]></handler>
+
+      <handler event="TabShow"><![CDATA[
+        if (event.target.soundPlaying) {
+          this._hiddenSoundPlayingStatusChanged(event.target);
+        }
+      ]]></handler>
 
       <handler event="transitionend"><![CDATA[
         if (event.propertyName != "max-width") {
@@ -1530,7 +1581,7 @@
                     onunderflow="this.removeAttribute('textoverflow');"
                     flex="1">
             <xul:label class="tab-text tab-label"
-                       xbl:inherits="xbl:text=label,accesskey,fadein,pinned,selected=visuallyselected,attention"
+                       xbl:inherits="xbl:text=label,accesskey,fadein,pinned,selected=visuallyselected,attention,multiselected"
                        role="presentation"/>
           </xul:hbox>
           <xul:image xbl:inherits="soundplaying,soundplaying-scheduledremoval,pinned,muted,blocked,selected=visuallyselected,activemedia-blocked"
@@ -1609,6 +1660,11 @@
       <property name="muted" readonly="true">
         <getter>
           return this.getAttribute("muted") == "true";
+        </getter>
+      </property>
+      <property name="multiselected" readonly="true">
+        <getter>
+          return this.getAttribute("multiselected") == "true";
         </getter>
       </property>
       <!--
@@ -1907,10 +1963,16 @@
 
         if (this.selected) {
           this.style.MozUserFocus = "ignore";
-        } else if (this.mOverCloseButton ||
-                   this._overPlayingIcon) {
-          // Prevent tabbox.xml from selecting the tab.
-          event.stopPropagation();
+        } else {
+          // When browser.tabs.multiselect config is set to false,
+          // then we ignore the state of multi-selection keys (Ctrl/Cmd).
+          const tabSelectionToggled = Services.prefs.getBoolPref("browser.tabs.multiselect") &&
+            event.getModifierState("Accel");
+
+          if (this.mOverCloseButton || this._overPlayingIcon || tabSelectionToggled) {
+            // Prevent tabbox.xml from selecting the tab.
+            event.stopPropagation();
+          }
         }
       ]]>
       </handler>
@@ -1919,6 +1981,22 @@
       </handler>
 
       <handler event="click" button="0"><![CDATA[
+        if (Services.prefs.getBoolPref("browser.tabs.multiselect")) {
+          const tabSelectionToggled = event.getModifierState("Accel");
+          if (tabSelectionToggled) {
+            if (this.multiselected) {
+              gBrowser.removeFromMultiSelectedTabs(this);
+            } else {
+              gBrowser.addToMultiSelectedTabs(this);
+            }
+            return;
+          } else if (gBrowser.multiSelectedTabsCount() > 0) {
+            // Tabs were previously multi-selected and user clicks on a tab
+            // without holding Ctrl/Cmd Key
+            gBrowser.clearMultiSelectedTabs();
+          }
+        }
+
         if (this._overPlayingIcon) {
           this.toggleMuteAudio();
           return;
@@ -2135,7 +2213,8 @@
 
           let showHiddenTabs = gBrowser.visibleTabs.length < gBrowser.tabs.length;
           document.getElementById("alltabs_hiddenTabs").hidden = !showHiddenTabs;
-          document.getElementById("alltabs-popup-separator-3").hidden = !showHiddenTabs;
+          let hiddenSeparator = document.getElementById("alltabs-popup-separator-3");
+          hiddenSeparator.hidden = !showHiddenTabs;
 
           var tabcontainer = gBrowser.tabContainer;
 
@@ -2143,15 +2222,22 @@
           tabcontainer.addEventListener("TabAttrModified", this);
           tabcontainer.addEventListener("TabClose", this);
 
-          let tabs = gBrowser.visibleTabs;
+          let tabs = gBrowser.tabs;
           let fragment = document.createDocumentFragment();
+          let hiddenFragment = document.createDocumentFragment();
           for (var i = 0; i < tabs.length; i++) {
             if (!tabs[i].pinned) {
-              let li = this._createTabMenuItem(tabs[i]);
-              fragment.appendChild(li);
+              if (!tabs[i].hidden) {
+                let li = this._createTabMenuItem(tabs[i]);
+                fragment.appendChild(li);
+              } else if (tabs[i].soundPlaying) {
+                let li = this._createTabMenuItem(tabs[i]);
+                hiddenFragment.appendChild(li);
+              }
             }
           }
           this.appendChild(fragment);
+          this.insertBefore(hiddenFragment, hiddenSeparator);
           this._updateTabsVisibilityStatus();
         }
       ]]></handler>

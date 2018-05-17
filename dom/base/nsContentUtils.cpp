@@ -133,10 +133,7 @@
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIDOMChromeWindow.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDragService.h"
 #include "nsIFormControl.h"
@@ -772,7 +769,7 @@ nsresult nsContentUtils::RemoveWyciwygScheme(nsIURI* aURI, nsIURI** aReturn)
 #ifdef DEBUG
   bool isWyciwyg = false;
   aURI->SchemeIs("wyciwyg", &isWyciwyg);
-  NS_PRECONDITION(isWyciwyg, "Scheme should be wyciwyg");
+  MOZ_ASSERT(isWyciwyg, "Scheme should be wyciwyg");
 #endif
   nsAutoCString path;
   nsresult rv = aURI->GetPathQueryRef(path);
@@ -1063,7 +1060,7 @@ nsContentUtils::Atob(const nsAString& aAsciiBase64String,
 bool
 nsContentUtils::IsAutocompleteEnabled(mozilla::dom::HTMLInputElement* aInput)
 {
-  NS_PRECONDITION(aInput, "aInput should not be null!");
+  MOZ_ASSERT(aInput, "aInput should not be null!");
 
   nsAutoString autocomplete;
   aInput->GetAutocomplete(autocomplete);
@@ -2051,18 +2048,6 @@ nsContentUtils::Shutdown()
  */
 // static
 nsresult
-nsContentUtils::CheckSameOrigin(const nsINode *aTrustedNode,
-                                nsIDOMNode *aUnTrustedNode)
-{
-  MOZ_ASSERT(aTrustedNode);
-
-  // Make sure it's a real node.
-  nsCOMPtr<nsINode> unTrustedNode = do_QueryInterface(aUnTrustedNode);
-  NS_ENSURE_TRUE(unTrustedNode, NS_ERROR_UNEXPECTED);
-  return CheckSameOrigin(aTrustedNode, unTrustedNode);
-}
-
-nsresult
 nsContentUtils::CheckSameOrigin(const nsINode* aTrustedNode,
                                 const nsINode* unTrustedNode)
 {
@@ -2207,14 +2192,14 @@ nsContentUtils::IsAbsoluteURL(const nsACString& aURL)
 bool
 nsContentUtils::InProlog(nsINode *aNode)
 {
-  NS_PRECONDITION(aNode, "missing node to nsContentUtils::InProlog");
+  MOZ_ASSERT(aNode, "missing node to nsContentUtils::InProlog");
 
   nsINode* parent = aNode->GetParentNode();
-  if (!parent || !parent->IsNodeOfType(nsINode::eDOCUMENT)) {
+  if (!parent || !parent->IsDocument()) {
     return false;
   }
 
-  nsIDocument* doc = static_cast<nsIDocument*>(parent);
+  nsIDocument* doc = parent->AsDocument();
   nsIContent* root = doc->GetRootElement();
 
   return !root || doc->ComputeIndexOf(aNode) < doc->ComputeIndexOf(root);
@@ -2405,17 +2390,18 @@ nsContentUtils::LookupBindingMember(JSContext* aCx, nsIContent *aContent,
 nsINode*
 nsContentUtils::GetCrossDocParentNode(nsINode* aChild)
 {
-  NS_PRECONDITION(aChild, "The child is null!");
+  MOZ_ASSERT(aChild, "The child is null!");
 
   nsINode* parent = aChild->GetParentNode();
   if (parent && parent->IsContent() && aChild->IsContent()) {
     parent = aChild->AsContent()->GetFlattenedTreeParent();
   }
 
-  if (parent || !aChild->IsNodeOfType(nsINode::eDOCUMENT))
+  if (parent || !aChild->IsDocument()) {
     return parent;
+  }
 
-  nsIDocument* doc = static_cast<nsIDocument*>(aChild);
+  nsIDocument* doc = aChild->AsDocument();
   nsIDocument* parentDoc = doc->GetParentDocument();
   return parentDoc ? parentDoc->FindContentForSubDocument(doc) : nullptr;
 }
@@ -2425,8 +2411,8 @@ bool
 nsContentUtils::ContentIsDescendantOf(const nsINode* aPossibleDescendant,
                                       const nsINode* aPossibleAncestor)
 {
-  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
-  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
 
   do {
     if (aPossibleDescendant == aPossibleAncestor)
@@ -2441,15 +2427,15 @@ bool
 nsContentUtils::ContentIsHostIncludingDescendantOf(
   const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor)
 {
-  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
-  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
 
   do {
     if (aPossibleDescendant == aPossibleAncestor)
       return true;
-    if (aPossibleDescendant->NodeType() == nsINode::DOCUMENT_FRAGMENT_NODE) {
+    if (aPossibleDescendant->IsDocumentFragment()) {
       aPossibleDescendant =
-        static_cast<const DocumentFragment*>(aPossibleDescendant)->GetHost();
+        aPossibleDescendant->AsDocumentFragment()->GetHost();
     } else {
       aPossibleDescendant = aPossibleDescendant->GetParentNode();
     }
@@ -2491,8 +2477,8 @@ bool
 nsContentUtils::ContentIsCrossDocDescendantOf(nsINode* aPossibleDescendant,
                                               nsINode* aPossibleAncestor)
 {
-  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
-  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
 
   do {
     if (aPossibleDescendant == aPossibleAncestor)
@@ -2510,8 +2496,8 @@ nsContentUtils::ContentIsFlattenedTreeDescendantOf(
   const nsINode* aPossibleDescendant,
   const nsINode* aPossibleAncestor)
 {
-  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
-  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
 
   do {
     if (aPossibleDescendant == aPossibleAncestor) {
@@ -2529,8 +2515,8 @@ nsContentUtils::ContentIsFlattenedTreeDescendantOfForStyle(
   const nsINode* aPossibleDescendant,
   const nsINode* aPossibleAncestor)
 {
-  NS_PRECONDITION(aPossibleDescendant, "The possible descendant is null!");
-  NS_PRECONDITION(aPossibleAncestor, "The possible ancestor is null!");
+  MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
+  MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
 
   do {
     if (aPossibleDescendant == aPossibleAncestor) {
@@ -3137,7 +3123,7 @@ nsContentUtils::SubjectPrincipal()
   JSCompartment *compartment = js::GetContextCompartment(cx);
 
   // When an AutoJSAPI is instantiated, we are in a null compartment until the
-  // first JSAutoCompartment, which is kind of a purgatory as far as permissions
+  // first JSAutoRealm, which is kind of a purgatory as far as permissions
   // go. It would be nice to just hard-abort if somebody does a security check
   // in this purgatory zone, but that would be too fragile, since it could be
   // triggered by random IsCallerChrome() checks 20-levels deep.
@@ -3464,9 +3450,9 @@ nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
                              int16_t* aImageBlockingStatus,
                              uint32_t aContentType)
 {
-  NS_PRECONDITION(aURI, "Must have a URI");
-  NS_PRECONDITION(aLoadingDocument, "Must have a document");
-  NS_PRECONDITION(aLoadingPrincipal, "Must have a loading principal");
+  MOZ_ASSERT(aURI, "Must have a URI");
+  MOZ_ASSERT(aLoadingDocument, "Must have a document");
+  MOZ_ASSERT(aLoadingPrincipal, "Must have a loading principal");
 
   nsresult rv;
 
@@ -3656,8 +3642,7 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
     // If something unexpected happened we return false, otherwise if props
     // is set, the image is cached and we return true
     nsCOMPtr<nsIProperties> props;
-    nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(aDocument);
-    nsresult rv = cache->FindEntryProperties(aURI, domDoc, getter_AddRefs(props));
+    nsresult rv = cache->FindEntryProperties(aURI, aDocument, getter_AddRefs(props));
     return (NS_SUCCEEDED(rv) && props);
 }
 
@@ -3689,11 +3674,11 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                           uint32_t aContentPolicyType,
                           bool aUseUrgentStartForChannel)
 {
-  NS_PRECONDITION(aURI, "Must have a URI");
-  NS_PRECONDITION(aContext, "Must have a context");
-  NS_PRECONDITION(aLoadingDocument, "Must have a document");
-  NS_PRECONDITION(aLoadingPrincipal, "Must have a principal");
-  NS_PRECONDITION(aRequest, "Null out param");
+  MOZ_ASSERT(aURI, "Must have a URI");
+  MOZ_ASSERT(aContext, "Must have a context");
+  MOZ_ASSERT(aLoadingDocument, "Must have a document");
+  MOZ_ASSERT(aLoadingPrincipal, "Must have a principal");
+  MOZ_ASSERT(aRequest, "Null out param");
 
   imgLoader* imgLoader = GetImgLoaderForDocument(aLoadingDocument);
   if (!imgLoader) {
@@ -3707,9 +3692,6 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
 
   NS_ASSERTION(loadGroup || IsFontTableURI(documentURI),
                "Could not get loadgroup; onload may fire too early");
-
-  // Make the URI immutable so people won't change it under us
-  NS_TryToSetImmutable(aURI);
 
   // XXXbz using "documentURI" for the initialDocumentURI is not quite
   // right, but the best we can do here...
@@ -3801,7 +3783,7 @@ nsContentUtils::ContentIsDraggable(nsIContent* aContent)
 bool
 nsContentUtils::IsDraggableImage(nsIContent* aContent)
 {
-  NS_PRECONDITION(aContent, "Must have content node to test");
+  MOZ_ASSERT(aContent, "Must have content node to test");
 
   nsCOMPtr<nsIImageLoadingContent> imageContent(do_QueryInterface(aContent));
   if (!imageContent) {
@@ -4438,8 +4420,7 @@ nsresult GetEventAndTarget(nsIDocument* aDoc, nsISupports* aTarget,
   event->InitEvent(aEventName, aCanBubble, aCancelable);
   event->SetTrusted(aTrusted);
 
-  nsresult rv = event->SetTarget(target);
-  NS_ENSURE_SUCCESS(rv, rv);
+  event->SetTarget(target);
 
   event.forget(aEvent);
   target.forget(aTargetOut);
@@ -4604,7 +4585,7 @@ nsContentUtils::MatchElementId(nsIContent *aContent, const nsAtom* aId)
 Element *
 nsContentUtils::MatchElementId(nsIContent *aContent, const nsAString& aId)
 {
-  NS_PRECONDITION(!aId.IsEmpty(), "Will match random elements");
+  MOZ_ASSERT(!aId.IsEmpty(), "Will match random elements");
 
   // ID attrs are generally stored as atoms, so just atomize this up front
   RefPtr<nsAtom> id(NS_Atomize(aId));
@@ -4748,12 +4729,11 @@ nsContentUtils::HasMutationListeners(nsIDocument* aDocument,
 }
 
 void
-nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
-                                     nsIDocument* aOwnerDoc)
+nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent)
 {
-  NS_PRECONDITION(aChild, "Missing child");
-  NS_PRECONDITION(aChild->GetParentNode() == aParent, "Wrong parent");
-  NS_PRECONDITION(aChild->OwnerDoc() == aOwnerDoc, "Wrong owner-doc");
+  MOZ_ASSERT(aChild, "Missing child");
+  MOZ_ASSERT(aChild->GetParentNode() == aParent, "Wrong parent");
+  MOZ_ASSERT(aChild->OwnerDoc() == aParent->OwnerDoc(), "Wrong owner-doc");
 
   // Having an explicit check here since it's an easy mistake to fall into,
   // and there might be existing code with problems. We'd rather be safe
@@ -4774,7 +4754,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
     if (!(aChild->IsContent() && aChild->AsContent()->IsInNativeAnonymousSubtree()) &&
         !sDOMNodeRemovedSuppressCount) {
       NS_ERROR("Want to fire DOMNodeRemoved event, but it's not safe");
-      WarnScriptWasIgnored(aOwnerDoc);
+      WarnScriptWasIgnored(aChild->OwnerDoc());
     }
     return;
   }
@@ -4784,7 +4764,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
     InternalMutationEvent mutation(true, eLegacyNodeRemoved);
     mutation.mRelatedNode = do_QueryInterface(aParent);
 
-    mozAutoSubtreeModified subtree(aOwnerDoc, aParent);
+    mozAutoSubtreeModified subtree(aParent->OwnerDoc(), aParent);
     EventDispatcher::Dispatch(aChild, nullptr, &mutation);
   }
 }
@@ -4929,19 +4909,6 @@ nsContentUtils::IsValidNodeName(nsAtom *aLocalName, nsAtom *aPrefix,
          (aNamespaceID == kNameSpaceID_XML || aPrefix != nsGkAtoms::xml);
 }
 
-/* static */
-nsresult
-nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
-                                         const nsAString& aFragment,
-                                         bool aPreventScriptExecution,
-                                         nsIDOMDocumentFragment** aReturn)
-{
-  ErrorResult rv;
-  *aReturn = CreateContextualFragment(aContextNode, aFragment,
-                                      aPreventScriptExecution, rv).take();
-  return rv.StealNSResult();
-}
-
 already_AddRefed<DocumentFragment>
 nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
                                          const nsAString& aFragment,
@@ -5053,11 +5020,11 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
     content = content->GetParent();
   }
 
-  nsCOMPtr<nsIDOMDocumentFragment> frag;
+  RefPtr<DocumentFragment> frag;
   aRv = ParseFragmentXML(aFragment, document, tagStack,
                          aPreventScriptExecution, getter_AddRefs(frag),
                          aSanitize);
-  return frag.forget().downcast<DocumentFragment>();
+  return frag.forget();
 }
 
 /* static */
@@ -5168,7 +5135,7 @@ nsContentUtils::ParseFragmentXML(const nsAString& aSourceBuffer,
                                  nsIDocument* aDocument,
                                  nsTArray<nsString>& aTagStack,
                                  bool aPreventScriptExecution,
-                                 nsIDOMDocumentFragment** aReturn,
+                                 DocumentFragment** aReturn,
                                  SanitizeFragments aSanitize)
 {
   AutoTimelineMarker m(aDocument->GetDocShell(), "Parse XML");
@@ -5217,13 +5184,11 @@ nsContentUtils::ParseFragmentXML(const nsAString& aSourceBuffer,
     // Don't fire mutation events for nodes removed by the sanitizer.
     nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
 
-    RefPtr<DocumentFragment> fragment = static_cast<DocumentFragment*>(*aReturn);
-
     nsTreeSanitizer sanitizer(nsIParserUtils::SanitizerAllowStyle |
                               nsIParserUtils::SanitizerAllowComments |
                               nsIParserUtils::SanitizerDropForms |
                               nsIParserUtils::SanitizerLogRemovals);
-    sanitizer.Sanitize(fragment);
+    sanitizer.Sanitize(*aReturn);
   }
 
   return rv;
@@ -5239,8 +5204,8 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
   nsCOMPtr<nsIURI> uri;
   NS_NewURI(getter_AddRefs(uri), "about:blank");
   nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithoutOriginAttributes();
-  nsCOMPtr<nsIDOMDocument> domDocument;
-  nsresult rv = NS_NewDOMDocument(getter_AddRefs(domDocument),
+  nsCOMPtr<nsIDocument> document;
+  nsresult rv = NS_NewDOMDocument(getter_AddRefs(document),
                                   EmptyString(),
                                   EmptyString(),
                                   nullptr,
@@ -5252,7 +5217,6 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
                                   DocumentFlavorHTML);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDocument> document = do_QueryInterface(domDocument);
   rv = nsContentUtils::ParseDocumentHTML(aSourceBuffer, document,
     !(aFlags & nsIDocumentEncoder::OutputNoScriptContent));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -5260,7 +5224,7 @@ nsContentUtils::ConvertToPlainText(const nsAString& aSourceBuffer,
   nsCOMPtr<nsIDocumentEncoder> encoder = do_CreateInstance(
     "@mozilla.org/layout/documentEncoder;1?type=text/plain");
 
-  rv = encoder->Init(domDocument, NS_LITERAL_STRING("text/plain"), aFlags);
+  rv = encoder->Init(document, NS_LITERAL_STRING("text/plain"), aFlags);
   NS_ENSURE_SUCCESS(rv, rv);
 
   encoder->SetWrapColumn(aWrapCol);
@@ -5300,15 +5264,14 @@ nsContentUtils::SetNodeTextContent(nsIContent* aContent,
           skipFirst = false;
           continue;
         }
-        nsContentUtils::MaybeFireNodeRemoved(child, aContent, doc);
+        nsContentUtils::MaybeFireNodeRemoved(child, aContent);
       }
     }
   }
 
   // Might as well stick a batch around this since we're performing several
   // mutations.
-  mozAutoDocUpdate updateBatch(aContent->GetComposedDoc(),
-    UPDATE_CONTENT_MODEL, true);
+  mozAutoDocUpdate updateBatch(aContent->GetComposedDoc(), true);
   nsAutoMutationBatch mb;
 
   if (aTryReuse && !aValue.IsEmpty()) {
@@ -5436,10 +5399,8 @@ bool
 nsContentUtils::IsInSameAnonymousTree(const nsINode* aNode,
                                       const nsIContent* aContent)
 {
-  NS_PRECONDITION(aNode,
-                  "Must have a node to work with");
-  NS_PRECONDITION(aContent,
-                  "Must have a content to work with");
+  MOZ_ASSERT(aNode, "Must have a node to work with");
+  MOZ_ASSERT(aContent, "Must have a content to work with");
 
   if (!aNode->IsContent()) {
     /**
@@ -5520,11 +5481,10 @@ nsContentUtils::CombineResourcePrincipals(nsCOMPtr<nsIPrincipal>* aResourcePrinc
 void
 nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
                             nsIURI *aLinkURI, const nsString &aTargetSpec,
-                            bool aClick, bool aIsUserTriggered,
-                            bool aIsTrusted)
+                            bool aClick, bool aIsTrusted)
 {
   NS_ASSERTION(aPresContext, "Need a nsPresContext");
-  NS_PRECONDITION(aLinkURI, "No link URI");
+  MOZ_ASSERT(aLinkURI, "No link URI");
 
   if (aContent->IsEditable()) {
     return;
@@ -5544,10 +5504,7 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
   nsresult proceed = NS_OK;
 
   if (sSecurityManager) {
-    uint32_t flag =
-      aIsUserTriggered ?
-      (uint32_t)nsIScriptSecurityManager::STANDARD :
-      (uint32_t)nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT;
+    uint32_t flag = static_cast<uint32_t>(nsIScriptSecurityManager::STANDARD);
     proceed =
       sSecurityManager->CheckLoadURIWithPrincipal(aContent->NodePrincipal(),
                                                   aLinkURI, flag);
@@ -5573,8 +5530,8 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
 
     handler->OnLinkClick(aContent, aLinkURI,
                          fileName.IsVoid() ? aTargetSpec.get() : EmptyString().get(),
-                         fileName, nullptr, -1, nullptr, aIsTrusted,
-                         aContent->NodePrincipal());
+                         fileName, nullptr, -1, nullptr, EventStateManager::IsHandlingUserInput(),
+                         aIsTrusted, aContent->NodePrincipal());
   }
 }
 
@@ -6034,9 +5991,8 @@ nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession,
 
   // If there is no source node, then this is a drag from another
   // application, which should be allowed.
-  nsCOMPtr<nsIDOMDocument> sourceDocument;
-  aDragSession->GetSourceDocument(getter_AddRefs(sourceDocument));
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(sourceDocument);
+  nsCOMPtr<nsIDocument> doc;
+  aDragSession->GetSourceDocument(getter_AddRefs(doc));
   if (doc) {
     // Get each successive parent of the source document and compare it to
     // the drop document. If they match, then this is a drag from a child frame.
@@ -6312,7 +6268,7 @@ SameOriginCheckerImpl::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
                                               uint32_t aFlags,
                                               nsIAsyncVerifyRedirectCallback* cb)
 {
-  NS_PRECONDITION(aNewChannel, "Redirecting to null channel?");
+  MOZ_ASSERT(aNewChannel, "Redirecting to null channel?");
 
   nsresult rv = nsContentUtils::CheckSameOrigin(aOldChannel, aNewChannel);
   if (NS_SUCCEEDED(rv)) {
@@ -6332,7 +6288,7 @@ SameOriginCheckerImpl::GetInterface(const nsIID& aIID, void** aResult)
 nsresult
 nsContentUtils::GetASCIIOrigin(nsIPrincipal* aPrincipal, nsACString& aOrigin)
 {
-  NS_PRECONDITION(aPrincipal, "missing principal");
+  MOZ_ASSERT(aPrincipal, "missing principal");
 
   aOrigin.Truncate();
 
@@ -6353,7 +6309,7 @@ nsContentUtils::GetASCIIOrigin(nsIPrincipal* aPrincipal, nsACString& aOrigin)
 nsresult
 nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin)
 {
-  NS_PRECONDITION(aURI, "missing uri");
+  MOZ_ASSERT(aURI, "missing uri");
 
   // For Blob URI we have to return the origin of page using its principal.
   nsCOMPtr<nsIURIWithPrincipal> uriWithPrincipal = do_QueryInterface(aURI);
@@ -6407,7 +6363,7 @@ nsContentUtils::GetASCIIOrigin(nsIURI* aURI, nsACString& aOrigin)
 nsresult
 nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin)
 {
-  NS_PRECONDITION(aPrincipal, "missing principal");
+  MOZ_ASSERT(aPrincipal, "missing principal");
 
   aOrigin.Truncate();
 
@@ -6428,7 +6384,7 @@ nsContentUtils::GetUTFOrigin(nsIPrincipal* aPrincipal, nsAString& aOrigin)
 nsresult
 nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
 {
-  NS_PRECONDITION(aURI, "missing uri");
+  MOZ_ASSERT(aURI, "missing uri");
 
   bool isBlobURL = false;
   nsresult rv = aURI->SchemeIs(BLOBURI_SCHEME, &isBlobURL);
@@ -6536,7 +6492,7 @@ nsContentUtils::CanAccessNativeAnon()
 /* static */ nsresult
 nsContentUtils::DispatchXULCommand(nsIContent* aTarget,
                                    bool aTrusted,
-                                   nsIDOMEvent* aSourceEvent,
+                                   Event* aSourceEvent,
                                    nsIPresShell* aShell,
                                    bool aCtrl,
                                    bool aAlt,
@@ -6554,8 +6510,7 @@ nsContentUtils::DispatchXULCommand(nsIContent* aTarget,
                                nsGlobalWindowInner::Cast(doc->GetInnerWindow()),
                                0, aCtrl, aAlt, aShift,
                                aMeta,
-                               aSourceEvent ?
-                                 aSourceEvent->InternalDOMEvent() : nullptr,
+                               aSourceEvent,
                                aInputSource, IgnoreErrors());
 
   if (aShell) {
@@ -6717,15 +6672,13 @@ nsContentUtils::IsFocusedContent(const nsIContent* aContent)
 {
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
 
-  return fm && fm->GetFocusedContent() == aContent;
+  return fm && fm->GetFocusedElement() == aContent;
 }
 
 bool
 nsContentUtils::IsSubDocumentTabbable(nsIContent* aContent)
 {
-  //XXXsmaug Shadow DOM spec issue!
-  //         We may need to change this to GetComposedDoc().
-  nsIDocument* doc = aContent->GetUncomposedDoc();
+  nsIDocument* doc = aContent->GetComposedDoc();
   if (!doc) {
     return false;
   }
@@ -7118,7 +7071,7 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
 
   // We can use the junk scope here, because we're just using it for
   // regexp evaluation, not actual script execution.
-  JSAutoCompartment ac(cx, xpc::UnprivilegedJunkScope());
+  JSAutoRealm ar(cx, xpc::UnprivilegedJunkScope());
 
   // The pattern has to match the entire value.
   aPattern.InsertLiteral(u"^(?:", 0);
@@ -9729,13 +9682,12 @@ nsContentUtils::GetPresentationURL(nsIDocShell* aDocShell, nsAString& aPresentat
   }
 
   nsCOMPtr<nsILoadContext> loadContext(do_QueryInterface(aDocShell));
-  nsCOMPtr<nsIDOMElement> topFrameElement;
-  loadContext->GetTopFrameElement(getter_AddRefs(topFrameElement));
-  if (!topFrameElement) {
+  RefPtr<Element> topFrameElt;
+  loadContext->GetTopFrameElement(getter_AddRefs(topFrameElt));
+  if (!topFrameElt) {
     return;
   }
 
-  nsCOMPtr<Element> topFrameElt = do_QueryInterface(topFrameElement);
   topFrameElt->GetAttribute(NS_LITERAL_STRING("mozpresentation"), aPresentationUrl);
 }
 
@@ -10028,7 +9980,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
         if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
           NS_IF_ADDREF(*aResult = NS_NewHTMLUnknownElement(nodeInfo.forget(), aFromParser));
         } else {
-          NS_IF_ADDREF(*aResult = new nsXULElement(nodeInfo.forget()));
+          NS_IF_ADDREF(*aResult = nsXULElement::Construct(nodeInfo.forget()));
         }
       }
       return NS_OK;
@@ -10038,7 +9990,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
     if (nodeInfo->NamespaceEquals(kNameSpaceID_XHTML)) {
       NS_IF_ADDREF(*aResult = NS_NewHTMLElement(nodeInfo.forget(), aFromParser));
     } else {
-      NS_IF_ADDREF(*aResult = new nsXULElement(nodeInfo.forget()));
+      NS_IF_ADDREF(*aResult = nsXULElement::Construct(nodeInfo.forget()));
     }
     (*aResult)->SetCustomElementData(new CustomElementData(definition->mType));
     nsContentUtils::EnqueueUpgradeReaction(*aResult, definition);
@@ -10054,7 +10006,7 @@ nsContentUtils::NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* a
       *aResult = CreateHTMLElement(tag, nodeInfo.forget(), aFromParser).take();
     }
   } else {
-    NS_IF_ADDREF(*aResult = new nsXULElement(nodeInfo.forget()));
+    NS_IF_ADDREF(*aResult = nsXULElement::Construct(nodeInfo.forget()));
   }
 
   if (!*aResult) {
@@ -10538,19 +10490,6 @@ nsContentUtils::ShouldBlockReservedKeys(WidgetKeyboardEvent* aKeyEvent)
   return false;
 }
 
-/* static */ Element*
-nsContentUtils::GetClosestNonNativeAnonymousAncestor(Element* aElement)
-{
-  MOZ_ASSERT(aElement);
-  MOZ_ASSERT(aElement->IsNativeAnonymous());
-
-  Element* e = aElement;
-  while (e && e->IsNativeAnonymous()) {
-    e = e->GetParentElement();
-  }
-  return e;
-}
-
 /**
  * Checks whether the given type is a supported document type for
  * loading within the nsObjectLoadingContent specified by aContent.
@@ -10666,9 +10605,8 @@ nsContentUtils::GetEventTargetByLoadInfo(nsILoadInfo* aLoadInfo, TaskCategory aC
     return nullptr;
   }
 
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  aLoadInfo->GetLoadingDocument(getter_AddRefs(domDoc));
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+  nsCOMPtr<nsIDocument> doc;
+  aLoadInfo->GetLoadingDocument(getter_AddRefs(doc));
   nsCOMPtr<nsISerialEventTarget> target;
   if (doc) {
     if (DocGroup* group = doc->GetDocGroup()) {

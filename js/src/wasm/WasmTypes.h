@@ -492,7 +492,6 @@ class Val
         I16x8 i16x8_;
         I32x4 i32x4_;
         F32x4 f32x4_;
-        U() {}
     } u;
 
   public:
@@ -1490,6 +1489,8 @@ enum class SymbolicAddress
     WaitI32,
     WaitI64,
     Wake,
+    MemCopy,
+    MemFill,
 #if defined(JS_CODEGEN_MIPS32)
     js_jit_gAtomic64Lock,
 #endif
@@ -1960,10 +1961,11 @@ class DebugFrame
     // the return value of a frame being debugged.
     union
     {
-        int32_t resultI32_;
-        int64_t resultI64_;
-        float resultF32_;
-        double resultF64_;
+        int32_t  resultI32_;
+        int64_t  resultI64_;
+        intptr_t resultRef_;
+        float    resultF32_;
+        double   resultF64_;
     };
 
     // The returnValue() method returns a HandleValue pointing to this field.

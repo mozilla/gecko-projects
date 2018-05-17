@@ -22,7 +22,7 @@ const PLACES_LINKS_CHANGED_DELAY_TIME = 1000; // time in ms to delay timer for p
 class Observer {
   constructor(dispatch, observerInterface) {
     this.dispatch = dispatch;
-    this.QueryInterface = XPCOMUtils.generateQI([observerInterface, Ci.nsISupportsWeakReference]);
+    this.QueryInterface = ChromeUtils.generateQI([observerInterface, Ci.nsISupportsWeakReference]);
   }
 }
 
@@ -247,16 +247,21 @@ class PlacesFeed {
     };
 
     // Always include the referrer (even for http links) if we have one
-    const {event, referrer} = action.data;
+    const {event, referrer, typedBonus} = action.data;
     if (referrer) {
       params.referrerPolicy = Ci.nsIHttpChannel.REFERRER_POLICY_UNSAFE_URL;
       params.referrerURI = Services.io.newURI(referrer);
     }
 
-    const win = action._target.browser.ownerGlobal;
-
     // Pocket gives us a special reader URL to open their stories in
     const urlToOpen = action.data.type === "pocket" ? action.data.open_url : action.data.url;
+
+    // Mark the page as typed for frecency bonus before opening the link
+    if (typedBonus) {
+      PlacesUtils.history.markPageAsTyped(Services.io.newURI(urlToOpen));
+    }
+
+    const win = action._target.browser.ownerGlobal;
     win.openLinkIn(urlToOpen, where || win.whereToOpenLink(event), params);
   }
 

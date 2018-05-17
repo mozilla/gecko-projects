@@ -56,6 +56,8 @@ using JS::ToInt8;
 using JS::ToInt16;
 using JS::ToInt32;
 using JS::ToInt64;
+using JS::ToUint8;
+using JS::ToUint16;
 using JS::ToUint32;
 using JS::ToUint64;
 
@@ -1280,7 +1282,7 @@ FracNumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d, int base = 10)
 #ifdef DEBUG
     {
         int32_t _;
-        MOZ_ASSERT(!mozilla::NumberIsInt32(d, &_));
+        MOZ_ASSERT(!mozilla::NumberEqualsInt32(d, &_));
     }
 #endif
 
@@ -1311,7 +1313,7 @@ js::NumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d, int base/* = 10
 {
     int32_t i;
     size_t len;
-    return mozilla::NumberIsInt32(d, &i)
+    return mozilla::NumberEqualsInt32(d, &i)
            ? Int32ToCString(cbuf, i, &len, base)
            : FracNumberToCString(cx, cbuf, d, base);
 }
@@ -1320,22 +1322,16 @@ template <AllowGC allowGC>
 static JSString*
 NumberToStringWithBase(JSContext* cx, double d, int base)
 {
+    MOZ_ASSERT(2 <= base && base <= 36);
+
     ToCStringBuf cbuf;
     char* numStr;
-
-    /*
-     * Caller is responsible for error reporting. When called from trace,
-     * returning nullptr here will cause us to fall of trace and then retry
-     * from the interpreter (which will report the error).
-     */
-    if (base < 2 || base > 36)
-        return nullptr;
 
     JSCompartment* comp = cx->compartment();
 
     int32_t i;
     bool isBase10Int = false;
-    if (mozilla::NumberIsInt32(d, &i)) {
+    if (mozilla::NumberEqualsInt32(d, &i)) {
         isBase10Int = (base == 10);
         if (isBase10Int && StaticStrings::hasInt(i))
             return cx->staticStrings().getInt(i);
@@ -1396,7 +1392,7 @@ JSAtom*
 js::NumberToAtom(JSContext* cx, double d)
 {
     int32_t si;
-    if (mozilla::NumberIsInt32(d, &si))
+    if (mozilla::NumberEqualsInt32(d, &si))
         return Int32ToAtom(cx, si);
 
     if (JSFlatString* str = LookupDtoaCache(cx, d))
@@ -1634,7 +1630,7 @@ js::ToUint8Slow(JSContext *cx, const HandleValue v, uint8_t *out)
         if (!ToNumberSlow(cx, v, &d))
             return false;
     }
-    *out = ToInt8(d);
+    *out = ToUint8(d);
     return true;
 }
 
@@ -1735,33 +1731,16 @@ js::ToUint16Slow(JSContext* cx, const HandleValue v, uint16_t* out)
     } else if (!ToNumberSlow(cx, v, &d)) {
         return false;
     }
-
-    if (d == 0 || !mozilla::IsFinite(d)) {
-        *out = 0;
-        return true;
-    }
-
-    uint16_t u = (uint16_t) d;
-    if ((double)u == d) {
-        *out = u;
-        return true;
-    }
-
-    bool neg = (d < 0);
-    d = floor(neg ? -d : d);
-    d = neg ? -d : d;
-    unsigned m = JS_BIT(16);
-    d = fmod(d, (double) m);
-    if (d < 0)
-        d += m;
-    *out = (uint16_t) d;
+    *out = ToUint16(d);
     return true;
 }
 
 // ES2017 draft 7.1.17 ToIndex
 bool
-js::ToIndex(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index)
+js::ToIndexSlow(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index)
 {
+    MOZ_ASSERT_IF(v.isInt32(), v.toInt32() < 0);
+
     // Step 1.
     if (v.isUndefined()) {
         *index = 0;

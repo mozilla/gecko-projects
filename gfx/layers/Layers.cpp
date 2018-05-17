@@ -213,6 +213,17 @@ Layer::SetCompositorAnimations(const CompositorAnimations& aCompositorAnimations
 }
 
 void
+Layer::ClearCompositorAnimations()
+{
+  MOZ_LAYERS_LOG_IF_SHADOWABLE(
+    this, ("Layer::Mutated(%p) ClearCompositorAnimations with id=%" PRIu64, this, mAnimationInfo.GetCompositorAnimationsId()));
+
+  mAnimationInfo.ClearAnimations();
+
+  Mutated();
+}
+
+void
 Layer::StartPendingAnimations(const TimeStamp& aReadyTime)
 {
   ForEachNode<ForwardIterator>(
@@ -452,6 +463,10 @@ AncestorLayerMayChangeTransform(Layer* aLayer)
     if (l->GetContentFlags() & Layer::CONTENT_MAY_CHANGE_TRANSFORM) {
       return true;
     }
+
+    if (l->GetParent() && l->GetParent()->AsRefLayer()) {
+      return false;
+    }
   }
   return false;
 }
@@ -616,6 +631,15 @@ const LayerToParentLayerMatrix4x4
 Layer::GetLocalTransformTyped()
 {
   return ViewAs<LayerToParentLayerMatrix4x4>(GetLocalTransform());
+}
+
+bool
+Layer::IsScrollbarContainer() const
+{
+  const ScrollbarData& data = GetScrollbarData();
+  return (data.mScrollbarLayerType == ScrollbarLayerType::Container)
+      ? data.mDirection.isSome()
+      : false;
 }
 
 bool
@@ -1813,15 +1837,17 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   if (Is3DContextLeaf()) {
     aStream << " [is3DContextLeaf]";
   }
-  if (GetScrollbarContainerDirection().isSome()) {
+  if (IsScrollbarContainer()) {
     aStream << " [scrollbar]";
   }
-  if (Maybe<ScrollDirection> thumbDirection = GetScrollbarData().mDirection) {
-    if (*thumbDirection == ScrollDirection::eVertical) {
-      aStream << nsPrintfCString(" [vscrollbar=%" PRIu64 "]", GetScrollbarTargetViewId()).get();
-    }
-    if (*thumbDirection == ScrollDirection::eHorizontal) {
-      aStream << nsPrintfCString(" [hscrollbar=%" PRIu64 "]", GetScrollbarTargetViewId()).get();
+  if (GetScrollbarData().IsThumb()) {
+    if (Maybe<ScrollDirection> thumbDirection = GetScrollbarData().mDirection) {
+      if (*thumbDirection == ScrollDirection::eVertical) {
+        aStream << nsPrintfCString(" [vscrollbar=%" PRIu64 "]", GetScrollbarData().mTargetViewId).get();
+      }
+      if (*thumbDirection == ScrollDirection::eHorizontal) {
+        aStream << nsPrintfCString(" [hscrollbar=%" PRIu64 "]", GetScrollbarData().mTargetViewId).get();
+      }
     }
   }
   if (GetIsFixedPosition()) {
@@ -1971,7 +1997,7 @@ Layer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
     layer->set_direct(*GetScrollbarData().mDirection == ScrollDirection::eVertical ?
                       LayersPacket::Layer::VERTICAL :
                       LayersPacket::Layer::HORIZONTAL);
-    layer->set_barid(GetScrollbarTargetViewId());
+    layer->set_barid(GetScrollbarData().mTargetViewId);
   }
 
   // Mask layer

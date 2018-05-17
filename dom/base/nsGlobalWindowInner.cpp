@@ -19,6 +19,7 @@
 #include "nsIDOMStorageManager.h"
 #include "mozilla/dom/DOMJSProxyHandler.h"
 #include "mozilla/dom/DOMPrefs.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/IdleRequest.h"
@@ -109,9 +110,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
 #include "Crypto.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMOfflineResourceList.h"
 #include "nsDOMString.h"
 #include "nsIEmbeddingSiteWindow.h"
@@ -122,7 +120,6 @@
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsISelectionController.h"
-#include "nsISelection.h"
 #include "nsIPrompt.h"
 #include "nsIPromptService.h"
 #include "nsIPromptFactory.h"
@@ -1219,7 +1216,7 @@ nsGlobalWindowInner::FreeInnerObjects()
   }
 
   // Remove our reference to the document and the document principal.
-  mFocusedNode = nullptr;
+  mFocusedElement = nullptr;
 
   if (mApplicationCache) {
     static_cast<nsDOMOfflineResourceList*>(mApplicationCache.get())->Disconnect();
@@ -1331,13 +1328,11 @@ nsGlobalWindowInner::FreeInnerObjects()
 // QueryInterface implementation for nsGlobalWindowInner
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsGlobalWindowInner)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  // Make sure this matches the cast in nsGlobalWindowInner::FromWrapper()
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, EventTarget)
   NS_INTERFACE_MAP_ENTRY(nsIDOMWindow)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIScriptGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   if (aIID.Equals(NS_GET_IID(nsPIDOMWindowInner))) {
     foundInterface = static_cast<nsPIDOMWindowInner*>(this);
@@ -1453,7 +1448,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
   // Traverse stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeEventHandler)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParentTarget)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFocusedNode)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFocusedElement)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMenubar)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mToolbar)
@@ -1541,7 +1536,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
   // Unlink stuff from nsPIDOMWindow
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeEventHandler)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mParentTarget)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFocusedNode)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFocusedElement)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMenubar)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mToolbar)
@@ -1617,7 +1612,7 @@ nsGlobalWindowInner::IsBlackForCC(bool aTracingNeeded)
   return (nsCCUncollectableMarker::InGeneration(GetMarkedCCGeneration()) ||
           HasKnownLiveWrapper()) &&
          (!aTracingNeeded ||
-          HasNothingToTrace(static_cast<nsIDOMEventTarget*>(this)));
+          HasNothingToTrace(ToSupports(this)));
 }
 
 //*****************************************************************************
@@ -1670,8 +1665,8 @@ nsGlobalWindowInner::SetNewDocument(nsIDocument* aDocument,
                                     nsISupports* aState,
                                     bool aForceReuseInnerWindow)
 {
-  NS_PRECONDITION(mDocumentPrincipal == nullptr,
-                  "mDocumentPrincipal prematurely set!");
+  MOZ_ASSERT(mDocumentPrincipal == nullptr,
+             "mDocumentPrincipal prematurely set!");
   MOZ_ASSERT(aDocument);
 
   if (!mOuterWindow) {
@@ -1702,7 +1697,7 @@ nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
 
   mDoc = aDocument;
   ClearDocumentDependentSlots(aCx);
-  mFocusedNode = nullptr;
+  mFocusedElement = nullptr;
   mLocalStorage = nullptr;
   mSessionStorage = nullptr;
 
@@ -2046,7 +2041,7 @@ nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor)
   /* mChromeEventHandler and mContext go dangling in the middle of this
    function under some circumstances (events that destroy the window)
    without this addref. */
-  nsCOMPtr<nsIDOMEventTarget> kungFuDeathGrip1(mChromeEventHandler);
+  RefPtr<EventTarget> kungFuDeathGrip1(mChromeEventHandler);
   mozilla::Unused << kungFuDeathGrip1; // These aren't referred to through the function
   nsCOMPtr<nsIScriptContext> kungFuDeathGrip2(GetContextInternal());
   mozilla::Unused << kungFuDeathGrip2; // These aren't referred to through the function
@@ -2853,9 +2848,7 @@ const InterfaceShimEntry kInterfaceShimMap[] =
 { { "nsIXMLHttpRequest", "XMLHttpRequest" },
   { "nsIDOMDOMException", "DOMException" },
   { "nsIDOMNode", "Node" },
-  { "nsIDOMCSSPrimitiveValue", "CSSPrimitiveValue" },
   { "nsIDOMCSSRule", "CSSRule" },
-  { "nsIDOMCSSValue", "CSSValue" },
   { "nsIDOMEvent", "Event" },
   { "nsIDOMNSEvent", "Event" },
   { "nsIDOMKeyEvent", "KeyEvent" },
@@ -4137,7 +4130,7 @@ nsGlobalWindowInner::CallerInnerWindow()
   // sandboxPrototype. This used to work incidentally for unrelated reasons, but
   // now we need to do some special handling to support it.
   if (xpc::IsSandbox(scope)) {
-    JSAutoCompartment ac(cx, scope);
+    JSAutoRealm ar(cx, scope);
     JS::Rooted<JSObject*> scopeProto(cx);
     bool ok = JS_GetPrototype(cx, scope, &scopeProto);
     NS_ENSURE_TRUE(ok, nullptr);
@@ -4302,14 +4295,10 @@ nsGlobalWindowInner::GetRealFrameElement(ErrorResult& aError)
  * nsIGlobalWindow::GetFrameElement (when called from C++) is just a wrapper
  * around GetRealFrameElement.
  */
-already_AddRefed<nsIDOMElement>
+Element*
 nsGlobalWindowInner::GetFrameElement()
 {
-  ErrorResult dummy;
-  nsCOMPtr<nsIDOMElement> frameElement =
-    do_QueryInterface(GetRealFrameElement(dummy));
-  dummy.SuppressException();
-  return frameElement.forget();
+  return GetRealFrameElement(IgnoreErrors());
 }
 
 /* static */ bool
@@ -4439,7 +4428,7 @@ nsGlobalWindowInner::ConvertDialogOptions(const nsAString& aOptions,
 
 void
 nsGlobalWindowInner::UpdateCommands(const nsAString& anAction,
-                                    nsISelection* aSel,
+                                    Selection* aSel,
                                     int16_t aReason)
 {
   if (GetOuterWindowInternal()) {
@@ -4486,7 +4475,7 @@ nsGlobalWindowInner::Btoa(const nsAString& aBinaryData,
 }
 
 //*****************************************************************************
-// nsGlobalWindowInner::nsIDOMEventTarget
+// EventTarget
 //*****************************************************************************
 
 nsPIDOMWindowOuter*
@@ -4654,28 +4643,28 @@ static bool ShouldShowFocusRingIfFocusedByMouse(nsIContent* aNode)
 }
 
 void
-nsGlobalWindowInner::SetFocusedNode(nsIContent* aNode,
-                                    uint32_t aFocusMethod,
-                                    bool aNeedsFocus)
+nsGlobalWindowInner::SetFocusedElement(Element* aElement,
+                                       uint32_t aFocusMethod,
+                                       bool aNeedsFocus)
 {
-  if (aNode && aNode->GetComposedDoc() != mDoc) {
+  if (aElement && aElement->GetComposedDoc() != mDoc) {
     NS_WARNING("Trying to set focus to a node from a wrong document");
     return;
   }
 
   if (IsDying()) {
-    NS_ASSERTION(!aNode, "Trying to focus cleaned up window!");
-    aNode = nullptr;
+    NS_ASSERTION(!aElement, "Trying to focus cleaned up window!");
+    aElement = nullptr;
     aNeedsFocus = false;
   }
-  if (mFocusedNode != aNode) {
-    UpdateCanvasFocus(false, aNode);
-    mFocusedNode = aNode;
+  if (mFocusedElement != aElement) {
+    UpdateCanvasFocus(false, aElement);
+    mFocusedElement = aElement;
     mFocusMethod = aFocusMethod & FOCUSMETHOD_MASK;
     mShowFocusRingForContent = false;
   }
 
-  if (mFocusedNode) {
+  if (mFocusedElement) {
     // if a node was focused by a keypress, turn on focus rings for the
     // window.
     if (mFocusMethod & nsIFocusManager::FLAG_BYKEY) {
@@ -4687,7 +4676,7 @@ nsGlobalWindowInner::SetFocusedNode(nsIContent* aNode,
       // are only visible on some elements.
 #ifndef XP_WIN
       !(mFocusMethod & nsIFocusManager::FLAG_BYMOUSE) ||
-      ShouldShowFocusRingIfFocusedByMouse(aNode) ||
+      ShouldShowFocusRingIfFocusedByMouse(aElement) ||
 #endif
       aFocusMethod & nsIFocusManager::FLAG_SHOWRING) {
         mShowFocusRingForContent = true;
@@ -4727,7 +4716,7 @@ nsGlobalWindowInner::TakeFocus(bool aFocus, uint32_t aFocusMethod)
 
   if (mHasFocus != aFocus) {
     mHasFocus = aFocus;
-    UpdateCanvasFocus(true, mFocusedNode);
+    UpdateCanvasFocus(true, mFocusedElement);
   }
 
   // if mNeedsFocus is true, then the document has not yet received a
@@ -4787,7 +4776,7 @@ public:
 
   NS_IMETHOD Run() override
   {
-    NS_PRECONDITION(NS_IsMainThread(), "Should be called on the main thread.");
+    MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread.");
     return mWindow->FireHashchange(mOldURL, mNewURL);
   }
 
@@ -4943,7 +4932,7 @@ nsGlobalWindowInner::UpdateCanvasFocus(bool aFocusChanged, nsIContent* aNewConte
   Element *rootElement = mDoc->GetRootElement();
   if (rootElement) {
       if ((mHasFocus || aFocusChanged) &&
-          (mFocusedNode == rootElement || aNewContent == rootElement)) {
+          (mFocusedElement == rootElement || aNewContent == rootElement)) {
           nsIFrame* frame = rootElement->GetPrimaryFrame();
           if (frame) {
               frame = frame->GetParent();
@@ -4978,28 +4967,6 @@ nsGlobalWindowInner::GetDefaultComputedStyle(Element& aElt,
                                              ErrorResult& aError)
 {
   return GetComputedStyleHelper(aElt, aPseudoElt, true, aError);
-}
-
-nsresult
-nsGlobalWindowInner::GetComputedStyleHelper(nsIDOMElement* aElt,
-                                            const nsAString& aPseudoElt,
-                                            bool aDefaultStylesOnly,
-                                            nsICSSDeclaration** aReturn)
-{
-  NS_ENSURE_ARG_POINTER(aReturn);
-  *aReturn = nullptr;
-
-  nsCOMPtr<dom::Element> element = do_QueryInterface(aElt);
-  if (!element) {
-    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
-  }
-
-  ErrorResult rv;
-  nsCOMPtr<nsICSSDeclaration> cs =
-    GetComputedStyleHelper(*element, aPseudoElt, aDefaultStylesOnly, rv);
-  cs.forget(aReturn);
-
-  return rv.StealNSResult();
 }
 
 already_AddRefed<nsICSSDeclaration>
@@ -5233,22 +5200,11 @@ nsGlobalWindowInner::FireOfflineStatusEventIfChanged()
   } else {
     name.AssignLiteral("online");
   }
-  // The event is fired at the body element, or if there is no body element,
-  // at the document.
-  nsCOMPtr<EventTarget> eventTarget = mDoc.get();
-  nsHTMLDocument* htmlDoc = mDoc->AsHTMLDocument();
-  if (htmlDoc) {
-    Element* body = htmlDoc->GetBody();
-    if (body) {
-      eventTarget = body;
-    }
-  } else {
-    Element* documentElement = mDoc->GetDocumentElement();
-    if (documentElement) {
-      eventTarget = documentElement;
-    }
-  }
-  nsContentUtils::DispatchTrustedEvent(mDoc, eventTarget, name, true, false);
+  nsContentUtils::DispatchTrustedEvent(mDoc,
+                                       static_cast<EventTarget*>(this),
+                                       name,
+                                       false,
+                                       false);
 }
 
 class NotifyIdleObserverRunnable : public Runnable
@@ -6330,11 +6286,18 @@ nsGlobalWindowInner::CallOnChildren(Method aMethod, Args& ...aArgs)
   int32_t childCount = 0;
   docShell->GetChildCount(&childCount);
 
+  // Take a copy of the current children so that modifications to
+  // the child list don't affect to the iteration.
+  AutoTArray<nsCOMPtr<nsIDocShellTreeItem>, 8> children;
   for (int32_t i = 0; i < childCount; ++i) {
     nsCOMPtr<nsIDocShellTreeItem> childShell;
     docShell->GetChildAt(i, getter_AddRefs(childShell));
-    NS_ASSERTION(childShell, "null child shell");
+    if (childShell) {
+      children.AppendElement(childShell);
+    }
+  }
 
+  for (nsCOMPtr<nsIDocShellTreeItem> childShell : children) {
     nsCOMPtr<nsPIDOMWindowOuter> pWin = childShell->GetWindow();
     if (!pWin) {
       continue;
@@ -6471,11 +6434,18 @@ nsGlobalWindowInner::FireDelayedDOMEvents()
     int32_t childCount = 0;
     docShell->GetChildCount(&childCount);
 
+    // Take a copy of the current children so that modifications to
+    // the child list don't affect to the iteration.
+    AutoTArray<nsCOMPtr<nsIDocShellTreeItem>, 8> children;
     for (int32_t i = 0; i < childCount; ++i) {
       nsCOMPtr<nsIDocShellTreeItem> childShell;
       docShell->GetChildAt(i, getter_AddRefs(childShell));
-      NS_ASSERTION(childShell, "null child shell");
+      if (childShell) {
+        children.AppendElement(childShell);
+      }
+    }
 
+    for (nsCOMPtr<nsIDocShellTreeItem> childShell : children) {
       if (nsCOMPtr<nsPIDOMWindowOuter> pWin = childShell->GetWindow()) {
         auto* win = nsGlobalWindowOuter::Cast(pWin);
         win->FireDelayedDOMEvents();
@@ -6536,41 +6506,23 @@ nsGlobalWindowInner::SetTimeout(JSContext* aCx, const nsAString& aHandler,
   return SetTimeoutOrInterval(aCx, aHandler, aTimeout, false, aError);
 }
 
-static bool
-IsInterval(const Optional<int32_t>& aTimeout, int32_t& aResultTimeout)
-{
-  if (aTimeout.WasPassed()) {
-    aResultTimeout = aTimeout.Value();
-    return true;
-  }
-
-  // If no interval was specified, treat this like a timeout, to avoid setting
-  // an interval of 0 milliseconds.
-  aResultTimeout = 0;
-  return false;
-}
-
 int32_t
 nsGlobalWindowInner::SetInterval(JSContext* aCx, Function& aFunction,
-                                 const Optional<int32_t>& aTimeout,
+                                 const int32_t aTimeout,
                                  const Sequence<JS::Value>& aArguments,
                                  ErrorResult& aError)
 {
-  int32_t timeout;
-  bool isInterval = IsInterval(aTimeout, timeout);
-  return SetTimeoutOrInterval(aCx, aFunction, timeout, aArguments, isInterval,
-                              aError);
+  return SetTimeoutOrInterval(
+    aCx, aFunction, aTimeout, aArguments, true, aError);
 }
 
 int32_t
 nsGlobalWindowInner::SetInterval(JSContext* aCx, const nsAString& aHandler,
-                                 const Optional<int32_t>& aTimeout,
+                                 const int32_t aTimeout,
                                  const Sequence<JS::Value>& /* unused */,
                                  ErrorResult& aError)
 {
-  int32_t timeout;
-  bool isInterval = IsInterval(aTimeout, timeout);
-  return SetTimeoutOrInterval(aCx, aHandler, timeout, isInterval, aError);
+  return SetTimeoutOrInterval(aCx, aHandler, aTimeout, true, aError);
 }
 
 int32_t
@@ -7353,27 +7305,10 @@ nsGlobalWindowInner::GetAttentionWithCycleCount(int32_t aCycleCount,
 }
 
 void
-nsGlobalWindowInner::BeginWindowMove(Event& aMouseDownEvent, Element* aPanel,
+nsGlobalWindowInner::BeginWindowMove(Event& aMouseDownEvent,
                                      ErrorResult& aError)
 {
-  nsCOMPtr<nsIWidget> widget;
-
-  // if a panel was supplied, use its widget instead.
-#ifdef MOZ_XUL
-  if (aPanel) {
-    nsIFrame* frame = aPanel->GetPrimaryFrame();
-    if (!frame || !frame->IsMenuPopupFrame()) {
-      return;
-    }
-
-    widget = (static_cast<nsMenuPopupFrame*>(frame))->GetWidget();
-  }
-  else {
-#endif
-    widget = GetMainWidget();
-#ifdef MOZ_XUL
-  }
-#endif
+  nsCOMPtr<nsIWidget> widget = GetMainWidget();
 
   if (!widget) {
     return;

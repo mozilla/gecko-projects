@@ -25,7 +25,6 @@
 #include "nsIFrame.h"
 #include "nsError.h"
 
-#include "nsCSSParser.h"
 #include "nsCSSPseudoElements.h"
 #include "nsComputedDOMStyle.h"
 
@@ -1086,7 +1085,10 @@ CanvasRenderingContext2D::CanvasRenderingContext2D(layers::LayersBackend aCompos
   , mCompositorBackend(aCompositorBackend)
   // these are the default values from the Canvas spec
   , mWidth(0), mHeight(0)
-  , mZero(false), mOpaque(false)
+  , mZero(false)
+  , mOpaqueAttrValue(false)
+  , mContextAttributesHasAlpha(true)
+  , mOpaque(false)
   , mResetLayer(true)
   , mIPC(false)
   , mIsSkiaGL(false)
@@ -1996,12 +1998,19 @@ CanvasRenderingContext2D::InitializeWithDrawTarget(nsIDocShell* aShell,
 }
 
 void
-CanvasRenderingContext2D::SetIsOpaque(bool aIsOpaque)
+CanvasRenderingContext2D::SetOpaqueValueFromOpaqueAttr(bool aOpaqueAttrValue)
 {
-  if (aIsOpaque != mOpaque) {
-    mOpaque = aIsOpaque;
-    ClearTarget();
+  if (aOpaqueAttrValue != mOpaqueAttrValue) {
+    mOpaqueAttrValue = aOpaqueAttrValue;
+    UpdateIsOpaque();
   }
+}
+
+void
+CanvasRenderingContext2D::UpdateIsOpaque()
+{
+  mOpaque = !mContextAttributesHasAlpha || mOpaqueAttrValue;
+  ClearTarget();
 }
 
 NS_IMETHODIMP
@@ -2044,9 +2053,8 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
     }
   }
 
-  if (!attributes.mAlpha) {
-    SetIsOpaque(true);
-  }
+  mContextAttributesHasAlpha = attributes.mAlpha;
+  UpdateIsOpaque();
 
   return NS_OK;
 }
@@ -3380,12 +3388,10 @@ bool CanvasRenderingContext2D::DrawCustomFocusRing(mozilla::dom::Element& aEleme
     return false;
   }
 
-  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    // check that the element i focused
-    nsCOMPtr<nsIDOMElement> focusedElement;
-    fm->GetFocusedElement(getter_AddRefs(focusedElement));
-    if (SameCOMIdentity(aElement.AsDOMNode(), focusedElement)) {
+    // check that the element is focused
+    if (&aElement == fm->GetFocusedElement()) {
       if (nsPIDOMWindowOuter* window = aElement.OwnerDoc()->GetWindow()) {
         return window->ShouldShowFocusRing();
       }

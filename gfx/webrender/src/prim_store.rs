@@ -3,10 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{AlphaType, BorderRadius, BoxShadowClipMode, BuiltDisplayList, ClipMode, ColorF, ComplexClipRegion};
-use api::{DeviceIntRect, DeviceIntSize, DevicePixelScale, Epoch, ExtendMode, FontRenderMode};
-use api::{FilterOp, GlyphInstance, GlyphKey, GradientStop, ImageKey, ImageRendering, ItemRange, ItemTag};
-use api::{LayerPoint, LayerRect, LayerSize, LayerToWorldTransform, LayerVector2D};
-use api::{PipelineId, PremultipliedColorF, Shadow, YuvColorSpace, YuvFormat};
+use api::{DeviceIntRect, DeviceIntSize, DeviceUintSize, DevicePixelScale, Epoch, ExtendMode, FontRenderMode};
+use api::{FilterOp, GlyphInstance, GlyphKey, GradientStop, ImageKey, ImageRendering, ItemRange, ItemTag, TileOffset};
+use api::{GlyphRasterSpace, LayoutPoint, LayoutRect, LayoutSize, LayoutToWorldTransform, LayoutVector2D};
+use api::{PipelineId, PremultipliedColorF, PropertyBinding, Shadow, YuvColorSpace, YuvFormat, DeviceIntSideOffsets};
 use border::{BorderCornerInstance, BorderEdgeKind};
 use box_shadow::BLUR_SAMPLE_SCALE;
 use clip_scroll_tree::{ClipChainIndex, ClipScrollNodeIndex, CoordinateSystemId};
@@ -18,16 +18,20 @@ use frame_builder::PrimitiveRunContext;
 use glyph_rasterizer::{FontInstance, FontTransform};
 use gpu_cache::{GpuBlockData, GpuCache, GpuCacheAddress, GpuCacheHandle, GpuDataRequest,
                 ToGpuBlocks};
-use gpu_types::{ClipChainRectIndex};
+use gpu_types::{BrushFlags, ClipChainRectIndex};
+use image::{for_each_tile, for_each_repetition};
 use picture::{PictureCompositeMode, PictureId, PicturePrimitive};
+#[cfg(debug_assertions)]
+use render_backend::FrameId;
 use render_task::{BlitSource, RenderTask, RenderTaskCacheKey};
 use render_task::{RenderTaskCacheKeyKind, RenderTaskId, RenderTaskCacheEntryHandle};
 use renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use resource_cache::{ImageProperties, ImageRequest};
+use scene::SceneProperties;
 use segment::SegmentBuilder;
 use std::{mem, usize};
 use std::sync::Arc;
-use util::{MatrixHelpers, WorldToLayerFastTransform, calculate_screen_bounding_rect};
+use util::{MatrixHelpers, WorldToLayoutFastTransform, calculate_screen_bounding_rect};
 use util::{pack_as_float, recycle_vec};
 
 
@@ -108,8 +112,8 @@ impl CachedGradient {
 //          in the picture structure.
 #[derive(Debug)]
 pub struct PrimitiveRunLocalRect {
-    pub local_rect_in_actual_parent_space: LayerRect,
-    pub local_rect_in_original_parent_space: LayerRect,
+    pub local_rect_in_actual_parent_space: LayoutRect,
+    pub local_rect_in_original_parent_space: LayoutRect,
 }
 
 /// For external images, it's not possible to know the
@@ -143,7 +147,6 @@ pub struct PictureIndex(pub usize);
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum PrimitiveKind {
     TextRun,
-    Image,
     Border,
     Brush,
 }
@@ -182,8 +185,8 @@ pub struct PrimitiveMetadata {
     // TODO(gw): In the future, we should just pull these
     //           directly from the DL item, instead of
     //           storing them here.
-    pub local_rect: LayerRect,
-    pub local_clip_rect: LayerRect,
+    pub local_rect: LayoutRect,
+    pub local_clip_rect: LayoutRect,
     pub clip_chain_rect_index: ClipChainRectIndex,
     pub is_backface_visible: bool,
     pub screen_rect: Option<ScreenRect>,
@@ -191,12 +194,71 @@ pub struct PrimitiveMetadata {
     /// A tag used to identify this primitive outside of WebRender. This is
     /// used for returning useful data during hit testing.
     pub tag: Option<ItemTag>,
+
+    /// The last frame ID (of the `RenderTaskTree`) this primitive
+    /// was prepared for rendering in.
+    #[cfg(debug_assertions)]
+    pub prepared_frame_id: FrameId,
+}
+
+// Maintains a list of opacity bindings that have been collapsed into
+// the color of a single primitive. This is an important optimization
+// that avoids allocating an intermediate surface for most common
+// uses of opacity filters.
+#[derive(Debug)]
+pub struct OpacityBinding {
+    bindings: Vec<PropertyBinding<f32>>,
+    current: f32,
+}
+
+impl OpacityBinding {
+    pub fn new() -> OpacityBinding {
+        OpacityBinding {
+            bindings: Vec::new(),
+            current: 1.0,
+        }
+    }
+
+    // Add a new opacity value / binding to the list
+    pub fn push(&mut self, binding: PropertyBinding<f32>) {
+        self.bindings.push(binding);
+    }
+
+    // Resolve the current value of each opacity binding, and
+    // store that as a single combined opacity. Returns true
+    // if the opacity value changed from last time.
+    pub fn update(&mut self, scene_properties: &SceneProperties) -> bool {
+        let mut new_opacity = 1.0;
+
+        for binding in &self.bindings {
+            let opacity = scene_properties.resolve_float(binding);
+            new_opacity = new_opacity * opacity;
+        }
+
+        let changed = new_opacity != self.current;
+        self.current = new_opacity;
+
+        changed
+    }
+}
+
+#[derive(Debug)]
+pub struct VisibleImageTile {
+    pub tile_offset: TileOffset,
+    pub handle: GpuCacheHandle,
+    pub edge_flags: EdgeAaSegmentMask,
+}
+
+#[derive(Debug)]
+pub struct VisibleGradientTile {
+    pub handle: GpuCacheHandle,
 }
 
 #[derive(Debug)]
 pub enum BrushKind {
     Solid {
         color: ColorF,
+        opacity_binding: OpacityBinding,
     },
     Clear,
     Picture {
@@ -206,10 +268,12 @@ pub enum BrushKind {
         request: ImageRequest,
         current_epoch: Epoch,
         alpha_type: AlphaType,
-        stretch_size: LayerSize,
-        tile_spacing: LayerSize,
+        stretch_size: LayoutSize,
+        tile_spacing: LayoutSize,
         source: ImageSource,
         sub_rect: Option<DeviceIntRect>,
+        opacity_binding: OpacityBinding,
+        visible_tiles: Vec<VisibleImageTile>,
     },
     YuvImage {
         yuv_key: [ImageKey; 3],
@@ -221,10 +285,13 @@ pub enum BrushKind {
         gradient_index: CachedGradientIndex,
         stops_range: ItemRange<GradientStop>,
         extend_mode: ExtendMode,
-        center: LayerPoint,
+        center: LayoutPoint,
         start_radius: f32,
         end_radius: f32,
         ratio_xy: f32,
+        stretch_size: LayoutSize,
+        tile_spacing: LayoutSize,
+        visible_tiles: Vec<VisibleGradientTile>,
     },
     LinearGradient {
         gradient_index: CachedGradientIndex,
@@ -232,9 +299,15 @@ pub enum BrushKind {
         stops_count: usize,
         extend_mode: ExtendMode,
         reverse_stops: bool,
-        start_point: LayerPoint,
-        end_point: LayerPoint,
-    }
+        start_point: LayoutPoint,
+        end_point: LayoutPoint,
+        stretch_size: LayoutSize,
+        tile_spacing: LayoutSize,
+        visible_tiles: Vec<VisibleGradientTile>,
+    },
+    Border {
+        request: ImageRequest,
+    },
 }
 
 impl BrushKind {
@@ -244,6 +317,7 @@ impl BrushKind {
             BrushKind::Image { .. } |
             BrushKind::YuvImage { .. } |
             BrushKind::RadialGradient { .. } |
+            BrushKind::Border { .. } |
             BrushKind::LinearGradient { .. } => true,
 
             // TODO(gw): Allow batch.rs to add segment instances
@@ -251,6 +325,14 @@ impl BrushKind {
             BrushKind::Picture { .. } => false,
 
             BrushKind::Clear => false,
+        }
+    }
+
+    // Construct a brush that is a solid color rectangle.
+    pub fn new_solid(color: ColorF) -> BrushKind {
+        BrushKind::Solid {
+            color,
+            opacity_binding: OpacityBinding::new(),
         }
     }
 }
@@ -271,25 +353,47 @@ bitflags! {
 }
 
 #[derive(Debug)]
+pub enum BrushSegmentTaskId {
+    RenderTaskId(RenderTaskId),
+    Opaque,
+    Empty,
+}
+
+impl BrushSegmentTaskId {
+    pub fn needs_blending(&self) -> bool {
+        match *self {
+            BrushSegmentTaskId::RenderTaskId(..) => true,
+            BrushSegmentTaskId::Opaque | BrushSegmentTaskId::Empty => false,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct BrushSegment {
-    pub local_rect: LayerRect,
-    pub clip_task_id: Option<RenderTaskId>,
+    pub local_rect: LayoutRect,
+    pub clip_task_id: BrushSegmentTaskId,
     pub may_need_clip_mask: bool,
     pub edge_flags: EdgeAaSegmentMask,
+    pub extra_data: [f32; 4],
+    pub brush_flags: BrushFlags,
 }
 
 impl BrushSegment {
     pub fn new(
-        origin: LayerPoint,
-        size: LayerSize,
+        origin: LayoutPoint,
+        size: LayoutSize,
         may_need_clip_mask: bool,
         edge_flags: EdgeAaSegmentMask,
+        extra_data: [f32; 4],
+        brush_flags: BrushFlags,
     ) -> BrushSegment {
         BrushSegment {
-            local_rect: LayerRect::new(origin, size),
-            clip_task_id: None,
+            local_rect: LayoutRect::new(origin, size),
+            clip_task_id: BrushSegmentTaskId::Opaque,
             may_need_clip_mask,
             edge_flags,
+            extra_data,
+            brush_flags,
         }
     }
 }
@@ -336,20 +440,55 @@ impl BrushPrimitive {
     fn write_gpu_blocks(
         &self,
         request: &mut GpuDataRequest,
+        local_rect: LayoutRect,
     ) {
         // has to match VECS_PER_SPECIFIC_BRUSH
         match self.kind {
-            BrushKind::Picture { .. } |
-            BrushKind::YuvImage { .. } |
-            BrushKind::Image { .. } => {}
-            BrushKind::Solid { color } => {
-                request.push(color.premultiplied());
+            BrushKind::Border { .. } => {
+                // Border primitives currently used for
+                // image borders, and run through the
+                // normal brush_image shader.
+                request.push(PremultipliedColorF::WHITE);
+                request.push(PremultipliedColorF::WHITE);
+                request.push([
+                    local_rect.size.width,
+                    local_rect.size.height,
+                    0.0,
+                    0.0,
+                ]);
+            }
+            BrushKind::YuvImage { .. } => {}
+            BrushKind::Picture { .. } => {
+                request.push(PremultipliedColorF::WHITE);
+                request.push(PremultipliedColorF::WHITE);
+                request.push([
+                    local_rect.size.width,
+                    local_rect.size.height,
+                    0.0,
+                    0.0,
+                ]);
+            }
+            // Images are drawn as a white color, modulated by the total
+            // opacity coming from any collapsed property bindings.
+            BrushKind::Image { stretch_size, tile_spacing, ref opacity_binding, .. } => {
+                request.push(ColorF::new(1.0, 1.0, 1.0, opacity_binding.current).premultiplied());
+                request.push(PremultipliedColorF::WHITE);
+                request.push([
+                    stretch_size.width + tile_spacing.width,
+                    stretch_size.height + tile_spacing.height,
+                    0.0,
+                    0.0,
+                ]);
+            }
+            // Solid rects also support opacity collapsing.
+            BrushKind::Solid { color, ref opacity_binding, .. } => {
+                request.push(color.scale_alpha(opacity_binding.current).premultiplied());
             }
             BrushKind::Clear => {
                 // Opaque black with operator dest out
                 request.push(PremultipliedColorF::BLACK);
             }
-            BrushKind::LinearGradient { start_point, end_point, extend_mode, .. } => {
+            BrushKind::LinearGradient { stretch_size, start_point, end_point, extend_mode, .. } => {
                 request.push([
                     start_point.x,
                     start_point.y,
@@ -358,12 +497,12 @@ impl BrushPrimitive {
                 ]);
                 request.push([
                     pack_as_float(extend_mode as u32),
-                    0.0,
-                    0.0,
+                    stretch_size.width,
+                    stretch_size.height,
                     0.0,
                 ]);
             }
-            BrushKind::RadialGradient { center, start_radius, end_radius, ratio_xy, extend_mode, .. } => {
+            BrushKind::RadialGradient { stretch_size, center, start_radius, end_radius, ratio_xy, extend_mode, .. } => {
                 request.push([
                     center.x,
                     center.y,
@@ -373,8 +512,8 @@ impl BrushPrimitive {
                 request.push([
                     ratio_xy,
                     pack_as_float(extend_mode as u32),
-                    0.,
-                    0.,
+                    stretch_size.width,
+                    stretch_size.height,
                 ]);
             }
         }
@@ -406,9 +545,9 @@ pub enum ImageSource {
 
 #[derive(Debug)]
 pub struct ImagePrimitiveCpu {
-    pub tile_spacing: LayerSize,
+    pub tile_spacing: LayoutSize,
     pub alpha_type: AlphaType,
-    pub stretch_size: LayerSize,
+    pub stretch_size: LayoutSize,
     pub current_epoch: Epoch,
     pub source: ImageSource,
     pub key: ImageCacheKey,
@@ -525,9 +664,16 @@ impl<'a> GradientGpuBlockBuilder<'a> {
         // * last stop has offset 1.0
 
         let mut src_stops = src_stops.into_iter();
-        let first = src_stops.next().unwrap();
-        let mut cur_color = first.color.premultiplied();
-        debug_assert_eq!(first.offset, 0.0);
+        let mut cur_color = match src_stops.next() {
+            Some(stop) => {
+                debug_assert_eq!(stop.offset, 0.0);
+                stop.color.premultiplied()
+            }
+            None => {
+                error!("Zero gradient stops found!");
+                PremultipliedColorF::BLACK
+            }
+        };
 
         // A table of gradient entries, with two colors per entry, that specify the start and end color
         // within the segment of the gradient space represented by that entry. To lookup a gradient result,
@@ -565,7 +711,10 @@ impl<'a> GradientGpuBlockBuilder<'a> {
 
                 cur_color = next_color;
             }
-            debug_assert_eq!(cur_idx, GRADIENT_DATA_TABLE_BEGIN);
+            if cur_idx != GRADIENT_DATA_TABLE_BEGIN {
+                error!("Gradient stops abruptly at {}, auto-completing to white", cur_idx);
+                self.fill_colors(GRADIENT_DATA_TABLE_BEGIN, cur_idx, &PremultipliedColorF::WHITE, &cur_color, &mut entries);
+            }
 
             // Fill in the last entry (for reversed stops) with the last color stop
             self.fill_colors(
@@ -600,7 +749,11 @@ impl<'a> GradientGpuBlockBuilder<'a> {
 
                 cur_color = next_color;
             }
-            debug_assert_eq!(cur_idx, GRADIENT_DATA_TABLE_END);
+            if cur_idx != GRADIENT_DATA_TABLE_END {
+                error!("Gradient stops abruptly at {}, auto-completing to white", cur_idx);
+                self.fill_colors(cur_idx, GRADIENT_DATA_TABLE_END, &PremultipliedColorF::WHITE, &cur_color, &mut entries);
+            }
+
 
             // Fill in the last entry with the last color stop
             self.fill_colors(
@@ -622,23 +775,26 @@ impl<'a> GradientGpuBlockBuilder<'a> {
 #[derive(Debug, Clone)]
 pub struct TextRunPrimitiveCpu {
     pub font: FontInstance,
-    pub offset: LayerVector2D,
+    pub offset: LayoutVector2D,
     pub glyph_range: ItemRange<GlyphInstance>,
     pub glyph_keys: Vec<GlyphKey>,
     pub glyph_gpu_blocks: Vec<GpuBlockData>,
     pub shadow: bool,
+    pub glyph_raster_space: GlyphRasterSpace,
 }
 
 impl TextRunPrimitiveCpu {
     pub fn get_font(
         &self,
         device_pixel_scale: DevicePixelScale,
-        transform: Option<LayerToWorldTransform>,
+        transform: Option<LayoutToWorldTransform>,
     ) -> FontInstance {
         let mut font = self.font.clone();
         font.size = font.size.scale_by(device_pixel_scale.0);
         if let Some(transform) = transform {
-            if transform.has_perspective_component() || !transform.has_2d_inverse() {
+            if transform.has_perspective_component() ||
+               !transform.has_2d_inverse() ||
+               self.glyph_raster_space != GlyphRasterSpace::Screen {
                 font.render_mode = font.render_mode.limit_by(FontRenderMode::Alpha);
             } else {
                 font.transform = FontTransform::from(&transform).quantize();
@@ -650,10 +806,15 @@ impl TextRunPrimitiveCpu {
     fn prepare_for_render(
         &mut self,
         device_pixel_scale: DevicePixelScale,
-        transform: Option<LayerToWorldTransform>,
+        transform: Option<LayoutToWorldTransform>,
+        allow_subpixel_aa: bool,
         display_list: &BuiltDisplayList,
         frame_building_state: &mut FrameBuildingState,
     ) {
+        if !allow_subpixel_aa && self.font.bg_color.a == 0 {
+            self.font.render_mode = self.font.render_mode.limit_by(FontRenderMode::Alpha);
+        }
+
         let font = self.get_font(device_pixel_scale, transform);
 
         // Cache the glyph positions, if not in the cache already.
@@ -719,14 +880,14 @@ impl TextRunPrimitiveCpu {
 #[derive(Debug)]
 #[repr(C)]
 struct ClipRect {
-    rect: LayerRect,
+    rect: LayoutRect,
     mode: f32,
 }
 
 #[derive(Debug)]
 #[repr(C)]
 struct ClipCorner {
-    rect: LayerRect,
+    rect: LayoutRect,
     outer_radius_x: f32,
     outer_radius_y: f32,
     inner_radius_x: f32,
@@ -750,7 +911,7 @@ impl ClipCorner {
         ]);
     }
 
-    fn uniform(rect: LayerRect, outer_radius: f32, inner_radius: f32) -> ClipCorner {
+    fn uniform(rect: LayoutRect, outer_radius: f32, inner_radius: f32) -> ClipCorner {
         ClipCorner {
             rect,
             outer_radius_x: outer_radius,
@@ -764,7 +925,7 @@ impl ClipCorner {
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImageMaskData {
-    pub local_rect: LayerRect,
+    pub local_rect: LayoutRect,
 }
 
 impl ToGpuBlocks for ImageMaskData {
@@ -783,16 +944,16 @@ pub struct ClipData {
 }
 
 impl ClipData {
-    pub fn rounded_rect(rect: &LayerRect, radii: &BorderRadius, mode: ClipMode) -> ClipData {
+    pub fn rounded_rect(rect: &LayoutRect, radii: &BorderRadius, mode: ClipMode) -> ClipData {
         ClipData {
             rect: ClipRect {
                 rect: *rect,
                 mode: mode as u32 as f32,
             },
             top_left: ClipCorner {
-                rect: LayerRect::new(
-                    LayerPoint::new(rect.origin.x, rect.origin.y),
-                    LayerSize::new(radii.top_left.width, radii.top_left.height),
+                rect: LayoutRect::new(
+                    LayoutPoint::new(rect.origin.x, rect.origin.y),
+                    LayoutSize::new(radii.top_left.width, radii.top_left.height),
                 ),
                 outer_radius_x: radii.top_left.width,
                 outer_radius_y: radii.top_left.height,
@@ -800,12 +961,12 @@ impl ClipData {
                 inner_radius_y: 0.0,
             },
             top_right: ClipCorner {
-                rect: LayerRect::new(
-                    LayerPoint::new(
+                rect: LayoutRect::new(
+                    LayoutPoint::new(
                         rect.origin.x + rect.size.width - radii.top_right.width,
                         rect.origin.y,
                     ),
-                    LayerSize::new(radii.top_right.width, radii.top_right.height),
+                    LayoutSize::new(radii.top_right.width, radii.top_right.height),
                 ),
                 outer_radius_x: radii.top_right.width,
                 outer_radius_y: radii.top_right.height,
@@ -813,12 +974,12 @@ impl ClipData {
                 inner_radius_y: 0.0,
             },
             bottom_left: ClipCorner {
-                rect: LayerRect::new(
-                    LayerPoint::new(
+                rect: LayoutRect::new(
+                    LayoutPoint::new(
                         rect.origin.x,
                         rect.origin.y + rect.size.height - radii.bottom_left.height,
                     ),
-                    LayerSize::new(radii.bottom_left.width, radii.bottom_left.height),
+                    LayoutSize::new(radii.bottom_left.width, radii.bottom_left.height),
                 ),
                 outer_radius_x: radii.bottom_left.width,
                 outer_radius_y: radii.bottom_left.height,
@@ -826,12 +987,12 @@ impl ClipData {
                 inner_radius_y: 0.0,
             },
             bottom_right: ClipCorner {
-                rect: LayerRect::new(
-                    LayerPoint::new(
+                rect: LayoutRect::new(
+                    LayoutPoint::new(
                         rect.origin.x + rect.size.width - radii.bottom_right.width,
                         rect.origin.y + rect.size.height - radii.bottom_right.height,
                     ),
-                    LayerSize::new(radii.bottom_right.width, radii.bottom_right.height),
+                    LayoutSize::new(radii.bottom_right.width, radii.bottom_right.height),
                 ),
                 outer_radius_x: radii.bottom_right.width,
                 outer_radius_y: radii.bottom_right.height,
@@ -841,43 +1002,43 @@ impl ClipData {
         }
     }
 
-    pub fn uniform(rect: LayerRect, radius: f32, mode: ClipMode) -> ClipData {
+    pub fn uniform(rect: LayoutRect, radius: f32, mode: ClipMode) -> ClipData {
         ClipData {
             rect: ClipRect {
                 rect,
                 mode: mode as u32 as f32,
             },
             top_left: ClipCorner::uniform(
-                LayerRect::new(
-                    LayerPoint::new(rect.origin.x, rect.origin.y),
-                    LayerSize::new(radius, radius),
+                LayoutRect::new(
+                    LayoutPoint::new(rect.origin.x, rect.origin.y),
+                    LayoutSize::new(radius, radius),
                 ),
                 radius,
                 0.0,
             ),
             top_right: ClipCorner::uniform(
-                LayerRect::new(
-                    LayerPoint::new(rect.origin.x + rect.size.width - radius, rect.origin.y),
-                    LayerSize::new(radius, radius),
+                LayoutRect::new(
+                    LayoutPoint::new(rect.origin.x + rect.size.width - radius, rect.origin.y),
+                    LayoutSize::new(radius, radius),
                 ),
                 radius,
                 0.0,
             ),
             bottom_left: ClipCorner::uniform(
-                LayerRect::new(
-                    LayerPoint::new(rect.origin.x, rect.origin.y + rect.size.height - radius),
-                    LayerSize::new(radius, radius),
+                LayoutRect::new(
+                    LayoutPoint::new(rect.origin.x, rect.origin.y + rect.size.height - radius),
+                    LayoutSize::new(radius, radius),
                 ),
                 radius,
                 0.0,
             ),
             bottom_right: ClipCorner::uniform(
-                LayerRect::new(
-                    LayerPoint::new(
+                LayoutRect::new(
+                    LayoutPoint::new(
                         rect.origin.x + rect.size.width - radius,
                         rect.origin.y + rect.size.height - radius,
                     ),
-                    LayerSize::new(radius, radius),
+                    LayoutSize::new(radius, radius),
                 ),
                 radius,
                 0.0,
@@ -902,7 +1063,6 @@ impl ClipData {
 #[derive(Debug)]
 pub enum PrimitiveContainer {
     TextRun(TextRunPrimitiveCpu),
-    Image(ImagePrimitiveCpu),
     Border(BorderPrimitiveCpu),
     Brush(BrushPrimitive),
 }
@@ -922,7 +1082,7 @@ impl PrimitiveContainer {
             }
             PrimitiveContainer::Brush(ref brush) => {
                 match brush.kind {
-                    BrushKind::Solid { ref color } => {
+                    BrushKind::Solid { ref color, .. } => {
                         color.a > 0.0
                     }
                     BrushKind::Clear |
@@ -930,12 +1090,12 @@ impl PrimitiveContainer {
                     BrushKind::Image { .. } |
                     BrushKind::YuvImage { .. } |
                     BrushKind::RadialGradient { .. } |
+                    BrushKind::Border { .. } |
                     BrushKind::LinearGradient { .. } => {
                         true
                     }
                 }
             }
-            PrimitiveContainer::Image(..) |
             PrimitiveContainer::Border(..) => {
                 true
             }
@@ -965,15 +1125,14 @@ impl PrimitiveContainer {
                     glyph_keys: info.glyph_keys.clone(),
                     glyph_gpu_blocks: Vec::new(),
                     shadow: true,
+                    glyph_raster_space: info.glyph_raster_space,
                 })
             }
             PrimitiveContainer::Brush(ref brush) => {
                 match brush.kind {
                     BrushKind::Solid { .. } => {
                         PrimitiveContainer::Brush(BrushPrimitive::new(
-                            BrushKind::Solid {
-                                color: shadow.color,
-                            },
+                            BrushKind::new_solid(shadow.color),
                             None,
                         ))
                     }
@@ -981,13 +1140,13 @@ impl PrimitiveContainer {
                     BrushKind::Picture { .. } |
                     BrushKind::Image { .. } |
                     BrushKind::YuvImage { .. } |
+                    BrushKind::Border { .. } |
                     BrushKind::RadialGradient { .. } |
                     BrushKind::LinearGradient { .. } => {
                         panic!("bug: other brush kinds not expected here yet");
                     }
                 }
             }
-            PrimitiveContainer::Image(..) |
             PrimitiveContainer::Border(..) => {
                 panic!("bug: other primitive containers not expected here");
             }
@@ -1061,8 +1220,8 @@ impl PrimitiveStore {
 
     pub fn add_primitive(
         &mut self,
-        local_rect: &LayerRect,
-        local_clip_rect: &LayerRect,
+        local_rect: &LayoutRect,
+        local_clip_rect: &LayoutRect,
         is_backface_visible: bool,
         clip_sources: Option<ClipSourcesHandle>,
         tag: Option<ItemTag>,
@@ -1077,24 +1236,27 @@ impl PrimitiveStore {
             local_rect: *local_rect,
             local_clip_rect: *local_clip_rect,
             clip_chain_rect_index: ClipChainRectIndex(0),
-            is_backface_visible: is_backface_visible,
+            is_backface_visible,
             screen_rect: None,
             tag,
             opacity: PrimitiveOpacity::translucent(),
             prim_kind: PrimitiveKind::Brush,
             cpu_prim_index: SpecificPrimitiveIndex(0),
+            #[cfg(debug_assertions)]
+            prepared_frame_id: FrameId(0),
         };
 
         let metadata = match container {
             PrimitiveContainer::Brush(brush) => {
                 let opacity = match brush.kind {
                     BrushKind::Clear => PrimitiveOpacity::translucent(),
-                    BrushKind::Solid { ref color } => PrimitiveOpacity::from_alpha(color.a),
+                    BrushKind::Solid { ref color, .. } => PrimitiveOpacity::from_alpha(color.a),
                     BrushKind::Image { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::YuvImage { .. } => PrimitiveOpacity::opaque(),
                     BrushKind::RadialGradient { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::LinearGradient { .. } => PrimitiveOpacity::translucent(),
                     BrushKind::Picture { .. } => PrimitiveOpacity::translucent(),
+                    BrushKind::Border { .. } => PrimitiveOpacity::translucent(),
                 };
 
                 let metadata = PrimitiveMetadata {
@@ -1119,17 +1281,6 @@ impl PrimitiveStore {
                 self.cpu_text_runs.push(text_cpu);
                 metadata
             }
-            PrimitiveContainer::Image(image_cpu) => {
-                let metadata = PrimitiveMetadata {
-                    opacity: PrimitiveOpacity::translucent(),
-                    prim_kind: PrimitiveKind::Image,
-                    cpu_prim_index: SpecificPrimitiveIndex(self.cpu_images.len()),
-                    ..base_metadata
-                };
-
-                self.cpu_images.push(image_cpu);
-                metadata
-            }
             PrimitiveContainer::Border(border_cpu) => {
                 let metadata = PrimitiveMetadata {
                     opacity: PrimitiveOpacity::translucent(),
@@ -1146,6 +1297,121 @@ impl PrimitiveStore {
         self.cpu_metadata.push(metadata);
 
         PrimitiveIndex(prim_index)
+    }
+
+    // Internal method that retrieves the primitive index of a primitive
+    // that can be the target for collapsing parent opacity filters into.
+    fn get_opacity_collapse_prim(
+        &self,
+        pic_index: PictureIndex,
+    ) -> Option<PrimitiveIndex> {
+        let pic = &self.pictures[pic_index.0];
+
+        // We can only collapse opacity if there is a single primitive, otherwise
+        // the opacity needs to be applied to the primitives as a group.
+        if pic.runs.len() != 1 {
+            return None;
+        }
+
+        let run = &pic.runs[0];
+        if run.count != 1 {
+            return None;
+        }
+
+        let prim_metadata = &self.cpu_metadata[run.base_prim_index.0];
+
+        // For now, we only support opacity collapse on solid rects and images.
+        // This covers the most common types of opacity filters that can be
+        // handled by this optimization. In the future, we can easily extend
+        // this to other primitives, such as text runs and gradients.
+        match prim_metadata.prim_kind {
+            PrimitiveKind::Brush => {
+                let brush = &self.cpu_brushes[prim_metadata.cpu_prim_index.0];
+                match brush.kind {
+                    BrushKind::Picture { pic_index, .. } => {
+                        let pic = &self.pictures[pic_index.0];
+                        // If we encounter a picture that is a pass-through
+                        // (i.e. no composite mode), then we can recurse into
+                        // that to try and find a primitive to collapse to.
+                        if pic.composite_mode.is_none() {
+                            return self.get_opacity_collapse_prim(pic_index);
+                        }
+                    }
+                    // If we find a single rect or image, we can use that
+                    // as the primitive to collapse the opacity into.
+                    BrushKind::Solid { .. } | BrushKind::Image { .. } => {
+                        return Some(run.base_prim_index)
+                    }
+                    BrushKind::Border { .. } |
+                    BrushKind::YuvImage { .. } |
+                    BrushKind::LinearGradient { .. } |
+                    BrushKind::RadialGradient { .. } |
+                    BrushKind::Clear => {}
+                }
+            }
+            PrimitiveKind::TextRun |
+            PrimitiveKind::Border => {}
+        }
+
+        None
+    }
+
+    // Apply any optimizations to drawing this picture. Currently,
+    // we just support collapsing pictures with an opacity filter
+    // by pushing that opacity value into the color of a primitive
+    // if that picture contains one compatible primitive.
+    pub fn optimize_picture_if_possible(
+        &mut self,
+        pic_index: PictureIndex,
+    ) {
+        // Only handle opacity filters for now.
+        let binding = match self.pictures[pic_index.0].composite_mode {
+            Some(PictureCompositeMode::Filter(FilterOp::Opacity(binding, _))) => {
+                binding
+            }
+            _ => {
+                return;
+            }
+        };
+
+        // See if this picture contains a single primitive that supports
+        // opacity collapse.
+        if let Some(prim_index) = self.get_opacity_collapse_prim(pic_index) {
+            let prim_metadata = &self.cpu_metadata[prim_index.0];
+            match prim_metadata.prim_kind {
+                PrimitiveKind::Brush => {
+                    let brush = &mut self.cpu_brushes[prim_metadata.cpu_prim_index.0];
+
+                    // By this point, we know we should only have found a primitive
+                    // that supports opacity collapse.
+                    match brush.kind {
+                        BrushKind::Solid { ref mut opacity_binding, .. } |
+                        BrushKind::Image { ref mut opacity_binding, .. } => {
+                            opacity_binding.push(binding);
+                        }
+                        BrushKind::Clear { .. } |
+                        BrushKind::Picture { .. } |
+                        BrushKind::YuvImage { .. } |
+                        BrushKind::Border { .. } |
+                        BrushKind::LinearGradient { .. } |
+                        BrushKind::RadialGradient { .. } => {
+                            unreachable!("bug: invalid prim type for opacity collapse");
+                        }
+                    };
+                }
+                PrimitiveKind::TextRun |
+                PrimitiveKind::Border => {
+                    unreachable!("bug: invalid prim type for opacity collapse");
+                }
+            }
+
+            // The opacity filter has been collapsed, so mark this picture
+            // as a pass though. This means it will no longer allocate an
+            // intermediate surface or incur an extra blend / blit. Instead,
+            // the collapsed primitive will be drawn directly into the
+            // parent picture.
+            self.pictures[pic_index.0].composite_mode = None;
+        }
     }
 
     pub fn get_metadata(&self, index: PrimitiveIndex) -> &PrimitiveMetadata {
@@ -1166,7 +1432,13 @@ impl PrimitiveStore {
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
     ) {
+        let mut is_tiled = false;
         let metadata = &mut self.cpu_metadata[prim_index.0];
+        #[cfg(debug_assertions)]
+        {
+            metadata.prepared_frame_id = frame_state.render_tasks.frame_id();
+        }
+
         match metadata.prim_kind {
             PrimitiveKind::Border => {}
             PrimitiveKind::TextRun => {
@@ -1176,142 +1448,64 @@ impl PrimitiveStore {
                 text.prepare_for_render(
                     frame_context.device_pixel_scale,
                     transform,
+                    pic_context.allow_subpixel_aa,
                     pic_context.display_list,
                     frame_state,
                 );
-            }
-            PrimitiveKind::Image => {
-                let image_cpu = &mut self.cpu_images[metadata.cpu_prim_index.0];
-                let image_properties = frame_state
-                    .resource_cache
-                    .get_image_properties(image_cpu.key.request.key);
-
-                // TODO(gw): Add image.rs and move this code out to a separate
-                //           source file as it gets more complicated, and we
-                //           start pre-rendering images for other reasons.
-
-                if let Some(image_properties) = image_properties {
-                    // See if this image has been updated since we last hit this code path.
-                    // If so, we need to (at least) update the opacity, and also rebuild
-                    // and render task cached portions of this image.
-                    if image_properties.epoch != image_cpu.current_epoch {
-                        image_cpu.current_epoch = image_properties.epoch;
-
-                        // Update the opacity.
-                        metadata.opacity.is_opaque = image_properties.descriptor.is_opaque &&
-                            image_cpu.tile_spacing.width == 0.0 &&
-                            image_cpu.tile_spacing.height == 0.0;
-
-                        // Work out whether this image is a normal / simple type, or if
-                        // we need to pre-render it to the render task cache.
-                        image_cpu.source = match image_cpu.key.texel_rect {
-                            Some(texel_rect) => {
-                                ImageSource::Cache {
-                                    // Size in device-pixels we need to allocate in render task cache.
-                                    size: texel_rect.size,
-                                    handle: None,
-                                }
-                            }
-                            None => {
-                                // Simple image - just use a normal texture cache entry.
-                                ImageSource::Default
-                            }
-                        };
-                    }
-
-                    // Set if we need to request the source image from the cache this frame.
-                    let mut request_source_image = false;
-
-                    // Every frame, for cached items, we need to request the render
-                    // task cache item. The closure will be invoked on the first
-                    // time through, and any time the render task output has been
-                    // evicted from the texture cache.
-                    match image_cpu.source {
-                        ImageSource::Cache { size, ref mut handle } => {
-                            let key = image_cpu.key;
-
-                            // Request a pre-rendered image task.
-                            *handle = Some(frame_state.resource_cache.request_render_task(
-                                RenderTaskCacheKey {
-                                    size,
-                                    kind: RenderTaskCacheKeyKind::Image(key),
-                                },
-                                frame_state.gpu_cache,
-                                frame_state.render_tasks,
-                                None,
-                                image_properties.descriptor.is_opaque,
-                                |render_tasks| {
-                                    // We need to render the image cache this frame,
-                                    // so will need access to the source texture.
-                                    request_source_image = true;
-
-                                    // Create a task to blit from the texture cache to
-                                    // a normal transient render task surface. This will
-                                    // copy only the sub-rect, if specified.
-                                    let cache_to_target_task = RenderTask::new_blit(
-                                        size,
-                                        BlitSource::Image {
-                                            key,
-                                        },
-                                    );
-                                    let cache_to_target_task_id = render_tasks.add(cache_to_target_task);
-
-                                    // Create a task to blit the rect from the child render
-                                    // task above back into the right spot in the persistent
-                                    // render target cache.
-                                    let target_to_cache_task = RenderTask::new_blit(
-                                        size,
-                                        BlitSource::RenderTask {
-                                            task_id: cache_to_target_task_id,
-                                        },
-                                    );
-                                    let target_to_cache_task_id = render_tasks.add(target_to_cache_task);
-
-                                    // Hook this into the render task tree at the right spot.
-                                    pic_state.tasks.push(target_to_cache_task_id);
-
-                                    // Pass the image opacity, so that the cached render task
-                                    // item inherits the same opacity properties.
-                                    target_to_cache_task_id
-                                }
-                            ));
-                        }
-                        ImageSource::Default => {
-                            // Normal images just reference the source texture each frame.
-                            request_source_image = true;
-                        }
-                    }
-
-                    // Request source image from the texture cache, if required.
-                    if request_source_image {
-                        frame_state.resource_cache.request_image(
-                            image_cpu.key.request,
-                            frame_state.gpu_cache,
-                        );
-                    }
-                }
             }
             PrimitiveKind::Brush => {
                 let brush = &mut self.cpu_brushes[metadata.cpu_prim_index.0];
 
                 match brush.kind {
-                    BrushKind::Image { request, sub_rect, ref mut current_epoch, ref mut source, .. } => {
+                    BrushKind::Image {
+                        request,
+                        sub_rect,
+                        stretch_size,
+                        ref mut tile_spacing,
+                        ref mut current_epoch,
+                        ref mut source,
+                        ref mut opacity_binding,
+                        ref mut visible_tiles,
+                        ..
+                    } => {
                         let image_properties = frame_state
                             .resource_cache
                             .get_image_properties(request.key);
 
+
                         // Set if we need to request the source image from the cache this frame.
                         if let Some(image_properties) = image_properties {
-                            // See if this image has been updated since we last hit this code path.
-                            // If so, we need to update the opacity.
-                            if image_properties.epoch != *current_epoch {
-                                *current_epoch = image_properties.epoch;
-                                metadata.opacity.is_opaque = image_properties.descriptor.is_opaque;
+                            *current_epoch = image_properties.epoch;
+                            is_tiled = image_properties.tiling.is_some();
+
+                            // If the opacity changed, invalidate the GPU cache so that
+                            // the new color for this primitive gets uploaded.
+                            if opacity_binding.update(frame_context.scene_properties) {
+                                frame_state.gpu_cache.invalidate(&mut metadata.gpu_location);
+                            }
+
+                            // Update opacity for this primitive to ensure the correct
+                            // batching parameters are used.
+                            metadata.opacity.is_opaque =
+                                image_properties.descriptor.is_opaque &&
+                                opacity_binding.current == 1.0;
+
+                            if *tile_spacing != LayoutSize::zero() && !is_tiled {
+                                *source = ImageSource::Cache {
+                                    // Size in device-pixels we need to allocate in render task cache.
+                                    size: DeviceIntSize::new(
+                                        image_properties.descriptor.width as i32,
+                                        image_properties.descriptor.height as i32
+                                    ),
+                                    handle: None,
+                                };
                             }
 
                             // Work out whether this image is a normal / simple type, or if
                             // we need to pre-render it to the render task cache.
                             if let Some(rect) = sub_rect {
+                                // We don't properly support this right now.
+                                debug_assert!(!is_tiled);
                                 *source = ImageSource::Cache {
                                     // Size in device-pixels we need to allocate in render task cache.
                                     size: rect.size,
@@ -1326,7 +1520,22 @@ impl PrimitiveStore {
                             // time through, and any time the render task output has been
                             // evicted from the texture cache.
                             match *source {
-                                ImageSource::Cache { size, ref mut handle } => {
+                                ImageSource::Cache { ref mut size, ref mut handle } => {
+                                    let padding = DeviceIntSideOffsets::new(
+                                        0,
+                                        (tile_spacing.width * size.width as f32 / stretch_size.width) as i32,
+                                        (tile_spacing.height * size.height as f32 / stretch_size.height) as i32,
+                                        0,
+                                    );
+
+                                    let inner_size = *size;
+                                    size.width += padding.horizontal();
+                                    size.height += padding.vertical();
+
+                                    if padding != DeviceIntSideOffsets::zero() {
+                                        metadata.opacity.is_opaque = false;
+                                    }
+
                                     let image_cache_key = ImageCacheKey {
                                         request,
                                         texel_rect: sub_rect,
@@ -1335,7 +1544,7 @@ impl PrimitiveStore {
                                     // Request a pre-rendered image task.
                                     *handle = Some(frame_state.resource_cache.request_render_task(
                                         RenderTaskCacheKey {
-                                            size,
+                                            size: *size,
                                             kind: RenderTaskCacheKeyKind::Image(image_cache_key),
                                         },
                                         frame_state.gpu_cache,
@@ -1350,8 +1559,9 @@ impl PrimitiveStore {
                                             // Create a task to blit from the texture cache to
                                             // a normal transient render task surface. This will
                                             // copy only the sub-rect, if specified.
-                                            let cache_to_target_task = RenderTask::new_blit(
-                                                size,
+                                            let cache_to_target_task = RenderTask::new_blit_with_padding(
+                                                inner_size,
+                                                &padding,
                                                 BlitSource::Image { key: image_cache_key },
                                             );
                                             let cache_to_target_task_id = render_tasks.add(cache_to_target_task);
@@ -1360,7 +1570,7 @@ impl PrimitiveStore {
                                             // task above back into the right spot in the persistent
                                             // render target cache.
                                             let target_to_cache_task = RenderTask::new_blit(
-                                                size,
+                                                *size,
                                                 BlitSource::RenderTask {
                                                     task_id: cache_to_target_task_id,
                                                 },
@@ -1382,14 +1592,89 @@ impl PrimitiveStore {
                                 }
                             }
 
-                            if request_source_image {
+                            if let Some(tile_size) = image_properties.tiling {
+
+                                let device_image_size = DeviceUintSize::new(
+                                    image_properties.descriptor.width,
+                                    image_properties.descriptor.height,
+                                );
+
+                                // Tighten the clip rect because decomposing the repeated image can
+                                // produce primitives that are partially covering the original image
+                                // rect and we want to clip these extra parts out.
+                                let tight_clip_rect = metadata.local_clip_rect.intersection(&metadata.local_rect).unwrap();
+
+                                let visible_rect = compute_conservative_visible_rect(
+                                    prim_run_context,
+                                    frame_context,
+                                    &tight_clip_rect
+                                );
+
+                                let base_edge_flags = edge_flags_for_tile_spacing(tile_spacing);
+
+                                let stride = stretch_size + *tile_spacing;
+
+                                visible_tiles.clear();
+
+                                for_each_repetition(
+                                    &metadata.local_rect,
+                                    &visible_rect,
+                                    &stride,
+                                    &mut |origin, edge_flags| {
+                                        let edge_flags = base_edge_flags | edge_flags;
+
+                                        let image_rect = LayoutRect {
+                                            origin: *origin,
+                                            size: stretch_size,
+                                        };
+
+                                        for_each_tile(
+                                            &image_rect,
+                                            &visible_rect,
+                                            &device_image_size,
+                                            tile_size as u32,
+                                            &mut |tile_rect, tile_offset, tile_flags| {
+
+                                                frame_state.resource_cache.request_image(
+                                                    request.with_tile(tile_offset),
+                                                    frame_state.gpu_cache,
+                                                );
+
+                                                let mut handle = GpuCacheHandle::new();
+                                                if let Some(mut request) = frame_state.gpu_cache.request(&mut handle) {
+                                                    request.push(*tile_rect);
+                                                    request.push(tight_clip_rect);
+                                                    request.push(ColorF::new(1.0, 1.0, 1.0, opacity_binding.current).premultiplied());
+                                                    request.push(PremultipliedColorF::WHITE);
+                                                    request.push([tile_rect.size.width, tile_rect.size.height, 0.0, 0.0]);
+                                                    request.write_segment(*tile_rect, [0.0; 4]);
+                                                }
+
+                                                visible_tiles.push(VisibleImageTile {
+                                                    tile_offset,
+                                                    handle,
+                                                    edge_flags: tile_flags & edge_flags,
+                                                });
+                                            }
+                                        );
+                                    }
+                                );
+
+                                if visible_tiles.is_empty() {
+                                    // At this point if we don't have tiles to show it means we could probably
+                                    // have done a better a job at culling during an earlier stage.
+                                    // Clearing the screen rect has the effect of "culling out" the primitive
+                                    // from the point of view of the batch builder, and ensures we don't hit
+                                    // assertions later on because we didn't request any image.
+                                    metadata.screen_rect = None;
+                                }
+                            } else if request_source_image {
                                 frame_state.resource_cache.request_image(
                                     request,
                                     frame_state.gpu_cache,
                                 );
                             }
                         }
-
                     }
                     BrushKind::YuvImage { format, yuv_key, image_rendering, .. } => {
                         let channel_num = format.get_plane_num();
@@ -1405,29 +1690,124 @@ impl PrimitiveStore {
                             );
                         }
                     }
-                    BrushKind::RadialGradient { gradient_index, stops_range, .. } => {
-                        let stops_handle = &mut frame_state.cached_gradients[gradient_index.0].handle;
-                        if let Some(mut request) = frame_state.gpu_cache.request(stops_handle) {
-                            let gradient_builder = GradientGpuBlockBuilder::new(
-                                stops_range,
-                                pic_context.display_list,
-                            );
-                            gradient_builder.build(
-                                false,
-                                &mut request,
+                    BrushKind::Border { request, .. } => {
+                        let image_properties = frame_state
+                            .resource_cache
+                            .get_image_properties(request.key);
+
+                        if let Some(image_properties) = image_properties {
+                            // Update opacity for this primitive to ensure the correct
+                            // batching parameters are used.
+                            metadata.opacity.is_opaque =
+                                image_properties.descriptor.is_opaque;
+
+                            frame_state.resource_cache.request_image(
+                                request,
+                                frame_state.gpu_cache,
                             );
                         }
                     }
-                    BrushKind::LinearGradient { gradient_index, stops_range, reverse_stops, .. } => {
-                        let stops_handle = &mut frame_state.cached_gradients[gradient_index.0].handle;
-                        if let Some(mut request) = frame_state.gpu_cache.request(stops_handle) {
-                            let gradient_builder = GradientGpuBlockBuilder::new(
-                                stops_range,
-                                pic_context.display_list,
+                    BrushKind::RadialGradient {
+                        gradient_index,
+                        stops_range,
+                        center,
+                        start_radius,
+                        end_radius,
+                        ratio_xy,
+                        extend_mode,
+                        stretch_size,
+                        tile_spacing,
+                        ref mut visible_tiles,
+                        ..
+                    } => {
+                        build_gradient_stops_request(
+                            gradient_index,
+                            stops_range,
+                            false,
+                            frame_state,
+                            pic_context,
+                        );
+
+                        if tile_spacing != LayoutSize::zero() {
+                            is_tiled = true;
+
+                            decompose_repeated_primitive(
+                                visible_tiles,
+                                metadata,
+                                &stretch_size,
+                                &tile_spacing,
+                                prim_run_context,
+                                frame_context,
+                                frame_state,
+                                &mut |rect, clip_rect, mut request| {
+                                    request.push(*rect);
+                                    request.push(*clip_rect);
+                                    request.push([
+                                        center.x,
+                                        center.y,
+                                        start_radius,
+                                        end_radius,
+                                    ]);
+                                    request.push([
+                                        ratio_xy,
+                                        pack_as_float(extend_mode as u32),
+                                        stretch_size.width,
+                                        stretch_size.height,
+                                    ]);
+                                    request.write_segment(*rect, [0.0; 4]);
+                                },
                             );
-                            gradient_builder.build(
-                                reverse_stops,
-                                &mut request,
+                        }
+                    }
+                    BrushKind::LinearGradient {
+                        gradient_index,
+                        stops_range,
+                        reverse_stops,
+                        start_point,
+                        end_point,
+                        extend_mode,
+                        stretch_size,
+                        tile_spacing,
+                        ref mut visible_tiles,
+                        ..
+                    } => {
+
+                        build_gradient_stops_request(
+                            gradient_index,
+                            stops_range,
+                            reverse_stops,
+                            frame_state,
+                            pic_context,
+                        );
+
+                        if tile_spacing != LayoutSize::zero() {
+                            is_tiled = true;
+
+                            decompose_repeated_primitive(
+                                visible_tiles,
+                                metadata,
+                                &stretch_size,
+                                &tile_spacing,
+                                prim_run_context,
+                                frame_context,
+                                frame_state,
+                                &mut |rect, clip_rect, mut request| {
+                                    request.push(*rect);
+                                    request.push(*clip_rect);
+                                    request.push([
+                                        start_point.x,
+                                        start_point.y,
+                                        end_point.x,
+                                        end_point.y,
+                                    ]);
+                                    request.push([
+                                        pack_as_float(extend_mode as u32),
+                                        stretch_size.width,
+                                        stretch_size.height,
+                                        0.0,
+                                    ]);
+                                    request.write_segment(*rect, [0.0; 4]);
+                                }
                             );
                         }
                     }
@@ -1436,16 +1816,31 @@ impl PrimitiveStore {
                         pic.prepare_for_render(
                             prim_index,
                             metadata,
+                            prim_run_context,
                             pic_state_for_children,
                             pic_state,
                             frame_context,
                             frame_state,
                         );
                     }
-                    BrushKind::Solid { .. } |
+                    BrushKind::Solid { ref color, ref mut opacity_binding, .. } => {
+                        // If the opacity changed, invalidate the GPU cache so that
+                        // the new color for this primitive gets uploaded. Also update
+                        // the opacity field that controls which batches this primitive
+                        // will be added to.
+                        if opacity_binding.update(frame_context.scene_properties) {
+                            metadata.opacity = PrimitiveOpacity::from_alpha(opacity_binding.current * color.a);
+                            frame_state.gpu_cache.invalidate(&mut metadata.gpu_location);
+                        }
+                    }
                     BrushKind::Clear => {}
                 }
             }
+        }
+
+        if is_tiled {
+            // we already requested each tile's gpu data.
+            return;
         }
 
         // Mark this GPU resource as required for this frame.
@@ -1459,26 +1854,29 @@ impl PrimitiveStore {
                     let border = &self.cpu_borders[metadata.cpu_prim_index.0];
                     border.write_gpu_blocks(request);
                 }
-                PrimitiveKind::Image => {
-                    let image = &self.cpu_images[metadata.cpu_prim_index.0];
-                    image.write_gpu_blocks(request);
-                }
                 PrimitiveKind::TextRun => {
                     let text = &self.cpu_text_runs[metadata.cpu_prim_index.0];
                     text.write_gpu_blocks(&mut request);
                 }
                 PrimitiveKind::Brush => {
                     let brush = &self.cpu_brushes[metadata.cpu_prim_index.0];
-                    brush.write_gpu_blocks(&mut request);
+                    brush.write_gpu_blocks(&mut request, metadata.local_rect);
+
                     match brush.segment_desc {
                         Some(ref segment_desc) => {
                             for segment in &segment_desc.segments {
                                 // has to match VECS_PER_SEGMENT
-                                request.write_segment(segment.local_rect);
+                                request.write_segment(
+                                    segment.local_rect,
+                                    segment.extra_data,
+                                );
                             }
                         }
                         None => {
-                            request.write_segment(metadata.local_rect);
+                            request.write_segment(
+                                metadata.local_rect,
+                                [0.0; 4],
+                            );
                         }
                     }
                 }
@@ -1608,7 +2006,7 @@ impl PrimitiveStore {
                     let prim_transform = &prim_run_context.scroll_node.world_content_transform;
                     let relative_transform = prim_transform
                         .inverse()
-                        .unwrap_or(WorldToLayerFastTransform::identity())
+                        .unwrap_or(WorldToLayoutFastTransform::identity())
                         .pre_mul(&clip_transform.into());
 
                     relative_transform.transform_rect(&local_clip_rect)
@@ -1637,6 +2035,8 @@ impl PrimitiveStore {
                                 segment.rect.size,
                                 segment.has_mask,
                                 segment.edge_flags,
+                                [0.0; 4],
+                                BrushFlags::empty(),
                             ),
                         );
                     });
@@ -1661,6 +2061,8 @@ impl PrimitiveStore {
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
     ) -> bool {
+        assert!(frame_context.screen_rect.contains_rect(combined_outer_rect));
+
         let metadata = &self.cpu_metadata[prim_index.0];
         let brush = match metadata.prim_kind {
             PrimitiveKind::Brush => {
@@ -1689,33 +2091,38 @@ impl PrimitiveStore {
 
         for segment in &mut segment_desc.segments {
             if !segment.may_need_clip_mask && clip_mask_kind != BrushClipMaskKind::Global {
-                segment.clip_task_id = None;
+                segment.clip_task_id = BrushSegmentTaskId::Opaque;
                 continue;
             }
 
-            let segment_screen_rect = calculate_screen_bounding_rect(
+            let intersected_rect = calculate_screen_bounding_rect(
                 &prim_run_context.scroll_node.world_content_transform,
                 &segment.local_rect,
                 frame_context.device_pixel_scale,
+                Some(&combined_outer_rect),
             );
 
-            let intersected_rect = combined_outer_rect.intersection(&segment_screen_rect);
-            segment.clip_task_id = intersected_rect.map(|bounds| {
-                let clip_task = RenderTask::new_mask(
-                    bounds,
-                    clips.clone(),
-                    prim_run_context.scroll_node.coordinate_system_id,
-                    frame_state.clip_store,
-                    frame_state.gpu_cache,
-                    frame_state.resource_cache,
-                    frame_state.render_tasks,
-                );
+            let bounds = match intersected_rect {
+                Some(bounds) => bounds,
+                None => {
+                    segment.clip_task_id = BrushSegmentTaskId::Empty;
+                    continue;
+                }
+            };
 
-                let clip_task_id = frame_state.render_tasks.add(clip_task);
-                pic_state.tasks.push(clip_task_id);
+            let clip_task = RenderTask::new_mask(
+                bounds,
+                clips.clone(),
+                prim_run_context.scroll_node.coordinate_system_id,
+                frame_state.clip_store,
+                frame_state.gpu_cache,
+                frame_state.resource_cache,
+                frame_state.render_tasks,
+            );
 
-                clip_task_id
-            })
+            let clip_task_id = frame_state.render_tasks.add(clip_task);
+            pic_state.tasks.push(clip_task_id);
+            segment.clip_task_id = BrushSegmentTaskId::RenderTaskId(clip_task_id);
         }
 
         true
@@ -1727,7 +2134,7 @@ impl PrimitiveStore {
         if metadata.prim_kind == PrimitiveKind::Brush {
             if let Some(ref mut desc) = self.cpu_brushes[metadata.cpu_prim_index.0].segment_desc {
                 for segment in &mut desc.segments {
-                    segment.clip_task_id = None;
+                    segment.clip_task_id = BrushSegmentTaskId::Opaque;
                 }
             }
         }
@@ -1768,8 +2175,11 @@ impl PrimitiveStore {
                     frame_state.resource_cache,
                     frame_context.device_pixel_scale,
                 );
-                let (screen_inner_rect, screen_outer_rect) =
-                    prim_clips.get_screen_bounds(transform, frame_context.device_pixel_scale);
+                let (screen_inner_rect, screen_outer_rect) = prim_clips.get_screen_bounds(
+                    transform,
+                    frame_context.device_pixel_scale,
+                    Some(&prim_screen_rect),
+                );
 
                 if let Some(outer) = screen_outer_rect {
                     combined_outer_rect = combined_outer_rect.and_then(|r| r.intersection(&outer));
@@ -1785,7 +2195,7 @@ impl PrimitiveStore {
                     // It's used to calculate a local clipping rectangle before we reach this
                     // point, so we can set it to zero here. It should be unused from this point
                     // on.
-                    local_clip_rect: LayerRect::zero(),
+                    local_clip_rect: LayoutRect::zero(),
                     screen_inner_rect,
                     screen_outer_rect: screen_outer_rect.unwrap_or(prim_screen_rect),
                     prev: None,
@@ -1876,7 +2286,7 @@ impl PrimitiveStore {
         pic_state: &mut PictureState,
         frame_context: &FrameBuildingContext,
         frame_state: &mut FrameBuildingState,
-    ) -> Option<LayerRect> {
+    ) -> Option<LayoutRect> {
         let mut may_need_clip_mask = true;
         let mut pic_state_for_children = PictureState::new();
 
@@ -1943,6 +2353,8 @@ impl PrimitiveStore {
                         inv_world_transform,
                         apply_local_clip_rect: pic.apply_local_clip_rect,
                         inflation_factor,
+                        // TODO(lsalzman): allow overriding parent if intermediate surface is opaque
+                        allow_subpixel_aa: pic_context.allow_subpixel_aa && pic.allow_subpixel_aa(),
                     }
                 };
 
@@ -1958,7 +2370,13 @@ impl PrimitiveStore {
                 pic.runs = pic_context_for_children.prim_runs;
 
                 let metadata = &mut self.cpu_metadata[prim_index.0];
-                metadata.local_rect = pic.update_local_rect(result);
+
+                let new_local_rect = pic.update_local_rect(result);
+
+                if new_local_rect != metadata.local_rect {
+                    metadata.local_rect = new_local_rect;
+                    frame_state.gpu_cache.invalidate(&mut metadata.gpu_location);
+                }
             }
         }
 
@@ -1970,41 +2388,33 @@ impl PrimitiveStore {
                 return None;
             }
 
+            metadata.screen_rect = None;
+
             // Inflate the local rect for this primitive by the inflation factor of
             // the picture context. This ensures that even if the primitive itself
             // is not visible, any effects from the blur radius will be correctly
             // taken into account.
-            let local_rect = metadata
-                .local_rect
+            let local_rect = metadata.local_rect
                 .inflate(pic_context.inflation_factor, pic_context.inflation_factor)
-                .intersection(&metadata.local_clip_rect);
-            let local_rect = match local_rect {
-                Some(local_rect) => local_rect,
-                None => return None,
-            };
+                .intersection(&metadata.local_clip_rect)?;
 
-            let screen_bounding_rect = calculate_screen_bounding_rect(
+            let unclipped = calculate_screen_bounding_rect(
                 &prim_run_context.scroll_node.world_content_transform,
                 &local_rect,
                 frame_context.device_pixel_scale,
-            );
+                None, //TODO: inflate `frame_context.screen_rect` appropriately
+            )?;
 
-            metadata.screen_rect = screen_bounding_rect
-                .intersection(&prim_run_context.clip_chain.combined_outer_screen_rect)
-                .map(|clipped| {
-                    ScreenRect {
-                        clipped,
-                        unclipped: screen_bounding_rect,
-                    }
-                });
+            let clipped = unclipped
+                .intersection(&prim_run_context.clip_chain.combined_outer_screen_rect)?;
 
-            if metadata.screen_rect.is_none() {
-                return None;
-            }
-
+            metadata.screen_rect = Some(ScreenRect {
+                clipped,
+                unclipped,
+            });
             metadata.clip_chain_rect_index = prim_run_context.clip_chain_rect_index;
 
-            (local_rect, screen_bounding_rect)
+            (local_rect, unclipped)
         };
 
         if may_need_clip_mask && !self.update_clip_task(
@@ -2047,8 +2457,8 @@ impl PrimitiveStore {
         frame_state: &mut FrameBuildingState,
     ) -> PrimitiveRunLocalRect {
         let mut result = PrimitiveRunLocalRect {
-            local_rect_in_actual_parent_space: LayerRect::zero(),
-            local_rect_in_original_parent_space: LayerRect::zero(),
+            local_rect_in_actual_parent_space: LayoutRect::zero(),
+            local_rect_in_original_parent_space: LayoutRect::zero(),
         };
 
         for run in &pic_context.prim_runs {
@@ -2084,16 +2494,17 @@ impl PrimitiveStore {
                     inv_parent.pre_mul(&scroll_node.world_content_transform)
                 });
 
-            let original_relative_transform = pic_context.original_reference_frame_index
+            let original_relative_transform = pic_context
+                .original_reference_frame_index
                 .and_then(|original_reference_frame_index| {
-                    let parent = frame_context
+                    frame_context
                         .clip_scroll_tree
                         .nodes[original_reference_frame_index.0]
-                        .world_content_transform;
-                    parent.inverse()
-                        .map(|inv_parent| {
-                            inv_parent.pre_mul(&scroll_node.world_content_transform)
-                        })
+                        .world_content_transform
+                        .inverse()
+                })
+                .map(|inv_parent| {
+                    inv_parent.pre_mul(&scroll_node.world_content_transform)
                 });
 
             let clip_chain_rect = if pic_context.apply_local_clip_rect {
@@ -2130,16 +2541,23 @@ impl PrimitiveStore {
                 ) {
                     frame_state.profile_counters.visible_primitives.inc();
 
-                    if let Some(ref matrix) = original_relative_transform {
-                        let bounds = matrix.transform_rect(&prim_local_rect);
-                        result.local_rect_in_original_parent_space =
-                            result.local_rect_in_original_parent_space.union(&bounds);
-                    }
+                    let clipped_rect = match clip_chain_rect {
+                        Some(ref chain_rect) => match prim_local_rect.intersection(chain_rect) {
+                            Some(rect) => rect,
+                            None => continue,
+                        },
+                        None => prim_local_rect,
+                    };
 
                     if let Some(ref matrix) = parent_relative_transform {
-                        let bounds = matrix.transform_rect(&prim_local_rect);
+                        let bounds = matrix.transform_rect(&clipped_rect);
                         result.local_rect_in_actual_parent_space =
                             result.local_rect_in_actual_parent_space.union(&bounds);
+                    }
+                    if let Some(ref matrix) = original_relative_transform {
+                        let bounds = matrix.transform_rect(&clipped_rect);
+                        result.local_rect_in_original_parent_space =
+                            result.local_rect_in_original_parent_space.union(&bounds);
                     }
                 }
             }
@@ -2147,6 +2565,113 @@ impl PrimitiveStore {
 
         result
     }
+}
+
+fn build_gradient_stops_request(
+    gradient_index: CachedGradientIndex,
+    stops_range: ItemRange<GradientStop>,
+    reverse_stops: bool,
+    frame_state: &mut FrameBuildingState,
+    pic_context: &PictureContext
+) {
+    let stops_handle = &mut frame_state.cached_gradients[gradient_index.0].handle;
+    if let Some(mut request) = frame_state.gpu_cache.request(stops_handle) {
+        let gradient_builder = GradientGpuBlockBuilder::new(
+            stops_range,
+            pic_context.display_list,
+        );
+        gradient_builder.build(
+            reverse_stops,
+            &mut request,
+        );
+    }
+}
+
+fn decompose_repeated_primitive(
+    visible_tiles: &mut Vec<VisibleGradientTile>,
+    metadata: &mut PrimitiveMetadata,
+    stretch_size: &LayoutSize,
+    tile_spacing: &LayoutSize,
+    prim_run_context: &PrimitiveRunContext,
+    frame_context: &FrameBuildingContext,
+    frame_state: &mut FrameBuildingState,
+    callback: &mut FnMut(&LayoutRect, &LayoutRect, GpuDataRequest),
+) {
+    visible_tiles.clear();
+
+    // Tighten the clip rect because decomposing the repeated image can
+    // produce primitives that are partially covering the original image
+    // rect and we want to clip these extra parts out.
+    let tight_clip_rect = metadata.local_clip_rect.intersection(&metadata.local_rect).unwrap();
+
+    let visible_rect = compute_conservative_visible_rect(
+        prim_run_context,
+        frame_context,
+        &tight_clip_rect
+    );
+    let stride = *stretch_size + *tile_spacing;
+
+    for_each_repetition(
+        &metadata.local_rect,
+        &visible_rect,
+        &stride,
+        &mut |origin, _| {
+
+            let mut handle = GpuCacheHandle::new();
+            if let Some(request) = frame_state.gpu_cache.request(&mut handle) {
+                let rect = LayoutRect {
+                    origin: *origin,
+                    size: *stretch_size,
+                };
+
+                callback(&rect, &tight_clip_rect, request);
+            }
+
+            visible_tiles.push(VisibleGradientTile { handle });
+        }
+    );
+
+    if visible_tiles.is_empty() {
+        // At this point if we don't have tiles to show it means we could probably
+        // have done a better a job at culling during an earlier stage.
+        // Clearing the screen rect has the effect of "culling out" the primitive
+        // from the point of view of the batch builder, and ensures we don't hit
+        // assertions later on because we didn't request any image.
+        metadata.screen_rect = None;
+    }
+}
+
+fn compute_conservative_visible_rect(
+    prim_run_context: &PrimitiveRunContext,
+    frame_context: &FrameBuildingContext,
+    local_clip_rect: &LayoutRect,
+) -> LayoutRect {
+    let world_screen_rect = prim_run_context
+        .clip_chain.combined_outer_screen_rect
+        .to_f32() / frame_context.device_pixel_scale;
+
+    if let Some(layer_screen_rect) = prim_run_context
+        .scroll_node
+        .world_content_transform
+        .unapply(&world_screen_rect) {
+
+        return local_clip_rect.intersection(&layer_screen_rect).unwrap_or(LayoutRect::zero());
+    }
+
+    *local_clip_rect
+}
+
+fn edge_flags_for_tile_spacing(tile_spacing: &LayoutSize) -> EdgeAaSegmentMask {
+    let mut flags = EdgeAaSegmentMask::empty();
+
+    if tile_spacing.width > 0.0 {
+        flags |= EdgeAaSegmentMask::LEFT | EdgeAaSegmentMask::RIGHT;
+    }
+    if tile_spacing.height > 0.0 {
+        flags |= EdgeAaSegmentMask::TOP | EdgeAaSegmentMask::BOTTOM;
+    }
+
+    flags
 }
 
 //Test for one clip region contains another
@@ -2209,44 +2734,37 @@ fn convert_clip_chain_to_clip_vector(
 fn get_local_clip_rect_for_nodes(
     scroll_node: &ClipScrollNode,
     clip_chain: &ClipChain,
-) -> Option<LayerRect> {
-    let local_rect = ClipChainNodeIter { current: clip_chain.nodes.clone() }.fold(
-        None,
-        |combined_local_clip_rect: Option<LayerRect>, node| {
-            if node.work_item.coordinate_system_id != scroll_node.coordinate_system_id {
-                return combined_local_clip_rect;
+) -> Option<LayoutRect> {
+    ClipChainNodeIter { current: clip_chain.nodes.clone() }
+        .fold(
+            None,
+            |combined_local_clip_rect: Option<LayoutRect>, node| {
+                if node.work_item.coordinate_system_id != scroll_node.coordinate_system_id {
+                    return combined_local_clip_rect;
+                }
+
+                Some(match combined_local_clip_rect {
+                    Some(combined_rect) =>
+                        combined_rect
+                            .intersection(&node.local_clip_rect)
+                            .unwrap_or_else(LayoutRect::zero),
+                    None => node.local_clip_rect,
+                })
             }
-
-            Some(match combined_local_clip_rect {
-                Some(combined_rect) =>
-                    combined_rect.intersection(&node.local_clip_rect).unwrap_or_else(LayerRect::zero),
-                None => node.local_clip_rect,
-            })
-        }
-    );
-
-    match local_rect {
-        Some(local_rect) => scroll_node.coordinate_system_relative_transform.unapply(&local_rect),
-        None => None,
-    }
+        )
+        .and_then(|local_rect| {
+            scroll_node.coordinate_system_relative_transform.unapply(&local_rect)
+        })
 }
 
 impl<'a> GpuDataRequest<'a> {
     // Write the GPU cache data for an individual segment.
-    // TODO(gw): The second block is currently unused. In
-    //           the future, it will be used to store a
-    //           UV rect, allowing segments to reference
-    //           part of an image.
     fn write_segment(
         &mut self,
-        local_rect: LayerRect,
+        local_rect: LayoutRect,
+        extra_data: [f32; 4],
     ) {
         self.push(local_rect);
-        self.push([
-            0.0,
-            0.0,
-            0.0,
-            0.0
-        ]);
+        self.push(extra_data);
     }
 }

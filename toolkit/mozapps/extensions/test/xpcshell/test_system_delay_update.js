@@ -98,10 +98,6 @@ function promiseInstallDeferred(addonID1, addonID2) {
           resolve();
         }
       },
-      onInstallPostponed: (install) => {
-        AddonManager.removeInstallListener(listener);
-        reject(`extension installation should not have been postponed for ${install.addon.id}`);
-      }
     };
 
     AddonManager.addInstallListener(listener);
@@ -119,7 +115,7 @@ add_task(async function() {
 
   await overrideBuiltIns({ "system": [IGNORE_ID, NORMAL_ID] });
 
-  startupManager();
+  await promiseStartupManager();
   let updateList = [
     { id: IGNORE_ID, version: "2.0", path: "system_delay_ignore_2.xpi" },
     { id: NORMAL_ID, version: "2.0", path: "system1_2.xpi" },
@@ -171,7 +167,7 @@ add_task(async function() {
   Assert.ok(addon_upgraded.isActive);
   Assert.equal(addon_upgraded.type, "extension");
 
-  await shutdownManager();
+  await promiseShutdownManager();
 });
 
 // add-on registers upgrade listener, and allows update.
@@ -184,7 +180,7 @@ add_task(async function() {
 
   await overrideBuiltIns({ "system": [COMPLETE_ID, NORMAL_ID] });
 
-  startupManager();
+  await promiseStartupManager();
 
   let updateList = [
     { id: COMPLETE_ID, version: "2.0", path: "system_delay_complete_2.xpi" },
@@ -257,7 +253,7 @@ add_task(async function() {
   Assert.ok(addon_upgraded.isActive);
   Assert.equal(addon_upgraded.type, "extension");
 
-  await shutdownManager();
+  await promiseShutdownManager();
 });
 
 // add-on registers upgrade listener, initially defers update then allows upgrade
@@ -270,7 +266,7 @@ add_task(async function() {
 
   await overrideBuiltIns({ "system": [DEFER_ID, NORMAL_ID] });
 
-  startupManager();
+  await promiseStartupManager();
 
   let updateList = [
     { id: DEFER_ID, version: "2.0", path: "system_delay_defer_2.xpi" },
@@ -348,7 +344,7 @@ add_task(async function() {
   Assert.ok(addon_upgraded.isActive);
   Assert.equal(addon_upgraded.type, "extension");
 
-  await shutdownManager();
+  await promiseShutdownManager();
 });
 
 // multiple add-ons registers upgrade listeners, initially defers then each unblock in turn.
@@ -361,7 +357,7 @@ add_task(async function() {
 
   await overrideBuiltIns({ "system": [DEFER_ID, DEFER_ALSO_ID] });
 
-  startupManager();
+  await promiseStartupManager();
 
   let updateList = [
     { id: DEFER_ID, version: "2.0", path: "system_delay_defer_2.xpi" },
@@ -460,5 +456,5 @@ add_task(async function() {
   Assert.ok(addon_upgraded.isActive);
   Assert.equal(addon_upgraded.type, "extension");
 
-  await shutdownManager();
+  await promiseShutdownManager();
 });

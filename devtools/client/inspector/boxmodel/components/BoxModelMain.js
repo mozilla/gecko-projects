@@ -15,9 +15,6 @@ const BoxModelEditable = createFactory(require("./BoxModelEditable"));
 
 const Types = require("../types");
 
-const BOXMODEL_STRINGS_URI = "devtools/client/locales/boxmodel.properties";
-const BOXMODEL_L10N = new LocalizationHelper(BOXMODEL_STRINGS_URI);
-
 const SHARED_STRINGS_URI = "devtools/client/locales/shared.properties";
 const SHARED_L10N = new LocalizationHelper(SHARED_STRINGS_URI);
 
@@ -452,7 +449,7 @@ class BoxModelMain extends PureComponent {
         },
         dom.span(
           {
-            title: BOXMODEL_L10N.getStr("boxmodel.content"),
+            title: "content",
           },
           SHARED_L10N.getFormatStr("dimensions", width, height)
         )
@@ -475,9 +472,9 @@ class BoxModelMain extends PureComponent {
           {
             className: "boxmodel-legend",
             "data-box": "position",
-            title: BOXMODEL_L10N.getStr("boxmodel.position"),
+            title: "position",
           },
-          BOXMODEL_L10N.getStr("boxmodel.position")
+          "position"
         )
         :
         null,
@@ -489,15 +486,15 @@ class BoxModelMain extends PureComponent {
           {
             className: "boxmodel-legend",
             "data-box": "margin",
-            title: BOXMODEL_L10N.getStr("boxmodel.margin"),
+            title: "margin",
           },
-          BOXMODEL_L10N.getStr("boxmodel.margin")
+          "margin"
         ),
         dom.div(
           {
             className: "boxmodel-margins",
             "data-box": "margin",
-            title: BOXMODEL_L10N.getStr("boxmodel.margin"),
+            title: "margin",
             ref: div => {
               this.marginLayout = div;
             },
@@ -506,15 +503,15 @@ class BoxModelMain extends PureComponent {
             {
               className: "boxmodel-legend",
               "data-box": "border",
-              title: BOXMODEL_L10N.getStr("boxmodel.border"),
+              title: "border",
             },
-            BOXMODEL_L10N.getStr("boxmodel.border")
+            "border"
           ),
           dom.div(
             {
               className: "boxmodel-borders",
               "data-box": "border",
-              title: BOXMODEL_L10N.getStr("boxmodel.border"),
+              title: "border",
               ref: div => {
                 this.borderLayout = div;
               },
@@ -523,15 +520,15 @@ class BoxModelMain extends PureComponent {
               {
                 className: "boxmodel-legend",
                 "data-box": "padding",
-                title: BOXMODEL_L10N.getStr("boxmodel.padding"),
+                title: "padding",
               },
-              BOXMODEL_L10N.getStr("boxmodel.padding")
+              "padding"
             ),
             dom.div(
               {
                 className: "boxmodel-paddings",
                 "data-box": "padding",
-                title: BOXMODEL_L10N.getStr("boxmodel.padding"),
+                title: "padding",
                 ref: div => {
                   this.paddingLayout = div;
                 },
@@ -539,7 +536,7 @@ class BoxModelMain extends PureComponent {
               dom.div({
                 className: "boxmodel-contents",
                 "data-box": "content",
-                title: BOXMODEL_L10N.getStr("boxmodel.content"),
+                title: "content",
                 ref: div => {
                   this.contentLayout = div;
                 },

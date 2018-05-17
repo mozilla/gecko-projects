@@ -16,15 +16,28 @@ XPCOMUtils.defineLazyGetter(this, "wcStrings", function() {
     "chrome://webcompat-reporter/locale/webcompat.properties");
 });
 
-// Gather values for prefs we want to appear in reports.
-let prefs = {};
-XPCOMUtils.defineLazyPreferenceGetter(prefs, "gfx.webrender.all", "gfx.webrender.all", false);
-XPCOMUtils.defineLazyPreferenceGetter(prefs, "gfx.webrender.blob-images", "gfx.webrender.blob-images", 1);
-XPCOMUtils.defineLazyPreferenceGetter(prefs, "gfx.webrender.enabled", "gfx.webrender.enabled", false);
-XPCOMUtils.defineLazyPreferenceGetter(prefs, "image.mem.shared", "image.mem.shared", 2);
+// Gather values for interesting details we want to appear in reports.
+let details = {};
+XPCOMUtils.defineLazyPreferenceGetter(details, "gfx.webrender.all", "gfx.webrender.all", false);
+XPCOMUtils.defineLazyPreferenceGetter(details, "gfx.webrender.blob-images", "gfx.webrender.blob-images", true);
+XPCOMUtils.defineLazyPreferenceGetter(details, "gfx.webrender.enabled", "gfx.webrender.enabled", false);
+XPCOMUtils.defineLazyPreferenceGetter(details, "image.mem.shared", "image.mem.shared", true);
+details.buildID = Services.appinfo.appBuildID;
+details.channel = AppConstants.MOZ_UPDATE_CHANNEL;
+
+Object.defineProperty(details, "blockList", {
+  // We don't want this property to end up in the stringified details
+  enumerable: false,
+  get() {
+    let trackingTable = Services.prefs.getCharPref("urlclassifier.trackingTable");
+    // If content-track-digest256 is in the tracking table,
+    // the user has enabled the strict list.
+    return trackingTable.includes("content") ? "strict" : "basic";
+  }
+});
 
 if (AppConstants.platform == "linux") {
-  XPCOMUtils.defineLazyPreferenceGetter(prefs, "layers.acceleration.force-enabled", "layers.acceleration.force-enabled", false);
+  XPCOMUtils.defineLazyPreferenceGetter(details, "layers.acceleration.force-enabled", "layers.acceleration.force-enabled", false);
 }
 
 let WebCompatReporter = {
@@ -57,8 +70,9 @@ let WebCompatReporter = {
   },
 
   // This method injects a framescript that should send back a screenshot blob
-  // of the top-level window of the currently selected tab, resolved as a
-  // Promise.
+  // of the top-level window of the currently selected tab, and some other details
+  // about the tab (url, tracking protection + mixed content blocking status)
+  // resolved as a Promise.
   getScreenshot(gBrowser) {
     const FRAMESCRIPT = "chrome://webcompat-reporter/content/tab-frame.js";
     const TABDATA_MESSAGE = "WebCompat:SendTabData";
@@ -88,13 +102,25 @@ let WebCompatReporter = {
     let win = Services.wm.getMostRecentWindow("navigator:browser");
     const WEBCOMPAT_ORIGIN = new win.URL(WebCompatReporter.endpoint).origin;
 
+    // Grab the relevant tab environment details that might change per site
+    details["mixed active content blocked"] = tabData.hasMixedActiveContentBlocked;
+    details["mixed passive content blocked"] = tabData.hasMixedDisplayContentBlocked;
+    details["tracking content blocked"] = tabData.hasTrackingContentBlocked ?
+      `true (${details.blockList})` : "false";
+
+      // question: do i add a label for basic vs strict?
+
     let params = new URLSearchParams();
     params.append("url", `${tabData.url}`);
     params.append("src", "desktop-reporter");
-    params.append("details", JSON.stringify(prefs));
+    params.append("details", JSON.stringify(details));
 
-    if (prefs["gfx.webrender.all"] || prefs["gfx.webrender.enabled"]) {
+    if (details["gfx.webrender.all"] || details["gfx.webrender.enabled"]) {
       params.append("label", "type-webrender-enabled");
+    }
+
+    if (tabData.hasTrackingContentBlocked) {
+      params.append("label", `type-tracking-protection-${details.blockList}`);
     }
 
     let tab = gBrowser.loadOneTab(
@@ -106,7 +132,7 @@ let WebCompatReporter = {
     if (tabData && tabData.blob) {
       let browser = gBrowser.getBrowserForTab(tab);
       let loadedListener = {
-        QueryInterface: XPCOMUtils.generateQI(["nsIWebProgressListener",
+        QueryInterface: ChromeUtils.generateQI(["nsIWebProgressListener",
           "nsISupportsWeakReference"]),
         onStateChange(webProgress, request, flags, status) {
           let isStopped = flags & Ci.nsIWebProgressListener.STATE_STOP;

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DevicePoint, LayerToWorldTransform, WorldToLayerTransform};
+use api::{DevicePoint, LayoutToWorldTransform, WorldToLayoutTransform};
 use gpu_cache::{GpuCacheAddress, GpuDataRequest};
 use prim_store::EdgeAaSegmentMask;
 use render_task::RenderTaskAddress;
@@ -81,6 +81,16 @@ pub struct ClipMaskInstance {
     pub segment: i32,
     pub clip_data_address: GpuCacheAddress,
     pub resource_address: GpuCacheAddress,
+}
+
+/// A border corner dot or dash drawn into the clipping mask.
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+#[repr(C)]
+pub struct ClipMaskBorderCornerDotDash {
+    pub clip_mask_instance: ClipMaskInstance,
+    pub dot_dash_data: [f32; 8],
 }
 
 // 32 bytes per instance should be enough for anyone!
@@ -191,7 +201,15 @@ bitflags! {
     /// Flags that define how the common brush shader
     /// code should process this instance.
     pub struct BrushFlags: u8 {
+        /// Apply perspective interpolation to UVs
         const PERSPECTIVE_INTERPOLATION = 0x1;
+        /// Do interpolation relative to segment rect,
+        /// rather than primitive rect.
+        const SEGMENT_RELATIVE = 0x2;
+        /// Repeat UVs horizontally.
+        const SEGMENT_REPEAT_X = 0x4;
+        /// Repeat UVs vertically.
+        const SEGMENT_REPEAT_Y = 0x8;
     }
 }
 
@@ -246,8 +264,8 @@ pub struct ClipScrollNodeIndex(pub u32);
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(C)]
 pub struct ClipScrollNodeData {
-    pub transform: LayerToWorldTransform,
-    pub inv_transform: WorldToLayerTransform,
+    pub transform: LayoutToWorldTransform,
+    pub inv_transform: WorldToLayoutTransform,
     pub transform_kind: f32,
     pub padding: [f32; 3],
 }
@@ -255,8 +273,8 @@ pub struct ClipScrollNodeData {
 impl ClipScrollNodeData {
     pub fn invalid() -> Self {
         ClipScrollNodeData {
-            transform: LayerToWorldTransform::identity(),
-            inv_transform: WorldToLayerTransform::identity(),
+            transform: LayoutToWorldTransform::identity(),
+            inv_transform: WorldToLayoutTransform::identity(),
             transform_kind: 0.0,
             padding: [0.0; 3],
         }
@@ -267,15 +285,38 @@ impl ClipScrollNodeData {
 #[repr(C)]
 pub struct ClipChainRectIndex(pub usize);
 
+// Texture cache resources can be either a simple rect, or define
+// a polygon within a rect by specifying a UV coordinate for each
+// corner. This is useful for rendering screen-space rasterized
+// off-screen surfaces.
 #[derive(Debug, Copy, Clone)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[repr(C)]
+pub enum UvRectKind {
+    // The 2d bounds of the texture cache entry define the
+    // valid UV space for this texture cache entry.
+    Rect,
+    // The four vertices below define a quad within
+    // the texture cache entry rect. The shader can
+    // use a bilerp() to correctly interpolate a
+    // UV coord in the vertex shader.
+    Quad {
+        top_left: DevicePoint,
+        top_right: DevicePoint,
+        bottom_left: DevicePoint,
+        bottom_right: DevicePoint,
+    },
+}
+
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct ImageSource {
     pub p0: DevicePoint,
     pub p1: DevicePoint,
     pub texture_layer: f32,
     pub user_data: [f32; 3],
+    pub uv_rect_kind: UvRectKind,
 }
 
 impl ImageSource {
@@ -292,5 +333,22 @@ impl ImageSource {
             self.user_data[1],
             self.user_data[2],
         ]);
+
+        // If this is a polygon uv kind, then upload the four vertices.
+        if let UvRectKind::Quad { top_left, top_right, bottom_left, bottom_right } = self.uv_rect_kind {
+            request.push([
+                top_left.x,
+                top_left.y,
+                top_right.x,
+                top_right.y,
+            ]);
+
+            request.push([
+                bottom_left.x,
+                bottom_left.y,
+                bottom_right.x,
+                bottom_right.y,
+            ]);
+        }
     }
 }

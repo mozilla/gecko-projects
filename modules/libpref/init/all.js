@@ -82,13 +82,8 @@ pref("browser.cache.max_shutdown_io_lag", 2);
 
 pref("browser.cache.offline.enable",           true);
 
-// Nightly and Early Beta will have AppCache disabled by default
-// Stable will remain enabled until Firefox 62.
-#ifdef EARLY_BETA_OR_EARLIER
+// AppCache over insecure connection is disabled by default
 pref("browser.cache.offline.insecure.enable",  false);
-#else
-pref("browser.cache.offline.insecure.enable",  true);
-#endif
 
 // enable offline apps by default, disable prompt
 pref("offline-apps.allow_by_default",          true);
@@ -111,19 +106,10 @@ pref("browser.cache.compression_level", 0);
 pref("browser.download.forbid_open_with", false);
 
 // Remove navigator.registerContentHandler
-#ifdef EARLY_BETA_OR_EARLIER
 pref("dom.registerContentHandler.enabled", false);
-#else
-pref("dom.registerContentHandler.enabled", true);
-#endif
 
-// Nightly will have insecure registerProtocolHandler disabled by default
-// Beta and Stable will remain enabled until Firefox 62 providing deprecation stats.
-#ifdef NIGHTLY_BUILD
+// Insecure registerProtocolHandler is disabled by default
 pref("dom.registerProtocolHandler.insecure.enabled", false);
-#else
-pref("dom.registerProtocolHandler.insecure.enabled", true);
-#endif
 
 // Whether or not testing features are enabled.
 pref("dom.quotaManager.testing", false);
@@ -138,6 +124,8 @@ pref("dom.indexedDB.logging.enabled", true);
 pref("dom.indexedDB.logging.details", true);
 // Enable profiler marks for indexedDB events.
 pref("dom.indexedDB.logging.profiler-marks", false);
+// Enable passing the "storage" option to indexedDB.open.
+pref("dom.indexedDB.storageOption.enabled", false);
 
 // Whether or not File Handle is enabled.
 pref("dom.fileHandle.enabled", true);
@@ -198,6 +186,9 @@ pref("dom.permissions.revoke.enable", false);
 // Enable exposing timeToNonBlankPaint
 pref("dom.performance.time_to_non_blank_paint.enabled", false);
 
+// Enable exposing timeToDOMContentFlushed
+pref("dom.performance.time_to_dom_content_flushed.enabled", false);
+
 // Enable Performance Observer API
 pref("dom.enable_performance_observer", true);
 
@@ -236,7 +227,7 @@ pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_i
 // if you need to limit under a directory, the path should end with "/" like
 // "example.com/foo/".  Note that this cannot limit port number for now.
 pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys",
-     "docs.google.com,mail.google.com");
+     "docs.google.com,mail.google.com,hangouts.google.com,keep.google.com,inbox.google.com,*.etherpad.org/p/,etherpad.wikimedia.org/p/,board.net/p/,pad.riseup.net/p/,*.sandstorm.io,factor.cc/pad/,*.etherpad.fr/p/,piratenpad.de/p/,notes.typo3.org/p/,etherpad.net/p/,*.framapad.org/p/,pad.ouvaton.coop/,pad.systemli.org/p/,pad.lqdn.fr/p/,public.etherpad-mozilla.org/p/,*.cloudron.me/p/,pad.aquilenet.fr/p/,free.primarypad.com/p/,pad.ondesk.work/p/,demo.maadix.org/etherpad/pads/,www.rememberthemilk.com,paper.dropbox.com/doc");
 #else
 pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 #endif
@@ -266,6 +257,10 @@ pref("dom.script_loader.bytecode_cache.enabled", true);
 // Other values might lead to experimental strategies. For more details, have a
 // look at: ScriptLoader::ShouldCacheBytecode function.
 pref("dom.script_loader.bytecode_cache.strategy", 0);
+
+#ifdef JS_BUILD_BINAST
+pref("dom.script_loader.binast_encoding.enabled", false);
+#endif
 
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
@@ -546,6 +541,9 @@ pref("media.mediasource.webm.enabled", true);
 #endif
 pref("media.mediasource.webm.audio.enabled", true);
 
+// Whether to enable MediaSource v2 support.
+pref("media.mediasource.experimental.enabled", false);
+
 pref("media.benchmark.vp9.threshold", 150);
 pref("media.benchmark.frames", 300);
 pref("media.benchmark.timeout", 1000);
@@ -593,8 +591,8 @@ pref("media.cubeb.logging_level", "");
 #ifdef XP_LINUX
 pref("media.cubeb.sandbox", true);
 pref("media.audioipc.pool_size", 2);
-// 64 kB stack per pool thread.
-pref("media.audioipc.stack_size", 65536);
+// 64 * 4 kB stack per pool thread.
+pref("media.audioipc.stack_size", 262144);
 #else
 pref("media.cubeb.sandbox", false);
 #endif
@@ -624,6 +622,14 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
+#ifdef NIGHTLY_BUILD
+pref("apz.android.chrome_fling_physics.enabled", true);
+#else
+pref("apz.android.chrome_fling_physics.enabled", false);
+#endif
+pref("apz.android.chrome_fling_physics.friction", "0.015");
+pref("apz.android.chrome_fling_physics.inflexion", "0.35");
+pref("apz.android.chrome_fling_physics.stop_threshold", "0.1");
 pref("apz.autoscroll.enabled", true);
 
 // Whether to lock touch scrolling to one axis at a time
@@ -837,12 +843,25 @@ pref("gfx.logging.peak-texture-usage.enabled", false);
 
 pref("gfx.ycbcr.accurate-conversion", false);
 
+// On Nightly, we expose two prefs: gfx.webrender.all and gfx.webrender.enabled.
+// The first enables WR+additional features, and the second just enables WR.
+// For developer convenience, building with --enable-webrender=true or just
+// --enable-webrender will set gfx.webrender.enabled to true by default.
+// On non-Nightly, we ignore these prefs.
+//
+// On both Nightly and non-Nightly, we have a pref gfx.webrender.all.qualified
+// which is not exposed via about:config. That pref enables WR but only on
+// qualified hardware. This is the pref we'll eventually flip to deploy WebRender
+// to the target population.
+#ifdef NIGHTLY_BUILD
 pref("gfx.webrender.all", false);
 #ifdef MOZ_ENABLE_WEBRENDER
 pref("gfx.webrender.enabled", true);
 #else
 pref("gfx.webrender.enabled", false);
 #endif
+#endif
+
 #ifdef XP_WIN
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
@@ -854,8 +873,9 @@ pref("gfx.compositor.glcontext.opaque", false);
 #endif
 
 pref("gfx.webrender.highlight-painted-layers", false);
-pref("gfx.webrender.blob-images", 1);
-pref("gfx.webrender.blob.invalidation", false);
+pref("gfx.webrender.async-scene-build", 2);
+pref("gfx.webrender.blob-images", true);
+pref("gfx.webrender.blob.invalidation", true);
 pref("gfx.webrender.hit-test", true);
 
 // WebRender debugging utilities.
@@ -2003,12 +2023,6 @@ pref("network.standard-url.punycode-host", true);
 // Idle timeout for ftp control connections - 5 minute default
 pref("network.ftp.idleConnectionTimeout", 300);
 
-// directory listing format
-// 2: HTML
-// 3: XUL directory viewer
-// all other values are treated like 2
-pref("network.dir.format", 2);
-
 // enables the prefetch service (i.e., prefetching of <link rel="next"> and
 // <link rel="prefetch"> URLs).
 pref("network.prefetch-next", true);
@@ -2160,6 +2174,12 @@ pref("network.cookie.ipc.sync",             false);
 pref("network.cookie.lifetimePolicy",       0); // 0-accept, 1-dontUse 2-acceptForSession, 3-acceptForNDays
 pref("network.cookie.prefsMigrated",        false);
 pref("network.cookie.lifetime.days",        90); // Ignored unless network.cookie.lifetimePolicy is 3.
+// The interval in seconds to move the cookies in the child process.
+// Set to 0 to disable moving the cookies.
+pref("network.cookie.move.interval_sec",    10);
+
+pref("network.cookie.maxNumber", 3000);
+pref("network.cookie.maxPerHost", 180);
 
 // The PAC file to load.  Ignored unless network.proxy.type is 2.
 pref("network.proxy.autoconfig_url", "");
@@ -2456,7 +2476,8 @@ pref("security.csp.experimentalEnabled", false);
 pref("security.csp.enableStrictDynamic", true);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.content_privileged_about_uris_without_csp", "blank,cache,certerror,checkerboard,credits,home,logo,neterror,newtab,printpreview,rights,srcdoc,studies");
+// about:welcome has been added until Bug 1448359 is fixed at which time home, newtab, and welcome will all be removed.
+pref("csp.content_privileged_about_uris_without_csp", "blank,home,newtab,printpreview,srcdoc,welcome");
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -2502,15 +2523,11 @@ pref("security.cert_pinning.process_headers_from_non_builtin_roots", false);
 // their protocol with the inner URI of the view-source URI
 pref("security.view-source.reachable-from-inner-protocol", false);
 
-// If set to true, in some limited circumstances it may be possible to load
-// privileged content in frames inside unprivileged content.
-pref("security.allow_chrome_frames_inside_content", false);
-
 // Services security settings
 pref("services.settings.server", "https://firefox.settings.services.mozilla.com/v1");
 pref("services.settings.changes.path", "/buckets/monitor/collections/changes/records");
 pref("services.settings.default_bucket", "main");
-pref("services.settings.default_signer", "");
+pref("services.settings.default_signer", "remote-settings.content-signature.mozilla.org");
 
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
@@ -2615,11 +2632,12 @@ pref("mousewheel.system_scroll_override_on_root_content.horizontal.factor", 200)
 // 0: Nothing happens
 // 1: Scrolling contents
 // 2: Go back or go forward, in your history
-// 3: Zoom in or out.
+// 3: Zoom in or out (reflowing zoom).
 // 4: Treat vertical wheel as horizontal scroll
 //      This treats vertical wheel operation (i.e., deltaY) as horizontal
 //      scroll.  deltaX and deltaZ are always ignored.  So, only
 //      "delta_multiplier_y" pref affects the scroll speed.
+// 5: Zoom in or out (pinch zoom).
 pref("mousewheel.default.action", 1);
 pref("mousewheel.with_alt.action", 2);
 pref("mousewheel.with_control.action", 3);
@@ -2674,11 +2692,7 @@ pref("mousewheel.min_line_scroll_amount", 5);
 // scroll is converted to a horizontal scroll for that target.
 // Note that auto-dir only takes effect for |mousewheel.*.action|s and
 // |mousewheel.*.action.override_x|s whose values are 1.
-#ifdef EARLY_BETA_OR_EARLIER
-pref("mousewheel.autodir.enabled", true);
-#else
 pref("mousewheel.autodir.enabled", false);
-#endif
 // When a wheel scroll is converted due to auto-dir, which side the converted
 // scroll goes towards is decided by one thing called "honoured target". If the
 // content of the honoured target horizontally starts from right to left, then
@@ -2805,12 +2819,6 @@ pref("layout.selection.caret_style", 0);
 // pref to report CSS errors to the error console
 pref("layout.css.report_errors", true);
 
-#ifdef NIGHTLY_BUILD
-pref("layout.css.getPropertyCSSValue.enabled", false);
-#else
-pref("layout.css.getPropertyCSSValue.enabled", true);
-#endif
-
 // Override DPI. A value of -1 means use the maximum of 96 and the system DPI.
 // A value of 0 means use the system DPI. A positive value is used as the DPI.
 // This sets the physical size of a device pixel and thus controls the
@@ -2881,10 +2889,6 @@ pref("layout.css.text-align-unsafe-value.enabled", false);
 // Is support for CSS text-justify property enabled?
 pref("layout.css.text-justify.enabled", true);
 
-// Is support for CSS "float: inline-{start,end}" and
-// "clear: inline-{start,end}" enabled?
-pref("layout.css.float-logical-values.enabled", true);
-
 // Is support for the CSS4 image-orientation property enabled?
 pref("layout.css.image-orientation.enabled", true);
 
@@ -2903,8 +2907,6 @@ pref("layout.css.prefixes.font-features", true);
 // Is support for background-blend-mode enabled?
 pref("layout.css.background-blend-mode.enabled", true);
 
-// Is support for CSS text-combine-upright (tate-chu-yoko) enabled?
-pref("layout.css.text-combine-upright.enabled", true);
 // Is support for CSS text-combine-upright: digits 2-4 enabled?
 pref("layout.css.text-combine-upright-digits.enabled", false);
 
@@ -2960,7 +2962,11 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 pref("layout.css.scroll-snap.enabled", true);
 
 // Is support for CSS shape-outside enabled?
+#ifdef NIGHTLY_BUILD
+pref("layout.css.shape-outside.enabled", true);
+#else
 pref("layout.css.shape-outside.enabled", false);
+#endif
 
 // Is support for document.fonts enabled?
 pref("layout.css.font-loading-api.enabled", true);
@@ -3101,11 +3107,6 @@ pref("plugins.navigator.hidden_ctp_plugin", "");
 // The default value for nsIPluginTag.enabledState (STATE_ENABLED = 2)
 pref("plugin.default.state", 2);
 
-// The MIME type that should bind to legacy java-specific invocations like
-// <applet> and <object data="java:foo">. Setting this to a non-java MIME type
-// is undefined behavior.
-pref("plugin.java.mime", "application/x-java-vm");
-
 // How long in minutes we will allow a plugin to work after the user has chosen
 // to allow it "now"
 pref("plugin.sessionPermissionNow.intervalInMinutes", 60);
@@ -3199,7 +3200,6 @@ pref("dom.ipc.useNativeEventProcessing.content", true);
 #endif
 
 // Quantum DOM scheduling:
-pref("dom.ipc.scheduler", false);
 pref("dom.ipc.scheduler.useMultipleQueues", true);
 pref("dom.ipc.scheduler.preemption", false);
 pref("dom.ipc.scheduler.threadCount", 2);
@@ -4508,6 +4508,10 @@ pref("image.animated.decode-on-demand.threshold-kb", 20480);
 // animation's currently displayed frame.
 pref("image.animated.decode-on-demand.batch-size", 6);
 
+// Resume an animated image from the last displayed frame rather than
+// advancing when out of view.
+pref("image.animated.resume-from-last-displayed", true);
+
 // Maximum number of surfaces for an image before entering "factor of 2" mode.
 // This in addition to the number of "native" sizes of an image. A native size
 // is a size for which we can decode a frame without up or downscaling. Most
@@ -4564,7 +4568,7 @@ pref("image.mem.animated.use_heap", false);
 
 // Decodes images into shared memory to allow direct use in separate
 // rendering processes. Only applicable with WebRender.
-pref("image.mem.shared", 1);
+pref("image.mem.shared", true);
 
 // Allows image locking of decoded image data in content processes.
 pref("image.mem.allow_locking_in_content_processes", true);
@@ -4771,22 +4775,9 @@ pref("layers.dump-host-layers", false);
 pref("layers.draw-borders", false);
 pref("layers.draw-tile-borders", false);
 pref("layers.draw-bigimage-borders", false);
-pref("layers.enable-tiles", false);
-pref("layers.single-tile.enabled", true);
-pref("layers.low-precision-buffer", false);
-pref("layers.progressive-paint", false);
-pref("layers.tile-width", 256);
-pref("layers.tile-height", 256);
-pref("layers.tiles.retain-back-buffer", true);
 pref("layers.child-process-shutdown", true);
 // Max number of layers per container. See Overwrite in mobile prefs.
 pref("layers.max-active", -1);
-// If this is set the tile size will only be treated as a suggestion.
-// On B2G we will round this to the stride of the underlying allocation.
-// On any platform we may later use the screen size and ignore
-// tile-width/tile-height entirely. Its recommended to turn this off
-// if you change the tile size.
-pref("layers.tiles.adjust", true);
 
 // Compositor target frame rate. NOTE: If vsync is enabled the compositor
 // frame rate will still be capped.
@@ -4796,13 +4787,30 @@ pref("layers.offmainthreadcomposition.frame-rate", -1);
 
 #if defined(XP_MACOSX) || defined (OS_OPENBSD)
 pref("layers.enable-tiles", true);
+#else
+pref("layers.enable-tiles", false);
+#endif
+#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+pref("layers.enable-tiles-if-skia-pomtp", true);
+#else
+pref("layers.enable-tiles-if-skia-pomtp", false);
+#endif
+pref("layers.single-tile.enabled", true);
+pref("layers.low-precision-buffer", false);
+pref("layers.progressive-paint", false);
+pref("layers.tiles.retain-back-buffer", true);
+// If this is set the tile size will only be treated as a suggestion.
+// On B2G we will round this to the stride of the underlying allocation.
+// On any platform we may later use the screen size and ignore
+// tile-width/tile-height entirely. Its recommended to turn this off
+// if you change the tile size.
+pref("layers.tiles.adjust", true);
 pref("layers.tile-width", 512);
 pref("layers.tile-height", 512);
-pref("layers.tiles.edge-padding", false);
-#endif
-
 #ifdef MOZ_WIDGET_ANDROID
 pref("layers.tiles.edge-padding", true);
+#else
+pref("layers.tiles.edge-padding", false);
 #endif
 
 // Whether to animate simple opacity and transforms on the compositor
@@ -4915,8 +4923,8 @@ pref("extensions.webextensions.remote", false);
 // unless other process sandboxing and extension remoting prefs are changed.
 pref("extensions.webextensions.protocol.remote", true);
 
-// Disable tab hiding API by default.
-pref("extensions.webextensions.tabhide.enabled", false);
+// Enable tab hiding API by default.
+pref("extensions.webextensions.tabhide.enabled", true);
 
 pref("extensions.webextensions.background-delayed-startup", false);
 
@@ -5123,7 +5131,7 @@ pref("dom.placeholder.show_on_focus", true);
 
 // WebVR is enabled by default in beta and release for Windows and for all
 // platforms in nightly and aurora.
-#if defined(XP_WIN) || defined(XP_MACOSX) || !defined(RELEASE_OR_BETA)
+#if defined(XP_WIN) || !defined(RELEASE_OR_BETA)
 pref("dom.vr.enabled", true);
 #else
 pref("dom.vr.enabled", false);
@@ -5399,10 +5407,8 @@ pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.service
 pref("browser.safebrowsing.provider.mozilla.nextupdatetime", "1");
 // Block lists for tracking protection. The name values will be used as the keys
 // to lookup the localized name in preferences.properties.
-pref("browser.safebrowsing.provider.mozilla.lists.base.name", "mozstdName");
-pref("browser.safebrowsing.provider.mozilla.lists.base.description", "mozstdDesc");
-pref("browser.safebrowsing.provider.mozilla.lists.content.name", "mozfullName");
-pref("browser.safebrowsing.provider.mozilla.lists.content.description", "mozfullDesc2");
+pref("browser.safebrowsing.provider.mozilla.lists.base", "moz-std");
+pref("browser.safebrowsing.provider.mozilla.lists.content", "moz-full");
 
 // The table and global pref for blocking plugin content
 pref("browser.safebrowsing.blockedURIs.enabled", true);
@@ -5770,12 +5776,7 @@ pref("layers.omtp.enabled", true);
 #else
 pref("layers.omtp.enabled", false);
 #endif
-#if defined(XP_MACOSX)
 pref("layers.omtp.paint-workers", -1);
-#else
-pref("layers.omtp.paint-workers", 1);
-#endif
-pref("layers.enable-tiles-if-skia-pomtp", false);
 pref("layers.omtp.release-capture-on-main-thread", false);
 pref("layers.omtp.dump-capture", false);
 

@@ -765,6 +765,11 @@ nsLayoutStylesheetCache::LoadSheet(nsIURI* aURI,
 
   nsZipArchive::sFileCorruptedReason = nullptr;
 
+  // Note: The parallel parsing code assume that UA sheets are always loaded
+  // synchrously like they are here, and thus that we'll never attempt parallel
+  // parsing on them. If that ever changes, we'll either need to find a
+  // different way to prohibit parallel parsing for UA sheets, or handle
+  // -moz-bool-pref and various other things in the parallel parsing code.
   nsresult rv = gCSSLoader->LoadSheetSync(aURI, aParsingMode, true, aSheet);
   if (NS_FAILED(rv)) {
     ErrorLoadingSheet(aURI,
@@ -786,8 +791,10 @@ void
 nsLayoutStylesheetCache::BuildPreferenceSheet(RefPtr<StyleSheet>* aSheet,
                                               nsPresContext* aPresContext)
 {
-  *aSheet = new ServoStyleSheet(eAgentSheetFeatures, CORS_NONE,
-                                mozilla::net::RP_Unset, dom::SRIMetadata());
+  *aSheet = new StyleSheet(eAgentSheetFeatures,
+                           CORS_NONE,
+                           mozilla::net::RP_Unset,
+                           dom::SRIMetadata());
 
   StyleSheet* sheet = *aSheet;
 
@@ -882,11 +889,11 @@ nsLayoutStylesheetCache::BuildPreferenceSheet(RefPtr<StyleSheet>* aSheet,
                "kPreallocSize should be big enough to build preference style "
                "sheet without reallocation");
 
-  ServoStyleSheet* servoSheet = sheet->AsServo();
-  // NB: The pref sheet never has @import rules.
-  servoSheet->ParseSheetSync(nullptr, sheetText, uri, uri, nullptr,
-                             /* aLoadData = */ nullptr, 0,
-                             eCompatibility_FullStandards);
+  // NB: The pref sheet never has @import rules, thus no loader.
+  sheet->ParseSheetSync(nullptr,
+                        sheetText,
+                        /* aLoadData = */ nullptr,
+                        /* aLineNumber = */ 0);
 
 #undef NS_GET_R_G_B
 }

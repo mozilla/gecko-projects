@@ -276,10 +276,10 @@ nsFTPDirListingConv::DigestBufferLines(char *aBuffer, nsCString &aString) {
 
         if (type != 'd')
         {
-            for (int i = 0; i < int(sizeof(result.fe_size)); ++i)
+            for (char& fe : result.fe_size)
             {
-                if (result.fe_size[i] != '\0')
-                    aString.Append((const char*)&result.fe_size[i], 1);
+                if (fe != '\0')
+                    aString.Append((const char*)&fe, 1);
             }
 
             aString.Append(' ');
@@ -334,7 +334,7 @@ nsFTPDirListingConv::DigestBufferLines(char *aBuffer, nsCString &aString) {
 nsresult
 NS_NewFTPDirListingConv(nsFTPDirListingConv** aFTPDirListingConv)
 {
-    NS_PRECONDITION(aFTPDirListingConv != nullptr, "null ptr");
+    MOZ_ASSERT(aFTPDirListingConv != nullptr, "null ptr");
     if (! aFTPDirListingConv)
         return NS_ERROR_NULL_POINTER;
 

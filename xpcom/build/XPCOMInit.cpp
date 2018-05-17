@@ -53,11 +53,6 @@
 #include "nsThreadManager.h"
 #include "nsThreadPool.h"
 
-#include "xptinfo.h"
-#include "nsIInterfaceInfoManager.h"
-#include "xptiprivate.h"
-#include "mozilla/XPTInterfaceInfoManager.h"
-
 #include "nsTimerImpl.h"
 #include "TimerThread.h"
 
@@ -159,6 +154,10 @@ using namespace mozilla;
 using base::AtExitManager;
 using mozilla::ipc::BrowserProcessSubThread;
 
+// From toolkit/library/rust/lib.rs
+extern "C" void GkRust_Init();
+extern "C" void GkRust_Shutdown();
+
 namespace {
 
 static AtExitManager* sExitManager;
@@ -244,24 +243,6 @@ nsThreadManagerGetSingleton(nsISupports* aOuter,
 }
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsThreadPool)
-
-static nsresult
-nsXPTIInterfaceInfoManagerGetSingleton(nsISupports* aOuter,
-                                       const nsIID& aIID,
-                                       void** aInstancePtr)
-{
-  NS_ASSERTION(aInstancePtr, "null outptr");
-  if (NS_WARN_IF(aOuter)) {
-    return NS_ERROR_NO_AGGREGATION;
-  }
-
-  nsCOMPtr<nsIInterfaceInfoManager> iim(XPTInterfaceInfoManager::GetSingleton());
-  if (!iim) {
-    return NS_ERROR_FAILURE;
-  }
-
-  return iim->QueryInterface(aIID, aInstancePtr);
-}
 
 nsComponentManagerImpl* nsComponentManagerImpl::gComponentManager = nullptr;
 bool gXPCOMShuttingDown = false;
@@ -473,6 +454,8 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   // passed, passing (0, nullptr) is alright here.
   mozilla::LogModule::Init(0, nullptr);
 
+  GkRust_Init();
+
   nsresult rv = NS_OK;
 
   // We are not shutting down
@@ -671,10 +654,6 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
     NS_ADDREF(*aResult = nsComponentManagerImpl::gComponentManager);
   }
 
-  // The iimanager constructor searches and registers XPT files.
-  // (We trigger the singleton's lazy construction here to make that happen.)
-  (void)XPTInterfaceInfoManager::GetSingleton();
-
   // After autoreg, but before we actually instantiate any components,
   // add any services listed in the "xpcom-directory-providers" category
   // to the directory service.
@@ -736,6 +715,8 @@ NS_InitMinimalXPCOM()
   // initialized by a previous call to LogModule::Init with the arguments
   // passed, passing (0, nullptr) is alright here.
   mozilla::LogModule::Init(0, nullptr);
+
+  GkRust_Init();
 
   nsresult rv = nsThreadManager::get().Init();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1011,12 +992,6 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     }
   }
 
-  // Release our own singletons
-  // Do this _after_ shutting down the component manager, because the
-  // JS component loader will use XPConnect to call nsIModule::canUnload,
-  // and that will spin up the InterfaceInfoManager again -- bad mojo
-  XPTInterfaceInfoManager::FreeInterfaceInfoManager();
-
   // Finally, release the component manager last because it unloads the
   // libraries:
   if (nsComponentManagerImpl::gComponentManager) {
@@ -1029,6 +1004,8 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
 
   // Shut down SystemGroup for main thread dispatching.
   SystemGroup::Shutdown();
+
+  GkRust_Shutdown();
 
   NS_ShutdownAtomTable();
 

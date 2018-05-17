@@ -30,7 +30,6 @@
 
 #include "nsDOMMutationObserver.h"
 #include "nsICycleCollectorListener.h"
-#include "mozilla/XPTInterfaceInfoManager.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsScriptSecurityManager.h"
@@ -97,6 +96,7 @@ nsXPConnect::~nsXPConnect()
 
     mShuttingDown = true;
     XPCWrappedNativeScope::SystemIsBeingShutDown();
+    mRuntime->SystemIsBeingShutDown();
 
     // The above causes us to clean up a bunch of XPConnect data structures,
     // after which point we need to GC to clean everything up. We need to do
@@ -177,12 +177,9 @@ nsXPConnect::GetRuntimeInstance()
 
 // static
 bool
-nsXPConnect::IsISupportsDescendant(nsIInterfaceInfo* info)
+nsXPConnect::IsISupportsDescendant(const nsXPTInterfaceInfo* info)
 {
-    bool found = false;
-    if (info)
-        info->HasAncestor(&NS_GET_IID(nsISupports), &found);
-    return found;
+    return info && info->HasAncestor(NS_GET_IID(nsISupports));
 }
 
 void
@@ -395,12 +392,6 @@ xpc::ErrorReport::ErrorReportToMessageString(JSErrorReport* aReport,
 /***************************************************************************/
 
 
-nsresult
-nsXPConnect::GetInfoForIID(const nsIID * aIID, nsIInterfaceInfo** info)
-{
-  return XPTInterfaceInfoManager::GetSingleton()->GetInfoForIID(aIID, info);
-}
-
 void
 xpc_TryUnmarkWrappedGrayObject(nsISupports* aWrappedJS)
 {
@@ -455,7 +446,7 @@ CreateGlobalObject(JSContext* cx, const JSClass* clasp, nsIPrincipal* principal,
                                            JS::DontFireOnNewGlobalHook, aOptions));
     if (!global)
         return nullptr;
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
 
     // The constructor automatically attaches the scope to the compartment private
     // of |global|.
@@ -518,9 +509,9 @@ InitGlobalObjectOptions(JS::CompartmentOptions& aOptions,
 bool
 InitGlobalObject(JSContext* aJSContext, JS::Handle<JSObject*> aGlobal, uint32_t aFlags)
 {
-    // Immediately enter the global's compartment so that everything we create
+    // Immediately enter the global's realm so that everything we create
     // ends up there.
-    JSAutoCompartment ac(aJSContext, aGlobal);
+    JSAutoRealm ar(aJSContext, aGlobal);
 
     // Stuff coming through this path always ends up as a DOM global.
     MOZ_ASSERT(js::GetObjectClass(aGlobal)->flags & JSCLASS_DOM_GLOBAL);
@@ -593,7 +584,7 @@ NativeInterface2JSObject(HandleObject aScope,
                          MutableHandleValue aVal)
 {
     AutoJSContext cx;
-    JSAutoCompartment ac(cx, aScope);
+    JSAutoRealm ar(cx, aScope);
 
     nsresult rv;
     xpcObjectHelper helper(aCOMObj, aCache);
@@ -662,7 +653,7 @@ nsXPConnect::WrapJS(JSContext * aJSContext,
     *result = nullptr;
 
     RootedObject aJSObj(aJSContext, aJSObjArg);
-    JSAutoCompartment ac(aJSContext, aJSObj);
+    JSAutoRealm ar(aJSContext, aJSObj);
 
     nsresult rv = NS_ERROR_UNEXPECTED;
     if (!XPCConvert::JSObject2NativeInterface(result, aJSObj,
@@ -676,7 +667,7 @@ nsXPConnect::JSValToVariant(JSContext* cx,
                             HandleValue aJSVal,
                             nsIVariant** aResult)
 {
-    NS_PRECONDITION(aResult, "bad param");
+    MOZ_ASSERT(aResult, "bad param");
 
     RefPtr<XPCVariant> variant = XPCVariant::newVariant(cx, aJSVal);
     variant.forget(aResult);
@@ -797,7 +788,7 @@ nsXPConnect::GetWrappedNativePrototype(JSContext* aJSContext,
                                        JSObject** aRetVal)
 {
     RootedObject aScope(aJSContext, aScopeArg);
-    JSAutoCompartment ac(aJSContext, aScope);
+    JSAutoRealm ar(aJSContext, aScope);
 
     XPCWrappedNativeScope* scope = ObjectScope(aScope);
     if (!scope)
@@ -888,9 +879,9 @@ NS_IMETHODIMP
 nsXPConnect::VariantToJS(JSContext* ctx, JSObject* scopeArg, nsIVariant* value,
                          MutableHandleValue _retval)
 {
-    NS_PRECONDITION(ctx, "bad param");
-    NS_PRECONDITION(scopeArg, "bad param");
-    NS_PRECONDITION(value, "bad param");
+    MOZ_ASSERT(ctx, "bad param");
+    MOZ_ASSERT(scopeArg, "bad param");
+    MOZ_ASSERT(value, "bad param");
 
     RootedObject scope(ctx, scopeArg);
     MOZ_ASSERT(js::IsObjectInContextCompartment(scope, ctx));
@@ -908,8 +899,8 @@ nsXPConnect::VariantToJS(JSContext* ctx, JSObject* scopeArg, nsIVariant* value,
 NS_IMETHODIMP
 nsXPConnect::JSToVariant(JSContext* ctx, HandleValue value, nsIVariant** _retval)
 {
-    NS_PRECONDITION(ctx, "bad param");
-    NS_PRECONDITION(_retval, "bad param");
+    MOZ_ASSERT(ctx, "bad param");
+    MOZ_ASSERT(_retval, "bad param");
 
     RefPtr<XPCVariant> variant = XPCVariant::newVariant(ctx, value);
     variant.forget(_retval);

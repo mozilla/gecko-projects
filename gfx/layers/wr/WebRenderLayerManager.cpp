@@ -38,7 +38,7 @@ namespace layers {
 
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
   : mWidget(aWidget)
-  , mLatestTransactionId(0)
+  , mLatestTransactionId{0}
   , mWindowOverlayChanged(false)
   , mNeedsComposite(false)
   , mIsFirstPaint(false)
@@ -127,7 +127,7 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
     // pending transaction. Do this at the top of the event loop so we don't
     // cause a paint to occur during compositor shutdown.
     RefPtr<TransactionIdAllocator> allocator = mTransactionIdAllocator;
-    uint64_t id = mLatestTransactionId;
+    TransactionId id = mLatestTransactionId;
 
     RefPtr<Runnable> task = NS_NewRunnableFunction(
       "TransactionIdAllocator::NotifyTransactionCompleted",
@@ -194,15 +194,9 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
 
-  // With the WebRenderLayerManager we reject attempts to set most kind of
-  // "pending data" for empty transactions. Any place that attempts to update
-  // transforms or scroll offset, for example, will get failure return values
-  // back, and will fall back to a full transaction. Therefore the only piece
-  // of "pending" information we need to send in an empty transaction are the
-  // APZ focus state and canvases's CompositableOperations.
-
   if (aFlags & EndTransactionFlags::END_NO_COMPOSITE && 
-      !mWebRenderCommandBuilder.NeedsEmptyTransaction()) {
+      !mWebRenderCommandBuilder.NeedsEmptyTransaction() &&
+      mPendingScrollUpdates.empty()) {
     MOZ_ASSERT(!mTarget);
     WrBridge()->SendSetFocusTarget(mFocusTarget);
     return true;
@@ -225,7 +219,9 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
     }
   }
 
-  WrBridge()->EndEmptyTransaction(mFocusTarget, mLatestTransactionId, transactionStart);
+  WrBridge()->EndEmptyTransaction(mFocusTarget, mPendingScrollUpdates,
+      mPaintSequenceNumber, mLatestTransactionId, transactionStart);
+  ClearPendingScrollInfoUpdate();
 
   MakeSnapshotIfRequired(size);
   return true;
@@ -264,7 +260,6 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   mAnimationReadyTime = TimeStamp::Now();
 
   WrBridge()->BeginTransaction();
-  DiscardCompositorAnimations();
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   wr::LayoutSize contentSize { (float)size.width, (float)size.height };
@@ -279,6 +274,8 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
                                                   contentSize,
                                                   aFilters);
 
+  DiscardCompositorAnimations();
+
   mWidget->AddWindowOverlayWebRenderCommands(WrBridge(), builder, resourceUpdates);
   mWindowOverlayChanged = false;
 
@@ -292,6 +289,10 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
     }
     mScrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
   }
+  // Since we're sending a full mScrollData that will include the new scroll
+  // offsets, and we can throw away the pending scroll updates we had kept for
+  // an empty transaction.
+  ClearPendingScrollInfoUpdate();
 
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
   TimeStamp transactionStart = mTransactionIdAllocator->GetTransactionStart();
@@ -471,7 +472,7 @@ WebRenderLayerManager::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
 }
 
 void
-WebRenderLayerManager::DidComposite(uint64_t aTransactionId,
+WebRenderLayerManager::DidComposite(TransactionId aTransactionId,
                                     const mozilla::TimeStamp& aCompositeStart,
                                     const mozilla::TimeStamp& aCompositeEnd)
 {
@@ -485,7 +486,7 @@ WebRenderLayerManager::DidComposite(uint64_t aTransactionId,
 
   // |aTransactionId| will be > 0 if the compositor is acknowledging a shadow
   // layers transaction.
-  if (aTransactionId) {
+  if (aTransactionId.IsValid()) {
     nsIWidgetListener *listener = mWidget->GetWidgetListener();
     if (listener) {
       listener->DidCompositeWindow(aTransactionId, aCompositeStart, aCompositeEnd);
@@ -569,6 +570,12 @@ WebRenderLayerManager::SetTransactionIdAllocator(TransactionIdAllocator* aAlloca
   mTransactionIdAllocator = aAllocator;
 }
 
+TransactionId
+WebRenderLayerManager::GetLastTransactionId()
+{
+  return mLatestTransactionId;
+}
+
 void
 WebRenderLayerManager::AddDidCompositeObserver(DidCompositeObserver* aObserver)
 {
@@ -625,15 +632,6 @@ WebRenderLayerManager::SetRoot(Layer* aLayer)
 {
   // This should never get called
   MOZ_ASSERT(false);
-}
-
-bool
-WebRenderLayerManager::SetPendingScrollUpdateForNextTransaction(FrameMetrics::ViewID aScrollId,
-                                                                const ScrollUpdateInfo& aUpdateInfo)
-{
-  // If we ever support changing the scroll position in an "empty transactions"
-  // properly in WR we can fill this in. Covered by bug 1382259.
-  return false;
 }
 
 already_AddRefed<PersistentBufferProvider>

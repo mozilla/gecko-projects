@@ -21,7 +21,7 @@ function PromptFactory() {
 PromptFactory.prototype = {
   classID: Components.ID("{076ac188-23c1-4390-aa08-7ef1f78ca5d9}"),
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIPromptFactory, Ci.nsIPromptService]),
 
   handleEvent: function(aEvent) {
@@ -163,7 +163,7 @@ PromptFactory.prototype = {
   },
 
   _handleContextMenu: function(aEvent) {
-    let target = aEvent.target;
+    let target = aEvent.composedTarget;
     if (aEvent.defaultPrevented || target.isContentEditable) {
       return;
     }
@@ -344,12 +344,13 @@ function PromptDelegate(aDomWin) {
   }
 
   if (!this._dispatcher) {
-    this._dispatcher = GeckoViewUtils.getActiveDispatcher();
+    [this._dispatcher, this._domWin] =
+        GeckoViewUtils.getActiveDispatcherAndWindow();
   }
 }
 
 PromptDelegate.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIPrompt]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIPrompt]),
 
   BUTTON_TYPE_POSITIVE: 0,
   BUTTON_TYPE_NEUTRAL: 1,
@@ -392,14 +393,15 @@ PromptDelegate.prototype = {
    */
   _showPrompt: function(aMsg) {
     let result = undefined;
-    if (!this._changeModalState(/* aEntering */ true)) {
+    if (!this._domWin || !this._changeModalState(/* aEntering */ true)) {
       return;
     }
     try {
       this.asyncShowPrompt(aMsg, res => result = res);
 
       // Spin this thread while we wait for a result
-      Services.tm.spinEventLoopUntil(() => result !== undefined);
+      Services.tm.spinEventLoopUntil(() =>
+          this._domWin.closed || result !== undefined);
     } finally {
       this._changeModalState(/* aEntering */ false);
     }
@@ -689,7 +691,7 @@ PromptDelegate.prototype = {
     this.asyncShowPrompt(this._addCheck(aCheckMsg, aCheckState,
                           this._getAuthMsg(aChannel, aLevel, aAuthInfo)), callback);
     return {
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsICancelable]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsICancelable]),
       cancel: function() {
         if (responded) {
           return;
@@ -776,7 +778,7 @@ function FilePickerDelegate() {
 FilePickerDelegate.prototype = {
   classID: Components.ID("{e4565e36-f101-4bf5-950b-4be0887785a9}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIFilePicker]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIFilePicker]),
 
   /* ----------  nsIFilePicker  ---------- */
   init: function(aParent, aTitle, aMode) {
@@ -869,7 +871,7 @@ FilePickerDelegate.prototype = {
       throw Cr.NS_ERROR_NOT_AVAILABLE;
     }
     return {
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsISimpleEnumerator]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsISimpleEnumerator]),
       _owner: this,
       _index: 0,
       hasMoreElements: function() {
@@ -966,7 +968,7 @@ function ColorPickerDelegate() {
 ColorPickerDelegate.prototype = {
   classID: Components.ID("{aa0dd6fc-73dd-4621-8385-c0b377e02cee}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIColorPicker]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIColorPicker]),
 
   init: function(aParent, aTitle, aInitialColor) {
     this._prompt = new PromptDelegate(aParent);

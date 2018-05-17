@@ -15,7 +15,6 @@
 #include "nsIDocShell.h"
 #include "nsHTMLParts.h"
 #include "nsIComponentManager.h"
-#include "nsIDOMElement.h"
 #include "nsIBaseWindow.h"
 #include "nsIDOMWindow.h"
 #include "nsCOMPtr.h"
@@ -59,7 +58,7 @@ using namespace mozilla::dom;
 
 
 nsresult
-NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
+NS_NewDOMDocument(nsIDocument** aInstancePtrResult,
                   const nsAString& aNamespaceURI,
                   const nsAString& aQualifiedName,
                   DocumentType* aDoctype,
@@ -185,8 +184,7 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
     }
   }
 
-  *aInstancePtrResult = doc;
-  NS_ADDREF(*aInstancePtrResult);
+  d.forget(aInstancePtrResult);
 
   return NS_OK;
 }
@@ -212,7 +210,7 @@ NS_NewXMLDocument(nsIDocument** aInstancePtrResult, bool aLoadedAsData,
 }
 
 nsresult
-NS_NewXBLDocument(nsIDOMDocument** aInstancePtrResult,
+NS_NewXBLDocument(nsIDocument** aInstancePtrResult,
                   nsIURI* aDocumentURI,
                   nsIURI* aBaseURI,
                   nsIPrincipal* aPrincipal)
@@ -224,14 +222,14 @@ NS_NewXBLDocument(nsIDOMDocument** aInstancePtrResult,
                                   nullptr, DocumentFlavorLegacyGuess);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDocument> idoc = do_QueryInterface(*aInstancePtrResult);
+  nsIDocument* idoc = *aInstancePtrResult;
 
   // XBL documents must allow XUL and XBL elements in them but the usual check
   // only checks if the document is loaded in the system principal which is
   // sometimes not the case.
   idoc->ForceEnableXULXBL();
 
-  nsDocument* doc = static_cast<nsDocument*>(idoc.get());
+  nsDocument* doc = static_cast<nsDocument*>(idoc);
   doc->SetLoadedAsInteractiveData(true);
   doc->SetReadyStateInternal(nsIDocument::READYSTATE_COMPLETE);
 
@@ -607,7 +605,7 @@ XMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const
   nsDocument::DocAddSizeOfExcludingThis(aWindowSizes);
 }
 
-// nsIDOMDocument interface
+// nsIDocument interface
 
 nsresult
 XMLDocument::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,

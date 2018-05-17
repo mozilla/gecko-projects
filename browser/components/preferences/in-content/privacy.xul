@@ -33,7 +33,11 @@
                 class="accessory-button"
                 data-l10n-id="forms-exceptions"
                 preference="pref.privacy.disable_button.view_passwords_exceptions"
-                search-l10n-ids="permissions-address"/>
+                search-l10n-ids="
+                  permissions-address,
+                  permissions-exceptions-saved-logins-window.title,
+                  permissions-exceptions-saved-logins-desc,
+                "/>
       </hbox>
     </hbox>
     <hbox id="showPasswordBox" pack="end">
@@ -66,30 +70,28 @@
   <hbox align="center">
     <label id="historyModeLabel"
            control="historyMode"
-           accesskey="&historyHeader2.pre.accesskey;">&historyHeader2.pre.label;
-    </label>
+           data-l10n-id="history-remember-label"/>
     <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
     <hbox>
       <menulist id="historyMode">
         <menupopup>
-          <menuitem label="&historyHeader.remember.label;"
+          <menuitem data-l10n-id="history-remember-option-all"
                     value="remember"
                     search-l10n-ids="history-remember-description"/>
-          <menuitem label="&historyHeader.dontremember.label;"
+          <menuitem data-l10n-id="history-remember-option-never"
                     value="dontremember"
                     search-l10n-ids="history-dontremember-description"/>
-          <menuitem label="&historyHeader.custom.label;"
+          <menuitem data-l10n-id="history-remember-option-custom"
                     value="custom"
                     search-l10n-ids="
                       history-private-browsing-permanent.label,
-                      history-remember-option.label,
+                      history-remember-browser-option.label,
                       history-remember-search-option.label,
                       history-clear-on-close-option.label,
                       history-clear-on-close-settings.label"/>
         </menupopup>
       </menulist>
     </hbox>
-    <label>&historyHeader.post.label;</label>
   </hbox>
   <hbox>
     <deck id="historyPane" flex="1">
@@ -118,7 +120,7 @@
                     preference="browser.privatebrowsing.autostart"/>
           <vbox class="indent">
             <checkbox id="rememberHistory"
-                      data-l10n-id="history-remember-option"
+                      data-l10n-id="history-remember-browser-option"
                       preference="places.history.enabled"/>
             <checkbox id="rememberForms"
                       data-l10n-id="history-remember-search-option"
@@ -144,7 +146,7 @@
         <button id="clearDataSettings"
                 class="accessory-button"
                 data-l10n-id="history-clear-on-close-settings"
-                searchkeywords="&clearDataSettings3.label;
+                searchkeywords="&clearDataSettings4.label;
                                 &historySection.label;
                                 &itemHistoryAndDownloads.label;
                                 &itemCookies.label;
@@ -160,7 +162,7 @@
 </groupbox>
 
 <!-- Site Data -->
-<groupbox id="siteDataGroup" data-category="panePrivacy">
+<groupbox id="siteDataGroup" data-category="panePrivacy" hidden="true">
   <caption><label data-l10n-id="sitedata-header"/></caption>
 
   <hbox data-subcategory="sitedata" align="baseline">
@@ -238,6 +240,8 @@
                   site-data-column-host.label,
                   site-data-column-cookies.label,
                   site-data-column-storage.label,
+                  site-data-settings-description,
+                  site-data-remove-all.label,
                 "/>
       </hbox>
       <hbox>
@@ -252,7 +256,8 @@
                   permissions-remove.label,
                   permissions-remove-all.label,
                   permissions-button-cancel.label,
-                  permissions-button-ok.label
+                  permissions-button-ok.label,
+                  permissions-exceptions-cookie-desc,
                 " />
       </hbox>
     </vbox>
@@ -282,7 +287,7 @@
     <hbox align="start">
       <vbox flex="1">
         <description data-l10n-id="tracking-desc">
-          <a id="trackingProtectionLearnMore" data-l10n-name="learn-more" target="_blank" class="learnMore text-link"/>
+          <html:a id="trackingProtectionLearnMore" data-l10n-name="learn-more" target="_blank" class="learnMore text-link"/>
         </description>
       </vbox>
       <spacer flex="1"/>
@@ -341,7 +346,9 @@
                     permissions-remove.label,
                     permissions-remove-all.label,
                     permissions-button-cancel.label,
-                    permissions-button-ok.label
+                    permissions-button-ok.label,
+                    permissions-exceptions-tracking-protection-window.title,
+                    permissions-exceptions-tracking-protection-desc,
                   "/>
         </hbox>
         <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
@@ -399,6 +406,10 @@
                     permissions-remove-all.label,
                     permissions-button-cancel.label,
                     permissions-button-ok.label,
+                    permissions-site-location-window.title,
+                    permissions-site-location-desc,
+                    permissions-site-location-disable-label,
+                    permissions-site-location-disable-desc,
                   " />
         </hbox>
       </row>
@@ -418,6 +429,10 @@
                     permissions-remove-all.label,
                     permissions-button-cancel.label,
                     permissions-button-ok.label,
+                    permissions-site-camera-window.title,
+                    permissions-site-camera-desc,
+                    permissions-site-camera-disable-label,
+                    permissions-site-camera-disable-desc,
                   " />
         </hbox>
       </row>
@@ -437,6 +452,10 @@
                     permissions-remove-all.label,
                     permissions-button-cancel.label,
                     permissions-button-ok.label,
+                    permissions-site-microphone-window.title,
+                    permissions-site-microphone-desc,
+                    permissions-site-microphone-disable-label,
+                    permissions-site-microphone-disable-desc,
                   " />
         </hbox>
       </row>
@@ -461,6 +480,10 @@
                     permissions-remove-all.label,
                     permissions-button-cancel.label,
                     permissions-button-ok.label,
+                    permissions-site-notification-window.title,
+                    permissions-site-notification-desc,
+                    permissions-site-notification-disable-label,
+                    permissions-site-notification-disable-desc,
                   " />
         </hbox>
       </row>
@@ -487,7 +510,9 @@
               search-l10n-ids="
                 permissions-address,
                 permissions-button-cancel.label,
-                permissions-button-ok.label
+                permissions-button-ok.label,
+                permissions-exceptions-popup-window.title,
+                permissions-exceptions-popup-desc,
               " />
     </hbox>
   </hbox>
@@ -510,6 +535,8 @@
                 permissions-remove-all.label,
                 permissions-button-cancel.label,
                 permissions-button-ok.label,
+                permissions-exceptions-addons-window.title,
+                permissions-exceptions-addons-desc,
               " />
     </hbox>
   </hbox>
@@ -551,6 +578,18 @@
       <label id="FHRLearnMore"
              class="learnMore text-link"
              data-l10n-id="collection-health-report-link"/>
+      <vbox class="indent">
+        <hbox align="center">
+          <checkbox id="optOutStudiesEnabled"
+                    class="tail-with-learn-more"
+                    data-l10n-id="collection-studies"/>
+          <label id="viewShieldStudies"
+                 href="about:studies"
+                 useoriginprincipal="true"
+                 class="learnMore text-link"
+                 data-l10n-id="collection-studies-link"/>
+        </hbox>
+      </vbox>
     </description>
 #ifndef MOZ_TELEMETRY_REPORTING
   <description id="TelemetryDisabledDesc"

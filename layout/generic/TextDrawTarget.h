@@ -68,6 +68,7 @@ public:
     // Add 1 pixel of dirty area around clip rect to allow us to paint
     // antialiased pixels beyond the measured text extents.
     layoutClipRect.Inflate(1);
+    mSize = IntSize::Ceil(layoutClipRect.Width(), layoutClipRect.Height());
     mClipStack.AppendElement(layoutClipRect);
 
     mBackfaceVisible = !aItem->BackfaceIsHidden();
@@ -188,6 +189,10 @@ public:
     mClipStack.RemoveLastElement();
   }
 
+  IntSize GetSize() const override {
+    return mSize;
+  }
+
   void
   AppendShadow(const wr::Shadow& aShadow)
   {
@@ -298,7 +303,7 @@ public:
   }
 
 private:
-  wr::LayerRect ClipRect()
+  wr::LayoutRect ClipRect()
   {
     return wr::ToRoundedLayoutRect(mClipStack.LastElement());
   }
@@ -322,7 +327,8 @@ private:
   layers::WebRenderLayerManager* mManager;
 
   // Computed facts
-  wr::LayerRect mBoundsRect;
+  IntSize mSize;
+  wr::LayoutRect mBoundsRect;
   nsTArray<LayoutDeviceRect> mClipStack;
   bool mBackfaceVisible;
 
@@ -350,11 +356,6 @@ public:
                                                       float aOpacity) override {
     MOZ_CRASH("TextDrawTarget: Method shouldn't be called");
     return nullptr;
-  }
-
-  IntSize GetSize() const override {
-    MOZ_CRASH("TextDrawTarget: Method shouldn't be called");
-    return IntSize(1, 1);
   }
 
   void Flush() override {

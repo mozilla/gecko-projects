@@ -123,8 +123,8 @@ function BrowserElementChild() {
 
 BrowserElementChild.prototype = {
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 
   _init: function() {
     debug("Starting up.");
@@ -877,7 +877,7 @@ BrowserElementChild.prototype = {
               hasVideo: hasVideo,
               documentURI: documentURI};
     }
-    if (elem instanceof Ci.nsIDOMHTMLInputElement &&
+    if (ChromeUtils.getClassName(elem) === "HTMLInputElement" &&
         elem.hasAttribute("name")) {
       // For input elements, we look for a parent <form> and if there is
       // one we return the form's method and action uri.
@@ -1380,8 +1380,8 @@ BrowserElementChild.prototype = {
   // The docShell keeps a weak reference to the progress listener, so we need
   // to keep a strong ref to it ourselves.
   _progressListener: {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                           Ci.nsISupportsWeakReference]),
+    QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
+                                            Ci.nsISupportsWeakReference]),
     _seenLoadStart: false,
 
     onLocationChange: function(webProgress, request, location, flags) {

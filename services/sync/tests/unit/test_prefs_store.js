@@ -39,7 +39,7 @@ add_task(async function run_test() {
     let ids = Object.keys(allIDs);
     Assert.equal(ids.length, 1);
     Assert.equal(ids[0], PREFS_GUID);
-    Assert.ok(allIDs[PREFS_GUID], true);
+    Assert.ok(allIDs[PREFS_GUID]);
 
     Assert.ok((await store.itemExists(PREFS_GUID)));
     Assert.equal(false, (await store.itemExists("random-gibberish")));
@@ -109,8 +109,7 @@ add_task(async function run_test() {
     // Ensure we don't go to the network to fetch personas and end up leaking
     // stuff.
     Services.io.offline = true;
-    Assert.ok(!prefs.get("lightweightThemes.selectedThemeID"));
-    Assert.equal(LightweightThemeManager.currentTheme, null);
+    Assert.equal(LightweightThemeManager.currentTheme.id, "default-theme@mozilla.org");
 
     let persona1 = makePersona();
     let persona2 = makePersona();
@@ -130,8 +129,7 @@ add_task(async function run_test() {
       "lightweightThemes.usedThemes": usedThemes
     };
     await store.update(record);
-    Assert.ok(!prefs.get("lightweightThemes.selectedThemeID"));
-    Assert.equal(LightweightThemeManager.currentTheme, null);
+    Assert.equal(LightweightThemeManager.currentTheme.id, "default-theme@mozilla.org");
 
     _("Only the current app's preferences are applied.");
     record = new PrefRec("prefs", "some-fake-app");

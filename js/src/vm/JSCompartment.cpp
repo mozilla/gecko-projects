@@ -1033,6 +1033,19 @@ JSCompartment::setAllocationMetadataBuilder(const js::AllocationMetadataBuilder 
 }
 
 void
+JSCompartment::forgetAllocationMetadataBuilder()
+{
+    // Unlike setAllocationMetadataBuilder, we don't have to discard all JIT
+    // code here (code is still valid, just a bit slower because it doesn't do
+    // inline GC allocations when a metadata builder is present), but we do want
+    // to cancel off-thread Ion compilations to avoid races when Ion calls
+    // hasAllocationMetadataBuilder off-thread.
+    CancelOffThreadIonCompile(this);
+
+    allocationMetadataBuilder = nullptr;
+}
+
+void
 JSCompartment::clearObjectMetadata()
 {
     js_delete(objectMetadataTable);
@@ -1077,10 +1090,10 @@ static bool
 AddLazyFunctionsForCompartment(JSContext* cx, AutoObjectVector& lazyFunctions, AllocKind kind)
 {
     // Find all live root lazy functions in the compartment: those which have a
-    // source object, indicating that they have a parent, and which do not have
-    // an uncompiled enclosing script. The last condition is so that we don't
-    // compile lazy scripts whose enclosing scripts failed to compile,
-    // indicating that the lazy script did not escape the script.
+    // non-lazy enclosing script, and which do not have an uncompiled enclosing
+    // script. The last condition is so that we don't compile lazy scripts
+    // whose enclosing scripts failed to compile, indicating that the lazy
+    // script did not escape the script.
     //
     // Some LazyScripts have a non-null |JSScript* script| pointer. We still
     // want to delazify in that case: this pointer is weak so the JSScript
@@ -1100,7 +1113,7 @@ AddLazyFunctionsForCompartment(JSContext* cx, AutoObjectVector& lazyFunctions, A
 
         if (fun->isInterpretedLazy()) {
             LazyScript* lazy = fun->lazyScriptOrNull();
-            if (lazy && lazy->sourceObject() && !lazy->hasUncompiledEnclosingScript()) {
+            if (lazy && !lazy->isEnclosingScriptLazy() && !lazy->hasUncompletedEnclosingScript()) {
                 if (!lazyFunctions.append(fun))
                     return false;
             }
@@ -1150,7 +1163,7 @@ CreateLazyScriptsForCompartment(JSContext* cx)
 bool
 JSCompartment::ensureDelazifyScriptsForDebugger(JSContext* cx)
 {
-    AutoCompartmentUnchecked ac(cx, this);
+    AutoRealmUnchecked ar(cx, this);
     if (needsDelazificationForDebugger() && !CreateLazyScriptsForCompartment(cx))
         return false;
     debugModeBits &= ~DebuggerNeedsDelazification;

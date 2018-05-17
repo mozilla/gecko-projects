@@ -22,8 +22,6 @@ ChromeUtils.defineModuleGetter(this, "Pocket",
                                "chrome://pocket/content/Pocket.jsm");
 ChromeUtils.defineModuleGetter(this, "ReaderMode",
                                "resource://gre/modules/ReaderMode.jsm");
-ChromeUtils.defineModuleGetter(this, "RecentWindow",
-                               "resource:///modules/RecentWindow.jsm");
 ChromeUtils.defineModuleGetter(this, "Services",
                                "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyGetter(this, "gPocketBundle", function() {
@@ -41,8 +39,7 @@ const PREF_BRANCH = "extensions.pocket.";
 const PREFS = {
   enabled: true, // bug 1229937, figure out ui tour support
   api: "api.getpocket.com",
-  site: "getpocket.com",
-  oAuthConsumerKey: "40249-e88c401e1b1f2242d9e441c4"
+  site: "getpocket.com"
 };
 
 function setDefaultPrefs() {

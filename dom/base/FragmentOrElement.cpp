@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * Base class for all element classes; this provides an implementation
- * of DOM Core's nsIDOMElement, implements nsIContent, provides
- * utility methods for subclasses, and so forth.
+ * Base class for all element classes and DocumentFragment.
  */
 
 #include "mozilla/ArrayUtils.h"
@@ -34,7 +32,6 @@
 #include "mozilla/dom/Event.h"
 #include "nsIDocumentInlines.h"
 #include "nsIDocumentEncoder.h"
-#include "nsIDOMNodeList.h"
 #include "nsIContentIterator.h"
 #include "nsFocusManager.h"
 #include "nsILinkHandler.h"
@@ -48,7 +45,6 @@
 #include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsUnicharUtils.h"
-#include "nsIDOMEvent.h"
 #include "nsDOMCID.h"
 #include "nsIServiceManager.h"
 #include "nsDOMCSSAttrDeclaration.h"
@@ -150,7 +146,6 @@ NS_INTERFACE_MAP_BEGIN(nsIContent)
   // not doing anything anyway.
   NS_INTERFACE_MAP_ENTRY(nsIContent)
   NS_INTERFACE_MAP_ENTRY(nsINode)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
@@ -498,7 +493,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 NS_INTERFACE_TABLE_HEAD(nsAttrChildContentList)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
-  NS_INTERFACE_TABLE(nsAttrChildContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE(nsAttrChildContentList, nsINodeList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsAttrChildContentList)
 NS_INTERFACE_MAP_END
 
@@ -700,7 +695,7 @@ FragmentOrElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback& aCb)
   aCb.NoteXPCOMChild(mAttributeMap.get());
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCb, "mSlots->mChildrenList");
-  aCb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIDOMNodeList*, mChildrenList));
+  aCb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsINodeList*, mChildrenList));
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCb, "mSlots->mClassList");
   aCb.NoteXPCOMChild(mClassList.get());
@@ -790,7 +785,7 @@ FragmentOrElement::nsExtendedDOMSlots::Traverse(nsCycleCollectionTraversalCallba
   aCb.NoteXPCOMChild(mControllers);
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCb, "mExtendedSlots->mLabelsList");
-  aCb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIDOMNodeList*, mLabelsList));
+  aCb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsINodeList*, mLabelsList));
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCb, "mExtendedSlots->mShadowRoot");
   aCb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIContent*, mShadowRoot));
@@ -819,8 +814,8 @@ FragmentOrElement::FragmentOrElement(already_AddRefed<mozilla::dom::NodeInfo>&& 
 
 FragmentOrElement::~FragmentOrElement()
 {
-  NS_PRECONDITION(!IsInUncomposedDoc(),
-                  "Please remove this from the document properly");
+  MOZ_ASSERT(!IsInUncomposedDoc(),
+             "Please remove this from the document properly");
   if (GetParent()) {
     NS_RELEASE(mParent);
   }
@@ -1096,7 +1091,11 @@ nsIContent::GetEventTargetParent(EventChainPreVisitor& aVisitor)
             // point to a node in Shadow DOM.
             aVisitor.mEvent->mTarget = aVisitor.mTargetInKnownToBeHandledScope;
             return;
-          } else {
+          } else if (targetInKnownToBeHandledScope) {
+            // Note, if targetInKnownToBeHandledScope is null,
+            // mTargetInKnownToBeHandledScope could be Window object in content
+            // page and we're in chrome document in the same process.
+
             // Step 11.6
             aVisitor.mRetargetedRelatedTarget = retargetedRelatedTarget;
           }
@@ -1188,7 +1187,7 @@ FragmentOrElement::InsertChildBefore(nsIContent* aKid,
                                      nsIContent* aBeforeThis,
                                      bool aNotify)
 {
-  NS_PRECONDITION(aKid, "null ptr");
+  MOZ_ASSERT(aKid, "null ptr");
 
   int32_t index = aBeforeThis ? ComputeIndexOf(aBeforeThis) : GetChildCount();
   MOZ_ASSERT(index >= 0);
@@ -1201,7 +1200,7 @@ FragmentOrElement::InsertChildAt_Deprecated(nsIContent* aKid,
                                             uint32_t aIndex,
                                             bool aNotify)
 {
-  NS_PRECONDITION(aKid, "null ptr");
+  MOZ_ASSERT(aKid, "null ptr");
 
   return doInsertChildAt(aKid, aIndex, aNotify, mAttrsAndChildren);
 }
@@ -1552,7 +1551,7 @@ FragmentOrElement::RemoveBlackMarkedNode(nsINode* aNode)
 static bool
 IsCertainlyAliveNode(nsINode* aNode, nsIDocument* aDoc)
 {
-  MOZ_ASSERT(aNode->GetUncomposedDoc() == aDoc);
+  MOZ_ASSERT(aNode->GetComposedDoc() == aDoc);
 
   // Marked to be in-CC-generation or if the document is an svg image that's
   // being kept alive by the image cache. (Note that an svg image's internal
@@ -1574,9 +1573,7 @@ FragmentOrElement::CanSkipInCC(nsINode* aNode)
     return false;
   }
 
-  //XXXsmaug Need to figure out in which cases Shadow DOM can be optimized out
-  //         from the CC graph.
-  nsIDocument* currentDoc = aNode->GetUncomposedDoc();
+  nsIDocument* currentDoc = aNode->GetComposedDoc();
   if (currentDoc && IsCertainlyAliveNode(aNode, currentDoc)) {
     return !NeedsScriptTraverse(aNode);
   }
@@ -1753,7 +1750,7 @@ FragmentOrElement::CanSkip(nsINode* aNode, bool aRemovingAllowed)
   }
 
   bool unoptimizable = aNode->UnoptimizableCCNode();
-  nsIDocument* currentDoc = aNode->GetUncomposedDoc();
+  nsIDocument* currentDoc = aNode->GetComposedDoc();
   if (currentDoc && IsCertainlyAliveNode(aNode, currentDoc) &&
       (!unoptimizable || NodeHasActiveFrame(currentDoc, aNode) ||
        OwnedByBindingManager(currentDoc, aNode))) {
@@ -1881,7 +1878,7 @@ FragmentOrElement::CanSkipThis(nsINode* aNode)
   if (aNode->HasKnownLiveWrapper()) {
     return true;
   }
-  nsIDocument* c = aNode->GetUncomposedDoc();
+  nsIDocument* c = aNode->GetComposedDoc();
   return
     ((c && IsCertainlyAliveNode(aNode, c)) || aNode->InCCBlackTree()) &&
     !NeedsScriptTraverse(aNode);
@@ -2282,7 +2279,7 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
   target->FireNodeRemovedForChildren();
 
   // Needed when innerHTML is used in combination with contenteditable
-  mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, true);
+  mozAutoDocUpdate updateBatch(doc, true);
 
   // Remove childnodes.
   nsAutoMutationBatch mb(target, true, false);
@@ -2345,13 +2342,11 @@ FragmentOrElement::FireNodeRemovedForChildren()
     return;
   }
 
-  nsCOMPtr<nsIDocument> owningDoc = doc;
-
   nsCOMPtr<nsINode> child;
   for (child = GetFirstChild();
        child && child->GetParentNode() == this;
        child = child->GetNextSibling()) {
-    nsContentUtils::MaybeFireNodeRemoved(child, this, doc);
+    nsContentUtils::MaybeFireNodeRemoved(child, this);
   }
 }
 

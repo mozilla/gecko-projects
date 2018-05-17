@@ -390,14 +390,10 @@ class MachCommands(MachCommandBase):
 class TaskClusterImagesProvider(MachCommandBase):
     def _ensure_zstd(self):
         try:
-            import zstd
-            # There are two zstd libraries that exist in the wild, ensure we
-            # have the right one.
-            zstd.ZstdCompressor
-            zstd.ZstdDecompressor
+            import zstandard  # noqa: F401
         except (ImportError, AttributeError):
             self._activate_virtualenv()
-            self.virtualenv_manager.install_pip_package('zstandard==0.8.1')
+            self.virtualenv_manager.install_pip_package('zstandard==0.9.0')
 
     @Command('taskcluster-load-image', category="ci",
              description="Load a pre-built Docker image")
@@ -458,7 +454,7 @@ class TaskClusterPartialsData(object):
              description="Query balrog for release history used by enable partials generation")
     @CommandArgument('-b', '--branch',
                      help="The gecko project branch used in balrog, such as "
-                          "mozilla-central, release, date")
+                          "mozilla-central, release, maple")
     @CommandArgument('--product', default='Firefox',
                      help="The product identifier, such as 'Firefox'")
     def generate_partials_builds(self, product, branch):

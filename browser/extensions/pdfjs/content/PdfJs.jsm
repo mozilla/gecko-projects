@@ -127,7 +127,7 @@ Factory.prototype = {
 };
 
 var PdfJs = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
   _registered: false,
   _initialized: false,
 
@@ -304,6 +304,7 @@ var PdfJs = {
 
     this.updateRegistration();
     let jsm = "resource://pdf.js/PdfjsChromeUtils.jsm";
+    // eslint-disable-next-line no-shadow
     let PdfjsChromeUtils = ChromeUtils.import(jsm, {}).PdfjsChromeUtils;
     PdfjsChromeUtils.notifyChildOfSettingsChange(this.enabled);
   },

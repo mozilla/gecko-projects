@@ -20,7 +20,6 @@
 #include "nsError.h"
 #include "nsIClipboard.h"
 #include "nsIContent.h"
-#include "nsIDOMEvent.h"
 #include "nsIDocument.h"
 #include "nsIDragService.h"
 #include "nsIDragSession.h"
@@ -83,15 +82,24 @@ TextEditor::InsertTextAt(const nsAString& aStringToInsert,
       // Use an auto tracker so that our drop point is correctly
       // positioned after the delete.
       AutoTrackDOMPoint tracker(mRangeUpdater, &targetNode, &targetOffset);
-      nsresult rv = DeleteSelection(eNone, eStrip);
-      NS_ENSURE_SUCCESS(rv, rv);
+      nsresult rv = DeleteSelectionAsAction(eNone, eStrip);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
 
-    nsresult rv = selection->Collapse(targetNode, targetOffset);
-    NS_ENSURE_SUCCESS(rv, rv);
+    ErrorResult error;
+    selection->Collapse(RawRangeBoundary(targetNode, targetOffset), error);
+    if (NS_WARN_IF(error.Failed())) {
+      return error.StealNSResult();
+    }
   }
 
-  return InsertText(aStringToInsert);
+  nsresult rv = InsertTextAsAction(aStringToInsert);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 nsresult
@@ -209,7 +217,7 @@ TextEditor::InsertFromDrop(DragEvent* aDropEvent)
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
-  bool isCollapsed = selection->Collapsed();
+  bool isCollapsed = selection->IsCollapsed();
 
   // Check if mouse is in the selection
   // if so, jump through some hoops to determine if mouse is over selection (bail)

@@ -18,10 +18,7 @@
 #include "TreeWalker.h"
 
 #include "mozilla/dom/HTMLTableElement.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMRange.h"
-#include "nsISelectionPrivate.h"
-#include "nsIDOMNodeList.h"
 #include "nsIHTMLCollection.h"
 #include "nsIDocument.h"
 #include "nsIMutableArray.h"
@@ -56,7 +53,7 @@ HTMLTableCellAccessible::
 // HTMLTableCellAccessible: Accessible implementation
 
 role
-HTMLTableCellAccessible::NativeRole()
+HTMLTableCellAccessible::NativeRole() const
 {
   if (mContent->IsMathMLElement(nsGkAtoms::mtd_)) {
     return roles::MATHML_CELL;
@@ -65,7 +62,7 @@ HTMLTableCellAccessible::NativeRole()
 }
 
 uint64_t
-HTMLTableCellAccessible::NativeState()
+HTMLTableCellAccessible::NativeState() const
 {
   uint64_t state = HyperTextAccessibleWrap::NativeState();
 
@@ -307,7 +304,7 @@ HTMLTableHeaderCellAccessible::
 // HTMLTableHeaderCellAccessible: Accessible implementation
 
 role
-HTMLTableHeaderCellAccessible::NativeRole()
+HTMLTableHeaderCellAccessible::NativeRole() const
 {
   // Check value of @scope attribute.
   static Element::AttrValuesArray scopeValues[] =
@@ -356,7 +353,7 @@ HTMLTableHeaderCellAccessible::NativeRole()
 ////////////////////////////////////////////////////////////////////////////////
 
 role
-HTMLTableRowAccessible::NativeRole()
+HTMLTableRowAccessible::NativeRole() const
 {
   if (mContent->IsMathMLElement(nsGkAtoms::mtr_)) {
     return roles::MATHML_TABLE_ROW;
@@ -398,7 +395,7 @@ HTMLTableAccessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
 }
 
 role
-HTMLTableAccessible::NativeRole()
+HTMLTableAccessible::NativeRole() const
 {
   if (mContent->IsMathMLElement(nsGkAtoms::mtable_)) {
     return roles::MATHML_TABLE;
@@ -407,13 +404,13 @@ HTMLTableAccessible::NativeRole()
 }
 
 uint64_t
-HTMLTableAccessible::NativeState()
+HTMLTableAccessible::NativeState() const
 {
   return Accessible::NativeState() | states::READONLY;
 }
 
 ENameValueFlag
-HTMLTableAccessible::NativeName(nsString& aName)
+HTMLTableAccessible::NativeName(nsString& aName) const
 {
   ENameValueFlag nameFlag = Accessible::NativeName(aName);
   if (!aName.IsEmpty())
@@ -458,7 +455,7 @@ HTMLTableAccessible::NativeAttributes()
 // HTMLTableAccessible: Accessible
 
 Relation
-HTMLTableAccessible::RelationByType(RelationType aType)
+HTMLTableAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
   if (aType == RelationType::LABELLED_BY)
@@ -487,7 +484,7 @@ HTMLTableAccessible::Summary(nsString& aSummary)
 }
 
 uint32_t
-HTMLTableAccessible::ColCount()
+HTMLTableAccessible::ColCount() const
 {
   nsTableWrapperFrame* tableFrame = do_QueryFrame(mContent->GetPrimaryFrame());
   return tableFrame ? tableFrame->GetColCount() : 0;
@@ -736,48 +733,40 @@ void
 HTMLTableAccessible::SelectRow(uint32_t aRowIdx)
 {
   DebugOnly<nsresult> rv =
-    RemoveRowsOrColumnsFromSelection(aRowIdx,
-                                     nsISelectionPrivate::TABLESELECTION_ROW,
-                                     true);
+    RemoveRowsOrColumnsFromSelection(aRowIdx, TableSelection::Row, true);
   NS_ASSERTION(NS_SUCCEEDED(rv),
                "RemoveRowsOrColumnsFromSelection() Shouldn't fail!");
 
-  AddRowOrColumnToSelection(aRowIdx, nsISelectionPrivate::TABLESELECTION_ROW);
+  AddRowOrColumnToSelection(aRowIdx, TableSelection::Row);
 }
 
 void
 HTMLTableAccessible::SelectCol(uint32_t aColIdx)
 {
   DebugOnly<nsresult> rv =
-    RemoveRowsOrColumnsFromSelection(aColIdx,
-                                     nsISelectionPrivate::TABLESELECTION_COLUMN,
-                                     true);
+    RemoveRowsOrColumnsFromSelection(aColIdx, TableSelection::Column, true);
   NS_ASSERTION(NS_SUCCEEDED(rv),
                "RemoveRowsOrColumnsFromSelection() Shouldn't fail!");
 
-  AddRowOrColumnToSelection(aColIdx, nsISelectionPrivate::TABLESELECTION_COLUMN);
+  AddRowOrColumnToSelection(aColIdx, TableSelection::Column);
 }
 
 void
 HTMLTableAccessible::UnselectRow(uint32_t aRowIdx)
 {
-  RemoveRowsOrColumnsFromSelection(aRowIdx,
-                                   nsISelectionPrivate::TABLESELECTION_ROW,
-                                   false);
+  RemoveRowsOrColumnsFromSelection(aRowIdx, TableSelection::Row, false);
 }
 
 void
 HTMLTableAccessible::UnselectCol(uint32_t aColIdx)
 {
-  RemoveRowsOrColumnsFromSelection(aColIdx,
-                                   nsISelectionPrivate::TABLESELECTION_COLUMN,
-                                   false);
+  RemoveRowsOrColumnsFromSelection(aColIdx, TableSelection::Column, false);
 }
 
 nsresult
-HTMLTableAccessible::AddRowOrColumnToSelection(int32_t aIndex, uint32_t aTarget)
+HTMLTableAccessible::AddRowOrColumnToSelection(int32_t aIndex, TableSelection aTarget)
 {
-  bool doSelectRow = (aTarget == nsISelectionPrivate::TABLESELECTION_ROW);
+  bool doSelectRow = (aTarget == TableSelection::Row);
 
   nsTableWrapperFrame* tableFrame = do_QueryFrame(mContent->GetPrimaryFrame());
   if (!tableFrame)
@@ -808,7 +797,7 @@ HTMLTableAccessible::AddRowOrColumnToSelection(int32_t aIndex, uint32_t aTarget)
 
 nsresult
 HTMLTableAccessible::RemoveRowsOrColumnsFromSelection(int32_t aIndex,
-                                                      uint32_t aTarget,
+                                                      TableSelection aTarget,
                                                       bool aIsOuter)
 {
   nsTableWrapperFrame* tableFrame = do_QueryFrame(mContent->GetPrimaryFrame());
@@ -819,7 +808,7 @@ HTMLTableAccessible::RemoveRowsOrColumnsFromSelection(int32_t aIndex,
   RefPtr<nsFrameSelection> tableSelection =
     const_cast<nsFrameSelection*>(presShell->ConstFrameSelection());
 
-  bool doUnselectRow = (aTarget == nsISelectionPrivate::TABLESELECTION_ROW);
+  bool doUnselectRow = (aTarget == TableSelection::Row);
   uint32_t count = doUnselectRow ? ColCount() : RowCount();
 
   int32_t startRowIdx = doUnselectRow ? aIndex : 0;
@@ -1115,7 +1104,7 @@ HTMLTableAccessible::IsProbablyLayoutTable()
 ////////////////////////////////////////////////////////////////////////////////
 
 Relation
-HTMLCaptionAccessible::RelationByType(RelationType aType)
+HTMLCaptionAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = HyperTextAccessible::RelationByType(aType);
   if (aType == RelationType::LABEL_FOR)
@@ -1125,7 +1114,7 @@ HTMLCaptionAccessible::RelationByType(RelationType aType)
 }
 
 role
-HTMLCaptionAccessible::NativeRole()
+HTMLCaptionAccessible::NativeRole() const
 {
   return roles::CAPTION;
 }

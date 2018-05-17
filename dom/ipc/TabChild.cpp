@@ -20,6 +20,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/DataTransfer.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/dom/MessageManagerBinding.h"
 #include "mozilla/dom/MouseEventBinding.h"
@@ -69,8 +70,6 @@
 #include "nsIDocumentInlines.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDOMChromeWindow.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsFocusManager.h"
@@ -202,9 +201,8 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(TabChildBase)
 already_AddRefed<nsIDocument>
 TabChildBase::GetDocument() const
 {
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  WebNavigation()->GetDocument(getter_AddRefs(domDoc));
-  nsCOMPtr<nsIDocument> doc(do_QueryInterface(domDoc));
+  nsCOMPtr<nsIDocument> doc;
+  WebNavigation()->GetDocument(getter_AddRefs(doc));
   return doc.forget();
 }
 
@@ -282,10 +280,10 @@ TabChildBase::ProcessUpdateFrame(const FrameMetrics& aFrameMetrics)
 }
 
 NS_IMETHODIMP
-ContentListener::HandleEvent(nsIDOMEvent* aEvent)
+ContentListener::HandleEvent(Event* aEvent)
 {
   RemoteDOMEvent remoteEvent;
-  remoteEvent.mEvent = do_QueryInterface(aEvent);
+  remoteEvent.mEvent = aEvent;
   NS_ENSURE_STATE(remoteEvent.mEvent);
   mTabChild->SendEvent(remoteEvent);
   return NS_OK;
@@ -2684,7 +2682,7 @@ TabChild::RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNaviga
 {
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    nsCOMPtr<nsIDOMElement> result;
+    RefPtr<Element> result;
     nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
 
     // Move to the first or last document.
@@ -3124,7 +3122,7 @@ TabChild::GetFrom(layers::LayersId aLayersId)
 }
 
 void
-TabChild::DidComposite(uint64_t aTransactionId,
+TabChild::DidComposite(mozilla::layers::TransactionId aTransactionId,
                        const TimeStamp& aCompositeStart,
                        const TimeStamp& aCompositeEnd)
 {

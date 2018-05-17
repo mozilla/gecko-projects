@@ -145,8 +145,8 @@ enum : uint32_t {
     /* Whether any objects have been iterated over. */
     OBJECT_FLAG_ITERATED              = 0x00080000,
 
-    /* Whether any object this represents may have frozen elements. */
-    OBJECT_FLAG_FROZEN_ELEMENTS       = 0x00100000,
+    /* Whether any object this represents may have non-extensible elements. */
+    OBJECT_FLAG_NON_EXTENSIBLE_ELEMENTS = 0x00100000,
 
     /*
      * For the function on a run-once script, whether the function has actually
@@ -656,17 +656,51 @@ class AutoClearTypeInferenceStateOnOOM
     }
 };
 
-// Assert no sweeping of TI data (ObjectGroup::sweep, JSScript::maybeSweepTypes)
-// happens in this scope.
-class MOZ_RAII AutoAssertNoTISweeping
+class MOZ_RAII AutoSweepBase
 {
-    TypeZone& zone_;
-    bool prev_;
-    JS::AutoCheckCannotGC nogc_;
+    // Make sure we don't GC while this class is live since GC might trigger
+    // (incremental) sweeping.
+    JS::AutoCheckCannotGC nogc;
+};
+
+// Sweep an ObjectGroup. Functions that expect a swept group should take a
+// reference to this class.
+class MOZ_RAII AutoSweepObjectGroup : public AutoSweepBase
+{
+#ifdef DEBUG
+    ObjectGroup* group_;
+#endif
 
   public:
-    explicit AutoAssertNoTISweeping(TypeZone& zone);
-    ~AutoAssertNoTISweeping();
+    inline explicit AutoSweepObjectGroup(ObjectGroup* group,
+                                         AutoClearTypeInferenceStateOnOOM* oom = nullptr);
+#ifdef DEBUG
+    inline ~AutoSweepObjectGroup();
+
+    ObjectGroup* group() const {
+        return group_;
+    }
+#endif
+};
+
+// Sweep a TypeScript. Functions that expect a swept script should take a
+// reference to this class.
+class MOZ_RAII AutoSweepTypeScript : public AutoSweepBase
+{
+#ifdef DEBUG
+    JSScript* script_;
+#endif
+
+  public:
+    inline explicit AutoSweepTypeScript(JSScript* script,
+                                        AutoClearTypeInferenceStateOnOOM* oom = nullptr);
+#ifdef DEBUG
+    inline ~AutoSweepTypeScript();
+
+    JSScript* script() const {
+        return script_;
+    }
+#endif
 };
 
 /* Superclass common to stack and heap type sets. */
@@ -703,7 +737,9 @@ class ConstraintTypeSet : public TypeSet
 #endif
     }
 
-    TypeConstraint* constraintList(const AutoAssertNoTISweeping&) const {
+    // This takes a reference to AutoSweepBase to ensure we swept the owning
+    // ObjectGroup or TypeScript.
+    TypeConstraint* constraintList(const AutoSweepBase& sweep) const {
         checkMagic();
         if (constraintList_)
             constraintList_->checkMagic();
@@ -721,11 +757,11 @@ class ConstraintTypeSet : public TypeSet
      * Add a type to this set, calling any constraint handlers if this is a new
      * possible type.
      */
-    void addType(JSContext* cx, Type type);
+    void addType(const AutoSweepBase& sweep, JSContext* cx, Type type);
 
     /* Generalize to any type. */
-    void makeUnknown(JSContext* cx) {
-        addType(cx, UnknownType());
+    void makeUnknown(const AutoSweepBase& sweep, JSContext* cx) {
+        addType(sweep, cx, UnknownType());
     }
 
     // Trigger a post barrier when writing to this set, if necessary.
@@ -735,7 +771,8 @@ class ConstraintTypeSet : public TypeSet
     /* Add a new constraint to this set. */
     bool addConstraint(JSContext* cx, TypeConstraint* constraint, bool callExisting = true);
 
-    inline void sweep(JS::Zone* zone, AutoClearTypeInferenceStateOnOOM& oom);
+    inline void sweep(const AutoSweepBase& sweep, JS::Zone* zone,
+                      AutoClearTypeInferenceStateOnOOM& oom);
     inline void trace(JS::Zone* zone, JSTracer* trc);
 };
 
@@ -746,17 +783,17 @@ class StackTypeSet : public ConstraintTypeSet
 
 class HeapTypeSet : public ConstraintTypeSet
 {
-    inline void newPropertyState(JSContext* cx);
+    inline void newPropertyState(const AutoSweepObjectGroup& sweep, JSContext* cx);
 
   public:
     /* Mark this type set as representing a non-data property. */
-    inline void setNonDataProperty(JSContext* cx);
+    inline void setNonDataProperty(const AutoSweepObjectGroup& sweep, JSContext* cx);
 
     /* Mark this type set as representing a non-writable property. */
-    inline void setNonWritableProperty(JSContext* cx);
+    inline void setNonWritableProperty(const AutoSweepObjectGroup& sweep, JSContext* cx);
 
     // Mark this type set as being non-constant.
-    inline void setNonConstantProperty(JSContext* cx);
+    inline void setNonConstantProperty(const AutoSweepObjectGroup& sweep, JSContext* cx);
 };
 
 CompilerConstraintList*
@@ -1298,10 +1335,10 @@ FinishDefinitePropertiesAnalysis(JSContext* cx, CompilerConstraintList* constrai
 
 // Representation of a heap type property which may or may not be instantiated.
 // Heap properties for singleton types are instantiated lazily as they are used
-// by the compiler, but this is only done on the active thread. If we are
+// by the compiler, but this is only done on the main thread. If we are
 // compiling off thread and use a property which has not yet been instantiated,
 // it will be treated as empty and non-configured and will be instantiated when
-// rejoining to the active thread. If it is in fact not empty, the compilation
+// rejoining to the main thread. If it is in fact not empty, the compilation
 // will fail; to avoid this, we try to instantiate singleton property types
 // during generation of baseline caches.
 class HeapTypeSetKey
@@ -1374,8 +1411,6 @@ class TypeZone
     ZoneData<bool> sweepingTypes;
 
     ZoneData<bool> keepTypeScripts;
-
-    ZoneData<bool> assertNoTISweeping;
 
     // The topmost AutoEnterAnalysis on the stack, if there is one.
     ZoneData<AutoEnterAnalysis*> activeAnalysis;

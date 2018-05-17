@@ -170,7 +170,7 @@ nsXBLContentSink::ReportError(const char16_t* aErrorText,
                               nsIScriptError *aError,
                               bool *_retval)
 {
-  NS_PRECONDITION(aError && aSourceText && aErrorText, "Check arguments!!!");
+  MOZ_ASSERT(aError && aSourceText && aErrorText, "Check arguments!!!");
 
   // XXX FIXME This function overrides and calls on
   // nsXMLContentSink::ReportError, and probably should die.  See bug 347826.
@@ -874,7 +874,7 @@ nsXBLContentSink::CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
   AddAttributesToXULPrototype(aAtts, aAttsCount, prototype);
 
   Element* result;
-  nsresult rv = nsXULElement::Create(prototype, mDocument, false, false, &result);
+  nsresult rv = nsXULElement::CreateFromPrototype(prototype, mDocument, false, false, &result);
   *aResult = result;
   return rv;
 #endif

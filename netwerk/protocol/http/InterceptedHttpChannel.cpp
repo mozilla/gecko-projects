@@ -1084,10 +1084,7 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest,
   mIsPending = false;
 
   // Register entry to the PerformanceStorage resource timing
-  mozilla::dom::PerformanceStorage* performanceStorage = GetPerformanceStorage();
-  if (performanceStorage) {
-    performanceStorage->AddEntry(this, this);
-  }
+  MaybeReportTimingData();
 
   if (mListener) {
     mListener->OnStopRequest(this, mListenerContext, mStatus);
@@ -1321,10 +1318,10 @@ InterceptedHttpChannel::GetAlternativeDataType(nsACString & aType)
 }
 
 NS_IMETHODIMP
-InterceptedHttpChannel::OpenAlternativeOutputStream(const nsACString & type, nsIOutputStream * *_retval)
+InterceptedHttpChannel::OpenAlternativeOutputStream(const nsACString & type, int64_t predictedSize, nsIOutputStream * *_retval)
 {
   if (mSynthesizedCacheInfo) {
-    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(type, _retval);
+    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(type, predictedSize, _retval);
   }
   return NS_ERROR_NOT_AVAILABLE;
 }

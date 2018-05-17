@@ -151,13 +151,6 @@ impl GpuCacheAddress {
             v: u16::MAX,
         }
     }
-
-    pub fn offset(&self, offset: usize) -> Self {
-        GpuCacheAddress {
-            u: self.u + offset as u16,
-            v: self.v
-        }
-    }
 }
 
 impl Add<usize> for GpuCacheAddress {
@@ -558,7 +551,10 @@ impl GpuCache {
     pub fn invalidate(&mut self, handle: &GpuCacheHandle) {
         if let Some(ref location) = handle.location {
             let block = &mut self.texture.blocks[location.block_index.0];
-            block.epoch.next();
+            // don't invalidate blocks that are already re-assigned
+            if block.epoch == location.epoch {
+                block.epoch.next();
+            }
         }
     }
 

@@ -106,8 +106,6 @@ var EXPORTED_SYMBOLS = [
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.defineModuleGetter(this, "AppConstants",
-  "resource://gre/modules/AppConstants.jsm");
 ChromeUtils.defineModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
 
@@ -856,7 +854,7 @@ var PanelMultiView = class extends AssociatedToNode {
     this._viewContainer.style.height = prevPanelView.knownHeight + "px";
     this._viewContainer.style.width = prevPanelView.knownWidth + "px";
     // Lock the dimensions of the window that hosts the popup panel.
-    let rect = this._panel.popupBoxObject.getOuterScreenRect();
+    let rect = this._panel.getOuterScreenRect();
     this._panel.setAttribute("width", rect.width);
     this._panel.setAttribute("height", rect.height);
 
@@ -1366,7 +1364,8 @@ var PanelView = class extends AssociatedToNode {
    * @return {Array}
    */
   getNavigableElements() {
-    let buttons = Array.from(this.node.querySelectorAll(".subviewbutton:not([disabled])"));
+    let buttons = Array.from(this.node.querySelectorAll(
+      ".subviewbutton:not([disabled]), .subviewkeynav:not([disabled])"));
     let dwu = this._dwu;
     return buttons.filter(button => {
       let bounds = dwu.getBoundsWithoutFlushing(button);

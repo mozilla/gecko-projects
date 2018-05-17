@@ -108,7 +108,6 @@
 #include "nsISupportsPrimitives.h"
 #include "nsMemory.h"
 #include "nsIXPConnect.h"
-#include "nsIInterfaceInfo.h"
 #include "nsIXPCScriptable.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
@@ -244,7 +243,7 @@ public:
 
     static XPCJSRuntime* GetRuntimeInstance();
 
-    static bool IsISupportsDescendant(nsIInterfaceInfo* info);
+    static bool IsISupportsDescendant(const nsXPTInterfaceInfo* info);
 
     static nsIScriptSecurityManager* SecurityManager()
     {
@@ -268,8 +267,6 @@ public:
     static void ReleaseXPConnectSingleton();
 
     bool IsShuttingDown() const {return mShuttingDown;}
-
-    nsresult GetInfoForIID(const nsIID * aIID, nsIInterfaceInfo** info);
 
     void RecordTraversal(void* p, nsISupports* s);
 
@@ -334,52 +331,6 @@ MOZ_DEFINE_ENUM(WatchdogTimestampCategory, (
 ));
 
 class AsyncFreeSnowWhite;
-
-template <class StringType>
-class ShortLivedStringBuffer
-{
-public:
-    StringType* Create()
-    {
-        for (uint32_t i = 0; i < ArrayLength(mStrings); ++i) {
-            if (!mStrings[i]) {
-                mStrings[i].emplace();
-                return mStrings[i].ptr();
-            }
-        }
-
-        // All our internal string wrappers are used, allocate a new string.
-        return new StringType();
-    }
-
-    void Destroy(StringType* string)
-    {
-        for (uint32_t i = 0; i < ArrayLength(mStrings); ++i) {
-            if (mStrings[i] && mStrings[i].ptr() == string) {
-                // One of our internal strings is no longer in use, mark
-                // it as such and free its data.
-                mStrings[i].reset();
-                return;
-            }
-        }
-
-        // We're done with a string that's not one of our internal
-        // strings, delete it.
-        delete string;
-    }
-
-    ~ShortLivedStringBuffer()
-    {
-#ifdef DEBUG
-        for (uint32_t i = 0; i < ArrayLength(mStrings); ++i) {
-            MOZ_ASSERT(!mStrings[i], "Short lived string still in use");
-        }
-#endif
-    }
-
-private:
-    mozilla::Maybe<StringType> mStrings[2];
-};
 
 class XPCJSContext final : public mozilla::CycleCollectedJSContext
                          , public mozilla::LinkedListElement<XPCJSContext>
@@ -472,9 +423,6 @@ public:
 
     inline JS::HandleId GetStringID(unsigned index) const;
     inline const char* GetStringName(unsigned index) const;
-
-    ShortLivedStringBuffer<nsString> mScratchStrings;
-    ShortLivedStringBuffer<nsCString> mScratchCStrings;
 
 private:
     XPCJSContext();
@@ -634,6 +582,8 @@ public:
 
     void InitSingletonScopes();
     void DeleteSingletonScopes();
+
+    void SystemIsBeingShutDown();
 
 private:
     explicit XPCJSRuntime(JSContext* aCx);
@@ -834,8 +784,7 @@ private:
 // visibility from more than one .cpp file.
 
 extern const js::Class XPC_WN_NoHelper_JSClass;
-extern const js::Class XPC_WN_NoMods_Proto_JSClass;
-extern const js::Class XPC_WN_ModsAllowed_Proto_JSClass;
+extern const js::Class XPC_WN_Proto_JSClass;
 extern const js::Class XPC_WN_Tearoff_JSClass;
 #define XPC_WN_TEAROFF_RESERVED_SLOTS 1
 #define XPC_WN_TEAROFF_FLAT_OBJECT_SLOT 0
@@ -846,15 +795,6 @@ XPC_WN_CallMethod(JSContext* cx, unsigned argc, JS::Value* vp);
 
 extern bool
 XPC_WN_GetterSetter(JSContext* cx, unsigned argc, JS::Value* vp);
-
-// Maybe this macro should check for class->enumerate ==
-// XPC_WN_Shared_Proto_Enumerate or something rather than checking for
-// 4 classes?
-static inline bool IS_PROTO_CLASS(const js::Class* clazz)
-{
-    return clazz == &XPC_WN_NoMods_Proto_JSClass ||
-           clazz == &XPC_WN_ModsAllowed_Proto_JSClass;
-}
 
 /***************************************************************************/
 // XPCWrappedNativeScope is one-to-one with a JS global object.
@@ -1142,12 +1082,12 @@ class XPCNativeInterface final
                                             DestroyInstance(this))
 
     static already_AddRefed<XPCNativeInterface> GetNewOrUsed(const nsIID* iid);
-    static already_AddRefed<XPCNativeInterface> GetNewOrUsed(nsIInterfaceInfo* info);
+    static already_AddRefed<XPCNativeInterface> GetNewOrUsed(const nsXPTInterfaceInfo* info);
     static already_AddRefed<XPCNativeInterface> GetNewOrUsed(const char* name);
     static already_AddRefed<XPCNativeInterface> GetISupports();
 
-    inline nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo.get();}
-    inline jsid              GetName()          const {return mName;}
+    inline const nsXPTInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
+    inline jsid                      GetName()          const {return mName;}
 
     inline const nsIID* GetIID() const;
     inline const char*  GetNameString() const;
@@ -1169,10 +1109,10 @@ class XPCNativeInterface final
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
   protected:
-    static already_AddRefed<XPCNativeInterface> NewInstance(nsIInterfaceInfo* aInfo);
+    static already_AddRefed<XPCNativeInterface> NewInstance(const nsXPTInterfaceInfo* aInfo);
 
     XPCNativeInterface() = delete;
-    XPCNativeInterface(nsIInterfaceInfo* aInfo, jsid aName)
+    XPCNativeInterface(const nsXPTInterfaceInfo* aInfo, jsid aName)
       : mInfo(aInfo), mName(aName), mMemberCount(0)
     {}
     ~XPCNativeInterface();
@@ -1185,7 +1125,7 @@ class XPCNativeInterface final
     static void DestroyInstance(XPCNativeInterface* inst);
 
 private:
-    nsCOMPtr<nsIInterfaceInfo> mInfo;
+    const nsXPTInterfaceInfo*  mInfo;
     jsid                       mName;
     uint16_t                   mMemberCount;
     XPCNativeMember            mMembers[1]; // always last - object sized for array
@@ -1327,8 +1267,7 @@ public:
     static XPCWrappedNativeProto*
     GetNewOrUsed(XPCWrappedNativeScope* scope,
                  nsIClassInfo* classInfo,
-                 nsIXPCScriptable* scriptable,
-                 bool callPostCreatePrototype = true);
+                 nsIXPCScriptable* scriptable);
 
     XPCWrappedNativeScope*
     GetScope()   const {return mScope;}
@@ -1351,7 +1290,6 @@ public:
     nsIXPCScriptable*
     GetScriptable() const { return mScriptable; }
 
-    bool CallPostCreatePrototype();
     void JSProtoObjectFinalized(js::FreeOp* fop, JSObject* obj);
     void JSProtoObjectMoved(JSObject* obj, const JSObject* old);
 
@@ -1395,7 +1333,7 @@ protected:
                           nsIClassInfo* ClassInfo,
                           already_AddRefed<XPCNativeSet>&& Set);
 
-    bool Init(nsIXPCScriptable* scriptable, bool callPostCreatePrototype);
+    bool Init(nsIXPCScriptable* scriptable);
 
 private:
 #ifdef DEBUG
@@ -1755,7 +1693,7 @@ public:
 
     REFNSIID GetIID() const {return mIID;}
     XPCJSRuntime* GetRuntime() const {return mRuntime;}
-    nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
+    const nsXPTInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
     const char* GetInterfaceName();
 
     NS_IMETHOD DelegatedQueryInterface(nsXPCWrappedJS* self, REFNSIID aIID,
@@ -1792,7 +1730,7 @@ private:
 
     nsXPCWrappedJSClass() = delete;
     nsXPCWrappedJSClass(JSContext* cx, REFNSIID aIID,
-                        nsIInterfaceInfo* aInfo);
+                        const nsXPTInterfaceInfo* aInfo);
 
     bool IsReflectable(uint16_t i) const
         {return (bool)(mDescriptors[i/32] & (1 << (i%32)));}
@@ -1800,35 +1738,23 @@ private:
         {if (b) mDescriptors[i/32] |= (1 << (i%32));
          else mDescriptors[i/32] &= ~(1 << (i%32));}
 
-    bool GetArraySizeFromParam(JSContext* cx,
-                               const nsXPTMethodInfo* method,
-                               const nsXPTParamInfo& param,
-                               uint16_t methodIndex,
-                               uint8_t paramIndex,
+    bool GetArraySizeFromParam(const nsXPTMethodInfo* method,
+                               const nsXPTType& type,
                                nsXPTCMiniVariant* params,
                                uint32_t* result) const;
 
-    bool GetInterfaceTypeFromParam(JSContext* cx,
-                                   const nsXPTMethodInfo* method,
-                                   const nsXPTParamInfo& param,
-                                   uint16_t methodIndex,
+    bool GetInterfaceTypeFromParam(const nsXPTMethodInfo* method,
                                    const nsXPTType& type,
                                    nsXPTCMiniVariant* params,
                                    nsID* result) const;
 
-    static void CleanupPointerArray(const nsXPTType& datum_type,
-                                    uint32_t array_count,
-                                    void** arrayp);
-
-    static void CleanupPointerTypeObject(const nsXPTType& type,
-                                         void** pp);
-
-    void CleanupOutparams(JSContext* cx, uint16_t methodIndex, const nsXPTMethodInfo* info,
-                          nsXPTCMiniVariant* nativeParams, bool inOutOnly, uint8_t n) const;
+    void CleanupOutparams(const nsXPTMethodInfo* info,
+                          nsXPTCMiniVariant* nativeParams,
+                          bool inOutOnly, uint8_t n) const;
 
 private:
     XPCJSRuntime* mRuntime;
-    nsCOMPtr<nsIInterfaceInfo> mInfo;
+    const nsXPTInterfaceInfo* mInfo;
     char* mName;
     nsIID mIID;
     uint32_t* mDescriptors;
@@ -2000,11 +1926,13 @@ public:
 
     static bool NativeData2JS(JS::MutableHandleValue d,
                               const void* s, const nsXPTType& type,
-                              const nsID* iid, nsresult* pErr);
+                              const nsID* iid, uint32_t arrlen,
+                              nsresult* pErr);
 
     static bool JSData2Native(void* d, JS::HandleValue s,
                               const nsXPTType& type,
                               const nsID* iid,
+                              uint32_t arrlen,
                               nsresult* pErr);
 
     /**
@@ -2050,7 +1978,7 @@ public:
      * @param scope the default scope to put on the new JSObjects' parent chain
      * @param pErr [out] relevant error code, if any.
      */
-    static bool NativeArray2JS(JS::MutableHandleValue d, const void** s,
+    static bool NativeArray2JS(JS::MutableHandleValue d, const void* const* s,
                                const nsXPTType& type, const nsID* iid,
                                uint32_t count, nsresult* pErr);
 
@@ -2063,15 +1991,6 @@ public:
                                     uint32_t count,
                                     const nsXPTType& type,
                                     nsresult* pErr);
-
-    static bool NativeStringWithSize2JS(JS::MutableHandleValue d, const void* s,
-                                        const nsXPTType& type,
-                                        uint32_t count,
-                                        nsresult* pErr);
-
-    static bool JSStringWithSize2Native(void* d, JS::HandleValue s,
-                                        uint32_t count, const nsXPTType& type,
-                                        nsresult* pErr);
 
     static nsresult JSValToXPCException(JS::MutableHandleValue s,
                                         const char* ifaceName,
@@ -2191,15 +2110,15 @@ public:
     NS_DECL_NSIJSIID
     NS_DECL_NSIXPCSCRIPTABLE
 
-    static already_AddRefed<nsJSIID> NewID(nsIInterfaceInfo* aInfo);
+    static already_AddRefed<nsJSIID> NewID(const nsXPTInterfaceInfo* aInfo);
 
-    explicit nsJSIID(nsIInterfaceInfo* aInfo);
+    explicit nsJSIID(const nsXPTInterfaceInfo* aInfo);
     nsJSIID() = delete;
 
 private:
     virtual ~nsJSIID();
 
-    nsCOMPtr<nsIInterfaceInfo> mInfo;
+    const nsXPTInterfaceInfo* mInfo;
 };
 
 // nsJSCID
@@ -2328,7 +2247,7 @@ private:
     JSContext* mJSContext;
     mozilla::Maybe<JS::AutoSaveExceptionState> mState;
     bool mEvaluated;
-    mozilla::Maybe<JSAutoCompartment> mAutoCompartment;
+    mozilla::Maybe<JSAutoRealm> mAutoRealm;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
     // No copying or assignment allowed
@@ -2615,6 +2534,9 @@ struct GlobalProperties {
     bool CSS : 1;
     bool CSSRule : 1;
     bool Directory : 1;
+    bool DOMParser : 1;
+    bool Element : 1;
+    bool Event : 1;
     bool File : 1;
     bool FileReader: 1;
     bool FormData : 1;
@@ -3033,6 +2955,8 @@ public:
     JSObject2WrappedJSMap* GetWrappedJSMap() const { return mWrappedJSMap; }
     void UpdateWeakPointersAfterGC();
 
+    void SystemIsBeingShutDown();
+
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
 private:
@@ -3104,6 +3028,39 @@ bool IsOutObject(JSContext* cx, JSObject* obj);
 nsresult HasInstance(JSContext* cx, JS::HandleObject objArg, const nsID* iid, bool* bp);
 
 nsIPrincipal* GetObjectPrincipal(JSObject* obj);
+
+// Attempt to clean up the passed in value pointer. The pointer `value` must be
+// a pointer to a value described by the type `nsXPTType`.
+//
+// This method expects a value of the following types:
+//   TD_PNSIID
+//     value : nsID* (free)
+//   TD_DOMSTRING, TD_ASTRING, TD_CSTRING, TD_UTF8STRING
+//     value : ns[C]String* (truncate)
+//   TD_PSTRING, TD_PWSTRING, TD_PSTRING_SIZE_IS, TD_PWSTRING_SIZE_IS
+//     value : char[16_t]** (free)
+//   TD_INTERFACE_TYPE, TD_INTERFACE_IS_TYPE
+//     value : nsISupports** (release)
+//   TD_ARRAY (NOTE: aArrayLen should be passed)
+//     value : void** (cleanup elements & free)
+//   TD_DOMOBJECT
+//     value : T** (cleanup)
+//   TD_PROMISE
+//     value : dom::Promise** (release)
+//
+// Other types are ignored.
+//
+// Custom behaviour may be desired in some situations:
+//  - This method Truncate()s nsStrings, it does not free them.
+//  - This method does not unroot JSValues.
+inline void CleanupValue(const nsXPTType& aType,
+                         void* aValue,
+                         uint32_t aArrayLen = 0);
+
+// Out-of-line internals for xpc::CleanupValue. Defined in XPCConvert.cpp.
+void InnerCleanupValue(const nsXPTType& aType,
+                       void* aValue,
+                       uint32_t aArrayLen);
 
 } // namespace xpc
 

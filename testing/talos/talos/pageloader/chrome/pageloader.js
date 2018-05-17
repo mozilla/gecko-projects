@@ -209,10 +209,11 @@ function plInit() {
         // pages should be able to load in the same mode as the initial page - due
         // to this reinitialization on the switch.
         let remoteType = E10SUtils.getRemoteTypeForURI(pageUrls[0], true);
+        let tabbrowser = browserWindow.gBrowser;
         if (remoteType) {
-          browserWindow.XULBrowserWindow.forceInitialBrowserRemote(remoteType);
+          tabbrowser.updateBrowserRemoteness(tabbrowser.initialBrowser, true, { remoteType });
         } else {
-          browserWindow.XULBrowserWindow.forceInitialBrowserNonRemote(null);
+          tabbrowser.updateBrowserRemoteness(tabbrowser.initialBrowser, false);
         }
 
         browserWindow.resizeTo(winWidth, winHeight);
@@ -237,7 +238,12 @@ function plInit() {
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/tscroll.js", false, true);
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/Profiler.js", false, true);
 
-        setTimeout(plLoadPage, 100);
+        // Ensure that any webextensions that need to do setup have a chance
+        // to do so. e.g. the 'tps' talos test registers a about:tabswitch
+        // handler during initialization, and if we don't wait for that, then
+        // attempting to load that URL will result in an error and hang the
+        // test.
+        setTimeout(plLoadPage, 2000);
       }, 500);
     };
 

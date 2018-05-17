@@ -469,7 +469,7 @@ public:
         RefPtr<gfxFont> mFont; // never null in a valid GlyphRun
         uint32_t        mCharacterOffset; // into original UTF16 string
         mozilla::gfx::ShapedTextFlags mOrientation; // gfxTextRunFactory::TEXT_ORIENT_* value
-        uint8_t         mMatchType;
+        gfxTextRange::MatchType mMatchType;
     };
 
     class MOZ_STACK_CLASS GlyphRunIterator {
@@ -527,7 +527,7 @@ public:
      * are added before any further operations are performed with this
      * TextRun.
      */
-    nsresult AddGlyphRun(gfxFont *aFont, uint8_t aMatchType,
+    nsresult AddGlyphRun(gfxFont *aFont, gfxTextRange::MatchType aMatchType,
                          uint32_t aStartCharIndex, bool aForceNewRun,
                          mozilla::gfx::ShapedTextFlags aOrientation);
     void ResetGlyphRuns()
@@ -957,7 +957,7 @@ public:
 
     gfxFont* FindFontForChar(uint32_t ch, uint32_t prevCh, uint32_t aNextCh,
                              Script aRunScript, gfxFont *aPrevMatchedFont,
-                             uint8_t *aMatchType);
+                             gfxTextRange::MatchType *aMatchType);
 
     gfxUserFontSet* GetUserFontSet();
 
@@ -1025,13 +1025,13 @@ protected:
     class FamilyFace {
     public:
         FamilyFace() : mFamily(nullptr), mFontEntry(nullptr),
-                       mNeedsBold(false), mFontCreated(false),
+                       mFontCreated(false),
                        mLoading(false), mInvalid(false),
                        mCheckForFallbackFaces(false)
         { }
 
         FamilyFace(gfxFontFamily* aFamily, gfxFont* aFont)
-            : mFamily(aFamily), mNeedsBold(false), mFontCreated(true),
+            : mFamily(aFamily), mFontCreated(true),
               mLoading(false), mInvalid(false), mCheckForFallbackFaces(false)
         {
             NS_ASSERTION(aFont, "font pointer must not be null");
@@ -1042,9 +1042,8 @@ protected:
             NS_ADDREF(aFont);
         }
 
-        FamilyFace(gfxFontFamily* aFamily, gfxFontEntry* aFontEntry,
-                   bool aNeedsBold)
-            : mFamily(aFamily), mNeedsBold(aNeedsBold), mFontCreated(false),
+        FamilyFace(gfxFontFamily* aFamily, gfxFontEntry* aFontEntry)
+            : mFamily(aFamily), mFontCreated(false),
               mLoading(false), mInvalid(false), mCheckForFallbackFaces(false)
         {
             NS_ASSERTION(aFontEntry, "font entry pointer must not be null");
@@ -1057,7 +1056,6 @@ protected:
 
         FamilyFace(const FamilyFace& aOtherFamilyFace)
             : mFamily(aOtherFamilyFace.mFamily),
-              mNeedsBold(aOtherFamilyFace.mNeedsBold),
               mFontCreated(aOtherFamilyFace.mFontCreated),
               mLoading(aOtherFamilyFace.mLoading),
               mInvalid(aOtherFamilyFace.mInvalid),
@@ -1090,7 +1088,6 @@ protected:
             }
 
             mFamily = aOther.mFamily;
-            mNeedsBold = aOther.mNeedsBold;
             mFontCreated = aOther.mFontCreated;
             mLoading = aOther.mLoading;
             mInvalid = aOther.mInvalid;
@@ -1115,7 +1112,6 @@ protected:
             return mFontCreated ? mFont->GetFontEntry() : mFontEntry;
         }
 
-        bool NeedsBold() const { return mNeedsBold; }
         bool IsUserFontContainer() const {
             return FontEntry()->mIsUserFontContainer;
         }
@@ -1152,7 +1148,6 @@ protected:
             gfxFont* MOZ_OWNING_REF      mFont;
             gfxFontEntry* MOZ_OWNING_REF mFontEntry;
         };
-        bool                    mNeedsBold   : 1;
         bool                    mFontCreated : 1;
         bool                    mLoading     : 1;
         bool                    mInvalid     : 1;

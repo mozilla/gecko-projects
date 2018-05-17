@@ -15,9 +15,11 @@ function test_getSharingProviders()
   let providers = sharingService.getSharingProviders("http://example.org");
   Assert.ok(providers.length > 1, "There are providers returned");
   providers.forEach(provider => {
-    Assert.ok("title" in provider, "Provider has title");
+    Assert.ok("name" in provider, "Provider has name");
     Assert.ok("menuItemTitle" in provider, "Provider has menuItemTitle");
     Assert.ok("image" in provider, "Provider has image");
+
+    Assert.notEqual(provider.title, "Mail", "Known filtered provider not returned");
   });
 }
 

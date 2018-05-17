@@ -62,6 +62,7 @@
 #include "vm/JSAtom-inl.h"
 #include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
+#include "vm/JSFunction-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/Shape-inl.h"
@@ -473,7 +474,7 @@ js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
     assertSameCompartment(cx, obj);
 
     // Steps 3-5. (Steps 1-2 are redundant assertions.)
-    if (!PreventExtensions(cx, obj, level))
+    if (!PreventExtensions(cx, obj))
         return false;
 
     // Steps 6-9, loosely interpreted.
@@ -521,8 +522,7 @@ js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
         // Ordinarily ArraySetLength handles this, but we're going behind its back
         // right now, so we must do this manually.
         if (level == IntegrityLevel::Frozen && obj->is<ArrayObject>()) {
-            if (!obj->as<ArrayObject>().maybeCopyElementsForWrite(cx))
-                return false;
+            MOZ_ASSERT(!nobj->denseElementsAreCopyOnWrite());
             obj->as<ArrayObject>().setNonWritableLength(cx);
         }
     } else {
@@ -568,11 +568,9 @@ js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
         }
     }
 
-    // Finally, freeze the dense elements.
-    if (level == IntegrityLevel::Frozen && obj->isNative()) {
-        if (!ObjectElements::FreezeElements(cx, obj.as<NativeObject>()))
-            return false;
-    }
+    // Finally, freeze or seal the dense elements.
+    if (obj->isNative())
+        ObjectElements::FreezeOrSeal(cx, &obj->as<NativeObject>(), level);
 
     return true;
 }
@@ -631,10 +629,26 @@ js::TestIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level, bo
             return true;
         }
 
-        // Unless the frozen flag is set, dense elements are configurable.
-        if (nobj->getDenseInitializedLength() > 0 && !nobj->denseElementsAreFrozen()) {
-            *result = false;
-            return true;
+        bool hasDenseElements = false;
+        for (size_t i = 0; i < nobj->getDenseInitializedLength(); i++) {
+            if (nobj->containsDenseElement(i)) {
+                hasDenseElements = true;
+                break;
+            }
+        }
+
+        if (hasDenseElements) {
+            // Unless the sealed flag is set, dense elements are configurable.
+            if (!nobj->denseElementsAreSealed()) {
+                *result = false;
+                return true;
+            }
+
+            // Unless the frozen flag is set, dense elements are writable.
+            if (level == IntegrityLevel::Frozen && !nobj->denseElementsAreFrozen()) {
+                *result = false;
+                return true;
+            }
         }
 
         // Steps 7-9.
@@ -727,7 +741,9 @@ NewObject(JSContext* cx, HandleObjectGroup group, gc::AllocKind kind,
     gc::InitialHeap heap = GetInitialHeap(newKind, clasp);
 
     JSObject* obj;
-    if (MOZ_LIKELY(clasp->isNative())) {
+    if (clasp->isJSFunction()) {
+        JS_TRY_VAR_OR_RETURN_NULL(cx, obj, JSFunction::create(cx, kind, heap, shape, group));
+    } else if (MOZ_LIKELY(clasp->isNative())) {
         JS_TRY_VAR_OR_RETURN_NULL(cx, obj, NativeObject::create(cx, kind, heap, shape, group));
     } else {
         MOZ_ASSERT(IsTypedObjectClass(clasp));
@@ -867,11 +883,16 @@ static bool
 NewObjectWithGroupIsCachable(JSContext* cx, HandleObjectGroup group,
                              NewObjectKind newKind)
 {
-    return group->proto().isObject() &&
-           newKind == GenericObject &&
-           group->clasp()->isNative() &&
-           (!group->newScript() || group->newScript()->analyzed()) &&
-           !cx->helperThread();
+    if (!group->proto().isObject() ||
+        newKind != GenericObject ||
+        !group->clasp()->isNative() ||
+        cx->helperThread())
+    {
+        return false;
+    }
+
+    AutoSweepObjectGroup sweep(group);
+    return !group->newScript(sweep) || group->newScript(sweep)->analyzed();
 }
 
 /*
@@ -949,15 +970,23 @@ static inline JSObject*
 CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
                                NewObjectKind newKind)
 {
-    if (group->maybeUnboxedLayout() && newKind != SingletonObject)
+    bool isUnboxed;
+    TypeNewScript* maybeNewScript;
+    {
+        AutoSweepObjectGroup sweep(group);
+        isUnboxed = group->maybeUnboxedLayout(sweep);
+        maybeNewScript = group->newScript(sweep);
+    }
+
+    if (isUnboxed && newKind != SingletonObject)
         return UnboxedPlainObject::create(cx, group, newKind);
 
-    if (TypeNewScript* newScript = group->newScript()) {
-        if (newScript->analyzed()) {
+    if (maybeNewScript) {
+        if (maybeNewScript->analyzed()) {
             // The definite properties analysis has been performed for this
             // group, so get the shape and alloc kind to use from the
             // TypeNewScript's template.
-            RootedPlainObject templateObject(cx, newScript->templateObject());
+            RootedPlainObject templateObject(cx, maybeNewScript->templateObject());
             MOZ_ASSERT(templateObject->group() == group);
 
             RootedPlainObject res(cx, CopyInitializerObject(cx, templateObject, newKind));
@@ -988,8 +1017,9 @@ CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
             return nullptr;
 
         // Make sure group->newScript is still there.
-        if (newKind != SingletonObject && group->newScript())
-            group->newScript()->registerNewObject(res);
+        AutoSweepObjectGroup sweep(group);
+        if (newKind != SingletonObject && group->newScript(sweep))
+            group->newScript(sweep)->registerNewObject(res);
 
         return res;
     }
@@ -1015,16 +1045,20 @@ js::CreateThisForFunctionWithProto(JSContext* cx, HandleObject callee, HandleObj
         if (!group)
             return nullptr;
 
-        if (group->newScript() && !group->newScript()->analyzed()) {
-            bool regenerate;
-            if (!group->newScript()->maybeAnalyze(cx, group, &regenerate))
-                return nullptr;
-            if (regenerate) {
-                // The script was analyzed successfully and may have changed
-                // the new type table, so refetch the group.
-                group = ObjectGroup::defaultNewGroup(cx, nullptr, TaggedProto(proto),
-                                                     newTarget);
-                MOZ_ASSERT(group && group->newScript());
+        {
+            AutoSweepObjectGroup sweep(group);
+            if (group->newScript(sweep) && !group->newScript(sweep)->analyzed()) {
+                bool regenerate;
+                if (!group->newScript(sweep)->maybeAnalyze(cx, group, &regenerate))
+                    return nullptr;
+                if (regenerate) {
+                    // The script was analyzed successfully and may have changed
+                    // the new type table, so refetch the group.
+                    group = ObjectGroup::defaultNewGroup(cx, nullptr, TaggedProto(proto),
+                                                         newTarget);
+                    AutoSweepObjectGroup sweepNewGroup(group);
+                    MOZ_ASSERT(group && group->newScript(sweepNewGroup));
+                }
             }
         }
 
@@ -1118,7 +1152,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
         desc.attributesRef() &= ~JSPROP_PERMANENT;
     }
 
-    JSAutoCompartment ac(cx, target);
+    JSAutoRealm ar(cx, target);
     cx->markId(id);
     RootedId wrappedId(cx, id);
     if (!cx->compartment()->wrap(cx, &desc))
@@ -1130,7 +1164,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
 JS_FRIEND_API(bool)
 JS_CopyPropertiesFrom(JSContext* cx, HandleObject target, HandleObject obj)
 {
-    JSAutoCompartment ac(cx, obj);
+    JSAutoRealm ar(cx, obj);
 
     AutoIdVector props(cx);
     if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, &props))
@@ -2084,7 +2118,8 @@ SetClassAndProto(JSContext* cx, HandleObject obj,
     obj->setGroup(newGroup);
 
     // Add the object's property types to the new group.
-    if (!newGroup->unknownProperties()) {
+    AutoSweepObjectGroup sweep(newGroup);
+    if (!newGroup->unknownProperties(sweep)) {
         if (obj->isNative())
             AddPropertyTypesAfterProtoChange(cx, &obj->as<NativeObject>(), oldGroup);
         else
@@ -2142,7 +2177,7 @@ js::GetObjectFromIncumbentGlobal(JSContext* cx, MutableHandleObject obj)
     }
 
     {
-        AutoCompartment ac(cx, globalObj);
+        AutoRealm ar(cx, globalObj);
         Handle<GlobalObject*> global = globalObj.as<GlobalObject>();
         obj.set(GlobalObject::getOrCreateObjectPrototype(cx, global));
         if (!obj)
@@ -2721,7 +2756,7 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto)
 }
 
 bool
-js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result, IntegrityLevel level)
+js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result)
 {
     if (obj->is<ProxyObject>())
         return js::Proxy::preventExtensions(cx, obj, result);
@@ -2732,16 +2767,14 @@ js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result, I
     if (!MaybeConvertUnboxedObjectToNative(cx, obj))
         return false;
 
-    // Force lazy properties to be resolved.
-    if (obj->isNative() && !ResolveLazyProperties(cx, obj.as<NativeObject>()))
-        return false;
+    if (obj->isNative()) {
+        // Force lazy properties to be resolved.
+        if (!ResolveLazyProperties(cx, obj.as<NativeObject>()))
+            return false;
 
-    // Sparsify dense elements, to make sure no element can be added without a
-    // call to isExtensible, at the cost of performance. If the object is being
-    // frozen, the caller is responsible for freezing the elements (and all
-    // other properties).
-    if (obj->isNative() && level != IntegrityLevel::Frozen) {
-        if (!NativeObject::sparsifyDenseElements(cx, obj.as<NativeObject>()))
+        // Prepare the elements. We have to do this before we mark the object
+        // non-extensible; that's fine because these changes are not observable.
+        if (!ObjectElements::PreventExtensions(cx, &obj->as<NativeObject>()))
             return false;
     }
 
@@ -2752,10 +2785,10 @@ js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result, I
 }
 
 bool
-js::PreventExtensions(JSContext* cx, HandleObject obj, IntegrityLevel level)
+js::PreventExtensions(JSContext* cx, HandleObject obj)
 {
     ObjectOpResult result;
-    return PreventExtensions(cx, obj, result, level) && result.checkStrict(cx, obj);
+    return PreventExtensions(cx, obj, result) && result.checkStrict(cx, obj);
 }
 
 bool
@@ -3548,8 +3581,6 @@ JSObject::dump(js::GenericPrinter& out) const
             out.put(" had_elements_access");
         if (nobj->isIndexed())
             out.put(" indexed");
-        if (nobj->wasNewScriptCleared())
-            out.put(" new_script_cleared");
     } else {
         out.put(" not_native\n");
     }
@@ -3977,7 +4008,8 @@ JSObject::traceChildren(JSTracer* trc)
 static JSAtom*
 displayAtomFromObjectGroup(ObjectGroup& group)
 {
-    TypeNewScript* script = group.newScript();
+    AutoSweepObjectGroup sweep(&group);
+    TypeNewScript* script = group.newScript(sweep);
     if (!script)
         return nullptr;
 
@@ -4116,7 +4148,7 @@ JSObject::debugCheckNewObject(ObjectGroup* group, Shape* shape, js::gc::AllocKin
     }
 
     // Classes with a finalizer must specify whether instances will be finalized
-    // on the active thread or in the background, except proxies whose behaviour
+    // on the main thread or in the background, except proxies whose behaviour
     // depends on the target object.
     static const uint32_t FinalizeMask = JSCLASS_FOREGROUND_FINALIZE | JSCLASS_BACKGROUND_FINALIZE;
     uint32_t flags = clasp->flags;

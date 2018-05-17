@@ -14,7 +14,6 @@ import json
 
 import os
 import pprint
-import subprocess
 import time
 import uuid
 import copy
@@ -57,8 +56,7 @@ Please add this to your config."
 
 ERROR_MSGS = {
     'undetermined_repo_path': 'The repo could not be determined. \
-Please make sure that either "repo" is in your config or, if \
-you are running this in buildbot, "repo_path" is in your buildbot_config.',
+Please make sure that "repo" is in your config.',
     'comments_undetermined': '"comments" could not be determined. This may be \
 because it was a forced build.',
     'tooltool_manifest_undetermined': '"tooltool_manifest_src" not set, \
@@ -833,17 +831,10 @@ or run without that action (ie: --no-{action})"
         if self.buildid:
             return self.buildid
 
-        buildid = None
-        if c.get("is_automation") and self.buildbot_config['properties'].get('buildid'):
-            self.info("Determining buildid from buildbot properties")
-            buildid = self.buildbot_config['properties']['buildid'].encode(
-                'ascii', 'replace'
-            )
-        else:
-            # for taskcluster, there are no buildbot properties, and we pass
-            # MOZ_BUILD_DATE into mozharness as an environment variable, only
-            # to have it pass the same value out with the same name.
-            buildid = os.environ.get('MOZ_BUILD_DATE')
+        # for taskcluster, we pass MOZ_BUILD_DATE into mozharness as an
+        # environment variable, only to have it pass the same value out with
+        # the same name.
+        buildid = os.environ.get('MOZ_BUILD_DATE')
 
         if not buildid:
             self.info("Creating buildid through current time")
@@ -1085,32 +1076,20 @@ or run without that action (ie: --no-{action})"
     def query_revision(self, source_path=None):
         """ returns the revision of the build
 
-         first will look for it in buildbot_properties and then in
-         buildbot_config. Failing that, it will actually poll the source of
-         the repo if it exists yet.
-
          This method is used both to figure out what revision to check out and
          to figure out what revision *was* checked out.
         """
         revision = None
-        if 'revision' in self.buildbot_properties:
-            revision = self.buildbot_properties['revision']
-        elif (self.buildbot_config and
-                  self.buildbot_config.get('sourcestamp', {}).get('revision')):
-            revision = self.buildbot_config['sourcestamp']['revision']
-        elif self.buildbot_config and self.buildbot_config.get('revision'):
-            revision = self.buildbot_config['revision']
-        else:
-            if not source_path:
-                dirs = self.query_abs_dirs()
-                source_path = dirs['abs_src_dir']  # let's take the default
+        if not source_path:
+            dirs = self.query_abs_dirs()
+            source_path = dirs['abs_src_dir']  # let's take the default
 
-            # Look at what we have checked out
-            if os.path.exists(source_path):
-                hg = self.query_exe('hg', return_type='list')
-                revision = self.get_output_from_command(
-                    hg + ['parent', '--template', '{node}'], cwd=source_path
-                )
+        # Look at what we have checked out
+        if os.path.exists(source_path):
+            hg = self.query_exe('hg', return_type='list')
+            revision = self.get_output_from_command(
+                hg + ['parent', '--template', '{node}'], cwd=source_path
+            )
         return revision.encode('ascii', 'replace') if revision else None
 
     def _count_ctors(self):
@@ -1268,6 +1247,11 @@ or run without that action (ie: --no-{action})"
         self.generate_build_props(console_output=True, halt_on_failure=True)
         self._generate_build_stats()
 
+    def static_analysis_autotest(self):
+        """Run mach static-analysis autotest, in order to make sure we dont regress"""
+        self.preflight_build()
+        self._run_mach_command_in_build_env(['static-analysis', 'autotest', '--intree-tool'])
+
     def _run_mach_command_in_build_env(self, args):
         """Run a mach command in a build context."""
         env = self.query_build_env()
@@ -1326,14 +1310,8 @@ or run without that action (ie: --no-{action})"
         if branch == 'try':
             branch = 'mozilla-central'
 
-        # Some android versions share the same .json config - if
-        # multi_locale_config_platform is set, use that the .json name;
-        # otherwise, use the buildbot platform.
-        default_platform = self.buildbot_config['properties'].get('platform',
-                                                                  'android')
-
         multi_config_pf = self.config.get('multi_locale_config_platform',
-                                          default_platform)
+                                          'android')
 
         # The l10n script location differs on buildbot and taskcluster
         if self.config.get('taskcluster_nightly'):
@@ -1780,7 +1758,14 @@ or run without that action (ie: --no-{action})"
             self.fatal("'mach valgrind-test' did not run successfully. Please check "
                        "log for errors.")
 
+    def ensure_upload_path(self):
+        env = self.query_mach_build_env()
 
+        # Some Taskcluster workers don't like it if an artifacts directory
+        # is defined but no artifacts are uploaded. Guard against this by always
+        # ensuring the artifacts directory exists.
+        if 'UPLOAD_PATH' in env and not os.path.exists(env['UPLOAD_PATH']):
+            os.makedirs(env['UPLOAD_PATH'])
 
     def _post_fatal(self, message=None, exit_code=None):
         if not self.return_code:  # only overwrite return_code if it's 0

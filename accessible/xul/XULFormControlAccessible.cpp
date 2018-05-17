@@ -21,7 +21,6 @@
 #include "nsIDOMXULCheckboxElement.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIDOMXULSelectCntrlItemEl.h"
-#include "nsIDOMXULTextboxElement.h"
 #include "nsIEditor.h"
 #include "nsIFrame.h"
 #include "nsITextControlFrame.h"
@@ -57,7 +56,7 @@ XULButtonAccessible::~XULButtonAccessible()
 // XULButtonAccessible: nsIAccessible
 
 uint8_t
-XULButtonAccessible::ActionCount()
+XULButtonAccessible::ActionCount() const
 {
   return 1;
 }
@@ -70,7 +69,7 @@ XULButtonAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULButtonAccessible::DoAction(uint8_t aIndex)
+XULButtonAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != 0)
     return false;
@@ -83,13 +82,13 @@ XULButtonAccessible::DoAction(uint8_t aIndex)
 // XULButtonAccessible: Accessible
 
 role
-XULButtonAccessible::NativeRole()
+XULButtonAccessible::NativeRole() const
 {
   return roles::PUSHBUTTON;
 }
 
 uint64_t
-XULButtonAccessible::NativeState()
+XULButtonAccessible::NativeState() const
 {
   // Possible states: focused, focusable, unavailable(disabled).
 
@@ -104,14 +103,9 @@ XULButtonAccessible::NativeState()
     if (type.EqualsLiteral("checkbox") || type.EqualsLiteral("radio")) {
       state |= states::CHECKABLE;
       bool checked = false;
-      int32_t checkState = 0;
       xulButtonElement->GetChecked(&checked);
       if (checked) {
         state |= states::PRESSED;
-        xulButtonElement->GetCheckState(&checkState);
-        if (checkState == nsIDOMXULButtonElement::CHECKSTATE_MIXED) {
-          state |= states::MIXED;
-        }
       }
     }
   }
@@ -211,7 +205,7 @@ XULDropmarkerAccessible::
 }
 
 uint8_t
-XULDropmarkerAccessible::ActionCount()
+XULDropmarkerAccessible::ActionCount() const
 {
   return 1;
 }
@@ -260,7 +254,7 @@ XULDropmarkerAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULDropmarkerAccessible::DoAction(uint8_t index)
+XULDropmarkerAccessible::DoAction(uint8_t index) const
 {
   if (index == eAction_Click) {
     DropmarkerOpen(true); // Reverse the open attribute
@@ -270,13 +264,13 @@ XULDropmarkerAccessible::DoAction(uint8_t index)
 }
 
 role
-XULDropmarkerAccessible::NativeRole()
+XULDropmarkerAccessible::NativeRole() const
 {
   return roles::PUSHBUTTON;
 }
 
 uint64_t
-XULDropmarkerAccessible::NativeState()
+XULDropmarkerAccessible::NativeState() const
 {
   return DropmarkerOpen(false) ? states::PRESSED : 0;
 }
@@ -292,13 +286,13 @@ XULCheckboxAccessible::
 }
 
 role
-XULCheckboxAccessible::NativeRole()
+XULCheckboxAccessible::NativeRole() const
 {
   return roles::CHECKBUTTON;
 }
 
 uint8_t
-XULCheckboxAccessible::ActionCount()
+XULCheckboxAccessible::ActionCount() const
 {
   return 1;
 }
@@ -315,7 +309,7 @@ XULCheckboxAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULCheckboxAccessible::DoAction(uint8_t aIndex)
+XULCheckboxAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Click)
     return false;
@@ -325,7 +319,7 @@ XULCheckboxAccessible::DoAction(uint8_t aIndex)
 }
 
 uint64_t
-XULCheckboxAccessible::NativeState()
+XULCheckboxAccessible::NativeState() const
 {
   // Possible states: focused, focusable, unavailable(disabled), checked
   // Get focus and disable status from base class
@@ -341,10 +335,6 @@ XULCheckboxAccessible::NativeState()
     xulCheckboxElement->GetChecked(&checked);
     if (checked) {
       state |= states::CHECKED;
-      int32_t checkState = 0;
-      xulCheckboxElement->GetCheckState(&checkState);
-      if (checkState == nsIDOMXULCheckboxElement::CHECKSTATE_MIXED)
-        state |= states::MIXED;
     }
   }
 
@@ -362,13 +352,13 @@ XULGroupboxAccessible::
 }
 
 role
-XULGroupboxAccessible::NativeRole()
+XULGroupboxAccessible::NativeRole() const
 {
   return roles::GROUPING;
 }
 
 ENameValueFlag
-XULGroupboxAccessible::NativeName(nsString& aName)
+XULGroupboxAccessible::NativeName(nsString& aName) const
 {
   // XXX: we use the first related accessible only.
   Accessible* label =
@@ -380,7 +370,7 @@ XULGroupboxAccessible::NativeName(nsString& aName)
 }
 
 Relation
-XULGroupboxAccessible::RelationByType(RelationType aType)
+XULGroupboxAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
   if (aType != RelationType::LABELLED_BY)
@@ -418,7 +408,7 @@ XULRadioButtonAccessible::
 }
 
 uint64_t
-XULRadioButtonAccessible::NativeState()
+XULRadioButtonAccessible::NativeState() const
 {
   uint64_t state = LeafAccessible::NativeState();
   state |= states::CHECKABLE;
@@ -472,7 +462,7 @@ XULRadioGroupAccessible::
 }
 
 role
-XULRadioGroupAccessible::NativeRole()
+XULRadioGroupAccessible::NativeRole() const
 {
   return roles::RADIO_GROUP;
 }
@@ -519,7 +509,7 @@ XULStatusBarAccessible::
 }
 
 role
-XULStatusBarAccessible::NativeRole()
+XULStatusBarAccessible::NativeRole() const
 {
   return roles::STATUSBAR;
 }
@@ -588,13 +578,13 @@ XULToolbarAccessible::
 }
 
 role
-XULToolbarAccessible::NativeRole()
+XULToolbarAccessible::NativeRole() const
 {
   return roles::TOOLBAR;
 }
 
 ENameValueFlag
-XULToolbarAccessible::NativeName(nsString& aName)
+XULToolbarAccessible::NativeName(nsString& aName) const
 {
   if (mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::toolbarname, aName))
     aName.CompressWhitespace();
@@ -614,13 +604,13 @@ XULToolbarSeparatorAccessible::
 }
 
 role
-XULToolbarSeparatorAccessible::NativeRole()
+XULToolbarSeparatorAccessible::NativeRole() const
 {
   return roles::SEPARATOR;
 }
 
 uint64_t
-XULToolbarSeparatorAccessible::NativeState()
+XULToolbarSeparatorAccessible::NativeState() const
 {
   return 0;
 }

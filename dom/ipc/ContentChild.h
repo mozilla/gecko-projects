@@ -120,6 +120,7 @@ public:
 
   bool Init(MessageLoop* aIOLoop,
             base::ProcessId aParentPid,
+            const char* aParentBuildID,
             IPC::Channel* aChannel,
             uint64_t aChildID,
             bool aIsForBrowser);
@@ -683,8 +684,7 @@ public:
    * GPU process since we don't want to crash the content process when the
    * GPU process crashes.
    */
-  static void FatalErrorIfNotUsingGPUProcess(const char* const aProtocolName,
-                                             const char* const aErrorMsg,
+  static void FatalErrorIfNotUsingGPUProcess(const char* const aErrorMsg,
                                              base::ProcessId aOtherPid);
 
   // This method is used by FileCreatorHelper for the creation of a BlobImpl.

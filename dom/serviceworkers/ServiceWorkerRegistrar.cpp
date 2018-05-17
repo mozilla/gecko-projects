@@ -15,10 +15,12 @@
 #include "nsIObserverService.h"
 #include "nsIOutputStream.h"
 #include "nsISafeOutputStream.h"
+#include "nsIServiceWorkerManager.h"
 
 #include "MainThreadUtils.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/CycleCollectedJSContext.h"
+#include "mozilla/dom/StorageActivityService.h"
 #include "mozilla/ErrorNames.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -35,6 +37,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
+#include "ServiceWorkerUtils.h"
 
 using namespace mozilla::ipc;
 
@@ -265,6 +268,7 @@ ServiceWorkerRegistrar::RegisterServiceWorker(
   }
 
   MaybeScheduleSaveData();
+  StorageActivityService::SendActivity(aData.principal());
 }
 
 void
@@ -301,6 +305,7 @@ ServiceWorkerRegistrar::UnregisterServiceWorker(
 
   if (deleted) {
     MaybeScheduleSaveData();
+    StorageActivityService::SendActivity(aPrincipalInfo);
   }
 }
 
@@ -316,9 +321,13 @@ ServiceWorkerRegistrar::RemoveAll()
 
   bool deleted = false;
 
+  nsTArray<ServiceWorkerRegistrationData> data;
   {
     MonitorAutoLock lock(mMonitor);
     MOZ_ASSERT(mDataLoaded);
+
+    // Let's take a copy in order to inform StorageActivityService.
+    data = mData;
 
     deleted = !mData.IsEmpty();
     mData.Clear();
@@ -326,8 +335,14 @@ ServiceWorkerRegistrar::RemoveAll()
     mDataGeneration = GetNextGeneration();
   }
 
-  if (deleted) {
-    MaybeScheduleSaveData();
+  if (!deleted) {
+    return;
+  }
+
+  MaybeScheduleSaveData();
+
+  for (uint32_t i = 0, len = data.Length(); i < len; ++i) {
+    StorageActivityService::SendActivity(data[i].principal());
   }
 }
 

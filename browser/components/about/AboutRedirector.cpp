@@ -23,6 +23,12 @@ NS_IMPL_ISUPPORTS(AboutRedirector, nsIAboutModule)
 
 bool AboutRedirector::sNewTabPageEnabled = false;
 
+static const uint32_t ACTIVITY_STREAM_FLAGS =
+  nsIAboutModule::ALLOW_SCRIPT |
+  nsIAboutModule::ENABLE_INDEXED_DB |
+  nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+  nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT;
+
 struct RedirEntry {
   const char* id;
   const char* url;
@@ -78,21 +84,15 @@ static const RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT |
     nsIAboutModule::HIDE_FROM_ABOUTABOUT },
   // Actual activity stream URL for home and newtab are set in channel creation
-  // Linkable because of indexeddb use (bug 1228118)
-  { "home", "about:blank",
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
-    nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
-    nsIAboutModule::ALLOW_SCRIPT |
-    nsIAboutModule::MAKE_LINKABLE |
-    nsIAboutModule::ENABLE_INDEXED_DB },
-  { "library", "chrome://browser/content/aboutLibrary.xhtml",
-    nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
-    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT },
-  { "newtab", "about:blank",
-    nsIAboutModule::ENABLE_INDEXED_DB |
+  { "home", "about:blank", ACTIVITY_STREAM_FLAGS | nsIAboutModule::MAKE_LINKABLE }, // Bug 1438367 to try removing MAKE_LINKABLE again
+  { "newtab", "about:blank", ACTIVITY_STREAM_FLAGS },
+  { "welcome", "about:blank",
     nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
     nsIAboutModule::ALLOW_SCRIPT },
+  { "library", "chrome://browser/content/aboutLibrary.xhtml",
+    nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+    nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT },
   { "preferences", "chrome://browser/content/preferences/in-content/preferences.xul",
     nsIAboutModule::ALLOW_SCRIPT },
   { "downloads", "chrome://browser/content/downloads/contentAreaDownloadsView.xul",
@@ -102,6 +102,8 @@ static const RedirEntry kRedirMap[] = {
     nsIAboutModule::ALLOW_SCRIPT |
     nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
     nsIAboutModule::HIDE_FROM_ABOUTABOUT },
+  { "restartrequired", "chrome://browser/content/aboutRestartRequired.xhtml",
+    nsIAboutModule::ALLOW_SCRIPT },
 };
 
 static nsAutoCString
@@ -150,9 +152,10 @@ AboutRedirector::NewChannel(nsIURI* aURI,
       nsAutoCString url;
 
       // Let the aboutNewTabService decide where to redirect for about:home and
-      // enabled about:newtab. Disabled about:newtab page uses fallback.
+      // enabled about:newtab. Disabledx about:newtab page uses fallback.
       if (path.EqualsLiteral("home") ||
-          (sNewTabPageEnabled && path.EqualsLiteral("newtab"))) {
+          (sNewTabPageEnabled && path.EqualsLiteral("newtab")) ||
+          path.EqualsLiteral("welcome")) {
         nsCOMPtr<nsIAboutNewTabService> aboutNewTabService =
           do_GetService("@mozilla.org/browser/aboutnewtab-service;1", &rv);
         NS_ENSURE_SUCCESS(rv, rv);

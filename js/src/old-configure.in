@@ -797,11 +797,16 @@ case "$target" in
         ;;
     esac
 
+    if test -n "$GNU_CC"; then
+        CFLAGS="$CFLAGS -fno-keep-inline-dllexport"
+        CXXFLAGS="$CXXFLAGS -fno-keep-inline-dllexport"
+    fi
+
     case "$target" in
     i*86-*)
         if test -n "$GNU_CC"; then
-            CFLAGS="$CFLAGS -mstackrealign -fno-keep-inline-dllexport"
-            CXXFLAGS="$CXXFLAGS -mstackrealign -fno-keep-inline-dllexport"
+            CFLAGS="$CFLAGS -mstackrealign"
+            CXXFLAGS="$CXXFLAGS -mstackrealign"
             LDFLAGS="$LDFLAGS -Wl,--large-address-aware"
         else
             DSO_LDOPTS="$DSO_LDOPTS -MACHINE:X86"
@@ -979,18 +984,6 @@ darwin*)
     )
     ;;
 esac
-
-dnl ========================================================
-dnl Check the command line for --with-pthreads
-dnl ========================================================
-MOZ_ARG_WITH_BOOL(pthreads,
-[  --with-pthreads         Force use of system pthread library with NSPR ],
-[ if test "$USE_PTHREADS"x = x; then
-    AC_MSG_ERROR([ --with-pthreads specified for a system without pthread support ]);
-fi],
-    USE_PTHREADS=
-    _PTHREAD_LDFLAGS=
-)
 
 dnl ========================================================
 dnl Do the platform specific pthread hackery
@@ -1436,22 +1429,6 @@ if test "$MOZ_MEMORY"; then
 fi
 AC_SUBST(MOZ_GLUE_IN_PROGRAM)
 AC_SUBST_LIST(MOZ_GLUE_WRAP_LDFLAGS)
-
-dnl ========================================================
-dnl = Use Valgrind
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(valgrind,
-[  --enable-valgrind       Enable Valgrind integration hooks (default=no)],
-    MOZ_VALGRIND=1,
-    MOZ_VALGRIND= )
-if test -n "$MOZ_VALGRIND"; then
-    MOZ_CHECK_HEADER([valgrind/valgrind.h], [],
-        AC_MSG_ERROR(
-            [--enable-valgrind specified but Valgrind is not installed]))
-    AC_DEFINE(MOZ_VALGRIND)
-    MOZ_VALGRIND=1
-fi
-AC_SUBST(MOZ_VALGRIND)
 
 dnl ========================================================
 dnl instruments

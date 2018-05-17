@@ -61,7 +61,7 @@ PlacesTreeView.prototype = {
     return this.__xulStore;
   },
 
-  QueryInterface: XPCOMUtils.generateQI(PTV_interfaces),
+  QueryInterface: ChromeUtils.generateQI(PTV_interfaces),
 
   // Bug 761494:
   // ----------
@@ -1789,7 +1789,7 @@ PlacesTreeView.prototype = {
     // have no reason to disallow renaming a shortcut to the Bookmarks Toolbar,
     // except for the one under All Bookmarks.
     if (PlacesUtils.nodeIsSeparator(node) || PlacesUtils.isRootItem(itemGuid) ||
-        PlacesUtils.isQueryGeneratedFolder(itemGuid))
+        PlacesUtils.isQueryGeneratedFolder(node))
       return false;
 
     return true;

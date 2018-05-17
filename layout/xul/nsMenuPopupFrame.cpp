@@ -18,7 +18,6 @@
 #include "nsMenuBarFrame.h"
 #include "nsPopupSetFrame.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIPresShell.h"
 #include "nsFrameManager.h"
@@ -60,6 +59,7 @@
 
 using namespace mozilla;
 using mozilla::dom::KeyboardEvent;
+using mozilla::dom::Event;
 
 int8_t nsMenuPopupFrame::sDefaultLevelIsTop = -1;
 
@@ -391,14 +391,12 @@ NS_IMETHODIMP nsXULPopupShownEvent::Run()
   return EventDispatcher::Dispatch(mPopup, mPresContext, &event);
 }
 
-NS_IMETHODIMP nsXULPopupShownEvent::HandleEvent(nsIDOMEvent* aEvent)
+NS_IMETHODIMP nsXULPopupShownEvent::HandleEvent(Event* aEvent)
 {
   nsMenuPopupFrame* popup = do_QueryFrame(mPopup->GetPrimaryFrame());
-  nsCOMPtr<nsIDOMEventTarget> eventTarget;
-  aEvent->GetTarget(getter_AddRefs(eventTarget));
   // Ignore events not targeted at the popup itself (ie targeted at
   // descendants):
-  if (!SameCOMIdentity(mPopup, eventTarget)) {
+  if (mPopup != aEvent->GetTarget()) {
     return NS_OK;
   }
   if (popup) {
@@ -878,42 +876,6 @@ nsMenuPopupFrame::InitializePopupAtRect(nsIContent* aTriggerContent,
   InitializePopup(nullptr, aTriggerContent, aPosition, 0, 0,
                   MenuPopupAnchorType_Rect, aAttributesOverride);
   mScreenRect = aRect;
-}
-
-void
-nsMenuPopupFrame::InitializePopupWithAnchorAlign(nsIContent* aAnchorContent,
-                                                 nsAString& aAnchor,
-                                                 nsAString& aAlign,
-                                                 int32_t aXPos, int32_t aYPos)
-{
-  EnsureWidget();
-
-  mPopupState = ePopupShowing;
-  mAdjustOffsetForContextMenu = false;
-  mFlip = FlipType_Default;
-  mPositionedOffset = 0;
-
-  // this popup opening function is provided for backwards compatibility
-  // only. It accepts either coordinates or an anchor and alignment value
-  // but doesn't use both together.
-  if (aXPos == -1 && aYPos == -1) {
-    mAnchorContent = aAnchorContent;
-    mAnchorType = MenuPopupAnchorType_Node;
-    mScreenRect = nsIntRect(-1, -1, 0, 0);
-    mXPos = 0;
-    mYPos = 0;
-    InitPositionFromAnchorAlign(aAnchor, aAlign);
-  }
-  else {
-    mAnchorContent = nullptr;
-    mAnchorType = MenuPopupAnchorType_Point;
-    mPopupAnchor = POPUPALIGNMENT_NONE;
-    mPopupAlignment = POPUPALIGNMENT_NONE;
-    mPosition = POPUPPOSITION_UNKNOWN;
-    mScreenRect = nsIntRect(aXPos, aYPos, 0, 0);
-    mXPos = aXPos;
-    mYPos = aYPos;
-  }
 }
 
 void
@@ -2325,7 +2287,7 @@ nsMenuPopupFrame::MoveToAttributePosition()
   // Move the widget around when the user sets the |left| and |top| attributes.
   // Note that this is not the best way to move the widget, as it results in lots
   // of FE notifications and is likely to be slow as molasses. Use |moveTo| on
-  // PopupBoxObject if possible.
+  // the element if possible.
   nsAutoString left, top;
   mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::left, left);
   mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::top, top);

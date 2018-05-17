@@ -61,8 +61,6 @@ function runTools(target) {
 }
 
 function getClient() {
-  let deferred = defer();
-
   DebuggerServer.init();
   DebuggerServer.registerAllActors();
 
@@ -88,7 +86,7 @@ function getTarget(client) {
 }
 
 function test() {
-  Task.spawn(async function() {
+  (async function() {
     toggleAllTools(true);
     await addTab("about:blank");
 
@@ -122,5 +120,5 @@ function test() {
     DebuggerServer.destroy();
     toggleAllTools(false);
     finish();
-  }, console.error);
+  })();
 }

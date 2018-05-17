@@ -47,25 +47,6 @@ const ADDONS = {
     compatible: [false, true,  false, true],
   },
 
-  // Theme - always uses strict compatibility, so is always incompatible
-  "addon3@tests.mozilla.org": {
-    "install.rdf": {
-      id: "addon3@tests.mozilla.org",
-      version: "1.0",
-      name: "Test 3",
-      internalName: "test-theme-3",
-      targetApplications: [{
-        id: "xpcshell@tests.mozilla.org",
-        minVersion: "0.8",
-        maxVersion: "0.9"
-      }]
-    },
-    expected: {
-      strictCompatibility: true,
-    },
-    compatible: [false, false, false, false],
-  },
-
   // Opt-in to strict compatibility - always incompatible
   "addon4@tests.mozilla.org": {
     "install.rdf": {
@@ -170,7 +151,7 @@ add_task(async function setup() {
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
   for (let addon of Object.values(ADDONS)) {
-    writeInstallRDFForExtension(addon["install.rdf"], profileDir);
+    await promiseWriteInstallRDFForExtension(addon["install.rdf"], profileDir);
   }
 
   Services.prefs.setCharPref(PREF_EM_MIN_COMPAT_APP_VERSION, "0.1");
@@ -299,7 +280,7 @@ add_task(async function setupCheckCompat() {
                 {version: "2.2.3", platformVersion: "2"});
 
   for (let addon of Object.values(CHECK_COMPAT_ADDONS)) {
-    writeInstallRDFForExtension(addon["install.rdf"], profileDir);
+    await promiseWriteInstallRDFForExtension(addon["install.rdf"], profileDir);
   }
   await promiseRestartManager("2.2.3");
 });

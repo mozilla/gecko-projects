@@ -14,7 +14,6 @@
 #include "nsEditorCID.h"
 #include "nsLayoutCID.h"
 #include "nsITextControlFrame.h"
-#include "nsIDOMDocument.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsTextControlFrame.h"
 #include "nsIControllers.h"
@@ -27,7 +26,6 @@
 #include "nsIEditorObserver.h"
 #include "nsIWidget.h"
 #include "nsIDocumentEncoder.h"
-#include "nsISelectionPrivate.h"
 #include "nsPIDOMWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/Selection.h"
@@ -39,6 +37,7 @@
 #include "nsIController.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/TextEvents.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
@@ -65,11 +64,11 @@ public:
   }
   ~ValueSetter()
   {
-    mTextEditor->SetSuppressDispatchingInputEvent(mOuterTransaction);
+    mTextEditor->SuppressDispatchingInputEvent(mOuterTransaction);
   }
   void Init()
   {
-    mTextEditor->SetSuppressDispatchingInputEvent(true);
+    mTextEditor->SuppressDispatchingInputEvent(true);
   }
 
 private:
@@ -298,9 +297,9 @@ public:
   NS_IMETHOD GetDisplaySelection(int16_t* _retval) override;
   NS_IMETHOD SetSelectionFlags(int16_t aInEnable) override;
   NS_IMETHOD GetSelectionFlags(int16_t *aOutEnable) override;
-  NS_IMETHOD GetSelection(RawSelectionType aRawSelectionType,
-                          nsISelection** aSelection) override;
-  Selection* GetDOMSelection(RawSelectionType aRawSelectionType) override;
+  NS_IMETHOD GetSelectionFromScript(RawSelectionType aRawSelectionType,
+                                    Selection** aSelection) override;
+  Selection* GetSelection(RawSelectionType aRawSelectionType) override;
   NS_IMETHOD ScrollSelectionIntoView(RawSelectionType aRawSelectionType,
                                      int16_t aRegion, int16_t aFlags) override;
   NS_IMETHOD RepaintSelection(RawSelectionType aRawSelectionType) override;
@@ -421,8 +420,8 @@ nsTextInputSelectionImpl::GetSelectionFlags(int16_t *aOutEnable)
 }
 
 NS_IMETHODIMP
-nsTextInputSelectionImpl::GetSelection(RawSelectionType aRawSelectionType,
-                                       nsISelection** aSelection)
+nsTextInputSelectionImpl::GetSelectionFromScript(RawSelectionType aRawSelectionType,
+                                                 Selection** aSelection)
 {
   if (!mFrameSelection)
     return NS_ERROR_NULL_POINTER;
@@ -440,7 +439,7 @@ nsTextInputSelectionImpl::GetSelection(RawSelectionType aRawSelectionType,
 }
 
 Selection*
-nsTextInputSelectionImpl::GetDOMSelection(RawSelectionType aRawSelectionType)
+nsTextInputSelectionImpl::GetSelection(RawSelectionType aRawSelectionType)
 {
   return GetSelection(ToSelectionType(aRawSelectionType));
 }
@@ -924,19 +923,13 @@ DoCommandCallback(Command aCommand, void* aData)
 }
 
 NS_IMETHODIMP
-TextInputListener::HandleEvent(nsIDOMEvent* aEvent)
+TextInputListener::HandleEvent(Event* aEvent)
 {
-  bool defaultPrevented = false;
-  nsresult rv = aEvent->GetDefaultPrevented(&defaultPrevented);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (defaultPrevented) {
+  if (aEvent->DefaultPrevented()) {
     return NS_OK;
   }
 
-  bool isTrusted = false;
-  rv = aEvent->GetIsTrusted(&isTrusted);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!isTrusted) {
+  if (!aEvent->IsTrusted()) {
     return NS_OK;
   }
 
@@ -1035,7 +1028,7 @@ TextInputListener::HandleValueChanged(nsTextControlFrame* aFrame)
 
 nsresult
 TextInputListener::UpdateTextInputCommands(const nsAString& aCommandsToUpdate,
-                                           nsISelection* aSelection,
+                                           Selection* aSelection,
                                            int16_t aReason)
 {
   nsIContent* content = mFrame->GetContent();
@@ -1110,12 +1103,6 @@ Element*
 nsTextEditorState::GetRootNode()
 {
   return mBoundFrame ? mBoundFrame->GetRootNode() : nullptr;
-}
-
-Element*
-nsTextEditorState::GetPlaceholderNode()
-{
-  return mBoundFrame ? mBoundFrame->GetPlaceholderNode() : nullptr;
 }
 
 Element*
@@ -1673,7 +1660,7 @@ nsTextEditorState::GetSelectionDirection(ErrorResult& aRv)
     return nsITextControlFrame::eForward; // Doesn't really matter
   }
 
-  nsDirection direction = sel->GetSelectionDirection();
+  nsDirection direction = sel->GetDirection();
   if (direction == eDirNext) {
     return nsITextControlFrame::eForward;
   }
@@ -2427,9 +2414,16 @@ nsTextEditorState::SetValue(const nsAString& aValue, const nsAString* aOldValue,
               StringTail(newValue, newlength - currentLength);
 
             if (insertValue.IsEmpty()) {
-              textEditor->DeleteSelection(nsIEditor::eNone, nsIEditor::eStrip);
+              DebugOnly<nsresult> rv =
+                textEditor->DeleteSelectionAsAction(nsIEditor::eNone,
+                                                    nsIEditor::eStrip);
+              NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                "Failed to remove the text");
             } else {
-              textEditor->InsertText(insertValue);
+              DebugOnly<nsresult> rv =
+                textEditor->InsertTextAsAction(insertValue);
+              NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                "Failed to insert the new value");
             }
           } else {
             AutoDisableUndo disableUndo(textEditor);

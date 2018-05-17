@@ -1485,21 +1485,28 @@ ICCompare_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
 bool
 ICCompare_String::Compiler::generateStubCode(MacroAssembler& masm)
 {
-    Label failure;
+    Label failure, restore;
     masm.branchTestString(Assembler::NotEqual, R0, &failure);
     masm.branchTestString(Assembler::NotEqual, R1, &failure);
 
     MOZ_ASSERT(IsEqualityOp(op));
 
-    Register left = masm.extractString(R0, ExtractTemp0);
-    Register right = masm.extractString(R1, ExtractTemp1);
+    // left/right are part of R0/R1. Restore R0 and R1 in the failure case.
+    Register left = R0.scratchReg();
+    Register right = R1.scratchReg();
+    masm.unboxString(R0, left);
+    masm.unboxString(R1, right);
 
     AllocatableGeneralRegisterSet regs(availableGeneralRegs(2));
     Register scratchReg = regs.takeAny();
 
-    masm.compareStrings(op, left, right, scratchReg, &failure);
+    masm.compareStrings(op, left, right, scratchReg, &restore);
     masm.tagValue(JSVAL_TYPE_BOOLEAN, scratchReg, R0);
     EmitReturnFromIC(masm);
+
+    masm.bind(&restore);
+    masm.tagValue(JSVAL_TYPE_STRING, left, R0);
+    masm.tagValue(JSVAL_TYPE_STRING, right, R1);
 
     masm.bind(&failure);
     EmitStubGuardFailure(masm);
@@ -2433,10 +2440,11 @@ ICUpdatedStub::addUpdateStubForValue(JSContext* cx, HandleScript outerScript, Ha
     }
 
     bool unknown = false, unknownObject = false;
-    if (group->unknownProperties()) {
+    AutoSweepObjectGroup sweep(group);
+    if (group->unknownProperties(sweep)) {
         unknown = unknownObject = true;
     } else {
-        if (HeapTypeSet* types = group->maybeGetProperty(id)) {
+        if (HeapTypeSet* types = group->maybeGetProperty(sweep, id)) {
             unknown = types->unknown();
             unknownObject = types->unknownObject();
         } else {
@@ -2576,7 +2584,7 @@ DoNewArray(JSContext* cx, void* payload, ICNewArray_Fallback* stub, uint32_t len
         if (!obj)
             return false;
 
-        if (obj && !obj->isSingleton() && !obj->group()->maybePreliminaryObjects()) {
+        if (!obj->isSingleton() && !obj->group()->maybePreliminaryObjectsDontCheckGeneration()) {
             JSObject* templateObject = NewArrayOperation(cx, script, pc, length, TenuredObject);
             if (!templateObject)
                 return false;
@@ -2626,7 +2634,8 @@ GenerateNewObjectWithTemplateCode(JSContext* cx, JSObject* templateObject)
     masm.branchIfPretenuredGroup(templateObject->group(), tempReg, &failure);
     masm.branchPtr(Assembler::NotEqual, AbsoluteAddress(cx->compartment()->addressOfMetadataBuilder()),
                    ImmWord(0), &failure);
-    masm.createGCObject(objReg, tempReg, templateObject, gc::DefaultHeap, &failure);
+    TemplateObject templateObj(templateObject);
+    masm.createGCObject(objReg, tempReg, templateObj, gc::DefaultHeap, &failure);
     masm.tagValue(JSVAL_TYPE_OBJECT, objReg, R0);
 
     EmitReturnFromIC(masm);
@@ -2649,14 +2658,16 @@ DoNewObject(JSContext* cx, void* payload, ICNewObject_Fallback* stub, MutableHan
 
     RootedObject templateObject(cx, stub->templateObject());
     if (templateObject) {
-        MOZ_ASSERT(!templateObject->group()->maybePreliminaryObjects());
+        MOZ_ASSERT(!templateObject->group()->maybePreliminaryObjectsDontCheckGeneration());
         obj = NewObjectOperationWithTemplate(cx, templateObject);
     } else {
         HandleScript script = info.script();
         jsbytecode* pc = info.pc();
         obj = NewObjectOperation(cx, script, pc);
 
-        if (obj && !obj->isSingleton() && !obj->group()->maybePreliminaryObjects()) {
+        if (obj && !obj->isSingleton() &&
+            !obj->group()->maybePreliminaryObjectsDontCheckGeneration())
+        {
             JSObject* templateObject = NewObjectOperation(cx, script, pc, TenuredObject);
             if (!templateObject)
                 return false;

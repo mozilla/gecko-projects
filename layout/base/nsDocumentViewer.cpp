@@ -28,7 +28,6 @@
 #include "nsGenericHTMLElement.h"
 
 #include "nsILinkHandler.h"
-#include "nsIDOMDocument.h"
 #include "nsISelectionListener.h"
 #include "mozilla/dom/Selection.h"
 #include "nsContentUtils.h"
@@ -104,7 +103,6 @@
 #endif // NS_PRINTING
 
 //focus
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMEventListener.h"
 #include "nsISelectionController.h"
 
@@ -119,6 +117,7 @@
 #include <stdio.h>
 
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/ScriptLoader.h"
 
@@ -692,9 +691,6 @@ nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow)
     return NS_ERROR_FAILURE;
   }
 
-  // We're done creating the style set
-  mPresShell->StyleSet()->EndUpdate();
-
   if (aDoInitialReflow) {
     // Since Initialize() will create frames for *all* items
     // that are currently in the document tree, we need to flush
@@ -750,9 +746,7 @@ nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow)
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv = selection->AddSelectionListener(mSelectionListener);
-  if (NS_FAILED(rv))
-    return rv;
+  selection->AddSelectionListener(mSelectionListener);
 
   // Save old listener so we can unregister it
   RefPtr<nsDocViewerFocusListener> oldFocusListener = mFocusListener;
@@ -1839,10 +1833,12 @@ nsDocumentViewer::Stop(void)
 }
 
 NS_IMETHODIMP
-nsDocumentViewer::GetDOMDocument(nsISupports **aResult)
+nsDocumentViewer::GetDOMDocument(nsIDocument **aResult)
 {
   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_AVAILABLE);
-  return CallQueryInterface(mDocument, aResult);
+  nsCOMPtr<nsIDocument> document = mDocument;
+  document.forget(aResult);
+  return NS_OK;
 }
 
 nsIDocument*
@@ -2316,8 +2312,6 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
 
   UniquePtr<ServoStyleSet> styleSet = MakeUnique<ServoStyleSet>();
 
-  styleSet->BeginUpdate();
-
   // The document will fill in the document sheets when we create the presshell
 
   if (aDocument->IsBeingUsedAsImage()) {
@@ -2329,8 +2323,6 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
     // xul.css) to be loaded on-demand.
     // XXXjwatt Nothing else is loaded on-demand, but I don't think that
     // should matter for SVG-as-an-image. If it does, I want to know why!
-
-    // Caller will handle calling EndUpdate, per contract.
     return styleSet;
   }
 
@@ -2345,13 +2337,13 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
   }
 
   if (sheet) {
-    styleSet->AppendStyleSheet(SheetType::User, sheet->AsServo());
+    styleSet->AppendStyleSheet(SheetType::User, sheet);
   }
 
   // Append chrome sheets (scrollbars + forms).
   sheet = cache->ScrollbarsSheet();
   if (sheet) {
-    styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+    styleSet->PrependStyleSheet(SheetType::Agent, sheet);
   }
 
   if (!aDocument->IsSVGDocument()) {
@@ -2366,21 +2358,21 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
 
     sheet = cache->FormsSheet();
     if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
     }
 
     if (aDocument->LoadsFullXULStyleSheetUpFront()) {
       // This is the only place components.css gets loaded, unlike xul.css
       sheet = cache->XULComponentsSheet();
       if (sheet) {
-        styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+        styleSet->PrependStyleSheet(SheetType::Agent, sheet);
       }
 
       // nsXULElement::BindToTree loads xul.css on-demand if we don't load it
       // up-front here.
       sheet = cache->XULSheet();
       if (sheet) {
-        styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+        styleSet->PrependStyleSheet(SheetType::Agent, sheet);
       }
     }
 
@@ -2388,25 +2380,25 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
     if (sheet) {
       // Load the minimal XUL rules for scrollbars and a few other XUL things
       // that non-XUL (typically HTML) documents commonly use.
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
     }
 
     sheet = cache->CounterStylesSheet();
     if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
     }
 
     if (nsLayoutUtils::ShouldUseNoScriptSheet(aDocument)) {
       sheet = cache->NoScriptSheet();
       if (sheet) {
-        styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+        styleSet->PrependStyleSheet(SheetType::Agent, sheet);
       }
     }
 
     if (nsLayoutUtils::ShouldUseNoFramesSheet(aDocument)) {
       sheet = cache->NoFramesSheet();
       if (sheet) {
-        styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+        styleSet->PrependStyleSheet(SheetType::Agent, sheet);
       }
     }
 
@@ -2415,30 +2407,28 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
 
     sheet = cache->HTMLSheet();
     if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
     }
 
-    styleSet->PrependStyleSheet(SheetType::Agent,
-                                cache->UASheet()->AsServo());
+    styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet());
   } else {
     // SVG documents may have scrollbars and need the scrollbar styling.
     sheet = cache->MinimalXULSheet();
     if (sheet) {
-      styleSet->PrependStyleSheet(SheetType::Agent, sheet->AsServo());
+      styleSet->PrependStyleSheet(SheetType::Agent, sheet);
     }
   }
 
   nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance();
   if (sheetService) {
     for (StyleSheet* sheet : *sheetService->AgentStyleSheets()) {
-      styleSet->AppendStyleSheet(SheetType::Agent, sheet->AsServo());
+      styleSet->AppendStyleSheet(SheetType::Agent, sheet);
     }
     for (StyleSheet* sheet : Reversed(*sheetService->UserStyleSheets())) {
-      styleSet->PrependStyleSheet(SheetType::User, sheet->AsServo());
+      styleSet->PrependStyleSheet(SheetType::User, sheet);
     }
   }
 
-  // Caller will handle calling EndUpdate, per contract.
   return styleSet;
 }
 
@@ -2587,9 +2577,9 @@ nsDocumentViewer::FindContainerView()
 nsresult
 nsDocumentViewer::CreateDeviceContext(nsView* aContainerView)
 {
-  NS_PRECONDITION(!mPresShell && !mWindow,
-                  "This will screw up our existing presentation");
-  NS_PRECONDITION(mDocument, "Gotta have a document here");
+  MOZ_ASSERT(!mPresShell && !mWindow,
+             "This will screw up our existing presentation");
+  MOZ_ASSERT(mDocument, "Gotta have a document here");
 
   nsIDocument* doc = mDocument->GetDisplayDocument();
   if (doc) {
@@ -2644,7 +2634,9 @@ NS_IMETHODIMP nsDocumentViewer::ClearSelection()
     return NS_ERROR_FAILURE;
   }
 
-  return selection->CollapseToStart();
+  ErrorResult rv;
+  selection->CollapseToStart(rv);
+  return rv.StealNSResult();
 }
 
 NS_IMETHODIMP nsDocumentViewer::SelectAll()
@@ -3660,7 +3652,7 @@ NS_IMETHODIMP nsDocumentViewer::GetInImage(bool* aInImage)
   return NS_OK;
 }
 
-NS_IMETHODIMP nsDocViewerSelectionListener::NotifySelectionChanged(nsIDOMDocument *, nsISelection *, int16_t aReason)
+NS_IMETHODIMP nsDocViewerSelectionListener::NotifySelectionChanged(nsIDocument *, Selection *, int16_t aReason)
 {
   if (!mDocViewer) {
     return NS_OK;
@@ -3678,8 +3670,7 @@ NS_IMETHODIMP nsDocViewerSelectionListener::NotifySelectionChanged(nsIDOMDocumen
   nsCOMPtr<nsPIDOMWindowOuter> domWindow = theDoc->GetWindow();
   if (!domWindow) return NS_ERROR_FAILURE;
 
-  bool selectionCollapsed;
-  selection->GetIsCollapsed(&selectionCollapsed);
+  bool selectionCollapsed = selection->IsCollapsed();
   // We only call UpdateCommands when the selection changes from collapsed to
   // non-collapsed or vice versa, however we skip the initializing collapse. We
   // might need another update string for simple selection changes, but that
@@ -3705,7 +3696,7 @@ nsDocViewerFocusListener::nsDocViewerFocusListener()
 nsDocViewerFocusListener::~nsDocViewerFocusListener(){}
 
 nsresult
-nsDocViewerFocusListener::HandleEvent(nsIDOMEvent* aEvent)
+nsDocViewerFocusListener::HandleEvent(Event* aEvent)
 {
   NS_ENSURE_STATE(mDocViewer);
 

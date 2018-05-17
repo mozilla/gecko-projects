@@ -45,6 +45,7 @@ import org.mozilla.gecko.sync.NonObjectJSONException;
 import org.mozilla.gecko.sync.ThreadPool;
 import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.setup.Constants;
+import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import java.io.IOException;
@@ -495,11 +496,7 @@ public class AndroidFxAccount {
   public ExtendedJSONObject toJSONObject() {
     ExtendedJSONObject o = unbundle();
     o.put("email", account.name);
-    try {
-      o.put("emailUTF8", Utils.byte2Hex(account.name.getBytes("UTF-8")));
-    } catch (UnsupportedEncodingException e) {
-      // Ignore.
-    }
+    o.put("emailUTF8", Utils.byte2Hex(account.name.getBytes(StringUtils.UTF_8)));
     o.put("fxaDeviceId", getDeviceId());
     o.put("fxaDeviceRegistrationVersion", getDeviceRegistrationVersion());
     o.put("fxaDeviceRegistrationTimestamp", getDeviceRegistrationTimestamp());
@@ -643,6 +640,20 @@ public class AndroidFxAccount {
     if (firstRunUUID != null) {
       userdata.putString(ACCOUNT_KEY_FIRST_RUN_SCOPE, firstRunUUID);
     }
+  }
+
+  /**
+   * If there's an active First Run session, tag the given account with it.  If
+   * there's no active First Run session, remove any existing tag.  We do this
+   * in order to reliably determine if an account was created during the current
+   * "first run"; this allows us to re-connect an account that was not created
+   * during the current "first run".
+   *
+   * See {@link FirefoxAccounts#optionallySeparateAccountsDuringFirstRun} for details.
+   */
+  public void updateFirstRunScope(final Context context) {
+    String firstRunUUID = EnvironmentUtils.firstRunUUID(context);
+    accountManager.setUserData(account, ACCOUNT_KEY_FIRST_RUN_SCOPE, firstRunUUID);
   }
 
   private void clearSyncPrefs() throws UnsupportedEncodingException, GeneralSecurityException {

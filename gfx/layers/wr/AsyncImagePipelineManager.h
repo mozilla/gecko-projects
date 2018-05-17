@@ -48,6 +48,7 @@ public:
   void RemovePipeline(const wr::PipelineId& aPipelineId, const wr::Epoch& aEpoch);
 
   void HoldExternalImage(const wr::PipelineId& aPipelineId, const wr::Epoch& aEpoch, WebRenderTextureHost* aTexture);
+  void HoldExternalImage(const wr::PipelineId& aPipelineId, const wr::Epoch& aEpoch, const wr::ExternalImageId& aImageId);
   void PipelineRendered(const wr::PipelineId& aPipelineId, const wr::Epoch& aEpoch);
   void PipelineRemoved(const wr::PipelineId& aPipelineId);
 
@@ -80,7 +81,7 @@ public:
                                 const gfx::MaybeIntSize& aScaleToSize,
                                 const wr::ImageRendering& aFilter,
                                 const wr::MixBlendMode& aMixBlendMode);
-  void ApplyAsyncImages();
+  void ApplyAsyncImages(wr::TransactionBuilder& aTxn);
 
   void AppendImageCompositeNotification(const ImageCompositeNotificationInfo& aNotification)
   {
@@ -117,9 +118,19 @@ private:
     CompositableTextureHostRef mTexture;
   };
 
+  struct ForwardingExternalImage {
+    ForwardingExternalImage(const wr::Epoch& aEpoch, const wr::ExternalImageId& aImageId)
+      : mEpoch(aEpoch)
+      , mImageId(aImageId)
+    {}
+    wr::Epoch mEpoch;
+    wr::ExternalImageId mImageId;
+  };
+
   struct PipelineTexturesHolder {
     // Holds forwarding WebRenderTextureHosts.
     std::queue<ForwardingTextureHost> mTextureHosts;
+    std::queue<ForwardingExternalImage> mExternalImages;
     Maybe<wr::Epoch> mDestroyedEpoch;
   };
 

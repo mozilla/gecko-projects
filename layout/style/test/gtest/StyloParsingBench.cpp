@@ -10,7 +10,6 @@
 #include "ExampleStylesheet.h"
 #include "ServoBindings.h"
 #include "NullPrincipalURI.h"
-#include "nsCSSParser.h"
 #include "mozilla/Encoding.h"
 
 using namespace mozilla;
@@ -24,7 +23,10 @@ using namespace mozilla::net;
 
 
 static void ServoParsingBench() {
+
   auto css = AsBytes(MakeStringSpan(EXAMPLE_STYLESHEET));
+  nsCString cssStr;
+  cssStr.Append(css);
   ASSERT_EQ(Encoding::UTF8ValidUpTo(css), css.Length());
 
   RefPtr<URLExtraData> data = new URLExtraData(
@@ -34,8 +36,7 @@ static void ServoParsingBench() {
       Servo_StyleSheet_FromUTF8Bytes(nullptr,
                                      nullptr,
                                      nullptr,
-                                     css.Elements(),
-                                     css.Length(),
+                                     &cssStr,
                                      eAuthorSheetFeatures,
                                      data,
                                      0,

@@ -9,14 +9,12 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/Selection.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMEventTarget.h"
 #include "nsISupportsImpl.h"
 #include "nsLiteralString.h"
 #include "nsQueryObject.h"
@@ -52,9 +50,9 @@ HTMLEditorEventListener::MouseUp(MouseEvent* aMouseEvent)
   HTMLEditor* htmlEditor = mEditorBase->AsHTMLEditor();
   MOZ_ASSERT(htmlEditor);
 
-  nsCOMPtr<nsIDOMEventTarget> target = aMouseEvent->GetTarget();
+  RefPtr<EventTarget> target = aMouseEvent->GetTarget();
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
+  nsCOMPtr<Element> element = do_QueryInterface(target);
 
   int32_t clientX = aMouseEvent->ClientX();
   int32_t clientY = aMouseEvent->ClientY();
@@ -100,9 +98,9 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
 
   int32_t clickCount = aMouseEvent->Detail();
 
-  nsCOMPtr<nsIDOMEventTarget> target = aMouseEvent->GetExplicitOriginalTarget();
+  RefPtr<EventTarget> target = aMouseEvent->GetExplicitOriginalTarget();
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
+  nsCOMPtr<Element> element = do_QueryInterface(target);
 
   if (isContextClick || (buttonNumber == 0 && clickCount == 2)) {
     RefPtr<Selection> selection = htmlEditor->GetSelection();
@@ -116,7 +114,7 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
 
     // Detect if mouse point is within current selection for context click
     bool nodeIsInSelection = false;
-    if (isContextClick && !selection->Collapsed()) {
+    if (isContextClick && !selection->IsCollapsed()) {
       uint32_t rangeCount = selection->RangeCount();
 
       for (uint32_t i = 0; i < rangeCount; i++) {
@@ -148,7 +146,7 @@ HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent)
             htmlEditor->GetElementOrParentByTagName(NS_LITERAL_STRING("href"),
                                                     node);
           if (linkElement) {
-            element = do_QueryInterface(linkElement);
+            element = linkElement;
           }
         }
       }
@@ -192,7 +190,7 @@ HTMLEditorEventListener::MouseClick(MouseEvent* aMouseEvent)
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDOMEventTarget> target = aMouseEvent->GetTarget();
+  RefPtr<EventTarget> target = aMouseEvent->GetTarget();
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
   nsCOMPtr<Element> element = do_QueryInterface(target);
   if (NS_WARN_IF(!element)) {

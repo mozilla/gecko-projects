@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DeviceIntRect, DevicePixelScale, ExternalScrollId, LayerPoint, LayerRect, LayerVector2D};
+use api::{DeviceIntRect, DevicePixelScale, ExternalScrollId, LayoutPoint, LayoutRect, LayoutVector2D};
 use api::{PipelineId, ScrollClamping, ScrollLocation, ScrollNodeState};
 use api::WorldPoint;
 use clip::{ClipChain, ClipSourcesHandle, ClipStore};
@@ -13,7 +13,7 @@ use internal_types::{FastHashMap, FastHashSet};
 use print_tree::{PrintTree, PrintTreePrinter};
 use resource_cache::ResourceCache;
 use scene::SceneProperties;
-use util::{LayerFastTransform, LayerToWorldFastTransform};
+use util::{LayoutFastTransform, LayoutToWorldFastTransform};
 
 pub type ScrollStates = FastHashMap<ExternalScrollId, ScrollFrameInfo>;
 
@@ -68,7 +68,7 @@ pub struct ClipScrollTree {
     /// ClipChainDescriptors and also those defined by the clipping node hierarchy.
     pub clip_chains: Vec<ClipChain>,
 
-    pub pending_scroll_offsets: FastHashMap<ExternalScrollId, (LayerPoint, ScrollClamping)>,
+    pub pending_scroll_offsets: FastHashMap<ExternalScrollId, (LayoutPoint, ScrollClamping)>,
 
     /// The current frame id, used for giving a unique id to all new dynamically
     /// added frames and clips. The ClipScrollTree increments this by one every
@@ -82,10 +82,10 @@ pub struct ClipScrollTree {
 
 #[derive(Clone)]
 pub struct TransformUpdateState {
-    pub parent_reference_frame_transform: LayerToWorldFastTransform,
-    pub parent_accumulated_scroll_offset: LayerVector2D,
-    pub nearest_scrolling_ancestor_offset: LayerVector2D,
-    pub nearest_scrolling_ancestor_viewport: LayerRect,
+    pub parent_reference_frame_transform: LayoutToWorldFastTransform,
+    pub parent_accumulated_scroll_offset: LayoutVector2D,
+    pub nearest_scrolling_ancestor_offset: LayoutVector2D,
+    pub nearest_scrolling_ancestor_viewport: LayoutRect,
 
     /// The index of the current parent's clip chain.
     pub parent_clip_chain_index: ClipChainIndex,
@@ -97,7 +97,7 @@ pub struct TransformUpdateState {
     pub current_coordinate_system_id: CoordinateSystemId,
 
     /// Transform from the coordinate system that started this compatible coordinate system.
-    pub coordinate_system_relative_transform: LayerFastTransform,
+    pub coordinate_system_relative_transform: LayoutFastTransform,
 
     /// True if this node is transformed by an invertible transform.  If not, display items
     /// transformed by this node will not be displayed and display items not transformed by this
@@ -131,36 +131,6 @@ impl ClipScrollTree {
         // TODO(mrobinson): We should eventually make this impossible to misuse.
         debug_assert!(self.nodes.len() >= 1);
         TOPMOST_SCROLL_NODE_INDEX
-    }
-
-    fn find_scrolling_node_at_point_in_node(
-        &self,
-        cursor: &WorldPoint,
-        index: ClipScrollNodeIndex,
-    ) -> Option<ClipScrollNodeIndex> {
-        let node = &self.nodes[index.0];
-        for child_index in node.children.iter().rev() {
-            let found_index = self.find_scrolling_node_at_point_in_node(cursor, *child_index);
-            if found_index.is_some() {
-                return found_index;
-            }
-        }
-
-        match node.node_type {
-            NodeType::ScrollFrame(state) if state.sensitive_to_input_events() => {}
-            _ => return None,
-        }
-
-        if node.ray_intersects_node(cursor) {
-            Some(index)
-        } else {
-            None
-        }
-    }
-
-    pub fn find_scrolling_node_at_point(&self, cursor: &WorldPoint) -> ClipScrollNodeIndex {
-        self.find_scrolling_node_at_point_in_node(cursor, self.root_reference_frame_index())
-            .unwrap_or(self.topmost_scroll_node_index())
     }
 
     pub fn get_scroll_node_state(&self) -> Vec<ScrollNodeState> {
@@ -200,7 +170,7 @@ impl ClipScrollTree {
 
     pub fn scroll_node(
         &mut self,
-        origin: LayerPoint,
+        origin: LayoutPoint,
         id: ExternalScrollId,
         clamp: ScrollClamping
     ) -> bool {
@@ -214,16 +184,31 @@ impl ClipScrollTree {
         false
     }
 
-    pub fn scroll(
+    fn find_nearest_scrolling_ancestor(
+        &self,
+        index: Option<ClipScrollNodeIndex>
+    ) -> ClipScrollNodeIndex {
+        let index = match index {
+            Some(index) => index,
+            None => return self.topmost_scroll_node_index(),
+        };
+
+        let node = &self.nodes[index.0];
+        match node.node_type {
+            NodeType::ScrollFrame(state) if state.sensitive_to_input_events() => index,
+            _ => self.find_nearest_scrolling_ancestor(node.parent)
+        }
+    }
+
+    pub fn scroll_nearest_scrolling_ancestor(
         &mut self,
         scroll_location: ScrollLocation,
-        cursor: WorldPoint,
+        node_index: Option<ClipScrollNodeIndex>,
     ) -> bool {
         if self.nodes.is_empty() {
             return false;
         }
-
-        let node_index = self.find_scrolling_node_at_point(&cursor);
+        let node_index = self.find_nearest_scrolling_ancestor(node_index);
         self.nodes[node_index.0].scroll(scroll_location)
     }
 
@@ -246,13 +231,13 @@ impl ClipScrollTree {
 
         let root_reference_frame_index = self.root_reference_frame_index();
         let mut state = TransformUpdateState {
-            parent_reference_frame_transform: LayerVector2D::new(pan.x, pan.y).into(),
-            parent_accumulated_scroll_offset: LayerVector2D::zero(),
-            nearest_scrolling_ancestor_offset: LayerVector2D::zero(),
-            nearest_scrolling_ancestor_viewport: LayerRect::zero(),
+            parent_reference_frame_transform: LayoutVector2D::new(pan.x, pan.y).into(),
+            parent_accumulated_scroll_offset: LayoutVector2D::zero(),
+            nearest_scrolling_ancestor_offset: LayoutVector2D::zero(),
+            nearest_scrolling_ancestor_viewport: LayoutRect::zero(),
             parent_clip_chain_index: ClipChainIndex(0),
             current_coordinate_system_id: CoordinateSystemId::root(),
-            coordinate_system_relative_transform: LayerFastTransform::identity(),
+            coordinate_system_relative_transform: LayoutFastTransform::identity(),
             invertible: true,
         };
         let mut next_coordinate_system_id = state.current_coordinate_system_id.next();
@@ -380,12 +365,11 @@ impl ClipScrollTree {
         index: ClipScrollNodeIndex,
         parent_index: ClipScrollNodeIndex,
         handle: ClipSourcesHandle,
-        clip_rect: LayerRect,
         pipeline_id: PipelineId,
     )  -> ClipChainIndex {
         let clip_chain_index = self.allocate_clip_chain();
         let node_type = NodeType::Clip { handle, clip_chain_index, clip_chain_node: None };
-        let node = ClipScrollNode::new(pipeline_id, Some(parent_index), &clip_rect, node_type);
+        let node = ClipScrollNode::new(pipeline_id, Some(parent_index), node_type);
         self.add_node(node, index);
         clip_chain_index
     }
@@ -394,16 +378,10 @@ impl ClipScrollTree {
         &mut self,
         index: ClipScrollNodeIndex,
         parent_index: ClipScrollNodeIndex,
-        frame_rect: LayerRect,
         sticky_frame_info: StickyFrameInfo,
         pipeline_id: PipelineId,
     ) {
-        let node = ClipScrollNode::new_sticky_frame(
-            parent_index,
-            frame_rect,
-            sticky_frame_info,
-            pipeline_id,
-        );
+        let node = ClipScrollNode::new_sticky_frame(parent_index, sticky_frame_info, pipeline_id);
         self.add_node(node, index);
     }
 
@@ -476,8 +454,9 @@ impl ClipScrollTree {
             NodeType::ScrollFrame(scrolling_info) => {
                 pt.new_level(format!("ScrollFrame"));
                 pt.add_item(format!("index: {:?}", index));
+                pt.add_item(format!("viewport: {:?}", scrolling_info.viewport_rect));
                 pt.add_item(format!("scrollable_size: {:?}", scrolling_info.scrollable_size));
-                pt.add_item(format!("scroll.offset: {:?}", scrolling_info.offset));
+                pt.add_item(format!("scroll offset: {:?}", scrolling_info.offset));
             }
             NodeType::StickyFrame(ref sticky_frame_info) => {
                 pt.new_level(format!("StickyFrame"));
@@ -487,7 +466,6 @@ impl ClipScrollTree {
             NodeType::Empty => unreachable!("Empty node remaining in ClipScrollTree."),
         }
 
-        pt.add_item(format!("local_viewport_rect: {:?}", node.local_viewport_rect));
         pt.add_item(format!("world_viewport_transform: {:?}", node.world_viewport_transform));
         pt.add_item(format!("world_content_transform: {:?}", node.world_content_transform));
         pt.add_item(format!("coordinate_system_id: {:?}", node.coordinate_system_id));

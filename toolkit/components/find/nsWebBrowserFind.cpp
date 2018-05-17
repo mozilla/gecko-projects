@@ -20,9 +20,7 @@
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsISelectionController.h"
-#include "nsISelection.h"
 #include "nsIFrame.h"
 #include "nsITextControlFrame.h"
 #include "nsReadableUtils.h"
@@ -48,6 +46,7 @@
 #endif
 
 using mozilla::dom::Selection;
+using mozilla::dom::Element;
 
 nsWebBrowserFind::nsWebBrowserFind()
   : mFindBackwards(false)
@@ -391,7 +390,7 @@ nsWebBrowserFind::SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow,
 
   selCon->SetDisplaySelection(nsISelectionController::SELECTION_ON);
   RefPtr<Selection> selection =
-    selCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+    selCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
   if (selection) {
     selection->RemoveAllRanges(IgnoreErrors());
     selection->AddRange(*aRange, IgnoreErrors());
@@ -399,10 +398,11 @@ nsWebBrowserFind::SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow,
     nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
     if (fm) {
       if (tcFrame) {
-        nsCOMPtr<nsIDOMElement> newFocusedElement(do_QueryInterface(content));
+        RefPtr<Element> newFocusedElement =
+          content->IsElement() ? content->AsElement() : nullptr;
         fm->SetFocus(newFocusedElement, nsIFocusManager::FLAG_NOSCROLL);
       } else {
-        nsCOMPtr<nsIDOMElement> result;
+        RefPtr<Element> result;
         fm->MoveFocus(aWindow, nullptr, nsIFocusManager::MOVEFOCUS_CARET,
                       nsIFocusManager::FLAG_NOSCROLL, getter_AddRefs(result));
       }
@@ -423,23 +423,21 @@ nsWebBrowserFind::SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow,
 
 // Adapted from TextServicesDocument::GetDocumentContentRootNode
 nsresult
-nsWebBrowserFind::GetRootNode(nsIDOMDocument* aDomDoc, nsIDOMNode** aNode)
+nsWebBrowserFind::GetRootNode(nsIDocument* aDoc, nsIDOMNode** aNode)
 {
+  NS_ENSURE_ARG_POINTER(aDoc);
   NS_ENSURE_ARG_POINTER(aNode);
   *aNode = 0;
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDomDoc);
-  NS_ENSURE_ARG_POINTER(doc);
-
-  if (doc->IsHTMLOrXHTML()) {
-    Element* body = doc->GetBody();
+  if (aDoc->IsHTMLOrXHTML()) {
+    Element* body = aDoc->GetBody();
     NS_ENSURE_ARG_POINTER(body);
     NS_ADDREF(*aNode = body->AsDOMNode());
     return NS_OK;
   }
 
   // For non-HTML documents, the content root node will be the doc element.
-  Element* root = doc->GetDocumentElement();
+  Element* root = aDoc->GetDocumentElement();
   NS_ENSURE_ARG_POINTER(root);
   NS_ADDREF(*aNode = root->AsDOMNode());
   return NS_OK;
@@ -449,7 +447,7 @@ nsresult
 nsWebBrowserFind::SetRangeAroundDocument(nsRange* aSearchRange,
                                          nsRange* aStartPt,
                                          nsRange* aEndPt,
-                                         nsIDOMDocument* aDoc)
+                                         nsIDocument* aDoc)
 {
   nsCOMPtr<nsIDOMNode> bodyNode;
   nsresult rv = GetRootNode(aDoc, getter_AddRefs(bodyNode));
@@ -483,15 +481,13 @@ nsWebBrowserFind::SetRangeAroundDocument(nsRange* aSearchRange,
 nsresult
 nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
                                   nsRange* aStartPt, nsRange* aEndPt,
-                                  nsIDOMDocument* aDoc, nsISelection* aSel,
+                                  nsIDocument* aDoc, Selection* aSel,
                                   bool aWrap)
 {
   NS_ENSURE_ARG_POINTER(aSel);
 
-  Selection* sel = aSel->AsSelection();
-
   // There is a selection.
-  uint32_t count = sel->RangeCount();
+  uint32_t count = aSel->RangeCount();
   if (count < 1) {
     return SetRangeAroundDocument(aSearchRange, aStartPt, aEndPt, aDoc);
   }
@@ -517,7 +513,7 @@ nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
   if (!mFindBackwards && !aWrap) {
     // This isn't quite right, since the selection's ranges aren't
     // necessarily in order; but they usually will be.
-    range = sel->GetRangeAt(count - 1);
+    range = aSel->GetRangeAt(count - 1);
     if (!range) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -536,7 +532,7 @@ nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
   }
   // Backward, not wrapping: DocStart to SelStart
   else if (mFindBackwards && !aWrap) {
-    range = sel->GetRangeAt(0);
+    range = aSel->GetRangeAt(0);
     if (!range) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -555,7 +551,7 @@ nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
   }
   // Forward, wrapping: DocStart to SelEnd
   else if (!mFindBackwards && aWrap) {
-    range = sel->GetRangeAt(count - 1);
+    range = aSel->GetRangeAt(count - 1);
     if (!range) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -574,7 +570,7 @@ nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
   }
   // Backward, wrapping: SelStart to DocEnd
   else if (mFindBackwards && aWrap) {
-    range = sel->GetRangeAt(0);
+    range = aSel->GetRangeAt(0);
     if (!range) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -728,17 +724,14 @@ nsWebBrowserFind::SearchInFrame(nsPIDOMWindowOuter* aWindow, bool aWrapping,
 
   nsCOMPtr<nsIDOMRange> foundRange;
 
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(theDoc);
-  MOZ_ASSERT(domDoc);
-
   // If !aWrapping, search from selection to end
   if (!aWrapping)
-    rv = GetSearchLimits(searchRange, startPt, endPt, domDoc, sel, false);
+    rv = GetSearchLimits(searchRange, startPt, endPt, theDoc, sel, false);
 
   // If aWrapping, search the part of the starting frame
   // up to the point where we left off.
   else
-    rv = GetSearchLimits(searchRange, startPt, endPt, domDoc, sel, true);
+    rv = GetSearchLimits(searchRange, startPt, endPt, theDoc, sel, true);
 
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -803,14 +796,14 @@ nsWebBrowserFind::GetFrameSelection(nsPIDOMWindowOuter* aWindow)
   RefPtr<Selection> sel;
   if (frame) {
     frame->GetSelectionController(presContext, getter_AddRefs(selCon));
-    sel = selCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+    sel = selCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
     if (sel && sel->RangeCount() > 0) {
       return sel.forget();
     }
   }
 
   selCon = do_QueryInterface(presShell);
-  sel = selCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+  sel = selCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
   return sel.forget();
 }
 
@@ -842,8 +835,7 @@ nsWebBrowserFind::OnFind(nsPIDOMWindowOuter* aFoundWindow)
   if (fm) {
     // get the containing frame and focus it. For top-level windows, the right
     // window should already be focused.
-    nsCOMPtr<nsIDOMElement> frameElement =
-      do_QueryInterface(aFoundWindow->GetFrameElementInternal());
+    RefPtr<Element> frameElement = aFoundWindow->GetFrameElementInternal();
     if (frameElement) {
       fm->SetFocus(frameElement, 0);
     }

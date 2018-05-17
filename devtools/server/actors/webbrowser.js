@@ -8,7 +8,6 @@
 
 var { Ci } = require("chrome");
 var Services = require("Services");
-const defer = require("devtools/shared/defer");
 var { DebuggerServer } = require("devtools/server/main");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 
@@ -214,7 +213,7 @@ BrowserTabList.prototype.constructor = BrowserTabList;
  * @private
  * @param window nsIChromeWindow
  *        The navigator:browser window for which you want the selected browser.
- * @return nsIDOMElement|null
+ * @return Element|null
  *         The currently selected xul:browser element, if any. Note that the
  *         browser window might not be loaded yet - the function will return
  *         |null| in such cases.
@@ -863,26 +862,22 @@ function BrowserAddonList(connection) {
   this._onListChanged = null;
 }
 
-BrowserAddonList.prototype.getList = function() {
-  let deferred = defer();
-  AddonManager.getAllAddons((addons) => {
-    for (let addon of addons) {
-      let actor = this._actorByAddonId.get(addon.id);
-      if (!actor) {
-        if (addon.isWebExtension) {
-          actor = new WebExtensionParentActor(this._connection, addon);
-        } else {
-          actor = new BrowserAddonActor(this._connection, addon);
-        }
-
-        this._actorByAddonId.set(addon.id, actor);
+BrowserAddonList.prototype.getList = async function() {
+  let addons = await AddonManager.getAllAddons();
+  for (let addon of addons) {
+    let actor = this._actorByAddonId.get(addon.id);
+    if (!actor) {
+      if (addon.isWebExtension) {
+        actor = new WebExtensionParentActor(this._connection, addon);
+      } else {
+        actor = new BrowserAddonActor(this._connection, addon);
       }
+
+      this._actorByAddonId.set(addon.id, actor);
     }
+  }
 
-    deferred.resolve([...this._actorByAddonId].map(([_, actor]) => actor));
-  });
-
-  return deferred.promise;
+  return Array.from(this._actorByAddonId, ([_, actor]) => actor);
 };
 
 Object.defineProperty(BrowserAddonList.prototype, "onListChanged", {

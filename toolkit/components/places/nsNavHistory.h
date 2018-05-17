@@ -7,10 +7,9 @@
 #define nsNavHistory_h_
 
 #include "nsINavHistoryService.h"
-#include "nsPIPlacesDatabase.h"
-#include "nsIBrowserHistory.h"
 #include "nsINavBookmarksService.h"
 #include "nsIFaviconService.h"
+#include "nsIGlobalHistory2.h"
 
 #include "nsIObserverService.h"
 #include "nsICollation.h"
@@ -66,22 +65,22 @@
 // The guid of the mobile bookmarks virtual query.
 #define MOBILE_BOOKMARKS_VIRTUAL_GUID "mobile____v"
 
-class nsNavHistory;
-class QueryKeyValuePair;
+class nsIAutoCompleteController;
 class nsIEffectiveTLDService;
 class nsIIDNService;
+class nsNavHistory;
+class PlacesDecayFrecencyCallback;
 class PlacesSQLQueryBuilder;
-class nsIAutoCompleteController;
+class QueryKeyValuePair;
 
 // nsNavHistory
 
 class nsNavHistory final : public nsSupportsWeakReference
                          , public nsINavHistoryService
                          , public nsIObserver
-                         , public nsIBrowserHistory
-                         , public nsPIPlacesDatabase
                          , public mozIStorageVacuumParticipant
 {
+  friend class PlacesDecayFrecencyCallback;
   friend class PlacesSQLQueryBuilder;
 
 public:
@@ -89,9 +88,7 @@ public:
 
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSINAVHISTORYSERVICE
-  NS_DECL_NSIBROWSERHISTORY
   NS_DECL_NSIOBSERVER
-  NS_DECL_NSPIPLACESDATABASE
   NS_DECL_MOZISTORAGEVACUUMPARTICIPANT
 
   /**
@@ -334,6 +331,12 @@ public:
   uint32_t GetRecentFlags(nsIURI *aURI);
 
   /**
+   * Whether there are visits.
+   * Note: This may cause synchronous I/O.
+   */
+  bool hasHistoryEntries();
+
+  /**
    * Registers a TRANSITION_EMBED visit for the session.
    *
    * @param aURI
@@ -351,11 +354,6 @@ public:
    * @return whether the page has a embed visit.
    */
   bool hasEmbedVisit(nsIURI* aURI);
-
-  /**
-   * Clears all registered embed visits.
-   */
-  void clearEmbedVisits();
 
   int32_t GetFrecencyAgedWeight(int32_t aAgeInDays) const
   {
@@ -445,7 +443,7 @@ public:
   /**
    * Fires onFrecencyChanged event to nsINavHistoryService observers
    */
-  void NotifyFrecencyChanged(nsIURI* aURI,
+  void NotifyFrecencyChanged(const nsACString& aSpec,
                              int32_t aNewFrecency,
                              const nsACString& aGUID,
                              bool aHidden,
@@ -464,6 +462,42 @@ public:
                                            const nsACString& aGUID,
                                            bool aHidden,
                                            PRTime aLastVisitDate) const;
+
+  /**
+   * Returns true if frecency is currently being decayed.
+   *
+   * @return True if frecency is being decayed, false if not.
+   */
+  bool IsFrecencyDecaying() const;
+
+  /**
+   * Updates frecencyMean and frecencyStandardDeviation given a change in
+   * frecency of a particular moz_places row.
+   *
+   * @param  aPlaceId
+   *         The moz_places row ID.
+   * @param  aOldFrecency
+   *         The old value of the frecency.
+   * @param  aNewFrecency
+   *         The new value of the frecency.
+   */
+  void UpdateFrecencyStats(int64_t aPlaceId,
+                           int32_t aOldFrecency,
+                           int32_t aNewFrecency);
+
+  /**
+   * Dispatches a runnable to the main thread that calls UpdateFrecencyStats.
+   *
+   * @param  aPlaceId
+   *         The moz_places row ID.
+   * @param  aOldFrecency
+   *         The old value of the frecency.
+   * @param  aNewFrecency
+   *         The new value of the frecency.
+   */
+  void DispatchFrecencyStatsUpdate(int64_t aPlaceId,
+                                   int32_t aOldFrecency,
+                                   int32_t aNewFrecency) const;
 
   /**
    * Store last insterted id for a table.
@@ -512,9 +546,6 @@ protected:
    */
   nsresult DecayFrecency();
 
-  nsresult RemovePagesInternal(const nsCString& aPlaceIdsQueryString);
-  nsresult CleanupPlacesOnVisitsDelete(const nsCString& aPlaceIdsQueryString);
-
   /**
    * Loads all of the preferences that we use into member variables.
    *
@@ -552,8 +583,6 @@ protected:
   nsresult ResultsAsList(mozIStorageStatement* statement,
                          nsNavHistoryQueryOptions* aOptions,
                          nsCOMArray<nsNavHistoryResultNode>* aResults);
-
-  void TitleForDomain(const nsCString& domain, nsACString& aTitle);
 
   // observers
   nsMaybeWeakPtrArray<nsINavHistoryObserver> mObservers;
@@ -627,6 +656,16 @@ protected:
   int32_t mUnvisitedBookmarkBonus;
   int32_t mUnvisitedTypedBonus;
   int32_t mReloadVisitBonus;
+
+  void DecayFrecencyCompleted(uint16_t reason);
+  uint32_t mDecayFrecencyPendingCount;
+
+  uint64_t mFrecencyStatsCount;
+  uint64_t mFrecencyStatsSum;
+  uint64_t mFrecencyStatsSumOfSquares;
+  nsCOMPtr<nsITimer> mUpdateFrecencyStatsPrefsTimer;
+  static void UpdateFrecencyStatsPrefs(nsITimer *aTimer,
+                                       void *aClosure);
 
   // in nsNavHistoryQuery.cpp
   nsresult TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,

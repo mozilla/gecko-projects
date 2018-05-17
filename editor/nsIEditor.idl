@@ -9,7 +9,6 @@
 
 interface nsIURI;
 interface nsIContent;
-interface nsISelection;
 interface nsISelectionController;
 interface nsIDocumentStateListener;
 interface nsIOutputStream;
@@ -19,6 +18,10 @@ interface nsIEditorObserver;
 interface nsIEditActionListener;
 interface nsIInlineSpellChecker;
 interface nsITransferable;
+
+webidl Document;
+webidl Element;
+webidl Selection;
 
 %{C++
 namespace mozilla {
@@ -46,21 +49,15 @@ interface nsIEditor  : nsISupports
   const short eStrip = 0;
   const short eNoStrip = 1;
 
-  readonly attribute nsISelection selection;
+  readonly attribute Selection selection;
 
-  void setAttributeOrEquivalent(in nsIDOMElement element,
+  void setAttributeOrEquivalent(in Element element,
                                 in AString sourceAttrName,
                                 in AString sourceAttrValue,
                                 in boolean aSuppressTransaction);
-  void removeAttributeOrEquivalent(in nsIDOMElement element,
+  void removeAttributeOrEquivalent(in Element element,
                                    in DOMString sourceAttrName,
                                    in boolean aSuppressTransaction);
-
-  /**
-   * postCreate should be called after Init, and is the time that the editor
-   * tells its documentStateObservers that the document has been created.
-   */
-  void postCreate();
 
   /**
    * preDestroy is called before the editor goes away, and gives the editor a
@@ -88,11 +85,11 @@ interface nsIEditor  : nsISupports
   /**
    * the DOM Document this editor is associated with, refcounted.
    */
-  readonly attribute nsIDOMDocument document;
+  readonly attribute Document document;
 
   /** the body element, i.e. the root of the editable document.
    */
-  readonly attribute  nsIDOMElement rootElement;
+  readonly attribute Element rootElement;
 
   /**
    * the selection controller for the current presentation, refcounted.
@@ -251,12 +248,6 @@ interface nsIEditor  : nsISupports
     */
   nsIInlineSpellChecker getInlineSpellChecker(in boolean autoCreate);
 
-  /** Resyncs spellchecking state (enabled/disabled).  This should be called
-    * when anything that affects spellchecking state changes, such as the
-    * spellcheck attribute value.
-    */
-  void syncRealTimeSpell();
-
   /** Called when the user manually overrides the spellchecking state for this
     * editor.
     * @param  enable  The new state of spellchecking in this editor, as
@@ -348,7 +339,7 @@ interface nsIEditor  : nsISupports
    * @param aAttribute  the string representation of the attribute to set
    * @param aValue      the value to set aAttribute to
    */
-  void setAttribute(in nsIDOMElement aElement, in AString attributestr,
+  void setAttribute(in Element aElement, in AString attributestr,
                     in AString attvalue);
 
   /**
@@ -361,7 +352,7 @@ interface nsIEditor  : nsISupports
    * @return              PR_TRUE if aAttribute is set on the current node,
    *                      PR_FALSE if it is not.
    */
-  boolean getAttributeValue(in nsIDOMElement aElement,
+  boolean getAttributeValue(in Element aElement,
                             in AString attributestr,
                             out AString resultValue);
 
@@ -372,7 +363,7 @@ interface nsIEditor  : nsISupports
    * @param aElement      the content element to operate on
    * @param aAttribute    the string representation of the attribute to get
    */
-  void removeAttribute(in nsIDOMElement aElement,
+  void removeAttribute(in Element aElement,
                        in AString aAttribute);
 
   /**
@@ -475,11 +466,6 @@ interface nsIEditor  : nsISupports
    */
   AString outputToString(in AString formatType,
                          in unsigned long flags);
-  void outputToStream(in nsIOutputStream aStream,
-                      in AString formatType,
-                      in ACString charsetOverride,
-                      in unsigned long flags);
-
 
   /* ------------ Various listeners methods --------------
    * nsIEditor holds strong references to the editor observers, action listeners
@@ -517,9 +503,6 @@ interface nsIEditor  : nsISupports
 
   /* Run unit tests. Noop in optimized builds */
   void debugUnitTests(out long outNumTests, out long  outNumTestsFailed);
-
-  /* Set true if you want to suppress dispatching input event. */
-  attribute boolean suppressDispatchingInputEvent;
 
   /**
    * forceCompositionEnd() force the composition end

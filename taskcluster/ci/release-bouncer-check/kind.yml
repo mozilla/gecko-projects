@@ -5,12 +5,11 @@
 loader: taskgraph.loader.transform:loader
 
 kind-dependencies:
-    - beetmover-cdns
+    - release-beetmover-push-to-release
 
 transforms:
     - taskgraph.transforms.release_deps:transforms
     - taskgraph.transforms.bouncer_check:transforms
-    - taskgraph.transforms.release_notifications:transforms
     - taskgraph.transforms.job:transforms
     - taskgraph.transforms.task:transforms
 
@@ -43,14 +42,18 @@ jobs:
         run:
             config:
                 by-project:
-                    mozilla-release:
-                        - releases/bouncer_firefox_release.py
                     mozilla-beta:
                         - releases/bouncer_firefox_beta.py
+                    mozilla-release:
+                        - releases/bouncer_firefox_release.py
+                    mozilla-esr60:
+                        - releases/bouncer_firefox_esr.py
+                    jamun:
+                        - releases/dev_bouncer_firefox_esr.py
                     default:
                         - releases/dev_bouncer_firefox_beta.py
         treeherder:
-            platform: linux64/opt
+            platform: firefox-release/opt
 
     devedition:
         shipping-product: devedition
@@ -65,4 +68,4 @@ jobs:
                     default:
                         - releases/dev_bouncer_firefox_devedition.py
         treeherder:
-            platform: linux64-devedition/opt
+            platform: devedition-release/opt

@@ -16,6 +16,9 @@ pub mod platform;
 extern crate core_foundation_sys;
 
 #[cfg(any(target_os = "macos"))]
+extern crate core_foundation;
+
+#[cfg(any(target_os = "macos"))]
 #[path = "macos/mod.rs"]
 pub mod platform;
 
@@ -39,8 +42,8 @@ extern crate bitflags;
 
 mod consts;
 mod statemachine;
-mod u2ftypes;
 mod u2fprotocol;
+mod u2ftypes;
 
 mod manager;
 pub use manager::U2FManager;
@@ -89,8 +92,8 @@ pub enum Error {
 }
 
 #[cfg(fuzzing)]
+pub use consts::*;
+#[cfg(fuzzing)]
 pub use u2fprotocol::*;
 #[cfg(fuzzing)]
 pub use u2ftypes::*;
-#[cfg(fuzzing)]
-pub use consts::*;

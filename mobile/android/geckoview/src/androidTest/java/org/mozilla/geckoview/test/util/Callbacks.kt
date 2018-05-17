@@ -1,8 +1,11 @@
-/* Any copyright is dedicated to the Public Domain.
-   http://creativecommons.org/publicdomain/zero/1.0/ */
+/* -*- Mode: Java; c-basic-offset: 4; tab-width: 4; indent-tabs-mode: nil; -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 package org.mozilla.geckoview.test.util
 
+import org.mozilla.geckoview.GeckoResponse
 import org.mozilla.geckoview.GeckoSession
 
 class Callbacks private constructor() {
@@ -45,11 +48,12 @@ class Callbacks private constructor() {
         }
 
         override fun onLoadRequest(session: GeckoSession, uri: String, where: Int,
-                                   response: GeckoSession.Response<Boolean>) {
+                                   flags: Int,
+                                   response: GeckoResponse<Boolean>) {
             response.respond(false)
         }
 
-        override fun onNewSession(session: GeckoSession, uri: String, response: GeckoSession.Response<GeckoSession>) {
+        override fun onNewSession(session: GeckoSession, uri: String, response: GeckoResponse<GeckoSession>) {
             response.respond(null)
         }
     }
@@ -124,7 +128,7 @@ class Callbacks private constructor() {
     }
 
     interface SelectionActionDelegate : GeckoSession.SelectionActionDelegate {
-        override fun onShowActionRequest(session: GeckoSession, selection: GeckoSession.SelectionActionDelegate.Selection, actions: Array<out String>, response: GeckoSession.Response<String>) {
+        override fun onShowActionRequest(session: GeckoSession, selection: GeckoSession.SelectionActionDelegate.Selection, actions: Array<out String>, response: GeckoResponse<String>) {
         }
 
         override fun onHideAction(session: GeckoSession, reason: Int) {

@@ -43,6 +43,7 @@ class nsIURI;
 class nsTextFrame;
 class imgIContainer;
 class nsPresContext;
+struct nsStyleDisplay;
 struct nsStyleVisibility;
 namespace mozilla {
 class ComputedStyle;
@@ -382,7 +383,7 @@ struct nsStyleImage
     if (mType == eStyleImageType_Image && !mImage->IsResolved()) {
       const nsStyleImageRequest* oldRequest =
         (aOldImage && aOldImage->GetType() == eStyleImageType_Image)
-        ? aOldImage->GetImageRequest() : nullptr;
+        ? aOldImage->ImageRequest() : nullptr;
       mImage->Resolve(aContext, oldRequest);
     }
   }
@@ -390,20 +391,20 @@ struct nsStyleImage
   nsStyleImageType GetType() const {
     return mType;
   }
-  nsStyleImageRequest* GetImageRequest() const {
+  nsStyleImageRequest* ImageRequest() const {
     MOZ_ASSERT(mType == eStyleImageType_Image, "Data is not an image!");
     MOZ_ASSERT(mImage);
     return mImage;
   }
   imgRequestProxy* GetImageData() const {
-    return GetImageRequest()->get();
+    return ImageRequest()->get();
   }
   nsStyleGradient* GetGradientData() const {
     NS_ASSERTION(mType == eStyleImageType_Gradient, "Data is not a gradient!");
     return mGradient;
   }
   bool IsResolved() const {
-    return mType != eStyleImageType_Image || GetImageRequest()->IsResolved();
+    return mType != eStyleImageType_Image || ImageRequest()->IsResolved();
   }
   const nsAtom* GetElementId() const {
     NS_ASSERTION(mType == eStyleImageType_Element, "Data is not an element!");
@@ -521,11 +522,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColor
   }
   void FinishStyle(nsPresContext*, const nsStyleColor*) {}
   const static bool kHasFinishStyle = false;
-
-  nscolor CalcComplexColor(const mozilla::StyleComplexColor& aColor) const {
-    return mozilla::LinearBlendColors(aColor.mColor, mColor,
-                                      aColor.mForegroundRatio);
-  }
 
   nsChangeHint CalcDifference(const nsStyleColor& aNewData) const;
 
@@ -658,6 +654,7 @@ struct nsStyleImageLayers {
 
   struct Layer {
     typedef mozilla::StyleGeometryBox StyleGeometryBox;
+    typedef mozilla::StyleImageLayerAttachment StyleImageLayerAttachment;
 
     nsStyleImage  mImage;         // [reset]
     mozilla::Position mPosition;  // [reset]
@@ -665,12 +662,13 @@ struct nsStyleImageLayers {
     StyleGeometryBox  mClip;      // [reset] See nsStyleConsts.h
     MOZ_INIT_OUTSIDE_CTOR
       StyleGeometryBox mOrigin;   // [reset] See nsStyleConsts.h
-    uint8_t       mAttachment;    // [reset] See nsStyleConsts.h
+    StyleImageLayerAttachment mAttachment;
+                                  // [reset] See nsStyleConsts.h
                                   // background-only property
                                   // This property is used for background layer
                                   // only. For a mask layer, it should always
                                   // be the initial value, which is
-                                  // NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL.
+                                  // StyleImageLayerAttachment::Scroll.
     uint8_t       mBlendMode;     // [reset] See nsStyleConsts.h
                                   // background-only property
                                   // This property is used for background layer
@@ -1507,8 +1505,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition
   nsStyleGridLine mGridColumnEnd;
   nsStyleGridLine mGridRowStart;
   nsStyleGridLine mGridRowEnd;
-  nsStyleCoord    mGridColumnGap;       // [reset] coord, percent, calc
-  nsStyleCoord    mGridRowGap;          // [reset] coord, percent, calc
+  nsStyleCoord    mColumnGap;       // [reset] normal, coord, percent, calc
+  nsStyleCoord    mRowGap;          // [reset] normal, coord, percent, calc
 
   // FIXME: Logical-coordinate equivalents to these WidthDepends... and
   // HeightDepends... methods have been introduced (see below); we probably
@@ -2353,6 +2351,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
   // The threshold used for extracting a shape from shape-outside: <image>.
   float mShapeImageThreshold = 0.0f; // [reset]
 
+  // The margin around a shape-outside: <image>.
+  nsStyleCoord mShapeMargin;
+
   mozilla::StyleShapeSource mShapeOutside; // [reset]
 
   bool IsBlockInsideStyle() const {
@@ -2685,15 +2686,16 @@ public:
     return mContent.mCounters;
   }
 
-  nsStyleImageRequest* GetImageRequest() const
+  nsStyleImageRequest* ImageRequest() const
   {
     MOZ_ASSERT(mType == eStyleContentType_Image);
+    MOZ_ASSERT(mContent.mImage);
     return mContent.mImage;
   }
 
   imgRequestProxy* GetImage() const
   {
-    return GetImageRequest()->get();
+    return ImageRequest()->get();
   }
 
   void SetKeyword(nsStyleContentType aType)
@@ -2931,7 +2933,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColumn
 
   uint32_t     mColumnCount; // [reset] see nsStyleConsts.h
   nsStyleCoord mColumnWidth; // [reset] coord, auto
-  nsStyleCoord mColumnGap;   // [reset] <length-percentage> | normal
 
   mozilla::StyleComplexColor mColumnRuleColor; // [reset]
   uint8_t      mColumnRuleStyle;  // [reset]

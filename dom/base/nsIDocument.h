@@ -16,7 +16,6 @@
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIContentViewer.h"
-#include "nsIDocumentObserver.h"         // for typedef (nsUpdateType)
 #include "nsIInterfaceRequestor.h"
 #include "nsILoadContext.h"
 #include "nsILoadGroup.h"                // for member (in nsCOMPtr)
@@ -93,9 +92,6 @@ class nsIDocShell;
 class nsIDocShellTreeItem;
 class nsIDocumentEncoder;
 class nsIDocumentObserver;
-class nsIDOMDocument;
-class nsIDOMElement;
-class nsIDOMNodeList;
 class nsIHTMLCollection;
 class nsILayoutHistoryState;
 class nsILoadContext;
@@ -803,53 +799,6 @@ public:
   }
 
   /**
-   * This gets fired when the element that an id refers to changes.
-   * This fires at difficult times. It is generally not safe to do anything
-   * which could modify the DOM in any way. Use
-   * nsContentUtils::AddScriptRunner.
-   * @return true to keep the callback in the callback set, false
-   * to remove it.
-   */
-  typedef bool (* IDTargetObserver)(Element* aOldElement,
-                                    Element* aNewelement, void* aData);
-
-  /**
-   * Add an IDTargetObserver for a specific ID. The IDTargetObserver
-   * will be fired whenever the content associated with the ID changes
-   * in the future. If aForImage is true, mozSetImageElement can override
-   * what content is associated with the ID. In that case the IDTargetObserver
-   * will be notified at those times when the result of LookupImageElement
-   * changes.
-   * At most one (aObserver, aData, aForImage) triple can be
-   * registered for each ID.
-   * @return the content currently associated with the ID.
-   */
-  Element* AddIDTargetObserver(nsAtom* aID, IDTargetObserver aObserver,
-                               void* aData, bool aForImage);
-  /**
-   * Remove the (aObserver, aData, aForImage) triple for a specific ID, if
-   * registered.
-   */
-  void RemoveIDTargetObserver(nsAtom* aID, IDTargetObserver aObserver,
-                              void* aData, bool aForImage);
-
-  /**
-   * Check that aId is not empty and log a message to the console
-   * service if it is.
-   * @returns true if aId looks correct, false otherwise.
-   */
-  inline bool CheckGetElementByIdArg(const nsAString& aId)
-  {
-    if (aId.IsEmpty()) {
-      ReportEmptyGetElementByIdArg();
-      return false;
-    }
-    return true;
-  }
-
-  void ReportEmptyGetElementByIdArg();
-
-  /**
    * Get the Content-Type of this document.
    */
   void GetContentType(nsAString& aContentType);
@@ -1004,14 +953,6 @@ public:
   bool GetHasMixedDisplayContentBlocked()
   {
     return mHasMixedDisplayContentBlocked;
-  }
-
-  /**
-  * Set referrer policy CSP flag for this document.
-  */
-  void SetHasReferrerPolicyCSP(bool aHasReferrerPolicyCSP)
-  {
-    mHasReferrerPolicyCSP = aHasReferrerPolicyCSP;
   }
 
   /**
@@ -1791,7 +1732,7 @@ public:
    * aFrameElement is the frame element which contains the child-process
    * fullscreen document.
    */
-  nsresult RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement);
+  nsresult RemoteFrameFullscreenChanged(mozilla::dom::Element* aFrameElement);
 
   /**
    * Called when a frame in a remote child document has rolled back fullscreen
@@ -1918,8 +1859,8 @@ public:
   // BeginUpdate must be called before any batch of modifications of the
   // content model or of style data, EndUpdate must be called afterward.
   // To make this easy and painless, use the mozAutoDocUpdate helper class.
-  void BeginUpdate(nsUpdateType aUpdateType);
-  virtual void EndUpdate(nsUpdateType aUpdateType) = 0;
+  void BeginUpdate();
+  virtual void EndUpdate() = 0;
 
   virtual void BeginLoad() = 0;
   virtual void EndLoad() = 0;
@@ -2367,7 +2308,7 @@ public:
                                float aBottomSize, float aLeftSize,
                                bool aIgnoreRootScrollFrame,
                                bool aFlushLayout,
-                               nsIDOMNodeList** aReturn);
+                               nsINodeList** aReturn);
 
   /**
    * See FlushSkinBindings on nsBindingManager
@@ -3266,8 +3207,21 @@ public:
 #endif
   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
   void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
-  void GetLastStyleSheetSet(nsAString& aSheetSet);
-  void GetPreferredStyleSheetSet(nsAString& aSheetSet);
+  void GetLastStyleSheetSet(nsAString& aSheetSet)
+  {
+    aSheetSet = mLastStyleSheetSet;
+  }
+  const nsString& GetCurrentStyleSheetSet() const
+  {
+    return mLastStyleSheetSet.IsEmpty()
+      ? mPreferredStyleSheetSet
+      : mLastStyleSheetSet;
+  }
+  void SetPreferredStyleSheetSet(const nsAString&);
+  void GetPreferredStyleSheetSet(nsAString& aSheetSet)
+  {
+    aSheetSet = mPreferredStyleSheetSet;
+  }
   mozilla::dom::DOMStringList* StyleSheetSets();
   void EnableStyleSheetsForSet(const nsAString& aSheetSet);
 
@@ -3348,9 +3302,23 @@ public:
   nsIHTMLCollection* Children();
   uint32_t ChildElementCount();
 
-  virtual nsHTMLDocument* AsHTMLDocument() { return nullptr; }
-  virtual mozilla::dom::SVGDocument* AsSVGDocument() { return nullptr; }
-  virtual mozilla::dom::XULDocument* AsXULDocument() { return nullptr; }
+  /**
+   * Asserts IsHTMLOrXHTML, and can't return null.
+   * Defined inline in nsHTMLDocument.h
+   */
+  inline nsHTMLDocument* AsHTMLDocument();
+
+  /**
+   * Asserts IsSVGDocument, and can't return null.
+   * Defined inline in SVGDocument.h
+   */
+  inline mozilla::dom::SVGDocument* AsSVGDocument();
+
+  /**
+   * Asserts IsXULDocument, and can't return null.
+   * Defined inline in XULDocument.h
+   */
+  inline mozilla::dom::XULDocument* AsXULDocument();
 
   /*
    * Given a node, get a weak reference to it and append that reference to
@@ -3566,6 +3534,8 @@ public:
    * Returns null if there is no such element.
    */
   nsIContent* GetContentInThisDocument(nsIFrame* aFrame) const;
+
+  void ReportShadowDOMUsage();
 
 protected:
   already_AddRefed<nsIPrincipal> MaybeDowngradePrincipal(nsIPrincipal* aPrincipal);
@@ -3889,9 +3859,6 @@ protected:
   // it's false only when we're in bfcache or unloaded.
   bool mVisible : 1;
 
-  // True if a document load has a CSP with referrer attached.
-  bool mHasReferrerPolicyCSP : 1;
-
   // True if our content viewer has been removed from the docshell
   // (it may still be displayed, but in zombie state). Form control data
   // has been saved.
@@ -4085,6 +4052,8 @@ protected:
   // pointing to them.  We track whether we ever reported use counters so
   // that we only report them once for the document.
   bool mReportedUseCounters: 1;
+
+  bool mHasReportedShadowDOMUsage: 1;
 
 #ifdef DEBUG
 public:
@@ -4425,6 +4394,8 @@ protected:
 
   // Member to store out last-selected stylesheet set.
   nsString mLastStyleSheetSet;
+  nsString mPreferredStyleSheetSet;
+
   RefPtr<nsDOMStyleSheetSetList> mStyleSheetSetList;
 
   // We lazily calculate declaration blocks for SVG elements with mapped
@@ -4561,7 +4532,7 @@ NS_NewVideoDocument(nsIDocument** aInstancePtrResult);
 // -- this method will not attempt to get a principal based on aDocumentURI.
 // Also, both aDocumentURI and aBaseURI must not be null.
 nsresult
-NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
+NS_NewDOMDocument(nsIDocument** aInstancePtrResult,
                   const nsAString& aNamespaceURI,
                   const nsAString& aQualifiedName,
                   mozilla::dom::DocumentType* aDoctype,
@@ -4575,7 +4546,7 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
 // This is used only for xbl documents created from the startup cache.
 // Non-cached documents are created in the same manner as xml documents.
 nsresult
-NS_NewXBLDocument(nsIDOMDocument** aInstancePtrResult,
+NS_NewXBLDocument(nsIDocument** aInstancePtrResult,
                   nsIURI* aDocumentURI,
                   nsIURI* aBaseURI,
                   nsIPrincipal* aPrincipal);
@@ -4605,6 +4576,20 @@ nsINode::GetParentObject() const
     // don't use XBL scopes.
   p.mUseXBLScope = IsInAnonymousSubtree() && !IsAnonymousContentInSVGUseSubtree();
   return p;
+}
+
+inline nsIDocument*
+nsINode::AsDocument()
+{
+  MOZ_ASSERT(IsDocument());
+  return static_cast<nsIDocument*>(this);
+}
+
+inline const nsIDocument*
+nsINode::AsDocument() const
+{
+  MOZ_ASSERT(IsDocument());
+  return static_cast<const nsIDocument*>(this);
 }
 
 #endif /* nsIDocument_h___ */

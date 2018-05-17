@@ -17,6 +17,7 @@ ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
 ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
 ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/Timer.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const {EventEmitter} = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
@@ -33,13 +34,14 @@ ChromeUtils.defineModuleGetter(this, "FileTestUtils",
                                "resource://testing-common/FileTestUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "HttpServer",
                                "resource://testing-common/httpd.js");
+ChromeUtils.defineModuleGetter(this, "InstallRDF",
+                               "resource://gre/modules/addons/RDFManifestConverter.jsm");
 ChromeUtils.defineModuleGetter(this, "MockRegistrar",
                                "resource://testing-common/MockRegistrar.jsm");
 
 XPCOMUtils.defineLazyServiceGetters(this, {
   aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
   proxyService: ["@mozilla.org/network/protocol-proxy-service;1", "nsIProtocolProxyService"],
-  rdfService: ["@mozilla.org/rdf/rdf-service;1", "nsIRDFService"],
   uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
 });
 
@@ -59,14 +61,6 @@ const ArrayBufferInputStream = Components.Constructor(
 const nsFile = Components.Constructor(
   "@mozilla.org/file/local;1",
   "nsIFile", "initWithPath");
-
-const RDFXMLParser = Components.Constructor(
-  "@mozilla.org/rdf/xml-parser;1",
-  "nsIRDFXMLParser", "parseString");
-
-const RDFDataSource = Components.Constructor(
-  "@mozilla.org/rdf/datasource;1?name=in-memory-datasource",
-  "nsIRDFDataSource");
 
 const ZipReader = Components.Constructor(
   "@mozilla.org/libjar/zip-reader;1",
@@ -108,27 +102,45 @@ class MockBlocklist {
       addons = new Map(Object.entries(addons));
     }
     this.addons = addons;
+    this.wrappedJSObject = this;
+
+    // Copy blocklist constants.
+    for (let [k, v] of Object.entries(Ci.nsIBlocklistService)) {
+      if (typeof v === "number") {
+        this[k] = v;
+      }
+    }
+
+    this._xpidb = ChromeUtils.import("resource://gre/modules/addons/XPIDatabase.jsm", null);
   }
 
   get contractID() {
     return "@mozilla.org/extensions/blocklist;1";
   }
 
+  _reLazifyService() {
+    XPCOMUtils.defineLazyServiceGetter(Services, "blocklist", this.contractID);
+    ChromeUtils.defineModuleGetter(this._xpidb, "Blocklist", "resource://gre/modules/Blocklist.jsm");
+  }
+
   register() {
     this.originalCID = MockRegistrar.register(this.contractID, this);
+    this._reLazifyService();
+    this._xpidb.Blocklist = this;
   }
 
   unregister() {
     MockRegistrar.unregister(this.originalCID);
+    this._reLazifyService();
   }
 
-  getAddonBlocklistState(addon, appVersion, toolkitVersion) {
-    return this.addons.get(addon.id, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+  async getAddonBlocklistState(addon, appVersion, toolkitVersion) {
+    await new Promise(r => setTimeout(r, 150));
+    return this.addons.get(addon.id) || Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   }
 
   async getAddonBlocklistEntry(addon, appVersion, toolkitVersion) {
-    await Promise.resolve();
-    let state = this.getAddonBlocklistState(addon, appVersion, toolkitVersion);
+    let state = await this.getAddonBlocklistState(addon, appVersion, toolkitVersion);
     if (state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
       return {
         state,
@@ -138,12 +150,13 @@ class MockBlocklist {
     return null;
   }
 
-  getPluginBlocklistState(plugin, version, appVersion, toolkitVersion) {
+  async getPluginBlocklistState(plugin, version, appVersion, toolkitVersion) {
+    await new Promise(r => setTimeout(r, 150));
     return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
   }
 }
 
-MockBlocklist.prototype.QueryInterface = XPCOMUtils.generateQI(["nsIBlocklistService"]);
+MockBlocklist.prototype.QueryInterface = ChromeUtils.generateQI(["nsIBlocklistService"]);
 
 
 /**
@@ -186,7 +199,6 @@ function escaped(strings, ...values) {
 class AddonsList {
   constructor(file) {
     this.extensions = [];
-    this.bootstrapped = [];
     this.themes = [];
     this.xpis = [];
 
@@ -219,8 +231,6 @@ class AddonsList {
 
           if (addon.type == "theme") {
             this.themes.push(file);
-          } else if (addon.bootstrapped) {
-            this.bootstrapped.push(file);
           } else {
             this.extensions.push(file);
           }
@@ -250,10 +260,6 @@ class AddonsList {
 
   hasTheme(dir, id) {
     return this.hasItem("themes", dir, id);
-  }
-
-  hasBootstrapped(dir, id) {
-    return this.hasItem("bootstrapped", dir, id);
   }
 
   hasExtension(dir, id) {
@@ -319,9 +325,6 @@ var AddonTestUtils = {
 
     // By default, don't cache add-ons in AddonRepository.jsm
     Services.prefs.setBoolPref("extensions.getAddons.cache.enabled", false);
-
-    // Disable the compatibility updates window by default
-    Services.prefs.setBoolPref("extensions.showMismatchUI", false);
 
     // Point update checks to the local machine for fast failures
     Services.prefs.setCharPref("extensions.update.url", "http://127.0.0.1/updateURL");
@@ -596,15 +599,8 @@ var AddonTestUtils = {
     let body = await fetch(manifestURI.spec);
 
     if (manifestURI.spec.endsWith(".rdf")) {
-      let data = await body.text();
-
-      let ds = new RDFDataSource();
-      new RDFXMLParser(ds, manifestURI, data);
-
-      let rdfID = ds.GetTarget(rdfService.GetResource("urn:mozilla:install-manifest"),
-                               rdfService.GetResource("http://www.mozilla.org/2004/em-rdf#id"),
-                               true);
-      return rdfID.QueryInterface(Ci.nsIRDFLiteral).Value;
+      let manifest = InstallRDF.loadFromBuffer(await body.arrayBuffer()).decode();
+      return manifest.id;
     }
 
     let manifest = await body.json();
@@ -672,17 +668,7 @@ var AddonTestUtils = {
         });
       },
 
-      verifySignedDirectoryAsync(root, dir, callback) {
-        // First try calling the real cert DB
-        this._genuine.verifySignedDirectoryAsync(root, dir, (result, cert) => {
-          verifyCert(dir.clone(), result, cert, callback)
-            .then(([callback, result, cert]) => {
-              callback.verifySignedDirectoryFinished(result, cert);
-            });
-        });
-      },
-
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIX509CertDB]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIX509CertDB]),
     };
 
     // Unregister the real database. This only works because the add-ons manager
@@ -712,18 +698,10 @@ var AddonTestUtils = {
 
   /**
    * Starts up the add-on manager as if it was started by the application.
-   *
-   * @param {boolean} [appChanged = true]
-   *        An optional boolean parameter to simulate the case where the
-   *        application has changed version since the last run. If not passed it
-   *        defaults to true
    */
-  async promiseStartupManager(appChanged = true) {
+  async promiseStartupManager() {
     if (this.addonIntegrationService)
       throw new Error("Attempting to startup manager that was already started.");
-
-    if (appChanged && this.addonStartup.exists())
-      this.addonStartup.remove(true);
 
     this.addonIntegrationService = Cc["@mozilla.org/addons/integration;1"]
           .getService(Ci.nsIObserver);
@@ -772,13 +750,8 @@ var AddonTestUtils = {
 
         AddonManagerPrivate.unregisterProvider(XPIscope.XPIProvider);
         Cu.unload("resource://gre/modules/addons/XPIProvider.jsm");
+        Cu.unload("resource://gre/modules/addons/XPIDatabase.jsm");
         Cu.unload("resource://gre/modules/addons/XPIInstall.jsm");
-
-        // We need to set this in order reset the startup service, which
-        // is only possible when running in automation.
-        Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, true);
-
-        aomStartup.reset();
 
         if (shutdownError)
           throw shutdownError;
@@ -787,6 +760,18 @@ var AddonTestUtils = {
       });
   },
 
+  /**
+   * Asynchronously restart the AddonManager.  If newVersion is provided,
+   * simulate an application upgrade (or downgrade) where the version
+   * is changed to newVersion when re-started.
+   *
+   * @param {string} [newVersion]
+   *        If provided, the application version is changed to this string
+   *        after the AddonManager is shut down, before it is re-started.
+   *
+   * @returns {Promise}
+   *          Resolves when the AddonManager has been re-started.
+   */
   promiseRestartManager(newVersion) {
     return this.promiseShutdownManager()
       .then(() => {
@@ -881,7 +866,7 @@ var AddonTestUtils = {
 
     let props = ["id", "version", "type", "internalName", "updateURL",
                  "optionsURL", "optionsType", "aboutURL", "iconURL", "icon64URL",
-                 "skinnable", "bootstrap", "unpack", "strictCompatibility",
+                 "skinnable", "bootstrap", "strictCompatibility",
                  "hasEmbeddedWebExtension"];
     rdf += this._writeProps(data, props);
 
@@ -944,6 +929,8 @@ var AddonTestUtils = {
     var zipW = ZipWriter(zipFile, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | flags);
 
     for (let [path, data] of Object.entries(files)) {
+      if (typeof data === "object" && ChromeUtils.getClassName(data) === "Object")
+        data = JSON.stringify(data);
       if (!(data instanceof ArrayBuffer))
         data = new TextEncoder("utf-8").encode(data).buffer;
 
@@ -1225,7 +1212,7 @@ var AddonTestUtils = {
         return null;
       },
 
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
     };
     Services.dirsvc.registerProvider(dirProvider);
 

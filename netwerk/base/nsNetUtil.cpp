@@ -2144,6 +2144,15 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI)
   if (!loadInfo) {
     return false;
   }
+
+  // Do not treat loads triggered by web extensions as foreign
+  nsCOMPtr<nsIURI> channelURI;
+  NS_GetFinalChannelURI(aChannel, getter_AddRefs(channelURI));
+  if (BasePrincipal::Cast(loadInfo->TriggeringPrincipal())->
+        AddonAllowsLoad(channelURI)) {
+    return false;
+  }
+
   nsCOMPtr<nsIURI> uri;
   if (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_DOCUMENT) {
     // for loads of TYPE_DOCUMENT we query the hostURI from the triggeringPricnipal
@@ -2160,13 +2169,25 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI)
     return false;
   }
 
-  bool isForeign = false;
-  thirdPartyUtil->IsThirdPartyChannel(aChannel, uri, &isForeign);
-
+  bool isForeign = true;
+  nsresult rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, uri, &isForeign);
   // if we are dealing with a cross origin request, we can return here
   // because we already know the request is 'foreign'.
-  if (isForeign) {
+  if (NS_FAILED(rv) || isForeign) {
     return true;
+  }
+
+  // for loads of TYPE_SUBDOCUMENT we have to perform an additional test, because
+  // a cross-origin iframe might perform a navigation to a same-origin iframe which
+  // would send same-site cookies. Hence, if the iframe navigation was triggered
+  // by a cross-origin triggeringPrincipal, we treat the load as foreign.
+  if (loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_SUBDOCUMENT) {
+    nsCOMPtr<nsIURI> triggeringPrincipalURI;
+    loadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(triggeringPrincipalURI));
+    rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, triggeringPrincipalURI, &isForeign);
+    if (NS_FAILED(rv) || isForeign) {
+      return true;
+    }
   }
 
   // for the purpose of same-site cookies we have to treat any cross-origin
@@ -2179,9 +2200,9 @@ bool NS_IsSameSiteForeign(nsIChannel* aChannel, nsIURI* aHostURI)
     entry->GetPrincipal(getter_AddRefs(redirectPrincipal));
     if (redirectPrincipal) {
       redirectPrincipal->GetURI(getter_AddRefs(redirectURI));
-      thirdPartyUtil->IsThirdPartyChannel(aChannel, redirectURI, &isForeign);
+      rv = thirdPartyUtil->IsThirdPartyChannel(aChannel, redirectURI, &isForeign);
       // if at any point we encounter a cross-origin redirect we can return.
-      if (isForeign) {
+      if (NS_FAILED(rv) || isForeign) {
         return true;
       }
     }
@@ -2291,8 +2312,8 @@ NS_NewNotificationCallbacksAggregation(nsIInterfaceRequestor  *callbacks,
 nsresult
 NS_DoImplGetInnermostURI(nsINestedURI *nestedURI, nsIURI **result)
 {
-    NS_PRECONDITION(nestedURI, "Must have a nested URI!");
-    NS_PRECONDITION(!*result, "Must have null *result");
+    MOZ_ASSERT(nestedURI, "Must have a nested URI!");
+    MOZ_ASSERT(!*result, "Must have null *result");
 
     nsCOMPtr<nsIURI> inner;
     nsresult rv = nestedURI->GetInnerURI(getter_AddRefs(inner));
@@ -2322,70 +2343,10 @@ NS_ImplGetInnermostURI(nsINestedURI *nestedURI, nsIURI **result)
     return NS_DoImplGetInnermostURI(nestedURI, result);
 }
 
-nsresult
-NS_EnsureSafeToReturn(nsIURI *uri, nsIURI **result)
-{
-    NS_PRECONDITION(uri, "Must have a URI");
-
-    // Assume mutable until told otherwise
-    bool isMutable = true;
-    nsCOMPtr<nsIMutable> mutableObj(do_QueryInterface(uri));
-    if (mutableObj) {
-        nsresult rv = mutableObj->GetMutable(&isMutable);
-        isMutable = NS_FAILED(rv) || isMutable;
-    }
-
-    if (!isMutable) {
-        NS_ADDREF(*result = uri);
-        return NS_OK;
-    }
-
-    nsresult rv = uri->Clone(result);
-    if (NS_SUCCEEDED(rv) && !*result) {
-        NS_ERROR("nsIURI.clone contract was violated");
-        return NS_ERROR_UNEXPECTED;
-    }
-
-    return rv;
-}
-
-void
-NS_TryToSetImmutable(nsIURI *uri)
-{
-    nsCOMPtr<nsIMutable> mutableObj(do_QueryInterface(uri));
-    if (mutableObj) {
-        mutableObj->SetMutable(false);
-    }
-}
-
-already_AddRefed<nsIURI>
-NS_TryToMakeImmutable(nsIURI *uri,
-                      nsresult *outRv /* = nullptr */)
-{
-    nsresult rv;
-    nsCOMPtr<nsINetUtil> util = do_GetNetUtil(&rv);
-
-    nsCOMPtr<nsIURI> result;
-    if (NS_SUCCEEDED(rv)) {
-        NS_ASSERTION(util, "do_GetNetUtil lied");
-        rv = util->ToImmutableURI(uri, getter_AddRefs(result));
-    }
-
-    if (NS_FAILED(rv)) {
-        result = uri;
-    }
-
-    if (outRv) {
-        *outRv = rv;
-    }
-
-    return result.forget();
-}
-
 already_AddRefed<nsIURI>
 NS_GetInnermostURI(nsIURI *aURI)
 {
-    NS_PRECONDITION(aURI, "Must have URI");
+    MOZ_ASSERT(aURI, "Must have URI");
 
     nsCOMPtr<nsIURI> uri = aURI;
 
@@ -2745,32 +2706,6 @@ NS_LinkRedirectChannels(uint32_t channelId,
                                  _result);
 }
 
-#define NS_FAKE_SCHEME "http://"
-#define NS_FAKE_TLD ".invalid"
-nsresult NS_MakeRandomInvalidURLString(nsCString &result)
-{
-  nsresult rv;
-  nsCOMPtr<nsIUUIDGenerator> uuidgen =
-    do_GetService("@mozilla.org/uuid-generator;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsID idee;
-  rv = uuidgen->GenerateUUIDInPlace(&idee);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  char chars[NSID_LENGTH];
-  idee.ToProvidedString(chars);
-
-  result.AssignLiteral(NS_FAKE_SCHEME);
-  // Strip off the '{' and '}' at the beginning and end of the UUID
-  result.Append(chars + 1, NSID_LENGTH - 3);
-  result.AppendLiteral(NS_FAKE_TLD);
-
-  return NS_OK;
-}
-#undef NS_FAKE_SCHEME
-#undef NS_FAKE_TLD
-
 nsresult NS_MaybeOpenChannelUsingOpen2(nsIChannel* aChannel,
                                        nsIInputStream **aStream)
 {
@@ -2789,64 +2724,6 @@ nsresult NS_MaybeOpenChannelUsingAsyncOpen2(nsIChannel* aChannel,
     return aChannel->AsyncOpen2(aListener);
   }
   return aChannel->AsyncOpen(aListener, nullptr);
-}
-
-nsresult
-NS_CheckIsJavaCompatibleURLString(nsCString &urlString, bool *result)
-{
-  *result = false; // Default to "no"
-
-  nsresult rv = NS_OK;
-  nsCOMPtr<nsIURLParser> urlParser =
-    do_GetService(NS_STDURLPARSER_CONTRACTID, &rv);
-  if (NS_FAILED(rv) || !urlParser)
-    return NS_ERROR_FAILURE;
-
-  bool compatible = true;
-  uint32_t schemePos = 0;
-  int32_t schemeLen = 0;
-  urlParser->ParseURL(urlString.get(), -1, &schemePos, &schemeLen,
-                      nullptr, nullptr, nullptr, nullptr);
-  if (schemeLen != -1) {
-    nsCString scheme;
-    scheme.Assign(urlString.get() + schemePos, schemeLen);
-    // By default Java only understands a small number of URL schemes, and of
-    // these only some can legitimately represent a browser page's "origin"
-    // (and be something we can legitimately expect Java to handle ... or not
-    // to mishandle).
-    //
-    // Besides those listed below, the OJI plugin understands the "jar",
-    // "mailto", "netdoc", "javascript" and "rmi" schemes, and Java Plugin2
-    // also understands the "about" scheme.  We actually pass "about" URLs
-    // to Java ("about:blank" when processing a javascript: URL (one that
-    // calls Java) from the location bar of a blank page, and (in FF4 and up)
-    // "about:home" when processing a javascript: URL from the home page).
-    // And Java doesn't appear to mishandle them (for example it doesn't allow
-    // connections to "about" URLs).  But it doesn't make any sense to do
-    // same-origin checks on "about" URLs, so we don't include them in our
-    // scheme whitelist.
-    //
-    // The OJI plugin doesn't understand "chrome" URLs (only Java Plugin2
-    // does) -- so we mustn't pass them to the OJI plugin.  But we do need to
-    // pass "chrome" URLs to Java Plugin2:  Java Plugin2 grants additional
-    // privileges to chrome "origins", and some extensions take advantage of
-    // this.  For more information see bug 620773.
-    //
-    // As of FF4, we no longer support the OJI plugin.
-    if (PL_strcasecmp(scheme.get(), "http") &&
-        PL_strcasecmp(scheme.get(), "https") &&
-        PL_strcasecmp(scheme.get(), "file") &&
-        PL_strcasecmp(scheme.get(), "ftp") &&
-        PL_strcasecmp(scheme.get(), "gopher") &&
-        PL_strcasecmp(scheme.get(), "chrome"))
-      compatible = false;
-  } else {
-    compatible = false;
-  }
-
-  *result = compatible;
-
-  return NS_OK;
 }
 
 /** Given the first (disposition) token from a Content-Disposition header,
@@ -3135,9 +3012,8 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
               break;
         }
         return NS_OK;
-      } else {
-        Telemetry::AccumulateCategorical(Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::PrefBlockedSTS);
       }
+      Telemetry::AccumulateCategorical(Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::PrefBlockedSTS);
     } else {
       Telemetry::AccumulateCategorical(Telemetry::LABELS_HTTP_SCHEME_UPGRADE_TYPE::NoReasonToUpgrade);
     }

@@ -76,6 +76,7 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-central',
         'mozilla-beta',
         'mozilla-release',
+        'comm-central',
     ])
 ], [
     'all-release-branches', set([
@@ -164,6 +165,7 @@ This is a list of list-pairs, for ordering.
 BALROG_SCOPE_ALIAS_TO_PROJECT = [[
     'nightly', set([
         'mozilla-central',
+        'comm-central'
     ])
 ], [
     'beta', set([

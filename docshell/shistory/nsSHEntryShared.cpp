@@ -12,7 +12,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsILayoutHistoryState.h"
 #include "nsISHistory.h"
 #include "nsISHistoryInternal.h"
@@ -139,8 +138,8 @@ nsSHEntryShared::DropPresentationState()
 nsresult
 nsSHEntryShared::SetContentViewer(nsIContentViewer* aViewer)
 {
-  NS_PRECONDITION(!aViewer || !mContentViewer,
-                  "SHEntryShared already contains viewer");
+  MOZ_ASSERT(!aViewer || !mContentViewer,
+             "SHEntryShared already contains viewer");
 
   if (mContentViewer || !aViewer) {
     DropPresentationState();

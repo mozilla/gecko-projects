@@ -942,7 +942,7 @@ FrameIter::isFunctionFrame() const
 }
 
 JSAtom*
-FrameIter::functionDisplayAtom() const
+FrameIter::maybeFunctionDisplayAtom() const
 {
     switch (data_.state_) {
       case DONE:
@@ -951,8 +951,9 @@ FrameIter::functionDisplayAtom() const
       case JIT:
         if (isWasm())
             return wasmFrame().functionDisplayAtom();
-        MOZ_ASSERT(isFunctionFrame());
-        return calleeTemplate()->displayAtom();
+        if (isFunctionFrame())
+            return calleeTemplate()->displayAtom();
+        return nullptr;
     }
 
     MOZ_CRASH("Unexpected state");
@@ -1012,11 +1013,8 @@ FrameIter::computeLine(uint32_t* column) const
         break;
       case INTERP:
       case JIT:
-        if (isWasm()) {
-            if (column)
-                *column = 0;
-            return wasmFrame().lineOrBytecode();
-        }
+        if (isWasm())
+            return wasmFrame().computeLine(column);
         return PCToLineNumber(script(), pc(), column);
     }
 
@@ -1146,8 +1144,12 @@ FrameIter::updatePcQuadratic()
 
             // Look for the current frame.
             data_.jitFrames_ = JitFrameIter(data_.activations_->asJit());
-            while (!jsJitFrame().isBaselineJS() || jsJitFrame().baselineFrame() != frame)
+            while (!isJSJit() ||
+                   !jsJitFrame().isBaselineJS() ||
+                   jsJitFrame().baselineFrame() != frame)
+            {
                 ++data_.jitFrames_;
+            }
 
             // Update the pc.
             MOZ_ASSERT(jsJitFrame().baselineFrame() == frame);
@@ -1620,7 +1622,7 @@ jit::JitActivation::getRematerializedFrame(JSContext* cx, const JSJitFrameIter& 
         // Frames are often rematerialized with the cx inside a Debugger's
         // compartment. To recover slots and to create CallObjects, we need to
         // be in the activation's compartment.
-        AutoCompartmentUnchecked ac(cx, compartment_);
+        AutoRealmUnchecked ar(cx, compartment_);
 
         if (!RematerializedFrame::RematerializeInlineFrames(cx, top, inlineIter, recover, frames))
             return nullptr;
@@ -1983,6 +1985,7 @@ JS::ProfilingFrameIterator::getPhysicalFrameAndEntry(jit::JitcodeGlobalEntry* en
         frame.returnAddress = nullptr;
         frame.activation = activation_;
         frame.label = nullptr;
+        frame.endStackAddress = activation_->asJit()->jsOrWasmExitFP();
         return mozilla::Some(frame);
     }
 
@@ -2009,6 +2012,7 @@ JS::ProfilingFrameIterator::getPhysicalFrameAndEntry(jit::JitcodeGlobalEntry* en
     frame.returnAddress = returnAddr;
     frame.activation = activation_;
     frame.label = nullptr;
+    frame.endStackAddress = activation_->asJit()->jsOrWasmExitFP();
     return mozilla::Some(frame);
 }
 

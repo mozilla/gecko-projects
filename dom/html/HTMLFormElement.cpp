@@ -784,7 +784,8 @@ HTMLFormElement::SubmitSubmission(HTMLFormSubmission* aFormSubmission)
                                       postDataStream, postDataStreamLength,
                                       nullptr, false,
                                       getter_AddRefs(docShell),
-                                      getter_AddRefs(mSubmittingRequest));
+                                      getter_AddRefs(mSubmittingRequest),
+                                      EventStateManager::IsHandlingUserInput());
     NS_ENSURE_SUBMIT_SUCCESS(rv);
   }
 
@@ -979,7 +980,7 @@ HTMLFormElement::NotifySubmitObservers(nsIURI* aActionURL,
       nsCOMPtr<nsIFormSubmitObserver> formSubmitObserver(
                       do_QueryInterface(inst));
       if (formSubmitObserver) {
-        rv = formSubmitObserver->Notify(static_cast<nsIContent*>(this),
+        rv = formSubmitObserver->Notify(this,
                                         window ? window->GetCurrentInnerWindow() : nullptr,
                                         aActionURL,
                                         aCancelSubmit);
@@ -1761,9 +1762,9 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
 NS_IMETHODIMP_(nsIFormControl*)
 HTMLFormElement::GetDefaultSubmitElement() const
 {
-  NS_PRECONDITION(mDefaultSubmitElement == mFirstSubmitInElements ||
-                  mDefaultSubmitElement == mFirstSubmitNotInElements,
-                  "What happened here?");
+  MOZ_ASSERT(mDefaultSubmitElement == mFirstSubmitInElements ||
+             mDefaultSubmitElement == mFirstSubmitNotInElements,
+             "What happened here?");
 
   return mDefaultSubmitElement;
 }
@@ -1771,7 +1772,7 @@ HTMLFormElement::GetDefaultSubmitElement() const
 bool
 HTMLFormElement::IsDefaultSubmitElement(const nsIFormControl* aControl) const
 {
-  NS_PRECONDITION(aControl, "Unexpected call");
+  MOZ_ASSERT(aControl, "Unexpected call");
 
   if (aControl == mDefaultSubmitElement) {
     // Yes, it is
@@ -1820,7 +1821,7 @@ HTMLFormElement::ImplicitSubmissionIsDisabled() const
 bool
 HTMLFormElement::IsLastActiveElement(const nsIFormControl* aControl) const
 {
-  NS_PRECONDITION(aControl, "Unexpected call");
+  MOZ_ASSERT(aControl, "Unexpected call");
 
   for (auto* element : Reversed(mControls->mElements)) {
     if (element->IsSingleLineTextOrNumberControl(false) &&
@@ -1977,7 +1978,7 @@ HTMLFormElement::CheckValidFormSubmission()
         observer = do_QueryInterface(inst);
 
         if (observer) {
-          observer->NotifyInvalidSubmit(static_cast<nsIContent*>(this),
+          observer->NotifyInvalidSubmit(this,
                                         static_cast<nsIArray*>(invalidElements));
         }
       }

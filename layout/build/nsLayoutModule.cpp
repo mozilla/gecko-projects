@@ -56,8 +56,6 @@
 // Transformiix stuff
 #include "mozilla/dom/XPathEvaluator.h"
 
-#include "mozilla/dom/DOMParser.h"
-
 // view stuff
 #include "nsContentCreatorFunctions.h"
 
@@ -74,6 +72,7 @@
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
 #include "mozilla/dom/SessionStorageManager.h"
+#include "mozilla/dom/StorageActivityService.h"
 #include "mozilla/dom/WorkerDebuggerManager.h"
 #include "mozilla/dom/Notification.h"
 #include "mozilla/OSFileConstants.h"
@@ -200,7 +199,6 @@ already_AddRefed<nsIPresentationService> NS_CreatePresentationService();
 // Factory Constructor
 typedef nsHostObjectURI::Mutator nsHostObjectURIMutator;
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHostObjectURIMutator)
-NS_GENERIC_FACTORY_CONSTRUCTOR(DOMParser)
 NS_GENERIC_FACTORY_CONSTRUCTOR(LocalStorageManager)
 NS_GENERIC_FACTORY_CONSTRUCTOR(SessionStorageManager)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(DOMRequestService,
@@ -211,6 +209,8 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(ServiceWorkerManager,
                                          ServiceWorkerManager::GetInstance)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(WorkerDebuggerManager,
                                          WorkerDebuggerManager::GetInstance)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(StorageActivityService,
+                                         StorageActivityService::GetOrCreate)
 
 #ifdef MOZ_WEBSPEECH
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsSynthVoiceRegistry,
@@ -285,7 +285,7 @@ Initialize()
 void
 Shutdown()
 {
-  NS_PRECONDITION(gInitialized, "module not initialized");
+  MOZ_ASSERT(gInitialized, "module not initialized");
   if (!gInitialized)
     return;
 
@@ -304,7 +304,6 @@ nsresult NS_NewBoxObject(nsIBoxObject** aResult);
 nsresult NS_NewListBoxObject(nsIBoxObject** aResult);
 nsresult NS_NewScrollBoxObject(nsIBoxObject** aResult);
 nsresult NS_NewMenuBoxObject(nsIBoxObject** aResult);
-nsresult NS_NewPopupBoxObject(nsIBoxObject** aResult);
 nsresult NS_NewTreeBoxObject(nsIBoxObject** aResult);
 #endif
 
@@ -366,7 +365,6 @@ MAKE_CTOR(CreateNewBoxObject,           nsIBoxObject,           NS_NewBoxObject)
 #ifdef MOZ_XUL
 MAKE_CTOR(CreateNewListBoxObject,       nsIBoxObject,           NS_NewListBoxObject)
 MAKE_CTOR(CreateNewMenuBoxObject,       nsIBoxObject,           NS_NewMenuBoxObject)
-MAKE_CTOR(CreateNewPopupBoxObject,      nsIBoxObject,           NS_NewPopupBoxObject)
 MAKE_CTOR(CreateNewScrollBoxObject,     nsIBoxObject,           NS_NewScrollBoxObject)
 MAKE_CTOR(CreateNewTreeBoxObject,       nsIBoxObject,           NS_NewTreeBoxObject)
 #endif // MOZ_XUL
@@ -509,7 +507,6 @@ NS_DEFINE_NAMED_CID(NS_BOXOBJECT_CID);
 #ifdef MOZ_XUL
 NS_DEFINE_NAMED_CID(NS_LISTBOXOBJECT_CID);
 NS_DEFINE_NAMED_CID(NS_MENUBOXOBJECT_CID);
-NS_DEFINE_NAMED_CID(NS_POPUPBOXOBJECT_CID);
 NS_DEFINE_NAMED_CID(NS_SCROLLBOXOBJECT_CID);
 NS_DEFINE_NAMED_CID(NS_TREEBOXOBJECT_CID);
 #endif // MOZ_XUL
@@ -550,13 +547,13 @@ NS_DEFINE_NAMED_CID(NS_VIDEODOCUMENT_CID);
 NS_DEFINE_NAMED_CID(NS_STYLESHEETSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_HOSTOBJECTURI_CID);
 NS_DEFINE_NAMED_CID(NS_HOSTOBJECTURIMUTATOR_CID);
-NS_DEFINE_NAMED_CID(NS_DOMPARSER_CID);
 NS_DEFINE_NAMED_CID(NS_DOMSESSIONSTORAGEMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_DOMLOCALSTORAGEMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_TEXTEDITOR_CID);
 NS_DEFINE_NAMED_CID(DOMREQUEST_SERVICE_CID);
 NS_DEFINE_NAMED_CID(QUOTAMANAGER_SERVICE_CID);
 NS_DEFINE_NAMED_CID(SERVICEWORKERMANAGER_CID);
+NS_DEFINE_NAMED_CID(STORAGEACTIVITYSERVICE_CID);
 NS_DEFINE_NAMED_CID(NOTIFICATIONTELEMETRYSERVICE_CID);
 NS_DEFINE_NAMED_CID(PUSHNOTIFIER_CID);
 NS_DEFINE_NAMED_CID(WORKERDEBUGGERMANAGER_CID);
@@ -751,7 +748,6 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
 #ifdef MOZ_XUL
   { &kNS_LISTBOXOBJECT_CID, false, nullptr, CreateNewListBoxObject },
   { &kNS_MENUBOXOBJECT_CID, false, nullptr, CreateNewMenuBoxObject },
-  { &kNS_POPUPBOXOBJECT_CID, false, nullptr, CreateNewPopupBoxObject },
   { &kNS_SCROLLBOXOBJECT_CID, false, nullptr, CreateNewScrollBoxObject },
   { &kNS_TREEBOXOBJECT_CID, false, nullptr, CreateNewTreeBoxObject },
 #endif // MOZ_XUL
@@ -792,13 +788,13 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kNS_STYLESHEETSERVICE_CID, false, nullptr, nsStyleSheetServiceConstructor },
   { &kNS_HOSTOBJECTURI_CID, false, nullptr, nsHostObjectURIMutatorConstructor }, // do_CreateInstance returns mutator
   { &kNS_HOSTOBJECTURIMUTATOR_CID, false, nullptr, nsHostObjectURIMutatorConstructor },
-  { &kNS_DOMPARSER_CID, false, nullptr, DOMParserConstructor },
   { &kNS_DOMSESSIONSTORAGEMANAGER_CID, false, nullptr, SessionStorageManagerConstructor },
   { &kNS_DOMLOCALSTORAGEMANAGER_CID, false, nullptr, LocalStorageManagerConstructor },
   { &kNS_TEXTEDITOR_CID, false, nullptr, TextEditorConstructor },
   { &kDOMREQUEST_SERVICE_CID, false, nullptr, DOMRequestServiceConstructor },
   { &kQUOTAMANAGER_SERVICE_CID, false, nullptr, QuotaManagerServiceConstructor },
   { &kSERVICEWORKERMANAGER_CID, false, nullptr, ServiceWorkerManagerConstructor },
+  { &kSTORAGEACTIVITYSERVICE_CID, false, nullptr, StorageActivityServiceConstructor },
   { &kNOTIFICATIONTELEMETRYSERVICE_CID, false, nullptr, NotificationTelemetryServiceConstructor },
   { &kPUSHNOTIFIER_CID, false, nullptr, PushNotifierConstructor },
   { &kWORKERDEBUGGERMANAGER_CID, true, nullptr, WorkerDebuggerManagerConstructor },
@@ -859,7 +855,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
 #ifdef MOZ_XUL
   { "@mozilla.org/layout/xul-boxobject-listbox;1", &kNS_LISTBOXOBJECT_CID },
   { "@mozilla.org/layout/xul-boxobject-menu;1", &kNS_MENUBOXOBJECT_CID },
-  { "@mozilla.org/layout/xul-boxobject-popup;1", &kNS_POPUPBOXOBJECT_CID },
   { "@mozilla.org/layout/xul-boxobject-scrollbox;1", &kNS_SCROLLBOXOBJECT_CID },
   { "@mozilla.org/layout/xul-boxobject-tree;1", &kNS_TREEBOXOBJECT_CID },
 #endif // MOZ_XUL
@@ -897,7 +892,6 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { NS_WINDOWCONTROLLER_CONTRACTID, &kNS_WINDOWCONTROLLER_CID },
   { PLUGIN_DLF_CONTRACTID, &kNS_PLUGINDOCLOADERFACTORY_CID },
   { NS_STYLESHEETSERVICE_CONTRACTID, &kNS_STYLESHEETSERVICE_CID },
-  { NS_DOMPARSER_CONTRACTID, &kNS_DOMPARSER_CID },
   { "@mozilla.org/dom/localStorage-manager;1", &kNS_DOMLOCALSTORAGEMANAGER_CID },
   // Keeping the old ContractID for backward compatibility
   { "@mozilla.org/dom/storagemanager;1", &kNS_DOMLOCALSTORAGEMANAGER_CID },
@@ -906,6 +900,7 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { DOMREQUEST_SERVICE_CONTRACTID, &kDOMREQUEST_SERVICE_CID },
   { QUOTAMANAGER_SERVICE_CONTRACTID, &kQUOTAMANAGER_SERVICE_CID },
   { SERVICEWORKERMANAGER_CONTRACTID, &kSERVICEWORKERMANAGER_CID },
+  { STORAGE_ACTIVITY_SERVICE_CONTRACTID, &kSTORAGEACTIVITYSERVICE_CID },
   { NOTIFICATIONTELEMETRYSERVICE_CONTRACTID, &kNOTIFICATIONTELEMETRYSERVICE_CID },
   { PUSHNOTIFIER_CONTRACTID, &kPUSHNOTIFIER_CID },
   { WORKERDEBUGGERMANAGER_CONTRACTID, &kWORKERDEBUGGERMANAGER_CID },

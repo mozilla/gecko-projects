@@ -106,7 +106,7 @@ public:
     NS_IMETHOD ForcePending(bool aForcePending) override;
 
 protected:
-    virtual ~nsFtpChannel() {}
+    virtual ~nsFtpChannel() = default;
     virtual nsresult OpenContentStream(bool async, nsIInputStream **result,
                                        nsIChannel** channel) override;
     virtual bool GetStatusArg(nsresult status, nsString &statusArg) override;
@@ -122,6 +122,9 @@ private:
     PRTime                           mLastModifiedTime;
     bool                             mForcePending;
     RefPtr<ADivertableParentChannel> mParentChannel;
+
+    // Current suspension depth for this channel object
+    uint32_t                          mSuspendCount;
 };
 
 #endif /* nsFTPChannel_h___ */

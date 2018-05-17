@@ -227,6 +227,7 @@
   background: none;
   box-shadow: none;
   border: none;
+  color: inherit;
 }
 
 /* On Mac, native buttons keep their full opacity when they become disabled
@@ -335,6 +336,7 @@ html|input.urlbar-input {
   color: GrayText;
 }
 
+#pageAction-urlbar-shareURL,
 #pageAction-panel-shareURL {
   list-style-image: url("chrome://browser/skin/share.svg");
 }
@@ -677,6 +679,12 @@ html|input.urlbar-input {
   text-shadow: none;
 }
 
+.browserContainer > findbar:-moz-lwtheme {
+  background-color: var(--toolbar-bgcolor);
+  background-image: none;
+  color: var(--toolbar-color, -moz-DialogText);
+}
+
 .openintabs-menuitem {
   list-style-image: none;
 }
@@ -753,7 +761,7 @@ html|input.urlbar-input {
   text-shadow: none;
 }
 
-.tabbrowser-tab[visuallyselected=true] {
+.tabbrowser-tab[visuallyselected=true]:not(:-moz-lwtheme) {
   -moz-font-smoothing-background-color: var(--toolbar-bgcolor);
 }
 

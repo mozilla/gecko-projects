@@ -2,7 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/CanonicalJSON.jsm");
 
 // Import common head.
 {
@@ -14,10 +13,12 @@ ChromeUtils.import("resource://gre/modules/CanonicalJSON.jsm");
 
 // Put any other stuff relative to this test folder below.
 
+ChromeUtils.import("resource://gre/modules/CanonicalJSON.jsm");
 ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
 ChromeUtils.import("resource://gre/modules/SyncedBookmarksMirror.jsm");
+ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 
 // These titles are defined in Database::CreateBookmarkRoots
@@ -43,6 +44,26 @@ function run_test() {
 
   do_get_profile();
   run_next_test();
+}
+
+// A test helper to insert local roots directly into Places, since the public
+// bookmarks APIs no longer support custom roots.
+async function insertLocalRoot({ guid, title }) {
+  await PlacesUtils.withConnectionWrapper("insertLocalRoot",
+    async function(db) {
+      let dateAdded = PlacesUtils.toPRTime(new Date());
+      await db.execute(`
+        INSERT INTO moz_bookmarks(guid, type, parent, position, title,
+                                  dateAdded, lastModified)
+        VALUES(:guid, :type, (SELECT id FROM moz_bookmarks
+                              WHERE guid = :parentGuid),
+               (SELECT COUNT(*) FROM moz_bookmarks
+                WHERE parent = (SELECT id FROM moz_bookmarks
+                                WHERE guid = :parentGuid)),
+               :title, :dateAdded, :dateAdded)`,
+        { guid, type: PlacesUtils.bookmarks.TYPE_FOLDER,
+          parentGuid: PlacesUtils.bookmarks.rootGuid, title, dateAdded });
+  });
 }
 
 // Returns a `CryptoWrapper`-like object that wraps the Sync record cleartext.
@@ -87,6 +108,25 @@ function inspectChangeRecords(changeRecords) {
   results.updated.sort();
   results.deleted.sort();
   return results;
+}
+
+async function promiseManyDatesAdded(guids) {
+  let datesAdded = new Map();
+  let db = await PlacesUtils.promiseDBConnection();
+  for (let chunk of PlacesSyncUtils.chunkArray(guids, 100)) {
+    let rows = await db.executeCached(`
+      SELECT guid, dateAdded FROM moz_bookmarks
+      WHERE guid IN (${new Array(chunk.length).fill("?").join(",")})`,
+      chunk);
+    if (rows.length != chunk.length) {
+      throw new TypeError("Can't fetch date added for nonexistent items");
+    }
+    for (let row of rows) {
+      let dateAdded = row.getResultByName("dateAdded") / 1000;
+      datesAdded.set(row.getResultByName("guid"), dateAdded);
+    }
+  }
+  return datesAdded;
 }
 
 async function fetchLocalTree(rootGuid) {
@@ -164,9 +204,8 @@ async function fetchAllKeywords(info) {
 }
 
 async function openMirror(name, options = {}) {
-  let path = OS.Path.join(OS.Constants.Path.profileDir, `${name}_buf.sqlite`);
   let buf = await SyncedBookmarksMirror.open({
-    path,
+    path: `${name}_buf.sqlite`,
     recordTelemetryEvent(...args) {
       if (options.recordTelemetryEvent) {
         options.recordTelemetryEvent.call(this, ...args);
@@ -214,15 +253,15 @@ BookmarkObserver.prototype = {
   },
   onItemVisited() {},
   onItemMoved(itemId, oldParentId, oldIndex, newParentId, newIndex, type, guid,
-              oldParentGuid, newParentGuid, source) {
+              oldParentGuid, newParentGuid, source, uri) {
     this.notifications.push({
       name: "onItemMoved",
       params: { itemId, oldParentId, oldIndex, newParentId, newIndex, type,
-                guid, oldParentGuid, newParentGuid, source },
+                guid, oldParentGuid, newParentGuid, source, uri },
     });
   },
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavBookmarkObserver,
   ]),
 
@@ -243,4 +282,13 @@ function expectBookmarkChangeNotifications(options) {
   let observer = new BookmarkObserver(options);
   PlacesUtils.bookmarks.addObserver(observer);
   return observer;
+}
+
+// Copies a support file to a temporary fixture file, allowing the support
+// file to be reused for multiple tests.
+async function setupFixtureFile(fixturePath) {
+  let fixtureFile = do_get_file(fixturePath);
+  let tempFile = FileTestUtils.getTempFile(fixturePath);
+  await OS.File.copy(fixtureFile.path, tempFile.path);
+  return tempFile;
 }

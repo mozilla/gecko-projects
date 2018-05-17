@@ -54,6 +54,7 @@ pref("extensions.update.autoUpdateDefault", true);
 
 // Check AUS for system add-on updates.
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+pref("extensions.systemAddon.update.enabled", true);
 
 // Disable add-ons that are not installed by the user in all scopes by default.
 // See the SCOPE constants in AddonManager.jsm for values to use here.
@@ -61,14 +62,11 @@ pref("extensions.autoDisableScopes", 15);
 // Scopes to scan for changes at startup.
 pref("extensions.startupScanScopes", 0);
 
-// This is where the profiler WebExtension API will look for breakpad symbols.
-// NOTE: deliberately http right now since https://symbols.mozilla.org is not supported.
-pref("extensions.geckoProfiler.symbols.url", "http://symbols.mozilla.org/");
 pref("extensions.geckoProfiler.acceptedExtensionIds", "geckoprofiler@mozilla.com,quantum-foxfooding@mozilla.com");
 #if defined(XP_LINUX) || defined (XP_MACOSX)
-pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,nm");
+pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,nm");
 #else // defined(XP_WIN)
-pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,dump_syms.exe");
+pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,dump_syms.exe");
 #endif
 
 
@@ -76,16 +74,19 @@ pref("extensions.geckoProfiler.getSymbolRules", "localBreakpad,remoteBreakpad,du
 pref("extensions.webextensions.base-content-security-policy", "script-src 'self' https://* moz-extension: blob: filesystem: 'unsafe-eval' 'unsafe-inline'; object-src 'self' https://* moz-extension: blob: filesystem:;");
 pref("extensions.webextensions.default-content-security-policy", "script-src 'self'; object-src 'self';");
 
-#if defined(XP_WIN)
-pref("extensions.webextensions.remote", true);
-#elif defined(XP_MACOSX) && !defined(RELEASE_OR_BETA)
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("extensions.webextensions.remote", true);
 #endif
 
+#ifdef NIGHTLY_BUILD
+pref("extensions.webextensions.background-delayed-startup", true);
+#endif
+
 // Extensions that should not be flagged as legacy in about:addons
-pref("extensions.legacy.exceptions", "{972ce4c6-7e08-4474-a285-3208198ce6fd},testpilot@cliqz.com,@testpilot-containers,jid1-NeEaf3sAHdKHPA@jetpack,@activity-streams,pulse@mozilla.com,@testpilot-addon,@min-vid,tabcentertest1@mozilla.com,snoozetabs@mozilla.com,speaktome@mozilla.com,hoverpad@mozilla.com");
+pref("extensions.legacy.exceptions", "testpilot@cliqz.com,@testpilot-containers,jid1-NeEaf3sAHdKHPA@jetpack,@activity-streams,pulse@mozilla.com,@testpilot-addon,@min-vid,tabcentertest1@mozilla.com,snoozetabs@mozilla.com,speaktome@mozilla.com,hoverpad@mozilla.com");
 
 // Require signed add-ons by default
+pref("extensions.langpacks.signatures.required", true);
 pref("xpinstall.signatures.required", true);
 pref("xpinstall.signatures.devInfoURL", "https://wiki.mozilla.org/Addons/Extension_Signing");
 
@@ -191,9 +192,6 @@ pref("extensions.update.background.url", "https://versioncheck-bg.addons.mozilla
 pref("extensions.update.interval", 86400);  // Check for updates to Extensions and
                                             // Themes every day
 
-pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.name", "chrome://browser/locale/browser.properties");
-pref("extensions.{972ce4c6-7e08-4474-a285-3208198ce6fd}.description", "chrome://browser/locale/browser.properties");
-
 pref("extensions.webextensions.themes.enabled", true);
 pref("extensions.webextensions.themes.icons.buttons", "back,forward,reload,stop,bookmark_star,bookmark_menu,downloads,home,app_menu,cut,copy,paste,new_window,new_private_window,save_page,print,history,full_screen,find,options,addons,developer,synced_tabs,open_file,sidebars,share_page,subscribe,text_encoding,email_link,forget,pocket");
 
@@ -255,11 +253,12 @@ pref("browser.startup.homepage",            "chrome://branding/locale/browsercon
 pref("browser.startup.firstrunSkipsHomepage", true);
 
 // Show an about:blank window as early as possible for quick startup feedback.
-#ifdef XP_MACOSX
+// Held to nightly and early beta on Linux due to bug 1450626.
 // Disabled on Mac because the bouncing dock icon already provides feedback.
-pref("browser.startup.blankWindow", false);
-#else
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) && defined(EARLY_BETA_OR_EARLIER)
 pref("browser.startup.blankWindow", true);
+#else
+pref("browser.startup.blankWindow", false);
 #endif
 
 pref("browser.slowStartup.notificationDisabled", false);
@@ -295,7 +294,6 @@ pref("browser.urlbar.doubleClickSelectsAll", false);
 
 // Control autoFill behavior
 pref("browser.urlbar.autoFill", true);
-pref("browser.urlbar.autoFill.typed", true);
 pref("browser.urlbar.speculativeConnect.enabled", true);
 
 // 0: Match anywhere (e.g., middle of words)
@@ -386,9 +384,6 @@ pref("browser.helperApps.deleteTempFileOnExit", true);
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
-// pointer to the default engine name
-pref("browser.search.defaultenginename",      "chrome://browser-region/locale/region.properties");
-
 // Ordering of Search Engines in the Engine list.
 pref("browser.search.order.1",                "chrome://browser-region/locale/region.properties");
 pref("browser.search.order.2",                "chrome://browser-region/locale/region.properties");
@@ -398,8 +393,7 @@ pref("browser.search.order.3",                "chrome://browser-region/locale/re
 pref("browser.search.geoSpecificDefaults", true);
 pref("browser.search.geoSpecificDefaults.url", "https://search.services.mozilla.com/1/%APP%/%VERSION%/%CHANNEL%/%LOCALE%/%REGION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%");
 
-// US specific default (used as a fallback if the geoSpecificDefaults request fails).
-pref("browser.search.defaultenginename.US",      "data:text/plain,browser.search.defaultenginename.US=Google");
+// US specific default
 pref("browser.search.order.US.1",                "data:text/plain,browser.search.order.US.1=Google");
 pref("browser.search.order.US.2",                "data:text/plain,browser.search.order.US.2=Bing");
 
@@ -458,6 +452,7 @@ pref("browser.link.open_newwindow.disabled_in_fullscreen", false);
 #endif
 
 // Tabbed browser
+pref("browser.tabs.multiselect", false);
 pref("browser.tabs.20FpsThrobber", false);
 pref("browser.tabs.30FpsThrobber", false);
 pref("browser.tabs.closeTabByDblclick", false);
@@ -630,8 +625,9 @@ pref("browser.snapshots.limit", 0);
 // 0: Nothing happens
 // 1: Scrolling contents
 // 2: Go back or go forward, in your history
-// 3: Zoom in or out.
+// 3: Zoom in or out (reflowing zoom).
 // 4: Treat vertical wheel as horizontal scroll
+// 5: Zoom in or out (pinch zoom).
 #ifdef XP_MACOSX
 // On macOS, if the wheel has one axis only, shift+wheel comes through as a
 // horizontal scroll event. Thus, we can't assign anything other than normal
@@ -723,8 +719,6 @@ pref("plugin.default.state", 1);
 // Plugins bundled in XPIs are enabled by default.
 pref("plugin.defaultXpi.state", 2);
 
-// Java is Click-to-Activate by default on all channels.
-pref("plugin.state.java", 1);
 
 // Flash is Click-to-Activate by default on all channels.
 pref("plugin.state.flash", 1);
@@ -1093,7 +1087,8 @@ pref("security.sandbox.gmp.win32k-disable", false);
 pref("security.sandbox.content.level", 3);
 #endif
 
-#if defined(NIGHTLY_BUILD) && defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+// Enable the Mac Flash sandbox on Nightly and Beta, not Release
+#if defined(EARLY_BETA_OR_EARLIER) && defined(XP_MACOSX) && defined(MOZ_SANDBOX)
 // Controls whether and how the Mac NPAPI Flash plugin process is sandboxed.
 // On Mac these levels are:
 // 0 - "no sandbox"
@@ -1258,7 +1253,7 @@ pref("services.sync.syncedTabs.showRemoteIcons", true);
 pref("lightweightThemes.selectedThemeID", "firefox-compact-dark@mozilla.org",
      sticky);
 #else
-pref("lightweightThemes.selectedThemeID", "", sticky);
+pref("lightweightThemes.selectedThemeID", "default-theme@mozilla.org", sticky);
 #endif
 
 // Whether the character encoding menu is under the main Firefox button. This
@@ -1277,11 +1272,7 @@ pref("browser.newtabpage.enabled", true);
 // Activity Stream prefs that control to which page to redirect
 pref("browser.newtabpage.activity-stream.prerender", true);
 #ifndef RELEASE_OR_BETA
-#ifdef MOZILLA_OFFICIAL
 pref("browser.newtabpage.activity-stream.debug", false);
-#else
-pref("browser.newtabpage.activity-stream.debug", true);
-#endif
 #endif
 
 pref("browser.library.activity-stream.enabled", true);
@@ -1310,11 +1301,6 @@ pref("pdfjs.firstRun", true);
 // became the default.
 pref("pdfjs.previousHandler.preferredAction", 0);
 pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
-
-// The maximum amount of decoded image data we'll willingly keep around (we
-// might keep around more than this, but we'll try to get down to this value).
-// (This is intentionally on the high side; see bug 746055.)
-pref("image.mem.max_decoded_image_kb", 256000);
 
 // Is the sidebar positioned ahead of the content browser
 pref("sidebar.position_start", true);
@@ -1436,6 +1422,9 @@ pref("identity.fxaccounts.migrateToDevEdition", true);
 pref("identity.fxaccounts.migrateToDevEdition", false);
 #endif
 
+// If activated, send tab will use the new FxA messages backend.
+pref("identity.fxaccounts.messages.enabled", false);
+
 // On GTK, we now default to showing the menubar only when alt is pressed:
 #ifdef MOZ_WIDGET_GTK
 pref("ui.key.menuAccessKeyFocuses", true);
@@ -1533,7 +1522,14 @@ pref("browser.tabs.remote.desktopbehavior", true);
 
 // For speculatively warming up tabs to improve perceived
 // performance while using the async tab switcher.
-#if defined(NIGHTLY_BUILD)
+//
+// This feature is enabled by default on Windows and Linux
+// on all channels.
+//
+// This feature is enabled on macOS only on the Nightly channel
+// until bug 1453080 is fixed.
+//
+#if !defined(XP_MACOSX) || defined(NIGHTLY_BUILD)
 pref("browser.tabs.remote.warmup.enabled", true);
 #else
 pref("browser.tabs.remote.warmup.enabled", false);
@@ -1612,6 +1608,7 @@ pref("browser.migrate.chrome.history.maxAgeInDays", 180);
 pref("dom.mozBrowserFramesEnabled", true);
 
 pref("extensions.pocket.enabled", true);
+pref("extensions.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 
 pref("signon.schemeUpgrades", true);
 
@@ -1725,7 +1722,7 @@ pref("app.normandy.dev_mode", false);
 pref("app.normandy.enabled", true);
 pref("app.normandy.first_run", true);
 pref("app.normandy.logging.level", 50); // Warn
-pref("app.normandy.run_interval_seconds", 86400); // 24 hours
+pref("app.normandy.run_interval_seconds", 21600); // 6 hours
 pref("app.normandy.shieldLearnMoreUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/shield");
 #ifdef MOZ_DATA_REPORTING
 pref("app.shield.optoutstudies.enabled", true);

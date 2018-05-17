@@ -1271,9 +1271,11 @@ BrowserPageActions.shareURL = {
   },
 
   onShowingSubview(panelViewNode) {
+    let bodyNode = panelViewNode.querySelector(".panel-subview-body");
+
     // We cache the providers + the UI if the user selects the share
     // panel multiple times while the panel is open.
-    if (this._cached) {
+    if (this._cached && bodyNode.childNodes.length > 0) {
       return;
     }
 
@@ -1286,14 +1288,16 @@ BrowserPageActions.shareURL = {
     shareProviders.forEach(function(share) {
       let item = document.createElement("toolbarbutton");
       item.setAttribute("label", share.menuItemTitle);
-      item.setAttribute("share-title", share.title);
+      item.setAttribute("share-name", share.name);
       item.setAttribute("image", share.image);
       item.classList.add("subviewbutton", "subviewbutton-iconic");
 
       item.addEventListener("command", event => {
-        let shareTitle = event.target.getAttribute("share-title");
-        if (shareTitle) {
-          sharingService.shareUrl(shareTitle, currentURI);
+        let shareName = event.target.getAttribute("share-name");
+        if (shareName) {
+          sharingService.shareUrl(shareName,
+                                  currentURI,
+                                  gBrowser.selectedBrowser.contentTitle);
         }
         PanelMultiView.hidePopup(BrowserPageActions.panelNode);
       });
@@ -1301,7 +1305,6 @@ BrowserPageActions.shareURL = {
       fragment.appendChild(item);
     });
 
-    let bodyNode = panelViewNode.querySelector(".panel-subview-body");
     while (bodyNode.firstChild) {
       bodyNode.firstChild.remove();
     }

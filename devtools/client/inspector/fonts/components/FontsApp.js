@@ -20,8 +20,10 @@ class FontsApp extends PureComponent {
       fontData: PropTypes.shape(Types.fontData).isRequired,
       fontEditor: PropTypes.shape(Types.fontEditor).isRequired,
       fontOptions: PropTypes.shape(Types.fontOptions).isRequired,
-      onAxisUpdate: PropTypes.func.isRequired,
+      onInstanceChange: PropTypes.func.isRequired,
       onPreviewFonts: PropTypes.func.isRequired,
+      onPropertyChange: PropTypes.func.isRequired,
+      onToggleFontHighlight: PropTypes.func.isRequired,
     };
   }
 
@@ -30,8 +32,10 @@ class FontsApp extends PureComponent {
       fontData,
       fontEditor,
       fontOptions,
-      onAxisUpdate,
+      onInstanceChange,
       onPreviewFonts,
+      onPropertyChange,
+      onToggleFontHighlight,
     } = this.props;
 
     return dom.div(
@@ -42,13 +46,15 @@ class FontsApp extends PureComponent {
       fontEditor.isVisible ?
         FontEditor({
           fontEditor,
-          onAxisUpdate,
+          onInstanceChange,
+          onPropertyChange,
         })
         :
         FontOverview({
           fontData,
           fontOptions,
           onPreviewFonts,
+          onToggleFontHighlight,
         })
     );
   }

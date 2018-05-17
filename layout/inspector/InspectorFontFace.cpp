@@ -13,6 +13,7 @@
 #include "brotli/decode.h"
 #include "zlib.h"
 #include "mozilla/dom/FontFaceSet.h"
+#include "mozilla/ServoBindings.h"
 #include "mozilla/ServoFontFaceRule.h"
 #include "mozilla/Unused.h"
 
@@ -22,19 +23,19 @@ namespace dom {
 bool
 InspectorFontFace::FromFontGroup()
 {
-  return mMatchType & gfxTextRange::kFontGroup;
+  return bool(mMatchType & gfxTextRange::MatchType::kFontGroup);
 }
 
 bool
 InspectorFontFace::FromLanguagePrefs()
 {
-  return mMatchType & gfxTextRange::kPrefsFallback;
+  return bool(mMatchType & gfxTextRange::MatchType::kPrefsFallback);
 }
 
 bool
 InspectorFontFace::FromSystemFallback()
 {
-  return mMatchType & gfxTextRange::kSystemFallback;
+  return bool(mMatchType & gfxTextRange::MatchType::kSystemFallback);
 }
 
 void

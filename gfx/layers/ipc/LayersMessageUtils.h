@@ -39,6 +39,11 @@ struct ParamTraits<mozilla::layers::LayersId>
 {};
 
 template <>
+struct ParamTraits<mozilla::layers::TransactionId>
+  : public PlainOldDataSerializer<mozilla::layers::TransactionId>
+{};
+
+template <>
 struct ParamTraits<mozilla::layers::LayersBackend>
   : public ContiguousEnumSerializer<
              mozilla::layers::LayersBackend,
@@ -630,12 +635,14 @@ struct ParamTraits<mozilla::layers::CompositorOptions>
     WriteParam(aMsg, aParam.mUseAPZ);
     WriteParam(aMsg, aParam.mUseWebRender);
     WriteParam(aMsg, aParam.mUseAdvancedLayers);
+    WriteParam(aMsg, aParam.mInitiallyPaused);
   }
 
   static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult) {
     return ReadParam(aMsg, aIter, &aResult->mUseAPZ)
         && ReadParam(aMsg, aIter, &aResult->mUseWebRender)
-        && ReadParam(aMsg, aIter, &aResult->mUseAdvancedLayers);
+        && ReadParam(aMsg, aIter, &aResult->mUseAdvancedLayers)
+        && ReadParam(aMsg, aIter, &aResult->mInitiallyPaused);
   }
 };
 
@@ -643,6 +650,11 @@ template <>
 struct ParamTraits<mozilla::layers::SimpleLayerAttributes>
   : public PlainOldDataSerializer<mozilla::layers::SimpleLayerAttributes>
 { };
+
+template <>
+struct ParamTraits<mozilla::layers::ScrollUpdateInfo>
+  : public PlainOldDataSerializer<mozilla::layers::ScrollUpdateInfo>
+{};
 
 } /* namespace IPC */
 

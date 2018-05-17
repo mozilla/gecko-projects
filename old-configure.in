@@ -229,6 +229,13 @@ case "$target" in
           WIN_UCRT_REDIST_DIR=`cd "$WIN_UCRT_REDIST_DIR" && pwd -W`
         fi
 
+        if test -n "$WIN_DIA_SDK_BIN_DIR"; then
+          if test ! -d "$WIN_DIA_SDK_BIN_DIR"; then
+            AC_MSG_ERROR([Invalid Windows DIA SDK directory: ${WIN_DIA_SDK_BIN_DIR}])
+          fi
+          WIN_DIA_SDK_BIN_DIR=`cd "$WIN_DIA_SDK_BIN_DIR" && pwd -W`
+        fi
+
         AC_SUBST(MSVC_HAS_DIA_SDK)
         AC_SUBST(MSVC_C_RUNTIME_DLL)
         AC_SUBST(MSVC_CXX_RUNTIME_DLL)
@@ -653,21 +660,6 @@ if test "$GNU_CXX"; then
     _USE_CPP_INCLUDE_FLAG=1
 fi
 
-dnl ========================================================
-dnl = Use Valgrind
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(valgrind,
-[  --enable-valgrind       Enable Valgrind integration hooks (default=no)],
-    MOZ_VALGRIND=1,
-    MOZ_VALGRIND= )
-if test -n "$MOZ_VALGRIND"; then
-    MOZ_CHECK_HEADER([valgrind/valgrind.h], [],
-        AC_MSG_ERROR(
-            [--enable-valgrind specified but Valgrind is not installed]))
-    AC_DEFINE(MOZ_VALGRIND)
-fi
-AC_SUBST(MOZ_VALGRIND)
-
 # For profiling builds keep the symbol information
 if test "$MOZ_PROFILING" -a -z "$STRIP_FLAGS"; then
     case "$OS_TARGET" in
@@ -1049,11 +1041,16 @@ case "$target" in
         ;;
     esac
 
+    if test -n "$GNU_CC"; then
+        CFLAGS="$CFLAGS -fno-keep-inline-dllexport"
+        CXXFLAGS="$CXXFLAGS -fno-keep-inline-dllexport"
+    fi
+
     case "$target" in
     i*86-*)
         if test -n "$GNU_CC"; then
-            CFLAGS="$CFLAGS -mstackrealign -fno-keep-inline-dllexport"
-            CXXFLAGS="$CXXFLAGS -mstackrealign -fno-keep-inline-dllexport"
+            CFLAGS="$CFLAGS -mstackrealign"
+            CXXFLAGS="$CXXFLAGS -mstackrealign"
             LDFLAGS="$LDFLAGS -Wl,--enable-stdcall-fixup -Wl,--large-address-aware"
         else
             DSO_LDOPTS="$DSO_LDOPTS -MACHINE:X86"
@@ -1335,18 +1332,6 @@ darwin*)
     )
     ;;
 esac
-
-dnl ========================================================
-dnl Check the command line for --with-pthreads
-dnl ========================================================
-MOZ_ARG_WITH_BOOL(pthreads,
-[  --with-pthreads         Force use of system pthread library with NSPR ],
-[ if test "$MOZ_USE_PTHREADS"x = x; then
-    AC_MSG_ERROR([ --with-pthreads specified for a system without pthread support ]);
-fi],
-    MOZ_USE_PTHREADS=
-    _PTHREAD_LDFLAGS=
-)
 
 dnl ========================================================
 dnl Do the platform specific pthread hackery
@@ -1766,7 +1751,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.36, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.38, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 if test -z "$MOZ_SYSTEM_NSS"; then
@@ -1831,34 +1816,6 @@ dnl ========================================================
 MOZ_ZLIB_CHECK([1.2.3])
 
 if test -z "$SKIP_LIBRARY_CHECKS"; then
-dnl system BZIP2 Support
-dnl ========================================================
-MOZ_ARG_WITH_STRING(system-bz2,
-[  --with-system-bz2[=PFX]
-                          Use system libbz2 [installed at prefix PFX]],
-    BZ2_DIR=$withval)
-
-_SAVE_CFLAGS=$CFLAGS
-_SAVE_LDFLAGS=$LDFLAGS
-_SAVE_LIBS=$LIBS
-if test -n "${BZ2_DIR}" -a "${BZ2_DIR}" != "yes"; then
-    CFLAGS="-I${BZ2_DIR}/include $CFLAGS"
-    LDFLAGS="-L${BZ2_DIR}/lib $LDFLAGS"
-fi
-if test -z "$BZ2_DIR" -o "$BZ2_DIR" = no; then
-    MOZ_SYSTEM_BZ2=
-else
-    AC_CHECK_LIB(bz2, BZ2_bzread, [MOZ_SYSTEM_BZ2=1 MOZ_BZ2_LIBS="-lbz2"],
-    [MOZ_SYSTEM_BZ2= MOZ_BZ2_CFLAGS= MOZ_BZ2_LIBS=])
-fi
-CFLAGS=$_SAVE_CFLAGS
-LDFLAGS=$_SAVE_LDFLAGS
-LIBS=$_SAVE_LIBS
-
-if test "${BZ2_DIR}" -a -d "${BZ2_DIR}" -a "$MOZ_SYSTEM_BZ2" = 1; then
-    MOZ_BZ2_CFLAGS="-I${BZ2_DIR}/include"
-    MOZ_BZ2_LIBS="-L${BZ2_DIR}/lib ${MOZ_BZ2_LIBS}"
-fi
 
 dnl ========================================================
 dnl system PNG Support
@@ -1924,10 +1881,6 @@ if test "$MOZ_IOS"; then
    MOZ_AUTH_EXTENSION=
 fi
 MOZ_RAW=
-MOZ_VORBIS=
-MOZ_TREMOR=
-MOZ_SAMPLE_TYPE_FLOAT32=
-MOZ_SAMPLE_TYPE_S16=
 MOZ_SRTP=
 MOZ_WEBRTC_HARDWARE_AEC_NS=
 MOZ_SCTP=
@@ -2073,7 +2026,7 @@ dnl ========================================================
 
 case "$MOZ_BUILD_APP" in
 mobile/android)
-    MOZ_ANDROID_SDK(23, 23, 26.0.2, 26.0.0 26.0.0-dev 25.3.2 25.3.1)
+    MOZ_ANDROID_SDK(26, 23, 26.0.2)
     ;;
 esac
 
@@ -2124,7 +2077,7 @@ esac
 
 if test "$COMPILE_ENVIRONMENT"; then
   if test "$MOZ_WIDGET_TOOLKIT" = gtk3; then
-    PKG_CHECK_MODULES(MOZ_GTK3, gtk+-3.0 >= $GTK3_VERSION gtk+-unix-print-3.0 glib-2.0 gobject-2.0 $GDK_PACKAGES)
+    PKG_CHECK_MODULES(MOZ_GTK3, gtk+-3.0 >= $GTK3_VERSION gtk+-unix-print-3.0 glib-2.0 gobject-2.0 gio-unix-2.0 $GDK_PACKAGES)
     MOZ_GTK3_CFLAGS="-I${_topsrcdir}/widget/gtk/compat-gtk3 $MOZ_GTK3_CFLAGS"
     TK_CFLAGS=$MOZ_GTK3_CFLAGS
     TK_LIBS=$MOZ_GTK3_LIBS
@@ -2143,7 +2096,7 @@ if test "$COMPILE_ENVIRONMENT"; then
     AC_DEFINE_UNQUOTED(GLIB_VERSION_MIN_REQUIRED,$GLIB_VERSION_MIN_REQUIRED)
     AC_DEFINE_UNQUOTED(GLIB_VERSION_MAX_ALLOWED,$GLIB_VERSION_MAX_ALLOWED)
 
-    PKG_CHECK_MODULES(MOZ_GTK2, gtk+-2.0 >= $GTK2_VERSION gtk+-unix-print-2.0 glib-2.0 >= $GLIB_VERSION gobject-2.0 $GDK_PACKAGES)
+    PKG_CHECK_MODULES(MOZ_GTK2, gtk+-2.0 >= $GTK2_VERSION gtk+-unix-print-2.0 glib-2.0 >= $GLIB_VERSION gobject-2.0 gio-unix-2.0 $GDK_PACKAGES)
     MOZ_GTK2_CFLAGS="-I${_topsrcdir}/widget/gtk/compat $MOZ_GTK2_CFLAGS"
   fi
   if test "$MOZ_WIDGET_TOOLKIT" = gtk2; then
@@ -2398,20 +2351,6 @@ AC_SUBST(MOZ_SCTP)
 AC_SUBST(MOZ_SRTP)
 AC_SUBST_LIST(MOZ_WEBRTC_X11_LIBS)
 
-dnl Use integers over floats for audio on B2G and Android
-dnl (regarless of the CPU architecture, because audio
-dnl backends for those platforms don't support floats. We also
-dnl use integers on ARM with other OS, because it's more efficient.
-if test "$OS_TARGET" = "Android" -o "$CPU_ARCH" = "arm"; then
-    MOZ_SAMPLE_TYPE_S16=1
-    AC_DEFINE(MOZ_SAMPLE_TYPE_S16)
-    AC_SUBST(MOZ_SAMPLE_TYPE_S16)
-else
-    MOZ_SAMPLE_TYPE_FLOAT32=1
-    AC_DEFINE(MOZ_SAMPLE_TYPE_FLOAT32)
-    AC_SUBST(MOZ_SAMPLE_TYPE_FLOAT32)
-fi
-
 dnl ========================================================
 dnl = Enable Raw Codecs
 dnl ========================================================
@@ -2480,12 +2419,6 @@ LIBS=$_SAVE_LIBS
 AC_SUBST(MOZ_SYSTEM_LIBVPX)
 AC_SUBST_LIST(MOZ_LIBVPX_CFLAGS)
 AC_SUBST_LIST(MOZ_LIBVPX_LIBS)
-
-if test "$MOZ_SAMPLE_TYPE_FLOAT32"; then
-    MOZ_VORBIS=1
-else
-    MOZ_TREMOR=1
-fi
 
 if test -z "$MOZ_SYSTEM_LIBVPX"; then
 
@@ -2582,18 +2515,6 @@ fi
 dnl ========================================================
 dnl = Handle dependent MEDIA defines
 dnl ========================================================
-
-if test -n "$MOZ_VORBIS" -a -n "$MOZ_TREMOR"; then
-    AC_MSG_ERROR([MOZ_VORBIS and MOZ_TREMOR are mutually exclusive!  The build system should not allow them both to be set, but they are.  Please file a bug at https://bugzilla.mozilla.org/])
-fi
-
-if test -n "$MOZ_VORBIS"; then
-    AC_DEFINE(MOZ_VORBIS)
-fi
-
-if test -n "$MOZ_TREMOR"; then
-    AC_DEFINE(MOZ_TREMOR)
-fi
 
 MOZ_WEBM_ENCODER=1
 AC_DEFINE(MOZ_WEBM_ENCODER)
@@ -4407,6 +4328,7 @@ fi
 dnl win32 options
 AC_SUBST(WIN32_REDIST_DIR)
 AC_SUBST(WIN_UCRT_REDIST_DIR)
+AC_SUBST(WIN_DIA_SDK_BIN_DIR)
 
 dnl ========================================================
 dnl ICU Support
@@ -4452,12 +4374,9 @@ HOST_CXXFLAGS=`echo \
 AC_SUBST(_DEPEND_CFLAGS)
 AC_SUBST(MOZ_SYSTEM_JPEG)
 AC_SUBST(MOZ_SYSTEM_PNG)
-AC_SUBST(MOZ_SYSTEM_BZ2)
 
 AC_SUBST_LIST(MOZ_JPEG_CFLAGS)
 AC_SUBST_LIST(MOZ_JPEG_LIBS)
-AC_SUBST_LIST(MOZ_BZ2_CFLAGS)
-AC_SUBST_LIST(MOZ_BZ2_LIBS)
 AC_SUBST_LIST(MOZ_PNG_CFLAGS)
 AC_SUBST_LIST(MOZ_PNG_LIBS)
 
@@ -4524,8 +4443,6 @@ AC_SUBST(NS_ENABLE_TSF)
 AC_SUBST(WIN32_CONSOLE_EXE_LDFLAGS)
 AC_SUBST(WIN32_GUI_EXE_LDFLAGS)
 
-AC_SUBST(MOZ_VORBIS)
-AC_SUBST(MOZ_TREMOR)
 AC_SUBST(MOZ_FFVPX)
 AC_SUBST(MOZ_FFVPX_FLACONLY)
 AC_SUBST_LIST(FFVPX_ASFLAGS)

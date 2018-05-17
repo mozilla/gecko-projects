@@ -8,6 +8,7 @@ package org.mozilla.geckoview.test
 import android.os.Parcel
 import android.support.test.InstrumentationRegistry
 import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
 
 import org.hamcrest.Matcher
@@ -26,7 +27,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val INVALID_URI = "http://www.test.invalid/"
         const val HELLO_HTML_PATH = "/assets/www/hello.html"
         const val HELLO2_HTML_PATH = "/assets/www/hello2.html"
-        const val NEW_SESSION_HTML_PATH = "/assets/www/newSession.html";
+        const val NEW_SESSION_HTML_PATH = "/assets/www/newSession.html"
         const val NEW_SESSION_CHILD_HTML_PATH = "/assets/www/newSession_child.html"
         const val CLICK_TO_RELOAD_HTML_PATH = "/assets/www/clickToReload.html"
         const val TITLE_CHANGE_HTML_PATH = "/assets/www/titleChange.html"
@@ -36,7 +37,7 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
     @get:Rule val sessionRule = GeckoSessionTestRule()
 
     @get:Rule val errors = ErrorCollector()
-    fun <T> assertThat(reason: String, v: T, m: Matcher<T>) = sessionRule.assertThat(reason, v, m)
+    fun <T> assertThat(reason: String, v: T, m: Matcher<in T>) = sessionRule.checkThat(reason, v, m)
 
     init {
         if (!noErrorCollector) {
@@ -46,9 +47,12 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
 
     fun <T> forEachCall(vararg values: T): T = sessionRule.forEachCall(*values)
 
-    fun GeckoSession.getTestBytes(path: String) =
+    fun getTestBytes(path: String) =
             InstrumentationRegistry.getTargetContext().resources.assets
                     .open(path.removePrefix("/assets/")).readBytes()
+
+    val GeckoSession.isRemote
+        get() = this.settings.getBoolean(GeckoSessionSettings.USE_MULTIPROCESS)
 
     fun GeckoSession.loadTestPath(path: String) =
             this.loadUri(GeckoSessionTestRule.APK_URI_PREFIX + path.removePrefix("/"))
@@ -96,4 +100,19 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
 
     fun GeckoSession.synthesizeTap(x: Int, y: Int) =
             sessionRule.synthesizeTap(this, x, y)
+
+    fun GeckoSession.evaluateJS(js: String): Any? =
+            sessionRule.evaluateJS(this, js)
+
+    infix fun Any?.dot(prop: Any): Any? =
+            if (prop is Int) this.asJSList<Any>()[prop] else this.asJSMap<Any>()[prop]
+
+    @Suppress("UNCHECKED_CAST")
+    fun <T> Any?.asJSMap(): Map<String, T> = this as Map<String, T>
+
+    @Suppress("UNCHECKED_CAST")
+    fun <T> Any?.asJSList(): List<T> = this as List<T>
+
+    fun Any?.asJSPromise(): GeckoSessionTestRule.PromiseWrapper =
+            this as GeckoSessionTestRule.PromiseWrapper
 }

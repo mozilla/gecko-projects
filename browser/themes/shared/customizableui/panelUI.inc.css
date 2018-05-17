@@ -315,36 +315,6 @@ panelview:not([mainview]) .toolbarbutton-text,
   padding: 4px 0;
 }
 
-/* START notification popups for extension controlled content */
-#extension-notification-panel > .panel-arrowcontainer > .panel-arrowcontent {
-  padding: 0;
-}
-
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-body {
-  width: 30em;
-}
-
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-body > hbox > vbox > .popup-notification-description {
-  font-size: 1.3em;
-  font-weight: lighter;
-}
-
-#extension-new-tab-notification-description {
-  margin-bottom: 0;
-}
-
-#extension-new-tab-notification-description > .extension-controlled-icon {
-  height: 16px;
-  width: 16px;
-  vertical-align: bottom;
-}
-
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-body > .popup-notification-warning,
-#extension-new-tab-notification > .popup-notification-body-container > .popup-notification-icon {
-  display: none;
-}
-/* END notification popups for extension controlled content */
-
 #appMenu-popup > .panel-arrowcontainer > .panel-arrowcontent,
 panel[photon] > .panel-arrowcontainer > .panel-arrowcontent {
   padding: 0;
@@ -803,6 +773,23 @@ panelview .toolbarbutton-1,
   padding-inline-start: 24px; /* This is 16px for the icon + 8px for the padding as defined below. */
 }
 
+.subviewbutton > .menu-right {
+  -moz-appearance: none;
+  list-style-image: url(chrome://browser/skin/customizableui/menu-arrow.svg);
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  /* Reset the rect we inherit from the button */
+  -moz-image-region: auto;
+}
+
+.subviewbutton[disabled="true"] > .menu-right {
+  fill-opacity: 0.6;
+}
+
+.subviewbutton > .menu-right:-moz-locale-dir(rtl) {
+  transform: scaleX(-1);
+}
+
 .subviewbutton > .menu-right,
 .subviewbutton > .menu-accel-container > .menu-iconic-accel,
 .subviewbutton > .menu-iconic-left,
@@ -1064,6 +1051,10 @@ menuitem.panel-subview-footer@menuStateActive@,
 
 #BMB_bookmarksPopup .subviewbutton:not([disabled="true"]) {
   color: inherit;
+}
+
+#BMB_bookmarksPopup .subviewbutton > .menu-iconic-left {
+  margin-inline-end: 3px;
 }
 
 #BMB_bookmarksPopup .panel-arrowcontainer > .panel-arrowcontent > .popup-internal-box > .autorepeatbutton-up,

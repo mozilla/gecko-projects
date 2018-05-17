@@ -78,6 +78,8 @@ class JSFunction : public js::NativeObject
         INTERPRETED_LAZY = 0x0200,  /* function is interpreted but doesn't have a script yet */
         RESOLVED_LENGTH  = 0x0400,  /* f.length has been resolved (see fun_resolve). */
         RESOLVED_NAME    = 0x0800,  /* f.name has been resolved (see fun_resolve). */
+        NEW_SCRIPT_CLEARED  = 0x1000, /* For a function used as an interpreted constructor, whether
+                                         a 'new' type had constructor information cleared. */
 
         FUNCTION_KIND_SHIFT = 13,
         FUNCTION_KIND_MASK  = 0x7 << FUNCTION_KIND_SHIFT,
@@ -182,6 +184,10 @@ class JSFunction : public js::NativeObject
     js::GCPtrAtom atom_;
 
   public:
+    static inline JS::Result<JSFunction*, JS::OOM&>
+    create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
+           js::HandleShape shape, js::HandleObjectGroup group);
+
     /* Call objects must be created for each invocation of this function. */
     bool needsCallObject() const {
         MOZ_ASSERT(!isInterpretedLazy());
@@ -369,6 +375,14 @@ class JSFunction : public js::NativeObject
         flags_ |= RESOLVED_NAME;
     }
 
+    // Mark a function as having its 'new' script information cleared.
+    bool wasNewScriptCleared() const {
+        return flags_ & NEW_SCRIPT_CLEARED;
+    }
+    void setNewScriptCleared() {
+        flags_ |= NEW_SCRIPT_CLEARED;
+    }
+
     void setAsyncKind(js::FunctionAsyncKind asyncKind) {
         if (isInterpretedLazy())
             lazyScript()->setAsyncKind(asyncKind);
@@ -550,13 +564,13 @@ class JSFunction : public js::NativeObject
     // The state of a JSFunction whose script errored out during bytecode
     // compilation. Such JSFunctions are only reachable via GC iteration and
     // not from script.
-    bool hasUncompiledScript() const {
+    bool hasUncompletedScript() const {
         MOZ_ASSERT(hasScript());
         return !u.scripted.s.script_;
     }
 
     JSScript* nonLazyScript() const {
-        MOZ_ASSERT(!hasUncompiledScript());
+        MOZ_ASSERT(!hasUncompletedScript());
         return u.scripted.s.script_;
     }
 
@@ -994,7 +1008,7 @@ JSString* FunctionToString(JSContext* cx, HandleFunction fun, bool isToSource);
 template<XDRMode mode>
 XDRResult
 XDRInterpretedFunction(XDRState<mode>* xdr, HandleScope enclosingScope,
-                       HandleScriptSource sourceObject, MutableHandleFunction objp);
+                       HandleScriptSourceObject sourceObject, MutableHandleFunction objp);
 
 /*
  * Report an error that call.thisv is not compatible with the specified class,

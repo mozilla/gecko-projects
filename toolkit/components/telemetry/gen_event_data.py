@@ -6,8 +6,10 @@
 # in a file provided as a command-line argument.
 
 from __future__ import print_function
+from collections import OrderedDict
 from shared_telemetry_utils import StringTable, static_assert, ParserError
 
+import json
 import parse_events
 import sys
 import itertools
@@ -74,13 +76,14 @@ def write_common_event_table(events, output, string_table, extra_table):
         print("  // objects: [%s]" % ", ".join(e.objects), file=output)
 
         # Write the common info structure
-        print("  {%d, %d, %d, %d, %s, %s}," %
+        print("  {%d, %d, %d, %d, %s, %s, %s }," %
               (string_table.stringIndex(e.category),
                string_table.stringIndex(e.expiry_version),
                extras[0],  # extra keys index
                extras[1],  # extra keys count
                e.dataset,
-               " | ".join(e.record_in_processes_enum)),
+               " | ".join(e.record_in_processes_enum),
+               " | ".join(e.products_enum)),
               file=output)
 
     print("};", file=output)
@@ -107,6 +110,42 @@ def write_event_table(events, output, string_table):
     print("};", file=output)
     static_assert(output, "sizeof(%s) <= UINT32_MAX" % table_name,
                   "index overflow")
+
+
+def generate_JSON_definitions(output, *filenames):
+    """ Write the event definitions to a JSON file.
+
+    :param output: the file to write the content to.
+    :param filenames: a list of filenames provided by the build system.
+           We only support a single file.
+    """
+    # Load the event data.
+    if len(filenames) > 1:
+        raise Exception('We don\'t support loading from more than one file.')
+    try:
+        events = parse_events.load_events(filenames[0], True)
+    except ParserError as ex:
+        print("\nError processing events:\n" + str(ex) + "\n")
+        sys.exit(1)
+
+    event_definitions = OrderedDict()
+    for event in events:
+        category = event.category
+
+        if category not in event_definitions:
+            event_definitions[category] = OrderedDict()
+
+        event_definitions[category][event.name] = OrderedDict({
+            'methods': event.methods,
+            'objects': event.objects,
+            'extra_keys': event.extra_keys,
+            'record_on_release': True if event.dataset_short == 'opt-out' else False,
+            # We don't expire dynamic-builtin scalars: they're only meant for
+            # use in local developer builds anyway. They will expire when rebuilding.
+            'expired': False,
+        })
+
+    json.dump(event_definitions, output)
 
 
 def main(output, *filenames):

@@ -28,6 +28,7 @@
 #include "irregexp/RegExpEngine.h"
 #include "irregexp/RegExpParser.h"
 #endif
+#include "gc/Heap.h"
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
 #include "js/Debug.h"
@@ -52,6 +53,7 @@
 #include "vm/ProxyObject.h"
 #include "vm/SavedStacks.h"
 #include "vm/Stack.h"
+#include "vm/StringType.h"
 #include "vm/TraceLogging.h"
 #include "wasm/AsmJS.h"
 #include "wasm/WasmBinaryToText.h"
@@ -66,6 +68,7 @@
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
+#include "vm/StringType-inl.h"
 
 using namespace js;
 
@@ -138,6 +141,14 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
     value = BooleanValue(false);
 #endif
     if (!JS_SetProperty(cx, info, "release_or_beta", value))
+        return false;
+
+#ifdef MOZ_CODE_COVERAGE
+    value = BooleanValue(true);
+#else
+    value = BooleanValue(false);
+#endif
+    if (!JS_SetProperty(cx, info, "coverage", value))
         return false;
 
 #ifdef JS_HAS_CTYPES
@@ -579,6 +590,19 @@ WasmSaturatingTruncationSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+    bool isSupported = true;
+#else
+    bool isSupported = false;
+#endif
+    args.rval().setBoolean(isSupported);
+    return true;
+}
+
+static bool
+WasmBulkMemSupported(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef ENABLE_WASM_BULKMEM_OPS
     bool isSupported = true;
 #else
     bool isSupported = false;
@@ -1307,9 +1331,9 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
 
     RootedObject stack(cx);
     {
-        Maybe<AutoCompartment> ac;
+        Maybe<AutoRealm> ar;
         if (compartmentObject)
-            ac.emplace(cx, compartmentObject);
+            ar.emplace(cx, compartmentObject);
         if (!JS::CaptureCurrentStack(cx, &stack, mozilla::Move(capture)))
             return false;
     }
@@ -1496,6 +1520,48 @@ NewMaybeExternalString(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+// Warning! This will let you create ropes that I'm not sure would be possible
+// otherwise, specifically:
+//
+//   - a rope with a zero-length child
+//   - a rope that would fit into an inline string
+//
+static bool
+NewRope(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!args.get(0).isString() || !args.get(1).isString()) {
+        JS_ReportErrorASCII(cx, "newRope requires two string arguments.");
+        return false;
+    }
+
+    gc::InitialHeap heap = js::gc::DefaultHeap;
+    if (args.get(2).isObject()) {
+        RootedObject options(cx, &args[2].toObject());
+        RootedValue v(cx);
+        if (!JS_GetProperty(cx, options, "nursery", &v))
+            return false;
+        if (!v.isUndefined() && !ToBoolean(v))
+            heap = js::gc::TenuredHeap;
+    }
+
+    JSString* left = args[0].toString();
+    JSString* right = args[1].toString();
+    size_t length = JS_GetStringLength(left) + JS_GetStringLength(right);
+    if (length > JSString::MAX_LENGTH) {
+        JS_ReportErrorASCII(cx, "rope length exceeds maximum string length");
+        return false;
+    }
+
+    Rooted<JSRope*> str(cx, JSRope::new_<NoGC>(cx, left, right, length, heap));
+    if (!str)
+        return false;
+
+    args.rval().setString(str);
+    return true;
+}
+
 static bool
 EnsureFlatString(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1542,7 +1608,7 @@ OOMThreadTypes(JSContext* cx, unsigned argc, Value* vp)
 static bool
 CheckCanSimulateOOM(JSContext* cx)
 {
-    if (js::oom::GetThreadType() != js::THREAD_TYPE_COOPERATING) {
+    if (js::oom::GetThreadType() != js::THREAD_TYPE_MAIN) {
         JS_ReportErrorASCII(cx, "Simulated OOM failure is only supported on the main thread");
         return false;
     }
@@ -1579,7 +1645,7 @@ SetupOOMFailure(JSContext* cx, bool failAlways, unsigned argc, Value* vp)
         return false;
     }
 
-    uint32_t targetThread = js::THREAD_TYPE_COOPERATING;
+    uint32_t targetThread = js::THREAD_TYPE_MAIN;
     if (args.length() > 1 && !ToUint32(cx, args[1], &targetThread))
         return false;
 
@@ -2117,10 +2183,10 @@ ResolvePromise(JSContext* cx, unsigned argc, Value* vp)
 
     RootedObject promise(cx, &args[0].toObject());
     RootedValue resolution(cx, args[1]);
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (IsWrapper(promise)) {
         promise = UncheckedUnwrap(promise);
-        ac.emplace(cx, promise);
+        ar.emplace(cx, promise);
         if (!cx->compartment()->wrap(cx, &resolution))
             return false;
     }
@@ -2149,10 +2215,10 @@ RejectPromise(JSContext* cx, unsigned argc, Value* vp)
 
     RootedObject promise(cx, &args[0].toObject());
     RootedValue reason(cx, args[1]);
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (IsWrapper(promise)) {
         promise = UncheckedUnwrap(promise);
-        ac.emplace(cx, promise);
+        ar.emplace(cx, promise);
         if (!cx->compartment()->wrap(cx, &reason))
             return false;
     }
@@ -2700,6 +2766,14 @@ SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp)
         }
     }
 
+    // JIT compiler options are process-wide, so we have to stop off-thread
+    // compilations for all runtimes to avoid races.
+    HelperThreadState().waitForAllThreads();
+
+    // Only release JIT code for the current runtime because there's no good
+    // way to discard code for other runtimes.
+    ReleaseAllJITCode(cx->runtime()->defaultFreeOp());
+
     JS_SetGlobalJitCompilerOption(cx, opt, uint32_t(number));
 
     args.rval().setUndefined();
@@ -2742,13 +2816,14 @@ SetIonCheckGraphCoherency(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+// A JSObject that holds structured clone data, similar to the C++ class
+// JSAutoStructuredCloneBuffer.
 class CloneBufferObject : public NativeObject {
     static const JSPropertySpec props_[3];
 
     static const size_t DATA_SLOT = 0;
-    static const size_t LENGTH_SLOT = 1;
-    static const size_t SYNTHETIC_SLOT = 2;
-    static const size_t NUM_SLOTS = 3;
+    static const size_t SYNTHETIC_SLOT = 1;
+    static const size_t NUM_SLOTS = 2;
 
   public:
     static const Class class_;
@@ -2758,7 +2833,6 @@ class CloneBufferObject : public NativeObject {
         if (!obj)
             return nullptr;
         obj->as<CloneBufferObject>().setReservedSlot(DATA_SLOT, PrivateValue(nullptr));
-        obj->as<CloneBufferObject>().setReservedSlot(LENGTH_SLOT, Int32Value(0));
         obj->as<CloneBufferObject>().setReservedSlot(SYNTHETIC_SLOT, BooleanValue(false));
 
         if (!JS_DefineProperties(cx, obj, props_))
@@ -2793,14 +2867,16 @@ class CloneBufferObject : public NativeObject {
         MOZ_ASSERT(!data());
         setReservedSlot(DATA_SLOT, PrivateValue(aData));
         setReservedSlot(SYNTHETIC_SLOT, BooleanValue(synthetic));
+
+        // For testing only, and will be unnecessary once the scope is moved
+        // into JSStructuredCloneData.
+        if (synthetic)
+            aData->IgnoreTransferables();
     }
 
     // Discard an owned clone buffer.
     void discard() {
-        if (data()) {
-            JSAutoStructuredCloneBuffer clonebuf(JS::StructuredCloneScope::SameProcessSameThread, nullptr, nullptr);
-            clonebuf.adopt(Move(*data()));
-        }
+        js_delete(data());
         setReservedSlot(DATA_SLOT, PrivateValue(nullptr));
     }
 
@@ -2833,13 +2909,13 @@ class CloneBufferObject : public NativeObject {
             return false;
         }
 
-        auto buf = js::MakeUnique<JSStructuredCloneData>(0, 0, nbytes);
-        if (!buf || !buf->Init(nbytes, nbytes)) {
+        auto buf = js::MakeUnique<JSStructuredCloneData>();
+        if (!buf || !buf->Init(nbytes)) {
             ReportOutOfMemory(cx);
             return false;
         }
 
-        js_memcpy(buf->Start(), data, nbytes);
+        MOZ_ALWAYS_TRUE(buf->AppendBytes((const char*)data, nbytes));
         obj->discard();
         obj->setData(buf.release(), true);
 
@@ -2893,7 +2969,7 @@ class CloneBufferObject : public NativeObject {
             ReportOutOfMemory(cx);
             return false;
         }
-        auto iter = data->Iter();
+        auto iter = data->Start();
         data->ReadBytes(iter, buffer.get(), size);
         JSString* str = JS_NewStringCopyN(cx, buffer.get(), size);
         if (!str)
@@ -2923,7 +2999,7 @@ class CloneBufferObject : public NativeObject {
             ReportOutOfMemory(cx);
             return false;
         }
-        auto iter = data->Iter();
+        auto iter = data->Start();
         data->ReadBytes(iter, buffer.get(), size);
         JSObject* arrayBuffer = JS_NewArrayBufferWithContents(cx, size, buffer.release());
         if (!arrayBuffer)
@@ -2981,6 +3057,8 @@ ParseCloneScope(JSContext* cx, HandleString str)
         scope.emplace(JS::StructuredCloneScope::SameProcessDifferentThread);
     else if (strcmp(scopeStr.ptr(), "DifferentProcess") == 0)
         scope.emplace(JS::StructuredCloneScope::DifferentProcess);
+    else if (strcmp(scopeStr.ptr(), "DifferentProcessForIndexedDB") == 0)
+        scope.emplace(JS::StructuredCloneScope::DifferentProcessForIndexedDB);
 
     return scope;
 }
@@ -3083,6 +3161,12 @@ Deserialize(JSContext* cx, unsigned argc, Value* vp)
                 return false;
             }
 
+            if (*maybeScope < scope) {
+                JS_ReportErrorASCII(cx, "Cannot use less restrictive scope "
+                                    "than the deserialized clone buffer's scope");
+                return false;
+            }
+
             scope = *maybeScope;
         }
     }
@@ -3098,13 +3182,6 @@ Deserialize(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_StructuredCloneHasTransferables(*obj->data(), &hasTransferable))
         return false;
 
-    if (obj->isSynthetic() &&
-        (scope != JS::StructuredCloneScope::DifferentProcess || hasTransferable))
-    {
-        JS_ReportErrorASCII(cx, "clone buffer data is synthetic but may contain pointers");
-        return false;
-    }
-
     RootedValue deserialized(cx);
     if (!JS_ReadStructuredClone(cx, *obj->data(),
                                 JS_STRUCTURED_CLONE_VERSION,
@@ -3115,6 +3192,8 @@ Deserialize(JSContext* cx, unsigned argc, Value* vp)
     }
     args.rval().set(deserialized);
 
+    // Consume any clone buffer with transferables; throw an error if it is
+    // deserialized again.
     if (hasTransferable)
         obj->discard();
 
@@ -3848,7 +3927,7 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
         // If we're switching globals here, ExecuteInGlobalAndReturnScope will
         // take care of cloning the script into that compartment before
         // executing it.
-        AutoCompartment ac(cx, global);
+        AutoRealm ar(cx, global);
 
         if (!js::ExecuteInGlobalAndReturnScope(cx, global, script, &lexicalScope))
             return false;
@@ -3923,7 +4002,7 @@ ShellCloneAndExecuteScript(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    AutoCompartment ac(cx, global);
+    AutoRealm ar(cx, global);
 
     JS::RootedValue rval(cx);
     if (!JS::CloneAndExecuteScript(cx, script, &rval))
@@ -4308,7 +4387,7 @@ GetLcovInfo(JSContext* cx, unsigned argc, Value* vp)
     size_t length = 0;
     char* content = nullptr;
     {
-        AutoCompartment ac(cx, global);
+        AutoRealm ar(cx, global);
         content = js::GetCodeCoverageSummary(cx, &length);
     }
 
@@ -5112,7 +5191,7 @@ BaselineCompile(JSContext* cx, unsigned argc, Value* vp)
 
     const char* returnedStr = nullptr;
     do {
-        AutoCompartment ac(cx, script);
+        AutoRealm ar(cx, script);
         if (script->hasBaselineScript()) {
             if (forceDebug && !script->baselineScript()->hasDebugInstrumentation()) {
                 // There isn't an easy way to do this for a script that might be on
@@ -5299,6 +5378,12 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "interruptTest(function)",
 "  This function simulates interrupts similar to how oomTest simulates OOM conditions."),
 #endif
+
+    JS_FN_HELP("newRope", NewRope, 3, 0,
+"newRope(left, right[, options])",
+"  Creates a rope with the given left/right strings.\n"
+"  Available options:\n"
+"    nursery: bool - force the string to be created in/out of the nursery, if possible.\n"),
 
     JS_FN_HELP("settlePromiseNow", SettlePromiseNow, 1, 0,
 "settlePromiseNow(promise)",
@@ -5491,6 +5576,11 @@ gc::ZealModeHelpText),
 "  Returns a boolean indicating whether the WebAssembly saturating truncates opcodes are\n"
 "  supported on the current device."),
 
+    JS_FN_HELP("wasmBulkMemSupported", WasmBulkMemSupported, 0, 0,
+"wasmBulkMemSupported()",
+"  Returns a boolean indicating whether the WebAssembly bulk memory proposal is\n"
+"  supported on the current device."),
+
     JS_FN_HELP("wasmCompileMode", WasmCompileMode, 0, 0,
 "wasmCompileMode()",
 "  Returns a string indicating the available compile policy: 'baseline', 'ion',\n"
@@ -5580,20 +5670,22 @@ gc::ZealModeHelpText),
 "  clone buffer object. 'policy' may be an options hash. Valid keys:\n"
 "    'SharedArrayBuffer' - either 'allow' (the default) or 'deny'\n"
 "      to specify whether SharedArrayBuffers may be serialized.\n"
-"    'scope' - SameProcessSameThread, SameProcessDifferentThread, or\n"
-"      DifferentProcess. Determines how some values will be serialized.\n"
-"      Clone buffers may only be deserialized with a compatible scope.\n"
-"      NOTE - For DifferentProcess, must also set SharedArrayBuffer:'deny'\n"
-"      if data contains any shared memory object."),
+"    'scope' - SameProcessSameThread, SameProcessDifferentThread,\n"
+"      DifferentProcess, or DifferentProcessForIndexedDB. Determines how some\n"
+"      values will be serialized. Clone buffers may only be deserialized with a\n"
+"      compatible scope. NOTE - For DifferentProcess/DifferentProcessForIndexedDB,\n"
+"      must also set SharedArrayBuffer:'deny' if data contains any shared memory\n"
+"      object."),
 
     JS_FN_HELP("deserialize", Deserialize, 1, 0,
 "deserialize(clonebuffer[, opts])",
 "  Deserialize data generated by serialize. 'opts' is an options hash with one\n"
 "  recognized key 'scope', which limits the clone buffers that are considered\n"
 "  valid. Allowed values: 'SameProcessSameThread', 'SameProcessDifferentThread',\n"
-"  and 'DifferentProcess'. So for example, a DifferentProcess clone buffer\n"
-"  may be deserialized in any scope, but a SameProcessSameThread clone buffer\n"
-"  cannot be deserialized in a DifferentProcess scope."),
+"  'DifferentProcess', and 'DifferentProcessForIndexedDB'. So for example, a\n"
+"  DifferentProcessForIndexedDB clone buffer may be deserialized in any scope, but\n"
+"  a SameProcessSameThread clone buffer cannot be deserialized in a\n"
+"  DifferentProcess scope."),
 
     JS_FN_HELP("detachArrayBuffer", DetachArrayBuffer, 1, 0,
 "detachArrayBuffer(buffer)",

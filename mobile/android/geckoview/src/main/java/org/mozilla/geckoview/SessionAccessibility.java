@@ -19,6 +19,8 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewParent;
 import android.view.accessibility.AccessibilityEvent;
@@ -59,16 +61,18 @@ public class SessionAccessibility {
     }
 
     /**
-      * Get the GeckoView instance that delegates accessibility to this session.
+      * Get the View instance that delegates accessibility to this session.
       *
-      * @return GeckoView instance.
+      * @return View instance.
       */
     public View getView() {
         return mView;
     }
 
     /**
-      * Set the GeckoView instance that should delegate accessibility to this session.
+      * Set the View instance that should delegate accessibility to this session.
+      *
+      * @param view View instance.
       */
     public void setView(final View view) {
         if (mView != null) {
@@ -127,7 +131,6 @@ public class SessionAccessibility {
                             info.setPackageName(GeckoAppShell.getApplicationContext().getPackageName());
                             info.setClassName(mView.getClass().getName());
                             info.setEnabled(true);
-                            info.addAction(AccessibilityNodeInfo.ACTION_CLICK);
                             info.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
                             info.addAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
                             info.addAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
@@ -166,6 +169,7 @@ public class SessionAccessibility {
                         return mView.performAccessibilityAction(action, arguments);
                     }
 
+                    @SuppressWarnings("fallthrough")
                     private boolean performContentAction(int action, Bundle arguments) {
                         final GeckoBundle data;
                         switch (action) {
@@ -189,6 +193,7 @@ public class SessionAccessibility {
                             if (mLastItem) {
                                 return false;
                             }
+                            // fall-through
                         case AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT:
                             if (arguments != null) {
                                 data = new GeckoBundle(1);
@@ -348,10 +353,12 @@ public class SessionAccessibility {
 
     private void populateNodeInfoFromJSON(AccessibilityNodeInfo node, final GeckoBundle message) {
         node.setEnabled(message.getBoolean("enabled", true));
-        node.setClickable(message.getBoolean("clickable"));
         node.setCheckable(message.getBoolean("checkable"));
         node.setChecked(message.getBoolean("checked"));
         node.setPassword(message.getBoolean("password"));
+        node.setFocusable(message.getBoolean("focusable"));
+        node.setFocused(message.getBoolean("focused"));
+        node.setEditable(message.getBoolean("editable"));
 
         final String[] textArray = message.getStringArray("text");
         StringBuilder sb = new StringBuilder();
@@ -364,19 +371,27 @@ public class SessionAccessibility {
         }
         node.setContentDescription(message.getString("description", ""));
 
+        if (message.getBoolean("clickable")) {
+            node.setClickable(true);
+            node.addAction(AccessibilityNodeInfo.ACTION_CLICK);
+        } else {
+            node.setClickable(false);
+            node.removeAction(AccessibilityNodeInfo.ACTION_CLICK);
+        }
+
         final GeckoBundle bounds = message.getBundle("bounds");
         if (bounds != null) {
-            Rect relativeBounds = new Rect(bounds.getInt("left"), bounds.getInt("top"),
-                                           bounds.getInt("right"), bounds.getInt("bottom"));
-            node.setBoundsInParent(relativeBounds);
+            Rect screenBounds = new Rect(bounds.getInt("left"), bounds.getInt("top"),
+                                         bounds.getInt("right"), bounds.getInt("bottom"));
+            node.setBoundsInScreen(screenBounds);
 
             final Matrix matrix = new Matrix();
             final float[] origin = new float[2];
             mSession.getClientToScreenMatrix(matrix);
             matrix.mapPoints(origin);
 
-            relativeBounds.offset((int) origin[0], (int) origin[1]);
-            node.setBoundsInScreen(relativeBounds);
+            screenBounds.offset((int) -origin[0], (int) -origin[1]);
+            node.setBoundsInParent(screenBounds);
         }
 
     }
@@ -406,7 +421,10 @@ public class SessionAccessibility {
             }
         }
 
-        if (eventSource != View.NO_ID) {
+        if (eventSource != View.NO_ID &&
+                (eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ||
+                 eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED ||
+                 eventType == AccessibilityEvent.TYPE_VIEW_HOVER_ENTER)) {
             // In Jelly Bean we populate an AccessibilityNodeInfo with the minimal amount of data to have
             // it work with TalkBack.
             if (mVirtualContentNode == null) {
@@ -418,5 +436,27 @@ public class SessionAccessibility {
         final AccessibilityEvent accessibilityEvent = obtainEvent(eventType, eventSource);
         populateEventFromJSON(accessibilityEvent, message);
         ((ViewParent) mView).requestSendAccessibilityEvent(mView, accessibilityEvent);
+    }
+
+    public boolean onMotionEvent(final MotionEvent event) {
+        if (!Settings.isEnabled()) {
+            return false;
+        }
+
+        if (event.getSource() != InputDevice.SOURCE_TOUCHSCREEN) {
+            return false;
+        }
+
+        final int action = event.getActionMasked();
+        if ((action != MotionEvent.ACTION_HOVER_MOVE) &&
+                (action != MotionEvent.ACTION_HOVER_ENTER) &&
+                (action != MotionEvent.ACTION_HOVER_EXIT)) {
+            return false;
+        }
+
+        final GeckoBundle data = new GeckoBundle(2);
+        data.putDoubleArray("coordinates", new double[] {event.getRawX(), event.getRawY()});
+        mSession.getEventDispatcher().dispatch("GeckoView:AccessibilityExploreByTouch", data);
+        return true;
     }
 }

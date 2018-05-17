@@ -58,7 +58,7 @@ public:
   {
     return aKey == mKey;
   }
-#ifndef RELEASE_OR_BETA
+
   PerformanceCounter* GetPerformanceCounter()
   {
     return mPerformanceCounter;
@@ -66,7 +66,7 @@ public:
 
   PerformanceInfo
   ReportPerformanceInfo();
-#endif
+
   TabGroup* GetTabGroup()
   {
     return mTabGroup;
@@ -113,19 +113,11 @@ public:
   // DocGroup.
   bool* GetValidAccessPtr();
 
-  // Append aSlot to the list of signal slot list, if it's not in it already
-  // list, and queue a mutation observer microtask.
-  void SignalSlotChange(const mozilla::dom::HTMLSlotElement* aSlot);
+  // Append aSlot to the list of signal slot list, and queue a mutation observer
+  // microtask.
+  void SignalSlotChange(HTMLSlotElement& aSlot);
 
-  const nsTArray<RefPtr<HTMLSlotElement>>& SignalSlotList() const
-  {
-    return mSignalSlotList;
-  }
-
-  void ClearSignalSlotList()
-  {
-    mSignalSlotList.Clear();
-  }
+  void MoveSignalSlotListTo(nsTArray<RefPtr<HTMLSlotElement>>& aDest);
 
   // List of DocGroups that has non-empty signal slot list.
   static AutoTArray<RefPtr<DocGroup>, 2>* sPendingDocGroups;
@@ -139,9 +131,9 @@ private:
   nsTArray<nsIDocument*> mDocuments;
   RefPtr<mozilla::dom::CustomElementReactionsStack> mReactionsStack;
   nsTArray<RefPtr<HTMLSlotElement>> mSignalSlotList;
-#ifndef RELEASE_OR_BETA
+  // This pointer will be null if dom.performance.enable_scheduler_timing is
+  // false (default value)
   RefPtr<mozilla::PerformanceCounter> mPerformanceCounter;
-#endif
 };
 
 } // namespace dom

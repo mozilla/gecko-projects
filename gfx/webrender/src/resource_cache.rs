@@ -24,6 +24,7 @@ use glyph_cache::GlyphCache;
 use glyph_cache::GlyphCacheEntry;
 use glyph_rasterizer::{FontInstance, GlyphFormat, GlyphRasterizer, GlyphRequest};
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
+use gpu_types::UvRectKind;
 use internal_types::{FastHashMap, FastHashSet, SourceTexture, TextureUpdateList};
 use profiler::{ResourceProfileCounters, TextureCacheProfileCounters};
 use render_backend::FrameId;
@@ -109,8 +110,6 @@ pub struct ImageTiling {
     pub tile_size: TileSize,
 }
 
-pub type TiledImageMap = FastHashMap<ImageKey, ImageTiling>;
-
 #[derive(Default)]
 struct ImageTemplates {
     images: FastHashMap<ImageKey, ImageResource>,
@@ -148,7 +147,7 @@ pub struct ResourceClassCache<K: Hash + Eq, V, U: Default> {
     pub user_data: U,
 }
 
-fn intersect_for_tile(
+pub fn intersect_for_tile(
     dirty: DeviceUintRect,
     width: u32,
     height: u32,
@@ -235,6 +234,16 @@ pub struct ImageRequest {
     pub key: ImageKey,
     pub rendering: ImageRendering,
     pub tile: Option<TileOffset>,
+}
+
+impl ImageRequest {
+    pub fn with_tile(&self, offset: TileOffset) -> Self {
+        ImageRequest {
+            key: self.key,
+            rendering: self.rendering,
+            tile: Some(offset),
+        }
+    }
 }
 
 impl Into<BlobImageRequest> for ImageRequest {
@@ -635,7 +644,6 @@ impl ResourceCache {
         //  - The blob hasn't already been requested this frame.
         if self.pending_image_requests.insert(request) && template.data.is_blob() {
             if let Some(ref mut renderer) = self.blob_image_renderer {
-                let mut dirty_rect = template.dirty_rect;
                 let (offset, w, h) = match template.tiling {
                     Some(tile_size) => {
                         let tile_offset = request.tile.unwrap();
@@ -649,9 +657,9 @@ impl ResourceCache {
                             tile_offset.y as f32 * tile_size as f32,
                         );
 
-                        if let Some(dirty) = dirty_rect {
-                            dirty_rect = intersect_for_tile(dirty, w, h, tile_size, tile_offset);
-                            if dirty_rect.is_none() {
+                        if let Some(dirty) = template.dirty_rect {
+                            if intersect_for_tile(dirty, w, h, tile_size, tile_offset).is_none() {
+                                // don't bother requesting unchanged tiles
                                 return
                             }
                         }
@@ -674,7 +682,7 @@ impl ResourceCache {
                         offset,
                         format: template.descriptor.format,
                     },
-                    dirty_rect,
+                    template.dirty_rect,
                 );
             }
         }
@@ -878,28 +886,6 @@ impl ResourceCache {
         })
     }
 
-    pub fn get_tiled_image_map(&self) -> TiledImageMap {
-        self.resources
-            .image_templates
-            .images
-            .iter()
-            .filter_map(|(&key, template)| {
-                template.tiling.map(|tile_size| {
-                    (
-                        key,
-                        ImageTiling {
-                            image_size: DeviceUintSize::new(
-                                template.descriptor.width,
-                                template.descriptor.height,
-                            ),
-                            tile_size,
-                        },
-                    )
-                })
-            })
-            .collect()
-    }
-
     pub fn begin_frame(&mut self, frame_id: FrameId) {
         debug_assert_eq!(self.state, State::Idle);
         self.state = State::AddResources;
@@ -1057,6 +1043,7 @@ impl ResourceCache {
                 dirty_rect,
                 gpu_cache,
                 None,
+                UvRectKind::Rect,
             );
             image_template.dirty_rect = None;
         }
@@ -1105,6 +1092,10 @@ impl ResourceCache {
             .retain(|key, _| key.0 != namespace);
         self.cached_glyphs
             .clear_fonts(|font| font.font_key.0 == namespace);
+
+        if let Some(ref mut r) = self.blob_image_renderer {
+            r.clear_namespace(namespace);
+        }
     }
 }
 

@@ -167,7 +167,7 @@ async function checkBootstrappedPref() {
   let XPIScope = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", {});
 
   let data = new Map();
-  for (let entry of XPIScope.XPIStates.bootstrappedAddons()) {
+  for (let entry of XPIScope.XPIStates.enabledAddons()) {
     data.set(entry.id, entry);
   }
 
@@ -324,7 +324,7 @@ add_task(async function test_3() {
   equal(getShutdownReason(), ADDON_DISABLE);
   equal(getShutdownNewVersion(), undefined);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
   BootstrapMonitor.checkAddonNotStarted(ID1);
@@ -392,7 +392,7 @@ add_task(async function test_5() {
   equal(getShutdownReason(), APP_SHUTDOWN);
   equal(getShutdownNewVersion(), undefined);
   do_check_not_in_crash_annotation(ID1, "1.0");
-  await promiseStartupManager(false);
+  await promiseStartupManager();
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
   BootstrapMonitor.checkAddonStarted(ID1, "1.0");
   equal(getStartupReason(), APP_STARTUP);
@@ -406,7 +406,6 @@ add_task(async function test_5() {
   ok(!b1.userDisabled);
   ok(b1.isActive);
   ok(!b1.isSystem);
-  ok(!isExtensionInAddonsList(profileDir, b1.id));
 
   await checkBootstrappedPref();
 });
@@ -502,10 +501,9 @@ add_task(async function test_7() {
 add_task(async function test_8() {
   await promiseShutdownManager();
 
-  manuallyInstall(XPIS.test_bootstrap1_1, profileDir,
-                  ID1);
+  await manuallyInstall(XPIS.test_bootstrap1_1, profileDir, ID1);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   let b1 = await AddonManager.getAddonByID(ID1);
   notEqual(b1, null);
@@ -530,7 +528,7 @@ add_task(async function test_9() {
   manuallyUninstall(profileDir, ID1);
   BootstrapMonitor.clear(ID1);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   let b1 = await AddonManager.getAddonByID(ID1);
   equal(b1, null);
@@ -677,10 +675,9 @@ add_task(async function test_11() {
 add_task(async function test_12() {
   await promiseShutdownManager();
 
-  manuallyInstall(XPIS.test_bootstrap1_1, profileDir,
-                  ID1);
+  await manuallyInstall(XPIS.test_bootstrap1_1, profileDir, ID1);
 
-  await promiseStartupManager(true);
+  await promiseStartupManager();
 
   let b1 = await AddonManager.getAddonByID(ID1);
   notEqual(b1, null);
@@ -771,10 +768,9 @@ add_task(async function test_14() {
 
   await promiseShutdownManager();
 
-  manuallyInstall(XPIS.test_bootstrap1_3, profileDir,
-                  ID1);
+  await manuallyInstall(XPIS.test_bootstrap1_3, profileDir, ID1);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   let b1 = await AddonManager.getAddonByID(ID1);
   notEqual(b1, null);
@@ -884,7 +880,7 @@ add_task(async function test_16() {
   BootstrapMonitor.checkAddonNotStarted(ID1);
 
   gAppInfo.inSafeMode = true;
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   let b1_2 = await AddonManager.getAddonByID(ID1);
   // Should still be stopped
@@ -897,7 +893,7 @@ add_task(async function test_16() {
 
   await promiseShutdownManager();
   gAppInfo.inSafeMode = false;
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   // Should have started
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
@@ -911,8 +907,7 @@ add_task(async function test_16() {
 add_task(async function test_17() {
   await promiseShutdownManager();
 
-  manuallyInstall(XPIS.test_bootstrap1_1, userExtDir,
-                  ID1);
+  await manuallyInstall(XPIS.test_bootstrap1_1, userExtDir, ID1);
 
   await promiseStartupManager();
 
@@ -1002,8 +997,7 @@ add_task(async function test_19() {
 add_task(async function test_20() {
   await promiseShutdownManager();
 
-  manuallyInstall(XPIS.test_bootstrap1_2, profileDir,
-                  ID1);
+  await manuallyInstall(XPIS.test_bootstrap1_2, profileDir, ID1);
 
   await promiseStartupManager();
 
@@ -1065,15 +1059,14 @@ add_task(async function test_21() {
   manuallyUninstall(userExtDir, ID1);
   BootstrapMonitor.clear(ID1);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 });
 
 // Check that an upgrade from the filesystem is detected and applied correctly
 add_task(async function test_22() {
   await promiseShutdownManager();
 
-  let file = manuallyInstall(XPIS.test_bootstrap1_1, profileDir,
-                             ID1);
+  let file = await manuallyInstall(XPIS.test_bootstrap1_1, profileDir, ID1);
   if (file.isDirectory())
     file.append("install.rdf");
 
@@ -1098,8 +1091,7 @@ add_task(async function test_22() {
 
   manuallyUninstall(profileDir, ID1);
   BootstrapMonitor.clear(ID1);
-  manuallyInstall(XPIS.test_bootstrap1_2, profileDir,
-                  ID1);
+  await manuallyInstall(XPIS.test_bootstrap1_2, profileDir, ID1);
 
   await promiseStartupManager();
 
@@ -1134,7 +1126,7 @@ add_task(async function test_23() {
   ]);
 
   let url = "http://example.com/addons/test_bootstrap1_1.xpi";
-  let install = await AddonManager.getInstallForURL(url, null, "application/x-xpinstall");
+  let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall");
 
   ensure_test_completed();
 
@@ -1244,7 +1236,7 @@ add_task(async function test_24() {
                             new TextEncoder().encode(JSON.stringify(data)),
                             {compression: "lz4"});
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
   BootstrapMonitor.checkAddonStarted(ID1, "1.0");

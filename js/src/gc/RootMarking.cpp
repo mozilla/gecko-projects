@@ -247,6 +247,7 @@ PropertyDescriptor::trace(JSTracer* trc)
 void
 js::gc::GCRuntime::traceRuntimeForMajorGC(JSTracer* trc, AutoTraceSession& session)
 {
+    MOZ_ASSERT(!TlsContext.get()->suppressGC);
     MOZ_ASSERT_IF(atomsZone->isCollecting(), session.maybeLock.isSome());
 
     // FinishRoots will have asserted that every root that we do not expect
@@ -264,6 +265,8 @@ js::gc::GCRuntime::traceRuntimeForMajorGC(JSTracer* trc, AutoTraceSession& sessi
 void
 js::gc::GCRuntime::traceRuntimeForMinorGC(JSTracer* trc, AutoTraceSession& session)
 {
+    MOZ_ASSERT(!TlsContext.get()->suppressGC);
+
     // Note that we *must* trace the runtime during the SHUTDOWN_GC's minor GC
     // despite having called FinishRoots already. This is because FinishRoots
     // does not clear the crossCompartmentWrapper map. It cannot do this
@@ -314,8 +317,6 @@ void
 js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrMark,
                                       AutoTraceSession& session)
 {
-    MOZ_ASSERT(!TlsContext.get()->suppressGC);
-
     {
         gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_STACK);
 
@@ -538,12 +539,12 @@ GCRuntime::markBufferedGrayRoots(JS::Zone* zone)
     if (roots.empty())
         return;
 
-    // Check for and remove canary value.
+    // Check for canary value but don't remove it.
     MOZ_RELEASE_ASSERT(roots.length() > 1);
     MOZ_RELEASE_ASSERT(roots.back() == GrayBufferCanary);
-    roots.popBack();
 
-    for (auto cell : zone->gcGrayRoots()) {
+    for (size_t i = 0; i < roots.length() - 1; i++) {
+        Cell* cell = roots[i];
         MOZ_ASSERT(IsCellPointerValid(cell));
         TraceManuallyBarrieredGenericPointerEdge(&marker, &cell, "buffered gray root");
     }

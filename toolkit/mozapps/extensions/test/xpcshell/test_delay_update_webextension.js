@@ -16,8 +16,6 @@ if (AppConstants.platform == "win" && AppConstants.DEBUG) {
   Services.prefs.setBoolPref("extensions.webextensions.remote", false);
 }
 
-ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm");
-
 PromiseTestUtils.expectUncaughtRejection(/Message manager disconnected/);
 
 /* globals browser*/
@@ -41,7 +39,7 @@ createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "42", "42");
 
 // add-on registers upgrade listener, and ignores update.
 add_task(async function delay_updates_ignore() {
-  startupManager();
+  await promiseStartupManager();
 
   let extension = ExtensionTestUtils.loadExtension({
     useAddonManager: "permanent",
@@ -120,7 +118,7 @@ add_task(async function delay_updates_ignore() {
 
 // add-on registers upgrade listener, and allows update.
 add_task(async function delay_updates_complete() {
-  startupManager();
+  await promiseStartupManager();
 
   let extension = ExtensionTestUtils.loadExtension({
     useAddonManager: "permanent",
@@ -183,7 +181,7 @@ add_task(async function delay_updates_complete() {
 
 // add-on registers upgrade listener, initially defers update then allows upgrade
 add_task(async function delay_updates_defer() {
-  startupManager();
+  await promiseStartupManager();
 
   let extension = ExtensionTestUtils.loadExtension({
     useAddonManager: "permanent",
@@ -279,7 +277,7 @@ add_task(async function delay_updates_defer() {
 
 // browser.runtime.reload() without a pending upgrade should just reload.
 add_task(async function runtime_reload() {
-  startupManager();
+  await promiseStartupManager();
 
   let extension = ExtensionTestUtils.loadExtension({
     useAddonManager: "permanent",

@@ -31,6 +31,7 @@ var { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {}
 
 var { gDevTools } = require("devtools/client/framework/devtools");
 var Services = require("Services");
+var { globals } = require("devtools/shared/builtin-modules");
 
 this.EXPORTED_SYMBOLS = ["AppCacheUtils"];
 
@@ -611,11 +612,6 @@ ManifestParser.prototype = {
 XPCOMUtils.defineLazyGetter(this, "l10n", () => Services.strings
   .createBundle("chrome://devtools/locale/appcacheutils.properties"));
 
-XPCOMUtils.defineLazyGetter(this, "appcacheservice", function() {
-  return Cc["@mozilla.org/network/application-cache-service;1"]
-           .getService(Ci.nsIApplicationCacheService);
-});
-
 XPCOMUtils.defineLazyGetter(this, "_DOMParser", function() {
-  return Cc["@mozilla.org/xmlextras/domparser;1"].createInstance(Ci.nsIDOMParser);
+  return globals.DOMParser();
 });

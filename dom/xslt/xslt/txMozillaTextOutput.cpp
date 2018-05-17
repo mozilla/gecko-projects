@@ -7,8 +7,6 @@
 #include "nsContentCID.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMDocumentFragment.h"
 #include "nsIDocumentTransformer.h"
 #include "nsCharsetSource.h"
 #include "nsIPrincipal.h"
@@ -19,6 +17,7 @@
 #include "mozilla/Encoding.h"
 #include "nsTextNode.h"
 #include "nsNameSpaceManager.h"
+#include "mozilla/dom/DocumentFragment.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -29,10 +28,10 @@ txMozillaTextOutput::txMozillaTextOutput(nsITransformObserver* aObserver)
     mObserver = do_GetWeakReference(aObserver);
 }
 
-txMozillaTextOutput::txMozillaTextOutput(nsIDOMDocumentFragment* aDest)
+txMozillaTextOutput::txMozillaTextOutput(DocumentFragment* aDest)
 {
     MOZ_COUNT_CTOR(txMozillaTextOutput);
-    mTextParent = do_QueryInterface(aDest);
+    mTextParent = aDest;
     mDocument = mTextParent->OwnerDoc();
 }
 
@@ -250,9 +249,9 @@ txMozillaTextOutput::startElement(nsAtom* aPrefix, const nsAString& aName,
     return NS_OK;
 }
 
-void txMozillaTextOutput::getOutputDocument(nsIDOMDocument** aDocument)
+void txMozillaTextOutput::getOutputDocument(nsIDocument** aDocument)
 {
-    CallQueryInterface(mDocument, aDocument);
+    NS_IF_ADDREF(*aDocument = mDocument);
 }
 
 nsresult

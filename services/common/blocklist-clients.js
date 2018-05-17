@@ -38,7 +38,7 @@ const PREF_BLOCKLIST_GFX_SIGNER              = "services.blocklist.gfx.signer";
  *
  * @param {Object} data   Current records in the local db.
  */
-async function updateCertBlocklist({data: records}) {
+async function updateCertBlocklist({ data: { current: records } }) {
   const certList = Cc["@mozilla.org/security/certblocklist;1"]
                      .getService(Ci.nsICertBlocklist);
   for (let item of records) {
@@ -66,7 +66,7 @@ async function updateCertBlocklist({data: records}) {
  *
  * @param {Object} data   Current records in the local db.
  */
-async function updatePinningList({data: records}) {
+async function updatePinningList({ data: { current: records } }) {
   if (!Services.prefs.getBoolPref(PREF_BLOCKLIST_PINNING_ENABLED)) {
     return;
   }
@@ -109,7 +109,7 @@ async function updatePinningList({data: records}) {
  * @param {Object} client   RemoteSettingsClient instance
  * @param {Object} data      Current records in the local db.
  */
-async function updateJSONBlocklist(client, { data: records }) {
+async function updateJSONBlocklist(client, { data: { current: records } }) {
   // Write JSON dump for synchronous load at startup.
   const path = OS.Path.join(OS.Constants.Path.profileDir, client.filename);
   const blocklistFolder = OS.Path.dirname(path);
@@ -127,6 +127,59 @@ async function updateJSONBlocklist(client, { data: records }) {
   }
 }
 
+
+/**
+ * This custom filter function is used to limit the entries returned
+ * by `RemoteSettings("...").get()` depending on the target app information
+ * defined on entries.
+ *
+ * When landing Bug 1451031, this function will have to check if the `entry`
+ * has a JEXL attribute and rely on the JEXL filter function in priority.
+ * The legacy target app mechanism will be kept in place for old entries.
+ */
+async function targetAppFilter(entry, { appID, version: appVersion }) {
+  // Keep entries without target information.
+  if (!("versionRange" in entry)) {
+    return entry;
+  }
+
+  const { versionRange } = entry;
+
+  // Gfx blocklist has a specific versionRange object, which is not a list.
+  if (!Array.isArray(versionRange)) {
+    const { minVersion = "0", maxVersion = "*" } = versionRange;
+    const matchesRange = (Services.vc.compare(appVersion, minVersion) >= 0 &&
+                          Services.vc.compare(appVersion, maxVersion) <= 0);
+    return matchesRange ? entry : null;
+  }
+
+  // Iterate the targeted applications, at least one of them must match.
+  // If no target application, keep the entry.
+  if (versionRange.length == 0) {
+    return entry;
+  }
+  for (const vr of versionRange) {
+    const { targetApplication = [] } = vr;
+    if (targetApplication.length == 0) {
+      return entry;
+    }
+    for (const ta of targetApplication) {
+      const { guid } = ta;
+      if (!guid) {
+        return entry;
+      }
+      const { minVersion = "0", maxVersion = "*" } = ta;
+      if (guid == appID &&
+          Services.vc.compare(appVersion, minVersion) >= 0 &&
+          Services.vc.compare(appVersion, maxVersion) <= 0) {
+        return entry;
+      }
+    }
+  }
+  // Skip this entry.
+  return null;
+}
+
 var AddonBlocklistClient;
 var GfxBlocklistClient;
 var OneCRLBlocklistClient;
@@ -139,33 +192,36 @@ function initialize() {
     lastCheckTimePref: PREF_BLOCKLIST_ONECRL_CHECKED_SECONDS,
     signerName: Services.prefs.getCharPref(PREF_BLOCKLIST_ONECRL_SIGNER),
   });
-  OneCRLBlocklistClient.on("change", updateCertBlocklist);
+  OneCRLBlocklistClient.on("sync", updateCertBlocklist);
 
   AddonBlocklistClient = RemoteSettings(Services.prefs.getCharPref(PREF_BLOCKLIST_ADDONS_COLLECTION), {
     bucketName: Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET),
     lastCheckTimePref: PREF_BLOCKLIST_ADDONS_CHECKED_SECONDS,
     signerName: Services.prefs.getCharPref(PREF_BLOCKLIST_ADDONS_SIGNER),
+    filterFunc: targetAppFilter,
   });
-  AddonBlocklistClient.on("change", updateJSONBlocklist.bind(null, AddonBlocklistClient));
+  AddonBlocklistClient.on("sync", updateJSONBlocklist.bind(null, AddonBlocklistClient));
 
   PluginBlocklistClient = RemoteSettings(Services.prefs.getCharPref(PREF_BLOCKLIST_PLUGINS_COLLECTION), {
     bucketName: Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET),
     lastCheckTimePref: PREF_BLOCKLIST_PLUGINS_CHECKED_SECONDS,
     signerName: Services.prefs.getCharPref(PREF_BLOCKLIST_PLUGINS_SIGNER),
+    filterFunc: targetAppFilter,
   });
-  PluginBlocklistClient.on("change", updateJSONBlocklist.bind(null, PluginBlocklistClient));
+  PluginBlocklistClient.on("sync", updateJSONBlocklist.bind(null, PluginBlocklistClient));
 
   GfxBlocklistClient = RemoteSettings(Services.prefs.getCharPref(PREF_BLOCKLIST_GFX_COLLECTION), {
     bucketName: Services.prefs.getCharPref(PREF_BLOCKLIST_BUCKET),
     lastCheckTimePref: PREF_BLOCKLIST_GFX_CHECKED_SECONDS,
     signerName: Services.prefs.getCharPref(PREF_BLOCKLIST_GFX_SIGNER),
+    filterFunc: targetAppFilter,
   });
-  GfxBlocklistClient.on("change", updateJSONBlocklist.bind(null, GfxBlocklistClient));
+  GfxBlocklistClient.on("sync", updateJSONBlocklist.bind(null, GfxBlocklistClient));
 
   PinningBlocklistClient = RemoteSettings(Services.prefs.getCharPref(PREF_BLOCKLIST_PINNING_COLLECTION), {
     bucketName: Services.prefs.getCharPref(PREF_BLOCKLIST_PINNING_BUCKET),
     lastCheckTimePref: PREF_BLOCKLIST_PINNING_CHECKED_SECONDS,
     signerName: Services.prefs.getCharPref(PREF_BLOCKLIST_PINNING_SIGNER),
   });
-  PinningBlocklistClient.on("change", updatePinningList);
+  PinningBlocklistClient.on("sync", updatePinningList);
 }

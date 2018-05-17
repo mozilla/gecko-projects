@@ -19,21 +19,27 @@ function ExternalAppService() {
 
 ExternalAppService.prototype = {
   classID: Components.ID("{a89eeec6-6608-42ee-a4f8-04d425992f45}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIExternalHelperAppService]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIExternalHelperAppService]),
 
   doContent(mimeType, request, context, forceSave) {
     const channel = request.QueryInterface(Ci.nsIChannel);
-    const mm = context.QueryInterface(Ci.nsIDocShell).tabChild.messageManager;
+    debug `doContent: uri=${channel.URI.displaySpec}
+                      contentType=${channel.contentType}`;
 
-    debug `doContent: uri=${ channel.URI.displaySpec
-                    } contentType=${ channel.contentType }`;
+    let filename = null;
+    try {
+      filename = channel.contentDispositionFilename;
+    } catch (e) {
+      // This throws NS_ERROR_NOT_AVAILABLE if there is not
+      // Content-disposition header.
+    }
 
-    EventDispatcher.forMessageManager(mm).sendRequest({
+    GeckoViewUtils.getDispatcherForWindow(context).sendRequest({
       type: "GeckoView:ExternalResponse",
       uri: channel.URI.displaySpec,
       contentType: channel.contentType,
       contentLength: channel.contentLength,
-      filename: channel.contentDispositionFilename
+      filename: filename
     });
 
     request.cancel(Cr.NS_ERROR_ABORT);
@@ -41,8 +47,8 @@ ExternalAppService.prototype = {
   },
 
   applyDecodingForExtension(ext, encoding) {
-    debug `applyDecodingForExtension: extension=${ ext
-                                    } encoding=${ encoding }`;
+    debug `applyDecodingForExtension: extension=${ext}
+                                      encoding=${encoding}`;
 
     // This doesn't matter for us right now because
     // we shouldn't end up reading the stream.

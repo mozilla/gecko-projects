@@ -8,6 +8,7 @@
 #define mozilla_dom_XMLStylesheetProcessingInstruction_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ProcessingInstruction.h"
 #include "nsIURI.h"
 #include "nsStyleLinkElement.h"
@@ -16,8 +17,7 @@ namespace mozilla {
 namespace dom {
 
 class XMLStylesheetProcessingInstruction final
-: public ProcessingInstruction
-, public nsStyleLinkElement
+  : public ProcessingInstruction
 {
 public:
   XMLStylesheetProcessingInstruction(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
@@ -35,8 +35,6 @@ public:
                                        nsGkAtoms::xml_stylesheet), aData)
   {
   }
-
-  virtual JSObject* WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -68,7 +66,7 @@ public:
     if (rv.Failed()) {
       return;
     }
-    UpdateStyleSheetInternal(nullptr, nullptr, true);
+    Unused << UpdateStyleSheetInternal(nullptr, nullptr, ForceUpdate::Yes);
   }
 
 protected:
@@ -76,12 +74,8 @@ protected:
 
   nsCOMPtr<nsIURI> mOverriddenBaseURI;
 
-  already_AddRefed<nsIURI>
-    GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal) final;
-  void GetStyleSheetInfo(nsAString& aTitle,
-                         nsAString& aType,
-                         nsAString& aMedia,
-                         bool* aIsAlternate) final;
+  Maybe<SheetInfo> GetStyleSheetInfo() final;
+
   already_AddRefed<CharacterData>
     CloneDataNode(mozilla::dom::NodeInfo* aNodeInfo,
                   bool aCloneText) const final;

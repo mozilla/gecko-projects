@@ -450,14 +450,16 @@ security:
   pkcs11_modules_loaded:
     bug_numbers:
       - 1369911
+      - 1445961
     description: >
       A keyed boolean indicating the library names of the PKCS#11 modules that
       have been loaded by the browser.
-    expires: "62"
+    expires: "69"
     kind: boolean
     keyed: true
     notification_emails:
       - seceng-telemetry@mozilla.com
+      - dkeeler@mozilla.com
     release_channel_collection: opt-out
     record_in_processes:
       - main
@@ -474,6 +476,22 @@ security:
     notification_emails:
       - seceng-telemetry@mozilla.com
       - jjones@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - main
+  client_cert:
+    bug_numbers:
+      - 1255120
+    description: >
+      Counts of events related to client certificates this session. Currently:
+      "requested" (a server requested a client certificate), "sent" (a client
+      certificate was sent), "compat" (a compatibility workaround was required).
+    expires: "66"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - seceng-telemetry@mozilla.com
+      - dkeeler@mozilla.com
     release_channel_collection: opt-out
     record_in_processes:
       - main
@@ -642,7 +660,8 @@ webrtc.nicer:
     expires: "62"
     kind: uint
     notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com, nohlmeier@mozilla.com
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
     release_channel_collection: opt-in
     record_in_processes:
       - 'main'
@@ -663,7 +682,8 @@ webrtc.nicer:
     expires: "62"
     kind: uint
     notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com, nohlmeier@mozilla.com
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
     release_channel_collection: opt-in
     record_in_processes:
       - 'main'
@@ -683,7 +703,8 @@ webrtc.nicer:
     expires: "62"
     kind: uint
     notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com, nohlmeier@mozilla.com
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
     release_channel_collection: opt-in
     record_in_processes:
       - 'main'
@@ -702,7 +723,8 @@ webrtc.nicer:
     expires: "62"
     kind: uint
     notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com, nohlmeier@mozilla.com
+      - webrtc-ice-telemetry-alerts@mozilla.com
+      - nohlmeier@mozilla.com
     release_channel_collection: opt-in
     record_in_processes:
       - 'main'
@@ -751,6 +773,20 @@ dom.contentprocess:
       - benjamin@smedbergs.us
       - mconley@mozilla.com
     release_channel_collection: opt-in
+    record_in_processes:
+      - 'main'
+
+  buildID_mismatch:
+    bug_numbers:
+      - 1366808
+    description: >
+      The number of times the about:restartrequired page appeared due to a
+      buildID mismatch between the parent and the content processes.
+    expires: never
+    kind: uint
+    notification_emails:
+      - spohl@mozilla.com
+    release_channel_collection: opt-out
     record_in_processes:
       - 'main'
 
@@ -879,6 +915,23 @@ devtools.grid.showInfiniteLines:
     record_in_processes:
       - 'main'
 
+devtools.inspector:
+  three_pane_enabled:
+    bug_numbers:
+      - 1437881
+    description: >
+      Number of times the DevTools inspector was opened with the 3 pane inspector enabled,
+      keyed by true/false.
+    expires: "65"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - gl@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 devtools:
   current_theme:
     bug_numbers:
@@ -903,7 +956,8 @@ devtools.aboutdevtools:
     expires: "63"
     kind: uint
     notification_emails:
-      - dev-developer-tools@lists.mozilla.org, jdescottes@mozilla.com
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
     record_in_processes:
       - 'main'
   installed:
@@ -914,7 +968,8 @@ devtools.aboutdevtools:
     expires: "63"
     kind: uint
     notification_emails:
-      - dev-developer-tools@lists.mozilla.org, jdescottes@mozilla.com
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
     record_in_processes:
       - 'main'
   noinstall_exits:
@@ -925,7 +980,8 @@ devtools.aboutdevtools:
     expires: "63"
     kind: uint
     notification_emails:
-      - dev-developer-tools@lists.mozilla.org, jdescottes@mozilla.com
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
     record_in_processes:
       - 'main'
 
@@ -938,7 +994,8 @@ devtools.onboarding:
     expires: "63"
     kind: boolean
     notification_emails:
-      - dev-developer-tools@lists.mozilla.org, jdescottes@mozilla.com
+      - dev-developer-tools@lists.mozilla.org
+      - jdescottes@mozilla.com
     record_in_processes:
       - 'main'
 
@@ -951,7 +1008,8 @@ devtools.responsive:
     expires: never
     kind: uint
     notification_emails:
-      - dev-developer-tools@lists.mozilla.org, jryans@mozilla.com
+      - dev-developer-tools@lists.mozilla.org
+      - jryans@mozilla.com
     record_in_processes:
       - main
     release_channel_collection: opt-out
@@ -964,7 +1022,8 @@ devtools.responsive:
     kind: uint
     keyed: true
     notification_emails:
-      - dev-developer-tools@lists.mozilla.org, jryans@mozilla.com
+      - dev-developer-tools@lists.mozilla.org
+      - jryans@mozilla.com
     record_in_processes:
       - main
     release_channel_collection: opt-out
@@ -1065,6 +1124,23 @@ devtools.accessibility:
     record_in_processes:
       - 'main'
 
+devtools.toolbox:
+  tabs_reordered:
+    bug_numbers:
+      - 1456551
+    description: >
+      Number of times the DevTools tab was reordered.
+      Keyed by tab's id.
+    expires: "65"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - daisuke@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 navigator.storage:
   estimate_count:
     bug_numbers:
@@ -1119,8 +1195,6 @@ telemetry:
     description: >
       The count of accumulations that had to be clamped down to not overflow,
       keyed to the histogram name of the overflowing accumulation.
-      This is doubled for non-keyed desktop Firefox Histograms because of
-      saved-session pings.
     expires: never
     kind: uint
     keyed: true
@@ -1241,24 +1315,6 @@ gfx.omtp:
     notification_emails:
       - gfx-telemetry-alerts@mozilla.com
       - rhunt@mozilla.com
-    record_in_processes:
-      - 'content'
-
-gfx:
-  small_paint_phase_weight:
-    bug_numbers:
-      - 1430897
-    description: >
-      Time that is spent in each phase of painting, as a percentage of
-      paint time. See also CONTENT_LARGE_PAINT_PHASE_WEIGHT in Histograms.json.
-      Keys are r (rasterization), dl (display list construction), and flb
-      (FrameLayerBuilder).
-    keyed: true
-    kind: uint
-    expires: "66"
-    notification_emails:
-      - gfx-telemetry-alerts@mozilla.com
-      - mwoodrow@mozilla.com
     record_in_processes:
       - 'content'
 
@@ -1612,6 +1668,21 @@ browser.errors:
     record_in_processes:
       - 'main'
 
+# The following section contains memory reporter counters.
+memoryreporter:
+  max_ghost_windows:
+    bug_numbers:
+      - 1454724
+    description: >
+      The maximum number of leaked ghost windows seen.
+    expires: "66"
+    kind: uint
+    notification_emails:
+      - memshrink-telemetry-alerts@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'content'
+
 # The following section is for probes testing the Telemetry system. They will not be
 # submitted in pings and are only used for testing.
 telemetry.test:
@@ -1791,6 +1862,101 @@ telemetry.test:
       - telemetry-client-dev@mozilla.com
     record_in_processes:
       - 'all_childs'
+
+  default_products:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+
+  desktop_only:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - firefox
+
+  keyed_desktop_only:
+    bug_numbers:
+      - 1452552
+    description: A keyed testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - firefox
+
+  multiproduct:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - firefox
+      - fennec
+      - geckoview
+
+  mobile_only:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - fennec
+      - geckoview
+
+  geckoview_only:
+    bug_numbers:
+      - 1452552
+    description: A testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - geckoview
+
+  keyed_mobile_only:
+    bug_numbers:
+      - 1452552
+    description: A keyed testing uint scalar; not meant to be touched
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+    record_in_processes:
+      - 'all'
+    products:
+      - fennec
+      - geckoview
 
 # NOTE: Please don't add new definitions below this point. Consider adding
 # them earlier in the file and leave the telemetry.test category as the last

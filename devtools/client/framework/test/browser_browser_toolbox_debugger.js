@@ -18,6 +18,7 @@ requestLongerTimeout(4);
 const { fetch } = require("devtools/shared/DevToolsUtils");
 
 const debuggerHeadURL = CHROME_URL_ROOT + "../../debugger/new/test/mochitest/head.js";
+const helpersURL = CHROME_URL_ROOT + "../../debugger/new/test/mochitest/helpers.js";
 const testScriptURL = CHROME_URL_ROOT + "test_browser_toolbox_debugger.js";
 
 add_task(async function runTest() {
@@ -63,6 +64,7 @@ add_task(async function runTest() {
               .getService(Ci.nsIEnvironment);
   // First inject a very minimal head, with simplest assertion methods
   // and very common globals
+  /* eslint-disable no-unused-vars */
   let testHead = (function() {
     const info = msg => dump(msg + "\n");
     const is = (a, b, description) => {
@@ -116,15 +118,20 @@ add_task(async function runTest() {
       });
     }
   }).toSource().replace(/^\(function\(\) \{|\}\)$/g, "");
+  /* eslint-enable no-unused-vars */
   // Stringify testHead's function and remove `(function {` prefix and `})` suffix
   // to ensure inner symbols gets exposed to next pieces of code
-
   // Then inject new debugger head file
-  let { content } = await fetch(debuggerHeadURL);
-  let debuggerHead = content;
+  let { content: debuggerHead } = await fetch(debuggerHeadURL);
+
   // We remove its import of shared-head, which isn't available in browser toolbox process
   // And isn't needed thanks to testHead's symbols
-  debuggerHead = debuggerHead.replace(/Services.scriptloader.loadSubScript[^\)]*\);/, "");
+  debuggerHead = debuggerHead.replace(/Services.scriptloader.loadSubScript[^\)]*\);/g, "");
+
+  // Also include the debugger helpers which are separated from debugger's head to be
+  // reused in other modules.
+  let { content: debuggerHelpers } = await fetch(helpersURL);
+  debuggerHead = debuggerHead + debuggerHelpers;
 
   // Finally, fetch the debugger test script that is going to be execute in the browser
   // toolbox process

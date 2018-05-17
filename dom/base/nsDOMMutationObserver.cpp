@@ -11,7 +11,7 @@
 #include "mozilla/OwningNonNull.h"
 
 #include "mozilla/dom/Animation.h"
-#include "mozilla/dom/KeyframeEffectReadOnly.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/DocGroup.h"
 
 #include "nsContentUtils.h"
@@ -380,13 +380,12 @@ void
 nsAnimationReceiver::RecordAnimationMutation(Animation* aAnimation,
                                              AnimationMutation aMutationType)
 {
-  mozilla::dom::AnimationEffectReadOnly* effect = aAnimation->GetEffect();
+  mozilla::dom::AnimationEffect* effect = aAnimation->GetEffect();
   if (!effect) {
     return;
   }
 
-  mozilla::dom::KeyframeEffectReadOnly* keyframeEffect =
-    effect->AsKeyframeEffect();
+  mozilla::dom::KeyframeEffect* keyframeEffect = effect->AsKeyframeEffect();
   if (!keyframeEffect) {
     return;
   }
@@ -900,17 +899,15 @@ nsDOMMutationObserver::HandleMutationsInternal(AutoSlowOperation& aAso)
 {
   nsTArray<RefPtr<nsDOMMutationObserver> >* suppressedObservers = nullptr;
 
-  // Let signalList be a copy of unit of related similar-origin browsing
-  // contexts' signal slot list.
+  // This loop implements:
+  //  * Let signalList be a copy of unit of related similar-origin browsing
+  //    contexts' signal slot list.
+  //  * Empty unit of related similar-origin browsing contexts' signal slot
+  //    list.
   nsTArray<RefPtr<HTMLSlotElement>> signalList;
   if (DocGroup::sPendingDocGroups) {
-    for (uint32_t i = 0; i < DocGroup::sPendingDocGroups->Length(); ++i) {
-      DocGroup* docGroup = DocGroup::sPendingDocGroups->ElementAt(i);
-      signalList.AppendElements(docGroup->SignalSlotList());
-
-      // Empty unit of related similar-origin browsing contexts' signal slot
-      // list.
-      docGroup->ClearSignalSlotList();
+    for (DocGroup* docGroup : *DocGroup::sPendingDocGroups) {
+      docGroup->MoveSignalSlotListTo(signalList);
     }
     delete DocGroup::sPendingDocGroups;
     DocGroup::sPendingDocGroups = nullptr;

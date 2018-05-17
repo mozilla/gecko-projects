@@ -199,7 +199,7 @@ FocusManager::ActiveItemChanged(Accessible* aItem, bool aCheckIfActive)
   if (!mActiveItem && XRE_IsParentProcess()) {
     nsFocusManager* domfm = nsFocusManager::GetFocusManager();
     if (domfm) {
-      nsIContent* focusedElm = domfm->GetFocusedContent();
+      nsIContent* focusedElm = domfm->GetFocusedElement();
       if (EventStateManager::IsRemoteTarget(focusedElm)) {
         dom::TabParent* tab = dom::TabParent::GetFrom(focusedElm);
         if (tab) {
@@ -239,7 +239,7 @@ void
 FocusManager::DispatchFocusEvent(DocAccessible* aDocument,
                                  Accessible* aTarget)
 {
-  NS_PRECONDITION(aDocument, "No document for focused accessible!");
+  MOZ_ASSERT(aDocument, "No document for focused accessible!");
   if (aDocument) {
     RefPtr<AccEvent> event =
       new AccEvent(nsIAccessibleEvent::EVENT_FOCUS, aTarget,
@@ -292,8 +292,8 @@ FocusManager::ProcessDOMFocus(nsINode* aTarget)
 void
 FocusManager::ProcessFocusEvent(AccEvent* aEvent)
 {
-  NS_PRECONDITION(aEvent->GetEventType() == nsIAccessibleEvent::EVENT_FOCUS,
-                  "Focus event is expected!");
+  MOZ_ASSERT(aEvent->GetEventType() == nsIAccessibleEvent::EVENT_FOCUS,
+             "Focus event is expected!");
 
   // Emit focus event if event target is the active item. Otherwise then check
   // if it's still focused and then update active item and emit focus event.
@@ -399,7 +399,7 @@ nsINode*
 FocusManager::FocusedDOMNode() const
 {
   nsFocusManager* DOMFocusManager = nsFocusManager::GetFocusManager();
-  nsIContent* focusedElm = DOMFocusManager->GetFocusedContent();
+  nsIContent* focusedElm = DOMFocusManager->GetFocusedElement();
 
   // No focus on remote target elements like xul:browser having DOM focus and
   // residing in chrome process because it means an element in content process

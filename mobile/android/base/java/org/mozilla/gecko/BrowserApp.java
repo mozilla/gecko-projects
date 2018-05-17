@@ -448,6 +448,7 @@ public class BrowserApp extends GeckoApp
     }
 
     @Override
+    @SuppressWarnings("fallthrough")
     public void onTabChanged(Tab tab, TabEvents msg, String data) {
         if (!mInitialized) {
             super.onTabChanged(tab, msg, data);
@@ -1374,6 +1375,7 @@ public class BrowserApp extends GeckoApp
         }
 
         MmaDelegate.track(MmaDelegate.RESUMED_FROM_BACKGROUND);
+        MmaDelegate.notifyDefaultBrowserStatus(this);
     }
 
     @Override

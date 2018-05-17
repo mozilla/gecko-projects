@@ -8,7 +8,6 @@ config = {
     ],
     'stage_platform': 'win32-st-an-debug',
     'debug_build': True,
-    'enable_signing': False,
     'tooltool_manifest_src': "browser/config/tooltool-manifests/win32/\
 releng.manifest",
     'perfherder_extra_options': ['static-analysis'],
@@ -19,7 +18,6 @@ releng.manifest",
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'MOZ_OBJDIR': '%(abs_obj_dir)s',
         'PATH': 'C:/mozilla-build/nsis-3.01;C:/mozilla-build/python27;'
-                'C:/mozilla-build/buildbotve/scripts;'
                 '%s' % (os.environ.get('path')),
         'PROPERTIES_FILE': os.path.join(os.getcwd(), 'buildprops.json'),
         'TINDERBOX_OUTPUT': '1',

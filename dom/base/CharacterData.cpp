@@ -19,11 +19,9 @@
 #include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsReadableUtils.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "nsIURI.h"
-#include "nsIDOMEvent.h"
 #include "nsCOMPtr.h"
 #include "nsDOMString.h"
 #include "nsChangeHint.h"
@@ -67,8 +65,8 @@ CharacterData::CharacterData(already_AddRefed<dom::NodeInfo>&& aNodeInfo)
 
 CharacterData::~CharacterData()
 {
-  NS_PRECONDITION(!IsInUncomposedDoc(),
-                  "Please remove this from the document properly");
+  MOZ_ASSERT(!IsInUncomposedDoc(),
+             "Please remove this from the document properly");
   if (GetParent()) {
     NS_RELEASE(mParent);
   }
@@ -247,8 +245,8 @@ CharacterData::SetTextInternal(uint32_t aOffset, uint32_t aCount,
                                uint32_t aLength, bool aNotify,
                                CharacterDataChangeInfo::Details* aDetails)
 {
-  NS_PRECONDITION(aBuffer || !aLength,
-                  "Null buffer passed to SetTextInternal!");
+  MOZ_ASSERT(aBuffer || !aLength,
+             "Null buffer passed to SetTextInternal!");
 
   // sanitize arguments
   uint32_t textLength = mText.GetLength();
@@ -268,7 +266,7 @@ CharacterData::SetTextInternal(uint32_t aOffset, uint32_t aCount,
   }
 
   nsIDocument *document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
 
   bool haveMutationListeners = aNotify &&
     nsContentUtils::HasMutationListeners(this,
@@ -447,28 +445,28 @@ CharacterData::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                           nsIContent* aBindingParent,
                           bool aCompileEventHandlers)
 {
-  NS_PRECONDITION(aParent || aDocument, "Must have document if no parent!");
-  NS_PRECONDITION(NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc(),
-                  "Must have the same owner document");
-  NS_PRECONDITION(!aParent || aDocument == aParent->GetUncomposedDoc(),
-                  "aDocument must be current doc of aParent");
-  NS_PRECONDITION(!GetUncomposedDoc() && !IsInUncomposedDoc(),
-                  "Already have a document.  Unbind first!");
+  MOZ_ASSERT(aParent || aDocument, "Must have document if no parent!");
+  MOZ_ASSERT(NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc(),
+             "Must have the same owner document");
+  MOZ_ASSERT(!aParent || aDocument == aParent->GetUncomposedDoc(),
+             "aDocument must be current doc of aParent");
+  MOZ_ASSERT(!GetUncomposedDoc() && !IsInUncomposedDoc(),
+             "Already have a document.  Unbind first!");
   // Note that as we recurse into the kids, they'll have a non-null parent.  So
   // only assert if our parent is _changing_ while we have a parent.
-  NS_PRECONDITION(!GetParent() || aParent == GetParent(),
-                  "Already have a parent.  Unbind first!");
-  NS_PRECONDITION(!GetBindingParent() ||
-                  aBindingParent == GetBindingParent() ||
-                  (!aBindingParent && aParent &&
-                   aParent->GetBindingParent() == GetBindingParent()),
-                  "Already have a binding parent.  Unbind first!");
-  NS_PRECONDITION(aBindingParent != this,
-                  "Content must not be its own binding parent");
-  NS_PRECONDITION(!IsRootOfNativeAnonymousSubtree() ||
-                  aBindingParent == aParent,
-                  "Native anonymous content must have its parent as its "
-                  "own binding parent");
+  MOZ_ASSERT(!GetParent() || aParent == GetParent(),
+             "Already have a parent.  Unbind first!");
+  MOZ_ASSERT(!GetBindingParent() ||
+             aBindingParent == GetBindingParent() ||
+             (!aBindingParent && aParent &&
+              aParent->GetBindingParent() == GetBindingParent()),
+             "Already have a binding parent.  Unbind first!");
+  MOZ_ASSERT(aBindingParent != this,
+             "Content must not be its own binding parent");
+  MOZ_ASSERT(!IsRootOfNativeAnonymousSubtree() ||
+             aBindingParent == aParent,
+             "Native anonymous content must have its parent as its "
+             "own binding parent");
 
   if (!aBindingParent && aParent) {
     aBindingParent = aParent->GetBindingParent();
@@ -663,7 +661,7 @@ CharacterData::DoGetXBLBinding() const
 bool
 CharacterData::IsNodeOfType(uint32_t aFlags) const
 {
-  return !(aFlags & ~eDATA_NODE);
+  return false;
 }
 
 void

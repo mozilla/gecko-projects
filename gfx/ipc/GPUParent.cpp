@@ -32,7 +32,6 @@
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/layers/UiCompositorControllerParent.h"
 #include "mozilla/layers/MemoryReportingMLGPU.h"
-#include "mozilla/layers/SharedSurfacesParent.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/HangDetails.h"
@@ -84,6 +83,7 @@ GPUParent::GetSingleton()
 
 bool
 GPUParent::Init(base::ProcessId aParentPid,
+                const char* aParentBuildID,
                 MessageLoop* aIOLoop,
                 IPC::Channel* aChannel)
 {
@@ -100,10 +100,15 @@ GPUParent::Init(base::ProcessId aParentPid,
 
   nsDebugImpl::SetMultiprocessMode("GPU");
 
-  // This must be sent before any IPDL message, which may hit sentinel
+  // This must be checked before any IPDL message, which may hit sentinel
   // errors due to parent and content processes having different
   // versions.
-  GetIPCChannel()->SendBuildID();
+  MessageChannel* channel = GetIPCChannel();
+  if (channel && !channel->SendBuildIDsMatchMessage(aParentBuildID)) {
+    // We need to quit this process if the buildID doesn't match the parent's.
+    // This can occur when an update occurred in the background.
+    ProcessChild::QuickExit();
+  }
 
   // Init crash reporter support.
   CrashReporterClient::InitSingleton(this);
@@ -259,10 +264,7 @@ GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
 
   // Make sure to do this *after* we update gfxVars above.
   if (gfxVars::UseWebRender()) {
-    wr::WebRenderAPI::InitExternalLogHandler();
-
     wr::RenderThread::Start();
-    SharedSurfacesParent::Initialize();
   }
 
   VRManager::ManagerInit();
@@ -494,10 +496,7 @@ GPUParent::ActorDestroy(ActorDestroyReason aWhy)
   // There is a case that RenderThread exists when gfxVars::UseWebRender() is false.
   // This could happen when WebRender was fallbacked to compositor.
   if (wr::RenderThread::Get()) {
-    SharedSurfacesParent::Shutdown();
     wr::RenderThread::ShutDown();
-
-    wr::WebRenderAPI::ShutdownExternalLogHandler();
   }
   Factory::ShutDown();
 #if defined(XP_WIN)

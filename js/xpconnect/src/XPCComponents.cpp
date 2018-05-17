@@ -23,7 +23,6 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/URLPreloader.h"
-#include "mozilla/XPTInterfaceInfoManager.h"
 #include "mozilla/dom/DOMException.h"
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -32,7 +31,6 @@
 #include "mozilla/Scheduler.h"
 #include "nsZipArchive.h"
 #include "nsWindowMemoryReporter.h"
-#include "ShimInterfaceInfo.h"
 #include "nsIException.h"
 #include "nsIScriptError.h"
 #include "nsISimpleEnumerator.h"
@@ -115,8 +113,6 @@ public:
 
 private:
     virtual ~nsXPCComponents_Interfaces();
-
-    nsCOMArray<nsIInterfaceInfo> mInterfaces;
 };
 
 NS_IMETHODIMP
@@ -203,39 +199,33 @@ nsXPCComponents_Interfaces::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                          bool* _retval)
 {
 
-    // Lazily init the list of interfaces when someone tries to
-    // enumerate them.
-    if (mInterfaces.IsEmpty()) {
-        XPTInterfaceInfoManager::GetSingleton()->
-            GetScriptableInterfaces(mInterfaces);
-    }
-
-    if (!properties.reserve(mInterfaces.Length())) {
+    if (!properties.reserve(nsXPTInterfaceInfo::InterfaceCount())) {
         *_retval = false;
         return NS_OK;
     }
 
-    for (uint32_t index = 0; index < mInterfaces.Length(); index++) {
-        nsIInterfaceInfo* interface = mInterfaces.SafeElementAt(index);
+    for (uint32_t index = 0; index < nsXPTInterfaceInfo::InterfaceCount(); index++) {
+        const nsXPTInterfaceInfo* interface = nsXPTInterfaceInfo::ByIndex(index);
         if (!interface)
             continue;
 
-        const char* name;
-        if (NS_SUCCEEDED(interface->GetNameShared(&name)) && name) {
-            RootedString idstr(cx, JS_NewStringCopyZ(cx, name));
-            if (!idstr) {
-                *_retval = false;
-                return NS_OK;
-            }
+        const char* name = interface->Name();
+        if (!name)
+            continue;
 
-            RootedId id(cx);
-            if (!JS_StringToId(cx, idstr, &id)) {
-                *_retval = false;
-                return NS_OK;
-            }
-
-            properties.infallibleAppend(id);
+        RootedString idstr(cx, JS_NewStringCopyZ(cx, name));
+        if (!idstr) {
+            *_retval = false;
+            return NS_OK;
         }
+
+        RootedId id(cx);
+        if (!JS_StringToId(cx, idstr, &id)) {
+            *_retval = false;
+            return NS_OK;
+        }
+
+        properties.infallibleAppend(id);
     }
 
     return NS_OK;
@@ -258,12 +248,7 @@ nsXPCComponents_Interfaces::Resolve(nsIXPConnectWrappedNative* wrapper,
 
     // we only allow interfaces by name here
     if (name.encodeLatin1(cx, str) && name.ptr()[0] != '{') {
-        nsCOMPtr<nsIInterfaceInfo> info =
-            ShimInterfaceInfo::MaybeConstruct(name.ptr(), cx);
-        if (!info) {
-            XPTInterfaceInfoManager::GetSingleton()->
-                GetInfoForName(name.ptr(), getter_AddRefs(info));
-        }
+        const nsXPTInterfaceInfo* info = nsXPTInterfaceInfo::ByName(name.ptr());
         if (!info)
             return NS_OK;
 
@@ -311,8 +296,6 @@ public:
 
 private:
     virtual ~nsXPCComponents_InterfacesByID();
-
-    nsCOMArray<nsIInterfaceInfo> mInterfaces;
 };
 
 /***************************************************************************/
@@ -399,39 +382,31 @@ nsXPCComponents_InterfacesByID::NewEnumerate(nsIXPConnectWrappedNative* wrapper,
                                              bool* _retval)
 {
 
-    if (mInterfaces.IsEmpty()) {
-        XPTInterfaceInfoManager::GetSingleton()->
-            GetScriptableInterfaces(mInterfaces);
-    }
-
-    if (!properties.reserve(mInterfaces.Length())) {
+    if (!properties.reserve(nsXPTInterfaceInfo::InterfaceCount())) {
         *_retval = false;
         return NS_OK;
     }
 
-    for (uint32_t index = 0; index < mInterfaces.Length(); index++) {
-        nsIInterfaceInfo* interface = mInterfaces.SafeElementAt(index);
+    for (uint32_t index = 0; index < nsXPTInterfaceInfo::InterfaceCount(); index++) {
+        const nsXPTInterfaceInfo* interface = nsXPTInterfaceInfo::ByIndex(index);
         if (!interface)
             continue;
 
-        nsIID const* iid;
-        if (NS_SUCCEEDED(interface->GetIIDShared(&iid))) {
-            char idstr[NSID_LENGTH];
-            iid->ToProvidedString(idstr);
-            RootedString jsstr(cx, JS_NewStringCopyZ(cx, idstr));
-            if (!jsstr) {
-                *_retval = false;
-                return NS_OK;
-            }
-
-            RootedId id(cx);
-            if (!JS_StringToId(cx, jsstr, &id)) {
-                *_retval = false;
-                return NS_OK;
-            }
-
-            properties.infallibleAppend(id);
+        char idstr[NSID_LENGTH];
+        interface->IID().ToProvidedString(idstr);
+        RootedString jsstr(cx, JS_NewStringCopyZ(cx, idstr));
+        if (!jsstr) {
+            *_retval = false;
+            return NS_OK;
         }
+
+        RootedId id(cx);
+        if (!JS_StringToId(cx, jsstr, &id)) {
+            *_retval = false;
+            return NS_OK;
+        }
+
+        properties.infallibleAppend(id);
     }
 
     return NS_OK;
@@ -459,9 +434,7 @@ nsXPCComponents_InterfacesByID::Resolve(nsIXPConnectWrappedNative* wrapper,
         if (!iid.Parse(utf8str.ptr()))
             return NS_OK;
 
-        nsCOMPtr<nsIInterfaceInfo> info;
-        XPTInterfaceInfoManager::GetSingleton()->
-            GetInfoForIID(&iid, getter_AddRefs(info));
+        const nsXPTInterfaceInfo* info = nsXPTInterfaceInfo::ByIID(iid);
         if (!info)
             return NS_OK;
 
@@ -1938,8 +1911,8 @@ nsXPCComponents_Constructor::CallOrConstruct(nsIXPConnectWrappedNative* wrapper,
             return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
         }
     } else {
-        nsCOMPtr<nsIInterfaceInfo> info;
-        xpc->GetInfoForIID(&NS_GET_IID(nsISupports), getter_AddRefs(info));
+        const nsXPTInterfaceInfo* info =
+            nsXPTInterfaceInfo::ByIID(NS_GET_IID(nsISupports));
 
         if (info) {
             cInterfaceID = nsJSIID::NewID(info);
@@ -2482,7 +2455,7 @@ nsXPCComponents_Utils::GetGlobalForObject(HandleValue object,
     Rooted<JSObject*> obj(cx, &object.toObject());
     obj = js::UncheckedUnwrap(obj);
     {
-        JSAutoCompartment ac(cx, obj);
+        JSAutoRealm ar(cx, obj);
         obj = JS_GetGlobalForObject(cx, obj);
     }
 
@@ -2551,7 +2524,7 @@ nsXPCComponents_Utils::MakeObjectPropsNormal(HandleValue vobj, JSContext* cx)
         return NS_ERROR_XPC_BAD_CONVERT_JS;
 
     RootedObject obj(cx, js::UncheckedUnwrap(&vobj.toObject()));
-    JSAutoCompartment ac(cx, obj);
+    JSAutoRealm ar(cx, obj);
     Rooted<IdVector> ida(cx, IdVector(cx));
     if (!JS_Enumerate(cx, obj, &ida))
         return NS_ERROR_FAILURE;
@@ -2681,13 +2654,13 @@ nsXPCComponents_Utils::Dispatch(HandleValue runnableArg, HandleValue scope,
                                 JSContext* cx)
 {
     RootedValue runnable(cx, runnableArg);
-    // Enter the given compartment, if any, and rewrap runnable.
-    Maybe<JSAutoCompartment> ac;
+    // Enter the given realm, if any, and rewrap runnable.
+    Maybe<JSAutoRealm> ar;
     if (scope.isObject()) {
         JSObject* scopeObj = js::UncheckedUnwrap(&scope.toObject());
         if (!scopeObj)
             return NS_ERROR_FAILURE;
-        ac.emplace(cx, scopeObj);
+        ar.emplace(cx, scopeObj);
         if (!JS_WrapValue(cx, &runnable))
             return NS_ERROR_FAILURE;
     }
@@ -2923,7 +2896,7 @@ nsXPCComponents_Utils::GenerateXPCWrappedJS(HandleValue aObj, HandleValue aScope
     RootedObject obj(aCx, &aObj.toObject());
     RootedObject scope(aCx, aScope.isObject() ? js::UncheckedUnwrap(&aScope.toObject())
                                               : CurrentGlobalOrNull(aCx));
-    JSAutoCompartment ac(aCx, scope);
+    JSAutoRealm ar(aCx, scope);
     if (!JS_WrapObject(aCx, &obj))
         return NS_ERROR_FAILURE;
 
@@ -2991,7 +2964,7 @@ xpc::CloneInto(JSContext* aCx, HandleValue aValue, HandleValue aScope,
         return false;
 
     {
-        JSAutoCompartment ac(aCx, scope);
+        JSAutoRealm ar(aCx, scope);
         aCloned.set(aValue);
         if (!StackScopedClone(aCx, options, aCloned))
             return false;

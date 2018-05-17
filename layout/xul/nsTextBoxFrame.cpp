@@ -22,7 +22,6 @@
 #include "nsMenuBarListener.h"
 #include "nsString.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMXULLabelElement.h"
 #include "mozilla/EventStateManager.h"
 #include "nsITheme.h"
@@ -332,7 +331,7 @@ nsDisplayXULTextBox::Paint(nsDisplayListBuilder* aBuilder,
   nsRect drawRect = static_cast<nsTextBoxFrame*>(mFrame)->mTextDrawRect +
                     ToReferenceFrame();
   nsLayoutUtils::PaintTextShadow(mFrame, aCtx,
-                                 drawRect, mVisibleRect,
+                                 drawRect, GetPaintRect(),
                                  mFrame->StyleColor()->mColor,
                                  PaintTextShadowCallback,
                                  (void*)this);
@@ -346,7 +345,7 @@ nsDisplayXULTextBox::PaintTextToContext(gfxContext* aCtx,
                                         const nscolor* aColor)
 {
   static_cast<nsTextBoxFrame*>(mFrame)->
-    PaintTitle(*aCtx, mVisibleRect, ToReferenceFrame() + aOffset, aColor);
+    PaintTitle(*aCtx, GetPaintRect(), ToReferenceFrame() + aOffset, aColor);
 }
 
 nsRect
@@ -428,8 +427,7 @@ nsTextBoxFrame::DrawText(gfxContext&         aRenderingContext,
         if (aOverrideColor) {
           color = *aOverrideColor;
         } else {
-          color = context->StyleColor()->
-            CalcComplexColor(styleText->mTextDecorationColor);
+          color = styleText->mTextDecorationColor.CalcColor(context);
         }
         uint8_t style = styleText->mTextDecorationStyle;
 

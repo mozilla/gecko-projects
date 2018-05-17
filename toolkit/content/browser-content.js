@@ -497,8 +497,8 @@ var Printing = {
   // really all the interface is used for, hence the fact that I don't actually
   // implement the interface here. Bug 1088061 has been filed to remove
   // this hackery.
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                         Ci.nsIPrintingPromptService]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
+                                          Ci.nsIPrintingPromptService]),
 
   MESSAGES: [
     "Printing:Preview:Enter",
@@ -652,7 +652,7 @@ var Printing = {
           }
         },
 
-        QueryInterface: XPCOMUtils.generateQI([
+        QueryInterface: ChromeUtils.generateQI([
           Ci.nsIWebProgressListener,
           Ci.nsISupportsWeakReference,
           Ci.nsIObserver,
@@ -1071,12 +1071,16 @@ var FindBar = {
 
   _passKeyToParent(event) {
     event.preventDefault();
+    // These are the properties required to dispatch another 'real' event
+    // to the findbar in the parent in _dispatchKeypressEvent in findbar.xml .
+    // If you make changes here, verify that that method can still do its job.
+    const kRequiredProps = [
+      "type", "bubbles", "cancelable", "ctrlKey", "altKey", "shiftKey",
+      "metaKey", "keyCode", "charCode",
+    ];
     let fakeEvent = {};
-    for (let k in event) {
-      if (typeof event[k] != "object" && typeof event[k] != "function" &&
-          !(k in content.KeyboardEvent)) {
-        fakeEvent[k] = event[k];
-      }
+    for (let prop of kRequiredProps) {
+      fakeEvent[prop] = event[prop];
     }
     sendAsyncMessage("Findbar:Keypress", fakeEvent);
   },
@@ -1174,7 +1178,7 @@ addMessageListener("WebChannelMessageToContent", function(e) {
 });
 
 var AudioPlaybackListener = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 
   init() {
     Services.obs.addObserver(this, "audio-playback");
@@ -1234,8 +1238,6 @@ var AudioPlaybackListener = {
           name += "ActiveMediaBlockStart";
         } else if (data === "activeMediaBlockStop") {
           name += "ActiveMediaBlockStop";
-        } else if (data == "mediaBlockStop") {
-          name += "MediaBlockStop";
         } else {
           name += (data === "active") ? "Start" : "Stop";
         }
@@ -1635,7 +1637,7 @@ addEventListener("MozApplicationManifest", function(e) {
 }, false);
 
 let AutoCompletePopup = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompletePopup]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompletePopup]),
 
   _connected: false,
 

@@ -145,7 +145,6 @@ class RefreshDriverTimer {
 public:
   RefreshDriverTimer()
     : mLastFireEpoch(0)
-    , mLastFireSkipped(false)
   {
   }
 
@@ -233,11 +232,6 @@ public:
 
   virtual TimeDuration GetTimerRate() = 0;
 
-  bool LastTickSkippedAnyPaints() const
-  {
-    return mLastFireSkipped;
-  }
-
   TimeStamp GetIdleDeadlineHint(TimeStamp aDefault)
   {
     MOZ_ASSERT(NS_IsMainThread());
@@ -305,8 +299,6 @@ protected:
       }
 
       TickDriver(driver, aJsNow, aNow);
-
-      mLastFireSkipped = mLastFireSkipped || driver->mSkippedPaints;
     }
   }
 
@@ -319,7 +311,6 @@ protected:
 
     mLastFireEpoch = jsnow;
     mLastFireTime = now;
-    mLastFireSkipped = false;
 
     LOG("[%p] ticking drivers...", this);
     // RD is short for RefreshDriver
@@ -338,7 +329,6 @@ protected:
   }
 
   int64_t mLastFireEpoch;
-  bool mLastFireSkipped;
   TimeStamp mLastFireTime;
   TimeStamp mTargetTime;
 
@@ -946,7 +936,6 @@ protected:
 
     mLastFireEpoch = jsnow;
     mLastFireTime = now;
-    mLastFireSkipped = false;
 
     nsTArray<RefPtr<nsRefreshDriver>> drivers(mContentRefreshDrivers);
     drivers.AppendElements(mRootRefreshDrivers);
@@ -956,7 +945,6 @@ protected:
         !drivers[index]->IsTestControllingRefreshesEnabled())
     {
       TickDriver(drivers[index], jsnow, now);
-      mLastFireSkipped = mLastFireSkipped || drivers[index]->SkippedPaints();
     }
 
     mNextDriverIndex++;
@@ -1072,21 +1060,12 @@ nsRefreshDriver::DefaultInterval()
 // Backends which block on swap/present/etc should try to not block
 // when layout.frame_rate=0 - to comply with "ASAP" as much as possible.
 double
-nsRefreshDriver::GetRegularTimerInterval(bool *outIsDefault) const
+nsRefreshDriver::GetRegularTimerInterval() const
 {
   int32_t rate = Preferences::GetInt("layout.frame_rate", -1);
   if (rate < 0) {
     rate = gfxPlatform::GetDefaultFrameRate();
-    if (outIsDefault) {
-      *outIsDefault = true;
-    }
-  } else {
-    if (outIsDefault) {
-      *outIsDefault = false;
-    }
-  }
-
-  if (rate == 0) {
+  } else if (rate == 0) {
     rate = 10000;
   }
 
@@ -1114,12 +1093,6 @@ nsRefreshDriver::GetMinRecomputeVisibilityInterval()
   return TimeDuration::FromMilliseconds(interval);
 }
 
-double
-nsRefreshDriver::GetRefreshTimerInterval() const
-{
-  return mThrottled ? GetThrottledTimerInterval() : GetRegularTimerInterval();
-}
-
 RefreshDriverTimer*
 nsRefreshDriver::ChooseTimer() const
 {
@@ -1131,8 +1104,7 @@ nsRefreshDriver::ChooseTimer() const
   }
 
   if (!sRegularRateTimer) {
-    bool isDefault = true;
-    double rate = GetRegularTimerInterval(&isDefault);
+    double rate = GetRegularTimerInterval();
 
     // Try to use vsync-base refresh timer first for sRegularRateTimer.
     CreateVsyncRefreshTimer();
@@ -1148,8 +1120,8 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
   : mActiveTimer(nullptr),
     mPresContext(aPresContext),
     mRootRefresh(nullptr),
-    mPendingTransaction(0),
-    mCompletedTransaction(0),
+    mPendingTransaction{0},
+    mCompletedTransaction{0},
     mFreezeCount(0),
     mThrottledFrameRequestInterval(TimeDuration::FromMilliseconds(
                                      GetThrottledTimerInterval())),
@@ -1163,6 +1135,7 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     mWaitingForTransaction(false),
     mSkippedPaints(false),
     mResizeSuppressed(false),
+    mNotifyDOMContentFlushed(false),
     mWarningThreshold(REFRESH_WAIT_WARNING)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -1335,6 +1308,19 @@ nsRefreshDriver::RemoveImageRequest(imgIRequest* aRequest)
 }
 
 void
+nsRefreshDriver::NotifyDOMContentLoaded()
+{
+  // If the refresh driver is going to tick, we mark the timestamp after
+  // everything is flushed in the next tick. If it isn't, mark ourselves as
+  // flushed now.
+  if (!HasObservers()) {
+      GetPresContext()->NotifyDOMContentFlushed();
+  } else {
+    mNotifyDOMContentFlushed = true;
+  }
+}
+
+void
 nsRefreshDriver::EnsureTimerStarted(EnsureTimerStartedFlags aFlags)
 {
   // FIXME: Bug 1346065: We should also assert the case where we have
@@ -1497,10 +1483,10 @@ nsRefreshDriver::ArrayFor(FlushType aFlushType)
 void
 nsRefreshDriver::DoTick()
 {
-  NS_PRECONDITION(!IsFrozen(), "Why are we notified while frozen?");
-  NS_PRECONDITION(mPresContext, "Why are we notified after disconnection?");
-  NS_PRECONDITION(!nsContentUtils::GetCurrentJSContext(),
-                  "Shouldn't have a JSContext on the stack");
+  MOZ_ASSERT(!IsFrozen(), "Why are we notified while frozen?");
+  MOZ_ASSERT(mPresContext, "Why are we notified after disconnection?");
+  MOZ_ASSERT(!nsContentUtils::GetCurrentJSContext(),
+             "Shouldn't have a JSContext on the stack");
 
   if (mTestControllingRefreshes) {
     Tick(mMostRecentRefreshEpochTime, mMostRecentRefresh);
@@ -1768,8 +1754,8 @@ nsRefreshDriver::CancelIdleRunnable(nsIRunnable* aRunnable)
 void
 nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
 {
-  NS_PRECONDITION(!nsContentUtils::GetCurrentJSContext(),
-                  "Shouldn't have a JSContext on the stack");
+  MOZ_ASSERT(!nsContentUtils::GetCurrentJSContext(),
+             "Shouldn't have a JSContext on the stack");
 
   if (nsNPAPIPluginInstance::InPluginCallUnsafeForReentry()) {
     NS_ERROR("Refresh driver should not run during plugin call!");
@@ -2073,6 +2059,11 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
   mozilla::Telemetry::AccumulateTimeDelta(mozilla::Telemetry::REFRESH_DRIVER_TICK, mTickStart);
 #endif
 
+  if (mNotifyDOMContentFlushed) {
+    mNotifyDOMContentFlushed = false;
+    mPresContext->NotifyDOMContentFlushed();
+  }
+
   nsTObserverArray<nsAPostRefreshObserver*>::ForwardIterator iter(mPostRefreshObservers);
   while (iter.HasMore()) {
     nsAPostRefreshObserver* observer = iter.GetNext();
@@ -2154,23 +2145,17 @@ void
 nsRefreshDriver::FinishedWaitingForTransaction()
 {
   mWaitingForTransaction = false;
-  if (mSkippedPaints &&
-      !IsInRefresh() &&
-      (HasObservers() || HasImageRequests())) {
-    AUTO_PROFILER_TRACING("Paint", "RefreshDriverTick");
-    DoRefresh();
-  }
   mSkippedPaints = false;
   mWarningThreshold = 1;
 }
 
-uint64_t
+mozilla::layers::TransactionId
 nsRefreshDriver::GetTransactionId(bool aThrottle)
 {
-  ++mPendingTransaction;
+  mPendingTransaction = mPendingTransaction.Next();
 
   if (aThrottle &&
-      mPendingTransaction >= mCompletedTransaction + 2 &&
+      mPendingTransaction - mCompletedTransaction >= 2 &&
       !mWaitingForTransaction &&
       !mTestControllingRefreshes) {
     mWaitingForTransaction = true;
@@ -2181,22 +2166,22 @@ nsRefreshDriver::GetTransactionId(bool aThrottle)
   return mPendingTransaction;
 }
 
-uint64_t
+mozilla::layers::TransactionId
 nsRefreshDriver::LastTransactionId() const
 {
   return mPendingTransaction;
 }
 
 void
-nsRefreshDriver::RevokeTransactionId(uint64_t aTransactionId)
+nsRefreshDriver::RevokeTransactionId(mozilla::layers::TransactionId aTransactionId)
 {
   MOZ_ASSERT(aTransactionId == mPendingTransaction);
-  if (mPendingTransaction == mCompletedTransaction + 2 &&
+  if (mPendingTransaction - mCompletedTransaction == 2 &&
       mWaitingForTransaction) {
     MOZ_ASSERT(!mSkippedPaints, "How did we skip a paint when we're in the middle of one?");
     FinishedWaitingForTransaction();
   }
-  mPendingTransaction--;
+  mPendingTransaction = mPendingTransaction.Prev();
 }
 
 void
@@ -2207,7 +2192,7 @@ nsRefreshDriver::ClearPendingTransactions()
 }
 
 void
-nsRefreshDriver::ResetInitialTransactionId(uint64_t aTransactionId)
+nsRefreshDriver::ResetInitialTransactionId(mozilla::layers::TransactionId aTransactionId)
 {
   mCompletedTransaction = mPendingTransaction = aTransactionId;
 }
@@ -2219,10 +2204,10 @@ nsRefreshDriver::GetTransactionStart()
 }
 
 void
-nsRefreshDriver::NotifyTransactionCompleted(uint64_t aTransactionId)
+nsRefreshDriver::NotifyTransactionCompleted(mozilla::layers::TransactionId aTransactionId)
 {
   if (aTransactionId > mCompletedTransaction) {
-    if (mPendingTransaction > mCompletedTransaction + 1 &&
+    if (mPendingTransaction - mCompletedTransaction > 1 &&
         mWaitingForTransaction) {
       mCompletedTransaction = aTransactionId;
       FinishedWaitingForTransaction();

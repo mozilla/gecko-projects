@@ -218,7 +218,7 @@ with Files("OfflineAudio*"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
 with Files("OffscreenCanvas.webidl"):
-    BUG_COMPONENT = ("Core", "Canvas 2D")
+    BUG_COMPONENT = ("Core", "Canvas: 2D")
 
 with Files("OscillatorNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
@@ -364,9 +364,7 @@ WEBIDL_FILES = [
     'AnalyserNode.webidl',
     'Animatable.webidl',
     'Animation.webidl',
-    'AnimationEffectReadOnly.webidl',
-    'AnimationEffectTiming.webidl',
-    'AnimationEffectTimingReadOnly.webidl',
+    'AnimationEffect.webidl',
     'AnimationEvent.webidl',
     'AnimationTimeline.webidl',
     'AnonymousContent.webidl',
@@ -443,7 +441,6 @@ WEBIDL_FILES = [
     'CSSMozDocumentRule.webidl',
     'CSSNamespaceRule.webidl',
     'CSSPageRule.webidl',
-    'CSSPrimitiveValue.webidl',
     'CSSPseudoElement.webidl',
     'CSSRule.webidl',
     'CSSRuleList.webidl',
@@ -452,8 +449,6 @@ WEBIDL_FILES = [
     'CSSStyleSheet.webidl',
     'CSSSupportsRule.webidl',
     'CSSTransition.webidl',
-    'CSSValue.webidl',
-    'CSSValueList.webidl',
     'CustomElementRegistry.webidl',
     'DataTransfer.webidl',
     'DataTransferItem.webidl',
@@ -713,6 +708,7 @@ WEBIDL_FILES = [
     'PerformanceObserver.webidl',
     'PerformanceObserverEntryList.webidl',
     'PerformanceResourceTiming.webidl',
+    'PerformanceServerTiming.webidl',
     'PerformanceTiming.webidl',
     'PeriodicWave.webidl',
     'Permissions.webidl',
@@ -720,7 +716,6 @@ WEBIDL_FILES = [
     'Plugin.webidl',
     'PluginArray.webidl',
     'PointerEvent.webidl',
-    'PopupBoxObject.webidl',
     'Position.webidl',
     'PositionError.webidl',
     'Presentation.webidl',
@@ -740,10 +735,8 @@ WEBIDL_FILES = [
     'PushSubscriptionOptions.webidl',
     'RadioNodeList.webidl',
     'Range.webidl',
-    'Rect.webidl',
     'Request.webidl',
     'Response.webidl',
-    'RGBColor.webidl',
     'RTCStatsReport.webidl',
     'Screen.webidl',
     'ScreenOrientation.webidl',
@@ -943,7 +936,6 @@ WEBIDL_FILES = [
     'XMLHttpRequestEventTarget.webidl',
     'XMLHttpRequestUpload.webidl',
     'XMLSerializer.webidl',
-    'XMLStylesheetProcessingInstruction.webidl',
     'XPathEvaluator.webidl',
     'XPathExpression.webidl',
     'XPathNSResolver.webidl',
@@ -952,6 +944,7 @@ WEBIDL_FILES = [
     'XULCommandEvent.webidl',
     'XULDocument.webidl',
     'XULElement.webidl',
+    'XULPopupElement.webidl',
 ]
 
 if CONFIG['MOZ_WEBRTC']:

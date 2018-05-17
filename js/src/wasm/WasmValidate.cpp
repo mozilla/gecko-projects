@@ -801,28 +801,32 @@ DecodeFunctionBodyExprs(const ModuleEnvironment& env, const Sig& sig, const ValT
             CHECK(iter.readReturn(&nothing));
           case uint16_t(Op::Unreachable):
             CHECK(iter.readUnreachable());
-          case uint16_t(Op::NumericPrefix): {
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+          case uint16_t(Op::MiscPrefix): {
             switch (op.b1) {
-              case uint16_t(NumericOp::I32TruncSSatF32):
-              case uint16_t(NumericOp::I32TruncUSatF32):
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+              case uint16_t(MiscOp::I32TruncSSatF32):
+              case uint16_t(MiscOp::I32TruncUSatF32):
                 CHECK(iter.readConversion(ValType::F32, ValType::I32, &nothing));
-              case uint16_t(NumericOp::I32TruncSSatF64):
-              case uint16_t(NumericOp::I32TruncUSatF64):
+              case uint16_t(MiscOp::I32TruncSSatF64):
+              case uint16_t(MiscOp::I32TruncUSatF64):
                 CHECK(iter.readConversion(ValType::F64, ValType::I32, &nothing));
-              case uint16_t(NumericOp::I64TruncSSatF32):
-              case uint16_t(NumericOp::I64TruncUSatF32):
+              case uint16_t(MiscOp::I64TruncSSatF32):
+              case uint16_t(MiscOp::I64TruncUSatF32):
                 CHECK(iter.readConversion(ValType::F32, ValType::I64, &nothing));
-              case uint16_t(NumericOp::I64TruncSSatF64):
-              case uint16_t(NumericOp::I64TruncUSatF64):
+              case uint16_t(MiscOp::I64TruncSSatF64):
+              case uint16_t(MiscOp::I64TruncUSatF64):
                 CHECK(iter.readConversion(ValType::F64, ValType::I64, &nothing));
+#endif
+#ifdef ENABLE_WASM_BULKMEM_OPS
+              case uint16_t(MiscOp::MemCopy):
+                CHECK(iter.readMemCopy(&nothing, &nothing, &nothing));
+              case uint16_t(MiscOp::MemFill):
+                CHECK(iter.readMemFill(&nothing, &nothing, &nothing));
+#endif
               default:
                 return iter.unrecognizedOpcode(&op);
             }
             break;
-#else
-            return iter.unrecognizedOpcode(&op);
-#endif
           }
 #ifdef ENABLE_WASM_GC
           case uint16_t(Op::RefNull): {
@@ -1946,7 +1950,7 @@ DecodeDataSection(Decoder& d, ModuleEnvironment* env)
 }
 
 static bool
-DecodeModuleNameSubsection(Decoder& d)
+DecodeModuleNameSubsection(Decoder& d, ModuleEnvironment* env)
 {
     Maybe<uint32_t> endOffset;
     if (!d.startNameSubsection(NameType::Module, &endOffset))
@@ -1963,12 +1967,13 @@ DecodeModuleNameSubsection(Decoder& d)
     if (!d.readVarU32(&nameLength))
         return d.fail("failed to read module name length");
 
+    NameInBytecode moduleName(d.currentOffset(), nameLength);
+
     const uint8_t* bytes;
     if (!d.readBytes(nameLength, &bytes))
         return d.fail("failed to read module name bytes");
 
-    // Do nothing with module name for now; a future patch will incorporate the
-    // module name into the callstack format.
+    env->moduleName.emplace(moduleName);
 
     return d.finishNameSubsection(*endOffset);
 }
@@ -2007,10 +2012,12 @@ DecodeFunctionNameSubsection(Decoder& d, ModuleEnvironment* env)
         if (!funcNames.resize(funcIndex + 1))
             return false;
 
-        funcNames[funcIndex] = NameInBytecode(d.currentOffset(), nameLength);
+        NameInBytecode funcName(d.currentOffset(), nameLength);
 
         if (!d.readBytes(nameLength))
             return d.fail("unable to read function name bytes");
+
+        funcNames[funcIndex] = funcName;
     }
 
     if (!d.finishNameSubsection(*endOffset))
@@ -2033,7 +2040,7 @@ DecodeNameSection(Decoder& d, ModuleEnvironment* env)
 
     // Once started, custom sections do not report validation errors.
 
-    if (!DecodeModuleNameSubsection(d))
+    if (!DecodeModuleNameSubsection(d, env))
         goto finish;
 
     if (!DecodeFunctionNameSubsection(d, env))

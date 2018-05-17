@@ -18,7 +18,6 @@
 #include "nsIAppShellService.h"
 #include "nsIWidget.h"
 #include "nsCRTGlue.h"
-#include "nsCSSParser.h"
 #include "nsCSSProps.h"
 #include "nsDeviceContext.h"
 #include "nsStyleUtil.h"
@@ -32,7 +31,7 @@
 #include "imgIContainer.h"
 #include "CounterStyleManager.h"
 
-#include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // for PlaybackDirection
+#include "mozilla/dom/AnimationEffectBinding.h" // for PlaybackDirection
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/ImageTracker.h"
 #include "mozilla/CORSMode.h"
@@ -756,7 +755,6 @@ nsStyleXUL::CalcDifference(const nsStyleXUL& aNewData) const
 nsStyleColumn::nsStyleColumn(const nsPresContext* aContext)
   : mColumnCount(NS_STYLE_COLUMN_COUNT_AUTO)
   , mColumnWidth(eStyleUnit_Auto)
-  , mColumnGap(eStyleUnit_Normal)
   , mColumnRuleColor(StyleComplexColor::CurrentColor())
   , mColumnRuleStyle(NS_STYLE_BORDER_STYLE_NONE)
   , mColumnFill(NS_STYLE_COLUMN_FILL_BALANCE)
@@ -776,7 +774,6 @@ nsStyleColumn::~nsStyleColumn()
 nsStyleColumn::nsStyleColumn(const nsStyleColumn& aSource)
   : mColumnCount(aSource.mColumnCount)
   , mColumnWidth(aSource.mColumnWidth)
-  , mColumnGap(aSource.mColumnGap)
   , mColumnRuleColor(aSource.mColumnRuleColor)
   , mColumnRuleStyle(aSource.mColumnRuleStyle)
   , mColumnFill(aSource.mColumnFill)
@@ -801,7 +798,6 @@ nsStyleColumn::CalcDifference(const nsStyleColumn& aNewData) const
   }
 
   if (mColumnWidth != aNewData.mColumnWidth ||
-      mColumnGap != aNewData.mColumnGap ||
       mColumnFill != aNewData.mColumnFill) {
     return NS_STYLE_HINT_REFLOW;
   }
@@ -1513,7 +1509,7 @@ nsStylePosition::nsStylePosition(const nsPresContext* aContext)
   , mAlignItems(NS_STYLE_ALIGN_NORMAL)
   , mAlignSelf(NS_STYLE_ALIGN_AUTO)
   , mJustifyContent(NS_STYLE_JUSTIFY_NORMAL)
-  , mSpecifiedJustifyItems(NS_STYLE_JUSTIFY_AUTO)
+  , mSpecifiedJustifyItems(NS_STYLE_JUSTIFY_LEGACY)
   , mJustifyItems(NS_STYLE_JUSTIFY_NORMAL)
   , mJustifySelf(NS_STYLE_JUSTIFY_AUTO)
   , mFlexDirection(NS_STYLE_FLEX_DIRECTION_ROW)
@@ -1523,8 +1519,8 @@ nsStylePosition::nsStylePosition(const nsPresContext* aContext)
   , mFlexGrow(0.0f)
   , mFlexShrink(1.0f)
   , mZIndex(eStyleUnit_Auto)
-  , mGridColumnGap(nscoord(0), nsStyleCoord::CoordConstructor)
-  , mGridRowGap(nscoord(0), nsStyleCoord::CoordConstructor)
+  , mColumnGap(eStyleUnit_Normal)
+  , mRowGap(eStyleUnit_Normal)
 {
   MOZ_COUNT_CTOR(nsStylePosition);
 
@@ -1587,8 +1583,8 @@ nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
   , mGridColumnEnd(aSource.mGridColumnEnd)
   , mGridRowStart(aSource.mGridRowStart)
   , mGridRowEnd(aSource.mGridRowEnd)
-  , mGridColumnGap(aSource.mGridColumnGap)
-  , mGridRowGap(aSource.mGridRowGap)
+  , mColumnGap(aSource.mColumnGap)
+  , mRowGap(aSource.mRowGap)
 {
   MOZ_COUNT_CTOR(nsStylePosition);
 
@@ -1712,8 +1708,8 @@ nsStylePosition::CalcDifference(const nsStylePosition& aNewData,
       mGridColumnEnd != aNewData.mGridColumnEnd ||
       mGridRowStart != aNewData.mGridRowStart ||
       mGridRowEnd != aNewData.mGridRowEnd ||
-      mGridColumnGap != aNewData.mGridColumnGap ||
-      mGridRowGap != aNewData.mGridRowGap) {
+      mColumnGap != aNewData.mColumnGap ||
+      mRowGap != aNewData.mRowGap) {
     return hint |
            nsChangeHint_AllReflowHints;
   }
@@ -3115,7 +3111,7 @@ nsStyleImageLayers::Size::operator==(const Size& aOther) const
 
 nsStyleImageLayers::Layer::Layer()
   : mClip(StyleGeometryBox::BorderBox)
-  , mAttachment(NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL)
+  , mAttachment(StyleImageLayerAttachment::Scroll)
   , mBlendMode(NS_STYLE_BLEND_NORMAL)
   , mComposite(NS_STYLE_MASK_COMPOSITE_ADD)
   , mMaskMode(NS_STYLE_MASK_MODE_MATCH_SOURCE)
@@ -3178,7 +3174,7 @@ FillImageLayerList(
     ComputedValueItem nsStyleImageLayers::Layer::* aResultLocation,
     uint32_t aItemCount, uint32_t aFillCount)
 {
-  NS_PRECONDITION(aFillCount <= aLayers.Length(), "unexpected array length");
+  MOZ_ASSERT(aFillCount <= aLayers.Length(), "unexpected array length");
   for (uint32_t sourceLayer = 0, destLayer = aItemCount;
        destLayer < aFillCount;
        ++sourceLayer, ++destLayer) {
@@ -3196,7 +3192,7 @@ FillImageLayerPositionCoordList(
         Position::* aResultLocation,
     uint32_t aItemCount, uint32_t aFillCount)
 {
-  NS_PRECONDITION(aFillCount <= aLayers.Length(), "unexpected array length");
+  MOZ_ASSERT(aFillCount <= aLayers.Length(), "unexpected array length");
   for (uint32_t sourceLayer = 0, destLayer = aItemCount;
        destLayer < aFillCount;
        ++sourceLayer, ++destLayer) {
@@ -3354,7 +3350,7 @@ nsStyleBackground::HasFixedBackground(nsIFrame* aFrame) const
 {
   NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, mImage) {
     const nsStyleImageLayers::Layer &layer = mImage.mLayers[i];
-    if (layer.mAttachment == NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED &&
+    if (layer.mAttachment == StyleImageLayerAttachment::Fixed &&
         !layer.mImage.IsEmpty() &&
         !nsLayoutUtils::IsTransformed(aFrame)) {
       return true;
@@ -3376,7 +3372,7 @@ nsStyleBackground::BackgroundColor(mozilla::ComputedStyle* aStyle) const
   // In that case, we can skip resolving StyleColor().
   return mBackgroundColor.IsNumericColor()
     ? mBackgroundColor.mColor
-    : aStyle->StyleColor()->CalcComplexColor(mBackgroundColor);
+    : mBackgroundColor.CalcColor(aStyle);
 }
 
 bool
@@ -3585,6 +3581,7 @@ nsStyleDisplay::nsStyleDisplay(const nsPresContext* aContext)
   , mAnimationFillModeCount(1)
   , mAnimationPlayStateCount(1)
   , mAnimationIterationCountCount(1)
+  , mShapeMargin(0, nsStyleCoord::CoordConstructor)
 {
   MOZ_COUNT_CTOR(nsStyleDisplay);
 
@@ -3658,6 +3655,7 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
   , mAnimationPlayStateCount(aSource.mAnimationPlayStateCount)
   , mAnimationIterationCountCount(aSource.mAnimationIterationCountCount)
   , mShapeImageThreshold(aSource.mShapeImageThreshold)
+  , mShapeMargin(aSource.mShapeMargin)
   , mShapeOutside(aSource.mShapeOutside)
 {
   MOZ_COUNT_CTOR(nsStyleDisplay);
@@ -3718,7 +3716,7 @@ nsStyleDisplay::FinishStyle(
       // ImageValue is created, in both Gecko and Stylo. That will
       // avoid doing a mutation here.
       if (shapeImage->GetType() == eStyleImageType_Image) {
-        shapeImage->GetImageRequest()->GetImageValue()->SetCORSMode(
+        shapeImage->ImageRequest()->GetImageValue()->SetCORSMode(
           CORSMode::CORS_ANONYMOUS);
       }
       const nsStyleImage* oldShapeImage =
@@ -3806,11 +3804,12 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
   }
 
   if (mShapeOutside != aNewData.mShapeOutside ||
+      mShapeMargin != aNewData.mShapeMargin ||
       mShapeImageThreshold != aNewData.mShapeImageThreshold) {
     if (aNewData.mFloat != StyleFloat::None) {
-      // If we are floating, and our shape-outside or shape-image-threshold
-      // are changed, our descendants are not impacted, but our ancestor and
-      // siblings are.
+      // If we are floating, and our shape-outside, shape-margin, or
+      // shape-image-threshold are changed, our descendants are not impacted,
+      // but our ancestor and siblings are.
       //
       // This is similar to a float-only change, but since the ISize of the
       // float area changes arbitrarily along its block axis, more is required
@@ -3823,8 +3822,8 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
       hint |= nsChangeHint_ReflowHintsForFloatAreaChange |
               nsChangeHint_CSSOverflowChange;
     } else {
-      // shape-outside or shape-image-threshold changed, but we don't need
-      // to reflow because we're not floating.
+      // shape-outside or shape-margin or shape-image-threshold changed,
+      // but we don't need to reflow because we're not floating.
       hint |= nsChangeHint_NeutralChange;
     }
   }
@@ -4162,7 +4161,7 @@ nsStyleContentData::nsStyleContentData(const nsStyleContentData& aOther)
       mContent.mCounters->AddRef();
       break;
     case eStyleContentType_Attr:
-      mContent.mAttr = new nsStyleContentAttr(*mContent.mAttr);
+      mContent.mAttr = new nsStyleContentAttr(*aOther.mContent.mAttr);
       break;
     case eStyleContentType_String:
       mContent.mString = NS_strdup(aOther.mContent.mString);

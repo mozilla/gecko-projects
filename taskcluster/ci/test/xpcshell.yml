@@ -1,6 +1,5 @@
 job-defaults:
     mozharness:
-        no-read-buildbot-config: true
         script:
             by-test-platform:
                 android.*: android_emulator_unittest.py
@@ -35,7 +34,6 @@ xpcshell:
     treeherder-symbol: X(X)
     run-on-projects:
         by-test-platform:
-            .*-qr/.*: ['mozilla-central', 'try']
             windows10-64-asan/opt: []  # No XPCShell on ASAN yet
             default: built-projects
     chunks:
@@ -43,6 +41,7 @@ xpcshell:
             linux32/debug: 12
             linux64/debug: 10
             android-4.2-x86/opt: 6
+            android-4.3-arm7-api-16/debug: 12
             macosx.*: 1
             windows.*: 1
             windows10-64-ccov/debug: 8

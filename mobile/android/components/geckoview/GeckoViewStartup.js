@@ -5,6 +5,7 @@
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  GeckoViewTelemetryController: "resource://gre/modules/GeckoViewTelemetryController.jsm",
   GeckoViewUtils: "resource://gre/modules/GeckoViewUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
 });
@@ -15,7 +16,7 @@ function GeckoViewStartup() {
 GeckoViewStartup.prototype = {
   classID: Components.ID("{8e993c34-fdd6-432c-967e-f995d888777f}"),
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 
   /**
    * Register resource://android as the APK root.
@@ -69,6 +70,23 @@ GeckoViewStartup.prototype = {
             "ContentPrefs:RemoveObserverForName",
           ],
         });
+
+        GeckoViewUtils.addLazyGetter(this, "GeckoViewRemoteDebugger", {
+          module: "resource://gre/modules/GeckoViewRemoteDebugger.jsm",
+          init: gvrd => gvrd.onInit(),
+        });
+
+        GeckoViewUtils.addLazyPrefObserver({
+          name: "devtools.debugger.remote-enabled",
+          default: false,
+        }, {
+          handler: _ => this.GeckoViewRemoteDebugger,
+        });
+
+        // This initializes Telemetry for GeckoView only in the parent process.
+        // The Telemetry initialization for the content process is performed in
+        // ContentProcessSingleton.js for consistency with Desktop Telemetry.
+        GeckoViewTelemetryController.setup();
         break;
       }
     }

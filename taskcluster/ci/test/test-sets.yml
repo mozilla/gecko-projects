@@ -35,9 +35,14 @@ common-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
+    - reftest-fonts
     - reftest-no-accel
+    - reftest-no-accel-fonts
     - telemetry-tests-client
+    - test-coverage
+    - test-coverage-wpt
     - test-verify
+    - test-verify-gpu
     - test-verify-wpt
     - xpcshell
 
@@ -77,30 +82,13 @@ talos:
 
 awsy:
     - awsy
+    - awsy-base
 
 awsy-stylo-sequential:
     - awsy-stylo-sequential
 
 ##
 # Limited test sets for specific platforms
-
-linux-qr-talos:
-    - talos-chrome
-    - talos-dromaeojs
-    - talos-g1
-    # - talos-g2 # doesn't work with QR yet
-    - talos-g3
-    - talos-g4
-    - talos-g5
-    - talos-other
-    - talos-svgr
-    - talos-tp5o
-    - talos-perf-reftest
-    - talos-perf-reftest-singletons
-    - talos-tp6
-    - talos-tp6-stylo-threads
-    - talos-speedometer
-    - talos-motionmark
 
 linux-qr-tests:
     - cppunit
@@ -114,8 +102,7 @@ linux-qr-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
-    - test-verify
-    - test-verify-wpt
+    - reftest-fonts
     - xpcshell
 
 linux-talos-profiling:
@@ -145,18 +132,7 @@ windows-qr-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
-    - test-verify
-
-windows-qr-talos:
-    - talos-chrome
-    - talos-dromaeojs
-    - talos-g1
-    - talos-g4
-    - talos-perf-reftest
-    - talos-perf-reftest-singletons
-    - talos-tp5o
-    - talos-speedometer
-    - talos-motionmark
+    - reftest-fonts
 
 jsdcov-code-coverage-tests:
     - mochitest
@@ -166,6 +142,7 @@ jsdcov-code-coverage-tests:
 
 windows-reftest-gpu:
     - reftest-gpu
+    - reftest-gpu-fonts
 
 windows-tests:
     - cppunit
@@ -187,8 +164,13 @@ windows-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
+    - reftest-fonts
     - reftest-no-accel
+    - reftest-no-accel-fonts
+    - test-coverage
+    - test-coverage-wpt
     - test-verify
+    - test-verify-gpu
     - test-verify-wpt
     - web-platform-tests
     - web-platform-tests-reftests
@@ -251,7 +233,9 @@ macosx64-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
+    - reftest-fonts
     - test-verify
+    - test-verify-gpu
     - test-verify-wpt
     - web-platform-tests
     - web-platform-tests-reftests
@@ -274,7 +258,7 @@ macosx64-talos:
     # - talos-tps # Bug 1453007 times out
     - talos-speedometer
     - talos-motionmark
-    - talos-h1
+    # - talos-h1 # too long to unpack profile- Bug 1442893
 
 macosx64-talos-profiling:
     - talos-chrome-profiling
@@ -294,6 +278,13 @@ macosx64-talos-profiling:
     - talos-tp6-profiling
     # - talos-tps-profiling # Bug 1453007 times out
 
+macosx64-qr-tests:
+    - reftest
+    - reftest-fonts
+
+macosx64-raptor:
+    - raptor-firefox-tp6
+
 linux32-tests:
     - cppunit
     - crashtest
@@ -312,7 +303,9 @@ linux32-tests:
     - mochitest-media
     - mochitest-webgl
     - reftest
+    - reftest-fonts
     - reftest-no-accel
+    - reftest-no-accel-fonts
     - web-platform-tests
     - web-platform-tests-reftests
     - web-platform-tests-wdspec
@@ -331,20 +324,19 @@ desktop-instrumentation:
 android-common-tests:
     - cppunit
     - crashtest
+    - geckoview-junit
     # - jittest # not ready yet: bug 1098508
     - jsreftest
+    - marionette
     - mochitest
     - mochitest-chrome
     - mochitest-clipboard
     - mochitest-gpu
     - mochitest-media
     - reftest
+    - reftest-fonts
     - test-verify
     - xpcshell
-
-android-debug-tests:
-    # Marionette only available on Fennec debug builds as a security precaution
-    - marionette
 
 android-opt-tests:
     # Robocop tests often fail on Debug builds
@@ -358,6 +350,18 @@ android-x86-tests:
     - mochitest-chrome
     - xpcshell
     - geckoview
+
+android-x86-kvm-tests:
+    - crashtest
+    - geckoview-junit
+    - jsreftest
+    - mochitest
+    - mochitest-chrome
+    - mochitest-clipboard
+    - mochitest-gpu
+    - mochitest-media
+    - reftest
+    - reftest-fonts
 
 devtools-tests:
     - mochitest-devtools-chrome

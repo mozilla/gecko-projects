@@ -10,6 +10,7 @@
   skin/classic/browser/aboutNetError.css                       (../shared/aboutNetError.css)
   skin/classic/browser/blockedSite.css                         (../shared/blockedSite.css)
   skin/classic/browser/error-pages.css                         (../shared/error-pages.css)
+  skin/classic/browser/aboutRestartRequired.css                (../shared/aboutRestartRequired.css)
 * skin/classic/browser/aboutSessionRestore.css                 (../shared/aboutSessionRestore.css)
   skin/classic/browser/aboutLibrary.css                        (../shared/aboutLibrary.css)
   skin/classic/browser/aboutTabCrashed.css                     (../shared/aboutTabCrashed.css)
@@ -33,6 +34,7 @@
   skin/classic/browser/customizableui/density-compact.svg      (../shared/customizableui/density-compact.svg)
   skin/classic/browser/customizableui/density-normal.svg       (../shared/customizableui/density-normal.svg)
   skin/classic/browser/customizableui/density-touch.svg        (../shared/customizableui/density-touch.svg)
+  skin/classic/browser/customizableui/menu-arrow.svg           (../shared/customizableui/menu-arrow.svg)
   skin/classic/browser/customizableui/whimsy.png               (../shared/customizableui/whimsy.png)
   skin/classic/browser/downloads/contentAreaDownloadsView.css  (../shared/downloads/contentAreaDownloadsView.css)
   skin/classic/browser/downloads/download-blocked.svg          (../shared/downloads/download-blocked.svg)
@@ -199,6 +201,7 @@
   skin/classic/browser/tabbrowser/tab-audio-blocked.svg        (../shared/tabbrowser/tab-audio-blocked.svg)
   skin/classic/browser/tabbrowser/tab-audio-small.svg          (../shared/tabbrowser/tab-audio-small.svg)
   skin/classic/browser/tabbrowser/tab-overflow-indicator.png   (../shared/tabbrowser/tab-overflow-indicator.png)
+  skin/classic/browser/tabbrowser/badge-audio-playing.svg      (../shared/tabbrowser/badge-audio-playing.svg)
 
   skin/classic/browser/translating-16.png                      (../shared/translation/translating-16.png)
   skin/classic/browser/translating-16@2x.png                   (../shared/translation/translating-16@2x.png)

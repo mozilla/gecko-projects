@@ -15,7 +15,6 @@
 
 #include "PLDHashTable.h"
 #include "nsIHttpChannel.h"
-#include "nsHTMLStyleSheet.h"
 #include "nsThreadUtils.h"
 #include "nsICommandManager.h"
 #include "mozilla/dom/HTMLSharedElement.h"
@@ -78,21 +77,11 @@ public:
     return mForms;
   }
 
-  // nsIDOMDocument interface
-  using nsDocument::CreateElement;
-  using nsDocument::CreateElementNS;
-  NS_FORWARD_NSIDOMDOCUMENT(nsDocument::)
-
-  // And explicitly import the things from nsDocument that we just shadowed
-  using nsDocument::GetImplementation;
-  using nsDocument::GetTitle;
-  using nsDocument::SetTitle;
-  using nsDocument::GetLastStyleSheetSet;
-  using nsDocument::MozSetImageElement;
-
   mozilla::dom::HTMLAllCollection* All();
 
-  nsISupports* ResolveName(const nsAString& aName, nsWrapperCache **aCache);
+  // Returns whether an object was found for aName.
+  bool ResolveName(JSContext* aCx, const nsAString& aName,
+                   JS::MutableHandle<JS::Value> aRetval, mozilla::ErrorResult& aError);
 
   virtual void AddedForm() override;
   virtual void RemovedForm() override;
@@ -136,7 +125,7 @@ public:
   };
   friend class nsAutoEditingState;
 
-  void EndUpdate(nsUpdateType aUpdateType) override;
+  void EndUpdate() override;
 
   virtual void SetMayStartLayout(bool aMayStartLayout) override;
 
@@ -164,7 +153,13 @@ public:
   void SetCookie(const nsAString& aCookie, mozilla::ErrorResult& rv);
   void NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
                    JS::MutableHandle<JSObject*> aRetval,
-                   mozilla::ErrorResult& rv);
+                   mozilla::ErrorResult& rv)
+  {
+    JS::Rooted<JS::Value> v(cx);
+    if ((aFound = ResolveName(cx, aName, &v, rv))) {
+      aRetval.set(v.toObjectOrNull());
+    }
+  }
   void GetSupportedNames(nsTArray<nsString>& aNames);
   already_AddRefed<nsIDocument> Open(JSContext* cx,
                                      const mozilla::dom::Optional<nsAString>& /* unused */,
@@ -224,8 +219,6 @@ public:
   {
     return nsIDocument::GetLocation();
   }
-
-  virtual nsHTMLDocument* AsHTMLDocument() override { return this; }
 
   static bool MatchFormControls(Element* aElement, int32_t aNamespaceID,
                                 nsAtom* aAtom, void* aData);
@@ -366,6 +359,13 @@ protected:
    */
   bool mPendingMaybeEditingStateChanged;
 };
+
+inline nsHTMLDocument*
+nsIDocument::AsHTMLDocument()
+{
+  MOZ_ASSERT(IsHTMLOrXHTML());
+  return static_cast<nsHTMLDocument*>(this);
+}
 
 #define NS_HTML_DOCUMENT_INTERFACE_TABLE_BEGIN(_class)                        \
     NS_DOCUMENT_INTERFACE_TABLE_BEGIN(_class)                                 \

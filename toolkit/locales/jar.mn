@@ -14,6 +14,7 @@
   locale/@AB_CD@/global/aboutProfiles.dtd               (%chrome/global/aboutProfiles.dtd)
   locale/@AB_CD@/global/aboutProfiles.properties        (%chrome/global/aboutProfiles.properties)
 #endif
+  locale/@AB_CD@/global/aboutStudies.properties         (%chrome/global/aboutStudies.properties)
   locale/@AB_CD@/global/aboutServiceWorkers.dtd         (%chrome/global/aboutServiceWorkers.dtd)
   locale/@AB_CD@/global/aboutServiceWorkers.properties  (%chrome/global/aboutServiceWorkers.properties)
   locale/@AB_CD@/global/aboutSupport.dtd                (%chrome/global/aboutSupport.dtd)
@@ -40,7 +41,6 @@
 #endif
   locale/@AB_CD@/global/extensions.properties           (%chrome/global/extensions.properties)
   locale/@AB_CD@/global/fallbackMenubar.properties      (%chrome/global/fallbackMenubar.properties)
-  locale/@AB_CD@/global/filefield.properties            (%chrome/global/filefield.properties)
   locale/@AB_CD@/global/filepicker.properties           (%chrome/global/filepicker.properties)
 #ifndef MOZ_FENNEC
   locale/@AB_CD@/global/findbar.dtd                     (%chrome/global/findbar.dtd)
@@ -94,7 +94,6 @@
 #ifndef MOZ_FENNEC
   locale/@AB_CD@/mozapps/extensions/extensions.properties         (%chrome/mozapps/extensions/extensions.properties)
   locale/@AB_CD@/mozapps/extensions/blocklist.dtd                 (%chrome/mozapps/extensions/blocklist.dtd)
-  locale/@AB_CD@/mozapps/extensions/update.properties             (%chrome/mozapps/extensions/update.properties)
 #endif
   locale/@AB_CD@/mozapps/handling/handling.dtd                    (%chrome/mozapps/handling/handling.dtd)
   locale/@AB_CD@/mozapps/handling/handling.properties             (%chrome/mozapps/handling/handling.properties)

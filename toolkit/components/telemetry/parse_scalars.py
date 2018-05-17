@@ -106,6 +106,7 @@ class ScalarType:
             'cpp_guard': basestring,
             'release_channel_collection': basestring,
             'keyed': bool,
+            'products': list,
         }
 
         # The types for the data within the fields that hold lists.
@@ -113,6 +114,7 @@ class ScalarType:
             'bug_numbers': int,
             'notification_emails': basestring,
             'record_in_processes': basestring,
+            'products': basestring,
         }
 
         # Concatenate the required and optional field definitions.
@@ -191,6 +193,13 @@ class ScalarType:
         for proc in record_in_processes:
             if not utils.is_valid_process_name(proc):
                 ParserError(self._name + ' - unknown value in record_in_processes: ' + proc +
+                            '.\nSee: {}'.format(BASE_DOC_URL)).handle_later()
+
+        # Validate product.
+        products = definition.get('products', [])
+        for product in products:
+            if not utils.is_valid_product(product):
+                ParserError(self._name + ' - unknown value in products: ' + product +
                             '.\nSee: {}'.format(BASE_DOC_URL)).handle_later()
 
         # Validate the expiration version.
@@ -275,18 +284,34 @@ class ScalarType:
         return [utils.process_name_to_enum(p) for p in self.record_in_processes]
 
     @property
+    def products(self):
+        """Get the non-empty list of products to record data on"""
+        return self._definition.get('products', ["firefox", "fennec"])
+
+    @property
+    def products_enum(self):
+        """Get the non-empty list of flags representing products to record data on"""
+        return [utils.product_name_to_enum(p) for p in self.products]
+
+    @property
     def dataset(self):
-        """Get the nsITelemetry constant equivalent to the chose release channel collection
+        """Get the nsITelemetry constant equivalent to the chosen release channel collection
         policy for the scalar.
         """
-        # The collection policy is optional, but we still define a default
-        # behaviour for it.
-        rcc = self._definition.get('release_channel_collection', 'opt-in')
+        rcc = self.dataset_short
         table = {
             'opt-in': 'OPTIN',
             'opt-out': 'OPTOUT',
         }
         return 'nsITelemetry::DATASET_RELEASE_CHANNEL_' + table[rcc]
+
+    @property
+    def dataset_short(self):
+        """Get the short name of the chosen release channel collection policy for the scalar.
+        """
+        # The collection policy is optional, but we still define a default
+        # behaviour for it.
+        return self._definition.get('release_channel_collection', 'opt-in')
 
     @property
     def cpp_guard(self):

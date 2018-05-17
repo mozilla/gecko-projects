@@ -55,8 +55,6 @@
 #include "nsDateTimeControlFrame.h"
 
 #include "mozilla/PresState.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMNodeList.h"
 #include "nsLinebreakConverter.h" //to strip out carriage returns
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
@@ -878,12 +876,12 @@ UploadLastDir::FetchDirectoryAndDisplayPicker(nsIDocument* aDoc,
                                               nsIFilePicker* aFilePicker,
                                               nsIFilePickerShownCallback* aFpCallback)
 {
-  NS_PRECONDITION(aDoc, "aDoc is null");
-  NS_PRECONDITION(aFilePicker, "aFilePicker is null");
-  NS_PRECONDITION(aFpCallback, "aFpCallback is null");
+  MOZ_ASSERT(aDoc, "aDoc is null");
+  MOZ_ASSERT(aFilePicker, "aFilePicker is null");
+  MOZ_ASSERT(aFpCallback, "aFpCallback is null");
 
   nsIURI* docURI = aDoc->GetDocumentURI();
-  NS_PRECONDITION(docURI, "docURI is null");
+  MOZ_ASSERT(docURI, "docURI is null");
 
   nsCOMPtr<nsILoadContext> loadContext = aDoc->GetLoadContext();
   nsCOMPtr<nsIContentPrefCallback2> prefCallback =
@@ -908,13 +906,13 @@ UploadLastDir::FetchDirectoryAndDisplayPicker(nsIDocument* aDoc,
 nsresult
 UploadLastDir::StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir)
 {
-  NS_PRECONDITION(aDoc, "aDoc is null");
+  MOZ_ASSERT(aDoc, "aDoc is null");
   if (!aDir) {
     return NS_OK;
   }
 
   nsCOMPtr<nsIURI> docURI = aDoc->GetDocumentURI();
-  NS_PRECONDITION(docURI, "docURI is null");
+  MOZ_ASSERT(docURI, "docURI is null");
 
   // Attempt to get the CPS, if it's not present we'll just return
   nsCOMPtr<nsIContentPrefService2> contentPrefService =
@@ -1116,7 +1114,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLInputElement,
                                              nsGenericHTMLFormElementWithState,
-                                             nsIDOMHTMLInputElement,
                                              nsITextControlElement,
                                              imgINotificationObserver,
                                              nsIImageLoadingContent,
@@ -2461,26 +2458,6 @@ HTMLInputElement::CreateEditor()
   return NS_ERROR_FAILURE;
 }
 
-NS_IMETHODIMP_(Element*)
-HTMLInputElement::GetRootEditorNode()
-{
-  nsTextEditorState* state = GetEditorState();
-  if (state) {
-    return state->GetRootNode();
-  }
-  return nullptr;
-}
-
-NS_IMETHODIMP_(Element*)
-HTMLInputElement::GetPlaceholderNode()
-{
-  nsTextEditorState* state = GetEditorState();
-  if (state) {
-    return state->GetPlaceholderNode();
-  }
-  return nullptr;
-}
-
 NS_IMETHODIMP_(void)
 HTMLInputElement::UpdateOverlayTextVisibility(bool aNotify)
 {
@@ -2499,16 +2476,6 @@ HTMLInputElement::GetPlaceholderVisibility()
   }
 
   return state->GetPlaceholderVisibility();
-}
-
-NS_IMETHODIMP_(Element*)
-HTMLInputElement::GetPreviewNode()
-{
-  nsTextEditorState* state = GetEditorState();
-  if (state) {
-    return state->GetPreviewNode();
-  }
-  return nullptr;
 }
 
 NS_IMETHODIMP_(void)
@@ -2827,8 +2794,8 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
                                    const nsAString* aOldValue,
                                    uint32_t aFlags)
 {
-  NS_PRECONDITION(GetValueMode() != VALUE_MODE_FILENAME,
-                  "Don't call SetValueInternal for file inputs");
+  MOZ_ASSERT(GetValueMode() != VALUE_MODE_FILENAME,
+             "Don't call SetValueInternal for file inputs");
 
   // We want to remember if the SetValueInternal() call is being made for a XUL
   // element.  We do that by looking at the parent node here, and if that node
@@ -3242,7 +3209,7 @@ HTMLInputElement::Focus(ErrorResult& aError)
       nsCOMPtr<nsIFormControl> formCtrl =
         do_QueryInterface(childFrame->GetContent());
       if (formCtrl && formCtrl->ControlType() == NS_FORM_BUTTON_BUTTON) {
-        nsCOMPtr<nsIDOMElement> element = do_QueryInterface(formCtrl);
+        nsCOMPtr<Element> element = do_QueryInterface(formCtrl);
         nsIFocusManager* fm = nsFocusManager::GetFocusManager();
         if (fm && element) {
           fm->SetFocus(element, 0);
@@ -3315,7 +3282,7 @@ HTMLInputElement::Select()
     }
   }
 
-  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
 
   RefPtr<nsPresContext> presContext = GetPresContext(eForComposedDoc);
   if (state == eInactiveWindow) {
@@ -3329,9 +3296,7 @@ HTMLInputElement::Select()
     fm->SetFocus(this, nsIFocusManager::FLAG_NOSCROLL);
 
     // ensure that the element is actually focused
-    nsCOMPtr<nsIDOMElement> focusedElement;
-    fm->GetFocusedElement(getter_AddRefs(focusedElement));
-    if (SameCOMIdentity(static_cast<nsIDOMNode*>(this), focusedElement)) {
+    if (this == fm->GetFocusedElement()) {
       // Now Select all the text!
       SelectAll(presContext);
     }

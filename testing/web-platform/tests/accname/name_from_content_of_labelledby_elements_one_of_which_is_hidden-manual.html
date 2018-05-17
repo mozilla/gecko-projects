@@ -62,7 +62,10 @@
   </head>
   <body>
   <p>This test examines the ARIA properties for Name from content of labelledby elements one of which is hidden.</p>
-    <div>
+    <style>
+    .hidden { display: none; }
+  </style>
+  <div>
     <input id="test" type="text" aria-labelledby="lbl1 lbl2" aria-describedby="descId" />
     <span>
       <span aria-hidden="true" id="lbl1">Important</span>
@@ -80,7 +83,7 @@
         <span aria-label="Garaventa">Zambino</span>
       </span>
       <span>the weird.</span>
-      (<span>Q</span><span>E</span><span>D</span>)
+      (QED)
       <span class="hidden"><i><b>and don't you forget it.</b></i></span>
       <table>
         <tr>

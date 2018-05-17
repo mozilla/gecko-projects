@@ -13,12 +13,10 @@ config = {
         'clobber',
         'build',
     ],
-    "buildbot_json_path": "buildprops.json",
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
     # decides whether we want to use moz_sign_cmd in env
-    'enable_signing': False,
     'vcs_share_base': '/builds/hg-shared',
-    # allows triggering of dependent jobs when --artifact try syntax is detected on buildbot
+    # allows triggering of dependent jobs when --artifact try syntax is detected
     'perfherder_extra_options': ['artifact'],
     #########################################################################
 
@@ -39,10 +37,8 @@ config = {
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'LC_ALL': 'C',
         # 32 bit specific
-        'PATH': '/usr/local/bin:/usr/lib/ccache:\
-/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/tools/git/bin:\
-/tools/python27/bin:/tools/python27-mercurial/bin:/home/cltbld/bin',
-        'LD_LIBRARY_PATH': "/tools/gcc-4.3.3/installed/lib",
+        'PATH': '/usr/local/bin:\
+/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:',
     },
     'mozconfig_variant': 'artifact',
     #########################################################################

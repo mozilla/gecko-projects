@@ -15,6 +15,7 @@ include protocol PCompositorBridge;
 include protocol PTexture;
 
 using mozilla::layers::APZTestData from "mozilla/layers/APZTestData.h";
+using mozilla::layers::ScrollUpdatesMap from "FrameMetrics.h";
 using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
 using struct mozilla::layers::TextureInfo from "mozilla/layers/CompositorTypes.h";
 using mozilla::layers::CompositableHandle from "mozilla/layers/LayersTypes.h";
@@ -22,6 +23,7 @@ using mozilla::wr::BuiltDisplayListDescriptor from "mozilla/webrender/webrender_
 using mozilla::wr::IdNamespace from "mozilla/webrender/WebRenderTypes.h";
 using mozilla::layers::WebRenderScrollData from "mozilla/layers/WebRenderScrollData.h";
 using mozilla::layers::FocusTarget from "mozilla/layers/FocusTarget.h";
+using mozilla::layers::TransactionId from "mozilla/layers/LayersTypes.h";
 
 namespace mozilla {
 namespace layers {
@@ -36,13 +38,13 @@ parent:
 
   sync Create(IntSize aSize);
   async DeleteCompositorAnimations(uint64_t[] aIds);
-  async SetDisplayList(IntSize aSize, WebRenderParentCommand[] commands, OpDestroy[] toDestroy, uint64_t fwdTransactionId, uint64_t transactionId,
+  async SetDisplayList(IntSize aSize, WebRenderParentCommand[] commands, OpDestroy[] toDestroy, uint64_t fwdTransactionId, TransactionId transactionId,
                        LayoutSize aContentSize, ByteBuf aDL, BuiltDisplayListDescriptor aDLDesc,
                        WebRenderScrollData aScrollData,
                        OpUpdateResource[] aResourceUpdates, RefCountedShmem[] aSmallShmems, Shmem[] aLargeShmems,
                        IdNamespace aIdNamespace, TimeStamp txnStartTime, TimeStamp fwdTime);
-  async EmptyTransaction(FocusTarget focusTarget,
-                         WebRenderParentCommand[] commands, OpDestroy[] toDestroy, uint64_t fwdTransactionId, uint64_t transactionId,
+  async EmptyTransaction(FocusTarget focusTarget, ScrollUpdatesMap scrollUpdates, uint32_t aPaintSequenceNumber,
+                         WebRenderParentCommand[] commands, OpDestroy[] toDestroy, uint64_t fwdTransactionId, TransactionId transactionId,
                          IdNamespace aIdNamespace, TimeStamp txnStartTime, TimeStamp fwdTime);
   async SetFocusTarget(FocusTarget focusTarget);
   async UpdateResources(OpUpdateResource[] aResourceUpdates, RefCountedShmem[] aSmallShmems, Shmem[] aLargeShmems);

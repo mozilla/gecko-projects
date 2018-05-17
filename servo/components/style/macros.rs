@@ -47,7 +47,7 @@ macro_rules! trivial_to_computed_value {
     };
 }
 
-/// A macro to parse an identifier, or return an `UnexpectedIndent` error
+/// A macro to parse an identifier, or return an `UnexpectedIdent` error
 /// otherwise.
 ///
 /// FIXME(emilio): The fact that `UnexpectedIdent` is a `SelectorParseError`
@@ -68,8 +68,9 @@ macro_rules! try_match_ident_ignore_ascii_case {
 macro_rules! define_keyword_type {
     ($name:ident, $css:expr) => {
         #[allow(missing_docs)]
-        #[derive(Animate, Clone, ComputeSquaredDistance, Copy, MallocSizeOf, PartialEq,
-                 ToAnimatedValue, ToAnimatedZero, ToComputedValue, ToCss)]
+        #[derive(Animate, Clone, ComputeSquaredDistance, Copy, MallocSizeOf,
+                 PartialEq, SpecifiedValueInfo, ToAnimatedValue, ToAnimatedZero,
+                 ToComputedValue, ToCss)]
         pub struct $name;
 
         impl fmt::Debug for $name {

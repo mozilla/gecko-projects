@@ -12,11 +12,11 @@ EXTRA_JS_MODULES.addons += [
     'GMPProvider.jsm',
     'LightweightThemeImageOptimizer.jsm',
     'ProductAddonChecker.jsm',
-    'SpellCheckDictionaryBootstrap.js',
-    'UpdateRDFConverter.jsm',
+    'RDFDataSource.jsm',
+    'RDFManifestConverter.jsm',
+    'XPIDatabase.jsm',
     'XPIInstall.jsm',
     'XPIProvider.jsm',
-    'XPIProviderUtils.js',
 ]
 
 TESTING_JS_MODULES += [

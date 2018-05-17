@@ -1885,6 +1885,7 @@ class BaseCompiler final : public BaseCompilerInterface
     MIRTypeVector               SigP_;
     MIRTypeVector               SigPI_;
     MIRTypeVector               SigPII_;
+    MIRTypeVector               SigPIII_;
     MIRTypeVector               SigPIIL_;
     MIRTypeVector               SigPILL_;
     NonAssertingLabel           returnLabel_;
@@ -3429,6 +3430,9 @@ class BaseCompiler final : public BaseCompilerInterface
           case ExprType::F32:
             masm.storeFloat32(RegF32(ReturnFloat32Reg), resultsAddress);
             break;
+          case ExprType::AnyRef:
+            masm.storePtr(RegPtr(ReturnReg), resultsAddress);
+            break;
           default:
             MOZ_CRASH("Function return type");
         }
@@ -3452,6 +3456,9 @@ class BaseCompiler final : public BaseCompilerInterface
             break;
           case ExprType::F32:
             masm.loadFloat32(resultsAddress, RegF32(ReturnFloat32Reg));
+            break;
+          case ExprType::AnyRef:
+            masm.loadPtr(resultsAddress, RegPtr(ReturnReg));
             break;
           default:
             MOZ_CRASH("Function return type");
@@ -3829,6 +3836,10 @@ class BaseCompiler final : public BaseCompilerInterface
         // constant pool entries.
         masm.flush();
 
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
+        // Prevent nop sequences to appear in the jump table.
+        AutoForbidNops afn(&masm);
+#endif
         masm.bind(theTable);
 
         for (uint32_t i = 0; i < labels.length(); i++) {
@@ -4520,14 +4531,9 @@ class BaseCompiler final : public BaseCompilerInterface
             MOZ_ASSERT(dest.i64() == specific_.abiReturnRegI64);
             masm.wasmLoadI64(*access, srcAddr, dest.i64());
         } else {
-            ScratchI8 scratch(*this);
-            bool byteRegConflict = access->byteSize() == 1 && !ra.isSingleByteI32(dest.i32());
-            AnyRegister out = byteRegConflict ? AnyRegister(scratch) : dest.any();
-
-            masm.wasmLoad(*access, srcAddr, out);
-
-            if (byteRegConflict)
-                masm.mov(scratch, dest.i32());
+            // For 8 bit loads, this will generate movsbl or movzbl, so
+            // there's no constraint on what the output register may be.
+            masm.wasmLoad(*access, srcAddr, dest.any());
         }
 #elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
         if (IsUnaligned(*access)) {
@@ -5764,7 +5770,7 @@ class BaseCompiler final : public BaseCompilerInterface
     void endIfThenElse(ExprType type);
 
     void doReturn(ExprType returnType, bool popStack);
-    void pushReturned(const FunctionCall& call, ExprType type);
+    void pushReturnedIfNonVoid(const FunctionCall& call, ExprType type);
 
     void emitCompareI32(Assembler::Condition compareOp, ValType compareType);
     void emitCompareI64(Assembler::Condition compareOp, ValType compareType);
@@ -5886,6 +5892,10 @@ class BaseCompiler final : public BaseCompilerInterface
     MOZ_MUST_USE bool emitWake();
     MOZ_MUST_USE bool emitAtomicXchg(ValType type, Scalar::Type viewType);
     void emitAtomicXchg64(MemoryAccessDesc* access, ValType type, WantResult wantResult);
+#ifdef ENABLE_WASM_BULKMEM_OPS
+    MOZ_MUST_USE bool emitMemCopy();
+    MOZ_MUST_USE bool emitMemFill();
+#endif
 };
 
 void
@@ -7743,11 +7753,11 @@ BaseCompiler::emitCallArgs(const ValTypeVector& argTypes, FunctionCall* baseline
 }
 
 void
-BaseCompiler::pushReturned(const FunctionCall& call, ExprType type)
+BaseCompiler::pushReturnedIfNonVoid(const FunctionCall& call, ExprType type)
 {
     switch (type) {
       case ExprType::Void:
-        MOZ_CRASH("Compiler bug: attempt to push void return");
+        // There's no return value.  Do nothing.
         break;
       case ExprType::I32: {
         RegI32 rv = captureReturnedI32();
@@ -7828,8 +7838,7 @@ BaseCompiler::emitCall()
 
     popValueStackBy(numArgs);
 
-    if (!IsVoid(sig.ret()))
-        pushReturned(baselineCall, sig.ret());
+    pushReturnedIfNonVoid(baselineCall, sig.ret());
 
     return true;
 }
@@ -7875,8 +7884,7 @@ BaseCompiler::emitCallIndirect()
 
     popValueStackBy(numArgs);
 
-    if (!IsVoid(sig.ret()))
-        pushReturned(baselineCall, sig.ret());
+    pushReturnedIfNonVoid(baselineCall, sig.ret());
 
     return true;
 }
@@ -7934,7 +7942,7 @@ BaseCompiler::emitUnaryMathBuiltinCall(SymbolicAddress callee, ValType operandTy
 
     popValueStackBy(numArgs);
 
-    pushReturned(baselineCall, retType);
+    pushReturnedIfNonVoid(baselineCall, retType);
 
     return true;
 }
@@ -8820,7 +8828,7 @@ BaseCompiler::emitInstanceCall(uint32_t lineOrBytecode, const MIRTypeVector& sig
 
     popValueStackBy(numArgs);
 
-    pushReturned(baselineCall, retType);
+    pushReturnedIfNonVoid(baselineCall, retType);
 }
 
 bool
@@ -9184,6 +9192,52 @@ BaseCompiler::emitWake()
 
     return true;
 }
+
+#ifdef ENABLE_WASM_BULKMEM_OPS
+bool
+BaseCompiler::emitMemCopy()
+{
+    uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
+
+    Nothing nothing;
+    if (!iter_.readMemCopy(&nothing, &nothing, &nothing))
+        return false;
+
+    if (deadCode_)
+        return true;
+
+    emitInstanceCall(lineOrBytecode, SigPIII_, ExprType::Void, SymbolicAddress::MemCopy);
+
+    Label ok;
+    masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
+    trap(Trap::ThrowReported);
+    masm.bind(&ok);
+
+    return true;
+}
+
+bool
+BaseCompiler::emitMemFill()
+{
+    uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
+
+    Nothing nothing;
+    if (!iter_.readMemFill(&nothing, &nothing, &nothing))
+        return false;
+
+    if (deadCode_)
+        return true;
+
+    emitInstanceCall(lineOrBytecode, SigPIII_, ExprType::Void, SymbolicAddress::MemFill);
+
+    Label ok;
+    masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
+    trap(Trap::ThrowReported);
+    masm.bind(&ok);
+
+    return true;
+}
+#endif
 
 bool
 BaseCompiler::emitBody()
@@ -9757,23 +9811,23 @@ BaseCompiler::emitBody()
             break;
 #endif
 
-          // Numeric operations
-          case uint16_t(Op::NumericPrefix): {
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+          // "Miscellaneous" operations
+          case uint16_t(Op::MiscPrefix): {
             switch (op.b1) {
-              case uint16_t(NumericOp::I32TruncSSatF32):
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+              case uint16_t(MiscOp::I32TruncSSatF32):
                 CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI32<TRUNC_SATURATING>,
                                              ValType::F32, ValType::I32));
-              case uint16_t(NumericOp::I32TruncUSatF32):
+              case uint16_t(MiscOp::I32TruncUSatF32):
                 CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI32<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                                              ValType::F32, ValType::I32));
-              case uint16_t(NumericOp::I32TruncSSatF64):
+              case uint16_t(MiscOp::I32TruncSSatF64):
                 CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI32<TRUNC_SATURATING>,
                                              ValType::F64, ValType::I32));
-              case uint16_t(NumericOp::I32TruncUSatF64):
+              case uint16_t(MiscOp::I32TruncUSatF64):
                 CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI32<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                                              ValType::F64, ValType::I32));
-              case uint16_t(NumericOp::I64TruncSSatF32):
+              case uint16_t(MiscOp::I64TruncSSatF32):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
                 CHECK_NEXT(emitCalloutConversionOOM(emitConvertFloatingToInt64Callout,
                                                     SymbolicAddress::SaturatingTruncateDoubleToInt64,
@@ -9782,7 +9836,7 @@ BaseCompiler::emitBody()
                 CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI64<TRUNC_SATURATING>,
                                              ValType::F32, ValType::I64));
 #endif
-              case uint16_t(NumericOp::I64TruncUSatF32):
+              case uint16_t(MiscOp::I64TruncUSatF32):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
                 CHECK_NEXT(emitCalloutConversionOOM(emitConvertFloatingToInt64Callout,
                                                     SymbolicAddress::SaturatingTruncateDoubleToUint64,
@@ -9791,7 +9845,7 @@ BaseCompiler::emitBody()
                 CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI64<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                                              ValType::F32, ValType::I64));
 #endif
-              case uint16_t(NumericOp::I64TruncSSatF64):
+              case uint16_t(MiscOp::I64TruncSSatF64):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
                 CHECK_NEXT(emitCalloutConversionOOM(emitConvertFloatingToInt64Callout,
                                                     SymbolicAddress::SaturatingTruncateDoubleToInt64,
@@ -9800,7 +9854,7 @@ BaseCompiler::emitBody()
                 CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI64<TRUNC_SATURATING>,
                                              ValType::F64, ValType::I64));
 #endif
-              case uint16_t(NumericOp::I64TruncUSatF64):
+              case uint16_t(MiscOp::I64TruncUSatF64):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
                 CHECK_NEXT(emitCalloutConversionOOM(emitConvertFloatingToInt64Callout,
                                                     SymbolicAddress::SaturatingTruncateDoubleToUint64,
@@ -9809,13 +9863,17 @@ BaseCompiler::emitBody()
                 CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI64<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                                              ValType::F64, ValType::I64));
 #endif
+#endif // ENABLE_WASM_SATURATING_TRUNC_OPS
+#ifdef ENABLE_WASM_BULKMEM_OPS
+              case uint16_t(MiscOp::MemCopy):
+                CHECK_NEXT(emitMemCopy());
+              case uint16_t(MiscOp::MemFill):
+                CHECK_NEXT(emitMemFill());
+#endif // ENABLE_WASM_BULKMEM_OPS
               default:
-                return iter_.unrecognizedOpcode(&op);
-            }
-            break;
-#else
+                break;
+            } // switch (op.b1)
             return iter_.unrecognizedOpcode(&op);
-#endif
           }
 
           // Thread operations
@@ -10054,6 +10112,11 @@ BaseCompiler::init()
         return false;
     if (!SigPII_.append(MIRType::Pointer) || !SigPII_.append(MIRType::Int32) ||
         !SigPII_.append(MIRType::Int32))
+    {
+        return false;
+    }
+    if (!SigPIII_.append(MIRType::Pointer) || !SigPIII_.append(MIRType::Int32) ||
+        !SigPIII_.append(MIRType::Int32) || !SigPIII_.append(MIRType::Int32))
     {
         return false;
     }

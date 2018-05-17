@@ -25,7 +25,6 @@
 
 // Interfaces Needed
 #include "nsIBrowserDOMWindow.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIScriptGlobalObject.h"
@@ -272,9 +271,6 @@ public:
   OpenJS(const nsAString& aUrl, const nsAString& aName,
          const nsAString& aOptions, nsPIDOMWindowOuter **_retval);
 
-  // nsIDOMEventTarget
-  NS_DECL_NSIDOMEVENTTARGET
-
   virtual mozilla::EventListenerManager*
     GetExistingListenerManager() const override;
 
@@ -459,7 +455,7 @@ public:
   friend class WindowStateHolder;
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsGlobalWindowOuter,
-                                                                   nsIDOMEventTarget)
+                                                                   mozilla::dom::EventTarget)
 
   virtual bool TakeFocus(bool aFocus, uint32_t aFocusMethod) override;
   virtual void SetReadyForFocus() override;
@@ -607,7 +603,7 @@ public:
   nsPIDOMWindowOuter* GetScriptableParentOrNull() override;
   mozilla::dom::Element*
   GetFrameElementOuter(nsIPrincipal& aSubjectPrincipal);
-  already_AddRefed<nsIDOMElement> GetFrameElement() override;
+  mozilla::dom::Element* GetFrameElement() override;
   already_AddRefed<nsPIDOMWindowOuter>
   OpenOuter(const nsAString& aUrl,
             const nsAString& aName,
@@ -642,7 +638,7 @@ public:
                    mozilla::ErrorResult& aError);
   void PrintOuter(mozilla::ErrorResult& aError);
   mozilla::dom::Selection* GetSelectionOuter();
-  already_AddRefed<nsISelection> GetSelection() override;
+  already_AddRefed<mozilla::dom::Selection> GetSelection() override;
   already_AddRefed<mozilla::dom::MediaQueryList> MatchMediaOuter(
     const nsAString& aQuery,
     mozilla::dom::CallerType aCallerType);
@@ -696,7 +692,8 @@ public:
                       const nsAString& aOptions,
                       nsISupports* aExtraArgument,
                       nsPIDOMWindowOuter** _retval) override;
-  void UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason) override;
+  void UpdateCommands(const nsAString& anAction, mozilla::dom::Selection* aSel,
+                      int16_t aReason) override;
 
   already_AddRefed<nsPIDOMWindowOuter>
   GetContentInternal(mozilla::ErrorResult& aError,
@@ -983,9 +980,9 @@ public:
   nsIntSize DevToCSSIntPixels(nsIntSize px);
   nsIntSize CSSToDevIntPixels(nsIntSize px);
 
-  virtual void SetFocusedNode(nsIContent* aNode,
-                              uint32_t aFocusMethod = 0,
-                              bool aNeedsFocus = false) override;
+  virtual void SetFocusedElement(mozilla::dom::Element* aElement,
+                                 uint32_t aFocusMethod = 0,
+                                 bool aNeedsFocus = false) override;
 
   virtual uint32_t GetFocusMethod() override;
 
@@ -1174,13 +1171,13 @@ protected:
 inline nsISupports*
 ToSupports(nsGlobalWindowOuter *p)
 {
-    return static_cast<nsIDOMEventTarget*>(p);
+  return static_cast<mozilla::dom::EventTarget*>(p);
 }
 
 inline nsISupports*
 ToCanonicalSupports(nsGlobalWindowOuter *p)
 {
-    return static_cast<nsIDOMEventTarget*>(p);
+  return static_cast<mozilla::dom::EventTarget*>(p);
 }
 
 inline nsIGlobalObject*

@@ -16,8 +16,7 @@ XPIDL_SOURCES += [
     'mozIDOMWindow.idl',
     'nsIContentPolicy.idl',
     'nsIDocumentEncoder.idl',
-    'nsIDOMDOMRequest.idl',
-    'nsIDOMParser.idl',
+    'nsIDOMRequestService.idl',
     'nsIDroppedLinkHandler.idl',
     'nsIFrameLoaderOwner.idl',
     'nsIImageLoadingContent.idl',
@@ -26,11 +25,9 @@ XPIDL_SOURCES += [
     'nsIPerformanceMetrics.idl',
     'nsIRemoteWindowContext.idl',
     'nsIScriptChannel.idl',
-    'nsISelection.idl',
     'nsISelectionController.idl',
     'nsISelectionDisplay.idl',
     'nsISelectionListener.idl',
-    'nsISelectionPrivate.idl',
     'nsISlowScriptDebug.idl',
 ]
 
@@ -68,6 +65,7 @@ EXPORTS += [
     'nsDOMString.h',
     'nsDOMTokenList.h',
     'nsFocusManager.h',
+    'nsFrameLoader.h',  # Because binding headers include it.
     'nsFrameMessageManager.h',
     'nsGlobalWindow.h',  # Because binding headers include it.
     'nsGlobalWindowInner.h',  # Because binding headers include it.
@@ -82,7 +80,6 @@ EXPORTS += [
     'nsIDocument.h',
     'nsIDocumentInlines.h',
     'nsIDocumentObserver.h',
-    'nsIDOMClassInfo.h',
     'nsIGlobalObject.h',
     'nsImageLoadingContent.h',
     'nsIMutationObserver.h',
@@ -169,6 +166,7 @@ EXPORTS.mozilla.dom += [
     'DOMImplementation.h',
     'DOMIntersectionObserver.h',
     'DOMMatrix.h',
+    'DOMMozPromiseRequestHolder.h',
     'DOMParser.h',
     'DOMPoint.h',
     'DOMPrefs.h',
@@ -195,6 +193,7 @@ EXPORTS.mozilla.dom += [
     'MessageListenerManager.h',
     'MessageManagerGlobal.h',
     'MessageSender.h',
+    'MozQueryInterface.h',
     'NameSpaceConstants.h',
     'Navigator.h',
     'NodeInfo.h',
@@ -275,6 +274,7 @@ UNIFIED_SOURCES += [
     'MessageListenerManager.cpp',
     'MessageManagerGlobal.cpp',
     'MessageSender.cpp',
+    'MozQueryInterface.cpp',
     'Navigator.cpp',
     'NodeInfo.cpp',
     'NodeIterator.cpp',

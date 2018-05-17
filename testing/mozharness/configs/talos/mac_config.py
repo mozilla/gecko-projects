@@ -14,18 +14,11 @@ VENV_PATH = '%s/build/venv' % os.getcwd()
 
 config = {
     "log_name": "talos",
-    "buildbot_json_path": "buildprops.json",
     "installer_path": "installer.exe",
     "virtualenv_path": VENV_PATH,
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
     "title": os.uname()[1].lower().split('.')[0],
     "default_actions": [
         "clobber",
-        "read-buildbot-config",
         "download-and-extract",
         "populate-webroot",
         "create-virtualenv",

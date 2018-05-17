@@ -26,7 +26,6 @@
 #include "nsPluginsDir.h"
 #include "nsPluginLogging.h"
 
-#include "nsIDOMElement.h"
 #include "nsPIDOMWindow.h"
 #include "nsGlobalWindow.h"
 #include "nsIDocument.h"
@@ -38,7 +37,9 @@
 #include "nsIPrincipal.h"
 #include "nsWildCard.h"
 #include "nsContentUtils.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/ToJSValue.h"
 #include "nsIXULRuntime.h"
 #include "nsIXPConnect.h"
 
@@ -102,17 +103,17 @@ static NPNetscapeFuncs sBrowserFuncs = {
   _geturl,
   _posturl,
   _requestread,
-  nullptr,
-  nullptr,
-  nullptr,
+  nullptr, // _newstream, unimplemented
+  nullptr, // _write, unimplemented
+  nullptr, // _destroystream, unimplemented
   _status,
   _useragent,
   _memalloc,
   _memfree,
   _memflush,
   _reloadplugins,
-  _getJavaEnv,
-  _getJavaPeer,
+  nullptr, // _getJavaEnv, unimplemented
+  nullptr, // _getJavaPeer, unimplemented
   _geturlnotify,
   _posturlnotify,
   _getvalue,
@@ -713,7 +714,7 @@ _getpluginelement(NPP npp)
   if (!inst)
     return nullptr;
 
-  nsCOMPtr<nsIDOMElement> element;
+  RefPtr<dom::Element> element;
   inst->GetDOMElement(getter_AddRefs(element));
 
   if (!element)
@@ -733,10 +734,16 @@ _getpluginelement(NPP npp)
   nsCOMPtr<nsIXPConnect> xpc(do_GetService(nsIXPConnect::GetCID()));
   NS_ENSURE_TRUE(xpc, nullptr);
 
-  JS::RootedObject obj(cx);
-  xpc->WrapNative(cx, ::JS::CurrentGlobalOrNull(cx), element,
-                  NS_GET_IID(nsIDOMElement), obj.address());
-  NS_ENSURE_TRUE(obj, nullptr);
+  JS::RootedValue val(cx);
+  if (!ToJSValue(cx, element, &val)) {
+    return nullptr;
+  }
+
+  if (NS_WARN_IF(!val.isObject())) {
+    return nullptr;
+  }
+
+  JS::RootedObject obj(cx, &val.toObject());
 
   return nsJSObjWrapper::GetNewOrUsed(npp, obj);
 }
@@ -1451,18 +1458,13 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
       return NPERR_GENERIC_ERROR;
     }
 
-    nsCOMPtr<nsIDOMElement> element;
+    RefPtr<dom::Element> element;
     inst->GetDOMElement(getter_AddRefs(element));
     if (!element) {
       return NPERR_GENERIC_ERROR;
     }
 
-    nsCOMPtr<nsIContent> content(do_QueryInterface(element));
-    if (!content) {
-      return NPERR_GENERIC_ERROR;
-    }
-
-    nsIPrincipal* principal = content->NodePrincipal();
+    nsIPrincipal* principal = element->NodePrincipal();
 
     nsAutoString utf16Origin;
     res = nsContentUtils::GetUTFOrigin(principal, utf16Origin);
@@ -1700,14 +1702,6 @@ _requestread(NPStream *pstream, NPByteRange *rangeList)
   return NPERR_STREAM_NOT_SEEKABLE;
 }
 
-// Deprecated, only stubbed out
-void* /* OJI type: JRIEnv* */
-_getJavaEnv()
-{
-  NPN_PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("NPN_GetJavaEnv\n"));
-  return nullptr;
-}
-
 const char *
 _useragent(NPP npp)
 {
@@ -1739,14 +1733,6 @@ _memalloc (uint32_t size)
   }
   NPN_PLUGIN_LOG(PLUGIN_LOG_NOISY, ("NPN_MemAlloc: size=%d\n", size));
   return moz_xmalloc(size);
-}
-
-// Deprecated, only stubbed out
-void* /* OJI type: jref */
-_getJavaPeer(NPP npp)
-{
-  NPN_PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("NPN_GetJavaPeer: npp=%p\n", (void*)npp));
-  return nullptr;
 }
 
 void

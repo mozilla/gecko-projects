@@ -1249,25 +1249,25 @@ extern JS_PUBLIC_API(bool)
 JS_RefreshCrossCompartmentWrappers(JSContext* cx, JS::Handle<JSObject*> obj);
 
 /*
- * At any time, a JSContext has a current (possibly-nullptr) compartment.
- * Compartments are described in:
+ * At any time, a JSContext has a current (possibly-nullptr) realm.
+ * Realms are described in:
  *
  *   developer.mozilla.org/en-US/docs/SpiderMonkey/SpiderMonkey_compartments
  *
- * The current compartment of a context may be changed. The preferred way to do
- * this is with JSAutoCompartment:
+ * The current realm of a context may be changed. The preferred way to do
+ * this is with JSAutoRealm:
  *
  *   void foo(JSContext* cx, JSObject* obj) {
- *     // in some compartment 'c'
+ *     // in some realm 'r'
  *     {
- *       JSAutoCompartment ac(cx, obj);  // constructor enters
- *       // in the compartment of 'obj'
+ *       JSAutoRealm ar(cx, obj);  // constructor enters
+ *       // in the realm of 'obj'
  *     }                                 // destructor leaves
- *     // back in compartment 'c'
+ *     // back in realm 'r'
  *   }
  *
  * For more complicated uses that don't neatly fit in a C++ stack frame, the
- * compartment can entered and left using separate function calls:
+ * realm can be entered and left using separate function calls:
  *
  *   void foo(JSContext* cx, JSObject* obj) {
  *     // in 'oldCompartment'
@@ -1282,32 +1282,30 @@ JS_RefreshCrossCompartmentWrappers(JSContext* cx, JS::Handle<JSObject*> obj);
  * JS_EnterCompartment call may be passed as the 'oldCompartment' argument of
  * the corresponding JS_LeaveCompartment call.
  *
- * Entering a compartment roots the compartment and its global object for the
- * lifetime of the JSAutoCompartment.
+ * Entering a realm roots the realm and its global object for the lifetime of
+ * the JSAutoRealm.
  */
 
-class MOZ_RAII JS_PUBLIC_API(JSAutoCompartment)
+class MOZ_RAII JS_PUBLIC_API(JSAutoRealm)
 {
     JSContext* cx_;
     JSCompartment* oldCompartment_;
   public:
-    JSAutoCompartment(JSContext* cx, JSObject* target
-                      MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    JSAutoCompartment(JSContext* cx, JSScript* target
-                      MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    ~JSAutoCompartment();
+    JSAutoRealm(JSContext* cx, JSObject* target MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    JSAutoRealm(JSContext* cx, JSScript* target MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    ~JSAutoRealm();
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-class MOZ_RAII JS_PUBLIC_API(JSAutoNullableCompartment)
+class MOZ_RAII JS_PUBLIC_API(JSAutoNullableRealm)
 {
     JSContext* cx_;
     JSCompartment* oldCompartment_;
   public:
-    explicit JSAutoNullableCompartment(JSContext* cx, JSObject* targetOrNull
-                                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    ~JSAutoNullableCompartment();
+    explicit JSAutoNullableRealm(JSContext* cx, JSObject* targetOrNull
+                                 MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    ~JSAutoNullableRealm();
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
@@ -3225,39 +3223,39 @@ JS_NewArrayBufferWithContents(JSContext* cx, size_t nbytes, void* contents);
 
 namespace JS {
 
-using BufferContentsRefFunc = void (*)(void* contents, void* userData);
+using BufferContentsFreeFunc = void (*)(void* contents, void* userData);
 
 }  /* namespace JS */
 
 /**
- * Create a new array buffer with the given contents. The ref and unref
- * functions should increment or decrement the reference count of the contents.
- * These functions allow array buffers to be used with embedder objects that
- * use reference counting, for example. The contents must not be modified by
- * any reference holders, internal or external.
+ * Create a new array buffer with the given contents. The contents must not be
+ * modified by any other code, internal or external.
  *
- * On success, the new array buffer takes a reference, and |ref(contents,
- * refUserData)| will be called. When the array buffer is ready to be disposed
- * of, |unref(contents, refUserData)| will be called to release the array
- * buffer's reference on the contents.
+ * When the array buffer is ready to be disposed of, `freeFunc(contents,
+ * freeUserData)` will be called to release the array buffer's reference on the
+ * contents.
  *
- * The ref and unref functions must not call any JSAPI functions that could
- * cause a garbage collection.
+ * `freeFunc()` must not call any JSAPI functions that could cause a garbage
+ * collection.
  *
- * The ref function is optional. If it is nullptr, the caller is responsible
+ * The caller must keep the buffer alive until `freeFunc()` is called, or, if
+ * `freeFunc` is null, until the JSRuntime is destroyed.
+ *
+ * The caller must not access the buffer on other threads. The JS engine will
+ * not allow the buffer to be transferred to other threads. If you try to
+ * transfer an external ArrayBuffer to another thread, the data is copied to a
+ * new malloc buffer. `freeFunc()` must be threadsafe, and may be called from
+ * any thread.
+ *
+ * This allows array buffers to be used with embedder objects that use reference
+ * counting, for example. In that case the caller is responsible
  * for incrementing the reference count before passing the contents to this
  * function. This also allows using non-reference-counted contents that must be
  * freed with some function other than free().
- *
- * The ref function may also be called in case the buffer is cloned in some
- * way. Currently this is not used, but it may be in the future. If the ref
- * function is nullptr, any operation where an extra reference would otherwise
- * be taken, will either copy the data, or throw an exception.
  */
 extern JS_PUBLIC_API(JSObject*)
 JS_NewExternalArrayBuffer(JSContext* cx, size_t nbytes, void* contents,
-                          JS::BufferContentsRefFunc ref, JS::BufferContentsRefFunc unref,
-                          void* refUserData = nullptr);
+                          JS::BufferContentsFreeFunc freeFunc, void* freeUserData = nullptr);
 
 /**
  * Create a new array buffer with the given contents.  The array buffer does not take ownership of
@@ -3638,7 +3636,8 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
         scriptSourceOffset(0),
         isRunOnce(false),
         nonSyntacticScope(false),
-        noScriptRval(false)
+        noScriptRval(false),
+        allowSyntaxParser(true)
     { }
 
     // Set all POD options (those not requiring reference counts, copies,
@@ -3675,6 +3674,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
     bool isRunOnce;
     bool nonSyntacticScope;
     bool noScriptRval;
+    bool allowSyntaxParser;
 
   private:
     void operator=(const ReadOnlyCompileOptions&) = delete;
@@ -3742,6 +3742,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     OwningCompileOptions& setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
     OwningCompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     OwningCompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
+    OwningCompileOptions& setAllowSyntaxParser(bool clp) { allowSyntaxParser = clp; return *this; }
     OwningCompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
     OwningCompileOptions& setNonSyntacticScope(bool n) { nonSyntacticScope = n; return *this; }
     OwningCompileOptions& setIntroductionType(const char* t) { introductionType = t; return *this; }
@@ -3757,6 +3758,8 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
         hasIntroductionInfo = true;
         return true;
     }
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
   private:
     void operator=(const CompileOptions& rhs) = delete;
@@ -3835,6 +3838,7 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) final : public ReadOnlyCompi
     CompileOptions& setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
     CompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
+    CompileOptions& setAllowSyntaxParser(bool clp) { allowSyntaxParser = clp; return *this; }
     CompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
     CompileOptions& setNonSyntacticScope(bool n) { nonSyntacticScope = n; return *this; }
     CompileOptions& setIntroductionType(const char* t) { introductionType = t; return *this; }
@@ -3914,7 +3918,7 @@ CanDecodeOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t 
  * callback will eventually be invoked with the specified data and a token
  * for the compilation. The callback will be invoked while off thread,
  * so must ensure that its operations are thread safe. Afterwards, one of the
- * following functions must be invoked on the runtime's active thread:
+ * following functions must be invoked on the runtime's main thread:
  *
  * - FinishOffThreadScript, to get the result script (or nullptr on failure).
  * - CancelOffThreadScript, to free the resources without creating a script.
@@ -3930,10 +3934,10 @@ CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
                  OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSScript*)
-FinishOffThreadScript(JSContext* cx, void* token);
+FinishOffThreadScript(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(void)
-CancelOffThreadScript(JSContext* cx, void* token);
+CancelOffThreadScript(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(bool)
 CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -3941,10 +3945,10 @@ CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
                        OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSObject*)
-FinishOffThreadModule(JSContext* cx, void* token);
+FinishOffThreadModule(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(void)
-CancelOffThreadModule(JSContext* cx, void* token);
+CancelOffThreadModule(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(bool)
 DecodeOffThreadScript(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -3957,10 +3961,10 @@ DecodeOffThreadScript(JSContext* cx, const ReadOnlyCompileOptions& options,
                       OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSScript*)
-FinishOffThreadScriptDecoder(JSContext* cx, void* token);
+FinishOffThreadScriptDecoder(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(void)
-CancelOffThreadScriptDecoder(JSContext* cx, void* token);
+CancelOffThreadScriptDecoder(JSContext* cx, OffThreadToken* token);
 
 extern JS_PUBLIC_API(bool)
 DecodeMultiOffThreadScripts(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -3968,10 +3972,11 @@ DecodeMultiOffThreadScripts(JSContext* cx, const ReadOnlyCompileOptions& options
                             OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(bool)
-FinishMultiOffThreadScriptsDecoder(JSContext* cx, void* token, JS::MutableHandle<JS::ScriptVector> scripts);
+FinishMultiOffThreadScriptsDecoder(JSContext* cx, OffThreadToken* token,
+                                   JS::MutableHandle<JS::ScriptVector> scripts);
 
 extern JS_PUBLIC_API(void)
-CancelMultiOffThreadScriptsDecoder(JSContext* cx, void* token);
+CancelMultiOffThreadScriptsDecoder(JSContext* cx, OffThreadToken* token);
 
 /**
  * Compile a function with envChain plus the global as its scope chain.
@@ -4136,17 +4141,19 @@ extern JS_PUBLIC_API(bool)
 Evaluate(JSContext* cx, const ReadOnlyCompileOptions& options,
          const char* filename, JS::MutableHandleValue rval);
 
-/**
- * Get the HostResolveImportedModule hook for a global.
- */
-extern JS_PUBLIC_API(JSFunction*)
-GetModuleResolveHook(JSContext* cx);
+using ModuleResolveHook = JSObject* (*)(JSContext*, HandleObject, HandleString);
 
 /**
- * Set the HostResolveImportedModule hook for a global to the given function.
+ * Get the HostResolveImportedModule hook for the runtime.
+ */
+extern JS_PUBLIC_API(ModuleResolveHook)
+GetModuleResolveHook(JSRuntime* rt);
+
+/**
+ * Set the HostResolveImportedModule hook for the runtime to the given function.
  */
 extern JS_PUBLIC_API(void)
-SetModuleResolveHook(JSContext* cx, JS::HandleFunction func);
+SetModuleResolveHook(JSRuntime* rt, ModuleResolveHook func);
 
 /**
  * Parse the given source buffer as a module in the scope of the current global
@@ -4222,6 +4229,33 @@ extern JS_PUBLIC_API(JSScript*)
 GetModuleScript(JS::HandleObject moduleRecord);
 
 } /* namespace JS */
+
+#if defined(JS_BUILD_BINAST)
+
+namespace JS {
+
+extern JS_PUBLIC_API(JSScript*)
+DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+             FILE* file);
+
+extern JS_PUBLIC_API(JSScript*)
+DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+             const uint8_t* buf, size_t length);
+
+extern JS_PUBLIC_API(bool)
+CanDecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t length);
+
+extern JS_PUBLIC_API(bool)
+DecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
+                      const uint8_t* buf, size_t length,
+                      OffThreadCompileCallback callback, void* callbackData);
+
+extern JS_PUBLIC_API(JSScript*)
+FinishOffThreadBinASTDecode(JSContext* cx, OffThreadToken* token);
+
+} /* namespace JS */
+
+#endif /* JS_BUILD_BINAST */
 
 extern JS_PUBLIC_API(bool)
 JS_CheckForInterrupt(JSContext* cx);
@@ -4713,9 +4747,6 @@ JS_StringEqualsAscii(JSContext* cx, JSString* str, const char* asciiBytes, bool*
 extern JS_PUBLIC_API(size_t)
 JS_PutEscapedString(JSContext* cx, char* buffer, size_t size, JSString* str, char quote);
 
-extern JS_PUBLIC_API(bool)
-JS_FileEscapedString(FILE* fp, JSString* str, char quote);
-
 /*
  * Extracting string characters and length.
  *
@@ -5015,6 +5046,7 @@ enum class SymbolCode : uint32_t {
     JS_FOR_EACH_WELL_KNOWN_SYMBOL(JS_DEFINE_SYMBOL_ENUM)  // SymbolCode::iterator, etc.
 #undef JS_DEFINE_SYMBOL_ENUM
     Limit,
+    WellKnownAPILimit = 0x80000000, // matches JS::shadow::Symbol::WellKnownAPILimit for inline use
     InSymbolRegistry = 0xfffffffe,  // created by Symbol.for() or JS::GetSymbolFor()
     UniqueSymbol = 0xffffffff       // created by Symbol() or JS::NewSymbol()
 };
@@ -5302,7 +5334,7 @@ JS_ReportErrorFlagsAndNumberUC(JSContext* cx, unsigned flags,
 /**
  * Complain when out of memory.
  */
-extern JS_PUBLIC_API(void)
+extern MOZ_COLD JS_PUBLIC_API(void)
 JS_ReportOutOfMemory(JSContext* cx);
 
 /**
@@ -6044,7 +6076,7 @@ DecodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer, JS::MutableHan
 
 // Register an encoder on the given script source, such that all functions can
 // be encoded as they are parsed. This strategy is used to avoid blocking the
-// active thread in a non-interruptible way.
+// main thread in a non-interruptible way.
 //
 // The |script| argument of |StartIncrementalEncoding| and
 // |FinishIncrementalEncoding| should be the top-level script returned either as
@@ -6242,7 +6274,7 @@ CompiledWasmModuleAssumptionsMatch(PRFileDesc* compiled, BuildIdCharVector&& bui
 
 extern JS_PUBLIC_API(RefPtr<WasmModule>)
 DeserializeWasmModule(PRFileDesc* bytecode, PRFileDesc* maybeCompiled, BuildIdCharVector&& buildId,
-                      JS::UniqueChars filename, unsigned line, unsigned column);
+                      JS::UniqueChars filename, unsigned line);
 
 /**
  * Convenience class for imitating a JS level for-of loop. Typical usage:

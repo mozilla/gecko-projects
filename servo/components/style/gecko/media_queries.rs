@@ -7,13 +7,13 @@
 use app_units::AU_PER_PX;
 use app_units::Au;
 use context::QuirksMode;
-use cssparser::{BasicParseErrorKind, Parser, Token, RGBA};
+use cssparser::{BasicParseErrorKind, Parser, RGBA};
 use euclid::Size2D;
 use euclid::TypedScale;
 use gecko::values::{convert_nscolor_to_rgba, convert_rgba_to_nscolor};
 use gecko_bindings::bindings;
 use gecko_bindings::structs;
-use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSUnit, nsCSSValue};
+use gecko_bindings::structs::{nsCSSKTableEntry, nsCSSKeyword, nsCSSUnit, nsCSSValue};
 use gecko_bindings::structs::{nsMediaFeature, nsMediaFeature_RangeType};
 use gecko_bindings::structs::{nsMediaFeature_ValueType, nsPresContext};
 use gecko_bindings::structs::RawGeckoPresContextOwned;
@@ -32,7 +32,7 @@ use stylesheets::Origin;
 use values::{serialize_atom_identifier, CSSFloat, CustomIdent, KeyframesName};
 use values::computed::{self, ToComputedValue};
 use values::computed::font::FontSize;
-use values::specified::{Integer, Length, Number};
+use values::specified::{Integer, Length, Number, Resolution};
 
 /// The `Device` in Gecko wraps a pres context, has a default values computed,
 /// and contains all the viewport rule state.
@@ -286,53 +286,6 @@ impl PartialEq for Expression {
     }
 }
 
-/// A resolution.
-#[derive(Clone, Debug, PartialEq, ToCss)]
-pub enum Resolution {
-    /// Dots per inch.
-    #[css(dimension)]
-    Dpi(CSSFloat),
-    /// Dots per pixel.
-    #[css(dimension)]
-    Dppx(CSSFloat),
-    /// Dots per centimeter.
-    #[css(dimension)]
-    Dpcm(CSSFloat),
-}
-
-impl Resolution {
-    fn to_dpi(&self) -> CSSFloat {
-        match *self {
-            Resolution::Dpi(f) => f,
-            Resolution::Dppx(f) => f * 96.0,
-            Resolution::Dpcm(f) => f * 2.54,
-        }
-    }
-
-    fn parse<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
-        let location = input.current_source_location();
-        let (value, unit) = match *input.next()? {
-            Token::Dimension {
-                value, ref unit, ..
-            } => (value, unit),
-            ref t => return Err(location.new_unexpected_token_error(t.clone())),
-        };
-
-        if value <= 0. {
-            return Err(location.new_custom_error(StyleParseErrorKind::UnspecifiedError));
-        }
-
-        (match_ignore_ascii_case! { &unit,
-            "dpi" => Ok(Resolution::Dpi(value)),
-            "dppx" => Ok(Resolution::Dppx(value)),
-            "dpcm" => Ok(Resolution::Dpcm(value)),
-            _ => Err(())
-        }).map_err(|()| {
-            location.new_custom_error(StyleParseErrorKind::UnexpectedDimension(unit.clone()))
-        })
-    }
-}
-
 /// A value found or expected in a media expression.
 ///
 /// FIXME(emilio): How should calc() serialize in the Number / Integer /
@@ -479,7 +432,7 @@ where
 }
 
 unsafe fn find_in_table<F>(
-    mut current_entry: *const nsCSSProps_KTableEntry,
+    mut current_entry: *const nsCSSKTableEntry,
     mut f: F,
 ) -> Option<(nsCSSKeyword, i16)>
 where
@@ -535,7 +488,7 @@ fn parse_feature_value<'i, 't>(
             MediaExpressionValue::IntRatio(a.value() as u32, b.value() as u32)
         },
         nsMediaFeature_ValueType::eResolution => {
-            MediaExpressionValue::Resolution(Resolution::parse(input)?)
+            MediaExpressionValue::Resolution(Resolution::parse(context, input)?)
         },
         nsMediaFeature_ValueType::eEnumerated => {
             let location = input.current_source_location();
@@ -544,7 +497,7 @@ fn parse_feature_value<'i, 't>(
                 bindings::Gecko_LookupCSSKeyword(keyword.as_bytes().as_ptr(), keyword.len() as u32)
             };
 
-            let first_table_entry: *const nsCSSProps_KTableEntry =
+            let first_table_entry: *const nsCSSKTableEntry =
                 unsafe { *feature.mData.mKeywordTable.as_ref() };
 
             let value = match unsafe { find_in_table(first_table_entry, |kw, _| kw == keyword) } {

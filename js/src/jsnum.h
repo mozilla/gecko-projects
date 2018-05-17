@@ -201,16 +201,6 @@ num_toString(JSContext* cx, unsigned argc, Value* vp);
 extern MOZ_MUST_USE bool
 num_valueOf(JSContext* cx, unsigned argc, Value* vp);
 
-static MOZ_ALWAYS_INLINE bool
-ValueFitsInInt32(const Value& v, int32_t* pi)
-{
-    if (v.isInt32()) {
-        *pi = v.toInt32();
-        return true;
-    }
-    return v.isDouble() && mozilla::NumberIsInt32(v.toDouble(), pi);
-}
-
 /*
  * Returns true if the given value is definitely an index: that is, the value
  * is a number that's an unsigned 32-bit integer.
@@ -229,7 +219,7 @@ IsDefinitelyIndex(const Value& v, uint32_t* indexp)
     }
 
     int32_t i;
-    if (v.isDouble() && mozilla::NumberIsInt32(v.toDouble(), &i) && i >= 0) {
+    if (v.isDouble() && mozilla::NumberEqualsInt32(v.toDouble(), &i) && i >= 0) {
         *indexp = uint32_t(i);
         return true;
     }
@@ -271,8 +261,21 @@ ToInteger(JSContext* cx, HandleValue v, double* dp)
  *
  * The returned index will always be in the range 0 <= *index <= 2^53-1.
  */
-MOZ_MUST_USE bool
-ToIndex(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index);
+extern MOZ_MUST_USE bool
+ToIndexSlow(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index);
+
+static MOZ_MUST_USE inline bool
+ToIndex(JSContext* cx, JS::HandleValue v, const unsigned errorNumber, uint64_t* index)
+{
+    if (v.isInt32()) {
+        int32_t i = v.toInt32();
+        if (i >= 0) {
+            *index = uint64_t(i);
+            return true;
+        }
+    }
+    return ToIndexSlow(cx, v, errorNumber, index);
+}
 
 static MOZ_MUST_USE inline bool
 ToIndex(JSContext* cx, JS::HandleValue v, uint64_t* index)

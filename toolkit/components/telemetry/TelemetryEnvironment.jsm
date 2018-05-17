@@ -214,6 +214,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["devtools.debugger.enabled", {what: RECORD_PREF_VALUE}],
   ["devtools.debugger.remote-enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
+  ["dom.ipc.plugins.sandbox-level.flash", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
   ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
@@ -512,7 +513,7 @@ EnvironmentAddonBuilder.prototype = {
     this._pendingTask = (async () => {
       try {
         // Gather initial addons details
-        await this._updateAddons();
+        await this._updateAddons(true);
 
         if (!this._environment._addonsAreFull) {
           // The addon database has not been loaded, so listen for the event
@@ -627,11 +628,15 @@ EnvironmentAddonBuilder.prototype = {
    * This should only be called from _pendingTask; otherwise we risk
    * running this during addon manager shutdown.
    *
+   * @param {boolean} [atStartup]
+   *        True if this is the first check we're performing at startup. In that
+   *        situation, we defer some more expensive initialization.
+   *
    * @returns Promise<Object> This returns a Promise resolved with a status object with the following members:
    *   changed - Whether the environment changed.
    *   oldEnvironment - Only set if a change occured, contains the environment data before the change.
    */
-  async _updateAddons() {
+  async _updateAddons(atStartup) {
     this._environment._log.trace("_updateAddons");
     let personaId = null;
     let theme = LightweightThemeManager.currentTheme;
@@ -642,9 +647,8 @@ EnvironmentAddonBuilder.prototype = {
     let addons = {
       activeAddons: await this._getActiveAddons(),
       theme: await this._getActiveTheme(),
-      activePlugins: this._getActivePlugins(),
-      activeGMPlugins: await this._getActiveGMPlugins(),
-      activeExperiment: {},
+      activePlugins: this._getActivePlugins(atStartup),
+      activeGMPlugins: await this._getActiveGMPlugins(atStartup),
       persona: personaId,
     };
 
@@ -751,12 +755,17 @@ EnvironmentAddonBuilder.prototype = {
 
   /**
    * Get the plugins data in object form.
+   *
+   * @param {boolean} [atStartup]
+   *        True if this is the first check we're performing at startup. In that
+   *        situation, we defer some more expensive initialization.
+   *
    * @return Object containing the plugins data.
    */
-  _getActivePlugins() {
+  _getActivePlugins(atStartup) {
     // If we haven't yet loaded the blocklist, pass back dummy data for now,
     // and add an observer to update this data as soon as we get it.
-    if (!Services.blocklist.isLoaded) {
+    if (atStartup || !Services.blocklist.isLoaded) {
       if (!this._blocklistObserverAdded) {
         Services.obs.addObserver(this, BLOCKLIST_LOADED_TOPIC);
         this._blocklistObserverAdded = true;
@@ -803,21 +812,26 @@ EnvironmentAddonBuilder.prototype = {
 
   /**
    * Get the GMPlugins data in object form.
+   *
+   * @param {boolean} [atStartup]
+   *        True if this is the first check we're performing at startup. In that
+   *        situation, we defer some more expensive initialization.
+   *
    * @return Object containing the GMPlugins data.
    *
    * This should only be called from _pendingTask; otherwise we risk
    * running this during addon manager shutdown.
    */
-  async _getActiveGMPlugins() {
+  async _getActiveGMPlugins(atStartup) {
     // If we haven't yet loaded the blocklist, pass back dummy data for now,
     // and add an observer to update this data as soon as we get it.
-    if (!Services.blocklist.isLoaded) {
+    if (atStartup || !Services.blocklist.isLoaded) {
       if (!this._blocklistObserverAdded) {
         Services.obs.addObserver(this, BLOCKLIST_LOADED_TOPIC);
         this._blocklistObserverAdded = true;
       }
       return {
-        "dummy-gmp": {version: "0.1", userDisabled: false, applyBackgroundUpdates: true}
+        "dummy-gmp": {version: "0.1", userDisabled: false, applyBackgroundUpdates: 1}
       };
     }
     // Request plugins, asynchronously.
@@ -1102,7 +1116,7 @@ EnvironmentCache.prototype = {
     throw new Error(`Unexpected preference type ("${prefType}") for "${pref}".`);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference]),
 
   /**
    * Start watching the preferences.

@@ -42,14 +42,6 @@ Object.defineProperty(this, "WebConsoleUtils", {
   enumerable: true
 });
 
-Object.defineProperty(this, "NetworkHelper", {
-  get: function() {
-    return require("devtools/shared/webconsole/network-helper");
-  },
-  configurable: true,
-  enumerable: true
-});
-
 this.EXPORTED_SYMBOLS = ["VariablesView", "escapeHTML"];
 
 /**
@@ -767,7 +759,6 @@ VariablesView.prototype = {
     let currFocusedItem = null;
 
     do {
-      commandDispatcher.suppressFocusScroll = true;
       commandDispatcher[aDirection]();
 
       // Make sure the newly focused item is a part of this view.

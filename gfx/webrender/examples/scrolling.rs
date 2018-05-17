@@ -34,12 +34,12 @@ impl Example for App {
         builder.push_stacking_context(
             &info,
             None,
-            ScrollPolicy::Scrollable,
             None,
             TransformStyle::Flat,
             None,
             MixBlendMode::Normal,
             Vec::new(),
+            GlyphRasterSpace::Screen,
         );
 
         if true {
@@ -49,12 +49,12 @@ impl Example for App {
             builder.push_stacking_context(
                 &LayoutPrimitiveInfo::new((10, 10).by(0, 0)),
                 None,
-                ScrollPolicy::Scrollable,
                 None,
                 TransformStyle::Flat,
                 None,
                 MixBlendMode::Normal,
                 Vec::new(),
+                GlyphRasterSpace::Screen,
             );
             // set the scrolling clip
             let clip_id = builder.define_scroll_frame(

@@ -35,7 +35,6 @@ from ..frontend.data import (
     ComputedFlags,
     ConfigFileSubstitution,
     ContextDerived,
-    ContextWrapped,
     Defines,
     DirectoryTraversal,
     ExternalLibrary,
@@ -51,7 +50,6 @@ from ..frontend.data import (
     HostSources,
     InstallationTarget,
     JARManifest,
-    JavaJarData,
     Library,
     Linkable,
     LocalInclude,
@@ -64,7 +62,7 @@ from ..frontend.data import (
     RustLibrary,
     HostRustLibrary,
     RustProgram,
-    RustTest,
+    RustTests,
     SharedLibrary,
     SimpleProgram,
     Sources,
@@ -535,6 +533,10 @@ class RecursiveMakeBackend(CommonBackend):
 
             first_output = outputs[0]
             dep_file = "%s.pp" % first_output
+            # The stub target file needs to go in MDDEPDIR so that it doesn't
+            # get written into generated Android resource directories, breaking
+            # Gradle tooling and/or polluting the Android packages.
+            stub_file = "$(MDDEPDIR)/%s.stub" % first_output
 
             if obj.inputs:
                 if obj.localized:
@@ -564,21 +566,6 @@ class RecursiveMakeBackend(CommonBackend):
             if needs_AB_rCD:
                 backend_file.write_once('include $(topsrcdir)/config/AB_rCD.mk\n')
 
-            # If we're doing this during export that means we need it during
-            # compile, but if we have an artifact build we don't run compile,
-            # so we can skip it altogether or let the rule run as the result of
-            # something depending on it.
-            if tier != 'export' or not self.environment.is_artifact_build:
-                if not needs_AB_rCD:
-                    # Android localized resources have special Makefile
-                    # handling.
-                    backend_file.write('%s:: %s\n' % (tier, first_output))
-            for output in outputs:
-                if output != first_output:
-                    backend_file.write('%s: %s ;\n' % (output, first_output))
-                backend_file.write('GARBAGE += %s\n' % output)
-            backend_file.write('EXTRA_MDDEPEND_FILES += %s\n' % dep_file)
-
             force = ''
             if obj.force:
                 force = ' FORCE'
@@ -586,11 +573,28 @@ class RecursiveMakeBackend(CommonBackend):
                 force = ' $(if $(IS_LANGUAGE_REPACK),FORCE)'
 
             if obj.script:
-                backend_file.write("""{output}: {script}{inputs}{backend}{force}
-\t$(REPORT_BUILD)
-\t$(call py_action,file_generate,{locale}{script} {method} {output} $(MDDEPDIR)/{dep_file}{inputs}{flags})
+                # If we're doing this during export that means we need it during
+                # compile, but if we have an artifact build we don't run compile,
+                # so we can skip it altogether or let the rule run as the result of
+                # something depending on it.
+                if tier != 'export' or not self.environment.is_artifact_build:
+                    if not needs_AB_rCD:
+                        # Android localized resources have special Makefile
+                        # handling.
+                        backend_file.write('%s:: %s\n' % (tier, stub_file))
+                for output in outputs:
+                    backend_file.write('%s: %s ;\n' % (output, stub_file))
+                    backend_file.write('GARBAGE += %s\n' % output)
+                backend_file.write('GARBAGE += %s\n' % stub_file)
+                backend_file.write('EXTRA_MDDEPEND_FILES += %s\n' % dep_file)
 
-""".format(output=first_output,
+                backend_file.write("""{stub}: {script}{inputs}{backend}{force}
+\t$(REPORT_BUILD)
+\t$(call py_action,file_generate,{locale}{script} {method} {output} $(MDDEPDIR)/{dep_file} {stub}{inputs}{flags})
+\t@$(TOUCH) $@
+
+""".format(stub=stub_file,
+           output=first_output,
            dep_file=dep_file,
            inputs=' ' + ' '.join(inputs) if inputs else '',
            flags=' ' + ' '.join(shell_quote(f) for f in obj.flags) if obj.flags else '',
@@ -620,8 +624,8 @@ class RecursiveMakeBackend(CommonBackend):
             build_target = self._build_target_for_obj(obj)
             self._compile_graph[build_target]
 
-        elif isinstance(obj, RustTest):
-            self._process_rust_test(obj, backend_file)
+        elif isinstance(obj, RustTests):
+            self._process_rust_tests(obj, backend_file)
 
         elif isinstance(obj, Program):
             self._process_program(obj, backend_file)
@@ -652,17 +656,6 @@ class RecursiveMakeBackend(CommonBackend):
 
         elif isinstance(obj, InstallationTarget):
             self._process_installation_target(obj, backend_file)
-
-        elif isinstance(obj, ContextWrapped):
-            # Process a rich build system object from the front-end
-            # as-is.  Please follow precedent and handle CamelCaseData
-            # in a function named _process_camel_case_data.  At some
-            # point in the future, this unwrapping process may be
-            # automated.
-            if isinstance(obj.wrapped, JavaJarData):
-                self._process_java_jar_data(obj.wrapped, backend_file)
-            else:
-                return False
 
         elif isinstance(obj, RustLibrary):
             self.backend_input_files.add(obj.cargo_file)
@@ -1052,8 +1045,6 @@ class RecursiveMakeBackend(CommonBackend):
             build_files.add_optional_exists(p)
 
         for idl in manager.idls.values():
-            self._install_manifests['dist_idl'].add_link(idl['source'],
-                idl['basename'])
             self._install_manifests['dist_include'].add_optional_exists('%s.h'
                 % idl['root'])
 
@@ -1065,9 +1056,11 @@ class RecursiveMakeBackend(CommonBackend):
         xpt_modules = sorted(modules.keys())
 
         mk = Makefile()
+        all_directories = set()
 
         for module in xpt_modules:
-            install_target, sources = modules[module]
+            sources, directories = modules[module]
+            all_directories |= directories
             deps = sorted(sources)
 
             # It may seem strange to have the .idl files listed as
@@ -1083,6 +1076,8 @@ class RecursiveMakeBackend(CommonBackend):
             mk.add_statement('%s_deps = %s' % (module, ' '.join(deps)))
 
             build_files.add_optional_exists('%s.xpt' % module)
+
+        mk.add_statement('all_idl_dirs = %s' % ' '.join(sorted(all_directories)))
 
         rules = StringIO()
         mk.dump(rules, removal_guard=False)
@@ -1131,10 +1126,10 @@ class RecursiveMakeBackend(CommonBackend):
                                         'HOST_RUST_PROGRAMS',
                                         'HOST_RUST_CARGO_PROGRAMS')
 
-    def _process_rust_test(self, obj, backend_file):
+    def _process_rust_tests(self, obj, backend_file):
         self._no_skip['check'].add(backend_file.relobjdir)
         backend_file.write_once('CARGO_FILE := $(srcdir)/Cargo.toml\n')
-        backend_file.write_once('RUST_TEST := %s\n' % obj.name)
+        backend_file.write_once('RUST_TESTS := %s\n' % ' '.join(obj.names))
         backend_file.write_once('RUST_TEST_FEATURES := %s\n' % ' '.join(obj.features))
 
     def _process_simple_program(self, obj, backend_file):
@@ -1294,8 +1289,9 @@ class RecursiveMakeBackend(CommonBackend):
             self.environment.topobjdir), obj.KIND)
 
     def _process_linked_libraries(self, obj, backend_file):
-        def pretty_relpath(lib):
-            return '$(DEPTH)/%s' % mozpath.relpath(lib.objdir, topobjdir)
+        def pretty_relpath(lib, name):
+            return os.path.normpath(mozpath.join(mozpath.relpath(lib.objdir, obj.objdir),
+                                                 name))
 
         topobjdir = mozpath.normsep(obj.topobjdir)
         # This will create the node even if there aren't any linked libraries.
@@ -1366,11 +1362,11 @@ class RecursiveMakeBackend(CommonBackend):
                 write_obj_deps(obj_target, objs_ref, pgo_objs_ref)
 
         for lib in shared_libs:
-            backend_file.write_once('SHARED_LIBS += %s/%s\n' %
-                                    (pretty_relpath(lib), lib.import_name))
+            backend_file.write_once('SHARED_LIBS += %s\n' %
+                                    pretty_relpath(lib, lib.import_name))
         for lib in static_libs:
-            backend_file.write_once('STATIC_LIBS += %s/%s\n' %
-                                    (pretty_relpath(lib), lib.import_name))
+            backend_file.write_once('STATIC_LIBS += %s\n' %
+                                    pretty_relpath(lib, lib.import_name))
         for lib in os_libs:
             if obj.KIND == 'target':
                 backend_file.write_once('OS_LIBS += %s\n' % lib)
@@ -1382,8 +1378,8 @@ class RecursiveMakeBackend(CommonBackend):
                 self._compile_graph[build_target].add(
                     self._build_target_for_obj(lib))
             if isinstance(lib, (HostLibrary, HostRustLibrary)):
-                backend_file.write_once('HOST_LIBS += %s/%s\n' %
-                                        (pretty_relpath(lib), lib.import_name))
+                backend_file.write_once('HOST_LIBS += %s\n' %
+                                        pretty_relpath(lib, lib.import_name))
 
         # We have to link any Rust libraries after all intermediate static
         # libraries have been listed to ensure that the Rust libraries are
@@ -1408,8 +1404,8 @@ class RecursiveMakeBackend(CommonBackend):
         # TODO: see bug 1310063 for checking dependencies are set up correctly.
 
         direct_linked = direct_linked[0]
-        backend_file.write('RUST_STATIC_LIB_FOR_SHARED_LIB := %s/%s\n' %
-                           (pretty_relpath(direct_linked), direct_linked.import_name))
+        backend_file.write('RUST_STATIC_LIB_FOR_SHARED_LIB := %s\n' %
+                           pretty_relpath(direct_linked, direct_linked.import_name))
 
     def _process_final_target_files(self, obj, files, backend_file):
         target = obj.install_target

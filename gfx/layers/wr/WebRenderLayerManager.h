@@ -93,7 +93,7 @@ public:
 
   virtual void SetLayerObserverEpoch(uint64_t aLayerObserverEpoch) override;
 
-  virtual void DidComposite(uint64_t aTransactionId,
+  virtual void DidComposite(TransactionId aTransactionId,
                             const mozilla::TimeStamp& aCompositeStart,
                             const mozilla::TimeStamp& aCompositeEnd) override;
 
@@ -102,6 +102,7 @@ public:
   virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() override;
 
   virtual void SetTransactionIdAllocator(TransactionIdAllocator* aAllocator) override;
+  virtual TransactionId GetLastTransactionId() override;
 
   virtual void AddDidCompositeObserver(DidCompositeObserver* aObserver) override;
   virtual void RemoveDidCompositeObserver(DidCompositeObserver* aObserver) override;
@@ -152,9 +153,6 @@ public:
   const APZTestData& GetAPZTestData() const
   { return mApzTestData; }
 
-  bool SetPendingScrollUpdateForNextTransaction(FrameMetrics::ViewID aScrollId,
-                                                const ScrollUpdateInfo& aUpdateInfo) override;
-
   WebRenderCommandBuilder& CommandBuilder() { return mWebRenderCommandBuilder; }
   WebRenderUserDataRefTable* GetWebRenderUserDataTable() { return mWebRenderCommandBuilder.GetWebRenderUserDataTable(); }
   WebRenderScrollData& GetScrollData() { return mScrollData; }
@@ -186,7 +184,7 @@ private:
   RefPtr<WebRenderBridgeChild> mWrChild;
 
   RefPtr<TransactionIdAllocator> mTransactionIdAllocator;
-  uint64_t mLatestTransactionId;
+  TransactionId mLatestTransactionId;
 
   nsTArray<DidCompositeObserver*> mDidCompositeObservers;
 

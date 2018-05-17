@@ -26,14 +26,17 @@ this.globalImportContext = globalImportContext;
 const actionTypes = {};
 for (const type of [
   "ARCHIVE_FROM_POCKET",
+  "AS_ROUTER_TELEMETRY_USER_EVENT",
   "BLOCK_URL",
   "BOOKMARK_URL",
+  "COPY_DOWNLOAD_LINK",
   "DELETE_BOOKMARK_BY_ID",
   "DELETE_FROM_POCKET",
   "DELETE_HISTORY_URL",
   "DIALOG_CANCEL",
   "DIALOG_OPEN",
   "DISABLE_ONBOARDING",
+  "DOWNLOAD_CHANGED",
   "INIT",
   "MIGRATION_CANCEL",
   "MIGRATION_COMPLETED",
@@ -44,6 +47,7 @@ for (const type of [
   "NEW_TAB_REHYDRATED",
   "NEW_TAB_STATE_REQUEST",
   "NEW_TAB_UNLOAD",
+  "OPEN_DOWNLOAD_FILE",
   "OPEN_LINK",
   "OPEN_NEW_WINDOW",
   "OPEN_PRIVATE_WINDOW",
@@ -60,6 +64,7 @@ for (const type of [
   "PREVIEW_REQUEST",
   "PREVIEW_REQUEST_CANCEL",
   "PREVIEW_RESPONSE",
+  "REMOVE_DOWNLOAD_FILE",
   "RICH_ICON_MISSING",
   "SAVE_SESSION_PERF_DATA",
   "SAVE_TO_POCKET",
@@ -75,6 +80,7 @@ for (const type of [
   "SETTINGS_CLOSE",
   "SETTINGS_OPEN",
   "SET_PREF",
+  "SHOW_DOWNLOAD_FILE",
   "SHOW_FIREFOX_ACCOUNTS",
   "SNIPPETS_BLOCKLIST_CLEARED",
   "SNIPPETS_BLOCKLIST_UPDATED",
@@ -227,6 +233,20 @@ function UserEvent(data) {
 }
 
 /**
+ * ASRouterUserEvent - A telemetry ping indicating a user action from AS router. This should only
+ *                     be sent from the UI during a user session.
+ *
+ * @param  {object} data Fields to include in the ping (source, etc.)
+ * @return {object} An AlsoToMain action
+ */
+function ASRouterUserEvent(data) {
+  return AlsoToMain({
+    type: actionTypes.AS_ROUTER_TELEMETRY_USER_EVENT,
+    data
+  });
+}
+
+/**
  * UndesiredEvent - A telemetry ping indicating an undesired state.
  *
  * @param  {object} data Fields to include in the ping (value, etc.)
@@ -289,6 +309,7 @@ this.actionTypes = actionTypes;
 this.actionCreators = {
   BroadcastToContent,
   UserEvent,
+  ASRouterUserEvent,
   UndesiredEvent,
   PerfEvent,
   ImpressionStats,

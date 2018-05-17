@@ -265,7 +265,6 @@ UNIFIED_SOURCES += [
     'jit/EdgeCaseAnalysis.cpp',
     'jit/EffectiveAddressAnalysis.cpp',
     'jit/ExecutableAllocator.cpp',
-    'jit/FlowAliasAnalysis.cpp',
     'jit/FoldLinearArithConstants.cpp',
     'jit/InstructionReordering.cpp',
     'jit/Ion.cpp',
@@ -691,6 +690,7 @@ FINAL_LIBRARY = 'js'
 if CONFIG['NIGHTLY_BUILD']:
     DEFINES['ENABLE_BINARYDATA'] = True
     DEFINES['ENABLE_SIMD'] = True
+    DEFINES['ENABLE_WASM_BULKMEM_OPS'] = True
     DEFINES['ENABLE_WASM_SATURATING_TRUNC_OPS'] = True
     DEFINES['ENABLE_WASM_SIGNEXTEND_OPS'] = True
     DEFINES['ENABLE_WASM_THREAD_OPS'] = True
@@ -704,7 +704,7 @@ if CONFIG['NIGHTLY_BUILD']:
 DEFINES['ENABLE_WASM_GLOBAL'] = True
 
 if CONFIG['JS_BUILD_BINAST']:
-    # Using SOURCES as UNIFIED_SOURCES causes mysterious bugs on 32-bit platforms.
+    # Using SOURCES, as UNIFIED_SOURCES causes mysterious bugs on 32-bit platforms.
     # These parts of BinAST are designed only to test evolutions of the
     # specification.
     SOURCES += ['frontend/BinTokenReaderTester.cpp']
@@ -712,7 +712,9 @@ if CONFIG['JS_BUILD_BINAST']:
     SOURCES += [
         'frontend/BinSource-auto.cpp',
         'frontend/BinSource.cpp',
-        'frontend/BinToken.cpp'
+        'frontend/BinToken.cpp',
+        'frontend/BinTokenReaderBase.cpp',
+        'frontend/BinTokenReaderMultipart.cpp',
     ]
 
     # Instrument BinAST files for fuzzing as we have a fuzzing target for BinAST.

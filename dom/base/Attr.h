@@ -14,7 +14,6 @@
 #include "mozilla/Attributes.h"
 #include "nsIAttribute.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNodeList.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
@@ -39,6 +38,8 @@ public:
        const nsAString& aValue);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+
+  NS_IMPL_FROMNODE_HELPER(Attr, IsAttr())
 
   // nsINode interface
   virtual void GetTextContentInternal(nsAString& aTextContent,

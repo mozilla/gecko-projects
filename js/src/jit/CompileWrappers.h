@@ -16,7 +16,7 @@ class JitRuntime;
 
 // During Ion compilation we need access to various bits of the current
 // compartment, runtime and so forth. However, since compilation can run off
-// thread while the active thread is mutating the VM, this access needs
+// thread while the main thread is mutating the VM, this access needs
 // to be restricted. The classes below give the compiler an interface to access
 // all necessary information in a threadsafe fashion.
 
@@ -49,7 +49,7 @@ class CompileRuntime
 
     const void* mainContextPtr();
     const void* addressOfJitStackLimit();
-    const void* addressOfInterrupt();
+    const void* addressOfInterruptBits();
 
 #ifdef DEBUG
     bool isInsideNursery(gc::Cell* cell);

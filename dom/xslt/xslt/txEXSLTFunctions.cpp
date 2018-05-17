@@ -24,7 +24,6 @@
 #include "nsContentCID.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsIContent.h"
-#include "nsIDOMDocumentFragment.h"
 #include "txMozillaXMLOutput.h"
 #include "nsTextNode.h"
 #include "mozilla/dom/DocumentFragment.h"
@@ -63,7 +62,7 @@ convertRtfToNode(txIEvalContext *aContext, txResultTreeFragment *aRtf)
         return NS_ERROR_UNEXPECTED;
     }
 
-    nsCOMPtr<nsIDOMDocumentFragment> domFragment =
+    RefPtr<DocumentFragment> domFragment =
       new DocumentFragment(doc->NodeInfoManager());
 
     txOutputFormat format;
@@ -109,12 +108,8 @@ createTextNode(txIEvalContext *aContext, nsString& aValue,
 
 static nsresult
 createAndAddToResult(nsAtom* aName, const nsAString& aValue,
-                     txNodeSet* aResultSet, nsIContent* aResultHolder)
+                     txNodeSet* aResultSet, DocumentFragment* aResultHolder)
 {
-    NS_ASSERTION(aResultHolder->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT) &&
-                 aResultHolder->OwnerDoc(),
-                 "invalid result-holder");
-
     nsIDocument* doc = aResultHolder->OwnerDoc();
     nsCOMPtr<Element> elem = doc->CreateElem(nsDependentAtomString(aName),
                                              nullptr, kNameSpaceID_None);
@@ -743,17 +738,14 @@ txEXSLTRegExFunctionCall::evaluate(txIEvalContext* aContext,
     switch (mType) {
         case txEXSLTType::MATCH:
         {
-            nsCOMPtr<nsIDOMDocument> sourceDoc =
-                do_QueryInterface(getSourceDocument(aContext));
+            nsCOMPtr<nsIDocument> sourceDoc = getSourceDocument(aContext);
             NS_ENSURE_STATE(sourceDoc);
 
-            nsCOMPtr<nsIDOMDocumentFragment> domDocFrag;
+            RefPtr<DocumentFragment> docFrag;
             rv = mRegExService->Match(string, regex, flags, sourceDoc,
-                                      getter_AddRefs(domDocFrag));
+                                      getter_AddRefs(docFrag));
             NS_ENSURE_SUCCESS(rv, rv);
-
-            nsCOMPtr<nsIContent> docFrag = do_QueryInterface(domDocFrag, &rv);
-            NS_ENSURE_SUCCESS(rv, rv);
+            NS_ENSURE_STATE(docFrag);
 
             RefPtr<txNodeSet> resultSet;
             rv = aContext->recycler()->getNodeSet(getter_AddRefs(resultSet));

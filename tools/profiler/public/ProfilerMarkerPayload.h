@@ -12,6 +12,7 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtrExtensions.h"
+#include "mozilla/net/TimingStruct.h"
 
 #include "nsString.h"
 #include "GeckoProfiler.h"
@@ -208,6 +209,42 @@ public:
 
 private:
   mozilla::TimeStamp mVsyncTimestamp;
+};
+
+class NetworkMarkerPayload : public ProfilerMarkerPayload
+{
+public:
+  NetworkMarkerPayload(int64_t aID, const char* aURI,
+                       NetworkLoadType aType,
+                       const mozilla::TimeStamp& aStartTime,
+                       const mozilla::TimeStamp& aEndTime,
+                       int32_t aPri,
+                       int64_t aCount,
+                       const mozilla::net::TimingStruct* aTimings = nullptr,
+                       const char* aRedirectURI = nullptr)
+    : ProfilerMarkerPayload(aStartTime, aEndTime)
+    , mID(aID)
+    , mURI(aURI ? strdup(aURI) : nullptr)
+    , mRedirectURI(aRedirectURI && (strlen(aRedirectURI) > 0) ? strdup(aRedirectURI) : nullptr)
+    , mType(aType)
+    , mPri(aPri)
+    , mCount(aCount)
+  {
+    if (aTimings) {
+      mTimings = *aTimings;
+    }
+  }
+
+  DECL_STREAM_PAYLOAD
+
+private:
+  int64_t mID;
+  mozilla::UniqueFreePtr<char> mURI;
+  mozilla::UniqueFreePtr<char> mRedirectURI;
+  NetworkLoadType mType;
+  int32_t mPri;
+  int64_t mCount;
+  mozilla::net::TimingStruct mTimings;
 };
 
 class ScreenshotPayload : public ProfilerMarkerPayload

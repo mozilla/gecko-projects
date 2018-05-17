@@ -14,7 +14,6 @@
 #include "nsIContent.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDocumentLoader.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMOfflineResourceList.h"
 #include "nsIDocument.h"
@@ -1290,7 +1289,7 @@ nsresult
 nsOfflineCacheUpdate::Init(nsIURI *aManifestURI,
                            nsIURI *aDocumentURI,
                            nsIPrincipal* aLoadingPrincipal,
-                           nsIDOMDocument *aDocument,
+                           nsIDocument *aDocument,
                            nsIFile *aCustomProfileDir)
 {
     nsresult rv;

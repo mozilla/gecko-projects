@@ -517,7 +517,7 @@ DeleteArrayElement(JSContext* cx, HandleObject obj, uint64_t index, ObjectOpResu
 {
     if (obj->is<ArrayObject>() &&
         !obj->as<NativeObject>().isIndexed() &&
-        !obj->as<NativeObject>().denseElementsAreFrozen())
+        !obj->as<NativeObject>().denseElementsAreSealed())
     {
         ArrayObject* aobj = &obj->as<ArrayObject>();
         if (index <= UINT32_MAX) {
@@ -566,7 +566,7 @@ DeletePropertiesOrThrow(JSContext* cx, HandleObject obj, uint64_t len, uint64_t 
 {
     if (obj->is<ArrayObject>() &&
         !obj->as<NativeObject>().isIndexed() &&
-        !obj->as<NativeObject>().denseElementsAreFrozen())
+        !obj->as<NativeObject>().denseElementsAreSealed())
     {
         if (len <= UINT32_MAX) {
             // Skip forward to the initialized elements of this array.
@@ -679,7 +679,8 @@ MaybeInIteration(HandleObject obj, JSContext* cx)
         return true;
     }
 
-    if (MOZ_UNLIKELY(group->hasAllFlags(OBJECT_FLAG_ITERATED)))
+    AutoSweepObjectGroup sweep(group);
+    if (MOZ_UNLIKELY(group->hasAllFlags(sweep, OBJECT_FLAG_ITERATED)))
         return true;
 
     return false;
@@ -779,7 +780,9 @@ js::ArraySetLength(JSContext* cx, Handle<ArrayObject*> arr, HandleId id,
         // for..in iteration over the array. Keys deleted before being reached
         // during the iteration must not be visited, and suppressing them here
         // would be too costly.
-        if (!arr->isIndexed() && !MaybeInIteration(arr, cx)) {
+        // This optimization is also invalid when there are sealed
+        // (non-configurable) elements.
+        if (!arr->isIndexed() && !MaybeInIteration(arr, cx) && !arr->denseElementsAreSealed()) {
             if (!arr->maybeCopyElementsForWrite(cx))
                 return false;
 
@@ -1527,7 +1530,7 @@ ArrayReverseDenseKernel(JSContext* cx, HandleNativeObject obj, uint32_t length)
     if (obj->getDenseInitializedLength() == 0)
         return DenseElementResult::Success;
 
-    if (obj->denseElementsAreFrozen())
+    if (!obj->isExtensible())
         return DenseElementResult::Incomplete;
 
     if (!IsPackedArray(obj)) {
@@ -2040,7 +2043,7 @@ FillWithUndefined(JSContext* cx, HandleObject obj, uint32_t start, uint32_t coun
             break;
 
         NativeObject* nobj = &obj->as<NativeObject>();
-        if (nobj->denseElementsAreFrozen())
+        if (!nobj->isExtensible())
             break;
 
         if (obj->is<ArrayObject>() &&
@@ -2378,6 +2381,7 @@ void
 js::ArrayShiftMoveElements(NativeObject* obj)
 {
     AutoUnsafeCallWithABI unsafe;
+    MOZ_ASSERT(obj->isExtensible());
     MOZ_ASSERT_IF(obj->is<ArrayObject>(), obj->as<ArrayObject>().lengthIsWritable());
 
     size_t initlen = obj->getDenseInitializedLength();
@@ -2400,7 +2404,7 @@ static DenseElementResult
 MoveDenseElements(JSContext* cx, NativeObject* obj, uint32_t dstStart, uint32_t srcStart,
                   uint32_t length)
 {
-    if (obj->denseElementsAreFrozen())
+    if (!obj->isExtensible())
         return DenseElementResult::Incomplete;
 
     if (!obj->maybeCopyElementsForWrite(cx))
@@ -2542,7 +2546,7 @@ js::array_unshift(JSContext* cx, unsigned argc, Value* vp)
             if (MaybeInIteration(obj, cx))
                 break;
             NativeObject* nobj = &obj->as<NativeObject>();
-            if (nobj->denseElementsAreFrozen())
+            if (!nobj->isExtensible())
                 break;
             if (nobj->is<ArrayObject>() && !nobj->as<ArrayObject>().lengthIsWritable())
                 break;
@@ -2650,8 +2654,9 @@ CanOptimizeForDenseStorage(HandleObject arr, uint64_t endIndex, JSContext* cx)
     if (!arr->as<ArrayObject>().lengthIsWritable())
         return false;
 
-    MOZ_ASSERT(!arr->as<ArrayObject>().denseElementsAreFrozen(),
-               "writable length implies elements are not frozen");
+    /* Also pick the slow path if the object is non-extensible. */
+    if (!arr->as<ArrayObject>().isExtensible())
+        return false;
 
     /* Also pick the slow path if the object is being iterated over. */
     if (MaybeInIteration(arr, cx))
@@ -2963,7 +2968,7 @@ array_splice_impl(JSContext* cx, unsigned argc, Value* vp, bool returnValueIsUse
             len <= UINT32_MAX)
         {
             HandleArrayObject arr = obj.as<ArrayObject>();
-            if (arr->lengthIsWritable()) {
+            if (arr->lengthIsWritable() && arr->isExtensible()) {
                 DenseElementResult result =
                     arr->ensureDenseElements(cx, uint32_t(len), itemCount - deleteCount);
                 if (result == DenseElementResult::Failure)
@@ -3197,7 +3202,7 @@ SliceArguments(JSContext* cx, Handle<ArgumentsObject*> argsobj, uint32_t begin, 
         return nullptr;
     result->setDenseInitializedLength(count);
 
-    MOZ_ASSERT(result->group()->unknownProperties(),
+    MOZ_ASSERT(result->group()->unknownPropertiesDontCheckGeneration(),
                "The default array group has unknown properties, so we can directly initialize the"
                "dense elements without needing to update the indexed type set.");
 
@@ -3960,8 +3965,11 @@ NewArrayTryUseGroup(JSContext* cx, HandleObjectGroup group, size_t length,
 {
     MOZ_ASSERT(newKind != SingletonObject);
 
-    if (group->shouldPreTenure())
-        newKind = TenuredObject;
+    {
+        AutoSweepObjectGroup sweep(group);
+        if (group->shouldPreTenure(sweep))
+            newKind = TenuredObject;
+    }
 
     RootedObject proto(cx, group->proto().toObject());
     ArrayObject* res = NewArray<maxLength>(cx, length, proto, newKind);

@@ -34,7 +34,10 @@
 #include "mozilla/dom/CSSBinding.h"
 #include "mozilla/dom/CSSRuleBinding.h"
 #include "mozilla/dom/DirectoryBinding.h"
+#include "mozilla/dom/DOMParserBinding.h"
 #include "mozilla/dom/DOMPrefs.h"
+#include "mozilla/dom/ElementBinding.h"
+#include "mozilla/dom/EventBinding.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FileBinding.h"
@@ -192,7 +195,7 @@ SandboxImport(JSContext* cx, unsigned argc, Value* vp)
             funobj = XPCWrapper::UnsafeUnwrapSecurityWrapper(funobj);
         }
 
-        JSAutoCompartment ac(cx, funobj);
+        JSAutoRealm ar(cx, funobj);
 
         RootedValue funval(cx, ObjectValue(*funobj));
         JSFunction* fun = JS_ValueToFunction(cx, funval);
@@ -811,6 +814,12 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             CSSRule = true;
         } else if (!strcmp(name.ptr(), "Directory")) {
             Directory = true;
+        } else if (!strcmp(name.ptr(), "DOMParser")) {
+            DOMParser = true;
+        } else if (!strcmp(name.ptr(), "Element")) {
+            Element = true;
+        } else if (!strcmp(name.ptr(), "Event")) {
+            Event = true;
         } else if (!strcmp(name.ptr(), "File")) {
             File = true;
         } else if (!strcmp(name.ptr(), "FileReader")) {
@@ -883,6 +892,18 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
 
     if (Directory &&
         !dom::DirectoryBinding::GetConstructorObject(cx))
+        return false;
+
+    if (DOMParser &&
+        !dom::DOMParserBinding::GetConstructorObject(cx))
+        return false;
+
+    if (Element &&
+        !dom::ElementBinding::GetConstructorObject(cx))
+        return false;
+
+    if (Event &&
+        !dom::EventBinding::GetConstructorObject(cx))
         return false;
 
     if (File &&
@@ -1049,7 +1070,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
       AccessCheck::isChrome(sandbox) ? false : options.wantXrays;
 
     {
-        JSAutoCompartment ac(cx, sandbox);
+        JSAutoRealm ar(cx, sandbox);
 
         nsCOMPtr<nsIScriptObjectPrincipal> sbp =
             new SandboxPrivate(principal, sandbox);
@@ -1135,7 +1156,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
 
     xpc::SetSandboxMetadata(cx, sandbox, options.metadata);
 
-    JSAutoCompartment ac(cx, sandbox);
+    JSAutoRealm ar(cx, sandbox);
     JS_FireOnNewGlobalObject(cx, sandbox);
 
     return NS_OK;
@@ -1770,7 +1791,7 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
         // This is clearly Gecko-specific and not in any spec.
         mozilla::dom::AutoEntryScript aes(priv, "XPConnect sandbox evaluation");
         JSContext* sandcx = aes.cx();
-        JSAutoCompartment ac(sandcx, sandbox);
+        JSAutoRealm ar(sandcx, sandbox);
 
         JS::CompileOptions options(sandcx);
         options.setFileAndLine(filenameBuf.get(), lineNo);
@@ -1823,7 +1844,7 @@ xpc::GetSandboxMetadata(JSContext* cx, HandleObject sandbox, MutableHandleValue 
 
     RootedValue metadata(cx);
     {
-      JSAutoCompartment ac(cx, sandbox);
+      JSAutoRealm ar(cx, sandbox);
       metadata = JS_GetReservedSlot(sandbox, XPCONNECT_SANDBOX_CLASS_METADATA_SLOT);
     }
 
@@ -1842,7 +1863,7 @@ xpc::SetSandboxMetadata(JSContext* cx, HandleObject sandbox, HandleValue metadat
 
     RootedValue metadata(cx);
 
-    JSAutoCompartment ac(cx, sandbox);
+    JSAutoRealm ar(cx, sandbox);
     if (!JS_StructuredClone(cx, metadataArg, &metadata, nullptr, nullptr))
         return NS_ERROR_UNEXPECTED;
 

@@ -41,7 +41,6 @@ using mozilla::TimeDuration;
 using mozilla::dom::Animation;
 using mozilla::dom::AnimationPlayState;
 using mozilla::dom::CSSTransition;
-using mozilla::dom::KeyframeEffectReadOnly;
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -79,7 +78,7 @@ ElementPropertyTransition::UpdateStartValueFromReplacedTransition()
     return;
   }
   MOZ_ASSERT(nsCSSProps::PropHasFlags(TransitionProperty(),
-                                      CSS_PROPERTY_CAN_ANIMATE_ON_COMPOSITOR),
+                                      CSSPropFlags::CanAnimateOnCompositor),
              "The transition property should be able to be run on the "
              "compositor");
   MOZ_ASSERT(mTarget && mTarget->mElement->OwnerDoc(),
@@ -394,7 +393,7 @@ CSSTransition::GetCurrentTimeAt(const dom::DocumentTimeline& aTimeline,
 }
 
 void
-CSSTransition::SetEffectFromStyle(dom::AnimationEffectReadOnly* aEffect)
+CSSTransition::SetEffectFromStyle(dom::AnimationEffect* aEffect)
 {
   Animation::SetEffectNoUpdate(aEffect);
 

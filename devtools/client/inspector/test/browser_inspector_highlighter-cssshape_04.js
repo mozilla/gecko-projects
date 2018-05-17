@@ -62,7 +62,8 @@ async function testPolygonMovePoint(config) {
   x = left + width * x / 100;
   y = top + height * y / 100;
   let dx = width / 10;
-  let dy = height / 10;
+  let dyPercent = 10;
+  let dy = height / dyPercent;
 
   let onRuleViewChanged = view.once("ruleview-changed");
   info("Moving first polygon point");
@@ -75,7 +76,8 @@ async function testPolygonMovePoint(config) {
   await onRuleViewChanged;
 
   let definition = await getComputedPropertyValue(selector, property, inspector);
-  ok(definition.includes(`${dx}px ${dy}px`), `Point moved to ${dx}px ${dy}px`);
+  ok(definition.includes(`${dx}px ${dyPercent}%`),
+    `Point moved to ${dx}px ${dyPercent}%`);
 
   await teardown({selector, property, ...config});
 }
@@ -182,6 +184,7 @@ async function testCircleMoveCenter(config) {
   const selector = "#circle";
   const property = "clip-path";
 
+  let onShapeChangeApplied = highlighters.once("shapes-highlighter-changes-applied");
   await setup({selector, property, ...config});
 
   let cx = parseFloat(await testActor.getHighlighterNodeAttribute(
@@ -195,13 +198,13 @@ async function testCircleMoveCenter(config) {
   let dx = width / 10;
   let dy = height / 10;
 
-  let onShapeChangeApplied = highlighters.once("shapes-highlighter-changes-applied");
   info("Moving circle center");
   let { mouse } = helper;
   await mouse.down(cxPixel, cyPixel, selector);
   await mouse.move(cxPixel + dx, cyPixel + dy, selector);
   await mouse.up(cxPixel + dx, cyPixel + dy, selector);
   await testActor.reflow();
+  info("Waiting for shape changes to apply");
   await onShapeChangeApplied;
 
   let definition = await getComputedPropertyValue(selector, property, inspector);
@@ -290,25 +293,28 @@ async function testInsetMoveEdges(config) {
   let { mouse } = helper;
 
   info("Moving inset top");
+  let onShapeChangeApplied = highlighters.once("shapes-highlighter-changes-applied");
   await mouse.down(xCenter, top, selector);
   await mouse.move(xCenter, top + dy, selector);
   await mouse.up(xCenter, top + dy, selector);
   await testActor.reflow();
+  await onShapeChangeApplied;
 
-  info("Moving inset bottom");
-  await mouse.down(xCenter, bottom, selector);
-  await mouse.move(xCenter, bottom + dy, selector);
-  await mouse.up(xCenter, bottom + dy, selector);
-  await testActor.reflow();
+  // TODO: Test bottom inset marker after Bug 1456777 is fixed.
+  // Bug 1456777 - https://bugzilla.mozilla.org/show_bug.cgi?id=1456777
+  // The test element is larger than the viewport when tests run in headless mode.
+  // When moved, the bottom marker value is getting clamped to the viewport.
 
   info("Moving inset left");
+  onShapeChangeApplied = highlighters.once("shapes-highlighter-changes-applied");
   await mouse.down(left, yCenter, selector);
   await mouse.move(left + dx, yCenter, selector);
   await mouse.up(left + dx, yCenter, selector);
   await testActor.reflow();
+  await onShapeChangeApplied;
 
   info("Moving inset right");
-  let onShapeChangeApplied = highlighters.once("shapes-highlighter-changes-applied");
+  onShapeChangeApplied = highlighters.once("shapes-highlighter-changes-applied");
   await mouse.down(right, yCenter, selector);
   await mouse.move(right + dx, yCenter, selector);
   await mouse.up(right + dx, yCenter, selector);
@@ -316,8 +322,10 @@ async function testInsetMoveEdges(config) {
   await onShapeChangeApplied;
 
   let definition = await getComputedPropertyValue(selector, property, inspector);
+
+  // NOTE: No change to bottom inset until Bug 1456777 is fixed.
   ok(definition.includes(
-    `${top + dy}px ${elemWidth - right - dx}px ${100 - y - height - 10}% ${x + 10}%`),
+    `${top + dy}px ${elemWidth - right - dx}px ${100 - y - height}% ${x + 10}%`),
      "Inset edges successfully moved");
 
   await teardown({selector, property, ...config});

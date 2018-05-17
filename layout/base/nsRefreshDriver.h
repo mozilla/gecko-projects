@@ -22,7 +22,6 @@
 #include "nsTObserverArray.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
-#include "mozilla/AnimationEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/layers/TransactionIdAllocator.h"
@@ -35,6 +34,7 @@ class nsINode;
 class nsIRunnable;
 
 namespace mozilla {
+class AnimationEventDispatcher;
 class RefreshDriverTimer;
 class Runnable;
 
@@ -79,6 +79,8 @@ public:
 class nsRefreshDriver final : public mozilla::layers::TransactionIdAllocator,
                               public nsARefreshObserver
 {
+  using TransactionId = mozilla::layers::TransactionId;
+
 public:
   explicit nsRefreshDriver(nsPresContext *aPresContext);
   ~nsRefreshDriver();
@@ -353,12 +355,12 @@ public:
   static bool GetJankLevels(mozilla::Vector<uint64_t>& aJank);
 
   // mozilla::layers::TransactionIdAllocator
-  uint64_t GetTransactionId(bool aThrottle) override;
-  uint64_t LastTransactionId() const override;
-  void NotifyTransactionCompleted(uint64_t aTransactionId) override;
-  void RevokeTransactionId(uint64_t aTransactionId) override;
+  TransactionId GetTransactionId(bool aThrottle) override;
+  TransactionId LastTransactionId() const override;
+  void NotifyTransactionCompleted(TransactionId aTransactionId) override;
+  void RevokeTransactionId(TransactionId aTransactionId) override;
   void ClearPendingTransactions() override;
-  void ResetInitialTransactionId(uint64_t aTransactionId) override;
+  void ResetInitialTransactionId(TransactionId aTransactionId) override;
   mozilla::TimeStamp GetTransactionStart() override;
 
   bool IsWaitingForPaint(mozilla::TimeStamp aTime);
@@ -391,10 +393,7 @@ public:
                                             uint32_t aDelay);
   static void CancelIdleRunnable(nsIRunnable* aRunnable);
 
-  bool SkippedPaints() const
-  {
-    return mSkippedPaints;
-  }
+  void NotifyDOMContentLoaded();
 
 private:
   typedef nsTObserverArray<nsARefreshObserver*> ObserverArray;
@@ -432,8 +431,7 @@ private:
   // Trigger a refresh immediately, if haven't been disconnected or frozen.
   void DoRefresh();
 
-  double GetRefreshTimerInterval() const;
-  double GetRegularTimerInterval(bool *outIsDefault = nullptr) const;
+  double GetRegularTimerInterval() const;
   static double GetThrottledTimerInterval();
 
   static mozilla::TimeDuration GetMinRecomputeVisibilityInterval();
@@ -453,9 +451,9 @@ private:
   RefPtr<nsRefreshDriver> mRootRefresh;
 
   // The most recently allocated transaction id.
-  uint64_t mPendingTransaction;
+  TransactionId mPendingTransaction;
   // The most recently completed transaction id.
-  uint64_t mCompletedTransaction;
+  TransactionId mCompletedTransaction;
 
   uint32_t mFreezeCount;
 
@@ -492,6 +490,9 @@ private:
   // next tick by the refresh driver. This flag will be reset at the
   // start of every tick.
   bool mResizeSuppressed;
+
+  // True if the next tick should notify DOMContentFlushed.
+  bool mNotifyDOMContentFlushed;
 
   int64_t mMostRecentRefreshEpochTime;
   // Number of seconds that the refresh driver is blocked waiting for a compositor

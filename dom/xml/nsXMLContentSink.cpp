@@ -19,6 +19,7 @@
 #include "mozilla/css/Loader.h"
 #include "nsGkAtoms.h"
 #include "nsContentUtils.h"
+#include "nsDocElementCreatedNotificationRunner.h"
 #include "nsIScriptContext.h"
 #include "nsNameSpaceManager.h"
 #include "nsIServiceManager.h"
@@ -78,7 +79,7 @@ NS_NewXMLContentSink(nsIXMLContentSink** aResult,
                      nsISupports* aContainer,
                      nsIChannel* aChannel)
 {
-  NS_PRECONDITION(nullptr != aResult, "null ptr");
+  MOZ_ASSERT(nullptr != aResult, "null ptr");
   if (nullptr == aResult) {
     return NS_ERROR_NULL_POINTER;
   }
@@ -400,9 +401,9 @@ nsXMLContentSink::OnTransformDone(nsresult aResult,
   if (rootElement) {
     NS_ASSERTION(mDocument->ComputeIndexOf(rootElement) != -1,
                  "rootElement not in doc?");
-    mDocument->BeginUpdate(UPDATE_CONTENT_MODEL);
+    mDocument->BeginUpdate();
     nsNodeUtils::ContentInserted(mDocument, rootElement);
-    mDocument->EndUpdate(UPDATE_CONTENT_MODEL);
+    mDocument->EndUpdate();
   }
 
   // Start the layout process
@@ -424,11 +425,11 @@ nsXMLContentSink::OnTransformDone(nsresult aResult,
 
 NS_IMETHODIMP
 nsXMLContentSink::StyleSheetLoaded(StyleSheet* aSheet,
-                                   bool aWasAlternate,
+                                   bool aWasDeferred,
                                    nsresult aStatus)
 {
   if (!mPrettyPrinting) {
-    return nsContentSink::StyleSheetLoaded(aSheet, aWasAlternate, aStatus);
+    return nsContentSink::StyleSheetLoaded(aSheet, aWasDeferred, aStatus);
   }
 
   if (!mDocument->CSSLoader()->HasPendingLoads()) {
@@ -455,7 +456,7 @@ nsXMLContentSink::WillResume(void)
 NS_IMETHODIMP
 nsXMLContentSink::SetParser(nsParserBase* aParser)
 {
-  NS_PRECONDITION(aParser, "Should have a parser here!");
+  MOZ_ASSERT(aParser, "Should have a parser here!");
   mParser = aParser;
   return NS_OK;
 }
@@ -602,12 +603,11 @@ nsXMLContentSink::CloseElement(nsIContent* aContent)
     nsCOMPtr<nsIStyleSheetLinkingElement> ssle(do_QueryInterface(aContent));
     if (ssle) {
       ssle->SetEnableUpdates(true);
-      bool willNotify;
-      bool isAlternate;
-      rv = ssle->UpdateStyleSheet(mRunsToCompletion ? nullptr : this,
-                                  &willNotify,
-                                  &isAlternate);
-      if (NS_SUCCEEDED(rv) && willNotify && !isAlternate && !mRunsToCompletion) {
+      auto updateOrError =
+        ssle->UpdateStyleSheet(mRunsToCompletion ? nullptr : this);
+      if (updateOrError.isErr()) {
+        rv = updateOrError.unwrapErr();
+      } else if (updateOrError.unwrap().ShouldBlock() && !mRunsToCompletion) {
         ++mPendingSheetCount;
         mScriptLoader->AddParserBlockingScriptExecutionBlocker();
       }
@@ -844,7 +844,7 @@ nsXMLContentSink::GetCurrentStackNode()
 nsresult
 nsXMLContentSink::PushContent(nsIContent *aContent)
 {
-  NS_PRECONDITION(aContent, "Null content being pushed!");
+  MOZ_ASSERT(aContent, "Null content being pushed!");
   StackNode *sn = mContentStack.AppendElement();
   NS_ENSURE_TRUE(sn, NS_ERROR_OUT_OF_MEMORY);
 
@@ -973,7 +973,7 @@ nsXMLContentSink::HandleStartElement(const char16_t *aName,
                                      uint32_t aLineNumber,
                                      bool aInterruptable)
 {
-  NS_PRECONDITION(aAttsCount % 2 == 0, "incorrect aAttsCount");
+  MOZ_ASSERT(aAttsCount % 2 == 0, "incorrect aAttsCount");
   // Adjust aAttsCount so it's the actual number of attributes
   aAttsCount /= 2;
 
@@ -1050,7 +1050,8 @@ nsXMLContentSink::HandleStartElement(const char16_t *aName,
 
   if (!mXSLTProcessor) {
     if (content == mDocElement) {
-      NotifyDocElementCreated(mDocument);
+      nsContentUtils::AddScriptRunner(
+          new nsDocElementCreatedNotificationRunner(mDocument));
 
       if (aInterruptable && NS_SUCCEEDED(result) && mParser && !mParser->IsParserEnabled()) {
         return NS_ERROR_HTMLPARSER_BLOCK;
@@ -1266,20 +1267,19 @@ nsXMLContentSink::HandleProcessingInstruction(const char16_t *aTarget,
     // This is an xml-stylesheet processing instruction... but it might not be
     // a CSS one if the type is set to something else.
     ssle->SetEnableUpdates(true);
-    bool willNotify;
-    bool isAlternate;
-    rv = ssle->UpdateStyleSheet(mRunsToCompletion ? nullptr : this,
-                                &willNotify,
-                                &isAlternate);
-    NS_ENSURE_SUCCESS(rv, rv);
+    auto updateOrError =
+      ssle->UpdateStyleSheet(mRunsToCompletion ? nullptr : this);
+    if (updateOrError.isErr()) {
+      return updateOrError.unwrapErr();
+    }
 
-    if (willNotify) {
+    auto update = updateOrError.unwrap();
+    if (update.WillNotify()) {
       // Successfully started a stylesheet load
-      if (!isAlternate && !mRunsToCompletion) {
+      if (update.ShouldBlock() && !mRunsToCompletion) {
         ++mPendingSheetCount;
         mScriptLoader->AddParserBlockingScriptExecutionBlocker();
       }
-
       return NS_OK;
     }
   }
@@ -1358,7 +1358,7 @@ nsXMLContentSink::ReportError(const char16_t* aErrorText,
                               nsIScriptError *aError,
                               bool *_retval)
 {
-  NS_PRECONDITION(aError && aSourceText && aErrorText, "Check arguments!!!");
+  MOZ_ASSERT(aError && aSourceText && aErrorText, "Check arguments!!!");
   nsresult rv = NS_OK;
 
   // The expat driver should report the error.  We're just cleaning up the mess.
@@ -1539,7 +1539,7 @@ nsXMLContentSink::FlushTags()
   ++mInNotification;
   {
     // Scope so we call EndUpdate before we decrease mInNotification
-    mozAutoDocUpdate updateBatch(mDocument, UPDATE_CONTENT_MODEL, true);
+    mozAutoDocUpdate updateBatch(mDocument, true);
     mBeganUpdate = true;
 
     // Don't release last text node in case we need to add to it again

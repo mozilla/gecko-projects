@@ -133,7 +133,7 @@ try {
   }
 
   let listener = {
-    QueryInterface: _XPCOMUtils.generateQI(["nsIConsoleListener"]),
+    QueryInterface: ChromeUtils.generateQI(["nsIConsoleListener"]),
     observe(msg) {
       if (typeof info === "function")
         info("CONSOLE_MESSAGE: (" + levelNames[msg.logLevel] + ") " + msg.toString());
@@ -174,7 +174,7 @@ function _Timer(func, delay) {
   _pendingTimers.push(timer);
 }
 _Timer.prototype = {
-  QueryInterface: _XPCOMUtils.generateQI(["nsITimerCallback"]),
+  QueryInterface: ChromeUtils.generateQI(["nsITimerCallback"]),
 
   notify(timer) {
     _pendingTimers.splice(_pendingTimers.indexOf(timer), 1);
@@ -199,6 +199,10 @@ _Timer.prototype = {
     do_timeout(newDelay, this._func);
   }
 };
+
+function _isGenerator(val) {
+  return typeof val === "object" && val && typeof val.next === "function";
+}
 
 function _do_main() {
   if (_quit)
@@ -276,7 +280,7 @@ var _fakeIdleService = {
     lockFactory(aLock) {
       throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
     },
-    QueryInterface: _XPCOMUtils.generateQI(["nsIFactory"]),
+    QueryInterface: ChromeUtils.generateQI(["nsIFactory"]),
   },
 
   // nsIIdleService
@@ -286,6 +290,7 @@ var _fakeIdleService = {
   addIdleObserver() {},
   removeIdleObserver() {},
 
+  // eslint-disable-next-line mozilla/use-chromeutils-generateqi
   QueryInterface(aIID) {
     // Useful for testing purposes, see test_get_idle.js.
     if (aIID.equals(Ci.nsIFactory)) {
@@ -574,7 +579,10 @@ function _execute_test() {
   (async () => {
     for (let func of _cleanupFunctions.reverse()) {
       try {
-        await func();
+        let result = await func();
+        if (_isGenerator(result)) {
+          Assert.ok(false, "Cleanup function returned a generator");
+        }
       } catch (ex) {
         reportCleanupError(ex);
       }
@@ -1104,7 +1112,7 @@ function do_get_profile(notifyProfileAfterChange = false) {
       }
       return null;
     },
-    QueryInterface: _XPCOMUtils.generateQI(["nsIDirectoryServiceProvider"]),
+    QueryInterface: ChromeUtils.generateQI(["nsIDirectoryServiceProvider"]),
   };
   _Services.dirsvc.QueryInterface(Ci.nsIDirectoryService)
            .registerProvider(provider);
@@ -1415,8 +1423,11 @@ function run_next_test() {
 
       if (_properties.isTask) {
         _gTaskRunning = true;
-        (async () => _gRunningTest())().then(() => {
+        (async () => _gRunningTest())().then(result => {
           _gTaskRunning = false;
+          if (_isGenerator(result)) {
+            Assert.ok(false, "Task returned a generator");
+          }
           run_next_test();
         }, ex => {
           _gTaskRunning = false;

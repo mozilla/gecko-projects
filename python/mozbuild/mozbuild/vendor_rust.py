@@ -41,7 +41,8 @@ class VendorRust(MozbuildObject):
         '''
         Ensure that cargo-vendor is new enough. cargo-vendor 0.1.13 and newer
         strips out .cargo-ok, .orig and .rej files, and deals with [patch]
-        replacements in Cargo.toml files which we want.
+        replacements in Cargo.toml files which we want.  Version 0.1.14 and up
+        handles local modifications to vendored crates (bug 1323557).
         '''
         for l in subprocess.check_output([cargo, 'install', '--list']).splitlines():
             # The line looks like one of the following:
@@ -51,7 +52,7 @@ class VendorRust(MozbuildObject):
             m = re.match('cargo-vendor v((\d+\.)*\d+)', l)
             if m:
                 version = m.group(1)
-                return LooseVersion(version) >= b'0.1.13'
+                return LooseVersion(version) >= b'0.1.14'
         return False
 
     def check_modified_files(self):
@@ -118,7 +119,7 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
             self.run_process(args=[cargo, 'install', 'cargo-vendor'],
                              append_env=env)
         elif not self.check_cargo_vendor_version(cargo):
-            self.log(logging.INFO, 'cargo_vendor', {}, 'cargo-vendor >= 0.1.12 required; force-reinstalling (this may take a few minutes)...')
+            self.log(logging.INFO, 'cargo_vendor', {}, 'cargo-vendor >= 0.1.14 required; force-reinstalling (this may take a few minutes)...')
             env = self.check_openssl()
             self.run_process(args=[cargo, 'install', '--force', 'cargo-vendor'],
                              append_env=env)
@@ -289,14 +290,12 @@ license file's hash.
 
         relative_vendor_dir = 'third_party/rust'
         vendor_dir = mozpath.join(self.topsrcdir, relative_vendor_dir)
-        self.log(logging.INFO, 'rm_vendor_dir', {}, 'rm -rf %s' % vendor_dir)
-        mozfile.remove(vendor_dir)
 
         # We use check_call instead of mozprocess to ensure errors are displayed.
         # We do an |update -p| here to regenerate the Cargo.lock file with minimal changes. See bug 1324462
         subprocess.check_call([cargo, 'update', '-p', 'gkrust'], cwd=self.topsrcdir)
 
-        subprocess.check_call([cargo, 'vendor', '--quiet', '--no-delete', '--sync', 'Cargo.lock'] + [vendor_dir], cwd=self.topsrcdir)
+        subprocess.check_call([cargo, 'vendor', '--quiet', '--sync', 'Cargo.lock'] + [vendor_dir], cwd=self.topsrcdir)
 
         if not self._check_licenses(vendor_dir):
             self.log(logging.ERROR, 'license_check_failed', {},

@@ -55,7 +55,7 @@ ServoPageRuleDeclaration::GetParentRule()
 nsINode*
 ServoPageRuleDeclaration::GetParentObject()
 {
-  return Rule()->GetDocument();
+  return Rule()->GetParentObject();
 }
 
 DeclarationBlock*
@@ -87,21 +87,11 @@ ServoPageRuleDeclaration::DocToUpdate()
   return nullptr;
 }
 
-void
-ServoPageRuleDeclaration::GetCSSParsingEnvironment(
-  CSSParsingEnvironment& aCSSParseEnv,
-  nsIPrincipal* aSubjectPrincipal)
-{
-  MOZ_ASSERT_UNREACHABLE("GetCSSParsingEnvironment "
-                         "shouldn't be calling for a Servo rule");
-  GetCSSParsingEnvironmentForRule(Rule(), aCSSParseEnv);
-}
-
-nsDOMCSSDeclaration::ServoCSSParsingEnvironment
-ServoPageRuleDeclaration::GetServoCSSParsingEnvironment(
+nsDOMCSSDeclaration::ParsingEnvironment
+ServoPageRuleDeclaration::GetParsingEnvironment(
   nsIPrincipal* aSubjectPrincipal) const
 {
-  return GetServoCSSParsingEnvironmentForRule(Rule());
+  return GetParsingEnvironmentForRule(Rule());
 }
 
 // -- ServoPageRule --------------------------------------------------

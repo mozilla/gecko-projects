@@ -78,11 +78,8 @@ EvaluateAppID(nsPIDOMWindowInner* aParent, const nsString& aOrigin,
   if (!document || !document->IsHTMLDocument()) {
     return false;
   }
-  nsHTMLDocument* html = document->AsHTMLDocument();
-  if (NS_WARN_IF(!html)) {
-    return false;
-  }
 
+  nsHTMLDocument* html = document->AsHTMLDocument();
   // Use the base domain as the facet for evaluation. This lets this algorithm
   // relax the whole eTLD+1.
   nsCOMPtr<nsIEffectiveTLDService> tldService =
@@ -158,13 +155,8 @@ AssembleAuthenticatorData(const CryptoBuffer& rpIdHashBuf,
     return NS_ERROR_INVALID_ARG;
   }
 
-  uint8_t flagSet = flags;
-  if (!attestationDataBuf.IsEmpty()) {
-    flagSet |= FLAG_AT;
-  }
-
   authDataBuf.AppendElements(rpIdHashBuf, mozilla::fallible);
-  authDataBuf.AppendElement(flagSet, mozilla::fallible);
+  authDataBuf.AppendElement(flags, mozilla::fallible);
   authDataBuf.AppendElements(counterBuf, mozilla::fallible);
   authDataBuf.AppendElements(attestationDataBuf, mozilla::fallible);
   return NS_OK;

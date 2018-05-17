@@ -97,7 +97,7 @@ class OptimizationInfo
 
     // The maximum total bytecode size of an inline call site. We use a lower
     // value if off-thread compilation is not available, to avoid stalling the
-    // active thread.
+    // main thread.
     uint32_t inlineMaxBytecodePerCallSiteHelperThread_;
     uint32_t inlineMaxBytecodePerCallSiteMainThread_;
 
@@ -219,10 +219,6 @@ class OptimizationInfo
 
     bool eliminateRedundantChecksEnabled() const {
         return eliminateRedundantChecks_;
-    }
-
-    bool flowAliasAnalysisEnabled() const {
-        return !JitOptions.disableFlowAA;
     }
 
     IonRegisterAllocator registerAllocator() const {

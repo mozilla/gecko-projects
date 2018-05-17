@@ -390,11 +390,11 @@ class ScriptSource
     };
 
   private:
-    uint32_t refs;
+    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> refs;
 
     // Note: while ScriptSources may be compressed off thread, they are only
-    // modified by the active thread, and all members are always safe to access
-    // on the active thread.
+    // modified by the main thread, and all members are always safe to access
+    // on the main thread.
 
     // Indicate which field in the |data| union is active.
 
@@ -665,7 +665,7 @@ class ScriptSource
     // The |sourceObject| argument is the object holding the current
     // ScriptSource.
     bool xdrEncodeFunction(JSContext* cx, HandleFunction fun,
-                           HandleScriptSource sourceObject);
+                           HandleScriptSourceObject sourceObject);
 
     // Linearize the encoded content in the |buffer| provided as argument to
     // |xdrEncodeTopLevel|, and free the XDR encoder.  In case of errors, the
@@ -725,10 +725,10 @@ class ScriptSourceObject : public NativeObject
 
     // Initialize those properties of this ScriptSourceObject whose values
     // are provided by |options|, re-wrapping as necessary.
-    static bool initFromOptions(JSContext* cx, HandleScriptSource source,
+    static bool initFromOptions(JSContext* cx, HandleScriptSourceObject source,
                                 const ReadOnlyCompileOptions& options);
 
-    static bool initElementProperties(JSContext* cx, HandleScriptSource source,
+    static bool initElementProperties(JSContext* cx, HandleScriptSourceObject source,
                                       HandleObject element, HandleString elementAttrName);
 
     ScriptSource* source() const {
@@ -766,12 +766,14 @@ enum class FunctionAsyncKind : bool { SyncFunction, AsyncFunction };
  */
 template<XDRMode mode>
 XDRResult
-XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSource sourceObject,
+XDRScript(XDRState<mode>* xdr, HandleScope enclosingScope,
+          HandleScriptSourceObject sourceObject,
           HandleFunction fun, MutableHandleScript scriptp);
 
 template<XDRMode mode>
 XDRResult
-XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScriptSource sourceObject,
+XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope,
+              HandleScriptSourceObject sourceObject,
               HandleFunction fun, MutableHandle<LazyScript*> lazy);
 
 /*
@@ -902,7 +904,7 @@ class JSScript : public js::gc::TenuredCell
     friend
     js::XDRResult
     js::XDRScript(js::XDRState<mode>* xdr, js::HandleScope enclosingScope,
-                  js::HandleScriptSource sourceObject, js::HandleFunction fun,
+                  js::HandleScriptSourceObject sourceObject, js::HandleFunction fun,
                   js::MutableHandleScript scriptp);
 
     friend bool
@@ -1712,9 +1714,12 @@ class JSScript : public js::gc::TenuredCell
     /* Ensure the script has a TypeScript. */
     inline bool ensureHasTypes(JSContext* cx, js::AutoKeepTypeScripts&);
 
-    inline js::TypeScript* types();
+    inline js::TypeScript* types(const js::AutoSweepTypeScript& sweep);
 
-    void maybeSweepTypes(js::AutoClearTypeInferenceStateOnOOM* oom);
+    inline bool typesNeedsSweep() const;
+
+    void sweepTypes(const js::AutoSweepTypeScript& sweep,
+                    js::AutoClearTypeInferenceStateOnOOM* oom);
 
     inline js::GlobalObject& global() const;
     js::GlobalObject& uninlinedGlobal() const;
@@ -2154,7 +2159,8 @@ class LazyScript : public gc::TenuredCell
     uint32_t lineno_;
     uint32_t column_;
 
-    LazyScript(JSFunction* fun, void* table, uint64_t packedFields,
+    LazyScript(JSFunction* fun, ScriptSourceObject& sourceObject,
+               void* table, uint64_t packedFields,
                uint32_t begin, uint32_t end, uint32_t toStringStart,
                uint32_t lineno, uint32_t column);
 
@@ -2162,6 +2168,7 @@ class LazyScript : public gc::TenuredCell
     // innerFunctions. To be GC-safe, the caller must initialize both vectors
     // with valid atoms and functions.
     static LazyScript* CreateRaw(JSContext* cx, HandleFunction fun,
+                                 HandleScriptSourceObject sourceObject,
                                  uint64_t packedData, uint32_t begin, uint32_t end,
                                  uint32_t toStringStart, uint32_t lineno, uint32_t column);
 
@@ -2172,6 +2179,7 @@ class LazyScript : public gc::TenuredCell
     // Create a LazyScript and initialize closedOverBindings and innerFunctions
     // with the provided vectors.
     static LazyScript* Create(JSContext* cx, HandleFunction fun,
+                              HandleScriptSourceObject sourceObject,
                               const frontend::AtomVector& closedOverBindings,
                               Handle<GCVector<JSFunction*, 8>> innerFunctions,
                               uint32_t begin, uint32_t end,
@@ -2188,7 +2196,7 @@ class LazyScript : public gc::TenuredCell
     // enclosing function is also lazy.
     static LazyScript* Create(JSContext* cx, HandleFunction fun,
                               HandleScript script, HandleScope enclosingScope,
-                              HandleScriptSource sourceObject,
+                              HandleScriptSourceObject sourceObject,
                               uint64_t packedData, uint32_t begin, uint32_t end,
                               uint32_t toStringStart, uint32_t lineno, uint32_t column);
 
@@ -2216,16 +2224,16 @@ class LazyScript : public gc::TenuredCell
         return enclosingScope_;
     }
 
-    ScriptSourceObject* sourceObject() const;
+    ScriptSourceObject& sourceObject() const;
     ScriptSource* scriptSource() const {
-        return sourceObject()->source();
+        return sourceObject().source();
     }
     ScriptSource* maybeForwardedScriptSource() const;
     bool mutedErrors() const {
         return scriptSource()->mutedErrors();
     }
 
-    void setEnclosingScopeAndSource(Scope* enclosingScope, ScriptSourceObject* sourceObject);
+    void setEnclosingScope(Scope* enclosingScope);
 
     uint32_t numClosedOverBindings() const {
         return p_.numClosedOverBindings;
@@ -2377,7 +2385,14 @@ class LazyScript : public gc::TenuredCell
         toStringEnd_ = toStringEnd;
     }
 
-    bool hasUncompiledEnclosingScript() const;
+    // Returns true if the enclosing script failed to compile.
+    // See the comment in the definition for more details.
+    bool hasUncompletedEnclosingScript() const;
+
+    // Returns true if the enclosing script is also lazy.
+    bool isEnclosingScriptLazy() const {
+        return !enclosingScope_;
+    }
 
     friend class GCMarker;
     void traceChildren(JSTracer* trc);
@@ -2423,6 +2438,10 @@ struct ScriptAndCounts
         TraceRoot(trc, &script, "ScriptAndCounts::script");
     }
 };
+
+extern char*
+FormatIntroducedFilename(JSContext* cx, const char* filename, unsigned lineno,
+                         const char* introducer);
 
 struct GSNCache;
 

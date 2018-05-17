@@ -1,4 +1,4 @@
-var conn = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase).DBConnection;
+var conn = PlacesUtils.history.DBConnection;
 
 /**
  * Gets a single column value from either the places or historyvisits table.
@@ -42,7 +42,7 @@ add_task(async function() {
       onClearHistory() {},
       onPageChanged() {},
       onDeleteVisits() {},
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryObserver])
+      QueryInterface: ChromeUtils.generateQI([Ci.nsINavHistoryObserver])
     };
     PlacesUtils.history.addObserver(historyObserver);
   });

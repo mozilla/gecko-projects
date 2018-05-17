@@ -29,6 +29,10 @@
 #include "vm/JSContext.h"
 #include "vm/MutexIDs.h"
 
+namespace JS {
+class OffThreadToken {};
+} // namespace JS
+
 namespace js {
 
 class AutoLockHelperThreadState;
@@ -49,6 +53,7 @@ enum class ParseTaskKind
     Script,
     Module,
     ScriptDecode,
+    BinAST,
     MultiScriptsDecode
 };
 
@@ -89,6 +94,7 @@ class GlobalHelperThreadState
 
     typedef Vector<jit::IonBuilder*, 0, SystemAllocPolicy> IonBuilderVector;
     typedef Vector<ParseTask*, 0, SystemAllocPolicy> ParseTaskVector;
+    typedef mozilla::LinkedList<ParseTask> ParseTaskList;
     typedef Vector<UniquePtr<SourceCompressionTask>, 0, SystemAllocPolicy> SourceCompressionTaskVector;
     typedef Vector<GCHelperState*, 0, SystemAllocPolicy> GCHelperStateVector;
     typedef Vector<GCParallelTask*, 0, SystemAllocPolicy> GCParallelTaskVector;
@@ -117,7 +123,8 @@ class GlobalHelperThreadState
     PromiseHelperTaskVector promiseHelperTasks_;
 
     // Script parsing/emitting worklist and finished jobs.
-    ParseTaskVector parseWorklist_, parseFinishedList_;
+    ParseTaskVector parseWorklist_;
+    ParseTaskList parseFinishedList_;
 
     // Parse tasks waiting for an atoms-zone GC to complete.
     ParseTaskVector parseWaitingOnGC_;
@@ -137,9 +144,13 @@ class GlobalHelperThreadState
     // GC tasks needing to be done in parallel.
     GCParallelTaskVector gcParallelWorklist_;
 
-    ParseTask* removeFinishedParseTask(ParseTaskKind kind, void* token);
+    ParseTask* removeFinishedParseTask(ParseTaskKind kind, JS::OffThreadToken* token);
 
   public:
+
+    void addSizeOfIncludingThis(JS::GlobalStats* stats,
+                                AutoLockHelperThreadState& lock) const;
+
     size_t maxIonCompilationThreads() const;
     size_t maxWasmCompilationThreads() const;
     size_t maxWasmTier2GeneratorThreads() const;
@@ -158,7 +169,7 @@ class GlobalHelperThreadState
     void lock();
     void unlock();
 #ifdef DEBUG
-    bool isLockedByCurrentThread();
+    bool isLockedByCurrentThread() const;
 #endif
 
     enum CondVar {
@@ -230,7 +241,7 @@ class GlobalHelperThreadState
     ParseTaskVector& parseWorklist(const AutoLockHelperThreadState&) {
         return parseWorklist_;
     }
-    ParseTaskVector& parseFinishedList(const AutoLockHelperThreadState&) {
+    ParseTaskList& parseFinishedList(const AutoLockHelperThreadState&) {
         return parseFinishedList_;
     }
     ParseTaskVector& parseWaitingOnGC(const AutoLockHelperThreadState&) {
@@ -286,32 +297,35 @@ class GlobalHelperThreadState
             mozilla::IsSame<bool, decltype((*(F*)nullptr)((ParseTask*)nullptr))>::value
         >::Type
     >
-    bool finishParseTask(JSContext* cx, ParseTaskKind kind, void* token, F&& finishCallback);
+    bool finishParseTask(JSContext* cx, ParseTaskKind kind, JS::OffThreadToken* token, F&& finishCallback);
 
-    JSScript* finishParseTask(JSContext* cx, ParseTaskKind kind, void* token);
+    JSScript* finishParseTask(JSContext* cx, ParseTaskKind kind, JS::OffThreadToken* token);
 
-    bool finishParseTask(JSContext* cx, ParseTaskKind kind, void* token, MutableHandle<ScriptVector> scripts);
+    bool finishParseTask(JSContext* cx, ParseTaskKind kind, JS::OffThreadToken* token, MutableHandle<ScriptVector> scripts);
 
-    void cancelParseTask(JSRuntime* rt, ParseTaskKind kind, void* token);
+    void cancelParseTask(JSRuntime* rt, ParseTaskKind kind, JS::OffThreadToken* token);
 
     void mergeParseTaskCompartment(JSContext* cx, ParseTask* parseTask, JSCompartment* dest);
 
     void trace(JSTracer* trc, js::gc::AutoTraceSession& session);
 
-    JSScript* finishScriptParseTask(JSContext* cx, void* token);
-    JSScript* finishScriptDecodeTask(JSContext* cx, void* token);
-    bool finishMultiScriptsDecodeTask(JSContext* cx, void* token, MutableHandle<ScriptVector> scripts);
-    JSObject* finishModuleParseTask(JSContext* cx, void* token);
+    JSScript* finishScriptParseTask(JSContext* cx, JS::OffThreadToken* token);
+    JSScript* finishScriptDecodeTask(JSContext* cx, JS::OffThreadToken* token);
+    bool finishMultiScriptsDecodeTask(JSContext* cx, JS::OffThreadToken* token, MutableHandle<ScriptVector> scripts);
+    JSObject* finishModuleParseTask(JSContext* cx, JS::OffThreadToken* token);
+
+#if defined(JS_BUILD_BINAST)
+    JSScript* finishBinASTDecodeTask(JSContext* cx, JS::OffThreadToken* token);
+#endif
 
     bool hasActiveThreads(const AutoLockHelperThreadState&);
+    void waitForAllThreads();
     void waitForAllThreadsLocked(AutoLockHelperThreadState&);
 
     template <typename T>
     bool checkTaskThreadLimit(size_t maxThreads, bool isMaster = false) const;
 
   private:
-    void waitForAllThreads();
-
     /*
      * Lock protecting all mutable shared state accessed by helper threads, and
      * used by all condition variables.
@@ -592,6 +606,15 @@ StartOffThreadDecodeScript(JSContext* cx, const ReadOnlyCompileOptions& options,
                            const JS::TranscodeRange& range,
                            JS::OffThreadCompileCallback callback, void* callbackData);
 
+#if defined(JS_BUILD_BINAST)
+
+bool
+StartOffThreadDecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+                           const uint8_t* buf, size_t length,
+                           JS::OffThreadCompileCallback callback, void* callbackData);
+
+#endif /* JS_BUILD_BINAST */
+
 bool
 StartOffThreadDecodeMultiScripts(JSContext* cx, const ReadOnlyCompileOptions& options,
                                  JS::TranscodeSources& sources,
@@ -649,7 +672,7 @@ class MOZ_RAII AutoUnlockHelperThreadState : public UnlockGuard<Mutex>
     }
 };
 
-struct ParseTask
+struct ParseTask : public mozilla::LinkedListElement<ParseTask>, public JS::OffThreadToken
 {
     ParseTaskKind kind;
     OwningCompileOptions options;
@@ -692,6 +715,11 @@ struct ParseTask
     }
 
     void trace(JSTracer* trc);
+
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
+        return mallocSizeOf(this) + sizeOfExcludingThis(mallocSizeOf);
+    }
 };
 
 struct ScriptParseTask : public ParseTask
@@ -720,6 +748,19 @@ struct ScriptDecodeTask : public ParseTask
                      JS::OffThreadCompileCallback callback, void* callbackData);
     void parse(JSContext* cx) override;
 };
+
+#if defined(JS_BUILD_BINAST)
+
+struct BinASTDecodeTask : public ParseTask
+{
+    mozilla::Range<const uint8_t> data;
+
+    BinASTDecodeTask(JSContext* cx, const uint8_t* buf, size_t length,
+                     JS::OffThreadCompileCallback callback, void* callbackData);
+    void parse(JSContext* cx) override;
+};
+
+#endif /* JS_BUILD_BINAST */
 
 struct MultiScriptsDecodeTask : public ParseTask
 {

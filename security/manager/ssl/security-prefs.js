@@ -53,7 +53,6 @@ pref("security.enterprise_roots.enabled", false);
 // 2: fetch OCSP only for EV certificates
 pref("security.OCSP.enabled", 1);
 pref("security.OCSP.require", false);
-pref("security.OCSP.GET.enabled", false);
 #ifdef RELEASE_OR_BETA
 pref("security.OCSP.timeoutMilliseconds.soft", 2000);
 #else
@@ -93,7 +92,7 @@ pref("security.signed_app_signatures.policy", 2);
 #ifdef RELEASE_OR_BETA
 pref("security.pki.name_matching_mode", 1);
 #else
-pref("security.pki.name_matching_mode", 2);
+pref("security.pki.name_matching_mode", 3);
 #endif
 
 // security.pki.netscape_step_up_policy controls how the platform handles the

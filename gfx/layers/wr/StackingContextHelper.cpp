@@ -17,6 +17,7 @@ StackingContextHelper::StackingContextHelper()
   , mScale(1.0f, 1.0f)
   , mAffectsClipPositioning(false)
   , mIsPreserve3D(false)
+  , mRasterizeLocally(false)
 {
   // mOrigin remains at 0,0
 }
@@ -27,17 +28,20 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              const LayoutDeviceRect& aBounds,
                                              const gfx::Matrix4x4* aBoundTransform,
                                              const wr::WrAnimationProperty* aAnimation,
-                                             float* aOpacityPtr,
-                                             gfx::Matrix4x4* aTransformPtr,
-                                             gfx::Matrix4x4* aPerspectivePtr,
+                                             const float* aOpacityPtr,
+                                             const gfx::Matrix4x4* aTransformPtr,
+                                             const gfx::Matrix4x4* aPerspectivePtr,
                                              const gfx::CompositionOp& aMixBlendMode,
                                              bool aBackfaceVisible,
                                              bool aIsPreserve3D,
-                                             const Maybe<gfx::Matrix4x4>& aTransformForScrollData)
+                                             const Maybe<gfx::Matrix4x4>& aTransformForScrollData,
+                                             const wr::WrClipId* aClipNodeId,
+                                             bool aRasterizeLocally)
   : mBuilder(&aBuilder)
   , mScale(1.0f, 1.0f)
   , mTransformForScrollData(aTransformForScrollData)
   , mIsPreserve3D(aIsPreserve3D)
+  , mRasterizeLocally(aRasterizeLocally || aParentSC.mRasterizeLocally)
 {
   // Compute scale for fallback rendering. We don't try to guess a scale for 3d
   // transformed items
@@ -52,19 +56,24 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
     mScale = aParentSC.mScale;
   }
 
-  mBuilder->PushStackingContext(wr::ToLayoutRect(aBounds),
-                                nullptr,
-                                aAnimation,
-                                aOpacityPtr,
-                                aTransformPtr,
-                                aIsPreserve3D ? wr::TransformStyle::Preserve3D : wr::TransformStyle::Flat,
-                                aPerspectivePtr,
-                                wr::ToMixBlendMode(aMixBlendMode),
-                                aFilters,
-                                aBackfaceVisible);
+  auto rasterSpace = mRasterizeLocally
+    ? wr::GlyphRasterSpace::Local(std::max(mScale.width, mScale.height))
+    : wr::GlyphRasterSpace::Screen();
 
-  mAffectsClipPositioning =
-      (aTransformPtr && !aTransformPtr->IsIdentity()) ||
+  mReferenceFrameId = mBuilder->PushStackingContext(
+          wr::ToLayoutRect(aBounds),
+          aClipNodeId,
+          aAnimation,
+          aOpacityPtr,
+          aTransformPtr,
+          aIsPreserve3D ? wr::TransformStyle::Preserve3D : wr::TransformStyle::Flat,
+          aPerspectivePtr,
+          wr::ToMixBlendMode(aMixBlendMode),
+          aFilters,
+          aBackfaceVisible,
+          rasterSpace);
+
+  mAffectsClipPositioning = mReferenceFrameId.isSome() ||
       (aBounds.TopLeft() != LayoutDevicePoint());
 }
 

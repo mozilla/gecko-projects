@@ -18,8 +18,7 @@ XBLChildrenElement::~XBLChildrenElement()
 
 NS_IMPL_ISUPPORTS_INHERITED(XBLChildrenElement,
                             Element,
-                            nsIDOMNode,
-                            nsIDOMElement)
+                            nsIDOMNode)
 
 NS_IMPL_ELEMENT_CLONE(XBLChildrenElement)
 
@@ -83,7 +82,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsAnonymousContentList)
 
 NS_INTERFACE_TABLE_HEAD(nsAnonymousContentList)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
-  NS_INTERFACE_TABLE(nsAnonymousContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE(nsAnonymousContentList, nsINodeList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsAnonymousContentList)
 NS_INTERFACE_MAP_END
 

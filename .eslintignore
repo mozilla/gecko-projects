@@ -350,8 +350,11 @@ testing/marionette/doc
 testing/marionette/harness
 
 # other testing/ exclusions
-testing/mochitest/**
 # third party modules
+testing/mochitest/tests/Harness_sanity/**
+testing/mochitest/MochiKit/**
+testing/mochitest/tests/MochiKit-1.4.2/**
+testing/mochitest/tests/SimpleTest/**
 testing/modules/ajv-4.1.1.js
 testing/modules/sinon-2.3.2.js
 # octothorpe used for pref file comment causes parsing error
@@ -387,11 +390,11 @@ toolkit/components/workerloader/tests/moduleF-syntax-error.js
 toolkit/modules/tests/xpcshell/test_task.js
 
 # External code:
+browser/components/payments/res/vendor/*
 toolkit/components/microformats/test/**
 toolkit/components/microformats/microformat-shiv.js
 toolkit/components/reader/Readability.js
 toolkit/components/reader/JSDOMParser.js
-toolkit/components/payments/res/vendor/*
 
 # Uses preprocessing
 toolkit/content/widgets/wizard.xml

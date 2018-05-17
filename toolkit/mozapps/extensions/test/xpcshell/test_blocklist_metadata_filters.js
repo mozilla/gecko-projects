@@ -35,13 +35,7 @@ var WindowWatcher = {
 
   },
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsIWindowWatcher)
-     || iid.equals(Ci.nsISupports))
-      return this;
-
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIWindowWatcher"])
 };
 
 MockRegistrar.register("@mozilla.org/embedcomp/window-watcher;1", WindowWatcher);
@@ -65,13 +59,13 @@ function end_test() {
   do_test_finished();
 }
 
-function run_test() {
+async function run_test() {
   do_test_pending();
 
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1");
 
   // Should get blocked by name
-  writeInstallRDFForExtension({
+  await promiseWriteInstallRDFForExtension({
     id: "block1@tests.mozilla.org",
     version: "1.0",
     name: "Mozilla Corp.",
@@ -84,7 +78,7 @@ function run_test() {
   }, profileDir);
 
   // Should get blocked by all the attributes.
-  writeInstallRDFForExtension({
+  await promiseWriteInstallRDFForExtension({
     id: "block2@tests.mozilla.org",
     version: "1.0",
     name: "Moz-addon",
@@ -101,7 +95,7 @@ function run_test() {
 
   // Fails to get blocked because of a different ID even though other
   // attributes match against a blocklist entry.
-  writeInstallRDFForExtension({
+  await promiseWriteInstallRDFForExtension({
     id: "block3@tests.mozilla.org",
     version: "1.0",
     name: "Moz-addon",
@@ -116,30 +110,28 @@ function run_test() {
     }]
   }, profileDir);
 
-  startupManager();
+  await promiseStartupManager();
 
-  AddonManager.getAddonsByIDs(["block1@tests.mozilla.org",
-                               "block2@tests.mozilla.org",
-                               "block3@tests.mozilla.org"], function([a1, a2, a3]) {
-    Assert.equal(a1.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
-    Assert.equal(a2.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
-    Assert.equal(a3.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+  let [a1, a2, a3] = await AddonManager.getAddonsByIDs(["block1@tests.mozilla.org",
+                                                        "block2@tests.mozilla.org",
+                                                        "block3@tests.mozilla.org"]);
+  Assert.equal(a1.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+  Assert.equal(a2.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+  Assert.equal(a3.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
 
-    run_test_1();
-  });
+  run_test_1();
 }
 
 function run_test_1() {
-  load_blocklist("test_blocklist_metadata_filters_1.xml", function() {
-    restartManager();
+  load_blocklist("test_blocklist_metadata_filters_1.xml", async function() {
+    await promiseRestartManager();
 
-    AddonManager.getAddonsByIDs(["block1@tests.mozilla.org",
-                                 "block2@tests.mozilla.org",
-                                 "block3@tests.mozilla.org"], function([a1, a2, a3]) {
-      Assert.equal(a1.blocklistState, Ci.nsIBlocklistService.STATE_SOFTBLOCKED);
-      Assert.equal(a2.blocklistState, Ci.nsIBlocklistService.STATE_BLOCKED);
-      Assert.equal(a3.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
-      end_test();
-    });
+    let [a1, a2, a3] = await AddonManager.getAddonsByIDs(["block1@tests.mozilla.org",
+                                                          "block2@tests.mozilla.org",
+                                                          "block3@tests.mozilla.org"]);
+    Assert.equal(a1.blocklistState, Ci.nsIBlocklistService.STATE_SOFTBLOCKED);
+    Assert.equal(a2.blocklistState, Ci.nsIBlocklistService.STATE_BLOCKED);
+    Assert.equal(a3.blocklistState, Ci.nsIBlocklistService.STATE_NOT_BLOCKED);
+    end_test();
   });
 }

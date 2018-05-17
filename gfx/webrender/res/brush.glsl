@@ -8,15 +8,21 @@ void brush_vs(
     VertexInfo vi,
     int prim_address,
     RectWithSize local_rect,
+    RectWithSize segment_rect,
     ivec3 user_data,
     mat4 transform,
-    PictureTask pic_task
+    PictureTask pic_task,
+    int brush_flags,
+    vec4 segment_data
 );
 
 #define VECS_PER_BRUSH_PRIM                 2
 #define VECS_PER_SEGMENT                    2
 
 #define BRUSH_FLAG_PERSPECTIVE_INTERPOLATION    1
+#define BRUSH_FLAG_SEGMENT_RELATIVE             2
+#define BRUSH_FLAG_SEGMENT_REPEAT_X             4
+#define BRUSH_FLAG_SEGMENT_REPEAT_Y             8
 
 struct BrushInstance {
     int picture_address;
@@ -146,27 +152,43 @@ void main(void) {
         vi,
         brush.prim_address + VECS_PER_BRUSH_PRIM,
         brush_prim.local_rect,
+        local_segment_rect,
         brush.user_data,
         scroll_node.transform,
-        pic_task
+        pic_task,
+        brush.flags,
+        segment_data[1]
     );
 }
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
 
-vec4 brush_fs();
+struct Fragment {
+    vec4 color;
+#ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+    vec4 blend;
+#endif
+};
+
+Fragment brush_fs();
 
 void main(void) {
     // Run the specific brush FS code to output the color.
-    vec4 color = brush_fs();
+    Fragment frag = brush_fs();
 
 #ifdef WR_FEATURE_ALPHA_PASS
     // Apply the clip mask
-    color *= do_clip();
+    float clip_alpha = do_clip();
+
+    frag.color *= clip_alpha;
+
+    #ifdef WR_FEATURE_DUAL_SOURCE_BLENDING
+        oFragBlend = frag.blend * clip_alpha;
+    #endif
 #endif
 
     // TODO(gw): Handle pre-multiply common code here as required.
-    oFragColor = color;
+    oFragColor = frag.color;
 }
 #endif

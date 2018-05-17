@@ -701,7 +701,7 @@ BaselineCompiler::emitInterruptCheck()
 
     Label done;
     masm.branch32(Assembler::Equal,
-                  AbsoluteAddress(cx->addressOfInterrupt()), Imm32(0),
+                  AbsoluteAddress(cx->addressOfInterruptBits()), Imm32(0),
                   &done);
 
     prepareVMCall();
@@ -4982,12 +4982,7 @@ BaselineCompiler::emit_JSOP_INITHOMEOBJECT()
 
     // Set HOMEOBJECT_SLOT
     Address addr(func, FunctionExtended::offsetOfMethodHomeObjectSlot());
-#ifdef DEBUG
-    Label isUndefined;
-    masm.branchTestUndefined(Assembler::Equal, addr, &isUndefined);
-    masm.assumeUnreachable("INITHOMEOBJECT expects undefined slot");
-    masm.bind(&isUndefined);
-#endif
+    masm.guardedCallPreBarrier(addr, MIRType::Value);
     masm.storeValue(R0, addr);
 
     Register temp = R1.scratchReg();

@@ -182,6 +182,12 @@ struct TErrorResult<CleanupPolicy>::Message {
   {
     return GetErrorArgCount(mErrorNumber) == mArgs.Length();
   }
+
+  bool operator==(const TErrorResult<CleanupPolicy>::Message& aRight)
+  {
+    return mErrorNumber == aRight.mErrorNumber &&
+           mArgs == aRight.mArgs;
+  }
 };
 
 template<typename CleanupPolicy>
@@ -192,9 +198,9 @@ TErrorResult<CleanupPolicy>::CreateErrorMessageHelper(const dom::ErrNum errorNum
   AssertInOwningThread();
   mResult = errorType;
 
-  mMessage = new Message();
-  mMessage->mErrorNumber = errorNumber;
-  return mMessage->mArgs;
+  Message* message = InitMessage(new Message());
+  message->mErrorNumber = errorNumber;
+  return message->mArgs;
 }
 
 template<typename CleanupPolicy>
@@ -204,9 +210,9 @@ TErrorResult<CleanupPolicy>::SerializeMessage(IPC::Message* aMsg) const
   using namespace IPC;
   AssertInOwningThread();
   MOZ_ASSERT(mUnionState == HasMessage);
-  MOZ_ASSERT(mMessage);
-  WriteParam(aMsg, mMessage->mArgs);
-  WriteParam(aMsg, mMessage->mErrorNumber);
+  MOZ_ASSERT(mExtra.mMessage);
+  WriteParam(aMsg, mExtra.mMessage->mArgs);
+  WriteParam(aMsg, mExtra.mMessage->mErrorNumber);
 }
 
 template<typename CleanupPolicy>
@@ -226,7 +232,7 @@ TErrorResult<CleanupPolicy>::DeserializeMessage(const IPC::Message* aMsg,
   }
 
   MOZ_ASSERT(mUnionState == HasNothing);
-  mMessage = readMessage.forget();
+  InitMessage(readMessage.forget());
 #ifdef DEBUG
   mUnionState = HasMessage;
 #endif // DEBUG
@@ -238,10 +244,11 @@ void
 TErrorResult<CleanupPolicy>::SetPendingExceptionWithMessage(JSContext* aCx)
 {
   AssertInOwningThread();
-  MOZ_ASSERT(mMessage, "SetPendingExceptionWithMessage() can be called only once");
   MOZ_ASSERT(mUnionState == HasMessage);
+  MOZ_ASSERT(mExtra.mMessage,
+             "SetPendingExceptionWithMessage() can be called only once");
 
-  Message* message = mMessage;
+  Message* message = mExtra.mMessage;
   MOZ_RELEASE_ASSERT(message->HasCorrectNumberOfArguments());
   const uint32_t argCount = message->mArgs.Length();
   const char16_t* args[JS::MaxNumErrorArguments + 1];
@@ -264,8 +271,9 @@ TErrorResult<CleanupPolicy>::ClearMessage()
 {
   AssertInOwningThread();
   MOZ_ASSERT(IsErrorWithMessage());
-  delete mMessage;
-  mMessage = nullptr;
+  MOZ_ASSERT(mUnionState == HasMessage);
+  delete mExtra.mMessage;
+  mExtra.mMessage = nullptr;
 #ifdef DEBUG
   mUnionState = HasNothing;
 #endif // DEBUG
@@ -281,16 +289,16 @@ TErrorResult<CleanupPolicy>::ThrowJSException(JSContext* cx, JS::Handle<JS::Valu
 
   ClearUnionData();
 
-  // Make sure mJSException is initialized _before_ we try to root it.  But
-  // don't set it to exn yet, because we don't want to do that until after we
-  // root.
-  mJSException.asValueRef().setUndefined();
-  if (!js::AddRawValueRoot(cx, &mJSException.asValueRef(), "TErrorResult::mJSException")) {
+  // Make sure mExtra.mJSException is initialized _before_ we try to root it.
+  // But don't set it to exn yet, because we don't want to do that until after
+  // we root.
+  JS::Value& exc = InitJSException();
+  if (!js::AddRawValueRoot(cx, &exc, "TErrorResult::mExtra::mJSException")) {
     // Don't use NS_ERROR_INTERNAL_ERRORRESULT_JS_EXCEPTION, because that
-    // indicates we have in fact rooted mJSException.
+    // indicates we have in fact rooted mExtra.mJSException.
     mResult = NS_ERROR_OUT_OF_MEMORY;
   } else {
-    mJSException = exn;
+    exc = exn;
     mResult = NS_ERROR_INTERNAL_ERRORRESULT_JS_EXCEPTION;
 #ifdef DEBUG
     mUnionState = HasJSException;
@@ -307,14 +315,14 @@ TErrorResult<CleanupPolicy>::SetPendingJSException(JSContext* cx)
              "Why didn't you tell us you planned to handle JS exceptions?");
   MOZ_ASSERT(mUnionState == HasJSException);
 
-  JS::Rooted<JS::Value> exception(cx, mJSException);
+  JS::Rooted<JS::Value> exception(cx, mExtra.mJSException);
   if (JS_WrapValue(cx, &exception)) {
     JS_SetPendingException(cx, exception);
   }
-  mJSException = exception;
+  mExtra.mJSException = exception;
   // If JS_WrapValue failed, not much we can do about it...  No matter
-  // what, go ahead and unroot mJSException.
-  js::RemoveRawValueRoot(cx, &mJSException.asValueRef());
+  // what, go ahead and unroot mExtra.mJSException.
+  js::RemoveRawValueRoot(cx, &mExtra.mJSException);
 
   mResult = NS_OK;
 #ifdef DEBUG
@@ -331,6 +339,12 @@ struct TErrorResult<CleanupPolicy>::DOMExceptionInfo {
 
   nsCString mMessage;
   nsresult mRv;
+
+  bool operator==(const TErrorResult<CleanupPolicy>::DOMExceptionInfo& aRight)
+  {
+    return mRv == aRight.mRv &&
+           mMessage == aRight.mMessage;
+  }
 };
 
 template<typename CleanupPolicy>
@@ -339,10 +353,10 @@ TErrorResult<CleanupPolicy>::SerializeDOMExceptionInfo(IPC::Message* aMsg) const
 {
   using namespace IPC;
   AssertInOwningThread();
-  MOZ_ASSERT(mDOMExceptionInfo);
   MOZ_ASSERT(mUnionState == HasDOMExceptionInfo);
-  WriteParam(aMsg, mDOMExceptionInfo->mMessage);
-  WriteParam(aMsg, mDOMExceptionInfo->mRv);
+  MOZ_ASSERT(mExtra.mDOMExceptionInfo);
+  WriteParam(aMsg, mExtra.mDOMExceptionInfo->mMessage);
+  WriteParam(aMsg, mExtra.mDOMExceptionInfo->mRv);
 }
 
 template<typename CleanupPolicy>
@@ -361,7 +375,7 @@ TErrorResult<CleanupPolicy>::DeserializeDOMExceptionInfo(const IPC::Message* aMs
 
   MOZ_ASSERT(mUnionState == HasNothing);
   MOZ_ASSERT(IsDOMException());
-  mDOMExceptionInfo = new DOMExceptionInfo(rv, message);
+  InitDOMExceptionInfo(new DOMExceptionInfo(rv, message));
 #ifdef DEBUG
   mUnionState = HasDOMExceptionInfo;
 #endif // DEBUG
@@ -377,7 +391,7 @@ TErrorResult<CleanupPolicy>::ThrowDOMException(nsresult rv,
   ClearUnionData();
 
   mResult = NS_ERROR_INTERNAL_ERRORRESULT_DOMEXCEPTION;
-  mDOMExceptionInfo = new DOMExceptionInfo(rv, message);
+  InitDOMExceptionInfo(new DOMExceptionInfo(rv, message));
 #ifdef DEBUG
   mUnionState = HasDOMExceptionInfo;
 #endif
@@ -388,11 +402,12 @@ void
 TErrorResult<CleanupPolicy>::SetPendingDOMException(JSContext* cx)
 {
   AssertInOwningThread();
-  MOZ_ASSERT(mDOMExceptionInfo,
-             "SetPendingDOMException() can be called only once");
   MOZ_ASSERT(mUnionState == HasDOMExceptionInfo);
+  MOZ_ASSERT(mExtra.mDOMExceptionInfo,
+             "SetPendingDOMException() can be called only once");
 
-  dom::Throw(cx, mDOMExceptionInfo->mRv, mDOMExceptionInfo->mMessage);
+  dom::Throw(cx, mExtra.mDOMExceptionInfo->mRv,
+             mExtra.mDOMExceptionInfo->mMessage);
 
   ClearDOMExceptionInfo();
   mResult = NS_OK;
@@ -404,9 +419,9 @@ TErrorResult<CleanupPolicy>::ClearDOMExceptionInfo()
 {
   AssertInOwningThread();
   MOZ_ASSERT(IsDOMException());
-  MOZ_ASSERT(mUnionState == HasDOMExceptionInfo || !mDOMExceptionInfo);
-  delete mDOMExceptionInfo;
-  mDOMExceptionInfo = nullptr;
+  MOZ_ASSERT(mUnionState == HasDOMExceptionInfo);
+  delete mExtra.mDOMExceptionInfo;
+  mExtra.mDOMExceptionInfo = nullptr;
 #ifdef DEBUG
   mUnionState = HasNothing;
 #endif // DEBUG
@@ -420,8 +435,8 @@ TErrorResult<CleanupPolicy>::ClearUnionData()
   if (IsJSException()) {
     JSContext* cx = dom::danger::GetJSContext();
     MOZ_ASSERT(cx);
-    mJSException.asValueRef().setUndefined();
-    js::RemoveRawValueRoot(cx, &mJSException.asValueRef());
+    mExtra.mJSException.setUndefined();
+    js::RemoveRawValueRoot(cx, &mExtra.mJSException);
 #ifdef DEBUG
     mUnionState = HasNothing;
 #endif // DEBUG
@@ -459,24 +474,26 @@ TErrorResult<CleanupPolicy>::operator=(TErrorResult<CleanupPolicy>&& aRHS)
   aRHS.mMightHaveUnreportedJSException = false;
 #endif
   if (aRHS.IsErrorWithMessage()) {
-    mMessage = aRHS.mMessage;
-    aRHS.mMessage = nullptr;
+    InitMessage(aRHS.mExtra.mMessage);
+    aRHS.mExtra.mMessage = nullptr;
   } else if (aRHS.IsJSException()) {
     JSContext* cx = dom::danger::GetJSContext();
     MOZ_ASSERT(cx);
-    mJSException.asValueRef().setUndefined();
-    if (!js::AddRawValueRoot(cx, &mJSException.asValueRef(), "TErrorResult::mJSException")) {
-      MOZ_CRASH("Could not root mJSException, we're about to OOM");
+    JS::Value& exn = InitJSException();
+    if (!js::AddRawValueRoot(cx, &exn,
+                             "TErrorResult::mExtra::mJSException")) {
+      MOZ_CRASH("Could not root mExtra.mJSException, we're about to OOM");
     }
-    mJSException = aRHS.mJSException;
-    aRHS.mJSException.asValueRef().setUndefined();
-    js::RemoveRawValueRoot(cx, &aRHS.mJSException.asValueRef());
+    mExtra.mJSException = aRHS.mExtra.mJSException;
+    aRHS.mExtra.mJSException.setUndefined();
+    js::RemoveRawValueRoot(cx, &aRHS.mExtra.mJSException);
   } else if (aRHS.IsDOMException()) {
-    mDOMExceptionInfo = aRHS.mDOMExceptionInfo;
-    aRHS.mDOMExceptionInfo = nullptr;
+    InitDOMExceptionInfo(aRHS.mExtra.mDOMExceptionInfo);
+    aRHS.mExtra.mDOMExceptionInfo = nullptr;
   } else {
-    // Null out the union on both sides for hygiene purposes.
-    mMessage = aRHS.mMessage = nullptr;
+    // Null out the union on both sides for hygiene purposes.  This is purely
+    // precautionary, so InitMessage/placement-new is unnecessary.
+    mExtra.mMessage = aRHS.mExtra.mMessage = nullptr;
   }
 
 #ifdef DEBUG
@@ -497,7 +514,6 @@ TErrorResult<CleanupPolicy>::CloneTo(TErrorResult& aRv) const
 {
   AssertInOwningThread();
   aRv.AssertInOwningThread();
-
   aRv.ClearUnionData();
   aRv.mResult = mResult;
 #ifdef DEBUG
@@ -508,21 +524,22 @@ TErrorResult<CleanupPolicy>::CloneTo(TErrorResult& aRv) const
 #ifdef DEBUG
     aRv.mUnionState = HasMessage;
 #endif
-    aRv.mMessage = new Message();
-    aRv.mMessage->mArgs = mMessage->mArgs;
-    aRv.mMessage->mErrorNumber = mMessage->mErrorNumber;
+    Message* message = aRv.InitMessage(new Message());
+    message->mArgs = mExtra.mMessage->mArgs;
+    message->mErrorNumber = mExtra.mMessage->mErrorNumber;
   } else if (IsDOMException()) {
 #ifdef DEBUG
     aRv.mUnionState = HasDOMExceptionInfo;
 #endif
-    aRv.mDOMExceptionInfo = new DOMExceptionInfo(mDOMExceptionInfo->mRv,
-                                                 mDOMExceptionInfo->mMessage);
+    auto* exnInfo = new DOMExceptionInfo(mExtra.mDOMExceptionInfo->mRv,
+                                         mExtra.mDOMExceptionInfo->mMessage);
+    aRv.InitDOMExceptionInfo(exnInfo);
   } else if (IsJSException()) {
 #ifdef DEBUG
     aRv.mUnionState = HasJSException;
 #endif
     JSContext* cx = dom::danger::GetJSContext();
-    JS::Rooted<JS::Value> exception(cx, mJSException.asValueRef());
+    JS::Rooted<JS::Value> exception(cx, mExtra.mJSException);
     aRv.ThrowJSException(cx, exception);
   }
 }
@@ -606,6 +623,7 @@ TErrorResult<CleanupPolicy>::NoteJSContextException(JSContext* aCx)
 template class TErrorResult<JustAssertCleanupPolicy>;
 template class TErrorResult<AssertAndSuppressCleanupPolicy>;
 template class TErrorResult<JustSuppressCleanupPolicy>;
+template class TErrorResult<ThreadSafeJustSuppressCleanupPolicy>;
 
 } // namespace binding_danger
 
@@ -781,7 +799,7 @@ CreateInterfaceObject(JSContext* cx, JS::Handle<JSObject*> global,
     }
 
     if (isChrome && !JS_DefineFunction(cx, constructor, "isInstance",
-                                       InterfaceHasInstance, 1,
+                                       InterfaceIsInstance, 1,
                                        // Don't bother making it enumerable
                                        0)) {
       return nullptr;
@@ -1590,7 +1608,7 @@ ResolvePrototypeOrConstructor(JSContext* cx, JS::Handle<JSObject*> wrapper,
 {
   JS::Rooted<JSObject*> global(cx, js::GetGlobalForObjectCrossCompartment(obj));
   {
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
     ProtoAndIfaceCache& protoAndIfaceCache = *GetProtoAndIfaceCache(global);
     // This function is called when resolving the "constructor" and "prototype"
     // properties of Xrays for DOM prototypes and constructors respectively.
@@ -2236,7 +2254,7 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg, ErrorResult& aErr
                                   domClass->mGetAssociatedGlobal(aCx, aObj));
   MOZ_ASSERT(JS_IsGlobalObject(newParent));
 
-  JSAutoCompartment oldAc(aCx, oldParent);
+  JSAutoRealm oldAr(aCx, oldParent);
 
   JSCompartment* oldCompartment = js::GetObjectCompartment(oldParent);
   JSCompartment* newCompartment = js::GetObjectCompartment(newParent);
@@ -2256,7 +2274,7 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg, ErrorResult& aErr
     expandoObject = DOMProxyHandler::GetAndClearExpandoObject(aObj);
   }
 
-  JSAutoCompartment newAc(aCx, newParent);
+  JSAutoRealm newAr(aCx, newParent);
 
   // First we clone the reflector. We get a copy of its properties and clone its
   // expando chain.
@@ -3492,10 +3510,10 @@ GetMaplikeSetlikeBackingObject(JSContext* aCx, JS::Handle<JSObject*> aObj,
   JS::Rooted<JS::Value> slotValue(aCx);
   slotValue = js::GetReservedSlot(reflector, aSlotIndex);
   if (slotValue.isUndefined()) {
-    // Since backing object access can happen in non-originating compartments,
-    // make sure to create the backing object in reflector compartment.
+    // Since backing object access can happen in non-originating realms,
+    // make sure to create the backing object in reflector realm.
     {
-      JSAutoCompartment ac(aCx, reflector);
+      JSAutoRealm ar(aCx, reflector);
       JS::Rooted<JSObject*> newBackingObj(aCx);
       newBackingObj.set(Method(aCx));
       if (NS_WARN_IF(!newBackingObj)) {
@@ -3718,7 +3736,7 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
   // objects as constructors?  Of course it's not clear that the spec check
   // makes sense to start with: https://github.com/whatwg/html/issues/3575
   {
-    JSAutoCompartment ac(aCx, newTarget);
+    JSAutoRealm ar(aCx, newTarget);
     JS::Handle<JSObject*> constructor =
       GetPerInterfaceObjectHandle(aCx, aConstructorId, aCreator,
                                   true);
@@ -3751,9 +3769,9 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
     // Step 4.
     // If the definition is for an autonomous custom element, the active
     // function should be HTMLElement or XULElement.  We want to get the actual
-    // functions to compare to from our global's compartment, not the caller
-    // compartment.
-    JSAutoCompartment ac(aCx, global.Get());
+    // functions to compare to from our global's realm, not the caller
+    // realm.
+    JSAutoRealm ar(aCx, global.Get());
 
     JS::Rooted<JSObject*> constructor(aCx);
     if (ns == kNameSpaceID_XUL) {
@@ -3793,9 +3811,9 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
       return ThrowErrorMessage(aCx, MSG_ILLEGAL_CONSTRUCTOR);
     }
 
-    // We want to get the constructor from our global's compartment, not the
-    // caller compartment.
-    JSAutoCompartment ac(aCx, global.Get());
+    // We want to get the constructor from our global's realm, not the
+    // caller realm.
+    JSAutoRealm ar(aCx, global.Get());
     JS::Rooted<JSObject*> constructor(aCx, cb(aCx));
     if (!constructor) {
       return false;
@@ -3815,22 +3833,22 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
   // Step 7.
   if (!desiredProto) {
     // This fallback behavior is designed to match analogous behavior for the
-    // JavaScript built-ins. So we enter the compartment of our underlying
-    // newTarget object and fall back to the prototype object from that global.
+    // JavaScript built-ins. So we enter the realm of our underlying newTarget
+    // object and fall back to the prototype object from that global.
     // XXX The spec says to use GetFunctionRealm(), which is not actually
     // the same thing as what we have here (e.g. in the case of scripted callable proxies
-    // whose target is not same-compartment with the proxy, or bound functions, etc).
+    // whose target is not same-realm with the proxy, or bound functions, etc).
     // https://bugzilla.mozilla.org/show_bug.cgi?id=1317658
     {
-      JSAutoCompartment ac(aCx, newTarget);
+      JSAutoRealm ar(aCx, newTarget);
       desiredProto = GetPerInterfaceObjectHandle(aCx, aProtoId, aCreator, true);
       if (!desiredProto) {
           return false;
       }
     }
 
-    // desiredProto is in the compartment of the underlying newTarget object.
-    // Wrap it into the context compartment.
+    // desiredProto is in the realm of the underlying newTarget object.
+    // Wrap it into the context realm.
     if (!JS_WrapObject(aCx, &desiredProto)) {
       return false;
     }
@@ -3845,9 +3863,9 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
   if (constructionStack.IsEmpty()) {
     // Step 8.
     // Now we go to construct an element.  We want to do this in global's
-    // compartment, not caller compartment (the normal constructor behavior),
+    // realm, not caller realm (the normal constructor behavior),
     // just in case those elements create JS things.
-    JSAutoCompartment ac(aCx, global.Get());
+    JSAutoRealm ar(aCx, global.Get());
 
     RefPtr<NodeInfo> nodeInfo =
       doc->NodeInfoManager()->GetNodeInfo(definition->mLocalName,
@@ -3857,7 +3875,8 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
     MOZ_ASSERT(nodeInfo);
 
     if (ns == kNameSpaceID_XUL) {
-      element = new nsXULElement(nodeInfo.forget());
+      element = nsXULElement::Construct(nodeInfo.forget());
+
     } else {
       if (tag == eHTMLTag_userdefined) {
         // Autonomous custom element.
@@ -3888,8 +3907,8 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
     // that proto).
     JS::Rooted<JSObject*> reflector(aCx, element->GetWrapper());
     if (reflector) {
-      // reflector might be in different compartment.
-      JSAutoCompartment ac(aCx, reflector);
+      // reflector might be in different realm.
+      JSAutoRealm ar(aCx, reflector);
       JS::Rooted<JSObject*> givenProto(aCx, desiredProto);
       if (!JS_WrapObject(aCx, &givenProto) ||
           !JS_SetPrototype(aCx, reflector, givenProto)) {
@@ -3902,9 +3921,9 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
   }
 
   // Tail end of step 8 and step 13: returning the element.  We want to do this
-  // part in the global's compartment, though in practice it won't matter much
-  // because Element always knows which compartment it should be created in.
-  JSAutoCompartment ac(aCx, global.Get());
+  // part in the global's realm, though in practice it won't matter much
+  // because Element always knows which realm it should be created in.
+  JSAutoRealm ar(aCx, global.Get());
   if (!js::IsObjectInContextCompartment(desiredProto, aCx) &&
       !JS_WrapObject(aCx, &desiredProto)) {
     return false;
@@ -3926,11 +3945,11 @@ AssertReflectorHasGivenProto(JSContext* aCx, JSObject* aReflector,
   }
 
   JS::Rooted<JSObject*> reflector(aCx, aReflector);
-  JSAutoCompartment ac(aCx, reflector);
+  JSAutoRealm ar(aCx, reflector);
   JS::Rooted<JSObject*> reflectorProto(aCx);
   bool ok = JS_GetPrototype(aCx, reflector, &reflectorProto);
   MOZ_ASSERT(ok);
-  // aGivenProto may not be in the right compartment here, so we
+  // aGivenProto may not be in the right realm here, so we
   // have to wrap it to compare.
   JS::Rooted<JSObject*> givenProto(aCx, aGivenProto);
   ok = JS_WrapObject(aCx, &givenProto);

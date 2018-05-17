@@ -86,7 +86,7 @@ SVGStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
   nsCOMPtr<nsIDocument> oldDoc = GetUncomposedDoc();
   ShadowRoot* oldShadow = GetContainingShadow();
   SVGStyleElementBase::UnbindFromTree(aDeep, aNullParent);
-  UpdateStyleSheetInternal(oldDoc, oldShadow);
+  Unused << UpdateStyleSheetInternal(oldDoc, oldShadow);
 }
 
 nsresult
@@ -100,7 +100,7 @@ SVGStyleElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
     if (aName == nsGkAtoms::title ||
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
-      UpdateStyleSheetInternal(nullptr, nullptr, true);
+      Unused << UpdateStyleSheetInternal(nullptr, nullptr, ForceUpdate::Yes);
     }
   }
 
@@ -159,7 +159,7 @@ void
 SVGStyleElement::ContentChanged(nsIContent* aContent)
 {
   if (nsContentUtils::IsInSameAnonymousTree(this, aContent)) {
-    UpdateStyleSheetInternal(nullptr, nullptr);
+    Unused << UpdateStyleSheetInternal(nullptr, nullptr);
   }
 }
 
@@ -216,42 +216,33 @@ SVGStyleElement::SetTitle(const nsAString& aTitle, ErrorResult& rv)
 //----------------------------------------------------------------------
 // nsStyleLinkElement methods
 
-already_AddRefed<nsIURI>
-SVGStyleElement::GetStyleSheetURL(bool* aIsInline, nsIPrincipal** aTriggeringPrincipal)
+Maybe<nsStyleLinkElement::SheetInfo>
+SVGStyleElement::GetStyleSheetInfo()
 {
-  *aIsInline = true;
-  *aTriggeringPrincipal = nullptr;
-  return nullptr;
-}
-
-void
-SVGStyleElement::GetStyleSheetInfo(nsAString& aTitle,
-                                   nsAString& aType,
-                                   nsAString& aMedia,
-                                   bool* aIsAlternate)
-{
-  *aIsAlternate = false;
+  if (!IsCSSMimeTypeAttribute(*this)) {
+    return Nothing();
+  }
 
   nsAutoString title;
-  GetAttr(kNameSpaceID_None, nsGkAtoms::title, title);
-  title.CompressWhitespace();
-  aTitle.Assign(title);
+  nsAutoString media;
+  GetTitleAndMediaForElement(*this, title, media);
 
-  GetAttr(kNameSpaceID_None, nsGkAtoms::media, aMedia);
-  // The SVG spec is formulated in terms of the CSS2 spec,
-  // which specifies that media queries are case insensitive.
-  nsContentUtils::ASCIIToLower(aMedia);
-
-  GetAttr(kNameSpaceID_None, nsGkAtoms::type, aType);
-  if (aType.IsEmpty()) {
-    aType.AssignLiteral("text/css");
-  }
-}
-
-CORSMode
-SVGStyleElement::GetCORSMode() const
-{
-  return AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
+  return Some(SheetInfo {
+    *OwnerDoc(),
+    this,
+    nullptr,
+    // FIXME(bug 1459822): Why doesn't this need a principal, but
+    // HTMLStyleElement does?
+    nullptr,
+    net::ReferrerPolicy::RP_Unset,
+    // FIXME(bug 1459822): Why does this need a crossorigin attribute, but
+    // HTMLStyleElement doesn't?
+    AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin)),
+    title,
+    media,
+    HasAlternateRel::No,
+    IsInline::Yes,
+  });
 }
 
 } // namespace dom

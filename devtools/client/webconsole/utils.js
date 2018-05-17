@@ -28,6 +28,8 @@ exports.CONSOLE_WORKER_IDS = [
 
 var WebConsoleUtils = {
 
+  CONSOLE_ENTRY_THRESHOLD,
+
   /**
    * Wrap a string in an nsISupportsString object.
    *
@@ -125,7 +127,7 @@ var WebConsoleUtils = {
   /**
    * Helper function to deduce the name of the provided function.
    *
-   * @param funtion function
+   * @param function function
    *        The function whose name will be returned.
    * @return string
    *         Function name.
@@ -236,8 +238,8 @@ var WebConsoleUtils = {
    * The inputNode "paste" event handler generator. Helps prevent
    * self-xss attacks
    *
-   * @param nsIDOMElement inputField
-   * @param nsIDOMElement notificationBox
+   * @param Element inputField
+   * @param Element notificationBox
    * @returns A function to be added as a handler to 'paste' and
    *'drop' events on the input field
    */

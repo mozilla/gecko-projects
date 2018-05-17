@@ -12,6 +12,11 @@
  * https://bugzilla.mozilla.org/show_bug.cgi?id=653934
  */
 
+// Via scratchpad.xul
+/* import-globals-from ../../../toolkit/content/globalOverlay.js */
+// Via editMenuCommands.inc.xul
+/* import-globals-from ../../../toolkit/content/editMenuOverlay.js */
+
 "use strict";
 
 const SCRATCHPAD_CONTEXT_CONTENT = 1;
@@ -337,14 +342,14 @@ var Scratchpad = {
    * Hide the menu bar.
    */
   hideMenu: function SP_hideMenu() {
-    document.getElementById("sp-menubar").style.display = "none";
+    document.getElementById("sp-menu-toolbar").style.display = "none";
   },
 
   /**
    * Show the menu bar.
    */
   showMenu: function SP_showMenu() {
-    document.getElementById("sp-menubar").style.display = "";
+    document.getElementById("sp-menu-toolbar").style.display = "";
   },
 
   /**
@@ -1591,7 +1596,7 @@ var Scratchpad = {
    * The Scratchpad window load event handler. This method
    * initializes the Scratchpad window and source editor.
    *
-   * @param nsIDOMEvent aEvent
+   * @param Event aEvent
    */
   onLoad: function SP_onLoad(aEvent) {
     if (aEvent.target != document) {
@@ -1728,7 +1733,7 @@ var Scratchpad = {
    * The Scratchpad window unload event handler. This method unloads/destroys
    * the source editor.
    *
-   * @param nsIDOMEvent aEvent
+   * @param Event aEvent
    */
   onUnload: function SP_onUnload(aEvent) {
     if (aEvent.target != document) {
@@ -1822,7 +1827,7 @@ var Scratchpad = {
    * Handler for window close event. Prompts to save scratchpad if
    * there are unsaved changes.
    *
-   * @param nsIDOMEvent aEvent
+   * @param Event aEvent
    * @param function aCallback
    *        Optional function you want to call when file is saved/closed.
    *        Used mainly for tests.
@@ -1982,7 +1987,7 @@ var Scratchpad = {
    */
   openDocumentationPage: function SP_openDocumentationPage() {
     let url = this.strings.GetStringFromName("help.openDocumentationPage");
-    this.browserWindow.openTrustedLinkIn(url, "tab");
+    this.browserWindow.openWebLinkIn(url, "tab");
     this.browserWindow.focus();
   },
 };

@@ -896,7 +896,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
 
         RootedObject typedArray(cx);
         {
-            JSAutoCompartment ac(cx, unwrappedBuffer);
+            JSAutoRealm ar(cx, unwrappedBuffer);
 
             RootedObject wrappedProto(cx, protoRoot);
             if (!cx->compartment()->wrap(cx, &wrappedProto))
@@ -1177,7 +1177,7 @@ TypedArrayObjectTemplate<T>::fromTypedArray(JSContext* cx, HandleObject other, b
             return nullptr;
         }
 
-        JSAutoCompartment ac(cx, unwrapped);
+        JSAutoRealm ar(cx, unwrapped);
 
         srcArray = &unwrapped->as<TypedArrayObject>();
 
@@ -2140,6 +2140,7 @@ js::IsBufferSource(JSObject* object, SharedMem<uint8_t*>* dataPointer, size_t* b
         DataViewObject& view = object->as<DataViewObject>();
         *dataPointer = view.dataPointerEither().cast<uint8_t*>();
         *byteLength = view.byteLength();
+        return true;
     }
 
     if (object->is<ArrayBufferObject>()) {

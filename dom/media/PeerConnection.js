@@ -203,8 +203,8 @@ class GlobalPCList {
   }
 }
 setupPrototype(GlobalPCList, {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
   classID: PC_MANAGER_CID,
   _xpcom_factory: {
     createInstance(outer, iid) {
@@ -230,8 +230,7 @@ class RTCIceCandidate {
 setupPrototype(RTCIceCandidate, {
   classID: PC_ICE_CID,
   contractID: PC_ICE_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
-                                         Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
 });
 
 class RTCSessionDescription {
@@ -275,8 +274,7 @@ class RTCSessionDescription {
 setupPrototype(RTCSessionDescription, {
   classID: PC_SESSION_CID,
   contractID: PC_SESSION_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
-                                         Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
 });
 
 class RTCStatsReport {
@@ -330,7 +328,7 @@ class RTCStatsReport {
 setupPrototype(RTCStatsReport, {
   classID: PC_STATS_CID,
   contractID: PC_STATS_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports]),
+  QueryInterface: ChromeUtils.generateQI([]),
   _specToLegacyFieldMapping: {
         "inbound-rtp": "inboundrtp",
         "outbound-rtp": "outboundrtp",
@@ -948,6 +946,7 @@ class RTCPeerConnection {
 
     // The fippo butter finger filter AKA non-ASCII chars
     // Note: SDP allows non-ASCII character in the subject (who cares?)
+    // eslint-disable-next-line no-control-regex
     let pos = sdp.search(/[^\u0000-\u007f]/);
     if (pos != -1) {
       throw new this._win.DOMException(
@@ -1606,8 +1605,7 @@ class RTCPeerConnection {
 setupPrototype(RTCPeerConnection, {
   classID: PC_CID,
   contractID: PC_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
-                                         Ci.nsIDOMGlobalPropertyInitializer]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer]),
   _actions: {
     offer: Ci.IPeerConnection.kActionOffer,
     answer: Ci.IPeerConnection.kActionAnswer,
@@ -1865,8 +1863,7 @@ class PeerConnectionObserver {
 setupPrototype(PeerConnectionObserver, {
   classID: PC_OBS_CID,
   contractID: PC_OBS_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
-                                         Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
 });
 
 class RTCPeerConnectionStatic {
@@ -1882,8 +1879,7 @@ class RTCPeerConnectionStatic {
 setupPrototype(RTCPeerConnectionStatic, {
   classID: PC_STATIC_CID,
   contractID: PC_STATIC_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
-                                         Ci.nsIDOMGlobalPropertyInitializer])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIDOMGlobalPropertyInitializer])
 });
 
 class RTCDTMFSender {
@@ -1911,7 +1907,7 @@ class RTCDTMFSender {
 setupPrototype(RTCDTMFSender, {
   classID: PC_DTMF_SENDER_CID,
   contractID: PC_DTMF_SENDER_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
+  QueryInterface: ChromeUtils.generateQI([])
 });
 
 class RTCRtpSender {
@@ -2033,8 +2029,13 @@ class RTCRtpSender {
   }
 
   getStats() {
-    return this._pc._async(
-      async () => this._pc._getStats(this.track));
+    if (this.track) {
+      return this._pc._async(
+        async () => this._pc._getStats(this.track));
+    }
+    return this._pc._win.Promise.resolve().then(
+      () => this._pc._win.RTCStatsReport._create(this._pc._win, new Map())
+    );
   }
 
   checkWasCreatedByPc(pc) {
@@ -2048,7 +2049,7 @@ class RTCRtpSender {
 setupPrototype(RTCRtpSender, {
   classID: PC_SENDER_CID,
   contractID: PC_SENDER_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
+  QueryInterface: ChromeUtils.generateQI([])
 });
 
 class RTCRtpReceiver {
@@ -2218,7 +2219,7 @@ class RTCRtpReceiver {
 setupPrototype(RTCRtpReceiver, {
   classID: PC_RECEIVER_CID,
   contractID: PC_RECEIVER_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
+  QueryInterface: ChromeUtils.generateQI([])
 });
 
 class RTCRtpTransceiver {
@@ -2381,7 +2382,7 @@ class RTCRtpTransceiver {
 setupPrototype(RTCRtpTransceiver, {
   classID: PC_TRANSCEIVER_CID,
   contractID: PC_TRANSCEIVER_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
+  QueryInterface: ChromeUtils.generateQI([])
 });
 
 class CreateOfferRequest {
@@ -2392,7 +2393,7 @@ class CreateOfferRequest {
 setupPrototype(CreateOfferRequest, {
   classID: PC_COREQUEST_CID,
   contractID: PC_COREQUEST_CONTRACT,
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports])
+  QueryInterface: ChromeUtils.generateQI([])
 });
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(

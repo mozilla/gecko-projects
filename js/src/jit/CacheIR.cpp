@@ -229,6 +229,8 @@ GetPropIRGenerator::tryAttachStub()
                 return true;
             if (tryAttachDenseElementHole(obj, objId, index, indexId))
                 return true;
+            if (tryAttachUnboxedElementHole(obj, objId, index, indexId))
+                return true;
             if (tryAttachArgumentsObjectArg(obj, objId, indexId))
                 return true;
 
@@ -442,11 +444,12 @@ IsPreliminaryObject(JSObject* obj)
     if (obj->isSingleton())
         return false;
 
-    TypeNewScript* newScript = obj->group()->newScript();
+    AutoSweepObjectGroup sweep(obj->group());
+    TypeNewScript* newScript = obj->group()->newScript(sweep);
     if (newScript && !newScript->analyzed())
         return true;
 
-    if (obj->group()->maybePreliminaryObjects())
+    if (obj->group()->maybePreliminaryObjects(sweep))
         return true;
 
     return false;
@@ -1045,7 +1048,7 @@ GetPropIRGenerator::tryAttachCrossCompartmentWrapper(HandleObject obj, ObjOperan
     if (!cx_->compartment()->wrap(cx_, &wrappedGlobal))
         return false;
 
-    AutoCompartment ac(cx_, unwrapped);
+    AutoRealm ar(cx_, unwrapped);
 
     // The first CCW for iframes is almost always wrapping another WindowProxy
     // so we optimize for that case as well.
@@ -2013,6 +2016,46 @@ GetPropIRGenerator::tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
         writer.returnFromIC();
 
     trackAttached("TypedElement");
+    return true;
+}
+
+bool
+GetPropIRGenerator::tryAttachUnboxedElementHole(HandleObject obj, ObjOperandId objId,
+                                                uint32_t index, Int32OperandId indexId)
+{
+    if (!obj->is<UnboxedPlainObject>())
+        return false;
+
+    // Only support unboxed objects with no elements (i.e. no expando)
+    UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando();
+    if (expando)
+        return false;
+
+    if (JSObject* proto = obj->staticPrototype()) {
+        // Start the check at the first object on the [[Prototype]],
+        // which must be native now.
+        if (!proto->isNative())
+            return false;
+
+        if (proto->as<NativeObject>().getDenseInitializedLength() != 0)
+            return false;
+
+        if (!CanAttachDenseElementHole(&proto->as<NativeObject>(), false))
+            return false;
+    }
+
+    // Guard on the group and prevent expandos from appearing.
+    Maybe<ObjOperandId> tempId;
+    TestMatchingReceiver(writer, obj, objId, &tempId);
+
+    // Guard that the prototype chain has no elements.
+    GeneratePrototypeHoleGuards(writer, obj, objId);
+
+    writer.loadUndefinedResult();
+    // No monitor: We know undefined must be in the typeset already.
+    writer.returnFromIC();
+
+    trackAttached("UnboxedElementHole");
     return true;
 }
 
@@ -3434,13 +3477,13 @@ SetPropIRGenerator::tryAttachSetDenseElement(HandleObject obj, ObjOperandId objI
 }
 
 static bool
-CanAttachAddElement(JSObject* obj, bool isInit)
+CanAttachAddElement(NativeObject* obj, bool isInit)
 {
     // Make sure the objects on the prototype don't have any indexed properties
     // or that such properties can't appear without a shape change.
     do {
         // The first two checks are also relevant to the receiver object.
-        if (obj->isNative() && obj->as<NativeObject>().isIndexed())
+        if (obj->isIndexed())
             return false;
 
         const Class* clasp = obj->getClass();
@@ -3465,10 +3508,21 @@ CanAttachAddElement(JSObject* obj, bool isInit)
         if (!proto->isNative())
             return false;
 
-        if (proto->as<NativeObject>().denseElementsAreFrozen())
+        // We have to make sure the proto has no non-writable (frozen) elements
+        // because we're not allowed to shadow them. There are a few cases to
+        // consider:
+        //
+        // * If the proto is extensible, its Shape will change when it's made
+        //   non-extensible.
+        //
+        // * If the proto is already non-extensible, no new elements will be
+        //   added, so if there are no elements now it doesn't matter if the
+        //   object is frozen later on.
+        NativeObject* nproto = &proto->as<NativeObject>();
+        if (!nproto->isExtensible() && nproto->getDenseInitializedLength() > 0)
             return false;
 
-        obj = proto;
+        obj = nproto;
     } while (true);
 
     return true;
@@ -3489,7 +3543,7 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
         return false;
 
     NativeObject* nobj = &obj->as<NativeObject>();
-    if (!nobj->nonProxyIsExtensible())
+    if (!nobj->isExtensible())
         return false;
 
     MOZ_ASSERT(!nobj->getElementsHeader()->isFrozen(),
@@ -3989,7 +4043,8 @@ SetPropIRGenerator::tryAttachAddSlotStub(HandleObjectGroup oldGroup, HandleShape
     // after we run the analysis as a group change may be required here. The
     // group change is not required for correctness but improves type
     // information elsewhere.
-    if (oldGroup->newScript() && !oldGroup->newScript()->analyzed()) {
+    AutoSweepObjectGroup sweep(oldGroup);
+    if (oldGroup->newScript(sweep) && !oldGroup->newScript(sweep)->analyzed()) {
         writer.guardGroupHasUnanalyzedNewScript(oldGroup);
         MOZ_ASSERT(IsPreliminaryObject(obj));
         preliminaryObjectAction_ = PreliminaryObjectAction::NotePreliminary;
@@ -4333,11 +4388,12 @@ CallIRGenerator::tryAttachArrayPush()
     RootedArrayObject thisarray(cx_, &thisobj->as<ArrayObject>());
 
     // And the object group for the array is not collecting preliminary objects.
-    if (thisobj->group()->maybePreliminaryObjects())
+    AutoSweepObjectGroup sweep(thisobj->group());
+    if (thisobj->group()->maybePreliminaryObjects(sweep))
         return false;
 
     // Check for other indexed properties or class hooks.
-    if (!CanAttachAddElement(thisobj, /* isInit = */ false))
+    if (!CanAttachAddElement(thisarray, /* isInit = */ false))
         return false;
 
     // Can't add new elements to arrays with non-writable length.
@@ -4345,7 +4401,7 @@ CallIRGenerator::tryAttachArrayPush()
         return false;
 
     // Check that array is extensible.
-    if (!thisarray->nonProxyIsExtensible())
+    if (!thisarray->isExtensible())
         return false;
 
     MOZ_ASSERT(!thisarray->getElementsHeader()->isFrozen(),
@@ -4545,7 +4601,7 @@ jit::NewWrapperWithObjectShape(JSContext* cx, HandleNativeObject obj)
 
     RootedObject wrapper(cx);
     {
-        AutoCompartment ac(cx, obj);
+        AutoRealm ar(cx, obj);
         wrapper = NewObjectWithClassProto(cx, &shapeContainerClass, nullptr);
         if (!obj)
             return nullptr;

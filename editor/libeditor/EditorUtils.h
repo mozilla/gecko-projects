@@ -19,7 +19,6 @@
 
 class nsAtom;
 class nsIContentIterator;
-class nsIDOMEvent;
 class nsISimpleEnumerator;
 class nsITransferable;
 class nsRange;
@@ -141,7 +140,8 @@ EditActionCanceled(nsresult aRv = NS_OK)
 }
 
 /***************************************************************************
- * SplitNodeResult is a simple class for EditorBase::SplitNodeDeep().
+ * SplitNodeResult is a simple class for
+ * EditorBase::SplitNodeDeepWithTransaction().
  * This makes the callers' code easier to read.
  */
 class MOZ_STACK_CLASS SplitNodeResult final
@@ -207,7 +207,7 @@ public:
   /**
    * SplitPoint() returns the split point in the container.
    * This is useful when callers insert an element at split point with
-   * EditorBase::CreateNode() or something similar methods.
+   * EditorBase::CreateNodeWithTransaction() or something similar methods.
    *
    * Note that the result is EditorRawDOMPoint but the nodes are grabbed
    * by this instance.  Therefore, the life time of both container node

@@ -140,6 +140,8 @@ struct BoxHeader {
     size: u64,
     /// Offset to the start of the contained data (or header size).
     offset: u64,
+    /// Uuid for extended type.
+    uuid: Option<[u8; 16]>,
 }
 
 /// File type box 'ftyp'.
@@ -593,15 +595,34 @@ fn read_box_header<T: ReadBytesExt>(src: &mut T) -> Result<BoxHeader> {
         2...7 => return Err(Error::InvalidData("malformed size")),
         _ => size32 as u64,
     };
-    let offset = match size32 {
+    let mut offset = match size32 {
         1 => 4 + 4 + 8,
         _ => 4 + 4,
+    };
+    let uuid = if name == BoxType::UuidBox {
+        if size >= offset + 16 {
+            let mut buffer = [0u8; 16];
+            let count = src.read(&mut buffer)?;
+            offset += count as u64;
+            if count == 16 {
+                Some(buffer)
+            } else {
+                debug!("malformed uuid (short read), skipping");
+                None
+            }
+        } else {
+            debug!("malformed uuid, skipping");
+            None
+        }
+    } else {
+        None
     };
     assert!(offset <= size);
     Ok(BoxHeader {
         name: name,
         size: size,
         offset: offset,
+        uuid: uuid,
     })
 }
 
@@ -835,24 +856,30 @@ fn read_edts<T: Read>(f: &mut BMFFBox<T>, track: &mut Track) -> Result<()> {
         match b.head.name {
             BoxType::EditListBox => {
                 let elst = read_elst(&mut b)?;
+                if elst.edits.len() < 1 {
+                    debug!("empty edit list");
+                    continue;
+                }
                 let mut empty_duration = 0;
                 let mut idx = 0;
-                if elst.edits.len() > 2 {
-                    return Err(Error::Unsupported("more than two edits"));
-                }
                 if elst.edits[idx].media_time == -1 {
-                    empty_duration = elst.edits[idx].segment_duration;
                     if elst.edits.len() < 2 {
-                        return Err(Error::InvalidData("expected additional edit"));
+                        debug!("expected additional edit, ignoring edit list");
+                        continue;
                     }
+                    empty_duration = elst.edits[idx].segment_duration;
                     idx += 1;
                 }
                 track.empty_duration = Some(MediaScaledTime(empty_duration));
-                if elst.edits[idx].media_time < 0 {
-                    return Err(Error::InvalidData("unexpected negative media time in edit"));
+                let media_time = elst.edits[idx].media_time;
+                if media_time < 0 {
+                    debug!("unexpected negative media time in edit");
                 }
-                track.media_time = Some(TrackScaledTime::<u64>(elst.edits[idx].media_time as u64,
+                track.media_time = Some(TrackScaledTime::<u64>(std::cmp::max(0, media_time) as u64,
                                                         track.id));
+                if elst.edits.len() > 2 {
+                    debug!("ignoring edit list with {} entries", elst.edits.len());
+                }
                 debug!("{:?}", elst);
             }
             _ => skip_box_content(&mut b)?,
@@ -1068,9 +1095,6 @@ fn read_tkhd<T: Read>(src: &mut BMFFBox<T>) -> Result<TrackHeaderBox> {
 fn read_elst<T: Read>(src: &mut BMFFBox<T>) -> Result<EditListBox> {
     let (version, _) = read_fullbox_extra(src)?;
     let edit_count = be_u32_with_limit(src)?;
-    if edit_count == 0 {
-        return Err(Error::InvalidData("invalid edit count"));
-    }
     let mut edits = Vec::new();
     for _ in 0..edit_count {
         let (segment_duration, media_time) = match version {
@@ -1093,6 +1117,9 @@ fn read_elst<T: Read>(src: &mut BMFFBox<T>) -> Result<EditListBox> {
             media_rate_fraction: media_rate_fraction,
         })?;
     }
+
+    // Padding could be added in some contents.
+    skip_box_remain(src)?;
 
     Ok(EditListBox {
         edits: edits,

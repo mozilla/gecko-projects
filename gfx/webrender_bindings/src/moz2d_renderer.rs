@@ -421,7 +421,6 @@ impl BlobImageRenderer for Moz2dImageRenderer {
         }
         {
             let mut index = BlobReader::new(&commands);
-            assert!(index.reader.pos < index.reader.buf.len());
             while index.reader.pos < index.reader.buf.len() {
                 let e  = index.read_entry();
                 process_fonts(BufReader::new(&commands[e.end..e.extra_end]), resources);
@@ -494,15 +493,20 @@ impl BlobImageRenderer for Moz2dImageRenderer {
 
     fn delete_font_instance(&mut self, _key: FontInstanceKey) {
     }
+
+    fn clear_namespace(&mut self, namespace: IdNamespace) {
+        unsafe { ClearBlobImageResources(namespace); }
+    }
 }
 
-use bindings::WrFontKey;
+use bindings::{WrFontKey, WrIdNamespace};
 
 #[allow(improper_ctypes)] // this is needed so that rustc doesn't complain about passing the &Arc<Vec> to an extern function
 extern "C" {
     fn AddFontData(key: WrFontKey, data: *const u8, size: usize, index: u32, vec: &ArcVecU8);
     fn AddNativeFontHandle(key: WrFontKey, handle: *mut c_void, index: u32);
     fn DeleteFontData(key: WrFontKey);
+    fn ClearBlobImageResources(namespace: WrIdNamespace);
 }
 
 impl Moz2dImageRenderer {

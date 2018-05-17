@@ -48,24 +48,12 @@ AutoCompleteInput.prototype = {
     setSelectedIndex() {},
     invalidate() {},
 
-    QueryInterface(iid) {
-      if (iid.equals(Ci.nsISupports) ||
-          iid.equals(Ci.nsIAutoCompletePopup))
-        return this;
-
-      throw Cr.NS_ERROR_NO_INTERFACE;
-    }
+    QueryInterface: ChromeUtils.generateQI(["nsIAutoCompletePopup"])
   },
 
   onSearchBegin() {},
 
-  QueryInterface(iid) {
-    if (iid.equals(Ci.nsISupports) ||
-        iid.equals(Ci.nsIAutoCompleteInput))
-      return this;
-
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIAutoCompleteInput"])
 };
 
 
@@ -103,9 +91,9 @@ function addAdaptiveFeedback(aUrl, aSearch) {
     Services.obs.addObserver(observer, PLACES_AUTOCOMPLETE_FEEDBACK_UPDATED_TOPIC);
 
     let thing = {
-      QueryInterface: XPCOMUtils.generateQI([Ci.nsIAutoCompleteInput,
-                                             Ci.nsIAutoCompletePopup,
-                                             Ci.nsIAutoCompleteController]),
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIAutoCompleteInput,
+                                              Ci.nsIAutoCompletePopup,
+                                              Ci.nsIAutoCompleteController]),
       get popup() { return thing; },
       get controller() { return thing; },
       popupOpen: true,
@@ -118,6 +106,13 @@ function addAdaptiveFeedback(aUrl, aSearch) {
   });
 }
 
+
+add_task(function init() {
+  Services.prefs.setBoolPref("browser.urlbar.autoFill", false);
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref("browser.urlbar.autoFill");
+  });
+});
 
 add_task(async function test_adaptive_search_specific() {
   // Add a bookmark to our url.

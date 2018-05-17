@@ -4,7 +4,6 @@
 "use strict";
 
 const { createElement, createFactory } = require("devtools/client/shared/vendor/react");
-const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
@@ -13,12 +12,10 @@ const { createContextMenu } = require("devtools/client/webconsole/utils/context-
 const { configureStore } = require("devtools/client/webconsole/store");
 const { isPacketPrivate } = require("devtools/client/webconsole/utils/messages");
 const { getAllMessagesById, getMessage } = require("devtools/client/webconsole/selectors/messages");
+const Telemetry = require("devtools/client/shared/telemetry");
 
 const EventEmitter = require("devtools/shared/event-emitter");
-const ConsoleOutput = createFactory(require("devtools/client/webconsole/components/ConsoleOutput"));
-const FilterBar = createFactory(require("devtools/client/webconsole/components/FilterBar"));
-const SideBar = createFactory(require("devtools/client/webconsole/components/SideBar"));
-const JSTerm = createFactory(require("devtools/client/webconsole/components/JSTerm"));
+const App = createFactory(require("devtools/client/webconsole/components/App"));
 
 let store = null;
 
@@ -38,8 +35,11 @@ function NewConsoleOutputWrapper(parentNode, hud, toolbox, owner, document) {
   this.queuedRequestUpdates = [];
   this.throttledDispatchPromise = null;
 
+  this._telemetry = new Telemetry();
+
   store = configureStore(this.hud);
 }
+
 NewConsoleOutputWrapper.prototype = {
   init: function() {
     return new Promise((resolve) => {
@@ -208,28 +208,15 @@ NewConsoleOutputWrapper.prototype = {
         });
       }
 
-      let provider = createElement(
-        Provider,
-        { store },
-        dom.div(
-          {className: "webconsole-output-wrapper"},
-          FilterBar({
-            hidePersistLogsCheckbox: this.hud.isBrowserConsole,
-            serviceContainer: {
-              attachRefToHud
-            }
-          }),
-          ConsoleOutput({
-            serviceContainer,
-            onFirstMeaningfulPaint: resolve
-          }),
-          SideBar({
-            serviceContainer,
-          }),
-          JSTerm({
-            hud: this.hud,
-          }),
-        ));
+      const app = App({
+        attachRefToHud,
+        serviceContainer,
+        hud,
+        onFirstMeaningfulPaint: resolve,
+      });
+
+      // Render the root Application component.
+      let provider = createElement(Provider, { store }, app);
       this.body = ReactDOM.render(provider, this.parentNode);
     });
   },
@@ -332,8 +319,15 @@ NewConsoleOutputWrapper.prototype = {
     // that networkInfo.updates has all we need.
     // Note that 'requestPostData' is sent only for POST requests, so we need
     // to count with that.
+    // 'fetchCacheDescriptor' will also cause a network update and increment
+    // the number of networkInfo.updates
     const NUMBER_OF_NETWORK_UPDATE = 8;
+
     let expectedLength = NUMBER_OF_NETWORK_UPDATE;
+    if (this.hud.proxy.webConsoleClient.traits.fetchCacheDescriptor
+      && res.networkInfo.updates.includes("responseCache")) {
+      expectedLength++;
+    }
     if (res.networkInfo.updates.includes("requestPostData")) {
       expectedLength++;
     }
@@ -386,6 +380,11 @@ NewConsoleOutputWrapper.prototype = {
         this.throttledDispatchPromise = null;
 
         store.dispatch(actions.messagesAdd(this.queuedMessageAdds));
+
+        const length = this.queuedMessageAdds.length;
+        this._telemetry.addEventProperty(
+          "devtools.main", "enter", "webconsole", null, "message_count", length);
+
         this.queuedMessageAdds = [];
 
         if (this.queuedMessageUpdates.length > 0) {

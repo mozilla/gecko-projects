@@ -50,6 +50,7 @@
 #include "transportlayer.h"
 #include "transportlayerdtls.h"
 #include "transportlayerice.h"
+#include "Tracing.h"
 
 #include "webrtc/base/bind.h"
 #include "webrtc/base/keep_ref_until_done.h"
@@ -247,11 +248,11 @@ public:
 protected:
   virtual ~VideoFrameConverter() { MOZ_COUNT_DTOR(VideoFrameConverter); }
 
-  static void DeleteBuffer(uint8* aData) { delete[] aData; }
+  static void DeleteBuffer(uint8_t* aData) { delete[] aData; }
 
   // This takes ownership of the buffer and attached it to the VideoFrame we
   // send to the listeners
-  void VideoFrameConverted(UniquePtr<uint8[]> aBuffer,
+  void VideoFrameConverted(UniquePtr<uint8_t[]> aBuffer,
                            unsigned int aVideoFrameLength,
                            unsigned short aWidth,
                            unsigned short aHeight,
@@ -412,7 +413,7 @@ protected:
     switch (surf->GetFormat()) {
       case SurfaceFormat::B8G8R8A8:
       case SurfaceFormat::B8G8R8X8:
-        rv = libyuv::ARGBToI420(static_cast<uint8*>(map.GetData()),
+        rv = libyuv::ARGBToI420(static_cast<uint8_t*>(map.GetData()),
                                 map.GetStride(),
                                 buffer->MutableDataY(),
                                 buffer->StrideY(),
@@ -424,7 +425,7 @@ protected:
                                 aSize.height);
         break;
       case SurfaceFormat::R5G6B5_UINT16:
-        rv = libyuv::RGB565ToI420(static_cast<uint8*>(map.GetData()),
+        rv = libyuv::RGB565ToI420(static_cast<uint8_t*>(map.GetData()),
                                   map.GetStride(),
                                   buffer->MutableDataY(),
                                   buffer->StrideY(),
@@ -1931,12 +1932,13 @@ MediaPipelineTransmit::PipelineListener::NotifyRealtimeTrackData(
     aMedia.GetDuration());
 
   if (aMedia.GetType() == MediaSegment::VIDEO) {
+    TRACE_COMMENT("Video");
     // We have to call the upstream NotifyRealtimeTrackData and
     // MediaStreamVideoSink will route them to SetCurrentFrames.
     MediaStreamVideoSink::NotifyRealtimeTrackData(aGraph, aOffset, aMedia);
     return;
   }
-
+  TRACE_COMMENT("Audio");
   NewData(aMedia, aGraph->GraphRate());
 }
 
@@ -2022,6 +2024,7 @@ MediaPipelineTransmit::PipelineListener::NewData(const MediaSegment& aMedia,
     }
   } else {
     const VideoSegment* video = static_cast<const VideoSegment*>(&aMedia);
+
     for (VideoSegment::ConstChunkIterator iter(*video); !iter.IsEnded();
          iter.Next()) {
       mConverter->QueueVideoChunk(*iter, !mEnabled);
@@ -2213,18 +2216,6 @@ public:
     NotifyPullImpl(aDesiredTime);
   }
 
-  RefPtr<SourceMediaStream::NotifyPullPromise> AsyncNotifyPull(
-    MediaStreamGraph* aGraph,
-    StreamTime aDesiredTime) override
-  {
-    RefPtr<PipelineListener> self = this;
-    return InvokeAsync(mTaskQueue, __func__, [self, aDesiredTime]() {
-      self->NotifyPullImpl(aDesiredTime);
-      return SourceMediaStream::NotifyPullPromise::CreateAndResolve(true,
-                                                                    __func__);
-    });
-  }
-
 private:
   ~PipelineListener()
   {
@@ -2234,6 +2225,7 @@ private:
 
   void NotifyPullImpl(StreamTime aDesiredTime)
   {
+    TRACE();
     uint32_t samplesPer10ms = mRate / 100;
 
     // mSource's rate is not necessarily the same as the graph rate, since there

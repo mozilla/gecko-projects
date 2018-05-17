@@ -21,8 +21,10 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
-from taskgraph.util.treeherder import split_symbol, join_symbol
+from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
 from taskgraph.util.platforms import platform_family
+from taskgraph import files_changed
+from mozpack.path import match as mozpackmatch
 from taskgraph.util.schema import (
     validate_schema,
     optionally_keyed_by,
@@ -40,6 +42,7 @@ from voluptuous import (
 
 import copy
 import logging
+import math
 
 # default worker types keyed by instance-size
 LINUX_WORKER_TYPES = {
@@ -101,22 +104,6 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-qr': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    # These values don't really matter since BBB will be executing them
-    'windows8-64': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    'windows8-64-pgo': {
-      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
-      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
-      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
-    },
-    'windows8-64-nightly': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -296,10 +283,6 @@ test_description_schema = Schema({
         # If true, tooltool downloads will be enabled via relengAPIProxy.
         Required('tooltool-downloads'): bool,
 
-        # This mozharness script also runs in Buildbot and tries to read a
-        # buildbot config file, so tell it not to do so in TaskCluster
-        Required('no-read-buildbot-config'): bool,
-
         # Add --blob-upload-branch=<project> mozharness parameter
         Optional('include-blob-upload-branch'): bool,
 
@@ -462,7 +445,6 @@ def set_defaults(config, tests):
         test['mozharness'].setdefault('extra-options', [])
         test['mozharness'].setdefault('requires-signed-builds', False)
         test['mozharness'].setdefault('tooltool-downloads', False)
-        test['mozharness'].setdefault('no-read-buildbot-config', False)
         test['mozharness'].setdefault('set-moz-node-path', False)
         test['mozharness'].setdefault('chunked', False)
         test['mozharness'].setdefault('chunking-args', 'this-chunk')
@@ -486,9 +468,30 @@ def setup_talos(config, tests):
             continue
 
         extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
-        extra_options.append('--add-option')
-        extra_options.append('--webServer,localhost')
         extra_options.append('--use-talos-json')
+        # win7 needs to test skip
+        if test['build-platform'].startswith('win32'):
+            extra_options.append('--add-option')
+            extra_options.append('--setpref,gfx.direct2d.disabled=true')
+
+        # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
+        # name is only required for try
+        if config.params.is_try():
+            extra_options.append('--branch-name')
+            extra_options.append('try')
+
+        yield test
+
+
+@transforms.add
+def setup_raptor(config, tests):
+    """Add options that are specific to raptor jobs (identified by suite=raptor)"""
+    for test in tests:
+        if test['suite'] != 'raptor':
+            yield test
+            continue
+
+        extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
 
         # Per https://bugzilla.mozilla.org/show_bug.cgi?id=1357753#c3, branch
         # name is only required for try
@@ -553,8 +556,18 @@ def set_treeherder_machine_platform(config, tests):
         'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
     }
     for test in tests:
-        test['treeherder-machine-platform'] = translation.get(
-            test['build-platform'], test['test-platform'])
+        # For most desktop platforms, the above table is not used for "regular"
+        # builds, so we'll always pick the test platform here.
+        # On macOS though, the regular builds are in the table.  This causes a
+        # conflict in `verify_task_graph_symbol` once you add a new test
+        # platform based on regular macOS builds, such as for QR.
+        # Since it's unclear if the regular macOS builds can be removed from
+        # the table, workaround the issue for QR.
+        if '-qr' in test['test-platform']:
+            test['treeherder-machine-platform'] = test['test-platform']
+        else:
+            test['treeherder-machine-platform'] = translation.get(
+                test['build-platform'], test['test-platform'])
         yield test
 
 
@@ -673,7 +686,7 @@ def handle_suite_category(config, tests):
 
         script = test['mozharness']['script']
         category_arg = None
-        if suite == 'test-verify':
+        if suite.startswith('test-verify') or suite.startswith('test-coverage'):
             pass
         elif script == 'android_emulator_unittest.py':
             category_arg = '--test-suite'
@@ -691,7 +704,7 @@ def handle_suite_category(config, tests):
 
 @transforms.add
 def enable_code_coverage(config, tests):
-    """Enable code coverage for the linux64-ccov/opt & linux64-jsdcov/opt & win64-ccov/debug
+    """Enable code coverage for the linux64-ccov/.* & linux64-jsdcov/.* & win64-ccov/.*
     build-platforms"""
     for test in tests:
         if 'ccov' in test['build-platform'] and not test['test-name'].startswith('test-verify'):
@@ -720,6 +733,10 @@ def enable_code_coverage(config, tests):
                 test['mozharness']['extra-options'].append('--no-upload-results')
                 test['mozharness']['extra-options'].append('--add-option')
                 test['mozharness']['extra-options'].append('--tptimeout,15000')
+            if 'raptor' in test['test-name']:
+                test['max-run-time'] = 1800
+                if 'linux' in test['build-platform']:
+                    test['docker-image'] = {"in-tree": "desktop1604-test"}
         elif test['build-platform'] == 'linux64-jsdcov/opt':
             # Ensure we don't run on inbound/autoland/beta, but if the test is try only, ignore it
             if 'mozilla-central' in test['run-on-projects'] or \
@@ -758,7 +775,7 @@ def split_e10s(config, tests):
             if group != '?':
                 group += '-e10s'
             test['treeherder-symbol'] = join_symbol(group, symbol)
-            if test['suite'] == 'talos':
+            if test['suite'] == 'talos' or test['suite'] == 'raptor':
                 for i, option in enumerate(test['mozharness']['extra-options']):
                     if option.startswith('--suite='):
                         test['mozharness']['extra-options'][i] += '-e10s'
@@ -773,6 +790,18 @@ def split_chunks(config, tests):
     them and assigning 'this-chunk' appropriately and updating the treeherder
     symbol."""
     for test in tests:
+        if test['suite'].startswith('test-verify'):
+            test['chunks'] = perfile_number_of_chunks(config, test['test-name'])
+            if test['chunks'] == 0:
+                continue
+            # limit the number of chunks we run for test-verify mode because
+            # test-verify is comprehensive and takes a lot of time, if we have
+            # >30 tests changed, this is probably an import of external tests,
+            # or a patch renaming/moving files in bulk
+            maximum_number_verify_chunks = 3
+            if test['chunks'] > maximum_number_verify_chunks:
+                test['chunks'] = maximum_number_verify_chunks
+
         if test['chunks'] == 1:
             test['this-chunk'] = 1
             yield test
@@ -784,11 +813,55 @@ def split_chunks(config, tests):
             chunked['this-chunk'] = this_chunk
 
             # add the chunk number to the TH symbol
-            group, symbol = split_symbol(chunked['treeherder-symbol'])
-            symbol += str(this_chunk)
-            chunked['treeherder-symbol'] = join_symbol(group, symbol)
+            chunked['treeherder-symbol'] = add_suffix(
+                chunked['treeherder-symbol'], this_chunk)
 
             yield chunked
+
+
+def perfile_number_of_chunks(config, type):
+    # A rough estimate of how many chunks we need based on simple rules
+    # for determining what a test file is.
+
+    # TODO: Make this flexible based on coverage vs verify || test type
+    tests_per_chunk = 10.0
+
+    if type.startswith('test-verify-wpt'):
+        file_patterns = ['testing/web-platform/tests/**']
+    elif type.startswith('test-verify-gpu'):
+        file_patterns = ['**/*webgl*/**/test_*',
+                         '**/dom/canvas/**/test_*',
+                         '**/gfx/tests/**/test_*',
+                         '**/devtools/canvasdebugger/**/browser_*',
+                         '**/reftest*/**']
+    elif type.startswith('test-verify'):
+        file_patterns = ['**/test_*',
+                         '**/browser_*',
+                         '**/crashtest*/**',
+                         'js/src/test/test/',
+                         'js/src/test/non262/',
+                         'js/src/test/test262/']
+
+    changed_files = files_changed.get_changed_files(config.params.get('head_repository'),
+                                                    config.params.get('head_rev'))
+    test_count = 0
+    for pattern in file_patterns:
+        for path in changed_files:
+            if mozpackmatch(path, pattern):
+                gpu = False
+                if type == 'test-verify-e10s':
+                    # file_patterns for test-verify will pick up some gpu tests, lets ignore
+                    # in the case of reftest, we will not have any in the regular case
+                    gpu_dirs = ['dom/canvas', 'gfx/tests', 'devtools/canvasdebugger', 'webgl']
+                    for gdir in gpu_dirs:
+                        if len(path.split(gdir)) > 1:
+                            gpu = True
+
+                if not gpu:
+                    test_count += 1
+
+    chunks = test_count/tests_per_chunk
+    return int(math.ceil(chunks))
 
 
 @transforms.add
@@ -802,6 +875,20 @@ def allow_software_gl_layers(config, tests):
             # This should be set always once bug 1296086 is resolved.
             test['mozharness'].setdefault('extra-options', [])\
                               .append("--allow-software-gl-layers")
+
+        yield test
+
+
+@transforms.add
+def reftest_win7_slowmode(config, tests):
+    """
+    Win7 needs time to render fonts, so for the reftest-fonts, add --run-slow
+    """
+    for test in tests:
+        if test['build-platform'].startswith('win32') and \
+           'font' in test['suite']:
+            test['mozharness'].setdefault('extra-options', [])\
+                              .append("--run-slower")
 
         yield test
 
@@ -902,7 +989,8 @@ def set_worker_type(config, tests):
             # now we have the right platform set the worker type accordingly
             test['worker-type'] = win_worker_type_platform[test['virtualization']]
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
-            if test.get('suite', '') == 'talos' and test['build-platform'] != 'linux64-ccov/opt':
+            if test.get('suite', '') == 'talos' and \
+                 not test['build-platform'].startswith('linux64-ccov'):
                 test['worker-type'] = 'releng-hardware/gecko-t-linux-talos'
             else:
                 test['worker-type'] = LINUX_WORKER_TYPES[test['instance-size']]
@@ -927,6 +1015,8 @@ def make_job_description(config, tests):
         try_name = test['try-name']
         if test['suite'] == 'talos':
             attr_try_name = 'talos_try_name'
+        elif test['suite'] == 'raptor':
+            attr_try_name = 'raptor_try_name'
         else:
             attr_try_name = 'unittest_try_name'
 

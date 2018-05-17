@@ -532,6 +532,14 @@ class HostSimpleProgram(HostMixin, BaseProgram):
     SUFFIX_VAR = 'HOST_BIN_SUFFIX'
     KIND = 'host'
 
+    def source_files(self):
+        for srcs in self.sources.values():
+            for f in srcs:
+                if ('host_%s' % mozpath.basename(mozpath.splitext(f)[0]) ==
+                    mozpath.splitext(self.program)[0]):
+                    return [f]
+        return []
+
 
 def cargo_output_directory(context, target_var):
     # cargo creates several directories and places its build artifacts
@@ -576,15 +584,15 @@ class HostRustProgram(BaseRustProgram):
     TARGET_SUBST_VAR = 'RUST_HOST_TARGET'
 
 
-class RustTest(ContextDerived):
+class RustTests(ContextDerived):
     __slots__ = (
-        'name',
+        'names',
         'features',
     )
 
-    def __init__(self, context, name, features):
+    def __init__(self, context, names, features):
         ContextDerived.__init__(self, context)
-        self.name = name
+        self.names = names
         self.features = features
 
 
@@ -899,54 +907,6 @@ class JARManifest(ContextDerived):
         ContextDerived.__init__(self, context)
 
         self.path = path
-
-
-class ContextWrapped(ContextDerived):
-    """Generic context derived container object for a wrapped rich object.
-
-    Use this wrapper class to shuttle a rich build system object
-    completely defined in moz.build files through the tree metadata
-    emitter to the build backend for processing as-is.
-    """
-
-    __slots__ = (
-        'wrapped',
-    )
-
-    def __init__(self, context, wrapped):
-        ContextDerived.__init__(self, context)
-
-        self.wrapped = wrapped
-
-
-class JavaJarData(object):
-    """Represents a Java JAR file.
-
-    A Java JAR has the following members:
-        * sources - strictly ordered list of input java sources
-        * generated_sources - strictly ordered list of generated input
-          java sources
-        * extra_jars - list of JAR file dependencies to include on the
-          javac compiler classpath
-        * javac_flags - list containing extra flags passed to the
-          javac compiler
-    """
-
-    __slots__ = (
-        'name',
-        'sources',
-        'generated_sources',
-        'extra_jars',
-        'javac_flags',
-    )
-
-    def __init__(self, name, sources=[], generated_sources=[],
-            extra_jars=[], javac_flags=[]):
-        self.name = name
-        self.sources = StrictOrderingOnAppendList(sources)
-        self.generated_sources = StrictOrderingOnAppendList(generated_sources)
-        self.extra_jars = list(extra_jars)
-        self.javac_flags = list(javac_flags)
 
 
 class BaseSources(ContextDerived):

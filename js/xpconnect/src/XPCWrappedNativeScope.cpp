@@ -291,7 +291,7 @@ JSObject*
 GetXBLScope(JSContext* cx, JSObject* contentScopeArg)
 {
     JS::RootedObject contentScope(cx, contentScopeArg);
-    JSAutoCompartment ac(cx, contentScope);
+    JSAutoRealm ar(cx, contentScope);
     XPCWrappedNativeScope* nativeScope = RealmPrivate::Get(contentScope)->scope;
 
     RootedObject scope(cx, nativeScope->EnsureContentXBLScope(cx));
@@ -549,6 +549,9 @@ XPCWrappedNativeScope::SystemIsBeingShutDown()
             }
             i.Remove();
         }
+
+        CompartmentPrivate* priv = CompartmentPrivate::Get(cur->Compartment());
+        priv->SystemIsBeingShutDown();
     }
 
     // Now it is safe to kill all the scopes.

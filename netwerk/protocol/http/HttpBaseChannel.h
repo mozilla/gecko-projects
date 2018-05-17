@@ -328,7 +328,7 @@ public:
         nsContentEncodings(nsIHttpChannel* aChannel, const char* aEncodingHeader);
 
     private:
-        virtual ~nsContentEncodings();
+        virtual ~nsContentEncodings() = default;
 
         MOZ_MUST_USE nsresult PrepareForNext(void);
 
@@ -429,6 +429,7 @@ protected:
   void NotifySetCookie(char const *aCookie);
 
   mozilla::dom::PerformanceStorage* GetPerformanceStorage();
+  void MaybeReportTimingData();
   nsIURI* GetReferringPage();
   nsPIDOMWindowInner* GetInnerDOMWindow();
 
@@ -783,7 +784,7 @@ MOZ_MUST_USE nsresult HttpAsyncAborter<T>::AsyncAbort(nsresult status)
 template <class T>
 inline void HttpAsyncAborter<T>::HandleAsyncAbort()
 {
-  NS_PRECONDITION(!mCallOnResume, "How did that happen?");
+  MOZ_ASSERT(!mCallOnResume, "How did that happen?");
 
   if (mThis->mSuspendCount) {
     MOZ_LOG(gHttpLog, LogLevel::Debug,
@@ -831,7 +832,7 @@ public:
   }
 
 private:
-  virtual ~ProxyReleaseRunnable() {}
+  virtual ~ProxyReleaseRunnable() = default;
 
   nsTArray<nsCOMPtr<nsISupports>> mDoomed;
 };

@@ -112,7 +112,7 @@ nsDisplayFieldSetBorder::Paint(nsDisplayListBuilder* aBuilder,
                                gfxContext* aCtx)
 {
   image::ImgDrawResult result = static_cast<nsFieldSetFrame*>(mFrame)->
-    PaintBorder(aBuilder, *aCtx, ToReferenceFrame(), mVisibleRect);
+    PaintBorder(aBuilder, *aCtx, ToReferenceFrame(), GetPaintRect());
 
   nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
 }
@@ -365,8 +365,8 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
   DO_GLOBAL_REFLOW_COUNT("nsFieldSetFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
   MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
-  NS_PRECONDITION(aReflowInput.ComputedISize() != NS_INTRINSICSIZE,
-                  "Should have a precomputed inline-size!");
+  MOZ_ASSERT(aReflowInput.ComputedISize() != NS_INTRINSICSIZE,
+             "Should have a precomputed inline-size!");
 
   nsOverflowAreas ocBounds;
   nsReflowStatus ocStatus;
@@ -706,4 +706,3 @@ nsFieldSetFrame::AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult)
     aResult.AppendElement(OwnedAnonBox(kid));
   }
 }
-

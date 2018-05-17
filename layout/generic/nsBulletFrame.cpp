@@ -566,7 +566,7 @@ BulletRenderer::CreateWebRenderCommandsForPath(nsDisplayItem* aItem,
         RoundedRect(ThebesRect(mPathRect.ToUnknownRect()),
                     RectCornerRadii(dest.size.width / 2.0))
       ));
-      auto clipId = aBuilder.DefineClip(Nothing(), Nothing(), dest, &clips, nullptr);
+      auto clipId = aBuilder.DefineClip(Nothing(), dest, &clips, nullptr);
       aBuilder.PushClip(clipId);
       aBuilder.PushRect(dest, dest, isBackfaceVisible, color);
       aBuilder.PopClip();
@@ -715,7 +715,7 @@ void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,
   }
 
   ImgDrawResult result = static_cast<nsBulletFrame*>(mFrame)->
-    PaintBullet(*aCtx, ToReferenceFrame(), mVisibleRect, flags,
+    PaintBullet(*aCtx, ToReferenceFrame(), GetPaintRect(), flags,
                 mDisableSubpixelAA);
 
   nsDisplayBulletGeometry::UpdateDrawResult(this, result);
@@ -1285,7 +1285,7 @@ nsBulletFrame::GetLoadGroup(nsPresContext *aPresContext, nsILoadGroup **aLoadGro
   if (!aPresContext)
     return;
 
-  NS_PRECONDITION(nullptr != aLoadGroup, "null OUT parameter pointer");
+  MOZ_ASSERT(nullptr != aLoadGroup, "null OUT parameter pointer");
 
   nsIPresShell *shell = aPresContext->GetPresShell();
 

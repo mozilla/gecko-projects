@@ -198,7 +198,7 @@ public:
     template<typename ParseHandler, typename CharT>
     SourceParseContext(GeneralParser<ParseHandler, CharT>* prs, SharedContext* sc,
                        Directives* newDirectives)
-      : ParseContext(prs->context, prs->pc, sc, prs->anyChars, prs->usedNames, newDirectives,
+      : ParseContext(prs->context, prs->pc, sc, prs->tokenStream, prs->usedNames, newDirectives,
                      mozilla::IsSame<ParseHandler, FullParseHandler>::value)
     { }
 };
@@ -247,7 +247,7 @@ enum AwaitHandling : uint8_t { AwaitIsName, AwaitIsKeyword, AwaitIsModuleKeyword
 template <class ParseHandler, typename CharT>
 class AutoAwaitIsKeyword;
 
-class ParserBase
+class MOZ_STACK_CLASS ParserBase
   : public StrictModeGetter,
     private JS::AutoGCRooter
 {
@@ -276,6 +276,8 @@ class ParserBase
 
     ScriptSource*       ss;
 
+    RootedScriptSourceObject sourceObject;
+
     /* Root atoms and objects allocated for the parsed tree. */
     AutoKeepAtoms       keepAtoms;
 
@@ -301,7 +303,8 @@ class ParserBase
     template<class, typename> friend class AutoAwaitIsKeyword;
 
     ParserBase(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
-               bool foldConstants, UsedNameTracker& usedNames);
+               bool foldConstants, UsedNameTracker& usedNames,
+               ScriptSourceObject* sourceObject);
     ~ParserBase();
 
     bool checkOptions();
@@ -393,6 +396,8 @@ class ParserBase
     bool leaveInnerFunction(ParseContext* outerpc);
 
     JSAtom* prefixAccessorName(PropertyType propType, HandleAtom propAtom);
+
+    MOZ_MUST_USE bool setSourceMapInfo();
 };
 
 inline
@@ -431,7 +436,7 @@ enum FunctionCallBehavior {
 };
 
 template <class ParseHandler>
-class PerHandlerParser
+class MOZ_STACK_CLASS PerHandlerParser
   : public ParserBase
 {
   private:
@@ -463,7 +468,8 @@ class PerHandlerParser
   protected:
     PerHandlerParser(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
                      bool foldConstants, UsedNameTracker& usedNames,
-                     LazyScript* lazyOuterFunction);
+                     LazyScript* lazyOuterFunction,
+                     ScriptSourceObject* sourceObject);
 
     static Node null() { return ParseHandler::null(); }
 
@@ -536,9 +542,6 @@ class PerHandlerParser
     inline void clearAbortedSyntaxParse();
 
   public:
-    void prepareNodeForMutation(Node node) { handler.prepareNodeForMutation(node); }
-    void freeTree(Node node) { handler.freeTree(node); }
-
     bool isValidSimpleAssignmentTarget(Node node,
                                        FunctionCallBehavior behavior = ForbidAssignmentToFunctionCalls);
 
@@ -637,7 +640,7 @@ template <class ParseHandler, typename CharT>
 class Parser;
 
 template <class ParseHandler, typename CharT>
-class GeneralParser
+class MOZ_STACK_CLASS GeneralParser
   : public PerHandlerParser<ParseHandler>
 {
   public:
@@ -868,7 +871,8 @@ class GeneralParser
     GeneralParser(JSContext* cx, LifoAlloc& alloc, const ReadOnlyCompileOptions& options,
                   const CharT* chars, size_t length, bool foldConstants,
                   UsedNameTracker& usedNames, SyntaxParser* syntaxParser,
-                  LazyScript* lazyOuterFunction);
+                  LazyScript* lazyOuterFunction,
+                  ScriptSourceObject* sourceObject);
 
     inline void setAwaitHandling(AwaitHandling awaitHandling);
 
@@ -1249,7 +1253,7 @@ class GeneralParser
 };
 
 template <typename CharT>
-class Parser<SyntaxParseHandler, CharT> final
+class MOZ_STACK_CLASS Parser<SyntaxParseHandler, CharT> final
   : public GeneralParser<SyntaxParseHandler, CharT>
 {
     using Base = GeneralParser<SyntaxParseHandler, CharT>;
@@ -1359,7 +1363,7 @@ class Parser<SyntaxParseHandler, CharT> final
 };
 
 template <typename CharT>
-class Parser<FullParseHandler, CharT> final
+class MOZ_STACK_CLASS Parser<FullParseHandler, CharT> final
   : public GeneralParser<FullParseHandler, CharT>
 {
     using Base = GeneralParser<FullParseHandler, CharT>;
@@ -1599,6 +1603,10 @@ mozilla::Maybe<VarScope::Data*>
 NewVarScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& alloc, ParseContext* pc);
 mozilla::Maybe<LexicalScope::Data*>
 NewLexicalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& alloc, ParseContext* pc);
+
+JSFunction*
+AllocNewFunction(JSContext* cx, HandleAtom atom, FunctionSyntaxKind kind, GeneratorKind generatorKind, FunctionAsyncKind asyncKind,
+                 HandleObject proto, bool isSelfHosting = false, bool inFunctionBox = false);
 
 } /* namespace frontend */
 } /* namespace js */

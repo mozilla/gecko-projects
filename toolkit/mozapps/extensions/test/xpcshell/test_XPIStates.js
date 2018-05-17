@@ -22,59 +22,32 @@ function run_test() {
 
 // Use bootstrap extensions so the changes will be immediate.
 // A packed extension, to be enabled
-writeInstallRDFToXPI({
-  id: "packed-enabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Packed, Enabled",
-}, profileDir);
+add_task(async function setup() {
+  await promiseWriteInstallRDFToXPI({
+    id: "packed-enabled@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Packed, Enabled",
+  }, profileDir);
 
-// Packed, will be disabled
-writeInstallRDFToXPI({
-  id: "packed-disabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Packed, Disabled",
-}, profileDir);
-
-// Unpacked, enabled
-writeInstallRDFToDir({
-  id: "unpacked-enabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  unpack: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Unpacked, Enabled",
-}, profileDir, undefined, "extraFile.js");
-
-
-// Unpacked, disabled
-writeInstallRDFToDir({
-  id: "unpacked-disabled@tests.mozilla.org",
-  version: "1.0",
-  bootstrap: true,
-  unpack: true,
-  targetApplications: [{
-    id: "xpcshell@tests.mozilla.org",
-    minVersion: "1",
-    maxVersion: "1"
-  }],
-  name: "Unpacked, disabled",
-}, profileDir, undefined, "extraFile.js");
+  // Packed, will be disabled
+  await promiseWriteInstallRDFToXPI({
+    id: "packed-disabled@tests.mozilla.org",
+    version: "1.0",
+    bootstrap: true,
+    targetApplications: [{
+      id: "xpcshell@tests.mozilla.org",
+      minVersion: "1",
+      maxVersion: "1"
+    }],
+    name: "Packed, Disabled",
+  }, profileDir);
+});
 
 // Keep track of the last time stamp we've used, so that we can keep moving
 // it forward (if we touch two different files in the same add-on with the same
@@ -110,17 +83,14 @@ async function getXSJSON() {
 }
 
 add_task(async function detect_touches() {
-  startupManager();
-  let [/* pe */, pd, /* ue */, ud] = await promiseAddonsByIDs([
+  await promiseStartupManager();
+  let [/* pe */, pd] = await promiseAddonsByIDs([
          "packed-enabled@tests.mozilla.org",
          "packed-disabled@tests.mozilla.org",
-         "unpacked-enabled@tests.mozilla.org",
-         "unpacked-disabled@tests.mozilla.org"
          ]);
 
   info("Disable test add-ons");
   pd.userDisabled = true;
-  ud.userDisabled = true;
 
   let XS = getXS();
 
@@ -132,8 +102,6 @@ add_task(async function detect_touches() {
   // State should correctly reflect enabled/disabled
   Assert.ok(states.get("packed-enabled@tests.mozilla.org").enabled);
   Assert.ok(!states.get("packed-disabled@tests.mozilla.org").enabled);
-  Assert.ok(states.get("unpacked-enabled@tests.mozilla.org").enabled);
-  Assert.ok(!states.get("unpacked-disabled@tests.mozilla.org").enabled);
 
   // Touch various files and make sure the change is detected.
 
@@ -146,35 +114,6 @@ add_task(async function detect_touches() {
   let pdFile = profileDir.clone();
   pdFile.append("packed-disabled@tests.mozilla.org.xpi");
   checkChange(XS, pdFile, true);
-
-  // We notice changing install.rdf for an enabled unpacked add-on.
-  let ueDir = profileDir.clone();
-  ueDir.append("unpacked-enabled@tests.mozilla.org");
-  let manifest = ueDir.clone();
-  manifest.append("install.rdf");
-  checkChange(XS, manifest, true);
-
-  // We notice changing install.rdf for a *disabled* unpacked add-on.
-  let udDir = profileDir.clone();
-  udDir.append("unpacked-disabled@tests.mozilla.org");
-  manifest = udDir.clone();
-  manifest.append("install.rdf");
-  checkChange(XS, manifest, true);
-  // Finally, the case we actually care about...
-  // We *don't* notice changing another file for disabled unpacked add-on.
-  let otherFile = udDir.clone();
-  otherFile.append("extraFile.js");
-  checkChange(XS, otherFile, false);
-
-  /*
-   * When we enable an unpacked add-on that was modified while it was
-   * disabled, we reflect the new timestamp in the add-on DB (otherwise, we'll
-   * think it changed on next restart).
-   */
-  ud.userDisabled = false;
-  let xState = XS.getAddon("app-profile", ud.id);
-  Assert.ok(xState.enabled);
-  Assert.equal(xState.mtime, ud.updateDate.getTime());
 });
 
 /*
@@ -182,11 +121,9 @@ add_task(async function detect_touches() {
  * extensions.xpiState preference.
  */
 add_task(async function uninstall_bootstrap() {
-  let [pe, /* pd, ue, ud */] = await promiseAddonsByIDs([
+  let [pe, /* pd */] = await promiseAddonsByIDs([
          "packed-enabled@tests.mozilla.org",
          "packed-disabled@tests.mozilla.org",
-         "unpacked-enabled@tests.mozilla.org",
-         "unpacked-disabled@tests.mozilla.org"
          ]);
   pe.uninstall();
 

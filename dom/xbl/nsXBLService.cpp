@@ -14,7 +14,6 @@
 #include "nsIInputStream.h"
 #include "nsNameSpaceManager.h"
 #include "nsIURI.h"
-#include "nsIDOMElement.h"
 #include "nsIURL.h"
 #include "nsIChannel.h"
 #include "nsString.h"
@@ -27,7 +26,6 @@
 #include "nsGkAtoms.h"
 #include "nsIMemory.h"
 #include "nsIObserverService.h"
-#include "nsIDOMNodeList.h"
 #include "nsXBLContentSink.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
@@ -266,7 +264,7 @@ nsXBLStreamListener::HasRequest(nsIURI* aURI, nsIContent* aElt)
 }
 
 nsresult
-nsXBLStreamListener::HandleEvent(nsIDOMEvent* aEvent)
+nsXBLStreamListener::HandleEvent(Event* aEvent)
 {
   nsresult rv = NS_OK;
   uint32_t i;
@@ -274,8 +272,7 @@ nsXBLStreamListener::HandleEvent(nsIDOMEvent* aEvent)
 
   // Get the binding document; note that we don't hold onto it in this object
   // to avoid creating a cycle
-  Event* event = aEvent->InternalDOMEvent();
-  EventTarget* target = event->GetCurrentTarget();
+  EventTarget* target = aEvent->GetCurrentTarget();
   nsCOMPtr<nsIDocument> bindingDocument = do_QueryInterface(target);
   NS_ASSERTION(bindingDocument, "Event not targeted at document?!");
 
@@ -483,7 +480,7 @@ nsXBLService::LoadBindings(Element* aElement, nsIURI* aURL,
                            nsIPrincipal* aOriginPrincipal,
                            nsXBLBinding** aBinding, bool* aResolveStyle)
 {
-  NS_PRECONDITION(aOriginPrincipal, "Must have an origin principal");
+  MOZ_ASSERT(aOriginPrincipal, "Must have an origin principal");
 
   *aBinding = nullptr;
   *aResolveStyle = false;
@@ -618,7 +615,8 @@ nsXBLService::AttachGlobalKeyHandler(EventTarget* aTarget)
   if (contentNode && contentNode->GetProperty(nsGkAtoms::listener))
     return NS_OK;
 
-  nsCOMPtr<nsIDOMElement> elt(do_QueryInterface(contentNode));
+  Element* elt =
+   contentNode && contentNode->IsElement() ? contentNode->AsElement() : nullptr;
 
   // Create the key handler
   RefPtr<nsXBLWindowKeyHandler> handler =
@@ -902,9 +900,9 @@ nsXBLService::LoadBindingDocumentInfo(nsIContent* aBoundElement,
                                       bool aForceSyncLoad,
                                       nsXBLDocumentInfo** aResult)
 {
-  NS_PRECONDITION(aBindingURI, "Must have a binding URI");
-  NS_PRECONDITION(!aOriginPrincipal || aBoundDocument,
-                  "If we're doing a security check, we better have a document!");
+  MOZ_ASSERT(aBindingURI, "Must have a binding URI");
+  MOZ_ASSERT(!aOriginPrincipal || aBoundDocument,
+             "If we're doing a security check, we better have a document!");
 
   *aResult = nullptr;
   // Allow XBL in unprivileged documents if it's specified in a privileged or

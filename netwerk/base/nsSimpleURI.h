@@ -11,7 +11,6 @@
 #include "nsISerializable.h"
 #include "nsString.h"
 #include "nsIClassInfo.h"
-#include "nsIMutable.h"
 #include "nsISizeOf.h"
 #include "nsIIPCSerializableURI.h"
 #include "nsIURIMutator.h"
@@ -31,20 +30,18 @@ class nsSimpleURI
     : public nsIURI
     , public nsISerializable
     , public nsIClassInfo
-    , public nsIMutable
     , public nsISizeOf
     , public nsIIPCSerializableURI
 {
 protected:
     nsSimpleURI();
-    virtual ~nsSimpleURI();
+    virtual ~nsSimpleURI() = default;
 
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIURI
     NS_DECL_NSISERIALIZABLE
     NS_DECL_NSICLASSINFO
-    NS_DECL_NSIMUTABLE
     NS_DECL_NSIIPCSERIALIZABLEURI
 
     static already_AddRefed<nsSimpleURI> From(nsIURI* aURI);
@@ -150,9 +147,9 @@ public:
             return InitFromInputStream(aStream);
         }
 
-        explicit Mutator() { }
+        explicit Mutator() = default;
     private:
-        virtual ~Mutator() { }
+        virtual ~Mutator() = default;
 
         friend class nsSimpleURI;
     };

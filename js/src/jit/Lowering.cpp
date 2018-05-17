@@ -1425,6 +1425,22 @@ LIRGenerator::visitRound(MRound* ins)
 }
 
 void
+LIRGenerator::visitTrunc(MTrunc* ins)
+{
+    MIRType type = ins->input()->type();
+    MOZ_ASSERT(IsFloatingPointType(type));
+
+    LInstructionHelper<1, 1, 0>* lir;
+    if (type == MIRType::Double)
+        lir = new (alloc()) LTrunc(useRegister(ins->input()));
+    else
+        lir = new (alloc()) LTruncF(useRegister(ins->input()));
+
+    assignSnapshot(lir, Bailout_Round);
+    define(lir, ins);
+}
+
+void
 LIRGenerator::visitNearbyInt(MNearbyInt* ins)
 {
     MIRType inputType = ins->input()->type();
@@ -1636,6 +1652,28 @@ LIRGenerator::visitPow(MPow* ins)
                                  tempFixed(CallTempReg0));
     }
     defineReturn(lir, ins);
+}
+
+void
+LIRGenerator::visitSign(MSign* ins)
+{
+    if (ins->type() == ins->input()->type()) {
+        LInstructionHelper<1, 1, 0>* lir;
+        if (ins->type() == MIRType::Int32) {
+            lir = new(alloc()) LSignI(useRegister(ins->input()));
+        } else {
+            MOZ_ASSERT(ins->type() == MIRType::Double);
+            lir = new(alloc()) LSignD(useRegister(ins->input()));
+        }
+        define(lir, ins);
+    } else {
+        MOZ_ASSERT(ins->type() == MIRType::Int32);
+        MOZ_ASSERT(ins->input()->type() == MIRType::Double);
+
+        auto* lir = new(alloc()) LSignDI(useRegister(ins->input()), tempDouble());
+        assignSnapshot(lir, Bailout_PrecisionLoss);
+        define(lir, ins);
+    }
 }
 
 void
@@ -4509,6 +4547,16 @@ LIRGenerator::visitHasClass(MHasClass* ins)
     MOZ_ASSERT(ins->object()->type() == MIRType::Object);
     MOZ_ASSERT(ins->type() == MIRType::Boolean);
     define(new(alloc()) LHasClass(useRegister(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitGuardToClass(MGuardToClass* ins)
+{
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
+    MOZ_ASSERT(ins->type() == MIRType::ObjectOrNull|| ins->type() == MIRType::Object);
+    LGuardToClass* lir = new(alloc()) LGuardToClass(useRegister(ins->object()), temp());
+    assignSnapshot(lir, Bailout_TypeBarrierO);
+    define(lir, ins);
 }
 
 void

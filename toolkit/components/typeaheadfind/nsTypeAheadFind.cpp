@@ -29,10 +29,8 @@
 #include "nsIFrame.h"
 #include "nsFrameTraversal.h"
 #include "nsIImageDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
-#include "nsISelection.h"
 #include "nsTextFragment.h"
 #include "nsIDOMNSEditableElement.h"
 #include "nsIEditor.h"
@@ -277,11 +275,11 @@ nsTypeAheadFind::CollapseSelection()
     return NS_OK;
   }
 
-  nsCOMPtr<nsISelection> selection;
-  selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL,
-                                     getter_AddRefs(selection));
-  if (selection)
-    selection->CollapseToStart();
+  RefPtr<Selection> selection =
+    selectionController->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  if (selection) {
+    selection->CollapseToStart(IgnoreErrors());
+  }
 
   return NS_OK;
 }
@@ -385,7 +383,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
                  getter_AddRefs(selection)); // cache for reuse
     mSelectionController = do_GetWeakReference(selectionController);
   } else {
-    selection = selectionController->GetDOMSelection(
+    selection = selectionController->GetSelection(
       nsISelectionController::SELECTION_NORMAL);
   }
 
@@ -533,7 +531,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
       // ------ Success! -------
       // Hide old selection (new one may be on a different controller)
       if (selection) {
-        selection->CollapseToStart();
+        selection->CollapseToStart(IgnoreErrors());
         SetSelectionModeAndRepaint(nsISelectionController::SELECTION_ON);
       }
 
@@ -594,7 +592,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
             editor->GetSelectionController(
               getter_AddRefs(selectionController));
             if (selectionController) {
-              selection = selectionController->GetDOMSelection(
+              selection = selectionController->GetSelection(
                 nsISelectionController::SELECTION_NORMAL);
             }
             mFoundEditable = do_QueryInterface(node);
@@ -737,7 +735,7 @@ nsTypeAheadFind::GetSearchString(nsAString& aSearchString)
 }
 
 NS_IMETHODIMP
-nsTypeAheadFind::GetFoundLink(nsIDOMElement** aFoundLink)
+nsTypeAheadFind::GetFoundLink(Element** aFoundLink)
 {
   NS_ENSURE_ARG_POINTER(aFoundLink);
   *aFoundLink = mFoundLink;
@@ -746,7 +744,7 @@ nsTypeAheadFind::GetFoundLink(nsIDOMElement** aFoundLink)
 }
 
 NS_IMETHODIMP
-nsTypeAheadFind::GetFoundEditable(nsIDOMElement** aFoundEditable)
+nsTypeAheadFind::GetFoundEditable(Element** aFoundEditable)
 {
   NS_ENSURE_ARG_POINTER(aFoundEditable);
   *aFoundEditable = mFoundEditable;
@@ -843,7 +841,7 @@ nsTypeAheadFind::GetSearchContainers(nsISupports *aContainer,
   RefPtr<nsRange> currentSelectionRange;
   nsCOMPtr<nsIPresShell> selectionPresShell = GetPresShell();
   if (aSelectionController && selectionPresShell && selectionPresShell == presShell) {
-    RefPtr<Selection> selection = aSelectionController->GetDOMSelection(
+    RefPtr<Selection> selection = aSelectionController->GetSelection(
       nsISelectionController::SELECTION_NORMAL);
     if (selection) {
       currentSelectionRange = selection->GetRangeAt(0);
@@ -1024,12 +1022,13 @@ nsTypeAheadFind::Find(const nsAString& aSearchString, bool aLinksOnly,
                  getter_AddRefs(selection)); // cache for reuse
     mSelectionController = do_GetWeakReference(selectionController);
   } else {
-    selection = selectionController->GetDOMSelection(
+    selection = selectionController->GetSelection(
       nsISelectionController::SELECTION_NORMAL);
   }
 
-  if (selection)
-    selection->CollapseToStart();
+  if (selection) {
+    selection->CollapseToStart(IgnoreErrors());
+  }
 
   if (aSearchString.IsEmpty()) {
     mTypeAheadBuffer.Truncate();
@@ -1070,9 +1069,7 @@ nsTypeAheadFind::Find(const nsAString& aSearchString, bool aLinksOnly,
     // If you can see the selection (not collapsed or thru caret browsing),
     // or if already focused on a page element, start there.
     // Otherwise we're going to start at the first visible element
-    bool isSelectionCollapsed = true;
-    if (selection)
-      selection->GetIsCollapsed(&isSelectionCollapsed);
+    bool isSelectionCollapsed = !selection || selection->IsCollapsed();
 
     // If true, we will scan from top left of visible area
     // If false, we will scan from start of selection
@@ -1092,15 +1089,14 @@ nsTypeAheadFind::Find(const nsAString& aSearchString, bool aLinksOnly,
       nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
       if (fm) {
         nsPIDOMWindowOuter* window = document->GetWindow();
-        nsCOMPtr<nsIDOMElement> focusedElement;
+        RefPtr<Element> focusedElement;
         nsCOMPtr<mozIDOMWindowProxy> focusedWindow;
         fm->GetFocusedElementForWindow(window, false,
                                        getter_AddRefs(focusedWindow),
                                        getter_AddRefs(focusedElement));
         // If the root element is focused, then it's actually the document
         // that has the focus, so ignore this.
-        if (focusedElement &&
-            !SameCOMIdentity(focusedElement, document->GetRootElement())) {
+        if (focusedElement && focusedElement != document->GetRootElement()) {
           fm->MoveCaretToFocus(window);
           isFirstVisiblePreferred = false;
         }
@@ -1158,7 +1154,7 @@ nsTypeAheadFind::GetSelection(nsIPresShell *aPresShell,
     frame->GetSelectionController(presContext, aSelCon);
     if (*aSelCon) {
       RefPtr<Selection> sel =
-        (*aSelCon)->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+        (*aSelCon)->GetSelection(nsISelectionController::SELECTION_NORMAL);
       sel.forget(aDOMSel);
     }
   }
@@ -1269,13 +1265,46 @@ nsTypeAheadFind::IsRangeVisible(nsIPresShell *aPresShell,
   if (!aGetTopVisibleLeaf && !frame->GetRect().IsEmpty()) {
     rectVisibility =
       aPresShell->GetRectVisibility(frame,
-                                    nsRect(nsPoint(0,0), frame->GetSize()),
+                                    frame->GetRectRelativeToSelf(),
                                     minDistance);
 
     if (rectVisibility == nsRectVisibility_kVisible) {
-      // This is an early exit case, where we return true if and only if
-      // the range is actually rendered.
-      return IsRangeRendered(aPresShell, aPresContext, aRange);
+      // The primary frame of the range is visible, but we don't yet know if
+      // any of the rects of the range itself are visible. Check to see if at
+      // least one of the rects is visible.
+      bool atLeastOneRangeRectVisible = false;
+
+      nsIFrame* containerFrame =
+        nsLayoutUtils::GetContainingBlockForClientRect(frame);
+      RefPtr<DOMRectList> rects = aRange->GetClientRects(true, true);
+      for (uint32_t i = 0; i < rects->Length(); ++i) {
+        RefPtr<DOMRect> rect = rects->Item(i);
+        nsRect r(nsPresContext::CSSPixelsToAppUnits((float)rect->X()),
+                 nsPresContext::CSSPixelsToAppUnits((float)rect->Y()),
+                 nsPresContext::CSSPixelsToAppUnits((float)rect->Width()),
+                 nsPresContext::CSSPixelsToAppUnits((float)rect->Height()));
+
+        // r is relative to containerFrame; transform it back to frame, so we
+        // can do a proper visibility check that is cropped to all of frame's
+        // ancestor scroll frames.
+        nsLayoutUtils::TransformResult res =
+          nsLayoutUtils::TransformRect(containerFrame, frame, r);
+        if (res == nsLayoutUtils::TransformResult::TRANSFORM_SUCCEEDED) {
+          nsRectVisibility rangeRectVisibility =
+            aPresShell->GetRectVisibility(frame, r, minDistance);
+
+          if (rangeRectVisibility == nsRectVisibility_kVisible) {
+            atLeastOneRangeRectVisible = true;
+            break;
+          }
+        }
+      }
+
+      if (atLeastOneRangeRectVisible) {
+        // This is an early exit case, where we return true if and only if
+        // the range is actually rendered.
+        return IsRangeRendered(aPresShell, aPresContext, aRange);
+      }
     }
   }
 

@@ -22,8 +22,6 @@
 #include "nsAutoPtr.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"

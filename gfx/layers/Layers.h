@@ -25,7 +25,6 @@
 #include "mozilla/Maybe.h"              // for Maybe
 #include "mozilla/Poison.h"
 #include "mozilla/RefPtr.h"             // for already_AddRefed
-#include "mozilla/StyleAnimationValue.h" // for StyleAnimationValue, etc
 #include "mozilla/TimeStamp.h"          // for TimeStamp, TimeDuration
 #include "mozilla/UniquePtr.h"          // for UniquePtr
 #include "mozilla/gfx/BaseMargin.h"     // for BaseMargin
@@ -65,7 +64,6 @@ namespace mozilla {
 
 class ComputedTimingFunction;
 class FrameLayerBuilder;
-class StyleAnimationValue;
 
 namespace gl {
 class GLContext;
@@ -696,7 +694,7 @@ public:
 
   virtual void SetLayerObserverEpoch(uint64_t aLayerObserverEpoch) {}
 
-  virtual void DidComposite(uint64_t aTransactionId,
+  virtual void DidComposite(TransactionId aTransactionId,
                             const mozilla::TimeStamp& aCompositeStart,
                             const mozilla::TimeStamp& aCompositeEnd) {}
 
@@ -712,7 +710,7 @@ public:
 
   virtual void SetTransactionIdAllocator(TransactionIdAllocator* aAllocator) {}
 
-  virtual uint64_t GetLastTransactionId() { return 0; }
+  virtual TransactionId GetLastTransactionId() { return TransactionId{0}; }
 
   virtual CompositorBridgeChild* GetCompositorBridgeChild() { return nullptr; }
 
@@ -772,8 +770,8 @@ public:
                                                         const ScrollUpdateInfo& aUpdateInfo);
   Maybe<ScrollUpdateInfo> GetPendingScrollInfoUpdate(FrameMetrics::ViewID aScrollId);
   void ClearPendingScrollInfoUpdate();
-private:
-  std::map<FrameMetrics::ViewID,ScrollUpdateInfo> mPendingScrollUpdates;
+protected:
+  ScrollUpdatesMap mPendingScrollUpdates;
 };
 
 /**
@@ -1211,6 +1209,8 @@ public:
   // 'initial current time' value.
   void StartPendingAnimations(const TimeStamp& aReadyTime);
 
+  void ClearCompositorAnimations();
+
   /**
    * CONSTRUCTION PHASE ONLY
    * If a layer represents a fixed position element, this data is stored on the
@@ -1328,10 +1328,8 @@ public:
   FrameMetrics::ViewID GetStickyScrollContainerId() { return mSimpleAttrs.GetStickyScrollContainerId(); }
   const LayerRectAbsolute& GetStickyScrollRangeOuter() { return mSimpleAttrs.GetStickyScrollRangeOuter(); }
   const LayerRectAbsolute& GetStickyScrollRangeInner() { return mSimpleAttrs.GetStickyScrollRangeInner(); }
-  FrameMetrics::ViewID GetScrollbarTargetViewId() { return mSimpleAttrs.GetScrollbarTargetViewId(); }
   const ScrollbarData& GetScrollbarData() const { return mSimpleAttrs.GetScrollbarData(); }
-  bool IsScrollbarContainer() { return mSimpleAttrs.GetScrollbarContainerDirection().isSome(); }
-  Maybe<ScrollDirection> GetScrollbarContainerDirection() { return mSimpleAttrs.GetScrollbarContainerDirection(); }
+  bool IsScrollbarContainer() const;
   Layer* GetMaskLayer() const { return mMaskLayer; }
   bool HasPendingTransform() const { return mPendingTransform; }
 
@@ -1389,7 +1387,7 @@ public:
   bool HasTransformAnimation() const;
   bool HasOpacityAnimation() const;
 
-  AnimationValue GetBaseAnimationStyle() const
+  RawServoAnimationValue* GetBaseAnimationStyle() const
   {
     return mAnimationInfo.GetBaseAnimationStyle();
   }
@@ -1799,6 +1797,9 @@ public:
    * a translation by integers, or if this layer or some ancestor layer
    * is marked as having a transform that may change without a full layer
    * transaction.
+   *
+   * Note: This function ignores ancestor layers across layer tree boundaries
+   * so that it returns a consistent value when compositing and when painting.
    */
   bool MayResample();
 

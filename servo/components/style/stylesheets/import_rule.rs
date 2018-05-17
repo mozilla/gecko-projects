@@ -83,11 +83,7 @@ impl DeepCloneWithLock for ImportSheet {
     }
 }
 
-/// A sheet that is held from an import rule.
-#[cfg(feature = "servo")]
-#[derive(Debug)]
-pub struct ImportSheet(pub ::servo_arc::Arc<::stylesheets::Stylesheet>);
-
+#[cfg(feature = "gecko")]
 impl StylesheetInDocument for ImportSheet {
     fn origin(&self, _guard: &SharedRwLockReadGuard) -> Origin {
         match *self {
@@ -125,6 +121,34 @@ impl StylesheetInDocument for ImportSheet {
     }
 }
 
+/// A sheet that is held from an import rule.
+#[cfg(feature = "servo")]
+#[derive(Debug)]
+pub struct ImportSheet(pub ::servo_arc::Arc<::stylesheets::Stylesheet>);
+
+#[cfg(feature = "servo")]
+impl StylesheetInDocument for ImportSheet {
+    fn origin(&self, guard: &SharedRwLockReadGuard) -> Origin {
+        self.0.origin(guard)
+    }
+
+    fn quirks_mode(&self, guard: &SharedRwLockReadGuard) -> QuirksMode {
+        self.0.quirks_mode(guard)
+    }
+
+    fn enabled(&self) -> bool {
+        self.0.enabled()
+    }
+
+    fn media<'a>(&'a self, guard: &'a SharedRwLockReadGuard) -> Option<&'a MediaList> {
+        self.0.media(guard)
+    }
+
+    fn rules<'a, 'b: 'a>(&'a self, guard: &'b SharedRwLockReadGuard) -> &'a [CssRule] {
+        self.0.rules(guard)
+    }
+}
+
 #[cfg(feature = "servo")]
 impl DeepCloneWithLock for ImportSheet {
     fn deep_clone_with_lock(
@@ -147,10 +171,9 @@ pub struct ImportRule {
     /// The `<url>` this `@import` rule is loading.
     pub url: CssUrl,
 
-    /// The stylesheet is always present.
-    ///
-    /// It contains an empty list of rules and namespace set that is updated
-    /// when it loads.
+    /// The stylesheet is always present. However, in the case of gecko async
+    /// parsing, we don't actually have a Gecko sheet at first, and so the
+    /// ImportSheet just has stub behavior until it appears.
     pub stylesheet: ImportSheet,
 
     /// The line and column of the rule's source code.

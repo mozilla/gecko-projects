@@ -799,13 +799,13 @@ FormatValue(JSContext* cx, const Value& vArg, JSAutoByteString& bytes)
         return "[unavailable]";
 
     /*
-     * We could use Maybe<AutoCompartment> here, but G++ can't quite follow
+     * We could use Maybe<AutoRealm> here, but G++ can't quite follow
      * that, and warns about uninitialized members being used in the
      * destructor.
      */
     RootedString str(cx);
     if (v.isObject()) {
-        AutoCompartment ac(cx, &v.toObject());
+        AutoRealm ar(cx, &v.toObject());
         str = ToString<CanGC>(cx, v);
     } else {
         str = ToString<CanGC>(cx, v);
@@ -851,7 +851,7 @@ FormatFrame(JSContext* cx, const FrameIter& iter, JS::UniqueChars&& inBuf, int n
     jsbytecode* pc = iter.pc();
 
     RootedObject envChain(cx, iter.environmentChain(cx));
-    JSAutoCompartment ac(cx, envChain);
+    JSAutoRealm ar(cx, envChain);
 
     const char* filename = script->filename();
     unsigned lineno = PCToLineNumber(script, pc);
@@ -1051,21 +1051,25 @@ FormatFrame(JSContext* cx, const FrameIter& iter, JS::UniqueChars&& inBuf, int n
 static JS::UniqueChars
 FormatWasmFrame(JSContext* cx, const FrameIter& iter, JS::UniqueChars&& inBuf, int num)
 {
-    JSAtom* functionDisplayAtom = iter.functionDisplayAtom();
     UniqueChars nameStr;
-    if (functionDisplayAtom)
+    if (JSAtom* functionDisplayAtom = iter.maybeFunctionDisplayAtom()) {
         nameStr = StringToNewUTF8CharsZ(cx, *functionDisplayAtom);
+        if (!nameStr)
+            return nullptr;
+    }
 
     JS::UniqueChars buf = sprintf_append(cx, Move(inBuf), "%d %s()",
                                          num,
                                          nameStr ? nameStr.get() : "<wasm-function>");
     if (!buf)
         return nullptr;
-    const char* filename = iter.filename();
-    uint32_t lineno = iter.computeLine();
-    buf = sprintf_append(cx, Move(buf), " [\"%s\":%d]\n",
-                         filename ? filename : "<unknown>",
-                         lineno);
+
+    buf = sprintf_append(cx, Move(buf), " [\"%s\":wasm-function[%d]:0x%x]\n",
+                         iter.filename() ? iter.filename() : "<unknown>",
+                         iter.wasmFuncIndex(),
+                         iter.wasmBytecodeOffset());
+    if (!buf)
+        return nullptr;
 
     MOZ_ASSERT(!cx->isExceptionPending());
     return buf;

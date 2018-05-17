@@ -20,6 +20,10 @@
         ondialoghelp="openPrefsHelp()">
 
   <link rel="localization" href="browser/preferences/connection.ftl"/>
+
+  <!-- Used for extension-controlled lockdown message -->
+  <link rel="localization" href="browser/preferences/preferences.ftl"/>
+  <link rel="localization" href="branding/brand.ftl"/>
   <script type="application/javascript" src="chrome://global/content/l10n.js"></script>
 
   <script type="application/javascript" src="chrome://browser/content/utilityOverlay.js"/>
@@ -31,9 +35,6 @@
   </keyset>
 
   <vbox id="ConnectionsDialogPane" class="prefpane largeDialogContainer">
-
-    <stringbundle id="bundlePreferences" src="chrome://browser/locale/preferences/preferences.properties"/>
-    <stringbundle id="bundleBrand" src="chrome://branding/locale/brand.properties"/>
     <script type="application/javascript" src="chrome://browser/content/preferences/connection.js"/>
 
     <hbox id="proxyExtensionContent" align="top" hidden="true">
@@ -49,8 +50,8 @@
       <radiogroup id="networkProxyType" preference="network.proxy.type"
                   onsyncfrompreference="return gConnectionsDialog.readProxyType();">
         <radio value="0" data-l10n-id="connection-proxy-option-no" />
-        <radio value="4" data-l10n-id="connection-proxy-option-system" />
-        <radio value="5" data-l10n-id="connection-proxy-option-auto" id="systemPref" hidden="true" />
+        <radio value="4" data-l10n-id="connection-proxy-option-auto" />
+        <radio value="5" data-l10n-id="connection-proxy-option-system" id="systemPref" hidden="true" />
         <radio value="1" data-l10n-id="connection-proxy-option-manual"/>
         <grid class="indent" flex="1">
           <columns>

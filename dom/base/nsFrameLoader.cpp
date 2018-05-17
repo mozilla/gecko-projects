@@ -35,7 +35,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIScrollable.h"
 #include "nsFrameLoader.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsSubDocumentFrame.h"
@@ -631,7 +630,7 @@ SetTreeOwnerAndChromeEventHandlerOnDocshellTree(nsIDocShellTreeItem* aItem,
                                                 nsIDocShellTreeOwner* aOwner,
                                                 EventTarget* aHandler)
 {
-  NS_PRECONDITION(aItem, "Must have item");
+  MOZ_ASSERT(aItem, "Must have item");
 
   aItem->SetTreeOwner(aOwner);
 
@@ -663,8 +662,8 @@ nsFrameLoader::AddTreeItemToTreeOwner(nsIDocShellTreeItem* aItem,
                                       int32_t aParentType,
                                       nsIDocShell* aParentNode)
 {
-  NS_PRECONDITION(aItem, "Must have docshell treeitem");
-  NS_PRECONDITION(mOwnerContent, "Must have owning content");
+  MOZ_ASSERT(aItem, "Must have docshell treeitem");
+  MOZ_ASSERT(mOwnerContent, "Must have owning content");
 
   nsAutoString value;
   bool isContent = mOwnerContent->AttrValueIs(
@@ -844,7 +843,8 @@ nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
   presShell = mDocShell->GetPresShell();
   if (presShell) {
     nsIDocument* doc = presShell->GetDocument();
-    nsHTMLDocument* htmlDoc = doc ? doc->AsHTMLDocument() : nullptr;
+    nsHTMLDocument* htmlDoc =
+      doc && doc->IsHTMLOrXHTML() ? doc->AsHTMLDocument() : nullptr;
 
     if (htmlDoc) {
       nsAutoString designMode;
@@ -1003,6 +1003,28 @@ nsFrameLoader::Hide()
                "Found an nsIDocShell which doesn't implement nsIBaseWindow.");
   baseWin->SetVisibility(false);
   baseWin->SetParentWidget(nullptr);
+}
+
+void
+nsFrameLoader::ForceLayoutIfNecessary()
+{
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (!frame) {
+    return;
+  }
+
+  nsPresContext* presContext = frame->PresContext();
+  if (!presContext) {
+    return;
+  }
+
+  // Only force the layout flush if the frameloader hasn't ever been
+  // run through layout.
+  if (frame->GetStateBits() & NS_FRAME_FIRST_REFLOW) {
+    if (nsCOMPtr<nsIPresShell> shell = presContext->GetPresShell()) {
+      shell->FlushPendingNotifications(FlushType::Layout);
+    }
+  }
 }
 
 nsresult
@@ -1876,7 +1898,7 @@ nsFrameLoader::SetOwnerContent(Element* aContent)
 
   JS::RootedObject wrapper(jsapi.cx(), GetWrapper());
   if (wrapper) {
-    JSAutoCompartment ac(jsapi.cx(), wrapper);
+    JSAutoRealm ar(jsapi.cx(), wrapper);
     IgnoredErrorResult rv;
     ReparentWrapper(jsapi.cx(), wrapper, rv);
     Unused << NS_WARN_IF(rv.Failed());
@@ -2054,13 +2076,13 @@ nsFrameLoader::MaybeCreateDocShell()
 
   // Make sure all shells have links back to the content element
   // in the nearest enclosing chrome shell.
-  nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
+  RefPtr<EventTarget> chromeEventHandler;
 
   if (parentType == nsIDocShellTreeItem::typeChrome) {
     // Our parent shell is a chrome shell. It is therefore our nearest
     // enclosing chrome shell.
 
-    chromeEventHandler = do_QueryInterface(mOwnerContent);
+    chromeEventHandler = mOwnerContent;
     NS_ASSERTION(chromeEventHandler,
                  "This mContent should implement this.");
   } else {
@@ -2522,9 +2544,8 @@ GetContentParent(Element* aBrowser)
     return ReturnTuple(nullptr, nullptr);
   }
 
-  nsCOMPtr<nsISupports> otherLoaderAsSupports;
-  browser->GetSameProcessAsFrameLoader(getter_AddRefs(otherLoaderAsSupports));
-  RefPtr<nsFrameLoader> otherLoader = do_QueryObject(otherLoaderAsSupports);
+  RefPtr<nsFrameLoader> otherLoader;
+  browser->GetSameProcessAsFrameLoader(getter_AddRefs(otherLoader));
   if (!otherLoader) {
     return ReturnTuple(nullptr, nullptr);
   }
@@ -2942,7 +2963,8 @@ nsFrameLoader::EnsureMessageManager()
       return NS_ERROR_FAILURE;
     }
     mChildMessageManager =
-      new nsInProcessTabChildGlobal(mDocShell, mOwnerContent, mMessageManager);
+      nsInProcessTabChildGlobal::Create(mDocShell, mOwnerContent, mMessageManager);
+    NS_ENSURE_TRUE(mChildMessageManager, NS_ERROR_UNEXPECTED);
   }
   return NS_OK;
 }

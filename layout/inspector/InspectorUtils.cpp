@@ -15,10 +15,8 @@
 #include "nsString.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIContentInlines.h"
-#include "nsIDOMElement.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
@@ -35,7 +33,6 @@
 #include "mozilla/dom/CSSLexer.h"
 #include "mozilla/dom/InspectorUtilsBinding.h"
 #include "mozilla/dom/ToJSValue.h"
-#include "nsCSSParser.h"
 #include "nsCSSProps.h"
 #include "nsCSSValue.h"
 #include "nsColor.h"
@@ -126,9 +123,8 @@ InspectorUtils::GetParentForNode(nsINode& aNode,
   // First do the special cases -- document nodes and anonymous content
   nsINode* parent = nullptr;
 
-  if (aNode.IsNodeOfType(nsINode::eDOCUMENT)) {
-    auto& doc = static_cast<nsIDocument&>(aNode);
-    parent = inLayoutUtils::GetContainerFor(doc);
+  if (aNode.IsDocument()) {
+    parent = inLayoutUtils::GetContainerFor(*aNode.AsDocument());
   } else if (aShowingAnonymousContent) {
     if (aNode.IsContent()) {
       parent = aNode.AsContent()->GetFlattenedTreeParent();
@@ -369,173 +365,36 @@ InspectorUtils::GetCSSPropertyNames(GlobalObject& aGlobalObject,
                                     const PropertyNamesOptions& aOptions,
                                     nsTArray<nsString>& aResult)
 {
-#define DO_PROP(_prop)                                                      \
-  PR_BEGIN_MACRO                                                            \
-    nsCSSPropertyID cssProp = nsCSSPropertyID(_prop);                       \
-    if (nsCSSProps::IsEnabled(cssProp, CSSEnabledState::eForAllContent)) {  \
-      nsDependentCString name(kCSSRawProperties[_prop]);                    \
-      aResult.AppendElement(NS_ConvertASCIItoUTF16(name));                  \
-    }                                                                       \
-  PR_END_MACRO
+  CSSEnabledState enabledState = aOptions.mIncludeExperimentals
+    ? CSSEnabledState::eIgnoreEnabledState
+    : CSSEnabledState::eForAllContent;
+
+  auto appendProperty = [enabledState, &aResult](uint32_t prop) {
+    nsCSSPropertyID cssProp = nsCSSPropertyID(prop);
+    if (nsCSSProps::IsEnabled(cssProp, enabledState)) {
+      nsDependentCString name(kCSSRawProperties[prop]);
+      aResult.AppendElement(NS_ConvertASCIItoUTF16(name));
+    }
+  };
 
   uint32_t prop = 0;
   for ( ; prop < eCSSProperty_COUNT_no_shorthands; ++prop) {
-    if (nsCSSProps::PropertyParseType(nsCSSPropertyID(prop)) !=
-        CSS_PROPERTY_PARSE_INACCESSIBLE) {
-      DO_PROP(prop);
+    if (!nsCSSProps::PropHasFlags(nsCSSPropertyID(prop),
+                                  CSSPropFlags::Inaccessible)) {
+      appendProperty(prop);
     }
   }
 
-  for ( ; prop < eCSSProperty_COUNT; ++prop) {
-    DO_PROP(prop);
+  if (aOptions.mIncludeShorthands) {
+    for ( ; prop < eCSSProperty_COUNT; ++prop) {
+      appendProperty(prop);
+    }
   }
 
   if (aOptions.mIncludeAliases) {
     for (prop = eCSSProperty_COUNT; prop < eCSSProperty_COUNT_with_aliases; ++prop) {
-      DO_PROP(prop);
+      appendProperty(prop);
     }
-  }
-
-#undef DO_PROP
-}
-
-static void InsertNoDuplicates(nsTArray<nsString>& aArray,
-                               const nsAString& aString)
-{
-  size_t i = aArray.IndexOfFirstElementGt(aString);
-  if (i > 0 && aArray[i-1].Equals(aString)) {
-    return;
-  }
-  aArray.InsertElementAt(i, aString);
-}
-
-static void GetKeywordsForProperty(const nsCSSPropertyID aProperty,
-                                   nsTArray<nsString>& aArray)
-{
-  const nsCSSProps::KTableEntry* keywordTable;
-  if (nsCSSProps::IsShorthand(aProperty)) {
-    if (aProperty == eCSSProperty_font) {
-      keywordTable = nsCSSProps::kFontKTable;
-    } else {
-      // Other shorthand props have no keywords.
-      return;
-    }
-  } else {
-    keywordTable = nsCSSProps::kKeywordTableTable[aProperty];
-    // Special cases where nsCSSPropList.h doesn't hold the table.
-    if (keywordTable == nullptr) {
-      if (aProperty == eCSSProperty_clip_path) {
-        keywordTable = nsCSSProps::kClipPathGeometryBoxKTable;
-      }
-    }
-  }
-
-  if (keywordTable) {
-    for (size_t i = 0; !keywordTable[i].IsSentinel(); ++i) {
-      nsCSSKeyword word = keywordTable[i].mKeyword;
-
-      // These are extra -moz values which are added while rebuilding
-      // the properties db. These values are not relevant and are not
-      // documented on MDN, so filter these out
-      // eCSSKeyword_UNKNOWN is ignored because it indicates an
-      // invalid entry; but can still be seen in a table, see bug 1430616.
-      if (word != eCSSKeyword__moz_zoom_in && word != eCSSKeyword__moz_zoom_out &&
-          word != eCSSKeyword__moz_grab && word != eCSSKeyword__moz_grabbing &&
-          word != eCSSKeyword_UNKNOWN) {
-          InsertNoDuplicates(aArray,
-                  NS_ConvertASCIItoUTF16(nsCSSKeywords::GetStringValue(word)));
-      }
-    }
-  }
-
-  // More special cases.
-  if (aProperty == eCSSProperty_clip_path) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("circle"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("ellipse"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("inset"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("polygon"));
-  } else if (aProperty == eCSSProperty_clip) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("rect"));
-  } else if (aProperty == eCSSProperty_list_style_type) {
-    int32_t length;
-    const char* const* values = nsCSSProps::GetListStyleTypes(&length);
-    for (int32_t i = 0; i < length; ++i) {
-      InsertNoDuplicates(aArray, NS_ConvertASCIItoUTF16(values[i]));
-    }
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("symbols"));
-  }
-}
-
-static void GetColorsForProperty(const uint32_t aParserVariant,
-                                 nsTArray<nsString>& aArray)
-{
-  if (aParserVariant & VARIANT_COLOR) {
-    // GetKeywordsForProperty and GetOtherValuesForProperty assume aArray is sorted,
-    // and if aArray is not empty here, then it's not going to be sorted coming out.
-    MOZ_ASSERT(aArray.Length() == 0);
-    size_t size;
-    const char * const *allColorNames = NS_AllColorNames(&size);
-    nsString* utf16Names = aArray.AppendElements(size);
-    for (size_t i = 0; i < size; i++) {
-      utf16Names[i].AssignASCII(allColorNames[i]);
-    }
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("currentColor"));
-  }
-}
-
-static void GetOtherValuesForProperty(const uint32_t aParserVariant,
-                                      nsTArray<nsString>& aArray)
-{
-  if (aParserVariant & VARIANT_AUTO) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("auto"));
-  }
-  if (aParserVariant & VARIANT_NORMAL) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("normal"));
-  }
-  if(aParserVariant & VARIANT_ALL) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("all"));
-  }
-  if (aParserVariant & VARIANT_NONE) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("none"));
-  }
-  if (aParserVariant & VARIANT_ELEMENT) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-element"));
-  }
-  if (aParserVariant & VARIANT_IMAGE_RECT) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-image-rect"));
-  }
-  if (aParserVariant & VARIANT_COLOR) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("rgb"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("hsl"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("rgba"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("hsla"));
-  }
-  if (aParserVariant & VARIANT_TIMING_FUNCTION) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("cubic-bezier"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("steps"));
-  }
-  if (aParserVariant & VARIANT_CALC) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("calc"));
-  }
-  if (aParserVariant & VARIANT_URL) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("url"));
-  }
-  if (aParserVariant & VARIANT_GRADIENT) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("linear-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("radial-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("repeating-linear-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("repeating-radial-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-linear-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-radial-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-repeating-linear-gradient"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-repeating-radial-gradient"));
-  }
-  if (aParserVariant & VARIANT_ATTR) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("attr"));
-  }
-  if (aParserVariant & VARIANT_COUNTER) {
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("counter"));
-    InsertNoDuplicates(aArray, NS_LITERAL_STRING("counters"));
   }
 }
 
@@ -585,189 +444,20 @@ InspectorUtils::CssPropertyIsShorthand(GlobalObject& aGlobalObject,
   return isShorthand;
 }
 
-// A helper function that determines whether the given property
-// supports the given type.
-static bool
-PropertySupportsVariant(nsCSSPropertyID aPropertyID, uint32_t aVariant)
-{
-  if (nsCSSProps::IsShorthand(aPropertyID)) {
-    // We need a special case for border here, because while it resets
-    // border-image, it can't actually parse an image.
-    if (aPropertyID == eCSSProperty_border) {
-      return (aVariant & (VARIANT_COLOR | VARIANT_LENGTH)) != 0;
-    }
-
-    for (const nsCSSPropertyID* props = nsCSSProps::SubpropertyEntryFor(aPropertyID);
-         *props != eCSSProperty_UNKNOWN; ++props) {
-      if (PropertySupportsVariant(*props, aVariant)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  uint32_t supported = nsCSSProps::ParserVariant(aPropertyID);
-
-  // For the time being, properties that are parsed by functions must
-  // have some of their attributes hand-maintained here.
-  if (nsCSSProps::PropHasFlags(aPropertyID, CSS_PROPERTY_VALUE_PARSER_FUNCTION) ||
-      nsCSSProps::PropertyParseType(aPropertyID) == CSS_PROPERTY_PARSE_FUNCTION) {
-    // These must all be special-cased.
-    switch (aPropertyID) {
-      case eCSSProperty_border_image_slice:
-      case eCSSProperty_grid_template:
-      case eCSSProperty_grid:
-        supported |= VARIANT_PN;
-        break;
-
-      case eCSSProperty_border_image_outset:
-        supported |= VARIANT_LN;
-        break;
-
-      case eCSSProperty_border_image_width:
-      case eCSSProperty_stroke_dasharray:
-        supported |= VARIANT_LPN;
-        break;
-
-      case eCSSProperty_border_top_left_radius:
-      case eCSSProperty_border_top_right_radius:
-      case eCSSProperty_border_bottom_left_radius:
-      case eCSSProperty_border_bottom_right_radius:
-      case eCSSProperty_background_position:
-      case eCSSProperty_background_position_x:
-      case eCSSProperty_background_position_y:
-      case eCSSProperty_background_size:
-      case eCSSProperty_mask_position:
-      case eCSSProperty_mask_position_x:
-      case eCSSProperty_mask_position_y:
-      case eCSSProperty_mask_size:
-      case eCSSProperty_grid_auto_columns:
-      case eCSSProperty_grid_auto_rows:
-      case eCSSProperty_grid_template_columns:
-      case eCSSProperty_grid_template_rows:
-      case eCSSProperty_object_position:
-      case eCSSProperty_scroll_snap_coordinate:
-      case eCSSProperty_scroll_snap_destination:
-      case eCSSProperty_transform_origin:
-      case eCSSProperty_translate:
-      case eCSSProperty_perspective_origin:
-      case eCSSProperty__moz_outline_radius_topleft:
-      case eCSSProperty__moz_outline_radius_topright:
-      case eCSSProperty__moz_outline_radius_bottomleft:
-      case eCSSProperty__moz_outline_radius_bottomright:
-      case eCSSProperty__moz_window_transform_origin:
-        supported |= VARIANT_LP;
-        break;
-
-      case eCSSProperty_text_shadow:
-      case eCSSProperty_box_shadow:
-        supported |= VARIANT_LENGTH | VARIANT_COLOR;
-        break;
-
-      case eCSSProperty_border_spacing:
-        supported |= VARIANT_LENGTH;
-        break;
-
-      case eCSSProperty_cursor:
-        supported |= VARIANT_URL;
-        break;
-
-      case eCSSProperty_shape_outside:
-        supported |= VARIANT_IMAGE;
-        break;
-
-      case eCSSProperty_fill:
-      case eCSSProperty_stroke:
-        supported |= VARIANT_COLOR | VARIANT_URL;
-        break;
-
-      case eCSSProperty_image_orientation:
-      case eCSSProperty_rotate:
-        supported |= VARIANT_ANGLE;
-        break;
-
-      case eCSSProperty_filter:
-        supported |= VARIANT_URL;
-        break;
-
-      case eCSSProperty_grid_column_start:
-      case eCSSProperty_grid_column_end:
-      case eCSSProperty_grid_row_start:
-      case eCSSProperty_grid_row_end:
-      case eCSSProperty_font_weight:
-      case eCSSProperty_initial_letter:
-      case eCSSProperty_scale:
-        supported |= VARIANT_NUMBER;
-        break;
-
-      default:
-        break;
-    }
-  }
-
-  return (supported & aVariant) != 0;
-}
-
 bool
 InspectorUtils::CssPropertySupportsType(GlobalObject& aGlobalObject,
                                         const nsAString& aProperty,
                                         uint32_t aType,
                                         ErrorResult& aRv)
 {
-  nsCSSPropertyID propertyID =
-    nsCSSProps::LookupProperty(aProperty, CSSEnabledState::eForAllContent);
-  if (propertyID == eCSSProperty_UNKNOWN) {
+  NS_ConvertUTF16toUTF8 property(aProperty);
+  bool found;
+  bool result = Servo_Property_SupportsType(&property, aType, &found);
+  if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
     return false;
   }
-
-  if (propertyID >= eCSSProperty_COUNT) {
-    return false;
-  }
-
-  uint32_t variant;
-  switch (aType) {
-  case InspectorUtilsBinding::TYPE_LENGTH:
-    variant = VARIANT_LENGTH;
-    break;
-  case InspectorUtilsBinding::TYPE_PERCENTAGE:
-    variant = VARIANT_PERCENT;
-    break;
-  case InspectorUtilsBinding::TYPE_COLOR:
-    variant = VARIANT_COLOR;
-    break;
-  case InspectorUtilsBinding::TYPE_URL:
-    variant = VARIANT_URL;
-    break;
-  case InspectorUtilsBinding::TYPE_ANGLE:
-    variant = VARIANT_ANGLE;
-    break;
-  case InspectorUtilsBinding::TYPE_FREQUENCY:
-    variant = VARIANT_FREQUENCY;
-    break;
-  case InspectorUtilsBinding::TYPE_TIME:
-    variant = VARIANT_TIME;
-    break;
-  case InspectorUtilsBinding::TYPE_GRADIENT:
-    variant = VARIANT_GRADIENT;
-    break;
-  case InspectorUtilsBinding::TYPE_TIMING_FUNCTION:
-    variant = VARIANT_TIMING_FUNCTION;
-    break;
-  case InspectorUtilsBinding::TYPE_IMAGE_RECT:
-    variant = VARIANT_IMAGE_RECT;
-    break;
-  case InspectorUtilsBinding::TYPE_NUMBER:
-    // Include integers under "number"?
-    variant = VARIANT_NUMBER | VARIANT_INTEGER;
-    break;
-  default:
-    // Unknown type
-    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-    return false;
-  }
-
-  return PropertySupportsVariant(propertyID, variant);
+  return result;
 }
 
 /* static */ void
@@ -776,51 +466,13 @@ InspectorUtils::GetCSSValuesForProperty(GlobalObject& aGlobalObject,
                                         nsTArray<nsString>& aResult,
                                         ErrorResult& aRv)
 {
-  nsCSSPropertyID propertyID = nsCSSProps::
-    LookupProperty(aProperty, CSSEnabledState::eForAllContent);
-  if (propertyID == eCSSProperty_UNKNOWN) {
+  NS_ConvertUTF16toUTF8 property(aProperty);
+  bool found;
+  Servo_Property_GetCSSValuesForProperty(&property, &found, &aResult);
+  if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
-    return;
   }
-
-  // We start collecting the values, BUT colors need to go in first, because aResult
-  // needs to stay sorted, and the colors are sorted, so we just append them.
-  if (propertyID == eCSSPropertyExtra_variable) {
-    // No other values we can report.
-  } else if (!nsCSSProps::IsShorthand(propertyID)) {
-    // Property is longhand.
-    uint32_t propertyParserVariant = nsCSSProps::ParserVariant(propertyID);
-    // Get colors first.
-    GetColorsForProperty(propertyParserVariant, aResult);
-    GetKeywordsForProperty(propertyID, aResult);
-    GetOtherValuesForProperty(propertyParserVariant, aResult);
-  } else if (propertyID == eCSSProperty_all) {
-    // We don't want to pick up everything from gAllSubpropTable, so
-    // special-case this here.
-  } else {
-    // Property is shorthand.
-    CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID,
-                                         CSSEnabledState::eForAllContent) {
-      // Get colors (once) first.
-      uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
-      if (propertyParserVariant & VARIANT_COLOR) {
-        GetColorsForProperty(propertyParserVariant, aResult);
-        break;
-      }
-    }
-    // Some shorthands may have keywords not available in subproperties.
-    GetKeywordsForProperty(propertyID, aResult);
-    CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID,
-                                         CSSEnabledState::eForAllContent) {
-      uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
-      GetKeywordsForProperty(*subproperty, aResult);
-      GetOtherValuesForProperty(propertyParserVariant, aResult);
-    }
-  }
-  // All CSS properties take initial, inherit and unset.
-  InsertNoDuplicates(aResult, NS_LITERAL_STRING("initial"));
-  InsertNoDuplicates(aResult, NS_LITERAL_STRING("inherit"));
-  InsertNoDuplicates(aResult, NS_LITERAL_STRING("unset"));
+  return;
 }
 
 /* static */ void
@@ -1054,8 +706,7 @@ InspectorUtils::ParseStyleSheet(GlobalObject& aGlobalObject,
                                 ErrorResult& aRv)
 {
 
-  RefPtr<ServoStyleSheet> servoSheet = aSheet.AsServo();
-  aRv = servoSheet->ReparseSheet(aInput);
+  aRv = aSheet.ReparseSheet(aInput);
 }
 
 void

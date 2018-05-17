@@ -25,9 +25,7 @@
 #include "nsIContentViewer.h"
 #include "nsIDocument.h"
 #include "nsIDocumentEncoder.h"
-#include "nsIDOMDocumentFragment.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMDocument.h"
 #include "nsMappedAttributes.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsIHTMLDocument.h"
@@ -58,7 +56,6 @@
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMEvent.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsITextControlFrame.h"
 #include "nsIForm.h"
@@ -110,7 +107,6 @@ NS_IMPL_ADDREF_INHERITED(nsGenericHTMLElement, nsGenericHTMLElementBase)
 NS_IMPL_RELEASE_INHERITED(nsGenericHTMLElement, nsGenericHTMLElementBase)
 
 NS_INTERFACE_MAP_BEGIN(nsGenericHTMLElement)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMElement)
   NS_INTERFACE_MAP_ENTRY(nsIDOMNode)
 NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElementBase)
 
@@ -547,8 +543,8 @@ bool
 nsGenericHTMLElement::CheckHandleEventForAnchorsPreconditions(
                         EventChainVisitor& aVisitor)
 {
-  NS_PRECONDITION(nsCOMPtr<Link>(do_QueryObject(this)),
-                  "should be called only when |this| implements |Link|");
+  MOZ_ASSERT(nsCOMPtr<Link>(do_QueryObject(this)),
+             "should be called only when |this| implements |Link|");
 
   if (!aVisitor.mPresContext) {
     // We need a pres context to do link stuff. Some events (e.g. mutation
@@ -592,7 +588,7 @@ nsGenericHTMLElement::PostHandleEventForAnchors(EventChainPostVisitor& aVisitor)
 bool
 nsGenericHTMLElement::IsHTMLLink(nsIURI** aURI) const
 {
-  NS_PRECONDITION(aURI, "Must provide aURI out param");
+  MOZ_ASSERT(aURI, "Must provide aURI out param");
 
   *aURI = GetHrefURIForAnchors().take();
   // We promise out param is non-null if we return true, so base rv on it
@@ -1686,7 +1682,7 @@ nsGenericHTMLFormElement::SaveSubtreeState()
 void
 nsGenericHTMLFormElement::SetForm(HTMLFormElement* aForm)
 {
-  NS_PRECONDITION(aForm, "Don't pass null here");
+  MOZ_ASSERT(aForm, "Don't pass null here");
   NS_ASSERTION(!mForm,
                "We don't support switching from one non-null form to another.");
 
@@ -2226,8 +2222,8 @@ void
 nsGenericHTMLFormElement::UpdateFormOwner(bool aBindToTree,
                                           Element* aFormIdElement)
 {
-  NS_PRECONDITION(!aBindToTree || !aFormIdElement,
-                  "aFormIdElement shouldn't be set if aBindToTree is true!");
+  MOZ_ASSERT(!aBindToTree || !aFormIdElement,
+             "aFormIdElement shouldn't be set if aBindToTree is true!");
 
   bool needStateUpdate = false;
   if (!aBindToTree) {
@@ -2572,7 +2568,7 @@ nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
 
     // Return true if the element became the current focus within its window.
     nsPIDOMWindowOuter* window = OwnerDoc()->GetWindow();
-    focused = (window && window->GetFocusedNode());
+    focused = (window && window->GetFocusedElement());
   }
 
   if (aKeyCausesActivation) {
@@ -2963,8 +2959,7 @@ nsGenericHTMLElement::SetInnerText(const nsAString& aValue)
 
   // Might as well stick a batch around this since we're performing several
   // mutations.
-  mozAutoDocUpdate updateBatch(GetComposedDoc(),
-    UPDATE_CONTENT_MODEL, true);
+  mozAutoDocUpdate updateBatch(GetComposedDoc(), true);
   nsAutoMutationBatch mb;
 
   mb.Init(this, true, false);

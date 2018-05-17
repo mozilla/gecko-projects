@@ -29,7 +29,9 @@ langpack_sign_push_description_schema = Schema({
     Required('worker-type'): optionally_keyed_by('project', basestring),
     Required('worker'): {
         Required('implementation'): 'sign-and-push-addons',
-        Required('channel'): optionally_keyed_by('project', Any('listed', 'unlisted')),
+        Required('channel'): optionally_keyed_by(
+            'project',
+            optionally_keyed_by('platform', Any('listed', 'unlisted'))),
         Required('upstream-artifacts'): None,   # Processed here below
     },
 
@@ -69,7 +71,9 @@ def resolve_keys(config, jobs):
             job, 'scopes', item_name=job['label'], project=config.params['project']
         )
         resolve_keyed_by(
-            job, 'worker.channel', item_name=job['label'], project=config.params['project']
+            job, 'worker.channel', item_name=job['label'],
+            project=config.params['project'],
+            platform=job['dependent-task'].attributes['build_platform'],
         )
 
         yield job
@@ -90,9 +94,9 @@ def filter_out_macos_jobs_but_mac_only_locales(config, jobs):
     for job in jobs:
         build_platform = job['dependent-task'].attributes.get('build_platform')
 
-        if build_platform == 'linux64-nightly':
+        if build_platform in ('linux64-nightly', 'linux64-devedition-nightly'):
             yield job
-        elif build_platform == 'macosx64-nightly' and \
+        elif build_platform in ('macosx64-nightly', 'macosx64-devedition-nightly') and \
                 'ja-JP-mac' in job['attributes']['chunk_locales']:
             # Other locales of the same job shouldn't be processed
             job['attributes']['chunk_locales'] = ['ja-JP-mac']

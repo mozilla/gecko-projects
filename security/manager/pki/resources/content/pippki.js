@@ -45,14 +45,13 @@ function getDERString(cert) {
   return derString;
 }
 
-function getPKCS7String(cert, chainMode) {
-  var length = {};
-  var pkcs7Array = cert.exportAsCMS(chainMode, length);
-  var pkcs7String = "";
-  for (var i = 0; i < pkcs7Array.length; i++) {
-    pkcs7String += String.fromCharCode(pkcs7Array[i]);
+function getPKCS7String(certArray) {
+  let certList = Cc["@mozilla.org/security/x509certlist;1"]
+                   .createInstance(Ci.nsIX509CertList);
+  for (let cert of certArray) {
+    certList.addCert(cert);
   }
-  return pkcs7String;
+  return certList.asPKCS7Blob();
 }
 
 function getPEMString(cert) {
@@ -78,7 +77,7 @@ const DEFAULT_CERT_EXTENSION = "crt";
 
 /**
  * Generates a filename for a cert suitable to set as the |defaultString|
- * attribute on an nsIFilePicker.
+ * attribute on an Ci.nsIFilePicker.
  *
  * @param {nsIX509Cert} cert
  *        The cert to generate a filename for.
@@ -94,9 +93,9 @@ function certToFilename(cert) {
                      .replace(/\\/g, "")
                      .replace(/\//g, "");
 
-  // nsIFilePicker.defaultExtension is more of a suggestion to some
+  // Ci.nsIFilePicker.defaultExtension is more of a suggestion to some
   // implementations, so we include the extension in the file name as well. This
-  // is what the documentation for nsIFilePicker.defaultString says we should do
+  // is what the documentation for Ci.nsIFilePicker.defaultString says we should do
   // anyways.
   return `${filename}.${DEFAULT_CERT_EXTENSION}`;
 }
@@ -107,11 +106,14 @@ async function exportToFile(parent, cert) {
     return undefined;
   }
 
-  var nsIFilePicker = Ci.nsIFilePicker;
-  var fp = Cc["@mozilla.org/filepicker;1"].
-           createInstance(nsIFilePicker);
-  fp.init(parent, bundle.getString("SaveCertAs"),
-          nsIFilePicker.modeSave);
+  let results = await asyncDetermineUsages(cert);
+  let chain = getBestChain(results);
+  if (!chain) {
+    chain = [cert];
+  }
+
+  var fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+  fp.init(parent, bundle.getString("SaveCertAs"), Ci.nsIFilePicker.modeSave);
   fp.defaultString = certToFilename(cert);
   fp.defaultExtension = DEFAULT_CERT_EXTENSION;
   fp.appendFilter(bundle.getString("CertFormatBase64"), "*.crt; *.pem");
@@ -119,7 +121,7 @@ async function exportToFile(parent, cert) {
   fp.appendFilter(bundle.getString("CertFormatDER"), "*.der");
   fp.appendFilter(bundle.getString("CertFormatPKCS7"), "*.p7c");
   fp.appendFilter(bundle.getString("CertFormatPKCS7Chain"), "*.p7c");
-  fp.appendFilters(nsIFilePicker.filterAll);
+  fp.appendFilters(Ci.nsIFilePicker.filterAll);
   return new Promise(resolve => {
     fp.open(res => {
       resolve(fpCallback(res));
@@ -127,7 +129,8 @@ async function exportToFile(parent, cert) {
   });
 
   function fpCallback(res) {
-    if (res != nsIFilePicker.returnOK && res != nsIFilePicker.returnReplace) {
+    if (res != Ci.nsIFilePicker.returnOK &&
+        res != Ci.nsIFilePicker.returnReplace) {
       return;
     }
 
@@ -135,19 +138,18 @@ async function exportToFile(parent, cert) {
     switch (fp.filterIndex) {
       case 1:
         content = getPEMString(cert);
-        var chain = cert.getChain();
         for (let i = 1; i < chain.length; i++) {
-          content += getPEMString(chain.queryElementAt(i, Ci.nsIX509Cert));
+          content += getPEMString(chain[i]);
         }
         break;
       case 2:
         content = getDERString(cert);
         break;
       case 3:
-        content = getPKCS7String(cert, Ci.nsIX509Cert.CMS_CHAIN_MODE_CertOnly);
+        content = getPKCS7String([cert]);
         break;
       case 4:
-        content = getPKCS7String(cert, Ci.nsIX509Cert.CMS_CHAIN_MODE_CertChainWithRoot);
+        content = getPKCS7String(chain);
         break;
       case 0:
       default:
@@ -192,4 +194,108 @@ async function exportToFile(parent, cert) {
                          [fp.file.path, msg]));
     }
   }
+}
+
+const PRErrorCodeSuccess = 0;
+
+// Certificate usages we care about in the certificate viewer.
+const certificateUsageSSLClient              = 0x0001;
+const certificateUsageSSLServer              = 0x0002;
+const certificateUsageSSLCA                  = 0x0008;
+const certificateUsageEmailSigner            = 0x0010;
+const certificateUsageEmailRecipient         = 0x0020;
+
+// A map from the name of a certificate usage to the value of the usage.
+// Useful for printing debugging information and for enumerating all supported
+// usages.
+const certificateUsages = {
+  certificateUsageSSLClient,
+  certificateUsageSSLServer,
+  certificateUsageSSLCA,
+  certificateUsageEmailSigner,
+  certificateUsageEmailRecipient,
+};
+
+/**
+ * Returns a promise that will resolve with a results array (see
+ * `displayUsages` in certViewer.js) consisting of what usages the given
+ * certificate successfully verified for.
+ *
+ * @param {nsIX509Cert} cert
+ *        The certificate to determine valid usages for.
+ * @return {Promise}
+ *        A promise that will resolve with the results of the verifications.
+ */
+function asyncDetermineUsages(cert) {
+  let promises = [];
+  let now = Date.now() / 1000;
+  let certdb = Cc["@mozilla.org/security/x509certdb;1"]
+                 .getService(Ci.nsIX509CertDB);
+  Object.keys(certificateUsages).forEach(usageString => {
+    promises.push(new Promise((resolve, reject) => {
+      let usage = certificateUsages[usageString];
+      certdb.asyncVerifyCertAtTime(cert, usage, 0, null, now,
+        (aPRErrorCode, aVerifiedChain, aHasEVPolicy) => {
+          resolve({ usageString,
+                    errorCode: aPRErrorCode,
+                    chain: aVerifiedChain });
+        });
+    }));
+  });
+  return Promise.all(promises);
+}
+
+/**
+ * Given a results array (see `displayUsages` in certViewer.js), returns the
+ * "best" verified certificate chain. Since the primary use case is for TLS
+ * server certificates in Firefox, such a verified chain will be returned if
+ * present. Otherwise, the priority is: TLS client certificate, email signer,
+ * email recipient, CA. Returns null if no usage verified successfully.
+ *
+ * @param {Array} results
+ *        An array of results from `asyncDetermineUsages`. See `displayUsages`.
+ * @param {Number} usage
+ *        A numerical value corresponding to a usage. See `certificateUsages`.
+ * @returns {Array} An array of `nsIX509Cert` representing the verified
+ *          certificate chain for the given usage, or null if there is none.
+ */
+function getBestChain(results) {
+  let usages = [ certificateUsageSSLServer, certificateUsageSSLClient,
+                 certificateUsageEmailSigner, certificateUsageEmailRecipient,
+                 certificateUsageSSLCA ];
+  for (let usage of usages) {
+    let chain = getChainForUsage(results, usage);
+    if (chain) {
+      return chain;
+    }
+  }
+  return null;
+}
+
+/**
+ * Given a results array (see `displayUsages` in certViewer.js), returns the
+ * chain corresponding to the desired usage, if verifying for that usage
+ * succeeded. Returns null otherwise.
+ *
+ * @param {Array} results
+ *        An array of results from `asyncDetermineUsages`. See `displayUsages`.
+ * @param {Number} usage
+ *        A numerical value corresponding to a usage. See `certificateUsages`.
+ * @returns {Array} An array of `nsIX509Cert` representing the verified
+ *          certificate chain for the given usage, or null if there is none.
+ */
+function getChainForUsage(results, usage) {
+  for (let result of results) {
+    if (certificateUsages[result.usageString] == usage &&
+        result.errorCode == PRErrorCodeSuccess) {
+      let array = [];
+      let enumerator = result.chain.getEnumerator();
+      while (enumerator.hasMoreElements()) {
+        let cert = enumerator.getNext().QueryInterface(Ci.nsIX509Cert);
+        array.push(cert);
+      }
+      return array;
+    }
+  }
+  return null;
 }

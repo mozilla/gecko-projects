@@ -10,21 +10,10 @@ config = {
     "exes": {
         'python': 'c:/mozilla-build/python27/python',
         'hg': 'c:/mozilla-build/hg/hg',
-        'mozinstall': ['%s/build/venv/scripts/python' % os.getcwd(),
-                       '%s/build/venv/scripts/mozinstall-script.py' % os.getcwd()],
     },
-
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
-
-    "buildbot_json_path": "buildprops.json",
 
     "default_actions": [
         'clobber',
-        'read-buildbot-config',
         'download-and-extract',
         'create-virtualenv',
         'install',

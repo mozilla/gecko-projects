@@ -27,7 +27,6 @@
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDocumentLoader.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIPrompt.h"
@@ -1700,9 +1699,12 @@ nsWindowWatcher::CalculateChromeFlagsHelper(uint32_t aInitialFlags,
                                nsIWebBrowserChrome::CHROME_WINDOW_MIN);
 
   // default scrollbar to "on," unless explicitly turned off
-  if (WinHasOption(aFeatures, "scrollbars", 1, &presenceFlag) || !presenceFlag) {
+  bool scrollbarsPresent = false;
+  if (WinHasOption(aFeatures, "scrollbars", 1, &scrollbarsPresent) ||
+      !scrollbarsPresent) {
     chromeFlags |= nsIWebBrowserChrome::CHROME_SCROLLBARS;
   }
+  presenceFlag = presenceFlag || scrollbarsPresent;
 
   return chromeFlags;
 }

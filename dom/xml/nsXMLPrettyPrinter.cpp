@@ -9,7 +9,6 @@
 #include "nsIObserver.h"
 #include "nsSyncLoadService.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDOMElement.h"
 #include "nsIServiceManager.h"
 #include "nsNetUtil.h"
 #include "mozilla/dom/Element.h"
@@ -103,7 +102,7 @@ nsXMLPrettyPrinter::PrettyPrint(nsIDocument* aDocument,
                    NS_LITERAL_CSTRING("chrome://global/content/xml/XMLPrettyPrint.xsl"));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsIDOMDocument> xslDocument;
+    nsCOMPtr<nsIDocument> xslDocument;
     rv = nsSyncLoadService::LoadDocument(xslUri, nsIContentPolicy::TYPE_XSLT,
                                          nsContentUtils::GetSystemPrincipal(),
                                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
@@ -114,8 +113,7 @@ nsXMLPrettyPrinter::PrettyPrint(nsIDocument* aDocument,
     // Transform the document
     RefPtr<txMozillaXSLTProcessor> transformer = new txMozillaXSLTProcessor();
     ErrorResult err;
-    nsCOMPtr<nsIDocument> xslDoc = do_QueryInterface(xslDocument);
-    transformer->ImportStylesheet(*xslDoc, err);
+    transformer->ImportStylesheet(*xslDocument, err);
     if (NS_WARN_IF(err.Failed())) {
         return err.StealNSResult();
     }

@@ -5,7 +5,7 @@
 /* exported Toolbox, restartNetMonitor, teardown, waitForExplicitFinish,
    verifyRequestItemTarget, waitFor, testFilterButtons,
    performRequestsInContent, waitForNetworkEvents, selectIndexAndWaitForSourceEditor,
-   testColumnsAlignment, hideColumn, showColumn, performRequests */
+   testColumnsAlignment, hideColumn, showColumn, performRequests, waitForRequestData */
 
 "use strict";
 
@@ -18,6 +18,12 @@ const {
   getFormattedIPAndPort,
   getFormattedTime,
 } = require("devtools/client/netmonitor/src/utils/format-utils");
+
+const {
+  getSortedRequests,
+  getRequestById
+} = require("devtools/client/netmonitor/src/selectors/index");
+
 const {
   getUnicodeUrl,
   getUnicodeHostname,
@@ -78,6 +84,8 @@ const HTTPS_REDIRECT_SJS = EXAMPLE_URL + "sjs_https-redirect-test-server.sjs";
 const CORS_SJS_PATH = "/browser/devtools/client/netmonitor/test/sjs_cors-test-server.sjs";
 const HSTS_SJS = EXAMPLE_URL + "sjs_hsts-test-server.sjs";
 const METHOD_SJS = EXAMPLE_URL + "sjs_method-test-server.sjs";
+const SLOW_SJS = EXAMPLE_URL + "sjs_slow-test-server.sjs";
+const SET_COOKIE_SAME_SITE_SJS = EXAMPLE_URL + "sjs_set-cookie-same-site.sjs";
 
 const HSTS_BASE_URL = EXAMPLE_URL;
 const HSTS_PAGE_URL = CUSTOM_GET_URL;
@@ -763,4 +771,31 @@ async function performRequests(monitor, tab, count) {
     content.wrappedJSObject.performRequests(requestCount);
   });
   await wait;
+}
+
+/**
+ * Wait for lazy fields to be loaded in a request.
+ *
+ * @param Object Store redux store containing request list.
+ * @param array fields array of strings which contain field names to be checked
+ * on the request.
+ */
+function waitForRequestData(store, fields, id) {
+  return waitUntil(() => {
+    let item;
+    if (id) {
+      item = getRequestById(store.getState(), id);
+    } else {
+      item = getSortedRequests(store.getState()).get(0);
+    }
+    if (!item) {
+      return false;
+    }
+    for (const field of fields) {
+      if (!item[field]) {
+        return false;
+      }
+    }
+    return true;
+  });
 }

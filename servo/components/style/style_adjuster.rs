@@ -5,7 +5,6 @@
 //! A struct to encapsulate all the style fixups and flags propagations
 //! a computed style needs in order for it to adhere to the CSS spec.
 
-use Atom;
 use app_units::Au;
 use dom::TElement;
 use properties::{self, CascadeFlags, ComputedValues, StyleBuilder};
@@ -52,6 +51,8 @@ fn is_effective_display_none_for_display_contents<E>(element: E) -> bool
 where
     E: TElement,
 {
+    use Atom;
+
     // FIXME(emilio): This should be an actual static.
     lazy_static! {
         static ref SPECIAL_HTML_ELEMENTS: [Atom; 16] = [
@@ -358,12 +359,10 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
     #[cfg(feature = "gecko")]
     fn adjust_for_mathvariant(&mut self) {
         use properties::longhands::_moz_math_variant::computed_value::T as MozMathVariant;
-        use properties::longhands::font_style::computed_value::T as FontStyle;
         use properties::longhands::font_weight::computed_value::T as FontWeight;
+        use values::generics::font::FontStyle;
         if self.style.get_font().clone__moz_math_variant() != MozMathVariant::None {
             let font_style = self.style.mutate_font();
-            // Sadly we don't have a nice name for the computed value
-            // of "font-weight: normal".
             font_style.set_font_weight(FontWeight::normal());
             font_style.set_font_style(FontStyle::Normal);
         }
@@ -672,17 +671,15 @@ impl<'a, 'b: 'a> StyleAdjuster<'a, 'b> {
         }
     }
 
-    /// Resolves "justify-items: auto" based on the inherited style if needed to
-    /// comply with:
+    /// Resolves "justify-items: legacy" based on the inherited style if needed
+    /// to comply with:
     ///
     /// <https://drafts.csswg.org/css-align/#valdef-justify-items-legacy>
-    ///
-    /// (Note that "auto" is being renamed to "legacy")
     #[cfg(feature = "gecko")]
     fn adjust_for_justify_items(&mut self) {
         use values::specified::align;
         let justify_items = self.style.get_position().clone_justify_items();
-        if justify_items.specified.0 != align::AlignFlags::AUTO {
+        if justify_items.specified.0 != align::AlignFlags::LEGACY {
             return;
         }
 

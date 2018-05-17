@@ -40,7 +40,6 @@
 #include "nsPlaceholderFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsSubDocumentFrame.h"
-#include "nsIDOMEvent.h"
 #include "nsDisplayList.h"
 #include "nsRegion.h"
 #include "nsCSSFrameConstructor.h"
@@ -74,7 +73,7 @@
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/DOMStringList.h"
-#include "mozilla/dom/KeyframeEffectReadOnly.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "imgIRequest.h"
 #include "nsIImageLoadingContent.h"
@@ -158,9 +157,6 @@ using namespace mozilla::gfx;
 using mozilla::dom::HTMLMediaElementBinding::HAVE_NOTHING;
 using mozilla::dom::HTMLMediaElementBinding::HAVE_METADATA;
 
-#define WEBKIT_PREFIXES_ENABLED_PREF_NAME "layout.css.prefixes.webkit"
-#define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
-#define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
 #define INTERCHARACTER_RUBY_ENABLED_PREF_NAME "layout.css.ruby.intercharacter.enabled"
 #define CONTENT_SELECT_ENABLED_PREF_NAME "dom.select_popup_in_content.enabled"
 
@@ -207,174 +203,11 @@ static ContentMap& GetContentMap() {
   return *sContentMap;
 }
 
-// When the pref "layout.css.prefixes.webkit" changes, this function is invoked
-// to let us update kDisplayKTable, to selectively disable or restore the
-// entries for "-webkit-box" and "-webkit-inline-box" in that table.
-static void
-WebkitPrefixEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
-{
-  MOZ_ASSERT(strncmp(aPrefName, WEBKIT_PREFIXES_ENABLED_PREF_NAME,
-                     ArrayLength(WEBKIT_PREFIXES_ENABLED_PREF_NAME)) == 0,
-             "We only registered this callback for a single pref, so it "
-             "should only be called for that pref");
-
-  static int32_t sIndexOfWebkitBoxInDisplayTable;
-  static int32_t sIndexOfWebkitInlineBoxInDisplayTable;
-  static int32_t sIndexOfWebkitFlexInDisplayTable;
-  static int32_t sIndexOfWebkitInlineFlexInDisplayTable;
-
-  static bool sAreKeywordIndicesInitialized; // initialized to false
-
-  bool isWebkitPrefixSupportEnabled =
-    Preferences::GetBool(WEBKIT_PREFIXES_ENABLED_PREF_NAME, false);
-  if (!sAreKeywordIndicesInitialized) {
-    // First run: find the position of the keywords in kDisplayKTable.
-    sIndexOfWebkitBoxInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword__webkit_box,
-                                     nsCSSProps::kDisplayKTable);
-    MOZ_ASSERT(sIndexOfWebkitBoxInDisplayTable >= 0,
-               "Couldn't find -webkit-box in kDisplayKTable");
-    sIndexOfWebkitInlineBoxInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword__webkit_inline_box,
-                                     nsCSSProps::kDisplayKTable);
-    MOZ_ASSERT(sIndexOfWebkitInlineBoxInDisplayTable >= 0,
-               "Couldn't find -webkit-inline-box in kDisplayKTable");
-
-    sIndexOfWebkitFlexInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword__webkit_flex,
-                                     nsCSSProps::kDisplayKTable);
-    MOZ_ASSERT(sIndexOfWebkitFlexInDisplayTable >= 0,
-               "Couldn't find -webkit-flex in kDisplayKTable");
-    sIndexOfWebkitInlineFlexInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword__webkit_inline_flex,
-                                     nsCSSProps::kDisplayKTable);
-    MOZ_ASSERT(sIndexOfWebkitInlineFlexInDisplayTable >= 0,
-               "Couldn't find -webkit-inline-flex in kDisplayKTable");
-    sAreKeywordIndicesInitialized = true;
-  }
-
-  // OK -- now, stomp on or restore the "-webkit-{box|flex}" entries in
-  // kDisplayKTable, depending on whether the webkit prefix pref is enabled
-  // vs. disabled.
-  if (sIndexOfWebkitBoxInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfWebkitBoxInDisplayTable].mKeyword =
-      isWebkitPrefixSupportEnabled ?
-      eCSSKeyword__webkit_box : eCSSKeyword_UNKNOWN;
-  }
-  if (sIndexOfWebkitInlineBoxInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfWebkitInlineBoxInDisplayTable].mKeyword =
-      isWebkitPrefixSupportEnabled ?
-      eCSSKeyword__webkit_inline_box : eCSSKeyword_UNKNOWN;
-  }
-  if (sIndexOfWebkitFlexInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfWebkitFlexInDisplayTable].mKeyword =
-      isWebkitPrefixSupportEnabled ?
-      eCSSKeyword__webkit_flex : eCSSKeyword_UNKNOWN;
-  }
-  if (sIndexOfWebkitInlineFlexInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfWebkitInlineFlexInDisplayTable].mKeyword =
-      isWebkitPrefixSupportEnabled ?
-      eCSSKeyword__webkit_inline_flex : eCSSKeyword_UNKNOWN;
-  }
-}
-
-// When the pref "layout.css.text-align-unsafe-value.enabled" changes, this
-// function is called to let us update kTextAlignKTable & kTextAlignLastKTable,
-// to selectively disable or restore the entries for "unsafe" in those tables.
-static void
-TextAlignUnsafeEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
-{
-  NS_ASSERTION(strcmp(aPrefName, TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME) == 0,
-               "Did you misspell " TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME " ?");
-
-  static bool sIsInitialized;
-  static int32_t sIndexOfUnsafeInTextAlignTable;
-  static int32_t sIndexOfUnsafeInTextAlignLastTable;
-  bool isTextAlignUnsafeEnabled =
-    Preferences::GetBool(TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME, false);
-
-  if (!sIsInitialized) {
-    // First run: find the position of "unsafe" in kTextAlignKTable.
-    sIndexOfUnsafeInTextAlignTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_unsafe,
-                                     nsCSSProps::kTextAlignKTable);
-    // First run: find the position of "unsafe" in kTextAlignLastKTable.
-    sIndexOfUnsafeInTextAlignLastTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_unsafe,
-                                     nsCSSProps::kTextAlignLastKTable);
-    sIsInitialized = true;
-  }
-
-  // OK -- now, stomp on or restore the "unsafe" entry in the keyword tables,
-  // depending on whether the pref is enabled vs. disabled.
-  MOZ_ASSERT(sIndexOfUnsafeInTextAlignTable >= 0);
-  nsCSSProps::kTextAlignKTable[sIndexOfUnsafeInTextAlignTable].mKeyword =
-    isTextAlignUnsafeEnabled ? eCSSKeyword_unsafe : eCSSKeyword_UNKNOWN;
-  MOZ_ASSERT(sIndexOfUnsafeInTextAlignLastTable >= 0);
-  nsCSSProps::kTextAlignLastKTable[sIndexOfUnsafeInTextAlignLastTable].mKeyword =
-    isTextAlignUnsafeEnabled ? eCSSKeyword_unsafe : eCSSKeyword_UNKNOWN;
-}
-
-// When the pref "layout.css.float-logical-values.enabled" changes, this
-// function is called to let us update kFloatKTable & kClearKTable,
-// to selectively disable or restore the entries for logical values
-// (inline-start and inline-end) in those tables.
-static void
-FloatLogicalValuesEnabledPrefChangeCallback(const char* aPrefName,
-                                            void* aClosure)
-{
-  NS_ASSERTION(strcmp(aPrefName, FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME) == 0,
-               "Did you misspell " FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME " ?");
-
-  static bool sIsInitialized;
-  static int32_t sIndexOfInlineStartInFloatTable;
-  static int32_t sIndexOfInlineEndInFloatTable;
-  static int32_t sIndexOfInlineStartInClearTable;
-  static int32_t sIndexOfInlineEndInClearTable;
-  bool isFloatLogicalValuesEnabled =
-    Preferences::GetBool(FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME, false);
-
-  if (!sIsInitialized) {
-    // First run: find the position of "inline-start" in kFloatKTable.
-    sIndexOfInlineStartInFloatTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_inline_start,
-                                     nsCSSProps::kFloatKTable);
-    // First run: find the position of "inline-end" in kFloatKTable.
-    sIndexOfInlineEndInFloatTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_inline_end,
-                                     nsCSSProps::kFloatKTable);
-    // First run: find the position of "inline-start" in kClearKTable.
-    sIndexOfInlineStartInClearTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_inline_start,
-                                     nsCSSProps::kClearKTable);
-    // First run: find the position of "inline-end" in kClearKTable.
-    sIndexOfInlineEndInClearTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_inline_end,
-                                     nsCSSProps::kClearKTable);
-    sIsInitialized = true;
-  }
-
-  // OK -- now, stomp on or restore the logical entries in the keyword tables,
-  // depending on whether the pref is enabled vs. disabled.
-  MOZ_ASSERT(sIndexOfInlineStartInFloatTable >= 0);
-  nsCSSProps::kFloatKTable[sIndexOfInlineStartInFloatTable].mKeyword =
-    isFloatLogicalValuesEnabled ? eCSSKeyword_inline_start : eCSSKeyword_UNKNOWN;
-  MOZ_ASSERT(sIndexOfInlineEndInFloatTable >= 0);
-  nsCSSProps::kFloatKTable[sIndexOfInlineEndInFloatTable].mKeyword =
-    isFloatLogicalValuesEnabled ? eCSSKeyword_inline_end : eCSSKeyword_UNKNOWN;
-  MOZ_ASSERT(sIndexOfInlineStartInClearTable >= 0);
-  nsCSSProps::kClearKTable[sIndexOfInlineStartInClearTable].mKeyword =
-    isFloatLogicalValuesEnabled ? eCSSKeyword_inline_start : eCSSKeyword_UNKNOWN;
-  MOZ_ASSERT(sIndexOfInlineEndInClearTable >= 0);
-  nsCSSProps::kClearKTable[sIndexOfInlineEndInClearTable].mKeyword =
-    isFloatLogicalValuesEnabled ? eCSSKeyword_inline_end : eCSSKeyword_UNKNOWN;
-}
-
 template<typename TestType>
 static bool
 HasMatchingAnimations(EffectSet* aEffects, TestType&& aTest)
 {
-  for (KeyframeEffectReadOnly* effect : *aEffects) {
+  for (KeyframeEffect* effect : *aEffects) {
     if (aTest(*effect)) {
       return true;
     }
@@ -399,7 +232,7 @@ bool
 nsLayoutUtils::HasCurrentTransitions(const nsIFrame* aFrame)
 {
   return HasMatchingAnimations(aFrame,
-    [](KeyframeEffectReadOnly& aEffect)
+    [](KeyframeEffect& aEffect)
     {
       // Since |aEffect| is current, it must have an associated Animation
       // so we don't need to null-check the result of GetAnimation().
@@ -448,7 +281,7 @@ nsLayoutUtils::HasAnimationOfProperty(EffectSet* aEffectSet,
   }
 
   return HasMatchingAnimations(aEffectSet,
-    [&aProperty](KeyframeEffectReadOnly& aEffect)
+    [&aProperty](KeyframeEffect& aEffect)
     {
       return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
              aEffect.HasAnimationOfProperty(aProperty);
@@ -465,7 +298,7 @@ nsLayoutUtils::HasAnimationOfProperty(const nsIFrame* aFrame,
   }
 
   return HasMatchingAnimations(aFrame,
-    [&aProperty](KeyframeEffectReadOnly& aEffect)
+    [&aProperty](KeyframeEffect& aEffect)
     {
       return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
              aEffect.HasAnimationOfProperty(aProperty);
@@ -485,7 +318,7 @@ nsLayoutUtils::HasEffectiveAnimation(const nsIFrame* aFrame,
 
 
   return HasMatchingAnimations(effects,
-    [&aProperty](KeyframeEffectReadOnly& aEffect)
+    [&aProperty](KeyframeEffect& aEffect)
     {
       return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
              aEffect.HasEffectiveAnimationOfProperty(aProperty);
@@ -541,7 +374,7 @@ GetMinAndMaxScaleForAnimationProperty(const nsIFrame* aFrame,
     // not yet finished or which are filling forwards).
     MOZ_ASSERT(anim->IsRelevant());
 
-    dom::KeyframeEffectReadOnly* effect =
+    dom::KeyframeEffect* effect =
       anim->GetEffect() ? anim->GetEffect()->AsKeyframeEffect() : nullptr;
     MOZ_ASSERT(effect, "A playing animation should have a keyframe effect");
     for (size_t propIdx = effect->Properties().Length(); propIdx-- != 0; ) {
@@ -700,22 +533,6 @@ nsLayoutUtils::UnsetValueEnabled()
   }
 
   return sUnsetValueEnabled;
-}
-
-bool
-nsLayoutUtils::IsTextAlignUnsafeValueEnabled()
-{
-  static bool sTextAlignUnsafeValueEnabled;
-  static bool sTextAlignUnsafeValueEnabledPrefCached = false;
-
-  if (!sTextAlignUnsafeValueEnabledPrefCached) {
-    sTextAlignUnsafeValueEnabledPrefCached = true;
-    Preferences::AddBoolVarCache(&sTextAlignUnsafeValueEnabled,
-                                 TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME,
-                                 false);
-  }
-
-  return sTextAlignUnsafeValueEnabled;
 }
 
 bool
@@ -1563,7 +1380,7 @@ nsLayoutUtils::RemoveDisplayPort(nsIContent* aContent)
 nsContainerFrame*
 nsLayoutUtils::LastContinuationWithChild(nsContainerFrame* aFrame)
 {
-  NS_PRECONDITION(aFrame, "NULL frame pointer");
+  MOZ_ASSERT(aFrame, "NULL frame pointer");
   nsIFrame* f = aFrame->LastContinuation();
   while (!f->PrincipalChildList().FirstChild() && f->GetPrevContinuation()) {
     f = f->GetPrevContinuation();
@@ -1806,12 +1623,14 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
                                      int32_t aIf2Ancestor,
                                      const nsIContent* aCommonAncestor)
 {
-  NS_PRECONDITION(aContent1, "aContent1 must not be null");
-  NS_PRECONDITION(aContent2, "aContent2 must not be null");
+  MOZ_ASSERT(aContent1, "aContent1 must not be null");
+  MOZ_ASSERT(aContent2, "aContent2 must not be null");
 
   AutoTArray<nsINode*, 32> content1Ancestors;
   nsINode* c1;
-  for (c1 = aContent1; c1 && c1 != aCommonAncestor; c1 = c1->GetParentNode()) {
+  for (c1 = aContent1;
+       c1 && c1 != aCommonAncestor;
+       c1 = c1->GetParentOrHostNode()) {
     content1Ancestors.AppendElement(c1);
   }
   if (!c1 && aCommonAncestor) {
@@ -1822,7 +1641,9 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
 
   AutoTArray<nsINode*, 32> content2Ancestors;
   nsINode* c2;
-  for (c2 = aContent2; c2 && c2 != aCommonAncestor; c2 = c2->GetParentNode()) {
+  for (c2 = aContent2;
+       c2 && c2 != aCommonAncestor;
+       c2 = c2->GetParentOrHostNode()) {
     content2Ancestors.AppendElement(c2);
   }
   if (!c2 && aCommonAncestor) {
@@ -1858,7 +1679,7 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
   }
 
   // content1Ancestor != content2Ancestor, so they must be siblings with the same parent
-  nsINode* parent = content1Ancestor->GetParentNode();
+  nsINode* parent = content1Ancestor->GetParentOrHostNode();
 #ifdef DEBUG
   // TODO: remove the uglyness, see bug 598468.
   NS_ASSERTION(gPreventAssertInCompareTreePosition || parent,
@@ -1911,8 +1732,8 @@ nsLayoutUtils::DoCompareTreePosition(nsIFrame* aFrame1,
                                      int32_t aIf2Ancestor,
                                      nsIFrame* aCommonAncestor)
 {
-  NS_PRECONDITION(aFrame1, "aFrame1 must not be null");
-  NS_PRECONDITION(aFrame2, "aFrame2 must not be null");
+  MOZ_ASSERT(aFrame1, "aFrame1 must not be null");
+  MOZ_ASSERT(aFrame2, "aFrame2 must not be null");
 
   AutoTArray<nsIFrame*,20> frame2Ancestors;
   nsIFrame* nonCommonAncestor =
@@ -1932,8 +1753,8 @@ nsLayoutUtils::DoCompareTreePosition(nsIFrame* aFrame1,
                                      int32_t aIf2Ancestor,
                                      nsIFrame* aCommonAncestor)
 {
-  NS_PRECONDITION(aFrame1, "aFrame1 must not be null");
-  NS_PRECONDITION(aFrame2, "aFrame2 must not be null");
+  MOZ_ASSERT(aFrame1, "aFrame1 must not be null");
+  MOZ_ASSERT(aFrame2, "aFrame2 must not be null");
 
   nsPresContext* presContext = aFrame1->PresContext();
   if (presContext != aFrame2->PresContext()) {
@@ -2265,7 +2086,7 @@ nsLayoutUtils::HasPseudoStyle(nsIContent* aContent,
                               CSSPseudoElementType aPseudoElement,
                               nsPresContext* aPresContext)
 {
-  NS_PRECONDITION(aPresContext, "Must have a prescontext");
+  MOZ_ASSERT(aPresContext, "Must have a prescontext");
 
   RefPtr<ComputedStyle> pseudoContext;
   if (aContent) {
@@ -2277,7 +2098,7 @@ nsLayoutUtils::HasPseudoStyle(nsIContent* aContent,
 }
 
 nsPoint
-nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(nsIDOMEvent* aDOMEvent, nsIFrame* aFrame)
+nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(Event* aDOMEvent, nsIFrame* aFrame)
 {
   if (!aDOMEvent)
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
@@ -5173,8 +4994,9 @@ GetIntrinsicCoord(const nsStyleCoord& aStyle,
                   eWidthProperty aProperty,
                   nscoord& aResult)
 {
-  NS_PRECONDITION(aProperty == PROP_WIDTH || aProperty == PROP_MAX_WIDTH ||
-                  aProperty == PROP_MIN_WIDTH, "unexpected property");
+  MOZ_ASSERT(aProperty == PROP_WIDTH || aProperty == PROP_MAX_WIDTH ||
+             aProperty == PROP_MIN_WIDTH, "unexpected property");
+
   if (aStyle.GetUnit() != eStyleUnit_Enumerated)
     return false;
   int32_t val = aStyle.GetIntValue();
@@ -5395,10 +5217,10 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis              aAxis,
                                 uint32_t                  aFlags,
                                 nscoord                   aMarginBoxMinSizeClamp)
 {
-  NS_PRECONDITION(aFrame, "null frame");
-  NS_PRECONDITION(aFrame->GetParent(),
-                  "IntrinsicForAxis called on frame not in tree");
-  NS_PRECONDITION(aType == MIN_ISIZE || aType == PREF_ISIZE, "bad type");
+  MOZ_ASSERT(aFrame, "null frame");
+  MOZ_ASSERT(aFrame->GetParent(),
+             "IntrinsicForAxis called on frame not in tree");
+  MOZ_ASSERT(aType == MIN_ISIZE || aType == PREF_ISIZE, "bad type");
   MOZ_ASSERT(aFrame->GetParent()->Type() != LayoutFrameType::GridContainer ||
              aPercentageBasis.isSome(),
              "grid layout should always pass a percentage basis");
@@ -5778,9 +5600,9 @@ nsLayoutUtils::ComputeBSizeDependentValue(
   // the unit conditions.
   // XXXldb Many callers pass a non-'auto' containing block height when
   // according to CSS2.1 they should be passing 'auto'.
-  NS_PRECONDITION(NS_AUTOHEIGHT != aContainingBlockBSize ||
-                  !aCoord.HasPercent(),
-                  "unexpected containing block block-size");
+  MOZ_ASSERT(NS_AUTOHEIGHT != aContainingBlockBSize ||
+             !aCoord.HasPercent(),
+             "unexpected containing block block-size");
 
   if (aCoord.IsCoordPercentCalcUnit()) {
     return aCoord.ComputeCoordPercentCalc(aContainingBlockBSize);
@@ -6487,7 +6309,7 @@ nsLayoutUtils::GetLastLineBaseline(WritingMode aWM,
 static nscoord
 CalculateBlockContentBEnd(WritingMode aWM, nsBlockFrame* aFrame)
 {
-  NS_PRECONDITION(aFrame, "null ptr");
+  MOZ_ASSERT(aFrame, "null ptr");
 
   nscoord contentBEnd = 0;
 
@@ -6513,7 +6335,7 @@ CalculateBlockContentBEnd(WritingMode aWM, nsBlockFrame* aFrame)
 /* static */ nscoord
 nsLayoutUtils::CalculateContentBEnd(WritingMode aWM, nsIFrame* aFrame)
 {
-  NS_PRECONDITION(aFrame, "null ptr");
+  MOZ_ASSERT(aFrame, "null ptr");
 
   nscoord contentBEnd = aFrame->BSize(aWM);
 
@@ -8019,7 +7841,7 @@ GetFontFacesForFramesInner(nsIFrame* aFrame,
                            nsLayoutUtils::UsedFontFaceTable& aFontFaces,
                            uint32_t aMaxRanges)
 {
-  NS_PRECONDITION(aFrame, "NULL frame pointer");
+  MOZ_ASSERT(aFrame, "NULL frame pointer");
 
   if (aFrame->IsTextFrame()) {
     if (!aFrame->GetPrevContinuation()) {
@@ -8046,7 +7868,7 @@ nsLayoutUtils::GetFontFacesForFrames(nsIFrame* aFrame,
                                      UsedFontFaceTable& aFontFaces,
                                      uint32_t aMaxRanges)
 {
-  NS_PRECONDITION(aFrame, "NULL frame pointer");
+  MOZ_ASSERT(aFrame, "NULL frame pointer");
 
   while (aFrame) {
     GetFontFacesForFramesInner(aFrame, aFontFaces, aMaxRanges);
@@ -8122,7 +7944,7 @@ nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
                                    UsedFontFaceTable& aFontFaces,
                                    uint32_t aMaxRanges)
 {
-  NS_PRECONDITION(aFrame, "NULL frame pointer");
+  MOZ_ASSERT(aFrame, "NULL frame pointer");
 
   if (!aFrame->IsTextFrame()) {
     return;
@@ -8174,7 +7996,7 @@ nsLayoutUtils::SizeOfTextRunsForFrames(nsIFrame* aFrame,
                                        MallocSizeOf aMallocSizeOf,
                                        bool clear)
 {
-  NS_PRECONDITION(aFrame, "NULL frame pointer");
+  MOZ_ASSERT(aFrame, "NULL frame pointer");
 
   size_t total = 0;
 
@@ -8206,20 +8028,6 @@ nsLayoutUtils::SizeOfTextRunsForFrames(nsIFrame* aFrame,
   }
   return total;
 }
-
-struct PrefCallbacks
-{
-  const char* name;
-  PrefChangedFunc func;
-};
-static const PrefCallbacks kPrefCallbacks[] = {
-  { WEBKIT_PREFIXES_ENABLED_PREF_NAME,
-    WebkitPrefixEnabledPrefChangeCallback },
-  { TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME,
-    TextAlignUnsafeEnabledPrefChangeCallback },
-  { FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME,
-    FloatLogicalValuesEnabledPrefChangeCallback },
-};
 
 /* static */
 void
@@ -8260,9 +8068,6 @@ nsLayoutUtils::Initialize()
                                "layout.idle_period.required_quiescent_frames",
                                DEFAULT_QUIESCENT_FRAMES);
 
-  for (auto& callback : kPrefCallbacks) {
-    Preferences::RegisterCallbackAndCall(callback.func, callback.name);
-  }
   nsComputedDOMStyle::RegisterPrefChangeCallbacks();
 }
 
@@ -8275,9 +8080,6 @@ nsLayoutUtils::Shutdown()
     sContentMap = nullptr;
   }
 
-  for (auto& callback : kPrefCallbacks) {
-    Preferences::UnregisterCallback(callback.func, callback.name);
-  }
   nsComputedDOMStyle::UnregisterPrefChangeCallbacks();
 
   // so the cached initial quotes array doesn't appear to be a leak

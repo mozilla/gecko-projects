@@ -667,12 +667,14 @@ nsRetrievalContextWayland::TransferFastTrackClipboard(
     int aClipboardRequestNumber, GtkSelectionData *aSelectionData)
 {
     if (mClipboardRequestNumber == aClipboardRequestNumber) {
-        mClipboardDataLength = gtk_selection_data_get_length(aSelectionData);
-        if (mClipboardDataLength > 0) {
+        int dataLength = gtk_selection_data_get_length(aSelectionData);
+        if (dataLength > 0) {
+            mClipboardDataLength = dataLength;
             mClipboardData = reinterpret_cast<char*>(
-                g_malloc(sizeof(char)*mClipboardDataLength));
+                g_malloc(sizeof(char)*(mClipboardDataLength+1)));
             memcpy(mClipboardData, gtk_selection_data_get_data(aSelectionData),
                    sizeof(char)*mClipboardDataLength);
+            mClipboardData[mClipboardDataLength] = '\0';
         }
     } else {
         NS_WARNING("Received obsoleted clipboard data!");
@@ -727,7 +729,7 @@ nsRetrievalContextWayland::GetClipboardText(int32_t aWhichClipboard)
     if (!dataOffer)
         return nullptr;
 
-    for (unsigned int i = 0; i < sizeof(sTextMimeTypes); i++) {
+    for (unsigned int i = 0; i < TEXT_MIME_TYPES_NUM; i++) {
         if (dataOffer->HasTarget(sTextMimeTypes[i])) {
             uint32_t unused;
             return GetClipboardData(sTextMimeTypes[i], aWhichClipboard,

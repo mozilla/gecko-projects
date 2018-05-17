@@ -2,6 +2,10 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+ChromeUtils.defineModuleGetter(this, "BrowserUtils",
+                               "resource://gre/modules/BrowserUtils.jsm");
+ChromeUtils.defineModuleGetter(this, "ExtensionControlledPopup",
+                               "resource:///modules/ExtensionControlledPopup.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "PromiseUtils",
@@ -20,6 +24,26 @@ var {
 } = ExtensionUtils;
 
 const TABHIDE_PREFNAME = "extensions.webextensions.tabhide.enabled";
+
+const TAB_HIDE_CONFIRMED_TYPE = "tabHideNotification";
+
+
+XPCOMUtils.defineLazyGetter(this, "tabHidePopup", () => {
+  return new ExtensionControlledPopup({
+    confirmedType: TAB_HIDE_CONFIRMED_TYPE,
+    anchorId: "alltabs-button",
+    popupnotificationId: "extension-tab-hide-notification",
+    descriptionId: "extension-tab-hide-notification-description",
+    descriptionMessageId: "tabHideControlled.message",
+    getLocalizedDescription: (doc, message, addonDetails) => {
+      let image = doc.createElement("image");
+      image.setAttribute("class", "extension-controlled-icon alltabs-icon");
+      return BrowserUtils.getLocalizedFragment(doc, message, addonDetails, image);
+    },
+    learnMoreMessageId: "tabHideControlled.learnMore",
+    learnMoreLink: "extension-hiding-tabs",
+  });
+});
 
 function showHiddenTabs(id) {
   let windowsEnum = Services.wm.getEnumerator("navigator:browser");
@@ -313,6 +337,11 @@ this.tabs = class extends ExtensionAPI {
 
   static onDisable(id) {
     showHiddenTabs(id);
+    tabHidePopup.clearConfirmation(id);
+  }
+
+  static onUninstall(id) {
+    tabHidePopup.clearConfirmation(id);
   }
 
   getAPI(context) {
@@ -450,33 +479,8 @@ this.tabs = class extends ExtensionAPI {
           context,
           name: "tabs.onMoved",
           register: fire => {
-            // There are certain circumstances where we need to ignore a move event.
-            //
-            // Namely, the first time the tab is moved after it's created, we need
-            // to report the final position as the initial position in the tab's
-            // onAttached or onCreated event. This is because most tabs are inserted
-            // in a temporary location and then moved after the TabOpen event fires,
-            // which generates a TabOpen event followed by a TabMove event, which
-            // does not match the contract of our API.
-            let ignoreNextMove = new WeakSet();
-
-            let openListener = event => {
-              ignoreNextMove.add(event.target);
-              // Remove the tab from the set on the next tick, since it will already
-              // have been moved by then.
-              Promise.resolve().then(() => {
-                ignoreNextMove.delete(event.target);
-              });
-            };
-
             let moveListener = event => {
               let nativeTab = event.originalTarget;
-
-              if (ignoreNextMove.has(nativeTab)) {
-                ignoreNextMove.delete(nativeTab);
-                return;
-              }
-
               fire.async(tabTracker.getId(nativeTab), {
                 windowId: windowTracker.getId(nativeTab.ownerGlobal),
                 fromIndex: event.detail,
@@ -485,10 +489,8 @@ this.tabs = class extends ExtensionAPI {
             };
 
             windowTracker.addListener("TabMove", moveListener);
-            windowTracker.addListener("TabOpen", openListener);
             return () => {
               windowTracker.removeListener("TabMove", moveListener);
-              windowTracker.removeListener("TabOpen", openListener);
             };
           },
         }).api(),
@@ -572,6 +574,14 @@ this.tabs = class extends ExtensionAPI {
               }
             }
 
+            if (createProperties.index != null) {
+              options.index = createProperties.index;
+            }
+
+            if (createProperties.pinned != null) {
+              options.pinned = createProperties.pinned;
+            }
+
             let nativeTab = window.gBrowser.addTab(url || window.BROWSER_NEW_TAB_URL, options);
 
             let active = true;
@@ -580,14 +590,6 @@ this.tabs = class extends ExtensionAPI {
             }
             if (active) {
               window.gBrowser.selectedTab = nativeTab;
-            }
-
-            if (createProperties.index !== null) {
-              window.gBrowser.moveTabTo(nativeTab, createProperties.index);
-            }
-
-            if (createProperties.pinned) {
-              window.gBrowser.pinTab(nativeTab);
             }
 
             if (active && !url) {
@@ -1169,7 +1171,7 @@ this.tabs = class extends ExtensionAPI {
                       resolve(retval == 0 ? "not_saved" : "not_replaced");
                     }
                   },
-                  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener]),
+                  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener]),
                 };
 
                 activeTab.linkedBrowser.print(activeTab.linkedBrowser.outerWindowID, printSettings, printProgressListener);
@@ -1226,6 +1228,10 @@ this.tabs = class extends ExtensionAPI {
                 hidden.push(tabTracker.getId(tab));
               }
             }
+          }
+          if (hidden.length > 0) {
+            let win = Services.wm.getMostRecentWindow("navigator:browser");
+            tabHidePopup.open(win, extension.id);
           }
           return hidden;
         },

@@ -28,9 +28,7 @@ public:
   explicit CustomElementUpgradeReaction(CustomElementDefinition* aDefinition)
     : mDefinition(aDefinition)
   {
-#if DEBUG
     mIsUpgradeReaction = true;
-#endif
   }
 
 private:
@@ -241,6 +239,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CustomElementRegistry)
   tmp->mConstructors.clear();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCustomDefinitions)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWhenDefinedPromiseMap)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mElementCreationCallbacks)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -248,6 +247,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(CustomElementRegistry)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCustomDefinitions)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWhenDefinedPromiseMap)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElementCreationCallbacks)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -303,11 +303,40 @@ CustomElementRegistry::IsCustomElementEnabled(nsIDocument* aDoc)
   return XRE_IsParentProcess() && nsContentUtils::AllowXULXBLForPrincipal(aDoc->NodePrincipal());
 }
 
+NS_IMETHODIMP
+CustomElementRegistry::RunCustomElementCreationCallback::Run()
+{
+  ErrorResult er;
+  nsDependentAtomString value(mAtom);
+  mCallback->Call(value, er);
+  MOZ_ASSERT(NS_SUCCEEDED(er.StealNSResult()),
+    "chrome JavaScript error in the callback.");
+
+  MOZ_ASSERT(mRegistry->mCustomDefinitions.GetWeak(mAtom),
+    "Callback should define the definition of type.");
+  MOZ_ASSERT(!mRegistry->mElementCreationCallbacks.GetWeak(mAtom),
+    "Callback should be removed.");
+
+  return NS_OK;
+}
+
 CustomElementDefinition*
 CustomElementRegistry::LookupCustomElementDefinition(nsAtom* aNameAtom,
-                                                     nsAtom* aTypeAtom) const
+                                                     nsAtom* aTypeAtom)
 {
   CustomElementDefinition* data = mCustomDefinitions.GetWeak(aTypeAtom);
+
+  if (!data) {
+    RefPtr<CustomElementCreationCallback> callback;
+    mElementCreationCallbacks.Get(aTypeAtom, getter_AddRefs(callback));
+    if (callback) {
+      RefPtr<Runnable> runnable =
+        new RunCustomElementCreationCallback(this, aTypeAtom, callback);
+      nsContentUtils::AddScriptRunner(runnable);
+      mElementCreationCallbacks.Remove(aTypeAtom);
+    }
+  }
+
   if (data && data->mLocalName == aNameAtom) {
     return data;
   }
@@ -776,11 +805,11 @@ CustomElementRegistry::Define(const nsAString& aName,
      */
     AutoSetRunningFlag as(this);
 
-    { // Enter constructor's compartment.
+    { // Enter constructor's realm.
       /**
        * 10.1. Let prototype be Get(constructor, "prototype"). Rethrow any exceptions.
        */
-      JSAutoCompartment ac(cx, constructor);
+      JSAutoRealm ar(cx, constructor);
       // The .prototype on the constructor passed could be an "expando" of a
       // wrapper. So we should get it from wrapper instead of the underlying
       // object.
@@ -796,7 +825,7 @@ CustomElementRegistry::Define(const nsAString& aName,
         aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_LITERAL_STRING("constructor.prototype"));
         return;
       }
-    } // Leave constructor's compartment.
+    } // Leave constructor's realm.
 
     JS::Rooted<JSObject*> constructorProtoUnwrapped(
       cx, js::CheckedUnwrap(&constructorPrototype.toObject()));
@@ -808,7 +837,7 @@ CustomElementRegistry::Define(const nsAString& aName,
     }
 
     { // Enter constructorProtoUnwrapped's compartment
-      JSAutoCompartment ac(cx, constructorProtoUnwrapped);
+      JSAutoRealm ar(cx, constructorProtoUnwrapped);
 
       /**
        * 10.3. Let lifecycleCallbacks be a map with the four keys
@@ -849,8 +878,8 @@ CustomElementRegistry::Define(const nsAString& aName,
        *          any exceptions from the conversion.
        */
       if (callbacksHolder->mAttributeChangedCallback.WasPassed()) {
-        // Enter constructor's compartment.
-        JSAutoCompartment ac(cx, constructor);
+        // Enter constructor's realm.
+        JSAutoRealm ar(cx, constructor);
         JS::Rooted<JS::Value> observedAttributesIterable(cx);
 
         if (!JS_GetProperty(cx, constructor, "observedAttributes",
@@ -899,7 +928,7 @@ CustomElementRegistry::Define(const nsAString& aName,
             }
           }
         }
-      } // Leave constructor's compartment.
+      } // Leave constructor's realm.
     } // Leave constructorProtoUnwrapped's compartment.
   } // Unset mIsCustomDefinitionRunning
 
@@ -953,6 +982,28 @@ CustomElementRegistry::Define(const nsAString& aName,
     promise->MaybeResolveWithUndefined();
   }
 
+  /**
+   * Clean-up mElementCreationCallbacks (if it exists)
+   */
+  mElementCreationCallbacks.Remove(nameAtom);
+
+}
+
+void
+CustomElementRegistry::SetElementCreationCallback(const nsAString& aName,
+                                                  CustomElementCreationCallback& aCallback,
+                                                  ErrorResult& aRv)
+{
+  RefPtr<nsAtom> nameAtom(NS_Atomize(aName));
+  if (mElementCreationCallbacks.GetWeak(nameAtom) ||
+      mCustomDefinitions.GetWeak(nameAtom)) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return;
+  }
+
+  RefPtr<CustomElementCreationCallback> callback = &aCallback;
+  mElementCreationCallbacks.Put(nameAtom, callback.forget());
+  return;
 }
 
 void
@@ -1184,8 +1235,10 @@ CustomElementReactionsStack::Enqueue(Element* aElement,
   // Add element to the backup element queue.
   MOZ_ASSERT(mReactionsStack.IsEmpty(),
              "custom element reactions stack should be empty");
-  MOZ_ASSERT(!aReaction->IsUpgradeReaction(),
-             "Upgrade reaction should not be scheduled to backup queue");
+  MOZ_ASSERT(!aReaction->IsUpgradeReaction() ||
+             nsContentUtils::IsChromeDoc(aElement->OwnerDoc()),
+             "Upgrade reaction should not be scheduled to backup queue "
+             "except when Custom Element is used inside XBL (in chrome).");
   mBackupQueue.AppendElement(aElement);
   elementData->mReactionQueue.AppendElement(aReaction);
 
@@ -1230,7 +1283,7 @@ CustomElementReactionsStack::InvokeReactions(ElementQueue* aElementQueue,
     MOZ_ASSERT(element);
 
     RefPtr<CustomElementData> elementData = element->GetCustomElementData();
-    if (!elementData) {
+    if (!elementData || !element->GetOwnerGlobal()) {
       // This happens when the document is destroyed and the element is already
       // unlinked, no need to fire the callbacks in this case.
       continue;
@@ -1239,9 +1292,17 @@ CustomElementReactionsStack::InvokeReactions(ElementQueue* aElementQueue,
     auto& reactions = elementData->mReactionQueue;
     for (uint32_t j = 0; j < reactions.Length(); ++j) {
       // Transfer the ownership of the entry due to reentrant invocation of
-      // this funciton. The entry will be removed when bug 1379573 is landed.
+      // this function.
       auto reaction(Move(reactions.ElementAt(j)));
       if (reaction) {
+        if (!aGlobal && reaction->IsUpgradeReaction()) {
+          // This is for the special case when custom element is included
+          // inside XBL.
+          MOZ_ASSERT(nsContentUtils::IsChromeDoc(element->OwnerDoc()));
+          nsIGlobalObject* global = element->GetOwnerGlobal();
+          MOZ_ASSERT(!aes);
+          aes.emplace(global, "custom elements reaction invocation");
+        }
         ErrorResult rv;
         reaction->Invoke(element, rv);
         if (aes) {
@@ -1250,6 +1311,9 @@ CustomElementReactionsStack::InvokeReactions(ElementQueue* aElementQueue,
             aes->ReportException();
           }
           MOZ_ASSERT(!JS_IsExceptionPending(cx));
+          if (!aGlobal && reaction->IsUpgradeReaction()) {
+            aes.reset();
+          }
         }
         MOZ_ASSERT(!rv.Failed());
       }

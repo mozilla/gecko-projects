@@ -2,49 +2,101 @@ ChromeUtils.defineModuleGetter(this, "IndexedDB", "resource://gre/modules/Indexe
 
 this.ActivityStreamStorage = class ActivityStreamStorage {
   /**
-   * @param storeName String with the store name to access or array of strings
-   *                  to create all the required stores
+   * @param storeNames Array of strings used to create all the required stores
    */
-  constructor(storeName) {
+  constructor({storeNames, telemetry}) {
+    if (!storeNames) {
+      throw new Error("storeNames required");
+    }
+
     this.dbName = "ActivityStream";
     this.dbVersion = 3;
-    this.storeName = storeName;
+    this.storeNames = storeNames;
+    this.telemetry = telemetry;
   }
 
   get db() {
-    return this._db || (this._db = this._openDatabase());
+    return this._db || (this._db = this.createOrOpenDb());
   }
 
-  async getStore() {
-    return (await this.db).objectStore(this.storeName, "readwrite");
+  /**
+   * Public method that binds the store required by the consumer and exposes
+   * the private db getters and setters.
+   *
+   * @param storeName String name of desired store
+   */
+  getDbTable(storeName) {
+    if (this.storeNames.includes(storeName)) {
+      return {
+        get: this._get.bind(this, storeName),
+        getAll: this._getAll.bind(this, storeName),
+        set: this._set.bind(this, storeName)
+      };
+    }
+
+    throw new Error(`Store name ${storeName} does not exist.`);
   }
 
-  async get(key) {
-    return (await this.getStore()).get(key);
+  async _getStore(storeName) {
+    return (await this.db).objectStore(storeName, "readwrite");
   }
 
-  async getAll() {
-    return (await this.getStore()).getAll();
+  _get(storeName, key) {
+    return this._requestWrapper(async () => (await this._getStore(storeName)).get(key));
   }
 
-  async set(key, value) {
-    return (await this.getStore()).put(value, key);
+  _getAll(storeName) {
+    return this._requestWrapper(async () => (await this._getStore(storeName)).getAll());
+  }
+
+  _set(storeName, key, value) {
+    return this._requestWrapper(async () => (await this._getStore(storeName)).put(value, key));
   }
 
   _openDatabase() {
     return IndexedDB.open(this.dbName, {version: this.dbVersion}, db => {
       // If provided with array of objectStore names we need to create all the
       // individual stores
-      if (Array.isArray(this.storeName)) {
-        this.storeName.forEach(store => {
-          if (!db.objectStoreNames.contains(store)) {
-            db.createObjectStore(store);
-          }
-        });
-      } else if (!db.objectStoreNames.contains(this.storeName)) {
-        db.createObjectStore(this.storeName);
-      }
+      this.storeNames.forEach(store => {
+        if (!db.objectStoreNames.contains(store)) {
+          this._requestWrapper(() => db.createObjectStore(store));
+        }
+      });
     });
+  }
+
+  /**
+   * createOrOpenDb - Open a db (with this.dbName) if it exists.
+   *                  If it does not exist, create it.
+   *                  If an error occurs, deleted the db and attempt to
+   *                  re-create it.
+   * @returns Promise that resolves with a db instance
+   */
+  async createOrOpenDb() {
+    try {
+      const db = await this._openDatabase();
+      return db;
+    } catch (e) {
+      if (this.telemetry) {
+        this.telemetry.handleUndesiredEvent({data: {event: "INDEXEDDB_OPEN_FAILED"}});
+      }
+      await IndexedDB.deleteDatabase(this.dbName);
+      return this._openDatabase();
+    }
+  }
+
+  async _requestWrapper(request) {
+    let result = null;
+    try {
+      result = await request();
+    } catch (e) {
+      if (this.telemetry) {
+        this.telemetry.handleUndesiredEvent({data: {event: "TRANSACTION_FAILED"}});
+      }
+      throw e;
+    }
+
+    return result;
   }
 };
 

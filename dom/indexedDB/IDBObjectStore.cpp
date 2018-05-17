@@ -73,7 +73,7 @@ struct IDBObjectStore::StructuredCloneWriteInfo
   uint64_t mOffsetToKeyProp;
 
   explicit StructuredCloneWriteInfo(IDBDatabase* aDatabase)
-    : mCloneBuffer(JS::StructuredCloneScope::SameProcessSameThread, nullptr,
+    : mCloneBuffer(JS::StructuredCloneScope::DifferentProcessForIndexedDB, nullptr,
                    nullptr)
     , mDatabase(aDatabase)
     , mOffsetToKeyProp(0)
@@ -639,7 +639,7 @@ StructuredCloneWriteCallback(JSContext* aCx,
     MOZ_ASSERT(module);
 
     size_t bytecodeSize = module->bytecodeSerializedSize();
-    UniquePtr<uint8_t[]> bytecode(new uint8_t[bytecodeSize]);
+    UniquePtr<uint8_t[], JS::FreePolicy> bytecode(js_pod_malloc<uint8_t>(bytecodeSize));
     module->bytecodeSerialize(bytecode.get(), bytecodeSize);
 
     RefPtr<BlobImpl> blobImpl =
@@ -1331,7 +1331,7 @@ IDBObjectStore::DeserializeValue(JSContext* aCx,
   // FIXME: Consider to use StructuredCloneHolder here and in other
   //        deserializing methods.
   if (!JS_ReadStructuredClone(aCx, aCloneReadInfo.mData, JS_STRUCTURED_CLONE_VERSION,
-                              JS::StructuredCloneScope::SameProcessSameThread,
+                              JS::StructuredCloneScope::DifferentProcessForIndexedDB,
                               aValue, &callbacks, &aCloneReadInfo)) {
     return false;
   }
@@ -1467,7 +1467,7 @@ public:
       return NS_OK;
     }
 
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
 
     JS::Rooted<JS::Value> value(cx);
     nsresult rv = DeserializeIndexValue(cx, &value);
@@ -1504,7 +1504,7 @@ private:
 
     if (!JS_ReadStructuredClone(aCx, mCloneReadInfo.mData,
                                 JS_STRUCTURED_CLONE_VERSION,
-                                JS::StructuredCloneScope::SameProcessSameThread,
+                                JS::StructuredCloneScope::DifferentProcessForIndexedDB,
                                 aValue, &callbacks, &mCloneReadInfo)) {
       return NS_ERROR_DOM_DATA_CLONE_ERR;
     }
@@ -1589,7 +1589,7 @@ public:
       return NS_OK;
     }
 
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
 
     JS::Rooted<JS::Value> value(cx);
     nsresult rv = DeserializeUpgradeValue(cx, &value);
@@ -1618,7 +1618,7 @@ private:
 
     if (!JS_ReadStructuredClone(aCx, mCloneReadInfo.mData,
                                 JS_STRUCTURED_CLONE_VERSION,
-                                JS::StructuredCloneScope::SameProcessSameThread,
+                                JS::StructuredCloneScope::DifferentProcessForIndexedDB,
                                 aValue, &callbacks, &mCloneReadInfo)) {
       return NS_ERROR_DOM_DATA_CLONE_ERR;
     }

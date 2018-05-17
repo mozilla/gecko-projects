@@ -9,9 +9,8 @@
 use cssparser::Parser;
 use gecko_bindings::structs;
 use parser::{Parse, ParserContext};
-use selectors::parser::SelectorParseErrorKind;
 use std::fmt::{self, Write};
-use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
+use style_traits::{CssWriter, KeywordsCollectFn, ParseError, SpecifiedValueInfo, ToCss};
 
 bitflags! {
     /// Constants shared by multiple CSS Box Alignment properties
@@ -81,14 +80,26 @@ impl ToCss for AlignFlags {
     where
         W: Write,
     {
-        match *self & AlignFlags::FLAG_BITS {
-            AlignFlags::LEGACY => dest.write_str("legacy ")?,
+        let extra_flags = *self & AlignFlags::FLAG_BITS;
+        let value = self.value();
+
+        match extra_flags {
+            AlignFlags::LEGACY => {
+                dest.write_str("legacy")?;
+                if value.is_empty() {
+                    return Ok(());
+                }
+                dest.write_char(' ')?;
+            },
             AlignFlags::SAFE => dest.write_str("safe ")?,
             // Don't serialize "unsafe", since it's the default.
-            _ => {},
+            AlignFlags::UNSAFE => {},
+            _ => {
+                debug_assert_eq!(extra_flags, AlignFlags::empty());
+            },
         }
 
-        dest.write_str(match self.value() {
+        dest.write_str(match value {
             AlignFlags::AUTO => "auto",
             AlignFlags::NORMAL => "normal",
             AlignFlags::START => "start",
@@ -180,6 +191,9 @@ impl ContentDistribution {
         input: &mut Parser<'i, 't>,
         axis: AxisDirection,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update the `list_keywords` function below
+        //      when this function is updated.
+
         // Try to parse normal first
         if input.try(|i| i.expect_ident_matching("normal")).is_ok() {
             return Ok(ContentDistribution::normal());
@@ -216,6 +230,19 @@ impl ContentDistribution {
             content_position | overflow_position,
         ))
     }
+
+    fn list_keywords(f: KeywordsCollectFn, axis: AxisDirection) {
+        f(&["normal"]);
+        if axis == AxisDirection::Block {
+            list_baseline_keywords(f);
+        }
+        list_content_distribution_keywords(f);
+        list_overflow_position_keywords(f);
+        f(&["start", "end", "flex-start", "flex-end", "center"]);
+        if axis == AxisDirection::Inline {
+            f(&["left", "right"]);
+        }
+    }
 }
 
 /// Value for the `align-content` property.
@@ -229,10 +256,18 @@ impl Parse for AlignContent {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update `impl SpecifiedValueInfo` below when
+        //      this function is updated.
         Ok(AlignContent(ContentDistribution::parse(
             input,
             AxisDirection::Block,
         )?))
+    }
+}
+
+impl SpecifiedValueInfo for AlignContent {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        ContentDistribution::list_keywords(f, AxisDirection::Block);
     }
 }
 
@@ -261,10 +296,18 @@ impl Parse for JustifyContent {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update `impl SpecifiedValueInfo` below when
+        //      this function is updated.
         Ok(JustifyContent(ContentDistribution::parse(
             input,
             AxisDirection::Inline,
         )?))
+    }
+}
+
+impl SpecifiedValueInfo for JustifyContent {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        ContentDistribution::list_keywords(f, AxisDirection::Inline);
     }
 }
 
@@ -308,6 +351,9 @@ impl SelfAlignment {
         input: &mut Parser<'i, 't>,
         axis: AxisDirection,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update the `list_keywords` function below
+        //      when this function is updated.
+
         // <baseline-position>
         //
         // It's weird that this accepts <baseline-position>, but not
@@ -328,6 +374,13 @@ impl SelfAlignment {
         let self_position = parse_self_position(input, axis)?;
         Ok(SelfAlignment(overflow_position | self_position))
     }
+
+    fn list_keywords(f: KeywordsCollectFn, axis: AxisDirection) {
+        list_baseline_keywords(f);
+        list_auto_normal_stretch(f);
+        list_overflow_position_keywords(f);
+        list_self_position_keywords(f, axis);
+    }
 }
 
 /// The specified value of the align-self property.
@@ -341,10 +394,18 @@ impl Parse for AlignSelf {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update `impl SpecifiedValueInfo` below when
+        //      this function is updated.
         Ok(AlignSelf(SelfAlignment::parse(
             input,
             AxisDirection::Block,
         )?))
+    }
+}
+
+impl SpecifiedValueInfo for AlignSelf {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        SelfAlignment::list_keywords(f, AxisDirection::Block);
     }
 }
 
@@ -371,10 +432,18 @@ impl Parse for JustifySelf {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update `impl SpecifiedValueInfo` below when
+        //      this function is updated.
         Ok(JustifySelf(SelfAlignment::parse(
             input,
             AxisDirection::Inline,
         )?))
+    }
+}
+
+impl SpecifiedValueInfo for JustifySelf {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        SelfAlignment::list_keywords(f, AxisDirection::Inline);
     }
 }
 
@@ -411,6 +480,9 @@ impl Parse for AlignItems {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update `impl SpecifiedValueInfo` below when
+        //      this function is updated.
+
         // <baseline-position>
         if let Ok(baseline) = input.try(parse_baseline) {
             return Ok(AlignItems(baseline));
@@ -429,6 +501,15 @@ impl Parse for AlignItems {
     }
 }
 
+impl SpecifiedValueInfo for AlignItems {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        list_baseline_keywords(f);
+        list_normal_stretch(f);
+        list_overflow_position_keywords(f);
+        list_self_position_keywords(f, AxisDirection::Block);
+    }
+}
+
 /// Value of the `justify-items` property
 ///
 /// <https://drafts.csswg.org/css-align/#justify-items-property>
@@ -436,10 +517,10 @@ impl Parse for AlignItems {
 pub struct JustifyItems(pub AlignFlags);
 
 impl JustifyItems {
-    /// The initial value 'auto'
+    /// The initial value 'legacy'
     #[inline]
-    pub fn auto() -> Self {
-        JustifyItems(AlignFlags::AUTO)
+    pub fn legacy() -> Self {
+        JustifyItems(AlignFlags::LEGACY)
     }
 
     /// The value 'normal'
@@ -454,6 +535,9 @@ impl Parse for JustifyItems {
         _: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
+        // NOTE Please also update `impl SpecifiedValueInfo` below when
+        //      this function is updated.
+
         // <baseline-position>
         //
         // It's weird that this accepts <baseline-position>, but not
@@ -462,24 +546,12 @@ impl Parse for JustifyItems {
             return Ok(JustifyItems(baseline));
         }
 
-        // auto | normal | stretch
-        //
-        // FIXME(emilio): auto is no longer a keyword in the current spec, and
-        // has been renamed to legacy, but that needs different changes because
-        // right now it's the initial value for both style systems, and has that
-        // weird behavior of "inheriting" into descendants.
-        //
-        // Fix this in both.
-        //
-        // See also:
-        //   https://bugs.webkit.org/show_bug.cgi?id=172711
-        //   https://bugs.chromium.org/p/chromium/issues/detail?id=726148
-        //
-        if let Ok(value) = input.try(parse_auto_normal_stretch) {
+        // normal | stretch
+        if let Ok(value) = input.try(parse_normal_stretch) {
             return Ok(JustifyItems(value));
         }
 
-        // [ legacy || [ left | right | center ] ]
+        // legacy | [ legacy && [ left | right | center ] ]
         if let Ok(value) = input.try(parse_legacy) {
             return Ok(JustifyItems(value));
         }
@@ -493,10 +565,22 @@ impl Parse for JustifyItems {
     }
 }
 
+impl SpecifiedValueInfo for JustifyItems {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        list_baseline_keywords(f);
+        list_normal_stretch(f);
+        list_legacy_keywords(f);
+        list_overflow_position_keywords(f);
+        list_self_position_keywords(f, AxisDirection::Inline);
+    }
+}
+
 // auto | normal | stretch
 fn parse_auto_normal_stretch<'i, 't>(
     input: &mut Parser<'i, 't>,
 ) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_auto_normal_stretch` function
+    //      below when this function is updated.
     try_match_ident_ignore_ascii_case! { input,
         "auto" => Ok(AlignFlags::AUTO),
         "normal" => Ok(AlignFlags::NORMAL),
@@ -504,16 +588,28 @@ fn parse_auto_normal_stretch<'i, 't>(
     }
 }
 
+fn list_auto_normal_stretch(f: KeywordsCollectFn) {
+    f(&["auto", "normal", "stretch"]);
+}
+
 // normal | stretch
 fn parse_normal_stretch<'i, 't>(input: &mut Parser<'i, 't>) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_normal_stretch` function below
+    //      when this function is updated.
     try_match_ident_ignore_ascii_case! { input,
         "normal" => Ok(AlignFlags::NORMAL),
         "stretch" => Ok(AlignFlags::STRETCH),
     }
 }
 
+fn list_normal_stretch(f: KeywordsCollectFn) {
+    f(&["normal", "stretch"]);
+}
+
 // <baseline-position>
 fn parse_baseline<'i, 't>(input: &mut Parser<'i, 't>) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_baseline_keywords` function
+    //      below when this function is updated.
     try_match_ident_ignore_ascii_case! { input,
         "baseline" => Ok(AlignFlags::BASELINE),
         "first" => {
@@ -527,10 +623,16 @@ fn parse_baseline<'i, 't>(input: &mut Parser<'i, 't>) -> Result<AlignFlags, Pars
     }
 }
 
+fn list_baseline_keywords(f: KeywordsCollectFn) {
+    f(&["baseline", "first baseline", "last baseline"]);
+}
+
 // <content-distribution>
 fn parse_content_distribution<'i, 't>(
     input: &mut Parser<'i, 't>,
 ) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_content_distribution_keywords`
+    //      function below when this function is updated.
     try_match_ident_ignore_ascii_case! { input,
         "stretch" => Ok(AlignFlags::STRETCH),
         "space-between" => Ok(AlignFlags::SPACE_BETWEEN),
@@ -539,14 +641,24 @@ fn parse_content_distribution<'i, 't>(
     }
 }
 
+fn list_content_distribution_keywords(f: KeywordsCollectFn) {
+    f(&["stretch", "space-between", "space-around", "space-evenly"]);
+}
+
 // <overflow-position>
 fn parse_overflow_position<'i, 't>(
     input: &mut Parser<'i, 't>,
 ) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_overflow_position_keywords`
+    //      function below when this function is updated.
     try_match_ident_ignore_ascii_case! { input,
         "safe" => Ok(AlignFlags::SAFE),
         "unsafe" => Ok(AlignFlags::UNSAFE),
     }
+}
+
+fn list_overflow_position_keywords(f: KeywordsCollectFn) {
+    f(&["safe", "unsafe"]);
 }
 
 // <self-position> | left | right in the inline axis.
@@ -554,6 +666,8 @@ fn parse_self_position<'i, 't>(
     input: &mut Parser<'i, 't>,
     axis: AxisDirection,
 ) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_self_position_keywords`
+    //      function below when this function is updated.
     Ok(try_match_ident_ignore_ascii_case! { input,
         "start" => AlignFlags::START,
         "end" => AlignFlags::END,
@@ -567,29 +681,48 @@ fn parse_self_position<'i, 't>(
     })
 }
 
-// [ legacy && [ left | right | center ] ]
-fn parse_legacy<'i, 't>(input: &mut Parser<'i, 't>) -> Result<AlignFlags, ParseError<'i>> {
-    let a_location = input.current_source_location();
-    let a = input.expect_ident()?.clone();
-    let b_location = input.current_source_location();
-    let b = input.expect_ident()?;
-    if a.eq_ignore_ascii_case("legacy") {
-        (match_ignore_ascii_case! { &b,
-            "left" => Ok(AlignFlags::LEGACY | AlignFlags::LEFT),
-            "right" => Ok(AlignFlags::LEGACY | AlignFlags::RIGHT),
-            "center" => Ok(AlignFlags::LEGACY | AlignFlags::CENTER),
-            _ => Err(())
-        }).map_err(|()| {
-            b_location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(b.clone()))
-        })
-    } else if b.eq_ignore_ascii_case("legacy") {
-        (match_ignore_ascii_case! { &a,
-            "left" => Ok(AlignFlags::LEGACY | AlignFlags::LEFT),
-            "right" => Ok(AlignFlags::LEGACY | AlignFlags::RIGHT),
-            "center" => Ok(AlignFlags::LEGACY | AlignFlags::CENTER),
-            _ => Err(())
-        }).map_err(|()| a_location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(a)))
-    } else {
-        Err(a_location.new_custom_error(StyleParseErrorKind::UnspecifiedError))
+fn list_self_position_keywords(f: KeywordsCollectFn, axis: AxisDirection) {
+    f(&[
+      "start", "end", "flex-start", "flex-end",
+      "center", "self-start", "self-end",
+    ]);
+    if axis == AxisDirection::Inline {
+        f(&["left", "right"]);
     }
+}
+
+fn parse_left_right_center<'i, 't>(
+    input: &mut Parser<'i, 't>,
+) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_legacy_keywords` function below
+    //      when this function is updated.
+    Ok(try_match_ident_ignore_ascii_case! { input,
+        "left" => AlignFlags::LEFT,
+        "right" => AlignFlags::RIGHT,
+        "center" => AlignFlags::CENTER,
+    })
+}
+
+// legacy | [ legacy && [ left | right | center ] ]
+fn parse_legacy<'i, 't>(input: &mut Parser<'i, 't>) -> Result<AlignFlags, ParseError<'i>> {
+    // NOTE Please also update the `list_legacy_keywords` function below
+    //      when this function is updated.
+    let flags = try_match_ident_ignore_ascii_case! { input,
+        "legacy" => {
+            let flags = input.try(parse_left_right_center)
+                .unwrap_or(AlignFlags::empty());
+
+            return Ok(AlignFlags::LEGACY | flags)
+        }
+        "left" => AlignFlags::LEFT,
+        "right" => AlignFlags::RIGHT,
+        "center" => AlignFlags::CENTER,
+    };
+
+    input.expect_ident_matching("legacy")?;
+    Ok(AlignFlags::LEGACY | flags)
+}
+
+fn list_legacy_keywords(f: KeywordsCollectFn) {
+    f(&["legacy", "left", "right", "center"]);
 }

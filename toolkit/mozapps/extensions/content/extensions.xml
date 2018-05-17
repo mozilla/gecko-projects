@@ -207,124 +207,6 @@
     </implementation>
   </binding>
 
-
-  <!-- Sorters - displays and controls the sort state of a list. -->
-  <binding id="sorters">
-    <content orient="horizontal">
-      <xul:button anonid="name-btn" class="sorter"
-                  label="&sort.name.label;" tooltiptext="&sort.name.tooltip;"
-                  oncommand="this.parentNode._handleChange('name');"/>
-      <xul:button anonid="date-btn" class="sorter"
-                  label="&sort.dateUpdated.label;"
-                  tooltiptext="&sort.dateUpdated.tooltip;"
-                  oncommand="this.parentNode._handleChange('updateDate');"/>
-    </content>
-
-    <implementation>
-      <constructor><![CDATA[
-        if (!this.hasAttribute("sortby"))
-          this.setAttribute("sortby", "name");
-
-        this._refreshState();
-      ]]></constructor>
-
-      <field name="handler">null</field>
-      <field name="_btnName">
-        document.getAnonymousElementByAttribute(this, "anonid", "name-btn");
-      </field>
-      <field name="_btnDate">
-        document.getAnonymousElementByAttribute(this, "anonid", "date-btn");
-      </field>
-
-      <property name="sortBy">
-        <getter><![CDATA[
-          return this.getAttribute("sortby");
-        ]]></getter>
-        <setter><![CDATA[
-          if (val != this.sortBy) {
-            this.setAttribute("sortBy", val);
-            this._refreshState();
-          }
-        ]]></setter>
-      </property>
-
-      <property name="ascending">
-        <getter><![CDATA[
-          return (this.getAttribute("ascending") == "true");
-        ]]></getter>
-        <setter><![CDATA[
-          val = !!val;
-          if (val != this.ascending) {
-            this.setAttribute("ascending", val);
-            this._refreshState();
-          }
-        ]]></setter>
-      </property>
-
-      <method name="setSort">
-        <parameter name="aSort"/>
-        <parameter name="aAscending"/>
-        <body><![CDATA[
-          var sortChanged = false;
-          if (aSort != this.sortBy) {
-            this.setAttribute("sortby", aSort);
-            sortChanged = true;
-          }
-
-          aAscending = !!aAscending;
-          if (this.ascending != aAscending) {
-            this.setAttribute("ascending", aAscending);
-            sortChanged = true;
-          }
-
-          if (sortChanged)
-            this._refreshState();
-        ]]></body>
-      </method>
-
-      <method name="_handleChange">
-        <parameter name="aSort"/>
-        <body><![CDATA[
-          const ASCENDING_SORT_FIELDS = ["name"];
-
-          // Toggle ascending if sort by is not changing, otherwise
-          // name sorting defaults to ascending, others to descending
-          if (aSort == this.sortBy)
-            this.ascending = !this.ascending;
-          else
-            this.setSort(aSort, ASCENDING_SORT_FIELDS.includes(aSort));
-        ]]></body>
-      </method>
-
-      <method name="_refreshState">
-        <body><![CDATA[
-          var sortBy = this.sortBy;
-          var checkState = this.ascending ? 2 : 1;
-
-          if (sortBy == "name") {
-            this._btnName.checkState = checkState;
-            this._btnName.checked = true;
-          } else {
-            this._btnName.checkState = 0;
-            this._btnName.checked = false;
-          }
-
-          if (sortBy == "updateDate") {
-            this._btnDate.checkState = checkState;
-            this._btnDate.checked = true;
-          } else {
-            this._btnDate.checkState = 0;
-            this._btnDate.checked = false;
-          }
-
-          if (this.handler && "onSortChanged" in this.handler)
-            this.handler.onSortChanged(sortBy, this.ascending);
-        ]]></body>
-      </method>
-    </implementation>
-  </binding>
-
-
   <!-- Categories list - displays the list of categories on the left pane. -->
   <binding id="categories-list"
            extends="chrome://global/content/bindings/richlistbox.xml#richlistbox">
@@ -1052,7 +934,7 @@
               (this.mAddon.applyBackgroundUpdates == AddonManager.AUTOUPDATE_DISABLE ||
                (this.mAddon.applyBackgroundUpdates == AddonManager.AUTOUPDATE_DEFAULT &&
                 !AddonManager.autoUpdateDefault))) {
-            AddonManager.getAllInstalls(aInstallsList => {
+            AddonManager.getAllInstalls().then(aInstallsList => {
               // This can return after the binding has been destroyed,
               // so try to detect that and return early
               if (!("onNewInstall" in this))
@@ -1151,8 +1033,10 @@
                 [this.mAddon.name], 1
               );
               this._errorLink.value = gStrings.ext.GetStringFromName("notification.blocked.link");
-              this._errorLink.href = this.mAddon.blocklistURL;
-              this._errorLink.hidden = false;
+              this.mAddon.getBlocklistURL().then(url => {
+                this._errorLink.href = url;
+                this._errorLink.hidden = false;
+              });
             } else if (!isUpgrade && isDisabledUnsigned(this.mAddon)) {
               this.setAttribute("notification", "error");
               this._error.textContent = gStrings.ext.formatStringFromName(
@@ -1185,8 +1069,10 @@
                 [this.mAddon.name], 1
               );
               this._warningLink.value = gStrings.ext.GetStringFromName("notification.softblocked.link");
-              this._warningLink.href = this.mAddon.blocklistURL;
-              this._warningLink.hidden = false;
+              this.mAddon.getBlocklistURL().then(url => {
+                this._warningLink.href = url;
+                this._warningLink.hidden = false;
+              });
               this._warningBtn.hidden = true;
             } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_OUTDATED) {
               this.setAttribute("notification", "warning");
@@ -1195,8 +1081,10 @@
                 [this.mAddon.name], 1
               );
               this._warningLink.value = gStrings.ext.GetStringFromName("notification.outdated.link");
-              this._warningLink.href = this.mAddon.blocklistURL;
-              this._warningLink.hidden = false;
+              this.mAddon.getBlocklistURL().then(url => {
+                this._warningLink.href = url;
+                this._warningLink.hidden = false;
+              });
               this._warningBtn.hidden = true;
             } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_UPDATE_AVAILABLE) {
               this.setAttribute("notification", "error");
@@ -1205,8 +1093,10 @@
                 [this.mAddon.name], 1
               );
               this._errorLink.value = gStrings.ext.GetStringFromName("notification.vulnerableUpdatable.link");
-              this._errorLink.href = this.mAddon.blocklistURL;
-              this._errorLink.hidden = false;
+              this.mAddon.getBlocklistURL().then(url => {
+                this._errorLink.href = url;
+                this._errorLink.hidden = false;
+              });
             } else if (!isUpgrade && this.mAddon.blocklistState == Ci.nsIBlocklistService.STATE_VULNERABLE_NO_UPDATE) {
               this.setAttribute("notification", "error");
               this._error.textContent = gStrings.ext.formatStringFromName(
@@ -1214,8 +1104,10 @@
                 [this.mAddon.name], 1
               );
               this._errorLink.value = gStrings.ext.GetStringFromName("notification.vulnerableNoUpdate.link");
-              this._errorLink.href = this.mAddon.blocklistURL;
-              this._errorLink.hidden = false;
+              this.mAddon.getBlocklistURL().then(url => {
+                this._errorLink.href = url;
+                this._errorLink.hidden = false;
+              });
             } else if (this.mAddon.isGMPlugin && !this.mAddon.isInstalled &&
                        this.mAddon.isActive) {
               this.setAttribute("notification", "warning");

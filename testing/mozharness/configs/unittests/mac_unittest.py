@@ -8,12 +8,7 @@ DISABLE_SCREEN_SAVER = False
 ADJUST_MOUSE_AND_SCREEN = False
 #####
 config = {
-    "buildbot_json_path": "buildprops.json",
-    "find_links": [
-        "http://pypi.pvt.build.mozilla.org/pub",
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
+    "virtualenv_modules": ['six==1.10.0', 'vcversioner==2.16.0.0'],
     ###
     "installer_path": INSTALLER_PATH,
     "xpcshell_name": XPCSHELL_NAME,
@@ -171,6 +166,10 @@ config = {
             'options': ["--suite=reftest"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
+        "reftest-fonts": {
+            'options': ["--suite=reftest"],
+            'tests': ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
+        },
     },
     "all_xpcshell_suites": {
         "xpcshell": {
@@ -223,7 +222,6 @@ config = {
     ],
     "vcs_output_timeout": 1000,
     "minidump_save_path": "%(abs_work_dir)s/../minidumps",
-    "buildbot_max_log_size": 52428800,
     "default_blob_upload_servers": [
         "https://blobupload.elasticbeanstalk.com",
     ],

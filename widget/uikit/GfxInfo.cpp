@@ -152,14 +152,14 @@ GfxInfo::GetIsGPU2Active(bool* aIsGPU2Active)
 const nsTArray<GfxDriverInfo>&
 GfxInfo::GetGfxDriverInfo()
 {
-  if (mDriverInfo->IsEmpty()) {
+  if (sDriverInfo->IsEmpty()) {
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Ios,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAll), GfxDriverInfo::allDevices,
       nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_STATUS_OK,
       DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions );
   }
 
-  return *mDriverInfo;
+  return *sDriverInfo;
 }
 
 nsresult
@@ -174,6 +174,10 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
   *aStatus = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
   if (aOS)
     *aOS = OperatingSystem::Ios;
+
+  if (sShutdownOccurred) {
+    return NS_OK;
+  }
 
   // OpenGL layers are never blacklisted on iOS.
   // This early return is so we avoid potentially slow

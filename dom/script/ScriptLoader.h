@@ -20,6 +20,7 @@
 #include "nsIIncrementalStreamLoader.h"
 #include "nsURIHashKey.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ScriptLoadRequest.h"
 #include "mozilla/dom/SRIMetadata.h"
 #include "mozilla/dom/SRICheck.h"
@@ -398,6 +399,15 @@ private:
 
   void HandleLoadError(ScriptLoadRequest *aRequest, nsresult aResult);
 
+  static bool BinASTEncodingEnabled()
+  {
+#ifdef JS_BUILD_BINAST
+    return DOMPrefs::BinASTEncodingEnabled();
+#else
+    return false;
+#endif
+  }
+
   /**
    * Process any pending requests asynchronously (i.e. off an event) if there
    * are any. Note that this is a no-op if there aren't any currently pending
@@ -505,8 +515,9 @@ private:
   RefPtr<mozilla::GenericPromise> WaitForModuleFetch(nsIURI* aURL);
   ModuleScript* GetFetchedModule(nsIURI* aURL) const;
 
-  friend bool
-  HostResolveImportedModule(JSContext* aCx, unsigned argc, JS::Value* vp);
+  friend JSObject*
+  HostResolveImportedModule(JSContext* aCx, JS::Handle<JSObject*> aModule,
+                          JS::Handle<JSString*> aSpecifier);
 
   // Returns wether we should save the bytecode of this script after the
   // execution of the script.

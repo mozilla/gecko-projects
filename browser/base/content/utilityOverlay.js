@@ -11,14 +11,11 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-ChromeUtils.defineModuleGetter(this, "RecentWindow",
-                               "resource:///modules/RecentWindow.jsm");
-
-ChromeUtils.defineModuleGetter(this, "ShellService",
-                               "resource:///modules/ShellService.jsm");
-
-ChromeUtils.defineModuleGetter(this, "ContextualIdentityService",
-                               "resource://gre/modules/ContextualIdentityService.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+  ShellService: "resource:///modules/ShellService.jsm"
+});
 
 XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "@mozilla.org/browser/aboutnewtab-service;1",
@@ -47,6 +44,7 @@ var gBidiUI = false;
 function isBlankPageURL(aURL) {
   return aURL == "about:blank" ||
          aURL == "about:home" ||
+         aURL == "about:welcome" ||
          aURL == BROWSER_NEW_TAB_URL;
 }
 
@@ -62,9 +60,10 @@ function getTopWin(skipPopups) {
       (!skipPopups || top.toolbar.visible))
     return top;
 
-  let isPrivate = PrivateBrowsingUtils.isWindowPrivate(window);
-  return RecentWindow.getMostRecentBrowserWindow({private: isPrivate,
-                                                  allowPopups: !skipPopups});
+  return BrowserWindowTracker.getTopWindow({
+    private: PrivateBrowsingUtils.isWindowPrivate(window),
+    allowPopups: !skipPopups
+  });
 }
 
 function getBoolPref(prefname, def) {
@@ -121,12 +120,7 @@ function openUILink(url, event, aIgnoreButton, aIgnoreAlt, aAllowThirdPartyFixup
   }
 
   if (!params.triggeringPrincipal) {
-    let dt = event ? event.dataTransfer : null;
-    if (!!dt && dt.mozSourceNode) {
-      params.triggeringPrincipal = dt.mozSourceNode.nodePrincipal;
-    } else {
-      params.triggeringPrincipal = Services.scriptSecurityManager.createNullPrincipal({});
-    }
+    throw new Error("Required argument triggeringPrincipal missing within openUILink");
   }
 
   let where = whereToOpenLink(event, aIgnoreButton, aIgnoreAlt);

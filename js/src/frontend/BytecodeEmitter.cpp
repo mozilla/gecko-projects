@@ -25,7 +25,6 @@
 
 #include "ds/Nestable.h"
 #include "frontend/Parser.h"
-#include "frontend/TokenStream.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/Debugger.h"
 #include "vm/GeneratorObject.h"
@@ -50,6 +49,7 @@ using mozilla::AssertedCast;
 using mozilla::DebugOnly;
 using mozilla::Maybe;
 using mozilla::Nothing;
+using mozilla::NumberEqualsInt32;
 using mozilla::NumberIsInt32;
 using mozilla::PodCopy;
 using mozilla::Some;
@@ -1497,13 +1497,46 @@ BytecodeEmitter::TDZCheckCache::noteTDZCheck(BytecodeEmitter* bce, JSAtom* name,
         MOZ_ASSERT(!check, "TDZ only needs to be checked once per binding per basic block.");
         p->value() = check;
     } else {
-        if (!cache_->add(p, name, check))
+        if (!cache_->add(p, name, check)) {
+            ReportOutOfMemory(bce->cx);
             return false;
+        }
     }
 
     return true;
 }
 
+// Class for emitting bytecode for blocks like try-catch-finally.
+//
+// Usage: (check for the return value is omitted for simplicity)
+//
+//   `try { try_block } catch (ex) { catch_block }`
+//     TryEmitter tryCatch(this, TryEmitter::TryCatch);
+//     tryCatch.emitTry();
+//     emit(try_block);
+//     tryCatch.emitCatch();
+//     emit(ex and catch_block); // use JSOP_EXCEPTION to get exception
+//     tryCatch.emitEnd();
+//
+//   `try { try_block } finally { finally_block }`
+//     TryEmitter tryCatch(this, TryEmitter::TryFinally);
+//     tryCatch.emitTry();
+//     emit(try_block);
+//     // finally_pos: The "{" character's position in the source code text.
+//     tryCatch.emitFinally(Some(finally_pos));
+//     emit(finally_block);
+//     tryCatch.emitEnd();
+//
+//   `try { try_block } catch (ex) {catch_block} finally { finally_block }`
+//     TryEmitter tryCatch(this, TryEmitter::TryCatchFinally);
+//     tryCatch.emitTry();
+//     emit(try_block);
+//     tryCatch.emitCatch();
+//     emit(ex and catch_block);
+//     tryCatch.emitFinally(Some(finally_pos));
+//     emit(finally_block);
+//     tryCatch.emitEnd();
+//
 class MOZ_STACK_CLASS TryEmitter
 {
   public:
@@ -1512,10 +1545,58 @@ class MOZ_STACK_CLASS TryEmitter
         TryCatchFinally,
         TryFinally
     };
+
+    // Whether the catch and finally blocks handle the frame's return value.
+    // If UseRetVal is specified, the bytecode marked with "*" are emitted
+    // to clear return value with `undefined` before the catch block and the
+    // finally block, and also to save/restore the return value before/after
+    // the finally block.
+    //
+    //     JSOP_TRY
+    //
+    //     try_body...
+    //
+    //     JSOP_GOSUB finally
+    //     JSOP_JUMPTARGET
+    //     JSOP_GOTO end:
+    //
+    //   catch:
+    //     JSOP_JUMPTARGET
+    //   * JSOP_UNDEFINED
+    //   * JSOP_SETRVAL
+    //
+    //     catch_body...
+    //
+    //     JSOP_GOSUB finally
+    //     JSOP_JUMPTARGET
+    //     JSOP_GOTO end
+    //
+    //   finally:
+    //     JSOP_JUMPTARGET
+    //   * JSOP_GETRVAL
+    //   * JSOP_UNDEFINED
+    //   * JSOP_SETRVAL
+    //
+    //     finally_body...
+    //
+    //   * JSOP_SETRVAL
+    //     JSOP_NOP
+    //
+    //   end:
+    //     JSOP_JUMPTARGET
+    //
+    // For syntactic try-catch-finally, UseRetVal should be used.
+    // For non-syntactic try-catch-finally, DontUseRetVal should be used.
     enum ShouldUseRetVal {
         UseRetVal,
         DontUseRetVal
     };
+
+    // Whether this class should use TryFinallyControl.
+    // See the comment for `controlInfo_`.
+    //
+    // For syntactic try-catch-finally, UseControl should be used.
+    // For non-syntactic try-catch-finally, DontUseControl should be used.
     enum ShouldUseControl {
         UseControl,
         DontUseControl,
@@ -1547,21 +1628,49 @@ class MOZ_STACK_CLASS TryEmitter
     // requirements as above.
     Maybe<TryFinallyControl> controlInfo_;
 
+    // The stack depth before emitting JSOP_TRY.
     int depth_;
+
+    // The source note index for SRC_TRY.
     unsigned noteIndex_;
+
+    // The offset after JSOP_TRY.
     ptrdiff_t tryStart_;
+
+    // JSOP_JUMPTARGET after the entire try-catch-finally block.
     JumpList catchAndFinallyJump_;
+
+    // The offset of JSOP_GOTO at the end of the try block.
     JumpTarget tryEnd_;
+
+    // The offset of JSOP_JUMPTARGET at the beginning of the finally block.
     JumpTarget finallyStart_;
 
+    // The state of this emitter.
+    //
+    // +-------+ emitTry +-----+   emitCatch +-------+      emitEnd  +-----+
+    // | Start |-------->| Try |-+---------->| Catch |-+->+--------->| End |
+    // +-------+         +-----+ |           +-------+ |  ^          +-----+
+    //                           |                     |  |
+    //                           |  +------------------+  +----+
+    //                           |  |                          |
+    //                           |  v emitFinally +---------+  |
+    //                           +->+------------>| Finally |--+
+    //                                            +---------+
     enum State {
+        // The initial state.
         Start,
+
+        // After calling emitTry.
         Try,
-        TryEnd,
+
+        // After calling emitCatch.
         Catch,
-        CatchEnd,
+
+        // After calling emitFinally.
         Finally,
-        FinallyEnd,
+
+        // After calling emitEnd.
         End
     };
     State state_;
@@ -1589,6 +1698,8 @@ class MOZ_STACK_CLASS TryEmitter
         finallyStart_.offset = 0;
     }
 
+    // Emits JSOP_GOTO to the end of try-catch-finally.
+    // Used in `yield*`.
     bool emitJumpOverCatchAndFinally() {
         if (!bce_->emitJump(JSOP_GOTO, &catchAndFinallyJump_))
             return false;
@@ -1688,6 +1799,10 @@ class MOZ_STACK_CLASS TryEmitter
     }
 
   public:
+    // If `finallyPos` is specified, it's an offset of the finally block's
+    // "{" character in the source code text, to improve line:column number in
+    // the error reporting.
+    // For non-syntactic try-catch-finally, `finallyPos` can be omitted.
     bool emitFinally(const Maybe<uint32_t>& finallyPos = Nothing()) {
         // If we are using controlInfo_ (i.e., emitting a syntactic try
         // blocks), we must have specified up front if there will be a finally
@@ -1808,23 +1923,90 @@ class MOZ_STACK_CLASS TryEmitter
     }
 };
 
+// Class for emitting bytecode for blocks like if-then-else.
+//
+// This class can be used to emit single if-then-else block.  Cascading
+// elseif's need multiple instances of this class.
+//
+// Usage: (check for the return value is omitted for simplicity)
+//
+//   `if (cond) then_block`
+//     IfThenElseEmitter ifThen(this);
+//     emit(cond);
+//     ifThen.emitIf();
+//     emit(then_block);
+//     ifThen.emitEnd();
+//
+//   `if (cond) then_block else else_block`
+//     IfThenElseEmitter ifThenElse(this);
+//     emit(cond);
+//     ifThenElse.emitIfElse();
+//     emit(then_block);
+//     ifThenElse.emitElse();
+//     emit(else_block);
+//     ifThenElse.emitEnd();
+//
+//   `cond ? then_expr : else_expr`
+//     IfThenElseEmitter condElse(this);
+//     emit(cond);
+//     condElse.emitCond();
+//     emit(then_block);
+//     condElse.emitElse();
+//     emit(else_block);
+//     condElse.emitEnd();
+//
 class MOZ_STACK_CLASS IfThenElseEmitter
 {
     BytecodeEmitter* bce_;
+
     JumpList jumpAroundThen_;
     JumpList jumpsAroundElse_;
+
+    // The source note index for SRC_IF, SRC_IF_ELSE, or SRC_COND.
     unsigned noteIndex_;
+
+    // The stack depth before emitting the then block.
+    // Used for restoring stack depth before emitting the else block.
+    // Also used for assertion to make sure then and else blocks pushed the
+    // same number of values.
     int32_t thenDepth_;
+
 #ifdef DEBUG
+    // The number of values pushed in the then and else blocks.
     int32_t pushed_;
     bool calculatedPushed_;
 #endif
+
+    // The state of this emitter.
+    //
+    // +-------+   emitIf     +----+                           emitEnd +-----+
+    // | Start |-+----------->| If |-------------------------+-------->| End |
+    // +-------+ |            +----+                         |         +-----+
+    //           |                                           |
+    //           | emitCond   +------+     emitElse +------+ |
+    //           +----------->| Cond |---+--------->| Else |-+
+    //           |            +------+   |          +------+
+    //           |                       |
+    //           | emitIfElse +--------+ |
+    //           +----------->| IfElse |-+
+    //                        +--------+
     enum State {
+        // The initial state.
         Start,
+
+        // After calling emitIf.
         If,
+
+        // After calling emitCond.
         Cond,
+
+        // After calling emitIfElse.
         IfElse,
+
+        // After calling Else.
         Else,
+
+        // After calling emitEnd.
         End
     };
     State state_;
@@ -1870,6 +2052,17 @@ class MOZ_STACK_CLASS IfThenElseEmitter
 #endif
         state_ = nextState;
         return true;
+    }
+
+    void calculateOrCheckPushed() {
+#ifdef DEBUG
+        if (!calculatedPushed_) {
+            pushed_ = bce_->stackDepth - thenDepth_;
+            calculatedPushed_ = true;
+        } else {
+            MOZ_ASSERT(pushed_ == bce_->stackDepth - thenDepth_);
+        }
+#endif
     }
 
   public:
@@ -1936,22 +2129,17 @@ class MOZ_STACK_CLASS IfThenElseEmitter
         return true;
     }
 
-    void calculateOrCheckPushed() {
 #ifdef DEBUG
-        if (!calculatedPushed_) {
-            pushed_ = bce_->stackDepth - thenDepth_;
-            calculatedPushed_ = true;
-        } else {
-            MOZ_ASSERT(pushed_ == bce_->stackDepth - thenDepth_);
-        }
-#endif
-    }
-
-#ifdef DEBUG
+    // Returns the number of values pushed onto the value stack inside
+    // `then_block` and `else_block`.
+    // Can be used in assertion after emitting if-then-else.
     int32_t pushed() const {
         return pushed_;
     }
 
+    // Returns the number of values popped onto the value stack inside
+    // `then_block` and `else_block`.
+    // Can be used in assertion after emitting if-then-else.
     int32_t popped() const {
         return -pushed_;
     }
@@ -2141,9 +2329,10 @@ class ForOfLoopControl : public LoopControl
     }
 };
 
+
 BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
-                                 const EitherParser<FullParseHandler>& parser, SharedContext* sc,
-                                 HandleScript script, Handle<LazyScript*> lazyScript,
+                                 SharedContext* sc, HandleScript script,
+                                 Handle<LazyScript*> lazyScript,
                                  uint32_t lineNum, EmitterMode emitterMode)
   : sc(sc),
     cx(sc->context),
@@ -2153,7 +2342,6 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     prologue(cx, lineNum),
     main(cx, lineNum),
     current(&main),
-    parser(parser),
     atomIndices(cx->frontendCollectionPool()),
     firstLine(lineNum),
     maxFixedSlots(0),
@@ -2175,19 +2363,35 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
     hasTryFinally(false),
     emittingRunOnceLambda(false),
     emitterMode(emitterMode),
+    scriptStartOffsetSet(false),
     functionBodyEndPosSet(false)
 {
     MOZ_ASSERT_IF(emitterMode == LazyFunction, lazyScript);
 }
 
 BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
-                                 const EitherParser<FullParseHandler>& parser, SharedContext* sc,
+                                 BCEParserHandle* handle, SharedContext* sc,
                                  HandleScript script, Handle<LazyScript*> lazyScript,
-                                 TokenPos bodyPosition, EmitterMode emitterMode)
-    : BytecodeEmitter(parent, parser, sc, script, lazyScript,
-                      parser.tokenStream().srcCoords.lineNum(bodyPosition.begin),
-                      emitterMode)
+                                 uint32_t lineNum, EmitterMode emitterMode)
+    : BytecodeEmitter(parent, sc, script, lazyScript, lineNum, emitterMode)
 {
+    parser = handle;
+}
+
+BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
+                                 const EitherParser& parser, SharedContext* sc,
+                                 HandleScript script, Handle<LazyScript*> lazyScript,
+                                 uint32_t lineNum, EmitterMode emitterMode)
+    : BytecodeEmitter(parent, sc, script, lazyScript, lineNum, emitterMode)
+{
+    ep_.emplace(parser);
+    this->parser = ep_.ptr();
+}
+
+void
+BytecodeEmitter::initFromBodyPosition(TokenPos bodyPosition)
+{
+    setScriptStartOffsetIfUnset(bodyPosition);
     setFunctionBodyEndPos(bodyPosition);
 }
 
@@ -2527,15 +2731,15 @@ LengthOfSetLine(unsigned line)
 bool
 BytecodeEmitter::updateLineNumberNotes(uint32_t offset)
 {
-    TokenStreamAnyChars* ts = &parser.tokenStream();
+    ErrorReporter* er = &parser->errorReporter();
     bool onThisLine;
-    if (!ts->srcCoords.isOnThisLine(offset, currentLine(), &onThisLine)) {
-        ts->reportErrorNoOffset(JSMSG_OUT_OF_MEMORY);
+    if (!er->isOnThisLine(offset, currentLine(), &onThisLine)) {
+        er->reportErrorNoOffset(JSMSG_OUT_OF_MEMORY);
         return false;
     }
 
     if (!onThisLine) {
-        unsigned line = ts->srcCoords.lineNum(offset);
+        unsigned line = er->lineAt(offset);
         unsigned delta = line - currentLine();
 
         /*
@@ -2571,7 +2775,7 @@ BytecodeEmitter::updateSourceCoordNotes(uint32_t offset)
     if (!updateLineNumberNotes(offset))
         return false;
 
-    uint32_t columnIndex = parser.tokenStream().srcCoords.columnIndex(offset);
+    uint32_t columnIndex = parser->errorReporter().columnAt(offset);
     ptrdiff_t colspan = ptrdiff_t(columnIndex) - ptrdiff_t(current->lastColumn);
     if (colspan != 0) {
         // If the column span is so large that we can't store it, then just
@@ -3524,51 +3728,11 @@ BytecodeEmitter::needsImplicitThis()
     return false;
 }
 
-bool
-BytecodeEmitter::maybeSetDisplayURL()
-{
-    if (tokenStream().hasDisplayURL()) {
-        if (!parser.ss()->setDisplayURL(cx, tokenStream().displayURL()))
-            return false;
-    }
-    return true;
-}
-
-bool
-BytecodeEmitter::maybeSetSourceMap()
-{
-    if (tokenStream().hasSourceMapURL()) {
-        MOZ_ASSERT(!parser.ss()->hasSourceMapURL());
-        if (!parser.ss()->setSourceMapURL(cx, tokenStream().sourceMapURL()))
-            return false;
-    }
-
-    /*
-     * Source map URLs passed as a compile option (usually via a HTTP source map
-     * header) override any source map urls passed as comment pragmas.
-     */
-    if (parser.options().sourceMapURL()) {
-        // Warn about the replacement, but use the new one.
-        if (parser.ss()->hasSourceMapURL()) {
-            if (!parser.warningNoOffset(JSMSG_ALREADY_HAS_PRAGMA,
-                                        parser.ss()->filename(), "//# sourceMappingURL"))
-            {
-                return false;
-            }
-        }
-
-        if (!parser.ss()->setSourceMapURL(cx, parser.options().sourceMapURL()))
-            return false;
-    }
-
-    return true;
-}
-
 void
 BytecodeEmitter::tellDebuggerAboutCompiledScript(JSContext* cx)
 {
     // Note: when parsing off thread the resulting scripts need to be handed to
-    // the debugger after rejoining to the active thread.
+    // the debugger after rejoining to the main thread.
     if (cx->helperThread())
         return;
 
@@ -3578,23 +3742,16 @@ BytecodeEmitter::tellDebuggerAboutCompiledScript(JSContext* cx)
         Debugger::onNewScript(cx, script);
 }
 
-inline TokenStreamAnyChars&
-BytecodeEmitter::tokenStream()
-{
-    return parser.tokenStream();
-}
-
 void
 BytecodeEmitter::reportError(ParseNode* pn, unsigned errorNumber, ...)
 {
-    TokenPos pos = pn ? pn->pn_pos : tokenStream().currentToken().pos;
+    MOZ_ASSERT_IF(!pn, this->scriptStartOffsetSet);
+    uint32_t offset = pn ? pn->pn_pos.begin : this->scriptStartOffset;
 
     va_list args;
     va_start(args, errorNumber);
 
-    ErrorMetadata metadata;
-    if (parser.computeErrorMetadata(&metadata, pos.begin))
-        ReportCompileError(cx, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
+    parser->errorReporter().errorAtVA(offset, errorNumber, &args);
 
     va_end(args);
 }
@@ -3602,12 +3759,13 @@ BytecodeEmitter::reportError(ParseNode* pn, unsigned errorNumber, ...)
 bool
 BytecodeEmitter::reportExtraWarning(ParseNode* pn, unsigned errorNumber, ...)
 {
-    TokenPos pos = pn ? pn->pn_pos : tokenStream().currentToken().pos;
+    MOZ_ASSERT_IF(!pn, this->scriptStartOffsetSet);
+    uint32_t offset = pn ? pn->pn_pos.begin : this->scriptStartOffset;
 
     va_list args;
     va_start(args, errorNumber);
 
-    bool result = parser.reportExtraWarningErrorNumberVA(nullptr, pos.begin, errorNumber, &args);
+    bool result = parser->errorReporter().reportExtraWarningErrorNumberVA(nullptr, offset, errorNumber, &args);
 
     va_end(args);
     return result;
@@ -3649,7 +3807,7 @@ BytecodeEmitter::iteratorResultShape(unsigned* shape)
     if (!NativeDefineDataProperty(cx, obj, done_id, UndefinedHandleValue, JSPROP_ENUMERATE))
         return false;
 
-    ObjectBox* objbox = parser.newObjectBox(obj);
+    ObjectBox* objbox = parser->newObjectBox(obj);
     if (!objbox)
         return false;
 
@@ -4470,7 +4628,7 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
     // Switch bytecodes run from here till end of final case.
     uint32_t caseCount = cases->pn_count;
     if (caseCount > JS_BIT(16)) {
-        parser.reportError(JSMSG_TOO_MANY_CASES);
+        reportError(pn, JSMSG_TOO_MANY_CASES);
         return false;
     }
 
@@ -4483,7 +4641,6 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
     if (caseCount == 0 ||
         (caseCount == 1 && (hasDefault = firstCase->isDefault())))
     {
-        caseCount = 0;
         low = 0;
         high = -1;
     } else {
@@ -4513,7 +4670,7 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
             }
 
             int32_t i;
-            if (!NumberIsInt32(caseValue->pn_dval, &i)) {
+            if (!NumberEqualsInt32(caseValue->pn_dval, &i)) {
                 switchOp = JSOP_CONDSWITCH;
                 continue;
             }
@@ -4859,7 +5016,9 @@ BytecodeEmitter::emitSetThis(ParseNode* pn)
 bool
 BytecodeEmitter::emitScript(ParseNode* body)
 {
-    AutoFrontendTraceLog traceLog(cx, TraceLogger_BytecodeEmission, tokenStream(), body);
+    AutoFrontendTraceLog traceLog(cx, TraceLogger_BytecodeEmission, parser->errorReporter(), body);
+
+    setScriptStartOffsetIfUnset(body->pn_pos);
 
     TDZCheckCache tdzCache(this);
     EmitterScope emitterScope(this);
@@ -4917,11 +5076,6 @@ BytecodeEmitter::emitScript(ParseNode* body)
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;
 
-    // URL and source map information must be set before firing
-    // Debugger::onNewScript.
-    if (!maybeSetDisplayURL() || !maybeSetSourceMap())
-        return false;
-
     tellDebuggerAboutCompiledScript(cx);
 
     return true;
@@ -4931,7 +5085,9 @@ bool
 BytecodeEmitter::emitFunctionScript(ParseNode* body)
 {
     FunctionBox* funbox = sc->asFunctionBox();
-    AutoFrontendTraceLog traceLog(cx, TraceLogger_BytecodeEmission, tokenStream(), funbox);
+    AutoFrontendTraceLog traceLog(cx, TraceLogger_BytecodeEmission, parser->errorReporter(), funbox);
+
+    setScriptStartOffsetIfUnset(body->pn_pos);
 
     // The ordering of these EmitterScopes is important. The named lambda
     // scope needs to enclose the function scope needs to enclose the extra
@@ -4984,15 +5140,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
     if (!JSScript::fullyInitFromEmitter(cx, script, this))
         return false;
 
-    // URL and source map information must be set before firing
-    // Debugger::onNewScript. Only top-level functions need this, as compiling
-    // the outer scripts of nested functions already processed the source.
-    if (emitterMode != LazyFunction && !parent) {
-        if (!maybeSetDisplayURL() || !maybeSetSourceMap())
-            return false;
-
-        tellDebuggerAboutCompiledScript(cx);
-    }
+    tellDebuggerAboutCompiledScript(cx);
 
     return true;
 }
@@ -6584,7 +6732,7 @@ BytecodeEmitter::emitSingletonInitialiser(ParseNode* pn)
 
     MOZ_ASSERT_IF(newKind == SingletonObject, value.toObject().isSingleton());
 
-    ObjectBox* objbox = parser.newObjectBox(&value.toObject());
+    ObjectBox* objbox = parser->newObjectBox(&value.toObject());
     if (!objbox)
         return false;
 
@@ -6600,7 +6748,7 @@ BytecodeEmitter::emitCallSiteObject(ParseNode* pn)
 
     MOZ_ASSERT(value.isObject());
 
-    ObjectBox* objbox1 = parser.newObjectBox(&value.toObject());
+    ObjectBox* objbox1 = parser->newObjectBox(&value.toObject());
     if (!objbox1)
         return false;
 
@@ -6609,7 +6757,7 @@ BytecodeEmitter::emitCallSiteObject(ParseNode* pn)
 
     MOZ_ASSERT(value.isObject());
 
-    ObjectBox* objbox2 = parser.newObjectBox(&value.toObject());
+    ObjectBox* objbox2 = parser->newObjectBox(&value.toObject());
     if (!objbox2)
         return false;
 
@@ -7124,7 +7272,7 @@ BytecodeEmitter::emitInitializeForInOrOfTarget(ParseNode* forHead)
     // If the for-in/of loop didn't have a variable declaration, per-loop
     // initialization is just assigning the iteration value to a target
     // expression.
-    if (!parser.isDeclarationList(target))
+    if (!parser->astGenerator().isDeclarationList(target))
         return emitAssignment(target, ParseNodeKind::Assign, nullptr); // ... ITERVAL
 
     // Otherwise, per-loop initialization is (possibly) declaration
@@ -7137,7 +7285,7 @@ BytecodeEmitter::emitInitializeForInOrOfTarget(ParseNode* forHead)
         return false;
 
     MOZ_ASSERT(target->isForLoopDeclaration());
-    target = parser.singleBindingFromDeclaration(target);
+    target = parser->astGenerator().singleBindingFromDeclaration(target);
 
     if (target->isKind(ParseNodeKind::Name)) {
         auto emitSwapScopeAndRhs = [](BytecodeEmitter* bce, const NameLocation&,
@@ -7377,8 +7525,8 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitte
     // Annex B: Evaluate the var-initializer expression if present.
     // |for (var i = initializer in expr) { ... }|
     ParseNode* forInTarget = forInHead->pn_kid1;
-    if (parser.isDeclarationList(forInTarget)) {
-        ParseNode* decl = parser.singleBindingFromDeclaration(forInTarget);
+    if (parser->astGenerator().isDeclarationList(forInTarget)) {
+        ParseNode* decl = parser->astGenerator().singleBindingFromDeclaration(forInTarget);
         if (decl->isKind(ParseNodeKind::Name)) {
             if (ParseNode* initializer = decl->expr()) {
                 MOZ_ASSERT(forInTarget->isKind(ParseNodeKind::Var),
@@ -7649,7 +7797,7 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn, EmitterScope* headLexicalEmitterSc
             return false;
 
         /* Restore the absolute line number for source note readers. */
-        uint32_t lineNum = parser.tokenStream().srcCoords.lineNum(pn->pn_pos.end);
+        uint32_t lineNum = parser->errorReporter().lineAt(pn->pn_pos.end);
         if (currentLine() != lineNum) {
             if (!newSrcNote2(SRC_SETLINE, ptrdiff_t(lineNum)))
                 return false;
@@ -7795,8 +7943,7 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             // fact. If we attempt to compile the outer script again, the
             // static scope chain will be newly allocated and will mismatch
             // the previously compiled LazyScript's.
-            ScriptSourceObject* source = &script->sourceObject()->as<ScriptSourceObject>();
-            fun->lazyScript()->setEnclosingScopeAndSource(innermostScope(), source);
+            fun->lazyScript()->setEnclosingScope(innermostScope());
             if (emittingRunOnceLambda)
                 fun->lazyScript()->setTreatAsRunOnce();
         } else {
@@ -7805,8 +7952,8 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
             // Inherit most things (principals, version, etc) from the
             // parent.  Use default values for the rest.
             Rooted<JSScript*> parent(cx, script);
-            MOZ_ASSERT(parent->mutedErrors() == parser.options().mutedErrors());
-            const TransitiveCompileOptions& transitiveOptions = parser.options();
+            MOZ_ASSERT(parent->mutedErrors() == parser->options().mutedErrors());
+            const TransitiveCompileOptions& transitiveOptions = parser->options();
             CompileOptions options(cx, transitiveOptions);
 
             Rooted<JSObject*> sourceObject(cx, script->sourceObject());
@@ -8091,8 +8238,8 @@ BytecodeEmitter::emitWhile(ParseNode* pn)
     // want to emit the line note after the initial goto, so that
     // "cont" stops on each iteration -- but without a stop before the
     // first iteration.
-    if (parser.tokenStream().srcCoords.lineNum(pn->pn_pos.begin) ==
-        parser.tokenStream().srcCoords.lineNum(pn->pn_pos.end))
+    if (parser->errorReporter().lineAt(pn->pn_pos.begin) ==
+        parser->errorReporter().lineAt(pn->pn_pos.end))
     {
         if (!updateSourceCoordNotes(pn->pn_pos.begin))
             return false;
@@ -8701,9 +8848,6 @@ BytecodeEmitter::emitExpressionStatement(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isKind(ParseNodeKind::ExpressionStatement));
 
-    if (!updateSourceCoordNotes(pn->pn_pos.begin))
-        return false;
-
     /*
      * Top-level or called-from-a-native JS_Execute/EvaluateScript,
      * debugger, and eval frames may need the value of the ultimate
@@ -8743,6 +8887,8 @@ BytecodeEmitter::emitExpressionStatement(ParseNode* pn)
         JSOp op = wantval ? JSOP_SETRVAL : JSOP_POP;
         ValueUsage valueUsage = wantval ? ValueUsage::WantValue : ValueUsage::IgnoreValue;
         MOZ_ASSERT_IF(expr->isKind(ParseNodeKind::Assign), expr->isOp(JSOP_NOP));
+        if (!updateSourceCoordNotes(pn->pn_pos.begin))
+            return false;
         if (!emitTree(expr, valueUsage))
             return false;
         if (!emit1(op))
@@ -9181,7 +9327,7 @@ BytecodeEmitter::emitCallee(ParseNode* callee, ParseNode* call, bool* callop)
         break;
       case ParseNodeKind::SuperBase:
         MOZ_ASSERT(call->isKind(ParseNodeKind::SuperCall));
-        MOZ_ASSERT(parser.isSuperBase(callee));
+        MOZ_ASSERT(parser->astGenerator().isSuperBase(callee));
         if (!emit1(JSOP_SUPERFUN))
             return false;
         break;
@@ -9252,7 +9398,7 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn, ValueUsage valueUsage /* = ValueUs
     uint32_t argc = pn->pn_count - 1;
 
     if (argc >= ARGC_LIMIT) {
-        parser.reportError(callop ? JSMSG_TOO_MANY_FUN_ARGS : JSMSG_TOO_MANY_CON_ARGS);
+        reportError(pn, callop ? JSMSG_TOO_MANY_FUN_ARGS : JSMSG_TOO_MANY_CON_ARGS);
         return false;
     }
 
@@ -9396,7 +9542,7 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn, ValueUsage valueUsage /* = ValueUs
         pn->isOp(JSOP_SPREADEVAL) ||
         pn->isOp(JSOP_STRICTSPREADEVAL))
     {
-        uint32_t lineNum = parser.tokenStream().srcCoords.lineNum(pn->pn_pos.begin);
+        uint32_t lineNum = parser->errorReporter().lineAt(pn->pn_pos.begin);
         if (!emitUint32Operand(JSOP_LINENO, lineNum))
             return false;
     }
@@ -9836,7 +9982,7 @@ BytecodeEmitter::emitObject(ParseNode* pn)
 bool
 BytecodeEmitter::replaceNewInitWithNewObject(JSObject* obj, ptrdiff_t offset)
 {
-    ObjectBox* objbox = parser.newObjectBox(obj);
+    ObjectBox* objbox = parser->newObjectBox(obj);
     if (!objbox)
         return false;
 
@@ -9885,7 +10031,7 @@ BytecodeEmitter::emitArrayLiteral(ParseNode* pn)
                 MOZ_ASSERT(obj->is<ArrayObject>() &&
                            obj->as<ArrayObject>().denseElementsAreCopyOnWrite());
 
-                ObjectBox* objbox = parser.newObjectBox(obj);
+                ObjectBox* objbox = parser->newObjectBox(obj);
                 if (!objbox)
                     return false;
 
@@ -11125,7 +11271,7 @@ bool
 BytecodeEmitter::setSrcNoteOffset(unsigned index, unsigned which, ptrdiff_t offset)
 {
     if (!SN_REPRESENTABLE_OFFSET(offset)) {
-        parser.reportError(JSMSG_NEED_DIET, js_script_str);
+        reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
         return false;
     }
 

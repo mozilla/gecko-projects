@@ -15,6 +15,7 @@
 #include "nsCOMArray.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/layers/APZUtils.h"
 #include "nsIFrame.h"
 #include "Units.h"
 #include "WheelHandlingHelper.h"          // for WheelDeltaAdjustmentStrategy
@@ -43,6 +44,7 @@ class WheelTransaction;
 namespace dom {
 class DataTransfer;
 class Element;
+class Selection;
 class TabParent;
 } // namespace dom
 
@@ -146,8 +148,9 @@ public:
    *                  affect the return value.
    */
   bool SetContentState(nsIContent* aContent, EventStates aState);
-  void ContentRemoved(nsIDocument* aDocument, nsIContent* aMaybeContainer,
-                      nsIContent* aContent);
+
+  void NativeAnonymousContentRemoved(nsIContent* aAnonContent);
+  void ContentRemoved(nsIDocument* aDocument, nsIContent* aContent);
 
   bool EventStatusOK(WidgetGUIEvent* aEvent);
 
@@ -306,8 +309,8 @@ public:
 
   static bool IsRemoteTarget(nsIContent* aTarget);
 
-  // Returns true if the given WidgetWheelEvent will resolve to a scroll action.
-  static bool WheelEventIsScrollAction(const WidgetWheelEvent* aEvent);
+  // Returns the kind of APZ action the given WidgetWheelEvent will perform.
+  static Maybe<layers::APZWheelAction> APZWheelActionFor(const WidgetWheelEvent* aEvent);
 
   // For some kinds of scrollings, the delta values of WidgetWheelEvent are
   // possbile to be adjusted. This function is used to detect such scrollings
@@ -586,7 +589,8 @@ protected:
       // original values. For more details, refer to
       // mozilla::WheelDeltaAdjustmentStrategy::eHorizontalize
       ACTION_HORIZONTALIZED_SCROLL,
-      ACTION_LAST = ACTION_HORIZONTALIZED_SCROLL,
+      ACTION_PINCH_ZOOM,
+      ACTION_LAST = ACTION_PINCH_ZOOM,
       // Following actions are used only by internal processing.  So, cannot
       // specified by prefs.
       ACTION_SEND_TO_PLUGIN,
@@ -1023,7 +1027,7 @@ protected:
   void DetermineDragTargetAndDefaultData(nsPIDOMWindowOuter* aWindow,
                                          nsIContent* aSelectionTarget,
                                          dom::DataTransfer* aDataTransfer,
-                                         nsISelection** aSelection,
+                                         dom::Selection** aSelection,
                                          nsIContent** aTargetNode,
                                          nsACString& aPrincipalURISpec);
 
@@ -1043,7 +1047,7 @@ protected:
                           WidgetDragEvent* aDragEvent,
                           dom::DataTransfer* aDataTransfer,
                           nsIContent* aDragTarget,
-                          nsISelection* aSelection,
+                          dom::Selection* aSelection,
                           const nsACString& aPrincipalURISpec);
 
   bool IsTrackingDragGesture ( ) const { return mGestureDownContent != nullptr; }
@@ -1085,6 +1089,17 @@ protected:
   void HandleQueryContentEvent(WidgetQueryContentEvent* aEvent);
 
 private:
+  // Removes a node from the :hover / :active chain if needed, notifying if the
+  // node is not a NAC subtree.
+  //
+  // Only meant to be called from ContentRemoved and
+  // NativeAnonymousContentRemoved.
+  void RemoveNodeFromChainIfNeeded(EventStates aState,
+                                   nsIContent* aContentRemoved,
+                                   bool aNotify);
+
+  bool IsEventOutsideDragThreshold(WidgetInputEvent* aEvent) const;
+
   static inline void DoStateChange(dom::Element* aElement,
                                    EventStates aState, bool aAddState);
   static inline void DoStateChange(nsIContent* aContent, EventStates aState,

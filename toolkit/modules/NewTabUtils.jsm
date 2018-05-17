@@ -288,8 +288,8 @@ var AllPages = {
     this._addObserver = function() {};
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference])
 };
 
 /**
@@ -616,8 +616,7 @@ var PlacesProvider = {
 
     // Execute the query.
     let query = PlacesUtils.history.getNewQuery();
-    let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase);
-    db.asyncExecuteLegacyQuery(query, options, callback);
+    PlacesUtils.history.asyncExecuteLegacyQuery(query, options, callback);
   },
 
   /**
@@ -730,8 +729,8 @@ var PlacesProvider = {
     }
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsINavHistoryObserver,
+                                          Ci.nsISupportsWeakReference]),
 };
 
 /**
@@ -1933,8 +1932,8 @@ var Links = {
     this._addObserver = function() {};
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference])
 };
 
 Links.compareLinks = Links.compareLinks.bind(Links);

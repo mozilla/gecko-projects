@@ -13,6 +13,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/Telemetry.h"
 #include "nsNetCID.h"
 #include "nsPrintfCString.h"
 #include "XPCJSMemoryReporter.h"
@@ -734,7 +735,7 @@ nsWindowMemoryReporter::Observe(nsISupports *aSubject, const char *aTopic,
 void
 nsWindowMemoryReporter::ObserveDOMWindowDetached(nsGlobalWindowInner* aWindow)
 {
-  nsWeakPtr weakWindow = do_GetWeakReference(static_cast<nsIDOMEventTarget*>(aWindow));
+  nsWeakPtr weakWindow = do_GetWeakReference(aWindow);
   if (!weakWindow) {
     NS_WARNING("Couldn't take weak reference to a window?");
     return;
@@ -900,6 +901,9 @@ nsWindowMemoryReporter::CheckForGhostWindows(
       }
     }
   }
+
+  Telemetry::ScalarSetMaximum(Telemetry::ScalarID::MEMORYREPORTER_MAX_GHOST_WINDOWS,
+                              mGhostWindowCount);
 }
 
 /* static */ int64_t

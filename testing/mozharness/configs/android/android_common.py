@@ -8,7 +8,6 @@ import os
 config = {
     "default_actions": [
         'clobber',
-        'read-buildbot-config',
         'setup-avds',
         'start-emulator',
         'download-and-extract',
@@ -22,10 +21,8 @@ config = {
     "hostutils_manifest_path": "testing/config/tooltool-manifests/linux64/hostutils.manifest",
     "avds_dir": "/builds/worker/workspace/build/.android",
     "minidump_stackwalk_path": "/usr/local/bin/linux64-minidump_stackwalk",
-    "find_links": [
-        "http://pypi.pub.build.mozilla.org/pub",
-    ],
-    "pip_index": False,
+    "marionette_address": "localhost:2828",
+    "marionette_test_manifest": "unit-tests.ini",
 
     "suite_definitions": {
         "mochitest": {
@@ -169,6 +166,25 @@ config = {
             ],
             "tests": ["tests/layout/reftests/reftest.list",],
         },
+        "reftest-fonts": {
+            "run_filename": "remotereftest.py",
+            "testsdir": "reftest",
+            "options": [
+                "--app=%(app)s",
+                "--ignore-window-size",
+                "--remote-webserver=%(remote_webserver)s",
+                "--xre-path=%(xre_path)s",
+                "--utility-path=%(utility_path)s",
+                "--httpd-path", "%(modules_dir)s",
+                "--symbols-path=%(symbols_path)s",
+                "--extra-profile-file=fonts",
+                "--extra-profile-file=hyphenation",
+                "--suite=reftest",
+                "--log-raw=%(raw_log_file)s",
+                "--log-errorsummary=%(error_summary_file)s",
+            ],
+            "tests": ["tests/layout/reftests/reftest_fonts.list",],
+        },
         "crashtest": {
             "run_filename": "remotereftest.py",
             "testsdir": "reftest",
@@ -253,7 +269,8 @@ config = {
                 "--address=%(address)s",
                 "%(test_manifest)s",
                 "--disable-e10s",
-                "--gecko-log=%(gecko_log)s",
+                "--gecko-log=-",
+                "-vv",
                 "--log-raw=%(raw_log_file)s",
                 "--log-errorsummary=%(error_summary_file)s",
                 "--symbols-path=%(symbols_path)s",
@@ -266,6 +283,16 @@ config = {
             "options": [
                 "--utility-path=%(utility_path)s",
                 "--symbols-path=%(symbols_path)s",
+            ],
+        },
+        "geckoview-junit": {
+            "run_filename": "runjunit.py",
+            "testsdir": "mochitest",
+            "options": [
+                "--certificate-path=%(certs_path)s",
+                "--remote-webserver=%(remote_webserver)s",
+                "--symbols-path=%(symbols_path)s",
+                "--utility-path=%(utility_path)s",
             ],
         },
 

@@ -133,7 +133,10 @@ getUpdateRequirements(const RefPtr<nsNavHistoryQuery>& aQuery,
   // and we are not a bookmark query we must requery. This
   // is because we can't generally know if any given addition/change causes
   // the item to be in the top N items in the database.
-  if (aOptions->MaxResults() > 0)
+  uint16_t sortingMode = aOptions->SortingMode();
+  if (aOptions->MaxResults() > 0 &&
+      sortingMode != nsINavHistoryQueryOptions::SORT_BY_DATE_ASCENDING &&
+      sortingMode != nsINavHistoryQueryOptions::SORT_BY_DATE_DESCENDING)
     return QUERYUPDATE_COMPLEX;
 
   if (domainBasedItems)
@@ -2056,7 +2059,8 @@ nsNavHistoryQueryResultNode::GetHasChildren(bool* aHasChildren)
       resultType == nsINavHistoryQueryOptions::RESULTS_AS_SITE_QUERY) {
     nsNavHistory* history = nsNavHistory::GetHistoryService();
     NS_ENSURE_TRUE(history, NS_ERROR_OUT_OF_MEMORY);
-    return history->GetHasHistoryEntries(aHasChildren);
+    *aHasChildren = history->hasHistoryEntries();
+    return NS_OK;
   }
 
   //XXX: For other containers queries we must:
@@ -2436,6 +2440,10 @@ nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
 {
   if (aHidden && !mOptions->IncludeHidden())
     return NS_OK;
+  // Skip the notification if the query is filtered by specific transition types
+  // and this visit has a different one.
+  if (mTransitions.Length() > 0 && !mTransitions.Contains(aTransitionType))
+    return NS_OK;
 
   nsNavHistoryResult* result = GetResult();
   NS_ENSURE_STATE(result);
@@ -2496,11 +2504,6 @@ nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
     }
 
     case QUERYUPDATE_SIMPLE: {
-      // If the query is filtered by some transitions, skip the
-      // update if aTransitionType doesn't match any of them.
-      if (mTransitions.Length() > 0 && !mTransitions.Contains(aTransitionType))
-        return NS_OK;
-
       // The history service can tell us whether the new item should appear
       // in the result.  We first have to construct a node for it to check.
       RefPtr<nsNavHistoryResultNode> addition;
@@ -2514,6 +2517,25 @@ nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
       addition->mTransitionType = aTransitionType;
       if (!evaluateQueryForNode(mQuery, mOptions, addition))
         return NS_OK; // don't need to include in our query
+
+      // Optimization for a common case: if the query has maxResults and is
+      // sorted by date, get the current boundaries and check if the added visit
+      // would fit.
+      // Later, we may have to remove the last child to respect maxResults.
+      if (mOptions->MaxResults() &&
+          static_cast<uint32_t>(mChildren.Count()) >= mOptions->MaxResults()) {
+        uint16_t sortType = GetSortType();
+        if (sortType == nsINavHistoryQueryOptions::SORT_BY_DATE_ASCENDING &&
+            aTime > std::max(mChildren[0]->mTime,
+                             mChildren[mChildren.Count() -1]->mTime)) {
+          return NS_OK;
+        }
+        if (sortType == nsINavHistoryQueryOptions::SORT_BY_DATE_DESCENDING &&
+            aTime < std::min(mChildren[0]->mTime,
+                             mChildren[mChildren.Count() -1]->mTime)) {
+          return NS_OK;
+        }
+      }
 
       if (mOptions->ResultType() == nsNavHistoryQueryOptions::RESULTS_AS_VISIT) {
         // If this is a visit type query, just insert the new visit.  We never
@@ -2537,6 +2559,12 @@ nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
           rv = InsertSortedChild(addition);
           NS_ENSURE_SUCCESS(rv, rv);
         }
+      }
+
+      // Trim the children if necessary.
+      if (mOptions->MaxResults() &&
+          static_cast<uint32_t>(mChildren.Count()) > mOptions->MaxResults()) {
+        mChildren.RemoveObjectAt(mChildren.Count() - 1);
       }
 
       if (aAdded)
@@ -2771,8 +2799,9 @@ nsNavHistoryQueryResultNode::OnDeleteVisits(nsIURI* aURI,
                                             uint16_t aReason,
                                             uint32_t aTransitionType)
 {
-  NS_PRECONDITION(mOptions->QueryType() == nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY,
-                  "Bookmarks queries should not get a OnDeleteVisits notification");
+  MOZ_ASSERT(mOptions->QueryType() == nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY,
+             "Bookmarks queries should not get a OnDeleteVisits notification");
+
   if (aVisitTime == 0) {
     // All visits for this uri have been removed, but the uri won't be removed
     // from the databse, most likely because it's a bookmark.  For a history
@@ -3003,7 +3032,8 @@ nsNavHistoryQueryResultNode::OnItemMoved(int64_t aFolder,
                                          const nsACString& aGUID,
                                          const nsACString& aOldParentGUID,
                                          const nsACString& aNewParentGUID,
-                                         uint16_t aSource)
+                                         uint16_t aSource,
+                                         const nsACString& aURI)
 {
   // 1. The query cannot be affected by the item's position
   // 2. For the time being, we cannot optimize this not to update
@@ -3962,12 +3992,23 @@ nsNavHistoryFolderResultNode::OnItemMoved(int64_t aItemId,
                                           const nsACString& aGUID,
                                           const nsACString& aOldParentGUID,
                                           const nsACString& aNewParentGUID,
-                                          uint16_t aSource)
+                                          uint16_t aSource,
+                                          const nsACString& aURI)
 {
   NS_ASSERTION(aOldParent == mTargetFolderItemId || aNewParent == mTargetFolderItemId,
                "Got a bookmark message that doesn't belong to us");
 
   RESTART_AND_RETURN_IF_ASYNC_PENDING();
+
+  bool excludeItems = mOptions->ExcludeItems();
+  if (excludeItems &&
+      (aItemType == nsINavBookmarksService::TYPE_SEPARATOR ||
+       (aItemType == nsINavBookmarksService::TYPE_BOOKMARK &&
+        !StringBeginsWith(aURI, NS_LITERAL_CSTRING("place:"))))) {
+    // This is a bookmark or a separator, so we don't need to handle this if
+    // we're excluding items.
+    return NS_OK;
+  }
 
   uint32_t index;
   nsNavHistoryResultNode* node = FindChildById(aItemId, &index);
@@ -3980,12 +4021,6 @@ nsNavHistoryFolderResultNode::OnItemMoved(int64_t aItemId,
     return NS_OK;
   if (!node && aOldParent == mTargetFolderItemId)
     return NS_OK;
-
-  bool excludeItems = mOptions->ExcludeItems();
-  if (node && excludeItems && (node->IsURI() || node->IsSeparator())) {
-    // Don't update items when we aren't displaying them.
-    return NS_OK;
-  }
 
   if (!StartIncrementalUpdate())
     return NS_OK; // entire container was refreshed for us
@@ -4641,25 +4676,26 @@ nsNavHistoryResult::OnItemMoved(int64_t aItemId,
                                 const nsACString& aGUID,
                                 const nsACString& aOldParentGUID,
                                 const nsACString& aNewParentGUID,
-                                uint16_t aSource)
+                                uint16_t aSource,
+                                const nsACString& aURI)
 {
   ENUMERATE_BOOKMARK_FOLDER_OBSERVERS(aOldParent,
       OnItemMoved(aItemId, aOldParent, aOldIndex, aNewParent, aNewIndex,
-                  aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource));
+                  aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource, aURI));
   if (aNewParent != aOldParent) {
     ENUMERATE_BOOKMARK_FOLDER_OBSERVERS(aNewParent,
         OnItemMoved(aItemId, aOldParent, aOldIndex, aNewParent, aNewIndex,
-                    aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource));
+                    aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource, aURI));
   }
   ENUMERATE_ALL_BOOKMARKS_OBSERVERS(OnItemMoved(aItemId, aOldParent, aOldIndex,
                                                 aNewParent, aNewIndex,
                                                 aItemType, aGUID,
                                                 aOldParentGUID,
-                                                aNewParentGUID, aSource));
+                                                aNewParentGUID, aSource, aURI));
   ENUMERATE_HISTORY_OBSERVERS(OnItemMoved(aItemId, aOldParent, aOldIndex,
                                           aNewParent, aNewIndex, aItemType,
                                           aGUID, aOldParentGUID,
-                                          aNewParentGUID, aSource));
+                                          aNewParentGUID, aSource, aURI));
   return NS_OK;
 }
 
@@ -4681,12 +4717,11 @@ nsNavHistoryResult::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
   ENUMERATE_HISTORY_OBSERVERS(OnVisit(aURI, aVisitId, aTime, aTransitionType,
                                       aHidden, &added));
 
-  // When we add visits through UpdatePlaces, we don't bother telling
-  // the world that the title 'changed' from nothing to the first title
-  // we ever see for a history entry. Our consumers here might still
-  // care, though, so we have to tell them - but only for the first
-  // visit we add. For subsequent changes, updateplaces will dispatch
-  // ontitlechanged notifications as normal.
+  // When we add visits, we don't bother telling the world that the title
+  // 'changed' from nothing to the first title we ever see for a history entry.
+  // Our consumers here might still care, though, so we have to tell them, but
+  // only for the first visit we add. Subsequent changes will get an usual
+  // ontitlechanged notification.
   if (!aLastKnownTitle.IsVoid() && aVisitCount == 1) {
     ENUMERATE_HISTORY_OBSERVERS(OnTitleChanged(aURI, aLastKnownTitle, aGUID));
   }

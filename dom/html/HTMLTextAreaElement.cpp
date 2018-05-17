@@ -133,7 +133,7 @@ HTMLTextAreaElement::Select()
     return;
   }
 
-  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
 
   RefPtr<nsPresContext> presContext = GetPresContext(eForComposedDoc);
   if (state == eInactiveWindow) {
@@ -156,9 +156,7 @@ HTMLTextAreaElement::Select()
       fm->SetFocus(this, nsIFocusManager::FLAG_NOSCROLL);
 
       // ensure that the element is actually focused
-      nsCOMPtr<nsIDOMElement> focusedElement;
-      fm->GetFocusedElement(getter_AddRefs(focusedElement));
-      if (SameCOMIdentity(static_cast<nsIDOMNode*>(this), focusedElement)) {
+      if (this == fm->GetFocusedElement()) {
         // Now Select all the text!
         SelectAll(presContext);
       }
@@ -261,18 +259,6 @@ HTMLTextAreaElement::CreateEditor()
   return mState.PrepareEditor();
 }
 
-NS_IMETHODIMP_(Element*)
-HTMLTextAreaElement::GetRootEditorNode()
-{
-  return mState.GetRootNode();
-}
-
-NS_IMETHODIMP_(Element*)
-HTMLTextAreaElement::GetPlaceholderNode()
-{
-  return mState.GetPlaceholderNode();
-}
-
 NS_IMETHODIMP_(void)
 HTMLTextAreaElement::UpdateOverlayTextVisibility(bool aNotify)
 {
@@ -283,12 +269,6 @@ NS_IMETHODIMP_(bool)
 HTMLTextAreaElement::GetPlaceholderVisibility()
 {
   return mState.GetPlaceholderVisibility();
-}
-
-NS_IMETHODIMP_(Element*)
-HTMLTextAreaElement::GetPreviewNode()
-{
-  return mState.GetPreviewNode();
 }
 
 NS_IMETHODIMP_(void)

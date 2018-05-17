@@ -14,7 +14,6 @@
 #include "mozilla/EditorUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEditRules.h"
-#include "mozilla/dom/CSSPrimitiveValueBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/EventTarget.h"
@@ -28,7 +27,6 @@
 #include "nsGkAtoms.h"
 #include "nsIContent.h"
 #include "nsROCSSPrimitiveValue.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMEventListener.h"
 #include "nsDOMCSSRGBColor.h"
 #include "nsIDOMWindow.h"
@@ -306,6 +304,8 @@ HTMLEditor::ShowGrabber(Element& aElement)
   mGrabber = CreateGrabber(*parentContent);
   NS_ENSURE_TRUE(mGrabber, NS_ERROR_FAILURE);
 
+  mHasShownGrabber = true;
+
   // and set its position
   return RefreshGrabber();
 }
@@ -491,9 +491,10 @@ HTMLEditor::SetPositionToAbsolute(Element& aElement)
     if (NS_WARN_IF(!selection)) {
       return NS_ERROR_FAILURE;
     }
-    RefPtr<Element> newBRElement =
-      CreateBRImpl(*selection, EditorRawDOMPoint(parentNode, 0), eNone);
-    if (NS_WARN_IF(!newBRElement)) {
+    RefPtr<Element> newBrElement =
+      InsertBrElementWithTransaction(*selection,
+                                     EditorRawDOMPoint(parentNode, 0));
+    if (NS_WARN_IF(!newBrElement)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -528,7 +529,7 @@ HTMLEditor::SetPositionToStatic(Element& aElement)
     NS_ENSURE_TRUE(htmlRules, NS_ERROR_FAILURE);
     nsresult rv = htmlRules->MakeSureElemStartsOrEndsOnCR(aElement);
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = RemoveContainer(&aElement);
+    rv = RemoveContainerWithTransaction(aElement);
     NS_ENSURE_SUCCESS(rv, rv);
   }
   return NS_OK;
@@ -571,16 +572,6 @@ HTMLEditor::SetTopAndLeft(Element& aElement,
   AutoPlaceholderBatch batchIt(this);
   mCSSEditUtils->SetCSSPropertyPixels(aElement, *nsGkAtoms::left, aX);
   mCSSEditUtils->SetCSSPropertyPixels(aElement, *nsGkAtoms::top, aY);
-}
-
-// self-explanatory
-NS_IMETHODIMP
-HTMLEditor::GetPositionedElement(nsIDOMElement** aReturn)
-{
-  nsCOMPtr<nsIDOMElement> ret =
-    static_cast<nsIDOMElement*>(GetAsDOMNode(GetPositionedElement()));
-  ret.forget(aReturn);
-  return NS_OK;
 }
 
 nsresult

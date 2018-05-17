@@ -232,7 +232,7 @@ HistoryStore.prototype = {
       // We want to notify history observers that a batch operation is underway
       // so they don't do lots of work for each incoming record.
       let observers = PlacesUtils.history.getObservers();
-      function notifyHistoryObservers(notification) {
+      const notifyHistoryObservers = (notification) => {
         for (let observer of observers) {
           try {
             observer[notification]();
@@ -242,7 +242,7 @@ HistoryStore.prototype = {
             this._log.info("history observer failed", ex);
           }
         }
-      }
+      };
       notifyHistoryObservers("onBeginUpdateBatch");
       try {
         if (toRemove.length) {
@@ -423,7 +423,7 @@ HistoryStore.prototype = {
     record.visits.length = k; // truncate array
 
     // No update if there aren't any visits to apply.
-    // mozIAsyncHistory::updatePlaces() wants at least one visit.
+    // History wants at least one visit.
     // In any case, the only thing we could change would be the title
     // and that shouldn't change without a visit.
     if (!record.visits.length) {
@@ -490,7 +490,7 @@ HistoryTracker.prototype = {
     PlacesUtils.history.removeObserver(this);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavHistoryObserver,
     Ci.nsISupportsWeakReference
   ]),

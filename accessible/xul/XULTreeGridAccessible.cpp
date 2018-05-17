@@ -20,8 +20,10 @@
 #include "nsIPersistentProperties2.h"
 #include "nsITreeSelection.h"
 #include "nsComponentManagerUtils.h"
+#include "mozilla/dom/Element.h"
 
 using namespace mozilla::a11y;
+using namespace mozilla;
 
 XULTreeGridAccessible::~XULTreeGridAccessible()
 {
@@ -31,7 +33,7 @@ XULTreeGridAccessible::~XULTreeGridAccessible()
 // XULTreeGridAccessible: Table
 
 uint32_t
-XULTreeGridAccessible::ColCount()
+XULTreeGridAccessible::ColCount() const
 {
   return nsCoreUtils::GetSensibleColumnCount(mTree);
 }
@@ -207,7 +209,7 @@ XULTreeGridAccessible::UnselectRow(uint32_t aRowIdx)
 // XULTreeGridAccessible: Accessible implementation
 
 role
-XULTreeGridAccessible::NativeRole()
+XULTreeGridAccessible::NativeRole() const
 {
   nsCOMPtr<nsITreeColumns> treeColumns;
   mTree->GetColumns(getter_AddRefs(treeColumns));
@@ -285,13 +287,13 @@ XULTreeGridRowAccessible::Shutdown()
 }
 
 role
-XULTreeGridRowAccessible::NativeRole()
+XULTreeGridRowAccessible::NativeRole() const
 {
   return roles::ROW;
 }
 
 ENameValueFlag
-XULTreeGridRowAccessible::Name(nsString& aName)
+XULTreeGridRowAccessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -369,7 +371,7 @@ XULTreeGridRowAccessible::ChildCount() const
 XULTreeGridCellAccessible*
 XULTreeGridRowAccessible::GetCellAccessible(nsITreeColumn* aColumn) const
 {
-  NS_PRECONDITION(aColumn, "No tree column!");
+  MOZ_ASSERT(aColumn, "No tree column!");
 
   void* key = static_cast<void*>(aColumn);
   XULTreeGridCellAccessible* cachedCell = mAccessibleCache.GetWeak(key);
@@ -474,7 +476,7 @@ XULTreeGridCellAccessible::FocusedChild()
 }
 
 ENameValueFlag
-XULTreeGridCellAccessible::Name(nsString& aName)
+XULTreeGridCellAccessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -495,20 +497,22 @@ XULTreeGridCellAccessible::Name(nsString& aName)
 }
 
 nsIntRect
-XULTreeGridCellAccessible::Bounds() const
+XULTreeGridCellAccessible::BoundsInCSSPixels() const
 {
   // Get bounds for tree cell and add x and y of treechildren element to
   // x and y of the cell.
   nsCOMPtr<nsIBoxObject> boxObj = nsCoreUtils::GetTreeBodyBoxObject(mTree);
-  if (!boxObj)
+  if (!boxObj) {
     return nsIntRect();
+  }
 
   int32_t x = 0, y = 0, width = 0, height = 0;
   nsresult rv = mTree->GetCoordsForCellItem(mRow, mColumn,
                                             NS_LITERAL_STRING("cell"),
                                             &x, &y, &width, &height);
-  if (NS_FAILED(rv))
+  if (NS_FAILED(rv)) {
     return nsIntRect();
+  }
 
   int32_t tcX = 0, tcY = 0;
   boxObj->GetScreenX(&tcX);
@@ -516,15 +520,22 @@ XULTreeGridCellAccessible::Bounds() const
   x += tcX;
   y += tcY;
 
+  return nsIntRect(x, y, width, height);
+}
+
+nsRect
+XULTreeGridCellAccessible::BoundsInAppUnits() const
+{
+  nsIntRect bounds = BoundsInCSSPixels();
   nsPresContext* presContext = mDoc->PresContext();
-  return nsIntRect(presContext->CSSPixelsToDevPixels(x),
-                   presContext->CSSPixelsToDevPixels(y),
-                   presContext->CSSPixelsToDevPixels(width),
-                   presContext->CSSPixelsToDevPixels(height));
+  return nsRect(presContext->CSSPixelsToAppUnits(bounds.X()),
+                presContext->CSSPixelsToAppUnits(bounds.Y()),
+                presContext->CSSPixelsToAppUnits(bounds.Width()),
+                presContext->CSSPixelsToAppUnits(bounds.Height()));
 }
 
 uint8_t
-XULTreeGridCellAccessible::ActionCount()
+XULTreeGridCellAccessible::ActionCount() const
 {
   bool isCycler = false;
   mColumn->GetCycler(&isCycler);
@@ -567,7 +578,7 @@ XULTreeGridCellAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULTreeGridCellAccessible::DoAction(uint8_t aIndex)
+XULTreeGridCellAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Click)
     return false;
@@ -622,11 +633,10 @@ XULTreeGridCellAccessible::RowIdx() const
 void
 XULTreeGridCellAccessible::ColHeaderCells(nsTArray<Accessible*>* aHeaderCells)
 {
-  nsCOMPtr<nsIDOMElement> columnElm;
+  RefPtr<dom::Element> columnElm;
   mColumn->GetElement(getter_AddRefs(columnElm));
 
-  nsCOMPtr<nsIContent> columnContent(do_QueryInterface(columnElm));
-  Accessible* headerCell = mDoc->GetAccessible(columnContent);
+  Accessible* headerCell = mDoc->GetAccessible(columnElm);
   if (headerCell)
     aHeaderCells->AppendElement(headerCell);
 }
@@ -672,13 +682,13 @@ XULTreeGridCellAccessible::NativeAttributes()
 }
 
 role
-XULTreeGridCellAccessible::NativeRole()
+XULTreeGridCellAccessible::NativeRole() const
 {
   return roles::GRID_CELL;
 }
 
 uint64_t
-XULTreeGridCellAccessible::NativeState()
+XULTreeGridCellAccessible::NativeState() const
 {
   if (!mTreeView)
     return states::DEFUNCT;
@@ -722,7 +732,7 @@ XULTreeGridCellAccessible::IndexInParent() const
 }
 
 Relation
-XULTreeGridCellAccessible::RelationByType(RelationType aType)
+XULTreeGridCellAccessible::RelationByType(RelationType aType) const
 {
   return Relation();
 }
@@ -795,7 +805,7 @@ XULTreeGridCellAccessible::GetSiblingAtOffset(int32_t aOffset,
 
 void
 XULTreeGridCellAccessible::DispatchClickEvent(nsIContent* aContent,
-                                              uint32_t aActionIndex)
+                                              uint32_t aActionIndex) const
 {
   if (IsDefunct())
     return;
@@ -817,16 +827,15 @@ XULTreeGridCellAccessible::IsEditable() const
   if (NS_FAILED(rv) || !isEditable)
     return false;
 
-  nsCOMPtr<nsIDOMElement> columnElm;
+  RefPtr<dom::Element> columnElm;
   mColumn->GetElement(getter_AddRefs(columnElm));
   if (!columnElm)
     return false;
 
-  nsCOMPtr<Element> columnContent(do_QueryInterface(columnElm));
-  if (!columnContent->AttrValueIs(kNameSpaceID_None,
-                                  nsGkAtoms::editable,
-                                  nsGkAtoms::_true,
-                                  eCaseMatters))
+  if (!columnElm->AttrValueIs(kNameSpaceID_None,
+                              nsGkAtoms::editable,
+                              nsGkAtoms::_true,
+                              eCaseMatters))
     return false;
 
   return mContent->AsElement()->AttrValueIs(kNameSpaceID_None,

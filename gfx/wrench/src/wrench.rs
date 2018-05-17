@@ -109,7 +109,7 @@ impl RenderNotifier for Notifier {
         self.update(false);
     }
 
-    fn new_document_ready(&self, _: DocumentId, scrolled: bool, _composite_needed: bool) {
+    fn new_frame_ready(&self, _: DocumentId, scrolled: bool, _composite_needed: bool) {
         self.update(!scrolled);
     }
 }
@@ -283,9 +283,9 @@ impl Wrench {
         render_mode: Option<FontRenderMode>,
         text: &str,
         size: Au,
-        origin: LayerPoint,
+        origin: LayoutPoint,
         flags: FontInstanceFlags,
-    ) -> (Vec<u32>, Vec<LayerPoint>, LayoutRect) {
+    ) -> (Vec<u32>, Vec<LayoutPoint>, LayoutRect) {
         // Map the string codepoints to glyph indices in this font.
         // Just drop any glyph that isn't present in this font.
         let indices: Vec<u32> = self.api
@@ -302,7 +302,7 @@ impl Wrench {
         for glyph_index in &indices {
             keys.push(GlyphKey::new(
                 *glyph_index,
-                LayerPoint::zero(),
+                LayoutPoint::zero(),
                 render_mode,
                 subpx_dir,
             ));
@@ -314,12 +314,12 @@ impl Wrench {
 
         let mut cursor = origin;
         let direction = if flags.contains(FontInstanceFlags::TRANSPOSE) {
-            LayerVector2D::new(
+            LayoutVector2D::new(
                 0.0,
                 if flags.contains(FontInstanceFlags::FLIP_Y) { -1.0 } else { 1.0 },
             )
         } else {
-            LayerVector2D::new(
+            LayoutVector2D::new(
                 if flags.contains(FontInstanceFlags::FLIP_X) { -1.0 } else { 1.0 },
                 0.0,
             )
@@ -467,6 +467,7 @@ impl Wrench {
         size: Au,
         flags: FontInstanceFlags,
         render_mode: Option<FontRenderMode>,
+        bg_color: Option<ColorU>,
     ) -> FontInstanceKey {
         let key = self.api.generate_font_instance_key();
         let mut update = ResourceUpdates::new();
@@ -474,6 +475,9 @@ impl Wrench {
         options.flags |= flags;
         if let Some(render_mode) = render_mode {
             options.render_mode = render_mode;
+        }
+        if let Some(bg_color) = bg_color {
+            options.bg_color = bg_color;
         }
         update.add_font_instance(key, font_key, size, Some(options), None, Vec::new());
         self.api.update_resources(update);
@@ -500,8 +504,8 @@ impl Wrench {
     pub fn send_lists(
         &mut self,
         frame_number: u32,
-        display_lists: Vec<(PipelineId, LayerSize, BuiltDisplayList)>,
-        scroll_offsets: &HashMap<ExternalScrollId, LayerPoint>,
+        display_lists: Vec<(PipelineId, LayoutSize, BuiltDisplayList)>,
+        scroll_offsets: &HashMap<ExternalScrollId, LayoutPoint>,
     ) {
         let root_background_color = Some(ColorF::new(1.0, 1.0, 1.0, 1.0));
 

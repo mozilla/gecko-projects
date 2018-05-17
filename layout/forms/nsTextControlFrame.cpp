@@ -23,11 +23,9 @@
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsLayoutUtils.h"
-#include "nsIDOMElement.h"
 #include "nsIPresShell.h"
 
 #include <algorithm>
-#include "nsIDOMNodeList.h" //for selection setting helper func
 #include "nsRange.h" //for selection setting helper func
 #include "nsINode.h"
 #include "nsPIDOMWindow.h" //needed for notify selection changed to update the menus ect.
@@ -453,6 +451,7 @@ nsTextControlFrame::CreateRootNode()
   MOZ_ASSERT(!mRootNode);
 
   mRootNode = CreateEmptyDiv(*this);
+  mRootNode->SetIsNativeAnonymousRoot();
 
   mMutationObserver = new nsAnonDivObserver(*this);
   mRootNode->AddMutationObserver(mMutationObserver);
@@ -759,20 +758,24 @@ void nsTextControlFrame::SetFocus(bool aOn, bool aRepaint)
   }
 
   nsISelectionController* selCon = txtCtrl->GetSelectionController();
-  if (!selCon)
+  if (!selCon) {
     return;
+  }
 
-  nsCOMPtr<nsISelection> ourSel;
-  selCon->GetSelection(nsISelectionController::SELECTION_NORMAL,
-    getter_AddRefs(ourSel));
-  if (!ourSel) return;
+  RefPtr<Selection> ourSel =
+    selCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  if (!ourSel) {
+    return;
+  }
 
   nsIPresShell* presShell = PresContext()->GetPresShell();
   RefPtr<nsCaret> caret = presShell->GetCaret();
-  if (!caret) return;
+  if (!caret) {
+    return;
+  }
 
   // Scroll the current selection into view
-  nsISelection *caretSelection = caret->GetSelection();
+  Selection* caretSelection = caret->GetSelection();
   const bool isFocusedRightNow = ourSel == caretSelection;
   if (!isFocusedRightNow) {
     // Don't scroll the current selection if we've been focused using the mouse.
@@ -803,7 +806,7 @@ void nsTextControlFrame::SetFocus(bool aOn, bool aRepaint)
 
   nsCOMPtr<nsISelectionController> selcon = do_QueryInterface(presShell);
   RefPtr<Selection> docSel =
-    selcon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+    selcon->GetSelection(nsISelectionController::SELECTION_NORMAL);
   if (!docSel) {
     return;
   }
@@ -882,16 +885,13 @@ nsTextControlFrame::SetSelectionInternal(nsINode* aStartNode,
   NS_ENSURE_TRUE(selCon, NS_ERROR_FAILURE);
 
   RefPtr<Selection> selection =
-    selCon->GetDOMSelection(nsISelectionController::SELECTION_NORMAL);
+    selCon->GetSelection(nsISelectionController::SELECTION_NORMAL);
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
-
-  nsCOMPtr<nsISelectionPrivate> selPriv = do_QueryObject(selection, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   nsDirection direction;
   if (aDirection == eNone) {
     // Preserve the direction
-    direction = selPriv->GetSelectionDirection();
+    direction = selection->GetDirection();
   } else {
     direction = (aDirection == eBackward) ? eDirPrevious : eDirNext;
   }
@@ -907,7 +907,7 @@ nsTextControlFrame::SetSelectionInternal(nsINode* aStartNode,
     return err.StealNSResult();
   }
 
-  selPriv->SetSelectionDirection(direction);
+  selection->SetDirection(direction);
   return rv;
 }
 
@@ -928,36 +928,24 @@ nsTextControlFrame::ScrollSelectionIntoView()
 }
 
 nsresult
-nsTextControlFrame::GetRootNodeAndInitializeEditor(nsIDOMElement **aRootElement)
-{
-  NS_ENSURE_ARG_POINTER(aRootElement);
-
-  RefPtr<TextEditor> textEditor = GetTextEditor();
-  if (!textEditor) {
-    return NS_OK;
-  }
-  return textEditor->GetRootElement(aRootElement);
-}
-
-nsresult
 nsTextControlFrame::SelectAllOrCollapseToEndOfText(bool aSelect)
 {
-  nsCOMPtr<nsIDOMElement> rootElement;
-  nsresult rv = GetRootNodeAndInitializeEditor(getter_AddRefs(rootElement));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv = EnsureEditorInitialized();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
-  nsCOMPtr<nsIContent> rootContent = do_QueryInterface(rootElement);
   nsCOMPtr<nsINode> rootNode;
-  rootNode = rootContent;
+  rootNode= mRootNode;
 
-  NS_ENSURE_TRUE(rootNode && rootContent, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(rootNode, NS_ERROR_FAILURE);
 
-  int32_t numChildren = rootContent->GetChildCount();
+  int32_t numChildren = mRootNode->GetChildCount();
 
   if (numChildren > 0) {
     // We never want to place the selection after the last
     // br under the root node!
-    nsIContent *child = rootContent->GetLastChild();
+    nsIContent *child = mRootNode->GetLastChild();
     if (child) {
       if (child->IsHTMLElement(nsGkAtoms::br)) {
         child = child->GetPreviousSibling();
@@ -1047,11 +1035,12 @@ nsTextControlFrame::OffsetToDOMPoint(uint32_t aOffset,
   *aResult = nullptr;
   *aPosition = 0;
 
-  nsCOMPtr<nsIDOMElement> rootElement;
-  nsresult rv = GetRootNodeAndInitializeEditor(getter_AddRefs(rootElement));
-  NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<nsINode> rootNode(do_QueryInterface(rootElement));
+  nsresult rv = EnsureEditorInitialized();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
+  RefPtr<Element> rootNode = mRootNode;
   NS_ENSURE_TRUE(rootNode, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsINodeList> nodeList = rootNode->ChildNodes();
@@ -1063,7 +1052,7 @@ nsTextControlFrame::OffsetToDOMPoint(uint32_t aOffset,
   Text* textNode = firstNode ? firstNode->GetAsText() : nullptr;
 
   if (length == 0) {
-    NS_IF_ADDREF(*aResult = rootNode);
+    rootNode.forget(aResult);
     *aPosition = 0;
   } else if (textNode) {
     uint32_t textLength = textNode->Length();
@@ -1272,9 +1261,9 @@ nsTextControlFrame::UpdateValueDisplay(bool aNotify,
   if (!IsSingleLineTextControl()) // textareas don't use this
     return NS_OK;
 
-  NS_PRECONDITION(mRootNode, "Must have a div content\n");
-  NS_PRECONDITION(!mEditorHasBeenInitialized,
-                  "Do not call this after editor has been initialized");
+  MOZ_ASSERT(mRootNode, "Must have a div content\n");
+  MOZ_ASSERT(!mEditorHasBeenInitialized,
+             "Do not call this after editor has been initialized");
 
   nsIContent* childContent = mRootNode->GetFirstChild();
   Text* textContent;
@@ -1352,13 +1341,10 @@ nsTextControlFrame::GetOwnedFrameSelection()
 UniquePtr<PresState>
 nsTextControlFrame::SaveState()
 {
-  nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
-  NS_ASSERTION(txtCtrl, "Content not a text control element");
-
-  nsIContent* rootNode = txtCtrl->GetRootEditorNode();
-  if (rootNode) {
+  if (mRootNode) {
     // Query the nsIStatefulFrame from the HTMLScrollFrame
-    nsIStatefulFrame* scrollStateFrame = do_QueryFrame(rootNode->GetPrimaryFrame());
+    nsIStatefulFrame* scrollStateFrame =
+      do_QueryFrame(mRootNode->GetPrimaryFrame());
     if (scrollStateFrame) {
       return scrollStateFrame->SaveState();
     }
@@ -1372,13 +1358,10 @@ nsTextControlFrame::RestoreState(PresState* aState)
 {
   NS_ENSURE_ARG_POINTER(aState);
 
-  nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
-  NS_ASSERTION(txtCtrl, "Content not a text control element");
-
-  nsIContent* rootNode = txtCtrl->GetRootEditorNode();
-  if (rootNode) {
+  if (mRootNode) {
     // Query the nsIStatefulFrame from the HTMLScrollFrame
-    nsIStatefulFrame* scrollStateFrame = do_QueryFrame(rootNode->GetPrimaryFrame());
+    nsIStatefulFrame* scrollStateFrame =
+      do_QueryFrame(mRootNode->GetPrimaryFrame());
     if (scrollStateFrame) {
       return scrollStateFrame->RestoreState(aState);
     }
@@ -1424,9 +1407,9 @@ nsTextControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   while (kid) {
     // If the frame is the placeholder or preview frame, we should only show
     // it if it has to be visible.
-    if (!((kid->GetContent() == txtCtrl->GetPlaceholderNode() &&
+    if (!((kid->GetContent() == mPlaceholderDiv &&
            !txtCtrl->GetPlaceholderVisibility()) ||
-          (kid->GetContent() == txtCtrl->GetPreviewNode() &&
+          (kid->GetContent() == mPreviewDiv &&
            !txtCtrl->GetPreviewVisibility()))) {
       BuildDisplayListForChild(aBuilder, kid, set, 0);
     }
@@ -1438,8 +1421,7 @@ mozilla::dom::Element*
 nsTextControlFrame::GetPseudoElement(CSSPseudoElementType aType)
 {
   if (aType == CSSPseudoElementType::placeholder) {
-    nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
-    return txtCtrl->GetPlaceholderNode();
+    return mPlaceholderDiv;
   }
 
   return nsContainerFrame::GetPseudoElement(aType);

@@ -43,19 +43,21 @@ using mozilla::TimeStamp;
 
 constexpr uintptr_t CanaryMagicValue = 0xDEADB15D;
 
-struct js::Nursery::FreeMallocedBuffersTask : public GCParallelTask
+struct js::Nursery::FreeMallocedBuffersTask : public GCParallelTaskHelper<FreeMallocedBuffersTask>
 {
-    explicit FreeMallocedBuffersTask(FreeOp* fop) : GCParallelTask(fop->runtime()), fop_(fop) {}
+    explicit FreeMallocedBuffersTask(FreeOp* fop)
+      : GCParallelTaskHelper(fop->runtime()),
+        fop_(fop) {}
     bool init() { return buffers_.init(); }
     void transferBuffersToFree(MallocedBuffersSet& buffersToFree,
                                const AutoLockHelperThreadState& lock);
-    ~FreeMallocedBuffersTask() override { join(); }
+    ~FreeMallocedBuffersTask() { join(); }
+
+    void run();
 
   private:
     FreeOp* fop_;
     MallocedBuffersSet buffers_;
-
-    virtual void run() override;
 };
 
 #ifdef JS_GC_ZEAL
@@ -676,6 +678,13 @@ js::Nursery::endProfile(ProfileKey key)
     totalDurations_[key] += profileDurations_[key];
 }
 
+bool
+js::Nursery::needIdleTimeCollection() const {
+    uint32_t threshold =
+        runtime()->gc.tunables.nurseryFreeThresholdForIdleCollection();
+    return minorGCRequested() || freeSpace() < threshold;
+}
+
 static inline bool
 IsFullStoreBufferReason(JS::gcreason::Reason reason)
 {
@@ -753,16 +762,21 @@ js::Nursery::collect(JS::gcreason::Reason reason)
         for (auto& entry : tenureCounts.entries) {
             if (entry.count >= 3000) {
                 ObjectGroup* group = entry.group;
-                if (group->canPreTenure()) {
-                    AutoCompartment ac(cx, group);
-                    group->setShouldPreTenure(cx);
+                AutoRealm ar(cx, group);
+                AutoSweepObjectGroup sweep(group);
+                if (group->canPreTenure(sweep)) {
+                    group->setShouldPreTenure(sweep, cx);
                     pretenureCount++;
                 }
             }
         }
     }
+
+    mozilla::Maybe<AutoTraceSession> session;
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         if (shouldPretenure && zone->allocNurseryStrings && zone->tenuredStrings >= 30 * 1000) {
+            if (!session.isSome())
+                session.emplace(rt, JS::HeapState::MinorCollecting);
             CancelOffThreadIonCompile(zone);
             bool preserving = zone->isPreservingCode();
             zone->setPreservingCode(false);
@@ -778,6 +792,7 @@ js::Nursery::collect(JS::gcreason::Reason reason)
         }
         zone->tenuredStrings = 0;
     }
+    session.reset(); // End the minor GC session, if running one.
     endProfile(ProfileKey::Pretenure);
 
     // We ignore gcMaxBytes when allocating for minor collection. However, if we
@@ -819,7 +834,8 @@ js::Nursery::collect(JS::gcreason::Reason reason)
             for (auto& entry : tenureCounts.entries) {
                 if (entry.count >= reportTenurings_) {
                     fprintf(stderr, "  %d x ", entry.count);
-                    entry.group->print();
+                    AutoSweepObjectGroup sweep(entry.group);
+                    entry.group->print(sweep);
                 }
             }
         }
@@ -827,8 +843,7 @@ js::Nursery::collect(JS::gcreason::Reason reason)
 }
 
 void
-js::Nursery::doCollection(JS::gcreason::Reason reason,
-                          TenureCountCache& tenureCounts)
+js::Nursery::doCollection(JS::gcreason::Reason reason, TenureCountCache& tenureCounts)
 {
     JSRuntime* rt = runtime();
     AutoTraceSession session(rt, JS::HeapState::MinorCollecting);

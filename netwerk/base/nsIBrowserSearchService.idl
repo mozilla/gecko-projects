@@ -155,9 +155,9 @@ interface nsISearchEngine : nsISupports
 
   /**
    * Gets a string representing the hostname from which search results for a
-   * given responseType are returned, minus the leading "www." (if present).
-   * This can be specified as an url attribute in the engine description file,
-   * but will default to host from the <Url>'s template otherwise.
+   * given responseType are returned.  This can be specified as an url attribute
+   * in the engine description file, but will default to host from the <Url>'s
+   * template otherwise.
    *
    * @param  responseType [optional]
    *         The MIME type to get resultDomain for.  Defaults to "text/html".
@@ -428,8 +428,7 @@ interface nsIBrowserSearchService : nsISupports
 
   /**
    * Returns an array of all default search engines. This includes all loaded
-   * engines that aren't in the user's profile directory
-   * (NS_APP_USER_SEARCH_DIR).
+   * engines that aren't in the user's profile directory.
    *
    * @returns an array of nsISearchEngine objects.
    */

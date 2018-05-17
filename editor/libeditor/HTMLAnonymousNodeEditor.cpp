@@ -5,7 +5,6 @@
 #include "mozilla/HTMLEditor.h"
 
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/CSSPrimitiveValueBinding.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/mozalloc.h"
@@ -41,7 +40,6 @@
 #include "nsROCSSPrimitiveValue.h"
 
 class nsIDOMEventListener;
-class nsISelection;
 
 namespace mozilla {
 
@@ -272,26 +270,12 @@ HTMLEditor::DeleteRefToAnonymousNode(ManualNACPtr aContent,
   // Need to check whether aShell has been destroyed (but not yet deleted).
   // See bug 338129.
   if (aContent->IsInComposedDoc() && aShell && !aShell->IsDestroying()) {
-    // Call BeginUpdate() so that the nsCSSFrameConstructor/PresShell
-    // knows we're messing with the frame tree.
-    //
-    // FIXME(emilio): Shouldn't this use the document update mechanism instead?
-    // Also, is it really needed? This is NAC anyway.
-    nsCOMPtr<nsIDocument> document = GetDocument();
-    if (document) {
-      aShell->BeginUpdate(document, UPDATE_CONTENT_MODEL);
-    }
-
     MOZ_ASSERT(aContent->IsRootOfAnonymousSubtree());
     MOZ_ASSERT(!aContent->GetPreviousSibling(), "NAC has no siblings");
 
     // FIXME(emilio): This is the only caller to PresShell::ContentRemoved that
     // passes NAC into it. This is not great!
     aShell->ContentRemoved(aContent, nullptr);
-
-    if (document) {
-      aShell->EndUpdate(document, UPDATE_CONTENT_MODEL);
-    }
   }
 
   // The ManualNACPtr destructor will invoke UnbindFromTree.
@@ -302,7 +286,7 @@ HTMLEditor::DeleteRefToAnonymousNode(ManualNACPtr aContent,
 // handles, a grabber and/or inline table editing UI need to be displayed
 // or refreshed
 NS_IMETHODIMP
-HTMLEditor::CheckSelectionStateForAnonymousButtons(nsISelection* aSelection)
+HTMLEditor::CheckSelectionStateForAnonymousButtons(Selection* aSelection)
 {
   NS_ENSURE_ARG_POINTER(aSelection);
 
@@ -490,7 +474,7 @@ HTMLEditor::GetPositionAndDimensions(Element& aElement,
   } else {
     mResizedObjectIsAbsolutelyPositioned = false;
     RefPtr<nsGenericHTMLElement> htmlElement =
-      nsGenericHTMLElement::FromNode(&aElement);
+      nsGenericHTMLElement::FromNode(aElement);
     if (!htmlElement) {
       return NS_ERROR_NULL_POINTER;
     }

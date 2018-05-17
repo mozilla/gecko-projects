@@ -210,6 +210,7 @@ public:
                          nsIInputStream* aPostDataStream,
                          int64_t aPostDataStreamLength,
                          nsIInputStream* aHeadersDataStream,
+                         bool aIsUserTriggered,
                          bool aIsTrusted,
                          nsIPrincipal* aTriggeringPrincipal) override;
   NS_IMETHOD OnLinkClickSync(nsIContent* aContent,
@@ -222,6 +223,7 @@ public:
                              bool aNoOpenerImplied = false,
                              nsIDocShell** aDocShell = 0,
                              nsIRequest** aRequest = 0,
+                             bool aIsUserTriggered = false,
                              nsIPrincipal* aTriggeringPrincipal = nullptr) override;
   NS_IMETHOD OnOverLink(nsIContent* aContent,
                         nsIURI* aURI,
@@ -232,7 +234,7 @@ public:
   // are shared with nsIDocShell (appID, etc.) and can't be declared twice.
   NS_IMETHOD GetAssociatedWindow(mozIDOMWindowProxy**) override;
   NS_IMETHOD GetTopWindow(mozIDOMWindowProxy**) override;
-  NS_IMETHOD GetTopFrameElement(nsIDOMElement**) override;
+  NS_IMETHOD GetTopFrameElement(mozilla::dom::Element**) override;
   NS_IMETHOD GetNestedFrameId(uint64_t*) override;
   NS_IMETHOD GetIsContent(bool*) override;
   NS_IMETHOD GetUsePrivateBrowsing(bool*) override;

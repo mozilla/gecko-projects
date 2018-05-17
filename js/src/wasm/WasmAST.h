@@ -207,6 +207,10 @@ enum class AstExprKind
     GrowMemory,
     If,
     Load,
+#ifdef ENABLE_WASM_BULKMEM_OPS
+    MemCopy,
+    MemFill,
+#endif
     Nop,
     Pop,
     RefNull,
@@ -673,6 +677,48 @@ class AstWake : public AstExpr
     const AstLoadStoreAddress& address() const { return address_; }
     AstExpr& count() const { return *count_; }
 };
+
+#ifdef ENABLE_WASM_BULKMEM_OPS
+class AstMemCopy : public AstExpr
+{
+    AstExpr* dest_;
+    AstExpr* src_;
+    AstExpr* len_;
+
+  public:
+    static const AstExprKind Kind = AstExprKind::MemCopy;
+    explicit AstMemCopy(AstExpr* dest, AstExpr* src, AstExpr* len)
+      : AstExpr(Kind, ExprType::I32),
+        dest_(dest),
+        src_(src),
+        len_(len)
+    {}
+
+    AstExpr& dest() const { return *dest_; }
+    AstExpr& src()  const { return *src_; }
+    AstExpr& len()  const { return *len_; }
+};
+
+class AstMemFill : public AstExpr
+{
+    AstExpr* start_;
+    AstExpr* val_;
+    AstExpr* len_;
+
+  public:
+    static const AstExprKind Kind = AstExprKind::MemFill;
+    explicit AstMemFill(AstExpr* start, AstExpr* val, AstExpr* len)
+      : AstExpr(Kind, ExprType::I32),
+        start_(start),
+        val_(val),
+        len_(len)
+    {}
+
+    AstExpr& start() const { return *start_; }
+    AstExpr& val()   const { return *val_; }
+    AstExpr& len()   const { return *len_; }
+};
+#endif
 
 class AstCurrentMemory final : public AstExpr
 {
@@ -1146,20 +1192,20 @@ class AstConversionOperator final : public AstExpr
 };
 
 #ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
-// Like AstConversionOperator, but for opcodes encoded with the Numeric prefix.
+// Like AstConversionOperator, but for opcodes encoded with the Misc prefix.
 class AstExtraConversionOperator final : public AstExpr
 {
-    NumericOp op_;
+    MiscOp op_;
     AstExpr* operand_;
 
   public:
     static const AstExprKind Kind = AstExprKind::ExtraConversionOperator;
-    explicit AstExtraConversionOperator(NumericOp op, AstExpr* operand)
+    explicit AstExtraConversionOperator(MiscOp op, AstExpr* operand)
       : AstExpr(Kind, ExprType::Limit),
         op_(op), operand_(operand)
     {}
 
-    NumericOp op() const { return op_; }
+    MiscOp op() const { return op_; }
     AstExpr* operand() const { return operand_; }
 };
 #endif

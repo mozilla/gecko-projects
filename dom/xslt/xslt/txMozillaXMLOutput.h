@@ -17,13 +17,17 @@
 #include "mozilla/dom/Element.h"
 
 class nsIContent;
-class nsIDOMDocument;
 class nsAtom;
-class nsIDOMDocumentFragment;
 class nsITransformObserver;
 class nsNodeInfoManager;
 class nsIDocument;
 class nsINode;
+
+namespace mozilla {
+namespace dom {
+class DocumentFragment;
+} // namespace dom
+} // namespace mozilla
 
 class txTransformNotifier final : public nsIScriptLoaderObserver,
                                   public nsICSSLoaderObserver
@@ -63,7 +67,7 @@ public:
     txMozillaXMLOutput(txOutputFormat* aFormat,
                        nsITransformObserver* aObserver);
     txMozillaXMLOutput(txOutputFormat* aFormat,
-                       nsIDOMDocumentFragment* aFragment,
+                       mozilla::dom::DocumentFragment* aFragment,
                        bool aNoFixup);
     ~txMozillaXMLOutput();
 

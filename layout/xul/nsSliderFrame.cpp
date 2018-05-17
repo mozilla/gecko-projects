@@ -23,7 +23,6 @@
 #include "nsHTMLParts.h"
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
-#include "nsIDOMEvent.h"
 #include "nsScrollbarButtonFrame.h"
 #include "nsISliderListener.h"
 #include "nsIScrollableFrame.h"
@@ -44,6 +43,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
 #include "mozilla/layers/InputAPZContext.h"
@@ -489,15 +489,6 @@ nsSliderFrame::DoXULLayout(nsBoxLayoutState& aState)
   }
 
   EnsureOrient();
-
-#ifdef DEBUG_LAYOUT
-  if (mState & NS_STATE_DEBUG_WAS_SET) {
-      if (mState & NS_STATE_SET_TO_DEBUG)
-          SetXULDebug(aState, true);
-      else
-          SetXULDebug(aState, false);
-  }
-#endif
 
   // get the content area inside our borders
   nsRect clientRect;
@@ -1002,7 +993,7 @@ nsSliderFrame::SetInitialChildList(ChildListID     aListID,
 }
 
 nsresult
-nsSliderMediator::HandleEvent(nsIDOMEvent* aEvent)
+nsSliderMediator::HandleEvent(dom::Event* aEvent)
 {
   // Only process the event if the thumb is not being dragged.
   if (mSlider && !mSlider->isDraggingThumb())
@@ -1162,7 +1153,7 @@ nsSliderFrame::StartAPZDrag(WidgetGUIEvent* aEvent)
 }
 
 nsresult
-nsSliderFrame::StartDrag(nsIDOMEvent* aEvent)
+nsSliderFrame::StartDrag(Event* aEvent)
 {
 #ifdef DEBUG_SLIDER
   printf("Begin dragging\n");

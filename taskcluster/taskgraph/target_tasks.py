@@ -40,14 +40,6 @@ def filter_on_platforms(task, platforms):
     return (platform in platforms)
 
 
-def filter_upload_symbols(task, parameters):
-    # Filters out symbols when there are not part of a nightly or a release build
-    # TODO Remove this too specific filter (bug 1353296)
-    return '-upload-symbols' not in task.label or \
-        task.attributes.get('nightly') or \
-        parameters.get('project') in ('mozilla-beta', 'mozilla-release')
-
-
 def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=False):
     if not standard_filter(task, parameters):
         return False
@@ -65,6 +57,8 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
             # On beta, Nightly builds are already PGOs
             'linux-pgo', 'linux64-pgo',
             'win32-pgo', 'win64-pgo',
+            # ASAN is central-only
+            'linux64-asan-reporter-nightly',
             ):
         return False
     if str(platform).startswith('android') and 'nightly' in str(platform):
@@ -76,7 +70,8 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
             'win32', 'win64',
             ):
         if task.attributes['build_type'] == 'opt' and \
-           task.attributes.get('unittest_suite') != 'talos':
+           task.attributes.get('unittest_suite') != 'talos' and \
+           task.attributes.get('unittest_suite') != 'raptor':
             return False
 
     # skip l10n, beetmover, balrog
@@ -94,7 +89,7 @@ def filter_beta_release_tasks(task, parameters, ignore_kinds=None, allow_l10n=Fa
 def standard_filter(task, parameters):
     return all(
         filter_func(task, parameters) for filter_func in
-        (filter_out_nightly, filter_for_project, filter_upload_symbols)
+        (filter_out_nightly, filter_for_project)
     )
 
 
@@ -133,6 +128,11 @@ def _try_option_syntax(full_task_graph, parameters, graph_config):
         # If the developer wants test talos jobs to be rebuilt N times we add that value here
         if options.talos_trigger_tests > 1 and task.attributes.get('unittest_suite') == 'talos':
             task.attributes['task_duplicates'] = options.talos_trigger_tests
+            task.attributes['profile'] = options.profile
+
+        # If the developer wants test raptor jobs to be rebuilt N times we add that value here
+        if options.raptor_trigger_tests > 1 and task.attributes.get('unittest_suite') == 'raptor':
+            task.attributes['task_duplicates'] = options.raptor_trigger_tests
             task.attributes['profile'] = options.profile
 
         task.attributes.update(attributes)
@@ -200,6 +200,9 @@ def target_tasks_ash(full_task_graph, parameters, graph_config):
                 return False
             # don't run talos on ash
             if task.attributes.get('unittest_suite') == 'talos':
+                return False
+            # don't run raptor on ash
+            if task.attributes.get('unittest_suite') == 'raptor':
                 return False
         # don't upload symbols
         if task.attributes['kind'] == 'upload-symbols':
@@ -273,6 +276,28 @@ def target_tasks_mozilla_release(full_task_graph, parameters, graph_config):
 
     return [l for l, t in full_task_graph.tasks.iteritems() if
             filter_beta_release_tasks(t, parameters)]
+
+
+@_target_task('mozilla_esr60_tasks')
+def target_tasks_mozilla_esr60(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required for a promotable beta or release build
+    of desktop, plus android CI. The candidates build process involves a pipeline
+    of builds and signing, but does not include beetmover or balrog jobs."""
+
+    def filter(task):
+        if not filter_beta_release_tasks(task, parameters):
+            return False
+
+        platform = task.attributes.get('build_platform')
+
+        # Android is not built on esr.
+        if platform and 'android' in platform:
+            return False
+
+        # All else was already filtered
+        return True
+
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
 @_target_task('promote_desktop')
@@ -500,6 +525,15 @@ def target_tasks_nightly_win64(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
 
 
+@_target_task('nightly_asan')
+def target_tasks_nightly_asan(full_task_graph, parameters, graph_config):
+    """Select the set of tasks required for a nightly build of asan. The
+    nightly build process involves a pipeline of builds, signing,
+    and, eventually, uploading the tasks to balrog."""
+    filter = make_nightly_filter({'linux64-asan-reporter-nightly'})
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
+
+
 @_target_task('nightly_desktop')
 def target_tasks_nightly_desktop(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of linux, mac,
@@ -510,6 +544,7 @@ def target_tasks_nightly_desktop(full_task_graph, parameters, graph_config):
         | set(target_tasks_nightly_win64(full_task_graph, parameters, graph_config))
         | set(target_tasks_nightly_macosx(full_task_graph, parameters, graph_config))
         | set(target_tasks_nightly_linux(full_task_graph, parameters, graph_config))
+        | set(target_tasks_nightly_asan(full_task_graph, parameters, graph_config))
     )
 
 

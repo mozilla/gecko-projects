@@ -429,7 +429,7 @@ js::ReportAccessDenied(JSContext* cx)
 const char Wrapper::family = 0;
 const Wrapper Wrapper::singleton((unsigned)0);
 const Wrapper Wrapper::singletonWithPrototype((unsigned)0, true);
-JSObject* Wrapper::defaultProto = TaggedProto::LazyProto;
+JSObject* const Wrapper::defaultProto = TaggedProto::LazyProto;
 
 /* Compartments. */
 
@@ -443,18 +443,18 @@ js::TransparentObjectWrapper(JSContext* cx, HandleObject existing, HandleObject 
 
 ErrorCopier::~ErrorCopier()
 {
-    JSContext* cx = ac->context();
+    JSContext* cx = ar->context();
 
     // The provenance of Debugger.DebuggeeWouldRun is the topmost locking
     // debugger compartment; it should not be copied around.
-    if (ac->origin() != cx->compartment() &&
+    if (ar->origin() != cx->compartment() &&
         cx->isExceptionPending() &&
         !cx->isThrowingDebuggeeWouldRun())
     {
         RootedValue exc(cx);
         if (cx->getPendingException(&exc) && exc.isObject() && exc.toObject().is<ErrorObject>()) {
             cx->clearPendingException();
-            ac.reset();
+            ar.reset();
             Rooted<ErrorObject*> errObj(cx, &exc.toObject().as<ErrorObject>());
             JSObject* copyobj = CopyErrorObject(cx, errObj);
             if (copyobj)

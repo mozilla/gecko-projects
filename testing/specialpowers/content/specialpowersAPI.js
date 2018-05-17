@@ -20,6 +20,7 @@ ChromeUtils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+ChromeUtils.import("resource://gre/modules/ServiceWorkerCleanUp.jsm");
 
 // We're loaded with "this" not set to the global in some cases, so we
 // have to play some games to get at the global object here.  Normally
@@ -27,7 +28,7 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 // but this whole file is in strict mode.  So instead fall back on
 // returning "this" from indirect eval, which returns the global.
 if (!(function() { var e = eval; return e("this"); })().File) { // eslint-disable-line no-eval
-    Cu.importGlobalProperties(["File", "InspectorUtils", "NodeFilter"]);
+    Cu.importGlobalProperties(["DOMParser", "File", "InspectorUtils", "NodeFilter"]);
 }
 
 // Allow stuff from this scope to be accessed from non-privileged scopes. This
@@ -380,8 +381,8 @@ SPConsoleListener.prototype = {
     }
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIConsoleListener,
-                                         Ci.nsIObserver])
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIConsoleListener,
+                                          Ci.nsIObserver])
 };
 
 function wrapCallback(cb) {
@@ -663,6 +664,15 @@ SpecialPowersAPI.prototype = {
       return this.DOMWindowUtils;
 
     return bindDOMWindowUtils(aWindow);
+  },
+
+  /*
+   * A method to get a DOMParser that can't parse XUL.
+   */
+  getNoXULDOMParser() {
+    // If we create it with a system subject principal (so it gets a
+    // nullprincipal), it won't be able to parse XUL by default.
+    return wrapPrivileged(new DOMParser());
   },
 
   get InspectorUtils() { return wrapPrivileged(InspectorUtils); },
@@ -1961,11 +1971,11 @@ SpecialPowersAPI.prototype = {
   },
 
   removeAllServiceWorkerData() {
-    this.notifyObserversInParentProcess(null, "browser:purge-session-history", "");
+    return wrapIfUnwrapped(ServiceWorkerCleanUp.removeAll());
   },
 
   removeServiceWorkerDataForExampleDomain() {
-    this.notifyObserversInParentProcess(null, "browser:purge-domain-data", "example.com");
+    return wrapIfUnwrapped(ServiceWorkerCleanUp.removeFromHost("example.com"));
   },
 
   cleanUpSTSData(origin, flags) {

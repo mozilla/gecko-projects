@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BuiltDisplayList, ColorF, DynamicProperties, Epoch, LayerSize, LayoutSize};
+use api::{BuiltDisplayList, ColorF, DynamicProperties, Epoch, LayoutSize};
 use api::{FilterOp, LayoutTransform, PipelineId, PropertyBinding, PropertyBindingId};
 use api::{ItemRange, MixBlendMode, StackingContext};
 use internal_types::FastHashMap;
@@ -54,15 +54,11 @@ impl SceneProperties {
     ) -> LayoutTransform {
         match *property {
             PropertyBinding::Value(value) => value,
-            PropertyBinding::Binding(ref key) => {
+            PropertyBinding::Binding(ref key, v) => {
                 self.transform_properties
                     .get(&key.id)
                     .cloned()
-                    .unwrap_or_else(|| {
-                        warn!("Property binding has an invalid value.");
-                        debug!("key={:?}", key);
-                        LayoutTransform::identity()
-                    })
+                    .unwrap_or(v)
             }
         }
     }
@@ -70,20 +66,15 @@ impl SceneProperties {
     /// Get the current value for a float property.
     pub fn resolve_float(
         &self,
-        property: &PropertyBinding<f32>,
-        default_value: f32
+        property: &PropertyBinding<f32>
     ) -> f32 {
         match *property {
             PropertyBinding::Value(value) => value,
-            PropertyBinding::Binding(ref key) => {
+            PropertyBinding::Binding(ref key, v) => {
                 self.float_properties
                     .get(&key.id)
                     .cloned()
-                    .unwrap_or_else(|| {
-                        warn!("Property binding has an invalid value.");
-                        debug!("key={:?}", key);
-                        default_value
-                    })
+                    .unwrap_or(v)
             }
         }
     }
@@ -95,7 +86,7 @@ impl SceneProperties {
 #[derive(Clone)]
 pub struct ScenePipeline {
     pub pipeline_id: PipelineId,
-    pub viewport_size: LayerSize,
+    pub viewport_size: LayoutSize,
     pub content_size: LayoutSize,
     pub background_color: Option<ColorF>,
     pub display_list: BuiltDisplayList,
@@ -130,7 +121,7 @@ impl Scene {
         epoch: Epoch,
         display_list: BuiltDisplayList,
         background_color: Option<ColorF>,
-        viewport_size: LayerSize,
+        viewport_size: LayoutSize,
         content_size: LayoutSize,
     ) {
         let new_pipeline = ScenePipeline {

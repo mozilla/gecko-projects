@@ -9,7 +9,6 @@ var EXPORTED_SYMBOLS = ["OnboardingTelemetry"];
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetters(this, {
   PingCentre: "resource:///modules/PingCentre.jsm",
-  Services: "resource://gre/modules/Services.jsm",
 });
 XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
   "@mozilla.org/uuid-generator;1", "nsIUUIDGenerator");
@@ -48,7 +47,7 @@ function isValidCategory(category) {
 
 // Validate the page value is within the list
 function isValidPage(page) {
-  return ["about:newtab", "about:home"].includes(page);
+    return ["about:newtab", "about:home", "about:welcome"].includes(page);
 }
 
 // Validate the tour_type value is within the list

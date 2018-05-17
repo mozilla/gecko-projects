@@ -238,7 +238,8 @@ private:
         gUnresolvedResponses++;
     }
 
-    void SendBuildID();
+    bool SendBuildIDsMatchMessage(const char* aParentBuildI);
+    bool DoBuildIDsMatch() { return mBuildIDsConfirmedMatch; }
 
     // Asynchronously deliver a message back to this side of the
     // channel
@@ -325,6 +326,10 @@ private:
     }
     static void SetIsPumpingMessages(bool aIsPumping) {
         sIsPumpingMessages = aIsPumping;
+    }
+
+    void SetInKillHardShutdown() {
+        mInKillHardShutdown = true;
     }
 
 #ifdef OS_WIN
@@ -854,6 +859,10 @@ private:
     // held in a queue until another thread deems it is safe to send them.
     bool mIsPostponingSends;
     std::vector<UniquePtr<Message>> mPostponedSends;
+
+    bool mInKillHardShutdown;
+
+    bool mBuildIDsConfirmedMatch;
 };
 
 void

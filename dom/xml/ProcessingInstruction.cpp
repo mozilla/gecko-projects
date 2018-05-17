@@ -20,7 +20,7 @@ NS_NewXMLProcessingInstruction(nsNodeInfoManager *aNodeInfoManager,
   using mozilla::dom::ProcessingInstruction;
   using mozilla::dom::XMLStylesheetProcessingInstruction;
 
-  NS_PRECONDITION(aNodeInfoManager, "Missing nodeinfo manager");
+  MOZ_ASSERT(aNodeInfoManager, "Missing nodeinfo manager");
 
   RefPtr<nsAtom> target = NS_Atomize(aTarget);
   MOZ_ASSERT(target);
@@ -62,6 +62,8 @@ ProcessingInstruction::~ProcessingInstruction()
 {
 }
 
+// If you add nsIStyleSheetLinkingElement here, make sure we actually
+// implement the nsStyleLinkElement methods.
 NS_IMPL_ISUPPORTS_INHERITED(ProcessingInstruction, CharacterData, nsIDOMNode)
 
 JSObject*
@@ -79,12 +81,6 @@ ProcessingInstruction::GetAttrValue(nsAtom *aName, nsAString& aValue)
   return nsContentUtils::GetPseudoAttributeValue(data, aName, aValue);
 }
 
-bool
-ProcessingInstruction::IsNodeOfType(uint32_t aFlags) const
-{
-  return !(aFlags & ~(ePROCESSING_INSTRUCTION | eDATA_NODE));
-}
-
 already_AddRefed<CharacterData>
 ProcessingInstruction::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
                                      bool aCloneText) const
@@ -93,6 +89,16 @@ ProcessingInstruction::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo,
   GetData(data);
   RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
   return do_AddRef(new ProcessingInstruction(ni.forget(), data));
+}
+
+Maybe<nsStyleLinkElement::SheetInfo>
+ProcessingInstruction::GetStyleSheetInfo()
+{
+  MOZ_ASSERT_UNREACHABLE("XMLStylesheetProcessingInstruction should override "
+                         "this and we don't try to do stylesheet stuff.  In "
+                         "particular, we do not implement "
+                         "nsIStyleSheetLinkingElement");
+  return Nothing();
 }
 
 #ifdef DEBUG

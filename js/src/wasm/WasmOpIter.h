@@ -218,6 +218,8 @@ enum class OpKind {
     SimdBooleanReduction,
     SimdShiftByScalar,
     SimdComparison,
+    MemCopy,
+    MemFill,
     RefNull,
 };
 
@@ -656,6 +658,8 @@ class MOZ_STACK_CLASS OpIter : private Policy
                                      Value* condition);
     MOZ_MUST_USE bool readSimdCtor(ValType elementType, uint32_t numElements, ValType simdType,
                                    ValueVector* argValues);
+    MOZ_MUST_USE bool readMemCopy(Value* dest, Value* src, Value* len);
+    MOZ_MUST_USE bool readMemFill(Value* start, Value* val, Value* len);
 
     // At a location where readOp is allowed, peek at the next opcode
     // without consuming it or updating any internal state.
@@ -2229,6 +2233,42 @@ OpIter<Policy>::readSimdCtor(ValType elementType, uint32_t numElements, ValType 
     }
 
     infalliblePush(simdType);
+
+    return true;
+}
+
+template <typename Policy>
+inline bool
+OpIter<Policy>::readMemCopy(Value* dest, Value* src, Value* len)
+{
+    MOZ_ASSERT(Classify(op_) == OpKind::MemCopy);
+
+    if (!popWithType(ValType::I32, len))
+        return false;
+
+    if (!popWithType(ValType::I32, src))
+        return false;
+
+    if (!popWithType(ValType::I32, dest))
+        return false;
+
+    return true;
+}
+
+template <typename Policy>
+inline bool
+OpIter<Policy>::readMemFill(Value* start, Value* val, Value* len)
+{
+    MOZ_ASSERT(Classify(op_) == OpKind::MemFill);
+
+    if (!popWithType(ValType::I32, len))
+        return false;
+
+    if (!popWithType(ValType::I32, val))
+        return false;
+
+    if (!popWithType(ValType::I32, start))
+        return false;
 
     return true;
 }

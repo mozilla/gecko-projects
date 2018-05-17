@@ -23,7 +23,7 @@ use media_queries::Device;
 use properties::{self, CascadeFlags, ComputedValues};
 use properties::{AnimationRules, PropertyDeclarationBlock};
 use rule_cache::{RuleCache, RuleCacheConditions};
-use rule_tree::{CascadeLevel, RuleTree, StrongRuleNode, StyleSource};
+use rule_tree::{CascadeLevel, RuleTree, ShadowCascadeOrder, StrongRuleNode, StyleSource};
 use selector_map::{PrecomputedHashMap, SelectorMap, SelectorMapEntry};
 use selector_parser::{PerPseudoElementMap, PseudoElement, SelectorImpl, SnapshotMap};
 use selectors::NthIndexCache;
@@ -693,7 +693,7 @@ impl Stylist {
 
         match declarations {
             Some(decls) => self.rule_tree.insert_ordered_rules_with_important(
-                decls.into_iter().map(|a| (a.source.clone(), a.level())),
+                decls.into_iter().map(|a| a.clone().for_rule_tree()),
                 guards,
             ),
             None => self.rule_tree.root().clone(),
@@ -1020,7 +1020,7 @@ impl Stylist {
             );
             if !declarations.is_empty() {
                 let rule_node = self.rule_tree.insert_ordered_rules_with_important(
-                    declarations.drain().map(|a| a.order_and_level()),
+                    declarations.drain().map(|a| a.for_rule_tree()),
                     guards,
                 );
                 if rule_node != *self.rule_tree.root() {
@@ -1187,6 +1187,7 @@ impl Stylist {
                 context,
                 flags_setter,
                 CascadeLevel::UANormal,
+                0,
             );
         }
 
@@ -1208,6 +1209,7 @@ impl Stylist {
                     context,
                     flags_setter,
                     CascadeLevel::UserNormal,
+                    0,
                 );
             }
         }
@@ -1232,6 +1234,7 @@ impl Stylist {
         }
 
         let mut match_document_author_rules = matches_author_rules;
+        let mut shadow_cascade_order = 0;
 
         // XBL / Shadow DOM rules, which are author rules too.
         //
@@ -1249,9 +1252,11 @@ impl Stylist {
                             applicable_declarations,
                             context,
                             flags_setter,
-                            CascadeLevel::AuthorNormal,
+                            CascadeLevel::InnerShadowNormal,
+                            shadow_cascade_order,
                         );
                     });
+                    shadow_cascade_order += 1;
                 }
             }
 
@@ -1275,9 +1280,11 @@ impl Stylist {
                             applicable_declarations,
                             context,
                             flags_setter,
-                            CascadeLevel::AuthorNormal,
+                            CascadeLevel::InnerShadowNormal,
+                            shadow_cascade_order,
                         );
                     });
+                    shadow_cascade_order += 1;
                 }
             }
 
@@ -1291,9 +1298,11 @@ impl Stylist {
                             applicable_declarations,
                             context,
                             flags_setter,
-                            CascadeLevel::AuthorNormal,
+                            CascadeLevel::SameTreeAuthorNormal,
+                            shadow_cascade_order,
                         );
                     });
+                    shadow_cascade_order += 1;
                 }
 
                 match_document_author_rules = false;
@@ -1309,10 +1318,6 @@ impl Stylist {
                 if let Some(map) = cascade_data.normal_rules(pseudo_element) {
                     // NOTE(emilio): This is needed because the XBL stylist may
                     // think it has a different quirks mode than the document.
-                    //
-                    // FIXME(emilio): this should use the same VisitedMatchingMode
-                    // as `context`, write a test-case of :visited not working on
-                    // Shadow DOM and fix it!
                     let mut matching_context = MatchingContext::new(
                         context.matching_mode(),
                         context.bloom_filter,
@@ -1322,13 +1327,16 @@ impl Stylist {
                     matching_context.pseudo_element_matching_fn =
                         context.pseudo_element_matching_fn;
 
+                    // SameTreeAuthorNormal instead of InnerShadowNormal to
+                    // preserve behavior, though that's kinda fishy...
                     map.get_all_matching_rules(
                         element,
                         rule_hash_target,
                         applicable_declarations,
                         &mut matching_context,
                         flags_setter,
-                        CascadeLevel::AuthorNormal,
+                        CascadeLevel::SameTreeAuthorNormal,
+                        shadow_cascade_order,
                     );
                 }
             });
@@ -1344,7 +1352,8 @@ impl Stylist {
                     applicable_declarations,
                     context,
                     flags_setter,
-                    CascadeLevel::AuthorNormal,
+                    CascadeLevel::SameTreeAuthorNormal,
+                    shadow_cascade_order,
                 );
             }
         }
@@ -1412,14 +1421,53 @@ impl Stylist {
     }
 
     /// Returns the registered `@keyframes` animation for the specified name.
-    ///
-    /// FIXME(emilio): This needs to account for the element rules.
     #[inline]
-    pub fn get_animation(&self, name: &Atom) -> Option<&KeyframesAnimation> {
-        self.cascade_data
-            .iter_origins()
-            .filter_map(|(d, _)| d.animations.get(name))
-            .next()
+    pub fn get_animation<'a, E>(
+        &'a self,
+        name: &Atom,
+        element: E,
+    ) -> Option<&'a KeyframesAnimation>
+    where
+        E: TElement + 'a,
+    {
+        macro_rules! try_find_in {
+            ($data:expr) => {
+                if let Some(animation) = $data.animations.get(name) {
+                    return Some(animation);
+                }
+            }
+        }
+
+        // NOTE(emilio): We implement basically what Blink does for this case,
+        // which is [1] as of this writing.
+        //
+        // See [2] for the spec discussion about what to do about this. WebKit's
+        // behavior makes a bit more sense off-hand, but it's way more complex
+        // to implement, and it makes value computation having to thread around
+        // the cascade level, which is not great. Also, it breaks if you inherit
+        // animation-name from an element in a different tree.
+        //
+        // See [3] for the bug to implement whatever gets resolved, and related
+        // bugs for a bit more context.
+        //
+        // [1]: https://cs.chromium.org/chromium/src/third_party/blink/renderer/
+        //        core/css/resolver/style_resolver.cc?l=1267&rcl=90f9f8680ebb4a87d177f3b0833372ae4e0c88d8
+        // [2]: https://github.com/w3c/csswg-drafts/issues/1995
+        // [3]: https://bugzil.la/1458189
+        if let Some(shadow) = element.shadow_root() {
+            try_find_in!(shadow.style_data());
+        }
+
+        if let Some(shadow) = element.containing_shadow() {
+            try_find_in!(shadow.style_data());
+        } else {
+            try_find_in!(self.cascade_data.author);
+        }
+
+        try_find_in!(self.cascade_data.user);
+        try_find_in!(self.cascade_data.user_agent.cascade_data);
+
+        None
     }
 
     /// Computes the match results of a given element against the set of
@@ -1508,27 +1556,25 @@ impl Stylist {
         E: TElement,
     {
         use font_metrics::get_metrics_provider_for_product;
-        use std::iter;
 
-        // FIXME(emilio): Why do we even need the rule node? We should probably
-        // just avoid allocating it and calling `apply_declarations` directly,
-        // maybe...
-        let rule_node = self.rule_tree.insert_ordered_rules(iter::once((
-            StyleSource::Declarations(declarations),
-            CascadeLevel::StyleAttributeNormal,
-        )));
+        let block = declarations.read_with(guards.author);
+        let iter_declarations = || {
+            block.declaration_importance_iter().map(|(declaration, importance)| {
+                debug_assert!(!importance.important());
+                (declaration, CascadeLevel::StyleAttributeNormal)
+            })
+        };
 
-        // This currently ignores visited styles.  It appears to be used for
-        // font styles in <canvas> via Servo_StyleSet_ResolveForDeclarations.
-        // It is unclear if visited styles are meaningful for this case.
         let metrics = get_metrics_provider_for_product();
 
-        // FIXME(emilio): the pseudo bit looks quite dubious!
-        properties::cascade::<E>(
+        // We don't bother inserting these declarations in the rule tree, since
+        // it'd be quite useless and slow.
+        properties::apply_declarations::<E, _, _>(
             &self.device,
             /* pseudo = */ None,
-            &rule_node,
+            self.rule_tree.root(),
             guards,
+            iter_declarations,
             Some(parent_style),
             Some(parent_style),
             Some(parent_style),
@@ -2168,10 +2214,11 @@ impl CascadeData {
                                     .expect("Expected precomputed declarations for the UA level")
                                     .get_or_insert_with(&pseudo.canonical(), Vec::new)
                                     .push(ApplicableDeclarationBlock::new(
-                                        StyleSource::Style(locked.clone()),
+                                        StyleSource::from_rule(locked.clone()),
                                         self.rules_source_order,
                                         CascadeLevel::UANormal,
                                         selector.specificity(),
+                                        0,
                                     ));
                                 continue;
                             }
@@ -2468,9 +2515,10 @@ impl Rule {
     pub fn to_applicable_declaration_block(
         &self,
         level: CascadeLevel,
+        shadow_cascade_order: ShadowCascadeOrder,
     ) -> ApplicableDeclarationBlock {
-        let source = StyleSource::Style(self.style_rule.clone());
-        ApplicableDeclarationBlock::new(source, self.source_order, level, self.specificity())
+        let source = StyleSource::from_rule(self.style_rule.clone());
+        ApplicableDeclarationBlock::new(source, self.source_order, level, self.specificity(), shadow_cascade_order)
     }
 
     /// Creates a new Rule.

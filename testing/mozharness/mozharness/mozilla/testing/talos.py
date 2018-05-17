@@ -161,7 +161,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
     def __init__(self, **kwargs):
         kwargs.setdefault('config_options', self.config_options)
         kwargs.setdefault('all_actions', ['clobber',
-                                          'read-buildbot-config',
                                           'download-and-extract',
                                           'populate-webroot',
                                           'create-virtualenv',
@@ -204,34 +203,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
     #   mozharness: --geckoProfile try: <stuff>
     def query_gecko_profile_options(self):
         gecko_results = []
-        if self.buildbot_config:
-            # this is inside automation
-            # now let's see if we added GeckoProfile specs in the commit message
-            try:
-                junk, junk, opts = self.buildbot_config['sourcestamp']['changes'][-1]['comments'].partition('mozharness:')
-            except IndexError:
-                # when we don't have comments on changes (bug 1255187)
-                opts = None
-
-            if opts:
-                # In the case of a multi-line commit message, only examine
-                # the first line for mozharness options
-                opts = opts.split('\n')[0]
-                opts = re.sub(r'\w+:.*', '', opts).strip().split(' ')
-                if "--geckoProfile" in opts:
-                    # overwrite whatever was set here.
-                    self.gecko_profile = True
-                try:
-                    idx = opts.index('--geckoProfileInterval')
-                    if len(opts) > idx + 1:
-                        self.gecko_profile_interval = opts[idx + 1]
-                except ValueError:
-                    pass
-            else:
-                # no opts, check for '--geckoProfile' in try message text directly
-                if self.try_message_has_flag('geckoProfile'):
-                    self.gecko_profile = True
-
         # finally, if gecko_profile is set, we add that to the talos options
         if self.gecko_profile:
             gecko_results.append('--geckoProfile')
@@ -476,7 +447,9 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
         self.install_mitmproxy()
 
         # download the recording set; will be overridden by the --no-download
-        if '--no-download' not in self.config['talos_extra_options']:
+        if ('talos_extra_options' in self.config and \
+            '--no-download' not in self.config['talos_extra_options']) or \
+            'talos_extra_options' not in self.config:
             self.download_mitmproxy_recording_set()
         else:
             self.info("Not downloading mitmproxy recording set because no-download was specified")
@@ -507,7 +480,9 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             self.mitmdump = os.path.join(mitmproxy_path, 'mitmdump')
             if not os.path.exists(self.mitmdump):
                 # download the mitmproxy release binary; will be overridden by the --no-download
-                if '--no-download' not in self.config['talos_extra_options']:
+                if ('talos_extra_options' in self.config and \
+                   '--no-download' not in self.config['talos_extra_options']) or \
+                   'talos_extra_options' not in self.config:
                     if 'osx' in self.platform_name():
                         _platform = 'osx'
                     else:
@@ -574,7 +549,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
 
     # Action methods. {{{1
     # clobber defined in BaseScript
-    # read_buildbot_config defined in BuildbotMixin
 
     def download_and_extract(self, extract_dirs=None, suite_categories=None):
         return super(Talos, self).download_and_extract(
@@ -624,10 +598,7 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             two_pass=True,
             editable=True,
         )
-        # require pip >= 1.5 so pip will prefer .whl files to install
-        super(Talos, self).create_virtualenv(
-            modules=['pip>=1.5']
-        )
+        super(Talos, self).create_virtualenv()
         # talos in harness requires what else is
         # listed in talos requirements.txt file.
         self.install_module(
@@ -705,15 +676,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
 
         # TODO: consider getting rid of this as we should be default to stylo now
         env['STYLO_FORCE_ENABLED'] = '1'
-
-        # Remove once Talos is migrated away from buildbot
-        if self.buildbot_config:
-            platform = self.buildbot_config.get('properties', {}).get('platform', '')
-            if 'qr' in platform:
-                env['MOZ_WEBRENDER'] = '1'
-                env['MOZ_ACCELERATED'] = '1'
-            if 'styloseq' in platform:
-                env['STYLO_THREADS'] = '1'
 
         # sets a timeout for how long talos should run without output
         output_timeout = self.config.get('talos_output_timeout', 3600)

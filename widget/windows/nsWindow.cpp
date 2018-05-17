@@ -351,6 +351,9 @@ static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 // General purpose user32.dll hook object
 static WindowsDllInterceptor sUser32Intercept;
 
+// AddHook success checks
+static mozilla::Maybe<bool> sHookedGetWindowInfo;
+
 // 2 pixel offset for eTransparencyBorderlessGlass which equals the size of
 // the default window border Windows paints. Glass will be extended inward
 // this distance to remove the border.
@@ -1273,7 +1276,7 @@ nsWindow::SetParent(nsIWidget *aNewParent)
 void
 nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 {
-  NS_PRECONDITION(aNewParent, "");
+  MOZ_ASSERT(aNewParent, "null widget");
 
   mParent = aNewParent;
   if (mWindowType == eWindowType_popup) {
@@ -2496,11 +2499,15 @@ nsWindow::UpdateGetWindowInfoCaptionStatus(bool aActiveCaption)
   if (!mWnd)
     return;
 
-  if (!sGetWindowInfoPtrStub) {
+  if (sHookedGetWindowInfo.isNothing()) {
     sUser32Intercept.Init("user32.dll");
-    if (!sUser32Intercept.AddHook("GetWindowInfo", reinterpret_cast<intptr_t>(GetWindowInfoHook),
-                                  (void**) &sGetWindowInfoPtrStub))
+    sHookedGetWindowInfo =
+      Some(sUser32Intercept.AddHook("GetWindowInfo",
+                                    reinterpret_cast<intptr_t>(GetWindowInfoHook),
+                                    (void**) &sGetWindowInfoPtrStub));
+    if (!sHookedGetWindowInfo.value()) {
       return;
+    }
   }
   // Update our internally tracked caption status
   SetPropW(mWnd, kManageWindowInfoProperty, 
@@ -4090,7 +4097,7 @@ nsWindow::AddWindowOverlayWebRenderCommands(layers::WebRenderBridgeChild* aWrBri
       RoundedRect(ThebesRect(mWindowButtonsRect->ToUnknownRect()),
                   RectCornerRadii(0, 0, 3, 3))));
     wr::WrClipId clipId =
-      aBuilder.DefineClip(Nothing(), Nothing(), rect, &roundedClip);
+      aBuilder.DefineClip(Nothing(), rect, &roundedClip);
     aBuilder.PushClip(clipId);
     aBuilder.PushClearRect(rect);
     aBuilder.PopClip();
@@ -5919,6 +5926,9 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_DISPLAYCHANGE:
     {
       ScreenHelperWin::RefreshScreens();
+      if (mWidgetListener) {
+        mWidgetListener->UIResolutionChanged();
+      }
       break;
     }
 
@@ -7562,18 +7572,20 @@ void nsWindow::SetWindowTranslucencyInner(nsTransparencyMode aMode)
 
   LONG_PTR style = ::GetWindowLongPtrW(hWnd, GWL_STYLE),
     exStyle = ::GetWindowLongPtr(hWnd, GWL_EXSTYLE);
- 
-   if (parent->mIsVisible)
-     style |= WS_VISIBLE;
-   if (parent->mSizeMode == nsSizeMode_Maximized)
-     style |= WS_MAXIMIZE;
-   else if (parent->mSizeMode == nsSizeMode_Minimized)
-     style |= WS_MINIMIZE;
 
-   if (aMode == eTransparencyTransparent)
-     exStyle |= WS_EX_LAYERED;
-   else
-     exStyle &= ~WS_EX_LAYERED;
+  if (parent->mIsVisible) {
+    style |= WS_VISIBLE;
+    if (parent->mSizeMode == nsSizeMode_Maximized) {
+      style |= WS_MAXIMIZE;
+    } else if (parent->mSizeMode == nsSizeMode_Minimized) {
+      style |= WS_MINIMIZE;
+    }
+  }
+
+  if (aMode == eTransparencyTransparent)
+    exStyle |= WS_EX_LAYERED;
+  else
+    exStyle &= ~WS_EX_LAYERED;
 
   VERIFY_WINDOW_STYLE(style);
   ::SetWindowLongPtrW(hWnd, GWL_STYLE, style);

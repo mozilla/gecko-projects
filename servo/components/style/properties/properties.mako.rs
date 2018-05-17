@@ -42,7 +42,8 @@ use selector_parser::PseudoElement;
 use selectors::parser::SelectorParseErrorKind;
 #[cfg(feature = "servo")] use servo_config::prefs::PREFS;
 use shared_lock::StylesheetGuards;
-use style_traits::{CssWriter, ParseError, ParsingMode, StyleParseErrorKind, ToCss};
+use style_traits::{CssWriter, KeywordsCollectFn, ParseError, ParsingMode};
+use style_traits::{SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 use stylesheets::{CssRuleType, Origin, UrlExtraData};
 #[cfg(feature = "servo")] use values::Either;
 use values::generics::text::LineHeight;
@@ -54,12 +55,6 @@ use str::{CssString, CssStringBorrow, CssStringWriter};
 use style_adjuster::StyleAdjuster;
 
 pub use self::declaration_block::*;
-
-#[cfg(feature = "gecko")]
-#[macro_export]
-macro_rules! property_name {
-    ($s: tt) => { atom!($s) }
-}
 
 <%!
     from data import Method, Keyword, to_rust_ident, to_camel_case, SYSTEM_FONT_LONGHANDS
@@ -114,11 +109,11 @@ pub mod longhands {
     <%include file="/longhand/inherited_box.mako.rs" />
     <%include file="/longhand/inherited_table.mako.rs" />
     <%include file="/longhand/inherited_text.mako.rs" />
+    <%include file="/longhand/inherited_ui.mako.rs" />
     <%include file="/longhand/list.mako.rs" />
     <%include file="/longhand/margin.mako.rs" />
     <%include file="/longhand/outline.mako.rs" />
     <%include file="/longhand/padding.mako.rs" />
-    <%include file="/longhand/pointing.mako.rs" />
     <%include file="/longhand/position.mako.rs" />
     <%include file="/longhand/table.mako.rs" />
     <%include file="/longhand/text.mako.rs" />
@@ -541,6 +536,43 @@ impl NonCustomPropertyId {
 
         false
     }
+
+    /// The supported types of this property. The return value should be
+    /// style_traits::CssType when it can become a bitflags type.
+    fn supported_types(&self) -> u8 {
+        const SUPPORTED_TYPES: [u8; ${len(data.longhands) + len(data.shorthands)}] = [
+            % for prop in data.longhands:
+                <${prop.specified_type()} as SpecifiedValueInfo>::SUPPORTED_TYPES,
+            % endfor
+            % for prop in data.shorthands:
+            % if prop.name == "all":
+                0, // 'all' accepts no value other than CSS-wide keywords
+            % else:
+                <shorthands::${prop.ident}::Longhands as SpecifiedValueInfo>::SUPPORTED_TYPES,
+            % endif
+            % endfor
+        ];
+        SUPPORTED_TYPES[self.0]
+    }
+
+    /// See PropertyId::collect_property_completion_keywords.
+    fn collect_property_completion_keywords(&self, f: KeywordsCollectFn) {
+        const COLLECT_FUNCTIONS: [&Fn(KeywordsCollectFn);
+                                  ${len(data.longhands) + len(data.shorthands)}] = [
+            % for prop in data.longhands:
+                &<${prop.specified_type()} as SpecifiedValueInfo>::collect_completion_keywords,
+            % endfor
+            % for prop in data.shorthands:
+            % if prop.name == "all":
+                &|_f| {}, // 'all' accepts no value other than CSS-wide keywords
+            % else:
+                &<shorthands::${prop.ident}::Longhands as SpecifiedValueInfo>::
+                    collect_completion_keywords,
+            % endif
+            % endfor
+        ];
+        COLLECT_FUNCTIONS[self.0](f);
+    }
 }
 
 impl From<LonghandId> for NonCustomPropertyId {
@@ -724,7 +756,8 @@ impl LonghandIdSet {
 }
 
 /// An enum to represent a CSS Wide keyword.
-#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, SpecifiedValueInfo,
+         ToCss)]
 pub enum CSSWideKeyword {
     /// The `initial` keyword.
     Initial,
@@ -781,6 +814,15 @@ bitflags! {
         const APPLIES_TO_FIRST_LINE = 1 << 4;
         /// This longhand property applies to ::placeholder.
         const APPLIES_TO_PLACEHOLDER = 1 << 5;
+
+        /* The following flags are currently not used in Rust code, they
+         * only need to be listed in corresponding properties so that
+         * they can be checked in the C++ side via ServoCSSPropList.h. */
+        /// This property's getComputedStyle implementation requires layout
+        /// to be flushed.
+        const GETCS_NEEDS_LAYOUT_FLUSH = 0;
+        /// This property can be animated on the compositor.
+        const CAN_ANIMATE_ON_COMPOSITOR = 0;
     }
 }
 
@@ -1683,6 +1725,18 @@ impl PropertyId {
         })
     }
 
+    /// Returns non-alias NonCustomPropertyId corresponding to this
+    /// property id.
+    fn non_custom_non_alias_id(&self) -> Option<NonCustomPropertyId> {
+        Some(match *self {
+            PropertyId::Custom(_) => return None,
+            PropertyId::Shorthand(id) => id.into(),
+            PropertyId::Longhand(id) => id.into(),
+            PropertyId::ShorthandAlias(id, _) => id.into(),
+            PropertyId::LonghandAlias(id, _) => id.into(),
+        })
+    }
+
     /// Whether the property is enabled for all content regardless of the
     /// stylesheet it was declared on (that is, in practice only checks prefs).
     #[inline]
@@ -1703,6 +1757,24 @@ impl PropertyId {
             Some(id) => id,
         };
         id.allowed_in(context)
+    }
+
+    /// Whether the property supports the given CSS type.
+    /// `ty` should a bitflags of constants in style_traits::CssType.
+    pub fn supports_type(&self, ty: u8) -> bool {
+        let id = self.non_custom_non_alias_id();
+        id.map_or(0, |id| id.supported_types()) & ty != 0
+    }
+
+    /// Collect supported starting word of values of this property.
+    ///
+    /// See style_traits::SpecifiedValueInfo::collect_completion_keywords for more
+    /// details.
+    pub fn collect_property_completion_keywords(&self, f: KeywordsCollectFn) {
+        if let Some(id) = self.non_custom_non_alias_id() {
+            id.collect_property_completion_keywords(f);
+        }
+        CSSWideKeyword::collect_completion_keywords(f);
     }
 }
 
@@ -2233,9 +2305,13 @@ pub mod style_structs {
                 pub fn compute_font_hash(&mut self) {
                     // Corresponds to the fields in
                     // `gfx::font_template::FontTemplateDescriptor`.
+                    //
+                    // FIXME(emilio): Where's font-style?
                     let mut hasher: FnvHasher = Default::default();
-                    hasher.write_u16(self.font_weight.0);
-                    self.font_stretch.hash(&mut hasher);
+                    // We hash the floating point number with four decimal
+                    // places.
+                    hasher.write_u64((self.font_weight.0 * 10000.).trunc() as u64);
+                    hasher.write_u64(((self.font_stretch.0).0 * 10000.).trunc() as u64);
                     self.font_family.hash(&mut hasher);
                     self.hash = hasher.finish()
                 }
@@ -2322,6 +2398,18 @@ pub mod style_structs {
                 pub fn ${longhand.ident}_mod(&self, index: usize)
                     -> longhands::${longhand.ident}::computed_value::SingleComputedValue {
                     self.${longhand.ident}_at(index % self.${longhand.ident}_count())
+                }
+
+                /// Clone the computed value for the property.
+                #[allow(non_snake_case)]
+                #[inline]
+                #[cfg(feature = "gecko")]
+                pub fn clone_${longhand.ident}(
+                    &self,
+                ) -> longhands::${longhand.ident}::computed_value::T {
+                    longhands::${longhand.ident}::computed_value::T(
+                        self.${longhand.ident}_iter().collect()
+                    )
                 }
             % endif
         % endfor
@@ -2555,10 +2643,10 @@ impl ComputedValuesInner {
     /// ineffective, and would yield an empty `::before` or `::after`
     /// pseudo-element.
     pub fn ineffective_content_property(&self) -> bool {
-        use properties::longhands::content::computed_value::T;
+        use values::generics::counters::Content;
         match self.get_counters().content {
-            T::Normal | T::None => true,
-            T::Items(ref items) => items.is_empty(),
+            Content::Normal | Content::None => true,
+            Content::Items(ref items) => items.is_empty(),
         }
     }
 
@@ -3411,7 +3499,7 @@ where
             let source = node.style_source();
 
             let declarations = if source.is_some() {
-                source.read(cascade_level.guard(guards)).declaration_importance_iter()
+                source.as_ref().unwrap().read(cascade_level.guard(guards)).declaration_importance_iter()
             } else {
                 // The root node has no style source.
                 DeclarationImportanceIterator::new(&[], &empty)

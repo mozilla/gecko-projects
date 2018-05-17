@@ -1,6 +1,6 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.import json
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import mozunit
 import sys
@@ -121,6 +121,29 @@ class TestParser(unittest.TestCase):
         self.assertEqual(hist.keyed(), False)
 
         parse_histograms.whitelists = None
+
+    def test_high_value(self):
+        SAMPLE_HISTOGRAM = {
+            "TEST_HISTOGRAM_WHITELIST_N_BUCKETS": {
+                "record_in_processes": ["main", "content"],
+                "alert_emails": ["team@mozilla.xyz"],
+                "bug_numbers": [1383793],
+                "expires_in_version": "never",
+                "kind": "exponential",
+                "low": 1024,
+                "high": 2 ** 64,
+                "n_buckets": 100,
+                "description": "Test histogram",
+            }
+        }
+        histograms = load_histogram(SAMPLE_HISTOGRAM)
+        parse_histograms.load_whitelist()
+
+        parse_histograms.Histogram('TEST_HISTOGRAM_WHITELIST_N_BUCKETS',
+                                   histograms['TEST_HISTOGRAM_WHITELIST_N_BUCKETS'],
+                                   strict_type_checks=True)
+
+        self.assertRaises(SystemExit, ParserError.exit_func)
 
     def test_high_n_buckets(self):
         SAMPLE_HISTOGRAM = {

@@ -31,9 +31,9 @@ pub trait YamlHelper {
     fn as_border_radius_component(&self) -> LayoutSize;
     fn as_border_radius(&self) -> Option<BorderRadius>;
     fn as_transform_style(&self) -> Option<TransformStyle>;
+    fn as_glyph_raster_space(&self) -> Option<GlyphRasterSpace>;
     fn as_clip_mode(&self) -> Option<ClipMode>;
     fn as_mix_blend_mode(&self) -> Option<MixBlendMode>;
-    fn as_scroll_policy(&self) -> Option<ScrollPolicy>;
     fn as_filter_op(&self) -> Option<FilterOp>;
     fn as_vec_filter_op(&self) -> Option<Vec<FilterOp>>;
 }
@@ -120,8 +120,6 @@ define_string_enum!(
         Luminosity = "luminosity"
     ]
 );
-
-define_string_enum!(ScrollPolicy, [Scrollable = "scrollable", Fixed = "fixed"]);
 
 define_string_enum!(
     LineOrientation,
@@ -519,11 +517,23 @@ impl YamlHelper for Yaml {
         self.as_str().and_then(|x| StringEnum::from_str(x))
     }
 
-    fn as_mix_blend_mode(&self) -> Option<MixBlendMode> {
-        self.as_str().and_then(|x| StringEnum::from_str(x))
+    fn as_glyph_raster_space(&self) -> Option<GlyphRasterSpace> {
+        self.as_str().and_then(|s| {
+            match parse_function(s) {
+                ("screen", _, _) => {
+                    Some(GlyphRasterSpace::Screen)
+                }
+                ("local", ref args, _) if args.len() == 1 => {
+                    Some(GlyphRasterSpace::Local(args[0].parse().unwrap()))
+                }
+                f => {
+                    panic!("error parsing glyph raster space {:?}", f);
+                }
+            }
+        })
     }
 
-    fn as_scroll_policy(&self) -> Option<ScrollPolicy> {
+    fn as_mix_blend_mode(&self) -> Option<MixBlendMode> {
         self.as_str().and_then(|x| StringEnum::from_str(x))
     }
 

@@ -8,11 +8,11 @@
 #include "nsIContentPolicy.idl"
 
 interface nsIChannel;
-interface nsIDOMDocument;
 interface nsINode;
 interface nsIPrincipal;
 interface nsIRedirectHistoryEntry;
 interface nsIURI;
+webidl Document;
 native LoadContextRef(already_AddRefed<nsISupports>);
 %{C++
 #include "nsTArray.h"
@@ -205,7 +205,7 @@ interface nsILoadInfo : nsISupports
 
   /**
    * Load an error page, it should be one of following : about:neterror,
-   * about:certerror, about:blocked, or about:tabcrashed.
+   * about:certerror, about:blocked, about:tabcrashed or about:restartrequired.
    */
   const unsigned long SEC_LOAD_ERROR_PAGE = (1<<13);
 
@@ -336,7 +336,7 @@ interface nsILoadInfo : nsISupports
    * LoadingDocument is null. When the LoadingDocument is not null, the
    * LoadingPrincipal is set to the principal of the LoadingDocument.
    */
-  readonly attribute nsIDOMDocument loadingDocument;
+  readonly attribute Document loadingDocument;
 
   /**
    * A C++-friendly version of loadingDocument (loadingNode).
@@ -626,18 +626,6 @@ interface nsILoadInfo : nsISupports
    * you are doing!!!
    */
   void resetPrincipalToInheritToNullPrincipal();
-
-  /**
-   * Allows certain top-level channels to be agnostic to CSP. If set,
-   * this attribute needs to be set before the CSP is initialized
-   * within nsDocument. If set after, this attribute has no effect.
-   * Please note, that this logic is only available for loads of TYPE_DOCUMENT,
-   * and is discarded for other loads.
-   *
-   * WARNING: Please only use that function if you know exactly what
-   * you are doing!!!
-   */
-  [infallible] attribute boolean allowDocumentToBeAgnosticToCSP;
 
   /**
    * Customized OriginAttributes within LoadInfo to allow overwriting of the

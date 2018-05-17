@@ -1,5 +1,7 @@
 load(libdir + "wasm-binary.js");
 
+const { extractStackFrameFunction } = WasmHelpers;
+
 const Module = WebAssembly.Module;
 const CompileError = WebAssembly.CompileError;
 
@@ -478,7 +480,7 @@ function checkIllegalPrefixed(prefix, opcode) {
     assertEq(WebAssembly.validate(binary), false);
 }
 
-// Illegal AtomicPrefix opcodes
+// Illegal ThreadPrefix opcodes
 //
 // June 2017 threads draft:
 //
@@ -486,19 +488,25 @@ function checkIllegalPrefixed(prefix, opcode) {
 //  0x10 .. 0x4f are primitive atomic ops
 
 for (let i = 3; i < 0x10; i++)
-    checkIllegalPrefixed(AtomicPrefix, i);
+    checkIllegalPrefixed(ThreadPrefix, i);
 
 for (let i = 0x4f; i < 0x100; i++)
-    checkIllegalPrefixed(AtomicPrefix, i);
+    checkIllegalPrefixed(ThreadPrefix, i);
 
 // Illegal Numeric opcodes
 //
 // Feb 2018 numeric draft:
 //
-//  0x00 .. 0x07 are saturating truncation ops
+//  0x00 .. 0x07 are saturating truncation ops.  0x40 and 0x41 are
+//  from the bulk memory proposal.  0x40/0x41 are unofficial values,
+//  until such time as there is an official assignment for memory.copy/fill
+//  subopcodes.
 
-for (let i = 0x08; i < 256; i++)
-    checkIllegalPrefixed(NumericPrefix, i);
+for (let i = 0; i < 256; i++) {
+    if (i <= 0x07 || i == 0x40 || i == 0x41)
+        continue;
+    checkIllegalPrefixed(MiscPrefix, i);
+}
 
 // Illegal SIMD opcodes (all of them, for now)
 for (let i = 0; i < 256; i++)
@@ -508,7 +516,7 @@ for (let i = 0; i < 256; i++)
 for (let i = 0; i < 256; i++)
     checkIllegalPrefixed(MozPrefix, i);
 
-for (let prefix of [AtomicPrefix, NumericPrefix, SimdPrefix, MozPrefix]) {
+for (let prefix of [ThreadPrefix, MiscPrefix, SimdPrefix, MozPrefix]) {
     // Prefix without a subsequent opcode
     let binary = moduleWithSections([v2vSigSection, declSection([0]), bodySection([funcBody({locals:[], body:[prefix]})])]);
     assertErrorMessage(() => wasmEval(binary), CompileError, /unrecognized opcode/);
@@ -538,8 +546,7 @@ function runStackTraceTest(moduleName, funcNames, expectedName) {
 
     var result = "";
     var callback = () => {
-        var prevFrameEntry = new Error().stack.split('\n')[1];
-        result = prevFrameEntry.split('@')[0];
+        result = extractStackFrameFunction(new Error().stack.split('\n')[1]);
     };
     wasmEval(moduleWithSections(sections), {"env": { callback }}).run();
     assertEq(result, expectedName);
@@ -556,7 +563,7 @@ runStackTraceTest(null, [{name:'blah'}, {name:'te\xE0\xFF'}], 'te\xE0\xFF');
 runStackTraceTest(null, [{name:'blah'}], 'wasm-function[1]');
 runStackTraceTest(null, [], 'wasm-function[1]');
 runStackTraceTest("", [{name:'blah'}, {name:'test'}], 'test');
-runStackTraceTest("a", [{name:'blah'}, {name:'test'}], 'test');
+runStackTraceTest("a", [{name:'blah'}, {name:'test'}], 'a.test');
 // Notice that invalid names section content shall not fail the parsing
 runStackTraceTest(null, [{name:'blah'}, {name:'test', index: 2}], 'wasm-function[1]'); // invalid index
 runStackTraceTest(null, [{name:'blah'}, {name:'test', index: 100000}], 'wasm-function[1]'); // invalid index

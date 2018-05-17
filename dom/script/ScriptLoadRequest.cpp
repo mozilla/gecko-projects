@@ -5,7 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ModuleLoadRequest.h"
+
 #include "mozilla/HoldDropJSObjects.h"
+#include "mozilla/Unused.h"
+
 #include "nsICacheInfoChannel.h"
 #include "ScriptLoadRequest.h"
 #include "ScriptSettings.h"
@@ -26,11 +29,13 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(ScriptLoadRequest)
 NS_IMPL_CYCLE_COLLECTION_CLASS(ScriptLoadRequest)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(ScriptLoadRequest)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mElement)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCacheInfo)
   tmp->DropBytecodeCacheReferences();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(ScriptLoadRequest)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCacheInfo)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -61,7 +66,6 @@ ScriptLoadRequest::ScriptLoadRequest(ScriptKind aKind,
   , mWasCompiledOMT(false)
   , mIsTracking(false)
   , mOffThreadToken(nullptr)
-  , mScriptText()
   , mScriptBytecode()
   , mBytecodeOffset(0)
   , mURI(aURI)
@@ -147,6 +151,67 @@ ScriptLoadRequest::SetScriptMode(bool aDeferAttr, bool aAsyncAttr)
     mScriptMode = ScriptMode::eDeferred;
   } else {
     mScriptMode = ScriptMode::eBlocking;
+  }
+}
+
+void
+ScriptLoadRequest::SetUnknownDataType()
+{
+  mDataType = DataType::eUnknown;
+  mScriptData.reset();
+}
+
+void
+ScriptLoadRequest::SetTextSource()
+{
+  MOZ_ASSERT(IsUnknownDataType());
+  mDataType = DataType::eTextSource;
+  mScriptData.emplace(VariantType<Vector<char16_t>>());
+}
+
+void
+ScriptLoadRequest::SetBinASTSource()
+{
+#ifdef JS_BUILD_BINAST
+  MOZ_ASSERT(IsUnknownDataType());
+  mDataType = DataType::eBinASTSource;
+  mScriptData.emplace(VariantType<Vector<uint8_t>>());
+#else
+  MOZ_CRASH("BinAST not supported");
+#endif
+}
+
+void
+ScriptLoadRequest::SetBytecode()
+{
+  MOZ_ASSERT(IsUnknownDataType());
+  mDataType = DataType::eBytecode;
+}
+
+bool
+ScriptLoadRequest::ShouldAcceptBinASTEncoding() const
+{
+#ifdef JS_BUILD_BINAST
+  // We accept the BinAST encoding if we're using a secure connection.
+
+  bool isHTTPS = false;
+  nsresult rv = mURI->SchemeIs("https", &isHTTPS);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  Unused << rv;
+
+  return isHTTPS;
+#else
+  MOZ_CRASH("BinAST not supported");
+#endif
+}
+
+void
+ScriptLoadRequest::ClearScriptSource()
+{
+  if (IsTextSource()) {
+    ScriptText().clearAndFree();
+  } else if (IsBinASTSource()) {
+    ScriptBinASTData().clearAndFree();
   }
 }
 

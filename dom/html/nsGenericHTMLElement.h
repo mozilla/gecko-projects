@@ -9,7 +9,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "nsMappedAttributeElement.h"
-#include "nsIDOMElement.h"
+#include "nsIDOMNode.h"
 #include "nsNameSpaceManager.h"  // for kNameSpaceID_None
 #include "nsIFormControl.h"
 #include "nsGkAtoms.h"
@@ -47,7 +47,7 @@ typedef nsMappedAttributeElement nsGenericHTMLElementBase;
  * A common superclass for HTML elements
  */
 class nsGenericHTMLElement : public nsGenericHTMLElementBase,
-                             public nsIDOMElement
+                             public nsIDOMNode
 {
 public:
   using Element::SetTabIndex;
@@ -1345,17 +1345,5 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Title)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Track)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Unknown)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Video)
-
-inline nsISupports*
-ToSupports(nsGenericHTMLElement* aHTMLElement)
-{
-  return static_cast<nsIContent*>(aHTMLElement);
-}
-
-inline nsISupports*
-ToCanonicalSupports(nsGenericHTMLElement* aHTMLElement)
-{
-  return static_cast<nsIContent*>(aHTMLElement);
-}
 
 #endif /* nsGenericHTMLElement_h___ */

@@ -5,6 +5,8 @@
 // This verifies that bootstrappable add-ons can be used without restarts.
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
+Cu.importGlobalProperties(["XMLHttpRequest"]);
+
 // Enable loading extensions from the user scopes
 Services.prefs.setIntPref("extensions.enabledScopes",
                           AddonManager.SCOPE_PROFILE + AddonManager.SCOPE_USER);
@@ -39,16 +41,10 @@ testserver.registerDirectory("/data/", do_get_file("data"));
  * itself when asked for mozISpellCheckingEngine.
  */
 var HunspellEngine = {
-  dictionaryDirs: [],
+  dictionaryURIs: new Map(),
   listener: null,
 
-  QueryInterface: function hunspell_qi(iid) {
-    if (iid.equals(Ci.nsISupports) ||
-        iid.equals(Ci.nsIFactory) ||
-        iid.equals(Ci.mozISpellCheckingEngine))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI(["nsIFactory", "mozISpellCheckingEngine"]),
   createInstance: function hunspell_ci(outer, iid) {
     if (outer)
       throw Cr.NS_ERROR_NO_AGGREGATION;
@@ -58,16 +54,16 @@ var HunspellEngine = {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
 
-  addDirectory: function hunspell_addDirectory(dir) {
-    this.dictionaryDirs.push(dir);
+  addDictionary(lang, uri) {
+    this.dictionaryURIs.set(lang, uri);
     if (this.listener)
-      this.listener("addDirectory");
+      this.listener("addDictionary");
   },
 
-  removeDirectory: function hunspell_addDirectory(dir) {
-    this.dictionaryDirs.splice(this.dictionaryDirs.indexOf(dir), 1);
+  removeDictionary(lang, uri) {
+    this.dictionaryURIs.delete(lang);
     if (this.listener)
-      this.listener("removeDirectory");
+      this.listener("removeDictionary");
   },
 
   getInterface: function hunspell_gi(iid) {
@@ -99,18 +95,23 @@ var HunspellEngine = {
   },
 
   isDictionaryEnabled: function hunspell_isDictionaryEnabled(name) {
-    return this.dictionaryDirs.some(function(dir) {
-      var dic = dir.clone();
-      dic.append(name);
-      return dic.exists();
-    });
+    let uri = this.dictionaryURIs.get(name.replace(/\.dic$/, ""));
+    if (!uri) {
+      return false;
+    }
+    try {
+      let xhr = new XMLHttpRequest();
+      xhr.open("GET", uri.spec.replace(/\.aff$/, ".dic"), false);
+      xhr.send();
+      return true;
+    } catch (e) {
+      Cu.reportError(e);
+    }
+    return false;
   }
 };
 
 add_task(async function setup() {
-  ok(AddonTestUtils.testUnpacked,
-     "Dictionaries are only supported when installed unpacked.");
-
   await promiseStartupManager();
 });
 
@@ -151,7 +152,7 @@ add_task(async function test_1() {
       ok(addon.hasResource("install.rdf"));
       HunspellEngine.listener = function(aEvent) {
         HunspellEngine.listener = null;
-        equal(aEvent, "addDirectory");
+        equal(aEvent, "addDictionary");
         resolve();
       };
     });
@@ -222,7 +223,7 @@ add_task(async function test_2() {
 add_task(async function test_3() {
   await promiseShutdownManager();
   ok(!HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   ok(!HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
   do_check_not_in_crash_annotation(ID_DICT, "1.0");
@@ -270,10 +271,12 @@ add_task(async function test_4() {
 add_task(async function test_5() {
   await promiseShutdownManager();
 
-  ok(!HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
+  // We don't unregister dictionaries at app shutdown, so the dictionary
+  // will still be registered at this point.
+  ok(HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
   do_check_not_in_crash_annotation(ID_DICT, "1.0");
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   ok(HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
   do_check_in_crash_annotation(ID_DICT, "1.0");
@@ -284,7 +287,6 @@ add_task(async function test_5() {
   ok(!addon.appDisabled);
   ok(!addon.userDisabled);
   ok(addon.isActive);
-  ok(!isExtensionInAddonsList(profileDir, addon.id));
 });
 
 // Tests that uninstalling doesn't require a restart
@@ -320,7 +322,7 @@ add_task(async function test_7() {
 add_task(async function test_8() {
   await promiseShutdownManager();
   await AddonTestUtils.manuallyInstall(XPI_DICT);
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   let addon = await AddonManager.getAddonByID(ID_DICT);
   notEqual(addon, null);
@@ -336,7 +338,7 @@ add_task(async function test_8() {
 add_task(async function test_9() {
   await promiseShutdownManager();
   await AddonTestUtils.manuallyUninstall(profileDir, ID_DICT);
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   let addon = await AddonManager.getAddonByID(ID_DICT);
   equal(addon, null);
@@ -349,7 +351,7 @@ add_task(async function test_9() {
 add_task(async function test_12() {
   await promiseShutdownManager();
   await AddonTestUtils.manuallyInstall(XPI_DICT);
-  await promiseStartupManager(true);
+  await promiseStartupManager();
 
   let addon = await AddonManager.getAddonByID(ID_DICT);
   notEqual(addon, null);
@@ -375,11 +377,14 @@ add_task(async function test_16() {
 
   await promiseShutdownManager();
 
-  // Should have stopped
-  ok(!HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
+  // We don't unregister dictionaries at app shutdown, so the dictionary
+  // will still be registered at this point.
+  ok(HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
+
+  HunspellEngine.dictionaryURIs.delete("ab-CD");
 
   gAppInfo.inSafeMode = true;
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   addon = await AddonManager.getAddonByID(ID_DICT);
   // Should still be stopped
@@ -388,7 +393,7 @@ add_task(async function test_16() {
 
   await promiseShutdownManager();
   gAppInfo.inSafeMode = false;
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   // Should have started
   ok(HunspellEngine.isDictionaryEnabled("ab-CD.dic"));
@@ -421,8 +426,7 @@ add_task(async function test_23() {
   ]);
 
   let url = "http://example.com/addons/test_dictionary.xpi";
-  let install = await AddonManager.getInstallForURL(url, null,
-                                                    "application/x-xpinstall");
+  let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall");
   ensure_test_completed();
 
   notEqual(install, null);

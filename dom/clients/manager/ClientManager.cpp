@@ -27,8 +27,13 @@ using mozilla::ipc::PrincipalInfo;
 
 namespace {
 
-uint32_t kBadThreadLocalIndex = -1;
+const uint32_t kBadThreadLocalIndex = -1;
+const uint32_t kThreadLocalMagic1 = 0x8d57eea6;
+const uint32_t kThreadLocalMagic2 = 0x59f375c9;
+uint32_t sClientManagerThreadLocalMagic1 = kThreadLocalMagic1;
 uint32_t sClientManagerThreadLocalIndex = kBadThreadLocalIndex;
+uint32_t sClientManagerThreadLocalMagic2 = kThreadLocalMagic2;
+uint32_t sClientManagerThreadLocalIndexDuplicate = kBadThreadLocalIndex;
 
 } // anonymous namespace
 
@@ -45,8 +50,15 @@ ClientManager::ClientManager()
     WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
     MOZ_DIAGNOSTIC_ASSERT(workerPrivate);
 
+    // Note, it would be nice to replace this with a WorkerRef, but
+    // currently there is no WorkerRef option that matches what we
+    // need here.  We need something like a StrongWorkerRef that will
+    // let us keep the worker alive until our actor is destroyed, but
+    // we also need to use AllowIdleShutdownStart like WeakWorkerRef.
+    // We need AllowIdleShutdownStart since every worker thread will
+    // have a ClientManager to support creating its ClientSource.
     workerHolderToken =
-      WorkerHolderToken::Create(workerPrivate, Closing,
+      WorkerHolderToken::Create(workerPrivate, Terminating,
                                 WorkerHolderToken::AllowIdleShutdownStart);
     if (NS_WARN_IF(!workerHolderToken)) {
       Shutdown();
@@ -72,7 +84,11 @@ ClientManager::~ClientManager()
 
   Shutdown();
 
-  MOZ_DIAGNOSTIC_ASSERT(this == PR_GetThreadPrivate(sClientManagerThreadLocalIndex));
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalMagic1 == kThreadLocalMagic1);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalMagic2 == kThreadLocalMagic2);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex != kBadThreadLocalIndex);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex == sClientManagerThreadLocalIndexDuplicate);
+  MOZ_RELEASE_ASSERT(this == PR_GetThreadPrivate(sClientManagerThreadLocalIndex));
 
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   PRStatus status =
@@ -158,12 +174,10 @@ ClientManager::StartOp(const ClientOpConstructorArgs& aArgs,
   // the ClientHandle might get de-refed and teardown the actor before we
   // get an answer.
   RefPtr<ClientManager> kungFuGrip = this;
-  promise->Then(aSerialEventTarget, __func__,
-                [kungFuGrip] (const ClientOpResult&) { },
-                [kungFuGrip] (nsresult) { });
 
-  MaybeExecute([aArgs, promise] (ClientManagerChild* aActor) {
-    ClientManagerOpChild* actor = new ClientManagerOpChild(aArgs, promise);
+  MaybeExecute([aArgs, promise, kungFuGrip] (ClientManagerChild* aActor) {
+    ClientManagerOpChild* actor =
+      new ClientManagerOpChild(kungFuGrip, aArgs, promise);
     if (!aActor->SendPClientManagerOpConstructor(actor, aArgs)) {
       // Constructor failure will reject promise via ActorDestroy()
       return;
@@ -180,7 +194,10 @@ ClientManager::StartOp(const ClientOpConstructorArgs& aArgs,
 already_AddRefed<ClientManager>
 ClientManager::GetOrCreateForCurrentThread()
 {
-  MOZ_DIAGNOSTIC_ASSERT(sClientManagerThreadLocalIndex != kBadThreadLocalIndex);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalMagic1 == kThreadLocalMagic1);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalMagic2 == kThreadLocalMagic2);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex != kBadThreadLocalIndex);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex == sClientManagerThreadLocalIndexDuplicate);
   RefPtr<ClientManager> cm =
     static_cast<ClientManager*>(PR_GetThreadPrivate(sClientManagerThreadLocalIndex));
 
@@ -194,7 +211,7 @@ ClientManager::GetOrCreateForCurrentThread()
     MOZ_DIAGNOSTIC_ASSERT(status == PR_SUCCESS);
   }
 
-  MOZ_ASSERT(cm);
+  MOZ_RELEASE_ASSERT(cm);
   return cm.forget();
 }
 
@@ -211,11 +228,20 @@ void
 ClientManager::Startup()
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalMagic1 == kThreadLocalMagic1);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalMagic2 == kThreadLocalMagic2);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex == kBadThreadLocalIndex);
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex == sClientManagerThreadLocalIndexDuplicate);
+
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   PRStatus status =
 #endif
     PR_NewThreadPrivateIndex(&sClientManagerThreadLocalIndex, nullptr);
   MOZ_DIAGNOSTIC_ASSERT(status == PR_SUCCESS);
+
+  MOZ_RELEASE_ASSERT(sClientManagerThreadLocalIndex != kBadThreadLocalIndex);
+  sClientManagerThreadLocalIndexDuplicate = sClientManagerThreadLocalIndex;
 
   ClientPrefsInit();
 }

@@ -129,7 +129,6 @@ add_task(async function test_delete() {
 
   extension.sendMessage("delete-all");
   [historyClearedCount, removedUrls] = await extension.awaitMessage("history-cleared");
-  equal(PlacesUtils.history.hasHistoryEntries, false, "history is empty");
   equal(historyClearedCount, 2, "onVisitRemoved called for each clearing of history");
   equal(removedUrls.length, 3, "onVisitRemoved called the expected number of times");
   for (let i = 1; i < 3; ++i) {
@@ -413,7 +412,7 @@ add_task(async function test_transition_types() {
     // Only session history contains TRANSITION_EMBED visits,
     // So global history query cannot find them.
     // ["auto_subframe", Ci.nsINavHistoryService.TRANSITION_EMBED],
-    // Redirects are not correctly tested here because History::UpdatePlaces
+    // Redirects are not correctly tested here because History
     // will not make redirect entries hidden.
     ["link", Ci.nsINavHistoryService.TRANSITION_REDIRECT_PERMANENT],
     ["link", Ci.nsINavHistoryService.TRANSITION_REDIRECT_TEMPORARY],

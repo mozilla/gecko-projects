@@ -73,7 +73,7 @@ nsAccUtils::SetAccGroupAttrs(nsIPersistentProperties *aAttributes,
 }
 
 int32_t
-nsAccUtils::GetDefaultLevel(Accessible* aAccessible)
+nsAccUtils::GetDefaultLevel(const Accessible* aAccessible)
 {
   roles::Role role = aAccessible->Role();
 
@@ -92,7 +92,7 @@ nsAccUtils::GetDefaultLevel(Accessible* aAccessible)
 }
 
 int32_t
-nsAccUtils::GetARIAOrDefaultLevel(Accessible* aAccessible)
+nsAccUtils::GetARIAOrDefaultLevel(const Accessible* aAccessible)
 {
   int32_t level = 0;
   nsCoreUtils::GetUIntAttr(aAccessible->GetContent(),
@@ -436,21 +436,27 @@ nsAccUtils::MustPrune(Accessible* aAccessible)
 {
   roles::Role role = aAccessible->Role();
 
-  // Don't prune the tree for certain roles if the tree is more complex than
-  // a single text leaf.
   return
-    (role == roles::MENUITEM ||
-     role == roles::COMBOBOX_OPTION ||
-     role == roles::OPTION ||
-     role == roles::ENTRY ||
-     role == roles::FLAT_EQUATION ||
-     role == roles::PASSWORD_TEXT ||
-     role == roles::PUSHBUTTON ||
-     role == roles::TOGGLE_BUTTON ||
-     role == roles::GRAPHIC ||
-     role == roles::SLIDER ||
-     role == roles::PROGRESSBAR ||
-     role == roles::SEPARATOR) &&
-    aAccessible->ContentChildCount() == 1 &&
-    aAccessible->ContentChildAt(0)->IsTextLeaf();
+    // Always prune the tree for sliders, as it doesn't make sense for a slider
+    // to have descendants and this confuses NVDA.
+    role == roles::SLIDER ||
+    // Don't prune the tree for certain roles if the tree is more complex than
+    // a single text leaf.
+    (
+     (
+      role == roles::MENUITEM ||
+      role == roles::COMBOBOX_OPTION ||
+      role == roles::OPTION ||
+      role == roles::ENTRY ||
+      role == roles::FLAT_EQUATION ||
+      role == roles::PASSWORD_TEXT ||
+      role == roles::PUSHBUTTON ||
+      role == roles::TOGGLE_BUTTON ||
+      role == roles::GRAPHIC ||
+      role == roles::PROGRESSBAR ||
+      role == roles::SEPARATOR
+     ) &&
+     aAccessible->ContentChildCount() == 1 &&
+     aAccessible->ContentChildAt(0)->IsTextLeaf()
+    );
 }

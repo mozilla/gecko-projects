@@ -52,7 +52,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
 #include "Connection.h"
-#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
+#include "mozilla/dom/Event.h" // for Event
 #include "nsGlobalWindow.h"
 #include "nsIIdleObserver.h"
 #include "nsIPermissionManager.h"
@@ -101,52 +101,6 @@ static bool sVibratorEnabled   = false;
 static uint32_t sMaxVibrateMS  = 0;
 static uint32_t sMaxVibrateListLen = 0;
 static const char* kVibrationPermissionType = "vibration";
-
-static void
-AddPermission(nsIPrincipal* aPrincipal, const char* aType, uint32_t aPermission,
-              uint32_t aExpireType, int64_t aExpireTime)
-{
-  MOZ_ASSERT(aType);
-  MOZ_ASSERT(aPrincipal);
-
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  if (!permMgr) {
-    return;
-  }
-  permMgr->AddFromPrincipal(aPrincipal, aType, aPermission, aExpireType,
-                            aExpireTime);
-}
-
-static uint32_t
-GetPermission(nsPIDOMWindowInner* aWindow, const char* aType)
-{
-  MOZ_ASSERT(aType);
-
-  uint32_t permission = nsIPermissionManager::UNKNOWN_ACTION;
-
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  if (!permMgr) {
-    return permission;
-  }
-  permMgr->TestPermissionFromWindow(aWindow, aType, &permission);
-  return permission;
-}
-
-static uint32_t
-GetPermission(nsIPrincipal* aPrincipal, const char* aType)
-{
-  MOZ_ASSERT(aType);
-  MOZ_ASSERT(aPrincipal);
-
-  uint32_t permission = nsIPermissionManager::UNKNOWN_ACTION;
-
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  if (!permMgr) {
-    return permission;
-  }
-  permMgr->TestPermissionFromPrincipal(aPrincipal, aType, &permission);
-  return permission;
-}
 
 /* static */
 void
@@ -661,31 +615,6 @@ Navigator::GetDoNotTrack(nsAString &aResult)
   }
 }
 
-bool
-Navigator::JavaEnabled(CallerType aCallerType, ErrorResult& aRv)
-{
-  Telemetry::AutoTimer<Telemetry::CHECK_JAVA_ENABLED> telemetryTimer;
-
-  // Return true if we have a handler for the java mime
-  nsAutoString javaMIME;
-  Preferences::GetString("plugin.java.mime", javaMIME);
-  NS_ENSURE_TRUE(!javaMIME.IsEmpty(), false);
-
-  if (!mMimeTypes) {
-    if (!mWindow) {
-      aRv.Throw(NS_ERROR_UNEXPECTED);
-      return false;
-    }
-    mMimeTypes = new nsMimeTypeArray(mWindow);
-  }
-
-  RefreshMIMEArray();
-
-  nsMimeType *mimeType = mMimeTypes->NamedItem(javaMIME, aCallerType);
-
-  return mimeType && mimeType->GetEnabledPlugin();
-}
-
 uint64_t
 Navigator::HardwareConcurrency()
 {
@@ -748,10 +677,10 @@ MayVibrate(nsIDocument* doc) {
 }
 
 NS_IMETHODIMP
-VibrateWindowListener::HandleEvent(nsIDOMEvent* aEvent)
+VibrateWindowListener::HandleEvent(Event* aEvent)
 {
   nsCOMPtr<nsIDocument> doc =
-    do_QueryInterface(aEvent->InternalDOMEvent()->GetTarget());
+    do_QueryInterface(aEvent->GetTarget());
 
   if (!MayVibrate(doc)) {
     // It's important that we call CancelVibrate(), not Vibrate() with an
@@ -844,10 +773,14 @@ Navigator::SetVibrationPermission(bool aPermitted, bool aPersistent)
   }
 
   if (aPersistent) {
-    AddPermission(doc->NodePrincipal(), kVibrationPermissionType,
-                  aPermitted ? nsIPermissionManager::ALLOW_ACTION :
-                               nsIPermissionManager::DENY_ACTION,
-                  nsIPermissionManager::EXPIRE_SESSION, 0);
+    nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
+    if (!permMgr) {
+      return;
+    }
+    permMgr->AddFromPrincipal(doc->NodePrincipal(), kVibrationPermissionType,
+                              aPermitted ? nsIPermissionManager::ALLOW_ACTION :
+                                           nsIPermissionManager::DENY_ACTION,
+                              nsIPermissionManager::EXPIRE_SESSION, 0);
   }
 }
 
@@ -891,7 +824,15 @@ Navigator::Vibrate(const nsTArray<uint32_t>& aPattern)
   }
 
   mRequestedVibrationPattern.SwapElements(pattern);
-  uint32_t permission = GetPermission(mWindow, kVibrationPermissionType);
+  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
+  if (!permMgr) {
+    return false;
+  }
+
+  uint32_t permission = nsIPermissionManager::UNKNOWN_ACTION;
+
+  permMgr->TestPermissionFromPrincipal(doc->NodePrincipal(), kVibrationPermissionType,
+                                       &permission);
 
   if (permission == nsIPermissionManager::ALLOW_ACTION ||
       mRequestedVibrationPattern.IsEmpty() ||
@@ -1553,53 +1494,10 @@ Navigator::OnNavigation()
   }
 }
 
-bool
-Navigator::CheckPermission(const char* type)
-{
-  return CheckPermission(mWindow, type);
-}
-
-/* static */
-bool
-Navigator::CheckPermission(nsPIDOMWindowInner* aWindow, const char* aType)
-{
-  if (!aWindow) {
-    return false;
-  }
-
-  uint32_t permission = GetPermission(aWindow, aType);
-  return permission == nsIPermissionManager::ALLOW_ACTION;
-}
-
 JSObject*
 Navigator::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
   return NavigatorBinding::Wrap(cx, this, aGivenProto);
-}
-
-/* static */
-bool
-Navigator::HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */)
-{
-  nsCOMPtr<nsIPowerManagerService> pmService =
-    do_GetService(POWERMANAGERSERVICE_CONTRACTID);
-  // No service means no wake lock support
-  return !!pmService;
-}
-
-/* static */
-bool
-Navigator::HasWifiManagerSupport(JSContext* /* unused */,
-                                 JSObject* aGlobal)
-{
-  // On XBL scope, the global object is NOT |window|. So we have
-  // to use nsContentUtils::GetObjectPrincipal to get the principal
-  // and test directly with permission manager.
-
-  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aGlobal);
-  uint32_t permission = GetPermission(principal, "wifi-manage");
-
-  return permission == nsIPermissionManager::ALLOW_ACTION;
 }
 
 /* static */

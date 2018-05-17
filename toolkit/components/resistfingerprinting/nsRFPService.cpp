@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Preferences.h"
@@ -107,8 +108,9 @@ nsRFPService::GetOrCreate()
   return sRFPService;
 }
 
-inline double
-TimerResolution()
+/* static */
+double
+nsRFPService::TimerResolution()
 {
   if(nsRFPService::IsResistFingerprintingEnabled()) {
     return max(100000.0, (double)sResolutionUSec);
@@ -689,26 +691,19 @@ nsRFPService::GetSpoofedUserAgent(nsACString &userAgent)
   uint32_t firefoxVersion = appVersion.ToInteger(&rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Starting from Firefox 10, Firefox ESR was released once every seven
-  // Firefox releases, e.g. Firefox 10, 17, 24, 31, and so on.
-  // We infer the last and closest ESR version based on this rule.
-  nsCOMPtr<nsIXULRuntime> runtime =
-    do_GetService("@mozilla.org/xre/runtime;1", &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoCString updateChannel;
-  rv = runtime->GetDefaultUpdateChannel(updateChannel);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // If we are running in Firefox ESR, determine whether the formula of ESR
   // version has changed.  Once changed, we must update the formula in this
   // function.
-  if (updateChannel.EqualsLiteral("esr")) {
-    MOZ_ASSERT(((firefoxVersion % 7) == 3),
+  if (!strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "esr")) {
+    MOZ_ASSERT(((firefoxVersion % 7) == 4),
       "Please udpate ESR version formula in nsRFPService.cpp");
   }
 
-  uint32_t spoofedVersion = firefoxVersion - ((firefoxVersion - 3) % 7);
+  // Starting from Firefox 10, Firefox ESR was released once every seven
+  // Firefox releases, e.g. Firefox 10, 17, 24, 31, and so on.
+  // Except we used 60 as an ESR instead of 59.
+  // We infer the last and closest ESR version based on this rule.
+  uint32_t spoofedVersion = firefoxVersion - ((firefoxVersion - 4) % 7);
   userAgent.Assign(nsPrintfCString(
     "Mozilla/5.0 (%s; rv:%d.0) Gecko/%s Firefox/%d.0",
     SPOOFED_UA_OS, spoofedVersion, LEGACY_BUILD_ID, spoofedVersion));
@@ -988,7 +983,7 @@ nsRFPService::GetSpoofedKeyCodeInfo(const nsIDocument* aDoc,
     // If the content-langauge is not given, we try to get langauge from the HTML
     // lang attribute.
     if (language.IsEmpty()) {
-      Element* elm = aDoc->GetHtmlElement();
+      dom::Element* elm = aDoc->GetHtmlElement();
 
       if (elm) {
         elm->GetLang(language);

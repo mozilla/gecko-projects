@@ -29,8 +29,6 @@
 #include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
 
-class nsIRDFResource;
-class nsIRDFService;
 class nsPIWindowRoot;
 class nsXULPrototypeElement;
 #if 0 // XXXbe save me, scc (need NSCAP_FORWARD_DECL(nsXULPrototypeScript))
@@ -83,10 +81,6 @@ public:
 
     virtual void EndLoad() override;
 
-    virtual XULDocument* AsXULDocument() override {
-        return this;
-    }
-
     // nsIMutationObserver interface
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
     NS_DECL_NSIMUTATIONOBSERVER_CONTENTINSERTED
@@ -121,25 +115,12 @@ public:
     virtual nsresult Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
                            bool aPreallocateChildren) const override;
 
-    // nsIDOMDocument interface
-    using nsDocument::CreateElement;
-    using nsDocument::CreateElementNS;
-    NS_FORWARD_NSIDOMDOCUMENT(XMLDocument::)
-    // And explicitly import the things from nsDocument that we just shadowed
-    using mozilla::dom::DocumentOrShadowRoot::GetElementById;
-    using nsDocument::GetImplementation;
-    using nsDocument::GetTitle;
-    using nsDocument::SetTitle;
-    using nsDocument::GetLastStyleSheetSet;
-    using nsDocument::MozSetImageElement;
-    using nsIDocument::GetLocation;
-
     // nsICSSLoaderObserver
     NS_IMETHOD StyleSheetLoaded(mozilla::StyleSheet* aSheet,
                                 bool aWasAlternate,
                                 nsresult aStatus) override;
 
-    virtual void EndUpdate(nsUpdateType aUpdateType) override;
+    virtual void EndUpdate() override;
 
     virtual bool IsDocumentRightToLeft() override;
 
@@ -257,11 +238,6 @@ protected:
 
     // pseudo constants
     static int32_t gRefCnt;
-
-    static nsIRDFService* gRDFService;
-    static nsIRDFResource* kNC_persist;
-    static nsIRDFResource* kNC_attribute;
-    static nsIRDFResource* kNC_value;
 
     static LazyLogModule gXULLog;
 
@@ -721,5 +697,12 @@ private:
 
 } // namespace dom
 } // namespace mozilla
+
+inline mozilla::dom::XULDocument*
+nsIDocument::AsXULDocument()
+{
+  MOZ_ASSERT(IsXULDocument());
+  return static_cast<mozilla::dom::XULDocument*>(this);
+}
 
 #endif // mozilla_dom_XULDocument_h

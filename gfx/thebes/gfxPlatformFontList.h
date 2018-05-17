@@ -98,7 +98,9 @@ class gfxPlatformFontList : public gfxFontInfoLoader
     friend class InitOtherFamilyNamesRunnable;
 
 public:
-    typedef mozilla::FontWeight FontWeight;
+    typedef mozilla::StretchRange StretchRange;
+    typedef mozilla::SlantStyleRange SlantStyleRange;
+    typedef mozilla::WeightRange WeightRange;
     typedef mozilla::unicode::Script Script;
 
     static gfxPlatformFontList* PlatformFontList() {
@@ -169,7 +171,8 @@ public:
                        gfxFontStyle* aStyle = nullptr,
                        gfxFloat aDevToCssSize = 1.0);
 
-    gfxFontEntry* FindFontForFamily(const nsAString& aFamily, const gfxFontStyle* aStyle, bool& aNeedsBold);
+    gfxFontEntry* FindFontForFamily(const nsAString& aFamily,
+                                    const gfxFontStyle* aStyle);
 
     // name lookup table methods
 
@@ -186,18 +189,33 @@ public:
     // get the system default font family
     gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle);
 
-    // look up a font by name on the host platform
+    /**
+     * Look up a font by name on the host platform.
+     *
+     * Note that the style attributes (weight, stretch, style) are NOT used in
+     * selecting the platform font, which is looked up by name only; these are
+     * values to be recorded in the new font entry.
+     */
     virtual gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                          FontWeight aWeight,
-                                          uint16_t aStretch,
-                                          uint8_t aStyle) = 0;
+                                          WeightRange aWeightForEntry,
+                                          StretchRange aStretchForEntry,
+                                          SlantStyleRange aStyleForEntry) = 0;
 
-    // create a new platform font from downloaded data (@font-face)
-    // this method is responsible to ensure aFontData is free()'d
+    /**
+     * Create a new platform font from downloaded data (@font-face).
+     *
+     * Note that the style attributes (weight, stretch, style) are NOT related
+     * (necessarily) to any values within the font resource itself; these are
+     * values to be recorded in the new font entry and used for face selection,
+     * in place of whatever inherent style attributes the resource may have.
+     *
+     * This method takes ownership of the data block passed in as aFontData,
+     * and must ensure it is free()'d when no longer required.
+     */
     virtual gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                           FontWeight aWeight,
-                                           uint16_t aStretch,
-                                           uint8_t aStyle,
+                                           WeightRange aWeightForEntry,
+                                           StretchRange aStretchForEntry,
+                                           SlantStyleRange aStyleForEntry,
                                            const uint8_t* aFontData,
                                            uint32_t aLength) = 0;
 

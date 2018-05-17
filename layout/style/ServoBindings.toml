@@ -55,9 +55,10 @@ headers = [
     "nsThemeConstants.h",
     "mozilla/css/Loader.h",
     "mozilla/css/SheetLoadData.h",
-    "mozilla/dom/AnimationEffectReadOnlyBinding.h",
+    "mozilla/dom/AnimationEffectBinding.h",
     "mozilla/dom/HTMLSlotElement.h",
     "mozilla/dom/KeyframeEffectBinding.h",
+    "mozilla/dom/MediaList.h",
     "mozilla/dom/ShadowRoot.h",
     "mozilla/AnimationPropertySegment.h",
     "mozilla/ComputedTiming.h",
@@ -72,11 +73,11 @@ headers = [
     "mozilla/LookAndFeel.h",
     "mozilla/StaticPrefs.h",
     "mozilla/ServoBindings.h",
-    "mozilla/ServoMediaList.h",
     "mozilla/ComputedStyle.h",
     "mozilla/ServoDeclarationBlock.h",
     "mozilla/ServoTraversalStatistics.h",
     "mozilla/SizeOfState.h",
+    "nsCSSProps.h",
     "nsContentUtils.h",
     "nsNameSpaceManager.h",
     "nsMediaFeatures.h",
@@ -96,13 +97,11 @@ hide-types = [
     "nsString",
     ".*char_traits",
     ".*incompatible_char_type",
-    # JS::Value and JS::UninitializedValue use alignas(8) which bindgen
-    # can't represent correctly on Linux 32-bit.  See
-    # https://github.com/rust-lang-nursery/rust-bindgen/issues/917.
+    # JS::Value uses alignas(8) which bindgen can't represent correctly on Linux
+    # 32-bit.  See https://github.com/rust-lang-nursery/rust-bindgen/issues/917.
     # It's also not used by Stylo.  The following types are also hidden for
     # making use of it and being similarly unused by Stylo.
     "JS::Value",
-    "JS::UninitializedValue",
     "mozilla::binding_danger::TErrorResult.*",
     "mozilla::ErrorResult.*", # Causes JSWhyMagic to be included & handled incorrectly.
     "mozilla::dom::CallbackFunction",
@@ -174,6 +173,7 @@ rusty-enums = [
     "mozilla::StyleUserFocus",
     "mozilla::StyleUserSelect",
     "mozilla::StyleImageLayerRepeat",
+    "mozilla::StyleImageLayerAttachment",
     "mozilla::StyleBoxDecorationBreak",
     "mozilla::StyleRuleInclusion",
     "mozilla::StyleGridTrackBreadth",
@@ -189,9 +189,6 @@ rusty-enums = [
     "nsStyleTransformMatrix::MatrixTransformOperator",
     "mozilla::StyleGeometryBox",
     "mozilla::SystemColor",
-]
-constified-enum-variants = [
-    { enum = "nsCSSPropertyID", variants = ["eCSSProperty_COUNT.*"] },
 ]
 whitelist-vars = [
     "NS_AUTHOR_SPECIFIED_.*",
@@ -223,13 +220,14 @@ whitelist-types = [
     "mozilla::SeenPtrs",
     "mozilla::ServoElementSnapshot.*",
     "mozilla::ComputedStyle",
-    "mozilla::ServoStyleSheet",
+    "mozilla::StyleSheet",
     "mozilla::ServoStyleSheetInner",
     "mozilla::ServoStyleSetSizes",
     "mozilla::ServoTraversalStatistics",
     "mozilla::css::ErrorReporter",
     "mozilla::css::LoaderReusableStyleSheets",
     "mozilla::css::SheetLoadData",
+    "mozilla::css::SheetLoadDataHolder",
     "mozilla::css::SheetParsingMode",
     "mozilla::css::URLMatchingFunction",
     "mozilla::dom::IterationCompositeOperation",
@@ -246,6 +244,7 @@ whitelist-types = [
     "mozilla::LookAndFeel",
     "mozilla::gfx::Float",
     "mozilla::gfx::FontVariation",
+    "mozilla::StyleImageLayerAttachment",
     ".*ThreadSafe.*Holder",
     "AnonymousContent",
     "AudioContext",
@@ -276,6 +275,7 @@ whitelist-types = [
     "nsChangeHint",
     "nsCSSCounterDesc",
     "nsCSSFontDesc",
+    "nsCSSKTableEntry",
     "nsCSSKeyword",
     "nsCSSPropertyID",
     "nsCSSPropertyIDSet",
@@ -295,7 +295,6 @@ whitelist-types = [
     "nsMargin",
     "nsMediaFeature",
     "nsMediaFeatures",
-    "nsMediaList",
     "nsRect",
     "nsRestyleHint",
     "nsresult",
@@ -366,7 +365,7 @@ whitelist-types = [
     "mozilla::ParsingMode",
     "mozilla::InheritTarget",
     "mozilla::ServoDeclarationBlock",
-    "mozilla::ServoMediaList",
+    "mozilla::dom::MediaList",
     "mozilla::StyleRuleInclusion",
     "nsStyleTransformMatrix::MatrixTransformOperator",
 ]
@@ -441,7 +440,7 @@ hide-types = [
     "ComputedStyleBorrowedOrNull",
 ]
 raw-lines = [
-    "pub use nsstring::{nsACString, nsAString, nsString, nsStringRepr};",
+    "pub use nsstring::{nsACString, nsAString, nsCString, nsString, nsStringRepr};",
     "use gecko_bindings::structs::nsStyleTransformMatrix;",
     "use gecko_bindings::structs::nsTArray;",
     "type nsACString_internal = nsACString;",
@@ -461,6 +460,8 @@ structs-types = [
     "mozilla::dom::CallerType",
     "mozilla::AnonymousCounterStyle",
     "mozilla::AtomArray",
+    "mozilla::FontStretch",
+    "mozilla::FontSlantStyle",
     "mozilla::FontWeight",
     "mozilla::MallocSizeOf",
     "mozilla::OriginFlags",
@@ -588,7 +589,8 @@ structs-types = [
     "Loader",
     "LoaderReusableStyleSheets",
     "SheetLoadData",
-    "ServoStyleSheet",
+    "SheetLoadDataHolder",
+    "StyleSheet",
     "ServoComputedData",
     "ComputedStyleStrong",
     "EffectCompositor_CascadeLevel",

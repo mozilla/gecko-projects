@@ -862,7 +862,7 @@ class FunctionCompiler
         return ins;
     }
 
-    bool checkWaitWakeResult(MDefinition* value) {
+    bool checkI32NegativeMeansFailedResult(MDefinition* value) {
         if (inDeadCode())
             return true;
 
@@ -3529,7 +3529,7 @@ EmitWait(FunctionCompiler& f, ValType type, uint32_t byteSize)
     if (!f.builtinInstanceMethodCall(callee, args, ValType::I32, &ret))
         return false;
 
-    if (!f.checkWaitWakeResult(ret))
+    if (!f.checkI32NegativeMeansFailedResult(ret))
         return false;
 
     f.iter().setResult(ret);
@@ -3571,7 +3571,7 @@ EmitWake(FunctionCompiler& f)
     if (!f.builtinInstanceMethodCall(SymbolicAddress::Wake, args, ValType::I32, &ret))
         return false;
 
-    if (!f.checkWaitWakeResult(ret))
+    if (!f.checkI32NegativeMeansFailedResult(ret))
         return false;
 
     f.iter().setResult(ret);
@@ -3597,6 +3597,86 @@ EmitAtomicXchg(FunctionCompiler& f, ValType type, Scalar::Type viewType)
 }
 
 #endif // ENABLE_WASM_THREAD_OPS
+
+#ifdef ENABLE_WASM_BULKMEM_OPS
+static bool
+EmitMemCopy(FunctionCompiler& f)
+{
+    MDefinition *dest, *src, *len;
+    if (!f.iter().readMemCopy(&dest, &src, &len))
+        return false;
+
+    if (f.inDeadCode())
+        return false;
+
+    uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
+
+    CallCompileState args(f, lineOrBytecode);
+    if (!f.startCall(&args))
+        return false;
+
+    if (!f.passInstance(&args))
+        return false;
+
+    if (!f.passArg(dest, ValType::I32, &args))
+        return false;
+    if (!f.passArg(src, ValType::I32, &args))
+        return false;
+    if (!f.passArg(len, ValType::I32, &args))
+        return false;
+
+    if (!f.finishCall(&args))
+        return false;
+
+    MDefinition* ret;
+    if (!f.builtinInstanceMethodCall(SymbolicAddress::MemCopy, args, ValType::I32, &ret))
+        return false;
+
+    if (!f.checkI32NegativeMeansFailedResult(ret))
+        return false;
+
+    return true;
+}
+
+static bool
+EmitMemFill(FunctionCompiler& f)
+{
+    MDefinition *start, *val, *len;
+    if (!f.iter().readMemFill(&start, &val, &len))
+        return false;
+
+    if (f.inDeadCode())
+        return false;
+
+    uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
+
+    CallCompileState args(f, lineOrBytecode);
+    if (!f.startCall(&args))
+        return false;
+
+    if (!f.passInstance(&args))
+        return false;
+
+    if (!f.passArg(start, ValType::I32, &args))
+        return false;
+    if (!f.passArg(val, ValType::I32, &args))
+        return false;
+    if (!f.passArg(len, ValType::I32, &args))
+        return false;
+
+    if (!f.finishCall(&args))
+        return false;
+
+    MDefinition* ret;
+    if (!f.builtinInstanceMethodCall(SymbolicAddress::MemFill, args, ValType::I32, &ret))
+        return false;
+
+    if (!f.checkI32NegativeMeansFailedResult(ret))
+        return false;
+
+    return true;
+}
+#endif // ENABLE_WASM_BULKMEM_OPS
 
 static bool
 EmitBodyExprs(FunctionCompiler& f)
@@ -3997,33 +4077,37 @@ EmitBodyExprs(FunctionCompiler& f)
             CHECK(EmitSignExtend(f, 4, 8));
 #endif
 
-          // Numeric operations
-          case uint16_t(Op::NumericPrefix): {
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+          // Miscellaneous operations
+          case uint16_t(Op::MiscPrefix): {
             switch (op.b1) {
-              case uint16_t(NumericOp::I32TruncSSatF32):
-              case uint16_t(NumericOp::I32TruncUSatF32):
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+              case uint16_t(MiscOp::I32TruncSSatF32):
+              case uint16_t(MiscOp::I32TruncUSatF32):
                 CHECK(EmitTruncate(f, ValType::F32, ValType::I32,
-                                   NumericOp(op.b1) == NumericOp::I32TruncUSatF32, true));
-              case uint16_t(NumericOp::I32TruncSSatF64):
-              case uint16_t(NumericOp::I32TruncUSatF64):
+                                   MiscOp(op.b1) == MiscOp::I32TruncUSatF32, true));
+              case uint16_t(MiscOp::I32TruncSSatF64):
+              case uint16_t(MiscOp::I32TruncUSatF64):
                 CHECK(EmitTruncate(f, ValType::F64, ValType::I32,
-                                   NumericOp(op.b1) == NumericOp::I32TruncUSatF64, true));
-              case uint16_t(NumericOp::I64TruncSSatF32):
-              case uint16_t(NumericOp::I64TruncUSatF32):
+                                   MiscOp(op.b1) == MiscOp::I32TruncUSatF64, true));
+              case uint16_t(MiscOp::I64TruncSSatF32):
+              case uint16_t(MiscOp::I64TruncUSatF32):
                 CHECK(EmitTruncate(f, ValType::F32, ValType::I64,
-                                   NumericOp(op.b1) == NumericOp::I64TruncUSatF32, true));
-              case uint16_t(NumericOp::I64TruncSSatF64):
-              case uint16_t(NumericOp::I64TruncUSatF64):
+                                   MiscOp(op.b1) == MiscOp::I64TruncUSatF32, true));
+              case uint16_t(MiscOp::I64TruncSSatF64):
+              case uint16_t(MiscOp::I64TruncUSatF64):
                 CHECK(EmitTruncate(f, ValType::F64, ValType::I64,
-                                   NumericOp(op.b1) == NumericOp::I64TruncUSatF64, true));
+                                   MiscOp(op.b1) == MiscOp::I64TruncUSatF64, true));
+#endif
+#ifdef ENABLE_WASM_BULKMEM_OPS
+              case uint16_t(MiscOp::MemCopy):
+                CHECK(EmitMemCopy(f));
+              case uint16_t(MiscOp::MemFill):
+                CHECK(EmitMemFill(f));
+#endif
               default:
                 return f.iter().unrecognizedOpcode(&op);
             }
             break;
-#else
-            return f.iter().unrecognizedOpcode(&op);
-#endif
           }
 
           // Thread operations

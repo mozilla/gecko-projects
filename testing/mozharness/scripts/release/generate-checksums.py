@@ -57,7 +57,6 @@ class ChecksumsGenerator(BaseScript, VirtualenvMixin):
                             require_config_file=False,
                             config={
                                 "virtualenv_modules": [
-                                    "pip",
                                     "boto",
                                 ],
                                 "virtualenv_path": "venv",

@@ -19,7 +19,6 @@
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIScrollableFrame.h"
-#include "nsISelectionPrivate.h"
 #include "nsISelectionController.h"
 #include "nsISimpleEnumerator.h"
 #include "mozilla/dom/TouchEvent.h"
@@ -74,13 +73,12 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
                                 int32_t aRowIndex, nsITreeColumn *aColumn,
                                 const nsAString& aPseudoElt)
 {
-  nsCOMPtr<nsIDOMElement> tcElm;
+  RefPtr<dom::Element> tcElm;
   aTreeBoxObj->GetTreeBody(getter_AddRefs(tcElm));
   if (!tcElm)
     return;
 
-  nsCOMPtr<nsIContent> tcContent(do_QueryInterface(tcElm));
-  nsIDocument *document = tcContent->GetUncomposedDoc();
+  nsIDocument *document = tcElm->GetUncomposedDoc();
   if (!document)
     return;
 
@@ -110,7 +108,7 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
   tcBoxObj->GetY(&tcY);
 
   // Dispatch mouse events.
-  AutoWeakFrame tcFrame = tcContent->GetPrimaryFrame();
+  AutoWeakFrame tcFrame = tcElm->GetPrimaryFrame();
   nsIFrame* rootFrame = presShell->GetRootFrame();
 
   nsPoint offset;
@@ -126,10 +124,10 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
 
   // XUL is just desktop, so there is no real reason for senfing touch events.
   DispatchMouseEvent(eMouseDown, cnvdX, cnvdY,
-                     tcContent, tcFrame, presShell, rootWidget);
+                     tcElm, tcFrame, presShell, rootWidget);
 
   DispatchMouseEvent(eMouseUp, cnvdX, cnvdY,
-                     tcContent, tcFrame, presShell, rootWidget);
+                     tcElm, tcFrame, presShell, rootWidget);
 }
 
 void
@@ -270,17 +268,16 @@ nsCoreUtils::ScrollSubstringTo(nsIFrame* aFrame, nsRange* aRange,
   NS_ENSURE_TRUE(selCon, NS_ERROR_FAILURE);
 
   RefPtr<dom::Selection> selection =
-    selCon->GetDOMSelection(nsISelectionController::SELECTION_ACCESSIBILITY);
+    selCon->GetSelection(nsISelectionController::SELECTION_ACCESSIBILITY);
 
-  nsCOMPtr<nsISelectionPrivate> privSel(do_QueryObject(selection));
   selection->RemoveAllRanges(IgnoreErrors());
   selection->AddRange(*aRange, IgnoreErrors());
 
-  privSel->ScrollIntoViewInternal(
-    nsISelectionController::SELECTION_ANCHOR_REGION,
-    true, aVertical, aHorizontal);
+  selection->ScrollIntoView(nsISelectionController::SELECTION_ANCHOR_REGION,
+                            aVertical, aHorizontal,
+                            Selection::SCROLL_SYNCHRONOUS);
 
-  selection->CollapseToStart();
+  selection->CollapseToStart(IgnoreErrors());
 
   return NS_OK;
 }
@@ -491,10 +488,9 @@ nsCoreUtils::GetLanguageFor(nsIContent *aContent, nsIContent *aRootContent,
 already_AddRefed<nsIBoxObject>
 nsCoreUtils::GetTreeBodyBoxObject(nsITreeBoxObject *aTreeBoxObj)
 {
-  nsCOMPtr<nsIDOMElement> tcElm;
+  RefPtr<dom::Element> tcElm;
   aTreeBoxObj->GetTreeBody(getter_AddRefs(tcElm));
-  nsCOMPtr<nsIContent> tcContent(do_QueryInterface(tcElm));
-  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromNodeOrNull(tcContent);
+  RefPtr<nsXULElement> tcXULElm = nsXULElement::FromNodeOrNull(tcElm);
   if (!tcXULElm)
     return nullptr;
 
@@ -614,10 +610,9 @@ nsCoreUtils::GetPreviousSensibleColumn(nsITreeColumn *aColumn)
 bool
 nsCoreUtils::IsColumnHidden(nsITreeColumn *aColumn)
 {
-  nsCOMPtr<nsIDOMElement> element;
+  RefPtr<Element> element;
   aColumn->GetElement(getter_AddRefs(element));
-  nsCOMPtr<Element> content = do_QueryInterface(element);
-  return content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::hidden,
+  return element->AttrValueIs(kNameSpaceID_None, nsGkAtoms::hidden,
                               nsGkAtoms::_true, eCaseMatters);
 }
 

@@ -34,9 +34,6 @@ loader.lazyRequireGetter(this, "WalkerSearch", "devtools/server/actors/utils/wal
 loader.lazyServiceGetter(this, "eventListenerService",
   "@mozilla.org/eventlistenerservice;1", "nsIEventListenerService");
 
-loader.lazyServiceGetter(this, "DOMParser",
-  "@mozilla.org/xmlextras/domparser;1", "nsIDOMParser");
-
 // Minimum delay between two "new-mutations" events.
 const MUTATIONS_THROTTLING_DELAY = 100;
 // List of mutation types that should -not- be throttled.
@@ -1259,7 +1256,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       return;
     }
 
-    let parsedDOM = DOMParser.parseFromString(value, "text/html");
+    let parsedDOM = new DOMParser().parseFromString(value, "text/html");
     let rawNode = node.rawNode;
     let parentNode = rawNode.parentNode;
 
@@ -2026,7 +2023,16 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     const accService = Cc["@mozilla.org/accessibilityService;1"].getService(
       Ci.nsIAccessibilityService);
-    const acc = accService.getAccessibleFor(node.rawNode);
+    let acc = accService.getAccessibleFor(node.rawNode);
+    // If node does not have an accessible object, but has an inline text child,
+    // try to retrieve an accessible object for the child instead.
+    if (!acc || acc.indexInParent < 0) {
+      const inlineTextChild = this.inlineTextChild(node);
+      if (inlineTextChild) {
+        acc = accService.getAccessibleFor(inlineTextChild.rawNode);
+      }
+    }
+
     return acc && acc.indexInParent > -1;
   },
 });

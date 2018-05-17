@@ -219,8 +219,6 @@ impl Transaction {
     /// Supplies a new frame to WebRender.
     ///
     /// Non-blocking, it notifies a worker process which processes the display list.
-    /// When it's done and a RenderNotifier has been set in `webrender::Renderer`,
-    /// [new_frame_ready()][notifier] gets called.
     ///
     /// Note: Scrolling doesn't require an own Frame.
     ///
@@ -236,8 +234,6 @@ impl Transaction {
     /// * `preserve_frame_state`: If a previous frame exists which matches this pipeline
     ///                           id, this setting determines if frame state (such as scrolling
     ///                           position) should be preserved for this new display list.
-    ///
-    /// [notifier]: trait.RenderNotifier.html#tymethod.new_frame_ready
     pub fn set_display_list(
         &mut self,
         epoch: Epoch,
@@ -284,11 +280,7 @@ impl Transaction {
     ///
     /// WebRender looks for the layer closest to the user
     /// which has `ScrollPolicy::Scrollable` set.
-    pub fn scroll(
-        &mut self,
-        scroll_location: ScrollLocation,
-        cursor: WorldPoint,
-    ) {
+    pub fn scroll(&mut self, scroll_location: ScrollLocation, cursor: WorldPoint) {
         self.frame_ops.push(FrameMsg::Scroll(scroll_location, cursor));
     }
 
@@ -313,7 +305,13 @@ impl Transaction {
         self.frame_ops.push(FrameMsg::SetPan(pan));
     }
 
-    /// Generate a new frame.
+    /// Generate a new frame. When it's done and a RenderNotifier has been set
+    /// in `webrender::Renderer`, [new_frame_ready()][notifier] gets called.
+    /// Note that the notifier is called even if the frame generation was a
+    /// no-op; the arguments passed to `new_frame_ready` will provide information
+    /// as to what happened.
+    ///
+    /// [notifier]: trait.RenderNotifier.html#tymethod.new_frame_ready
     pub fn generate_frame(&mut self) {
         self.generate_frame = true;
     }
@@ -631,6 +629,7 @@ pub enum ApiMsg {
     /// through another channel.
     WakeUp,
     WakeSceneBuilder,
+    FlushSceneBuilder(MsgSender<()>),
     ShutDown,
 }
 
@@ -651,6 +650,7 @@ impl fmt::Debug for ApiMsg {
             ApiMsg::ShutDown => "ApiMsg::ShutDown",
             ApiMsg::WakeUp => "ApiMsg::WakeUp",
             ApiMsg::WakeSceneBuilder => "ApiMsg::WakeSceneBuilder",
+            ApiMsg::FlushSceneBuilder(..) => "ApiMsg::FlushSceneBuilder",
         })
     }
 }
@@ -963,6 +963,15 @@ impl RenderApi {
         self.send_message(ApiMsg::WakeSceneBuilder);
     }
 
+    /// Block until a round-trip to the scene builder thread has completed. This
+    /// ensures that any transactions (including ones deferred to the scene
+    /// builder thread) have been processed.
+    pub fn flush_scene_builder(&self) {
+        let (tx, rx) = channel::msg_channel().unwrap();
+        self.send_message(ApiMsg::FlushSceneBuilder(tx));
+        rx.recv().unwrap(); // block until done
+    }
+
     /// Save a capture of the current frame state for debugging.
     pub fn save_capture(&self, path: PathBuf, bits: CaptureBits) {
         let msg = ApiMsg::DebugCommand(DebugCommand::SaveCapture(path, bits));
@@ -1069,21 +1078,18 @@ impl<T> PropertyBindingKey<T> {
 /// A binding property can either be a specific value
 /// (the normal, non-animated case) or point to a binding location
 /// to fetch the current value from.
+/// Note that Binding has also a non-animated value, the value is
+/// used for the case where the animation is still in-delay phase
+/// (i.e. the animation doesn't produce any animation values).
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum PropertyBinding<T> {
     Value(T),
-    Binding(PropertyBindingKey<T>),
+    Binding(PropertyBindingKey<T>, T),
 }
 
 impl<T> From<T> for PropertyBinding<T> {
     fn from(value: T) -> PropertyBinding<T> {
         PropertyBinding::Value(value)
-    }
-}
-
-impl<T> From<PropertyBindingKey<T>> for PropertyBinding<T> {
-    fn from(key: PropertyBindingKey<T>) -> PropertyBinding<T> {
-        PropertyBinding::Binding(key)
     }
 }
 
@@ -1107,7 +1113,7 @@ pub struct DynamicProperties {
 pub trait RenderNotifier: Send {
     fn clone(&self) -> Box<RenderNotifier>;
     fn wake_up(&self);
-    fn new_document_ready(&self, DocumentId, scrolled: bool, composite_needed: bool);
+    fn new_frame_ready(&self, DocumentId, scrolled: bool, composite_needed: bool);
     fn external_event(&self, _evt: ExternalEvent) {
         unimplemented!()
     }

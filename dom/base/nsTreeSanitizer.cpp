@@ -14,8 +14,8 @@
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/css/Rule.h"
 #include "mozilla/dom/CSSRuleList.h"
+#include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/SRIMetadata.h"
-#include "nsCSSParser.h"
 #include "nsCSSPropertyID.h"
 #include "nsUnicharInputStream.h"
 #include "nsAttrName.h"
@@ -1091,15 +1091,17 @@ nsTreeSanitizer::SanitizeStyleSheet(const nsAString& aOriginal,
   bool didSanitize = false;
   // Create a sheet to hold the parsed CSS
   RefPtr<StyleSheet> sheet =
-    new ServoStyleSheet(mozilla::css::eAuthorSheetFeatures,
-                        CORS_NONE, aDocument->GetReferrerPolicy(),
-                        SRIMetadata());
+    new StyleSheet(mozilla::css::eAuthorSheetFeatures,
+                   CORS_NONE,
+                   aDocument->GetReferrerPolicy(),
+                   SRIMetadata());
   sheet->SetURIs(aDocument->GetDocumentURI(), nullptr, aBaseURI);
   sheet->SetPrincipal(aDocument->NodePrincipal());
-  sheet->AsServo()->ParseSheetSync(
-    aDocument->CSSLoader(), NS_ConvertUTF16toUTF8(aOriginal),
-    aDocument->GetDocumentURI(), aBaseURI, aDocument->NodePrincipal(),
-    /* aLoadData = */ nullptr, 0, aDocument->GetCompatibilityMode());
+  sheet->ParseSheetSync(
+    aDocument->CSSLoader(),
+    NS_ConvertUTF16toUTF8(aOriginal),
+    /* aLoadData = */ nullptr,
+    /* aLineNumber = */ 0);
   NS_ENSURE_SUCCESS(rv, true);
   // Mark the sheet as complete.
   MOZ_ASSERT(!sheet->HasForcedUniqueInner(),
@@ -1350,14 +1352,12 @@ nsTreeSanitizer::SanitizeURL(mozilla::dom::Element* aElement,
 }
 
 void
-nsTreeSanitizer::Sanitize(nsIContent* aFragment)
+nsTreeSanitizer::Sanitize(DocumentFragment* aFragment)
 {
   // If you want to relax these preconditions, be sure to check the code in
   // here that notifies / does not notify or that fires mutation events if
   // in tree.
-  NS_PRECONDITION(aFragment->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT),
-      "Argument was not DOM fragment.");
-  NS_PRECONDITION(!aFragment->IsInUncomposedDoc(), "The fragment is in doc?");
+  MOZ_ASSERT(!aFragment->IsInUncomposedDoc(), "The fragment is in doc?");
 
   mFullDocument = false;
   SanitizeChildren(aFragment);
@@ -1370,9 +1370,9 @@ nsTreeSanitizer::Sanitize(nsIDocument* aDocument)
   // here that notifies / does not notify or that fires mutation events if
   // in tree.
 #ifdef DEBUG
-  NS_PRECONDITION(!aDocument->GetContainer(), "The document is in a shell.");
+  MOZ_ASSERT(!aDocument->GetContainer(), "The document is in a shell.");
   RefPtr<mozilla::dom::Element> root = aDocument->GetRootElement();
-  NS_PRECONDITION(root->IsHTMLElement(nsGkAtoms::html), "Not HTML root.");
+  MOZ_ASSERT(root->IsHTMLElement(nsGkAtoms::html), "Not HTML root.");
 #endif
 
   mFullDocument = true;
@@ -1500,7 +1500,7 @@ nsTreeSanitizer::SanitizeChildren(nsINode* aRoot)
     }
     NS_ASSERTION(!node->GetFirstChild(), "How come non-element node had kids?");
     nsIContent* next = node->GetNextNonChildNode(aRoot);
-    if (!mAllowComments && node->IsNodeOfType(nsINode::eCOMMENT)) {
+    if (!mAllowComments && node->IsComment()) {
       node->RemoveFromParent();
     }
     node = next;
@@ -1542,7 +1542,7 @@ nsTreeSanitizer::LogMessage(const char* aMessage, nsIDocument* aDoc,
 void
 nsTreeSanitizer::InitializeStatics()
 {
-  NS_PRECONDITION(!sElementsHTML, "Initializing a second time.");
+  MOZ_ASSERT(!sElementsHTML, "Initializing a second time.");
 
   sElementsHTML = new AtomsTable(ArrayLength(kElementsHTML));
   for (uint32_t i = 0; kElementsHTML[i]; i++) {

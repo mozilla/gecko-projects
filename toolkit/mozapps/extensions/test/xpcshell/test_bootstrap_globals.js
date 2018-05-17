@@ -13,9 +13,9 @@ const EXPECTED_GLOBALS = [
   ["console", "object"]
 ];
 
-function run_test() {
+async function run_test() {
   do_test_pending();
-  startupManager();
+  await promiseStartupManager();
   let sawGlobals = false;
 
   Services.obs.addObserver(function(subject) {
@@ -29,9 +29,8 @@ function run_test() {
     sawGlobals = true;
   }, "bootstrap-seen-globals");
 
-  installAllFiles([do_get_addon("bootstrap_globals")], function() {
-    Assert.ok(sawGlobals);
-    shutdownManager();
-    do_test_finished();
-  });
+  await promiseInstallAllFiles([do_get_addon("bootstrap_globals")]);
+  Assert.ok(sawGlobals);
+  await promiseShutdownManager();
+  do_test_finished();
 }

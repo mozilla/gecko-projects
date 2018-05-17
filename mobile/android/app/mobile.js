@@ -126,7 +126,7 @@ pref("network.mdns.use_js_fallback", false);
 pref("browser.display.remotetabs.timeout", 10);
 
 /* session history */
-pref("browser.sessionhistory.max_total_viewers", 1);
+pref("browser.sessionhistory.max_total_viewers", -1);
 pref("browser.sessionhistory.max_entries", 50);
 pref("browser.sessionhistory.contentViewerTimeout", 360);
 pref("browser.sessionhistory.bfcacheIgnoreMemoryPressure", false);
@@ -187,6 +187,7 @@ pref("xpinstall.whitelist.directRequest", false);
 pref("xpinstall.whitelist.fileRequest", false);
 pref("xpinstall.whitelist.add", "https://addons.mozilla.org,https://testpilot.firefox.com");
 
+pref("extensions.langpacks.signatures.required", true);
 pref("xpinstall.signatures.required", true);
 
 pref("extensions.enabledScopes", 1);
@@ -198,7 +199,6 @@ pref("extensions.dss.enabled", false);
 pref("extensions.ignoreMTimeChanges", false);
 pref("extensions.logging.enabled", false);
 pref("extensions.hideInstallButton", true);
-pref("extensions.showMismatchUI", false);
 pref("extensions.hideUpdateButton", false);
 pref("extensions.strictCompatibility", false);
 pref("extensions.minCompatibleAppVersion", "11.0");
@@ -253,8 +253,6 @@ pref("accessibility.browsewithcaret_shortcut.enabled", false);
 // preference is a string so that localizers can alter it.
 pref("browser.menu.showCharacterEncoding", "chrome://browser/locale/browser.properties");
 
-// pointer to the default engine name
-pref("browser.search.defaultenginename", "chrome://browser/locale/region.properties");
 // SSL error page behaviour
 pref("browser.ssl_override_behavior", 2);
 pref("browser.xul.error_pages.expert_bad_cert", false);
@@ -268,8 +266,7 @@ pref("browser.search.order.3", "chrome://browser/locale/region.properties");
 pref("browser.search.geoSpecificDefaults", true);
 pref("browser.search.geoSpecificDefaults.url", "https://search.services.mozilla.com/1/%APP%/%VERSION%/%CHANNEL%/%LOCALE%/%REGION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%");
 
-// US specific default (used as a fallback if the geoSpecificDefaults request fails).
-pref("browser.search.defaultenginename.US", "chrome://browser/locale/region.properties");
+// Allow for unique order in the US.
 pref("browser.search.order.US.1", "chrome://browser/locale/region.properties");
 pref("browser.search.order.US.2", "chrome://browser/locale/region.properties");
 pref("browser.search.order.US.3", "chrome://browser/locale/region.properties");

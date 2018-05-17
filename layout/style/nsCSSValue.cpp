@@ -122,6 +122,18 @@ nsCSSValue::nsCSSValue(SharedFontList* aValue)
   mValue.mFontFamilyList->AddRef();
 }
 
+nsCSSValue::nsCSSValue(FontStretch aStretch)
+  : mUnit(eCSSUnit_FontStretch)
+{
+  mValue.mFontStretch = aStretch;
+}
+
+nsCSSValue::nsCSSValue(FontSlantStyle aStyle)
+  : mUnit(eCSSUnit_FontSlantStyle)
+{
+  mValue.mFontSlantStyle = aStyle;
+}
+
 nsCSSValue::nsCSSValue(FontWeight aWeight)
   : mUnit(eCSSUnit_FontWeight)
 {
@@ -186,6 +198,12 @@ nsCSSValue::nsCSSValue(const nsCSSValue& aCopy)
   else if (eCSSUnit_FontFamilyList == mUnit) {
     mValue.mFontFamilyList = aCopy.mValue.mFontFamilyList;
     mValue.mFontFamilyList->AddRef();
+  }
+  else if (eCSSUnit_FontStretch == mUnit) {
+    mValue.mFontStretch = aCopy.mValue.mFontStretch;
+  }
+  else if (eCSSUnit_FontSlantStyle == mUnit) {
+    mValue.mFontSlantStyle = aCopy.mValue.mFontSlantStyle;
   }
   else if (eCSSUnit_FontWeight == mUnit) {
     mValue.mFontWeight = aCopy.mValue.mFontWeight;
@@ -268,6 +286,12 @@ bool nsCSSValue::operator==(const nsCSSValue& aOther) const
     else if (eCSSUnit_FontFamilyList == mUnit) {
       return mValue.mFontFamilyList->mNames ==
              aOther.mValue.mFontFamilyList->mNames;
+    }
+    else if (eCSSUnit_FontStretch == mUnit) {
+      return mValue.mFontStretch == aOther.mValue.mFontStretch;
+    }
+    else if (eCSSUnit_FontSlantStyle == mUnit) {
+      return mValue.mFontSlantStyle == aOther.mValue.mFontSlantStyle;
     }
     else if (eCSSUnit_FontWeight == mUnit) {
       return mValue.mFontWeight == aOther.mValue.mFontWeight;
@@ -488,6 +512,20 @@ void nsCSSValue::SetFontFamilyListValue(already_AddRefed<SharedFontList> aValue)
   Reset();
   mUnit = eCSSUnit_FontFamilyList;
   mValue.mFontFamilyList = aValue.take();
+}
+
+void nsCSSValue::SetFontStretch(FontStretch aStretch)
+{
+  Reset();
+  mUnit = eCSSUnit_FontStretch;
+  mValue.mFontStretch = aStretch;
+}
+
+void nsCSSValue::SetFontSlantStyle(FontSlantStyle aStyle)
+{
+  Reset();
+  mUnit = eCSSUnit_FontSlantStyle;
+  mValue.mFontSlantStyle = aStyle;
 }
 
 void nsCSSValue::SetFontWeight(FontWeight aWeight)
@@ -785,7 +823,11 @@ nsCSSValue::AppendAlignJustifyValueToString(int32_t aValue, nsAString& aResult)
   auto legacy = aValue & NS_STYLE_ALIGN_LEGACY;
   if (legacy) {
     aValue &= ~legacy;
-    aResult.AppendLiteral("legacy ");
+    aResult.AppendLiteral("legacy");
+    if (!aValue) {
+      return;
+    }
+    aResult.AppendLiteral(" ");
   }
   // Don't serialize the 'unsafe' keyword; it's the default.
   auto overflowPos = aValue & (NS_STYLE_ALIGN_SAFE | NS_STYLE_ALIGN_UNSAFE);
@@ -915,6 +957,8 @@ nsCSSValue::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     // Int: nothing extra to measure.
     case eCSSUnit_Integer:
     case eCSSUnit_Enumerated:
+    case eCSSUnit_FontStretch:
+    case eCSSUnit_FontSlantStyle:
     case eCSSUnit_FontWeight:
       break;
 

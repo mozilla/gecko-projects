@@ -17,7 +17,7 @@ NS_IMPL_ADDREF(CacheFileInputStream)
 NS_IMETHODIMP_(MozExternalRefCountType)
 CacheFileInputStream::Release()
 {
-  NS_PRECONDITION(0 != mRefCnt, "dup release");
+  MOZ_ASSERT(0 != mRefCnt, "dup release");
   nsrefcnt count = --mRefCnt;
   NS_LOG_RELEASE(this, count, "CacheFileInputStream");
 
@@ -161,9 +161,8 @@ CacheFileInputStream::ReadSegments(nsWriteSegmentFun aWriter, void *aClosure,
     if (!mChunk) {
       if (mListeningForChunk == -1) {
         return NS_OK;
-      } else {
-        return NS_BASE_STREAM_WOULD_BLOCK;
       }
+      return NS_BASE_STREAM_WOULD_BLOCK;
     }
 
     if (aCount == 0) {
@@ -497,9 +496,8 @@ CacheFileInputStream::OnChunkUpdated(CacheFileChunk *aChunk)
 
     return NS_OK;
   }
-  else {
-    mWaitingForUpdate = false;
-  }
+
+  mWaitingForUpdate = false;
 
   MOZ_ASSERT(mChunk == aChunk);
 
@@ -555,9 +553,8 @@ CacheFileInputStream::EnsureCorrectChunk(bool aReleaseOnly)
            "[this=%p, idx=%d]", this, chunkIdx));
 
       return;
-    } else {
-      ReleaseChunk();
     }
+    ReleaseChunk();
   }
 
   MOZ_ASSERT(!mWaitingForUpdate);

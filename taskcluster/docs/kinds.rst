@@ -90,6 +90,12 @@ the source code while building.  The useful output from these tasks are their
 build logs, and while they produce a binary, they do not upload it as an
 artifact.
 
+static-analysis-autotest
+---------------
+
+Static analysis autotest utility in order to be sure that there is no regression
+when upgrading utilities that impact static-analysis.
+
 toolchain
 ---------
 
@@ -189,10 +195,12 @@ Beetmover-repackage is beetmover but for tasks that need an intermediate step
 between signing and packaging, such as OSX. For more details see the definitions
 of the Beetmover kind above and the repackage kind below.
 
-beetmover-cdns
--------------------
+release-beetmover-push-to-release
+---------------------------------
 
-Beetmover-cdns publishes promoted releases to CDNs. This is part of release promotion.
+release-beetmover-push-to-release publishes promoted releases from the
+candidates directory to the release directory. This is part of release
+promotion.
 
 beetmover-source
 -------------------
@@ -470,3 +478,7 @@ diffoscope
 Tasks used to compare pairs of Firefox builds using https://diffoscope.org/.
 As of writing, this is mainly meant to be used in try builds, by editing
 taskcluster/ci/diffoscope/kind.yml for your needs.
+
+addon
+-----
+Tasks used to build/package add-ons.

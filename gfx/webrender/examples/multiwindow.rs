@@ -37,7 +37,7 @@ impl RenderNotifier for Notifier {
         let _ = self.events_proxy.wakeup();
     }
 
-    fn new_document_ready(&self, _: DocumentId, _scrolled: bool, _composite_needed: bool) {
+    fn new_frame_ready(&self, _: DocumentId, _scrolled: bool, _composite_needed: bool) {
         self.wake_up();
     }
 }
@@ -181,12 +181,12 @@ impl Window {
         builder.push_stacking_context(
             &info,
             None,
-            ScrollPolicy::Scrollable,
             None,
             TransformStyle::Flat,
             None,
             MixBlendMode::Normal,
             Vec::new(),
+            GlyphRasterSpace::Screen,
         );
 
         let info = LayoutPrimitiveInfo::new(LayoutRect::new(

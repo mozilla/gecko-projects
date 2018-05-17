@@ -87,7 +87,7 @@ TRRService::Init()
          captiveState, (int)mCaptiveIsPassed));
   }
 
-  ReadPrefs(NULL);
+  ReadPrefs(nullptr);
 
   gTRRService = this;
 
@@ -272,9 +272,10 @@ TRRService::Observe(nsISupports *aSubject,
   if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
     ReadPrefs(NS_ConvertUTF16toUTF8(aData).get());
 
-    if ((mConfirmationState == CONFIRM_INIT) &&
-        !mBootstrapAddr.IsEmpty() &&
-        (mMode == MODE_TRRONLY)) {
+    if (((mConfirmationState == CONFIRM_INIT) &&
+         !mBootstrapAddr.IsEmpty() &&
+         (mMode == MODE_TRRONLY))  ||
+        (mConfirmationState == CONFIRM_FAILED)) {
       mConfirmationState = CONFIRM_TRYING;
       MaybeConfirm();
     }
@@ -286,30 +287,30 @@ TRRService::Observe(nsISupports *aSubject,
   } else if (!strcmp(aTopic, NS_CAPTIVE_PORTAL_CONNECTIVITY)) {
     nsAutoCString data = NS_ConvertUTF16toUTF8(aData);
     LOG(("TRRservice captive portal was %s\n", data.get()));
-    if (data.Equals("clear")) {
-      if (!mTRRBLStorage) {
-        mTRRBLStorage = DataStorage::Get(DataStorageClass::TRRBlacklist);
-        if (mTRRBLStorage) {
-          bool storageWillPersist = true;
-          if (NS_FAILED(mTRRBLStorage->Init(storageWillPersist))) {
-            mTRRBLStorage = nullptr;
+    if (!mTRRBLStorage) {
+      mTRRBLStorage = DataStorage::Get(DataStorageClass::TRRBlacklist);
+      if (mTRRBLStorage) {
+        bool storageWillPersist = true;
+        if (NS_FAILED(mTRRBLStorage->Init(storageWillPersist))) {
+          mTRRBLStorage = nullptr;
+        }
+        if (mClearTRRBLStorage) {
+          if (mTRRBLStorage) {
+            mTRRBLStorage->Clear();
           }
-          if (mClearTRRBLStorage) {
-            if (mTRRBLStorage) {
-              mTRRBLStorage->Clear();
-            }
-            mClearTRRBLStorage = false;
-          }
+          mClearTRRBLStorage = false;
         }
       }
-      if (mConfirmationState != CONFIRM_OK) {
-        mConfirmationState = CONFIRM_TRYING;
-        MaybeConfirm();
-      } else {
-        LOG(("TRRservice CP clear when already up!\n"));
-      }
-      mCaptiveIsPassed = true;
     }
+
+    if (mConfirmationState != CONFIRM_OK) {
+      mConfirmationState = CONFIRM_TRYING;
+      MaybeConfirm();
+    } else {
+      LOG(("TRRservice CP clear when already up!\n"));
+    }
+
+    mCaptiveIsPassed = true;
 
   } else if (!strcmp(aTopic, kClearPrivateData) ||
              !strcmp(aTopic, kPurge)) {
@@ -383,13 +384,6 @@ bool
 TRRService::IsTRRBlacklisted(const nsACString &aHost, bool privateBrowsing,
                              bool aParentsToo) // false if domain
 {
-  if (mClearTRRBLStorage) {
-    if (mTRRBLStorage) {
-      mTRRBLStorage->Clear();
-    }
-    mClearTRRBLStorage = false;
-  }
-
   if (mMode == MODE_TRRONLY) {
     return false; // might as well try
   }
@@ -405,6 +399,15 @@ TRRService::IsTRRBlacklisted(const nsACString &aHost, bool privateBrowsing,
   }
   if (!mTRRBLStorage) {
     return false;
+  }
+
+  // Only use the Storage API in the main thread
+  MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
+
+  if (mClearTRRBLStorage) {
+    mTRRBLStorage->Clear();
+    mClearTRRBLStorage = false;
+    return false; // just cleared!
   }
 
   int32_t dot = aHost.FindChar('.');
@@ -438,21 +441,20 @@ TRRService::IsTRRBlacklisted(const nsACString &aHost, bool privateBrowsing,
     if (NS_SUCCEEDED(code) && (until > expire)) {
       LOG(("Host [%s] is TRR blacklisted\n", nsCString(aHost).get()));
       return true;
+    }
+    // the blacklisted entry has expired
+    RefPtr<DataStorage> storage = mTRRBLStorage;
+    nsCOMPtr<nsIRunnable> runnable =
+      NS_NewRunnableFunction("proxyStorageRemove",
+                              [storage, hashkey, privateBrowsing]() {
+                                storage->Remove(hashkey, privateBrowsing ?
+                                                DataStorage_Private :
+                                                DataStorage_Persistent);
+                              });
+    if (!NS_IsMainThread()) {
+      NS_DispatchToMainThread(runnable);
     } else {
-      // the blacklisted entry has expired
-      RefPtr<DataStorage> storage = mTRRBLStorage;
-      nsCOMPtr<nsIRunnable> runnable =
-        NS_NewRunnableFunction("proxyStorageRemove",
-                               [storage, hashkey, privateBrowsing]() {
-                                 storage->Remove(hashkey, privateBrowsing ?
-                                                 DataStorage_Private :
-                                                 DataStorage_Persistent);
-                               });
-      if (!NS_IsMainThread()) {
-        NS_DispatchToMainThread(runnable);
-      } else {
-        runnable->Run();
-      }
+      runnable->Run();
     }
   }
   return false;

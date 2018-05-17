@@ -144,13 +144,13 @@ ac_add_options --enable-artifact-builds
 # Upgrade Mercurial older than this.
 # This should match OLDEST_NON_LEGACY_VERSION from
 # the hg setup wizard in version-control-tools.
-MODERN_MERCURIAL_VERSION = LooseVersion('4.2.3')
+MODERN_MERCURIAL_VERSION = LooseVersion('4.3.3')
 
 # Upgrade Python older than this.
 MODERN_PYTHON_VERSION = LooseVersion('2.7.3')
 
 # Upgrade rust older than this.
-MODERN_RUST_VERSION = LooseVersion('1.25.0')
+MODERN_RUST_VERSION = LooseVersion('1.24.0')
 
 
 class BaseBootstrapper(object):

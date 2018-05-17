@@ -30,14 +30,15 @@ class MacOSFontEntry : public gfxFontEntry
 {
 public:
     friend class gfxMacPlatformFontList;
+    friend class gfxMacFont;
 
-    MacOSFontEntry(const nsAString& aPostscriptName, FontWeight aWeight,
+    MacOSFontEntry(const nsAString& aPostscriptName, WeightRange aWeight,
                    bool aIsStandardFace = false,
                    double aSizeHint = 0.0);
 
     // for use with data fonts
     MacOSFontEntry(const nsAString& aPostscriptName, CGFontRef aFontRef,
-                   FontWeight aWeight, uint16_t aStretch, uint8_t aStyle,
+                   WeightRange aWeight, StretchRange aStretch, SlantStyleRange aStyle,
                    bool aIsDataUserFont, bool aIsLocal);
 
     virtual ~MacOSFontEntry() {
@@ -80,8 +81,7 @@ public:
     float TrackingForCSSPx(float aPointSize) const;
 
 protected:
-    gfxFont* CreateFontInstance(const gfxFontStyle *aFontStyle,
-                                bool aNeedsBold) override;
+    gfxFont* CreateFontInstance(const gfxFontStyle *aFontStyle) override;
 
     bool HasFontTable(uint32_t aTableTag) override;
 
@@ -105,6 +105,19 @@ protected:
     bool mHasAATSmallCaps;
     bool mHasAATSmallCapsInitialized;
     bool mCheckedForTracking;
+
+    // To work around Core Text's mishandling of the default value for 'opsz',
+    // we need to record whether the font has an a optical size axis, what its
+    // range and default values are, and a usable close-to-default alternative.
+    // (See bug 1457417 for details.)
+    // These fields are used by gfxMacFont, but stored in the font entry so
+    // that only a single font instance needs to inspect the available
+    // variations.
+    bool mCheckedForOpszAxis;
+    bool mHasOpszAxis;
+    gfxFontVariationAxis mOpszAxis;
+    float mAdjustedDefaultOpsz;
+
     nsTHashtable<nsUint32HashKey> mAvailableTables;
 
     mozilla::ThreadSafeWeakPtr<mozilla::gfx::UnscaledFontMac> mUnscaledFont;
@@ -131,14 +144,14 @@ public:
     bool GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName) override;
 
     gfxFontEntry* LookupLocalFont(const nsAString& aFontName,
-                                  FontWeight aWeight,
-                                  uint16_t aStretch,
-                                  uint8_t aStyle) override;
+                                  WeightRange aWeightForEntry,
+                                  StretchRange aStretchForEntry,
+                                  SlantStyleRange aStyleForEntry) override;
 
     gfxFontEntry* MakePlatformFont(const nsAString& aFontName,
-                                   FontWeight aWeight,
-                                   uint16_t aStretch,
-                                   uint8_t aStyle,
+                                   WeightRange aWeightForEntry,
+                                   StretchRange aStretchForEntry,
+                                   SlantStyleRange aStyleForEntry,
                                    const uint8_t* aFontData,
                                    uint32_t aLength) override;
 

@@ -254,7 +254,7 @@ def render_actions_json(parameters, graph_config):
                 'description': action.description,
                 'context': action.context,
                 'schema': (
-                    action.schema(graph_config) if callable(action.schema)
+                    action.schema(graph_config=graph_config) if callable(action.schema)
                     else action.schema
                 ),
                 'task': task,

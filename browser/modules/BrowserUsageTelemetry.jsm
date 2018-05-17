@@ -227,8 +227,8 @@ let URICountListener = {
     this._domainSet.clear();
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
+                                          Ci.nsISupportsWeakReference]),
 };
 
 let urlbarListener = {
@@ -312,8 +312,8 @@ let urlbarListener = {
     }
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 };
 
 let BrowserUsageTelemetry = {
@@ -341,8 +341,8 @@ let BrowserUsageTelemetry = {
     URICountListener.reset();
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 
   uninit() {
     if (!this._inited) {
@@ -510,7 +510,7 @@ let BrowserUsageTelemetry = {
   /**
    * Records the method by which the user selected a urlbar result.
    *
-   * @param {nsIDOMEvent} event
+   * @param {Event} event
    *        The event that triggered the selection.
    * @param {string} userSelectionBehavior
    *        How the user cycled through results before picking the current match.
@@ -534,7 +534,7 @@ let BrowserUsageTelemetry = {
   /**
    * Records the method by which the user selected a searchbar result.
    *
-   * @param {nsIDOMEvent} event
+   * @param {Event} event
    *        The event that triggered the selection.
    * @param {number} highlightedIndex
    *        The index that the user chose in the popup, or -1 if there wasn't a

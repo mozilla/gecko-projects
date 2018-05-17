@@ -23,6 +23,7 @@ DIRS += ['xbl-marquee']
 TEST_DIRS += ['test']
 
 EXPORTS += [
+    '!nsCSSPropertyID.h',
     'AnimationCommon.h',
     'CounterStyleManager.h',
     'nsAnimationManager.h',
@@ -33,11 +34,7 @@ EXPORTS += [
     'nsCSSFontDescList.h',
     'nsCSSKeywordList.h',
     'nsCSSKeywords.h',
-    'nsCSSParser.h',
-    'nsCSSPropAliasList.h',
-    'nsCSSPropertyID.h',
     'nsCSSPropertyIDSet.h',
-    'nsCSSPropList.h',
     'nsCSSProps.h',
     'nsCSSPseudoElementList.h',
     'nsCSSPseudoElements.h',
@@ -63,12 +60,14 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
+    '!ServoCSSPropList.h',
     'AnimationCollection.h',
     'BindingStyleRule.h',
     'CachedInheritingStyles.h',
     'ComputedStyle.h',
     'ComputedStyleInlines.h',
     'CSSEnabledState.h',
+    'CSSPropFlags.h',
     'DeclarationBlock.h',
     'DeclarationBlockInlines.h',
     'DocumentStyleRootIterator.h',
@@ -82,6 +81,8 @@ EXPORTS.mozilla += [
     'ServoBindingList.h',
     'ServoBindings.h',
     'ServoBindingTypes.h',
+    'ServoComputedData.h',
+    'ServoComputedDataInlines.h',
     'ServoCounterStyleRule.h',
     'ServoCSSParser.h',
     'ServoCSSRuleList.h',
@@ -94,7 +95,6 @@ EXPORTS.mozilla += [
     'ServoImportRule.h',
     'ServoKeyframeRule.h',
     'ServoKeyframesRule.h',
-    'ServoMediaList.h',
     'ServoMediaRule.h',
     'ServoNamespaceRule.h',
     'ServoPageRule.h',
@@ -102,7 +102,6 @@ EXPORTS.mozilla += [
     'ServoStyleRule.h',
     'ServoStyleSet.h',
     'ServoStyleSetInlines.h',
-    'ServoStyleSheet.h',
     'ServoSupportsRule.h',
     'ServoTraversalStatistics.h',
     'ServoTypes.h',
@@ -215,17 +214,16 @@ UNIFIED_SOURCES += [
     'ServoImportRule.cpp',
     'ServoKeyframeRule.cpp',
     'ServoKeyframesRule.cpp',
-    'ServoMediaList.cpp',
     'ServoMediaRule.cpp',
     'ServoNamespaceRule.cpp',
     'ServoPageRule.cpp',
     'ServoSpecifiedValues.cpp',
     'ServoStyleRule.cpp',
     'ServoStyleSet.cpp',
-    'ServoStyleSheet.cpp',
     'ServoSupportsRule.cpp',
     'StreamLoader.cpp',
     'StyleAnimationValue.cpp',
+    'StyleComplexColor.cpp',
     'StyleSheet.cpp',
     'URLExtraData.cpp',
 ]
@@ -274,15 +272,40 @@ CONTENT_ACCESSIBLE_FILES += [
     'TopLevelVideoDocument.css',
 ]
 
+GENERATED_FILES += [
+    'nsCSSPropertyID.h',
+    'ServoCSSPropList.h',
+    'ServoCSSPropList.py',
+]
+
+prop_id = GENERATED_FILES['nsCSSPropertyID.h']
+prop_id.script = 'GenerateCSSPropertyID.py:generate'
+prop_id.inputs = [
+    'nsCSSPropertyID.h.in',
+    '!ServoCSSPropList.py',
+]
+
+servo_props = GENERATED_FILES['ServoCSSPropList.h']
+servo_props.script = 'GenerateServoCSSPropList.py:generate_header'
+servo_props.inputs = [
+    '!ServoCSSPropList.py',
+]
+
+servo_props = GENERATED_FILES['ServoCSSPropList.py']
+servo_props.script = 'GenerateServoCSSPropList.py:generate_data'
+servo_props.inputs = [
+    'ServoCSSPropList.mako.py',
+]
+
 if CONFIG['COMPILE_ENVIRONMENT']:
     GENERATED_FILES += [
         'nsCSSPropsGenerated.inc',
     ]
+
     css_props = GENERATED_FILES['nsCSSPropsGenerated.inc']
     css_props.script = 'GenerateCSSPropsGenerated.py:generate'
     css_props.inputs = [
-        'nsCSSPropsGenerated.inc.in',
-        'PythonCSSProps.h',
+        '!ServoCSSPropList.py',
     ]
 
     CONFIGURE_SUBST_FILES += [

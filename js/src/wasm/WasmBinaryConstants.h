@@ -337,7 +337,7 @@ enum class Op
     RefIsNull                            = 0xd1,
 
     FirstPrefix                          = 0xfc,
-    NumericPrefix                        = 0xfc,
+    MiscPrefix                           = 0xfc,
     ThreadPrefix                         = 0xfe,
     MozPrefix                            = 0xff,
 
@@ -350,8 +350,8 @@ IsPrefixByte(uint8_t b)
     return b >= uint8_t(Op::FirstPrefix);
 }
 
-// Opcodes in the "numeric" opcode space.
-enum class NumericOp
+// Opcodes in the "miscellaneous" opcode space.
+enum class MiscOp
 {
     // Saturating float-to-int conversions
     I32TruncSSatF32                      = 0x00,
@@ -362,6 +362,10 @@ enum class NumericOp
     I64TruncUSatF32                      = 0x05,
     I64TruncSSatF64                      = 0x06,
     I64TruncUSatF64                      = 0x07,
+
+    // Bulk memory operations.  Note, these are unofficial.
+    MemCopy                              = 0x40,
+    MemFill                              = 0x41,
 
     Limit
 };
@@ -447,6 +451,17 @@ enum class ThreadOp
     I64AtomicCmpXchg8U                   = 0x4c,
     I64AtomicCmpXchg16U                  = 0x4d,
     I64AtomicCmpXchg32U                  = 0x4e,
+
+    Limit
+};
+
+// Opcodes from Bulk Memory Operations proposal as at 2 Feb 2018.  Note,
+// the opcodes are not actually assigned in that proposal.  This is just
+// an interim assignment.
+enum class CopyOrFillOp
+{
+    Copy                                 = 0x01,
+    Fill                                 = 0x02,
 
     Limit
 };

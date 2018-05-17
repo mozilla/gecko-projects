@@ -34,7 +34,6 @@
 #include "nsSize.h"
 #include "nsIFrame.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocShell.h"
 #include "nsError.h"
 #include "nsNodeInfoManager.h"
@@ -1667,7 +1666,7 @@ HTMLMediaElement::GetCurrentImage()
   }
 
   AutoLockImage lockImage(container);
-  RefPtr<layers::Image> image = lockImage.GetImage();
+  RefPtr<layers::Image> image = lockImage.GetImage(TimeStamp::Now());
   return image.forget();
 }
 
@@ -2097,8 +2096,7 @@ void HTMLMediaElement::SelectResource()
       mMediaSource = mSrcMediaSource;
       DDLINKCHILD("mediasource", mMediaSource.get());
       UpdatePreloadAction();
-      if (mPreloadAction == HTMLMediaElement::PRELOAD_NONE &&
-          !IsMediaStreamURI(mLoadingSrc) && !mMediaSource) {
+      if (mPreloadAction == HTMLMediaElement::PRELOAD_NONE && !mMediaSource) {
         // preload:none media, suspend the load here before we make any
         // network requests.
         SuspendLoad();
@@ -2427,8 +2425,7 @@ void HTMLMediaElement::LoadFromSourceChildren()
     NS_ASSERTION(mNetworkState == NETWORK_LOADING,
                  "Network state should be loading");
 
-    if (mPreloadAction == HTMLMediaElement::PRELOAD_NONE &&
-        !IsMediaStreamURI(mLoadingSrc) && !mMediaSource) {
+    if (mPreloadAction == HTMLMediaElement::PRELOAD_NONE && !mMediaSource) {
       // preload:none media, suspend the load here before we make any
       // network requests.
       SuspendLoad();
@@ -2575,20 +2572,6 @@ HTMLMediaElement::LoadResource()
       static_cast<ChannelMediaDecoder*>(other->mDecoder.get()));
     if (NS_SUCCEEDED(rv))
       return rv;
-  }
-
-  if (IsMediaStreamURI(mLoadingSrc)) {
-    RefPtr<DOMMediaStream> stream;
-    nsresult rv = NS_GetStreamForMediaStreamURI(mLoadingSrc, getter_AddRefs(stream));
-    if (NS_FAILED(rv)) {
-      nsAutoString spec;
-      GetCurrentSrc(spec);
-      const char16_t* params[] = { spec.get() };
-      ReportLoadError("MediaLoadInvalidURI", params, ArrayLength(params));
-      return MediaResult(rv, "MediaLoadInvalidURI");
-    }
-    SetupSrcMediaStreamPlayback(stream);
-    return NS_OK;
   }
 
   if (mMediaSource) {
@@ -2866,11 +2849,7 @@ HTMLMediaElement::Seek(double aTime,
   // The media backend is responsible for dispatching the timeupdate
   // event if it changes the playback position as a result of the seek.
   LOG(LogLevel::Debug, ("%p SetCurrentTime(%f) starting seek", this, aTime));
-  nsresult rv = mDecoder->Seek(aTime, aSeekType);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-    return nullptr;
-  }
+  mDecoder->Seek(aTime, aSeekType);
 
   // We changed whether we're seeking so we need to AddRemoveSelfReference.
   AddRemoveSelfReference();
@@ -4072,20 +4051,7 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
         // starting playback until we've loaded metadata.
         mAttemptPlayUponLoadedMetadata = true;
       } else {
-        nsresult rv = mDecoder->Play();
-        if (NS_FAILED(rv)) {
-          // We don't need to remove the _promise_ from _mPendingPlayPromises_ here.
-          // If something wrong between |mPendingPlayPromises.AppendElement(promise);|
-          // and here, the _promise_ should already have been rejected. Otherwise,
-          // the _promise_ won't be returned to JS at all, so just leave it in the
-          // _mPendingPlayPromises_ and let it be resolved/rejected with the
-          // following actions and the promise-resolution won't be observed at all.
-          LOG(LogLevel::Debug,
-              ("%p Play() promise rejected because failed to play MediaDecoder.",
-              this));
-          promise->MaybeReject(rv);
-          return promise.forget();
-        }
+        mDecoder->Play();
       }
     }
   } else if (mReadyState < HAVE_METADATA) {
@@ -4106,8 +4072,12 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
   UpdatePreloadAction();
   UpdateSrcMediaStreamPlaying();
 
-  // once media start playing, we would always allow it to autoplay
-  mIsBlessed = true;
+  // Once play() has been called in a user generated event handler,
+  // it is allowed to autoplay. Note: we can reach here when not in
+  // a user generated event handler if our readyState has not yet
+  // reached HAVE_METADATA.
+  mIsBlessed |= EventStateManager::IsHandlingUserInput();
+
 
   // TODO: If the playback has ended, then the user agent must set
   // seek to the effective start.
@@ -4843,8 +4813,8 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   NS_ASSERTION(!mimeType.IsEmpty(), "We should have the Content-Type.");
   NS_ConvertUTF8toUTF16 mimeUTF16(mimeType);
 
-  HTMLMediaElement* self = this;
-  auto reportCanPlay = [&](bool aCanPlay) {
+  RefPtr<HTMLMediaElement> self = this;
+  auto reportCanPlay = [&, self](bool aCanPlay) {
     diagnostics.StoreFormatDiagnostics(
       self->OwnerDoc(), mimeUTF16, aCanPlay, __func__);
     if (!aCanPlay) {
@@ -4856,7 +4826,7 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
     }
   };
 
-  auto onExit = MakeScopeExit([&] {
+  auto onExit = MakeScopeExit([self] {
     if (self->mChannelLoader) {
       self->mChannelLoader->Done();
       self->mChannelLoader = nullptr;
@@ -4949,19 +4919,14 @@ HTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder)
     mDecoder->Suspend();
   }
 
-  nsresult rv = NS_OK;
   if (!mPaused && !mAttemptPlayUponLoadedMetadata) {
     SetPlayedOrSeeked(true);
     if (!mPausedForInactiveDocumentOrChannel) {
-      rv = mDecoder->Play();
+      mDecoder->Play();
     }
   }
 
-  if (NS_FAILED(rv)) {
-    ShutdownDecoder();
-  }
-
-  return rv;
+  return NS_OK;
 }
 
 class HTMLMediaElement::StreamListener : public MediaStreamListener
@@ -5543,7 +5508,6 @@ void HTMLMediaElement::PlaybackEnded()
 
   if (!mPaused) {
     Pause();
-    AsyncRejectPendingPlayPromises(NS_ERROR_DOM_MEDIA_ABORT_ERR);
   }
 
   if (mSrcStream) {
@@ -5965,8 +5929,9 @@ HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
         if (IsAllowedToPlay()) {
           mDecoder->Play();
         } else {
-          AsyncRejectPendingPlayPromises(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
           mPaused = true;
+          DispatchAsyncEvent(NS_LITERAL_STRING("pause"));
+          AsyncRejectPendingPlayPromises(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
         }
       }
       NotifyAboutPlaying();
@@ -6530,12 +6495,6 @@ void HTMLMediaElement::NotifyShutdownEvent()
   mShuttingDown = true;
   ResetState();
   AddRemoveSelfReference();
-}
-
-bool
-HTMLMediaElement::IsNodeOfType(uint32_t aFlags) const
-{
-  return !(aFlags & ~eMEDIA);
 }
 
 void HTMLMediaElement::DispatchAsyncSourceError(nsIContent* aSourceElement)

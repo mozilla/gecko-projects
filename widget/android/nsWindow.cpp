@@ -284,7 +284,7 @@ public:
                      jni::Object::Param aQueue,
                      jni::Object::Param aCompositor,
                      jni::Object::Param aDispatcher,
-                     jni::Object::Param aSettings,
+                     jni::Object::Param aInitData,
                      jni::String::Param aId,
                      jni::String::Param aChromeURI,
                      int32_t aScreenId,
@@ -298,7 +298,7 @@ public:
                   jni::Object::Param aQueue,
                   jni::Object::Param aCompositor,
                   jni::Object::Param aDispatcher,
-                  jni::Object::Param aSettings);
+                  jni::Object::Param aInitData);
 
     void AttachEditable(const GeckoSession::Window::LocalRef& inst,
                         jni::Object::Param aEditableParent,
@@ -763,16 +763,14 @@ NS_IMPL_ISUPPORTS(nsWindow::AndroidView,
 
 
 nsresult
-nsWindow::AndroidView::GetSettings(JSContext* aCx, JS::MutableHandleValue aOut)
+nsWindow::AndroidView::GetInitData(JSContext* aCx, JS::MutableHandleValue aOut)
 {
-    if (!mSettings) {
+    if (!mInitData) {
         aOut.setNull();
         return NS_OK;
     }
 
-    // Lock to prevent races with UI thread.
-    auto lock = mSettings.Lock();
-    return widget::EventDispatcher::UnboxBundle(aCx, mSettings, aOut);
+    return widget::EventDispatcher::UnboxBundle(aCx, mInitData, aOut);
 }
 
 /**
@@ -824,19 +822,6 @@ class nsWindow::LayerViewSupport final
 
 public:
     typedef LayerSession::Compositor::Natives<LayerViewSupport> Base;
-
-    template<class Functor>
-    static void OnNativeCall(Functor&& aCall)
-    {
-        if (aCall.IsTarget(&LayerViewSupport::CreateCompositor)) {
-            // This call is blocking.
-            nsAppShell::SyncRunEvent(nsAppShell::LambdaEvent<Functor>(
-                    mozilla::Move(aCall)), &LayerViewEvent::MakeEvent);
-            return;
-        }
-
-        MOZ_CRASH("Unexpected call");
-    }
 
     static LayerViewSupport*
     FromNative(const LayerSession::Compositor::LocalRef& instance)
@@ -930,20 +915,6 @@ public:
         }
 
         mWindow->Resize(aLeft, aTop, aWidth, aHeight, /* repaint */ false);
-    }
-
-    void CreateCompositor(int32_t aWidth, int32_t aHeight,
-                          jni::Object::Param aSurface)
-    {
-        MOZ_ASSERT(NS_IsMainThread());
-        if (!mWindow) {
-            return; // Already shut down.
-        }
-
-        mSurface = aSurface;
-        mWindow->CreateLayerManager(aWidth, aHeight);
-
-        mCompositorPaused = false;
     }
 
     void SyncPauseCompositor()
@@ -1171,7 +1142,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                                  jni::Object::Param aQueue,
                                  jni::Object::Param aCompositor,
                                  jni::Object::Param aDispatcher,
-                                 jni::Object::Param aSettings,
+                                 jni::Object::Param aInitData,
                                  jni::String::Param aId,
                                  jni::String::Param aChromeURI,
                                  int32_t aScreenId,
@@ -1198,7 +1169,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     RefPtr<AndroidView> androidView = new AndroidView();
     androidView->mEventDispatcher->Attach(
             java::EventDispatcher::Ref::From(aDispatcher), nullptr);
-    androidView->mSettings = java::GeckoBundle::Ref::From(aSettings);
+    androidView->mInitData = java::GeckoBundle::Ref::From(aInitData);
 
     nsAutoCString chromeFlags("chrome,dialog=0,resizable,scrollbars");
     if (aPrivateMode) {
@@ -1226,7 +1197,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
 
     // Attach other session support objects.
     window->mGeckoViewSupport->Transfer(
-            sessionWindow, aQueue, aCompositor, aDispatcher, aSettings);
+            sessionWindow, aQueue, aCompositor, aDispatcher, aInitData);
 
     if (window->mWidgetListener) {
         nsCOMPtr<nsIXULWindow> xulWindow(
@@ -1260,7 +1231,7 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
                                      jni::Object::Param aQueue,
                                      jni::Object::Param aCompositor,
                                      jni::Object::Param aDispatcher,
-                                     jni::Object::Param aSettings)
+                                     jni::Object::Param aInitData)
 {
     if (window.mNPZCSupport) {
         MOZ_ASSERT(window.mLayerViewSupport);
@@ -1278,10 +1249,14 @@ nsWindow::GeckoViewSupport::Transfer(const GeckoSession::Window::LocalRef& inst,
     MOZ_ASSERT(window.mAndroidView);
     window.mAndroidView->mEventDispatcher->Attach(
             java::EventDispatcher::Ref::From(aDispatcher), mDOMWindow);
-    window.mAndroidView->mSettings = java::GeckoBundle::Ref::From(aSettings);
 
     if (mIsReady) {
+        // We're in a transfer; update init-data and notify JS code.
+        window.mAndroidView->mInitData =
+                java::GeckoBundle::Ref::From(aInitData);
         OnReady(aQueue);
+        window.mAndroidView->mEventDispatcher->Dispatch(
+                u"GeckoView:UpdateInitData");
     }
 
     DispatchToUiThread(
@@ -1420,6 +1395,14 @@ nsWindow::Create(nsIWidget* aParent,
         parent->mChildren.AppendElement(this);
         mParent = parent;
     }
+
+    // A default size of 1x1 confuses MobileViewportManager, so
+    // use 0x0 instead. This is also a little more fitting since
+    // we don't yet have a surface yet (and therefore a valid size)
+    // and 0x0 is usually recognized as invalid.
+    Resize(0, 0, false);
+
+    CreateLayerManager();
 
 #ifdef DEBUG_ANDROID_WIDGET
     DumpWindows();
@@ -1857,7 +1840,7 @@ nsWindow::GetLayerManager(PLayerTransactionChild*, LayersBackend, LayerManagerPe
 }
 
 void
-nsWindow::CreateLayerManager(int aCompositorWidth, int aCompositorHeight)
+nsWindow::CreateLayerManager()
 {
     if (mLayerManager) {
         return;
@@ -1873,7 +1856,8 @@ nsWindow::CreateLayerManager(int aCompositorWidth, int aCompositorHeight)
     gfxPlatform::GetPlatform();
 
     if (ShouldUseOffMainThreadCompositing()) {
-        CreateCompositor(aCompositorWidth, aCompositorHeight);
+        LayoutDeviceIntRect rect = GetBounds();
+        CreateCompositor(rect.Width(), rect.Height());
         if (mLayerManager) {
             return;
         }

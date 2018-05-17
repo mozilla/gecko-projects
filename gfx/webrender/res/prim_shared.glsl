@@ -20,8 +20,6 @@ uniform sampler2DArray sCacheRGBA8;
 // An A8 target for standalone tasks that is available to all passes.
 uniform sampler2DArray sSharedCacheA8;
 
-uniform sampler2D sGradients;
-
 vec2 clamp_rect(vec2 pt, RectWithSize rect) {
     return clamp(pt, rect.p0, rect.p0 + rect.size);
 }
@@ -42,6 +40,16 @@ varying vec3 vClipMaskUv;
 #define VECS_PER_PRIM_HEADER        2
 #define VECS_PER_TEXT_RUN           3
 #define VECS_PER_GRADIENT_STOP      2
+
+#define COLOR_MODE_FROM_PASS          0
+#define COLOR_MODE_ALPHA              1
+#define COLOR_MODE_SUBPX_CONST_COLOR  2
+#define COLOR_MODE_SUBPX_BG_PASS0     3
+#define COLOR_MODE_SUBPX_BG_PASS1     4
+#define COLOR_MODE_SUBPX_BG_PASS2     5
+#define COLOR_MODE_SUBPX_DUAL_SOURCE  6
+#define COLOR_MODE_BITMAP             7
+#define COLOR_MODE_COLOR_BITMAP       8
 
 uniform HIGHP_SAMPLER_FLOAT sampler2D sLocalClipRects;
 

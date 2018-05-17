@@ -50,7 +50,6 @@
 #include "nsIDeprecationWarner.h"
 #include "nsICompressConvStats.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIEventTarget.h"
 #include "nsRedirectHistoryEntry.h"
@@ -61,6 +60,10 @@
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
+#endif
+
+#ifdef MOZ_GECKO_PROFILER
+#include "ProfilerMarkerPayload.h"
 #endif
 
 using namespace mozilla::dom;
@@ -191,6 +194,7 @@ HttpChannelChild::HttpChannelChild()
 
   mChannelCreationTime = PR_Now();
   mChannelCreationTimestamp = TimeStamp::Now();
+  mLastStatusReported = mChannelCreationTimestamp; // in case we enable the profiler after Init()
   mAsyncOpenTime = TimeStamp::Now();
   mEventQ = new ChannelEventQueue(static_cast<nsIHttpChannel*>(this));
 
@@ -671,9 +675,7 @@ class SyntheticDiversionListener final : public nsIStreamListener
 {
   RefPtr<HttpChannelChild> mChannel;
 
-  ~SyntheticDiversionListener()
-  {
-  }
+  ~SyntheticDiversionListener() = default;
 
 public:
   explicit SyntheticDiversionListener(HttpChannelChild* aChannel)
@@ -1151,6 +1153,17 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
   mCacheReadStart = timing.cacheReadStart;
   mCacheReadEnd = timing.cacheReadEnd;
 
+#ifdef MOZ_GECKO_PROFILER
+  if (profiler_is_active()) {
+    int32_t priority = PRIORITY_NORMAL;
+    GetPriority(&priority);
+    profiler_add_network_marker(mURI, priority, mChannelId, NetworkLoadType::LOAD_STOP,
+                                mLastStatusReported, TimeStamp::Now(),
+                                mTransferSize,
+                                &mTransactionTimings);
+  }
+#endif
+
   mResponseTrailers = new nsHttpHeaderArray(aResponseTrailers);
 
   DoPreOnStopRequest(channelStatus);
@@ -1213,10 +1226,7 @@ HttpChannelChild::DoPreOnStopRequest(nsresult aStatus)
 
   MaybeCallSynthesizedCallback();
 
-  PerformanceStorage* performanceStorage = GetPerformanceStorage();
-  if (performanceStorage) {
-      performanceStorage->AddEntry(this, this);
-  }
+  MaybeReportTimingData();
 
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
     mStatus = aStatus;
@@ -1782,6 +1792,12 @@ HttpChannelChild::Redirect1Begin(const uint32_t& registrarId,
   ipc::MergeParentLoadInfoForwarder(loadInfoForwarder, mLoadInfo);
 
   nsCOMPtr<nsIURI> uri = DeserializeURI(newOriginalURI);
+
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, channelId, NetworkLoadType::LOAD_REDIRECT,
+                              mLastStatusReported, TimeStamp::Now(),
+                              0,
+                              &mTransactionTimings,
+                              uri);
 
   if (!securityInfoSerialization.IsEmpty()) {
     NS_DeserializeObject(securityInfoSerialization,
@@ -2508,6 +2524,11 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   // other http-* notifications are disabled in child processes.
   gHttpHandler->OnOpeningRequest(this);
 
+  mLastStatusReported = TimeStamp::Now();
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+                              mChannelCreationTimestamp, mLastStatusReported,
+                              0, nullptr, nullptr);
+
   mIsPending = true;
   mWasOpened = true;
   mListener = listener;
@@ -3104,12 +3125,12 @@ HttpChannelChild::GetAlternativeDataType(nsACString & aType)
 }
 
 NS_IMETHODIMP
-HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, nsIOutputStream * *_retval)
+HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, int64_t aPredictedSize, nsIOutputStream * *_retval)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 
   if (mSynthesizedCacheInfo) {
-    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(aType, _retval);
+    return mSynthesizedCacheInfo->OpenAlternativeOutputStream(aType, aPredictedSize, _retval);
   }
 
   if (!mIPCOpen) {
@@ -3129,6 +3150,7 @@ HttpChannelChild::OpenAlternativeOutputStream(const nsACString & aType, nsIOutpu
 
   if (!gNeckoChild->SendPAltDataOutputStreamConstructor(stream,
                                                         nsCString(aType),
+                                                        aPredictedSize,
                                                         this)) {
     return NS_ERROR_FAILURE;
   }

@@ -315,8 +315,14 @@ CutOrDeleteCommand::DoCommand(const char* aCommandName,
   TextEditor* textEditor = editor->AsTextEditor();
   MOZ_ASSERT(textEditor);
   dom::Selection* selection = textEditor->GetSelection();
-  if (selection && selection->Collapsed()) {
-    return textEditor->DeleteSelection(nsIEditor::eNext, nsIEditor::eStrip);
+  if (selection && selection->IsCollapsed()) {
+    nsresult rv =
+      textEditor->DeleteSelectionAsAction(nsIEditor::eNext,
+                                          nsIEditor::eStrip);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    return NS_OK;
   }
   return textEditor->Cut();
 }
@@ -427,8 +433,14 @@ CopyOrDeleteCommand::DoCommand(const char* aCommandName,
   TextEditor* textEditor = editor->AsTextEditor();
   MOZ_ASSERT(textEditor);
   dom::Selection* selection = textEditor->GetSelection();
-  if (selection && selection->Collapsed()) {
-    return textEditor->DeleteSelection(nsIEditor::eNextWord, nsIEditor::eStrip);
+  if (selection && selection->IsCollapsed()) {
+    nsresult rv =
+      textEditor->DeleteSelectionAsAction(nsIEditor::eNextWord,
+                                          nsIEditor::eStrip);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    return NS_OK;
   }
   return textEditor->Copy();
 }
@@ -489,7 +501,7 @@ CopyAndCollapseToEndCommand::DoCommand(const char* aCommandName,
   }
   RefPtr<dom::Selection> selection = textEditor->GetSelection();
   if (selection) {
-    selection->CollapseToEnd();
+    selection->CollapseToEnd(IgnoreErrors());
   }
   return NS_OK;
 }
@@ -789,7 +801,12 @@ DeleteCommand::DoCommand(const char* aCommandName,
 
   TextEditor* textEditor = editor->AsTextEditor();
   MOZ_ASSERT(textEditor);
-  return textEditor->DeleteSelection(deleteDir, nsIEditor::eStrip);
+  nsresult rv =
+    textEditor->DeleteSelectionAsAction(deleteDir, nsIEditor::eStrip);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1074,7 +1091,15 @@ InsertPlaintextCommand::DoCommand(const char* aCommandName,
   }
   TextEditor* textEditor = editor->AsTextEditor();
   MOZ_ASSERT(textEditor);
-  return textEditor->InsertText(EmptyString());
+  // XXX InsertTextAsAction() is not same as OnInputText().  However, other
+  //     commands to insert line break or paragraph separator use OnInput*().
+  //     According to the semantics of those methods, using *AsAction() is
+  //     better, however, this may not cause two or more placeholder
+  //     transactions to the top transaction since its name may not be
+  //     nsGkAtoms::TypingTxnName.
+  DebugOnly<nsresult> rv = textEditor->InsertTextAsAction(EmptyString());
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to insert empty string");
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1100,7 +1125,15 @@ InsertPlaintextCommand::DoCommandParams(const char* aCommandName,
 
   TextEditor* textEditor = editor->AsTextEditor();
   MOZ_ASSERT(textEditor);
-  return textEditor->InsertText(text);
+  // XXX InsertTextAsAction() is not same as OnInputText().  However, other
+  //     commands to insert line break or paragraph separator use OnInput*().
+  //     According to the semantics of those methods, using *AsAction() is
+  //     better, however, this may not cause two or more placeholder
+  //     transactions to the top transaction since its name may not be
+  //     nsGkAtoms::TypingTxnName.
+  rv = textEditor->InsertTextAsAction(text);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to insert the text");
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1152,7 +1185,9 @@ InsertParagraphCommand::DoCommand(const char* aCommandName,
 
   TextEditor* textEditor = editor->AsTextEditor();
   MOZ_ASSERT(textEditor);
-  return textEditor->TypedText(EmptyString(), TextEditor::eTypedBreak);
+  // XXX OnInputParagraphSeparator() is a handler of user input.  So, this
+  //     call may not be expected.
+  return textEditor->OnInputParagraphSeparator();
 }
 
 NS_IMETHODIMP
@@ -1210,9 +1245,13 @@ InsertLineBreakCommand::DoCommand(const char* aCommandName,
     return NS_ERROR_FAILURE;
   }
 
-  TextEditor* textEditor = editor->AsTextEditor();
-  MOZ_ASSERT(textEditor);
-  return textEditor->TypedText(EmptyString(), TextEditor::eTypedBR);
+  HTMLEditor* htmlEditor = editor->AsHTMLEditor();
+  if (!htmlEditor) {
+    return NS_ERROR_FAILURE;
+  }
+  // XXX OnInputLineBreak() is a handler of user input.  So, this call may not
+  //     be expected.
+  return htmlEditor->OnInputLineBreak();
 }
 
 NS_IMETHODIMP

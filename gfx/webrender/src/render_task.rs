@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceSize, ImageDescriptor, ImageFormat};
+use api::{DeviceIntPoint, DeviceIntRect, DeviceIntSize, DeviceSize, DeviceIntSideOffsets, ImageDescriptor, ImageFormat};
 #[cfg(feature = "pathfinder")]
 use api::FontRenderMode;
 use box_shadow::{BoxShadowCacheKey};
@@ -14,7 +14,7 @@ use euclid::{TypedPoint2D, TypedVector2D};
 use freelist::{FreeList, FreeListHandle, WeakFreeListHandle};
 use glyph_rasterizer::GpuGlyphCacheKey;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
-use gpu_types::{ImageSource, RasterizationSpace};
+use gpu_types::{ImageSource, RasterizationSpace, UvRectKind};
 use internal_types::{FastHashMap, SavedTargetIndex, SourceTexture};
 #[cfg(feature = "pathfinder")]
 use pathfinder_partitioner::mesh::Mesh;
@@ -142,6 +142,11 @@ impl RenderTaskTree {
         self.next_saved.0 += 1;
         id
     }
+
+    #[cfg(debug_assertions)]
+    pub fn frame_id(&self) -> FrameId {
+        self.frame_id
+    }
 }
 
 impl ops::Index<RenderTaskId> for RenderTaskTree {
@@ -191,6 +196,7 @@ pub struct PictureTask {
     pub prim_index: PrimitiveIndex,
     pub content_origin: DeviceIntPoint,
     pub uv_rect_handle: GpuCacheHandle,
+    uv_rect_kind: UvRectKind,
 }
 
 #[derive(Debug)]
@@ -200,6 +206,7 @@ pub struct BlurTask {
     pub blur_std_deviation: f32,
     pub target_kind: RenderTargetKind,
     pub uv_rect_handle: GpuCacheHandle,
+    uv_rect_kind: UvRectKind,
 }
 
 impl BlurTask {
@@ -210,8 +217,8 @@ impl BlurTask {
     }
 }
 
-#[cfg(feature = "pathfinder")]
 #[derive(Debug)]
+#[cfg(feature = "pathfinder")]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct GlyphTask {
@@ -247,6 +254,7 @@ pub enum BlitSource {
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct BlitTask {
     pub source: BlitSource,
+    pub padding: DeviceIntSideOffsets,
 }
 
 #[derive(Debug)]
@@ -301,6 +309,7 @@ impl RenderTask {
         prim_index: PrimitiveIndex,
         content_origin: DeviceIntPoint,
         children: Vec<RenderTaskId>,
+        uv_rect_kind: UvRectKind,
     ) -> Self {
         RenderTask {
             children,
@@ -309,6 +318,7 @@ impl RenderTask {
                 prim_index,
                 content_origin,
                 uv_rect_handle: GpuCacheHandle::new(),
+                uv_rect_kind,
             }),
             clear_mode: ClearMode::Transparent,
             saved_index: None,
@@ -329,6 +339,14 @@ impl RenderTask {
         size: DeviceIntSize,
         source: BlitSource,
     ) -> Self {
+        RenderTask::new_blit_with_padding(size, &DeviceIntSideOffsets::zero(), source)
+    }
+
+    pub fn new_blit_with_padding(
+        mut size: DeviceIntSize,
+        padding: &DeviceIntSideOffsets,
+        source: BlitSource,
+    ) -> Self {
         let mut children = Vec::new();
 
         // If this blit uses a render task as a source,
@@ -340,11 +358,15 @@ impl RenderTask {
             children.push(task_id);
         }
 
+        size.width += padding.horizontal();
+        size.height += padding.vertical();
+
         RenderTask {
             children,
             location: RenderTaskLocation::Dynamic(None, Some(size)),
             kind: RenderTaskKind::Blit(BlitTask {
                 source,
+                padding: *padding,
             }),
             clear_mode: ClearMode::Transparent,
             saved_index: None,
@@ -483,7 +505,10 @@ impl RenderTask {
     ) -> Self {
         // Adjust large std deviation value.
         let mut adjusted_blur_std_deviation = blur_std_deviation;
-        let blur_target_size = render_tasks[src_task_id].get_dynamic_size();
+        let (blur_target_size, uv_rect_kind) = {
+            let src_task = &render_tasks[src_task_id];
+            (src_task.get_dynamic_size(), src_task.uv_rect_kind())
+        };
         let mut adjusted_blur_target_size = blur_target_size;
         let mut downscaling_src_task_id = src_task_id;
         let mut scale_factor = 1.0;
@@ -510,6 +535,7 @@ impl RenderTask {
                 blur_std_deviation: adjusted_blur_std_deviation,
                 target_kind,
                 uv_rect_handle: GpuCacheHandle::new(),
+                uv_rect_kind,
             }),
             clear_mode,
             saved_index: None,
@@ -524,6 +550,7 @@ impl RenderTask {
                 blur_std_deviation: adjusted_blur_std_deviation,
                 target_kind,
                 uv_rect_handle: GpuCacheHandle::new(),
+                uv_rect_kind,
             }),
             clear_mode,
             saved_index: None,
@@ -567,6 +594,31 @@ impl RenderTask {
             }),
             clear_mode: ClearMode::Transparent,
             saved_index: None,
+        }
+    }
+
+    fn uv_rect_kind(&self) -> UvRectKind {
+        match self.kind {
+            RenderTaskKind::CacheMask(..) |
+            RenderTaskKind::Readback(..) |
+            RenderTaskKind::Scaling(..) => {
+                unreachable!("bug: unexpected render task");
+            }
+
+            RenderTaskKind::Picture(ref task) => {
+                task.uv_rect_kind
+            }
+
+            RenderTaskKind::VerticalBlur(ref task) |
+            RenderTaskKind::HorizontalBlur(ref task) => {
+                task.uv_rect_kind
+            }
+
+            RenderTaskKind::ClipRegion(..) |
+            RenderTaskKind::Glyph(_) |
+            RenderTaskKind::Blit(..) => {
+                UvRectKind::Rect
+            }
         }
     }
 
@@ -773,13 +825,13 @@ impl RenderTask {
     ) {
         let (target_rect, target_index) = self.get_target_rect();
 
-        let cache_handle = match self.kind {
+        let (cache_handle, uv_rect_kind) = match self.kind {
             RenderTaskKind::HorizontalBlur(ref mut info) |
             RenderTaskKind::VerticalBlur(ref mut info) => {
-                &mut info.uv_rect_handle
+                (&mut info.uv_rect_handle, info.uv_rect_kind)
             }
             RenderTaskKind::Picture(ref mut info) => {
-                &mut info.uv_rect_handle
+                (&mut info.uv_rect_handle, info.uv_rect_kind)
             }
             RenderTaskKind::Readback(..) |
             RenderTaskKind::Scaling(..) |
@@ -792,11 +844,15 @@ impl RenderTask {
         };
 
         if let Some(mut request) = gpu_cache.request(cache_handle) {
+            let p0 = target_rect.origin.to_f32();
+            let p1 = target_rect.bottom_right().to_f32();
+
             let image_source = ImageSource {
-                p0: target_rect.origin.to_f32(),
-                p1: target_rect.bottom_right().to_f32(),
+                p0,
+                p1,
                 texture_layer: target_index.0 as f32,
                 user_data: [0.0; 3],
+                uv_rect_kind,
             };
             image_source.write_gpu_blocks(&mut request);
         }
@@ -900,6 +956,7 @@ pub enum RenderTaskCacheMarker {}
 
 // A cache of render tasks that are stored in the texture
 // cache for usage across frames.
+#[derive(Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct RenderTaskCache {
@@ -1007,6 +1064,7 @@ impl RenderTaskCache {
                     None,
                     gpu_cache,
                     None,
+                    render_task.uv_rect_kind(),
                 );
 
                 // Get the allocation details in the texture cache, and store

@@ -129,6 +129,7 @@ using namespace mozilla::widget;
 #endif
 
 #include "nsShmImage.h"
+#include "gtkdrawing.h"
 
 #include "NativeKeyBindings.h"
 
@@ -630,7 +631,7 @@ EnsureInvisibleContainer()
 static void
 CheckDestroyInvisibleContainer()
 {
-    NS_PRECONDITION(gInvisibleContainer, "oh, no");
+    MOZ_ASSERT(gInvisibleContainer, "oh, no");
 
     if (!gdk_window_peek_children(gtk_widget_get_window(gInvisibleContainer))) {
         // No children, so not in use.
@@ -886,7 +887,7 @@ nsWindow::WidgetTypeSupportsAcceleration()
 void
 nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 {
-    NS_PRECONDITION(aNewParent, "");
+    MOZ_ASSERT(aNewParent, "null widget");
     NS_ASSERTION(!mIsDestroyed, "");
     NS_ASSERTION(!static_cast<nsWindow*>(aNewParent)->mIsDestroyed, "");
 
@@ -1738,6 +1739,15 @@ nsWindow::GetNativeData(uint32_t aDataType)
     case NS_NATIVE_COMPOSITOR_DISPLAY:
         return gfxPlatformGtk::GetPlatform()->GetCompositorDisplay();
 #endif // MOZ_X11
+    case NS_NATIVE_EGL_WINDOW: {
+        if (mIsX11Display)
+            return mGdkWindow ? (void*)GDK_WINDOW_XID(mGdkWindow) : nullptr;
+#ifdef MOZ_WAYLAND
+        if (mContainer)
+            return moz_container_get_wl_egl_window(mContainer);
+#endif
+        return nullptr;
+    }
     default:
         NS_WARNING("nsWindow::GetNativeData called with bad value");
         return nullptr;
@@ -3326,6 +3336,33 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
     }
     // else the widget is a shell widget.
 
+    // The block below is a bit evil.
+    //
+    // When a window is resized before it is shown, gtk_window_resize() delays
+    // resizes until the window is shown.  If gtk_window_state_event() sees a
+    // GDK_WINDOW_STATE_MAXIMIZED change [1] before the window is shown, then
+    // gtk_window_compute_configure_request_size() ignores the values from the
+    // resize [2].  See bug 1449166 for an example of how this could happen.
+    //
+    // [1] https://gitlab.gnome.org/GNOME/gtk/blob/3.22.30/gtk/gtkwindow.c#L7967
+    // [2] https://gitlab.gnome.org/GNOME/gtk/blob/3.22.30/gtk/gtkwindow.c#L9377
+    //
+    // In order to provide a sensible size for the window when the user exits
+    // maximized state, we hide the GDK_WINDOW_STATE_MAXIMIZED change from
+    // gtk_window_state_event() so as to trick GTK into using the values from
+    // gtk_window_resize() in its configure request.
+    //
+    // We instead notify gtk_window_state_event() of the maximized state change
+    // once the window is shown.
+    if (!mIsShown) {
+        aEvent->changed_mask = static_cast<GdkWindowState>
+            (aEvent->changed_mask & ~GDK_WINDOW_STATE_MAXIMIZED);
+    } else if (aEvent->changed_mask & GDK_WINDOW_STATE_WITHDRAWN &&
+               aEvent->new_window_state & GDK_WINDOW_STATE_MAXIMIZED) {
+        aEvent->changed_mask = static_cast<GdkWindowState>
+            (aEvent->changed_mask | GDK_WINDOW_STATE_MAXIMIZED);
+    }
+
     // We don't care about anything but changes in the maximized/icon/fullscreen
     // states
     if ((aEvent->changed_mask
@@ -3368,6 +3405,10 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
           aEvent->new_window_state & GDK_WINDOW_STATE_FULLSCREEN);
       }
     }
+
+    if (mDrawInTitlebar && mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
+        UpdateClientOffsetForCSDWindow();
+    }
 }
 
 void
@@ -3406,6 +3447,7 @@ nsWindow::OnDPIChanged()
       // Update menu's font size etc
       presShell->ThemeChanged();
     }
+    mWidgetListener->UIResolutionChanged();
   }
 }
 
@@ -3857,17 +3899,7 @@ nsWindow::Create(nsIWidget* aParent,
         // If the window were to get unredirected, there could be visible
         // tearing because Gecko does not align its framebuffer updates with
         // vblank.
-        if (mIsX11Display) {
-            gulong value = 2; // Opt out of unredirection
-            GdkAtom cardinal_atom = gdk_x11_xatom_to_atom(XA_CARDINAL);
-            gdk_property_change(gtk_widget_get_window(mShell),
-                                gdk_atom_intern("_NET_WM_BYPASS_COMPOSITOR", FALSE),
-                                cardinal_atom,
-                                32, // format
-                                GDK_PROP_MODE_REPLACE,
-                                (guchar*)&value,
-                                1);
-        }
+        SetCompositorHint(GTK_WIDGET_COMPOSIDED_ENABLED);
 #endif
     }
         break;
@@ -4081,60 +4113,70 @@ nsWindow::Create(nsIWidget* aParent,
 }
 
 void
-nsWindow::SetWindowClass(const nsAString &xulWinType)
+nsWindow::RefreshWindowClass(void)
 {
-  if (!mShell)
-    return;
+    if (mGtkWindowTypeName.IsEmpty() || mGtkWindowRoleName.IsEmpty())
+        return;
 
-  const char *res_class = gdk_get_program_class();
-  if (!res_class)
-    return;
-
-  char *res_name = ToNewCString(xulWinType);
-  if (!res_name)
-    return;
-
-  const char *role = nullptr;
-
-  // Parse res_name into a name and role. Characters other than
-  // [A-Za-z0-9_-] are converted to '_'. Anything after the first
-  // colon is assigned to role; if there's no colon, assign the
-  // whole thing to both role and res_name.
-  for (char *c = res_name; *c; c++) {
-    if (':' == *c) {
-      *c = 0;
-      role = c + 1;
-    }
-    else if (!isascii(*c) || (!isalnum(*c) && ('_' != *c) && ('-' != *c)))
-      *c = '_';
-  }
-  res_name[0] = toupper(res_name[0]);
-  if (!role) role = res_name;
-
-  GdkWindow* gdkWindow = gtk_widget_get_window(mShell);
-  gdk_window_set_role(gdkWindow, role);
+    GdkWindow* gdkWindow = gtk_widget_get_window(mShell);
+    gdk_window_set_role(gdkWindow, mGtkWindowRoleName.get());
 
 #ifdef MOZ_X11
-  if (mIsX11Display) {
-      XClassHint *class_hint = XAllocClassHint();
-      if (!class_hint) {
-        free(res_name);
-        return;
-      }
-      class_hint->res_name = res_name;
-      class_hint->res_class = const_cast<char*>(res_class);
+    if (mIsX11Display) {
+        XClassHint *class_hint = XAllocClassHint();
+        if (!class_hint) {
+          return;
+        }
+        const char *res_class = gdk_get_program_class();
+        if (!res_class)
+          return;
 
-      // Can't use gtk_window_set_wmclass() for this; it prints
-      // a warning & refuses to make the change.
-      GdkDisplay *display = gdk_display_get_default();
-      XSetClassHint(GDK_DISPLAY_XDISPLAY(display),
-                    gdk_x11_window_get_xid(gdkWindow),
-                    class_hint);
-      XFree(class_hint);
-  }
+        class_hint->res_name = const_cast<char*>(mGtkWindowTypeName.get());
+        class_hint->res_class = const_cast<char*>(res_class);
+
+        // Can't use gtk_window_set_wmclass() for this; it prints
+        // a warning & refuses to make the change.
+        GdkDisplay *display = gdk_display_get_default();
+        XSetClassHint(GDK_DISPLAY_XDISPLAY(display),
+                      gdk_x11_window_get_xid(gdkWindow),
+                      class_hint);
+        XFree(class_hint);
+    }
 #endif /* MOZ_X11 */
+}
 
-  free(res_name);
+void
+nsWindow::SetWindowClass(const nsAString &xulWinType)
+{
+    if (!mShell)
+      return;
+
+    char *res_name = ToNewCString(xulWinType);
+    if (!res_name)
+      return;
+
+    const char *role = nullptr;
+
+    // Parse res_name into a name and role. Characters other than
+    // [A-Za-z0-9_-] are converted to '_'. Anything after the first
+    // colon is assigned to role; if there's no colon, assign the
+    // whole thing to both role and res_name.
+    for (char *c = res_name; *c; c++) {
+      if (':' == *c) {
+        *c = 0;
+        role = c + 1;
+      }
+      else if (!isascii(*c) || (!isalnum(*c) && ('_' != *c) && ('-' != *c)))
+        *c = '_';
+    }
+    res_name[0] = toupper(res_name[0]);
+    if (!role) role = res_name;
+
+    mGtkWindowTypeName = res_name;
+    mGtkWindowRoleName = role;
+    free(res_name);
+
+    RefreshWindowClass();
 }
 
 void
@@ -4160,6 +4202,8 @@ nsWindow::NativeResize()
          size.width, size.height));
 
     if (mIsTopLevel) {
+        MOZ_ASSERT(size.width > 0 && size.height > 0,
+                   "Can't resize window smaller than 1x1.");
         gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
@@ -4205,6 +4249,8 @@ nsWindow::NativeMoveResize()
             NativeShow(false);
         }
         NativeMove();
+
+        return;
     }
 
     GdkRectangle size = DevicePixelsToGdkSizeRoundUp(mBounds.Size());
@@ -4217,6 +4263,8 @@ nsWindow::NativeMoveResize()
         // x and y give the position of the window manager frame top-left.
         gtk_window_move(GTK_WINDOW(mShell), topLeft.x, topLeft.y);
         // This sets the client window size.
+        MOZ_ASSERT(size.width > 0 && size.height > 0,
+                   "Can't resize window smaller than 1x1.");
         gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
@@ -4269,6 +4317,16 @@ nsWindow::NativeShow(bool aAction)
         }
     }
     else {
+#ifdef MOZ_WAYLAND
+        if (mContainer && moz_container_has_wl_egl_window(mContainer)) {
+            // Because wl_egl_window is destroyed on moz_container_unmap(),
+            // the current compositor cannot use it anymore. To avoid crash,
+            // destroy the compositor & recreate a new compositor on next
+            // expose event.
+            DestroyLayerManager();
+        }
+#endif
+
         if (mIsTopLevel) {
             // Workaround window freezes on GTK versions before 3.21.2 by
             // ensuring that configure events get dispatched to windows before
@@ -4940,6 +4998,8 @@ FullscreenTransitionWindow::FullscreenTransitionWindow(GtkWidget* aWidget)
     gdk_screen_get_monitor_geometry(screen, monitorNum, &monitorRect);
     gtk_window_set_screen(gtkWin, screen);
     gtk_window_move(gtkWin, monitorRect.x, monitorRect.y);
+    MOZ_ASSERT(monitorRect.width > 0 && monitorRect.height > 0,
+               "Can't resize window smaller than 1x1.");
     gtk_window_resize(gtkWin, monitorRect.width, monitorRect.height);
 
     GdkColor bgColor;
@@ -6586,6 +6646,32 @@ nsWindow::ClearCachedResources()
     }
 }
 
+/* nsWindow::UpdateClientOffsetForCSDWindow() is designed to be called from
+ * paint code to update mClientOffset any time. It also propagates
+ * the mClientOffset to child tabs.
+ *
+ * It works only for CSD decorated GtkWindow.
+ */
+void
+nsWindow::UpdateClientOffsetForCSDWindow()
+{
+    // _NET_FRAME_EXTENTS is not set on client decorated windows,
+    // so we need to read offset between mContainer and toplevel mShell
+    // window.
+    if (mSizeState == nsSizeMode_Normal) {
+        GtkBorder decorationSize;
+        GetCSDDecorationSize(GTK_WINDOW(mShell), &decorationSize);
+        mClientOffset = nsIntPoint(decorationSize.left, decorationSize.top);
+    } else {
+        mClientOffset = nsIntPoint(0, 0);
+    }
+
+    // Send a WindowMoved notification. This ensures that TabParent
+    // picks up the new client offset and sends it to the child process
+    // if appropriate.
+    NotifyWindowMoved(mBounds.x, mBounds.y);
+}
+
 nsresult
 nsWindow::SetNonClientMargins(LayoutDeviceIntMargin &aMargins)
 {
@@ -6659,6 +6745,22 @@ nsWindow::SetDrawsInTitlebar(bool aState)
         gtk_widget_reparent(GTK_WIDGET(mContainer), GTK_WIDGET(mShell));
         mNeedsShow = true;
         NativeResize();
+
+        // Label mShell toplevel window so property_notify_event_cb callback
+        // can find its way home.
+        g_object_set_data(G_OBJECT(gtk_widget_get_window(mShell)),
+                          "nsWindow", this);
+#ifdef MOZ_X11
+        SetCompositorHint(GTK_WIDGET_COMPOSIDED_ENABLED);
+#endif
+        RefreshWindowClass();
+
+        // When we use system titlebar setup managed by Gtk+ we also get
+        // _NET_FRAME_EXTENTS property for our toplevel window so we can't
+        // update the client offset it here.
+        if (aState) {
+            UpdateClientOffsetForCSDWindow();
+        }
 
         gtk_widget_destroy(tmpWindow);
     }
@@ -7133,3 +7235,21 @@ nsWindow::SetProgress(unsigned long progressPercent)
                            progressPercent);
 #endif // MOZ_X11
 }
+
+#ifdef MOZ_X11
+void
+nsWindow::SetCompositorHint(WindowComposeRequest aState)
+{
+    if (mIsX11Display) {
+        gulong value = aState;
+        GdkAtom cardinal_atom = gdk_x11_xatom_to_atom(XA_CARDINAL);
+        gdk_property_change(gtk_widget_get_window(mShell),
+                            gdk_atom_intern("_NET_WM_BYPASS_COMPOSITOR", FALSE),
+                            cardinal_atom,
+                            32, // format
+                            GDK_PROP_MODE_REPLACE,
+                            (guchar*)&value,
+                            1);
+    }
+}
+#endif

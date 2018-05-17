@@ -714,7 +714,7 @@ AstDecodeConversion(AstDecodeContext& c, ValType fromType, ValType toType, Op op
 
 #ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
 static bool
-AstDecodeExtraConversion(AstDecodeContext& c, ValType fromType, ValType toType, NumericOp op)
+AstDecodeExtraConversion(AstDecodeContext& c, ValType fromType, ValType toType, MiscOp op)
 {
     if (!c.iter().readConversion(fromType, toType, nullptr))
         return false;
@@ -1249,6 +1249,50 @@ AstDecodeWake(AstDecodeContext& c)
     return true;
 }
 
+#ifdef ENABLE_WASM_BULKMEM_OPS
+static bool
+AstDecodeMemCopy(AstDecodeContext& c)
+{
+    if (!c.iter().readMemCopy(nullptr, nullptr, nullptr))
+        return false;
+
+    AstDecodeStackItem dest = c.popCopy();
+    AstDecodeStackItem src  = c.popCopy();
+    AstDecodeStackItem len  = c.popCopy();
+
+    AstMemCopy* mc = new(c.lifo) AstMemCopy(dest.expr, src.expr, len.expr);
+
+    if (!mc)
+        return false;
+
+    if (!c.push(AstDecodeStackItem(mc)))
+        return false;
+
+    return true;
+}
+
+static bool
+AstDecodeMemFill(AstDecodeContext& c)
+{
+    if (!c.iter().readMemFill(nullptr, nullptr, nullptr))
+        return false;
+
+    AstDecodeStackItem len   = c.popCopy();
+    AstDecodeStackItem val   = c.popCopy();
+    AstDecodeStackItem start = c.popCopy();
+
+    AstMemFill* mf = new(c.lifo) AstMemFill(start.expr, val.expr, len.expr);
+
+    if (!mf)
+        return false;
+
+    if (!c.push(AstDecodeStackItem(mf)))
+        return false;
+
+    return true;
+}
+#endif
+
 static bool
 AstDecodeExpr(AstDecodeContext& c)
 {
@@ -1668,34 +1712,44 @@ AstDecodeExpr(AstDecodeContext& c)
         if (!c.push(AstDecodeStackItem(tmp)))
             return false;
         break;
-#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
-      case uint16_t(Op::NumericPrefix):
+      case uint16_t(Op::MiscPrefix):
         switch (op.b1) {
-          case uint16_t(NumericOp::I32TruncSSatF32):
-          case uint16_t(NumericOp::I32TruncUSatF32):
-            if (!AstDecodeExtraConversion(c, ValType::F32, ValType::I32, NumericOp(op.b1)))
+#ifdef ENABLE_WASM_SATURATING_TRUNC_OPS
+          case uint16_t(MiscOp::I32TruncSSatF32):
+          case uint16_t(MiscOp::I32TruncUSatF32):
+            if (!AstDecodeExtraConversion(c, ValType::F32, ValType::I32, MiscOp(op.b1)))
                 return false;
             break;
-          case uint16_t(NumericOp::I32TruncSSatF64):
-          case uint16_t(NumericOp::I32TruncUSatF64):
-            if (!AstDecodeExtraConversion(c, ValType::F64, ValType::I32, NumericOp(op.b1)))
+          case uint16_t(MiscOp::I32TruncSSatF64):
+          case uint16_t(MiscOp::I32TruncUSatF64):
+            if (!AstDecodeExtraConversion(c, ValType::F64, ValType::I32, MiscOp(op.b1)))
                 return false;
             break;
-          case uint16_t(NumericOp::I64TruncSSatF32):
-          case uint16_t(NumericOp::I64TruncUSatF32):
-            if (!AstDecodeExtraConversion(c, ValType::F32, ValType::I64, NumericOp(op.b1)))
+          case uint16_t(MiscOp::I64TruncSSatF32):
+          case uint16_t(MiscOp::I64TruncUSatF32):
+            if (!AstDecodeExtraConversion(c, ValType::F32, ValType::I64, MiscOp(op.b1)))
                 return false;
             break;
-          case uint16_t(NumericOp::I64TruncSSatF64):
-          case uint16_t(NumericOp::I64TruncUSatF64):
-            if (!AstDecodeExtraConversion(c, ValType::F64, ValType::I64, NumericOp(op.b1)))
+          case uint16_t(MiscOp::I64TruncSSatF64):
+          case uint16_t(MiscOp::I64TruncUSatF64):
+            if (!AstDecodeExtraConversion(c, ValType::F64, ValType::I64, MiscOp(op.b1)))
                 return false;
             break;
+#endif
+#ifdef ENABLE_WASM_BULKMEM_OPS
+          case uint16_t(MiscOp::MemCopy):
+            if (!AstDecodeMemCopy(c))
+                return false;
+            break;
+          case uint16_t(MiscOp::MemFill):
+            if (!AstDecodeMemFill(c))
+                return false;
+            break;
+#endif
           default:
             return c.iter().unrecognizedOpcode(&op);
         }
         break;
-#endif
       case uint16_t(Op::ThreadPrefix):
         switch (op.b1) {
           case uint16_t(ThreadOp::Wake):
@@ -2244,8 +2298,11 @@ AstDecodeModuleTail(AstDecodeContext& c)
         return false;
 
     for (DataSegment& s : c.env().dataSegments) {
-        const uint8_t* src = c.d.begin() + s.bytecodeOffset;
         char16_t* buffer = static_cast<char16_t*>(c.lifo.alloc(s.length * sizeof(char16_t)));
+        if (!buffer)
+            return false;
+
+        const uint8_t* src = c.d.begin() + s.bytecodeOffset;
         for (size_t i = 0; i < s.length; i++)
             buffer[i] = src[i];
 

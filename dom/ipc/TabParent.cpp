@@ -54,8 +54,6 @@
 #include "nsIContent.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -468,10 +466,16 @@ TabParent::ActorDestroy(ActorDestroyReason why)
         // and created a new frameloader. If so, we don't fire the event,
         // since the frameloader owner has clearly moved on.
         if (currentFrameLoader == frameLoader) {
-          nsContentUtils::DispatchTrustedEvent(frameElement->OwnerDoc(), frameElement,
-                                               NS_LITERAL_STRING("oop-browser-crashed"),
-                                               true, true);
-
+          MessageChannel* channel = GetIPCChannel();
+          if (channel && !channel->DoBuildIDsMatch()) {
+            nsContentUtils::DispatchTrustedEvent(
+              frameElement->OwnerDoc(), frameElement,
+              NS_LITERAL_STRING("oop-browser-buildid-mismatch"), true, true);
+          } else {
+            nsContentUtils::DispatchTrustedEvent(
+              frameElement->OwnerDoc(), frameElement,
+              NS_LITERAL_STRING("oop-browser-crashed"), true, true);
+          }
         }
       }
     }
@@ -489,15 +493,14 @@ TabParent::RecvMoveFocus(const bool& aForward, const bool& aForDocumentNavigatio
 {
   nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
   if (fm) {
-    nsCOMPtr<nsIDOMElement> dummy;
+    RefPtr<Element> dummy;
 
     uint32_t type = aForward ?
       (aForDocumentNavigation ? static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_FORWARDDOC) :
                                 static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_FORWARD)) :
       (aForDocumentNavigation ? static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_BACKWARDDOC) :
                                 static_cast<uint32_t>(nsIFocusManager::MOVEFOCUS_BACKWARD));
-    nsCOMPtr<nsIDOMElement> frame = do_QueryInterface(mFrameElement);
-    fm->MoveFocus(nullptr, frame, type, nsIFocusManager::FLAG_BYKEY,
+    fm->MoveFocus(nullptr, mFrameElement, type, nsIFocusManager::FLAG_BYKEY,
                   getter_AddRefs(dummy));
   }
   return IPC_OK();
@@ -572,7 +575,7 @@ TabParent::RecvDropLinks(nsTArray<nsString>&& aLinks)
 mozilla::ipc::IPCResult
 TabParent::RecvEvent(const RemoteDOMEvent& aEvent)
 {
-  nsCOMPtr<nsIDOMEvent> event = do_QueryInterface(aEvent.mEvent);
+  RefPtr<Event> event = aEvent.mEvent;
   NS_ENSURE_TRUE(event, IPC_OK());
 
   nsCOMPtr<mozilla::dom::EventTarget> target = do_QueryInterface(mFrameElement);
@@ -580,7 +583,7 @@ TabParent::RecvEvent(const RemoteDOMEvent& aEvent)
 
   event->SetOwner(target);
 
-  target->DispatchEvent(*event->InternalDOMEvent());
+  target->DispatchEvent(*event);
   return IPC_OK();
 }
 
@@ -1814,9 +1817,6 @@ TabParent::RecvSetStatus(const uint32_t& aType, const nsString& aStatus)
   }
 
   switch (aType) {
-   case nsIWebBrowserChrome::STATUS_SCRIPT:
-    xulBrowserWindow->SetJSStatus(aStatus);
-    break;
    case nsIWebBrowserChrome::STATUS_LINK:
     xulBrowserWindow->SetOverLink(aStatus, nullptr);
     break;
@@ -2033,8 +2033,8 @@ TabParent::RecvRequestFocus(const bool& aCanRaise)
   if (aCanRaise)
     flags |= nsIFocusManager::FLAG_RAISE;
 
-  nsCOMPtr<nsIDOMElement> node = do_QueryInterface(mFrameElement);
-  fm->SetFocus(node, flags);
+  RefPtr<Element> element = mFrameElement;
+  fm->SetFocus(element, flags);
   return IPC_OK();
 }
 
@@ -2152,7 +2152,7 @@ TabParent::RecvReplyKeyEvent(const WidgetKeyboardEvent& aEvent)
   WidgetKeyboardEvent localEvent(aEvent);
   localEvent.MarkAsHandledInRemoteProcess();
 
-  // Here we convert the WidgetEvent that we received to an nsIDOMEvent
+  // Here we convert the WidgetEvent that we received to an Event
   // to be able to dispatch it to the <browser> element as the target element.
   nsIDocument* doc = mFrameElement->OwnerDoc();
   nsPresContext* presContext = doc->GetPresContext();
@@ -2208,7 +2208,7 @@ TabParent::RecvAccessKeyNotHandled(const WidgetKeyboardEvent& aEvent)
   localEvent.MarkAsHandledInRemoteProcess();
   localEvent.mMessage = eAccessKeyNotFound;
 
-  // Here we convert the WidgetEvent that we received to an nsIDOMEvent
+  // Here we convert the WidgetEvent that we received to an Event
   // to be able to dispatch it to the <browser> element as the target element.
   nsIDocument* doc = mFrameElement->OwnerDoc();
   nsIPresShell* presShell = doc->GetShell();
@@ -2595,8 +2595,7 @@ TabParent::GetAuthPrompt(uint32_t aPromptReason, const nsIID& iid,
 
   nsCOMPtr<nsILoginManagerPrompter> prompter = do_QueryInterface(prompt);
   if (prompter) {
-    nsCOMPtr<nsIDOMElement> browser = do_QueryInterface(mFrameElement);
-    prompter->SetBrowser(browser);
+    prompter->SetBrowser(mFrameElement);
   }
 
   *aResult = prompt.forget().take();
@@ -3141,7 +3140,7 @@ TabParent::DeallocPPaymentRequestParent(PPaymentRequestParent* aActor)
 }
 
 nsresult
-TabParent::HandleEvent(nsIDOMEvent* aEvent)
+TabParent::HandleEvent(Event* aEvent)
 {
   nsAutoString eventType;
   aEvent->GetType(eventType);
@@ -3231,9 +3230,9 @@ public:
   }
   NS_IMETHOD GetAssociatedWindow(mozIDOMWindowProxy**) NO_IMPL
   NS_IMETHOD GetTopWindow(mozIDOMWindowProxy**) NO_IMPL
-  NS_IMETHOD GetTopFrameElement(nsIDOMElement** aElement) override
+  NS_IMETHOD GetTopFrameElement(Element** aElement) override
   {
-    nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(mElement);
+    nsCOMPtr<Element> elem = mElement;
     elem.forget(aElement);
     return NS_OK;
   }

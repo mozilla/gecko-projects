@@ -24,6 +24,7 @@
 #include "builtin/AtomicsObject.h"
 #include "builtin/intl/SharedIntlData.h"
 #include "builtin/Promise.h"
+#include "frontend/BinSourceRuntimeSupport.h"
 #include "frontend/NameCollections.h"
 #include "gc/GCRuntime.h"
 #include "gc/Tracer.h"
@@ -461,7 +462,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
      * be accessed simultaneously by multiple threads.
      *
      * Locking this only occurs if there is actually a thread other than the
-     * active thread which could access such data.
+     * main thread which could access such data.
      */
     js::Mutex exclusiveAccessLock;
 #ifdef DEBUG
@@ -473,7 +474,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
      * off-thread parsing.
      *
      * Locking this only occurs if there is actually a thread other than the
-     * active thread which could access this.
+     * main thread which could access this.
      */
     js::Mutex scriptDataLock;
 #ifdef DEBUG
@@ -852,7 +853,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
 
     static const unsigned LARGE_ALLOCATION = 25 * 1024 * 1024;
 
-    void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::RuntimeSizes* runtime);
+    void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::RuntimeSizes* rtSizes);
 
   private:
     // Settings for how helper threads can be used.
@@ -935,6 +936,18 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     // of all instances registered in all JSCompartments. Accessed from watchdog
     // threads for purposes of wasm::InterruptRunningCode().
     js::ExclusiveData<js::wasm::InstanceVector> wasmInstances;
+
+    // The implementation-defined abstract operation HostResolveImportedModule.
+    js::MainThreadData<JS::ModuleResolveHook> moduleResolveHook;
+
+  public:
+#if defined(JS_BUILD_BINAST)
+    js::BinaryASTSupport& binast() {
+        return binast_;
+    }
+  private:
+    js::BinaryASTSupport binast_;
+#endif // defined(JS_BUILD_BINAST)
 
   public:
 #if defined(NIGHTLY_BUILD)

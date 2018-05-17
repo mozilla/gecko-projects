@@ -37,7 +37,7 @@
 #include "nsNetCID.h"
 #include "prtime.h"
 #ifdef MOZ_PLACES
-#include "mozIAsyncFavicons.h"
+#include "nsIFaviconService.h"
 #endif
 #include "nsIIconURI.h"
 #include "nsIDownloader.h"
@@ -799,7 +799,7 @@ WinUtils::GetRegistryKey(HKEY aRoot,
                          wchar_t* aBuffer,
                          DWORD aBufferLength)
 {
-  NS_PRECONDITION(aKeyName, "The key name is NULL");
+  MOZ_ASSERT(aKeyName, "The key name is NULL");
 
   HKEY key;
   LONG result =
@@ -1351,7 +1351,7 @@ AsyncEncodeAndWriteIcon::AsyncEncodeAndWriteIcon(const nsAString &aIconPath,
 
 NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run()
 {
-  NS_PRECONDITION(!NS_IsMainThread(), "Should not be called on the main thread.");
+  MOZ_ASSERT(!NS_IsMainThread(), "Should not be called on the main thread.");
 
   // Note that since we're off the main thread we can't use
   // gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget()
@@ -1649,7 +1649,7 @@ nsresult
 {
 #ifdef MOZ_PLACES
   // Obtain the favicon service and get the favicon for the specified page
-  nsCOMPtr<mozIAsyncFavicons> favIconSvc(
+  nsCOMPtr<nsIFaviconService> favIconSvc(
     do_GetService("@mozilla.org/browser/favicon-service;1"));
   NS_ENSURE_TRUE(favIconSvc, NS_ERROR_FAILURE);
 
@@ -1767,13 +1767,6 @@ WinUtils::SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
       aArray->AppendElement(KeyPair(map[1], map[2]));
     }
   }
-}
-
-/* static */
-bool
-WinUtils::ShouldHideScrollbars()
-{
-  return false;
 }
 
 // This is in use here and in dom/events/TouchEvent.cpp

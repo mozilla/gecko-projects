@@ -308,6 +308,12 @@ CSP_CreateHostSrcFromSelfURI(nsIURI* aSelfURI)
 }
 
 bool
+CSP_IsEmptyDirective(const nsAString& aValue, const nsAString& aDir)
+{
+  return (aDir.Length() == 0 &&
+          aValue.Length() == 0);
+}
+bool
 CSP_IsValidDirective(const nsAString& aDir)
 {
   uint32_t numDirs = (sizeof(CSPStrDirectives) / sizeof(CSPStrDirectives[0]));
@@ -841,9 +847,12 @@ nsCSPKeywordSrc::allows(enum CSPKeyword aKeyword, const nsAString& aHashOrNonce,
     return false;
   }
   // either the keyword allows the load or the policy contains 'strict-dynamic', in which
-  // case we have to make sure the script is not parser created before allowing the load.
+  // case we have to make sure the script is not parser created before allowing the load
+  // and also eval should be blocked even if 'strict-dynamic' is present. Should be
+  // allowed only if 'unsafe-eval' is present.
   return ((mKeyword == aKeyword) ||
-          ((mKeyword == CSP_STRICT_DYNAMIC) && !aParserCreated));
+          ((mKeyword == CSP_STRICT_DYNAMIC) && !aParserCreated &&
+            aKeyword != CSP_UNSAFE_EVAL));
 }
 
 bool
@@ -1201,7 +1210,7 @@ nsCSPDirective::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
       outCSP.mWorker_src.Value() = mozilla::Move(srcs);
       return;
 
-    // REFERRER_DIRECTIVE and REQUIRE_SRI_FOR are handled in nsCSPPolicy::toDomCSPStruct()
+    // REQUIRE_SRI_FOR is handled in nsCSPPolicy::toDomCSPStruct()
 
     default:
       NS_ASSERTION(false, "cannot find directive to convert CSP to JSON");
@@ -1570,14 +1579,7 @@ nsCSPPolicy::toString(nsAString& outStr) const
 {
   uint32_t length = mDirectives.Length();
   for (uint32_t i = 0; i < length; ++i) {
-
-    if (mDirectives[i]->equals(nsIContentSecurityPolicy::REFERRER_DIRECTIVE)) {
-      outStr.AppendASCII(CSP_CSPDirectiveToString(nsIContentSecurityPolicy::REFERRER_DIRECTIVE));
-      outStr.AppendASCII(" ");
-      outStr.Append(mReferrerPolicy);
-    } else {
-      mDirectives[i]->toString(outStr);
-    }
+    mDirectives[i]->toString(outStr);
     if (i != (length - 1)) {
       outStr.AppendASCII("; ");
     }
@@ -1590,14 +1592,7 @@ nsCSPPolicy::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
   outCSP.mReport_only = mReportOnly;
 
   for (uint32_t i = 0; i < mDirectives.Length(); ++i) {
-    if (mDirectives[i]->equals(nsIContentSecurityPolicy::REFERRER_DIRECTIVE)) {
-      mozilla::dom::Sequence<nsString> srcs;
-      srcs.AppendElement(mReferrerPolicy, mozilla::fallible);
-      outCSP.mReferrer.Construct();
-      outCSP.mReferrer.Value() = srcs;
-    } else {
-      mDirectives[i]->toDomCSPStruct(outCSP);
-    }
+    mDirectives[i]->toDomCSPStruct(outCSP);
   }
 }
 

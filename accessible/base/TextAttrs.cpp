@@ -14,6 +14,7 @@
 #include "nsFontMetrics.h"
 #include "nsLayoutUtils.h"
 #include "nsContainerFrame.h"
+#include "nsStyleUtil.h"
 #include "HyperTextAccessible.h"
 #include "mozilla/AppUnits.h"
 #include "mozilla/gfx/2D.h"
@@ -36,13 +37,13 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
   // 3. Offset accessible and result hyper text offsets must not be specified
   // but include default text attributes flag and attributes list must be
   // specified in the case of default text attributes.
-  NS_PRECONDITION(mHyperTextAcc &&
-                  ((mOffsetAcc && mOffsetAccIdx != -1 &&
-                    aStartOffset && aEndOffset) ||
-                  (!mOffsetAcc && mOffsetAccIdx == -1 &&
-                    !aStartOffset && !aEndOffset &&
-                   mIncludeDefAttrs && aAttributes)),
-                  "Wrong usage of TextAttrsMgr!");
+  MOZ_ASSERT(mHyperTextAcc &&
+             ((mOffsetAcc && mOffsetAccIdx != -1 &&
+               aStartOffset && aEndOffset) ||
+             (!mOffsetAcc && mOffsetAccIdx == -1 &&
+               !aStartOffset && !aEndOffset &&
+              mIncludeDefAttrs && aAttributes)),
+             "Wrong usage of TextAttrsMgr!");
 
   // Embedded objects are combined into own range with empty attributes set.
   if (mOffsetAcc && !mOffsetAcc->IsText()) {
@@ -549,7 +550,7 @@ TextAttrsMgr::FontSizeTextAttr::
 
 TextAttrsMgr::FontStyleTextAttr::
   FontStyleTextAttr(nsIFrame* aRootFrame, nsIFrame* aFrame) :
-  TTextAttr<nscoord>(!aFrame)
+  TTextAttr<FontSlantStyle>(!aFrame)
 {
   mRootNativeValue = aRootFrame->StyleFont()->mFont.style;
   mIsRootDefined = true;
@@ -562,7 +563,7 @@ TextAttrsMgr::FontStyleTextAttr::
 
 bool
 TextAttrsMgr::FontStyleTextAttr::
-  GetValueFor(Accessible* aAccessible, nscoord* aValue)
+  GetValueFor(Accessible* aAccessible, FontSlantStyle* aValue)
 {
   nsIContent* elm = nsCoreUtils::GetDOMElementFor(aAccessible->GetContent());
   if (elm) {
@@ -577,12 +578,12 @@ TextAttrsMgr::FontStyleTextAttr::
 
 void
 TextAttrsMgr::FontStyleTextAttr::
-  ExposeValue(nsIPersistentProperties* aAttributes, const nscoord& aValue)
+  ExposeValue(nsIPersistentProperties* aAttributes,
+              const FontSlantStyle& aValue)
 {
-  nsAutoString formattedValue;
-  StyleInfo::FormatFontStyle(aValue, formattedValue);
-
-  nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::font_style, formattedValue);
+  nsAutoString string;
+  nsStyleUtil::AppendFontSlantStyle(aValue, string);
+  nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::font_style, string);
 }
 
 
@@ -655,9 +656,10 @@ TextAttrsMgr::FontWeightTextAttr::
   // which may not be the weight of the font face used to render the
   // characters. On Mac, font->GetStyle()->weight will just give the same
   // number as getComputedStyle(). fontEntry->Weight() will give the weight
-  // of the font face used.
+  // range supported by the font face used, so we clamp the weight that was
+  // requested by style to what is actually supported by the font.
   gfxFontEntry *fontEntry = font->GetFontEntry();
-  return fontEntry->Weight();
+  return fontEntry->Weight().Clamp(font->GetStyle()->weight);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -700,8 +702,7 @@ TextAttrsMgr::TextDecorValue::
 {
   const nsStyleTextReset* textReset = aFrame->StyleTextReset();
   mStyle = textReset->mTextDecorationStyle;
-  mColor = aFrame->StyleColor()->
-    CalcComplexColor(textReset->mTextDecorationColor);
+  mColor = textReset->mTextDecorationColor.CalcColor(aFrame);
   mLine = textReset->mTextDecorationLine &
     (NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE |
      NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH);

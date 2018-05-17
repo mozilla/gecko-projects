@@ -6,15 +6,15 @@ use api::{ApiMsg, BuiltDisplayList, ClearCache, DebugCommand};
 #[cfg(feature = "debugger")]
 use api::{BuiltDisplayListIter, SpecificDisplayItem};
 use api::{DeviceIntPoint, DevicePixelScale, DeviceUintPoint, DeviceUintRect, DeviceUintSize};
-use api::{DocumentId, DocumentLayer, ExternalScrollId, FrameMsg, HitTestResult};
-use api::{IdNamespace, LayerPoint, PipelineId, RenderNotifier, SceneMsg, ScrollClamping};
-use api::{ScrollLocation, ScrollNodeState, TransactionMsg, WorldPoint};
+use api::{DocumentId, DocumentLayer, ExternalScrollId, FrameMsg, HitTestFlags, HitTestResult};
+use api::{IdNamespace, LayoutPoint, PipelineId, RenderNotifier, SceneMsg, ScrollClamping};
+use api::{ScrollLocation, ScrollNodeState, TransactionMsg};
 use api::channel::{MsgReceiver, Payload};
 #[cfg(feature = "capture")]
 use api::CaptureBits;
 #[cfg(feature = "replay")]
 use api::CapturedDocument;
-use clip_scroll_tree::ClipScrollTree;
+use clip_scroll_tree::{ClipScrollNodeIndex, ClipScrollTree};
 #[cfg(feature = "debugger")]
 use debug_server;
 use display_list_flattener::DisplayListFlattener;
@@ -40,7 +40,7 @@ use serde_json;
 use std::path::PathBuf;
 use std::sync::atomic::{ATOMIC_USIZE_INIT, AtomicUsize, Ordering};
 use std::mem::replace;
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{channel, Sender, Receiver};
 use std::u32;
 use tiling::Frame;
 use time::precise_time_ns;
@@ -206,7 +206,6 @@ impl Document {
             &self.pending.scene,
             &mut self.clip_scroll_tree,
             resource_cache.get_font_instances(),
-            resource_cache.get_tiled_image_map(),
             &self.view,
             &self.output_pipelines,
             &self.frame_builder_config,
@@ -251,7 +250,6 @@ impl Document {
                 removed_pipelines: replace(&mut self.pending.removed_pipelines, Vec::new()),
                 view: self.view.clone(),
                 font_instances: resource_cache.get_font_instances(),
-                tiled_image_map: resource_cache.get_tiled_image_map(),
                 output_pipelines: self.output_pipelines.clone(),
             })
         } else {
@@ -264,7 +262,6 @@ impl Document {
             frame_ops: transaction_msg.frame_ops,
             render: transaction_msg.generate_frame,
             document_id,
-            current_epochs: self.current.scene.pipeline_epochs.clone(),
         }).unwrap();
     }
 
@@ -316,18 +313,18 @@ impl Document {
     }
 
     /// Returns true if any nodes actually changed position or false otherwise.
-    pub fn scroll(
+    pub fn scroll_nearest_scrolling_ancestor(
         &mut self,
         scroll_location: ScrollLocation,
-        cursor: WorldPoint,
+        scroll_node_index: Option<ClipScrollNodeIndex>,
     ) -> bool {
-        self.clip_scroll_tree.scroll(scroll_location, cursor)
+        self.clip_scroll_tree.scroll_nearest_scrolling_ancestor(scroll_location, scroll_node_index)
     }
 
     /// Returns true if the node actually changed position or false otherwise.
     pub fn scroll_node(
         &mut self,
-        origin: LayerPoint,
+        origin: LayoutPoint,
         id: ExternalScrollId,
         clamp: ScrollClamping
     ) -> bool {
@@ -621,9 +618,24 @@ impl RenderBackend {
             FrameMsg::Scroll(delta, cursor) => {
                 profile_scope!("Scroll");
 
-                let should_render = doc.scroll(delta, cursor)
-                    && doc.render_on_scroll == Some(true);
+                let mut should_render = true;
+                let node_index = match doc.hit_tester {
+                    Some(ref hit_tester) => {
+                        // Ideally we would call doc.scroll_nearest_scrolling_ancestor here, but
+                        // we need have to avoid a double-borrow.
+                        let test = HitTest::new(None, cursor, HitTestFlags::empty());
+                        hit_tester.find_node_under_point(test)
+                    }
+                    None => {
+                        should_render = false;
+                        None
+                    }
+                };
 
+                let should_render =
+                    should_render &&
+                    doc.scroll_nearest_scrolling_ancestor(delta, node_index) &&
+                    doc.render_on_scroll == Some(true);
                 DocumentOps {
                     scroll: true,
                     render: should_render,
@@ -706,12 +718,22 @@ impl RenderBackend {
                                 doc.new_async_scene_ready(built_scene);
                                 doc.render_on_hittest = true;
                             }
-                            result_tx.send(SceneSwapResult::Complete).unwrap();
+                            if let Some(tx) = result_tx {
+                                let (resume_tx, resume_rx) = channel();
+                                tx.send(SceneSwapResult::Complete(resume_tx)).unwrap();
+                                // Block until the post-swap hook has completed on
+                                // the scene builder thread. We need to do this before
+                                // we can sample from the sampler hook which might happen
+                                // in the update_document call below.
+                                resume_rx.recv().ok();
+                            }
                         } else {
                             // The document was removed while we were building it, skip it.
                             // TODO: we might want to just ensure that removed documents are
                             // always forwarded to the scene builder thread to avoid this case.
-                            result_tx.send(SceneSwapResult::Aborted).unwrap();
+                            if let Some(tx) = result_tx {
+                                tx.send(SceneSwapResult::Aborted).unwrap();
+                            }
                             continue;
                         }
 
@@ -731,6 +753,12 @@ impl RenderBackend {
                                 &mut profile_counters
                             );
                         }
+                    },
+                    SceneBuilderResult::FlushComplete(tx) => {
+                        tx.send(()).ok();
+                    }
+                    SceneBuilderResult::Stopped => {
+                        panic!("We haven't sent a Stop yet, how did we get a Stopped back?");
                     }
                 }
             }
@@ -747,6 +775,22 @@ impl RenderBackend {
         }
 
         let _ = self.scene_tx.send(SceneBuilderRequest::Stop);
+        // Ensure we read everything the scene builder is sending us from
+        // inflight messages, otherwise the scene builder might panic.
+        while let Ok(msg) = self.scene_rx.recv() {
+            match msg {
+                SceneBuilderResult::FlushComplete(tx) => {
+                    // If somebody's blocked waiting for a flush, how did they
+                    // trigger the RB thread to shut down? This shouldn't happen
+                    // but handle it gracefully anyway.
+                    debug_assert!(false);
+                    tx.send(()).ok();
+                }
+                SceneBuilderResult::Stopped => break,
+                _ => continue,
+            }
+        }
+
         self.notifier.shut_down();
 
         if let Some(ref sampler) = self.sampler {
@@ -765,6 +809,9 @@ impl RenderBackend {
             ApiMsg::WakeUp => {}
             ApiMsg::WakeSceneBuilder => {
                 self.scene_tx.send(SceneBuilderRequest::WakeUp).unwrap();
+            }
+            ApiMsg::FlushSceneBuilder(tx) => {
+                self.scene_tx.send(SceneBuilderRequest::Flush(tx)).unwrap();
             }
             ApiMsg::UpdateResources(updates) => {
                 self.resource_cache
@@ -1034,8 +1081,8 @@ impl RenderBackend {
             doc.render_on_hittest = false;
         }
 
-        if op.render || op.scroll {
-            self.notifier.new_document_ready(document_id, op.scroll, op.composite);
+        if transaction_msg.generate_frame {
+            self.notifier.new_frame_ready(document_id, op.scroll, op.composite);
         }
     }
 
@@ -1328,7 +1375,7 @@ impl RenderBackend {
             self.result_tx.send(msg_publish).unwrap();
             profile_counters.reset();
 
-            self.notifier.new_document_ready(id, false, true);
+            self.notifier.new_frame_ready(id, false, true);
             self.documents.insert(id, doc);
         }
     }

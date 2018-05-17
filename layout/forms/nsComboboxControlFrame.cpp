@@ -29,6 +29,7 @@
 #include "nsIDOMNode.h"
 #include "nsISelectControlFrame.h"
 #include "nsContentUtils.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/dom/HTMLSelectElement.h"
 #include "nsIDocument.h"
 #include "nsIScrollableFrame.h"
@@ -97,7 +98,7 @@ private:
 public:
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD HandleEvent(nsIDOMEvent*) override
+  NS_IMETHOD HandleEvent(dom::Event*) override
   {
     mComboBox->ShowDropDown(!mComboBox->IsDroppedDown());
     return NS_OK;
@@ -954,7 +955,7 @@ nsComboboxControlFrame::ShowDropDown(bool aDoDropDown)
 
   if (!mDroppedDown && aDoDropDown) {
     nsFocusManager* fm = nsFocusManager::GetFocusManager();
-    if (!fm || fm->GetFocusedContent() == GetContent()) {
+    if (!fm || fm->GetFocusedElement() == GetContent()) {
       DropDownPositionState state = AbsolutelyPositionDropDown();
       if (state == eDropDownPositionFinal) {
         ShowList(aDoDropDown); // might destroy us
@@ -1060,7 +1061,7 @@ nsComboboxControlFrame::HandleRedisplayTextEvent()
   // Redirect frame insertions during this method (see GetContentInsertionFrame())
   // so that any reframing that the frame constructor forces upon us is inserted
   // into the correct parent (mDisplayFrame). See bug 282607.
-  NS_PRECONDITION(!mInRedisplayText, "Nested RedisplayText");
+  MOZ_ASSERT(!mInRedisplayText, "Nested RedisplayText");
   mInRedisplayText = true;
   mRedisplayTextEvent.Forget();
 

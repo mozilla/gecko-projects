@@ -62,12 +62,8 @@ var EXPORTED_SYMBOLS = [ "Bookmarks" ];
 Cu.importGlobalProperties(["URL"]);
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "Services",
-                               "resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "NetUtil",
                                "resource://gre/modules/NetUtil.jsm");
-ChromeUtils.defineModuleGetter(this, "Sqlite",
-                               "resource://gre/modules/Sqlite.jsm");
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
                                "resource://gre/modules/PlacesUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "PlacesSyncUtils",
@@ -790,7 +786,8 @@ var Bookmarks = Object.freeze({
                                              updatedItem.index, updatedItem.type,
                                              updatedItem.guid, item.parentGuid,
                                              updatedItem.parentGuid,
-                                             updatedItem.source ]);
+                                             updatedItem.source,
+                                             updatedItem.url && updatedItem.url.href ]);
         }
 
         // Remove non-enumerable properties.
@@ -1204,7 +1201,7 @@ var Bookmarks = Object.freeze({
                                            i, child.type,
                                            child.guid, child.parentGuid,
                                            child.parentGuid,
-                                           source ]);
+                                           source, child.url && child.url.href ]);
       }
     })();
   },
@@ -2446,7 +2443,7 @@ async function maybeInsertPlace(db, url) {
     `, { url: url.href,
          rev_host: PlacesUtils.getReversedHost(url),
          frecency: url.protocol == "place:" ? 0 : -1 });
-  await db.executeCached("DELETE FROM moz_updatehostsinsert_temp");
+  await db.executeCached("DELETE FROM moz_updateoriginsinsert_temp");
 }
 
 /**
@@ -2468,7 +2465,7 @@ async function maybeInsertManyPlaces(db, urls) {
        frecency: url.protocol == "place:" ? 0 : -1,
        maybeguid: PlacesUtils.history.makeGuid(),
      })));
-  await db.executeCached("DELETE FROM moz_updatehostsinsert_temp");
+  await db.executeCached("DELETE FROM moz_updateoriginsinsert_temp");
 }
 
 // Indicates whether we should write a tombstone for an item that has been

@@ -95,12 +95,19 @@
 #include "KeyedStackCapturer.h"
 #endif // MOZ_GECKO_PROFILER
 
+#if defined(MOZ_TELEMETRY_GECKOVIEW)
+#include "geckoview/TelemetryGeckoViewPersistence.h"
+#endif
+
 namespace {
 
 using namespace mozilla;
 using namespace mozilla::HangMonitor;
 using Telemetry::Common::AutoHashtable;
 using Telemetry::Common::ToJSString;
+using Telemetry::Common::GetCurrentProduct;
+using Telemetry::Common::SetCurrentProduct;
+using Telemetry::Common::SupportedProduct;
 using mozilla::dom::Promise;
 using mozilla::dom::AutoJSAPI;
 using mozilla::Telemetry::HangReports;
@@ -576,32 +583,20 @@ TelemetryImpl::SetHistogramRecordingEnabled(const nsACString &id, bool aEnabled)
 }
 
 NS_IMETHODIMP
-TelemetryImpl::SnapshotHistograms(unsigned int aDataset, bool aSubsession,
+TelemetryImpl::SnapshotHistograms(unsigned int aDataset,
                                   bool aClearHistograms, JSContext* aCx,
                                   JS::MutableHandleValue aResult)
 {
-#if defined(MOZ_WIDGET_ANDROID)
-  if (aSubsession) {
-    return NS_OK;
-  }
-#endif
   return TelemetryHistogram::CreateHistogramSnapshots(aCx, aResult, aDataset,
-                                                      aSubsession,
                                                       aClearHistograms);
 }
 
 NS_IMETHODIMP
-TelemetryImpl::SnapshotKeyedHistograms(unsigned int aDataset, bool aSubsession,
+TelemetryImpl::SnapshotKeyedHistograms(unsigned int aDataset,
                                        bool aClearHistograms, JSContext* aCx,
                                        JS::MutableHandleValue aResult)
 {
-#if defined(MOZ_WIDGET_ANDROID)
-  if (aSubsession) {
-    return NS_OK;
-  }
-#endif
   return TelemetryHistogram::GetKeyedHistogramSnapshots(aCx, aResult, aDataset,
-                                                        aSubsession,
                                                         aClearHistograms);
 }
 
@@ -981,7 +976,7 @@ public:
 #endif // MOZ_GECKO_PROFILER
 
 NS_IMETHODIMP
-TelemetryImpl::GetLoadedModules(JSContext *cx, nsISupports** aPromise)
+TelemetryImpl::GetLoadedModules(JSContext *cx, Promise** aPromise)
 {
 #if defined(MOZ_GECKO_PROFILER)
   nsIGlobalObject* global = xpc::NativeGlobal(JS::CurrentGlobalOrNull(cx));
@@ -1263,6 +1258,9 @@ TelemetryImpl::CreateTelemetryInstance()
     useTelemetry = true;
   }
 
+  // Set current product (determines Fennec/GeckoView at runtime).
+  SetCurrentProduct();
+
   // First, initialize the TelemetryHistogram and TelemetryScalar global states.
   TelemetryHistogram::InitializeGlobalState(useTelemetry, useTelemetry);
   TelemetryScalar::InitializeGlobalState(useTelemetry, useTelemetry);
@@ -1284,6 +1282,15 @@ TelemetryImpl::CreateTelemetryInstance()
   sTelemetry->InitMemoryReporter();
   InitHistogramRecordingEnabled(); // requires sTelemetry to exist
 
+#if defined(MOZ_TELEMETRY_GECKOVIEW)
+  // We only want to add persistence for GeckoView, but both
+  // GV and Fennec are on Android. So just init persistence if this
+  // is Android but not Fennec.
+  if (GetCurrentProduct() == SupportedProduct::Geckoview) {
+    TelemetryGeckoViewPersistence::InitPersistence();
+  }
+#endif
+
   return ret.forget();
 }
 
@@ -1300,6 +1307,12 @@ TelemetryImpl::ShutdownTelemetry()
   TelemetryScalar::DeInitializeGlobalState();
   TelemetryEvent::DeInitializeGlobalState();
   TelemetryIPCAccumulator::DeInitializeGlobalState();
+
+#if defined(MOZ_TELEMETRY_GECKOVIEW)
+  if (GetCurrentProduct() == SupportedProduct::Geckoview) {
+    TelemetryGeckoViewPersistence::DeInitPersistence();
+  }
+#endif
 }
 
 void
@@ -1815,7 +1828,15 @@ TelemetryImpl::RegisterEvents(const nsACString& aCategory,
                               JS::Handle<JS::Value> aEventData,
                               JSContext* cx)
 {
-  return TelemetryEvent::RegisterEvents(aCategory, aEventData, cx);
+  return TelemetryEvent::RegisterEvents(aCategory, aEventData, false, cx);
+}
+
+NS_IMETHODIMP
+TelemetryImpl::RegisterBuiltinEvents(const nsACString& aCategory,
+                              JS::Handle<JS::Value> aEventData,
+                              JSContext* cx)
+{
+  return TelemetryEvent::RegisterEvents(aCategory, aEventData, true, cx);
 }
 
 NS_IMETHODIMP
@@ -1823,6 +1844,36 @@ TelemetryImpl::ClearEvents()
 {
   TelemetryEvent::ClearEvents();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+TelemetryImpl::ResetCurrentProduct()
+{
+#if defined(MOZ_WIDGET_ANDROID)
+  SetCurrentProduct();
+  return NS_OK;
+#else
+  return NS_ERROR_FAILURE;
+#endif
+}
+
+NS_IMETHODIMP
+TelemetryImpl::ClearProbes()
+{
+#if defined(MOZ_TELEMETRY_GECKOVIEW)
+  // We only support this in GeckoView.
+  if (GetCurrentProduct() != SupportedProduct::Geckoview) {
+    MOZ_ASSERT(false, "ClearProbes is only supported on GeckoView");
+    return NS_ERROR_FAILURE;
+  }
+
+  // TODO: supporting clear for histograms will come from bug 1457127.
+  TelemetryScalar::ClearScalars();
+  TelemetryGeckoViewPersistence::ClearPersistenceData();
+  return NS_OK;
+#else
+  return NS_ERROR_FAILURE;
+#endif
 }
 
 NS_IMETHODIMP

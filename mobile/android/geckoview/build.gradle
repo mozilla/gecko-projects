@@ -5,6 +5,10 @@ apply plugin: 'kotlin-android'
 
 apply from: "${topsrcdir}/mobile/android/gradle/product_flavors.gradle"
 
+// The SDK binding generation tasks depend on the JAR creation task of the
+// :annotations project.
+evaluationDependsOn(':annotations')
+
 // Non-official versions are like "61.0a1", where "a1" is the milestone.
 // This simply strips that off, leaving "61.0" in this example.
 def getAppVersionWithoutMilestone() {
@@ -135,6 +139,10 @@ android {
                     exclude 'org/mozilla/gecko/media/Utils.java'
                 }
 
+                if (!mozconfig.substs.MOZ_CRASHREPORTER) {
+                    exclude 'org/mozilla/gecko/CrashReporterService.java'
+                }
+
                 if (mozconfig.substs.MOZ_WEBRTC) {
                     srcDir "${topsrcdir}/media/webrtc/trunk/webrtc/base/java/src"
                     srcDir "${topsrcdir}/media/webrtc/trunk/webrtc/modules/audio_device/android/java/src"
@@ -145,6 +153,40 @@ android {
             assets {
             }
         }
+    }
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {
+    // Translate Kotlin messages like "w: ..." and "e: ..." into
+    // "...: warning: ..." and "...: error: ...", to make Treeherder understand.
+    def listener = {
+        if (it.startsWith('w: ') || it.startsWith('e: ')) {
+            def matches = (it =~ /([ew]): (.+): \((\d+), (\d+)\): (.*)/)
+            if (!matches) {
+                logger.quiet "kotlinc message format has changed!"
+                if (it.startsWith('w: ')) {
+                    // For warnings, don't continue because we don't want to throw an
+                    // exception. For errors, we want the exception so that the new error
+                    // message format gets translated properly.
+                    return
+                }
+            }
+            def (_, type, file, line, column, message) = matches[0]
+            type = (type == 'w') ? 'warning' : 'error'
+            // Use logger.lifecycle, which does not go through stderr again.
+            logger.lifecycle "$file:$line:$column: $type: $message"
+        }
+    } as StandardOutputListener
+
+    kotlinOptions {
+        allWarningsAsErrors = true
+    }
+
+    doFirst {
+        logging.addStandardErrorListener(listener)
+    }
+    doLast {
+        logging.removeStandardErrorListener(listener)
     }
 }
 
@@ -189,7 +231,8 @@ android.libraryVariants.all { variant ->
         include 'org/mozilla/geckoview/**'
         options.addPathOption('sourcepath', ':').setValue(
             variant.sourceSets.collect({ it.javaDirectories }).flatten() +
-            variant.generateBuildConfig.sourceOutputDir)
+            variant.generateBuildConfig.sourceOutputDir +
+            variant.aidlCompile.sourceOutputDir)
 
         // javadoc 8 has a bug that requires the rt.jar file from the JRE to be
         // in the bootclasspath (https://stackoverflow.com/a/30458820).
@@ -292,3 +335,33 @@ afterEvaluate {
 // Bug 1353055 - Strip 'vars' debugging information to agree with moz.build.
 apply from: "${topsrcdir}/mobile/android/gradle/debug_level.gradle"
 android.libraryVariants.all configureVariantDebugLevel
+
+// There's nothing specific to the :geckoview project here -- this just needs to
+// be somewhere where the Android plugin is available so that we can fish the
+// path to "android.jar".
+task("generateSDKBindings", type: JavaExec) {
+    classpath project(':annotations').jar.archivePath
+    classpath project(':annotations').compileJava.classpath
+
+    // To use the lint APIs: "Lint must be invoked with the System property
+    // com.android.tools.lint.bindir pointing to the ANDROID_SDK tools
+    // directory"
+    systemProperties = [
+        'com.android.tools.lint.bindir': "${android.sdkDirectory}/tools",
+    ]
+
+    main = 'org.mozilla.gecko.annotationProcessors.SDKProcessor'
+    args android.bootClasspath
+    args 16
+    args "${topobjdir}/widget/android/bindings"
+
+    // Configure the arguments at evaluation-time, not at configuration-time.
+    doFirst {
+        // From -Pgenerate_sdk_bindings_args=... on command line.
+        args project.generate_sdk_bindings_args.split(':')
+    }
+
+    workingDir "${topsrcdir}/widget/android/bindings"
+
+    dependsOn project(':annotations').jar
+}

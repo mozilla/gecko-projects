@@ -19,7 +19,6 @@ use num_traits::Zero;
 use properties::{CSSWideKeyword, PropertyDeclaration};
 use properties::longhands;
 use properties::longhands::font_weight::computed_value::T as FontWeight;
-use properties::longhands::font_stretch::computed_value::T as FontStretch;
 use properties::longhands::visibility::computed_value::T as Visibility;
 use properties::PropertyId;
 use properties::{LonghandId, ShorthandId};
@@ -28,7 +27,7 @@ use smallvec::SmallVec;
 use std::{cmp, ptr};
 use std::mem::{self, ManuallyDrop};
 #[cfg(feature = "gecko")] use hash::FnvHashMap;
-use style_traits::ParseError;
+use style_traits::{KeywordsCollectFn, ParseError, SpecifiedValueInfo};
 use super::ComputedValues;
 use values::{CSSFloat, CustomIdent, Either};
 use values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
@@ -173,6 +172,15 @@ impl From<nsCSSPropertyID> for TransitionProperty {
     }
 }
 
+impl SpecifiedValueInfo for TransitionProperty {
+    fn collect_completion_keywords(f: KeywordsCollectFn) {
+        // `transition-property` can actually accept all properties and
+        // arbitrary identifiers, but `all` is a special one we'd like
+        // to list.
+        f(&["all"]);
+    }
+}
+
 /// Returns true if this nsCSSPropertyID is one of the transitionable properties.
 #[cfg(feature = "gecko")]
 pub fn nscsspropertyid_is_transitionable(property: nsCSSPropertyID) -> bool {
@@ -188,7 +196,6 @@ pub fn nscsspropertyid_is_transitionable(property: nsCSSPropertyID) -> bool {
 
 /// An animated property interpolation between two computed values for that
 /// property.
-#[cfg(feature = "servo")]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum AnimatedProperty {
@@ -205,7 +212,6 @@ pub enum AnimatedProperty {
     % endfor
 }
 
-#[cfg(feature = "servo")]
 impl AnimatedProperty {
     /// Get the name of this property.
     pub fn name(&self) -> &'static str {
@@ -247,9 +253,12 @@ impl AnimatedProperty {
 
     /// Update `style` with the proper computed style corresponding to this
     /// animation at `progress`.
+    #[cfg_attr(feature = "gecko", allow(unused))]
     pub fn update(&self, style: &mut ComputedValues, progress: f64) {
-        match *self {
-            % for prop in data.longhands:
+        #[cfg(feature = "servo")]
+        {
+            match *self {
+                % for prop in data.longhands:
                 % if prop.animatable:
                     AnimatedProperty::${prop.camel_case}(ref from, ref to) => {
                         // https://drafts.csswg.org/web-animations/#discrete-animation-type
@@ -268,7 +277,8 @@ impl AnimatedProperty {
                         style.mutate_${prop.style_struct.name_lower}().set_${prop.ident}(value);
                     }
                 % endif
-            % endfor
+                % endfor
+            }
         }
     }
 
@@ -873,80 +883,10 @@ impl ToAnimatedZero for MaxLength {
     fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
 }
 
-/// <http://dev.w3.org/csswg/css-transitions/#animtype-font-weight>
-impl Animate for FontWeight {
-    #[inline]
-    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        let a = self.0 as f64;
-        let b = other.0 as f64;
-        const NORMAL: f64 = 400.;
-        let (this_weight, other_weight) = procedure.weights();
-        let weight = (a - NORMAL) * this_weight + (b - NORMAL) * other_weight + NORMAL;
-        let weight = (weight.max(100.).min(900.) / 100.).round() * 100.;
-        Ok(FontWeight(weight as u16))
-    }
-}
-
 impl ToAnimatedZero for FontWeight {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {
         Ok(FontWeight::normal())
-    }
-}
-
-/// <https://drafts.csswg.org/css-fonts/#font-stretch-prop>
-impl Animate for FontStretch {
-    #[inline]
-    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()>
-    {
-        let from = f64::from(*self);
-        let to = f64::from(*other);
-        let normal = f64::from(FontStretch::Normal);
-        let (this_weight, other_weight) = procedure.weights();
-        let result = (from - normal) * this_weight + (to - normal) * other_weight + normal;
-        Ok(result.into())
-    }
-}
-
-impl ComputeSquaredDistance for FontStretch {
-    #[inline]
-    fn compute_squared_distance(&self, other: &Self) -> Result<SquaredDistance, ()> {
-        f64::from(*self).compute_squared_distance(&(*other).into())
-    }
-}
-
-impl ToAnimatedZero for FontStretch {
-    #[inline]
-    fn to_animated_zero(&self) -> Result<Self, ()> { Err(()) }
-}
-
-/// We should treat font stretch as real number in order to interpolate this property.
-/// <https://drafts.csswg.org/css-fonts-3/#font-stretch-animation>
-impl From<FontStretch> for f64 {
-    fn from(stretch: FontStretch) -> f64 {
-        use self::FontStretch::*;
-        match stretch {
-            UltraCondensed => 1.0,
-            ExtraCondensed => 2.0,
-            Condensed => 3.0,
-            SemiCondensed => 4.0,
-            Normal => 5.0,
-            SemiExpanded => 6.0,
-            Expanded => 7.0,
-            ExtraExpanded => 8.0,
-            UltraExpanded => 9.0,
-        }
-    }
-}
-
-impl Into<FontStretch> for f64 {
-    fn into(self) -> FontStretch {
-        use properties::longhands::font_stretch::computed_value::T::*;
-        let index = (self + 0.5).floor().min(9.0).max(1.0);
-        static FONT_STRETCH_ENUM_MAP: [FontStretch; 9] =
-            [ UltraCondensed, ExtraCondensed, Condensed, SemiCondensed, Normal,
-              SemiExpanded, Expanded, ExtraExpanded, UltraExpanded ];
-        FONT_STRETCH_ENUM_MAP[(index - 1.0) as usize]
     }
 }
 
@@ -1353,16 +1293,8 @@ impl Animate for ComputedTransformOperation {
                 &TransformOperation::Perspective(ref fd),
                 &TransformOperation::Perspective(ref td),
             ) => {
-                let mut fd_matrix = Matrix3D::identity();
-                let mut td_matrix = Matrix3D::identity();
-                if fd.px() > 0. {
-                    fd_matrix.m34 = -1. / fd.px();
-                }
-                if td.px() > 0. {
-                    td_matrix.m34 = -1. / td.px();
-                }
-                Ok(TransformOperation::Matrix3D(
-                    fd_matrix.animate(&td_matrix, procedure)?,
+                Ok(TransformOperation::Perspective(
+                    fd.animate(td, procedure)?
                 ))
             },
             _ if self.is_translate() && other.is_translate() => {
@@ -2702,16 +2634,7 @@ impl ComputeSquaredDistance for ComputedTransformOperation {
                 &TransformOperation::Perspective(ref fd),
                 &TransformOperation::Perspective(ref td),
             ) => {
-                let mut fd_matrix = Matrix3D::identity();
-                let mut td_matrix = Matrix3D::identity();
-                if fd.px() > 0. {
-                    fd_matrix.m34 = -1. / fd.px();
-                }
-
-                if td.px() > 0. {
-                    td_matrix.m34 = -1. / td.px();
-                }
-                fd_matrix.compute_squared_distance(&td_matrix)
+                fd.compute_squared_distance(td)
             }
             (
                 &TransformOperation::Perspective(ref p),
@@ -2720,6 +2643,8 @@ impl ComputeSquaredDistance for ComputedTransformOperation {
                 &TransformOperation::Matrix3D(ref m),
                 &TransformOperation::Perspective(ref p),
             ) => {
+                // FIXME(emilio): Is this right? Why interpolating this with
+                // Perspective but not with anything else?
                 let mut p_matrix = Matrix3D::identity();
                 if p.px() > 0. {
                     p_matrix.m34 = -1. / p.px();

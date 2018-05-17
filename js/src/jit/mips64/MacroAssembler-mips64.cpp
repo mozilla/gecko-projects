@@ -330,7 +330,7 @@ MacroAssemblerMIPS64::ma_dror(Register rd, Register rt, Register shift)
 void
 MacroAssemblerMIPS64::ma_drol(Register rd, Register rt, Register shift)
 {
-    ma_negu(ScratchRegister, shift);
+    as_dsubu(ScratchRegister, zero, shift);
     as_drotrv(rd, rt, ScratchRegister);
 }
 
@@ -2040,7 +2040,7 @@ MacroAssembler::callWithABIPre(uint32_t* stackAdjust, bool callFromWasm)
 
     // Position all arguments.
     {
-        enoughMemory_ = enoughMemory_ && moveResolver_.resolve();
+        enoughMemory_ &= moveResolver_.resolve();
         if (!enoughMemory_)
             return;
 

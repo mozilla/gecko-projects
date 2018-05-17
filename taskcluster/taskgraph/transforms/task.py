@@ -36,7 +36,7 @@ from voluptuous import Any, Required, Optional, Extra
 from taskgraph import GECKO, MAX_DEPENDENCIES
 from ..util import docker as dockerutil
 
-RUN_TASK = os.path.join(GECKO, 'taskcluster', 'docker', 'recipes', 'run-task')
+RUN_TASK = os.path.join(GECKO, 'taskcluster', 'scripts', 'run-task')
 
 
 @memoize
@@ -376,27 +376,6 @@ task_description_schema = Schema({
         Required('chain-of-trust'): bool,
         Optional('taskcluster-proxy'): bool,
     }, {
-        Required('implementation'): 'buildbot-bridge',
-
-        # see
-        # https://github.com/mozilla/buildbot-bridge/blob/master/bbb/schemas/payload.yml
-        Required('buildername'): basestring,
-        Required('sourcestamp'): {
-            'branch': basestring,
-            Optional('revision'): basestring,
-            Optional('repository'): basestring,
-            Optional('project'): basestring,
-        },
-        Required('properties'): {
-            'product': basestring,
-            Optional('build_number'): int,
-            Optional('release_promotion'): bool,
-            Optional('generate_bz2_blob'): bool,
-            Optional('tuxedo_server_url'): optionally_keyed_by('project', basestring),
-            Optional('release_eta'): basestring,
-            Extra: taskref_or_string,  # additional properties are allowed
-        },
-    }, {
         Required('implementation'): 'native-engine',
         Required('os'): Any('macosx', 'linux'),
 
@@ -486,7 +465,7 @@ task_description_schema = Schema({
             Required('locale'): basestring,
         }],
     }, {
-        Required('implementation'): 'beetmover-cdns',
+        Required('implementation'): 'beetmover-push-to-release',
 
         # the maximum time to run, in seconds
         Required('max-run-time'): int,
@@ -496,6 +475,7 @@ task_description_schema = Schema({
         Required('balrog-action'): Any(*BALROG_ACTIONS),
         Optional('product'): basestring,
         Optional('platforms'): [basestring],
+        Optional('release-eta'): basestring,
         Optional('channel-names'): optionally_keyed_by('project', [basestring]),
         Optional('require-mirrors'): bool,
         Optional('publish-rules'): optionally_keyed_by('project', [int]),
@@ -644,7 +624,6 @@ BRANCH_PRIORITIES = {
     'birch': 'very-low',
     'cedar': 'very-low',
     'cypress': 'very-low',
-    'date': 'very-low',
     'elm': 'very-low',
     'fig': 'very-low',
     'gum': 'very-low',
@@ -1019,8 +998,8 @@ def build_beetmover_payload(config, task, task_def):
         task_def['payload'].update(release_config)
 
 
-@payload_builder('beetmover-cdns')
-def build_beetmover_cdns_payload(config, task, task_def):
+@payload_builder('beetmover-push-to-release')
+def build_beetmover_push_to_release_payload(config, task, task_def):
     worker = task['worker']
     release_config = get_release_config(config)
 
@@ -1068,7 +1047,7 @@ def build_balrog_payload(config, task, task_def):
         else:  # schedule / ship
             task_def['payload'].update({
                 'publish_rules': worker['publish-rules'],
-                'release_eta': config.params.get('release_eta') or '',
+                'release_eta': worker.get('release-eta', config.params.get('release_eta')) or '',
             })
 
 
@@ -1206,29 +1185,6 @@ def build_macosx_engine_payload(config, task, task_def):
         raise Exception('needs-sccache not supported in native-engine')
 
 
-@payload_builder('buildbot-bridge')
-def build_buildbot_bridge_payload(config, task, task_def):
-    task['extra'].pop('treeherder', None)
-    worker = task['worker']
-
-    if worker['properties'].get('tuxedo_server_url'):
-        resolve_keyed_by(
-            worker, 'properties.tuxedo_server_url', worker['buildername'],
-            **config.params
-        )
-
-    task_def['payload'] = {
-        'buildername': worker['buildername'],
-        'sourcestamp': worker['sourcestamp'],
-        'properties': worker['properties'],
-    }
-    task_def.setdefault('scopes', [])
-    if worker['properties'].get('release_promotion'):
-        task_def['scopes'].append(
-            "project:releng:buildbot-bridge:builder-name:{}".format(worker['buildername'])
-        )
-
-
 transforms = TransformSequence()
 
 
@@ -1263,7 +1219,7 @@ def set_defaults(config, tasks):
             worker.setdefault('max-run-time', 600)
         elif worker['implementation'] == 'beetmover':
             worker.setdefault('max-run-time', 600)
-        elif worker['implementation'] == 'beetmover-cdns':
+        elif worker['implementation'] == 'beetmover-push-to-release':
             worker.setdefault('max-run-time', 600)
         elif worker['implementation'] == 'push-apk':
             worker.setdefault('commit', False)
@@ -1518,6 +1474,7 @@ def build_task(config, tasks):
         extra['parent'] = os.environ.get('TASK_ID', '')
         task_th = task.get('treeherder')
         if task_th:
+            extra.setdefault('treeherder-platform', task_th['platform'])
             treeherder = extra.setdefault('treeherder', {})
 
             machine_platform, collection = task_th['platform'].split('/', 1)

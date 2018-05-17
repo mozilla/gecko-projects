@@ -85,7 +85,8 @@ public:
   static bool CompositorIsInGPUProcess();
 
   virtual mozilla::ipc::IPCResult
-  RecvDidComposite(const LayersId& aId, const uint64_t& aTransactionId,
+  RecvDidComposite(const LayersId& aId,
+                   const TransactionId& aTransactionId,
                    const TimeStamp& aCompositeStart,
                    const TimeStamp& aCompositeEnd) override;
 
@@ -322,6 +323,8 @@ private:
   RecvNotifyWebRenderError(const WebRenderError& aError) override;
 
   uint64_t GetNextResourceId();
+
+  void ClearSharedFrameMetricsData(LayersId aLayersId);
 
   // Class used to store the shared FrameMetrics, mutex, and APZCId  in a hash table
   class SharedFrameMetricsData {

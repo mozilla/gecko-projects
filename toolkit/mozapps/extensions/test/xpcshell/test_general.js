@@ -9,49 +9,44 @@
 // etc. detected
 var gCount;
 
-function run_test() {
+async function run_test() {
   do_test_pending();
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
-  startupManager();
-  AddonManager.getAddonsByTypes(null, function(list) {
-    gCount = list.length;
+  await promiseStartupManager();
+  let list = await AddonManager.getAddonsByTypes(null);
+  gCount = list.length;
 
-    executeSoon(run_test_1);
-  });
+  executeSoon(run_test_1);
 }
 
-function run_test_1() {
-  restartManager();
+async function run_test_1() {
+  await promiseRestartManager();
 
-  AddonManager.getAddonsByTypes(null, function(addons) {
-    Assert.equal(gCount, addons.length);
+  let addons = await AddonManager.getAddonsByTypes(null);
+  Assert.equal(gCount, addons.length);
 
-    AddonManager.getAddonsWithOperationsByTypes(null, function(pendingAddons) {
-      Assert.equal(0, pendingAddons.length);
+  let pendingAddons = await AddonManager.getAddonsWithOperationsByTypes(null);
+  Assert.equal(0, pendingAddons.length);
 
-      executeSoon(run_test_2);
-    });
-  });
+  executeSoon(run_test_2);
 }
 
-function run_test_2() {
-  shutdownManager();
+async function run_test_2() {
+  await promiseShutdownManager();
 
-  startupManager(false);
+  await promiseStartupManager();
 
-  AddonManager.getAddonsByTypes(null, function(addons) {
-    Assert.equal(gCount, addons.length);
+  let addons = await AddonManager.getAddonsByTypes(null);
+  Assert.equal(gCount, addons.length);
 
-    executeSoon(run_test_3);
-  });
+  executeSoon(run_test_3);
 }
 
-function run_test_3() {
-  restartManager();
+async function run_test_3() {
+  await promiseRestartManager();
 
-  AddonManager.getAddonsByTypes(null, callback_soon(function(addons) {
-    Assert.equal(gCount, addons.length);
-    do_test_finished();
-  }));
+  let addons = await AddonManager.getAddonsByTypes(null);
+  Assert.equal(gCount, addons.length);
+  do_test_finished();
 }

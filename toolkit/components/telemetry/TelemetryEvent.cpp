@@ -43,9 +43,11 @@ using mozilla::Telemetry::Common::IsInDataset;
 using mozilla::Telemetry::Common::MsSinceProcessStart;
 using mozilla::Telemetry::Common::LogToBrowserConsole;
 using mozilla::Telemetry::Common::CanRecordInProcess;
+using mozilla::Telemetry::Common::CanRecordProduct;
 using mozilla::Telemetry::Common::GetNameForProcessID;
 using mozilla::Telemetry::Common::IsValidIdentifierString;
 using mozilla::Telemetry::Common::ToJSString;
+using mozilla::Telemetry::Common::GetCurrentProduct;
 using mozilla::Telemetry::EventExtraEntry;
 using mozilla::Telemetry::ChildEventData;
 using mozilla::Telemetry::ProcessID;
@@ -117,9 +119,6 @@ const uint32_t kMaxExtraKeyNameByteLength = 15;
 // The maximum number of valid extra keys for an event.
 const uint32_t kMaxExtraKeyCount = 10;
 
-typedef nsDataHashtable<nsCStringHashKey, uint32_t> StringUintMap;
-typedef nsClassHashtable<nsCStringHashKey, nsCString> StringMap;
-
 struct EventKey {
   uint32_t id;
   bool dynamic;
@@ -128,12 +127,13 @@ struct EventKey {
 struct DynamicEventInfo {
   DynamicEventInfo(const nsACString& category, const nsACString& method,
                    const nsACString& object, nsTArray<nsCString>& extra_keys,
-                   bool recordOnRelease)
+                   bool recordOnRelease, bool builtin)
     : category(category)
     , method(method)
     , object(object)
     , extra_keys(extra_keys)
     , recordOnRelease(recordOnRelease)
+    , builtin(builtin)
   {}
 
   DynamicEventInfo(const DynamicEventInfo&) = default;
@@ -144,6 +144,7 @@ struct DynamicEventInfo {
   const nsCString object;
   const nsTArray<nsCString> extra_keys;
   const bool recordOnRelease;
+  const bool builtin;
 
   size_t
   SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
@@ -308,16 +309,22 @@ bool gCanRecordExtended;
 // The EventName -> EventKey cache map.
 nsClassHashtable<nsCStringHashKey, EventKey> gEventNameIDMap(kEventCount);
 
-// The CategoryName -> CategoryID cache map.
-StringUintMap gCategoryNameIDMap;
+// The CategoryName set.
+nsTHashtable<nsCStringHashKey> gCategoryNames;
 
 // This tracks the IDs of the categories for which recording is enabled.
 nsTHashtable<nsCStringHashKey> gEnabledCategories;
 
 // The main event storage. Events are inserted here, keyed by process id and
 // in recording order.
+typedef nsUint32HashKey ProcessIDHashKey;
 typedef nsTArray<EventRecord> EventRecordArray;
-nsClassHashtable<nsUint32HashKey, EventRecordArray> gEventRecords;
+typedef nsClassHashtable<ProcessIDHashKey, EventRecordArray> EventRecordsMapType;
+
+EventRecordsMapType gEventRecords;
+// Provide separate storage for "dynamic builtin" events needed to
+// support "build faster" in local developer builds.
+EventRecordsMapType gBuiltinEventRecords;
 
 // The details on dynamic events that are recorded from addons are registered here.
 StaticAutoPtr<nsTArray<DynamicEventInfo>> gDynamicEventInfo;
@@ -376,6 +383,11 @@ CanRecordEvent(const StaticMutexAutoLock& lock, const EventKey& eventKey,
   // We don't allow specifying a process to record in for dynamic events.
   if (!eventKey.dynamic) {
     const CommonEventInfo& info = gEventInfo[eventKey.id].common_info;
+
+    if (!CanRecordProduct(info.products)) {
+      return false;
+    }
+
     if (!CanRecordInProcess(info.record_in_processes, process)) {
       return false;
     }
@@ -392,12 +404,17 @@ IsExpired(const EventKey& key)
 
 EventRecordArray*
 GetEventRecordsForProcess(const StaticMutexAutoLock& lock, ProcessID processType,
-                          const EventKey& eventKey)
+                          const EventKey& eventKey, bool isDynamicBuiltin)
 {
+  // Put dynamic-builtin events (used to support "build faster") in a
+  // separate storage.
+  EventRecordsMapType& processStorage =
+    isDynamicBuiltin ? gBuiltinEventRecords : gEventRecords;
+
   EventRecordArray* eventRecords = nullptr;
-  if (!gEventRecords.Get(uint32_t(processType), &eventRecords)) {
+  if (!processStorage.Get(uint32_t(processType), &eventRecords)) {
     eventRecords = new EventRecordArray();
-    gEventRecords.Put(uint32_t(processType), eventRecords);
+    processStorage.Put(uint32_t(processType), eventRecords);
   }
   return eventRecords;
 }
@@ -451,23 +468,28 @@ RecordEvent(const StaticMutexAutoLock& lock, ProcessID processType,
     return RecordEventResult::UnknownEvent;
   }
 
-  if (eventKey->dynamic) {
-    processType = ProcessID::Dynamic;
-  }
-
-  EventRecordArray* eventRecords = GetEventRecordsForProcess(lock, processType, *eventKey);
-
-  // Apply hard limit on event count in storage.
-  if (eventRecords->Length() >= kMaxEventRecords) {
-    return RecordEventResult::StorageLimitReached;
-  }
-
   // If the event is expired or not enabled for this process, we silently drop this call.
   // We don't want recording for expired probes to be an error so code doesn't
   // have to be removed at a specific time or version.
   // Even logging warnings would become very noisy.
   if (IsExpired(*eventKey)) {
     return RecordEventResult::ExpiredEvent;
+  }
+
+  // Fixup the process id only for non-builtin (e.g. supporting build faster)
+  // dynamic events.
+  if (eventKey->dynamic &&
+      !(*gDynamicEventInfo)[eventKey->id].builtin) {
+    processType = ProcessID::Dynamic;
+  }
+
+  bool isDynamicBuiltin = eventKey->dynamic && (*gDynamicEventInfo)[eventKey->id].builtin;
+  EventRecordArray* eventRecords =
+    GetEventRecordsForProcess(lock, processType, *eventKey, isDynamicBuiltin);
+
+  // Apply hard limit on event count in storage.
+  if (eventRecords->Length() >= kMaxEventRecords) {
+    return RecordEventResult::StorageLimitReached;
   }
 
   // Check whether the extra keys passed are valid.
@@ -521,7 +543,7 @@ ShouldRecordChildEvent(const StaticMutexAutoLock& lock, const nsACString& catego
 void
 RegisterEvents(const StaticMutexAutoLock& lock, const nsACString& category,
                const nsTArray<DynamicEventInfo>& eventInfos,
-               const nsTArray<bool>& eventExpired)
+               const nsTArray<bool>& eventExpired, bool aBuiltin)
 {
   MOZ_ASSERT(eventInfos.Length() == eventExpired.Length(), "Event data array sizes should match.");
 
@@ -548,8 +570,16 @@ RegisterEvents(const StaticMutexAutoLock& lock, const nsACString& category,
     gEventNameIDMap.Put(eventName, new EventKey{eventId, true});
   }
 
-  // Now after successful registration enable recording for this category.
-  gEnabledCategories.PutEntry(category);
+  // If it is a builtin, add the category name in order to enable it later.
+  if (aBuiltin) {
+    gCategoryNames.PutEntry(category);
+  }
+
+  if (!aBuiltin) {
+    // Now after successful registration enable recording for this category
+    // (if not a dynamic builtin).
+    gEnabledCategories.PutEntry(category);
+  }
 }
 
 } // anonymous namespace
@@ -707,15 +737,9 @@ TelemetryEvent::InitializeGlobalState(bool aCanRecordBase, bool aCanRecordExtend
     }
 
     gEventNameIDMap.Put(UniqueEventName(info), new EventKey{eventId, false});
-    if (!gCategoryNameIDMap.Contains(info.common_info.category())) {
-      gCategoryNameIDMap.Put(info.common_info.category(),
-                             info.common_info.category_offset);
-    }
+    gCategoryNames.PutEntry(info.common_info.category());
   }
 
-#ifdef DEBUG
-  gCategoryNameIDMap.MarkImmutable();
-#endif
   gInitDone = true;
 }
 
@@ -729,9 +753,10 @@ TelemetryEvent::DeInitializeGlobalState()
   gCanRecordExtended = false;
 
   gEventNameIDMap.Clear();
-  gCategoryNameIDMap.Clear();
+  gCategoryNames.Clear();
   gEnabledCategories.Clear();
   gEventRecords.Clear();
+  gBuiltinEventRecords.Clear();
 
   gDynamicEventInfo = nullptr;
 
@@ -956,12 +981,13 @@ GetArrayPropertyValues(JSContext* cx, JS::HandleObject obj, const char* property
 nsresult
 TelemetryEvent::RegisterEvents(const nsACString& aCategory,
                                JS::Handle<JS::Value> aEventData,
+                               bool aBuiltin,
                                JSContext* cx)
 {
   MOZ_ASSERT(XRE_IsParentProcess(),
              "Events can only be registered in the parent process");
 
-  if (!IsValidIdentifierString(aCategory, 30, true, false)) {
+  if (!IsValidIdentifierString(aCategory, 30, true, true)) {
     JS_ReportErrorASCII(cx, "Category parameter should match the identifier pattern.");
     return NS_ERROR_INVALID_ARG;
   }
@@ -1045,7 +1071,7 @@ TelemetryEvent::RegisterEvents(const nsACString& aCategory,
 
     // Validate methods.
     for (auto& method : methods) {
-      if (!IsValidIdentifierString(method, kMaxMethodNameByteLength, false, false)) {
+      if (!IsValidIdentifierString(method, kMaxMethodNameByteLength, false, true)) {
         JS_ReportErrorASCII(cx, "Method names should match the identifier pattern.");
         return NS_ERROR_INVALID_ARG;
       }
@@ -1065,7 +1091,7 @@ TelemetryEvent::RegisterEvents(const nsACString& aCategory,
       return NS_ERROR_INVALID_ARG;
     }
     for (auto& key : extra_keys) {
-      if (!IsValidIdentifierString(key, kMaxExtraKeyNameByteLength, false, false)) {
+      if (!IsValidIdentifierString(key, kMaxExtraKeyNameByteLength, false, true)) {
         JS_ReportErrorASCII(cx, "Extra key names should match the identifier pattern.");
         return NS_ERROR_INVALID_ARG;
       }
@@ -1077,7 +1103,7 @@ TelemetryEvent::RegisterEvents(const nsACString& aCategory,
         // We defer the actual registration here in case any other event description is invalid.
         // In that case we don't need to roll back any partial registration.
         DynamicEventInfo info{aCategory, method, object,
-                              extra_keys, recordOnRelease};
+                              extra_keys, recordOnRelease, aBuiltin};
         newEventInfos.AppendElement(info);
         newEventExpired.AppendElement(expired);
       }
@@ -1086,7 +1112,7 @@ TelemetryEvent::RegisterEvents(const nsACString& aCategory,
 
   {
     StaticMutexAutoLock locker(gTelemetryEventsMutex);
-    RegisterEvents(locker, aCategory, newEventInfos, newEventExpired);
+    RegisterEvents(locker, aCategory, newEventInfos, newEventExpired, aBuiltin);
   }
 
   return NS_OK;
@@ -1115,26 +1141,38 @@ TelemetryEvent::CreateSnapshots(uint32_t aDataset, bool aClear, JSContext* cx,
       return NS_ERROR_FAILURE;
     }
 
-    for (auto iter = gEventRecords.Iter(); !iter.Done(); iter.Next()) {
-      const EventRecordArray* eventStorage = static_cast<EventRecordArray*>(iter.Data());
-      EventRecordArray events;
+    // The snapshotting function is the same for both static and dynamic builtin events.
+    // We can use the same function and store the events in the same output storage.
+    auto snapshotter = [aDataset, &locker, &processEvents]
+                       (EventRecordsMapType& aProcessStorage)
+    {
 
-      const uint32_t len = eventStorage->Length();
-      for (uint32_t i = 0; i < len; ++i) {
-        const EventRecord& record = (*eventStorage)[i];
-        if (IsInDataset(GetDataset(locker, record.GetEventKey()), aDataset)) {
-          events.AppendElement(record);
+      for (auto iter = aProcessStorage.Iter(); !iter.Done(); iter.Next()) {
+        const EventRecordArray* eventStorage = static_cast<EventRecordArray*>(iter.Data());
+        EventRecordArray events;
+
+        const uint32_t len = eventStorage->Length();
+        for (uint32_t i = 0; i < len; ++i) {
+          const EventRecord& record = (*eventStorage)[i];
+          if (IsInDataset(GetDataset(locker, record.GetEventKey()), aDataset)) {
+            events.AppendElement(record);
+          }
+        }
+
+        if (events.Length()) {
+          const char* processName = GetNameForProcessID(ProcessID(iter.Key()));
+          processEvents.AppendElement(mozilla::MakePair(processName, Move(events)));
         }
       }
+    };
 
-      if (events.Length()) {
-        const char* processName = GetNameForProcessID(ProcessID(iter.Key()));
-        processEvents.AppendElement(mozilla::MakePair(processName, Move(events)));
-      }
-    }
+    // Take a snapshot of the plain and dynamic builtin events.
+    snapshotter(gEventRecords);
+    snapshotter(gBuiltinEventRecords);
 
     if (aClear) {
       gEventRecords.Clear();
+      gBuiltinEventRecords.Clear();
     }
   }
 
@@ -1174,6 +1212,7 @@ TelemetryEvent::ClearEvents()
   }
 
   gEventRecords.Clear();
+  gBuiltinEventRecords.Clear();
 }
 
 void
@@ -1181,8 +1220,7 @@ TelemetryEvent::SetEventRecordingEnabled(const nsACString& category, bool enable
 {
   StaticMutexAutoLock locker(gTelemetryEventsMutex);
 
-  uint32_t categoryId;
-  if (!gCategoryNameIDMap.Get(category, &categoryId)) {
+  if (!gCategoryNames.Contains(category)) {
     LogToBrowserConsole(nsIScriptError::warningFlag,
                         NS_LITERAL_STRING("Unkown category for SetEventRecordingEnabled."));
     return;
@@ -1201,28 +1239,30 @@ TelemetryEvent::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   StaticMutexAutoLock locker(gTelemetryEventsMutex);
   size_t n = 0;
 
+  auto getSizeOfRecords = [aMallocSizeOf](auto &storageMap)
+  {
+    size_t partial = storageMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
+    for (auto iter = storageMap.Iter(); !iter.Done(); iter.Next()) {
+      EventRecordArray* eventRecords = static_cast<EventRecordArray*>(iter.Data());
+      partial += eventRecords->ShallowSizeOfIncludingThis(aMallocSizeOf);
 
-  n += gEventRecords.ShallowSizeOfExcludingThis(aMallocSizeOf);
-  for (auto iter = gEventRecords.Iter(); !iter.Done(); iter.Next()) {
-    EventRecordArray* eventRecords = static_cast<EventRecordArray*>(iter.Data());
-    n += eventRecords->ShallowSizeOfIncludingThis(aMallocSizeOf);
-
-    const uint32_t len = eventRecords->Length();
-    for (uint32_t i = 0; i < len; ++i) {
-      n += (*eventRecords)[i].SizeOfExcludingThis(aMallocSizeOf);
+      const uint32_t len = eventRecords->Length();
+      for (uint32_t i = 0; i < len; ++i) {
+        partial += (*eventRecords)[i].SizeOfExcludingThis(aMallocSizeOf);
+      }
     }
-  }
+    return partial;
+  };
+
+  n += getSizeOfRecords(gEventRecords);
+  n += getSizeOfRecords(gBuiltinEventRecords);
 
   n += gEventNameIDMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
   for (auto iter = gEventNameIDMap.ConstIter(); !iter.Done(); iter.Next()) {
     n += iter.Key().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
   }
 
-  n += gCategoryNameIDMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
-  for (auto iter = gCategoryNameIDMap.ConstIter(); !iter.Done(); iter.Next()) {
-    n += iter.Key().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
-  }
-
+  n += gCategoryNames.ShallowSizeOfExcludingThis(aMallocSizeOf);
   n += gEnabledCategories.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
   if (gDynamicEventInfo) {

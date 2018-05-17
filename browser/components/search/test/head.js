@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+ChromeUtils.import("resource://testing-common/CustomizableUITestUtils.jsm", this);
+let gCUITestUtils = new CustomizableUITestUtils(window);
 
 /**
  * Recursively compare two objects and check that every property of expectedObj has the same value
@@ -93,8 +95,8 @@ let promiseStateChangeFrameScript = "data:," + encodeURIComponent(`(${
     const global = this;
     const LISTENER = Symbol("listener");
     let listener = {
-      QueryInterface: XPCOMUtils.generateQI(["nsISupportsWeakReference",
-                                             "nsIWebProgressListener"]),
+      QueryInterface: ChromeUtils.generateQI(["nsISupportsWeakReference",
+                                              "nsIWebProgressListener"]),
 
       onStateChange: function onStateChange(webProgress, req, flags, status) {
         // Only care about top-level document starts

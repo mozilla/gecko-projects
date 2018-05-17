@@ -1615,9 +1615,7 @@ class nsAsyncBridgeRequest final  : public nsPACManCallback
     void Wait()   { mCondVar.Wait(TimeDuration::FromSeconds(3)); }
 
 private:
-    ~nsAsyncBridgeRequest()
-    {
-    }
+    ~nsAsyncBridgeRequest() = default;
 
     friend class nsProtocolProxyService;
 
@@ -1776,12 +1774,12 @@ nsProtocolProxyService::NewProxyInfoWithAuth(const nsACString &aType,
 
     // resolve type; this allows us to avoid copying the type string into each
     // proxy info instance.  we just reference the string literals directly :)
-    const char *type = nullptr;
-    for (uint32_t i = 0; i < ArrayLength(types); ++i) {
-        if (aType.LowerCaseEqualsASCII(types[i])) {
-            type = types[i];
-            break;
-        }
+    const char* type = nullptr;
+    for (auto& t : types) {
+      if (aType.LowerCaseEqualsASCII(t)) {
+        type = t;
+        break;
+      }
     }
     NS_ENSURE_TRUE(type, NS_ERROR_INVALID_ARG);
 
@@ -2134,8 +2132,8 @@ loser:
 nsresult
 nsProtocolProxyService::GetProtocolInfo(nsIURI *uri, nsProtocolInfo *info)
 {
-    NS_PRECONDITION(uri, "URI is null");
-    NS_PRECONDITION(info, "info is null");
+    MOZ_ASSERT(uri, "URI is null");
+    MOZ_ASSERT(info, "info is null");
 
     nsresult rv;
 

@@ -26,9 +26,8 @@ const {FaviconFeed} = ChromeUtils.import("resource://activity-stream/lib/Favicon
 const {TopSitesFeed} = ChromeUtils.import("resource://activity-stream/lib/TopSitesFeed.jsm", {});
 const {TopStoriesFeed} = ChromeUtils.import("resource://activity-stream/lib/TopStoriesFeed.jsm", {});
 const {HighlightsFeed} = ChromeUtils.import("resource://activity-stream/lib/HighlightsFeed.jsm", {});
-const {ActivityStreamStorage} = ChromeUtils.import("resource://activity-stream/lib/ActivityStreamStorage.jsm", {});
 const {ThemeFeed} = ChromeUtils.import("resource://activity-stream/lib/ThemeFeed.jsm", {});
-const {MessageCenterFeed} = ChromeUtils.import("resource://activity-stream/lib/MessageCenterFeed.jsm", {});
+const {ASRouterFeed} = ChromeUtils.import("resource://activity-stream/lib/ASRouterFeed.jsm", {});
 
 const DEFAULT_SITES = new Map([
   // This first item is the global list fallback for any unexpected geos
@@ -43,6 +42,12 @@ const DEFAULT_SITES = new Map([
 ]);
 const GEO_PREF = "browser.search.region";
 const REASON_ADDON_UNINSTALL = 6;
+const SPOCS_GEOS = ["US"];
+
+// Determine if spocs should be shown for a geo/locale
+function showSpocs({geo}) {
+  return SPOCS_GEOS.includes(geo);
+}
 
 // Configure default Activity Stream prefs with a plain `value` or a `getValue`
 // that computes a value. A `value_local_dev` is used for development defaults.
@@ -61,10 +66,10 @@ const PREFS_CONFIG = new Map([
       provider_icon: "pocket",
       provider_name: "Pocket",
       read_more_endpoint: "https://getpocket.com/explore/trending?src=fx_new_tab",
-      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=${args.locale}`,
+      stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=3&consumer_key=$apiKey&locale_lang=${args.locale}&feed_variant=${showSpocs(args) ? "default_spocs_on" : "default_spocs_off"}`,
       stories_referrer: "https://getpocket.com/recommendations",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
-      show_spocs: false,
+      show_spocs: showSpocs(args),
       personalized: true
     })
   }],
@@ -118,8 +123,20 @@ const PREFS_CONFIG = new Map([
     title: "Telemetry server endpoint",
     value: "https://tiles.services.mozilla.com/v4/links/activity-stream"
   }],
+  ["section.highlights.includeVisited", {
+    title: "Boolean flag that decides whether or not to show visited pages in highlights.",
+    value: true
+  }],
+  ["section.highlights.includeBookmarks", {
+    title: "Boolean flag that decides whether or not to show bookmarks in highlights.",
+    value: true
+  }],
   ["section.highlights.includePocket", {
     title: "Boolean flag that decides whether or not to show saved Pocket stories in highlights.",
+    value: true
+  }],
+  ["section.highlights.includeDownloads", {
+    title: "Boolean flag that decides whether or not to show saved recent Downloads in highlights.",
     value: true
   }],
   ["section.topstories.showDisclaimer", {
@@ -130,15 +147,11 @@ const PREFS_CONFIG = new Map([
     title: "Tippy Top service manifest url",
     value: "https://activity-stream-icons.services.mozilla.com/v1/icons.json.br"
   }],
-  ["enableWideLayout", {
-    title: "Enable the wider layout (8 topsites per row and larger pocket+highlight cards)",
-    value: true
-  }],
   ["sectionOrder", {
     title: "The rendering order for the sections",
     value: "topsites,topstories,highlights"
   }],
-  ["messageCenterExperimentEnabled", {
+  ["asrouterExperimentEnabled", {
     title: "Is the message center experiment on?",
     value: false
   }]
@@ -201,8 +214,8 @@ const FEEDS_DATA = [
     // Dynamically determine if Pocket should be shown for a geo / locale
     getValue: ({geo, locale}) => {
       const locales = ({
-        "US": ["en-US", "en-GB", "en-ZA"],
-        "CA": ["en-US", "en-GB", "en-ZA"],
+        "US": ["en-CA", "en-GB", "en-US", "en-ZA"],
+        "CA": ["en-CA", "en-GB", "en-US", "en-ZA"],
         "DE": ["de", "de-DE", "de-AT", "de-CH"]
       })[geo];
       return !!locales && locales.includes(locale);
@@ -239,9 +252,9 @@ const FEEDS_DATA = [
     value: true
   },
   {
-    name: "messagecenterfeed",
-    factory: () => new MessageCenterFeed(),
-    title: "Queries places and gets metadata for Top Sites section",
+    name: "asrouterfeed",
+    factory: () => new ASRouterFeed(),
+    title: "Handles AS Router messages, such as snippets and onboaridng",
     value: true
   }
 ];
@@ -268,18 +281,12 @@ this.ActivityStream = class ActivityStream {
     this.store = new Store();
     this.feeds = FEEDS_CONFIG;
     this._defaultPrefs = new DefaultPrefs(PREFS_CONFIG);
-    this._storage = new ActivityStreamStorage(["sectionPrefs", "snippets"]);
   }
 
   init() {
     try {
       this._updateDynamicPrefs();
       this._defaultPrefs.init();
-
-      // Accessing the db causes the object stores to be created / migrated.
-      // This needs to happen before other instances try to access the db, which
-      // would update only a subset of the stores to the latest version.
-      this._storage.db; // eslint-disable-line no-unused-expressions
 
       // Hook up the store and let all feeds and pages initialize
       this.store.init(this.feeds, ac.BroadcastToContent({

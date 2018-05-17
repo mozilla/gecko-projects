@@ -118,7 +118,6 @@ private:
            bool aBrowserWouldUpgradeInsecureRequests,
            bool aVerifySignedContent,
            bool aEnforceSRI,
-           bool aAllowDocumentToBeAgnosticToCSP,
            bool aForceAllowDataURI,
            bool aAllowInsecureRedirectToDataURI,
            bool aSkipContentPolicyCheckForWebRequest,
@@ -152,7 +151,7 @@ private:
     const mozilla::net::OptionalLoadInfoArgs& aLoadInfoArgs,
     nsILoadInfo** outLoadInfo);
 
-  ~LoadInfo();
+  ~LoadInfo() = default;
 
   void ComputeIsThirdPartyContext(nsPIDOMWindowOuter* aOuterWindow);
 
@@ -187,7 +186,6 @@ private:
   bool                             mBrowserWouldUpgradeInsecureRequests;
   bool                             mVerifySignedContent;
   bool                             mEnforceSRI;
-  bool                             mAllowDocumentToBeAgnosticToCSP;
   bool                             mForceAllowDataURI;
   bool                             mAllowInsecureRedirectToDataURI;
   bool                             mSkipContentPolicyCheckForWebRequest;

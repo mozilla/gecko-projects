@@ -58,7 +58,7 @@ ServoStyleRuleDeclaration::GetParentRule()
 nsINode*
 ServoStyleRuleDeclaration::GetParentObject()
 {
-  return Rule()->GetDocument();
+  return Rule()->GetParentObject();
 }
 
 DeclarationBlock*
@@ -72,8 +72,6 @@ ServoStyleRuleDeclaration::SetCSSDeclaration(DeclarationBlock* aDecl)
 {
   ServoStyleRule* rule = Rule();
   if (RefPtr<StyleSheet> sheet = rule->GetStyleSheet()) {
-    nsCOMPtr<nsIDocument> doc = sheet->GetAssociatedDocument();
-    mozAutoDocUpdate updateBatch(doc, UPDATE_STYLE, true);
     if (aDecl != mDecls) {
       mDecls->SetOwningRule(nullptr);
       RefPtr<ServoDeclarationBlock> decls = aDecl->AsServo();
@@ -92,21 +90,11 @@ ServoStyleRuleDeclaration::DocToUpdate()
   return nullptr;
 }
 
-void
-ServoStyleRuleDeclaration::GetCSSParsingEnvironment(
-  CSSParsingEnvironment& aCSSParseEnv,
-  nsIPrincipal* aSubjectPrincipal)
-{
-  MOZ_ASSERT_UNREACHABLE("GetCSSParsingEnvironment "
-                         "shouldn't be calling for a Servo rule");
-  GetCSSParsingEnvironmentForRule(Rule(), aCSSParseEnv);
-}
-
-nsDOMCSSDeclaration::ServoCSSParsingEnvironment
-ServoStyleRuleDeclaration::GetServoCSSParsingEnvironment(
+nsDOMCSSDeclaration::ParsingEnvironment
+ServoStyleRuleDeclaration::GetParsingEnvironment(
   nsIPrincipal* aSubjectPrincipal) const
 {
-  return GetServoCSSParsingEnvironmentForRule(Rule());
+  return GetParsingEnvironmentForRule(Rule());
 }
 
 // -- ServoStyleRule --------------------------------------------------
@@ -207,19 +195,13 @@ void
 ServoStyleRule::SetSelectorText(const nsAString& aSelectorText)
 {
   if (RefPtr<StyleSheet> sheet = GetStyleSheet()) {
-    ServoStyleSheet* servoSheet = sheet->AsServo();
-    nsIDocument* doc = sheet->GetAssociatedDocument();
-
-    mozAutoDocUpdate updateBatch(doc, UPDATE_STYLE, true);
-
     // StyleRule lives inside of the Inner, it is unsafe to call WillDirty
     // if sheet does not already have a unique Inner.
     sheet->AssertHasUniqueInner();
     sheet->WillDirty();
 
-    const RawServoStyleSheetContents* contents = servoSheet->RawContents();
+    const RawServoStyleSheetContents* contents = sheet->RawContents();
     if (Servo_StyleRule_SetSelectorText(contents, mRawRule, &aSelectorText)) {
-      sheet->DidDirty();
       sheet->RuleChanged(this);
     }
   }
@@ -230,7 +212,6 @@ ServoStyleRule::GetSelectorCount()
 {
   uint32_t aCount;
   Servo_StyleRule_GetSelectorCount(mRawRule, &aCount);
-
   return aCount;
 }
 

@@ -256,6 +256,15 @@ typedef enum JSGCParamKey {
      * Pref: None
      */
     JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT = 26,
+
+    /**
+     * Attempt to run a minor GC in the idle time if the free space falls
+     * below this threshold.
+     *
+     * Default: NurseryChunkUsableSize / 4
+     * Pref: None
+     */
+    JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION = 27,
 } JSGCParamKey;
 
 /*
@@ -347,6 +356,7 @@ namespace JS {
     D(FULL_CELL_PTR_BUFFER)                     \
     D(FULL_SLOT_BUFFER)                         \
     D(FULL_SHAPE_BUFFER)                        \
+    D(TOO_MUCH_WASM_MEMORY)                     \
                                                 \
     /* These are reserved for future use. */    \
     D(RESERVED0)                                \
@@ -358,7 +368,6 @@ namespace JS {
     D(RESERVED6)                                \
     D(RESERVED7)                                \
     D(RESERVED8)                                \
-    D(RESERVED9)                                \
                                                 \
     /* Reasons from Firefox */                  \
     D(DOM_WINDOW_UTILS)                         \

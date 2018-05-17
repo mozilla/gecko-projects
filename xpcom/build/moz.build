@@ -26,8 +26,9 @@ EXPORTS.mozilla += [
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
-    EXPORTS += ['nsWindowsDllInterceptor.h']
-    EXPORTS.mozilla += ['perfprobe.h']
+    EXPORTS.mozilla += [
+        'perfprobe.h',
+    ]
     SOURCES += ['perfprobe.cpp']
     if CONFIG['CC_TYPE'] != 'gcc':
         SOURCES += [
@@ -91,7 +92,6 @@ LOCAL_INCLUDES += [
     '../ds',
     '../glue',
     '../io',
-    '../reflect/xptinfo',
     '../threads',
     '/chrome',
     '/docshell/base',

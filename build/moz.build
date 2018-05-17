@@ -24,9 +24,6 @@ CRAMTEST_MANIFESTS += [
     'tests/cram/cram.ini',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    DIRS += ['annotationProcessors']
-
 DEFINES['ACCEPTED_MAR_CHANNEL_IDS'] = CONFIG['ACCEPTED_MAR_CHANNEL_IDS']
 
 if CONFIG['MOZ_BUILD_APP'] == 'browser':
@@ -95,6 +92,20 @@ if CONFIG['MOZ_APP_BASENAME']:
     appini = GENERATED_FILES['application.ini.h']
     appini.script = 'appini_header.py'
     appini.inputs = ['!application.ini']
+
+if CONFIG['ENABLE_TESTS']:
+    GENERATED_FILES += ['automation.py']
+    auto = GENERATED_FILES['automation.py']
+    auto.script = 'gen_automation.py'
+    auto.inputs = ['automation.py.in']
+
+    TEST_HARNESS_FILES.reftest += [
+        '!automation.py',
+    ]
+
+    TEST_HARNESS_FILES.testing.mochitest += [
+        '!automation.py',
+    ]
 
 # NOTE: Keep .gdbinit in the topsrcdir for people who run gdb from the topsrcdir.
 OBJDIR_FILES += ['/.gdbinit']

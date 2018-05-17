@@ -44,13 +44,6 @@ AutoDetectInvalidation::AutoDetectInvalidation(JSContext* cx, MutableHandleValue
     disabled_(false)
 { }
 
-void
-VMFunction::addToFunctions()
-{
-    this->next = functions;
-    functions = this;
-}
-
 bool
 InvokeFunction(JSContext* cx, HandleObject obj, bool constructing, bool ignoresReturnValue,
                uint32_t argc, Value* argv, MutableHandleValue rval)
@@ -1062,9 +1055,11 @@ InitRestParameter(JSContext* cx, uint32_t length, Value* rest, HandleObject temp
         return arrRes;
     }
 
-    NewObjectKind newKind = templateObj->group()->shouldPreTenure()
-                            ? TenuredObject
-                            : GenericObject;
+    NewObjectKind newKind;
+    {
+        AutoSweepObjectGroup sweep(templateObj->group());
+        newKind = templateObj->group()->shouldPreTenure(sweep) ? TenuredObject : GenericObject;
+    }
     ArrayObject* arrRes = NewDenseCopiedArray(cx, length, rest, nullptr, newKind);
     if (arrRes)
         arrRes->setGroup(templateObj->group());
@@ -1483,25 +1478,6 @@ ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber)
 }
 
 bool
-ThrowReadOnlyError(JSContext* cx, HandleObject obj, int32_t index)
-{
-    // We have to throw different errors depending on whether |index| is past
-    // the array length, etc. It's simpler to just call SetProperty to ensure
-    // we match the interpreter.
-
-    RootedValue objVal(cx, ObjectValue(*obj));
-    RootedValue indexVal(cx, Int32Value(index));
-    RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, indexVal, &id))
-        return false;
-
-    ObjectOpResult result;
-    MOZ_ALWAYS_FALSE(SetProperty(cx, obj, id, UndefinedHandleValue, objVal, result) &&
-                     result.checkStrictErrorOrWarning(cx, obj, id, /* strict = */ true));
-    return false;
-}
-
-bool
 ThrowBadDerivedReturn(JSContext* cx, HandleValue v)
 {
     ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK, v, nullptr);
@@ -1577,6 +1553,8 @@ EqualStringsHelper(JSString* str1, JSString* str2)
     MOZ_ASSERT(!str2->isAtom());
     MOZ_ASSERT(str1->length() == str2->length());
 
+    // ensureLinear is intentionally called with a nullptr to avoid OOM
+    // reporting; if it fails, we will continue to the next stub.
     JSLinearString* str2Linear = str2->ensureLinear(nullptr);
     if (!str2Linear)
         return false;

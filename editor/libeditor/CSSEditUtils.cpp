@@ -14,6 +14,7 @@
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
 #include "nsCOMPtr.h"
+#include "nsCSSProps.h"
 #include "nsColor.h"
 #include "nsComputedDOMStyle.h"
 #include "nsDebug.h"
@@ -583,7 +584,7 @@ CSSEditUtils::RemoveCSSInlineStyle(nsINode& aNode,
     return NS_OK;
   }
 
-  return mHTMLEditor->RemoveContainer(element);
+  return mHTMLEditor->RemoveContainerWithTransaction(*element);
 }
 
 // Answers true if the property can be removed by setting a "none" CSS value
@@ -639,10 +640,6 @@ CSSEditUtils::GetDefaultLengthUnit(nsAString& aLengthUnit)
     aLengthUnit.AssignLiteral("px");
   }
 }
-
-// Unfortunately, CSSStyleDeclaration::GetPropertyCSSValue is not yet
-// implemented... We need then a way to determine the number part and the unit
-// from aString, aString being the result of a GetPropertyValue query...
 
 // static
 void

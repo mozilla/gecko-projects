@@ -16,6 +16,7 @@
 #include "nsAnnotationService.h"
 #include "nsFaviconService.h"
 #include "nsPlacesMacros.h"
+#include "nsPlacesTriggers.h"
 #include "DateTimeFormat.h"
 #include "History.h"
 #include "Helpers.h"
@@ -108,7 +109,10 @@ using namespace mozilla::places;
 
 // This is a 'hidden' pref for the purposes of unit tests.
 #define PREF_FREC_DECAY_RATE     "places.frecency.decayRate"
-#define PREF_FREC_DECAY_RATE_DEF 0.975f
+
+#define PREF_FREC_STATS_COUNT   "places.frecency.stats.count"
+#define PREF_FREC_STATS_SUM     "places.frecency.stats.sum"
+#define PREF_FREC_STATS_SQUARES "places.frecency.stats.sumOfSquares"
 
 // In order to avoid calling PR_now() too often we use a cached "now" value
 // for repeating stuff.  These are milliseconds between "now" cache refreshes.
@@ -177,10 +181,8 @@ NS_IMPL_CLASSINFO(nsNavHistory, nullptr, nsIClassInfo::SINGLETON,
                   NS_NAVHISTORYSERVICE_CID)
 NS_INTERFACE_MAP_BEGIN(nsNavHistory)
   NS_INTERFACE_MAP_ENTRY(nsINavHistoryService)
-  NS_INTERFACE_MAP_ENTRY(nsIBrowserHistory)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-  NS_INTERFACE_MAP_ENTRY(nsPIPlacesDatabase)
   NS_INTERFACE_MAP_ENTRY(mozIStorageVacuumParticipant)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsINavHistoryService)
   NS_IMPL_QUERY_CLASSINFO(nsNavHistory)
@@ -188,8 +190,7 @@ NS_INTERFACE_MAP_END
 
 // We don't care about flattening everything
 NS_IMPL_CI_INTERFACE_GETTER(nsNavHistory,
-                            nsINavHistoryService,
-                            nsIBrowserHistory)
+                            nsINavHistoryService)
 
 namespace {
 
@@ -268,8 +269,32 @@ const int32_t nsNavHistory::kGetInfoIndex_VisitType = 17;
 // nsNavBookmarks::kGetChildrenIndex_Type = 20;
 // nsNavBookmarks::kGetChildrenIndex_PlaceID = 21;
 
-PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsNavHistory, gHistoryService)
+static uint64_t
+GetUInt64Pref(const char *prefName)
+{
+  // `Preferences` doesn't support uint64_t, so we store it as a string instead.
+  nsAutoCString strVal;
+  nsresult rv = Preferences::GetCString(prefName, strVal);
+  if (NS_SUCCEEDED(rv)) {
+    int64_t val = strVal.ToInteger64(&rv);
+    if (NS_SUCCEEDED(rv)) {
+      return static_cast<uint64_t>(val);
+    }
+  }
+  return 0U;
+}
 
+static void
+SetUInt64Pref(const char *prefName,
+              uint64_t val)
+{
+  nsAutoCString strVal;
+  strVal.AppendInt(val);
+  Unused << Preferences::SetCString(prefName, strVal);
+}
+
+
+PLACES_FACTORY_SINGLETON_IMPLEMENTATION(nsNavHistory, gHistoryService)
 
 nsNavHistory::nsNavHistory()
   : mBatchLevel(0)
@@ -281,6 +306,7 @@ nsNavHistory::nsNavHistory()
   , mEmbedVisits(EMBED_VISITS_INITIAL_CACHE_LENGTH)
   , mHistoryEnabled(true)
   , mNumVisitsForFrecency(10)
+  , mDecayFrecencyPendingCount(0)
   , mTagsFolder(-1)
   , mDaysOfHistory(-1)
   , mLastCachedStartOfDay(INT64_MAX)
@@ -305,6 +331,8 @@ nsNavHistory::nsNavHistory()
 
 nsNavHistory::~nsNavHistory()
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
+
   // remove the static reference to the service. Check to make sure its us
   // in case somebody creates an extra instance of the service.
   NS_ASSERTION(gHistoryService == this,
@@ -328,6 +356,10 @@ nsNavHistory::Init()
 
   mDB = Database::GetDatabase();
   NS_ENSURE_STATE(mDB);
+
+  mFrecencyStatsCount = GetUInt64Pref(PREF_FREC_STATS_COUNT);
+  mFrecencyStatsSum = GetUInt64Pref(PREF_FREC_STATS_SUM);
+  mFrecencyStatsSumOfSquares = GetUInt64Pref(PREF_FREC_STATS_SQUARES);
 
   /*****************************************************************************
    *** IMPORTANT NOTICE!
@@ -468,9 +500,9 @@ nsNavHistory::GetOrCreateIdForPage(nsIURI* aURI,
   }
 
   {
-    // Trigger the updates to moz_hosts
+    // Trigger the updates to the moz_origins tables
     nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(
-      "DELETE FROM moz_updatehostsinsert_temp"
+      "DELETE FROM moz_updateoriginsinsert_temp"
     );
     NS_ENSURE_STATE(stmt);
     mozStorageStatementScoper scoper(stmt);
@@ -550,15 +582,25 @@ nsNavHistory::NotifyTitleChange(nsIURI* aURI,
 }
 
 void
-nsNavHistory::NotifyFrecencyChanged(nsIURI* aURI,
+nsNavHistory::NotifyFrecencyChanged(const nsACString& aSpec,
                                     int32_t aNewFrecency,
                                     const nsACString& aGUID,
                                     bool aHidden,
                                     PRTime aLastVisitDate)
 {
   MOZ_ASSERT(!aGUID.IsEmpty());
+
+  nsCOMPtr<nsIURI> uri;
+  Unused << NS_NewURI(getter_AddRefs(uri), aSpec);
+  // We cannot assert since some automated tests are checking this path.
+  NS_WARNING_ASSERTION(uri, "Invalid URI in nsNavHistory::NotifyFrecencyChanged");
+  // Notify a frecency change only if we have a valid uri, otherwise
+  // the observer couldn't gather any useful data from the notification.
+  if (!uri) {
+    return;
+  }
   NOTIFY_OBSERVERS(mCanNotify, mObservers, nsINavHistoryObserver,
-                   OnFrecencyChanged(aURI, aNewFrecency, aGUID, aHidden,
+                   OnFrecencyChanged(uri, aNewFrecency, aGUID, aHidden,
                                      aLastVisitDate));
 }
 
@@ -569,54 +611,6 @@ nsNavHistory::NotifyManyFrecenciesChanged()
                    OnManyFrecenciesChanged());
 }
 
-namespace {
-
-class FrecencyNotification : public Runnable
-{
-public:
-  FrecencyNotification(const nsACString& aSpec,
-                       int32_t aNewFrecency,
-                       const nsACString& aGUID,
-                       bool aHidden,
-                       PRTime aLastVisitDate)
-    : mozilla::Runnable("FrecencyNotification")
-    , mSpec(aSpec)
-    , mNewFrecency(aNewFrecency)
-    , mGUID(aGUID)
-    , mHidden(aHidden)
-    , mLastVisitDate(aLastVisitDate)
-  {
-  }
-
-  NS_IMETHOD Run() override
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
-    nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
-    if (navHistory) {
-      nsCOMPtr<nsIURI> uri;
-      (void)NS_NewURI(getter_AddRefs(uri), mSpec);
-      // We cannot assert since some automated tests are checking this path.
-      NS_WARNING_ASSERTION(uri, "Invalid URI in FrecencyNotification");
-      // Notify a frecency change only if we have a valid uri, otherwise
-      // the observer couldn't gather any useful data from the notification.
-      if (uri) {
-        navHistory->NotifyFrecencyChanged(uri, mNewFrecency, mGUID, mHidden,
-                                          mLastVisitDate);
-      }
-    }
-    return NS_OK;
-  }
-
-private:
-  nsCString mSpec;
-  int32_t mNewFrecency;
-  nsCString mGUID;
-  bool mHidden;
-  PRTime mLastVisitDate;
-};
-
-} // namespace
-
 void
 nsNavHistory::DispatchFrecencyChangedNotification(const nsACString& aSpec,
                                                   int32_t aNewFrecency,
@@ -624,10 +618,129 @@ nsNavHistory::DispatchFrecencyChangedNotification(const nsACString& aSpec,
                                                   bool aHidden,
                                                   PRTime aLastVisitDate) const
 {
-  nsCOMPtr<nsIRunnable> notif = new FrecencyNotification(aSpec, aNewFrecency,
-                                                         aGUID, aHidden,
-                                                         aLastVisitDate);
-  (void)NS_DispatchToMainThread(notif);
+  Unused << NS_DispatchToMainThread(
+    NewRunnableMethod<nsCString, int32_t, nsCString, bool, PRTime>(
+      "nsNavHistory::NotifyFrecencyChanged",
+      const_cast<nsNavHistory*>(this),
+      &nsNavHistory::NotifyFrecencyChanged,
+      aSpec, aNewFrecency, aGUID, aHidden, aLastVisitDate
+    )
+  );
+}
+
+
+void
+nsNavHistory::DispatchFrecencyStatsUpdate(int64_t aPlaceId,
+                                          int32_t aOldFrecency,
+                                          int32_t aNewFrecency) const
+{
+  MOZ_ASSERT(aPlaceId >= 0);
+  Unused << NS_DispatchToMainThread(
+    NewRunnableMethod<int64_t, int32_t, int32_t>(
+      "nsNavHistory::UpdateFrecencyStats",
+      const_cast<nsNavHistory*>(this),
+      &nsNavHistory::UpdateFrecencyStats,
+      aPlaceId, aOldFrecency, aNewFrecency
+    )
+  );
+}
+
+void
+nsNavHistory::UpdateFrecencyStats(int64_t aPlaceId,
+                                  int32_t aOldFrecency,
+                                  int32_t aNewFrecency)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
+  MOZ_ASSERT(aPlaceId >= 0);
+
+  if (aOldFrecency > 0) {
+    MOZ_ASSERT(mFrecencyStatsCount > 0);
+    mFrecencyStatsCount--;
+    uint64_t uOld = static_cast<uint64_t>(aOldFrecency);
+    MOZ_ASSERT(mFrecencyStatsSum >= uOld);
+    mFrecencyStatsSum -= uOld;
+    uint64_t square = uOld * uOld;
+    MOZ_ASSERT(mFrecencyStatsSumOfSquares >= square);
+    mFrecencyStatsSumOfSquares -= square;
+  }
+  if (aNewFrecency > 0) {
+    mFrecencyStatsCount++;
+    uint64_t uNew = static_cast<uint64_t>(aNewFrecency);
+    mFrecencyStatsSum += uNew;
+    mFrecencyStatsSumOfSquares += uNew * uNew;
+  }
+
+  // This method can be called many times very quickly when many frecencies
+  // change at once.  (Note though that it is *not* called when frecencies
+  // decay.)  To avoid hammering preferences, update them only every so often.
+  // There's actually a browser mochitest that makes sure preferences aren't
+  // accessed too much, and it fails without throttling like this.
+  if (!mUpdateFrecencyStatsPrefsTimer) {
+    Unused << NS_NewTimerWithFuncCallback(
+      getter_AddRefs(mUpdateFrecencyStatsPrefsTimer),
+      &UpdateFrecencyStatsPrefs,
+      this,
+      5000, // ms
+      nsITimer::TYPE_ONE_SHOT,
+      "nsNavHistory::UpdateFrecencyStatsPrefs",
+      nullptr
+    );
+  }
+}
+
+void // static
+nsNavHistory::UpdateFrecencyStatsPrefs(nsITimer *aTimer,
+                                       void *aClosure)
+{
+  nsNavHistory *history = static_cast<nsNavHistory *>(aClosure);
+  if (!history) {
+    return;
+  }
+  SetUInt64Pref(PREF_FREC_STATS_COUNT, history->mFrecencyStatsCount);
+  SetUInt64Pref(PREF_FREC_STATS_SUM, history->mFrecencyStatsSum);
+  SetUInt64Pref(PREF_FREC_STATS_SQUARES, history->mFrecencyStatsSumOfSquares);
+  history->mUpdateFrecencyStatsPrefsTimer = nullptr;
+
+  // This is only so that tests can know when the prefs are written.  Observing
+  // nsPref:changed isn't sufficient because that's not fired when a pref value
+  // is the same as the previous value.
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    MOZ_ALWAYS_SUCCEEDS(obs->NotifyObservers(
+      nullptr,
+      "places-frecency-stats-prefs-updated",
+      nullptr
+    ));
+  }
+}
+
+NS_IMETHODIMP
+nsNavHistory::GetFrecencyMean(double *_retval)
+{
+  NS_ENSURE_ARG_POINTER(_retval);
+  if (mFrecencyStatsCount == 0) {
+    *_retval = 0.0;
+    return NS_OK;
+  }
+  *_retval =
+    static_cast<double>(mFrecencyStatsSum) /
+    static_cast<double>(mFrecencyStatsCount);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNavHistory::GetFrecencyStandardDeviation(double *_retval)
+{
+  NS_ENSURE_ARG_POINTER(_retval);
+  if (mFrecencyStatsCount <= 1) {
+    *_retval = 0.0;
+    return NS_OK;
+  }
+  double squares = static_cast<double>(mFrecencyStatsSumOfSquares);
+  double sum = static_cast<double>(mFrecencyStatsSum);
+  double count = static_cast<double>(mFrecencyStatsCount);
+  *_retval = sqrt((squares - ((sum * sum) / count)) / count);
+  return NS_OK;
 }
 
 Atomic<int64_t> nsNavHistory::sLastInsertedPlaceId(0);
@@ -789,12 +902,10 @@ nsNavHistory::DomainNameFromURI(nsIURI *aURI,
 }
 
 
-NS_IMETHODIMP
-nsNavHistory::GetHasHistoryEntries(bool* aHasEntries)
+bool
+nsNavHistory::hasHistoryEntries()
 {
-  NS_ENSURE_ARG_POINTER(aHasEntries);
-  *aHasEntries = GetDaysOfHistory() > 0;
-  return NS_OK;
+  return GetDaysOfHistory() > 0;
 }
 
 
@@ -2181,306 +2292,6 @@ nsNavHistory::GetHistoryDisabled(bool *_retval)
   return NS_OK;
 }
 
-// Browser history *************************************************************
-
-
-// nsNavHistory::RemovePagesInternal
-//
-//    Deletes a list of placeIds from history.
-//    This is an internal method used by RemovePages, RemovePagesFromHost and
-//    RemovePagesByTimeframe.
-//    Takes a comma separated list of place ids.
-//    This method does not do any observer notification.
-
-nsresult
-nsNavHistory::RemovePagesInternal(const nsCString& aPlaceIdsQueryString)
-{
-  // Return early if there is nothing to delete.
-  if (aPlaceIdsQueryString.IsEmpty())
-    return NS_OK;
-
-  nsCOMPtr<mozIStorageConnection> conn = mDB->MainConn();
-  if (!conn) {
-    return NS_ERROR_UNEXPECTED;
-  }
-  mozStorageTransaction transaction(conn, false,
-                                    mozIStorageConnection::TRANSACTION_DEFAULT,
-                                    true);
-
-  // Delete all visits for the specified place ids.
-  nsresult rv = conn->ExecuteSimpleSQL(
-    NS_LITERAL_CSTRING(
-      "DELETE FROM moz_historyvisits WHERE place_id IN (") +
-        aPlaceIdsQueryString +
-        NS_LITERAL_CSTRING(")")
-  );
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = CleanupPlacesOnVisitsDelete(aPlaceIdsQueryString);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Invalidate the cached value for whether there's history or not.
-  mDaysOfHistory = -1;
-
-  return transaction.Commit();
-}
-
-
-/**
- * Performs cleanup on places that just had all their visits removed, including
- * deletion of those places.  This is an internal method used by
- * RemovePagesInternal.  This method does not execute in a transaction, so
- * callers should make sure they begin one if needed.
- *
- * @param aPlaceIdsQueryString
- *        A comma-separated list of place IDs, each of which just had all its
- *        visits removed
- */
-nsresult
-nsNavHistory::CleanupPlacesOnVisitsDelete(const nsCString& aPlaceIdsQueryString)
-{
-  // Return early if there is nothing to delete.
-  if (aPlaceIdsQueryString.IsEmpty())
-    return NS_OK;
-
-  // Collect about-to-be-deleted URIs to notify onDeleteURI.
-  nsCOMPtr<mozIStorageStatement> stmt = mDB->GetStatement(NS_LITERAL_CSTRING(
-    "SELECT h.id, h.url, h.guid, "
-           "(SUBSTR(h.url, 1, 6) <> 'place:' "
-           " AND NOT EXISTS (SELECT b.id FROM moz_bookmarks b "
-                            "WHERE b.fk = h.id LIMIT 1)) as whole_entry "
-    "FROM moz_places h "
-    "WHERE h.id IN ( ") + aPlaceIdsQueryString + NS_LITERAL_CSTRING(")")
-  );
-  NS_ENSURE_STATE(stmt);
-  mozStorageStatementScoper scoper(stmt);
-
-  nsCString filteredPlaceIds;
-  nsCOMArray<nsIURI> URIs;
-  nsTArray<nsCString> GUIDs;
-  bool hasMore;
-  while (NS_SUCCEEDED(stmt->ExecuteStep(&hasMore)) && hasMore) {
-    int64_t placeId;
-    nsresult rv = stmt->GetInt64(0, &placeId);
-    NS_ENSURE_SUCCESS(rv, rv);
-    nsAutoCString URLString;
-    rv = stmt->GetUTF8String(1, URLString);
-    nsCString guid;
-    rv = stmt->GetUTF8String(2, guid);
-    int32_t wholeEntry;
-    rv = stmt->GetInt32(3, &wholeEntry);
-    nsCOMPtr<nsIURI> uri;
-    rv = NS_NewURI(getter_AddRefs(uri), URLString);
-    NS_ENSURE_SUCCESS(rv, rv);
-    if (wholeEntry) {
-      if (!filteredPlaceIds.IsEmpty()) {
-        filteredPlaceIds.Append(',');
-      }
-      filteredPlaceIds.AppendInt(placeId);
-      URIs.AppendElement(uri.forget());
-      GUIDs.AppendElement(guid);
-    }
-    else {
-      // Notify that we will delete all visits for this page, but not the page
-      // itself, since it's bookmarked or a place: query.
-      NOTIFY_OBSERVERS(mCanNotify, mObservers, nsINavHistoryObserver,
-                       OnDeleteVisits(uri, 0, guid, nsINavHistoryObserver::REASON_DELETED, 0));
-    }
-  }
-
-  // if the entry is not bookmarked and is not a place: uri
-  // then we can remove it from moz_places.
-  // Note that we do NOT delete favicons. Any unreferenced favicons will be
-  // deleted next time the browser is shut down.
-  nsCOMPtr<mozIStorageConnection> conn = mDB->MainConn();
-  if (!conn) {
-    return NS_ERROR_UNEXPECTED;
-  }
-  nsresult rv = conn->ExecuteSimpleSQL(
-    NS_LITERAL_CSTRING(
-      "DELETE FROM moz_places WHERE id IN ( "
-        ) + filteredPlaceIds + NS_LITERAL_CSTRING(
-      ") "
-    )
-  );
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Expire orphan icons.
-  rv = conn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "DELETE FROM moz_pages_w_icons "
-    "WHERE page_url_hash NOT IN (SELECT url_hash FROM moz_places) "
-  ));
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = conn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "DELETE FROM moz_icons "
-    "WHERE root = 0 AND id NOT IN (SELECT icon_id FROM moz_icons_to_pages) "
-  ));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Hosts accumulated during the places delete are updated through a trigger
-  // (see nsPlacesTriggers.h).
-  rv = conn->ExecuteSimpleSQL(
-    NS_LITERAL_CSTRING("DELETE FROM moz_updatehostsdelete_temp")
-  );
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Invalidate frecencies of touched places, since they need recalculation.
-  rv = invalidateFrecencies(aPlaceIdsQueryString);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Finally notify about the removed URIs.
-  for (int32_t i = 0; i < URIs.Count(); ++i) {
-    NOTIFY_OBSERVERS(mCanNotify, mObservers, nsINavHistoryObserver,
-                     OnDeleteURI(URIs[i], GUIDs[i], nsINavHistoryObserver::REASON_DELETED));
-  }
-
-  return NS_OK;
-}
-
-
-// nsNavHistory::RemovePagesFromHost
-//
-//    This function will delete all history information about pages from a
-//    given host. If aEntireDomain is set, we will also delete pages from
-//    sub hosts (so if we are passed in "microsoft.com" we delete
-//    "www.microsoft.com", "msdn.microsoft.com", etc.). An empty host name
-//    means local files and anything else with no host name. You can also pass
-//    in the localized "(local files)" title given to you from a history query.
-//
-//    Silently fails if we have no knowledge of the host.
-//
-//    This sends onBeginUpdateBatch/onEndUpdateBatch to observers
-
-NS_IMETHODIMP
-nsNavHistory::RemovePagesFromHost(const nsACString& aHost, bool aEntireDomain)
-{
-  NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
-
-  nsresult rv;
-  // Local files don't have any host name. We don't want to delete all files in
-  // history when we get passed an empty string, so force to exact match
-  if (aHost.IsEmpty())
-    aEntireDomain = false;
-
-  // translate "(local files)" to an empty host name
-  // be sure to use the TitleForDomain to get the localized name
-  nsCString localFiles;
-  TitleForDomain(EmptyCString(), localFiles);
-  nsAutoString host16;
-  if (!aHost.Equals(localFiles))
-    CopyUTF8toUTF16(aHost, host16);
-
-  // see BindQueryClauseParameters for how this host selection works
-  nsAutoString revHostDot;
-  GetReversedHostname(host16, revHostDot);
-  NS_ASSERTION(revHostDot[revHostDot.Length() - 1] == '.', "Invalid rev. host");
-  nsAutoString revHostSlash(revHostDot);
-  revHostSlash.Truncate(revHostSlash.Length() - 1);
-  revHostSlash.Append('/');
-
-  // build condition string based on host selection type
-  nsAutoCString conditionString;
-  if (aEntireDomain)
-    conditionString.AssignLiteral("rev_host >= ?1 AND rev_host < ?2 ");
-  else
-    conditionString.AssignLiteral("rev_host = ?1 ");
-
-  // create statement depending on delete type
-  nsCOMPtr<mozIStorageStatement> statement = mDB->GetStatement(
-    NS_LITERAL_CSTRING("SELECT id FROM moz_places WHERE ") + conditionString
-  );
-  NS_ENSURE_STATE(statement);
-  mozStorageStatementScoper scoper(statement);
-
-  rv = statement->BindStringByIndex(0, revHostDot);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (aEntireDomain) {
-    rv = statement->BindStringByIndex(1, revHostSlash);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  nsCString hostPlaceIds;
-  bool hasMore = false;
-  while (NS_SUCCEEDED(statement->ExecuteStep(&hasMore)) && hasMore) {
-    if (!hostPlaceIds.IsEmpty())
-      hostPlaceIds.Append(',');
-    int64_t placeId;
-    rv = statement->GetInt64(0, &placeId);
-    NS_ENSURE_SUCCESS(rv, rv);
-    hostPlaceIds.AppendInt(placeId);
-  }
-
-  // force a full refresh calling onEndUpdateBatch (will call Refresh())
-  UpdateBatchScoper batch(*this); // sends Begin/EndUpdateBatch to observers
-
-  rv = RemovePagesInternal(hostPlaceIds);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Clear the registered embed visits.
-  clearEmbedVisits();
-
-  return NS_OK;
-}
-
-
-// nsNavHistory::RemovePagesByTimeframe
-//
-//    This function will delete all history information about
-//    pages for a given timeframe.
-//    Limits are included: aBeginTime <= timeframe <= aEndTime
-//
-//    This method sends onBeginUpdateBatch/onEndUpdateBatch to observers
-
-NS_IMETHODIMP
-nsNavHistory::RemovePagesByTimeframe(PRTime aBeginTime, PRTime aEndTime)
-{
-  NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
-
-  nsresult rv;
-  // build a list of place ids to delete
-  nsCString deletePlaceIdsQueryString;
-
-  // we only need to know if a place has a visit into the given timeframe
-  // this query is faster than actually selecting in moz_historyvisits
-  nsCOMPtr<mozIStorageStatement> selectByTime = mDB->GetStatement(
-    "SELECT h.id FROM moz_places h WHERE "
-      "EXISTS "
-        "(SELECT id FROM moz_historyvisits v WHERE v.place_id = h.id "
-          "AND v.visit_date >= :from_date AND v.visit_date <= :to_date LIMIT 1)"
-  );
-  NS_ENSURE_STATE(selectByTime);
-  mozStorageStatementScoper selectByTimeScoper(selectByTime);
-
-  rv = selectByTime->BindInt64ByName(NS_LITERAL_CSTRING("from_date"), aBeginTime);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = selectByTime->BindInt64ByName(NS_LITERAL_CSTRING("to_date"), aEndTime);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool hasMore = false;
-  while (NS_SUCCEEDED(selectByTime->ExecuteStep(&hasMore)) && hasMore) {
-    int64_t placeId;
-    rv = selectByTime->GetInt64(0, &placeId);
-    NS_ENSURE_SUCCESS(rv, rv);
-    if (placeId != 0) {
-      if (!deletePlaceIdsQueryString.IsEmpty())
-        deletePlaceIdsQueryString.Append(',');
-      deletePlaceIdsQueryString.AppendInt(placeId);
-    }
-  }
-
-  // force a full refresh calling onEndUpdateBatch (will call Refresh())
-  UpdateBatchScoper batch(*this); // sends Begin/EndUpdateBatch to observers
-
-  rv = RemovePagesInternal(deletePlaceIdsQueryString);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Clear the registered embed visits.
-  clearEmbedVisits();
-
-  return NS_OK;
-}
-
-
 // Call this method before visiting a URL in order to help determine the
 // transition type of the visit.
 //
@@ -2572,10 +2383,6 @@ nsNavHistory::OnEndVacuum(bool aSucceeded)
   NS_WARNING_ASSERTION(aSucceeded, "Places.sqlite vacuum failed.");
   return NS_OK;
 }
-
-
-////////////////////////////////////////////////////////////////////////////////
-//// nsPIPlacesDatabase
 
 NS_IMETHODIMP
 nsNavHistory::GetDBConnection(mozIStorageConnection **_DBConnection)
@@ -2774,12 +2581,10 @@ nsNavHistory::Observe(nsISupports *aSubject, const char *aTopic,
 }
 
 
-namespace {
-
-class DecayFrecencyCallback : public AsyncStatementTelemetryTimer
+class PlacesDecayFrecencyCallback : public AsyncStatementTelemetryTimer
 {
 public:
-  DecayFrecencyCallback()
+  PlacesDecayFrecencyCallback()
     : AsyncStatementTelemetryTimer(Telemetry::PLACES_IDLE_FRECENCY_DECAY_TIME_MS)
   {
   }
@@ -2787,16 +2592,12 @@ public:
   NS_IMETHOD HandleCompletion(uint16_t aReason) override
   {
     (void)AsyncStatementTelemetryTimer::HandleCompletion(aReason);
-    if (aReason == REASON_FINISHED) {
-      nsNavHistory *navHistory = nsNavHistory::GetHistoryService();
-      NS_ENSURE_STATE(navHistory);
-      navHistory->NotifyManyFrecenciesChanged();
-    }
+    nsNavHistory *navHistory = nsNavHistory::GetHistoryService();
+    NS_ENSURE_STATE(navHistory);
+    navHistory->DecayFrecencyCompleted(aReason);
     return NS_OK;
   }
 };
-
-} // namespace
 
 nsresult
 nsNavHistory::DecayFrecency()
@@ -2804,7 +2605,7 @@ nsNavHistory::DecayFrecency()
   nsresult rv = FixInvalidFrecencies();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  float decayRate = Preferences::GetFloat(PREF_FREC_DECAY_RATE, PREF_FREC_DECAY_RATE_DEF);
+  float decayRate = Preferences::GetFloat(PREF_FREC_DECAY_RATE, FRECENCY_DECAY_RATE);
 
   // Globally decay places frecency rankings to estimate reduced frecency
   // values of pages that haven't been visited for a while, i.e., they do
@@ -2845,12 +2646,30 @@ nsNavHistory::DecayFrecency()
     deleteAdaptive.get()
   };
   nsCOMPtr<mozIStoragePendingStatement> ps;
-  RefPtr<DecayFrecencyCallback> cb = new DecayFrecencyCallback();
+  RefPtr<PlacesDecayFrecencyCallback> cb = new PlacesDecayFrecencyCallback();
   rv = conn->ExecuteAsync(stmts, ArrayLength(stmts), cb,
                                      getter_AddRefs(ps));
   NS_ENSURE_SUCCESS(rv, rv);
 
+  mDecayFrecencyPendingCount++;
+
   return NS_OK;
+}
+
+void
+nsNavHistory::DecayFrecencyCompleted(uint16_t reason)
+{
+  MOZ_ASSERT(mDecayFrecencyPendingCount > 0);
+  mDecayFrecencyPendingCount--;
+  if (mozIStorageStatementCallback::REASON_FINISHED == reason) {
+    NotifyManyFrecenciesChanged();
+  }
+}
+
+bool
+nsNavHistory::IsFrecencyDecaying() const
+{
+  return mDecayFrecencyPendingCount > 0;
 }
 
 
@@ -3356,16 +3175,9 @@ nsNavHistory::hasEmbedVisit(nsIURI* aURI) {
   return !!mEmbedVisits.GetEntry(aURI);
 }
 
-void
-nsNavHistory::clearEmbedVisits() {
-  NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
-
-  mEmbedVisits.Clear();
-}
-
 NS_IMETHODIMP
 nsNavHistory::ClearEmbedVisits() {
-  clearEmbedVisits();
+  mEmbedVisits.Clear();
   return NS_OK;
 }
 
@@ -3830,24 +3642,6 @@ nsNavHistory::SendPageChangedNotification(nsIURI* aURI,
   MOZ_ASSERT(!aGUID.IsEmpty());
   NOTIFY_OBSERVERS(mCanNotify, mObservers, nsINavHistoryObserver,
                    OnPageChanged(aURI, aChangedAttribute, aNewValue, aGUID));
-}
-
-// nsNavHistory::TitleForDomain
-//
-//    This computes the title for a given domain. Normally, this is just the
-//    domain name, but we specially handle empty cases to give you a nice
-//    localized string.
-
-void
-nsNavHistory::TitleForDomain(const nsCString& domain, nsACString& aTitle)
-{
-  if (! domain.IsEmpty()) {
-    aTitle = domain;
-    return;
-  }
-
-  // use the localized one instead
-  GetStringFromName("localhost", aTitle);
 }
 
 void

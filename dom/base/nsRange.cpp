@@ -14,7 +14,6 @@
 #include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMDocumentFragment.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsError.h"
@@ -61,7 +60,7 @@ nsRange::GetDocGroup() const
 
 static void InvalidateAllFrames(nsINode* aNode)
 {
-  NS_PRECONDITION(aNode, "bad arg");
+  MOZ_ASSERT(aNode, "bad arg");
 
   nsIFrame* frame = nullptr;
   switch (aNode->NodeType()) {
@@ -200,7 +199,7 @@ struct IsItemInRangeComparator
 nsRange::IsNodeSelected(nsINode* aNode, uint32_t aStartOffset,
                         uint32_t aEndOffset)
 {
-  NS_PRECONDITION(aNode, "bad arg");
+  MOZ_ASSERT(aNode, "bad arg");
 
   nsINode* n = GetNextRangeCommonAncestor(aNode);
   NS_ASSERTION(n || !aNode->IsSelectionDescendant(),
@@ -462,7 +461,7 @@ static void UnmarkDescendants(nsINode* aNode)
 void
 nsRange::RegisterCommonAncestor(nsINode* aNode)
 {
-  NS_PRECONDITION(aNode, "bad arg");
+  MOZ_ASSERT(aNode, "bad arg");
 
   MOZ_DIAGNOSTIC_ASSERT(IsInSelection(), "registering range not in selection");
 
@@ -483,7 +482,7 @@ nsRange::RegisterCommonAncestor(nsINode* aNode)
 void
 nsRange::UnregisterCommonAncestor(nsINode* aNode, bool aIsUnlinking)
 {
-  NS_PRECONDITION(aNode, "bad arg");
+  MOZ_ASSERT(aNode, "bad arg");
   NS_ASSERTION(aNode->IsCommonAncestorForRangeInSelection(), "wrong node");
   MOZ_DIAGNOSTIC_ASSERT(aNode == mRegisteredCommonAncestor, "wrong node");
   LinkedList<nsRange>* ranges = aNode->GetExistingCommonAncestorRanges();
@@ -965,29 +964,32 @@ nsRange::DoSetRange(const RawRangeBoundary& aStart,
                     const RawRangeBoundary& aEnd,
                     nsINode* aRoot, bool aNotInsertedYet)
 {
-  NS_PRECONDITION((aStart.IsSet() && aEnd.IsSet() && aRoot) ||
-                  (!aStart.IsSet() && !aEnd.IsSet() && !aRoot),
-                  "Set all or none");
-  NS_PRECONDITION(!aRoot || aNotInsertedYet ||
-                  (nsContentUtils::ContentIsDescendantOf(aStart.Container(), aRoot) &&
-                   nsContentUtils::ContentIsDescendantOf(aEnd.Container(), aRoot) &&
-                   aRoot == IsValidBoundary(aStart.Container()) &&
-                   aRoot == IsValidBoundary(aEnd.Container())),
-                  "Wrong root");
-  NS_PRECONDITION(!aRoot ||
-                  (aStart.Container()->IsContent() &&
-                   aEnd.Container()->IsContent() &&
-                   aRoot ==
-                    static_cast<nsIContent*>(aStart.Container())->GetBindingParent() &&
-                   aRoot ==
-                    static_cast<nsIContent*>(aEnd.Container())->GetBindingParent()) ||
-                  (!aRoot->GetParentNode() &&
-                   (aRoot->IsNodeOfType(nsINode::eDOCUMENT) ||
-                    aRoot->IsNodeOfType(nsINode::eATTRIBUTE) ||
-                    aRoot->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT) ||
-                     /*For backward compatibility*/
-                    aRoot->IsContent())),
-                  "Bad root");
+  MOZ_ASSERT((aStart.IsSet() && aEnd.IsSet() && aRoot) ||
+             (!aStart.IsSet() && !aEnd.IsSet() && !aRoot),
+             "Set all or none");
+
+  MOZ_ASSERT(!aRoot || aNotInsertedYet ||
+             (nsContentUtils::ContentIsDescendantOf(aStart.Container(), aRoot) &&
+              nsContentUtils::ContentIsDescendantOf(aEnd.Container(), aRoot) &&
+              aRoot == IsValidBoundary(aStart.Container()) &&
+              aRoot == IsValidBoundary(aEnd.Container())),
+             "Wrong root");
+
+  MOZ_ASSERT(!aRoot ||
+             (aStart.Container()->IsContent() &&
+              aEnd.Container()->IsContent() &&
+              aRoot ==
+               static_cast<nsIContent*>(aStart.Container())->GetBindingParent() &&
+              aRoot ==
+               static_cast<nsIContent*>(aEnd.Container())->GetBindingParent()) ||
+             (!aRoot->GetParentNode() &&
+              (aRoot->IsDocument() ||
+               aRoot->IsAttr() ||
+               aRoot->IsDocumentFragment() ||
+                /*For backward compatibility*/
+               aRoot->IsContent())),
+             "Bad root");
+
   if (mRoot != aRoot) {
     if (mRoot) {
       mRoot->RemoveMutationObserver(this);
@@ -1209,7 +1211,7 @@ nsRange::ComputeRootNode(nsINode* aNode, bool aMaySpanAnonymousSubtrees)
 
   root = aNode->SubtreeRoot();
 
-  NS_ASSERTION(!root->IsNodeOfType(nsINode::eDOCUMENT),
+  NS_ASSERTION(!root->IsDocument(),
                "GetUncomposedDoc should have returned a doc");
 
   // We allow this because of backward compatibility.

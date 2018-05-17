@@ -114,6 +114,10 @@ class Layer;
 class LayerManager;
 } // namespace layers
 
+namespace dom {
+class Selection;
+} // namespace dom
+
 } // namespace mozilla
 
 /**
@@ -608,7 +612,6 @@ public:
     , mFrameIsModified(false)
     , mHasOverrideDirtyRegion(false)
     , mMayHaveWillChangeBudget(false)
-    , mBuiltBlendContainer(false)
     , mIsPrimaryFrame(false)
     , mMayHaveTransformAnimation(false)
     , mMayHaveOpacityAnimation(false)
@@ -1153,10 +1156,10 @@ public:
                                  aContainerSize - mRect.Size());
   }
 
-  virtual nsPoint GetPositionOfChildIgnoringScrolling(nsIFrame* aChild)
+  virtual nsPoint GetPositionOfChildIgnoringScrolling(const nsIFrame* aChild)
   { return aChild->GetPosition(); }
 
-  nsPoint GetPositionIgnoringScrolling();
+  nsPoint GetPositionIgnoringScrolling() const;
 
   typedef AutoTArray<nsDisplayItem*, 4> DisplayItemArray;
 
@@ -2711,6 +2714,12 @@ public:
   nsPoint GetOffsetTo(const nsIFrame* aOther) const;
 
   /**
+   * Just like GetOffsetTo, but treats all scrollframes as scrolled to
+   * their origin.
+   */
+  nsPoint GetOffsetToIgnoringScrolling(const nsIFrame* aOther) const;
+
+  /**
    * Get the offset between the coordinate systems of |this| and aOther
    * expressed in appunits per dev pixel of |this|' document. Adding the return
    * value to a point that is relative to the origin of |this| will make the
@@ -3485,7 +3494,7 @@ public:
    * Overridable function to determine whether this frame should be considered
    * "in" the given non-null aSelection for visibility purposes.
    */
-  virtual bool IsVisibleInSelection(nsISelection* aSelection);
+  virtual bool IsVisibleInSelection(mozilla::dom::Selection* aSelection);
 
   /**
    * Determines if this frame has a container effect that requires
@@ -3738,13 +3747,6 @@ public:
 
   nsresult XULRedraw(nsBoxLayoutState& aState);
   virtual nsresult XULRelayoutChildAtOrdinal(nsIFrame* aChild)=0;
-
-#ifdef DEBUG_LAYOUT
-  virtual nsresult SetXULDebug(nsBoxLayoutState& aState, bool aDebug)=0;
-  virtual nsresult GetXULDebug(bool& aDebug)=0;
-
-  virtual nsresult XULDumpBox(FILE* out)=0;
-#endif
 
   static bool AddXULPrefSize(nsIFrame* aBox, nsSize& aSize, bool& aWidth, bool& aHeightSet);
   static bool AddXULMinSize(nsBoxLayoutState& aState, nsIFrame* aBox,
@@ -4142,9 +4144,6 @@ public:
   bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
   void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
 
-  bool BuiltBlendContainer() { return mBuiltBlendContainer; }
-  void SetBuiltBlendContainer(bool aBuilt) { mBuiltBlendContainer = aBuilt; }
-
   /**
    * Returns the set of flags indicating the properties of the frame that the
    * compositor might care about for hit-testing purposes. Note that this function
@@ -4342,12 +4341,6 @@ protected:
    */
   bool mMayHaveWillChangeBudget : 1;
 
-  /**
-   * True if we built an nsDisplayBlendContainer last time
-   * we did retained display list building for this frame.
-   */
-  bool mBuiltBlendContainer : 1;
-
 private:
   /**
    * True if this is the primary frame for mContent.
@@ -4369,7 +4362,7 @@ private:
 
 protected:
 
-  // There is no gap left here.
+  // There is a 1-bit gap left here.
 
   // Helpers
   /**
@@ -4819,7 +4812,7 @@ template<bool IsLessThanOrEqual(nsIFrame*, nsIFrame*)>
 /* static */ nsIFrame*
 nsIFrame::SortedMerge(nsIFrame *aLeft, nsIFrame *aRight)
 {
-  NS_PRECONDITION(aLeft && aRight, "SortedMerge must have non-empty lists");
+  MOZ_ASSERT(aLeft && aRight, "SortedMerge must have non-empty lists");
 
   nsIFrame *result;
   // Unroll first iteration to avoid null-check 'result' inside the loop.
@@ -4867,7 +4860,7 @@ template<bool IsLessThanOrEqual(nsIFrame*, nsIFrame*)>
 /* static */ nsIFrame*
 nsIFrame::MergeSort(nsIFrame *aSource)
 {
-  NS_PRECONDITION(aSource, "MergeSort null arg");
+  MOZ_ASSERT(aSource, "MergeSort null arg");
 
   nsIFrame *sorted[32] = { nullptr };
   nsIFrame **fill = &sorted[0];

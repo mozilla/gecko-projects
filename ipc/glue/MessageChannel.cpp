@@ -13,6 +13,7 @@
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Move.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
@@ -533,7 +534,9 @@ MessageChannel::MessageChannel(const char* aName,
     mFlags(REQUIRE_DEFAULT),
     mPeerPidSet(false),
     mPeerPid(-1),
-    mIsPostponingSends(false)
+    mIsPostponingSends(false),
+    mInKillHardShutdown(false),
+    mBuildIDsConfirmedMatch(false)
 {
     MOZ_COUNT_CTOR(ipc::MessageChannel);
 
@@ -699,7 +702,10 @@ MessageChannel::Clear()
     // before mListener.  But just to be safe, mListener is a weak pointer.
 
 #if !defined(ANDROID)
-    if (!Unsound_IsClosed()) {
+    // KillHard shutdowns can occur with the channel in connected state. We are
+    // already collecting crash dump data about KillHard shutdowns and we
+    // shouldn't intentionally crash here.
+    if (!Unsound_IsClosed() && !mInKillHardShutdown) {
         CrashReporter::AnnotateCrashReport(
             NS_LITERAL_CSTRING("IPCFatalErrorProtocol"),
             nsDependentCString(mName));
@@ -772,7 +778,7 @@ MessageChannel::Clear()
 bool
 MessageChannel::Open(Transport* aTransport, MessageLoop* aIOLoop, Side aSide)
 {
-    NS_PRECONDITION(!mLink, "Open() called > once");
+    MOZ_ASSERT(!mLink, "Open() called > once");
 
     mMonitor = new RefCountedMonitor();
     mWorkerLoop = MessageLoop::current();
@@ -804,8 +810,8 @@ MessageChannel::Open(MessageChannel *aTargetChan, nsIEventTarget *aEventTarget, 
     //    - meanwhile, on PB's worker loop, the work item is removed and:
     //      - invokes PB->SlaveOpen(PA, ...):
     //        - sets its state and that of PA to Connected
-    NS_PRECONDITION(aTargetChan, "Need a target channel");
-    NS_PRECONDITION(ChannelClosed == mChannelState, "Not currently closed");
+    MOZ_ASSERT(aTargetChan, "Need a target channel");
+    MOZ_ASSERT(ChannelClosed == mChannelState, "Not currently closed");
 
     CommonThreadOpenInit(aTargetChan, aSide);
 
@@ -837,10 +843,9 @@ void
 MessageChannel::OnOpenAsSlave(MessageChannel *aTargetChan, Side aSide)
 {
     // Invoked when the other side has begun the open.
-    NS_PRECONDITION(ChannelClosed == mChannelState,
-                    "Not currently closed");
-    NS_PRECONDITION(ChannelOpening == aTargetChan->mChannelState,
-                    "Target channel not in the process of opening");
+    MOZ_ASSERT(ChannelClosed == mChannelState, "Not currently closed");
+    MOZ_ASSERT(ChannelOpening == aTargetChan->mChannelState,
+               "Target channel not in the process of opening");
 
     CommonThreadOpenInit(aTargetChan, aSide);
     mMonitor = aTargetChan->mMonitor;
@@ -1000,29 +1005,38 @@ MessageChannel::RejectPendingResponsesForActor(ActorIdType aActorId)
   }
 }
 
-class BuildIDMessage : public IPC::Message
+class BuildIDsMatchMessage : public IPC::Message
 {
 public:
-    BuildIDMessage()
-        : IPC::Message(MSG_ROUTING_NONE, BUILD_ID_MESSAGE_TYPE)
+    BuildIDsMatchMessage()
+        : IPC::Message(MSG_ROUTING_NONE, BUILD_IDS_MATCH_MESSAGE_TYPE)
     {
     }
     void Log(const std::string& aPrefix, FILE* aOutf) const
     {
-        fputs("(special `Build ID' message)", aOutf);
+        fputs("(special `Build IDs match' message)", aOutf);
     }
 };
 
-// Send the parent a special async message to allow it to detect if
-// this process is running a different build. This is a minor
-// variation on MessageChannel::Send(Message* aMsg).
-void
-MessageChannel::SendBuildID()
+// Send the parent a special async message to confirm when the parent and child
+// are of the same buildID. Skips sending the message and returns false if the
+// buildIDs don't match. This is a minor variation on
+// MessageChannel::Send(Message* aMsg).
+bool
+MessageChannel::SendBuildIDsMatchMessage(const char* aParentBuildID)
 {
     MOZ_ASSERT(!XRE_IsParentProcess());
-    nsAutoPtr<BuildIDMessage> msg(new BuildIDMessage());
-    nsCString buildID(mozilla::PlatformBuildID());
-    IPC::WriteParam(msg, buildID);
+
+    nsCString parentBuildID(aParentBuildID);
+    nsCString childBuildID(mozilla::PlatformBuildID());
+
+    if (parentBuildID != childBuildID) {
+        // The build IDs didn't match, usually because an update occurred in the
+        // background.
+        return false;
+    }
+
+    nsAutoPtr<BuildIDsMatchMessage> msg(new BuildIDsMatchMessage());
 
     MOZ_RELEASE_ASSERT(!msg->is_sync());
     MOZ_RELEASE_ASSERT(msg->nested_level() != IPC::Message::NESTED_INSIDE_SYNC);
@@ -1034,9 +1048,10 @@ MessageChannel::SendBuildID()
     MonitorAutoLock lock(*mMonitor);
     if (!Connected()) {
         ReportConnectionError("MessageChannel", msg);
-        return;
+        return false;
     }
     mLink->SendMessage(msg.forget());
+    return true;
 }
 
 class CancelMessage : public IPC::Message
@@ -1054,22 +1069,6 @@ public:
         fputs("(special `Cancel' message)", aOutf);
     }
 };
-
-MOZ_NEVER_INLINE static void
-CheckChildProcessBuildID(const IPC::Message& aMsg)
-{
-    MOZ_ASSERT(XRE_IsParentProcess());
-    nsCString childBuildID;
-    PickleIterator msgIter(aMsg);
-    MOZ_ALWAYS_TRUE(IPC::ReadParam(&aMsg, &msgIter, &childBuildID));
-    aMsg.EndRead(msgIter);
-
-    nsCString parentBuildID(mozilla::PlatformBuildID());
-
-    // This assert can fail if the child process has been updated
-    // to a newer version while the parent process was running.
-    MOZ_RELEASE_ASSERT(parentBuildID == childBuildID);
-}
 
 bool
 MessageChannel::MaybeInterceptSpecialIOMessage(const Message& aMsg)
@@ -1092,9 +1091,9 @@ MessageChannel::MaybeInterceptSpecialIOMessage(const Message& aMsg)
             CancelTransaction(aMsg.transaction_id());
             NotifyWorkerThread();
             return true;
-        } else if (BUILD_ID_MESSAGE_TYPE == aMsg.type()) {
-            IPC_LOG("Build ID message");
-            CheckChildProcessBuildID(aMsg);
+        } else if (BUILD_IDS_MATCH_MESSAGE_TYPE == aMsg.type()) {
+            IPC_LOG("Build IDs match message");
+            mBuildIDsConfirmedMatch = true;
             return true;
         }
     }
@@ -1164,7 +1163,9 @@ MessageChannel::OnMessageReceivedFromLink(Message&& aMsg)
     if (MaybeInterceptSpecialIOMessage(aMsg))
         return;
 
+#ifdef EARLY_BETA_OR_EARLIER
     mListener->OnChannelReceivedMessage(aMsg);
+#endif
 
     // Regardless of the Interrupt stack, if we're awaiting a sync reply,
     // we know that it needs to be immediately handled to unblock us.
@@ -2696,7 +2697,16 @@ MessageChannel::Close()
     AssertWorkerThread();
 
     {
-        MonitorAutoLock lock(*mMonitor);
+        // We don't use MonitorAutoLock here as that causes some sort of
+        // deadlock in the error/timeout-with-a-listener state below when
+        // compiling an optimized msvc build.
+        mMonitor->Lock();
+
+        // Instead just use a ScopeExit to manage the unlock.
+        RefPtr<RefCountedMonitor> monitor(mMonitor);
+        auto exit = MakeScopeExit([m = Move(monitor)] () {
+          m->Unlock();
+        });
 
         if (ChannelError == mChannelState || ChannelTimeout == mChannelState) {
             // See bug 538586: if the listener gets deleted while the
@@ -2705,7 +2715,8 @@ MessageChannel::Close()
             // also be deleted and the listener will never be notified
             // of the channel error.
             if (mListener) {
-                MonitorAutoUnlock unlock(*mMonitor);
+                exit.release(); // Explicitly unlocking, clear scope exit.
+                mMonitor->Unlock();
                 NotifyMaybeChannelError();
             }
             return;

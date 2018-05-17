@@ -386,7 +386,7 @@ private:
   /**
    * Cut or delete the range's contents.
    *
-   * @param aFragment nsIDOMDocumentFragment containing the nodes.
+   * @param aFragment DocumentFragment containing the nodes.
    *                  May be null to indicate the caller doesn't want a fragment.
    */
   nsresult CutContents(mozilla::dom::DocumentFragment** frag);
@@ -585,12 +585,6 @@ protected:
   bool mIsGenerated : 1;
   bool mCalledByJS : 1;
 };
-
-inline nsISupports*
-ToCanonicalSupports(nsRange* aRange)
-{
-  return static_cast<nsIDOMRange*>(aRange);
-}
 
 inline nsISupports*
 ToSupports(nsRange* aRange)

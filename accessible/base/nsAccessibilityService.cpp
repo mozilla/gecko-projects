@@ -68,6 +68,7 @@
 #include "nsXBLBinding.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/DOMStringList.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "nsDeckFrame.h"
@@ -272,23 +273,6 @@ static Accessible*
 New_HTMLTableCellAccessible(Element* aElement, Accessible* aContext)
   { return new HTMLTableCellAccessible(aElement, aContext->Document()); }
 
-static Accessible*
-New_HTMLTableHeaderCell(Element* aElement, Accessible* aContext)
-{
-  if (aContext->IsTableRow() && aContext->GetContent() == aElement->GetParent())
-    return new HTMLTableHeaderCellAccessibleWrap(aElement, aContext->Document());
-  return nullptr;
-}
-
-static Accessible*
-New_HTMLTableHeaderCellIfScope(Element* aElement, Accessible* aContext)
-{
-  if (aContext->IsTableRow() && aContext->GetContent() == aElement->GetParent() &&
-      aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::scope))
-    return new HTMLTableHeaderCellAccessibleWrap(aElement, aContext->Document());
-  return nullptr;
-}
-
 /**
  * Cached value of the PREF_ACCESSIBILITY_FORCE_DISABLED preference.
  */
@@ -375,7 +359,7 @@ nsAccessibilityService::ListenersChanged(nsIArray* aEventChanges)
   for (uint32_t i = 0 ; i < targetCount ; i++) {
     nsCOMPtr<nsIEventListenerChange> change = do_QueryElementAt(aEventChanges, i);
 
-    nsCOMPtr<nsIDOMEventTarget> target;
+    RefPtr<EventTarget> target;
     change->GetTarget(getter_AddRefs(target));
     nsCOMPtr<nsIContent> node(do_QueryInterface(target));
     if (!node || !node->IsHTMLElement()) {
@@ -1044,11 +1028,10 @@ nsAccessibilityService::CreateAccessible(nsINode* aNode,
   MOZ_ASSERT(!document->GetAccessible(aNode),
              "We already have an accessible for this node.");
 
-  if (aNode->IsNodeOfType(nsINode::eDOCUMENT)) {
+  if (aNode->IsDocument()) {
     // If it's document node then ask accessible document loader for
     // document accessible, otherwise return null.
-    nsCOMPtr<nsIDocument> document(do_QueryInterface(aNode));
-    return GetDocAccessible(document);
+    return GetDocAccessible(aNode->AsDocument());
   }
 
   // We have a content node.
@@ -1071,6 +1054,20 @@ nsAccessibilityService::CreateAccessible(nsINode* aNode,
   // Check frame and its visibility. Note, hidden frame allows visible
   // elements in subtree.
   if (!frame || !frame->StyleVisibility()->IsVisible()) {
+    // display:contents element doesn't have a frame, but retains the semantics.
+    // All its children are unaffected.
+    if (content->IsElement() && content->AsElement()->IsDisplayContents()) {
+      const HTMLMarkupMapInfo* markupMap =
+        mHTMLMarkupMap.Get(content->NodeInfo()->NameAtom());
+      if (markupMap && markupMap->new_func) {
+        RefPtr<Accessible> newAcc =
+          markupMap->new_func(content->AsElement(), aContext);
+        document->BindToDocument(newAcc, aria::GetRoleMap(content->AsElement()));
+        return newAcc;
+      }
+      return nullptr;
+    }
+
     if (aIsSubtreeHidden && !frame)
       *aIsSubtreeHidden = true;
 

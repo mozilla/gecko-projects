@@ -332,6 +332,32 @@ static int32_t FFWC_recursions=0;
 static int32_t FFWC_nextInFlows=0;
 #endif
 
+#ifdef MOZ_XUL
+
+static bool
+IsXULListBox(nsIContent* aContainer)
+{
+  return aContainer->IsXULElement(nsGkAtoms::listbox);
+}
+
+static
+nsListBoxBodyFrame*
+MaybeGetListBoxBodyFrame(nsIContent* aChild)
+{
+  if (aChild->IsXULElement(nsGkAtoms::listitem) && aChild->GetParent() &&
+      IsXULListBox(aChild->GetParent())) {
+    RefPtr<nsXULElement> xulElement =
+      nsXULElement::FromNode(aChild->GetParent());
+    nsCOMPtr<nsIBoxObject> boxObject = xulElement->GetBoxObject(IgnoreErrors());
+    nsCOMPtr<nsPIListBoxObject> listBoxObject = do_QueryInterface(boxObject);
+    if (listBoxObject) {
+      return listBoxObject->GetListBoxBody(false);
+    }
+  }
+
+  return nullptr;
+}
+#endif // MOZ_XUL
 
 // Returns true if aFrame is an anonymous flex/grid item.
 static inline bool
@@ -422,7 +448,7 @@ IsInlineFrame(const nsIFrame* aFrame)
 static inline bool
 IsDisplayContents(const Element* aElement)
 {
-  return aElement->HasServoData() && Servo_Element_IsDisplayContents(aElement);
+  return aElement->IsDisplayContents();
 }
 
 static inline bool
@@ -519,7 +545,7 @@ IsFramePartOfIBSplit(nsIFrame* aFrame)
 
 static nsContainerFrame* GetIBSplitSibling(nsIFrame* aFrame)
 {
-  NS_PRECONDITION(IsFramePartOfIBSplit(aFrame), "Shouldn't call this");
+  MOZ_ASSERT(IsFramePartOfIBSplit(aFrame), "Shouldn't call this");
 
   // We only store the "ib-split sibling" annotation with the first
   // frame in the continuation chain. Walk back to find that frame now.
@@ -529,7 +555,7 @@ static nsContainerFrame* GetIBSplitSibling(nsIFrame* aFrame)
 
 static nsContainerFrame* GetIBSplitPrevSibling(nsIFrame* aFrame)
 {
-  NS_PRECONDITION(IsFramePartOfIBSplit(aFrame), "Shouldn't call this");
+  MOZ_ASSERT(IsFramePartOfIBSplit(aFrame), "Shouldn't call this");
 
   // We only store the ib-split sibling annotation with the first
   // frame in the continuation chain. Walk back to find that frame now.
@@ -553,7 +579,7 @@ GetLastIBSplitSibling(nsIFrame* aFrame)
 static void
 SetFrameIsIBSplit(nsContainerFrame* aFrame, nsContainerFrame* aIBSplitSibling)
 {
-  NS_PRECONDITION(aFrame, "bad args!");
+  MOZ_ASSERT(aFrame, "bad args!");
 
   // We should be the only continuation
   NS_ASSERTION(!aFrame->GetPrevContinuation(),
@@ -580,8 +606,8 @@ SetFrameIsIBSplit(nsContainerFrame* aFrame, nsContainerFrame* aIBSplitSibling)
 static nsIFrame*
 GetIBContainingBlockFor(nsIFrame* aFrame)
 {
-  NS_PRECONDITION(IsFramePartOfIBSplit(aFrame),
-                  "GetIBContainingBlockFor() should only be called on known IB frames");
+  MOZ_ASSERT(IsFramePartOfIBSplit(aFrame),
+             "GetIBContainingBlockFor() should only be called on known IB frames");
 
   // Get the first "normal" ancestor of the target frame.
   nsIFrame* parentFrame;
@@ -665,7 +691,7 @@ FindFirstNonBlock(const nsFrameList& aList)
 inline void
 SetInitialSingleChild(nsContainerFrame* aParent, nsIFrame* aFrame)
 {
-  NS_PRECONDITION(!aFrame->GetNextSibling(), "Should be using a frame list");
+  MOZ_ASSERT(!aFrame->GetNextSibling(), "Should be using a frame list");
   nsFrameList temp(aFrame, aFrame);
   aParent->SetInitialChildList(kPrincipalList, temp);
 }
@@ -682,7 +708,7 @@ struct nsFrameItems : public nsFrameList
 void
 nsFrameItems::AddChild(nsIFrame* aChild)
 {
-  NS_PRECONDITION(aChild, "nsFrameItems::AddChild");
+  MOZ_ASSERT(aChild, "nsFrameItems::AddChild");
 
   // It'd be really nice if we could just AppendFrames(kPrincipalList, aChild) here,
   // but some of our callers put frames that have different
@@ -1122,9 +1148,9 @@ void
 nsFrameConstructorState::PushFloatContainingBlock(nsContainerFrame* aNewFloatContainingBlock,
                                                   nsFrameConstructorSaveState& aSaveState)
 {
-  NS_PRECONDITION(!aNewFloatContainingBlock ||
-                  aNewFloatContainingBlock->IsFloatContainingBlock(),
-                  "Please push a real float containing block!");
+  MOZ_ASSERT(!aNewFloatContainingBlock ||
+             aNewFloatContainingBlock->IsFloatContainingBlock(),
+             "Please push a real float containing block!");
   NS_ASSERTION(!aNewFloatContainingBlock ||
                !ShouldSuppressFloatingOfDescendants(aNewFloatContainingBlock),
                "We should not push a frame that is supposed to _suppress_ "
@@ -1140,7 +1166,7 @@ nsContainerFrame*
 nsFrameConstructorState::GetGeometricParent(const nsStyleDisplay* aStyleDisplay,
                                             nsContainerFrame* aContentParentFrame) const
 {
-  NS_PRECONDITION(aStyleDisplay, "Must have display struct!");
+  MOZ_ASSERT(aStyleDisplay, "Must have display struct!");
 
   // If there is no container for a fixed, absolute, or floating root
   // frame, we will ignore the positioning.  This hack is originally
@@ -1287,7 +1313,7 @@ nsFrameConstructorState::AddChild(nsIFrame* aNewFrame,
                                   bool aInsertAfter,
                                   nsIFrame* aInsertAfterFrame)
 {
-  NS_PRECONDITION(!aNewFrame->GetNextSibling(), "Shouldn't happen");
+  MOZ_ASSERT(!aNewFrame->GetNextSibling(), "Shouldn't happen");
 
   nsFrameState placeholderType;
   nsAbsoluteItems* outOfFlowFrameItems =
@@ -1353,13 +1379,13 @@ nsFrameConstructorState::ProcessFrameInsertions(nsAbsoluteItems& aFrameItems,
                               &aFrameItems == &mTopLayerFixedItems) &&    \
                              aChildListID == nsIFrame::kFixedList)
 #ifdef MOZ_XUL
-  NS_PRECONDITION(NS_NONXUL_LIST_TEST ||
-                  (&aFrameItems == &mPopupItems &&
-                   aChildListID == nsIFrame::kPopupList),
-                  "Unexpected aFrameItems/aChildListID combination");
+  MOZ_ASSERT(NS_NONXUL_LIST_TEST ||
+             (&aFrameItems == &mPopupItems &&
+              aChildListID == nsIFrame::kPopupList),
+             "Unexpected aFrameItems/aChildListID combination");
 #else
-  NS_PRECONDITION(NS_NONXUL_LIST_TEST,
-                  "Unexpected aFrameItems/aChildListID combination");
+  MOZ_ASSERT(NS_NONXUL_LIST_TEST,
+             "Unexpected aFrameItems/aChildListID combination");
 #endif
 
   if (aFrameItems.IsEmpty()) {
@@ -2019,8 +2045,8 @@ nsCSSFrameConstructor::AdjustParentFrame(nsContainerFrame**           aParentFra
                                          const FrameConstructionData* aFCData,
                                          ComputedStyle*              aComputedStyle)
 {
-  NS_PRECONDITION(aComputedStyle, "Must have child's style");
-  NS_PRECONDITION(aFCData, "Must have frame construction data");
+  MOZ_ASSERT(aComputedStyle, "Must have child's style");
+  MOZ_ASSERT(aFCData, "Must have frame construction data");
 
   bool tablePart = ((aFCData->mBits & FCDATA_IS_TABLE_PART) != 0);
 
@@ -2057,9 +2083,9 @@ nsCSSFrameConstructor::ConstructTable(nsFrameConstructorState& aState,
                                       const nsStyleDisplay*    aDisplay,
                                       nsFrameItems&            aFrameItems)
 {
-  NS_PRECONDITION(aDisplay->mDisplay == StyleDisplay::Table ||
-                  aDisplay->mDisplay == StyleDisplay::InlineTable,
-                  "Unexpected call");
+  MOZ_ASSERT(aDisplay->mDisplay == StyleDisplay::Table ||
+             aDisplay->mDisplay == StyleDisplay::InlineTable,
+             "Unexpected call");
 
   nsIContent* const content = aItem.mContent;
   ComputedStyle* const computedStyle = aItem.mComputedStyle;
@@ -2350,10 +2376,10 @@ NeedFrameFor(const nsFrameConstructorState& aState,
 {
   // XXX the GetContent() != aChildContent check is needed due to bug 135040.
   // Remove it once that's fixed.
-  NS_PRECONDITION(!aChildContent->GetPrimaryFrame() ||
-                  aState.mCreatingExtraFrames ||
-                  aChildContent->GetPrimaryFrame()->GetContent() != aChildContent,
-                  "Why did we get called?");
+  MOZ_ASSERT(!aChildContent->GetPrimaryFrame() ||
+             aState.mCreatingExtraFrames ||
+             aChildContent->GetPrimaryFrame()->GetContent() != aChildContent,
+             "Why did we get called?");
 
   // don't create a whitespace frame if aParentFrame doesn't want it.
   // always create frames for children in generated content. counter(),
@@ -2703,10 +2729,10 @@ nsCSSFrameConstructor::ConstructRootFrame()
 void
 nsCSSFrameConstructor::SetUpDocElementContainingBlock(nsIContent* aDocElement)
 {
-  NS_PRECONDITION(aDocElement, "No element?");
-  NS_PRECONDITION(!aDocElement->GetParent(), "Not root content?");
-  NS_PRECONDITION(aDocElement->GetUncomposedDoc(), "Not in a document?");
-  NS_PRECONDITION(aDocElement->GetUncomposedDoc()->GetRootElement() ==
+  MOZ_ASSERT(aDocElement, "No element?");
+  MOZ_ASSERT(!aDocElement->GetParent(), "Not root content?");
+  MOZ_ASSERT(aDocElement->GetUncomposedDoc(), "Not in a document?");
+  MOZ_ASSERT(aDocElement->GetUncomposedDoc()->GetRootElement() ==
                   aDocElement, "Not the root of the document?");
 
   /*
@@ -3031,8 +3057,9 @@ nsCSSFrameConstructor::CreatePlaceholderFrameFor(nsIPresShell*     aPresShell,
 static inline void
 ClearLazyBits(nsIContent* aStartContent, nsIContent* aEndContent)
 {
-  NS_PRECONDITION(aStartContent || !aEndContent,
-                  "Must have start child if we have an end child");
+  MOZ_ASSERT(aStartContent || !aEndContent,
+             "Must have start child if we have an end child");
+
   for (nsIContent* cur = aStartContent; cur != aEndContent;
        cur = cur->GetNextSibling()) {
     cur->UnsetFlags(NODE_DESCENDANTS_NEED_FRAMES | NODE_NEEDS_FRAME);
@@ -3410,20 +3437,28 @@ FindAncestorWithGeneratedContentPseudo(nsIFrame* aFrame)
 
 /* static */
 const nsCSSFrameConstructor::FrameConstructionData*
-nsCSSFrameConstructor::FindTextData(nsIFrame* aParentFrame)
+nsCSSFrameConstructor::FindTextData(nsIFrame* aParentFrame,
+                                    nsIContent* aTextContent)
 {
+  MOZ_ASSERT(aTextContent, "How?");
   if (aParentFrame && IsFrameForSVG(aParentFrame)) {
-    nsIFrame *ancestorFrame =
+    nsIFrame* ancestorFrame =
       nsSVGUtils::GetFirstNonAAncestorFrame(aParentFrame);
-    if (ancestorFrame) {
-      static const FrameConstructionData sSVGTextData =
-        FCDATA_DECL(FCDATA_IS_LINE_PARTICIPANT | FCDATA_IS_SVG_TEXT,
-                    NS_NewTextFrame);
-      if (nsSVGUtils::IsInSVGTextSubtree(ancestorFrame)) {
-        return &sSVGTextData;
-      }
+    if (!ancestorFrame || !nsSVGUtils::IsInSVGTextSubtree(ancestorFrame)) {
+      return nullptr;
     }
-    return nullptr;
+
+    // Don't render stuff in display: contents / Shadow DOM subtrees, because
+    // TextCorrespondenceRecorder in the SVG text code doesn't really know how
+    // to deal with it. This kinda sucks. :(
+    if (aParentFrame->GetContent() != aTextContent->GetParent()) {
+      return nullptr;
+    }
+
+    static const FrameConstructionData sSVGTextData =
+      FCDATA_DECL(FCDATA_IS_LINE_PARTICIPANT | FCDATA_IS_SVG_TEXT,
+                  NS_NewTextFrame);
+    return &sSVGTextData;
   }
 
   static const FrameConstructionData sTextData =
@@ -3439,7 +3474,7 @@ nsCSSFrameConstructor::ConstructTextFrame(const FrameConstructionData* aData,
                                           ComputedStyle*          aComputedStyle,
                                           nsFrameItems&            aFrameItems)
 {
-  NS_PRECONDITION(aData, "Must have frame construction data");
+  MOZ_ASSERT(aData, "Must have frame construction data");
 
   nsIFrame* newFrame = (*aData->mFunc.mCreationFunc)(mPresShell, aComputedStyle);
 
@@ -5474,6 +5509,11 @@ nsCSSFrameConstructor::ShouldCreateItemsForChild(nsFrameConstructorState& aState
   if (aContent->GetPrimaryFrame() &&
       aContent->GetPrimaryFrame()->GetContent() == aContent &&
       !aState.mCreatingExtraFrames) {
+    // This condition is known to be reachable for listitems, assert fatally
+    // elsewhere.
+    MOZ_ASSERT(MaybeGetListBoxBodyFrame(aContent),
+               "asked to create frame construction item for a node that "
+               "already has a frame");
     NS_ERROR("asked to create frame construction item for a node that already "
              "has a frame");
     return false;
@@ -5485,8 +5525,7 @@ nsCSSFrameConstructor::ShouldCreateItemsForChild(nsFrameConstructorState& aState
   }
 
   // never create frames for comments or PIs
-  if (aContent->IsNodeOfType(nsINode::eCOMMENT) ||
-      aContent->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
+  if (aContent->IsComment() || aContent->IsProcessingInstruction()) {
     return false;
   }
 
@@ -5614,8 +5653,8 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
                                                          nsTArray<nsIAnonymousContentCreator::ContentInfo>* aAnonChildren,
                                                          FrameConstructionItemList& aItems)
 {
-  NS_PRECONDITION(aContent->IsText() || aContent->IsElement(),
-                  "Shouldn't get anything else here!");
+  MOZ_ASSERT(aContent->IsText() || aContent->IsElement(),
+             "Shouldn't get anything else here!");
   MOZ_ASSERT(aContent->IsInComposedDoc());
   MOZ_ASSERT(!aContent->GetPrimaryFrame() || aState.mCreatingExtraFrames ||
              aContent->NodeInfo()->NameAtom() == nsGkAtoms::area);
@@ -5740,7 +5779,7 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
   // Try to find frame construction data for this content
   const FrameConstructionData* data;
   if (isText) {
-    data = FindTextData(aParentFrame);
+    data = FindTextData(aParentFrame, aContent);
     if (!data) {
       // Nothing to do here; suppressed text inside SVG
       return;
@@ -6238,12 +6277,12 @@ nsCSSFrameConstructor::AppendFramesToParent(nsFrameConstructorState&       aStat
                                             nsIFrame*                      aPrevSibling,
                                             bool                           aIsRecursiveCall)
 {
-  NS_PRECONDITION(!IsFramePartOfIBSplit(aParentFrame) ||
-                  !GetIBSplitSibling(aParentFrame) ||
-                  !GetIBSplitSibling(aParentFrame)->PrincipalChildList().FirstChild(),
-                  "aParentFrame has a ib-split sibling with kids?");
-  NS_PRECONDITION(!aPrevSibling || aPrevSibling->GetParent() == aParentFrame,
-                  "Parent and prevsibling don't match");
+  MOZ_ASSERT(!IsFramePartOfIBSplit(aParentFrame) ||
+             !GetIBSplitSibling(aParentFrame) ||
+             !GetIBSplitSibling(aParentFrame)->PrincipalChildList().FirstChild(),
+             "aParentFrame has a ib-split sibling with kids?");
+  MOZ_ASSERT(!aPrevSibling || aPrevSibling->GetParent() == aParentFrame,
+             "Parent and prevsibling don't match");
 
   nsIFrame* nextSibling = ::GetInsertNextSibling(aParentFrame, aPrevSibling);
 
@@ -6349,8 +6388,7 @@ nsCSSFrameConstructor::IsValidSibling(nsIFrame*              aSibling,
     // if we haven't already, resolve a style to find the display type of
     // aContent.
     if (UNSET_DISPLAY == aDisplay) {
-      if (aContent->IsNodeOfType(nsINode::eCOMMENT) ||
-          aContent->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
+      if (aContent->IsComment() || aContent->IsProcessingInstruction()) {
         // Comments and processing instructions never have frames, so we should
         // not try to generate styles for them.
         return false;
@@ -6567,8 +6605,7 @@ static nsContainerFrame*
 GetAdjustedParentFrame(nsContainerFrame* aParentFrame,
                        nsIContent* aChildContent)
 {
-  NS_PRECONDITION(!aParentFrame->IsTableWrapperFrame(),
-                  "Shouldn't be happening!");
+  MOZ_ASSERT(!aParentFrame->IsTableWrapperFrame(), "Shouldn't be happening!");
 
   nsContainerFrame* newParent = nullptr;
 
@@ -6590,7 +6627,7 @@ nsCSSFrameConstructor::GetInsertionPrevSibling(InsertionPoint* aInsertion,
                                                nsIContent* aStartSkipChild,
                                                nsIContent* aEndSkipChild)
 {
-  NS_PRECONDITION(aInsertion->mParentFrame, "Must have parent frame to start with");
+  MOZ_ASSERT(aInsertion->mParentFrame, "Must have parent frame to start with");
 
   *aIsAppend = false;
 
@@ -6695,40 +6732,13 @@ IsSpecialFramesetChild(nsIContent* aContent)
 static void
 InvalidateCanvasIfNeeded(nsIPresShell* presShell, nsIContent* node);
 
-#ifdef MOZ_XUL
-
-static bool
-IsXULListBox(nsIContent* aContainer)
-{
-  return aContainer->IsXULElement(nsGkAtoms::listbox);
-}
-
-static
-nsListBoxBodyFrame*
-MaybeGetListBoxBodyFrame(nsIContent* aChild)
-{
-  if (aChild->IsXULElement(nsGkAtoms::listitem) && aChild->GetParent() &&
-      IsXULListBox(aChild->GetParent())) {
-    RefPtr<nsXULElement> xulElement =
-      nsXULElement::FromNode(aChild->GetParent());
-    nsCOMPtr<nsIBoxObject> boxObject = xulElement->GetBoxObject(IgnoreErrors());
-    nsCOMPtr<nsPIListBoxObject> listBoxObject = do_QueryInterface(boxObject);
-    if (listBoxObject) {
-      return listBoxObject->GetListBoxBody(false);
-    }
-  }
-
-  return nullptr;
-}
-#endif // MOZ_XUL
-
 void
 nsCSSFrameConstructor::AddTextItemIfNeeded(nsFrameConstructorState& aState,
                                            const InsertionPoint& aInsertion,
                                            nsIContent* aPossibleTextContent,
                                            FrameConstructionItemList& aItems)
 {
-  NS_PRECONDITION(aPossibleTextContent, "Must have node");
+  MOZ_ASSERT(aPossibleTextContent, "Must have node");
   if (!aPossibleTextContent->IsText() ||
       !aPossibleTextContent->HasFlag(NS_CREATE_FRAME_IF_NON_WHITESPACE) ||
       aPossibleTextContent->HasFlag(NODE_NEEDS_FRAME)) {
@@ -7012,16 +7022,30 @@ nsCSSFrameConstructor::StyleNewChildRange(nsIContent* aStartChild,
 
   for (nsIContent* child = aStartChild; child != aEndChild;
        child = child->GetNextSibling()) {
-    if (child->IsElement() && !child->AsElement()->HasServoData()) {
-      Element* parent = child->AsElement()->GetFlattenedTreeParentElement();
-      // NB: Parent may be null if the content is appended to a shadow root, and
-      // isn't assigned to any insertion point.
-      if (MOZ_LIKELY(parent) && parent->HasServoData()) {
-        MOZ_ASSERT(IsFlattenedTreeChild(parent, child),
-                   "GetFlattenedTreeParent and ChildIterator don't agree, fix this!");
-        styleSet->StyleNewSubtree(child->AsElement());
-      }
+    if (!child->IsElement()) {
+      continue;
     }
+
+    Element* childElement = child->AsElement();
+
+    // We only come in here from non-lazy frame construction, so the children
+    // should be unstyled.
+    MOZ_ASSERT(!childElement->HasServoData());
+
+#ifdef DEBUG
+    {
+      // Furthermore, all of them should have the same flattened tree parent
+      // (GetRangeInsertionPoint ensures it). And that parent should be styled,
+      // otherwise we would've never found an insertion point at all.
+      Element* parent = childElement->GetFlattenedTreeParentElement();
+      MOZ_ASSERT(parent);
+      MOZ_ASSERT(parent->HasServoData());
+      MOZ_ASSERT(IsFlattenedTreeChild(parent, child),
+                 "GetFlattenedTreeParent and ChildIterator don't agree, fix this!");
+    }
+#endif
+
+    styleSet->StyleNewSubtree(childElement);
   }
 }
 
@@ -7073,18 +7097,17 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
     return;
   }
 
-  if (aInsertionKind == InsertionKind::Async &&
-      MaybeConstructLazily(CONTENTAPPEND, aFirstNewContent)) {
-    LazilyStyleNewChildRange(aFirstNewContent, nullptr);
-    return;
-  }
-
-  // We couldn't construct lazily. Make Servo eagerly traverse the new content
-  // if needed (when aInsertionKind == InsertionKind::Sync, we know that the
-  // styles are up-to-date already).
   if (aInsertionKind == InsertionKind::Async) {
+    if (MaybeConstructLazily(CONTENTAPPEND, aFirstNewContent)) {
+      LazilyStyleNewChildRange(aFirstNewContent, nullptr);
+      return;
+    }
+    // We couldn't construct lazily. Make Servo eagerly traverse the new content
+    // if needed (when aInsertionKind == InsertionKind::Sync, we know that the
+    // styles are up-to-date already).
     StyleNewChildRange(aFirstNewContent, nullptr);
   }
+
 
   LAYOUT_PHASE_TEMP_EXIT();
   if (MaybeRecreateForFrameset(parentFrame, aFirstNewContent, nullptr)) {
@@ -7393,7 +7416,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aStartChild,
 
   AUTO_LAYOUT_PHASE_ENTRY_POINT(mPresShell->GetPresContext(), FrameC);
 
-  NS_PRECONDITION(aStartChild, "must always pass a child");
+  MOZ_ASSERT(aStartChild, "must always pass a child");
 
 #ifdef DEBUG
   if (gNoisyContentUpdates) {
@@ -7423,14 +7446,6 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aStartChild,
   }
 #endif
 
-  auto styleNewChildRangeEagerly =
-    [this, aInsertionKind, aStartChild, aEndChild]() {
-      // When aInsertionKind == InsertionKind::Sync, we know that the
-      // styles are up-to-date already.
-      if (aInsertionKind == InsertionKind::Async) {
-        StyleNewChildRange(aStartChild, aEndChild);
-      }
-    };
 
   bool isSingleInsert = (aStartChild->GetNextSibling() == aEndChild);
   NS_ASSERTION(isSingleInsert ||
@@ -7441,8 +7456,6 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aStartChild,
 
 #ifdef MOZ_XUL
   if (aStartChild->GetParent() && IsXULListBox(aStartChild->GetParent())) {
-    // For XUL list box, we need to style the new children eagerly.
-    styleNewChildRangeEagerly();
     if (isSingleInsert) {
       // The insert case in NotifyListBoxBody doesn't use "old next sibling".
       if (NotifyListBoxBody(mPresShell->GetPresContext(),
@@ -7528,15 +7541,16 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aStartChild,
     return;
   }
 
-  if (aInsertionKind == InsertionKind::Async &&
-      MaybeConstructLazily(CONTENTINSERT, aStartChild)) {
-    LazilyStyleNewChildRange(aStartChild, aEndChild);
-    return;
+  if (aInsertionKind == InsertionKind::Async) {
+    if (MaybeConstructLazily(CONTENTINSERT, aStartChild)) {
+      LazilyStyleNewChildRange(aStartChild, aEndChild);
+      return;
+    }
+    // We couldn't construct lazily. Make Servo eagerly traverse the new content
+    // if needed (when aInsertionKind == InsertionKind::Sync, we know that the
+    // styles are up-to-date already).
+    StyleNewChildRange(aStartChild, aEndChild);
   }
-
-  // We couldn't construct lazily. Make Servo eagerly traverse the new content
-  // if needed.
-  styleNewChildRangeEagerly();
 
   bool isAppend, isRangeInsertSafe;
   nsIFrame* prevSibling = GetInsertionPrevSibling(&insertion, aStartChild,
@@ -8197,8 +8211,8 @@ nsCSSFrameConstructor::ContentRemoved(nsIContent* aChild,
 static void
 InvalidateCanvasIfNeeded(nsIPresShell* presShell, nsIContent* node)
 {
-  NS_PRECONDITION(presShell->GetRootFrame(), "What happened here?");
-  NS_PRECONDITION(presShell->GetPresContext(), "Say what?");
+  MOZ_ASSERT(presShell->GetRootFrame(), "What happened here?");
+  MOZ_ASSERT(presShell->GetPresContext(), "Say what?");
 
   //  Note that both in ContentRemoved and ContentInserted the content node
   //  will still have the right parent pointer, so looking at that is ok.
@@ -8842,10 +8856,10 @@ FindPreviousNonWhitespaceSibling(nsIFrame* aFrame)
 bool
 nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(nsIFrame* aFrame)
 {
-  NS_PRECONDITION(aFrame, "Must have a frame");
-  NS_PRECONDITION(aFrame->GetParent(), "Frame shouldn't be root");
-  NS_PRECONDITION(aFrame == aFrame->FirstContinuation(),
-                  "aFrame not the result of GetPrimaryFrame()?");
+  MOZ_ASSERT(aFrame, "Must have a frame");
+  MOZ_ASSERT(aFrame->GetParent(), "Frame shouldn't be root");
+  MOZ_ASSERT(aFrame == aFrame->FirstContinuation(),
+             "aFrame not the result of GetPrimaryFrame()?");
 
   if (IsFramePartOfIBSplit(aFrame)) {
     // The removal functions can't handle removal of an {ib} split directly; we
@@ -9076,6 +9090,27 @@ nsCSSFrameConstructor::UpdateTableCellSpans(nsIContent* aContent)
   }
 }
 
+static nsIContent*
+GetTopmostMathMLElement(nsIContent* aMathMLContent)
+{
+  MOZ_ASSERT(aMathMLContent->IsMathMLElement());
+  MOZ_ASSERT(aMathMLContent->GetPrimaryFrame());
+  MOZ_ASSERT(aMathMLContent->GetPrimaryFrame()->IsFrameOfType(nsIFrame::eMathML));
+  nsIContent* root = aMathMLContent;
+
+  for (nsIContent* parent = aMathMLContent->GetFlattenedTreeParent();
+       parent;
+       parent = parent->GetFlattenedTreeParent()) {
+    nsIFrame* frame = parent->GetPrimaryFrame();
+    if (!frame || !frame->IsFrameOfType(nsIFrame::eMathML)) {
+      break;
+    }
+    root = parent;
+  }
+
+  return root;
+}
+
 void
 nsCSSFrameConstructor::RecreateFramesForContent(nsIContent* aContent,
                                                 InsertionKind aInsertionKind)
@@ -9101,15 +9136,9 @@ nsCSSFrameConstructor::RecreateFramesForContent(nsIContent* aContent,
   nsIFrame* frame = aContent->GetPrimaryFrame();
   if (frame && frame->IsFrameOfType(nsIFrame::eMathML)) {
     // Reframe the topmost MathML element to prevent exponential blowup
-    // (see bug 397518)
-    while (true) {
-      nsIContent* parentContent = aContent->GetParent();
-      nsIFrame* parentContentFrame = parentContent->GetPrimaryFrame();
-      if (!parentContentFrame || !parentContentFrame->IsFrameOfType(nsIFrame::eMathML))
-        break;
-      aContent = parentContent;
-      frame = parentContentFrame;
-    }
+    // (see bug 397518).
+    aContent = GetTopmostMathMLElement(aContent);
+    frame = aContent->GetPrimaryFrame();
   }
 
   if (frame) {
@@ -9252,7 +9281,7 @@ nsCSSFrameConstructor::ShouldHaveFirstLetterStyle(nsIContent* aContent,
 bool
 nsCSSFrameConstructor::HasFirstLetterStyle(nsIFrame* aBlockFrame)
 {
-  NS_PRECONDITION(aBlockFrame, "Need a frame");
+  MOZ_ASSERT(aBlockFrame, "Need a frame");
   NS_ASSERTION(nsLayoutUtils::GetAsBlock(aBlockFrame),
                "Not a block frame?");
 
@@ -10143,8 +10172,7 @@ nsCSSFrameConstructor::AddFCItemsForAnonymousContent(
                "Should not be marked as needing frames");
     MOZ_ASSERT(!content->GetPrimaryFrame(),
                "Should have no existing frame");
-    MOZ_ASSERT(!content->IsNodeOfType(nsINode::eCOMMENT) &&
-               !content->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION),
+    MOZ_ASSERT(!content->IsComment() && !content->IsProcessingInstruction(),
                "Why is someone creating garbage anonymous content");
 
     // Make sure we eagerly performed the servo cascade when the anonymous
@@ -10178,10 +10206,11 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
                                        PendingBinding*          aPendingBinding,
                                        nsIFrame*                aPossiblyLeafFrame)
 {
-  NS_PRECONDITION(aFrame, "Must have parent frame here");
-  NS_PRECONDITION(aFrame->GetContentInsertionFrame() == aFrame,
-                  "Parent frame in ProcessChildren should be its own "
-                  "content insertion frame");
+  MOZ_ASSERT(aFrame, "Must have parent frame here");
+  MOZ_ASSERT(aFrame->GetContentInsertionFrame() == aFrame,
+             "Parent frame in ProcessChildren should be its own "
+             "content insertion frame");
+
   const uint32_t kMaxDepth = 2 * MAX_REFLOW_DEPTH;
   static_assert(kMaxDepth <= UINT16_MAX, "mCurrentDepth type is too narrow");
   AutoRestore<uint16_t> savedDepth(mCurrentDepth);
@@ -10571,7 +10600,7 @@ FirstLetterCount(const nsTextFragment* aFragment)
 static bool
 NeedFirstLetterContinuation(nsIContent* aContent)
 {
-  NS_PRECONDITION(aContent, "null ptr");
+  MOZ_ASSERT(aContent, "null ptr");
 
   bool result = false;
   if (aContent) {
@@ -10674,7 +10703,7 @@ nsCSSFrameConstructor::CreateLetterFrame(nsContainerFrame* aBlockFrame,
                                          nsContainerFrame* aParentFrame,
                                          nsFrameItems& aResult)
 {
-  NS_PRECONDITION(aTextContent->IsText(), "aTextContent isn't text");
+  MOZ_ASSERT(aTextContent->IsText(), "aTextContent isn't text");
   NS_ASSERTION(nsLayoutUtils::GetAsBlock(aBlockFrame),
                  "Not a block frame?");
 
@@ -11118,6 +11147,10 @@ nsCSSFrameConstructor::CreateListBoxContent(nsContainerFrame*      aParentFrame,
                                   GetFloatContainingBlock(aParentFrame),
                                   do_AddRef(mTempFrameTreeState));
 
+    if (aChild->IsElement() && !aChild->AsElement()->HasServoData()) {
+      mPresShell->StyleSet()->StyleNewSubtree(aChild->AsElement());
+    }
+
     RefPtr<ComputedStyle> computedStyle = ResolveComputedStyle(aChild);
 
     // Pre-check for display "none" - only if we find that, do we create
@@ -11395,9 +11428,9 @@ nsCSSFrameConstructor::CreateIBSiblings(nsFrameConstructorState& aState,
   do {
     // On entry to this loop aChildItems is not empty and the first frame in it
     // is block-level.
-    NS_PRECONDITION(aChildItems.NotEmpty(), "Should have child items");
-    NS_PRECONDITION(!aChildItems.FirstChild()->IsInlineOutside(),
-                    "Must have list starting with block");
+    MOZ_ASSERT(aChildItems.NotEmpty(), "Should have child items");
+    MOZ_ASSERT(!aChildItems.FirstChild()->IsInlineOutside(),
+               "Must have list starting with block");
 
     // The initial run of blocks belongs to an anonymous block that we create
     // right now. The anonymous block will be the parent of these block
@@ -11486,8 +11519,7 @@ nsCSSFrameConstructor::BuildInlineChildItems(nsFrameConstructorState& aState,
       // AddFrameConstructionItems.  We know our parent is a non-replaced inline,
       // so there is no need to do the NeedFrameFor check.
       content->UnsetFlags(NODE_DESCENDANTS_NEED_FRAMES | NODE_NEEDS_FRAME);
-      if (content->IsNodeOfType(nsINode::eCOMMENT) ||
-          content->IsNodeOfType(nsINode::ePROCESSING_INSTRUCTION)) {
+      if (content->IsComment() || content->IsProcessingInstruction()) {
         continue;
       }
 
@@ -11516,8 +11548,8 @@ nsCSSFrameConstructor::BuildInlineChildItems(nsFrameConstructorState& aState,
 static bool
 IsSafeToAppendToIBSplitInline(nsIFrame* aParentFrame, nsIFrame* aNextSibling)
 {
-  NS_PRECONDITION(IsInlineFrame(aParentFrame),
-                  "Must have an inline parent here");
+  MOZ_ASSERT(IsInlineFrame(aParentFrame), "Must have an inline parent here");
+
   do {
     NS_ASSERTION(IsFramePartOfIBSplit(aParentFrame),
                  "How is this not part of an ib-split?");
@@ -11981,8 +12013,8 @@ bool
 nsCSSFrameConstructor::
 FrameConstructionItem::IsWhitespace(nsFrameConstructorState& aState) const
 {
-  NS_PRECONDITION(aState.mCreatingExtraFrames ||
-                  !mContent->GetPrimaryFrame(), "How did that happen?");
+  MOZ_ASSERT(aState.mCreatingExtraFrames ||
+             !mContent->GetPrimaryFrame(), "How did that happen?");
   if (!mIsText) {
     return false;
   }
@@ -11998,7 +12030,7 @@ void
 nsCSSFrameConstructor::FrameConstructionItemList::
 AdjustCountsForItem(FrameConstructionItem* aItem, int32_t aDelta)
 {
-  NS_PRECONDITION(aDelta == 1 || aDelta == -1, "Unexpected delta");
+  MOZ_ASSERT(aDelta == 1 || aDelta == -1, "Unexpected delta");
   mItemCount += aDelta;
   if (aItem->mIsAllInline) {
     mInlineCount += aDelta;
@@ -12019,7 +12051,7 @@ inline bool
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::SkipItemsWantingParentType(ParentType aParentType)
 {
-  NS_PRECONDITION(!IsDone(), "Shouldn't be done yet");
+  MOZ_ASSERT(!IsDone(), "Shouldn't be done yet");
   while (item().DesiredParentType() == aParentType) {
     Next();
     if (IsDone()) {
@@ -12033,7 +12065,7 @@ inline bool
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::SkipItemsNotWantingParentType(ParentType aParentType)
 {
-  NS_PRECONDITION(!IsDone(), "Shouldn't be done yet");
+  MOZ_ASSERT(!IsDone(), "Shouldn't be done yet");
   while (item().DesiredParentType() != aParentType) {
     Next();
     if (IsDone()) {
@@ -12084,7 +12116,7 @@ Iterator::SkipItemsThatNeedAnonFlexOrGridItem(
   const nsFrameConstructorState& aState,
   bool aIsLegacyBox)
 {
-  NS_PRECONDITION(!IsDone(), "Shouldn't be done yet");
+  MOZ_ASSERT(!IsDone(), "Shouldn't be done yet");
   while (item().NeedsAnonFlexOrGridItem(aState, aIsLegacyBox)) {
     Next();
     if (IsDone()) {
@@ -12100,7 +12132,7 @@ Iterator::SkipItemsThatDontNeedAnonFlexOrGridItem(
   const nsFrameConstructorState& aState,
   bool aIsLegacyBox)
 {
-  NS_PRECONDITION(!IsDone(), "Shouldn't be done yet");
+  MOZ_ASSERT(!IsDone(), "Shouldn't be done yet");
   while (!(item().NeedsAnonFlexOrGridItem(aState, aIsLegacyBox))) {
     Next();
     if (IsDone()) {
@@ -12114,7 +12146,7 @@ inline bool
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::SkipItemsNotWantingRubyParent()
 {
-  NS_PRECONDITION(!IsDone(), "Shouldn't be done yet");
+  MOZ_ASSERT(!IsDone(), "Shouldn't be done yet");
   while (!IsRubyParentType(item().DesiredParentType())) {
     Next();
     if (IsDone()) {
@@ -12128,8 +12160,8 @@ inline bool
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::SkipWhitespace(nsFrameConstructorState& aState)
 {
-  NS_PRECONDITION(!IsDone(), "Shouldn't be done yet");
-  NS_PRECONDITION(item().IsWhitespace(aState), "Not pointing to whitespace?");
+  MOZ_ASSERT(!IsDone(), "Shouldn't be done yet");
+  MOZ_ASSERT(item().IsWhitespace(aState), "Not pointing to whitespace?");
   do {
     Next();
     if (IsDone()) {
@@ -12145,7 +12177,7 @@ nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::AppendItemToList(FrameConstructionItemList& aTargetList)
 {
   NS_ASSERTION(&aTargetList != &mList, "Unexpected call");
-  NS_PRECONDITION(!IsDone(), "should not be done");
+  MOZ_ASSERT(!IsDone(), "should not be done");
 
   FrameConstructionItem* item = mCurrent;
   Next();
@@ -12162,7 +12194,7 @@ Iterator::AppendItemsToList(nsCSSFrameConstructor* aFCtor, const Iterator& aEnd,
                             FrameConstructionItemList& aTargetList)
 {
   NS_ASSERTION(&aTargetList != &mList, "Unexpected call");
-  NS_PRECONDITION(&mList == &aEnd.mList, "End iterator for some other list?");
+  MOZ_ASSERT(&mList == &aEnd.mList, "End iterator for some other list?");
 
   // We can't just move our guts to the other list if it already has
   // some information or if we're not moving our entire list.
@@ -12211,8 +12243,8 @@ void
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::DeleteItemsTo(nsCSSFrameConstructor* aFCtor, const Iterator& aEnd)
 {
-  NS_PRECONDITION(&mList == &aEnd.mList, "End iterator for some other list?");
-  NS_PRECONDITION(*this != aEnd, "Shouldn't be at aEnd yet");
+  MOZ_ASSERT(&mList == &aEnd.mList, "End iterator for some other list?");
+  MOZ_ASSERT(*this != aEnd, "Shouldn't be at aEnd yet");
 
   do {
     NS_ASSERTION(!IsDone(), "Ran off end of list?");

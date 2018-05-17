@@ -8,11 +8,9 @@ const { createFactory, PureComponent } = require("devtools/client/shared/vendor/
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
+const FontMeta = createFactory(require("./FontMeta"));
 const FontPreview = createFactory(require("./FontPreview"));
 
-loader.lazyRequireGetter(this, "clipboardHelper", "devtools/shared/platform/clipboard");
-
-const { getStr } = require("../utils/l10n");
 const Types = require("../types");
 
 class Font extends PureComponent {
@@ -20,7 +18,9 @@ class Font extends PureComponent {
     return {
       font: PropTypes.shape(Types.font).isRequired,
       fontOptions: PropTypes.shape(Types.fontOptions).isRequired,
+      isForCurrentElement: PropTypes.bool.isRequired,
       onPreviewFonts: PropTypes.func.isRequired,
+      onToggleFontHighlight: PropTypes.func.isRequired,
     };
   }
 
@@ -32,7 +32,6 @@ class Font extends PureComponent {
     };
 
     this.onFontFaceRuleToggle = this.onFontFaceRuleToggle.bind(this);
-    this.onCopyURL = this.onCopyURL.bind(this);
   }
 
   componentWillReceiveProps(newProps) {
@@ -43,10 +42,6 @@ class Font extends PureComponent {
     this.setState({
       isFontFaceRuleExpanded: false,
     });
-  }
-
-  onCopyURL() {
-    clipboardHelper.copyString(this.props.font.URI);
   }
 
   onFontFaceRuleToggle(event) {
@@ -88,46 +83,6 @@ class Font extends PureComponent {
     );
   }
 
-  renderFontOrigin(url) {
-    if (!url) {
-      return dom.p(
-        {
-          className: "font-origin system"
-        },
-        getStr("fontinspector.system")
-      );
-    }
-
-    return dom.p(
-      {
-        className: "font-origin remote",
-      },
-      dom.span(
-        {
-          className: "url",
-          title: url
-        },
-        url
-      ),
-      dom.button(
-        {
-          className: "copy-icon",
-          onClick: this.onCopyURL,
-          title: getStr("fontinspector.copyURL"),
-        }
-      )
-    );
-  }
-
-  renderFontName(name) {
-    return dom.h1(
-      {
-        className: "font-name"
-      },
-      name
-    );
-  }
-
   renderFontCSSCodeTwisty() {
     let { isFontFaceRuleExpanded } = this.state;
 
@@ -146,26 +101,25 @@ class Font extends PureComponent {
     let {
       font,
       fontOptions,
+      isForCurrentElement,
       onPreviewFonts,
+      onToggleFontHighlight,
     } = this.props;
 
     let { previewText } = fontOptions;
 
     let {
-      name,
       previewUrl,
       rule,
       ruleText,
-      URI,
     } = font;
 
     return dom.li(
       {
         className: "font",
       },
-      this.renderFontName(name),
+      FontMeta({ font, isForCurrentElement, onToggleFontHighlight }),
       FontPreview({ previewText, previewUrl, onPreviewFonts }),
-      this.renderFontOrigin(URI),
       this.renderFontCSSCode(rule, ruleText)
     );
   }

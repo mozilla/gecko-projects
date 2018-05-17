@@ -9,15 +9,17 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
+Cu.importGlobalProperties(["Element"]);
+
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.jsm",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
-  RecentWindow: "resource:///modules/RecentWindow.jsm",
   Weave: "resource://services-sync/main.js",
 });
 
@@ -334,7 +336,7 @@ var PlacesUIUtils = {
         node.lastChild._placesView)
       return node.lastChild._placesView;
 
-    while (node instanceof Ci.nsIDOMElement) {
+    while (Element.isInstance(node)) {
       if (node._placesView)
         return node._placesView;
       if (node.localName == "tree" && node.getAttribute("type") == "places")
@@ -602,13 +604,7 @@ var PlacesUIUtils = {
     if (!aItemsToOpen.length)
       return;
 
-    // Prefer the caller window if it's a browser window, otherwise use
-    // the top browser window.
-    var browserWindow = null;
-    browserWindow =
-      aWindow && aWindow.document.documentElement.getAttribute("windowtype") == "navigator:browser" ?
-      aWindow : RecentWindow.getMostRecentBrowserWindow();
-
+    let browserWindow = getBrowserWindow(aWindow);
     var urls = [];
     let skipMarking = browserWindow && PrivateBrowsingUtils.isWindowPrivate(browserWindow);
     for (let item of aItemsToOpen) {
@@ -705,10 +701,16 @@ var PlacesUIUtils = {
   function PUIU_openNodeWithEvent(aNode, aEvent) {
     let window = aEvent.target.ownerGlobal;
 
+    let browserWindow = getBrowserWindow(window);
+
     let where = window.whereToOpenLink(aEvent, false, true);
-    if (where == "current" && this.loadBookmarksInTabs &&
-        PlacesUtils.nodeIsBookmark(aNode) && !aNode.uri.startsWith("javascript:")) {
-      where = "tab";
+    if (this.loadBookmarksInTabs && PlacesUtils.nodeIsBookmark(aNode)) {
+      if (where == "current" && !aNode.uri.startsWith("javascript:")) {
+        where = "tab";
+      }
+      if (where == "tab" && browserWindow.isTabEmpty(browserWindow.gBrowser.selectedTab)) {
+        where = "current";
+      }
     }
 
     this._openNodeIn(aNode, where, window);
@@ -745,7 +747,7 @@ var PlacesUIUtils = {
       if (aWhere == "current" && isBookmark) {
         if (PlacesUtils.annotations
                        .itemHasAnnotation(aNode.itemId, this.LOAD_IN_SIDEBAR_ANNO)) {
-          let browserWin = RecentWindow.getMostRecentBrowserWindow();
+          let browserWin = BrowserWindowTracker.getTopWindow();
           if (browserWin) {
             browserWin.openWebPanel(aNode.title, aNode.uri);
             return;
@@ -1128,7 +1130,7 @@ function canMoveUnwrappedNode(unwrappedNode) {
  *                  if one could not be found.
  */
 function getResultForBatching(viewOrElement) {
-  if (viewOrElement && viewOrElement instanceof Ci.nsIDOMElement &&
+  if (viewOrElement && Element.isInstance(viewOrElement) &&
       viewOrElement.id === "placesList") {
     // Note: fall back to the existing item if we can't find the right-hane pane.
     viewOrElement = viewOrElement.ownerDocument.getElementById("placeContent") || viewOrElement;
@@ -1297,4 +1299,11 @@ async function getTransactionsForCopy(items, insertionIndex,
     }
   }
   return transactions;
+}
+
+function getBrowserWindow(aWindow) {
+  // Prefer the caller window if it's a browser window, otherwise use
+  // the top browser window.
+  return aWindow && aWindow.document.documentElement.getAttribute("windowtype") == "navigator:browser" ?
+    aWindow : BrowserWindowTracker.getTopWindow();
 }

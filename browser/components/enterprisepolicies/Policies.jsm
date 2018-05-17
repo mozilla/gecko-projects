@@ -414,7 +414,7 @@ var Policies = {
               }
               url = Services.io.newFileURI(xpiFile).spec;
             }
-            AddonManager.getInstallForURL(url, null, "application/x-xpinstall").then(install => {
+            AddonManager.getInstallForURL(url, "application/x-xpinstall").then(install => {
               if (install.addon && install.addon.appDisabled) {
                 log.error(`Incompatible add-on - ${location}`);
                 install.cancel();
@@ -449,19 +449,18 @@ var Policies = {
         });
       }
       if ("Uninstall" in param) {
-        runOncePerModification("extensionsUninstall", JSON.stringify(param.Uninstall), () => {
-          AddonManager.getAddonsByIDs(param.Uninstall, (addons) => {
-            for (let addon of addons) {
-              if (addon) {
-                try {
-                  addon.uninstall();
-                } catch (e) {
-                  // This can fail for add-ons that can't be uninstalled.
-                  // Just ignore.
-                }
+        runOncePerModification("extensionsUninstall", JSON.stringify(param.Uninstall), async () => {
+          let addons = await AddonManager.getAddonsByIDs(param.Uninstall);
+          for (let addon of addons) {
+            if (addon) {
+              try {
+                addon.uninstall();
+              } catch (e) {
+                // This can fail for add-ons that can't be uninstalled.
+                // Just ignore.
               }
             }
-          });
+          }
         });
       }
       if ("Locked" in param) {

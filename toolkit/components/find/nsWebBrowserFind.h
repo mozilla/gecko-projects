@@ -21,10 +21,10 @@
 #define NS_WEB_BROWSER_FIND_CID \
   {0x57cf9383, 0x3405, 0x11d5, {0xbe, 0x5b, 0xaa, 0x20, 0xfa, 0x2c, 0xf3, 0x7c}}
 
-class nsISelection;
 class nsIDOMWindow;
 
 class nsIDocShell;
+class nsIDocument;
 class nsRange;
 
 namespace mozilla {
@@ -72,15 +72,15 @@ protected:
 
   void SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow, nsRange* aRange);
 
-  nsresult GetRootNode(nsIDOMDocument* aDomDoc, nsIDOMNode** aNode);
+  nsresult GetRootNode(nsIDocument* aDomDoc, nsIDOMNode** aNode);
   nsresult GetSearchLimits(nsRange* aRange,
                            nsRange* aStartPt, nsRange* aEndPt,
-                           nsIDOMDocument* aDoc, nsISelection* aSel,
+                           nsIDocument* aDoc, mozilla::dom::Selection* aSel,
                            bool aWrap);
   nsresult SetRangeAroundDocument(nsRange* aSearchRange,
                                   nsRange* aStartPoint,
                                   nsRange* aEndPoint,
-                                  nsIDOMDocument* aDoc);
+                                  nsIDocument* aDoc);
 
 protected:
   nsString mSearchString;

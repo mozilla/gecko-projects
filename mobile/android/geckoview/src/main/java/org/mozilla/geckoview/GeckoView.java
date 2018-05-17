@@ -515,25 +515,16 @@ public class GeckoView extends FrameLayout {
     }
 
     @Override
-    public boolean onHoverEvent(final MotionEvent event) {
-        // If we get a touchscreen hover event, and accessibility is not enabled, don't
-        // send it to Gecko.
-        if (event.getSource() == InputDevice.SOURCE_TOUCHSCREEN &&
-            !SessionAccessibility.Settings.isEnabled()) {
-            return false;
-        }
-
-        return mSession != null &&
-               mSession.getPanZoomController().onMotionEvent(event);
-    }
-
-    @Override
     public boolean onGenericMotionEvent(final MotionEvent event) {
         if (AndroidGamepadManager.handleMotionEvent(event)) {
             return true;
         }
 
-        return mSession != null &&
+        if (mSession == null) {
+            return false;
+        }
+
+        return mSession.getAccessibility().onMotionEvent(event) ||
                mSession.getPanZoomController().onMotionEvent(event);
     }
 }

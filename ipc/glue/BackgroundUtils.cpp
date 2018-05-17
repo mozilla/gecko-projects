@@ -315,6 +315,7 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
   PrincipalInfo triggeringPrincipalInfo;
   rv = PrincipalToPrincipalInfo(aLoadInfo->TriggeringPrincipal(),
                                 &triggeringPrincipalInfo);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   OptionalPrincipalInfo principalToInheritInfo = mozilla::void_t();
   if (aLoadInfo->PrincipalToInherit()) {
@@ -407,7 +408,6 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
       aLoadInfo->GetBrowserWouldUpgradeInsecureRequests(),
       aLoadInfo->GetVerifySignedContent(),
       aLoadInfo->GetEnforceSRI(),
-      aLoadInfo->GetAllowDocumentToBeAgnosticToCSP(),
       aLoadInfo->GetForceAllowDataURI(),
       aLoadInfo->GetAllowInsecureRedirectToDataURI(),
       aLoadInfo->GetSkipContentPolicyCheckForWebRequest(),
@@ -556,7 +556,6 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
                           loadInfoArgs.browserWouldUpgradeInsecureRequests(),
                           loadInfoArgs.verifySignedContent(),
                           loadInfoArgs.enforceSRI(),
-                          loadInfoArgs.allowDocumentToBeAgnosticToCSP(),
                           loadInfoArgs.forceAllowDataURI(),
                           loadInfoArgs.allowInsecureRedirectToDataURI(),
                           loadInfoArgs.skipContentPolicyCheckForWebRequest(),

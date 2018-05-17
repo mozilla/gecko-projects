@@ -9,7 +9,6 @@
 #include "HalImpl.h"
 #include "HalLog.h"
 #include "HalSandbox.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocument.h"
 #include "nsIDocShell.h"
@@ -665,19 +664,6 @@ SetProcessPriority(int aPid, ProcessPriority aPriority)
   PROXY_IF_SANDBOXED(SetProcessPriority(aPid, aPriority));
 }
 
-void
-SetCurrentThreadPriority(hal::ThreadPriority aThreadPriority)
-{
-  PROXY_IF_SANDBOXED(SetCurrentThreadPriority(aThreadPriority));
-}
-
-void
-SetThreadPriority(PlatformThreadId aThreadId,
-                  hal::ThreadPriority aThreadPriority)
-{
-  PROXY_IF_SANDBOXED(SetThreadPriority(aThreadId, aThreadPriority));
-}
-
 // From HalTypes.h.
 const char*
 ProcessPriorityToString(ProcessPriority aPriority)
@@ -702,18 +688,6 @@ ProcessPriorityToString(ProcessPriority aPriority)
   default:
     MOZ_ASSERT(false);
     return "???";
-  }
-}
-
-const char *
-ThreadPriorityToString(ThreadPriority aPriority)
-{
-  switch (aPriority) {
-    case THREAD_PRIORITY_COMPOSITOR:
-      return "COMPOSITOR";
-    default:
-      MOZ_ASSERT(false);
-      return "???";
   }
 }
 

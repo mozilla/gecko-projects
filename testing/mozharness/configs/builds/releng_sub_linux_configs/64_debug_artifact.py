@@ -6,14 +6,12 @@ config = {
         'clobber',
         'build',
     ],
-    "buildbot_json_path": "buildprops.json",
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
     'vcs_share_base': '/builds/hg-shared',
     # debug specific
     'debug_build': True,
     # decides whether we want to use moz_sign_cmd in env
-    'enable_signing': False,
-    # allows triggering of test jobs when --artifact try syntax is detected on buildbot
+    # allows triggering of test jobs when --artifact try syntax is detected
     'perfherder_extra_options': ['artifact'],
     #########################################################################
 
@@ -36,10 +34,8 @@ config = {
         # debug-specific
         'XPCOM_DEBUG_BREAK': 'stack-and-abort',
         ## 64 bit specific
-        'PATH': '/usr/local/bin:/usr/lib64/ccache:/bin:\
-/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/tools/git/bin:/tools/python27/bin:\
-/tools/python27-mercurial/bin:/home/cltbld/bin',
-        'LD_LIBRARY_PATH': "/tools/gcc-4.3.3/installed/lib64",
+        'PATH': '/usr/local/bin:/bin:\
+/usr/bin:/usr/local/sbin:/usr/sbin:/sbin',
         ##
     },
     'mozconfig_variant': 'debug-artifact',

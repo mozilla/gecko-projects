@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef mozilla_dom_serviceworkerregistrationimpl_h
+#define mozilla_dom_serviceworkerregistrationimpl_h
+
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/Unused.h"
 #include "nsCycleCollectionParticipant.h"
@@ -39,24 +42,11 @@ public:
   void
   ClearServiceWorkerRegistration(ServiceWorkerRegistration* aReg) override;
 
-  already_AddRefed<Promise>
-  Update(ErrorResult& aRv) override;
+  RefPtr<ServiceWorkerRegistrationPromise>
+  Update() override;
 
-  already_AddRefed<Promise>
-  Unregister(ErrorResult& aRv) override;
-
-  already_AddRefed<Promise>
-  ShowNotification(JSContext* aCx,
-                   const nsAString& aTitle,
-                   const NotificationOptions& aOptions,
-                   ErrorResult& aRv) override;
-
-  already_AddRefed<Promise>
-  GetNotifications(const GetNotificationOptions& aOptions,
-                   ErrorResult& aRv) override;
-
-  already_AddRefed<PushManager>
-  GetPushManager(JSContext* aCx, ErrorResult& aRv) override;
+  RefPtr<GenericPromise>
+  Unregister() override;
 
   // ServiceWorkerRegistrationListener
   void
@@ -90,6 +80,7 @@ private:
   RegistrationRemovedInternal();
 
   ServiceWorkerRegistration* mOuter;
+  ServiceWorkerRegistrationDescriptor mDescriptor;
   const nsString mScope;
   bool mListeningForEvents;
 };
@@ -118,24 +109,11 @@ public:
   void
   ClearServiceWorkerRegistration(ServiceWorkerRegistration* aReg) override;
 
-  already_AddRefed<Promise>
-  Update(ErrorResult& aRv) override;
+  RefPtr<ServiceWorkerRegistrationPromise>
+  Update() override;
 
-  already_AddRefed<Promise>
-  Unregister(ErrorResult& aRv) override;
-
-  already_AddRefed<Promise>
-  ShowNotification(JSContext* aCx,
-                   const nsAString& aTitle,
-                   const NotificationOptions& aOptions,
-                   ErrorResult& aRv) override;
-
-  already_AddRefed<Promise>
-  GetNotifications(const GetNotificationOptions& aOptions,
-                   ErrorResult& aRv) override;
-
-  already_AddRefed<PushManager>
-  GetPushManager(JSContext* aCx, ErrorResult& aRv) override;
+  RefPtr<GenericPromise>
+  Unregister() override;
 
   void
   UpdateFound();
@@ -154,6 +132,7 @@ private:
   GetWorkerPrivate(const MutexAutoLock& aProofOfLock);
 
   ServiceWorkerRegistration* mOuter;
+  const ServiceWorkerRegistrationDescriptor mDescriptor;
   const nsString mScope;
   RefPtr<WorkerListener> mListener;
   RefPtr<WeakWorkerRef> mWorkerRef;
@@ -161,3 +140,5 @@ private:
 
 } // dom namespace
 } // mozilla namespace
+
+#endif // mozilla_dom_serviceworkerregistrationimpl_h

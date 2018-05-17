@@ -6,7 +6,7 @@
 
 /*
  * Base class for all element classes; this provides an implementation
- * of DOM Core's nsIDOMElement, implements nsIContent, provides
+ * of DOM Core's Element, implements nsIContent, provides
  * utility methods for subclasses, and so forth.
  */
 
@@ -18,7 +18,6 @@
 #include "mozilla/EventStates.h"           // for member
 #include "mozilla/ServoTypes.h"
 #include "mozilla/dom/DirectionalityUtils.h"
-#include "nsIDOMElement.h"
 #include "nsILinkHandler.h"
 #include "nsINodeList.h"
 #include "nsNodeUtils.h"
@@ -74,6 +73,7 @@ namespace dom {
   struct ScrollToOptions;
   class DOMIntersectionObserver;
   class DOMMatrixReadOnly;
+  class Element;
   class ElementOrCSSPseudoElement;
   class UnrestrictedDoubleOrKeyframeAnimationOptions;
   enum class CallerType : uint32_t;
@@ -82,6 +82,8 @@ namespace dom {
 } // namespace dom
 } // namespace mozilla
 
+// Declared here because of include hell.
+extern "C" bool Servo_Element_IsDisplayContents(const mozilla::dom::Element*);
 
 already_AddRefed<nsContentList>
 NS_GetContentList(nsINode* aRootNode,
@@ -601,22 +603,22 @@ protected:
   // those in EXTERNALLY_MANAGED_STATES.
   virtual void AddStates(EventStates aStates)
   {
-    NS_PRECONDITION(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
-                    "Should only be adding externally-managed states here");
+    MOZ_ASSERT(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
+               "Should only be adding externally-managed states here");
     AddStatesSilently(aStates);
     NotifyStateChange(aStates);
   }
   virtual void RemoveStates(EventStates aStates)
   {
-    NS_PRECONDITION(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
-                    "Should only be removing externally-managed states here");
+    MOZ_ASSERT(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
+               "Should only be removing externally-managed states here");
     RemoveStatesSilently(aStates);
     NotifyStateChange(aStates);
   }
   virtual void ToggleStates(EventStates aStates, bool aNotify)
   {
-    NS_PRECONDITION(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
-                    "Should only be removing externally-managed states here");
+    MOZ_ASSERT(!aStates.HasAtLeastOneOfStates(INTRINSIC_STATES),
+               "Should only be removing externally-managed states here");
     mState ^= aStates;
     if (aNotify) {
       NotifyStateChange(aStates);
@@ -1435,6 +1437,11 @@ public:
   // Work around silly C++ name hiding stuff
   nsIFrame* GetPrimaryFrame() const { return nsIContent::GetPrimaryFrame(); }
 
+  bool IsDisplayContents() const
+  {
+    return HasServoData() && Servo_Element_IsDisplayContents(this);
+  }
+
   const nsAttrValue* GetParsedAttr(nsAtom* aAttr) const
   {
     return mAttrsAndChildren.GetAttr(aAttr);
@@ -2033,6 +2040,11 @@ inline const mozilla::dom::Element* nsINode::AsElement() const
 {
   MOZ_ASSERT(IsElement());
   return static_cast<const mozilla::dom::Element*>(this);
+}
+
+inline mozilla::dom::Element* nsINode::GetParentElement() const
+{
+  return mParent && mParent->IsElement() ? mParent->AsElement() : nullptr;
 }
 
 /**

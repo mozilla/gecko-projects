@@ -8,7 +8,6 @@
 #include "mozilla/ArrayUtils.h"
 
 #define CreateEvent CreateEventA
-#include "nsIDOMDocument.h"
 
 #include "Accessible-inl.h"
 #include "DocAccessible-inl.h"
@@ -74,7 +73,7 @@ RootAccessible::~RootAccessible()
 // Accessible
 
 ENameValueFlag
-RootAccessible::Name(nsString& aName)
+RootAccessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -89,7 +88,7 @@ RootAccessible::Name(nsString& aName)
 }
 
 role
-RootAccessible::NativeRole()
+RootAccessible::NativeRole() const
 {
   // If it's a <dialog> or <wizard>, use roles::DIALOG instead
   dom::Element* rootElm = mDocumentNode->GetRootElement();
@@ -103,7 +102,7 @@ RootAccessible::NativeRole()
 // RootAccessible protected member
 #ifdef MOZ_XUL
 uint32_t
-RootAccessible::GetChromeFlags()
+RootAccessible::GetChromeFlags() const
 {
   // Return the flag set for the top level window as defined
   // by nsIWebBrowserChrome::CHROME_WINDOW_[FLAGNAME]
@@ -124,7 +123,7 @@ RootAccessible::GetChromeFlags()
 #endif
 
 uint64_t
-RootAccessible::NativeState()
+RootAccessible::NativeState() const
 {
   uint64_t state = DocAccessibleWrap::NativeState();
   if (state & states::DEFUNCT)
@@ -230,11 +229,10 @@ RootAccessible::DocumentActivated(DocAccessible* aDocument)
 // nsIDOMEventListener
 
 NS_IMETHODIMP
-RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
+RootAccessible::HandleEvent(Event* aDOMEvent)
 {
   MOZ_ASSERT(aDOMEvent);
-  Event* event = aDOMEvent->InternalDOMEvent();
-  nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(event->GetOriginalTarget());
+  nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(aDOMEvent->GetOriginalTarget());
   if (!origTargetNode)
     return NS_OK;
 
@@ -253,7 +251,7 @@ RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
     // Root accessible exists longer than any of its descendant documents so
     // that we are guaranteed notification is processed before root accessible
     // is destroyed.
-    document->HandleNotification<RootAccessible, nsIDOMEvent>
+    document->HandleNotification<RootAccessible, Event>
       (this, &RootAccessible::ProcessDOMEvent, aDOMEvent);
   }
 
@@ -262,11 +260,11 @@ RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
 
 // RootAccessible protected
 void
-RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
+RootAccessible::ProcessDOMEvent(Event* aDOMEvent)
 {
   MOZ_ASSERT(aDOMEvent);
-  Event* event = aDOMEvent->InternalDOMEvent();
-  nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(event->GetOriginalTarget());
+  nsCOMPtr<nsINode> origTargetNode =
+    do_QueryInterface(aDOMEvent->GetOriginalTarget());
 
   nsAutoString eventType;
   aDOMEvent->GetType(eventType);
@@ -482,7 +480,7 @@ RootAccessible::Shutdown()
 }
 
 Relation
-RootAccessible::RelationByType(RelationType aType)
+RootAccessible::RelationByType(RelationType aType) const
 {
   if (!mDocumentNode || aType != RelationType::EMBEDS)
     return DocAccessibleWrap::RelationByType(aType);
@@ -652,11 +650,11 @@ RootAccessible::HandlePopupHidingEvent(nsINode* aPopupNode)
 
 #ifdef MOZ_XUL
 static void
-GetPropertyBagFromEvent(nsIDOMEvent* aEvent, nsIPropertyBag2** aPropertyBag)
+GetPropertyBagFromEvent(Event* aEvent, nsIPropertyBag2** aPropertyBag)
 {
   *aPropertyBag = nullptr;
 
-  CustomEvent* customEvent = aEvent->InternalDOMEvent()->AsCustomEvent();
+  CustomEvent* customEvent = aEvent->AsCustomEvent();
   if (!customEvent)
     return;
 
@@ -682,7 +680,7 @@ GetPropertyBagFromEvent(nsIDOMEvent* aEvent, nsIPropertyBag2** aPropertyBag)
 }
 
 void
-RootAccessible::HandleTreeRowCountChangedEvent(nsIDOMEvent* aEvent,
+RootAccessible::HandleTreeRowCountChangedEvent(Event* aEvent,
                                                XULTreeAccessible* aAccessible)
 {
   nsCOMPtr<nsIPropertyBag2> propBag;
@@ -704,7 +702,7 @@ RootAccessible::HandleTreeRowCountChangedEvent(nsIDOMEvent* aEvent,
 }
 
 void
-RootAccessible::HandleTreeInvalidatedEvent(nsIDOMEvent* aEvent,
+RootAccessible::HandleTreeInvalidatedEvent(Event* aEvent,
                                            XULTreeAccessible* aAccessible)
 {
   nsCOMPtr<nsIPropertyBag2> propBag;

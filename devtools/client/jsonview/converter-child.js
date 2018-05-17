@@ -7,7 +7,7 @@
 "use strict";
 
 const {Ci, Cu, CC} = require("chrome");
-const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const ChromeUtils = require("ChromeUtils");
 const Services = require("Services");
 
 loader.lazyRequireGetter(this, "NetworkHelper",
@@ -21,6 +21,8 @@ const BinaryInput = CC("@mozilla.org/binaryinputstream;1",
                        "nsIBinaryInputStream", "setInputStream");
 const BufferStream = CC("@mozilla.org/io/arraybuffer-input-stream;1",
                        "nsIArrayBufferInputStream", "setData");
+
+const kCSP = "default-src 'none' ; script-src resource:; ";
 
 // Localization
 loader.lazyGetter(this, "jsonViewStrings", () => {
@@ -38,7 +40,7 @@ loader.lazyGetter(this, "jsonViewStrings", () => {
 function Converter() {}
 
 Converter.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([
+  QueryInterface: ChromeUtils.generateQI([
     Ci.nsIStreamConverter,
     Ci.nsIStreamListener,
     Ci.nsIRequestObserver
@@ -79,11 +81,13 @@ Converter.prototype = {
     request.QueryInterface(Ci.nsIChannel);
     request.contentType = "text/html";
 
+    let headers = getHttpHeaders(request);
+
     // Enforce strict CSP:
     try {
       request.QueryInterface(Ci.nsIHttpChannel);
-      request.setResponseHeader("Content-Security-Policy",
-        "default-src 'none' ; script-src resource:; ", false);
+      request.setResponseHeader("Content-Security-Policy", kCSP, false);
+      request.setResponseHeader("Content-Security-Policy-Report-Only", "", false);
     } catch (ex) {
       // If this is not an HTTP channel we can't and won't do anything.
     }
@@ -105,7 +109,7 @@ Converter.prototype = {
 
     // Initialize stuff.
     let win = NetworkHelper.getWindowForRequest(request);
-    this.data = exportData(win, request);
+    this.data = exportData(win, headers);
     insertJsonData(win, this.data.json);
     win.addEventListener("contentMessage", onContentMessage, false, true);
     keepThemeUpdated(win);
@@ -164,8 +168,30 @@ function fixSave(request) {
   request.setProperty("contentType", originalType);
 }
 
+function getHttpHeaders(request) {
+  let headers = {
+    response: [],
+    request: []
+  };
+  // The request doesn't have to be always nsIHttpChannel
+  // (e.g. in case of data: URLs)
+  if (request instanceof Ci.nsIHttpChannel) {
+    request.visitResponseHeaders({
+      visitHeader: function(name, value) {
+        headers.response.push({name: name, value: value});
+      }
+    });
+    request.visitRequestHeaders({
+      visitHeader: function(name, value) {
+        headers.request.push({name: name, value: value});
+      }
+    });
+  }
+  return headers;
+}
+
 // Exports variables that will be accessed by the non-privileged scripts.
-function exportData(win, request) {
+function exportData(win, headers) {
   let data = Cu.createObjectIn(win, {
     defineAs: "JSONView"
   });
@@ -188,24 +214,6 @@ function exportData(win, request) {
   };
   data.Locale = Cu.cloneInto(Locale, win, {cloneFunctions: true});
 
-  let headers = {
-    response: [],
-    request: []
-  };
-  // The request doesn't have to be always nsIHttpChannel
-  // (e.g. in case of data: URLs)
-  if (request instanceof Ci.nsIHttpChannel) {
-    request.visitResponseHeaders({
-      visitHeader: function(name, value) {
-        headers.response.push({name: name, value: value});
-      }
-    });
-    request.visitRequestHeaders({
-      visitHeader: function(name, value) {
-        headers.request.push({name: name, value: value});
-      }
-    });
-  }
   data.headers = Cu.cloneInto(headers, win);
 
   return data;
@@ -242,6 +250,10 @@ function initialHTML(doc) {
       "dir": Services.locale.isAppLocaleRTL ? "rtl" : "ltr"
     }, [
       element("head", {}, [
+        element("meta", {
+          "http-equiv": "Content-Security-Policy",
+          content: kCSP,
+        }),
         element("link", {
           rel: "stylesheet",
           type: "text/css",

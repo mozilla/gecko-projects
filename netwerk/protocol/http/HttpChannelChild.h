@@ -316,6 +316,8 @@ private:
 
   nsCString mProtocolVersion;
 
+  TimeStamp mLastStatusReported;
+
   // If ResumeAt is called before AsyncOpen, we need to send extra data upstream
   bool mSendResumeAt;
 
@@ -496,7 +498,7 @@ class InterceptStreamListener : public nsIStreamListener
 {
   RefPtr<HttpChannelChild> mOwner;
   nsCOMPtr<nsISupports> mContext;
-  virtual ~InterceptStreamListener() {}
+  virtual ~InterceptStreamListener() = default;
  public:
   InterceptStreamListener(HttpChannelChild* aOwner, nsISupports* aContext)
   : mOwner(aOwner)

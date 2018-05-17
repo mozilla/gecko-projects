@@ -13,8 +13,6 @@ const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {executeSoon} = require("devtools/shared/DevToolsUtils");
 const {Toolbox} = require("devtools/client/framework/toolbox");
-const {PrefObserver} = require("devtools/client/shared/prefs");
-const Telemetry = require("devtools/client/shared/telemetry");
 const HighlightersOverlay = require("devtools/client/inspector/shared/highlighters-overlay");
 const ReflowTracker = require("devtools/client/inspector/shared/reflow-tracker");
 const Store = require("devtools/client/inspector/store");
@@ -26,6 +24,7 @@ const Promise = require("Promise");
 
 loader.lazyRequireGetter(this, "initCssProperties", "devtools/shared/fronts/css-properties", true);
 loader.lazyRequireGetter(this, "HTMLBreadcrumbs", "devtools/client/inspector/breadcrumbs", true);
+loader.lazyRequireGetter(this, "ThreePaneOnboardingTooltip", "devtools/client/inspector/shared/three-pane-onboarding-tooltip");
 loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-shortcuts");
 loader.lazyRequireGetter(this, "InspectorSearch", "devtools/client/inspector/inspector-search", true);
 loader.lazyRequireGetter(this, "ToolSidebar", "devtools/client/inspector/toolsidebar", true);
@@ -55,8 +54,10 @@ const PORTRAIT_MODE_WIDTH_THRESHOLD = 700;
 // mode.
 const SIDE_PORTAIT_MODE_WIDTH_THRESHOLD = 1000;
 
+const SHOW_THREE_PANE_ONBOARDING_PREF = "devtools.inspector.show-three-pane-tooltip";
 const SHOW_THREE_PANE_TOGGLE_PREF = "devtools.inspector.three-pane-toggle";
 const THREE_PANE_ENABLED_PREF = "devtools.inspector.three-pane-enabled";
+const THREE_PANE_ENABLED_SCALAR = "devtools.inspector.three_pane_enabled";
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -102,33 +103,35 @@ function Inspector(toolbox) {
   this.panelDoc = window.document;
   this.panelWin = window;
   this.panelWin.inspector = this;
+  this.telemetry = toolbox.telemetry;
+
+  this.store = Store();
 
   // Map [panel id => panel instance]
   // Stores all the instances of sidebar panels like rule view, computed view, ...
   this._panels = new Map();
 
   this.highlighters = new HighlightersOverlay(this);
-  this.prefsObserver = new PrefObserver("devtools.");
   this.reflowTracker = new ReflowTracker(this._target);
   this.styleChangeTracker = new InspectorStyleChangeTracker(this);
-  this.store = Store();
-  this.telemetry = new Telemetry();
 
   // Store the URL of the target page prior to navigation in order to ensure
   // telemetry counts in the Grid Inspector are not double counted on reload.
   this.previousURL = this.target.url;
 
-  this.show3PaneToggle = Services.prefs.getBoolPref(SHOW_THREE_PANE_TOGGLE_PREF);
   this.is3PaneModeEnabled = Services.prefs.getBoolPref(THREE_PANE_ENABLED_PREF);
+  this.show3PaneToggle = Services.prefs.getBoolPref(SHOW_THREE_PANE_TOGGLE_PREF);
+  this.show3PaneTooltip = Services.prefs.getBoolPref(SHOW_THREE_PANE_ONBOARDING_PREF);
 
   this.nodeMenuTriggerInfo = null;
 
+  this._clearSearchResultsLabel = this._clearSearchResultsLabel.bind(this);
   this._handleRejectionIfNotDestroyed = this._handleRejectionIfNotDestroyed.bind(this);
-  this._onContextMenu = this._onContextMenu.bind(this);
   this._onBeforeNavigate = this._onBeforeNavigate.bind(this);
+  this._onContextMenu = this._onContextMenu.bind(this);
   this._onMarkupFrameLoad = this._onMarkupFrameLoad.bind(this);
   this._updateSearchResultsLabel = this._updateSearchResultsLabel.bind(this);
-  this._clearSearchResultsLabel = this._clearSearchResultsLabel.bind(this);
+  this._updateDebuggerPausedWarning = this._updateDebuggerPausedWarning.bind(this);
 
   this.onDetached = this.onDetached.bind(this);
   this.onMarkupLoaded = this.onMarkupLoaded.bind(this);
@@ -171,47 +174,37 @@ Inspector.prototype = {
   },
 
   get inspector() {
-    return this._toolbox.inspector;
+    return this.toolbox.inspector;
   },
 
   get walker() {
-    return this._toolbox.walker;
+    return this.toolbox.walker;
   },
 
   get selection() {
-    return this._toolbox.selection;
+    return this.toolbox.selection;
   },
 
   get highlighter() {
-    return this._toolbox.highlighter;
+    return this.toolbox.highlighter;
   },
 
-  get isOuterHTMLEditable() {
-    return this._target.client.traits.editOuterHTML;
-  },
-
-  get hasUrlToImageDataResolver() {
-    return this._target.client.traits.urlToImageDataResolver;
-  },
-
-  get canGetUniqueSelector() {
-    return this._target.client.traits.getUniqueSelector;
-  },
-
+  // Added in 53.
   get canGetCssPath() {
     return this._target.client.traits.getCssPath;
   },
 
+  // Added in 56.
   get canGetXPath() {
     return this._target.client.traits.getXPath;
   },
 
-  get canGetUsedFontFaces() {
-    return this._target.client.traits.getUsedFontFaces;
-  },
+  get notificationBox() {
+    if (!this._notificationBox) {
+      this._notificationBox = this.toolbox.getNotificationBox();
+    }
 
-  get canPasteInnerOrAdjacentHTML() {
-    return this._target.client.traits.pasteHTML;
+    return this._notificationBox;
   },
 
   /**
@@ -235,32 +228,10 @@ Inspector.prototype = {
     this.selection.on("detached-front", this.onDetached);
 
     if (this.target.isLocalTab) {
-      // Show a warning when the debugger is paused.
-      // We show the warning only when the inspector
-      // is selected.
-      this.updateDebuggerPausedWarning = () => {
-        let notificationBox = this._toolbox.getNotificationBox();
-        let notification =
-          notificationBox.getNotificationWithValue("inspector-script-paused");
-        if (!notification && this._toolbox.currentToolId == "inspector" &&
-            this._toolbox.threadClient.paused) {
-          let message = INSPECTOR_L10N.getStr("debuggerPausedWarning.message");
-          notificationBox.appendNotification(message,
-            "inspector-script-paused", "", notificationBox.PRIORITY_WARNING_HIGH);
-        }
-
-        if (notification && this._toolbox.currentToolId != "inspector") {
-          notificationBox.removeNotification(notification);
-        }
-
-        if (notification && !this._toolbox.threadClient.paused) {
-          notificationBox.removeNotification(notification);
-        }
-      };
-      this.target.on("thread-paused", this.updateDebuggerPausedWarning);
-      this.target.on("thread-resumed", this.updateDebuggerPausedWarning);
-      this._toolbox.on("select", this.updateDebuggerPausedWarning);
-      this.updateDebuggerPausedWarning();
+      this.target.on("thread-paused", this._updateDebuggerPausedWarning);
+      this.target.on("thread-resumed", this._updateDebuggerPausedWarning);
+      this.toolbox.on("select", this._updateDebuggerPausedWarning);
+      this._updateDebuggerPausedWarning();
     }
 
     this._initMarkup();
@@ -291,8 +262,20 @@ Inspector.prototype = {
       await this.markup.expandNode(this.selection.nodeFront);
     }
 
-    // And setup the toolbar only now because it may depend on the document.
+    // Setup the toolbar only now because it may depend on the document.
     await this.setupToolbar();
+
+    // Show the 3 pane onboarding tooltip only if the inspector is visisble since the
+    // Accessibility panel initializes the Inspector.
+    if (this.show3PaneTooltip && this.toolbox.currentToolId === "inspector") {
+      this.threePaneTooltip = new ThreePaneOnboardingTooltip(this.toolbox, this.panelDoc);
+    }
+
+    // Log the 3 pane inspector setting on inspector open. The question we want to answer
+    // is:
+    // "What proportion of users use the 3 pane vs 2 pane inspector on inspector open?"
+    this.telemetry.keyedScalarAdd(THREE_PANE_ENABLED_SCALAR, this.is3PaneModeEnabled, 1);
+
     this.emit("ready");
     return this;
   },
@@ -427,6 +410,35 @@ Inspector.prototype = {
     this.searchResultsLabel.textContent = str;
   },
 
+  /**
+   * Show a warning notification box when the debugger is paused. We show the warning only
+   * when the inspector is selected.
+   */
+  _updateDebuggerPausedWarning: function() {
+    if (!this.toolbox.threadClient.paused && !this._notificationBox) {
+      return;
+    }
+
+    let notificationBox = this.notificationBox;
+    let notification = this.notificationBox.getNotificationWithValue(
+      "inspector-script-paused");
+
+    if (!notification && this.toolbox.currentToolId == "inspector" &&
+        this.toolbox.threadClient.paused) {
+      let message = INSPECTOR_L10N.getStr("debuggerPausedWarning.message");
+      notificationBox.appendNotification(message,
+        "inspector-script-paused", "", notificationBox.PRIORITY_WARNING_HIGH);
+    }
+
+    if (notification && this.toolbox.currentToolId != "inspector") {
+      notificationBox.removeNotification(notification);
+    }
+
+    if (notification && !this.toolbox.threadClient.paused) {
+      notificationBox.removeNotification(notification);
+    }
+  },
+
   get React() {
     return this._toolbox.React;
   },
@@ -452,6 +464,22 @@ Inspector.prototype = {
     return this._InspectorTabPanel;
   },
 
+  get InspectorSplitBox() {
+    if (!this._InspectorSplitBox) {
+      this._InspectorSplitBox = this.React.createFactory(this.browserRequire(
+        "devtools/client/shared/components/splitter/SplitBox"));
+    }
+    return this._InspectorSplitBox;
+  },
+
+  get TabBar() {
+    if (!this._TabBar) {
+      this._TabBar = this.React.createFactory(this.browserRequire(
+        "devtools/client/shared/components/tabs/TabBar"));
+    }
+    return this._TabBar;
+  },
+
   /**
    * Check if the inspector should use the landscape mode.
    *
@@ -469,11 +497,9 @@ Inspector.prototype = {
    * the Inspector panel.
    */
   setupSplitter: function() {
-    let SplitBox = this.React.createFactory(this.browserRequire(
-      "devtools/client/shared/components/splitter/SplitBox"));
     let { width, height, splitSidebarWidth } = this.getSidebarSize();
 
-    let splitter = SplitBox({
+    let splitter = this.InspectorSplitBox({
       className: "inspector-sidebar-splitter",
       initialWidth: width,
       initialHeight: height,
@@ -484,7 +510,7 @@ Inspector.prototype = {
       startPanel: this.InspectorTabPanel({
         id: "inspector-main-content"
       }),
-      endPanel: SplitBox({
+      endPanel: this.InspectorSplitBox({
         initialWidth: splitSidebarWidth,
         minSize: 10,
         maxSize: "80%",
@@ -813,115 +839,59 @@ Inspector.prototype = {
         defaultTab == "computedview");
     }
 
-    if (Services.prefs.getBoolPref("devtools.changesview.enabled")) {
-      // Inject a lazy loaded react tab by exposing a fake React object
-      // with a lazy defined Tab thanks to `panel` being a function
-      let changesId = "changesview";
-      let changesTitle = INSPECTOR_L10N.getStr("inspector.sidebar.changesViewTitle");
+    const animationTitle =
+      INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle");
+
+    if (Services.prefs.getBoolPref("devtools.new-animationinspector.enabled")) {
+      const animationId = "newanimationinspector";
+
       this.sidebar.addTab(
-        changesId,
-        changesTitle,
+        animationId,
+        animationTitle,
         {
           props: {
-            id: changesId,
-            title: changesTitle
+            id: animationId,
+            title: animationTitle
           },
           panel: () => {
-            if (!this.changesview) {
-              const ChangesView =
-                this.browserRequire("devtools/client/inspector/changes/changes");
-              this.changesview = new ChangesView(this, this.panelWin);
-            }
-
-            return this.changesview.provider;
+            const AnimationInspector =
+              this.browserRequire("devtools/client/inspector/animation/animation");
+            this.animationinspector = new AnimationInspector(this, this.panelWin);
+            return this.animationinspector.provider;
           }
         },
-        defaultTab == changesId);
+        defaultTab == animationId);
+    } else {
+      this.sidebar.addFrameTab(
+        "animationinspector",
+        animationTitle,
+        "chrome://devtools/content/inspector/animation-old/animation-inspector.xhtml",
+        defaultTab == "animationinspector");
     }
 
-    if (Services.prefs.getBoolPref("devtools.eventsview.enabled")) {
-      // Inject a lazy loaded react tab by exposing a fake React object
-      // with a lazy defined Tab thanks to `panel` being a function
-      let eventsId = "eventsview";
-      let eventsTitle = INSPECTOR_L10N.getStr("inspector.sidebar.eventsViewTitle");
-      this.sidebar.addTab(
-        eventsId,
-        eventsTitle,
-        {
-          props: {
-            id: eventsId,
-            title: eventsTitle
-          },
-          panel: () => {
-            if (!this.eventview) {
-              const EventsView =
-                this.browserRequire("devtools/client/inspector/events/events");
-              this.eventsview = new EventsView(this, this.panelWin);
-            }
-
-            return this.eventsview.provider;
-          }
+    // Inject a lazy loaded react tab by exposing a fake React object
+    // with a lazy defined Tab thanks to `panel` being a function
+    let fontId = "fontinspector";
+    let fontTitle = INSPECTOR_L10N.getStr("inspector.sidebar.fontInspectorTitle");
+    this.sidebar.addTab(
+      fontId,
+      fontTitle,
+      {
+        props: {
+          id: fontId,
+          title: fontTitle
         },
-        defaultTab == eventsId);
-    }
-
-    if (this.target.form.animationsActor) {
-      const animationTitle =
-        INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle");
-
-      if (Services.prefs.getBoolPref("devtools.new-animationinspector.enabled")) {
-        const animationId = "newanimationinspector";
-
-        this.sidebar.addTab(
-          animationId,
-          animationTitle,
-          {
-            props: {
-              id: animationId,
-              title: animationTitle
-            },
-            panel: () => {
-              const AnimationInspector =
-                this.browserRequire("devtools/client/inspector/animation/animation");
-              this.animationinspector = new AnimationInspector(this, this.panelWin);
-              return this.animationinspector.provider;
-            }
-          },
-          defaultTab == animationId);
-      } else {
-        this.sidebar.addFrameTab(
-          "animationinspector",
-          animationTitle,
-          "chrome://devtools/content/animationinspector/animation-inspector.xhtml",
-          defaultTab == "animationinspector");
-      }
-    }
-
-    if (this.canGetUsedFontFaces) {
-      // Inject a lazy loaded react tab by exposing a fake React object
-      // with a lazy defined Tab thanks to `panel` being a function
-      let fontId = "fontinspector";
-      let fontTitle = INSPECTOR_L10N.getStr("inspector.sidebar.fontInspectorTitle");
-      this.sidebar.addTab(
-        fontId,
-        fontTitle,
-        {
-          props: {
-            id: fontId,
-            title: fontTitle
-          },
-          panel: () => {
-            if (!this.fontinspector) {
-              const FontInspector =
-                this.browserRequire("devtools/client/inspector/fonts/fonts");
-              this.fontinspector = new FontInspector(this, this.panelWin);
-            }
-
-            return this.fontinspector.provider;
+        panel: () => {
+          if (!this.fontinspector) {
+            const FontInspector =
+              this.browserRequire("devtools/client/inspector/fonts/fonts");
+            this.fontinspector = new FontInspector(this, this.panelWin);
           }
-        },
-        defaultTab == fontId);
-    }
+
+          return this.fontinspector.provider;
+        }
+      },
+      defaultTab == fontId);
 
     // Persist splitter state in preferences.
     this.sidebar.on("show", this.onSidebarShown);
@@ -1225,8 +1195,7 @@ Inspector.prototype = {
 
     // On any new selection made by the user, store the unique css selector
     // of the selected node so it can be restored after reload of the same page
-    if (this.canGetUniqueSelector &&
-        this.selection.isElementNode()) {
+    if (this.selection.isElementNode()) {
       selection.getUniqueSelector().then(selector => {
         this.selectionCssSelector = selector;
       }, this._handleRejectionIfNotDestroyed);
@@ -1321,10 +1290,13 @@ Inspector.prototype = {
 
     this.cancelUpdate();
 
+    this.selection.off("new-node-front", this.onNewSelection);
+    this.selection.off("detached-front", this.onDetached);
+    this.sidebar.off("select", this.onSidebarSelect);
     this.target.off("will-navigate", this._onBeforeNavigate);
-    this.target.off("thread-paused", this.updateDebuggerPausedWarning);
-    this.target.off("thread-resumed", this.updateDebuggerPausedWarning);
-    this._toolbox.off("select", this.updateDebuggerPausedWarning);
+    this.target.off("thread-paused", this._updateDebuggerPausedWarning);
+    this.target.off("thread-resumed", this._updateDebuggerPausedWarning);
+    this._toolbox.off("select", this._updateDebuggerPausedWarning);
 
     for (let [, panel] of this._panels) {
       panel.destroy();
@@ -1343,29 +1315,27 @@ Inspector.prototype = {
       this.animationinspector.destroy();
     }
 
+    if (this.threePaneTooltip) {
+      this.threePaneTooltip.destroy();
+    }
+
     let cssPropertiesDestroyer = this._cssProperties.front.destroy();
-
-    this.sidebar.off("select", this.onSidebarSelect);
     let sidebarDestroyer = this.sidebar.destroy();
-
     let ruleViewSideBarDestroyer = this.ruleViewSideBar ?
       this.ruleViewSideBar.destroy() : null;
+    let markupDestroyer = this._destroyMarkup();
+    let highlighterDestroyer = this.highlighters.destroy();
 
     this.teardownSplitter();
-
     this.teardownToolbar();
+
     this.breadcrumbs.destroy();
-    this.selection.off("new-node-front", this.onNewSelection);
-    this.selection.off("detached-front", this.onDetached);
-
-    let markupDestroyer = this._destroyMarkup();
-
-    let highlighterDestroyer = this.highlighters.destroy();
-    this.prefsObserver.destroy();
     this.reflowTracker.destroy();
     this.styleChangeTracker.destroy();
     this.search.destroy();
 
+    this._notificationBox = null;
+    this._target = null;
     this._toolbox = null;
     this.breadcrumbs = null;
     this.highlighters = null;
@@ -1373,14 +1343,15 @@ Inspector.prototype = {
     this.panelDoc = null;
     this.panelWin.inspector = null;
     this.panelWin = null;
-    this.prefsObserver = null;
     this.resultsLength = null;
     this.search = null;
     this.searchBox = null;
     this.show3PaneToggle = null;
+    this.show3PaneTooltip = null;
     this.sidebar = null;
     this.store = null;
-    this.target = null;
+    this.telemetry = null;
+    this.threePaneTooltip = null;
 
     this._panelDestroyer = promise.all([
       highlighterDestroyer,
@@ -1443,7 +1414,6 @@ Inspector.prototype = {
                                 !this.selection.isAnonymousNode() &&
                                 !this.selection.isRoot();
     let isScreenshotable = isSelectionElement &&
-                           this.canGetUniqueSelector &&
                            this.selection.nodeFront.isTreeDisplayed;
 
     let menu = new Menu();
@@ -1451,7 +1421,7 @@ Inspector.prototype = {
       id: "node-menu-edithtml",
       label: INSPECTOR_L10N.getStr("inspectorHTMLEdit.label"),
       accesskey: INSPECTOR_L10N.getStr("inspectorHTMLEdit.accesskey"),
-      disabled: !isEditableElement || !this.isOuterHTMLEditable,
+      disabled: !isEditableElement,
       click: () => this.editHTML(),
     }));
     menu.append(new MenuItem({
@@ -1586,7 +1556,7 @@ Inspector.prototype = {
   },
 
   buildA11YMenuItem: function(menu) {
-    if (!this.selection.isElementNode() ||
+    if (!(this.selection.isElementNode() || this.selection.isTextNode()) ||
         !Services.prefs.getBoolPref("devtools.accessibility.enabled")) {
       return;
     }
@@ -1639,7 +1609,6 @@ Inspector.prototype = {
       accesskey:
         INSPECTOR_L10N.getStr("inspectorCopyCSSSelector.accesskey"),
       disabled: !isSelectionElement,
-      hidden: !this.canGetUniqueSelector,
       click: () => this.copyUniqueSelector(),
     }));
     copySubmenu.append(new MenuItem({
@@ -1673,26 +1642,24 @@ Inspector.prototype = {
 
   _getPasteSubmenu: function(isEditableElement) {
     let isPasteable = isEditableElement && this._getClipboardContentForPaste();
-    let disableAdjacentPaste = !isPasteable ||
-          !this.canPasteInnerOrAdjacentHTML || this.selection.isRoot() ||
+    let disableAdjacentPaste = !isPasteable || this.selection.isRoot() ||
           this.selection.isBodyNode() || this.selection.isHeadNode();
     let disableFirstLastPaste = !isPasteable ||
-          !this.canPasteInnerOrAdjacentHTML || (this.selection.isHTMLNode() &&
-          this.selection.isRoot());
+          (this.selection.isHTMLNode() && this.selection.isRoot());
 
     let pasteSubmenu = new Menu();
     pasteSubmenu.append(new MenuItem({
       id: "node-menu-pasteinnerhtml",
       label: INSPECTOR_L10N.getStr("inspectorPasteInnerHTML.label"),
       accesskey: INSPECTOR_L10N.getStr("inspectorPasteInnerHTML.accesskey"),
-      disabled: !isPasteable || !this.canPasteInnerOrAdjacentHTML,
+      disabled: !isPasteable,
       click: () => this.pasteInnerHTML(),
     }));
     pasteSubmenu.append(new MenuItem({
       id: "node-menu-pasteouterhtml",
       label: INSPECTOR_L10N.getStr("inspectorPasteOuterHTML.label"),
       accesskey: INSPECTOR_L10N.getStr("inspectorPasteOuterHTML.accesskey"),
-      disabled: !isPasteable || !this.isOuterHTMLEditable,
+      disabled: !isPasteable,
       click: () => this.pasteOuterHTML(),
     }));
     pasteSubmenu.append(new MenuItem({
@@ -2170,7 +2137,7 @@ Inspector.prototype = {
       return;
     }
 
-    this.telemetry.toolOpened("copyuniquecssselector");
+    this.telemetry.scalarSet("devtools.copy.unique.css.selector.opened", 1);
     this.selection.nodeFront.getUniqueSelector().then(selector => {
       clipboardHelper.copyString(selector);
     }).catch(console.error);
@@ -2184,7 +2151,7 @@ Inspector.prototype = {
       return;
     }
 
-    this.telemetry.toolOpened("copyfullcssselector");
+    this.telemetry.scalarSet("devtools.copy.full.css.selector.opened", 1);
     this.selection.nodeFront.getCssPath().then(path => {
       clipboardHelper.copyString(path);
     }).catch(console.error);
@@ -2198,7 +2165,7 @@ Inspector.prototype = {
       return;
     }
 
-    this.telemetry.toolOpened("copyxpath");
+    this.telemetry.scalarSet("devtools.copy.xpath.opened", 1);
     this.selection.nodeFront.getXPath().then(path => {
       clipboardHelper.copyString(path);
     }).catch(console.error);
@@ -2436,115 +2403,4 @@ Inspector.prototype = {
   },
 };
 
-/**
- * Create a fake toolbox when running the inspector standalone, either in a chrome tab or
- * in a content tab.
- *
- * @param {Target} target to debug
- * @param {Function} createThreadClient
- *        When supported the thread client needs a reference to the toolbox.
- *        This callback will be called right after the toolbox object is created.
- * @param {Object} dependencies
- *        - react
- *        - reactDOM
- *        - browserRequire
- */
-const buildFakeToolbox = async function(
-  target, createThreadClient, {
-    React,
-    ReactDOM,
-    browserRequire
-  }) {
-  const { InspectorFront } = require("devtools/shared/fronts/inspector");
-  const { Selection } = require("devtools/client/framework/selection");
-  const { getHighlighterUtils } = require("devtools/client/framework/toolbox-highlighter-utils");
-
-  let notImplemented = function() {
-    throw new Error("Not implemented in a tab");
-  };
-  let fakeToolbox = {
-    target,
-    hostType: "bottom",
-    doc: window.document,
-    win: window,
-    on() {}, emit() {}, off() {},
-    initInspector() {},
-    browserRequire,
-    React,
-    ReactDOM,
-    isToolRegistered() {
-      return false;
-    },
-    currentToolId: "inspector",
-    getCurrentPanel() {
-      return "inspector";
-    },
-    get textboxContextMenuPopup() {
-      notImplemented();
-    },
-    getPanel: notImplemented,
-    openSplitConsole: notImplemented,
-    viewCssSourceInStyleEditor: notImplemented,
-    viewJsSourceInDebugger: notImplemented,
-    viewSource: notImplemented,
-    viewSourceInDebugger: notImplemented,
-    viewSourceInStyleEditor: notImplemented,
-
-    get inspectorExtensionSidebars() {
-      notImplemented();
-    },
-
-    // For attachThread:
-    highlightTool() {},
-    unhighlightTool() {},
-    selectTool() {},
-    raise() {},
-    getNotificationBox() {}
-  };
-
-  fakeToolbox.threadClient = await createThreadClient(fakeToolbox);
-
-  let inspector = InspectorFront(target.client, target.form);
-  let showAllAnonymousContent =
-    Services.prefs.getBoolPref("devtools.inspector.showAllAnonymousContent");
-  let walker = await inspector.getWalker({ showAllAnonymousContent });
-  let selection = new Selection(walker);
-  let highlighter = await inspector.getHighlighter(false);
-  fakeToolbox.highlighterUtils = getHighlighterUtils(fakeToolbox);
-
-  fakeToolbox.inspector = inspector;
-  fakeToolbox.walker = walker;
-  fakeToolbox.selection = selection;
-  fakeToolbox.highlighter = highlighter;
-  return fakeToolbox;
-};
-
-// URL constructor doesn't support chrome: scheme
-let href = window.location.href.replace(/chrome:/, "http://");
-let url = new window.URL(href);
-
-// If query parameters are given in a chrome tab, the inspector is running in standalone.
-if (window.location.protocol === "chrome:" && url.search.length > 1) {
-  const { targetFromURL } = require("devtools/client/framework/target-from-url");
-  const { attachThread } = require("devtools/client/framework/attach-thread");
-
-  const browserRequire = BrowserLoader({ window, useOnlyShared: true }).require;
-  const React = browserRequire("devtools/client/shared/vendor/react");
-  const ReactDOM = browserRequire("devtools/client/shared/vendor/react-dom");
-
-  (async function() {
-    let target = await targetFromURL(url);
-    let fakeToolbox = await buildFakeToolbox(
-      target,
-      (toolbox) => attachThread(toolbox),
-      { React, ReactDOM, browserRequire }
-    );
-    let inspectorUI = new Inspector(fakeToolbox);
-    inspectorUI.init();
-  })().catch(e => {
-    window.alert("Unable to start the inspector:" + e.message + "\n" + e.stack);
-  });
-}
-
 exports.Inspector = Inspector;
-exports.buildFakeToolbox = buildFakeToolbox;

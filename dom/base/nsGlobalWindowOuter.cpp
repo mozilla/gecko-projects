@@ -17,6 +17,7 @@
 #include "nsHistory.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/IdleRequest.h"
@@ -106,9 +107,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
 #include "Crypto.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMEvent.h"
 #include "nsIDOMOfflineResourceList.h"
 #include "nsDOMString.h"
 #include "nsIEmbeddingSiteWindow.h"
@@ -119,7 +117,6 @@
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsISelectionController.h"
-#include "nsISelection.h"
 #include "nsIPrompt.h"
 #include "nsIPromptService.h"
 #include "nsIPromptFactory.h"
@@ -796,7 +793,7 @@ nsChromeOuterWindowProxy::singleton;
 static JSObject*
 NewOuterWindowProxy(JSContext *cx, JS::Handle<JSObject*> global, bool isChrome)
 {
-  JSAutoCompartment ac(cx, global);
+  JSAutoRealm ar(cx, global);
   MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(global) == global);
 
   js::WrapperOptions options;
@@ -1085,13 +1082,11 @@ nsGlobalWindowOuter::ClearControllers()
 // QueryInterface implementation for nsGlobalWindowOuter
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsGlobalWindowOuter)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  // Make sure this matches the cast in nsGlobalWindowOuter::FromWrapper()
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, EventTarget)
   NS_INTERFACE_MAP_ENTRY(nsIDOMWindow)
   NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIScriptGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   if (aIID.Equals(NS_GET_IID(nsPIDOMWindowOuter))) {
     foundInterface = static_cast<nsPIDOMWindowOuter*>(this);
@@ -1219,7 +1214,7 @@ nsGlobalWindowOuter::IsBlackForCC(bool aTracingNeeded)
   return (nsCCUncollectableMarker::InGeneration(GetMarkedCCGeneration()) ||
           HasKnownLiveWrapper()) &&
          (!aTracingNeeded ||
-          HasNothingToTrace(static_cast<nsIDOMEventTarget*>(this)));
+          HasNothingToTrace(ToSupports(this)));
 }
 
 //*****************************************************************************
@@ -1418,7 +1413,7 @@ WindowStateHolder::WindowStateHolder(nsGlobalWindowInner* aWindow)
   : mInnerWindow(aWindow),
     mInnerWindowReflector(RootingCx(), aWindow->GetWrapper())
 {
-  NS_PRECONDITION(aWindow, "null window");
+  MOZ_ASSERT(aWindow, "null window");
 
   aWindow->Suspend();
 
@@ -1540,7 +1535,7 @@ static const JSFunctionSpec EnablePrivilegeSpec[] = {
 static bool
 InitializeLegacyNetscapeObject(JSContext* aCx, JS::Handle<JSObject*> aGlobal)
 {
-  JSAutoCompartment ac(aCx, aGlobal);
+  JSAutoRealm ar(aCx, aGlobal);
 
   // Note: MathJax depends on window.netscape being exposed. See bug 791526.
   JS::Rooted<JSObject*> obj(aCx);
@@ -1643,7 +1638,7 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
                                     nsISupports* aState,
                                     bool aForceReuseInnerWindow)
 {
-  NS_PRECONDITION(mDocumentPrincipal == nullptr,
+  MOZ_ASSERT(mDocumentPrincipal == nullptr,
                   "mDocumentPrincipal prematurely set!");
   MOZ_ASSERT(aDocument);
 
@@ -1877,8 +1872,8 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
       mContext->SetWindowProxy(outerObject);
     }
 
-    // Enter the new global's compartment.
-    JSAutoCompartment ac(cx, GetWrapperPreserveColor());
+    // Enter the new global's realm.
+    JSAutoRealm ar(cx, GetWrapperPreserveColor());
 
     {
       JS::Rooted<JSObject*> outer(cx, GetWrapperPreserveColor());
@@ -1910,7 +1905,7 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
     }
   }
 
-  JSAutoCompartment ac(cx, GetWrapperPreserveColor());
+  JSAutoRealm ar(cx, GetWrapperPreserveColor());
 
   if (!aState && !reUseInnerWindow) {
     // Loading a new page and creating a new inner window, *not*
@@ -2134,7 +2129,7 @@ nsGlobalWindowOuter::SetDocShell(nsIDocShell* aDocShell)
 
   // Get our enclosing chrome shell and retrieve its global window impl, so
   // that we can do some forwarding to the chrome document.
-  nsCOMPtr<nsIDOMEventTarget> chromeEventHandler;
+  RefPtr<EventTarget> chromeEventHandler;
   mDocShell->GetChromeEventHandler(getter_AddRefs(chromeEventHandler));
   mChromeEventHandler = do_QueryInterface(chromeEventHandler);
   if (!mChromeEventHandler) {
@@ -3063,19 +3058,8 @@ nsGlobalWindowOuter::SetStatusOuter(const nsAString& aStatus)
 {
   mStatus = aStatus;
 
-  /*
-   * If caller is not chrome, prevent propagating window.status to the UI by
-   * exiting early.
-   */
-  if (!nsContentUtils::LegacyIsCallerChromeOrNativeCode()) {
-    return;
-  }
-
-  nsCOMPtr<nsIWebBrowserChrome> browserChrome = GetWebBrowserChrome();
-  if (browserChrome) {
-    browserChrome->SetStatus(nsIWebBrowserChrome::STATUS_SCRIPT,
-                             PromiseFlatString(aStatus).get());
-  }
+  // We don't support displaying window.status in the UI, so there's nothing
+  // left to do here.
 }
 
 void
@@ -3824,7 +3808,7 @@ nsGlobalWindowOuter::DispatchResizeEvent(const CSSIntSize& aSize)
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
-  JSAutoCompartment ac(cx, GetWrapperPreserveColor());
+  JSAutoRealm ar(cx, GetWrapperPreserveColor());
 
   DOMWindowResizeEventDetail detail;
   detail.mWidth = aSize.width;
@@ -3864,7 +3848,7 @@ nsGlobalWindowOuter::WindowExists(const nsAString& aName,
                                   bool aForceNoOpener,
                                   bool aLookForCallerOnJSStack)
 {
-  NS_PRECONDITION(mDocShell, "Must have docshell");
+  MOZ_ASSERT(mDocShell, "Must have docshell");
 
   if (aForceNoOpener) {
     return aName.LowerCaseEqualsLiteral("_self") ||
@@ -4841,13 +4825,12 @@ nsGlobalWindowOuter::FocusOuter(ErrorResult& aError)
       return;
     }
 
-    nsIContent* frame = parentdoc->FindContentForSubDocument(mDoc);
-    nsCOMPtr<nsIDOMElement> frameElement = do_QueryInterface(frame);
-    if (frameElement) {
+    RefPtr<Element> frame = parentdoc->FindContentForSubDocument(mDoc);
+    if (frame) {
       uint32_t flags = nsIFocusManager::FLAG_NOSCROLL;
       if (canFocus)
         flags |= nsIFocusManager::FLAG_RAISE;
-      aError = fm->SetFocus(frameElement, flags);
+      aError = fm->SetFocus(frame, flags);
     }
     return;
   }
@@ -4887,10 +4870,9 @@ nsGlobalWindowOuter::BlurOuter()
     // if the root is focused, clear the focus
     nsIFocusManager* fm = nsFocusManager::GetFocusManager();
     if (fm && mDoc) {
-      nsCOMPtr<nsIDOMElement> element;
+      RefPtr<Element> element;
       fm->GetFocusedElementForWindow(this, false, nullptr, getter_AddRefs(element));
-      nsCOMPtr<nsIContent> content = do_QueryInterface(element);
-      if (content == mDoc->GetRootElement()) {
+      if (element == mDoc->GetRootElement()) {
         fm->ClearFocus(this);
       }
     }
@@ -5622,7 +5604,7 @@ nsGlobalWindowOuter::CallerInnerWindow()
   // sandboxPrototype. This used to work incidentally for unrelated reasons, but
   // now we need to do some special handling to support it.
   if (xpc::IsSandbox(scope)) {
-    JSAutoCompartment ac(cx, scope);
+    JSAutoRealm ar(cx, scope);
     JS::Rooted<JSObject*> scopeProto(cx);
     bool ok = JS_GetPrototype(cx, scope, &scopeProto);
     NS_ENSURE_TRUE(ok, nullptr);
@@ -6231,7 +6213,7 @@ nsGlobalWindowOuter::GetRealFrameElementOuter()
  * nsIGlobalWindow::GetFrameElement (when called from C++) is just a wrapper
  * around GetRealFrameElement.
  */
-already_AddRefed<nsIDOMElement>
+Element*
 nsGlobalWindowOuter::GetFrameElement()
 {
   FORWARD_TO_INNER(GetFrameElement, (), nullptr);
@@ -6291,7 +6273,7 @@ public:
 
 void
 nsGlobalWindowOuter::UpdateCommands(const nsAString& anAction,
-                                    nsISelection* aSel,
+                                    Selection* aSel,
                                     int16_t aReason)
 {
   // If this is a child process, redirect to the parent process.
@@ -6312,14 +6294,16 @@ nsGlobalWindowOuter::UpdateCommands(const nsAString& anAction,
   }
 
   nsIDocument* doc = rootWindow->GetExtantDoc();
-  XULDocument* xulDoc = doc ? doc->AsXULDocument() : nullptr;
   // See if we contain a XUL document.
+  if (!doc || !doc->IsXULDocument()) {
+    return;
+  }
   // selectionchange action is only used for mozbrowser, not for XUL. So we bypass
   // XUL command dispatch if anAction is "selectionchange".
-  if (xulDoc && !anAction.EqualsLiteral("selectionchange")) {
+  if (!anAction.EqualsLiteral("selectionchange")) {
     // Retrieve the command dispatcher and call updateCommands on it.
     nsIDOMXULCommandDispatcher* xulCommandDispatcher =
-      xulDoc->GetCommandDispatcher();
+      doc->AsXULDocument()->GetCommandDispatcher();
     if (xulCommandDispatcher) {
       nsContentUtils::AddScriptRunner(new CommandDispatcher(xulCommandDispatcher,
                                                             anAction));
@@ -6338,15 +6322,13 @@ nsGlobalWindowOuter::GetSelectionOuter()
   if (!presShell) {
     return nullptr;
   }
-  nsISelection* domSelection =
-    presShell->GetCurrentSelection(SelectionType::eNormal);
-  return domSelection ? domSelection->AsSelection() : nullptr;
+  return presShell->GetCurrentSelection(SelectionType::eNormal);
 }
 
-already_AddRefed<nsISelection>
+already_AddRefed<Selection>
 nsGlobalWindowOuter::GetSelection()
 {
-  nsCOMPtr<nsISelection> selection = GetSelectionOuter();
+  RefPtr<Selection> selection = GetSelectionOuter();
   return selection.forget();
 }
 
@@ -6401,7 +6383,7 @@ nsGlobalWindowOuter::FindOuter(const nsAString& aString, bool aCaseSensitive,
 }
 
 //*****************************************************************************
-// nsGlobalWindowOuter::nsIDOMEventTarget
+// EventTarget
 //*****************************************************************************
 
 nsPIDOMWindowOuter*
@@ -6638,11 +6620,12 @@ nsGlobalWindowOuter::SetChromeEventHandler(EventTarget* aChromeEventHandler)
 }
 
 void
-nsGlobalWindowOuter::SetFocusedNode(nsIContent* aNode,
-                                    uint32_t aFocusMethod,
-                                    bool aNeedsFocus)
+nsGlobalWindowOuter::SetFocusedElement(Element* aElement,
+                                       uint32_t aFocusMethod,
+                                       bool aNeedsFocus)
 {
-  FORWARD_TO_INNER_VOID(SetFocusedNode, (aNode, aFocusMethod, aNeedsFocus));
+  FORWARD_TO_INNER_VOID(SetFocusedElement,
+                        (aElement, aFocusMethod, aNeedsFocus));
 }
 
 uint32_t
@@ -6689,14 +6672,13 @@ nsGlobalWindowOuter::SetKeyboardIndicators(UIStateChangeType aShowAccelerators,
 
   bool newShouldShowFocusRing = ShouldShowFocusRing();
   if (mInnerWindow && nsGlobalWindowInner::Cast(mInnerWindow)->mHasFocus &&
-      mInnerWindow->mFocusedNode &&
-      oldShouldShowFocusRing != newShouldShowFocusRing &&
-      mInnerWindow->mFocusedNode->IsElement()) {
+      mInnerWindow->mFocusedElement &&
+      oldShouldShowFocusRing != newShouldShowFocusRing) {
     // Update focusedNode's state.
     if (newShouldShowFocusRing) {
-      mInnerWindow->mFocusedNode->AsElement()->AddStates(NS_EVENT_STATE_FOCUSRING);
+      mInnerWindow->mFocusedElement->AddStates(NS_EVENT_STATE_FOCUSRING);
     } else {
-      mInnerWindow->mFocusedNode->AsElement()->RemoveStates(NS_EVENT_STATE_FOCUSRING);
+      mInnerWindow->mFocusedElement->RemoveStates(NS_EVENT_STATE_FOCUSRING);
     }
   }
 }
@@ -6915,10 +6897,11 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
   if (argv)
       argv->GetLength(&argc);
 #endif
-  NS_PRECONDITION(!aExtraArgument || (!argv && argc == 0),
-                  "Can't pass in arguments both ways");
-  NS_PRECONDITION(!aCalledNoScript || (!argv && argc == 0),
-                  "Can't pass JS args when called via the noscript methods");
+
+  MOZ_ASSERT(!aExtraArgument || (!argv && argc == 0),
+             "Can't pass in arguments both ways");
+  MOZ_ASSERT(!aCalledNoScript || (!argv && argc == 0),
+             "Can't pass JS args when called via the noscript methods");
 
   mozilla::Maybe<AutoUnblockScriptClosing> closeUnblocker;
 
@@ -7169,7 +7152,7 @@ nsGlobalWindowOuter::SecurityCheckURL(const char *aURL)
   }
   AutoJSContext cx;
   nsGlobalWindowInner* sourceWin = nsGlobalWindowInner::Cast(sourceWindow);
-  JSAutoCompartment ac(cx, sourceWin->GetGlobalJSObject());
+  JSAutoRealm ar(cx, sourceWin->GetGlobalJSObject());
 
   // Resolve the baseURI, which could be relative to the calling window.
   //
@@ -7271,13 +7254,14 @@ nsGlobalWindowOuter::RestoreWindowState(nsISupports *aState)
 
   // if a link is focused, refocus with the FLAG_SHOWRING flag set. This makes
   // it easy to tell which link was last clicked when going back a page.
-  nsIContent* focusedNode = inner->GetFocusedNode();
-  if (nsContentUtils::ContentIsLink(focusedNode)) {
+  Element* focusedElement = inner->GetFocusedElement();
+  if (nsContentUtils::ContentIsLink(focusedElement)) {
     nsIFocusManager* fm = nsFocusManager::GetFocusManager();
     if (fm) {
-      nsCOMPtr<nsIDOMElement> focusedElement(do_QueryInterface(focusedNode));
-      fm->SetFocus(focusedElement, nsIFocusManager::FLAG_NOSCROLL |
-                                   nsIFocusManager::FLAG_SHOWRING);
+      // XXXbz Do we need the stack strong ref here?
+      RefPtr<Element> kungFuDeathGrip(focusedElement);
+      fm->SetFocus(kungFuDeathGrip, nsIFocusManager::FLAG_NOSCROLL |
+                                    nsIFocusManager::FLAG_SHOWRING);
     }
   }
 
@@ -7718,18 +7702,26 @@ NextWindowID();
 } // namespace mozilla
 
 nsPIDOMWindowOuter::nsPIDOMWindowOuter()
-: mFrameElement(nullptr), mDocShell(nullptr), mModalStateDepth(0),
-  mIsActive(false), mIsBackground(false),
-  mMediaSuspend(
-    Preferences::GetBool("media.block-autoplay-until-in-foreground", true) &&
-    Preferences::GetBool("media.autoplay.enabled", true) ?
-    nsISuspendedTypes::SUSPENDED_BLOCK : nsISuspendedTypes::NONE_SUSPENDED),
-  mAudioMuted(false), mAudioVolume(1.0),
-  mDesktopModeViewport(false), mIsRootOuterWindow(false), mInnerWindow(nullptr),
+  : mFrameElement(nullptr)
+  , mDocShell(nullptr)
+  , mModalStateDepth(0)
+  , mIsActive(false)
+  , mIsBackground(false)
+  , mMediaSuspend(
+      Preferences::GetBool("media.block-autoplay-until-in-foreground", true)
+        ? nsISuspendedTypes::SUSPENDED_BLOCK
+        : nsISuspendedTypes::NONE_SUSPENDED)
+  , mAudioMuted(false)
+  , mAudioVolume(1.0)
+  , mDesktopModeViewport(false)
+  , mIsRootOuterWindow(false)
+  , mInnerWindow(nullptr)
+  ,
   // Make sure no actual window ends up with mWindowID == 0
-  mWindowID(NextWindowID()),
-  mMarkedCCGeneration(0), mServiceWorkersTestingEnabled(false),
-  mLargeAllocStatus(LargeAllocStatus::NONE)
+  mWindowID(NextWindowID())
+  , mMarkedCCGeneration(0)
+  , mServiceWorkersTestingEnabled(false)
+  , mLargeAllocStatus(LargeAllocStatus::NONE)
 {
 }
 
@@ -7744,4 +7736,3 @@ nsAutoPopupStatePusherInternal::~nsAutoPopupStatePusherInternal()
 {
   nsContentUtils::PopPopupControlState(mOldState);
 }
-

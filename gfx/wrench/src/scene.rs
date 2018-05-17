@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use webrender::api::{BuiltDisplayList, ColorF, Epoch};
-use webrender::api::{LayerSize, PipelineId};
+use webrender::api::{LayoutSize, PipelineId};
 use webrender::api::{PropertyBinding, PropertyBindingId, LayoutTransform, DynamicProperties};
 
 /// Stores a map of the animated property bindings for the current display list. These
@@ -45,27 +45,21 @@ impl SceneProperties {
 
         match property {
             PropertyBinding::Value(matrix) => matrix,
-            PropertyBinding::Binding(ref key) => self.transform_properties
+            PropertyBinding::Binding(ref key, v) => self.transform_properties
                 .get(&key.id)
                 .cloned()
-                .unwrap_or_else(|| {
-                    println!("Property binding {:?} has an invalid value.", key);
-                    LayoutTransform::identity()
-                }),
+                .unwrap_or(v),
         }
     }
 
     /// Get the current value for a float property.
-    pub fn resolve_float(&self, property: &PropertyBinding<f32>, default_value: f32) -> f32 {
+    pub fn resolve_float(&self, property: &PropertyBinding<f32>) -> f32 {
         match *property {
             PropertyBinding::Value(value) => value,
-            PropertyBinding::Binding(ref key) => self.float_properties
+            PropertyBinding::Binding(ref key, v) => self.float_properties
                 .get(&key.id)
                 .cloned()
-                .unwrap_or_else(|| {
-                    println!("Property binding {:?} has an invalid value.", key);
-                    default_value
-                }),
+                .unwrap_or(v),
         }
     }
 }
@@ -74,7 +68,7 @@ impl SceneProperties {
 #[derive(Debug)]
 pub struct ScenePipeline {
     pub epoch: Epoch,
-    pub viewport_size: LayerSize,
+    pub viewport_size: LayoutSize,
     pub background_color: Option<ColorF>,
 }
 
@@ -113,7 +107,7 @@ impl Scene {
         pipeline_id: &PipelineId,
         epoch: &Epoch,
         background_color: &Option<ColorF>,
-        viewport_size: &LayerSize,
+        viewport_size: &LayoutSize,
     ) {
         let new_pipeline = ScenePipeline {
             epoch: epoch.clone(),

@@ -60,7 +60,7 @@
 /******/ 	__webpack_require__.p = "";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 17);
+/******/ 	return __webpack_require__(__webpack_require__.s = 19);
 /******/ })
 /************************************************************************/
 /******/ ([
@@ -112,7 +112,7 @@ const actionTypes = {};
 /* harmony export (immutable) */ __webpack_exports__["b"] = actionTypes;
 
 
-for (const type of ["ARCHIVE_FROM_POCKET", "BLOCK_URL", "BOOKMARK_URL", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISABLE_ONBOARDING", "INIT", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_FIREFOX_ACCOUNTS", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "THEME_UPDATE", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "UNINIT", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
+for (const type of ["ARCHIVE_FROM_POCKET", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISABLE_ONBOARDING", "DOWNLOAD_CHANGED", "INIT", "MIGRATION_CANCEL", "MIGRATION_COMPLETED", "MIGRATION_START", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "THEME_UPDATE", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "UNINIT", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
   actionTypes[type] = type;
 }
 
@@ -239,6 +239,20 @@ function UserEvent(data) {
 }
 
 /**
+ * ASRouterUserEvent - A telemetry ping indicating a user action from AS router. This should only
+ *                     be sent from the UI during a user session.
+ *
+ * @param  {object} data Fields to include in the ping (source, etc.)
+ * @return {object} An AlsoToMain action
+ */
+function ASRouterUserEvent(data) {
+  return AlsoToMain({
+    type: actionTypes.AS_ROUTER_TELEMETRY_USER_EVENT,
+    data
+  });
+}
+
+/**
  * UndesiredEvent - A telemetry ping indicating an undesired state.
  *
  * @param  {object} data Fields to include in the ping (value, etc.)
@@ -299,6 +313,7 @@ function WebExtEvent(type, data, importContext = globalImportContext) {
 var actionCreators = {
   BroadcastToContent,
   UserEvent,
+  ASRouterUserEvent,
   UndesiredEvent,
   PerfEvent,
   ImpressionStats,
@@ -860,22 +875,28 @@ var reducers = { TopSites, App, Snippets, Prefs, Dialog, Sections, Theme };
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["b"] = initMessageCenter;
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_dom__ = __webpack_require__(8);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_dom___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_dom__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__templates_SimpleSnippet__ = __webpack_require__(19);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["b"] = initASRouter;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_lib_init_store__ = __webpack_require__(8);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__components_ImpressionsWrapper_ImpressionsWrapper__ = __webpack_require__(22);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_dom__ = __webpack_require__(9);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_dom___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react_dom__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5__templates_SimpleSnippet_SimpleSnippet__ = __webpack_require__(23);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
 
 
 
-const INCOMING_MESSAGE_NAME = "MessageCenter:parent-to-child";
-const OUTGOING_MESSAGE_NAME = "MessageCenter:child-to-parent";
 
-const MessageCenterUtils = {
+
+
+const INCOMING_MESSAGE_NAME = "ASRouter:parent-to-child";
+const OUTGOING_MESSAGE_NAME = "ASRouter:child-to-parent";
+
+const ASRouterUtils = {
   addListener(listener) {
     global.addMessageListener(INCOMING_MESSAGE_NAME, listener);
   },
@@ -886,27 +907,56 @@ const MessageCenterUtils = {
     global.sendAsyncMessage(OUTGOING_MESSAGE_NAME, action);
   },
   blockById(id) {
-    MessageCenterUtils.sendMessage({ type: "BLOCK_MESSAGE_BY_ID", data: { id } });
+    ASRouterUtils.sendMessage({ type: "BLOCK_MESSAGE_BY_ID", data: { id } });
   },
   unblockById(id) {
-    MessageCenterUtils.sendMessage({ type: "UNBLOCK_MESSAGE_BY_ID", data: { id } });
+    ASRouterUtils.sendMessage({ type: "UNBLOCK_MESSAGE_BY_ID", data: { id } });
   },
   getNextMessage() {
-    MessageCenterUtils.sendMessage({ type: "GET_NEXT_MESSAGE" });
+    ASRouterUtils.sendMessage({ type: "GET_NEXT_MESSAGE" });
+  },
+  overrideMessage(id) {
+    ASRouterUtils.sendMessage({ type: "OVERRIDE_MESSAGE", data: { id } });
+  },
+  sendTelemetry(ping) {
+    const payload = __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].ASRouterUserEvent(ping);
+    global.sendAsyncMessage(__WEBPACK_IMPORTED_MODULE_1_content_src_lib_init_store__["a" /* OUTGOING_MESSAGE_NAME */], payload);
   }
 };
-/* harmony export (immutable) */ __webpack_exports__["a"] = MessageCenterUtils;
+/* harmony export (immutable) */ __webpack_exports__["a"] = ASRouterUtils;
 
 
-class MessageCenterUISurface extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.PureComponent {
+// Note: nextProps/prevProps refer to props passed to <ImpressionsWrapper />, not <ASRouterUISurface />
+function shouldSendImpressionOnUpdate(nextProps, prevProps) {
+  return nextProps.message.id && (!prevProps.message || prevProps.message.id !== nextProps.message.id);
+}
+
+class ASRouterUISurface extends __WEBPACK_IMPORTED_MODULE_3_react___default.a.PureComponent {
   constructor(props) {
     super(props);
     this.onMessageFromParent = this.onMessageFromParent.bind(this);
+    this.sendImpression = this.sendImpression.bind(this);
+    this.sendUserActionTelemetry = this.sendUserActionTelemetry.bind(this);
     this.state = { message: {} };
   }
 
+  sendUserActionTelemetry(extraProps = {}) {
+    const { message } = this.state;
+    const eventType = `${message.provider}_user_event`;
+
+    ASRouterUtils.sendTelemetry(Object.assign({
+      message_id: message.id,
+      source: this.props.id,
+      action: eventType
+    }, extraProps));
+  }
+
+  sendImpression() {
+    this.sendUserActionTelemetry({ event: "IMPRESSION" });
+  }
+
   onBlockById(id) {
-    return () => MessageCenterUtils.blockById(id);
+    return () => ASRouterUtils.blockById(id);
   }
 
   onMessageFromParent({ data: action }) {
@@ -921,12 +971,12 @@ class MessageCenterUISurface extends __WEBPACK_IMPORTED_MODULE_0_react___default
   }
 
   componentWillMount() {
-    MessageCenterUtils.addListener(this.onMessageFromParent);
-    MessageCenterUtils.sendMessage({ type: "CONNECT_UI_REQUEST" });
+    ASRouterUtils.addListener(this.onMessageFromParent);
+    ASRouterUtils.sendMessage({ type: "CONNECT_UI_REQUEST" });
   }
 
   componentWillUnmount() {
-    MessageCenterUtils.removeMessageListener(this.onMessageFromParent);
+    ASRouterUtils.removeListener(this.onMessageFromParent);
   }
 
   render() {
@@ -934,26 +984,198 @@ class MessageCenterUISurface extends __WEBPACK_IMPORTED_MODULE_0_react___default
     if (!message.id) {
       return null;
     }
-
-    return __WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_2__templates_SimpleSnippet__["a" /* SimpleSnippet */], _extends({}, message, {
-      getNextMessage: MessageCenterUtils.getNextMessage,
-      onBlock: this.onBlockById(message.id) }));
+    return __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(
+      __WEBPACK_IMPORTED_MODULE_2__components_ImpressionsWrapper_ImpressionsWrapper__["a" /* ImpressionsWrapper */],
+      {
+        message: message,
+        sendImpression: this.sendImpression,
+        shouldSendImpressionOnUpdate: shouldSendImpressionOnUpdate
+        // This helps with testing
+        , document: this.props.document },
+      __WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_5__templates_SimpleSnippet_SimpleSnippet__["a" /* SimpleSnippet */], _extends({}, message, {
+        UISurface: this.props.id,
+        getNextMessage: ASRouterUtils.getNextMessage,
+        onBlock: this.onBlockById(message.id),
+        sendUserActionTelemetry: this.sendUserActionTelemetry }))
+    );
   }
 }
+/* unused harmony export ASRouterUISurface */
 
-function initMessageCenter() {
-  __WEBPACK_IMPORTED_MODULE_1_react_dom___default.a.render(__WEBPACK_IMPORTED_MODULE_0_react___default.a.createElement(MessageCenterUISurface, null), document.getElementById("snippets-container"));
+
+ASRouterUISurface.defaultProps = { document: global.document };
+
+function initASRouter() {
+  __WEBPACK_IMPORTED_MODULE_4_react_dom___default.a.render(__WEBPACK_IMPORTED_MODULE_3_react___default.a.createElement(ASRouterUISurface, { id: "NEWTAB_FOOTER_BAR" }), document.getElementById("snippets-container"));
 }
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
 /* 8 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["b"] = initStore;
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux__ = __webpack_require__(21);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_redux__);
+/* eslint-env mozilla/frame-script */
+
+
+
+
+const MERGE_STORE_ACTION = "NEW_TAB_INITIAL_STATE";
+/* unused harmony export MERGE_STORE_ACTION */
+
+const OUTGOING_MESSAGE_NAME = "ActivityStream:ContentToMain";
+/* harmony export (immutable) */ __webpack_exports__["a"] = OUTGOING_MESSAGE_NAME;
+
+const INCOMING_MESSAGE_NAME = "ActivityStream:MainToContent";
+/* unused harmony export INCOMING_MESSAGE_NAME */
+
+const EARLY_QUEUED_ACTIONS = [__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SAVE_SESSION_PERF_DATA, __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].PAGE_PRERENDERED];
+/* unused harmony export EARLY_QUEUED_ACTIONS */
+
+
+/**
+ * A higher-order function which returns a reducer that, on MERGE_STORE action,
+ * will return the action.data object merged into the previous state.
+ *
+ * For all other actions, it merely calls mainReducer.
+ *
+ * Because we want this to merge the entire state object, it's written as a
+ * higher order function which takes the main reducer (itself often a call to
+ * combineReducers) as a parameter.
+ *
+ * @param  {function} mainReducer reducer to call if action != MERGE_STORE_ACTION
+ * @return {function}             a reducer that, on MERGE_STORE_ACTION action,
+ *                                will return the action.data object merged
+ *                                into the previous state, and the result
+ *                                of calling mainReducer otherwise.
+ */
+function mergeStateReducer(mainReducer) {
+  return (prevState, action) => {
+    if (action.type === MERGE_STORE_ACTION) {
+      return Object.assign({}, prevState, action.data);
+    }
+
+    return mainReducer(prevState, action);
+  };
+}
+
+/**
+ * messageMiddleware - Middleware that looks for SentToMain type actions, and sends them if necessary
+ */
+const messageMiddleware = store => next => action => {
+  const skipLocal = action.meta && action.meta.skipLocal;
+  if (__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isSendToMain(action)) {
+    sendAsyncMessage(OUTGOING_MESSAGE_NAME, action);
+  }
+  if (!skipLocal) {
+    next(action);
+  }
+};
+
+const rehydrationMiddleware = store => next => action => {
+  if (store._didRehydrate) {
+    return next(action);
+  }
+
+  const isMergeStoreAction = action.type === MERGE_STORE_ACTION;
+  const isRehydrationRequest = action.type === __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].NEW_TAB_STATE_REQUEST;
+
+  if (isRehydrationRequest) {
+    store._didRequestInitialState = true;
+    return next(action);
+  }
+
+  if (isMergeStoreAction) {
+    store._didRehydrate = true;
+    return next(action);
+  }
+
+  // If init happened after our request was made, we need to re-request
+  if (store._didRequestInitialState && action.type === __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].INIT) {
+    return next(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].NEW_TAB_STATE_REQUEST }));
+  }
+
+  if (__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isBroadcastToContent(action) || __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isSendToOneContent(action) || __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isSendToPreloaded(action)) {
+    // Note that actions received before didRehydrate will not be dispatched
+    // because this could negatively affect preloading and the the state
+    // will be replaced by rehydration anyway.
+    return null;
+  }
+
+  return next(action);
+};
+/* unused harmony export rehydrationMiddleware */
+
+
+/**
+ * This middleware queues up all the EARLY_QUEUED_ACTIONS until it receives
+ * the first action from main. This is useful for those actions for main which
+ * require higher reliability, i.e. the action will not be lost in the case
+ * that it gets sent before the main is ready to receive it. Conversely, any
+ * actions allowed early are accepted to be ignorable or re-sendable.
+ */
+const queueEarlyMessageMiddleware = store => next => action => {
+  if (store._receivedFromMain) {
+    next(action);
+  } else if (__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isFromMain(action)) {
+    next(action);
+    store._receivedFromMain = true;
+    // Sending out all the early actions as main is ready now
+    if (store._earlyActionQueue) {
+      store._earlyActionQueue.forEach(next);
+      store._earlyActionQueue = [];
+    }
+  } else if (EARLY_QUEUED_ACTIONS.includes(action.type)) {
+    store._earlyActionQueue = store._earlyActionQueue || [];
+    store._earlyActionQueue.push(action);
+  } else {
+    // Let any other type of action go through
+    next(action);
+  }
+};
+/* unused harmony export queueEarlyMessageMiddleware */
+
+
+/**
+ * initStore - Create a store and listen for incoming actions
+ *
+ * @param  {object} reducers An object containing Redux reducers
+ * @param  {object} intialState (optional) The initial state of the store, if desired
+ * @return {object}          A redux store
+ */
+function initStore(reducers, initialState) {
+  const store = Object(__WEBPACK_IMPORTED_MODULE_1_redux__["createStore"])(mergeStateReducer(Object(__WEBPACK_IMPORTED_MODULE_1_redux__["combineReducers"])(reducers)), initialState, global.addMessageListener && Object(__WEBPACK_IMPORTED_MODULE_1_redux__["applyMiddleware"])(rehydrationMiddleware, queueEarlyMessageMiddleware, messageMiddleware));
+
+  store._didRehydrate = false;
+  store._didRequestInitialState = false;
+
+  if (global.addMessageListener) {
+    global.addMessageListener(INCOMING_MESSAGE_NAME, msg => {
+      try {
+        store.dispatch(msg.data);
+      } catch (ex) {
+        console.error("Content msg:", msg, "Dispatch error: ", ex); // eslint-disable-line no-console
+        dump(`Content msg: ${JSON.stringify(msg)}\nDispatch error: ${ex}\n${ex.stack}`);
+      }
+    });
+  }
+
+  return store;
+}
+/* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
+
+/***/ }),
+/* 9 */
 /***/ (function(module, exports) {
 
 module.exports = ReactDOM;
 
 /***/ }),
-/* 9 */
+/* 10 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -1041,37 +1263,37 @@ class ErrorBoundary extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureCo
 ErrorBoundary.defaultProps = { FallbackComponent: ErrorBoundaryFallback };
 
 /***/ }),
-/* 10 */
+/* 11 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-
-// EXTERNAL MODULE: ./system-addon/common/Actions.jsm
-var Actions = __webpack_require__(1);
-
-// EXTERNAL MODULE: external "ReactRedux"
-var external__ReactRedux_ = __webpack_require__(4);
-var external__ReactRedux__default = /*#__PURE__*/__webpack_require__.n(external__ReactRedux_);
-
-// EXTERNAL MODULE: ./system-addon/content-src/components/ContextMenu/ContextMenu.jsx
-var ContextMenu = __webpack_require__(11);
-
-// EXTERNAL MODULE: external "ReactIntl"
-var external__ReactIntl_ = __webpack_require__(2);
-var external__ReactIntl__default = /*#__PURE__*/__webpack_require__.n(external__ReactIntl_);
-
-// CONCATENATED MODULE: ./system-addon/content-src/lib/link-menu-options.js
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
 
 
 const _OpenInPrivateWindow = site => ({
   id: "menu_action_open_private_window",
   icon: "new-window-private",
-  action: Actions["a" /* actionCreators */].OnlyToMain({
-    type: Actions["b" /* actionTypes */].OPEN_PRIVATE_WINDOW,
+  action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+    type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].OPEN_PRIVATE_WINDOW,
     data: { url: site.url, referrer: site.referrer }
   }),
   userEvent: "OPEN_PRIVATE_WINDOW"
 });
+
+const GetPlatformString = platform => {
+  switch (platform) {
+    case "win":
+      return "menu_action_show_file_windows";
+    case "macosx":
+      return "menu_action_show_file_mac_os";
+    case "linux":
+      return "menu_action_show_file_linux";
+    default:
+      return "menu_action_show_file_default";
+  }
+};
+/* harmony export (immutable) */ __webpack_exports__["a"] = GetPlatformString;
+
 
 /**
  * List of functions that return items that can be included as menu options in a
@@ -1084,8 +1306,8 @@ const LinkMenuOptions = {
   RemoveBookmark: site => ({
     id: "menu_action_remove_bookmark",
     icon: "bookmark-added",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].DELETE_BOOKMARK_BY_ID,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].DELETE_BOOKMARK_BY_ID,
       data: site.bookmarkGuid
     }),
     userEvent: "BOOKMARK_DELETE"
@@ -1093,8 +1315,8 @@ const LinkMenuOptions = {
   AddBookmark: site => ({
     id: "menu_action_bookmark",
     icon: "bookmark-hollow",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].BOOKMARK_URL,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].BOOKMARK_URL,
       data: { url: site.url, title: site.title, type: site.type }
     }),
     userEvent: "BOOKMARK_ADD"
@@ -1102,20 +1324,24 @@ const LinkMenuOptions = {
   OpenInNewWindow: site => ({
     id: "menu_action_open_new_window",
     icon: "new-window",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].OPEN_NEW_WINDOW,
-      data: { url: site.url, referrer: site.referrer }
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].OPEN_NEW_WINDOW,
+      data: {
+        referrer: site.referrer,
+        typedBonus: site.typedBonus,
+        url: site.url
+      }
     }),
     userEvent: "OPEN_NEW_WINDOW"
   }),
   BlockUrl: (site, index, eventSource) => ({
     id: "menu_action_dismiss",
     icon: "dismiss",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].BLOCK_URL,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].BLOCK_URL,
       data: { url: site.url, pocket_id: site.pocket_id }
     }),
-    impression: Actions["a" /* actionCreators */].ImpressionStats({
+    impression: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].ImpressionStats({
       source: eventSource,
       block: 0,
       tiles: [{ id: site.guid, pos: index }]
@@ -1129,7 +1355,7 @@ const LinkMenuOptions = {
     id: "menu_action_webext_dismiss",
     string_id: "menu_action_dismiss",
     icon: "dismiss",
-    action: Actions["a" /* actionCreators */].WebExtEvent(Actions["b" /* actionTypes */].WEBEXT_DISMISS, {
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].WebExtEvent(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].WEBEXT_DISMISS, {
       source: eventSource,
       url: site.url,
       action_position: index
@@ -1139,9 +1365,9 @@ const LinkMenuOptions = {
     id: "menu_action_delete",
     icon: "delete",
     action: {
-      type: Actions["b" /* actionTypes */].DIALOG_OPEN,
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].DIALOG_OPEN,
       data: {
-        onConfirm: [Actions["a" /* actionCreators */].AlsoToMain({ type: Actions["b" /* actionTypes */].DELETE_HISTORY_URL, data: { url: site.url, pocket_id: site.pocket_id, forceBlock: site.bookmarkGuid } }), Actions["a" /* actionCreators */].UserEvent(Object.assign({ event: "DELETE", source: eventSource, action_position: index }, siteInfo))],
+        onConfirm: [__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].DELETE_HISTORY_URL, data: { url: site.url, pocket_id: site.pocket_id, forceBlock: site.bookmarkGuid } }), __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].UserEvent(Object.assign({ event: "DELETE", source: eventSource, action_position: index }, siteInfo))],
         eventSource,
         body_string_id: ["confirm_history_delete_p1", "confirm_history_delete_notice_p2"],
         confirm_button_string_id: "menu_action_delete",
@@ -1151,11 +1377,52 @@ const LinkMenuOptions = {
     },
     userEvent: "DIALOG_OPEN"
   }),
+  ShowFile: (site, index, eventSource, isEnabled, siteInfo, platform) => ({
+    id: GetPlatformString(platform),
+    icon: "search",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SHOW_DOWNLOAD_FILE,
+      data: { url: site.url }
+    })
+  }),
+  OpenFile: site => ({
+    id: "menu_action_open_file",
+    icon: "open-file",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].OPEN_DOWNLOAD_FILE,
+      data: { url: site.url }
+    })
+  }),
+  CopyDownloadLink: site => ({
+    id: "menu_action_copy_download_link",
+    icon: "copy",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].COPY_DOWNLOAD_LINK,
+      data: { url: site.url }
+    })
+  }),
+  GoToDownloadPage: site => ({
+    id: "menu_action_go_to_download_page",
+    icon: "download",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].OPEN_LINK,
+      data: { url: site.referrer }
+    }),
+    disabled: !site.referrer
+  }),
+  RemoveDownload: site => ({
+    id: "menu_action_remove_download",
+    icon: "delete",
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].REMOVE_DOWNLOAD_FILE,
+      data: { url: site.url }
+    })
+  }),
   PinTopSite: (site, index) => ({
     id: "menu_action_pin",
     icon: "pin",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].TOP_SITES_PIN,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].TOP_SITES_PIN,
       data: { site: { url: site.url }, index }
     }),
     userEvent: "PIN"
@@ -1163,8 +1430,8 @@ const LinkMenuOptions = {
   UnpinTopSite: site => ({
     id: "menu_action_unpin",
     icon: "unpin",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].TOP_SITES_UNPIN,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].TOP_SITES_UNPIN,
       data: { site: { url: site.url } }
     }),
     userEvent: "UNPIN"
@@ -1172,11 +1439,11 @@ const LinkMenuOptions = {
   SaveToPocket: (site, index, eventSource) => ({
     id: "menu_action_save_to_pocket",
     icon: "pocket",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].SAVE_TO_POCKET,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SAVE_TO_POCKET,
       data: { site: { url: site.url, title: site.title } }
     }),
-    impression: Actions["a" /* actionCreators */].ImpressionStats({
+    impression: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].ImpressionStats({
       source: eventSource,
       pocket: 0,
       tiles: [{ id: site.guid, pos: index }]
@@ -1186,8 +1453,8 @@ const LinkMenuOptions = {
   DeleteFromPocket: site => ({
     id: "menu_action_delete_pocket",
     icon: "delete",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].DELETE_FROM_POCKET,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].DELETE_FROM_POCKET,
       data: { pocket_id: site.pocket_id }
     }),
     userEvent: "DELETE_FROM_POCKET"
@@ -1195,8 +1462,8 @@ const LinkMenuOptions = {
   ArchiveFromPocket: site => ({
     id: "menu_action_archive_pocket",
     icon: "check",
-    action: Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].ARCHIVE_FROM_POCKET,
+    action: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].ARCHIVE_FROM_POCKET,
       data: { pocket_id: site.pocket_id }
     }),
     userEvent: "ARCHIVE_FROM_POCKET"
@@ -1205,7 +1472,7 @@ const LinkMenuOptions = {
     id: "edit_topsites_button_text",
     icon: "edit",
     action: {
-      type: Actions["b" /* actionTypes */].TOP_SITES_EDIT,
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].TOP_SITES_EDIT,
       data: { index }
     }
   }),
@@ -1215,11 +1482,23 @@ const LinkMenuOptions = {
   CheckBookmarkOrArchive: site => site.pocket_id ? LinkMenuOptions.ArchiveFromPocket(site) : LinkMenuOptions.CheckBookmark(site),
   OpenInPrivateWindow: (site, index, eventSource, isEnabled) => isEnabled ? _OpenInPrivateWindow(site) : LinkMenuOptions.EmptyItem()
 };
-// EXTERNAL MODULE: external "React"
-var external__React_ = __webpack_require__(0);
-var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
+/* harmony export (immutable) */ __webpack_exports__["b"] = LinkMenuOptions;
 
-// CONCATENATED MODULE: ./system-addon/content-src/components/LinkMenu/LinkMenu.jsx
+
+/***/ }),
+/* 12 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_redux__ = __webpack_require__(4);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_redux__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ContextMenu_ContextMenu__ = __webpack_require__(13);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react_intl__ = __webpack_require__(2);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react_intl__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_link_menu_options__ = __webpack_require__(11);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_5_react__);
 
 
 
@@ -1229,15 +1508,15 @@ var external__React__default = /*#__PURE__*/__webpack_require__.n(external__Reac
 
 const DEFAULT_SITE_MENU_OPTIONS = ["CheckPinTopSite", "EditTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl"];
 
-class LinkMenu__LinkMenu extends external__React__default.a.PureComponent {
+class _LinkMenu extends __WEBPACK_IMPORTED_MODULE_5_react___default.a.PureComponent {
   getOptions() {
     const { props } = this;
-    const { site, index, source, isPrivateBrowsingEnabled, siteInfo } = props;
+    const { site, index, source, isPrivateBrowsingEnabled, siteInfo, platform } = props;
 
     // Handle special case of default site
     const propOptions = !site.isDefault ? props.options : DEFAULT_SITE_MENU_OPTIONS;
 
-    const options = propOptions.map(o => LinkMenuOptions[o](site, index, source, isPrivateBrowsingEnabled, siteInfo)).map(option => {
+    const options = propOptions.map(o => __WEBPACK_IMPORTED_MODULE_4_content_src_lib_link_menu_options__["b" /* LinkMenuOptions */][o](site, index, source, isPrivateBrowsingEnabled, siteInfo, platform)).map(option => {
       const { action, impression, id, string_id, type, userEvent } = option;
       if (!type && id) {
         option.label = props.intl.formatMessage({ id: string_id || id });
@@ -1249,7 +1528,7 @@ class LinkMenu__LinkMenu extends external__React__default.a.PureComponent {
               source,
               action_position: index
             }, siteInfo);
-            props.dispatch(Actions["a" /* actionCreators */].UserEvent(userEventData));
+            props.dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].UserEvent(userEventData));
           }
           if (impression && props.shouldSendImpressionStats) {
             props.dispatch(impression);
@@ -1268,7 +1547,7 @@ class LinkMenu__LinkMenu extends external__React__default.a.PureComponent {
   }
 
   render() {
-    return external__React__default.a.createElement(ContextMenu["a" /* ContextMenu */], {
+    return __WEBPACK_IMPORTED_MODULE_5_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_2_content_src_components_ContextMenu_ContextMenu__["a" /* ContextMenu */], {
       onUpdate: this.props.onUpdate,
       options: this.getOptions() });
   }
@@ -1276,13 +1555,13 @@ class LinkMenu__LinkMenu extends external__React__default.a.PureComponent {
 /* unused harmony export _LinkMenu */
 
 
-const getState = state => ({ isPrivateBrowsingEnabled: state.Prefs.values.isPrivateBrowsingEnabled });
-const LinkMenu = Object(external__ReactRedux_["connect"])(getState)(Object(external__ReactIntl_["injectIntl"])(LinkMenu__LinkMenu));
+const getState = state => ({ isPrivateBrowsingEnabled: state.Prefs.values.isPrivateBrowsingEnabled, platform: state.Prefs.values.platform });
+const LinkMenu = Object(__WEBPACK_IMPORTED_MODULE_1_react_redux__["connect"])(getState)(Object(__WEBPACK_IMPORTED_MODULE_3_react_intl__["injectIntl"])(_LinkMenu));
 /* harmony export (immutable) */ __webpack_exports__["a"] = LinkMenu;
 
 
 /***/ }),
-/* 11 */
+/* 13 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -1382,18 +1661,18 @@ class ContextMenuItem extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.Pure
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 12 */
+/* 14 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react_intl__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ErrorBoundary_ErrorBoundary__ = __webpack_require__(9);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ErrorBoundary_ErrorBoundary__ = __webpack_require__(10);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_SectionMenu_SectionMenu__ = __webpack_require__(29);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_content_src_lib_section_menu_options__ = __webpack_require__(13);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_SectionMenu_SectionMenu__ = __webpack_require__(33);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_content_src_lib_section_menu_options__ = __webpack_require__(15);
 
 
 
@@ -1641,7 +1920,7 @@ const CollapsibleSection = Object(__WEBPACK_IMPORTED_MODULE_0_react_intl__["inje
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 13 */
+/* 15 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -1719,12 +1998,12 @@ const SectionMenuOptions = {
 
 
 /***/ }),
-/* 14 */
+/* 16 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(15);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(17);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_2_react__);
 
@@ -1893,7 +2172,7 @@ class ComponentPerfTimer extends __WEBPACK_IMPORTED_MODULE_2_react___default.a.C
 
 
 /***/ }),
-/* 15 */
+/* 17 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2027,7 +2306,7 @@ _PerfService.prototype = {
 var perfService = new _PerfService();
 
 /***/ }),
-/* 16 */
+/* 18 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2035,7 +2314,7 @@ var perfService = new _PerfService();
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_intl__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2__TopSitesConstants__ = __webpack_require__(5);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_LinkMenu_LinkMenu__ = __webpack_require__(10);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_LinkMenu_LinkMenu__ = __webpack_require__(12);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_common_Reducers_jsm__ = __webpack_require__(6);
@@ -2218,8 +2497,17 @@ class TopSite extends __WEBPACK_IMPORTED_MODULE_4_react___default.a.PureComponen
     }, this._getTelemetryInfo())));
   }
 
-  onLinkClick(ev) {
+  onLinkClick(event) {
     this.userEvent("CLICK");
+
+    // Specially handle a top site link click for "typed" frecency bonus as
+    // specified as a property on the link.
+    event.preventDefault();
+    const { altKey, button, ctrlKey, metaKey, shiftKey } = event;
+    this.props.dispatch(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].OnlyToMain({
+      type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].OPEN_LINK,
+      data: Object.assign(this.props.link, { event: { altKey, button, ctrlKey, metaKey, shiftKey } })
+    }));
   }
 
   onMenuButtonClick(event) {
@@ -2479,21 +2767,21 @@ const TopSiteList = Object(__WEBPACK_IMPORTED_MODULE_1_react_intl__["injectIntl"
 
 
 /***/ }),
-/* 17 */
+/* 19 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_lib_snippets__ = __webpack_require__(18);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_Base_Base__ = __webpack_require__(20);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_lib_detect_user_session_start__ = __webpack_require__(33);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_init_store__ = __webpack_require__(34);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_lib_snippets__ = __webpack_require__(20);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_Base_Base__ = __webpack_require__(24);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_lib_detect_user_session_start__ = __webpack_require__(37);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_init_store__ = __webpack_require__(8);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_5_react_redux__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_6_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_react_dom__ = __webpack_require__(8);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_react_dom__ = __webpack_require__(9);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_react_dom___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_7_react_dom__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_common_Reducers_jsm__ = __webpack_require__(6);
 
@@ -2506,7 +2794,7 @@ Object.defineProperty(__webpack_exports__, "__esModule", { value: true });
 
 
 
-const store = Object(__WEBPACK_IMPORTED_MODULE_4_content_src_lib_init_store__["a" /* initStore */])(__WEBPACK_IMPORTED_MODULE_8_common_Reducers_jsm__["b" /* reducers */], global.gActivityStreamPrerenderedState);
+const store = Object(__WEBPACK_IMPORTED_MODULE_4_content_src_lib_init_store__["b" /* initStore */])(__WEBPACK_IMPORTED_MODULE_8_common_Reducers_jsm__["b" /* reducers */], global.gActivityStreamPrerenderedState);
 
 new __WEBPACK_IMPORTED_MODULE_3_content_src_lib_detect_user_session_start__["a" /* DetectUserSessionStart */](store).sendEventOrAddListener();
 
@@ -2530,13 +2818,13 @@ Object(__WEBPACK_IMPORTED_MODULE_1_content_src_lib_snippets__["a" /* addSnippets
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 18 */
+/* 20 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["a"] = addSnippetsSubscriber;
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_message_center_message_center_content__ = __webpack_require__(7);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_asrouter_asrouter_content__ = __webpack_require__(7);
 const DATABASE_NAME = "snippets_db";
 const DATABASE_VERSION = 1;
 const SNIPPETS_OBJECTSTORE_NAME = "snippets";
@@ -2915,7 +3203,7 @@ function addSnippetsSubscriber(store) {
     // snippets.initialized:                  Is SnippetsProvider currently initialised?
     if (state.Prefs.values["feeds.snippets"] &&
     // If the message center experiment is enabled, don't show snippets
-    !state.Prefs.values.messageCenterExperimentEnabled && !state.Prefs.values.disableSnippets && state.Snippets.initialized && !snippets.initialized &&
+    !state.Prefs.values.asrouterExperimentEnabled && !state.Prefs.values.disableSnippets && state.Snippets.initialized && !snippets.initialized &&
     // Don't call init multiple times
     !initializing) {
       initializing = true;
@@ -2925,8 +3213,8 @@ function addSnippetsSubscriber(store) {
       snippets.uninit();
     }
 
-    if (state.Prefs.values.messageCenterExperimentEnabled) {
-      Object(__WEBPACK_IMPORTED_MODULE_1_content_src_message_center_message_center_content__["b" /* initMessageCenter */])();
+    if (state.Prefs.values.asrouterExperimentEnabled) {
+      Object(__WEBPACK_IMPORTED_MODULE_1_content_src_asrouter_asrouter_content__["b" /* initASRouter */])();
     }
   });
 
@@ -2936,7 +3224,88 @@ function addSnippetsSubscriber(store) {
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 19 */
+/* 21 */
+/***/ (function(module, exports) {
+
+module.exports = Redux;
+
+/***/ }),
+/* 22 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_0_react__);
+
+
+const VISIBLE = "visible";
+/* unused harmony export VISIBLE */
+
+const VISIBILITY_CHANGE_EVENT = "visibilitychange";
+/* unused harmony export VISIBILITY_CHANGE_EVENT */
+
+
+/**
+ * Component wrapper used to send telemetry pings on every impression.
+ */
+class ImpressionsWrapper extends __WEBPACK_IMPORTED_MODULE_0_react___default.a.PureComponent {
+  // This sends an event when a user sees a set of new content. If content
+  // changes while the page is hidden (i.e. preloaded or on a hidden tab),
+  // only send the event if the page becomes visible again.
+  sendImpressionOrAddListener() {
+    if (this.props.document.visibilityState === VISIBLE) {
+      this.props.sendImpression();
+    } else {
+      // We should only ever send the latest impression stats ping, so remove any
+      // older listeners.
+      if (this._onVisibilityChange) {
+        this.props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+      }
+
+      // When the page becomes visible, send the impression stats ping if the section isn't collapsed.
+      this._onVisibilityChange = () => {
+        if (this.props.document.visibilityState === VISIBLE) {
+          this.props.sendImpression();
+          this.props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+        }
+      };
+      this.props.document.addEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+    }
+  }
+
+  componentWillUnmount() {
+    if (this._onVisibilityChange) {
+      this.props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+    }
+  }
+
+  componentDidMount() {
+    if (this.props.sendOnMount) {
+      this.sendImpressionOrAddListener();
+    }
+  }
+
+  componentDidUpdate(prevProps) {
+    if (this.props.shouldSendImpressionOnUpdate(this.props, prevProps)) {
+      this.sendImpressionOrAddListener();
+    }
+  }
+
+  render() {
+    return this.props.children;
+  }
+}
+/* harmony export (immutable) */ __webpack_exports__["a"] = ImpressionsWrapper;
+
+
+ImpressionsWrapper.defaultProps = {
+  document: global.document,
+  sendOnMount: true
+};
+/* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
+
+/***/ }),
+/* 23 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2945,163 +3314,135 @@ function addSnippetsSubscriber(store) {
 var external__React_ = __webpack_require__(0);
 var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
 
-// CONCATENATED MODULE: ./system-addon/content-src/message-center/components/Button.jsx
+// CONCATENATED MODULE: ./system-addon/content-src/asrouter/template-utils.js
+function safeURI(url) {
+  if (!url) {
+    return "";
+  }
+  const { protocol } = new URL(url);
+  const isAllowed = ["http:", "https:", "data:", "resource:", "chrome:"].includes(protocol);
+  if (!isAllowed) {
+    console.warn(`The protocol ${protocol} is not allowed for template URLs.`); // eslint-disable-line no-console
+  }
+  return isAllowed ? url : "";
+}
+// CONCATENATED MODULE: ./system-addon/content-src/asrouter/components/Button/Button.jsx
+
+
+
+const Button = props => external__React__default.a.createElement(
+  "a",
+  { href: safeURI(props.url),
+    onClick: props.onClick,
+    className: "ASRouterButton" },
+  props.children
+);
+// CONCATENATED MODULE: ./system-addon/content-src/asrouter/components/SnippetBase/SnippetBase.jsx
+
+
+class SnippetBase_SnippetBase extends external__React__default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onBlockClicked = this.onBlockClicked.bind(this);
+  }
+
+  onBlockClicked() {
+    this.props.sendUserActionTelemetry({ event: "BLOCK" });
+    this.props.onBlock();
+  }
+
+  render() {
+    const { props } = this;
+
+    const containerClassName = `SnippetBaseContainer${props.className ? ` ${props.className}` : ""}`;
+
+    return external__React__default.a.createElement(
+      "div",
+      { className: containerClassName },
+      external__React__default.a.createElement(
+        "div",
+        { className: "innerWrapper" },
+        props.children
+      ),
+      external__React__default.a.createElement("button", { className: "blockButton", onClick: this.onBlockClicked })
+    );
+  }
+}
+// CONCATENATED MODULE: ./system-addon/content-src/asrouter/templates/SimpleSnippet/SimpleSnippet.jsx
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
 
-const Button_styles = {
-  button: {
-    border: 0,
-    backgroundColor: "#e1e1e2",
-    fontFamily: "inherit",
-    padding: "8px 15px",
-    marginLeft: "15px"
+
+
+
+const DEFAULT_ICON_PATH = "chrome://branding/content/icon64.png";
+
+class SimpleSnippet_SimpleSnippet extends external__React__default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onButtonClick = this.onButtonClick.bind(this);
   }
-};
 
-const Button = props => external__React__default.a.createElement(
-  "button",
-  _extends({ style: Button_styles.button }, props),
-  props.children
-);
-// CONCATENATED MODULE: ./system-addon/content-src/message-center/components/SnippetBase.jsx
-
-
-const defaultStyles = {
-  container: {
-    position: "fixed",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: "20px",
-    backgroundColor: "white",
-    fontSize: "12px",
-    lineHeight: "16px",
-    boxShadow: "0 -1px 4px 0 rgba(12, 12, 13, 0.1)"
-  },
-  innerWrapper: {
-    maxWidth: "992px",
-    margin: "0 auto",
-    display: "flex",
-    alignItems: "center"
-  },
-  blockButton: {
-    background: "none",
-    border: 0,
-    display: "block",
-    position: "absolute",
-    top: "50%",
-    right: "24px",
-    height: "16px",
-    width: "16px",
-    backgroundImage: "url(resource://activity-stream/data/content/assets/glyph-dismiss-16.svg)",
-    opacity: 0.5,
-    marginTop: "-8px",
-    padding: 0
+  onButtonClick() {
+    this.props.sendUserActionTelemetry({ event: "CLICK_BUTTON" });
   }
-};
 
-class SnippetBase_SnippetBase extends external__React__default.a.PureComponent {
   render() {
     const { props } = this;
-
-    // Extend default styles
-    const styles = Object.assign({}, defaultStyles);
-    if (props.styles) {
-      Object.keys(props.styles).forEach(key => {
-        styles[key] = Object.assign({}, styles[key], props.styles[key]);
-      });
-    }
-
     return external__React__default.a.createElement(
-      "div",
-      { style: styles.container },
+      SnippetBase_SnippetBase,
+      _extends({}, props, { className: "SimpleSnippet" }),
+      external__React__default.a.createElement("img", { src: safeURI(props.content.icon) || DEFAULT_ICON_PATH, className: "icon" }),
       external__React__default.a.createElement(
         "div",
-        { style: styles.innerWrapper },
-        props.children
+        null,
+        props.content.title ? external__React__default.a.createElement(
+          "h3",
+          { className: "title" },
+          props.content.title
+        ) : null,
+        " ",
+        external__React__default.a.createElement(
+          "p",
+          { className: "body" },
+          props.content.text
+        )
       ),
-      external__React__default.a.createElement("button", { style: styles.blockButton, onClick: props.onBlock })
+      props.content.button_url ? external__React__default.a.createElement(
+        "div",
+        null,
+        external__React__default.a.createElement(
+          Button,
+          { onClick: this.onButtonClick, url: props.content.button_url },
+          props.content.button_label
+        )
+      ) : null
     );
   }
 }
-// CONCATENATED MODULE: ./system-addon/content-src/message-center/templates/SimpleSnippet.jsx
-
-
-
-
-const SimpleSnippet_styles = {
-  title: {
-    display: "inline",
-    fontSize: "inherit",
-    margin: 0
-  },
-  body: {
-    display: "inline",
-    margin: 0
-  },
-  icon: {
-    height: "42px",
-    width: "42px",
-    marginRight: "15px",
-    borderRadius: "6px",
-    backgroundColor: "rgba(0,0,0,0.1)",
-    flexShrink: 0
-  }
-};
-
-const SimpleSnippet = props => external__React__default.a.createElement(
-  SnippetBase_SnippetBase,
-  props,
-  external__React__default.a.createElement("div", { style: SimpleSnippet_styles.icon }),
-  external__React__default.a.createElement(
-    "div",
-    null,
-    external__React__default.a.createElement(
-      "h3",
-      { style: SimpleSnippet_styles.title },
-      props.content.title
-    ),
-    " ",
-    external__React__default.a.createElement(
-      "p",
-      { style: SimpleSnippet_styles.body },
-      props.content.body
-    )
-  ),
-  props.content.button ? external__React__default.a.createElement(
-    "div",
-    null,
-    external__React__default.a.createElement(
-      Button,
-      null,
-      props.content.button.label
-    )
-  ) : null
-);
-/* harmony export (immutable) */ __webpack_exports__["a"] = SimpleSnippet;
+/* harmony export (immutable) */ __webpack_exports__["a"] = SimpleSnippet_SimpleSnippet;
 
 
 /***/ }),
-/* 20 */
+/* 24 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_intl__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ConfirmDialog_ConfirmDialog__ = __webpack_require__(21);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react_redux__ = __webpack_require__(4);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react_redux__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_ErrorBoundary_ErrorBoundary__ = __webpack_require__(9);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_content_src_components_ManualMigration_ManualMigration__ = __webpack_require__(22);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_content_src_components_MessageCenterAdmin_MessageCenterAdmin__ = __webpack_require__(23);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_common_PrerenderData_jsm__ = __webpack_require__(24);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_ASRouterAdmin_ASRouterAdmin__ = __webpack_require__(25);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_ConfirmDialog_ConfirmDialog__ = __webpack_require__(26);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_redux__ = __webpack_require__(4);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react_redux__);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_content_src_components_ErrorBoundary_ErrorBoundary__ = __webpack_require__(10);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_content_src_components_ManualMigration_ManualMigration__ = __webpack_require__(27);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_common_PrerenderData_jsm__ = __webpack_require__(28);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_8_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_9_content_src_components_Search_Search__ = __webpack_require__(25);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_10_content_src_components_Sections_Sections__ = __webpack_require__(27);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_9_content_src_components_Search_Search__ = __webpack_require__(29);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_10_content_src_components_Sections_Sections__ = __webpack_require__(31);
 
 
 
@@ -3176,8 +3517,8 @@ class _Base extends __WEBPACK_IMPORTED_MODULE_8_react___default.a.PureComponent 
     const { App, locale, strings } = props;
     const { initialized } = App;
 
-    if (props.Prefs.values.messageCenterExperimentEnabled && window.location.hash === "#message-center-admin") {
-      return __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_6_content_src_components_MessageCenterAdmin_MessageCenterAdmin__["a" /* MessageCenterAdmin */], null);
+    if (props.Prefs.values.asrouterExperimentEnabled && window.location.hash === "#asrouter") {
+      return __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_2_content_src_components_ASRouterAdmin_ASRouterAdmin__["a" /* ASRouterAdmin */], null);
     }
 
     if (!props.isPrerendered && !initialized) {
@@ -3188,7 +3529,7 @@ class _Base extends __WEBPACK_IMPORTED_MODULE_8_react___default.a.PureComponent 
       __WEBPACK_IMPORTED_MODULE_1_react_intl__["IntlProvider"],
       { locale: locale, messages: strings },
       __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(
-        __WEBPACK_IMPORTED_MODULE_4_content_src_components_ErrorBoundary_ErrorBoundary__["a" /* ErrorBoundary */],
+        __WEBPACK_IMPORTED_MODULE_5_content_src_components_ErrorBoundary_ErrorBoundary__["a" /* ErrorBoundary */],
         { className: "base-content-fallback" },
         __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(BaseContent, this.props)
       )
@@ -3217,7 +3558,7 @@ class BaseContent extends __WEBPACK_IMPORTED_MODULE_8_react___default.a.PureComp
 
     const shouldBeFixedToTop = __WEBPACK_IMPORTED_MODULE_7_common_PrerenderData_jsm__["a" /* PrerenderData */].arePrefsValid(name => prefs[name]);
 
-    const outerClassName = ["outer-wrapper", shouldBeFixedToTop && "fixed-to-top", prefs.enableWideLayout ? "wide-layout-enabled" : "wide-layout-disabled"].filter(v => v).join(" ");
+    const outerClassName = ["outer-wrapper", shouldBeFixedToTop && "fixed-to-top"].filter(v => v).join(" ");
 
     return __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(
       "div",
@@ -3229,7 +3570,7 @@ class BaseContent extends __WEBPACK_IMPORTED_MODULE_8_react___default.a.PureComp
           "div",
           { className: "non-collapsible-section" },
           __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(
-            __WEBPACK_IMPORTED_MODULE_4_content_src_components_ErrorBoundary_ErrorBoundary__["a" /* ErrorBoundary */],
+            __WEBPACK_IMPORTED_MODULE_5_content_src_components_ErrorBoundary_ErrorBoundary__["a" /* ErrorBoundary */],
             null,
             __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_9_content_src_components_Search_Search__["a" /* Search */], null)
           )
@@ -3240,12 +3581,12 @@ class BaseContent extends __WEBPACK_IMPORTED_MODULE_8_react___default.a.PureComp
           !prefs.migrationExpired && __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(
             "div",
             { className: "non-collapsible-section" },
-            __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_5_content_src_components_ManualMigration_ManualMigration__["a" /* ManualMigration */], null)
+            __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_6_content_src_components_ManualMigration_ManualMigration__["a" /* ManualMigration */], null)
           ),
           __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_10_content_src_components_Sections_Sections__["a" /* Sections */], null),
           __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(PrefsButton, { onClick: this.openPreferences })
         ),
-        __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_2_content_src_components_ConfirmDialog_ConfirmDialog__["a" /* ConfirmDialog */], null)
+        __WEBPACK_IMPORTED_MODULE_8_react___default.a.createElement(__WEBPACK_IMPORTED_MODULE_3_content_src_components_ConfirmDialog_ConfirmDialog__["a" /* ConfirmDialog */], null)
       )
     );
   }
@@ -3253,13 +3594,184 @@ class BaseContent extends __WEBPACK_IMPORTED_MODULE_8_react___default.a.PureComp
 /* unused harmony export BaseContent */
 
 
-const Base = Object(__WEBPACK_IMPORTED_MODULE_3_react_redux__["connect"])(state => ({ App: state.App, Prefs: state.Prefs, Theme: state.Theme }))(_Base);
+const Base = Object(__WEBPACK_IMPORTED_MODULE_4_react_redux__["connect"])(state => ({ App: state.App, Prefs: state.Prefs, Theme: state.Theme }))(_Base);
 /* harmony export (immutable) */ __webpack_exports__["a"] = Base;
 
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 21 */
+/* 25 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__ = __webpack_require__(7);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react__ = __webpack_require__(0);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react__);
+
+
+
+class ASRouterAdmin extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onMessage = this.onMessage.bind(this);
+    this.state = {};
+  }
+
+  onMessage({ data: action }) {
+    if (action.type === "ADMIN_SET_STATE") {
+      this.setState(action.data);
+    }
+  }
+
+  componentWillMount() {
+    __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].sendMessage({ type: "ADMIN_CONNECT_STATE" });
+    __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].addListener(this.onMessage);
+  }
+
+  componentWillUnmount() {
+    __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].removeListener(this.onMessage);
+  }
+
+  handleBlock(id) {
+    return () => __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].blockById(id);
+  }
+
+  handleUnblock(id) {
+    return () => __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].unblockById(id);
+  }
+
+  handleOverride(id) {
+    return () => __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].overrideMessage(id);
+  }
+
+  renderMessageItem(msg) {
+    const isCurrent = msg.id === this.state.currentId;
+    const isBlocked = this.state.blockList.includes(msg.id);
+
+    let itemClassName = "message-item";
+    if (isCurrent) {
+      itemClassName += " current";
+    }
+    if (isBlocked) {
+      itemClassName += " blocked";
+    }
+
+    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+      "tr",
+      { className: itemClassName, key: msg.id },
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "td",
+        { className: "message-id" },
+        __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+          "span",
+          null,
+          msg.id
+        )
+      ),
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "td",
+        null,
+        __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+          "button",
+          { className: `button ${isBlocked ? "" : " primary"}`, onClick: isBlocked ? this.handleUnblock(msg.id) : this.handleBlock(msg.id) },
+          isBlocked ? "Unblock" : "Block"
+        ),
+        isBlocked ? null : __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+          "button",
+          { className: "button", onClick: this.handleOverride(msg.id) },
+          "Show"
+        )
+      ),
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "td",
+        { className: "message-summary" },
+        __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+          "pre",
+          null,
+          JSON.stringify(msg, null, 2)
+        )
+      )
+    );
+  }
+
+  renderMessages() {
+    if (!this.state.messages) {
+      return null;
+    }
+    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+      "table",
+      null,
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "tbody",
+        null,
+        this.state.messages.map(msg => this.renderMessageItem(msg))
+      )
+    );
+  }
+
+  renderProviders() {
+    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+      "table",
+      null,
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "tbody",
+        null,
+        this.state.providers.map((provider, i) => __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+          "tr",
+          { className: "message-item", key: i },
+          __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+            "td",
+            null,
+            provider.id
+          ),
+          __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+            "td",
+            null,
+            provider.type === "remote" ? __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+              "a",
+              { target: "_blank", href: provider.url },
+              provider.url
+            ) : "(local)"
+          )
+        ))
+      )
+    );
+  }
+
+  render() {
+    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+      "div",
+      { className: "asrouter-admin outer-wrapper" },
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "h1",
+        null,
+        "AS Router Admin"
+      ),
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "button",
+        { className: "button primary", onClick: __WEBPACK_IMPORTED_MODULE_0__asrouter_asrouter_content__["a" /* ASRouterUtils */].getNextMessage },
+        "Refresh Current Message"
+      ),
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "h2",
+        null,
+        "Message Providers"
+      ),
+      this.state.providers ? this.renderProviders() : null,
+      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
+        "h2",
+        null,
+        "Messages"
+      ),
+      this.renderMessages()
+    );
+  }
+}
+/* harmony export (immutable) */ __webpack_exports__["a"] = ASRouterAdmin;
+
+
+/***/ }),
+/* 26 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3372,7 +3884,7 @@ const ConfirmDialog = Object(__WEBPACK_IMPORTED_MODULE_1_react_redux__["connect"
 
 
 /***/ }),
-/* 22 */
+/* 27 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3448,134 +3960,7 @@ const ManualMigration = Object(__WEBPACK_IMPORTED_MODULE_1_react_redux__["connec
 
 
 /***/ }),
-/* 23 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__ = __webpack_require__(7);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react__ = __webpack_require__(0);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react__);
-
-
-
-class MessageCenterAdmin extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent {
-  constructor(props) {
-    super(props);
-    this.onMessage = this.onMessage.bind(this);
-    this.state = {};
-  }
-
-  onMessage({ data: action }) {
-    if (action.type === "ADMIN_SET_STATE") {
-      this.setState(action.data);
-    }
-  }
-
-  componentWillMount() {
-    __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__["a" /* MessageCenterUtils */].sendMessage({ type: "ADMIN_CONNECT_STATE" });
-    __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__["a" /* MessageCenterUtils */].addListener(this.onMessage);
-  }
-
-  componentWillUnmount() {
-    __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__["a" /* MessageCenterUtils */].removeListener(this.onMessage);
-  }
-
-  handleBlock(id) {
-    return () => __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__["a" /* MessageCenterUtils */].blockById(id);
-  }
-
-  handleUnblock(id) {
-    return () => __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__["a" /* MessageCenterUtils */].unblockById(id);
-  }
-
-  renderMessageItem(msg) {
-    const isCurrent = msg.id === this.state.currentId;
-    const isBlocked = this.state.blockList[msg.id];
-
-    let itemClassName = "message-item";
-    if (isCurrent) {
-      itemClassName += " current";
-    }
-    if (isBlocked) {
-      itemClassName += " blocked";
-    }
-
-    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-      "tr",
-      { className: itemClassName, key: msg.id },
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "td",
-        { className: "message-id" },
-        __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-          "span",
-          null,
-          msg.id
-        )
-      ),
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "td",
-        null,
-        __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-          "button",
-          { className: `button ${isBlocked ? "" : " primary"}`, onClick: isBlocked ? this.handleUnblock(msg.id) : this.handleBlock(msg.id) },
-          isBlocked ? "Unblock" : "Block"
-        )
-      ),
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "td",
-        { className: "message-summary" },
-        __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-          "pre",
-          null,
-          JSON.stringify(msg, null, 2)
-        )
-      )
-    );
-  }
-
-  renderMessages() {
-    if (!this.state.messages) {
-      return null;
-    }
-    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-      "table",
-      null,
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "tbody",
-        null,
-        this.state.messages.map(msg => this.renderMessageItem(msg))
-      )
-    );
-  }
-
-  render() {
-    return __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-      "div",
-      { className: "messages-admin outer-wrapper" },
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "h1",
-        null,
-        "Messages Admin"
-      ),
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "button",
-        { className: "button primary", onClick: __WEBPACK_IMPORTED_MODULE_0__message_center_message_center_content__["a" /* MessageCenterUtils */].getNextMessage },
-        "Refresh Current Message"
-      ),
-      __WEBPACK_IMPORTED_MODULE_1_react___default.a.createElement(
-        "h2",
-        null,
-        "Messages"
-      ),
-      this.renderMessages()
-    );
-  }
-}
-/* harmony export (immutable) */ __webpack_exports__["a"] = MessageCenterAdmin;
-
-
-/***/ }),
-/* 24 */
+/* 28 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3645,7 +4030,6 @@ var PrerenderData = new _PrerenderData({
     "topSitesRows": 1,
     "feeds.section.topstories": true,
     "feeds.section.highlights": true,
-    "enableWideLayout": true,
     "sectionOrder": "topsites,topstories,highlights",
     "collapsed": false
   },
@@ -3655,7 +4039,7 @@ var PrerenderData = new _PrerenderData({
   // too different for the prerendered version to be used. Unfortunately, this
   // will result in users who have modified some of their preferences not being
   // able to get the benefits of prerendering.
-  validation: ["feeds.topsites", "showSearch", "topSitesRows", "enableWideLayout", "sectionOrder",
+  validation: ["feeds.topsites", "showSearch", "topSitesRows", "sectionOrder",
   // This means if either of these are set to their default values,
   // prerendering can be used.
   { oneOf: ["feeds.section.topstories", "feeds.section.highlights"] },
@@ -3678,7 +4062,7 @@ var PrerenderData = new _PrerenderData({
 });
 
 /***/ }),
-/* 25 */
+/* 29 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3687,7 +4071,7 @@ var PrerenderData = new _PrerenderData({
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_Actions_jsm__ = __webpack_require__(1);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_2_react_redux__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_lib_constants__ = __webpack_require__(26);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_lib_constants__ = __webpack_require__(30);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react__);
 /* globals ContentSearchUIController */
@@ -3797,7 +4181,7 @@ const Search = Object(__WEBPACK_IMPORTED_MODULE_2_react_redux__["connect"])()(Ob
 
 
 /***/ }),
-/* 26 */
+/* 30 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3807,22 +4191,22 @@ const Search = Object(__WEBPACK_IMPORTED_MODULE_2_react_redux__["connect"])()(Ob
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 27 */
+/* 31 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_content_src_components_Card_Card__ = __webpack_require__(28);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_content_src_components_Card_Card__ = __webpack_require__(32);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_react_intl__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(12);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(14);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(14);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(16);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_5_react_redux__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_6_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_content_src_components_Topics_Topics__ = __webpack_require__(30);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_content_src_components_TopSites_TopSites__ = __webpack_require__(31);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_content_src_components_Topics_Topics__ = __webpack_require__(34);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8_content_src_components_TopSites_TopSites__ = __webpack_require__(35);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
@@ -4070,7 +4454,7 @@ const Sections = Object(__WEBPACK_IMPORTED_MODULE_5_react_redux__["connect"])(st
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 28 */
+/* 32 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4099,20 +4483,33 @@ const cardContextTypes = {
   pocket: {
     intlID: "type_label_pocket",
     icon: "pocket"
+  },
+  download: {
+    intlID: "type_label_downloaded",
+    icon: "download"
   }
 };
+// EXTERNAL MODULE: external "ReactRedux"
+var external__ReactRedux_ = __webpack_require__(4);
+var external__ReactRedux__default = /*#__PURE__*/__webpack_require__.n(external__ReactRedux_);
+
 // EXTERNAL MODULE: external "ReactIntl"
 var external__ReactIntl_ = __webpack_require__(2);
 var external__ReactIntl__default = /*#__PURE__*/__webpack_require__.n(external__ReactIntl_);
 
-// EXTERNAL MODULE: ./system-addon/content-src/components/LinkMenu/LinkMenu.jsx + 1 modules
-var LinkMenu = __webpack_require__(10);
+// EXTERNAL MODULE: ./system-addon/content-src/lib/link-menu-options.js
+var link_menu_options = __webpack_require__(11);
+
+// EXTERNAL MODULE: ./system-addon/content-src/components/LinkMenu/LinkMenu.jsx
+var LinkMenu = __webpack_require__(12);
 
 // EXTERNAL MODULE: external "React"
 var external__React_ = __webpack_require__(0);
 var external__React__default = /*#__PURE__*/__webpack_require__.n(external__React_);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/Card/Card.jsx
+
+
 
 
 
@@ -4131,7 +4528,7 @@ const gImageLoading = new Map();
  * this class. Each card will then get a context menu which reflects the actions that
  * can be done on this Card.
  */
-class Card_Card extends external__React__default.a.PureComponent {
+class Card__Card extends external__React__default.a.PureComponent {
   constructor(props) {
     super(props);
     this.state = {
@@ -4197,12 +4594,18 @@ class Card_Card extends external__React__default.a.PureComponent {
 
   onLinkClick(event) {
     event.preventDefault();
-    const { altKey, button, ctrlKey, metaKey, shiftKey } = event;
-    this.props.dispatch(Actions["a" /* actionCreators */].AlsoToMain({
-      type: Actions["b" /* actionTypes */].OPEN_LINK,
-      data: Object.assign(this.props.link, { event: { altKey, button, ctrlKey, metaKey, shiftKey } })
-    }));
-
+    if (this.props.link.type === "download") {
+      this.props.dispatch(Actions["a" /* actionCreators */].OnlyToMain({
+        type: Actions["b" /* actionTypes */].SHOW_DOWNLOAD_FILE,
+        data: this.props.link
+      }));
+    } else {
+      const { altKey, button, ctrlKey, metaKey, shiftKey } = event;
+      this.props.dispatch(Actions["a" /* actionCreators */].OnlyToMain({
+        type: Actions["b" /* actionTypes */].OPEN_LINK,
+        data: Object.assign(this.props.link, { event: { altKey, button, ctrlKey, metaKey, shiftKey } })
+      }));
+    }
     if (this.props.isWebExtension) {
       this.props.dispatch(Actions["a" /* actionCreators */].WebExtEvent(Actions["b" /* actionTypes */].WEBEXT_CLICK, {
         source: this.props.eventSource,
@@ -4271,6 +4674,12 @@ class Card_Card extends external__React__default.a.PureComponent {
           external__React__default.a.createElement(
             "div",
             { className: `card-details${hasImage ? "" : " no-image"}` },
+            link.type === "download" && external__React__default.a.createElement("div", { className: "card-download-icon icon icon-download-folder" }),
+            link.type === "download" && external__React__default.a.createElement(
+              "div",
+              { className: "card-host-name alternate" },
+              external__React__default.a.createElement(external__ReactIntl_["FormattedMessage"], { id: Object(link_menu_options["a" /* GetPlatformString */])(this.props.platform) })
+            ),
             link.hostname && external__React__default.a.createElement(
               "div",
               { className: "card-host-name" },
@@ -4331,26 +4740,28 @@ class Card_Card extends external__React__default.a.PureComponent {
     );
   }
 }
-/* harmony export (immutable) */ __webpack_exports__["a"] = Card_Card;
+/* unused harmony export _Card */
 
-Card_Card.defaultProps = { link: {} };
+Card__Card.defaultProps = { link: {} };
+const Card = Object(external__ReactRedux_["connect"])(state => ({ platform: state.Prefs.values.platform }))(Card__Card);
+/* harmony export (immutable) */ __webpack_exports__["a"] = Card;
 
-const PlaceholderCard = () => external__React__default.a.createElement(Card_Card, { placeholder: true });
+const PlaceholderCard = () => external__React__default.a.createElement(Card, { placeholder: true });
 /* harmony export (immutable) */ __webpack_exports__["b"] = PlaceholderCard;
 
 
 /***/ }),
-/* 29 */
+/* 33 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_components_ContextMenu_ContextMenu__ = __webpack_require__(11);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_content_src_components_ContextMenu_ContextMenu__ = __webpack_require__(13);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react_intl__ = __webpack_require__(2);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_react_intl___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_2_react_intl__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_3_react__);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_section_menu_options__ = __webpack_require__(13);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_content_src_lib_section_menu_options__ = __webpack_require__(15);
 
 
 
@@ -4412,7 +4823,7 @@ const SectionMenu = Object(__WEBPACK_IMPORTED_MODULE_2_react_intl__["injectIntl"
 
 
 /***/ }),
-/* 30 */
+/* 34 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4468,14 +4879,14 @@ class Topics extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent
 
 
 /***/ }),
-/* 31 */
+/* 35 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_1__TopSitesConstants__ = __webpack_require__(5);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(12);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(14);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_2_content_src_components_CollapsibleSection_CollapsibleSection__ = __webpack_require__(14);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_3_content_src_components_ComponentPerfTimer_ComponentPerfTimer__ = __webpack_require__(16);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_redux__ = __webpack_require__(4);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_4_react_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_4_react_redux__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_5_react_intl__ = __webpack_require__(2);
@@ -4483,8 +4894,8 @@ class Topics extends __WEBPACK_IMPORTED_MODULE_1_react___default.a.PureComponent
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react__ = __webpack_require__(0);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_6_react___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_6_react__);
 /* harmony import */ var __WEBPACK_IMPORTED_MODULE_7_common_Reducers_jsm__ = __webpack_require__(6);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8__TopSiteForm__ = __webpack_require__(32);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_9__TopSite__ = __webpack_require__(16);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_8__TopSiteForm__ = __webpack_require__(36);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_9__TopSite__ = __webpack_require__(18);
 var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; };
 
 
@@ -4645,7 +5056,7 @@ const TopSites = Object(__WEBPACK_IMPORTED_MODULE_4_react_redux__["connect"])(st
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
 
 /***/ }),
-/* 32 */
+/* 36 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4740,7 +5151,7 @@ TopSiteFormInput_TopSiteFormInput.defaultProps = {
   validationError: false
 };
 // EXTERNAL MODULE: ./system-addon/content-src/components/TopSites/TopSite.jsx
-var TopSite = __webpack_require__(16);
+var TopSite = __webpack_require__(18);
 
 // CONCATENATED MODULE: ./system-addon/content-src/components/TopSites/TopSiteForm.jsx
 
@@ -5015,12 +5426,12 @@ TopSiteForm_TopSiteForm.defaultProps = {
 };
 
 /***/ }),
-/* 33 */
+/* 37 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(15);
+/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_common_PerfService_jsm__ = __webpack_require__(17);
 
 
 
@@ -5088,170 +5499,6 @@ class DetectUserSessionStart {
 /* harmony export (immutable) */ __webpack_exports__["a"] = DetectUserSessionStart;
 
 /* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
-
-/***/ }),
-/* 34 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (immutable) */ __webpack_exports__["a"] = initStore;
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__ = __webpack_require__(1);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux__ = __webpack_require__(35);
-/* harmony import */ var __WEBPACK_IMPORTED_MODULE_1_redux___default = __webpack_require__.n(__WEBPACK_IMPORTED_MODULE_1_redux__);
-/* eslint-env mozilla/frame-script */
-
-
-
-
-const MERGE_STORE_ACTION = "NEW_TAB_INITIAL_STATE";
-/* unused harmony export MERGE_STORE_ACTION */
-
-const OUTGOING_MESSAGE_NAME = "ActivityStream:ContentToMain";
-/* unused harmony export OUTGOING_MESSAGE_NAME */
-
-const INCOMING_MESSAGE_NAME = "ActivityStream:MainToContent";
-/* unused harmony export INCOMING_MESSAGE_NAME */
-
-const EARLY_QUEUED_ACTIONS = [__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].SAVE_SESSION_PERF_DATA, __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].PAGE_PRERENDERED];
-/* unused harmony export EARLY_QUEUED_ACTIONS */
-
-
-/**
- * A higher-order function which returns a reducer that, on MERGE_STORE action,
- * will return the action.data object merged into the previous state.
- *
- * For all other actions, it merely calls mainReducer.
- *
- * Because we want this to merge the entire state object, it's written as a
- * higher order function which takes the main reducer (itself often a call to
- * combineReducers) as a parameter.
- *
- * @param  {function} mainReducer reducer to call if action != MERGE_STORE_ACTION
- * @return {function}             a reducer that, on MERGE_STORE_ACTION action,
- *                                will return the action.data object merged
- *                                into the previous state, and the result
- *                                of calling mainReducer otherwise.
- */
-function mergeStateReducer(mainReducer) {
-  return (prevState, action) => {
-    if (action.type === MERGE_STORE_ACTION) {
-      return Object.assign({}, prevState, action.data);
-    }
-
-    return mainReducer(prevState, action);
-  };
-}
-
-/**
- * messageMiddleware - Middleware that looks for SentToMain type actions, and sends them if necessary
- */
-const messageMiddleware = store => next => action => {
-  const skipLocal = action.meta && action.meta.skipLocal;
-  if (__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isSendToMain(action)) {
-    sendAsyncMessage(OUTGOING_MESSAGE_NAME, action);
-  }
-  if (!skipLocal) {
-    next(action);
-  }
-};
-
-const rehydrationMiddleware = store => next => action => {
-  if (store._didRehydrate) {
-    return next(action);
-  }
-
-  const isMergeStoreAction = action.type === MERGE_STORE_ACTION;
-  const isRehydrationRequest = action.type === __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].NEW_TAB_STATE_REQUEST;
-
-  if (isRehydrationRequest) {
-    store._didRequestInitialState = true;
-    return next(action);
-  }
-
-  if (isMergeStoreAction) {
-    store._didRehydrate = true;
-    return next(action);
-  }
-
-  // If init happened after our request was made, we need to re-request
-  if (store._didRequestInitialState && action.type === __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].INIT) {
-    return next(__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["a" /* actionCreators */].AlsoToMain({ type: __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["b" /* actionTypes */].NEW_TAB_STATE_REQUEST }));
-  }
-
-  if (__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isBroadcastToContent(action) || __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isSendToOneContent(action) || __WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isSendToPreloaded(action)) {
-    // Note that actions received before didRehydrate will not be dispatched
-    // because this could negatively affect preloading and the the state
-    // will be replaced by rehydration anyway.
-    return null;
-  }
-
-  return next(action);
-};
-/* unused harmony export rehydrationMiddleware */
-
-
-/**
- * This middleware queues up all the EARLY_QUEUED_ACTIONS until it receives
- * the first action from main. This is useful for those actions for main which
- * require higher reliability, i.e. the action will not be lost in the case
- * that it gets sent before the main is ready to receive it. Conversely, any
- * actions allowed early are accepted to be ignorable or re-sendable.
- */
-const queueEarlyMessageMiddleware = store => next => action => {
-  if (store._receivedFromMain) {
-    next(action);
-  } else if (__WEBPACK_IMPORTED_MODULE_0_common_Actions_jsm__["c" /* actionUtils */].isFromMain(action)) {
-    next(action);
-    store._receivedFromMain = true;
-    // Sending out all the early actions as main is ready now
-    if (store._earlyActionQueue) {
-      store._earlyActionQueue.forEach(next);
-      store._earlyActionQueue = [];
-    }
-  } else if (EARLY_QUEUED_ACTIONS.includes(action.type)) {
-    store._earlyActionQueue = store._earlyActionQueue || [];
-    store._earlyActionQueue.push(action);
-  } else {
-    // Let any other type of action go through
-    next(action);
-  }
-};
-/* unused harmony export queueEarlyMessageMiddleware */
-
-
-/**
- * initStore - Create a store and listen for incoming actions
- *
- * @param  {object} reducers An object containing Redux reducers
- * @param  {object} intialState (optional) The initial state of the store, if desired
- * @return {object}          A redux store
- */
-function initStore(reducers, initialState) {
-  const store = Object(__WEBPACK_IMPORTED_MODULE_1_redux__["createStore"])(mergeStateReducer(Object(__WEBPACK_IMPORTED_MODULE_1_redux__["combineReducers"])(reducers)), initialState, global.addMessageListener && Object(__WEBPACK_IMPORTED_MODULE_1_redux__["applyMiddleware"])(rehydrationMiddleware, queueEarlyMessageMiddleware, messageMiddleware));
-
-  store._didRehydrate = false;
-  store._didRequestInitialState = false;
-
-  if (global.addMessageListener) {
-    global.addMessageListener(INCOMING_MESSAGE_NAME, msg => {
-      try {
-        store.dispatch(msg.data);
-      } catch (ex) {
-        console.error("Content msg:", msg, "Dispatch error: ", ex); // eslint-disable-line no-console
-        dump(`Content msg: ${JSON.stringify(msg)}\nDispatch error: ${ex}\n${ex.stack}`);
-      }
-    });
-  }
-
-  return store;
-}
-/* WEBPACK VAR INJECTION */}.call(__webpack_exports__, __webpack_require__(3)))
-
-/***/ }),
-/* 35 */
-/***/ (function(module, exports) {
-
-module.exports = Redux;
 
 /***/ })
 /******/ ]);

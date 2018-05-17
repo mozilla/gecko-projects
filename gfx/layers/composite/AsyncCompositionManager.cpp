@@ -11,7 +11,7 @@
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
 #include "gfxPoint.h"                   // for gfxPoint, gfxSize
 #include "gfxPrefs.h"                   // for gfxPrefs
-#include "mozilla/StyleAnimationValue.h" // for StyleAnimationValue, etc
+#include "mozilla/ServoBindings.h"      // for Servo_AnimationValue_GetOpacity, etc
 #include "mozilla/WidgetUtils.h"        // for ComputeTransformForRotation
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/gfx/Point.h"          // for RoundedToInt, PointTyped
@@ -575,14 +575,59 @@ AsyncCompositionManager::AlignFixedAndStickyLayers(Layer* aTransformedSubtreeRoo
   }
 }
 
+static Matrix4x4
+ServoAnimationValueToMatrix4x4(const RefPtr<RawServoAnimationValue>& aValue,
+                               const TransformData& aTransformData)
+{
+  // FIXME: Bug 1457033: We should convert servo's animation value to matrix
+  // directly without nsCSSValueSharedList.
+  RefPtr<nsCSSValueSharedList> list;
+  Servo_AnimationValue_GetTransform(aValue, &list);
+  // we expect all our transform data to arrive in device pixels
+  Point3D transformOrigin = aTransformData.transformOrigin();
+  nsDisplayTransform::FrameTransformProperties props(Move(list),
+                                                     transformOrigin);
+
+  return nsDisplayTransform::GetResultingTransformMatrix(
+    props, aTransformData.origin(),
+    aTransformData.appUnitsPerDevPixel(),
+    0, &aTransformData.bounds());
+}
+
+
+static Matrix4x4
+FrameTransformToTransformInDevice(const Matrix4x4& aFrameTransform,
+                                  Layer* aLayer,
+                                  const TransformData& aTransformData)
+{
+  Matrix4x4 transformInDevice = aFrameTransform;
+  // If our parent layer is a perspective layer, then the offset into reference
+  // frame coordinates is already on that layer. If not, then we need to ask
+  // for it to be added here.
+  if (!aLayer->GetParent() ||
+      !aLayer->GetParent()->GetTransformIsPerspective()) {
+    nsLayoutUtils::PostTranslate(transformInDevice, aTransformData.origin(),
+      aTransformData.appUnitsPerDevPixel(),
+      true);
+  }
+
+  if (ContainerLayer* c = aLayer->AsContainerLayer()) {
+    transformInDevice.PostScale(c->GetInheritedXScale(),
+                                c->GetInheritedYScale(),
+                                1);
+  }
+
+  return transformInDevice;
+}
+
 static void
 ApplyAnimatedValue(Layer* aLayer,
                    CompositorAnimationStorage* aStorage,
                    nsCSSPropertyID aProperty,
                    const AnimationData& aAnimationData,
-                   const AnimationValue& aValue)
+                   const RefPtr<RawServoAnimationValue>& aValue)
 {
-  if (aValue.IsNull()) {
+  if (!aValue) {
     // Return gracefully if we have no valid AnimationValue.
     return;
   }
@@ -590,47 +635,34 @@ ApplyAnimatedValue(Layer* aLayer,
   HostLayer* layerCompositor = aLayer->AsHostLayer();
   switch (aProperty) {
     case eCSSProperty_opacity: {
-      layerCompositor->SetShadowOpacity(aValue.GetOpacity());
+      float opacity = Servo_AnimationValue_GetOpacity(aValue);
+      layerCompositor->SetShadowOpacity(opacity);
       layerCompositor->SetShadowOpacitySetByAnimation(true);
-      aStorage->SetAnimatedValue(aLayer->GetCompositorAnimationsId(),
-                                 aValue.GetOpacity());
+      aStorage->SetAnimatedValue(aLayer->GetCompositorAnimationsId(), opacity);
 
+      layerCompositor->SetShadowBaseTransform(aLayer->GetBaseTransform());
+      layerCompositor->SetShadowTransformSetByAnimation(false);
       break;
     }
     case eCSSProperty_transform: {
-      RefPtr<const nsCSSValueSharedList> list = aValue.GetTransformList();
       const TransformData& transformData = aAnimationData.get_TransformData();
-      nsPoint origin = transformData.origin();
-      // we expect all our transform data to arrive in device pixels
-      Point3D transformOrigin = transformData.transformOrigin();
-      nsDisplayTransform::FrameTransformProperties props(Move(list),
-                                                         transformOrigin);
+
+      Matrix4x4 frameTransform =
+        ServoAnimationValueToMatrix4x4(aValue, transformData);
 
       Matrix4x4 transform =
-        nsDisplayTransform::GetResultingTransformMatrix(props, origin,
-                                                        transformData.appUnitsPerDevPixel(),
-                                                        0, &transformData.bounds());
-      Matrix4x4 frameTransform = transform;
-
-      // If our parent layer is a perspective layer, then the offset into reference
-      // frame coordinates is already on that layer. If not, then we need to ask
-      // for it to be added here.
-      if (!aLayer->GetParent() ||
-          !aLayer->GetParent()->GetTransformIsPerspective()) {
-        nsLayoutUtils::PostTranslate(transform, origin,
-                                     transformData.appUnitsPerDevPixel(),
-                                     true);
-      }
-
-      if (ContainerLayer* c = aLayer->AsContainerLayer()) {
-        transform.PostScale(c->GetInheritedXScale(), c->GetInheritedYScale(), 1);
-      }
+        FrameTransformToTransformInDevice(frameTransform,
+                                          aLayer,
+                                          transformData);
 
       layerCompositor->SetShadowBaseTransform(transform);
       layerCompositor->SetShadowTransformSetByAnimation(true);
       aStorage->SetAnimatedValue(aLayer->GetCompositorAnimationsId(),
                                  Move(transform), Move(frameTransform),
                                  transformData);
+
+      layerCompositor->SetShadowOpacity(aLayer->GetOpacity());
+      layerCompositor->SetShadowOpacitySetByAnimation(false);
       break;
     }
     default:
@@ -641,7 +673,8 @@ ApplyAnimatedValue(Layer* aLayer,
 static bool
 SampleAnimations(Layer* aLayer,
                  CompositorAnimationStorage* aStorage,
-                 TimeStamp aTime)
+                 TimeStamp aPreviousFrameTime,
+                 TimeStamp aCurrentFrameTime)
 {
   bool isAnimating = false;
 
@@ -649,22 +682,82 @@ SampleAnimations(Layer* aLayer,
       aLayer,
       [&] (Layer* layer)
       {
-        bool hasInEffectAnimations = false;
-        AnimationValue animationValue = layer->GetBaseAnimationStyle();
-        if (AnimationHelper::SampleAnimationForEachNode(aTime,
-                                                        layer->GetAnimations(),
-                                                        layer->GetAnimationData(),
-                                                        animationValue,
-                                                        hasInEffectAnimations)) {
-          isAnimating = true;
+        AnimationArray& animations = layer->GetAnimations();
+        if (animations.IsEmpty()) {
+          return;
         }
-        if (hasInEffectAnimations) {
-          Animation& animation = layer->GetAnimations().LastElement();
-          ApplyAnimatedValue(layer,
-                             aStorage,
-                             animation.property(),
-                             animation.data(),
-                             animationValue);
+        isAnimating = true;
+        AnimatedValue* previousValue =
+          aStorage->GetAnimatedValue(layer->GetCompositorAnimationsId());
+        RefPtr<RawServoAnimationValue> animationValue =
+          layer->GetBaseAnimationStyle();
+        AnimationHelper::SampleResult sampleResult =
+          AnimationHelper::SampleAnimationForEachNode(aPreviousFrameTime,
+                                                      aCurrentFrameTime,
+                                                      animations,
+                                                      layer->GetAnimationData(),
+                                                      animationValue,
+                                                      previousValue);
+        switch (sampleResult) {
+          case AnimationHelper::SampleResult::Sampled: {
+            Animation& animation = animations.LastElement();
+            ApplyAnimatedValue(layer,
+                               aStorage,
+                               animation.property(),
+                               animation.data(),
+                               animationValue);
+            break;
+          }
+          case AnimationHelper::SampleResult::Skipped:
+            // We don't need to update animation values for this layer since
+            // the values haven't changed.
+#ifdef DEBUG
+            // Sanity check that the animation value is surely unchanged.
+            switch (animations[0].property()) {
+              case eCSSProperty_opacity:
+                MOZ_ASSERT(
+                  layer->AsHostLayer()->GetShadowOpacitySetByAnimation());
+                // Disable this assertion until the root cause is fixed in bug
+                // 1459775.
+                // MOZ_ASSERT(FuzzyEqualsMultiplicative(
+                //   Servo_AnimationValue_GetOpacity(animationValue),
+                //   *(aStorage->GetAnimationOpacity(layer->GetCompositorAnimationsId()))));
+                break;
+              case eCSSProperty_transform: {
+                MOZ_ASSERT(
+                  layer->AsHostLayer()->GetShadowTransformSetByAnimation());
+
+                MOZ_ASSERT(previousValue);
+
+                const TransformData& transformData =
+                  animations[0].data().get_TransformData();
+                Matrix4x4 frameTransform =
+                  ServoAnimationValueToMatrix4x4(animationValue, transformData);
+                Matrix4x4 transformInDevice =
+                  FrameTransformToTransformInDevice(frameTransform,
+                                                    layer,
+                                                    transformData);
+                MOZ_ASSERT(
+                  previousValue->mTransform.mTransformInDevSpace.FuzzyEqualsMultiplicative(
+                  transformInDevice));
+                break;
+              }
+              default:
+                MOZ_ASSERT_UNREACHABLE("Unsupported properties");
+                break;
+            }
+#endif
+            break;
+          case AnimationHelper::SampleResult::None: {
+            HostLayer* layerCompositor = layer->AsHostLayer();
+            layerCompositor->SetShadowBaseTransform(layer->GetBaseTransform());
+            layerCompositor->SetShadowTransformSetByAnimation(false);
+            layerCompositor->SetShadowOpacity(layer->GetOpacity());
+            layerCompositor->SetShadowOpacitySetByAnimation(false);
+            break;
+          }
+          default:
+            break;
         }
       });
 
@@ -753,9 +846,10 @@ MoveScrollbarForLayerMargin(Layer* aRoot, FrameMetrics::ViewID aRootScrollId,
   // adjustment on the layer tree.
   Layer* scrollbar = BreadthFirstSearch<ReverseIterator>(aRoot,
     [aRootScrollId](Layer* aNode) {
-      return (aNode->GetScrollbarData().mDirection.isSome() &&
+      return (aNode->GetScrollbarData().IsThumb() &&
+              aNode->GetScrollbarData().mDirection.isSome() &&
               *aNode->GetScrollbarData().mDirection == ScrollDirection::eHorizontal &&
-              aNode->GetScrollbarTargetViewId() == aRootScrollId);
+              aNode->GetScrollbarData().mTargetViewId == aRootScrollId);
     });
   if (scrollbar) {
     // Shift the horizontal scrollbar down into the new space exposed by the
@@ -1050,7 +1144,7 @@ LayerIsScrollbarTarget(const LayerMetricsWrapper& aTarget, Layer* aScrollbar)
   }
   const FrameMetrics& metrics = aTarget.Metrics();
   MOZ_ASSERT(metrics.IsScrollable());
-  if (metrics.GetScrollId() != aScrollbar->GetScrollbarTargetViewId()) {
+  if (metrics.GetScrollId() != aScrollbar->GetScrollbarData().mTargetViewId) {
     return false;
   }
   return !metrics.IsScrollInfoLayer();
@@ -1171,15 +1265,11 @@ AsyncCompositionManager::TransformShadowTree(TimeStamp aCurrentFrame,
   // First, compute and set the shadow transforms from OMT animations.
   // NB: we must sample animations *before* sampling pan/zoom
   // transforms.
-  // Use a previous vsync time to make main thread animations and compositor
-  // more in sync with each other.
-  // On the initial frame we use aVsyncTimestamp here so the timestamp on the
-  // second frame are the same as the initial frame, but it does not matter.
   bool wantNextFrame =
     SampleAnimations(root,
                      storage,
-                     !mPreviousFrameTimeStamp.IsNull() ?
-                       mPreviousFrameTimeStamp : aCurrentFrame);
+                     mPreviousFrameTimeStamp,
+                     aCurrentFrame);
 
   if (!wantNextFrame) {
     // Clean up the CompositorAnimationStorage because

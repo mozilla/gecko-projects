@@ -105,8 +105,8 @@ class ChunkPool
 };
 
 // Performs extra allocation off thread so that when memory is required on the
-// active thread it will already be available and waiting.
-class BackgroundAllocTask : public GCParallelTask
+// main thread it will already be available and waiting.
+class BackgroundAllocTask : public GCParallelTaskHelper<BackgroundAllocTask>
 {
     // Guarded by the GC lock.
     GCLockData<ChunkPool&> chunkPool_;
@@ -117,21 +117,19 @@ class BackgroundAllocTask : public GCParallelTask
     BackgroundAllocTask(JSRuntime* rt, ChunkPool& pool);
     bool enabled() const { return enabled_; }
 
-  protected:
-    void run() override;
+    void run();
 };
 
 // Search the provided Chunks for free arenas and decommit them.
-class BackgroundDecommitTask : public GCParallelTask
+class BackgroundDecommitTask : public GCParallelTaskHelper<BackgroundDecommitTask>
 {
   public:
     using ChunkVector = mozilla::Vector<Chunk*>;
 
-    explicit BackgroundDecommitTask(JSRuntime *rt) : GCParallelTask(rt) {}
+    explicit BackgroundDecommitTask(JSRuntime *rt) : GCParallelTaskHelper(rt) {}
     void setChunksToScan(ChunkVector &chunks);
 
-  protected:
-    void run() override;
+    void run();
 
   private:
     MainThreadOrGCTaskData<ChunkVector> toDecommit;
@@ -287,6 +285,16 @@ class GCRuntime
     void setDeterministic(bool enable);
 #endif
 
+#ifdef ENABLE_WASM_GC
+    // If we run with wasm-gc enabled and there's wasm frames on the stack,
+    // then GCs are suppressed and many APIs should not be available.
+    // TODO (bug 1456824) This is temporary and should be removed once proper
+    // GC support is implemented.
+    static bool temporaryAbortIfWasmGc(JSContext* cx);
+#else
+    static bool temporaryAbortIfWasmGc(JSContext* cx) { return false; }
+#endif
+
     uint64_t nextCellUniqueId() {
         MOZ_ASSERT(nextCellUniqueId_ > 0);
         uint64_t uid = ++nextCellUniqueId_;
@@ -308,7 +316,7 @@ class GCRuntime
     void waitBackgroundSweepEnd() { helperState.waitBackgroundSweepEnd(); }
     void waitBackgroundSweepOrAllocEnd() {
         helperState.waitBackgroundSweepEnd();
-        allocTask.cancel(GCParallelTask::CancelAndWait);
+        allocTask.cancelAndWait();
     }
 
 #ifdef DEBUG
@@ -482,8 +490,10 @@ class GCRuntime
     /*
      * Concurrent sweep infrastructure.
      */
-    void startTask(GCParallelTask& task, gcstats::PhaseKind phase, AutoLockHelperThreadState& locked);
-    void joinTask(GCParallelTask& task, gcstats::PhaseKind phase, AutoLockHelperThreadState& locked);
+    void startTask(GCParallelTask& task, gcstats::PhaseKind phase,
+                   AutoLockHelperThreadState& locked);
+    void joinTask(GCParallelTask& task, gcstats::PhaseKind phase,
+                  AutoLockHelperThreadState& locked);
 
     void mergeCompartments(JSCompartment* source, JSCompartment* target);
 
@@ -936,7 +946,7 @@ class GCRuntime
     MainThreadData<bool> arenasEmptyAtShutdown;
 #endif
 
-    /* Synchronize GC heap access among GC helper threads and active threads. */
+    /* Synchronize GC heap access among GC helper threads and the main thread. */
     friend class js::AutoLockGC;
     friend class js::AutoLockGCBgAlloc;
     js::Mutex lock;

@@ -203,8 +203,7 @@ mozTXTToHTMLConv::FindURLStart(const char16_t * aInString, int32_t aInLength,
       start = pos + 1;
       return true;
     }
-    else
-      return false;
+    return false;
   }
   case RFC2396E:
   {
@@ -216,8 +215,7 @@ mozTXTToHTMLConv::FindURLStart(const char16_t * aInString, int32_t aInLength,
       start = uint32_t(++i);
       return start < pos;
     }
-    else
-      return false;
+    return false;
   }
   case freetext:
   {
@@ -235,8 +233,7 @@ mozTXTToHTMLConv::FindURLStart(const char16_t * aInString, int32_t aInLength,
       start = uint32_t(i);
       return true;
     }
-    else
-      return false;
+    return false;
   }
   case abbreviated:
   {
@@ -269,8 +266,7 @@ mozTXTToHTMLConv::FindURLStart(const char16_t * aInString, int32_t aInLength,
       start = uint32_t(i);
       return true;
     }
-    else
-      return false;
+    return false;
   }
   default:
     return false;
@@ -474,8 +470,7 @@ mozTXTToHTMLConv::CheckURLAndCreateHTML(
     outputHTML.AppendLiteral("</a>");
     return true;
   }
-  else
-    return false;
+  return false;
 }
 
 NS_IMETHODIMP mozTXTToHTMLConv::FindURLInPlaintext(const char16_t * aInString, int32_t aInLength, int32_t aPos, int32_t * aStartPos, int32_t * aEndPos)
@@ -1009,14 +1004,6 @@ mozTXTToHTMLConv::GlyphHit(const char16_t * aInString, int32_t aInLength, bool c
   Library-internal Interface
 ****************************************************************************/
 
-mozTXTToHTMLConv::mozTXTToHTMLConv()
-{
-}
-
-mozTXTToHTMLConv::~mozTXTToHTMLConv()
-{
-}
-
 NS_IMPL_ISUPPORTS(mozTXTToHTMLConv,
                   mozITXTToHTMLConv,
                   nsIStreamConverter,
@@ -1414,7 +1401,7 @@ mozTXTToHTMLConv::ScanHTML(const char16_t *text, uint32_t whattodo,
 nsresult
 MOZ_NewTXTToHTMLConv(mozTXTToHTMLConv** aConv)
 {
-    NS_PRECONDITION(aConv != nullptr, "null ptr");
+    MOZ_ASSERT(aConv != nullptr, "null ptr");
     if (!aConv)
       return NS_ERROR_NULL_POINTER;
 

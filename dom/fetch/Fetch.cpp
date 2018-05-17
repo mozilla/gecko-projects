@@ -535,8 +535,14 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
       return nullptr;
     }
 
+    Maybe<ClientInfo> clientInfo(worker->GetClientInfo());
+    if (clientInfo.isNothing()) {
+      aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      return nullptr;
+    }
+
     RefPtr<MainThreadFetchRunnable> run =
-      new MainThreadFetchRunnable(resolver, worker->GetClientInfo(),
+      new MainThreadFetchRunnable(resolver, clientInfo.ref(),
                                   worker->GetController(), r);
     worker->DispatchToMainThread(run.forget());
   }
@@ -1401,7 +1407,9 @@ template <class Derived>
 void
 FetchBody<Derived>::Abort()
 {
-  MOZ_ASSERT(mReadableStreamBody);
+  if (!mReadableStreamBody) {
+    return;
+  }
 
   AutoJSAPI jsapi;
   if (!jsapi.Init(mOwner)) {

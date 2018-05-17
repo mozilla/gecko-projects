@@ -175,7 +175,6 @@ def get_partner_config(partner_url_config, github_token):
             },
             'release_enable_partners': {
                 'type': 'boolean',
-                'default': False,
                 'description': ('Toggle for creating partner repacks'),
             },
             'release_partner_build_number': {
@@ -202,7 +201,6 @@ def get_partner_config(partner_url_config, github_token):
             },
             'release_enable_emefree': {
                 'type': 'boolean',
-                'default': False,
                 'description': ('Toggle for creating EME-free repacks'),
             },
         },
@@ -294,6 +292,9 @@ def release_promotion_action(parameters, graph_config, input, task_group_id, tas
     parameters['release_partners'] = input.get('release_partners')
     parameters['release_enable_emefree'] = release_enable_emefree
     parameters['release_product'] = product
+    # When doing staging releases on try, we still want to re-use tasks from
+    # previous graphs.
+    parameters['optimize_target_tasks'] = True
 
     partner_config = input.get('release_partner_config')
     if not partner_config and (release_enable_emefree or release_enable_partners):

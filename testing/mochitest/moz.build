@@ -22,16 +22,20 @@ FINAL_TARGET_PP_FILES += ['install.rdf']
 FINAL_TARGET_FILES += ['bootstrap.js']
 
 MOCHITEST_MANIFESTS += [
+    'baselinecoverage/plain/mochitest.ini',
     'tests/MochiKit-1.4.2/tests/mochitest.ini',
 ]
-MOCHITEST_CHROME_MANIFESTS += ['chrome/chrome.ini']
 
-GENERATED_FILES += [
-    'automation.py',
+MOCHITEST_CHROME_MANIFESTS += [
+    'baselinecoverage/chrome/chrome.ini',
+    'chrome/chrome.ini'
+]
+
+BROWSER_CHROME_MANIFESTS += [
+    'baselinecoverage/browser_chrome/browser.ini'
 ]
 
 TEST_HARNESS_FILES.testing.mochitest += [
-    '!automation.py',
     '/build/mobile/remoteautomation.py',
     '/build/pgo/server-locations.txt',
     '/build/sanitizers/lsan_suppressions.txt',
@@ -56,6 +60,7 @@ TEST_HARNESS_FILES.testing.mochitest += [
     'pywebsocket_wrapper.py',
     'redirect.html',
     'rungeckoview.py',
+    'runjunit.py',
     'runrobocop.py',
     'runtests.py',
     'runtestsremote.py',

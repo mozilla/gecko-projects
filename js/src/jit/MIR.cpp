@@ -954,12 +954,12 @@ bool
 jit::IonCompilationCanUseNurseryPointers()
 {
     // If we are doing backend compilation, which could occur on a helper
-    // thread but might actually be on the active thread, check the flag set on
+    // thread but might actually be on the main thread, check the flag set on
     // the JSContext by AutoEnterIonCompilation.
     if (CurrentThreadIsIonCompiling())
         return !CurrentThreadIsIonCompilingSafeForMinorGC();
 
-    // Otherwise, we must be on the active thread during MIR construction. The
+    // Otherwise, we must be on the main thread during MIR construction. The
     // store buffer must have been notified that minor GCs must cancel pending
     // or in progress Ion compilations.
     JSRuntime* rt = TlsContext.get()->zone()->runtimeFromMainThread();
@@ -1286,8 +1286,11 @@ MConstant::valueToBoolean(bool* res) const
         *res = toString()->length() != 0;
         return true;
       case MIRType::Object:
-        *res = !EmulatesUndefined(&toObject());
-        return true;
+        // We have to call EmulatesUndefined but that reads obj->group->clasp
+        // and so it's racy when the object has a lazy group. The main callers
+        // of this (MTest, MNot) already know how to fold the object case, so
+        // just give up.
+        return false;
       default:
         MOZ_ASSERT(IsMagicType(type()));
         return false;
@@ -1888,6 +1891,29 @@ void MNearbyInt::printOpcode(GenericPrinter& out) const
 }
 #endif
 
+MDefinition*
+MSign::foldsTo(TempAllocator& alloc)
+{
+    MDefinition* input = getOperand(0);
+    if (!input->isConstant() || !input->toConstant()->isTypeRepresentableAsDouble())
+        return this;
+
+    double in = input->toConstant()->numberToDouble();
+    double out = js::math_sign_uncached(in);
+
+    if (type() == MIRType::Int32) {
+        // Decline folding if this is an int32 operation, but the result type
+        // isn't an int32.
+        Value outValue = NumberValue(out);
+        if (!outValue.isInt32())
+            return this;
+
+        return MConstant::New(alloc, outValue);
+    }
+
+    return MConstant::New(alloc, DoubleValue(out));
+}
+
 const char*
 MMathFunction::FunctionName(Function function)
 {
@@ -1910,7 +1936,6 @@ MMathFunction::FunctionName(Function function)
       case ACosH:  return "ACosH";
       case ASinH:  return "ASinH";
       case ATanH:  return "ATanH";
-      case Sign:   return "Sign";
       case Trunc:  return "Trunc";
       case Cbrt:   return "Cbrt";
       case Floor:  return "Floor";
@@ -1993,9 +2018,6 @@ MMathFunction::foldsTo(TempAllocator& alloc)
         break;
       case ATanH:
         out = js::math_atanh_uncached(in);
-        break;
-      case Sign:
-        out = js::math_sign_uncached(in);
         break;
       case Trunc:
         out = js::math_trunc_uncached(in);
@@ -2260,6 +2282,14 @@ MCeil::trySpecializeFloat32(TempAllocator& alloc)
 
 void
 MRound::trySpecializeFloat32(TempAllocator& alloc)
+{
+    MOZ_ASSERT(type() == MIRType::Int32);
+    if (EnsureFloatInputOrConvert(this, alloc))
+        specialization_ = MIRType::Float32;
+}
+
+void
+MTrunc::trySpecializeFloat32(TempAllocator& alloc)
 {
     MOZ_ASSERT(type() == MIRType::Int32);
     if (EnsureFloatInputOrConvert(this, alloc))
@@ -6123,7 +6153,8 @@ MConvertUnboxedObjectToNative::New(TempAllocator& alloc, MDefinition* obj, Objec
 {
     MConvertUnboxedObjectToNative* res = new(alloc) MConvertUnboxedObjectToNative(obj, group);
 
-    ObjectGroup* nativeGroup = group->unboxedLayout().nativeGroup();
+    AutoSweepObjectGroup sweep(group);
+    ObjectGroup* nativeGroup = group->unboxedLayout(sweep).nativeGroup();
 
     // Make a new type set for the result of this instruction which replaces
     // the input group with the native group we will convert it to.
@@ -6200,10 +6231,10 @@ jit::ElementAccessMightBeCopyOnWrite(CompilerConstraintList* constraints, MDefin
 }
 
 bool
-jit::ElementAccessMightBeFrozen(CompilerConstraintList* constraints, MDefinition* obj)
+jit::ElementAccessMightBeNonExtensible(CompilerConstraintList* constraints, MDefinition* obj)
 {
     TemporaryTypeSet* types = obj->resultTypeSet();
-    return !types || types->hasObjectFlags(constraints, OBJECT_FLAG_FROZEN_ELEMENTS);
+    return !types || types->hasObjectFlags(constraints, OBJECT_FLAG_NON_EXTENSIBLE_ELEMENTS);
 }
 
 AbortReasonOr<bool>
@@ -6712,10 +6743,12 @@ jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc, CompilerConstraintList*
     // being written can accommodate the value.
     for (size_t i = 0; i < types->getObjectCount(); i++) {
         TypeSet::ObjectKey* key = types->getObject(i);
-        if (key && key->isGroup() && key->group()->maybeUnboxedLayout()) {
-            const UnboxedLayout& layout = key->group()->unboxedLayout();
+        if (!key || !key->isGroup())
+            continue;
+        AutoSweepObjectGroup sweep(key->group());
+        if (const auto* layout = key->group()->maybeUnboxedLayout(sweep)) {
             if (name) {
-                const UnboxedLayout::Property* property = layout.lookup(name);
+                const UnboxedLayout::Property* property = layout->lookup(name);
                 if (property && !CanStoreUnboxedType(alloc, property->type, *pvalue))
                     return true;
             }
@@ -6756,7 +6789,8 @@ jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc, CompilerConstraintList*
     // does not have a corresponding native group. Objects with the native
     // group might appear even though they are not in the type set.
     if (excluded->isGroup()) {
-        if (UnboxedLayout* layout = excluded->group()->maybeUnboxedLayout()) {
+        AutoSweepObjectGroup sweep(excluded->group());
+        if (UnboxedLayout* layout = excluded->group()->maybeUnboxedLayout(sweep)) {
             if (layout->nativeGroup())
                 return true;
             excluded->watchStateChangeForUnboxedConvertedToNative(constraints);

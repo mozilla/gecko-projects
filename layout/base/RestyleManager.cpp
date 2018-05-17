@@ -991,8 +991,8 @@ static void
 DoApplyRenderingChangeToTree(nsIFrame* aFrame,
                              nsChangeHint aChange)
 {
-  NS_PRECONDITION(gInApplyRenderingChangeToTree,
-                  "should only be called within ApplyRenderingChangeToTree");
+  MOZ_ASSERT(gInApplyRenderingChangeToTree,
+             "should only be called within ApplyRenderingChangeToTree");
 
   for ( ; aFrame; aFrame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame)) {
     // Invalidate and sync views on all descendant frames, following placeholders.
@@ -1091,8 +1091,9 @@ DoApplyRenderingChangeToTree(nsIFrame* aFrame,
 static void
 SyncViewsAndInvalidateDescendants(nsIFrame* aFrame, nsChangeHint aChange)
 {
-  NS_PRECONDITION(gInApplyRenderingChangeToTree,
-                  "should only be called within ApplyRenderingChangeToTree");
+  MOZ_ASSERT(gInApplyRenderingChangeToTree,
+             "should only be called within ApplyRenderingChangeToTree");
+
   NS_ASSERTION(nsChangeHint_size_t(aChange) ==
                           (aChange & (nsChangeHint_RepaintFrame |
                                       nsChangeHint_SyncFrameView |
@@ -1849,7 +1850,7 @@ RestyleManager::AnimationsWithDestroyedFrame
     // *compositor* at this point.
     EffectSet* effectSet = EffectSet::GetEffectSet(element, aPseudoType);
     if (effectSet) {
-      for (KeyframeEffectReadOnly* effect : *effectSet) {
+      for (KeyframeEffect* effect : *effectSet) {
         effect->ResetIsRunningOnCompositor();
       }
     }
@@ -2188,13 +2189,6 @@ RestyleManager::PostRestyleEvent(Element* aElement,
   if (aRestyleHint || aMinChangeHint) {
     Servo_NoteExplicitHints(aElement, aRestyleHint, aMinChangeHint);
   }
-}
-
-void
-RestyleManager::PostRestyleEventForCSSRuleChanges()
-{
-  mRestyleForCSSRuleChanges = true;
-  mPresContext->PresShell()->EnsureStyleFlush();
 }
 
 void
@@ -2591,6 +2585,9 @@ RestyleManager::ProcessPostTraversal(
 {
   nsIFrame* styleFrame = nsLayoutUtils::GetStyleFrame(aElement);
   nsIFrame* primaryFrame = aElement->GetPrimaryFrame();
+
+  MOZ_DIAGNOSTIC_ASSERT(aElement->HasServoData(),
+                        "Element without Servo data on a post-traversal? How?");
 
   // NOTE(emilio): This is needed because for table frames the bit is set on the
   // table wrapper (which is the primary frame), not on the table itself.
@@ -3522,7 +3519,7 @@ RestyleManager::DoReparentComputedStyleForFirstLine(nsIFrame* aFrame,
   ReparentFrameDescendants(aFrame, providerChild, aStyleSet);
 
   // We do not need to do the equivalent of UpdateFramePseudoElementStyles,
-  // because those are hadled by our descendant walk.
+  // because those are handled by our descendant walk.
 }
 
 void
@@ -3530,6 +3527,12 @@ RestyleManager::ReparentFrameDescendants(nsIFrame* aFrame,
                                          nsIFrame* aProviderChild,
                                          ServoStyleSet& aStyleSet)
 {
+  if (aFrame->GetContent()->IsElement() &&
+      !aFrame->GetContent()->AsElement()->HasServoData()) {
+    // We're getting into a display: none subtree, avoid reparenting into stuff
+    // that is going to go away anyway in seconds.
+    return;
+  }
   nsIFrame::ChildListIterator lists(aFrame);
   for (; !lists.IsDone(); lists.Next()) {
     for (nsIFrame* child : lists.CurrentList()) {

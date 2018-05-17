@@ -591,7 +591,7 @@ add_task(async function test_offline_cache() {
     onCacheEntryCheck() { return Ci.nsICacheEntryOpenCallback.ENTRY_WANTED; },
     onCacheEntryAvailable(entry, isnew, unused, status) {
       is(status, Cr.NS_OK);
-      var stream = entry.openOutputStream(0);
+      var stream = entry.openOutputStream(0, -1);
       var content = "content";
       stream.write(content, content.length);
       stream.close();
@@ -776,8 +776,8 @@ WindowHelper.prototype = {
    * this.onload to a function to execute onload.  It should close the dialog
    * when done so that the tests may continue.  Set this.onunload to a function
    * to execute onunload.  this.onunload is optional. If it returns true, the
-   * caller is expected to call waitForAsyncUpdates at some point; if false is
-   * returned, waitForAsyncUpdates is called automatically.
+   * caller is expected to call promiseAsyncUpdates at some point; if false is
+   * returned, promiseAsyncUpdates is called automatically.
    */
   open() {
     let wh = this;

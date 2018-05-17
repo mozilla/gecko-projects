@@ -20,7 +20,7 @@
 #include "nsIWidget.h"
 #include "nsThemeConstants.h"  // For system widget appearance types
 
-#include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // for PlaybackDirection
+#include "mozilla/dom/AnimationEffectBinding.h" // for PlaybackDirection
 #include "mozilla/LookAndFeel.h" // for system colors
 
 #include "nsString.h"
@@ -33,41 +33,18 @@ using namespace mozilla;
 
 typedef nsCSSProps::KTableEntry KTableEntry;
 
-// By wrapping internal-only properties in this macro, we are not
-// exposing them in the CSSOM. Since currently it is not necessary to
-// allow accessing them in that way, it is easier and cheaper to just
-// do this rather than exposing them conditionally.
-#define CSS_PROP(name_, id_, method_, flags_, pref_, ...) \
-  static_assert(!((flags_) & CSS_PROPERTY_ENABLED_MASK) || pref_[0], \
-                "Internal-only property '" #name_ "' should be wrapped in " \
-                "#ifndef CSS_PROP_LIST_EXCLUDE_INTERNAL");
-#define CSS_PROP_LIST_EXCLUDE_INTERNAL
-#include "nsCSSPropList.h"
-#undef CSS_PROP_LIST_EXCLUDE_INTERNAL
-#undef CSS_PROP
-
-#define CSS_PROP(name_, id_, method_, flags_, pref_, ...) \
-  static_assert(!((flags_) & CSS_PROPERTY_ENABLED_IN_CHROME) || \
-                ((flags_) & CSS_PROPERTY_ENABLED_IN_UA_SHEETS), \
-                "Property '" #name_ "' is enabled in chrome, so it should " \
-                "also be enabled in UA sheets");
-#include "nsCSSPropList.h"
-#undef CSS_PROP
-
 // required to make the symbol external, so that TestCSSPropertyLookup.cpp can link with it
 extern const char* const kCSSRawProperties[];
 
 // define an array of all CSS properties
 const char* const kCSSRawProperties[eCSSProperty_COUNT_with_aliases] = {
-#define CSS_PROP(name_, ...) #name_,
-#include "nsCSSPropList.h"
-#undef CSS_PROP
-#define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) #name_,
-#include "nsCSSPropList.h"
-#undef CSS_PROP_SHORTHAND
-#define CSS_PROP_ALIAS(aliasname_, aliasid_, id_, method_, pref_) #aliasname_,
-#include "nsCSSPropAliasList.h"
+#define CSS_PROP_LONGHAND(name_, ...) #name_,
+#define CSS_PROP_SHORTHAND(name_, ...) #name_,
+#define CSS_PROP_ALIAS(name_, ...) #name_,
+#include "mozilla/ServoCSSPropList.h"
 #undef CSS_PROP_ALIAS
+#undef CSS_PROP_SHORTHAND
+#undef CSS_PROP_LONGHAND
 };
 
 using namespace mozilla;
@@ -90,34 +67,6 @@ static const char* const kCSSRawCounterDescs[] = {
 #undef CSS_COUNTER_DESC
 };
 
-static const char* const kCSSRawPredefinedCounterStyles[] = {
-  "none",
-  // 6 Simple Predefined Counter Styles
-  // 6.1 Numeric
-  "decimal", "decimal-leading-zero", "arabic-indic", "armenian",
-  "upper-armenian", "lower-armenian", "bengali", "cambodian", "khmer",
-  "cjk-decimal", "devanagari", "georgian", "gujarati", "gurmukhi", "hebrew",
-  "kannada", "lao", "malayalam", "mongolian", "myanmar", "oriya", "persian",
-  "lower-roman", "upper-roman", "tamil", "telugu", "thai", "tibetan",
-  // 6.2 Alphabetic
-  "lower-alpha", "lower-latin", "upper-alpha", "upper-latin",
-  "cjk-earthly-branch", "cjk-heavenly-stem", "lower-greek",
-  "hiragana", "hiragana-iroha", "katakana", "katakana-iroha",
-  // 6.3 Symbolic
-  "disc", "circle", "square", "disclosure-open", "disclosure-closed",
-  // 7 Complex Predefined Counter Styles
-  // 7.1 Longhand East Asian Counter Styles
-  // 7.1.1 Japanese
-  "japanese-informal", "japanese-formal",
-  // 7.1.2 Korean
-  "korean-hangul-formal", "korean-hanja-informal", "korean-hanja-formal",
-  // 7.1.3 Chinese
-  "simp-chinese-informal", "simp-chinese-formal",
-  "trad-chinese-informal", "trad-chinese-formal", "cjk-ideographic",
-  // 7.2 Ethiopic Numeric Counter Style
-  "ethiopic-numeric"
-};
-
 // We need eCSSAliasCount so we can make gAliases nonzero size when there
 // are no aliases.
 enum {
@@ -128,7 +77,7 @@ enum {
 static nsCSSPropertyID gAliases[eCSSAliasCount != 0 ? eCSSAliasCount : 1] = {
 #define CSS_PROP_ALIAS(aliasname_, aliasid_, propid_, aliasmethod_, pref_)  \
   eCSSProperty_##propid_ ,
-#include "nsCSSPropAliasList.h"
+#include "mozilla/ServoCSSPropList.h"
 #undef CSS_PROP_ALIAS
 };
 
@@ -181,88 +130,19 @@ nsCSSProps::AddRefTable(void)
                                        pref_);                                \
         }
 
-      #define CSS_PROP(name_, id_, method_, flags_, pref_, ...) \
+      #define CSS_PROP_LONGHAND(name_, id_, method_, flags_, pref_) \
         OBSERVE_PROP(pref_, eCSSProperty_##id_)
-      #include "nsCSSPropList.h"
-      #undef CSS_PROP
-
-      #define  CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) \
+      #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) \
         OBSERVE_PROP(pref_, eCSSProperty_##id_)
-      #include "nsCSSPropList.h"
-      #undef CSS_PROP_SHORTHAND
-
-      #define CSS_PROP_ALIAS(aliasname_, aliasid_, propid_, aliasmethod_, pref_)    \
-        OBSERVE_PROP(pref_, eCSSPropertyAlias_##aliasmethod_)
-      #include "nsCSSPropAliasList.h"
+      #define CSS_PROP_ALIAS(name_, aliasid_, id_, method_, pref_) \
+        OBSERVE_PROP(pref_, eCSSPropertyAlias_##aliasid_)
+      #include "mozilla/ServoCSSPropList.h"
       #undef CSS_PROP_ALIAS
+      #undef CSS_PROP_SHORTHAND
+      #undef CSS_PROP_LONGHAND
 
       #undef OBSERVE_PROP
     }
-
-#ifdef DEBUG
-    {
-      // Assert that if CSS_PROPERTY_ENABLED_IN_UA_SHEETS or
-      // CSS_PROPERTY_ENABLED_IN_CHROME is used on a shorthand property
-      // that all of its component longhands also have the flag.
-      static uint32_t flagsToCheck[] = {
-        CSS_PROPERTY_ENABLED_IN_UA_SHEETS,
-        CSS_PROPERTY_ENABLED_IN_CHROME
-      };
-      for (nsCSSPropertyID shorthand = eCSSProperty_COUNT_no_shorthands;
-           shorthand < eCSSProperty_COUNT;
-           shorthand = nsCSSPropertyID(shorthand + 1)) {
-        for (size_t i = 0; i < ArrayLength(flagsToCheck); i++) {
-          uint32_t flag = flagsToCheck[i];
-          if (!nsCSSProps::PropHasFlags(shorthand, flag)) {
-            continue;
-          }
-          for (const nsCSSPropertyID* p =
-                 nsCSSProps::SubpropertyEntryFor(shorthand);
-               *p != eCSSProperty_UNKNOWN;
-               ++p) {
-            MOZ_ASSERT(nsCSSProps::PropHasFlags(*p, flag),
-                       "all subproperties of a property with a "
-                       "CSS_PROPERTY_ENABLED_* flag must also have "
-                       "the flag");
-          }
-        }
-      }
-
-      // Assert that CSS_PROPERTY_INTERNAL is used on properties in
-      // #ifndef CSS_PROP_LIST_EXCLUDE_INTERNAL sections of nsCSSPropList.h
-      // and on no others.
-      static nsCSSPropertyID nonInternalProperties[] = {
-        #define CSS_PROP(name_, id_, ...)           eCSSProperty_##id_,
-        #define CSS_PROP_SHORTHAND(name_, id_, ...) eCSSProperty_##id_,
-        #define CSS_PROP_LIST_EXCLUDE_INTERNAL
-        #include "nsCSSPropList.h"
-        #undef CSS_PROP_LIST_EXCLUDE_INTERNAL
-        #undef CSS_PROP_SHORTHAND
-        #undef CSS_PROP
-      };
-      MOZ_ASSERT(ArrayLength(nonInternalProperties) <= eCSSProperty_COUNT);
-
-      bool found[eCSSProperty_COUNT];
-      PodArrayZero(found);
-      for (nsCSSPropertyID p : nonInternalProperties) {
-        MOZ_ASSERT(!nsCSSProps::PropHasFlags(p, CSS_PROPERTY_INTERNAL),
-                   "properties defined outside of #ifndef "
-                   "CSS_PROP_LIST_EXCLUDE_INTERNAL sections must not have "
-                   "the CSS_PROPERTY_INTERNAL flag");
-        found[p] = true;
-      }
-
-      for (size_t i = 0; i < ArrayLength(found); ++i) {
-        if (!found[i]) {
-          auto p = static_cast<nsCSSPropertyID>(i);
-          MOZ_ASSERT(nsCSSProps::PropHasFlags(p, CSS_PROPERTY_INTERNAL),
-                     "properties defined in #ifndef "
-                     "CSS_PROP_LIST_EXCLUDE_INTERNAL sections must have "
-                     "the CSS_PROPERTY_INTERNAL flag");
-        }
-      }
-    }
-#endif
   }
 }
 
@@ -400,13 +280,6 @@ nsCSSProps::GetStringValue(nsCSSCounterDesc aCounterDesc)
   }
 }
 
-const char* const*
-nsCSSProps::GetListStyleTypes(int32_t *aLength)
-{
-  *aLength = ArrayLength(kCSSRawPredefinedCounterStyles);
-  return kCSSRawPredefinedCounterStyles;
-}
-
 /***************************************************************************/
 
 const KTableEntry nsCSSProps::kAnimationDirectionKTable[] = {
@@ -422,11 +295,6 @@ const KTableEntry nsCSSProps::kAnimationFillModeKTable[] = {
   { eCSSKeyword_forwards, static_cast<uint32_t>(dom::FillMode::Forwards) },
   { eCSSKeyword_backwards, static_cast<uint32_t>(dom::FillMode::Backwards) },
   { eCSSKeyword_both, static_cast<uint32_t>(dom::FillMode::Both) },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kAnimationIterationCountKTable[] = {
-  { eCSSKeyword_infinite, NS_STYLE_ANIMATION_ITERATION_COUNT_INFINITE },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -579,9 +447,9 @@ const KTableEntry nsCSSProps::kTransformStyleKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kImageLayerAttachmentKTable[] = {
-  { eCSSKeyword_fixed, NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED },
-  { eCSSKeyword_scroll, NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL },
-  { eCSSKeyword_local, NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL },
+  { eCSSKeyword_fixed, StyleImageLayerAttachment::Fixed },
+  { eCSSKeyword_scroll, StyleImageLayerAttachment::Scroll },
+  { eCSSKeyword_local, StyleImageLayerAttachment::Local },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -621,18 +489,6 @@ const KTableEntry nsCSSProps::kMaskClipKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-// Note: Don't change this table unless you update
-// ParseImageLayerPosition!
-
-const KTableEntry nsCSSProps::kImageLayerPositionKTable[] = {
-  { eCSSKeyword_center, NS_STYLE_IMAGELAYER_POSITION_CENTER },
-  { eCSSKeyword_top, NS_STYLE_IMAGELAYER_POSITION_TOP },
-  { eCSSKeyword_bottom, NS_STYLE_IMAGELAYER_POSITION_BOTTOM },
-  { eCSSKeyword_left, NS_STYLE_IMAGELAYER_POSITION_LEFT },
-  { eCSSKeyword_right, NS_STYLE_IMAGELAYER_POSITION_RIGHT },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kImageLayerRepeatKTable[] = {
   { eCSSKeyword_no_repeat,  StyleImageLayerRepeat::NoRepeat },
   { eCSSKeyword_repeat,     StyleImageLayerRepeat::Repeat },
@@ -640,20 +496,6 @@ const KTableEntry nsCSSProps::kImageLayerRepeatKTable[] = {
   { eCSSKeyword_repeat_y,   StyleImageLayerRepeat::RepeatY },
   { eCSSKeyword_round,      StyleImageLayerRepeat::Round},
   { eCSSKeyword_space,      StyleImageLayerRepeat::Space},
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kImageLayerRepeatPartKTable[] = {
-  { eCSSKeyword_no_repeat,  StyleImageLayerRepeat::NoRepeat },
-  { eCSSKeyword_repeat,     StyleImageLayerRepeat::Repeat },
-  { eCSSKeyword_round,      StyleImageLayerRepeat::Round},
-  { eCSSKeyword_space,      StyleImageLayerRepeat::Space},
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kImageLayerSizeKTable[] = {
-  { eCSSKeyword_contain, NS_STYLE_IMAGELAYER_SIZE_CONTAIN },
-  { eCSSKeyword_cover,   NS_STYLE_IMAGELAYER_SIZE_COVER },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -706,11 +548,6 @@ const KTableEntry nsCSSProps::kBorderImageRepeatKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kBorderImageSliceKTable[] = {
-  { eCSSKeyword_fill, NS_STYLE_BORDER_IMAGE_SLICE_FILL },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kBorderStyleKTable[] = {
   { eCSSKeyword_none,   NS_STYLE_BORDER_STYLE_NONE },
   { eCSSKeyword_hidden, NS_STYLE_BORDER_STYLE_HIDDEN },
@@ -722,13 +559,6 @@ const KTableEntry nsCSSProps::kBorderStyleKTable[] = {
   { eCSSKeyword_ridge,  NS_STYLE_BORDER_STYLE_RIDGE },
   { eCSSKeyword_inset,  NS_STYLE_BORDER_STYLE_INSET },
   { eCSSKeyword_outset, NS_STYLE_BORDER_STYLE_OUTSET },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kBorderWidthKTable[] = {
-  { eCSSKeyword_thin, NS_STYLE_BORDER_WIDTH_THIN },
-  { eCSSKeyword_medium, NS_STYLE_BORDER_WIDTH_MEDIUM },
-  { eCSSKeyword_thick, NS_STYLE_BORDER_WIDTH_THICK },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -759,137 +589,13 @@ const KTableEntry nsCSSProps::kCaptionSideKTable[] = {
   { eCSSKeyword_UNKNOWN,              -1 }
 };
 
-KTableEntry nsCSSProps::kClearKTable[] = {
+const KTableEntry nsCSSProps::kClearKTable[] = {
   { eCSSKeyword_none, StyleClear::None },
   { eCSSKeyword_left, StyleClear::Left },
   { eCSSKeyword_right, StyleClear::Right },
   { eCSSKeyword_inline_start, StyleClear::InlineStart },
   { eCSSKeyword_inline_end, StyleClear::InlineEnd },
   { eCSSKeyword_both, StyleClear::Both },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-// See also kContextPatternKTable for SVG paint-specific values
-const KTableEntry nsCSSProps::kColorKTable[] = {
-  { eCSSKeyword_activeborder, LookAndFeel::eColorID_activeborder },
-  { eCSSKeyword_activecaption, LookAndFeel::eColorID_activecaption },
-  { eCSSKeyword_appworkspace, LookAndFeel::eColorID_appworkspace },
-  { eCSSKeyword_background, LookAndFeel::eColorID_background },
-  { eCSSKeyword_buttonface, LookAndFeel::eColorID_buttonface },
-  { eCSSKeyword_buttonhighlight, LookAndFeel::eColorID_buttonhighlight },
-  { eCSSKeyword_buttonshadow, LookAndFeel::eColorID_buttonshadow },
-  { eCSSKeyword_buttontext, LookAndFeel::eColorID_buttontext },
-  { eCSSKeyword_captiontext, LookAndFeel::eColorID_captiontext },
-  { eCSSKeyword_graytext, LookAndFeel::eColorID_graytext },
-  { eCSSKeyword_highlight, LookAndFeel::eColorID_highlight },
-  { eCSSKeyword_highlighttext, LookAndFeel::eColorID_highlighttext },
-  { eCSSKeyword_inactiveborder, LookAndFeel::eColorID_inactiveborder },
-  { eCSSKeyword_inactivecaption, LookAndFeel::eColorID_inactivecaption },
-  { eCSSKeyword_inactivecaptiontext, LookAndFeel::eColorID_inactivecaptiontext },
-  { eCSSKeyword_infobackground, LookAndFeel::eColorID_infobackground },
-  { eCSSKeyword_infotext, LookAndFeel::eColorID_infotext },
-  { eCSSKeyword_menu, LookAndFeel::eColorID_menu },
-  { eCSSKeyword_menutext, LookAndFeel::eColorID_menutext },
-  { eCSSKeyword_scrollbar, LookAndFeel::eColorID_scrollbar },
-  { eCSSKeyword_threeddarkshadow, LookAndFeel::eColorID_threeddarkshadow },
-  { eCSSKeyword_threedface, LookAndFeel::eColorID_threedface },
-  { eCSSKeyword_threedhighlight, LookAndFeel::eColorID_threedhighlight },
-  { eCSSKeyword_threedlightshadow, LookAndFeel::eColorID_threedlightshadow },
-  { eCSSKeyword_threedshadow, LookAndFeel::eColorID_threedshadow },
-  { eCSSKeyword_window, LookAndFeel::eColorID_window },
-  { eCSSKeyword_windowframe, LookAndFeel::eColorID_windowframe },
-  { eCSSKeyword_windowtext, LookAndFeel::eColorID_windowtext },
-  { eCSSKeyword__moz_activehyperlinktext, NS_COLOR_MOZ_ACTIVEHYPERLINKTEXT },
-  { eCSSKeyword__moz_buttondefault, LookAndFeel::eColorID__moz_buttondefault },
-  { eCSSKeyword__moz_buttonhoverface, LookAndFeel::eColorID__moz_buttonhoverface },
-  { eCSSKeyword__moz_buttonhovertext, LookAndFeel::eColorID__moz_buttonhovertext },
-  { eCSSKeyword__moz_cellhighlight, LookAndFeel::eColorID__moz_cellhighlight },
-  { eCSSKeyword__moz_cellhighlighttext, LookAndFeel::eColorID__moz_cellhighlighttext },
-  { eCSSKeyword__moz_eventreerow, LookAndFeel::eColorID__moz_eventreerow },
-  { eCSSKeyword__moz_field, LookAndFeel::eColorID__moz_field },
-  { eCSSKeyword__moz_fieldtext, LookAndFeel::eColorID__moz_fieldtext },
-  { eCSSKeyword__moz_default_background_color, NS_COLOR_MOZ_DEFAULT_BACKGROUND_COLOR },
-  { eCSSKeyword__moz_default_color, NS_COLOR_MOZ_DEFAULT_COLOR },
-  { eCSSKeyword__moz_dialog, LookAndFeel::eColorID__moz_dialog },
-  { eCSSKeyword__moz_dialogtext, LookAndFeel::eColorID__moz_dialogtext },
-  { eCSSKeyword__moz_dragtargetzone, LookAndFeel::eColorID__moz_dragtargetzone },
-  { eCSSKeyword__moz_gtk_info_bar_text, LookAndFeel::eColorID__moz_gtk_info_bar_text },
-  { eCSSKeyword__moz_hyperlinktext, NS_COLOR_MOZ_HYPERLINKTEXT },
-  { eCSSKeyword__moz_html_cellhighlight, LookAndFeel::eColorID__moz_html_cellhighlight },
-  { eCSSKeyword__moz_html_cellhighlighttext, LookAndFeel::eColorID__moz_html_cellhighlighttext },
-  { eCSSKeyword__moz_mac_buttonactivetext, LookAndFeel::eColorID__moz_mac_buttonactivetext },
-  { eCSSKeyword__moz_mac_chrome_active, LookAndFeel::eColorID__moz_mac_chrome_active },
-  { eCSSKeyword__moz_mac_chrome_inactive, LookAndFeel::eColorID__moz_mac_chrome_inactive },
-  { eCSSKeyword__moz_mac_defaultbuttontext, LookAndFeel::eColorID__moz_mac_defaultbuttontext },
-  { eCSSKeyword__moz_mac_focusring, LookAndFeel::eColorID__moz_mac_focusring },
-  { eCSSKeyword__moz_mac_menuselect, LookAndFeel::eColorID__moz_mac_menuselect },
-  { eCSSKeyword__moz_mac_menushadow, LookAndFeel::eColorID__moz_mac_menushadow },
-  { eCSSKeyword__moz_mac_menutextdisable, LookAndFeel::eColorID__moz_mac_menutextdisable },
-  { eCSSKeyword__moz_mac_menutextselect, LookAndFeel::eColorID__moz_mac_menutextselect },
-  { eCSSKeyword__moz_mac_disabledtoolbartext, LookAndFeel::eColorID__moz_mac_disabledtoolbartext },
-  { eCSSKeyword__moz_mac_secondaryhighlight, LookAndFeel::eColorID__moz_mac_secondaryhighlight },
-  { eCSSKeyword__moz_mac_vibrancy_light, LookAndFeel::eColorID__moz_mac_vibrancy_light },
-  { eCSSKeyword__moz_mac_vibrancy_dark, LookAndFeel::eColorID__moz_mac_vibrancy_dark },
-  { eCSSKeyword__moz_mac_vibrant_titlebar_light, LookAndFeel::eColorID__moz_mac_vibrant_titlebar_light },
-  { eCSSKeyword__moz_mac_vibrant_titlebar_dark,  LookAndFeel::eColorID__moz_mac_vibrant_titlebar_dark },
-  { eCSSKeyword__moz_mac_menuitem, LookAndFeel::eColorID__moz_mac_menuitem },
-  { eCSSKeyword__moz_mac_active_menuitem, LookAndFeel::eColorID__moz_mac_active_menuitem },
-  { eCSSKeyword__moz_mac_menupopup, LookAndFeel::eColorID__moz_mac_menupopup },
-  { eCSSKeyword__moz_mac_source_list, LookAndFeel::eColorID__moz_mac_source_list },
-  { eCSSKeyword__moz_mac_source_list_selection, LookAndFeel::eColorID__moz_mac_source_list_selection },
-  { eCSSKeyword__moz_mac_active_source_list_selection, LookAndFeel::eColorID__moz_mac_active_source_list_selection },
-  { eCSSKeyword__moz_mac_tooltip, LookAndFeel::eColorID__moz_mac_tooltip },
-  { eCSSKeyword__moz_menuhover, LookAndFeel::eColorID__moz_menuhover },
-  { eCSSKeyword__moz_menuhovertext, LookAndFeel::eColorID__moz_menuhovertext },
-  { eCSSKeyword__moz_menubartext, LookAndFeel::eColorID__moz_menubartext },
-  { eCSSKeyword__moz_menubarhovertext, LookAndFeel::eColorID__moz_menubarhovertext },
-  { eCSSKeyword__moz_oddtreerow, LookAndFeel::eColorID__moz_oddtreerow },
-  { eCSSKeyword__moz_visitedhyperlinktext, NS_COLOR_MOZ_VISITEDHYPERLINKTEXT },
-  { eCSSKeyword_currentcolor, NS_COLOR_CURRENTCOLOR },
-  { eCSSKeyword__moz_win_accentcolor, LookAndFeel::eColorID__moz_win_accentcolor },
-  { eCSSKeyword__moz_win_accentcolortext, LookAndFeel::eColorID__moz_win_accentcolortext },
-  { eCSSKeyword__moz_win_mediatext, LookAndFeel::eColorID__moz_win_mediatext },
-  { eCSSKeyword__moz_win_communicationstext, LookAndFeel::eColorID__moz_win_communicationstext },
-  { eCSSKeyword__moz_nativehyperlinktext, LookAndFeel::eColorID__moz_nativehyperlinktext },
-  { eCSSKeyword__moz_comboboxtext, LookAndFeel::eColorID__moz_comboboxtext },
-  { eCSSKeyword__moz_combobox, LookAndFeel::eColorID__moz_combobox },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kContentKTable[] = {
-  { eCSSKeyword_open_quote, uint8_t(StyleContent::OpenQuote) },
-  { eCSSKeyword_close_quote, uint8_t(StyleContent::CloseQuote) },
-  { eCSSKeyword_no_open_quote, uint8_t(StyleContent::NoOpenQuote) },
-  { eCSSKeyword_no_close_quote, uint8_t(StyleContent::NoCloseQuote) },
-  { eCSSKeyword__moz_alt_content, uint8_t(StyleContent::AltContent) },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kControlCharacterVisibilityKTable[] = {
-  { eCSSKeyword_hidden, NS_STYLE_CONTROL_CHARACTER_VISIBILITY_HIDDEN },
-  { eCSSKeyword_visible, NS_STYLE_CONTROL_CHARACTER_VISIBILITY_VISIBLE },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kCounterRangeKTable[] = {
-  { eCSSKeyword_infinite, NS_STYLE_COUNTER_RANGE_INFINITE },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kCounterSpeakAsKTable[] = {
-  { eCSSKeyword_bullets, NS_STYLE_COUNTER_SPEAKAS_BULLETS },
-  { eCSSKeyword_numbers, NS_STYLE_COUNTER_SPEAKAS_NUMBERS },
-  { eCSSKeyword_words, NS_STYLE_COUNTER_SPEAKAS_WORDS },
-  { eCSSKeyword_spell_out, NS_STYLE_COUNTER_SPEAKAS_SPELL_OUT },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kCounterSymbolsSystemKTable[] = {
-  { eCSSKeyword_cyclic, NS_STYLE_COUNTER_SYSTEM_CYCLIC },
-  { eCSSKeyword_numeric, NS_STYLE_COUNTER_SYSTEM_NUMERIC },
-  { eCSSKeyword_alphabetic, NS_STYLE_COUNTER_SYSTEM_ALPHABETIC },
-  { eCSSKeyword_symbolic, NS_STYLE_COUNTER_SYSTEM_SYMBOLIC },
-  { eCSSKeyword_fixed, NS_STYLE_COUNTER_SYSTEM_FIXED },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1191,7 +897,7 @@ const KTableEntry nsCSSProps::kHyphensKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-KTableEntry nsCSSProps::kFloatKTable[] = {
+const KTableEntry nsCSSProps::kFloatKTable[] = {
   { eCSSKeyword_none, StyleFloat::None },
   { eCSSKeyword_left, StyleFloat::Left },
   { eCSSKeyword_right, StyleFloat::Right },
@@ -1203,38 +909,6 @@ KTableEntry nsCSSProps::kFloatKTable[] = {
 const KTableEntry nsCSSProps::kFloatEdgeKTable[] = {
   { eCSSKeyword_content_box, uint8_t(StyleFloatEdge::ContentBox) },
   { eCSSKeyword_margin_box, uint8_t(StyleFloatEdge::MarginBox) },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontDisplayKTable[] = {
-  { eCSSKeyword_auto, NS_FONT_DISPLAY_AUTO },
-  { eCSSKeyword_block, NS_FONT_DISPLAY_BLOCK },
-  { eCSSKeyword_swap, NS_FONT_DISPLAY_SWAP },
-  { eCSSKeyword_fallback, NS_FONT_DISPLAY_FALLBACK },
-  { eCSSKeyword_optional, NS_FONT_DISPLAY_OPTIONAL },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontKTable[] = {
-  // CSS2.
-  { eCSSKeyword_caption, NS_STYLE_FONT_CAPTION },
-  { eCSSKeyword_icon, NS_STYLE_FONT_ICON },
-  { eCSSKeyword_menu, NS_STYLE_FONT_MENU },
-  { eCSSKeyword_message_box, NS_STYLE_FONT_MESSAGE_BOX },
-  { eCSSKeyword_small_caption, NS_STYLE_FONT_SMALL_CAPTION },
-  { eCSSKeyword_status_bar, NS_STYLE_FONT_STATUS_BAR },
-
-  // Proposed for CSS3.
-  { eCSSKeyword__moz_window, NS_STYLE_FONT_WINDOW },
-  { eCSSKeyword__moz_document, NS_STYLE_FONT_DOCUMENT },
-  { eCSSKeyword__moz_workspace, NS_STYLE_FONT_WORKSPACE },
-  { eCSSKeyword__moz_desktop, NS_STYLE_FONT_DESKTOP },
-  { eCSSKeyword__moz_info, NS_STYLE_FONT_INFO },
-  { eCSSKeyword__moz_dialog, NS_STYLE_FONT_DIALOG },
-  { eCSSKeyword__moz_button, NS_STYLE_FONT_BUTTON },
-  { eCSSKeyword__moz_pull_down_menu, NS_STYLE_FONT_PULL_DOWN_MENU },
-  { eCSSKeyword__moz_list, NS_STYLE_FONT_LIST },
-  { eCSSKeyword__moz_field, NS_STYLE_FONT_FIELD },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1251,42 +925,9 @@ const KTableEntry nsCSSProps::kFontOpticalSizingKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kFontSizeKTable[] = {
-  { eCSSKeyword_xx_small, NS_STYLE_FONT_SIZE_XXSMALL },
-  { eCSSKeyword_x_small, NS_STYLE_FONT_SIZE_XSMALL },
-  { eCSSKeyword_small, NS_STYLE_FONT_SIZE_SMALL },
-  { eCSSKeyword_medium, NS_STYLE_FONT_SIZE_MEDIUM },
-  { eCSSKeyword_large, NS_STYLE_FONT_SIZE_LARGE },
-  { eCSSKeyword_x_large, NS_STYLE_FONT_SIZE_XLARGE },
-  { eCSSKeyword_xx_large, NS_STYLE_FONT_SIZE_XXLARGE },
-  { eCSSKeyword_larger, NS_STYLE_FONT_SIZE_LARGER },
-  { eCSSKeyword_smaller, NS_STYLE_FONT_SIZE_SMALLER },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kFontSmoothingKTable[] = {
   { eCSSKeyword_auto, NS_FONT_SMOOTHING_AUTO },
   { eCSSKeyword_grayscale, NS_FONT_SMOOTHING_GRAYSCALE },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontStretchKTable[] = {
-  { eCSSKeyword_ultra_condensed, NS_STYLE_FONT_STRETCH_ULTRA_CONDENSED },
-  { eCSSKeyword_extra_condensed, NS_STYLE_FONT_STRETCH_EXTRA_CONDENSED },
-  { eCSSKeyword_condensed, NS_STYLE_FONT_STRETCH_CONDENSED },
-  { eCSSKeyword_semi_condensed, NS_STYLE_FONT_STRETCH_SEMI_CONDENSED },
-  { eCSSKeyword_normal, NS_STYLE_FONT_STRETCH_NORMAL },
-  { eCSSKeyword_semi_expanded, NS_STYLE_FONT_STRETCH_SEMI_EXPANDED },
-  { eCSSKeyword_expanded, NS_STYLE_FONT_STRETCH_EXPANDED },
-  { eCSSKeyword_extra_expanded, NS_STYLE_FONT_STRETCH_EXTRA_EXPANDED },
-  { eCSSKeyword_ultra_expanded, NS_STYLE_FONT_STRETCH_ULTRA_EXPANDED },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontStyleKTable[] = {
-  { eCSSKeyword_normal, NS_STYLE_FONT_STYLE_NORMAL },
-  { eCSSKeyword_italic, NS_STYLE_FONT_STYLE_ITALIC },
-  { eCSSKeyword_oblique, NS_STYLE_FONT_STYLE_OBLIQUE },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1364,14 +1005,6 @@ const KTableEntry nsCSSProps::kFontVariantPositionKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kFontWeightKTable[] = {
-  { eCSSKeyword_normal, NS_FONT_WEIGHT_NORMAL },
-  { eCSSKeyword_bold, NS_FONT_WEIGHT_BOLD },
-  { eCSSKeyword_bolder, NS_STYLE_FONT_WEIGHT_BOLDER },
-  { eCSSKeyword_lighter, NS_STYLE_FONT_WEIGHT_LIGHTER },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kGridAutoFlowKTable[] = {
   { eCSSKeyword_row, NS_STYLE_GRID_AUTO_FLOW_ROW },
   { eCSSKeyword_column, NS_STYLE_GRID_AUTO_FLOW_COLUMN },
@@ -1382,17 +1015,6 @@ const KTableEntry nsCSSProps::kGridAutoFlowKTable[] = {
 const KTableEntry nsCSSProps::kGridTrackBreadthKTable[] = {
   { eCSSKeyword_min_content, StyleGridTrackBreadth::MinContent },
   { eCSSKeyword_max_content, StyleGridTrackBreadth::MaxContent },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kImageOrientationKTable[] = {
-  { eCSSKeyword_flip, NS_STYLE_IMAGE_ORIENTATION_FLIP },
-  { eCSSKeyword_from_image, NS_STYLE_IMAGE_ORIENTATION_FROM_IMAGE },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kImageOrientationFlipKTable[] = {
-  { eCSSKeyword_flip, NS_STYLE_IMAGE_ORIENTATION_FLIP },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1423,53 +1045,12 @@ const KTableEntry nsCSSProps::kListStylePositionKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kMathVariantKTable[] = {
-  { eCSSKeyword_none, NS_MATHML_MATHVARIANT_NONE },
-  { eCSSKeyword_normal, NS_MATHML_MATHVARIANT_NORMAL },
-  { eCSSKeyword_bold, NS_MATHML_MATHVARIANT_BOLD },
-  { eCSSKeyword_italic, NS_MATHML_MATHVARIANT_ITALIC },
-  { eCSSKeyword_bold_italic, NS_MATHML_MATHVARIANT_BOLD_ITALIC },
-  { eCSSKeyword_script, NS_MATHML_MATHVARIANT_SCRIPT },
-  { eCSSKeyword_bold_script, NS_MATHML_MATHVARIANT_BOLD_SCRIPT },
-  { eCSSKeyword_fraktur, NS_MATHML_MATHVARIANT_FRAKTUR },
-  { eCSSKeyword_double_struck, NS_MATHML_MATHVARIANT_DOUBLE_STRUCK },
-  { eCSSKeyword_bold_fraktur, NS_MATHML_MATHVARIANT_BOLD_FRAKTUR },
-  { eCSSKeyword_sans_serif, NS_MATHML_MATHVARIANT_SANS_SERIF },
-  { eCSSKeyword_bold_sans_serif, NS_MATHML_MATHVARIANT_BOLD_SANS_SERIF },
-  { eCSSKeyword_sans_serif_italic, NS_MATHML_MATHVARIANT_SANS_SERIF_ITALIC },
-  { eCSSKeyword_sans_serif_bold_italic, NS_MATHML_MATHVARIANT_SANS_SERIF_BOLD_ITALIC },
-  { eCSSKeyword_monospace, NS_MATHML_MATHVARIANT_MONOSPACE },
-  { eCSSKeyword_initial, NS_MATHML_MATHVARIANT_INITIAL },
-  { eCSSKeyword_tailed, NS_MATHML_MATHVARIANT_TAILED },
-  { eCSSKeyword_looped, NS_MATHML_MATHVARIANT_LOOPED },
-  { eCSSKeyword_stretched, NS_MATHML_MATHVARIANT_STRETCHED },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kMathDisplayKTable[] = {
-  { eCSSKeyword_inline, NS_MATHML_DISPLAYSTYLE_INLINE },
-  { eCSSKeyword_block, NS_MATHML_DISPLAYSTYLE_BLOCK },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kContainKTable[] = {
   { eCSSKeyword_none,    NS_STYLE_CONTAIN_NONE },
   { eCSSKeyword_strict,  NS_STYLE_CONTAIN_STRICT },
   { eCSSKeyword_layout,  NS_STYLE_CONTAIN_LAYOUT },
   { eCSSKeyword_style,   NS_STYLE_CONTAIN_STYLE },
   { eCSSKeyword_paint,   NS_STYLE_CONTAIN_PAINT },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kContextOpacityKTable[] = {
-  { eCSSKeyword_context_fill_opacity, NS_STYLE_CONTEXT_FILL_OPACITY },
-  { eCSSKeyword_context_stroke_opacity, NS_STYLE_CONTEXT_STROKE_OPACITY },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kContextPatternKTable[] = {
-  { eCSSKeyword_context_fill, NS_COLOR_CONTEXT_FILL },
-  { eCSSKeyword_context_stroke, NS_COLOR_CONTEXT_STROKE },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1534,31 +1115,9 @@ const KTableEntry nsCSSProps::kOverflowSubKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kPageBreakKTable[] = {
-  { eCSSKeyword_auto, NS_STYLE_PAGE_BREAK_AUTO },
-  { eCSSKeyword_always, NS_STYLE_PAGE_BREAK_ALWAYS },
-  { eCSSKeyword_avoid, NS_STYLE_PAGE_BREAK_AVOID },
-  { eCSSKeyword_left, NS_STYLE_PAGE_BREAK_LEFT },
-  { eCSSKeyword_right, NS_STYLE_PAGE_BREAK_RIGHT },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kPageBreakInsideKTable[] = {
   { eCSSKeyword_auto, NS_STYLE_PAGE_BREAK_AUTO },
   { eCSSKeyword_avoid, NS_STYLE_PAGE_BREAK_AVOID },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kPageMarksKTable[] = {
-  { eCSSKeyword_none, NS_STYLE_PAGE_MARKS_NONE },
-  { eCSSKeyword_crop, NS_STYLE_PAGE_MARKS_CROP },
-  { eCSSKeyword_cross, NS_STYLE_PAGE_MARKS_REGISTER },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kPageSizeKTable[] = {
-  { eCSSKeyword_landscape, NS_STYLE_PAGE_SIZE_LANDSCAPE },
-  { eCSSKeyword_portrait, NS_STYLE_PAGE_SIZE_PORTRAIT },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1585,28 +1144,11 @@ const KTableEntry nsCSSProps::kPositionKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kRadialGradientShapeKTable[] = {
-  { eCSSKeyword_circle,  NS_STYLE_GRADIENT_SHAPE_CIRCULAR },
-  { eCSSKeyword_ellipse, NS_STYLE_GRADIENT_SHAPE_ELLIPTICAL },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kRadialGradientSizeKTable[] = {
   { eCSSKeyword_closest_side,    NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE },
   { eCSSKeyword_closest_corner,  NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER },
   { eCSSKeyword_farthest_side,   NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE },
   { eCSSKeyword_farthest_corner, NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER },
-  { eCSSKeyword_UNKNOWN,         -1 }
-};
-
-const KTableEntry nsCSSProps::kRadialGradientLegacySizeKTable[] = {
-  { eCSSKeyword_closest_side,    NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE },
-  { eCSSKeyword_closest_corner,  NS_STYLE_GRADIENT_SIZE_CLOSEST_CORNER },
-  { eCSSKeyword_farthest_side,   NS_STYLE_GRADIENT_SIZE_FARTHEST_SIDE },
-  { eCSSKeyword_farthest_corner, NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER },
-  // synonyms
-  { eCSSKeyword_contain,         NS_STYLE_GRADIENT_SIZE_CLOSEST_SIDE },
-  { eCSSKeyword_cover,           NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER },
   { eCSSKeyword_UNKNOWN,         -1 }
 };
 
@@ -1740,20 +1282,6 @@ const KTableEntry nsCSSProps::kTextOrientationKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kTextEmphasisPositionKTable[] = {
-  { eCSSKeyword_over, NS_STYLE_TEXT_EMPHASIS_POSITION_OVER },
-  { eCSSKeyword_under, NS_STYLE_TEXT_EMPHASIS_POSITION_UNDER },
-  { eCSSKeyword_left, NS_STYLE_TEXT_EMPHASIS_POSITION_LEFT },
-  { eCSSKeyword_right, NS_STYLE_TEXT_EMPHASIS_POSITION_RIGHT },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kTextEmphasisStyleFillKTable[] = {
-  { eCSSKeyword_filled, NS_STYLE_TEXT_EMPHASIS_STYLE_FILLED },
-  { eCSSKeyword_open, NS_STYLE_TEXT_EMPHASIS_STYLE_OPEN },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kTextEmphasisStyleShapeKTable[] = {
   { eCSSKeyword_dot, NS_STYLE_TEXT_EMPHASIS_STYLE_DOT },
   { eCSSKeyword_circle, NS_STYLE_TEXT_EMPHASIS_STYLE_CIRCLE },
@@ -1791,12 +1319,6 @@ const KTableEntry nsCSSProps::kTouchActionKTable[] = {
   { eCSSKeyword_pan_y,        NS_STYLE_TOUCH_ACTION_PAN_Y },
   { eCSSKeyword_manipulation, NS_STYLE_TOUCH_ACTION_MANIPULATION },
   { eCSSKeyword_UNKNOWN,      -1 }
-};
-
-const KTableEntry nsCSSProps::kTopLayerKTable[] = {
-  { eCSSKeyword_none,     NS_STYLE_TOP_LAYER_NONE },
-  { eCSSKeyword_top,      NS_STYLE_TOP_LAYER_TOP },
-  { eCSSKeyword_UNKNOWN, -1 }
 };
 
 const KTableEntry nsCSSProps::kTransformBoxKTable[] = {
@@ -2094,13 +1616,6 @@ const KTableEntry nsCSSProps::kStrokeLinejoinKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-// Lookup table to store the sole objectValue keyword to let SVG glyphs inherit
-// certain stroke-* properties from the outer text object
-const KTableEntry nsCSSProps::kStrokeContextValueKTable[] = {
-  { eCSSKeyword_context_value, NS_STYLE_STROKE_PROP_CONTEXT_VALUE },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kTextAnchorKTable[] = {
   { eCSSKeyword_start, NS_STYLE_TEXT_ANCHOR_START },
   { eCSSKeyword_middle, NS_STYLE_TEXT_ANCHOR_MIDDLE },
@@ -2214,514 +1729,12 @@ nsCSSProps::ValueToKeyword(int32_t aValue, const KTableEntry aTable[])
   }
 }
 
-/* static */ const KTableEntry* const
-nsCSSProps::kKeywordTableTable[eCSSProperty_COUNT_no_shorthands] = {
-  #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, \
-                   kwtable_, ...) kwtable_,
-  #include "nsCSSPropList.h"
-  #undef CSS_PROP
-};
-
-const nsCString&
-nsCSSProps::LookupPropertyValue(nsCSSPropertyID aProp, int32_t aValue)
-{
-  MOZ_ASSERT(aProp >= 0 && aProp < eCSSProperty_COUNT,
-             "property out of range");
-#ifdef DEBUG
-  typedef decltype(KTableEntry::mValue) table_value_type;
-  NS_ASSERTION(table_value_type(aValue) == aValue, "Value out of range");
-#endif
-
-  const KTableEntry* kwtable = nullptr;
-  if (aProp < eCSSProperty_COUNT_no_shorthands)
-    kwtable = kKeywordTableTable[aProp];
-
-  if (kwtable)
-    return ValueToKeyword(aValue, kwtable);
-
-  static nsDependentCString sNullStr("");
-  return sNullStr;
-}
-
-bool nsCSSProps::GetColorName(int32_t aPropValue, nsCString &aStr)
-{
-  bool rv = false;
-
-  // first get the keyword corresponding to the property Value from the color table
-  nsCSSKeyword keyword = ValueToKeywordEnum(aPropValue, kColorKTable);
-
-  // next get the name as a string from the keywords table
-  if (keyword != eCSSKeyword_UNKNOWN) {
-    nsCSSKeywords::AddRefTable();
-    aStr = nsCSSKeywords::GetStringValue(keyword);
-    nsCSSKeywords::ReleaseTable();
-    rv = true;
-  }
-  return rv;
-}
-
-const nsStyleAnimType
-nsCSSProps::kAnimTypeTable[eCSSProperty_COUNT_no_shorthands] = {
-#define CSS_PROP(name_, id_, method_, flags_, pref_, \
-                 parsevariant_, kwtable_, animtype_) \
-  animtype_,
-#include "nsCSSPropList.h"
-#undef CSS_PROP
-};
-
-const uint32_t nsCSSProps::kFlagsTable[eCSSProperty_COUNT] = {
-#define CSS_PROP(name_, id_, method_, flags_, ...) flags_,
-#include "nsCSSPropList.h"
-#undef CSS_PROP
-#define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) flags_,
-#include "nsCSSPropList.h"
+const CSSPropFlags nsCSSProps::kFlagsTable[eCSSProperty_COUNT] = {
+#define CSS_PROP_LONGHAND(name_, id_, method_, flags_, ...) flags_,
+#define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, ...) flags_,
+#include "mozilla/ServoCSSPropList.h"
 #undef CSS_PROP_SHORTHAND
-};
-
-static const nsCSSPropertyID gAllSubpropTable[] = {
-#define CSS_PROP_LIST_ONLY_COMPONENTS_OF_ALL_SHORTHAND
-#define CSS_PROP(name_, id_, ...) eCSSProperty_##id_,
-#include "nsCSSPropList.h"
-#undef CSS_PROP
-#undef CSS_PROP_LIST_ONLY_COMPONENTS_OF_ALL_SHORTHAND
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gAnimationSubpropTable[] = {
-  eCSSProperty_animation_duration,
-  eCSSProperty_animation_timing_function,
-  eCSSProperty_animation_delay,
-  eCSSProperty_animation_direction,
-  eCSSProperty_animation_fill_mode,
-  eCSSProperty_animation_iteration_count,
-  eCSSProperty_animation_play_state,
-  // List animation-name last so we serialize it last, in case it has
-  // a value that conflicts with one of the other properties.  (See
-  // how Declaration::GetValue serializes 'animation'.
-  eCSSProperty_animation_name,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderRadiusSubpropTable[] = {
-  // Code relies on these being in topleft-topright-bottomright-bottomleft
-  // order.
-  eCSSProperty_border_top_left_radius,
-  eCSSProperty_border_top_right_radius,
-  eCSSProperty_border_bottom_right_radius,
-  eCSSProperty_border_bottom_left_radius,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gOutlineRadiusSubpropTable[] = {
-  // Code relies on these being in topleft-topright-bottomright-bottomleft
-  // order.
-  eCSSProperty__moz_outline_radius_topleft,
-  eCSSProperty__moz_outline_radius_topright,
-  eCSSProperty__moz_outline_radius_bottomright,
-  eCSSProperty__moz_outline_radius_bottomleft,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBackgroundSubpropTable[] = {
-  eCSSProperty_background_color,
-  eCSSProperty_background_image,
-  eCSSProperty_background_repeat,
-  eCSSProperty_background_attachment,
-  eCSSProperty_background_clip,
-  eCSSProperty_background_origin,
-  eCSSProperty_background_position_x,
-  eCSSProperty_background_position_y,
-  eCSSProperty_background_size,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBackgroundPositionSubpropTable[] = {
-  eCSSProperty_background_position_x,
-  eCSSProperty_background_position_y,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderSubpropTable[] = {
-  eCSSProperty_border_top_width,
-  eCSSProperty_border_right_width,
-  eCSSProperty_border_bottom_width,
-  eCSSProperty_border_left_width,
-  eCSSProperty_border_top_style,
-  eCSSProperty_border_right_style,
-  eCSSProperty_border_bottom_style,
-  eCSSProperty_border_left_style,
-  eCSSProperty_border_top_color,
-  eCSSProperty_border_right_color,
-  eCSSProperty_border_bottom_color,
-  eCSSProperty_border_left_color,
-  eCSSProperty_border_image_source,
-  eCSSProperty_border_image_slice,
-  eCSSProperty_border_image_width,
-  eCSSProperty_border_image_outset,
-  eCSSProperty_border_image_repeat,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderBlockEndSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_block_end_width,
-  eCSSProperty_border_block_end_style,
-  eCSSProperty_border_block_end_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderBlockStartSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_block_start_width,
-  eCSSProperty_border_block_start_style,
-  eCSSProperty_border_block_start_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderBottomSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_bottom_width,
-  eCSSProperty_border_bottom_style,
-  eCSSProperty_border_bottom_color,
-  eCSSProperty_UNKNOWN
-};
-
-static_assert(eSideTop == 0 && eSideRight == 1 &&
-              eSideBottom == 2 && eSideLeft == 3,
-              "box side constants not top/right/bottom/left == 0/1/2/3");
-static const nsCSSPropertyID gBorderColorSubpropTable[] = {
-  // Code relies on these being in top-right-bottom-left order.
-  // Code relies on these matching the enum Side constants.
-  eCSSProperty_border_top_color,
-  eCSSProperty_border_right_color,
-  eCSSProperty_border_bottom_color,
-  eCSSProperty_border_left_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderInlineEndSubpropTable[] = {
-  // Declaration.cpp output the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_inline_end_width,
-  eCSSProperty_border_inline_end_style,
-  eCSSProperty_border_inline_end_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderLeftSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_left_width,
-  eCSSProperty_border_left_style,
-  eCSSProperty_border_left_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderRightSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_right_width,
-  eCSSProperty_border_right_style,
-  eCSSProperty_border_right_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderInlineStartSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_inline_start_width,
-  eCSSProperty_border_inline_start_style,
-  eCSSProperty_border_inline_start_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderStyleSubpropTable[] = {
-  // Code relies on these being in top-right-bottom-left order.
-  eCSSProperty_border_top_style,
-  eCSSProperty_border_right_style,
-  eCSSProperty_border_bottom_style,
-  eCSSProperty_border_left_style,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderTopSubpropTable[] = {
-  // Declaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_border_top_width,
-  eCSSProperty_border_top_style,
-  eCSSProperty_border_top_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderWidthSubpropTable[] = {
-  // Code relies on these being in top-right-bottom-left order.
-  eCSSProperty_border_top_width,
-  eCSSProperty_border_right_width,
-  eCSSProperty_border_bottom_width,
-  eCSSProperty_border_left_width,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gFontSubpropTable[] = {
-  eCSSProperty_font_family,
-  eCSSProperty_font_style,
-  eCSSProperty_font_weight,
-  eCSSProperty_font_size,
-  eCSSProperty_line_height,
-  eCSSProperty_font_size_adjust,
-  eCSSProperty_font_stretch,
-  eCSSProperty_font_feature_settings,
-  eCSSProperty_font_language_override,
-  eCSSProperty_font_kerning,
-  eCSSProperty_font_optical_sizing,
-  eCSSProperty_font_variation_settings,
-  eCSSProperty_font_variant_alternates,
-  eCSSProperty_font_variant_caps,
-  eCSSProperty_font_variant_east_asian,
-  eCSSProperty_font_variant_ligatures,
-  eCSSProperty_font_variant_numeric,
-  eCSSProperty_font_variant_position,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gFontVariantSubpropTable[] = {
-  eCSSProperty_font_variant_alternates,
-  eCSSProperty_font_variant_caps,
-  eCSSProperty_font_variant_east_asian,
-  eCSSProperty_font_variant_ligatures,
-  eCSSProperty_font_variant_numeric,
-  eCSSProperty_font_variant_position,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gListStyleSubpropTable[] = {
-  eCSSProperty_list_style_type,
-  eCSSProperty_list_style_image,
-  eCSSProperty_list_style_position,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gMarginSubpropTable[] = {
-  // Code relies on these being in top-right-bottom-left order.
-  eCSSProperty_margin_top,
-  eCSSProperty_margin_right,
-  eCSSProperty_margin_bottom,
-  eCSSProperty_margin_left,
-  eCSSProperty_UNKNOWN
-};
-
-
-static const nsCSSPropertyID gOutlineSubpropTable[] = {
-  // nsCSSDeclaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_outline_width,
-  eCSSProperty_outline_style,
-  eCSSProperty_outline_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gColumnsSubpropTable[] = {
-  eCSSProperty_column_count,
-  eCSSProperty_column_width,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gColumnRuleSubpropTable[] = {
-  // nsCSSDeclaration.cpp outputs the subproperties in this order.
-  // It also depends on the color being third.
-  eCSSProperty_column_rule_width,
-  eCSSProperty_column_rule_style,
-  eCSSProperty_column_rule_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gFlexSubpropTable[] = {
-  eCSSProperty_flex_grow,
-  eCSSProperty_flex_shrink,
-  eCSSProperty_flex_basis,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gFlexFlowSubpropTable[] = {
-  eCSSProperty_flex_direction,
-  eCSSProperty_flex_wrap,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gGridTemplateSubpropTable[] = {
-  eCSSProperty_grid_template_areas,
-  eCSSProperty_grid_template_rows,
-  eCSSProperty_grid_template_columns,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gGridSubpropTable[] = {
-  eCSSProperty_grid_template_areas,
-  eCSSProperty_grid_template_rows,
-  eCSSProperty_grid_template_columns,
-  eCSSProperty_grid_auto_flow,
-  eCSSProperty_grid_auto_rows,
-  eCSSProperty_grid_auto_columns,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gGridColumnSubpropTable[] = {
-  eCSSProperty_grid_column_start,
-  eCSSProperty_grid_column_end,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gGridRowSubpropTable[] = {
-  eCSSProperty_grid_row_start,
-  eCSSProperty_grid_row_end,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gGridAreaSubpropTable[] = {
-  eCSSProperty_grid_row_start,
-  eCSSProperty_grid_column_start,
-  eCSSProperty_grid_row_end,
-  eCSSProperty_grid_column_end,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gGridGapSubpropTable[] = {
-  eCSSProperty_grid_row_gap,
-  eCSSProperty_grid_column_gap,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gOverflowSubpropTable[] = {
-  eCSSProperty_overflow_x,
-  eCSSProperty_overflow_y,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gOverflowClipBoxSubpropTable[] = {
-  eCSSProperty_overflow_clip_box_block,
-  eCSSProperty_overflow_clip_box_inline,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gPaddingSubpropTable[] = {
-  // Code relies on these being in top-right-bottom-left order.
-  eCSSProperty_padding_top,
-  eCSSProperty_padding_right,
-  eCSSProperty_padding_bottom,
-  eCSSProperty_padding_left,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gTextDecorationSubpropTable[] = {
-  eCSSProperty_text_decoration_color,
-  eCSSProperty_text_decoration_line,
-  eCSSProperty_text_decoration_style,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gTextEmphasisSubpropTable[] = {
-  eCSSProperty_text_emphasis_style,
-  eCSSProperty_text_emphasis_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gWebkitTextStrokeSubpropTable[] = {
-  eCSSProperty__webkit_text_stroke_width,
-  eCSSProperty__webkit_text_stroke_color,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gTransitionSubpropTable[] = {
-  eCSSProperty_transition_property,
-  eCSSProperty_transition_duration,
-  eCSSProperty_transition_timing_function,
-  eCSSProperty_transition_delay,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gBorderImageSubpropTable[] = {
-  eCSSProperty_border_image_source,
-  eCSSProperty_border_image_slice,
-  eCSSProperty_border_image_width,
-  eCSSProperty_border_image_outset,
-  eCSSProperty_border_image_repeat,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gMarkerSubpropTable[] = {
-  eCSSProperty_marker_start,
-  eCSSProperty_marker_mid,
-  eCSSProperty_marker_end,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gPlaceContentSubpropTable[] = {
-  eCSSProperty_align_content,
-  eCSSProperty_justify_content,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gPlaceItemsSubpropTable[] = {
-  eCSSProperty_align_items,
-  eCSSProperty_justify_items,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gPlaceSelfSubpropTable[] = {
-  eCSSProperty_align_self,
-  eCSSProperty_justify_self,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gOverscrollBehaviorSubpropTable[] = {
-  eCSSProperty_overscroll_behavior_x,
-  eCSSProperty_overscroll_behavior_y,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gScrollSnapTypeSubpropTable[] = {
-  eCSSProperty_scroll_snap_type_x,
-  eCSSProperty_scroll_snap_type_y,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gMaskSubpropTable[] = {
-  eCSSProperty_mask_image,
-  eCSSProperty_mask_repeat,
-  eCSSProperty_mask_position_x,
-  eCSSProperty_mask_position_y,
-  eCSSProperty_mask_clip,
-  eCSSProperty_mask_origin,
-  eCSSProperty_mask_size,
-  eCSSProperty_mask_composite,
-  eCSSProperty_mask_mode,
-  eCSSProperty_UNKNOWN
-};
-
-static const nsCSSPropertyID gMaskPositionSubpropTable[] = {
-  eCSSProperty_mask_position_x,
-  eCSSProperty_mask_position_y,
-  eCSSProperty_UNKNOWN
-};
-
-// FIXME: mask-border tables should be added when we implement
-// mask-border properties.
-
-const nsCSSPropertyID *const
-nsCSSProps::kSubpropertyTable[eCSSProperty_COUNT - eCSSProperty_COUNT_no_shorthands] = {
-#define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) privatename_
-// Need an extra level of macro nesting to force expansion of method_
-// params before they get pasted.
-#define NSCSSPROPS_INNER_MACRO(method_) g##method_##SubpropTable,
-#define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) \
-  NSCSSPROPS_INNER_MACRO(method_)
-#include "nsCSSPropList.h"
-#undef CSS_PROP_SHORTHAND
-#undef NSCSSPROPS_INNER_MACRO
-#undef CSS_PROP_PUBLIC_OR_PRIVATE
+#undef CSS_PROP_LONGHAND
 };
 
 /* static */ bool
@@ -2732,22 +1745,17 @@ nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
   // If the property has "ENABLED_IN" flags but doesn't have a pref,
   // it is an internal property which is disabled elsewhere.
   #define IS_ENABLED_BY_DEFAULT(flags_) \
-    (!((flags_) & CSS_PROPERTY_ENABLED_MASK))
+    (!((flags_) & (CSSPropFlags::EnabledMask | CSSPropFlags::Inaccessible)))
 
-  #define CSS_PROP(name_, id_, method_, flags_, ...) \
+  #define CSS_PROP_LONGHAND(name_, id_, method_, flags_, ...) \
     IS_ENABLED_BY_DEFAULT(flags_),
-  #include "nsCSSPropList.h"
-  #undef CSS_PROP
-
-  #define  CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) \
+  #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, ...) \
     IS_ENABLED_BY_DEFAULT(flags_),
-  #include "nsCSSPropList.h"
-  #undef CSS_PROP_SHORTHAND
-
-  #define CSS_PROP_ALIAS(aliasname_, aliasid_, propid_, aliasmethod_, pref_) \
-    true,
-  #include "nsCSSPropAliasList.h"
+  #define CSS_PROP_ALIAS(...) true,
+  #include "mozilla/ServoCSSPropList.h"
   #undef CSS_PROP_ALIAS
+  #undef CSS_PROP_SHORTHAND
+  #undef CSS_PROP_LONGHAND
 
   #undef IS_ENABLED_BY_DEFAULT
 };
@@ -2757,19 +1765,16 @@ nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
 /* static */ const UseCounter
 nsCSSProps::gPropertyUseCounter[eCSSProperty_COUNT_no_shorthands] = {
   #define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) privatename_
-  #define CSS_PROP(name_, id_, method_, ...) \
+  // Need an extra level of macro nesting to force expansion of method_
+  // params before they get pasted.
+  #define CSS_PROP_USE_COUNTER(method_) \
     static_cast<UseCounter>(USE_COUNTER_FOR_CSS_PROPERTY_##method_),
-  #include "nsCSSPropList.h"
-  #undef CSS_PROP
+  #define CSS_PROP_LONGHAND(name_, id_, method_, ...) \
+    CSS_PROP_USE_COUNTER(method_)
+  #include "mozilla/ServoCSSPropList.h"
+  #undef CSS_PROP_LONGHAND
+  #undef CSS_PROP_USE_COUNTER
   #undef CSS_PROP_PUBLIC_OR_PRIVATE
-};
-
-const uint32_t
-nsCSSProps::kParserVariantTable[eCSSProperty_COUNT_no_shorthands] = {
-#define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, ...) \
-  parsevariant_,
-#include "nsCSSPropList.h"
-#undef CSS_PROP
 };
 
 #include "nsCSSPropsGenerated.inc"

@@ -17,6 +17,7 @@ XPCOMUtils.defineLazyGetter(this, "DevtoolsStartup", () => {
 // our own lazy require.
 XPCOMUtils.defineLazyGetter(this, "Telemetry", function() {
   const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  // eslint-disable-next-line no-shadow
   const Telemetry = require("devtools/client/shared/telemetry");
 
   return Telemetry;
@@ -199,8 +200,7 @@ this.DevToolsShim = {
     // Record the timing at which this event started in order to compute later in
     // gDevTools.showToolbox, the complete time it takes to open the toolbox.
     // i.e. especially take `DevtoolsStartup.initDevTools` into account.
-    let { performance } = Services.appShell.hiddenDOMWindow;
-    let startTime = performance.now();
+    let startTime = Cu.now();
 
     this.initDevTools("ContextMenu");
 
@@ -232,8 +232,7 @@ this.DevToolsShim = {
     // Record the timing at which this event started in order to compute later in
     // gDevTools.showToolbox, the complete time it takes to open the toolbox.
     // i.e. especially take `DevtoolsStartup.initDevTools` into account.
-    let { performance } = Services.appShell.hiddenDOMWindow;
-    let startTime = performance.now();
+    let startTime = Cu.now();
 
     this.initDevTools("ContextMenu");
 

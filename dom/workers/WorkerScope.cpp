@@ -305,14 +305,11 @@ WorkerGlobalScope::ClearTimeout(int32_t aHandle)
 int32_t
 WorkerGlobalScope::SetInterval(JSContext* aCx,
                                Function& aHandler,
-                               const Optional<int32_t>& aTimeout,
+                               const int32_t aTimeout,
                                const Sequence<JS::Value>& aArguments,
                                ErrorResult& aRv)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
-
-  bool isInterval = aTimeout.WasPassed();
-  int32_t timeout = aTimeout.WasPassed() ? aTimeout.Value() : 0;
 
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
     NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler, aArguments, aRv);
@@ -320,13 +317,13 @@ WorkerGlobalScope::SetInterval(JSContext* aCx,
     return 0;
   }
 
-  return mWorkerPrivate->SetTimeout(aCx, handler,  timeout, isInterval, aRv);
+  return mWorkerPrivate->SetTimeout(aCx, handler,  aTimeout, true, aRv);
 }
 
 int32_t
 WorkerGlobalScope::SetInterval(JSContext* aCx,
                                const nsAString& aHandler,
-                               const Optional<int32_t>& aTimeout,
+                               const int32_t aTimeout,
                                const Sequence<JS::Value>& /* unused */,
                                ErrorResult& aRv)
 {
@@ -334,12 +331,9 @@ WorkerGlobalScope::SetInterval(JSContext* aCx,
 
   Sequence<JS::Value> dummy;
 
-  bool isInterval = aTimeout.WasPassed();
-  int32_t timeout = aTimeout.WasPassed() ? aTimeout.Value() : 0;
-
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
     NS_CreateJSTimeoutHandler(aCx, mWorkerPrivate, aHandler);
-  return mWorkerPrivate->SetTimeout(aCx, handler, timeout, isInterval, aRv);
+  return mWorkerPrivate->SetTimeout(aCx, handler, aTimeout, true, aRv);
 }
 
 void
@@ -546,9 +540,7 @@ WorkerGlobalScope::AbstractMainThreadFor(TaskCategory aCategory)
 Maybe<ClientInfo>
 WorkerGlobalScope::GetClientInfo() const
 {
-  Maybe<ClientInfo> info;
-  info.emplace(mWorkerPrivate->GetClientInfo());
-  return Move(info);
+  return mWorkerPrivate->GetClientInfo();
 }
 
 Maybe<ClientState>
@@ -1021,7 +1013,7 @@ WorkerDebuggerGlobalScope::LoadSubScript(JSContext* aCx,
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
-  Maybe<JSAutoCompartment> ac;
+  Maybe<JSAutoRealm> ar;
   if (aSandbox.WasPassed()) {
     JS::Rooted<JSObject*> sandbox(aCx, js::CheckedUnwrap(aSandbox.Value()));
     if (!IsWorkerDebuggerSandbox(sandbox)) {
@@ -1029,7 +1021,7 @@ WorkerDebuggerGlobalScope::LoadSubScript(JSContext* aCx,
       return;
     }
 
-    ac.emplace(aCx, sandbox);
+    ar.emplace(aCx, sandbox);
   }
 
   nsTArray<nsString> urls;

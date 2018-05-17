@@ -48,7 +48,7 @@ public:
                   nsDisplayItem* aItem,
                   int32_t aDescendantCount,
                   const ActiveScrolledRoot* aStopAtAsr,
-                  const Maybe<gfx::Matrix4x4>& aTransform);
+                  const Maybe<gfx::Matrix4x4>& aAncestorTransform);
 
   int32_t GetDescendantCount() const;
   size_t GetScrollMetadataCount() const;
@@ -62,6 +62,7 @@ public:
   const ScrollMetadata& GetScrollMetadata(const WebRenderScrollData& aOwner,
                                           size_t aIndex) const;
 
+  gfx::Matrix4x4 GetAncestorTransform() const { return mAncestorTransform; }
   void SetTransform(const gfx::Matrix4x4& aTransform) { mTransform = aTransform; }
   gfx::Matrix4x4 GetTransform() const { return mTransform; }
   CSSTransformMatrix GetTransformTyped() const;
@@ -81,10 +82,6 @@ public:
   const ScrollbarData& GetScrollbarData() const { return mScrollbarData; }
   void SetScrollbarAnimationId(const uint64_t& aId) { mScrollbarAnimationId = aId; }
   const uint64_t& GetScrollbarAnimationId() const { return mScrollbarAnimationId; }
-  void SetScrollbarTargetContainerId(FrameMetrics::ViewID aId) { mScrollbarTargetContainerId = aId; }
-  FrameMetrics::ViewID GetScrollbarTargetContainerId() const { return mScrollbarTargetContainerId; }
-  void SetScrollbarContainerDirection(ScrollDirection aDirection) { mScrollbarContainerDirection = Some(aDirection); }
-  Maybe<ScrollDirection> GetScrollbarContainerDirection() const { return mScrollbarContainerDirection; }
 
   void SetFixedPositionScrollContainerId(FrameMetrics::ViewID aId) { mFixedPosScrollContainerId = aId; }
   FrameMetrics::ViewID GetFixedPositionScrollContainerId() const { return mFixedPosScrollContainerId; }
@@ -109,6 +106,7 @@ private:
   // Various data that we collect from the Layer in Initialize(), serialize
   // over IPC, and use on the parent side in APZ.
 
+  gfx::Matrix4x4 mAncestorTransform;
   gfx::Matrix4x4 mTransform;
   bool mTransformIsPerspective;
   EventRegions mEventRegions;
@@ -117,8 +115,6 @@ private:
   EventRegionsOverride mEventRegionsOverride;
   ScrollbarData mScrollbarData;
   uint64_t mScrollbarAnimationId;
-  FrameMetrics::ViewID mScrollbarTargetContainerId;
-  Maybe<ScrollDirection> mScrollbarContainerDirection;
   FrameMetrics::ViewID mFixedPosScrollContainerId;
 };
 
@@ -159,9 +155,17 @@ public:
   void SetPaintSequenceNumber(uint32_t aPaintSequenceNumber);
   uint32_t GetPaintSequenceNumber() const;
 
+  void ApplyUpdates(const ScrollUpdatesMap& aUpdates,
+                    uint32_t aPaintSequenceNumber);
+
   friend struct IPC::ParamTraits<WebRenderScrollData>;
 
   void Dump() const;
+
+private:
+  // This is called by the ParamTraits implementation to rebuild mScrollIdMap
+  // based on mScrollMetadatas
+  bool RepopulateMap();
 
 private:
   // Pointer back to the layer manager; if this is non-null, it will always be
@@ -170,9 +174,9 @@ private:
   WebRenderLayerManager* MOZ_NON_OWNING_REF mManager;
 
   // Internal data structure used to maintain uniqueness of mScrollMetadatas.
-  // This is not serialized/deserialized over IPC because there's no need for it,
-  // as the parent side doesn't need this at all. Also because we don't have any
-  // IPC-friendly hashtable implementation lying around.
+  // This is not serialized/deserialized over IPC, but it is rebuilt on the
+  // parent side when mScrollMetadatas is deserialized. So it should always be
+  // valid on both the child and parent.
   // The key into this map is the scrollId of a ScrollMetadata, and the value is
   // an index into the mScrollMetadatas array.
   std::map<FrameMetrics::ViewID, size_t> mScrollIdMap;
@@ -222,6 +226,7 @@ struct ParamTraits<mozilla::layers::WebRenderLayerScrollData>
   {
     WriteParam(aMsg, aParam.mDescendantCount);
     WriteParam(aMsg, aParam.mScrollIds);
+    WriteParam(aMsg, aParam.mAncestorTransform);
     WriteParam(aMsg, aParam.mTransform);
     WriteParam(aMsg, aParam.mTransformIsPerspective);
     WriteParam(aMsg, aParam.mEventRegions);
@@ -230,8 +235,6 @@ struct ParamTraits<mozilla::layers::WebRenderLayerScrollData>
     WriteParam(aMsg, aParam.mEventRegionsOverride);
     WriteParam(aMsg, aParam.mScrollbarData);
     WriteParam(aMsg, aParam.mScrollbarAnimationId);
-    WriteParam(aMsg, aParam.mScrollbarTargetContainerId);
-    WriteParam(aMsg, aParam.mScrollbarContainerDirection);
     WriteParam(aMsg, aParam.mFixedPosScrollContainerId);
   }
 
@@ -240,6 +243,7 @@ struct ParamTraits<mozilla::layers::WebRenderLayerScrollData>
   {
     return ReadParam(aMsg, aIter, &aResult->mDescendantCount)
         && ReadParam(aMsg, aIter, &aResult->mScrollIds)
+        && ReadParam(aMsg, aIter, &aResult->mAncestorTransform)
         && ReadParam(aMsg, aIter, &aResult->mTransform)
         && ReadParam(aMsg, aIter, &aResult->mTransformIsPerspective)
         && ReadParam(aMsg, aIter, &aResult->mEventRegions)
@@ -248,8 +252,6 @@ struct ParamTraits<mozilla::layers::WebRenderLayerScrollData>
         && ReadParam(aMsg, aIter, &aResult->mEventRegionsOverride)
         && ReadParam(aMsg, aIter, &aResult->mScrollbarData)
         && ReadParam(aMsg, aIter, &aResult->mScrollbarAnimationId)
-        && ReadParam(aMsg, aIter, &aResult->mScrollbarTargetContainerId)
-        && ReadParam(aMsg, aIter, &aResult->mScrollbarContainerDirection)
         && ReadParam(aMsg, aIter, &aResult->mFixedPosScrollContainerId);
   }
 };
@@ -276,7 +278,8 @@ struct ParamTraits<mozilla::layers::WebRenderScrollData>
         && ReadParam(aMsg, aIter, &aResult->mLayerScrollData)
         && ReadParam(aMsg, aIter, &aResult->mFocusTarget)
         && ReadParam(aMsg, aIter, &aResult->mIsFirstPaint)
-        && ReadParam(aMsg, aIter, &aResult->mPaintSequenceNumber);
+        && ReadParam(aMsg, aIter, &aResult->mPaintSequenceNumber)
+        && aResult->RepopulateMap();
   }
 };
 

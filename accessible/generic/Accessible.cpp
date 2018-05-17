@@ -30,7 +30,6 @@
 #include "TreeWalker.h"
 #include "XULDocument.h"
 
-#include "nsIDOMElement.h"
 #include "nsIDOMXULButtonElement.h"
 #include "nsIDOMXULLabelElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
@@ -70,6 +69,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/ErrorResult.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MouseEvents.h"
@@ -124,7 +124,7 @@ Accessible::~Accessible()
 }
 
 ENameValueFlag
-Accessible::Name(nsString& aName)
+Accessible::Name(nsString& aName) const
 {
   aName.Truncate();
 
@@ -321,11 +321,17 @@ Accessible::TranslateString(const nsString& aKey, nsAString& aStringOut)
 }
 
 uint64_t
-Accessible::VisibilityState()
+Accessible::VisibilityState() const
 {
   nsIFrame* frame = GetFrame();
-  if (!frame)
+  if (!frame) {
+    // Element having display:contents is considered visible semantically,
+    // despite it doesn't have a visually visible box.
+    if (mContent->IsElement() && mContent->AsElement()->IsDisplayContents()) {
+      return states::OFFSCREEN;
+    }
     return states::INVISIBLE;
+  }
 
   // Walk the parent frame chain to see if there's invisible parent or the frame
   // is in background tab.
@@ -401,7 +407,7 @@ Accessible::VisibilityState()
 }
 
 uint64_t
-Accessible::NativeState()
+Accessible::NativeState() const
 {
   uint64_t state = 0;
 
@@ -561,6 +567,11 @@ Accessible::ChildAtPoint(int32_t aX, int32_t aY,
   nsRect screenRect = startFrame->GetScreenRectInAppUnits();
   nsPoint offset(presContext->DevPixelsToAppUnits(aX) - screenRect.X(),
                  presContext->DevPixelsToAppUnits(aY) - screenRect.Y());
+
+  // We need to take into account a non-1 resolution set on the presshell.
+  // This happens in mobile platforms with async pinch zooming.
+  offset = offset.RemoveResolution(presContext->PresShell()->GetResolution());
+
   nsIFrame* foundFrame = nsLayoutUtils::GetFrameForPoint(startFrame, offset);
 
   nsIContent* content = nullptr;
@@ -664,28 +675,37 @@ Accessible::RelativeBounds(nsIFrame** aBoundingFrame) const
   return nsRect();
 }
 
-nsIntRect
-Accessible::Bounds() const
+nsRect
+Accessible::BoundsInAppUnits() const
 {
   nsIFrame* boundingFrame = nullptr;
   nsRect unionRectTwips = RelativeBounds(&boundingFrame);
-  if (!boundingFrame)
-    return nsIntRect();
+  if (!boundingFrame) {
+    return nsRect();
+  }
 
-  nsIntRect screenRect;
-  nsPresContext* presContext = mDoc->PresContext();
-  screenRect.SetRect(presContext->AppUnitsToDevPixels(unionRectTwips.X()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Y()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Width()),
-                     presContext->AppUnitsToDevPixels(unionRectTwips.Height()));
-
+  // We need to take into account a non-1 resolution set on the presshell.
+  // This happens in mobile platforms with async pinch zooming. Here we
+  // scale the bounds before adding the screen-relative offset.
+  unionRectTwips.ScaleRoundOut(mDoc->PresContext()->PresShell()->GetResolution());
   // We have the union of the rectangle, now we need to put it in absolute
   // screen coords.
-  nsIntRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits().
-    ToNearestPixels(presContext->AppUnitsPerDevPixel());
-  screenRect.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
+  nsRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits();
+  unionRectTwips.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
 
-  return screenRect;
+  return unionRectTwips;
+}
+
+nsIntRect
+Accessible::Bounds() const
+{
+  return BoundsInAppUnits().ToNearestPixels(mDoc->PresContext()->AppUnitsPerDevPixel());
+}
+
+nsIntRect
+Accessible::BoundsInCSSPixels() const
+{
+  return BoundsInAppUnits().ToNearestPixels(mDoc->PresContext()->AppUnitsPerCSSPixel());
 }
 
 void
@@ -727,7 +747,7 @@ Accessible::TakeSelection()
 }
 
 void
-Accessible::TakeFocus()
+Accessible::TakeFocus() const
 {
   nsIFrame* frame = GetFrame();
   if (!frame)
@@ -749,10 +769,14 @@ Accessible::TakeFocus()
     }
   }
 
-  nsCOMPtr<nsIDOMElement> element(do_QueryInterface(focusContent));
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (fm)
+  if (fm) {
+    AutoHandlingUserInputStatePusher inputStatePusher(true, nullptr, focusContent->OwnerDoc());
+    // XXXbz: Can we actually have a non-element content here?
+    RefPtr<Element> element =
+      focusContent->IsElement() ? focusContent->AsElement() : nullptr;
     fm->SetFocus(element, 0);
+  }
 }
 
 void
@@ -1319,7 +1343,7 @@ Accessible::ApplyARIAState(uint64_t* aState) const
 }
 
 void
-Accessible::Value(nsString& aValue)
+Accessible::Value(nsString& aValue) const
 {
   const nsRoleMapEntry* roleMapEntry = ARIARoleMap();
   if (!roleMapEntry)
@@ -1421,7 +1445,7 @@ Accessible::SetCurValue(double aValue)
 }
 
 role
-Accessible::ARIATransformRole(role aRole)
+Accessible::ARIATransformRole(role aRole) const
 {
   // Beginning with ARIA 1.1, user agents are expected to use the native host
   // language role of the element when the region role is used without a name.
@@ -1496,13 +1520,13 @@ Accessible::LandmarkRole() const
 }
 
 role
-Accessible::NativeRole()
+Accessible::NativeRole() const
 {
   return roles::NOTHING;
 }
 
 uint8_t
-Accessible::ActionCount()
+Accessible::ActionCount() const
 {
   return GetActionRule() == eNoAction ? 0 : 1;
 }
@@ -1575,7 +1599,7 @@ Accessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-Accessible::DoAction(uint8_t aIndex)
+Accessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != 0)
     return false;
@@ -1603,7 +1627,7 @@ Accessible::GetAtomicRegion() const
 }
 
 Relation
-Accessible::RelationByType(RelationType aType)
+Accessible::RelationByType(RelationType aType) const
 {
   if (!HasOwnContent())
     return Relation();
@@ -1745,9 +1769,10 @@ Accessible::RelationByType(RelationType aType)
         }
       } else {
         // In XUL, use first <button default="true" .../> in the document
-        dom::XULDocument* xulDoc = mContent->OwnerDoc()->AsXULDocument();
+        nsIDocument* doc = mContent->OwnerDoc();
         nsCOMPtr<nsIDOMXULButtonElement> buttonEl;
-        if (xulDoc) {
+        if (doc->IsXULDocument()) {
+          dom::XULDocument* xulDoc = doc->AsXULDocument();
           nsCOMPtr<nsINodeList> possibleDefaultButtons =
             xulDoc->GetElementsByAttribute(NS_LITERAL_STRING("default"),
                                            NS_LITERAL_STRING("true"));
@@ -1823,12 +1848,12 @@ Accessible::GetNativeInterface(void** aNativeAccessible)
 }
 
 void
-Accessible::DoCommand(nsIContent *aContent, uint32_t aActionIndex)
+Accessible::DoCommand(nsIContent* aContent, uint32_t aActionIndex) const
 {
   class Runnable final : public mozilla::Runnable
   {
   public:
-    Runnable(Accessible* aAcc, nsIContent* aContent, uint32_t aIdx)
+    Runnable(const Accessible* aAcc, nsIContent* aContent, uint32_t aIdx)
       : mozilla::Runnable("Runnable")
       , mAcc(aAcc)
       , mContent(aContent)
@@ -1851,7 +1876,7 @@ Accessible::DoCommand(nsIContent *aContent, uint32_t aActionIndex)
     }
 
   private:
-    RefPtr<Accessible> mAcc;
+    RefPtr<const Accessible> mAcc;
     nsCOMPtr<nsIContent> mContent;
     uint32_t mIdx;
   };
@@ -1862,7 +1887,7 @@ Accessible::DoCommand(nsIContent *aContent, uint32_t aActionIndex)
 }
 
 void
-Accessible::DispatchClickEvent(nsIContent *aContent, uint32_t aActionIndex)
+Accessible::DispatchClickEvent(nsIContent *aContent, uint32_t aActionIndex) const
 {
   if (IsDefunct())
     return;
@@ -1927,8 +1952,12 @@ Accessible::AppendTextTo(nsAString& aText, uint32_t aStartOffset,
     return;
 
   nsIFrame *frame = GetFrame();
-  if (!frame)
+  if (!frame) {
+    if (mContent->IsElement() && mContent->AsElement()->IsDisplayContents()) {
+      aText += kEmbeddedObjectChar;
+    }
     return;
+  }
 
   NS_ASSERTION(mParent,
                "Called on accessible unbound from tree. Result can be wrong.");
@@ -1971,7 +2000,7 @@ Accessible::Shutdown()
 
 // Accessible protected
 void
-Accessible::ARIAName(nsString& aName)
+Accessible::ARIAName(nsString& aName) const
 {
   // aria-labelledby now takes precedence over aria-label
   nsresult rv = nsTextEquivUtils::
@@ -1990,7 +2019,7 @@ Accessible::ARIAName(nsString& aName)
 
 // Accessible protected
 ENameValueFlag
-Accessible::NativeName(nsString& aName)
+Accessible::NativeName(nsString& aName) const
 {
   if (mContent->IsHTMLElement()) {
     Accessible* label = nullptr;
@@ -2327,7 +2356,7 @@ Accessible::GetIndexOfEmbeddedChild(Accessible* aChild)
 // HyperLinkAccessible methods
 
 bool
-Accessible::IsLink()
+Accessible::IsLink() const
 {
   // Every embedded accessible within hypertext accessible implements
   // hyperlink interface.
@@ -2337,7 +2366,7 @@ Accessible::IsLink()
 uint32_t
 Accessible::StartOffset()
 {
-  NS_PRECONDITION(IsLink(), "StartOffset is called not on hyper link!");
+  MOZ_ASSERT(IsLink(), "StartOffset is called not on hyper link!");
 
   HyperTextAccessible* hyperText = mParent ? mParent->AsHyperText() : nullptr;
   return hyperText ? hyperText->GetChildOffset(this) : 0;
@@ -2346,7 +2375,7 @@ Accessible::StartOffset()
 uint32_t
 Accessible::EndOffset()
 {
-  NS_PRECONDITION(IsLink(), "EndOffset is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "EndOffset is called on not hyper link!");
 
   HyperTextAccessible* hyperText = mParent ? mParent->AsHyperText() : nullptr;
   return hyperText ? (hyperText->GetChildOffset(this) + 1) : 0;
@@ -2355,21 +2384,21 @@ Accessible::EndOffset()
 uint32_t
 Accessible::AnchorCount()
 {
-  NS_PRECONDITION(IsLink(), "AnchorCount is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "AnchorCount is called on not hyper link!");
   return 1;
 }
 
 Accessible*
 Accessible::AnchorAt(uint32_t aAnchorIndex)
 {
-  NS_PRECONDITION(IsLink(), "GetAnchor is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "GetAnchor is called on not hyper link!");
   return aAnchorIndex == 0 ? this : nullptr;
 }
 
 already_AddRefed<nsIURI>
-Accessible::AnchorURIAt(uint32_t aAnchorIndex)
+Accessible::AnchorURIAt(uint32_t aAnchorIndex) const
 {
-  NS_PRECONDITION(IsLink(), "AnchorURIAt is called on not hyper link!");
+  MOZ_ASSERT(IsLink(), "AnchorURIAt is called on not hyper link!");
   return nullptr;
 }
 
@@ -2545,7 +2574,7 @@ Accessible::AreItemsOperable() const
 }
 
 Accessible*
-Accessible::CurrentItem()
+Accessible::CurrentItem() const
 {
   // Check for aria-activedescendant, which changes which element has focus.
   // For activedescendant, the ARIA spec does not require that the user agent
@@ -2568,7 +2597,7 @@ Accessible::CurrentItem()
 }
 
 void
-Accessible::SetCurrentItem(Accessible* aItem)
+Accessible::SetCurrentItem(const Accessible* aItem)
 {
   nsAtom* id = aItem->GetContent()->GetID();
   if (id) {
@@ -2704,7 +2733,7 @@ Accessible::GetActionRule() const
 }
 
 AccGroupInfo*
-Accessible::GetGroupInfo()
+Accessible::GetGroupInfo() const
 {
   if (IsProxy())
     MOZ_CRASH("This should never be called on proxy wrappers");

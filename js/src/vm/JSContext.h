@@ -25,7 +25,7 @@ struct DtoaState;
 
 namespace js {
 
-class AutoCompartment;
+class AutoRealm;
 
 namespace jit {
 class JitContext;
@@ -91,6 +91,14 @@ enum class ContextKind
 bool
 CurrentThreadIsParseThread();
 #endif
+
+enum class InterruptReason : uint32_t
+{
+    GC = 1 << 0,
+    AttachIonCompilations = 1 << 1,
+    CallbackUrgent = 1 << 2,
+    CallbackCanWait = 1 << 3,
+};
 
 } /* namespace js */
 
@@ -191,7 +199,7 @@ struct JSContext : public JS::RootingContext,
      * enter/leave stack is maintained by enterCompartmentDepth_ and queried by
      * hasEnteredCompartment.
      *
-     * To enter a compartment, code should prefer using AutoCompartment over
+     * To enter a compartment, code should prefer using AutoRealm over
      * manually calling cx->enterCompartment/leaveCompartment.
      */
   protected:
@@ -216,7 +224,7 @@ struct JSContext : public JS::RootingContext,
     inline void enterAtomsCompartment(JSCompartment* c,
                                       const js::AutoLockForExclusiveAccess& lock);
 
-    friend class js::AutoCompartment;
+    friend class js::AutoRealm;
 
   public:
     template <typename T>
@@ -257,7 +265,7 @@ struct JSContext : public JS::RootingContext,
     inline js::LifoAlloc& typeLifoAlloc();
 
     // Current global. This is only safe to use within the scope of the
-    // AutoCompartment from which it's called.
+    // AutoRealm from which it's called.
     inline js::Handle<js::GlobalObject*> global() const;
 
     // Methods to access runtime data that must be protected by locks.
@@ -464,12 +472,12 @@ struct JSContext : public JS::RootingContext,
     js::ThreadData<bool> ionCompilingSafeForMinorGC;
 
     // Whether this thread is currently performing GC.  This thread could be the
-    // active thread or a helper thread while the active thread is running the
+    // main thread or a helper thread while the main thread is running the
     // collector.
     js::ThreadData<bool> performingGC;
 
     // Whether this thread is currently sweeping GC things.  This thread could
-    // be the active thread or a helper thread while the active thread is running
+    // be the main thread or a helper thread while the main thread is running
     // the mutator.  This is used to assert that destruction of GCPtr only
     // happens when we are sweeping.
     js::ThreadData<bool> gcSweeping;
@@ -541,7 +549,7 @@ struct JSContext : public JS::RootingContext,
 
     // Count of AutoKeepAtoms instances on the current thread's stack. When any
     // instances exist, atoms in the runtime will not be collected. Threads
-    // parsing off the active thread do not increment this value, but the presence
+    // parsing off the main thread do not increment this value, but the presence
     // of any such threads also inhibits collection of atoms. We don't scan the
     // stacks of exclusive threads, so we need to avoid collecting their
     // objects in another way. The only GC thing pointers they have are to
@@ -787,26 +795,21 @@ struct JSContext : public JS::RootingContext,
 
     js::ThreadData<bool> interruptCallbackDisabled;
 
-    mozilla::Atomic<uint32_t, mozilla::Relaxed> interrupt_;
-    mozilla::Atomic<uint32_t, mozilla::Relaxed> interruptRegExpJit_;
-
-    enum InterruptMode {
-        RequestInterruptUrgent,
-        RequestInterruptCanWait
-    };
+    // Bitfield storing InterruptReason values.
+    mozilla::Atomic<uint32_t, mozilla::Relaxed> interruptBits_;
 
     // Any thread can call requestInterrupt() to request that this thread
-    // stop running and call the interrupt callback (allowing the interrupt
-    // callback to halt execution). To stop this thread, requestInterrupt
-    // sets two fields: interrupt_ (set to true) and jitStackLimit_ (set to
+    // stop running. To stop this thread, requestInterrupt sets two fields:
+    // interruptBits_ (a bitset of InterruptReasons) and jitStackLimit_ (set to
     // UINTPTR_MAX). The JS engine must continually poll one of these fields
-    // and call handleInterrupt if either field has the interrupt value. (The
-    // point of setting jitStackLimit_ to UINTPTR_MAX is that JIT code already
-    // needs to guard on jitStackLimit_ in every function prologue to avoid
-    // stack overflow, so we avoid a second branch on interrupt_ by setting
-    // jitStackLimit_ to a value that is guaranteed to fail the guard.)
+    // and call handleInterrupt if either field has the interrupt value.
     //
-    // Note that the writes to interrupt_ and jitStackLimit_ use a Relaxed
+    // The point of setting jitStackLimit_ to UINTPTR_MAX is that JIT code
+    // already needs to guard on jitStackLimit_ in every function prologue to
+    // avoid stack overflow, so we avoid a second branch on interruptBits_ by
+    // setting jitStackLimit_ to a value that is guaranteed to fail the guard.)
+    //
+    // Note that the writes to interruptBits_ and jitStackLimit_ use a Relaxed
     // Atomic so, while the writes are guaranteed to eventually be visible to
     // this thread, it can happen in any order. handleInterrupt calls the
     // interrupt callback if either is set, so it really doesn't matter as long
@@ -814,20 +817,20 @@ struct JSContext : public JS::RootingContext,
     // cases, this relaxed ordering could lead to an interrupt handler being
     // called twice in succession after a single requestInterrupt call, but
     // that's fine.
-    void requestInterrupt(InterruptMode mode);
+    void requestInterrupt(js::InterruptReason reason);
     bool handleInterrupt();
 
-    MOZ_ALWAYS_INLINE bool hasPendingInterrupt() const {
-        static_assert(sizeof(interrupt_) == sizeof(uint32_t), "Assumed by JIT callers");
-        return interrupt_;
+    MOZ_ALWAYS_INLINE bool hasAnyPendingInterrupt() const {
+        static_assert(sizeof(interruptBits_) == sizeof(uint32_t), "Assumed by JIT callers");
+        return interruptBits_ != 0;
+    }
+    bool hasPendingInterrupt(js::InterruptReason reason) const {
+        return interruptBits_ & uint32_t(reason);
     }
 
   public:
-    void* addressOfInterrupt() {
-        return &interrupt_;
-    }
-    void* addressOfInterruptRegExpJit() {
-        return &interruptRegExpJit_;
+    void* addressOfInterruptBits() {
+        return &interruptBits_;
     }
     void* addressOfJitStackLimit() {
         return &jitStackLimit;

@@ -25,6 +25,7 @@ loader.lazyGetter(this, "StoragePanel", () => require("devtools/client/storage/p
 loader.lazyGetter(this, "ScratchpadPanel", () => require("devtools/client/scratchpad/scratchpad-panel").ScratchpadPanel);
 loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/dom-panel").DomPanel);
 loader.lazyGetter(this, "AccessibilityPanel", () => require("devtools/client/accessibility/accessibility-panel").AccessibilityPanel);
+loader.lazyGetter(this, "ApplicationPanel", () => require("devtools/client/application/panel").ApplicationPanel);
 
 // Other dependencies
 loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
@@ -100,7 +101,14 @@ Tools.webConsole = {
   accesskey: l10n("webConsoleCmd.accesskey"),
   ordinal: 2,
   url: "chrome://devtools/content/webconsole/webconsole.html",
-  browserConsoleURL: "chrome://devtools/content/webconsole/browserconsole.xul",
+  get browserConsoleUsesHTML() {
+    return Services.prefs.getBoolPref("devtools.browserconsole.html");
+  },
+  get browserConsoleURL() {
+    return this.browserConsoleUsesHTML ?
+      "chrome://devtools/content/webconsole/webconsole.html" :
+      "chrome://devtools/content/webconsole/browserconsole.xul";
+  },
   icon: "chrome://devtools/skin/images/tool-webconsole.svg",
   label: l10n("ToolboxTabWebconsole.label"),
   menuLabel: l10n("MenuWebconsole.label"),
@@ -444,6 +452,27 @@ Tools.accessibility = {
   }
 };
 
+Tools.application = {
+  id: "application",
+  ordinal: 15,
+  visibilityswitch: "devtools.application.enabled",
+  icon: "chrome://devtools/skin/images/tool-application.svg",
+  url: "chrome://devtools/content/application/index.html",
+  label: "Application",
+  panelLabel: "Application",
+  tooltip: "Application",
+  inMenu: false,
+  hiddenInOptions: true,
+
+  isTargetSupported: function(target) {
+    return target.isLocalTab;
+  },
+
+  build: function(iframeWindow, toolbox) {
+    return new ApplicationPanel(iframeWindow, toolbox);
+  }
+};
+
 var defaultTools = [
   Tools.options,
   Tools.webConsole,
@@ -460,6 +489,7 @@ var defaultTools = [
   Tools.memory,
   Tools.dom,
   Tools.accessibility,
+  Tools.application,
 ];
 
 exports.defaultTools = defaultTools;

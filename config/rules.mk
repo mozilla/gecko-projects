@@ -36,7 +36,7 @@ REPORT_BUILD = $(info $(notdir $@))
 ifdef BUILD_VERBOSE_LOG
 REPORT_BUILD_VERBOSE = $(REPORT_BUILD)
 else
-REPORT_BUILD_VERBOSE =
+REPORT_BUILD_VERBOSE = $(call BUILDSTATUS,BUILD_VERBOSE $(relativesrcdir))
 endif
 
 endif
@@ -881,6 +881,7 @@ define RUN_CARGO
 $(if $(findstring n,$(filter-out --%, $(MAKEFLAGS))),,+)env $(environment_cleaner) $(rust_unlock_unstable) $(rustflags_override) $(sccache_wrap) \
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) \
 	RUSTC=$(RUSTC) \
+	RUSTDOC=$(RUSTDOC) \
 	MOZ_SRC=$(topsrcdir) \
 	MOZ_DIST=$(ABS_DIST) \
 	LIBCLANG_PATH="$(MOZ_LIBCLANG_PATH)" \
@@ -924,8 +925,9 @@ ifndef MOZ_TSAN
 # Cargo needs the same linker flags as the C/C++ compiler,
 # but not the final libraries. Filter those out because they
 # cause problems on macOS 10.7; see bug 1365993 for details.
+# Also, we don't want to pass PGO flags until cargo supports them.
 target_cargo_env_vars := \
-	MOZ_CARGO_WRAP_LDFLAGS="$(filter-out -framework Cocoa -lobjc AudioToolbox ExceptionHandling,$(LDFLAGS))" \
+	MOZ_CARGO_WRAP_LDFLAGS="$(filter-out -framework Cocoa -lobjc AudioToolbox ExceptionHandling -fprofile-%,$(LDFLAGS))" \
 	MOZ_CARGO_WRAP_LD="$(CC)" \
 	$(cargo_linker_env_var)=$(topsrcdir)/build/cargo-linker
 endif # MOZ_TSAN
@@ -957,14 +959,19 @@ force-cargo-library-check:
 	@true
 endif # RUST_LIBRARY_FILE
 
-ifdef RUST_TEST
+ifdef RUST_TESTS
+
+rust_test_options := $(foreach test,$(RUST_TESTS),-p $(test))
 
 ifdef RUST_TEST_FEATURES
 rust_features_flag := --features "$(RUST_TEST_FEATURES)"
 endif
 
+# Don't stop at the first failure. We want to list all failures together.
+rust_test_flag := --no-fail-fast
+
 force-cargo-test-run:
-	$(call RUN_CARGO,test $(cargo_target_flag) -p $(RUST_TEST) $(rust_features_flag),$(target_cargo_env_vars))
+	$(call RUN_CARGO,test $(cargo_target_flag) $(rust_test_flag) $(rust_test_options) $(rust_features_flag),$(target_cargo_env_vars))
 
 check:: force-cargo-test-run
 endif
@@ -1170,13 +1177,6 @@ non-root-path = $(shell echo $(1) | sed -e 's|\(/[^/]*\)/\?\(.*\)|\2|')
 normalizepath = $(foreach p,$(1),$(if $(filter /%,$(1)),$(patsubst %/,%,$(shell cd $(call root-path,$(1)) && pwd -W))/$(call non-root-path,$(1)),$(1)))
 else
 normalizepath = $(1)
-endif
-
-###############################################################################
-# Java rules
-###############################################################################
-ifneq (,$(JAVA_JAR_TARGETS))
-  include $(MOZILLA_DIR)/config/makefiles/java-build.mk
 endif
 
 ###############################################################################

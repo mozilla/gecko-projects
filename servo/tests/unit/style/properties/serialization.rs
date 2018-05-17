@@ -520,42 +520,6 @@ mod shorthand_serialization {
         }
     }
 
-    mod outline {
-        use style::values::specified::outline::OutlineStyle;
-        use super::*;
-
-        #[test]
-        fn outline_should_show_all_properties_when_set() {
-            let mut properties = Vec::new();
-
-            let width = BorderSideWidth::Length(Length::from_px(4f32));
-            let style = OutlineStyle::Other(BorderStyle::Solid);
-            let color = RGBA::new(255, 0, 0, 255).into();
-
-            properties.push(PropertyDeclaration::OutlineWidth(width));
-            properties.push(PropertyDeclaration::OutlineStyle(style));
-            properties.push(PropertyDeclaration::OutlineColor(color));
-
-            let serialization = shorthand_properties_to_string(properties);
-            assert_eq!(serialization, "outline: 4px solid rgb(255, 0, 0);");
-        }
-
-        #[test]
-        fn outline_should_serialize_correctly_when_style_is_auto() {
-            let mut properties = Vec::new();
-
-            let width = BorderSideWidth::Length(Length::from_px(4f32));
-            let style = OutlineStyle::Auto;
-            let color = RGBA::new(255, 0, 0, 255).into();
-            properties.push(PropertyDeclaration::OutlineWidth(width));
-            properties.push(PropertyDeclaration::OutlineStyle(style));
-            properties.push(PropertyDeclaration::OutlineColor(color));
-
-            let serialization = shorthand_properties_to_string(properties);
-            assert_eq!(serialization, "outline: 4px auto rgb(255, 0, 0);");
-        }
-    }
-
     mod background {
         use super::*;
 
@@ -957,33 +921,6 @@ mod shorthand_serialization {
             let shadow = parse(|c, e, i| Ok(parse_property_declaration_list(c, e, i)), shadow_css).unwrap();
 
             assert_eq!(shadow.to_css_string(), shadow_css);
-        }
-    }
-
-    mod counter_increment {
-        pub use super::*;
-        pub use style::properties::longhands::counter_increment::SpecifiedValue as CounterIncrement;
-        use style::values::specified::Integer;
-
-        #[test]
-        fn counter_increment_with_properties_should_serialize_correctly() {
-            let mut properties = Vec::new();
-
-            properties.push((CustomIdent("counter1".into()), Integer::new(1)));
-            properties.push((CustomIdent("counter2".into()), Integer::new(-4)));
-
-            let counter_increment = CounterIncrement::new(properties);
-            let counter_increment_css = "counter1 1 counter2 -4";
-
-            assert_eq!(counter_increment.to_css_string(), counter_increment_css);
-        }
-
-        #[test]
-        fn counter_increment_without_properties_should_serialize_correctly() {
-            let counter_increment = CounterIncrement::new(Vec::new());
-            let counter_increment_css = "none";
-
-            assert_eq!(counter_increment.to_css_string(), counter_increment_css);
         }
     }
 }

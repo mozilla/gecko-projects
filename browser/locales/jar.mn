@@ -18,6 +18,7 @@
     locale/browser/aboutRobots.dtd                 (%chrome/browser/aboutRobots.dtd)
     locale/browser/aboutHome.dtd                   (%chrome/browser/aboutHome.dtd)
     locale/browser/accounts.properties             (%chrome/browser/accounts.properties)
+    locale/browser/aboutRestartRequired.dtd        (%chrome/browser/aboutRestartRequired.dtd)
     locale/browser/aboutSearchReset.dtd            (%chrome/browser/aboutSearchReset.dtd)
     locale/browser/aboutSessionRestore.dtd         (%chrome/browser/aboutSessionRestore.dtd)
     locale/browser/aboutTabCrashed.dtd             (%chrome/browser/aboutTabCrashed.dtd)
@@ -55,12 +56,8 @@
     locale/browser/feeds/subscribe.properties       (%chrome/browser/feeds/subscribe.properties)
     locale/browser/migration/migration.dtd         (%chrome/browser/migration/migration.dtd)
     locale/browser/migration/migration.properties  (%chrome/browser/migration/migration.properties)
-    locale/browser/preferences/clearSiteData.properties     (%chrome/browser/preferences/clearSiteData.properties)
-    locale/browser/preferences/content.dtd            (%chrome/browser/preferences/content.dtd)
     locale/browser/preferences/preferences.properties     (%chrome/browser/preferences/preferences.properties)
-    locale/browser/preferences/privacy.dtd            (%chrome/browser/preferences/privacy.dtd)
     locale/browser/preferences/security.dtd           (%chrome/browser/preferences/security.dtd)
-    locale/browser/preferences/sync.dtd               (%chrome/browser/preferences/sync.dtd)
     locale/browser/syncBrand.dtd                (%chrome/browser/syncBrand.dtd)
     locale/browser/syncSetup.properties         (%chrome/browser/syncSetup.properties)
 #if BUILD_FASTER
@@ -73,7 +70,6 @@
     locale/browser/searchplugins/images/amazon.ico     (searchplugins/images/amazon.ico)
     locale/browser/searchplugins/images/ebay.ico       (searchplugins/images/ebay.ico)
     locale/browser/searchplugins/images/wikipedia.ico  (searchplugins/images/wikipedia.ico)
-    locale/browser/searchplugins/images/yahoo.ico      (searchplugins/images/yahoo.ico)
     locale/browser/searchplugins/images/yandex-en.ico  (searchplugins/images/yandex-en.ico)
     locale/browser/searchplugins/images/yandex-ru.ico  (searchplugins/images/yandex-ru.ico)
 % locale browser-region @AB_CD@ %locale/browser-region/

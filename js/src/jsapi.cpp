@@ -693,8 +693,8 @@ JS_LeaveCompartment(JSContext* cx, JSCompartment* oldCompartment)
     cx->leaveCompartment(oldCompartment);
 }
 
-JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSObject* target
-                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+JSAutoRealm::JSAutoRealm(JSContext* cx, JSObject* target
+                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : cx_(cx),
     oldCompartment_(cx->compartment())
 {
@@ -703,8 +703,8 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSObject* target
     cx_->enterCompartmentOf(target);
 }
 
-JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSScript* target
-                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+JSAutoRealm::JSAutoRealm(JSContext* cx, JSScript* target
+                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : cx_(cx),
     oldCompartment_(cx->compartment())
 {
@@ -713,14 +713,14 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSScript* target
     cx_->enterCompartmentOf(target);
 }
 
-JSAutoCompartment::~JSAutoCompartment()
+JSAutoRealm::~JSAutoRealm()
 {
     cx_->leaveCompartment(oldCompartment_);
 }
 
-JSAutoNullableCompartment::JSAutoNullableCompartment(JSContext* cx,
-                                                     JSObject* targetOrNull
-                                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+JSAutoNullableRealm::JSAutoNullableRealm(JSContext* cx,
+                                         JSObject* targetOrNull
+                                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : cx_(cx),
     oldCompartment_(cx->compartment())
 {
@@ -732,7 +732,7 @@ JSAutoNullableCompartment::JSAutoNullableCompartment(JSContext* cx,
         cx_->enterNullCompartment();
 }
 
-JSAutoNullableCompartment::~JSAutoNullableCompartment()
+JSAutoNullableRealm::~JSAutoNullableRealm()
 {
     cx_->leaveCompartment(oldCompartment_);
 }
@@ -873,6 +873,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
     MOZ_ASSERT(!target->is<CrossCompartmentWrapperObject>());
     MOZ_ASSERT(origobj->getClass() == target->getClass());
     ReleaseAssertObjectHasNoWrappers(cx, target);
+    MOZ_ASSERT(JS::CellIsNotGray(target));
 
     RootedValue origv(cx, ObjectValue(*origobj));
     RootedObject newIdentity(cx);
@@ -889,7 +890,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         // destination, then we know that we won't find a wrapper in the
         // destination's cross compartment map and that the same
         // object will continue to work.
-        AutoCompartment ac(cx, origobj);
+        AutoRealmUnchecked ar(cx, origobj->compartment());
         if (!JSObject::swap(cx, origobj, target))
             MOZ_CRASH();
         newIdentity = origobj;
@@ -904,7 +905,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         destination->removeWrapper(p);
         NukeCrossCompartmentWrapper(cx, newIdentity);
 
-        AutoCompartment ac(cx, newIdentity);
+        AutoRealm ar(cx, newIdentity);
         if (!JSObject::swap(cx, newIdentity, target))
             MOZ_CRASH();
     } else {
@@ -923,7 +924,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
     // Lastly, update the original object to point to the new one.
     if (origobj->compartment() != destination) {
         RootedObject newIdentityWrapper(cx, newIdentity);
-        AutoCompartment ac(cx, origobj);
+        AutoRealmUnchecked ar(cx, origobj->compartment());
         if (!JS_WrapObject(cx, &newIdentityWrapper))
             MOZ_CRASH();
         MOZ_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
@@ -935,6 +936,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
 
     // The new identity object might be one of several things. Return it to avoid
     // ambiguity.
+    MOZ_ASSERT(JS::CellIsNotGray(newIdentity));
     return newIdentity;
 }
 
@@ -3673,7 +3675,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject env, Handle
     // Note that funobj can be in a different compartment.
 
     if (!funobj->is<JSFunction>()) {
-        AutoCompartment ac(cx, funobj);
+        AutoRealm ar(cx, funobj);
         RootedValue v(cx, ObjectValue(*funobj));
         ReportIsNotFunction(cx, v);
         return nullptr;
@@ -3681,7 +3683,7 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject env, Handle
 
     RootedFunction fun(cx, &funobj->as<JSFunction>());
     if (fun->isInterpretedLazy()) {
-        AutoCompartment ac(cx, funobj);
+        AutoRealm ar(cx, funobj);
         if (!JSFunction::getOrCreateScript(cx, fun))
             return nullptr;
     }
@@ -3853,7 +3855,7 @@ JS_DefineFunctionById(JSContext* cx, HandleObject obj, HandleId id, JSNative cal
 # define fast_getc getc
 #endif
 
-typedef Vector<char, 8, TempAllocPolicy> FileContents;
+using FileContents = Vector<uint8_t, 8, TempAllocPolicy>;
 
 static bool
 ReadCompleteFile(JSContext* cx, FILE* fp, FileContents& buffer)
@@ -3980,6 +3982,14 @@ JS::OwningCompileOptions::~OwningCompileOptions()
     js_free(const_cast<char*>(filename_));
     js_free(const_cast<char16_t*>(sourceMapURL_));
     js_free(const_cast<char*>(introducerFilename_));
+}
+
+size_t
+JS::OwningCompileOptions::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    return mallocSizeOf(filename_) +
+           mallocSizeOf(sourceMapURL_) +
+           mallocSizeOf(introducerFilename_);
 }
 
 bool
@@ -4119,7 +4129,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
     if (!ReadCompleteFile(cx, fp, buffer))
         return false;
 
-    return ::Compile(cx, options, buffer.begin(), buffer.length(), script);
+    return ::Compile(cx, options, reinterpret_cast<const char*>(buffer.begin()), buffer.length(), script);
 }
 
 static bool
@@ -4215,8 +4225,49 @@ JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& opt
     return ::Compile(cx, options, filename, script);
 }
 
+#if defined(JS_BUILD_BINAST)
+
+JSScript*
+JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
+                 const uint8_t* buf, size_t length)
+{
+    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    AssertHeapIsIdle();
+    CHECK_REQUEST(cx);
+
+    return frontend::CompileGlobalBinASTScript(cx, cx->tempLifoAlloc(), options, buf, length);
+}
+
+JSScript*
+JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options, FILE* file)
+{
+    FileContents fileContents(cx);
+    if (!ReadCompleteFile(cx, file, fileContents))
+        return nullptr;
+
+    return DecodeBinAST(cx, options, fileContents.begin(), fileContents.length());
+}
+
+JS_PUBLIC_API(bool)
+JS::DecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
+                          const uint8_t* buf, size_t length,
+                          OffThreadCompileCallback callback, void* callbackData)
+{
+    return StartOffThreadDecodeBinAST(cx, options, buf, length, callback, callbackData);
+}
+
+JS_PUBLIC_API(JSScript*)
+JS::FinishOffThreadBinASTDecode(JSContext* cx, JS::OffThreadToken* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+    return HelperThreadState().finishBinASTDecodeTask(cx, token);
+}
+
+#endif /* JS_BUILD_BINAST */
+
 enum class OffThread {
-    Compile, Decode,
+    Compile, Decode, DecodeBinAST
 };
 
 static bool
@@ -4225,22 +4276,29 @@ CanDoOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t leng
     static const size_t TINY_LENGTH = 5 * 1000;
     static const size_t HUGE_SRC_LENGTH = 100 * 1000;
     static const size_t HUGE_BC_LENGTH = 367 * 1000;
+    static const size_t HUGE_BINAST_LENGTH = 70 * 1000;
+
+    // TODO: We can't decode BinAST off main thread until bug 1459555 is fixed.
+    if (what == OffThread::DecodeBinAST)
+        return false;
 
     // These are heuristics which the caller may choose to ignore (e.g., for
     // testing purposes).
     if (!options.forceAsync) {
-        // Compiling off the active thread inolves creating a new Zone and other
+        // Compiling off the main thread inolves creating a new Zone and other
         // significant overheads.  Don't bother if the script is tiny.
         if (length < TINY_LENGTH)
             return false;
 
         // If the parsing task would have to wait for GC to complete, it'll probably
-        // be faster to just start it synchronously on the active thread unless the
+        // be faster to just start it synchronously on the main thread unless the
         // script is huge.
         if (OffThreadParsingMustWaitForGC(cx->runtime())) {
             if (what == OffThread::Compile && length < HUGE_SRC_LENGTH)
                 return false;
             if (what == OffThread::Decode && length < HUGE_BC_LENGTH)
+                return false;
+            if (what == OffThread::DecodeBinAST && length < HUGE_BINAST_LENGTH)
                 return false;
         }
     }
@@ -4260,6 +4318,14 @@ JS::CanDecodeOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, siz
     return CanDoOffThread(cx, options, length, OffThread::Decode);
 }
 
+#ifdef JS_BUILD_BINAST
+JS_PUBLIC_API(bool)
+JS::CanDecodeBinASTOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t length)
+{
+    return CanDoOffThread(cx, options, length, OffThread::DecodeBinAST);
+}
+#endif
+
 JS_PUBLIC_API(bool)
 JS::CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
                      const char16_t* chars, size_t length,
@@ -4270,7 +4336,7 @@ JS::CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(JSScript*)
-JS::FinishOffThreadScript(JSContext* cx, void* token)
+JS::FinishOffThreadScript(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4278,7 +4344,7 @@ JS::FinishOffThreadScript(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(void)
-JS::CancelOffThreadScript(JSContext* cx, void* token)
+JS::CancelOffThreadScript(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4295,7 +4361,7 @@ JS::CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(JSObject*)
-JS::FinishOffThreadModule(JSContext* cx, void* token)
+JS::FinishOffThreadModule(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4303,7 +4369,7 @@ JS::FinishOffThreadModule(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(void)
-JS::CancelOffThreadModule(JSContext* cx, void* token)
+JS::CancelOffThreadModule(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4345,7 +4411,7 @@ JS::DecodeMultiOffThreadScripts(JSContext* cx, const ReadOnlyCompileOptions& opt
 }
 
 JS_PUBLIC_API(JSScript*)
-JS::FinishOffThreadScriptDecoder(JSContext* cx, void* token)
+JS::FinishOffThreadScriptDecoder(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4353,7 +4419,7 @@ JS::FinishOffThreadScriptDecoder(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(void)
-JS::CancelOffThreadScriptDecoder(JSContext* cx, void* token)
+JS::CancelOffThreadScriptDecoder(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4361,7 +4427,7 @@ JS::CancelOffThreadScriptDecoder(JSContext* cx, void* token)
 }
 
 JS_PUBLIC_API(bool)
-JS::FinishMultiOffThreadScriptsDecoder(JSContext* cx, void* token, MutableHandle<ScriptVector> scripts)
+JS::FinishMultiOffThreadScriptsDecoder(JSContext* cx, JS::OffThreadToken* token, MutableHandle<ScriptVector> scripts)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4369,7 +4435,7 @@ JS::FinishMultiOffThreadScriptsDecoder(JSContext* cx, void* token, MutableHandle
 }
 
 JS_PUBLIC_API(void)
-JS::CancelMultiOffThreadScriptsDecoder(JSContext* cx, void* token)
+JS::CancelMultiOffThreadScriptsDecoder(JSContext* cx, JS::OffThreadToken* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
@@ -4411,10 +4477,17 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
     frontend::UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
+
+    RootedScriptSourceObject sourceObject(cx, frontend::CreateScriptSourceObject(cx, options,
+                                                                                 mozilla::Nothing()));
+    if (!sourceObject)
+        return false;
+
     frontend::Parser<frontend::FullParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(),
                                                                   options, chars, length,
                                                                   /* foldConstants = */ true,
-                                                                  usedNames, nullptr, nullptr);
+                                                                  usedNames, nullptr, nullptr,
+                                                                  sourceObject);
     JS::WarningReporter older = JS::SetWarningReporter(cx, nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of source, we
@@ -4459,7 +4532,7 @@ JS_GetFunctionScript(JSContext* cx, HandleFunction fun)
     if (fun->isNative())
         return nullptr;
     if (fun->isInterpretedLazy()) {
-        AutoCompartment funCompartment(cx, fun);
+        AutoRealm ar(cx, fun);
         JSScript* script = JSFunction::getOrCreateScript(cx, fun);
         if (!script)
             MOZ_CRASH();
@@ -4632,7 +4705,7 @@ JS::InitScriptSourceElement(JSContext* cx, HandleScript script,
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
 
-    RootedScriptSource sso(cx, &script->sourceObject()->as<ScriptSourceObject>());
+    RootedScriptSourceObject sso(cx, &script->sourceObject()->as<ScriptSourceObject>());
     return ScriptSourceObject::initElementProperties(cx, sso, element, elementAttrName);
 }
 
@@ -4841,7 +4914,7 @@ Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
 
     CompileOptions options(cx, optionsArg);
     options.setFileAndLine(filename, 1);
-    return Evaluate(cx, options, buffer.begin(), buffer.length(), rval);
+    return Evaluate(cx, options, reinterpret_cast<const char*>(buffer.begin()), buffer.length(), rval);
 }
 
 JS_PUBLIC_API(bool)
@@ -4881,21 +4954,18 @@ JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
     return ::Evaluate(cx, optionsArg, filename, rval);
 }
 
-JS_PUBLIC_API(JSFunction*)
-JS::GetModuleResolveHook(JSContext* cx)
+JS_PUBLIC_API(JS::ModuleResolveHook)
+JS::GetModuleResolveHook(JSRuntime* rt)
 {
     AssertHeapIsIdle();
-    CHECK_REQUEST(cx);
-    return cx->global()->moduleResolveHook();
+    return rt->moduleResolveHook;
 }
 
 JS_PUBLIC_API(void)
-JS::SetModuleResolveHook(JSContext* cx, HandleFunction func)
+JS::SetModuleResolveHook(JSRuntime* rt, JS::ModuleResolveHook func)
 {
     AssertHeapIsIdle();
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, func);
-    cx->global()->setModuleResolveHook(func);
+    rt->moduleResolveHook = func;
 }
 
 JS_PUBLIC_API(bool)
@@ -5182,7 +5252,7 @@ ResolveOrRejectPromise(JSContext* cx, JS::HandleObject promiseObj, JS::HandleVal
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, promiseObj, resultOrReason_);
 
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     Rooted<PromiseObject*> promise(cx);
     RootedValue resultOrReason(cx, resultOrReason_);
     if (IsWrapper(promiseObj)) {
@@ -5192,7 +5262,7 @@ ResolveOrRejectPromise(JSContext* cx, JS::HandleObject promiseObj, JS::HandleVal
             return false;
         }
         promise = &unwrappedPromiseObj->as<PromiseObject>();
-        ac.emplace(cx, promise);
+        ar.emplace(cx, promise);
         if (!cx->compartment()->wrap(cx, &resultOrReason))
             return false;
     } else {
@@ -5230,7 +5300,7 @@ CallOriginalPromiseThenImpl(JSContext* cx, JS::HandleObject promiseObj,
     MOZ_ASSERT_IF(onRejectedObj_, IsCallable(onRejectedObj_));
 
     {
-        mozilla::Maybe<AutoCompartment> ac;
+        mozilla::Maybe<AutoRealm> ar;
         Rooted<PromiseObject*> promise(cx);
         RootedObject onResolvedObj(cx, onResolvedObj_);
         RootedObject onRejectedObj(cx, onRejectedObj_);
@@ -5241,7 +5311,7 @@ CallOriginalPromiseThenImpl(JSContext* cx, JS::HandleObject promiseObj,
                 return false;
             }
             promise = &unwrappedPromiseObj->as<PromiseObject>();
-            ac.emplace(cx, promise);
+            ar.emplace(cx, promise);
             if (!cx->compartment()->wrap(cx, &onResolvedObj) ||
                 !cx->compartment()->wrap(cx, &onRejectedObj))
             {
@@ -5690,13 +5760,13 @@ JS::InitConsumeStreamCallback(JSContext* cx, ConsumeStreamCallback callback)
 JS_PUBLIC_API(void)
 JS_RequestInterruptCallback(JSContext* cx)
 {
-    cx->requestInterrupt(JSContext::RequestInterruptUrgent);
+    cx->requestInterrupt(InterruptReason::CallbackUrgent);
 }
 
 JS_PUBLIC_API(void)
 JS_RequestInterruptCallbackCanWait(JSContext* cx)
 {
-    cx->requestInterrupt(JSContext::RequestInterruptCanWait);
+    cx->requestInterrupt(InterruptReason::CallbackCanWait);
 }
 
 JS::AutoSetAsyncStackForNewCalls::AutoSetAsyncStackForNewCalls(
@@ -6077,13 +6147,6 @@ JS_PutEscapedString(JSContext* cx, char* buffer, size_t size, JSString* str, cha
     if (!linearStr)
         return size_t(-1);
     return PutEscapedString(buffer, size, linearStr, quote);
-}
-
-JS_PUBLIC_API(bool)
-JS_FileEscapedString(FILE* fp, JSString* str, char quote)
-{
-    JSLinearString* linearStr = str->ensureLinear(nullptr);
-    return linearStr && FileEscapedString(fp, linearStr, quote);
 }
 
 JS_PUBLIC_API(JSString*)
@@ -7696,9 +7759,9 @@ JS::CompiledWasmModuleAssumptionsMatch(PRFileDesc* compiled, JS::BuildIdCharVect
 JS_PUBLIC_API(RefPtr<JS::WasmModule>)
 JS::DeserializeWasmModule(PRFileDesc* bytecode, PRFileDesc* maybeCompiled,
                           JS::BuildIdCharVector&& buildId, UniqueChars file,
-                          unsigned line, unsigned column)
+                          unsigned line)
 {
-    return wasm::DeserializeModule(bytecode, maybeCompiled, Move(buildId), Move(file), line, column);
+    return wasm::DeserializeModule(bytecode, maybeCompiled, Move(buildId), Move(file), line);
 }
 
 JS_PUBLIC_API(void)

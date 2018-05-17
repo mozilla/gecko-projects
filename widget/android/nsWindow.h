@@ -166,7 +166,7 @@ private:
 
         NS_FORWARD_NSIANDROIDEVENTDISPATCHER(mEventDispatcher->)
 
-        mozilla::java::GeckoBundle::GlobalRef mSettings;
+        mozilla::java::GeckoBundle::GlobalRef mInitData;
     };
 
     RefPtr<AndroidView> mAndroidView;
@@ -341,7 +341,7 @@ protected:
     static void LogWindow(nsWindow *win, int index, int indent);
 
 private:
-    void CreateLayerManager(int aCompositorWidth, int aCompositorHeight);
+    void CreateLayerManager();
     void RedrawAll();
 
     mozilla::layers::LayersId GetRootLayerId() const;

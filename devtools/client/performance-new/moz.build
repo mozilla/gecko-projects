@@ -5,9 +5,11 @@
 
 DIRS += [
     'components',
+    'store',
 ]
 
 DevToolsModules(
+    'browser.js',
     'panel.js',
     'utils.js',
 )

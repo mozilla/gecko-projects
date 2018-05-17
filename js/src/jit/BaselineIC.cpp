@@ -1825,7 +1825,7 @@ GetTemplateObjectForNative(JSContext* cx, HandleFunction target, const CallArgs&
             ObjectGroup* group = ObjectGroup::callingAllocationSiteGroup(cx, JSProto_Array);
             if (!group)
                 return false;
-            if (group->maybePreliminaryObjects()) {
+            if (group->maybePreliminaryObjectsDontCheckGeneration()) {
                 *skipAttach = true;
                 return true;
             }
@@ -1853,7 +1853,7 @@ GetTemplateObjectForNative(JSContext* cx, HandleFunction target, const CallArgs&
         if (args.thisv().isObject()) {
             RootedObject obj(cx, &args.thisv().toObject());
             if (!obj->isSingleton()) {
-                if (obj->group()->maybePreliminaryObjects()) {
+                if (obj->group()->maybePreliminaryObjectsDontCheckGeneration()) {
                     *skipAttach = true;
                     return true;
                 }
@@ -1869,7 +1869,7 @@ GetTemplateObjectForNative(JSContext* cx, HandleFunction target, const CallArgs&
         ObjectGroup* group = ObjectGroup::callingAllocationSiteGroup(cx, JSProto_Array);
         if (!group)
             return false;
-        if (group->maybePreliminaryObjects()) {
+        if (group->maybePreliminaryObjectsDontCheckGeneration()) {
             *skipAttach = true;
             return true;
         }
@@ -2095,7 +2095,8 @@ TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub, HandleScript script, jsb
                 if (!group)
                     return false;
 
-                if (group->newScript() && !group->newScript()->analyzed()) {
+                AutoSweepObjectGroup sweep(group);
+                if (group->newScript(sweep) && !group->newScript(sweep)->analyzed()) {
                     JitSpew(JitSpew_BaselineIC, "  Function newScript has not been analyzed");
 
                     // This is temporary until the analysis is perfomed, so
@@ -2191,7 +2192,8 @@ TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub, HandleScript script, jsb
                 *handled = true;
                 return true;
             }
-            MOZ_ASSERT_IF(templateObject, !templateObject->group()->maybePreliminaryObjects());
+            MOZ_ASSERT_IF(templateObject,
+                          !templateObject->group()->maybePreliminaryObjectsDontCheckGeneration());
         }
 
         bool ignoresReturnValue = op == JSOP_CALL_IGNORES_RV &&
@@ -3209,7 +3211,8 @@ ICCall_ConstStringSplit::Compiler::generateStubCode(MacroAssembler& masm)
         masm.loadValue(sepAddr, sepVal);
         masm.branchTestString(Assembler::NotEqual, sepVal, &failureRestoreArgc);
 
-        Register sep = masm.extractString(sepVal, ExtractTemp0);
+        Register sep = sepVal.scratchReg();
+        masm.unboxString(sepVal, sep);
         masm.branchPtr(Assembler::NotEqual, Address(ICStubReg, offsetOfExpectedSep()),
                        sep, &failureRestoreArgc);
         regs.add(sepVal);
@@ -3224,7 +3227,8 @@ ICCall_ConstStringSplit::Compiler::generateStubCode(MacroAssembler& masm)
         masm.loadValue(strAddr, strVal);
         masm.branchTestString(Assembler::NotEqual, strVal, &failureRestoreArgc);
 
-        Register str = masm.extractString(strVal, ExtractTemp0);
+        Register str = strVal.scratchReg();
+        masm.unboxString(strVal, str);
         masm.branchPtr(Assembler::NotEqual, Address(ICStubReg, offsetOfExpectedStr()),
                        str, &failureRestoreArgc);
         regs.add(strVal);

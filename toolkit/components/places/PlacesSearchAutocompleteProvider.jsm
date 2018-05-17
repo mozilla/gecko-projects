@@ -121,8 +121,8 @@ const SearchAutocompleteProviderInternal = {
                                                  userContextId);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 };
 
 function SearchSuggestionControllerWrapper(engine, searchToken,
@@ -231,8 +231,10 @@ var PlacesSearchAutocompleteProvider = Object.freeze({
 
     // Match at the beginning for now.  In the future, an "options" argument may
     // allow the matching behavior to be tuned.
-    return SearchAutocompleteProviderInternal.priorityMatches
-                                             .find(m => m.token.startsWith(searchToken));
+    return SearchAutocompleteProviderInternal.priorityMatches.find(m => {
+      return m.token.startsWith(searchToken) ||
+             m.token.startsWith("www." + searchToken);
+    });
   },
 
   /**

@@ -3,7 +3,6 @@ job-defaults:
     max-run-time: 5400
     mozharness:
         script: web_platform_tests.py
-        no-read-buildbot-config: true
         config:
             by-test-platform:
                 windows.*:
@@ -32,10 +31,7 @@ web-platform-tests:
         by-test-platform:
             linux32/debug: both
             default: true
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
-            default: built-projects
+    run-on-projects: built-projects
     mozharness:
         chunked: true
         extra-options:
@@ -82,10 +78,7 @@ web-platform-tests-reftests:
         by-test-platform:
             linux32/debug: both
             default: true
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
-            default: built-projects
+    run-on-projects: built-projects
     mozharness:
         extra-options:
             - --test-type=reftest
@@ -122,10 +115,7 @@ web-platform-tests-wdspec:
     mozharness:
         extra-options:
             - --test-type=wdspec
-    run-on-projects:
-        by-test-platform:
-            .*-qr/.*: ['trunk', 'try']  # exclude beta and project branches
-            default: built-projects
+    run-on-projects: built-projects
 
 web-platform-tests-wdspec-headless:
     description: "Web platform webdriver-spec headless run"
@@ -163,3 +153,22 @@ test-verify-wpt:
     mozharness:
         extra-options:
             - --verify
+
+test-coverage-wpt:
+    description: "Per web-platform test coverage"
+    suite: test-coverage-wpt
+    treeherder-symbol: TCw
+    max-run-time: 10800
+    run-on-projects:
+        by-test-platform:
+            # only run on mozilla-central and try.
+            linux64-ccov/.*: ['mozilla-central', 'try']
+            windows10-64-ccov/debug: ['mozilla-central', 'try']
+            default: []
+    tier:
+        by-test-platform:
+            windows10-64-asan.*: 3
+            default: 2
+    mozharness:
+        extra-options:
+            - --per-test-coverage

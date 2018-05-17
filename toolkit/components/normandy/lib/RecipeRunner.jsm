@@ -13,12 +13,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "timerManager",
                                    "nsIUpdateTimerManager");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  Preferences: "resource://gre/modules/Preferences.jsm",
   Storage: "resource://normandy/lib/Storage.jsm",
-  NormandyDriver: "resource://normandy/lib/NormandyDriver.jsm",
   FilterExpressions: "resource://normandy/lib/FilterExpressions.jsm",
   NormandyApi: "resource://normandy/lib/NormandyApi.jsm",
-  SandboxManager: "resource://normandy/lib/SandboxManager.jsm",
   ClientEnvironment: "resource://normandy/lib/ClientEnvironment.jsm",
   CleanupManager: "resource://normandy/lib/CleanupManager.jsm",
   AddonStudies: "resource://normandy/lib/AddonStudies.jsm",
@@ -206,6 +203,11 @@ var RecipeRunner = {
     let recipes;
     try {
       recipes = await NormandyApi.fetchRecipes({enabled: true});
+      log.debug(
+        `Fetched ${recipes.length} recipes from the server: ` +
+        recipes.map(r => r.name).join(", ")
+      );
+
     } catch (e) {
       const apiUrl = Services.prefs.getCharPref(API_URL_PREF);
       log.error(`Could not fetch recipes from ${apiUrl}: "${e}"`);
@@ -237,7 +239,7 @@ var RecipeRunner = {
       log.debug("No recipes to execute");
     } else {
       for (const recipe of recipesToRun) {
-        actions.runRecipe(recipe);
+        await actions.runRecipe(recipe);
       }
     }
 

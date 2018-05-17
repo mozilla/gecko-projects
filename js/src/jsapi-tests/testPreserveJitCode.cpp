@@ -10,7 +10,7 @@
 using namespace JS;
 
 static void
-ScriptCallback(JSRuntime* rt, void* data, JSScript* script)
+ScriptCallback(JSRuntime* rt, void* data, JSScript* script, const JS::AutoRequireNoGC& nogc)
 {
     unsigned& count = *static_cast<unsigned*>(data);
     if (script->hasIonScript())
@@ -41,7 +41,7 @@ testPreserveJitCode(bool preserveJitCode, unsigned remainingIonScripts)
 
     RootedObject global(cx, createTestGlobal(preserveJitCode));
     CHECK(global);
-    JSAutoCompartment ac(cx, global);
+    JSAutoRealm ar(cx, global);
 
     // The Ion JIT may be unavailable due to --disable-ion or lack of support
     // for this platform.

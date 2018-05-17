@@ -17,9 +17,9 @@ import android.view.WindowManager;
 
 import java.util.Locale;
 
+import org.mozilla.geckoview.GeckoResponse;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
-import org.mozilla.geckoview.GeckoSession.Response;
 import org.mozilla.geckoview.GeckoSession.TrackingProtectionDelegate;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.GeckoRuntime;
@@ -67,7 +67,12 @@ public class GeckoViewActivity extends Activity {
             if (extras != null) {
                 runtimeSettingsBuilder.extras(extras);
             }
-            runtimeSettingsBuilder.useContentProcessHint(useMultiprocess);
+
+            runtimeSettingsBuilder
+                    .useContentProcessHint(useMultiprocess)
+                    .nativeCrashReportingEnabled(true)
+                    .javaCrashReportingEnabled(true);
+
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
         }
 
@@ -138,12 +143,8 @@ public class GeckoViewActivity extends Activity {
     }
 
     private void loadSettings(final Intent intent) {
-        final GeckoSessionSettings settings = mGeckoSession.getSettings();
-        settings.setBoolean(
-            GeckoSessionSettings.USE_REMOTE_DEBUGGER,
+        sGeckoRuntime.getSettings().setRemoteDebuggingEnabled(
             intent.getBooleanExtra(USE_REMOTE_DEBUGGER_EXTRA, false));
-
-        Log.i(LOGTAG, "Load with settings " + settings);
     }
 
     @Override
@@ -364,13 +365,15 @@ public class GeckoViewActivity extends Activity {
 
         @Override
         public void onLoadRequest(final GeckoSession session, final String uri,
-                                  final int target, Response<Boolean> response) {
-            Log.d(LOGTAG, "onLoadRequest=" + uri + " where=" + target);
+                                  final int target, final int flags,
+                                  GeckoResponse<Boolean> response) {
+            Log.d(LOGTAG, "onLoadRequest=" + uri + " where=" + target +
+                  " flags=" + flags);
             response.respond(false);
         }
 
         @Override
-        public void onNewSession(final GeckoSession session, final String uri, Response<GeckoSession> response) {
+        public void onNewSession(final GeckoSession session, final String uri, GeckoResponse<GeckoSession> response) {
             response.respond(null);
         }
     }

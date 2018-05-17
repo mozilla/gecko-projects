@@ -13,8 +13,8 @@ ChromeUtils.defineModuleGetter(this, "NetUtil",
 function MainProcessSingleton() {}
 MainProcessSingleton.prototype = {
   classID: Components.ID("{0636a680-45cb-11e4-916c-0800200c9a66}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver,
-                                         Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver,
+                                          Ci.nsISupportsWeakReference]),
 
   // Called when a webpage calls window.external.AddSearchProvider
   addSearchEngine({ target: browser, data: { pageURL, engineURL } }) {
@@ -65,6 +65,7 @@ MainProcessSingleton.prototype = {
     switch (topic) {
     case "app-startup": {
       Services.obs.addObserver(this, "xpcom-shutdown");
+      Services.obs.addObserver(this, "document-element-inserted");
 
       // Load this script early so that console.* is initialized
       // before other frame scripts.
@@ -75,8 +76,26 @@ MainProcessSingleton.prototype = {
       break;
     }
 
+    case "document-element-inserted":
+      // Set up Custom Elements for XUL windows before anything else happens
+      // in the document. Anything loaded here should be considered part of
+      // core XUL functionality. Any window-specific elements can be registered
+      // via <script> tags at the top of individual documents.
+      const doc = subject;
+      if (doc.nodePrincipal.isSystemPrincipal &&
+          doc.contentType == "application/vnd.mozilla.xul+xml") {
+        for (let script of [
+          "chrome://global/content/elements/stringbundle.js",
+          "chrome://global/content/elements/general.js",
+        ]) {
+          Services.scriptloader.loadSubScript(script, doc.ownerGlobal);
+        }
+      }
+      break;
+
     case "xpcom-shutdown":
       Services.mm.removeMessageListener("Search:AddEngine", this.addSearchEngine);
+      Services.obs.removeObserver(this, "document-element-inserted");
       break;
     }
   },

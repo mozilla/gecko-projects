@@ -231,21 +231,6 @@ enum class StyleOrient : uint8_t {
   Vertical,
 };
 
-
-// See nsStyleColor
-#define NS_STYLE_COLOR_INHERIT_FROM_BODY  2  /* Can't come from CSS directly */
-
-// See nsStyleColor
-#define NS_COLOR_CURRENTCOLOR                   -1
-#define NS_COLOR_MOZ_DEFAULT_COLOR              -2
-#define NS_COLOR_MOZ_DEFAULT_BACKGROUND_COLOR   -3
-#define NS_COLOR_MOZ_HYPERLINKTEXT              -4
-#define NS_COLOR_MOZ_VISITEDHYPERLINKTEXT       -5
-#define NS_COLOR_MOZ_ACTIVEHYPERLINKTEXT        -6
-// Only valid as paints in SVG glyphs
-#define NS_COLOR_CONTEXT_FILL                   -7
-#define NS_COLOR_CONTEXT_STROKE                 -8
-
 // See nsStyleDisplay
 #define NS_STYLE_WILL_CHANGE_STACKING_CONTEXT   (1<<0)
 #define NS_STYLE_WILL_CHANGE_TRANSFORM          (1<<1)
@@ -254,8 +239,8 @@ enum class StyleOrient : uint8_t {
 #define NS_STYLE_WILL_CHANGE_FIXPOS_CB          (1<<4)
 #define NS_STYLE_WILL_CHANGE_ABSPOS_CB          (1<<5)
 
-// See AnimationEffectReadOnly.webidl
-// and mozilla/dom/AnimationEffectReadOnlyBinding.h
+// See AnimationEffect.webidl
+// and mozilla/dom/AnimationEffectBinding.h
 namespace dom {
 enum class PlaybackDirection : uint8_t;
 enum class FillMode : uint8_t;
@@ -269,9 +254,11 @@ enum class FillMode : uint8_t;
 #define NS_STYLE_ANIMATION_PLAY_STATE_PAUSED      1
 
 // See nsStyleImageLayers
-#define NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL        0
-#define NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED         1
-#define NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL         2
+enum class StyleImageLayerAttachment : uint8_t {
+    Scroll,
+    Fixed,
+    Local
+};
 
 // A magic value that we use for our "pretend that background-clip is
 // 'padding' when we have a solid border" optimization.  This isn't
@@ -589,18 +576,6 @@ enum class StyleDisplay : uint8_t {
 #define NS_STYLE_FONT_SIZE_LARGER               8
 #define NS_STYLE_FONT_SIZE_SMALLER              9
 #define NS_STYLE_FONT_SIZE_NO_KEYWORD          10 // Used by Servo to track the "no keyword" case
-
-// See nsStyleFont
-// We should eventually stop using the NS_STYLE_* variants here.
-#define NS_STYLE_FONT_STRETCH_ULTRA_CONDENSED   NS_FONT_STRETCH_ULTRA_CONDENSED
-#define NS_STYLE_FONT_STRETCH_EXTRA_CONDENSED   NS_FONT_STRETCH_EXTRA_CONDENSED
-#define NS_STYLE_FONT_STRETCH_CONDENSED         NS_FONT_STRETCH_CONDENSED
-#define NS_STYLE_FONT_STRETCH_SEMI_CONDENSED    NS_FONT_STRETCH_SEMI_CONDENSED
-#define NS_STYLE_FONT_STRETCH_NORMAL            NS_FONT_STRETCH_NORMAL
-#define NS_STYLE_FONT_STRETCH_SEMI_EXPANDED     NS_FONT_STRETCH_SEMI_EXPANDED
-#define NS_STYLE_FONT_STRETCH_EXPANDED          NS_FONT_STRETCH_EXPANDED
-#define NS_STYLE_FONT_STRETCH_EXTRA_EXPANDED    NS_FONT_STRETCH_EXTRA_EXPANDED
-#define NS_STYLE_FONT_STRETCH_ULTRA_EXPANDED    NS_FONT_STRETCH_ULTRA_EXPANDED
 
 // See nsStyleFont - system fonts
 #define NS_STYLE_FONT_CAPTION                   1   // css2

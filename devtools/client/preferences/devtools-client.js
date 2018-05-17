@@ -29,6 +29,7 @@ pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
 pref("devtools.toolbox.splitconsoleEnabled", false);
 pref("devtools.toolbox.splitconsoleHeight", 100);
+pref("devtools.toolbox.tabsOrder", "");
 
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);
@@ -56,6 +57,12 @@ pref("devtools.inspector.three-pane-toggle", false);
 #endif
 // Enable the 3 pane mode in the inspector
 pref("devtools.inspector.three-pane-enabled", false);
+// Show the 3 pane onboarding tooltip in the inspector
+#if defined(NIGHTLY_BUILD)
+pref("devtools.inspector.show-three-pane-tooltip", true);
+#else
+pref("devtools.inspector.show-three-pane-tooltip", false);
+#endif
 // Collapse pseudo-elements by default in the rule-view
 pref("devtools.inspector.show_pseudo_elements", false);
 // The default size for image preview tooltips in the rule-view/computed-view/markup-view
@@ -68,10 +75,6 @@ pref("devtools.inspector.showAllAnonymousContent", false);
 pref("devtools.inspector.flexboxHighlighter.enabled", false);
 // Enable the CSS shapes highlighter
 pref("devtools.inspector.shapesHighlighter.enabled", true);
-// Enable the Changes View
-pref("devtools.changesview.enabled", false);
-// Enable the Events View
-pref("devtools.eventsview.enabled", false);
 // Enable the Flexbox Inspector panel
 pref("devtools.flexboxinspector.enabled", false);
 // Enable the new Animation Inspector in Nightly only
@@ -82,6 +85,8 @@ pref("devtools.new-animationinspector.enabled", false);
 #endif
 // Enable the Variable Fonts editor
 pref("devtools.inspector.fonteditor.enabled", false);
+// Enable the font highlight-on-hover feature
+pref("devtools.inspector.fonthighlighter.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -163,6 +168,9 @@ pref("devtools.serviceWorkers.testing.enabled", false);
 // Enable the Network Monitor
 pref("devtools.netmonitor.enabled", true);
 
+// Enable the Application panel
+pref("devtools.application.enabled", false);
+
 // The default Network Monitor UI settings
 pref("devtools.netmonitor.panes-network-details-width", 550);
 pref("devtools.netmonitor.panes-network-details-height", 450);
@@ -237,6 +245,9 @@ pref("devtools.accessibility.enabled", false);
 
 // Web Audio Editor Inspector Width should be a preference
 pref("devtools.webaudioeditor.inspectorWidth", 300);
+
+// Experimental UI for the browser console that doesn't use a XUL wrapper doc
+pref("devtools.browserconsole.html", false);
 
 // Web console filters
 pref("devtools.webconsole.filter.error", true);

@@ -343,6 +343,12 @@ GlobalObject::resolveOffThreadConstructor(JSContext* cx,
         return false;
     }
 
+    if ((key == JSProto_Object || key == JSProto_Function || key == JSProto_Array) &&
+        !JSObject::setNewGroupUnknown(cx, placeholder->getClass(), placeholder))
+    {
+        return false;
+    }
+
     global->setPrototype(key, ObjectValue(*placeholder));
     global->setConstructor(key, MagicValue(JS_OFF_THREAD_CONSTRUCTOR));
     return true;
@@ -503,7 +509,7 @@ GlobalObject::new_(JSContext* cx, const Class* clasp, JSPrincipals* principals,
 
     Rooted<GlobalObject*> global(cx);
     {
-        AutoCompartmentUnchecked ac(cx, compartment);
+        AutoRealmUnchecked ar(cx, compartment);
         global = GlobalObject::createInternal(cx, clasp);
         if (!global)
             return nullptr;

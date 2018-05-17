@@ -6,7 +6,7 @@
 
 /*
  * Base class for all element classes; this provides an implementation
- * of DOM Core's nsIDOMElement, implements nsIContent, provides
+ * of DOM Core's Element, implements nsIContent, provides
  * utility methods for subclasses, and so forth.
  */
 
@@ -14,6 +14,7 @@
 
 #include "AnimationCommon.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/Flex.h"
@@ -26,8 +27,6 @@
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
 #include "mozilla/dom/DocumentTimeline.h"
-#include "nsIDOMNodeList.h"
-#include "nsIDOMDocument.h"
 #include "nsIContentIterator.h"
 #include "nsFlexContainerFrame.h"
 #include "nsFocusManager.h"
@@ -41,7 +40,6 @@
 #include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsUnicharUtils.h"
-#include "nsIDOMEvent.h"
 #include "nsDOMCID.h"
 #include "nsIServiceManager.h"
 #include "nsDOMCSSAttrDeclaration.h"
@@ -120,7 +118,6 @@
 
 #include "mozAutoDocUpdate.h"
 
-#include "nsCSSParser.h"
 #include "nsDOMMutationObserver.h"
 #include "nsWrapperCacheInlines.h"
 #include "xpcpublic.h"
@@ -139,8 +136,8 @@
 #include "mozilla/dom/CSSPseudoElement.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/ElementBinding.h"
-#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/VRDisplay.h"
@@ -341,15 +338,14 @@ Element::TabIndex()
 void
 Element::Focus(mozilla::ErrorResult& aError)
 {
-  nsCOMPtr<nsIDOMElement> domElement = do_QueryInterface(this);
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   // Also other browsers seem to have the hack to not re-focus (and flush) when
   // the element is already focused.
-  if (fm && domElement) {
+  if (fm) {
     if (fm->CanSkipFocus(this)) {
       fm->NeedsFlushBeforeEventHandling(this);
     } else {
-      aError = fm->SetFocus(domElement, 0);
+      aError = fm->SetFocus(this, 0);
     }
   }
 }
@@ -1252,6 +1248,10 @@ Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
 
   shadowRoot->SetIsComposedDocParticipant(IsInComposedDoc());
 
+  if (StaticPrefs::dom_webcomponents_shadowdom_report_usage()) {
+    OwnerDoc()->ReportShadowDOMUsage();
+  }
+
   /**
    * 5. Set context object’s shadow root to shadow.
    */
@@ -1538,30 +1538,30 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                     nsIContent* aBindingParent,
                     bool aCompileEventHandlers)
 {
-  NS_PRECONDITION(aParent || aDocument, "Must have document if no parent!");
-  NS_PRECONDITION((NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc()),
-                  "Must have the same owner document");
-  NS_PRECONDITION(!aParent || aDocument == aParent->GetUncomposedDoc(),
-                  "aDocument must be current doc of aParent");
-  NS_PRECONDITION(!GetUncomposedDoc(), "Already have a document.  Unbind first!");
+  MOZ_ASSERT(aParent || aDocument, "Must have document if no parent!");
+  MOZ_ASSERT((NODE_FROM(aParent, aDocument)->OwnerDoc() == OwnerDoc()),
+             "Must have the same owner document");
+  MOZ_ASSERT(!aParent || aDocument == aParent->GetUncomposedDoc(),
+             "aDocument must be current doc of aParent");
+  MOZ_ASSERT(!GetUncomposedDoc(), "Already have a document.  Unbind first!");
   // Note that as we recurse into the kids, they'll have a non-null parent.  So
   // only assert if our parent is _changing_ while we have a parent.
-  NS_PRECONDITION(!GetParent() || aParent == GetParent(),
-                  "Already have a parent.  Unbind first!");
-  NS_PRECONDITION(!GetBindingParent() ||
-                  aBindingParent == GetBindingParent() ||
-                  (!aBindingParent && aParent &&
-                   aParent->GetBindingParent() == GetBindingParent()),
-                  "Already have a binding parent.  Unbind first!");
-  NS_PRECONDITION(aBindingParent != this,
-                  "Content must not be its own binding parent");
-  NS_PRECONDITION(!IsRootOfNativeAnonymousSubtree() ||
-                  aBindingParent == aParent,
-                  "Native anonymous content must have its parent as its "
-                  "own binding parent");
-  NS_PRECONDITION(aBindingParent || !aParent ||
-                  aBindingParent == aParent->GetBindingParent(),
-                  "We should be passed the right binding parent");
+  MOZ_ASSERT(!GetParent() || aParent == GetParent(),
+             "Already have a parent.  Unbind first!");
+  MOZ_ASSERT(!GetBindingParent() ||
+             aBindingParent == GetBindingParent() ||
+             (!aBindingParent && aParent &&
+              aParent->GetBindingParent() == GetBindingParent()),
+             "Already have a binding parent.  Unbind first!");
+  MOZ_ASSERT(aBindingParent != this,
+             "Content must not be its own binding parent");
+  MOZ_ASSERT(!IsRootOfNativeAnonymousSubtree() ||
+             aBindingParent == aParent,
+             "Native anonymous content must have its parent as its "
+             "own binding parent");
+  MOZ_ASSERT(aBindingParent || !aParent ||
+             aBindingParent == aParent->GetBindingParent(),
+             "We should be passed the right binding parent");
 
 #ifdef MOZ_XUL
   // First set the binding parent
@@ -1845,7 +1845,7 @@ RemoveFromBindingManagerRunnable::Run()
 void
 Element::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  NS_PRECONDITION(aDeep || (!GetUncomposedDoc() && !GetBindingParent()),
+  MOZ_ASSERT(aDeep || (!GetUncomposedDoc() && !GetBindingParent()),
                   "Shallow unbind won't clear document and binding parent on "
                   "kids!");
 
@@ -2222,9 +2222,9 @@ Element::DispatchEvent(nsPresContext* aPresContext,
                        bool aFullDispatch,
                        nsEventStatus* aStatus)
 {
-  NS_PRECONDITION(aTarget, "Must have target");
-  NS_PRECONDITION(aEvent, "Must have source event");
-  NS_PRECONDITION(aStatus, "Null out param?");
+  MOZ_ASSERT(aTarget, "Must have target");
+  MOZ_ASSERT(aEvent, "Must have source event");
+  MOZ_ASSERT(aStatus, "Null out param?");
 
   if (!aPresContext) {
     return NS_OK;
@@ -2251,9 +2251,9 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
                             const EventFlags* aExtraEventFlags,
                             nsEventStatus* aStatus)
 {
-  NS_PRECONDITION(aTarget, "Must have target");
-  NS_PRECONDITION(aSourceEvent, "Must have source event");
-  NS_PRECONDITION(aStatus, "Null out param?");
+  MOZ_ASSERT(aTarget, "Must have target");
+  MOZ_ASSERT(aSourceEvent, "Must have source event");
+  MOZ_ASSERT(aStatus, "Null out param?");
 
   WidgetMouseEvent event(aSourceEvent->IsTrusted(), eMouseClick,
                          aSourceEvent->mWidget, WidgetMouseEvent::eReal);
@@ -2326,7 +2326,7 @@ Element::SetEventHandler(nsAtom* aEventName,
     return NS_OK;
   }
 
-  NS_PRECONDITION(aEventName, "Must have event name!");
+  MOZ_ASSERT(aEventName, "Must have event name!");
   bool defer = true;
   EventListenerManager* manager =
     GetEventListenerManagerForAttr(aEventName, &defer);
@@ -2455,7 +2455,7 @@ Element::SetSingleClassFromParser(nsAtom* aSingleClassName)
   nsAttrValue value(aSingleClassName);
 
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, false);
+  mozAutoDocUpdate updateBatch(document, false);
 
   // In principle, BeforeSetAttr should be called here if a node type
   // existed that wanted to do something special for class, but there
@@ -2525,7 +2525,7 @@ Element::SetAttr(int32_t aNamespaceID, nsAtom* aName,
   // Hold a script blocker while calling ParseAttribute since that can call
   // out to id-observers
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
 
   nsresult rv = BeforeSetAttr(aNamespaceID, aName, &value, aNotify);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2583,7 +2583,7 @@ Element::SetParsedAttr(int32_t aNamespaceID, nsAtom* aName,
   PreIdMaybeChange(aNamespaceID, aName, &value);
 
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
   return SetAttrAndNotify(aNamespaceID, aName, aPrefix,
                           oldValueSet ? &oldValue : nullptr,
                           aParsedValue, nullptr, modType, hasListeners, aNotify,
@@ -2915,7 +2915,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
   }
 
   nsIDocument *document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
 
   if (aNotify) {
     nsNodeUtils::AttributeWillChange(this, aNameSpaceID, aName,
@@ -3250,7 +3250,7 @@ Element::GetEventTargetParentForLinks(EventChainPreVisitor& aVisitor)
       nsAutoString target;
       GetLinkTarget(target);
       nsContentUtils::TriggerLink(this, aVisitor.mPresContext, absURI, target,
-                                  false, true, true);
+                                  /* click */ false, /* isTrusted */ true);
       // Make sure any ancestor links don't also TriggerLink
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
     }
@@ -3309,9 +3309,9 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
           nsIFocusManager* fm = nsFocusManager::GetFocusManager();
           if (fm) {
             aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
-            nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(this);
-            fm->SetFocus(elem, nsIFocusManager::FLAG_BYMOUSE |
-                               nsIFocusManager::FLAG_NOSCROLL);
+            RefPtr<Element> kungFuDeathGrip(this);
+            fm->SetFocus(kungFuDeathGrip, nsIFocusManager::FLAG_BYMOUSE |
+                                          nsIFocusManager::FLAG_NOSCROLL);
           }
 
           EventStateManager::SetActiveManager(
@@ -3362,7 +3362,7 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
         const InternalUIEvent* activeEvent = aVisitor.mEvent->AsUIEvent();
         MOZ_ASSERT(activeEvent);
         nsContentUtils::TriggerLink(this, aVisitor.mPresContext, absURI, target,
-                                    true, true, activeEvent->IsTrustable());
+                                    /* click */ true, activeEvent->IsTrustable());
         aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
       }
     }
@@ -3684,11 +3684,11 @@ Element::Animate(const Nullable<ElementOrCSSPseudoElement>& aTarget,
   }
 
   // Animation constructor follows the standard Xray calling convention and
-  // needs to be called in the target element's compartment.
-  Maybe<JSAutoCompartment> ac;
+  // needs to be called in the target element's realm.
+  Maybe<JSAutoRealm> ar;
   if (js::GetContextCompartment(aContext) !=
       js::GetObjectCompartment(ownerGlobal->GetGlobalJSObject())) {
-    ac.emplace(aContext, ownerGlobal->GetGlobalJSObject());
+    ar.emplace(aContext, ownerGlobal->GetGlobalJSObject());
   }
 
   AnimationTimeline* timeline = referenceElement->OwnerDoc()->Timeline();
@@ -3780,7 +3780,7 @@ Element::GetAnimationsUnsorted(Element* aElement,
     return;
   }
 
-  for (KeyframeEffectReadOnly* effect : *effects) {
+  for (KeyframeEffect* effect : *effects) {
     MOZ_ASSERT(effect && effect->GetAnimation(),
                "Only effects associated with an animation should be "
                "added to an element's effect set");
@@ -3869,15 +3869,11 @@ Element::SetOuterHTML(const nsAString& aOuterHTML, ErrorResult& aError)
     context = NS_NewHTMLBodyElement(info.forget(), FROM_PARSER_FRAGMENT);
   }
 
-  nsCOMPtr<nsIDOMDocumentFragment> df;
-  aError = nsContentUtils::CreateContextualFragment(context,
-                                                    aOuterHTML,
-                                                    true,
-                                                    getter_AddRefs(df));
+  RefPtr<DocumentFragment> fragment =
+    nsContentUtils::CreateContextualFragment(context, aOuterHTML, true, aError);
   if (aError.Failed()) {
     return;
   }
-  nsCOMPtr<nsINode> fragment = do_QueryInterface(df);
   parent->ReplaceChild(*fragment, *this, aError);
 }
 
@@ -3920,7 +3916,7 @@ Element::InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
   nsIDocument* doc = OwnerDoc();
 
   // Needed when insertAdjacentHTML is used in combination with contenteditable
-  mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, true);
+  mozAutoDocUpdate updateBatch(doc, true);
   nsAutoScriptLoaderDisabler sld(doc);
 
   // Batch possible DOMSubtreeModified events.
@@ -3954,16 +3950,11 @@ Element::InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
   }
 
   // couldn't parse directly
-  nsCOMPtr<nsIDOMDocumentFragment> df;
-  aError = nsContentUtils::CreateContextualFragment(destination,
-                                                    aText,
-                                                    true,
-                                                    getter_AddRefs(df));
+  RefPtr<DocumentFragment> fragment =
+    nsContentUtils::CreateContextualFragment(destination, aText, true, aError);
   if (aError.Failed()) {
     return;
   }
-
-  nsCOMPtr<nsINode> fragment = do_QueryInterface(df);
 
   // Suppress assertion about node removal mutation events that can't have
   // listeners anyway, because no one has had the chance to register mutation

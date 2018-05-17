@@ -6188,8 +6188,9 @@ IonBuilder::jsop_newarray_copyonwrite()
     // with the copy on write flag set already. During the arguments usage
     // analysis the baseline compiler hasn't run yet, however, though in this
     // case the template object's type doesn't matter.
+    ObjectGroup* group = templateObject->group();
     MOZ_ASSERT_IF(info().analysisMode() != Analysis_ArgumentsUsage,
-                  templateObject->group()->hasAnyFlags(OBJECT_FLAG_COPY_ON_WRITE));
+                  group->hasAllFlagsDontCheckGeneration(OBJECT_FLAG_COPY_ON_WRITE));
 
 
     MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), templateObject);
@@ -6197,7 +6198,7 @@ IonBuilder::jsop_newarray_copyonwrite()
 
     MNewArrayCopyOnWrite* ins =
         MNewArrayCopyOnWrite::New(alloc(), constraints(), templateConst,
-                                  templateObject->group()->initialHeap(constraints()));
+                                  group->initialHeap(constraints()));
 
     current->add(ins);
     current->push(ins);
@@ -7324,7 +7325,7 @@ static size_t
 NumFixedSlots(JSObject* object)
 {
     // Note: we can't use object->numFixedSlots() here, as this will read the
-    // shape and can race with the active thread if we are building off thread.
+    // shape and can race with the main thread if we are building off thread.
     // The allocation kind and object class (which goes through the type) can
     // be read freely, however.
     gc::AllocKind kind = object->asTenured().getAllocKind();
@@ -7796,6 +7797,11 @@ IonBuilder::jsop_getelem()
         if (emitted)
             return Ok();
 
+        trackOptimizationAttempt(TrackedStrategy::GetElem_CallSiteObject);
+        MOZ_TRY(getElemTryCallSiteObject(&emitted, obj, index));
+        if (emitted)
+            return Ok();
+
         trackOptimizationAttempt(TrackedStrategy::GetElem_Dense);
         MOZ_TRY(getElemTryDense(&emitted, obj, index));
         if (emitted)
@@ -8237,6 +8243,57 @@ IonBuilder::getElemTryTypedArray(bool* emitted, MDefinition* obj, MDefinition* i
 
     // Emit typed getelem variant.
     MOZ_TRY(jsop_getelem_typed(obj, index, arrayType));
+
+    trackOptimizationSuccess();
+    *emitted = true;
+    return Ok();
+}
+
+AbortReasonOr<Ok>
+IonBuilder::getElemTryCallSiteObject(bool* emitted, MDefinition* obj, MDefinition* index)
+{
+    MOZ_ASSERT(*emitted == false);
+
+    if (!obj->isConstant() || obj->type() != MIRType::Object) {
+        trackOptimizationOutcome(TrackedOutcome::NotObject);
+        return Ok();
+    }
+
+    if (!index->isConstant() || index->type() != MIRType::Int32) {
+        trackOptimizationOutcome(TrackedOutcome::IndexType);
+        return Ok();
+    }
+
+    JSObject* cst = &obj->toConstant()->toObject();
+    if (!cst->is<ArrayObject>()) {
+        trackOptimizationOutcome(TrackedOutcome::GenericFailure);
+        return Ok();
+    }
+
+    // Technically this code would work with any kind of frozen array,
+    // in pratice it is usually a CallSiteObject.
+
+    ArrayObject* array = &cst->as<ArrayObject>();
+    if (array->lengthIsWritable() || array->hasEmptyElements() || !array->denseElementsAreFrozen()) {
+        trackOptimizationOutcome(TrackedOutcome::GenericFailure);
+        return Ok();
+    }
+
+    int32_t idx = index->toConstant()->toInt32();
+    if (idx < 0 || !array->containsDenseElement(uint32_t(idx))) {
+        trackOptimizationOutcome(TrackedOutcome::OutOfBounds);
+        return Ok();
+    }
+
+    const Value& v = array->getDenseElement(uint32_t(idx));
+    // Strings should have been atomized by the parser.
+    if (!v.isString() || !v.toString()->isAtom())
+        return Ok();
+
+    obj->setImplicitlyUsedUnchecked();
+    index->setImplicitlyUsedUnchecked();
+
+    pushConstant(v);
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -9087,9 +9144,9 @@ IonBuilder::initOrSetElemDense(TemporaryTypeSet::DoubleConversion conversion,
     bool hasExtraIndexedProperty;
     MOZ_TRY_VAR(hasExtraIndexedProperty, ElementAccessHasExtraIndexedProperty(this, obj));
 
-    bool mayBeFrozen = ElementAccessMightBeFrozen(constraints(), obj);
+    bool mayBeNonExtensible = ElementAccessMightBeNonExtensible(constraints(), obj);
 
-    if (mayBeFrozen && hasExtraIndexedProperty) {
+    if (mayBeNonExtensible && hasExtraIndexedProperty) {
         // FallibleStoreElement does not know how to deal with extra indexed
         // properties on the prototype. This case should be rare so we fall back
         // to an IC.
@@ -9142,23 +9199,23 @@ IonBuilder::initOrSetElemDense(TemporaryTypeSet::DoubleConversion conversion,
     // Use MStoreElementHole if this SETELEM has written to out-of-bounds
     // indexes in the past. Otherwise, use MStoreElement so that we can hoist
     // the initialized length and bounds check.
-    // If an object may have been frozen, no previous expectation hold and we
-    // fallback to MFallibleStoreElement.
+    // If an object may have been made non-extensible, no previous expectations
+    // hold and we fallback to MFallibleStoreElement.
     MInstruction* store;
     MStoreElementCommon* common = nullptr;
-    if (writeHole && !hasExtraIndexedProperty && !mayBeFrozen) {
+    if (writeHole && !hasExtraIndexedProperty && !mayBeNonExtensible) {
         MStoreElementHole* ins = MStoreElementHole::New(alloc(), obj, elements, id, newValue);
         store = ins;
         common = ins;
 
         current->add(ins);
-    } else if (mayBeFrozen) {
+    } else if (mayBeNonExtensible) {
         MOZ_ASSERT(!hasExtraIndexedProperty,
                    "FallibleStoreElement codegen assumes no extra indexed properties");
 
-        bool strict = IsStrictSetPC(pc);
+        bool needsHoleCheck = !packed;
         MFallibleStoreElement* ins = MFallibleStoreElement::New(alloc(), obj, elements, id,
-                                                                newValue, strict);
+                                                                newValue, needsHoleCheck);
         store = ins;
         common = ins;
 
@@ -9533,8 +9590,10 @@ IonBuilder::getDefiniteSlot(TemporaryTypeSet* types, jsid id, uint32_t* pnfixed)
         // allowable range for fixed slots, except for objects which were
         // converted from unboxed objects and have a smaller allocation size.
         size_t nfixed = NativeObject::MAX_FIXED_SLOTS;
-        if (ObjectGroup* group = key->group()->maybeOriginalUnboxedGroup())
-            nfixed = gc::GetGCKindSlots(group->unboxedLayout().getAllocKind());
+        if (ObjectGroup* group = key->group()->maybeOriginalUnboxedGroup()) {
+            AutoSweepObjectGroup sweepGroup(group);
+            nfixed = gc::GetGCKindSlots(group->unboxedLayout(sweepGroup).getAllocKind());
+        }
 
         uint32_t propertySlot = property.maybeTypes()->definiteSlot();
         if (slot == UINT32_MAX) {
@@ -9574,7 +9633,8 @@ IonBuilder::getUnboxedOffset(TemporaryTypeSet* types, jsid id, JSValueType* punb
             return UINT32_MAX;
         }
 
-        UnboxedLayout* layout = key->group()->maybeUnboxedLayout();
+        AutoSweepObjectGroup sweep(key->group());
+        UnboxedLayout* layout = key->group()->maybeUnboxedLayout(sweep);
         if (!layout) {
             trackOptimizationOutcome(TrackedOutcome::NotUnboxed);
             return UINT32_MAX;
@@ -10597,7 +10657,8 @@ IonBuilder::convertUnboxedObjects(MDefinition* obj)
         if (!key || !key->isGroup())
             continue;
 
-        if (UnboxedLayout* layout = key->group()->maybeUnboxedLayout()) {
+        AutoSweepObjectGroup sweep(key->group());
+        if (UnboxedLayout* layout = key->group()->maybeUnboxedLayout(sweep)) {
             AutoEnterOOMUnsafeRegion oomUnsafe;
             if (layout->nativeGroup() && !list.append(key->group()))
                 oomUnsafe.crash("IonBuilder::convertUnboxedObjects");
@@ -11110,7 +11171,8 @@ IonBuilder::getPropTryInlineAccess(bool* emitted, MDefinition* obj, PropertyName
 
         obj = addGroupGuard(obj, group, Bailout_ShapeGuard);
 
-        const UnboxedLayout::Property* property = group->unboxedLayout().lookup(name);
+        AutoSweepObjectGroup sweep(group);
+        const UnboxedLayout::Property* property = group->unboxedLayout(sweep).lookup(name);
         MInstruction* load = loadUnboxedProperty(obj, property->offset, property->type, barrier, types);
         current->push(load);
 
@@ -11918,7 +11980,8 @@ IonBuilder::setPropTryInlineAccess(bool* emitted, MDefinition* obj,
         if (needsPostBarrier(value))
             current->add(MPostWriteBarrier::New(alloc(), obj, value));
 
-        const UnboxedLayout::Property* property = group->unboxedLayout().lookup(name);
+        AutoSweepObjectGroup sweep(group);
+        const UnboxedLayout::Property* property = group->unboxedLayout(sweep).lookup(name);
         MInstruction* store = storeUnboxedProperty(obj, property->offset, property->type, value);
 
         current->push(value);
@@ -13544,7 +13607,7 @@ JSObject*
 IonBuilder::checkNurseryObject(JSObject* obj)
 {
     // If we try to use any nursery pointers during compilation, make sure that
-    // the active thread will cancel this compilation before performing a minor
+    // the main thread will cancel this compilation before performing a minor
     // GC. All constants used during compilation should either go through this
     // function or should come from a type set (which has a similar barrier).
     if (obj && IsInsideNursery(obj)) {
@@ -13665,4 +13728,19 @@ IonBuilder::trace(JSTracer* trc)
 
     MOZ_ASSERT(rootList_);
     rootList_->trace(trc);
+}
+
+size_t
+IonBuilder::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    // See js::jit::FreeIonBuilder.
+    // The IonBuilder and most of its contents live in the LifoAlloc we point
+    // to. Note that this is only true for background IonBuilders.
+
+    size_t result = alloc_->lifoAlloc()->sizeOfIncludingThis(mallocSizeOf);
+
+    if (backgroundCodegen_)
+        result += mallocSizeOf(backgroundCodegen_);
+
+    return result;
 }

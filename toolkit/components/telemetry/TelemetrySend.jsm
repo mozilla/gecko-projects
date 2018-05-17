@@ -25,8 +25,6 @@ ChromeUtils.import("resource://gre/modules/Services.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm", this);
 ChromeUtils.import("resource://gre/modules/Timer.jsm", this);
 
-ChromeUtils.defineModuleGetter(this, "AsyncShutdown",
-                               "resource://gre/modules/AsyncShutdown.jsm");
 ChromeUtils.defineModuleGetter(this, "TelemetryStorage",
                                "resource://gre/modules/TelemetryStorage.jsm");
 ChromeUtils.defineModuleGetter(this, "TelemetryReportingPolicy",
@@ -653,7 +651,7 @@ var TelemetrySendImpl = {
     Services.obs.addObserver(this, TOPIC_QUIT_APPLICATION_GRANTED);
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference]),
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference]),
 
   async setup(testing) {
     this._log.trace("setup");
@@ -1213,24 +1211,24 @@ var TelemetrySendImpl = {
     utf8Payload += converter.Finish();
     Telemetry.getHistogramById("TELEMETRY_STRINGIFY").add(Utils.monotonicNow() - startTime);
 
+    let payloadStream = Cc["@mozilla.org/io/string-input-stream;1"]
+                        .createInstance(Ci.nsIStringInputStream);
+    startTime = Utils.monotonicNow();
+    payloadStream.data = gzipCompressString(utf8Payload);
+
     // Check the size and drop pings which are too big.
-    const pingSizeBytes = utf8Payload.length;
-    if (pingSizeBytes > TelemetryStorage.MAXIMUM_PING_SIZE) {
-      this._log.error("_doPing - submitted ping exceeds the size limit, size: " + pingSizeBytes);
+    const compressedPingSizeBytes = payloadStream.data.length;
+    if (compressedPingSizeBytes > TelemetryStorage.MAXIMUM_PING_SIZE) {
+      this._log.error("_doPing - submitted ping exceeds the size limit, size: " + compressedPingSizeBytes);
       Telemetry.getHistogramById("TELEMETRY_PING_SIZE_EXCEEDED_SEND").add();
       Telemetry.getHistogramById("TELEMETRY_DISCARDED_SEND_PINGS_SIZE_MB")
-               .add(Math.floor(pingSizeBytes / 1024 / 1024));
+               .add(Math.floor(compressedPingSizeBytes / 1024 / 1024));
       // We don't need to call |request.abort()| as it was not sent yet.
       this._pendingPingRequests.delete(id);
 
       TelemetryHealthPing.recordDiscardedPing(ping.type);
       return TelemetryStorage.removePendingPing(id);
     }
-
-    let payloadStream = Cc["@mozilla.org/io/string-input-stream;1"]
-                        .createInstance(Ci.nsIStringInputStream);
-    startTime = Utils.monotonicNow();
-    payloadStream.data = gzipCompressString(utf8Payload);
 
     const compressedPingSizeKB = Math.floor(payloadStream.data.length / 1024);
     Telemetry.getHistogramById("TELEMETRY_COMPRESS").add(Utils.monotonicNow() - startTime);

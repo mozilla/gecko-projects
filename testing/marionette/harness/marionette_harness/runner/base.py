@@ -872,7 +872,7 @@ class BaseMarionetteTestRunner(object):
         device_info = None
         if self.marionette.instance and self.emulator:
             try:
-                device_info = self.marionette.instance.runner.device.dm.getInfo()
+                device_info = self.marionette.instance.runner.device.device.get_info()
             except Exception:
                 self.logger.warning('Could not get device info', exc_info=True)
 
@@ -892,6 +892,9 @@ class BaseMarionetteTestRunner(object):
                                 name='marionette-test',
                                 version_info=self.version_info,
                                 device_info=device_info)
+
+        if self.shuffle:
+            self.logger.info("Using shuffle seed: %d" % self.shuffle_seed)
 
         self._log_skipped_tests()
 
@@ -925,8 +928,6 @@ class BaseMarionetteTestRunner(object):
 
             for run_tests in self.mixin_run_tests:
                 run_tests(tests)
-            if self.shuffle:
-                self.logger.info("Using shuffle seed: %d" % self.shuffle_seed)
 
             self.logger.suite_end()
         except Exception:

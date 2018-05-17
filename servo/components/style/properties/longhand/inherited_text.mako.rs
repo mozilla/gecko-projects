@@ -6,13 +6,16 @@
 <% from data import Keyword %>
 <% data.new_style_struct("InheritedText", inherited=True, gecko_name="Text") %>
 
-${helpers.predefined_type("line-height",
-                          "LineHeight",
-                          "computed::LineHeight::normal()",
-                          animation_value_type="LineHeight",
-                          flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE APPLIES_TO_PLACEHOLDER",
-                          spec="https://drafts.csswg.org/css2/visudet.html#propdef-line-height",
-                          servo_restyle_damage = "reflow")}
+${helpers.predefined_type(
+    "line-height",
+    "LineHeight",
+    "computed::LineHeight::normal()",
+    animation_value_type="LineHeight",
+    flags="APPLIES_TO_FIRST_LETTER APPLIES_TO_FIRST_LINE \
+           APPLIES_TO_PLACEHOLDER GETCS_NEEDS_LAYOUT_FLUSH",
+    spec="https://drafts.csswg.org/css2/visudet.html#propdef-line-height",
+    servo_restyle_damage="reflow"
+)}
 
 // CSS Text Module Level 3
 
@@ -289,7 +292,6 @@ ${helpers.single_keyword("ruby-position", "over under",
 
 ${helpers.single_keyword("text-combine-upright", "none all",
                          products="gecko", animation_value_type="discrete",
-                         gecko_pref="layout.css.text-combine-upright.enabled",
                          spec="https://drafts.csswg.org/css-writing-modes-3/#text-combine-upright")}
 
 // SVG 1.1: Section 11 - Painting: Filling, Stroking and Marker Symbols

@@ -3,13 +3,13 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "Services",
-  "resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "Utils",
   "resource://gre/modules/accessibility/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Logger",
   "resource://gre/modules/accessibility/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Roles",
+  "resource://gre/modules/accessibility/Constants.jsm");
+ChromeUtils.defineModuleGetter(this, "States",
   "resource://gre/modules/accessibility/Constants.jsm");
 ChromeUtils.defineModuleGetter(this, "TraversalRules",
   "resource://gre/modules/accessibility/Traversal.jsm");
@@ -35,7 +35,6 @@ this.ContentControl.prototype = {
                        "AccessFu:MoveToPoint",
                        "AccessFu:AutoMove",
                        "AccessFu:Activate",
-                       "AccessFu:MoveCaret",
                        "AccessFu:MoveByGranularity",
                        "AccessFu:AndroidScroll"],
 
@@ -44,7 +43,6 @@ this.ContentControl.prototype = {
     for (let message of this.messagesOfInterest) {
       cs.addMessageListener(message, this);
     }
-    cs.addEventListener("mousemove", this);
   },
 
   stop: function cc_stop() {
@@ -52,7 +50,6 @@ this.ContentControl.prototype = {
     for (let message of this.messagesOfInterest) {
       cs.removeMessageListener(message, this);
     }
-    cs.removeEventListener("mousemove", this);
   },
 
   get document() {
@@ -106,7 +103,7 @@ this.ContentControl.prototype = {
     }
 
     this._contentScope.get().sendAsyncMessage("AccessFu:DoScroll",
-      { bounds: Utils.getBounds(position, true),
+      { bounds: Utils.getBounds(position),
         page: aMessage.json.direction === "forward" ? 1 : -1,
         horizontal: false });
   },
@@ -158,24 +155,11 @@ this.ContentControl.prototype = {
     }
   },
 
-  handleEvent: function cc_handleEvent(aEvent) {
-    if (aEvent.type === "mousemove") {
-      this.handleMoveToPoint(
-        { json: { x: aEvent.screenX, y: aEvent.screenY, rule: "Simple" } });
-    }
-    if (!Utils.getMessageManager(aEvent.target)) {
-      aEvent.preventDefault();
-    } else {
-      aEvent.target.focus();
-    }
-  },
-
   handleMoveToPoint: function cc_handleMoveToPoint(aMessage) {
     let [x, y] = [aMessage.json.x, aMessage.json.y];
     let rule = TraversalRules[aMessage.json.rule];
 
-    let dpr = this.window.devicePixelRatio;
-    this.vc.moveToPoint(rule, x * dpr, y * dpr, true);
+    this.vc.moveToPoint(rule, x, y, true);
   },
 
   handleClearCursor: function cc_handleClearCursor(aMessage) {
@@ -317,25 +301,29 @@ this.ContentControl.prototype = {
   },
 
   handleMoveByGranularity: function cc_handleMoveByGranularity(aMessage) {
-    // XXX: Add sendToChild. Right now this is only used in Android, so no need.
-    let direction = aMessage.json.direction;
-    let granularity;
+    let { direction, granularity } = aMessage.json;
+    let focusedAcc = Utils.AccService.getAccessibleFor(this.document.activeElement);
+    if (focusedAcc && Utils.getState(focusedAcc).contains(States.EDITABLE)) {
+      this.moveCaret(focusedAcc, direction, granularity);
+      return;
+    }
 
-    switch (aMessage.json.granularity) {
+    let pivotGranularity;
+    switch (granularity) {
       case MOVEMENT_GRANULARITY_CHARACTER:
-        granularity = Ci.nsIAccessiblePivot.CHAR_BOUNDARY;
+        pivotGranularity = Ci.nsIAccessiblePivot.CHAR_BOUNDARY;
         break;
       case MOVEMENT_GRANULARITY_WORD:
-        granularity = Ci.nsIAccessiblePivot.WORD_BOUNDARY;
+        pivotGranularity = Ci.nsIAccessiblePivot.WORD_BOUNDARY;
         break;
       default:
         return;
     }
 
     if (direction === "Previous") {
-      this.vc.movePreviousByText(granularity);
+      this.vc.movePreviousByText(pivotGranularity);
     } else if (direction === "Next") {
-      this.vc.moveNextByText(granularity);
+      this.vc.moveNextByText(pivotGranularity);
     }
   },
 
@@ -348,16 +336,13 @@ this.ContentControl.prototype = {
     }
   },
 
-  handleMoveCaret: function cc_handleMoveCaret(aMessage) {
-    let direction = aMessage.json.direction;
-    let granularity = aMessage.json.granularity;
-    let accessible = this.vc.position;
+  moveCaret: function cc_moveCaret(accessible, direction, granularity) {
     let accText = accessible.QueryInterface(Ci.nsIAccessibleText);
     let oldOffset = accText.caretOffset;
     let text = accText.getText(0, accText.characterCount);
 
     let start = {}, end = {};
-    if (direction === "Previous" && !aMessage.json.atStart) {
+    if (direction === "Previous" && oldOffset > 0) {
       switch (granularity) {
         case MOVEMENT_GRANULARITY_CHARACTER:
           accText.caretOffset--;
@@ -373,7 +358,7 @@ this.ContentControl.prototype = {
           accText.caretOffset = startOfParagraph !== -1 ? startOfParagraph : 0;
           break;
       }
-    } else if (direction === "Next" && !aMessage.json.atEnd) {
+    } else if (direction === "Next" && oldOffset < accText.characterCount) {
       switch (granularity) {
         case MOVEMENT_GRANULARITY_CHARACTER:
           accText.caretOffset++;
@@ -519,7 +504,7 @@ this.ContentControl.prototype = {
     this._autoMove = 0;
   },
 
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupportsWeakReference,
+  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference,
     Ci.nsIMessageListener
   ])
 };

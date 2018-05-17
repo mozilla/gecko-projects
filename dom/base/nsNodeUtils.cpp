@@ -30,7 +30,7 @@
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLMediaElement.h"
-#include "mozilla/dom/KeyframeEffectReadOnly.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsObjectLoadingContent.h"
 #include "nsDOMMutationObserver.h"
@@ -210,9 +210,8 @@ void
 nsNodeUtils::ContentInserted(nsINode* aContainer,
                              nsIContent* aChild)
 {
-  NS_PRECONDITION(aContainer->IsContent() ||
-                  aContainer->IsNodeOfType(nsINode::eDOCUMENT),
-                  "container must be an nsIContent or an nsIDocument");
+  MOZ_ASSERT(aContainer->IsContent() || aContainer->IsDocument(),
+             "container must be an nsIContent or an nsIDocument");
   nsIDocument* doc = aContainer->OwnerDoc();
   IMPL_MUTATION_NOTIFICATION(ContentInserted, aContainer, (aChild),
                              IsRemoveNotification::No);
@@ -223,9 +222,8 @@ nsNodeUtils::ContentRemoved(nsINode* aContainer,
                             nsIContent* aChild,
                             nsIContent* aPreviousSibling)
 {
-  NS_PRECONDITION(aContainer->IsContent() ||
-                  aContainer->IsNodeOfType(nsINode::eDOCUMENT),
-                  "container must be an nsIContent or an nsIDocument");
+  MOZ_ASSERT(aContainer->IsContent() || aContainer->IsDocument(),
+             "container must be an nsIContent or an nsIDocument");
   nsIDocument* doc = aContainer->OwnerDoc();
   MOZ_ASSERT(aChild->GetParentNode() == aContainer,
              "We expect the parent link to be still around at this point");
@@ -237,7 +235,7 @@ nsNodeUtils::ContentRemoved(nsINode* aContainer,
 Maybe<NonOwningAnimationTarget>
 nsNodeUtils::GetTargetForAnimation(const Animation* aAnimation)
 {
-  AnimationEffectReadOnly* effect = aAnimation->GetEffect();
+  AnimationEffect* effect = aAnimation->GetEffect();
   if (!effect || !effect->AsKeyframeEffect()) {
     return Nothing();
   }
@@ -309,11 +307,11 @@ nsNodeUtils::LastRelease(nsINode* aNode)
 
   // Kill properties first since that may run external code, so we want to
   // be in as complete state as possible at that time.
-  if (aNode->IsNodeOfType(nsINode::eDOCUMENT)) {
+  if (aNode->IsDocument()) {
     // Delete all properties before tearing down the document. Some of the
     // properties are bound to nsINode objects and the destructor functions of
     // the properties may want to use the owner document of the nsINode.
-    static_cast<nsIDocument*>(aNode)->DeleteAllProperties();
+    aNode->AsDocument()->DeleteAllProperties();
   }
   else {
     if (aNode->HasProperties()) {
@@ -385,11 +383,10 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
                            nsCOMArray<nsINode> *aNodesWithProperties,
                            nsINode* aParent, ErrorResult& aError)
 {
-  NS_PRECONDITION((!aClone && aNewNodeInfoManager) || !aReparentScope,
-                  "If cloning or not getting a new nodeinfo we shouldn't "
-                  "rewrap");
-  NS_PRECONDITION(!aParent || aNode->IsContent(),
-                  "Can't insert document or attribute nodes into a parent");
+  MOZ_ASSERT((!aClone && aNewNodeInfoManager) || !aReparentScope,
+              "If cloning or not getting a new nodeinfo we shouldn't rewrap");
+  MOZ_ASSERT(!aParent || aNode->IsContent(),
+             "Can't insert document or attribute nodes into a parent");
 
   // First deal with aNode and walk its attributes (and their children). Then,
   // if aDeep is true, deal with aNode's children (and recurse into their
@@ -489,7 +486,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
         return nullptr;
       }
     }
-    else if (aDeep && clone->IsNodeOfType(nsINode::eDOCUMENT)) {
+    else if (aDeep && clone->IsDocument()) {
       // After cloning the document itself, we want to clone the children into
       // the cloned document (somewhat like cloning and importing them into the
       // cloned document).
@@ -587,7 +584,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
       JS::Rooted<JSObject*> wrapper(cx);
       if ((wrapper = aNode->GetWrapper())) {
         MOZ_ASSERT(IsDOMObject(wrapper));
-        JSAutoCompartment ac(cx, wrapper);
+        JSAutoRealm ar(cx, wrapper);
         ReparentWrapper(cx, wrapper, aError);
         if (aError.Failed()) {
           if (wasRegistered) {
@@ -615,7 +612,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
     }
   }
 
-  if (aDeep && (!aClone || !aNode->IsNodeOfType(nsINode::eATTRIBUTE))) {
+  if (aDeep && (!aClone || !aNode->IsAttr())) {
     // aNode's children.
     for (nsIContent* cloneChild = aNode->GetFirstChild();
          cloneChild;
@@ -715,4 +712,3 @@ nsNodeUtils::GetFirstChildOfTemplateOrNode(nsINode* aNode)
 
   return aNode->GetFirstChild();
 }
-

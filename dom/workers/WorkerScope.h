@@ -134,11 +134,11 @@ public:
   ClearTimeout(int32_t aHandle);
   int32_t
   SetInterval(JSContext* aCx, Function& aHandler,
-              const Optional<int32_t>& aTimeout,
+              const int32_t aTimeout,
               const Sequence<JS::Value>& aArguments, ErrorResult& aRv);
   int32_t
   SetInterval(JSContext* aCx, const nsAString& aHandler,
-              const Optional<int32_t>& aTimeout,
+              const int32_t aTimeout,
               const Sequence<JS::Value>& /* unused */, ErrorResult& aRv);
   void
   ClearInterval(int32_t aHandle);
@@ -461,7 +461,7 @@ private:
 inline nsISupports*
 ToSupports(mozilla::dom::WorkerGlobalScope* aScope)
 {
-  return static_cast<nsIDOMEventTarget*>(aScope);
+  return static_cast<mozilla::dom::EventTarget*>(aScope);
 }
 
 #endif /* mozilla_dom_workerscope_h__ */

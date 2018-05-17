@@ -183,16 +183,16 @@ const ADDONS = {
   },
 
   "theme1@tests.mozilla.org": {
-    "install.rdf": {
-      id: "theme1@tests.mozilla.org",
-      version: "1.0",
+    manifest: {
+      manifest_version: 2,
       name: "Theme 1",
-      internalName: "classic/1.0",
-      targetApplications: [{
-        id: "xpcshell@tests.mozilla.org",
-        minVersion: "2",
-        maxVersion: "2"
-      }]
+      version: "1.0",
+      theme: { images: { headerURL: "example.png" } },
+      applications: {
+        gecko: {
+          id: "theme1@tests.mozilla.org",
+        },
+      },
     },
     desiredValues: {
       isActive: false,
@@ -284,7 +284,7 @@ add_task(async function test_after_schema_version_change() {
   // the schema
   await changeXPIDBVersion(100);
 
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   info("Test add-on state after schema version change");
   let addons = await getAddons(IDS);
@@ -297,7 +297,7 @@ add_task(async function test_after_schema_version_change() {
 });
 
 add_task(async function test_after_second_restart() {
-  await promiseStartupManager(false);
+  await promiseStartupManager();
 
   info("Test add-on state after second restart");
   let addons = await getAddons(IDS);

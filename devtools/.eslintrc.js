@@ -16,10 +16,7 @@ module.exports = {
     // XXX Bug 1230193. We're still working on enabling no-undef for these test
     // directories.
     "files": [
-      "client/framework/test/**",
-      "client/scratchpad/**",
       "server/tests/mochitest/**",
-      "shared/tests/unit/**",
     ],
     "rules": {
       "no-undef": "off",
@@ -30,7 +27,6 @@ module.exports = {
     ],
     "rules": {
       "no-return-assign": "off",
-      "no-unused-vars": "off",
     }
   }, {
     "files": [

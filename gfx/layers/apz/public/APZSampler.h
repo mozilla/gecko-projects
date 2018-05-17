@@ -7,7 +7,12 @@
 #ifndef mozilla_layers_APZSampler_h
 #define mozilla_layers_APZSampler_h
 
+#include <unordered_map>
+
+#include "base/platform_thread.h" // for PlatformThreadId
 #include "mozilla/layers/AsyncCompositionManager.h" // for AsyncTransform
+#include "mozilla/StaticMutex.h"
+#include "mozilla/StaticPtr.h"
 #include "nsTArray.h"
 #include "Units.h"
 
@@ -16,8 +21,10 @@ namespace mozilla {
 class TimeStamp;
 
 namespace wr {
-class TransactionBuilder;
+struct Transaction;
+class TransactionWrapper;
 struct WrTransformProperty;
+struct WrWindowId;
 } // namespace wr
 
 namespace layers {
@@ -35,10 +42,23 @@ class APZSampler {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(APZSampler)
 
 public:
-  explicit APZSampler(const RefPtr<APZCTreeManager>& aApz);
+  APZSampler(const RefPtr<APZCTreeManager>& aApz,
+             bool aIsUsingWebRender);
 
-  bool PushStateToWR(wr::TransactionBuilder& aTxn,
-                     const TimeStamp& aSampleTime);
+  void SetWebRenderWindowId(const wr::WindowId& aWindowId);
+
+  /**
+   * This function is invoked from rust on the render backend thread when it
+   * is created. It effectively tells the APZSampler "the current thread is
+   * the sampler thread for this window id" and allows APZSampler to remember
+   * which thread it is.
+   */
+  static void SetSamplerThread(const wr::WrWindowId& aWindowId);
+  static void SampleForWebRender(const wr::WrWindowId& aWindowId,
+                                 wr::Transaction* aTxn);
+
+  void SetSampleTime(const TimeStamp& aSampleTime);
+  void SampleForWebRender(wr::TransactionWrapper& aTxn);
 
   bool SampleAnimations(const LayerMetricsWrapper& aLayer,
                         const TimeStamp& aSampleTime);
@@ -84,8 +104,32 @@ public:
 protected:
   virtual ~APZSampler();
 
+  static already_AddRefed<APZSampler> GetSampler(const wr::WrWindowId& aWindowId);
+
 private:
   RefPtr<APZCTreeManager> mApz;
+  bool mIsUsingWebRender;
+
+  // Used to manage the mapping from a WR window id to APZSampler. These are only
+  // used if WebRender is enabled. Both sWindowIdMap and mWindowId should only
+  // be used while holding the sWindowIdLock. Note that we use a StaticAutoPtr
+  // wrapper on sWindowIdMap to avoid a static initializer for the unordered_map.
+  // This also avoids the initializer/memory allocation in cases where we're
+  // not using WebRender.
+  static StaticMutex sWindowIdLock;
+  static StaticAutoPtr<std::unordered_map<uint64_t, APZSampler*>> sWindowIdMap;
+  Maybe<wr::WrWindowId> mWindowId;
+
+  // Lock used to protected mSamplerThreadId
+  mutable Mutex mThreadIdLock;
+  // If WebRender is enabled, this holds the thread id of the render backend
+  // thread (which is the sampler thread) for the compositor associated with
+  // this APZSampler instance.
+  Maybe<PlatformThreadId> mSamplerThreadId;
+
+  Mutex mSampleTimeLock;
+  // Can only be accessed or modified while holding mSampleTimeLock.
+  TimeStamp mSampleTime;
 };
 
 } // namespace layers

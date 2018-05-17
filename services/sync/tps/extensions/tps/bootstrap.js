@@ -17,7 +17,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "resProto",
 
 const Cm = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
 
-const CATMAN_CONTRACTID        = "@mozilla.org/categorymanager;1";
+const CATMAN_CONTRACTID = "@mozilla.org/categorymanager;1";
 
 const CATEGORY_NAME = "command-line-handler";
 const CATEGORY_ENTRY = "m-tps";
@@ -30,7 +30,7 @@ TPSCmdLine.prototype = {
   classID: Components.ID("{4e5bd3f0-41d3-11df-9879-0800200c9a66}"),
   contractID: "@mozilla.org/commandlinehandler/general-startup;1?type=tps",
 
-  QueryInterface:   XPCOMUtils.generateQI([Ci.nsICommandLineHandler]),
+  QueryInterface:   ChromeUtils.generateQI([Ci.nsICommandLineHandler]),
 
   register() {
     Cm.registerFactory(this.classID, this.classDescription,
@@ -93,7 +93,7 @@ TPSCmdLine.prototype = {
 
 function startup(data, reason) {
   TPSCmdLine.prototype.register();
-  resProto.setSubstitution("tps", Services.io.newURI("resource", null, data.resourceURI));
+  resProto.setSubstitution("tps", Services.io.newURI("resource/", null, data.resourceURI));
 }
 
 function shutdown(data, reason) {

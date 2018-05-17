@@ -6,7 +6,6 @@
 #include "nsAppRunner.h"
 #include "nsToolkitCompsCID.h"
 #include "nsXREDirProvider.h"
-#include "mozilla/AddonManagerStartup.h"
 
 #include "jsapi.h"
 #include "xpcpublic.h"
@@ -516,19 +515,6 @@ nsXREDirProvider::GetFile(const char* aProperty, bool* aPersistent,
     else if (!strcmp(aProperty, NS_APP_PREFS_50_FILE)) {
       rv = file->AppendNative(NS_LITERAL_CSTRING("prefs.js"));
     }
-    else if (!strcmp(aProperty, NS_LOCALSTORE_UNSAFE_FILE)) {
-      rv = file->AppendNative(NS_LITERAL_CSTRING("localstore.rdf"));
-    }
-    else if (!strcmp(aProperty, NS_APP_LOCALSTORE_50_FILE)) {
-      if (gSafeMode) {
-        rv = file->AppendNative(NS_LITERAL_CSTRING("localstore-safe.rdf"));
-        file->Remove(false);
-      }
-      else {
-        rv = file->AppendNative(NS_LITERAL_CSTRING("localstore.rdf"));
-        ensureFilePermissions = true;
-      }
-    }
     else if (!strcmp(aProperty, NS_APP_PREFS_OVERRIDE_DIR)) {
       rv = mProfileDir->Clone(getter_AddRefs(file));
       nsresult tmp = file->AppendNative(NS_LITERAL_CSTRING(PREF_OVERRIDE_DIRNAME));
@@ -867,8 +853,6 @@ nsXREDirProvider::GetFilesInternal(const char* aProperty,
 
     LoadDirsIntoArray(mAppBundleDirectories,
                       kAppendNothing, directories);
-    LoadDirsIntoArray(AddonManagerStartup::GetSingleton().ExtensionPaths(),
-                      kAppendNothing, directories);
 
     rv = NS_NewArrayEnumerator(aResult, directories);
   }
@@ -893,9 +877,6 @@ nsXREDirProvider::GetFilesInternal(const char* aProperty,
     LoadDirsIntoArray(mAppBundleDirectories,
                       kAppendChromeDir,
                       directories);
-    LoadDirsIntoArray(AddonManagerStartup::GetSingleton().ExtensionPaths(),
-                      kAppendChromeDir,
-                      directories);
 
     rv = NS_NewArrayEnumerator(aResult, directories);
   }
@@ -916,9 +897,6 @@ nsXREDirProvider::GetFilesInternal(const char* aProperty,
     // The root dirserviceprovider does quite a bit for us: we're mainly
     // interested in xulapp and extension-provided plugins.
     LoadDirsIntoArray(mAppBundleDirectories,
-                      kAppendPlugins,
-                      directories);
-    LoadDirsIntoArray(AddonManagerStartup::GetSingleton().ExtensionPaths(),
                       kAppendPlugins,
                       directories);
 

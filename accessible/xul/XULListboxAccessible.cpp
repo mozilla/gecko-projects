@@ -17,9 +17,9 @@
 #include "nsIAutoCompletePopup.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
-#include "nsIDOMNodeList.h"
 #include "nsIDOMXULSelectCntrlItemEl.h"
 #include "nsIMutableArray.h"
+#include "nsINodeList.h"
 #include "nsIPersistentProperties2.h"
 
 using namespace mozilla::a11y;
@@ -35,13 +35,13 @@ XULColumAccessible::
 }
 
 role
-XULColumAccessible::NativeRole()
+XULColumAccessible::NativeRole() const
 {
   return roles::LIST;
 }
 
 uint64_t
-XULColumAccessible::NativeState()
+XULColumAccessible::NativeState() const
 {
   return states::READONLY;
 }
@@ -58,19 +58,19 @@ XULColumnItemAccessible::
 }
 
 role
-XULColumnItemAccessible::NativeRole()
+XULColumnItemAccessible::NativeRole() const
 {
   return roles::COLUMNHEADER;
 }
 
 uint64_t
-XULColumnItemAccessible::NativeState()
+XULColumnItemAccessible::NativeState() const
 {
   return states::READONLY;
 }
 
 uint8_t
-XULColumnItemAccessible::ActionCount()
+XULColumnItemAccessible::ActionCount() const
 {
   return 1;
 }
@@ -83,7 +83,7 @@ XULColumnItemAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULColumnItemAccessible::DoAction(uint8_t aIndex)
+XULColumnItemAccessible::DoAction(uint8_t aIndex) const
 {
   if (aIndex != eAction_Click)
     return false;
@@ -116,7 +116,7 @@ XULListboxAccessible::
 // XULListboxAccessible: Accessible
 
 uint64_t
-XULListboxAccessible::NativeState()
+XULListboxAccessible::NativeState() const
 {
   // As a XULListboxAccessible we can have the following states:
   //   FOCUSED, READONLY, FOCUSABLE
@@ -138,7 +138,7 @@ XULListboxAccessible::NativeState()
   * Our value is the label of our ( first ) selected child.
   */
 void
-XULListboxAccessible::Value(nsString& aValue)
+XULListboxAccessible::Value(nsString& aValue) const
 {
   aValue.Truncate();
 
@@ -152,7 +152,7 @@ XULListboxAccessible::Value(nsString& aValue)
 }
 
 role
-XULListboxAccessible::NativeRole()
+XULListboxAccessible::NativeRole() const
 {
   // A richlistbox is used with the new autocomplete URL bar, and has a parent
   // popup <panel>.
@@ -166,7 +166,7 @@ XULListboxAccessible::NativeRole()
 // XULListboxAccessible: Table
 
 uint32_t
-XULListboxAccessible::ColCount()
+XULListboxAccessible::ColCount() const
 {
   nsIContent* headContent = nullptr;
   for (nsIContent* childContent = mContent->GetFirstChild(); childContent;
@@ -271,14 +271,12 @@ XULListboxAccessible::SelectedCellCount()
   NS_ASSERTION(control,
                "Doesn't implement nsIDOMXULMultiSelectControlElement.");
 
-  nsCOMPtr<nsIDOMNodeList> selectedItems;
+  nsCOMPtr<nsINodeList> selectedItems;
   control->GetSelectedItems(getter_AddRefs(selectedItems));
   if (!selectedItems)
     return 0;
 
-  nsINodeList* list = nsINodeList::FromDOMNodeList(selectedItems);
-
-  uint32_t selectedItemsCount = list->Length();
+  uint32_t selectedItemsCount = selectedItems->Length();
 
   return selectedItemsCount * ColCount();
 }
@@ -322,16 +320,15 @@ XULListboxAccessible::SelectedCells(nsTArray<Accessible*>* aCells)
   NS_ASSERTION(control,
                "Doesn't implement nsIDOMXULMultiSelectControlElement.");
 
-  nsCOMPtr<nsIDOMNodeList> selectedItems;
+  nsCOMPtr<nsINodeList> selectedItems;
   control->GetSelectedItems(getter_AddRefs(selectedItems));
   if (!selectedItems)
     return;
-  nsINodeList* list = nsINodeList::FromDOMNodeList(selectedItems);
 
-  uint32_t selectedItemsCount = list->Length();
+  uint32_t selectedItemsCount = selectedItems->Length();
 
   for (uint32_t index = 0; index < selectedItemsCount; index++) {
-    nsIContent* itemContent = list->Item(index);
+    nsIContent* itemContent = selectedItems->Item(index);
     Accessible* item = mDoc->GetAccessible(itemContent);
 
     if (item) {
@@ -353,13 +350,12 @@ XULListboxAccessible::SelectedCellIndices(nsTArray<uint32_t>* aCells)
   NS_ASSERTION(control,
                "Doesn't implement nsIDOMXULMultiSelectControlElement.");
 
-  nsCOMPtr<nsIDOMNodeList> selectedItems;
+  nsCOMPtr<nsINodeList> selectedItems;
   control->GetSelectedItems(getter_AddRefs(selectedItems));
   if (!selectedItems)
     return;
-  nsINodeList* list = nsINodeList::FromDOMNodeList(selectedItems);
 
-  uint32_t selectedItemsCount = list->Length();
+  uint32_t selectedItemsCount = selectedItems->Length();
 
   uint32_t colCount = ColCount();
   aCells->SetCapacity(selectedItemsCount * colCount);
@@ -368,7 +364,7 @@ XULListboxAccessible::SelectedCellIndices(nsTArray<uint32_t>* aCells)
   for (uint32_t selItemsIdx = 0, cellsIdx = 0;
        selItemsIdx < selectedItemsCount; selItemsIdx++) {
 
-    nsIContent* itemContent = list->Item(selItemsIdx);
+    nsIContent* itemContent = selectedItems->Item(selItemsIdx);
     nsCOMPtr<nsIDOMXULSelectControlItemElement> item =
       do_QueryInterface(itemContent);
 
@@ -400,13 +396,12 @@ XULListboxAccessible::SelectedRowIndices(nsTArray<uint32_t>* aRows)
   NS_ASSERTION(control,
                "Doesn't implement nsIDOMXULMultiSelectControlElement.");
 
-  nsCOMPtr<nsIDOMNodeList> selectedItems;
+  nsCOMPtr<nsINodeList> selectedItems;
   control->GetSelectedItems(getter_AddRefs(selectedItems));
   if (!selectedItems)
     return;
-  nsINodeList* list = nsINodeList::FromDOMNodeList(selectedItems);
 
-  uint32_t rowCount = list->Length();
+  uint32_t rowCount = selectedItems->Length();
 
   if (!rowCount)
     return;
@@ -415,7 +410,7 @@ XULListboxAccessible::SelectedRowIndices(nsTArray<uint32_t>* aRows)
   aRows->AppendElements(rowCount);
 
   for (uint32_t rowIdx = 0; rowIdx < rowCount; rowIdx++) {
-    nsIContent* itemContent = list->Item(rowIdx);
+    nsIContent* itemContent = selectedItems->Item(rowIdx);
     nsCOMPtr<nsIDOMXULSelectControlItemElement> item =
       do_QueryInterface(itemContent);
 
@@ -582,7 +577,7 @@ XULListitemAccessible::Description(nsString& aDesc)
   *   default to getting the name from GetXULName
   */
 ENameValueFlag
-XULListitemAccessible::NativeName(nsString& aName)
+XULListitemAccessible::NativeName(nsString& aName) const
 {
   nsIContent* childContent = mContent->GetFirstChild();
   if (childContent) {
@@ -597,7 +592,7 @@ XULListitemAccessible::NativeName(nsString& aName)
 }
 
 role
-XULListitemAccessible::NativeRole()
+XULListitemAccessible::NativeRole() const
 {
   Accessible* list = GetListAccessible();
   if (!list) {
@@ -618,7 +613,7 @@ XULListitemAccessible::NativeRole()
 }
 
 uint64_t
-XULListitemAccessible::NativeState()
+XULListitemAccessible::NativeState() const
 {
   if (mIsCheckbox)
     return XULMenuitemAccessible::NativeState();
@@ -789,7 +784,7 @@ XULListCellAccessible::Selected()
 // XULListCellAccessible. Accessible implementation
 
 role
-XULListCellAccessible::NativeRole()
+XULListCellAccessible::NativeRole() const
 {
   return roles::CELL;
 }

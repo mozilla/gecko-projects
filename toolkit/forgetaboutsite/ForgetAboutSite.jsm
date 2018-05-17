@@ -11,6 +11,8 @@ ChromeUtils.defineModuleGetter(this, "PlacesUtils",
                                "resource://gre/modules/PlacesUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "Downloads",
                                "resource://gre/modules/Downloads.jsm");
+ChromeUtils.defineModuleGetter(this, "ServiceWorkerCleanUp",
+                               "resource://gre/modules/ServiceWorkerCleanUp.jsm");
 
 var EXPORTED_SYMBOLS = ["ForgetAboutSite"];
 
@@ -40,7 +42,7 @@ function hasRootDomain(str, aDomain) {
 
 var ForgetAboutSite = {
   async removeDataFromDomain(aDomain) {
-    PlacesUtils.history.removePagesFromHost(aDomain, true);
+    await PlacesUtils.history.removeByFilter({ host: "." + aDomain });
 
     let promises = [];
     // Cache
@@ -142,7 +144,11 @@ var ForgetAboutSite = {
       }));
     }
 
-    // Offline Storages
+    // ServiceWorkers
+    await ServiceWorkerCleanUp.removeFromHost("http://" + aDomain);
+    await ServiceWorkerCleanUp.removeFromHost("https://" + aDomain);
+
+    // Offline Storages. This must run after the ServiceWorkers promises.
     promises.push((async function() {
       // delete data from both HTTP and HTTPS sites
       let httpURI = NetUtil.newURI("http://" + aDomain);

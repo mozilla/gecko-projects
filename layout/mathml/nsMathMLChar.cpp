@@ -578,7 +578,7 @@ nsOpenTypeTable::MakeTextRun(DrawTarget*        aDrawTarget,
     gfxTextRun::Create(&params, 1, aFontGroup,
                        gfx::ShapedTextFlags(), nsTextFrameUtils::Flags());
   textRun->AddGlyphRun(aFontGroup->GetFirstValidFont(),
-                       gfxTextRange::kFontGroup, 0,
+                       gfxTextRange::MatchType::kFontGroup, 0,
                        false, gfx::ShapedTextFlags::TEXT_ORIENT_HORIZONTAL);
                               // We don't care about CSS writing mode here;
                               // math runs are assumed to be horizontal.
@@ -1955,11 +1955,11 @@ void nsDisplayMathMLCharDebug::Paint(nsDisplayListBuilder* aBuilder,
   // Since this is used only for debugging, we don't need to worry about
   // tracking the ImgDrawResult.
   Unused <<
-    nsCSSRendering::PaintBorder(presContext, *aCtx, mFrame, mVisibleRect,
+    nsCSSRendering::PaintBorder(presContext, *aCtx, mFrame, GetPaintRect(),
                                 rect, computedStyle, flags, skipSides);
 
   nsCSSRendering::PaintOutline(presContext, *aCtx, mFrame,
-                               mVisibleRect, rect, computedStyle);
+                               GetPaintRect(), rect, computedStyle);
 }
 #endif
 

@@ -57,7 +57,7 @@ HyperTextAccessible::
 }
 
 role
-HyperTextAccessible::NativeRole()
+HyperTextAccessible::NativeRole() const
 {
   a11y::role r = GetAccService()->MarkupRole(mContent);
   if (r != roles::NOTHING)
@@ -71,7 +71,7 @@ HyperTextAccessible::NativeRole()
 }
 
 uint64_t
-HyperTextAccessible::NativeState()
+HyperTextAccessible::NativeState() const
 {
   uint64_t states = AccessibleWrap::NativeState();
 
@@ -1272,6 +1272,16 @@ HyperTextAccessible::TextBounds(int32_t aStartOffset, int32_t aEndOffset,
     offset1 = 0;
   }
 
+  // This document may have a resolution set, we will need to multiply
+  // the document-relative coordinates by that value and re-apply the doc's
+  // screen coordinates.
+  nsPresContext* presContext = mDoc->PresContext();
+  nsIFrame* rootFrame = presContext->PresShell()->GetRootFrame();
+  nsIntRect orgRectPixels = rootFrame->GetScreenRectInAppUnits().ToNearestPixels(presContext->AppUnitsPerDevPixel());
+  bounds.MoveBy(-orgRectPixels.X(), -orgRectPixels.Y());
+  bounds.ScaleRoundOut(presContext->PresShell()->GetResolution());
+  bounds.MoveBy(orgRectPixels.X(), orgRectPixels.Y());
+
   auto boundsX = bounds.X();
   auto boundsY = bounds.Y();
   nsAccUtils::ConvertScreenCoordsTo(&boundsX, &boundsY, aCoordType, this);
@@ -1362,7 +1372,7 @@ HyperTextAccessible::SetSelectionRange(int32_t aStartPos, int32_t aEndPos)
     nsIDocument* docNode = mDoc->DocumentNode();
     NS_ENSURE_TRUE(docNode, NS_ERROR_FAILURE);
     nsCOMPtr<nsPIDOMWindowOuter> window = docNode->GetWindow();
-    nsCOMPtr<nsIDOMElement> result;
+    RefPtr<dom::Element> result;
     DOMFocusManager->MoveFocus(window, nullptr, nsIFocusManager::MOVEFOCUS_CARET,
                                nsIFocusManager::FLAG_BYMOVEFOCUS, getter_AddRefs(result));
   }
@@ -1858,7 +1868,7 @@ HyperTextAccessible::RangeAtPoint(int32_t aX, int32_t aY,
 
 // Accessible protected
 ENameValueFlag
-HyperTextAccessible::NativeName(nsString& aName)
+HyperTextAccessible::NativeName(nsString& aName) const
 {
   // Check @alt attribute for invalid img elements.
   bool hasImgAlt = false;
@@ -1912,7 +1922,7 @@ HyperTextAccessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
 }
 
 Relation
-HyperTextAccessible::RelationByType(RelationType aType)
+HyperTextAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = Accessible::RelationByType(aType);
 

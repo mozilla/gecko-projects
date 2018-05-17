@@ -87,13 +87,6 @@ WebRenderBridgeChild::AddWebRenderParentCommand(const WebRenderParentCommand& aC
 }
 
 void
-WebRenderBridgeChild::AddWebRenderParentCommands(const nsTArray<WebRenderParentCommand>& aCommands)
-{
-  MOZ_ASSERT(mIsInTransaction);
-  mParentCommands.AppendElements(aCommands);
-}
-
-void
 WebRenderBridgeChild::BeginTransaction()
 {
   MOZ_ASSERT(!mDestroyed);
@@ -127,7 +120,7 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
                                      wr::BuiltDisplayList& aDL,
                                      wr::IpcResourceUpdateQueue& aResources,
                                      const gfx::IntSize& aSize,
-                                     uint64_t aTransactionId,
+                                     TransactionId aTransactionId,
                                      const WebRenderScrollData& aScrollData,
                                      const mozilla::TimeStamp& aTxnStartTime)
 {
@@ -161,7 +154,9 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
 
 void
 WebRenderBridgeChild::EndEmptyTransaction(const FocusTarget& aFocusTarget,
-                                          uint64_t aTransactionId,
+                                          const ScrollUpdatesMap& aUpdates,
+                                          uint32_t aPaintSequenceNumber,
+                                          TransactionId aTransactionId,
                                           const mozilla::TimeStamp& aTxnStartTime)
 {
   MOZ_ASSERT(!mDestroyed);
@@ -172,7 +167,7 @@ WebRenderBridgeChild::EndEmptyTransaction(const FocusTarget& aFocusTarget,
   fwdTime = TimeStamp::Now();
 #endif
 
-  this->SendEmptyTransaction(aFocusTarget,
+  this->SendEmptyTransaction(aFocusTarget, aUpdates, aPaintSequenceNumber,
                              mParentCommands, mDestroyedActors,
                              GetFwdTransactionId(), aTransactionId,
                              mIdNamespace, aTxnStartTime, fwdTime);
@@ -272,7 +267,7 @@ WriteFontDescriptor(const uint8_t* aData, uint32_t aLength, uint32_t aIndex,
 void
 WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, Range<const wr::GlyphInstance> aGlyphs,
                                  gfx::ScaledFont* aFont, const wr::ColorF& aColor, const StackingContextHelper& aSc,
-                                 const wr::LayerRect& aBounds, const wr::LayerRect& aClip, bool aBackfaceVisible,
+                                 const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip, bool aBackfaceVisible,
                                  const wr::GlyphOptions* aGlyphOptions)
 {
   MOZ_ASSERT(aFont);

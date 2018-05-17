@@ -4,7 +4,7 @@
 
 import re
 
-PHYSICAL_SIDES = ["top", "left", "bottom", "right"]
+PHYSICAL_SIDES = ["top", "right", "bottom", "left"]
 LOGICAL_SIDES = ["block-start", "block-end", "inline-start", "inline-end"]
 PHYSICAL_SIZES = ["width", "height"]
 LOGICAL_SIZES = ["block-size", "inline-size"]
@@ -385,6 +385,7 @@ class Alias(object):
         self.name = name
         self.ident = to_rust_ident(name)
         self.camel_case = to_camel_case(self.ident)
+        self.original = original
         self.enabled_in = original.enabled_in
         self.servo_pref = original.servo_pref
         self.gecko_pref = gecko_pref
@@ -406,7 +407,7 @@ class Alias(object):
         return self.enabled_in == "content"
 
     def nscsspropertyid(self):
-        return "nsCSSPropertyID::eCSSPropertyAlias_%s" % self.camel_case
+        return "nsCSSPropertyID::eCSSPropertyAlias_%s" % self.ident
 
 
 class Method(object):

@@ -45,7 +45,6 @@ class nsAutoCauseReflowNotifier;
 class AutoPointerEventTargetUpdater;
 
 namespace mozilla {
-class ServoStyleSheet;
 
 namespace dom {
 class Element;
@@ -88,9 +87,9 @@ public:
 
   void UpdatePreferenceStyles() override;
 
-  NS_IMETHOD GetSelection(RawSelectionType aRawSelectionType,
-                          nsISelection** aSelection) override;
-  dom::Selection* GetDOMSelection(RawSelectionType aRawSelectionType) override;
+  NS_IMETHOD GetSelectionFromScript(RawSelectionType aRawSelectionType,
+                                    dom::Selection** aSelection) override;
+  dom::Selection* GetSelection(RawSelectionType aRawSelectionType) override;
 
   dom::Selection* GetCurrentSelection(SelectionType aSelectionType) override;
 
@@ -159,9 +158,9 @@ public:
   void UnsuppressPainting() override;
 
   nsresult GetAgentStyleSheets(
-      nsTArray<RefPtr<ServoStyleSheet>>& aSheets) override;
+      nsTArray<RefPtr<StyleSheet>>& aSheets) override;
   nsresult SetAgentStyleSheets(
-      const nsTArray<RefPtr<ServoStyleSheet>>& aSheets) override;
+      const nsTArray<RefPtr<StyleSheet>>& aSheets) override;
 
   nsresult AddOverrideStyleSheet(StyleSheet* aSheet) override;
   nsresult RemoveOverrideStyleSheet(StyleSheet* aSheet) override;
@@ -237,7 +236,7 @@ public:
                                     WidgetEvent* aEvent,
                                     nsEventStatus* aStatus) override;
   nsresult HandleDOMEventWithTarget(nsIContent* aTargetContent,
-                                    nsIDOMEvent* aEvent,
+                                    dom::Event* aEvent,
                                     nsEventStatus* aStatus) override;
   bool ShouldIgnoreInvalidation() override;
   void WillPaint() override;
@@ -284,8 +283,6 @@ public:
                                   int16_t aEndOffset, bool* aRetval) override;
 
   // nsIDocumentObserver
-  NS_DECL_NSIDOCUMENTOBSERVER_BEGINUPDATE
-  NS_DECL_NSIDOCUMENTOBSERVER_ENDUPDATE
   NS_DECL_NSIDOCUMENTOBSERVER_BEGINLOAD
   NS_DECL_NSIDOCUMENTOBSERVER_ENDLOAD
   NS_DECL_NSIDOCUMENTOBSERVER_CONTENTSTATECHANGED
@@ -542,7 +539,7 @@ private:
    */
   already_AddRefed<SourceSurface>
   PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems,
-                      nsISelection* aSelection,
+                      dom::Selection* aSelection,
                       nsIntRegion* aRegion,
                       nsRect aArea,
                       const LayoutDeviceIntPoint aPoint,
@@ -695,7 +692,7 @@ private:
 
   // Get the selected item and coordinates in device pixels relative to root
   // document's root view for element, first ensuring the element is onscreen
-  void GetCurrentItemAndPositionForElement(nsIDOMElement *aCurrentEl,
+  void GetCurrentItemAndPositionForElement(dom::Element* aFocusedElement,
                                            nsIContent **aTargetToUse,
                                            LayoutDeviceIntPoint& aTargetPt,
                                            nsIWidget *aRootWidget);
@@ -757,7 +754,6 @@ private:
   // The reflow root under which we're currently reflowing.  Null when
   // not in reflow.
   nsIFrame* mCurrentReflowRoot;
-  uint32_t mUpdateCount;
 #endif
 
 #ifdef MOZ_REFLOW_PERF

@@ -6,7 +6,6 @@
 
 EXPORTS += [
     'BackstagePass.h',
-    'qsObjectHelper.h',
     'XPCJSMemoryReporter.h',
     'xpcObjectHelper.h',
     'xpcpublic.h',
@@ -58,7 +57,6 @@ LOCAL_INCLUDES += [
     '/dom/svg',
     '/layout/base',
     '/layout/style',
-    '/xpcom/reflect/xptinfo',
 ]
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):

@@ -39,12 +39,12 @@ impl Example for App {
         sub_builder.push_stacking_context(
             &info,
             None,
-            ScrollPolicy::Scrollable,
             None,
             TransformStyle::Flat,
             None,
             MixBlendMode::Normal,
             Vec::new(),
+            GlyphRasterSpace::Screen,
         );
 
         // green rect visible == success
@@ -65,12 +65,12 @@ impl Example for App {
         builder.push_stacking_context(
             &info,
             None,
-            ScrollPolicy::Scrollable,
-            Some(PropertyBinding::Binding(PropertyBindingKey::new(42))),
+            Some(PropertyBinding::Binding(PropertyBindingKey::new(42), LayoutTransform::identity())),
             TransformStyle::Flat,
             None,
             MixBlendMode::Normal,
             Vec::new(),
+            GlyphRasterSpace::Screen,
         );
         // red rect under the iframe: if this is visible, things have gone wrong
         builder.push_rect(&info, ColorF::new(1.0, 0.0, 0.0, 1.0));

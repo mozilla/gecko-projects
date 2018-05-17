@@ -316,7 +316,7 @@ class JSString : public js::gc::Cell
                       "Inline char16_t chars must fit in a JSString");
 
         /* Ensure js::shadow::String has the same layout. */
-        using js::shadow::String;
+        using JS::shadow::String;
         static_assert(offsetof(JSString, d.u1.length) == offsetof(String, length),
                       "shadow::String length offset must match JSString");
         static_assert(offsetof(JSString, d.u1.flags) == offsetof(String, flags),
@@ -688,7 +688,7 @@ class JSRope : public JSString
     static inline JSRope* new_(JSContext* cx,
                                typename js::MaybeRooted<JSString*, allowGC>::HandleType left,
                                typename js::MaybeRooted<JSString*, allowGC>::HandleType right,
-                               size_t length);
+                               size_t length, js::gc::InitialHeap = js::gc::DefaultHeap);
 
     bool copyLatin1Chars(JSContext* cx,
                          js::ScopedJSFreePtr<JS::Latin1Char>& out) const;

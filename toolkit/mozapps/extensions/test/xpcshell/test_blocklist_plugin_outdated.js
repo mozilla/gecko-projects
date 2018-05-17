@@ -13,7 +13,6 @@ var gBlocklist = null;
 var gTestserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 gTestserver.registerDirectory("/data/", do_get_file("data"));
 
-
 var PLUGINS = [{
   // Tests a plugin whose state goes from not-blocked, to outdated
   name: "test_bug514327_outdated",
@@ -32,20 +31,13 @@ var PLUGINS = [{
   version: "5",
   disabled: false,
   blocklisted: false
-} ];
+}].map(opts => new MockPluginTag(opts, opts.enabledState));
 
-
-// A fake plugin host for the blocklist service to use
-var PluginHost = {
-  getPluginTags(countRef) {
-    countRef.value = PLUGINS.length;
-    return PLUGINS;
-  },
-
-  QueryInterface: XPCOMUtils.generateQI(["nsIPluginHost"]),
-};
+mockPluginHost(PLUGINS);
 
 var BlocklistPrompt = {
+  get wrappedJSObject() { return this; },
+
   prompt(list) {
     // Should only include one item
     Assert.equal(list.length, 1);
@@ -55,7 +47,7 @@ var BlocklistPrompt = {
     Assert.notEqual(item.name, "test_bug514327_outdated");
   },
 
-  QueryInterface: XPCOMUtils.generateQI(["nsIBlocklistPrompt"]),
+  QueryInterface: ChromeUtils.generateQI([]),
 };
 
 
@@ -64,12 +56,10 @@ async function loadBlocklist(file) {
 
   Services.prefs.setCharPref("extensions.blocklist.url",
                              "http://example.com/data/" + file);
-  Services.blocklist.QueryInterface(Ci.nsITimerCallback).notify(null);
+  Blocklist.notify();
 
   await blocklistUpdated;
 }
-
-MockRegistrar.register("@mozilla.org/plugin/host;1", PluginHost);
 
 let factory = XPCOMUtils.generateSingletonFactory(function() { return BlocklistPrompt; });
 Cm.registerFactory(Components.ID("{26d32654-30c7-485d-b983-b4d2568aebba}"),
@@ -86,8 +76,14 @@ add_task(async function setup() {
 
   gBlocklist = Services.blocklist;
 
+  // The blocklist service defers plugin request until the Blocklist
+  // module loads. Make sure it loads, or we'll wait forever.
+  executeSoon(() => {
+    void Blocklist;
+  });
+
   // should NOT be marked as outdated by the blocklist
-  Assert.ok(gBlocklist.getPluginBlocklistState(PLUGINS[0], "1", "1.9") == nsIBLS.STATE_NOT_BLOCKED);
+  Assert.equal(await gBlocklist.getPluginBlocklistState(PLUGINS[0], "1", "1.9"), nsIBLS.STATE_NOT_BLOCKED);
 });
 
 add_task(async function test_part_1() {
@@ -95,7 +91,7 @@ add_task(async function test_part_1() {
   await loadBlocklist("test_bug514327_3_outdated_1.xml");
 
   // plugin should now be marked as outdated
-  Assert.ok(gBlocklist.getPluginBlocklistState(PLUGINS[0], "1", "1.9") == nsIBLS.STATE_OUTDATED);
+  Assert.equal(await gBlocklist.getPluginBlocklistState(PLUGINS[0], "1", "1.9"), nsIBLS.STATE_OUTDATED);
 
 });
 
@@ -104,5 +100,5 @@ add_task(async function test_part_2() {
   await loadBlocklist("test_bug514327_3_outdated_2.xml");
 
   // plugin should still be marked as outdated
-  Assert.ok(gBlocklist.getPluginBlocklistState(PLUGINS[0], "1", "1.9") == nsIBLS.STATE_OUTDATED);
+  Assert.equal(await gBlocklist.getPluginBlocklistState(PLUGINS[0], "1", "1.9"), nsIBLS.STATE_OUTDATED);
 });

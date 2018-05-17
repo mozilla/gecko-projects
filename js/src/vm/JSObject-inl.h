@@ -95,7 +95,7 @@ JSObject::finalize(js::FreeOp* fop)
 #ifdef DEBUG
     MOZ_ASSERT(isTenured());
     if (!IsBackgroundFinalized(asTenured().getAllocKind())) {
-        /* Assert we're on the active thread. */
+        /* Assert we're on the main thread. */
         MOZ_ASSERT(CurrentThreadCanAccessZone(zone()));
     }
 #endif
@@ -151,13 +151,6 @@ js::NativeObject::updateDictionaryListPointerAfterMinorGC(NativeObject* old)
     // tenured the shape's pointer into the object needs to be updated.
     if (shape()->listp == old->shapePtr())
         shape()->listp = shapePtr();
-}
-
-inline void
-js::gc::MakeAccessibleAfterMovingGC(JSObject* obj)
-{
-    if (obj->isNative())
-        obj->as<NativeObject>().updateShapeAfterMovingGC();
 }
 
 /* static */ inline bool

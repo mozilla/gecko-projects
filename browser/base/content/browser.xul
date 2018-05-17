@@ -13,6 +13,7 @@
 <?xml-stylesheet href="chrome://browser/skin/controlcenter/panel.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/customizableui/panelUI.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/downloads/downloads.css"?>
+<?xml-stylesheet href="chrome://browser/skin/searchbar.css"?>
 <?xml-stylesheet href="chrome://browser/skin/places/places.css"?>
 <?xml-stylesheet href="chrome://browser/skin/places/editBookmark.css"?>
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
@@ -332,12 +333,18 @@
     </panel>
 
     <menupopup id="toolbar-context-menu"
-               onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator'));">
+               onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator')); UpdateDownloadsAutoHide(this)">
       <menuitem oncommand="gCustomizeMode.addToPanel(document.popupNode)"
                 accesskey="&customizeMenu.pinToOverflowMenu.accesskey;"
                 label="&customizeMenu.pinToOverflowMenu.label;"
                 contexttype="toolbaritem"
                 class="customize-context-moveToPanel"/>
+      <menuitem oncommand="onDownloadsAutoHideChange(event)"
+                type="checkbox"
+                accesskey="&customizeMenu.autoHideDownloadsButton.accesskey;"
+                label="&customizeMenu.autoHideDownloadsButton.label;"
+                contexttype="toolbaritem"
+                class="customize-context-autoHide"/>
       <menuitem oncommand="gCustomizeMode.removeFromArea(document.popupNode)"
                 accesskey="&customizeMenu.removeFromToolbar.accesskey;"
                 label="&customizeMenu.removeFromToolbar.label;"
@@ -666,7 +673,7 @@
                      removable="true"/>
 
       <toolbarbutton id="alltabs-button"
-                     class="toolbarbutton-1 chromeclass-toolbar-additional tabs-alltabs-button"
+                     class="toolbarbutton-1 chromeclass-toolbar-additional tabs-alltabs-button badged-button"
                      type="menu"
                      label="&listAllTabs.label;"
                      tooltiptext="&listAllTabs.label;"
@@ -777,6 +784,7 @@
                      class="chromeclass-location" overflows="false">
             <textbox id="urlbar" flex="1"
                      placeholder="&urlbar.placeholder2;"
+                     defaultPlaceholder="&urlbar.placeholder2;"
                      focused="true"
                      type="autocomplete"
                      autocompletesearch="unifiedcomplete"
@@ -1215,9 +1223,10 @@
       <vbox id="appcontent" flex="1">
         <notificationbox id="high-priority-global-notificationbox" notificationside="top"/>
         <tabbox id="tabbrowser-tabbox"
-                    flex="1" eventnode="document" tabcontainer="tabbrowser-tabs"
-                    onselect="if (event.target.localName == 'tabpanels') gBrowser.updateCurrentBrowser();">
-          <tabpanels flex="1" class="plain" selectedIndex="0" id="tabbrowser-tabpanels">
+                flex="1" eventnode="document" tabcontainer="tabbrowser-tabs">
+          <tabpanels id="tabbrowser-tabpanels"
+                     flex="1" class="plain" selectedIndex="0"
+                     onselect="if (event.target == this) gBrowser.updateCurrentBrowser();">
             <notificationbox flex="1" notificationside="top">
               <!-- Set large flex to allow the devtools toolbox to set a flex attribute.
                    We don't want the toolbox to actually take up free space, but we do want it to collapse when the window shrinks, and with flex=0 it can't.

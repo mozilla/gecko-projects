@@ -25,10 +25,10 @@ with Files("talos/**"):
     SCHEDULES.exclusive = ['talos']
 
 with Files("talos/talos/tests/v8_7/**"):
-    BUG_COMPONENT = ("Core", "Javascript Engine")
+    BUG_COMPONENT = ("Core", "JavaScript Engine")
 
 with Files("talos/talos/tests/kraken/**"):
-    BUG_COMPONENT = ("Core", "Javascript Engine")
+    BUG_COMPONENT = ("Core", "JavaScript Engine")
 
 with Files("talos/talos/tests/a11y/**"):
     BUG_COMPONENT = ("Core", "Disability Access APIs")
@@ -119,3 +119,8 @@ with Files("tools/minidumpwriter/**"):
 
 with Files("remote*"):
     BUG_COMPONENT = ("Firefox for Android", "Testing")
+
+with Files("raptor/**"):
+    BUG_COMPONENT = ("Testing", "Raptor")
+    SCHEDULES.exclusive = ['raptor']
+

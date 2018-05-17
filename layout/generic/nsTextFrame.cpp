@@ -344,8 +344,7 @@ public:
     if (nsSVGUtils::IsInSVGTextSubtree(mFrame)) {
       return 0;
     }
-    return mFrame->StyleColor()->
-      CalcComplexColor(mFrame->StyleText()->mWebkitTextStrokeColor);
+    return mFrame->StyleText()->mWebkitTextStrokeColor.CalcColor(mFrame);
   }
   float GetWebkitTextStrokeWidth() {
     if (nsSVGUtils::IsInSVGTextSubtree(mFrame)) {
@@ -581,13 +580,13 @@ ClearAllTextRunReferences(nsTextFrame* aFrame, gfxTextRun* aTextRun,
                           nsTextFrame* aStartContinuation,
                           nsFrameState aWhichTextRunState)
 {
-  NS_PRECONDITION(aFrame, "");
-  NS_PRECONDITION(!aStartContinuation ||
-                  (!aStartContinuation->GetTextRun(nsTextFrame::eInflated) ||
-                   aStartContinuation->GetTextRun(nsTextFrame::eInflated) == aTextRun) ||
-                  (!aStartContinuation->GetTextRun(nsTextFrame::eNotInflated) ||
-                   aStartContinuation->GetTextRun(nsTextFrame::eNotInflated) == aTextRun),
-                  "wrong aStartContinuation for this text run");
+  MOZ_ASSERT(aFrame, "null frame");
+  MOZ_ASSERT(!aStartContinuation ||
+             (!aStartContinuation->GetTextRun(nsTextFrame::eInflated) ||
+              aStartContinuation->GetTextRun(nsTextFrame::eInflated) == aTextRun) ||
+             (!aStartContinuation->GetTextRun(nsTextFrame::eNotInflated) ||
+              aStartContinuation->GetTextRun(nsTextFrame::eNotInflated) == aTextRun),
+             "wrong aStartContinuation for this text run");
 
   if (!aStartContinuation || aStartContinuation == aFrame) {
     aFrame->RemoveStateBits(aWhichTextRunState);
@@ -3287,8 +3286,9 @@ static void FindClusterEnd(const gfxTextRun* aTextRun,
                            gfxSkipCharsIterator* aPos,
                            bool aAllowSplitLigature = true)
 {
-  NS_PRECONDITION(aPos->GetOriginalOffset() < aOriginalEnd,
-                  "character outside string");
+  MOZ_ASSERT(aPos->GetOriginalOffset() < aOriginalEnd,
+             "character outside string");
+
   aPos->AdvanceOriginal(1);
   while (aPos->GetOriginalOffset() < aOriginalEnd) {
     if (aPos->IsOriginalCharSkipped() ||
@@ -3428,7 +3428,7 @@ void
 PropertyProvider::GetSpacingInternal(Range aRange, Spacing* aSpacing,
                                      bool aIgnoreTabs) const
 {
-  NS_PRECONDITION(IsInBounds(mStart, mLength, aRange), "Range out of bounds");
+  MOZ_ASSERT(IsInBounds(mStart, mLength, aRange), "Range out of bounds");
 
   uint32_t index;
   for (index = 0; index < aRange.Length(); ++index) {
@@ -3618,8 +3618,8 @@ IS_HYPHEN(char16_t u)
 void
 PropertyProvider::GetHyphenationBreaks(Range aRange, HyphenType* aBreakBefore) const
 {
-  NS_PRECONDITION(IsInBounds(mStart, mLength, aRange), "Range out of bounds");
-  NS_PRECONDITION(mLength != INT32_MAX, "Can't call this with undefined length");
+  MOZ_ASSERT(IsInBounds(mStart, mLength, aRange), "Range out of bounds");
+  MOZ_ASSERT(mLength != INT32_MAX, "Can't call this with undefined length");
 
   if (!mTextStyle->WhiteSpaceCanWrap(mFrame) ||
       mTextStyle->mHyphens == StyleHyphens::None)
@@ -3706,7 +3706,7 @@ PropertyProvider::InitializeForMeasure()
 void
 PropertyProvider::SetupJustificationSpacing(bool aPostReflow)
 {
-  NS_PRECONDITION(mLength != INT32_MAX, "Can't call this with undefined length");
+  MOZ_ASSERT(mLength != INT32_MAX, "Can't call this with undefined length");
 
   if (!(mFrame->GetStateBits() & TEXT_JUSTIFICATION_ENABLED)) {
     return;
@@ -3988,7 +3988,7 @@ nsTextPaintStyle::GetSelectionUnderlineForPaint(int32_t  aIndex,
   NS_ASSERTION(aIndex >= 0 && aIndex < 5, "Index out of range");
 
   nsSelectionStyle* selectionStyle = GetSelectionStyle(aIndex);
-  if (selectionStyle->mUnderlineStyle == NS_STYLE_BORDER_STYLE_NONE ||
+  if (selectionStyle->mUnderlineStyle == NS_STYLE_TEXT_DECORATION_STYLE_NONE ||
       selectionStyle->mUnderlineColor == NS_TRANSPARENT ||
       selectionStyle->mUnderlineRelativeSize <= 0.0f)
     return false;
@@ -4339,7 +4339,7 @@ nsTextFrame::Init(nsIContent*       aContent,
                   nsIFrame*         aPrevInFlow)
 {
   NS_ASSERTION(!aPrevInFlow, "Can't be a continuation!");
-  NS_PRECONDITION(aContent->IsText(), "Bogus content!");
+  MOZ_ASSERT(aContent->IsText(), "Bogus content!");
 
   // Remove any NewlineOffsetProperty or InFlowContentLengthProperty since they
   // might be invalid if the content was modified while there was no frame
@@ -5101,8 +5101,13 @@ nsDisplayText::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder
     return true;
   }
 
+
+  auto appUnitsPerDevPixel = Frame()->PresContext()->AppUnitsPerDevPixel();
+  gfx::Point deviceOffset = LayoutDevicePoint::FromAppUnits(
+      mBounds.TopLeft(), appUnitsPerDevPixel).ToUnknownPoint();
+
   RefPtr<TextDrawTarget> textDrawer = new TextDrawTarget(aBuilder, aSc, aManager, this, mBounds);
-  RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(textDrawer);
+  RefPtr<gfxContext> captureCtx = gfxContext::CreateOrNull(textDrawer, deviceOffset);
 
   RenderToContext(captureCtx, aDisplayListBuilder, true);
 
@@ -5119,7 +5124,7 @@ nsDisplayText::RenderToContext(gfxContext* aCtx, nsDisplayListBuilder* aBuilder,
   // This is temporary until we do this in the actual calculation of text extents.
   auto A2D = mFrame->PresContext()->AppUnitsPerDevPixel();
   LayoutDeviceRect extraVisible =
-    LayoutDeviceRect::FromAppUnits(mVisibleRect, A2D);
+    LayoutDeviceRect::FromAppUnits(GetPaintRect(), A2D);
   extraVisible.Inflate(1);
 
   gfxRect pixelVisible(extraVisible.x, extraVisible.y,
@@ -5189,11 +5194,10 @@ nsTextFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsTextFrame");
 
-  const nsStyleColor* sc = StyleColor();
   const nsStyleText* st = StyleText();
   bool isTextTransparent =
-    NS_GET_A(sc->CalcComplexColor(st->mWebkitTextFillColor)) == 0 &&
-    NS_GET_A(sc->CalcComplexColor(st->mWebkitTextStrokeColor)) == 0;
+    NS_GET_A(st->mWebkitTextFillColor.CalcColor(this)) == 0 &&
+    NS_GET_A(st->mWebkitTextStrokeColor.CalcColor(this)) == 0;
   Maybe<bool> isSelected;
   if (((GetStateBits() & TEXT_NO_RENDERED_GLYPHS) ||
        (isTextTransparent && !StyleText()->HasTextShadow())) &&
@@ -6684,16 +6688,17 @@ nsTextFrame::DrawEmphasisMarks(gfxContext* aContext,
 nscolor
 nsTextFrame::GetCaretColorAt(int32_t aOffset)
 {
-  NS_PRECONDITION(aOffset >= 0, "aOffset must be positive");
+  MOZ_ASSERT(aOffset >= 0, "aOffset must be positive");
 
   nscolor result = nsFrame::GetCaretColorAt(aOffset);
   gfxSkipCharsIterator iter = EnsureTextRun(nsTextFrame::eInflated);
   PropertyProvider provider(this, iter, nsTextFrame::eInflated);
   int32_t contentOffset = provider.GetStart().GetOriginalOffset();
   int32_t contentLength = provider.GetOriginalLength();
-  NS_PRECONDITION(aOffset >= contentOffset &&
-                  aOffset <= contentOffset + contentLength,
-                  "aOffset must be in the frame's range");
+  MOZ_ASSERT(aOffset >= contentOffset &&
+             aOffset <= contentOffset + contentLength,
+             "aOffset must be in the frame's range");
+
   int32_t offsetInFrame = aOffset - contentOffset;
   if (offsetInFrame < 0 || offsetInFrame >= contentLength) {
     return result;
@@ -7394,7 +7399,7 @@ nsTextFrame::GetSelectionStatus(int16_t* aSelectionFlags)
 }
 
 bool
-nsTextFrame::IsVisibleInSelection(nsISelection* aSelection)
+nsTextFrame::IsVisibleInSelection(Selection* aSelection)
 {
   // Check the quick way first
   if (!GetContent()->IsSelectionDescendant())
@@ -8965,7 +8970,7 @@ HasSoftHyphenBefore(const nsTextFragment* aFrag, const gfxTextRun* aTextRun,
 static void
 RemoveEmptyInFlows(nsTextFrame* aFrame, nsTextFrame* aFirstToNotRemove)
 {
-  NS_PRECONDITION(aFrame != aFirstToNotRemove, "This will go very badly");
+  MOZ_ASSERT(aFrame != aFirstToNotRemove, "This will go very badly");
   // We have to be careful here, because some RemoveFrame implementations
   // remove and destroy not only the passed-in frame but also all its following
   // in-flows (and sometimes all its following continuations in general).  So

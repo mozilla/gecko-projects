@@ -1,6 +1,9 @@
 Contributing
 ============
 
+If you are new to open source or to Mozilla, you might like this
+[tutorial for new Marionette contributors](NewContributors.html).
+
 We are delighted that you want to help improve Marionette!
 ‘Marionette’ means different a few different things, depending
 on who you talk to, but the overall scope of the project involves
@@ -30,7 +33,7 @@ By participating in this project, you agree to abide by the Mozilla
 for contributing high-quality and actionable bugs and code.
 
 [_Marionette_]: ./index.html
-[_geckodriver_]: ../geckodriver
+[_geckodriver_]: ../../geckodriver/geckodriver
 [_webdriver_]: https://searchfox.org/mozilla-central/source/testing/webdriver/README.md
 [WebDriver protocol]: https://w3c.github.io/webdriver/webdriver-spec.html#protocol
 [XPCOM]: https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XPCOM/Guide
@@ -51,10 +54,10 @@ have a curated set of [good first bugs] you may consider attempting first.
 We have collected a lot of good advice for working on Marionette
 code in our [code style document], which we highly recommend you read.
 
-[ask questions]: #communication
-[reach out to us]: #communication
+[ask questions]: ./index.html#communication
+[reach out to us]: ./index.html#communication
 [mozilla-central]: https://searchfox.org/mozilla-central/source/testing/marionette/
-[good first bugs]: https://www.joshmatthews.net/bugsahoy/?automation=1&js=1
+[good first bugs]: https://www.joshmatthews.net/bugsahoy/?automation=1
 [code style document]: CodeStyle.html
 
 
@@ -72,3 +75,4 @@ Other resources
 
   * [Code style](CodeStyle.html)
   * [Internals](internals/)
+  * [New Contributor Tutorial](NewContributors.html)

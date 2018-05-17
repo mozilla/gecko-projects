@@ -454,7 +454,7 @@ class ExecuteAsyncScriptRun(object):
             # We didn't get any data back from the test, so check if the
             # browser is still responsive
             if self.protocol.is_alive:
-                self.result = False, ("ERROR", None)
+                self.result = False, ("INTERNAL-ERROR", None)
             else:
                 self.result = False, ("CRASH", None)
         return self.result
@@ -476,7 +476,7 @@ class ExecuteAsyncScriptRun(object):
                 message += "\n"
             message += traceback.format_exc(e)
             self.logger.warning(traceback.format_exc())
-            self.result = False, ("ERROR", e)
+            self.result = False, ("INTERNAL-ERROR", e)
         finally:
             self.result_flag.set()
 
@@ -642,12 +642,12 @@ class MarionetteRefTestExecutor(RefTestExecutor):
                                      test_url,
                                      timeout).run()
 
-    def _screenshot(self, marionette, url, timeout):
-        marionette.navigate(url)
+    def _screenshot(self, protocol, url, timeout):
+        protocol.marionette.navigate(url)
 
-        marionette.execute_async_script(self.wait_script)
+        protocol.base.execute_script(self.wait_script, async=True)
 
-        screenshot = marionette.screenshot(full=False)
+        screenshot = protocol.marionette.screenshot(full=False)
         # strip off the data:img/png, part of the url
         if screenshot.startswith("data:image/png;base64,"):
             screenshot = screenshot.split(",", 1)[1]

@@ -25,11 +25,11 @@
 #include "nsCaret.h"
 #include "nsContentUtils.h"
 #include "nsGkAtoms.h"
-#include "nsISelection.h"
 #include "nsQuickSort.h"
 #include "SVGObserverUtils.h"
 #include "nsSVGOuterSVGFrame.h"
 #include "nsSVGPaintServerFrame.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/SVGRect.h"
 #include "mozilla/dom/SVGTextContentElementBinding.h"
 #include "nsSVGIntegrationUtils.h"
@@ -419,7 +419,7 @@ TruncateTo(nsTArray<T>& aArrayToTruncate, const nsTArray<U>& aReferenceArray)
 static SVGTextFrame*
 FrameIfAnonymousChildReflowed(SVGTextFrame* aFrame)
 {
-  NS_PRECONDITION(aFrame, "aFrame must not be null");
+  MOZ_ASSERT(aFrame, "aFrame must not be null");
   nsIFrame* kid = aFrame->PrincipalChildList().FirstChild();
   if (NS_SUBTREE_DIRTY(kid)) {
     MOZ_ASSERT(false, "should have already reflowed the anonymous block child");
@@ -3521,14 +3521,12 @@ SVGTextFrame::NotifySVGChanged(uint32_t aFlags)
 static int32_t
 GetCaretOffset(nsCaret* aCaret)
 {
-  nsCOMPtr<nsISelection> selection = aCaret->GetSelection();
+  RefPtr<Selection> selection = aCaret->GetSelection();
   if (!selection) {
     return -1;
   }
 
-  int32_t offset = -1;
-  selection->GetAnchorOffset(&offset);
-  return offset;
+  return selection->AnchorOffset();
 }
 
 /**
@@ -4582,6 +4580,8 @@ SVGTextFrame::ResolvePositionsForNode(nsIContent* aContent,
       mPositions[aIndex].mStartOfChunk = true;
     }
   } else if (!aContent->IsSVGElement(nsGkAtoms::a)) {
+    MOZ_ASSERT(aContent->IsSVGElement());
+
     // We have a text content element that can have x/y/dx/dy/rotate attributes.
     nsSVGElement* element = static_cast<nsSVGElement*>(aContent);
 

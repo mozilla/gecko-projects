@@ -24,7 +24,6 @@
 #include "nsIPresShell.h"
 #include "nsGkAtoms.h"
 #include "nsCSSProps.h"
-#include "nsCSSParser.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsLayoutUtils.h"
 #include "nsSVGAnimatedTransformList.h"
@@ -233,7 +232,7 @@ nsSVGElement::Init()
 // nsISupports methods
 
 NS_IMPL_ISUPPORTS_INHERITED(nsSVGElement, nsSVGElementBase,
-                            nsIDOMNode, nsIDOMElement)
+                            nsIDOMNode)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -535,7 +534,7 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
           RefPtr<nsAtom> valAtom = NS_Atomize(aValue);
           rv = enumInfo.mEnums[i].SetBaseValueAtom(valAtom, this);
           if (NS_FAILED(rv)) {
-            enumInfo.Reset(i);
+            enumInfo.SetUnknownValue(i);
           } else {
             aResult.SetTo(valAtom);
             didSetResult = true;
@@ -1061,7 +1060,7 @@ nsSVGElement::sMaskMap[] = {
 };
 
 //----------------------------------------------------------------------
-// nsIDOMElement methods
+// Element methods
 
 // forwarded to Element implementations
 
@@ -1434,8 +1433,7 @@ nsSVGElement::DidChangeValue(nsAtom* aName,
                   : static_cast<uint8_t>(MutationEventBinding::ADDITION);
 
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL,
-                               kNotifyDocumentObservers);
+  mozAutoDocUpdate updateBatch(document, kNotifyDocumentObservers);
   // XXX Really, the fourth argument to SetAttrAndNotify should be null if
   // aEmptyOrOldValue does not represent the actual previous value of the
   // attribute, but currently SVG elements do not even use the old attribute
@@ -1508,7 +1506,8 @@ nsSVGElement::GetLengthInfo()
   return LengthAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::LengthAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::LengthAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mLengths[aAttrEnum].Init(mLengthInfo[aAttrEnum].mCtxType,
                            aAttrEnum,
@@ -1858,7 +1857,8 @@ nsSVGElement::GetNumberInfo()
   return NumberAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::NumberAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::NumberAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mNumbers[aAttrEnum].Init(aAttrEnum,
                            mNumberInfo[aAttrEnum].mDefaultValue);
@@ -1920,7 +1920,8 @@ nsSVGElement::GetNumberPairInfo()
   return NumberPairAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::NumberPairAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::NumberPairAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mNumberPairs[aAttrEnum].Init(aAttrEnum,
                                mNumberPairInfo[aAttrEnum].mDefaultValue1,
@@ -1969,7 +1970,8 @@ nsSVGElement::GetIntegerInfo()
   return IntegerAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::IntegerAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::IntegerAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mIntegers[aAttrEnum].Init(aAttrEnum,
                             mIntegerInfo[aAttrEnum].mDefaultValue);
@@ -2031,7 +2033,8 @@ nsSVGElement::GetIntegerPairInfo()
   return IntegerPairAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::IntegerPairAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::IntegerPairAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mIntegerPairs[aAttrEnum].Init(aAttrEnum,
                                 mIntegerPairInfo[aAttrEnum].mDefaultValue1,
@@ -2081,7 +2084,8 @@ nsSVGElement::GetAngleInfo()
   return AngleAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::AngleAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::AngleAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mAngles[aAttrEnum].Init(aAttrEnum,
                           mAngleInfo[aAttrEnum].mDefaultValue,
@@ -2129,7 +2133,8 @@ nsSVGElement::GetBooleanInfo()
   return BooleanAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::BooleanAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::BooleanAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mBooleans[aAttrEnum].Init(aAttrEnum,
                             mBooleanInfo[aAttrEnum].mDefaultValue);
@@ -2168,10 +2173,18 @@ nsSVGElement::GetEnumInfo()
   return EnumAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::EnumAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::EnumAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mEnums[aAttrEnum].Init(aAttrEnum,
                          mEnumInfo[aAttrEnum].mDefaultValue);
+}
+
+void
+nsSVGElement::EnumAttributesInfo::SetUnknownValue(uint8_t aAttrEnum)
+{
+  // Fortunately in SVG every enum's unknown value is 0
+  mEnums[aAttrEnum].Init(aAttrEnum, 0);
 }
 
 void
@@ -2332,12 +2345,14 @@ nsSVGElement::GetStringInfo()
   return StringAttributesInfo(nullptr, nullptr, 0);
 }
 
-void nsSVGElement::StringAttributesInfo::Reset(uint8_t aAttrEnum)
+void
+nsSVGElement::StringAttributesInfo::Reset(uint8_t aAttrEnum)
 {
   mStrings[aAttrEnum].Init(aAttrEnum);
 }
 
-void nsSVGElement::GetStringBaseValue(uint8_t aAttrEnum, nsAString& aResult) const
+void
+nsSVGElement::GetStringBaseValue(uint8_t aAttrEnum, nsAString& aResult) const
 {
   nsSVGElement::StringAttributesInfo info = const_cast<nsSVGElement*>(this)->GetStringInfo();
 
@@ -2350,7 +2365,8 @@ void nsSVGElement::GetStringBaseValue(uint8_t aAttrEnum, nsAString& aResult) con
           *info.mStringInfo[aAttrEnum].mName, aResult);
 }
 
-void nsSVGElement::SetStringBaseValue(uint8_t aAttrEnum, const nsAString& aValue)
+void
+nsSVGElement::SetStringBaseValue(uint8_t aAttrEnum, const nsAString& aValue)
 {
   nsSVGElement::StringAttributesInfo info = GetStringInfo();
 
@@ -2388,7 +2404,7 @@ nsSVGElement::WillChangeStringList(bool aIsConditionalProcessingAttribute,
 {
   nsAtom* name;
   if (aIsConditionalProcessingAttribute) {
-    nsCOMPtr<SVGTests> tests(do_QueryInterface(static_cast<nsIDOMElement*>(this)));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(static_cast<nsIDOMNode*>(this)));
     name = tests->GetAttrName(aAttrEnum);
   } else {
     name = *GetStringListInfo().mStringListInfo[aAttrEnum].mName;

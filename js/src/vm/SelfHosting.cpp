@@ -207,6 +207,22 @@ intrinsic_IsInstanceOfBuiltin(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+template<typename T>
+static bool
+intrinsic_GuardToBuiltin(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 1);
+    MOZ_ASSERT(args[0].isObject());
+
+    if (args[0].toObject().is<T>()) {
+        args.rval().setObject(args[0].toObject());
+        return true;
+    }
+    args.rval().setNull();
+    return true;
+}
+
 /**
  * Self-hosting intrinsic returning the original constructor for a builtin
  * the name of which is the first and only argument.
@@ -1236,8 +1252,13 @@ DangerouslyUnwrapTypedArray(JSContext* cx, JSObject* obj)
     // An unwrapped pointer to an object potentially on the other side of a
     // compartment boundary!  Isn't this such fun?
     JSObject* unwrapped = CheckedUnwrap(obj);
+    if (!unwrapped) {
+        ReportAccessDenied(cx);
+        return nullptr;
+    }
+
     if (!unwrapped->is<TypedArrayObject>()) {
-        // By *appearances* this can't happen, as self-hosted TypedArraySet
+        // By *appearances* this can't happen, as self-hosted code
         // checked this.  But.  Who's to say a GC couldn't happen between
         // the check that this value was a typed array, and this extraction
         // occurring?  A GC might turn a cross-compartment wrapper |obj| into
@@ -1572,6 +1593,113 @@ intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+// The specification requires us to perform bitwise copying when |sourceType|
+// and |targetType| are the same (ES2017, §22.2.3.24, step 15). Additionally,
+// as an optimization, we can also perform bitwise copying when |sourceType|
+// and |targetType| have compatible bit-level representations.
+static bool
+IsTypedArrayBitwiseSlice(Scalar::Type sourceType, Scalar::Type targetType)
+{
+    switch (sourceType) {
+      case Scalar::Int8:
+        return targetType == Scalar::Int8 || targetType == Scalar::Uint8;
+
+      case Scalar::Uint8:
+      case Scalar::Uint8Clamped:
+        return targetType == Scalar::Int8 || targetType == Scalar::Uint8 ||
+               targetType == Scalar::Uint8Clamped;
+
+      case Scalar::Int16:
+      case Scalar::Uint16:
+        return targetType == Scalar::Int16 || targetType == Scalar::Uint16;
+
+      case Scalar::Int32:
+      case Scalar::Uint32:
+        return targetType == Scalar::Int32 || targetType == Scalar::Uint32;
+
+      case Scalar::Float32:
+        return targetType == Scalar::Float32;
+
+      case Scalar::Float64:
+        return targetType == Scalar::Float64;
+
+      default:
+        MOZ_CRASH("IsTypedArrayBitwiseSlice with a bogus typed array type");
+    }
+}
+
+static bool
+intrinsic_TypedArrayBitwiseSlice(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 4);
+    MOZ_ASSERT(args[0].isObject());
+    MOZ_ASSERT(args[1].isObject());
+    MOZ_ASSERT(args[2].isInt32());
+    MOZ_ASSERT(args[3].isInt32());
+
+    Rooted<TypedArrayObject*> source(cx, &args[0].toObject().as<TypedArrayObject>());
+    MOZ_ASSERT(!source->hasDetachedBuffer());
+
+    // As directed by |DangerouslyUnwrapTypedArray|, sigil this pointer and all
+    // variables derived from it to counsel extreme caution here.
+    Rooted<TypedArrayObject*> unsafeTypedArrayCrossCompartment(cx);
+    unsafeTypedArrayCrossCompartment = DangerouslyUnwrapTypedArray(cx, &args[1].toObject());
+    if (!unsafeTypedArrayCrossCompartment)
+        return false;
+    MOZ_ASSERT(!unsafeTypedArrayCrossCompartment->hasDetachedBuffer());
+
+    Scalar::Type sourceType = source->type();
+    if (!IsTypedArrayBitwiseSlice(sourceType, unsafeTypedArrayCrossCompartment->type())) {
+        args.rval().setBoolean(false);
+        return true;
+    }
+
+    MOZ_ASSERT(args[2].toInt32() >= 0);
+    uint32_t sourceOffset = uint32_t(args[2].toInt32());
+
+    MOZ_ASSERT(args[3].toInt32() >= 0);
+    uint32_t count = uint32_t(args[3].toInt32());
+
+    MOZ_ASSERT(count > 0 && count <= source->length());
+    MOZ_ASSERT(sourceOffset <= source->length() - count);
+    MOZ_ASSERT(count <= unsafeTypedArrayCrossCompartment->length());
+
+    size_t elementSize = TypedArrayElemSize(sourceType);
+    MOZ_ASSERT(elementSize == TypedArrayElemSize(unsafeTypedArrayCrossCompartment->type()));
+
+    SharedMem<uint8_t*> sourceData =
+        source->viewDataEither().cast<uint8_t*>() + sourceOffset * elementSize;
+
+    SharedMem<uint8_t*> unsafeTargetDataCrossCompartment =
+        unsafeTypedArrayCrossCompartment->viewDataEither().cast<uint8_t*>();
+
+    uint32_t byteLength = count * elementSize;
+
+    // The same-type case requires exact copying preserving the bit-level
+    // encoding of the source data, so use memcpy if possible. If source and
+    // target are the same buffer, we can't use memcpy (or memmove), because
+    // the specification requires sequential copying of the values. This case
+    // is only possible if a @@species constructor created a specifically
+    // crafted typed array. It won't happen in normal code and hence doesn't
+    // need to be optimized.
+    if (!TypedArrayObject::sameBuffer(source, unsafeTypedArrayCrossCompartment)) {
+        jit::AtomicOperations::memcpySafeWhenRacy(unsafeTargetDataCrossCompartment,
+                                                  sourceData,
+                                                  byteLength);
+    } else {
+        using namespace jit;
+
+        for (; byteLength > 0; byteLength--) {
+            AtomicOperations::storeSafeWhenRacy(unsafeTargetDataCrossCompartment++,
+                                                AtomicOperations::loadSafeWhenRacy(sourceData++));
+        }
+    }
+
+    args.rval().setBoolean(true);
+    return true;
+}
+
 static bool
 intrinsic_RegExpCreate(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1797,7 +1925,7 @@ intrinsic_RuntimeDefaultLocale(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    JSString* jslocale = JS_NewStringCopyZ(cx, locale);
+    JSString* jslocale = NewStringCopyZ<CanGC>(cx, locale);
     if (!jslocale)
         return false;
 
@@ -2018,25 +2146,26 @@ intrinsic_HostResolveImportedModule(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 2);
-    MOZ_ASSERT(args[0].toObject().is<ModuleObject>());
-    MOZ_ASSERT(args[1].isString());
+    RootedModuleObject module(cx, &args[0].toObject().as<ModuleObject>());
+    RootedString specifier(cx, args[1].toString());
 
-    RootedFunction moduleResolveHook(cx, cx->global()->moduleResolveHook());
+    JS::ModuleResolveHook moduleResolveHook = cx->runtime()->moduleResolveHook;
     if (!moduleResolveHook) {
         JS_ReportErrorASCII(cx, "Module resolve hook not set");
         return false;
     }
 
-    RootedValue result(cx);
-    if (!JS_CallFunction(cx, nullptr, moduleResolveHook, args, &result))
+    RootedObject result(cx);
+    result = moduleResolveHook(cx, module, specifier);
+    if (!result)
         return false;
 
-    if (!result.isObject() || !result.toObject().is<ModuleObject>()) {
+    if (!result->is<ModuleObject>()) {
         JS_ReportErrorASCII(cx, "Module resolve hook did not return Module object");
         return false;
     }
 
-    args.rval().set(result);
+    args.rval().setObject(*result);
     return true;
 }
 
@@ -2358,18 +2487,18 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("_SetCanonicalName",       intrinsic_SetCanonicalName,        2,0),
 
-    JS_INLINABLE_FN("IsArrayIterator",
-                    intrinsic_IsInstanceOfBuiltin<ArrayIteratorObject>, 1,0,
-                    IntrinsicIsArrayIterator),
-    JS_INLINABLE_FN("IsMapIterator",
-                    intrinsic_IsInstanceOfBuiltin<MapIteratorObject>,   1,0,
-                    IntrinsicIsMapIterator),
-    JS_INLINABLE_FN("IsSetIterator",
-                    intrinsic_IsInstanceOfBuiltin<SetIteratorObject>,   1,0,
-                    IntrinsicIsSetIterator),
-    JS_INLINABLE_FN("IsStringIterator",
-                    intrinsic_IsInstanceOfBuiltin<StringIteratorObject>, 1,0,
-                    IntrinsicIsStringIterator),
+    JS_INLINABLE_FN("GuardToArrayIterator",
+                    intrinsic_GuardToBuiltin<ArrayIteratorObject>, 1,0,
+                    IntrinsicGuardToArrayIterator),
+    JS_INLINABLE_FN("GuardToMapIterator",
+                    intrinsic_GuardToBuiltin<MapIteratorObject>,   1,0,
+                    IntrinsicGuardToMapIterator),
+    JS_INLINABLE_FN("GuardToSetIterator",
+                    intrinsic_GuardToBuiltin<SetIteratorObject>,   1,0,
+                    IntrinsicGuardToSetIterator),
+    JS_INLINABLE_FN("GuardToStringIterator",
+                    intrinsic_GuardToBuiltin<StringIteratorObject>, 1,0,
+                    IntrinsicGuardToStringIterator),
 
     JS_FN("_CreateMapIterationResultPair", intrinsic_CreateMapIterationResultPair, 0, 0),
     JS_INLINABLE_FN("_GetNextMapEntryForIterator", intrinsic_GetNextMapEntryForIterator, 2,0,
@@ -2397,12 +2526,12 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("GeneratorIsRunning",      intrinsic_GeneratorIsRunning,      1,0),
     JS_FN("GeneratorSetClosed",      intrinsic_GeneratorSetClosed,      1,0),
 
-    JS_INLINABLE_FN("IsArrayBuffer",
-          intrinsic_IsInstanceOfBuiltin<ArrayBufferObject>,             1,0,
-          IntrinsicIsArrayBuffer),
-    JS_INLINABLE_FN("IsSharedArrayBuffer",
-          intrinsic_IsInstanceOfBuiltin<SharedArrayBufferObject>,       1,0,
-          IntrinsicIsSharedArrayBuffer),
+    JS_INLINABLE_FN("GuardToArrayBuffer",
+          intrinsic_GuardToBuiltin<ArrayBufferObject>,             1,0,
+          IntrinsicGuardToArrayBuffer),
+    JS_INLINABLE_FN("GuardToSharedArrayBuffer",
+          intrinsic_GuardToBuiltin<SharedArrayBufferObject>,       1,0,
+          IntrinsicGuardToSharedArrayBuffer),
     JS_FN("IsWrappedArrayBuffer",
           intrinsic_IsWrappedArrayBuffer<ArrayBufferObject>,            1,0),
     JS_FN("IsWrappedSharedArrayBuffer",
@@ -2457,6 +2586,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("SetDisjointTypedElements",intrinsic_SetDisjointTypedElements,3,0,
                     IntrinsicSetDisjointTypedElements),
 
+    JS_FN("TypedArrayBitwiseSlice", intrinsic_TypedArrayBitwiseSlice, 4, 0),
+
     JS_FN("CallArrayBufferMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<ArrayBufferObject>>, 2, 0),
     JS_FN("CallSharedArrayBufferMethodIfWrapped",
@@ -2467,12 +2598,12 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("CallGeneratorMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<GeneratorObject>>, 2, 0),
 
-    JS_INLINABLE_FN("IsMapObject", intrinsic_IsInstanceOfBuiltin<MapObject>, 1, 0,
-                    IntrinsicIsMapObject),
+    JS_INLINABLE_FN("GuardToMapObject", intrinsic_GuardToBuiltin<MapObject>, 1, 0,
+                    IntrinsicGuardToMapObject),
     JS_FN("CallMapMethodIfWrapped", CallNonGenericSelfhostedMethod<Is<MapObject>>, 2, 0),
 
-    JS_INLINABLE_FN("IsSetObject", intrinsic_IsInstanceOfBuiltin<SetObject>, 1, 0,
-                    IntrinsicIsSetObject),
+    JS_INLINABLE_FN("GuardToSetObject", intrinsic_GuardToBuiltin<SetObject>, 1, 0,
+                    IntrinsicGuardToSetObject),
     JS_FN("CallSetMethodIfWrapped", CallNonGenericSelfhostedMethod<Is<SetObject>>, 2, 0),
 
     // See builtin/TypedObject.h for descriptors of the typedobj functions.
@@ -2547,21 +2678,21 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("intl_toLocaleLowerCase", intl_toLocaleLowerCase, 2,0),
     JS_FN("intl_toLocaleUpperCase", intl_toLocaleUpperCase, 2,0),
 
-    JS_INLINABLE_FN("IsCollator",
-                    intrinsic_IsInstanceOfBuiltin<CollatorObject>, 1,0,
-                    IntlIsCollator),
-    JS_INLINABLE_FN("IsDateTimeFormat",
-                    intrinsic_IsInstanceOfBuiltin<DateTimeFormatObject>, 1,0,
-                    IntlIsDateTimeFormat),
-    JS_INLINABLE_FN("IsNumberFormat",
-                    intrinsic_IsInstanceOfBuiltin<NumberFormatObject>, 1,0,
-                    IntlIsNumberFormat),
-    JS_INLINABLE_FN("IsPluralRules",
-                    intrinsic_IsInstanceOfBuiltin<PluralRulesObject>, 1,0,
-                    IntlIsPluralRules),
-    JS_INLINABLE_FN("IsRelativeTimeFormat",
-                    intrinsic_IsInstanceOfBuiltin<RelativeTimeFormatObject>, 1,0,
-                    IntlIsRelativeTimeFormat),
+    JS_INLINABLE_FN("GuardToCollator",
+                    intrinsic_GuardToBuiltin<CollatorObject>, 1,0,
+                    IntlGuardToCollator),
+    JS_INLINABLE_FN("GuardToDateTimeFormat",
+                    intrinsic_GuardToBuiltin<DateTimeFormatObject>, 1,0,
+                    IntlGuardToDateTimeFormat),
+    JS_INLINABLE_FN("GuardToNumberFormat",
+                    intrinsic_GuardToBuiltin<NumberFormatObject>, 1,0,
+                    IntlGuardToNumberFormat),
+    JS_INLINABLE_FN("GuardToPluralRules",
+                    intrinsic_GuardToBuiltin<PluralRulesObject>, 1,0,
+                    IntlGuardToPluralRules),
+    JS_INLINABLE_FN("GuardToRelativeTimeFormat",
+                    intrinsic_GuardToBuiltin<RelativeTimeFormatObject>, 1,0,
+                    IntlGuardToRelativeTimeFormat),
     JS_FN("GetDateTimeFormatConstructor",
           intrinsic_GetBuiltinIntlConstructor<GlobalObject::getOrCreateDateTimeFormatConstructor>,
           0,0),
@@ -2680,7 +2811,7 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
         &shgClassOps
     };
 
-    AutoCompartmentUnchecked ac(cx, compartment);
+    AutoRealmUnchecked ar(cx, compartment);
     Rooted<GlobalObject*> shg(cx, GlobalObject::createInternal(cx, &shgClass));
     if (!shg)
         return nullptr;
@@ -2807,7 +2938,7 @@ JSRuntime::initSelfHosting(JSContext* cx)
     if (!shg)
         return false;
 
-    JSAutoCompartment ac(cx, shg);
+    JSAutoRealm ar(cx, shg);
 
     /*
      * Set a temporary error reporter printing to stderr because it is too

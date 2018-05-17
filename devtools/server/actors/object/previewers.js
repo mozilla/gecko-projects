@@ -361,7 +361,17 @@ function GenericObject(objectActor, grip, rawObj, specialStringBehavior = false)
   };
 
   try {
-    names = obj.getOwnPropertyNames();
+    if (ObjectUtils.isStorage(obj)) {
+      // local and session storage cannot be iterated over using
+      // Object.getOwnPropertyNames() because it skips keys that are duplicated
+      // on the prototype e.g. "key", "getKeys" so we need to gather the real
+      // keys using the storage.key() function.
+      for (let j = 0; j < rawObj.length; j++) {
+        names.push(rawObj.key(j));
+      }
+    } else {
+      names = obj.getOwnPropertyNames();
+    }
     symbols = obj.getOwnPropertySymbols();
   } catch (ex) {
     // Calling getOwnPropertyNames() on some wrapped native prototypes is not
@@ -536,7 +546,6 @@ previewers.Object = [
         obj.class != "CSSRuleList" &&
         obj.class != "MediaList" &&
         obj.class != "StyleSheetList" &&
-        obj.class != "CSSValueList" &&
         obj.class != "NamedNodeMap" &&
         obj.class != "FileList" &&
         obj.class != "NodeList") {
@@ -606,7 +615,7 @@ previewers.Object = [
 
     if (rawObj instanceof Ci.nsIDOMDocument && rawObj.location) {
       preview.location = hooks.createValueGrip(rawObj.location.href);
-    } else if (rawObj instanceof Ci.nsIDOMDocumentFragment) {
+    } else if (obj.class == "DocumentFragment") {
       preview.childNodesLength = rawObj.childNodes.length;
 
       if (hooks.getGripDepth() < 2) {
@@ -619,7 +628,7 @@ previewers.Object = [
           }
         }
       }
-    } else if (rawObj instanceof Ci.nsIDOMElement) {
+    } else if (Element.isInstance(rawObj)) {
       // For HTML elements (in an HTML document, at least), the nodeName is an
       // uppercased version of the actual element name.  Check for HTML
       // elements, that is elements in the HTML namespace, and lowercase the
@@ -646,7 +655,7 @@ previewers.Object = [
   },
 
   function DOMEvent({obj, hooks}, grip, rawObj) {
-    if (isWorker || !rawObj || !(rawObj instanceof Ci.nsIDOMEvent)) {
+    if (isWorker || !rawObj || !Event.isInstance(rawObj)) {
       return false;
     }
 

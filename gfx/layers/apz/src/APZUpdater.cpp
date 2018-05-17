@@ -9,6 +9,7 @@
 #include "APZCTreeManager.h"
 #include "AsyncPanZoomController.h"
 #include "base/task.h"
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/SynchronousTask.h"
@@ -19,14 +20,14 @@ namespace mozilla {
 namespace layers {
 
 StaticMutex APZUpdater::sWindowIdLock;
-std::unordered_map<uint64_t, APZUpdater*> APZUpdater::sWindowIdMap;
+StaticAutoPtr<std::unordered_map<uint64_t, APZUpdater*>> APZUpdater::sWindowIdMap;
 
 
-APZUpdater::APZUpdater(const RefPtr<APZCTreeManager>& aApz)
+APZUpdater::APZUpdater(const RefPtr<APZCTreeManager>& aApz,
+                       bool aIsUsingWebRender)
   : mApz(aApz)
-#ifdef DEBUG
-  , mUpdaterThreadQueried(false)
-#endif
+  , mIsUsingWebRender(aIsUsingWebRender)
+  , mThreadIdLock("APZUpdater::ThreadIdLock")
   , mQueueLock("APZUpdater::QueueLock")
 {
   MOZ_ASSERT(aApz);
@@ -39,8 +40,9 @@ APZUpdater::~APZUpdater()
 
   StaticMutexAutoLock lock(sWindowIdLock);
   if (mWindowId) {
+    MOZ_ASSERT(sWindowIdMap);
     // Ensure that ClearTree was called and the task got run
-    MOZ_ASSERT(sWindowIdMap.find(wr::AsUint64(*mWindowId)) == sWindowIdMap.end());
+    MOZ_ASSERT(sWindowIdMap->find(wr::AsUint64(*mWindowId)) == sWindowIdMap->end());
   }
 }
 
@@ -56,15 +58,22 @@ APZUpdater::SetWebRenderWindowId(const wr::WindowId& aWindowId)
   StaticMutexAutoLock lock(sWindowIdLock);
   MOZ_ASSERT(!mWindowId);
   mWindowId = Some(aWindowId);
-  sWindowIdMap[wr::AsUint64(aWindowId)] = this;
+  if (!sWindowIdMap) {
+    sWindowIdMap = new std::unordered_map<uint64_t, APZUpdater*>();
+    NS_DispatchToMainThread(
+      NS_NewRunnableFunction("APZUpdater::ClearOnShutdown", [] {
+        ClearOnShutdown(&sWindowIdMap);
+      }
+    ));
+  }
+  (*sWindowIdMap)[wr::AsUint64(aWindowId)] = this;
 }
 
 /*static*/ void
 APZUpdater::SetUpdaterThread(const wr::WrWindowId& aWindowId)
 {
   if (RefPtr<APZUpdater> updater = GetUpdater(aWindowId)) {
-    // Ensure nobody tried to use the updater thread before this point.
-    MOZ_ASSERT(!updater->mUpdaterThreadQueried);
+    MutexAutoLock lock(updater->mThreadIdLock);
     updater->mUpdaterThreadId = Some(PlatformThread::CurrentId());
   }
 }
@@ -147,7 +156,8 @@ APZUpdater::ClearTree(LayersId aRootLayersId)
       // and avoid leaving a dangling pointer to this object.
       StaticMutexAutoLock lock(sWindowIdLock);
       if (self->mWindowId) {
-        sWindowIdMap.erase(wr::AsUint64(*(self->mWindowId)));
+        MOZ_ASSERT(sWindowIdMap);
+        sWindowIdMap->erase(wr::AsUint64(*(self->mWindowId)));
       }
     }
   ));
@@ -218,6 +228,30 @@ APZUpdater::UpdateScrollDataAndTreeState(LayersId aRootLayerTreeId,
           WebRenderScrollDataWrapper(*self, &(root->second)),
           aScrollData.IsFirstPaint(), aOriginatingLayersId,
           aScrollData.GetPaintSequenceNumber());
+    }
+  ));
+}
+
+void
+APZUpdater::UpdateScrollOffsets(LayersId aRootLayerTreeId,
+                                LayersId aOriginatingLayersId,
+                                ScrollUpdatesMap&& aUpdates,
+                                uint32_t aPaintSequenceNumber)
+{
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  RefPtr<APZUpdater> self = this;
+  RunOnUpdaterThread(aOriginatingLayersId, NS_NewRunnableFunction(
+    "APZUpdater::UpdateScrollOffsets",
+    [=,updates=Move(aUpdates)]() {
+      self->mScrollData[aOriginatingLayersId].ApplyUpdates(updates, aPaintSequenceNumber);
+      auto root = self->mScrollData.find(aRootLayerTreeId);
+      if (root == self->mScrollData.end()) {
+        return;
+      }
+      self->mApz->UpdateHitTestingTree(aRootLayerTreeId,
+          WebRenderScrollDataWrapper(*self, &(root->second)),
+          /*isFirstPaint*/ false, aOriginatingLayersId,
+          aPaintSequenceNumber);
     }
   ));
 }
@@ -334,6 +368,13 @@ APZUpdater::RunOnUpdaterThread(LayersId aLayersId, already_AddRefed<Runnable> aT
 {
   RefPtr<Runnable> task = aTask;
 
+  // In the scenario where UsingWebRenderUpdaterThread() is true, this function
+  // might get called early (before mUpdaterThreadId is set). In that case
+  // IsUpdaterThread() will return false and we'll queue the task onto
+  // mUpdaterQueue. This is fine; the task is still guaranteed to run (barring
+  // catastrophic failure) because the WakeSceneBuilder call will still trigger
+  // the callback to run tasks.
+
   if (IsUpdaterThread()) {
     task->Run();
     return;
@@ -345,20 +386,35 @@ APZUpdater::RunOnUpdaterThread(LayersId aLayersId, already_AddRefed<Runnable> aT
     // during the callback from the updater thread, which we trigger by the
     // call to WakeSceneBuilder.
 
+    bool sendWakeMessage = true;
     { // scope lock
       MutexAutoLock lock(mQueueLock);
+      for (const auto& queuedTask : mUpdaterQueue) {
+        if (queuedTask.mLayersId == aLayersId) {
+          // If there's already a task in the queue with this layers id, then
+          // we must have previously sent a WakeSceneBuilder message (when
+          // adding the first task with this layers id to the queue). Either
+          // that hasn't been fully processed yet, or the layers id is blocked
+          // waiting for an epoch - in either case there's no point in sending
+          // another WakeSceneBuilder message.
+          sendWakeMessage = false;
+          break;
+        }
+      }
       mUpdaterQueue.push_back(QueuedTask { aLayersId, task });
     }
-    RefPtr<wr::WebRenderAPI> api = mApz->GetWebRenderAPI();
-    if (api) {
-      api->WakeSceneBuilder();
-    } else {
-      // Not sure if this can happen, but it might be possible. If it does,
-      // the task is in the queue, but if we didn't get a WebRenderAPI it
-      // might never run, or it might run later if we manage to get a
-      // WebRenderAPI later. For now let's just emit a warning, this can
-      // probably be upgraded to an assert later.
-      NS_WARNING("Possibly dropping task posted to updater thread");
+    if (sendWakeMessage) {
+      RefPtr<wr::WebRenderAPI> api = mApz->GetWebRenderAPI();
+      if (api) {
+        api->WakeSceneBuilder();
+      } else {
+        // Not sure if this can happen, but it might be possible. If it does,
+        // the task is in the queue, but if we didn't get a WebRenderAPI it
+        // might never run, or it might run later if we manage to get a
+        // WebRenderAPI later. For now let's just emit a warning, this can
+        // probably be upgraded to an assert later.
+        NS_WARNING("Possibly dropping task posted to updater thread");
+      }
     }
     return;
   }
@@ -375,7 +431,12 @@ bool
 APZUpdater::IsUpdaterThread() const
 {
   if (UsingWebRenderUpdaterThread()) {
-    return PlatformThread::CurrentId() == *mUpdaterThreadId;
+    // If the updater thread id isn't set yet then we cannot be running on the
+    // updater thread (because we will have the thread id before we run any
+    // C++ code on it, and this function is only ever invoked from C++ code),
+    // so return false in that scenario.
+    MutexAutoLock lock(mThreadIdLock);
+    return mUpdaterThreadId && PlatformThread::CurrentId() == *mUpdaterThreadId;
   }
   return CompositorThreadHolder::IsInCompositorThread();
 }
@@ -394,21 +455,7 @@ APZUpdater::RunOnControllerThread(LayersId aLayersId, already_AddRefed<Runnable>
 bool
 APZUpdater::UsingWebRenderUpdaterThread() const
 {
-  if (!gfxPrefs::WebRenderAsyncSceneBuild()) {
-    return false;
-  }
-  // If mUpdaterThreadId is not set at the point that this is called, then
-  // that means that either (a) WebRender is not enabled for the compositor
-  // to which this APZUpdater is attached or (b) we are attempting to do
-  // something updater-related before WebRender is up and running. In case
-  // (a) falling back to the compositor thread is correct, and in case (b)
-  // we should stop doing the updater-related thing so early. We catch this
-  // case by setting the mUpdaterThreadQueried flag and asserting on WR
-  // initialization.
-#ifdef DEBUG
-  mUpdaterThreadQueried = true;
-#endif
-  return mUpdaterThreadId.isSome();
+  return (mIsUsingWebRender && gfxPrefs::WebRenderAsyncSceneBuild());
 }
 
 /*static*/ already_AddRefed<APZUpdater>
@@ -416,9 +463,11 @@ APZUpdater::GetUpdater(const wr::WrWindowId& aWindowId)
 {
   RefPtr<APZUpdater> updater;
   StaticMutexAutoLock lock(sWindowIdLock);
-  auto it = sWindowIdMap.find(wr::AsUint64(aWindowId));
-  if (it != sWindowIdMap.end()) {
-    updater = it->second;
+  if (sWindowIdMap) {
+    auto it = sWindowIdMap->find(wr::AsUint64(aWindowId));
+    if (it != sWindowIdMap->end()) {
+      updater = it->second;
+    }
   }
   return updater.forget();
 }

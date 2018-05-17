@@ -12,7 +12,6 @@ const ServerSocket = CC(
     "initSpecialConnection");
 
 ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.import("chrome://marionette/content/assert.js");
@@ -27,30 +26,31 @@ const {
   Message,
   Response,
 } = ChromeUtils.import("chrome://marionette/content/message.js", {});
+const {MarionettePrefs} = ChromeUtils.import("chrome://marionette/content/prefs.js", {});
 const {DebuggerTransport} = ChromeUtils.import("chrome://marionette/content/transport.js", {});
 
 const logger = Log.repository.getLogger("Marionette");
 
 const {KeepWhenOffline, LoopbackOnly} = Ci.nsIServerSocket;
 
-this.EXPORTED_SYMBOLS = ["server"];
+this.EXPORTED_SYMBOLS = [
+  "TCPConnection",
+  "TCPListener",
+];
 
 /** @namespace */
 this.server = {};
 
 const PROTOCOL_VERSION = 3;
 
-const PREF_CONTENT_LISTENER = "marionette.contentListener";
-const PREF_PORT = "marionette.port";
-
 /**
  * Bootstraps Marionette and handles incoming client connections.
  *
  * Starting the Marionette server will open a TCP socket sporting the
- * debugger transport interface on the provided <var>port</var>.
- * For every new connection, a {@link server.TCPConnection} is created.
+ * debugger transport interface on the provided `port`.  For every
+ * new connection, a {@link TCPConnection} is created.
  */
-server.TCPListener = class {
+class TCPListener {
   /**
    * @param {number} port
    *     Port for server to listen to.
@@ -64,7 +64,7 @@ server.TCPListener = class {
   }
 
   /**
-   * Function produces a GeckoDriver.
+   * Function produces a {@link GeckoDriver}.
    *
    * Determines the application to initialise the driver with.
    *
@@ -72,7 +72,7 @@ server.TCPListener = class {
    *     A driver instance.
    */
   driverFactory() {
-    Preferences.set(PREF_CONTENT_LISTENER, false);
+    MarionettePrefs.contentListener = false;
     return new GeckoDriver(Services.appinfo.ID, this);
   }
 
@@ -90,13 +90,15 @@ server.TCPListener = class {
         this.port = this.socket.port;
 
         this.socket.asyncListen(this);
-        logger.debug("New connections are accepted");
+        logger.info(`Listening on port ${this.port}`);
       }
 
     } else if (this.socket) {
+      // Note that closing the server socket will not close currently active
+      // connections.
       this.socket.close();
       this.socket = null;
-      logger.debug("New connections will no longer be accepted");
+      logger.info(`Stopped listening on port ${this.port}`);
     }
   }
 
@@ -114,7 +116,7 @@ server.TCPListener = class {
 
     // Start socket server and listening for connection attempts
     this.acceptConnections = true;
-    Preferences.set(PREF_PORT, this.port);
+    MarionettePrefs.port = this.port;
     this.alive = true;
   }
 
@@ -133,7 +135,7 @@ server.TCPListener = class {
     let output = clientSocket.openOutputStream(0, 0, 0);
     let transport = new DebuggerTransport(input, output);
 
-    let conn = new server.TCPConnection(
+    let conn = new TCPConnection(
         this.nextConnID++, transport, this.driverFactory.bind(this));
     conn.onclose = this.onConnectionClosed.bind(this);
     this.conns.add(conn);
@@ -148,7 +150,8 @@ server.TCPListener = class {
     logger.debug(`Closed connection ${conn.id}`);
     this.conns.delete(conn);
   }
-};
+}
+this.TCPListener = TCPListener;
 
 /**
  * Marionette client connection.
@@ -163,7 +166,7 @@ server.TCPListener = class {
  * @param {function(): GeckoDriver} driverFactory
  *     Factory function that produces a {@link GeckoDriver}.
  */
-server.TCPConnection = class {
+class TCPConnection {
   constructor(connID, transport, driverFactory) {
     this.id = connID;
     this.conn = transport;
@@ -308,7 +311,7 @@ server.TCPConnection = class {
    *     Message ID to respond to.  If it is not a number, -1 is used.
    *
    * @return {Response}
-   *     Response to the message with <var>msgID</var>.
+   *     Response to the message with `msgID`.
    */
   createResponse(msgID) {
     if (typeof msgID != "number") {
@@ -402,6 +405,7 @@ server.TCPConnection = class {
   }
 
   toString() {
-    return `[object server.TCPConnection ${this.id}]`;
+    return `[object TCPConnection ${this.id}]`;
   }
-};
+}
+this.TCPConnection = TCPConnection;

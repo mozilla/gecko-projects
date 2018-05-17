@@ -85,18 +85,21 @@ describe("Top Sites Feed", () => {
       "lib/ActivityStreamStorage.jsm": {ActivityStreamStorage: function Fake() {}, getDefaultOptions}
     }));
     feed = new TopSitesFeed();
-    feed._storage = {
-      init: sandbox.stub().returns(Promise.resolve()),
-      get: sandbox.stub().returns(Promise.resolve()),
-      set: sandbox.stub().returns(Promise.resolve())
+    const storage = {
+      init: sandbox.stub().resolves(),
+      get: sandbox.stub().resolves(),
+      set: sandbox.stub().resolves()
     };
+    // Setup for tests that don't call `init` but require feed.storage
+    feed._storage = storage;
     feed.store = {
       dispatch: sinon.spy(),
       getState() { return this.state; },
       state: {
         Prefs: {values: {filterAdult: false, topSitesRows: 2}},
         TopSites: {rows: Array(12).fill("site")}
-      }
+      },
+      dbStorage: {getDbTable: sandbox.stub().returns(storage)}
     };
     feed.dedupe.group = (...sites) => sites;
     links = FAKE_LINKS;
@@ -163,10 +166,18 @@ describe("Top Sites Feed", () => {
     describe("general", () => {
       it("should get the links from NewTabUtils", async () => {
         const result = await feed.getLinksWithDefaults();
-        const reference = links.map(site => Object.assign({}, site, {hostname: shortURLStub(site)}));
+        const reference = links.map(site => Object.assign({}, site, {
+          hostname: shortURLStub(site),
+          typedBonus: true
+        }));
 
         assert.deepEqual(result, reference);
         assert.calledOnce(global.NewTabUtils.activityStreamLinks.getTopSites);
+      });
+      it("should indicate the links get typed bonus", async () => {
+        const result = await feed.getLinksWithDefaults();
+
+        assert.propertyVal(result[0], "typedBonus", true);
       });
       it("should not filter out adult sites when pref is false", async () => {
         await feed.getLinksWithDefaults();
@@ -190,6 +201,7 @@ describe("Top Sites Feed", () => {
         const topsite = {
           frecency: FAKE_FRECENCY,
           hostname: shortURLStub({url}),
+          typedBonus: true,
           url
         };
         const blockedDefaultSite = {url: "https://foo.com"};
@@ -219,7 +231,11 @@ describe("Top Sites Feed", () => {
         links = [{frecency: FAKE_FRECENCY, url: "foo.com"}];
 
         const result = await feed.getLinksWithDefaults();
-        const reference = [...links, ...DEFAULT_TOP_SITES].map(s => Object.assign({}, s, {hostname: shortURLStub(s)}));
+        const reference = [...links, ...DEFAULT_TOP_SITES].map(s =>
+          Object.assign({}, s, {
+            hostname: shortURLStub(s),
+            typedBonus: true
+          }));
 
         assert.deepEqual(result, reference);
       });
@@ -230,7 +246,11 @@ describe("Top Sites Feed", () => {
           links.push({frecency: FAKE_FRECENCY, url: `foo${i}.com`});
         }
         const result = await feed.getLinksWithDefaults();
-        const reference = [...links, DEFAULT_TOP_SITES[0]].map(s => Object.assign({}, s, {hostname: shortURLStub(s)}));
+        const reference = [...links, DEFAULT_TOP_SITES[0]].map(s =>
+          Object.assign({}, s, {
+            hostname: shortURLStub(s),
+            typedBonus: true
+          }));
 
         assert.lengthOf(result, numVisible);
         assert.deepEqual(result, reference);
@@ -441,14 +461,41 @@ describe("Top Sites Feed", () => {
       assert.calledWith(feed._fetchScreenshot, sinon.match.object, "custom");
     });
   });
+  describe("#init", () => {
+    it("should call refresh (broadcast:true)", async () => {
+      sandbox.stub(feed, "refresh");
+
+      await feed.init();
+
+      assert.calledOnce(feed.refresh);
+      assert.calledWithExactly(feed.refresh, {broadcast: true});
+    });
+    it("should initialise the storage", async () => {
+      await feed.init();
+
+      assert.calledOnce(feed.store.dbStorage.getDbTable);
+      assert.calledWithExactly(feed.store.dbStorage.getDbTable, "sectionPrefs");
+    });
+  });
   describe("#refresh", () => {
     beforeEach(() => {
       sandbox.stub(feed, "_fetchIcon");
     });
-    it("should initialise _tippyTopProvider if it's not already initialised", async () => {
+    it("should wait for tippytop to initialize", async () => {
       feed._tippyTopProvider.initialized = false;
-      await feed.refresh({broadcast: true});
-      assert.ok(feed._tippyTopProvider.initialized);
+      sinon.stub(feed._tippyTopProvider, "init").resolves();
+
+      await feed.refresh();
+
+      assert.calledOnce(feed._tippyTopProvider.init);
+    });
+    it("should not init the tippyTopProvider if already initialized", async () => {
+      feed._tippyTopProvider.initialized = true;
+      sinon.stub(feed._tippyTopProvider, "init").resolves();
+
+      await feed.refresh();
+
+      assert.notCalled(feed._tippyTopProvider.init);
     });
     it("should broadcast TOP_SITES_UPDATED", async () => {
       sinon.stub(feed, "getLinksWithDefaults").returns(Promise.resolve([]));
@@ -463,7 +510,10 @@ describe("Top Sites Feed", () => {
     });
     it("should dispatch an action with the links returned", async () => {
       await feed.refresh({broadcast: true});
-      const reference = links.map(site => Object.assign({}, site, {hostname: shortURLStub(site)}));
+      const reference = links.map(site => Object.assign({}, site, {
+        hostname: shortURLStub(site),
+        typedBonus: true
+      }));
 
       assert.calledOnce(feed.store.dispatch);
       assert.propertyVal(feed.store.dispatch.firstCall.args[0], "type", at.TOP_SITES_UPDATED);
@@ -491,6 +541,18 @@ describe("Top Sites Feed", () => {
       await feed.refresh({broadcast: false});
 
       assert.notCalled(feed._storage.init);
+    });
+    it("should catch indexedDB errors", async () => {
+      feed._storage.get.throws(new Error());
+      globals.sandbox.spy(global.Cu, "reportError");
+
+      try {
+        await feed.refresh({broadcast: false});
+      } catch (e) {
+        assert.fails();
+      }
+
+      assert.calledOnce(Cu.reportError);
     });
   });
   describe("#updateSectionPrefs", () => {
@@ -701,10 +763,10 @@ describe("Top Sites Feed", () => {
       assert.calledOnce(feed.store.dispatch);
       assert.propertyVal(feed.store.dispatch.firstCall.args[0], "type", at.TOP_SITES_UPDATED);
     });
-    it("should call refresh on INIT action", async () => {
-      sinon.stub(feed, "refresh");
-      await feed.onAction({type: at.INIT});
-      assert.calledOnce(feed.refresh);
+    it("should call init on INIT action", async () => {
+      sinon.stub(feed, "init");
+      feed.onAction({type: at.INIT});
+      assert.calledOnce(feed.init);
     });
     it("should call refresh on MIGRATION_COMPLETED action", async () => {
       sinon.stub(feed, "refresh");

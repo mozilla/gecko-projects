@@ -148,8 +148,8 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
     // We should definitely have a request here
     MOZ_ASSERT(aRequest, "no request?");
 
-    NS_PRECONDITION(aRequest == mCurrentRequest || aRequest == mPendingRequest,
-                    "Unknown request");
+    MOZ_ASSERT(aRequest == mCurrentRequest || aRequest == mPendingRequest,
+               "Unknown request");
   }
 
   {
@@ -342,7 +342,7 @@ nsImageLoadingContent::SetLoadingEnabled(bool aLoadingEnabled)
 NS_IMETHODIMP
 nsImageLoadingContent::GetImageBlockingStatus(int16_t* aStatus)
 {
-  NS_PRECONDITION(aStatus, "Null out param");
+  MOZ_ASSERT(aStatus, "Null out param");
   *aStatus = ImageBlockingStatus();
   return NS_OK;
 }
@@ -719,7 +719,7 @@ NS_IMETHODIMP
 nsImageLoadingContent::GetRequestType(imgIRequest* aRequest,
                                       int32_t* aRequestType)
 {
-  NS_PRECONDITION(aRequestType, "Null out param");
+  MOZ_ASSERT(aRequestType, "Null out param");
 
   ErrorResult result;
   *aRequestType = GetRequestType(aRequest, result);
@@ -732,11 +732,8 @@ nsImageLoadingContent::GetCurrentURI(ErrorResult& aError)
   nsCOMPtr<nsIURI> uri;
   if (mCurrentRequest) {
     mCurrentRequest->GetURI(getter_AddRefs(uri));
-  } else if (mCurrentURI) {
-    nsresult rv = NS_EnsureSafeToReturn(mCurrentURI, getter_AddRefs(uri));
-    if (NS_FAILED(rv)) {
-      aError.Throw(rv);
-    }
+  } else {
+    uri = mCurrentURI;
   }
 
   return uri.forget();
@@ -871,8 +868,6 @@ nsImageLoadingContent::LoadImage(const nsAString& aNewURI,
   nsresult rv = StringToURI(aNewURI, doc, getter_AddRefs(imageURI));
   NS_ENSURE_SUCCESS(rv, rv);
   // XXXbiesi fire onerror if that failed?
-
-  NS_TryToSetImmutable(imageURI);
 
   return LoadImage(imageURI, aForce, aNotify, aImageLoadType, false, doc,
                    nsIRequest::LOAD_NORMAL, aTriggeringPrincipal);
@@ -1239,8 +1234,8 @@ nsImageLoadingContent::StringToURI(const nsAString& aSpec,
                                    nsIDocument* aDocument,
                                    nsIURI** aURI)
 {
-  NS_PRECONDITION(aDocument, "Must have a document");
-  NS_PRECONDITION(aURI, "Null out param");
+  MOZ_ASSERT(aDocument, "Must have a document");
+  MOZ_ASSERT(aURI, "Null out param");
 
   // (1) Get the base URI
   nsIContent* thisContent = AsContent();
@@ -1748,4 +1743,4 @@ mozilla::net::ReferrerPolicy
 nsImageLoadingContent::GetImageReferrerPolicy()
 {
   return mozilla::net::RP_Unset;
-};
+}

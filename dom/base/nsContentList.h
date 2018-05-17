@@ -19,7 +19,6 @@
 #include "nsTArray.h"
 #include "nsString.h"
 #include "nsIHTMLCollection.h"
-#include "nsIDOMNodeList.h"
 #include "nsINodeList.h"
 #include "nsStubMutationObserver.h"
 #include "nsAtom.h"
@@ -388,8 +387,8 @@ public:
     // most common namespace id is kNameSpaceID_Unknown.  So check the
     // string first.  Cases in which whether our root's ownerDocument
     // is HTML changes are extremely rare, so check those last.
-    NS_PRECONDITION(mXMLMatchAtom,
-                    "How did we get here with a null match atom on our list?");
+    MOZ_ASSERT(mXMLMatchAtom,
+               "How did we get here with a null match atom on our list?");
     return
       mXMLMatchAtom->Equals(aKey.mTagname) &&
       mRootNode == aKey.mRootNode &&

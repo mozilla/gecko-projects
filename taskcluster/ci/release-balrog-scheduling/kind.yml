@@ -7,7 +7,6 @@ loader: taskgraph.loader.transform:loader
 transforms:
    - taskgraph.transforms.release_deps:transforms
    - taskgraph.transforms.scriptworker:add_balrog_scopes
-   - taskgraph.transforms.release_notifications:transforms
    - taskgraph.transforms.task:transforms
 
 kind-dependencies:
@@ -35,7 +34,7 @@ jobs:
                mozilla-release: [145]
                default: []
       treeherder:
-         platform: linux64/opt
+         platform: firefox-release/opt
          symbol: Rel(BSFx)
          tier: 1
          kind: build
@@ -51,7 +50,7 @@ jobs:
                mozilla-beta: [10]
                default: []
       treeherder:
-         platform: linux64/opt
+         platform: devedition-release/opt
          symbol: Rel(BSDev)
          tier: 1
          kind: build

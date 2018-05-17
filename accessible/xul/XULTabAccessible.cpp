@@ -35,7 +35,7 @@ XULTabAccessible::
 // XULTabAccessible: Accessible
 
 uint8_t
-XULTabAccessible::ActionCount()
+XULTabAccessible::ActionCount() const
 {
   return 1;
 }
@@ -48,7 +48,7 @@ XULTabAccessible::ActionNameAt(uint8_t aIndex, nsAString& aName)
 }
 
 bool
-XULTabAccessible::DoAction(uint8_t index)
+XULTabAccessible::DoAction(uint8_t index) const
 {
   if (index == eAction_Switch) {
     // XXXbz Could this just FromContent?
@@ -65,13 +65,13 @@ XULTabAccessible::DoAction(uint8_t index)
 // XULTabAccessible: Accessible
 
 role
-XULTabAccessible::NativeRole()
+XULTabAccessible::NativeRole() const
 {
   return roles::PAGETAB;
 }
 
 uint64_t
-XULTabAccessible::NativeState()
+XULTabAccessible::NativeState() const
 {
   // Possible states: focused, focusable, unavailable(disabled), offscreen.
 
@@ -102,7 +102,7 @@ XULTabAccessible::NativeInteractiveState() const
 }
 
 Relation
-XULTabAccessible::RelationByType(RelationType aType)
+XULTabAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
   if (aType != RelationType::LABEL_FOR)
@@ -137,25 +137,25 @@ XULTabsAccessible::
 }
 
 role
-XULTabsAccessible::NativeRole()
+XULTabsAccessible::NativeRole() const
 {
   return roles::PAGETABLIST;
 }
 
 uint8_t
-XULTabsAccessible::ActionCount()
+XULTabsAccessible::ActionCount() const
 {
   return 0;
 }
 
 void
-XULTabsAccessible::Value(nsString& aValue)
+XULTabsAccessible::Value(nsString& aValue) const
 {
   aValue.Truncate();
 }
 
 ENameValueFlag
-XULTabsAccessible::NativeName(nsString& aName)
+XULTabsAccessible::NativeName(nsString& aName) const
 {
   // no name
   return eNameOK;
@@ -167,7 +167,7 @@ XULTabsAccessible::NativeName(nsString& aName)
 ////////////////////////////////////////////////////////////////////////////////
 
 role
-XULTabpanelsAccessible::NativeRole()
+XULTabpanelsAccessible::NativeRole() const
 {
   return roles::PANE;
 }
@@ -183,13 +183,13 @@ XULTabpanelAccessible::
 }
 
 role
-XULTabpanelAccessible::NativeRole()
+XULTabpanelAccessible::NativeRole() const
 {
   return roles::PROPERTYPAGE;
 }
 
 Relation
-XULTabpanelAccessible::RelationByType(RelationType aType)
+XULTabpanelAccessible::RelationByType(RelationType aType) const
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
   if (aType != RelationType::LABELLED_BY)
