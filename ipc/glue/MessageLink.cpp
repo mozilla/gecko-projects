@@ -158,6 +158,8 @@ ProcessLink::EchoMessage(Message *msg)
 void
 ProcessLink::SendMessage(Message *msg)
 {
+    recordreplay::RecordReplayAssert("ProcessLink::SendMessage %s %d", msg->name(), (int) msg->size());
+
     if (msg->size() > IPC::Channel::kMaximumMessageSize) {
       CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCMessageName"), nsDependentCString(msg->name()));
       CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCMessageSize"), nsPrintfCString("%d", msg->size()));

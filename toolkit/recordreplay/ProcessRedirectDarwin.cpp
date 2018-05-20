@@ -255,9 +255,11 @@ namespace recordreplay {
   MACRO(CGColorSpaceCreateDeviceRGB)            \
   MACRO(CGColorSpaceCreatePattern)              \
   MACRO(CGColorSpaceRelease)                    \
+  MACRO(CGContextBeginTransparencyLayerWithRect) \
   MACRO(CGContextClipToRects)                   \
   MACRO(CGContextConcatCTM)                     \
   MACRO(CGContextDrawImage)                     \
+  MACRO(CGContextEndTransparencyLayer)          \
   MACRO(CGContextFillRect)                      \
   MACRO(CGContextGetClipBoundingBox)            \
   MACRO(CGContextGetCTM)                        \
@@ -385,7 +387,9 @@ namespace recordreplay {
   MACRO(LSGetApplicationForInfo)                \
   MACRO(LSGetApplicationForURL)                 \
   MACRO(NSClassFromString)                      \
+  MACRO(NSRectFill)                             \
   MACRO(NSSearchPathForDirectoriesInDomains)    \
+  MACRO(NSSetFocusRingStyle)                    \
   MACRO(NSTemporaryDirectory)                   \
   MACRO(OSSpinLockLock)                         \
   MACRO(ReleaseEvent)                           \
@@ -2090,6 +2094,8 @@ RRFunction0(CGColorSpaceCreateDeviceRGB)
 RRFunction1(CGColorSpaceCreatePattern)
 RRFunction1(CGColorSpaceCopyICCProfile)
 RRFunction1(CGColorSpaceRelease)
+RRFunctionTypesVoid3(CGContextBeginTransparencyLayerWithRect,
+                     CGContextRef, CGRect, CFDictionaryRef)
 RRFunction3(CGContextClipToRects)
 RRFunctionTypesVoid2(CGContextConcatCTM, CGContextRef, CGAffineTransform)
 
@@ -2099,6 +2105,8 @@ RR_CGContextDrawImage(CGContextRef aCx, CGRect aRect, CGImageRef aImage)
   RecordReplayFunctionVoid(CGContextDrawImage, aCx, aRect, aImage);
   FlushContext(aCx);
 }
+
+RRFunctionVoid1(CGContextEndTransparencyLayer)
 
 static void
 RR_CGContextFillRect(CGContextRef aCx, CGRect aRect)
@@ -2553,7 +2561,9 @@ RR_LSGetApplicationForURL(CFURLRef aInURL, LSRolesMask aInRoleMask,
 }
 
 RRFunction1(NSClassFromString)
+RRFunctionTypesVoid1(NSRectFill, CGRect /* Actually NSRect, but they appear to always be the same */)
 RRFunction3(NSSearchPathForDirectoriesInDomains)
+RRFunction1(NSSetFocusRingStyle)
 RRFunction0(NSTemporaryDirectory)
 RRFunction1(ReleaseEvent)
 
