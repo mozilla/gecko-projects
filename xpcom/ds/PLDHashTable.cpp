@@ -233,14 +233,10 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
   MOZ_RELEASE_ASSERT(mOps == aOther.mOps || !mOps || recordreplay::IsRecordingOrReplaying());
   MOZ_RELEASE_ASSERT(mEntrySize == aOther.mEntrySize || !mEntrySize);
 
-  // Destruct |this|.
+  // Reconstruct |this|.
   const PLDHashTableOps* ops = recordreplay::UnwrapPLDHashTableCallbacks(aOther.mOps);
   this->~PLDHashTable();
   new (KnownNotNull, this) PLDHashTable(ops, aOther.mEntrySize, 0);
-
-  // Reconstruct |this|.
-  this->~PLDHashTable();
-  new (KnownNotNull, this) PLDHashTable(aOther.mOps, aOther.mEntrySize, 0);
 
   // Move non-const pieces over.
   mHashShift = Move(aOther.mHashShift);
