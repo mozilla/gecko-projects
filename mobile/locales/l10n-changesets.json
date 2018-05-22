@@ -317,13 +317,6 @@
         ], 
         "revision": "default"
     }, 
-    "lij": {
-        "platforms": [
-            "android", 
-            "android-api-16"
-        ], 
-        "revision": "default"
-    }, 
     "lo": {
         "platforms": [
             "android-multilocale"
@@ -398,8 +391,6 @@
     }, 
     "oc": {
         "platforms": [
-            "android", 
-            "android-api-16", 
             "android-multilocale"
         ], 
         "revision": "default"
