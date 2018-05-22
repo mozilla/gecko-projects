@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/task.h"
 #include "chrome/common/child_thread.h"
+#include "chrome/common/mach_ipc_mac.h"
 #include "ipc/Channel.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/layers/ImageDataSerializer.h"
@@ -28,6 +29,7 @@
 #include "Units.h"
 
 #include <algorithm>
+#include <mach/mach_vm.h>
 #include <unistd.h>
 
 namespace mozilla {
@@ -180,6 +182,8 @@ ListenForCheckpointThreadMain(void*)
   }
 }
 
+void* gGraphicsShmem;
+
 void
 InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
                                 int* aArgc, char*** aArgv)
@@ -199,11 +203,13 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
   }
   MOZ_RELEASE_ASSERT(channelID.isSome());
 
-  {
-    AutoPassThroughThreadEvents pt;
-    gMonitor = new Monitor();
-    gChannel = new Channel(channelID.ref(), ChannelMessageHandler);
-  }
+  Maybe<AutoPassThroughThreadEvents> pt;
+  pt.emplace();
+
+  gMonitor = new Monitor();
+  gChannel = new Channel(channelID.ref(), ChannelMessageHandler);
+
+  pt.reset();
 
   DirectCreatePipe(&gCheckpointWriteFd, &gCheckpointReadFd);
 
@@ -211,9 +217,39 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   InitDebuggerHooks();
 
+  pt.emplace();
+
+  // Setup a mach port to receive the graphics shmem handle over.
+  char portName[128];
+  SprintfLiteral(portName, "WebReplay.%d.%d", gMiddlemanPid, channelID.ref());
+  ReceivePort receivePort(portName);
+
+  pt.reset();
+
   // We are ready to receive initialization messages from the middleman, pause
   // so they can be sent.
   HitCheckpoint(InvalidCheckpointId, /* aRecordingEndpoint = */ false);
+
+  pt.emplace();
+
+  // The parent should have sent us a handle to the graphics shmem.
+  MachReceiveMessage message;
+  kern_return_t kr = receivePort.WaitForMessage(&message, 0);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+  MOZ_RELEASE_ASSERT(message.GetMessageID() == GraphicsMessageId);
+  mach_port_t graphicsPort = message.GetTranslatedPort(0);
+  MOZ_RELEASE_ASSERT(graphicsPort != MACH_PORT_NULL);
+
+  mach_vm_address_t address = 0;
+  kr = mach_vm_map(mach_task_self(), &address, GraphicsMemorySize, 0, VM_FLAGS_ANYWHERE,
+                   graphicsPort, 0, false,
+                   VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE,
+                   VM_INHERIT_NONE);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+
+  gGraphicsShmem = (void*) address;
+
+  pt.reset();
 
   // Process the introduction message to fill in arguments.
   MOZ_RELEASE_ASSERT(!gShmemPrefs);
@@ -339,32 +375,36 @@ NotifyVsyncObserver()
 // Painting
 ///////////////////////////////////////////////////////////////////////////////
 
-// Message and buffer for the compositor in the recording/replaying process to
-// draw into. This is only written on the compositor thread and read on the
-// main thread, using the gPendingPaint flag to synchronize accesses.
-static PaintMessage* gPaintMessage;
+// Graphics memory is only written on the compositor thread and read on the
+// main thread and by the middleman. The gPendingPaint flag is used to
+// synchronize access, so that data is not read until the paint has completed.
+static Maybe<PaintMessage> gPaintMessage;
 static bool gPendingPaint;
+
+// Buffer to paint into.
+static void* gGraphicsMemory;
+static size_t gGraphicsMemorySize;
 
 already_AddRefed<gfx::DrawTarget>
 DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize)
 {
   MOZ_RELEASE_ASSERT(!NS_IsMainThread());
 
-  gfx::IntSize size(aSize.width, aSize.height);
+  gPaintMessage = Some(PaintMessage(aSize.width, aSize.height));
 
-  if (!gPaintMessage ||
-      aSize.width != (int) gPaintMessage->mWidth ||
-      aSize.height != (int) gPaintMessage->mHeight)
-  {
-    free(gPaintMessage);
-    size_t bufferSize = layers::ImageDataSerializer::ComputeRGBBufferSize(size, gSurfaceFormat);
-    gPaintMessage = PaintMessage::New(bufferSize, aSize.width, aSize.height);
+  gfx::IntSize size(aSize.width, aSize.height);
+  size_t bufferSize = layers::ImageDataSerializer::ComputeRGBBufferSize(size, gSurfaceFormat);
+  MOZ_RELEASE_ASSERT(bufferSize <= GraphicsMemorySize);
+
+  if (bufferSize != gGraphicsMemorySize) {
+    free(gGraphicsMemory);
+    gGraphicsMemory = malloc(bufferSize);
+    gGraphicsMemorySize = bufferSize;
   }
 
   size_t stride = layers::ImageDataSerializer::ComputeRGBStride(gSurfaceFormat, aSize.width);
   RefPtr<gfx::DrawTarget> drawTarget =
-    gfx::Factory::CreateDrawTargetForData(gfx::BackendType::SKIA,
-                                          gPaintMessage->Buffer(),
+    gfx::Factory::CreateDrawTargetForData(gfx::BackendType::SKIA, (uint8_t*) gGraphicsMemory,
                                           size, stride, gSurfaceFormat,
                                           /* aUninitialized = */ true);
   if (!drawTarget) {
@@ -399,8 +439,9 @@ WaitForPaintToComplete()
   while (gPendingPaint) {
     gMonitor->Wait();
   }
-  if (IsActiveChild() && gPaintMessage) {
-    gChannel->SendMessage(*gPaintMessage);
+  if (IsActiveChild() && gPaintMessage.isSome()) {
+    memcpy(gGraphicsShmem, gGraphicsMemory, gGraphicsMemorySize);
+    gChannel->SendMessage(gPaintMessage.ref());
   }
 }
 

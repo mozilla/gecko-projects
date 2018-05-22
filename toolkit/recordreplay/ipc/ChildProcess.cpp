@@ -48,12 +48,6 @@ ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
 
   LaunchSubprocess();
 
-  // The child should send us a HitCheckpoint with an invalid ID to pause.
-  WaitUntilPaused();
-
-  MOZ_RELEASE_ASSERT(gIntroductionMessage);
-  SendMessage(*gIntroductionMessage);
-
   // Replaying processes always save the first checkpoint, if saving
   // checkpoints is allowed. This is currently assumed by the rewinding
   // mechanism in the replaying process, and would be nice to investigate
@@ -453,6 +447,21 @@ ChildProcess::LaunchSubprocess()
   }
 
   mLastMessageTime = TimeStamp::Now();
+
+  // The child should send us a HitCheckpoint with an invalid ID to pause.
+  WaitUntilPaused();
+
+  // Send the child a handle to the graphics shmem via mach IPC.
+  char portName[128];
+  SprintfLiteral(portName, "WebReplay.%d.%d", getpid(), (int) channelId);
+  MachPortSender sender(portName);
+  MachSendMessage message(GraphicsMessageId);
+  message.AddDescriptor(MachMsgPortDescriptor(gGraphicsPort, MACH_MSG_TYPE_COPY_SEND));
+  kern_return_t kr = sender.SendMessage(message, 1000);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+
+  MOZ_RELEASE_ASSERT(gIntroductionMessage);
+  SendMessage(*gIntroductionMessage);
 }
 
 // Whether the main thread is waiting on a child process to be terminated.
@@ -541,11 +550,6 @@ ChildProcess::AttemptRestart(const char* aWhy)
   mShouldSaveCheckpoints.clear();
 
   LaunchSubprocess();
-
-  WaitUntilPaused();
-
-  MOZ_RELEASE_ASSERT(gIntroductionMessage);
-  SendMessage(*gIntroductionMessage);
 
   // Disallow child processes from intentionally crashing after restarting.
   SendMessage(SetAllowIntentionalCrashesMessage(false));

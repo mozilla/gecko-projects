@@ -213,12 +213,6 @@ Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
   AutoEnsurePassThroughThreadEvents pt;
   char* data = nullptr;
   switch (aMsg.mType) {
-  case MessageType::Paint: {
-    const PaintMessage& nmsg = (const PaintMessage&) aMsg;
-    data = new char[32];
-    snprintf(data, 32, "%d", (int) HashBytes(nmsg.Buffer(), nmsg.BufferSize()));
-    break;
-  }
   case MessageType::HitCheckpoint: {
     const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
     data = new char[128];

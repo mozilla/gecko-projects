@@ -334,20 +334,11 @@ struct PaintMessage : public Message
   uint32_t mWidth;
   uint32_t mHeight;
 
-  PaintMessage(uint32_t aSize, uint32_t aWidth, uint32_t aHeight)
-    : Message(MessageType::Paint, aSize)
+  PaintMessage(uint32_t aWidth, uint32_t aHeight)
+    : Message(MessageType::Paint, sizeof(*this))
     , mWidth(aWidth)
     , mHeight(aHeight)
   {}
-
-  unsigned char* Buffer() { return Data<PaintMessage, unsigned char>(); }
-  const unsigned char* Buffer() const { return Data<PaintMessage, unsigned char>(); }
-  size_t BufferSize() const { return DataSize<PaintMessage, unsigned char>(); }
-
-  static PaintMessage* New(uint32_t aBufferSize, uint32_t aWidth, uint32_t aHeight) {
-    MOZ_RELEASE_ASSERT(aBufferSize >= aWidth * aHeight * 4);
-    return NewWithData<PaintMessage, unsigned char>(aBufferSize, aWidth, aHeight);
-  }
 };
 
 struct HitCheckpointMessage : public Message
@@ -447,6 +438,9 @@ public:
 
 // Command line option used to specify the channel ID for a child process.
 static const char* gChannelIDOption = "-recordReplayChannelID";
+
+static const int32_t GraphicsMessageId = 42;
+static const size_t GraphicsMemorySize = 4096 * 4096 * 4;
 
 } // namespace recordreplay
 } // namespace mozilla

@@ -10,6 +10,7 @@
 #include "ParentInternal.h"
 
 #include "base/task.h"
+#include "chrome/common/mach_ipc_mac.h"
 #include "ipc/Channel.h"
 #include "js/Proxy.h"
 #include "mozilla/dom/ContentChild.h"
@@ -253,8 +254,6 @@ static void RecvDebuggerResponse(const DebuggerResponseMessage& aMsg);
 static void RecvRecordingFlushed();
 static void RecvAlwaysMarkMajorCheckpoints();
 
-static PaintMessage* gLastPaint;
-
 // The role taken by the active child.
 class ChildRoleActive : public ChildRole
 {
@@ -278,9 +277,7 @@ public:
   void OnIncomingMessage(const Message& aMsg) override {
     switch (aMsg.mType) {
     case MessageType::Paint:
-      UpdateGraphicsInUIProcess((const PaintMessage&) aMsg);
-      free(gLastPaint);
-      gLastPaint = (PaintMessage*) aMsg.Clone();
+      UpdateGraphicsInUIProcess((const PaintMessage*) &aMsg);
       break;
     case MessageType::HitCheckpoint:
       RecvHitCheckpoint((const HitCheckpointMessage&) aMsg);
@@ -905,8 +902,8 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
     if (type == dom::PBrowser::Msg_Destroy__ID) {
       DestroyRoutingId(aMessage.routing_id());
     }
-    if (type == dom::PBrowser::Msg_RenderLayers__ID && gLastPaint) {
-      UpdateGraphicsInUIProcess(*gLastPaint);
+    if (type == dom::PBrowser::Msg_RenderLayers__ID) {
+      UpdateGraphicsInUIProcess(nullptr);
     }
     return false;
   }
@@ -1169,6 +1166,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid)
   }
 
   InitDebuggerHooks();
+  InitializeGraphicsMemory();
 
   gMonitor = new Monitor();
 

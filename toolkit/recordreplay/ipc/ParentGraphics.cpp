@@ -14,9 +14,35 @@
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PTextureChild.h"
 
+#include <mach/mach_vm.h>
+
 namespace mozilla {
 namespace recordreplay {
 namespace parent {
+
+void* gGraphicsMemory;
+mach_port_t gGraphicsPort;
+
+void
+InitializeGraphicsMemory()
+{
+  mach_vm_address_t address;
+  kern_return_t kr = mach_vm_allocate(mach_task_self(), &address,
+                                      GraphicsMemorySize, VM_FLAGS_ANYWHERE);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+
+  memory_object_size_t memoryObjectSize = GraphicsMemorySize;
+  kr = mach_make_memory_entry_64(mach_task_self(),
+                                 &memoryObjectSize,
+                                 address,
+                                 VM_PROT_DEFAULT,
+                                 &gGraphicsPort,
+                                 MACH_PORT_NULL);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+  MOZ_RELEASE_ASSERT(memoryObjectSize == GraphicsMemorySize);
+
+  gGraphicsMemory = (void*) address;
+}
 
 static void
 UpdateBrowserTitle(dom::TabChild* aBrowser)
@@ -109,10 +135,13 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
   LayerTreeInfo* layersInfo = GetLayerTreeInfo(aBrowser);
   layers::PLayerTransactionChild* LTC = layersInfo->mLayerTransactionChild;
 
-  ipc::Shmem shmem;
-  TRY(CBC->AllocShmem(aMsg.BufferSize(), ipc::SharedMemory::TYPE_BASIC, &shmem));
+  gfx::IntSize size(aMsg.mWidth, aMsg.mHeight);
+  size_t bufferSize = layers::ImageDataSerializer::ComputeRGBBufferSize(size, gSurfaceFormat);
 
-  memcpy(shmem.get<char>(), aMsg.Buffer(), aMsg.BufferSize());
+  ipc::Shmem shmem;
+  TRY(CBC->AllocShmem(bufferSize, ipc::SharedMemory::TYPE_BASIC, &shmem));
+
+  memcpy(shmem.get<char>(), gGraphicsMemory, bufferSize);
 
   size_t width = aMsg.mWidth;
   size_t height = aMsg.mHeight;
@@ -270,10 +299,18 @@ ClearBrowserGraphics(dom::TabChild* aBrowser)
   LTC->SendClearCachedResources();
 }
 
+static Maybe<PaintMessage> gLastPaint;
+
 void
-UpdateGraphicsInUIProcess(const PaintMessage& aMsg)
+UpdateGraphicsInUIProcess(const PaintMessage* aMsg)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
+  if (aMsg) {
+    gLastPaint = Some(*aMsg);
+  } else if (!gLastPaint.isSome()) {
+    return;
+  }
 
   nsTArray<dom::PBrowserChild*> browsers;
   dom::ContentChild::GetSingleton()->ManagedPBrowserChild(browsers);
@@ -286,7 +323,7 @@ UpdateGraphicsInUIProcess(const PaintMessage& aMsg)
     dom::TabChild* browser = static_cast<dom::TabChild*>(browsers[i]);
     if (browser->WebWidget()->IsVisible()) {
       UpdateBrowserTitle(browser);
-      UpdateBrowserGraphics(browser, aMsg);
+      UpdateBrowserGraphics(browser, gLastPaint.ref());
     } else {
       ClearBrowserGraphics(browser);
     }

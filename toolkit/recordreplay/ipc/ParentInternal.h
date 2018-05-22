@@ -37,9 +37,14 @@ static Monitor* gMonitor;
 // Graphics
 ///////////////////////////////////////////////////////////////////////////////
 
+extern mach_port_t gGraphicsPort;
+extern void* gGraphicsMemory;
+
+void InitializeGraphicsMemory();
+
 // Update the graphics painted in the UI process, per painting data received
-// from a child process.
-void UpdateGraphicsInUIProcess(const PaintMessage& aMsg);
+// from a child process, or null for the last paint performed.
+void UpdateGraphicsInUIProcess(const PaintMessage* aMsg);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Child Processes
