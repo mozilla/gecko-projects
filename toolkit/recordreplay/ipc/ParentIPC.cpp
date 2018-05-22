@@ -31,6 +31,29 @@ namespace recordreplay {
 namespace parent {
 
 ///////////////////////////////////////////////////////////////////////////////
+// UI Process State
+///////////////////////////////////////////////////////////////////////////////
+
+const char* gSaveAllRecordingsDirectory = nullptr;
+
+void
+InitializeUIProcess(int aArgc, char** aArgv)
+{
+  for (int i = 0; i < aArgc; i++) {
+    if (!strcmp(aArgv[i], "--save-recordings") && i + 1 < aArgc) {
+      gSaveAllRecordingsDirectory = strdup(aArgv[i + 1]);
+    }
+  }
+}
+
+const char*
+SaveAllRecordingsDirectory()
+{
+  MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
+  return gSaveAllRecordingsDirectory;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Preferences
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -682,8 +705,12 @@ SaveRecording(const nsCString& aFilename)
   MOZ_RELEASE_ASSERT(IsMiddleman());
 
   char* filename = strdup(aFilename.get());
-  MainThreadMessageLoop()->PostTask(NewRunnableFunction("SaveRecordingInternal",
-                                                        SaveRecordingInternal, filename));
+  if (NS_IsMainThread()) {
+    SaveRecordingInternal(filename);
+  } else {
+    MainThreadMessageLoop()->PostTask(NewRunnableFunction("SaveRecordingInternal",
+                                                          SaveRecordingInternal, filename));
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -769,9 +796,6 @@ ActiveChildIsPausedOrRewinding()
 // IPDL Forwarding
 ///////////////////////////////////////////////////////////////////////////////
 
-// Monitor for synchronizing the main and message forwarding threads.
-static Monitor* gCommunicationMonitor;
-
 // Message loop processed on the main thread.
 static MessageLoop* gMainThreadMessageLoop;
 
@@ -781,8 +805,33 @@ MainThreadMessageLoop()
   return gMainThreadMessageLoop;
 }
 
-// The routing IDs of all destroyed browsers in the parent process.
-static StaticInfallibleVector<int32_t> gDeadBrowsers;
+// Known associations between managee and manager routing IDs.
+static StaticInfallibleVector<std::pair<int32_t, int32_t>> gProtocolManagers;
+
+// The routing IDs of actors in the parent process that have been destroyed.
+static StaticInfallibleVector<int32_t> gDeadRoutingIds;
+
+static void
+NoteProtocolManager(int32_t aManagee, int32_t aManager)
+{
+  gProtocolManagers.emplaceBack(aManagee, aManager);
+  for (auto id : gDeadRoutingIds) {
+    if (id == aManager) {
+      gDeadRoutingIds.emplaceBack(aManagee);
+    }
+  }
+}
+
+static void
+DestroyRoutingId(int32_t aId)
+{
+  gDeadRoutingIds.emplaceBack(aId);
+  for (auto manager : gProtocolManagers) {
+    if (manager.second == aId) {
+      DestroyRoutingId(manager.first);
+    }
+  }
+}
 
 // Return whether a message from the child process to the UI process is being
 // sent to a target that is being destroyed, and should be suppressed.
@@ -795,11 +844,9 @@ MessageTargetIsDead(const IPC::Message& aMessage)
   // the browser has been destroyed, but we need to ignore such messages from
   // the child process (if it is still recording) to avoid confusing the UI
   // process.
-  if (aMessage.type() >= dom::PBrowser::PBrowserStart && aMessage.type() <= dom::PBrowser::PBrowserEnd) {
-    for (int32_t id : gDeadBrowsers) {
-      if (id == aMessage.routing_id()) {
-        return true;
-      }
+  for (int32_t id : gDeadRoutingIds) {
+    if (id == aMessage.routing_id()) {
+      return true;
     }
   }
   return false;
@@ -808,12 +855,26 @@ MessageTargetIsDead(const IPC::Message& aMessage)
 static bool
 HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
 {
+  IPC::Message::msgid_t type = aMessage.type();
+
   // Ignore messages sent from the child to dead UI process targets.
   if (aSide == ipc::ParentSide) {
-    return MessageTargetIsDead(aMessage);
-  }
+    if (type == dom::PBrowser::Msg_PDocAccessibleConstructor__ID) {
+      PickleIterator iter(aMessage);
+      ipc::ActorHandle handle;
 
-  IPC::Message::msgid_t type = aMessage.type();
+      if (!IPC::ReadParam(&aMessage, &iter, &handle))
+        MOZ_CRASH("IPC::ReadParam failed");
+
+      NoteProtocolManager(handle.mId, aMessage.routing_id());
+    }
+
+    if (MessageTargetIsDead(aMessage)) {
+      PrintSpew("Suppressing %s message to dead target\n", IPC::StringFromIPCMessageType(type));
+      return true;
+    }
+    return false;
+  }
 
   // Handle messages that should be sent to both the middleman and the
   // content process.
@@ -842,7 +903,7 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
       }
     }
     if (type == dom::PBrowser::Msg_Destroy__ID) {
-      gDeadBrowsers.append(aMessage.routing_id());
+      DestroyRoutingId(aMessage.routing_id());
     }
     if (type == dom::PBrowser::Msg_RenderLayers__ID && gLastPaint) {
       UpdateGraphicsInUIProcess(*gLastPaint);
@@ -870,6 +931,24 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
   return false;
 }
 
+static bool gMainThreadBlocked = false;
+
+// Helper for places where the main thread will block while waiting on a
+// synchronous IPDL reply from a child process. Incoming messages from the
+// child must be handled immediately.
+struct MOZ_RAII AutoMarkMainThreadBlocked
+{
+  AutoMarkMainThreadBlocked() {
+    MOZ_RELEASE_ASSERT(NS_IsMainThread());
+    MOZ_RELEASE_ASSERT(!gMainThreadBlocked);
+    gMainThreadBlocked = true;
+  }
+
+  ~AutoMarkMainThreadBlocked() {
+    gMainThreadBlocked = false;
+  }
+};
+
 class MiddlemanProtocol : public ipc::IToplevelProtocol
 {
 public:
@@ -890,7 +969,10 @@ public:
 
   static void ForwardMessageAsync(MiddlemanProtocol* aProtocol, Message* aMessage) {
     if (gActiveChild->IsRecording()) {
-      PrintSpew("ForwardAsyncMsg %s\n", IPC::StringFromIPCMessageType(aMessage->type()));
+      PrintSpew("ForwardAsyncMsg %s %s %d\n",
+                (aProtocol->mSide == ipc::ChildSide) ? "Child" : "Parent",
+                IPC::StringFromIPCMessageType(aMessage->type()),
+                (int) aMessage->routing_id());
       if (!aProtocol->GetIPCChannel()->Send(aMessage)) {
         MOZ_CRASH("MiddlemanProtocol::ForwardMessageAsync");
       }
@@ -932,24 +1014,31 @@ public:
       MOZ_CRASH("MiddlemanProtocol::ForwardMessageSync");
     }
 
-    MonitorAutoLock lock(*gCommunicationMonitor);
+    MonitorAutoLock lock(*gMonitor);
     *aReply = nReply;
-    gCommunicationMonitor->Notify();
+    gMonitor->Notify();
   }
 
   virtual Result OnMessageReceived(const Message& aMessage, Message*& aReply) override {
-    MOZ_RELEASE_ASSERT(mSide == ipc::ParentSide);
-    MOZ_RELEASE_ASSERT(!MessageTargetIsDead(aMessage));
+    MOZ_RELEASE_ASSERT(mOppositeMessageLoop);
+    MOZ_RELEASE_ASSERT(mSide == ipc::ChildSide || !MessageTargetIsDead(aMessage));
 
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
     mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardMessageSync", ForwardMessageSync,
                                                        mOpposite, nMessage, &aReply));
 
-    MonitorAutoLock lock(*gCommunicationMonitor);
-    while (!aReply) {
-      gCommunicationMonitor->Wait();
+    if (mSide == ipc::ChildSide) {
+      AutoMarkMainThreadBlocked blocked;
+      gRecordingChild->WaitUntil([&]() { return !!aReply; });
+    } else {
+      MonitorAutoLock lock(*gMonitor);
+      while (!aReply) {
+        gMonitor->Wait();
+      }
     }
+
+    PrintSpew("SyncMsgDone\n");
     return MsgProcessed;
   }
 
@@ -962,23 +1051,31 @@ public:
       MOZ_CRASH("MiddlemanProtocol::ForwardCallMessage");
     }
 
-    MonitorAutoLock lock(*gCommunicationMonitor);
+    MonitorAutoLock lock(*gMonitor);
     *aReply = nReply;
-    gCommunicationMonitor->Notify();
+    gMonitor->Notify();
   }
 
   virtual Result OnCallReceived(const Message& aMessage, Message*& aReply) override {
-    MOZ_RELEASE_ASSERT(mSide == ipc::ParentSide);
-    MOZ_RELEASE_ASSERT(!MessageTargetIsDead(aMessage));
+    MOZ_RELEASE_ASSERT(mOppositeMessageLoop);
+    MOZ_RELEASE_ASSERT(mSide == ipc::ChildSide || !MessageTargetIsDead(aMessage));
 
     Message* nMessage = new Message();
     nMessage->CopyFrom(aMessage);
     mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardCallMessage", ForwardCallMessage,
                                                        mOpposite, nMessage, &aReply));
 
-    MonitorAutoLock lock(*gCommunicationMonitor);
-    while (!aReply)
-      gCommunicationMonitor->Wait();
+    if (mSide == ipc::ChildSide) {
+      AutoMarkMainThreadBlocked blocked;
+      gRecordingChild->WaitUntil([&]() { return !!aReply; });
+    } else {
+      MonitorAutoLock lock(*gMonitor);
+      while (!aReply) {
+        gMonitor->Wait();
+      }
+    }
+
+    PrintSpew("SyncCallDone\n");
     return MsgProcessed;
   }
 
@@ -1027,9 +1124,9 @@ ForwardingMessageLoopMain(void*)
 
   // Notify the main thread that we have finished initialization.
   {
-    MonitorAutoLock lock(*gCommunicationMonitor);
+    MonitorAutoLock lock(*gMonitor);
     gParentProtocolOpened = true;
-    gCommunicationMonitor->Notify();
+    gMonitor->Notify();
   }
 
   messageLoop.Run();
@@ -1073,7 +1170,7 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid)
 
   InitDebuggerHooks();
 
-  gCommunicationMonitor = new Monitor();
+  gMonitor = new Monitor();
 
   gMainThreadMessageLoop = MessageLoop::current();
 
@@ -1095,9 +1192,9 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid)
 
     // Wait for the forwarding message loop thread to finish initialization.
     {
-      MonitorAutoLock lock(*gCommunicationMonitor);
+      MonitorAutoLock lock(*gMonitor);
       while (!gParentProtocolOpened) {
-        gCommunicationMonitor->Wait();
+        gMonitor->Wait();
       }
     }
   }
@@ -1257,8 +1354,11 @@ RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
 
   // Resume either forwards or backwards. Break the resume off into a separate
   // runnable, to avoid starving any code already on the stack and waiting for
-  // the process to pause.
-  if (!gResumeForwardOrBackward) {
+  // the process to pause. Immediately resume if the main thread is blocked.
+  if (gMainThreadBlocked) {
+    MOZ_RELEASE_ASSERT(gChildExecuteForward);
+    HookResume(true);
+  } else if (!gResumeForwardOrBackward) {
     gResumeForwardOrBackward = true;
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",
                                                          ResumeForwardOrBackward));

@@ -16,9 +16,6 @@ static IntroductionMessage* gIntroductionMessage;
 // How many channels have been constructed so far.
 static size_t gNumChannels;
 
-// Monitor used for synchronizing between the main and channel threads.
-static Monitor* gChildProcessMonitor;
-
 // Whether children might be debugged and should not be treated as hung.
 static bool gChildrenAreDebugging;
 
@@ -40,9 +37,9 @@ ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  if (!gChildProcessMonitor) {
-    gChildProcessMonitor = new Monitor();
-
+  static bool gFirst = false;
+  if (!gFirst) {
+    gFirst = true;
     gChildrenAreDebugging = !!getenv("WAIT_AT_START");
     gRestartEnabled = !getenv("NO_RESTARTS");
   }
@@ -472,9 +469,9 @@ ChildProcess::TerminateSubprocess()
   // Child processes need to be destroyed on the correct thread.
   XRE_GetIOMessageLoop()->PostTask(NewRunnableFunction("TerminateSubprocess", Terminate, mProcess));
 
-  MonitorAutoLock lock(*gChildProcessMonitor);
+  MonitorAutoLock lock(*gMonitor);
   while (gWaitingOnTerminateChildProcess) {
-    gChildProcessMonitor->Wait();
+    gMonitor->Wait();
   }
 
   mProcess = nullptr;
@@ -486,10 +483,10 @@ ChildProcess::Terminate(ipc::GeckoChildProcessHost* aProcess)
   // The destructor for GeckoChildProcessHost will teardown the child process.
   delete aProcess;
 
-  MonitorAutoLock lock(*gChildProcessMonitor);
+  MonitorAutoLock lock(*gMonitor);
   MOZ_RELEASE_ASSERT(gWaitingOnTerminateChildProcess);
   gWaitingOnTerminateChildProcess = false;
-  gChildProcessMonitor->Notify();
+  gMonitor->Notify();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -570,7 +567,7 @@ ChildProcess::AttemptRestart(const char* aWhy)
 // so runnables associated with child processes have special handling.
 
 // All messages received on a channel thread which the main thread has not
-// processed yet. This is protected by gChildProcessMonitor.
+// processed yet. This is protected by gMonitor.
 struct PendingMessage
 {
   ChildProcess* mProcess;
@@ -585,7 +582,7 @@ static bool gHasPendingMessageRunnable;
 
 // Process a pending message from aProcess (or any process if aProcess is null)
 // and return whether such a message was found. This must be called on the main
-// thread with gChildProcessMonitor held.
+// thread with gMonitor held.
 /* static */ bool
 ChildProcess::MaybeProcessPendingMessage(ChildProcess* aProcess)
 {
@@ -596,7 +593,7 @@ ChildProcess::MaybeProcessPendingMessage(ChildProcess* aProcess)
       PendingMessage copy = gPendingMessages[i];
       gPendingMessages.erase(&gPendingMessages[i]);
 
-      MonitorAutoUnlock unlock(*gChildProcessMonitor);
+      MonitorAutoUnlock unlock(*gMonitor);
       copy.mProcess->OnIncomingMessage(copy.mChannelId, *copy.mMsg);
       free(copy.mMsg);
       return true;
@@ -616,18 +613,18 @@ ChildProcess::WaitUntil(const std::function<bool()>& aCallback)
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   while (!aCallback()) {
-    MonitorAutoLock lock(*gChildProcessMonitor);
+    MonitorAutoLock lock(*gMonitor);
     if (!MaybeProcessPendingMessage(this)) {
       if (gChildrenAreDebugging) {
         // Don't watch for hangs when children are being debugged.
-        gChildProcessMonitor->Wait();
+        gMonitor->Wait();
       } else {
         TimeStamp deadline = mLastMessageTime + TimeDuration::FromSeconds(HangSeconds);
         if (TimeStamp::Now() >= deadline) {
-          MonitorAutoUnlock unlock(*gChildProcessMonitor);
+          MonitorAutoUnlock unlock(*gMonitor);
           AttemptRestart("Child process non-responsive");
         }
-        gChildProcessMonitor->WaitUntil(deadline);
+        gMonitor->WaitUntil(deadline);
       }
     }
   }
@@ -639,7 +636,7 @@ ChildProcess::WaitUntil(const std::function<bool()>& aCallback)
 ChildProcess::MaybeProcessPendingMessageRunnable()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  MonitorAutoLock lock(*gChildProcessMonitor);
+  MonitorAutoLock lock(*gMonitor);
   MOZ_RELEASE_ASSERT(gHasPendingMessageRunnable);
   gHasPendingMessageRunnable = false;
   while (MaybeProcessPendingMessage(nullptr)) {}
@@ -653,7 +650,7 @@ ChildProcess::ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg)
 {
   MOZ_RELEASE_ASSERT(!NS_IsMainThread());
 
-  MonitorAutoLock lock(*gChildProcessMonitor);
+  MonitorAutoLock lock(*gMonitor);
 
   PendingMessage pending;
   pending.mProcess = this;
@@ -662,7 +659,7 @@ ChildProcess::ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg)
   gPendingMessages.append(pending);
 
   // Notify the main thread, if it is waiting in WaitUntil.
-  gChildProcessMonitor->NotifyAll();
+  gMonitor->NotifyAll();
 
   // Make sure there is a task on the main thread's message loop that can
   // process this task if necessary.

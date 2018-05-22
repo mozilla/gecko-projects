@@ -30,6 +30,9 @@ bool CanRewind();
 // Whether the child currently being interacted with is recording.
 bool ActiveChildIsRecording();
 
+// Monitor used for synchronizing between the main and channel or message loop threads.
+static Monitor* gMonitor;
+
 ///////////////////////////////////////////////////////////////////////////////
 // Graphics
 ///////////////////////////////////////////////////////////////////////////////
@@ -161,7 +164,6 @@ class ChildProcess
   void SendNextRecoveryMessage();
   void SendMessageRaw(const Message& aMsg);
 
-  static bool MaybeProcessPendingMessage(ChildProcess* aProcess);
   static void MaybeProcessPendingMessageRunnable();
   void ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg);
 
@@ -269,6 +271,8 @@ public:
   void WaitUntil(const std::function<bool()>& aCallback);
 
   void WaitUntilPaused() { WaitUntil([=]() { return IsPaused(); }); }
+
+  static bool MaybeProcessPendingMessage(ChildProcess* aProcess);
 };
 
 } // namespace parent

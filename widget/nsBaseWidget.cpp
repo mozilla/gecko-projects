@@ -1295,6 +1295,10 @@ void nsBaseWidget::CreateCompositorVsyncDispatcher()
 already_AddRefed<CompositorVsyncDispatcher>
 nsBaseWidget::GetCompositorVsyncDispatcher()
 {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return nullptr;
+  }
+
   MOZ_ASSERT(mCompositorVsyncDispatcherLock.get());
 
   MutexAutoLock lock(*mCompositorVsyncDispatcherLock.get());

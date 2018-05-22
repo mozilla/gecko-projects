@@ -90,6 +90,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
+#include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/Scheduler.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/ScriptPreloader.h"
@@ -777,7 +778,8 @@ ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
 
   nsTArray<ContentParent*>& contentParents = GetOrCreatePool(aRemoteType);
   uint32_t maxContentParents = GetMaxProcessCount(aRemoteType);
-  if (recordExecution.Length() || replayExecution.Length()) {
+  if (recordExecution.Length() || replayExecution.Length() ||
+      recordreplay::parent::SaveAllRecordingsDirectory()) {
     // Fall through and always create a new process when recording or replaying.
   } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     // We never want to re-use Large-Allocation processes.
@@ -1402,6 +1404,16 @@ ContentParent::ShutDownProcess(ShutDownMethod aMethod)
   // other methods. We first call Shutdown() in the child. After the child is
   // ready, it calls FinishShutdown() on us. Then we close the channel.
   if (aMethod == SEND_SHUTDOWN_MESSAGE) {
+    if (const char* directory = recordreplay::parent::SaveAllRecordingsDirectory()) {
+      // Save a recording for the child process before it shuts down.
+      char file[64];
+      strcpy(file, "RecordingXXXXXX");
+      char buf[1024];
+      SprintfLiteral(buf, "%s/%s", directory, mktemp(file));
+      fprintf(stderr, "Saving Recording: %s\n", buf);
+      SaveRecording(nsAutoCString(buf));
+    }
+
     if (mIPCOpen && !mShutdownPending) {
       // Stop sending input events with input priority when shutting down.
       SetInputPriorityEventEnabled(false);
@@ -2077,17 +2089,24 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   extraArgs.push_back(parentBuildID.get());
 
   // Specify whether the process is recording or replaying an execution.
-  if (mRecordExecution.Length() || mReplayExecution.Length()) {
+  if (mReplayExecution.Length()) {
     char buf[20];
-    SprintfLiteral(buf, "%d",
-                   (int) mRecordExecution.Length()
-                   ? recordreplay::ProcessKind::MiddlemanRecording
-                   : recordreplay::ProcessKind::MiddlemanReplaying);
+    SprintfLiteral(buf, "%d", (int) recordreplay::ProcessKind::MiddlemanReplaying);
     extraArgs.push_back(recordreplay::gProcessKindOption);
     extraArgs.push_back(buf);
 
     extraArgs.push_back(recordreplay::gRecordingFileOption);
-    extraArgs.push_back(NS_ConvertUTF16toUTF8(mRecordExecution.Length() ? mRecordExecution : mReplayExecution).get());
+    extraArgs.push_back(NS_ConvertUTF16toUTF8(mReplayExecution).get());
+  } else if (mRecordExecution.Length() || recordreplay::parent::SaveAllRecordingsDirectory()) {
+    MOZ_RELEASE_ASSERT(!mRecordExecution.Length() ||
+                       (mRecordExecution.Length() == 1 && mRecordExecution[0] == '*'));
+    char buf[20];
+    SprintfLiteral(buf, "%d", (int) recordreplay::ProcessKind::MiddlemanRecording);
+    extraArgs.push_back(recordreplay::gProcessKindOption);
+    extraArgs.push_back(buf);
+
+    extraArgs.push_back(recordreplay::gRecordingFileOption);
+    extraArgs.push_back("*");
   }
 
   SetOtherProcessId(kInvalidProcessId, ProcessIdState::ePending);
@@ -5705,14 +5724,13 @@ ContentParent::CanCommunicateWith(ContentParentId aOtherProcess)
 bool
 ContentParent::SaveRecording(const nsACString& aFilename)
 {
-  if (!mRecordExecution.Length()) {
-    return false;
+  if (mRecordExecution.Length() ||
+      (recordreplay::parent::SaveAllRecordingsDirectory() && !mReplayExecution.Length())) {
+    nsCString filename(aFilename);
+    Unused << SendSaveRecording(filename);
+    return true;
   }
-
-  nsCString filename(aFilename);
-  Unused << SendSaveRecording(filename);
-
-  return true;
+  return false;
 }
 
 mozilla::ipc::IPCResult

@@ -13,6 +13,7 @@
 #include "base/task.h"
 #include "chrome/common/child_thread.h"
 #include "ipc/Channel.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/VsyncDispatcher.h"
@@ -398,7 +399,7 @@ WaitForPaintToComplete()
   while (gPendingPaint) {
     gMonitor->Wait();
   }
-  if (IsActiveChild()) {
+  if (IsActiveChild() && gPaintMessage) {
     gChannel->SendMessage(*gPaintMessage);
   }
 }

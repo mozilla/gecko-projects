@@ -60,10 +60,44 @@ struct LayerTreeInfo
   layers::LayersId mLayerTreeId;
   layers::PLayerTransactionChild* mLayerTransactionChild;
 
+  uint64_t mLayerObserverEpoch;
+
   // Action to clean up the current paint, to be performed after the next paint.
   std::function<void()> mDestroyAction;
 };
 static StaticInfallibleVector<LayerTreeInfo> gLayerTrees;
+
+static LayerTreeInfo*
+GetLayerTreeInfo(dom::TabChild* aBrowser)
+{
+  for (LayerTreeInfo& existing : gLayerTrees) {
+    if (existing.mLayerTreeId == aBrowser->GetLayersId()) {
+      if (existing.mLayerObserverEpoch != aBrowser->LayerObserverEpoch()) {
+        existing.mLayerObserverEpoch = aBrowser->LayerObserverEpoch();
+        existing.mLayerTransactionChild->SendSetLayerObserverEpoch(existing.mLayerObserverEpoch);
+      }
+      return &existing;
+    }
+  }
+
+  gLayerTrees.emplaceBack();
+  LayerTreeInfo* layersInfo = &gLayerTrees.back();
+
+  layersInfo->mLayerTreeId = aBrowser->GetLayersId();
+
+  nsTArray<layers::LayersBackend> backends;
+  backends.AppendElement(layers::LayersBackend::LAYERS_BASIC);
+
+  layers::CompositorBridgeChild* CBC = layers::CompositorBridgeChild::Get();
+  layersInfo->mLayerTransactionChild =
+    CBC->SendPLayerTransactionConstructor(backends, aBrowser->GetLayersId());
+  MOZ_RELEASE_ASSERT(layersInfo->mLayerTransactionChild);
+
+  layersInfo->mLayerObserverEpoch = aBrowser->LayerObserverEpoch();
+  layersInfo->mLayerTransactionChild->SendSetLayerObserverEpoch(layersInfo->mLayerObserverEpoch);
+
+  return layersInfo;
+}
 
 #define TRY(op) do { if (!(op)) MOZ_CRASH(#op); } while (false)
 
@@ -72,26 +106,7 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
 {
   layers::CompositorBridgeChild* CBC = layers::CompositorBridgeChild::Get();
 
-  LayerTreeInfo* layersInfo = nullptr;
-  for (LayerTreeInfo& existing : gLayerTrees) {
-    if (existing.mLayerTreeId == aBrowser->GetLayersId()) {
-      layersInfo = &existing;
-      break;
-    }
-  }
-  if (!layersInfo) {
-    gLayerTrees.emplaceBack();
-    layersInfo = &gLayerTrees.back();
-
-    layersInfo->mLayerTreeId = aBrowser->GetLayersId();
-
-    nsTArray<layers::LayersBackend> backends;
-    backends.AppendElement(layers::LayersBackend::LAYERS_BASIC);
-    layersInfo->mLayerTransactionChild =
-      CBC->SendPLayerTransactionConstructor(backends, aBrowser->GetLayersId());
-    MOZ_RELEASE_ASSERT(layersInfo->mLayerTransactionChild);
-  }
-
+  LayerTreeInfo* layersInfo = GetLayerTreeInfo(aBrowser);
   layers::PLayerTransactionChild* LTC = layersInfo->mLayerTransactionChild;
 
   ipc::Shmem shmem;
@@ -246,6 +261,15 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
   PaintSequenceNumber++;
 }
 
+static void
+ClearBrowserGraphics(dom::TabChild* aBrowser)
+{
+  LayerTreeInfo* layersInfo = GetLayerTreeInfo(aBrowser);
+  layers::PLayerTransactionChild* LTC = layersInfo->mLayerTransactionChild;
+
+  LTC->SendClearCachedResources();
+}
+
 void
 UpdateGraphicsInUIProcess(const PaintMessage& aMsg)
 {
@@ -263,6 +287,8 @@ UpdateGraphicsInUIProcess(const PaintMessage& aMsg)
     if (browser->WebWidget()->IsVisible()) {
       UpdateBrowserTitle(browser);
       UpdateBrowserGraphics(browser, aMsg);
+    } else {
+      ClearBrowserGraphics(browser);
     }
   }
 }

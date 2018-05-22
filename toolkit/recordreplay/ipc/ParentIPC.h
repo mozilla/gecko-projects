@@ -27,9 +27,15 @@ namespace parent {
 // recording process can additionally be done via IPDL messages, usually by
 // forwarding them from the UI process.
 
-///////////////////////////////////////////////////////////////////////////////
-// Public API
-///////////////////////////////////////////////////////////////////////////////
+// UI process API
+
+// Initialize state in a UI process.
+void InitializeUIProcess(int aArgc, char** aArgv);
+
+// Get any directory where content process recordings should be saved.
+const char* SaveAllRecordingsDirectory();
+
+// Middleman process API
 
 // Save the recording up to the current point in execution.
 void SaveRecording(const nsCString& aFilename);
@@ -37,6 +43,7 @@ void SaveRecording(const nsCString& aFilename);
 // Get the message channel used to communicate with the UI process.
 ipc::MessageChannel* ChannelToUIProcess();
 
+// Initialize state in a middleman process.
 void Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid);
 
 // Note the contents of the prefs shmem for use by the child process.
