@@ -13,8 +13,6 @@ Cu.importGlobalProperties(["TextEncoder"]);
 
 const PREF_EM_CHECK_UPDATE_SECURITY   = "extensions.checkUpdateSecurity";
 const PREF_EM_STRICT_COMPATIBILITY    = "extensions.strictCompatibility";
-const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
-const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
 const PREF_GETADDONS_BYIDS               = "extensions.getAddons.get.url";
 const PREF_COMPAT_OVERRIDES              = "extensions.getAddons.compatOverides.url";
 const PREF_XPI_SIGNATURES_REQUIRED    = "xpinstall.signatures.required";
@@ -246,7 +244,8 @@ this.BootstrapMonitor = {
     Assert.notEqual(cached, undefined);
     Assert.equal(current.data.version, cached.data.version);
     Assert.equal(current.data.installPath, cached.data.installPath);
-    Assert.equal(current.data.resourceURI, cached.data.resourceURI);
+    Assert.ok(Services.io.newURI(current.data.resourceURI).equals(Services.io.newURI(cached.data.resourceURI)),
+              `Resource URIs match: "${current.data.resourceURI}" == "${cached.data.resourceURI}"`);
   },
 
   checkAddonStarted(id, version = undefined) {
@@ -1126,10 +1125,6 @@ function promiseInstallWebExtension(aData) {
 // By default use strict compatibility
 Services.prefs.setBoolPref("extensions.strictCompatibility", true);
 
-// By default, set min compatible versions to 0
-Services.prefs.setCharPref(PREF_EM_MIN_COMPAT_APP_VERSION, "0");
-Services.prefs.setCharPref(PREF_EM_MIN_COMPAT_PLATFORM_VERSION, "0");
-
 // Ensure signature checks are enabled by default
 Services.prefs.setBoolPref(PREF_XPI_SIGNATURES_REQUIRED, true);
 
@@ -1277,8 +1272,6 @@ function buildSystemAddonUpdates(addons, root) {
     xml += `  <addons>\n`;
     for (let addon of addons) {
       xml += `    <addon id="${addon.id}" URL="${root + addon.path}" version="${addon.version}"`;
-      if (addon.size)
-        xml += ` size="${addon.size}"`;
       if (addon.hashFunction)
         xml += ` hashFunction="${addon.hashFunction}"`;
       if (addon.hashValue)

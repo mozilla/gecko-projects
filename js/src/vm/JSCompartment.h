@@ -550,10 +550,7 @@ class WeakMapBase;
 
 struct JSCompartment
 {
-    const JS::CompartmentCreationOptions creationOptions_;
-    JS::CompartmentBehaviors behaviors_;
-
-  private:
+  protected:
     JS::Zone*                    zone_;
     JSRuntime*                   runtime_;
 
@@ -599,13 +596,6 @@ struct JSCompartment
         isSystem_ = isSystem;
     }
 
-    bool isAtomsCompartment() const {
-        return isAtomsCompartment_;
-    }
-    void setIsAtomsCompartment() {
-        isAtomsCompartment_ = true;
-    }
-
     // Used to approximate non-content code when reporting telemetry.
     inline bool isProbablySystemCode() const {
         return isSystem_;
@@ -613,7 +603,6 @@ struct JSCompartment
   private:
     JSPrincipals*                principals_;
     bool                         isSystem_;
-    bool                         isAtomsCompartment_;
 
   public:
     bool                         isSelfHosting;
@@ -629,7 +618,6 @@ struct JSCompartment
   private:
     friend struct JSRuntime;
     friend struct JSContext;
-    js::ReadBarrieredGlobalObject global_;
 
     unsigned                     enterCompartmentDepth;
 
@@ -649,10 +637,6 @@ struct JSCompartment
     JS::Zone* zone() { return zone_; }
     const JS::Zone* zone() const { return zone_; }
 
-    const JS::CompartmentCreationOptions& creationOptions() const { return creationOptions_; }
-    JS::CompartmentBehaviors& behaviors() { return behaviors_; }
-    const JS::CompartmentBehaviors& behaviors() const { return behaviors_; }
-
     JSRuntime* runtimeFromMainThread() const {
         MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(runtime_));
         return runtime_;
@@ -664,46 +648,22 @@ struct JSCompartment
         return runtime_;
     }
 
-    /* The global object for this compartment.
-     *
-     * This returns nullptr if this is the atoms compartment.  (The global_
-     * field is also null briefly during GC, after the global object is
-     * collected; but when that happens the JSCompartment is destroyed during
-     * the same GC.)
-     *
-     * In contrast, JSObject::global() is infallible because marking a JSObject
-     * always marks its global as well.
-     * TODO: add infallible JSScript::global()
-     */
-    inline js::GlobalObject* maybeGlobal() const;
-
-    /* An unbarriered getter for use while tracing. */
-    inline js::GlobalObject* unsafeUnbarrieredMaybeGlobal() const;
-
-    /* True if a global object exists, but it's being collected. */
-    inline bool globalIsAboutToBeFinalized();
-
-    inline void initGlobal(js::GlobalObject& global);
-
   public:
     void*                        data;
     void*                        realmData;
 
-  private:
+  protected:
     const js::AllocationMetadataBuilder *allocationMetadataBuilder;
 
     js::SavedStacks              savedStacks_;
 
+  private:
     js::WrapperMap               crossCompartmentWrappers;
 
-    // The global environment record's [[VarNames]] list that contains all
-    // names declared using FunctionDeclaration, GeneratorDeclaration, and
-    // VariableDeclaration declarations in global code in this compartment.
-    // Names are only removed from this list by a |delete IdentifierReference|
-    // that successfully removes that global property.
-    JS::GCHashSet<JSAtom*,
-                  js::DefaultHasher<JSAtom*>,
-                  js::SystemAllocPolicy> varNames_;
+  public:
+    void assertNoCrossCompartmentWrappers() {
+        MOZ_ASSERT(crossCompartmentWrappers.empty());
+    }
 
   public:
     /* Last time at which an animation was played for a global in this compartment. */
@@ -731,7 +691,7 @@ struct JSCompartment
     // might be detached.
     int32_t                      detachedTypedObjects;
 
-  private:
+  protected:
     friend class js::AutoSetNewObjectMetadata;
     js::NewObjectMetadataState objectMetadataState;
 
@@ -751,24 +711,11 @@ struct JSCompartment
         }
     }
 
-  public:
-    void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                                size_t* tiAllocationSiteTables,
-                                size_t* tiArrayTypeTables,
-                                size_t* tiObjectTypeTables,
-                                size_t* compartmentObject,
-                                size_t* compartmentTables,
-                                size_t* innerViews,
-                                size_t* lazyArrayBuffers,
-                                size_t* objectMetadataTables,
-                                size_t* crossCompartmentWrappers,
-                                size_t* savedStacksSet,
-                                size_t* varNamesSet,
-                                size_t* nonSyntacticLexicalScopes,
-                                size_t* jitCompartment,
-                                size_t* privateData,
-                                size_t* scriptCountsMapArg);
+  protected:
+    void addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
+                                size_t* crossCompartmentWrappersArg);
 
+  public:
     // Object group tables and other state in the compartment.
     js::ObjectGroupCompartment   objectGroups;
 
@@ -801,7 +748,7 @@ struct JSCompartment
     // WebAssembly state for the compartment.
     js::wasm::Compartment wasm;
 
-  private:
+  protected:
     // All non-syntactic lexical environments in the compartment. These are kept in
     // a map because when loading scripts into a non-syntactic environment, we need
     // to use the same lexical environment to persist lexical bindings.
@@ -851,13 +798,13 @@ struct JSCompartment
     bool isAccessValid() const { return validAccessPtr ? *validAccessPtr : true; }
     void setValidAccessPtr(bool* accessp) { validAccessPtr = accessp; }
 
-  public:
-    JSCompartment(JS::Zone* zone, const JS::CompartmentOptions& options);
+  protected:
+    explicit JSCompartment(JS::Zone* zone);
     ~JSCompartment();
 
     MOZ_MUST_USE bool init(JSContext* maybecx);
-    void destroy(js::FreeOp* fop);
 
+  public:
     MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp);
 
     MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandleString strp);
@@ -904,20 +851,6 @@ struct JSCompartment
     js::LexicalEnvironmentObject* getNonSyntacticLexicalEnvironment(JSObject* enclosing) const;
 
     /*
-     * This method traces data that is live iff we know that this compartment's
-     * global is still live.
-     */
-    void traceGlobal(JSTracer* trc);
-    /*
-     * This method traces JSCompartment-owned GC roots that are considered live
-     * regardless of whether the compartment's global is still live.
-     */
-    void traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime traceOrMark);
-    /*
-     * This method clears out tables of roots in preparation for the final GC.
-     */
-    void finishRoots();
-    /*
      * These methods mark pointers that cross compartment boundaries. They are
      * called in per-zone GCs to prevent the wrappers' outgoing edges from
      * dangling (full GCs naturally follow pointers across compartments) and
@@ -926,29 +859,22 @@ struct JSCompartment
     void traceOutgoingCrossCompartmentWrappers(JSTracer* trc);
     static void traceIncomingCrossCompartmentEdgesForZoneGC(JSTracer* trc);
 
-    /* Whether to preserve JIT code on non-shrinking GCs. */
-    bool preserveJitCode() { return creationOptions_.preserveJitCode(); }
-
     void sweepAfterMinorGC(JSTracer* trc);
     void sweepMapAndSetObjectsAfterMinorGC();
 
     void sweepCrossCompartmentWrappers();
     void sweepSavedStacks();
-    void sweepGlobalObject();
     void sweepSelfHostingScriptSource();
     void sweepJitCompartment();
     void sweepRegExps();
     void sweepDebugEnvironments();
     void sweepNativeIterators();
     void sweepTemplateObjects();
-    void sweepVarNames();
 
     void purge();
-    void clearTables();
 
     static void fixupCrossCompartmentWrappersAfterMovingGC(JSTracer* trc);
     void fixupAfterMovingGC();
-    void fixupGlobal();
     void fixupScriptMapsAfterMovingGC();
 
     bool hasAllocationMetadataBuilder() const { return allocationMetadataBuilder; }
@@ -964,18 +890,6 @@ struct JSCompartment
     }
 
     js::SavedStacks& savedStacks() { return savedStacks_; }
-
-    // Add a name to [[VarNames]].  Reports OOM on failure.
-    MOZ_MUST_USE bool addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name);
-
-    void removeFromVarNames(JS::Handle<JSAtom*> name) {
-        varNames_.remove(name);
-    }
-
-    // Whether the given name is in [[VarNames]].
-    bool isInVarNames(JS::Handle<JSAtom*> name) {
-        return varNames_.has(name);
-    }
 
     void findOutgoingEdges(js::gc::ZoneComponentFinder& finder);
 
@@ -1134,25 +1048,24 @@ struct JSCompartment
 
   private:
     /* Used by memory reporters and invalid otherwise. */
-    JS::CompartmentStats* compartmentStats_;
+    JS::RealmStats* realmStats_;
 
   public:
     // This should only be called when it is non-null, i.e. during memory
     // reporting.
-    JS::CompartmentStats& compartmentStats() {
+    JS::RealmStats& realmStats() {
         // We use MOZ_RELEASE_ASSERT here because in bug 1132502 there was some
-        // (inconclusive) evidence that compartmentStats_ can be nullptr
-        // unexpectedly.
-        MOZ_RELEASE_ASSERT(compartmentStats_);
-        return *compartmentStats_;
+        // (inconclusive) evidence that realmStats_ can be nullptr unexpectedly.
+        MOZ_RELEASE_ASSERT(realmStats_);
+        return *realmStats_;
     }
-    void nullCompartmentStats() {
-        MOZ_ASSERT(compartmentStats_);
-        compartmentStats_ = nullptr;
+    void nullRealmStats() {
+        MOZ_ASSERT(realmStats_);
+        realmStats_ = nullptr;
     }
-    void setCompartmentStats(JS::CompartmentStats* newStats) {
-        MOZ_ASSERT(!compartmentStats_ && newStats);
-        compartmentStats_ = newStats;
+    void setRealmStats(JS::RealmStats* newStats) {
+        MOZ_ASSERT(!realmStats_ && newStats);
+        realmStats_ = newStats;
     }
 
     MOZ_ALWAYS_INLINE bool objectMaybeInIteration(JSObject* obj);
@@ -1162,7 +1075,7 @@ struct JSCompartment
     bool scheduledForDestruction;
     bool maybeAlive;
 
-  private:
+  protected:
     js::jit::JitCompartment* jitCompartment_;
 
     js::ReadBarriered<js::ArgumentsObject*> mappedArgumentsTemplate_;
@@ -1209,6 +1122,119 @@ struct JSCompartment
     js::Vector<js::SetObject*, 0, js::SystemAllocPolicy> setsWithNurseryMemory;
 };
 
+class JS::Realm : public JSCompartment
+{
+    const JS::RealmCreationOptions creationOptions_;
+    JS::RealmBehaviors behaviors_;
+
+  public:
+    Realm(JS::Zone* zone, const JS::RealmOptions& options);
+
+    MOZ_MUST_USE bool init(JSContext* maybecx);
+    void destroy(js::FreeOp* fop);
+    void clearTables();
+
+    void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
+                                size_t* tiAllocationSiteTables,
+                                size_t* tiArrayTypeTables,
+                                size_t* tiObjectTypeTables,
+                                size_t* realmObject,
+                                size_t* realmTables,
+                                size_t* innerViews,
+                                size_t* lazyArrayBuffers,
+                                size_t* objectMetadataTables,
+                                size_t* crossCompartmentWrappers,
+                                size_t* savedStacksSet,
+                                size_t* varNamesSet,
+                                size_t* nonSyntacticLexicalScopes,
+                                size_t* jitCompartment,
+                                size_t* privateData,
+                                size_t* scriptCountsMapArg);
+
+    const JS::RealmCreationOptions& creationOptions() const { return creationOptions_; }
+    JS::RealmBehaviors& behaviors() { return behaviors_; }
+    const JS::RealmBehaviors& behaviors() const { return behaviors_; }
+
+    /* Whether to preserve JIT code on non-shrinking GCs. */
+    bool preserveJitCode() { return creationOptions_.preserveJitCode(); }
+
+  private:
+    bool isAtomsRealm_ = false;
+  public:
+    bool isAtomsRealm() const {
+        return isAtomsRealm_;
+    }
+    void setIsAtomsRealm() {
+        isAtomsRealm_ = true;
+    }
+
+  private:
+    friend struct ::JSContext;
+    js::ReadBarrieredGlobalObject global_;
+  public:
+    /* The global object for this realm.
+     *
+     * This returns nullptr if this is the atoms realm.  (The global_ field is
+     * also null briefly during GC, after the global object is collected; but
+     * when that happens the Realm is destroyed during the same GC.)
+     *
+     * In contrast, JSObject::global() is infallible because marking a JSObject
+     * always marks its global as well.
+     */
+    inline js::GlobalObject* maybeGlobal() const;
+
+    /* An unbarriered getter for use while tracing. */
+    inline js::GlobalObject* unsafeUnbarrieredMaybeGlobal() const;
+
+    /* True if a global object exists, but it's being collected. */
+    inline bool globalIsAboutToBeFinalized();
+
+    inline void initGlobal(js::GlobalObject& global);
+
+    /*
+     * This method traces data that is live iff we know that this realm's
+     * global is still live.
+     */
+    void traceGlobal(JSTracer* trc);
+
+    void sweepGlobalObject();
+    void fixupGlobal();
+
+    /*
+     * This method traces Realm-owned GC roots that are considered live
+     * regardless of whether the realm's global is still live.
+     */
+    void traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime traceOrMark);
+    /*
+     * This method clears out tables of roots in preparation for the final GC.
+     */
+    void finishRoots();
+
+  private:
+    // The global environment record's [[VarNames]] list that contains all
+    // names declared using FunctionDeclaration, GeneratorDeclaration, and
+    // VariableDeclaration declarations in global code in this realm.
+    // Names are only removed from this list by a |delete IdentifierReference|
+    // that successfully removes that global property.
+    using VarNamesSet = JS::GCHashSet<JSAtom*,
+                                      js::DefaultHasher<JSAtom*>,
+                                      js::SystemAllocPolicy>;
+    VarNamesSet varNames_;
+  public:
+    // Add a name to [[VarNames]].  Reports OOM on failure.
+    MOZ_MUST_USE bool addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name);
+    void sweepVarNames();
+
+    void removeFromVarNames(JS::Handle<JSAtom*> name) {
+        varNames_.remove(name);
+    }
+
+    // Whether the given name is in [[VarNames]].
+    bool isInVarNames(JS::Handle<JSAtom*> name) {
+        return varNames_.has(name);
+    }
+};
+
 namespace js {
 
 // We only set the maybeAlive flag for objects and scripts. It's assumed that,
@@ -1226,41 +1252,41 @@ inline js::Handle<js::GlobalObject*>
 JSContext::global() const
 {
     /*
-     * It's safe to use |unsafeGet()| here because any compartment that is
+     * It's safe to use |unsafeGet()| here because any realm that is
      * on-stack will be marked automatically, so there's no need for a read
-     * barrier on it. Once the compartment is popped, the handle is no longer
+     * barrier on it. Once the realm is popped, the handle is no longer
      * safe to use.
      */
-    MOZ_ASSERT(compartment_, "Caller needs to enter a compartment first");
-    return js::Handle<js::GlobalObject*>::fromMarkedLocation(compartment_->global_.unsafeGet());
+    MOZ_ASSERT(realm_, "Caller needs to enter a realm first");
+    return js::Handle<js::GlobalObject*>::fromMarkedLocation(realm_->global_.unsafeGet());
 }
 
 namespace js {
 
-class MOZ_RAII AssertCompartmentUnchanged
+class MOZ_RAII AssertRealmUnchanged
 {
   public:
-    explicit AssertCompartmentUnchanged(JSContext* cx
-                                        MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : cx(cx), oldCompartment(cx->compartment())
+    explicit AssertRealmUnchanged(JSContext* cx
+                                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : cx(cx), oldRealm(cx->realm())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    ~AssertCompartmentUnchanged() {
-        MOZ_ASSERT(cx->compartment() == oldCompartment);
+    ~AssertRealmUnchanged() {
+        MOZ_ASSERT(cx->realm() == oldRealm);
     }
 
   protected:
-    JSContext * const cx;
-    JSCompartment * const oldCompartment;
+    JSContext* const cx;
+    JS::Realm* const oldRealm;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 class AutoRealm
 {
     JSContext* const cx_;
-    JSCompartment* const origin_;
+    JS::Realm* const origin_;
     const AutoLockForExclusiveAccess* maybeLock_;
 
   public:
@@ -1269,13 +1295,13 @@ class AutoRealm
     inline ~AutoRealm();
 
     JSContext* context() const { return cx_; }
-    JSCompartment* origin() const { return origin_; }
+    JS::Realm* origin() const { return origin_; }
 
   protected:
-    inline AutoRealm(JSContext* cx, JSCompartment* target);
+    inline AutoRealm(JSContext* cx, JS::Realm* target);
 
-    // Used only for entering the atoms compartment.
-    inline AutoRealm(JSContext* cx, JSCompartment* target,
+    // Used only for entering the atoms realm.
+    inline AutoRealm(JSContext* cx, JS::Realm* target,
                      AutoLockForExclusiveAccess& lock);
 
   private:
@@ -1366,7 +1392,7 @@ class MOZ_RAII AutoWrapperVector : public JS::GCVector<WrapperValue, 8>,
     explicit AutoWrapperVector(JSContext* cx
                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : JS::GCVector<WrapperValue, 8>(cx),
-        JS::AutoGCRooter(cx, WRAPVECTOR)
+        JS::AutoGCRooter(cx, JS::AutoGCRooter::Tag::WrapperVector)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
@@ -1380,7 +1406,7 @@ class MOZ_RAII AutoWrapperRooter : private JS::AutoGCRooter {
   public:
     AutoWrapperRooter(JSContext* cx, const WrapperValue& v
                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : JS::AutoGCRooter(cx, WRAPPER), value(v)
+      : JS::AutoGCRooter(cx, JS::AutoGCRooter::Tag::Wrapper), value(v)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
@@ -1402,7 +1428,7 @@ class MOZ_RAII AutoSuppressAllocationMetadataBuilder {
 
   public:
     explicit AutoSuppressAllocationMetadataBuilder(JSContext* cx)
-      : AutoSuppressAllocationMetadataBuilder(cx->compartment()->zone())
+      : AutoSuppressAllocationMetadataBuilder(cx->realm()->zone())
     { }
 
     explicit AutoSuppressAllocationMetadataBuilder(JS::Zone* zone)

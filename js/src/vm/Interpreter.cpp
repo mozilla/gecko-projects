@@ -3290,13 +3290,13 @@ END_CASE(JSOP_SYMBOL)
 CASE(JSOP_OBJECT)
 {
     ReservedRooted<JSObject*> ref(&rootObject0, script->getObject(REGS.pc));
-    if (cx->compartment()->creationOptions().cloneSingletons()) {
+    if (cx->realm()->creationOptions().cloneSingletons()) {
         JSObject* obj = DeepCloneObjectLiteral(cx, ref, TenuredObject);
         if (!obj)
             goto error;
         PUSH_OBJECT(*obj);
     } else {
-        cx->compartment()->behaviors().setSingletonsAsValues();
+        cx->realm()->behaviors().setSingletonsAsValues();
         PUSH_OBJECT(*ref);
     }
 }
@@ -4468,7 +4468,7 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
         if (!DefineDataProperty(cx, parent, name, rval, attrs))
             return false;
 
-        return parent->is<GlobalObject>() ? parent->compartment()->addToVarNames(cx, name) : true;
+        return parent->is<GlobalObject>() ? parent->realm()->addToVarNames(cx, name) : true;
     }
 
     /*
@@ -4494,7 +4494,7 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
 
         // Careful: the presence of a shape, even one appearing to derive from
         // a variable declaration, doesn't mean it's in [[VarNames]].
-        if (!parent->compartment()->addToVarNames(cx, name))
+        if (!parent->realm()->addToVarNames(cx, name))
             return false;
     }
 
@@ -4718,7 +4718,7 @@ js::DeleteNameOperation(JSContext* cx, HandlePropertyName name, HandleObject sco
     if (status) {
         // Deleting a name from the global object removes it from [[VarNames]].
         if (pobj == scope && scope->is<GlobalObject>())
-            scope->compartment()->removeFromVarNames(name);
+            scope->realm()->removeFromVarNames(name);
     }
 
     return true;

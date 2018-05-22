@@ -106,6 +106,7 @@
 # ifdef MOZ_ENABLE_FREETYPE
 #  include "skia/include/ports/SkTypeface_cairo.h"
 # endif
+# include "mozilla/gfx/SkMemoryReporter.h"
 # ifdef __GNUC__
 #  pragma GCC diagnostic pop // -Wshadow
 # endif
@@ -839,6 +840,9 @@ gfxPlatform::Init()
     }
 
     RegisterStrongMemoryReporter(new GfxMemoryImageReporter());
+#ifdef USE_SKIA
+    RegisterStrongMemoryReporter(new SkMemoryReporter());
+#endif
     mlg::InitializeMemoryReporters();
 
 #ifdef USE_SKIA
@@ -853,6 +857,7 @@ gfxPlatform::Init()
 
     if (XRE_IsParentProcess()) {
       gfxVars::SetDXInterop2Blocked(IsDXInterop2Blocked());
+      gfxVars::SetDXNV12Blocked(IsDXNV12Blocked());
       Preferences::Unlock(FONT_VARIATIONS_PREF);
       if (!gPlatform->HasVariationFontSupport()) {
         // Ensure variation fonts are disabled and the pref is locked.
@@ -875,6 +880,19 @@ gfxPlatform::IsDXInterop2Blocked()
   nsCString blockId;
   int32_t status;
   if (!NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DX_INTEROP2,
+                                              blockId, &status))) {
+    return true;
+  }
+  return status != nsIGfxInfo::FEATURE_STATUS_OK;
+}
+
+/* static*/ bool
+gfxPlatform::IsDXNV12Blocked()
+{
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+  nsCString blockId;
+  int32_t status;
+  if (!NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DX_NV12,
                                               blockId, &status))) {
     return true;
   }

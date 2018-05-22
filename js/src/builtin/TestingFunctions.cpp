@@ -2845,7 +2845,7 @@ class CloneBufferObject : public NativeObject {
         Rooted<CloneBufferObject*> obj(cx, Create(cx));
         if (!obj)
             return nullptr;
-        auto data = js::MakeUnique<JSStructuredCloneData>();
+        auto data = js::MakeUnique<JSStructuredCloneData>(buffer->scope());
         if (!data) {
             ReportOutOfMemory(cx);
             return nullptr;
@@ -2867,11 +2867,6 @@ class CloneBufferObject : public NativeObject {
         MOZ_ASSERT(!data());
         setReservedSlot(DATA_SLOT, PrivateValue(aData));
         setReservedSlot(SYNTHETIC_SLOT, BooleanValue(synthetic));
-
-        // For testing only, and will be unnecessary once the scope is moved
-        // into JSStructuredCloneData.
-        if (synthetic)
-            aData->IgnoreTransferables();
     }
 
     // Discard an owned clone buffer.
@@ -2909,7 +2904,7 @@ class CloneBufferObject : public NativeObject {
             return false;
         }
 
-        auto buf = js::MakeUnique<JSStructuredCloneData>();
+        auto buf = js::MakeUnique<JSStructuredCloneData>(JS::StructuredCloneScope::DifferentProcess);
         if (!buf || !buf->Init(nbytes)) {
             ReportOutOfMemory(cx);
             return false;
@@ -3294,7 +3289,7 @@ static bool
 SharedMemoryEnabled(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled());
+    args.rval().setBoolean(cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled());
     return true;
 }
 
@@ -4125,7 +4120,7 @@ SetLazyParsingDisabled(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     bool disable = !args.hasDefined(0) || ToBoolean(args[0]);
-    cx->compartment()->behaviors().setDisableLazyParsing(disable);
+    cx->realm()->behaviors().setDisableLazyParsing(disable);
 
     args.rval().setUndefined();
     return true;
@@ -4137,7 +4132,7 @@ SetDiscardSource(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     bool discard = !args.hasDefined(0) || ToBoolean(args[0]);
-    cx->compartment()->behaviors().setDiscardSource(discard);
+    cx->realm()->behaviors().setDiscardSource(discard);
 
     args.rval().setUndefined();
     return true;

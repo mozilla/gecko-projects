@@ -14,11 +14,11 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MaybeOneOf.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Scoped.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/Vector.h"
 
+#include <algorithm>
 #include <setjmp.h>
 
 #include "builtin/AtomicsObject.h"
@@ -700,14 +700,14 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
     // Set of all atoms added while the main atoms table is being swept.
     js::ExclusiveAccessLockData<js::AtomSet*> atomsAddedWhileSweeping_;
 
-    // Compartment and associated zone containing all atoms in the runtime, as
+    // Realm and associated zone containing all atoms in the runtime, as
     // well as runtime wide IonCode stubs. Modifying the contents of this
-    // compartment requires the calling thread to use AutoLockForExclusiveAccess.
-    js::WriteOnceData<JSCompartment*> atomsCompartment_;
+    // zone requires the calling thread to use AutoLockForExclusiveAccess.
+    js::WriteOnceData<JS::Realm*> atomsRealm_;
 
     // Set of all live symbols produced by Symbol.for(). All such symbols are
-    // allocated in the atomsCompartment. Reading or writing the symbol
-    // registry requires the calling thread to use AutoLockForExclusiveAccess.
+    // allocated in the atomsZone. Reading or writing the symbol registry
+    // requires the calling thread to use AutoLockForExclusiveAccess.
     js::ExclusiveAccessLockOrGCTaskData<js::SymbolRegistry> symbolRegistry_;
 
   public:
@@ -735,22 +735,25 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
         return atomsAddedWhileSweeping_;
     }
 
-    JSCompartment* atomsCompartment(js::AutoLockForExclusiveAccess& lock) {
-        return atomsCompartment_;
+    JS::Realm* atomsRealm(js::AutoLockForExclusiveAccess& lock) {
+        return atomsRealm_;
     }
-    JSCompartment* unsafeAtomsCompartment() {
-        return atomsCompartment_;
+    JS::Realm* unsafeAtomsRealm() {
+        return atomsRealm_;
     }
 
+    // Note: once JS::Realm and JSCompartment are completely unrelated, the
+    // atoms realm probably won't have a compartment so we can remove this
+    // then.
     bool isAtomsCompartment(JSCompartment* comp) {
-        return comp == atomsCompartment_;
+        return JS::GetRealmForCompartment(comp) == atomsRealm_;
     }
 
     const JS::Zone* atomsZone(js::AutoLockForExclusiveAccess& lock) const {
         return gc.atomsZone;
     }
 
-    // The atoms compartment is the only one in its zone.
+    // The atoms realm is the only one in its zone.
     bool isAtomsZone(const JS::Zone* zone) const {
         return zone == gc.atomsZone;
     }
@@ -1093,20 +1096,21 @@ class MOZ_RAII AutoUnlockGC
 static MOZ_ALWAYS_INLINE void
 MakeRangeGCSafe(Value* vec, size_t len)
 {
-    mozilla::PodZero(vec, len);
+    // Don't PodZero here because JS::Value is non-trivial.
+    for (size_t i = 0; i < len; i++)
+        vec[i].setDouble(+0.0);
 }
 
 static MOZ_ALWAYS_INLINE void
 MakeRangeGCSafe(Value* beg, Value* end)
 {
-    mozilla::PodZero(beg, end - beg);
+    MakeRangeGCSafe(beg, end - beg);
 }
 
 static MOZ_ALWAYS_INLINE void
 MakeRangeGCSafe(jsid* beg, jsid* end)
 {
-    for (jsid* id = beg; id != end; ++id)
-        *id = INT_TO_JSID(0);
+    std::fill(beg, end, INT_TO_JSID(0));
 }
 
 static MOZ_ALWAYS_INLINE void
@@ -1118,13 +1122,13 @@ MakeRangeGCSafe(jsid* vec, size_t len)
 static MOZ_ALWAYS_INLINE void
 MakeRangeGCSafe(Shape** beg, Shape** end)
 {
-    mozilla::PodZero(beg, end - beg);
+    std::fill(beg, end, nullptr);
 }
 
 static MOZ_ALWAYS_INLINE void
 MakeRangeGCSafe(Shape** vec, size_t len)
 {
-    mozilla::PodZero(vec, len);
+    MakeRangeGCSafe(vec, vec + len);
 }
 
 static MOZ_ALWAYS_INLINE void

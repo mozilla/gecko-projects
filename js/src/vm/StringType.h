@@ -8,7 +8,6 @@
 #define vm_StringType_h
 
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/TextUtils.h"
 
@@ -701,6 +700,13 @@ class JSRope : public JSString
     template <typename CharT>
     bool copyChars(JSContext* cx, js::ScopedJSFreePtr<CharT>& out) const;
 
+    // Hash function specific for ropes that avoids allocating a temporary
+    // string. There are still allocations internally so it's technically
+    // fallible.
+    //
+    // Returns the same value as if this were a linear string being hashed.
+    MOZ_MUST_USE bool hash(uint32_t* outhHash) const;
+
     JSString* leftChild() const {
         MOZ_ASSERT(isRope());
         return d.s.u2.left;
@@ -1280,19 +1286,17 @@ class StaticStrings
     static const size_t SMALL_CHAR_LIMIT    = 128U;
     static const size_t NUM_SMALL_CHARS     = 64U;
 
-    JSAtom* length2StaticTable[NUM_SMALL_CHARS * NUM_SMALL_CHARS];
+    JSAtom* length2StaticTable[NUM_SMALL_CHARS * NUM_SMALL_CHARS] = {}; // zeroes
 
   public:
     /* We keep these public for the JITs. */
     static const size_t UNIT_STATIC_LIMIT   = 256U;
-    JSAtom* unitStaticTable[UNIT_STATIC_LIMIT];
+    JSAtom* unitStaticTable[UNIT_STATIC_LIMIT] = {}; // zeroes
 
     static const size_t INT_STATIC_LIMIT    = 256U;
-    JSAtom* intStaticTable[INT_STATIC_LIMIT];
+    JSAtom* intStaticTable[INT_STATIC_LIMIT] = {}; // zeroes
 
-    StaticStrings() {
-        mozilla::PodZero(this);
-    }
+    StaticStrings() = default;
 
     bool init(JSContext* cx);
     void trace(JSTracer* trc);

@@ -484,7 +484,7 @@ extern JS_FRIEND_API(bool)
 IsSystemZone(JS::Zone* zone);
 
 extern JS_FRIEND_API(bool)
-IsAtomsCompartment(JSCompartment* comp);
+IsAtomsRealm(JS::Realm* realm);
 
 extern JS_FRIEND_API(bool)
 IsAtomsZone(JS::Zone* zone);
@@ -1202,7 +1202,7 @@ GetErrorTypeName(JSContext* cx, int16_t exnType);
 
 #ifdef JS_DEBUG
 extern JS_FRIEND_API(unsigned)
-GetEnterCompartmentDepth(JSContext* cx);
+GetEnterRealmDepth(JSContext* cx);
 #endif
 
 extern JS_FRIEND_API(RegExpShared*)
@@ -1804,7 +1804,7 @@ JS_NewFloat64ArrayWithBuffer(JSContext* cx, JS::HandleObject arrayBuffer,
 /**
  * Create a new SharedArrayBuffer with the given byte length.  This
  * may only be called if
- * JS::CompartmentCreationOptionsRef(cx).getSharedMemoryAndAtomicsEnabled() is
+ * JS::RealmCreationOptionsRef(cx).getSharedMemoryAndAtomicsEnabled() is
  * true.
  */
 extern JS_FRIEND_API(JSObject*)

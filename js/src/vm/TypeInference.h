@@ -508,7 +508,10 @@ class TypeSet
 
     // Clone a type set into an arbitrary allocator.
     TemporaryTypeSet* clone(LifoAlloc* alloc) const;
-    bool clone(LifoAlloc* alloc, TemporaryTypeSet* result) const;
+
+    // |*result| is not even partly initialized when this function is called:
+    // this function placement-new's its contents into existence.
+    bool cloneIntoUninitialized(LifoAlloc* alloc, TemporaryTypeSet* result) const;
 
     // Create a new TemporaryTypeSet where undefined and/or null has been filtered out.
     TemporaryTypeSet* filter(LifoAlloc* alloc, bool filterUndefined, bool filterNull) const;
@@ -957,12 +960,10 @@ class PreliminaryObjectArray
   private:
     // All objects with the type which have been allocated. The pointers in
     // this array are weak.
-    JSObject* objects[COUNT];
+    JSObject* objects[COUNT] = {}; // zeroes
 
   public:
-    PreliminaryObjectArray() {
-        mozilla::PodZero(this);
-    }
+    PreliminaryObjectArray() = default;
 
     void registerNewObject(PlainObject* res);
     void unregisterObject(PlainObject* obj);
@@ -1056,11 +1057,11 @@ class TypeNewScript
 
   private:
     // Scripted function which this information was computed for.
-    HeapPtr<JSFunction*> function_;
+    HeapPtr<JSFunction*> function_ = {};
 
     // Any preliminary objects with the type. The analyses are not performed
     // until this array is cleared.
-    PreliminaryObjectArray* preliminaryObjects;
+    PreliminaryObjectArray* preliminaryObjects = nullptr;
 
     // After the new script properties analyses have been performed, a template
     // object to use for newly constructed objects. The shape of this object
@@ -1068,7 +1069,7 @@ class TypeNewScript
     // allocation kind to use. This is null if the new objects have an unboxed
     // layout, in which case the UnboxedLayout provides the initial structure
     // of the object.
-    HeapPtr<PlainObject*> templateObject_;
+    HeapPtr<PlainObject*> templateObject_ = {};
 
     // Order in which definite properties become initialized. We need this in
     // case the definite properties are invalidated (such as by adding a setter
@@ -1078,21 +1079,21 @@ class TypeNewScript
     // shape. Property assignments in inner frames are preceded by a series of
     // SETPROP_FRAME entries specifying the stack down to the frame containing
     // the write.
-    Initializer* initializerList;
+    Initializer* initializerList = nullptr;
 
     // If there are additional properties found by the acquired properties
     // analysis which were not found by the definite properties analysis, this
     // shape contains all such additional properties (plus the definite
     // properties). When an object of this group acquires this shape, it is
     // fully initialized and its group can be changed to initializedGroup.
-    HeapPtr<Shape*> initializedShape_;
+    HeapPtr<Shape*> initializedShape_ = {};
 
     // Group with definite properties set for all properties found by
     // both the definite and acquired properties analyses.
-    HeapPtr<ObjectGroup*> initializedGroup_;
+    HeapPtr<ObjectGroup*> initializedGroup_ = {};
 
   public:
-    TypeNewScript() { mozilla::PodZero(this); }
+    TypeNewScript() = default;
     ~TypeNewScript() {
         js_delete(preliminaryObjects);
         js_free(initializerList);

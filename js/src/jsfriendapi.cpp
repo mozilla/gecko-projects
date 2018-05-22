@@ -39,7 +39,7 @@ using mozilla::Move;
 using mozilla::PodArrayZero;
 
 JS::RootingContext::RootingContext()
-  : autoGCRooters_(nullptr), compartment_(nullptr), zone_(nullptr)
+  : autoGCRooters_(nullptr), realm_(nullptr), zone_(nullptr)
 {
     for (auto& stackRootPtr : stackRoots_)
         stackRootPtr = nullptr;
@@ -149,7 +149,7 @@ JS_NewObjectWithoutMetadata(JSContext* cx, const JSClass* clasp, JS::Handle<JSOb
 JS_FRIEND_API(bool)
 JS_GetIsSecureContext(JSCompartment* compartment)
 {
-    return compartment->creationOptions().secureContext();
+    return JS::GetRealmForCompartment(compartment)->creationOptions().secureContext();
 }
 
 JS_FRIEND_API(JSPrincipals*)
@@ -241,7 +241,7 @@ DefineHelpProperty(JSContext* cx, HandleObject obj, const char* prop, const char
 JS_FRIEND_API(bool)
 JS_DefineFunctionsWithHelp(JSContext* cx, HandleObject obj, const JSFunctionSpecWithHelp* fs)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
 
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -343,9 +343,9 @@ js::IsSystemZone(Zone* zone)
 }
 
 JS_FRIEND_API(bool)
-js::IsAtomsCompartment(JSCompartment* comp)
+js::IsAtomsRealm(JS::Realm* realm)
 {
-    return comp->runtimeFromAnyThread()->isAtomsCompartment(comp);
+    return realm->isAtomsRealm();
 }
 
 JS_FRIEND_API(bool)
@@ -424,7 +424,7 @@ js::DefineFunctionWithReserved(JSContext* cx, JSObject* objArg, const char* name
                                unsigned nargs, unsigned attrs)
 {
     RootedObject obj(cx, objArg);
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
     JSAtom* atom = Atomize(cx, name, strlen(name));
@@ -438,7 +438,7 @@ JS_FRIEND_API(JSFunction*)
 js::NewFunctionWithReserved(JSContext* cx, JSNative native, unsigned nargs, unsigned flags,
                             const char* name)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
 
     CHECK_REQUEST(cx);
 
@@ -459,7 +459,7 @@ js::NewFunctionByIdWithReserved(JSContext* cx, JSNative native, unsigned nargs, 
                                 jsid id)
 {
     MOZ_ASSERT(JSID_IS_STRING(id));
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, id);
 
@@ -572,8 +572,8 @@ js::AreGCGrayBitsValid(JSRuntime* rt)
 JS_FRIEND_API(bool)
 js::ZoneGlobalsAreAllGray(JS::Zone* zone)
 {
-    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
-        JSObject* obj = comp->unsafeUnbarrieredMaybeGlobal();
+    for (RealmsInZoneIter realm(zone); !realm.done(); realm.next()) {
+        JSObject* obj = realm->unsafeUnbarrieredMaybeGlobal();
         if (!obj || !JS::ObjectIsMarkedGray(obj))
             return false;
     }
@@ -1312,9 +1312,9 @@ js::GetTestingFunctions(JSContext* cx)
 
 #ifdef DEBUG
 JS_FRIEND_API(unsigned)
-js::GetEnterCompartmentDepth(JSContext* cx)
+js::GetEnterRealmDepth(JSContext* cx)
 {
-  return cx->getEnterCompartmentDepth();
+  return cx->getEnterRealmDepth();
 }
 #endif
 

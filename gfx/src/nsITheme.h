@@ -24,6 +24,7 @@ class nsAtom;
 class nsIWidget;
 
 namespace mozilla {
+class ComputedStyle;
 namespace layers {
 class StackingContextHelper;
 class WebRenderLayerManager;
@@ -73,6 +74,14 @@ public:
                                   const nsRect& aDirtyRect) = 0;
 
   /**
+   * Get the used color of the given widget when it's specified as auto.
+   * It's currently only used for scrollbar-*-color properties.
+   */
+  virtual nscolor GetWidgetAutoColor(mozilla::ComputedStyle* aStyle,
+                                     uint8_t aWidgetType)
+  { return NS_RGB(0, 0, 0); }
+
+  /**
    * Create WebRender commands for the theme background.
    * @return true if the theme knows how to create WebRender commands for the
    *         given widget type, false if DrawWidgetBackground need sto be called
@@ -87,12 +96,12 @@ public:
                                                 const nsRect& aRect) { return false; }
 
   /**
-   * Get the computed CSS border for the widget, in pixels.
+   * Get the border for the widget, in device pixels.
    */
   NS_IMETHOD GetWidgetBorder(nsDeviceContext* aContext, 
                              nsIFrame* aFrame,
                              uint8_t aWidgetType,
-                             nsIntMargin* aResult)=0;
+                             mozilla::LayoutDeviceIntMargin* aResult) = 0;
 
   /**
    * This method can return false to indicate that the CSS padding
@@ -106,7 +115,7 @@ public:
   virtual bool GetWidgetPadding(nsDeviceContext* aContext,
                                   nsIFrame* aFrame,
                                   uint8_t aWidgetType,
-                                  nsIntMargin* aResult) = 0;
+                                  mozilla::LayoutDeviceIntMargin* aResult) = 0;
 
   /**
    * On entry, *aResult is positioned at 0,0 and sized to the new size

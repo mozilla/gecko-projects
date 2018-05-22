@@ -130,6 +130,12 @@ var paymentRequest = {
         id: "address-page",
         onboardingWizard: true,
       };
+    } else if (Object.keys(detail.savedBasicCards).length == 0) {
+      state.page = {
+        id: "basic-card-page",
+        onboardingWizard: true,
+        guid: null,
+      };
     }
 
     document.querySelector("payment-dialog").setStateFromParent(state);
@@ -217,6 +223,11 @@ var paymentRequest = {
   onPaymentRequestUnload() {
     // remove listeners that may be used multiple times here
     window.removeEventListener("paymentChromeToContent", this);
+  },
+
+  getAddresses(state) {
+    let addresses = Object.assign({}, state.savedAddresses, state.tempAddresses);
+    return addresses;
   },
 
   getBasicCards(state) {

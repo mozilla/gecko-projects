@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.getSelectedSourceText = exports.getSelectedSource = exports.getSelectedLocation = exports.getSourcesForTabs = exports.getSourceTabs = exports.getTabs = exports.getSources = exports.SourceRecordClass = undefined;
+exports.getSelectedSourceText = exports.getSelectedSource = exports.getSelectedLocation = exports.getSourcesForTabs = exports.getSourceTabs = exports.getTabs = exports.getSources = exports.RelativeSourceRecordClass = exports.SourceRecordClass = undefined;
 exports.initialSourcesState = initialSourcesState;
 exports.removeSourceFromTabList = removeSourceFromTabList;
 exports.removeSourcesFromTabList = removeSourcesFromTabList;
@@ -51,7 +51,7 @@ function initialSourcesState() {
   })();
 }
 
-const SourceRecordClass = exports.SourceRecordClass = new I.Record({
+const sourceRecordProperties = {
   id: undefined,
   url: undefined,
   sourceMapURL: undefined,
@@ -62,7 +62,11 @@ const SourceRecordClass = exports.SourceRecordClass = new I.Record({
   contentType: "",
   error: undefined,
   loadedState: "unloaded"
-});
+};
+const SourceRecordClass = exports.SourceRecordClass = new I.Record(sourceRecordProperties);
+const RelativeSourceRecordClass = exports.RelativeSourceRecordClass = new I.Record(_objectSpread({}, sourceRecordProperties, {
+  relativeUrl: undefined
+}));
 
 function update(state = initialSourcesState(), action) {
   let location = null;
@@ -85,7 +89,7 @@ function update(state = initialSourcesState(), action) {
         return action.sources.reduce((newState, source) => updateSource(newState, source), state);
       }
 
-    case "SELECT_SOURCE":
+    case "SET_SELECTED_LOCATION":
       location = _objectSpread({}, action.location, {
         url: action.source.url
       });
@@ -94,7 +98,7 @@ function update(state = initialSourcesState(), action) {
         sourceId: action.source.id
       }, action.location)).set("pendingSelectedLocation", location);
 
-    case "CLEAR_SELECTED_SOURCE":
+    case "CLEAR_SELECTED_LOCATION":
       location = {
         url: ""
       };
@@ -103,7 +107,7 @@ function update(state = initialSourcesState(), action) {
         sourceId: ""
       }).set("pendingSelectedLocation", location);
 
-    case "SELECT_SOURCE_URL":
+    case "SET_PENDING_SELECTED_LOCATION":
       location = {
         url: action.url,
         line: action.line
@@ -349,12 +353,12 @@ function getSourceByURL(state, url) {
   return getSourceByUrlInSources(state.sources.sources, url);
 }
 
-function getGeneratedSource(state, source) {
-  if (!source || !(0, _devtoolsSourceMap.isOriginalId)(source.id)) {
+function getGeneratedSource(state, sourceRecord) {
+  if (!sourceRecord || !(0, _devtoolsSourceMap.isOriginalId)(sourceRecord.id)) {
     return null;
   }
 
-  return getSource(state, (0, _devtoolsSourceMap.originalToGeneratedId)(source.id));
+  return getSource(state, (0, _devtoolsSourceMap.originalToGeneratedId)(sourceRecord.id));
 }
 
 function getPendingSelectedLocation(state) {

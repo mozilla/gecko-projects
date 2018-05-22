@@ -356,7 +356,6 @@ toolbarpaletteitem {
 #main-window[inFullscreen][inDOMFullscreen] #fullscr-toggler,
 #main-window[inFullscreen][inDOMFullscreen] #sidebar-box,
 #main-window[inFullscreen][inDOMFullscreen] #sidebar-splitter,
-#main-window[inFullscreen][inDOMFullscreen] #developer-toolbar,
 #main-window[inFullscreen]:not([OSXLionFullscreen]) toolbar:not([fullscreentoolbar=true]),
 #main-window[inFullscreen] #global-notificationbox,
 #main-window[inFullscreen] #high-priority-global-notificationbox {
@@ -887,24 +886,17 @@ window[chromehidden~="toolbar"] toolbar:not(#nav-bar):not(#TabsToolbar):not(#pri
 
 #historySwipeAnimationContainer {
   overflow: hidden;
+  pointer-events: none;
 }
 
-#historySwipeAnimationPreviousPage,
-#historySwipeAnimationCurrentPage,
-#historySwipeAnimationNextPage {
-  background: none top left no-repeat white;
+#historySwipeAnimationPreviousArrow {
+  background: url("chrome://browser/content/history-swipe-arrow.svg")
+              center left / 64px 128px no-repeat transparent;
 }
-
-#historySwipeAnimationPreviousPage {
-  background-image: -moz-element(#historySwipeAnimationPreviousPageSnapshot);
-}
-
-#historySwipeAnimationCurrentPage {
-  background-image: -moz-element(#historySwipeAnimationCurrentPageSnapshot);
-}
-
-#historySwipeAnimationNextPage {
-  background-image: -moz-element(#historySwipeAnimationNextPageSnapshot);
+#historySwipeAnimationNextArrow {
+  background: url("chrome://browser/content/history-swipe-arrow.svg")
+              center left / 64px 128px no-repeat transparent;
+  transform: rotate(180deg);
 }
 
 /*  Full Screen UI */
@@ -960,7 +952,7 @@ html|*#fullscreen-exit-button {
 /* ::::: Ctrl-Tab Panel ::::: */
 
 .ctrlTab-preview {
-  -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#ctrlTab-preview");
+  -moz-binding: url("chrome://global/content/bindings/button.xml#button-base");
 }
 
 
@@ -1043,30 +1035,6 @@ browser[tabmodalPromptShowing] {
   height: 3em;
   width: 100%;
   -moz-box-align: end;
-}
-
-/* gcli */
-
-html|*#gcli-tooltip-frame,
-html|*#gcli-output-frame,
-#gcli-output,
-#gcli-tooltip {
-  overflow-x: hidden;
-}
-
-.gclitoolbar-input-node,
-.gclitoolbar-complete-node {
-  direction: ltr;
-}
-
-#developer-toolbar-toolbox-button[error-count] > .toolbarbutton-icon {
-  display: none;
-}
-
-#developer-toolbar-toolbox-button[error-count]:before {
-  content: attr(error-count);
-  display: -moz-box;
-  -moz-box-pack: center;
 }
 
 /* Translation */

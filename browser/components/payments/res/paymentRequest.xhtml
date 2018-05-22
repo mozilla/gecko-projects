@@ -46,6 +46,7 @@
   <!ENTITY addressPage.cancelButton.label     "Cancel">
   <!ENTITY addressPage.backButton.label       "Back">
   <!ENTITY addressPage.saveButton.label       "Save">
+  <!ENTITY addressPage.persistCheckbox.label  "Save address to Firefox">
 ]>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -93,6 +94,7 @@
                id="shipping-type-label"
                data-shipping-address-label="&shippingAddressLabel;"
                data-delivery-address-label="&deliveryAddressLabel;"
+               data-persist-checkbox-label="&addressPage.persistCheckbox.label;"
                data-pickup-address-label="&pickupAddressLabel;"><label></label></div>
           <address-picker class="shipping-related"
                           data-add-link-label="&address.addLink.label;"
@@ -104,8 +106,6 @@
 
           <div><label>&paymentMethodsLabel;</label></div>
           <payment-method-picker selected-state-key="selectedPaymentCard"
-                                 data-add-basic-card-title="&basicCard.addPage.title;"
-                                 data-edit-basic-card-title="&basicCard.editPage.title;"
                                  data-add-link-label="&basicCard.addLink.label;"
                                  data-edit-link-label="&basicCard.editLink.label;">
           </payment-method-picker>
@@ -135,9 +135,12 @@
 
       <basic-card-form id="basic-card-page"
                        class="page"
+                       data-add-basic-card-title="&basicCard.addPage.title;"
+                       data-edit-basic-card-title="&basicCard.editPage.title;"
                        data-error-generic-save="&basicCardPage.error.genericSave;"
                        data-back-button-label="&basicCardPage.backButton.label;"
                        data-save-button-label="&basicCardPage.saveButton.label;"
+                       data-cancel-button-label="&cancelPaymentButton.label;"
                        data-persist-checkbox-label="&basicCardPage.persistCheckbox.label;"
                        hidden="hidden"></basic-card-form>
 
@@ -147,6 +150,7 @@
                     data-cancel-button-label="&addressPage.cancelButton.label;"
                     data-back-button-label="&addressPage.backButton.label;"
                     data-save-button-label="&addressPage.saveButton.label;"
+                    data-persist-checkbox-label="&addressPage.persistCheckbox.label;"
                     hidden="hidden"></address-form>
     </div>
 

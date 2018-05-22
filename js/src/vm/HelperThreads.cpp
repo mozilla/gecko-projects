@@ -347,7 +347,7 @@ js::HasOffThreadIonCompile(JSCompartment* comp)
 {
     AutoLockHelperThreadState lock;
 
-    if (!HelperThreadState().threads || comp->isAtomsCompartment())
+    if (!HelperThreadState().threads || JS::GetRealmForCompartment(comp)->isAtomsRealm())
         return false;
 
     GlobalHelperThreadState::IonBuilderVector& worklist = HelperThreadState().ionWorklist(lock);
@@ -665,11 +665,10 @@ bool
 js::OffThreadParsingMustWaitForGC(JSRuntime* rt)
 {
     // Off thread parsing can't occur during incremental collections on the
-    // atoms compartment, to avoid triggering barriers. (Outside the atoms
-    // compartment, the compilation will use a new zone that is never
-    // collected.) If an atoms-zone GC is in progress, hold off on executing the
-    // parse task until the atoms-zone GC completes (see
-    // EnqueuePendingParseTasksAfterGC).
+    // atoms zone, to avoid triggering barriers. (Outside the atoms zone, the
+    // compilation will use a new zone that is never collected.) If an
+    // atoms-zone GC is in progress, hold off on executing the parse task until
+    // the atoms-zone GC completes (see EnqueuePendingParseTasksAfterGC).
     return rt->activeGCInAtomsZone();
 }
 
@@ -733,12 +732,12 @@ class MOZ_RAII AutoSetCreatedForHelperThread
 static JSObject*
 CreateGlobalForOffThreadParse(JSContext* cx, const gc::AutoSuppressGC& nogc)
 {
-    JSCompartment* currentCompartment = cx->compartment();
+    JS::Realm* currentRealm = cx->realm();
 
-    JS::CompartmentOptions compartmentOptions(currentCompartment->creationOptions(),
-                                              currentCompartment->behaviors());
+    JS::RealmOptions realmOptions(currentRealm->creationOptions(),
+                                  currentRealm->behaviors());
 
-    auto& creationOptions = compartmentOptions.creationOptions();
+    auto& creationOptions = realmOptions.creationOptions();
 
     creationOptions.setInvisibleToDebugger(true)
                    .setMergeable(true)
@@ -748,13 +747,13 @@ CreateGlobalForOffThreadParse(JSContext* cx, const gc::AutoSuppressGC& nogc)
     creationOptions.setTrace(nullptr);
 
     JSObject* obj = JS_NewGlobalObject(cx, &parseTaskGlobalClass, nullptr,
-                                       JS::DontFireOnNewGlobalHook, compartmentOptions);
+                                       JS::DontFireOnNewGlobalHook, realmOptions);
     if (!obj)
         return nullptr;
 
     Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
-    JS_SetCompartmentPrincipals(global->compartment(), currentCompartment->principals());
+    JS_SetCompartmentPrincipals(global->compartment(), currentRealm->principals());
 
     return global;
 }
@@ -785,7 +784,7 @@ bool
 StartOffThreadParseTask(JSContext* cx, ParseTask* task, const ReadOnlyCompileOptions& options)
 {
     // Suppress GC so that calls below do not trigger a new incremental GC
-    // which could require barriers on the atoms compartment.
+    // which could require barriers on the atoms zone.
     gc::AutoSuppressGC nogc(cx);
     gc::AutoSuppressNurseryCellAlloc noNurseryAlloc(cx);
     AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);

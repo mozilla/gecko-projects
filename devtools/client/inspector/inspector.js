@@ -55,9 +55,10 @@ const PORTRAIT_MODE_WIDTH_THRESHOLD = 700;
 const SIDE_PORTAIT_MODE_WIDTH_THRESHOLD = 1000;
 
 const SHOW_THREE_PANE_ONBOARDING_PREF = "devtools.inspector.show-three-pane-tooltip";
-const SHOW_THREE_PANE_TOGGLE_PREF = "devtools.inspector.three-pane-toggle";
 const THREE_PANE_ENABLED_PREF = "devtools.inspector.three-pane-enabled";
 const THREE_PANE_ENABLED_SCALAR = "devtools.inspector.three_pane_enabled";
+
+const TELEMETRY_EYEDROPPER_OPENED = "devtools.toolbar.eyedropper.opened";
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -120,7 +121,6 @@ function Inspector(toolbox) {
   this.previousURL = this.target.url;
 
   this.is3PaneModeEnabled = Services.prefs.getBoolPref(THREE_PANE_ENABLED_PREF);
-  this.show3PaneToggle = Services.prefs.getBoolPref(SHOW_THREE_PANE_TOGGLE_PREF);
   this.show3PaneTooltip = Services.prefs.getBoolPref(SHOW_THREE_PANE_ONBOARDING_PREF);
 
   this.nodeMenuTriggerInfo = null;
@@ -266,8 +266,9 @@ Inspector.prototype = {
     await this.setupToolbar();
 
     // Show the 3 pane onboarding tooltip only if the inspector is visisble since the
-    // Accessibility panel initializes the Inspector.
-    if (this.show3PaneTooltip && this.toolbox.currentToolId === "inspector") {
+    // Accessibility panel initializes the Inspector and if it is not the browser toolbox.
+    if (this.show3PaneTooltip && !this.target.chrome &&
+        this.toolbox.currentToolId === "inspector") {
       this.threePaneTooltip = new ThreePaneOnboardingTooltip(this.toolbox, this.panelDoc);
     }
 
@@ -486,6 +487,10 @@ Inspector.prototype = {
    * @return {Boolean} true if the inspector should be in landscape mode.
    */
   useLandscapeMode: function() {
+    if (!this.panelDoc) {
+      return true;
+    }
+
     let { clientWidth } = this.panelDoc.getElementById("inspector-splitter-box");
     return this.is3PaneModeEnabled && this.toolbox.hostType == Toolbox.HostType.SIDE ?
       clientWidth > SIDE_PORTAIT_MODE_WIDTH_THRESHOLD :
@@ -552,8 +557,12 @@ Inspector.prototype = {
    * to `horizontal` to support portrait view.
    */
   onPanelWindowResize: function() {
-    this.splitBox.setState({
-      vert: this.useLandscapeMode(),
+    window.cancelIdleCallback(this._resizeTimerId);
+    this._resizeTimerId = window.requestIdleCallback(() => {
+      this.splitBox.setState({
+        vert: this.useLandscapeMode(),
+      });
+      this.emit("inspector-resize");
     });
   },
 
@@ -767,16 +776,15 @@ Inspector.prototype = {
    */
   async setupSidebar() {
     let sidebar = this.panelDoc.getElementById("inspector-sidebar");
-    let options = { showAllTabsMenu: true };
-
-    if (this.show3PaneToggle) {
-      options.sidebarToggleButton = {
+    let options = {
+      showAllTabsMenu: true,
+      sidebarToggleButton: {
         collapsed: !this.is3PaneModeEnabled,
         collapsePaneTitle: INSPECTOR_L10N.getStr("inspector.hideThreePaneMode"),
         expandPaneTitle: INSPECTOR_L10N.getStr("inspector.showThreePaneMode"),
         onClick: this.onSidebarToggle,
-      };
-    }
+      }
+    };
 
     this.sidebar = new ToolSidebar(sidebar, this, "inspector", options);
 
@@ -796,15 +804,6 @@ Inspector.prototype = {
     // Append all side panels
 
     await this.addRuleView(defaultTab);
-
-    // If the 3 Pane Inspector feature is disabled, use the old order:
-    // Rules, Computed, Layout, etc.
-    if (!this.show3PaneToggle) {
-      this.sidebar.addExistingTab(
-        "computedview",
-        INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
-        defaultTab == "computedview");
-    }
 
     // Inject a lazy loaded react tab by exposing a fake React object
     // with a lazy defined Tab thanks to `panel` being a function
@@ -830,14 +829,10 @@ Inspector.prototype = {
       },
       defaultTab == layoutId);
 
-    // If the 3 Pane Inspector feature is enabled, use the new order:
-    // Rules, Layout, Computed, etc.
-    if (this.show3PaneToggle) {
-      this.sidebar.addExistingTab(
-        "computedview",
-        INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
-        defaultTab == "computedview");
-    }
+    this.sidebar.addExistingTab(
+      "computedview",
+      INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
+      defaultTab == "computedview");
 
     const animationTitle =
       INSPECTOR_L10N.getStr("inspector.sidebar.animationInspectorTitle");
@@ -1116,7 +1111,7 @@ Inspector.prototype = {
       if (this.toolbox && this.toolbox.currentToolId == "inspector") {
         let delay = this.panelWin.performance.now() - this._newRootStart;
         let telemetryKey = "DEVTOOLS_INSPECTOR_NEW_ROOT_TO_RELOAD_DELAY_MS";
-        let histogram = Services.telemetry.getHistogramById(telemetryKey);
+        let histogram = this.telemetry.getHistogramById(telemetryKey);
         histogram.add(delay);
       }
       delete this._newRootStart;
@@ -1346,7 +1341,6 @@ Inspector.prototype = {
     this.resultsLength = null;
     this.search = null;
     this.searchBox = null;
-    this.show3PaneToggle = null;
     this.show3PaneTooltip = null;
     this.sidebar = null;
     this.store = null;
@@ -1883,7 +1877,7 @@ Inspector.prototype = {
       return null;
     }
 
-    this.telemetry.toolOpened("toolbareyedropper");
+    this.telemetry.scalarSet(TELEMETRY_EYEDROPPER_OPENED, 1);
     this.eyeDropperButton.classList.add("checked");
     this.startEyeDropperListeners();
     return this.inspector.pickColorFromPage(this.toolbox, {copyOnSelect: true})

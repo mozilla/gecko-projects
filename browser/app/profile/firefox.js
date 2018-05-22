@@ -30,9 +30,6 @@ pref("extensions.logging.enabled", false);
 // Disables strict compatibility, making addons compatible-by-default.
 pref("extensions.strictCompatibility", false);
 
-// Specifies a minimum maxVersion an addon needs to say it's compatible with
-// for it to be compatible by default.
-pref("extensions.minCompatibleAppVersion", "4.0");
 // Temporary preference to forcibly make themes more safe with Australis even if
 // extensions.checkCompatibility=false has been set.
 pref("extensions.checkCompatibility.temporaryThemeOverride_minAppVersion", "29.0a1");
@@ -384,18 +381,9 @@ pref("browser.helperApps.deleteTempFileOnExit", true);
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
-// Ordering of Search Engines in the Engine list.
-pref("browser.search.order.1",                "chrome://browser-region/locale/region.properties");
-pref("browser.search.order.2",                "chrome://browser-region/locale/region.properties");
-pref("browser.search.order.3",                "chrome://browser-region/locale/region.properties");
-
 // Market-specific search defaults
 pref("browser.search.geoSpecificDefaults", true);
 pref("browser.search.geoSpecificDefaults.url", "https://search.services.mozilla.com/1/%APP%/%VERSION%/%CHANNEL%/%LOCALE%/%REGION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%");
-
-// US specific default
-pref("browser.search.order.US.1",                "data:text/plain,browser.search.order.US.1=Google");
-pref("browser.search.order.US.2",                "data:text/plain,browser.search.order.US.2=Bing");
 
 // search bar results always open in a new tab
 pref("browser.search.openintab", false);
@@ -620,7 +608,7 @@ pref("browser.gesture.twist.left", "cmd_gestureRotateLeft");
 pref("browser.gesture.twist.end", "cmd_gestureRotateEnd");
 pref("browser.gesture.tap", "cmd_fullZoomReset");
 
-pref("browser.snapshots.limit", 0);
+pref("browser.history_swipe_animation.disabled", false);
 
 // 0: Nothing happens
 // 1: Scrolling contents
@@ -856,6 +844,7 @@ pref("browser.rights.override", true);
 
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.resume_session_once", false);
+pref("browser.sessionstore.resuming_after_os_restart", false);
 
 // Minimal interval between two save operations in milliseconds (while the user is active).
 pref("browser.sessionstore.interval", 15000); // 15 seconds
@@ -1034,8 +1023,9 @@ pref("dom.ipc.shims.enabledWarnings", false);
 //     everything, but will probably cause some functionality restrictions
 pref("dom.ipc.plugins.sandbox-level.default", 0);
 #if defined(_AMD64_)
-// The lines in PluginModuleParent.cpp should be changed in line with this.
-pref("dom.ipc.plugins.sandbox-level.flash", 2);
+// The base sandbox level in nsPluginTag::InitSandboxLevel must be
+// updated to keep in sync with this value.
+pref("dom.ipc.plugins.sandbox-level.flash", 3);
 #else
 pref("dom.ipc.plugins.sandbox-level.flash", 0);
 #endif
@@ -1285,6 +1275,16 @@ pref("full-screen-api.enabled", true);
 // (this pref has no effect if more than 6 hours have passed since the last crash)
 pref("toolkit.startup.max_resumed_crashes", 3);
 
+// Whether to use RegisterApplicationRestart to restart the browser and resume
+// the session on next Windows startup
+#if defined(XP_WIN)
+#if defined(NIGHTLY_BUILD)
+pref("toolkit.winRegisterApplicationRestart", true);
+#else
+pref("toolkit.winRegisterApplicationRestart", false);
+#endif
+#endif
+
 // Whether we use pdfium to view content with the pdf mime type.
 // Note: if the pref is set to false while Firefox is open, it won't
 // take effect until there are no open pdfium tabs.
@@ -1533,6 +1533,14 @@ pref("browser.tabs.remote.desktopbehavior", true);
 pref("browser.tabs.remote.warmup.enabled", true);
 #else
 pref("browser.tabs.remote.warmup.enabled", false);
+#endif
+
+// Caches tab layers to improve perceived performance
+// of tab switches.
+#if defined(NIGHTLY_BUILD)
+pref("browser.tabs.remote.tabCacheSize", 5);
+#else
+pref("browser.tabs.remote.tabCacheSize", 0);
 #endif
 
 pref("browser.tabs.remote.warmup.maxTabs", 3);

@@ -13,9 +13,6 @@ pref("devtools.devedition.promo.url", "https://www.mozilla.org/firefox/developer
   pref("devtools.devedition.promo.enabled", false);
 #endif
 
-// Developer toolbar preferences
-pref("devtools.toolbar.enabled", true);
-
 // Enable DevTools WebIDE by default
 pref("devtools.webide.enabled", true);
 
@@ -49,20 +46,17 @@ pref("devtools.inspector.enabled", true);
 // What was the last active sidebar in the inspector
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.remote", false);
-// Enable the 3 pane mode toggle in the inspector
+
 #if defined(NIGHTLY_BUILD)
-pref("devtools.inspector.three-pane-toggle", true);
-#else
-pref("devtools.inspector.three-pane-toggle", false);
-#endif
-// Enable the 3 pane mode in the inspector
-pref("devtools.inspector.three-pane-enabled", false);
 // Show the 3 pane onboarding tooltip in the inspector
-#if defined(NIGHTLY_BUILD)
 pref("devtools.inspector.show-three-pane-tooltip", true);
+// Enable the 3 pane mode in the inspector
+pref("devtools.inspector.three-pane-enabled", true);
 #else
 pref("devtools.inspector.show-three-pane-tooltip", false);
+pref("devtools.inspector.three-pane-enabled", false);
 #endif
+
 // Collapse pseudo-elements by default in the rule-view
 pref("devtools.inspector.show_pseudo_elements", false);
 // The default size for image preview tooltips in the rule-view/computed-view/markup-view
@@ -292,8 +286,15 @@ pref("devtools.webconsole.timestampMessages", false);
 // to automatically trigger multiline editing (equivalent to shift + enter).
 pref("devtools.webconsole.autoMultiline", true);
 
-// Enable the webconsole sidebar toggle
+// Enable the webconsole sidebar toggle in Nightly builds.
+#if defined(NIGHTLY_BUILD)
+pref("devtools.webconsole.sidebarToggle", true);
+#else
 pref("devtools.webconsole.sidebarToggle", false);
+#endif
+
+// Enable CodeMirror in the JsTerm: |false|
+pref("devtools.webconsole.jsterm.codeMirror", false);
 
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
@@ -318,11 +319,6 @@ pref("devtools.editor.autoclosebrackets", true);
 pref("devtools.editor.detectindentation", true);
 pref("devtools.editor.enableCodeFolding", true);
 pref("devtools.editor.autocomplete", true);
-
-// Pref to store the browser version at the time of a telemetry ping for an
-// opened developer tool. This allows us to ping telemetry just once per browser
-// version for each user.
-pref("devtools.telemetry.tools.opened.version", "{}");
 
 // Whether to reload when touch simulation is toggled
 pref("devtools.responsive.reloadConditions.touchSimulation", false);

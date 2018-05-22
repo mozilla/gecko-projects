@@ -27,6 +27,7 @@ namespace jit {
     _(GuardIsInt32Index)                  \
     _(GuardType)                          \
     _(GuardClass)                         \
+    _(GuardGroupHasUnanalyzedNewScript)   \
     _(GuardIsNativeFunction)              \
     _(GuardIsNativeObject)                \
     _(GuardIsProxy)                       \
@@ -40,6 +41,7 @@ namespace jit {
     _(GuardAndGetIndexFromString)         \
     _(GuardIndexIsNonNegative)            \
     _(GuardTagNotEqual)                   \
+    _(LoadObject)                         \
     _(LoadProto)                          \
     _(LoadEnclosingEnvironment)           \
     _(LoadWrapperTarget)                  \

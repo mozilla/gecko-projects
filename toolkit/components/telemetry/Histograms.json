@@ -10,13 +10,13 @@
   },
   "A11Y_CONSUMERS": {
     "record_in_processes": ["main"],
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 11,
     "releaseChannelCollection": "opt-out",
-    "bug_numbers": [1382820],
+    "bug_numbers": [1382820, 1462238],
     "description": "A list of known accessibility clients that inject into Firefox process space (see https://dxr.mozilla.org/mozilla-central/source/accessible/windows/msaa/Compatibility.h).",
-    "alert_emails": ["accessibility@mozilla.com"]
+    "alert_emails": ["accessibility@mozilla.com", "jteh@mozilla.com"]
   },
   "A11Y_ISIMPLEDOM_USAGE_FLAG": {
     "record_in_processes": ["main"],
@@ -1077,34 +1077,37 @@
     "description": "Time(ms) to purge dirty heap pages."
   },
   "LOW_MEMORY_EVENTS_VIRTUAL": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 1024,
     "n_buckets": 21,
     "description": "Number of low-virtual-memory events fired since last ping",
-    "cpp_guard": "XP_WIN"
+    "cpp_guard": "XP_WIN",
+    "bug_numbers": [711490,1451005]
   },
   "LOW_MEMORY_EVENTS_PHYSICAL": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 1024,
     "n_buckets": 21,
     "description": "Number of low-physical-memory events fired since last ping",
-    "cpp_guard": "XP_WIN"
+    "cpp_guard": "XP_WIN",
+    "bug_numbers": [711490,1451005]
   },
   "LOW_MEMORY_EVENTS_COMMIT_SPACE": {
-    "record_in_processes": ["main", "content"],
+    "record_in_processes": ["main"],
     "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 1024,
     "n_buckets": 21,
     "description": "Number of low-commit-space events fired since last ping",
-    "cpp_guard": "XP_WIN"
+    "cpp_guard": "XP_WIN",
+    "bug_numbers": [1451005]
   },
   "PAGE_FAULTS_HARD": {
     "record_in_processes": ["main", "content"],
@@ -10006,13 +10009,6 @@
     "releaseChannelCollection": "opt-out",
     "description": "What runtime version did WebIDE connect to?"
   },
-  "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 13,
-    "description": "Screen resolution of DevTools user (0:lower, 1:800x600, 2:1024x768, 3:1280x800, 4:1280x1024, 5:1366x768, 6:1440x900, 7:1920x1080, 8:2560×1440, 9:2560×1600, 10:2880x1800, 11:other, 12:higher)"
-  },
   "DEVTOOLS_SAVE_HEAP_SNAPSHOT_MS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -12395,157 +12391,14 @@
     "labels": ["ClassicScript", "ModuleScript"],
     "description": "Record the kind of every script loaded in a document."
   },
-  "DOM_SCRIPT_SRC_ENCODING": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["dteller@mozilla.com"],
-    "expires_in_version": "61",
-    "kind": "count",
-    "keyed": true,
-    "bug_numbers": [1344152],
-    "description": "Note the encoding (e.g. 'UTF-8', 'windows-1252', 'ASCII') of each external <script> element that is successfully loaded and decoded."
-  },
   "DOM_SCRIPT_LOADING_SOURCE": {
     "record_in_processes": ["content"],
     "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
+    "expires_in_version": "never",
     "kind": "categorical",
     "bug_numbers": [1362114],
     "labels": ["Inline", "SourceFallback", "Source", "AltData"],
     "description": "Record the input from which the bytes are coming from, for each script in a document."
-  },
-  "DOM_SCRIPT_INLINE_SIZE": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "low": 64,
-    "high": 16000000,
-    "n_buckets": 50,
-    "bug_numbers": [1362114],
-    "description": "Size (in number of characters) of each script which is inlined in a document."
-  },
-  "DOM_SCRIPT_SOURCE_SIZE": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "low": 64,
-    "high": 16000000,
-    "n_buckets": 50,
-    "bug_numbers": [1362114],
-    "description": "Size (in number of characters) of each script which is streamed in plain-text in a document."
-  },
-  "DOM_SCRIPT_BYTECODE_SIZE": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "low": 64,
-    "high": 16000000,
-    "n_buckets": 50,
-    "bug_numbers": [1362114],
-    "description": "Size (in number of bytes) of each script which is streamed in encoded-format in a document."
-  },
-  "DOM_SCRIPT_FETCH_COUNT": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "linear",
-    "low": 1,
-    "high": 100,
-    "n_buckets": 99,
-    "bug_numbers": [1362114],
-    "description": "For each script in a document, record the number of times it was requested since it got saved in the cache."
-  },
-  "DOM_SCRIPT_MAIN_THREAD_PARSE_EXEC_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "high": 50000,
-    "n_buckets": 100,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to parse and execute a script (which might be encoded later) on the main thread."
-  },
-  "DOM_SCRIPT_MAIN_THREAD_PARSE_ENCODE_EXEC_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "high": 50000,
-    "n_buckets": 100,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to parse, encode and execute a script on the main thread."
-  },
-  "DOM_SCRIPT_MAIN_THREAD_DECODE_EXEC_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "high": 50000,
-    "n_buckets": 100,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to decode and execute a script on the main thread."
-  },
-  "DOM_SCRIPT_OFF_THREAD_PARSE_EXEC_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "high": 50000,
-    "n_buckets": 100,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to parse off-main-thread and execute a script (which might be encoded later) on the main thread."
-  },
-  "DOM_SCRIPT_OFF_THREAD_PARSE_ENCODE_EXEC_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "high": 50000,
-    "n_buckets": 100,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to parse off-main-thread, encode and execute a script on the main thread."
-  },
-  "DOM_SCRIPT_OFF_THREAD_DECODE_EXEC_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "exponential",
-    "high": 50000,
-    "n_buckets": 100,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to decode off-main-thread and execute a script on the main thread."
-  },
-  "DOM_SCRIPT_ENCODING_MS_PER_DOCUMENT": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "linear",
-    "high": 64,
-    "n_buckets": 32,
-    "bug_numbers": [1362114],
-    "description": "Time, in milliseconds, needed to encode all scripts in a document."
-  },
-  "DOM_SCRIPT_ENCODING_STATUS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "categorical",
-    "bug_numbers": [1362114],
-    "labels": ["EncodingFailure", "BufferTooLarge", "OpenFailure", "WriteFailure", "CloseFailure", "EncodingSuccess"],
-    "description": "Record the failure reasons of the JavaScript Start-up Bytecode Cache encoder."
-  },
-  "DOM_SCRIPT_EVAL_PER_DOCUMENT": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "62",
-    "kind": "linear",
-    "low": 1,
-    "high": 200,
-    "n_buckets": 50,
-    "bug_numbers": [1362114],
-    "description": "Number of script tags evaluated per document."
   },
   "DOM_SCRIPT_PRELOAD_RESULT": {
     "record_in_processes": ["main", "content"],

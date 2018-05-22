@@ -160,9 +160,9 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<UnbarrieredKey>, HeapPtr<JSObjec
     template<typename KeyInput, typename ValueInput>
     bool relookupOrAdd(AddPtr& p, const KeyInput& k, const ValueInput& v) {
         MOZ_ASSERT(v->compartment() == this->compartment);
-        MOZ_ASSERT(!k->compartment()->creationOptions().mergeable());
+        MOZ_ASSERT(!k->realm()->creationOptions().mergeable());
         MOZ_ASSERT_IF(!InvisibleKeysOk,
-                      !k->compartment()->creationOptions().invisibleToDebugger());
+                      !k->realm()->creationOptions().invisibleToDebugger());
         MOZ_ASSERT(!Base::has(k));
         if (!incZoneCount(k->zone()))
             return false;
@@ -353,9 +353,9 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
         Observing = 1
     };
 
-    // Return true if the given compartment is a debuggee of this debugger,
+    // Return true if the given realm is a debuggee of this debugger,
     // false otherwise.
-    bool isDebuggeeUnbarriered(const JSCompartment* compartment) const;
+    bool isDebuggeeUnbarriered(const Realm* realm) const;
 
     // Return true if this Debugger observed a debuggee that participated in the
     // GC identified by the given GC number. Return false otherwise.
@@ -1798,7 +1798,7 @@ Debugger::onNewScript(JSContext* cx, HandleScript script)
 {
     // We early return in slowPathOnNewScript for self-hosted scripts, so we can
     // ignore those in our assertion here.
-    MOZ_ASSERT_IF(!script->compartment()->creationOptions().invisibleToDebugger() &&
+    MOZ_ASSERT_IF(!script->realm()->creationOptions().invisibleToDebugger() &&
                   !script->selfHosted(),
                   script->compartment()->firedOnNewGlobalObject);
 

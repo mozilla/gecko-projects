@@ -17,6 +17,7 @@
 #include "vm/ArrayObject.h"
 #include "vm/Debugger.h"
 #include "vm/Interpreter.h"
+#include "vm/SelfHosting.h"
 #include "vm/TraceLogging.h"
 
 #include "jit/BaselineFrame-inl.h"
@@ -688,11 +689,11 @@ GetDynamicName(JSContext* cx, JSObject* envChain, JSString* str, Value* vp)
 }
 
 void
-PostWriteBarrier(JSRuntime* rt, JSObject* obj)
+PostWriteBarrier(JSRuntime* rt, js::gc::Cell* cell)
 {
     AutoUnsafeCallWithABI unsafe;
-    MOZ_ASSERT(!IsInsideNursery(obj));
-    rt->gc.storeBuffer().putWholeCell(obj);
+    MOZ_ASSERT(!IsInsideNursery(cell));
+    rt->gc.storeBuffer().putWholeCell(cell);
 }
 
 static const size_t MAX_WHOLE_CELL_BUFFER_SIZE = 4096;
@@ -926,22 +927,14 @@ InterpretResume(JSContext* cx, HandleObject obj, HandleValue val, HandleProperty
 {
     MOZ_ASSERT(obj->is<GeneratorObject>());
 
-    RootedValue selfHostedFun(cx);
-    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().InterpretGeneratorResume,
-                                         &selfHostedFun))
-    {
-        return false;
-    }
-
-    MOZ_ASSERT(selfHostedFun.toObject().is<JSFunction>());
-
     FixedInvokeArgs<3> args(cx);
 
     args[0].setObject(*obj);
     args[1].set(val);
     args[2].setString(kind);
 
-    return Call(cx, selfHostedFun, UndefinedHandleValue, args, rval);
+    return CallSelfHostedFunction(cx, cx->names().InterpretGeneratorResume, UndefinedHandleValue,
+                                  args, rval);
 }
 
 bool

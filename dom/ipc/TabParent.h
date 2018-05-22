@@ -234,6 +234,8 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvSetCandidateWindowForPlugin(
     const widget::CandidateWindowPosition& aPosition) override;
+  virtual mozilla::ipc::IPCResult
+  RecvEnableIMEForPlugin(const bool& aEnable) override;
 
   virtual mozilla::ipc::IPCResult
   RecvDefaultProcOfPluginEvent(const WidgetPluginEvent& aEvent) override;
@@ -623,7 +625,7 @@ protected:
 
   virtual mozilla::ipc::IPCResult RecvRemoteIsReadyToHandleInputEvents() override;
 
-  virtual mozilla::ipc::IPCResult RecvForcePaintNoOp(const uint64_t& aLayerObserverEpoch) override;
+  virtual mozilla::ipc::IPCResult RecvPaintWhileInterruptingJSNoOp(const uint64_t& aLayerObserverEpoch) override;
 
   virtual mozilla::ipc::IPCResult RecvSetDimensions(const uint32_t& aFlags,
                                                     const int32_t& aX, const int32_t& aY,
@@ -648,6 +650,8 @@ protected:
 
 private:
   void DestroyInternal();
+
+  void SetRenderLayersInternal(bool aEnabled, bool aForceRepaint);
 
   already_AddRefed<nsFrameLoader>
   GetFrameLoader(bool aUseCachedFrameLoaderAfterDestroy = false) const;

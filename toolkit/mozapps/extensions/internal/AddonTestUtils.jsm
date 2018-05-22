@@ -375,19 +375,14 @@ var AddonTestUtils = {
       }
 
       // Check that the temporary directory is empty
-      var dirEntries = this.tempDir.directoryEntries
-                           .QueryInterface(Ci.nsIDirectoryEnumerator);
       var entries = [];
-      while (dirEntries.hasMoreElements()) {
-        let {leafName} = dirEntries.nextFile;
+      for (let {leafName} of this.iterDirectory(this.tempDir)) {
         if (!ignoreEntries.has(leafName)) {
           entries.push(leafName);
         }
       }
       if (entries.length)
         throw new Error(`Found unexpected files in temporary directory: ${entries.join(", ")}`);
-
-      dirEntries.close();
 
       try {
         appDirForAddons.remove(true);
@@ -399,20 +394,9 @@ var AddonTestUtils = {
       let featuresDir = this.profileDir.clone();
       featuresDir.append("features");
       // upgrade directories will be in UUID folders under features/
-      let systemAddonDirs = [];
-      if (featuresDir.exists()) {
-        let featuresDirEntries = featuresDir.directoryEntries
-                                            .QueryInterface(Ci.nsIDirectoryEnumerator);
-        while (featuresDirEntries.hasMoreElements()) {
-          let entry = featuresDirEntries.getNext();
-          entry.QueryInterface(Ci.nsIFile);
-          systemAddonDirs.push(entry);
-        }
-
-        systemAddonDirs.map(dir => {
-          dir.append("stage");
-          pathShouldntExist(dir);
-        });
+      for (let dir of this.iterDirectory(featuresDir)) {
+        dir.append("stage");
+        pathShouldntExist(dir);
       }
 
       // ensure no leftover files in the user addon location
@@ -445,6 +429,33 @@ var AddonTestUtils = {
         Cu.reportError(e);
       }
     });
+  },
+
+  /**
+   * Iterates over the entries in a given directory.
+   *
+   * Fails silently if the given directory does not exist.
+   *
+   * @param {nsIFile} dir
+   *        Directory to iterate.
+   */
+  * iterDirectory(dir) {
+    let dirEnum;
+    try {
+      dirEnum = dir.directoryEntries;
+      let file;
+      while ((file = dirEnum.nextFile)) {
+        yield file;
+      }
+    } catch (e) {
+      if (dir.exists()) {
+        Cu.reportError(e);
+      }
+    } finally {
+      if (dirEnum) {
+        dirEnum.close();
+      }
+    }
   },
 
   /**
@@ -514,6 +525,7 @@ var AddonTestUtils = {
     for (let file of this.tempXPIs.splice(0)) {
       if (file.exists()) {
         try {
+          Services.obs.notifyObservers(file, "flush-cache-entry");
           file.remove(false);
         } catch (e) {
           Cu.reportError(e);
@@ -698,10 +710,17 @@ var AddonTestUtils = {
 
   /**
    * Starts up the add-on manager as if it was started by the application.
+   *
+   * @param {string} [newVersion]
+   *        If provided, the application version is changed to this string
+   *        before the AddonManager is started.
    */
-  async promiseStartupManager() {
+  async promiseStartupManager(newVersion) {
     if (this.addonIntegrationService)
       throw new Error("Attempting to startup manager that was already started.");
+
+    if (newVersion)
+      this.appInfo.version = newVersion;
 
     this.addonIntegrationService = Cc["@mozilla.org/addons/integration;1"]
           .getService(Ci.nsIObserver);
@@ -768,18 +787,10 @@ var AddonTestUtils = {
    * @param {string} [newVersion]
    *        If provided, the application version is changed to this string
    *        after the AddonManager is shut down, before it is re-started.
-   *
-   * @returns {Promise}
-   *          Resolves when the AddonManager has been re-started.
    */
-  promiseRestartManager(newVersion) {
-    return this.promiseShutdownManager()
-      .then(() => {
-        if (newVersion)
-          this.appInfo.version = newVersion;
-
-        return this.promiseStartupManager(!!newVersion);
-      });
+  async promiseRestartManager(newVersion) {
+    await this.promiseShutdownManager();
+    await this.promiseStartupManager(newVersion);
   },
 
   async loadAddonsList(flush = false) {
@@ -1178,11 +1189,8 @@ var AddonTestUtils = {
   setExtensionModifiedTime(ext, time) {
     ext.lastModifiedTime = time;
     if (ext.isDirectory()) {
-      let entries = ext.directoryEntries
-                       .QueryInterface(Ci.nsIDirectoryEnumerator);
-      while (entries.hasMoreElements())
-        this.setExtensionModifiedTime(entries.nextFile, time);
-      entries.close();
+      for (let file of this.iterDirectory(ext))
+        this.setExtensionModifiedTime(file, time);
     }
   },
 

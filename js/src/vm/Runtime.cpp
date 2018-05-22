@@ -157,7 +157,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     allowContentJS_(true),
     atoms_(nullptr),
     atomsAddedWhileSweeping_(nullptr),
-    atomsCompartment_(nullptr),
+    atomsRealm_(nullptr),
     staticStrings(nullptr),
     commonNames(nullptr),
     permanentAtoms(nullptr),
@@ -180,9 +180,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     JS_COUNT_CTOR(JSRuntime);
     liveRuntimesCount++;
 
-    /* Initialize infallibly first, so we can goto bad and JS_DestroyRuntime. */
-
-    PodZero(&asmJSCacheOps);
     lcovOutput().init();
 }
 
@@ -221,20 +218,20 @@ JSRuntime::init(JSContext* cx, uint32_t maxbytes, uint32_t maxNurseryBytes)
     if (!atomsZone || !atomsZone->init(true))
         return false;
 
-    JS::CompartmentOptions options;
-    ScopedJSDeletePtr<JSCompartment> atomsCompartment(js_new<JSCompartment>(atomsZone.get(), options));
-    if (!atomsCompartment || !atomsCompartment->init(nullptr))
+    JS::RealmOptions options;
+    ScopedJSDeletePtr<Realm> atomsRealm(js_new<Realm>(atomsZone.get(), options));
+    if (!atomsRealm || !atomsRealm->init(nullptr))
         return false;
 
     gc.atomsZone = atomsZone.get();
-    if (!atomsZone->compartments().append(atomsCompartment.get()))
+    if (!atomsZone->compartments().append(atomsRealm.get()))
         return false;
 
-    atomsCompartment->setIsSystem(true);
-    atomsCompartment->setIsAtomsCompartment();
+    atomsRealm->setIsSystem(true);
+    atomsRealm->setIsAtomsRealm();
 
     atomsZone.forget();
-    this->atomsCompartment_ = atomsCompartment.forget();
+    this->atomsRealm_ = atomsRealm.forget();
 
     if (!symbolRegistry_.ref().init())
         return false;
@@ -331,7 +328,7 @@ JSRuntime::destroyRuntime()
 #endif
 
     gc.finish();
-    atomsCompartment_ = nullptr;
+    atomsRealm_ = nullptr;
 
     js_delete(defaultFreeOp_.ref());
 
@@ -435,7 +432,7 @@ static bool
 HandleInterrupt(JSContext* cx, bool invokeCallback)
 {
     MOZ_ASSERT(cx->requestDepth >= 1);
-    MOZ_ASSERT(!cx->compartment()->isAtomsCompartment());
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
 
     cx->runtime()->gc.gcIfRequested();
 
@@ -768,7 +765,7 @@ JSRuntime::onOutOfMemoryCanGC(AllocFunction allocFunc, size_t bytes, void* reall
 bool
 JSRuntime::activeGCInAtomsZone()
 {
-    Zone* zone = atomsCompartment_->zone();
+    Zone* zone = atomsRealm_->zone();
     return (zone->needsIncrementalBarrier() && !gc.isVerifyPreBarriersEnabled()) ||
            zone->wasGCStarted();
 }

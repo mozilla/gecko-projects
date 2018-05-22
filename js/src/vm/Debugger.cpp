@@ -349,10 +349,10 @@ class MOZ_RAII js::EnterDebuggeeNoExecute
     }
 #endif
 
-    // Given a JSContext entered into a debuggee compartment, find the lock
+    // Given a JSContext entered into a debuggee realm, find the lock
     // that locks it. Returns nullptr if not found.
     static EnterDebuggeeNoExecute* findInStack(JSContext* cx) {
-        JSCompartment* debuggee = cx->compartment();
+        Realm* debuggee = cx->realm();
         for (EnterDebuggeeNoExecute* it = cx->noExecuteDebuggerTop; it; it = it->prev_) {
             Debugger& dbg = it->debugger();
             if (!it->unlocked_ && dbg.isEnabled() && dbg.observesGlobal(debuggee->maybeGlobal()))
@@ -2174,7 +2174,7 @@ void
 Debugger::slowPathOnNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global)
 {
     MOZ_ASSERT(!cx->runtime()->onNewGlobalObjectWatchers().isEmpty());
-    if (global->compartment()->creationOptions().invisibleToDebugger())
+    if (global->realm()->creationOptions().invisibleToDebugger())
         return;
 
     /*
@@ -2255,10 +2255,10 @@ Debugger::slowPathOnLogAllocationSite(JSContext* cx, HandleObject obj, HandleSav
 }
 
 bool
-Debugger::isDebuggeeUnbarriered(const JSCompartment* compartment) const
+Debugger::isDebuggeeUnbarriered(const Realm* realm) const
 {
-    MOZ_ASSERT(compartment);
-    return compartment->isDebuggee() && debuggees.has(compartment->unsafeUnbarrieredMaybeGlobal());
+    MOZ_ASSERT(realm);
+    return realm->isDebuggee() && debuggees.has(realm->unsafeUnbarrieredMaybeGlobal());
 }
 
 bool
@@ -3064,9 +3064,9 @@ Debugger::markIteratively(GCMarker* marker)
      * convoluted since the easiest way to find them is via their debuggees.
      */
     JSRuntime* rt = marker->runtime();
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
-        if (c->isDebuggee()) {
-            GlobalObject* global = c->unsafeUnbarrieredMaybeGlobal();
+    for (RealmsIter r(rt, SkipAtoms); !r.done(); r.next()) {
+        if (r->isDebuggee()) {
+            GlobalObject* global = r->unsafeUnbarrieredMaybeGlobal();
             if (!IsMarkedUnbarriered(rt, &global))
                 continue;
 
@@ -3741,11 +3741,11 @@ Debugger::addAllGlobalsAsDebuggees(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "addAllGlobalsAsDebuggees", args, dbg);
     for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-        for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-            if (c == dbg->object->compartment() || c->creationOptions().invisibleToDebugger())
+        for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
+            if (r == dbg->object->realm() || r->creationOptions().invisibleToDebugger())
                 continue;
-            c->scheduledForDestruction = false;
-            GlobalObject* global = c->maybeGlobal();
+            r->scheduledForDestruction = false;
+            GlobalObject* global = r->maybeGlobal();
             if (global) {
                 Rooted<GlobalObject*> rg(cx, global);
                 if (!dbg->addDebuggeeGlobal(cx, rg))
@@ -3963,15 +3963,15 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     // invisible global in order to pass it to addDebuggee. But this is possible
     // with certain testing aides we expose in the shell, so just make addDebuggee
     // throw in that case.
-    JSCompartment* debuggeeCompartment = global->compartment();
-    if (debuggeeCompartment->creationOptions().invisibleToDebugger()) {
+    Realm* debuggeeRealm = global->realm();
+    if (debuggeeRealm->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_CANT_DEBUG_GLOBAL);
         return false;
     }
 
     /*
-     * Check for cycles. If global's compartment is reachable from this
-     * Debugger object's compartment by following debuggee-to-debugger links,
+     * Check for cycles. If global's realm is reachable from this
+     * Debugger object's realm by following debuggee-to-debugger links,
      * then adding global would create a cycle. (Typically nobody is debugging
      * the debugger, in which case we zip through this code without looping.)
      */
@@ -3980,7 +3980,7 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
         return false;
     for (size_t i = 0; i < visited.length(); i++) {
         JSCompartment* c = visited[i];
-        if (c == debuggeeCompartment) {
+        if (c == debuggeeRealm) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_LOOP);
             return false;
         }
@@ -3990,7 +3990,8 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
          * object. Add those compartments to visited.
          */
         if (c->isDebuggee()) {
-            GlobalObject::DebuggerVector* v = c->maybeGlobal()->getDebuggers();
+            Realm* realm = JS::GetRealmForCompartment(c);
+            GlobalObject::DebuggerVector* v = realm->maybeGlobal()->getDebuggers();
             for (auto p = v->begin(); p != v->end(); p++) {
                 JSCompartment* next = (*p)->object->compartment();
                 if (Find(visited, next) == visited.end() && !visited.append(next))
@@ -4072,12 +4073,12 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     });
 
     // (6)
-    AutoRestoreCompartmentDebugMode debugModeGuard(debuggeeCompartment);
-    debuggeeCompartment->setIsDebuggee();
-    debuggeeCompartment->updateDebuggerObservesAsmJS();
-    debuggeeCompartment->updateDebuggerObservesBinarySource();
-    debuggeeCompartment->updateDebuggerObservesCoverage();
-    if (observesAllExecution() && !ensureExecutionObservabilityOfCompartment(cx, debuggeeCompartment))
+    AutoRestoreCompartmentDebugMode debugModeGuard(debuggeeRealm);
+    debuggeeRealm->setIsDebuggee();
+    debuggeeRealm->updateDebuggerObservesAsmJS();
+    debuggeeRealm->updateDebuggerObservesBinarySource();
+    debuggeeRealm->updateDebuggerObservesCoverage();
+    if (observesAllExecution() && !ensureExecutionObservabilityOfCompartment(cx, debuggeeRealm))
         return false;
 
     globalDebuggersGuard.release();
@@ -4853,7 +4854,7 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
          * node.
          */
         JSCompartment* comp = referent.compartment();
-        if (comp && !dbg->isDebuggeeUnbarriered(comp)) {
+        if (comp && !dbg->isDebuggeeUnbarriered(JS::GetRealmForCompartment(comp))) {
             traversal.abandonReferent();
             return true;
         }
@@ -4954,17 +4955,16 @@ Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp)
 
     {
         // Accumulate the list of globals before wrapping them, because
-        // wrapping can GC and collect compartments from under us, while
-        // iterating.
+        // wrapping can GC and collect realms from under us, while iterating.
         JS::AutoCheckCannotGC nogc;
 
-        for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {
-            if (c->creationOptions().invisibleToDebugger())
+        for (RealmsIter r(cx->runtime(), SkipAtoms); !r.done(); r.next()) {
+            if (r->creationOptions().invisibleToDebugger())
                 continue;
 
-            c->scheduledForDestruction = false;
+            r->scheduledForDestruction = false;
 
-            GlobalObject* global = c->maybeGlobal();
+            GlobalObject* global = r->maybeGlobal();
 
             if (cx->runtime()->isSelfHostingGlobal(global))
                 continue;
@@ -5009,11 +5009,10 @@ Debugger::makeGlobalObjectReference(JSContext* cx, unsigned argc, Value* vp)
     if (!global)
         return false;
 
-    // If we create a D.O referring to a global in an invisible compartment,
+    // If we create a D.O referring to a global in an invisible realm,
     // then from it we can reach function objects, scripts, environments, etc.,
     // none of which we're ever supposed to see.
-    JSCompartment* globalCompartment = global->compartment();
-    if (globalCompartment->creationOptions().invisibleToDebugger()) {
+    if (global->realm()->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                   JSMSG_DEBUG_INVISIBLE_COMPARTMENT);
         return false;
@@ -10645,9 +10644,8 @@ DebuggerObject::unwrap(JSContext* cx, HandleDebuggerObject object,
 
     // Don't allow unwrapping to create a D.O whose referent is in an
     // invisible-to-Debugger global. (If our referent is a *wrapper* to such,
-    // and the wrapper is in a visible compartment, that's fine.)
-    JSCompartment* unwrappedCompartment = unwrapped->compartment();
-    if (unwrappedCompartment->creationOptions().invisibleToDebugger()) {
+    // and the wrapper is in a visible realm, that's fine.)
+    if (unwrapped->realm()->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_INVISIBLE_COMPARTMENT);
         return false;
     }

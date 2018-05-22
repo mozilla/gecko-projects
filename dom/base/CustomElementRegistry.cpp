@@ -300,7 +300,7 @@ CustomElementRegistry::IsCustomElementEnabled(nsIDocument* aDoc)
     return true;
   }
 
-  return XRE_IsParentProcess() && nsContentUtils::AllowXULXBLForPrincipal(aDoc->NodePrincipal());
+  return XRE_IsParentProcess() && aDoc->AllowXULXBL();
 }
 
 NS_IMETHODIMP
@@ -565,7 +565,7 @@ CandidateFinder::OrderedCandidates()
 
   nsTArray<nsCOMPtr<Element>> orderedElements(mCandidates.Count());
   for (Element* child = mDoc->GetFirstElementChild(); child; child = child->GetNextElementSibling()) {
-    if (!Traverse(child->AsElement(), orderedElements)) {
+    if (!Traverse(child, orderedElements)) {
       break;
     }
   }
@@ -648,59 +648,18 @@ CustomElementRegistry::GetDocGroup() const
   return mWindow ? mWindow->GetDocGroup() : nullptr;
 }
 
-static const char* kLifeCycleCallbackNames[] = {
-  "connectedCallback",
-  "disconnectedCallback",
-  "adoptedCallback",
-  "attributeChangedCallback"
-};
-
-static void
-CheckLifeCycleCallbacks(JSContext* aCx,
-                        JS::Handle<JSObject*> aConstructor,
-                        ErrorResult& aRv)
-{
-  for (size_t i = 0; i < ArrayLength(kLifeCycleCallbackNames); ++i) {
-    const char* callbackName = kLifeCycleCallbackNames[i];
-    JS::Rooted<JS::Value> callbackValue(aCx);
-    if (!JS_GetProperty(aCx, aConstructor, callbackName, &callbackValue)) {
-      aRv.StealExceptionFromJSContext(aCx);
-      return;
-    }
-    if (!callbackValue.isUndefined()) {
-      if (!callbackValue.isObject()) {
-        aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_ConvertASCIItoUTF16(callbackName));
-        return;
-      }
-      JS::Rooted<JSObject*> callback(aCx, &callbackValue.toObject());
-      if (!JS::IsCallable(callback)) {
-        aRv.ThrowTypeError<MSG_NOT_CALLABLE>(NS_ConvertASCIItoUTF16(callbackName));
-        return;
-      }
-    }
-  }
-}
-
 // https://html.spec.whatwg.org/multipage/scripting.html#element-definition
 void
-CustomElementRegistry::Define(const nsAString& aName,
+CustomElementRegistry::Define(JSContext* aCx,
+                              const nsAString& aName,
                               Function& aFunctionConstructor,
                               const ElementDefinitionOptions& aOptions,
                               ErrorResult& aRv)
 {
-  aRv.MightThrowJSException();
-
-  AutoJSAPI jsapi;
-  if (NS_WARN_IF(!jsapi.Init(mWindow))) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-
-  JSContext *cx = jsapi.cx();
   // Note: No calls that might run JS or trigger CC before this point, or
   // there's a (vanishingly small) chance of our constructor being nulled
   // before we access it.
-  JS::Rooted<JSObject*> constructor(cx, aFunctionConstructor.CallableOrNull());
+  JS::Rooted<JSObject*> constructor(aCx, aFunctionConstructor.CallableOrNull());
 
   /**
    * 1. If IsConstructor(constructor) is false, then throw a TypeError and abort
@@ -708,7 +667,7 @@ CustomElementRegistry::Define(const nsAString& aName,
    */
   // For now, all wrappers are constructable if they are callable. So we need to
   // unwrap constructor to check it is really constructable.
-  JS::Rooted<JSObject*> constructorUnwrapped(cx, js::CheckedUnwrap(constructor));
+  JS::Rooted<JSObject*> constructorUnwrapped(aCx, js::CheckedUnwrap(constructor));
   if (!constructorUnwrapped) {
     // If the caller's compartment does not have permission to access the
     // unwrapped constructor then throw.
@@ -766,22 +725,42 @@ CustomElementRegistry::Define(const nsAString& aName,
    *       definition in this specification), then throw a "NotSupportedError"
    *       DOMException.
    *    3. Set localName to extends.
+   *
+   * Special note for XUL elements:
+   *
+   * For step 7.1, we'll subject XUL to the same rules as HTML, so that a
+   * custom built-in element will not be extending from a dashed name.
+   * Step 7.2 is disregarded. But, we do check if the name is a dashed name
+   * (i.e. step 2) given that there is no reason for a custom built-in element
+   * type to take on a non-dashed name.
+   * This also ensures the name of the built-in custom element type can never
+   * be the same as the built-in element name, so we don't break the assumption
+   * elsewhere.
    */
   nsAutoString localName(aName);
   if (aOptions.mExtends.WasPassed()) {
     RefPtr<nsAtom> extendsAtom(NS_Atomize(aOptions.mExtends.Value()));
-    if (nsContentUtils::IsCustomElementName(extendsAtom, nameSpaceID)) {
+    if (nsContentUtils::IsCustomElementName(extendsAtom, kNameSpaceID_XHTML)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
       return;
     }
 
-    // bgsound and multicol are unknown html element.
-    int32_t tag = nsHTMLTags::CaseSensitiveAtomTagToId(extendsAtom);
-    if (tag == eHTMLTag_userdefined ||
-        tag == eHTMLTag_bgsound ||
-        tag == eHTMLTag_multicol) {
-      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
+    if (nameSpaceID == kNameSpaceID_XHTML) {
+      // bgsound and multicol are unknown html element.
+      int32_t tag = nsHTMLTags::CaseSensitiveAtomTagToId(extendsAtom);
+      if (tag == eHTMLTag_userdefined ||
+          tag == eHTMLTag_bgsound ||
+          tag == eHTMLTag_multicol) {
+        aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+        return;
+      }
+    } else { // kNameSpaceID_XUL
+      // As stated above, ensure the name of the customized built-in element
+      // (the one that goes to the |is| attribute) is a dashed name.
+      if (!nsContentUtils::IsNameWithDash(nameAtom)) {
+        aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+        return;
+      }
     }
 
     localName.Assign(aOptions.mExtends.Value());
@@ -796,8 +775,7 @@ CustomElementRegistry::Define(const nsAString& aName,
     return;
   }
 
-  JS::Rooted<JS::Value> constructorPrototype(cx);
-  nsAutoPtr<LifecycleCallbacks> callbacksHolder(new LifecycleCallbacks());
+  auto callbacksHolder = MakeUnique<LifecycleCallbacks>();
   nsTArray<RefPtr<nsAtom>> observedAttributes;
   { // Set mIsCustomDefinitionRunning.
     /**
@@ -805,131 +783,105 @@ CustomElementRegistry::Define(const nsAString& aName,
      */
     AutoSetRunningFlag as(this);
 
-    { // Enter constructor's realm.
-      /**
-       * 10.1. Let prototype be Get(constructor, "prototype"). Rethrow any exceptions.
-       */
-      JSAutoRealm ar(cx, constructor);
-      // The .prototype on the constructor passed could be an "expando" of a
-      // wrapper. So we should get it from wrapper instead of the underlying
-      // object.
-      if (!JS_GetProperty(cx, constructor, "prototype", &constructorPrototype)) {
-        aRv.StealExceptionFromJSContext(cx);
-        return;
-      }
-
-      /**
-       * 10.2. If Type(prototype) is not Object, then throw a TypeError exception.
-       */
-      if (!constructorPrototype.isObject()) {
-        aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_LITERAL_STRING("constructor.prototype"));
-        return;
-      }
-    } // Leave constructor's realm.
-
-    JS::Rooted<JSObject*> constructorProtoUnwrapped(
-      cx, js::CheckedUnwrap(&constructorPrototype.toObject()));
-    if (!constructorProtoUnwrapped) {
-      // If the caller's compartment does not have permission to access the
-      // unwrapped prototype then throw.
-      aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    /**
+     * 10.1. Let prototype be Get(constructor, "prototype"). Rethrow any exceptions.
+     */
+    // The .prototype on the constructor passed could be an "expando" of a
+    // wrapper. So we should get it from wrapper instead of the underlying
+    // object.
+    JS::Rooted<JS::Value> prototype(aCx);
+    if (!JS_GetProperty(aCx, constructor, "prototype", &prototype)) {
+      aRv.NoteJSContextException(aCx);
       return;
     }
 
-    { // Enter constructorProtoUnwrapped's compartment
-      JSAutoRealm ar(cx, constructorProtoUnwrapped);
+    /**
+     * 10.2. If Type(prototype) is not Object, then throw a TypeError exception.
+     */
+    if (!prototype.isObject()) {
+      aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_LITERAL_STRING("constructor.prototype"));
+      return;
+    }
 
-      /**
-       * 10.3. Let lifecycleCallbacks be a map with the four keys
-       *       "connectedCallback", "disconnectedCallback", "adoptedCallback", and
-       *       "attributeChangedCallback", each of which belongs to an entry whose
-       *       value is null.
-       * 10.4. For each of the four keys callbackName in lifecycleCallbacks:
-       *       1. Let callbackValue be Get(prototype, callbackName). Rethrow any
-       *          exceptions.
-       *       2. If callbackValue is not undefined, then set the value of the
-       *          entry in lifecycleCallbacks with key callbackName to the result
-       *          of converting callbackValue to the Web IDL Function callback type.
-       *          Rethrow any exceptions from the conversion.
-       */
-      // Will do the same checking for the life cycle callbacks from v0 spec.
-      CheckLifeCycleCallbacks(cx, constructorProtoUnwrapped, aRv);
-      if (aRv.Failed()) {
+    /**
+     * 10.3. Let lifecycleCallbacks be a map with the four keys
+     *       "connectedCallback", "disconnectedCallback", "adoptedCallback", and
+     *       "attributeChangedCallback", each of which belongs to an entry whose
+     *       value is null.
+     * 10.4. For each of the four keys callbackName in lifecycleCallbacks:
+     *       1. Let callbackValue be Get(prototype, callbackName). Rethrow any
+     *          exceptions.
+     *       2. If callbackValue is not undefined, then set the value of the
+     *          entry in lifecycleCallbacks with key callbackName to the result
+     *          of converting callbackValue to the Web IDL Function callback type.
+     *          Rethrow any exceptions from the conversion.
+     */
+    if (!callbacksHolder->Init(aCx, prototype)) {
+      aRv.NoteJSContextException(aCx);
+      return;
+    }
+
+    /**
+     * 10.5. Let observedAttributes be an empty sequence<DOMString>.
+     * 10.6. If the value of the entry in lifecycleCallbacks with key
+     *       "attributeChangedCallback" is not null, then:
+     *       1. Let observedAttributesIterable be Get(constructor,
+     *          "observedAttributes"). Rethrow any exceptions.
+     *       2. If observedAttributesIterable is not undefined, then set
+     *          observedAttributes to the result of converting
+     *          observedAttributesIterable to a sequence<DOMString>. Rethrow
+     *          any exceptions from the conversion.
+     */
+    if (callbacksHolder->mAttributeChangedCallback.WasPassed()) {
+      JS::Rooted<JS::Value> observedAttributesIterable(aCx);
+
+      if (!JS_GetProperty(aCx, constructor, "observedAttributes",
+                          &observedAttributesIterable)) {
+        aRv.NoteJSContextException(aCx);
         return;
       }
 
-      // Note: We call the init from the constructorProtoUnwrapped's compartment
-      //       here.
-      JS::RootedValue rootedv(cx, JS::ObjectValue(*constructorProtoUnwrapped));
-      if (!JS_WrapValue(cx, &rootedv) || !callbacksHolder->Init(cx, rootedv)) {
-        aRv.StealExceptionFromJSContext(cx);
-        return;
-      }
-
-      /**
-       * 10.5. Let observedAttributes be an empty sequence<DOMString>.
-       * 10.6. If the value of the entry in lifecycleCallbacks with key
-       *       "attributeChangedCallback" is not null, then:
-       *       1. Let observedAttributesIterable be Get(constructor,
-       *          "observedAttributes"). Rethrow any exceptions.
-       *       2. If observedAttributesIterable is not undefined, then set
-       *          observedAttributes to the result of converting
-       *          observedAttributesIterable to a sequence<DOMString>. Rethrow
-       *          any exceptions from the conversion.
-       */
-      if (callbacksHolder->mAttributeChangedCallback.WasPassed()) {
-        // Enter constructor's realm.
-        JSAutoRealm ar(cx, constructor);
-        JS::Rooted<JS::Value> observedAttributesIterable(cx);
-
-        if (!JS_GetProperty(cx, constructor, "observedAttributes",
-                            &observedAttributesIterable)) {
-          aRv.StealExceptionFromJSContext(cx);
+      if (!observedAttributesIterable.isUndefined()) {
+        if (!observedAttributesIterable.isObject()) {
+          aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(NS_LITERAL_STRING("observedAttributes"));
           return;
         }
 
-        if (!observedAttributesIterable.isUndefined()) {
-          if (!observedAttributesIterable.isObject()) {
-            aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(NS_LITERAL_STRING("observedAttributes"));
+        JS::ForOfIterator iter(aCx);
+        if (!iter.init(observedAttributesIterable, JS::ForOfIterator::AllowNonIterable)) {
+          aRv.NoteJSContextException(aCx);
+          return;
+        }
+
+        if (!iter.valueIsIterable()) {
+          aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(NS_LITERAL_STRING("observedAttributes"));
+          return;
+        }
+
+        JS::Rooted<JS::Value> attribute(aCx);
+        while (true) {
+          bool done;
+          if (!iter.next(&attribute, &done)) {
+            aRv.NoteJSContextException(aCx);
+            return;
+          }
+          if (done) {
+            break;
+          }
+
+          nsAutoString attrStr;
+          if (!ConvertJSValueToString(aCx, attribute, eStringify, eStringify, attrStr)) {
+            aRv.NoteJSContextException(aCx);
             return;
           }
 
-          JS::ForOfIterator iter(cx);
-          if (!iter.init(observedAttributesIterable, JS::ForOfIterator::AllowNonIterable)) {
-            aRv.StealExceptionFromJSContext(cx);
+          if (!observedAttributes.AppendElement(NS_Atomize(attrStr))) {
+            aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
             return;
-          }
-
-          if (!iter.valueIsIterable()) {
-            aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(NS_LITERAL_STRING("observedAttributes"));
-            return;
-          }
-
-          JS::Rooted<JS::Value> attribute(cx);
-          while (true) {
-            bool done;
-            if (!iter.next(&attribute, &done)) {
-              aRv.StealExceptionFromJSContext(cx);
-              return;
-            }
-            if (done) {
-              break;
-            }
-
-            nsAutoString attrStr;
-            if (!ConvertJSValueToString(cx, attribute, eStringify, eStringify, attrStr)) {
-              aRv.StealExceptionFromJSContext(cx);
-              return;
-            }
-
-            if (!observedAttributes.AppendElement(NS_Atomize(attrStr))) {
-              aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-              return;
-            }
           }
         }
-      } // Leave constructor's realm.
-    } // Leave constructorProtoUnwrapped's compartment.
+      }
+    }
   } // Unset mIsCustomDefinitionRunning
 
   /**
@@ -940,7 +892,6 @@ CustomElementRegistry::Define(const nsAString& aName,
    */
   // Associate the definition with the custom element.
   RefPtr<nsAtom> localNameAtom(NS_Atomize(localName));
-  LifecycleCallbacks* callbacks = callbacksHolder.forget();
 
   /**
    * 12. Add definition to this CustomElementRegistry.
@@ -955,7 +906,7 @@ CustomElementRegistry::Define(const nsAString& aName,
                                 localNameAtom,
                                 &aFunctionConstructor,
                                 Move(observedAttributes),
-                                callbacks);
+                                Move(callbacksHolder));
 
   CustomElementDefinition* def = definition.get();
   mCustomDefinitions.Put(nameAtom, definition.forget());
@@ -1372,12 +1323,12 @@ CustomElementDefinition::CustomElementDefinition(nsAtom* aType,
                                                  nsAtom* aLocalName,
                                                  Function* aConstructor,
                                                  nsTArray<RefPtr<nsAtom>>&& aObservedAttributes,
-                                                 LifecycleCallbacks* aCallbacks)
+                                                 UniquePtr<LifecycleCallbacks>&& aCallbacks)
   : mType(aType),
     mLocalName(aLocalName),
     mConstructor(new CustomElementConstructor(aConstructor)),
     mObservedAttributes(Move(aObservedAttributes)),
-    mCallbacks(aCallbacks)
+    mCallbacks(Move(aCallbacks))
 {
 }
 

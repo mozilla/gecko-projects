@@ -138,10 +138,10 @@ inline js::GlobalObject&
 JSScript::global() const
 {
     /*
-     * A JSScript always marks its compartment's global (via bindings) so we
-     * can assert that maybeGlobal is non-null here.
+     * A JSScript always marks its realm's global (via bindings) so we can
+     * assert that maybeGlobal is non-null here.
      */
-    return *compartment()->maybeGlobal();
+    return *realm()->maybeGlobal();
 }
 
 inline js::LexicalScope*
@@ -204,7 +204,7 @@ JSScript::ensureHasAnalyzedArgsUsage(JSContext* cx)
 inline bool
 JSScript::isDebuggee() const
 {
-    return compartment_->debuggerObservesAllExecution() || hasDebugScript_;
+    return realm_->debuggerObservesAllExecution() || bitFields_.hasDebugScript_;
 }
 
 #endif /* vm_JSScript_inl_h */

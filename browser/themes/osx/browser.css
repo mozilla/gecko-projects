@@ -638,18 +638,6 @@ html|input.urlbar-input {
   text-align: end;
 }
 
-/* History Swipe Animation */
-
-#historySwipeAnimationCurrentPage,
-#historySwipeAnimationNextPage {
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.6);
-}
-
-#historySwipeAnimationContainer {
-  background: url("chrome://browser/skin/subtle-pattern.png") #B3B9C1;
-}
-
-
 /* ----- SIDEBAR ELEMENTS ----- */
 
 %include ../shared/sidebar.inc.css
@@ -1045,20 +1033,6 @@ html|*.addon-webext-perm-list {
 .click-to-play-plugins-notification-description-box > .popup-notification-closebutton {
   margin-inline-end: -6px;
   margin-top: -7px;
-}
-
-.gclitoolbar-input-node > .textbox-input-box > html|*.textbox-input::-moz-selection {
-  color: hsl(210,11%,16%);
-}
-
-/* Error counter */
-
-#developer-toolbar-toolbox-button[error-count]:before {
-  color: #FDF3DE;
-  min-width: 16px;
-  text-shadow: none;
-  background-image: linear-gradient(#B4211B, #8A1915);
-  border-radius: 1px;
 }
 
 /* Customization mode */

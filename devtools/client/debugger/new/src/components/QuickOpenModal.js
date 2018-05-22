@@ -433,6 +433,7 @@ class QuickOpenModal extends _react.Component {
     const newResults = results && results.slice(0, 100);
     const items = this.highlightMatching(query, newResults || []);
     const expanded = !!items && items.length > 0;
+    const summaryMsg = this.isGotoQuery() ? L10N.getStr("shortcuts.gotoLine") : "";
     return _react2.default.createElement(_Modal2.default, {
       "in": enabled,
       handleClose: this.closeModal
@@ -441,7 +442,7 @@ class QuickOpenModal extends _react.Component {
       hasPrefix: true,
       count: this.getResultCount(),
       placeholder: L10N.getStr("sourceSearch.search"),
-      summaryMsg: "",
+      summaryMsg: summaryMsg,
       showErrorEmoji: this.shouldShowErrorEmoji(),
       onChange: this.onChange,
       onKeyDown: this.onKeyDown,
@@ -472,7 +473,7 @@ function mapStateToProps(state) {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
   return {
     enabled: (0, _selectors.getQuickOpenEnabled)(state),
-    sources: (0, _quickOpen.formatSources)((0, _selectors.getRelativeSources)(state), (0, _selectors.getTabs)(state).toArray()),
+    sources: (0, _quickOpen.formatSources)((0, _selectors.getRelativeSources)(state).toArray(), (0, _selectors.getTabs)(state).toArray()),
     selectedSource,
     symbols: (0, _quickOpen.formatSymbols)((0, _selectors.getSymbols)(state, selectedSource)),
     symbolsLoading: (0, _selectors.isSymbolsLoading)(state, selectedSource),

@@ -577,7 +577,6 @@ menuseparator {
 
 .folder,
 .domain,
-.source-icon,
 .file,
 .extension {
   background-color: var(--theme-comment);
@@ -586,7 +585,7 @@ menuseparator {
 .worker,
 .file,
 .folder,
-.source-icon,
+.sources-list .source-icon,
 .extension {
   position: relative;
   top: 2px;
@@ -608,8 +607,7 @@ menuseparator {
 }
 
 img.domain,
-img.folder,
-img.source-icon {
+img.folder {
   width: 15px;
   height: 15px;
 }
@@ -666,7 +664,7 @@ img.file {
 img.domain,
 img.folder,
 img.file,
-img.source-icon,
+.sources-list img.source-icon,
 img.extension {
   mask-size: 100%;
   margin-inline-end: 5px;
@@ -958,6 +956,89 @@ img.close::before {
   width: 100%;
   height: 100%;
   padding: 6px;
+}
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+.command-bar-button {
+  appearance: none;
+  background: transparent;
+  border: none;
+  display: inline-block;
+  text-align: center;
+  position: relative;
+  padding: 0px 5px;
+  fill: currentColor;
+}
+
+.command-bar-button:focus {
+  outline: none;
+}
+
+.command-bar-button:disabled {
+  opacity: 0.8;
+  cursor: default;
+}
+
+.command-bar-button:not(.disabled):hover {
+  background: var(--theme-toolbar-background-hover);
+}
+
+:root.theme-dark .command-bar-button {
+  color: var(--theme-body-color);
+}
+
+.command-bar-button > * {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+}
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
+.toggle-button {
+  transform: translate(0, 0px);
+  transition: transform 0.25s ease-in-out;
+  padding: 5px;
+}
+
+.toggle-button .togglePanes {
+  vertical-align: -2px;
+}
+
+.toggle-button svg {
+  fill: var(--theme-comment);
+  vertical-align: 0;
+}
+
+:root.theme-dark .toggle-button svg {
+  fill: var(--theme-comment-alt);
+}
+
+.toggle-button.end {
+  margin-inline-end: 0px;
+  margin-inline-start: auto;
+}
+
+.toggle-button.start {
+  margin-inline-start: 0px;
+}
+
+html:not([dir="rtl"]) .toggle-button.end svg,
+html[dir="rtl"] .toggle-button.start svg {
+  transform: rotate(180deg);
+}
+
+html .toggle-button.end.vertical svg {
+  transform: rotate(-90deg);
+}
+
+.toggle-button.start.collapsed,
+.toggle-button.end.collapsed {
+  transform: rotate(180deg);
 }
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1416,7 +1497,9 @@ img.close::before {
   background-color: white;
 }
 
-.tree:not(.object-inspector) .tree-node[data-expandable="false"] .tree-indent:last-of-type {
+.tree:not(.object-inspector)
+  .tree-node[data-expandable="false"]
+  .tree-indent:last-of-type {
   margin-inline-end: 4px;
 }
 
@@ -1442,7 +1525,9 @@ img.close::before {
 }
 
 /* Removes start margin when a custom root is used */
-.sources-list-custom-root .tree > .tree-node[data-expandable="false"][aria-level="0"] {
+.sources-list-custom-root
+  .tree
+  > .tree-node[data-expandable="false"][aria-level="0"] {
   padding-inline-start: 4px;
 }
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -1636,7 +1721,7 @@ menuseparator {
 }
 
 .theme-dark .outline-footer button {
-    color: var(--theme-body-color);
+  color: var(--theme-body-color);
 }
 
 .outline-footer button.active {
@@ -1665,89 +1750,6 @@ menuseparator {
 
 .function-signature .comma {
   color: var(--object-color);
-}
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-.command-bar-button {
-  appearance: none;
-  background: transparent;
-  border: none;
-  display: inline-block;
-  text-align: center;
-  position: relative;
-  padding: 0px 5px;
-  fill: currentColor;
-}
-
-.command-bar-button:focus {
-  outline: none;
-}
-
-.command-bar-button:disabled {
-  opacity: 0.8;
-  cursor: default;
-}
-
-.command-bar-button:not(.disabled):hover {
-  background: var(--theme-toolbar-background-hover);
-}
-
-:root.theme-dark .command-bar-button {
-  color: var(--theme-body-color);
-}
-
-.command-bar-button > * {
-  width: 16px;
-  height: 16px;
-  display: inline-block;
-  vertical-align: middle;
-}
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-
-.toggle-button {
-  transform: translate(0, 0px);
-  transition: transform 0.25s ease-in-out;
-  padding: 5px;
-}
-
-.toggle-button .togglePanes {
-  vertical-align: -2px;
-}
-
-.toggle-button svg {
-  fill: var(--theme-comment);
-  vertical-align: 0;
-}
-
-:root.theme-dark .toggle-button svg {
-  fill: var(--theme-comment-alt);
-}
-
-.toggle-button.end {
-  margin-inline-end: 0px;
-  margin-inline-start: auto;
-}
-
-.toggle-button.start {
-  margin-inline-start: 0px;
-}
-
-html:not([dir="rtl"]) .toggle-button.end svg,
-html[dir="rtl"] .toggle-button.start svg {
-  transform: rotate(180deg);
-}
-
-html .toggle-button.end.vertical svg {
-  transform: rotate(-90deg);
-}
-
-.toggle-button.start.collapsed,
-.toggle-button.end.collapsed {
-  transform: rotate(180deg);
 }
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1796,7 +1798,7 @@ html .toggle-button.end.vertical svg {
   justify-content: center;
 }
 
-.source-footer > button.action:hover {
+.source-footer > .commands > button.action:hover {
   background: var(--theme-toolbar-background-hover);
 }
 
@@ -2887,6 +2889,37 @@ debug-expression-error {
   border-radius: 2px;
   margin: 0 -1px -1px -1px;
 }
+.source-icon {
+  position: relative;
+  background-color: var(--theme-comment);
+  mask-size: 100%;
+  display: inline-block;
+  margin-inline-end: 5px;
+}
+
+.source-icon,
+.source-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.source-icon.prettyPrint {
+  mask: url("chrome://devtools/skin/images/debugger/prettyPrint.svg") no-repeat;
+  mask-size: 100%;
+  background: var(--theme-highlight-blue);
+  fill: var(--theme-textbox-box-shadow);
+}
+
+.source-icon.blackBox {
+  mask: url("chrome://devtools/skin/images/debugger/blackBox.svg") no-repeat;
+  mask-size: 100%;
+  background: var(--theme-highlight-blue);
+}
+
+.source-icon.react {
+  mask-size: 100%;
+  background: var(--theme-highlight-bluegrey);
+}
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -2906,7 +2939,14 @@ debug-expression-error {
 .breakpoints-list .breakpoint-heading {
   text-overflow: ellipsis;
   overflow: hidden;
-  padding-top: 0.75em;
+  display: flex;
+  width: 100%;
+  align-items: center;
+}
+
+/* temporary until we refactor the sources tree and tab icon styles */
+.breakpoints-list .breakpoint-heading .source-icon.file {
+  top: 0;
 }
 
 .breakpoints-list .breakpoint-heading,
@@ -2920,7 +2960,8 @@ debug-expression-error {
 
 .breakpoints-list .breakpoint-heading,
 .breakpoints-list .breakpoint,
-.breakpoints-exceptions {
+.breakpoints-exceptions,
+.breakpoints-exceptions-caught {
   padding: 0.25em 1em;
 }
 
@@ -2930,8 +2971,7 @@ debug-expression-error {
 }
 
 .breakpoints-list .breakpoint {
-    padding-top: 0.25em;
-    padding-bottom: 0.25em;
+  min-height: var(--breakpoint-expression-height);
 }
 
 .breakpoints-exceptions-caught {
@@ -2996,7 +3036,7 @@ html .breakpoints-list .breakpoint.paused {
 
 .breakpoints-list .breakpoint.disabled .breakpoint-label {
   color: var(--theme-comment);
-  transition: color 0.5s linear;
+  transition: color 0.15s linear;
 }
 
 .breakpoints-list .breakpoint:hover {
@@ -3096,8 +3136,11 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
   min-width: initial !important;
 }
 
+.breakpoints-list .breakpoint .CodeMirror.cm-s-mozilla-breakpoint {
+  transition: opacity 0.15s linear;
+}
+
 .breakpoints-list .breakpoint.disabled .CodeMirror.cm-s-mozilla-breakpoint {
-  transition: opacity 0.5s linear;
   opacity: 0.5;
 }
 
@@ -3190,6 +3233,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
   background-color: var(--theme-body-background);
   display: block;
   position: relative;
+  min-height: var(--breakpoint-expression-height);
 }
 
 .expression-container > .tree {
@@ -3205,7 +3249,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
   background-color: var(--theme-selection-background-hover);
 }
 
-.tree  .tree-node:not(.focused):hover {
+.tree .tree-node:not(.focused):hover {
   background-color: transparent;
 }
 
@@ -3709,7 +3753,7 @@ img.skipPausing {
 }
 
 .command-bar .active .skipPausing {
-   background-color: var(--theme-highlight-blue);
+  background-color: var(--theme-highlight-blue);
 }
 
 .bottom {
@@ -3745,6 +3789,14 @@ img.skipPausing {
   opacity: 0.6;
 }
 
+.object-node {
+  padding-left: 4px;
+}
+
+html[dir="rtl"] .object-node {
+  padding-right: 4px;
+}
+
 .object-label {
   color: var(--theme-highlight-blue);
 }
@@ -3766,10 +3818,6 @@ img.skipPausing {
 
 .scopes-pane {
   overflow: auto;
-}
-
-.scopes-list {
-  padding-inline-start: 4px;
 }
 
 .scopes-list .tree:focus {
@@ -3800,9 +3848,10 @@ img.skipPausing {
   flex-direction: column;
   flex: 1;
   white-space: nowrap;
-  --breakpoint-expression-right-clear-space: 36px;
   -moz-user-select: none;
   user-select: none;
+  --breakpoint-expression-right-clear-space: 36px;
+  --breakpoint-expression-height: 2.4em;
 }
 
 /*
@@ -3911,6 +3960,17 @@ img.skipPausing {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.welcomebox__searchSources,
+.welcomebox__searchProject {
+  transition: color 0.15s linear;
+}
+
+.welcomebox__searchSources:hover,
+.welcomebox__searchProject:hover {
+  color: var(--theme-body-color);
 }
 
 .shortcutKey {
@@ -4013,40 +4073,28 @@ html .welcomebox .toggle-button-end.collapsed {
   fill: var(--theme-body-color);
 }
 
-.source-tab img.prettyPrint {
-  mask: url("chrome://devtools/skin/images/debugger/prettyPrint.svg") no-repeat;
-  mask-size: 100%;
-  padding-top: 12px;
+.source-tab .source-icon {
+  margin-inline-end: 0;
+}
+
+.source-tab img.prettyPrint,
+.source-tab .source-icon.blackBox {
   height: 12px;
   width: 12px;
-  background: var(--theme-highlight-blue);
+  align-self: center;
 }
 
 .source-tab .prettyPrint path {
   fill: var(--theme-textbox-box-shadow);
 }
 
-.source-tab .blackBox,
-.source-tab .prettyPrint {
-  align-self: center;
-}
-
-.source-tab img.blackBox {
-  mask: url("chrome://devtools/skin/images/debugger/blackBox.svg") no-repeat;
-  mask-size: 100%;
-  padding-top: 12px;
-  height: 12px;
-  width: 12px;
-  background: var(--theme-highlight-blue);
-}
-
 .source-tab img.react {
   mask: url("chrome://devtools/skin/images/debugger/react.svg") no-repeat;
   mask-size: 100%;
-  padding-top: 12px;
   height: 14px;
   width: 14px;
   background: var(--theme-highlight-bluegrey);
+  top: 0;
 }
 
 .source-tab .blackBox path {
@@ -4077,7 +4125,7 @@ html[dir="rtl"] img.moreTabs {
   text-overflow: ellipsis;
   overflow: hidden;
   padding: 0 4px;
-  align-self: flex-start;
+  align-self: center;
 }
 
 .source-tab .close-btn {
@@ -4171,7 +4219,6 @@ html[dir="rtl"] .dropdown {
   mask: url("chrome://devtools/skin/images/debugger/file.svg") no-repeat;
   mask-size: 100%;
   margin-bottom: 7px;
-
 }
 
 .dropdown ul {

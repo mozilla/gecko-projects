@@ -97,6 +97,8 @@ window._gBrowser = {
 
   _contentWaitingCount: 0,
 
+  _tabLayerCache: [],
+
   tabAnimationsInProgress: 0,
 
   _XUL_NS: "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul",
@@ -135,6 +137,8 @@ window._gBrowser = {
   _removingTabs: [],
 
   _multiSelectedTabsMap: new WeakMap(),
+
+  _lastMultiSelectedTabRef: null,
 
   /**
    * Tab close requests are ignored if the window is closing anyway,
@@ -1619,7 +1623,7 @@ window._gBrowser = {
 
     // Change the "remote" attribute.
     let parent = aBrowser.parentNode;
-    parent.removeChild(aBrowser);
+    aBrowser.remove();
     if (aShouldBeRemote) {
       aBrowser.setAttribute("remote", "true");
       aBrowser.setAttribute("remoteType", aOptions.remoteType);
@@ -2130,9 +2134,7 @@ window._gBrowser = {
     }
 
     aBrowser.destroy();
-
-    let notificationbox = this.getNotificationBox(aBrowser);
-    this.tabpanels.removeChild(notificationbox);
+    this.getNotificationBox(aBrowser).remove();
     tab.removeAttribute("linkedpanel");
 
     this._createLazyBrowser(tab);
@@ -2751,6 +2753,13 @@ window._gBrowser = {
       }
     }
 
+    // this._switcher would normally cover removing a tab from this
+    // cache, but we may not have one at this time.
+    let tabCacheIndex = this._tabLayerCache.indexOf(aTab);
+    if (tabCacheIndex != -1) {
+      this._tabLayerCache.splice(tabCacheIndex, 1);
+    }
+
     this._blurTab(aTab);
 
     var closeWindow = false;
@@ -2926,7 +2935,7 @@ window._gBrowser = {
     var wasPinned = aTab.pinned;
 
     // Remove the tab ...
-    this.tabContainer.removeChild(aTab);
+    aTab.remove();
 
     // Update hashiddentabs if this tab was hidden.
     if (aTab.hidden)
@@ -3617,6 +3626,32 @@ window._gBrowser = {
     this._multiSelectedTabsMap.set(aTab, null);
   },
 
+  /**
+   * Adds two given tabs and all tabs between them into the (multi) selected tabs collection
+   */
+  addRangeToMultiSelectedTabs(aTab1, aTab2) {
+    // Let's avoid going through all the heavy process below when the same
+    // tab is given as params.
+    if (aTab1 == aTab2) {
+      this.addToMultiSelectedTabs(aTab1);
+      return;
+    }
+
+    const tabs = [...this.tabs];
+    const indexOfTab1 = tabs.indexOf(aTab1);
+    const indexOfTab2 = tabs.indexOf(aTab2);
+
+    const [lowerIndex, higherIndex] = indexOfTab1 < indexOfTab2 ?
+      [indexOfTab1, indexOfTab2] : [indexOfTab2, indexOfTab1];
+
+    for (let i = lowerIndex; i <= higherIndex; i++) {
+      let tab = tabs[i];
+      if (!tab.hidden) {
+        this.addToMultiSelectedTabs(tab);
+      }
+    }
+  },
+
   removeFromMultiSelectedTabs(aTab) {
     if (!aTab.multiselected) {
       return;
@@ -3635,10 +3670,22 @@ window._gBrowser = {
     this._multiSelectedTabsMap = new WeakMap();
   },
 
-  multiSelectedTabsCount() {
+  get multiSelectedTabsCount() {
     return ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap)
       .filter(tab => tab.isConnected)
       .length;
+  },
+
+  get lastMultiSelectedTab() {
+    let tab = this._lastMultiSelectedTabRef ? this._lastMultiSelectedTabRef.get() : null;
+    if (tab && tab.isConnected && this._multiSelectedTabsMap.has(tab)) {
+      return tab;
+    }
+    return gBrowser.selectedTab;
+  },
+
+  set lastMultiSelectedTab(aTab) {
+    this._lastMultiSelectedTabRef = Cu.getWeakReference(aTab);
   },
 
   activateBrowserForPrintPreview(aBrowser) {
@@ -4625,6 +4672,14 @@ class TabProgressListener {
             PrivateBrowsingUtils.permanentPrivateBrowsing)) {
         gBrowser._unifiedComplete.registerOpenPage(aLocation, userContextId);
         this.mBrowser.registeredOpenURI = aLocation;
+      }
+
+      if (this.mTab != gBrowser.selectedTab) {
+        let tabCacheIndex = gBrowser._tabLayerCache.indexOf(this.mTab);
+        if (tabCacheIndex != -1) {
+          gBrowser._tabLayerCache.splice(tabCacheIndex, 1);
+          gBrowser._getSwitcher().cleanUpTabAfterEviction(this.mTab);
+        }
       }
     }
 

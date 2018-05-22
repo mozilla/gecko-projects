@@ -658,22 +658,6 @@ IonCacheIRCompiler::emitGuardGroup()
 }
 
 bool
-IonCacheIRCompiler::emitGuardGroupHasUnanalyzedNewScript()
-{
-    ObjectGroup* group = groupStubField(reader.stubOffset());
-    AutoScratchRegister scratch1(allocator, masm);
-    AutoScratchRegister scratch2(allocator, masm);
-
-    FailurePath* failure;
-    if (!addFailurePath(&failure))
-        return false;
-
-    masm.movePtr(ImmGCPtr(group), scratch1);
-    masm.guardGroupHasUnanalyzedNewScript(scratch1, scratch2, failure->label());
-    return true;
-}
-
-bool
 IonCacheIRCompiler::emitGuardProto()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2285,15 +2269,6 @@ IonCacheIRCompiler::emitReturnFromIC()
     RepatchLabel rejoin;
     rejoinOffset_ = masm.jumpWithPatch(&rejoin);
     masm.bind(&rejoin);
-    return true;
-}
-
-bool
-IonCacheIRCompiler::emitLoadObject()
-{
-    Register reg = allocator.defineRegister(masm, reader.objOperandId());
-    JSObject* obj = objectStubField(reader.stubOffset());
-    masm.movePtr(ImmGCPtr(obj), reg);
     return true;
 }
 

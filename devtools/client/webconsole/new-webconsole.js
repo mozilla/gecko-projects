@@ -48,6 +48,7 @@ function NewWebConsoleFrame(webConsoleOwner) {
 
   this._onToolboxPrefChanged = this._onToolboxPrefChanged.bind(this);
   this._onPanelSelected = this._onPanelSelected.bind(this);
+  this._onChangeSplitConsoleState = this._onChangeSplitConsoleState.bind(this);
 
   EventEmitter.decorate(this);
 }
@@ -103,6 +104,8 @@ NewWebConsoleFrame.prototype = {
     let toolbox = gDevTools.getToolbox(this.owner.target);
     if (toolbox) {
       toolbox.off("webconsole-selected", this._onPanelSelected);
+      toolbox.off("split-console", this._onChangeSplitConsoleState);
+      toolbox.off("select", this._onChangeSplitConsoleState);
     }
 
     this.window = this.owner = this.newConsoleOutput = null;
@@ -212,6 +215,8 @@ NewWebConsoleFrame.prototype = {
 
     if (toolbox) {
       toolbox.on("webconsole-selected", this._onPanelSelected);
+      toolbox.on("split-console", this._onChangeSplitConsoleState);
+      toolbox.on("select", this._onChangeSplitConsoleState);
     }
   },
 
@@ -236,6 +241,10 @@ NewWebConsoleFrame.prototype = {
     shortcuts.on(clearShortcut, () => this.jsterm.clearOutput(true));
 
     if (this.isBrowserConsole) {
+      // Make sure keyboard shortcuts work immediately after opening
+      // the Browser Console (Bug 1461366).
+      this.window.focus();
+
       shortcuts.on(l10n.getStr("webconsole.close.key"),
                    this.window.top.close.bind(this.window.top));
 
@@ -294,6 +303,10 @@ NewWebConsoleFrame.prototype = {
    */
   _onPanelSelected: function() {
     this.jsterm.focus();
+  },
+
+  _onChangeSplitConsoleState: function() {
+    this.newConsoleOutput.dispatchSplitConsoleCloseButtonToggle();
   },
 
   /**

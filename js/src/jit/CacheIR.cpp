@@ -473,7 +473,7 @@ IsCacheableNoProperty(JSContext* cx, JSObject* obj, JSObject* holder, Shape* sha
     // If we're doing a name lookup, we have to throw a ReferenceError. If
     // extra warnings are enabled, we may have to report a warning.
     // Note that Ion does not generate idempotent caches for JSOP_GETBOUNDNAME.
-    if ((pc && *pc == JSOP_GETBOUNDNAME) || cx->compartment()->behaviors().extraWarnings(cx))
+    if ((pc && *pc == JSOP_GETBOUNDNAME) || cx->realm()->behaviors().extraWarnings(cx))
         return false;
 
     return CheckHasNoSuchProperty(cx, obj, id);
@@ -1054,7 +1054,7 @@ GetPropIRGenerator::tryAttachCrossCompartmentWrapper(HandleObject obj, ObjOperan
     // so we optimize for that case as well.
     bool isWindowProxy = IsWindowProxy(unwrapped);
     if (isWindowProxy) {
-        MOZ_ASSERT(ToWindowIfWindowProxy(unwrapped) == unwrapped->compartment()->maybeGlobal());
+        MOZ_ASSERT(ToWindowIfWindowProxy(unwrapped) == unwrapped->realm()->maybeGlobal());
         unwrapped = cx_->global();
         MOZ_ASSERT(unwrapped);
     }

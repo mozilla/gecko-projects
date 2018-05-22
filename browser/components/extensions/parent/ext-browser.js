@@ -121,31 +121,55 @@ global.replaceUrlInTab = (gBrowser, tab, url) => {
   return loaded;
 };
 
-// Manages tab-specific context data, and dispatching tab select events
-// across all windows.
+/**
+ * Manages tab-specific and window-specific context data, and dispatches
+ * tab select events across all windows.
+ */
 global.TabContext = class extends EventEmitter {
-  constructor(getDefaults, extension) {
+  /**
+   * @param {Function} getDefaultPrototype
+   *        Provides the prototype of the context value for a tab or window when there is none.
+   *        Called with a XULElement or ChromeWindow argument.
+   *        Should return an object or null.
+   */
+  constructor(getDefaultPrototype) {
     super();
 
-    this.extension = extension;
-    this.getDefaults = getDefaults;
+    this.getDefaultPrototype = getDefaultPrototype;
 
     this.tabData = new WeakMap();
 
     windowTracker.addListener("progress", this);
     windowTracker.addListener("TabSelect", this);
+
+    this.tabDetached = this.tabDetached.bind(this);
+    tabTracker.on("tab-detached", this.tabDetached);
   }
 
-  get(nativeTab) {
-    if (!this.tabData.has(nativeTab)) {
-      this.tabData.set(nativeTab, this.getDefaults(nativeTab));
+  /**
+   * Returns the context data associated with `keyObject`.
+   *
+   * @param {XULElement|ChromeWindow} keyObject
+   *        Browser tab or browser chrome window.
+   * @returns {Object}
+   */
+  get(keyObject) {
+    if (!this.tabData.has(keyObject)) {
+      let data = Object.create(this.getDefaultPrototype(keyObject));
+      this.tabData.set(keyObject, data);
     }
 
-    return this.tabData.get(nativeTab);
+    return this.tabData.get(keyObject);
   }
 
-  clear(nativeTab) {
-    this.tabData.delete(nativeTab);
+  /**
+   * Clears the context data associated with `keyObject`.
+   *
+   * @param {XULElement|ChromeWindow} keyObject
+   *        Browser tab or browser chrome window.
+   */
+  clear(keyObject) {
+    this.tabData.delete(keyObject);
   }
 
   handleEvent(event) {
@@ -164,9 +188,24 @@ global.TabContext = class extends EventEmitter {
     this.emit("location-change", tab, fromBrowse);
   }
 
+  tabDetached(eventType, {nativeTab, adoptedBy}) {
+    if (!this.tabData.has(nativeTab)) {
+      return;
+    }
+    // Create a new object (possibly with different inheritance) when a tab is moved
+    // into a new window. But then reassign own properties from the old object.
+    let newData = this.get(adoptedBy);
+    let oldData = this.tabData.get(nativeTab);
+    Object.assign(newData, oldData);
+  }
+
+  /**
+   * Makes the TabContext instance stop emitting events.
+   */
   shutdown() {
     windowTracker.removeListener("progress", this);
     windowTracker.removeListener("TabSelect", this);
+    tabTracker.off("tab-detached", this.tabDetached);
   }
 };
 

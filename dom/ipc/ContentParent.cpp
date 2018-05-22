@@ -2467,6 +2467,11 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
     nsTArray<BlobURLRegistrationData> registrations;
     if (nsHostObjectProtocolHandler::GetAllBlobURLEntries(registrations,
                                                           this)) {
+      for (const BlobURLRegistrationData& registration : registrations) {
+        nsresult rv = TransmitPermissionsForPrincipal(registration.principal());
+        Unused << NS_WARN_IF(NS_FAILED(rv));
+      }
+
       Unused << SendInitBlobURLs(registrations);
     }
   }
@@ -2828,6 +2833,10 @@ ContentParent::Observe(nsISupports* aSubject,
 {
   if (mSubprocess && (!strcmp(aTopic, "profile-before-change") ||
                       !strcmp(aTopic, "xpcom-shutdown"))) {
+    // Make sure that our process will get scheduled.
+    ProcessPriorityManager::SetProcessPriority(this,
+                                               PROCESS_PRIORITY_FOREGROUND);
+
     // Okay to call ShutDownProcess multiple times.
     ShutDownProcess(SEND_SHUTDOWN_MESSAGE);
 
@@ -2842,9 +2851,7 @@ ContentParent::Observe(nsISupports* aSubject,
     return NS_OK;
 
   // listening for memory pressure event
-  if (!strcmp(aTopic, "memory-pressure") &&
-      !StringEndsWith(nsDependentString(aData),
-                      NS_LITERAL_STRING("-no-forward"))) {
+  if (!strcmp(aTopic, "memory-pressure")) {
       Unused << SendFlushMemory(nsDependentString(aData));
   }
   else if (!strcmp(aTopic, "nsPref:changed")) {
@@ -5147,8 +5154,13 @@ ContentParent::BroadcastBlobURLRegistration(const nsACString& aURI,
 
   for (auto* cp : AllProcesses(eLive)) {
     if (cp != aIgnoreThisCP) {
+      nsresult rv = cp->TransmitPermissionsForPrincipal(principal);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        break;
+      }
+
       IPCBlob ipcBlob;
-      nsresult rv = IPCBlobUtils::Serialize(aBlobImpl, cp, ipcBlob);
+      rv = IPCBlobUtils::Serialize(aBlobImpl, cp, ipcBlob);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         break;
       }
@@ -5310,12 +5322,17 @@ ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
 }
 
 void
-ContentParent::ForceTabPaint(TabParent* aTabParent, uint64_t aLayerObserverEpoch)
+ContentParent::PaintTabWhileInterruptingJS(TabParent* aTabParent,
+                                           bool aForceRepaint,
+                                           uint64_t aLayerObserverEpoch)
 {
   if (!mHangMonitorActor) {
     return;
   }
-  ProcessHangMonitor::ForcePaint(mHangMonitorActor, aTabParent, aLayerObserverEpoch);
+  ProcessHangMonitor::PaintWhileInterruptingJS(mHangMonitorActor,
+                                               aTabParent,
+                                               aForceRepaint,
+                                               aLayerObserverEpoch);
 }
 
 void

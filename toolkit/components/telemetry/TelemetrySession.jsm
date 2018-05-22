@@ -1089,11 +1089,12 @@ var Impl = {
     b("MEMORY_UNIQUE", "residentUnique");
     p("MEMORY_HEAP_OVERHEAD_FRACTION", "heapOverheadFraction");
     b("MEMORY_JS_GC_HEAP", "JSMainRuntimeGCHeap");
-    c("MEMORY_JS_COMPARTMENTS_SYSTEM", "JSMainRuntimeCompartmentsSystem");
-    c("MEMORY_JS_COMPARTMENTS_USER", "JSMainRuntimeCompartmentsUser");
+    c("MEMORY_JS_COMPARTMENTS_SYSTEM", "JSMainRuntimeRealmsSystem");
+    c("MEMORY_JS_COMPARTMENTS_USER", "JSMainRuntimeRealmsUser");
     b("MEMORY_IMAGES_CONTENT_USED_UNCOMPRESSED", "imagesContentUsedUncompressed");
     b("MEMORY_STORAGE_SQLITE", "storageSQLite");
     cc("LOW_MEMORY_EVENTS_VIRTUAL", "lowMemoryEventsVirtual");
+    cc("LOW_MEMORY_EVENTS_COMMIT_SPACE", "lowMemoryEventsCommitSpace");
     cc("LOW_MEMORY_EVENTS_PHYSICAL", "lowMemoryEventsPhysical");
     cc("PAGE_FAULTS_HARD", "pageFaultsHard");
 

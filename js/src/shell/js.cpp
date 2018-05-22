@@ -525,7 +525,7 @@ static void
 CancelExecution(JSContext* cx);
 
 static JSObject*
-NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
+NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
                 JSPrincipals* principals);
 
 /*
@@ -1951,14 +1951,14 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
 
         {
             if (saveBytecode) {
-                if (!JS::CompartmentCreationOptionsRef(cx).cloneSingletons()) {
+                if (!JS::RealmCreationOptionsRef(cx).cloneSingletons()) {
                     JS_ReportErrorNumberASCII(cx, my_GetErrorMessage, nullptr,
                                               JSSMSG_CACHE_SINGLETON_FAILED);
                     return false;
                 }
 
                 // cloneSingletons implies that singletons are used as template objects.
-                MOZ_ASSERT(JS::CompartmentBehaviorsRef(cx).getSingletonsAsTemplates());
+                MOZ_ASSERT(JS::RealmBehaviorsRef(cx).getSingletonsAsTemplates());
             }
 
             if (loadBytecode) {
@@ -2695,6 +2695,8 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
         switch (type) {
           case SRC_NULL:
           case SRC_IF:
+          case SRC_IF_ELSE:
+          case SRC_COND:
           case SRC_CONTINUE:
           case SRC_BREAK:
           case SRC_BREAK2LABEL:
@@ -2729,18 +2731,12 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
             }
             break;
 
-          case SRC_IF_ELSE:
-            if (!sp->jsprintf(" else %u", unsigned(GetSrcNoteOffset(sn, 0))))
-                return false;
-            break;
-
           case SRC_FOR_IN:
           case SRC_FOR_OF:
             if (!sp->jsprintf(" closingjump %u", unsigned(GetSrcNoteOffset(sn, 0))))
                 return false;
             break;
 
-          case SRC_COND:
           case SRC_WHILE:
           case SRC_NEXTCASE:
             if (!sp->jsprintf(" offset %u", unsigned(GetSrcNoteOffset(sn, 0))))
@@ -3418,7 +3414,7 @@ static const JSClass sandbox_class = {
 };
 
 static void
-SetStandardCompartmentOptions(JS::CompartmentOptions& options)
+SetStandardRealmOptions(JS::RealmOptions& options)
 {
     options.creationOptions().setSharedMemoryAndAtomicsEnabled(enableSharedMemory);
 }
@@ -3426,8 +3422,8 @@ SetStandardCompartmentOptions(JS::CompartmentOptions& options)
 static JSObject*
 NewSandbox(JSContext* cx, bool lazy)
 {
-    JS::CompartmentOptions options;
-    SetStandardCompartmentOptions(options);
+    JS::RealmOptions options;
+    SetStandardRealmOptions(options);
     RootedObject obj(cx, JS_NewGlobalObject(cx, &sandbox_class, nullptr,
                                             JS::DontFireOnNewGlobalHook, options));
     if (!obj)
@@ -3580,6 +3576,7 @@ WorkerMain(void* arg)
 
     auto guard = mozilla::MakeScopeExit([&] {
         CancelOffThreadJobsForContext(cx);
+        sc->markObservers.reset();
         JS_DestroyContext(cx);
         js_delete(sc);
         js_delete(input);
@@ -3605,8 +3602,8 @@ WorkerMain(void* arg)
     do {
         JSAutoRequest areq(cx);
 
-        JS::CompartmentOptions compartmentOptions;
-        SetStandardCompartmentOptions(compartmentOptions);
+        JS::RealmOptions compartmentOptions;
+        SetStandardRealmOptions(compartmentOptions);
 
         RootedObject global(cx, NewGlobalObject(cx, compartmentOptions, nullptr));
         if (!global)
@@ -4293,6 +4290,10 @@ static JSObject*
 CallModuleResolveHook(JSContext* cx, HandleObject module, HandleString specifier)
 {
     ShellContext* sc = GetShellContext(cx);
+    if (!sc->moduleResolveHook) {
+        JS_ReportErrorASCII(cx, "Module resolve hook not set");
+        return nullptr;
+    }
 
     JS::AutoValueArray<2> args(cx);
     args[0].setObject(*module);
@@ -5190,11 +5191,11 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
 {
     JSPrincipals* principals = nullptr;
 
-    JS::CompartmentOptions options;
-    JS::CompartmentCreationOptions& creationOptions = options.creationOptions();
-    JS::CompartmentBehaviors& behaviors = options.behaviors();
+    JS::RealmOptions options;
+    JS::RealmCreationOptions& creationOptions = options.creationOptions();
+    JS::RealmBehaviors& behaviors = options.behaviors();
 
-    SetStandardCompartmentOptions(options);
+    SetStandardRealmOptions(options);
     options.creationOptions().setNewZone();
 
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -5732,7 +5733,7 @@ GetSharedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
 
             // Shared memory is enabled globally in the shell: there can't be a worker
             // that does not enable it if the main thread has it.
-            MOZ_ASSERT(cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled());
+            MOZ_ASSERT(cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled());
 
             newObj = SharedArrayBufferObject::New(cx, buf, mbx->length);
             if (!newObj) {
@@ -8224,7 +8225,7 @@ static const JSPropertySpec TestingProperties[] = {
 };
 
 static JSObject*
-NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
+NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
                 JSPrincipals* principals)
 {
     RootedObject glob(cx, JS_NewGlobalObject(cx, &global_class, principals,
@@ -8560,11 +8561,6 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
         }
     }
 
-    if (op.getStringOption("ion-aa")) {
-        // Removed in bug 1455280, the option is preserved
-        // to ease transition for fuzzers and other tools
-    }
-
     if (const char* str = op.getStringOption("ion-licm")) {
         if (strcmp(str, "on") == 0)
             jit::JitOptions.disableLicm = false;
@@ -8836,8 +8832,8 @@ Shell(JSContext* cx, OptionParser* op, char** envp)
     if (op->getBoolOption("disable-oom-functions"))
         disableOOMFunctions = true;
 
-    JS::CompartmentOptions options;
-    SetStandardCompartmentOptions(options);
+    JS::RealmOptions options;
+    SetStandardRealmOptions(options);
     RootedObject glob(cx, NewGlobalObject(cx, options, nullptr));
     if (!glob)
         return 1;
@@ -9070,9 +9066,6 @@ main(int argc, char** argv, char** envp)
                                "  on:  enable GVN (default)\n")
         || !op.addStringOption('\0', "ion-licm", "on/off",
                                "Loop invariant code motion (default: on, off to disable)")
-        || !op.addStringOption('\0', "ion-aa", "flow-sensitive/flow-insensitive",
-                               "Specify wheter or not to use flow sensitive Alias Analysis"
-                               "(default: flow-insensitive)")
         || !op.addStringOption('\0', "ion-edgecase-analysis", "on/off",
                                "Find edge cases where Ion can avoid bailouts (default: on, off to disable)")
         || !op.addStringOption('\0', "ion-pgo", "on/off",

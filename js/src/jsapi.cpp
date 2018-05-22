@@ -675,66 +675,66 @@ JS_SetExternalStringSizeofCallback(JSContext* cx, JSExternalStringSizeofCallback
 }
 
 JS_PUBLIC_API(JSCompartment*)
-JS_EnterCompartment(JSContext* cx, JSObject* target)
+JS::EnterRealm(JSContext* cx, JSObject* target)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
-    JSCompartment* oldCompartment = cx->compartment();
-    cx->enterCompartmentOf(target);
-    return oldCompartment;
+    Realm* oldRealm = cx->realm();
+    cx->enterRealmOf(target);
+    return JS::GetRealmForCompartment(oldRealm);
 }
 
 JS_PUBLIC_API(void)
-JS_LeaveCompartment(JSContext* cx, JSCompartment* oldCompartment)
+JS::LeaveRealm(JSContext* cx, JS::Realm* oldRealm)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    cx->leaveCompartment(oldCompartment);
+    cx->leaveRealm(oldRealm);
 }
 
 JSAutoRealm::JSAutoRealm(JSContext* cx, JSObject* target
                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : cx_(cx),
-    oldCompartment_(cx->compartment())
+    oldRealm_(cx->realm())
 {
     AssertHeapIsIdleOrIterating();
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    cx_->enterCompartmentOf(target);
+    cx_->enterRealmOf(target);
 }
 
 JSAutoRealm::JSAutoRealm(JSContext* cx, JSScript* target
                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : cx_(cx),
-    oldCompartment_(cx->compartment())
+    oldRealm_(cx->realm())
 {
     AssertHeapIsIdleOrIterating();
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    cx_->enterCompartmentOf(target);
+    cx_->enterRealmOf(target);
 }
 
 JSAutoRealm::~JSAutoRealm()
 {
-    cx_->leaveCompartment(oldCompartment_);
+    cx_->leaveRealm(oldRealm_);
 }
 
 JSAutoNullableRealm::JSAutoNullableRealm(JSContext* cx,
                                          JSObject* targetOrNull
                                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : cx_(cx),
-    oldCompartment_(cx->compartment())
+    oldRealm_(cx->realm())
 {
     AssertHeapIsIdleOrIterating();
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     if (targetOrNull)
-        cx_->enterCompartmentOf(targetOrNull);
+        cx_->enterRealmOf(targetOrNull);
     else
-        cx_->enterNullCompartment();
+        cx_->enterNullRealm();
 }
 
 JSAutoNullableRealm::~JSAutoNullableRealm()
 {
-    cx_->leaveCompartment(oldCompartment_);
+    cx_->leaveRealm(oldRealm_);
 }
 
 JS_PUBLIC_API(void)
@@ -954,7 +954,7 @@ JS_RefreshCrossCompartmentWrappers(JSContext* cx, HandleObject obj)
 JS_PUBLIC_API(bool)
 JS_InitStandardClasses(JSContext* cx, HandleObject obj)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -1307,14 +1307,6 @@ JS_ExtensibleLexicalEnvironment(JSObject* obj)
         lexical = obj->compartment()->getNonSyntacticLexicalEnvironment(obj);
     MOZ_ASSERT(lexical);
     return lexical;
-}
-
-JS_PUBLIC_API(JSObject*)
-JS_GetGlobalForCompartmentOrNull(JSContext* cx, JSCompartment* c)
-{
-    AssertHeapIsIdleOrIterating();
-    assertSameCompartment(cx, c);
-    return c->maybeGlobal();
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -1845,55 +1837,55 @@ JS_GetConstructor(JSContext* cx, HandleObject proto)
 }
 
 bool
-JS::CompartmentBehaviors::extraWarnings(JSContext* cx) const
+JS::RealmBehaviors::extraWarnings(JSContext* cx) const
 {
     return extraWarningsOverride_.get(cx->options().extraWarnings());
 }
 
-JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setSystemZone()
+JS::RealmCreationOptions&
+JS::RealmCreationOptions::setSystemZone()
 {
     zoneSpec_ = JS::SystemZone;
     zone_ = nullptr;
     return *this;
 }
 
-JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setExistingZone(JSObject* obj)
+JS::RealmCreationOptions&
+JS::RealmCreationOptions::setExistingZone(JSObject* obj)
 {
     zoneSpec_ = JS::ExistingZone;
     zone_ = obj->zone();
     return *this;
 }
 
-JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setNewZone()
+JS::RealmCreationOptions&
+JS::RealmCreationOptions::setNewZone()
 {
     zoneSpec_ = JS::NewZone;
     zone_ = nullptr;
     return *this;
 }
 
-const JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptionsRef(JSCompartment* compartment)
+const JS::RealmCreationOptions&
+JS::RealmCreationOptionsRef(JSCompartment* compartment)
 {
-    return compartment->creationOptions();
+    return JS::GetRealmForCompartment(compartment)->creationOptions();
 }
 
-const JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptionsRef(JSObject* obj)
+const JS::RealmCreationOptions&
+JS::RealmCreationOptionsRef(JSObject* obj)
 {
-    return obj->compartment()->creationOptions();
+    return obj->realm()->creationOptions();
 }
 
-const JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptionsRef(JSContext* cx)
+const JS::RealmCreationOptions&
+JS::RealmCreationOptionsRef(JSContext* cx)
 {
-    return cx->compartment()->creationOptions();
+    return cx->realm()->creationOptions();
 }
 
 bool
-JS::CompartmentCreationOptions::getSharedMemoryAndAtomicsEnabled() const
+JS::RealmCreationOptions::getSharedMemoryAndAtomicsEnabled() const
 {
 #if defined(ENABLE_SHARED_ARRAY_BUFFER)
     return sharedMemoryAndAtomics_;
@@ -1902,8 +1894,8 @@ JS::CompartmentCreationOptions::getSharedMemoryAndAtomicsEnabled() const
 #endif
 }
 
-JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setSharedMemoryAndAtomicsEnabled(bool flag)
+JS::RealmCreationOptions&
+JS::RealmCreationOptions::setSharedMemoryAndAtomicsEnabled(bool flag)
 {
 #if defined(ENABLE_SHARED_ARRAY_BUFFER)
     sharedMemoryAndAtomics_ = flag;
@@ -1911,28 +1903,28 @@ JS::CompartmentCreationOptions::setSharedMemoryAndAtomicsEnabled(bool flag)
     return *this;
 }
 
-JS::CompartmentBehaviors&
-JS::CompartmentBehaviorsRef(JSCompartment* compartment)
+JS::RealmBehaviors&
+JS::RealmBehaviorsRef(JSCompartment* compartment)
 {
-    return compartment->behaviors();
+    return JS::GetRealmForCompartment(compartment)->behaviors();
 }
 
-JS::CompartmentBehaviors&
-JS::CompartmentBehaviorsRef(JSObject* obj)
+JS::RealmBehaviors&
+JS::RealmBehaviorsRef(JSObject* obj)
 {
-    return obj->compartment()->behaviors();
+    return obj->realm()->behaviors();
 }
 
-JS::CompartmentBehaviors&
-JS::CompartmentBehaviorsRef(JSContext* cx)
+JS::RealmBehaviors&
+JS::RealmBehaviorsRef(JSContext* cx)
 {
-    return cx->compartment()->behaviors();
+    return cx->realm()->behaviors();
 }
 
 JS_PUBLIC_API(JSObject*)
 JS_NewGlobalObject(JSContext* cx, const JSClass* clasp, JSPrincipals* principals,
                    JS::OnNewGlobalHookOption hookOption,
-                   const JS::CompartmentOptions& options)
+                   const JS::RealmOptions& options)
 {
     MOZ_RELEASE_ASSERT(cx->runtime()->hasInitializedSelfHosting(),
                        "Must call JS::InitSelfHostedCode() before creating a global");
@@ -1949,21 +1941,21 @@ JS_GlobalObjectTraceHook(JSTracer* trc, JSObject* global)
     MOZ_ASSERT(global->is<GlobalObject>());
 
     // Off thread parsing and compilation tasks create a dummy global which is
-    // then merged back into the host compartment. Since it used to be a
-    // global, it will still have this trace hook, but it does not have a
-    // meaning relative to its new compartment. We can safely skip it.
+    // then merged back into the host realm. Since it used to be a global, it
+    // will still have this trace hook, but it does not have a meaning relative
+    // to its new realm. We can safely skip it.
     //
     // Similarly, if we GC when creating the global, we may not have set that
-    // global's compartment's global pointer yet. In this case, the compartment
-    // will not yet contain anything that needs to be traced.
+    // global's realm's global pointer yet. In this case, the realm will not yet
+    // contain anything that needs to be traced.
     if (!global->isOwnGlobal(trc))
         return;
 
-    // Trace the compartment for any GC things that should only stick around if
-    // we know the global is live.
-    global->compartment()->traceGlobal(trc);
+    // Trace the realm for any GC things that should only stick around if we
+    // know the global is live.
+    global->realm()->traceGlobal(trc);
 
-    if (JSTraceOp trace = global->compartment()->creationOptions().getTrace())
+    if (JSTraceOp trace = global->realm()->creationOptions().getTrace())
         trace(trc, global);
 }
 
@@ -1982,7 +1974,7 @@ JS_FireOnNewGlobalObject(JSContext* cx, JS::HandleObject global)
 JS_PUBLIC_API(JSObject*)
 JS_NewObject(JSContext* cx, const JSClass* jsclasp)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -1999,7 +1991,7 @@ JS_NewObject(JSContext* cx, const JSClass* jsclasp)
 JS_PUBLIC_API(JSObject*)
 JS_NewObjectWithGivenProto(JSContext* cx, const JSClass* jsclasp, HandleObject proto)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, proto);
@@ -2017,7 +2009,7 @@ JS_NewObjectWithGivenProto(JSContext* cx, const JSClass* jsclasp, HandleObject p
 JS_PUBLIC_API(JSObject*)
 JS_NewPlainObject(JSContext* cx)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -2917,7 +2909,7 @@ JS_PUBLIC_API(bool)
 JS_CallFunctionValue(JSContext* cx, HandleObject obj, HandleValue fval, const HandleValueArray& args,
                      MutableHandleValue rval)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, fval, args);
@@ -2934,7 +2926,7 @@ JS_PUBLIC_API(bool)
 JS_CallFunction(JSContext* cx, HandleObject obj, HandleFunction fun, const HandleValueArray& args,
                 MutableHandleValue rval)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, fun, args);
@@ -2952,7 +2944,7 @@ JS_PUBLIC_API(bool)
 JS_CallFunctionName(JSContext* cx, HandleObject obj, const char* name, const HandleValueArray& args,
                     MutableHandleValue rval)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, args);
@@ -3386,7 +3378,7 @@ JS_SetReservedSlot(JSObject* obj, uint32_t index, const Value& value)
 JS_PUBLIC_API(JSObject*)
 JS_NewArrayObject(JSContext* cx, const JS::HandleValueArray& contents)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -3397,7 +3389,7 @@ JS_NewArrayObject(JSContext* cx, const JS::HandleValueArray& contents)
 JS_PUBLIC_API(JSObject*)
 JS_NewArrayObject(JSContext* cx, size_t length)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -3520,7 +3512,7 @@ JS_PUBLIC_API(JSFunction*)
 JS_NewFunction(JSContext* cx, JSNative native, unsigned nargs, unsigned flags,
                const char* name)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
 
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
@@ -3540,7 +3532,7 @@ JS_NewFunction(JSContext* cx, JSNative native, unsigned nargs, unsigned flags,
 JS_PUBLIC_API(JSFunction*)
 JS::GetSelfHostedFunction(JSContext* cx, const char* selfHostedName, HandleId id, unsigned nargs)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, id);
@@ -3796,7 +3788,7 @@ JS_IsConstructor(JSFunction* fun)
 JS_PUBLIC_API(bool)
 JS_DefineFunctions(JSContext* cx, HandleObject obj, const JSFunctionSpec* fs)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -3808,7 +3800,7 @@ JS_PUBLIC_API(JSFunction*)
 JS_DefineFunction(JSContext* cx, HandleObject obj, const char* name, JSNative call,
                   unsigned nargs, unsigned attrs)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -3824,7 +3816,7 @@ JS_DefineUCFunction(JSContext* cx, HandleObject obj,
                     const char16_t* name, size_t namelen, JSNative call,
                     unsigned nargs, unsigned attrs)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -3839,7 +3831,7 @@ extern JS_PUBLIC_API(JSFunction*)
 JS_DefineFunctionById(JSContext* cx, HandleObject obj, HandleId id, JSNative call,
                       unsigned nargs, unsigned attrs)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, id);
@@ -4072,7 +4064,7 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
       introductionScriptRoot(cx)
 {
     strictOption = cx->options().strictMode();
-    extraWarningsOption = cx->compartment()->behaviors().extraWarnings(cx);
+    extraWarningsOption = cx->realm()->behaviors().extraWarnings(cx);
     isProbablySystemCode = cx->compartment()->isProbablySystemCode();
     werrorOption = cx->options().werror();
     if (!cx->options().asmJS())
@@ -4090,7 +4082,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
 {
     ScopeKind scopeKind = options.nonSyntacticScope ? ScopeKind::NonSyntactic : ScopeKind::Global;
 
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -4231,7 +4223,7 @@ JSScript*
 JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
                  const uint8_t* buf, size_t length)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -4554,7 +4546,7 @@ CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                 HandleObject enclosingEnv, HandleScope enclosingScope,
                 MutableHandleFunction fun)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, enclosingEnv);
@@ -4723,7 +4715,7 @@ JS::ExposeScriptToDebugger(JSContext* cx, HandleScript script)
 JS_PUBLIC_API(JSString*)
 JS_DecompileScript(JSContext* cx, HandleScript script)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
 
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
@@ -4741,7 +4733,7 @@ JS_DecompileScript(JSContext* cx, HandleScript script)
 JS_PUBLIC_API(JSString*)
 JS_DecompileFunction(JSContext* cx, HandleFunction fun)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, fun);
@@ -4751,7 +4743,7 @@ JS_DecompileFunction(JSContext* cx, HandleFunction fun)
 MOZ_NEVER_INLINE static bool
 ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, Value* rval)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, scope, script);
@@ -4845,7 +4837,7 @@ Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject env,
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
     CompileOptions options(cx, optionsArg);
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, env);
@@ -4972,7 +4964,7 @@ JS_PUBLIC_API(bool)
 JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
                   SourceBufferHolder& srcBuf, JS::MutableHandleObject module)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -5130,7 +5122,7 @@ JS::SetPromiseRejectionTrackerCallback(JSContext* cx, JSPromiseRejectionTrackerC
 JS_PUBLIC_API(JSObject*)
 JS::NewPromiseObject(JSContext* cx, HandleObject executor, HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, executor, proto);
@@ -5384,7 +5376,7 @@ JS::NewReadableDefaultStreamObject(JSContext* cx,
                                    double highWaterMark /* = 1 */,
                                    JS::HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -5406,7 +5398,7 @@ JS::NewReadableByteStreamObject(JSContext* cx,
                                 double highWaterMark /* = 1 */,
                                 JS::HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -5465,7 +5457,7 @@ JS::NewReadableExternalSourceStreamObject(JSContext* cx, void* underlyingSource,
                                           uint8_t flags /* = 0 */,
                                           HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -7594,9 +7586,9 @@ GetScriptedCallerGlobal(JSContext* cx)
     if (activation->scriptedCallerIsHidden())
         return nullptr;
 
-    GlobalObject* global = activation->compartment()->maybeGlobal();
+    GlobalObject* global = JS::GetRealmForCompartment(activation->compartment())->maybeGlobal();
 
-    // Noone should be running code in the atoms compartment or running code in
+    // No one should be running code in the atoms realm or running code in
     // a compartment without any live objects, so there should definitely be a
     // live global.
     MOZ_ASSERT(global);

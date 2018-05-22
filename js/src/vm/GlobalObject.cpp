@@ -112,7 +112,7 @@ GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key)
       // Return true if the given constructor has been disabled at run-time.
       case JSProto_Atomics:
       case JSProto_SharedArrayBuffer:
-        return !cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled();
+        return !cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled();
       default:
         return false;
     }
@@ -485,7 +485,7 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
         return nullptr;
     global->setReservedSlot(EMPTY_GLOBAL_SCOPE, PrivateGCThingValue(emptyGlobalScope));
 
-    cx->compartment()->initGlobal(*global);
+    cx->realm()->initGlobal(*global);
 
     if (!JSObject::setQualifiedVarObj(cx, global))
         return nullptr;
@@ -498,10 +498,10 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
 /* static */ GlobalObject*
 GlobalObject::new_(JSContext* cx, const Class* clasp, JSPrincipals* principals,
                    JS::OnNewGlobalHookOption hookOption,
-                   const JS::CompartmentOptions& options)
+                   const JS::RealmOptions& options)
 {
     MOZ_ASSERT(!cx->isExceptionPending());
-    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    MOZ_ASSERT_IF(cx->realm(), !cx->realm()->isAtomsRealm());
 
     JSCompartment* compartment = NewCompartment(cx, principals, options);
     if (!compartment)

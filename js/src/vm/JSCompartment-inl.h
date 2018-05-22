@@ -16,28 +16,28 @@
 #include "vm/JSContext-inl.h"
 
 inline void
-JSCompartment::initGlobal(js::GlobalObject& global)
+JS::Realm::initGlobal(js::GlobalObject& global)
 {
-    MOZ_ASSERT(global.compartment() == this);
+    MOZ_ASSERT(global.realm() == this);
     MOZ_ASSERT(!global_);
     global_.set(&global);
 }
 
 js::GlobalObject*
-JSCompartment::maybeGlobal() const
+JS::Realm::maybeGlobal() const
 {
-    MOZ_ASSERT_IF(global_, global_->compartment() == this);
+    MOZ_ASSERT_IF(global_, global_->realm() == this);
     return global_;
 }
 
 js::GlobalObject*
-JSCompartment::unsafeUnbarrieredMaybeGlobal() const
+JS::Realm::unsafeUnbarrieredMaybeGlobal() const
 {
     return *global_.unsafeGet();
 }
 
 inline bool
-JSCompartment::globalIsAboutToBeFinalized()
+JS::Realm::globalIsAboutToBeFinalized()
 {
     MOZ_ASSERT(zone_->isGCSweeping());
     return global_ && js::gc::IsAboutToBeFinalizedUnbarriered(global_.unsafeGet());
@@ -46,47 +46,47 @@ JSCompartment::globalIsAboutToBeFinalized()
 template <typename T>
 js::AutoRealm::AutoRealm(JSContext* cx, const T& target)
   : cx_(cx),
-    origin_(cx->compartment()),
+    origin_(cx->realm()),
     maybeLock_(nullptr)
 {
-    cx_->enterCompartmentOf(target);
+    cx_->enterRealmOf(target);
 }
 
 // Protected constructor that bypasses assertions in enterCompartmentOf. Used
-// only for entering the atoms compartment.
-js::AutoRealm::AutoRealm(JSContext* cx, JSCompartment* target,
+// only for entering the atoms realm.
+js::AutoRealm::AutoRealm(JSContext* cx, JS::Realm* target,
                          js::AutoLockForExclusiveAccess& lock)
   : cx_(cx),
-    origin_(cx->compartment()),
+    origin_(cx->realm()),
     maybeLock_(&lock)
 {
-    MOZ_ASSERT(target->isAtomsCompartment());
-    cx_->enterAtomsCompartment(target, lock);
+    MOZ_ASSERT(target->isAtomsRealm());
+    cx_->enterAtomsRealm(target, lock);
 }
 
 // Protected constructor that bypasses assertions in enterCompartmentOf. Should
-// not be used to enter the atoms compartment.
-js::AutoRealm::AutoRealm(JSContext* cx, JSCompartment* target)
+// not be used to enter the atoms realm.
+js::AutoRealm::AutoRealm(JSContext* cx, JS::Realm* target)
   : cx_(cx),
-    origin_(cx->compartment()),
+    origin_(cx->realm()),
     maybeLock_(nullptr)
 {
-    MOZ_ASSERT(!target->isAtomsCompartment());
-    cx_->enterNonAtomsCompartment(target);
+    MOZ_ASSERT(!target->isAtomsRealm());
+    cx_->enterNonAtomsRealm(target);
 }
 
 js::AutoRealm::~AutoRealm()
 {
-    cx_->leaveCompartment(origin_, maybeLock_);
+    cx_->leaveRealm(origin_, maybeLock_);
 }
 
 js::AutoAtomsRealm::AutoAtomsRealm(JSContext* cx,
                                    js::AutoLockForExclusiveAccess& lock)
-  : AutoRealm(cx, cx->atomsCompartment(lock), lock)
+  : AutoRealm(cx, cx->atomsRealm(lock), lock)
 {}
 
 js::AutoRealmUnchecked::AutoRealmUnchecked(JSContext* cx, JSCompartment* target)
-  : AutoRealm(cx, target)
+  : AutoRealm(cx, JS::GetRealmForCompartment(target))
 {}
 
 inline bool
@@ -98,8 +98,8 @@ JSCompartment::wrap(JSContext* cx, JS::MutableHandleValue vp)
 
     /*
      * Symbols are GC things, but never need to be wrapped or copied because
-     * they are always allocated in the atoms compartment. They still need to
-     * be marked in the new compartment's zone, however.
+     * they are always allocated in the atoms zone. They still need to be
+     * marked in the new compartment's zone, however.
      */
     if (vp.isSymbol()) {
         cx->markAtomValue(vp);

@@ -7,6 +7,7 @@
 #include "vm/StringType-inl.h"
 
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/HashFunctions.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
@@ -307,10 +308,9 @@ bool
 JSRope::copyCharsInternal(JSContext* cx, ScopedJSFreePtr<CharT>& out,
                           bool nullTerminate) const
 {
-    /*
-     * Perform non-destructive post-order traversal of the rope, splatting
-     * each node's characters into a contiguous buffer.
-     */
+    // Left-leaning ropes are far more common than right-leaning ropes, so
+    // perform a non-destructive traversal of the rope, right node first,
+    // splatting each node's characters into a contiguous buffer.
 
     size_t n = length();
     if (cx)
@@ -323,25 +323,72 @@ JSRope::copyCharsInternal(JSContext* cx, ScopedJSFreePtr<CharT>& out,
 
     Vector<const JSString*, 8, SystemAllocPolicy> nodeStack;
     const JSString* str = this;
-    CharT* pos = out;
+    CharT* end = out + str->length();
     while (true) {
         if (str->isRope()) {
-            if (!nodeStack.append(str->asRope().rightChild()))
+            if (!nodeStack.append(str->asRope().leftChild()))
                 return false;
-            str = str->asRope().leftChild();
+            str = str->asRope().rightChild();
         } else {
-            CopyChars(pos, str->asLinear());
-            pos += str->length();
+            end -= str->length();
+            CopyChars(end, str->asLinear());
             if (nodeStack.empty())
                 break;
             str = nodeStack.popCopy();
         }
     }
 
-    MOZ_ASSERT(pos == out + n);
+    MOZ_ASSERT(end == out);
 
     if (nullTerminate)
         out[n] = 0;
+
+    return true;
+}
+
+template <typename CharT>
+void AddStringToHash(uint32_t* hash, const CharT* chars, size_t len)
+{
+    // It's tempting to use |HashString| instead of this loop, but that's
+    // slightly different than our existing implementation for non-ropes. We
+    // want to pretend we have a contiguous set of chars so we need to
+    // accumulate char by char rather than generate a new hash for substring
+    // and then accumulate that.
+    for (size_t i = 0; i < len; i++) {
+        *hash = mozilla::AddToHash(*hash, chars[i]);
+    }
+}
+
+void AddStringToHash(uint32_t* hash, const JSString* str)
+{
+    AutoCheckCannotGC nogc;
+    const auto& s = str->asLinear();
+    if (s.hasLatin1Chars())
+        AddStringToHash(hash, s.latin1Chars(nogc), s.length());
+    else
+        AddStringToHash(hash, s.twoByteChars(nogc), s.length());
+}
+
+bool
+JSRope::hash(uint32_t* outHash) const
+{
+    Vector<const JSString*, 8, SystemAllocPolicy> nodeStack;
+    const JSString* str = this;
+
+    *outHash = 0;
+
+    while (true) {
+        if (str->isRope()) {
+            if (!nodeStack.append(str->asRope().rightChild()))
+                return false;
+            str = str->asRope().leftChild();
+        } else {
+            AddStringToHash(outHash, str);
+            if (nodeStack.empty())
+                break;
+            str = nodeStack.popCopy();
+        }
+    }
 
     return true;
 }

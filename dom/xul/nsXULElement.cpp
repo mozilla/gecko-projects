@@ -190,7 +190,10 @@ nsXULElement::CreateFromPrototype(nsXULPrototypeElement* aPrototype,
 {
     RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
     nsCOMPtr<Element> baseElement;
-    NS_NewXULElement(getter_AddRefs(baseElement), ni.forget(), dom::FROM_PARSER_NETWORK);
+    NS_NewXULElement(getter_AddRefs(baseElement),
+                     ni.forget(),
+                     dom::FROM_PARSER_NETWORK,
+                     aPrototype->mIsAtom);
 
     if (baseElement) {
         nsXULElement* element = FromNode(baseElement);
@@ -265,7 +268,8 @@ nsXULElement::CreateFromPrototype(nsXULPrototypeElement* aPrototype,
 
 nsresult
 NS_NewXULElement(Element** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                 FromParser aFromParser)
+                 FromParser aFromParser, nsAtom* aIsAtom,
+                 mozilla::dom::CustomElementDefinition* aDefinition)
 {
     RefPtr<mozilla::dom::NodeInfo> nodeInfo = aNodeInfo;
 
@@ -279,7 +283,7 @@ NS_NewXULElement(Element** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& a
         return NS_ERROR_NOT_AVAILABLE;
     }
 
-    return nsContentUtils::NewXULOrHTMLElement(aResult, nodeInfo, aFromParser, nullptr, nullptr);
+    return nsContentUtils::NewXULOrHTMLElement(aResult, nodeInfo, aFromParser, aIsAtom, aDefinition);
 }
 
 void
@@ -300,12 +304,14 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXULElement,
                                                   nsStyledElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBindingParent);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXULElement,
                                                 nsStyledElement)
     // Why aren't we unlinking the prototype?
     tmp->ClearHasID();
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mBindingParent);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(nsXULElement, nsStyledElement)
@@ -2290,6 +2296,12 @@ nsXULPrototypeElement::SetAttrAt(uint32_t aPos, const nsAString& aValue,
         // id="" means that the element has no id. Not that it has
         // emptystring as id.
         mAttributes[aPos].mValue.ParseAtom(aValue);
+
+        return NS_OK;
+    } else if (mAttributes[aPos].mName.Equals(nsGkAtoms::is)) {
+        // Store is as atom.
+        mAttributes[aPos].mValue.ParseAtom(aValue);
+        mIsAtom = mAttributes[aPos].mValue.GetAtomValue();
 
         return NS_OK;
     } else if (mAttributes[aPos].mName.Equals(nsGkAtoms::_class)) {

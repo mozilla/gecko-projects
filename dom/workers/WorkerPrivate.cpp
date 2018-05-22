@@ -1167,8 +1167,8 @@ public:
       delete static_cast<xpc::ZoneStatsExtras*>(zoneStatsVector[i].extra);
     }
 
-    for (size_t i = 0; i != compartmentStatsVector.length(); i++) {
-      delete static_cast<xpc::CompartmentStatsExtras*>(compartmentStatsVector[i].extra);
+    for (size_t i = 0; i != realmStatsVector.length(); i++) {
+      delete static_cast<xpc::RealmStatsExtras*>(realmStatsVector[i].extra);
     }
   }
 
@@ -1196,24 +1196,24 @@ public:
   }
 
   virtual void
-  initExtraCompartmentStats(JSCompartment* aCompartment,
-                            JS::CompartmentStats* aCompartmentStats)
-                            override
+  initExtraRealmStats(JSCompartment* aCompartment,
+                      JS::RealmStats* aRealmStats)
+                      override
   {
-    MOZ_ASSERT(!aCompartmentStats->extra);
+    MOZ_ASSERT(!aRealmStats->extra);
 
     // ReportJSRuntimeExplicitTreeStats expects that
-    // aCompartmentStats->extra is a xpc::CompartmentStatsExtras pointer.
-    xpc::CompartmentStatsExtras* extras = new xpc::CompartmentStatsExtras;
+    // aRealmStats->extra is a xpc::RealmStatsExtras pointer.
+    xpc::RealmStatsExtras* extras = new xpc::RealmStatsExtras;
 
-    // This is the |jsPathPrefix|.  Each worker has exactly two compartments:
+    // This is the |jsPathPrefix|.  Each worker has exactly two realms:
     // one for atoms, and one for everything else.
     extras->jsPathPrefix.Assign(mRtPath);
     extras->jsPathPrefix += nsPrintfCString("zone(0x%p)/",
                                             (void *)js::GetCompartmentZone(aCompartment));
-    extras->jsPathPrefix += js::IsAtomsCompartment(aCompartment)
-                            ? NS_LITERAL_CSTRING("compartment(web-worker-atoms)/")
-                            : NS_LITERAL_CSTRING("compartment(web-worker)/");
+    extras->jsPathPrefix += js::IsAtomsRealm(JS::GetRealmForCompartment(aCompartment))
+                            ? NS_LITERAL_CSTRING("realm(web-worker-atoms)/")
+                            : NS_LITERAL_CSTRING("realm(web-worker)/");
 
     // This should never be used when reporting with workers (hence the "?!").
     extras->domPathPrefix.AssignLiteral("explicit/workers/?!/");
@@ -1223,7 +1223,7 @@ public:
 
     extras->location = nullptr;
 
-    aCompartmentStats->extra = extras;
+    aRealmStats->extra = extras;
   }
 };
 
@@ -2717,13 +2717,13 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
     }
 
     if (mIsSecureContext) {
-      mJSSettings.chrome.compartmentOptions
+      mJSSettings.chrome.realmOptions
                  .creationOptions().setSecureContext(true);
-      mJSSettings.chrome.compartmentOptions
+      mJSSettings.chrome.realmOptions
                  .creationOptions().setClampAndJitterTime(false);
-      mJSSettings.content.compartmentOptions
+      mJSSettings.content.realmOptions
                  .creationOptions().setSecureContext(true);
-      mJSSettings.content.compartmentOptions
+      mJSSettings.content.realmOptions
                  .creationOptions().setClampAndJitterTime(false);
     }
 

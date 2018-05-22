@@ -2846,6 +2846,9 @@ pref("layout.css.isolation.enabled", true);
 // Is support for CSS Filters enabled?
 pref("layout.css.filters.enabled", true);
 
+// Is support for CSS Scrollbar color properties enabled?
+pref("layout.css.scrollbar-colors.enabled", false);
+
 // Set the threshold distance in CSS pixels below which scrolling will snap to
 // an edge, when scroll snapping is set to "proximity".
 pref("layout.css.scroll-snap.proximity-threshold", 200);
@@ -4883,13 +4886,8 @@ pref("geo.wifi.xhr.timeout", 60000);
 pref("device.sensors.enabled", true);
 pref("device.sensors.orientation.enabled", true);
 pref("device.sensors.motion.enabled", true);
-#ifdef EARLY_BETA_OR_EARLIER
 pref("device.sensors.proximity.enabled", false);
 pref("device.sensors.ambientLight.enabled", false);
-#else
-pref("device.sensors.proximity.enabled", true);
-pref("device.sensors.ambientLight.enabled", true);
-#endif
 
 // Enable/Disable the device storage API for content
 pref("device.storage.enabled", false);
@@ -4904,7 +4902,6 @@ pref("xpinstall.whitelist.required", true);
 // Only Firefox requires add-on signatures
 pref("xpinstall.signatures.required", false);
 pref("extensions.langpacks.signatures.required", false);
-pref("extensions.minCompatiblePlatformVersion", "2.0");
 pref("extensions.webExtensionsMinPlatformVersion", "42.0a1");
 pref("extensions.legacy.enabled", true);
 
