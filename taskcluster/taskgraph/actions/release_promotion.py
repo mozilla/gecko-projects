@@ -175,6 +175,7 @@ def get_partner_config(partner_url_config, github_token):
             },
             'release_enable_partners': {
                 'type': 'boolean',
+                'default': False,
                 'description': ('Toggle for creating partner repacks'),
             },
             'release_partner_build_number': {
@@ -201,6 +202,7 @@ def get_partner_config(partner_url_config, github_token):
             },
             'release_enable_emefree': {
                 'type': 'boolean',
+                'default': False,
                 'description': ('Toggle for creating EME-free repacks'),
             },
         },
