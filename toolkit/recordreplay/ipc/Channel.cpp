@@ -216,7 +216,9 @@ Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
   case MessageType::HitCheckpoint: {
     const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
     data = new char[128];
-    snprintf(data, 128, "Id %d Endpoint %d", (int) nmsg.mCheckpointId, nmsg.mRecordingEndpoint);
+    snprintf(data, 128, "Id %d Endpoint %d Duration %.2f ms",
+             (int) nmsg.mCheckpointId, nmsg.mRecordingEndpoint,
+             nmsg.mDurationMicroseconds / 1000.0);
     break;
   }
   case MessageType::HitBreakpoint: {

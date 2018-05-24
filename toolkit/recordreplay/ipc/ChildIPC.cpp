@@ -488,16 +488,16 @@ static void
 HitCheckpoint(size_t aId, bool aRecordingEndpoint)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  double time = CurrentTime();
   PauseMainThreadAndInvokeCallback([=]() {
       double duration = 0;
-      double time = CurrentTime();
       if (aId > FirstCheckpointId) {
         duration = time - gLastCheckpointTime;
         MOZ_RELEASE_ASSERT(duration > 0);
       }
-      gLastCheckpointTime = time;
       gChannel->SendMessage(HitCheckpointMessage(aId, aRecordingEndpoint, duration));
     });
+  gLastCheckpointTime = time;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
