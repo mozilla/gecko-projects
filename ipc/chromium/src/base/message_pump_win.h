@@ -103,7 +103,7 @@ class MessagePumpWin : public MessagePump {
   // A boolean value used to indicate if there is a kMsgDoWork message pending
   // in the Windows Message queue.  There is at most one such message, and it
   // can drive execution of tasks when a native message pump is running.
-  int have_work_;
+  LONG have_work_;
 
   // State for the current invocation of Run.
   RunState* state_;

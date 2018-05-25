@@ -14,10 +14,6 @@
 #include <dlfcn.h>
 #endif
 
-#ifdef WIN32
-#include <windows.h>
-#endif
-
 namespace mozilla {
 namespace recordreplay {
 
@@ -95,14 +91,7 @@ FOR_EACH_INTERFACE_VOID(DECLARE_SYMBOL_VOID)
 static void*
 LoadSymbol(const char* aName)
 {
-  void* rv;
-#if defined(XP_MACOSX)
-  rv = dlsym(RTLD_DEFAULT, aName);
-#elif defined(WIN32)
-  rv = GetProcAddress(LoadLibraryA("xul.dll"), aName);
-#else
-#error "Unknown platform"
-#endif
+  void* rv = dlsym(RTLD_DEFAULT, aName);
   MOZ_RELEASE_ASSERT(rv);
   return rv;
 }

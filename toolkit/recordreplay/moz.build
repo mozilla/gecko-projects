@@ -43,11 +43,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'ProcessRedirectDarwin.cpp',
     ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-    SOURCES += [
-        'ProcessRedirectWindows.cpp',
-    ]
-
 LOCAL_INCLUDES += [
     '!/ipc/ipdl/_ipdlheaders',
     '/ipc/chromium/src',

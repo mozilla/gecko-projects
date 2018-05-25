@@ -339,16 +339,8 @@ UnprotectExecutableMemory(uint8_t* aAddress, size_t aSize)
   MOZ_ASSERT(aSize);
   uint8_t* pageStart = PageStart(aAddress);
   uint8_t* pageEnd = PageStart(aAddress + aSize - 1) + PageSize;
-#if defined(XP_MACOSX)
   int ret = mprotect(pageStart, pageEnd - pageStart, PROT_READ | PROT_EXEC | PROT_WRITE);
   MOZ_RELEASE_ASSERT(ret >= 0);
-#elif defined(WIN32)
-  DWORD oldProtect;
-  BOOL res = VirtualProtect(pageStart, pageEnd - pageStart, PAGE_EXECUTE_READWRITE, &oldProtect);
-  MOZ_RELEASE_ASSERT(res);
-#else
-  #error "Unknown platform"
-#endif
 }
 
 } // namespace recordreplay

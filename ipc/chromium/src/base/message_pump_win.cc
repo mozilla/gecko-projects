@@ -12,7 +12,6 @@
 #include "base/histogram.h"
 #include "base/win_util.h"
 #include "WinUtils.h"
-#include "pratom.h"
 
 using base::Time;
 
@@ -98,7 +97,7 @@ MessagePumpForUI::~MessagePumpForUI() {
 }
 
 void MessagePumpForUI::ScheduleWork() {
-  if (PR_ATOMIC_SET(&have_work_, 1))
+  if (InterlockedExchange(&have_work_, 1))
     return;  // Someone else continued the pumping.
 
   // Make sure the MessagePump does some work for us.
@@ -268,7 +267,7 @@ void MessagePumpForUI::HandleWorkMessage() {
   // sort.
   if (!state_) {
     // Since we handled a kMsgHaveWork message, we must still update this flag.
-    PR_ATOMIC_SET(&have_work_, 0);
+    InterlockedExchange(&have_work_, 0);
     return;
   }
 
@@ -370,7 +369,7 @@ bool MessagePumpForUI::ProcessPumpReplacementMessage() {
          msg.hwnd != message_hwnd_);
 
   // Since we discarded a kMsgHaveWork message, we must update the flag.
-  int old_have_work = PR_ATOMIC_SET(&have_work_, 0);
+  int old_have_work = InterlockedExchange(&have_work_, 0);
   DCHECK(old_have_work);
 
   // We don't need a special time slice if we didn't have_message to process.
@@ -394,7 +393,7 @@ MessagePumpForIO::MessagePumpForIO() {
 }
 
 void MessagePumpForIO::ScheduleWork() {
-  if (PR_ATOMIC_SET(&have_work_, 1))
+  if (InterlockedExchange(&have_work_, 1))
     return;  // Someone else continued the pumping.
 
   // Make sure the MessagePump does some work for us.
@@ -523,7 +522,7 @@ bool MessagePumpForIO::ProcessInternalIOItem(const IOItem& item) {
       this == reinterpret_cast<MessagePumpForIO*>(item.handler)) {
     // This is our internal completion.
     DCHECK(!item.bytes_transfered);
-    PR_ATOMIC_SET(&have_work_, 0);
+    InterlockedExchange(&have_work_, 0);
     return true;
   }
   return false;

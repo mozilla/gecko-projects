@@ -93,18 +93,11 @@ AddClobberPatch(uint8_t* aStart, uint8_t* aEnd)
 static uint8_t*
 SymbolBase(uint8_t* aPtr)
 {
-#if defined(XP_MACOSX)
   Dl_info info;
   if (!dladdr(aPtr, &info)) {
     MOZ_CRASH();
   }
   return static_cast<uint8_t*>(info.dli_saddr);
-#elif defined(WIN32)
-  MOZ_CRASH();
-  return nullptr;
-#else
-  #error "Unknown platform"
-#endif
 }
 
 // Use Udis86 to decode a single instruction, returning the number of bytes
@@ -126,8 +119,6 @@ DecodeInstruction(uint8_t* aIp, ud_t* aUd)
 static uint8_t*
 MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
 {
-#if defined(XP_MACOSX)
-
   // The start and end have to be associated with the same symbol, as otherwise
   // a jump could come into the start of the later symbol.
   const char* startName = SymbolNameRaw(aIpStart);
@@ -180,16 +171,6 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
   }
 
   return nullptr;
-
-#elif defined(WIN32)
-
-  // DLL API functions normally have nop buffers between symbols, so there
-  // shouldn't be problems related to overwriting code from a different symbol.
-  return nullptr;
-
-#else // WIN32
-#error "Unknown platform"
-#endif
 }
 
 // Any reasons why redirection failed.
@@ -424,23 +405,9 @@ CopyInstructions(const char* aName, uint8_t* aIpStart, uint8_t* aIpEnd,
 static uint8_t*
 FunctionStartAddress(Redirection& aRedirection)
 {
-  uint8_t* addr;
-#ifdef WIN32
-  HMODULE module = LoadLibraryA(aRedirection.mDllName);
-  addr = static_cast<uint8_t*>(GetProcAddress(module, aRedirection.mName));
-#else
-  addr = static_cast<uint8_t*>(dlsym(RTLD_DEFAULT, aRedirection.mName));
-#endif
+  uint8_t* addr = static_cast<uint8_t*>(dlsym(RTLD_DEFAULT, aRedirection.mName));
   if (!addr)
     return nullptr;
-
-#ifdef WIN32
-  // Watch for function bodies which are a simple absolute jump to
-  // another function body. These appear in DLL jump tables.
-  if (addr[0] == 0xFF && addr[1] == 0x25) {
-    return **(uint8_t***)&addr[2];
-  }
-#endif
 
   if (addr[0] == 0xFF && addr[1] == 0x25) {
     return *(uint8_t**)(addr + 6 + *reinterpret_cast<int32_t*>(addr + 2));
@@ -586,44 +553,6 @@ Redirect(Redirection& aRedirection, Assembler& aAssembler, bool aFirstPass)
   AddClobberPatch(functionStart + ShortJumpBytes, nro);
 }
 
-#if defined(DEBUG) && defined(WIN32)
-
-void
-RedirectFunctionForTrampoline(const char* aDLLName, const char* aFunctionName,
-                              bool (*aFilter)(void*),
-                              uint8_t* aTargetAddress, Assembler& aAssembler)
-{
-  Redirection redirection;
-  memset(&redirection, 0, sizeof(redirection));
-  redirection.mDLLName = aDLLName;
-  redirection.mName = aFunctionName;
-  redirection.mBaseFunction = FunctionStartAddress(redirection);
-
-  if (!redirection.mBaseFunction || !aFilter(redirection.mBaseFunction)) {
-    return;
-  }
-
-  // The new function for the redirection is a move storing the original
-  // function in rax (for jumping to once the trampoline has done its work),
-  // followed by a jump to the trampoline itself.
-  redirection.mNewFunction = aAssembler.Current();
-
-  // Reserve space for the move instruction.
-  aAssembler.MoveImmediateToRax(nullptr);
-
-  // Jump to the trampoline.
-  aAssembler.Jump(aTargetAddress);
-
-  if (!Redirect(redirection, aCursor, aCursorEnd)) {
-    MOZ_CRASH();
-  }
-
-  // Fill in the move instruction, now that the original function is known.
-  aAssembler.PatchMoveImmediateToRax(redirection.mNewFunction, redirection.mOriginalFunction);
-}
-
-#endif // DEBUG && WIN32
-
 void
 EarlyInitializeRedirections()
 {
@@ -676,10 +605,6 @@ InitializeRedirections()
       }
       Redirect(redirection, assembler, /* aFirstPass = */ false);
     }
-
-#if defined(DEBUG) && defined(WIN32)
-    RedirectAllDLLExports();
-#endif
   }
 
   // Don't install redirections if we had any failures.

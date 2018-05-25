@@ -301,19 +301,6 @@ void DirectCreatePipe(FileHandle* aWriteFd, FileHandle* aReadFd);
 // Spawn a new thread.
 void DirectSpawnThread(void (*aFunction)(void*), void* aArgument);
 
-#ifdef WIN32
-
-// Get the base and size of the mapped memory region in this process containing aAddress.
-void GetAllocatedRegionInfo(void* aAddress, uint8_t** aBase, size_t* aSize);
-
-// Get the base and size of the executable code memory region for a DLL.
-void GetExecutableCodeRegionInDLL(const char* aDllName, uint8_t** aBase, size_t* aSize);
-
-void WriteLoadedLibraries(Stream& aStream);
-void ReadLoadedLibraries(Stream& aStream);
-
-#endif // WIN32
-
 } // recordreplay
 } // mozilla
 

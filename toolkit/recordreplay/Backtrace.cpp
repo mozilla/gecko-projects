@@ -14,11 +14,6 @@
 #include <execinfo.h>
 #endif
 
-#if defined(WIN32)
-#include <Dbghelp.h>
-#include <Psapi.h>
-#endif
-
 #include <string.h>
 
 namespace mozilla {
@@ -34,8 +29,6 @@ SymbolNameRaw(void* aPtr)
   return nullptr;
 #endif
 }
-
-#if defined(XP_MACOSX)
 
 size_t
 GetBacktrace(const char* aAssertion, void** aAddresses, size_t aAddressesCount)
@@ -99,141 +92,6 @@ InitializeBacktraces()
 {
   gAddressCache = new AddressCacheEntry[AddressCacheSize];
 }
-
-#elif defined(WIN32)
-
-// DLLs which we will look for instruction pointers on the stack.
-struct BacktraceModule
-{
-  const char* mName;
-  uint8_t* mBase;
-  size_t mSize;
-};
-static BacktraceModule gBacktraceModules[] = {
-  { "mozglue.dll" },
-  { "nss3.dll" },
-  { "xul.dll" }
-};
-
-void
-InitializeBacktraces()
-{
-  if (gBacktraceModules[0].mBase) {
-    return;
-  }
-
-  for (BacktraceModule& module : gBacktraceModules) {
-    GetExecutableCodeRegionInDLL(module.mName, &module.mBase, &module.mSize);
-  }
-}
-
-// Determine if aAddress is within the executable code region for one of the
-// backtrace modules.
-static bool
-MaybeGetBacktraceModule(uint8_t* aAddress, const char** aName, size_t* aOffset)
-{
-  for (const BacktraceModule& module : gBacktraceModules) {
-    if (MemoryContains(module.mBase, module.mSize, aAddress)) {
-      if (aName) {
-        *aName = module.mName;
-      }
-      if (aOffset) {
-        *aOffset = aAddress - module.mBase;
-      }
-      return true;
-    }
-  }
-  return false;
-}
-
-static void*
-InvertAddress(void* aAddress)
-{
-  return (void*)((size_t)aAddress ^ (size_t)-1);
-}
-
-size_t
-GetBacktrace(const char* aAssertion, void** aAddresses, size_t aAddressesCount)
-{
-  // Find the boundary of the current thread's stack.
-  MEMORY_BASIC_INFORMATION buffer;
-  SIZE_T nbytes = VirtualQuery(&buffer, &buffer, sizeof(buffer));
-  MOZ_RELEASE_ASSERT(nbytes == sizeof(buffer);
-
-  MOZ_RELEASE_ASSERT(buffer.AllocationBase <= buffer.BaseAddress);
-  uint8_t* stackLimit = (uint8_t*)buffer.BaseAddress + buffer.RegionSize;
-
-  size_t index = 0;
-
-  // Look for instruction pointers on the stack which are within one of the
-  // backtrace modules.
-  uint8_t** cursor = (uint8_t**)&buffer;
-  for (size_t i = 0; i < 5000; i++) {
-    if ((uint8_t*)cursor >= stackLimit) {
-      break;
-    }
-
-    uint8_t* addr = *cursor++;
-    if (MaybeGetBacktraceModule(addr, nullptr, nullptr)) {
-      bool found = false;
-      for (size_t j = 0; j < index; j++) {
-        if (aAddresses[j] == InvertAddress(addr)) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-	// Invert the bits in the stored addresses. Because we compute the
-	// backtrace by looking for instruction pointers on the stack, if
-	// aAddresses is itself on the stack then we might rediscover those
-	// pointers as we go if we don't obfuscate them.
-        aAddresses[index++] = InvertAddress(addr);
-        if (index == aAddressesCount) {
-          break;
-        }
-      }
-    }
-  }
-
-  // Undo the address inversion from earlier.
-  for (size_t i = 0; i < index; i++) {
-    aAddresses[i] = InvertAddress(aAddresses[i]);
-  }
-
-  return index;
-}
-
-// For debugging.
-void*
-GetBacktraceAddress(void* aStart, size_t aIndex)
-{
-  uint8_t** cursor = (uint8_t**)aStart;
-  for (;;) {
-    uint8_t* addr = *cursor++;
-    if (MaybeGetBacktraceModule(addr, nullptr, nullptr)) {
-      if (--aIndex == 0) {
-        return addr;
-      }
-    }
-  }
-  MOZ_CRASH();
-}
-
-const char*
-SymbolName(void* aPtr, char* aBuf, size_t aSize)
-{
-  const char* dllName;
-  size_t dllOffset;
-  if (MaybeGetBacktraceModule((uint8_t*)aPtr, &dllName, &dllOffset)) {
-    snprintf(aBuf, aSize, "%s+%d", dllName, (int) dllOffset);
-    return aBuf;
-  }
-  return "???";
-}
-
-#else // WIN32
-#error "Unknown platform"
-#endif
 
 } // namespace recordreplay
 } // namespace mozilla

@@ -73,8 +73,6 @@ ClearThreadState(ThreadState* aInfo)
   aInfo->mStackBytes = 0;
 }
 
-#if defined(XP_MACOSX)
-
 extern "C" {
 
 extern int
@@ -175,17 +173,6 @@ __asm(
 );
 
 } // extern "C"
-
-#elif defined(WIN32) // XP_MACOSX
-
-int
-SaveThreadStateOrReturnFromRestore(ThreadState* aInfo, int (*aSetjmpArg)(jmp_buf),
-                                   int* aStackSeparator)
-{
-  MOZ_CRASH();
-}
-
-#endif // WIN32
 
 bool
 SaveThreadState(size_t aId, int* aStackSeparator)

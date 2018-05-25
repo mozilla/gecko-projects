@@ -51,18 +51,9 @@ Thread::BindToCurrent()
   MOZ_ASSERT(!mStackBase);
   gTlsThreadKey.set(this);
 
-  size_t size;
-  uint8_t* base;
-#if defined(XP_MACOSX)
   mNativeId = pthread_self();
-  size = pthread_get_stacksize_np(mNativeId);
-  base = (uint8_t*)pthread_get_stackaddr_np(mNativeId) - size;
-#elif defined(WIN32)
-  GetAllocatedRegionInfo(&size, &base, &size);
-  MOZ_CRASH();
-#else
-#error "Unknown platform"
-#endif
+  size_t size = pthread_get_stacksize_np(mNativeId);
+  uint8_t* base = (uint8_t*)pthread_get_stackaddr_np(mNativeId) - size;
 
   // Lock if we will be notifying later on. We don't do this for the main
   // thread because we haven't initialized enough state yet that we can use
@@ -627,10 +618,6 @@ SnapshotStackFilename(const CheckpointId& aCheckpoint, CharBuffer& aFilename)
 Thread::SaveAllThreads(const CheckpointId& aCheckpoint)
 {
   MOZ_RELEASE_ASSERT(CurrentIsMainThread());
-
-#ifdef WIN32
-  MOZ_CRASH();
-#endif
 
   AutoPassThroughThreadEvents pt; // setjmp may perform system calls.
   SetMemoryChangesAllowed(false);

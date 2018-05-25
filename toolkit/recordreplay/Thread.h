@@ -133,13 +133,6 @@ private:
   char* mBuffer;
   size_t mBufferCapacity;
 
-  // Set the passthrough value for this thread in a way that the DLL entry
-  // point CheckPassThroughTrampoline can check for it. This is defined in
-  // ProcessRedirectWindows.cpp
-#if defined(DEBUG) && defined(WIN32)
-  static void SetPassThroughInArray(size_t aId, bool aPassThrough);
-#endif
-
   // Stack boundary of the thread, protected by the thread monitor.
   uint8_t* mStackBase;
   size_t mStackSize;
@@ -180,9 +173,6 @@ public:
   void SetPassThrough(bool aPassThrough) {
     MOZ_RELEASE_ASSERT(mPassThroughEvents == !aPassThrough);
     mPassThroughEvents = aPassThrough;
-#if defined(DEBUG) && defined(WIN32)
-    SetPassThroughInArray(mId, aPassThrough);
-#endif
   }
   bool PassThroughEvents() {
     return mPassThroughEvents;

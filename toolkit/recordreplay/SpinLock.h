@@ -117,13 +117,7 @@ private:
 static inline void
 ThreadYield()
 {
-#ifdef XP_MACOSX
   sched_yield();
-#elif defined(WIN32)
-  SwitchToThread();
-#else
-  MOZ_CRASH();
-#endif
 }
 
 inline void

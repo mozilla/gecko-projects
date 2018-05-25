@@ -56,8 +56,7 @@ namespace recordreplay {
 // that are necessary for reliable record/replay.
 //
 // Some platforms need additional redirection techniques for handling different
-// features of that platform, like Objective C messages on Macs and COM object
-// interfaces on Windows. See the individual ProcessRedirect*.cpp files for
+// features of that platform. See the individual ProcessRedirect*.cpp files for
 // descriptions of these.
 //
 // The main advantage of using redirections is that Gecko code does not need to
@@ -70,11 +69,7 @@ namespace recordreplay {
 // The main risk with using function redirections is that the set of redirected
 // functions is incomplete. If a library API is not redirected then it might
 // behave differently between recording and replaying, or it might crash while
-// replaying. On Windows we try to detect this by hooking every entry point in
-// certain DLLs, inserting a check that the entry point is only called when
-// events are passed through. This leads to an immediate crash if an
-// unredirected API in the DLL is called by Gecko code. Similar functionality
-// does not yet exist on other platforms.
+// replaying.
 
 ///////////////////////////////////////////////////////////////////////////////
 // Function Redirections
@@ -85,11 +80,6 @@ struct Redirection
 {
   // Name of the function being redirected.
   const char* mName;
-
-#ifdef WIN32
-  // DLL containing the function.
-  const char* mDllName;
-#endif
 
   // Address of the function which is being redirected. The code for this
   // this function is modified so that attempts to call this function will
@@ -121,28 +111,14 @@ bool InitializeRedirections();
 typedef ssize_t ErrorType;
 
 // Functions for saving or restoring system error codes.
-#if defined(XP_MACOSX)
 static inline ErrorType SaveError() { return errno; }
 static inline void RestoreError(ErrorType aError) { errno = aError; }
-#elif defined(WIN32)
-static inline ErrorType SaveError() { return GetLastError(); }
-static inline void RestoreError(ErrorType aError) { SetLastError(aError); }
-#else
-#error "Unknown platform"
-#endif
 
 // Specify the default ABI to use by the record/replay macros below.
-#ifdef WIN32
-#define DEFAULTABI __stdcall
-#else
 #define DEFAULTABI
-#endif
 
 // Define CallFunction(...) for all supported ABIs.
 DefineAllCallFunctions(DEFAULTABI)
-#ifdef WIN32
-DefineAllCallFunctions(__cdecl)
-#endif
 
 // Get the address of the original function for a call event ID.
 static inline void*
@@ -776,24 +752,6 @@ NewLeakyArray(size_t aSize)
 ///////////////////////////////////////////////////////////////////////////////
 // Other Redirection Interfaces
 ///////////////////////////////////////////////////////////////////////////////
-
-#if defined(DEBUG) && defined(WIN32)
-
-// On Windows, redirect all non-redirected entry points in various DLLs to
-// check that the entry points are only called when events are passed through.
-// This is implemented in ProcessRedirectWindows.cpp
-void RedirectAllDLLExports(Assembler& aAssembler);
-
-// Redirect a function so that it stores the address of its original function
-// in rax and then jumps to aTargetAddress. If aFilter returns false when
-// called with the function's base address then the redirection is not
-// performed.
-void
-RedirectFunctionForTrampoline(const char* aDLLName, const char* aFunctionName,
-                              bool (*aFilter)(void*),
-                              uint8_t* aTargetAddress, Assembler& aAssembler);
-
-#endif // DEBUG && WIN32
 
 // Given an argument function aFunction, generate code for a new function that
 // takes one fewer argument than aFunction and then calls aFunction with all
