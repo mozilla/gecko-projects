@@ -105,13 +105,8 @@ MessagePump::Run(MessagePump::Delegate* aDelegate)
 
     did_work |= aDelegate->DoDelayedWork(&delayed_work_time_);
 
-    recordreplay::RecordReplayAssert("MessagePump::Run #1 %d %d",
-                                     did_work, delayed_work_time_.is_null());
-
-    if (did_work && delayed_work_time_.is_null())
+if (did_work && delayed_work_time_.is_null())
       mDelayedWorkTimer->Cancel();
-
-    recordreplay::RecordReplayAssert("MessagePump::Run #2");
 
     if (!keep_running_)
       break;

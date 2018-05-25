@@ -121,8 +121,6 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
                                   AbsPosReflowFlags        aFlags,
                                   nsOverflowAreas*         aOverflowAreas)
 {
-  recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow");
-
   nsReflowStatus reflowStatus;
 
   const bool reflowAll = aReflowInput.ShouldReflowAllKids();
@@ -130,7 +128,6 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
   nsIFrame* kidFrame;
   nsOverflowContinuationTracker tracker(aDelegatingFrame, true);
   for (kidFrame = mAbsoluteFrames.FirstChild(); kidFrame; kidFrame = kidFrame->GetNextSibling()) {
-    recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #1");
     bool kidNeedsReflow = reflowAll || NS_SUBTREE_DIRTY(kidFrame) ||
       FrameDependsOnContainer(kidFrame,
                               !!(aFlags & AbsPosReflowFlags::eCBWidthChanged),
@@ -165,10 +162,8 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
         }
       }
     }
-    recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2");
     if (kidNeedsReflow && !aPresContext->HasPendingInterrupt()) {
       // Reflow the frame
-      recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2.1");
       nsReflowStatus kidStatus;
       ReflowAbsoluteFrame(aDelegatingFrame, aPresContext, aReflowInput, cb,
                           aFlags, kidFrame, kidStatus, aOverflowAreas);
@@ -179,11 +174,9 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
           aDelegatingFrame->IsFrameOfType(nsIFrame::eCanContainOverflowContainers)) {
         // Need a continuation
         if (!nextFrame) {
-          recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2.4");
           nextFrame =
             aPresContext->PresShell()->FrameConstructor()->
               CreateContinuingFrame(aPresContext, kidFrame, aDelegatingFrame);
-          recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2.5");
         }
         // Add it as an overflow container.
         //XXXfr This is a hack to fix some of our printing dataloss.
@@ -193,7 +186,6 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
         reflowStatus.MergeCompletionStatusFrom(kidStatus);
       }
       else {
-        recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2.6");
         // Delete any continuations
         if (nextFrame) {
           nsOverflowContinuationTracker::AutoFinish fini(&tracker, kidFrame);
@@ -202,14 +194,11 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
       }
     }
     else {
-      recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2.7");
       tracker.Skip(kidFrame, reflowStatus);
       if (aOverflowAreas) {
         aDelegatingFrame->ConsiderChildOverflow(*aOverflowAreas, kidFrame);
       }
-      recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #2.8");
     }
-    recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #3");
 
     // Make a CheckForInterrupt call, here, not just HasPendingInterrupt.  That
     // will make sure that we end up reflowing aDelegatingFrame in cases when
@@ -230,8 +219,6 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
         kidFrame->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
       }
     }
-
-    recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #4");
   }
 
   // Abspos frames can't cause their parent to be incomplete,
@@ -240,8 +227,6 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
     reflowStatus.SetOverflowIncomplete();
 
   aReflowStatus.MergeCompletionStatusFrom(reflowStatus);
-
-  recordreplay::RecordReplayAssert("nsAbsoluteContainingBlock::Reflow #5");
 }
 
 static inline bool IsFixedPaddingSize(const nsStyleCoord& aCoord)

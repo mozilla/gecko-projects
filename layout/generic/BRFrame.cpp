@@ -193,7 +193,6 @@ BRFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
     aData->mCurrentLine += 1;
     aData->ForceBreak();
   }
-  recordreplay::RecordReplayAssert("BRFrame::AddInlinePrefISize %d", (int) aData->mCurrentLine);
 }
 
 /* virtual */ nscoord

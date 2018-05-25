@@ -316,18 +316,6 @@ nsBlockFrame::~nsBlockFrame()
 {
 }
 
-static void
-AssertLineCount(nsBlockFrame* aFrame, const char* aPrefix)
-{
-  size_t count = 0;
-  for (auto iter = aFrame->LinesBegin(); iter != aFrame->LinesEnd(); iter++) {
-    count++;
-  }
-
-  recordreplay::RecordReplayAssert("nsBlockFrame %s THING %d LINES %d",
-                                   aPrefix, (int) recordreplay::ThingIndex(aFrame), (int) count);
-}
-
 void
 nsBlockFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestroyData)
 {
@@ -791,20 +779,15 @@ nsBlockFrame::GetMinISize(gfxContext *aRenderingContext)
 nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
 {
   nsIFrame* firstInFlow = FirstContinuation();
-  if (firstInFlow != this) {
-    nscoord res = firstInFlow->GetPrefISize(aRenderingContext);
-    recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #1 %d", (int) res);
-    return res;
-  }
+  if (firstInFlow != this)
+    return firstInFlow->GetPrefISize(aRenderingContext);
 
   DISPLAY_PREF_WIDTH(this, mPrefWidth);
 
   CheckIntrinsicCacheAgainstShrinkWrapState();
 
-  if (mPrefWidth != NS_INTRINSIC_WIDTH_UNKNOWN) {
-    recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2 %d", (int) mPrefWidth);
+  if (mPrefWidth != NS_INTRINSIC_WIDTH_UNKNOWN)
     return mPrefWidth;
-  }
 
 #ifdef DEBUG
   if (gNoisyIntrinsic) {
@@ -826,14 +809,11 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
   if (GetStateBits() & NS_BLOCK_NEEDS_BIDI_RESOLUTION)
     ResolveBidi();
   InlinePrefISizeData data;
-  recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.0 %d", (int) data.mCurrentLine);
   for (nsBlockFrame* curFrame = this; curFrame;
        curFrame = static_cast<nsBlockFrame*>(curFrame->GetNextContinuation())) {
-    recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.1 %d", (int) data.mCurrentLine);
     for (LineIterator line = curFrame->LinesBegin(), line_end = curFrame->LinesEnd();
          line != line_end; ++line)
     {
-      recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.2 %d", (int) data.mCurrentLine);
 #ifdef DEBUG
       if (gNoisyIntrinsic) {
         IndentBy(stdout, gNoiseIndent);
@@ -844,7 +824,6 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
       AutoNoisyIndenter lineindent(gNoisyIntrinsic);
 #endif
       if (line->IsBlock()) {
-        recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.3 %d", (int) data.mCurrentLine);
         StyleClear breakType;
         if (!data.mLineIsEmpty || BlockCanIntersectFloats(line->mFirstChild)) {
           breakType = StyleClear::Both;
@@ -857,7 +836,6 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
                         line->mFirstChild, nsLayoutUtils::PREF_ISIZE);
         data.ForceBreak();
       } else {
-        recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.4 %d", (int) data.mCurrentLine);
         if (!curFrame->GetPrevContinuation() &&
             line == curFrame->LinesBegin()) {
           // Only add text-indent if it has no percentages; using a
@@ -879,12 +857,9 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
         nsIFrame *kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
              ++i, kid = kid->GetNextSibling()) {
-          recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.5 %d", (int) data.mCurrentLine);
           kid->AddInlinePrefISize(aRenderingContext, &data);
-          recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.6 %d", (int) data.mCurrentLine);
         }
       }
-      recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.7 %d", (int) data.mCurrentLine);
 #ifdef DEBUG
       if (gNoisyIntrinsic) {
         IndentBy(stdout, gNoiseIndent);
@@ -894,15 +869,9 @@ nsBlockFrame::GetPrefISize(gfxContext *aRenderingContext)
 #endif
     }
   }
-  recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.8 %d %d",
-                                   (int) data.mCurrentLine, (int) data.mPrevLines);
   data.ForceBreak();
-  recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #2.9 %d", (int) data.mPrevLines);
 
   mPrefWidth = data.mPrevLines;
-
-  recordreplay::RecordReplayAssert("nsBlockFrame::GetPrefISize #3 %d", (int) mPrefWidth);
-
   return mPrefWidth;
 }
 
@@ -1106,8 +1075,6 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
                      const ReflowInput& aReflowInput,
                      nsReflowStatus&          aStatus)
 {
-  AssertLineCount(this, "Reflow");
-
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsBlockFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
@@ -1465,9 +1432,6 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
       if (cbHeightChanged) {
         flags |= AbsPosReflowFlags::eCBHeightChanged;
       }
-
-      AssertLineCount(this, "Reflow #1");
-
       // Setup the line cursor here to optimize line searching for
       // calculating hypothetical position of absolutely-positioned
       // frames. The line cursor is immediately cleared afterward to
@@ -1477,8 +1441,6 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
                                 state.mReflowStatus,
                                 containingBlock, flags,
                                 &aMetrics.mOverflowAreas);
-
-      AssertLineCount(this, "Reflow #2");
     }
   }
 
@@ -2172,8 +2134,6 @@ static void DumpLine(const BlockReflowInput& aState, nsLineBox* aLine,
 void
 nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
 {
-  AssertLineCount(this, "ReflowDirtyLines");
-
   bool keepGoing = true;
   bool repositionViews = false; // should we really need this?
   bool foundAnyClears = aState.mFloatBreakType != StyleClear::None;
@@ -2221,11 +2181,8 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
 
   LineIterator line = LinesBegin(), line_end = LinesEnd();
 
-  AssertLineCount(this, "ReflowDirtyLines #0.1");
-
   // Reflow the lines that are already ours
   for ( ; line != line_end; ++line, aState.AdvanceToNextLine()) {
-    AssertLineCount(this, "ReflowDirtyLines #1");
     DumpLine(aState, line, deltaBCoord, 0);
 #ifdef DEBUG
     AutoNoisyIndenter indent2(gNoisyReflow);
@@ -2253,7 +2210,6 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
     if (!line->IsDirty() &&
         (line->GetBreakTypeBefore() != StyleClear::None ||
          replacedBlock)) {
-      AssertLineCount(this, "ReflowDirtyLines #2");
       nscoord curBCoord = aState.mBCoord;
       // See where we would be after applying any clearance due to
       // BRs.
@@ -2280,7 +2236,6 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
           line->MarkDirty();
         }
       }
-      AssertLineCount(this, "ReflowDirtyLines #3");
     }
 
     // We might have to reflow a line that is after a clearing BR.
@@ -2377,7 +2332,6 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
     // may be placed incorrectly), but that's OK because we'll mark the
     // line dirty below under "if (aState.mReflowInput.mDiscoveredClearance..."
     if (line->IsDirty() && (line->HasFloats() || !willReflowAgain)) {
-      AssertLineCount(this, "ReflowDirtyLines #4");
       lastLineMovedUp = true;
 
       bool maybeReflowingForFirstTime =
@@ -2393,13 +2347,9 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
       NS_ASSERTION(!willReflowAgain || !line->IsBlock(),
                    "Don't reflow blocks while willReflowAgain is true, reflow of block abs-pos children depends on this");
 
-      AssertLineCount(this, "ReflowDirtyLines #4.0.1");
-
       // Reflow the dirty line. If it's an incremental reflow, then force
       // it to invalidate the dirty area if necessary
       ReflowLine(aState, line, &keepGoing);
-
-      AssertLineCount(this, "ReflowDirtyLines #4.0.2");
 
       if (aState.mReflowInput.WillReflowAgainForClearance()) {
         line->MarkDirty();
@@ -2414,14 +2364,12 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
       }
 
       if (!keepGoing) {
-        AssertLineCount(this, "ReflowDirtyLines #4.1");
         DumpLine(aState, line, deltaBCoord, -1);
         if (0 == line->GetChildCount()) {
           DeleteLine(aState, line, line_end);
         }
         break;
       }
-      AssertLineCount(this, "ReflowDirtyLines #4.2");
 
       // Test to see whether the margin that should be carried out
       // to the next line (NL) might have changed. In ReflowBlockFrame
@@ -2471,10 +2419,7 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
       // actually reflow the line, so that if we get back in here we'll get
       // further on the reflow before interrupting.
       aState.mPresContext->CheckForInterrupt(this);
-
-      recordreplay::RecordReplayAssert("nsBlockFrame::ReflowDirtyLines #5");
     } else {
-      recordreplay::RecordReplayAssert("nsBlockFrame::ReflowDirtyLines #6");
       aState.mOverflowTracker->Skip(line->mFirstChild, aState.mReflowStatus);
         // Nop except for blocks (we don't create overflow container
         // continuations for any inlines atm), so only checking mFirstChild
@@ -2552,8 +2497,6 @@ nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState)
       MarkLineDirtyForInterrupt(line);
     }
   }
-
-  AssertLineCount(this, "ReflowDirtyLines #7");
 
   // Handle BR-clearance from the last line of the block
   if (inlineFloatBreakType != StyleClear::None) {
@@ -2859,32 +2802,22 @@ nsBlockFrame::ReflowLine(BlockReflowInput& aState,
 {
   MOZ_ASSERT(aLine->GetChildCount(), "reflowing empty line");
 
-  AssertLineCount(this, "ReflowLine");
-
   // Setup the line-layout for the new line
   aState.mCurrentLine = aLine;
   aLine->ClearDirty();
   aLine->InvalidateCachedIsEmpty();
   aLine->ClearHadFloatPushed();
 
-  AssertLineCount(this, "ReflowLine #1");
-
   // Now that we know what kind of line we have, reflow it
   if (aLine->IsBlock()) {
-    AssertLineCount(this, "ReflowLine #2");
     ReflowBlockFrame(aState, aLine, aKeepReflowGoing);
-    AssertLineCount(this, "ReflowLine #3");
   } else {
-    AssertLineCount(this, "ReflowLine #4");
     aLine->SetLineWrapped(false);
     ReflowInlineFrames(aState, aLine, aKeepReflowGoing);
-
-    AssertLineCount(this, "ReflowLine #5");
 
     // Store the line's float edges for text-overflow analysis if needed.
     aLine->ClearFloatEdges();
     if (aState.mFlags.mCanHaveTextOverflow) {
-      AssertLineCount(this, "ReflowLine #6");
       WritingMode wm = aLine->mWritingMode;
       nsFlowAreaRect r = aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
                                                                aLine->BSize(),
@@ -2897,7 +2830,6 @@ nsBlockFrame::ReflowLine(BlockReflowInput& aState,
         if (so.IEnd(wm) > e || so.IStart(wm) < s) {
           // This line is overlapping a float - store the edges marking the area
           // between the floats for text-overflow analysis.
-          AssertLineCount(this, "ReflowLine #7");
           aLine->SetFloatEdges(s, e);
         }
       }
@@ -3859,8 +3791,6 @@ nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
                                  LineIterator aLine,
                                  bool* aKeepReflowGoing)
 {
-  AssertLineCount(this, "ReflowInlineFrames");
-
   *aKeepReflowGoing = true;
 
   aLine->SetLineIsImpactedByFloat(false);
@@ -3874,17 +3804,14 @@ nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
 
   LineReflowStatus lineReflowStatus;
   do {
-    AssertLineCount(this, "ReflowInlineFrames #1");
     nscoord availableSpaceBSize = 0;
     aState.mLineBSize.reset();
     do {
-      AssertLineCount(this, "ReflowInlineFrames #2");
       bool allowPullUp = true;
       nsIFrame* forceBreakInFrame = nullptr;
       int32_t forceBreakOffset = -1;
       gfxBreakPriority forceBreakPriority = gfxBreakPriority::eNoBreak;
       do {
-        AssertLineCount(this, "ReflowInlineFrames #3");
         nsFloatManager::SavedState floatManagerState;
         aState.FloatManager()->PushState(&floatManagerState);
 
@@ -3902,12 +3829,10 @@ nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
         if (forceBreakInFrame) {
           lineLayout.ForceBreakAtPosition(forceBreakInFrame, forceBreakOffset);
         }
-        AssertLineCount(this, "ReflowInlineFrames #4");
         DoReflowInlineFrames(aState, lineLayout, aLine,
                              floatAvailableSpace, availableSpaceBSize,
                              &floatManagerState, aKeepReflowGoing,
                              &lineReflowStatus, allowPullUp);
-        AssertLineCount(this, "ReflowInlineFrames #5");
         lineLayout.EndLineReflow();
 
         if (LineReflowStatus::RedoNoPull == lineReflowStatus ||
@@ -3923,7 +3848,6 @@ nsBlockFrame::ReflowInlineFrames(BlockReflowInput& aState,
           } else {
             forceBreakInFrame = nullptr;
           }
-          AssertLineCount(this, "ReflowInlineFrames #6");
           // restore the float manager state
           aState.FloatManager()->PopState(&floatManagerState);
           // Clear out float lists
@@ -3960,8 +3884,6 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
                                    LineReflowStatus* aLineReflowStatus,
                                    bool aAllowPullUp)
 {
-  AssertLineCount(this, "DoReflowInlineFrames");
-
   // Forget all of the floats on the line
   aLine->FreeFloats(aState.mFloatCacheFreeList);
   aState.mFloatOverflowAreas.Clear();
@@ -3983,13 +3905,6 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
 
   nscoord iStart = lineRect.IStart(lineWM);
   nscoord availISize = lineRect.ISize(lineWM);
-
-  recordreplay::RecordReplayAssert("nsBlockFrame availISize %d %d %d %d",
-                                   (int) iStart,
-                                   (int) availISize,
-                                   (int) aState.ContainerSize().width,
-                                   (int) aState.ContainerSize().height);
-
   nscoord availBSize;
   if (aState.mFlags.mHasUnconstrainedBSize) {
     availBSize = NS_UNCONSTRAINEDSIZE;
@@ -4003,15 +3918,11 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
   // because it might get disabled there
   aLine->EnableResizeReflowOptimization();
 
-  AssertLineCount(this, "DoReflowInlineFrames #1");
-
   aLineLayout.BeginLineReflow(iStart, aState.mBCoord,
                               availISize, availBSize,
                               aFloatAvailableSpace.mHasFloats,
                               false, /*XXX isTopOfPage*/
                               lineWM, aState.mContainerSize);
-
-  AssertLineCount(this, "DoReflowInlineFrames #2");
 
   aState.mFlags.mIsLineLayoutEmpty = false;
 
@@ -4044,9 +3955,7 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
   // count can change during the loop!
   for (i = 0; LineReflowStatus::OK == lineReflowStatus && i < aLine->GetChildCount();
        i++, frame = frame->GetNextSibling()) {
-    AssertLineCount(this, "DoReflowInlineFrames #3");
     ReflowInlineFrame(aState, aLineLayout, aLine, frame, &lineReflowStatus);
-    AssertLineCount(this, "DoReflowInlineFrames #4");
     if (LineReflowStatus::OK != lineReflowStatus) {
       // It is possible that one or more of next lines are empty
       // (because of DeleteNextInFlowChild). If so, delete them now
@@ -4055,13 +3964,11 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
       while ((aLine != LinesEnd()) && (0 == aLine->GetChildCount())) {
         // XXX Is this still necessary now that DeleteNextInFlowChild
         // uses DoRemoveFrame?
-        AssertLineCount(this, "DoReflowInlineFrames #5");
         nsLineBox *toremove = aLine;
         aLine = mLines.erase(aLine);
         NS_ASSERTION(nullptr == toremove->mFirstChild, "bad empty line");
         FreeLineBox(toremove);
       }
-      AssertLineCount(this, "DoReflowInlineFrames #6");
       --aLine;
 
       NS_ASSERTION(lineReflowStatus != LineReflowStatus::Truncated,
@@ -4069,26 +3976,19 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
                    "needs to go to the next page/column");
     }
   }
-  AssertLineCount(this, "DoReflowInlineFrames #7");
 
   // Don't pull up new frames into lines with continuation placeholders
   if (aAllowPullUp) {
     // Pull frames and reflow them until we can't
     while (LineReflowStatus::OK == lineReflowStatus) {
-      AssertLineCount(this, "DoReflowInlineFrames #8");
       frame = PullFrame(aState, aLine);
-      AssertLineCount(this, "DoReflowInlineFrames #9");
       if (!frame) {
-        AssertLineCount(this, "DoReflowInlineFrames #10");
         break;
       }
-      AssertLineCount(this, "DoReflowInlineFrames #11");
 
       while (LineReflowStatus::OK == lineReflowStatus) {
         int32_t oldCount = aLine->GetChildCount();
-        AssertLineCount(this, "DoReflowInlineFrames #12");
         ReflowInlineFrame(aState, aLineLayout, aLine, frame, &lineReflowStatus);
-        AssertLineCount(this, "DoReflowInlineFrames #13");
         if (aLine->GetChildCount() != oldCount) {
           // We just created a continuation for aFrame AND its going
           // to end up on this line (e.g. :first-letter
@@ -4130,10 +4030,7 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
     aLineLayout.ClearOptionalBreakPosition();
   }
 
-  AssertLineCount(this, "DoReflowInlineFrames #14");
-
   if (LineReflowStatus::RedoNextBand == lineReflowStatus) {
-    AssertLineCount(this, "DoReflowInlineFrames #15");
     // This happens only when we have a line that is impacted by
     // floats and the first element in the line doesn't fit with
     // the floats.
@@ -4168,15 +4065,12 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
         aState.FloatManager()->AssertStateMatches(aFloatStateBeforeLine);
         aFloatAvailableSpace = aState.GetFloatAvailableSpace();
       } else {
-        AssertLineCount(this, "DoReflowInlineFrames #16");
         // There's nowhere to retry placing the line, so we want to push
         // it to the next page/column where its contents can fit not
         // next to a float.
         lineReflowStatus = LineReflowStatus::Truncated;
         PushTruncatedLine(aState, aLine, aKeepReflowGoing);
-        AssertLineCount(this, "DoReflowInlineFrames #17");
       }
-      AssertLineCount(this, "DoReflowInlineFrames #18");
     }
 
     // XXX: a small optimization can be done here when paginating:
@@ -4186,22 +4080,17 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
   }
   else if (LineReflowStatus::Truncated != lineReflowStatus &&
            LineReflowStatus::RedoNoPull != lineReflowStatus) {
-    AssertLineCount(this, "DoReflowInlineFrames #19");
     // If we are propagating out a break-before status then there is
     // no point in placing the line.
     if (!aState.mReflowStatus.IsInlineBreakBefore()) {
-      AssertLineCount(this, "DoReflowInlineFrames #20");
       if (!PlaceLine(aState, aLineLayout, aLine, aFloatStateBeforeLine,
                      aFloatAvailableSpace.mRect, aAvailableSpaceBSize,
                      aKeepReflowGoing)) {
-        AssertLineCount(this, "DoReflowInlineFrames #21");
         lineReflowStatus = LineReflowStatus::RedoMoreFloats;
         // PlaceLine already called GetAvailableSpaceForBSize for us.
       }
-      AssertLineCount(this, "DoReflowInlineFrames #22");
     }
   }
-  AssertLineCount(this, "DoReflowInlineFrames #23");
 #ifdef DEBUG
   if (gNoisyReflow) {
     printf("Line reflow status = %s\n", LineReflowStatusToString(lineReflowStatus));
@@ -4209,7 +4098,6 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
 #endif
 
   if (aLineLayout.GetDirtyNextLine()) {
-    AssertLineCount(this, "DoReflowInlineFrames #24");
     // aLine may have been pushed to the overflow lines.
     FrameLines* overflowLines = GetOverflowLines();
     // We can't just compare iterators front() to aLine here, since they may be in
@@ -4229,7 +4117,6 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
       }
     }
   }
-  AssertLineCount(this, "DoReflowInlineFrames #25");
 
   *aLineReflowStatus = lineReflowStatus;
 }
@@ -4249,8 +4136,6 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
                                 nsIFrame* aFrame,
                                 LineReflowStatus* aLineReflowStatus)
 {
-  AssertLineCount(this, "ReflowInlineFrame");
-
   MOZ_ASSERT(aFrame);
   *aLineReflowStatus = LineReflowStatus::OK;
 
@@ -4262,24 +4147,15 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
          aLineLayout.GetFirstLetterStyleOK() ? "on" : "off");
 #endif
 
-  AssertLineCount(this, "ReflowInlineFrame #1");
-
   if (aFrame->IsPlaceholderFrame()) {
     auto ph = static_cast<nsPlaceholderFrame*>(aFrame);
     ph->ForgetLineIsEmptySoFar();
   }
 
-  AssertLineCount(this, "ReflowInlineFrame #2");
-
   // Reflow the inline frame
   nsReflowStatus frameReflowStatus;
   bool pushedFrame;
   aLineLayout.ReflowFrame(aFrame, frameReflowStatus, nullptr, pushedFrame);
-
-  recordreplay::RecordReplayAssert("ReflowInlineFrame STATUS #1 %d",
-                                   (int) frameReflowStatus.IsFullyComplete());
-
-  AssertLineCount(this, "ReflowInlineFrame #3");
 
   if (frameReflowStatus.NextInFlowNeedsReflow()) {
     aLineLayout.SetDirtyNextLine();
@@ -4312,7 +4188,6 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
   aLine->SetBreakTypeAfter(StyleClear::None);
   if (frameReflowStatus.IsInlineBreak() ||
       StyleClear::None != aState.mFloatBreakType) {
-    AssertLineCount(this, "ReflowInlineFrame #4");
     // Always abort the line reflow (because a line break is the
     // minimal amount of break we do).
     *aLineReflowStatus = LineReflowStatus::Stop;
@@ -4323,7 +4198,6 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
                StyleClear::None != aState.mFloatBreakType, "bad break type");
 
     if (frameReflowStatus.IsInlineBreakBefore()) {
-      AssertLineCount(this, "ReflowInlineFrame #5");
       // Break-before cases.
       if (aFrame == aLine->mFirstChild) {
         // If we break before the first frame on the line then we must
@@ -4333,11 +4207,9 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
         *aLineReflowStatus = LineReflowStatus::RedoNextBand;
       }
       else {
-        AssertLineCount(this, "ReflowInlineFrame #6");
         // It's not the first child on this line so go ahead and split
         // the line. We will see the frame again on the next-line.
         SplitLine(aState, aLineLayout, aLine, aFrame, aLineReflowStatus);
-        AssertLineCount(this, "ReflowInlineFrame #7");
 
         // If we're splitting the line because the frame didn't fit and it
         // was pushed, then mark the line as having word wrapped. We need to
@@ -4346,10 +4218,8 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
           aLine->SetLineWrapped(true);
         }
       }
-      AssertLineCount(this, "ReflowInlineFrame #8");
     }
     else {
-      AssertLineCount(this, "ReflowInlineFrame #9");
       // If a float split and its prev-in-flow was followed by a <BR>, then combine
       // the <BR>'s break type with the inline's break type (the inline will be the very
       // next frame after the split float).
@@ -4366,37 +4236,26 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
       }
       aLine->SetBreakTypeAfter(breakType);
       if (frameReflowStatus.IsComplete()) {
-        AssertLineCount(this, "ReflowInlineFrame #10");
         // Split line, but after the frame just reflowed
         SplitLine(aState, aLineLayout, aLine, aFrame->GetNextSibling(), aLineReflowStatus);
-        AssertLineCount(this, "ReflowInlineFrame #11");
 
         if (frameReflowStatus.IsInlineBreakAfter() &&
             !aLineLayout.GetLineEndsInBR()) {
           aLineLayout.SetDirtyNextLine();
         }
       }
-      AssertLineCount(this, "ReflowInlineFrame #12");
     }
   }
 
-  AssertLineCount(this, "ReflowInlineFrame #12.1");
   if (!frameReflowStatus.IsFullyComplete()) {
-    AssertLineCount(this, "ReflowInlineFrame #12.2");
     // Create a continuation for the incomplete frame. Note that the
     // frame may already have a continuation.
     CreateContinuationFor(aState, aLine, aFrame);
-    AssertLineCount(this, "ReflowInlineFrame #12.3");
 
     // Remember that the line has wrapped
     if (!aLineLayout.GetLineEndsInBR()) {
       aLine->SetLineWrapped(true);
     }
-
-    recordreplay::RecordReplayAssert("ReflowInlineFrame #12.4 %d %d %d",
-                                     (int) frameReflowStatus.FirstLetterComplete(),
-                                     (int) aFrame->IsPlaceholderFrame(),
-                                     (int) *aLineReflowStatus);
 
     // If we just ended a first-letter frame or reflowed a placeholder then
     // don't split the line and don't stop the line reflow...
@@ -4406,12 +4265,9 @@ nsBlockFrame::ReflowInlineFrame(BlockReflowInput& aState,
         *aLineReflowStatus == LineReflowStatus::Stop) {
       // Split line after the current frame
       *aLineReflowStatus = LineReflowStatus::Stop;
-      AssertLineCount(this, "ReflowInlineFrame #13");
       SplitLine(aState, aLineLayout, aLine, aFrame->GetNextSibling(), aLineReflowStatus);
-      AssertLineCount(this, "ReflowInlineFrame #14");
     }
   }
-  AssertLineCount(this, "ReflowInlineFrame #15");
 }
 
 bool
@@ -7096,8 +6952,6 @@ nsBlockFrame::Init(nsIContent*       aContent,
                    nsContainerFrame* aParent,
                    nsIFrame*         aPrevInFlow)
 {
-  recordreplay::RegisterThing(this);
-
   if (aPrevInFlow) {
     // Copy over the inherited block frame bits from the prev-in-flow.
     RemoveStateBits(NS_BLOCK_FLAGS_MASK);

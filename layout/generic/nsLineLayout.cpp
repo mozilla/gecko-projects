@@ -195,19 +195,11 @@ nsLineLayout::BeginLineReflow(nscoord aICoord, nscoord aBCoord,
 
   PerSpanData* psd = NewPerSpanData();
   mCurrentSpan = mRootSpan = psd;
-
-  recordreplay::RecordReplayAssert("nsLineLayout mCurrentSpan #1 %d %d",
-                                   (int) (mCurrentSpan ? mCurrentSpan->mIEnd : 0),
-                                   (int) (mCurrentSpan ? mCurrentSpan->mICoord : 0));
-
   psd->mReflowInput = mBlockReflowInput;
   psd->mIStart = aICoord;
   psd->mICoord = aICoord;
   psd->mIEnd = aICoord + aISize;
   mContainerSize = aContainerSize;
-
-  recordreplay::RecordReplayAssert("nsLineLayout mCurrentSpan #1.1 %d %d",
-                                   (int) aICoord, (int) aISize);
 
   mBStartEdge = aBCoord;
 
@@ -401,10 +393,6 @@ nsLineLayout::NewPerSpanData()
   psd->mContainsFloat = false;
   psd->mHasNonemptyContent = false;
 
-  // FIXME
-  psd->mIEnd = 0;
-  psd->mICoord = 0;
-
 #ifdef DEBUG
   outerLineLayout->mSpansAllocated++;
 #endif
@@ -448,11 +436,6 @@ nsLineLayout::BeginSpan(nsIFrame* aFrame,
 
   // Switch to new span
   mCurrentSpan = psd;
-
-  recordreplay::RecordReplayAssert("nsLineLayout mCurrentSpan #2 %d %d",
-                                   (int) (mCurrentSpan ? mCurrentSpan->mIEnd : 0),
-                                   (int) (mCurrentSpan ? mCurrentSpan->mICoord : 0));
-
   mSpanDepth++;
 }
 
@@ -471,11 +454,6 @@ nsLineLayout::EndSpan(nsIFrame* aFrame)
   mSpanDepth--;
   mCurrentSpan->mReflowInput = nullptr;  // no longer valid so null it out!
   mCurrentSpan = mCurrentSpan->mParent;
-
-  recordreplay::RecordReplayAssert("nsLineLayout mCurrentSpan #3 %d %d",
-                                   (int) (mCurrentSpan ? mCurrentSpan->mIEnd : 0),
-                                   (int) (mCurrentSpan ? mCurrentSpan->mICoord : 0));
-
   return iSizeResult;
 }
 
@@ -805,31 +783,18 @@ IsPercentageAware(const nsIFrame* aFrame)
   return false;
 }
 
-static void
-AssertReflowStatus(const char* aPrefix, const nsReflowStatus& aReflowStatus)
-{
-  recordreplay::RecordReplayAssert("%s %d", aPrefix, (int) aReflowStatus.IsFullyComplete());
-}
-
 void
 nsLineLayout::ReflowFrame(nsIFrame* aFrame,
                           nsReflowStatus& aReflowStatus,
                           ReflowOutput* aMetrics,
                           bool& aPushedFrame)
 {
-  AssertReflowStatus("nsLineLayout::ReflowFrame", aReflowStatus);
-
   // Initialize OUT parameter
   aPushedFrame = false;
 
   PerFrameData* pfd = NewPerFrameData(aFrame);
   PerSpanData* psd = mCurrentSpan;
-
-  recordreplay::RecordReplayAssert("nsLineLayout::ReflowFrame AVAILABLE #0 %d %d", (int) psd->mIEnd, (int) psd->mICoord);
-
   psd->AppendFrame(pfd);
-
-  recordreplay::RecordReplayAssert("nsLineLayout::ReflowFrame AVAILABLE #0.1 %d %d", (int) psd->mIEnd, (int) psd->mICoord);
 
 #ifdef REALLY_NOISY_REFLOW
   nsFrame::IndentBy(stdout, mSpanDepth);
@@ -887,8 +852,6 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
                       "very large sizes, not attempts at intrinsic width "
                       "calculation");
   nscoord availableSpaceOnLine = psd->mIEnd - psd->mICoord;
-
-  recordreplay::RecordReplayAssert("nsLineLayout::ReflowFrame AVAILABLE %d %d", (int) psd->mIEnd, (int) psd->mICoord);
 
   // Setup reflow state for reflowing the frame
   Maybe<ReflowInput> reflowInputHolder;
@@ -958,16 +921,12 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
                                  &savedOptionalBreakPriority);
 
   if (!isText) {
-    AssertReflowStatus("nsLineLayout::ReflowFrame #1", aReflowStatus);
     aFrame->Reflow(mPresContext, reflowOutput, *reflowInputHolder, aReflowStatus);
-    AssertReflowStatus("nsLineLayout::ReflowFrame #2", aReflowStatus);
   } else {
-    AssertReflowStatus("nsLineLayout::ReflowFrame #3", aReflowStatus);
     static_cast<nsTextFrame*>(aFrame)->
       ReflowText(*this, availableSpaceOnLine,
                  psd->mReflowInput->mRenderingContext->GetDrawTarget(),
                  reflowOutput, aReflowStatus);
-    AssertReflowStatus("nsLineLayout::ReflowFrame #4", aReflowStatus);
   }
 
   pfd->mJustificationInfo = mJustificationInfo;
@@ -1124,11 +1083,9 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
                  !reflowInputHolder->IsFloating(),
                  "How'd we get a floated inline frame? "
                  "The frame ctor should've dealt with this.");
-    AssertReflowStatus("nsLineLayout::ReflowFrame #5", aReflowStatus);
     if (CanPlaceFrame(pfd, notSafeToBreak, continuingTextRun,
                       savedOptionalBreakFrame != nullptr, reflowOutput,
                       aReflowStatus, &optionalBreakAfterFits)) {
-      AssertReflowStatus("nsLineLayout::ReflowFrame #6", aReflowStatus);
       if (!isEmpty) {
         psd->mHasNonemptyContent = true;
         mLineIsEmpty = false;
@@ -1179,11 +1136,9 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
     }
   }
   else {
-    AssertReflowStatus("nsLineLayout::ReflowFrame #7", aReflowStatus);
     PushFrame(aFrame);
     aPushedFrame = true;
   }
-  AssertReflowStatus("nsLineLayout::ReflowFrame #8", aReflowStatus);
 
 #ifdef REALLY_NOISY_REFLOW
   nsFrame::IndentBy(stdout, mSpanDepth);

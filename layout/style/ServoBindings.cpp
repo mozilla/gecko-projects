@@ -1205,10 +1205,7 @@ Gecko_Atomize(const char* aString, uint32_t aLength)
 nsAtom*
 Gecko_Atomize16(const nsAString* aString)
 {
-  recordreplay::RecordReplayAssert("Gecko_Atomize16 BEGIN");
-  nsAtom* rv = NS_Atomize(*aString).take();
-  recordreplay::RecordReplayAssert("Gecko_Atomize16 END");
-  return rv;
+  return NS_Atomize(*aString).take();
 }
 
 void

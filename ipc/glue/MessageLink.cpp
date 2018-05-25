@@ -158,8 +158,6 @@ ProcessLink::EchoMessage(Message *msg)
 void
 ProcessLink::SendMessage(Message *msg)
 {
-    recordreplay::RecordReplayAssert("ProcessLink::SendMessage %s %d", msg->name(), (int) msg->size());
-
     if (msg->size() > IPC::Channel::kMaximumMessageSize) {
       CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCMessageName"), nsDependentCString(msg->name()));
       CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCMessageSize"), nsPrintfCString("%d", msg->size()));
@@ -281,8 +279,6 @@ ThreadLink::Unsound_NumQueuedMessages() const
 void
 ProcessLink::OnMessageReceived(Message&& msg)
 {
-    recordreplay::RecordReplayAssert("ProcessLink::OnMessageReceived %d", recordreplay::ThingIndex(mChan));
-
     AssertIOThread();
     NS_ASSERTION(mChan->mChannelState != ChannelError, "Shouldn't get here!");
     MonitorAutoLock lock(*mChan->mMonitor);

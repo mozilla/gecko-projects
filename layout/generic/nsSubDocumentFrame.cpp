@@ -760,26 +760,16 @@ nsSubDocumentFrame::ComputeSize(gfxContext*         aRenderingContext,
 {
   nsIFrame* subDocRoot = ObtainIntrinsicSizeFrame();
   if (subDocRoot) {
-    LogicalSize result = ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+    return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
                                               subDocRoot->GetIntrinsicSize(),
                                               subDocRoot->GetIntrinsicRatio(),
                                               aCBSize, aMargin, aBorder,
                                               aPadding, aFlags);
-
-  recordreplay::RecordReplayAssert("nsSubDocumentFrame::ComputeSize #1 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
-  return result;
   }
-  LogicalSize result = nsAtomicContainerFrame::ComputeSize(aRenderingContext, aWM,
+  return nsAtomicContainerFrame::ComputeSize(aRenderingContext, aWM,
                                              aCBSize, aAvailableISize,
                                              aMargin, aBorder, aPadding,
                                              aFlags);
-
-  recordreplay::RecordReplayAssert("nsSubDocumentFrame::ComputeSize #2 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
-  return result;
 }
 
 void

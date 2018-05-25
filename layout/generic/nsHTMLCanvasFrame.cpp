@@ -325,15 +325,10 @@ nsHTMLCanvasFrame::ComputeSize(gfxContext *aRenderingContext,
 
   nsSize intrinsicRatio = GetIntrinsicRatio(); // won't actually be used
 
-  LogicalSize result = ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+  return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
                                             intrinsicSize, intrinsicRatio,
                                             aCBSize, aMargin, aBorder, aPadding,
                                             aFlags);
-
-  recordreplay::RecordReplayAssert("nsHTMLCanvasFrame::ComputeSize %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
-  return result;
 }
 
 void

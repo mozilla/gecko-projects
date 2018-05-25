@@ -735,16 +735,11 @@ static nscoord GetCoord(const nsStyleCoord& aCoord, nscoord aIfNotCoord)
   return aIfNotCoord;
 }
 
-nsIFrame* gContainerFrameKid;
-
 void
 nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
                                          InlineIntrinsicISizeData *aData,
                                          nsLayoutUtils::IntrinsicISizeType aType)
 {
-  recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #6 %d",
-                                   (int) aData->mCurrentLine);
-
   if (GetPrevInFlow())
     return; // Already added.
 
@@ -760,9 +755,6 @@ nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
   const nsStylePadding *stylePadding = StylePadding();
   const nsStyleBorder *styleBorder = StyleBorder();
   const nsStyleMargin *styleMargin = StyleMargin();
-
-  recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #5 %d",
-                                   (int) aData->mCurrentLine);
 
   // This goes at the beginning no matter how things are broken and how
   // messy the bidi situations are, since per CSS2.1 section 8.6
@@ -789,9 +781,6 @@ nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
     }
   }
 
-  recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #4 %d",
-                                   (int) aData->mCurrentLine);
-
   nscoord endPBM =
     // clamp negative calc() to 0
     std::max(GetCoord(stylePadding->mPadding.Get(endSide), 0), 0) +
@@ -804,31 +793,19 @@ nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
   const nsLineList_iterator* savedLine = aData->mLine;
   nsIFrame* const savedLineContainer = aData->LineContainer();
 
-  recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #3 %d",
-                                   (int) aData->mCurrentLine);
-
   nsContainerFrame *lastInFlow;
   for (nsContainerFrame *nif = this; nif;
        nif = static_cast<nsContainerFrame*>(nif->GetNextInFlow())) {
-    recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #2 %d",
-                                     (int) aData->mCurrentLine);
     if (aData->mCurrentLine == 0) {
       aData->mCurrentLine = clonePBM;
-      recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #2.0 %d",
-                                       (int) aData->mCurrentLine);
     }
     for (nsIFrame* kid : nif->mFrames) {
-      recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #2.1 %d",
-                                       (int) aData->mCurrentLine);
-      gContainerFrameKid = kid;
       if (aType == nsLayoutUtils::MIN_ISIZE)
         kid->AddInlineMinISize(aRenderingContext,
                                static_cast<InlineMinISizeData*>(aData));
       else
         kid->AddInlinePrefISize(aRenderingContext,
                                 static_cast<InlinePrefISizeData*>(aData));
-      recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #2.2 %d",
-                                       (int) aData->mCurrentLine);
     }
 
     // After we advance to our next-in-flow, the stored line and line container
@@ -842,9 +819,6 @@ nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
   aData->mLine = savedLine;
   aData->SetLineContainer(savedLineContainer);
 
-  recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize #1 %d",
-                                   (int) aData->mCurrentLine);
-
   // This goes at the end no matter how things are broken and how
   // messy the bidi situations are, since per CSS2.1 section 8.6
   // (implemented in bug 328168), the endSide border is always on the
@@ -855,9 +829,6 @@ nsContainerFrame::DoInlineIntrinsicISize(gfxContext *aRenderingContext,
   if (MOZ_LIKELY(!lastInFlow->GetNextContinuation() && sliceBreak)) {
     aData->mCurrentLine += endPBM;
   }
-
-  recordreplay::RecordReplayAssert("nsContainerFrame::DoInlineIntrinsicISize %d",
-                                   (int) aData->mCurrentLine);
 }
 
 /* virtual */

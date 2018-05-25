@@ -1846,10 +1846,6 @@ GetSpacingFlags(nsIFrame* aFrame, const nsStyleText* aStyleText = nullptr)
     (eStyleUnit_Percent == ws.GetUnit() && ws.GetPercentValue() != 0) ||
     (eStyleUnit_Calc == ws.GetUnit() && !ws.GetCalcValue()->IsDefinitelyZero());
 
-  recordreplay::RecordReplayAssert("GetSpacingFlags #1 %d %d",
-                                   (int) ls.GetUnit(), (int) ls.GetCoordValue());
-  recordreplay::RecordReplayAssert("GetSpacingFlags %d", (int) nonStandardSpacing);
-
   return nonStandardSpacing
     ? gfx::ShapedTextFlags::TEXT_ENABLE_SPACING
     : gfx::ShapedTextFlags();
@@ -2131,7 +2127,6 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
       GetCSSWhitespaceToCompressionMode(f, textStyle);
     if ((enabledJustification || f->ShouldSuppressLineBreak()) &&
         !textStyle->WhiteSpaceIsSignificant() && !isSVG) {
-      recordreplay::RecordReplayAssert("BuildTextRunsScanner::BuildTextRunForFrames #1");
       flags |= gfx::ShapedTextFlags::TEXT_ENABLE_SPACING;
     }
     fontStyle = f->StyleFont();
@@ -2289,7 +2284,6 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
   }
 
   if (flags2 & nsTextFrameUtils::Flags::TEXT_HAS_TAB) {
-    recordreplay::RecordReplayAssert("BuildTextRunsScanner::BuildTextRunForFrames #2");
     flags |= gfx::ShapedTextFlags::TEXT_ENABLE_SPACING;
   }
   if (flags2 & nsTextFrameUtils::Flags::TEXT_HAS_SHY) {
@@ -4344,8 +4338,6 @@ nsTextFrame::Init(nsIContent*       aContent,
                   nsContainerFrame* aParent,
                   nsIFrame*         aPrevInFlow)
 {
-  recordreplay::RegisterThing(this);
-
   NS_ASSERTION(!aPrevInFlow, "Can't be a continuation!");
   MOZ_ASSERT(aContent->IsText(), "Bogus content!");
 
@@ -4616,8 +4608,6 @@ nsContinuingTextFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
                                           InlinePrefISizeData *aData)
 {
   // Do nothing, since the first-in-flow accounts for everything.
-  recordreplay::RecordReplayAssert("nsContinuingTextFrame::AddInlinePrefISize %d",
-                                   (int) aData->mCurrentLine);
 }
 
 //----------------------------------------------------------------------
@@ -8534,9 +8524,6 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
                                       nsIFrame::InlineMinISizeData *aData,
                                       TextRunType aTextRunType)
 {
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow %d",
-                                   (int) aData->mCurrentLine);
-
   uint32_t flowEndInTextRun;
   gfxSkipCharsIterator iter =
     EnsureTextRun(aTextRunType, aRenderingContext->GetDrawTarget(),
@@ -8544,9 +8531,6 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
   gfxTextRun *textRun = GetTextRun(aTextRunType);
   if (!textRun)
     return;
-
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #1 %d",
-                                   (int) aData->mCurrentLine);
 
   // Pass null for the line container. This will disable tab spacing, but that's
   // OK since we can't really handle tabs for intrinsic sizing anyway.
@@ -8572,12 +8556,8 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
   bool preformatNewlines = textStyle->NewlineIsSignificant(this);
   bool preformatTabs = textStyle->WhiteSpaceIsSignificant();
   gfxFloat tabWidth = -1;
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #2 %d",
-                                   (int) aData->mCurrentLine);
   uint32_t start =
     FindStartAfterSkippingWhitespace(&provider, aData, textStyle, &iter, flowEndInTextRun);
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #3 %d",
-                                   (int) aData->mCurrentLine);
 
   // text-combine-upright frame is constantly 1em on inline-axis.
   if (Style()->IsTextCombined()) {
@@ -8585,13 +8565,9 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
       aData->OptionallyBreak();
     }
     aData->mCurrentLine += provider.GetFontMetrics()->EmHeight();
-    recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #4 %d",
-                                     (int) aData->mCurrentLine);
     aData->mTrailingWhitespace = 0;
     return;
   }
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #5 %d",
-                                   (int) aData->mCurrentLine);
 
   AutoTArray<gfxTextRun::HyphenType, BIG_TEXT_NODE_SIZE> hyphBuffer;
   if (hyphenating) {
@@ -8627,11 +8603,7 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
       nscoord width = NSToCoordCeilClamped(
         textRun->GetAdvanceWidth(Range(wordStart, i), &provider));
       width = std::max(0, width);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #6 %d %d",
-                                       (int) aData->mCurrentLine, (int) width);
       aData->mCurrentLine = NSCoordSaturatingAdd(aData->mCurrentLine, width);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #7 %d",
-                                       (int) aData->mCurrentLine);
       aData->mAtStartOfLine = false;
 
       if (collapseWhitespace) {
@@ -8654,21 +8626,13 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
     if (preformattedTab) {
       PropertyProvider::Spacing spacing;
       provider.GetSpacing(Range(i, i + 1), &spacing);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #8 %d",
-                                       (int) aData->mCurrentLine);
       aData->mCurrentLine += nscoord(spacing.mBefore);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #9 %d",
-                                       (int) aData->mCurrentLine);
       if (tabWidth < 0) {
         tabWidth = ComputeTabWidthAppUnits(this, textRun);
       }
       gfxFloat afterTab =
         AdvanceToNextTab(aData->mCurrentLine, tabWidth);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #10 %d",
-                                       (int) aData->mCurrentLine);
       aData->mCurrentLine = nscoord(afterTab + spacing.mAfter);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #11 %d",
-                                       (int) aData->mCurrentLine);
       wordStart = i + 1;
     } else if (i < flowEndInTextRun ||
         (i == textRun->GetLength() &&
@@ -8692,9 +8656,6 @@ nsTextFrame::AddInlineMinISizeForFlow(gfxContext *aRenderingContext,
                        iter.ConvertSkippedToOriginal(flowEndInTextRun - 1),
                        textStyle);
   }
-
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISizeForFlow #12 %d",
-                                   (int) aData->mCurrentLine);
 }
 
 bool nsTextFrame::IsCurrentFontInflation(float aInflation) const {
@@ -8707,9 +8668,6 @@ bool nsTextFrame::IsCurrentFontInflation(float aInflation) const {
 nsTextFrame::AddInlineMinISize(gfxContext *aRenderingContext,
                                nsIFrame::InlineMinISizeData *aData)
 {
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISize #1 %d",
-                                   (int) aData->mCurrentLine);
-
   float inflation = nsLayoutUtils::FontSizeInflationFor(this);
   TextRunType trtype = (inflation == 1.0f) ? eNotInflated : eInflated;
 
@@ -8719,16 +8677,11 @@ nsTextFrame::AddInlineMinISize(gfxContext *aRenderingContext,
     ClearTextRun(nullptr, nsTextFrame::eInflated);
   }
 
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISize #2 %d",
-                                   (int) aData->mCurrentLine);
-
   nsTextFrame* f;
   const gfxTextRun* lastTextRun = nullptr;
   // nsContinuingTextFrame does nothing for AddInlineMinISize; all text frames
   // in the flow are handled right here.
   for (f = this; f; f = f->GetNextContinuation()) {
-    recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISize #3 %d",
-                                     (int) aData->mCurrentLine);
     // f->GetTextRun(nsTextFrame::eNotInflated) could be null if we
     // haven't set up textruns yet for f.  Except in OOM situations,
     // lastTextRun will only be null for the first text frame.
@@ -8743,17 +8696,10 @@ nsTextFrame::AddInlineMinISize(gfxContext *aRenderingContext,
       }
 
       // This will process all the text frames that share the same textrun as f.
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISize #4 %d",
-                                       (int) aData->mCurrentLine);
       f->AddInlineMinISizeForFlow(aRenderingContext, aData, trtype);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISize #5 %d",
-                                       (int) aData->mCurrentLine);
       lastTextRun = f->GetTextRun(trtype);
     }
   }
-
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlineMinISize %d",
-                                   (int) aData->mCurrentLine);
 }
 
 // XXX this doesn't handle characters shaped by line endings. We need to
@@ -8873,9 +8819,6 @@ nsTextFrame::AddInlinePrefISizeForFlow(gfxContext *aRenderingContext,
 nsTextFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
                                 nsIFrame::InlinePrefISizeData *aData)
 {
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlinePrefISize #5 %d",
-                                   (int) aData->mCurrentLine);
-
   float inflation = nsLayoutUtils::FontSizeInflationFor(this);
   TextRunType trtype = (inflation == 1.0f) ? eNotInflated : eInflated;
 
@@ -8885,16 +8828,11 @@ nsTextFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
     ClearTextRun(nullptr, nsTextFrame::eInflated);
   }
 
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlinePrefISize #4 %d",
-                                   (int) aData->mCurrentLine);
-
   nsTextFrame* f;
   const gfxTextRun* lastTextRun = nullptr;
   // nsContinuingTextFrame does nothing for AddInlineMinISize; all text frames
   // in the flow are handled right here.
   for (f = this; f; f = f->GetNextContinuation()) {
-    recordreplay::RecordReplayAssert("nsTextFrame::AddInlinePrefISize #1 %d",
-                                     (int) aData->mCurrentLine);
     // f->GetTextRun(nsTextFrame::eNotInflated) could be null if we
     // haven't set up textruns yet for f.  Except in OOM situations,
     // lastTextRun will only be null for the first text frame.
@@ -8909,17 +8847,10 @@ nsTextFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
       }
 
       // This will process all the text frames that share the same textrun as f.
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlinePrefISize #2 %d",
-                                       (int) aData->mCurrentLine);
       f->AddInlinePrefISizeForFlow(aRenderingContext, aData, trtype);
-      recordreplay::RecordReplayAssert("nsTextFrame::AddInlinePrefISize #3 %d",
-                                       (int) aData->mCurrentLine);
       lastTextRun = f->GetTextRun(trtype);
     }
   }
-
-  recordreplay::RecordReplayAssert("nsTextFrame::AddInlinePrefISize %d",
-                                   (int) aData->mCurrentLine);
 }
 
 /* virtual */
@@ -9291,22 +9222,12 @@ private:
 };
 #endif
 
-static void
-AssertReflowStatus(const char* aPrefix, nsTextFrame* aFrame, const nsReflowStatus& aReflowStatus)
-{
-  recordreplay::RecordReplayAssert("%s %d %d", aPrefix,
-                                   (int) recordreplay::ThingIndex(aFrame),
-                                   (int) aReflowStatus.IsFullyComplete());
-}
-
 void
 nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
                         DrawTarget* aDrawTarget,
                         ReflowOutput& aMetrics,
                         nsReflowStatus& aStatus)
 {
-  AssertReflowStatus("nsTextFrame::ReflowText", this, aStatus);
-
   MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
 
 #ifdef NOISY_REFLOW
@@ -9525,7 +9446,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     : -1;
   PropertyProvider provider(mTextRun, textStyle, frag, this, iter, length,
       lineContainer, xOffsetForTabs, nsTextFrame::eInflated);
-  recordreplay::RecordReplayAssert("nsTextFrame::ReflowText ENDHINT #1 %d", (int) provider.GetEndHint().GetOriginalOffset());
 
   uint32_t transformedOffset = provider.GetStart().GetSkippedOffset();
 
@@ -9587,7 +9507,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   } else if (!aLineLayout.LineIsBreakable()) {
     suppressBreak = gfxTextRun::eSuppressInitialBreak;
   }
-  recordreplay::RecordReplayAssert("nsTextFrame::ReflowText ENDHINT #2 %d %d", (int) provider.GetEndHint().GetOriginalOffset(), (int) aAvailableWidth);
   uint32_t transformedCharsFit =
     mTextRun->BreakAndMeasureText(transformedOffset, transformedLength,
                                   (GetStateBits() & TEXT_START_OF_LINE) != 0,
@@ -9599,7 +9518,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
                                   aDrawTarget,
                                   &usedHyphenation, &transformedLastBreak,
                                   textStyle->WordCanWrap(this), &breakPriority);
-  recordreplay::RecordReplayAssert("nsTextFrame::ReflowText ENDHINT #3 %d", (int) provider.GetEndHint().GetOriginalOffset());
   if (!length && !textMetrics.mAscent && !textMetrics.mDescent) {
     // If we're measuring a zero-length piece of text, update
     // the height manually.
@@ -9617,18 +9535,14 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   // by this frame. Basically, its original-string offset is offset+charsFit
   // after we've computed charsFit.
   gfxSkipCharsIterator end(provider.GetEndHint());
-  recordreplay::RecordReplayAssert("nsTextFrame::ReflowText ENDHINT LAST %d", (int) provider.GetEndHint().GetOriginalOffset());
   end.SetSkippedOffset(transformedOffset + transformedCharsFit);
-  recordreplay::RecordReplayAssert("nsTextFrame::ReflowText WHAT WHAT %d %d %d", (int) transformedOffset, (int) transformedCharsFit, (int) provider.GetEndHint().GetOriginalOffset());
   int32_t charsFit = end.GetOriginalOffset() - offset;
-  recordreplay::RecordReplayAssert("nsTextFrame::ReflowText CHARSFIT #1 %d %d", (int) end.GetOriginalOffset(), (int) offset);
   if (offset + charsFit == newLineOffset) {
     // We broke before a trailing preformatted '\n'. The newline should
     // be assigned to this frame. Note that newLineOffset will be -1 if
     // there was no preformatted newline, so we wouldn't get here in that
     // case.
     ++charsFit;
-    recordreplay::RecordReplayAssert("nsTextFrame::ReflowText CHARSFIT #2 %d", (int) charsFit);
   }
   // That might have taken us beyond our assigned content range (because
   // we might have advanced over some skipped chars that extend outside
@@ -9636,7 +9550,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   int32_t lastBreak = -1;
   if (charsFit >= limitLength) {
     charsFit = limitLength;
-    recordreplay::RecordReplayAssert("nsTextFrame::ReflowText CHARSFIT #3 %d", (int) charsFit);
     if (transformedLastBreak != UINT32_MAX) {
       // lastBreak is needed.
       // This may set lastBreak greater than 'length', but that's OK
@@ -9700,9 +9613,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   }
 
   int32_t contentLength = offset + charsFit - GetContentOffset();
-
-  recordreplay::RecordReplayAssert("nsTextFrame CHARSFIT #4 %d %d %d",
-                                   (int) offset, (int) charsFit, (int) GetContentOffset());
 
   /////////////////////////////////////////////////////////////////////
   // Compute output metrics
@@ -9844,38 +9754,25 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     }
   }
 
-  AssertReflowStatus("nsTextFrame::ReflowText #1", this, aStatus);
-
-  recordreplay::RecordReplayAssert("nsTextFrame CONTENT %d %d", (int) contentLength, (int) maxContentLength);
-
   // Compute reflow status
   if (contentLength != maxContentLength) {
-    AssertReflowStatus("nsTextFrame::ReflowText #2", this, aStatus);
     aStatus.SetIncomplete();
   }
-  AssertReflowStatus("nsTextFrame::ReflowText #3", this, aStatus);
 
   if (charsFit == 0 && length > 0 && !usedHyphenation) {
-    AssertReflowStatus("nsTextFrame::ReflowText #4", this, aStatus);
     // Couldn't place any text
     aStatus.SetInlineLineBreakBeforeAndReset();
   } else if (contentLength > 0 && mContentOffset + contentLength - 1 == newLineOffset) {
-    AssertReflowStatus("nsTextFrame::ReflowText #5", this, aStatus);
     // Ends in \n
     aStatus.SetInlineLineBreakAfter();
     aLineLayout.SetLineEndsInBR(true);
   } else if (breakAfter) {
-    AssertReflowStatus("nsTextFrame::ReflowText #6", this, aStatus);
     aStatus.SetInlineLineBreakAfter();
   }
-  AssertReflowStatus("nsTextFrame::ReflowText #7", this, aStatus);
   if (completedFirstLetter) {
-    AssertReflowStatus("nsTextFrame::ReflowText #7.1", this, aStatus);
     aLineLayout.SetFirstLetterStyleOK(false);
     aStatus.SetFirstLetterComplete();
-    AssertReflowStatus("nsTextFrame::ReflowText #7.2", this, aStatus);
   }
-  AssertReflowStatus("nsTextFrame::ReflowText #8", this, aStatus);
 
   // Updated the cached NewlineProperty, or delete it.
   if (contentLength < maxContentLength &&
@@ -9914,8 +9811,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   SetLength(contentLength, &aLineLayout, ALLOW_FRAME_CREATION_AND_DESTRUCTION);
 
   InvalidateFrame();
-
-  AssertReflowStatus("nsTextFrame::ReflowText #8", this, aStatus);
 
 #ifdef NOISY_REFLOW
   ListTag(stdout);

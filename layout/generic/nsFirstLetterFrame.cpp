@@ -115,7 +115,6 @@ nsFirstLetterFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
 {
   DoInlineIntrinsicISize(aRenderingContext, aData, nsLayoutUtils::PREF_ISIZE);
   aData->mLineIsEmpty = false;
-  recordreplay::RecordReplayAssert("nsFirstLetterFrame::AddInlinePrefISize %d", (int) aData->mCurrentLine);
 }
 
 // Needed for floating first-letter frames.

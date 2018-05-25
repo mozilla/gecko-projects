@@ -109,8 +109,6 @@ ScriptElement::ContentInserted(nsIContent* aChild)
 bool
 ScriptElement::MaybeProcessScript()
 {
-  recordreplay::RecordReplayAssert("ScriptElement::MaybeProcessScript");
-
   nsCOMPtr<nsIContent> cont =
     do_QueryInterface((nsIScriptElement*) this);
 
@@ -119,7 +117,6 @@ ScriptElement::MaybeProcessScript()
 
   if (mAlreadyStarted || !mDoneAddingChildren ||
       !cont->GetComposedDoc() || mMalformed || !HasScriptContent()) {
-    recordreplay::RecordReplayAssert("ScriptElement::MaybeProcessScript #1");
     return false;
   }
 
@@ -135,7 +132,6 @@ ScriptElement::MaybeProcessScript()
       nsCOMPtr<nsIDocument> parserDoc = do_QueryInterface(sink->GetTarget());
       if (ownerDoc != parserDoc) {
         // Willful violation of HTML5 as of 2010-12-01
-        recordreplay::RecordReplayAssert("ScriptElement::MaybeProcessScript #2");
         return false;
       }
     }

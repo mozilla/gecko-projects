@@ -265,7 +265,6 @@ nsInlineFrame::AddInlinePrefISize(gfxContext *aRenderingContext,
 {
   DoInlineIntrinsicISize(aRenderingContext, aData, nsLayoutUtils::PREF_ISIZE);
   aData->mLineIsEmpty = false;
-  recordreplay::RecordReplayAssert("nsInlineFrame::AddInlinePrefISize %d", (int) aData->mCurrentLine);
 }
 
 /* virtual */

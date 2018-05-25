@@ -105,8 +105,6 @@ nsPlaceholderFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
     aData->mFloats.AppendElement(
       InlineIntrinsicISizeData::FloatInfo(mOutOfFlowFrame, floatWidth));
   }
-
-  recordreplay::RecordReplayAssert("nsPlaceholderFrame::AddInlinePrefISize %d", (int) aData->mCurrentLine);
 }
 
 void

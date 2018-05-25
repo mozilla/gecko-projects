@@ -435,8 +435,6 @@ NS_IdleDispatchToCurrentThread(already_AddRefed<nsIRunnable>&& aEvent,
 nsresult
 NS_ProcessPendingEvents(nsIThread* aThread, PRIntervalTime aTimeout)
 {
-  mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents");
-
   nsresult rv = NS_OK;
 
 #ifdef MOZILLA_INTERNAL_API
@@ -459,21 +457,15 @@ NS_ProcessPendingEvents(nsIThread* aThread, PRIntervalTime aTimeout)
 
   PRIntervalTime start = PR_IntervalNow();
   for (;;) {
-    mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents #1");
     bool processedEvent;
     rv = aThread->ProcessNextEvent(false, &processedEvent);
-    mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents #1.1 %d %d", (int) rv, processedEvent);
     if (NS_FAILED(rv) || !processedEvent) {
-      mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents #2");
       break;
     }
     if (PR_IntervalNow() - start > aTimeout) {
-      mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents #3");
       break;
     }
-    mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents #4");
   }
-  mozilla::recordreplay::RecordReplayAssert("NS_ProcessPendingEvents #5");
   return rv;
 }
 #endif // XPCOM_GLUE_AVOID_NSPR

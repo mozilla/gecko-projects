@@ -10006,10 +10006,6 @@ nsLayoutUtils::ApplyMinFontSize(nsStyleFont* aFont,
                                 const nsPresContext* aPresContext,
                                 nscoord aMinFontSize)
 {
-  recordreplay::RecordReplayAssert("nsLayoutUtils::ApplyMinFontSize %d %d %.2f %d",
-                                   aFont->mSize, aMinFontSize,
-                                   (float) aFont->mMinFontSizeRatio, aPresContext->IsChrome());
-
   nscoord fontSize = aFont->mSize;
 
   // enforce the user' specified minimum font-size on the value that we expose
@@ -10050,9 +10046,6 @@ nsLayoutUtils::ComputeSystemFont(nsFont* aSystemFont, LookAndFeel::FontID aFontI
       NSFloatPixelsToAppUnits(fontStyle.size,
                               aPresContext->DeviceContext()->
                                 AppUnitsPerDevPixelAtUnitFullZoom());
-    recordreplay::RecordReplayAssert("nsLayoutUtils::ComputeSystemFont #1 %d %d %d",
-                                     (int) aSystemFont->size, (int) fontStyle.size,
-                                     (int) aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
     //aSystemFont->langGroup = fontStyle.langGroup;
     aSystemFont->sizeAdjust = fontStyle.sizeAdjust;
 

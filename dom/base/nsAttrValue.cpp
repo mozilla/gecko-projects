@@ -37,8 +37,6 @@ using namespace mozilla;
 bool
 MiscContainer::GetString(nsAString& aString) const
 {
-  mozilla::recordreplay::RecordReplayAssert("MiscContainer::GetString");
-
   void* ptr = MISC_STR_PTR(this);
 
   if (!ptr) {
@@ -556,8 +554,6 @@ nsAttrValue::SwapValueWith(nsAttrValue& aOther)
 void
 nsAttrValue::ToString(nsAString& aResult) const
 {
-  mozilla::recordreplay::RecordReplayAssert("nsAttrValue::ToString");
-
   MiscContainer* cont = nullptr;
   if (BaseType() == eOtherBase) {
     cont = GetMiscContainer();

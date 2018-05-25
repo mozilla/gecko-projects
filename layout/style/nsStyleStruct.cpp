@@ -119,8 +119,6 @@ nsStyleFont::nsStyleFont(const nsFont& aFont, const nsPresContext* aContext)
 {
   MOZ_COUNT_CTOR(nsStyleFont);
   mFont.size = mSize;
-
-  recordreplay::RecordReplayAssert("nsStyleFont::nsStyleFont %d %d", mFont.size, mSize);
 }
 
 nsStyleFont::nsStyleFont(const nsStyleFont& aSrc)
@@ -156,7 +154,6 @@ nsStyleFont::nsStyleFont(const nsPresContext* aContext)
   } else {
     mFont.size = mSize;
   }
-  recordreplay::RecordReplayAssert("nsStyleFont::nsStyleFont #2 %d", mFont.size);
 }
 
 void
@@ -177,7 +174,6 @@ nsStyleFont::EnableZoom(nsPresContext* aContext, bool aEnable)
     mScriptUnconstrainedSize =
       nsStyleFont::UnZoomText(aContext, mScriptUnconstrainedSize);
   }
-  recordreplay::RecordReplayAssert("nsStyleFont::EnableZoom %d %d", mSize, mFont.size);
 }
 
 nsChangeHint

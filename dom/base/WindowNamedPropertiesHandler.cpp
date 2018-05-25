@@ -99,9 +99,6 @@ WindowNamedPropertiesHandler::getOwnPropDescriptor(JSContext* aCx,
     return false;
   }
 
-  recordreplay::RecordReplayAssert("WindowNamedPropertiesHandler::getOwnPropDescriptor #1 %s",
-                                   NS_ConvertUTF16toUTF8(str).get());
-
   if(str.IsEmpty()) {
     return true;
   }
@@ -111,11 +108,7 @@ WindowNamedPropertiesHandler::getOwnPropDescriptor(JSContext* aCx,
   nsGlobalWindowInner* win = xpc::WindowOrNull(global);
   if (win->Length() > 0) {
     nsCOMPtr<nsPIDOMWindowOuter> childWin = win->GetChildWindow(str);
-    recordreplay::RecordReplayAssert("WindowNamedPropertiesHandler::getOwnPropDescriptor #2");
-
     if (childWin && ShouldExposeChildWindow(str, childWin)) {
-      recordreplay::RecordReplayAssert("WindowNamedPropertiesHandler::getOwnPropDescriptor #3");
-
       // We found a subframe of the right name. Shadowing via |var foo| in
       // global scope is still allowed, since |var| only looks up |own|
       // properties. But unqualified shadowing will fail, per-spec.
@@ -128,8 +121,6 @@ WindowNamedPropertiesHandler::getOwnPropDescriptor(JSContext* aCx,
     }
   }
 
-  recordreplay::RecordReplayAssert("WindowNamedPropertiesHandler::getOwnPropDescriptor #4");
-
   // The rest of this function is for HTML documents only.
   nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(win->GetExtantDoc());
   if (!htmlDoc) {
@@ -139,10 +130,6 @@ WindowNamedPropertiesHandler::getOwnPropDescriptor(JSContext* aCx,
 
   Element* element = document->GetElementById(str);
   if (element) {
-    recordreplay::RecordReplayAssert("WrapObject %d %S",
-                                     recordreplay::ThingIndex(static_cast<nsWrapperCache*>(element)),
-                                     str.get());
-
     JS::Rooted<JS::Value> v(aCx);
     if (!WrapObject(aCx, element, &v)) {
       return false;

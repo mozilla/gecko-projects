@@ -16,23 +16,6 @@
 
 using namespace mozilla;
 
-static void
-RecordReplayAssertCoord(const char* aPrefix, nsStyleUnit aOtherUnit,
-                        const nsStyleUnion& aOtherValue)
-{
-  recordreplay::RecordReplayAssert("RecordReplayAssertCoord %s %d %d",
-                                   aPrefix,
-                                   (int) aOtherUnit,
-                                   (aOtherUnit == eStyleUnit_Coord) ? aOtherValue.mInt : 0);
-}
-
-void
-RecordReplayAssertCoord(nsStyleUnit aOtherUnit,
-                        const nsStyleUnion& aOtherValue)
-{
-  RecordReplayAssertCoord("#1", aOtherUnit, aOtherValue);
-}
-
 nsStyleCoord::nsStyleCoord(nsStyleUnit aUnit)
   : mUnit(aUnit)
 {
@@ -41,7 +24,6 @@ nsStyleCoord::nsStyleCoord(nsStyleUnit aUnit)
     mUnit = eStyleUnit_Null;
   }
   mValue.mInt = 0;
-  RecordReplayAssertCoord("#2", mUnit, mValue);
 }
 
 nsStyleCoord::nsStyleCoord(int32_t aValue, nsStyleUnit aUnit)
@@ -59,7 +41,6 @@ nsStyleCoord::nsStyleCoord(int32_t aValue, nsStyleUnit aUnit)
     mUnit = eStyleUnit_Null;
     mValue.mInt = 0;
   }
-  RecordReplayAssertCoord("#3", mUnit, mValue);
 }
 
 nsStyleCoord::nsStyleCoord(float aValue, nsStyleUnit aUnit)
@@ -72,7 +53,6 @@ nsStyleCoord::nsStyleCoord(float aValue, nsStyleUnit aUnit)
   } else {
     mValue.mFloat = aValue;
   }
-  RecordReplayAssertCoord("#4", mUnit, mValue);
 }
 
 bool nsStyleCoord::operator==(const nsStyleCoord& aOther) const
@@ -115,7 +95,6 @@ void nsStyleCoord::SetCoordValue(nscoord aValue)
   Reset();
   mUnit = eStyleUnit_Coord;
   mValue.mInt = aValue;
-  RecordReplayAssertCoord("#5", mUnit, mValue);
 }
 
 void nsStyleCoord::SetIntValue(int32_t aValue, nsStyleUnit aUnit)
@@ -128,7 +107,6 @@ void nsStyleCoord::SetIntValue(int32_t aValue, nsStyleUnit aUnit)
     mUnit = aUnit;
     mValue.mInt = aValue;
   }
-  RecordReplayAssertCoord("#6", mUnit, mValue);
 }
 
 void nsStyleCoord::SetPercentValue(float aValue)
@@ -136,7 +114,6 @@ void nsStyleCoord::SetPercentValue(float aValue)
   Reset();
   mUnit = eStyleUnit_Percent;
   mValue.mFloat = aValue;
-  RecordReplayAssertCoord("#7", mUnit, mValue);
 }
 
 void nsStyleCoord::SetFactorValue(float aValue)
@@ -144,7 +121,6 @@ void nsStyleCoord::SetFactorValue(float aValue)
   Reset();
   mUnit = eStyleUnit_Factor;
   mValue.mFloat = aValue;
-  RecordReplayAssertCoord("#8", mUnit, mValue);
 }
 
 void nsStyleCoord::SetAngleValue(float aValue, nsStyleUnit aUnit)
@@ -157,13 +133,8 @@ void nsStyleCoord::SetAngleValue(float aValue, nsStyleUnit aUnit)
     mUnit = aUnit;
     mValue.mFloat = aValue;
   } else {
-    MOZ_CRASH();
     NS_NOTREACHED("not an angle value");
   }
-  recordreplay::RecordReplayAssert("RecordReplayAssertCoord SetAngleValue %d %d",
-                                   (int) mUnit,
-                                   (mUnit == eStyleUnit_Coord) ? mValue.mInt : 0);
-  RecordReplayAssertCoord("#9", mUnit, mValue);
 }
 
 void nsStyleCoord::SetFlexFractionValue(float aValue)
@@ -171,7 +142,6 @@ void nsStyleCoord::SetFlexFractionValue(float aValue)
   Reset();
   mUnit = eStyleUnit_FlexFraction;
   mValue.mFloat = aValue;
-  RecordReplayAssertCoord("#10", mUnit, mValue);
 }
 
 void nsStyleCoord::SetCalcValue(Calc* aValue)
@@ -180,7 +150,6 @@ void nsStyleCoord::SetCalcValue(Calc* aValue)
   mUnit = eStyleUnit_Calc;
   mValue.mPointer = aValue;
   aValue->AddRef();
-  RecordReplayAssertCoord("#11", mUnit, mValue);
 }
 
 void nsStyleCoord::SetNormalValue()
@@ -188,7 +157,6 @@ void nsStyleCoord::SetNormalValue()
   Reset();
   mUnit = eStyleUnit_Normal;
   mValue.mInt = 0;
-  RecordReplayAssertCoord("#12", mUnit, mValue);
 }
 
 void nsStyleCoord::SetAutoValue()
@@ -196,7 +164,6 @@ void nsStyleCoord::SetAutoValue()
   Reset();
   mUnit = eStyleUnit_Auto;
   mValue.mInt = 0;
-  RecordReplayAssertCoord("#13", mUnit, mValue);
 }
 
 void nsStyleCoord::SetNoneValue()
@@ -204,7 +171,6 @@ void nsStyleCoord::SetNoneValue()
   Reset();
   mUnit = eStyleUnit_None;
   mValue.mInt = 0;
-  RecordReplayAssertCoord("#14", mUnit, mValue);
 }
 
 // accessors that are not inlined

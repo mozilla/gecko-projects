@@ -897,15 +897,10 @@ nsImageFrame::ComputeSize(gfxContext *aRenderingContext,
     }
   }
 
-  LogicalSize result = ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
+  return ComputeSizeWithIntrinsicDimensions(aRenderingContext, aWM,
                                             intrinsicSize, mIntrinsicRatio,
                                             aCBSize, aMargin, aBorder, aPadding,
                                             aFlags);
-
-  recordreplay::RecordReplayAssert("nsImageFrame::ComputeSize %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
-  return result;
 }
 
 // XXXdholbert This function's clients should probably just be calling

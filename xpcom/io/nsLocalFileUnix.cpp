@@ -395,12 +395,7 @@ NS_IMETHODIMP
 nsLocalFile::OpenNSPRFileDesc(int32_t aFlags, int32_t aMode,
                               PRFileDesc** aResult)
 {
-  recordreplay::RecordReplayAssert("nsLocalFile::OpenNSPRFileDesc");
-
   *aResult = PR_Open(mPath.get(), aFlags, aMode);
-
-  recordreplay::RecordReplayAssert("nsLocalFile::OpenNSPRFileDesc #1");
-
   if (!*aResult) {
     return NS_ErrorAccordingToNSPR();
   }

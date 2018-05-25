@@ -3870,14 +3870,10 @@ CanvasRenderingContext2D::StrokeText(const nsAString& aText, double aX,
   aError = DrawOrMeasureText(aText, aX, aY, aMaxWidth, TextDrawOperation::STROKE, nullptr);
 }
 
-extern "C" const char* JS_CurrentExecutionPoint();
-
 TextMetrics*
 CanvasRenderingContext2D::MeasureText(const nsAString& aRawText,
                                       ErrorResult& aError)
 {
-  recordreplay::RecordReplayAssert("CanvasRenderingContext2D::MeasureText %s", JS_CurrentExecutionPoint());
-
   float width;
   Optional<double> maxWidth;
   aError = DrawOrMeasureText(aRawText, 0, 0, maxWidth, TextDrawOperation::MEASURE, &width);

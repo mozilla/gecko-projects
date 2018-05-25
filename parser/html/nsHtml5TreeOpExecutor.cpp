@@ -482,7 +482,6 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
       for (nsHtml5TreeOperation* iter = first;; ++iter) {
         if (MOZ_UNLIKELY(!mParser)) {
           // The previous tree op caused a call to nsIParser::Terminate().
-          recordreplay::RecordReplayAssert("nsHtml5TreeOpExecutor::RunFlushLoop Terminate #1");
           return;
         }
         MOZ_ASSERT(IsInDocUpdate(),
@@ -501,8 +500,6 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
                    MOZ_UNLIKELY(nsContentSink::DidProcessATokenImpl() ==
                                 NS_ERROR_HTMLPARSER_INTERRUPTED)) {
 
-          recordreplay::RecordReplayAssert("nsHtml5TreeOpExecutor::RunFlushLoop Interrupted");
-
           autoFlush.SetNumberOfOpsToRemove((iter - first) + 1);
 
           nsHtml5TreeOpExecutor::ContinueInterruptedParsingAsync();
@@ -511,7 +508,6 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
       }
 
       if (MOZ_UNLIKELY(!mParser)) {
-        recordreplay::RecordReplayAssert("nsHtml5TreeOpExecutor::RunFlushLoop Terminate #2");
         // The parse ended during an update pause.
         return;
       }
@@ -521,13 +517,11 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
     } // end autoFlush
 
     if (MOZ_UNLIKELY(!mParser)) {
-      recordreplay::RecordReplayAssert("nsHtml5TreeOpExecutor::RunFlushLoop Terminate #3");
       // Ending the doc update caused a call to nsIParser::Terminate().
       return;
     }
 
     if (streamEnded) {
-      recordreplay::RecordReplayAssert("nsHtml5TreeOpExecutor::RunFlushLoop StreamEnded");
       DidBuildModel(false);
 #ifdef DEBUG
       if (scriptElement) {
@@ -541,7 +535,6 @@ nsHtml5TreeOpExecutor::RunFlushLoop()
 #endif
     } else if (scriptElement) {
       // must be tail call when mFlushState is eNotFlushing
-      recordreplay::RecordReplayAssert("nsHtml5TreeOpExecutor::RunFlushLoop Call RunScript");
       RunScript(scriptElement);
 
       // Always check the clock in nsContentSink right after a script

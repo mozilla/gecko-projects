@@ -4743,8 +4743,6 @@ ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, Value* rva
 static bool
 ExecuteScript(JSContext* cx, AutoObjectVector& envChain, HandleScript scriptArg, Value* rval)
 {
-    mozilla::recordreplay::RecordReplayAssert("ExecuteScript %s", scriptArg->filename());
-
     RootedObject env(cx);
     RootedScope dummy(cx);
     if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &dummy))

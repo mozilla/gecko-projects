@@ -417,8 +417,6 @@ protected:
   nsStyleUnion  mValues[8];
 };
 
-void RecordReplayAssertCoord(nsStyleUnit aOtherUnit,
-                             const nsStyleUnion& aOtherValue);
 
 // -------------------------
 // nsStyleCoord inlines
@@ -427,7 +425,6 @@ inline nsStyleCoord::nsStyleCoord(nscoord aValue, CoordConstructorType)
   : mUnit(eStyleUnit_Coord)
 {
   mValue.mInt = aValue;
-  RecordReplayAssertCoord(mUnit, mValue);
 }
 
 inline nsStyleCoord::nsStyleCoord(const nsStyleCoord& aCopy)
@@ -557,8 +554,6 @@ nsStyleCoord::InitWithValue(nsStyleUnit& aUnit,
                             nsStyleUnit aOtherUnit,
                             const nsStyleUnion& aOtherValue)
 {
-  RecordReplayAssertCoord(aOtherUnit, aOtherValue);
-
   aUnit = aOtherUnit;
   aValue = aOtherValue;
 

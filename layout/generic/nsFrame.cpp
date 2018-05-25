@@ -5345,7 +5345,6 @@ nsFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
   nscoord isize = nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                     this, nsLayoutUtils::PREF_ISIZE);
   aData->DefaultAddInlinePrefISize(isize);
-  recordreplay::RecordReplayAssert("nsFrame::AddInlinePrefISize %d", (int) aData->mCurrentLine);
 }
 
 void
@@ -5419,12 +5418,9 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
              aBreakType == StyleClear::Right,
              "Must be a physical break type");
 
-  recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak %d %d", (int) mCurrentLine, (int) mPrevLines);
-
   // If this force break is not clearing any float, we can leave all the
   // floats to the next force break.
   if (mFloats.Length() != 0 && aBreakType != StyleClear::None) {
-    recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #1 %d %d", (int) mCurrentLine, (int) mPrevLines);
             // preferred widths accumulated for floats that have already
             // been cleared past
     nscoord floats_done = 0,
@@ -5435,7 +5431,6 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
     const WritingMode wm = mLineContainerWM;
 
     for (uint32_t i = 0, i_end = mFloats.Length(); i != i_end; ++i) {
-      recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #2 %d %d", (int) mCurrentLine, (int) mPrevLines);
       const FloatInfo& floatInfo = mFloats[i];
       const nsStyleDisplay* floatDisp = floatInfo.Frame()->StyleDisplay();
       StyleClear breakType = floatDisp->PhysicalBreakType(wm);
@@ -5472,10 +5467,7 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
 
     mCurrentLine = NSCoordSaturatingAdd(mCurrentLine, floats_done);
 
-    recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #3 %d %d", (int) mCurrentLine, (int) mPrevLines);
-
     if (aBreakType == StyleClear::Both) {
-      recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #3.1 %d %d", (int) mCurrentLine, (int) mPrevLines);
       mFloats.Clear();
     } else {
       // If the break type does not clear all floats, it means there may
@@ -5492,7 +5484,6 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
       // Iterate the array in reverse so that we can stop when there are
       // no longer any floats we need to keep. See below.
       for (FloatInfo& floatInfo : Reversed(mFloats)) {
-        recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #4 %d %d", (int) mCurrentLine, (int) mPrevLines);
         const nsStyleDisplay* floatDisp = floatInfo.Frame()->StyleDisplay();
         if (floatDisp->PhysicalFloats(wm) != clearFloatType) {
           newFloats.AppendElement(floatInfo);
@@ -5516,14 +5507,9 @@ nsIFrame::InlinePrefISizeData::ForceBreak(StyleClear aBreakType)
     }
   }
 
-  recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #5 %d %d", (int) mCurrentLine, (int) mPrevLines);
-
   mCurrentLine =
     NSCoordSaturatingSubtract(mCurrentLine, mTrailingWhitespace, nscoord_MAX);
   mPrevLines = std::max(mPrevLines, mCurrentLine);
-
-  recordreplay::RecordReplayAssert("nsIFrame::InlinePrefISizeData::ForceBreak #6 %d %d", (int) mCurrentLine, (int) mPrevLines);
-
   mCurrentLine = mTrailingWhitespace = 0;
   mSkipWhitespace = true;
   mLineIsEmpty = true;
@@ -5645,9 +5631,6 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
                                        aFlags);
   const nsStylePosition *stylePos = StylePosition();
 
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize #7 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
   LogicalSize boxSizingAdjust(aWM);
   if (stylePos->mBoxSizing == StyleBoxSizing::Border) {
     boxSizingAdjust = aBorder + aPadding;
@@ -5751,9 +5734,6 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
     }
   }
 
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize #6 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
   // Flex items ignore their min & max sizing properties in their
   // flex container's main-axis.  (Those properties get applied later in
   // the flexbox algorithm.)
@@ -5767,9 +5747,6 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
                         maxISizeCoord, aFlags);
     result.ISize(aWM) = std::min(maxISize, result.ISize(aWM));
   }
-
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize #5 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
 
   const nsStyleCoord& minISizeCoord = stylePos->MinISize(aWM);
   nscoord minISize;
@@ -5806,9 +5783,6 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
     minISize = 0;
   }
   result.ISize(aWM) = std::max(minISize, result.ISize(aWM));
-
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize #4 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
 
   // Compute block-axis size
   // (but not if we have auto bsize or if we received the "eUseAutoBSize"
@@ -5848,9 +5822,6 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
         }
       }
     }
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize #3 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
-
   }
 
   const nsStyleCoord& maxBSizeCoord = stylePos->MaxBSize(aWM);
@@ -5875,8 +5846,6 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
                                          minBSizeCoord);
       result.BSize(aWM) = std::max(minBSize, result.BSize(aWM));
     }
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize #1 %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
   }
 
   const nsStyleDisplay *disp = StyleDisplay();
@@ -5903,15 +5872,10 @@ nsFrame::ComputeSize(gfxContext*         aRenderingContext,
     if (size.ISize(aWM) > result.ISize(aWM) || !canOverride) {
       result.ISize(aWM) = size.ISize(aWM);
     }
-    recordreplay::RecordReplayAssert("nsFrame::ComputeSize #2 %d %d",
-                                     (int) result.ISize(aWM), (int) result.BSize(aWM));
   }
 
   result.ISize(aWM) = std::max(0, result.ISize(aWM));
   result.BSize(aWM) = std::max(0, result.BSize(aWM));
-
-  recordreplay::RecordReplayAssert("nsFrame::ComputeSize %d %d",
-                                   (int) result.ISize(aWM), (int) result.BSize(aWM));
 
   return result;
 }
@@ -6427,14 +6391,9 @@ nsFrame::ShrinkWidthToFit(gfxContext*         aRenderingContext,
     if (prefISize > aISizeInCB) {
       result = aISizeInCB;
     } else {
-      recordreplay::RecordReplayAssert("nsFrame::ShrinkWidthToFit #1 %d", (int) prefISize);
       result = prefISize;
     }
   }
-
-  recordreplay::RecordReplayAssert("nsFrame::ShrinkWidthToFit %d %d %d %d",
-                                   (int) result, (int) minISize, (int) aISizeInCB, (int) aFlags);
-
   return result;
 }
 
