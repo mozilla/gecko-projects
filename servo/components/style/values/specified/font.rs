@@ -564,10 +564,6 @@ impl FontFamily {
     #[cfg(feature = "gecko")]
     /// Return the generic ID if it is a single generic font
     pub fn single_generic(&self) -> Option<u8> {
-	unsafe {
-        bindings::Gecko_RecordReplayAssert("single_generic #1\0".as_ptr());
-	}
-
         match *self {
             FontFamily::Values(ref values) => values.single_generic(),
             _ => None,

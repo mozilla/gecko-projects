@@ -462,10 +462,6 @@ impl SingleFontFamily {
     fn from_font_family_name(family: &structs::FontFamilyName) -> SingleFontFamily {
         use gecko_bindings::structs::FontFamilyType;
 
-	unsafe {
-        bindings::Gecko_RecordReplayAssert(format!("from_font_family_name {}\0", family.mType as i32).as_ptr());
-	}
-
         match family.mType {
             FontFamilyType::eFamily_sans_serif => SingleFontFamily::Generic(atom!("sans-serif")),
             FontFamilyType::eFamily_serif => SingleFontFamily::Generic(atom!("serif")),
@@ -616,10 +612,6 @@ impl FontFamilyList {
     #[cfg(feature = "gecko")]
     /// Return the generic ID if it is a single generic font
     pub fn single_generic(&self) -> Option<u8> {
-	unsafe {
-        bindings::Gecko_RecordReplayAssert("single_generic #2\0".as_ptr());
-	}
-
         let mut iter = self.iter();
         if let Some(SingleFontFamily::Generic(ref name)) = iter.next() {
             if iter.next().is_none() {

@@ -2903,6 +2903,12 @@ Gecko_IsMainThread()
   return NS_IsMainThread();
 }
 
+bool
+Gecko_IsRecordingOrReplaying()
+{
+  return recordreplay::IsRecordingOrReplaying();
+}
+
 void
 Gecko_RecordReplayAssert(const uint8_t* aText)
 {
