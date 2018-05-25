@@ -20,12 +20,12 @@ namespace recordreplay {
 
 // Record/Replay Overview.
 //
-// Firefox content processes can be set up at creation time to record or replay
-// their behavior. Whether a process is recording or replaying is invariant
-// throughout its existence, except at the very beginning and end of execution.
+// Firefox content processes can be specified to record or replay their
+// behavior. Whether a process is recording or replaying is initialized at the
+// start of the main() routine, and is afterward invariant for the process.
 // A third process type, middleman processes, are normal content processes used
-// when replaying to facilitate IPC between the replaying process and the
-// chrome process.
+// when replaying to facilitate IPC between recording/replaying processes and
+// the UI process.
 //
 // Recording and replaying works by controlling non-determinism in the browser:
 // non-deterministic behaviors are initially recorded, then later replayed
@@ -58,8 +58,8 @@ namespace recordreplay {
 //
 // This file contains the main public API for places where mozilla code needs
 // to interact with the record/replay system. There are a few additional public
-// APIs in toolkit/recordreplay/ipc, for the IPC performed by replaying and
-// middleman processes.
+// APIs in toolkit/recordreplay/ipc, for the IPC performed by
+// recording/replaying processes and middleman processes.
 //
 // A more complete description of Web Replay can be found at this URL:
 // https://developer.mozilla.org/en-US/docs/WebReplay
@@ -68,19 +68,29 @@ namespace recordreplay {
 // Public API
 ///////////////////////////////////////////////////////////////////////////////
 
+// Recording and replaying is only enabled on Mac nightlies.
+#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
+
 extern MFBT_DATA bool gIsRecordingOrReplaying;
 extern MFBT_DATA bool gIsRecording;
 extern MFBT_DATA bool gIsReplaying;
 extern MFBT_DATA bool gIsMiddleman;
 
-// Whether the current process is recording or replaying an execution.
+// Get the kind of recording/replaying process this is, if any.
 static inline bool IsRecordingOrReplaying() { return gIsRecordingOrReplaying; }
 static inline bool IsRecording() { return gIsRecording; }
 static inline bool IsReplaying() { return gIsReplaying; }
-
-// Whether the current process is a middleman between a replaying process and
-// chrome process.
 static inline bool IsMiddleman() { return gIsMiddleman; }
+
+#else // XP_MACOSX && NIGHTLY_BUILD
+
+// On unsupported platforms, getting the kind of process is a no-op.
+static inline bool IsRecordingOrReplaying() { return false; }
+static inline bool IsRecording() { return false; }
+static inline bool IsReplaying() { return false; }
+static inline bool IsMiddleman() { return false; }
+
+#endif // XP_MACOSX && NIGHTLY_BUILD
 
 // Mark a region which occurs atomically wrt the recording. No two threads can
 // be in an atomic region at once, and the order in which atomic sections are
@@ -486,16 +496,18 @@ public:
   MFBT_API void Internal ##aName aFormals;                              \
   static inline void aName aFormals                                     \
   {                                                                     \
-    if (IsRecordingOrReplaying())                                       \
+    if (IsRecordingOrReplaying()) {                                     \
       Internal ##aName aActuals;                                        \
+    }                                                                   \
   }
 
 #define MOZ_MakeRecordReplayWrapper(aName, aReturnType, aDefaultValue, aFormals, aActuals) \
   MFBT_API aReturnType Internal ##aName aFormals;                       \
   static inline aReturnType aName aFormals                              \
   {                                                                     \
-    if (IsRecordingOrReplaying())                                       \
+    if (IsRecordingOrReplaying()) {                                     \
       return Internal ##aName aActuals;                                 \
+    }                                                                   \
     return aDefaultValue;                                               \
   }
 

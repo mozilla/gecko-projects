@@ -9,11 +9,8 @@
 #include "mozilla/Assertions.h"
 #include "SpinLock.h"
 
-#if defined(XP_MACOSX)
 #include <dlfcn.h>
 #include <execinfo.h>
-#endif
-
 #include <string.h>
 
 namespace mozilla {
@@ -22,12 +19,8 @@ namespace recordreplay {
 const char*
 SymbolNameRaw(void* aPtr)
 {
-#if defined(XP_MACOSX)
   Dl_info info;
   return (dladdr(aPtr, &info) && info.dli_sname) ? info.dli_sname : "???";
-#else
-  return nullptr;
-#endif
 }
 
 size_t

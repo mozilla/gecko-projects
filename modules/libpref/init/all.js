@@ -1031,7 +1031,7 @@ pref("browser.dom.window.dump.enabled", true, sticky);
 pref("toolkit.dump.emit", false);
 
 // Enable recording/replaying executions.
-#if defined(NIGHTLY_BUILD)
+#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
 pref("devtools.recordreplay.enabled", true);
 pref("devtools.recordreplay.enableRewinding", true);
 #endif

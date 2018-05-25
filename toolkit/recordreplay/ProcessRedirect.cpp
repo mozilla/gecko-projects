@@ -9,11 +9,8 @@
 #include "InfallibleVector.h"
 #include "mozilla/Sprintf.h"
 
-#include <string.h>
-
-#ifdef XP_MACOSX
 #include <dlfcn.h>
-#endif
+#include <string.h>
 
 namespace {
 
@@ -667,7 +664,6 @@ BindFunctionArgument(void* aFunction, void* aArgument, size_t aArgumentPosition,
 {
   void* res = aAssembler.Current();
 
-#ifdef XP_MACOSX
   // On x64 the argument will be in a register, so to add an extra argument for
   // the callee we just need to fill in the appropriate register for the
   // argument position with the bound argument value.
@@ -682,9 +678,6 @@ BindFunctionArgument(void* aFunction, void* aArgument, size_t aArgumentPosition,
 
   // Jump to the function that was bound.
   aAssembler.Jump(aFunction);
-#else
-  MOZ_CRASH();
-#endif
 
   return res;
 }

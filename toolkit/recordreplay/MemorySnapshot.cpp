@@ -16,11 +16,8 @@
 #include "Thread.h"
 
 #include <algorithm>
-
-#ifdef XP_MACOSX
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
-#endif
 
 //#define WANT_COUNTDOWN_THREAD 1
 

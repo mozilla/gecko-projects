@@ -9,9 +9,7 @@
 #include "ProcessRecordReplay.h"
 #include "udis86/types.h"
 
-#ifdef XP_MACOSX
 #include <sys/mman.h>
-#endif
 
 namespace mozilla {
 namespace recordreplay {

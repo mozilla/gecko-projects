@@ -177,14 +177,12 @@ __asm(
 bool
 SaveThreadState(size_t aId, int* aStackSeparator)
 {
-#if defined(XP_MACOSX)
   MOZ_ASSERT(offsetof(ThreadState, mRegisters) == atol(THREAD_REGISTERS_OFFSET));
   MOZ_ASSERT(offsetof(ThreadState, mStackPointer) == atol(THREAD_STACK_POINTER_OFFSET));
   MOZ_ASSERT(offsetof(ThreadState, mStackTop) == atol(THREAD_STACK_TOP_OFFSET));
   MOZ_ASSERT(offsetof(ThreadState, mStackTopBytes) == atol(THREAD_STACK_TOP_BYTES_OFFSET));
   MOZ_ASSERT(offsetof(ThreadState, mStackContents) == atol(THREAD_STACK_CONTENTS_OFFSET));
   MOZ_ASSERT(offsetof(ThreadState, mStackBytes) == atol(THREAD_STACK_BYTES_OFFSET));
-#endif // XP_MACOSX
 
   ThreadState* info = &gThreadState[aId];
   MOZ_RELEASE_ASSERT(!info->mShouldRestore);

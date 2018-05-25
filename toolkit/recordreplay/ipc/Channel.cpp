@@ -6,6 +6,12 @@
 
 #include "Channel.h"
 
+#include "ChildIPC.h"
+#include "ProcessRewind.h"
+#include "Thread.h"
+
+#include "MainThreadUtils.h"
+
 #include "base/process_util.h"
 
 #include <sys/socket.h>

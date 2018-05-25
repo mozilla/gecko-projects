@@ -12,9 +12,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/GuardObjects.h"
 
-#ifdef XP_MACOSX
 #include <sched.h>
-#endif
 
 namespace mozilla {
 namespace recordreplay {

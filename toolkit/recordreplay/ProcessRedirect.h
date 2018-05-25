@@ -19,9 +19,7 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Casting.h"
 
-#ifdef XP_MACOSX
 #include <errno.h>
-#endif
 
 namespace mozilla {
 namespace recordreplay {

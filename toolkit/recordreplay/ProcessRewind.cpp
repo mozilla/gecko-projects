@@ -17,10 +17,7 @@
 #include "prcvar.h"
 
 #include <setjmp.h>
-
-#ifdef XP_MACOSX
 #include <sys/time.h>
-#endif
 
 namespace mozilla {
 namespace recordreplay {

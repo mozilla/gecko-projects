@@ -11,19 +11,13 @@
 #include "MemorySnapshot.h"
 #include "Thread.h"
 
-#if defined(XP_MACOSX)
-
 #include <mach/exc.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <sys/time.h>
 
-#endif // XP_MACOSX
-
 namespace mozilla {
 namespace recordreplay {
-
-#if defined(XP_MACOSX)
 
 static mach_port_t gDirtyMemoryExceptionPort;
 
@@ -126,8 +120,6 @@ SetupDirtyMemoryHandler()
                                   THREAD_STATE_NONE);
   MOZ_RELEASE_ASSERT(kret == KERN_SUCCESS);
 }
-
-#endif // XP_MACOSX
 
 } // namespace recordreplay
 } // namespace mozilla

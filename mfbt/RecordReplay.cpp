@@ -10,7 +10,12 @@
 
 #include <stdlib.h>
 
-#ifdef XP_MACOSX
+// Recording and replaying is only enabled on Mac nightlies.
+#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
+#define ENABLE_RECORD_REPLAY
+#endif
+
+#ifdef ENABLE_RECORD_REPLAY
 #include <dlfcn.h>
 #endif
 
@@ -91,16 +96,13 @@ FOR_EACH_INTERFACE_VOID(DECLARE_SYMBOL_VOID)
 static void*
 LoadSymbol(const char* aName)
 {
+#ifdef ENABLE_RECORD_REPLAY
   void* rv = dlsym(RTLD_DEFAULT, aName);
   MOZ_RELEASE_ASSERT(rv);
   return rv;
-}
-
-static inline bool
-TestEnv(const char* env)
-{
-  const char* value = getenv(env);
-  return value && value[0];
+#else
+  return nullptr;
+#endif
 }
 
 void
@@ -157,10 +159,16 @@ FOR_EACH_INTERFACE_VOID(DEFINE_WRAPPER_VOID)
 #undef DEFINE_WRAPPER
 #undef DEFINE_WRAPPER_VOID
 
+#ifdef ENABLE_RECORD_REPLAY
+
 bool gIsRecordingOrReplaying;
 bool gIsRecording;
 bool gIsReplaying;
 bool gIsMiddleman;
+
+#endif // ENABLE_RECORD_REPLAY
+
+#undef ENABLE_RECORD_REPLAY
 
 } // recordreplay
 } // mozilla

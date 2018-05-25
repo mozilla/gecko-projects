@@ -9,38 +9,38 @@ EXPORTS.mozilla.recordreplay += [
     'ipc/ParentIPC.h',
 ]
 
-UNIFIED_SOURCES += [
-    'Assembler.cpp',
-    'Backtrace.cpp',
-    'Callback.cpp',
-    'DirtyMemoryHandler.cpp',
-    'File.cpp',
-    'HashTable.cpp',
-    'ipc/Channel.cpp',
-    'ipc/ChildIPC.cpp',
-    'ipc/ChildProcess.cpp',
-    'ipc/ParentGraphics.cpp',
-    'ipc/ParentIPC.cpp',
-    'Lock.cpp',
-    'MemorySnapshot.cpp',
-    'ProcessRecordReplay.cpp',
-    'ProcessRewind.cpp',
-    'Thread.cpp',
-    'ThreadSnapshot.cpp',
-    'Trigger.cpp',
-    'ValueIndex.cpp',
-    'WeakPointer.cpp',
-]
-
-SOURCES += [
-    # ProcessRedirect includes udis86 directly and will not compile if the
-    # udis86 headers are included elsewhere in the same compilation unit.
-    'ProcessRedirect.cpp',
-]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    SOURCES += [
+if CONFIG['OS_ARCH'] == 'Darwin' and CONFIG['NIGHTLY_BUILD']:
+    UNIFIED_SOURCES += [
+        'Assembler.cpp',
+        'Backtrace.cpp',
+        'Callback.cpp',
+        'DirtyMemoryHandler.cpp',
+        'File.cpp',
+        'HashTable.cpp',
+        'ipc/Channel.cpp',
+        'ipc/ChildIPC.cpp',
+        'ipc/ChildProcess.cpp',
+        'ipc/ParentGraphics.cpp',
+        'ipc/ParentIPC.cpp',
+        'Lock.cpp',
+        'MemorySnapshot.cpp',
+        'ProcessRecordReplay.cpp',
         'ProcessRedirectDarwin.cpp',
+        'ProcessRewind.cpp',
+        'Thread.cpp',
+        'ThreadSnapshot.cpp',
+        'Trigger.cpp',
+        'ValueIndex.cpp',
+        'WeakPointer.cpp',
+    ]
+    SOURCES += [
+        # ProcessRedirect includes udis86 directly and will not compile if the
+        # udis86 headers are included elsewhere in the same compilation unit.
+        'ProcessRedirect.cpp',
+    ]
+else:
+    UNIFIED_SOURCES += [
+        'ipc/DisabledIPC.cpp',
     ]
 
 LOCAL_INCLUDES += [

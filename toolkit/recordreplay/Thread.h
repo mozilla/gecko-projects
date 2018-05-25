@@ -12,10 +12,7 @@
 #include "Lock.h"
 #include "Monitor.h"
 
-#ifdef XP_MACOSX
 #include <pthread.h>
-#endif
-
 #include <setjmp.h>
 
 namespace mozilla {
