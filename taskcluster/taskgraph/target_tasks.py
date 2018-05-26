@@ -175,7 +175,40 @@ def target_tasks_default(full_task_graph, parameters, graph_config):
 @_target_task('ash_tasks')
 def target_tasks_ash(full_task_graph, parameters, graph_config):
     """Target tasks that only run on the ash branch."""
-    return target_tasks_default(full_task_graph, parameters, graph_config)
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        # Early return if platform is None
+        if not platform:
+            return False
+        # Only on Linux platforms
+        if 'linux' not in platform:
+            return False
+        # No random non-build jobs either. This is being purposely done as a
+        # blacklist so newly-added jobs aren't missed by default.
+        for p in ('nightly', 'haz', 'artifact', 'cov', 'add-on'):
+            if p in platform:
+                return False
+        for k in ('toolchain', 'l10n', 'static-analysis'):
+            if k in task.attributes['kind']:
+                return False
+        # and none of this linux64-asan/debug stuff
+        if platform == 'linux64-asan' and task.attributes['build_type'] == 'debug':
+            return False
+        # no non-e10s tests
+        if task.attributes.get('unittest_suite'):
+            if not task.attributes.get('e10s'):
+                return False
+            # don't run talos on ash
+            if task.attributes.get('unittest_suite') == 'talos':
+                return False
+            # don't run raptor on ash
+            if task.attributes.get('unittest_suite') == 'raptor':
+                return False
+        # don't upload symbols
+        if task.attributes['kind'] == 'upload-symbols':
+            return False
+        return True
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
 @_target_task('cedar_tasks')

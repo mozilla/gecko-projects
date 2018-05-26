@@ -2089,10 +2089,7 @@ MessageChannel::DispatchSyncMessage(const Message& aMsg, Message*& aReply)
 
     int nestedLevel = aMsg.nested_level();
 
-    MOZ_RELEASE_ASSERT(nestedLevel == IPC::Message::NOT_NESTED ||
-                       NS_IsMainThread() ||
-                       recordreplay::IsMiddleman() ||
-                       (recordreplay::IsReplaying() && recordreplay::AreThreadEventsPassedThrough()));
+    MOZ_RELEASE_ASSERT(nestedLevel == IPC::Message::NOT_NESTED || NS_IsMainThread());
 #ifdef MOZ_TASK_TRACER
     AutoScopedLabel autolabel("sync message %s", aMsg.name());
 #endif

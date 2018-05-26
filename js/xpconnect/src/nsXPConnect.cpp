@@ -320,7 +320,7 @@ void
 xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack)
 {
     // Don't log failures after diverging from a recording during replay, as
-    // this will cause the associated debugger operation to fail opaquely.
+    // this will cause the associated debugger operation to fail.
     if (recordreplay::HasDivergedFromRecording())
         return;
 

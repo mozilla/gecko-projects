@@ -509,8 +509,8 @@ ClientLayerManager::DidComposite(TransactionId aTransactionId,
                                  const TimeStamp& aCompositeStart,
                                  const TimeStamp& aCompositeEnd)
 {
-  // FIXME
   if (!mWidget) {
+    // When recording/replaying this manager may have already been destroyed.
     MOZ_ASSERT(recordreplay::IsRecordingOrReplaying());
     return;
   }

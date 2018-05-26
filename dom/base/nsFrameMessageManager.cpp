@@ -695,7 +695,6 @@ nsFrameMessageManager::DispatchAsyncMessage(JSContext* aCx,
                                         aPrincipal);
 }
 
-
 class MMListenerRemover
 {
 public:
@@ -724,7 +723,6 @@ public:
 static bool
 DirectMessageToMiddleman(const nsAString& aMessage)
 {
-  // FIXME surely there is a better way to do this.
   nsCString cmsg = NS_ConvertUTF16toUTF8(aMessage);
   const char* cstr = cmsg.get();
   return strncmp(cstr, "debug:", 6) == 0

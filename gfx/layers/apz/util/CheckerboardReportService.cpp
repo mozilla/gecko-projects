@@ -59,10 +59,6 @@ CheckerboardEventStorage::Report(uint32_t aSeverity, const std::string& aLog)
     return;
   }
 
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return;
-  }
-
   RefPtr<CheckerboardEventStorage> storage = GetInstance();
   storage->ReportCheckerboard(aSeverity, aLog);
 }

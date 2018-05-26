@@ -126,6 +126,8 @@ class HangMonitorChild
  private:
   void ShutdownOnThread();
 
+  // JS interrupt callbacks cannot perform recorded events, since they are
+  // triggered non-deterministically when recording or replaying.
   static Atomic<HangMonitorChild*, SequentiallyConsistent,
                 recordreplay::Behavior::DontPreserve> sInstance;
   UniquePtr<BackgroundHangMonitor> mForcePaintMonitor;
@@ -338,6 +340,8 @@ HangMonitorChild::InterruptCallback()
     mForcePaint = false;
   }
 
+  // Don't paint from the interrupt callback when recording or replaying, as
+  // the interrupt callback is triggered non-deterministically.
   if (forcePaint && !recordreplay::IsRecordingOrReplaying()) {
     RefPtr<TabChild> tabChild = TabChild::FindTabChild(forcePaintTab);
     if (tabChild) {

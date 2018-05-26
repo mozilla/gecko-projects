@@ -103,7 +103,7 @@ TabGroup::GetFromActor(TabChild* aTabChild)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  // FIXME
+  // Middleman processes do not assign event targets to their tab children.
   if (recordreplay::IsMiddleman()) {
     return GetChromeTabGroup();
   }

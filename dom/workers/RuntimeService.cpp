@@ -576,6 +576,9 @@ InterruptCallback(JSContext* aCx)
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   MOZ_ASSERT(worker);
 
+  // As with the main thread, the interrupt callback is triggered
+  // non-deterministically when recording/replaying, so return early to avoid
+  // performing any recorded events.
   if (recordreplay::IsRecordingOrReplaying()) {
     return true;
   }
@@ -992,6 +995,7 @@ public:
       }
     }
 
+    // Cycle collections must occur at consistent points when recording/replaying.
     if (recordreplay::IsRecordingOrReplaying()) {
       recordreplay::RegisterTrigger(this, [=]() { nsCycleCollector_collect(nullptr); });
     }

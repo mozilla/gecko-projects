@@ -69,8 +69,9 @@ mozilla::detail::MutexImpl::MutexImpl(recordreplay::Behavior aRecorded)
   pthread_mutexattr_t* attrp = nullptr;
 
   mozilla::Maybe<mozilla::recordreplay::AutoPassThroughThreadEvents> pt;
-  if (aRecorded == recordreplay::Behavior::DontPreserve)
+  if (aRecorded == recordreplay::Behavior::DontPreserve) {
     pt.emplace();
+  }
 
   // Linux with glibc and FreeBSD support adaptive mutexes that spin
   // for a short number of tries before sleeping.  NSPR's locks did

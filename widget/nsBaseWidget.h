@@ -444,7 +444,8 @@ protected:
   {
     return StartRemoteDrawing();
   }
-  virtual void EndRemoteDrawing();
+  virtual void EndRemoteDrawing()
+  {}
   virtual void EndRemoteDrawingInRegion(DrawTarget* aDrawTarget,
                                         LayoutDeviceIntRegion& aInvalidRegion)
   {

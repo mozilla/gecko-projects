@@ -1049,7 +1049,7 @@ ScriptPreloader::DecodeNextBatch(size_t chunkSize, JS::HandleObject scope)
                                          static_cast<void*>(this))) {
         // If we fail here, we don't move on to process the next batch, so make
         // sure we don't have any other scripts left to process.
-        //MOZ_ASSERT(mPendingScripts.isEmpty());
+        MOZ_ASSERT(mPendingScripts.isEmpty());
         for (auto script : mPendingScripts) {
             script->mReadyToExecute = true;
         }

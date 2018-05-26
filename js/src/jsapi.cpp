@@ -7847,18 +7847,3 @@ NoteIntentionalCrash()
 }
 
 } // namespace js
-
-extern "C" const char*
-JS_CurrentExecutionPoint()
-{
-    JSContext* cx = TlsContext.get();
-    if (!cx)
-        return "No JSContext";
-    jsbytecode* pc;
-    JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
-    if (!script)
-        return "No current JSScript";
-    static char buf[4096];
-    SprintfLiteral(buf, "%s:%d", script->filename(), PCToLineNumber(script, pc));
-    return buf;
-}

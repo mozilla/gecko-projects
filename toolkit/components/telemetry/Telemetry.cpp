@@ -1184,8 +1184,9 @@ TelemetryImpl::GetCanRecordBase(bool *ret) {
 
 NS_IMETHODIMP
 TelemetryImpl::SetCanRecordBase(bool canRecord) {
-  if (recordreplay::IsRecordingOrReplaying())
+  if (recordreplay::IsRecordingOrReplaying()) {
     return NS_OK;
+  }
   if (canRecord != mCanRecordBase) {
     TelemetryHistogram::SetCanRecordBase(canRecord);
     TelemetryScalar::SetCanRecordBase(canRecord);
@@ -1210,8 +1211,9 @@ TelemetryImpl::GetCanRecordExtended(bool *ret) {
 
 NS_IMETHODIMP
 TelemetryImpl::SetCanRecordExtended(bool canRecord) {
-  if (recordreplay::IsRecordingOrReplaying())
+  if (recordreplay::IsRecordingOrReplaying()) {
     return NS_OK;
+  }
   if (canRecord != mCanRecordExtended) {
     TelemetryHistogram::SetCanRecordExtended(canRecord);
     TelemetryScalar::SetCanRecordExtended(canRecord);
@@ -1269,8 +1271,7 @@ TelemetryImpl::CreateTelemetryInstance()
   TelemetryScalar::InitializeGlobalState(useTelemetry, useTelemetry);
 
   // Only record events from the parent process.
-  bool recordEvents = XRE_IsParentProcess() && !recordreplay::IsRecordingOrReplaying();
-  TelemetryEvent::InitializeGlobalState(recordEvents, recordEvents);
+  TelemetryEvent::InitializeGlobalState(XRE_IsParentProcess(), XRE_IsParentProcess());
 
   // Now, create and initialize the Telemetry global state.
   sTelemetry = new TelemetryImpl();

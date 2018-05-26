@@ -133,7 +133,7 @@ LockScreenOrientation(const dom::ScreenOrientationInternal& aOrientation)
 void
 UnlockScreenOrientation()
 {
-  // FIXME why is this message being sent with an invalid routing ID by middleman processes?
+  // Don't send this message from both the middleman and recording processes.
   if (!recordreplay::IsMiddleman()) {
     Hal()->SendUnlockScreenOrientation();
   }

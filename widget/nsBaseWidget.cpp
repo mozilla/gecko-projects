@@ -1295,10 +1295,6 @@ void nsBaseWidget::CreateCompositorVsyncDispatcher()
 already_AddRefed<CompositorVsyncDispatcher>
 nsBaseWidget::GetCompositorVsyncDispatcher()
 {
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return nullptr;
-  }
-
   MOZ_ASSERT(mCompositorVsyncDispatcherLock.get());
 
   MutexAutoLock lock(*mCompositorVsyncDispatcherLock.get());
@@ -1528,23 +1524,6 @@ nsBaseWidget::StartRemoteDrawing()
     return recordreplay::child::DrawTargetForRemoteDrawing(mBounds.Size());
   }
   return nullptr;
-}
-
-// FIXME
-namespace mozilla {
-  namespace recordreplay {
-    namespace child {
-      void EndRemoteDrawing();
-    }
-  }
-}
-
-void
-nsBaseWidget::EndRemoteDrawing()
-{
-  if (recordreplay::IsRecordingOrReplaying()) {
-    recordreplay::child::EndRemoteDrawing();
-  }
 }
 
 uint32_t

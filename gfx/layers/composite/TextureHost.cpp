@@ -746,7 +746,7 @@ BufferTextureHost::EnsureWrappingTextureSource()
     // Returning false is fine but if we get into this situation it probably
     // means something fishy is going on, like a texture being used with
     // several compositor backends.
-    //NS_WARNING("Failed to use a BufferTextureHost without intermediate buffer");
+    NS_WARNING("Failed to use a BufferTextureHost without intermediate buffer");
     return false;
   }
 

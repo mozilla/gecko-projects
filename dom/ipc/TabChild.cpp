@@ -212,10 +212,8 @@ already_AddRefed<nsIPresShell>
 TabChildBase::GetPresShell() const
 {
   nsCOMPtr<nsIPresShell> result;
-  if (!recordreplay::IsMiddleman()) {
-    if (nsCOMPtr<nsIDocument> doc = GetDocument()) {
-      result = doc->GetShell();
-    }
+  if (nsCOMPtr<nsIDocument> doc = GetDocument()) {
+    result = doc->GetShell();
   }
   return result.forget();
 }
@@ -653,6 +651,7 @@ TabChild::Init()
 
   mIPCOpen = true;
 
+  // Recording/replaying processes use their own compositor.
   if (recordreplay::IsRecordingOrReplaying()) {
     mPuppetWidget->CreateCompositor();
   }
@@ -1125,11 +1124,9 @@ TabChild::ActorDestroy(ActorDestroyReason why)
     }
   }
 
-  if (!recordreplay::IsRecordingOrReplaying() && !recordreplay::IsMiddleman()) {
-    CompositorBridgeChild* compositorChild = CompositorBridgeChild::Get();
-    if (compositorChild) {
-      compositorChild->CancelNotifyAfterRemotePaint(this);
-    }
+  CompositorBridgeChild* compositorChild = CompositorBridgeChild::Get();
+  if (compositorChild) {
+    compositorChild->CancelNotifyAfterRemotePaint(this);
   }
 
   if (GetTabId() != 0) {
@@ -1297,6 +1294,8 @@ TabChild::RecvInitRendering(const TextureFactoryIdentifier& aTextureFactoryIdent
 mozilla::ipc::IPCResult
 TabChild::RecvUpdateDimensions(const DimensionInfo& aDimensionInfo)
 {
+    // When recording/replaying we need to make sure the dimensions are up to
+    // date on the compositor used in this process.
     if (!mRemoteFrame && !recordreplay::IsRecordingOrReplaying()) {
         return IPC_OK();
     }
@@ -2926,6 +2925,7 @@ void
 TabChild::NotifyPainted()
 {
     if (!mNotified) {
+        // Recording/replaying processes have a compositor but not a remote frame.
         if (!recordreplay::IsRecordingOrReplaying()) {
             mRemoteFrame->SendNotifyCompositorTransaction();
         }

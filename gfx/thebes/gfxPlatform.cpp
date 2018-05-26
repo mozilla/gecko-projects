@@ -659,7 +659,7 @@ gfxPlatform::Init()
 
     gfxConfig::Init();
 
-    if (XRE_IsParentProcess()) {
+    if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
       GPUProcessManager::Initialize();
 
       if (Preferences::GetBool("media.wmf.skip-blacklist")) {
@@ -683,10 +683,6 @@ gfxPlatform::Init()
         file->GetPath(path);
         gfxVars::SetGREDirectory(nsString(path));
       }
-    }
-
-    if (recordreplay::IsRecordingOrReplaying()) {
-      GPUProcessManager::Initialize();
     }
 
     // Drop a note in the crash report if we end up forcing an option that could
@@ -1344,10 +1340,6 @@ gfxPlatform::ComputeTileSize()
 void
 gfxPlatform::PopulateScreenInfo()
 {
-  if (recordreplay::IsMiddleman()) {
-    return;
-  }
-
   nsCOMPtr<nsIScreenManager> manager = do_GetService("@mozilla.org/gfx/screenmanager;1");
   MOZ_ASSERT(manager, "failed to get nsIScreenManager");
 
@@ -1401,10 +1393,7 @@ bool gfxPlatform::AllowOpenGLCanvas()
       mCompositorBackend == LayersBackend::LAYERS_WR) &&
      (GetContentBackendFor(mCompositorBackend) == BackendType::SKIA));
 
-  if (gfxPrefs::CanvasAzureAccelerated() &&
-      correctBackend &&
-      !recordreplay::IsRecordingOrReplaying())
-  {
+  if (gfxPrefs::CanvasAzureAccelerated() && correctBackend) {
     nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
     int32_t status;
     nsCString discardFailureId;
@@ -2653,7 +2642,7 @@ gfxPlatform::InitOMTPConfig()
     // The parent process runs through all the real decision-making code
     // later in this function. For other processes we still want to report
     // the state of the feature for crash reports.
-    if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
+    if (gfxVars::UseOMTP()) {
       reporter.SetSuccessful(paintWorkerCount);
     }
     return;
@@ -2902,8 +2891,6 @@ gfxPlatform::GetTilesSupportInfo(mozilla::widget::InfoObject& aObj)
 /*static*/ bool
 gfxPlatform::AsyncPanZoomEnabled()
 {
-  if (recordreplay::IsRecordingOrReplaying())
-    return false;
 #if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_UIKIT)
   // For XUL applications (everything but Firefox on Android)
   // we only want to use APZ when E10S is enabled. If

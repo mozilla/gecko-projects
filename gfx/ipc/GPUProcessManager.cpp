@@ -70,7 +70,7 @@ GPUProcessManager::Get()
 void
 GPUProcessManager::Initialize()
 {
-  MOZ_ASSERT(XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying());
+  MOZ_ASSERT(XRE_IsParentProcess());
   sSingleton = new GPUProcessManager();
 }
 

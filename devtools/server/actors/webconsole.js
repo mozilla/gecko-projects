@@ -1328,8 +1328,6 @@ WebConsoleActor.prototype =
         try {
           result = frame.eval(string);
         } catch (e) {
-          // If we are replaying then evaluating may throw under certain
-          // conditions. FIXME track down the reasons for these exceptions.
           result = { "throw": e };
         }
       } else {

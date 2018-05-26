@@ -503,6 +503,7 @@ LayerTransactionParent::RecvUpdate(const TransactionInfo& aInfo)
     mLayerManager->RecordUpdateTime((TimeStamp::Now() - updateStart).ToMilliseconds());
   }
 
+  // Compose after every update when recording/replaying.
   if (recordreplay::IsRecordingOrReplaying()) {
     mCompositorBridge->ForceComposeToTarget(nullptr);
   }

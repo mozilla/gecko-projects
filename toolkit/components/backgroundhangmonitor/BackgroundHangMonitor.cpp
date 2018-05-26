@@ -570,10 +570,6 @@ BackgroundHangThread*
 BackgroundHangThread::FindThread()
 {
 #ifdef MOZ_ENABLE_BACKGROUND_HANG_MONITOR
-  if (recordreplay::IsRecordingOrReplaying()) {
-    return nullptr;
-  }
-
   if (BackgroundHangManager::sInstance == nullptr) {
     MOZ_ASSERT(BackgroundHangManager::sDisabled,
                "BackgroundHandleManager is not initialized");
@@ -717,8 +713,7 @@ BackgroundHangMonitor::BackgroundHangMonitor(const char* aName,
   }
 # endif
 
-  if (!BackgroundHangManager::sDisabled && !mThread &&
-      !recordreplay::IsMiddleman() /* FIXME there should be a better way to do this */) {
+  if (!BackgroundHangManager::sDisabled && !mThread && !recordreplay::IsMiddleman()) {
     mThread = new BackgroundHangThread(aName, aTimeoutMs, aMaxTimeoutMs,
                                        aThreadType);
   }

@@ -94,7 +94,7 @@ struct MemoryPorts {
 };
 
 // Protects gMemoryCommPorts and gThreads.
-static StaticMutexNotRecorded gMutex;
+static StaticMutex gMutex;
 
 static std::map<pid_t, MemoryPorts> gMemoryCommPorts;
 

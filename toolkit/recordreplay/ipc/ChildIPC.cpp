@@ -415,12 +415,6 @@ DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize)
 }
 
 void
-EndRemoteDrawing()
-{
-  MOZ_RELEASE_ASSERT(!NS_IsMainThread());
-}
-
-void
 NotifyPaintStart()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());

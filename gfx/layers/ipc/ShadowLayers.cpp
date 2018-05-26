@@ -892,9 +892,6 @@ void ShadowLayerForwarder::AttachAsyncCompositable(const CompositableHandle& aHa
 
 void ShadowLayerForwarder::SetShadowManager(PLayerTransactionChild* aShadowManager)
 {
-  if (recordreplay::IsMiddleman()) {
-    return;
-  }
   mShadowManager = static_cast<LayerTransactionChild*>(aShadowManager);
   mShadowManager->SetForwarder(this);
 }
@@ -1091,7 +1088,6 @@ ShadowLayerForwarder::GetCompositorBridgeChild()
   if (!mShadowManager) {
     return nullptr;
   }
-  MOZ_ASSERT(!recordreplay::IsMiddleman());
   mCompositorBridgeChild = static_cast<CompositorBridgeChild*>(mShadowManager->Manager());
   return mCompositorBridgeChild;
 }
