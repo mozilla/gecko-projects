@@ -1330,7 +1330,7 @@ class HashTable : private AllocPolicy
         Entry* end = oldTable + capacity;
         for (Entry* e = oldTable; e < end; ++e)
             e->destroyIfLive();
-        alloc.template free_<Entry>(oldTable, capacity);
+        alloc.template free_(oldTable, capacity);
     }
 
   public:
@@ -1597,7 +1597,7 @@ class HashTable : private AllocPolicy
         }
 
         // All entries have been destroyed, no need to destroyTable.
-        this->template free_<Entry>(oldTable, oldCap);
+        this->template free_(oldTable, oldCap);
         return Rehashed;
     }
 

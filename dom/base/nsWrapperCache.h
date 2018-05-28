@@ -101,7 +101,8 @@ public:
 #ifdef BOOL_FLAGS_ON_WRAPPER_CACHE
     , mBoolFlags(0)
 #endif
-  {}
+  {
+  }
   ~nsWrapperCache()
   {
     // Clear any JS root associated with this cache while replaying.

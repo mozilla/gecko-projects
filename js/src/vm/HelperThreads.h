@@ -70,14 +70,6 @@ typedef Vector<Tier2GeneratorTask*, 0, SystemAllocPolicy> Tier2GeneratorTaskPtrV
 
 }  // namespace wasm
 
-typedef mozilla::Atomic<bool,
-                        mozilla::SequentiallyConsistent,
-                        mozilla::recordreplay::Behavior::DontPreserve> HelperThreadAtomicBool;
-
-typedef mozilla::Atomic<bool,
-                        mozilla::Relaxed,
-                        mozilla::recordreplay::Behavior::DontPreserve> HelperThreadRelaxedAtomicBool;
-
 // Per-process state for off thread work items.
 class GlobalHelperThreadState
 {

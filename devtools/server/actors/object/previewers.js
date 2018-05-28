@@ -453,6 +453,9 @@ previewers.Object = [
     }
 
     let raw = obj.unsafeDereference();
+
+    // The raw object will be null/unavailable when interacting with a
+    // replaying execution.
     if (raw) {
       let global = Cu.getGlobalForObject(DebuggerServer);
       let classProto = global[obj.class].prototype;

@@ -201,7 +201,7 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
                           const AudioContextOptions& aOptions,
                           ErrorResult& aRv)
 {
-  // Audio playback is not yet supported when recording or replaying.
+  // Audio playback is not yet supported when recording or replaying. See bug 1304147.
   if (recordreplay::IsRecordingOrReplaying()) {
     aRv.Throw(NS_ERROR_NOT_AVAILABLE);
     return nullptr;
@@ -258,7 +258,7 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
                           float aSampleRate,
                           ErrorResult& aRv)
 {
-  // Audio playback is not yet supported when recording or replaying.
+  // Audio playback is not yet supported when recording or replaying. See bug 1304147.
   if (recordreplay::IsRecordingOrReplaying()) {
     aRv.Throw(NS_ERROR_NOT_AVAILABLE);
     return nullptr;

@@ -1035,7 +1035,6 @@ BaselineCompiler::emitBody()
 
 #define EMIT_OP(OP)                            \
           case OP:                             \
-              /*masm.printf("BaselineOp: " #OP "\n");*/ \
             if (MOZ_UNLIKELY(!this->emit_##OP())) \
                 return Method_Error;           \
             break;

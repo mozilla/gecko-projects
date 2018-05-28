@@ -4,9 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* Public API for Web Replay. */
+
 #ifndef mozilla_RecordReplay_h
 #define mozilla_RecordReplay_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/TemplateLib.h"
 #include "mozilla/Types.h"
@@ -25,7 +28,8 @@ namespace recordreplay {
 // start of the main() routine, and is afterward invariant for the process.
 // A third process type, middleman processes, are normal content processes used
 // when replaying to facilitate IPC between recording/replaying processes and
-// the UI process.
+// the UI process, and to run debugger code that interacts with the recording
+// and replaying processes.
 //
 // Recording and replaying works by controlling non-determinism in the browser:
 // non-deterministic behaviors are initially recorded, then later replayed
@@ -337,7 +341,8 @@ static const char* gRecordingFileOption = "-recordReplayFile";
 // Debugger API
 ///////////////////////////////////////////////////////////////////////////////
 
-// These functions are for use by the debugger in a child process.
+// This interface is used by JS Debugger objects in a child or middleman
+// process.
 
 // Special IDs for normal checkpoints.
 static const size_t InvalidCheckpointId = 0;

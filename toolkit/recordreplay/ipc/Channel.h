@@ -445,4 +445,4 @@ static const size_t GraphicsMemorySize = 4096 * 4096 * 4;
 } // namespace recordreplay
 } // namespace mozilla
 
-#endif // mozilla_toolkit_recordreplay_ipc_ParentIPC_h
+#endif // mozilla_toolkit_recordreplay_ipc_Channel_h

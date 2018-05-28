@@ -42,7 +42,8 @@ namespace mozilla {
  *  - template <typename T> T* pod_realloc(T*, size_t, size_t)
  *      Responsible for OOM reporting when null is returned.  The old allocation
  *      size is passed in, in addition to the new allocation size requested.
- *  - void free_(void*)
+ *  - template <typename T> void free_(T*, size_t)
+ *      The capacity passed in should match the original allocation.
  *  - void reportAllocOverflow() const
  *      Called on allocation overflow (that is, an allocation implicitly tried
  *      to allocate more than the available memory space -- think allocating an
@@ -176,7 +177,8 @@ public:
     MOZ_CRASH("NeverAllocPolicy::pod_realloc");
   }
 
-  void free_(void* aPtr)
+  template <typename T>
+  void free_(T* aPtr, size_t aNumElems)
   {
     MOZ_CRASH("NeverAllocPolicy::free_");
   }

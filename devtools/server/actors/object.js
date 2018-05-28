@@ -147,7 +147,8 @@ ObjectActor.prototype = {
     let raw = this.obj.unsafeDereference();
 
     // If Cu is not defined, we are running on a worker thread, where xrays
-    // don't exist.
+    // don't exist. The raw object will be null/unavailable when interacting
+    // with a replaying execution.
     if (raw && Cu) {
       raw = Cu.unwaiveXrays(raw);
     }

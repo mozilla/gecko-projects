@@ -693,8 +693,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool setOnEnterFrame(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnPopFrame(JSContext* cx, unsigned argc, Value* vp);
     static bool setOnPopFrame(JSContext* cx, unsigned argc, Value* vp);
-    static bool getOnReplayFinished(JSContext* cx, unsigned argc, Value* vp);
-    static bool setOnReplayFinished(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnNewGlobalObject(JSContext* cx, unsigned argc, Value* vp);
     static bool setOnNewGlobalObject(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnNewPromise(JSContext* cx, unsigned argc, Value* vp);

@@ -144,7 +144,7 @@ struct VectorImpl
       new_(dst, Move(*src));
     }
     VectorImpl::destroy(aV.beginNoCheck(), aV.endNoCheck());
-    aV.template free_<T>(aV.mBegin, aV.mTail.mCapacity);
+    aV.template free_(aV.mBegin, aV.mTail.mCapacity);
     aV.mBegin = newbuf;
     /* aV.mLength is unchanged. */
     aV.mTail.mCapacity = aNewCap;
@@ -927,7 +927,7 @@ Vector<T, N, AP>::~Vector()
   MOZ_REENTRANCY_GUARD_ET_AL;
   Impl::destroy(beginNoCheck(), endNoCheck());
   if (!usingInlineStorage()) {
-    this->template free_<T>(beginNoCheck(), mTail.mCapacity);
+    this->template free_(beginNoCheck(), mTail.mCapacity);
   }
 }
 
@@ -1511,7 +1511,7 @@ Vector<T, N, AP>::replaceRawBuffer(T* aP, size_t aLength, size_t aCapacity)
   /* Destroy what we have. */
   Impl::destroy(beginNoCheck(), endNoCheck());
   if (!usingInlineStorage()) {
-    this->template free_<T>(beginNoCheck(), mTail.mCapacity);
+    this->template free_(beginNoCheck(), mTail.mCapacity);
   }
 
   /* Take in the new buffer. */
@@ -1526,7 +1526,7 @@ Vector<T, N, AP>::replaceRawBuffer(T* aP, size_t aLength, size_t aCapacity)
     mTail.mCapacity = kInlineCapacity;
     Impl::moveConstruct(mBegin, aP, aP + aLength);
     Impl::destroy(aP, aP + aLength);
-    this->template free_<T>(aP, aLength);
+    this->template free_(aP, aLength);
   } else {
     mBegin = aP;
     mLength = aLength;

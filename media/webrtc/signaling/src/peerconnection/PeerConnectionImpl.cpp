@@ -1335,7 +1335,7 @@ PeerConnectionImpl::CreateDataChannel(const nsAString& aLabel,
   PC_AUTO_ENTER_API_CALL(false);
   MOZ_ASSERT(aRetval);
 
-  // RTC is not enabled when recording/replaying.
+  // WebRTC is not enabled when recording/replaying. See bug 1304149.
   if (recordreplay::IsRecordingOrReplaying()) {
     return NS_ERROR_NOT_AVAILABLE;
   }

@@ -123,9 +123,8 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
 #if EXPOSE_INTL_API
     UErrorCode err = U_ZERO_ERROR;
     u_init(&err);
-    // FIXME
-    //if (U_FAILURE(err))
-    //    return "u_init() failed";
+    if (U_FAILURE(err))
+        return "u_init() failed";
 #endif // EXPOSE_INTL_API
 
     RETURN_IF_FAIL(js::CreateHelperThreadsState());

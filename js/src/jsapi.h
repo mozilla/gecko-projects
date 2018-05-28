@@ -4052,6 +4052,7 @@ JS_DecompileScript(JSContext* cx, JS::Handle<JSScript*> script);
 extern JS_PUBLIC_API(JSString*)
 JS_DecompileFunction(JSContext* cx, JS::Handle<JSFunction*> fun);
 
+
 /*
  * NB: JS_ExecuteScript and the JS::Evaluate APIs come in two flavors: either
  * they use the global as the scope, or they take an AutoObjectVector of objects

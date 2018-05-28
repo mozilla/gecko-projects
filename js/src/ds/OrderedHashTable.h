@@ -124,7 +124,7 @@ class OrderedHashTable
         uint32_t capacity = uint32_t(buckets * fillFactor());
         Data* dataAlloc = alloc.template pod_malloc<Data>(capacity);
         if (!dataAlloc) {
-            alloc.template free_<Data*>(tableAlloc, buckets);
+            alloc.template free_(tableAlloc, buckets);
             return false;
         }
 
@@ -634,7 +634,7 @@ class OrderedHashTable
 
     void freeData(Data* data, uint32_t length, uint32_t capacity) {
         destroyData(data, length);
-        alloc.template free_<Data>(data, capacity);
+        alloc.template free_(data, capacity);
     }
 
     Data* lookup(const Lookup& l, HashNumber h) {
@@ -706,7 +706,7 @@ class OrderedHashTable
         uint32_t newCapacity = uint32_t(newHashBuckets * fillFactor());
         Data* newData = alloc.template pod_malloc<Data>(newCapacity);
         if (!newData) {
-            alloc.template free_<Data*>(newHashTable, newHashBuckets);
+            alloc.template free_(newHashTable, newHashBuckets);
             return false;
         }
 
@@ -722,7 +722,7 @@ class OrderedHashTable
         }
         MOZ_ASSERT(wp == newData + liveCount);
 
-        alloc.template free_<Data*>(hashTable, hashBuckets());
+        alloc.template free_(hashTable, hashBuckets());
         freeData(data, dataLength, dataCapacity);
 
         hashTable = newHashTable;
