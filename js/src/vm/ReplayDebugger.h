@@ -135,11 +135,6 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     bool objectUnsafeDereference(JSContext* cx, HandleObject obj, CallArgs& args);
     bool objectUnwrap(JSContext* cx, HandleObject obj, CallArgs& args);
 
-  private:
-    bool objectOwnPropertyKeys(JSContext* cx, HandleObject obj, unsigned flags,
-                               MutableHandleValue rv);
-  public:
-
     // Env methods.
     bool envType(JSContext* cx, HandleObject obj, CallArgs& args);
     bool envParent(JSContext* cx, HandleObject obj, CallArgs& args);

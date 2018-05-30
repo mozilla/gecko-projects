@@ -1338,25 +1338,20 @@ ReplayDebugger::objectOwnPropertyDescriptor(JSContext* cx, HandleObject obj, Cal
 bool
 ReplayDebugger::objectOwnPropertyNames(JSContext* cx, HandleObject obj, CallArgs& args)
 {
-    return objectOwnPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_HIDDEN, args.rval());
+    Activity a(cx);
+    HandleObject data = a.getObjectData(obj);
+    HandleObject properties = GetObjectProperties(a, data);
+
+    args.rval().setObjectOrNull(NewArrayWithPropertyDescriptorNames(a, properties));
+    return a.success();
 }
 
 bool
 ReplayDebugger::objectOwnPropertySymbols(JSContext* cx, HandleObject obj, CallArgs& args)
 {
-    unsigned flags = JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS | JSITER_SYMBOLSONLY;
-    return objectOwnPropertyKeys(cx, obj, flags, args.rval());
-}
-
-bool
-ReplayDebugger::objectOwnPropertyKeys(JSContext* cx, HandleObject obj, unsigned flags,
-                                      MutableHandleValue rv)
-{
+    // Symbols cannot yet be transported between processes.
     Activity a(cx);
-    HandleObject data = a.getObjectData(obj);
-    HandleObject properties = GetObjectProperties(a, data);
-
-    rv.setObjectOrNull(NewArrayWithPropertyDescriptorNames(a, properties));
+    args.rval().setObjectOrNull(a.newArray());
     return a.success();
 }
 
