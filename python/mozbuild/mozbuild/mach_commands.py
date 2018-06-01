@@ -2301,6 +2301,25 @@ class Vendor(MachCommandBase):
         vendor_command = self._spawn(VendorAOM)
         vendor_command.vendor(**kwargs)
 
+    @SubCommand('vendor', 'python',
+                description='Vendor Python packages from pypi.org into third_party/python')
+    @CommandArgument('packages', default=None, nargs='*', help='Packages to vendor. If omitted, packages and their dependencies defined in Pipfile.lock will be vendored. If Pipfile has been modified, then Pipfile.lock will be regenerated. Note that transient dependencies may be updated when running this command.')
+    def vendor_python(self, **kwargs):
+        from mozbuild.vendor_python import VendorPython
+        vendor_command = self._spawn(VendorPython)
+        vendor_command.vendor(**kwargs)
+
+    @SubCommand('vendor', 'manifest',
+                description='Vendor externally hosted repositories into this '
+                            'repository.')
+    @CommandArgument('files', nargs='+',
+                     help='Manifest files to work on')
+    @CommandArgumentGroup('verify')
+    @CommandArgument('--verify', '-v', action='store_true', group='verify',
+                     required=True, help='Verify manifest')
+    def vendor_manifest(self, files, verify):
+        from mozbuild.vendor_manifest import verify_manifests
+        verify_manifests(files)
 
 @CommandProvider
 class WebRTCGTestCommands(GTestCommands):

@@ -6,6 +6,7 @@
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 Cu.importGlobalProperties(["fetch"]);
 const {ASRouterActions: ra} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
+const {OnboardingMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/OnboardingMessageProvider.jsm", {});
 
 const INCOMING_MESSAGE_NAME = "ASRouter:child-to-parent";
 const OUTGOING_MESSAGE_NAME = "ASRouter:parent-to-child";
@@ -14,47 +15,6 @@ const SNIPPETS_ENDPOINT_PREF = "browser.newtabpage.activity-stream.asrouter.snip
 // Note: currently a restart is required when this pref is changed, this will be fixed in Bug 1462114
 const SNIPPETS_ENDPOINT = Services.prefs.getStringPref(SNIPPETS_ENDPOINT_PREF,
   "https://activity-stream-icons.services.mozilla.com/v1/messages.json.br");
-const LOCAL_TEST_MESSAGES = [
-  {
-    id: "ONBOARDING_1",
-    template: "onboarding",
-    bundled: 3,
-    content: {
-      title: "Private Browsing",
-      text: "Browse by yourself. Private Browsing with Tracking Protection blocks online trackers that follow you around the web.",
-      icon: "privatebrowsing",
-      button_label: "Try It Now",
-      button_action: "OPEN_PRIVATE_BROWSER_WINDOW",
-      button_action_params: "about:home"
-    }
-  },
-  {
-    id: "ONBOARDING_2",
-    template: "onboarding",
-    bundled: 3,
-    content: {
-      title: "Screenshots",
-      text: "Take, save and share screenshots - without leaving Firefox. Capture a region or an entire page as you browse. Then save to the web for easy access and sharing.",
-      icon: "screenshots",
-      button_label: "Try It Now",
-      button_action: "OPEN_URL",
-      button_action_params: "https://screenshots.firefox.com/#tour"
-    }
-  },
-  {
-    id: "ONBOARDING_3",
-    template: "onboarding",
-    bundled: 3,
-    content: {
-      title: "Add-ons",
-      text: "Add even more features that make Firefox work harder for you. Compare prices, check the weather or express your personality with a custom theme.",
-      icon: "addons",
-      button_label: "Try It Now",
-      button_action: "OPEN_ABOUT_PAGE",
-      button_action_params: "addons"
-    }
-  }
-];
 
 const MessageLoaderUtils = {
   /**
@@ -79,9 +39,16 @@ const MessageLoaderUtils = {
     let remoteMessages = [];
     if (provider.url) {
       try {
-        remoteMessages = (await (await fetch(provider.url)).json())
-          .messages
-          .map(msg => (Object.assign({}, msg, {provider_url: provider.url})));
+        const response = await fetch(provider.url);
+        if (
+          // Empty response
+          response.status !== 204 &&
+          (response.ok || response.status === 302)
+        ) {
+          remoteMessages = (await response.json())
+            .messages
+            .map(msg => ({...msg, provider_url: provider.url}));
+        }
       } catch (e) {
         Cu.reportError(e);
       }
@@ -127,7 +94,7 @@ const MessageLoaderUtils = {
    */
   async loadMessagesForProvider(provider) {
     const messages = (await this._getMessageLoader(provider)(provider))
-        .map(msg => Object.assign({}, msg, {provider: provider.id}));
+        .map(msg => ({...msg, provider: provider.id}));
     const lastUpdated = Date.now();
     return {messages, lastUpdated};
   }
@@ -160,15 +127,13 @@ class _ASRouter {
     this.messageChannel = null;
     this._storage = null;
     this._resetInitialization();
-    this._state = Object.assign(
-      {
-        currentId: null,
-        providers: [],
-        blockList: [],
-        messages: []
-      },
-      initialState
-    );
+    this._state = {
+      lastMessageId: null,
+      providers: [],
+      blockList: [],
+      messages: [],
+      ...initialState
+    };
     this.onMessage = this.onMessage.bind(this);
   }
 
@@ -211,7 +176,7 @@ class _ASRouter {
       for (const provider of this.state.providers) {
         if (needsUpdate.includes(provider)) {
           const {messages, lastUpdated} = await MessageLoaderUtils.loadMessagesForProvider(provider);
-          newState.providers.push((Object.assign({}, provider, {lastUpdated})));
+          newState.providers.push({...provider, lastUpdated});
           newState.messages = [...newState.messages, ...messages];
         } else {
           // Skip updating this provider's messages if no update is required
@@ -245,7 +210,7 @@ class _ASRouter {
   }
 
   uninit() {
-    this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_MESSAGE"});
+    this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_ALL"});
     this.messageChannel.removeMessageListener(INCOMING_MESSAGE_NAME, this.onMessage);
     this.messageChannel = null;
     this._resetInitialization();
@@ -253,7 +218,7 @@ class _ASRouter {
 
   setState(callbackOrObj) {
     const newState = (typeof callbackOrObj === "function") ? callbackOrObj(this.state) : callbackOrObj;
-    this._state = Object.assign({}, this.state, newState);
+    this._state = {...this.state, ...newState};
     return new Promise(resolve => {
       this._onStateChanged(this.state);
       resolve();
@@ -288,8 +253,8 @@ class _ASRouter {
     let bundledMessages;
 
     await this.setState(state => {
-      message = getRandomItemFromArray(state.messages.filter(item => item.id !== state.currentId && !state.blockList.includes(item.id)));
-      return {currentId: message ? message.id : null};
+      message = getRandomItemFromArray(state.messages.filter(item => item.id !== state.lastMessageId && !state.blockList.includes(item.id)));
+      return {lastMessageId: message ? message.id : null};
     });
     // If this message needs to be bundled with other messages of the same template, find them and bundle them together
     if (message && message.bundled) {
@@ -302,12 +267,12 @@ class _ASRouter {
       // If the message we want is bundled with other messages, send the entire bundle
       target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_BUNDLED_MESSAGES", data: bundledMessages});
     } else {
-      target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_MESSAGE"});
+      target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_ALL"});
     }
   }
 
   async setMessageById(id) {
-    await this.setState({currentId: id});
+    await this.setState({lastMessageId: id});
     const newMessage = this.getMessageById(id);
     if (newMessage) {
       // If this message needs to be bundled with other messages of the same template, find them and bundle them together
@@ -320,11 +285,13 @@ class _ASRouter {
     }
   }
 
-  async clearMessage(target, id) {
-    if (this.state.currentId === id) {
-      await this.setState({currentId: null});
-    }
-    target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_MESSAGE"});
+  async blockById(idOrIds) {
+    const idsToBlock = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    await this.setState(state => {
+      const blockList = [...state.blockList, ...idsToBlock];
+      this._storage.set("blockList", blockList);
+      return {blockList};
+    });
   }
 
   openLinkIn(url, target, {isPrivate = false, trusted = false, where = ""}) {
@@ -351,7 +318,8 @@ class _ASRouter {
         await this.sendNextMessage(target);
         break;
       case ra.OPEN_PRIVATE_BROWSER_WINDOW:
-        this.openLinkIn(action.data.button_action_params, target, {isPrivate: true, where: "window"});
+        // Forcefully open about:privatebrowsing
+        target.browser.ownerGlobal.OpenBrowserWindow({private: true});
         break;
       case ra.OPEN_URL:
         this.openLinkIn(action.data.button_action_params, target, {isPrivate: false, where: "tabshifted"});
@@ -360,27 +328,12 @@ class _ASRouter {
         this.openLinkIn(`about:${action.data.button_action_params}`, target, {isPrivate: false, trusted: true, where: "tab"});
         break;
       case "BLOCK_MESSAGE_BY_ID":
-        await this.setState(state => {
-          const blockList = [...state.blockList];
-          blockList.push(action.data.id);
-          this._storage.set("blockList", blockList);
-
-          return {blockList};
-        });
-        await this.clearMessage(target, action.data.id);
+        await this.blockById(action.data.id);
+        this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_MESSAGE", data: {id: action.data.id}});
         break;
       case "BLOCK_BUNDLE":
-        await this.setState(state => {
-          const blockList = [...state.blockList];
-          for (let message of action.data.bundle) {
-            blockList.push(message.id);
-          }
-          this._storage.set("blockList", blockList);
-
-          return {blockList};
-        });
-        await this.setState({currentId: null});
-        target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_MESSAGE"});
+        await this.blockById(action.data.bundle.map(b => b.id));
+        this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "CLEAR_BUNDLE"});
         break;
       case "UNBLOCK_MESSAGE_BY_ID":
         await this.setState(state => {
@@ -417,7 +370,7 @@ this._ASRouter = _ASRouter;
  */
 this.ASRouter = new _ASRouter({
   providers: [
-    {id: "onboarding", type: "local", messages: LOCAL_TEST_MESSAGES},
+    {id: "onboarding", type: "local", messages: OnboardingMessageProvider.getMessages()},
     {id: "snippets", type: "remote", url: SNIPPETS_ENDPOINT, updateCycleInMs: ONE_HOUR_IN_MS * 4}
   ]
 });

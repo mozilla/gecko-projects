@@ -1394,7 +1394,7 @@ IonBuilder::inlineMathRandom(CallInfo& callInfo)
     // MRandom JIT code directly accesses the RNG. It's (barely) possible to
     // inline Math.random without it having been called yet, so ensure RNG
     // state that isn't guaranteed to be initialized already.
-    script()->compartment()->ensureRandomNumberGenerator();
+    script()->realm()->getOrCreateRandomNumberGenerator();
 
     callInfo.setImplicitlyUsedUnchecked();
 
@@ -1770,7 +1770,7 @@ IonBuilder::inlineStringSplitString(CallInfo& callInfo)
         return resultConstStringSplit;
 
     JSContext* cx = TlsContext.get();
-    ObjectGroup* group = ObjectGroupCompartment::getStringSplitStringGroup(cx);
+    ObjectGroup* group = ObjectGroupRealm::getStringSplitStringGroup(cx);
     if (!group)
         return InliningStatus_NotInlined;
     AutoSweepObjectGroup sweep(group);
@@ -2152,7 +2152,7 @@ IonBuilder::inlineRegExpMatcher(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     JSContext* cx = TlsContext.get();
-    if (!cx->compartment()->jitCompartment()->ensureRegExpMatcherStubExists(cx)) {
+    if (!cx->realm()->jitRealm()->ensureRegExpMatcherStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
         return InliningStatus_NotInlined;
     }
@@ -2196,7 +2196,7 @@ IonBuilder::inlineRegExpSearcher(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     JSContext* cx = TlsContext.get();
-    if (!cx->compartment()->jitCompartment()->ensureRegExpSearcherStubExists(cx)) {
+    if (!cx->realm()->jitRealm()->ensureRegExpSearcherStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
         return abort(AbortReason::Error);
     }
@@ -2240,7 +2240,7 @@ IonBuilder::inlineRegExpTester(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     JSContext* cx = TlsContext.get();
-    if (!cx->compartment()->jitCompartment()->ensureRegExpTesterStubExists(cx)) {
+    if (!cx->realm()->jitRealm()->ensureRegExpTesterStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
         return InliningStatus_NotInlined;
     }
@@ -2577,7 +2577,7 @@ IonBuilder::inlineObjectToString(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     // Make sure there's no Symbol.toStringTag property.
-    jsid toStringTag = SYMBOL_TO_JSID(compartment->runtime()->wellKnownSymbols().toStringTag);
+    jsid toStringTag = SYMBOL_TO_JSID(realm->runtime()->wellKnownSymbols().toStringTag);
     bool res;
     MOZ_TRY_VAR(res, testNotDefinedProperty(arg, toStringTag));
     if (!res)

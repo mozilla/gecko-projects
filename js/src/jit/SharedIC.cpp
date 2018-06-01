@@ -51,7 +51,7 @@ FallbackICSpew(JSContext* cx, ICFallbackStub* stub, const char* fmt, ...)
         va_end(args);
 
         JitSpew(JitSpew_BaselineICFallback,
-                "Fallback hit for (%s:%zu) (pc=%zu,line=%d,uses=%d,stubs=%zu): %s",
+                "Fallback hit for (%s:%u) (pc=%zu,line=%d,uses=%d,stubs=%zu): %s",
                 script->filename(),
                 script->lineno(),
                 script->pcToOffset(pc),
@@ -76,7 +76,7 @@ TypeFallbackICSpew(JSContext* cx, ICTypeMonitor_Fallback* stub, const char* fmt,
         va_end(args);
 
         JitSpew(JitSpew_BaselineICFallback,
-                "Type monitor fallback hit for (%s:%zu) (pc=%zu,line=%d,uses=%d,stubs=%d): %s",
+                "Type monitor fallback hit for (%s:%u) (pc=%zu,line=%d,uses=%d,stubs=%d): %s",
                 script->filename(),
                 script->lineno(),
                 script->pcToOffset(pc),
@@ -494,11 +494,11 @@ ICUpdatedStub::initUpdatingChain(JSContext* cx, ICStubSpace* space)
 JitCode*
 ICStubCompiler::getStubCode()
 {
-    JitCompartment* comp = cx->compartment()->jitCompartment();
+    JitRealm* realm = cx->realm()->jitRealm();
 
     // Check for existing cached stubcode.
     uint32_t stubKey = getKey();
-    JitCode* stubCode = comp->getStubCode(stubKey);
+    JitCode* stubCode = realm->getStubCode(stubKey);
     if (stubCode)
         return stubCode;
 
@@ -523,7 +523,7 @@ ICStubCompiler::getStubCode()
         return nullptr;
 
     // Cache newly compiled stubcode.
-    if (!comp->putStubCode(cx, stubKey, newStubCode))
+    if (!realm->putStubCode(cx, stubKey, newStubCode))
         return nullptr;
 
     // After generating code, run postGenerateStubCode().  We must not fail
@@ -2041,7 +2041,7 @@ ICGetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<
         BailoutReturnStub kind = hasReceiver_ ? BailoutReturnStub::GetPropSuper
                                               : BailoutReturnStub::GetProp;
         void* address = code->raw() + bailoutReturnOffset_.offset();
-        cx->compartment()->jitCompartment()->initBailoutReturnAddr(address, getKey(), kind);
+        cx->realm()->jitRealm()->initBailoutReturnAddr(address, getKey(), kind);
     }
 }
 
@@ -2632,7 +2632,7 @@ GenerateNewObjectWithTemplateCode(JSContext* cx, JSObject* templateObject)
     Register objReg = R0.scratchReg();
     Register tempReg = R1.scratchReg();
     masm.branchIfPretenuredGroup(templateObject->group(), tempReg, &failure);
-    masm.branchPtr(Assembler::NotEqual, AbsoluteAddress(cx->compartment()->addressOfMetadataBuilder()),
+    masm.branchPtr(Assembler::NotEqual, AbsoluteAddress(cx->realm()->addressOfMetadataBuilder()),
                    ImmWord(0), &failure);
     TemplateObject templateObj(templateObject);
     masm.createGCObject(objReg, tempReg, templateObj, gc::DefaultHeap, &failure);

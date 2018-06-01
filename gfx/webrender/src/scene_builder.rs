@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{DocumentId, PipelineId, ApiMsg, FrameMsg, ResourceUpdates};
+use api::{DocumentId, PipelineId, ApiMsg, FrameMsg, ResourceUpdate};
 use api::channel::MsgSender;
 use display_list_flattener::build_scene;
 use frame_builder::{FrameBuilderConfig, FrameBuilder};
@@ -19,7 +19,7 @@ pub enum SceneBuilderRequest {
     Transaction {
         document_id: DocumentId,
         scene: Option<SceneRequest>,
-        resource_updates: ResourceUpdates,
+        resource_updates: Vec<ResourceUpdate>,
         frame_ops: Vec<FrameMsg>,
         render: bool,
     },
@@ -33,7 +33,7 @@ pub enum SceneBuilderResult {
     Transaction {
         document_id: DocumentId,
         built_scene: Option<BuiltScene>,
-        resource_updates: ResourceUpdates,
+        resource_updates: Vec<ResourceUpdate>,
         frame_ops: Vec<FrameMsg>,
         render: bool,
         result_tx: Option<Sender<SceneSwapResult>>,
@@ -162,6 +162,7 @@ impl SceneBuilder {
                     _ => (None, None, None),
                 };
 
+                let has_resources_updates = !resource_updates.is_empty();
                 self.tx.send(SceneBuilderResult::Transaction {
                     document_id,
                     built_scene,
@@ -184,6 +185,10 @@ impl SceneBuilder {
                         },
                         _ => (),
                     };
+                } else if has_resources_updates {
+                    if let &Some(ref hooks) = &self.hooks {
+                        hooks.post_resource_update();
+                    }
                 }
             }
             SceneBuilderRequest::Stop => {

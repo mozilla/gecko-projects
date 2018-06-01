@@ -44,9 +44,7 @@ struct CGObjectList {
     CGObjectList() : length(0), lastbox(nullptr) {}
 
     unsigned add(ObjectBox* objbox);
-    unsigned indexOf(JSObject* obj);
     void finish(ObjectArray* array);
-    ObjectBox* find(uint32_t index);
 };
 
 struct MOZ_STACK_CLASS CGScopeList {
@@ -240,8 +238,22 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     EmitterScope*    varEmitterScope;
     NestableControl* innermostNestableControl;
-    EmitterScope*    innermostEmitterScope;
+    EmitterScope*    innermostEmitterScope_;
     TDZCheckCache*   innermostTDZCheckCache;
+
+#ifdef DEBUG
+    bool unstableEmitterScope;
+
+    friend class AutoCheckUnstableEmitterScope;
+#endif
+
+    EmitterScope* innermostEmitterScope() const {
+        MOZ_ASSERT(!unstableEmitterScope);
+        return innermostEmitterScopeNoCheck();
+    }
+    EmitterScope* innermostEmitterScopeNoCheck() const {
+        return innermostEmitterScope_;
+    }
 
     CGConstList      constList;      /* constants to be included with the script */
     CGObjectList     objectList;     /* list of emitted objects */
@@ -356,9 +368,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
 
     MOZ_MUST_USE bool init();
 
-    template <typename Predicate /* (NestableControl*) -> bool */>
-    NestableControl* findInnermostNestableControl(Predicate predicate) const;
-
     template <typename T>
     T* findInnermostNestableControl() const;
 
@@ -379,7 +388,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter
                                                                     EmitterScope* source);
 
     mozilla::Maybe<NameLocation> locationOfNameBoundInFunctionScope(JSAtom* name) {
-        return locationOfNameBoundInFunctionScope(name, innermostEmitterScope);
+        return locationOfNameBoundInFunctionScope(name, innermostEmitterScope());
     }
 
     void setVarEmitterScope(EmitterScope* emitterScope) {
@@ -677,14 +686,20 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitFinishIteratorResult(bool done);
     MOZ_MUST_USE bool iteratorResultShape(unsigned* shape);
 
-    MOZ_MUST_USE bool emitGetDotGenerator();
+    MOZ_MUST_USE bool emitGetDotGeneratorInInnermostScope() {
+        return emitGetDotGeneratorInScope(*innermostEmitterScope());
+    }
+    MOZ_MUST_USE bool emitGetDotGeneratorInScope(EmitterScope& currentScope);
 
     MOZ_MUST_USE bool emitInitialYield(ParseNode* pn);
     MOZ_MUST_USE bool emitYield(ParseNode* pn);
     MOZ_MUST_USE bool emitYieldOp(JSOp op);
     MOZ_MUST_USE bool emitYieldStar(ParseNode* iter);
-    MOZ_MUST_USE bool emitAwait();
-    MOZ_MUST_USE bool emitAwait(ParseNode* pn);
+    MOZ_MUST_USE bool emitAwaitInInnermostScope() {
+        return emitAwaitInScope(*innermostEmitterScope());
+    }
+    MOZ_MUST_USE bool emitAwaitInInnermostScope(ParseNode* pn);
+    MOZ_MUST_USE bool emitAwaitInScope(EmitterScope& currentScope);
 
     MOZ_MUST_USE bool emitPropLHS(ParseNode* pn);
     MOZ_MUST_USE bool emitPropOp(ParseNode* pn, JSOp op);
@@ -756,12 +771,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlavor flav);
     MOZ_MUST_USE bool emitDestructuringOpsObject(ParseNode* pattern, DestructuringFlavor flav);
 
-    typedef bool
-    (*DestructuringDeclEmitter)(BytecodeEmitter* bce, ParseNode* pn);
-
-    template <typename NameEmitter>
-    MOZ_MUST_USE bool emitDestructuringDeclsWithEmitter(ParseNode* pattern, NameEmitter emitName);
-
     enum class CopyOption {
         Filtered, Unfiltered
     };
@@ -781,9 +790,16 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     // onto the stack.
     MOZ_MUST_USE bool emitIteratorNext(ParseNode* pn, IteratorKind kind = IteratorKind::Sync,
                                        bool allowSelfHosted = false);
-    MOZ_MUST_USE bool emitIteratorClose(IteratorKind iterKind = IteratorKind::Sync,
-                                        CompletionKind completionKind = CompletionKind::Normal,
-                                        bool allowSelfHosted = false);
+    MOZ_MUST_USE bool emitIteratorCloseInScope(EmitterScope& currentScope,
+                                               IteratorKind iterKind = IteratorKind::Sync,
+                                               CompletionKind completionKind = CompletionKind::Normal,
+                                               bool allowSelfHosted = false);
+    MOZ_MUST_USE bool emitIteratorCloseInInnermostScope(IteratorKind iterKind = IteratorKind::Sync,
+                                                        CompletionKind completionKind = CompletionKind::Normal,
+                                                        bool allowSelfHosted = false) {
+        return emitIteratorCloseInScope(*innermostEmitterScope(), iterKind, completionKind,
+                                        allowSelfHosted);
+    }
 
     template <typename InnerEmitter>
     MOZ_MUST_USE bool wrapWithDestructuringIteratorCloseTryNote(int32_t iterDepth,
@@ -881,6 +897,31 @@ struct MOZ_STACK_CLASS BytecodeEmitter
     MOZ_MUST_USE bool emitPipeline(ParseNode* pn);
 
     MOZ_MUST_USE bool emitExportDefault(ParseNode* pn);
+};
+
+class MOZ_RAII AutoCheckUnstableEmitterScope {
+#ifdef DEBUG
+    bool prev_;
+    BytecodeEmitter* bce_;
+#endif
+
+  public:
+    AutoCheckUnstableEmitterScope() = delete;
+    explicit AutoCheckUnstableEmitterScope(BytecodeEmitter* bce)
+#ifdef DEBUG
+      : bce_(bce)
+#endif
+    {
+#ifdef DEBUG
+        prev_ = bce_->unstableEmitterScope;
+        bce_->unstableEmitterScope = true;
+#endif
+    }
+    ~AutoCheckUnstableEmitterScope() {
+#ifdef DEBUG
+        bce_->unstableEmitterScope = prev_;
+#endif
+    }
 };
 
 } /* namespace frontend */

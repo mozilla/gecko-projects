@@ -8,6 +8,9 @@
 
 #include "mozilla/MaybeOneOf.h"
 
+#ifdef ENABLE_BIGINT
+#include "builtin/BigInt.h"
+#endif
 #include "builtin/Eval.h"
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/String.h"
@@ -471,6 +474,11 @@ GetBuiltinTagSlow(JSContext* cx, HandleObject obj, MutableHandleString builtinTa
       case ESClass::RegExp:
         builtinTag.set(cx->names().objectRegExp);
         return true;
+#ifdef ENABLE_BIGINT
+      case ESClass::BigInt:
+        builtinTag.set(cx->names().objectBigInt);
+        return true;
+#endif
       default:
         if (obj->isCallable()) {
             // Non-standard: Prevent <object> from showing up as Function.
@@ -529,6 +537,11 @@ GetBuiltinTagFast(JSObject* obj, const Class* clasp, JSContext* cx)
         // Non-standard: Prevent <object> from showing up as Function.
         return cx->names().objectFunction;
     }
+
+#ifdef ENABLE_BIGINT
+    if (obj->is<BigIntObject>())
+        return cx->names().objectBigInt;
+#endif
 
     return nullptr;
 }
@@ -1986,7 +1999,7 @@ CreateObjectConstructor(JSContext* cx, JSProtoKey key)
 static JSObject*
 CreateObjectPrototype(JSContext* cx, JSProtoKey key)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     MOZ_ASSERT(cx->global()->isNative());
 
     /*
@@ -2010,7 +2023,8 @@ CreateObjectPrototype(JSContext* cx, JSProtoKey key)
      * to have unknown properties, to simplify handling of e.g. heterogenous
      * objects in JSON and script literals.
      */
-    if (!JSObject::setNewGroupUnknown(cx, &PlainObject::class_, objectProto))
+    ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
+    if (!JSObject::setNewGroupUnknown(cx, realm, &PlainObject::class_, objectProto))
         return nullptr;
 
     return objectProto;

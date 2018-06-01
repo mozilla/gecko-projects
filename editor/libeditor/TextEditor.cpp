@@ -13,7 +13,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/EditAction.h"
 #include "mozilla/EditorDOMPoint.h"
-#include "mozilla/EditorUtils.h" // AutoPlaceholderBatch, AutoRules
+#include "mozilla/EditorUtils.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/mozalloc.h"
@@ -41,7 +41,6 @@
 #include "nsIClipboard.h"
 #include "nsIContent.h"
 #include "nsIContentIterator.h"
-#include "nsIDOMNode.h"
 #include "nsIDocumentEncoder.h"
 #include "nsINode.h"
 #include "nsIPresShell.h"
@@ -328,7 +327,7 @@ TextEditor::UpdateMetaCharset(nsIDocument& aDocument,
   return false;
 }
 
-NS_IMETHODIMP
+nsresult
 TextEditor::InitRules()
 {
   if (!mRules) {
@@ -669,7 +668,10 @@ TextEditor::DeleteSelectionAsAction(EDirection aDirection,
 
   // delete placeholder txns merge.
   AutoPlaceholderBatch batch(this, nsGkAtoms::DeleteTxnName);
-  AutoRules beginRulesSniffing(this, EditAction::deleteSelection, aDirection);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this,
+                                      EditSubAction::eDeleteSelectedContent,
+                                      aDirection);
 
   // pre-process
   RefPtr<Selection> selection = GetSelection();
@@ -702,18 +704,21 @@ TextEditor::DeleteSelectionAsAction(EDirection aDirection,
     }
   }
 
-  RulesInfo ruleInfo(EditAction::deleteSelection);
-  ruleInfo.collapsedAction = aDirection;
-  ruleInfo.stripWrappers = aStripWrappers;
+  EditSubActionInfo subActionInfo(EditSubAction::eDeleteSelectedContent);
+  subActionInfo.collapsedAction = aDirection;
+  subActionInfo.stripWrappers = aStripWrappers;
   bool cancel, handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   if (!cancel && !handled) {
     rv = DeleteSelectionWithTransaction(aDirection, aStripWrappers);
   }
   if (!cancel) {
     // post-process
-    rv = rules->DidDoAction(selection, &ruleInfo, rv);
+    rv = rules->DidDoAction(selection, subActionInfo, rv);
   }
   return rv;
 }
@@ -745,7 +750,10 @@ TextEditor::DeleteSelectionWithTransaction(EDirection aDirection,
 
   RefPtr<CharacterData> deleteCharData =
     CharacterData::FromNodeOrNull(deleteNode);
-  AutoRules beginRulesSniffing(this, EditAction::deleteSelection, aDirection);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this,
+                                      EditSubAction::eDeleteSelectedContent,
+                                      aDirection);
 
   if (mRules && mRules->AsHTMLEditRules()) {
     if (!deleteNode) {
@@ -800,7 +808,7 @@ TextEditor::DeleteSelectionWithTransaction(EDirection aDirection,
       }
     } else {
       for (auto& listener : mActionListeners) {
-        listener->DidDeleteNode(deleteNode->AsDOMNode(), rv);
+        listener->DidDeleteNode(deleteNode, rv);
       }
     }
   }
@@ -942,13 +950,16 @@ TextEditor::InsertTextAsAction(const nsAString& aStringToInsert)
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
-  EditAction opID = EditAction::insertText;
+  EditSubAction editSubAction = EditSubAction::eInsertText;
   if (ShouldHandleIMEComposition()) {
-    opID = EditAction::insertIMEText;
+    // So, the string must come from IME as new composition string or
+    // commit string.
+    editSubAction = EditSubAction::eInsertTextComingFromIME;
   }
 
   AutoPlaceholderBatch batch(this, nullptr);
-  AutoRules beginRulesSniffing(this, opID, nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, editSubAction, nsIEditor::eNext);
 
   RefPtr<Selection> selection = GetSelection();
   if (NS_WARN_IF(!selection)) {
@@ -956,16 +967,17 @@ TextEditor::InsertTextAsAction(const nsAString& aStringToInsert)
   }
 
   nsAutoString resultString;
-  // XXX can we trust instring to outlive ruleInfo,
-  // XXX and ruleInfo not to refer to instring in its dtor?
+  // XXX can we trust instring to outlive subActionInfo,
+  // XXX and subActionInfo not to refer to instring in its dtor?
   //nsAutoString instring(aStringToInsert);
-  RulesInfo ruleInfo(opID);
-  ruleInfo.inString = &aStringToInsert;
-  ruleInfo.outString = &resultString;
-  ruleInfo.maxLength = mMaxTextLength;
+  EditSubActionInfo subActionInfo(editSubAction);
+  subActionInfo.inString = &aStringToInsert;
+  subActionInfo.outString = &resultString;
+  subActionInfo.maxLength = mMaxTextLength;
 
   bool cancel, handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -976,7 +988,7 @@ TextEditor::InsertTextAsAction(const nsAString& aStringToInsert)
     return NS_OK;
   }
   // post-process
-  return rules->DidDoAction(selection, &ruleInfo, NS_OK);
+  return rules->DidDoAction(selection, subActionInfo, NS_OK);
 }
 
 NS_IMETHODIMP
@@ -996,17 +1008,20 @@ TextEditor::InsertParagraphSeparatorAsAction()
   RefPtr<TextEditRules> rules(mRules);
 
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::insertBreak, nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this,
+                                      EditSubAction::eInsertParagraphSeparator,
+                                      nsIEditor::eNext);
 
   RefPtr<Selection> selection = GetSelection();
   if (NS_WARN_IF(!selection)) {
     return NS_ERROR_FAILURE;
   }
 
-  RulesInfo ruleInfo(EditAction::insertBreak);
-  ruleInfo.maxLength = mMaxTextLength;
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertParagraphSeparator);
+  subActionInfo.maxLength = mMaxTextLength;
   bool cancel, handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  nsresult rv = rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     // XXX DidDoAction() won't be called when WillDoAction() returns error.
     //     Perhaps, we should move the code between WillDoAction() and
@@ -1073,7 +1088,7 @@ TextEditor::InsertParagraphSeparatorAsAction()
 
   if (!cancel) {
     // post-process, always called if WillInsertBreak didn't return cancel==true
-    rv = rules->DidDoAction(selection, &ruleInfo, rv);
+    rv = rules->DidDoAction(selection, subActionInfo, rv);
   }
   return rv;
 }
@@ -1090,20 +1105,23 @@ TextEditor::SetText(const nsAString& aString)
 
   // delete placeholder txns merge.
   AutoPlaceholderBatch batch(this, nullptr);
-  AutoRules beginRulesSniffing(this, EditAction::setText, nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, EditSubAction::eSetText,
+                                      nsIEditor::eNext);
 
   // pre-process
   RefPtr<Selection> selection = GetSelection();
   if (NS_WARN_IF(!selection)) {
     return NS_ERROR_NULL_POINTER;
   }
-  RulesInfo ruleInfo(EditAction::setText);
-  ruleInfo.inString = &aString;
-  ruleInfo.maxLength = mMaxTextLength;
+  EditSubActionInfo subActionInfo(EditSubAction::eSetText);
+  subActionInfo.inString = &aString;
+  subActionInfo.maxLength = mMaxTextLength;
 
   bool cancel;
   bool handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1135,7 +1153,7 @@ TextEditor::SetText(const nsAString& aString)
     }
   }
   // post-process
-  return rules->DidDoAction(selection, &ruleInfo, rv);
+  return rules->DidDoAction(selection, subActionInfo, rv);
 }
 
 bool
@@ -1216,7 +1234,7 @@ TextEditor::OnCompositionChange(WidgetCompositionEvent& aCompsitionChangeEvent)
   {
     AutoPlaceholderBatch batch(this, nsGkAtoms::IMETxnName);
 
-    MOZ_ASSERT(mIsInEditAction,
+    MOZ_ASSERT(mIsInEditSubAction,
       "AutoPlaceholderBatch should've notified the observes of before-edit");
     rv = InsertTextAsAction(aCompsitionChangeEvent.mData);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
@@ -1487,12 +1505,14 @@ TextEditor::Undo(uint32_t aCount)
 
   nsresult rv;
   {
-    AutoRules beginRulesSniffing(this, EditAction::undo, nsIEditor::eNone);
+    AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                        *this, EditSubAction::eUndo,
+                                        nsIEditor::eNone);
 
-    RulesInfo ruleInfo(EditAction::undo);
+    EditSubActionInfo subActionInfo(EditSubAction::eUndo);
     RefPtr<Selection> selection = GetSelection();
     bool cancel, handled;
-    rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+    rv = rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
     if (!cancel && NS_SUCCEEDED(rv)) {
       RefPtr<TransactionManager> transactionManager(mTransactionManager);
       for (uint32_t i = 0; i < aCount; ++i) {
@@ -1502,7 +1522,7 @@ TextEditor::Undo(uint32_t aCount)
         }
         DoAfterUndoTransaction();
       }
-      rv = rules->DidDoAction(selection, &ruleInfo, rv);
+      rv = rules->DidDoAction(selection, subActionInfo, rv);
     }
   }
 
@@ -1540,12 +1560,14 @@ TextEditor::Redo(uint32_t aCount)
 
   nsresult rv;
   {
-    AutoRules beginRulesSniffing(this, EditAction::redo, nsIEditor::eNone);
+    AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                        *this, EditSubAction::eRedo,
+                                        nsIEditor::eNone);
 
-    RulesInfo ruleInfo(EditAction::redo);
+    EditSubActionInfo subActionInfo(EditSubAction::eRedo);
     RefPtr<Selection> selection = GetSelection();
     bool cancel, handled;
-    rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+    rv = rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
     if (!cancel && NS_SUCCEEDED(rv)) {
       RefPtr<TransactionManager> transactionManager(mTransactionManager);
       for (uint32_t i = 0; i < aCount; ++i) {
@@ -1555,7 +1577,7 @@ TextEditor::Redo(uint32_t aCount)
         }
         DoAfterRedoTransaction();
       }
-      rv = rules->DidDoAction(selection, &ruleInfo, rv);
+      rv = rules->DidDoAction(selection, subActionInfo, rv);
     }
   }
 
@@ -1718,7 +1740,7 @@ TextEditor::GetAndInitDocEncoder(const nsAString& aFormatType,
       return nullptr;
     }
     if (!rootElement->IsHTMLElement(nsGkAtoms::body)) {
-      rv = docEncoder->SetNativeContainerNode(rootElement);
+      rv = docEncoder->SetContainerNode(rootElement);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return nullptr;
       }
@@ -1737,25 +1759,22 @@ TextEditor::OutputToString(const nsAString& aFormatType,
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
-  nsString resultString;
-  RulesInfo ruleInfo(EditAction::outputText);
-  ruleInfo.outString = &resultString;
-  ruleInfo.flags = aFlags;
-  // XXX Struct should store a nsAReadable*
-  nsAutoString str(aFormatType);
-  ruleInfo.outputFormat = &str;
+  EditSubActionInfo subActionInfo(EditSubAction::eComputeTextToOutput);
+  subActionInfo.outString = &aOutputString;
+  subActionInfo.flags = aFlags;
+  subActionInfo.outputFormat = &aFormatType;
   Selection* selection = GetSelection();
   if (NS_WARN_IF(!selection)) {
     return NS_ERROR_FAILURE;
   }
   bool cancel, handled;
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
   if (cancel || NS_FAILED(rv)) {
     return rv;
   }
   if (handled) {
-    // This case will get triggered by password fields.
-    aOutputString.Assign(*(ruleInfo.outString));
+    // This case will get triggered by password fields or single text node only.
     return rv;
   }
 
@@ -1771,6 +1790,7 @@ TextEditor::OutputToString(const nsAString& aFormatType,
     return NS_ERROR_FAILURE;
   }
 
+  // XXX Why don't we call TextEditRules::DidDoAction() here?
   return encoder->EncodeToString(aOutputString);
 }
 
@@ -1828,7 +1848,7 @@ TextEditor::PasteAsQuotation(int32_t aSelectionType)
 
 NS_IMETHODIMP
 TextEditor::InsertAsQuotation(const nsAString& aQuotedText,
-                              nsIDOMNode** aNodeInserted)
+                              nsINode** aNodeInserted)
 {
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
@@ -1849,13 +1869,17 @@ TextEditor::InsertAsQuotation(const nsAString& aQuotedText,
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::insertText, nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, EditSubAction::eInsertText,
+                                      nsIEditor::eNext);
 
   // give rules a chance to handle or cancel
-  RulesInfo ruleInfo(EditAction::insertElement);
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertElement);
   bool cancel, handled;
-  rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-  NS_ENSURE_SUCCESS(rv, rv);
+  rv = rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   if (cancel) {
     return NS_OK; // Rules canceled the operation.
   }
@@ -1868,6 +1892,7 @@ TextEditor::InsertAsQuotation(const nsAString& aQuotedText,
       *aNodeInserted = nullptr;
     }
   }
+  // XXX Why don't we call TextEditRules::DidDoAction()?
   return rv;
 }
 
@@ -1882,7 +1907,7 @@ NS_IMETHODIMP
 TextEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
                                    const nsAString& aCitation,
                                    bool aInsertHTML,
-                                   nsIDOMNode** aNodeInserted)
+                                   nsINode** aNodeInserted)
 {
   return InsertAsQuotation(aQuotedText, aNodeInserted);
 }
@@ -1973,38 +1998,41 @@ TextEditor::GetEmbeddedObjects(nsIArray** aNodeList)
   return NS_OK;
 }
 
-/**
- * All editor operations which alter the doc should be prefaced
- * with a call to StartOperation, naming the action and direction.
- */
-nsresult
-TextEditor::StartOperation(EditAction opID,
-                           nsIEditor::EDirection aDirection)
+void
+TextEditor::OnStartToHandleTopLevelEditSubAction(
+              EditSubAction aEditSubAction,
+              nsIEditor::EDirection aDirection)
 {
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
-  EditorBase::StartOperation(opID, aDirection);  // will set mAction, mDirection
-  if (rules) {
-    return rules->BeforeEdit(mAction, mDirection);
+  EditorBase::OnStartToHandleTopLevelEditSubAction(aEditSubAction, aDirection);
+  if (!rules) {
+    return;
   }
-  return NS_OK;
+
+  MOZ_ASSERT(mTopLevelEditSubAction == aEditSubAction);
+  MOZ_ASSERT(mDirection == aDirection);
+  DebugOnly<nsresult> rv =
+    rules->BeforeEdit(mTopLevelEditSubAction, mDirection);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+    "TextEditRules::BeforeEdit() failed to handle something");
 }
 
-/**
- * All editor operations which alter the doc should be followed
- * with a call to EndOperation.
- */
-nsresult
-TextEditor::EndOperation()
+void
+TextEditor::OnEndHandlingTopLevelEditSubAction()
 {
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
   // post processing
-  nsresult rv = rules ? rules->AfterEdit(mAction, mDirection) : NS_OK;
-  EditorBase::EndOperation();  // will clear mAction, mDirection
-  return rv;
+  DebugOnly<nsresult> rv =
+    rules ? rules->AfterEdit(mTopLevelEditSubAction, mDirection) : NS_OK;
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+    "TextEditRules::AfterEdit() failed to handle something");
+  EditorBase::OnEndHandlingTopLevelEditSubAction();
+  MOZ_ASSERT(!mTopLevelEditSubAction);
+  MOZ_ASSERT(mDirection == eNone);
 }
 
 nsresult

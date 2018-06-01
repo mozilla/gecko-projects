@@ -18,11 +18,15 @@ var _SourceIcon2 = _interopRequireDefault(_SourceIcon);
 
 var _Button = require("../shared/Button/index");
 
+var _text = require("../../utils/text");
+
 var _actions = require("../../actions/index");
 
 var _actions2 = _interopRequireDefault(_actions);
 
 var _source = require("../../utils/source");
+
+var _devtoolsModules = require("devtools/client/debugger/new/dist/vendors").vendored["devtools-modules"];
 
 var _clipboard = require("../../utils/clipboard");
 
@@ -137,8 +141,7 @@ class Tab extends _react.PureComponent {
       closeTab,
       source
     } = this.props;
-    const src = source.toJS();
-    const filename = (0, _source.getFilename)(src);
+    const filename = (0, _source.getFilename)(source);
     const sourceId = source.id;
     const active = selectedSource && sourceId == selectedSource.get("id") && !this.isProjectSearchEnabled() && !this.isSourceSearchEnabled();
     const isPrettyCode = (0, _source.isPretty)(source);
@@ -168,13 +171,13 @@ class Tab extends _react.PureComponent {
       key: sourceId,
       onMouseUp: handleTabClick,
       onContextMenu: e => this.onTabContextMenu(e, sourceId),
-      title: (0, _source.getFileURL)(src)
+      title: (0, _source.getFileURL)(source)
     }, _react2.default.createElement(_SourceIcon2.default, {
       source: source,
       shouldHide: icon => ["file", "javascript"].includes(icon)
     }), _react2.default.createElement("div", {
       className: "filename"
-    }, filename), _react2.default.createElement(_Button.CloseButton, {
+    }, (0, _text.truncateMiddleText)((0, _devtoolsModules.getUnicodeUrlPath)(filename), 30)), _react2.default.createElement(_Button.CloseButton, {
       handleClick: onClickClose,
       tooltip: L10N.getStr("sourceTabs.closeTabButtonTooltip")
     }));

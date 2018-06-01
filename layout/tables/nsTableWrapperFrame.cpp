@@ -18,7 +18,6 @@
 #include "nsHTMLParts.h"
 #include "nsIPresShell.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMNode.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h"
 #include "nsIFrameInlines.h"
@@ -123,6 +122,10 @@ nsTableWrapperFrame::AppendFrames(ChildListID     aListID,
   // just tell the pres shell.
   PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
+  // The presence of caption frames makes us sort our display
+  // list differently, so mark us as changed for the new
+  // ordering.
+  MarkNeedsDisplayItemRebuild();
 }
 
 void
@@ -142,6 +145,7 @@ nsTableWrapperFrame::InsertFrames(ChildListID     aListID,
   // just tell the pres shell.
   PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
+  MarkNeedsDisplayItemRebuild();
 }
 
 void
@@ -163,6 +167,7 @@ nsTableWrapperFrame::RemoveFrame(ChildListID  aListID,
 
   PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
+  MarkNeedsDisplayItemRebuild();
 }
 
 void

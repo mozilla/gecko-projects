@@ -16,7 +16,6 @@ const {WebExtensionPolicy} = Cu.getGlobalForObject(Services);
 // lazy module getters
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  AboutHome: "resource:///modules/AboutHome.jsm",
   BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
@@ -55,8 +54,10 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   SchedulePressure: "resource:///modules/SchedulePressure.jsm",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
   SimpleServiceDiscovery: "resource://gre/modules/SimpleServiceDiscovery.jsm",
+  SiteDataManager: "resource:///modules/SiteDataManager.jsm",
   SitePermissions: "resource:///modules/SitePermissions.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
+  TabsPopup: "resource:///modules/TabsPopup.jsm",
   TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
   Translation: "resource:///modules/translation/Translation.jsm",
   UITour: "resource:///modules/UITour.jsm",
@@ -1162,6 +1163,37 @@ var delayedStartupPromise = new Promise(resolve => {
 var gBrowserInit = {
   delayedStartupFinished: false,
 
+  _tabToAdopt: undefined,
+
+  getTabToAdopt() {
+    if (this._tabToAdopt !== undefined) {
+      return this._tabToAdopt;
+    }
+
+    if (window.arguments && window.arguments[0] instanceof window.XULElement) {
+      this._tabToAdopt = window.arguments[0];
+
+      // Clear the reference of the tab being adopted from the arguments.
+      window.arguments[0] = null;
+    } else {
+      // There was no tab to adopt in the arguments, set _tabToAdopt to null
+      // to avoid checking it again.
+      this._tabToAdopt = null;
+    }
+
+    return this._tabToAdopt;
+  },
+
+  _clearTabToAdopt() {
+    this._tabToAdopt = null;
+  },
+
+  // Used to check if the new window is still adopting an existing tab as its first tab
+  // (e.g. from the WebExtensions internals).
+  isAdoptingTab() {
+    return !!this.getTabToAdopt();
+  },
+
   onBeforeInitialXULLayout() {
     // Set a sane starting width/height for all resolutions on new profiles.
     if (Services.prefs.getBoolPref("privacy.resistFingerprinting")) {
@@ -1225,8 +1257,8 @@ var gBrowserInit = {
     let remoteType;
     let sameProcessAsFrameLoader;
 
-    let tabArgument = window.arguments && window.arguments[0];
-    if (tabArgument instanceof XULElement) {
+    let tabArgument = this.getTabToAdopt();
+    if (tabArgument) {
       // The window's first argument is a tab if and only if we are swapping tabs.
       // We must set the browser's usercontextid before updateBrowserRemoteness(),
       // so that the newly created remote tab child has the correct usercontextid.
@@ -1331,26 +1363,27 @@ var gBrowserInit = {
     BrowserSearch.init();
     BrowserPageActions.init();
     gAccessibilityServiceIndicator.init();
+    AccessibilityRefreshBlocker.init();
 
     gRemoteControl.updateVisualCue(Marionette.running);
 
     // If we are given a tab to swap in, take care of it before first paint to
     // avoid an about:blank flash.
-    let tabToOpen = window.arguments && window.arguments[0];
-    if (tabToOpen instanceof XULElement) {
-      // Clear the reference to the tab from the arguments array.
-      window.arguments[0] = null;
-
+    let tabToAdopt = this.getTabToAdopt();
+    if (tabToAdopt) {
       // Stop the about:blank load
       gBrowser.stop();
       // make sure it has a docshell
       gBrowser.docShell;
 
       try {
-        gBrowser.swapBrowsersAndCloseOther(gBrowser.selectedTab, tabToOpen);
+        gBrowser.swapBrowsersAndCloseOther(gBrowser.selectedTab, tabToAdopt);
       } catch (e) {
         Cu.reportError(e);
       }
+
+      // Clear the reference to the tab once its adoption has been completed.
+      this._clearTabToAdopt();
     }
 
     // Wait until chrome is painted before executing code not critical to making the window visible
@@ -1595,8 +1628,8 @@ var gBrowserInit = {
     // we should remove the attribute before first paint.
     let shouldRemoveFocusedAttribute = true;
     this._callWithURIToLoad(uriToLoad => {
-      if ((isBlankPageURL(uriToLoad) || uriToLoad == "about:privatebrowsing") &&
-          focusAndSelectUrlBar()) {
+      if (isBlankPageURL(uriToLoad) || uriToLoad == "about:privatebrowsing") {
+        focusAndSelectUrlBar();
         shouldRemoveFocusedAttribute = false;
         return;
       }
@@ -1854,6 +1887,8 @@ var gBrowserInit = {
     DownloadsButton.uninit();
 
     gAccessibilityServiceIndicator.uninit();
+
+    AccessibilityRefreshBlocker.uninit();
 
     LanguagePrompt.uninit();
 
@@ -2206,7 +2241,11 @@ function BrowserGoHome(aEvent) {
   switch (where) {
   case "current":
     loadOneOrMoreURIs(homePage, Services.scriptSecurityManager.getSystemPrincipal());
-    gBrowser.selectedBrowser.focus();
+    if (isBlankPageURL(homePage)) {
+      focusAndSelectUrlBar();
+    } else {
+      gBrowser.selectedBrowser.focus();
+    }
     notifyObservers = true;
     break;
   case "tabshifted":
@@ -2278,39 +2317,35 @@ function focusAndSelectUrlBar(userInitiatedFocus = false) {
     gNavToolbox.addEventListener("aftercustomization", function() {
       focusAndSelectUrlBar(userInitiatedFocus);
     }, {once: true});
-
-    return true;
+    return;
   }
 
-  if (gURLBar) {
-    if (window.fullScreen)
-      FullScreen.showNavToolbox();
-
-    gURLBar.userInitiatedFocus = userInitiatedFocus;
-    gURLBar.select();
-    gURLBar.userInitiatedFocus = false;
-    if (document.activeElement == gURLBar.inputField)
-      return true;
+  if (window.fullScreen) {
+    FullScreen.showNavToolbox();
   }
-  return false;
+
+  gURLBar.userInitiatedFocus = userInitiatedFocus;
+  gURLBar.select();
+  gURLBar.userInitiatedFocus = false;
 }
 
 function openLocation() {
-  if (focusAndSelectUrlBar(true))
+  if (window.location.href == getBrowserURL()) {
+    focusAndSelectUrlBar(true);
     return;
-
-  if (window.location.href != getBrowserURL()) {
-    var win = getTopWin();
-    if (win) {
-      // If there's an open browser window, it should handle this command
-      win.focus();
-      win.openLocation();
-    } else {
-      // If there are no open browser windows, open a new one
-      window.openDialog("chrome://browser/content/", "_blank",
-                        "chrome,all,dialog=no", BROWSER_NEW_TAB_URL);
-    }
   }
+
+  // If there's an open browser window, redirect the command there.
+  let win = getTopWin();
+  if (win) {
+    win.focus();
+    win.openLocation();
+    return;
+  }
+
+  // There are no open browser windows; open a new one.
+  window.openDialog("chrome://browser/content/", "_blank",
+                    "chrome,all,dialog=no", BROWSER_NEW_TAB_URL);
 }
 
 function BrowserOpenTab(event) {
@@ -4704,7 +4739,6 @@ var XULBrowserWindow = {
   // This function fires only for the currently selected tab.
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
     const nsIWebProgressListener = Ci.nsIWebProgressListener;
-    const nsIChannel = Ci.nsIChannel;
 
     let browser = gBrowser.selectedBrowser;
 
@@ -4737,7 +4771,7 @@ var XULBrowserWindow = {
         let location;
         let canViewSource = true;
         // Get the URI either from a channel or a pseudo-object
-        if (aRequest instanceof nsIChannel || "URI" in aRequest) {
+        if (aRequest instanceof Ci.nsIChannel || "URI" in aRequest) {
           location = aRequest.URI;
 
           // For keyword URIs clear the user typed value since they will be changed into real URIs
@@ -5271,6 +5305,44 @@ var CombinedStopReload = {
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = 0;
+    }
+  }
+};
+
+// This helper only cares about loading the frame
+// script if the pref is seen as true.
+// After the frame script is loaded, it takes over
+// the responsibility of watching the pref and
+// enabling/disabling itself.
+const AccessibilityRefreshBlocker = {
+  PREF: "accessibility.blockautorefresh",
+
+  init() {
+    if (Services.prefs.getBoolPref(this.PREF)) {
+      this.loadFrameScript();
+    } else {
+      Services.prefs.addObserver(this.PREF, this);
+    }
+  },
+
+  uninit() {
+    Services.prefs.removeObserver(this.PREF, this);
+  },
+
+  observe(aSubject, aTopic, aPrefName) {
+    if (aTopic == "nsPref:changed" &&
+        aPrefName == this.PREF &&
+        Services.prefs.getBoolPref(this.PREF)) {
+      this.loadFrameScript();
+      Services.prefs.removeObserver(this.PREF, this);
+    }
+  },
+
+  loadFrameScript() {
+    if (!this._loaded) {
+      this._loaded = true;
+      let mm = window.getGroupMessageManager("browsers");
+      mm.loadFrameScript("chrome://browser/content/content-refreshblocker.js", true);
     }
   }
 };
@@ -6123,8 +6195,7 @@ function contentAreaClick(event, isPanelClick) {
                                          uri: makeURI(href),
                                          title: linkNode.getAttribute("title"),
                                          loadBookmarkInSidebar: true,
-                                         hiddenRows: [ "description",
-                                                       "location",
+                                         hiddenRows: [ "location",
                                                        "keyword" ]
                                        }, window);
       event.preventDefault();
@@ -6798,9 +6869,9 @@ var IndexedDBPromptHelper = {
       throw new Error("Unexpected topic!");
     }
 
-    var requestor = subject.QueryInterface(Ci.nsIInterfaceRequestor);
+    var request = subject.QueryInterface(Ci.nsIIDBPermissionsRequest);
 
-    var browser = requestor.getInterface(Ci.nsIDOMNode);
+    var browser = request.browserElement;
     if (browser.ownerGlobal != window) {
       // Only listen for notifications for browsers in our chrome window.
       return;
@@ -6817,7 +6888,7 @@ var IndexedDBPromptHelper = {
       responseTopic = this._permissionsResponse;
     }
 
-    var observer = requestor.getInterface(Ci.nsIObserver);
+    var observer = request.responseObserver;
 
     var mainAction = {
       label: gNavigatorBundle.getString("offlineApps.allowStoring.label"),
@@ -7037,7 +7108,7 @@ var WebAuthnPromptHelper = {
       label: gNavigatorBundle.getString("webauthn.proceed"),
       accessKey: gNavigatorBundle.getString("webauthn.proceed.accesskey"),
       callback(state) {
-        mgr.resumeRegister(tid, !state.checkboxChecked);
+        mgr.resumeRegister(tid, state.checkboxChecked);
       }
     };
   },
@@ -7265,12 +7336,10 @@ function AddKeywordForSearchField() {
                                        type: "bookmark",
                                        uri: makeURI(bookmarkData.spec),
                                        title,
-                                       description: bookmarkData.description,
                                        keyword: "",
                                        postData: bookmarkData.postData,
                                        charSet: bookmarkData.charset,
                                        hiddenRows: [ "location",
-                                                     "description",
                                                      "tags",
                                                      "loadInSidebar" ]
                                      }, window);
@@ -7830,6 +7899,11 @@ var TabContextMenu = {
       unpinnedTabsToClose--;
     }
     document.getElementById("context_closeOtherTabs").disabled = unpinnedTabsToClose < 1;
+
+    // Only one of close_tab/close_selected_tabs should be visible
+    let hasMultiSelectedTabs = !!gBrowser.multiSelectedTabsCount;
+    document.getElementById("context_closeTab").hidden = hasMultiSelectedTabs;
+    document.getElementById("context_closeSelectedTabs").hidden = !hasMultiSelectedTabs;
 
     // Hide "Bookmark All Tabs" for a pinned tab.  Update its state if visible.
     let bookmarkAllTabs = document.getElementById("context_bookmarkAllTabs");

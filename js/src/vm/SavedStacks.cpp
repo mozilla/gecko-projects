@@ -101,21 +101,21 @@ LiveSavedFrameCache::find(JSContext* cx, FramePtr& framePtr, const jsbytecode* p
     MOZ_ASSERT(initialized());
     MOZ_ASSERT(framePtr.hasCachedSavedFrame());
 
-    // If we flushed the cache due to a compartment mismatch, then we shouldn't
+    // If we flushed the cache due to a realm mismatch, then we shouldn't
     // expect to find any frames in the cache.
     if (frames->empty()) {
         frame.set(nullptr);
         return;
     }
 
-    // All our SavedFrames should be in the same compartment. If the last
-    // entry's SavedFrame's compartment doesn't match cx's, flush the cache.
-    if (frames->back().savedFrame->compartment() != cx->compartment()) {
+    // All our SavedFrames should be in the same realm. If the last
+    // entry's SavedFrame's realm doesn't match cx's, flush the cache.
+    if (frames->back().savedFrame->realm() != cx->realm()) {
 #ifdef DEBUG
-        // Check that they are, indeed, all in the same compartment.
-        auto compartment = frames->back().savedFrame->compartment();
+        // Check that they are, indeed, all in the same realm.
+        auto compartment = frames->back().savedFrame->realm();
         for (const auto& f : (*frames))
-            MOZ_ASSERT(compartment == f.savedFrame->compartment());
+            MOZ_ASSERT(compartment == f.savedFrame->realm());
 #endif
         frames->clear();
         frame.set(nullptr);
@@ -124,7 +124,7 @@ LiveSavedFrameCache::find(JSContext* cx, FramePtr& framePtr, const jsbytecode* p
 
     Key key(framePtr);
     while (key != frames->back().key) {
-        MOZ_ASSERT(frames->back().savedFrame->compartment() == cx->compartment());
+        MOZ_ASSERT(frames->back().savedFrame->realm() == cx->realm());
 
         // We know that the cache does contain an entry for frameIter's frame,
         // since its bit is set. That entry must be below this one in the stack,
@@ -559,7 +559,7 @@ SavedFrame::create(JSContext* cx)
     // Ensure that we don't try to capture the stack again in the
     // `SavedStacksMetadataBuilder` for this new SavedFrame object, and
     // accidentally cause O(n^2) behavior.
-    SavedStacks::AutoReentrancyGuard guard(cx->compartment()->savedStacks());
+    SavedStacks::AutoReentrancyGuard guard(cx->realm()->savedStacks());
 
     RootedNativeObject proto(cx, GlobalObject::getOrCreateSavedFramePrototype(cx, global));
     if (!proto)
@@ -614,8 +614,8 @@ SavedFrameSubsumedByCaller(JSContext* cx, HandleSavedFrame frame)
     if (!subsumes)
         return true;
 
-    auto currentCompartmentPrincipals = cx->compartment()->principals();
-    MOZ_ASSERT(!ReconstructedSavedFramePrincipals::is(currentCompartmentPrincipals));
+    auto currentRealmPrincipals = cx->realm()->principals();
+    MOZ_ASSERT(!ReconstructedSavedFramePrincipals::is(currentRealmPrincipals));
 
     auto framePrincipals = frame->getPrincipals();
 
@@ -626,7 +626,7 @@ SavedFrameSubsumedByCaller(JSContext* cx, HandleSavedFrame frame)
     if (framePrincipals == &ReconstructedSavedFramePrincipals::IsNotSystem)
         return true;
 
-    return subsumes(currentCompartmentPrincipals, framePrincipals);
+    return subsumes(currentRealmPrincipals, framePrincipals);
 }
 
 // Return the first SavedFrame in the chain that starts with |frame| whose
@@ -771,29 +771,29 @@ namespace {
 //
 // We want callers to pass us the object they were actually passed, not an
 // unwrapped form of it.  That way Xray access to SavedFrame objects should not
-// be affected by AutoMaybeEnterFrameCompartment and the only things that will
+// be affected by AutoMaybeEnterFrameRealm and the only things that will
 // be affected will be cases in which privileged code works with some C++ object
 // that then pokes at an unprivileged StackFrame it has on hand.
-class MOZ_STACK_CLASS AutoMaybeEnterFrameCompartment
+class MOZ_STACK_CLASS AutoMaybeEnterFrameRealm
 {
 public:
-    AutoMaybeEnterFrameCompartment(JSContext* cx,
-                                   HandleObject obj
-                                   MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    AutoMaybeEnterFrameRealm(JSContext* cx,
+                             HandleObject obj
+                             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
-        MOZ_RELEASE_ASSERT(cx->compartment());
+        MOZ_RELEASE_ASSERT(cx->realm());
         if (obj)
-            MOZ_RELEASE_ASSERT(obj->compartment());
+            MOZ_RELEASE_ASSERT(obj->realm());
 
         // Note that obj might be null here, since we're doing this before
         // UnwrapSavedFrame.
-        if (obj && cx->compartment() != obj->compartment())
+        if (obj && cx->realm() != obj->realm())
         {
             JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes;
-            if (subsumes && subsumes(cx->compartment()->principals(),
-                                     obj->compartment()->principals()))
+            if (subsumes && subsumes(cx->realm()->principals(),
+                                     obj->realm()->principals()))
             {
                 ar_.emplace(cx, obj);
             }
@@ -829,10 +829,10 @@ GetSavedFrameSource(JSContext* cx, HandleObject savedFrame, MutableHandleString 
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
     {
-        AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+        AutoMaybeEnterFrameRealm ar(cx, savedFrame);
         bool skippedAsync;
         js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, savedFrame, selfHosted, skippedAsync));
         if (!frame) {
@@ -852,10 +852,10 @@ GetSavedFrameLine(JSContext* cx, HandleObject savedFrame, uint32_t* linep,
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
     MOZ_ASSERT(linep);
 
-    AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+    AutoMaybeEnterFrameRealm ar(cx, savedFrame);
     bool skippedAsync;
     js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, savedFrame, selfHosted, skippedAsync));
     if (!frame) {
@@ -872,10 +872,10 @@ GetSavedFrameColumn(JSContext* cx, HandleObject savedFrame, uint32_t* columnp,
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
     MOZ_ASSERT(columnp);
 
-    AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+    AutoMaybeEnterFrameRealm ar(cx, savedFrame);
     bool skippedAsync;
     js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, savedFrame, selfHosted, skippedAsync));
     if (!frame) {
@@ -892,10 +892,10 @@ GetSavedFrameFunctionDisplayName(JSContext* cx, HandleObject savedFrame, Mutable
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
     {
-        AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+        AutoMaybeEnterFrameRealm ar(cx, savedFrame);
         bool skippedAsync;
         js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, savedFrame, selfHosted, skippedAsync));
         if (!frame) {
@@ -915,10 +915,10 @@ GetSavedFrameAsyncCause(JSContext* cx, HandleObject savedFrame, MutableHandleStr
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
     {
-        AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+        AutoMaybeEnterFrameRealm ar(cx, savedFrame);
         bool skippedAsync;
         // This function is always called with self-hosted frames excluded by
         // GetValueIfNotCached in dom/bindings/Exceptions.cpp. However, we want
@@ -946,9 +946,9 @@ GetSavedFrameAsyncParent(JSContext* cx, HandleObject savedFrame, MutableHandleOb
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
-    AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+    AutoMaybeEnterFrameRealm ar(cx, savedFrame);
     bool skippedAsync;
     js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, savedFrame, selfHosted, skippedAsync));
     if (!frame) {
@@ -979,9 +979,9 @@ GetSavedFrameParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject 
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
-    AutoMaybeEnterFrameCompartment ac(cx, savedFrame);
+    AutoMaybeEnterFrameRealm ar(cx, savedFrame);
     bool skippedAsync;
     js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, savedFrame, selfHosted, skippedAsync));
     if (!frame) {
@@ -1085,7 +1085,7 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
 {
     js::AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
     js::StringBuffer sb(cx);
 
@@ -1094,11 +1094,11 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
     MOZ_ASSERT(format != js::StackFormat::Default);
 
     // Enter a new block to constrain the scope of possibly entering the stack's
-    // compartment. This ensures that when we finish the StringBuffer, we are
-    // back in the cx's original compartment, and fulfill our contract with
-    // callers to place the output string in the cx's current compartment.
+    // realm. This ensures that when we finish the StringBuffer, we are back in
+    // the cx's original compartment, and fulfill our contract with callers to
+    // place the output string in the cx's current realm.
     {
-        AutoMaybeEnterFrameCompartment ac(cx, stack);
+        AutoMaybeEnterFrameRealm ar(cx, stack);
         bool skippedAsync;
         js::RootedSavedFrame frame(cx, UnwrapSavedFrame(cx, stack, SavedFrameSelfHosted::Exclude,
                                                         skippedAsync));
@@ -1279,8 +1279,8 @@ SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame,
                               JS::StackCapture&& capture /* = JS::StackCapture(JS::AllFrames()) */)
 {
     MOZ_ASSERT(initialized());
-    MOZ_RELEASE_ASSERT(cx->compartment());
-    assertSameCompartment(cx, this);
+    MOZ_RELEASE_ASSERT(cx->realm());
+    MOZ_DIAGNOSTIC_ASSERT(&cx->realm()->savedStacks() == this);
 
     if (creatingSavedFrame ||
         cx->isExceptionPending() ||
@@ -1301,8 +1301,8 @@ SavedStacks::copyAsyncStack(JSContext* cx, HandleObject asyncStack, HandleString
                             const Maybe<size_t>& maxFrameCount)
 {
     MOZ_ASSERT(initialized());
-    MOZ_RELEASE_ASSERT(cx->compartment());
-    assertSameCompartment(cx, this);
+    MOZ_RELEASE_ASSERT(cx->realm());
+    MOZ_DIAGNOSTIC_ASSERT(&cx->realm()->savedStacks() == this);
 
     RootedAtom asyncCauseAtom(cx, AtomizeString(cx, asyncCause));
     if (!asyncCauseAtom)
@@ -1474,14 +1474,14 @@ SavedStacks::insertFrames(JSContext* cx, MutableHandleSavedFrame frame,
         // needed to construct the SavedFrame::Lookup.
         Rooted<LocationValue> location(cx);
         {
-            AutoRealmUnchecked ar(cx, iter.compartment());
-            if (!cx->compartment()->savedStacks().getLocation(cx, iter, &location))
+            AutoRealmUnchecked ar(cx, iter.realm());
+            if (!cx->realm()->savedStacks().getLocation(cx, iter, &location))
                 return false;
         }
 
         RootedAtom displayAtom(cx, iter.maybeFunctionDisplayAtom());
 
-        auto principals = iter.compartment()->principals();
+        auto principals = iter.realm()->principals();
         MOZ_ASSERT_IF(framePtr && !iter.isWasm(), iter.pc());
 
         if (!stackChain->emplaceBack(location.source(),
@@ -1618,12 +1618,12 @@ SavedStacks::adoptAsyncStack(JSContext* cx, MutableHandleSavedFrame asyncStack,
     // Attach the asyncCause to the youngest frame.
     stackChain[0]->asyncCause = asyncCause;
 
-    // If we walked the entire stack, and it's in cx's compartment, we don't
+    // If we walked the entire stack, and it's in cx's realm, we don't
     // need to rebuild the full chain again using the lookup objects - we can
     // just use the existing chain. Only the asyncCause on the youngest frame
     // needs to be changed.
     if (currentSavedFrame == nullptr &&
-        asyncStack->compartment() == cx->compartment())
+        asyncStack->realm() == cx->realm())
     {
         SavedFrame::HandleLookup lookup = stackChain[0];
         lookup->parent = asyncStack->getParent();
@@ -1748,7 +1748,8 @@ SavedStacks::getLocation(JSContext* cx, const FrameIter& iter,
     // compartment. Otherwise, we would get dead cross-compartment scripts in
     // the cache because our compartment's sweep method isn't called when their
     // compartment gets collected.
-    assertSameCompartment(cx, this, iter.compartment());
+    MOZ_DIAGNOSTIC_ASSERT(&cx->realm()->savedStacks() == this);
+    assertSameCompartment(cx, iter.compartment());
 
     // When we have a |JSScript| for this frame, use a potentially memoized
     // location from our PCLocationMap and copy it into |locationp|. When we do
@@ -1806,9 +1807,8 @@ SavedStacks::getLocation(JSContext* cx, const FrameIter& iter,
 }
 
 void
-SavedStacks::chooseSamplingProbability(JSCompartment* compartment)
+SavedStacks::chooseSamplingProbability(Realm* realm)
 {
-    Realm* realm = JS::GetRealmForCompartment(compartment);
     GlobalObject* global = realm->maybeGlobal();
     if (!global)
         return;
@@ -1850,7 +1850,7 @@ SavedStacks::MetadataBuilder::build(JSContext* cx, HandleObject target,
 {
     RootedObject obj(cx, target);
 
-    SavedStacks& stacks = cx->compartment()->savedStacks();
+    SavedStacks& stacks = cx->realm()->savedStacks();
     if (!stacks.bernoulli.trial())
         return nullptr;
 
@@ -1866,18 +1866,6 @@ SavedStacks::MetadataBuilder::build(JSContext* cx, HandleObject target,
 }
 
 const SavedStacks::MetadataBuilder SavedStacks::metadataBuilder;
-
-#ifdef JS_CRASH_DIAGNOSTICS
-void
-CompartmentChecker::check(SavedStacks* stacks)
-{
-    if (&compartment->savedStacks() != stacks) {
-        printf("*** Compartment SavedStacks mismatch: %p vs. %p\n",
-               (void*) &compartment->savedStacks(), stacks);
-        MOZ_CRASH();
-    }
-}
-#endif /* JS_CRASH_DIAGNOSTICS */
 
 /* static */ ReconstructedSavedFramePrincipals ReconstructedSavedFramePrincipals::IsSystem;
 /* static */ ReconstructedSavedFramePrincipals ReconstructedSavedFramePrincipals::IsNotSystem;
@@ -2001,7 +1989,7 @@ ConstructSavedFrameStackSlow(JSContext* cx, JS::ubi::StackFrame& frame,
     for (size_t i = stackChain->length(); i != 0; i--) {
         SavedFrame::HandleLookup lookup = stackChain[i-1];
         lookup->parent = parentFrame;
-        parentFrame = cx->compartment()->savedStacks().getOrCreateSavedFrame(cx, lookup);
+        parentFrame = cx->realm()->savedStacks().getOrCreateSavedFrame(cx, lookup);
         if (!parentFrame)
             return false;
     }

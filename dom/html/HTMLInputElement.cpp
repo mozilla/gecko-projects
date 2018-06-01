@@ -11,6 +11,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Date.h"
 #include "mozilla/dom/Directory.h"
+#include "mozilla/dom/DocumentOrShadowRoot.h"
 #include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/FileSystemUtils.h"
@@ -18,6 +19,7 @@
 #include "mozilla/dom/WheelEventBinding.h"
 #include "nsAttrValueInlines.h"
 #include "nsCRTGlue.h"
+#include "nsQueryObject.h"
 
 #include "nsITextControlElement.h"
 #include "nsIDOMNSEditableElement.h"
@@ -508,7 +510,7 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
 
     while (NS_SUCCEEDED(iter->HasMoreElements(&hasMore)) && hasMore) {
       iter->GetNext(getter_AddRefs(tmp));
-      nsCOMPtr<nsIDOMBlob> domBlob = do_QueryInterface(tmp);
+      RefPtr<Blob> domBlob = do_QueryObject(tmp);
       MOZ_ASSERT(domBlob,
                  "Null file object from FilePicker's file enumerator?");
       if (!domBlob) {
@@ -516,7 +518,7 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
       }
 
       OwningFileOrDirectory* element = newFilesOrDirectories.AppendElement();
-      element->SetAsFile() = static_cast<File*>(domBlob.get());
+      element->SetAsFile() = domBlob->ToFile();
     }
   } else {
     MOZ_ASSERT(mode == static_cast<int16_t>(nsIFilePicker::modeOpen) ||
@@ -525,9 +527,9 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
     nsresult rv = mFilePicker->GetDomFileOrDirectory(getter_AddRefs(tmp));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(tmp);
+    RefPtr<Blob> blob = do_QueryObject(tmp);
     if (blob) {
-      RefPtr<File> file = static_cast<Blob*>(blob.get())->ToFile();
+      RefPtr<File> file = blob->ToFile();
       MOZ_ASSERT(file);
 
       OwningFileOrDirectory* element = newFilesOrDirectories.AppendElement();
@@ -1120,7 +1122,7 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(HTMLInputElement,
                                              nsIDOMNSEditableElement,
                                              nsIConstraintValidation)
 
-// nsIDOMNode
+// nsINode
 
 nsresult
 HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult,
@@ -1716,13 +1718,12 @@ HTMLInputElement::GetList() const
     return nullptr;
   }
 
-  //XXXsmaug How should this all work in case input element is in Shadow DOM.
-  nsIDocument* doc = GetUncomposedDoc();
-  if (!doc) {
+  DocumentOrShadowRoot* docOrShadow = GetUncomposedDocOrConnectedShadowRoot();
+  if (!docOrShadow) {
     return nullptr;
   }
 
-  Element* element = doc->GetElementById(dataListId);
+  Element* element = docOrShadow->GetElementById(dataListId);
   if (!element || !element->IsHTMLElement(nsGkAtoms::datalist)) {
     return nullptr;
   }
@@ -3177,7 +3178,8 @@ HTMLInputElement::Focus(ErrorResult& aError)
     nsNumberControlFrame* numberControlFrame =
       do_QueryFrame(GetPrimaryFrame());
     if (numberControlFrame) {
-      HTMLInputElement* textControl = numberControlFrame->GetAnonTextControl();
+      RefPtr<HTMLInputElement> textControl =
+        numberControlFrame->GetAnonTextControl();
       if (textControl) {
         textControl->Focus(aError);
         return;

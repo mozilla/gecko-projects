@@ -399,7 +399,7 @@ CodeGenerator::CodeGenerator(MIRGenerator* gen, LIRGraph* graph, MacroAssembler*
   , ionScriptLabels_(gen->alloc())
   , scriptCounts_(nullptr)
   , simdTemplatesToReadBarrier_(0)
-  , compartmentStubsToReadBarrier_(0)
+  , realmStubsToReadBarrier_(0)
 {
 }
 
@@ -1792,6 +1792,7 @@ CreateDependentString::generate(MacroAssembler& masm, const JSAtomState& names,
 
         // Post-barrier the base store, whether it was the direct or indirect
         // base (both will end up in temp1 here).
+        masm.branchPtrInNurseryChunk(Assembler::Equal, string, temp2, &done);
         masm.branchPtrInNurseryChunk(Assembler::NotEqual, temp1, temp2, &done);
 
         LiveRegisterSet regsToSave(RegisterSet::Volatile());
@@ -1894,7 +1895,7 @@ CreateMatchResultFallback(MacroAssembler& masm, LiveRegisterSet regsToSave,
 }
 
 JitCode*
-JitCompartment::generateRegExpMatcherStub(JSContext* cx)
+JitRealm::generateRegExpMatcherStub(JSContext* cx)
 {
     Register regexp = RegExpMatcherRegExpReg;
     Register input = RegExpMatcherStringReg;
@@ -1929,7 +1930,7 @@ JitCompartment::generateRegExpMatcherStub(JSContext* cx)
         maybeTemp4 = regs.takeAny();
     }
 
-    ArrayObject* templateObject = cx->compartment()->regExps.getOrCreateMatchResultTemplateObject(cx);
+    ArrayObject* templateObject = cx->realm()->regExps.getOrCreateMatchResultTemplateObject(cx);
     if (!templateObject)
         return nullptr;
 
@@ -2217,8 +2218,8 @@ CodeGenerator::visitRegExpMatcher(LRegExpMatcher* lir)
     OutOfLineRegExpMatcher* ool = new(alloc()) OutOfLineRegExpMatcher(lir);
     addOutOfLineCode(ool, lir->mir());
 
-    const JitCompartment* jitCompartment = gen->compartment->jitCompartment();
-    JitCode* regExpMatcherStub = jitCompartment->regExpMatcherStubNoBarrier(&compartmentStubsToReadBarrier_);
+    const JitRealm* jitRealm = gen->realm->jitRealm();
+    JitCode* regExpMatcherStub = jitRealm->regExpMatcherStubNoBarrier(&realmStubsToReadBarrier_);
     masm.call(regExpMatcherStub);
     masm.branchTestUndefined(Assembler::Equal, JSReturnOperand, ool->entry());
     masm.bind(ool->rejoin());
@@ -2230,7 +2231,7 @@ static const int32_t RegExpSearcherResultNotFound = -1;
 static const int32_t RegExpSearcherResultFailed = -2;
 
 JitCode*
-JitCompartment::generateRegExpSearcherStub(JSContext* cx)
+JitRealm::generateRegExpSearcherStub(JSContext* cx)
 {
     Register regexp = RegExpTesterRegExpReg;
     Register input = RegExpTesterStringReg;
@@ -2367,8 +2368,8 @@ CodeGenerator::visitRegExpSearcher(LRegExpSearcher* lir)
     OutOfLineRegExpSearcher* ool = new(alloc()) OutOfLineRegExpSearcher(lir);
     addOutOfLineCode(ool, lir->mir());
 
-    const JitCompartment* jitCompartment = gen->compartment->jitCompartment();
-    JitCode* regExpSearcherStub = jitCompartment->regExpSearcherStubNoBarrier(&compartmentStubsToReadBarrier_);
+    const JitRealm* jitRealm = gen->realm->jitRealm();
+    JitCode* regExpSearcherStub = jitRealm->regExpSearcherStubNoBarrier(&realmStubsToReadBarrier_);
     masm.call(regExpSearcherStub);
     masm.branch32(Assembler::Equal, ReturnReg, Imm32(RegExpSearcherResultFailed), ool->entry());
     masm.bind(ool->rejoin());
@@ -2380,7 +2381,7 @@ static const int32_t RegExpTesterResultNotFound = -1;
 static const int32_t RegExpTesterResultFailed = -2;
 
 JitCode*
-JitCompartment::generateRegExpTesterStub(JSContext* cx)
+JitRealm::generateRegExpTesterStub(JSContext* cx)
 {
     Register regexp = RegExpTesterRegExpReg;
     Register input = RegExpTesterStringReg;
@@ -2504,8 +2505,8 @@ CodeGenerator::visitRegExpTester(LRegExpTester* lir)
     OutOfLineRegExpTester* ool = new(alloc()) OutOfLineRegExpTester(lir);
     addOutOfLineCode(ool, lir->mir());
 
-    const JitCompartment* jitCompartment = gen->compartment->jitCompartment();
-    JitCode* regExpTesterStub = jitCompartment->regExpTesterStubNoBarrier(&compartmentStubsToReadBarrier_);
+    const JitRealm* jitRealm = gen->realm->jitRealm();
+    JitCode* regExpTesterStub = jitRealm->regExpTesterStubNoBarrier(&realmStubsToReadBarrier_);
     masm.call(regExpTesterStub);
 
     masm.branch32(Assembler::Equal, ReturnReg, Imm32(RegExpTesterResultFailed), ool->entry());
@@ -2542,7 +2543,7 @@ CodeGenerator::visitRegExpPrototypeOptimizable(LRegExpPrototypeOptimizable* ins)
     masm.loadJSContext(temp);
     masm.loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
     size_t offset = Realm::offsetOfRegExps() +
-                    RegExpCompartment::offsetOfOptimizableRegExpPrototypeShape();
+                    RegExpRealm::offsetOfOptimizableRegExpPrototypeShape();
     masm.loadPtr(Address(temp, offset), temp);
 
     masm.branchTestObjShapeUnsafe(Assembler::NotEqual, object, temp, ool->entry());
@@ -2602,7 +2603,7 @@ CodeGenerator::visitRegExpInstanceOptimizable(LRegExpInstanceOptimizable* ins)
     masm.loadJSContext(temp);
     masm.loadPtr(Address(temp, JSContext::offsetOfRealm()), temp);
     size_t offset = Realm::offsetOfRegExps() +
-                    RegExpCompartment::offsetOfOptimizableRegExpInstanceShape();
+                    RegExpRealm::offsetOfOptimizableRegExpInstanceShape();
     masm.loadPtr(Address(temp, offset), temp);
 
     masm.branchTestObjShapeUnsafe(Assembler::NotEqual, object, temp, ool->entry());
@@ -4036,16 +4037,20 @@ CodeGenerator::maybeEmitGlobalBarrierCheck(const LAllocation* maybeGlobal, OutOf
 {
     // Check whether an object is a global that we have already barriered before
     // calling into the VM.
+    //
+    // We only check for the script's global, not other globals within the same
+    // compartment, because we bake in a pointer to realm->globalWriteBarriered
+    // and doing that would be invalid for other realms because they could be
+    // collected before the Ion code is discarded.
 
     if (!maybeGlobal->isConstant())
         return;
 
     JSObject* obj = &maybeGlobal->toConstant()->toObject();
-    if (!isGlobalObject(obj))
+    if (gen->realm->maybeGlobal() != obj)
         return;
 
-    JSCompartment* comp = obj->compartment();
-    auto addr = AbsoluteAddress(&comp->globalWriteBarriered);
+    auto addr = AbsoluteAddress(gen->realm->addressOfGlobalWriteBarriered());
     masm.branch32(Assembler::NotEqual, addr, Imm32(0), ool->rejoin());
 }
 
@@ -5352,7 +5357,7 @@ CodeGenerator::maybeCreateScriptCounts()
                 JSScript* innerScript = block->info().script();
                 description = (char*) js_calloc(200);
                 if (description) {
-                    snprintf(description, 200, "%s:%zu",
+                    snprintf(description, 200, "%s:%u",
                              innerScript->filename(), innerScript->lineno());
                 }
             }
@@ -5629,7 +5634,7 @@ CodeGenerator::emitDebugForceBailing(LInstruction* lir)
         return;
 
     masm.comment("emitDebugForceBailing");
-    const void* bailAfterAddr = gen->compartment->zone()->addressOfIonBailAfter();
+    const void* bailAfterAddr = gen->realm->zone()->addressOfIonBailAfter();
 
     AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
 
@@ -8198,8 +8203,8 @@ CodeGenerator::emitConcat(LInstruction* lir, Register lhs, Register rhs, Registe
     OutOfLineCode* ool = oolCallVM(ConcatStringsInfo, lir, ArgList(lhs, rhs),
                                    StoreRegisterTo(output));
 
-    const JitCompartment* jitCompartment = gen->compartment->jitCompartment();
-    JitCode* stringConcatStub = jitCompartment->stringConcatStubNoBarrier(&compartmentStubsToReadBarrier_);
+    const JitRealm* jitRealm = gen->realm->jitRealm();
+    JitCode* stringConcatStub = jitRealm->stringConcatStubNoBarrier(&realmStubsToReadBarrier_);
     masm.call(stringConcatStub);
     masm.branchTestPtr(Assembler::Zero, output, output, ool->entry());
 
@@ -8479,7 +8484,7 @@ CodeGenerator::visitSubstr(LSubstr* lir)
 }
 
 JitCode*
-JitCompartment::generateStringConcatStub(JSContext* cx)
+JitRealm::generateStringConcatStub(JSContext* cx)
 {
     StackMacroAssembler masm(cx);
 
@@ -9872,11 +9877,11 @@ CodeGenerator::visitIteratorMore(LIteratorMore* lir)
     Register outputScratch = output.scratchReg();
     LoadNativeIterator(masm, obj, outputScratch, ool->entry());
 
-    // If props_cursor < props_end, load the next string and advance the cursor.
-    // Else, return MagicValue(JS_NO_ITER_VALUE).
+    // If propertyCursor_ < propertiesEnd_, load the next string and advance
+    // the cursor.  Otherwise return MagicValue(JS_NO_ITER_VALUE).
     Label iterDone;
-    Address cursorAddr(outputScratch, offsetof(NativeIterator, props_cursor));
-    Address cursorEndAddr(outputScratch, offsetof(NativeIterator, props_end));
+    Address cursorAddr(outputScratch, NativeIterator::offsetOfPropertyCursor());
+    Address cursorEndAddr(outputScratch, NativeIterator::offsetOfPropertiesEnd());
     masm.loadPtr(cursorAddr, temp);
     masm.branchPtr(Assembler::BelowOrEqual, cursorEndAddr, temp, &iterDone);
 
@@ -9925,12 +9930,12 @@ CodeGenerator::visitIteratorEnd(LIteratorEnd* lir)
     LoadNativeIterator(masm, obj, temp1, ool->entry());
 
     // Clear active bit.
-    masm.and32(Imm32(~JSITER_ACTIVE), Address(temp1, offsetof(NativeIterator, flags)));
+    masm.and32(Imm32(~NativeIterator::Flags::Active),
+               Address(temp1, NativeIterator::offsetOfFlags()));
 
     // Reset property cursor.
-    Address propCursor(temp1, offsetof(NativeIterator, props_cursor));
-    masm.computeEffectiveAddress(Address(temp1, sizeof(NativeIterator)), temp2);
-    masm.storePtr(temp2, propCursor);
+    masm.loadPtr(Address(temp1, NativeIterator::offsetOfGuardsEnd()), temp2);
+    masm.storePtr(temp2, Address(temp1, NativeIterator::offsetOfPropertyCursor()));
 
     // Unlink from the iterator list.
     const Register next = temp2;
@@ -10140,7 +10145,7 @@ CodeGenerator::generateWasm(wasm::SigIdDesc sigId, wasm::BytecodeOffset trapOffs
 bool
 CodeGenerator::generate()
 {
-    JitSpew(JitSpew_Codegen, "# Emitting code for script %s:%zu",
+    JitSpew(JitSpew_Codegen, "# Emitting code for script %s:%u",
             gen->info().script()->filename(),
             gen->info().script()->lineno());
 
@@ -10290,9 +10295,9 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 
     // Perform any read barriers which were skipped while compiling the
     // script, which may have happened off-thread.
-    const JitCompartment* jc = gen->compartment->jitCompartment();
-    jc->performStubReadBarriers(compartmentStubsToReadBarrier_);
-    jc->performSIMDTemplateReadBarriers(simdTemplatesToReadBarrier_);
+    const JitRealm* jr = gen->realm->jitRealm();
+    jr->performStubReadBarriers(realmStubsToReadBarrier_);
+    jr->performSIMDTemplateReadBarriers(simdTemplatesToReadBarrier_);
 
     // We finished the new IonScript. Invalidate the current active IonScript,
     // so we can replace it with this new (probably higher optimized) version.
@@ -13220,7 +13225,7 @@ CodeGenerator::visitRandom(LRandom* ins)
     Register64 s1Reg(ToRegister(ins->temp3()), ToRegister(ins->temp4()));
 #endif
 
-    const void* rng = gen->compartment->addressOfRandomNumberGenerator();
+    const void* rng = gen->realm->addressOfRandomNumberGenerator();
     masm.movePtr(ImmPtr(rng), tempReg);
 
     static_assert(sizeof(XorShift128PlusRNG) == 2 * sizeof(uint64_t),

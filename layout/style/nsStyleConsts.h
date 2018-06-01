@@ -408,7 +408,7 @@ enum class StyleContent : uint8_t {
 // See nsStyleDisplay
 //
 // NOTE: Order is important! If you change it, make sure to take a look at
-// the FrameConstructorDataByDisplay stuff (both the XUL and non-XUL version),
+// the FrameConstructionDataByDisplay stuff (both the XUL and non-XUL version),
 // and ensure it's still correct!
 enum class StyleDisplay : uint8_t {
   None = 0,
@@ -455,15 +455,21 @@ enum class StyleDisplay : uint8_t {
 };
 
 // See nsStyleDisplay
-// If these are re-ordered, nsComputedDOMStyle::DoGetContain() and
-// nsCSSValue::AppendToString() must be updated.
+// If these are re-ordered, nsComputedDOMStyle::DoGetContain() must be updated.
 #define NS_STYLE_CONTAIN_NONE                   0
-#define NS_STYLE_CONTAIN_STRICT                 0x1
-#define NS_STYLE_CONTAIN_LAYOUT                 0x2
-#define NS_STYLE_CONTAIN_STYLE                  0x4
-#define NS_STYLE_CONTAIN_PAINT                  0x8
+#define NS_STYLE_CONTAIN_SIZE                   0x01
+#define NS_STYLE_CONTAIN_LAYOUT                 0x02
+#define NS_STYLE_CONTAIN_STYLE                  0x04
+#define NS_STYLE_CONTAIN_PAINT                  0x08
+#define NS_STYLE_CONTAIN_STRICT                 0x10
+#define NS_STYLE_CONTAIN_CONTENT                0x20
 // NS_STYLE_CONTAIN_ALL_BITS does not correspond to a keyword.
 #define NS_STYLE_CONTAIN_ALL_BITS               (NS_STYLE_CONTAIN_LAYOUT | \
+                                                 NS_STYLE_CONTAIN_STYLE  | \
+                                                 NS_STYLE_CONTAIN_PAINT  | \
+                                                 NS_STYLE_CONTAIN_SIZE)
+// NS_STYLE_CONTAIN_CONTENT_BITS does not correspond to a keyword.
+#define NS_STYLE_CONTAIN_CONTENT_BITS           (NS_STYLE_CONTAIN_LAYOUT | \
                                                  NS_STYLE_CONTAIN_STYLE  | \
                                                  NS_STYLE_CONTAIN_PAINT)
 
@@ -899,9 +905,6 @@ enum class StyleWhiteSpace : uint8_t {
 // See nsStyleText
 #define NS_STYLE_TEXT_COMBINE_UPRIGHT_NONE        0
 #define NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL         1
-#define NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_2    2
-#define NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_3    3
-#define NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_4    4
 
 // See nsStyleText
 #define NS_STYLE_LINE_HEIGHT_BLOCK_HEIGHT       0

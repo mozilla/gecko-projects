@@ -754,8 +754,8 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
   private:
     static MOZ_MUST_USE bool ensureExecutionObservabilityOfFrame(JSContext* cx,
                                                                  AbstractFramePtr frame);
-    static MOZ_MUST_USE bool ensureExecutionObservabilityOfCompartment(JSContext* cx,
-                                                                       JSCompartment* comp);
+    static MOZ_MUST_USE bool ensureExecutionObservabilityOfRealm(JSContext* cx,
+                                                                 JS::Realm* realm);
 
     static bool hookObservesAllExecution(Hook which);
 
@@ -1800,22 +1800,22 @@ Debugger::onNewScript(JSContext* cx, HandleScript script)
     // ignore those in our assertion here.
     MOZ_ASSERT_IF(!script->realm()->creationOptions().invisibleToDebugger() &&
                   !script->selfHosted(),
-                  script->compartment()->firedOnNewGlobalObject);
+                  script->realm()->firedOnNewGlobalObject);
 
     // The script may not be ready to be interrogated by the debugger.
     if (script->hideScriptFromDebugger())
         return;
 
-    if (script->compartment()->isDebuggee())
+    if (script->realm()->isDebuggee())
         slowPathOnNewScript(cx, script);
 }
 
 /* static */ void
 Debugger::onNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global)
 {
-    MOZ_ASSERT(!global->compartment()->firedOnNewGlobalObject);
+    MOZ_ASSERT(!global->realm()->firedOnNewGlobalObject);
 #ifdef DEBUG
-    global->compartment()->firedOnNewGlobalObject = true;
+    global->realm()->firedOnNewGlobalObject = true;
 #endif
     if (!cx->runtime()->onNewGlobalObjectWatchers().isEmpty())
         Debugger::slowPathOnNewGlobalObject(cx, global);

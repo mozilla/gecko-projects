@@ -782,10 +782,10 @@ js::Nursery::collect(JS::gcreason::Reason reason)
             zone->setPreservingCode(false);
             zone->discardJitCode(rt->defaultFreeOp());
             zone->setPreservingCode(preserving);
-            for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
-                if (jit::JitCompartment* jitComp = c->jitCompartment()) {
-                    jitComp->discardStubs();
-                    jitComp->stringsCanBeInNursery = false;
+            for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
+                if (jit::JitRealm* jitRealm = r->jitRealm()) {
+                    jitRealm->discardStubs();
+                    jitRealm->stringsCanBeInNursery = false;
                 }
             }
             zone->allocNurseryStrings = false;
@@ -1029,10 +1029,11 @@ js::Nursery::sweep(JSTracer* trc)
     }
     cellsWithUid_.clear();
 
-    for (CompartmentsIter c(runtime(), SkipAtoms); !c.done(); c.next())
+    for (CompartmentsIter c(runtime()); !c.done(); c.next())
         c->sweepAfterMinorGC(trc);
 
     sweepDictionaryModeObjects();
+    sweepMapAndSetObjects();
 }
 
 void
@@ -1246,6 +1247,19 @@ js::Nursery::sweepDictionaryModeObjects()
     dictionaryModeObjects_.clear();
 }
 
+void
+js::Nursery::sweepMapAndSetObjects()
+{
+    auto fop = runtime_->defaultFreeOp();
+
+    for (auto mapobj : mapsWithNurseryMemory_)
+        MapObject::sweepAfterMinorGC(fop, mapobj);
+    mapsWithNurseryMemory_.clearAndFree();
+
+    for (auto setobj : setsWithNurseryMemory_)
+        SetObject::sweepAfterMinorGC(fop, setobj);
+    setsWithNurseryMemory_.clearAndFree();
+}
 
 JS_PUBLIC_API(void)
 JS::EnableNurseryStrings(JSContext* cx)

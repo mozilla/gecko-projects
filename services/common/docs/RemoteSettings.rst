@@ -68,9 +68,6 @@ The ``sync`` event allows to be notified when the remote settings are changed on
       }
     });
 
-.. important::
-    If one of the event handler fails, the others handlers for the same remote settings collection won't be executed.
-
 .. note::
     Currently, the update of remote settings is triggered by the `nsBlocklistService <https://dxr.mozilla.org/mozilla-central/source/toolkit/mozapps/extensions/nsBlocklistService.js>`_ (~ every 24H).
 
@@ -101,6 +98,18 @@ It is possible to package a dump of the server records that will be loaded into 
 #. Add the filename to the ``FINAL_TARGET_FILES`` list in ``services/settings/dumps/main/moz.build``
 
 Now, when ``RemoteSettings("some-key").get()`` is called from an empty profile, the ``some-key.json`` file is going to be loaded before the results are returned.
+
+
+Targets and A/B testing
+=======================
+
+In order to deliver settings to subsets of the population, you can set targets on entries (platform, language, channel, version range, preferences values, samples, etc.) when editing records on the server.
+
+From the client API standpoint, this is completely transparent: the ``.get()`` method — as well as the event data — will always filter the entries on which the target matches.
+
+.. note::
+
+    The remote settings targets follow the same approach as the :ref:`Normandy recipe client <components/normandy>` (ie. JEXL filter expressions),
 
 
 Uptake Telemetry

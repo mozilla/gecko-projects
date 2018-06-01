@@ -1538,8 +1538,7 @@ add_task(async function test_sort_folder_by_name() {
     }
   });
 
-  let folderId = await PlacesUtils.promiseItemId(folder_info.guid);
-  let folderContainer = PlacesUtils.getFolderContents(folderId).root;
+  let folderContainer = PlacesUtils.getFolderContents(folder_info.guid).root;
   function ensureOrder(aOrder) {
     for (let i = 0; i < folderContainer.childCount; i++) {
       Assert.equal(folderContainer.getChild(i).bookmarkGuid, aOrder[i].guid);
@@ -1763,13 +1762,16 @@ add_task(async function test_invalid_uri_spec_throws() {
   Assert.throws(() =>
     PT.NewBookmark({ parentGuid: PlacesUtils.bookmarks.unfiledGuid,
                      url:        "invalid uri spec",
-                     title:      "test bookmark" }));
+                     title:      "test bookmark"}),
+                    /invalid uri spec is not a valid URL/);
   Assert.throws(() =>
     PT.Tag({ tag: "TheTag",
-             urls: ["invalid uri spec"] }));
+             urls: ["invalid uri spec"] }),
+           /TypeError: invalid uri spec is not a valid URL/);
   Assert.throws(() =>
     PT.Tag({ tag: "TheTag",
-             urls: ["about:blank", "invalid uri spec"] }));
+             urls: ["about:blank", "invalid uri spec"] }),
+           /TypeError: invalid uri spec is not a valid URL/);
 });
 
 add_task(async function test_annotate_multiple_items() {

@@ -230,6 +230,7 @@
     macro(maximumFractionDigits, maximumFractionDigits, "maximumFractionDigits") \
     macro(maximumSignificantDigits, maximumSignificantDigits, "maximumSignificantDigits") \
     macro(message, message, "message") \
+    macro(meta, meta, "meta") \
     macro(minDays, minDays, "minDays") \
     macro(minimumFractionDigits, minimumFractionDigits, "minimumFractionDigits") \
     macro(minimumIntegerDigits, minimumIntegerDigits, "minimumIntegerDigits") \
@@ -262,6 +263,7 @@
     macro(numeric, numeric, "numeric") \
     macro(objectArguments, objectArguments, "[object Arguments]") \
     macro(objectArray, objectArray, "[object Array]") \
+    macro(objectBigInt, objectBigInt, "[object BigInt]") \
     macro(objectBoolean, objectBoolean, "[object Boolean]") \
     macro(objectDate, objectDate, "[object Date]") \
     macro(objectError, objectError, "[object Error]") \
@@ -463,6 +465,7 @@
     macro(boolean, boolean, "boolean") \
     macro(null, null, "null") \
     macro(symbol, symbol, "symbol") \
-    macro(defineDataPropertyIntrinsic, defineDataPropertyIntrinsic, "_DefineDataProperty") \
+    macro(bigint, bigint, "bigint") \
+    macro(defineDataPropertyIntrinsic, defineDataPropertyIntrinsic, "_DefineDataProperty")
 
 #endif /* vm_CommonPropertyNames_h */

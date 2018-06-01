@@ -485,7 +485,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetURL(const char *aURL,
   }
 
   rv = lh->OnLinkClick(content, uri, unitarget.get(), VoidString(),
-                       aPostStream, -1, headersDataStream,
+                       aPostStream, headersDataStream,
                        /* isUserTriggered */ false,
                        /* isTrusted */ true, triggeringPrincipal);
 
@@ -902,6 +902,10 @@ nsPluginInstanceOwner::RequestCommitOrCancel(bool aCommitted)
 bool
 nsPluginInstanceOwner::EnableIME(bool aEnable)
 {
+  if (NS_WARN_IF(!mPluginFrame)) {
+    return false;
+  }
+
   nsCOMPtr<nsIWidget> widget = GetContainingWidgetIfOffset();
   if (!widget) {
     widget = GetRootWidgetForPluginFrame(mPluginFrame);

@@ -4180,17 +4180,9 @@ nsComputedDOMStyle::DoGetTextCombineUpright()
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   uint8_t tch = StyleText()->mTextCombineUpright;
 
-  if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL) {
-    val->SetIdent(
-      nsCSSProps::ValueToKeywordEnum(tch,
-                                     nsCSSProps::kTextCombineUprightKTable));
-  } else if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_2) {
-    val->SetString(NS_LITERAL_STRING("digits 2"));
-  } else if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_3) {
-    val->SetString(NS_LITERAL_STRING("digits 3"));
-  } else {
-    val->SetString(NS_LITERAL_STRING("digits 4"));
-  }
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(tch,
+                                   nsCSSProps::kTextCombineUprightKTable));
 
   return val.forget();
 }
@@ -5089,14 +5081,18 @@ nsComputedDOMStyle::DoGetContain()
     val->SetIdent(eCSSKeyword_none);
   } else if (mask & NS_STYLE_CONTAIN_STRICT) {
     NS_ASSERTION(mask == (NS_STYLE_CONTAIN_STRICT | NS_STYLE_CONTAIN_ALL_BITS),
-                 "contain: strict should imply contain: layout style paint");
+                 "contain: strict should imply contain: size layout style paint");
     val->SetIdent(eCSSKeyword_strict);
-  } else {
+  } else if (mask & NS_STYLE_CONTAIN_CONTENT) {
+    NS_ASSERTION(mask == (NS_STYLE_CONTAIN_CONTENT | NS_STYLE_CONTAIN_CONTENT_BITS),
+                 "contain: content should imply contain: layout style paint");
+    val->SetIdent(eCSSKeyword_content);
+  }  else {
     nsAutoString valueStr;
-
     nsStyleUtil::AppendBitmaskCSSValue(nsCSSProps::kContainKTable,
-                                       mask, NS_STYLE_CONTAIN_LAYOUT,
-                                       NS_STYLE_CONTAIN_PAINT, valueStr);
+                                       mask,
+                                       NS_STYLE_CONTAIN_SIZE, NS_STYLE_CONTAIN_PAINT,
+                                       valueStr);
     val->SetString(valueStr);
   }
 
@@ -6414,7 +6410,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetFloodColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetToRGBAColor(val, StyleSVGReset()->mFloodColor);
+  SetValueFromComplexColor(val, StyleSVGReset()->mFloodColor);
   return val.forget();
 }
 
@@ -6422,7 +6418,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetLightingColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetToRGBAColor(val, StyleSVGReset()->mLightingColor);
+  SetValueFromComplexColor(val, StyleSVGReset()->mLightingColor);
   return val.forget();
 }
 
@@ -6430,7 +6426,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetStopColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetToRGBAColor(val, StyleSVGReset()->mStopColor);
+  SetValueFromComplexColor(val, StyleSVGReset()->mStopColor);
   return val.forget();
 }
 

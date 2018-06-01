@@ -365,8 +365,7 @@ NS_NewChannelInternal(nsIChannel           **outChannel,
   nsCOMPtr<nsIChannel> channel;
   rv = aIoService->NewChannelFromURIWithClientAndController(
          aUri,
-         aLoadingNode ?
-           aLoadingNode->AsDOMNode() : nullptr,
+         aLoadingNode,
          aLoadingPrincipal,
          aTriggeringPrincipal,
          aLoadingClientInfo,
@@ -768,11 +767,11 @@ NS_NewInputStreamChannelInternal(nsIChannel** outChannel,
                                  nsContentPolicyType aContentPolicyType)
 {
   nsCOMPtr<nsILoadInfo> loadInfo =
-    new mozilla::LoadInfo(aLoadingPrincipal,
-                          aTriggeringPrincipal,
-                          aLoadingNode,
-                          aSecurityFlags,
-                          aContentPolicyType);
+    new mozilla::net::LoadInfo(aLoadingPrincipal,
+                               aTriggeringPrincipal,
+                               aLoadingNode,
+                               aSecurityFlags,
+                               aContentPolicyType);
   if (!loadInfo) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -859,8 +858,9 @@ NS_NewInputStreamChannelInternal(nsIChannel        **outChannel,
                                  bool                aIsSrcdocChannel /* = false */)
 {
   nsCOMPtr<nsILoadInfo> loadInfo =
-      new mozilla::LoadInfo(aLoadingPrincipal, aTriggeringPrincipal,
-                            aLoadingNode, aSecurityFlags, aContentPolicyType);
+      new mozilla::net::LoadInfo(aLoadingPrincipal, aTriggeringPrincipal,
+                                 aLoadingNode, aSecurityFlags,
+                                 aContentPolicyType);
   return NS_NewInputStreamChannelInternal(outChannel, aUri, aData, aContentType,
                                           loadInfo, aIsSrcdocChannel);
 }

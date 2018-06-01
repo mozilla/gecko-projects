@@ -306,6 +306,12 @@ impl RootKind for *mut JS::Symbol {
     fn rootKind() -> JS::RootKind { JS::RootKind::Symbol }
 }
 
+#[cfg(feature = "bigint")]
+impl RootKind for *mut JS::BigInt {
+    #[inline(always)]
+    fn rootKind() -> JS::RootKind { JS::RootKind::BigInt }
+}
+
 impl RootKind for *mut JSScript {
     #[inline(always)]
     fn rootKind() -> JS::RootKind { JS::RootKind::Script }
@@ -1049,7 +1055,7 @@ pub unsafe fn get_object_class(obj: *mut JSObject) -> *const JSClass {
 
 #[inline]
 pub unsafe fn get_object_compartment(obj: *mut JSObject) -> *mut JSCompartment {
-    (*get_object_group(obj)).compartment
+    (*get_object_group(obj)).realm as *mut JSCompartment
 }
 
 #[inline]

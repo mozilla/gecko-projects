@@ -13,6 +13,7 @@
 #include "jit/JSJitFrameIter.h"
 #include "jit/Linker.h"
 #include "jit/SharedICHelpers.h"
+#include "proxy/DeadObjectProxy.h"
 #include "proxy/Proxy.h"
 
 #include "jit/JSJitFrameIter-inl.h"
@@ -678,14 +679,19 @@ bool
 IonCacheIRCompiler::emitGuardCompartment()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
-    objectStubField(reader.stubOffset()); // Read global wrapper.
+    JSObject* globalWrapper = objectStubField(reader.stubOffset());
     JSCompartment* compartment = compartmentStubField(reader.stubOffset());
-
     AutoScratchRegister scratch(allocator, masm);
 
     FailurePath* failure;
     if (!addFailurePath(&failure))
         return false;
+
+    // Verify that the global wrapper is still valid, as
+    // it is pre-requisite for doing the compartment check.
+    masm.movePtr(ImmGCPtr(globalWrapper), scratch);
+    Address handlerAddr(scratch, ProxyObject::offsetOfHandler());
+    masm.branchPtr(Assembler::Equal, handlerAddr, ImmPtr(&DeadObjectProxy::singleton), failure->label());
 
     masm.branchTestObjCompartment(Assembler::NotEqual, obj, compartment, scratch,
                                   failure->label());
@@ -2302,20 +2308,19 @@ IonCacheIRCompiler::emitGuardAndGetIterator()
     masm.movePtr(ImmGCPtr(iterobj), output);
     masm.loadObjPrivate(output, JSObject::ITER_CLASS_NFIXED_SLOTS, niScratch);
 
-    // Ensure the |active| and |unreusable| bits are not set.
-    masm.branchTest32(Assembler::NonZero, Address(niScratch, offsetof(NativeIterator, flags)),
-                      Imm32(JSITER_ACTIVE|JSITER_UNREUSABLE), failure->label());
+    // Ensure the iterator is reusable: see NativeIterator::isReusable.
+    masm.branchIfNativeIteratorNotReusable(niScratch, failure->label());
 
-    // Pre-write barrier for store to 'obj'.
-    Address iterObjAddr(niScratch, offsetof(NativeIterator, obj));
+    // Pre-write barrier for store to 'objectBeingIterated_'.
+    Address iterObjAddr(niScratch, NativeIterator::offsetOfObjectBeingIterated());
     EmitPreBarrier(masm, iterObjAddr, MIRType::Object);
 
     // Mark iterator as active.
-    Address iterFlagsAddr(niScratch, offsetof(NativeIterator, flags));
+    Address iterFlagsAddr(niScratch, NativeIterator::offsetOfFlags());
     masm.storePtr(obj, iterObjAddr);
-    masm.or32(Imm32(JSITER_ACTIVE), iterFlagsAddr);
+    masm.or32(Imm32(NativeIterator::Flags::Active), iterFlagsAddr);
 
-    // Post-write barrier for stores to 'obj'.
+    // Post-write barrier for stores to 'objectBeingIterated_'.
     emitPostBarrierSlot(output, TypedOrValueRegister(MIRType::Object, AnyRegister(obj)), scratch1);
 
     // Chain onto the active iterator stack.

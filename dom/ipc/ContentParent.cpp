@@ -1599,7 +1599,8 @@ ContentParent::RecvAllocateLayerTreeId(const ContentParentId& aCpId,
   // child of it.
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   RefPtr<ContentParent> contentParent = cpm->GetContentProcessById(aCpId);
-  if (ChildID() != aCpId && !contentParent->CanCommunicateWith(ChildID())) {
+  if (!contentParent ||
+      (ChildID() != aCpId && !contentParent->CanCommunicateWith(ChildID()))) {
     return IPC_FAIL_NO_REASON(this);
   }
 
@@ -1623,7 +1624,7 @@ ContentParent::RecvDeallocateLayerTreeId(const ContentParentId& aCpId,
 
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   RefPtr<ContentParent> contentParent = cpm->GetContentProcessById(aCpId);
-  if (!contentParent->CanCommunicateWith(ChildID())) {
+  if (!contentParent || !contentParent->CanCommunicateWith(ChildID())) {
     return IPC_FAIL(this, "Spoofed DeallocateLayerTreeId call");
   }
 
@@ -2318,9 +2319,10 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
     nsCString UAName(gAppData->UAName);
     nsCString ID(gAppData->ID);
     nsCString vendor(gAppData->vendor);
+    nsCString sourceURL(gAppData->sourceURL);
 
     // Sending all information to content process.
-    Unused << SendAppInfo(version, buildID, name, UAName, ID, vendor);
+    Unused << SendAppInfo(version, buildID, name, UAName, ID, vendor, sourceURL);
   }
 
   // Send the child its remote type. On Mac, this needs to be sent prior

@@ -7943,6 +7943,10 @@ class Tree extends Component {
         onExpand: this._onExpand,
         onCollapse: this._onCollapse,
         onClick: e => {
+          // We can stop the propagation since click handler on the node can be
+          // created in `renderItem`.
+          e.stopPropagation();
+
           // Since the user just clicked the node, there's no need to check if
           // it should be scrolled into view.
           this._focus(item, { preventAutoScroll: true });
@@ -7975,11 +7979,12 @@ class Tree extends Component {
           return;
         }
 
-        const { explicitOriginalTarget } = nativeEvent;
+        const { relatedTarget } = nativeEvent;
+
         // Only set default focus to the first tree node if the focus came
         // from outside the tree (e.g. by tabbing to the tree from other
         // external elements).
-        if (explicitOriginalTarget !== this.treeRef && !this.treeRef.contains(explicitOriginalTarget)) {
+        if (relatedTarget !== this.treeRef && !this.treeRef.contains(relatedTarget)) {
           this._focus(traversal[0].item);
         }
       },
@@ -8044,13 +8049,6 @@ module.exports = "<!-- This Source Code Form is subject to the terms of the Mozi
 "use strict";
 /* WEBPACK VAR INJECTION */(function(process) {
 
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.isDevelopment = isDevelopment;
-exports.isTesting = isTesting;
-exports.isFirefoxPanel = isFirefoxPanel;
-exports.isFirefox = isFirefox;
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -8066,7 +8064,7 @@ function isNode() {
 }
 
 function isDevelopment() {
-  if (!isNode && isBrowser()) {
+  if (!isNode() && isBrowser()) {
     const href = window.location ? window.location.href : "";
     return href.match(/^file:/) || href.match(/localhost:/);
   }
@@ -8086,6 +8084,13 @@ function isFirefox() {
   return (/firefox/i.test(navigator.userAgent)
   );
 }
+
+module.exports = {
+  isDevelopment,
+  isTesting,
+  isFirefoxPanel,
+  isFirefox
+};
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(120)))
 
 /***/ }),
@@ -8169,7 +8174,7 @@ function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj;
 // (eg. "my-module/Test") which is why they are nested in "vendored".
 // The keys of the vendored object should match the module names
 // !!! Should remain synchronized with .babel/transform-mc.js !!!
-const vendored = {
+const vendored = exports.vendored = {
   classnames: _classnames2.default,
   "devtools-components": devtoolsComponents,
   "devtools-config": devtoolsConfig,
@@ -8205,7 +8210,6 @@ const vendored = {
  */
 
 // Modules imported with destructuring
-exports.vendored = vendored;
 
 /***/ }),
 

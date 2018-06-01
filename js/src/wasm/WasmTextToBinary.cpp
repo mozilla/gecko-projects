@@ -146,7 +146,7 @@ class WasmToken
     Kind kind_;
     const char16_t* begin_;
     const char16_t* end_;
-    union {
+    union U {
         uint32_t index_;
         uint64_t uint_;
         int64_t sint_;
@@ -155,6 +155,7 @@ class WasmToken
         Op op_;
         MiscOp miscOp_;
         ThreadOp threadOp_;
+        U() : index_(0) {}
     } u;
   public:
     WasmToken()
@@ -705,8 +706,11 @@ class WasmTokenStream
             *ref = AstRef(token.name());
             break;
           case WasmToken::Index:
-            *ref = AstRef(token.index());
-            break;
+            if (token.index() != AstNoIndex) {
+                *ref = AstRef(token.index());
+                break;
+            }
+            MOZ_FALLTHROUGH;
           default:
             generateError(token, error);
             return false;
@@ -2265,7 +2269,7 @@ static AstConst*
 ParseConst(WasmParseContext& c, WasmToken constToken)
 {
     WasmToken val = c.ts.get();
-    switch (constToken.valueType()) {
+    switch (constToken.valueType().code()) {
       case ValType::I32: {
         switch (val.kind()) {
           case WasmToken::Index:
@@ -3656,9 +3660,15 @@ ParseExport(WasmParseContext& c)
     WasmToken exportee = c.ts.get();
     switch (exportee.kind()) {
       case WasmToken::Index:
-        return new(c.lifo) AstExport(name.text(), DefinitionKind::Function, AstRef(exportee.index()));
+        if (exportee.index() == AstNoIndex) {
+            c.ts.generateError(exportee, c.error);
+            return nullptr;
+        }
+        return new(c.lifo) AstExport(name.text(), DefinitionKind::Function,
+                                     AstRef(exportee.index()));
       case WasmToken::Name:
-        return new(c.lifo) AstExport(name.text(), DefinitionKind::Function, AstRef(exportee.name()));
+        return new(c.lifo) AstExport(name.text(), DefinitionKind::Function,
+                                     AstRef(exportee.name()));
       case WasmToken::Table: {
         AstRef ref;
         if (!c.ts.getIfRef(&ref))
@@ -4756,7 +4766,7 @@ EncodeCallIndirect(Encoder& e, AstCallIndirect& c)
 static bool
 EncodeConst(Encoder& e, AstConst& c)
 {
-    switch (c.val().type()) {
+    switch (c.val().type().code()) {
       case ValType::I32:
         return e.writeOp(Op::I32Const) &&
                e.writeVarS32(c.val().i32());

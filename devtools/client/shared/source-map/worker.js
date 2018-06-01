@@ -1973,6 +1973,7 @@ exports.ArraySet = ArraySet;
 
 const {
   getOriginalURLs,
+  getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
   getAllGeneratedLocations,
@@ -1993,6 +1994,7 @@ const {
 // easier to unit test.
 self.onmessage = workerHandler({
   getOriginalURLs,
+  getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
   getAllGeneratedLocations,
@@ -2045,6 +2047,57 @@ async function getOriginalURLs(generatedSource) {
 }
 
 const COMPUTED_SPANS = new WeakSet();
+
+const SOURCE_MAPPINGS = new WeakMap();
+async function getOriginalRanges(sourceId, url) {
+  if (!isOriginalId(sourceId)) {
+    return [];
+  }
+
+  const generatedSourceId = originalToGeneratedId(sourceId);
+  const map = await getSourceMap(generatedSourceId);
+  if (!map) {
+    return [];
+  }
+
+  let mappings = SOURCE_MAPPINGS.get(map);
+  if (!mappings) {
+    mappings = new Map();
+    SOURCE_MAPPINGS.set(map, mappings);
+  }
+
+  let fileMappings = mappings.get(url);
+  if (!fileMappings) {
+    fileMappings = [];
+    mappings.set(url, fileMappings);
+
+    const originalMappings = fileMappings;
+    map.eachMapping(mapping => {
+      if (mapping.source !== url) {
+        return;
+      }
+
+      const last = originalMappings[originalMappings.length - 1];
+
+      if (last && last.line === mapping.originalLine) {
+        if (last.columnStart < mapping.originalColumn) {
+          last.columnEnd = mapping.originalColumn;
+        } else {
+          // Skip this duplicate original location,
+          return;
+        }
+      }
+
+      originalMappings.push({
+        line: mapping.originalLine,
+        columnStart: mapping.originalColumn,
+        columnEnd: Infinity
+      });
+    }, null, SourceMapConsumer.ORIGINAL_ORDER);
+  }
+
+  return fileMappings;
+}
 
 /**
  * Given an original location, find the ranges on the generated file that
@@ -2146,7 +2199,7 @@ async function getAllGeneratedLocations(location, originalSource) {
   }));
 }
 
-async function getOriginalLocation(location) {
+async function getOriginalLocation(location, { search } = {}) {
   if (!isGeneratedId(location.sourceId)) {
     return location;
   }
@@ -2156,11 +2209,31 @@ async function getOriginalLocation(location) {
     return location;
   }
 
-  const { source: sourceUrl, line, column } = map.originalPositionFor({
+  // First check for an exact match
+  let match = map.originalPositionFor({
     line: location.line,
     column: location.column == null ? 0 : location.column
   });
 
+  // If there is not an exact match, look for a match with a bias at the
+  // current location and then on subsequent lines
+  if (search) {
+    let line = location.line;
+    let column = location.column == null ? 0 : location.column;
+
+    while (match.source === null) {
+      match = map.originalPositionFor({
+        line,
+        column,
+        bias: SourceMapConsumer[search]
+      });
+
+      line += search == "LEAST_UPPER_BOUND" ? 1 : -1;
+      column = search == "LEAST_UPPER_BOUND" ? 0 : Infinity;
+    }
+  }
+
+  const { source: sourceUrl, line, column } = match;
   if (sourceUrl == null) {
     // No url means the location didn't map.
     return location;
@@ -2214,6 +2287,7 @@ function applySourceMap(generatedId, url, code, mappings) {
 
 module.exports = {
   getOriginalURLs,
+  getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
   getAllGeneratedLocations,

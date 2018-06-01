@@ -36,6 +36,17 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
 
     this.persistCheckbox = new LabelledCheckbox();
 
+    this._errorFieldMap = {
+      addressLine: "#street-address-container",
+      city: "#address-level2-container",
+      country: "#country-container",
+      organization: "#organization-container",
+      phone: "#tel-container",
+      postalCode: "#postal-code-container",
+      recipient: "#name-container",
+      region: "#address-level1-container",
+    };
+
     // The markup is shared with form autofill preferences.
     let url = "formautofill/editAddress.xhtml";
     this.promiseReady = this._fetchMarkup(url).then(doc => {
@@ -86,6 +97,8 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
     let record = {};
     let {
       page,
+      "address-page": addressPage,
+      request,
     } = state;
 
     if (this.id && page && page.id !== this.id) {
@@ -101,23 +114,23 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
     this.backButton.hidden = page.onboardingWizard;
     this.cancelButton.hidden = !page.onboardingWizard;
 
-    if (page.addressFields) {
-      this.setAttribute("address-fields", page.addressFields);
+    if (addressPage.addressFields) {
+      this.setAttribute("address-fields", addressPage.addressFields);
     } else {
       this.removeAttribute("address-fields");
     }
 
-    this.pageTitle.textContent = page.title;
+    this.pageTitle.textContent = addressPage.title;
     this.genericErrorText.textContent = page.error;
 
-    let editing = !!page.guid;
+    let editing = !!addressPage.guid;
     let addresses = paymentRequest.getAddresses(state);
 
     // If an address is selected we want to edit it.
     if (editing) {
-      record = addresses[page.guid];
+      record = addresses[addressPage.guid];
       if (!record) {
-        throw new Error("Trying to edit a non-existing address: " + page.guid);
+        throw new Error("Trying to edit a non-existing address: " + addressPage.guid);
       }
       // When editing an existing record, prevent changes to persistence
       this.persistCheckbox.hidden = true;
@@ -128,6 +141,19 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
     }
 
     this.formHandler.loadRecord(record);
+
+    let shippingAddressErrors = request.paymentDetails.shippingAddressErrors;
+    for (let [errorName, errorSelector] of Object.entries(this._errorFieldMap)) {
+      let container = document.querySelector(errorSelector);
+      let span = container.querySelector(".error-text");
+      if (!span) {
+        span = document.createElement("span");
+        span.className = "error-text";
+        container.appendChild(span);
+      }
+      span.textContent = shippingAddressErrors[errorName];
+      container.classList.toggle("error", !!shippingAddressErrors[errorName]);
+    }
   }
 
   handleEvent(event) {
@@ -146,11 +172,19 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
         break;
       }
       case this.backButton: {
-        this.requestStore.setState({
+        let currentState = this.requestStore.getState();
+        const previousId = currentState.page.previousId;
+        let state = {
           page: {
-            id: "payment-summary",
+            id: previousId || "payment-summary",
           },
-        });
+        };
+        if (previousId) {
+          state[previousId] = Object.assign({}, currentState[previousId], {
+            preserveFieldValues: true,
+          });
+        }
+        this.requestStore.setState(state);
         break;
       }
       case this.saveButton: {
@@ -165,14 +199,16 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
 
   saveRecord() {
     let record = this.formHandler.buildFormObject();
+    let currentState = this.requestStore.getState();
     let {
       page,
       tempAddresses,
       savedBasicCards,
-    } = this.requestStore.getState();
-    let editing = !!page.guid;
+      "address-page": addressPage,
+    } = currentState;
+    let editing = !!addressPage.guid;
 
-    if (editing ? (page.guid in tempAddresses) : !this.persistCheckbox.checked) {
+    if (editing ? (addressPage.guid in tempAddresses) : !this.persistCheckbox.checked) {
       record.isTemporary = true;
     }
 
@@ -183,28 +219,36 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
           onboardingWizard: page.onboardingWizard,
           error: this.dataset.errorGenericSave,
         },
+        "address-page": addressPage,
       },
       preserveOldProperties: true,
       selectedStateKey: page.selectedStateKey,
     };
 
+    const previousId = page.previousId;
     if (page.onboardingWizard && !Object.keys(savedBasicCards).length) {
       state.successStateChange = {
         page: {
           id: "basic-card-page",
-          onboardingWizard: true,
-          guid: null,
+          previousId: "address-page",
+          onboardingWizard: page.onboardingWizard,
         },
       };
     } else {
       state.successStateChange = {
         page: {
-          id: "payment-summary",
+          id: previousId || "payment-summary",
+          onboardingWizard: page.onboardingWizard,
         },
       };
     }
 
-    paymentRequest.updateAutofillRecord("addresses", record, page.guid, state);
+    if (previousId) {
+      state.successStateChange[previousId] = Object.assign({}, currentState[previousId]);
+      state.successStateChange[previousId].preserveFieldValues = true;
+    }
+
+    paymentRequest.updateAutofillRecord("addresses", record, addressPage.guid, state);
   }
 }
 

@@ -10,7 +10,12 @@ module.exports = {
     "fetchAndLoad": false,
     "fetchAndLoadAsync": false,
     "fetchWithXHR": false,
+    "logEvents": false,
     "loadSegment": false,
+    "must_not_reject": false,
+    "must_not_throw": false,
+    "must_reject": false,
+    "must_throw": false,
     "once": false,
     "range": false,
     "runWithMSE": false,
@@ -18,7 +23,7 @@ module.exports = {
   },
   // Use const/let instead of var for tighter scoping, avoiding redeclaration
   "rules": {
-    "array-bracket-spacing": ["error", "always"],
+    "array-bracket-spacing": ["error", "never"],
     "no-var": "error",
     "prefer-const": "error"
   }

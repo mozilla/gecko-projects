@@ -381,6 +381,20 @@ browser.session.restore:
     record_in_processes:
       - 'main'
 
+extensions.updates:
+  rdf:
+    bug_numbers:
+      - 1460336
+    description: >
+      The number of RDF update requsts for a given extension ID.
+    expires: "66"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - addons-dev-internal@mozilla.com
+    record_in_processes:
+      - main
+
 # This section is for probes used to measure use of the Webextensions storage.sync API.
 storage.sync.api.usage:
   extensions_using:
@@ -1223,6 +1237,38 @@ telemetry:
     release_channel_collection: opt-out
     record_in_processes:
       - 'all'
+
+  profile_directory_scans:
+    bug_numbers:
+      - 1458574
+    description: >
+      The number of times a profile directory scan was initiated in ProfileAge.jsm
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - jrediger@mozilla.com
+      - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'all'
+
+  # While the following probe could be restricted to GeckoView, we can't
+  # turn the product filter on as we don't run GeckoView test coverage on
+  # GeckoView.
+  persistence_timer_hit_count:
+    bug_numbers:
+      - 1463152
+    description: >
+      How many times the GeckoView Telemetry persistence timer was hit during
+      the current subsession.
+    expires: "65"
+    kind: uint
+    notification_emails:
+      - telemetry-client-dev@mozilla.com
+      - aplacitelli@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
 
 telemetry.discarded:
   accumulations:

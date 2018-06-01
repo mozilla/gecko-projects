@@ -21,7 +21,6 @@
 #include "nsDeviceContext.h"
 #include "nsIContentInlines.h"
 #include "nsICrashReporter.h"
-#include "nsIDOMNode.h"
 #include "nsIDocumentInlines.h"
 #include "nsILoadContext.h"
 #include "nsIFrame.h"
@@ -48,7 +47,7 @@
 #include "nsWindowSizes.h"
 
 #include "mozilla/CORSMode.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventStates.h"
@@ -115,7 +114,7 @@ ThreadSafeGetDefaultFontHelper(const nsPresContext* aPresContext,
   }
   {
     AutoWriteLock guard(*sServoFFILock);
-  retval = aPresContext->GetDefaultFont(aGenericId, aLanguage, nullptr);
+    retval = aPresContext->GetDefaultFont(aGenericId, aLanguage, nullptr);
   }
   return retval;
 }
@@ -350,18 +349,15 @@ Gecko_CalcStyleDifference(ComputedStyleBorrowed aOldStyle,
   MOZ_ASSERT(aNewStyle);
 
   uint32_t equalStructs;
-  nsChangeHint result = const_cast<mozilla::ComputedStyle*>(aOldStyle)->
-    CalcStyleDifference(
-      const_cast<mozilla::ComputedStyle*>(aNewStyle),
-      &equalStructs);
+  nsChangeHint result = const_cast<ComputedStyle*>(aOldStyle)->
+    CalcStyleDifference(const_cast<ComputedStyle*>(aNewStyle), &equalStructs);
 
-  *aAnyStyleStructChanged = equalStructs != NS_STYLE_INHERIT_MASK;
+  *aAnyStyleStructChanged =
+    equalStructs != StyleStructConstants::kAllStructsMask;
 
-  const uint32_t kInheritStructsMask =
-    NS_STYLE_INHERIT_MASK & ~NS_STYLE_RESET_STRUCT_MASK;
-
+  const auto kInheritedStructsMask = StyleStructConstants::kInheritedStructsMask;
   *aOnlyResetStructsChanged =
-    (equalStructs & kInheritStructsMask) == kInheritStructsMask;
+    (equalStructs & kInheritedStructsMask) == kInheritedStructsMask;
 
   return result;
 }
@@ -395,7 +391,7 @@ Gecko_GetStyleAttrDeclarationBlock(RawGeckoElementBorrowed aElement)
   if (!decl) {
     return nullptr;
   }
-  return decl->AsServo()->RefRawStrong();
+  return decl->RefRawStrong();
 }
 
 void
@@ -425,7 +421,7 @@ Gecko_GetHTMLPresentationAttrDeclarationBlock(RawGeckoElementBorrowed aElement)
     auto* svg = nsSVGElement::FromNodeOrNull(aElement);
     if (svg) {
       if (auto decl = svg->GetContentDeclarationBlock()) {
-        return decl->AsServo()->RefRawStrong();
+        return decl->RefRawStrong();
       }
     }
     return nullptr;
@@ -751,14 +747,17 @@ Gecko_GetProgressFromComputedTiming(RawGeckoComputedTimingBorrowed aComputedTimi
 
 double
 Gecko_GetPositionInSegment(RawGeckoAnimationPropertySegmentBorrowed aSegment,
-                          double aProgress,
-                          ComputedTimingFunction::BeforeFlag aBeforeFlag)
+                           double aProgress,
+                           ComputedTimingFunction::BeforeFlag aBeforeFlag)
 {
   MOZ_ASSERT(aSegment->mFromKey < aSegment->mToKey,
              "The segment from key should be less than to key");
 
-  double positionInSegment =
-    (aProgress - aSegment->mFromKey) / (aSegment->mToKey - aSegment->mFromKey);
+  double positionInSegment = (aProgress - aSegment->mFromKey) /
+                             // To avoid floating precision inaccuracies, make
+                             // sure we calculate both the numerator and
+                             // denominator using double precision.
+                             (double(aSegment->mToKey) - aSegment->mFromKey);
 
   return ComputedTimingFunction::GetPortion(aSegment->mTimingFunction,
                                             positionInSegment,
@@ -2892,12 +2891,21 @@ Gecko_ContentList_AppendAll(
 }
 
 const nsTArray<Element*>*
-Gecko_GetElementsWithId(const nsIDocument* aDocument, nsAtom* aId)
+Gecko_Document_GetElementsWithId(const nsIDocument* aDoc, nsAtom* aId)
 {
-  MOZ_ASSERT(aDocument);
+  MOZ_ASSERT(aDoc);
   MOZ_ASSERT(aId);
 
-  return aDocument->GetAllElementsForId(nsDependentAtomString(aId));
+  return aDoc->GetAllElementsForId(nsDependentAtomString(aId));
+}
+
+const nsTArray<Element*>*
+Gecko_ShadowRoot_GetElementsWithId(const ShadowRoot* aShadowRoot, nsAtom* aId)
+{
+  MOZ_ASSERT(aShadowRoot);
+  MOZ_ASSERT(aId);
+
+  return aShadowRoot->GetAllElementsForId(nsDependentAtomString(aId));
 }
 
 bool

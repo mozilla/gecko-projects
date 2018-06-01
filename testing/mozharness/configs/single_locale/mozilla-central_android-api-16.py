@@ -12,8 +12,6 @@ config = {
     "log_name": "single_locale",
     "objdir": OBJDIR,
     "is_automation": True,
-    "force_clobber": True,
-    "clobberer_url": "https://api.pub.build.mozilla.org/clobberer/lastclobber",
     "locales_file": "%s/mobile/locales/l10n-changesets.json" % MOZILLA_DIR,
     "locales_dir": "mobile/android/locales",
     "ignore_locales": ["en-US"],
@@ -34,10 +32,6 @@ config = {
         "repo": "https://hg.mozilla.org/mozilla-central",
         "revision": "%(revision)s",
         "dest": MOZILLA_DIR,
-    }, {
-        "repo": "https://hg.mozilla.org/build/buildbot-configs",
-        "branch": "default",
-        "dest": "buildbot-configs"
     }],
     "hg_l10n_base": "https://hg.mozilla.org/l10n-central",
     "hg_l10n_tag": "default",

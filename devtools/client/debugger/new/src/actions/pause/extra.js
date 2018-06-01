@@ -60,7 +60,7 @@ async function getExtraProps(getState, expression, result, evaluate) {
     props.react = await getReactProps(evaluate, component);
   }
 
-  if ((0, _preview.isImmutable)(result)) {
+  if ((0, _preview.isImmutablePreview)(result)) {
     props.immutable = await getImmutableProps(expression, evaluate);
   }
 
@@ -91,7 +91,7 @@ function getExtra(expression, result) {
     const selectedFrame = (0, _selectors.getSelectedFrame)(getState());
 
     if (!selectedFrame) {
-      return;
+      return {};
     }
 
     const extra = await getExtraProps(getState, expression, result, expr => client.evaluateInFrame(expr, selectedFrame.id));

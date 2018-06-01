@@ -344,7 +344,7 @@ wasm::EncodeLocalEntries(Encoder& e, const ValTypeVector& locals)
         return false;
 
     uint32_t numLocalEntries = 0;
-    ValType prev = ValType(TypeCode::Limit);
+    ValType prev;
     for (ValType t : locals) {
         if (t != prev) {
             numLocalEntries++;
@@ -389,12 +389,12 @@ DecodeValType(Decoder& d, ModuleKind kind, HasGcTypes gcTypesEnabled, ValType* t
       case uint8_t(ValType::F32):
       case uint8_t(ValType::F64):
       case uint8_t(ValType::I64):
-        *type = ValType(unchecked);
+        *type = ValType::fromTypeCode(unchecked);
         return true;
       case uint8_t(ValType::AnyRef):
         if (gcTypesEnabled == HasGcTypes::False)
             break;
-        *type = ValType(unchecked);
+        *type = ValType::fromTypeCode(unchecked);
         return true;
       case uint8_t(ValType::I8x16):
       case uint8_t(ValType::I16x8):
@@ -405,7 +405,7 @@ DecodeValType(Decoder& d, ModuleKind kind, HasGcTypes gcTypesEnabled, ValType* t
       case uint8_t(ValType::B32x4):
         if (kind != ModuleKind::AsmJS)
             return d.fail("bad type");
-        *type = ValType(unchecked);
+        *type = ValType::fromTypeCode(unchecked);
         return true;
       default:
         break;
@@ -1240,7 +1240,7 @@ DecodeTableLimits(Decoder& d, TableDescVector* tables)
 static bool
 GlobalIsJSCompatible(Decoder& d, ValType type, bool isMutable)
 {
-    switch (type) {
+    switch (type.code()) {
       case ValType::I32:
       case ValType::F32:
       case ValType::F64:
@@ -1249,11 +1249,6 @@ GlobalIsJSCompatible(Decoder& d, ValType type, bool isMutable)
       default:
         return d.fail("unexpected variable type in global import/export");
     }
-
-#if !(defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER))
-    if (isMutable)
-        return d.fail("can't import/export mutable globals in the MVP");
-#endif
 
     return true;
 }

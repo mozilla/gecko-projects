@@ -1048,9 +1048,11 @@ const KTableEntry nsCSSProps::kListStylePositionKTable[] = {
 const KTableEntry nsCSSProps::kContainKTable[] = {
   { eCSSKeyword_none,    NS_STYLE_CONTAIN_NONE },
   { eCSSKeyword_strict,  NS_STYLE_CONTAIN_STRICT },
+  { eCSSKeyword_content, NS_STYLE_CONTAIN_CONTENT },
   { eCSSKeyword_layout,  NS_STYLE_CONTAIN_LAYOUT },
   { eCSSKeyword_style,   NS_STYLE_CONTAIN_STYLE },
   { eCSSKeyword_paint,   NS_STYLE_CONTAIN_PAINT },
+  { eCSSKeyword_size,    NS_STYLE_CONTAIN_SIZE },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1251,7 +1253,6 @@ const KTableEntry nsCSSProps::kTextJustifyKTable[] = {
 const KTableEntry nsCSSProps::kTextCombineUprightKTable[] = {
   { eCSSKeyword_none, NS_STYLE_TEXT_COMBINE_UPRIGHT_NONE },
   { eCSSKeyword_all, NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL },
-  { eCSSKeyword_digits, NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_2 }, // w/o number ==> 2
   { eCSSKeyword_UNKNOWN, -1 }
 };
 

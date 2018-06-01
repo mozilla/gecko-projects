@@ -495,7 +495,7 @@ class GCRuntime
     void joinTask(GCParallelTask& task, gcstats::PhaseKind phase,
                   AutoLockHelperThreadState& locked);
 
-    void mergeCompartments(JSCompartment* source, JSCompartment* target);
+    void mergeRealms(JS::Realm* source, JS::Realm* target);
 
   private:
     enum IncrementalResult
@@ -568,7 +568,7 @@ class GCRuntime
     MOZ_MUST_USE bool beginMarkPhase(JS::gcreason::Reason reason, AutoTraceSession& session);
     bool prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOut,
                                    AutoLockForExclusiveAccess& lock);
-    bool shouldPreserveJITCode(JSCompartment* comp, int64_t currentTime,
+    bool shouldPreserveJITCode(JS::Realm* realm, int64_t currentTime,
                                JS::gcreason::Reason reason, bool canAllocateMoreCode);
     void traceRuntimeForMajorGC(JSTracer* trc, AutoTraceSession& session);
     void traceRuntimeAtoms(JSTracer* trc, AutoLockForExclusiveAccess& lock);

@@ -115,14 +115,14 @@ jit::NewBaselineFrameInspector(TempAllocator* temp, BaselineFrame* frame)
     return inspector;
 }
 
-IonBuilder::IonBuilder(JSContext* analysisContext, CompileCompartment* comp,
+IonBuilder::IonBuilder(JSContext* analysisContext, CompileRealm* realm,
                        const JitCompileOptions& options, TempAllocator* temp,
                        MIRGraph* graph, CompilerConstraintList* constraints,
                        BaselineInspector* inspector, CompileInfo* info,
                        const OptimizationInfo* optimizationInfo,
                        BaselineFrameInspector* baselineFrame, size_t inliningDepth,
                        uint32_t loopDepth)
-  : MIRGenerator(comp, options, temp, graph, info, optimizationInfo),
+  : MIRGenerator(realm, options, temp, graph, info, optimizationInfo),
     backgroundCodegen_(nullptr),
     actionableAbortScript_(nullptr),
     actionableAbortPc_(nullptr),
@@ -325,7 +325,7 @@ IonBuilder::InliningDecision
 IonBuilder::DontInline(JSScript* targetScript, const char* reason)
 {
     if (targetScript) {
-        JitSpew(JitSpew_Inlining, "Cannot inline %s:%zu: %s",
+        JitSpew(JitSpew_Inlining, "Cannot inline %s:%u: %s",
                 targetScript->filename(), targetScript->lineno(), reason);
     } else {
         JitSpew(JitSpew_Inlining, "Cannot inline: %s", reason);
@@ -751,11 +751,11 @@ IonBuilder::build()
 
 #ifdef JS_JITSPEW
     if (info().isAnalysis()) {
-        JitSpew(JitSpew_IonScripts, "Analyzing script %s:%zu (%p) %s",
+        JitSpew(JitSpew_IonScripts, "Analyzing script %s:%u (%p) %s",
                 script()->filename(), script()->lineno(), (void*)script(),
                 AnalysisModeString(info().analysisMode()));
     } else {
-        JitSpew(JitSpew_IonScripts, "%sompiling script %s:%zu (%p) (warmup-counter=%" PRIu32 ", level=%s)",
+        JitSpew(JitSpew_IonScripts, "%sompiling script %s:%u (%p) (warmup-counter=%" PRIu32 ", level=%s)",
                 (script()->hasIonScript() ? "Rec" : "C"),
                 script()->filename(), script()->lineno(), (void*)script(),
                 script()->getWarmUpCount(), OptimizationLevelString(optimizationInfo().level()));
@@ -925,7 +925,7 @@ IonBuilder::buildInline(IonBuilder* callerBuilder, MResumePoint* callerResumePoi
 
     MOZ_TRY(init());
 
-    JitSpew(JitSpew_IonScripts, "Inlining script %s:%zu (%p)",
+    JitSpew(JitSpew_IonScripts, "Inlining script %s:%u (%p)",
             script()->filename(), script()->lineno(), (void*)script());
 
     callerBuilder_ = callerBuilder;
@@ -1214,12 +1214,12 @@ IonBuilder::initEnvironmentChain(MDefinition* callee)
 void
 IonBuilder::initArgumentsObject()
 {
-    JitSpew(JitSpew_IonMIR, "%s:%zu - Emitting code to initialize arguments object! block=%p",
+    JitSpew(JitSpew_IonMIR, "%s:%u - Emitting code to initialize arguments object! block=%p",
             script()->filename(), script()->lineno(), current);
     MOZ_ASSERT(info().needsArgsObj());
 
     bool mapped = script()->hasMappedArgsObj();
-    ArgumentsObject* templateObj = script()->compartment()->maybeArgumentsTemplateObject(mapped);
+    ArgumentsObject* templateObj = script()->realm()->maybeArgumentsTemplateObject(mapped);
 
     MCreateArgumentsObject* argsObj =
         MCreateArgumentsObject::New(alloc(), current->environmentChain(), templateObj);
@@ -1426,7 +1426,7 @@ GetOrCreateControlFlowGraph(TempAllocator& tempAlloc, JSScript* script,
     }
 
     if (JitSpewEnabled(JitSpew_CFG)) {
-        JitSpew(JitSpew_CFG, "Generating graph for %s:%zu",
+        JitSpew(JitSpew_CFG, "Generating graph for %s:%u",
                              script->filename(), script->lineno());
         Fprinter& print = JitSpewPrinter();
         cfg->dump(print, script);
@@ -1876,7 +1876,7 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_SYMBOL: {
         unsigned which = GET_UINT8(pc);
-        JS::Symbol* sym = compartment->runtime()->wellKnownSymbols().get(which);
+        JS::Symbol* sym = realm->runtime()->wellKnownSymbols().get(which);
         pushConstant(SymbolValue(sym));
         return Ok();
       }
@@ -2375,6 +2375,9 @@ IonBuilder::inspectOpcode(JSOp op)
         pushConstant(BooleanValue(false));
         return Ok();
       }
+
+      case JSOP_IMPORTMETA:
+          return jsop_importmeta();
 
       // ===== NOT Yet Implemented =====
       // Read below!
@@ -3790,7 +3793,7 @@ IonBuilder::inlineScriptedCall(CallInfo& callInfo, JSFunction* target)
     AutoAccumulateReturns aar(graph(), returns);
 
     // Build the graph.
-    IonBuilder inlineBuilder(analysisContext, compartment, options, &alloc(), &graph(), constraints(),
+    IonBuilder inlineBuilder(analysisContext, realm, options, &alloc(), &graph(), constraints(),
                              &inspector, info, &optimizationInfo(), nullptr, inliningDepth_ + 1,
                              loopDepth_);
     AbortReasonOr<Ok> result = inlineBuilder.buildInline(this, outerResumePoint, callInfo);
@@ -4025,7 +4028,7 @@ IonBuilder::makeInliningDecision(JSObject* targetArg, CallInfo& callInfo)
         info().analysisMode() != Analysis_DefiniteProperties)
     {
         trackOptimizationOutcome(TrackedOutcome::CantInlineNotHot);
-        JitSpew(JitSpew_Inlining, "Cannot inline %s:%zu: callee is insufficiently hot.",
+        JitSpew(JitSpew_Inlining, "Cannot inline %s:%u: callee is insufficiently hot.",
                 targetScript->filename(), targetScript->lineno());
         return InliningDecision_WarmUpCountTooLow;
     }
@@ -4962,7 +4965,7 @@ IonBuilder::createThisScriptedBaseline(MDefinition* callee)
     if (!templateObject->is<PlainObject>() && !templateObject->is<UnboxedPlainObject>())
         return nullptr;
 
-    Shape* shape = target->lookupPure(compartment->runtime()->names().prototype);
+    Shape* shape = target->lookupPure(realm->runtime()->names().prototype);
     if (!shape || !shape->isDataProperty())
         return nullptr;
 
@@ -5450,7 +5453,7 @@ IonBuilder::testShouldDOMCall(TypeSet* inTypes, JSFunction* func, JSJitInfo::OpT
     // property, we can bake in a call to the bottom half of the DOM
     // accessor
     DOMInstanceClassHasProtoAtDepth instanceChecker =
-        compartment->runtime()->DOMcallbacks()->instanceClassMatchesProto;
+        realm->runtime()->DOMcallbacks()->instanceClassMatchesProto;
 
     const JSJitInfo* jinfo = func->jitInfo();
     if (jinfo->type() != opType)
@@ -6975,21 +6978,21 @@ ClassHasEffectlessLookup(const Class* clasp)
 // Return whether an object might have a property for name which is not
 // accounted for by type information.
 static bool
-ObjectHasExtraOwnProperty(CompileCompartment* comp, TypeSet::ObjectKey* object, jsid id)
+ObjectHasExtraOwnProperty(CompileRealm* realm, TypeSet::ObjectKey* object, jsid id)
 {
     // Some typed object properties are not reflected in type information.
     if (object->isGroup() && object->group()->maybeTypeDescr())
-        return object->group()->typeDescr().hasProperty(comp->runtime()->names(), id);
+        return object->group()->typeDescr().hasProperty(realm->runtime()->names(), id);
 
     const Class* clasp = object->clasp();
 
     // Array |length| properties are not reflected in type information.
     if (clasp == &ArrayObject::class_)
-        return JSID_IS_ATOM(id, comp->runtime()->names().length);
+        return JSID_IS_ATOM(id, realm->runtime()->names().length);
 
     // Resolve hooks can install new properties on objects on demand.
     JSObject* singleton = object->isSingleton() ? object->singleton() : nullptr;
-    return ClassMayResolveId(comp->runtime()->names(), clasp, id, singleton);
+    return ClassMayResolveId(realm->runtime()->names(), clasp, id, singleton);
 }
 
 void
@@ -7051,7 +7054,7 @@ IonBuilder::testSingletonProperty(JSObject* obj, jsid id)
             return nullptr;
         }
 
-        if (ObjectHasExtraOwnProperty(compartment, objKey, id))
+        if (ObjectHasExtraOwnProperty(realm, objKey, id))
             return nullptr;
 
         obj = checkNurseryObject(obj->staticPrototype());
@@ -7113,7 +7116,7 @@ IonBuilder::testSingletonPropertyTypes(MDefinition* obj, jsid id)
                 key->ensureTrackedProperty(analysisContext, id);
 
             const Class* clasp = key->clasp();
-            if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(compartment, key, id))
+            if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(realm, key, id))
                 return nullptr;
             if (key->unknownProperties())
                 return nullptr;
@@ -7169,7 +7172,7 @@ IonBuilder::testNotDefinedProperty(MDefinition* obj, jsid id, bool ownProperty /
                 return false;
 
             const Class* clasp = key->clasp();
-            if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(compartment, key, id))
+            if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(realm, key, id))
                 return false;
 
             // If the object is a singleton, we can do a lookup now to avoid
@@ -7446,7 +7449,7 @@ IonBuilder::loadStaticSlot(JSObject* staticObject, BarrierKind barrier, Temporar
 bool
 IonBuilder::needsPostBarrier(MDefinition* value)
 {
-    CompileZone* zone = compartment->zone();
+    CompileZone* zone = realm->zone();
     if (!zone->nurseryExists())
         return false;
     if (value->mightBeType(MIRType::Object))
@@ -7573,11 +7576,11 @@ IonBuilder::jsop_getgname(PropertyName* name)
         return Ok();
     }
     if (name == names().NaN) {
-        pushConstant(compartment->runtime()->NaNValue());
+        pushConstant(realm->runtime()->NaNValue());
         return Ok();
     }
     if (name == names().Infinity) {
-        pushConstant(compartment->runtime()->positiveInfinityValue());
+        pushConstant(realm->runtime()->positiveInfinityValue());
         return Ok();
     }
 
@@ -9773,7 +9776,7 @@ IonBuilder::commonPrototypeWithGetterSetter(TemporaryTypeSet* types, PropertyNam
             if (!ClassHasEffectlessLookup(clasp))
                 return nullptr;
             JSObject* singleton = key->isSingleton() ? key->singleton() : nullptr;
-            if (ObjectHasExtraOwnProperty(compartment, key, NameToId(name))) {
+            if (ObjectHasExtraOwnProperty(realm, key, NameToId(name))) {
                 if (!singleton || !singleton->is<GlobalObject>())
                     return nullptr;
                 *guardGlobal = true;
@@ -9980,7 +9983,7 @@ IonBuilder::annotateGetPropertyCache(MDefinition* obj, PropertyName* name,
         JSObject* proto = checkNurseryObject(key->proto().toObject());
 
         const Class* clasp = key->clasp();
-        if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(compartment, key, NameToId(name)))
+        if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(realm, key, NameToId(name)))
             continue;
 
         HeapTypeSetKey ownTypes = key->property(NameToId(name));
@@ -12115,7 +12118,7 @@ IonBuilder::jsop_object(JSObject* obj)
         return resumeAfter(clone);
     }
 
-    compartment->setSingletonsAsValues();
+    realm->setSingletonsAsValues();
     pushConstant(ObjectValue(*obj));
     return Ok();
 }
@@ -13039,7 +13042,7 @@ IonBuilder::jsop_instanceof()
         // If the user has supplied their own @@hasInstance method we shouldn't
         // clobber it.
         JSFunction* fun = &rhsObject->as<JSFunction>();
-        const WellKnownSymbols* symbols = &compartment->runtime()->wellKnownSymbols();
+        const WellKnownSymbols* symbols = &realm->runtime()->wellKnownSymbols();
         if (!js::FunctionHasDefaultHasInstance(fun, *symbols))
             break;
 
@@ -13140,6 +13143,21 @@ IonBuilder::jsop_implicitthis(PropertyName* name)
     current->push(implicitThis);
 
     return resumeAfter(implicitThis);
+}
+
+AbortReasonOr<Ok>
+IonBuilder::jsop_importmeta()
+{
+    ModuleObject* module = GetModuleObjectForScript(script());
+    MOZ_ASSERT(module);
+
+    // The object must have been created already when we compiled for baseline.
+    JSObject* metaObject = module->metaObject();
+    MOZ_ASSERT(metaObject);
+
+    pushConstant(ObjectValue(*metaObject));
+
+    return Ok();
 }
 
 MInstruction*
@@ -13611,7 +13629,7 @@ IonBuilder::checkNurseryObject(JSObject* obj)
     // GC. All constants used during compilation should either go through this
     // function or should come from a type set (which has a similar barrier).
     if (obj && IsInsideNursery(obj)) {
-        compartment->zone()->setMinorGCShouldCancelIonCompilations();
+        realm->zone()->setMinorGCShouldCancelIonCompilations();
         IonBuilder* builder = this;
         while (builder) {
             builder->setNotSafeForMinorGC();
@@ -13723,7 +13741,7 @@ IonBuilder::convertToBoolean(MDefinition* input)
 void
 IonBuilder::trace(JSTracer* trc)
 {
-    if (!compartment->runtime()->runtimeMatches(trc->runtime()))
+    if (!realm->runtime()->runtimeMatches(trc->runtime()))
         return;
 
     MOZ_ASSERT(rootList_);

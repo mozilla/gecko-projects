@@ -451,7 +451,7 @@ AtomizeAndCopyCharsInner(JSContext* cx, const CharT* tbchars, size_t length, Pin
 
     JSAtom* atom;
     {
-        AutoAtomsRealm ar(cx, lock);
+        AutoAtomsZone az(cx, lock);
 
         JSFlatString* flat = NewStringCopyN<NoGC>(cx, tbchars, length);
         if (!flat) {
@@ -585,7 +585,7 @@ js::IndexToIdSlow(JSContext* cx, uint32_t index, MutableHandleId idp)
     if (!atom)
         return false;
 
-    idp.set(JSID_FROM_BITS((size_t)atom));
+    idp.set(JSID_FROM_BITS((size_t)atom | JSID_TYPE_STRING));
     return true;
 }
 
@@ -636,6 +636,14 @@ ToAtomSlow(JSContext* cx, typename MaybeRooted<Value, allowGC>::HandleType arg)
         }
         return nullptr;
     }
+#ifdef ENABLE_BIGINT
+    if (v.isBigInt()) {
+        JSAtom* atom = BigIntToAtom(cx, v.toBigInt());
+        if (!allowGC && !atom)
+            cx->recoverFromOutOfMemory();
+        return atom;
+    }
+#endif
     MOZ_ASSERT(v.isUndefined());
     return cx->names().undefined;
 }

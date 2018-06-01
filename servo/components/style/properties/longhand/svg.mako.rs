@@ -21,8 +21,8 @@ ${helpers.single_keyword("vector-effect", "none non-scaling-stroke",
 
 ${helpers.predefined_type(
     "stop-color",
-    "RGBAColor",
-    "RGBA::new(0, 0, 0, 255)",
+    "Color",
+    "RGBA::new(0, 0, 0, 255).into()",
     products="gecko",
     animation_value_type="AnimatedRGBA",
     spec="https://www.w3.org/TR/SVGTiny12/painting.html#StopColorProperty",
@@ -37,10 +37,10 @@ ${helpers.predefined_type("stop-opacity", "Opacity", "1.0",
 
 ${helpers.predefined_type(
     "flood-color",
-    "RGBAColor",
-    "RGBA::new(0, 0, 0, 255)",
+    "Color",
+    "RGBA::new(0, 0, 0, 255).into()",
     products="gecko",
-    animation_value_type="AnimatedRGBA",
+    animation_value_type="AnimatedColor",
     spec="https://www.w3.org/TR/SVG/filters.html#FloodColorProperty",
 )}
 
@@ -50,10 +50,10 @@ ${helpers.predefined_type("flood-opacity", "Opacity",
 
 ${helpers.predefined_type(
     "lighting-color",
-    "RGBAColor",
-    "RGBA::new(255, 255, 255, 255)",
+    "Color",
+    "RGBA::new(255, 255, 255, 255).into()",
     products="gecko",
-    animation_value_type="AnimatedRGBA",
+    animation_value_type="AnimatedColor",
     spec="https://www.w3.org/TR/SVG/filters.html#LightingColorProperty",
 )}
 
@@ -108,25 +108,32 @@ ${helpers.predefined_type(
     )}
 % endfor
 
-${helpers.single_keyword("mask-clip",
-                         "border-box content-box padding-box",
-                         extra_gecko_values="fill-box stroke-box view-box no-clip",
-                         vector=True,
-                         products="gecko",
-                         extra_prefixes="webkit",
-                         gecko_enum_prefix="StyleGeometryBox",
-                         animation_value_type="discrete",
-                         spec="https://drafts.fxtf.org/css-masking/#propdef-mask-clip")}
+${helpers.single_keyword(
+    "mask-clip",
+    "border-box content-box padding-box",
+    extra_gecko_values="fill-box stroke-box view-box no-clip",
+    vector=True,
+    products="gecko",
+    extra_prefixes="webkit",
+    gecko_enum_prefix="StyleGeometryBox",
+    gecko_inexhaustive=True,
+    animation_value_type="discrete",
+    spec="https://drafts.fxtf.org/css-masking/#propdef-mask-clip",
+)}
 
-${helpers.single_keyword("mask-origin",
-                         "border-box content-box padding-box",
-                         extra_gecko_values="fill-box stroke-box view-box",
-                         vector=True,
-                         products="gecko",
-                         extra_prefixes="webkit",
-                         gecko_enum_prefix="StyleGeometryBox",
-                         animation_value_type="discrete",
-                         spec="https://drafts.fxtf.org/css-masking/#propdef-mask-origin")}
+${helpers.single_keyword(
+    "mask-origin",
+    "border-box content-box padding-box",
+    extra_gecko_values="fill-box stroke-box view-box",
+    vector=True,
+    products="gecko",
+    extra_prefixes="webkit",
+    gecko_enum_prefix="StyleGeometryBox",
+    gecko_inexhaustive=True,
+    animation_value_type="discrete",
+    spec="https://drafts.fxtf.org/css-masking/#propdef-mask-origin",
+)}
+
 ${helpers.predefined_type(
     "mask-size",
     "background::BackgroundSize",

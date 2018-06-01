@@ -23,7 +23,7 @@ from mozprocess import ProcessHandler
 
 from mozharness.base.log import FATAL
 from mozharness.base.script import BaseScript, PreScriptAction, PostScriptAction
-from mozharness.mozilla.buildbot import TBPL_RETRY, EXIT_STATUS_DICT
+from mozharness.mozilla.automation import TBPL_RETRY, EXIT_STATUS_DICT
 from mozharness.mozilla.mozbase import MozbaseMixin
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.mozilla.testing.codecoverage import CodeCoverageMixin
@@ -166,7 +166,7 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
             self.apk_path = os.path.join(apk_dir, self.installer_path)
             unzip = self.query_exe("unzip")
             package_path = os.path.join(apk_dir, 'package-name.txt')
-            unzip_cmd = [unzip, '-q', '-o',  self.apk_path]
+            unzip_cmd = [unzip, '-q', '-o', self.apk_path]
             self.run_command(unzip_cmd, cwd=apk_dir, halt_on_failure=True)
             self.app_name = str(self.read_from_file(package_path, verbose=True)).rstrip()
         return self.app_name
@@ -436,13 +436,14 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
             else:
                 cmd.extend([option % str_format_values])
 
-        if user_paths:
-            cmd.extend(user_paths.split(':'))
-        elif not self.verify_enabled:
-            if self.this_chunk is not None:
-                cmd.extend(['--this-chunk', self.this_chunk])
-            if self.total_chunks is not None:
-                cmd.extend(['--total-chunks', self.total_chunks])
+        if not (self.verify_enabled or self.per_test_coverage):
+            if user_paths:
+                cmd.extend(user_paths.split(':'))
+            elif not (self.verify_enabled or self.per_test_coverage):
+                if self.this_chunk is not None:
+                    cmd.extend(['--this-chunk', self.this_chunk])
+                if self.total_chunks is not None:
+                    cmd.extend(['--total-chunks', self.total_chunks])
 
         try_options, try_tests = self.try_args(self.test_suite)
         cmd.extend(try_options)
@@ -773,7 +774,7 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
             env['MINIDUMP_SAVE_PATH'] = self.query_abs_dirs()['abs_blob_upload_dir']
             env['RUST_BACKTRACE'] = 'full'
 
-            summary = None
+            summary = {}
             for per_test_args in self.query_args(per_test_suite):
                 if (datetime.datetime.now() - self.start_time) > max_per_test_time:
                     # Running tests has run out of time. That is okay! Stop running
@@ -810,10 +811,10 @@ class AndroidEmulatorTest(TestingMixin, BaseScript, MozbaseMixin, CodeCoverageMi
                 self.info("##### %s log ends" % self.test_suite)
 
                 if len(per_test_args) > 0:
-                    self.buildbot_status(tbpl_status, level=log_level)
+                    self.record_status(tbpl_status, level=log_level)
                     self.log_per_test_status(per_test_args[-1], tbpl_status, log_level)
                 else:
-                    self.buildbot_status(tbpl_status, level=log_level)
+                    self.record_status(tbpl_status, level=log_level)
                     self.log("The %s suite: %s ran with return status: %s" %
                              (suite_category, suite, tbpl_status), level=log_level)
 

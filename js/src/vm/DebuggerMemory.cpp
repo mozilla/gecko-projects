@@ -308,10 +308,10 @@ DebuggerMemory::setAllocationSamplingProbability(JSContext* cx, unsigned argc, V
         dbg->allocationSamplingProbability = probability;
 
         // If this is a change any debuggees would observe, have all debuggee
-        // compartments recompute their sampling probabilities.
+        // realms recompute their sampling probabilities.
         if (dbg->enabled && dbg->trackingAllocationSites) {
             for (auto r = dbg->debuggees.all(); !r.empty(); r.popFront())
-                r.front()->compartment()->chooseAllocationSamplingProbability();
+                r.front()->realm()->chooseAllocationSamplingProbability();
         }
     }
 
@@ -375,6 +375,13 @@ bool
 DebuggerMemory::takeCensus(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER_MEMORY(cx, argc, vp, "Debugger.Memory.prototype.census", args, memory);
+
+#ifdef ENABLE_WASM_GC
+    if (gc::GCRuntime::temporaryAbortIfWasmGc(cx)) {
+        JS_ReportErrorASCII(cx, "API temporarily unavailable under wasm gc");
+        return false;
+    }
+#endif
 
     Census census(cx);
     if (!census.init())

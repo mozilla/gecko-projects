@@ -23,7 +23,7 @@
 #include "jit/CompileInfo.h"
 #include "jit/Ion.h"
 #include "jit/IonAnalysis.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "jit/OptimizationTracking.h"
 #include "js/MemoryMetrics.h"
 #include "vm/HelperThreads.h"
@@ -113,6 +113,10 @@ TypeSet::NonObjectTypeString(TypeSet::Type type)
             return "string";
           case JSVAL_TYPE_SYMBOL:
             return "symbol";
+#ifdef ENABLE_BIGINT
+          case JSVAL_TYPE_BIGINT:
+            return "BigInt";
+#endif
           case JSVAL_TYPE_MAGIC:
             return "lazyargs";
           default:
@@ -785,6 +789,10 @@ TypeSet::print(FILE* fp)
         fprintf(fp, " string");
     if (flags & TYPE_FLAG_SYMBOL)
         fprintf(fp, " symbol");
+#ifdef ENABLE_BIGINT
+    if (flags & TYPE_FLAG_BIGINT)
+        fprintf(fp, " BigInt");
+#endif
     if (flags & TYPE_FLAG_LAZYARGS)
         fprintf(fp, " lazyargs");
 
@@ -2566,7 +2574,7 @@ TypeZone::processPendingRecompiles(FreeOp* fop, RecompileInfoVector& recompiles)
 void
 TypeZone::addPendingRecompile(JSContext* cx, const RecompileInfo& info)
 {
-    InferSpew(ISpewOps, "addPendingRecompile: %p:%s:%zu",
+    InferSpew(ISpewOps, "addPendingRecompile: %p:%s:%u",
               info.script(), info.script()->filename(), info.script()->lineno());
 
     AutoEnterOOMUnsafeRegion oomUnsafe;
@@ -3013,7 +3021,7 @@ ObjectGroup::detachNewScript(bool writeBarrier, ObjectGroup* replacement)
     MOZ_ASSERT(newScript);
 
     if (newScript->analyzed()) {
-        ObjectGroupCompartment& objectGroups = newScript->function()->compartment()->objectGroups;
+        ObjectGroupRealm& objectGroups = ObjectGroupRealm::get(this);
         TaggedProto proto = this->proto();
         if (proto.isObject() && IsForwarded(proto.toObject()))
             proto = TaggedProto(Forwarded(proto.toObject()));
@@ -3468,8 +3476,8 @@ JSFunction::setTypeForScriptedFunction(JSContext* cx, HandleFunction fun,
     } else {
         RootedObject funProto(cx, fun->staticPrototype());
         Rooted<TaggedProto> taggedProto(cx, TaggedProto(funProto));
-        ObjectGroup* group = ObjectGroupCompartment::makeGroup(cx, &JSFunction::class_,
-                                                               taggedProto);
+        ObjectGroup* group = ObjectGroupRealm::makeGroup(cx, &JSFunction::class_,
+                                                         taggedProto);
         if (!group)
             return false;
 
@@ -3797,6 +3805,7 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
         return true;
 
     MOZ_ASSERT(this == group->newScript(sweep));
+    MOZ_ASSERT(cx->realm() == group->realm());
 
     if (regenerate)
         *regenerate = false;
@@ -3986,16 +3995,16 @@ TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group, bool* regenerate,
     ObjectGroupFlags initialFlags = group->flags(sweep) & OBJECT_FLAG_DYNAMIC_MASK;
 
     Rooted<TaggedProto> protoRoot(cx, group->proto());
-    ObjectGroup* initialGroup = ObjectGroupCompartment::makeGroup(cx, group->clasp(), protoRoot,
-                                                                  initialFlags);
+    ObjectGroup* initialGroup = ObjectGroupRealm::makeGroup(cx, group->clasp(), protoRoot,
+                                                            initialFlags);
     if (!initialGroup)
         return false;
 
     initialGroup->addDefiniteProperties(cx, templateObject()->lastProperty());
     group->addDefiniteProperties(cx, prefixShape);
 
-    cx->compartment()->objectGroups.replaceDefaultNewGroup(nullptr, group->proto(), function(),
-                                                           initialGroup);
+    ObjectGroupRealm& realm = ObjectGroupRealm::get(group);
+    realm.replaceDefaultNewGroup(nullptr, group->proto(), function(), initialGroup);
 
     templateObject()->setGroup(initialGroup);
 
@@ -4408,10 +4417,10 @@ ObjectGroup::sweep(const AutoSweepObjectGroup& sweep, AutoClearTypeInferenceStat
 
     if (auto* layout = maybeUnboxedLayout(sweep)) {
         // Remove unboxed layouts that are about to be finalized from the
-        // compartment wide list while we are still on the main thread.
+        // realm wide list while we are still on the main thread.
         ObjectGroup* group = this;
         if (IsAboutToBeFinalizedUnbarriered(&group))
-            layout->detachFromCompartment();
+            layout->detachFromRealm();
 
         if (layout->newScript())
             layout->newScript()->sweep();
@@ -4691,7 +4700,7 @@ TypeScript::printTypes(JSContext* cx, HandleScript script) const
         fprintf(stderr, "Eval");
     else
         fprintf(stderr, "Main");
-    fprintf(stderr, " %#" PRIxPTR " %s:%zu ",
+    fprintf(stderr, " %#" PRIxPTR " %s:%u ",
             uintptr_t(script.get()), script->filename(), script->lineno());
 
     if (script->functionNonDelazifying()) {

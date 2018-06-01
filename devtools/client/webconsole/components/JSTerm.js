@@ -14,20 +14,15 @@ loader.lazyRequireGetter(this, "defer", "devtools/shared/defer");
 loader.lazyRequireGetter(this, "Debugger", "Debugger");
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 loader.lazyRequireGetter(this, "AutocompletePopup", "devtools/client/shared/autocomplete-popup");
-loader.lazyRequireGetter(this, "asyncStorage", "devtools/shared/async-storage");
 loader.lazyRequireGetter(this, "PropTypes", "devtools/client/shared/vendor/react-prop-types");
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "KeyCodes", "devtools/client/shared/keycodes", true);
+loader.lazyRequireGetter(this, "Editor", "devtools/client/sourceeditor/editor");
+loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
 
 const l10n = require("devtools/client/webconsole/webconsole-l10n");
 
-// Constants used for defining the direction of JSTerm input history navigation.
-const HISTORY_BACK = -1;
-const HISTORY_FORWARD = 1;
-
 const HELP_URL = "https://developer.mozilla.org/docs/Tools/Web_Console/Helpers";
-
-const PREF_INPUT_HISTORY_COUNT = "devtools.webconsole.inputHistoryCount";
 const PREF_AUTO_MULTILINE = "devtools.webconsole.autoMultiline";
 
 function gSequenceId() {
@@ -35,8 +30,23 @@ function gSequenceId() {
 }
 gSequenceId.n = 0;
 
+// React & Redux
 const { Component } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const { connect } = require("devtools/client/shared/vendor/react-redux");
+
+// History Modules
+const {
+  getHistory,
+  getHistoryValue
+} = require("devtools/client/webconsole/selectors/history");
+const historyActions = require("devtools/client/webconsole/actions/history");
+
+// Constants used for defining the direction of JSTerm input history navigation.
+const {
+  HISTORY_BACK,
+  HISTORY_FORWARD
+} = require("devtools/client/webconsole/constants");
 
 /**
  * Create a JSTerminal (a JavaScript command line). This is attached to an
@@ -50,9 +60,22 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 class JSTerm extends Component {
   static get propTypes() {
     return {
+      // Append new executed expression into history list (action).
+      appendToHistory: PropTypes.func.isRequired,
+      // Remove all entries from the history list (action).
+      clearHistory: PropTypes.func.isRequired,
+      // Returns previous or next value from the history
+      // (depending on direction argument).
+      getValueFromHistory: PropTypes.func.isRequired,
+      // History of executed expression (state).
+      history: PropTypes.object.isRequired,
+      // Console object.
       hud: PropTypes.object.isRequired,
-      // Handler for clipboard 'paste' event (also used for 'drop' event).
+      // Handler for clipboard 'paste' event (also used for 'drop' event, callback).
       onPaste: PropTypes.func,
+      codeMirrorEnabled: PropTypes.bool,
+      // Update position in the history after executing an expression (action).
+      updatePlaceHolder: PropTypes.func.isRequired,
     };
   }
 
@@ -65,8 +88,6 @@ class JSTerm extends Component {
 
     this.hud = hud;
     this.hudId = this.hud.hudId;
-    this.inputHistoryCount = Services.prefs.getIntPref(PREF_INPUT_HISTORY_COUNT);
-    this._loadHistory();
 
     /**
      * Stores the data for the last completion.
@@ -126,11 +147,6 @@ class JSTerm extends Component {
      */
     this._autocompletePopupNavigated = false;
 
-    /**
-     * History of code that was executed.
-     * @type array
-     */
-    this.history = [];
     this.autocompletePopup = null;
     this.inputNode = null;
     this.completeNode = null;
@@ -141,15 +157,13 @@ class JSTerm extends Component {
     this.COMPLETE_PAGEUP = 3;
     this.COMPLETE_PAGEDOWN = 4;
 
+    this._telemetry = new Telemetry();
+
     EventEmitter.decorate(this);
     hud.jsterm = this;
   }
 
   componentDidMount() {
-    if (!this.inputNode) {
-      return;
-    }
-
     let autocompleteOptions = {
       onSelect: this.onAutocompleteSelect.bind(this),
       onClick: this.acceptProposedCompletion.bind(this),
@@ -166,77 +180,61 @@ class JSTerm extends Component {
     // such as the browser console which doesn't have a toolbox.
     this.autocompletePopup = new AutocompletePopup(tooltipDoc, autocompleteOptions);
 
-    this.inputBorderSize = this.inputNode.getBoundingClientRect().height -
-                           this.inputNode.clientHeight;
+    this.inputBorderSize = this.inputNode
+      ? this.inputNode.getBoundingClientRect().height - this.inputNode.clientHeight
+      : 0;
 
     // Update the character width and height needed for the popup offset
     // calculations.
     this._updateCharSize();
 
-    this.inputNode.addEventListener("keypress", this._keyPress);
-    this.inputNode.addEventListener("input", this._inputEventHandler);
-    this.inputNode.addEventListener("keyup", this._inputEventHandler);
-    this.inputNode.addEventListener("focus", this._focusEventHandler);
+    if (this.props.codeMirrorEnabled) {
+      if (this.node) {
+        this.editor = new Editor({
+          autofocus: true,
+          enableCodeFolding: false,
+          gutters: [],
+          lineWrapping: true,
+          mode: Editor.modes.js,
+          styleActiveLine: false,
+          tabIndex: "0",
+          viewportMargin: Infinity,
+          extraKeys: {
+            "Enter": (e, cm) => {
+              let autoMultiline = Services.prefs.getBoolPref(PREF_AUTO_MULTILINE);
+              if (e.shiftKey
+                || (
+                  !Debugger.isCompilableUnit(this.getInputValue())
+                  && autoMultiline
+                )
+              ) {
+                // shift return or incomplete statement
+                return "CodeMirror.Pass";
+              }
+              this.execute();
+              return null;
+            },
+          },
+        });
+        this.editor.appendToLocalElement(this.node);
+      }
+    } else if (this.inputNode) {
+      this.inputNode.addEventListener("keypress", this._keyPress);
+      this.inputNode.addEventListener("input", this._inputEventHandler);
+      this.inputNode.addEventListener("keyup", this._inputEventHandler);
+      this.inputNode.addEventListener("focus", this._focusEventHandler);
+      this.focus();
+    }
+
     this.hud.window.addEventListener("blur", this._blurEventHandler);
     this.lastInputValue && this.setInputValue(this.lastInputValue);
-
-    this.focus();
   }
 
-  shouldComponentUpdate() {
-    // XXX: For now, everything is handled in an imperative way and we only want React
-    // to do the initial rendering of the component.
+  shouldComponentUpdate(nextProps, nextState) {
+    // XXX: For now, everything is handled in an imperative way and we
+    // only want React to do the initial rendering of the component.
     // This should be modified when the actual refactoring will take place.
     return false;
-  }
-
-  /**
-   * Load the console history from previous sessions.
-   * @private
-   */
-  _loadHistory() {
-    this.history = [];
-    this.historyIndex = this.historyPlaceHolder = 0;
-
-    this.historyLoaded = asyncStorage.getItem("webConsoleHistory")
-      .then(value => {
-        if (Array.isArray(value)) {
-          // Since it was gotten asynchronously, there could be items already in
-          // the history.  It's not likely but stick them onto the end anyway.
-          this.history = value.concat(this.history);
-
-          // Holds the number of entries in history. This value is incremented
-          // in this.execute().
-          this.historyIndex = this.history.length;
-
-          // Holds the index of the history entry that the user is currently
-          // viewing. This is reset to this.history.length when this.execute()
-          // is invoked.
-          this.historyPlaceHolder = this.history.length;
-        }
-      }, console.error);
-  }
-
-  /**
-   * Clear the console history altogether.  Note that this will not affect
-   * other consoles that are already opened (since they have their own copy),
-   * but it will reset the array for all newly-opened consoles.
-   * @returns Promise
-   *          Resolves once the changes have been persisted.
-   */
-  clearHistory() {
-    this.history = [];
-    this.historyIndex = this.historyPlaceHolder = 0;
-    return this.storeHistory();
-  }
-
-  /**
-   * Stores the console history for future console instances.
-   * @returns Promise
-   *          Resolves once the changes have been persisted.
-   */
-  storeHistory() {
-    return asyncStorage.setItem("webConsoleHistory", this.history);
   }
 
   /**
@@ -256,7 +254,9 @@ class JSTerm extends Component {
   }
 
   focus() {
-    if (this.inputNode && !this.inputNode.getAttribute("focused")) {
+    if (this.editor) {
+      this.editor.focus();
+    } else if (this.inputNode && !this.inputNode.getAttribute("focused")) {
       this.inputNode.focus();
     }
   }
@@ -295,7 +295,7 @@ class JSTerm extends Component {
           this.clearOutput();
           break;
         case "clearHistory":
-          this.clearHistory();
+          this.props.clearHistory();
           break;
         case "inspectObject":
           this.inspectObjectActor(helperResult.object);
@@ -324,19 +324,19 @@ class JSTerm extends Component {
       return;
     }
 
-    if (this.hud.newConsoleOutput) {
-      this.hud.newConsoleOutput.dispatchMessageAdd(response, true).then(callback);
+    if (this.hud.consoleOutput) {
+      this.hud.consoleOutput.dispatchMessageAdd(response, true).then(callback);
     }
   }
 
   inspectObjectActor(objectActor) {
-    this.hud.newConsoleOutput.dispatchMessageAdd({
+    this.hud.consoleOutput.dispatchMessageAdd({
       helperResult: {
         type: "inspectObject",
         object: objectActor
       }
     }, true);
-    return this.hud.newConsoleOutput;
+    return this.hud.consoleOutput;
   }
 
   /**
@@ -361,17 +361,9 @@ class JSTerm extends Component {
       return null;
     }
 
-    // Append a new value in the history of executed code, or overwrite the most
-    // recent entry. The most recent entry may contain the last edited input
-    // value that was not evaluated yet.
-    this.history[this.historyIndex++] = executeString;
-    this.historyPlaceHolder = this.history.length;
+    // Append executed expression into the history list.
+    this.props.appendToHistory(executeString);
 
-    if (this.history.length > this.inputHistoryCount) {
-      this.history.splice(0, this.history.length - this.inputHistoryCount);
-      this.historyIndex = this.historyPlaceHolder = this.history.length;
-    }
-    this.storeHistory();
     WebConsoleUtils.usageCount++;
     this.setInputValue("");
     this.clearCompletion();
@@ -449,6 +441,11 @@ class JSTerm extends Component {
     };
 
     this.webConsoleClient.evaluateJSAsync(str, onResult, evalOptions);
+
+    this._telemetry.recordEvent("devtools.main", "execute_js", "webconsole", null, {
+      lines: str.split(/\n/).length
+    });
+
     return deferred.promise;
   }
 
@@ -501,8 +498,8 @@ class JSTerm extends Component {
    *        this Web Console.
    */
   clearOutput(clearStorage) {
-    if (this.hud && this.hud.newConsoleOutput) {
-      this.hud.newConsoleOutput.dispatchMessagesClear();
+    if (this.hud && this.hud.consoleOutput) {
+      this.hud.consoleOutput.dispatchMessagesClear();
     }
 
     this.webConsoleClient.clearNetworkRequests();
@@ -519,8 +516,8 @@ class JSTerm extends Component {
    * This method emits the "private-messages-cleared" notification.
    */
   clearPrivateMessages() {
-    if (this.hud && this.hud.newConsoleOutput) {
-      this.hud.newConsoleOutput.dispatchPrivateMessagesClear();
+    if (this.hud && this.hud.consoleOutput) {
+      this.hud.consoleOutput.dispatchPrivateMessagesClear();
       this.emit("private-messages-cleared");
     }
   }
@@ -531,6 +528,10 @@ class JSTerm extends Component {
    * @returns void
    */
   resizeInput() {
+    if (this.props.codeMirrorEnabled) {
+      return;
+    }
+
     if (!this.inputNode) {
       return;
     }
@@ -542,10 +543,7 @@ class JSTerm extends Component {
     inputNode.style.height = "auto";
 
     // Now resize the input field to fit its contents.
-    // TODO: remove `inputNode.inputField.scrollHeight` when the old
-    // console UI is removed. See bug 1381834
-    let scrollHeight = inputNode.inputField ?
-      inputNode.inputField.scrollHeight : inputNode.scrollHeight;
+    let scrollHeight = inputNode.scrollHeight;
 
     if (scrollHeight > 0) {
       inputNode.style.height = (scrollHeight + this.inputBorderSize) + "px";
@@ -562,13 +560,20 @@ class JSTerm extends Component {
    * @returns void
    */
   setInputValue(newValue) {
-    if (!this.inputNode) {
-      return;
+    if (this.props.codeMirrorEnabled) {
+      if (this.editor) {
+        this.editor.setText(newValue);
+      }
+    } else {
+      if (!this.inputNode) {
+        return;
+      }
+
+      this.inputNode.value = newValue;
+      this.completeNode.value = "";
     }
 
-    this.inputNode.value = newValue;
     this.lastInputValue = newValue;
-    this.completeNode.value = "";
     this.resizeInput();
     this._inputChanged = true;
     this.emit("set-input-value");
@@ -579,6 +584,10 @@ class JSTerm extends Component {
    * @returns string
    */
   getInputValue() {
+    if (this.props.codeMirrorEnabled) {
+      return this.editor.getText() || "";
+    }
+
     return this.inputNode ? this.inputNode.value || "" : "";
   }
 
@@ -847,39 +856,26 @@ class JSTerm extends Component {
    *          True if the input value changed, false otherwise.
    */
   historyPeruse(direction) {
-    if (!this.history.length) {
+    let {
+      history,
+      updatePlaceHolder,
+      getValueFromHistory,
+    } = this.props;
+
+    if (!history.entries.length) {
       return false;
     }
 
-    // Up Arrow key
-    if (direction == HISTORY_BACK) {
-      if (this.historyPlaceHolder <= 0) {
-        return false;
-      }
-      let inputVal = this.history[--this.historyPlaceHolder];
+    let newInputValue = getValueFromHistory(direction);
+    let expression = this.getInputValue();
+    updatePlaceHolder(direction, expression);
 
-      // Save the current input value as the latest entry in history, only if
-      // the user is already at the last entry.
-      // Note: this code does not store changes to items that are already in
-      // history.
-      if (this.historyPlaceHolder + 1 == this.historyIndex) {
-        this.history[this.historyIndex] = this.getInputValue() || "";
-      }
-
-      this.setInputValue(inputVal);
-    } else if (direction == HISTORY_FORWARD) {
-      // Down Arrow key
-      if (this.historyPlaceHolder >= (this.history.length - 1)) {
-        return false;
-      }
-
-      let inputVal = this.history[++this.historyPlaceHolder];
-      this.setInputValue(inputVal);
-    } else {
-      throw new Error("Invalid argument 0");
+    if (newInputValue != null) {
+      this.setInputValue(newInputValue);
+      return true;
     }
 
-    return true;
+    return false;
   }
 
   /**
@@ -1256,6 +1252,10 @@ class JSTerm extends Component {
    * @private
    */
   _updateCharSize() {
+    if (this.props.codeMirrorEnabled || !this.inputNode) {
+      return;
+    }
+
     let doc = this.hud.document;
     let tempLabel = doc.createElement("span");
     let style = tempLabel.style;
@@ -1307,6 +1307,18 @@ class JSTerm extends Component {
       return null;
     }
 
+    if (this.props.codeMirrorEnabled) {
+      return dom.div({
+        className: "jsterm-input-container devtools-monospace",
+        key: "jsterm-container",
+        style: {direction: "ltr"},
+        "aria-live": "off",
+        ref: node => {
+          this.node = node;
+        },
+      });
+    }
+
     let {
       onPaste
     } = this.props;
@@ -1343,4 +1355,22 @@ class JSTerm extends Component {
   }
 }
 
-module.exports = JSTerm;
+// Redux connect
+
+function mapStateToProps(state) {
+  return {
+    history: getHistory(state),
+    getValueFromHistory: (direction) => getHistoryValue(state, direction),
+  };
+}
+
+function mapDispatchToProps(dispatch) {
+  return {
+    appendToHistory: (expr) => dispatch(historyActions.appendToHistory(expr)),
+    clearHistory: () => dispatch(historyActions.clearHistory()),
+    updatePlaceHolder: (direction, expression) =>
+      dispatch(historyActions.updatePlaceHolder(direction, expression)),
+  };
+}
+
+module.exports = connect(mapStateToProps, mapDispatchToProps)(JSTerm);

@@ -225,7 +225,7 @@ uint8_t*
 InterpreterStack::allocateFrame(JSContext* cx, size_t size)
 {
     size_t maxFrames;
-    if (cx->compartment()->principals() == cx->runtime()->trustedPrincipals())
+    if (cx->realm()->principals() == cx->runtime()->trustedPrincipals())
         maxFrames = MAX_FRAMES_TRUSTED;
     else
         maxFrames = MAX_FRAMES;
@@ -493,10 +493,10 @@ AbstractFramePtr::pushVarEnvironment(JSContext* cx, HandleScope scope)
     return js::PushVarEnvironmentObject(cx, scope, *this);
 }
 
-inline JSCompartment*
-AbstractFramePtr::compartment() const
+inline JS::Realm*
+AbstractFramePtr::realm() const
 {
-    return environmentChain()->compartment();
+    return environmentChain()->realm();
 }
 
 inline unsigned

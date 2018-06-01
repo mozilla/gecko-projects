@@ -10,8 +10,8 @@
 #include "frontend/BytecodeCompiler.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/BaselineIC.h"
-#include "jit/JitCompartment.h"
 #include "jit/JitFrames.h"
+#include "jit/JitRealm.h"
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
 #include "vm/ArrayObject.h"
@@ -747,9 +747,9 @@ void
 PostGlobalWriteBarrier(JSRuntime* rt, JSObject* obj)
 {
     MOZ_ASSERT(obj->is<GlobalObject>());
-    if (!obj->compartment()->globalWriteBarriered) {
+    if (!obj->realm()->globalWriteBarriered) {
         PostWriteBarrier(rt, obj);
-        obj->compartment()->globalWriteBarriered = 1;
+        obj->realm()->globalWriteBarriered = 1;
     }
 }
 
@@ -1136,7 +1136,7 @@ bool
 GlobalHasLiveOnDebuggerStatement(JSContext* cx)
 {
     AutoUnsafeCallWithABI unsafe;
-    return cx->compartment()->isDebuggee() &&
+    return cx->realm()->isDebuggee() &&
            Debugger::hasLiveHook(cx->global(), Debugger::OnDebuggerStatement);
 }
 
@@ -1191,7 +1191,7 @@ bool
 DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ASSERT(frame->script()->baselineScript()->hasDebugInstrumentation());
-    if (cx->compartment()->isDebuggee())
+    if (cx->realm()->isDebuggee())
         DebugEnvironments::onPopLexical(cx, frame, pc);
     return true;
 }

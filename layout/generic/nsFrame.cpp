@@ -31,6 +31,7 @@
 #include "nsIContentInlines.h"
 #include "nsContentUtils.h"
 #include "nsCSSFrameConstructor.h"
+#include "nsCSSProps.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSRendering.h"
 #include "nsAtom.h"
@@ -49,7 +50,6 @@
 #include "LayoutLogging.h"
 #include "mozilla/RestyleManager.h"
 #include "nsInlineFrame.h"
-#include "nsIDOMNode.h"
 #include "nsFrameSelection.h"
 #include "nsGkAtoms.h"
 #include "nsCSSAnonBoxes.h"
@@ -280,6 +280,16 @@ std::ostream& operator<<(std::ostream& aStream,
           << "FirstLetter=" << (aStatus.FirstLetterComplete() ? 'Y' : 'N')
           << "]";
   return aStream;
+}
+
+nsCString
+nsReflowStatus::ToString() const
+{
+  nsCString result;
+  std::stringstream ss;
+  ss << *this;
+  result.Append(ss.str().c_str());
+  return result;
 }
 
 static bool gShowFrameBorders = false;
@@ -612,6 +622,7 @@ nsFrame::Init(nsIContent*       aContent,
 
   mContent = aContent;
   mParent = aParent;
+  MOZ_DIAGNOSTIC_ASSERT(!mParent || PresShell() == mParent->PresShell());
 
   if (aPrevInFlow) {
     mWritingMode = aPrevInFlow->GetWritingMode();
@@ -623,7 +634,6 @@ nsFrame::Init(nsIContent*       aContent,
     AddStateBits(state & (NS_FRAME_INDEPENDENT_SELECTION |
                           NS_FRAME_PART_OF_IBSPLIT |
                           NS_FRAME_MAY_BE_TRANSFORMED |
-                          NS_FRAME_MAY_HAVE_GENERATED_CONTENT |
                           NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN));
   } else {
     PresContext()->ConstructedFrame();
@@ -1001,6 +1011,10 @@ nsIFrame::MarkNeedsDisplayItemRebuild()
   }
 
   if (Type() == LayoutFrameType::Placeholder) {
+    nsIFrame* oof = static_cast<nsPlaceholderFrame*>(this)->GetOutOfFlowFrame();
+    if (oof) {
+      oof->MarkNeedsDisplayItemRebuild();
+    }
     // Do not mark placeholder frames modified.
     return;
   }
@@ -1537,6 +1551,13 @@ nsIFrame::HasAnimationOfTransform() const
 }
 
 bool
+nsIFrame::ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const
+{
+  MOZ_ASSERT(aStyleDisplay == StyleDisplay());
+  return aStyleDisplay->HasPerspective(this);
+}
+
+bool
 nsIFrame::HasOpacityInternal(float aThreshold,
                              EffectSet* aEffectSet) const
 {
@@ -1544,6 +1565,10 @@ nsIFrame::HasOpacityInternal(float aThreshold,
   if (StyleEffects()->mOpacity < aThreshold ||
       (StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY)) {
     return true;
+  }
+
+  if (!mMayHaveOpacityAnimation) {
+    return false;
   }
 
   EffectSet* effects =
@@ -2954,9 +2979,12 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   // layer (for async animations), see
   // nsSVGIntegrationsUtils::PaintMaskAndClipPath or
   // nsSVGIntegrationsUtils::PaintFilter.
+  // Use MayNeedActiveLayer to decide, since we don't want to condition the wrapping
+  // display item on values that might change silently between paints (opacity activity
+  // can depend on the will-change budget).
   bool useOpacity = HasVisualOpacity(effectSet) &&
                     !nsSVGUtils::CanOptimizeOpacity(this) &&
-                    (!usingSVGEffects || nsDisplayOpacity::NeedsActiveLayer(aBuilder, this));
+                    (!usingSVGEffects || nsDisplayOpacity::MayNeedActiveLayer(this));
   bool useBlendMode = effects->mMixBlendMode != NS_STYLE_BLEND_NORMAL;
   bool useStickyPosition = disp->mPosition == NS_STYLE_POSITION_STICKY &&
     IsScrollFrameActive(aBuilder,
@@ -9799,27 +9827,20 @@ GetCorrectedParent(const nsIFrame* aFrame)
     pseudo = aFrame->PrincipalChildList().FirstChild()->Style()->GetPseudo();
   }
 
-  // Prevent NAC from inheriting NAC. This partially duplicates the logic
-  // implemented in nsCSSFrameConstructor::AddFCItemsForAnonymousContent, and is
-  // necessary so that restyle inherits style in the same way as the initial
-  // styling performed in frame construction.
-  //
-  // It would be nice to put it in CorrectStyleParentFrame and therefore share
-  // it, but that would lose the information of whether the _child_ is NAC,
-  // since CorrectStyleParentFrame only knows about the prospective _parent_.
-  // This duplication and complexity will go away when we fully switch to the
-  // Servo style system, where all this can be handled much more naturally.
-  //
-  // We need to take special care not to disrupt the style inheritance of frames
-  // whose content is NAC but who implement a pseudo (like an anonymous
-  // box, or a non-NAC-backed pseudo like ::first-line) that does not match the
-  // one that the NAC implements, if any.
-  nsIContent* content = aFrame->GetContent();
-  Element* element =
-    content && content->IsElement() ? content->AsElement() : nullptr;
-  if (element && element->IsNativeAnonymous() && !element->IsNativeScrollbarContent() &&
-      element->GetPseudoElementType() == aFrame->Style()->GetPseudoType()) {
-    while (parent->GetContent() && parent->GetContent()->IsNativeAnonymous()) {
+  // Prevent a NAC pseudo-element from inheriting from its NAC parent, and
+  // inherit from the NAC generator element instead.
+  if (pseudo) {
+    MOZ_ASSERT(aFrame->GetContent());
+    Element* element = Element::FromNode(aFrame->GetContent());
+    // Make sure to avoid doing the fixup for non-element-backed pseudos like
+    // ::first-line and such.
+    if (element &&
+        !element->IsRootOfNativeAnonymousSubtree() &&
+        element->GetPseudoElementType() == aFrame->Style()->GetPseudoType()) {
+      while (parent->GetContent() &&
+             !parent->GetContent()->IsRootOfAnonymousSubtree()) {
+        parent = parent->GetInFlowParent();
+      }
       parent = parent->GetInFlowParent();
     }
   }
@@ -10900,6 +10921,7 @@ nsIFrame::SetParent(nsContainerFrame* aParent)
 
   // Note that the current mParent may already be destroyed at this point.
   mParent = aParent;
+  MOZ_DIAGNOSTIC_ASSERT(!mParent || PresShell() == mParent->PresShell());
   if (::IsXULBoxWrapped(this)) {
     ::InitBoxMetrics(this, true);
   } else {
@@ -10988,9 +11010,10 @@ nsIFrame::IsVisuallyAtomic(EffectSet* aEffectSet,
                            const nsStyleEffects* aStyleEffects) {
   return HasOpacity(aEffectSet) ||
          IsTransformed(aStyleDisplay) ||
+         aStyleDisplay->IsContainPaint() ||
          // strictly speaking, 'perspective' doesn't require visual atomicity,
          // but the spec says it acts like the rest of these
-         aStyleDisplay->mChildPerspective.GetUnit() == eStyleUnit_Coord ||
+         ChildrenHavePerspective(aStyleDisplay) ||
          aStyleEffects->mMixBlendMode != NS_STYLE_BLEND_NORMAL ||
          nsSVGIntegrationUtils::UsingEffectsForFrame(this);
 }
@@ -10999,22 +11022,29 @@ bool
 nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
                             const nsStylePosition* aStylePosition,
                             bool aIsPositioned,
-                            bool aIsVisuallyAtomic) {
-  return (aIsPositioned && (aStyleDisplay->IsPositionForcingStackingContext() ||
-                           aStylePosition->mZIndex.GetUnit() == eStyleUnit_Integer)) ||
+                            bool aIsVisuallyAtomic)
+{
+  return aIsVisuallyAtomic ||
+         (aIsPositioned && (aStyleDisplay->IsPositionForcingStackingContext() ||
+                            aStylePosition->mZIndex.GetUnit() == eStyleUnit_Integer)) ||
          (aStyleDisplay->mWillChangeBitField & NS_STYLE_WILL_CHANGE_STACKING_CONTEXT) ||
-         aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO ||
-         aIsVisuallyAtomic;
+         aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO;
 }
 
 bool
 nsIFrame::IsStackingContext()
 {
   const nsStyleDisplay* disp = StyleDisplay();
-  bool isPositioned = disp->IsAbsPosContainingBlock(this);
-  bool isVisuallyAtomic = IsVisuallyAtomic(EffectSet::GetEffectSet(this),
-                                           disp, StyleEffects());
-  return IsStackingContext(disp, StylePosition(), isPositioned, isVisuallyAtomic);
+  const bool isVisuallyAtomic = IsVisuallyAtomic(EffectSet::GetEffectSet(this),
+                                                 disp, StyleEffects());
+  if (isVisuallyAtomic) {
+    // If this is changed, the function above should be updated as well.
+    return true;
+  }
+
+  const bool isPositioned = disp->IsAbsPosContainingBlock(this);
+  return IsStackingContext(disp, StylePosition(),
+                           isPositioned, isVisuallyAtomic);
 }
 
 static bool
@@ -11283,7 +11313,7 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     // are the event targets for any regions viewport frames may cover.
     return result;
   }
-  uint8_t pointerEvents = StyleUserInterface()->GetEffectivePointerEvents(this);
+  const uint8_t pointerEvents = StyleUserInterface()->GetEffectivePointerEvents(this);
   if (pointerEvents == NS_STYLE_POINTER_EVENTS_NONE) {
     return result;
   }
@@ -11315,7 +11345,7 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
   if (nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(this)) {
     touchActionFrame = do_QueryFrame(scrollFrame);
   }
-  uint32_t touchAction = nsLayoutUtils::GetTouchActionFromFrame(touchActionFrame);
+  const uint32_t touchAction = nsLayoutUtils::GetTouchActionFromFrame(touchActionFrame);
   // The CSS allows the syntax auto | none | [pan-x || pan-y] | manipulation
   // so we can eliminate some combinations of things.
   if (touchAction == NS_STYLE_TOUCH_ACTION_AUTO) {
@@ -11341,10 +11371,10 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     }
   }
 
-  nsDisplayOwnLayerFlags flags = aBuilder->GetCurrentScrollbarFlags();
-  if (flags != nsDisplayOwnLayerFlags::eNone) {
+  const Maybe<ScrollDirection> scrollDirection = aBuilder->GetCurrentScrollbarDirection();
+  if (scrollDirection.isSome()) {
     if (GetContent()->IsXULElement(nsGkAtoms::thumb)) {
-      bool thumbGetsLayer = aBuilder->GetCurrentScrollbarTarget() !=
+      const bool thumbGetsLayer = aBuilder->GetCurrentScrollbarTarget() !=
           layers::FrameMetrics::NULL_SCROLL_ID;
       if (thumbGetsLayer) {
         result |= CompositorHitTestInfo::eScrollbarThumb;
@@ -11352,13 +11382,11 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
         result |= CompositorHitTestInfo::eDispatchToContent;
       }
     }
-    // The only flags that get set in nsDisplayListBuilder::mCurrentScrollbarFlags
-    // are the scrollbar direction flags
-    if (flags == nsDisplayOwnLayerFlags::eVerticalScrollbar) {
+
+    if (*scrollDirection == ScrollDirection::eVertical) {
       result |= CompositorHitTestInfo::eScrollbarVertical;
-    } else {
-      MOZ_ASSERT(flags == nsDisplayOwnLayerFlags::eHorizontalScrollbar);
     }
+
     // includes the ScrollbarFrame, SliderFrame, anything else that
     // might be inside the xul:scrollbar
     result |= CompositorHitTestInfo::eScrollbar;
@@ -12666,25 +12694,13 @@ ReflowInput::DisplayInitFrameTypeExit(nsIFrame* aFrame,
     if (aFrame->IsFloating())
       printf(" float");
 
-    // This array must exactly match the StyleDisplay enum.
-    const char *const displayTypes[] = {
-      "none", "block", "inline", "inline-block", "list-item", "table",
-      "inline-table", "table-row-group", "table-column", "table-column",
-      "table-column-group", "table-header-group", "table-footer-group",
-      "table-row", "table-cell", "table-caption", "flex", "inline-flex",
-      "grid", "inline-grid", "ruby", "ruby-base", "ruby-base-container",
-      "ruby-text", "ruby-text-container", "contents", "-webkit-box",
-      "-webkit-inline-box", "box", "inline-box",
-#ifdef MOZ_XUL
-      "grid", "inline-grid", "grid-group", "grid-line", "stack",
-      "inline-stack", "deck", "groupbox", "popup",
-#endif
-    };
-    const uint32_t display = static_cast<uint32_t>(disp->mDisplay);
-    if (display >= ArrayLength(displayTypes))
-      printf(" display=%u", display);
+    const nsCSSKeyword displayVal =
+      nsCSSProps::ValueToKeywordEnum(disp->mDisplay,
+                                     nsCSSProps::kDisplayKTable);
+    if (displayVal == eCSSKeyword_UNKNOWN)
+      printf(" display=%u", static_cast<uint32_t>(disp->mDisplay));
     else
-      printf(" display=%s", displayTypes[display]);
+      printf(" display=%s", nsCSSKeywords::GetStringValue(displayVal).get());
 
     // This array must exactly match the NS_CSS_FRAME_TYPE constants.
     const char *const cssFrameTypes[] = {

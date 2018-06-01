@@ -196,9 +196,7 @@ class CustomElementReaction
 public:
   virtual ~CustomElementReaction() = default;
   virtual void Invoke(Element* aElement, ErrorResult& aRv) = 0;
-  virtual void Traverse(nsCycleCollectionTraversalCallback& aCb) const
-  {
-  }
+  virtual void Traverse(nsCycleCollectionTraversalCallback& aCb) const = 0;
 
   bool IsUpgradeReaction()
   {
@@ -226,8 +224,9 @@ public:
   // before the reactions in its reaction queue are invoked.
   // The element reaction queues are stored in CustomElementData.
   // We need to lookup ElementReactionQueueMap again to get relevant reaction queue.
-  // The choice of 1 for the auto size here is based on gut feeling.
-  typedef AutoTArray<RefPtr<Element>, 1> ElementQueue;
+  // The choice of 3 for the auto size here is based on running Custom Elements
+  // wpt tests.
+  typedef AutoTArray<RefPtr<Element>, 3> ElementQueue;
 
   /**
    * Enqueue a custom element upgrade reaction
@@ -376,17 +375,13 @@ private:
                                               nsAtom* aAtom,
                                               CustomElementCreationCallback* aCallback)
       : mozilla::Runnable("CustomElementRegistry::RunCustomElementCreationCallback")
-#ifdef DEBUG
       , mRegistry(aRegistry)
-#endif
       , mAtom(aAtom)
       , mCallback(aCallback)
     {
     }
     private:
-#ifdef DEBUG
       RefPtr<CustomElementRegistry> mRegistry;
-#endif
       RefPtr<nsAtom> mAtom;
       RefPtr<CustomElementCreationCallback> mCallback;
   };
@@ -430,6 +425,38 @@ public:
    */
   void UnregisterUnresolvedElement(Element* aElement,
                                    nsAtom* aTypeName = nullptr);
+
+  /**
+   * Register an element to be upgraded when the custom element creation
+   * callback is executed.
+   *
+   * To be used when LookupCustomElementDefinition() didn't return a definition,
+   * but with the callback scheduled to be run.
+   */
+  inline void RegisterCallbackUpgradeElement(Element* aElement,
+                                             nsAtom* aTypeName = nullptr)
+  {
+    if (mElementCreationCallbacksUpgradeCandidatesMap.IsEmpty()) {
+      return;
+    }
+
+    RefPtr<nsAtom> typeName = aTypeName;
+    if (!typeName) {
+      typeName = aElement->NodeInfo()->NameAtom();
+    }
+
+    nsTHashtable<nsRefPtrHashKey<nsIWeakReference>>* elements =
+      mElementCreationCallbacksUpgradeCandidatesMap.Get(typeName);
+
+    // If there isn't a table, there won't be a definition added by the callback.
+    if (!elements) {
+      return;
+    }
+
+    nsWeakPtr elem = do_GetWeakReference(aElement);
+    elements->PutEntry(elem);
+  }
+
 private:
   ~CustomElementRegistry();
 
@@ -478,6 +505,10 @@ private:
   // namespace id and local name to a list of elements to upgrade if that
   // element is registered as a custom element.
   CandidateMap mCandidatesMap;
+
+  // If an element creation callback is found, the nsTHashtable for the
+  // type is created here, and elements will later be upgraded.
+  CandidateMap mElementCreationCallbacksUpgradeCandidatesMap;
 
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
 

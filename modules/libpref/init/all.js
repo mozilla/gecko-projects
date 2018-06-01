@@ -62,8 +62,8 @@ pref("browser.cache.memory.max_entry_size",  5120);
 // (priority) like html, css, fonts and js, and one for other data like images,
 // video, etc.
 // Note: 0 means no limit.
-pref("browser.cache.disk.max_chunks_memory_usage", 10240);
-pref("browser.cache.disk.max_priority_chunks_memory_usage", 10240);
+pref("browser.cache.disk.max_chunks_memory_usage", 40960);
+pref("browser.cache.disk.max_priority_chunks_memory_usage", 40960);
 
 pref("browser.cache.disk_cache_ssl",        true);
 // 0 = once-per-session, 1 = each-time, 2 = never, 3 = when-appropriate/automatically
@@ -227,7 +227,7 @@ pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_i
 // if you need to limit under a directory, the path should end with "/" like
 // "example.com/foo/".  Note that this cannot limit port number for now.
 pref("dom.keyboardevent.keypress.hack.dispatch_non_printable_keys",
-     "docs.google.com,mail.google.com,hangouts.google.com,keep.google.com,inbox.google.com,*.etherpad.org/p/,etherpad.wikimedia.org/p/,board.net/p/,pad.riseup.net/p/,*.sandstorm.io,factor.cc/pad/,*.etherpad.fr/p/,piratenpad.de/p/,notes.typo3.org/p/,etherpad.net/p/,*.framapad.org/p/,pad.ouvaton.coop/,pad.systemli.org/p/,pad.lqdn.fr/p/,public.etherpad-mozilla.org/p/,*.cloudron.me/p/,pad.aquilenet.fr/p/,free.primarypad.com/p/,pad.ondesk.work/p/,demo.maadix.org/etherpad/pads/,www.rememberthemilk.com,paper.dropbox.com/doc");
+     "docs.google.com,mail.google.com,hangouts.google.com,keep.google.com,inbox.google.com,*.etherpad.org/p/,etherpad.wikimedia.org/p/,board.net/p/,pad.riseup.net/p/,*.sandstorm.io,factor.cc/pad/,*.etherpad.fr/p/,piratenpad.de/p/,notes.typo3.org/p/,etherpad.net/p/,*.framapad.org/p/,pad.ouvaton.coop/,pad.systemli.org/p/,pad.lqdn.fr/p/,public.etherpad-mozilla.org/p/,*.cloudron.me/p/,pad.aquilenet.fr/p/,free.primarypad.com/p/,pad.ondesk.work/p/,demo.maadix.org/etherpad/pads/,paper.dropbox.com/doc");
 #else
 pref("dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content", false);
 #endif
@@ -375,7 +375,7 @@ pref("media.wmf.dxva.enabled", true);
 pref("media.wmf.dxva.d3d11.enabled", true);
 pref("media.wmf.dxva.max-videos", 8);
 pref("media.wmf.low-latency.enabled", false);
-pref("media.wmf.amd.vp9.enabled", true);
+pref("media.wmf.amd.vp9.enabled", false);
 pref("media.wmf.amd.highres.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.wmf.use-nv12-format", true);
@@ -866,6 +866,7 @@ pref("gfx.webrender.enabled", false);
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
 pref("gfx.webrender.program-binary", true);
+pref("gfx.webrender.program-binary-disk", true);
 #endif
 
 #ifdef XP_MACOSX
@@ -873,7 +874,7 @@ pref("gfx.compositor.glcontext.opaque", false);
 #endif
 
 pref("gfx.webrender.highlight-painted-layers", false);
-pref("gfx.webrender.async-scene-build", 2);
+pref("gfx.webrender.async-scene-build", true);
 pref("gfx.webrender.blob-images", true);
 pref("gfx.webrender.blob.invalidation", true);
 pref("gfx.webrender.hit-test", true);
@@ -1322,10 +1323,11 @@ pref("dom.event.clipboardevents.enabled",   true);
 pref("dom.event.highrestimestamp.enabled",  true);
 pref("dom.event.coalesce_mouse_move",       true);
 
-pref("dom.webcomponents.shadowdom.enabled", false);
 #ifdef NIGHTLY_BUILD
+pref("dom.webcomponents.shadowdom.enabled", true);
 pref("dom.webcomponents.customelements.enabled", true);
 #else
+pref("dom.webcomponents.shadowdom.enabled", false);
 pref("dom.webcomponents.customelements.enabled", false);
 #endif
 
@@ -1769,6 +1771,7 @@ pref("network.http.focused_window_transaction_ratio", "0.9");
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
 pref("network.http.active_tab_priority", true);
+// </http>
 
 // default values for FTP
 // in a DSCP environment this should be 40 (0x28, or AF11), per RFC-4594,
@@ -1781,10 +1784,25 @@ pref("network.ftp.enabled", true);
 // The max time to spend on xpcom events between two polls in ms.
 pref("network.sts.max_time_for_events_between_two_polls", 100);
 
+// The number of seconds we don't let poll() handing indefinitely after network
+// link change has been detected so we can detect breakout of the pollable event.
+// Expected in seconds, 0 to disable.
+pref("network.sts.poll_busy_wait_period", 50);
+
+// The number of seconds we cap poll() timeout to during the network link change
+// detection period.
+// Expected in seconds, 0 to disable.
+pref("network.sts.poll_busy_wait_period_timeout", 7);
+
 // During shutdown we limit PR_Close calls. If time exceeds this pref (in ms)
 // let sockets just leak.
 pref("network.sts.max_time_for_pr_close_during_shutdown", 5000);
-// </http>
+
+// When the polling socket pair we use to wake poll() up on demand doesn't
+// get signalled (is not readable) within this timeout, we try to repair it.
+// This timeout can be disabled by setting this pref to 0.
+// The value is expected in seconds.
+pref("network.sts.pollable_event_timeout", 6);
 
 // 2147483647 == PR_INT32_MAX == ~2 GB
 pref("network.websocket.max-message-size", 2147483647);
@@ -2550,10 +2568,10 @@ pref("services.blocklist.onecrl.checked", 0);
 pref("services.blocklist.onecrl.signer", "onecrl.content-signature.mozilla.org");
 pref("services.blocklist.addons.collection", "addons");
 pref("services.blocklist.addons.checked", 0);
-pref("services.blocklist.addons.signer", "onecrl.content-signature.mozilla.org");
+pref("services.blocklist.addons.signer", "remote-settings.content-signature.mozilla.org");
 pref("services.blocklist.plugins.collection", "plugins");
 pref("services.blocklist.plugins.checked", 0);
-pref("services.blocklist.plugins.signer", "onecrl.content-signature.mozilla.org");
+pref("services.blocklist.plugins.signer", "remote-settings.content-signature.mozilla.org");
 pref("services.blocklist.pinning.enabled", true);
 pref("services.blocklist.pinning.bucket", "pinning");
 pref("services.blocklist.pinning.collection", "pins");
@@ -2561,7 +2579,7 @@ pref("services.blocklist.pinning.checked", 0);
 pref("services.blocklist.pinning.signer", "pinning-preload.content-signature.mozilla.org");
 pref("services.blocklist.gfx.collection", "gfx");
 pref("services.blocklist.gfx.checked", 0);
-pref("services.blocklist.gfx.signer", "onecrl.content-signature.mozilla.org");
+pref("services.blocklist.gfx.signer", "remote-settings.content-signature.mozilla.org");
 // Enable blocklists via the services settings mechanism
 pref("services.blocklist.update_enabled", true);
 
@@ -2909,9 +2927,6 @@ pref("layout.css.prefixes.font-features", true);
 
 // Is support for background-blend-mode enabled?
 pref("layout.css.background-blend-mode.enabled", true);
-
-// Is support for CSS text-combine-upright: digits 2-4 enabled?
-pref("layout.css.text-combine-upright-digits.enabled", false);
 
 // Is -moz-osx-font-smoothing enabled?
 // Only supported in OSX builds
@@ -4389,60 +4404,60 @@ pref("font.size.fixed.x-western", 12);
 #endif
 
 #if defined(ANDROID)
-// We use the bundled fonts for Firefox for Android
+// We use the bundled Charis SIL Compact as serif font for Firefox for Android
 
 pref("font.name-list.emoji", "Noto Color Emoji");
 
 pref("font.name-list.serif.ar", "Noto Naskh Arabic, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.ar", "Noto Naskh Arabic, Clear Sans, Roboto, Droid Sans");
+pref("font.name-list.sans-serif.ar", "Noto Naskh Arabic, Roboto, Droid Sans");
 pref("font.name-list.monospace.ar", "Noto Naskh Arabic");
 
 pref("font.name-list.serif.el", "Droid Serif, Noto Serif"); // not Charis SIL Compact, only has a few Greek chars
-pref("font.name-list.sans-serif.el", "Clear Sans, Roboto, Droid Sans");
+pref("font.name-list.sans-serif.el", "Roboto, Droid Sans");
 pref("font.name-list.monospace.el", "Droid Sans Mono");
 
 pref("font.name-list.serif.he", "Droid Serif, Noto Serif");
-pref("font.name-list.sans-serif.he", "Clear Sans, Droid Sans Hebrew, Droid Sans, Arial");
+pref("font.name-list.sans-serif.he", "Roboto, Droid Sans Hebrew, Droid Sans, Arial");
 pref("font.name-list.monospace.he", "Droid Sans Mono");
 
 pref("font.name-list.serif.ja", "Charis SIL Compact, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.ja", "Clear Sans, Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Noto Sans JP, Noto Sans CJK JP, Droid Sans Japanese");
+pref("font.name-list.sans-serif.ja", "Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Noto Sans JP, Noto Sans CJK JP, Droid Sans Japanese");
 pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono CJK JP, Droid Sans Mono");
 
 pref("font.name-list.serif.ko", "Charis SIL Compact, Noto Serif, Droid Serif, HYSerif");
-pref("font.name-list.sans-serif.ko", "Clear Sans, SmartGothic, NanumGothic, Noto Sans KR, Noto Sans CJK KR, DroidSansFallback, Droid Sans Fallback");
+pref("font.name-list.sans-serif.ko", "Roboto, SmartGothic, NanumGothic, Noto Sans KR, Noto Sans CJK KR, DroidSansFallback, Droid Sans Fallback");
 pref("font.name-list.monospace.ko", "Droid Sans Mono, Noto Sans Mono CJK KR");
 
 pref("font.name-list.serif.th", "Charis SIL Compact, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.th", "Clear Sans, Droid Sans Thai, Droid Sans");
+pref("font.name-list.sans-serif.th", "Roboto, Droid Sans Thai, Droid Sans");
 pref("font.name-list.monospace.th", "Droid Sans Mono");
 
 pref("font.name-list.serif.x-cyrillic", "Charis SIL Compact, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.x-cyrillic", "Clear Sans, Roboto, Droid Sans");
+pref("font.name-list.sans-serif.x-cyrillic", "Roboto, Droid Sans");
 pref("font.name-list.monospace.x-cyrillic", "Droid Sans Mono");
 
 pref("font.name-list.serif.x-unicode", "Charis SIL Compact, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.x-unicode", "Clear Sans, Roboto, Droid Sans");
+pref("font.name-list.sans-serif.x-unicode", "Roboto, Droid Sans");
 pref("font.name-list.monospace.x-unicode", "Droid Sans Mono");
 
 pref("font.name-list.serif.x-western", "Charis SIL Compact, Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.x-western", "Clear Sans, Roboto, Droid Sans");
+pref("font.name-list.sans-serif.x-western", "Roboto, Droid Sans");
 pref("font.name-list.monospace.x-western", "Droid Sans Mono");
 
 pref("font.name-list.serif.zh-CN", "Charis SIL Compact, Noto Serif, Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-CN", "Clear Sans, Roboto, Droid Sans, Noto Sans SC, Noto Sans CJK SC, Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Noto Sans SC, Noto Sans CJK SC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-CN", "Droid Sans Mono, Noto Sans Mono CJK SC, Droid Sans Fallback");
 
 pref("font.name-list.serif.zh-HK", "Charis SIL Compact, Noto Serif, Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-HK", "Clear Sans, Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-HK", "Droid Sans Mono, Noto Sans Mono CJK TC, Droid Sans Fallback");
 
 pref("font.name-list.serif.zh-TW", "Charis SIL Compact, Noto Serif, Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-TW", "Clear Sans, Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-TW", "Droid Sans Mono, Noto Sans Mono CJK TC, Droid Sans Fallback");
 
 pref("font.name-list.serif.x-math", "Latin Modern Math, STIX Two Math, XITS Math, Cambria Math, Libertinus Math, DejaVu Math TeX Gyre, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
-pref("font.name-list.sans-serif.x-math", "Clear Sans");
+pref("font.name-list.sans-serif.x-math", "Roboto");
 pref("font.name-list.monospace.x-math", "Droid Sans Mono");
 
 #endif
@@ -4793,7 +4808,7 @@ pref("layers.enable-tiles", true);
 #else
 pref("layers.enable-tiles", false);
 #endif
-#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+#if defined(XP_WIN)
 pref("layers.enable-tiles-if-skia-pomtp", true);
 #else
 pref("layers.enable-tiles-if-skia-pomtp", false);

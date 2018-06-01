@@ -1363,7 +1363,7 @@ nsDOMWindowUtils::NodesFromRect(float aX, float aY,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetTranslationNodes(nsIDOMNode* aRoot,
+nsDOMWindowUtils::GetTranslationNodes(nsINode* aRoot,
                                       nsITranslationNodeList** aRetVal)
 {
   NS_ENSURE_ARG_POINTER(aRetVal);
@@ -1430,7 +1430,7 @@ nsDOMWindowUtils::GetTranslationNodes(nsIDOMNode* aRoot,
           isTranslationRoot = !parentInList;
         }
 
-        list->AppendElement(content->AsDOMNode(), isTranslationRoot);
+        list->AppendElement(content, isTranslationRoot);
         --limit;
         break;
       }
@@ -1828,7 +1828,7 @@ nsDOMWindowUtils::GetFullZoom(float* aFullZoom)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::DispatchDOMEventViaPresShell(nsIDOMNode* aTarget,
+nsDOMWindowUtils::DispatchDOMEventViaPresShell(nsINode* aTarget,
                                                Event* aEvent,
                                                bool aTrusted,
                                                bool* aRetVal)
@@ -2510,15 +2510,14 @@ nsDOMWindowUtils::GetAsyncPanZoomEnabled(bool *aResult)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
+nsDOMWindowUtils::SetAsyncScrollOffset(Element* aElement,
                                        float aX, float aY)
 {
-  nsCOMPtr<Element> element = do_QueryInterface(aNode);
-  if (!element) {
+  if (!aElement) {
     return NS_ERROR_INVALID_ARG;
   }
   FrameMetrics::ViewID viewId;
-  if (!nsLayoutUtils::FindIDFor(element, &viewId)) {
+  if (!nsLayoutUtils::FindIDFor(aElement, &viewId)) {
     return NS_ERROR_UNEXPECTED;
   }
   nsIWidget* widget = GetWidget();
@@ -2546,14 +2545,13 @@ nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::SetAsyncZoom(nsIDOMNode* aRootElement, float aValue)
+nsDOMWindowUtils::SetAsyncZoom(Element* aRootElement, float aValue)
 {
-  nsCOMPtr<Element> element = do_QueryInterface(aRootElement);
-  if (!element) {
+  if (!aRootElement) {
     return NS_ERROR_INVALID_ARG;
   }
   FrameMetrics::ViewID viewId;
-  if (!nsLayoutUtils::FindIDFor(element, &viewId)) {
+  if (!nsLayoutUtils::FindIDFor(aRootElement, &viewId)) {
     return NS_ERROR_UNEXPECTED;
   }
   nsIWidget* widget = GetWidget();
@@ -2907,7 +2905,14 @@ nsDOMWindowUtils::CheckAndClearPaintedState(Element* aElement, bool* aResult)
     }
   }
 
-  *aResult = frame->CheckAndClearPaintedState();
+  while (frame) {
+    if (!frame->CheckAndClearPaintedState()) {
+      *aResult = false;
+      return NS_OK;
+    }
+    frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame);
+  }
+  *aResult = true;
   return NS_OK;
 }
 
@@ -2936,7 +2941,14 @@ nsDOMWindowUtils::CheckAndClearDisplayListState(Element* aElement, bool* aResult
     }
   }
 
-  *aResult = frame->CheckAndClearDisplayListState();
+  while (frame) {
+    if (!frame->CheckAndClearDisplayListState()) {
+      *aResult = false;
+      return NS_OK;
+    }
+    frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame);
+  }
+  *aResult = true;
   return NS_OK;
 
 }
@@ -3568,11 +3580,10 @@ nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::IsNodeDisabledForEvents(nsIDOMNode* aNode, bool* aRetVal)
+nsDOMWindowUtils::IsNodeDisabledForEvents(nsINode* aNode, bool* aRetVal)
 {
   *aRetVal = false;
-  nsCOMPtr<nsINode> n = do_QueryInterface(aNode);
-  nsINode* node = n;
+  nsINode* node = aNode;
   while (node) {
     if (node->IsNodeOfType(nsINode::eHTML_FORM_CONTROL)) {
       nsCOMPtr<nsIFormControl> fc = do_QueryInterface(node);
@@ -4052,7 +4063,7 @@ nsDOMWindowUtils::TriggerDeviceReset()
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::ForceUseCounterFlush(nsIDOMNode *aNode)
+nsDOMWindowUtils::ForceUseCounterFlush(nsINode *aNode)
 {
   NS_ENSURE_ARG_POINTER(aNode);
 
@@ -4264,13 +4275,6 @@ nsDOMWindowUtils::EnsureDirtyRootFrame()
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMWindowUtils::GetIsStyledByServo(bool* aStyledByServo)
-{
-  *aStyledByServo = true;
-  return NS_OK;
-}
-
 NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsITranslationNodeList)
@@ -4280,7 +4284,7 @@ NS_IMPL_ADDREF(nsTranslationNodeList)
 NS_IMPL_RELEASE(nsTranslationNodeList)
 
 NS_IMETHODIMP
-nsTranslationNodeList::Item(uint32_t aIndex, nsIDOMNode** aRetVal)
+nsTranslationNodeList::Item(uint32_t aIndex, nsINode** aRetVal)
 {
   NS_ENSURE_ARG_POINTER(aRetVal);
   NS_IF_ADDREF(*aRetVal = mNodes.SafeElementAt(aIndex));

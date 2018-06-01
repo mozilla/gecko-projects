@@ -45,7 +45,7 @@ class IonBuilder
 {
 
   public:
-    IonBuilder(JSContext* analysisContext, CompileCompartment* comp,
+    IonBuilder(JSContext* analysisContext, CompileRealm* realm,
                const JitCompileOptions& options, TempAllocator* temp,
                MIRGraph* graph, CompilerConstraintList* constraints,
                BaselineInspector* inspector, CompileInfo* info,
@@ -591,6 +591,7 @@ class IonBuilder
     AbortReasonOr<Ok> jsop_checkobjcoercible();
     AbortReasonOr<Ok> jsop_pushcallobj();
     AbortReasonOr<Ok> jsop_implicitthis(PropertyName* name);
+    AbortReasonOr<Ok> jsop_importmeta();
 
     /* Inlining. */
 
@@ -967,7 +968,7 @@ class IonBuilder
         return callerBuilder_ != nullptr;
     }
 
-    const JSAtomState& names() { return compartment->runtime()->names(); }
+    const JSAtomState& names() { return realm->runtime()->names(); }
 
     bool hadActionableAbort() const {
         MOZ_ASSERT(!actionableAbortScript_ ||

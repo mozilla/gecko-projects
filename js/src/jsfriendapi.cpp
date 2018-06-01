@@ -11,6 +11,9 @@
 
 #include <stdint.h>
 
+#ifdef ENABLE_BIGINT
+#include "builtin/BigInt.h"
+#endif
 #include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
 #include "gc/GCInternals.h"
@@ -155,40 +158,47 @@ JS_GetIsSecureContext(JSCompartment* compartment)
 JS_FRIEND_API(JSPrincipals*)
 JS_GetCompartmentPrincipals(JSCompartment* compartment)
 {
-    return compartment->principals();
+    Realm* realm = JS::GetRealmForCompartment(compartment);
+    return realm->principals();
+}
+
+JS_FRIEND_API(JSPrincipals*)
+JS::GetRealmPrincipals(JS::Realm* realm)
+{
+    return realm->principals();
 }
 
 JS_FRIEND_API(void)
-JS_SetCompartmentPrincipals(JSCompartment* compartment, JSPrincipals* principals)
+JS::SetRealmPrincipals(JS::Realm* realm, JSPrincipals* principals)
 {
     // Short circuit if there's no change.
-    if (principals == compartment->principals())
+    if (principals == realm->principals())
         return;
 
-    // Any compartment with the trusted principals -- and there can be
-    // multiple -- is a system compartment.
-    const JSPrincipals* trusted = compartment->runtimeFromMainThread()->trustedPrincipals();
+    // Any realm with the trusted principals -- and there can be
+    // multiple -- is a system realm.
+    const JSPrincipals* trusted = realm->runtimeFromMainThread()->trustedPrincipals();
     bool isSystem = principals && principals == trusted;
 
     // Clear out the old principals, if any.
-    if (compartment->principals()) {
-        JS_DropPrincipals(TlsContext.get(), compartment->principals());
-        compartment->setPrincipals(nullptr);
+    if (realm->principals()) {
+        JS_DropPrincipals(TlsContext.get(), realm->principals());
+        realm->setPrincipals(nullptr);
         // We'd like to assert that our new principals is always same-origin
         // with the old one, but JSPrincipals doesn't give us a way to do that.
         // But we can at least assert that we're not switching between system
         // and non-system.
-        MOZ_ASSERT(compartment->isSystem() == isSystem);
+        MOZ_ASSERT(realm->isSystem() == isSystem);
     }
 
     // Set up the new principals.
     if (principals) {
         JS_HoldPrincipals(principals);
-        compartment->setPrincipals(principals);
+        realm->setPrincipals(principals);
     }
 
     // Update the system flag.
-    compartment->setIsSystem(isSystem);
+    realm->setIsSystem(isSystem);
 }
 
 JS_FRIEND_API(JSPrincipals*)
@@ -241,7 +251,7 @@ DefineHelpProperty(JSContext* cx, HandleObject obj, const char* prop, const char
 JS_FRIEND_API(bool)
 JS_DefineFunctionsWithHelp(JSContext* cx, HandleObject obj, const JSFunctionSpecWithHelp* fs)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
 
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -311,6 +321,10 @@ js::GetBuiltinClass(JSContext* cx, HandleObject obj, ESClass* cls)
         *cls = ESClass::Arguments;
     else if (obj->is<ErrorObject>())
         *cls = ESClass::Error;
+#ifdef ENABLE_BIGINT
+    else if (obj->is<BigIntObject>())
+        *cls = ESClass::BigInt;
+#endif
     else
         *cls = ESClass::Other;
 
@@ -333,19 +347,13 @@ js::GetCompartmentZone(JSCompartment* comp)
 JS_FRIEND_API(bool)
 js::IsSystemCompartment(JSCompartment* comp)
 {
-    return comp->isSystem();
+    return JS::GetRealmForCompartment(comp)->isSystem();
 }
 
 JS_FRIEND_API(bool)
 js::IsSystemZone(Zone* zone)
 {
     return zone->isSystem;
-}
-
-JS_FRIEND_API(bool)
-js::IsAtomsRealm(JS::Realm* realm)
-{
-    return realm->isAtomsRealm();
 }
 
 JS_FRIEND_API(bool)
@@ -397,7 +405,7 @@ JS_FRIEND_API(void)
 js::NotifyAnimationActivity(JSObject* obj)
 {
     int64_t timeNow = PRMJ_Now();
-    obj->compartment()->lastAnimationTime = timeNow;
+    obj->realm()->lastAnimationTime = timeNow;
     obj->runtimeFromMainThread()->lastAnimationTime = timeNow;
 }
 
@@ -424,7 +432,7 @@ js::DefineFunctionWithReserved(JSContext* cx, JSObject* objArg, const char* name
                                unsigned nargs, unsigned attrs)
 {
     RootedObject obj(cx, objArg);
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
     JSAtom* atom = Atomize(cx, name, strlen(name));
@@ -438,7 +446,7 @@ JS_FRIEND_API(JSFunction*)
 js::NewFunctionWithReserved(JSContext* cx, JSNative native, unsigned nargs, unsigned flags,
                             const char* name)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
 
     CHECK_REQUEST(cx);
 
@@ -459,7 +467,7 @@ js::NewFunctionByIdWithReserved(JSContext* cx, JSNative native, unsigned nargs, 
                                 jsid id)
 {
     MOZ_ASSERT(JSID_IS_STRING(id));
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, id);
 
@@ -1175,16 +1183,17 @@ DumpHeapVisitZone(JSRuntime* rt, void* data, Zone* zone)
 }
 
 static void
-DumpHeapVisitCompartment(JSContext* cx, void* data, JSCompartment* comp)
+DumpHeapVisitRealm(JSContext* cx, void* data, Handle<Realm*> realm)
 {
     char name[1024];
-    if (cx->runtime()->compartmentNameCallback)
-        (*cx->runtime()->compartmentNameCallback)(cx, comp, name, sizeof(name));
+    if (auto nameCallback = cx->runtime()->realmNameCallback)
+        nameCallback(cx, realm, name, sizeof(name));
     else
         strcpy(name, "<unknown>");
 
     DumpHeapTracer* dtrc = static_cast<DumpHeapTracer*>(data);
-    fprintf(dtrc->output, "# compartment %s [in zone %p]\n", name, (void*)comp->zone());
+    fprintf(dtrc->output, "# realm %s [in compartment %p, zone %p]\n", name,
+            (void*)realm->compartment(), (void*)realm->zone());
 }
 
 static void
@@ -1241,10 +1250,10 @@ js::DumpHeap(JSContext* cx, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehavi
 
     dtrc.prefix = "> ";
     IterateHeapUnbarriered(cx, &dtrc,
-                                                   DumpHeapVisitZone,
-                                                   DumpHeapVisitCompartment,
-                                                   DumpHeapVisitArena,
-                                                   DumpHeapVisitCell);
+                           DumpHeapVisitZone,
+                           DumpHeapVisitRealm,
+                           DumpHeapVisitArena,
+                           DumpHeapVisitCell);
 
     fflush(dtrc.output);
 }
@@ -1262,12 +1271,15 @@ JS::NotifyGCRootsRemoved(JSContext* cx)
     cx->runtime()->gc.notifyRootsRemoved();
 }
 
-JS_FRIEND_API(JSCompartment*)
-js::GetAnyCompartmentInZone(JS::Zone* zone)
+JS_FRIEND_API(JS::Realm*)
+js::GetAnyRealmInZone(JS::Zone* zone)
 {
-    CompartmentsInZoneIter comp(zone);
-    MOZ_ASSERT(!comp.done());
-    return comp.get();
+    if (zone->isAtomsZone())
+        return nullptr;
+
+    RealmsInZoneIter realm(zone);
+    MOZ_ASSERT(!realm.done());
+    return realm.get();
 }
 
 void
@@ -1415,15 +1427,15 @@ js::AutoCTypesActivityCallback::AutoCTypesActivityCallback(JSContext* cx,
 }
 
 JS_FRIEND_API(void)
-js::SetAllocationMetadataBuilder(JSContext* cx, const AllocationMetadataBuilder *callback)
+js::SetAllocationMetadataBuilder(JSContext* cx, const AllocationMetadataBuilder* callback)
 {
-    cx->compartment()->setAllocationMetadataBuilder(callback);
+    cx->realm()->setAllocationMetadataBuilder(callback);
 }
 
 JS_FRIEND_API(JSObject*)
 js::GetAllocationMetadata(JSObject* obj)
 {
-    ObjectWeakMap* map = obj->compartment()->objectMetadataTable;
+    ObjectWeakMap* map = ObjectRealm::get(obj).objectMetadataTable.get();
     if (map)
         return map->lookup(obj);
     return nullptr;
@@ -1533,9 +1545,10 @@ js::EnableAccessValidation(JSContext* cx, bool enabled)
 }
 
 JS_FRIEND_API(void)
-js::SetCompartmentValidAccessPtr(JSContext* cx, JS::HandleObject global, bool* accessp)
+js::SetRealmValidAccessPtr(JSContext* cx, JS::HandleObject global, bool* accessp)
 {
-    global->compartment()->setValidAccessPtr(accessp);
+    MOZ_ASSERT(global->is<GlobalObject>());
+    global->realm()->setValidAccessPtr(accessp);
 }
 
 JS_FRIEND_API(bool)

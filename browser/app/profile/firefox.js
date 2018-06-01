@@ -250,9 +250,8 @@ pref("browser.startup.homepage",            "chrome://branding/locale/browsercon
 pref("browser.startup.firstrunSkipsHomepage", true);
 
 // Show an about:blank window as early as possible for quick startup feedback.
-// Held to nightly and early beta on Linux due to bug 1450626.
 // Disabled on Mac because the bouncing dock icon already provides feedback.
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK) && defined(EARLY_BETA_OR_EARLIER)
+#if !defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
 pref("browser.startup.blankWindow", true);
 #else
 pref("browser.startup.blankWindow", false);
@@ -832,15 +831,6 @@ pref("gecko.handlerService.schemes.ircs.3.name", "chrome://browser-region/locale
 pref("gecko.handlerService.schemes.ircs.3.uriTemplate", "chrome://browser-region/locale/region.properties");
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
-
-pref("browser.EULA.version", 3);
-pref("browser.rights.version", 3);
-pref("browser.rights.3.shown", false);
-
-#ifdef DEBUG
-// Don't show the about:rights notification in debug builds.
-pref("browser.rights.override", true);
-#endif
 
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.resume_session_once", false);
@@ -1537,11 +1527,7 @@ pref("browser.tabs.remote.warmup.enabled", false);
 
 // Caches tab layers to improve perceived performance
 // of tab switches.
-#if defined(NIGHTLY_BUILD)
-pref("browser.tabs.remote.tabCacheSize", 5);
-#else
 pref("browser.tabs.remote.tabCacheSize", 0);
-#endif
 
 pref("browser.tabs.remote.warmup.maxTabs", 3);
 pref("browser.tabs.remote.warmup.unloadDelayMs", 2000);

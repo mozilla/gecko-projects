@@ -594,7 +594,7 @@ wasm::DeserializeModule(PRFileDesc* bytecodeFile, PRFileDesc* maybeCompiledFile,
         return nullptr;
 
     // The true answer to whether shared memory is enabled is provided by
-    // cx->compartment()->creationOptions().getSharedMemoryAndAtomicsEnabled()
+    // cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()
     // where cx is the context that originated the call that caused this
     // deserialization attempt to happen.  We don't have that context here, so
     // we assume that shared memory is enabled; we will catch a wrong assumption
@@ -1025,7 +1025,6 @@ ExtractGlobalValue(const ValVector& globalImportValues, uint32_t globalIndex, co
     MOZ_CRASH("Not a global value");
 }
 
-#if defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER)
 static bool
 EnsureGlobalObject(JSContext* cx, const ValVector& globalImportValues, size_t globalIndex,
                    const GlobalDesc& global, WasmGlobalObjectVector& globalObjs)
@@ -1046,13 +1045,11 @@ EnsureGlobalObject(JSContext* cx, const ValVector& globalImportValues, size_t gl
     globalObjs[globalIndex] = go;
     return true;
 }
-#endif
 
 bool
 Module::instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
                            WasmGlobalObjectVector& globalObjs) const
 {
-#if defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER)
     // If there are exported globals that aren't in globalObjs because they
     // originate in this module or because they were immutable imports that came
     // in as primitive values then we must create cells in the globalObjs for
@@ -1074,7 +1071,7 @@ Module::instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
     // primitive value; these globals are always immutable.  Assert that we do
     // not need to create any additional Global objects for such imports.
 
-# ifdef DEBUG
+#ifdef DEBUG
     size_t numGlobalImports = 0;
     for (const Import& import : imports_) {
         if (import.kind != DefinitionKind::Global)
@@ -1087,7 +1084,6 @@ Module::instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
     }
     MOZ_ASSERT_IF(!metadata().isAsmJS(),
                   numGlobalImports == globals.length() || !globals[numGlobalImports].isImport());
-# endif
 #endif
     return true;
 }
@@ -1122,22 +1118,7 @@ GetGlobalExport(JSContext* cx,
                 const WasmGlobalObjectVector& globalObjs,
                 MutableHandleValue jsval)
 {
-#if defined(ENABLE_WASM_GLOBAL) && defined(EARLY_BETA_OR_EARLIER)
     jsval.setObject(*globalObjs[globalIndex]);
-#else
-    const GlobalDesc& global = globals[globalIndex];
-
-    MOZ_ASSERT(!global.isMutable(), "Mutable variables can't be exported.");
-
-    Val val = ExtractGlobalValue(globalImportValues, globalIndex, global);
-    if (val.type() == ValType::I64) {
-        JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_I64_LINK);
-        return false;
-    }
-
-    jsval.set(ToJSValue(val));
-#endif
-
     return true;
 }
 
@@ -1281,13 +1262,13 @@ Module::instantiate(JSContext* cx,
     // To support viewing the source of an instance (Instance::createText), the
     // instance must hold onto a ref of the bytecode (keeping it alive). This
     // wastes memory for most users, so we try to only save the source when a
-    // developer actually cares: when the compartment is debuggable (which is
-    // true when the web console is open), has code compiled with debug flag
+    // developer actually cares: when the realm is debuggable (which is true
+    // when the web console is open), has code compiled with debug flag
     // enabled or a names section is present (since this going to be stripped
     // for non-developer builds).
 
     const ShareableBytes* maybeBytecode = nullptr;
-    if (cx->compartment()->isDebuggee() || metadata().debugEnabled ||
+    if (cx->realm()->isDebuggee() || metadata().debugEnabled ||
         !metadata().funcNames.empty())
     {
         maybeBytecode = bytecode_.get();
@@ -1297,7 +1278,7 @@ Module::instantiate(JSContext* cx,
     // provides the lazily created source text for the program, even if that
     // text is a placeholder message when debugging is not enabled.
 
-    bool binarySource = cx->compartment()->debuggerObservesBinarySource();
+    bool binarySource = cx->realm()->debuggerObservesBinarySource();
     auto debug = cx->make_unique<DebugState>(code, maybeBytecode, binarySource);
     if (!debug)
         return false;
@@ -1322,12 +1303,12 @@ Module::instantiate(JSContext* cx,
         return false;
     }
 
-    // Register the instance with the JSCompartment so that it can find out
-    // about global events like profiling being enabled in the compartment.
-    // Registration does not require a fully-initialized instance and must
-    // precede initSegments as the final pre-requisite for a live instance.
+    // Register the instance with the Realm so that it can find out about global
+    // events like profiling being enabled in the realm. Registration does not
+    // require a fully-initialized instance and must precede initSegments as the
+    // final pre-requisite for a live instance.
 
-    if (!cx->compartment()->wasm.registerInstance(cx, instance))
+    if (!cx->realm()->wasm.registerInstance(cx, instance))
         return false;
 
     // Perform initialization as the final step after the instance is fully

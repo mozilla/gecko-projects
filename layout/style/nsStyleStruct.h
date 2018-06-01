@@ -216,30 +216,21 @@ private:
  * A wrapper for an imgRequestProxy that supports off-main-thread creation
  * and equality comparison.
  *
- * An nsStyleImageRequest can be created in two ways:
+ * An nsStyleImageRequest can be created using the constructor that takes the
+ * URL, base URI, referrer and principal that can be used to initiate an image
+ * load and produce an imgRequestProxy later.
  *
- * 1. Using the constructor that takes an imgRequestProxy.  This must
- *    be called from the main thread.  The nsStyleImageRequest is
- *    immediately considered "resolved", and the get() method that
- *    returns the imgRequestProxy can be called.
- *
- * 2. Using the constructor that takes the URL, base URI, referrer
- *    and principal that can be used to inititiate an image load and
- *    produce an imgRequestProxy later.  This can be called from
- *    any thread.  The nsStyleImageRequest is not considered "resolved"
- *    at this point, and the Resolve() method must be called later
- *    to initiate the image load and make calls to get() valid.
+ * This can be called from any thread.  The nsStyleImageRequest is not
+ * considered "resolved" at this point, and the Resolve() method must be called
+ * later to initiate the image load and make calls to get() valid.
  *
  * Calls to TrackImage(), UntrackImage(), LockImage(), UnlockImage() and
  * RequestDiscard() are made to the imgRequestProxy and ImageTracker as
  * appropriate, according to the mode flags passed in to the constructor.
  *
- * The main thread constructor takes a pointer to the css::ImageValue that
- * is the specified url() value, while the off-main-thread constructor
- * creates a new css::ImageValue to represent the url() information passed
- * to the constructor.  This ImageValue is held on to for the comparisons done
- * in DefinitelyEquals(), so that we don't need to call into the non-OMT-safe
- * Equals() on the nsIURI objects returned from imgRequestProxy::GetURI().
+ * The constructor receives a css::ImageValue to represent the url()
+ * information, which is held on to for the comparisons done in
+ * DefinitelyEquals().
  */
 class nsStyleImageRequest
 {
@@ -267,19 +258,9 @@ public:
     Discard = 0x2,
   };
 
-  // Must be called from the main thread.
-  //
-  // aImageTracker must be non-null iff aModeFlags contains Track.
-  nsStyleImageRequest(Mode aModeFlags,
-                      imgRequestProxy* aRequestProxy,
-                      mozilla::css::ImageValue* aImageValue,
-                      mozilla::dom::ImageTracker* aImageTracker);
-
   // Can be called from any thread, but Resolve() must be called later
   // on the main thread before get() can be used.
-  nsStyleImageRequest(
-      Mode aModeFlags,
-      mozilla::css::ImageValue* aImageValue);
+  nsStyleImageRequest(Mode aModeFlags, mozilla::css::ImageValue* aImageValue);
 
   bool Resolve(nsPresContext*, const nsStyleImageRequest* aOldImageRequest);
   bool IsResolved() const { return mResolved; }
@@ -2508,12 +2489,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
    * The same as IsAbsPosContainingBlock, except skipping the tests that
    * are based on the frame rather than the ComputedStyle (thus
    * potentially returning a false positive).
-   *
-   * FIXME(stylo-everywhere): Pretty sure the template can go here.
    */
-  template<class ComputedStyleLike>
   inline bool IsAbsPosContainingBlockForAppropriateFrame(
-                ComputedStyleLike* aComputedStyle) const;
+    mozilla::ComputedStyle&) const;
 
   /**
    * Returns true when the element has the transform property
@@ -2521,6 +2499,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
    * aContextFrame is the frame for which this is the nsStyleDisplay.
    */
   inline bool HasTransform(const nsIFrame* aContextFrame) const;
+
+  /**
+   * Returns true when the element has the perspective property,
+   * and supports CSS transforms. aContextFrame is the frame for
+   * which this is the nsStyleDisplay.
+   */
+  inline bool HasPerspective(const nsIFrame* aContextFrame) const;
 
   /**
    * Returns true when the element is a containing block for its fixed-pos
@@ -2533,12 +2518,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
    * The same as IsFixedPosContainingBlock, except skipping the tests that
    * are based on the frame rather than the ComputedStyle (thus
    * potentially returning a false positive).
-   *
-   * FIXME(stylo-everywhere): Pretty sure the template can go here.
    */
-  template<class ComputedStyleLike>
   inline bool IsFixedPosContainingBlockForAppropriateFrame(
-                ComputedStyleLike* aComputedStyle) const;
+    mozilla::ComputedStyle&) const;
 
   /**
    * Returns the final combined transform.
@@ -2555,14 +2537,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay
 private:
   // Helpers for above functions, which do some but not all of the tests
   // for them (since transform must be tested separately for each).
-  //
-  // FIXME(stylo-everywhere): Pretty sure the template can go here.
-  template<class ComputedStyleLike>
-  inline bool HasAbsPosContainingBlockStyleInternal(
-                ComputedStyleLike* aComputedStyle) const;
-  template<class ComputedStyleLike>
+  inline bool HasAbsPosContainingBlockStyleInternal() const;
   inline bool HasFixedPosContainingBlockStyleInternal(
-                ComputedStyleLike* aComputedStyle) const;
+    mozilla::ComputedStyle&) const;
   void GenerateCombinedTransform();
 public:
   // Return the 'float' and 'clear' properties, with inline-{start,end} values
@@ -3256,9 +3233,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset
 
   nsStyleImageLayers    mMask;
   mozilla::StyleShapeSource mClipPath;// [reset]
-  nscolor          mStopColor;        // [reset]
-  nscolor          mFloodColor;       // [reset]
-  nscolor          mLightingColor;    // [reset]
+  mozilla::StyleComplexColor mStopColor;     // [reset]
+  mozilla::StyleComplexColor mFloodColor;    // [reset]
+  mozilla::StyleComplexColor mLightingColor; // [reset]
 
   float            mStopOpacity;      // [reset]
   float            mFloodOpacity;     // [reset]

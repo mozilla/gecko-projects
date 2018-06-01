@@ -1349,7 +1349,7 @@ bool
 TypedObject::isAttached() const
 {
     if (is<InlineTransparentTypedObject>()) {
-        ObjectWeakMap* table = compartment()->lazyArrayBuffers;
+        ObjectWeakMap* table = ObjectRealm::get(this).lazyArrayBuffers.get();
         if (table) {
             JSObject* buffer = table->lookup(this);
             if (buffer)
@@ -2143,12 +2143,16 @@ InlineTypedObject::obj_moved(JSObject* dst, JSObject* src)
 ArrayBufferObject*
 InlineTransparentTypedObject::getOrCreateBuffer(JSContext* cx)
 {
-    ObjectWeakMap*& table = cx->compartment()->lazyArrayBuffers;
-    if (!table) {
-        table = cx->new_<ObjectWeakMap>(cx);
+    ObjectRealm& realm = ObjectRealm::get(this);
+    if (!realm.lazyArrayBuffers) {
+        auto table = cx->make_unique<ObjectWeakMap>(cx);
         if (!table || !table->init())
             return nullptr;
+
+        realm.lazyArrayBuffers = Move(table);
     }
+
+    ObjectWeakMap* table = realm.lazyArrayBuffers.get();
 
     JSObject* obj = table->lookup(this);
     if (obj)
@@ -2332,7 +2336,7 @@ TypedObject::create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap h
     tobj->initShape(shape);
 
     MOZ_ASSERT(clasp->shouldDelayMetadataBuilder());
-    cx->compartment()->setObjectPendingMetadata(cx, tobj);
+    cx->realm()->setObjectPendingMetadata(cx, tobj);
 
     js::gc::gcTracer.traceCreateObject(tobj);
 

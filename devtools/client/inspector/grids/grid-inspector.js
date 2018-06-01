@@ -5,12 +5,7 @@
 "use strict";
 
 const Services = require("Services");
-
-const SwatchColorPickerTooltip = require("devtools/client/shared/widgets/tooltip/SwatchColorPickerTooltip");
 const { throttle } = require("devtools/client/inspector/shared/utils");
-const { compareFragmentsGeometry } = require("devtools/client/inspector/grids/utils/utils");
-const asyncStorage = require("devtools/shared/async-storage");
-const { parseURL } = require("devtools/client/shared/source-utils");
 
 const {
   updateGridColor,
@@ -22,6 +17,11 @@ const {
   updateShowGridLineNumbers,
   updateShowInfiniteLines,
 } = require("./actions/highlighter-settings");
+
+loader.lazyRequireGetter(this, "compareFragmentsGeometry", "devtools/client/inspector/grids/utils/utils", true);
+loader.lazyRequireGetter(this, "SwatchColorPickerTooltip", "devtools/client/shared/widgets/tooltip/SwatchColorPickerTooltip");
+loader.lazyRequireGetter(this, "parseURL", "devtools/client/shared/source-utils", true);
+loader.lazyRequireGetter(this, "asyncStorage", "devtools/shared/async-storage");
 
 const CSS_GRID_COUNT_HISTOGRAM_ID = "DEVTOOLS_NUMBER_OF_CSS_GRIDS_IN_A_PAGE";
 
@@ -52,7 +52,6 @@ const GRID_COLORS = [
 class GridInspector {
   constructor(inspector, window) {
     this.document = window.document;
-    this.highlighters = inspector.highlighters;
     this.inspector = inspector;
     this.store = inspector.store;
     this.telemetry = inspector.telemetry;
@@ -76,6 +75,26 @@ class GridInspector {
     this.init();
   }
 
+  get highlighters() {
+    if (!this._highlighters) {
+      this._highlighters = this.inspector.highlighters;
+    }
+
+    return this._highlighters;
+  }
+
+  get swatchColorPickerTooltip() {
+    if (!this._swatchColorPickerTooltip) {
+      this._swatchColorPickerTooltip = new SwatchColorPickerTooltip(
+        this.inspector.toolbox.doc,
+        this.inspector,
+        { supportsCssColor4ColorFunction: () => false }
+      );
+    }
+
+    return this._swatchColorPickerTooltip;
+  }
+
   /**
    * Initializes the grid inspector by fetching the LayoutFront from the walker, loading
    * the highlighter settings and initalizing the SwatchColorPicker instance.
@@ -93,17 +112,11 @@ class GridInspector {
       return;
     }
 
-    // Create a shared SwatchColorPicker instance to be reused by all GridItem components.
-    this.swatchColorPickerTooltip = new SwatchColorPickerTooltip(
-      this.inspector.toolbox.doc,
-      this.inspector,
-      {
-        supportsCssColor4ColorFunction: () => false
-      }
-    );
+    this.document.addEventListener("mousemove", () => {
+      this.highlighters.on("grid-highlighter-hidden", this.onHighlighterHidden);
+      this.highlighters.on("grid-highlighter-shown", this.onHighlighterShown);
+    }, { once: true });
 
-    this.highlighters.on("grid-highlighter-hidden", this.onHighlighterHidden);
-    this.highlighters.on("grid-highlighter-shown", this.onHighlighterShown);
     this.inspector.sidebar.on("select", this.onSidebarSelect);
     this.inspector.on("new-root", this.onNavigate);
 
@@ -115,8 +128,11 @@ class GridInspector {
    * and cleans up references.
    */
   destroy() {
-    this.highlighters.off("grid-highlighter-hidden", this.onHighlighterHidden);
-    this.highlighters.off("grid-highlighter-shown", this.onHighlighterShown);
+    if (this._highlighters) {
+      this.highlighters.off("grid-highlighter-hidden", this.onHighlighterHidden);
+      this.highlighters.off("grid-highlighter-shown", this.onHighlighterShown);
+    }
+
     this.inspector.sidebar.off("select", this.onSidebarSelect);
     this.inspector.off("new-root", this.onNavigate);
 
@@ -124,16 +140,16 @@ class GridInspector {
 
     // The color picker may not be ready as `init` function is async,
     // and we do not wait for its completion before calling destroy in tests
-    if (this.swatchColorPickerTooltip) {
-      this.swatchColorPickerTooltip.destroy();
+    if (this._swatchColorPickerTooltip) {
+      this._swatchColorPickerTooltip.destroy();
+      this._swatchColorPickerTooltip = null;
     }
 
+    this._highlighters = null;
     this.document = null;
-    this.highlighters = null;
     this.inspector = null;
     this.layoutInspector = null;
     this.store = null;
-    this.swatchColorPickerTooltip = null;
     this.walker = null;
   }
 
@@ -163,7 +179,8 @@ class GridInspector {
    *         The color to use.
    */
   getInitialGridColor(nodeFront, customColor, fallbackColor) {
-    let highlighted = nodeFront == this.highlighters.gridHighlighterShown;
+    let highlighted = this._highlighters &&
+      nodeFront == this.highlighters.gridHighlighterShown;
 
     let color;
     if (customColor) {
@@ -250,11 +267,6 @@ class GridInspector {
     if (!this.inspector || !this.store) {
       return;
     }
-    let currentUrl = this.inspector.target.url;
-    // Get the hostname, if there is no hostname, fall back on protocol
-    // ex: `data:` uri, and `about:` pages
-    let hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
-    let customColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
 
     // Get all the GridFront from the server if no gridFronts were provided.
     let gridFronts;
@@ -266,17 +278,28 @@ class GridInspector {
       return;
     }
 
+    if (!gridFronts.length) {
+      this.store.dispatch(updateGrids([]));
+      this.inspector.emit("grid-panel-updated");
+      return;
+    }
+
+    let currentUrl = this.inspector.target.url;
+
     // Log how many CSS Grid elements DevTools sees.
-    if (gridFronts.length > 0 &&
-        currentUrl != this.inspector.previousURL) {
+    if (currentUrl != this.inspector.previousURL) {
       this.telemetry.getHistogramById(CSS_GRID_COUNT_HISTOGRAM_ID).add(gridFronts.length);
       this.inspector.previousURL = currentUrl;
     }
 
+    // Get the hostname, if there is no hostname, fall back on protocol
+    // ex: `data:` uri, and `about:` pages
+    let hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+    let customColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
+
     let grids = [];
     for (let i = 0; i < gridFronts.length; i++) {
       let grid = gridFronts[i];
-
       let nodeFront = grid.containerNodeFront;
 
       // If the GridFront didn't yet have access to the NodeFront for its container, then
@@ -292,9 +315,11 @@ class GridInspector {
         }
       }
 
-      let colorForHost = customColors[hostname] ? customColors[hostname][i] : undefined;
+      let colorForHost = customColors[hostname] ? customColors[hostname][i] : null;
       let fallbackColor = GRID_COLORS[i % GRID_COLORS.length];
       let color = this.getInitialGridColor(nodeFront, colorForHost, fallbackColor);
+      let highlighted = this._highlighters &&
+        nodeFront == this.highlighters.gridHighlighterShown;
 
       grids.push({
         id: i,
@@ -302,7 +327,7 @@ class GridInspector {
         color,
         direction: grid.direction,
         gridFragments: grid.gridFragments,
-        highlighted: nodeFront == this.highlighters.gridHighlighterShown,
+        highlighted,
         nodeFront,
         writingMode: grid.writingMode,
       });
@@ -427,7 +452,8 @@ class GridInspector {
         oldNodeFronts.sort().join(",") == newNodeFronts.sort().join(",")) {
       // Same list of containers, but let's check if the geometry of the current grid has
       // changed, if it hasn't we can safely abort.
-      if (!this.highlighters.gridHighlighterShown ||
+      if (!this._highlighters ||
+          !this.highlighters.gridHighlighterShown ||
           (this.highlighters.gridHighlighterShown &&
            !this.haveCurrentFragmentsChanged(newGridFronts))) {
         return;

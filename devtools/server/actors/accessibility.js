@@ -503,8 +503,15 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
    * A helper method. Accessibility walker is assumed to have only 1 child which
    * is the top level document.
    */
-  children() {
-    return Promise.all([this.getDocument()]);
+  async children() {
+    if (this._childrenPromise) {
+      return this._childrenPromise;
+    }
+
+    this._childrenPromise = Promise.all([this.getDocument()]);
+    let children = await this._childrenPromise;
+    this._childrenPromise = null;
+    return children;
   },
 
   /**
@@ -606,12 +613,6 @@ const AccessibleWalkerActor = ActorClassWithSpec(accessibleWalkerSpec, {
       case EVENT_STATE_CHANGE:
         let { state, isEnabled } = event.QueryInterface(nsIAccessibleStateChangeEvent);
         let isBusy = state & Ci.nsIAccessibleStates.STATE_BUSY;
-        // Accessible document is recreated.
-        if (isBusy && !isEnabled && rawAccessible instanceof Ci.nsIAccessibleDocument) {
-          // Remove its existing cache from tree.
-          this.purgeSubtree(rawAccessible, event.DOMNode);
-        }
-
         if (accessible) {
           // Only propagate state change events for active accessibles.
           if (isBusy && isEnabled) {

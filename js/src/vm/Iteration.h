@@ -11,6 +11,7 @@
  * JavaScript iterators.
  */
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/MemoryReporting.h"
 
 #include "gc/Barrier.h"
@@ -18,42 +19,59 @@
 #include "vm/ReceiverGuard.h"
 #include "vm/Stack.h"
 
-/*
- * For cacheable native iterators, whether the iterator is currently active.
- * Not serialized by XDR.
- */
-#define JSITER_ACTIVE       0x1000
-#define JSITER_UNREUSABLE   0x2000
-
 namespace js {
 
 class PropertyIteratorObject;
 
 struct NativeIterator
 {
-    // Object being iterated.
-    GCPtrObject obj = {};
+  private:
+    // Object being iterated.  Non-null except in NativeIterator sentinels and
+    // empty property iterators created when |null| or |undefined| is iterated.
+    GCPtrObject objectBeingIterated_ = {};
 
     // Internal iterator object.
     JSObject* iterObj_ = nullptr;
 
-    // The next property, pointing into an array of strings directly after this
-    // NativeIterator as part of the overall allocation containing |*this|.
-    GCPtrFlatString* props_cursor; // initialized by constructor
+    // The end of HeapReceiverGuards that appear directly after |this|, as part
+    // of an overall allocation that stores |*this|, receiver guards, and
+    // iterated strings.  Once this has been fully initialized, it also equals
+    // the start of iterated strings.
+    HeapReceiverGuard* guardsEnd_; // initialized by constructor
 
-    // The limit/end of properties to iterate.  (This is also, after casting,
-    // the start of an array of HeapReceiverGuards included in the overall
-    // allocation that stores |*this| and the iterated strings.)
-    GCPtrFlatString* props_end; // initialized by constructor
+    // The next property, pointing into an array of strings directly after any
+    // HeapReceiverGuards that appear directly after |*this|, as part of an
+    // overall allocation that stores |*this|, receiver guards, and iterated
+    // strings.
+    GCPtrFlatString* propertyCursor_; // initialized by constructor
 
-    uint32_t guard_length = 0;
-    uint32_t guard_key = 0;
-    uint32_t flags = 0;
+    // The limit/end of properties to iterate (and, assuming no error occurred
+    // while constructing this NativeIterator, the end of the full allocation
+    // storing |*this|, receiver guards, and strings).  Beware!  This value may
+    // change as properties are deleted from the observed object.
+    GCPtrFlatString* propertiesEnd_; // initialized by constructor
+
+    uint32_t guardKey_; // initialized by constructor
+
+  public:
+    // For cacheable native iterators, whether the iterator is currently
+    // active.  Not serialized by XDR.
+    struct Flags
+    {
+        static constexpr uint32_t Initialized = 0x1;
+        static constexpr uint32_t Active = 0x2;
+        static constexpr uint32_t HasUnvisitedPropertyDeletion = 0x4;
+        static constexpr uint32_t NotReusable = Active | HasUnvisitedPropertyDeletion;
+    };
 
   private:
+    uint32_t flags_ = 0; // consists of Flags bits
+
     /* While in compartment->enumerators, these form a doubly linked list. */
     NativeIterator* next_ = nullptr;
     NativeIterator* prev_ = nullptr;
+
+    // END OF PROPERTIES
 
     // No further fields appear after here *in NativeIterator*, but this class
     // is always allocated with space tacked on immediately after |this| to
@@ -76,59 +94,175 @@ struct NativeIterator
     /** Initialize a |JSCompartment::enumerators| sentinel. */
     NativeIterator();
 
-    GCPtrFlatString* begin() const {
-        static_assert(alignof(NativeIterator) >= alignof(GCPtrFlatString),
-                      "GCPtrFlatStrings for properties must be able to appear "
-                      "directly after NativeIterator, with no padding space "
-                      "required for correct alignment");
+    JSObject* objectBeingIterated() const {
+        return objectBeingIterated_;
+    }
 
-        // Note that JIT code inlines this computation to reset |props_cursor|
-        // when an iterator ends: see |CodeGenerator::visitIteratorEnd|.
+    void changeObjectBeingIterated(JSObject& obj) {
+        objectBeingIterated_ = &obj;
+    }
+
+    HeapReceiverGuard* guardsBegin() const {
+        static_assert(alignof(HeapReceiverGuard) <= alignof(NativeIterator),
+                      "NativeIterator must be aligned to begin storing "
+                      "HeapReceiverGuards immediately after it with no "
+                      "required padding");
         const NativeIterator* immediatelyAfter = this + 1;
         auto* afterNonConst = const_cast<NativeIterator*>(immediatelyAfter);
-        return reinterpret_cast<GCPtrFlatString*>(afterNonConst);
+        return reinterpret_cast<HeapReceiverGuard*>(afterNonConst);
     }
 
-    GCPtrFlatString* end() const {
-        return props_end;
+    HeapReceiverGuard* guardsEnd() const {
+        return guardsEnd_;
     }
 
-    HeapReceiverGuard* guardArray() const {
-        static_assert(alignof(ReceiverGuard) == alignof(GCPtrFlatString),
-                      "the end of all properties must be exactly aligned "
-                      "adequate to begin storing ReceiverGuards, else the "
-                      "full tacked-on memory won't be enough to store all "
-                      "properties/guards");
-        return reinterpret_cast<HeapReceiverGuard*>(props_end);
+    uint32_t guardCount() const {
+        return mozilla::PointerRangeSize(guardsBegin(), guardsEnd());
+    }
+
+    GCPtrFlatString* propertiesBegin() const {
+        static_assert(alignof(HeapReceiverGuard) >= alignof(GCPtrFlatString),
+                      "GCPtrFlatStrings for properties must be able to appear "
+                      "directly after any HeapReceiverGuards after this "
+                      "NativeIterator, with no padding space required for "
+                      "correct alignment");
+        static_assert(alignof(NativeIterator) >= alignof(GCPtrFlatString),
+                      "GCPtrFlatStrings for properties must be able to appear "
+                      "directly after this NativeIterator when no "
+                      "HeapReceiverGuards are present, with no padding space "
+                      "required for correct alignment");
+
+        // We *could* just check the assertion below if we wanted, but the
+        // incompletely-initialized NativeIterator case matters for so little
+        // code that we prefer not imposing the condition-check on every single
+        // user.
+        MOZ_ASSERT(isInitialized(),
+                   "NativeIterator must be initialized, or else |guardsEnd_| "
+                   "isn't necessarily the start of properties and instead "
+                   "|propertyCursor_| instead is");
+
+        return reinterpret_cast<GCPtrFlatString*>(guardsEnd_);
+    }
+
+    GCPtrFlatString* propertiesEnd() const {
+        return propertiesEnd_;
+    }
+
+    GCPtrFlatString* nextProperty() const {
+        return propertyCursor_;
+    }
+
+    MOZ_ALWAYS_INLINE JS::Value nextIteratedValueAndAdvance() {
+        if (propertyCursor_ >= propertiesEnd_) {
+            MOZ_ASSERT(propertyCursor_ == propertiesEnd_);
+            return JS::MagicValue(JS_NO_ITER_VALUE);
+        }
+
+        JSFlatString* str = *propertyCursor_;
+        incCursor();
+        return JS::StringValue(str);
+    }
+
+    void resetPropertyCursorForReuse() {
+        MOZ_ASSERT(isInitialized());
+
+        // This function is called unconditionally on IteratorClose, so
+        // unvisited properties might have been deleted, so we can't assert
+        // this NativeIterator is reusable.  (Should we not bother resetting
+        // the cursor in that case?)
+
+        // Note: JIT code inlines |propertyCursor_| resetting when an iterator
+        //       ends: see |CodeGenerator::visitIteratorEnd|.
+        propertyCursor_ = propertiesBegin();
+    }
+
+    bool previousPropertyWas(JS::Handle<JSFlatString*> str) {
+        MOZ_ASSERT(isInitialized());
+        return propertyCursor_ > propertiesBegin() && propertyCursor_[-1] == str;
     }
 
     size_t numKeys() const {
-        return end() - begin();
+        return mozilla::PointerRangeSize(propertiesBegin(), propertiesEnd());
+    }
+
+    void trimLastProperty() {
+        MOZ_ASSERT(isInitialized());
+
+        propertiesEnd_--;
+
+        // This invokes the pre barrier on this property, since it's no longer
+        // going to be marked, and it ensures that any existing remembered set
+        // entry will be dropped.
+        *propertiesEnd_ = nullptr;
     }
 
     JSObject* iterObj() const {
         return iterObj_;
     }
-    GCPtrFlatString* current() const {
-        MOZ_ASSERT(props_cursor < props_end);
-        return props_cursor;
+    GCPtrFlatString* currentProperty() const {
+        MOZ_ASSERT(propertyCursor_ < propertiesEnd());
+        return propertyCursor_;
     }
 
     NativeIterator* next() {
         return next_;
     }
 
-    static inline size_t offsetOfNext() {
-        return offsetof(NativeIterator, next_);
-    }
-    static inline size_t offsetOfPrev() {
-        return offsetof(NativeIterator, prev_);
+    void incCursor() {
+        MOZ_ASSERT(isInitialized());
+        propertyCursor_++;
     }
 
-    void incCursor() {
-        props_cursor = props_cursor + 1;
+    uint32_t guardKey() const {
+        return guardKey_;
     }
+
+    bool isInitialized() const {
+        return flags_ & Flags::Initialized;
+    }
+
+  private:
+    void markInitialized() {
+        MOZ_ASSERT(flags_ == 0);
+        flags_ = Flags::Initialized;
+    }
+
+  public:
+    bool isActive() const {
+        MOZ_ASSERT(isInitialized());
+
+        return flags_ & Flags::Active;
+    }
+
+    void markActive() {
+        MOZ_ASSERT(isInitialized());
+
+        flags_ |= Flags::Active;
+    }
+
+    void markInactive() {
+        MOZ_ASSERT(isInitialized());
+
+        flags_ &= ~Flags::Active;
+    }
+
+    bool isReusable() const {
+        MOZ_ASSERT(isInitialized());
+        return flags_ == Flags::Initialized;
+    }
+
+    void markHasUnvisitedPropertyDeletion() {
+        MOZ_ASSERT(isInitialized());
+
+        flags_ |= Flags::HasUnvisitedPropertyDeletion;
+    }
+
     void link(NativeIterator* other) {
+        // The NativeIterator sentinel doesn't have to be linked, because it's
+        // the start of the list.  Anything else added should have been
+        // initialized.
+        MOZ_ASSERT(isInitialized());
+
         /* A NativeIterator cannot appear in the enumerator list twice. */
         MOZ_ASSERT(!next_ && !prev_);
 
@@ -138,6 +272,8 @@ struct NativeIterator
         other->prev_ = this;
     }
     void unlink() {
+        MOZ_ASSERT(isInitialized());
+
         next_->prev_ = prev_;
         prev_->next_ = next_;
         next_ = nullptr;
@@ -147,6 +283,34 @@ struct NativeIterator
     static NativeIterator* allocateSentinel(JSContext* maybecx);
 
     void trace(JSTracer* trc);
+
+    static constexpr size_t offsetOfObjectBeingIterated() {
+        return offsetof(NativeIterator, objectBeingIterated_);
+    }
+
+    static constexpr size_t offsetOfGuardsEnd() {
+        return offsetof(NativeIterator, guardsEnd_);
+    }
+
+    static constexpr size_t offsetOfPropertyCursor() {
+        return offsetof(NativeIterator, propertyCursor_);
+    }
+
+    static constexpr size_t offsetOfPropertiesEnd() {
+        return offsetof(NativeIterator, propertiesEnd_);
+    }
+
+    static constexpr size_t offsetOfFlags() {
+        return offsetof(NativeIterator, flags_);
+    }
+
+    static constexpr size_t offsetOfNext() {
+        return offsetof(NativeIterator, next_);
+    }
+
+    static constexpr size_t offsetOfPrev() {
+        return offsetof(NativeIterator, prev_);
+    }
 };
 
 class PropertyIteratorObject : public NativeObject

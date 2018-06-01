@@ -44,6 +44,7 @@
 #include "mozilla/dom/InspectorUtilsBinding.h"
 #include "mozilla/dom/MessageChannelBinding.h"
 #include "mozilla/dom/MessagePortBinding.h"
+#include "mozilla/dom/NodeBinding.h"
 #include "mozilla/dom/NodeFilterBinding.h"
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/RequestBinding.h"
@@ -830,6 +831,8 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             InspectorUtils = true;
         } else if (!strcmp(name.ptr(), "MessageChannel")) {
             MessageChannel = true;
+        } else if (!strcmp(name.ptr(), "Node")) {
+            Node = true;
         } else if (!strcmp(name.ptr(), "NodeFilter")) {
             NodeFilter = true;
         } else if (!strcmp(name.ptr(), "TextDecoder")) {
@@ -924,6 +927,9 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
     if (MessageChannel &&
         (!dom::MessageChannelBinding::GetConstructorObject(cx) ||
          !dom::MessagePortBinding::GetConstructorObject(cx)))
+        return false;
+
+    if (Node && !dom::NodeBinding::GetConstructorObject(cx))
         return false;
 
     if (NodeFilter && !dom::NodeFilterBinding::GetConstructorObject(cx))
@@ -1072,11 +1078,8 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     {
         JSAutoRealm ar(cx, sandbox);
 
-        nsCOMPtr<nsIScriptObjectPrincipal> sbp =
-            new SandboxPrivate(principal, sandbox);
-
-        // Pass on ownership of sbp to |sandbox|.
-        JS_SetPrivate(sandbox, sbp.forget().take());
+        // This creates a SandboxPrivate and passes ownership of it to |sandbox|.
+        SandboxPrivate::Create(principal, sandbox);
 
         // Ensure |Object.prototype| is instantiated before prototype-
         // splicing below.

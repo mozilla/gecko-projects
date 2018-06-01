@@ -283,7 +283,7 @@ Reify(JSContext* cx, JSCompartment* origin, HandleObject objp)
     Rooted<PropertyIteratorObject*> iterObj(cx, &objp->as<PropertyIteratorObject>());
     NativeIterator* ni = iterObj->getNativeIterator();
 
-    RootedObject obj(cx, ni->obj);
+    RootedObject obj(cx, ni->objectBeingIterated());
     {
         AutoCloseIterator close(cx, iterObj);
 
@@ -304,7 +304,7 @@ Reify(JSContext* cx, JSCompartment* origin, HandleObject objp)
             RootedId id(cx);
             RootedValue v(cx);
             for (size_t i = 0; i < length; ++i) {
-                v.setString(ni->begin()[i]);
+                v.setString(ni->propertiesBegin()[i]);
                 if (!ValueToId<CanGC>(cx, v, &id))
                     return nullptr;
                 cx->markId(id);
@@ -537,7 +537,7 @@ js::NukeCrossCompartmentWrappers(JSContext* cx,
     CHECK_REQUEST(cx);
     JSRuntime* rt = cx->runtime();
 
-    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
         if (!sourceFilter.match(c))
             continue;
 
@@ -613,6 +613,7 @@ js::RemapWrapper(JSContext* cx, JSObject* wobjArg, JSObject* newTargetArg)
     MOZ_ASSERT(!JS_IsDeadWrapper(origTarget),
                "We don't want a dead proxy in the wrapper map");
     Value origv = ObjectValue(*origTarget);
+    Realm* wrealm = wobj->realm();
     JSCompartment* wcompartment = wobj->compartment();
 
     AutoDisableProxyCheck adpc;
@@ -637,7 +638,7 @@ js::RemapWrapper(JSContext* cx, JSObject* wobjArg, JSObject* newTargetArg)
     // wrapper, |wobj|, since it's been nuked anyway. The wrap() function has
     // the choice to reuse |wobj| or not.
     RootedObject tobj(cx, newTarget);
-    AutoRealmUnchecked ar(cx, wcompartment);
+    AutoRealmUnchecked ar(cx, wrealm);
     if (!wcompartment->rewrap(cx, &tobj, wobj))
         MOZ_CRASH();
 
@@ -680,7 +681,7 @@ js::RemapAllWrappersForObject(JSContext* cx, JSObject* oldTargetArg,
     if (!toTransplant.reserve(cx->runtime()->numCompartments))
         return false;
 
-    for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
         if (WrapperMap::Ptr wp = c->lookupWrapper(origv)) {
             // We found a wrapper. Remember and root it.
             toTransplant.infallibleAppend(WrapperValue(wp));
@@ -700,7 +701,7 @@ js::RecomputeWrappers(JSContext* cx, const CompartmentFilter& sourceFilter,
     bool evictedNursery = false;
 
     AutoWrapperVector toRecompute(cx);
-    for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
         // Filter by source compartment.
         if (!sourceFilter.match(c))
             continue;

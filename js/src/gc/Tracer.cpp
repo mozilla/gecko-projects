@@ -16,6 +16,9 @@
 #include "gc/PublicIterators.h"
 #include "gc/Zone.h"
 #include "util/Text.h"
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
 #include "vm/Shape.h"
@@ -160,7 +163,7 @@ struct TraceIncomingFunctor {
 JS_PUBLIC_API(void)
 JS::TraceIncomingCCWs(JSTracer* trc, const JS::CompartmentSet& compartments)
 {
-    for (js::CompartmentsIter comp(trc->runtime(), SkipAtoms); !comp.done(); comp.next()) {
+    for (js::CompartmentsIter comp(trc->runtime()); !comp.done(); comp.next()) {
         if (compartments.has(comp))
             continue;
 
@@ -396,6 +399,12 @@ JS_GetTraceThingInfo(char* buf, size_t bufsize, JSTracer* trc, void* thing,
         name = "symbol";
         break;
 
+#ifdef ENABLE_BIGINT
+      case JS::TraceKind::BigInt:
+        name = "BigInt";
+        break;
+#endif
+
       default:
         name = "INVALID";
         break;
@@ -432,7 +441,7 @@ JS_GetTraceThingInfo(char* buf, size_t bufsize, JSTracer* trc, void* thing,
           case JS::TraceKind::Script:
           {
             JSScript* script = static_cast<JSScript*>(thing);
-            snprintf(buf, bufsize, " %s:%zu", script->filename(), script->lineno());
+            snprintf(buf, bufsize, " %s:%u", script->filename(), script->lineno());
             break;
           }
 

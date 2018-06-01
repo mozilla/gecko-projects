@@ -13,7 +13,6 @@ const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {executeSoon} = require("devtools/shared/DevToolsUtils");
 const {Toolbox} = require("devtools/client/framework/toolbox");
-const HighlightersOverlay = require("devtools/client/inspector/shared/highlighters-overlay");
 const ReflowTracker = require("devtools/client/inspector/shared/reflow-tracker");
 const Store = require("devtools/client/inspector/store");
 const InspectorStyleChangeTracker = require("devtools/client/inspector/shared/style-change-tracker");
@@ -29,6 +28,7 @@ loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-short
 loader.lazyRequireGetter(this, "InspectorSearch", "devtools/client/inspector/inspector-search", true);
 loader.lazyRequireGetter(this, "ToolSidebar", "devtools/client/inspector/toolsidebar", true);
 loader.lazyRequireGetter(this, "MarkupView", "devtools/client/inspector/markup/markup");
+loader.lazyRequireGetter(this, "HighlightersOverlay", "devtools/client/inspector/shared/highlighters-overlay");
 loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants");
 loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
 loader.lazyRequireGetter(this, "MenuItem", "devtools/client/framework/menu-item");
@@ -112,7 +112,6 @@ function Inspector(toolbox) {
   // Stores all the instances of sidebar panels like rule view, computed view, ...
   this._panels = new Map();
 
-  this.highlighters = new HighlightersOverlay(this);
   this.reflowTracker = new ReflowTracker(this._target);
   this.styleChangeTracker = new InspectorStyleChangeTracker(this);
 
@@ -134,6 +133,7 @@ function Inspector(toolbox) {
   this._updateDebuggerPausedWarning = this._updateDebuggerPausedWarning.bind(this);
 
   this.onDetached = this.onDetached.bind(this);
+  this.onHostChanged = this.onHostChanged.bind(this);
   this.onMarkupLoaded = this.onMarkupLoaded.bind(this);
   this.onNewSelection = this.onNewSelection.bind(this);
   this.onNewRoot = this.onNewRoot.bind(this);
@@ -189,6 +189,14 @@ Inspector.prototype = {
     return this.toolbox.highlighter;
   },
 
+  get highlighters() {
+    if (!this._highlighters) {
+      this._highlighters = new HighlightersOverlay(this);
+    }
+
+    return this._highlighters;
+  },
+
   // Added in 53.
   get canGetCssPath() {
     return this._target.client.traits.getCssPath;
@@ -207,6 +215,14 @@ Inspector.prototype = {
     return this._notificationBox;
   },
 
+  get search() {
+    if (!this._search) {
+      this._search = new InspectorSearch(this, this.searchBox, this.searchClearButton);
+    }
+
+    return this._search;
+  },
+
   /**
    * Handle promise rejections for various asynchronous actions, and only log errors if
    * the inspector panel still exists.
@@ -223,7 +239,7 @@ Inspector.prototype = {
     this.breadcrumbs = new HTMLBreadcrumbs(this);
 
     this.walker.on("new-root", this.onNewRoot);
-
+    this.toolbox.on("host-changed", this.onHostChanged);
     this.selection.on("new-node-front", this.onNewSelection);
     this.selection.on("detached-front", this.onDetached);
 
@@ -370,9 +386,10 @@ Inspector.prototype = {
     this.searchClearButton = this.panelDoc.getElementById("inspector-searchinput-clear");
     this.searchResultsLabel = this.panelDoc.getElementById("inspector-searchlabel");
 
-    this.search = new InspectorSearch(this, this.searchBox, this.searchClearButton);
-    this.search.on("search-cleared", this._clearSearchResultsLabel);
-    this.search.on("search-result", this._updateSearchResultsLabel);
+    this.searchBox.addEventListener("focus", () => {
+      this.search.on("search-cleared", this._clearSearchResultsLabel);
+      this.search.on("search-result", this._updateSearchResultsLabel);
+    }, { once: true });
 
     let shortcuts = new KeyShortcuts({
       window: this.panelDoc.defaultView,
@@ -626,7 +643,60 @@ Inspector.prototype = {
     Services.prefs.setBoolPref(THREE_PANE_ENABLED_PREF, this.is3PaneModeEnabled);
 
     await this.setupToolbar();
-    await this.addRuleView();
+    await this.addRuleView({ skipQueue: true });
+  },
+
+  /**
+   * Sets the inspector sidebar split box state. Shows the splitter inside the sidebar
+   * split box, specifies the end panel control and resizes the split box width depending
+   * on the width of the toolbox.
+   */
+  setSidebarSplitBoxState() {
+    const toolboxWidth =
+      this.panelDoc.getElementById("inspector-splitter-box").clientWidth;
+
+    // Get the inspector sidebar's (right panel in horizontal mode or bottom panel in
+    // vertical mode) width.
+    const sidebarWidth = this.splitBox.state.width;
+    // This variable represents the width of the right panel in horizontal mode or
+    // bottom-right panel in vertical mode width in 3 pane mode.
+    let sidebarSplitboxWidth;
+
+    if (this.useLandscapeMode()) {
+      // Whether or not doubling the inspector sidebar's (right panel in horizontal mode
+      // or bottom panel in vertical mode) width will be bigger than half of the
+      // toolbox's width.
+      const canDoubleSidebarWidth = (sidebarWidth * 2) < (toolboxWidth / 2);
+
+      // Resize the main split box's end panel that contains the middle and right panel.
+      // Attempts to resize the main split box's end panel to be double the size of the
+      // existing sidebar's width when switching to 3 pane mode. However, if the middle
+      // and right panel's width together is greater than half of the toolbox's width,
+      // split all 3 panels to be equally sized by resizing the end panel to be 2/3 of
+      // the current toolbox's width.
+      this.splitBox.setState({
+        width: canDoubleSidebarWidth ? sidebarWidth * 2 : toolboxWidth * 2 / 3,
+      });
+
+      // In landscape/horizontal mode, set the right panel back to its original
+      // inspector sidebar width if we can double the sidebar width. Otherwise, set
+      // the width of the right panel to be 1/3 of the toolbox's width since all 3
+      // panels will be equally sized.
+      sidebarSplitboxWidth = canDoubleSidebarWidth ? sidebarWidth : toolboxWidth / 3;
+    } else {
+      // In portrait/vertical mode, set the bottom-right panel to be 1/2 of the
+      // toolbox's width.
+      sidebarSplitboxWidth = toolboxWidth / 2;
+    }
+
+    // Show the splitter inside the sidebar split box. Sets the width of the inspector
+    // sidebar and specify that the end (right in horizontal or bottom-right in
+    // vertical) panel of the sidebar split box should be controlled when resizing.
+    this.sidebarSplitBox.setState({
+      endPanelControl: true,
+      splitterSize: 1,
+      width: sidebarSplitboxWidth,
+    });
   },
 
   /**
@@ -640,60 +710,16 @@ Inspector.prototype = {
    * @params {String} defaultTab
    *         Thie id of the default tab for the sidebar.
    */
-  async addRuleView(defaultTab = "ruleview") {
+  async addRuleView({ defaultTab = "ruleview", skipQueue = false } = {}) {
     const ruleViewSidebar = this.sidebarSplitBox.startPanelContainer;
-    const toolboxWidth =
-      this.panelDoc.getElementById("inspector-splitter-box").clientWidth;
 
     if (this.is3PaneModeEnabled) {
       // Convert to 3 pane mode by removing the rule view from the inspector sidebar
       // and adding the rule view to the middle (in landscape/horizontal mode) or
       // bottom-left (in portrait/vertical mode) panel.
-
       ruleViewSidebar.style.display = "block";
 
-      // Get the inspector sidebar's (right panel in horizontal mode or bottom panel in
-      // vertical mode) width.
-      const sidebarWidth = this.splitBox.state.width;
-      // This variable represents the width of the right panel in horizontal mode or
-      // bottom-right panel in vertical mode width in 3 pane mode.
-      let sidebarSplitboxWidth;
-
-      if (this.useLandscapeMode()) {
-        // Whether or not doubling the inspector sidebar's (right panel in horizontal mode
-        // or bottom panel in vertical mode) width will be bigger than half of the
-        // toolbox's width.
-        const canDoubleSidebarWidth = (sidebarWidth * 2) < (toolboxWidth / 2);
-
-        // Resize the main split box's end panel that contains the middle and right panel.
-        // Attempts to resize the main split box's end panel to be double the size of the
-        // existing sidebar's width when switching to 3 pane mode. However, if the middle
-        // and right panel's width together is greater than half of the toolbox's width,
-        // split all 3 panels to be equally sized by resizing the end panel to be 2/3 of
-        // the current toolbox's width.
-        this.splitBox.setState({
-          width: canDoubleSidebarWidth ? sidebarWidth * 2 : toolboxWidth * 2 / 3,
-        });
-
-        // In landscape/horizontal mode, set the right panel back to its original
-        // inspector sidebar width if we can double the sidebar width. Otherwise, set
-        // the width of the right panel to be 1/3 of the toolbox's width since all 3
-        // panels will be equally sized.
-        sidebarSplitboxWidth = canDoubleSidebarWidth ? sidebarWidth : toolboxWidth / 3;
-      } else {
-        // In portrait/vertical mode, set the bottom-right panel to be 1/2 of the
-        // toolbox's width.
-        sidebarSplitboxWidth = toolboxWidth / 2;
-      }
-
-      // Show the splitter inside the sidebar split box. Sets the width of the inspector
-      // sidebar and specify that the end (right in horizontal or bottom-right in
-      // vertical) panel of the sidebar split box should be controlled when resizing.
-      this.sidebarSplitBox.setState({
-        endPanelControl: true,
-        splitterSize: 1,
-        width: sidebarSplitboxWidth,
-      });
+      this.setSidebarSplitBoxState();
 
       // Force the rule view panel creation by calling getPanel
       this.getPanel("ruleview");
@@ -709,13 +735,14 @@ Inspector.prototype = {
     } else {
       // Removes the rule view from the 3 pane mode and adds the rule view to the main
       // inspector sidebar.
-
       ruleViewSidebar.style.display = "none";
 
       // Set the width of the split box (right panel in horziontal mode and bottom panel
       // in vertical mode) to be the width of the inspector sidebar.
+      const splitterBox = this.panelDoc.getElementById("inspector-splitter-box");
       this.splitBox.setState({
-        width: this.useLandscapeMode() ? this.sidebarSplitBox.state.width : toolboxWidth,
+        width: this.useLandscapeMode() ?
+          this.sidebarSplitBox.state.width : splitterBox.clientWidth,
       });
 
       // Hide the splitter to prevent any drag events in the sidebar split box and
@@ -729,11 +756,19 @@ Inspector.prototype = {
       this.ruleViewSideBar.hide();
       await this.ruleViewSideBar.removeTab("ruleview");
 
-      this.sidebar.addExistingTab(
+      if (skipQueue) {
+        this.sidebar.addExistingTab(
         "ruleview",
         INSPECTOR_L10N.getStr("inspector.sidebar.ruleViewTitle"),
         defaultTab == "ruleview",
         0);
+      } else {
+        this.sidebar.queueExistingTab(
+          "ruleview",
+          INSPECTOR_L10N.getStr("inspector.sidebar.ruleViewTitle"),
+          defaultTab == "ruleview",
+          0);
+      }
     }
 
     this.emit("ruleview-added");
@@ -803,13 +838,13 @@ Inspector.prototype = {
 
     // Append all side panels
 
-    await this.addRuleView(defaultTab);
+    await this.addRuleView({ defaultTab });
 
     // Inject a lazy loaded react tab by exposing a fake React object
     // with a lazy defined Tab thanks to `panel` being a function
     let layoutId = "layoutview";
     let layoutTitle = INSPECTOR_L10N.getStr("inspector.sidebar.layoutViewTitle2");
-    this.sidebar.addTab(
+    this.sidebar.queueTab(
       layoutId,
       layoutTitle,
       {
@@ -829,7 +864,7 @@ Inspector.prototype = {
       },
       defaultTab == layoutId);
 
-    this.sidebar.addExistingTab(
+    this.sidebar.queueExistingTab(
       "computedview",
       INSPECTOR_L10N.getStr("inspector.sidebar.computedViewTitle"),
       defaultTab == "computedview");
@@ -840,7 +875,7 @@ Inspector.prototype = {
     if (Services.prefs.getBoolPref("devtools.new-animationinspector.enabled")) {
       const animationId = "newanimationinspector";
 
-      this.sidebar.addTab(
+      this.sidebar.queueTab(
         animationId,
         animationTitle,
         {
@@ -857,7 +892,7 @@ Inspector.prototype = {
         },
         defaultTab == animationId);
     } else {
-      this.sidebar.addFrameTab(
+      this.sidebar.queueFrameTab(
         "animationinspector",
         animationTitle,
         "chrome://devtools/content/inspector/animation-old/animation-inspector.xhtml",
@@ -868,7 +903,7 @@ Inspector.prototype = {
     // with a lazy defined Tab thanks to `panel` being a function
     let fontId = "fontinspector";
     let fontTitle = INSPECTOR_L10N.getStr("inspector.sidebar.fontInspectorTitle");
-    this.sidebar.addTab(
+    this.sidebar.queueTab(
       fontId,
       fontTitle,
       {
@@ -887,6 +922,8 @@ Inspector.prototype = {
         }
       },
       defaultTab == fontId);
+
+    this.sidebar.addAllQueuedTabs();
 
     // Persist splitter state in preferences.
     this.sidebar.on("show", this.onSidebarShown);
@@ -1090,10 +1127,12 @@ Inspector.prototype = {
     let onExpand = this.markup.expandNode(this.selection.nodeFront);
 
     // Restore the highlighter states prior to emitting "new-root".
-    await Promise.all([
-      this.highlighters.restoreFlexboxState(),
-      this.highlighters.restoreGridState()
-    ]);
+    if (this._highlighters) {
+      await Promise.all([
+        this.highlighters.restoreFlexboxState(),
+        this.highlighters.restoreGridState()
+      ]);
+    }
 
     this.emit("new-root");
 
@@ -1165,6 +1204,18 @@ Inspector.prototype = {
            !selection.isAnonymousNode() &&
            !invalidTagNames.includes(
             selection.nodeFront.nodeName.toLowerCase());
+  },
+
+  /**
+   * Handler for the "host-changed" event from the toolbox. Resets the inspector
+   * sidebar sizes when the toolbox host type changes.
+   */
+  onHostChanged: function() {
+    if (!this.is3PaneModeEnabled) {
+      return;
+    }
+
+    this.setSidebarSplitBoxState();
   },
 
   /**
@@ -1314,12 +1365,21 @@ Inspector.prototype = {
       this.threePaneTooltip.destroy();
     }
 
+    if (this._highlighters) {
+      this._highlighters.destroy();
+      this._highlighters = null;
+    }
+
+    if (this._search) {
+      this._search.destroy();
+      this._search = null;
+    }
+
     let cssPropertiesDestroyer = this._cssProperties.front.destroy();
     let sidebarDestroyer = this.sidebar.destroy();
     let ruleViewSideBarDestroyer = this.ruleViewSideBar ?
       this.ruleViewSideBar.destroy() : null;
     let markupDestroyer = this._destroyMarkup();
-    let highlighterDestroyer = this.highlighters.destroy();
 
     this.teardownSplitter();
     this.teardownToolbar();
@@ -1327,19 +1387,16 @@ Inspector.prototype = {
     this.breadcrumbs.destroy();
     this.reflowTracker.destroy();
     this.styleChangeTracker.destroy();
-    this.search.destroy();
 
     this._notificationBox = null;
     this._target = null;
     this._toolbox = null;
     this.breadcrumbs = null;
-    this.highlighters = null;
     this.is3PaneModeEnabled = null;
     this.panelDoc = null;
     this.panelWin.inspector = null;
     this.panelWin = null;
     this.resultsLength = null;
-    this.search = null;
     this.searchBox = null;
     this.show3PaneTooltip = null;
     this.sidebar = null;
@@ -1348,7 +1405,6 @@ Inspector.prototype = {
     this.threePaneTooltip = null;
 
     this._panelDestroyer = promise.all([
-      highlighterDestroyer,
       cssPropertiesDestroyer,
       markupDestroyer,
       sidebarDestroyer,

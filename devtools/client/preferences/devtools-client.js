@@ -2,17 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Developer edition promo preferences
-pref("devtools.devedition.promo.shown", false);
-pref("devtools.devedition.promo.url", "https://www.mozilla.org/firefox/developer/?utm_source=firefox-dev-tools&utm_medium=firefox-browser&utm_content=betadoorhanger");
-
-// Only potentially show in beta release
-#if MOZ_UPDATE_CHANNEL == beta
-  pref("devtools.devedition.promo.enabled", true);
-#else
-  pref("devtools.devedition.promo.enabled", false);
-#endif
-
 // Enable DevTools WebIDE by default
 pref("devtools.webide.enabled", true);
 
@@ -47,15 +36,10 @@ pref("devtools.inspector.enabled", true);
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.remote", false);
 
-#if defined(NIGHTLY_BUILD)
 // Show the 3 pane onboarding tooltip in the inspector
 pref("devtools.inspector.show-three-pane-tooltip", true);
 // Enable the 3 pane mode in the inspector
 pref("devtools.inspector.three-pane-enabled", true);
-#else
-pref("devtools.inspector.show-three-pane-tooltip", false);
-pref("devtools.inspector.three-pane-enabled", false);
-#endif
 
 // Collapse pseudo-elements by default in the rule-view
 pref("devtools.inspector.show_pseudo_elements", false);

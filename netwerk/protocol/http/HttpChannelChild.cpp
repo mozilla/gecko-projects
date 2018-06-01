@@ -1511,6 +1511,12 @@ HttpChannelChild::DoNotifyListenerCleanup()
   MaybeCallSynthesizedCallback();
 }
 
+void
+HttpChannelChild::DoAsyncAbort(nsresult aStatus)
+{
+  Unused << AsyncAbort(aStatus);
+}
+
 class DeleteSelfEvent : public NeckoTargetChannelEvent<HttpChannelChild>
 {
  public:
@@ -2474,6 +2480,13 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
   LogCallingScriptLocation(this);
 
+  if (!mLoadGroup && !mCallbacks) {
+    // If no one called SetLoadGroup or SetNotificationCallbacks, the private
+    // state has not been updated on PrivateBrowsingChannel (which we derive from)
+    // Hence, we have to call UpdatePrivateBrowsing() here
+    UpdatePrivateBrowsing();
+  }
+
 #ifdef DEBUG
   AssertPrivateBrowsingId();
 #endif
@@ -2485,6 +2498,10 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   NS_ENSURE_ARG_POINTER(listener);
   NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
   NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_ALREADY_OPENED);
+
+  if (MaybeWaitForUploadStreamLength(listener, aContext)) {
+    return NS_OK;
+  }
 
   mAsyncOpenTime = TimeStamp::Now();
 #ifdef MOZ_TASK_TRACER

@@ -1764,7 +1764,7 @@ js::intrinsic_StringSplitString(JSContext* cx, unsigned argc, Value* vp)
     RootedString string(cx, args[0].toString());
     RootedString sep(cx, args[1].toString());
 
-    RootedObjectGroup group(cx, ObjectGroupCompartment::getStringSplitStringGroup(cx));
+    RootedObjectGroup group(cx, ObjectGroupRealm::getStringSplitStringGroup(cx));
     if (!group)
         return false;
 
@@ -1790,7 +1790,7 @@ intrinsic_StringSplitStringLimit(JSContext* cx, unsigned argc, Value* vp)
     uint32_t limit = uint32_t(args[2].toNumber());
     MOZ_ASSERT(limit > 0, "Zero limit case is already handled in self-hosted code.");
 
-    RootedObjectGroup group(cx, ObjectGroupCompartment::getStringSplitStringGroup(cx));
+    RootedObjectGroup group(cx, ObjectGroupRealm::getStringSplitStringGroup(cx));
     if (!group)
         return false;
 
@@ -1995,7 +1995,7 @@ intrinsic_AddContentTelemetry(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(id < JS_TELEMETRY_END);
     MOZ_ASSERT(id >= 0);
 
-    if (!cx->compartment()->isProbablySystemCode())
+    if (!cx->realm()->isProbablySystemCode())
         cx->runtime()->addTelemetry(id, args[1].toInt32());
 
     args.rval().setUndefined();
@@ -2014,7 +2014,7 @@ intrinsic_WarnDeprecatedStringMethod(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(id < STRING_GENERICS_METHODS_LIMIT);
 
     uint32_t mask = (1 << id);
-    if (!(cx->compartment()->warnedAboutStringGenericsMethods & mask)) {
+    if (!(cx->realm()->warnedAboutStringGenericsMethods & mask)) {
         JSFlatString* name = args[1].toString()->ensureFlat(cx);
         if (!name)
             return false;
@@ -2029,7 +2029,7 @@ intrinsic_WarnDeprecatedStringMethod(JSContext* cx, unsigned argc, Value* vp)
         {
             return false;
         }
-        cx->compartment()->warnedAboutStringGenericsMethods |= mask;
+        cx->realm()->warnedAboutStringGenericsMethods |= mask;
     }
 
     args.rval().setUndefined();
@@ -2791,8 +2791,8 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
     options.creationOptions().setNewZone();
     options.behaviors().setDiscardSource(true);
 
-    JSCompartment* compartment = NewCompartment(cx, nullptr, options);
-    if (!compartment)
+    Realm* realm = NewRealm(cx, nullptr, options);
+    if (!realm)
         return nullptr;
 
     static const ClassOps shgClassOps = {
@@ -2807,14 +2807,14 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
         &shgClassOps
     };
 
-    AutoRealmUnchecked ar(cx, compartment);
+    AutoRealmUnchecked ar(cx, realm);
     Rooted<GlobalObject*> shg(cx, GlobalObject::createInternal(cx, &shgClass));
     if (!shg)
         return nullptr;
 
     cx->runtime()->selfHostingGlobal_ = shg;
-    compartment->isSelfHosting = true;
-    compartment->setIsSystem(true);
+    realm->setIsSelfHostingRealm();
+    realm->setIsSystem(true);
 
     if (!GlobalObject::initSelfHostingBuiltins(cx, shg, intrinsic_functions))
         return nullptr;
@@ -2982,12 +2982,6 @@ JSRuntime::traceSelfHostingGlobal(JSTracer* trc)
 {
     if (selfHostingGlobal_ && !parentRuntime)
         TraceRoot(trc, const_cast<NativeObject**>(&selfHostingGlobal_.ref()), "self-hosting global");
-}
-
-bool
-JSRuntime::isSelfHostingCompartment(JSCompartment* comp) const
-{
-    return selfHostingGlobal_->compartment() == comp;
 }
 
 bool

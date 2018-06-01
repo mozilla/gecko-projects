@@ -112,6 +112,7 @@
 #include "nsIMIMEInputStream.h"
 #include "nsIMultiplexInputStream.h"
 #include "../../cache2/CacheFileUtils.h"
+#include "nsINetworkLinkService.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -638,73 +639,9 @@ nsHttpChannel::ConnectOnTailUnblock()
     return TriggerNetwork();
 }
 
-// nsIInputAvailableCallback (nsIStreamTransportService.idl)
-NS_IMETHODIMP
-nsHttpChannel::OnInputAvailableComplete(uint64_t size, nsresult status)
-{
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread.");
-    LOG(("nsHttpChannel::OnInputAvailableComplete %p %" PRIx32 "\n",
-         this, static_cast<uint32_t>(status)));
-    if (NS_SUCCEEDED(status)) {
-        mReqContentLength = size;
-    } else {
-        // fall back to synchronous on the error path. should not happen.
-        if (NS_SUCCEEDED(mUploadStream->Available(&size))) {
-            mReqContentLength = size;
-        }
-    }
-
-    LOG(("nsHttpChannel::DetermineContentLength %p from sts\n", this));
-    mReqContentLengthDetermined = true;
-    nsresult rv = mCanceled ? mStatus : ContinueConnect();
-    if (NS_FAILED(rv)) {
-        CloseCacheEntry(false);
-        Unused << AsyncAbort(rv);
-    }
-    return NS_OK;
-}
-
-void
-nsHttpChannel::DetermineContentLength()
-{
-    nsCOMPtr<nsIStreamTransportService> sts(services::GetStreamTransportService());
-
-    if (!mUploadStream || !sts) {
-        LOG(("nsHttpChannel::DetermineContentLength %p no body\n", this));
-        mReqContentLength = 0U;
-        mReqContentLengthDetermined = true;
-        return;
-    }
-
-    // If this is a stream is blocking, it needs to be sent to a worker thread
-    // to do Available() as it may cause disk/IO.
-    bool nonBlocking = false;
-    if (NS_FAILED(mUploadStream->IsNonBlocking(&nonBlocking)) || nonBlocking) {
-        mUploadStream->Available(&mReqContentLength);
-        LOG(("nsHttpChannel::DetermineContentLength %p from mem\n", this));
-        mReqContentLengthDetermined = true;
-        return;
-    }
-
-    LOG(("nsHttpChannel::DetermineContentLength Async [this=%p]\n", this));
-    sts->InputAvailable(mUploadStream, this);
-}
-
 nsresult
 nsHttpChannel::ContinueConnect()
 {
-    // If we have a request body that is going to require bouncing to the STS
-    // in order to determine the content-length as doing it on the main thread
-    // will incur file IO some of the time.
-    if (!mReqContentLengthDetermined) {
-        // C-L might be determined sync or async. Sync will set
-        // mReqContentLengthDetermined to true in DetermineContentLength()
-        DetermineContentLength();
-    }
-    if (!mReqContentLengthDetermined) {
-        return NS_OK;
-    }
-
     // If we need to start a CORS preflight, do it now!
     // Note that it is important to do this before the early returns below.
     if (!mIsCorsPreflightDone && mRequireCORSPreflight) {
@@ -832,6 +769,12 @@ nsHttpChannel::ReleaseListeners()
     HttpBaseChannel::ReleaseListeners();
     mChannelClassifier = nullptr;
     mWarningReporter = nullptr;
+}
+
+void
+nsHttpChannel::DoAsyncAbort(nsresult aStatus)
+{
+    Unused << AsyncAbort(aStatus);
 }
 
 void
@@ -5837,7 +5780,6 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
     NS_INTERFACE_MAP_ENTRY(nsITransportEventSink)
     NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
     NS_INTERFACE_MAP_ENTRY(nsIProtocolProxyCallback)
-    NS_INTERFACE_MAP_ENTRY(nsIInputAvailableCallback)
     NS_INTERFACE_MAP_ENTRY(nsIProxiedChannel)
     NS_INTERFACE_MAP_ENTRY(nsIHttpAuthenticableChannel)
     NS_INTERFACE_MAP_ENTRY(nsIApplicationCacheContainer)
@@ -5852,12 +5794,7 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
     NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
     NS_INTERFACE_MAP_ENTRY(nsIChannelWithDivertableParentListener)
     NS_INTERFACE_MAP_ENTRY(nsIRequestTailUnblockCallback)
-    // we have no macro that covers this case.
-    if (aIID.Equals(NS_GET_IID(nsHttpChannel)) ) {
-        AddRef();
-        *aInstancePtr = this;
-        return NS_OK;
-    } else
+    NS_INTERFACE_MAP_ENTRY_CONCRETE(nsHttpChannel)
 NS_INTERFACE_MAP_END_INHERITING(HttpBaseChannel)
 
 //-----------------------------------------------------------------------------
@@ -5994,6 +5931,10 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
     NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_ALREADY_OPENED);
 
+    if (MaybeWaitForUploadStreamLength(listener, context)) {
+        return NS_OK;
+    }
+
     nsresult rv;
 
     MOZ_ASSERT(NS_IsMainThread());
@@ -6019,6 +5960,13 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     if (NS_FAILED(rv)) {
         ReleaseListeners();
         return rv;
+    }
+
+    if (!mLoadGroup && !mCallbacks) {
+        // If no one called SetLoadGroup or SetNotificationCallbacks, the private
+        // state has not been updated on PrivateBrowsingChannel (which we derive from)
+        // Hence, we have to call UpdatePrivateBrowsing() here
+        UpdatePrivateBrowsing();
     }
 
     if (WaitingForTailUnblock()) {
@@ -6182,9 +6130,8 @@ nsHttpChannel::BeginConnect()
     RefPtr<AltSvcMapping> mapping;
     if (!mConnectionInfo && mAllowAltSvc && // per channel
         !(mLoadFlags & LOAD_FRESH_CONNECTION) &&
-        (scheme.EqualsLiteral("http") ||
-         scheme.EqualsLiteral("https")) &&
-        (!proxyInfo || proxyInfo->IsDirect()) &&
+        AltSvcMapping::AcceptableProxy(proxyInfo) &&
+        (scheme.EqualsLiteral("http") || scheme.EqualsLiteral("https")) &&
         (mapping = gHttpHandler->GetAltServiceMapping(scheme,
                                                       host, port,
                                                       mPrivateBrowsing,
@@ -9183,6 +9130,23 @@ nsHttpChannel::TriggerNetwork()
 nsresult
 nsHttpChannel::MaybeRaceCacheWithNetwork()
 {
+    nsresult rv;
+
+    nsCOMPtr<nsINetworkLinkService> netLinkSvc =
+        do_GetService(NS_NETWORK_LINK_SERVICE_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    uint32_t linkType;
+    rv = netLinkSvc->GetLinkType(&linkType);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!(linkType == nsINetworkLinkService::LINK_TYPE_UNKNOWN ||
+          linkType == nsINetworkLinkService::LINK_TYPE_ETHERNET ||
+          linkType == nsINetworkLinkService::LINK_TYPE_USB ||
+          linkType == nsINetworkLinkService::LINK_TYPE_WIFI)) {
+        return NS_OK;
+    }
+
     // Don't trigger the network if the load flags say so.
     if (mLoadFlags & (LOAD_ONLY_FROM_CACHE | LOAD_NO_NETWORK_IO)) {
         return NS_OK;

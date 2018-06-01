@@ -149,6 +149,33 @@ class TimeScale {
   getDuration() {
     return this.maxEndTime - this.minStartTime;
   }
+
+  /**
+   * Return current time of this time scale represents.
+   *
+   * @return {Number}
+   */
+  getCurrentTime() {
+    // If currentTime is not defined (which happens when connected to server older
+    // than FF62), use documentCurrentTime instead. See bug 1454392.
+    const baseTime = typeof this.currentTime === "undefined"
+                       ? this.documentCurrentTime : this.currentTime;
+    return baseTime - this.minStartTime;
+  }
+
+  /**
+   * Return end time of given animation.
+   * This time does not include playbackRate and cratedTime.
+   * Also, if the animation has infinite iterations, this returns Infinity.
+   *
+   * @param {Object} animation
+   * @return {Numbber} end time
+   */
+  getEndTime({ state }) {
+    return state.iterationCount ?
+             state.delay + state.duration * state.iterationCount + state.endDelay :
+             Infinity;
+  }
 }
 
 module.exports = TimeScale;

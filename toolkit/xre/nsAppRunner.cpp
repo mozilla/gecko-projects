@@ -716,6 +716,19 @@ nsXULAppInfo::GetUAName(nsACString& aResult)
 }
 
 NS_IMETHODIMP
+nsXULAppInfo::GetSourceURL(nsACString& aResult)
+{
+  if (XRE_IsContentProcess()) {
+    ContentChild* cc = ContentChild::GetSingleton();
+    aResult = cc->GetAppInfo().sourceURL;
+    return NS_OK;
+  }
+  aResult.Assign(gAppData->sourceURL);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsXULAppInfo::GetLogConsoleErrors(bool *aResult)
 {
   *aResult = gLogConsoleErrors;
@@ -1705,21 +1718,15 @@ static RemoteResult
 StartRemoteClient(const char* aDesktopStartupID,
                   nsCString& program,
                   const char* profile,
-                  const char* username,
-                  bool aIsX11Display)
+                  const char* username)
 {
   nsAutoPtr<nsRemoteClient> client;
 
-  if (aIsX11Display) {
-    client = new XRemoteClient();
-  } else {
 #if defined(MOZ_ENABLE_DBUS) && defined(MOZ_WAYLAND)
-    client = new DBusRemoteClient();
+  client = new DBusRemoteClient();
 #else
-    MOZ_ASSERT(false, "Missing remote implementation!");
-    return REMOTE_NOT_FOUND;
+  client = new XRemoteClient();
 #endif
-  }
 
   nsresult rv = client->Init();
   if (NS_FAILED(rv))
@@ -3758,11 +3765,11 @@ static void SetShutdownChecks() {
   // too.
 
 #ifdef DEBUG
-#if defined(MOZ_CODE_COVERAGE) && defined(XP_WIN)
+#if defined(MOZ_CODE_COVERAGE)
   gShutdownChecks = SCM_NOTHING;
 #else
   gShutdownChecks = SCM_CRASH;
-#endif // MOZ_CODE_COVERAGE && XP_WIN
+#endif // MOZ_CODE_COVERAGE
 #else
   const char* releaseChannel = NS_STRINGIFY(MOZ_UPDATE_CHANNEL);
   if (strcmp(releaseChannel, "nightly") == 0 ||
@@ -4075,8 +4082,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     const char* desktopStartupIDPtr =
       mDesktopStartupID.IsEmpty() ? nullptr : mDesktopStartupID.get();
 
-    rr = StartRemoteClient(desktopStartupIDPtr, program, profile, username,
-                           GDK_IS_X11_DISPLAY(mGdkDisplay));
+    rr = StartRemoteClient(desktopStartupIDPtr, program, profile, username);
     if (rr == REMOTE_FOUND) {
       *aExitFlag = true;
       return 0;

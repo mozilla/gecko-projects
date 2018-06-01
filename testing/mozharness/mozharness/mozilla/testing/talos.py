@@ -23,12 +23,11 @@ from mozharness.base.errors import PythonErrorList
 from mozharness.base.log import OutputParser, DEBUG, ERROR, CRITICAL
 from mozharness.base.log import INFO, WARNING
 from mozharness.base.python import Python3Virtualenv
-from mozharness.mozilla.blob_upload import BlobUploadMixin, blobupload_config_options
 from mozharness.mozilla.testing.testbase import TestingMixin, testing_config_options
 from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
-from mozharness.mozilla.buildbot import TBPL_SUCCESS, TBPL_WORST_LEVEL_TUPLE
-from mozharness.mozilla.buildbot import TBPL_RETRY, TBPL_FAILURE, TBPL_WARNING
+from mozharness.mozilla.automation import TBPL_SUCCESS, TBPL_WORST_LEVEL_TUPLE
+from mozharness.mozilla.automation import TBPL_RETRY, TBPL_FAILURE, TBPL_WARNING
 from mozharness.mozilla.tooltool import TooltoolMixin
 from mozharness.mozilla.testing.codecoverage import (
     CodeCoverageMixin,
@@ -85,7 +84,7 @@ class TalosOutputParser(OutputParser):
         if m:
             self.found_perf_data.append(m.group(1))
 
-        # now let's check if buildbot should retry
+        # now let's check if we should retry
         harness_retry_re = TinderBoxPrintRe['harness_error']['retry_regex']
         if harness_retry_re.search(line):
             self.critical(' %s' % line)
@@ -94,11 +93,10 @@ class TalosOutputParser(OutputParser):
         super(TalosOutputParser, self).parse_single_line(line)
 
 
-class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
+class Talos(TestingMixin, MercurialScript, TooltoolMixin,
             Python3Virtualenv, CodeCoverageMixin):
     """
-    install and run Talos tests:
-    https://wiki.mozilla.org/Buildbot/Talos
+    install and run Talos tests
     """
     config_options = [
         [["--use-talos-json"],
@@ -155,8 +153,7 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             "default": False,
             "help": "Tries to enable the WebRender compositor.",
         }],
-    ] + testing_config_options + copy.deepcopy(blobupload_config_options) \
-                               + copy.deepcopy(code_coverage_config_options)
+    ] + testing_config_options + copy.deepcopy(code_coverage_config_options)
 
     def __init__(self, **kwargs):
         kwargs.setdefault('config_options', self.config_options)
@@ -605,6 +602,15 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             requirements=[os.path.join(self.talos_path,
                                        'requirements.txt')]
         )
+        # if running locally and gecko profiing is on, we will be using the
+        # view-gecko-profile tool which has its own requirements too
+        if self.gecko_profile and self.run_local:
+            tools = os.path.join(self.config['repo_path'], 'testing', 'tools')
+            view_gecko_profile_req = os.path.join(tools,
+                                              'view_gecko_profile',
+                                              'requirements.txt')
+            self.info("installing requirements for the view-gecko-profile tool")
+            self.install_module(requirements=[view_gecko_profile_req])
 
     def _validate_treeherder_data(self, parser):
         # late import is required, because install is done in create_virtualenv
@@ -732,7 +738,7 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
                     dest = os.path.join(env['MOZ_UPLOAD_DIR'], 'perfherder-data.json')
                     self._artifact_perf_data(dest)
 
-        self.buildbot_status(parser.worst_tbpl_status,
+        self.record_status(parser.worst_tbpl_status,
                              level=parser.worst_log_level)
 
     def fetch_python3(self):

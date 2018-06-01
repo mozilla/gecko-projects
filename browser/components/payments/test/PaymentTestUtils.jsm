@@ -83,17 +83,6 @@ var PaymentTestUtils = {
   },
 
   DialogContentTasks: {
-    isElementVisible: selector => {
-      let element = content.document.querySelector(selector);
-      return element.getBoundingClientRect().height > 0;
-    },
-
-    getElementTextContent: selector => {
-      let doc = content.document;
-      let element = doc.querySelector(selector);
-      return element.textContent;
-    },
-
     getShippingOptions: () => {
       let select = content.document.querySelector("shipping-option-picker > rich-select");
       let popupBox = Cu.waiveXrays(select).popupBox;
@@ -165,6 +154,10 @@ var PaymentTestUtils = {
 
     /**
      * Do the minimum possible to complete the payment succesfully.
+     *
+     * Don't await on this task since the cancel can close the dialog before
+     * ContentTask can resolve the promise.
+     *
      * @returns {undefined}
      */
     completePayment: () => {
@@ -207,10 +200,28 @@ var PaymentTestUtils = {
    * Common PaymentDetailsInit for testing
    */
   Details: {
+    total2USD: {
+      total: {
+        label: "Total due",
+        amount: { currency: "USD", value: "2.00" },
+      },
+    },
+    total32USD: {
+      total: {
+        label: "Total due",
+        amount: { currency: "USD", value: "32.00" },
+      },
+    },
     total60USD: {
       total: {
         label: "Total due",
         amount: { currency: "USD", value: "60.00" },
+      },
+    },
+    total1pt75EUR: {
+      total: {
+        label: "Total due",
+        amount: { currency: "EUR", value: "1.75" },
       },
     },
     total60EUR: {
@@ -220,10 +231,6 @@ var PaymentTestUtils = {
       },
     },
     twoDisplayItems: {
-      total: {
-        label: "Total due",
-        amount: { currency: "USD", value: "32.00" },
-      },
       displayItems: [
         {
           label: "First",
@@ -235,11 +242,19 @@ var PaymentTestUtils = {
         },
       ],
     },
+    twoDisplayItemsEUR: {
+      displayItems: [
+        {
+          label: "First",
+          amount: { currency: "EUR", value: "0.85" },
+        },
+        {
+          label: "Second",
+          amount: { currency: "EUR", value: "1.70" },
+        },
+      ],
+    },
     twoShippingOptions: {
-      total: {
-        label: "Total due",
-        amount: { currency: "USD", value: "2.00" },
-      },
       shippingOptions: [
         {
           id: "1",
@@ -255,10 +270,6 @@ var PaymentTestUtils = {
       ],
     },
     twoShippingOptionsEUR: {
-      total: {
-        label: "Total due",
-        amount: { currency: "EUR", value: "1.75" },
-      },
       shippingOptions: [
         {
           id: "1",
@@ -273,21 +284,10 @@ var PaymentTestUtils = {
         },
       ],
     },
+    noShippingOptions: {
+      shippingOptions: [],
+    },
     bobPayPaymentModifier: {
-      total: {
-        label: "Total due",
-        amount: { currency: "USD", value: "2.00" },
-      },
-      displayItems: [
-        {
-          label: "First",
-          amount: { currency: "USD", value: "1.75" },
-        },
-        {
-          label: "Second",
-          amount: { currency: "USD", value: "0.25" },
-        },
-      ],
       modifiers: [
         {
           additionalDisplayItems: [
@@ -319,6 +319,42 @@ var PaymentTestUtils = {
           },
         },
       ],
+    },
+    additionalDisplayItemsEUR: {
+      modifiers: [
+        {
+          additionalDisplayItems: [
+            {
+              label: "Handling fee",
+              amount: { currency: "EUR", value: "1.00" },
+            },
+          ],
+          supportedMethods: "basic-card",
+          total: {
+            label: "Total due",
+            amount: { currency: "EUR", value: "2.50" },
+          },
+        },
+      ],
+    },
+    noError: {
+      error: "",
+    },
+    genericShippingError: {
+      error: "Cannot ship with option 1 on days that end with Y",
+    },
+    fieldSpecificErrors: {
+      error: "There are errors related to specific parts of the address",
+      shippingAddressErrors: {
+        addressLine: "Can only ship to ROADS, not DRIVES, BOULEVARDS, or STREETS",
+        city: "Can only ship to CITIES, not TOWNSHIPS or VILLAGES",
+        country: "Can only ship to USA, not CA",
+        organization: "Can only ship to CORPORATIONS, not CONSORTIUMS",
+        phone: "Only allowed to ship to area codes that start with 9",
+        postalCode: "Only allowed to ship to postalCodes that start with 0",
+        recipient: "Can only ship to names that start with J",
+        region: "Can only ship to regions that start with M",
+      },
     },
   },
 
@@ -353,7 +389,7 @@ var PaymentTestUtils = {
     },
     TimBL2: {
       "given-name": "Timothy",
-      "additional-name": "John",
+      "additional-name": "Johann",
       "family-name": "Berners-Lee",
       organization: "World Wide Web Consortium",
       "street-address": "1 Pommes Frittes Place",
@@ -382,9 +418,9 @@ var PaymentTestUtils = {
   BasicCards: {
     JohnDoe: {
       "cc-exp-month": 1,
-      "cc-exp-year": 9999,
+      "cc-exp-year": (new Date()).getFullYear() + 9,
       "cc-name": "John Doe",
-      "cc-number": "999999999999",
+      "cc-number": "4111111111111111",
     },
   },
 };

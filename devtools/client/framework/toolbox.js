@@ -18,6 +18,7 @@ const REGEX_PANEL = /webconsole|inspector|jsdebugger|styleeditor|netmonitor|stor
 var {Ci, Cc} = require("chrome");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
+const { debounce } = require("devtools/shared/debounce");
 var Services = require("Services");
 var ChromeUtils = require("ChromeUtils");
 var {gDevTools} = require("devtools/client/framework/devtools");
@@ -46,8 +47,6 @@ loader.lazyRequireGetter(this, "InspectorFront",
   "devtools/shared/fronts/inspector", true);
 loader.lazyRequireGetter(this, "flags",
   "devtools/shared/flags");
-loader.lazyRequireGetter(this, "showDoorhanger",
-  "devtools/client/shared/doorhanger", true);
 loader.lazyRequireGetter(this, "createPerformanceFront",
   "devtools/shared/fronts/performance", true);
 loader.lazyRequireGetter(this, "getPreferenceFront",
@@ -144,7 +143,6 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
   this._saveSplitConsoleHeight = this._saveSplitConsoleHeight.bind(this);
   this._onFocus = this._onFocus.bind(this);
   this._onBrowserMessage = this._onBrowserMessage.bind(this);
-  this._showDevEditionPromo = this._showDevEditionPromo.bind(this);
   this._updateTextBoxMenuItems = this._updateTextBoxMenuItems.bind(this);
   this._onPerformanceFrontEvent = this._onPerformanceFrontEvent.bind(this);
   this._onTabsOrderUpdated = this._onTabsOrderUpdated.bind(this);
@@ -184,7 +182,6 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this.on("host-changed", this._refreshHostTitle);
   this.on("select", this._onToolSelected);
-  this.on("ready", this._showDevEditionPromo);
 
   gDevTools.on("tool-registered", this._toolRegistered);
   gDevTools.on("tool-unregistered", this._toolUnregistered);
@@ -719,13 +716,11 @@ Toolbox.prototype = {
 
     // Log current theme. The question we want to answer is:
     // "What proportion of users use which themes?"
-    let currentTheme = Services.prefs.getCharPref("devtools.theme");
+    const currentTheme = Services.prefs.getCharPref("devtools.theme");
     this.telemetry.keyedScalarAdd(CURRENT_THEME_SCALAR, currentTheme, 1);
 
-    this.telemetry.preparePendingEvent(
-      "devtools.main", "open", "tools", null,
-      ["entrypoint", "first_panel", "host", "splitconsole", "width"]
-    );
+    this.telemetry.preparePendingEvent("devtools.main", "open", "tools", null,
+      ["entrypoint", "first_panel", "host", "shortcut", "splitconsole", "width"]);
     this.telemetry.addEventProperty(
       "devtools.main", "open", "tools", null, "host", this._getTelemetryHostString()
     );
@@ -1907,7 +1902,7 @@ Toolbox.prototype = {
       pending.push("message_count");
 
       // Cold webconsole event message_count is handled in
-      // devtools/client/webconsole/new-console-output-wrapper.js
+      // devtools/client/webconsole/webconsole-output-wrapper.js
       if (!cold) {
         this.telemetry.addEventProperty(
           "devtools.main", "enter", "webconsole", null, "message_count", 0);
@@ -2391,8 +2386,33 @@ Toolbox.prototype = {
     }
 
     // We may need to hide/show the frames button now.
+    const wasVisible = this.frameButton.isVisible;
+    const wasDisabled = this.frameButton.disabled;
     this.updateFrameButton();
-    this.component.setToolboxButtons(this.toolbarButtons);
+
+    const toolbarUpdate = () => {
+      if (this.frameButton.isVisible === wasVisible &&
+          this.frameButton.disabled === wasDisabled) {
+        return;
+      }
+      this.component.setToolboxButtons(this.toolbarButtons);
+    };
+
+    // If we are navigating/reloading, however (in which case data.destroyAll
+    // will be true), we should debounce the update to avoid unnecessary
+    // flickering/rendering.
+    if (data.destroyAll && !this.debouncedToolbarUpdate) {
+      this.debouncedToolbarUpdate = debounce(() => {
+        toolbarUpdate();
+        this.debouncedToolbarUpdate = null;
+      }, 200, this);
+    }
+
+    if (this.debouncedToolbarUpdate) {
+      this.debouncedToolbarUpdate();
+    } else {
+      toolbarUpdate();
+    }
   },
 
   /**
@@ -2760,7 +2780,6 @@ Toolbox.prototype = {
     this._target.off("frame-update", this._updateFrames);
     this.off("select", this._onToolSelected);
     this.off("host-changed", this._refreshHostTitle);
-    this.off("ready", this._showDevEditionPromo);
 
     gDevTools.off("tool-registered", this._toolRegistered);
     gDevTools.off("tool-unregistered", this._toolUnregistered);
@@ -2957,18 +2976,6 @@ Toolbox.prototype = {
 
   _highlighterHidden: function() {
     this.emit("highlighter-hide");
-  },
-
-  /**
-   * For displaying the promotional Doorhanger on first opening of
-   * the developer tools, promoting the Developer Edition.
-   */
-  _showDevEditionPromo: function() {
-    // Do not display in browser toolbox
-    if (this.target.chrome) {
-      return;
-    }
-    showDoorhanger({ window: this.win, type: "deveditionpromo" });
   },
 
   /**

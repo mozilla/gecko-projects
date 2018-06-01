@@ -18,7 +18,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "nsFocusManager.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsNameSpaceManager.h"
@@ -318,14 +318,13 @@ NS_IMPL_ADDREF_INHERITED(nsXULElement, nsStyledElement)
 NS_IMPL_RELEASE_INHERITED(nsXULElement, nsStyledElement)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsXULElement)
-    NS_INTERFACE_TABLE_INHERITED(nsXULElement, nsIDOMNode)
     NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
     NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIFrameLoaderOwner,
                                    new nsXULElementTearoff(this))
 NS_INTERFACE_MAP_END_INHERITING(nsStyledElement)
 
 //----------------------------------------------------------------------
-// nsIDOMNode interface
+// nsINode interface
 
 nsresult
 nsXULElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
@@ -2324,7 +2323,7 @@ nsXULPrototypeElement::SetAttrAt(uint32_t aPos, const nsAString& aValue,
         RefPtr<URLExtraData> data =
           new URLExtraData(aDocumentURI, aDocumentURI, principal);
         RefPtr<DeclarationBlock> declaration =
-          ServoDeclarationBlock::FromCssText(
+          DeclarationBlock::FromCssText(
             aValue, data, eCompatibility_FullStandards, nullptr);
         if (declaration) {
             mAttributes[aPos].mValue.SetTo(declaration.forget(), &aValue);

@@ -4,9 +4,10 @@
 
 "use strict";
 
+const { openWebLink, openTrustedLink } = require("devtools/client/shared/link");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { Component } = require("devtools/client/shared/vendor/react");
-const { a, article, p, li, ul } = require("devtools/client/shared/vendor/react-dom-factories");
+const { a, article, h1, li, p, ul } = require("devtools/client/shared/vendor/react-dom-factories");
 const DOC_URL = "https://developer.mozilla.org/docs/Web/API/Service_Worker_API/Using_Service_Workers" +
   "?utm_source=devtools&utm_medium=sw-panel-blank";
 
@@ -30,18 +31,18 @@ class WorkerListEmpty extends Component {
   }
 
   openAboutDebugging() {
-    this.props.serviceContainer.openTrustedLink("about:debugging#workers");
+    openTrustedLink("about:debugging#workers");
   }
 
   openDocumentation() {
-    this.props.serviceContainer.openWebLink(DOC_URL);
+    openWebLink(DOC_URL);
   }
 
   render() {
     return article(
       { className: "worker-list-empty" },
-      p(
-        {},
+      h1(
+        { className: "worker-list-empty__title" },
         "You need to register a Service Worker to inspect it here.",
         a(
           { className: "external-link", onClick: () => this.openDocumentation() },
@@ -54,9 +55,9 @@ class WorkerListEmpty extends Component {
         `here are some things you can try:`,
       ),
       ul(
-        { className: "worker-list-empty__list"},
+        { className: "worker-list-empty__tips" },
         li(
-          {},
+          { className: "worker-list-empty__tips__item" },
           "Look for errors in the Console.",
           a(
             { className: "link", onClick: () => this.switchToConsole() },
@@ -64,7 +65,7 @@ class WorkerListEmpty extends Component {
           )
         ),
         li(
-          {},
+          { className: "worker-list-empty__tips__item" },
           "Step through you Service Worker registration and look for exceptions.",
           a(
             { className: "link", onClick: () => this.switchToDebugger()},
@@ -72,7 +73,7 @@ class WorkerListEmpty extends Component {
           )
         ),
         li(
-          {},
+          { className: "worker-list-empty__tips__item" },
           "Inspect Service Workers from other domains.",
           a(
             { className: "external-link", onClick: () => this.openAboutDebugging() },

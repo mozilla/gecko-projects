@@ -16,7 +16,7 @@
 #include "mozilla/dom/FragmentOrElement.h"
 
 #include "mozilla/AsyncEventDispatcher.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -24,12 +24,14 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/TextEditor.h"
+#include "mozilla/TouchEvents.h"
 #include "mozilla/URLExtraData.h"
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
 #include "nsAtom.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/TouchEvent.h"
 #include "nsIDocumentInlines.h"
 #include "nsIDocumentEncoder.h"
 #include "nsIContentIterator.h"
@@ -1106,6 +1108,30 @@ nsIContent::GetEventTargetParent(EventChainPreVisitor& aVisitor)
         }
       }
     }
+
+    if (aVisitor.mEvent->mClass == eTouchEventClass) {
+      // Retarget touch objects.
+      MOZ_ASSERT(!aVisitor.mRetargetedTouchTargets.isSome());
+      aVisitor.mRetargetedTouchTargets.emplace();
+      WidgetTouchEvent* touchEvent = aVisitor.mEvent->AsTouchEvent();
+      WidgetTouchEvent::TouchArray& touches = touchEvent->mTouches;
+      for (uint32_t i = 0; i < touches.Length(); ++i) {
+        Touch* touch = touches[i];
+        EventTarget* originalTarget = touch->mOriginalTarget;
+        EventTarget* touchTarget = originalTarget;
+        nsCOMPtr<nsINode> targetAsNode = do_QueryInterface(originalTarget);
+        if (targetAsNode) {
+          EventTarget* retargeted = nsContentUtils::Retarget(targetAsNode, this);
+          if (retargeted) {
+            touchTarget = retargeted;
+          }
+        }
+        aVisitor.mRetargetedTouchTargets->AppendElement(touchTarget);
+        touch->mTarget = touchTarget;
+      }
+      MOZ_ASSERT(aVisitor.mRetargetedTouchTargets->Length() ==
+                   touches.Length());
+    }
   }
 
   if (slot) {
@@ -1300,7 +1326,7 @@ FragmentOrElement::FireNodeInserted(nsIDocument* aDoc,
     if (nsContentUtils::HasMutationListeners(childContent,
           NS_EVENT_BITS_MUTATION_NODEINSERTED, aParent)) {
       InternalMutationEvent mutation(true, eLegacyNodeInserted);
-      mutation.mRelatedNode = do_QueryInterface(aParent);
+      mutation.mRelatedNode = aParent;
 
       mozAutoSubtreeModified subtree(aDoc, aParent);
       (new AsyncEventDispatcher(childContent, mutation))->RunDOMEventWhenSafe();
@@ -2216,9 +2242,9 @@ FragmentOrElement::GetMarkup(bool aIncludeSelf, nsAString& aMarkup)
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   if (aIncludeSelf) {
-    docEncoder->SetNativeNode(this);
+    docEncoder->SetNode(this);
   } else {
-    docEncoder->SetNativeContainerNode(this);
+    docEncoder->SetContainerNode(this);
   }
   rv = docEncoder->EncodeToString(aMarkup);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
@@ -2250,8 +2276,7 @@ ContainsMarkup(const nsAString& aStr)
 }
 
 void
-FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult& aError,
-                                        bool aNeverSanitize)
+FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult& aError)
 {
   FragmentOrElement* target = this;
   // Handle template case.
@@ -2303,9 +2328,6 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
     contextNameSpaceID = shadowRoot->GetHost()->GetNameSpaceID();
   }
 
-  auto sanitize = (aNeverSanitize ? nsContentUtils::NeverSanitize
-                                  : nsContentUtils::SanitizeSystemPrivileged);
-
   if (doc->IsHTMLDocument()) {
     int32_t oldChildCount = target->GetChildCount();
     aError = nsContentUtils::ParseFragmentHTML(aInnerHTML,
@@ -2314,8 +2336,7 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
                                                contextNameSpaceID,
                                                doc->GetCompatibilityMode() ==
                                                  eCompatibility_NavQuirks,
-                                               true,
-                                               sanitize);
+                                               true);
     mb.NodesAdded();
     // HTML5 parser has notified, but not fired mutation events.
     nsContentUtils::FireMutationEventsForDirectParsing(doc, target,
@@ -2323,7 +2344,7 @@ FragmentOrElement::SetInnerHTMLInternal(const nsAString& aInnerHTML, ErrorResult
   } else {
     RefPtr<DocumentFragment> df =
       nsContentUtils::CreateContextualFragment(target, aInnerHTML, true,
-                                               sanitize, aError);
+                                               aError);
     if (!aError.Failed()) {
       // Suppress assertion about node removal mutation events that can't have
       // listeners anyway, because no one has had the chance to register mutation

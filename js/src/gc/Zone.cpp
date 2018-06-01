@@ -11,7 +11,7 @@
 #include "gc/PublicIterators.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "vm/Debugger.h"
 #include "vm/Runtime.h"
 
@@ -294,10 +294,10 @@ Zone::createJitZone(JSContext* cx)
 }
 
 bool
-Zone::hasMarkedCompartments()
+Zone::hasMarkedRealms()
 {
-    for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
-        if (comp->marked)
+    for (RealmsInZoneIter realm(this); !realm.done(); realm.next()) {
+        if (realm->marked())
             return true;
     }
     return false;

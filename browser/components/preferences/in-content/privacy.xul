@@ -228,7 +228,7 @@
         <button id="clearSiteDataButton"
             class="accessory-button"
             icon="clear"
-            search-l10n-ids="clear-site-data-cookies, clear-site-data-cache"
+            search-l10n-ids="clear-site-data-cookies-empty.label, clear-site-data-cache-empty.label"
             data-l10n-id="sitedata-clear"/>
       </hbox>
       <hbox>
@@ -283,7 +283,7 @@
 <!-- Tracking -->
 <groupbox id="trackingGroup" data-category="panePrivacy" hidden="true">
   <caption><label data-l10n-id="tracking-header"/></caption>
-  <vbox>
+  <vbox data-subcategory="trackingprotection">
     <hbox align="start">
       <vbox flex="1">
         <description data-l10n-id="tracking-desc">
@@ -496,7 +496,25 @@
 
   <separator flex="1"/>
 
-  <hbox align="start">
+  <hbox align="start" id="autoplayMediaBox" hidden="true">
+    <checkbox id="autoplayMediaPolicy"
+              data-l10n-id="permissions-block-autoplay-media"
+              flex="1" />
+    <!-- Please don't remove the wrapping hbox/vbox/box for these elements. It's used to properly compute the search tooltip position. -->
+    <hbox>
+      <button id="autoplayMediaPolicyButton"
+              class="accessory-button"
+              data-l10n-id="permissions-block-autoplay-media-exceptions"
+              search-l10n-ids="permissions-address,
+                               permissions-button-cancel.label,
+                               permissions-button-ok.label,
+                               permissions-exceptions-autoplay-media-window.title,
+                               permissions-exceptions-autoplay-media-desc
+                               " />
+    </hbox>
+  </hbox>
+
+  <hbox>
     <checkbox id="popupPolicy" preference="dom.disable_open_during_load"
               data-l10n-id="permissions-block-popups"
               onsyncfrompreference="return gPrivacyPane.updateButtons('popupPolicyButton',

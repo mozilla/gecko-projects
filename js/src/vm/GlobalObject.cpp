@@ -11,6 +11,9 @@
 #include "jsfriendapi.h"
 
 #include "builtin/AtomicsObject.h"
+#ifdef ENABLE_BIGINT
+#include "builtin/BigInt.h"
+#endif
 #include "builtin/DataViewObject.h"
 #include "builtin/Eval.h"
 #include "builtin/MapObject.h"
@@ -343,10 +346,10 @@ GlobalObject::resolveOffThreadConstructor(JSContext* cx,
         return false;
     }
 
-    if ((key == JSProto_Object || key == JSProto_Function || key == JSProto_Array) &&
-        !JSObject::setNewGroupUnknown(cx, placeholder->getClass(), placeholder))
-    {
-        return false;
+    if (key == JSProto_Object || key == JSProto_Function || key == JSProto_Array) {
+        ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
+        if (!JSObject::setNewGroupUnknown(cx, realm, placeholder->getClass(), placeholder))
+            return false;
     }
 
     global->setPrototype(key, ObjectValue(*placeholder));
@@ -501,15 +504,15 @@ GlobalObject::new_(JSContext* cx, const Class* clasp, JSPrincipals* principals,
                    const JS::RealmOptions& options)
 {
     MOZ_ASSERT(!cx->isExceptionPending());
-    MOZ_ASSERT_IF(cx->realm(), !cx->realm()->isAtomsRealm());
+    MOZ_ASSERT_IF(cx->zone(), !cx->zone()->isAtomsZone());
 
-    JSCompartment* compartment = NewCompartment(cx, principals, options);
-    if (!compartment)
+    Realm* realm = NewRealm(cx, principals, options);
+    if (!realm)
         return nullptr;
 
     Rooted<GlobalObject*> global(cx);
     {
-        AutoRealmUnchecked ar(cx, compartment);
+        AutoRealmUnchecked ar(cx, realm);
         global = GlobalObject::createInternal(cx, clasp);
         if (!global)
             return nullptr;

@@ -140,6 +140,9 @@
                 observes="History:UndoCloseTab"/>
       <menuitem id="context_closeTab" label="&closeTab.label;" accesskey="&closeTab.accesskey;"
                 oncommand="gBrowser.removeTab(TabContextMenu.contextTab, { animate: true });"/>
+      <menuitem id="context_closeSelectedTabs" label="&closeSelectedTabs.label;"
+                hidden="true" accesskey="&closeSelectedTabs.accesskey;"
+                oncommand="gBrowser.removeMultiSelectedTabs();"/>
     </menupopup>
 
     <!-- bug 415444/582485: event.stopPropagation is here for the cloned version
@@ -219,15 +222,9 @@
            tabspecific="true"
            onpopupshown="StarUI.panelShown(event);"
            aria-labelledby="editBookmarkPanelTitle">
-      <row id="editBookmarkPanelHeader" align="center" hidden="true">
-        <vbox align="center">
-          <image id="editBookmarkPanelStarIcon"/>
-        </vbox>
-        <vbox>
-          <label id="editBookmarkPanelTitle"/>
-          <description id="editBookmarkPanelDescription"/>
-        </vbox>
-      </row>
+      <box class="panel-header">
+        <label id="editBookmarkPanelTitle"/>
+      </box>
 #include ../../components/places/content/editBookmarkPanel.inc.xul
       <hbox id="editBookmarkPanelBottomButtons" pack="end">
 #ifndef XP_UNIX
@@ -238,13 +235,11 @@
                 oncommand="StarUI.panel.hidePopup();"/>
         <button id="editBookmarkPanelRemoveButton"
                 class="editBookmarkPanelBottomButton"
-                oncommand="StarUI.removeBookmarkButtonCommand();"
-                accesskey="&editBookmark.removeBookmark.accessKey;"/>
+                oncommand="StarUI.removeBookmarkButtonCommand();"/>
 #else
         <button id="editBookmarkPanelRemoveButton"
                 class="editBookmarkPanelBottomButton"
-                oncommand="StarUI.removeBookmarkButtonCommand();"
-                accesskey="&editBookmark.removeBookmark.accessKey;"/>
+                oncommand="StarUI.removeBookmarkButtonCommand();"/>
         <button id="editBookmarkPanelDoneButton"
                 class="editBookmarkPanelBottomButton"
                 label="&editBookmark.done.label;"
@@ -1133,7 +1128,7 @@
                        placespopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
-                                         new PlacesMenu(event, 'place:folder=TOOLBAR',
+                                         new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.toolbarGuid}`,
                                                         PlacesUIUtils.getViewForNode(this.parentNode.parentNode).options);">
               <menuitem id="BMB_viewBookmarksToolbar"
                         class="menuitem-iconic subviewbutton"
@@ -1152,7 +1147,7 @@
                        placespopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
-                                         new PlacesMenu(event, 'place:folder=UNFILED_BOOKMARKS',
+                                         new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.unfiledGuid}`,
                                                         PlacesUIUtils.getViewForNode(this.parentNode.parentNode).options);"/>
           </menu>
           <menu id="BMB_mobileBookmarks"
@@ -1164,7 +1159,7 @@
                        placespopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
-                                         new PlacesMenu(event, 'place:folder=MOBILE_BOOKMARKS',
+                                         new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.mobileGuid}`,
                                                         PlacesUIUtils.getViewForNode(this.parentNode.parentNode).options);"/>
           </menu>
 

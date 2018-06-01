@@ -34,7 +34,6 @@
 #include "nsIStreamListener.h"
 
 #include "nsIFrame.h"
-#include "nsIDOMNode.h"
 
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
@@ -135,6 +134,10 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
                               int32_t aType,
                               const nsIntRect* aData)
 {
+  MOZ_ASSERT(aRequest, "no request?");
+  MOZ_ASSERT(aRequest == mCurrentRequest || aRequest == mPendingRequest,
+             "Forgot to cancel a previous request?");
+
   if (aType == imgINotificationObserver::IS_ANIMATED) {
     return OnImageIsAnimated(aRequest);
   }
@@ -142,14 +145,6 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
   if (aType == imgINotificationObserver::UNLOCKED_DRAW) {
     OnUnlockedDraw();
     return NS_OK;
-  }
-
-  if (aType == imgINotificationObserver::LOAD_COMPLETE) {
-    // We should definitely have a request here
-    MOZ_ASSERT(aRequest, "no request?");
-
-    MOZ_ASSERT(aRequest == mCurrentRequest || aRequest == mPendingRequest,
-               "Unknown request");
   }
 
   {
@@ -627,12 +622,6 @@ nsImageLoadingContent::GetRequest(int32_t aRequestType,
   *aRequest = GetRequest(aRequestType, result).take();
 
   return result.StealNSResult();
-}
-
-NS_IMETHODIMP_(bool)
-nsImageLoadingContent::CurrentRequestHasSize()
-{
-  return HaveSize(mCurrentRequest);
 }
 
 NS_IMETHODIMP_(void)

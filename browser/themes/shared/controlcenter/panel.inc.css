@@ -146,6 +146,11 @@
   margin: 0;
 }
 
+#identity-popup-permissions-content > description,
+#tracking-protection-content > description {
+  color: var(--panel-disabled-color);
+}
+
 /* This element needs the pre-wrap because we add newlines to it in the code. */
 #identity-popup-content-supplemental {
   white-space: pre-wrap;
@@ -229,7 +234,7 @@
 
 #identity-popup-security-descriptions > description {
   margin-top: 6px;
-  color: Graytext;
+  color: var(--panel-disabled-color);
 }
 
 #identity-popup-securityView-body {
@@ -239,12 +244,15 @@
   padding-inline-end: 1em;
 }
 
-#identity-popup-securityView-footer {
+#identity-popup-more-info-footer {
   margin-top: 1em;
+}
+
+.identity-popup-footer {
   background-color: var(--arrowpanel-dimmed);
 }
 
-#identity-popup-securityView-footer > button {
+.identity-popup-footer > button {
   -moz-appearance: none;
   margin: 0;
   border: none;
@@ -254,18 +262,18 @@
   background-color: transparent;
 }
 
-#identity-popup-securityView-footer > button:hover,
-#identity-popup-securityView-footer > button:focus {
+.identity-popup-footer > button:hover,
+.identity-popup-footer > button:focus {
   background-color: var(--arrowpanel-dimmed);
 }
 
-#identity-popup-securityView-footer > button:hover:active {
+.identity-popup-footer > button:hover:active {
   background-color: var(--arrowpanel-dimmed-further);
 }
 
 #identity-popup-content-verifier ~ description {
   margin-top: 1em;
-  color: Graytext;
+  color: var(--panel-disabled-color);
 }
 
 description#identity-popup-content-verified-by,
@@ -376,7 +384,7 @@ description#identity-popup-content-verifier,
 .identity-popup-permission-state-label {
   margin-inline-end: 5px;
   text-align: end;
-  color: graytext;
+  color: var(--panel-disabled-color);
 }
 
 .identity-popup-permission-remove-button {

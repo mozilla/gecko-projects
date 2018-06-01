@@ -111,9 +111,10 @@
 #endif
 
 // Linux builds use LUL, which uses DWARF info to unwind stacks.
-#if defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_x86_linux) || \
-    defined(GP_PLAT_mips64_linux) || defined(GP_PLAT_arm64_linux) || \
-    defined(GP_PLAT_arm64_android)
+#if defined(GP_PLAT_amd64_linux) || \
+    defined(GP_PLAT_x86_linux) || defined(GP_PLAT_x86_android) || \
+    defined(GP_PLAT_mips64_linux) || \
+    defined(GP_PLAT_arm64_linux) || defined(GP_PLAT_arm64_android)
 # define HAVE_NATIVE_UNWIND
 # define USE_LUL_STACKWALK
 # include "lul/LulMain.h"
@@ -696,7 +697,7 @@ uint32_t ActivePS::sNextGeneration = 0;
 // The mutex that guards accesses to CorePS and ActivePS.
 static PSMutex gPSMutex;
 
-Atomic<uint32_t> RacyFeatures::sActiveAndFeatures(0);
+Atomic<uint32_t, MemoryOrdering::Relaxed> RacyFeatures::sActiveAndFeatures(0);
 
 // Each live thread has a RegisteredThread, and we store a reference to it in TLS.
 // This class encapsulates that TLS.
@@ -1564,11 +1565,7 @@ StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists() && ActivePS::Exists(aLock));
 
-  aWriter.IntProperty("version", 9);
-
-#if defined(MOZ_SOURCE_URL)
-  aWriter.StringProperty("sourceURL", "@MOZ_SOURCE_URL@");
-#endif
+  aWriter.IntProperty("version", 10);
 
   // The "startTime" field holds the number of milliseconds since midnight
   // January 1, 1970 GMT. This grotty code computes (Now - (Now -
@@ -1660,6 +1657,10 @@ StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
     res = appInfo->GetAppBuildID(string);
     if (!NS_FAILED(res))
       aWriter.StringProperty("appBuildID", string.Data());
+
+    res = appInfo->GetSourceURL(string);
+    if (!NS_FAILED(res))
+      aWriter.StringProperty("sourceURL", string.Data());
   }
 
   // We should avoid collecting extension metadata for profiler while XPCOM is
@@ -1793,7 +1794,7 @@ locked_profiler_stream_json_for_this_process(PSLockRef aLock,
      // Thread id of java Main thread is 0, if we support profiling of other
      // java thread, we have to get thread id and name via JNI.
      RefPtr<ThreadInfo> threadInfo =
-       new ThreadInfo("Java Main Thread", 0, false);
+       new ThreadInfo("Java Main Thread", 0, false, CorePS::ProcessStartTime());
      ProfiledThreadData profiledThreadData(threadInfo, nullptr,
                                            ActivePS::FeatureResponsiveness(aLock));
      profiledThreadData.StreamJSON(*javaBuffer.get(), nullptr, aWriter,
@@ -3027,10 +3028,16 @@ locked_profiler_stop(PSLockRef aLock)
     RegisteredThread* registeredThread = thread.mRegisteredThread;
     if (ActivePS::FeatureJS(aLock)) {
       registeredThread->StopJSSampling();
-      if (registeredThread->Info()->ThreadId() == tid) {
+      RefPtr<ThreadInfo> info = registeredThread->Info();
+      if (info->ThreadId() == tid) {
         // We can manually poll the current thread so it stops profiling
         // immediately.
         registeredThread->PollJSSampling();
+      } else if (info->IsMainThread()) {
+        // Dispatch a runnable to the main thread to call PollJSSampling(),
+        // so that we don't have wait for the next JS interrupt callback in
+        // order to start profiling JS.
+        TriggerPollJSSamplingOnMainThread();
       }
     }
   }

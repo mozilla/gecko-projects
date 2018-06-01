@@ -29,14 +29,13 @@ const {
   InvalidSelectorError,
   NoSuchElementError,
   NoSuchFrameError,
-  pprint,
   TimeoutError,
   UnknownError,
 } = ChromeUtils.import("chrome://marionette/content/error.js", {});
 ChromeUtils.import("chrome://marionette/content/evaluate.js");
 ChromeUtils.import("chrome://marionette/content/event.js");
 const {ContentEventObserverService} = ChromeUtils.import("chrome://marionette/content/dom.js", {});
-const {truncate} = ChromeUtils.import("chrome://marionette/content/format.js", {});
+const {pprint, truncate} = ChromeUtils.import("chrome://marionette/content/format.js", {});
 ChromeUtils.import("chrome://marionette/content/interaction.js");
 ChromeUtils.import("chrome://marionette/content/legacyaction.js");
 ChromeUtils.import("chrome://marionette/content/navigate.js");
@@ -1150,10 +1149,6 @@ async function findElementContent(strategy, selector, opts = {}) {
   }
 
   opts.all = false;
-  if (opts.startNode) {
-    opts.startNode = opts.startNode;
-  }
-
   let el = await element.find(curContainer, strategy, selector, opts);
   return seenEls.add(el);
 }
@@ -1332,7 +1327,7 @@ function clearElement(el) {
 
 /** Switch the current context to the specified host's Shadow DOM. */
 function switchToShadowRoot(el) {
-  if (!el) {
+  if (!element.isElement(el)) {
     // If no host element is passed, attempt to find a parent shadow
     // root or, if none found, unset the current shadow root
     if (curContainer.shadowRoot) {

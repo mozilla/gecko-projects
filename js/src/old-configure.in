@@ -651,7 +651,7 @@ case "$target" in
         # Use temp file for windres (bug 213281)
         RCFLAGS='-O coff --use-temp-file'
         # mingw doesn't require kernel32, user32, and advapi32 explicitly
-        LIBS="$LIBS -lgdi32 -lwinmm -lwsock32"
+        LIBS="$LIBS -lusp10 -lgdi32 -lwinmm -lwsock32"
         MOZ_FIX_LINK_PATHS=
 
         MOZ_OPTIMIZE_FLAGS="-O2"
@@ -712,6 +712,9 @@ case "$target" in
         # the same thing as C4244, we disable C4267, too.
         CFLAGS="$CFLAGS -wd4244 -wd4267"
         CXXFLAGS="$CXXFLAGS -wd4244 -wd4267 -wd4251"
+        # Silence "warning C4065: switch statement contains 'default' but no
+        # 'case' labels".  See bug 1461304.
+        CXXFLAGS="$CXXFLAGS -wd4065"
         if test -n "$CLANG_CL"; then
             # XXX We should combine some of these with our generic GCC-style
             # warning checks.

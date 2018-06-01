@@ -278,25 +278,25 @@ ValueToIdentifier(JSContext* cx, HandleValue v, MutableHandleId id)
     return true;
 }
 
-class AutoRestoreCompartmentDebugMode
+class js::AutoRestoreRealmDebugMode
 {
-    JSCompartment* comp_;
+    Realm* realm_;
     unsigned bits_;
 
   public:
-    explicit AutoRestoreCompartmentDebugMode(JSCompartment* comp)
-      : comp_(comp), bits_(comp->debugModeBits)
+    explicit AutoRestoreRealmDebugMode(Realm* realm)
+      : realm_(realm), bits_(realm->debugModeBits_)
     {
-        MOZ_ASSERT(comp_);
+        MOZ_ASSERT(realm_);
     }
 
-    ~AutoRestoreCompartmentDebugMode() {
-        if (comp_)
-            comp_->debugModeBits = bits_;
+    ~AutoRestoreRealmDebugMode() {
+        if (realm_)
+            realm_->debugModeBits_ = bits_;
     }
 
     void release() {
-        comp_ = nullptr;
+        realm_ = nullptr;
     }
 };
 
@@ -375,7 +375,7 @@ class MOZ_RAII js::EnterDebuggeeNoExecute
                 }
                 const char* filename = script->filename() ? script->filename() : "(none)";
                 char linenoStr[15];
-                SprintfLiteral(linenoStr, "%zu", script->lineno());
+                SprintfLiteral(linenoStr, "%u", script->lineno());
                 unsigned flags = warning ? JSREPORT_WARNING : JSREPORT_ERROR;
                 // FIXME: filename should be UTF-8 (bug 987069).
                 return JS_ReportErrorFlagsAndNumberLatin1(cx, flags, GetErrorMessage, nullptr,
@@ -418,7 +418,7 @@ class MOZ_RAII js::LeaveDebuggeeNoExecute
 /* static */ bool
 Debugger::slowPathCheckNoExecute(JSContext* cx, HandleScript script)
 {
-    MOZ_ASSERT(cx->compartment()->isDebuggee());
+    MOZ_ASSERT(cx->realm()->isDebuggee());
     MOZ_ASSERT(cx->noExecuteDebuggerTop);
     return EnterDebuggeeNoExecute::reportIfFoundInStack(cx, script);
 }
@@ -2367,35 +2367,35 @@ Debugger::slowPathPromiseHook(JSContext* cx, Hook hook, Handle<PromiseObject*> p
 
 /*** Debugger code invalidation for observing execution ******************************************/
 
-class MOZ_RAII ExecutionObservableCompartments : public Debugger::ExecutionObservableSet
+class MOZ_RAII ExecutionObservableRealms : public Debugger::ExecutionObservableSet
 {
-    HashSet<JSCompartment*> compartments_;
+    HashSet<Realm*> realms_;
     HashSet<Zone*> zones_;
 
   public:
-    explicit ExecutionObservableCompartments(JSContext* cx
-                                             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : compartments_(cx),
+    explicit ExecutionObservableRealms(JSContext* cx
+                                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : realms_(cx),
         zones_(cx)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    bool init() { return compartments_.init() && zones_.init(); }
-    bool add(JSCompartment* comp) { return compartments_.put(comp) && zones_.put(comp->zone()); }
+    bool init() { return realms_.init() && zones_.init(); }
+    bool add(Realm* realm) { return realms_.put(realm) && zones_.put(realm->zone()); }
 
-    typedef HashSet<JSCompartment*>::Range CompartmentRange;
-    const HashSet<JSCompartment*>* compartments() const { return &compartments_; }
+    using RealmRange = HashSet<Realm*>::Range;
+    const HashSet<Realm*>* realms() const { return &realms_; }
 
     const HashSet<Zone*>* zones() const override { return &zones_; }
     bool shouldRecompileOrInvalidate(JSScript* script) const override {
-        return script->hasBaselineScript() && compartments_.has(script->compartment());
+        return script->hasBaselineScript() && realms_.has(script->realm());
     }
     bool shouldMarkAsDebuggee(FrameIter& iter) const override {
         // AbstractFramePtr can't refer to non-remateralized Ion frames or
         // non-debuggee wasm frames, so if iter refers to one such, we know we
         // don't match.
-        return iter.hasUsableAbstractFramePtr() && compartments_.has(iter.compartment());
+        return iter.hasUsableAbstractFramePtr() && realms_.has(iter.realm());
     }
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
@@ -2640,8 +2640,8 @@ UpdateExecutionObservabilityOfScriptsInZone(JSContext* cx, Zone* zone,
     }
 
     // Iterate through all wasm instances to find ones that need to be updated.
-    for (JSCompartment* c : zone->compartments()) {
-        for (wasm::Instance* instance : c->wasm.instances()) {
+    for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
+        for (wasm::Instance* instance : r->wasm.instances()) {
             if (!instance->debugEnabled())
                 continue;
 
@@ -2741,14 +2741,14 @@ Debugger::ensureExecutionObservabilityOfFrame(JSContext* cx, AbstractFramePtr fr
 }
 
 /* static */ bool
-Debugger::ensureExecutionObservabilityOfCompartment(JSContext* cx, JSCompartment* comp)
+Debugger::ensureExecutionObservabilityOfRealm(JSContext* cx, Realm* realm)
 {
-    if (comp->debuggerObservesAllExecution())
+    if (realm->debuggerObservesAllExecution())
         return true;
-    ExecutionObservableCompartments obs(cx);
-    if (!obs.init() || !obs.add(comp))
+    ExecutionObservableRealms obs(cx);
+    if (!obs.init() || !obs.add(realm))
         return false;
-    comp->updateDebuggerObservesAllExecution();
+    realm->updateDebuggerObservesAllExecution();
     return updateExecutionObservability(cx, obs, Observing);
 }
 
@@ -2796,28 +2796,28 @@ Debugger::observesCoverage() const
 bool
 Debugger::updateObservesAllExecutionOnDebuggees(JSContext* cx, IsObserving observing)
 {
-    ExecutionObservableCompartments obs(cx);
+    ExecutionObservableRealms obs(cx);
     if (!obs.init())
         return false;
 
     for (WeakGlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
-        JSCompartment* comp = global->compartment();
+        JS::Realm* realm = global->realm();
 
-        if (comp->debuggerObservesAllExecution() == observing)
+        if (realm->debuggerObservesAllExecution() == observing)
             continue;
 
-        // It's expensive to eagerly invalidate and recompile a compartment,
-        // so add the compartment to the set only if we are observing.
-        if (observing && !obs.add(comp))
+        // It's expensive to eagerly invalidate and recompile a realm,
+        // so add the realm to the set only if we are observing.
+        if (observing && !obs.add(realm))
             return false;
     }
 
     if (!updateExecutionObservability(cx, obs, observing))
         return false;
 
-    typedef ExecutionObservableCompartments::CompartmentRange CompartmentRange;
-    for (CompartmentRange r = obs.compartments()->all(); !r.empty(); r.popFront())
+    using RealmRange = ExecutionObservableRealms::RealmRange;
+    for (RealmRange r = obs.realms()->all(); !r.empty(); r.popFront())
         r.front()->updateDebuggerObservesAllExecution();
 
     return true;
@@ -2826,21 +2826,21 @@ Debugger::updateObservesAllExecutionOnDebuggees(JSContext* cx, IsObserving obser
 bool
 Debugger::updateObservesCoverageOnDebuggees(JSContext* cx, IsObserving observing)
 {
-    ExecutionObservableCompartments obs(cx);
+    ExecutionObservableRealms obs(cx);
     if (!obs.init())
         return false;
 
     for (WeakGlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
-        JSCompartment* comp = global->compartment();
+        Realm* realm = global->realm();
 
-        if (comp->debuggerObservesCoverage() == observing)
+        if (realm->debuggerObservesCoverage() == observing)
             continue;
 
-        // Invalidate and recompile a compartment to add or remove PCCounts
+        // Invalidate and recompile a realm to add or remove PCCounts
         // increments. We have to eagerly invalidate, as otherwise we might have
         // dangling pointers to freed PCCounts.
-        if (!obs.add(comp))
+        if (!obs.add(realm))
             return false;
     }
 
@@ -2860,10 +2860,10 @@ Debugger::updateObservesCoverageOnDebuggees(JSContext* cx, IsObserving observing
     if (!updateExecutionObservability(cx, obs, observing))
         return false;
 
-    // All compartments can safely be toggled, and all scripts will be
-    // recompiled. Thus we can update each compartment accordingly.
-    typedef ExecutionObservableCompartments::CompartmentRange CompartmentRange;
-    for (CompartmentRange r = obs.compartments()->all(); !r.empty(); r.popFront())
+    // All realms can safely be toggled, and all scripts will be recompiled.
+    // Thus we can update each realm accordingly.
+    using RealmRange = ExecutionObservableRealms::RealmRange;
+    for (RealmRange r = obs.realms()->all(); !r.empty(); r.popFront())
         r.front()->updateDebuggerObservesCoverage();
 
     return true;
@@ -2874,12 +2874,12 @@ Debugger::updateObservesAsmJSOnDebuggees(IsObserving observing)
 {
     for (WeakGlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
-        JSCompartment* comp = global->compartment();
+        Realm* realm = global->realm();
 
-        if (comp->debuggerObservesAsmJS() == observing)
+        if (realm->debuggerObservesAsmJS() == observing)
             continue;
 
-        comp->updateDebuggerObservesAsmJS();
+        realm->updateDebuggerObservesAsmJS();
     }
 }
 
@@ -2888,12 +2888,12 @@ Debugger::updateObservesBinarySourceDebuggees(IsObserving observing)
 {
     for (WeakGlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
-        JSCompartment* comp = global->compartment();
+        Realm* realm = global->realm();
 
-        if (comp->debuggerObservesBinarySource() == observing)
+        if (realm->debuggerObservesBinarySource() == observing)
             continue;
 
-        comp->updateDebuggerObservesBinarySource();
+        realm->updateDebuggerObservesBinarySource();
     }
 }
 
@@ -2903,7 +2903,7 @@ Debugger::updateObservesBinarySourceDebuggees(IsObserving observing)
 /* static */ bool
 Debugger::cannotTrackAllocations(const GlobalObject& global)
 {
-    auto existingCallback = global.compartment()->getAllocationMetadataBuilder();
+    auto existingCallback = global.realm()->getAllocationMetadataBuilder();
     return existingCallback && existingCallback != &SavedStacks::metadataBuilder;
 }
 
@@ -2934,8 +2934,8 @@ Debugger::addAllocationsTracking(JSContext* cx, Handle<GlobalObject*> debuggee)
         return false;
     }
 
-    debuggee->compartment()->setAllocationMetadataBuilder(&SavedStacks::metadataBuilder);
-    debuggee->compartment()->chooseAllocationSamplingProbability();
+    debuggee->realm()->setAllocationMetadataBuilder(&SavedStacks::metadataBuilder);
+    debuggee->realm()->chooseAllocationSamplingProbability();
     return true;
 }
 
@@ -2946,11 +2946,11 @@ Debugger::removeAllocationsTracking(GlobalObject& global)
     // remove the metadata callback yet. Recompute the sampling probability
     // based on the remaining debuggers' needs.
     if (isObservedByDebuggerTrackingAllocations(global)) {
-        global.compartment()->chooseAllocationSamplingProbability();
+        global.realm()->chooseAllocationSamplingProbability();
         return;
     }
 
-    global.compartment()->forgetAllocationMetadataBuilder();
+    global.realm()->forgetAllocationMetadataBuilder();
 }
 
 bool
@@ -3064,7 +3064,7 @@ Debugger::markIteratively(GCMarker* marker)
      * convoluted since the easiest way to find them is via their debuggees.
      */
     JSRuntime* rt = marker->runtime();
-    for (RealmsIter r(rt, SkipAtoms); !r.done(); r.next()) {
+    for (RealmsIter r(rt); !r.done(); r.next()) {
         if (r->isDebuggee()) {
             GlobalObject* global = r->unsafeUnbarrieredMaybeGlobal();
             if (!IsMarkedUnbarriered(rt, &global))
@@ -3261,26 +3261,39 @@ Debugger::detachAllDebuggersFromGlobal(FreeOp* fop, GlobalObject* global)
 /* static */ void
 Debugger::findZoneEdges(Zone* zone, js::gc::ZoneComponentFinder& finder)
 {
-    /*
-     * For debugger cross compartment wrappers, add edges in the opposite
-     * direction to those already added by JSCompartment::findOutgoingEdges.
-     * This ensure that debuggers and their debuggees are finalized in the same
-     * group.
-     */
     JSRuntime* rt = zone->runtimeFromMainThread();
     for (Debugger* dbg : rt->debuggerList()) {
-        Zone* w = dbg->object->zone();
-        if (w == zone || !w->isGCMarking())
+        Zone* debuggerZone = dbg->object->zone();
+        if (!debuggerZone->isGCMarking())
             continue;
-        if (dbg->debuggeeZones.has(zone) ||
-            dbg->scripts.hasKeyInZone(zone) ||
-            dbg->sources.hasKeyInZone(zone) ||
-            dbg->objects.hasKeyInZone(zone) ||
-            dbg->environments.hasKeyInZone(zone) ||
-            dbg->wasmInstanceScripts.hasKeyInZone(zone) ||
-            dbg->wasmInstanceSources.hasKeyInZone(zone))
-        {
-            finder.addEdgeTo(w);
+
+        if (debuggerZone == zone) {
+            /*
+             * Add edges to debuggee zones. These are weak references that are
+             * not in the cross compartment wrapper map.
+             */
+            for (auto e = dbg->debuggeeZones.all(); !e.empty(); e.popFront()) {
+                Zone* debuggeeZone = e.front();
+                if (debuggeeZone->isGCMarking())
+                    finder.addEdgeTo(debuggeeZone);
+            }
+        } else {
+            /*
+             * For debugger cross compartment wrappers, add edges in the
+             * opposite direction to those already added by
+             * JSCompartment::findOutgoingEdges and above.  This ensure that
+             * debuggers and their debuggees are finalized in the same group.
+             */
+            if (dbg->debuggeeZones.has(zone) ||
+                dbg->scripts.hasKeyInZone(zone) ||
+                dbg->sources.hasKeyInZone(zone) ||
+                dbg->objects.hasKeyInZone(zone) ||
+                dbg->environments.hasKeyInZone(zone) ||
+                dbg->wasmInstanceScripts.hasKeyInZone(zone) ||
+                dbg->wasmInstanceSources.hasKeyInZone(zone))
+            {
+                finder.addEdgeTo(debuggerZone);
+            }
         }
     }
 }
@@ -3594,8 +3607,8 @@ Debugger::setAllowUnobservedAsmJS(JSContext* cx, unsigned argc, Value* vp)
 
     for (WeakGlobalObjectSet::Range r = dbg->debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
-        JSCompartment* comp = global->compartment();
-        comp->updateDebuggerObservesAsmJS();
+        Realm* realm = global->realm();
+        realm->updateDebuggerObservesAsmJS();
     }
 
     args.rval().setUndefined();
@@ -3620,8 +3633,8 @@ Debugger::setAllowWasmBinarySource(JSContext* cx, unsigned argc, Value* vp)
 
     for (WeakGlobalObjectSet::Range r = dbg->debuggees.all(); !r.empty(); r.popFront()) {
         GlobalObject* global = r.front();
-        JSCompartment* comp = global->compartment();
-        comp->updateDebuggerObservesBinarySource();
+        Realm* realm = global->realm();
+        realm->updateDebuggerObservesBinarySource();
     }
 
     args.rval().setUndefined();
@@ -3744,7 +3757,7 @@ Debugger::addAllGlobalsAsDebuggees(JSContext* cx, unsigned argc, Value* vp)
         for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
             if (r == dbg->object->realm() || r->creationOptions().invisibleToDebugger())
                 continue;
-            r->scheduledForDestruction = false;
+            r->compartment()->scheduledForDestruction = false;
             GlobalObject* global = r->maybeGlobal();
             if (global) {
                 Rooted<GlobalObject*> rg(cx, global);
@@ -3769,17 +3782,17 @@ Debugger::removeDebuggee(JSContext* cx, unsigned argc, Value* vp)
     if (!global)
         return false;
 
-    ExecutionObservableCompartments obs(cx);
+    ExecutionObservableRealms obs(cx);
     if (!obs.init())
         return false;
 
     if (dbg->debuggees.has(global)) {
         dbg->removeDebuggeeGlobal(cx->runtime()->defaultFreeOp(), global, nullptr);
 
-        // Only update the compartment if there are no Debuggers left, as it's
-        // expensive to check if no other Debugger has a live script or frame hook
-        // on any of the current on-stack debuggee frames.
-        if (global->getDebuggers()->empty() && !obs.add(global->compartment()))
+        // Only update the realm if there are no Debuggers left, as it's
+        // expensive to check if no other Debugger has a live script or frame
+        // hook on any of the current on-stack debuggee frames.
+        if (global->getDebuggers()->empty() && !obs.add(global->realm()))
             return false;
         if (!updateExecutionObservability(cx, obs, NotObserving))
             return false;
@@ -3794,7 +3807,7 @@ Debugger::removeAllDebuggees(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "removeAllDebuggees", args, dbg);
 
-    ExecutionObservableCompartments obs(cx);
+    ExecutionObservableRealms obs(cx);
     if (!obs.init())
         return false;
 
@@ -3803,7 +3816,7 @@ Debugger::removeAllDebuggees(JSContext* cx, unsigned argc, Value* vp)
         dbg->removeDebuggeeGlobal(cx->runtime()->defaultFreeOp(), global, &e);
 
         // See note about adding to the observable set in removeDebuggee.
-        if (global->getDebuggers()->empty() && !obs.add(global->compartment()))
+        if (global->getDebuggers()->empty() && !obs.add(global->realm()))
             return false;
     }
 
@@ -3888,8 +3901,7 @@ Debugger::clearAllBreakpoints(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "clearAllBreakpoints", args, dbg);
     for (WeakGlobalObjectSet::Range r = dbg->debuggees.all(); !r.empty(); r.popFront())
-        r.front()->compartment()->clearBreakpointsIn(cx->runtime()->defaultFreeOp(),
-                                                     dbg, nullptr);
+        r.front()->realm()->clearBreakpointsIn(cx->runtime()->defaultFreeOp(), dbg, nullptr);
     return true;
 }
 
@@ -3975,25 +3987,24 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
      * then adding global would create a cycle. (Typically nobody is debugging
      * the debugger, in which case we zip through this code without looping.)
      */
-    Vector<JSCompartment*> visited(cx);
-    if (!visited.append(object->compartment()))
+    Vector<Realm*> visited(cx);
+    if (!visited.append(object->realm()))
         return false;
     for (size_t i = 0; i < visited.length(); i++) {
-        JSCompartment* c = visited[i];
-        if (c == debuggeeRealm) {
+        Realm* realm = visited[i];
+        if (realm == debuggeeRealm) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_LOOP);
             return false;
         }
 
         /*
-         * Find all compartments containing debuggers debugging c's global
-         * object. Add those compartments to visited.
+         * Find all realms containing debuggers debugging realm's global object.
+         * Add those realms to visited.
          */
-        if (c->isDebuggee()) {
-            Realm* realm = JS::GetRealmForCompartment(c);
+        if (realm->isDebuggee()) {
             GlobalObject::DebuggerVector* v = realm->maybeGlobal()->getDebuggers();
             for (auto p = v->begin(); p != v->end(); p++) {
-                JSCompartment* next = (*p)->object->compartment();
+                Realm* next = (*p)->object->realm();
                 if (Find(visited, next) == visited.end() && !visited.append(next))
                     return false;
             }
@@ -4008,8 +4019,8 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
      * 3. it must be in zone->getDebuggers(),
      * 4. the debuggee's zone must be in this->debuggeeZones,
      * 5. if we are tracking allocations, the SavedStacksMetadataBuilder must be
-     *    installed for this compartment, and
-     * 6. JSCompartment::isDebuggee()'s bit must be set.
+     *    installed for this realm, and
+     * 6. Realm::isDebuggee()'s bit must be set.
      *
      * All six indications must be kept consistent.
      */
@@ -4073,12 +4084,12 @@ Debugger::addDebuggeeGlobal(JSContext* cx, Handle<GlobalObject*> global)
     });
 
     // (6)
-    AutoRestoreCompartmentDebugMode debugModeGuard(debuggeeRealm);
+    AutoRestoreRealmDebugMode debugModeGuard(debuggeeRealm);
     debuggeeRealm->setIsDebuggee();
     debuggeeRealm->updateDebuggerObservesAsmJS();
     debuggeeRealm->updateDebuggerObservesBinarySource();
     debuggeeRealm->updateDebuggerObservesCoverage();
-    if (observesAllExecution() && !ensureExecutionObservabilityOfCompartment(cx, debuggeeRealm))
+    if (observesAllExecution() && !ensureExecutionObservabilityOfRealm(cx, debuggeeRealm))
         return false;
 
     globalDebuggersGuard.release();
@@ -4178,11 +4189,11 @@ Debugger::removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
         nextbp = bp->nextInDebugger();
         switch (bp->site->type()) {
           case BreakpointSite::Type::JS:
-            if (bp->site->asJS()->script->compartment() == global->compartment())
+            if (bp->site->asJS()->script->realm() == global->realm())
                 bp->destroy(fop);
             break;
           case BreakpointSite::Type::Wasm:
-            if (bp->asWasm()->wasmInstance->compartment() == global->compartment())
+            if (bp->asWasm()->wasmInstance->realm() == global->realm())
                 bp->destroy(fop);
             break;
         }
@@ -4191,18 +4202,18 @@ Debugger::removeDebuggeeGlobal(FreeOp* fop, GlobalObject* global,
 
     /*
      * If we are tracking allocation sites, we need to remove the object
-     * metadata callback from this global's compartment.
+     * metadata callback from this global's realm.
      */
     if (trackingAllocationSites)
         Debugger::removeAllocationsTracking(*global);
 
     if (global->getDebuggers()->empty()) {
-        global->compartment()->unsetIsDebuggee();
+        global->realm()->unsetIsDebuggee();
     } else {
-        global->compartment()->updateDebuggerObservesAllExecution();
-        global->compartment()->updateDebuggerObservesAsmJS();
-        global->compartment()->updateDebuggerObservesBinarySource();
-        global->compartment()->updateDebuggerObservesCoverage();
+        global->realm()->updateDebuggerObservesAllExecution();
+        global->realm()->updateDebuggerObservesAsmJS();
+        global->realm()->updateDebuggerObservesBinarySource();
+        global->realm()->updateDebuggerObservesCoverage();
     }
 }
 
@@ -4446,7 +4457,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         // TODOshu: Until such time that wasm modules are real ES6 modules,
         // unconditionally consider all wasm toplevel instance scripts.
         for (WeakGlobalObjectSet::Range r = debugger->allDebuggees(); !r.empty(); r.popFront()) {
-            for (wasm::Instance* instance : r.front()->compartment()->wasm.instances()) {
+            for (wasm::Instance* instance : r.front()->realm()->wasm.instances()) {
                 consider(instance->object());
                 if (oom) {
                     ReportOutOfMemory(cx);
@@ -4584,7 +4595,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         // everything.
         for (auto r = compartments.all(); !r.empty(); r.popFront()) {
             JSCompartment* comp = r.front();
-            if (!comp->ensureDelazifyScriptsForDebugger(cx))
+            Realm* realm = JS::GetRealmForCompartment(comp);
+            if (!realm->ensureDelazifyScriptsForDebugger(cx))
                 return false;
         }
         return true;
@@ -4958,11 +4970,11 @@ Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp)
         // wrapping can GC and collect realms from under us, while iterating.
         JS::AutoCheckCannotGC nogc;
 
-        for (RealmsIter r(cx->runtime(), SkipAtoms); !r.done(); r.next()) {
+        for (RealmsIter r(cx->runtime()); !r.done(); r.next()) {
             if (r->creationOptions().invisibleToDebugger())
                 continue;
 
-            r->scheduledForDestruction = false;
+            r->compartment()->scheduledForDestruction = false;
 
             GlobalObject* global = r->maybeGlobal();
 
@@ -5061,7 +5073,8 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
                                                                   length,
                                                                   /* foldConstants = */ true,
                                                                   usedNames, nullptr, nullptr,
-                                                                  sourceObject);
+                                                                  sourceObject,
+                                                                  frontend::ParseGoal::Script);
     JS::WarningReporter older = JS::SetWarningReporter(cx, nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of memory we report
@@ -5415,7 +5428,7 @@ struct DebuggerScriptGetStartLineMatcher
     using ReturnType = uint32_t;
 
     ReturnType match(HandleScript script) {
-        return uint32_t(script->lineno());
+        return script->lineno();
     }
     ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         return 1;

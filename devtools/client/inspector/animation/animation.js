@@ -291,15 +291,12 @@ class AnimationInspector {
   }
 
   async onAnimationsMutation(changes) {
-    const animations = [...this.state.animations];
-
-    // Update other animations as well since the currentTime would be proceeded.
-    // Because the scrubber position is related the currentTime.
-    await this.updateAnimations(animations);
+    let animations = [...this.state.animations];
+    const addedAnimations = [];
 
     for (const {type, player: animation} of changes) {
       if (type === "added") {
-        animations.push(animation);
+        addedAnimations.push(animation);
         animation.on("changed", this.onAnimationStateChanged);
       } else if (type === "removed") {
         const index = animations.indexOf(animation);
@@ -308,7 +305,16 @@ class AnimationInspector {
       }
     }
 
-    this.updateState(animations);
+    // Update existing other animations as well since the currentTime would be proceeded
+    // sice the scrubber position is related the currentTime.
+    // Also, don't update the state of removed animations since React components
+    // may refer to the same instance still.
+    await this.updateAnimations(animations);
+
+    // Get rid of animations that were removed during async updateAnimations().
+    animations = animations.filter(animation => !!animation.state.type);
+
+    this.updateState(animations.concat(addedAnimations));
   }
 
   onElementPickerStarted() {
@@ -434,15 +440,23 @@ class AnimationInspector {
         await this.inspector.target.actorHasMethod("animations", "pauseSome");
     }
 
+    const { animations, timeScale } = this.state;
+
     try {
+      if (doPlay && animations.every(animation =>
+                      timeScale.getEndTime(animation) <= animation.state.currentTime)) {
+        await this.animationsFront.setCurrentTimes(animations, 0, true,
+                                                   { relativeToCreatedTime: true });
+      }
+
       // If the server does not support pauseSome/playSome function, (which happens
       // when connected to server older than FF62), use pauseAll/playAll instead.
       // See bug 1456857.
       if (this.hasPausePlaySome) {
         if (doPlay) {
-          await this.animationsFront.playSome(this.state.animations);
+          await this.animationsFront.playSome(animations);
         } else {
-          await this.animationsFront.pauseSome(this.state.animations);
+          await this.animationsFront.pauseSome(animations);
         }
       } else if (doPlay) {
         await this.animationsFront.playAll();
@@ -450,7 +464,7 @@ class AnimationInspector {
         await this.animationsFront.pauseAll();
       }
 
-      await this.updateAnimations(this.state.animations);
+      await this.updateAnimations(animations);
     } catch (e) {
       // Expected if we've already been destroyed or other node have been selected
       // in the meantime.
@@ -458,7 +472,7 @@ class AnimationInspector {
       return;
     }
 
-    await this.updateState([...this.state.animations]);
+    await this.updateState([...animations]);
   }
 
   /**
@@ -518,6 +532,11 @@ class AnimationInspector {
    *         https://drafts.csswg.org/web-animations/#the-animation-interface
    */
   simulateAnimation(keyframes, effectTiming, isElementNeeded) {
+    // Don't simulate animation if the animation inspector is already destroyed.
+    if (!this.win) {
+      return null;
+    }
+
     let targetEl = null;
 
     if (isElementNeeded) {
@@ -628,12 +647,21 @@ class AnimationInspector {
   }
 
   updateState(animations) {
+    // Animation inspector already destroyed
+    if (!this.inspector) {
+      return;
+    }
+
     this.stopAnimationsCurrentTimeTimer();
 
     this.inspector.store.dispatch(updateAnimations(animations));
 
     if (hasRunningAnimation(animations)) {
       this.startAnimationsCurrentTimeTimer();
+    } else {
+      // Even no running animations, update the current time once
+      // so as to show the state.
+      this.onCurrentTimeTimerUpdated(this.state.timeScale.getCurrentTime());
     }
   }
 }

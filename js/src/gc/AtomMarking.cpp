@@ -83,7 +83,7 @@ AtomMarkingRuntime::computeBitmapFromChunkMarkBits(JSRuntime* runtime, DenseBitm
     if (!bitmap.ensureSpace(allocatedWords))
         return false;
 
-    Zone* atomsZone = runtime->unsafeAtomsRealm()->zone();
+    Zone* atomsZone = runtime->unsafeAtomsZone();
     for (auto thingKind : AllAllocKinds()) {
         for (ArenaIter aiter(atomsZone, thingKind); !aiter.done(); aiter.next()) {
             Arena* arena = aiter.get();
@@ -117,7 +117,7 @@ AddBitmapToChunkMarkBits(JSRuntime* runtime, Bitmap& bitmap)
     static_assert(ArenaBitmapBits == ArenaBitmapWords * JS_BITS_PER_WORD,
                   "ArenaBitmapWords must evenly divide ArenaBitmapBits");
 
-    Zone* atomsZone = runtime->unsafeAtomsRealm()->zone();
+    Zone* atomsZone = runtime->unsafeAtomsZone();
     for (auto thingKind : AllAllocKinds()) {
         for (ArenaIter aiter(atomsZone, thingKind); !aiter.done(); aiter.next()) {
             Arena* arena = aiter.get();
@@ -190,7 +190,10 @@ AtomMarkingRuntime::markAtomValue(JSContext* cx, const Value& value)
         markAtom(cx, value.toSymbol());
         return;
     }
-    MOZ_ASSERT_IF(value.isGCThing(), value.isObject() || value.isPrivateGCThing());
+    MOZ_ASSERT_IF(value.isGCThing(),
+                  value.isObject() ||
+                  value.isPrivateGCThing() ||
+                  IF_BIGINT(value.isBigInt(), false));
 }
 
 void
@@ -272,7 +275,10 @@ AtomMarkingRuntime::valueIsMarked(Zone* zone, const Value& value)
     if (value.isSymbol())
         return atomIsMarked(zone, value.toSymbol());
 
-    MOZ_ASSERT_IF(value.isGCThing(), value.isObject() || value.isPrivateGCThing());
+    MOZ_ASSERT_IF(value.isGCThing(),
+                  value.isObject() ||
+                  value.isPrivateGCThing() ||
+                  IF_BIGINT(value.isBigInt(), false));
     return true;
 }
 

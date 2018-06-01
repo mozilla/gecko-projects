@@ -674,7 +674,7 @@ JS_SetExternalStringSizeofCallback(JSContext* cx, JSExternalStringSizeofCallback
     cx->runtime()->externalStringSizeofCallback = callback;
 }
 
-JS_PUBLIC_API(JSCompartment*)
+JS_PUBLIC_API(Realm*)
 JS::EnterRealm(JSContext* cx, JSObject* target)
 {
     AssertHeapIsIdle();
@@ -682,7 +682,7 @@ JS::EnterRealm(JSContext* cx, JSObject* target)
 
     Realm* oldRealm = cx->realm();
     cx->enterRealmOf(target);
-    return JS::GetRealmForCompartment(oldRealm);
+    return oldRealm;
 }
 
 JS_PUBLIC_API(void)
@@ -797,7 +797,7 @@ ReleaseAssertObjectHasNoWrappers(JSContext* cx, HandleObject target)
 {
     RootedValue origv(cx, ObjectValue(*target));
 
-    for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {
+    for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
         if (c->lookupWrapper(origv))
             MOZ_CRASH("wrapper found for target object");
     }
@@ -890,7 +890,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         // destination, then we know that we won't find a wrapper in the
         // destination's cross compartment map and that the same
         // object will continue to work.
-        AutoRealmUnchecked ar(cx, origobj->compartment());
+        AutoRealmUnchecked ar(cx, origobj->realm());
         if (!JSObject::swap(cx, origobj, target))
             MOZ_CRASH();
         newIdentity = origobj;
@@ -924,7 +924,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
     // Lastly, update the original object to point to the new one.
     if (origobj->compartment() != destination) {
         RootedObject newIdentityWrapper(cx, newIdentity);
-        AutoRealmUnchecked ar(cx, origobj->compartment());
+        AutoRealmUnchecked ar(cx, origobj->realm());
         if (!JS_WrapObject(cx, &newIdentityWrapper))
             MOZ_CRASH();
         MOZ_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
@@ -954,7 +954,7 @@ JS_RefreshCrossCompartmentWrappers(JSContext* cx, HandleObject obj)
 JS_PUBLIC_API(bool)
 JS_InitStandardClasses(JSContext* cx, HandleObject obj)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -1294,7 +1294,7 @@ JS_GlobalLexicalEnvironment(JSObject* obj)
 extern JS_PUBLIC_API(bool)
 JS_HasExtensibleLexicalEnvironment(JSObject* obj)
 {
-    return obj->is<GlobalObject>() || obj->compartment()->getNonSyntacticLexicalEnvironment(obj);
+    return obj->is<GlobalObject>() || ObjectRealm::get(obj).getNonSyntacticLexicalEnvironment(obj);
 }
 
 extern JS_PUBLIC_API(JSObject*)
@@ -1304,7 +1304,7 @@ JS_ExtensibleLexicalEnvironment(JSObject* obj)
     if (obj->is<GlobalObject>())
         lexical = JS_GlobalLexicalEnvironment(obj);
     else
-        lexical = obj->compartment()->getNonSyntacticLexicalEnvironment(obj);
+        lexical = ObjectRealm::get(obj).getNonSyntacticLexicalEnvironment(obj);
     MOZ_ASSERT(lexical);
     return lexical;
 }
@@ -1974,7 +1974,7 @@ JS_FireOnNewGlobalObject(JSContext* cx, JS::HandleObject global)
 JS_PUBLIC_API(JSObject*)
 JS_NewObject(JSContext* cx, const JSClass* jsclasp)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -1991,7 +1991,7 @@ JS_NewObject(JSContext* cx, const JSClass* jsclasp)
 JS_PUBLIC_API(JSObject*)
 JS_NewObjectWithGivenProto(JSContext* cx, const JSClass* jsclasp, HandleObject proto)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, proto);
@@ -2009,7 +2009,7 @@ JS_NewObjectWithGivenProto(JSContext* cx, const JSClass* jsclasp, HandleObject p
 JS_PUBLIC_API(JSObject*)
 JS_NewPlainObject(JSContext* cx)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -2909,7 +2909,7 @@ JS_PUBLIC_API(bool)
 JS_CallFunctionValue(JSContext* cx, HandleObject obj, HandleValue fval, const HandleValueArray& args,
                      MutableHandleValue rval)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, fval, args);
@@ -2926,7 +2926,7 @@ JS_PUBLIC_API(bool)
 JS_CallFunction(JSContext* cx, HandleObject obj, HandleFunction fun, const HandleValueArray& args,
                 MutableHandleValue rval)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, fun, args);
@@ -2944,7 +2944,7 @@ JS_PUBLIC_API(bool)
 JS_CallFunctionName(JSContext* cx, HandleObject obj, const char* name, const HandleValueArray& args,
                     MutableHandleValue rval)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, args);
@@ -3378,7 +3378,7 @@ JS_SetReservedSlot(JSObject* obj, uint32_t index, const Value& value)
 JS_PUBLIC_API(JSObject*)
 JS_NewArrayObject(JSContext* cx, const JS::HandleValueArray& contents)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -3389,7 +3389,7 @@ JS_NewArrayObject(JSContext* cx, const JS::HandleValueArray& contents)
 JS_PUBLIC_API(JSObject*)
 JS_NewArrayObject(JSContext* cx, size_t length)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -3512,7 +3512,7 @@ JS_PUBLIC_API(JSFunction*)
 JS_NewFunction(JSContext* cx, JSNative native, unsigned nargs, unsigned flags,
                const char* name)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
 
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
@@ -3532,7 +3532,7 @@ JS_NewFunction(JSContext* cx, JSNative native, unsigned nargs, unsigned flags,
 JS_PUBLIC_API(JSFunction*)
 JS::GetSelfHostedFunction(JSContext* cx, const char* selfHostedName, HandleId id, unsigned nargs)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, id);
@@ -3630,7 +3630,7 @@ CreateNonSyntacticEnvironmentChain(JSContext* cx, AutoObjectVector& envChain,
         //
         // TODOshu: disallow the subscript loader from using non-distinguished
         // objects as dynamic scopes.
-        env.set(cx->compartment()->getOrCreateNonSyntacticLexicalEnvironment(cx, env));
+        env.set(ObjectRealm::get(env).getOrCreateNonSyntacticLexicalEnvironment(cx, env));
         if (!env)
             return false;
     } else {
@@ -3788,7 +3788,7 @@ JS_IsConstructor(JSFunction* fun)
 JS_PUBLIC_API(bool)
 JS_DefineFunctions(JSContext* cx, HandleObject obj, const JSFunctionSpec* fs)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -3800,7 +3800,7 @@ JS_PUBLIC_API(JSFunction*)
 JS_DefineFunction(JSContext* cx, HandleObject obj, const char* name, JSNative call,
                   unsigned nargs, unsigned attrs)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -3816,7 +3816,7 @@ JS_DefineUCFunction(JSContext* cx, HandleObject obj,
                     const char16_t* name, size_t namelen, JSNative call,
                     unsigned nargs, unsigned attrs)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
@@ -3831,7 +3831,7 @@ extern JS_PUBLIC_API(JSFunction*)
 JS_DefineFunctionById(JSContext* cx, HandleObject obj, HandleId id, JSNative call,
                       unsigned nargs, unsigned attrs)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, id);
@@ -4065,11 +4065,11 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
 {
     strictOption = cx->options().strictMode();
     extraWarningsOption = cx->realm()->behaviors().extraWarnings(cx);
-    isProbablySystemCode = cx->compartment()->isProbablySystemCode();
+    isProbablySystemCode = cx->realm()->isProbablySystemCode();
     werrorOption = cx->options().werror();
     if (!cx->options().asmJS())
         asmJSOption = AsmJSOption::Disabled;
-    else if (cx->compartment()->debuggerObservesAsmJS())
+    else if (cx->realm()->debuggerObservesAsmJS())
         asmJSOption = AsmJSOption::DisabledByDebugger;
     else
         asmJSOption = AsmJSOption::Enabled;
@@ -4082,7 +4082,7 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
 {
     ScopeKind scopeKind = options.nonSyntacticScope ? ScopeKind::NonSyntactic : ScopeKind::Global;
 
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -4223,7 +4223,7 @@ JSScript*
 JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
                  const uint8_t* buf, size_t length)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -4479,7 +4479,8 @@ JS_BufferIsCompilableUnit(JSContext* cx, HandleObject obj, const char* utf8, siz
                                                                   options, chars, length,
                                                                   /* foldConstants = */ true,
                                                                   usedNames, nullptr, nullptr,
-                                                                  sourceObject);
+                                                                  sourceObject,
+                                                                  frontend::ParseGoal::Script);
     JS::WarningReporter older = JS::SetWarningReporter(cx, nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of source, we
@@ -4546,7 +4547,7 @@ CompileFunction(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                 HandleObject enclosingEnv, HandleScope enclosingScope,
                 MutableHandleFunction fun)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, enclosingEnv);
@@ -4715,7 +4716,7 @@ JS::ExposeScriptToDebugger(JSContext* cx, HandleScript script)
 JS_PUBLIC_API(JSString*)
 JS_DecompileScript(JSContext* cx, HandleScript script)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
 
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
@@ -4733,7 +4734,7 @@ JS_DecompileScript(JSContext* cx, HandleScript script)
 JS_PUBLIC_API(JSString*)
 JS_DecompileFunction(JSContext* cx, HandleFunction fun)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, fun);
@@ -4743,7 +4744,7 @@ JS_DecompileFunction(JSContext* cx, HandleFunction fun)
 MOZ_NEVER_INLINE static bool
 ExecuteScript(JSContext* cx, HandleObject scope, HandleScript script, Value* rval)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, scope, script);
@@ -4837,7 +4838,7 @@ Evaluate(JSContext* cx, ScopeKind scopeKind, HandleObject env,
          SourceBufferHolder& srcBuf, MutableHandleValue rval)
 {
     CompileOptions options(cx, optionsArg);
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, env);
@@ -4960,11 +4961,25 @@ JS::SetModuleResolveHook(JSRuntime* rt, JS::ModuleResolveHook func)
     rt->moduleResolveHook = func;
 }
 
+JS_PUBLIC_API(JS::ModuleMetadataHook)
+JS::GetModuleMetadataHook(JSRuntime* rt)
+{
+    AssertHeapIsIdle();
+    return rt->moduleMetadataHook;
+}
+
+JS_PUBLIC_API(void)
+JS::SetModuleMetadataHook(JSRuntime* rt, JS::ModuleMetadataHook func)
+{
+    AssertHeapIsIdle();
+    rt->moduleMetadataHook = func;
+}
+
 JS_PUBLIC_API(bool)
 JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
                   SourceBufferHolder& srcBuf, JS::MutableHandleObject module)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -5122,7 +5137,7 @@ JS::SetPromiseRejectionTrackerCallback(JSContext* cx, JSPromiseRejectionTrackerC
 JS_PUBLIC_API(JSObject*)
 JS::NewPromiseObject(JSContext* cx, HandleObject executor, HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, executor, proto);
@@ -5376,7 +5391,7 @@ JS::NewReadableDefaultStreamObject(JSContext* cx,
                                    double highWaterMark /* = 1 */,
                                    JS::HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -5398,7 +5413,7 @@ JS::NewReadableByteStreamObject(JSContext* cx,
                                 double highWaterMark /* = 1 */,
                                 JS::HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -5457,7 +5472,7 @@ JS::NewReadableExternalSourceStreamObject(JSContext* cx, void* underlyingSource,
                                           uint8_t flags /* = 0 */,
                                           HandleObject proto /* = nullptr */)
 {
-    MOZ_ASSERT(!cx->realm()->isAtomsRealm());
+    MOZ_ASSERT(!cx->zone()->isAtomsZone());
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
 
@@ -7498,7 +7513,7 @@ DescribeScriptedCaller(JSContext* cx, AutoFilename* filename, unsigned* lineno,
     if (!cx->compartment())
         return false;
 
-    NonBuiltinFrameIter i(cx, cx->compartment()->principals());
+    NonBuiltinFrameIter i(cx, cx->realm()->principals());
     if (i.done())
         return false;
 
@@ -7529,37 +7544,58 @@ DescribeScriptedCaller(JSContext* cx, AutoFilename* filename, unsigned* lineno,
     return true;
 }
 
-// Fast path to get the activation to use for GetScriptedCallerGlobal. If this
-// returns false, the fast path didn't work out and the caller has to use the
-// (much slower) NonBuiltinFrameIter path.
+// Fast path to get the activation and realm to use for GetScriptedCallerGlobal.
+// If this returns false, the fast path didn't work out and the caller has to
+// use the (much slower) NonBuiltinFrameIter path.
 //
 // The optimization here is that we skip Ion-inlined frames and only look at
-// 'outer' frames. That's fine: each activation is tied to a single compartment,
-// so if an activation contains at least one non-self-hosted frame, we can use
-// the activation's global for GetScriptedCallerGlobal. If, however, all 'outer'
-// frames are self-hosted, it's possible Ion inlined a non-self-hosted script,
-// so we must return false and use the slower path.
+// 'outer' frames. That's fine because Ion doesn't inline cross-realm calls.
+// However, GetScriptedCallerGlobal has to skip self-hosted frames and Ion
+// can inline self-hosted scripts, so we have to be careful:
+//
+// * When we see a non-self-hosted outer script, it's possible we inlined
+//   self-hosted scripts into it but that doesn't matter because these scripts
+//   all have the same realm/global anyway.
+//
+// * When we see a self-hosted outer script, it's possible we inlined
+//   non-self-hosted scripts into it, so we have to give up because in this
+//   case, whether or not to skip the self-hosted frame (to the possibly
+//   different-realm caller) requires the slow path to handle inlining. Baseline
+//   and the interpreter don't inline so this only affects Ion.
 static bool
-GetScriptedCallerActivationFast(JSContext* cx, Activation** activation)
+GetScriptedCallerActivationRealmFast(JSContext* cx, Activation** activation, Realm** realm)
 {
     ActivationIterator activationIter(cx);
 
     if (activationIter.done()) {
         *activation = nullptr;
+        *realm = nullptr;
         return true;
     }
 
-    *activation = activationIter.activation();
-
     if (activationIter->isJit()) {
         for (OnlyJSJitFrameIter iter(activationIter); !iter.done(); ++iter) {
-            if (iter.frame().isScripted() && !iter.frame().script()->selfHosted())
+            if (!iter.frame().isScripted())
+                continue;
+            if (!iter.frame().script()->selfHosted()) {
+                *activation = activationIter.activation();
+                *realm = iter.frame().script()->realm();
                 return true;
+            }
+            if (iter.frame().isIonScripted()) {
+                // Ion might have inlined non-self-hosted scripts in this
+                // self-hosted script.
+                return false;
+            }
         }
     } else if (activationIter->isInterpreter()) {
-        for (InterpreterFrameIterator iter((*activation)->asInterpreter()); !iter.done(); ++iter) {
-            if (!iter.frame()->script()->selfHosted())
+        InterpreterActivation* act = activationIter->asInterpreter();
+        for (InterpreterFrameIterator iter(act); !iter.done(); ++iter) {
+            if (!iter.frame()->script()->selfHosted()) {
+                *activation = act;
+                *realm = iter.frame()->script()->realm();
                 return true;
+            }
         }
     }
 
@@ -7570,8 +7606,8 @@ JS_PUBLIC_API(JSObject*)
 GetScriptedCallerGlobal(JSContext* cx)
 {
     Activation* activation;
-
-    if (GetScriptedCallerActivationFast(cx, &activation)) {
+    Realm* realm;
+    if (GetScriptedCallerActivationRealmFast(cx, &activation, &realm)) {
         if (!activation)
             return nullptr;
     } else {
@@ -7579,18 +7615,20 @@ GetScriptedCallerGlobal(JSContext* cx)
         if (i.done())
             return nullptr;
         activation = i.activation();
+        realm = i.realm();
     }
+
+    MOZ_ASSERT(realm->compartment() == activation->compartment());
 
     // If the caller is hidden, the embedding wants us to return null here so
     // that it can check its own stack (see HideScriptedCaller).
     if (activation->scriptedCallerIsHidden())
         return nullptr;
 
-    GlobalObject* global = JS::GetRealmForCompartment(activation->compartment())->maybeGlobal();
+    GlobalObject* global = realm->maybeGlobal();
 
-    // No one should be running code in the atoms realm or running code in
-    // a compartment without any live objects, so there should definitely be a
-    // live global.
+    // No one should be running code in a realm without any live objects, so
+    // there should definitely be a live global.
     MOZ_ASSERT(global);
 
     return global;
@@ -7772,7 +7810,7 @@ JS::SetOutOfMemoryCallback(JSContext* cx, OutOfMemoryCallback cb, void* data)
 
 JS::FirstSubsumedFrame::FirstSubsumedFrame(JSContext* cx,
                                            bool ignoreSelfHostedFrames /* = true */)
-  : JS::FirstSubsumedFrame(cx, cx->compartment()->principals(), ignoreSelfHostedFrames)
+  : JS::FirstSubsumedFrame(cx, cx->realm()->principals(), ignoreSelfHostedFrames)
 { }
 
 JS_PUBLIC_API(bool)
@@ -7781,11 +7819,11 @@ JS::CaptureCurrentStack(JSContext* cx, JS::MutableHandleObject stackp,
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
-    JSCompartment* compartment = cx->compartment();
+    Realm* realm = cx->realm();
     Rooted<SavedFrame*> frame(cx);
-    if (!compartment->savedStacks().saveCurrentStack(cx, &frame, mozilla::Move(capture)))
+    if (!realm->savedStacks().saveCurrentStack(cx, &frame, mozilla::Move(capture)))
         return false;
     stackp.set(frame.get());
     return true;
@@ -7798,13 +7836,12 @@ JS::CopyAsyncStack(JSContext* cx, JS::HandleObject asyncStack,
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_RELEASE_ASSERT(cx->compartment());
+    MOZ_RELEASE_ASSERT(cx->realm());
 
     js::AssertObjectIsSavedFrameOrWrapper(cx, asyncStack);
-    JSCompartment* compartment = cx->compartment();
+    Realm* realm = cx->realm();
     Rooted<SavedFrame*> frame(cx);
-    if (!compartment->savedStacks().copyAsyncStack(cx, asyncStack, asyncCause,
-                                                   &frame, maxFrameCount))
+    if (!realm->savedStacks().copyAsyncStack(cx, asyncStack, asyncCause, &frame, maxFrameCount))
         return false;
     stackp.set(frame.get());
     return true;

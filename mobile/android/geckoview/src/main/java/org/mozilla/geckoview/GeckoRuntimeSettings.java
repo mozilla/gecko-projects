@@ -6,11 +6,17 @@
 
 package org.mozilla.geckoview;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
 import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+
+import org.mozilla.geckoview.GeckoSession.TrackingProtectionDelegate;
 
 public final class GeckoRuntimeSettings implements Parcelable {
     /**
@@ -152,6 +158,62 @@ public final class GeckoRuntimeSettings implements Parcelable {
             mSettings.mDebugPause = enabled;
             return this;
         }
+
+        /**
+         * Set cookie storage behavior.
+         *
+         * @param behavior The storage behavior that should be applied.
+         *                 Use one of the {@link #COOKIE_ACCEPT_ALL COOKIE_ACCEPT_*} flags.
+         * @return The Builder instance.
+         */
+        public @NonNull Builder cookieBehavior(@CookieBehavior int behavior) {
+            mSettings.mCookieBehavior.set(behavior);
+            return this;
+        }
+
+        /**
+         * Set the cookie lifetime.
+         *
+         * @param lifetime The enforced cookie lifetime.
+         *                 Use one of the {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
+         *                 Use {@link #cookieLifetimeDays} to set expiration
+         *                 days for {@link #COOKIE_LIFETIME_DAYS}.
+         * @return The Builder instance.
+         */
+        public @NonNull Builder cookieLifetime(@CookieLifetime int lifetime) {
+            mSettings.mCookieLifetime.set(lifetime);
+            return this;
+        }
+
+        /**
+         * Set the expiration days for {@link #COOKIE_LIFETIME_DAYS}.
+         *
+         * @param days Limit lifetime to N days. Only enforced for {@link #COOKIE_LIFETIME_DAYS}.
+         * @return The Builder instance.
+         */
+        public @NonNull Builder cookieLifetimeDays(int days) {
+            if (mSettings.mCookieLifetime.get() != COOKIE_LIFETIME_DAYS) {
+                throw new IllegalStateException(
+                    "Setting expiration days for incompatible cookie lifetime");
+            }
+            mSettings.mCookieLifetimeDays.set(days);
+            return this;
+        }
+
+        /**
+         * Set tracking protection blocking categories.
+         *
+         * @param categories The categories of trackers that should be blocked.
+         *                   Use one or more of the
+         *                   {@link TrackingProtectionDelegate#CATEGORY_AD TrackingProtectionDelegate.CATEGORY_*} flags.
+         * @return This Builder instance.
+         **/
+        public @NonNull Builder trackingProtectionCategories(
+                @TrackingProtectionDelegate.Category int categories) {
+            mSettings.mTrackingProtection
+                     .set(TrackingProtection.buildPrefValue(categories));
+            return this;
+        }
     }
 
     /* package */ GeckoRuntime runtime;
@@ -195,12 +257,22 @@ public final class GeckoRuntimeSettings implements Parcelable {
         "devtools.debugger.remote-enabled", false);
     /* package */ Pref<Boolean> mWebFonts = new Pref<Boolean>(
         "browser.display.use_document_fonts", true);
+    /* package */ Pref<Integer> mCookieBehavior = new Pref<Integer>(
+        "network.cookie.cookieBehavior", COOKIE_ACCEPT_ALL);
+    /* package */ Pref<Integer> mCookieLifetime = new Pref<Integer>(
+        "network.cookie.lifetimePolicy", COOKIE_LIFETIME_NORMAL);
+    /* package */ Pref<Integer> mCookieLifetimeDays = new Pref<Integer>(
+        "network.cookie.lifetime.days", 90);
+    /* package */ Pref<String> mTrackingProtection = new Pref<String>(
+        "urlclassifier.trackingTable", "");
+
     /* package */ boolean mNativeCrashReporting;
     /* package */ boolean mJavaCrashReporting;
     /* package */ boolean mDebugPause;
 
     private final Pref<?>[] mPrefs = new Pref<?>[] {
-        mJavaScript, mRemoteDebugging, mWebFonts
+        mCookieBehavior, mCookieLifetime, mCookieLifetimeDays, mJavaScript,
+        mRemoteDebugging, mTrackingProtection, mWebFonts
     };
 
     /* package */ GeckoRuntimeSettings() {
@@ -351,6 +423,146 @@ public final class GeckoRuntimeSettings implements Parcelable {
      * @return True if the pause is enabled.
      */
     public boolean getPauseForDebuggerEnabled() { return mDebugPause; }
+
+    // Sync values with nsICookieService.idl.
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({ COOKIE_ACCEPT_ALL, COOKIE_ACCEPT_FIRST_PARTY,
+              COOKIE_ACCEPT_NONE, COOKIE_ACCEPT_VISITED })
+    public @interface CookieBehavior {}
+    /**
+     * Accept first-party and third-party cookies and site data.
+     */
+    public static final int COOKIE_ACCEPT_ALL = 0;
+    /**
+     * Accept only first-party cookies and site data to block cookies which are
+     * not associated with the domain of the visited site.
+     */
+    public static final int COOKIE_ACCEPT_FIRST_PARTY = 1;
+    /**
+     * Do not store any cookies and site data.
+     */
+    public static final int COOKIE_ACCEPT_NONE = 2;
+    /**
+     * Accept first-party and third-party cookies and site data only from
+     * sites previously visited in a first-party context.
+     */
+    public static final int COOKIE_ACCEPT_VISITED = 3;
+
+    /**
+     * Get the assigned cookie storage behavior.
+     *
+     * @return The assigned behavior, as one of {@link #COOKIE_ACCEPT_ALL COOKIE_ACCEPT_*} flags.
+     */
+    public @CookieBehavior int getCookieBehavior() {
+        return mCookieBehavior.get();
+    }
+
+    /**
+     * Set cookie storage behavior.
+     *
+     * @param behavior The storage behavior that should be applied.
+     *                 Use one of the {@link #COOKIE_ACCEPT_ALL COOKIE_ACCEPT_*} flags.
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setCookieBehavior(
+            @CookieBehavior int behavior) {
+        mCookieBehavior.set(behavior);
+        return this;
+    }
+
+    // Sync values with nsICookieService.idl.
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({ COOKIE_LIFETIME_NORMAL, COOKIE_LIFETIME_RUNTIME,
+              COOKIE_LIFETIME_DAYS })
+    public @interface CookieLifetime {}
+    /**
+     * Accept default cookie lifetime.
+     */
+    public static final int COOKIE_LIFETIME_NORMAL = 0;
+    /**
+     * Downgrade cookie lifetime to this runtime's lifetime.
+     */
+    public static final int COOKIE_LIFETIME_RUNTIME = 2;
+    /**
+     * Limit cookie lifetime to N days.
+     * Defaults to 90 days.
+     */
+    public static final int COOKIE_LIFETIME_DAYS = 3;
+
+    /**
+     * Get the assigned cookie lifetime.
+     *
+     * @return The assigned lifetime, as one of {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
+     */
+    public @CookieBehavior int getCookieLifetime() {
+        return mCookieLifetime.get();
+    }
+
+    /**
+     * Get the enforced lifetime expiration days.
+     *
+     * Note: This is only enforced for {@link #COOKIE_LIFETIME_DAYS}.
+     *
+     * @return The enforced expiration days.
+     */
+    public int getCookieLifetimeDays() {
+        return mCookieLifetimeDays.get();
+    }
+
+    /**
+     * Set the cookie lifetime.
+     *
+     * @param lifetime The enforced cookie lifetime.
+     *                 Use one of the {@link #COOKIE_LIFETIME_NORMAL COOKIE_LIFETIME_*} flags.
+     *                 Use {@link #setCookieLifetimeDays} to set expiration
+     *                 days for {@link #COOKIE_LIFETIME_DAYS}.
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setCookieLifetime(
+            @CookieLifetime int lifetime) {
+        mCookieLifetime.set(lifetime);
+        return this;
+    }
+
+    /**
+     * Set the expiration days for {@link #COOKIE_LIFETIME_DAYS}.
+     *
+     * @param days Limit lifetime to N days. Only enforced for {@link #COOKIE_LIFETIME_DAYS}.
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public @NonNull GeckoRuntimeSettings setCookieLifetimeDays(int days) {
+        if (mCookieLifetime.get() != COOKIE_LIFETIME_DAYS) {
+            throw new IllegalStateException(
+                "Setting expiration days for incompatible cookie lifetime");
+        }
+        mCookieLifetimeDays.set(days);
+        return this;
+    }
+
+    /**
+     * Get the set tracking protection blocking categories.
+     *
+     * @return categories The categories of trackers that are set to be blocked.
+     *                    Use one or more of the
+     *                    {@link TrackingProtectionDelegate#CATEGORY_AD TrackingProtectionDelegate.CATEGORY_*} flags.
+     **/
+    public @TrackingProtectionDelegate.Category int getTrackingProtectionCategories() {
+        return TrackingProtection.listToCategory(mTrackingProtection.get());
+    }
+
+    /**
+     * Set tracking protection blocking categories.
+     *
+     * @param categories The categories of trackers that should be blocked.
+     *                   Use one or more of the
+     *                   {@link TrackingProtectionDelegate#CATEGORY_AD TrackingProtectionDelegate.CATEGORY_*} flags.
+     * @return This GeckoRuntimeSettings instance.
+     **/
+    public @NonNull GeckoRuntimeSettings setTrackingProtectionCategories(
+            @TrackingProtectionDelegate.Category int categories) {
+        mTrackingProtection.set(TrackingProtection.buildPrefValue(categories));
+        return this;
+    }
 
     @Override // Parcelable
     public int describeContents() {

@@ -405,8 +405,9 @@ NS_IMETHODIMP
 nsAccessibilityService::Observe(nsISupports *aSubject, const char *aTopic,
                          const char16_t *aData)
 {
-  if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID))
+  if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     Shutdown();
+  }
 
   return NS_OK;
 }
@@ -1660,17 +1661,16 @@ nsAccessibilityService::RemoveNativeRootAccessible(Accessible* aAccessible)
 }
 
 bool
-nsAccessibilityService::HasAccessible(nsIDOMNode* aDOMNode)
+nsAccessibilityService::HasAccessible(nsINode* aDOMNode)
 {
-  nsCOMPtr<nsINode> node(do_QueryInterface(aDOMNode));
-  if (!node)
+  if (!aDOMNode)
     return false;
 
-  DocAccessible* document = GetDocAccessible(node->OwnerDoc());
+  DocAccessible* document = GetDocAccessible(aDOMNode->OwnerDoc());
   if (!document)
     return false;
 
-  return document->HasAccessible(node);
+  return document->HasAccessible(aDOMNode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

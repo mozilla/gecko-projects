@@ -71,9 +71,9 @@ fuzzy(135,530) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-contain
 fuzzy(215,241) == css-multicol/multicol-containing-002.xht css-multicol/multicol-containing-002-ref.xht
 fuzzy(87,180) == css-multicol/multicol-count-001.xht css-multicol/multicol-columns-001-ref.xht
 fails == css-multicol/multicol-count-002.xht css-multicol/multicol-count-002-ref.xht
-fails-if(winWidget||OSX||Android) == css-multicol/multicol-count-computed-003.xht css-multicol/multicol-count-computed-003-ref.xht
-fuzzy-if(winWidget||OSX||gtkWidget,112,861) fails-if(Android) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-count-computed-004.xht css-multicol/multicol-count-computed-004-ref.xht
-fails-if(winWidget||OSX||Android) == css-multicol/multicol-count-computed-005.xht css-multicol/multicol-count-computed-003-ref.xht
+fails-if(winWidget||OSX) == css-multicol/multicol-count-computed-003.xht css-multicol/multicol-count-computed-003-ref.xht
+fuzzy-if(winWidget||OSX||gtkWidget,112,861) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-count-computed-004.xht css-multicol/multicol-count-computed-004-ref.xht
+fails-if(winWidget||OSX) == css-multicol/multicol-count-computed-005.xht css-multicol/multicol-count-computed-003-ref.xht
 fuzzy(204,930) fuzzy-if(skiaContent,208,930) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-count-negative-001.xht css-multicol/multicol-columns-invalid-001-ref.xht
 fuzzy(204,930) fuzzy-if(skiaContent,208,930) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-count-negative-002.xht css-multicol/multicol-columns-invalid-001-ref.xht
 fuzzy(204,930) fuzzy-if(skiaContent,208,930) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-count-non-integer-001.xht css-multicol/multicol-columns-invalid-001-ref.xht
@@ -94,7 +94,7 @@ fuzzy(204,930) fuzzy-if(skiaContent,208,930) fails-if(webrender&&cocoaWidget) ==
 fuzzy(204,930) fuzzy-if(skiaContent,208,930) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-gap-003.xht css-multicol/multicol-gap-002-ref.xht
 fuzzy(107,1823) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-gap-fraction-001.xht css-multicol/multicol-gap-fraction-001-ref.xht
 skip == css-multicol/multicol-gap-fraction-002.html reference/nothing.html
-fuzzy-if(winWidget||OSX||gtkWidget,204,1048) fuzzy-if(skiaContent,208,1048) fails-if(Android) == css-multicol/multicol-gap-large-001.xht css-multicol/multicol-gap-large-001-ref.xht
+fuzzy-if(winWidget||OSX||gtkWidget,204,1048) fuzzy-if(skiaContent,208,1048) == css-multicol/multicol-gap-large-001.xht css-multicol/multicol-gap-large-001-ref.xht
 fuzzy(225,920) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-gap-large-002.xht css-multicol/multicol-gap-large-002-ref.xht
 fuzzy(204,930) fuzzy-if(skiaContent,208,930) fails-if(webrender&&cocoaWidget) == css-multicol/multicol-gap-negative-001.xht css-multicol/multicol-gap-002-ref.xht
 == css-multicol/multicol-height-001.xht css-multicol/multicol-height-001-ref.xht
@@ -712,12 +712,12 @@ fails == css-writing-modes/contiguous-floated-table-vrl-002.xht reference/ref-fi
 fails == css-writing-modes/contiguous-floated-table-vrl-004.xht reference/ref-filled-green-100px-square.xht
 fails == css-writing-modes/contiguous-floated-table-vrl-006.xht reference/ref-filled-green-100px-square.xht
 fails == css-writing-modes/contiguous-floated-table-vrl-008.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(webrender&&cocoaWidget,15-15,3-3) == css-writing-modes/different-block-flow-dir-001.xht reference/ref-filled-green-100px-square.xht
+== css-writing-modes/different-block-flow-dir-001.xht reference/ref-filled-green-100px-square.xht
 fuzzy-if(webrender&&cocoaWidget,7-7,2-2) == css-writing-modes/different-block-flow-dir-002.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/direction-vlr-003.xht css-writing-modes/direction-vlr-003-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/direction-vlr-005.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/direction-vrl-002.xht css-writing-modes/direction-vrl-002-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/direction-vrl-004.xht css-writing-modes/direction-vrl-004-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/direction-vlr-003.xht css-writing-modes/direction-vlr-003-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/direction-vlr-005.xht reference/ref-filled-green-100px-square.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/direction-vrl-002.xht css-writing-modes/direction-vrl-002-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/direction-vrl-004.xht css-writing-modes/direction-vrl-004-ref.xht
 == css-writing-modes/flexbox_align-items-stretch-writing-modes.html css-writing-modes/flexbox_align-items-stretch-writing-modes-ref.html
 == css-writing-modes/float-clear-vlr-003.xht reference/ref-filled-green-100px-square.xht
 == css-writing-modes/float-clear-vlr-005.xht reference/ref-filled-green-100px-square.xht
@@ -731,14 +731,14 @@ fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) =
 == css-writing-modes/float-contiguous-vlr-005.xht css-writing-modes/inline-replaced-vrl-004-ref.xht
 == css-writing-modes/float-contiguous-vlr-007.xht css-writing-modes/float-contiguous-vlr-007-ref.xht
 == css-writing-modes/float-contiguous-vlr-009.xht css-writing-modes/float-contiguous-vlr-009-ref.xht
-fuzzy-if(OSX||winWidget,135,902) == css-writing-modes/float-contiguous-vlr-011.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,135,902) == css-writing-modes/float-contiguous-vlr-013.xht css-writing-modes/float-contiguous-vrl-012-ref.xht
+fuzzy-if(OSX||winWidget,135,904) == css-writing-modes/float-contiguous-vlr-011.xht reference/ref-filled-green-100px-square.xht
+fuzzy-if(OSX||winWidget,135,904) == css-writing-modes/float-contiguous-vlr-013.xht css-writing-modes/float-contiguous-vrl-012-ref.xht
 == css-writing-modes/float-contiguous-vrl-002.xht css-writing-modes/inline-replaced-vrl-004-ref.xht
 == css-writing-modes/float-contiguous-vrl-004.xht css-writing-modes/inline-replaced-vrl-004-ref.xht
 == css-writing-modes/float-contiguous-vrl-006.xht css-writing-modes/float-contiguous-vrl-006-ref.xht
 == css-writing-modes/float-contiguous-vrl-008.xht css-writing-modes/float-contiguous-vrl-008-ref.xht
-fuzzy-if(OSX||winWidget,135,902) == css-writing-modes/float-contiguous-vrl-010.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,135,902) == css-writing-modes/float-contiguous-vrl-012.xht css-writing-modes/float-contiguous-vrl-012-ref.xht
+fuzzy-if(OSX||winWidget,135,904) == css-writing-modes/float-contiguous-vrl-010.xht reference/ref-filled-green-100px-square.xht
+fuzzy-if(OSX||winWidget,135,904) == css-writing-modes/float-contiguous-vrl-012.xht css-writing-modes/float-contiguous-vrl-012-ref.xht
 fails == css-writing-modes/float-lft-orthog-htb-in-vlr-002.xht css-writing-modes/float-lft-orthog-htb-in-vlr-002-ref.xht
 fails == css-writing-modes/float-lft-orthog-htb-in-vrl-002.xht css-writing-modes/float-lft-orthog-htb-in-vrl-002-ref.xht
 fails == css-writing-modes/float-lft-orthog-vlr-in-htb-002.xht css-writing-modes/float-lft-orthog-vlr-in-htb-002-ref.xht
@@ -800,43 +800,43 @@ fails == css-writing-modes/inline-table-alignment-002.xht css-writing-modes/inli
 fails == css-writing-modes/inline-table-alignment-003.xht css-writing-modes/inline-table-alignment-003-ref.xht
 fails == css-writing-modes/inline-table-alignment-004.xht css-writing-modes/inline-table-alignment-002-ref.xht
 fails == css-writing-modes/inline-table-alignment-005.xht css-writing-modes/inline-table-alignment-003-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-htb-001.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-043.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-047.xht css-writing-modes/block-flow-direction-002-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-048.xht css-writing-modes/block-flow-direction-002-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-050.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-053.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-054.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-htb-001.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-043.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-047.xht css-writing-modes/block-flow-direction-002-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-048.xht css-writing-modes/block-flow-direction-002-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-050.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-053.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-054.xht css-writing-modes/block-flow-direction-001-ref.xht
 random == css-writing-modes/line-box-direction-slr-056.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-058.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-slr-060.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-042.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-045.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-046.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-049.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-051.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-052.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-058.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-slr-060.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-042.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-045.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-046.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-049.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-051.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-052.xht css-writing-modes/block-flow-direction-001-ref.xht
 random == css-writing-modes/line-box-direction-srl-055.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-057.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-srl-059.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-003.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-007.xht css-writing-modes/block-flow-direction-002-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-008.xht css-writing-modes/block-flow-direction-002-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-010.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-013.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-014.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-057.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-srl-059.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-003.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-007.xht css-writing-modes/block-flow-direction-002-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-008.xht css-writing-modes/block-flow-direction-002-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-010.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-013.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-014.xht css-writing-modes/block-flow-direction-001-ref.xht
 random == css-writing-modes/line-box-direction-vlr-016.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-018.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vlr-020.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-002.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-005.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-006.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-009.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-011.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-012.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-018.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vlr-020.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-002.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-005.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-006.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-009.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-011.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-012.xht css-writing-modes/block-flow-direction-001-ref.xht
 random == css-writing-modes/line-box-direction-vrl-015.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-017.xht css-writing-modes/block-flow-direction-001-ref.xht
-fuzzy-if(OSX||winWidget,213,1540) == css-writing-modes/line-box-direction-vrl-019.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-017.xht css-writing-modes/block-flow-direction-001-ref.xht
+fuzzy-if(OSX||winWidget,213,1540) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/line-box-direction-vrl-019.xht css-writing-modes/block-flow-direction-001-ref.xht
 fails == css-writing-modes/line-box-height-vlr-003.xht css-writing-modes/line-box-height-vlr-003-ref.xht
 fails == css-writing-modes/line-box-height-vlr-005.xht css-writing-modes/line-box-height-vlr-003-ref.xht
 == css-writing-modes/line-box-height-vlr-007.xht css-writing-modes/line-box-height-vlr-007-ref.xht
@@ -917,114 +917,114 @@ fuzzy-if(OSX||winWidget,110,1200) == css-writing-modes/row-progression-vrl-004.x
 fuzzy-if(OSX||winWidget,110,1200) == css-writing-modes/row-progression-vrl-006.xht css-writing-modes/block-flow-direction-001-ref.xht
 fuzzy-if(OSX||winWidget,110,1200) == css-writing-modes/row-progression-vrl-008.xht css-writing-modes/block-flow-direction-001-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-001.xht css-writing-modes/sizing-orthog-htb-in-vlr-001-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vlr-003.xht css-writing-modes/sizing-orthog-htb-in-vlr-003-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vlr-003.xht css-writing-modes/sizing-orthog-htb-in-vlr-003-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-004.xht css-writing-modes/sizing-orthog-htb-in-vlr-004-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-006.xht css-writing-modes/sizing-orthog-htb-in-vlr-006-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-007.xht css-writing-modes/sizing-orthog-htb-in-vlr-007-ref.xht
-fails-if(OSX||winWidget||Android) == css-writing-modes/sizing-orthog-htb-in-vlr-008.xht css-writing-modes/sizing-orthog-htb-in-vlr-008-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vlr-009.xht css-writing-modes/sizing-orthog-htb-in-vlr-003-ref.xht
+fails-if(OSX||winWidget||Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vlr-008.xht css-writing-modes/sizing-orthog-htb-in-vlr-008-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vlr-009.xht css-writing-modes/sizing-orthog-htb-in-vlr-003-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-010.xht css-writing-modes/sizing-orthog-htb-in-vlr-010-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-011.xht css-writing-modes/sizing-orthog-htb-in-vlr-011-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-012.xht css-writing-modes/sizing-orthog-htb-in-vlr-006-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-013.xht css-writing-modes/sizing-orthog-htb-in-vlr-013-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vlr-015.xht css-writing-modes/sizing-orthog-htb-in-vlr-015-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vlr-015.xht css-writing-modes/sizing-orthog-htb-in-vlr-015-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-016.xht css-writing-modes/sizing-orthog-htb-in-vlr-016-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-018.xht css-writing-modes/sizing-orthog-htb-in-vlr-018-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-019.xht css-writing-modes/sizing-orthog-htb-in-vlr-019-ref.xht
-fails-if(OSX||winWidget||Android) == css-writing-modes/sizing-orthog-htb-in-vlr-020.xht css-writing-modes/sizing-orthog-htb-in-vlr-020-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vlr-021.xht css-writing-modes/sizing-orthog-htb-in-vlr-015-ref.xht
+fails-if(OSX||winWidget||Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vlr-020.xht css-writing-modes/sizing-orthog-htb-in-vlr-020-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vlr-021.xht css-writing-modes/sizing-orthog-htb-in-vlr-015-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-022.xht css-writing-modes/sizing-orthog-htb-in-vlr-022-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-023.xht css-writing-modes/sizing-orthog-htb-in-vlr-023-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vlr-024.xht css-writing-modes/sizing-orthog-htb-in-vlr-018-ref.xht
 fails == css-writing-modes/sizing-orthog-htb-in-vrl-001.xht css-writing-modes/sizing-orthog-htb-in-vrl-001-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vrl-003.xht css-writing-modes/sizing-orthog-htb-in-vrl-003-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vrl-003.xht css-writing-modes/sizing-orthog-htb-in-vrl-003-ref.xht
 fails == css-writing-modes/sizing-orthog-htb-in-vrl-004.xht css-writing-modes/sizing-orthog-htb-in-vlr-004-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-006.xht css-writing-modes/sizing-orthog-htb-in-vrl-006-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-007.xht css-writing-modes/sizing-orthog-htb-in-vrl-007-ref.xht
-fails-if(OSX||winWidget||Android) == css-writing-modes/sizing-orthog-htb-in-vrl-008.xht css-writing-modes/sizing-orthog-htb-in-vrl-008-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vrl-009.xht css-writing-modes/sizing-orthog-htb-in-vrl-003-ref.xht
+fails-if(OSX||winWidget||Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vrl-008.xht css-writing-modes/sizing-orthog-htb-in-vrl-008-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vrl-009.xht css-writing-modes/sizing-orthog-htb-in-vrl-003-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-010.xht css-writing-modes/sizing-orthog-htb-in-vrl-010-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-011.xht css-writing-modes/sizing-orthog-htb-in-vrl-011-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-012.xht css-writing-modes/sizing-orthog-htb-in-vrl-006-ref.xht
 fails == css-writing-modes/sizing-orthog-htb-in-vrl-013.xht css-writing-modes/sizing-orthog-htb-in-vrl-013-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vrl-015.xht css-writing-modes/sizing-orthog-htb-in-vrl-015-ref.xht
+== css-writing-modes/sizing-orthog-htb-in-vrl-015.xht css-writing-modes/sizing-orthog-htb-in-vrl-015-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-016.xht css-writing-modes/sizing-orthog-htb-in-vlr-016-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-018.xht css-writing-modes/sizing-orthog-htb-in-vrl-018-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-019.xht css-writing-modes/sizing-orthog-htb-in-vrl-019-ref.xht
-fails-if(OSX||winWidget||Android) == css-writing-modes/sizing-orthog-htb-in-vrl-020.xht css-writing-modes/sizing-orthog-htb-in-vrl-020-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-htb-in-vrl-021.xht css-writing-modes/sizing-orthog-htb-in-vrl-015-ref.xht
+fails-if(OSX||winWidget||Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-htb-in-vrl-020.xht css-writing-modes/sizing-orthog-htb-in-vrl-020-ref.xht
+== css-writing-modes/sizing-orthog-htb-in-vrl-021.xht css-writing-modes/sizing-orthog-htb-in-vrl-015-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-022.xht css-writing-modes/sizing-orthog-htb-in-vrl-022-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-023.xht css-writing-modes/sizing-orthog-htb-in-vrl-023-ref.xht
 == css-writing-modes/sizing-orthog-htb-in-vrl-024.xht css-writing-modes/sizing-orthog-htb-in-vrl-018-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-001.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-001-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-002.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-002-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-003.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-003-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-004.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-004-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-005.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-005-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-006.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-006-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-007.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-007-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vlr-008.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-008-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-001.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-001-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-002.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-002-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-003.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-003-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-004.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-004-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-005.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-005-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-006.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-006-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-007.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-007-ref.xht
-== css-writing-modes/sizing-orthog-prct-htb-in-vrl-008.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-008-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-001.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-001-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-002.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-002-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-003.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-003-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-004.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-004-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-005.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-005-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-006.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-006-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-007.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-007-ref.xht
-== css-writing-modes/sizing-orthog-prct-vlr-in-htb-008.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-008-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-001.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-001-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-002.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-002-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-003.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-003-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-004.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-004-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-005.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-005-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-006.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-006-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-007.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-007-ref.xht
-== css-writing-modes/sizing-orthog-prct-vrl-in-htb-008.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-008-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-001.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-001-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-002.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-002-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-003.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-003-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-004.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-004-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-005.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-005-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-006.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-006-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-007.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-007-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vlr-008.xht css-writing-modes/sizing-orthog-prct-htb-in-vlr-008-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-001.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-001-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-002.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-002-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-003.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-003-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-004.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-004-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-005.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-005-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-006.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-006-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-007.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-007-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-htb-in-vrl-008.xht css-writing-modes/sizing-orthog-prct-htb-in-vrl-008-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-001.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-001-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-002.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-002-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-003.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-003-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-004.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-004-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-005.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-005-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-006.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-006-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-007.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-007-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vlr-in-htb-008.xht css-writing-modes/sizing-orthog-prct-vlr-in-htb-008-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-001.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-001-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-002.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-002-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-003.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-003-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-004.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-004-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-005.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-005-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-006.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-006-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-007.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-007-ref.xht
+random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-prct-vrl-in-htb-008.xht css-writing-modes/sizing-orthog-prct-vrl-in-htb-008-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-001.xht css-writing-modes/sizing-orthog-vlr-in-htb-001-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vlr-in-htb-003.xht css-writing-modes/sizing-orthog-vlr-in-htb-003-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vlr-in-htb-003.xht css-writing-modes/sizing-orthog-vlr-in-htb-003-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-004.xht css-writing-modes/sizing-orthog-vlr-in-htb-004-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-006.xht css-writing-modes/sizing-orthog-vlr-in-htb-006-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-007.xht css-writing-modes/sizing-orthog-vlr-in-htb-007-ref.xht
-fuzzy-if(winWidget,255,648-713) == css-writing-modes/sizing-orthog-vlr-in-htb-008.xht css-writing-modes/sizing-orthog-vlr-in-htb-008-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vlr-in-htb-009.xht css-writing-modes/sizing-orthog-vlr-in-htb-009-ref.xht
+fuzzy-if(winWidget,255,648-713) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vlr-in-htb-008.xht css-writing-modes/sizing-orthog-vlr-in-htb-008-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vlr-in-htb-009.xht css-writing-modes/sizing-orthog-vlr-in-htb-009-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-010.xht css-writing-modes/sizing-orthog-vlr-in-htb-010-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-011.xht css-writing-modes/sizing-orthog-vlr-in-htb-011-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-012.xht css-writing-modes/sizing-orthog-vlr-in-htb-012-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-013.xht css-writing-modes/sizing-orthog-vlr-in-htb-013-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vlr-in-htb-015.xht css-writing-modes/sizing-orthog-vlr-in-htb-015-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vlr-in-htb-015.xht css-writing-modes/sizing-orthog-vlr-in-htb-015-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-016.xht css-writing-modes/sizing-orthog-vlr-in-htb-016-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-018.xht css-writing-modes/sizing-orthog-vlr-in-htb-018-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-019.xht css-writing-modes/sizing-orthog-vlr-in-htb-019-ref.xht
-fuzzy-if(winWidget,255,648-713) == css-writing-modes/sizing-orthog-vlr-in-htb-020.xht css-writing-modes/sizing-orthog-vlr-in-htb-020-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vlr-in-htb-021.xht css-writing-modes/sizing-orthog-vlr-in-htb-015-ref.xht
+fuzzy-if(winWidget,255,648-713) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vlr-in-htb-020.xht css-writing-modes/sizing-orthog-vlr-in-htb-020-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vlr-in-htb-021.xht css-writing-modes/sizing-orthog-vlr-in-htb-015-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-022.xht css-writing-modes/sizing-orthog-vlr-in-htb-022-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-023.xht css-writing-modes/sizing-orthog-vlr-in-htb-023-ref.xht
 == css-writing-modes/sizing-orthog-vlr-in-htb-024.xht css-writing-modes/sizing-orthog-vlr-in-htb-018-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-001.xht css-writing-modes/sizing-orthog-vrl-in-htb-001-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vrl-in-htb-003.xht css-writing-modes/sizing-orthog-vrl-in-htb-003-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vrl-in-htb-003.xht css-writing-modes/sizing-orthog-vrl-in-htb-003-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-004.xht css-writing-modes/sizing-orthog-vrl-in-htb-004-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-006.xht css-writing-modes/sizing-orthog-vrl-in-htb-006-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-007.xht css-writing-modes/sizing-orthog-vrl-in-htb-007-ref.xht
-fuzzy-if(winWidget,255,648-713) == css-writing-modes/sizing-orthog-vrl-in-htb-008.xht css-writing-modes/sizing-orthog-vrl-in-htb-008-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vrl-in-htb-009.xht css-writing-modes/sizing-orthog-vrl-in-htb-009-ref.xht
+fuzzy-if(winWidget,255,648-713) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vrl-in-htb-008.xht css-writing-modes/sizing-orthog-vrl-in-htb-008-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vrl-in-htb-009.xht css-writing-modes/sizing-orthog-vrl-in-htb-009-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-010.xht css-writing-modes/sizing-orthog-vrl-in-htb-010-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-011.xht css-writing-modes/sizing-orthog-vrl-in-htb-011-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-012.xht css-writing-modes/sizing-orthog-vrl-in-htb-012-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-013.xht css-writing-modes/sizing-orthog-vrl-in-htb-013-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vrl-in-htb-015.xht css-writing-modes/sizing-orthog-vrl-in-htb-015-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vrl-in-htb-015.xht css-writing-modes/sizing-orthog-vrl-in-htb-015-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-016.xht css-writing-modes/sizing-orthog-vrl-in-htb-016-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-018.xht css-writing-modes/sizing-orthog-vrl-in-htb-018-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-019.xht css-writing-modes/sizing-orthog-vrl-in-htb-019-ref.xht
-fuzzy-if(winWidget,255,648-713) == css-writing-modes/sizing-orthog-vrl-in-htb-020.xht css-writing-modes/sizing-orthog-vrl-in-htb-020-ref.xht
-fails-if(Android) == css-writing-modes/sizing-orthog-vrl-in-htb-021.xht css-writing-modes/sizing-orthog-vrl-in-htb-015-ref.xht
+fuzzy-if(winWidget,255,648-713) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vrl-in-htb-020.xht css-writing-modes/sizing-orthog-vrl-in-htb-020-ref.xht
+fails-if(Android) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == css-writing-modes/sizing-orthog-vrl-in-htb-021.xht css-writing-modes/sizing-orthog-vrl-in-htb-015-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-022.xht css-writing-modes/sizing-orthog-vrl-in-htb-022-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-023.xht css-writing-modes/sizing-orthog-vrl-in-htb-023-ref.xht
 == css-writing-modes/sizing-orthog-vrl-in-htb-024.xht css-writing-modes/sizing-orthog-vrl-in-htb-018-ref.xht
@@ -1048,24 +1048,24 @@ fails == css-writing-modes/table-progression-vlr-004.html css-writing-modes/tabl
 fails == css-writing-modes/table-progression-vrl-002.html css-writing-modes/table-progression-002-ref.html
 fails == css-writing-modes/table-progression-vrl-003.html css-writing-modes/table-progression-001-ref.html
 fails == css-writing-modes/table-progression-vrl-004.html css-writing-modes/table-progression-002-ref.html
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-003.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-005.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-007.xht reference/ref-filled-green-100px-square.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-009.xht css-writing-modes/text-align-vlr-009-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-011.xht css-writing-modes/text-align-vlr-009-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-013.xht css-writing-modes/text-align-vlr-009-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-015.xht css-writing-modes/direction-vlr-003-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-017.xht css-writing-modes/direction-vlr-003-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vlr-019.xht css-writing-modes/direction-vlr-003-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-002.xht css-writing-modes/direction-vrl-004-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-004.xht css-writing-modes/direction-vrl-004-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-006.xht css-writing-modes/direction-vrl-004-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-008.xht css-writing-modes/text-align-vrl-008-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-010.xht css-writing-modes/text-align-vrl-008-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-012.xht css-writing-modes/text-align-vrl-008-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-014.xht css-writing-modes/direction-vrl-002-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-016.xht css-writing-modes/direction-vrl-002-ref.xht
-fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-302) == css-writing-modes/text-align-vrl-018.xht css-writing-modes/direction-vrl-002-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-003.xht reference/ref-filled-green-100px-square.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-005.xht reference/ref-filled-green-100px-square.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-007.xht reference/ref-filled-green-100px-square.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-009.xht css-writing-modes/text-align-vlr-009-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-011.xht css-writing-modes/text-align-vlr-009-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-013.xht css-writing-modes/text-align-vlr-009-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-015.xht css-writing-modes/direction-vlr-003-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-017.xht css-writing-modes/direction-vlr-003-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vlr-019.xht css-writing-modes/direction-vlr-003-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-002.xht css-writing-modes/direction-vrl-004-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-004.xht css-writing-modes/direction-vrl-004-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-006.xht css-writing-modes/direction-vrl-004-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-008.xht css-writing-modes/text-align-vrl-008-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-010.xht css-writing-modes/text-align-vrl-008-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-012.xht css-writing-modes/text-align-vrl-008-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-014.xht css-writing-modes/direction-vrl-002-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-016.xht css-writing-modes/direction-vrl-002-ref.xht
+fuzzy-if(OSX||winWidget,75,404) fuzzy-if(webrender&&!gtkWidget,92-108,300-404) == css-writing-modes/text-align-vrl-018.xht css-writing-modes/direction-vrl-002-ref.xht
 fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-slr-009.xht css-writing-modes/text-baseline-slr-009-ref.xht
 fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-srl-008.xht css-writing-modes/text-baseline-vrl-006-ref.xht
 fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-vlr-003.xht css-writing-modes/text-baseline-vrl-002-ref.xht
@@ -1074,7 +1074,7 @@ fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-vlr-007.xht 
 fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-vrl-002.xht css-writing-modes/text-baseline-vrl-002-ref.xht
 fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-vrl-004.xht css-writing-modes/text-baseline-vrl-002-ref.xht
 fuzzy-if(OSX||winWidget,215,780) == css-writing-modes/text-baseline-vrl-006.xht css-writing-modes/text-baseline-vrl-006-ref.xht
-fuzzy-if(OSX,15,16) == css-writing-modes/text-combine-upright-decorations-001.html css-writing-modes/reference/text-combine-upright-decorations-001.html
+fuzzy-if(OSX,23,16) == css-writing-modes/text-combine-upright-decorations-001.html css-writing-modes/reference/text-combine-upright-decorations-001.html
 == css-writing-modes/text-combine-upright-inherit-all-001.html css-writing-modes/reference/text-combine-upright-inherit-all-001.html
 == css-writing-modes/text-combine-upright-inherit-all-002.html css-writing-modes/reference/text-combine-upright-inherit-all-002.html
 == css-writing-modes/text-combine-upright-layout-rules-001.html css-writing-modes/reference/text-combine-upright-layout-rules-001-ref.html
@@ -1159,10 +1159,10 @@ fails == css-writing-modes/wm-propagation-body-011.xht css-writing-modes/wm-prop
 fails == css-writing-modes/wm-propagation-body-015.xht css-writing-modes/block-flow-direction-025-ref.xht
 == css-writing-modes/writing-mode-horizontal-001l.html css-writing-modes/reference/writing-mode-horizontal-001l-ref.html
 == css-writing-modes/writing-mode-horizontal-001r.html css-writing-modes/reference/writing-mode-horizontal-001r-ref.html
-fuzzy-if(OSX||winWidget,153,612) == css-writing-modes/writing-mode-vertical-lr-002.xht css-writing-modes/reftest/writing-mode-vertical-lr-002-ref.xht
-fuzzy-if(OSX||winWidget,153,612) == css-writing-modes/writing-mode-vertical-rl-001.xht css-writing-modes/reftest/writing-mode-vertical-rl-001-ref.xht
-fuzzy-if(OSX||winWidget,153,612) == css-writing-modes/writing-mode-vertical-rl-002.xht css-writing-modes/reftest/writing-mode-vertical-rl-002-ref.xht
-fuzzy-if(OSX||winWidget,153,612) == css-writing-modes/writing-mode-vertical-rl-003.htm css-writing-modes/writing-mode-vertical-rl-003-ref.htm
+fuzzy-if(OSX||winWidget,158,624) == css-writing-modes/writing-mode-vertical-lr-002.xht css-writing-modes/reftest/writing-mode-vertical-lr-002-ref.xht
+fuzzy-if(OSX||winWidget,158,624) == css-writing-modes/writing-mode-vertical-rl-001.xht css-writing-modes/reftest/writing-mode-vertical-rl-001-ref.xht
+fuzzy-if(OSX||winWidget,158,624) == css-writing-modes/writing-mode-vertical-rl-002.xht css-writing-modes/reftest/writing-mode-vertical-rl-002-ref.xht
+fuzzy-if(OSX||winWidget,158,624) == css-writing-modes/writing-mode-vertical-rl-003.htm css-writing-modes/writing-mode-vertical-rl-003-ref.htm
 skip == selectors/any-link-dynamic-001.html selectors/any-link-dynamic-001-ref.html
 needs-focus == selectors/focus-within-001.html selectors/focus-within-001-ref.html
 needs-focus == selectors/focus-within-002.html selectors/focus-within-001-ref.html

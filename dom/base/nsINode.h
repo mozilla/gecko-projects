@@ -11,7 +11,6 @@
 #include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"               // for member, local
 #include "nsGkAtoms.h"              // for nsGkAtoms::baseURIProperty
-#include "nsIDOMNode.h"
 #include "mozilla/dom/NodeInfo.h"            // member (in nsCOMPtr)
 #include "nsIVariant.h"             // for use in GetUserData()
 #include "nsIWeakReference.h"
@@ -131,28 +130,7 @@ enum {
 
   NODE_IS_EDITABLE =                      NODE_FLAG_BIT(6),
 
-  // This node was created by layout as native anonymous content. This
-  // generally corresponds to things created by nsIAnonymousContentCreator,
-  // though there are exceptions (svg:use content does not have this flag
-  // set, and any non-nsIAnonymousContentCreator callers of
-  // SetIsNativeAnonymousRoot also get this flag).
-  //
-  // One very important aspect here is that this node is not transitive over
-  // the subtree (if you want that, use NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE).
-  // If Gecko code somewhere attaches children to a node with this bit set,
-  // the children will not have the bit themselves unless the calling code sets
-  // it explicitly. This means that XBL content bound to NAC doesn't get this
-  // bit, nor do nodes inserted by editor.
-  //
-  // For now, this bit exists primarily to control style inheritance behavior,
-  // since the nodes for which we set it are often used to implement pseudo-
-  // elements, which need to inherit style from a script-visible element.
-  //
-  // A more general principle for this bit might be this: If the node is entirely
-  // a detail of layout, is not script-observable in any way, and other engines
-  // might accomplish the same task with a nodeless layout frame, then the node
-  // should have this bit set.
-  NODE_IS_NATIVE_ANONYMOUS =              NODE_FLAG_BIT(7),
+  // Free bit here.
 
   // Whether the node participates in a shadow tree.
   NODE_IS_IN_SHADOW_TREE =                NODE_FLAG_BIT(8),
@@ -587,8 +565,6 @@ public:
     return NodeType() == ATTRIBUTE_NODE;
   }
 
-  virtual nsIDOMNode* AsDOMNode() = 0;
-
   /**
    * Return if this node has any children.
    */
@@ -692,11 +668,11 @@ public:
    * Returns OwnerDoc() if the node is in uncomposed document and ShadowRoot if
    * the node is in Shadow DOM and is in composed document.
    */
-  mozilla::dom::DocumentOrShadowRoot* GetUncomposedDocOrConnectedShadowRoot();
+  mozilla::dom::DocumentOrShadowRoot* GetUncomposedDocOrConnectedShadowRoot() const;
 
   /**
    * The values returned by this function are the ones defined for
-   * nsIDOMNode.nodeType
+   * Node.nodeType
    */
   uint16_t NodeType() const
   {
@@ -1274,15 +1250,6 @@ public:
   }
 
   bool IsEditable() const;
-
-  /**
-   * Returns true if |this| is native anonymous (i.e. created by
-   * nsIAnonymousContentCreator);
-   */
-  bool IsNativeAnonymous() const
-  {
-    return HasFlag(NODE_IS_NATIVE_ANONYMOUS);
-  }
 
   /**
    * Returns true if |this| or any of its ancestors is native anonymous.
@@ -2120,11 +2087,6 @@ protected:
   // Storage for more members that are usually not needed; allocated lazily.
   nsSlots* mSlots;
 };
-
-inline nsIDOMNode* GetAsDOMNode(nsINode* aNode)
-{
-  return aNode ? aNode->AsDOMNode() : nullptr;
-}
 
 // Useful inline function for getting a node given an nsIContent and an
 // nsIDocument.  Returns the first argument cast to nsINode if it is non-null,

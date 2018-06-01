@@ -12,6 +12,10 @@ import urlparse
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
 from taskgraph.util.scriptworker import get_release_config
+from taskgraph.transforms.task import (
+    get_branch_repo,
+    get_branch_rev,
+)
 
 transforms = TransformSequence()
 
@@ -20,13 +24,15 @@ transforms = TransformSequence()
 # In the rare event that we do ship a point
 # release to beta, we need to either:
 # 1) update these regexes to match that specific version
-# 2) pass a second include version that matches that specifivc version
+# 2) pass a second include version that matches that specific version
 INCLUDE_VERSION_REGEXES = {
     "beta": r"'^(\d+\.\d+(b\d+)?)$'",
     "nonbeta": r"'^\d+\.\d+(\.\d+)?$'",
     # Same as beta, except excludes 58.0b1 due to issues with it not being able
     # to update to latest
     "devedition_hack": r"'^((?!58\.0b1$)\d+\.\d+(b\d+)?)$'",
+    # Same as nonbeta, except for the esr suffix
+    "esr": r"'^\d+\.\d+(\.\d+)?esr$'",
 }
 
 MAR_CHANNEL_ID_OVERRIDE_REGEXES = {
@@ -62,16 +68,17 @@ def add_command(config, tasks):
             "--product", task["extra"]["product"],
             "--stage-product", task["shipping-product"],
             "--app-name", task["extra"]["app-name"],
+            "--branch-prefix", task["extra"]["branch-prefix"],
             "--platform", task["extra"]["platform"],
             "--to-version", release_config["version"],
             "--to-app-version", release_config["appVersion"],
             "--to-build-number", str(release_config["build_number"]),
             "--to-buildid", config.params["moz_build_date"],
-            "--to-revision", config.params["head_rev"],
+            "--to-revision", get_branch_rev(config),
             "--output-file", "update-verify.cfg",
         ]
 
-        repo_path = urlparse.urlsplit(config.params["head_repository"]).path.lstrip("/")
+        repo_path = urlparse.urlsplit(get_branch_repo(config)).path.lstrip("/")
         command.extend(["--repo-path", repo_path])
 
         if release_config.get("partial_versions"):

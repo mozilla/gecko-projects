@@ -356,6 +356,10 @@ public:
   bool FirstLetterComplete() const { return mFirstLetterComplete; }
   void SetFirstLetterComplete() { mFirstLetterComplete = true; }
 
+#ifdef DEBUG
+  nsCString ToString() const;
+#endif
+
 private:
   StyleClear mBreakType;
   InlineBreak mInlineBreak;
@@ -780,6 +784,7 @@ public:
   void SetComputedStyle(ComputedStyle* aStyle)
   {
     if (aStyle != mComputedStyle) {
+      MOZ_DIAGNOSTIC_ASSERT(PresShell() == aStyle->PresContextForFrame()->PresShell());
       RefPtr<ComputedStyle> oldComputedStyle = mComputedStyle.forget();
       mComputedStyle = aStyle;
       DidSetComputedStyle(oldComputedStyle);
@@ -795,6 +800,7 @@ public:
   void SetComputedStyleWithoutNotification(ComputedStyle* aStyle)
   {
     if (aStyle != mComputedStyle) {
+      MOZ_DIAGNOSTIC_ASSERT(PresShell() == aStyle->PresContextForFrame()->PresShell());
       mComputedStyle = aStyle;
     }
   }
@@ -1857,10 +1863,7 @@ public:
     return HasPerspective(StyleDisplay());
   }
 
-  bool ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const {
-    MOZ_ASSERT(aStyleDisplay == StyleDisplay());
-    return aStyleDisplay->HasPerspectiveStyle();
-  }
+  bool ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const;
   bool ChildrenHavePerspective() const {
     return ChildrenHavePerspective(StyleDisplay());
   }

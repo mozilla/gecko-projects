@@ -75,7 +75,8 @@ MarkFramesWithItemsAndImagesModified(nsDisplayList* aList)
 static AnimatedGeometryRoot*
 SelectAGRForFrame(nsIFrame* aFrame, AnimatedGeometryRoot* aParentAGR)
 {
-  if (!aFrame->IsStackingContext()) {
+  if (!aFrame->IsStackingContext() ||
+      !aFrame->IsFixedPosContainingBlock()) {
     return aParentAGR;
   }
 
@@ -335,8 +336,9 @@ public:
     for (nsDisplayItem* i : *items) {
       if (i != aItem && i->Frame() == aItem->Frame() &&
           i->GetPerFrameKey() == aItem->GetPerFrameKey()) {
-        *aOutIndex = i->GetOldListIndex(mOldList, mOuterKey);
-        return true;
+        if (i->GetOldListIndex(mOldList, mOuterKey, aOutIndex)) {
+          return true;
+        }
       }
     }
     return false;

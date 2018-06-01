@@ -489,9 +489,9 @@ var BrowserApp = {
       InitLater(() => GlobalEventDispatcher.dispatch("GeckoView:AccessibilityReady"));
       GlobalEventDispatcher.registerListener((aEvent, aData, aCallback) => {
         if (aData.enabled) {
-          AccessFu.attach(window);
+          AccessFu.enable();
         } else {
-          AccessFu.detach();
+          AccessFu.disable();
         }
       }, "GeckoView:AccessibilitySettings");
     }
@@ -2162,6 +2162,13 @@ var BrowserApp = {
       appLocale = appLocale.toLowerCase();
     }
 
+    try {
+        const resistFingerprinting = Services.prefs.getBoolPref("privacy.resistFingerprinting");
+        if (resistFingerprinting) {
+          osLocale = null;
+        }
+    } catch (e) {}
+
     if (osLocale) {
       osLocale = osLocale.toLowerCase();
     }
@@ -3146,7 +3153,7 @@ var NativeWindow = {
     },
 
     _getLink: function(aElement) {
-      if (aElement.nodeType == Ci.nsIDOMNode.ELEMENT_NODE &&
+      if (aElement.nodeType == aElement.ELEMENT_NODE &&
           ((ChromeUtils.getClassName(aElement) === "HTMLAnchorElement" && aElement.href) ||
            (ChromeUtils.getClassName(aElement) === "HTMLAreaElement" && aElement.href) ||
            ChromeUtils.getClassName(aElement) === "HTMLLinkElement" ||
@@ -4884,7 +4891,7 @@ var BrowserEventHandler = {
   },
 
   _getLinkURI: function(aElement) {
-    if (aElement.nodeType == Ci.nsIDOMNode.ELEMENT_NODE &&
+    if (aElement.nodeType == aElement.ELEMENT_NODE &&
         ((ChromeUtils.getClassName(aElement) === "HTMLAnchorElement" && aElement.href) ||
          (ChromeUtils.getClassName(aElement) === "HTMLAreaElement" && aElement.href))) {
       try {
@@ -5382,9 +5389,9 @@ var IndexedDB = {
       throw new Error("Unexpected topic!");
     }
 
-    let requestor = subject.QueryInterface(Ci.nsIInterfaceRequestor);
+    let request = subject.QueryInterface(Ci.nsIIDBPermissionsRequest);
 
-    let browser = requestor.getInterface(Ci.nsIDOMNode);
+    let browser = request.browserElement;
     let tab = BrowserApp.getTabForBrowser(browser);
     if (!tab)
       return;
@@ -5404,7 +5411,7 @@ var IndexedDB = {
     let timeoutId;
 
     let notificationID = responseTopic + host;
-    let observer = requestor.getInterface(Ci.nsIObserver);
+    let observer = request.responseObserver;
 
     // This will be set to the result of PopupNotifications.show() below, or to
     // the result of PopupNotifications.getNotification() if this is a

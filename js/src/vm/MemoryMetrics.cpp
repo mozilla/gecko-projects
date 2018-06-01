@@ -13,6 +13,9 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/ArrayObject.h"
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
 #include "vm/HelperThreads.h"
 #include "vm/JSCompartment.h"
 #include "vm/JSObject.h"
@@ -329,10 +332,8 @@ StatsZoneCallback(JSRuntime* rt, void* data, Zone* zone)
 }
 
 static void
-StatsRealmCallback(JSContext* cx, void* data, JSCompartment* compartment)
+StatsRealmCallback(JSContext* cx, void* data, Handle<Realm*> realm)
 {
-    Realm* realm = JS::GetRealmForCompartment(compartment);
-
     // Append a new RealmStats to the vector.
     RuntimeStats* rtStats = static_cast<StatsClosure*>(data)->rtStats;
 
@@ -341,7 +342,7 @@ StatsRealmCallback(JSContext* cx, void* data, JSCompartment* compartment)
     RealmStats& realmStats = rtStats->realmStatsVector.back();
     if (!realmStats.initClasses())
         MOZ_CRASH("oom");
-    rtStats->initExtraRealmStats(compartment, &realmStats);
+    rtStats->initExtraRealmStats(realm, &realmStats);
 
     realm->setRealmStats(&realmStats);
 
@@ -460,7 +461,7 @@ StatsCellCallback(JSRuntime* rt, void* data, void* thing, JS::TraceKind traceKin
     switch (traceKind) {
       case JS::TraceKind::Object: {
         JSObject* obj = static_cast<JSObject*>(thing);
-        RealmStats& realmStats = obj->compartment()->realmStats();
+        RealmStats& realmStats = obj->realm()->realmStats();
         JS::ClassInfo info;        // This zeroes all the sizes.
         info.objectsGCHeap += thingSize;
 
@@ -507,7 +508,7 @@ StatsCellCallback(JSRuntime* rt, void* data, void* thing, JS::TraceKind traceKin
 
       case JS::TraceKind::Script: {
         JSScript* script = static_cast<JSScript*>(thing);
-        RealmStats& realmStats = script->compartment()->realmStats();
+        RealmStats& realmStats = script->realm()->realmStats();
         realmStats.scriptsGCHeap += thingSize;
         realmStats.scriptsMallocHeapData += script->sizeOfData(rtStats->mallocSizeOf_);
         realmStats.typeInferenceTypeScripts += script->sizeOfTypeScript(rtStats->mallocSizeOf_);
@@ -555,6 +556,15 @@ StatsCellCallback(JSRuntime* rt, void* data, void* thing, JS::TraceKind traceKin
       case JS::TraceKind::Symbol:
         zStats->symbolsGCHeap += thingSize;
         break;
+
+#ifdef ENABLE_BIGINT
+      case JS::TraceKind::BigInt: {
+        JS::BigInt* bi = static_cast<BigInt*>(thing);
+        zStats->bigIntsGCHeap += thingSize;
+        zStats->bigIntsMallocHeap += bi->sizeOfExcludingThis(rtStats->mallocSizeOf_);
+        break;
+      }
+#endif
 
       case JS::TraceKind::BaseShape: {
         JS::ShapeInfo info;        // This zeroes all the sizes.
@@ -826,8 +836,8 @@ CollectRuntimeStatsHelper(JSContext* cx, RuntimeStats* rtStats, ObjectPrivateVis
     MOZ_ASSERT(totalArenaSize % gc::ArenaSize == 0);
 #endif
 
-    for (CompartmentsIter comp(rt, WithAtoms); !comp.done(); comp.next())
-        comp->nullRealmStats();
+    for (RealmsIter realm(rt); !realm.done(); realm.next())
+        realm->nullRealmStats();
 
     size_t numDirtyChunks =
         (rtStats->gcHeapChunkTotal - rtStats->gcHeapUnusedChunks) / gc::ChunkSize;
@@ -876,8 +886,8 @@ JS_PUBLIC_API(size_t)
 JS::SystemRealmCount(JSContext* cx)
 {
     size_t n = 0;
-    for (CompartmentsIter comp(cx->runtime(), WithAtoms); !comp.done(); comp.next()) {
-        if (comp->isSystem())
+    for (RealmsIter realm(cx->runtime()); !realm.done(); realm.next()) {
+        if (realm->isSystem())
             ++n;
     }
     return n;
@@ -887,8 +897,8 @@ JS_PUBLIC_API(size_t)
 JS::UserRealmCount(JSContext* cx)
 {
     size_t n = 0;
-    for (CompartmentsIter comp(cx->runtime(), WithAtoms); !comp.done(); comp.next()) {
-        if (!comp->isSystem())
+    for (RealmsIter realm(cx->runtime()); !realm.done(); realm.next()) {
+        if (!realm->isSystem())
             ++n;
     }
     return n;
@@ -913,8 +923,7 @@ class SimpleJSRuntimeStats : public JS::RuntimeStats
         override
     {}
 
-    virtual void initExtraRealmStats(
-        JSCompartment* c, JS::RealmStats* realmStats) override
+    virtual void initExtraRealmStats(Handle<Realm*> realm, JS::RealmStats* realmStats) override
     {}
 };
 
@@ -938,10 +947,10 @@ AddSizeOfTab(JSContext* cx, HandleObject obj, MallocSizeOf mallocSizeOf, ObjectP
     if (!closure.init())
         return false;
     IterateHeapUnbarrieredForZone(cx, zone, &closure,
-                                                  StatsZoneCallback,
-                                                  StatsRealmCallback,
-                                                  StatsArenaCallback,
-                                                  StatsCellCallback<CoarseGrained>);
+                                  StatsZoneCallback,
+                                  StatsRealmCallback,
+                                  StatsArenaCallback,
+                                  StatsCellCallback<CoarseGrained>);
 
     MOZ_ASSERT(rtStats.zoneStatsVector.length() == 1);
     rtStats.zTotals.addSizes(rtStats.zoneStatsVector[0]);
@@ -949,8 +958,8 @@ AddSizeOfTab(JSContext* cx, HandleObject obj, MallocSizeOf mallocSizeOf, ObjectP
     for (size_t i = 0; i < rtStats.realmStatsVector.length(); i++)
         rtStats.realmTotals.addSizes(rtStats.realmStatsVector[i]);
 
-    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next())
-        comp->nullRealmStats();
+    for (RealmsInZoneIter realm(zone); !realm.done(); realm.next())
+        realm->nullRealmStats();
 
     rtStats.zTotals.addToTabSizes(sizes);
     rtStats.realmTotals.addToTabSizes(sizes);

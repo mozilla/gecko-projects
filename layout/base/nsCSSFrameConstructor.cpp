@@ -3392,8 +3392,6 @@ nsCSSFrameConstructor::ConstructFieldSetFrame(nsFrameConstructorState& aState,
   // Set the outer frame's initial child list
   fieldsetFrame->SetInitialChildList(kPrincipalList, fieldsetKids);
 
-  fieldsetFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
-
   // Our new frame returned is the outer frame, which is the fieldset frame.
   return fieldsetFrame;
 }
@@ -4153,14 +4151,6 @@ ConnectAnonymousTreeDescendants(nsIContent* aParent,
   }
 }
 
-static void
-SetNativeAnonymousBitOnDescendants(nsIContent* aRoot)
-{
-  for (nsIContent* curr = aRoot; curr; curr = curr->GetNextNode(aRoot)) {
-    curr->SetFlags(NODE_IS_NATIVE_ANONYMOUS);
-  }
-}
-
 nsresult
 nsCSSFrameConstructor::GetAnonymousContent(nsIContent* aParent,
                                            nsIFrame* aParentFrame,
@@ -4184,28 +4174,12 @@ nsCSSFrameConstructor::GetAnonymousContent(nsIContent* aParent,
 
     ConnectAnonymousTreeDescendants(content, aContent[i].mChildren);
 
-    LayoutFrameType parentFrameType = aParentFrame->Type();
-    if (parentFrameType == LayoutFrameType::SVGUse) {
+    if (aParentFrame->IsSVGUseFrame()) {
       // least-surprise CSS binding until we do the SVG specified
       // cascading rules for <svg:use> - bug 265894
       content->SetFlags(NODE_IS_ANONYMOUS_ROOT);
     } else {
       content->SetIsNativeAnonymousRoot();
-      // Don't mark descendants of the custom content container
-      // as native anonymous.  When canvas custom content is initially
-      // created and appended to the custom content container, in
-      // nsIDocument::InsertAnonymousContent, it is not considered native
-      // anonymous content.  But if we end up reframing the root element,
-      // we will re-create the nsCanvasFrame, and we would end up in here,
-      // marking it as NAC.  Existing uses of canvas custom content would
-      // break if it becomes NAC (since each element starts inheriting
-      // styles from its closest non-NAC ancestor, rather than from its
-      // parent).
-      if (!(parentFrameType == LayoutFrameType::Canvas &&
-            content == static_cast<nsCanvasFrame*>(aParentFrame)
-                         ->GetCustomContentContainer())) {
-        SetNativeAnonymousBitOnDescendants(content);
-      }
     }
 
     bool anonContentIsEditable = content->HasFlag(NODE_IS_EDITABLE);
@@ -4321,6 +4295,7 @@ nsCSSFrameConstructor::FindXULTagData(Element* aElement,
     SCROLLABLE_XUL_CREATE(autorepeatbutton, NS_NewAutoRepeatBoxFrame),
     SCROLLABLE_XUL_CREATE(titlebar, NS_NewTitleBarFrame),
     SCROLLABLE_XUL_CREATE(resizer, NS_NewResizerFrame),
+    SCROLLABLE_XUL_CREATE(toolbarpaletteitem, NS_NewBoxFrame),
     SIMPLE_XUL_CREATE(image, NS_NewImageBoxFrame),
     SIMPLE_XUL_CREATE(spring, NS_NewLeafBoxFrame),
     SIMPLE_XUL_CREATE(spacer, NS_NewLeafBoxFrame),
@@ -5732,10 +5707,6 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
   }
 
   if (display->mDisplay == StyleDisplay::Contents) {
-    if (aParentFrame) {
-      // FIXME(emilio): Pretty sure aParentFrame can't be null here.
-      aParentFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
-    }
     CreateGeneratedContentItem(aState, aParentFrame, aContent->AsElement(),
                                computedStyle, CSSPseudoElementType::before,
                                aItems);
@@ -7049,6 +7020,26 @@ nsCSSFrameConstructor::StyleNewChildRange(nsIContent* aStartChild,
   }
 }
 
+nsIFrame*
+nsCSSFrameConstructor::FindNextSiblingForAppend(const InsertionPoint& aInsertion)
+{
+  auto SlowPath = [&]() -> nsIFrame* {
+    FlattenedChildIterator iter(aInsertion.mContainer,
+                                /* aStartAtBeginning = */ false);
+    iter.GetPreviousChild(); // Prime the iterator.
+    StyleDisplay unused = UNSET_DISPLAY;
+    return FindNextSibling(iter, unused);
+  };
+
+  if (!IsDisplayContents(aInsertion.mContainer) &&
+      !nsLayoutUtils::GetAfterFrame(aInsertion.mContainer)) {
+    MOZ_ASSERT(!SlowPath());
+    return nullptr;
+  }
+
+  return SlowPath();
+}
+
 void
 nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
                                        InsertionKind aInsertionKind)
@@ -7143,17 +7134,7 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
   MOZ_ASSERT(!parentFrame->IsFieldSetFrame() && !parentFrame->IsDetailsFrame(),
              "Parent frame should not be fieldset or details!");
 
-  // Deal with possible :after generated content on the parent, or display:
-  // contents.
-  nsIFrame* nextSibling = nullptr;
-  if (IsDisplayContents(insertion.mContainer) ||
-      nsLayoutUtils::GetAfterFrame(insertion.mContainer)) {
-    FlattenedChildIterator iter(insertion.mContainer);
-    iter.Seek(insertion.mContainer->GetLastChild());
-    StyleDisplay unused = UNSET_DISPLAY;
-    nextSibling = FindNextSibling(iter, unused);
-  }
-
+  nsIFrame* nextSibling = FindNextSiblingForAppend(insertion);
   if (nextSibling) {
     parentFrame = nextSibling->GetParent()->GetContentInsertionFrame();
   } else {
@@ -7182,10 +7163,7 @@ nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
     //
     // FIXME(emilio): This kinda sucks! :(
     if (nextSibling && !wf) {
-      FlattenedChildIterator iter(insertion.mContainer);
-      iter.Seek(insertion.mContainer->GetLastChild());
-      StyleDisplay unused = UNSET_DISPLAY;
-      nextSibling = FindNextSibling(iter, unused);
+      nextSibling = FindNextSiblingForAppend(insertion);
       if (nextSibling) {
         parentFrame = nextSibling->GetParent()->GetContentInsertionFrame();
         containingBlock = GetFloatContainingBlock(parentFrame);
@@ -10282,7 +10260,6 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
     ComputedStyle* computedStyle;
 
     if (aCanHaveGeneratedContent) {
-      aFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
       computedStyle =
         nsFrame::CorrectStyleParentFrame(aFrame, nullptr)->Style();
       // Probe for generated content before
@@ -11348,9 +11325,6 @@ nsCSSFrameConstructor::ConstructInline(nsFrameConstructorState& aState,
   // Initialize the frame
   InitAndRestoreFrame(aState, content, aParentFrame, newFrame);
 
-  // Inline frames can always have generated content
-  newFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT);
-
   nsFrameConstructorSaveState absoluteSaveState;  // definition cannot be inside next block
                                                   // because the object's destructor is significant
                                                   // this is part of the fix for bug 42372
@@ -11453,8 +11427,7 @@ nsCSSFrameConstructor::CreateIBSiblings(nsFrameConstructorState& aState,
     // frame.
     nsInlineFrame* inlineFrame = NS_NewInlineFrame(mPresShell, computedStyle);
     InitAndRestoreFrame(aState, content, parentFrame, inlineFrame, false);
-    inlineFrame->AddStateBits(NS_FRAME_MAY_HAVE_GENERATED_CONTENT |
-                              NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN);
+    inlineFrame->AddStateBits(NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN);
     if (aIsPositioned) {
       inlineFrame->MarkAsAbsoluteContainingBlock();
     }

@@ -220,7 +220,7 @@ struct Zone : public JS::shadow::Zone,
 
     void beginSweepTypes(bool releaseTypes);
 
-    bool hasMarkedCompartments();
+    bool hasMarkedRealms();
 
     void scheduleGC() { MOZ_ASSERT(!CurrentThreadIsHeapBusy()); gcScheduled_ = true; }
     void unscheduleGC() { gcScheduled_ = false; }
@@ -697,6 +697,13 @@ struct Zone : public JS::shadow::Zone,
         updateMallocCounter(bytes);
         return p;
     }
+
+    // Non-zero if the storage underlying any typed object in this zone might
+    // be detached. This is stored in Zone because IC stubs bake in a pointer
+    // to this field and Baseline IC code is shared across realms within a
+    // Zone. Furthermore, it's not entirely clear if this flag is ever set to
+    // a non-zero value since bug 1458011.
+    uint32_t detachedTypedObjects = 0;
 
   private:
     js::ZoneData<js::jit::JitZone*> jitZone_;

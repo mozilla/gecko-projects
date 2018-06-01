@@ -11,6 +11,9 @@
 
 SimpleTest.waitForExplicitFinish();
 
+var reduceTimePrecisionPrevPrefValue = SpecialPowers.getBoolPref("privacy.reduceTimerPrecision");
+SpecialPowers.setBoolPref("privacy.reduceTimerPrecision", false);
+
 function ConsoleListener() {
   SpecialPowers.addObserver(this, "console-api-log-event");
 }
@@ -18,16 +21,11 @@ function ConsoleListener() {
 ConsoleListener.prototype = {
   observe(aSubject, aTopic, aData) {
     let obj = aSubject.wrappedJSObject;
-    if (obj.arguments[0] != 'test') {
+    if (obj.arguments[0] != "test_bug1463614") {
       return;
     }
 
-    if (!this._cb) {
-      ok(false, "Callback not set!");
-      return;
-    }
-
-    if (!this._cb(obj)) {
+    if (!this._cb || !this._cb(obj)) {
       return;
     }
 
@@ -54,10 +52,10 @@ async function runTest() {
   let cl = listener.waitFor(obj => {
     return ("timer" in obj) &&
            ("name" in obj.timer) &&
-           obj.timer.name == 'test';
+           obj.timer.name == "test_bug1463614";
   });
 
-  console.time('test');
+  console.time("test_bug1463614");
   await cl;
   ok(true, "Console.time received!");
 
@@ -65,15 +63,15 @@ async function runTest() {
   cl = listener.waitFor(obj => {
     return ("timer" in obj) &&
            ("name" in obj.timer) &&
-           obj.timer.name == 'test' &&
+           obj.timer.name == "test_bug1463614" &&
            ("duration" in obj.timer) &&
-           obj.timer.duration > 0 &&
+           obj.timer.duration >= 0 &&
            obj.arguments[1] == 1 &&
            obj.arguments[2] == 2 &&
            obj.arguments[3] == 3 &&
            obj.arguments[4] == 4;
   });
-  console.timeLog('test', 1, 2, 3, 4);
+  console.timeLog("test_bug1463614", 1, 2, 3, 4);
   await cl;
   ok(true, "Console.timeLog received!");
 
@@ -81,11 +79,11 @@ async function runTest() {
   cl = listener.waitFor(obj => {
     return ("timer" in obj) &&
            ("name" in obj.timer) &&
-           obj.timer.name == 'test' &&
+           obj.timer.name == "test_bug1463614" &&
            ("duration" in obj.timer) &&
-           obj.timer.duration > 0;
+           obj.timer.duration >= 0;
   });
-  console.timeEnd('test');
+  console.timeEnd("test_bug1463614");
   await cl;
   ok(true, "Console.timeEnd received!");
 
@@ -93,16 +91,18 @@ async function runTest() {
   cl = listener.waitFor(obj => {
     return ("timer" in obj) &&
            ("name" in obj.timer) &&
-           obj.timer.name == 'test' &&
+           obj.timer.name == "test_bug1463614" &&
            ("error" in obj.timer);
   });
-  console.timeLog('test');
+  console.timeLog("test_bug1463614");
   await cl;
   ok(true, "Console.time with error received!");
 }
 
 runTest().then(() => {
   listener.shutdown();
+
+  SpecialPowers.setBoolPref("privacy.reduceTimerPrecision", reduceTimePrecisionPrevPrefValue);
   SimpleTest.finish();
 });
 

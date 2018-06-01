@@ -9,6 +9,7 @@
 #include "RenderThread.h"
 #include "nsThreadUtils.h"
 #include "mtransport/runnable_utils.h"
+#include "mozilla/layers/AsyncImagePipelineManager.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/SharedSurfacesParent.h"
@@ -69,6 +70,16 @@ RenderThread::Start()
   widget::WinCompositorWindowThread::Start();
 #endif
   layers::SharedSurfacesParent::Initialize();
+
+  if (XRE_IsGPUProcess() &&
+      gfx::gfxVars::UseWebRenderProgramBinary()) {
+    MOZ_ASSERT(gfx::gfxVars::UseWebRender());
+    // Initialize program cache if necessary
+    RefPtr<Runnable> runnable = WrapRunnable(
+      RefPtr<RenderThread>(sRenderThread.get()),
+      &RenderThread::ProgramCacheTask);
+    sRenderThread->Loop()->PostTask(runnable.forget());
+  }
 }
 
 // static
@@ -241,7 +252,7 @@ RenderThread::RunEvent(wr::WindowId aWindowId, UniquePtr<RendererEvent> aEvent)
 }
 
 static void
-NotifyDidRender(layers::CompositorBridgeParentBase* aBridge,
+NotifyDidRender(layers::CompositorBridgeParent* aBridge,
                 wr::WrPipelineInfo aInfo,
                 TimeStamp aStart,
                 TimeStamp aEnd)
@@ -252,9 +263,6 @@ NotifyDidRender(layers::CompositorBridgeParentBase* aBridge,
         aInfo.epochs.data[i].epoch,
         aStart,
         aEnd);
-  }
-  for (uintptr_t i = 0; i < aInfo.removed_pipelines.length; i++) {
-    aBridge->NotifyPipelineRemoved(aInfo.removed_pipelines.data[i]);
   }
 
   wr_pipeline_info_delete(aInfo);
@@ -284,6 +292,16 @@ RenderThread::UpdateAndRender(wr::WindowId aWindowId, bool aReadback)
   TimeStamp end = TimeStamp::Now();
 
   auto info = renderer->FlushPipelineInfo();
+  RefPtr<layers::AsyncImagePipelineManager> pipelineMgr =
+      renderer->GetCompositorBridge()->GetAsyncImagePipelineManager();
+  // pipelineMgr should always be non-null here because it is only nulled out
+  // after the WebRenderAPI instance for the CompositorBridgeParent is
+  // destroyed, and that destruction blocks until the renderer thread has
+  // removed the relevant renderer. And after that happens we should never reach
+  // this code at all; it would bail out at the mRenderers.find check above.
+  MOZ_ASSERT(pipelineMgr);
+  pipelineMgr->NotifyPipelinesUpdated(info);
+
   layers::CompositorThreadHolder::Loop()->PostTask(NewRunnableFunction(
     "NotifyDidRenderRunnable",
     &NotifyDidRender,
@@ -503,13 +521,19 @@ RenderThread::GetRenderTexture(wr::WrExternalImageId aExternalImageId)
   return mRenderTextures.GetWeak(aExternalImageId.mHandle);
 }
 
+void
+RenderThread::ProgramCacheTask()
+{
+  ProgramCache();
+}
+
 WebRenderProgramCache*
 RenderThread::ProgramCache()
 {
   MOZ_ASSERT(IsInRenderThread());
 
   if (!mProgramCache) {
-    mProgramCache = MakeUnique<WebRenderProgramCache>();
+    mProgramCache = MakeUnique<WebRenderProgramCache>(ThreadPool().Raw());
   }
   return mProgramCache.get();
 }
@@ -524,9 +548,16 @@ WebRenderThreadPool::~WebRenderThreadPool()
   wr_thread_pool_delete(mThreadPool);
 }
 
-WebRenderProgramCache::WebRenderProgramCache()
+WebRenderProgramCache::WebRenderProgramCache(wr::WrThreadPool* aThreadPool)
 {
-  mProgramCache = wr_program_cache_new();
+  MOZ_ASSERT(aThreadPool);
+
+  nsAutoString path;
+  if (gfxVars::UseWebRenderProgramBinaryDisk()) {
+    path.Append(gfx::gfxVars::ProfDirectory());
+  }
+  mProgramCache = wr_program_cache_new(&path, aThreadPool);
+  wr_try_load_shader_from_disk(mProgramCache);
 }
 
 WebRenderProgramCache::~WebRenderProgramCache()

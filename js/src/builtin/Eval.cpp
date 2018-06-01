@@ -137,35 +137,29 @@ template <typename CharT>
 static bool
 EvalStringMightBeJSON(const mozilla::Range<const CharT> chars)
 {
-    // If the eval string starts with '(' or '[' and ends with ')' or ']', it may be JSON.
-    // Try the JSON parser first because it's much faster.  If the eval string
-    // isn't JSON, JSON parsing will probably fail quickly, so little time
-    // will be lost.
+    // If the eval string starts with '(' or '[' and ends with ')' or ']', it
+    // may be JSON.  Try the JSON parser first because it's much faster.  If
+    // the eval string isn't JSON, JSON parsing will probably fail quickly, so
+    // little time will be lost.
     size_t length = chars.length();
-    if (length > 2 &&
-        ((chars[0] == '[' && chars[length - 1] == ']') ||
-         (chars[0] == '(' && chars[length - 1] == ')')))
-    {
-        // Remarkably, JavaScript syntax is not a superset of JSON syntax:
-        // strings in JavaScript cannot contain the Unicode line and paragraph
-        // terminator characters U+2028 and U+2029, but strings in JSON can.
-        // Rather than force the JSON parser to handle this quirk when used by
-        // eval, we simply don't use the JSON parser when either character
-        // appears in the provided string.  See bug 657367.
-        if (sizeof(CharT) > 1) {
-            for (RangedPtr<const CharT> cp = chars.begin() + 1, end = chars.end() - 1;
-                 cp < end;
-                 cp++)
-            {
-                char16_t c = *cp;
-                if (c == 0x2028 || c == 0x2029)
-                    return false;
-            }
-        }
+    if (length < 2)
+        return false;
 
-        return true;
-    }
-    return false;
+    // It used to be that strings in JavaScript forbid U+2028 LINE SEPARATOR
+    // and U+2029 PARAGRAPH SEPARATOR, so something like
+    //
+    //   eval("['" + "\u2028" + "']");
+    //
+    // i.e. an array containing a string with a line separator in it, *would*
+    // be JSON but *would not* be valid JavaScript.  Handing such a string to
+    // the JSON parser would then fail to recognize a syntax error.  As of
+    // <https://tc39.github.io/proposal-json-superset/> JavaScript strings may
+    // contain these two code points, so it's safe to JSON-parse eval strings
+    // that contain them.
+
+    CharT first = chars[0], last = chars[length - 1];
+    return (first == '[' && last == ']') ||
+           (first == '(' && last == ')');
 }
 
 template <typename CharT>
@@ -427,7 +421,7 @@ js::DirectEval(JSContext* cx, HandleValue v, MutableHandleValue vp)
                JSOp(*iter.pc()) == JSOP_STRICTEVAL ||
                JSOp(*iter.pc()) == JSOP_SPREADEVAL ||
                JSOp(*iter.pc()) == JSOP_STRICTSPREADEVAL);
-    MOZ_ASSERT(caller.compartment() == caller.script()->compartment());
+    MOZ_ASSERT(caller.realm() == caller.script()->realm());
 
     RootedObject envChain(cx, caller.environmentChain());
     return EvalKernel(cx, v, DIRECT_EVAL, caller, envChain, iter.pc(), vp);
@@ -489,9 +483,10 @@ js::NewJSMEnvironment(JSContext* cx)
     if (!varEnv)
         return nullptr;
 
-    // Force LexicalEnvironmentObject to be created
-    MOZ_ASSERT(!cx->compartment()->getNonSyntacticLexicalEnvironment(varEnv));
-    if (!cx->compartment()->getOrCreateNonSyntacticLexicalEnvironment(cx, varEnv))
+    // Force LexicalEnvironmentObject to be created.
+    ObjectRealm& realm = ObjectRealm::get(varEnv);
+    MOZ_ASSERT(!realm.getNonSyntacticLexicalEnvironment(varEnv));
+    if (!realm.getOrCreateNonSyntacticLexicalEnvironment(cx, varEnv))
         return nullptr;
 
     return varEnv;
@@ -509,7 +504,7 @@ js::ExecuteInJSMEnvironment(JSContext* cx, HandleScript scriptArg, HandleObject 
                             AutoObjectVector& targetObj)
 {
     assertSameCompartment(cx, varEnv);
-    MOZ_ASSERT(cx->compartment()->getNonSyntacticLexicalEnvironment(varEnv));
+    MOZ_ASSERT(ObjectRealm::get(varEnv).getNonSyntacticLexicalEnvironment(varEnv));
     MOZ_DIAGNOSTIC_ASSERT(scriptArg->noScriptRval());
 
     RootedObject env(cx, JS_ExtensibleLexicalEnvironment(varEnv));
@@ -538,7 +533,7 @@ js::ExecuteInJSMEnvironment(JSContext* cx, HandleScript scriptArg, HandleObject 
             return false;
 
         // Create an extensible LexicalEnvironmentObject for target object
-        env = cx->compartment()->getOrCreateNonSyntacticLexicalEnvironment(cx, env);
+        env = ObjectRealm::get(env).getOrCreateNonSyntacticLexicalEnvironment(cx, env);
         if (!env)
             return false;
     }

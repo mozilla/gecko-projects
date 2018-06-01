@@ -8,6 +8,7 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/Sprintf.h"
 
 #include "jsutil.h"
 
@@ -15,7 +16,7 @@
 #include "jit/arm/disasm/Disasm-arm.h"
 #include "jit/arm/MacroAssembler-arm.h"
 #include "jit/ExecutableAllocator.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "jit/MacroAssembler.h"
 #include "vm/JSCompartment.h"
 
@@ -3314,7 +3315,7 @@ Assembler::spewBranch(Instruction* i, const LabelDoc& target)
 
     bool haveTarget = target.valid;
     if (!haveTarget)
-        snprintf(labelBuf, sizeof(labelBuf), "  -> (link-time target)");
+        SprintfLiteral(labelBuf, "  -> (link-time target)");
 
     if (InstBranchImm::IsTHIS(*i)) {
         InstBranchImm* bimm = InstBranchImm::AsTHIS(*i);
@@ -3334,7 +3335,7 @@ Assembler::spewBranch(Instruction* i, const LabelDoc& target)
                 ;
             buffer[i] = 0;
             if (haveTarget) {
-                snprintf(labelBuf, sizeof(labelBuf), "  -> %d%s", target.doc,
+                SprintfLiteral(labelBuf, "  -> %d%s", target.doc,
                          !target.bound ? "f" : "");
                 haveTarget = false;
             }

@@ -670,7 +670,7 @@ MaybeInIteration(HandleObject obj, JSContext* cx)
      * the iterated object itself.
      */
 
-    if (MOZ_LIKELY(!cx->compartment()->objectMaybeInIteration(obj)))
+    if (MOZ_LIKELY(!ObjectRealm::get(obj).objectMaybeInIteration(obj)))
         return false;
 
     ObjectGroup* group = JSObject::getGroup(cx, obj);
@@ -1088,7 +1088,7 @@ IsArraySpecies(JSContext* cx, HandleObject origArray)
     if (!origArray->is<ArrayObject>())
         return true;
 
-    if (cx->compartment()->arraySpeciesLookup.tryOptimizeArray(cx, &origArray->as<ArrayObject>()))
+    if (cx->realm()->arraySpeciesLookup.tryOptimizeArray(cx, &origArray->as<ArrayObject>()))
         return true;
 
     Value ctor;
@@ -1271,6 +1271,12 @@ ArrayJoinDenseKernel(JSContext* cx, SeparatorOp sepOp, HandleNativeObject obj, u
              * Symbol stringifying is a TypeError, so into the slow path
              * with those as well.
              */
+            break;
+        } else if (IF_BIGINT(elem.isBigInt(), false)) {
+            // ToString(bigint) doesn't access bigint.toString or
+            // anything like that, so it can't mutate the array we're
+            // walking through, so it *could* be handled here. We don't
+            // do so yet for reasons of initial-implementation economy.
             break;
         } else {
             MOZ_ASSERT(elem.isMagic(JS_ELEMENTS_HOLE) || elem.isNullOrUndefined());
@@ -3549,7 +3555,7 @@ static const JSFunctionSpec array_methods[] = {
 
 #ifdef NIGHTLY_BUILD
     JS_SELF_HOSTED_FN("flatMap",     "ArrayFlatMap",     1,0),
-    JS_SELF_HOSTED_FN("flatten",     "ArrayFlatten",     0,0),
+    JS_SELF_HOSTED_FN("flat",        "ArrayFlat",        0,0),
 #endif
 
     JS_FS_END
@@ -3696,7 +3702,8 @@ CreateArrayPrototype(JSContext* cx, JSProtoKey key)
      * arrays in JSON and script literals and allows setDenseArrayElement to
      * be used without updating the indexed type set for such default arrays.
      */
-    if (!JSObject::setNewGroupUnknown(cx, &ArrayObject::class_, arrayProto))
+    ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
+    if (!JSObject::setNewGroupUnknown(cx, realm, &ArrayObject::class_, arrayProto))
         return nullptr;
 
     return arrayProto;

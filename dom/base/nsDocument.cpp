@@ -258,6 +258,8 @@
 #include "mozilla/dom/MenuBoxObject.h"
 #include "mozilla/dom/ScrollBoxObject.h"
 #include "mozilla/dom/TreeBoxObject.h"
+#include "nsIXULWindow.h"
+#include "nsIDocShellTreeOwner.h"
 #endif
 #include "nsIPresShellInlines.h"
 
@@ -1728,8 +1730,6 @@ NS_INTERFACE_TABLE_HEAD(nsDocument)
     NS_INTERFACE_TABLE_ENTRY_AMBIGUOUS(nsDocument, nsISupports, nsINode)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsINode)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIDocument)
-    NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIDOMDocument)
-    NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIDOMNode)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsIScriptObjectPrincipal)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, mozilla::dom::EventTarget)
     NS_INTERFACE_TABLE_ENTRY(nsDocument, nsISupportsWeakReference)
@@ -2364,9 +2364,9 @@ nsIDocument::ResetToURI(nsIURI* aURI,
     mFontFaceSet->RefreshStandardFontLoadPrincipal();
   }
 
-  // Refresh the principal on the compartment.
+  // Refresh the principal on the realm.
   if (nsPIDOMWindowInner* win = GetInnerWindow()) {
-    nsGlobalWindowInner::Cast(win)->RefreshCompartmentPrincipal();
+    nsGlobalWindowInner::Cast(win)->RefreshRealmPrincipal();
   }
 }
 
@@ -3754,7 +3754,7 @@ nsIDocument::SetHeaderData(nsAtom* aHeaderField, const nsAString& aData)
 
   // Referrer policy spec says to ignore any empty referrer policies.
   if (aHeaderField == nsGkAtoms::referrer && !aData.IsEmpty()) {
-     enum ReferrerPolicy policy = mozilla::net::ReferrerPolicyFromString(aData);
+     enum mozilla::net::ReferrerPolicy policy = mozilla::net::ReferrerPolicyFromString(aData);
     // If policy is not the empty string, then set element's node document's
     // referrer policy to policy
     if (policy != mozilla::net::RP_Unset) {
@@ -3766,7 +3766,7 @@ nsIDocument::SetHeaderData(nsAtom* aHeaderField, const nsAString& aData)
   }
 
   if (aHeaderField == nsGkAtoms::headerReferrerPolicy && !aData.IsEmpty()) {
-     enum ReferrerPolicy policy = nsContentUtils::GetReferrerPolicyFromHeader(aData);
+     enum mozilla::net::ReferrerPolicy policy = nsContentUtils::GetReferrerPolicyFromHeader(aData);
     if (policy != mozilla::net::RP_Unset) {
       mReferrerPolicy = policy;
       mReferrerPolicySet = true;
@@ -3803,14 +3803,15 @@ AssertNoStaleServoDataIn(const nsINode& aSubtreeRoot)
   for (const nsINode* node = &aSubtreeRoot;
        node;
        node = node->GetNextNode(&aSubtreeRoot)) {
-    if (!node->IsElement()) {
+    const Element* element = Element::FromNode(node);
+    if (!element) {
       continue;
     }
-    MOZ_ASSERT(!node->AsElement()->HasServoData());
-    if (auto* shadow = node->AsElement()->GetShadowRoot()) {
+    MOZ_ASSERT(!element->HasServoData());
+    if (auto* shadow = element->GetShadowRoot()) {
       AssertNoStaleServoDataIn(*shadow);
     }
-    if (nsXBLBinding* binding = node->AsElement()->GetXBLBinding()) {
+    if (nsXBLBinding* binding = element->GetXBLBinding()) {
       if (nsXBLBinding* bindingWithContent = binding->GetBindingWithContent()) {
         nsIContent* content = bindingWithContent->GetAnonymousContent();
         MOZ_ASSERT(!content->AsElement()->HasServoData());
@@ -4144,10 +4145,9 @@ nsIDocument::GetRootElementInternal() const
   // are likely to appear before the root element.
   uint32_t i;
   for (i = mChildren.ChildCount(); i > 0; --i) {
-    nsIContent* child = mChildren.ChildAt(i - 1);
-    if (child->IsElement()) {
-      const_cast<nsIDocument*>(this)->mCachedRootElement = child->AsElement();
-      return child->AsElement();
+    if (Element* element = Element::FromNode(mChildren.ChildAt(i - 1))) {
+      const_cast<nsIDocument*>(this)->mCachedRootElement = element;
+      return element;
     }
   }
 
@@ -5553,7 +5553,7 @@ nsIDocument::GetAnonRootIfInAnonymousContentContainer(nsINode* aNode) const
   nsINode* parent = aNode->GetParentNode();
   while (parent && parent->IsInNativeAnonymousSubtree()) {
     if (parent == customContainer) {
-      return child->IsElement() ? child->AsElement() : nullptr;
+      return Element::FromNode(child);
     }
     child = parent;
     parent = child->GetParentNode();
@@ -6124,14 +6124,13 @@ nsIDocument::GetAnonymousElementByAttribute(nsIContent* aElement,
   bool universalMatch = aAttrValue.EqualsLiteral("*");
 
   for (uint32_t i = 0; i < length; ++i) {
-    nsIContent* current = nodeList->Item(i);
-    if (!current->IsElement()) {
+    Element* current = Element::FromNode(nodeList->Item(i));
+    if (!current) {
       continue;
     }
 
     Element* matchedElm =
-      GetElementByAttribute(current->AsElement(), aAttrName, aAttrValue,
-                            universalMatch);
+      GetElementByAttribute(current, aAttrName, aAttrValue, universalMatch);
     if (matchedElm)
       return matchedElm;
   }
@@ -6550,6 +6549,13 @@ nsIDocument::SetMayStartLayout(bool aMayStartLayout)
 {
   mMayStartLayout = aMayStartLayout;
   if (MayStartLayout()) {
+    // Before starting layout, check whether we're a toplevel chrome
+    // window.  If we are, setup some state so that we don't have to restyle
+    // the whole tree after StartLayout.
+    if (nsCOMPtr<nsIXULWindow> win = GetXULWindowIfToplevelChrome()) {
+        // We're the chrome document!
+        win->BeforeStartLayout();
+    }
     ReadyState state = GetReadyStateEnum();
     if (state >= READYSTATE_INTERACTIVE) {
       // DOMContentLoaded has fired already.
@@ -6926,12 +6932,10 @@ nsIDocument::GetCompatMode(nsString& aCompatMode) const
 }
 
 void
-nsDOMAttributeMap::BlastSubtreeToPieces(nsINode *aNode)
+nsDOMAttributeMap::BlastSubtreeToPieces(nsINode* aNode)
 {
-  if (aNode->IsElement()) {
-    Element *element = aNode->AsElement();
-    const nsDOMAttributeMap *map = element->GetAttributeMap();
-    if (map) {
+  if (Element* element = Element::FromNode(aNode)) {
+    if (const nsDOMAttributeMap* map = element->GetAttributeMap()) {
       while (true) {
         nsCOMPtr<nsIAttribute> attr;
         {
@@ -7055,8 +7059,8 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
         // have a binding applied. Remove the binding from the element now
         // that it's getting adopted into a new document.
         // TODO Fully tear down the binding.
-        if (adoptedNode->IsElement()) {
-          adoptedNode->AsElement()->SetXBLBinding(nullptr);
+        if (Element* element = Element::FromNode(adoptedNode)) {
+          element->SetXBLBinding(nullptr);
         }
       }
 
@@ -8491,6 +8495,18 @@ static void ClearPendingFullscreenRequests(nsIDocument* aDoc);
 void
 nsIDocument::OnPageHide(bool aPersisted, EventTarget* aDispatchStartTarget)
 {
+  if (mDocGroup && Telemetry::CanRecordExtended() &&
+      IsTopLevelContentDocument()) {
+    TabGroup* tabGroup = mDocGroup->GetTabGroup();
+
+    if (tabGroup) {
+      Telemetry::Accumulate(Telemetry::ACTIVE_DOCGROUPS_PER_TABGROUP,
+                            tabGroup->Count(true /* aActiveOnly */));
+      Telemetry::Accumulate(Telemetry::TOTAL_DOCGROUPS_PER_TABGROUP,
+                            tabGroup->Count());
+    }
+  }
+
   // Send out notifications that our <link> elements are detached,
   // but only if this is not a full unload.
   Element* root = GetRootElement();
@@ -8954,7 +8970,7 @@ nsIDocument::ResolvePreloadImage(nsIURI *aBaseURI,
 void
 nsIDocument::MaybePreLoadImage(nsIURI* uri,
                                const nsAString &aCrossOriginAttr,
-                               enum ReferrerPolicy aReferrerPolicy,
+                               enum mozilla::net::ReferrerPolicy aReferrerPolicy,
                                bool aIsImgSet)
 {
   // Early exit if the img is already present in the img-cache
@@ -9101,7 +9117,7 @@ void
 nsIDocument::PreloadStyle(nsIURI* uri,
                           const Encoding* aEncoding,
                           const nsAString& aCrossOriginAttr,
-                          const enum ReferrerPolicy aReferrerPolicy,
+                          const enum mozilla::net::ReferrerPolicy aReferrerPolicy,
                           const nsAString& aIntegrity)
 {
   // The CSSLoader will retain this object after we return.
@@ -11890,6 +11906,27 @@ nsIDocument::Evaluate(JSContext* aCx, const nsAString& aExpression,
 {
   return XPathEvaluator()->Evaluate(aCx, aExpression, aContextNode, aResolver,
                                     aType, aResult, rv);
+}
+
+already_AddRefed<nsIXULWindow>
+nsIDocument::GetXULWindowIfToplevelChrome() const
+{
+  nsCOMPtr<nsIDocShellTreeItem> item = GetDocShell();
+  if (!item) {
+    return nullptr;
+  }
+  nsCOMPtr<nsIDocShellTreeOwner> owner;
+  item->GetTreeOwner(getter_AddRefs(owner));
+  nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(owner);
+  if (!xulWin) {
+    return nullptr;
+  }
+  nsCOMPtr<nsIDocShell> xulWinShell;
+  xulWin->GetDocShell(getter_AddRefs(xulWinShell));
+  if (!SameCOMIdentity(xulWinShell, item)) {
+    return nullptr;
+  }
+  return xulWin.forget();
 }
 
 nsIDocument*

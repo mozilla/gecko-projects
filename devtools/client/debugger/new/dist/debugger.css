@@ -1108,7 +1108,10 @@ html .toggle-button.end.vertical svg {
 
 .search-field i.magnifying-glass,
 .search-field i.sad-face {
-  padding: 6px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  padding-inline-end: 10px;
+  padding-inline-start: 5px;
   width: 24px;
 }
 
@@ -1116,6 +1119,11 @@ html .toggle-button.end.vertical svg {
 .search-field.big i.sad-face {
   position: absolute;
   width: 40px;
+}
+
+.search-field.big i.sad-face {
+  padding-top: 4px;
+  padding-inline-start: 4px;
 }
 
 .search-field .magnifying-glass path,
@@ -1133,12 +1141,12 @@ html .toggle-button.end.vertical svg {
 
 .search-field .summary {
   line-height: 27px;
-  padding-right: 10px;
+  text-align: center;
+  padding-inline-end: 10px;
   color: var(--theme-body-color-inactive);
-}
-
-.search-field.big .summary {
-  line-height: 40px;
+  align-self: center;
+  padding-top: 1px;
+  white-space: nowrap;
 }
 
 .search-field .search-nav-buttons {
@@ -1256,7 +1264,7 @@ html .toggle-button.end.vertical svg {
 }
 
 .project-text-search .search-field .close-btn.big {
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .project-text-search .managed-tree {
@@ -2109,6 +2117,10 @@ menuseparator {
   padding: 0 2px;
 }
 
+.objectBox-node.clickable {
+  cursor: pointer;
+}
+
 /******************************************************************************/
 
 .objectBox-event,
@@ -2215,6 +2227,7 @@ button.open-inspector {
   height: 16px;
   margin-left: 0.25em;
   vertical-align: middle;
+  cursor: pointer;
 }
 
 .objectBox-node:hover .open-inspector,
@@ -3072,7 +3085,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
   max-width: calc(100% - var(--breakpoint-expression-right-clear-space));
   display: inline-block;
   padding-inline-end: 8px;
-  cursor: default;
+  cursor: pointer;
   flex-grow: 1;
   text-overflow: ellipsis;
   overflow: hidden;
@@ -3256,7 +3269,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
 .expression-container__close-btn {
   position: absolute;
   offset-inline-end: 0px;
-  top: 0px;
+  top: 1px;
 }
 
 .expression-content {
@@ -4044,6 +4057,7 @@ html .welcomebox .toggle-button-end.collapsed {
   position: relative;
   transition: all 0.15s ease;
   min-width: 40px;
+  max-width: 100%;
   overflow: hidden;
   padding: 5px;
   margin-inline-start: 3px;

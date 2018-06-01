@@ -440,6 +440,7 @@ public:
   typedef mozilla::layers::FrameMetrics FrameMetrics;
   typedef mozilla::layers::FrameMetrics::ViewID ViewID;
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
+  typedef mozilla::Maybe<mozilla::layers::ScrollDirection> MaybeScrollDirection;
 
   /**
    * @param aReferenceFrame the frame at the root of the subtree; its origin
@@ -621,7 +622,7 @@ public:
    * which we are building display items at the moment.
    */
   ViewID GetCurrentScrollbarTarget() const { return mCurrentScrollbarTarget; }
-  nsDisplayOwnLayerFlags GetCurrentScrollbarFlags() const { return mCurrentScrollbarFlags; }
+  MaybeScrollDirection GetCurrentScrollbarDirection() const { return mCurrentScrollbarDirection; }
   /**
    * Returns true if building a scrollbar, and the scrollbar will not be
    * layerized.
@@ -1363,18 +1364,18 @@ public:
   class AutoCurrentScrollbarInfoSetter {
   public:
     AutoCurrentScrollbarInfoSetter(nsDisplayListBuilder* aBuilder, ViewID aScrollTargetID,
-                                   nsDisplayOwnLayerFlags aScrollbarFlags, bool aWillHaveLayer)
+                                   const MaybeScrollDirection& aScrollbarDirection, bool aWillHaveLayer)
      : mBuilder(aBuilder) {
       aBuilder->mIsBuildingScrollbar = true;
       aBuilder->mCurrentScrollbarTarget = aScrollTargetID;
-      aBuilder->mCurrentScrollbarFlags = aScrollbarFlags;
+      aBuilder->mCurrentScrollbarDirection = aScrollbarDirection;
       aBuilder->mCurrentScrollbarWillHaveLayer = aWillHaveLayer;
     }
     ~AutoCurrentScrollbarInfoSetter() {
       // No need to restore old values because scrollbars cannot be nested.
       mBuilder->mIsBuildingScrollbar = false;
       mBuilder->mCurrentScrollbarTarget = FrameMetrics::NULL_SCROLL_ID;
-      mBuilder->mCurrentScrollbarFlags = (nsDisplayOwnLayerFlags)0;
+      mBuilder->mCurrentScrollbarDirection.reset();
       mBuilder->mCurrentScrollbarWillHaveLayer = false;
     }
   private:
@@ -1960,7 +1961,7 @@ private:
   nsDisplayListBuilderMode       mMode;
   ViewID                         mCurrentScrollParentId;
   ViewID                         mCurrentScrollbarTarget;
-  nsDisplayOwnLayerFlags         mCurrentScrollbarFlags;
+  MaybeScrollDirection           mCurrentScrollbarDirection;
   Preserves3DContext             mPreserves3DCtx;
   uint32_t                       mPerspectiveItemIndex;
   int32_t                        mSVGEffectsBuildingDepth;
@@ -2857,20 +2858,22 @@ public:
   void SetOldListIndex(nsDisplayList* aList, OldListIndex aIndex, uint32_t aListKey, uint32_t aNestingDepth)
   {
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-    mOldList = reinterpret_cast<uintptr_t>(aList);
     mOldListKey = aListKey;
     mOldNestingDepth = aNestingDepth;
 #endif
+    mOldList = reinterpret_cast<uintptr_t>(aList);
     mOldListIndex = aIndex;
   }
-  OldListIndex GetOldListIndex(nsDisplayList* aList, uint32_t aListKey)
+  bool GetOldListIndex(nsDisplayList* aList, uint32_t aListKey, OldListIndex* aOutIndex)
   {
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
     if (mOldList != reinterpret_cast<uintptr_t>(aList)) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
       MOZ_CRASH_UNSAFE_PRINTF("Item found was in the wrong list! type %d (outer type was %d at depth %d, now is %d)", GetPerFrameKey(), mOldListKey, mOldNestingDepth, aListKey);
-    }
 #endif
-    return mOldListIndex;
+      return false;
+    }
+    *aOutIndex = mOldListIndex;
+    return true;
   }
 
   const nsRect& GetPaintRect() const {
@@ -2910,7 +2913,6 @@ protected:
 
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 public:
-  uintptr_t mOldList = 0;
   uint32_t mOldListKey = 0;
   uint32_t mOldNestingDepth = 0;
   bool mMergedItem = false;
@@ -2918,6 +2920,7 @@ public:
 protected:
 #endif
   OldListIndex mOldListIndex;
+  uintptr_t mOldList = 0;
 
   bool      mForceNotVisible;
   bool      mDisableSubpixelAA;
@@ -3306,7 +3309,7 @@ protected:
     return !mNext && mStack.Length() > 0;
   }
 
-  virtual bool ShouldFlattenNextItem() const
+  virtual bool ShouldFlattenNextItem()
   {
     return mNext && mNext->ShouldFlattenAway(mBuilder);
   }
@@ -5384,6 +5387,7 @@ public:
   bool OpacityAppliedToChildren() const { return mOpacityAppliedToChildren; }
 
   static bool NeedsActiveLayer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame);
+  static bool MayNeedActiveLayer(nsIFrame* aFrame);
   NS_DISPLAY_DECL_NAME("Opacity", TYPE_OPACITY)
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 
@@ -5631,10 +5635,7 @@ protected:
 enum class nsDisplayOwnLayerFlags {
   eNone = 0,
   eGenerateSubdocInvalidations = 1 << 0,
-  eVerticalScrollbar = 1 << 1,
-  eHorizontalScrollbar = 1 << 2,
-  eGenerateScrollableLayer = 1 << 3,
-  eScrollbarContainer = 1 << 4,
+  eGenerateScrollableLayer = 1 << 1,
 };
 
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(nsDisplayOwnLayerFlags)
@@ -5710,6 +5711,7 @@ public:
 
   nsDisplayOwnLayerFlags GetFlags() { return mFlags; }
   bool IsScrollThumbLayer() const;
+  bool IsScrollbarContainer() const;
   NS_DISPLAY_DECL_NAME("OwnLayer", TYPE_OWN_LAYER)
 protected:
   nsDisplayOwnLayerFlags mFlags;

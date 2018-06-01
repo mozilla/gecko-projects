@@ -45,10 +45,6 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-static_assert((((1 << nsStyleStructID_Length) - 1) &
-               ~(NS_STYLE_INHERIT_MASK)) == 0,
-              "Not enough bits in NS_STYLE_INHERIT_MASK");
-
 /* static */ const int32_t nsStyleGridLine::kMinLine;
 /* static */ const int32_t nsStyleGridLine::kMaxLine;
 
@@ -1228,9 +1224,9 @@ nsStyleFilter::SetDropShadow(nsCSSShadowArray* aDropShadow)
 //
 nsStyleSVGReset::nsStyleSVGReset(const nsPresContext* aContext)
   : mMask(nsStyleImageLayers::LayerType::Mask)
-  , mStopColor(NS_RGB(0, 0, 0))
-  , mFloodColor(NS_RGB(0, 0, 0))
-  , mLightingColor(NS_RGB(255, 255, 255))
+  , mStopColor(StyleComplexColor::FromColor(NS_RGB(0, 0, 0)))
+  , mFloodColor(StyleComplexColor::FromColor(NS_RGB(0, 0, 0)))
+  , mLightingColor(StyleComplexColor::FromColor(NS_RGB(255, 255, 255)))
   , mStopOpacity(1.0f)
   , mFloodOpacity(1.0f)
   , mDominantBaseline(NS_STYLE_DOMINANT_BASELINE_AUTO)
@@ -2100,27 +2096,7 @@ private:
 };
 
 nsStyleImageRequest::nsStyleImageRequest(Mode aModeFlags,
-                                         imgRequestProxy* aRequestProxy,
-                                         css::ImageValue* aImageValue,
-                                         ImageTracker* aImageTracker)
-  : mRequestProxy(aRequestProxy)
-  , mImageValue(aImageValue)
-  , mImageTracker(aImageTracker)
-  , mModeFlags(aModeFlags)
-  , mResolved(true)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aImageValue);
-  MOZ_ASSERT(!!(aModeFlags & Mode::Track) == !!aImageTracker);
-
-  if (mRequestProxy) {
-    MaybeTrackAndLock();
-  }
-}
-
-nsStyleImageRequest::nsStyleImageRequest(
-    Mode aModeFlags,
-    mozilla::css::ImageValue* aImageValue)
+                                         css::ImageValue* aImageValue)
   : mImageValue(aImageValue)
   , mModeFlags(aModeFlags)
   , mResolved(false)
@@ -2199,11 +2175,12 @@ nsStyleImageRequest::Resolve(
   } else {
     mDocGroup = doc->GetDocGroup();
     mImageValue->Initialize(doc);
-
-    nsCSSValue value;
-    value.SetImageValue(mImageValue);
-    mRequestProxy = value.GetPossiblyStaticImageValue(aPresContext->Document(),
-                                                      aPresContext);
+    imgRequestProxy* request = mImageValue->mRequests.GetWeak(doc);
+    if (aPresContext->IsDynamic()) {
+      mRequestProxy = request;
+    } else if (request) {
+      request->GetStaticRequest(doc, getter_AddRefs(mRequestProxy));
+    }
   }
 
   if (!mRequestProxy) {
@@ -3362,17 +3339,13 @@ nsStyleBackground::HasFixedBackground(nsIFrame* aFrame) const
 nscolor
 nsStyleBackground::BackgroundColor(const nsIFrame* aFrame) const
 {
-  return BackgroundColor(aFrame->Style());
+  return mBackgroundColor.CalcColor(aFrame);
 }
 
 nscolor
 nsStyleBackground::BackgroundColor(mozilla::ComputedStyle* aStyle) const
 {
-  // In majority of cases, background-color should just be a numeric color.
-  // In that case, we can skip resolving StyleColor().
-  return mBackgroundColor.IsNumericColor()
-    ? mBackgroundColor.mColor
-    : mBackgroundColor.CalcColor(aStyle);
+  return mBackgroundColor.CalcColor(aStyle);
 }
 
 bool

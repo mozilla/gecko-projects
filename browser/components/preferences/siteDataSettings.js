@@ -31,19 +31,22 @@ let gSiteDataSettings = {
     let container = document.createElement("hbox");
 
     // Creates a new column item with the specified relative width.
-    function addColumnItem(l10n, flexWidth) {
+    function addColumnItem(l10n, flexWidth, tooltipText) {
       let box = document.createElement("hbox");
       box.className = "item-box";
       box.setAttribute("flex", flexWidth);
       let label = document.createElement("label");
       label.setAttribute("crop", "end");
       if (l10n) {
-        if (l10n.raw) {
+        if (l10n.hasOwnProperty("raw")) {
           box.setAttribute("tooltiptext", l10n.raw);
           label.setAttribute("value", l10n.raw);
         } else {
           document.l10n.setAttributes(label, l10n.id, l10n.args);
         }
+      }
+      if (tooltipText) {
+        box.setAttribute("tooltiptext", tooltipText);
       }
       box.appendChild(label);
       container.appendChild(box);
@@ -69,8 +72,12 @@ let gSiteDataSettings = {
     }
 
     // Add "Last Used" column.
+    let formattedLastAccessed = site.lastAccessed > 0 ?
+      this._relativeTimeFormat.formatBestUnit(site.lastAccessed) : null;
+    let formattedFullDate = site.lastAccessed > 0 ?
+      this._absoluteTimeFormat.format(site.lastAccessed) : null;
     addColumnItem(site.lastAccessed > 0 ?
-      {raw: this._formatter.format(site.lastAccessed)} : null, "2");
+      { raw: formattedLastAccessed } : null, "2", formattedFullDate);
 
     item.appendChild(container);
     return item;
@@ -82,9 +89,11 @@ let gSiteDataSettings = {
               .addEventListener(eventType, callback.bind(gSiteDataSettings));
     }
 
-    this._formatter = new Services.intl.DateTimeFormat(undefined, {
+    this._absoluteTimeFormat = new Services.intl.DateTimeFormat(undefined, {
       dateStyle: "short", timeStyle: "short",
     });
+
+    this._relativeTimeFormat = new Services.intl.RelativeTimeFormat(undefined, {});
 
     this._list = document.getElementById("sitesList");
     this._searchBox = document.getElementById("searchBox");
@@ -180,6 +189,7 @@ let gSiteDataSettings = {
     }
 
     let keyword = this._searchBox.value.toLowerCase().trim();
+    let fragment = document.createDocumentFragment();
     for (let site of sites) {
       let host = site.host;
       if (keyword && !host.includes(keyword)) {
@@ -191,8 +201,9 @@ let gSiteDataSettings = {
       }
 
       let item = this._createSiteListItem(site);
-      this._list.appendChild(item);
+      fragment.appendChild(item);
     }
+    this._list.appendChild(fragment);
     this._updateButtonsState();
   },
 

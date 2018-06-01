@@ -52,11 +52,6 @@ protected:
   nsCOMPtr<nsINode> mLastBlockParent;
   nsresult GetBlockParent(nsINode* aNode, nsINode** aParent);
 
-  // Utility routines:
-  bool IsBlockNode(nsIContent* aNode);
-  bool SkipNode(nsIContent* aNode);
-  bool IsVisibleNode(nsINode* aNode);
-
   // Move in the right direction for our search:
   nsresult NextNode(nsRange* aSearchRange,
                     nsRange* aStartPoint, nsRange* aEndPoint,
@@ -71,8 +66,8 @@ protected:
   void ResetAll();
 
   // The iterator we use to move through the document:
-  nsresult InitIterator(nsIDOMNode* aStartNode, int32_t aStartOffset,
-                        nsIDOMNode* aEndNode, int32_t aEndOffset);
+  nsresult InitIterator(nsINode* aStartNode, int32_t aStartOffset,
+                        nsINode* aEndNode, int32_t aEndOffset);
   RefPtr<nsFindContentIterator> mIterator;
 
   friend class PeekNextCharRestoreState;

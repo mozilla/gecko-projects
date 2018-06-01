@@ -172,6 +172,15 @@ enum JSShellExitCode {
     EXITCODE_TIMEOUT            = 6
 };
 
+// Define use of application-specific slots on the shell's global object.
+enum GlobalAppSlot
+{
+    GlobalAppSlotModuleResolveHook,
+    GlobalAppSlotCount
+};
+static_assert(GlobalAppSlotCount <= JSCLASS_GLOBAL_APPLICATION_SLOTS,
+              "Too many applications slots defined for shell global");
+
 /*
  * Note: This limit should match the stack limit set by the browser in
  *       js/xpconnect/src/XPCJSContext.cpp
@@ -610,8 +619,7 @@ ShellContext::ShellContext(JSContext* cx)
     readLineBufPos(0),
     errFilePtr(nullptr),
     outFilePtr(nullptr),
-    offThreadMonitor(mutexid::ShellOffThreadState),
-    moduleResolveHook(cx)
+    offThreadMonitor(mutexid::ShellOffThreadState)
 {}
 
 ShellContext::~ShellContext()
@@ -4279,8 +4287,8 @@ SetModuleResolveHook(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    ShellContext* sc = GetShellContext(cx);
-    sc->moduleResolveHook = &args[0].toObject().as<JSFunction>();
+    Handle<GlobalObject*> global = cx->global();
+    global->setReservedSlot(GlobalAppSlotModuleResolveHook, args[0]);
 
     args.rval().setUndefined();
     return true;
@@ -4289,18 +4297,20 @@ SetModuleResolveHook(JSContext* cx, unsigned argc, Value* vp)
 static JSObject*
 CallModuleResolveHook(JSContext* cx, HandleObject module, HandleString specifier)
 {
-    ShellContext* sc = GetShellContext(cx);
-    if (!sc->moduleResolveHook) {
+    Handle<GlobalObject*> global = cx->global();
+    RootedValue hookValue(cx, global->getReservedSlot(GlobalAppSlotModuleResolveHook));
+    if (hookValue.isUndefined()) {
         JS_ReportErrorASCII(cx, "Module resolve hook not set");
         return nullptr;
     }
+    MOZ_ASSERT(hookValue.toObject().is<JSFunction>());
 
     JS::AutoValueArray<2> args(cx);
     args[0].setObject(*module);
     args[1].setString(specifier);
 
     RootedValue result(cx);
-    if (!JS_CallFunction(cx, nullptr, sc->moduleResolveHook, args, &result))
+    if (!JS_CallFunctionValue(cx, nullptr, hookValue, args, &result))
         return nullptr;
 
     if (!result.isObject() || !result.toObject().is<ModuleObject>()) {
@@ -4309,6 +4319,24 @@ CallModuleResolveHook(JSContext* cx, HandleObject module, HandleString specifier
     }
 
     return &result.toObject();
+}
+
+static bool
+ShellModuleMetadataHook(JSContext* cx, HandleObject module, HandleObject metaObject)
+{
+    // For the shell, just use the script's filename as the base URL.
+    RootedScript script(cx, module->as<ModuleObject>().script());
+    const char* filename = script->scriptSource()->filename();
+    MOZ_ASSERT(filename);
+
+    RootedString url(cx, NewStringCopyZ<CanGC>(cx, filename));
+    if (!url)
+        return false;
+
+    if (!JS_DefineProperty(cx, metaObject, "url", url, JSPROP_ENUMERATE))
+        return false;
+
+    return true;
 }
 
 static bool
@@ -4518,7 +4546,7 @@ Parse(JSContext* cx, unsigned argc, Value* vp)
 
     Parser<FullParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(), options, chars, length,
                                               /* foldConstants = */ false, usedNames, nullptr,
-                                              nullptr, sourceObject);
+                                              nullptr, sourceObject, ParseGoal::Script);
     if (!parser.checkOptions())
         return false;
 
@@ -4576,7 +4604,8 @@ SyntaxParse(JSContext* cx, unsigned argc, Value* vp)
     Parser<frontend::SyntaxParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(),
                                                           options, chars, length, false,
                                                           usedNames, nullptr, nullptr,
-                                                          sourceObject);
+                                                          sourceObject,
+                                                          frontend::ParseGoal::Script);
     if (!parser.checkOptions())
         return false;
 
@@ -6148,7 +6177,7 @@ ReflectTrackedOptimizations(JSContext* cx, unsigned argc, Value* vp)
             uint8_t* addr = ion->method()->raw() + endOffset;
             entry.youngestFrameLocationAtAddr(rt, addr, &script, &pc);
 
-            if (!sp.jsprintf("{\"location\":\"%s:%zu\",\"offset\":%zu,\"index\":%u}%s",
+            if (!sp.jsprintf("{\"location\":\"%s:%u\",\"offset\":%zu,\"index\":%u}%s",
                              script->filename(), script->lineno(), script->pcToOffset(pc), index,
                              iter.more() ? "," : ""))
             {
@@ -8880,7 +8909,7 @@ Shell(JSContext* cx, OptionParser* op, char** envp)
      * Dump remaining type inference results while we still have a context.
      * This printing depends on atoms still existing.
      */
-    for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next())
+    for (CompartmentsIter c(cx->runtime()); !c.done(); c.next())
         PrintTypes(cx, c, false);
 
     return result;
@@ -9315,6 +9344,7 @@ main(int argc, char** argv, char** envp)
     js::SetPreserveWrapperCallback(cx, DummyPreserveWrapperCallback);
 
     JS::SetModuleResolveHook(cx->runtime(), CallModuleResolveHook);
+    JS::SetModuleMetadataHook(cx->runtime(), ShellModuleMetadataHook);
 
     result = Shell(cx, &op, envp);
 

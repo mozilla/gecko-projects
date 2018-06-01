@@ -1646,7 +1646,7 @@ ICSetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<
 {
     BailoutReturnStub kind = BailoutReturnStub::SetProp;
     void* address = code->raw() + bailoutReturnOffset_.offset();
-    cx->compartment()->jitCompartment()->initBailoutReturnAddr(address, getKey(), kind);
+    cx->realm()->jitRealm()->initBailoutReturnAddr(address, getKey(), kind);
 }
 
 //
@@ -1798,7 +1798,7 @@ GetTemplateObjectForSimd(JSContext* cx, JSFunction* target, MutableHandleObject 
     // Create a template object based on retType.
     RootedGlobalObject global(cx, cx->global());
     Rooted<SimdTypeDescr*> descr(cx, GlobalObject::getOrCreateSimdTypeDescr(cx, global, retType));
-    res.set(cx->compartment()->jitCompartment()->getSimdTemplateObjectFor(cx, descr));
+    res.set(cx->realm()->jitRealm()->getSimdTemplateObjectFor(cx, descr));
     return true;
 }
 
@@ -1903,7 +1903,7 @@ GetTemplateObjectForClassHook(JSContext* cx, JSNative hook, CallArgs& args,
 
     if (hook == SimdTypeDescr::call && JitSupportsSimd()) {
         Rooted<SimdTypeDescr*> descr(cx, &args.callee().as<SimdTypeDescr>());
-        templateObject.set(cx->compartment()->jitCompartment()->getSimdTemplateObjectFor(cx, descr));
+        templateObject.set(cx->realm()->jitRealm()->getSimdTemplateObjectFor(cx, descr));
         return !!templateObject;
     }
 
@@ -2105,7 +2105,7 @@ TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub, HandleScript script, jsb
                     fun->native(), constructing ? "yes" : "no", isSpread ? "yes" : "no");
         } else {
             JitSpew(JitSpew_BaselineIC,
-                    "  Generating Call_Scripted stub (fun=%p, %s:%zu, cons=%s, spread=%s)",
+                    "  Generating Call_Scripted stub (fun=%p, %s:%u, cons=%s, spread=%s)",
                     fun.get(), fun->nonLazyScript()->filename(), fun->nonLazyScript()->lineno(),
                     constructing ? "yes" : "no", isSpread ? "yes" : "no");
         }
@@ -2880,7 +2880,7 @@ ICCall_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<Jit
     void* address = code->raw() + bailoutReturnOffset_.offset();
     BailoutReturnStub kind = isConstructing_ ? BailoutReturnStub::New
                                              : BailoutReturnStub::Call;
-    cx->compartment()->jitCompartment()->initBailoutReturnAddr(address, getKey(), kind);
+    cx->realm()->jitRealm()->initBailoutReturnAddr(address, getKey(), kind);
 }
 
 typedef bool (*CreateThisFn)(JSContext* cx, HandleObject callee, HandleObject newTarget,
@@ -4046,11 +4046,11 @@ ICIteratorMore_Native::Compiler::generateStubCode(MacroAssembler& masm)
                             obj, &failure);
     masm.loadObjPrivate(obj, JSObject::ITER_CLASS_NFIXED_SLOTS, nativeIterator);
 
-    // If props_cursor < props_end, load the next string and advance the cursor.
-    // Else, return MagicValue(JS_NO_ITER_VALUE).
+    // If propertyCursor_ < propertiesEnd_, load the next string and advance
+    // the cursor.  Otherwise return MagicValue(JS_NO_ITER_VALUE).
     Label iterDone;
-    Address cursorAddr(nativeIterator, offsetof(NativeIterator, props_cursor));
-    Address cursorEndAddr(nativeIterator, offsetof(NativeIterator, props_end));
+    Address cursorAddr(nativeIterator, NativeIterator::offsetOfPropertyCursor());
+    Address cursorEndAddr(nativeIterator, NativeIterator::offsetOfPropertiesEnd());
     masm.loadPtr(cursorAddr, scratch);
     masm.branchPtr(Assembler::BelowOrEqual, cursorEndAddr, scratch, &iterDone);
 

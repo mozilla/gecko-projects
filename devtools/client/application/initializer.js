@@ -37,24 +37,10 @@ window.Application = {
     this.actions = bindActionCreators(actions, this.store.dispatch);
 
     const serviceContainer = {
-      openWebLink(url) {
-        let win = toolbox.doc.defaultView.top;
-        win.openWebLinkIn(url, "tab", { relatedToCurrent: true });
-      },
-
-      openTrustedLink(url) {
-        let win = toolbox.doc.defaultView.top;
-        win.openTrustedLinkIn(url, "tab", { relatedToCurrent: true });
-      },
-
       selectTool(toolId) {
         return toolbox.selectTool(toolId);
       }
     };
-
-    // Render the root Application component.
-    const app = App({ client: this.client, serviceContainer });
-    render(Provider({ store: this.store }, app), this.mount);
 
     this.client.addListener("workerListChanged", this.updateWorkers);
     this.client.addListener("serviceWorkerRegistrationListChanged", this.updateWorkers);
@@ -64,6 +50,10 @@ window.Application = {
 
     this.updateDomain();
     await this.updateWorkers();
+
+    // Render the root Application component.
+    const app = App({ client: this.client, serviceContainer });
+    render(Provider({ store: this.store }, app), this.mount);
   },
 
   async updateWorkers() {

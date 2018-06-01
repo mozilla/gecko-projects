@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
@@ -103,13 +103,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-
-NS_IMPL_ADDREF_INHERITED(nsGenericHTMLElement, nsGenericHTMLElementBase)
-NS_IMPL_RELEASE_INHERITED(nsGenericHTMLElement, nsGenericHTMLElementBase)
-
-NS_INTERFACE_MAP_BEGIN(nsGenericHTMLElement)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMNode)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElementBase)
 
 nsresult
 nsGenericHTMLElement::CopyInnerTo(Element* aDst, bool aPreallocateChildren)

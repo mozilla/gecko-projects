@@ -39,7 +39,6 @@
 #include "nsISizeOfEventTarget.h"
 #include "nsDOMJSUtils.h"
 #include "nsArrayUtils.h"
-#include "nsIDOMWindowCollection.h"
 #include "nsDOMWindowList.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
@@ -1088,15 +1087,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsGlobalWindowOuter)
   NS_INTERFACE_MAP_ENTRY(nsIScriptGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
-  if (aIID.Equals(NS_GET_IID(nsPIDOMWindowOuter))) {
-    foundInterface = static_cast<nsPIDOMWindowOuter*>(this);
-  } else
-  if (aIID.Equals(NS_GET_IID(mozIDOMWindowProxy))) {
-    foundInterface = static_cast<mozIDOMWindowProxy*>(this);
-  } else
-  if (aIID.Equals(NS_GET_IID(nsIDOMChromeWindow)) && IsChromeWindow()) {
-    foundInterface = static_cast<nsIDOMChromeWindow*>(this);
-  } else
+  NS_INTERFACE_MAP_ENTRY(nsPIDOMWindowOuter)
+  NS_INTERFACE_MAP_ENTRY(mozIDOMWindowProxy)
+  NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsIDOMChromeWindow, IsChromeWindow())
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
 NS_INTERFACE_MAP_END
@@ -1754,24 +1747,26 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
     }
 
     // Inner windows are only reused for same-origin principals, but the principals
-    // don't necessarily match exactly. Update the principal on the compartment to
-    // match the new document.
-    // NB: We don't just call currentInner->RefreshCompartmentPrincipals() here
+    // don't necessarily match exactly. Update the principal on the realm to match
+    // the new document.
+    // NB: We don't just call currentInner->RefreshRealmPrincipals() here
     // because we haven't yet set its mDoc to aDocument.
-    JSCompartment *compartment = js::GetObjectCompartment(newInnerGlobal);
+    JS::Realm* realm = js::GetNonCCWObjectRealm(newInnerGlobal);
 #ifdef DEBUG
     bool sameOrigin = false;
     nsIPrincipal *existing =
-      nsJSPrincipals::get(JS_GetCompartmentPrincipals(compartment));
+      nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
     aDocument->NodePrincipal()->Equals(existing, &sameOrigin);
     MOZ_ASSERT(sameOrigin);
-#endif
+
+    JSCompartment* compartment = JS::GetCompartmentForRealm(realm);
     MOZ_ASSERT_IF(aDocument == oldDoc,
                   xpc::GetCompartmentPrincipal(compartment) ==
                   aDocument->NodePrincipal());
+#endif
     if (aDocument != oldDoc) {
-      JS_SetCompartmentPrincipals(compartment,
-                                  nsJSPrincipals::get(aDocument->NodePrincipal()));
+      JS::SetRealmPrincipals(realm,
+                             nsJSPrincipals::get(aDocument->NodePrincipal()));
       // Make sure we clear out the old content XBL scope, so the new one will
       // get created with a principal that subsumes our new principal.
       xpc::ClearContentXBLScope(newInnerGlobal);
@@ -1987,13 +1982,13 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
   currentInner = nullptr;
 
   // Ask the JS engine to assert that it's valid to access our DocGroup whenever
-  // it runs JS code for this compartment. We skip the check if this window is
-  // for chrome JS or an add-on.
+  // it runs JS code for this realm. We skip the check if this window is for
+  // chrome JS or an add-on.
   nsCOMPtr<nsIPrincipal> principal = mDoc->NodePrincipal();
   if (GetDocGroup() && !nsContentUtils::IsSystemPrincipal(principal) &&
       !BasePrincipal::Cast(principal)->AddonPolicy()) {
-    js::SetCompartmentValidAccessPtr(cx, newInnerGlobal,
-                                     newInnerWindow->GetDocGroup()->GetValidAccessPtr());
+    js::SetRealmValidAccessPtr(cx, newInnerGlobal,
+                               newInnerWindow->GetDocGroup()->GetValidAccessPtr());
   }
 
   kungFuDeathGrip->DidInitializeContext();
@@ -2920,7 +2915,7 @@ nsGlobalWindowOuter::Closed()
 }
 
 nsDOMWindowList*
-nsGlobalWindowOuter::GetWindowList()
+nsGlobalWindowOuter::GetFrames()
 {
   if (!mFrames && mDocShell) {
     mFrames = new nsDOMWindowList(mDocShell);
@@ -2929,17 +2924,10 @@ nsGlobalWindowOuter::GetWindowList()
   return mFrames;
 }
 
-already_AddRefed<nsIDOMWindowCollection>
-nsGlobalWindowOuter::GetFrames()
-{
-  nsCOMPtr<nsIDOMWindowCollection> frames = GetWindowList();
-  return frames.forget();
-}
-
 already_AddRefed<nsPIDOMWindowOuter>
 nsGlobalWindowOuter::IndexedGetterOuter(uint32_t aIndex)
 {
-  nsDOMWindowList* windows = GetWindowList();
+  nsDOMWindowList* windows = GetFrames();
   NS_ENSURE_TRUE(windows, nullptr);
 
   return windows->IndexedGetter(aIndex);
@@ -3757,7 +3745,7 @@ nsGlobalWindowOuter::GetScrollYOuter()
 uint32_t
 nsGlobalWindowOuter::Length()
 {
-  nsDOMWindowList* windows = GetWindowList();
+  nsDOMWindowList* windows = GetFrames();
 
   return windows ? windows->GetLength() : 0;
 }

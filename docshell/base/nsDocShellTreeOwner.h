@@ -165,6 +165,7 @@ private:
                          const nsAString& aInTipText,
                          const nsAString& aDirText);
   NS_IMETHOD HideTooltip();
+  nsITooltipTextProvider* GetTooltipTextProvider();
 
   nsWebBrowser* mWebBrowser;
   nsCOMPtr<mozilla::dom::EventTarget> mEventTarget;
@@ -199,7 +200,7 @@ private:
   // detect that. It's set only when the tooltip timer is created and launched.
   // The timer must either fire or be cancelled (or possibly released?), and we
   // release this reference in each of those cases. So we don't leak.
-  nsCOMPtr<nsIDOMNode> mPossibleTooltipNode;
+  nsCOMPtr<nsINode> mPossibleTooltipNode;
 };
 
 #endif /* nsDocShellTreeOwner_h__ */

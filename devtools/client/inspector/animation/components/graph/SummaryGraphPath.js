@@ -155,9 +155,11 @@ class SummaryGraphPath extends Component {
     } = props;
 
     let animatedPropertyMap = null;
+    let thisEl = null;
 
     try {
       animatedPropertyMap = await getAnimatedPropertyMap(animation);
+      thisEl = ReactDOM.findDOMNode(this);
     } catch (e) {
       // Expected if we've already been destroyed or other node have been selected
       // in the meantime.
@@ -166,8 +168,6 @@ class SummaryGraphPath extends Component {
     }
 
     const keyframesList = this.getOffsetAndEasingOnlyKeyframes(animatedPropertyMap);
-
-    const thisEl = ReactDOM.findDOMNode(this);
     const totalDuration = timeScale.getDuration() * animation.state.playbackRate;
     const durationPerPixel = totalDuration / thisEl.parentNode.clientWidth;
 
@@ -184,16 +184,14 @@ class SummaryGraphPath extends Component {
 
   render() {
     const { durationPerPixel, keyframesList } = this.state;
+    const { animation, simulateAnimation, timeScale } = this.props;
 
-    if (!durationPerPixel) {
+    if (!durationPerPixel || !animation.state.type) {
+      // Undefined animation.state.type means that the animation had been removed already.
+      // Even if the animation was removed, we still need the empty svg since the
+      // component might be re-used.
       return dom.svg();
     }
-
-    const {
-      animation,
-      simulateAnimation,
-      timeScale,
-    } = this.props;
 
     const { createdTime, playbackRate } = animation.state;
 

@@ -14,6 +14,7 @@
 #include "mozilla/Maybe.h"
 
 #include "gc/Zone.h"
+#include "vm/JSCompartment.h"
 
 namespace js {
 
@@ -73,6 +74,8 @@ class ZonesIter
 
 struct CompartmentsInZoneIter
 {
+    using ItemType = JSCompartment;
+
     explicit CompartmentsInZoneIter(JS::Zone* zone) : zone(zone) {
         it = zone->compartments().begin();
     }
@@ -98,128 +101,129 @@ struct CompartmentsInZoneIter
   private:
     JS::Zone* zone;
     JSCompartment** it;
-
-    CompartmentsInZoneIter()
-      : zone(nullptr), it(nullptr)
-    {}
-
-    // This is for the benefit of CompartmentsIterT::comp.
-    friend class mozilla::Maybe<CompartmentsInZoneIter>;
 };
 
-// Note: this class currently assumes there's a single realm per compartment.
-class RealmsInZoneIter
+class RealmsInCompartmentIter
 {
-    CompartmentsInZoneIter comp;
+    JSCompartment* comp;
+    JS::Realm** it;
 
   public:
-    explicit RealmsInZoneIter(JS::Zone* zone)
-      : comp(zone)
-    {}
+    explicit RealmsInCompartmentIter(JSCompartment* comp)
+      : comp(comp)
+    {
+        it = comp->realms().begin();
+    }
 
     bool done() const {
-        return comp.done();
+        MOZ_ASSERT(it);
+        return it < comp->realms().begin() ||
+               it >= comp->realms().end();
     }
     void next() {
         MOZ_ASSERT(!done());
-        comp.next();
+        it++;
     }
 
     JS::Realm* get() const {
-        return JS::GetRealmForCompartment(comp.get());
+        MOZ_ASSERT(!done());
+        return *it;
     }
 
     operator JS::Realm*() const { return get(); }
     JS::Realm* operator->() const { return get(); }
 };
 
-// This iterator iterates over all the compartments in a given set of zones. The
-// set of zones is determined by iterating ZoneIterT.
-template<class ZonesIterT>
-class CompartmentsIterT
+class RealmsInZoneIter
 {
-    gc::AutoEnterIteration iterMarker;
-    ZonesIterT zone;
-    mozilla::Maybe<CompartmentsInZoneIter> comp;
+    CompartmentsInZoneIter comp;
+    mozilla::Maybe<RealmsInCompartmentIter> realm;
 
   public:
-    explicit CompartmentsIterT(JSRuntime* rt)
-      : iterMarker(&rt->gc), zone(rt)
+    using ItemType = JS::Realm;
+
+    explicit RealmsInZoneIter(JS::Zone* zone)
+      : comp(zone)
     {
-        if (zone.done())
-            comp.emplace();
-        else
-            comp.emplace(zone);
+        settleOnCompartment();
     }
 
-    CompartmentsIterT(JSRuntime* rt, ZoneSelector selector)
-      : iterMarker(&rt->gc), zone(rt, selector)
+    void settleOnCompartment() {
+        if (!comp.done()) {
+            realm.emplace(comp.get());
+            MOZ_ASSERT(!realm->done(), "compartment must have at least one realm");
+        }
+    }
+
+    bool done() const {
+        MOZ_ASSERT(comp.done() == realm.isNothing());
+        return comp.done();
+    }
+    void next() {
+        MOZ_ASSERT(!done());
+
+        realm->next();
+
+        if (realm->done()) {
+            realm.reset();
+            comp.next();
+            settleOnCompartment();
+        }
+    }
+
+    JS::Realm* get() const {
+        return realm->get();
+    }
+
+    operator JS::Realm*() const { return get(); }
+    JS::Realm* operator->() const { return get(); }
+};
+
+// This iterator iterates over all the compartments or realms in a given set of
+// zones. The set of zones is determined by iterating ZoneIterT. The set of
+// compartments or realms is determined by InnerIterT.
+template<class ZonesIterT, class InnerIterT>
+class CompartmentsOrRealmsIterT
+{
+    using T = typename InnerIterT::ItemType;
+
+    gc::AutoEnterIteration iterMarker;
+    ZonesIterT zone;
+    mozilla::Maybe<InnerIterT> inner;
+
+  public:
+    explicit CompartmentsOrRealmsIterT(JSRuntime* rt)
+      : iterMarker(&rt->gc), zone(rt, SkipAtoms)
     {
-        if (zone.done())
-            comp.emplace();
-        else
-            comp.emplace(zone);
+        if (!zone.done())
+            inner.emplace(zone);
     }
 
     bool done() const { return zone.done(); }
 
     void next() {
         MOZ_ASSERT(!done());
-        MOZ_ASSERT(!comp.ref().done());
-        comp->next();
-        if (comp->done()) {
-            comp.reset();
+        MOZ_ASSERT(!inner.ref().done());
+        inner->next();
+        if (inner->done()) {
+            inner.reset();
             zone.next();
             if (!zone.done())
-                comp.emplace(zone);
+                inner.emplace(zone);
         }
     }
 
-    JSCompartment* get() const {
+    T* get() const {
         MOZ_ASSERT(!done());
-        return *comp;
+        return *inner;
     }
 
-    operator JSCompartment*() const { return get(); }
-    JSCompartment* operator->() const { return get(); }
+    operator T*() const { return get(); }
+    T* operator->() const { return get(); }
 };
 
-using CompartmentsIter = CompartmentsIterT<ZonesIter>;
-
-// This iterator iterates over all the realms in a given set of zones. The
-// set of zones is determined by iterating ZoneIterT.
-template<class ZonesIterT>
-class RealmsIterT
-{
-    gc::AutoEnterIteration iterMarker;
-    CompartmentsIterT<ZonesIterT> comp;
-
-  public:
-    explicit RealmsIterT(JSRuntime* rt)
-      : iterMarker(&rt->gc), comp(rt)
-    {}
-
-    RealmsIterT(JSRuntime* rt, ZoneSelector selector)
-      : iterMarker(&rt->gc), comp(rt, selector)
-    {}
-
-    bool done() const { return comp.done(); }
-
-    void next() {
-        MOZ_ASSERT(!done());
-        comp.next();
-    }
-
-    JS::Realm* get() const {
-        MOZ_ASSERT(!done());
-        return JS::GetRealmForCompartment(comp.get());
-    }
-
-    operator JS::Realm*() const { return get(); }
-    JS::Realm* operator->() const { return get(); }
-};
-
-using RealmsIter = RealmsIterT<ZonesIter>;
+using CompartmentsIter = CompartmentsOrRealmsIterT<ZonesIter, CompartmentsInZoneIter>;
+using RealmsIter = CompartmentsOrRealmsIterT<ZonesIter, RealmsInZoneIter>;
 
 } // namespace js
 

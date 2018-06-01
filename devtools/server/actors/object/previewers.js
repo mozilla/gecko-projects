@@ -602,7 +602,7 @@ previewers.Object = [
 
   function DOMNode({obj, hooks}, grip, rawObj) {
     if (isWorker || obj.class == "Object" || !rawObj ||
-        !(rawObj instanceof Ci.nsIDOMNode)) {
+        !Node.isInstance(rawObj)) {
       return false;
     }
 
@@ -613,7 +613,7 @@ previewers.Object = [
       isConnected: rawObj.isConnected === true,
     };
 
-    if (rawObj instanceof Ci.nsIDOMDocument && rawObj.location) {
+    if (rawObj.nodeType == rawObj.DOCUMENT_NODE && rawObj.location) {
       preview.location = hooks.createValueGrip(rawObj.location.href);
     } else if (obj.class == "DocumentFragment") {
       preview.childNodesLength = rawObj.childNodes.length;

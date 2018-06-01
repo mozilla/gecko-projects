@@ -27,6 +27,7 @@ class Telemetry {
     this.scalarSet = this.scalarSet.bind(this);
     this.scalarAdd = this.scalarAdd.bind(this);
     this.keyedScalarAdd = this.keyedScalarAdd.bind(this);
+    this.keyedScalarSet = this.keyedScalarSet.bind(this);
     this.recordEvent = this.recordEvent.bind(this);
     this.setEventRecordingEnabled = this.setEventRecordingEnabled.bind(this);
     this.preparePendingEvent = this.preparePendingEvent.bind(this);
@@ -239,6 +240,38 @@ class Telemetry {
         return;
       }
       Services.telemetry.scalarAdd(scalarId, value);
+    } catch (e) {
+      dump(`Warning: An attempt was made to write to the ${scalarId} ` +
+           `scalar, which is not defined in Scalars.yaml\n` +
+           `CALLER: ${getCaller()}`);
+    }
+  }
+
+  /**
+   * Log a value to a keyed scalar.
+   *
+   * @param  {String} scalarId
+   *         Scalar in which the data is to be stored.
+   * @param  {String} key
+   *         The key within the  scalar.
+   * @param  value
+   *         Value to store.
+   */
+  keyedScalarSet(scalarId, key, value) {
+    if (!scalarId) {
+      return;
+    }
+
+    try {
+      if (isNaN(value) && typeof value !== "boolean") {
+        dump(`Warning: An attempt was made to write a non-numeric and ` +
+             `non-boolean value ${value} to the ${scalarId} scalar. Only ` +
+             `numeric and boolean values are allowed.\n` +
+             `CALLER: ${getCaller()}`);
+
+        return;
+      }
+      Services.telemetry.keyedScalarSet(scalarId, key, value);
     } catch (e) {
       dump(`Warning: An attempt was made to write to the ${scalarId} ` +
            `scalar, which is not defined in Scalars.yaml\n` +
@@ -467,31 +500,33 @@ class Telemetry {
    * @param {String} object
    *        The telemetry event object name (the name of the object the event
    *        occurred on) e.g. "tools" or "setting"
-   * @param {String|null} value
-   *        The telemetry event value (a user defined value, providing context
-   *        for the event) e.g. "console"
-   * @param {Object} extra
-   *        The telemetry event extra object containing the properties that will
-   *        be sent with the event e.g.
+   * @param {String|null} [value]
+   *        Optional telemetry event value (a user defined value, providing
+   *        context for the event) e.g. "console"
+   * @param {Object} [extra]
+   *        Optional telemetry event extra object containing the properties that
+   *        will be sent with the event e.g.
    *        {
    *          host: "bottom",
    *          width: "1024"
    *        }
    */
-  recordEvent(category, method, object, value, extra) {
+  recordEvent(category, method, object, value = null, extra = null) {
     // Only string values are allowed so cast all values to strings.
-    for (let [name, val] of Object.entries(extra)) {
-      val = val + "";
-      extra[name] = val;
+    if (extra) {
+      for (let [name, val] of Object.entries(extra)) {
+        val = val + "";
+        extra[name] = val;
 
-      if (val.length > 80) {
-        const sig = `${category},${method},${object},${value}`;
+        if (val.length > 80) {
+          const sig = `${category},${method},${object},${value}`;
 
-        throw new Error(`The property "${name}" was added to a telemetry ` +
-                        `event with the signature ${sig} but it's value ` +
-                        `"${val}" is longer than the maximum allowed length ` +
-                        `of 80 characters\n` +
-                        `CALLER: ${getCaller()}`);
+          throw new Error(`The property "${name}" was added to a telemetry ` +
+                          `event with the signature ${sig} but it's value ` +
+                          `"${val}" is longer than the maximum allowed length ` +
+                          `of 80 characters\n` +
+                          `CALLER: ${getCaller()}`);
+        }
       }
     }
     Services.telemetry.recordEvent(category, method, object, value, extra);

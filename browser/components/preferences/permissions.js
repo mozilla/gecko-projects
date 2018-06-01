@@ -34,6 +34,10 @@ const permissionExceptionsL10n = {
     window: "permissions-exceptions-addons-window",
     description: "permissions-exceptions-addons-desc",
   },
+  "autoplay-media": {
+    window: "permissions-exceptions-autoplay-media-window",
+    description: "permissions-exceptions-autoplay-media-desc",
+  },
 };
 
 function Permission(principal, type, capability) {
@@ -385,6 +389,11 @@ var gPermissionManager = {
                                                         this._lastPermissionSortColumn,
                                                         this._lastPermissionSortAscending);
     this._lastPermissionSortColumn = aColumn;
+    let sortDirection = this._lastPermissionSortAscending ? "descending" : "ascending";
+    let cols = document.querySelectorAll("treecol");
+    cols.forEach(c => c.removeAttribute("sortDirection"));
+    let column = document.querySelector(`treecol[data-field-name=${aColumn}]`);
+    column.setAttribute("sortDirection", sortDirection);
   },
 
   onApplyChanges() {

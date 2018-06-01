@@ -33,7 +33,7 @@
 #include "jit/AtomicOp.h"
 #include "jit/IonInstrumentation.h"
 #include "jit/IonTypes.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "jit/TemplateObject.h"
 #include "jit/VMFunctions.h"
 #include "vm/ProxyObject.h"
@@ -2191,6 +2191,8 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void debugAssertIsObject(const ValueOperand& val);
     void debugAssertObjHasFixedSlots(Register obj, Register scratch);
+
+    void branchIfNativeIteratorNotReusable(Register ni, Label* notReusable);
 
     using MacroAssemblerSpecific::extractTag;
     Register extractTag(const TypedOrValueRegister& reg, Register scratch) {

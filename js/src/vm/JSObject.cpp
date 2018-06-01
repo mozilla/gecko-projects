@@ -25,6 +25,9 @@
 #include "jsutil.h"
 
 #include "builtin/Array.h"
+#ifdef ENABLE_BIGINT
+#include "builtin/BigInt.h"
+#endif
 #include "builtin/Eval.h"
 #include "builtin/Object.h"
 #include "builtin/String.h"
@@ -2105,7 +2108,7 @@ SetClassAndProto(JSContext* cx, HandleObject obj,
         // group so we can keep track of the interpreted function for Ion
         // inlining.
         MOZ_ASSERT(obj->is<JSFunction>());
-        newGroup = ObjectGroupCompartment::makeGroup(cx, &JSFunction::class_, proto);
+        newGroup = ObjectGroupRealm::makeGroup(cx, &JSFunction::class_, proto);
         if (!newGroup)
             return false;
         newGroup->setInterpretedFunction(oldGroup->maybeInterpretedFunction());
@@ -2141,7 +2144,8 @@ JSObject::changeToSingleton(JSContext* cx, HandleObject obj)
 
     MarkObjectGroupUnknownProperties(cx, obj->group());
 
-    ObjectGroup* group = ObjectGroup::lazySingletonGroup(cx, obj->getClass(),
+    ObjectGroupRealm& realm = ObjectGroupRealm::get(obj->group());
+    ObjectGroup* group = ObjectGroup::lazySingletonGroup(cx, realm, obj->getClass(),
                                                          obj->taggedProto());
     if (!group)
         return false;
@@ -3251,9 +3255,19 @@ js::PrimitiveToObject(JSContext* cx, const Value& v)
         return NumberObject::create(cx, v.toNumber());
     if (v.isBoolean())
         return BooleanObject::create(cx, v.toBoolean());
+#ifdef ENABLE_BIGINT
+    if (v.isSymbol()) {
+        RootedSymbol symbol(cx, v.toSymbol());
+        return SymbolObject::create(cx, symbol);
+    }
+    MOZ_ASSERT(v.isBigInt());
+    RootedBigInt bigInt(cx, v.toBigInt());
+    return BigIntObject::create(cx, bigInt);
+#else
     MOZ_ASSERT(v.isSymbol());
     RootedSymbol symbol(cx, v.toSymbol());
     return SymbolObject::create(cx, symbol);
+#endif
 }
 
 /*
@@ -3423,7 +3437,7 @@ dumpValue(const Value& v, js::GenericPrinter& out)
         }
         if (fun->hasScript()) {
             JSScript* script = fun->nonLazyScript();
-            out.printf(" (%s:%zu)",
+            out.printf(" (%s:%u)",
                     script->filename() ? script->filename() : "", script->lineno());
         }
         out.printf(" at %p>", (void*) fun);
@@ -3703,7 +3717,7 @@ js::DumpInterpreterFrame(JSContext* cx, js::GenericPrinter& out, InterpreterFram
         }
         out.putChar('\n');
 
-        out.printf("file %s line %zu\n",
+        out.printf("file %s line %u\n",
                 i.script()->filename(), i.script()->lineno());
 
         if (jsbytecode* pc = i.pc()) {
@@ -4123,6 +4137,10 @@ js::Unbox(JSContext* cx, HandleObject obj, MutableHandleValue vp)
         vp.set(obj->as<DateObject>().UTCTime());
     else if (obj->is<SymbolObject>())
         vp.setSymbol(obj->as<SymbolObject>().unbox());
+#ifdef ENABLE_BIGINT
+    else if (obj->is<BigIntObject>())
+        vp.setBigInt(obj->as<BigIntObject>().unbox());
+#endif
     else
         vp.setUndefined();
 
@@ -4166,7 +4184,7 @@ JSObject::debugCheckNewObject(ObjectGroup* group, Shape* shape, js::gc::AllocKin
                                         clasp->isProxy());
     MOZ_ASSERT_IF(group->hasUnanalyzedPreliminaryObjects(), heap == gc::TenuredHeap);
 
-    MOZ_ASSERT(!group->compartment()->hasObjectPendingMetadata());
+    MOZ_ASSERT(!group->realm()->hasObjectPendingMetadata());
 
     // Non-native classes manage their own data and slots, so numFixedSlots and
     // slotSpan are always 0. Note that proxy classes can have reserved slots

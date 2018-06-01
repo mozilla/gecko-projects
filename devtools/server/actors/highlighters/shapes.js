@@ -1377,7 +1377,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
             rotatePoint, center } = this.transformedBoundingBox;
 
       const points = [
-        { pointName: "translate", x: center[0], y: center[1], cursor: "move" },
+        { pointName: "translate", x: center[0], y: center[1], cursor: hoverCursor },
         { pointName: "scale-se", x: se[0], y: se[1], anchor: "nw" },
         { pointName: "scale-ne", x: ne[0], y: ne[1], anchor: "sw" },
         { pointName: "scale-sw", x: sw[0], y: sw[1], anchor: "ne" },
@@ -2557,7 +2557,7 @@ class ShapesHighlighter extends AutoRefreshHighlighter {
 
 /**
  * Get the "raw" (i.e. non-computed) shape definition on the given node.
- * @param {nsIDOMNode} node the node to analyze
+ * @param {Node} node the node to analyze
  * @param {String} property the CSS property for which a value should be retrieved.
  * @returns {String} the value of the given CSS property on the given node.
  */

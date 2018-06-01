@@ -344,15 +344,14 @@ function cleanUp() {
     console.log("benchmark complete");
   }
   window.onload = null;
-  // done, dump to console to tell framework to shutdown browser; currently
-  // this only works with Firefox as google chrome doesn't support dump()
-  if (browserName === "firefox")
-    window.dump("\n__raptor_shutdownBrowser\n");
-
+  // tell the control server we are done and the browser can be shutdown
+  postToControlServer("status", "__raptor_shutdownBrowser");
 }
 
 function runner() {
   let config = getTestConfig();
+  console.log("test name is: " + config.test_name);
+  console.log("test settings url is: " + config.test_settings_url);
   testName = config.test_name;
   settingsURL = config.test_settings_url;
   csPort = config.cs_port;

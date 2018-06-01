@@ -1051,43 +1051,32 @@ JSScript::initScriptCounts(JSContext* cx)
     for (size_t i = 0; i < jumpTargets.length(); i++)
         base.infallibleEmplaceBack(pcToOffset(jumpTargets[i]));
 
-    // Create compartment's scriptCountsMap if necessary.
-    ScriptCountsMap* map = compartment()->scriptCountsMap;
-    if (!map) {
-        map = cx->new_<ScriptCountsMap>();
-        if (!map) {
+    // Create realm's scriptCountsMap if necessary.
+    if (!realm()->scriptCountsMap) {
+        auto map = cx->make_unique<ScriptCountsMap>();
+        if (!map || !map->init()) {
             ReportOutOfMemory(cx);
             return false;
         }
 
-        if (!map->init()) {
-            js_delete(map);
-            ReportOutOfMemory(cx);
-            return false;
-        }
-
-        compartment()->scriptCountsMap = map;
+        realm()->scriptCountsMap = Move(map);
     }
 
     // Allocate the ScriptCounts.
-    ScriptCounts* sc = cx->new_<ScriptCounts>(Move(base));
+    UniqueScriptCounts sc = cx->make_unique<ScriptCounts>(Move(base));
     if (!sc) {
         ReportOutOfMemory(cx);
         return false;
     }
-    auto guardScriptCounts = mozilla::MakeScopeExit([&] () {
-        js_delete(sc);
-    });
 
-    // Register the current ScriptCounts in the compartment's map.
-    if (!map->putNew(this, sc)) {
+    // Register the current ScriptCounts in the realm's map.
+    if (!realm()->scriptCountsMap->putNew(this, Move(sc))) {
         ReportOutOfMemory(cx);
         return false;
     }
 
     // safe to set this;  we can't fail after this point.
     bitFields_.hasScriptCounts_ = true;
-    guardScriptCounts.release();
 
     // Enable interrupts in any interpreter frames running on this script. This
     // is used to let the interpreter increment the PCCounts, if present.
@@ -1099,11 +1088,11 @@ JSScript::initScriptCounts(JSContext* cx)
     return true;
 }
 
-static inline ScriptCountsMap::Ptr GetScriptCountsMapEntry(JSScript* script)
+static inline ScriptCountsMap::Ptr
+GetScriptCountsMapEntry(JSScript* script)
 {
     MOZ_ASSERT(script->hasScriptCounts());
-    ScriptCountsMap* map = script->compartment()->scriptCountsMap;
-    ScriptCountsMap::Ptr p = map->lookup(script);
+    ScriptCountsMap::Ptr p = script->realm()->scriptCountsMap->lookup(script);
     MOZ_ASSERT(p);
     return p;
 }
@@ -1111,8 +1100,7 @@ static inline ScriptCountsMap::Ptr GetScriptCountsMapEntry(JSScript* script)
 static inline ScriptNameMap::Ptr
 GetScriptNameMapEntry(JSScript* script)
 {
-    ScriptNameMap* map = script->compartment()->scriptNameMap;
-    auto p = map->lookup(script);
+    auto p = script->realm()->scriptNameMap->lookup(script);
     MOZ_ASSERT(p);
     return p;
 }
@@ -1128,7 +1116,7 @@ const char*
 JSScript::getScriptName()
 {
     auto p = GetScriptNameMapEntry(this);
-    return p->value();
+    return p->value().get();
 }
 
 js::PCCounts*
@@ -1292,12 +1280,8 @@ JSScript::getIonCounts()
 }
 
 void
-JSScript::takeOverScriptCountsMapEntry(ScriptCounts* entryValue)
+JSScript::clearHasScriptCounts()
 {
-#ifdef DEBUG
-    ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
-    MOZ_ASSERT(entryValue == p->value());
-#endif
     bitFields_.hasScriptCounts_ = false;
 }
 
@@ -1305,9 +1289,8 @@ void
 JSScript::releaseScriptCounts(ScriptCounts* counts)
 {
     ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
-    *counts = Move(*p->value());
-    js_delete(p->value());
-    compartment()->scriptCountsMap->remove(p);
+    *counts = Move(*p->value().get());
+    realm()->scriptCountsMap->remove(p);
     bitFields_.hasScriptCounts_ = false;
 }
 
@@ -1324,17 +1307,16 @@ void
 JSScript::destroyScriptName()
 {
     auto p = GetScriptNameMapEntry(this);
-    js_delete(p->value());
-    compartment()->scriptNameMap->remove(p);
+    realm()->scriptNameMap->remove(p);
 }
 
 bool
 JSScript::hasScriptName()
 {
-    if (!compartment()->scriptNameMap)
+    if (!realm()->scriptNameMap)
         return false;
 
-    auto p = compartment()->scriptNameMap->lookup(this);
+    auto p = realm()->scriptNameMap->lookup(this);
     return p.found();
 }
 
@@ -2708,33 +2690,25 @@ JSScript::initScriptName(JSContext* cx)
     if (!filename())
         return true;
 
-    // Create compartment's scriptNameMap if necessary.
-    ScriptNameMap* map = compartment()->scriptNameMap;
-    if (!map) {
-        map = cx->new_<ScriptNameMap>();
-        if (!map) {
+    // Create realm's scriptNameMap if necessary.
+    if (!realm()->scriptNameMap) {
+        auto map = cx->make_unique<ScriptNameMap>();
+        if (!map || !map->init()) {
             ReportOutOfMemory(cx);
             return false;
         }
 
-        if (!map->init()) {
-            js_delete(map);
-            ReportOutOfMemory(cx);
-            return false;
-        }
-
-        compartment()->scriptNameMap = map;
+        realm()->scriptNameMap = Move(map);
     }
 
-    char* name = js_strdup(filename());
+    UniqueChars name(js_strdup(filename()));
     if (!name) {
         ReportOutOfMemory(cx);
         return false;
     }
 
-    // Register the script name in the compartment's map.
-    if (!map->putNew(this, name)) {
-        js_delete(name);
+    // Register the script name in the realm's map.
+    if (!realm()->scriptNameMap->putNew(this, Move(name))) {
         ReportOutOfMemory(cx);
         return false;
     }
@@ -3134,10 +3108,10 @@ JSScript::finalize(FreeOp* fop)
     // fullyInitFromEmitter() or fullyInitTrivial().
 
     // Collect code coverage information for this script and all its inner
-    // scripts, and store the aggregated information on the compartment.
+    // scripts, and store the aggregated information on the realm.
     MOZ_ASSERT_IF(hasScriptName(), fop->runtime()->lcovOutput().isEnabled());
     if (fop->runtime()->lcovOutput().isEnabled() && hasScriptName()) {
-        compartment()->lcovOutput.collectCodeCoverageInfo(compartment(), this, getScriptName());
+        realm()->lcovOutput.collectCodeCoverageInfo(realm(), this, getScriptName());
         destroyScriptName();
     }
 
@@ -3369,7 +3343,7 @@ js::DescribeScriptedCallerForCompilation(JSContext* cx, MutableHandleScript mayb
         return;
     }
 
-    NonBuiltinFrameIter iter(cx, cx->compartment()->principals());
+    NonBuiltinFrameIter iter(cx, cx->realm()->principals());
 
     if (iter.done()) {
         maybeScript.set(nullptr);
@@ -3625,17 +3599,17 @@ CreateEmptyScriptForClone(JSContext* cx, HandleScript src)
      * use for them.
      */
     RootedObject sourceObject(cx);
-    if (cx->runtime()->isSelfHostingCompartment(src->compartment())) {
-        if (!cx->compartment()->selfHostingScriptSource) {
+    if (src->realm()->isSelfHostingRealm()) {
+        if (!cx->realm()->selfHostingScriptSource) {
             CompileOptions options(cx);
             FillSelfHostingCompileOptions(options);
 
             ScriptSourceObject* obj = frontend::CreateScriptSourceObject(cx, options);
             if (!obj)
                 return nullptr;
-            cx->compartment()->selfHostingScriptSource.set(obj);
+            cx->realm()->selfHostingScriptSource.set(obj);
         }
-        sourceObject = cx->compartment()->selfHostingScriptSource;
+        sourceObject = cx->realm()->selfHostingScriptSource;
     } else {
         sourceObject = src->sourceObject();
         if (!cx->compartment()->wrap(cx, &sourceObject))
@@ -3728,22 +3702,22 @@ DebugScript*
 JSScript::debugScript()
 {
     MOZ_ASSERT(bitFields_.hasDebugScript_);
-    DebugScriptMap* map = compartment()->debugScriptMap;
+    DebugScriptMap* map = realm()->debugScriptMap.get();
     MOZ_ASSERT(map);
     DebugScriptMap::Ptr p = map->lookup(this);
     MOZ_ASSERT(p);
-    return p->value();
+    return p->value().get();
 }
 
 DebugScript*
 JSScript::releaseDebugScript()
 {
     MOZ_ASSERT(bitFields_.hasDebugScript_);
-    DebugScriptMap* map = compartment()->debugScriptMap;
+    DebugScriptMap* map = realm()->debugScriptMap.get();
     MOZ_ASSERT(map);
     DebugScriptMap::Ptr p = map->lookup(this);
     MOZ_ASSERT(p);
-    DebugScript* debug = p->value();
+    DebugScript* debug = p->value().release();
     map->remove(p);
     bitFields_.hasDebugScript_ = false;
     return debug;
@@ -3773,26 +3747,22 @@ JSScript::ensureHasDebugScript(JSContext* cx)
         return true;
 
     size_t nbytes = offsetof(DebugScript, breakpoints) + length() * sizeof(BreakpointSite*);
-    DebugScript* debug = (DebugScript*) zone()->pod_calloc<uint8_t>(nbytes);
+    UniqueDebugScript debug(reinterpret_cast<DebugScript*>(zone()->pod_calloc<uint8_t>(nbytes)));
     if (!debug)
         return false;
 
-    /* Create compartment's debugScriptMap if necessary. */
-    DebugScriptMap* map = compartment()->debugScriptMap;
-    if (!map) {
-        map = cx->new_<DebugScriptMap>();
-        if (!map || !map->init()) {
-            js_free(debug);
-            js_delete(map);
+    /* Create realm's debugScriptMap if necessary. */
+    if (!realm()->debugScriptMap) {
+        auto map = cx->make_unique<DebugScriptMap>();
+        if (!map || !map->init())
             return false;
-        }
-        compartment()->debugScriptMap = map;
+
+        realm()->debugScriptMap = Move(map);
     }
 
-    if (!map->putNew(this, debug)) {
-        js_free(debug);
+    if (!realm()->debugScriptMap->putNew(this, Move(debug)))
         return false;
-    }
+
     bitFields_.hasDebugScript_ = true; // safe to set this;  we can't fail after this point
 
     /*
@@ -3828,7 +3798,7 @@ bool
 JSScript::incrementStepModeCount(JSContext* cx)
 {
     assertSameCompartment(cx, this);
-    MOZ_ASSERT(cx->compartment()->isDebuggee());
+    MOZ_ASSERT(cx->realm()->isDebuggee());
 
     if (!ensureHasDebugScript(cx))
         return false;
@@ -3955,7 +3925,7 @@ JSScript::traceChildren(JSTracer* trc)
         TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
 
     if (trc->isMarkingTracer())
-        compartment()->mark();
+        realm()->mark();
 
     jit::TraceJitScripts(trc, this);
 }
@@ -4289,7 +4259,7 @@ LazyScript::CreateRaw(JSContext* cx, HandleFunction fun,
     if (!res)
         return nullptr;
 
-    cx->compartment()->scheduleDelazificationForDebugger();
+    cx->realm()->scheduleDelazificationForDebugger();
 
     return new (res) LazyScript(fun, *sourceObject, table.forget(), packed, sourceStart, sourceEnd,
                                 toStringStart, lineno, column);
@@ -4301,7 +4271,8 @@ LazyScript::Create(JSContext* cx, HandleFunction fun,
                    const frontend::AtomVector& closedOverBindings,
                    Handle<GCVector<JSFunction*, 8>> innerFunctions,
                    uint32_t sourceStart, uint32_t sourceEnd,
-                   uint32_t toStringStart, uint32_t lineno, uint32_t column)
+                   uint32_t toStringStart, uint32_t lineno, uint32_t column,
+                   frontend::ParseGoal parseGoal)
 {
     union {
         PackedView p;
@@ -4322,6 +4293,7 @@ LazyScript::Create(JSContext* cx, HandleFunction fun,
     p.isLikelyConstructorWrapper = false;
     p.isDerivedClassConstructor = false;
     p.needsHomeObject = false;
+    p.parseGoal = uint32_t(parseGoal);
 
     LazyScript* res = LazyScript::CreateRaw(cx, fun, sourceObject, packedFields,
                                             sourceStart, sourceEnd,
@@ -4463,11 +4435,11 @@ void
 JSScript::AutoDelazify::holdScript(JS::HandleFunction fun)
 {
     if (fun) {
-        if (fun->compartment()->isSelfHosting) {
-            // The self-hosting compartment is shared across runtimes, so we
-            // can't use JSAutoRealm: it could cause races. Functions in the
-            // self-hosting compartment will never be lazy, so we can safely
-            // assume we don't have to delazify.
+        if (fun->realm()->isSelfHostingRealm()) {
+            // The self-hosting realm is shared across runtimes, so we can't use
+            // JSAutoRealm: it could cause races. Functions in the self-hosting
+            // realm will never be lazy, so we can safely assume we don't have
+            // to delazify.
             script_ = fun->nonLazyScript();
         } else {
             JSAutoRealm ar(cx_, fun);
@@ -4483,9 +4455,9 @@ JSScript::AutoDelazify::holdScript(JS::HandleFunction fun)
 void
 JSScript::AutoDelazify::dropScript()
 {
-    // Don't touch script_ if it's in the self-hosting compartment, see the
-    // comment in holdScript.
-    if (script_ && !script_->compartment()->isSelfHosting)
+    // Don't touch script_ if it's in the self-hosting realm, see the comment
+    // in holdScript.
+    if (script_ && !script_->realm()->isSelfHostingRealm())
         script_->setDoNotRelazify(oldDoNotRelazify_);
     script_ = nullptr;
 }

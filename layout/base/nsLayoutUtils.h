@@ -2332,6 +2332,8 @@ public:
    */
   static bool HasAnimationOfProperty(const nsIFrame* aFrame,
                                      nsCSSPropertyID aProperty);
+  static bool MayHaveAnimationOfProperty(const nsIFrame* aFrame,
+                                         nsCSSPropertyID aProperty);
 
   /**
    * Returns true if |aEffectSet| has an animation of |aProperty| regardless of
@@ -2346,6 +2348,8 @@ public:
    */
   static bool HasEffectiveAnimation(const nsIFrame* aFrame,
                                     nsCSSPropertyID aProperty);
+  static bool MayHaveEffectiveAnimation(const nsIFrame* aFrame,
+                                        nsCSSPropertyID aProperty);
 
   /**
    * Checks if off-main-thread animations are enabled.
@@ -2515,10 +2519,6 @@ public:
 
   static bool SVGTransformBoxEnabled() {
     return sSVGTransformBoxEnabled;
-  }
-
-  static bool TextCombineUprightDigitsEnabled() {
-    return sTextCombineUprightDigitsEnabled;
   }
 
   static uint32_t IdlePeriodDeadlineLimit() {
@@ -3107,6 +3107,12 @@ public:
     return ResolveToLength<true>(aGap, aPercentageBasis);
   }
 
+  /**
+   * Get the computed style from which the scrollbar style should be
+   * used for the given scrollbar part frame.
+   */
+  static ComputedStyle* StyleForScrollbar(nsIFrame* aScrollbarPart);
+
 private:
   static uint32_t sFontSizeInflationEmPerLine;
   static uint32_t sFontSizeInflationMinTwips;
@@ -3121,7 +3127,6 @@ private:
   static bool sInvalidationDebuggingIsEnabled;
   static bool sInterruptibleReflowEnabled;
   static bool sSVGTransformBoxEnabled;
-  static bool sTextCombineUprightDigitsEnabled;
   static uint32_t sIdlePeriodDeadlineLimit;
   static uint32_t sQuiescentFramesBeforeIdlePeriod;
 

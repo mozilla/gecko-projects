@@ -20,6 +20,7 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
 #include "nsCharTraits.h"
@@ -188,7 +189,6 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ bool nsLayoutUtils::sInvalidationDebuggingIsEnabled;
 /* static */ bool nsLayoutUtils::sInterruptibleReflowEnabled;
 /* static */ bool nsLayoutUtils::sSVGTransformBoxEnabled;
-/* static */ bool nsLayoutUtils::sTextCombineUprightDigitsEnabled;
 /* static */ uint32_t nsLayoutUtils::sIdlePeriodDeadlineLimit;
 /* static */ uint32_t nsLayoutUtils::sQuiescentFramesBeforeIdlePeriod;
 
@@ -258,8 +258,9 @@ MayHaveAnimationOfProperty(EffectSet* effects, nsCSSPropertyID aProperty)
   return true;
 }
 
-static bool
-MayHaveAnimationOfProperty(const nsIFrame* aFrame, nsCSSPropertyID aProperty)
+bool
+nsLayoutUtils::MayHaveAnimationOfProperty(const nsIFrame* aFrame,
+                                          nsCSSPropertyID aProperty)
 {
   switch (aProperty) {
     case eCSSProperty_transform:
@@ -276,7 +277,7 @@ bool
 nsLayoutUtils::HasAnimationOfProperty(EffectSet* aEffectSet,
                                       nsCSSPropertyID aProperty)
 {
-  if (!aEffectSet || !MayHaveAnimationOfProperty(aEffectSet, aProperty)) {
+  if (!aEffectSet || !::MayHaveAnimationOfProperty(aEffectSet, aProperty)) {
     return false;
   }
 
@@ -312,7 +313,7 @@ nsLayoutUtils::HasEffectiveAnimation(const nsIFrame* aFrame,
                                      nsCSSPropertyID aProperty)
 {
   EffectSet* effects = EffectSet::GetEffectSet(aFrame);
-  if (!effects || !MayHaveAnimationOfProperty(effects, aProperty)) {
+  if (!effects || !::MayHaveAnimationOfProperty(effects, aProperty)) {
     return false;
   }
 
@@ -324,6 +325,17 @@ nsLayoutUtils::HasEffectiveAnimation(const nsIFrame* aFrame,
              aEffect.HasEffectiveAnimationOfProperty(aProperty);
     }
   );
+}
+
+bool
+nsLayoutUtils::MayHaveEffectiveAnimation(const nsIFrame* aFrame,
+                                         nsCSSPropertyID aProperty)
+{
+  EffectSet* effects = EffectSet::GetEffectSet(aFrame);
+  if (!effects || !::MayHaveAnimationOfProperty(effects, aProperty)) {
+    return false;
+  }
+  return true;
 }
 
 static float
@@ -8059,8 +8071,6 @@ nsLayoutUtils::Initialize()
                                "layout.interruptible-reflow.enabled");
   Preferences::AddBoolVarCache(&sSVGTransformBoxEnabled,
                                "svg.transform-box.enabled");
-  Preferences::AddBoolVarCache(&sTextCombineUprightDigitsEnabled,
-                               "layout.css.text-combine-upright-digits.enabled");
   Preferences::AddUintVarCache(&sIdlePeriodDeadlineLimit,
                                "layout.idle_period.time_limit",
                                DEFAULT_IDLE_PERIOD_TIME_LIMIT);
@@ -10173,4 +10183,47 @@ nsLayoutUtils::ParseFontLanguageOverride(const nsAString& aLangTag)
     result = (result << 8) + 0x20;
   }
   return result;
+}
+
+/* static */ ComputedStyle*
+nsLayoutUtils::StyleForScrollbar(nsIFrame* aScrollbarPart)
+{
+  // Get the closest non-native-anonymous content node, which should be
+  // the originating element of the scrollbar part. In theory we could
+  // have an XBL binding attached to NAC element, and that binding
+  // creates a scrollable element. It's unlikely we want to control the
+  // style of scrollbars from inside the binding, so that case is not
+  // considered below.
+  nsIContent* content = aScrollbarPart->GetContent();
+  // Note that the content may be a normal element with scrollbar part
+  // value specified for its -moz-appearance, so don't rely on it being
+  // a native anonymous.
+  MOZ_ASSERT(content, "No content for the scrollbar part?");
+  while (content && content->IsInNativeAnonymousSubtree()) {
+    content = content->GetParent();
+  }
+  MOZ_ASSERT(content, "Native anonymous element with no originating node?");
+  // Use the style from the primary frame of the content.
+  // Note: it is important to use the primary frame rather than an
+  // ancestor frame of the scrollbar part for the correct handling of
+  // viewport scrollbar. The content of the scroll frame of the viewport
+  // is the root element, but its style inherits from the viewport.
+  // Since we need to use the style of root element for the viewport
+  // scrollbar, we have to get the style from the primary frame.
+  if (nsIFrame* primaryFrame = content->GetPrimaryFrame()) {
+    return primaryFrame->Style();
+  }
+  // If the element doesn't have primary frame, get the computed style
+  // from the element directly. This can happen on viewport, because
+  // the scrollbar of viewport may be shown when the root element has
+  // > display: none; overflow: scroll;
+  nsPresContext* pc = aScrollbarPart->PresContext();
+  MOZ_ASSERT(content == pc->Document()->GetRootElement(),
+             "Root element is the only case for this fallback "
+             "path to be triggered");
+  RefPtr<ComputedStyle> style =
+    pc->StyleSet()->ResolveServoStyle(content->AsElement());
+  // Dropping the strong reference is fine because the style should be
+  // held strongly by the element.
+  return style.get();
 }

@@ -59,7 +59,7 @@
 #include "mozilla/AnimationComparator.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/ContentEvents.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -182,8 +182,8 @@ Check##type##Size<sizeof(type), opt_size + EXTRA_DOM_ELEMENT_BYTES> g##type##CES
 
 // Note that mozjemalloc uses a 16 byte quantum, so 128 is a bin/bucket size.
 ASSERT_ELEMENT_SIZE(Element, 120);
-ASSERT_ELEMENT_SIZE(HTMLDivElement, 128);
-ASSERT_ELEMENT_SIZE(HTMLSpanElement, 128);
+ASSERT_ELEMENT_SIZE(HTMLDivElement, 120);
+ASSERT_ELEMENT_SIZE(HTMLSpanElement, 120);
 
 #undef ASSERT_ELEMENT_SIZE
 #undef EXTRA_DOM_ELEMENT_BYTES
@@ -1757,29 +1757,14 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
-  // Pseudo-elements implemented by JS must have the NODE_IS_NATIVE_ANONYMOUS
-  // flag set on them. For C++-created pseudo-elements, this is done in
-  // nsCSSFrameConstructor::GetAnonymousContent, but any JS that creates
-  // pseudo-elements would run after that. So we set that flag here,
-  // when the element implementing the pseudo is inserted into the document.
-  // We maintain the invariant that any NAC-implemented pseudo-element's
-  // anonymous ancestors are also flagged as NAC, which the style system relies on.
-  if (aDocument) {
+  // FIXME(emilio): Why is this needed? The element shouldn't even be styled in
+  // the first place, we should style it properly eventually.
+  //
+  // Also, if this _is_ needed, then it's wrong and should use GetComposedDoc()
+  // to account for Shadow DOM.
+  if (aDocument && MayHaveAnimations()) {
     CSSPseudoElementType pseudoType = GetPseudoElementType();
-    if (pseudoType != CSSPseudoElementType::NotPseudo &&
-        nsCSSPseudoElements::PseudoElementIsJSCreatedNAC(pseudoType)) {
-      SetFlags(NODE_IS_NATIVE_ANONYMOUS);
-      nsIContent* parent = aParent;
-      while (parent && !parent->IsRootOfNativeAnonymousSubtree()) {
-        MOZ_ASSERT(parent->IsInNativeAnonymousSubtree());
-        parent->SetFlags(NODE_IS_NATIVE_ANONYMOUS);
-        parent = parent->GetParent();
-      }
-      MOZ_ASSERT(parent);
-    }
-
-    if (MayHaveAnimations() &&
-        (pseudoType == CSSPseudoElementType::NotPseudo ||
+    if ((pseudoType == CSSPseudoElementType::NotPseudo ||
          pseudoType == CSSPseudoElementType::before ||
          pseudoType == CSSPseudoElementType::after) &&
         EffectSet::GetEffectSet(this, pseudoType)) {
@@ -2039,7 +2024,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 nsDOMCSSAttributeDeclaration*
-Element::GetSMILOverrideStyle()
+Element::SMILOverrideStyle()
 {
   Element::nsExtendedDOMSlots* slots = ExtendedDOMSlots();
 
@@ -3798,12 +3783,6 @@ Element::SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal* aSubjectPrincip
 }
 
 void
-Element::UnsafeSetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
-{
-  SetInnerHTMLInternal(aInnerHTML, aError, true);
-}
-
-void
 Element::GetOuterHTML(nsAString& aOuterHTML)
 {
   GetMarkup(true, aOuterHTML);
@@ -4399,18 +4378,23 @@ AssertNoBitsPropagatedFrom(nsINode* aRoot)
 #endif
 }
 
-// Sets |aBits| on aElement and all of its flattened-tree ancestors up to and
-// including aStopAt or the root element (whichever is encountered first).
+// Sets `aBits` on `aElement` and all of its flattened-tree ancestors up to and
+// including aStopAt or the root element (whichever is encountered first), and
+// as long as `aBitsToStopAt` isn't found anywhere in the chain.
 static inline Element*
-PropagateBits(Element* aElement, uint32_t aBits, nsINode* aStopAt)
+PropagateBits(Element* aElement, uint32_t aBits, nsINode* aStopAt, uint32_t aBitsToStopAt)
 {
   Element* curr = aElement;
-  while (curr && !curr->HasAllFlags(aBits)) {
+  while (curr && !curr->HasAllFlags(aBitsToStopAt)) {
     curr->SetFlags(aBits);
     if (curr == aStopAt) {
       break;
     }
     curr = curr->GetFlattenedTreeParentElementForStyle();
+  }
+
+  if (aBitsToStopAt != aBits && curr) {
+    curr->SetFlags(aBits);
   }
 
   return curr;
@@ -4489,7 +4473,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     // We can't check for a frame here, since <frame> elements inside <frameset>
     // still need to generate a frame, even if they're display: none. :(
     //
-    // The servo traversal doesn't keep style data under display: none subtrees, 
+    // The servo traversal doesn't keep style data under display: none subtrees,
     // so in order for it to not need to cleanup each time anything happens in a
     // display: none subtree, we keep it clean.
     //
@@ -4523,7 +4507,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
   // propagating bits as we go.
   const bool reachedDocRoot =
     !parent->IsElement() ||
-    !PropagateBits(parent->AsElement(), aBits, existingRoot);
+    !PropagateBits(parent->AsElement(), aBits, existingRoot, aBits);
 
   uint32_t existingBits = doc->GetServoRestyleRootDirtyBits();
   if (!reachedDocRoot || existingRoot == doc) {
@@ -4535,7 +4519,9 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     // now need to find the nearest common ancestor, so climb up from the
     // existing root, extending bits along the way.
     Element* rootParent = existingRoot->GetFlattenedTreeParentElementForStyle();
-    if (Element* commonAncestor = PropagateBits(rootParent, existingBits, aElement)) {
+    // We can stop at the first occurrence of `aBits` in order to find the
+    // common ancestor.
+    if (Element* commonAncestor = PropagateBits(rootParent, existingBits, aElement, aBits)) {
       MOZ_ASSERT(commonAncestor == aElement ||
                  commonAncestor == nsContentUtils::GetCommonFlattenedTreeAncestorForStyle(aElement, rootParent));
 
@@ -4547,6 +4533,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
         MOZ_ASSERT(curr->HasAllFlags(aBits));
         curr->UnsetFlags(aBits);
       }
+      AssertNoBitsPropagatedFrom(commonAncestor);
     } else {
       // We didn't find a common ancestor element. That means we're descended
       // from two different document style roots, so the common ancestor is the
@@ -4585,7 +4572,8 @@ Element::NoteDirtySubtreeForServo()
         existingRoot->AsElement(), this)) {
     PropagateBits(existingRoot->AsElement()->GetFlattenedTreeParentElementForStyle(),
                   existingBits,
-                  this);
+                  this,
+                  existingBits);
 
     doc->ClearServoRestyleRoot();
   }

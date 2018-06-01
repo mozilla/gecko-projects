@@ -107,12 +107,6 @@
 #define LMANNO_FEEDURI "livemark/feedURI"
 #define LMANNO_SITEURI "livemark/siteURI"
 
-#define ROOT_GUID "root________"
-#define MENU_ROOT_GUID "menu________"
-#define TOOLBAR_ROOT_GUID "toolbar_____"
-#define UNFILED_ROOT_GUID "unfiled_____"
-#define TAGS_ROOT_GUID "tags________"
-#define MOBILE_ROOT_GUID "mobile______"
 // This is no longer used & obsolete except for during migration.
 // Note: it may still be found in older places databases.
 #define MOBILE_ROOT_ANNO "mobile/bookmarksRoot"
@@ -1301,7 +1295,12 @@ Database::InitSchema(bool* aDatabaseMigrated)
         NS_ENSURE_SUCCESS(rv, rv);
       }
 
-      // Firefox 62 uses schema version 49.
+      if (currentSchemaVersion < 50) {
+        rv = MigrateV50Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 62 uses schema version 50.
 
       // Schema Upgrades must add migration code here.
       // >>> IMPORTANT! <<<
@@ -1532,8 +1531,6 @@ Database::EnsureBookmarkRoots(const int32_t startPosition)
         "UPDATE moz_bookmarks SET syncStatus = :sync_status WHERE id = :id"
       ), getter_AddRefs(mobileRootSyncStatusStmt));
       if (NS_FAILED(rv)) return rv;
-      mozStorageStatementScoper mobileRootSyncStatusScoper(
-        mobileRootSyncStatusStmt);
 
       rv = mobileRootSyncStatusStmt->BindInt32ByName(
         NS_LITERAL_CSTRING("sync_status"),
@@ -1674,7 +1671,6 @@ Database::MigrateV32Up() {
         "FROM moz_places WHERE LENGTH(url) > :maxlen AND foreign_count = 0"
     ), getter_AddRefs(stmt));
     NS_ENSURE_SUCCESS(rv, rv);
-    mozStorageStatementScoper scoper(stmt);
     rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("maxlen"), MaxUrlLength());
     NS_ENSURE_SUCCESS(rv, rv);
     rv = stmt->Execute();
@@ -1687,7 +1683,6 @@ Database::MigrateV32Up() {
       "DELETE FROM moz_places WHERE LENGTH(url) > :maxlen AND foreign_count = 0"
     ), getter_AddRefs(stmt));
     NS_ENSURE_SUCCESS(rv, rv);
-    mozStorageStatementScoper scoper(stmt);
     rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("maxlen"), MaxUrlLength());
     NS_ENSURE_SUCCESS(rv, rv);
     rv = stmt->Execute();
@@ -1825,7 +1820,6 @@ Database::MigrateV35Up() {
       "SELECT id FROM moz_bookmarks WHERE parent = 0"
     ), getter_AddRefs(checkRootsStmt));
     NS_ENSURE_SUCCESS(rv, rv);
-    mozStorageStatementScoper scoper(checkRootsStmt);
     bool hasResult = false;
     rv = checkRootsStmt->ExecuteStep(&hasResult);
     if (NS_SUCCEEDED(rv) && !hasResult) {
@@ -1862,7 +1856,6 @@ Database::MigrateV35Up() {
       "WHERE parent = :folder_id"
     ), getter_AddRefs(moveStmt));
     if (NS_FAILED(rv)) return rv;
-    mozStorageStatementScoper moveScoper(moveStmt);
 
     rv = moveStmt->BindInt64ByName(NS_LITERAL_CSTRING("root_id"),
                                    mobileRootId);
@@ -2077,7 +2070,6 @@ Database::MigrateV42Up() {
       "PRAGMA favicons.auto_vacuum"
     ), getter_AddRefs(stmt));
     NS_ENSURE_SUCCESS(rv, rv);
-    mozStorageStatementScoper scoper(stmt);
     bool hasResult = false;
     if (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
       vacuum = stmt->AsInt32(0);
@@ -2343,8 +2335,8 @@ Database::MigrateV48Up() {
     NS_ENSURE_SUCCESS(rv, rv);
   }
   rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "INSERT OR IGNORE INTO moz_origins (prefix, host, frecency) " \
-    "SELECT get_prefix(url), get_host_and_port(url), -1 " \
+    "INSERT OR IGNORE INTO moz_origins (prefix, host, frecency) "
+    "SELECT get_prefix(url), get_host_and_port(url), -1 "
     "FROM moz_places; "
   ));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2355,7 +2347,7 @@ Database::MigrateV48Up() {
   ), getter_AddRefs(stmt));
   if (NS_FAILED(rv)) {
     rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "ALTER TABLE moz_places " \
+      "ALTER TABLE moz_places "
       "ADD COLUMN origin_id INTEGER REFERENCES moz_origins(id); "
     ));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -2363,10 +2355,10 @@ Database::MigrateV48Up() {
   rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_PLACES_ORIGIN_ID);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "UPDATE moz_places " \
+    "UPDATE moz_places "
     "SET origin_id = ( "
-      "SELECT id FROM moz_origins " \
-      "WHERE prefix = get_prefix(url) AND host = get_host_and_port(url) " \
+      "SELECT id FROM moz_origins "
+      "WHERE prefix = get_prefix(url) AND host = get_host_and_port(url) "
     "); "
   ));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2415,41 +2407,33 @@ MigrateV48FrecenciesRunnable::Run()
     return NS_OK;
   }
 
+  // We do the work in chunks, or the wal journal may grow too much.
+  nsCOMPtr<mozIStorageStatement> updateStmt;
+  nsresult rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_origins "
+    "SET frecency = ( "
+      "SELECT MAX(frecency) "
+      "FROM moz_places "
+      "WHERE moz_places.origin_id = moz_origins.id "
+    ") "
+    "WHERE rowid IN ( "
+      "SELECT rowid "
+      "FROM moz_origins "
+      "WHERE frecency = -1 "
+      "LIMIT 400 "
+    ") "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
   nsCOMPtr<mozIStorageStatement> selectStmt;
-  nsresult rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
-    "SELECT id FROM moz_origins " \
-    "WHERE frecency = -1 " \
-    "ORDER BY id ASC " \
-    "LIMIT 200; "
+  rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT id FROM moz_origins WHERE frecency = -1 "
   ), getter_AddRefs(selectStmt));
   NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<mozIStorageStatement> updateStmt;
-  rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
-    "UPDATE moz_origins " \
-    "SET frecency = ( " \
-      "SELECT MAX(frecency) " \
-      "FROM moz_places " \
-      "WHERE moz_places.origin_id = moz_origins.id " \
-    ") " \
-    "WHERE id = :id; "
-  ), getter_AddRefs(updateStmt));
+  bool hasResult = false;
+  rv = selectStmt->ExecuteStep(&hasResult);
   NS_ENSURE_SUCCESS(rv, rv);
-
-  mozStorageStatementScoper updateScoper(updateStmt);
-
-  // We should do the work in chunks, or the wal journal may grow too much.
-  bool hasResult;
-  uint8_t count = 0;
-  for (; NS_SUCCEEDED(selectStmt->ExecuteStep(&hasResult)) && hasResult; ++count) {
-    int64_t id = selectStmt->AsInt64(0);
-    rv = updateStmt->BindInt64ByName(NS_LITERAL_CSTRING("id"), id);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = updateStmt->Execute();
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (count == 200) {
+  if (hasResult) {
     // There are more results to handle. Re-dispatch to the same thread for the
     // next chunk.
     return NS_DispatchToCurrentThread(this);
@@ -2497,6 +2481,163 @@ Database::MigrateV49Up() {
 }
 
 nsresult
+Database::MigrateV50Up() {
+  // Convert the existing queries. We don't have REGEX available, so the simplest
+  // thing to do is to pull the urls out, and process them manually.
+  nsCOMPtr<mozIStorageStatement> stmt;
+  nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT id, url FROM moz_places "
+    "WHERE url_hash BETWEEN hash('place', 'prefix_lo') AND "
+                           "hash('place', 'prefix_hi') "
+      "AND url LIKE '%folder=%' "
+  ), getter_AddRefs(stmt));
+  if (NS_FAILED(rv)) return rv;
+
+  AutoTArray<Pair<int64_t, nsCString>, 32> placeURLs;
+
+  bool hasMore = false;
+  nsCString url;
+  while (NS_SUCCEEDED(stmt->ExecuteStep(&hasMore)) && hasMore) {
+    int64_t placeId;
+    rv = stmt->GetInt64(0, &placeId);
+    if (NS_FAILED(rv)) return rv;
+    rv = stmt->GetUTF8String(1, url);
+    if (NS_FAILED(rv)) return rv;
+
+    if (!placeURLs.AppendElement(MakePair(placeId, url))) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+
+  if (placeURLs.IsEmpty()) {
+    return NS_OK;
+  }
+
+  int64_t placeId;
+  for (uint32_t i = 0; i < placeURLs.Length(); ++i) {
+    placeId = placeURLs[i].first();
+    url = placeURLs[i].second();
+
+    rv = ConvertOldStyleQuery(url);
+    // Something bad happened, and we can't convert it, so just continue.
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      continue;
+    }
+
+    nsCOMPtr<mozIStorageStatement> updateStmt;
+    rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+      "UPDATE moz_places "
+      "SET url = :url, url_hash = hash(:url) "
+      "WHERE id = :placeId "
+    ), getter_AddRefs(updateStmt));
+    if (NS_FAILED(rv)) return rv;
+
+    rv = URIBinder::Bind(updateStmt, NS_LITERAL_CSTRING("url"), url);
+    if (NS_FAILED(rv)) return rv;
+    rv = updateStmt->BindInt64ByName(NS_LITERAL_CSTRING("placeId"), placeId);
+    if (NS_FAILED(rv)) return rv;
+
+    rv = updateStmt->Execute();
+    if (NS_FAILED(rv)) return rv;
+
+    // Update Sync fields for these queries.
+    nsCOMPtr<mozIStorageStatement> syncStmt;
+    rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+      "UPDATE moz_bookmarks SET syncChangeCounter = syncChangeCounter + 1 "
+      "WHERE fk = :placeId "
+    ), getter_AddRefs(syncStmt));
+    if (NS_FAILED(rv)) return rv;
+
+    rv = syncStmt->BindInt64ByName(NS_LITERAL_CSTRING("placeId"), placeId);
+    if (NS_FAILED(rv)) return rv;
+
+    rv = syncStmt->Execute();
+    if (NS_FAILED(rv)) return rv;
+  }
+
+  return NS_OK;
+}
+
+
+nsresult
+Database::ConvertOldStyleQuery(nsCString& aURL)
+{
+  AutoTArray<QueryKeyValuePair, 8> tokens;
+  nsresult rv = TokenizeQueryString(aURL, &tokens);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  AutoTArray<QueryKeyValuePair, 8> newTokens;
+  bool invalid = false;
+  nsAutoCString guid;
+
+  for (uint32_t j = 0; j < tokens.Length(); ++j) {
+    const QueryKeyValuePair& kvp = tokens[j];
+
+    if (!kvp.key.EqualsLiteral("folder")) {
+      if (!newTokens.AppendElement(kvp)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      continue;
+    }
+
+    int64_t itemId = kvp.value.ToInteger(&rv);
+    if (NS_SUCCEEDED(rv)) {
+      // We have the folder's ID, now to find its GUID.
+      nsCOMPtr<mozIStorageStatement> stmt;
+      nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+        "SELECT guid FROM moz_bookmarks "
+        "WHERE id = :itemId "
+      ), getter_AddRefs(stmt));
+      if (NS_FAILED(rv)) return rv;
+
+      rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("itemId"), itemId);
+      if (NS_FAILED(rv)) return rv;
+
+      bool hasMore = false;
+      if (NS_SUCCEEDED(stmt->ExecuteStep(&hasMore)) && hasMore) {
+        rv = stmt->GetUTF8String(0, guid);
+        if (NS_FAILED(rv)) return rv;
+      }
+    } else if (kvp.value.EqualsLiteral("PLACES_ROOT")) {
+      guid = NS_LITERAL_CSTRING(ROOT_GUID);
+    } else if (kvp.value.EqualsLiteral("BOOKMARKS_MENU")) {
+      guid = NS_LITERAL_CSTRING(MENU_ROOT_GUID);
+    } else if (kvp.value.EqualsLiteral("TAGS")) {
+      guid = NS_LITERAL_CSTRING(TAGS_ROOT_GUID);
+    } else if (kvp.value.EqualsLiteral("UNFILED_BOOKMARKS")) {
+      guid = NS_LITERAL_CSTRING(UNFILED_ROOT_GUID);
+    } else if (kvp.value.EqualsLiteral("TOOLBAR")) {
+      guid = NS_LITERAL_CSTRING(TOOLBAR_ROOT_GUID);
+    } else if (kvp.value.EqualsLiteral("MOBILE_BOOKMARKS")) {
+      guid = NS_LITERAL_CSTRING(MOBILE_ROOT_GUID);
+    }
+
+    QueryKeyValuePair* newPair;
+    if (guid.IsEmpty()) {
+      // This is invalid, so we'll change this key/value pair to something else
+      // so that the query remains a valid url.
+      newPair = new QueryKeyValuePair(NS_LITERAL_CSTRING("invalidOldParentId"), kvp.value);
+      invalid = true;
+    } else {
+      newPair = new QueryKeyValuePair(NS_LITERAL_CSTRING("parent"), guid);
+    }
+    if (!newTokens.AppendElement(*newPair)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+    delete newPair;
+  }
+
+  if (invalid) {
+    // One or more of the folders don't exist, replace with an empty query.
+    newTokens.AppendElement(QueryKeyValuePair(NS_LITERAL_CSTRING("excludeItems"),
+                                              NS_LITERAL_CSTRING("1")));
+  }
+
+  TokensToQueryString(newTokens, aURL);
+  return NS_OK;
+}
+
+nsresult
 Database::GetItemsWithAnno(const nsACString& aAnnoName, int32_t aItemType,
                            nsTArray<int64_t>& aItemIds)
 {
@@ -2509,7 +2650,6 @@ Database::GetItemsWithAnno(const nsACString& aAnnoName, int32_t aItemType,
           "b.type = :item_type"
   ), getter_AddRefs(stmt));
   if (NS_FAILED(rv)) return rv;
-  mozStorageStatementScoper scoper(stmt);
 
   rv = stmt->BindUTF8StringByName(NS_LITERAL_CSTRING("anno_name"), aAnnoName);
   if (NS_FAILED(rv)) return rv;
@@ -2536,7 +2676,6 @@ Database::DeleteBookmarkItem(int32_t aItemId)
     "DELETE FROM moz_bookmarks WHERE id = :item_id"
   ), getter_AddRefs(deleteStmt));
   if (NS_FAILED(rv)) return rv;
-  mozStorageStatementScoper deleteScoper(deleteStmt);
 
   rv = deleteStmt->BindInt64ByName(NS_LITERAL_CSTRING("item_id"),
                                    aItemId);
@@ -2551,7 +2690,6 @@ Database::DeleteBookmarkItem(int32_t aItemId)
     "DELETE FROM moz_items_annos WHERE item_id = :item_id"
   ), getter_AddRefs(removeAnnosStmt));
   if (NS_FAILED(rv)) return rv;
-  mozStorageStatementScoper removeAnnosScoper(removeAnnosStmt);
 
   rv = removeAnnosStmt->BindInt64ByName(NS_LITERAL_CSTRING("item_id"),
                                         aItemId);
@@ -2579,7 +2717,6 @@ Database::CreateMobileRoot()
     "FROM moz_bookmarks b WHERE b.parent = 0"
   ), getter_AddRefs(createStmt));
   if (NS_FAILED(rv)) return -1;
-  mozStorageStatementScoper createScoper(createStmt);
 
   rv = createStmt->BindInt32ByName(NS_LITERAL_CSTRING("item_type"),
                                    nsINavBookmarksService::TYPE_FOLDER);
@@ -2604,7 +2741,6 @@ Database::CreateMobileRoot()
     "SELECT id FROM moz_bookmarks WHERE guid = :guid"
   ), getter_AddRefs(findIdStmt));
   if (NS_FAILED(rv)) return -1;
-  mozStorageStatementScoper findIdScoper(findIdStmt);
 
   rv = findIdStmt->BindUTF8StringByName(NS_LITERAL_CSTRING("guid"),
                                         NS_LITERAL_CSTRING(MOBILE_ROOT_GUID));

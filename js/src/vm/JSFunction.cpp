@@ -835,14 +835,11 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
      * give it the guts to be one.
      */
     RootedObject enclosingEnv(cx, &self->lexicalEnvironment());
-    JSObject* functionProto_ =
-        NewFunctionWithProto(cx, nullptr, 0, JSFunction::INTERPRETED,
-                             enclosingEnv, nullptr, objectProto, AllocKind::FUNCTION,
-                             SingletonObject);
-    if (!functionProto_)
-        return nullptr;
-
-    RootedFunction functionProto(cx, &functionProto_->as<JSFunction>());
+    RootedFunction functionProto(cx, NewFunctionWithProto(cx, nullptr, 0, JSFunction::INTERPRETED,
+                                                          enclosingEnv, nullptr, objectProto,
+                                                          AllocKind::FUNCTION, SingletonObject));
+    if (!functionProto)
+    	return nullptr;
 
     const char* rawSource = "function () {\n}";
     size_t sourceLen = strlen(rawSource);
@@ -890,7 +887,8 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
      * inference to have unknown properties, to simplify handling of e.g.
      * NewFunctionClone.
      */
-    if (!JSObject::setNewGroupUnknown(cx, &JSFunction::class_, functionProto))
+    ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
+    if (!JSObject::setNewGroupUnknown(cx, realm, &JSFunction::class_, functionProto))
         return nullptr;
 
     return functionProto;
@@ -1681,22 +1679,22 @@ JSFunction::maybeRelazify(JSRuntime* rt)
     if (!hasScript() || !u.scripted.s.script_)
         return;
 
-    // Don't relazify functions in compartments that are active.
-    JSCompartment* comp = compartment();
-    if (comp->hasBeenEntered() && !rt->allowRelazificationForTesting)
+    // Don't relazify functions in realms that are active.
+    Realm* realm = this->realm();
+    if (realm->hasBeenEntered() && !rt->allowRelazificationForTesting)
         return;
 
     // The caller should have checked we're not in the self-hosting zone (it's
     // shared with worker runtimes so relazifying functions in it will race).
-    MOZ_ASSERT(!comp->isSelfHosting);
+    MOZ_ASSERT(!realm->isSelfHostingRealm());
 
-    // Don't relazify if the compartment is being debugged.
-    if (comp->isDebuggee())
+    // Don't relazify if the realm is being debugged.
+    if (realm->isDebuggee())
         return;
 
-    // Don't relazify if the compartment and/or runtime is instrumented to
+    // Don't relazify if the realm and/or runtime is instrumented to
     // collect code coverage for analysis.
-    if (comp->collectCoverageForDebug())
+    if (realm->collectCoverageForDebug())
         return;
 
     // Don't relazify functions with JIT code.
@@ -1727,7 +1725,7 @@ JSFunction::maybeRelazify(JSRuntime* rt)
         MOZ_ASSERT(getExtendedSlot(LAZY_FUNCTION_NAME_SLOT).toString()->isAtom());
     }
 
-    comp->scheduleDelazificationForDebugger();
+    realm->scheduleDelazificationForDebugger();
 }
 
 const JSFunctionSpec js::function_methods[] = {
@@ -2288,7 +2286,7 @@ JSFunction*
 js::CloneSelfHostingIntrinsic(JSContext* cx, HandleFunction fun)
 {
     MOZ_ASSERT(fun->isNative());
-    MOZ_ASSERT(fun->compartment()->isSelfHosting);
+    MOZ_ASSERT(fun->realm()->isSelfHostingRealm());
     MOZ_ASSERT(!fun->isExtended());
     MOZ_ASSERT(cx->compartment() != fun->compartment());
 
