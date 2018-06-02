@@ -541,8 +541,14 @@ task_description_schema = Schema({
             Required('paths'): [basestring],
         }],
     }, {
-        Required('implementation'): 'shipit',
+        Required('implementation'): 'shipit-shipped',
         Required('release-name'): basestring,
+    }, {
+        Required('implementation'): 'shipit-started',
+        Required('release-name'): basestring,
+        Required('product'): basestring,
+        Required('branch'): basestring,
+        Required('locales'): Any(object, basestring)
     }, {
         Required('implementation'): 'treescript',
         Required('tag'): bool,
@@ -1104,12 +1110,29 @@ def build_push_snap_payload(config, task, task_def):
     }
 
 
-@payload_builder('shipit')
-def build_ship_it_payload(config, task, task_def):
+@payload_builder('shipit-shipped')
+def build_ship_it_shipped_payload(config, task, task_def):
     worker = task['worker']
 
     task_def['payload'] = {
         'release_name': worker['release-name']
+    }
+
+
+@payload_builder('shipit-started')
+def build_ship_it_started_payload(config, task, task_def):
+    worker = task['worker']
+    release_config = get_release_config(config)
+
+    task_def['payload'] = {
+        'release_name': worker['release-name'],
+        'product': worker['product'],
+        'version': release_config['version'],
+        'build_number': release_config['build_number'],
+        'branch': worker['branch'],
+        'revision': get_branch_rev(config),
+        'partials': release_config.get('partial_versions', ""),
+        'l10n_changesets': worker['locales'],
     }
 
 
