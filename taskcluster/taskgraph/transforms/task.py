@@ -548,7 +548,7 @@ task_description_schema = Schema({
         Required('release-name'): basestring,
         Required('product'): basestring,
         Required('branch'): basestring,
-        Required('locales'): Any(object, basestring)
+        Required('locales'): basestring,
     }, {
         Required('implementation'): 'treescript',
         Required('tag'): bool,

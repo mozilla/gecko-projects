@@ -43,7 +43,7 @@ def make_task_description(config, jobs):
 
         if job['shipping-product'] == 'fennec':
             with open(locales_file, mode='r') as f:
-                all_locales = json.load(f)
+                all_locales = json.dumps(json.load(f))
         else:
             all_locales = "\n".join([
                 "{} {}".format(locale, revision)
