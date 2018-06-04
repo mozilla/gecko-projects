@@ -24,7 +24,7 @@ job-defaults:
          default:
             - project:releng:ship-it:server:staging
             - project:releng:ship-it:action:mark-as-started
-   run-on-projects: ['maple', 'mozilla-beta']
+   run-on-projects: []
    shipping-phase: promote
    locales-file: browser/locales/l10n-changesets.json
 
