@@ -57,7 +57,7 @@ def make_beetmover_checksums_description(config, jobs):
             raise Exception("Cannot find repack id!")
 
         label = dep_job.label.replace("beetmover-", "beetmover-checksums-")
-        description =  (
+        description = (
             "Beetmove checksums for repack_id '{repack_id}' for build '"
             "{build_platform}/{build_type}'".format(
                 repack_id=repack_id,
