@@ -214,7 +214,7 @@ InitRecordingOrReplayingProcess(int* aArgc, char*** aArgv)
   pt.emplace();
 
   gMonitor = new Monitor();
-  gChannel = new Channel(channelID.ref(), ChannelMessageHandler);
+  gChannel = new Channel(channelID.ref(), false, ChannelMessageHandler);
 
   pt.reset();
 
