@@ -202,7 +202,8 @@ private:
   #undef NO_OVERLAP
 
   // We combine the active bit with the feature bits so they can be read or
-  // written in a single atomic operation.
+  // written in a single atomic operation. Accesses to this atomic are not
+  // recorded by web replay as they may occur at non-deterministic points.
   static mozilla::Atomic<uint32_t, SequentiallyConsistent,
                          recordreplay::Behavior::DontPreserve> sActiveAndFeatures;
 };

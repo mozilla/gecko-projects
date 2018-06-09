@@ -4,7 +4,14 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test unhandled divergence while evaluating at a breakpoint with Web Replay.
-async function runTest(tab) {
+async function test() {
+  waitForExplicitFinish();
+
+  let tab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  await once(Services.ppmm, "RecordingFinished");
+
   let client = await attachDebugger(tab);
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_basic.html", 21);
@@ -15,15 +22,6 @@ async function runTest(tab) {
   await checkEvaluateInTopFrameThrows(client, "window.alert(3)");
   await checkEvaluateInTopFrame(client, "number", 10);
   await checkEvaluateInTopFrame(client, "testStepping2()", undefined);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  var tab = gBrowser.addTab(null, { recordExecution: "*" });
-  addMessageListener("RecordingFinished", () => runTest(tab));
-
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
 }

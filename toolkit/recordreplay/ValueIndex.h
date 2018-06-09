@@ -45,7 +45,7 @@ public:
   // Remove an entry from the map, unless there is no entry for aValue.
   void Remove(const void* aValue);
 
-  // Get the index for an entry in the map.
+  // Get the index for an entry in the map. The entry must exist in the map.
   size_t GetIndex(const void* aValue);
 
   // Get the index for an entry in the map if there is one, otherwise return
@@ -55,7 +55,7 @@ public:
   // Return whether there is an entry for aValue.
   bool Contains(const void* aValue);
 
-  // Get the value associated with an index.
+  // Get the value associated with an index. The index must exist in the map.
   const void* GetValue(size_t aIndex);
 
   // Whether the map is empty.

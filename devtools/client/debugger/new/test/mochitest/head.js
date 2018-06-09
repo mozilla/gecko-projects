@@ -65,52 +65,30 @@ async function takeScreenshot(dbg) {
   dump(`[SCREENSHOT] ${canvas.toDataURL()}\n`);
 }
 
-// Specify a callback to be invoked the next time a particular message is sent
-// by a test file.
-function addMessageListener(message, callback) {
-  const ppmm = Services.ppmm;
-  ppmm.addMessageListener(message,
-                          function listener() {
-                            ppmm.removeMessageListener(message, listener);
-                            callback();
-                          });
-}
-
 // Attach a debugger to a tab, returning a promise that resolves with the
 // debugger's thread client.
-function attachDebugger(tab) {
+async function attachDebugger(tab) {
   let target = TargetFactory.forTab(tab);
-  return new Promise(function(resolve) {
-    gDevTools.showToolbox(target, "jsdebugger").then(aToolbox => {
-      ok(aToolbox.threadClient.state == "resuming", "Thread is attached");
-      resolve(aToolbox.threadClient);
-    });
-  });
+  let toolbox = await gDevTools.showToolbox(target, "jsdebugger");
+  ok(toolbox.threadClient.state == "resuming", "Thread is attached");
+  return toolbox.threadClient;
 }
 
 // Return a promise that resolves when a breakpoint has been set.
-function setBreakpoint(threadClient, expectedFile, lineno) {
-  return new Promise(function(resolve) {
-    threadClient.getSources().then(function({sources}) {
-      ok(sources.length == 1, "Got one source");
-      ok(RegExp(expectedFile).test(sources[0].url), "Source is " + expectedFile);
-      let sourceClient = threadClient.source(sources[0]);
-      sourceClient.setBreakpoint({ line: lineno }, function(response, bpClient) {
-        resolve(response);
-      });
-    });
-  });
+async function setBreakpoint(threadClient, expectedFile, lineno) {
+  let {sources} = await threadClient.getSources();
+  ok(sources.length == 1, "Got one source");
+  ok(RegExp(expectedFile).test(sources[0].url), "Source is " + expectedFile);
+  let sourceClient = threadClient.source(sources[0]);
+  await sourceClient.setBreakpoint({ line: lineno });
 }
 
 function resumeThenPauseAtLineFunctionFactory(method) {
-  return function(threadClient, lineno) {
+  return async function(threadClient, lineno) {
     threadClient[method]();
-    return new Promise(function(resolve) {
-      threadClient.addOneTimeListener("paused", function(event, packet) {
-        let frameLine = ("frame" in packet) ? packet.frame.where.line : undefined;
-        ok(frameLine == lineno, "Paused at line " + frameLine + " expected " + lineno);
-        resolve();
-      });
+    await threadClient.addOneTimeListener("paused", function(event, packet) {
+      let frameLine = ("frame" in packet) ? packet.frame.where.line : undefined;
+      ok(frameLine == lineno, "Paused at line " + frameLine + " expected " + lineno);
     });
   };
 }
@@ -128,57 +106,47 @@ var stepOutToLine = resumeThenPauseAtLineFunctionFactory("stepOut");
 
 // Return a promise that resolves with the result of a thread evaluating a
 // string in the topmost frame.
-function evaluateInTopFrame(threadClient, text) {
-  return new Promise(function(resolve) {
-    threadClient.getFrames(0, 1).then(function({frames}) {
-      ok(frames.length == 1, "Got one frame");
-      return threadClient.eval(frames[0].actor, text);
-    }).then(function(response) {
-      ok(response.type == "resumed", "Got resume response from eval");
-      threadClient.addOneTimeListener("paused", function(event, packet) {
-        ok(packet.type == "paused" &&
-           packet.why.type == "clientEvaluated" &&
-           "return" in packet.why.frameFinished, "Eval returned a value");
-        let rval = packet.why.frameFinished["return"];
-        resolve((rval.type == "undefined") ? undefined : rval);
-      });
-    });
+async function evaluateInTopFrame(threadClient, text) {
+  let {frames} = await threadClient.getFrames(0, 1);
+  ok(frames.length == 1, "Got one frame");
+  let response = await threadClient.eval(frames[0].actor, text);
+  ok(response.type == "resumed", "Got resume response from eval");
+  let rval;
+  await threadClient.addOneTimeListener("paused", function(event, packet) {
+    ok(packet.type == "paused" &&
+       packet.why.type == "clientEvaluated" &&
+       "return" in packet.why.frameFinished, "Eval returned a value");
+    rval = packet.why.frameFinished["return"];
   });
+  return (rval.type == "undefined") ? undefined : rval;
 }
 
 // Return a promise that resolves when a thread evaluates a string in the
 // topmost frame, ensuring the result matches the expected value.
-function checkEvaluateInTopFrame(threadClient, text, expected) {
-  return new Promise(function(resolve) {
-    evaluateInTopFrame(threadClient, text).then(function(rval) {
-      ok(rval == expected, "Eval returned " + expected);
-      resolve();
-    });
-  });
+async function checkEvaluateInTopFrame(threadClient, text, expected) {
+  let rval = await evaluateInTopFrame(threadClient, text);
+  ok(rval == expected, "Eval returned " + expected);
 }
 
 // Return a promise that resolves when a thread evaluates a string in the
 // topmost frame, with the result throwing an exception.
-function checkEvaluateInTopFrameThrows(threadClient, text) {
-  return new Promise(function(resolve) {
-    threadClient.getFrames(0, 1).then(function({frames}) {
-      ok(frames.length == 1, "Got one frame");
-      return threadClient.eval(frames[0].actor, text);
-    }).then(function(response) {
-      ok(response.type == "resumed", "Got resume response from eval");
-      threadClient.addOneTimeListener("paused", function(event, packet) {
-        ok(packet.type == "paused" &&
-           packet.why.type == "clientEvaluated" &&
-           "throw" in packet.why.frameFinished, "Eval threw an exception");
-        resolve();
-      });
-    });
+async function checkEvaluateInTopFrameThrows(threadClient, text) {
+  let {frames} = await threadClient.getFrames(0, 1);
+  ok(frames.length == 1, "Got one frame");
+  let response = await threadClient.eval(frames[0].actor, text);
+  ok(response.type == "resumed", "Got resume response from eval");
+  await threadClient.addOneTimeListener("paused", function(event, packet) {
+    ok(packet.type == "paused" &&
+       packet.why.type == "clientEvaluated" &&
+       "throw" in packet.why.frameFinished, "Eval threw an exception");
   });
 }
 
 // Return a pathname that can be used for a new recording file.
 function newRecordingFile() {
-  return "/tmp/MochitestRecording" + Math.round(Math.random() * 1000000000);
+  ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
+  return OS.Path.join(OS.Constants.Path.tmpDir,
+                      "MochitestRecording" + Math.round(Math.random() * 1000000000));
 }
 
 // Several web replay mochitests are running into these rejections. See bug 1447411.

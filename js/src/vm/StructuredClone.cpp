@@ -552,12 +552,22 @@ struct JSStructuredCloneWriter {
                                   SystemAllocPolicy>;
     Rooted<CloneMemory> memory;
 
-    // Set of transferable objects. Iteration order of this table must be
-    // preserved during recording/replaying, as the callbacks used during
-    // transfer may interact with the recording.
+    struct TransferableObjectsHasher : public DefaultHasher<JSObject*>
+    {
+        static inline HashNumber hash(const Lookup& l) {
+            // Iteration order of the transferable objects table must be
+            // preserved during recording/replaying, as the callbacks used
+            // during transfer may interact with the recording. Just use the
+            // same hash number for all elements to ensure this.
+            if (mozilla::recordreplay::IsRecordingOrReplaying())
+                return 0;
+            return DefaultHasher<JSObject*>::hash(l);
+        }
+    };
+
+    // Set of transferable objects
     RootedValue transferable;
-    typedef GCHashSet<JSObject*, DefaultHasher<JSObject*>, TempAllocPolicy,
-                      mozilla::recordreplay::Behavior::Preserve> TransferableObjectsSet;
+    typedef GCHashSet<JSObject*, TransferableObjectsHasher> TransferableObjectsSet;
     Rooted<TransferableObjectsSet> transferableObjects;
 
     const JS::CloneDataPolicy cloneDataPolicy;

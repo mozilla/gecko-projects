@@ -4,29 +4,32 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test ending a recording at a breakpoint and then separately replaying to the end.
-var recordingFile;
-var lastNumberValue;
+async function test() {
+  waitForExplicitFinish();
 
-async function runRecordingTest(tab) {
-  let client = await attachDebugger(tab);
+  let recordingFile = newRecordingFile();
+  let recordingTab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = recordingTab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
+
+  let client = await attachDebugger(recordingTab);
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_continuous.html", 14);
   await resumeToLine(client, 14);
   await resumeToLine(client, 14);
   await reverseStepOverToLine(client, 13);
-  lastNumberValue = await evaluateInTopFrame(client, "number");
-  let tabParent = tab.linkedBrowser.frameLoader.tabParent;
-  ok(tabParent, "Found recording tab parent");
-  addMessageListener("SaveRecordingFinished", () => {
-    let replayingTab = gBrowser.addTab(null, { replayExecution: recordingFile });
-    addMessageListener("HitRecordingEndpoint", () => runReplayingTest(replayingTab));
-    gBrowser.selectedTab = replayingTab;
-  });
-  ok(tabParent.saveRecording(recordingFile), "Saved recording");
-}
+  let lastNumberValue = await evaluateInTopFrame(client, "number");
 
-async function runReplayingTest(tab) {
-  let client = await attachDebugger(tab);
+  let tabParent = recordingTab.linkedBrowser.frameLoader.tabParent;
+  ok(tabParent, "Found recording tab parent");
+  ok(tabParent.saveRecording(recordingFile), "Saved recording");
+  await once(Services.ppmm, "SaveRecordingFinished");
+
+  let replayingTab = gBrowser.addTab(null, { replayExecution: recordingFile });
+  gBrowser.selectedTab = replayingTab;
+  await once(Services.ppmm, "HitRecordingEndpoint");
+
+  client = await attachDebugger(replayingTab);
   await client.interrupt();
   await checkEvaluateInTopFrame(client, "number", lastNumberValue);
   await reverseStepOverToLine(client, 13);
@@ -35,17 +38,6 @@ async function runReplayingTest(tab) {
   await checkEvaluateInTopFrame(client, "number", lastNumberValue - 1);
   await resumeToLine(client, 14);
   await checkEvaluateInTopFrame(client, "number", lastNumberValue);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  recordingFile = newRecordingFile();
-
-  let recordingTab = gBrowser.addTab(null, { recordExecution: "*" });
-  gBrowser.selectedTab = recordingTab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
-
-  runRecordingTest(recordingTab);
 }

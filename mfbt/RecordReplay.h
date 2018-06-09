@@ -26,10 +26,6 @@ namespace recordreplay {
 // Firefox content processes can be specified to record or replay their
 // behavior. Whether a process is recording or replaying is initialized at the
 // start of the main() routine, and is afterward invariant for the process.
-// A third process type, middleman processes, are normal content processes used
-// when replaying to facilitate IPC between recording/replaying processes and
-// the UI process, and to run debugger code that interacts with the recording
-// and replaying processes.
 //
 // Recording and replaying works by controlling non-determinism in the browser:
 // non-deterministic behaviors are initially recorded, then later replayed
@@ -59,6 +55,11 @@ namespace recordreplay {
 // values can differ, and JS GCs can occur at different points (a more complete
 // list is at the URL below). Some of the APIs below are used to accommodate
 // these behaviors and keep the replaying process on track.
+//
+// A third process type, middleman processes, are normal content processes
+// which facilitate communication with recording and replaying processes,
+// managing the graphics data they generate, and running devtools code that
+// interacts with them.
 //
 // This file contains the main public API for places where mozilla code needs
 // to interact with the record/replay system. There are a few additional public
@@ -99,14 +100,12 @@ static inline bool IsMiddleman() { return false; }
 // Mark a region which occurs atomically wrt the recording. No two threads can
 // be in an atomic region at once, and the order in which atomic sections are
 // executed by the various threads will be the same in the replay as in the
-// recording.
+// recording. These calls have no effect when not recording/replaying.
 static inline void BeginOrderedAtomicAccess();
 static inline void EndOrderedAtomicAccess();
 
-// RAII class for an atomic access. This can also be called directly
-// (i.e. AutoOrderedAtomicAccess()) to insert an ordering fence that will force
-// threads to execute in the same order during replay.
-struct AutoOrderedAtomicAccess
+// RAII class for an atomic access.
+struct MOZ_RAII AutoOrderedAtomicAccess
 {
   AutoOrderedAtomicAccess() { BeginOrderedAtomicAccess(); }
   ~AutoOrderedAtomicAccess() { EndOrderedAtomicAccess(); }
@@ -264,10 +263,12 @@ MFBT_API void UnregisterTrigger(void* aObj);
 MFBT_API void ActivateTrigger(void* aObj);
 MFBT_API void ExecuteTriggers();
 
-// Return whether execution has diverged from the recording and events may be
-// encountered that did not happen while recording. Interacting with the system
-// will generally cause the current debugger operation to fail. For more
-// information see the 'Recording Divergence' comment in ProcessRewind.h
+// Some devtools operations which execute in a replaying process can cause code
+// to run which did not run while recording. For example, the JS debugger can
+// run arbitrary JS while paused at a breakpoint, by doing an eval(). In such
+// cases we say that execution has diverged from the recording, and if recorded
+// events are encountered the associated devtools operation fails. This API can
+// be used to test for such cases and avoid causing the operation to fail.
 static inline bool HasDivergedFromRecording();
 
 // API for handling unrecorded waits. During replay, periodically all threads
@@ -332,21 +333,17 @@ enum class ProcessKind {
 };
 
 // Command line option for specifying the record/replay kind of a process.
-static const char* gProcessKindOption = "-recordReplayKind";
+static const char gProcessKindOption[] = "-recordReplayKind";
 
 // Command line option for specifying the recording file to use.
-static const char* gRecordingFileOption = "-recordReplayFile";
+static const char gRecordingFileOption[] = "-recordReplayFile";
 
 ///////////////////////////////////////////////////////////////////////////////
-// Debugger API
+// Devtools API
 ///////////////////////////////////////////////////////////////////////////////
 
-// This interface is used by JS Debugger objects in a child or middleman
-// process.
-
-// Special IDs for normal checkpoints.
-static const size_t InvalidCheckpointId = 0;
-static const size_t FirstCheckpointId = 1;
+// This interface is used by devtools C++ code (e.g. the JS Debugger) running
+// in a child or middleman process.
 
 // The ID of a checkpoint in a child process. Checkpoints are either normal or
 // temporary. Normal checkpoints occur at the same point in the recording and
@@ -358,19 +355,23 @@ struct CheckpointId
   // starting at FirstCheckpointId.
   size_t mNormal;
 
+  // Special IDs for normal checkpoints.
+  static const size_t Invalid = 0;
+  static const size_t First = 1;
+
   // How many temporary checkpoints have been generated since the most recent
   // normal checkpoint, zero if this represents the normal checkpoint itself.
   size_t mTemporary;
 
-  explicit CheckpointId(size_t aNormal = InvalidCheckpointId, size_t aTemporary = 0)
+  explicit CheckpointId(size_t aNormal = Invalid, size_t aTemporary = 0)
     : mNormal(aNormal), mTemporary(aTemporary)
   {}
 
-  inline bool operator ==(const CheckpointId& o) const {
+  inline bool operator==(const CheckpointId& o) const {
     return mNormal == o.mNormal && mTemporary == o.mTemporary;
   }
 
-  inline bool operator !=(const CheckpointId& o) const {
+  inline bool operator!=(const CheckpointId& o) const {
     return mNormal != o.mNormal || mTemporary != o.mTemporary;
   }
 };
@@ -432,7 +433,7 @@ MFBT_API bool SpewEnabled();
 // TrackedMemoryKind is reserved for memory that is saved and restored when
 // saving or restoring checkpoints. All other values refer to memory that is
 // untracked, and whose contents are preserved when restoring checkpoints.
-// Different values may be used to distinguish different classes of memory for
+// Different values are used to distinguish different classes of memory for
 // diagnosing leaks and reporting memory usage.
 typedef size_t AllocatedMemoryKind;
 static const AllocatedMemoryKind TrackedMemoryKind = 0;

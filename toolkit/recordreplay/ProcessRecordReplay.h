@@ -68,13 +68,10 @@ enum class ThreadEvent : uint32_t
   CallStart
 };
 
-template <AllocatedMemoryKind Kind>
-class FileTemplate;
+class File;
 
-// Files and filenames used during recording and replay.
-extern FileTemplate<TrackedMemoryKind>* gRecordingFile;
-extern const char* gSnapshotMemoryPrefix;
-extern const char* gSnapshotStackPrefix;
+// File used during recording and replay.
+extern File* gRecordingFile;
 
 // Whether record/replay state has finished initialization.
 extern bool gInitialized;
@@ -114,6 +111,7 @@ enum class Directive
 };
 
 // Get the process kind and recording file specified at the command line.
+// These are available in the middleman as well as while recording/replaying.
 extern ProcessKind gProcessKind;
 extern char* gRecordingFilename;
 

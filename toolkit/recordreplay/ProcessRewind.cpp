@@ -13,7 +13,7 @@
 #include "MemorySnapshot.h"
 #include "Monitor.h"
 #include "ProcessRecordReplay.h"
-#include "Thread.h"
+#include "ThreadSnapshot.h"
 #include "prcvar.h"
 
 #include <setjmp.h>
@@ -33,14 +33,11 @@ struct RewindInfo {
 
   // Checkpoints which have been saved. This includes only entries from
   // mShouldSaveCheckpoints, plus all temporary checkpoints.
-  InfallibleVector<CheckpointId, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mSavedCheckpoints;
+  InfallibleVector<SavedCheckpoint, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mSavedCheckpoints;
 
   // Unsorted list of checkpoints which the middleman has instructed us to
   // save. All those equal to or prior to mLastCheckpoint will have been saved.
   InfallibleVector<size_t, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mShouldSaveCheckpoints;
-
-  // All files that have ever been written to for memory or thread snapshots.
-  InfallibleVector<char*, 1024, AllocPolicy<UntrackedMemoryKind::Generic>> mSnapshotFiles;
 };
 
 static RewindInfo* gRewindInfo;
@@ -87,12 +84,13 @@ RecordReplayInterface_RestoreCheckpointAndResume(const CheckpointId& aCheckpoint
   double start = CurrentTime();
 
   // Rewind heap memory to the target checkpoint, which must have been saved.
-  CheckpointId newCheckpoint = gRewindInfo->mSavedCheckpoints.back();
+  CheckpointId newCheckpoint = gRewindInfo->mSavedCheckpoints.back().mCheckpoint;
   RestoreMemoryToLastSavedCheckpoint();
   while (CheckpointPrecedes(aCheckpoint, newCheckpoint)) {
+    gRewindInfo->mSavedCheckpoints.back().ReleaseContents();
     gRewindInfo->mSavedCheckpoints.popBack();
     RestoreMemoryToLastSavedDiffCheckpoint();
-    newCheckpoint = gRewindInfo->mSavedCheckpoints.back();
+    newCheckpoint = gRewindInfo->mSavedCheckpoints.back().mCheckpoint;
   }
   MOZ_RELEASE_ASSERT(newCheckpoint == aCheckpoint);
 
@@ -108,7 +106,7 @@ RecordReplayInterface_RestoreCheckpointAndResume(const CheckpointId& aCheckpoint
 
   // Finally, let threads restore themselves to their stacks at the checkpoint
   // we are rewinding to.
-  Thread::RestoreAllThreads(newCheckpoint);
+  RestoreAllThreads(gRewindInfo->mSavedCheckpoints.back());
   Unreachable();
 }
 
@@ -178,7 +176,7 @@ RecordReplayInterface_NewCheckpoint(bool aTemporary)
 
     // Save all thread stacks for the checkpoint. If we rewind here from a
     // later point of execution then this will return false.
-    if (Thread::SaveAllThreads(checkpoint)) {
+    if (SaveAllThreads(gRewindInfo->mSavedCheckpoints.back())) {
       PrintSpew("Saved checkpoint #%d:%d %.2fs\n",
                 (int) checkpoint.mNormal, (int) checkpoint.mTemporary,
                 (end - start) / 1000000.0);
@@ -191,7 +189,7 @@ RecordReplayInterface_NewCheckpoint(bool aTemporary)
       // After restoring, make sure all threads have updated their stacks
       // before letting any of them resume execution. Threads might have
       // pointers into each others' stacks.
-      Thread::WaitForIdleThreadsToRestoreTheirStacks();
+      WaitForIdleThreadsToRestoreTheirStacks();
     }
 
     Thread::ResumeIdleThreads();
@@ -248,7 +246,7 @@ EnsureNotDivergedFromRecording()
   if (HasDivergedFromRecording()) {
     MOZ_RELEASE_ASSERT(gUnhandledDivergeAllowed);
     PrintSpew("Unhandled recording divergence, restoring checkpoint...\n");
-    RestoreCheckpointAndResume(gRewindInfo->mSavedCheckpoints.back());
+    RestoreCheckpointAndResume(gRewindInfo->mSavedCheckpoints.back().mCheckpoint);
     Unreachable();
   }
 }
@@ -263,7 +261,7 @@ CheckpointId
 GetLastSavedCheckpoint()
 {
   MOZ_RELEASE_ASSERT(!gRewindInfo->mSavedCheckpoints.empty());
-  return gRewindInfo->mSavedCheckpoints.back();
+  return gRewindInfo->mSavedCheckpoints.back().mCheckpoint;
 }
 
 static bool gMainThreadShouldPause = false;
@@ -353,22 +351,6 @@ bool
 IsActiveChild()
 {
   return gRewindInfo->mIsActiveChild;
-}
-
-void
-AddSnapshotFile(const char* aFilename)
-{
-  char* copy = (char*) AllocateMemory(strlen(aFilename + 1), UntrackedMemoryKind::Generic);
-  strcpy(copy, aFilename);
-  gRewindInfo->mSnapshotFiles.append(copy);
-}
-
-void
-DeleteSnapshotFiles()
-{
-  for (char* filename : gRewindInfo->mSnapshotFiles) {
-    DirectDeleteFile(filename);
-  }
 }
 
 } // namespace recordreplay

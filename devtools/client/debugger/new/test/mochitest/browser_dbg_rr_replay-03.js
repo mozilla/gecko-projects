@@ -11,21 +11,20 @@ async function test() {
 
   let recordingFile = newRecordingFile();
   let recordingTab = gBrowser.addTab(null, { recordExecution: "*" });
-
-  addMessageListener("RecordingFinished", () => {
-    let tabParent = recordingTab.linkedBrowser.frameLoader.tabParent;
-    ok(tabParent, "Found recording tab parent");
-    addMessageListener("SaveRecordingFinished", () => {
-      let replayingTab = gBrowser.addTab(null, { replayExecution: recordingFile });
-      addMessageListener("HitRecordingEndpoint", () => {
-        ok(true, "Replayed to end of recording");
-        finish();
-      });
-      gBrowser.selectedTab = replayingTab;
-    });
-    ok(tabParent.saveRecording(recordingFile), "Saved recording");
-  });
-
   gBrowser.selectedTab = recordingTab;
   openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  await once(Services.ppmm, "RecordingFinished");
+
+  let tabParent = recordingTab.linkedBrowser.frameLoader.tabParent;
+  ok(tabParent, "Found recording tab parent");
+  ok(tabParent.saveRecording(recordingFile), "Saved recording");
+  await once(Services.ppmm, "SaveRecordingFinished");
+
+  let replayingTab = gBrowser.addTab(null, { replayExecution: recordingFile });
+  gBrowser.selectedTab = replayingTab;
+  await once(Services.ppmm, "HitRecordingEndpoint");
+
+  ok(true, "Replayed to end of recording");
+
+  finish();
 }

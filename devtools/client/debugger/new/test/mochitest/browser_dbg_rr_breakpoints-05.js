@@ -5,28 +5,24 @@
 
 // Test hitting breakpoints when rewinding past the point where the breakpoint
 // script was created.
-async function runTest(tab) {
+async function test() {
+  waitForExplicitFinish();
+
+  let tab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  await once(Services.ppmm, "RecordingFinished");
+
   let client = await attachDebugger(tab);
   await client.interrupt();
-  addMessageListener("HitRecordingBeginning", () => runTestFromBeginning(client));
   client.rewind();
-}
+  await once(Services.ppmm, "HitRecordingBeginning");
 
-async function runTestFromBeginning(client) {
   await setBreakpoint(client, "doc_rr_basic.html", 21);
   await resumeToLine(client, 21);
   await checkEvaluateInTopFrame(client, "number", 1);
   await resumeToLine(client, 21);
   await checkEvaluateInTopFrame(client, "number", 2);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  var tab = gBrowser.addTab(null, { recordExecution: "*" });
-  addMessageListener("RecordingFinished", () => runTest(tab));
-
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
 }

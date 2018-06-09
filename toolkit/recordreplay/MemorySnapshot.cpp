@@ -6,6 +6,8 @@
 
 #include "MemorySnapshot.h"
 
+#include "ipc/ChildIPC.h"
+#include "js/ReplayHooks.h"
 #include "mozilla/Maybe.h"
 #include "DirtyMemoryHandler.h"
 #include "InfallibleVector.h"
@@ -27,18 +29,18 @@ namespace recordreplay {
 ///////////////////////////////////////////////////////////////////////////////
 // Memory Snapshots Overview.
 //
-// Checkpoints are periodically saved, storing on disk enough information
+// Checkpoints are periodically saved, storing in memory enough information
 // for the process to restore the contents of all tracked memory as it
 // rewinds to earlier checkpoitns. There are two components to a saved
 // checkpoint:
 //
-// - Stack contents for each thread are completely saved on disk at each
-//   saved checkpoint. This is handled by ThreadSnapshot.cpp
+// - Stack contents for each thread are completely saved on disk at each saved
+//   checkpoint. This is handled by ThreadSnapshot.cpp
 //
-// - Heap and static memory contents (tracked memory) are saved on disk or in
-//   memory as the contents of pages modified before either the the next saved
-//   checkpoint or the current execution point (if this is the last saved
-//   checkpoint). This is handled here.
+// - Heap and static memory contents (tracked memory) are saved in memory as
+//   the contents of pages modified before either the the next saved checkpoint
+//   or the current execution point (if this is the last saved checkpoint).
+//   This is handled here.
 //
 // Heap memory is only tracked when allocated with TrackedMemoryKind.
 //
@@ -57,9 +59,8 @@ namespace recordreplay {
 //    and unprotects the pages.
 //
 // #3 Save Checkpoint B. P0a and P1a, along with any other pages modified
-//    between A and B, become associated with checkpoint A. They may be kept in
-//    memory, or compressed and written out to disk by a snapshot thread
-//    (see below). All modified pages are reprotected.
+//    between A and B, become associated with checkpoint A. All modified pages
+//    are reprotected.
 //
 // #4 Write pages P1 and P2. Again, writing to the pages trips the fault
 //    handler and copies P1b and P2b are created and the pages are unprotected.
@@ -80,14 +81,8 @@ namespace recordreplay {
 // checkpoints. These page copies are initially all in memory. It is the
 // responsibility of the snapshot threads to do the following:
 //
-// 1. When memory pressure gets high (determined by exhausting a preallocated
-//    block of pages used for copies of other pages), the snapshot threads
-//    write out snapshot diffs to disk (oldest first) and frees the in memory
-//    copy that was made.
-//
-// 2. When rewinding to the last saved checkpoint, snapshot threads are used to
-//    restore the original contents of pages, either by using in memory copies
-//    or by reading pages back from disk.
+// 1. When rewinding to the last saved checkpoint, snapshot threads are used to
+//    restore the original contents of pages using their in-memory copies.
 //
 // There are a fixed number of snapshot threads that are spawned when the
 // first checkpoint is saved. Threads are each responsible for distinct sets of
@@ -141,9 +136,9 @@ struct DirtyPage {
   // Base address of the page.
   uint8_t* mBase;
 
-  // Copy of the page at the first checkpoint, nullptr if the copy is not loaded.
-  // Written by the dirty memory handler via HandleDirtyMemoryFault if this is
-  // in the active page set, otherwise accessed by snapshot threads.
+  // Copy of the page at the first checkpoint. Written by the dirty memory
+  // handler via HandleDirtyMemoryFault if this is in the active page set,
+  // otherwise accessed by snapshot threads.
   uint8_t* mOriginal;
 
   bool mExecutable;
@@ -192,8 +187,7 @@ struct SnapshotThreadWorklist {
   size_t mThreadId;
 
   // Sets of pages in the thread's worklist. Each set is for a different diff,
-  // with the oldest checkpoints first. As the thread writes diffs out to disk,
-  // the earliest entries in this vector are erased.
+  // with the oldest checkpoints first.
   InfallibleVector<DirtyPageSet, 256, AllocPolicy<UntrackedMemoryKind::Generic>> mSets;
 };
 
@@ -338,17 +332,6 @@ struct MemoryInfo {
 
   // Whether snapshot threads should idle.
   SnapshotThreadCondition mSnapshotThreadsShouldIdle;
-
-  // Lock protecting state coordinating management of in-memory snapshot pages.
-  SpinLock mSnapshotPagesLock;
-
-  // The number of untracked page copies that are in use by in-memory snapshots.
-  // Protected by mSnapshotPagesLock.
-  size_t mNumSnapshotPages;
-
-  // Whether snapshot threads have been woken up due to excessive pages in use
-  // by in-memory snapshots. Protected by mSnapshotPagesLock.
-  bool mSnapshotPagePressure;
 
   // Counter used by the countdown thread.
   Atomic<size_t, SequentiallyConsistent, Behavior::DontPreserve> mCountdown;
@@ -564,32 +547,10 @@ SnapshotThreadCondition::WaitUntilNoLongerActive()
 // Snapshot Page Allocation
 ///////////////////////////////////////////////////////////////////////////////
 
-// Approximate limit for the memory to use for in-memory snapshot pages.
-static const size_t SnapshotPageMaxMB = 300;
-static const size_t SnapshotPageMaxCount = SnapshotPageMaxMB * 1024 * 1024 / PageSize;
-
-// Lower limit at which to stop writing snapshot pages to disk.
-static const size_t SnapshotPageMinMB = 280;
-static const size_t SnapshotPageMinCount = SnapshotPageMinMB * 1024 * 1024 / PageSize;
-
 // Get a page in untracked memory that can be used as a copy of a tracked page.
 static uint8_t*
 AllocatePageCopy()
 {
-  {
-    AutoSpinLock ex(gMemoryInfo->mSnapshotPagesLock);
-    if (++gMemoryInfo->mNumSnapshotPages >= SnapshotPageMaxCount) {
-      if (!gMemoryInfo->mSnapshotPagePressure) {
-        // Wake up snapshot threads so that they can start writing old diff
-        // pages out to disk.
-        for (size_t i = 0; i < NumSnapshotThreads; i++) {
-          Thread::Notify(gMemoryInfo->mSnapshotWorklists[i].mThreadId);
-        }
-        gMemoryInfo->mSnapshotPagePressure = true;
-      }
-    }
-  }
-
   return (uint8_t*) AllocateMemory(PageSize, UntrackedMemoryKind::PageCopy);
 }
 
@@ -597,14 +558,6 @@ AllocatePageCopy()
 static void
 FreePageCopy(uint8_t* aPage)
 {
-  {
-    AutoSpinLock ex(gMemoryInfo->mSnapshotPagesLock);
-    MOZ_RELEASE_ASSERT(gMemoryInfo->mNumSnapshotPages);
-    if (--gMemoryInfo->mNumSnapshotPages <= SnapshotPageMinCount) {
-      gMemoryInfo->mSnapshotPagePressure = false;
-    }
-  }
-
   DeallocateMemory(aPage, PageSize, UntrackedMemoryKind::PageCopy);
 }
 
@@ -612,35 +565,30 @@ FreePageCopy(uint8_t* aPage)
 // Page Fault Handling
 ///////////////////////////////////////////////////////////////////////////////
 
-// This is an alternative to memmove/memcpy that can be called in areas where
-// faults in write protected memory are not allowed. It's hard to avoid dynamic
-// code loading when calling memmove/memcpy directly.
-static void
-MemoryMove(void* aDst, void* aSrc, size_t aSize)
+void
+MemoryMove(void* aDst, const void* aSrc, size_t aSize)
 {
-  MOZ_ASSERT((size_t)aDst % sizeof(size_t) == 0);
-  MOZ_ASSERT((size_t)aSrc % sizeof(size_t) == 0);
-  MOZ_ASSERT(aSize % sizeof(size_t) == 0);
-  MOZ_ASSERT((size_t)aDst <= (size_t)aSrc || (size_t)aDst >= (size_t)aSrc + aSize);
+  MOZ_RELEASE_ASSERT((size_t)aDst % sizeof(uint32_t) == 0);
+  MOZ_RELEASE_ASSERT((size_t)aSrc % sizeof(uint32_t) == 0);
+  MOZ_RELEASE_ASSERT(aSize % sizeof(uint32_t) == 0);
+  MOZ_RELEASE_ASSERT((size_t)aDst <= (size_t)aSrc || (size_t)aDst >= (size_t)aSrc + aSize);
 
-  size_t* ndst = (size_t*)aDst;
-  size_t* nsrc = (size_t*)aSrc;
-  for (size_t i = 0; i < aSize / sizeof(size_t); i++) {
+  uint32_t* ndst = (uint32_t*)aDst;
+  const uint32_t* nsrc = (const uint32_t*)aSrc;
+  for (size_t i = 0; i < aSize / sizeof(uint32_t); i++) {
     ndst[i] = nsrc[i];
   }
 }
 
-// Similarly, zero out a range of memory without doing anything weird with
-// dynamic code loading.
-static void
+void
 MemoryZero(void* aDst, size_t aSize)
 {
-  MOZ_ASSERT((size_t)aDst % sizeof(size_t) == 0);
-  MOZ_ASSERT(aSize % sizeof(size_t) == 0);
+  MOZ_RELEASE_ASSERT((size_t)aDst % sizeof(uint32_t) == 0);
+  MOZ_RELEASE_ASSERT(aSize % sizeof(uint32_t) == 0);
 
   // Use volatile here to avoid annoying clang optimizations.
-  volatile size_t* ndst = (size_t*)aDst;
-  for (size_t i = 0; i < aSize / sizeof(size_t); i++) {
+  volatile uint32_t* ndst = (uint32_t*)aDst;
+  for (size_t i = 0; i < aSize / sizeof(uint32_t); i++) {
     ndst[i] = 0;
   }
 }
@@ -1219,42 +1167,6 @@ RecordReplayInterface_DeallocateMemory(void* aAddress, size_t aSize, AllocatedMe
 // Snapshot Threads
 ///////////////////////////////////////////////////////////////////////////////
 
-// Write out an index with the address (but not the contents) of all pages
-// modified in a snapshot.
-static void
-SnapshotThreadWriteDirtyPageIndex(UntrackedStream& aStream, DirtyPageSet* aSet)
-{
-  aStream.WriteScalar(aSet->mPages.length());
-  for (const DirtyPage& page : aSet->mPages) {
-    MOZ_RELEASE_ASSERT(page.mBase);
-    aStream.WriteScalar((size_t) page.mBase);
-    aStream.WriteScalar(page.mExecutable);
-  }
-}
-
-// Read back an index written by SnapshotThreadWriteDirtyPageIndex.
-static void
-SnapshotThreadReadDirtyPageIndex(UntrackedStream& aStream, DirtyPageSet* aSet)
-{
-  MOZ_RELEASE_ASSERT(aSet->mPages.empty());
-  size_t count = aStream.ReadScalar();
-  for (size_t i = 0; i < count; i++) {
-    uint8_t* base = (uint8_t*) aStream.ReadScalar();
-    aSet->mPages.emplaceBack(base, nullptr, aStream.ReadScalar());
-  }
-}
-
-template <typename CharBuffer>
-static void
-MemorySnapshotFilename(const CheckpointId& aCheckpoint, size_t aThreadIndex,
-                       CharBuffer& aFilename)
-{
-  size_t nchars = SprintfLiteral(aFilename, "%s_%d_%d_%d", gSnapshotMemoryPrefix,
-                                 (int) aCheckpoint.mNormal, (int) aCheckpoint.mTemporary,
-                                 (int) aThreadIndex);
-  MOZ_RELEASE_ASSERT(nchars < sizeof(aFilename));
-}
-
 // While on a snapshot thread, restore the contents of all pages belonging to
 // this thread which were modified since the last recorded diff snapshot.
 static void
@@ -1262,45 +1174,11 @@ SnapshotThreadRestoreLastDiffSnapshot(SnapshotThreadWorklist* aWorklist)
 {
   CheckpointId checkpoint = GetLastSavedCheckpoint();
 
-  UntrackedFile file;
-  UntrackedStream* stream = nullptr;
-
-  // Any pages which have been written out to disk need to be read back in.
-  // There are two possibilities: either we wrote out this snapshot entirely,
-  // in which case all the pages are on disk and there are no dirty sets in the
-  // worklist, or we were interrupted in the middle of writing this snapshot
-  // out and have written a prefix of the pages (SnapshotThreadMain already
-  // closed the open file).
-  bool useFile = !aWorklist->mSets.length() ||
-                 (!aWorklist->mSets.back().mPages.empty() &&
-                  !aWorklist->mSets.back().mPages[0].mOriginal);
-
-  DirtyPageSet fileSet(checkpoint);
-  if (useFile) {
-    char filename[1024];
-    MemorySnapshotFilename(checkpoint, aWorklist->mThreadIndex, filename);
-    file.Open(filename, UntrackedFile::READ);
-    stream = file.OpenStream(StreamName::Main, 0);
-    SnapshotThreadReadDirtyPageIndex(*stream, &fileSet);
-  }
-
-  // Use the set that is still in memory if available, as some of its pages
-  // might still be in memory as well.
-  DirtyPageSet& set = aWorklist->mSets.empty() ? fileSet : aWorklist->mSets.back();
+  DirtyPageSet& set = aWorklist->mSets.back();
   MOZ_RELEASE_ASSERT(set.mCheckpoint == checkpoint);
 
-  size_t index = 0;
-
-  // Read in any prefix of pages that are on disk.
-  for (index = 0; index < set.mPages.length() && !set.mPages[index].mOriginal; index++) {
-    const DirtyPage& page = set.mPages[index];
-    DirectUnprotectMemory(page.mBase, PageSize, page.mExecutable);
-    stream->ReadBytes(page.mBase, PageSize);
-    DirectWriteProtectMemory(page.mBase, PageSize, page.mExecutable);
-  }
-
-  // Copy the original contents of any remaining pages that are in memory.
-  for (; index < set.mPages.length(); index++) {
+  // Copy the original contents of all pages.
+  for (size_t index = 0; index < set.mPages.length(); index++) {
     const DirtyPage& page = set.mPages[index];
     MOZ_RELEASE_ASSERT(page.mOriginal);
     DirectUnprotectMemory(page.mBase, PageSize, page.mExecutable);
@@ -1324,26 +1202,10 @@ SnapshotThreadMain(void* aArgument)
   SnapshotThreadWorklist* worklist = &gMemoryInfo->mSnapshotWorklists[threadIndex];
   worklist->mThreadIndex = threadIndex;
 
-  // The next page to process in the first snapshot in the worklist. If this is
-  // non-zero then we have started writing out the snapshot diff file.
-  size_t activeIndex = 0;
-
-  // File for all snapshot diffs processed on this thread.
-  UntrackedFile file;
-  UntrackedStream* stream = nullptr;
-
   while (true) {
     // If the main thread is waiting for us to restore the most recent diff,
     // then do so and notify the main thread we finished.
     if (gMemoryInfo->mSnapshotThreadsShouldRestore.IsActive()) {
-      if (worklist->mSets.length() == 1 && activeIndex) {
-        // We have partially written out the pages in the last snapshot. Close
-        // the file now, SnapshotThreadRestoreLastDiffSnapshot will figure out
-        // which parts it needs to read back.
-        file.Close();
-        stream = nullptr;
-        activeIndex = 0;
-      }
       SnapshotThreadRestoreLastDiffSnapshot(worklist);
       gMemoryInfo->mSnapshotThreadsShouldRestore.WaitUntilNoLongerActive();
     }
@@ -1353,57 +1215,8 @@ SnapshotThreadMain(void* aArgument)
       gMemoryInfo->mSnapshotThreadsShouldIdle.WaitUntilNoLongerActive();
     }
 
-    // Idle if there are no snapshots to write out.
-    if (worklist->mSets.empty()) {
-      Thread::WaitNoIdle();
-      continue;
-    }
-
-    // Idle if memory pressure is low. We don't want to be too aggressive about
-    // writing snapshots to disk, to make it faster to restore later and to
-    // avoid unnecessary pressure on the system.
-    //
-    // Read here without locking, this is just a heuristic to keep the number
-    // of snapshot pages in approximately the right range.
-    if (!gMemoryInfo->mSnapshotPagePressure) {
-      Thread::WaitNoIdle();
-      continue;
-    }
-
-    DirtyPageSet* set = &worklist->mSets[0];
-
-    // Open a file for the snapshot if this is the first page being processed.
-    if (activeIndex == 0) {
-      char filename[1024];
-      MemorySnapshotFilename(set->mCheckpoint, threadIndex, filename);
-      AddSnapshotFile(filename);
-
-      file.Open(filename, UntrackedFile::WRITE);
-      stream = file.OpenStream(StreamName::Main, 0);
-      SnapshotThreadWriteDirtyPageIndex(*stream, set);
-    }
-
-    // Write the next page in the snapshot to disk, watching for the degenerate
-    // case when the snapshot's page set is empty.
-    if (activeIndex < set->mPages.length()) {
-      DirtyPage* page = &set->mPages[activeIndex];
-      stream->WriteBytes(page->mOriginal, PageSize);
-      FreePageCopy(page->mOriginal);
-      page->mOriginal = nullptr;
-      activeIndex++;
-    } else {
-      MOZ_RELEASE_ASSERT(activeIndex == 0 && set->mPages.empty());
-    }
-
-    // Close the snapshot file after the last page has been written, and remove
-    // the set from the worklist.
-    if (activeIndex == set->mPages.length()) {
-      file.Close();
-      stream = nullptr;
-
-      worklist->mSets.erase(&worklist->mSets[0]);
-      activeIndex = 0;
-    }
+    // Idle until notified by the main thread.
+    Thread::WaitNoIdle();
   }
 }
 

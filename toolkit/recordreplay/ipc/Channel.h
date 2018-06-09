@@ -48,70 +48,70 @@ namespace recordreplay {
 // all replaying processes must be paused when the recording process is
 // flushing a new index to the file.
 
-#define ForEachMessageType(Macro)                              \
+#define ForEachMessageType(_Macro)                             \
   /* Messages sent from the middleman to the child process. */ \
                                                                \
   /* Sent at startup. */                                       \
-  Macro(Introduction)                                          \
+  _Macro(Introduction)                                         \
                                                                \
   /* Sent to recording processes when exiting. */              \
-  Macro(Terminate)                                             \
+  _Macro(Terminate)                                            \
                                                                \
   /* Flush the current recording to disk. */                   \
-  Macro(FlushRecording)                                        \
+  _Macro(FlushRecording)                                       \
                                                                \
   /* Poke a child that is recording to create an artificial checkpoint, rather than */ \
   /* (potentially) idling indefinitely. This has no effect on a replaying process. */ \
-  Macro(CreateCheckpoint)                                      \
+  _Macro(CreateCheckpoint)                                     \
                                                                \
   /* Debugger JSON messages are initially sent from the parent. The child unpauses */ \
   /* after receiving the message and will pause after it sends a DebuggerResponse. */ \
-  Macro(DebuggerRequest)                                       \
+  _Macro(DebuggerRequest)                                      \
                                                                \
   /* Set or clear a JavaScript breakpoint. */                  \
-  Macro(SetBreakpoint)                                         \
+  _Macro(SetBreakpoint)                                        \
                                                                \
   /* Unpause the child and play execution either to the next point when a */ \
   /* breakpoint is hit, or to the next checkpoint. Resumption may be either */ \
   /* forward or backward. */                                   \
-  Macro(Resume)                                                \
+  _Macro(Resume)                                               \
                                                                \
   /* Rewind to a particular saved checkpoint in the past. */   \
-  Macro(RestoreCheckpoint)                                     \
+  _Macro(RestoreCheckpoint)                                    \
                                                                \
   /* Notify the child whether it is the active child and should send paint and similar */ \
   /* messages to the middleman. */                             \
-  Macro(SetIsActive)                                           \
+  _Macro(SetIsActive)                                          \
                                                                \
   /* Set whether to perform intentional crashes, for testing. */ \
-  Macro(SetAllowIntentionalCrashes)                            \
+  _Macro(SetAllowIntentionalCrashes)                           \
                                                                \
   /* Set whether to save a particular checkpoint. */           \
-  Macro(SetSaveCheckpoint)                                     \
+  _Macro(SetSaveCheckpoint)                                    \
                                                                \
   /* Messages sent from the child process to the middleman. */ \
                                                                \
   /* Sent in response to a FlushRecording, telling the middleman that the flush */ \
   /* has finished. */                                          \
-  Macro(RecordingFlushed)                                      \
+  _Macro(RecordingFlushed)                                     \
                                                                \
   /* A critical error occurred and execution cannot continue. The child will */ \
   /* stop executing after sending this message and will wait to be terminated. */ \
-  Macro(FatalError)                                            \
+  _Macro(FatalError)                                           \
                                                                \
   /* The child's graphics were repainted. */                   \
-  Macro(Paint)                                                 \
+  _Macro(Paint)                                                \
                                                                \
   /* Notify the middleman that a checkpoint or breakpoint was hit. */ \
   /* The child will pause after sending these messages. */     \
-  Macro(HitCheckpoint)                                         \
-  Macro(HitBreakpoint)                                         \
+  _Macro(HitCheckpoint)                                        \
+  _Macro(HitBreakpoint)                                        \
                                                                \
   /* Send a response to a DebuggerRequest message. */          \
-  Macro(DebuggerResponse)                                      \
+  _Macro(DebuggerResponse)                                     \
                                                                \
   /* Notify that the 'AlwaysMarkMajorCheckpoints' directive was invoked. */ \
-  Macro(AlwaysMarkMajorCheckpoints)
+  _Macro(AlwaysMarkMajorCheckpoints)
 
 enum class MessageType
 {
@@ -205,6 +205,16 @@ struct IntroductionMessage : public Message
     MOZ_RELEASE_ASSERT(offset == argsLen);
 
     return res;
+  }
+
+  static IntroductionMessage* RecordReplay(const IntroductionMessage& aMsg) {
+    size_t introductionSize = RecordReplayValue(aMsg.mSize);
+    IntroductionMessage* msg = (IntroductionMessage*) malloc(introductionSize);
+    if (IsRecording()) {
+      memcpy(msg, &aMsg, introductionSize);
+    }
+    RecordReplayBytes(msg, introductionSize);
+    return msg;
   }
 };
 
@@ -389,6 +399,10 @@ public:
   // called on the channel's message thread.
   typedef std::function<void(Message*)> MessageHandler;
 
+  // The recording channel is opened at startup and is initialized differently
+  // from other channels.
+  static const size_t RecordingId = 0;
+
 private:
   // ID for this channel, unique for the middleman.
   size_t mId;
@@ -436,11 +450,11 @@ public:
   void SendMessage(const Message& aMsg);
 };
 
+// Command line option used to specify the middleman pid for a child process.
+static const char* gMiddlemanPidOption = "-middlemanPid";
+
 // Command line option used to specify the channel ID for a child process.
 static const char* gChannelIDOption = "-recordReplayChannelID";
-
-static const int32_t GraphicsMessageId = 42;
-static const size_t GraphicsMemorySize = 4096 * 4096 * 4;
 
 } // namespace recordreplay
 } // namespace mozilla

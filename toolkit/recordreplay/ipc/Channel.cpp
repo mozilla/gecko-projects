@@ -11,8 +11,10 @@
 #include "Thread.h"
 
 #include "MainThreadUtils.h"
-
+#include "nsXULAppAPI.h"
 #include "base/process_util.h"
+#include "mozilla/dom/ContentChild.h"
+#include "mozilla/ipc/FileDescriptor.h"
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -28,6 +30,29 @@ GetSocketAddress(struct sockaddr_un* addr, base::ProcessId aMiddlemanPid, size_t
   MOZ_RELEASE_ASSERT(n >= 0 && n < (int) sizeof(addr->sun_path));
   addr->sun_len = SUN_LEN(addr);
 }
+
+namespace parent {
+
+void
+OpenChannel(base::ProcessId aMiddlemanPid, uint32_t aChannelId,
+            ipc::FileDescriptor* aConnection)
+{
+  MOZ_RELEASE_ASSERT(IsMiddleman() || XRE_IsParentProcess());
+
+  int connectionFd = socket(AF_UNIX, SOCK_STREAM, 0);
+  MOZ_RELEASE_ASSERT(connectionFd > 0);
+
+  struct sockaddr_un addr;
+  GetSocketAddress(&addr, aMiddlemanPid, aChannelId);
+
+  int rv = bind(connectionFd, (sockaddr*) &addr, SUN_LEN(&addr));
+  MOZ_RELEASE_ASSERT(rv >= 0);
+
+  *aConnection = ipc::FileDescriptor(connectionFd);
+  close(connectionFd);
+}
+
+} // namespace parent
 
 struct HelloMessage
 {
@@ -45,8 +70,7 @@ Channel::Channel(size_t aId, const MessageHandler& aHandler)
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   if (IsRecordingOrReplaying()) {
-    MOZ_ASSERT(IsRecordingOrReplaying());
-    MOZ_ASSERT(AreThreadEventsPassedThrough());
+    MOZ_RELEASE_ASSERT(AreThreadEventsPassedThrough());
 
     mFd = socket(AF_UNIX, SOCK_STREAM, 0);
     MOZ_RELEASE_ASSERT(mFd > 0);
@@ -61,16 +85,19 @@ Channel::Channel(size_t aId, const MessageHandler& aHandler)
   } else {
     MOZ_RELEASE_ASSERT(IsMiddleman());
 
-    mConnectionFd = socket(AF_UNIX, SOCK_STREAM, 0);
-    MOZ_RELEASE_ASSERT(mConnectionFd > 0);
+    ipc::FileDescriptor connection;
+    if (mId == RecordingId) {
+      // When starting the recording child process we have not done enough
+      // initialization to ask for a channel from the parent, but have also not
+      // started the sandbox so we can do it ourselves.
+      parent::OpenChannel(base::GetCurrentProcId(), mId, &connection);
+    } else {
+      dom::ContentChild::GetSingleton()->SendOpenRecordReplayChannel(mId, &connection);
+      MOZ_RELEASE_ASSERT(connection.IsValid());
+    }
 
-    struct sockaddr_un addr;
-    GetSocketAddress(&addr, base::GetCurrentProcId(), mId);
-
-    int rv = bind(mConnectionFd, (sockaddr*) &addr, SUN_LEN(&addr));
-    MOZ_RELEASE_ASSERT(rv >= 0);
-
-    rv = listen(mConnectionFd, 1);
+    mConnectionFd = connection.ClonePlatformHandle().release();
+    int rv = listen(mConnectionFd, 1);
     MOZ_RELEASE_ASSERT(rv >= 0);
   }
 
@@ -153,7 +180,7 @@ Message*
 Channel::WaitForMessage()
 {
   if (!mMessageBuffer.length()) {
-    mMessageBuffer.appendN(0, 1048576);
+    mMessageBuffer.appendN(0, PageSize);
   }
 
   size_t messageSize = 0;
@@ -182,7 +209,6 @@ Channel::WaitForMessage()
         return nullptr;
       }
       PrintSpew("Channel disconnected, exiting...\n");
-      DeleteSnapshotFiles();
       _exit(0);
     }
 
@@ -216,6 +242,9 @@ WideCharString(const char16_t* aBuffer, size_t aBufferSize)
 void
 Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
 {
+  if (!SpewEnabled()) {
+    return;
+  }
   AutoEnsurePassThroughThreadEvents pt;
   char* data = nullptr;
   switch (aMsg.mType) {

@@ -6,6 +6,8 @@
 
 #include "Trigger.h"
 
+#include "ipc/ChildIPC.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/RecordReplay.h"
 #include "InfallibleVector.h"

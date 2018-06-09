@@ -54,13 +54,14 @@ enum class StreamName
   Count
 };
 
-template <AllocatedMemoryKind Kind>
-class StreamTemplate
+class File;
+
+class Stream
 {
-  friend class FileTemplate<Kind>;
+  friend class File;
 
   // File this stream belongs to.
-  FileTemplate<Kind>* mFile;
+  File* mFile;
 
   // Prefix name for this stream.
   StreamName mName;
@@ -71,7 +72,7 @@ class StreamTemplate
 
   // When writing, all chunks that have been flushed to disk. When reading, all
   // chunks in the entire stream.
-  InfallibleVector<StreamChunkLocation, 1, AllocPolicy<Kind>> mChunks;
+  InfallibleVector<StreamChunkLocation> mChunks;
 
   // Data buffer.
   char* mBuffer;
@@ -104,7 +105,7 @@ class StreamTemplate
   // flushed.
   size_t mFlushedChunks;
 
-  StreamTemplate(FileTemplate<Kind>* aFile, StreamName aName, size_t aNameIndex)
+  Stream(File* aFile, StreamName aName, size_t aNameIndex)
     : mFile(aFile)
     , mName(aName)
     , mNameIndex(aNameIndex)
@@ -119,13 +120,9 @@ class StreamTemplate
     , mFlushedChunks(0)
   {}
 
-  ~StreamTemplate() {
-    if (mBuffer) {
-      mFile->DeallocateMemory(mBuffer, mBufferSize);
-    }
-    if (mBallast) {
-      mFile->DeallocateMemory(mBallast, mBallastSize);
-    }
+  ~Stream() {
+    delete[] mBuffer;
+    delete[] mBallast;
   }
 
 public:
@@ -189,11 +186,7 @@ private:
   static size_t BallastMaxSize();
 };
 
-typedef StreamTemplate<TrackedMemoryKind> Stream;
-typedef StreamTemplate<UntrackedMemoryKind::File> UntrackedStream;
-
-template <AllocatedMemoryKind Kind>
-class FileTemplate
+class File
 {
 public:
   enum Mode {
@@ -201,12 +194,9 @@ public:
     READ
   };
 
-  friend class StreamTemplate<Kind>;
+  friend class Stream;
 
 private:
-  // Name of the file being accessed.
-  char* mFilename;
-
   // Open file handle, or 0 if closed.
   FileHandle mFd;
 
@@ -220,7 +210,7 @@ private:
   uint64_t mLastIndexOffset;
 
   // All streams in this file, indexed by stream name and name index.
-  typedef InfallibleVector<StreamTemplate<Kind>*, 1, AllocPolicy<Kind>> StreamVector;
+  typedef InfallibleVector<Stream*> StreamVector;
   StreamVector mStreams[(size_t) StreamName::Count];
 
   // Lock protecting access to this file.
@@ -231,12 +221,14 @@ private:
   ReadWriteSpinLock mStreamLock;
 
   void Clear() {
-    mFilename = nullptr;
     mFd = 0;
     mMode = READ;
     mWriteOffset = 0;
     mLastIndexOffset = 0;
     for (auto& vector : mStreams) {
+      for (auto stream : vector) {
+        delete stream;
+      }
       vector.clear();
     }
     PodZero(&mLock);
@@ -244,22 +236,20 @@ private:
   }
 
 public:
-  FileTemplate() { Clear(); }
-  ~FileTemplate() { Close(); }
+  File() { Clear(); }
+  ~File() { Close(); }
 
-  bool Open(const char* aFilename, Mode aMode);
+  bool Open(const char* aName, Mode aMode);
   void Close();
 
   bool OpenForWriting() const { return mFd && mMode == WRITE; }
   bool OpenForReading() const { return mFd && mMode == READ; }
 
-  StreamTemplate<Kind>* OpenStream(StreamName aName, size_t aNameIndex);
-
-  const char* Filename() { return mFilename; }
+  Stream* OpenStream(StreamName aName, size_t aNameIndex);
 
   // Prevent/allow other threads to write to streams in this file.
-  void PreventStreamWrites() { mStreamLock.Lock(/* aRead = */ false); }
-  void AllowStreamWrites() { mStreamLock.Unlock(/* aRead = */ false); }
+  void PreventStreamWrites() { mStreamLock.WriteLock(); }
+  void AllowStreamWrites() { mStreamLock.WriteUnlock(); }
 
   // Flush any changes since the last Flush() call to disk, returning whether
   // there were such changes.
@@ -274,24 +264,14 @@ public:
   // Read any data added to the file by a Flush() call. aUpdatedStreams is
   // optional and filled in with streams whose contents have changed, and may
   // have duplicates.
-  ReadIndexResult ReadNextIndex(InfallibleVector<StreamTemplate<Kind>*>* aUpdatedStreams);
+  ReadIndexResult ReadNextIndex(InfallibleVector<Stream*>* aUpdatedStreams);
 
 private:
-  void SetFilename(const char* aFilename);
-
   StreamChunkLocation WriteChunk(const char* aStart,
                                  size_t aCompressedSize, size_t aDecompressedSize,
                                  bool aTakeLock);
   void ReadChunk(char* aDest, const StreamChunkLocation& aChunk);
-
-  char* AllocateMemory(size_t aSize);
-  void DeallocateMemory(void* aBuf, size_t aSize);
 };
-
-typedef FileTemplate<TrackedMemoryKind> File;
-typedef FileTemplate<UntrackedMemoryKind::File> UntrackedFile;
-
-void InitializeFiles(const char* aTempFile);
 
 } // namespace recordreplay
 } // namespace mozilla

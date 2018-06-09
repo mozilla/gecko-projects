@@ -147,6 +147,12 @@ namespace detail {
 /*
  * Structure which can be used to preserve the ordering of atomic accesses
  * when recording or replaying an execution, depending on the Recording enum.
+ *
+ * Atomic access ordering is preserved by default when recording/replaying.
+ * This should be overridden for atomics that can be accessed in code that
+ * runs non-deterministically when recording/replaying, such as during GC, the
+ * JS interrupt callback, or code that is affected by JIT compilation or
+ * debugger activity.
  */
 template<recordreplay::Behavior Recording> struct AutoRecordAtomicAccess;
 

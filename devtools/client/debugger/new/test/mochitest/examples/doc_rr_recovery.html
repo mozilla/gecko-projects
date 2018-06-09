@@ -19,7 +19,7 @@ function f() {
 function updateNumber() {
   number++;
   document.getElementById("maindiv").innerHTML = "Number: " + number;
-  recordReplayDirective(/* MaybeCrash */ 2);
+  SpecialPowers.Cu.recordReplayDirective(/* MaybeCrash */ 2);
 }
 window.setTimeout(f, 1);
 </script>

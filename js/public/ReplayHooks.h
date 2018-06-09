@@ -101,7 +101,7 @@ struct ExecutionPoint
     ExecutionPosition position;
 
     ExecutionPoint()
-      : checkpoint(mozilla::recordreplay::InvalidCheckpointId)
+      : checkpoint(mozilla::recordreplay::CheckpointId::Invalid)
       , progress(0)
     {}
 

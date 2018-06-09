@@ -7,7 +7,6 @@
 use context::StyleSystemOptions;
 use gecko_bindings::bindings::{Gecko_RegisterProfilerThread, Gecko_UnregisterProfilerThread};
 use gecko_bindings::bindings::Gecko_SetJemallocThreadLocalArena;
-use gecko_bindings::bindings::Gecko_IsRecordingOrReplaying;
 use num_cpus;
 use parallel::STYLE_THREAD_STACK_SIZE_KB;
 use rayon;
@@ -78,15 +77,6 @@ lazy_static! {
             let force_pool = env::var("FORCE_STYLO_THREAD_POOL")
                 .ok().map_or(false, |s| s.parse::<usize>().expect("invalid FORCE_STYLO_THREAD_POOL value") == 1);
             if !force_pool {
-                num_threads = 0;
-            }
-        }
-
-        // If we are recording or replaying this execution, never create a
-        // thread pool. Rayon's threads use lock-free atomics to synchronize in
-        // some places, which are not yet instrumented for use with Web Replay.
-        unsafe {
-            if Gecko_IsRecordingOrReplaying() {
                 num_threads = 0;
             }
         }

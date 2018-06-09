@@ -149,6 +149,9 @@ class nsPipeInputStream final
   , public nsIBufferedInputStream
 {
 public:
+  // Pipe input streams preserve their refcount changes when record/replaying,
+  // as otherwise the thread which destroys the stream may vary between
+  // recording and replaying.
   NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
   NS_DECL_NSIINPUTSTREAM
   NS_DECL_NSIASYNCINPUTSTREAM
@@ -300,6 +303,8 @@ public:
   friend class nsPipeOutputStream;
   friend class AutoReadSegment;
 
+  // As for nsPipeInputStream, preserve refcount changes when recording or
+  // replaying.
   NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
   NS_DECL_NSIPIPE
 

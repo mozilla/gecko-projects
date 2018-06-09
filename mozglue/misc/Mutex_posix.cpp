@@ -68,7 +68,7 @@ mozilla::detail::MutexImpl::MutexImpl(recordreplay::Behavior aRecorded)
 {
   pthread_mutexattr_t* attrp = nullptr;
 
-  mozilla::Maybe<mozilla::recordreplay::AutoPassThroughThreadEvents> pt;
+  mozilla::Maybe<mozilla::recordreplay::AutoEnsurePassThroughThreadEvents> pt;
   if (aRecorded == recordreplay::Behavior::DontPreserve) {
     pt.emplace();
   }

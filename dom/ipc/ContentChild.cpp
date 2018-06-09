@@ -666,7 +666,7 @@ ContentChild::Init(MessageLoop* aIOLoop,
   // Middleman processes use a special channel for forwarding messages to
   // their own children.
   if (recordreplay::IsMiddleman()) {
-    SetIPCChannel(recordreplay::parent::ChannelToUIProcess());
+    SetMiddlemanIPCChannel(recordreplay::parent::ChannelToUIProcess());
   }
 
   if (!Open(aChannel, aParentPid, aIOLoop)) {
@@ -3756,9 +3756,9 @@ ContentChild::RecvAddDynamicScalars(nsTArray<DynamicScalarDefinition>&& aDefs)
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvSaveRecording(const nsCString& aFilename)
+ContentChild::RecvSaveRecording(const FileDescriptor& aFile)
 {
-  recordreplay::parent::SaveRecording(aFilename);
+  recordreplay::parent::SaveRecording(aFile);
   return IPC_OK();
 }
 

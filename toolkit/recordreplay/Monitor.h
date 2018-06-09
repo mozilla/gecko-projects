@@ -7,59 +7,42 @@
 #ifndef mozilla_toolkit_recordreplay_Monitor_h
 #define mozilla_toolkit_recordreplay_Monitor_h
 
-#include "prcvar.h"
-
-#include <pthread.h>
-
-#include "mozilla/TimeStamp.h"
+#include "mozilla/PlatformConditionVariable.h"
 
 namespace mozilla {
 namespace recordreplay {
 
-// Simple wrapper around a PRLock and PRCondVar. This is a lighter weight
+// Simple wrapper around mozglue mutexes and condvars. This is a lighter weight
 // abstraction than mozilla::Monitor and has simpler interactions with the
 // record/replay system.
-class Monitor
+class Monitor : public detail::MutexImpl
 {
 public:
-  Monitor() {
-    AutoEnsurePassThroughThreadEvents pt;
-    mLock = PR_NewLock();
-    mCondVar = PR_NewCondVar(mLock);
-  }
+  Monitor()
+    : detail::MutexImpl(Behavior::DontPreserve)
+  {}
 
-  ~Monitor() {
-    PR_DestroyLock(mLock);
-    PR_DestroyCondVar(mCondVar);
-  }
-
-  void Lock() { PR_Lock(mLock); }
-  void Unlock() { PR_Unlock(mLock); }
-  void Wait() { PR_WaitCondVar(mCondVar, PR_INTERVAL_NO_TIMEOUT); }
-  void Notify() { PR_NotifyCondVar(mCondVar); }
-  void NotifyAll() { PR_NotifyAllCondVar(mCondVar); }
+  void Lock() { detail::MutexImpl::lock(); }
+  void Unlock() { detail::MutexImpl::unlock(); }
+  void Wait() { mCondVar.wait(*this); }
+  void Notify() { mCondVar.notify_one(); }
+  void NotifyAll() { mCondVar.notify_all(); }
 
   void WaitUntil(TimeStamp aTime) {
     AutoEnsurePassThroughThreadEvents pt;
-    TimeStamp now = TimeStamp::Now();
-    if (now < aTime) {
-      size_t milliseconds = (aTime - now).ToMilliseconds();
-      PR_WaitCondVar(mCondVar, PR_MillisecondsToInterval(milliseconds));
-    }
+    mCondVar.wait_for(*this, aTime - TimeStamp::Now());
   }
 
 private:
-  PRLock* mLock;
-  PRCondVar* mCondVar;
+  detail::ConditionVariableImpl mCondVar;
 };
 
 // RAII class to lock a monitor.
 struct MOZ_RAII MonitorAutoLock
 {
-  explicit MonitorAutoLock(Monitor& aMonitor MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit MonitorAutoLock(Monitor& aMonitor)
     : mMonitor(aMonitor)
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     mMonitor.Lock();
   }
 
@@ -69,17 +52,15 @@ struct MOZ_RAII MonitorAutoLock
   }
 
 private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   Monitor& mMonitor;
 };
 
 // RAII class to unlock a monitor.
 struct MOZ_RAII MonitorAutoUnlock
 {
-  explicit MonitorAutoUnlock(Monitor& aMonitor MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit MonitorAutoUnlock(Monitor& aMonitor)
     : mMonitor(aMonitor)
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     mMonitor.Unlock();
   }
 
@@ -89,7 +70,6 @@ struct MOZ_RAII MonitorAutoUnlock
   }
 
 private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   Monitor& mMonitor;
 };
 

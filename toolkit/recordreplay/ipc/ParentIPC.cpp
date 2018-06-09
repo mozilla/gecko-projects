@@ -10,14 +10,9 @@
 #include "ParentInternal.h"
 
 #include "base/task.h"
-#include "chrome/common/mach_ipc_mac.h"
 #include "ipc/Channel.h"
 #include "js/Proxy.h"
-#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
-#include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/layers/CompositorBridgeChild.h"
-#include "mozilla/ipc/IOThreadChild.h"
 #include "InfallibleVector.h"
 #include "Monitor.h"
 #include "ProcessRecordReplay.h"
@@ -55,36 +50,6 @@ SaveAllRecordingsDirectory()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Preferences
-///////////////////////////////////////////////////////////////////////////////
-
-static bool gPreferencesLoaded;
-static bool gRewindingEnabled;
-
-static void
-PreferencesLoaded()
-{
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-
-  MOZ_RELEASE_ASSERT(!gPreferencesLoaded);
-  gPreferencesLoaded = true;
-
-  gRewindingEnabled = Preferences::GetBool("devtools.recordreplay.enableRewinding");
-
-  // Force-disable rewinding and saving checkpoints with an env var for testing.
-  if (getenv("NO_REWIND")) {
-    gRewindingEnabled = false;
-  }
-}
-
-bool
-CanRewind()
-{
-  MOZ_RELEASE_ASSERT(gPreferencesLoaded);
-  return gRewindingEnabled;
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // Child Roles
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -99,16 +64,26 @@ static const double MajorCheckpointSeconds = 2;
 //
 // At any time there is one active child: the process which the user is
 // interacting with. This may be any of the two or three children in existence,
-// depending on the user's behavior. Below are some scenarios showing the state
-// we attempt to keep the children in, and ways in which the active process
-// switches from one to another.
+// depending on the user's behavior. The other processes do not interact with
+// the user: inactive recording processes are inert, and sit idle until
+// recording is ready to resume, while inactive replaying processes are on
+// standby, staying close to the active process in the recording's execution
+// space and saving checkpoints in case the user starts rewinding.
+//
+// Below are some scenarios showing the state we attempt to keep the children
+// in, and ways in which the active process switches from one to another.
+// The execution diagrams show the position of each process, with '*' and '-'
+// indicating checkpoints the process reached and, respectively, whether
+// the checkpoint was saved or not.
 //
 // When the recording process is actively recording, flushes are issued to it
-// every FlushSeconds to keep the recording reasonably current. Additionally,
-// one replaying process saves a checkpoint every MajorCheckpointSeconds
-// with the process saving the checkpoint alternating back and forth so that
-// individual processes save checkpoints every MajorCheckpointSeconds*2. These
-// are the major checkpoints for each replaying process.
+// every FlushSeconds to keep the recording reasonably current and allow the
+// replaying processes to stay behind but close to the position of the
+// recording process. Additionally, one replaying process saves a checkpoint
+// every MajorCheckpointSeconds with the process saving the checkpoint
+// alternating back and forth so that individual processes save checkpoints
+// every MajorCheckpointSeconds*2. These are the major checkpoints for each
+// replaying process.
 //
 // Active  Recording:    -----------------------
 // Standby Replaying #1: *---------*---------*
@@ -147,7 +122,7 @@ static const double MajorCheckpointSeconds = 2;
 // Active  Replaying #2: -----*---------**
 //
 // Rewinding continues in this manner, alternating back and forth between the
-// replaying process as the user continues going back in time.
+// replaying processes as the user continues going back in time.
 //
 // Inert   Recording:    -----------------------
 // Active  Replaying #1: *---------**
@@ -192,43 +167,35 @@ static const double MajorCheckpointSeconds = 2;
 // Standby Replaying #2: -----*****-----***-------*---------*--
 
 // The current active child.
-static ChildProcess* gActiveChild;
+static ChildProcessInfo* gActiveChild;
 
 // The single recording child process, or null.
-static ChildProcess* gRecordingChild;
+static ChildProcessInfo* gRecordingChild;
 
 // The two replaying child processes, null if they haven't been spawned yet.
 // When rewinding is disabled, there is only a single replaying child, and zero
 // replaying children if there is a recording child.
-static ChildProcess* gFirstReplayingChild;
-static ChildProcess* gSecondReplayingChild;
+static ChildProcessInfo* gFirstReplayingChild;
+static ChildProcessInfo* gSecondReplayingChild;
 
-// Whether to delete the recording file when finishing.
-static bool gRecordingFileIsTemporary;
-
-// Terminate all children and kill this process.
-static void
+void
 Shutdown()
 {
-  if (gRecordingFileIsTemporary) {
-    DirectDeleteFile(gRecordingFilename);
-  }
-
   delete gRecordingChild;
   delete gFirstReplayingChild;
   delete gSecondReplayingChild;
   _exit(0);
 }
 
-static ChildProcess*
-OtherReplayingChild(ChildProcess* aChild)
+static ChildProcessInfo*
+OtherReplayingChild(ChildProcessInfo* aChild)
 {
   MOZ_RELEASE_ASSERT(!aChild->IsRecording() && gFirstReplayingChild && gSecondReplayingChild);
   return aChild == gFirstReplayingChild ? gSecondReplayingChild : gFirstReplayingChild;
 }
 
 static void
-ForEachReplayingChild(const std::function<void(ChildProcess*)>& aCallback)
+ForEachReplayingChild(const std::function<void(ChildProcessInfo*)>& aCallback)
 {
   if (gFirstReplayingChild) {
     aCallback(gFirstReplayingChild);
@@ -241,7 +208,7 @@ ForEachReplayingChild(const std::function<void(ChildProcess*)>& aCallback)
 static void
 PokeChildren()
 {
-  ForEachReplayingChild([=](ChildProcess* aChild) {
+  ForEachReplayingChild([=](ChildProcessInfo* aChild) {
       if (aChild->IsPaused()) {
         aChild->Role()->Poke();
       }
@@ -255,7 +222,7 @@ static void RecvRecordingFlushed();
 static void RecvAlwaysMarkMajorCheckpoints();
 
 // The role taken by the active child.
-class ChildRoleActive : public ChildRole
+class ChildRoleActive final : public ChildRole
 {
 public:
   ChildRoleActive()
@@ -269,7 +236,7 @@ public:
 
     // Always run forward from the primordial checkpoint. Otherwise, the
     // debugger hooks below determine how the active child changes.
-    if (mProcess->LastCheckpoint() == InvalidCheckpointId) {
+    if (mProcess->LastCheckpoint() == CheckpointId::Invalid) {
       mProcess->SendMessage(ResumeMessage(/* aForward = */ true));
     }
   }
@@ -306,13 +273,20 @@ ActiveChildIsRecording()
   return gActiveChild->IsRecording();
 }
 
+ChildProcessInfo*
+ActiveRecordingChild()
+{
+  MOZ_RELEASE_ASSERT(ActiveChildIsRecording());
+  return gActiveChild;
+}
+
 // The last checkpoint included in the recording.
 static size_t gLastRecordingCheckpoint;
 
 // The role taken by replaying children trying to stay close to the active
 // child and save either major or intermediate checkpoints, depending on
 // whether the active child is paused or rewinding.
-class ChildRoleStandby : public ChildRole
+class ChildRoleStandby final : public ChildRole
 {
 public:
   ChildRoleStandby()
@@ -334,7 +308,7 @@ public:
 };
 
 // The role taken by a recording child while another child is active.
-class ChildRoleInert : public ChildRole
+class ChildRoleInert final : public ChildRole
 {
 public:
   ChildRoleInert()
@@ -350,11 +324,11 @@ public:
   }
 };
 
-// Get the last major checkpoint for a process at or before aId, or InvalidCheckpointId.
+// Get the last major checkpoint for a process at or before aId, or CheckpointId::Invalid.
 static size_t
-LastMajorCheckpointPreceding(ChildProcess* aChild, size_t aId)
+LastMajorCheckpointPreceding(ChildProcessInfo* aChild, size_t aId)
 {
-  size_t last = InvalidCheckpointId;
+  size_t last = CheckpointId::Invalid;
   for (size_t majorCheckpoint : aChild->MajorCheckpoints()) {
     if (majorCheckpoint > aId) {
       break;
@@ -366,7 +340,7 @@ LastMajorCheckpointPreceding(ChildProcess* aChild, size_t aId)
 
 // Get the replaying process responsible for saving aId when rewinding: the one
 // with the most recent major checkpoint preceding aId.
-static ChildProcess*
+static ChildProcessInfo*
 ReplayingChildResponsibleForSavingCheckpoint(size_t aId)
 {
   MOZ_RELEASE_ASSERT(CanRewind() && gFirstReplayingChild && gSecondReplayingChild);
@@ -382,12 +356,14 @@ ReplayingChildResponsibleForSavingCheckpoint(size_t aId)
 // rewind to.
 static bool ActiveChildIsPausedOrRewinding();
 
+// Notify a child it does not need to save aCheckpoint, unless it is a major
+// checkpoint for the child.
 static void
-MaybeClearSavedNonMajorCheckpoint(ChildProcess* aChild, size_t aCheckpoint)
+ClearIfSavedNonMajorCheckpoint(ChildProcessInfo* aChild, size_t aCheckpoint)
 {
   if (aChild->ShouldSaveCheckpoint(aCheckpoint) &&
       !aChild->IsMajorCheckpoint(aCheckpoint) &&
-      aCheckpoint != FirstCheckpointId)
+      aCheckpoint != CheckpointId::First)
   {
     aChild->SendMessage(SetSaveCheckpointMessage(aCheckpoint, false));
   }
@@ -418,8 +394,14 @@ ChildRoleStandby::Poke()
 
     // If there is no major checkpoint prior to the active child's position,
     // just idle.
-    if (!lastMajorCheckpoint) {
+    if (lastMajorCheckpoint == CheckpointId::Invalid) {
       return;
+    }
+
+    // If we haven't reached the last major checkpoint, we need to run forward
+    // without saving intermediate checkpoints.
+    if (mProcess->LastCheckpoint() < lastMajorCheckpoint) {
+      break;
     }
 
     // The endpoint of the range is the checkpoint prior to either the active
@@ -427,14 +409,9 @@ ChildRoleStandby::Poke()
     // major checkpoint.
     size_t otherMajorCheckpoint =
       LastMajorCheckpointPreceding(OtherReplayingChild(mProcess), targetCheckpoint);
-    if (otherMajorCheckpoint > lastMajorCheckpoint && otherMajorCheckpoint <= targetCheckpoint) {
+    if (otherMajorCheckpoint > lastMajorCheckpoint) {
+      MOZ_RELEASE_ASSERT(otherMajorCheckpoint <= targetCheckpoint);
       targetCheckpoint = otherMajorCheckpoint - 1;
-    }
-
-    // If we haven't reached the last major checkpoint, we need to run forward
-    // without saving intermediate checkpoints.
-    if (mProcess->LastCheckpoint() < lastMajorCheckpoint) {
-      break;
     }
 
     // Find the first checkpoint in the fill range which we have not saved.
@@ -451,8 +428,10 @@ ChildRoleStandby::Poke()
       return;
     }
 
-    // Since we always save major checkpoints, we must have saved the
-    // checkpoint prior to the missing one and can restore it.
+    // We must have saved the checkpoint prior to the missing one and can
+    // restore it. missingCheckpoint cannot be lastMajorCheckpoint, because we
+    // always save major checkpoints, and the loop above checked that all
+    // prior checkpoints going back to lastMajorCheckpoint have been saved.
     size_t restoreTarget = missingCheckpoint.ref() - 1;
     MOZ_RELEASE_ASSERT(mProcess->HasSavedCheckpoint(restoreTarget));
 
@@ -462,10 +441,12 @@ ChildRoleStandby::Poke()
       return;
     }
 
-    // Otherwise, run forward to the next checkpoint and save it.
+    // Make sure the process will save the next checkpoint.
     if (!mProcess->ShouldSaveCheckpoint(missingCheckpoint.ref())) {
       mProcess->SendMessage(SetSaveCheckpointMessage(missingCheckpoint.ref(), true));
     }
+
+    // Run forward to the next checkpoint.
     mProcess->SendMessage(ResumeMessage(/* aForward = */ true));
     return;
   } while (false);
@@ -474,7 +455,7 @@ ChildRoleStandby::Poke()
   // checkpoint included in the on-disk recording. Only save major checkpoints.
   if ((mProcess->LastCheckpoint() < gActiveChild->LastCheckpoint()) &&
       (!gRecordingChild || mProcess->LastCheckpoint() < gLastRecordingCheckpoint)) {
-    MaybeClearSavedNonMajorCheckpoint(mProcess, mProcess->LastCheckpoint() + 1);
+    ClearIfSavedNonMajorCheckpoint(mProcess, mProcess->LastCheckpoint() + 1);
     mProcess->SendMessage(ResumeMessage(/* aForward = */ true));
   }
 }
@@ -493,7 +474,7 @@ static TimeDuration gTimeSinceLastFlush;
 static TimeDuration gTimeSinceLastMajorCheckpoint;
 
 // The replaying process that was given the last major checkpoint.
-static ChildProcess* gLastAssignedMajorCheckpoint;
+static ChildProcessInfo* gLastAssignedMajorCheckpoint;
 
 // For testing, mark new major checkpoints as frequently as possible.
 static bool gAlwaysMarkMajorCheckpoints;
@@ -505,12 +486,12 @@ RecvAlwaysMarkMajorCheckpoints()
 }
 
 static void
-AssignMajorCheckpoint(ChildProcess* aChild, size_t aId)
+AssignMajorCheckpoint(ChildProcessInfo* aChild, size_t aId)
 {
   PrintSpew("AssignMajorCheckpoint: Process %d Checkpoint %d\n",
             (int) aChild->GetId(), (int) aId);
   aChild->AddMajorCheckpoint(aId);
-  if (aId != FirstCheckpointId) {
+  if (aId != CheckpointId::First) {
     aChild->WaitUntilPaused();
     aChild->SendMessage(SetSaveCheckpointMessage(aId, true));
   }
@@ -532,7 +513,7 @@ UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
 
     // Occasionally flush while recording so replaying processes stay
     // reasonably current.
-    if (aMsg.mCheckpointId == FirstCheckpointId ||
+    if (aMsg.mCheckpointId == CheckpointId::First ||
         gTimeSinceLastFlush >= TimeDuration::FromSeconds(FlushSeconds))
     {
       FlushRecording();
@@ -547,7 +528,7 @@ UpdateCheckpointTimes(const HitCheckpointMessage& aMsg)
     // Alternate back and forth between assigning major checkpoints to the
     // two replaying processes.
     MOZ_RELEASE_ASSERT(gLastAssignedMajorCheckpoint);
-    ChildProcess* child = OtherReplayingChild(gLastAssignedMajorCheckpoint);
+    ChildProcessInfo* child = OtherReplayingChild(gLastAssignedMajorCheckpoint);
     AssignMajorCheckpoint(child, aMsg.mCheckpointId + 1);
     gTimeSinceLastMajorCheckpoint = 0;
   }
@@ -561,45 +542,92 @@ static void
 SpawnRecordingChild()
 {
   MOZ_RELEASE_ASSERT(!gRecordingChild && !gFirstReplayingChild && !gSecondReplayingChild);
-  gRecordingChild = new ChildProcess(new ChildRoleActive(), /* aRecording = */ true);
+  gRecordingChild =
+    new ChildProcessInfo(MakeUnique<ChildRoleActive>(), /* aRecording = */ true);
 }
 
 static void
 SpawnSingleReplayingChild()
 {
   MOZ_RELEASE_ASSERT(!gRecordingChild && !gFirstReplayingChild && !gSecondReplayingChild);
-  gFirstReplayingChild = new ChildProcess(new ChildRoleActive(), /* aRecording = */ false);
+  gFirstReplayingChild =
+    new ChildProcessInfo(MakeUnique<ChildRoleActive>(), /* aRecording = */ false);
 }
 
 static void
 SpawnReplayingChildren()
 {
   MOZ_RELEASE_ASSERT(CanRewind() && !gFirstReplayingChild && !gSecondReplayingChild);
-  ChildRole* firstRole = gRecordingChild
-                         ? (ChildRole*) new ChildRoleStandby()
-                         : (ChildRole*) new ChildRoleActive();
-  gFirstReplayingChild = new ChildProcess(firstRole, /* aRecording = */ false);
-  gSecondReplayingChild = new ChildProcess(new ChildRoleStandby(), /* aRecording = */ false);
-  AssignMajorCheckpoint(gSecondReplayingChild, FirstCheckpointId);
+  UniquePtr<ChildRole> firstRole;
+  if (gRecordingChild) {
+    firstRole = MakeUnique<ChildRoleStandby>();
+  } else {
+    firstRole = MakeUnique<ChildRoleActive>();
+  }
+  gFirstReplayingChild =
+    new ChildProcessInfo(Move(firstRole), /* aRecording = */ false);
+  gSecondReplayingChild =
+    new ChildProcessInfo(MakeUnique<ChildRoleStandby>(), /* aRecording = */ false);
+  AssignMajorCheckpoint(gSecondReplayingChild, CheckpointId::First);
 }
 
 // Change the current active child, and select a new role for the old one.
 static void
-SwitchActiveChild(ChildProcess* aChild)
+SwitchActiveChild(ChildProcessInfo* aChild)
 {
   MOZ_RELEASE_ASSERT(aChild != gActiveChild);
-  ChildProcess* oldActiveChild = gActiveChild;
+  ChildProcessInfo* oldActiveChild = gActiveChild;
   aChild->WaitUntilPaused();
   if (!aChild->IsRecording()) {
     aChild->Recover(gActiveChild);
   }
-  aChild->SetRole(new ChildRoleActive());
+  aChild->SetRole(MakeUnique<ChildRoleActive>());
   if (oldActiveChild->IsRecording()) {
-    oldActiveChild->SetRole(new ChildRoleInert());
+    oldActiveChild->SetRole(MakeUnique<ChildRoleInert>());
   } else {
     oldActiveChild->RecoverToCheckpoint(oldActiveChild->MostRecentSavedCheckpoint());
-    oldActiveChild->SetRole(new ChildRoleStandby());
+    oldActiveChild->SetRole(MakeUnique<ChildRoleStandby>());
   }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Preferences
+///////////////////////////////////////////////////////////////////////////////
+
+static bool gPreferencesLoaded;
+static bool gRewindingEnabled;
+
+void
+PreferencesLoaded()
+{
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
+  MOZ_RELEASE_ASSERT(!gPreferencesLoaded);
+  gPreferencesLoaded = true;
+
+  gRewindingEnabled = Preferences::GetBool("devtools.recordreplay.enableRewinding");
+
+  // Force-disable rewinding and saving checkpoints with an env var for testing.
+  if (getenv("NO_REWIND")) {
+    gRewindingEnabled = false;
+  }
+
+  // If there is no recording child, we have now initialized enough state
+  // that we can start spawning replaying children.
+  if (!gRecordingChild) {
+    if (CanRewind()) {
+      SpawnReplayingChildren();
+    } else {
+      SpawnSingleReplayingChild();
+    }
+  }
+}
+
+bool
+CanRewind()
+{
+  MOZ_RELEASE_ASSERT(gPreferencesLoaded);
+  return gRewindingEnabled;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -612,7 +640,7 @@ FlushRecording()
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(gActiveChild->IsRecording() && gActiveChild->IsPaused());
 
-  ForEachReplayingChild([=](ChildProcess* aChild) {
+  ForEachReplayingChild([=](ChildProcessInfo* aChild) {
       aChild->SetPauseNeeded();
       aChild->WaitUntilPaused();
     });
@@ -634,7 +662,7 @@ static void
 RecvRecordingFlushed()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  ForEachReplayingChild([=](ChildProcess* aChild) { aChild->ClearPauseNeeded(); });
+  ForEachReplayingChild([=](ChildProcessInfo* aChild) { aChild->ClearPauseNeeded(); });
 }
 
 // Recording children can idle indefinitely while waiting for input, without
@@ -664,8 +692,11 @@ SendMessageToUIProcess(const char* aMessage)
   err.SuppressException();
 }
 
+// Handle to the recording file opened at startup.
+static FileHandle gRecordingFd;
+
 static void
-SaveRecordingInternal(char* aFilename)
+SaveRecordingInternal(const ipc::FileDescriptor& aFile)
 {
   MOZ_RELEASE_ASSERT(gRecordingChild);
 
@@ -678,35 +709,31 @@ SaveRecordingInternal(char* aFilename)
   }
 
   // Copy the file's contents to the new file.
-  int readfd = DirectOpenFile(gRecordingFilename, /* aWriting = */ false);
-  int writefd = DirectOpenFile(aFilename, /* aWriting = */ true);
+  DirectSeekFile(gRecordingFd, 0);
+  ipc::FileDescriptor::UniquePlatformHandle writefd = aFile.ClonePlatformHandle();
   char buf[4096];
   while (true) {
-    size_t n = DirectRead(readfd, buf, sizeof(buf));
+    size_t n = DirectRead(gRecordingFd, buf, sizeof(buf));
     if (!n) {
       break;
     }
-    DirectWrite(writefd, buf, n);
+    DirectWrite(writefd.get(), buf, n);
   }
-  DirectCloseFile(readfd);
-  DirectCloseFile(writefd);
 
-  PrintSpew("Copied Recording %s\n", aFilename);
+  PrintSpew("Saved Recording Copy.\n");
   SendMessageToUIProcess("SaveRecordingFinished");
-  free(aFilename);
 }
 
 void
-SaveRecording(const nsCString& aFilename)
+SaveRecording(const ipc::FileDescriptor& aFile)
 {
   MOZ_RELEASE_ASSERT(IsMiddleman());
 
-  char* filename = strdup(aFilename.get());
   if (NS_IsMainThread()) {
-    SaveRecordingInternal(filename);
+    SaveRecordingInternal(aFile);
   } else {
     MainThreadMessageLoop()->PostTask(NewRunnableFunction("SaveRecordingInternal",
-                                                          SaveRecordingInternal, filename));
+                                                          SaveRecordingInternal, aFile));
   }
 }
 
@@ -719,7 +746,7 @@ SaveRecording(const nsCString& aFilename)
 static size_t gLastExplicitPause;
 
 static bool
-HasSavedCheckpointsInRange(ChildProcess* aChild, size_t aStart, size_t aEnd)
+HasSavedCheckpointsInRange(ChildProcessInfo* aChild, size_t aStart, size_t aEnd)
 {
   for (size_t i = aStart; i <= aEnd; i++) {
     if (!aChild->HasSavedCheckpoint(i)) {
@@ -760,7 +787,7 @@ MarkActiveChildExplicitPause()
     // switch the active child to a replaying child when pausing at a
     // breakpoint.
     if (CanRewind() && gActiveChild->IsPausedAtMatchingBreakpoint(IsUserBreakpoint)) {
-      ChildProcess* child =
+      ChildProcessInfo* child =
         OtherReplayingChild(ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint));
       SwitchActiveChild(child);
     }
@@ -790,7 +817,7 @@ ActiveChildIsPausedOrRewinding()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// IPDL Forwarding
+// Initialization
 ///////////////////////////////////////////////////////////////////////////////
 
 // Message loop processed on the main thread.
@@ -800,333 +827,6 @@ MessageLoop*
 MainThreadMessageLoop()
 {
   return gMainThreadMessageLoop;
-}
-
-// Known associations between managee and manager routing IDs.
-static StaticInfallibleVector<std::pair<int32_t, int32_t>> gProtocolManagers;
-
-// The routing IDs of actors in the parent process that have been destroyed.
-static StaticInfallibleVector<int32_t> gDeadRoutingIds;
-
-static void
-NoteProtocolManager(int32_t aManagee, int32_t aManager)
-{
-  gProtocolManagers.emplaceBack(aManagee, aManager);
-  for (auto id : gDeadRoutingIds) {
-    if (id == aManager) {
-      gDeadRoutingIds.emplaceBack(aManagee);
-    }
-  }
-}
-
-static void
-DestroyRoutingId(int32_t aId)
-{
-  gDeadRoutingIds.emplaceBack(aId);
-  for (auto manager : gProtocolManagers) {
-    if (manager.second == aId) {
-      DestroyRoutingId(manager.first);
-    }
-  }
-}
-
-// Return whether a message from the child process to the UI process is being
-// sent to a target that is being destroyed, and should be suppressed.
-static bool
-MessageTargetIsDead(const IPC::Message& aMessage)
-{
-  // After the parent process destroys a browser, we handle the destroy in
-  // both the middleman and child processes. Both processes will respond to
-  // the destroy by sending additional messages to the UI process indicating
-  // the browser has been destroyed, but we need to ignore such messages from
-  // the child process (if it is still recording) to avoid confusing the UI
-  // process.
-  for (int32_t id : gDeadRoutingIds) {
-    if (id == aMessage.routing_id()) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool
-HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
-{
-  IPC::Message::msgid_t type = aMessage.type();
-
-  // Ignore messages sent from the child to dead UI process targets.
-  if (aSide == ipc::ParentSide) {
-    if (type == dom::PBrowser::Msg_PDocAccessibleConstructor__ID) {
-      PickleIterator iter(aMessage);
-      ipc::ActorHandle handle;
-
-      if (!IPC::ReadParam(&aMessage, &iter, &handle))
-        MOZ_CRASH("IPC::ReadParam failed");
-
-      NoteProtocolManager(handle.mId, aMessage.routing_id());
-    }
-
-    if (MessageTargetIsDead(aMessage)) {
-      PrintSpew("Suppressing %s message to dead target\n", IPC::StringFromIPCMessageType(type));
-      return true;
-    }
-    return false;
-  }
-
-  // Handle messages that should be sent to both the middleman and the
-  // content process.
-  if (type == dom::PContent::Msg_PBrowserConstructor__ID ||
-      type == dom::PContent::Msg_RegisterChrome__ID ||
-      type == dom::PContent::Msg_SetXPCOMProcessAttributes__ID ||
-      type == dom::PBrowser::Msg_SetDocShellIsActive__ID ||
-      type == dom::PBrowser::Msg_PRenderFrameConstructor__ID ||
-      type == dom::PBrowser::Msg_InitRendering__ID ||
-      type == dom::PBrowser::Msg_RenderLayers__ID ||
-      type == dom::PBrowser::Msg_LoadRemoteScript__ID ||
-      type == dom::PBrowser::Msg_AsyncMessage__ID ||
-      type == dom::PBrowser::Msg_Destroy__ID) {
-    ipc::IProtocol::Result r = dom::ContentChild::GetSingleton()->PContentChild::OnMessageReceived(aMessage);
-    MOZ_RELEASE_ASSERT(r == ipc::IProtocol::MsgProcessed);
-    if (type == dom::PContent::Msg_SetXPCOMProcessAttributes__ID) {
-      // Preferences are initialized via the SetXPCOMProcessAttributes message.
-      PreferencesLoaded();
-
-      if (!gRecordingChild) {
-        if (CanRewind()) {
-          SpawnReplayingChildren();
-        } else {
-          SpawnSingleReplayingChild();
-        }
-      }
-    }
-    if (type == dom::PBrowser::Msg_Destroy__ID) {
-      DestroyRoutingId(aMessage.routing_id());
-    }
-    if (type == dom::PBrowser::Msg_RenderLayers__ID) {
-      UpdateGraphicsInUIProcess(nullptr);
-    }
-    return false;
-  }
-
-  // Handle messages that should only be sent to the middleman.
-  if (type == dom::PContent::Msg_InitRendering__ID ||
-      type == dom::PContent::Msg_SaveRecording__ID ||
-      type == dom::PContent::Msg_Shutdown__ID) {
-    ipc::IProtocol::Result r = dom::ContentChild::GetSingleton()->PContentChild::OnMessageReceived(aMessage);
-    MOZ_RELEASE_ASSERT(r == ipc::IProtocol::MsgProcessed);
-    return true;
-  }
-
-  if (type >= layers::PCompositorBridge::PCompositorBridgeStart &&
-      type <= layers::PCompositorBridge::PCompositorBridgeEnd) {
-    layers::CompositorBridgeChild* compositorChild = layers::CompositorBridgeChild::Get();
-    ipc::IProtocol::Result r = compositorChild->OnMessageReceived(aMessage);
-    MOZ_RELEASE_ASSERT(r == ipc::IProtocol::MsgProcessed);
-    return true;
-  }
-
-  return false;
-}
-
-static bool gMainThreadBlocked = false;
-
-// Helper for places where the main thread will block while waiting on a
-// synchronous IPDL reply from a child process. Incoming messages from the
-// child must be handled immediately.
-struct MOZ_RAII AutoMarkMainThreadBlocked
-{
-  AutoMarkMainThreadBlocked() {
-    MOZ_RELEASE_ASSERT(NS_IsMainThread());
-    MOZ_RELEASE_ASSERT(!gMainThreadBlocked);
-    gMainThreadBlocked = true;
-  }
-
-  ~AutoMarkMainThreadBlocked() {
-    gMainThreadBlocked = false;
-  }
-};
-
-class MiddlemanProtocol : public ipc::IToplevelProtocol
-{
-public:
-  ipc::Side mSide;
-  MiddlemanProtocol* mOpposite;
-  MessageLoop* mOppositeMessageLoop;
-
-  explicit MiddlemanProtocol(ipc::Side aSide)
-    : ipc::IToplevelProtocol("MiddlemanProtocol", PContentMsgStart, aSide)
-    , mSide(aSide)
-    , mOpposite(nullptr)
-    , mOppositeMessageLoop(nullptr)
-  {}
-
-  virtual void RemoveManagee(int32_t, IProtocol*) override {
-    MOZ_CRASH("MiddlemanProtocol::RemoveManagee");
-  }
-
-  static void ForwardMessageAsync(MiddlemanProtocol* aProtocol, Message* aMessage) {
-    if (gActiveChild->IsRecording()) {
-      PrintSpew("ForwardAsyncMsg %s %s %d\n",
-                (aProtocol->mSide == ipc::ChildSide) ? "Child" : "Parent",
-                IPC::StringFromIPCMessageType(aMessage->type()),
-                (int) aMessage->routing_id());
-      if (!aProtocol->GetIPCChannel()->Send(aMessage)) {
-        MOZ_CRASH("MiddlemanProtocol::ForwardMessageAsync");
-      }
-    } else {
-      delete aMessage;
-    }
-  }
-
-  virtual Result OnMessageReceived(const Message& aMessage) override {
-    // If we do not have a recording process then just see if the message can
-    // be handled in the middleman.
-    if (!mOppositeMessageLoop) {
-      MOZ_RELEASE_ASSERT(mSide == ipc::ChildSide);
-      HandleMessageInMiddleman(mSide, aMessage);
-      return MsgProcessed;
-    }
-
-    // Copy the message first, since HandleMessageInMiddleman may destructively
-    // modify it through OnMessageReceived calls.
-    Message* nMessage = new Message();
-    nMessage->CopyFrom(aMessage);
-
-    if (HandleMessageInMiddleman(mSide, aMessage)) {
-      delete nMessage;
-      return MsgProcessed;
-    }
-
-    mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardMessageAsync", ForwardMessageAsync,
-                                                       mOpposite, nMessage));
-    return MsgProcessed;
-  }
-
-  static void ForwardMessageSync(MiddlemanProtocol* aProtocol, Message* aMessage, Message** aReply) {
-    PrintSpew("ForwardSyncMsg %s\n", IPC::StringFromIPCMessageType(aMessage->type()));
-
-    MOZ_RELEASE_ASSERT(!*aReply);
-    Message* nReply = new Message();
-    if (!aProtocol->GetIPCChannel()->Send(aMessage, nReply)) {
-      MOZ_CRASH("MiddlemanProtocol::ForwardMessageSync");
-    }
-
-    MonitorAutoLock lock(*gMonitor);
-    *aReply = nReply;
-    gMonitor->Notify();
-  }
-
-  virtual Result OnMessageReceived(const Message& aMessage, Message*& aReply) override {
-    MOZ_RELEASE_ASSERT(mOppositeMessageLoop);
-    MOZ_RELEASE_ASSERT(mSide == ipc::ChildSide || !MessageTargetIsDead(aMessage));
-
-    Message* nMessage = new Message();
-    nMessage->CopyFrom(aMessage);
-    mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardMessageSync", ForwardMessageSync,
-                                                       mOpposite, nMessage, &aReply));
-
-    if (mSide == ipc::ChildSide) {
-      AutoMarkMainThreadBlocked blocked;
-      gRecordingChild->WaitUntil([&]() { return !!aReply; });
-    } else {
-      MonitorAutoLock lock(*gMonitor);
-      while (!aReply) {
-        gMonitor->Wait();
-      }
-    }
-
-    PrintSpew("SyncMsgDone\n");
-    return MsgProcessed;
-  }
-
-  static void ForwardCallMessage(MiddlemanProtocol* aProtocol, Message* aMessage, Message** aReply) {
-    PrintSpew("ForwardSyncCall %s\n", IPC::StringFromIPCMessageType(aMessage->type()));
-
-    MOZ_RELEASE_ASSERT(!*aReply);
-    Message* nReply = new Message();
-    if (!aProtocol->GetIPCChannel()->Call(aMessage, nReply)) {
-      MOZ_CRASH("MiddlemanProtocol::ForwardCallMessage");
-    }
-
-    MonitorAutoLock lock(*gMonitor);
-    *aReply = nReply;
-    gMonitor->Notify();
-  }
-
-  virtual Result OnCallReceived(const Message& aMessage, Message*& aReply) override {
-    MOZ_RELEASE_ASSERT(mOppositeMessageLoop);
-    MOZ_RELEASE_ASSERT(mSide == ipc::ChildSide || !MessageTargetIsDead(aMessage));
-
-    Message* nMessage = new Message();
-    nMessage->CopyFrom(aMessage);
-    mOppositeMessageLoop->PostTask(NewRunnableFunction("ForwardCallMessage", ForwardCallMessage,
-                                                       mOpposite, nMessage, &aReply));
-
-    if (mSide == ipc::ChildSide) {
-      AutoMarkMainThreadBlocked blocked;
-      gRecordingChild->WaitUntil([&]() { return !!aReply; });
-    } else {
-      MonitorAutoLock lock(*gMonitor);
-      while (!aReply) {
-        gMonitor->Wait();
-      }
-    }
-
-    PrintSpew("SyncCallDone\n");
-    return MsgProcessed;
-  }
-
-  virtual int32_t GetProtocolTypeId() override {
-    MOZ_CRASH("MiddlemanProtocol::GetProtocolTypeId");
-  }
-
-  virtual void OnChannelClose() override {
-    MOZ_RELEASE_ASSERT(mSide == ipc::ChildSide);
-    gMainThreadMessageLoop->PostTask(NewRunnableFunction("Shutdown", Shutdown));
-  }
-
-  virtual void OnChannelError() override {
-    MOZ_CRASH("MiddlemanProtocol::OnChannelError");
-  }
-};
-
-static MiddlemanProtocol* gChildProtocol;
-static MiddlemanProtocol* gParentProtocol;
-
-ipc::MessageChannel*
-ChannelToUIProcess()
-{
-  return gChildProtocol->GetIPCChannel();
-}
-
-// Message loop for forwarding messages between the parent process and a
-// recording process.
-static MessageLoop* gForwardingMessageLoop;
-
-static bool gParentProtocolOpened = false;
-
-// Main routine for the forwarding message loop thread.
-static void
-ForwardingMessageLoopMain(void*)
-{
-  MOZ_RELEASE_ASSERT(gActiveChild->IsRecording());
-
-  MessageLoop messageLoop;
-  gForwardingMessageLoop = &messageLoop;
-
-  gChildProtocol->mOppositeMessageLoop = gForwardingMessageLoop;
-
-  gParentProtocol->Open(gActiveChild->Process()->GetChannel(),
-                        base::GetProcId(gActiveChild->Process()->GetChildProcessHandle()));
-
-  // Notify the main thread that we have finished initialization.
-  {
-    MonitorAutoLock lock(*gMonitor);
-    gParentProtocolOpened = true;
-    gMonitor->Notify();
-  }
-
-  messageLoop.Run();
 }
 
 // Initialize hooks used by the debugger.
@@ -1146,24 +846,18 @@ NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen)
 }
 
 void
-Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid)
+InitializeMiddleman(int aArgc, char* aArgv[], base::ProcessId aParentPid)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(gShmemPrefs);
 
   // Construct the message that will be sent to each child when starting up.
-  gIntroductionMessage = IntroductionMessage::New(aParentPid, gShmemPrefs, gShmemPrefsLen, aArgc, aArgv);
+  IntroductionMessage* msg =
+    IntroductionMessage::New(aParentPid, gShmemPrefs, gShmemPrefsLen, aArgc, aArgv);
+  ChildProcessInfo::SetIntroductionMessage(msg);
 
   MOZ_RELEASE_ASSERT(gProcessKind == ProcessKind::MiddlemanRecording ||
                      gProcessKind == ProcessKind::MiddlemanReplaying);
-
-  // Use a temporary file for the recording if the filename is unspecified.
-  if (!strcmp(gRecordingFilename, "*")) {
-    MOZ_RELEASE_ASSERT(gProcessKind == ProcessKind::MiddlemanRecording);
-    free(gRecordingFilename);
-    gRecordingFilename = mktemp(strdup("/tmp/RecordingXXXXXX"));
-    gRecordingFileIsTemporary = true;
-  }
 
   InitDebuggerHooks();
   InitializeGraphicsMemory();
@@ -1172,30 +866,15 @@ Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid)
 
   gMainThreadMessageLoop = MessageLoop::current();
 
-  gChildProtocol = new MiddlemanProtocol(ipc::ChildSide);
-
   if (gProcessKind == ProcessKind::MiddlemanRecording) {
-    gParentProtocol = new MiddlemanProtocol(ipc::ParentSide);
-    gParentProtocol->mOpposite = gChildProtocol;
-    gChildProtocol->mOpposite = gParentProtocol;
-
-    gParentProtocol->mOppositeMessageLoop = gMainThreadMessageLoop;
-
     SpawnRecordingChild();
-
-    if (!PR_CreateThread(PR_USER_THREAD, ForwardingMessageLoopMain, nullptr,
-                         PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0)) {
-      MOZ_CRASH("parent::Initialize");
-    }
-
-    // Wait for the forwarding message loop thread to finish initialization.
-    {
-      MonitorAutoLock lock(*gMonitor);
-      while (!gParentProtocolOpened) {
-        gMonitor->Wait();
-      }
-    }
   }
+
+  InitializeForwarding();
+
+  // Open a file handle to the recording file we can use for saving recordings
+  // later on.
+  gRecordingFd = DirectOpenFile(gRecordingFilename, false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1276,7 +955,7 @@ HookResume(bool aForward)
     size_t targetCheckpoint = gActiveChild->RewindTargetCheckpoint();
 
     // Don't rewind if we are at the beginning of the recording.
-    if (targetCheckpoint == InvalidCheckpointId) {
+    if (targetCheckpoint == CheckpointId::Invalid) {
       SendMessageToUIProcess("HitRecordingBeginning");
       return;
     }
@@ -1284,10 +963,10 @@ HookResume(bool aForward)
     // Find the replaying child responsible for saving the target checkpoint.
     // We should have explicitly paused before rewinding and given fill roles
     // to the replaying children.
-    ChildProcess* targetChild = ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint);
+    ChildProcessInfo* targetChild = ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint);
     MOZ_RELEASE_ASSERT(targetChild != gActiveChild);
 
-    // This process will be the new active child, make sure it has saved the
+    // This process will be the new active child, so make sure it has saved the
     // checkpoint we need it to.
     targetChild->WaitUntil([=]() {
         return targetChild->HasSavedCheckpoint(targetCheckpoint)
@@ -1312,7 +991,7 @@ HookResume(bool aForward)
       SwitchActiveChild(gRecordingChild);
     }
 
-    MaybeClearSavedNonMajorCheckpoint(gActiveChild, gActiveChild->LastCheckpoint() + 1);
+    ClearIfSavedNonMajorCheckpoint(gActiveChild, gActiveChild->LastCheckpoint() + 1);
 
     // Idle children might change their behavior as we run forward.
     PokeChildren();
@@ -1353,7 +1032,7 @@ RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
   // Resume either forwards or backwards. Break the resume off into a separate
   // runnable, to avoid starving any code already on the stack and waiting for
   // the process to pause. Immediately resume if the main thread is blocked.
-  if (gMainThreadBlocked) {
+  if (MainThreadIsWaitingForIPDLReply()) {
     MOZ_RELEASE_ASSERT(gChildExecuteForward);
     HookResume(true);
   } else if (!gResumeForwardOrBackward) {
@@ -1374,9 +1053,10 @@ HitBreakpoint(uint32_t* aBreakpoints, size_t aNumBreakpoints)
   // Call breakpoint handlers until one of them explicitly resumes forward or
   // backward travel.
   for (size_t i = 0; i < aNumBreakpoints && gResumeForwardOrBackward; i++) {
-    // FIXME what happens if this throws?
     AutoSafeJSContext cx;
-    (void) JS::replay::hooks.hitBreakpointMiddleman(cx, aBreakpoints[i]);
+    if (!JS::replay::hooks.hitBreakpointMiddleman(cx, aBreakpoints[i])) {
+      Print("Warning: hitBreakpoint hook threw an exception.\n");
+    }
   }
 
   // If the child was not explicitly resumed by any breakpoint handler, resume

@@ -39,8 +39,10 @@ private:
 class ReadWriteSpinLock
 {
 public:
-  inline void Lock(bool aRead);
-  inline void Unlock(bool aRead);
+  inline void ReadLock();
+  inline void ReadUnlock();
+  inline void WriteLock();
+  inline void WriteUnlock();
 
 private:
   SpinLock mLock; // Protects mReaders.
@@ -50,10 +52,9 @@ private:
 // RAII class to lock a spin lock.
 struct MOZ_RAII AutoSpinLock
 {
-  explicit AutoSpinLock(SpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoSpinLock(SpinLock& aLock)
     : mLock(aLock)
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     mLock.Lock();
   }
 
@@ -63,47 +64,42 @@ struct MOZ_RAII AutoSpinLock
   }
 
 private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   SpinLock& mLock;
 };
 
 // RAII class to lock a read/write spin lock for reading.
 struct AutoReadSpinLock
 {
-  explicit AutoReadSpinLock(ReadWriteSpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoReadSpinLock(ReadWriteSpinLock& aLock)
     : mLock(aLock)
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    mLock.Lock(/* aRead = */ true);
+    mLock.ReadLock();
   }
 
   ~AutoReadSpinLock()
   {
-    mLock.Unlock(/* aRead = */ true);
+    mLock.ReadUnlock();
   }
 
 private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   ReadWriteSpinLock& mLock;
 };
 
 // RAII class to lock a read/write spin lock for writing.
 struct AutoWriteSpinLock
 {
-  explicit AutoWriteSpinLock(ReadWriteSpinLock& aLock MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  explicit AutoWriteSpinLock(ReadWriteSpinLock& aLock)
     : mLock(aLock)
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    mLock.Lock(/* aRead = */ false);
+    mLock.WriteLock();
   }
 
   ~AutoWriteSpinLock()
   {
-    mLock.Unlock(/* aRead = */ false);
+    mLock.WriteUnlock();
   }
 
 private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   ReadWriteSpinLock& mLock;
 };
 
@@ -134,29 +130,43 @@ SpinLock::Unlock()
 }
 
 inline void
-ReadWriteSpinLock::Lock(bool aRead)
+ReadWriteSpinLock::ReadLock()
 {
-  bool done;
-  do {
+  while (true) {
     AutoSpinLock ex(mLock);
-    done = aRead ? (mReaders != -1) : (mReaders == 0);
-    if (done) {
-      mReaders = aRead ? (mReaders + 1) : -1;
+    if (mReaders != -1) {
+      mReaders++;
+      return;
     }
-  } while (!done);
+  }
 }
 
 inline void
-ReadWriteSpinLock::Unlock(bool aRead)
+ReadWriteSpinLock::ReadUnlock()
 {
   AutoSpinLock ex(mLock);
-  if (aRead) {
-    MOZ_ASSERT(mReaders > 0);
-    mReaders--;
-  } else {
-    MOZ_ASSERT(mReaders == -1);
-    mReaders = 0;
+  MOZ_ASSERT(mReaders > 0);
+  mReaders--;
+}
+
+inline void
+ReadWriteSpinLock::WriteLock()
+{
+  while (true) {
+    AutoSpinLock ex(mLock);
+    if (mReaders == 0) {
+      mReaders = -1;
+      return;
+    }
   }
+}
+
+inline void
+ReadWriteSpinLock::WriteUnlock()
+{
+  AutoSpinLock ex(mLock);
+  MOZ_ASSERT(mReaders == -1);
+  mReaders = 0;
 }
 
 } // namespace recordreplay

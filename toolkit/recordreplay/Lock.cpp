@@ -180,10 +180,16 @@ Lock::Enter(const std::function<void()>& aCallback)
   }
 }
 
+struct AtomicLock : public detail::MutexImpl
+{
+  using detail::MutexImpl::lock;
+  using detail::MutexImpl::unlock;
+};
+
 // Lock which is held during code sections that run atomically. This is a
 // PRLock instead of an OffTheBooksMutex because the latter performs atomic
 // operations during initialization.
-static PRLock* gAtomicLock = nullptr;
+static AtomicLock* gAtomicLock = nullptr;
 
 /* static */ void
 Lock::InitializeLocks()
@@ -191,7 +197,7 @@ Lock::InitializeLocks()
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   gNumLocks = gAtomicLockId;
 
-  gAtomicLock = PR_NewLock();
+  gAtomicLock = new AtomicLock();
   MOZ_RELEASE_ASSERT(!IsRecording() || gNumLocks == gAtomicLockId + 1);
 }
 
@@ -211,7 +217,7 @@ RecordReplayInterface_InternalBeginOrderedAtomicAccess()
 {
   MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
   if (!gInitializationFailureMessage) {
-    PR_Lock(gAtomicLock);
+    gAtomicLock->lock();
   }
 }
 
@@ -220,7 +226,7 @@ RecordReplayInterface_InternalEndOrderedAtomicAccess()
 {
   MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
   if (!gInitializationFailureMessage) {
-    PR_Unlock(gAtomicLock);
+    gAtomicLock->unlock();
   }
 }
 

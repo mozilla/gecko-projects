@@ -21,7 +21,7 @@ namespace parent {
 
 // The middleman process is a content process that manages communication with
 // one or more child recording or replaying processes. It performs IPC with the
-// chrome process in the normal fashion for a content process, using the normal
+// UI process in the normal fashion for a content process, using the normal
 // IPDL protocols. Communication with a recording or replaying process is done
 // via a special IPC channel (see Channel.h), and communication with a
 // recording process can additionally be done via IPDL messages, usually by
@@ -38,16 +38,27 @@ const char* SaveAllRecordingsDirectory();
 // Middleman process API
 
 // Save the recording up to the current point in execution.
-void SaveRecording(const nsCString& aFilename);
+void SaveRecording(const ipc::FileDescriptor& aFile);
 
 // Get the message channel used to communicate with the UI process.
 ipc::MessageChannel* ChannelToUIProcess();
 
 // Initialize state in a middleman process.
-void Initialize(int aArgc, char* aArgv[], base::ProcessId aParentPid);
+void InitializeMiddleman(int aArgc, char* aArgv[], base::ProcessId aParentPid);
 
 // Note the contents of the prefs shmem for use by the child process.
 void NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen);
+
+// Open a socket which a recording/replaying child can use to connect to its
+// middleman process.
+void OpenChannel(base::ProcessId aMiddlemanPid, uint32_t aChannelId,
+                 ipc::FileDescriptor* aConnection);
+
+// Get the command line arguments to use when spawning a recording or replaying
+// child process.
+void GetArgumentsForChildProcess(base::ProcessId aMiddlemanPid, uint32_t aChannelId,
+                                 const char* aRecordingFile, bool aRecording,
+                                 std::vector<std::string>& aExtraArgs);
 
 } // namespace parent
 } // namespace recordreplay

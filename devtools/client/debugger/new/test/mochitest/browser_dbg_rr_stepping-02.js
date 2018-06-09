@@ -4,7 +4,14 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test fixes for some simple stepping bugs.
-async function runTest(tab) {
+async function test() {
+  waitForExplicitFinish();
+
+  let tab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  await once(Services.ppmm, "RecordingFinished");
+
   let client = await attachDebugger(tab);
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_basic.html", 22);
@@ -16,15 +23,6 @@ async function runTest(tab) {
   await reverseStepOverToLine(client, 32);
   await reverseStepOutToLine(client, 26);
   await reverseStepOverToLine(client, 25);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  var tab = gBrowser.addTab(null, { recordExecution: "*" });
-  addMessageListener("RecordingFinished", () => runTest(tab));
-
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
 }

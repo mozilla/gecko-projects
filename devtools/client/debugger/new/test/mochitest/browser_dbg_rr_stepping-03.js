@@ -4,7 +4,13 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test stepping back while recording, then resuming recording.
-async function runTest(tab) {
+async function test() {
+  waitForExplicitFinish();
+
+  let tab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
+
   let client = await attachDebugger(tab);
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_continuous.html", 13);
@@ -15,16 +21,6 @@ async function runTest(tab) {
   await resumeToLine(client, 13);
   await resumeToLine(client, 13);
   await checkEvaluateInTopFrame(client, "number", value + 1);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  var tab = gBrowser.addTab(null, { recordExecution: "*" });
-
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
-
-  runTest(tab);
 }

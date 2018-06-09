@@ -9,8 +9,10 @@
 #include "ipc/ChildIPC.h"
 #include "mozilla/Compression.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/Sprintf.h"
+#include "mozilla/StackWalk.h"
 #include "mozilla/StaticMutex.h"
-#include "Backtrace.h"
+#include "DirtyMemoryHandler.h"
 #include "Lock.h"
 #include "MemorySnapshot.h"
 #include "ProcessRedirect.h"
@@ -90,7 +92,7 @@ RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
   case ProcessKind::MiddlemanRecording:
   case ProcessKind::MiddlemanReplaying:
     gIsMiddleman = true;
-    fprintf(stderr, "MIDDLEMAN %d\n", getpid());
+    fprintf(stderr, "MIDDLEMAN %d %s\n", getpid(), recordingFile.ref());
     break;
   default:
     MOZ_CRASH("Bad ProcessKind");
@@ -119,7 +121,6 @@ RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
   gSnapshotStackPrefix = mktemp(strdup("/tmp/SnapshotStackXXXXXX"));
 
   InitializeCurrentTime();
-  InitializeBacktraces();
 
   gRecordingFile = new File();
   if (!gRecordingFile->Open(recordingFile.ref(), IsRecording() ? File::WRITE : File::READ)) {
@@ -131,8 +132,6 @@ RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
     MOZ_RELEASE_ASSERT(gInitializationFailureMessage);
     return;
   }
-
-  InitializeFiles(gSnapshotMemoryPrefix);
 
   Thread::InitializeThreads();
 
@@ -152,6 +151,9 @@ RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
   Thread::SpawnAllThreads();
   InitializeCountdownThread();
   SetupDirtyMemoryHandler();
+
+  // Don't create a stylo thread pool when recording or replaying.
+  putenv((char*) "STYLO_THREADS=1");
 
   thread->SetPassThrough(false);
 
@@ -333,39 +335,51 @@ RecordReplayInterface_InternalPrint(const char* aFormat, va_list aArgs)
 // Record/Replay Assertions
 ///////////////////////////////////////////////////////////////////////////////
 
-static bool
-BufferAppend(char** aBuf, size_t* aSize, const char* aText)
+struct StackWalkData
 {
-  size_t len = strlen(aText);
-  if (len > *aSize) {
-    return false;
+  char* mBuf;
+  size_t mSize;
+
+  StackWalkData(char* aBuf, size_t aSize)
+    : mBuf(aBuf), mSize(aSize)
+  {}
+
+  void append(const char* aText) {
+    size_t len = strlen(aText);
+    if (len <= mSize) {
+      strcpy(mBuf, aText);
+      mBuf += len;
+      mSize -= len;
+    }
   }
-  memcpy(*aBuf, aText, len);
-  (*aBuf) += len;
-  (*aSize) -= len;
-  return true;
+};
+
+static void
+StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP, void* aClosure)
+{
+  StackWalkData* data = (StackWalkData*) aClosure;
+
+  MozCodeAddressDetails details;
+  MozDescribeCodeAddress(aPC, &details);
+
+  data->append(" ### ");
+  data->append(details.function[0] ? details.function : "???");
 }
 
 static void
 SetCurrentStackString(const char* aAssertion, char* aBuf, size_t aSize)
 {
-  void* addresses[50];
-  size_t count = GetBacktrace(aAssertion, addresses, sizeof(addresses) / sizeof(addresses[0]));
+  size_t frameCount = 12;
 
-  aSize--; // Reserve space for null terminator.
-  for (size_t i = 0; i < count; i++) {
-    if (!BufferAppend(&aBuf, &aSize, " ### ")) {
-      break;
-    }
-
-    char buf[50];
-    const char* name = SymbolName(addresses[i], buf, sizeof(buf));
-    if (!BufferAppend(&aBuf, &aSize, name)) {
-      break;
-    }
+  // Locking operations usually have extra stack goop.
+  if (!strcmp(aAssertion, "Lock 1")) {
+    frameCount += 8;
+  } else if (!strncmp(aAssertion, "Lock ", 5)) {
+    frameCount += 4;
   }
 
-  *aBuf = 0;
+  StackWalkData data(aBuf, aSize);
+  MozStackWalk(StackWalkCallback, /* aSkipFrames = */ 2, frameCount, &data);
 }
 
 // For debugging.

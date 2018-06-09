@@ -6,7 +6,9 @@
 
 #include "Thread.h"
 
+#include "ipc/ChildIPC.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/ThreadLocal.h"
 #include "ChunkAllocator.h"
@@ -182,8 +184,6 @@ Thread::ThreadMain(void* aArgument)
     // Notify any other thread waiting for this to finish in JoinThread.
     gMonitor->NotifyAll();
   }
-
-  Unreachable();
 }
 
 /* static */ void
@@ -603,92 +603,6 @@ Thread::Notify(size_t aId)
 {
   uint8_t data = 0;
   DirectWrite(GetById(aId)->mNotifyfd, &data, 1);
-}
-
-template <typename CharBuffer>
-static void
-SnapshotStackFilename(const CheckpointId& aCheckpoint, CharBuffer& aFilename)
-{
-  size_t nchars = SprintfLiteral(aFilename, "%s_%d_%d", gSnapshotStackPrefix,
-                                 (int) aCheckpoint.mNormal, (int) aCheckpoint.mTemporary);
-  MOZ_RELEASE_ASSERT(nchars < sizeof(aFilename));
-}
-
-/* static */ bool
-Thread::SaveAllThreads(const CheckpointId& aCheckpoint)
-{
-  MOZ_RELEASE_ASSERT(CurrentIsMainThread());
-
-  AutoPassThroughThreadEvents pt; // setjmp may perform system calls.
-  SetMemoryChangesAllowed(false);
-
-  int stackSeparator = 0;
-  if (!SaveThreadState(MainThreadId, &stackSeparator)) {
-    // We just restored this state from a later point of execution.
-    SetMemoryChangesAllowed(true);
-    return false;
-  }
-
-  char filename[1024];
-  SnapshotStackFilename(aCheckpoint, filename);
-  AddSnapshotFile(filename);
-
-  UntrackedFile file;
-  file.Open(filename, UntrackedFile::WRITE);
-
-  UntrackedStream* stream = file.OpenStream(StreamName::Main, 0);
-
-  for (size_t i = MainThreadId; i <= MaxRecordedThreadId; i++) {
-    SaveThreadStack(*stream, i);
-  }
-
-  SetMemoryChangesAllowed(true);
-  return true;
-}
-
-/* static */ void
-Thread::RestoreAllThreads(const CheckpointId& aCheckpoint)
-{
-  MOZ_RELEASE_ASSERT(CurrentIsMainThread());
-
-  BeginPassThroughThreadEvents();
-  SetMemoryChangesAllowed(false);
-
-  char filename[1024];
-  SnapshotStackFilename(aCheckpoint, filename);
-
-  UntrackedFile file;
-  file.Open(filename, UntrackedFile::READ);
-
-  UntrackedStream* stream = file.OpenStream(StreamName::Main, 0);
-
-  for (size_t i = MainThreadId; i <= MaxRecordedThreadId; i++) {
-    RestoreStackForLoadingByThread(*stream, i);
-  }
-
-  file.Close();
-
-  RestoreThreadStack(MainThreadId);
-  MOZ_CRASH(); // RestoreThreadState does not return.
-}
-
-/* static */ void
-Thread::WaitForIdleThreadsToRestoreTheirStacks()
-{
-  // Wait for all other threads to restore their stack before resuming execution.
-  while (true) {
-    bool done = true;
-    for (size_t i = MainThreadId + 1; i <= MaxRecordedThreadId; i++) {
-      if (ShouldRestoreThreadStack(i)) {
-        Notify(i);
-        done = false;
-      }
-    }
-    if (done) {
-      break;
-    }
-    WaitNoIdle();
-  }
 }
 
 } // namespace recordreplay

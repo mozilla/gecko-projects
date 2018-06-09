@@ -56,9 +56,7 @@ void NeckoChild::InitNeckoChild()
 {
   MOZ_ASSERT(IsNeckoChild(), "InitNeckoChild called by non-child!");
 
-  // Necko children are not created in middleman processes, to avoid
-  // conflicting with the child created in the middleman's recording process.
-  if (!gNeckoChild && !recordreplay::IsMiddleman()) {
+  if (!gNeckoChild) {
     mozilla::dom::ContentChild * cpc =
       mozilla::dom::ContentChild::GetSingleton();
     NS_ASSERTION(cpc, "Content Protocol is NULL!");

@@ -34,6 +34,10 @@ MOZ_CrashOOL(const char* aFilename, int aLine, const char* aReason)
 }
 
 static char sPrintfCrashReason[sPrintfCrashReasonSize] = {};
+
+// Accesses to this atomic are not included in web replay recordings, so that
+// if we crash in an area where recorded events are not allowed the true reason
+// for the crash is not obscured by a record/replay error.
 static mozilla::Atomic<bool, mozilla::SequentiallyConsistent,
                        mozilla::recordreplay::Behavior::DontPreserve> sCrashing(false);
 

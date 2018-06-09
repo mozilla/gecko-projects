@@ -107,6 +107,15 @@ struct MOZ_RAII AutoCountdown
 // Initialize the thread consuming the countdown.
 void InitializeCountdownThread();
 
+// This is an alternative to memmove/memcpy that can be called in areas where
+// faults in write protected memory are not allowed. It's hard to avoid dynamic
+// code loading when calling memmove/memcpy directly.
+void MemoryMove(void* aDst, const void* aSrc, size_t aSize);
+
+// Similarly, zero out a range of memory without doing anything weird with
+// dynamic code loading.
+void MemoryZero(void* aDst, size_t aSize);
+
 } // namespace recordreplay
 } // namespace mozilla
 

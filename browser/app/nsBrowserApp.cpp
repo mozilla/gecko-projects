@@ -279,16 +279,6 @@ int main(int argc, char* argv[], char* envp[])
       return 255;
     }
 
-    // Middleman content processes should use the same executable for replaying
-    // processes under the same circumstances that the chrome process used
-    // to launch the original recording process, so that the recording and
-    // replaying processes will initialize themselves in the same way.
-#ifdef MOZ_BROWSER_CAN_BE_CONTENTPROC
-    if (recordreplay::IsMiddleman()) {
-      XRE_EnableSameExecutableForContentProc();
-    }
-#endif
-
     int result = content_process_main(gBootstrap.get(), argc, argv);
 
     // InitXPCOMGlue calls NS_LogInit, so we need to balance it here.

@@ -151,6 +151,20 @@ NotePrefsShmemContents(char* aPrefs, size_t aPrefsLen)
   MOZ_CRASH();
 }
 
+void
+OpenChannel(base::ProcessId aMiddlemanPid, uint32_t aChannelId, ipc::FileDescriptor* aConnection)
+{
+  MOZ_CRASH();
+}
+
+void
+GetArgumentsForChildProcess(base::ProcessId aMiddlemanPid, uint32_t aChannelId,
+                            const char* aRecordingFile, bool aRecording,
+                            std::vector<std::string>& aExtraArgs)
+{
+  MOZ_CRASH();
+}
+
 } // namespace parent
 
 } // namespace recordreplay

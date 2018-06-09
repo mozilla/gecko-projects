@@ -7,12 +7,10 @@
 #include "WeakPointer.h"
 
 #include "mozilla/dom/ScriptSettings.h"
-#include "InfallibleVector.h"
-#include "Monitor.h"
-#include "ProcessRewind.h"
-#include "Thread.h"
-#include "ValueIndex.h"
+#include "mozilla/StaticMutex.h"
 #include "jsapi.h"
+
+#include <unordered_map>
 
 namespace mozilla {
 namespace recordreplay {

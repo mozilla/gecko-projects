@@ -8,6 +8,7 @@
 #define mozilla_toolkit_recordreplay_ThreadSnapshot_h
 
 #include "File.h"
+#include "Thread.h"
 
 namespace mozilla {
 namespace recordreplay {
@@ -23,15 +24,15 @@ namespace recordreplay {
 //    for the thread as well as a portion of the top of the stack, and after
 //    saving the state it returns true.
 //
-// 2. Once all other threads are idle, the main thread calls SaveThreadStack on
-//    every thread, saving the remainder of the stack contents. (The portion
-//    saved earlier gives threads leeway to perform operations after saving
-//    their stack, mainly for entering an idle state.)
+// 2. Once all other threads are idle, the main thread saves the remainder of
+//    all thread stacks. (The portion saved earlier gives threads leeway to
+//    perform operations after saving their stack, mainly for entering an idle
+//    state.)
 //
-// 3. The thread stacks are now stored on disk. Later on, the main thread may
-//    ensure that all threads are idle and then call, for every thread,
-//    RestoreStackForLoadingByThread. This loads the stacks and prepares them
-//    for restoring by the associated threads.
+// 3. The thread stacks are now stored on the heap. Later on, the main thread
+//    may ensure that all threads are idle and then call, for all threads,
+//    RestoreStackForLoadingByThread. This prepares the stacks for restoring by
+//    the associated threads.
 //
 // 4. While still in their idle state, threads call ShouldRestoreThreadStack to
 //    see if there is stack information for them to restore.
@@ -49,8 +50,62 @@ namespace recordreplay {
 // the main thread saves the remainder of the stack.
 bool SaveThreadState(size_t aId, int* aStackSeparator);
 
-void SaveThreadStack(UntrackedStream& aStream, size_t aId);
-void RestoreStackForLoadingByThread(UntrackedStream& aStream, size_t aId);
+// Information saved about the state of a thread.
+struct SavedThreadStack
+{
+  // Saved stack pointer.
+  void* mStackPointer;
+
+  // Saved stack contents, starting at |mStackPointer|.
+  uint8_t* mStack;
+  size_t mStackBytes;
+
+  // Saved register state.
+  jmp_buf mRegisters;
+
+  SavedThreadStack()
+  {
+    PodZero(this);
+  }
+
+  void ReleaseContents() {
+    if (mStackBytes) {
+      DeallocateMemory(mStack, mStackBytes, UntrackedMemoryKind::ThreadSnapshot);
+    }
+  }
+};
+
+struct SavedCheckpoint
+{
+  CheckpointId mCheckpoint;
+  SavedThreadStack mStacks[MaxRecordedThreadId];
+
+  SavedCheckpoint(CheckpointId aCheckpoint)
+    : mCheckpoint(aCheckpoint)
+  {}
+
+  void ReleaseContents() {
+    for (SavedThreadStack& stack : mStacks) {
+      stack.ReleaseContents();
+    }
+  }
+};
+
+// When all other threads are idle, the main thread may call this to save its
+// own stack and the stacks of all other threads. The return value is true if
+// the stacks were just saved, or false if they were just restored due to a
+// rewind from a later point of execution.
+bool SaveAllThreads(SavedCheckpoint& aSavedCheckpoint);
+
+// Restore the saved stacks for a checkpoint and rewind state to that point.
+// This function does not return.
+void RestoreAllThreads(const SavedCheckpoint& aSavedCheckpoint);
+
+// After rewinding to an earlier checkpoint, the main thread will call this to
+// ensure that each thread has woken up and restored its own stack contents.
+// The main thread does not itself write to the stacks of other threads.
+void WaitForIdleThreadsToRestoreTheirStacks();
+
 bool ShouldRestoreThreadStack(size_t aId);
 void RestoreThreadStack(size_t aId);
 

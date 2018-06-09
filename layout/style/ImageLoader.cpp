@@ -46,6 +46,10 @@ ImageLoader::DropDocumentReference()
   mDocument = nullptr;
 }
 
+// Normally, arrays of requests and frames are sorted by their pointer address,
+// for faster lookup. When recording or replaying, we don't do this, so that
+// the arrays retain their insertion order and are consistent between recording
+// and replaying.
 template <typename Elem, typename Item, typename Comparator = nsDefaultComparator<Elem, Item>>
 static size_t
 GetMaybeSortedIndex(const nsTArray<Elem>& aArray, const Item& aItem, bool* aFound,

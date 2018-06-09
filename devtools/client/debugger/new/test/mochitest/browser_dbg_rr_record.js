@@ -3,15 +3,15 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function test() {
+// Test basic recording of a tab without any debugging.
+async function test() {
   waitForExplicitFinish();
-
-  addMessageListener("RecordingFinished", () => {
-    ok(true, "Finished");
-    finish();
-  });
 
   var recordingTab = gBrowser.addTab(null, { recordExecution: "*" });
   gBrowser.selectedTab = recordingTab;
   openTrustedLinkIn(EXAMPLE_URL + "doc_rr_basic.html", "current");
+  await once(Services.ppmm, "RecordingFinished");
+
+  ok(true, "Finished");
+  finish();
 }

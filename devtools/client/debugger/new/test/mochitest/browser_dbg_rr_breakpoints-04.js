@@ -5,7 +5,13 @@
 
 // Test navigating back to earlier breakpoints while recording, then resuming
 // recording.
-async function runTest(tab) {
+async function test() {
+  waitForExplicitFinish();
+
+  let tab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
+
   let client = await attachDebugger(tab);
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_continuous.html", 14);
@@ -23,16 +29,6 @@ async function runTest(tab) {
   await checkEvaluateInTopFrame(client, "number", value + 3);
   await rewindToLine(client, 14);
   await checkEvaluateInTopFrame(client, "number", value + 2);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  var tab = gBrowser.addTab(null, { recordExecution: "*" });
-
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
-
-  runTest(tab);
 }

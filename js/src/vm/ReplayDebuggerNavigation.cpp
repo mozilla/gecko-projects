@@ -462,7 +462,7 @@ class NavigationState
             // The recording must include everything up to the first
             // checkpoint. After that point we will ask the record/replay
             // system to notify us about any further endpoints.
-            mRecordingEndpoint = ExecutionPoint(FirstCheckpointId);
+            mRecordingEndpoint = ExecutionPoint(CheckpointId::First);
         }
     }
 
@@ -809,7 +809,7 @@ void
 CheckpointPausedPhase::resume(bool forward)
 {
     // We can't rewind past the beginning of the replay.
-    MOZ_RELEASE_ASSERT(forward || mCheckpoint != FirstCheckpointId);
+    MOZ_RELEASE_ASSERT(forward || mCheckpoint != CheckpointId::First);
 
     if (forward) {
         // Run forward from the current execution point.

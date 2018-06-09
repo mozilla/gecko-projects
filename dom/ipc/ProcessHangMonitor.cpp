@@ -126,6 +126,8 @@ class HangMonitorChild
  private:
   void ShutdownOnThread();
 
+  // Ordering of this atomic is not preserved while recording/replaying, as it
+  // may be accessed during the JS interrupt callback.
   static Atomic<HangMonitorChild*, SequentiallyConsistent,
                 recordreplay::Behavior::DontPreserve> sInstance;
   UniquePtr<BackgroundHangMonitor> mForcePaintMonitor;
@@ -152,7 +154,7 @@ class HangMonitorChild
 
   // Allows us to ensure we NotifyActivity only once, allowing
   // either thread to do so.
-  Atomic<bool, SequentiallyConsistent, recordreplay::Behavior::DontPreserve> mBHRMonitorActive;
+  Atomic<bool> mBHRMonitorActive;
 };
 
 Atomic<HangMonitorChild*, SequentiallyConsistent,
@@ -293,6 +295,8 @@ bool HangMonitorParent::sShouldForcePaint = true;
 
 HangMonitorChild::HangMonitorChild(ProcessHangMonitor* aMonitor)
  : mHangMonitor(aMonitor),
+   // Ordering of this atomic is not preserved while recording/replaying, as it
+   // may be accessed during the JS interrupt callback.
    mMonitor("HangMonitorChild lock", recordreplay::Behavior::DontPreserve),
    mSentReport(false),
    mTerminateScript(false),

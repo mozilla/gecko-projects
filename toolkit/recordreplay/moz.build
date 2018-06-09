@@ -12,7 +12,6 @@ EXPORTS.mozilla.recordreplay += [
 if CONFIG['OS_ARCH'] == 'Darwin' and CONFIG['NIGHTLY_BUILD']:
     UNIFIED_SOURCES += [
         'Assembler.cpp',
-        'Backtrace.cpp',
         'Callback.cpp',
         'DirtyMemoryHandler.cpp',
         'File.cpp',
@@ -20,6 +19,7 @@ if CONFIG['OS_ARCH'] == 'Darwin' and CONFIG['NIGHTLY_BUILD']:
         'ipc/Channel.cpp',
         'ipc/ChildIPC.cpp',
         'ipc/ChildProcess.cpp',
+        'ipc/ParentForwarding.cpp',
         'ipc/ParentGraphics.cpp',
         'ipc/ParentIPC.cpp',
         'Lock.cpp',

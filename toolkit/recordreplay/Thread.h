@@ -286,24 +286,9 @@ public:
   // or restoring a checkpoint. This may only be called on the main thread.
   static void WaitForIdleThreads();
 
-  // After rewinding to an earlier checkpoint, the main thread will call this to
-  // ensure that each thread has woken up and restored its own stack contents.
-  // The main thread does not itself write to the stacks of other threads.
-  static void WaitForIdleThreadsToRestoreTheirStacks();
-
   // After WaitForIdleThreads(), the main thread will call this to allow
   // other threads to resume execution.
   static void ResumeIdleThreads();
-
-  // When all other threads are idle, the main thread may call this to save its
-  // own stack and the stacks of all other threads. The return value is true if
-  // the stacks were just saved, or false if they were just restored due to a
-  // rewind from a later point of execution.
-  static bool SaveAllThreads(const CheckpointId& aCheckpoint);
-
-  // Restore the saved stacks for a checkpoint and rewind state to that point.
-  // This function does not return.
-  static void RestoreAllThreads(const CheckpointId& aCheckpoint);
 };
 
 // This uses a stack pointer instead of TLS to make sure events are passed

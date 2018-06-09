@@ -3719,22 +3719,6 @@ nsGlobalWindowInner::Dump(const nsAString& aStr)
 }
 
 void
-nsGlobalWindowInner::RecordReplayAssert(const nsAString& aStr)
-{
-  char *cstr = ToNewUTF8String(aStr);
-  if (cstr) {
-    recordreplay::RecordReplayAssert(cstr);
-    free(cstr);
-  }
-}
-
-void
-nsGlobalWindowInner::RecordReplayDirective(long aDirective)
-{
-  recordreplay::RecordReplayDirective(aDirective);
-}
-
-void
 nsGlobalWindowInner::Alert(nsIPrincipal& aSubjectPrincipal,
                            ErrorResult& aError)
 {

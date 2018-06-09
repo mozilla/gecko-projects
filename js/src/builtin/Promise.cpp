@@ -28,8 +28,9 @@
 using namespace js;
 
 static double
-MillisecondsSinceStartup(const mozilla::TimeStamp& now)
+MillisecondsSinceStartup(const mozilla::Maybe<mozilla::TimeStamp>& maybeNow)
 {
+    auto now = maybeNow.isSome() ? maybeNow.ref() : mozilla::TimeStamp::Now();
     return (now - mozilla::TimeStamp::ProcessCreation()).ToMilliseconds();
 }
 
@@ -166,6 +167,17 @@ ShouldCaptureDebugInfo(JSContext* cx)
     return cx->options().asyncStack() || cx->compartment()->isDebuggee();
 }
 
+static mozilla::Maybe<mozilla::TimeStamp>
+MaybeNow()
+{
+    // ShouldCaptureDebugInfo() may return inconsistent values when recording
+    // or replaying, so in places where we might need the current time for
+    // promise debug info we always capture the current time.
+    if (mozilla::recordreplay::IsRecordingOrReplaying())
+        return mozilla::Some(mozilla::TimeStamp::Now());
+    return mozilla::Nothing();
+}
+
 class PromiseDebugInfo : public NativeObject
 {
   private:
@@ -181,7 +193,7 @@ class PromiseDebugInfo : public NativeObject
   public:
     static const Class class_;
     static PromiseDebugInfo* create(JSContext* cx, Handle<PromiseObject*> promise,
-                                    const mozilla::TimeStamp& now) {
+                                    const mozilla::Maybe<mozilla::TimeStamp>& maybeNow) {
         Rooted<PromiseDebugInfo*> debugInfo(cx, NewObjectWithClassProto<PromiseDebugInfo>(cx));
         if (!debugInfo)
             return nullptr;
@@ -191,7 +203,7 @@ class PromiseDebugInfo : public NativeObject
             return nullptr;
         debugInfo->setFixedSlot(Slot_AllocationSite, ObjectOrNullValue(stack));
         debugInfo->setFixedSlot(Slot_ResolutionSite, NullValue());
-        debugInfo->setFixedSlot(Slot_AllocationTime, DoubleValue(MillisecondsSinceStartup(now)));
+        debugInfo->setFixedSlot(Slot_AllocationTime, DoubleValue(MillisecondsSinceStartup(maybeNow)));
         debugInfo->setFixedSlot(Slot_ResolutionTime, NumberValue(0));
         promise->setFixedSlot(PromiseSlot_DebugInfo, ObjectValue(*debugInfo));
 
@@ -233,9 +245,7 @@ class PromiseDebugInfo : public NativeObject
     JSObject* resolutionSite() { return getFixedSlot(Slot_ResolutionSite).toObjectOrNull(); }
 
     static void setResolutionInfo(JSContext* cx, Handle<PromiseObject*> promise) {
-        // ShouldCaptureDebugInfo() may return inconsistent values when
-        // recording or replaying, so always capture the current time.
-        mozilla::TimeStamp now = mozilla::TimeStamp::Now();
+        mozilla::Maybe<mozilla::TimeStamp> maybeNow = MaybeNow();
 
         if (!ShouldCaptureDebugInfo(cx))
             return;
@@ -248,7 +258,7 @@ class PromiseDebugInfo : public NativeObject
         Rooted<PromiseDebugInfo*> debugInfo(cx, FromPromise(promise));
         if (!debugInfo) {
             RootedValue idVal(cx, promise->getFixedSlot(PromiseSlot_DebugInfo));
-            debugInfo = create(cx, promise, now);
+            debugInfo = create(cx, promise, maybeNow);
             if (!debugInfo) {
                 cx->clearPendingException();
                 return;
@@ -282,7 +292,7 @@ class PromiseDebugInfo : public NativeObject
         }
 
         debugInfo->setFixedSlot(Slot_ResolutionSite, ObjectOrNullValue(stack));
-        debugInfo->setFixedSlot(Slot_ResolutionTime, DoubleValue(MillisecondsSinceStartup(now)));
+        debugInfo->setFixedSlot(Slot_ResolutionTime, DoubleValue(MillisecondsSinceStartup(maybeNow)));
     }
 };
 
@@ -1496,9 +1506,7 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
     // Step 7.
     // Implicit, the handled flag is unset by default.
 
-    // ShouldCaptureDebugInfo() may return inconsistent values when recording
-    // or replaying, so always capture the current time.
-    mozilla::TimeStamp now = mozilla::TimeStamp::Now();
+    mozilla::Maybe<mozilla::TimeStamp> maybeNow = MaybeNow();
 
     if (MOZ_LIKELY(!ShouldCaptureDebugInfo(cx)))
         return promise;
@@ -1510,7 +1518,7 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
 
     Rooted<PromiseObject*> promiseRoot(cx, promise);
 
-    PromiseDebugInfo* debugInfo = PromiseDebugInfo::create(cx, promiseRoot, now);
+    PromiseDebugInfo* debugInfo = PromiseDebugInfo::create(cx, promiseRoot, maybeNow);
     if (!debugInfo)
         return nullptr;
 
@@ -3460,7 +3468,7 @@ PromiseObject::getID()
 double
 PromiseObject::lifetime()
 {
-    return MillisecondsSinceStartup(mozilla::TimeStamp::Now()) - allocationTime();
+    return MillisecondsSinceStartup(mozilla::Some(mozilla::TimeStamp::Now())) - allocationTime();
 }
 
 /**

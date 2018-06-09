@@ -7,7 +7,7 @@
 #ifndef mozilla_toolkit_recordreplay_ProcessRewind_h
 #define mozilla_toolkit_recordreplay_ProcessRewind_h
 
-#include "mozilla/Types.h"
+#include "mozilla/RecordReplay.h"
 
 #include <functional>
 
@@ -112,10 +112,6 @@ void EnsureNotDivergedFromRecording();
 // Access the flag for whether this is the active child process.
 void SetIsActiveChild(bool aActive);
 bool IsActiveChild();
-
-// Manage the temporary files created for memory and thread snapshots.
-void AddSnapshotFile(const char* aFilename);
-void DeleteSnapshotFiles();
 
 } // namespace recordreplay
 } // namespace mozilla

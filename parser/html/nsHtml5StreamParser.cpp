@@ -291,7 +291,7 @@ nsHtml5StreamParser::SetViewSourceTitle(nsIURI* aURL)
     nsAutoCString spec;
     aURL->GetSpec(spec);
     JS::BeginContentParseForRecordReplay(this, spec.get(), "text/html",
-                                         JS::SmallestEncoding::Latin1 /* FIXME Guessing here */);
+                                         JS::SmallestEncoding::UTF16);
   }
 
   if (aURL) {
@@ -845,6 +845,9 @@ nsHtml5StreamParser::WriteStreamBytes(const uint8_t* aFromSegment,
     bool hadErrors;
     Tie(result, read, written, hadErrors) =
       mUnicodeDecoder->DecodeToUTF16(src, dst, false);
+    if (recordreplay::IsRecordingOrReplaying()) {
+      JS::AddContentParseDataForRecordReplay(this, dst.data(), written * sizeof(char16_t));
+    }
     if (hadErrors && !mHasHadErrors) {
       mHasHadErrors = true;
       if (mEncoding == UTF_8_ENCODING) {
@@ -1101,6 +1104,9 @@ nsHtml5StreamParser::DoStopRequest()
     bool hadErrors;
     Tie(result, read, written, hadErrors) =
       mUnicodeDecoder->DecodeToUTF16(src, dst, true);
+    if (recordreplay::IsRecordingOrReplaying()) {
+      JS::AddContentParseDataForRecordReplay(this, dst.data(), written * sizeof(char16_t));
+    }
     if (hadErrors && !mHasHadErrors) {
       mHasHadErrors = true;
       if (mEncoding == UTF_8_ENCODING) {
@@ -1176,10 +1182,6 @@ nsHtml5StreamParser::DoDataAvailable(const uint8_t* aBuffer, uint32_t aLength)
 
   if (IsTerminated()) {
     return;
-  }
-
-  if (recordreplay::IsRecordingOrReplaying()) {
-    JS::AddContentParseDataForRecordReplay(this, aBuffer, aLength);
   }
 
   uint32_t writeCount;

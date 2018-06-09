@@ -288,8 +288,11 @@ public:
     {
         return mState->GetIPCChannel();
     }
-    void SetIPCChannel(MessageChannel* aChannel)
+    void SetMiddlemanIPCChannel(MessageChannel* aChannel)
     {
+        // Middleman processes sometimes need to change the channel used by a
+        // protocol.
+        MOZ_RELEASE_ASSERT(recordreplay::IsMiddleman());
         mState->SetIPCChannel(aChannel);
     }
 
@@ -866,10 +869,10 @@ public:
     {
         MOZ_RELEASE_ASSERT(mValid);
         if (mMyPid != base::GetCurrentProcId()) {
-            // The parent process will supply the middleman's pid instead of
-            // the true child pid when recording or replaying. Fix this here.
-            // Note that if we're replaying we'll see the pid of the middleman
-            // used while recording.
+            // These pids must match, unless we are recording or replaying, in
+            // which case the parent process will have supplied the pid for the
+            // middleman process instead. Fix this here. If we're replaying
+            // we'll see the pid of the middleman used while recording.
             MOZ_RELEASE_ASSERT(recordreplay::IsRecordingOrReplaying());
             MOZ_RELEASE_ASSERT(recordreplay::IsReplaying() ||
                                mMyPid == recordreplay::child::MiddlemanProcessId());

@@ -428,12 +428,10 @@ template <typename Key,
           typename Value,
           size_t InlineEntries,
           typename HashPolicy = DefaultHasher<Key>,
-          typename AllocPolicy = TempAllocPolicy,
-          mozilla::recordreplay::Behavior RecordingBehavior =
-              mozilla::recordreplay::Behavior::DontPreserve>
+          typename AllocPolicy = TempAllocPolicy>
 class InlineMap
 {
-    using Map = HashMap<Key, Value, HashPolicy, AllocPolicy, RecordingBehavior>;
+    using Map = HashMap<Key, Value, HashPolicy, AllocPolicy>;
 
     struct InlineEntry
     {

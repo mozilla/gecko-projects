@@ -4,13 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// This file has the logic which the middleman process uses to sent messages to
+// This file has the logic which the middleman process uses to send messages to
 // the UI process with painting data from the child process.
 
 #include "ParentInternal.h"
 
+#include "chrome/common/mach_ipc_mac.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
+#include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PTextureChild.h"
 
@@ -21,7 +23,9 @@ namespace recordreplay {
 namespace parent {
 
 void* gGraphicsMemory;
-mach_port_t gGraphicsPort;
+
+static mach_port_t gGraphicsPort;
+static ReceivePort* gGraphicsReceiver;
 
 void
 InitializeGraphicsMemory()
@@ -42,6 +46,26 @@ InitializeGraphicsMemory()
   MOZ_RELEASE_ASSERT(memoryObjectSize == GraphicsMemorySize);
 
   gGraphicsMemory = (void*) address;
+  gGraphicsReceiver = new ReceivePort(nsPrintfCString("WebReplay.%d", getpid()).get());
+}
+
+void
+SendGraphicsMemoryToChild()
+{
+  MachReceiveMessage handshakeMessage;
+  kern_return_t kr = gGraphicsReceiver->WaitForMessage(&handshakeMessage, 0);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+
+  MOZ_RELEASE_ASSERT(handshakeMessage.GetMessageID() == GraphicsHandshakeMessageId);
+  mach_port_t childPort = handshakeMessage.GetTranslatedPort(0);
+  MOZ_RELEASE_ASSERT(childPort != MACH_PORT_NULL);
+
+  MachSendMessage message(GraphicsMemoryMessageId);
+  message.AddDescriptor(MachMsgPortDescriptor(gGraphicsPort, MACH_MSG_TYPE_COPY_SEND));
+
+  MachPortSender sender(childPort);
+  kr = sender.SendMessage(message, 1000);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
 }
 
 static void

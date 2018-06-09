@@ -4,28 +4,24 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test some issues when stepping around after hitting a breakpoint while recording.
-async function runTest(tab) {
+async function test() {
+  waitForExplicitFinish();
+
+  let tab = gBrowser.addTab(null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
+
   let client = await attachDebugger(tab);
   await client.interrupt();
   await setBreakpoint(client, "doc_rr_continuous.html", 19);
   await resumeToLine(client, 19);
   await reverseStepOverToLine(client, 18);
-  await checkEvaluateInTopFrame(client, "recordReplayDirective(/* AlwaysTakeTemporarySnapshots */ 3)", undefined);
+  await checkEvaluateInTopFrame(client, "SpecialPowers.Cu.recordReplayDirective(/* AlwaysTakeTemporarySnapshots */ 3)", undefined);
   await stepInToLine(client, 22);
   await setBreakpoint(client, "doc_rr_continuous.html", 24);
   await resumeToLine(client, 24);
   await setBreakpoint(client, "doc_rr_continuous.html", 22);
   await rewindToLine(client, 22);
+
   finish();
-}
-
-function test() {
-  waitForExplicitFinish();
-
-  var tab = gBrowser.addTab(null, { recordExecution: "*" });
-
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + "doc_rr_continuous.html", "current");
-
-  runTest(tab);
 }

@@ -6,9 +6,11 @@
 
 #include "File.h"
 
+#include "ipc/ChildIPC.h"
 #include "mozilla/Compression.h"
 #include "mozilla/Sprintf.h"
 #include "ProcessRewind.h"
+#include "SpinLock.h"
 
 #include <algorithm>
 
@@ -16,12 +18,11 @@ namespace mozilla {
 namespace recordreplay {
 
 ///////////////////////////////////////////////////////////////////////////////
-// StreamTemplate
+// Stream
 ///////////////////////////////////////////////////////////////////////////////
 
-template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::ReadBytes(void* aData, size_t aSize)
+Stream::ReadBytes(void* aData, size_t aSize)
 {
   MOZ_RELEASE_ASSERT(mFile->OpenForReading());
 
@@ -76,18 +77,16 @@ StreamTemplate<Kind>::ReadBytes(void* aData, size_t aSize)
   }
 }
 
-template <AllocatedMemoryKind Kind>
 bool
-StreamTemplate<Kind>::AtEnd()
+Stream::AtEnd()
 {
   MOZ_RELEASE_ASSERT(mFile->OpenForReading());
 
   return mBufferPos == mBufferLength && mChunkIndex == mChunks.length();
 }
 
-template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::WriteBytes(const void* aData, size_t aSize)
+Stream::WriteBytes(const void* aData, size_t aSize)
 {
   MOZ_RELEASE_ASSERT(mFile->OpenForWriting());
 
@@ -118,9 +117,8 @@ StreamTemplate<Kind>::WriteBytes(const void* aData, size_t aSize)
   }
 }
 
-template <AllocatedMemoryKind Kind>
 size_t
-StreamTemplate<Kind>::ReadScalar()
+Stream::ReadScalar()
 {
   // Read back a pointer sized value using the same encoding as WriteScalar.
   size_t value = 0, shift = 0;
@@ -136,9 +134,8 @@ StreamTemplate<Kind>::ReadScalar()
   return value;
 }
 
-template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::WriteScalar(size_t aValue)
+Stream::WriteScalar(size_t aValue)
 {
   // Pointer sized values are written out as unsigned values with an encoding
   // optimized for small values. Each written byte successively captures 7 bits
@@ -158,9 +155,8 @@ StreamTemplate<Kind>::WriteScalar(size_t aValue)
   } while (aValue);
 }
 
-template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::CheckInput(size_t aValue)
+Stream::CheckInput(size_t aValue)
 {
   size_t oldValue = aValue;
   RecordOrReplayScalar(&oldValue);
@@ -170,10 +166,9 @@ StreamTemplate<Kind>::CheckInput(size_t aValue)
   }
 }
 
-template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::EnsureMemory(char** aBuf, size_t* aSize,
-                                   size_t aNeededSize, size_t aMaxSize, ShouldCopy aCopy)
+Stream::EnsureMemory(char** aBuf, size_t* aSize,
+                     size_t aNeededSize, size_t aMaxSize, ShouldCopy aCopy)
 {
   // Once a stream buffer grows, it never shrinks again. Buffers start out
   // small because most streams are very small.
@@ -181,21 +176,20 @@ StreamTemplate<Kind>::EnsureMemory(char** aBuf, size_t* aSize,
   MOZ_RELEASE_ASSERT(aNeededSize <= aMaxSize);
   if (*aSize < aNeededSize) {
     size_t newSize = std::min(std::max<size_t>(256, aNeededSize * 2), aMaxSize);
-    char* newBuf = mFile->AllocateMemory(newSize);
+    char* newBuf = new char[newSize];
     if (*aBuf) {
       if (aCopy == CopyExistingData) {
         memcpy(newBuf, *aBuf, *aSize);
       }
-      mFile->DeallocateMemory(*aBuf, *aSize);
+      delete[] *aBuf;
     }
     *aBuf = newBuf;
     *aSize = newSize;
   }
 }
 
-template <AllocatedMemoryKind Kind>
 void
-StreamTemplate<Kind>::Flush(bool aTakeLock)
+Stream::Flush(bool aTakeLock)
 {
   MOZ_RELEASE_ASSERT(mFile && mFile->OpenForWriting());
 
@@ -219,18 +213,14 @@ StreamTemplate<Kind>::Flush(bool aTakeLock)
   mBufferPos = 0;
 }
 
-template <AllocatedMemoryKind Kind>
 /* static */ size_t
-StreamTemplate<Kind>::BallastMaxSize()
+Stream::BallastMaxSize()
 {
   return Compression::LZ4::maxCompressedSize(BUFFER_MAX);
 }
 
-template class StreamTemplate<TrackedMemoryKind>;
-template class StreamTemplate<UntrackedMemoryKind::File>;
-
 ///////////////////////////////////////////////////////////////////////////////
-// FileTemplate
+// File
 ///////////////////////////////////////////////////////////////////////////////
 
 // We expect to find this at every index in a file.
@@ -242,6 +232,11 @@ struct FileIndexChunk
   uint32_t /* StreamName */ mName;
   uint32_t mNameIndex;
   StreamChunkLocation mChunk;
+
+  FileIndexChunk()
+  {
+    PodZero(this);
+  }
 
   FileIndexChunk(StreamName aName, uint32_t aNameIndex, const StreamChunkLocation& aChunk)
     : mName((uint32_t) aName), mNameIndex(aNameIndex), mChunk(aChunk)
@@ -266,26 +261,14 @@ struct FileIndex
   {}
 };
 
-template <AllocatedMemoryKind Kind>
-void
-FileTemplate<Kind>::SetFilename(const char* aFilename)
-{
-  MOZ_RELEASE_ASSERT(!mFilename);
-  mFilename = AllocateMemory(strlen(aFilename) + 1);
-  strcpy(mFilename, aFilename);
-}
-
-template <AllocatedMemoryKind Kind>
 bool
-FileTemplate<Kind>::Open(const char* aName, Mode aMode)
+File::Open(const char* aName, Mode aMode)
 {
   MOZ_RELEASE_ASSERT(!mFd);
   MOZ_RELEASE_ASSERT(aName);
 
-  SetFilename(aName);
-
   mMode = aMode;
-  mFd = DirectOpenFile(mFilename, mMode == WRITE);
+  mFd = DirectOpenFile(aName, mMode == WRITE);
 
   if (OpenForWriting()) {
     // Write an empty index at the start of the file.
@@ -307,9 +290,8 @@ FileTemplate<Kind>::Open(const char* aName, Mode aMode)
   return true;
 }
 
-template <AllocatedMemoryKind Kind>
 void
-FileTemplate<Kind>::Close()
+File::Close()
 {
   if (!mFd) {
     return;
@@ -319,15 +301,11 @@ FileTemplate<Kind>::Close()
     Flush();
   }
 
-  DirectCloseFile(mFd);
-  DeallocateMemory(mFilename, strlen(mFilename) + 1);
-
   Clear();
 }
 
-template <AllocatedMemoryKind Kind>
-typename FileTemplate<Kind>::ReadIndexResult
-FileTemplate<Kind>::ReadNextIndex(InfallibleVector<StreamTemplate<Kind>*>* aUpdatedStreams)
+File::ReadIndexResult
+File::ReadNextIndex(InfallibleVector<Stream*>* aUpdatedStreams)
 {
   // Unlike in the Flush() case, we don't have to worry about other threads
   // attempting to read data from streams in this file while we are reading
@@ -358,34 +336,32 @@ FileTemplate<Kind>::ReadNextIndex(InfallibleVector<StreamTemplate<Kind>*>* aUpda
   MOZ_RELEASE_ASSERT(index.mNumChunks);
 
   size_t indexBytes = index.mNumChunks * sizeof(FileIndexChunk);
-  FileIndexChunk* chunks = (FileIndexChunk*) AllocateMemory(indexBytes);
+  FileIndexChunk* chunks = new FileIndexChunk[index.mNumChunks];
   if (DirectRead(mFd, chunks, indexBytes) != indexBytes) {
     return ReadIndexResult::InvalidFile;
   }
   for (size_t i = 0; i < index.mNumChunks; i++) {
     const FileIndexChunk& indexChunk = chunks[i];
-    StreamTemplate<Kind>* stream =
-      OpenStream((StreamName) indexChunk.mName, indexChunk.mNameIndex);
+    Stream* stream = OpenStream((StreamName) indexChunk.mName, indexChunk.mNameIndex);
     stream->mChunks.append(indexChunk.mChunk);
     if (aUpdatedStreams) {
       aUpdatedStreams->append(stream);
     }
   }
-  DeallocateMemory(chunks, indexBytes);
+  delete[] chunks;
 
   return ReadIndexResult::FoundIndex;
 }
 
-template <AllocatedMemoryKind Kind>
 bool
-FileTemplate<Kind>::Flush()
+File::Flush()
 {
   MOZ_ASSERT(OpenForWriting());
   AutoSpinLock lock(mLock);
 
-  InfallibleVector<FileIndexChunk, 0, AllocPolicy<Kind>> newChunks;
+  InfallibleVector<FileIndexChunk> newChunks;
   for (auto& vector : mStreams) {
-    for (StreamTemplate<Kind>* stream : vector) {
+    for (Stream* stream : vector) {
       if (stream) {
         stream->Flush(/* aTakeLock = */ false);
         for (size_t i = stream->mFlushedChunks; i < stream->mChunkIndex; i++) {
@@ -419,11 +395,10 @@ FileTemplate<Kind>::Flush()
   return true;
 }
 
-template <AllocatedMemoryKind Kind>
 StreamChunkLocation
-FileTemplate<Kind>::WriteChunk(const char* aStart,
-                               size_t aCompressedSize, size_t aDecompressedSize,
-                               bool aTakeLock)
+File::WriteChunk(const char* aStart,
+                 size_t aCompressedSize, size_t aDecompressedSize,
+                 bool aTakeLock)
 {
   Maybe<AutoSpinLock> lock;
   if (aTakeLock) {
@@ -441,9 +416,8 @@ FileTemplate<Kind>::WriteChunk(const char* aStart,
   return chunk;
 }
 
-template <AllocatedMemoryKind Kind>
 void
-FileTemplate<Kind>::ReadChunk(char* aDest, const StreamChunkLocation& aChunk)
+File::ReadChunk(char* aDest, const StreamChunkLocation& aChunk)
 {
   AutoSpinLock lock(mLock);
   DirectSeekFile(mFd, aChunk.mOffset);
@@ -453,9 +427,8 @@ FileTemplate<Kind>::ReadChunk(char* aDest, const StreamChunkLocation& aChunk)
   }
 }
 
-template <AllocatedMemoryKind Kind>
-StreamTemplate<Kind>*
-FileTemplate<Kind>::OpenStream(StreamName aName, size_t aNameIndex)
+Stream*
+File::OpenStream(StreamName aName, size_t aNameIndex)
 {
   AutoSpinLock lock(mLock);
 
@@ -465,53 +438,11 @@ FileTemplate<Kind>::OpenStream(StreamName aName, size_t aNameIndex)
     vector.appendN(nullptr, aNameIndex + 1 - vector.length());
   }
 
-  StreamTemplate<Kind>*& stream = vector[aNameIndex];
+  Stream*& stream = vector[aNameIndex];
   if (!stream) {
-    void* ptr = AllocateMemory(sizeof(StreamTemplate<Kind>));
-    stream = new (ptr) StreamTemplate<Kind>(this, aName, aNameIndex);
+    stream = new Stream(this, aName, aNameIndex);
   }
   return stream;
-}
-
-template <AllocatedMemoryKind Kind>
-char*
-FileTemplate<Kind>::AllocateMemory(size_t aSize)
-{
-  return (char*) recordreplay::AllocateMemory(aSize, Kind);
-}
-
-template <AllocatedMemoryKind Kind>
-void
-FileTemplate<Kind>::DeallocateMemory(void* aBuf, size_t aSize)
-{
-  recordreplay::DeallocateMemory(aBuf, aSize, Kind);
-}
-
-template class FileTemplate<TrackedMemoryKind>;
-template class FileTemplate<UntrackedMemoryKind::File>;
-
-void
-InitializeFiles(const char* aTempFile)
-{
-  // Make sure that all the symbols we will use for writing and reading files
-  // are instantiated, so we don't get lazy loads at unexpected places later in
-  // execution.
-  {
-    File file;
-    file.Open(aTempFile, File::WRITE);
-    Stream* stream = file.OpenStream(StreamName::Main, 0);
-    uint32_t token = 0xDEADBEEF;
-    stream->WriteBytes(&token, sizeof(uint32_t));
-  }
-  {
-    File file;
-    file.Open(aTempFile, File::READ);
-    Stream* stream = file.OpenStream(StreamName::Main, 0);
-    uint32_t token;
-    stream->ReadBytes(&token, sizeof(uint32_t));
-    MOZ_RELEASE_ASSERT(token == 0xDEADBEEF);
-  }
-  DirectDeleteFile(aTempFile);
 }
 
 } // namespace recordreplay

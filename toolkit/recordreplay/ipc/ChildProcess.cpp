@@ -6,6 +6,10 @@
 
 #include "ParentInternal.h"
 
+#include "base/task.h"
+#include "mozilla/dom/ContentChild.h"
+#include "Thread.h"
+
 namespace mozilla {
 namespace recordreplay {
 namespace parent {
@@ -22,17 +26,22 @@ static bool gChildrenAreDebugging;
 // Whether we are allowed to restart crashed/hung child processes.
 static bool gRestartEnabled;
 
-ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
-  : mProcess(nullptr)
-  , mChannel(nullptr)
+/* static */ void
+ChildProcessInfo::SetIntroductionMessage(IntroductionMessage* aMessage)
+{
+  gIntroductionMessage = aMessage;
+}
+
+ChildProcessInfo::ChildProcessInfo(UniquePtr<ChildRole> aRole, bool aRecording)
+  : mChannel(nullptr)
   , mRecording(aRecording)
   , mRecoveryStage(RecoveryStage::None)
   , mPaused(false)
   , mPausedMessage(nullptr)
-  , mLastCheckpoint(InvalidCheckpointId)
+  , mLastCheckpoint(CheckpointId::Invalid)
   , mNumRecoveredMessages(0)
   , mNumRestarts(0)
-  , mRole(aRole)
+  , mRole(Move(aRole))
   , mPauseNeeded(false)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -53,29 +62,28 @@ ChildProcess::ChildProcess(ChildRole* aRole, bool aRecording)
   // mechanism in the replaying process, and would be nice to investigate
   // removing.
   if (!aRecording && CanRewind()) {
-    SendMessage(SetSaveCheckpointMessage(FirstCheckpointId, true));
+    SendMessage(SetSaveCheckpointMessage(CheckpointId::First, true));
   }
 
   mRole->Initialize();
 }
 
-ChildProcess::~ChildProcess()
+ChildProcessInfo::~ChildProcessInfo()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (IsRecording()) {
     SendMessage(TerminateMessage());
   }
-  TerminateSubprocess();
 }
 
-ChildProcess::Disposition
-ChildProcess::GetDisposition()
+ChildProcessInfo::Disposition
+ChildProcessInfo::GetDisposition()
 {
   // We can determine the disposition of the child by looking at the first
   // resume message sent since the last time it reached a checkpoint.
   for (Message* msg : mMessages) {
     if (msg->mType == MessageType::Resume) {
-      const ResumeMessage& nmsg = (const ResumeMessage&) *msg;
+      const ResumeMessage& nmsg = static_cast<const ResumeMessage&>(*msg);
       return nmsg.mForward ? AfterLastCheckpoint : BeforeLastCheckpoint;
     }
   }
@@ -83,34 +91,34 @@ ChildProcess::GetDisposition()
 }
 
 bool
-ChildProcess::IsPausedAtCheckpoint()
+ChildProcessInfo::IsPausedAtCheckpoint()
 {
   return IsPaused() && mPausedMessage->mType == MessageType::HitCheckpoint;
 }
 
 bool
-ChildProcess::IsPausedAtRecordingEndpoint()
+ChildProcessInfo::IsPausedAtRecordingEndpoint()
 {
   if (!IsPaused()) {
     return false;
   }
   if (mPausedMessage->mType == MessageType::HitCheckpoint) {
-    return ((HitCheckpointMessage*) mPausedMessage)->mRecordingEndpoint;
+    return static_cast<HitCheckpointMessage*>(mPausedMessage)->mRecordingEndpoint;
   }
   if (mPausedMessage->mType == MessageType::HitBreakpoint) {
-    return ((HitBreakpointMessage*) mPausedMessage)->mRecordingEndpoint;
+    return static_cast<HitBreakpointMessage*>(mPausedMessage)->mRecordingEndpoint;
   }
   return false;
 }
 
 bool
-ChildProcess::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
+ChildProcessInfo::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
 {
   if (!IsPaused() || mPausedMessage->mType != MessageType::HitBreakpoint) {
     return false;
   }
 
-  HitBreakpointMessage* npaused = (HitBreakpointMessage*) mPausedMessage;
+  HitBreakpointMessage* npaused = static_cast<HitBreakpointMessage*>(mPausedMessage);
   for (size_t i = 0; i < npaused->NumBreakpoints(); i++) {
     uint32_t breakpointId = npaused->Breakpoints()[i];
 
@@ -119,7 +127,7 @@ ChildProcess::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
     SetBreakpointMessage* lastSet = nullptr;
     for (Message* msg : mMessages) {
       if (msg->mType == MessageType::SetBreakpoint) {
-        SetBreakpointMessage* nmsg = (SetBreakpointMessage*) msg;
+        SetBreakpointMessage* nmsg = static_cast<SetBreakpointMessage*>(msg);
         if (nmsg->mId == breakpointId) {
           lastSet = nmsg;
         }
@@ -136,7 +144,7 @@ ChildProcess::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
 }
 
 void
-ChildProcess::AddMajorCheckpoint(size_t aId)
+ChildProcessInfo::AddMajorCheckpoint(size_t aId)
 {
   // Major checkpoints should be listed in order.
   MOZ_RELEASE_ASSERT(mMajorCheckpoints.empty() || aId > mMajorCheckpoints.back());
@@ -144,20 +152,19 @@ ChildProcess::AddMajorCheckpoint(size_t aId)
 }
 
 void
-ChildProcess::SetRole(ChildRole* aRole)
+ChildProcessInfo::SetRole(UniquePtr<ChildRole> aRole)
 {
   MOZ_RELEASE_ASSERT(!IsRecovering());
 
   PrintSpew("SetRole:%d %s\n", (int) GetId(), ChildRole::TypeString(aRole->GetType()));
 
-  delete mRole;
-  mRole = aRole;
+  mRole = Move(aRole);
   mRole->SetProcess(this);
   mRole->Initialize();
 }
 
 void
-ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
+ChildProcessInfo::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -168,7 +175,7 @@ ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
 
   // Always handle fatal errors in the same way.
   if (aMsg.mType == MessageType::FatalError) {
-    const FatalErrorMessage& nmsg = (const FatalErrorMessage&) aMsg;
+    const FatalErrorMessage& nmsg = static_cast<const FatalErrorMessage&>(aMsg);
     AttemptRestart(nmsg.Error());
     return;
   }
@@ -198,7 +205,7 @@ ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
   }
 
   if (aMsg.mType == MessageType::HitCheckpoint) {
-    const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
+    const HitCheckpointMessage& nmsg = static_cast<const HitCheckpointMessage&>(aMsg);
     mLastCheckpoint = nmsg.mCheckpointId;
 
     // All messages sent since the last checkpoint are now obsolete, except
@@ -209,8 +216,7 @@ ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
         // Look for an older SetBreakpoint on the same ID to overwrite.
         bool found = false;
         for (Message*& older : newMessages) {
-          if (older->mType == MessageType::SetBreakpoint &&
-              static_cast<SetBreakpointMessage*>(msg)->mId ==
+          if (static_cast<SetBreakpointMessage*>(msg)->mId ==
               static_cast<SetBreakpointMessage*>(older)->mId) {
             free(older);
             older = msg;
@@ -235,7 +241,7 @@ ChildProcess::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
 }
 
 void
-ChildProcess::SendMessage(const Message& aMsg)
+ChildProcessInfo::SendMessage(const Message& aMsg)
 {
   MOZ_RELEASE_ASSERT(!IsRecovering());
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -272,7 +278,7 @@ ChildProcess::SendMessage(const Message& aMsg)
 
   // Keep track of the checkpoints the process will save.
   if (aMsg.mType == MessageType::SetSaveCheckpoint) {
-    const SetSaveCheckpointMessage& nmsg = (const SetSaveCheckpointMessage&) aMsg;
+    const SetSaveCheckpointMessage& nmsg = static_cast<const SetSaveCheckpointMessage&>(aMsg);
     MOZ_RELEASE_ASSERT(nmsg.mCheckpoint > MostRecentCheckpoint());
     VectorAddOrRemoveEntry(mShouldSaveCheckpoints, nmsg.mCheckpoint, nmsg.mSave);
   }
@@ -281,7 +287,7 @@ ChildProcess::SendMessage(const Message& aMsg)
 }
 
 void
-ChildProcess::SendMessageRaw(const Message& aMsg)
+ChildProcessInfo::SendMessageRaw(const Message& aMsg)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   mLastMessageTime = TimeStamp::Now();
@@ -289,8 +295,8 @@ ChildProcess::SendMessageRaw(const Message& aMsg)
 }
 
 void
-ChildProcess::Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpoint,
-                      Message** aMessages, size_t aNumMessages)
+ChildProcessInfo::Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpoint,
+                          Message** aMessages, size_t aNumMessages)
 {
   MOZ_RELEASE_ASSERT(IsPaused());
 
@@ -302,7 +308,7 @@ ChildProcess::Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpo
   // Clear out all messages that have been sent to this process.
   for (Message* msg : mMessages) {
     if (msg->mType == MessageType::SetBreakpoint) {
-      SetBreakpointMessage* nmsg = (SetBreakpointMessage*) msg;
+      SetBreakpointMessage* nmsg = static_cast<SetBreakpointMessage*>(msg);
       SendMessageRaw(SetBreakpointMessage(nmsg->mId, JS::replay::ExecutionPosition()));
     }
     free(msg);
@@ -324,13 +330,13 @@ ChildProcess::Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpo
   } else if (mostRecentCheckpoint > mLastCheckpoint || !pausedAtCheckpoint) {
     mRecoveryStage = RecoveryStage::ReachingCheckpoint;
     // Rewind to the last saved checkpoint at or prior to the target.
-    size_t targetCheckpoint = InvalidCheckpointId;
+    size_t targetCheckpoint = CheckpointId::Invalid;
     for (size_t saved : mShouldSaveCheckpoints) {
       if (saved <= mLastCheckpoint && saved > targetCheckpoint) {
         targetCheckpoint = saved;
       }
     }
-    MOZ_RELEASE_ASSERT(targetCheckpoint != InvalidCheckpointId);
+    MOZ_RELEASE_ASSERT(targetCheckpoint != CheckpointId::Invalid);
     SendMessageRaw(RestoreCheckpointMessage(targetCheckpoint));
   } else {
     mRecoveryStage = RecoveryStage::PlayingMessages;
@@ -341,7 +347,7 @@ ChildProcess::Recover(bool aPaused, Message* aPausedMessage, size_t aLastCheckpo
 }
 
 void
-ChildProcess::Recover(ChildProcess* aTargetProcess)
+ChildProcessInfo::Recover(ChildProcessInfo* aTargetProcess)
 {
   MOZ_RELEASE_ASSERT(aTargetProcess->IsPaused());
   Recover(true, aTargetProcess->mPausedMessage->Clone(),
@@ -350,7 +356,7 @@ ChildProcess::Recover(ChildProcess* aTargetProcess)
 }
 
 void
-ChildProcess::RecoverToCheckpoint(size_t aCheckpoint)
+ChildProcessInfo::RecoverToCheckpoint(size_t aCheckpoint)
 {
   HitCheckpointMessage pausedMessage(aCheckpoint,
                                      /* aRecordingEndpoint = */ false,
@@ -359,12 +365,12 @@ ChildProcess::RecoverToCheckpoint(size_t aCheckpoint)
 }
 
 void
-ChildProcess::OnIncomingRecoveryMessage(const Message& aMsg)
+ChildProcessInfo::OnIncomingRecoveryMessage(const Message& aMsg)
 {
   switch (aMsg.mType) {
   case MessageType::HitCheckpoint: {
     MOZ_RELEASE_ASSERT(mRecoveryStage == RecoveryStage::ReachingCheckpoint);
-    const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
+    const HitCheckpointMessage& nmsg = static_cast<const HitCheckpointMessage&>(aMsg);
     if (nmsg.mCheckpointId < mLastCheckpoint) {
       SendMessageRaw(ResumeMessage(/* aForward = */ true));
     } else {
@@ -384,7 +390,7 @@ ChildProcess::OnIncomingRecoveryMessage(const Message& aMsg)
 }
 
 void
-ChildProcess::SendNextRecoveryMessage()
+ChildProcessInfo::SendNextRecoveryMessage()
 {
   MOZ_RELEASE_ASSERT(mRecoveryStage == RecoveryStage::PlayingMessages);
 
@@ -399,6 +405,9 @@ ChildProcess::SendNextRecoveryMessage()
     }
     msg = mMessages[mNumRecoveredMessages++];
     SendMessageRaw(*msg);
+
+    // If we just sent a SetBreakpoint message then the child process is still
+    // paused, so keep sending more messages.
   } while (msg->mType == MessageType::SetBreakpoint);
 
   // If we have sent all messages and are in an unpaused state, we are done
@@ -412,90 +421,67 @@ ChildProcess::SendNextRecoveryMessage()
 // Subprocess Management
 ///////////////////////////////////////////////////////////////////////////////
 
+ipc::GeckoChildProcessHost* gRecordingProcess;
+
 void
-ChildProcess::LaunchSubprocess()
+GetArgumentsForChildProcess(base::ProcessId aMiddlemanPid, uint32_t aChannelId,
+                            const char* aRecordingFile, bool aRecording,
+                            std::vector<std::string>& aExtraArgs)
 {
-  MOZ_RELEASE_ASSERT(!mProcess);
+  MOZ_RELEASE_ASSERT(IsMiddleman() || XRE_IsParentProcess());
+
+  aExtraArgs.push_back(gMiddlemanPidOption);
+  aExtraArgs.push_back(nsPrintfCString("%d", aMiddlemanPid).get());
+
+  aExtraArgs.push_back(gChannelIDOption);
+  aExtraArgs.push_back(nsPrintfCString("%d", (int) aChannelId).get());
+
+  aExtraArgs.push_back(gProcessKindOption);
+  aExtraArgs.push_back(nsPrintfCString("%d", aRecording
+                                             ? (int) ProcessKind::Recording
+                                             : (int) ProcessKind::Replaying).get());
+
+  aExtraArgs.push_back(gRecordingFileOption);
+  aExtraArgs.push_back(aRecordingFile);
+}
+
+void
+ChildProcessInfo::LaunchSubprocess()
+{
+  size_t channelId = gNumChannels++;
+  MOZ_RELEASE_ASSERT((channelId == Channel::RecordingId) == IsRecording());
 
   // Create a new channel every time we launch a new subprocess, without
   // deleting or tearing down the old one's state. This is pretty lame and it
   // would be nice if we could do something better here, especially because
   // with restarts we could create any number of channels over time.
-  size_t channelId = gNumChannels++;
   mChannel = new Channel(channelId, [=](Message* aMsg) {
       ReceiveChildMessageOnMainThread(channelId, aMsg);
     });
 
-  mProcess = new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
+  if (IsRecording()) {
+    std::vector<std::string> extraArgs;
+    GetArgumentsForChildProcess(base::GetCurrentProcId(), channelId,
+                                gRecordingFilename, /* aRecording = */ true, extraArgs);
 
-  std::vector<std::string> extraArgs;
-  char buf[20];
-
-  SprintfLiteral(buf, "%d", (int) GetId());
-  extraArgs.push_back(gChannelIDOption);
-  extraArgs.push_back(buf);
-
-  SprintfLiteral(buf, "%d", (int) IsRecording() ? ProcessKind::Recording : ProcessKind::Replaying);
-  extraArgs.push_back(gProcessKindOption);
-  extraArgs.push_back(buf);
-
-  extraArgs.push_back(gRecordingFileOption);
-  extraArgs.push_back(gRecordingFilename);
-
-  if (!mProcess->LaunchAndWaitForProcessHandle(extraArgs)) {
-    MOZ_CRASH("ChildProcess::LaunchSubprocess");
+    MOZ_RELEASE_ASSERT(!gRecordingProcess);
+    gRecordingProcess = new ipc::GeckoChildProcessHost(GeckoProcessType_Content);
+    if (!gRecordingProcess->LaunchAndWaitForProcessHandle(extraArgs)) {
+      MOZ_CRASH("ChildProcessInfo::LaunchSubprocess");
+    }
+  } else {
+    dom::ContentChild::GetSingleton()->SendCreateReplayingProcess(channelId);
   }
 
   mLastMessageTime = TimeStamp::Now();
 
+  SendGraphicsMemoryToChild();
+
   // The child should send us a HitCheckpoint with an invalid ID to pause.
   WaitUntilPaused();
 
-  // Send the child a handle to the graphics shmem via mach IPC.
-  char portName[128];
-  SprintfLiteral(portName, "WebReplay.%d.%d", getpid(), (int) channelId);
-  MachPortSender sender(portName);
-  MachSendMessage message(GraphicsMessageId);
-  message.AddDescriptor(MachMsgPortDescriptor(gGraphicsPort, MACH_MSG_TYPE_COPY_SEND));
-  kern_return_t kr = sender.SendMessage(message, 1000);
-  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
-
   MOZ_RELEASE_ASSERT(gIntroductionMessage);
   SendMessage(*gIntroductionMessage);
-}
-
-// Whether the main thread is waiting on a child process to be terminated.
-static bool gWaitingOnTerminateChildProcess;
-
-void
-ChildProcess::TerminateSubprocess()
-{
-  MOZ_RELEASE_ASSERT(NS_IsMainThread());
-
-  MOZ_RELEASE_ASSERT(!gWaitingOnTerminateChildProcess);
-  gWaitingOnTerminateChildProcess = true;
-
-  // Child processes need to be destroyed on the correct thread.
-  XRE_GetIOMessageLoop()->PostTask(NewRunnableFunction("TerminateSubprocess", Terminate, mProcess));
-
-  MonitorAutoLock lock(*gMonitor);
-  while (gWaitingOnTerminateChildProcess) {
-    gMonitor->Wait();
-  }
-
-  mProcess = nullptr;
-}
-
-/* static */ void
-ChildProcess::Terminate(ipc::GeckoChildProcessHost* aProcess)
-{
-  // The destructor for GeckoChildProcessHost will teardown the child process.
-  delete aProcess;
-
-  MonitorAutoLock lock(*gMonitor);
-  MOZ_RELEASE_ASSERT(gWaitingOnTerminateChildProcess);
-  gWaitingOnTerminateChildProcess = false;
-  gMonitor->Notify();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -506,7 +492,7 @@ ChildProcess::Terminate(ipc::GeckoChildProcessHost* aProcess)
 static const size_t MaxRestarts = 5;
 
 bool
-ChildProcess::CanRestart()
+ChildProcessInfo::CanRestart()
 {
   return gRestartEnabled
       && !IsRecording()
@@ -516,7 +502,7 @@ ChildProcess::CanRestart()
 }
 
 void
-ChildProcess::AttemptRestart(const char* aWhy)
+ChildProcessInfo::AttemptRestart(const char* aWhy)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -530,7 +516,7 @@ ChildProcess::AttemptRestart(const char* aWhy)
 
   mNumRestarts++;
 
-  TerminateSubprocess();
+  dom::ContentChild::GetSingleton()->SendTerminateReplayingProcess(mChannel->GetId());
 
   bool newPaused = mPaused;
   Message* newPausedMessage = mPausedMessage;
@@ -539,7 +525,7 @@ ChildProcess::AttemptRestart(const char* aWhy)
   mPausedMessage = nullptr;
 
   size_t newLastCheckpoint = mLastCheckpoint;
-  mLastCheckpoint = InvalidCheckpointId;
+  mLastCheckpoint = CheckpointId::Invalid;
 
   InfallibleVector<Message*> newMessages;
   newMessages.append(mMessages.begin(), mMessages.length());
@@ -574,7 +560,7 @@ ChildProcess::AttemptRestart(const char* aWhy)
 // processed yet. This is protected by gMonitor.
 struct PendingMessage
 {
-  ChildProcess* mProcess;
+  ChildProcessInfo* mProcess;
   size_t mChannelId;
   Message* mMsg;
 };
@@ -588,7 +574,7 @@ static bool gHasPendingMessageRunnable;
 // and return whether such a message was found. This must be called on the main
 // thread with gMonitor held.
 /* static */ bool
-ChildProcess::MaybeProcessPendingMessage(ChildProcess* aProcess)
+ChildProcessInfo::MaybeProcessPendingMessage(ChildProcessInfo* aProcess)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -612,7 +598,7 @@ ChildProcess::MaybeProcessPendingMessage(ChildProcess* aProcess)
 static const size_t HangSeconds = 5;
 
 void
-ChildProcess::WaitUntil(const std::function<bool()>& aCallback)
+ChildProcessInfo::WaitUntil(const std::function<bool()>& aCallback)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -637,7 +623,7 @@ ChildProcess::WaitUntil(const std::function<bool()>& aCallback)
 // Runnable created on the main thread to handle any tasks sent by the replay
 // message loop thread which were not handled while the main thread was blocked.
 /* static */ void
-ChildProcess::MaybeProcessPendingMessageRunnable()
+ChildProcessInfo::MaybeProcessPendingMessageRunnable()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MonitorAutoLock lock(*gMonitor);
@@ -650,7 +636,7 @@ ChildProcess::MaybeProcessPendingMessageRunnable()
 // called on a channel thread, and the function executes asynchronously on
 // the main thread.
 void
-ChildProcess::ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg)
+ChildProcessInfo::ReceiveChildMessageOnMainThread(size_t aChannelId, Message* aMsg)
 {
   MOZ_RELEASE_ASSERT(!NS_IsMainThread());
 

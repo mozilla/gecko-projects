@@ -723,10 +723,11 @@ public:
 static bool
 DirectMessageToMiddleman(const nsAString& aMessage)
 {
-  nsCString cmsg = NS_ConvertUTF16toUTF8(aMessage);
-  const char* cstr = cmsg.get();
-  return strncmp(cstr, "debug:", 6) == 0
-      || strcmp(cstr, "SessionStore:flush") == 0;
+  // Middleman processes run developer tools server code and need to receive
+  // debugger related messages. The session store flush message needs to be
+  // received in order to cleanly shutdown the process.
+  return StringBeginsWith(aMessage, NS_LITERAL_STRING("debug:"))
+      || aMessage.EqualsLiteral("SessionStore:flush");
 }
 
 void

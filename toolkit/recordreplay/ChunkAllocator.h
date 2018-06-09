@@ -31,7 +31,7 @@ class ChunkAllocator
   {
     uint8_t mStorage[PageSize - sizeof(Chunk*)];
     ChunkPointer mNext;
-    Chunk() { PodZero(this); }
+    Chunk() : mStorage{}, mNext(nullptr) {}
 
     static size_t MaxThings() {
       return sizeof(mStorage) / sizeof(T);
@@ -54,9 +54,14 @@ class ChunkAllocator
     }
   }
 
+  ChunkAllocator(const ChunkAllocator&) = delete;
+  ChunkAllocator& operator=(const ChunkAllocator&) = delete;
+
 public:
   // ChunkAllocators are allocated in static storage and should not have
   // constructors. Their memory will be initially zero.
+  ChunkAllocator() = default;
+  ~ChunkAllocator() = default;
 
   // Get an existing entry from the allocator.
   inline T* Get(size_t aId) {
@@ -68,8 +73,8 @@ public:
     return chunk->GetThing(aId);
   }
 
-  // Get an existing entry from the allocator, or null. This may return an etry
-  // that has not been created yet.
+  // Get an existing entry from the allocator, or null. This may return an
+  // entry that has not been created yet.
   inline T* MaybeGet(size_t aId) {
     return (aId < mCapacity) ? Get(aId) : nullptr;
   }

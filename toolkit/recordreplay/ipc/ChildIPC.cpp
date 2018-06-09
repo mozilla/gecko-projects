@@ -22,6 +22,7 @@
 #include "InfallibleVector.h"
 #include "MemorySnapshot.h"
 #include "Monitor.h"
+#include "ParentInternal.h"
 #include "ProcessRecordReplay.h"
 #include "ProcessRedirect.h"
 #include "ProcessRewind.h"
@@ -58,7 +59,8 @@ static size_t gShmemPrefsLen;
 static FileHandle gCheckpointWriteFd;
 static FileHandle gCheckpointReadFd;
 
-// Copy of the introduction message we got from the middleman.
+// Copy of the introduction message we got from the middleman. This is saved on
+// receipt and then processed during InitRecordingOrReplayingProcess.
 static IntroductionMessage* gIntroductionMessage;
 
 // Processing routine for incoming channel messages.
@@ -71,6 +73,7 @@ ChannelMessageHandler(Message* aMsg)
 
   switch (aMsg->mType) {
   case MessageType::Introduction: {
+    MOZ_RELEASE_ASSERT(!gIntroductionMessage);
     gIntroductionMessage = (IntroductionMessage*) aMsg->Clone();
     break;
   }
@@ -123,7 +126,9 @@ ChannelMessageHandler(Message* aMsg)
   case MessageType::Resume: {
     const ResumeMessage& nmsg = (const ResumeMessage&) *aMsg;
     PauseMainThreadAndInvokeCallback([=]() {
-        // The hooks will not have been set yet for the primordial resume.
+        // Inform the debugger about the request to resume execution. The hooks
+        // will not have been set yet for the primordial resume, in which case
+        // just continue executing forward.
         if (JS::replay::hooks.resumeReplay) {
           JS::replay::hooks.resumeReplay(nmsg.mForward);
         } else {
@@ -152,9 +157,6 @@ PrefsShmemContents(size_t aPrefsLen)
   MOZ_RELEASE_ASSERT(aPrefsLen == gShmemPrefsLen);
   return gShmemPrefs;
 }
-
-// The singleton channel messaging thread.
-static PRThread* gChannelThread = nullptr;
 
 // Initialize hooks used by the replay debugger.
 static void InitDebuggerHooks();
@@ -185,23 +187,28 @@ ListenForCheckpointThreadMain(void*)
 void* gGraphicsShmem;
 
 void
-InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
-                                int* aArgc, char*** aArgv)
+InitRecordingOrReplayingProcess(int* aArgc, char*** aArgv)
 {
   if (!IsRecordingOrReplaying()) {
     return;
   }
 
-  gMiddlemanPid = aParentPid;
-
+  Maybe<int> middlemanPid;
   Maybe<int> channelID;
   for (int i = 0; i < *aArgc; i++) {
+    if (!strcmp((*aArgv)[i], gMiddlemanPidOption)) {
+      MOZ_RELEASE_ASSERT(middlemanPid.isNothing() && i + 1 < *aArgc);
+      middlemanPid.emplace(atoi((*aArgv)[i + 1]));
+    }
     if (!strcmp((*aArgv)[i], gChannelIDOption)) {
       MOZ_RELEASE_ASSERT(channelID.isNothing() && i + 1 < *aArgc);
       channelID.emplace(atoi((*aArgv)[i + 1]));
     }
   }
+  MOZ_RELEASE_ASSERT(middlemanPid.isSome());
   MOZ_RELEASE_ASSERT(channelID.isSome());
+
+  gMiddlemanPid = middlemanPid.ref();
 
   Maybe<AutoPassThroughThreadEvents> pt;
   pt.emplace();
@@ -220,28 +227,25 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
   pt.emplace();
 
   // Setup a mach port to receive the graphics shmem handle over.
-  char portName[128];
-  SprintfLiteral(portName, "WebReplay.%d.%d", gMiddlemanPid, channelID.ref());
-  ReceivePort receivePort(portName);
+  ReceivePort receivePort(nsPrintfCString("WebReplay.%d.%d", gMiddlemanPid, (int) channelID.ref()).get());
 
-  pt.reset();
+  MachSendMessage handshakeMessage(parent::GraphicsHandshakeMessageId);
+  handshakeMessage.AddDescriptor(MachMsgPortDescriptor(receivePort.GetPort(), MACH_MSG_TYPE_COPY_SEND));
 
-  // We are ready to receive initialization messages from the middleman, pause
-  // so they can be sent.
-  HitCheckpoint(InvalidCheckpointId, /* aRecordingEndpoint = */ false);
-
-  pt.emplace();
-
-  // The parent should have sent us a handle to the graphics shmem.
-  MachReceiveMessage message;
-  kern_return_t kr = receivePort.WaitForMessage(&message, 0);
+  MachPortSender sender(nsPrintfCString("WebReplay.%d", gMiddlemanPid).get());
+  kern_return_t kr = sender.SendMessage(handshakeMessage, 1000);
   MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
-  MOZ_RELEASE_ASSERT(message.GetMessageID() == GraphicsMessageId);
+
+  // The parent should send us a handle to the graphics shmem.
+  MachReceiveMessage message;
+  kr = receivePort.WaitForMessage(&message, 0);
+  MOZ_RELEASE_ASSERT(kr == KERN_SUCCESS);
+  MOZ_RELEASE_ASSERT(message.GetMessageID() == parent::GraphicsMemoryMessageId);
   mach_port_t graphicsPort = message.GetTranslatedPort(0);
   MOZ_RELEASE_ASSERT(graphicsPort != MACH_PORT_NULL);
 
   mach_vm_address_t address = 0;
-  kr = mach_vm_map(mach_task_self(), &address, GraphicsMemorySize, 0, VM_FLAGS_ANYWHERE,
+  kr = mach_vm_map(mach_task_self(), &address, parent::GraphicsMemorySize, 0, VM_FLAGS_ANYWHERE,
                    graphicsPort, 0, false,
                    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE,
                    VM_INHERIT_NONE);
@@ -251,6 +255,10 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   pt.reset();
 
+  // We are ready to receive initialization messages from the middleman, pause
+  // so they can be sent.
+  HitCheckpoint(CheckpointId::Invalid, /* aRecordingEndpoint = */ false);
+
   // Process the introduction message to fill in arguments.
   MOZ_RELEASE_ASSERT(!gShmemPrefs);
   MOZ_RELEASE_ASSERT(gParentArgv.empty());
@@ -259,22 +267,24 @@ InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
 
   // Record/replay the introduction message itself so we get consistent args
   // and prefs between recording and replaying.
-  size_t introductionSize = RecordReplayValue(gIntroductionMessage->mSize);
-  IntroductionMessage* msg = (IntroductionMessage*) malloc(introductionSize);
-  if (IsRecording()) {
-    memcpy(msg, gIntroductionMessage, introductionSize);
-  }
-  RecordReplayBytes(msg, introductionSize);
+  {
+    IntroductionMessage* msg = IntroductionMessage::RecordReplay(*gIntroductionMessage);
 
-  gShmemPrefs = new char[msg->mPrefsLen];
-  memcpy(gShmemPrefs, msg->PrefsData(), msg->mPrefsLen);
-  gShmemPrefsLen = msg->mPrefsLen;
+    gShmemPrefs = new char[msg->mPrefsLen];
+    memcpy(gShmemPrefs, msg->PrefsData(), msg->mPrefsLen);
+    gShmemPrefsLen = msg->mPrefsLen;
 
-  const char* pos = msg->ArgvString();
-  for (size_t i = 0; i < msg->mArgc; i++) {
-    gParentArgv.append(strdup(pos));
-    pos += strlen(pos) + 1;
+    const char* pos = msg->ArgvString();
+    for (size_t i = 0; i < msg->mArgc; i++) {
+      gParentArgv.append(strdup(pos));
+      pos += strlen(pos) + 1;
+    }
+
+    free(msg);
   }
+
+  free(gIntroductionMessage);
+  gIntroductionMessage = nullptr;
 
   // Some argument manipulation code expects a null pointer at the end.
   gParentArgv.append(nullptr);
@@ -329,7 +339,6 @@ ReportFatalError(const char* aFormat, ...)
   DirectPrint(buf);
   DirectPrint("\n");
 
-  DeleteSnapshotFiles();
   UnrecoverableSnapshotFailure();
 
   // Block until we get a terminate message and die.
@@ -394,7 +403,7 @@ DrawTargetForRemoteDrawing(LayoutDeviceIntSize aSize)
 
   gfx::IntSize size(aSize.width, aSize.height);
   size_t bufferSize = layers::ImageDataSerializer::ComputeRGBBufferSize(size, gSurfaceFormat);
-  MOZ_RELEASE_ASSERT(bufferSize <= GraphicsMemorySize);
+  MOZ_RELEASE_ASSERT(bufferSize <= parent::GraphicsMemorySize);
 
   if (bufferSize != gGraphicsMemorySize) {
     free(gGraphicsMemory);
@@ -455,10 +464,10 @@ NotifyPaintComplete()
 ///////////////////////////////////////////////////////////////////////////////
 
 // When recording, the time when the last HitCheckpoint message was sent.
-double gLastCheckpointTime;
+static double gLastCheckpointTime;
 
 // When recording and we are idle, the time when we became idle.
-double gIdleTimeStart;
+static double gIdleTimeStart;
 
 void
 BeginIdleTime()
@@ -485,7 +494,7 @@ HitCheckpoint(size_t aId, bool aRecordingEndpoint)
   double time = CurrentTime();
   PauseMainThreadAndInvokeCallback([=]() {
       double duration = 0;
-      if (aId > FirstCheckpointId) {
+      if (aId > CheckpointId::First) {
         duration = time - gLastCheckpointTime;
         MOZ_RELEASE_ASSERT(duration > 0);
       }
@@ -531,6 +540,7 @@ PauseAfterRecoveringFromDivergence()
 static void
 InitDebuggerHooks()
 {
+  // Initialize hooks the JS debugger in a recording/replaying process can invoke.
   JS::replay::hooks.hitBreakpointReplay = HitBreakpoint;
   JS::replay::hooks.hitCheckpointReplay = HitCheckpoint;
   JS::replay::hooks.debugResponseReplay = DebuggerResponseHook;

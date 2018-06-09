@@ -112,6 +112,7 @@
 #include "nsConsoleService.h"
 #include "nsContentUtils.h"
 #include "nsDebugImpl.h"
+#include "nsDirectoryServiceDefs.h"
 #include "nsEmbedCID.h"
 #include "nsFrameLoader.h"
 #include "nsFrameMessageManager.h"
@@ -605,8 +606,8 @@ ContentParent::PreallocateProcess()
   RefPtr<ContentParent> process =
     new ContentParent(/* aOpener = */ nullptr,
                       NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE),
-                      /* aRecordExecution = */ nsString(),
-                      /* aReplayExecution = */ nsString());
+                      eNotRecordingOrReplaying,
+                      /* aRecordingFile = */ EmptyString());
 
   PreallocatedProcessManager::AddBlocker(process);
 
@@ -762,6 +763,17 @@ ContentParent::MinTabSelect(const nsTArray<ContentParent*>& aContentParents,
   return candidate.forget();
 }
 
+static bool
+CreateTemporaryRecordingFile(nsAString& aResult)
+{
+  unsigned long elapsed = (TimeStamp::Now() - TimeStamp::ProcessCreation()).ToMilliseconds();
+
+  nsCOMPtr<nsIFile> file;
+  return !NS_FAILED(NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(file)))
+      && !NS_FAILED(file->AppendNative(nsPrintfCString("Recording%lu", elapsed)))
+      && !NS_FAILED(file->GetPath(aResult));
+}
+
 /*static*/ already_AddRefed<ContentParent>
 ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
                                           const nsAString& aRemoteType,
@@ -769,17 +781,31 @@ ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
                                           ContentParent* aOpener,
                                           bool aPreferUsed)
 {
-  nsAutoString recordExecution;
-  nsAutoString replayExecution;
+  // Figure out if this process will be recording or replaying, and which file
+  // to use for the recording.
+  RecordReplayState recordReplayState = eNotRecordingOrReplaying;
+  nsAutoString recordingFile;
   if (aFrameElement) {
-    aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::RecordExecution, recordExecution);
-    aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::ReplayExecution, replayExecution);
+    aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::ReplayExecution, recordingFile);
+    if (!recordingFile.IsEmpty()) {
+      recordReplayState = eReplaying;
+    } else {
+      aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::RecordExecution, recordingFile);
+      if (recordingFile.IsEmpty() && recordreplay::parent::SaveAllRecordingsDirectory()) {
+        recordingFile = NS_LITERAL_STRING("*");
+      }
+      if (!recordingFile.IsEmpty()) {
+        if (recordingFile.EqualsLiteral("*") && !CreateTemporaryRecordingFile(recordingFile)) {
+          return nullptr;
+        }
+        recordReplayState = eRecording;
+      }
+    }
   }
 
   nsTArray<ContentParent*>& contentParents = GetOrCreatePool(aRemoteType);
   uint32_t maxContentParents = GetMaxProcessCount(aRemoteType);
-  if (recordExecution.Length() || replayExecution.Length() ||
-      recordreplay::parent::SaveAllRecordingsDirectory()) {
+  if (recordReplayState != eNotRecordingOrReplaying) {
     // Fall through and always create a new process when recording or replaying.
   } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     // We never want to re-use Large-Allocation processes.
@@ -843,7 +869,7 @@ ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
   }
 
   // Create a new process from scratch.
-  RefPtr<ContentParent> p = new ContentParent(aOpener, aRemoteType, recordExecution, replayExecution);
+  RefPtr<ContentParent> p = new ContentParent(aOpener, aRemoteType, recordReplayState, recordingFile);
 
   // Until the new process is ready let's not allow to start up any preallocated processes.
   PreallocatedProcessManager::AddBlocker(p);
@@ -852,7 +878,7 @@ ContentParent::GetNewOrUsedBrowserProcess(Element* aFrameElement,
     return nullptr;
   }
 
-  if (!recordExecution.Length() && !replayExecution.Length()) {
+  if (recordReplayState == eNotRecordingOrReplaying) {
     contentParents.AppendElement(p);
   }
 
@@ -1406,12 +1432,14 @@ ContentParent::ShutDownProcess(ShutDownMethod aMethod)
   if (aMethod == SEND_SHUTDOWN_MESSAGE) {
     if (const char* directory = recordreplay::parent::SaveAllRecordingsDirectory()) {
       // Save a recording for the child process before it shuts down.
-      char file[64];
-      strcpy(file, "RecordingXXXXXX");
-      char buf[1024];
-      SprintfLiteral(buf, "%s/%s", directory, mktemp(file));
-      fprintf(stderr, "Saving Recording: %s\n", buf);
-      SaveRecording(nsAutoCString(buf));
+      unsigned long elapsed = (TimeStamp::Now() - TimeStamp::ProcessCreation()).ToMilliseconds();
+      nsCOMPtr<nsIFile> file;
+      if (!NS_FAILED(NS_NewNativeLocalFile(nsDependentCString(directory), false,
+                                           getter_AddRefs(file))) &&
+          !NS_FAILED(file->AppendNative(nsPrintfCString("Recording%lu", elapsed)))) {
+        bool unused;
+        SaveRecording(file, &unused);
+      }
     }
 
     if (mIPCOpen && !mShutdownPending) {
@@ -1796,6 +1824,14 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
                                  DelayedDeleteSubprocess, mSubprocess));
   mSubprocess = nullptr;
 
+  // Delete any remaining replaying children.
+  for (auto& replayingProcess : mReplayingChildren) {
+    if (replayingProcess) {
+      DelayedDeleteSubprocess(replayingProcess);
+      replayingProcess = nullptr;
+    }
+  }
+
   // IPDL rules require actors to live on past ActorDestroy, but it
   // may be that the kungFuDeathGrip above is the last reference to
   // |this|.  If so, when we go out of scope here, we're deleted and
@@ -1983,6 +2019,50 @@ ContentParent::NotifyTabDestroyed(const TabId& aTabId,
   }
 }
 
+mozilla::ipc::IPCResult
+ContentParent::RecvOpenRecordReplayChannel(const uint32_t& aChannelId,
+                                           FileDescriptor* aConnection)
+{
+  recordreplay::parent::OpenChannel(Pid(), aChannelId, aConnection);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvCreateReplayingProcess(const uint32_t& aChannelId)
+{
+  while (aChannelId >= mReplayingChildren.length()) {
+    if (!mReplayingChildren.append(nullptr)) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+  }
+  if (mReplayingChildren[aChannelId]) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  std::vector<std::string> extraArgs;
+  recordreplay::parent::GetArgumentsForChildProcess(Pid(), aChannelId,
+                                                    NS_ConvertUTF16toUTF8(mRecordingFile).get(),
+                                                    /* aRecording = */ false,
+                                                    extraArgs);
+
+  mReplayingChildren[aChannelId] = new GeckoChildProcessHost(GeckoProcessType_Content);
+  if (!mReplayingChildren[aChannelId]->LaunchAndWaitForProcessHandle(extraArgs)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvTerminateReplayingProcess(const uint32_t& aChannelId)
+{
+  if (aChannelId < mReplayingChildren.length() && mReplayingChildren[aChannelId]) {
+    DelayedDeleteSubprocess(mReplayingChildren[aChannelId]);
+    mReplayingChildren[aChannelId] = nullptr;
+  }
+  return IPC_OK();
+}
+
 jsipc::CPOWManager*
 ContentParent::GetCPOWManager()
 {
@@ -2089,24 +2169,15 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   extraArgs.push_back(parentBuildID.get());
 
   // Specify whether the process is recording or replaying an execution.
-  if (mReplayExecution.Length()) {
-    char buf[20];
-    SprintfLiteral(buf, "%d", (int) recordreplay::ProcessKind::MiddlemanReplaying);
+  if (mRecordReplayState != eNotRecordingOrReplaying) {
+    nsPrintfCString buf("%d", mRecordReplayState == eRecording
+                              ? (int) recordreplay::ProcessKind::MiddlemanRecording
+                              : (int) recordreplay::ProcessKind::MiddlemanReplaying);
     extraArgs.push_back(recordreplay::gProcessKindOption);
-    extraArgs.push_back(buf);
+    extraArgs.push_back(buf.get());
 
     extraArgs.push_back(recordreplay::gRecordingFileOption);
-    extraArgs.push_back(NS_ConvertUTF16toUTF8(mReplayExecution).get());
-  } else if (mRecordExecution.Length() || recordreplay::parent::SaveAllRecordingsDirectory()) {
-    MOZ_RELEASE_ASSERT(!mRecordExecution.Length() ||
-                       (mRecordExecution.Length() == 1 && mRecordExecution[0] == '*'));
-    char buf[20];
-    SprintfLiteral(buf, "%d", (int) recordreplay::ProcessKind::MiddlemanRecording);
-    extraArgs.push_back(recordreplay::gProcessKindOption);
-    extraArgs.push_back(buf);
-
-    extraArgs.push_back(recordreplay::gRecordingFileOption);
-    extraArgs.push_back("*");
+    extraArgs.push_back(NS_ConvertUTF16toUTF8(mRecordingFile).get());
   }
 
   SetOtherProcessId(kInvalidProcessId, ProcessIdState::ePending);
@@ -2147,8 +2218,8 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
 
 ContentParent::ContentParent(ContentParent* aOpener,
                              const nsAString& aRemoteType,
-                             const nsAString& aRecordExecution,
-                             const nsAString& aReplayExecution,
+                             RecordReplayState aRecordReplayState,
+                             const nsAString& aRecordingFile,
                              int32_t aJSPluginID)
   : nsIContentParent()
   , mSubprocess(nullptr)
@@ -2163,8 +2234,8 @@ ContentParent::ContentParent(ContentParent* aOpener,
   , mIsAvailable(true)
   , mIsAlive(true)
   , mIsForBrowser(!mRemoteType.IsEmpty())
-  , mRecordExecution(aRecordExecution)
-  , mReplayExecution(aReplayExecution)
+  , mRecordReplayState(aRecordReplayState)
+  , mRecordingFile(aRecordingFile)
   , mCalledClose(false)
   , mCalledKillHard(false)
   , mCreatedPairedMinidumps(false)
@@ -5721,16 +5792,29 @@ ContentParent::CanCommunicateWith(ContentParentId aOtherProcess)
   return parentId == aOtherProcess;
 }
 
-bool
-ContentParent::SaveRecording(const nsACString& aFilename)
+nsresult
+ContentParent::SaveRecording(nsIFile* aFile, bool* aRetval)
 {
-  if (mRecordExecution.Length() ||
-      (recordreplay::parent::SaveAllRecordingsDirectory() && !mReplayExecution.Length())) {
-    nsCString filename(aFilename);
-    Unused << SendSaveRecording(filename);
-    return true;
+  if (mRecordReplayState != eRecording) {
+    *aRetval = false;
+    return NS_OK;
   }
-  return false;
+
+  PRFileDesc* prfd;
+  nsresult rv = aFile->OpenNSPRFileDesc(PR_WRONLY | PR_TRUNCATE | PR_CREATE_FILE, 0644, &prfd);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  FileDescriptor::PlatformHandleType handle =
+    FileDescriptor::PlatformHandleType(PR_FileDesc2NativeHandle(prfd));
+
+  Unused << SendSaveRecording(FileDescriptor(handle));
+
+  PR_Close(prfd);
+
+  *aRetval = true;
+  return NS_OK;
 }
 
 mozilla::ipc::IPCResult

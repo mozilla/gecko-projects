@@ -716,7 +716,7 @@ public:
   DeallocPClientOpenWindowOpChild(PClientOpenWindowOpChild* aActor) override;
 
   mozilla::ipc::IPCResult
-  RecvSaveRecording(const nsCString& filename) override;
+  RecvSaveRecording(const FileDescriptor& aFile) override;
 
 #ifdef NIGHTLY_BUILD
   // Fetch the current number of pending input events.
