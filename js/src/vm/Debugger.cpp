@@ -734,7 +734,14 @@ Debugger::isReplayingChildJSObject(const JSObject* obj)
 NativeObject*
 Debugger::createChildObject(JSContext* cx, const Class* clasp, HandleObject proto, bool replaying)
 {
-    MOZ_RELEASE_ASSERT(!!replayDebugger() == replaying);
+    if (replayDebugger() && !replaying) {
+        JS_ReportErrorASCII(cx, "Replaying debugger cannot create non-replaying debuggee value");
+        return nullptr;
+    }
+    if (!replayDebugger() && replaying) {
+        JS_ReportErrorASCII(cx, "Debugger cannot create replaying debuggee value");
+        return nullptr;
+    }
     NativeObject* obj = NewNativeObjectWithGivenProto(cx, clasp, proto, TenuredObject);
     if (!obj)
         return nullptr;
@@ -3596,6 +3603,46 @@ Debugger::setOnNewGlobalObject(JSContext* cx, unsigned argc, Value* vp)
 }
 
 /* static */ bool
+Debugger::getOnReplayForcedPause(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGGER(cx, argc, vp, "(get onReplayForcedPause)", args, dbg);
+    if (dbg->replayDebugger())
+        return dbg->replayDebugger()->getOnForcedPause(cx, args.rval());
+    args.rval().setUndefined();
+    return true;
+}
+
+/* static */ bool
+Debugger::setOnReplayForcedPause(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGGER(cx, argc, vp, "(set onReplayForcedPause)", args, dbg);
+    if (dbg->replayDebugger())
+        return dbg->replayDebugger()->setOnForcedPause(cx, args[0]);
+    JS_ReportErrorASCII(cx, "onReplayForcedPause can only be used with replay debuggers");
+    return false;
+}
+
+/* static */ bool
+Debugger::getOnConsoleMessage(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGGER(cx, argc, vp, "(get onConsoleMessage)", args, dbg);
+    if (dbg->replayDebugger())
+        return dbg->replayDebugger()->getOnConsoleMessage(cx, args.rval());
+    args.rval().setUndefined();
+    return true;
+}
+
+/* static */ bool
+Debugger::setOnConsoleMessage(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGGER(cx, argc, vp, "(set onConsoleMessage)", args, dbg);
+    if (dbg->replayDebugger())
+        return dbg->replayDebugger()->setOnConsoleMessage(cx, args[0]);
+    JS_ReportErrorASCII(cx, "onConsoleMessage can only be used with replay debuggers");
+    return false;
+}
+
+/* static */ bool
 Debugger::getUncaughtExceptionHook(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "get uncaughtExceptionHook", args, dbg);
@@ -5140,6 +5187,17 @@ Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp)
 }
 
 /* static */ bool
+Debugger::findAllConsoleMessages(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGGER(cx, argc, vp, "findAllConsoleMessages", args, dbg);
+    if (!dbg->replayDebugger()) {
+        JS_ReportErrorASCII(cx, "findAllConsoleMessages requires a replaying debugger");
+        return false;
+    }
+    return dbg->replayDebugger()->findAllConsoleMessages(cx, args.rval());
+}
+
+/* static */ bool
 Debugger::makeGlobalObjectReference(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGGER(cx, argc, vp, "makeGlobalObjectReference", args, dbg);
@@ -5199,6 +5257,20 @@ Debugger::replayPause(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
     dbg->replayDebugger()->pause();
+    args.rval().setUndefined();
+    return true;
+}
+
+/* static */ bool
+Debugger::replayTimeWarp(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGGER(cx, argc, vp, "replayTimeWarp", args, dbg);
+    if (!dbg->replayDebugger()) {
+        JS_ReportErrorASCII(cx, "replayTimeWarp requires a replaying debugger");
+        return false;
+    }
+    if (!dbg->replayDebugger()->timeWarp(cx, args[0]))
+        return false;
     args.rval().setUndefined();
     return true;
 }
@@ -5316,6 +5388,9 @@ const JSPropertySpec Debugger::properties[] = {
     JS_PSGS("onEnterFrame", Debugger::getOnEnterFrame, Debugger::setOnEnterFrame, 0),
     JS_PSGS("onPopFrame", Debugger::getOnPopFrame, Debugger::setOnPopFrame, 0),
     JS_PSGS("onNewGlobalObject", Debugger::getOnNewGlobalObject, Debugger::setOnNewGlobalObject, 0),
+    JS_PSGS("onReplayForcedPause", Debugger::getOnReplayForcedPause,
+            Debugger::setOnReplayForcedPause, 0),
+    JS_PSGS("onConsoleMessage", Debugger::getOnConsoleMessage, Debugger::setOnConsoleMessage, 0),
     JS_PSGS("uncaughtExceptionHook", Debugger::getUncaughtExceptionHook,
             Debugger::setUncaughtExceptionHook, 0),
     JS_PSGS("allowUnobservedAsmJS", Debugger::getAllowUnobservedAsmJS,
@@ -5341,10 +5416,12 @@ const JSFunctionSpec Debugger::methods[] = {
     JS_FN("findScripts", Debugger::findScripts, 1, 0),
     JS_FN("findObjects", Debugger::findObjects, 1, 0),
     JS_FN("findAllGlobals", Debugger::findAllGlobals, 0, 0),
+    JS_FN("findAllConsoleMessages", Debugger::findAllConsoleMessages, 0, 0),
     JS_FN("makeGlobalObjectReference", Debugger::makeGlobalObjectReference, 1, 0),
     JS_FN("replayResumeBackward", Debugger::replayResumeBackward, 0, 0),
     JS_FN("replayResumeForward", Debugger::replayResumeForward, 0, 0),
     JS_FN("replayPause", Debugger::replayPause, 0, 0),
+    JS_FN("replayTimeWarp", Debugger::replayTimeWarp, 1, 0),
     JS_FN("replayingContent", Debugger::replayingContent, 1, 0),
     JS_FN("adoptDebuggeeValue", Debugger::adoptDebuggeeValue, 1, 0),
     JS_FS_END

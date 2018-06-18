@@ -107,6 +107,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this._dbg.onDebuggerStatement = this.onDebuggerStatement;
       this._dbg.onNewScript = this.onNewScript;
       this._dbg.on("newGlobal", this.onNewGlobal);
+      if (this._dbg.replaying) {
+        this._dbg.onReplayForcedPause = this.onReplayForcedPause.bind(this);
+      }
       // Keep the debugger disabled until a client attaches.
       this._dbg.enabled = this._state != "detached";
     }
@@ -275,20 +278,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     this.dbg.addDebuggees();
     this.dbg.enabled = true;
     try {
+      if (this.dbg.replaying) {
+        this.dbg.replayPause();
+      }
+
       // Put ourselves in the paused state.
-      let packet = this._paused();
-      if (!packet) {
+      if (!this._pauseAndRespond(null, { type: "attached" })) {
         return { error: "notAttached" };
       }
-      packet.why = { type: "attached" };
-
-      // Send the response to the attach request now (rather than
-      // returning it), because we're going to start a nested event loop
-      // here.
-      this.conn.send(packet);
-
-      // Start a nested event loop.
-      this._pushThreadPause();
 
       // We already sent a response to this request, don't send one
       // now.
@@ -332,11 +329,34 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   },
 
   /**
+   * Send a packet after modifying it through a callback.
+   *
+   * @param object
+   *        Packet to send.
+   * @param function onPacket
+   *        Hook to modify the packet before it is sent. Feel free to return a
+   *        promise.
+   */
+  sendPacket: function(packet, onPacket) {
+    Promise.resolve(onPacket(packet))
+      .catch(error => {
+        reportError(error);
+        return {
+          error: "unknownError",
+          message: error.message + "\n" + error.stack
+        };
+      })
+      .then(pkt => {
+        this.conn.send(pkt);
+      });
+  },
+
+  /**
    * Pause the debuggee, by entering a nested event loop, and return a 'paused'
    * packet to the client.
    *
    * @param Debugger.Frame frame
-   *        The newest debuggee frame in the stack.
+   *        The newest debuggee frame in the stack, or null.
    * @param object reason
    *        An object with a 'type' property containing the reason for the pause.
    * @param function onPacket
@@ -351,41 +371,34 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
       packet.why = reason;
 
-      let generatedLocation = this.sources.getFrameLocation(frame);
-      this.sources.getOriginalLocation(generatedLocation).then((originalLocation) => {
-        if (!originalLocation.originalSourceActor) {
-          // The only time the source actor will be null is if there
-          // was a sourcemap and it tried to look up the original
-          // location but there was no original URL. This is a strange
-          // scenario so we simply don't pause.
-          DevToolsUtils.reportException(
-            "ThreadActor",
-            new Error("Attempted to pause in a script with a sourcemap but " +
-                      "could not find original location.")
-          );
+      if (frame) {
+        let generatedLocation = this.sources.getFrameLocation(frame);
+        this.sources.getOriginalLocation(generatedLocation).then((originalLocation) => {
+          if (!originalLocation.originalSourceActor) {
+            // The only time the source actor will be null is if there
+            // was a sourcemap and it tried to look up the original
+            // location but there was no original URL. This is a strange
+            // scenario so we simply don't pause.
+            DevToolsUtils.reportException(
+              "ThreadActor",
+              new Error("Attempted to pause in a script with a sourcemap but " +
+                        "could not find original location.")
+            );
+            return undefined;
+          }
+
+          packet.frame.where = {
+            source: originalLocation.originalSourceActor.form(),
+            line: originalLocation.originalLine,
+            column: originalLocation.originalColumn
+          };
+
+          this.sendPacket(packet, onPacket);
           return undefined;
-        }
-
-        packet.frame.where = {
-          source: originalLocation.originalSourceActor.form(),
-          line: originalLocation.originalLine,
-          column: originalLocation.originalColumn
-        };
-
-        Promise.resolve(onPacket(packet))
-          .catch(error => {
-            reportError(error);
-            return {
-              error: "unknownError",
-              message: error.message + "\n" + error.stack
-            };
-          })
-          .then(pkt => {
-            this.conn.send(pkt);
-          });
-
-        return undefined;
-      });
+        });
+      } else {
+        this.sendPacket(packet, onPacket);
+      }
 
       this._pushThreadPause();
     } catch (e) {
@@ -628,11 +641,16 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   _handleResumeLimit: async function(request) {
     let steppingType = request.resumeLimit.type;
     let rewinding = request.rewind;
-    if (!["break", "step", "next", "finish"].includes(steppingType)) {
+    if (!["break", "step", "next", "finish", "warp"].includes(steppingType)) {
       return Promise.reject({
         error: "badParameterType",
         message: "Unknown resumeLimit type"
       });
+    }
+
+    if (steppingType == "warp") {
+      // Time warp resume limits are handled by the caller.
+      return true;
     }
 
     const generatedLocation = this.sources.getFrameLocation(this.youngestFrame);
@@ -782,7 +800,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       // When replaying execution in a separate process we need to explicitly
       // notify that process when to resume execution.
       if (this.dbg.replaying) {
-        if (rewinding)
+        if (request && request.resumeLimit && request.resumeLimit.type == "warp")
+          this.dbg.replayTimeWarp(request.resumeLimit.target);
+        else if (rewinding)
           this.dbg.replayResumeBackward();
         else
           this.dbg.replayResumeForward();
@@ -1152,22 +1172,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
       // If execution should pause immediately, just put ourselves in the paused
       // state.
-      let packet = this._paused();
-      if (!packet) {
-        return { error: "notInterrupted" };
-      }
+      //
       // onNext is set while replaying so that the client will treat us as paused
       // at a breakpoint. When replaying we may need to pause and interact with
       // the server even if there are no frames on the stack.
-      packet.why = { type: "interrupted", onNext: this.dbg.replaying };
-
-      // Send the response to the interrupt request now (rather than
-      // returning it), because we're going to start a nested event loop
-      // here.
-      this.conn.send(packet);
-
-      // Start a nested event loop.
-      this._pushThreadPause();
+      if (!this._pauseAndRespond(null, { type: "interrupted", onNext: this.dbg.replaying })) {
+        return { error: "notInterrupted" };
+      }
 
       // We already sent a response to this request, don't send one
       // now.
@@ -1598,6 +1609,18 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return this.sources.isBlackBoxed(url) || frame.onStep
       ? undefined
       : this._pauseAndRespond(frame, { type: "debuggerStatement" });
+  },
+
+  /**
+   * A function that the engine calls when replay has hit a point where it will
+   * pause, even if no breakpoint has been set. Such points include hitting the
+   * beginning or end of the replay, or reaching the target of a time warp.
+   *
+   * @param frame Debugger.Frame
+   *        The youngest stack frame, or null.
+   */
+  onReplayForcedPause: function(frame) {
+    return this._pauseAndRespond(frame, { type: "replayForcedPause" });
   },
 
   /**

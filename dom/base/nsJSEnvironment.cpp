@@ -471,7 +471,7 @@ public:
     if (status != nsEventStatus_eConsumeNoDefault) {
       JS::Rooted<JSObject*> stack(rootingCx,
         xpc::FindExceptionStackForConsoleReport(win, mError));
-      mReport->LogToConsoleWithStack(stack);
+      mReport->LogToConsoleWithStack(stack, JS::ExceptionTimeWarpTarget(mError));
     }
 
     return NS_OK;

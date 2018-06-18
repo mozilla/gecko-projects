@@ -271,6 +271,12 @@ Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
     snprintf(data, 128, "Forward %d", nmsg.mForward);
     break;
   }
+  case MessageType::RestoreCheckpoint: {
+    const RestoreCheckpointMessage& nmsg = (const RestoreCheckpointMessage&) aMsg;
+    data = new char[128];
+    snprintf(data, 128, "Id %d", (int) nmsg.mCheckpoint);
+    break;
+  }
   case MessageType::SetBreakpoint: {
     const SetBreakpointMessage& nmsg = (const SetBreakpointMessage&) aMsg;
     data = new char[128];

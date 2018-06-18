@@ -174,6 +174,7 @@ function transformConsoleAPICallPacket(packet) {
     userProvidedStyles: message.styles,
     prefix: message.prefix,
     private: message.private,
+    executionPoint: message.executionPoint,
   });
 }
 
@@ -234,6 +235,7 @@ function transformPageErrorPacket(packet) {
     timeStamp: pageError.timeStamp,
     notes: pageError.notes,
     private: pageError.private,
+    executionPoint: pageError.executionPoint,
   });
 }
 

@@ -16,6 +16,7 @@ const { MESSAGE_SOURCE } = require("devtools/client/webconsole/constants");
 
 const clipboardHelper = require("devtools/shared/platform/clipboard");
 const { l10n } = require("devtools/client/webconsole/utils/messages");
+const { getMessage } = require("devtools/client/webconsole/selectors/messages");
 
 /**
  * Create a Menu instance for the webconsole.
@@ -35,6 +36,8 @@ const { l10n } = require("devtools/client/webconsole/utils/messages");
  *        - {Function} openSidebar (optional) function that will open the object
  *            inspector sidebar
  *        - {String} rootActorId (optional) actor id for the root object being clicked on
+ *        - {Object} executionPoint (optional) when replaying, the execution point where
+ *            this message was logged
  */
 function createContextMenu(hud, parentNode, {
   actor,
@@ -44,6 +47,7 @@ function createContextMenu(hud, parentNode, {
   serviceContainer,
   openSidebar,
   rootActorId,
+  executionPoint,
 }) {
   let win = parentNode.ownerDocument.defaultView;
   let selection = win.getSelection();
@@ -178,6 +182,20 @@ function createContextMenu(hud, parentNode, {
       accesskey: l10n.getStr("webconsole.menu.openInSidebar.accesskey"),
       disabled: !rootActorId,
       click: () => openSidebar(message.messageId),
+    }));
+  }
+
+  // Add time warp option if available.
+  if (executionPoint) {
+    menu.append(new MenuItem({
+      id: "console-menu-time-warp",
+      label: l10n.getStr("webconsole.menu.timeWarp.label"),
+      disabled: false,
+      click: () => {
+        let toolbox = gDevTools.getToolbox(hud.owner.target);
+        let threadClient = toolbox.threadClient;
+        threadClient.timeWarp(executionPoint);
+      },
     }));
   }
 

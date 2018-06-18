@@ -70,7 +70,6 @@ async function takeScreenshot(dbg) {
 async function attachDebugger(tab) {
   let target = TargetFactory.forTab(tab);
   let toolbox = await gDevTools.showToolbox(target, "jsdebugger");
-  ok(toolbox.threadClient.state == "resuming", "Thread is attached");
   return toolbox.threadClient;
 }
 
@@ -86,8 +85,9 @@ async function setBreakpoint(threadClient, expectedFile, lineno) {
 function resumeThenPauseAtLineFunctionFactory(method) {
   return async function(threadClient, lineno) {
     threadClient[method]();
-    await threadClient.addOneTimeListener("paused", function(event, packet) {
-      let frameLine = ("frame" in packet) ? packet.frame.where.line : undefined;
+    await threadClient.addOneTimeListener("paused", async function(event, packet) {
+      let {frames} = await threadClient.getFrames(0, 1);
+      let frameLine = frames[0] ? frames[0].where.line : undefined;
       ok(frameLine == lineno, "Paused at line " + frameLine + " expected " + lineno);
     });
   };
@@ -154,3 +154,4 @@ ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
 PromiseTestUtils.whitelistRejectionsGlobally(/No such actor for ID/);
 PromiseTestUtils.whitelistRejectionsGlobally(/Component not initialized/);
 PromiseTestUtils.whitelistRejectionsGlobally(/this.worker is null/);
+PromiseTestUtils.whitelistRejectionsGlobally(/frame is undefined/);

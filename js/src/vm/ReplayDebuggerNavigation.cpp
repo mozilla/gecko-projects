@@ -178,6 +178,11 @@ class NavigationPhase
         unsupported("restoreCheckpoint");
     }
 
+    // Called after the middleman tells us to run forward to a specific point.
+    virtual void runToPoint(const ExecutionPoint& target) {
+        unsupported("runToPoint");
+    }
+
     // Process an incoming debugger request from the middleman.
     virtual void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) {
         unsupported("handleDebuggerRequest");
@@ -227,7 +232,8 @@ typedef Vector<RequestInfo, 4, UntrackedAllocPolicy> UntrackedRequestVector;
 
 typedef Vector<uint32_t, 0, SystemAllocPolicy> BreakpointVector;
 
-// Phase when the replaying process is paused at a breakpoint.
+// Phase when the replaying process is paused at any intra-checkpoint point,
+// which may or may not have any breakpoints.
 class BreakpointPausedPhase : public NavigationPhase
 {
     // Where the pause is at.
@@ -249,7 +255,8 @@ class BreakpointPausedPhase : public NavigationPhase
     bool mResumeForward;
 
   public:
-    void enter(const ExecutionPoint& point, const BreakpointVector& breakpoints);
+    void enter(const ExecutionPoint& point, bool atRecordingEndpoint,
+               const BreakpointVector& breakpoints);
 
     void toString(Sprinter& sp) override {
         sp.printf("BreakpointPaused RecoveringFromDivergence %d", mRecoveringFromDivergence);
@@ -284,6 +291,7 @@ class CheckpointPausedPhase : public NavigationPhase
     void positionHit(const ExecutionPoint& point) override;
     void resume(bool forward) override;
     void restoreCheckpoint(size_t checkpoint) override;
+    void runToPoint(const ExecutionPoint& point) override;
     void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) override;
     ExecutionPoint getRecordingEndpoint() override;
 };
@@ -329,8 +337,8 @@ class ReachBreakpointPhase : public NavigationPhase
     TimeStamp mStartTime;
 
   public:
-    // Note: this always rewinds.
     void enter(const CheckpointId& start,
+               bool rewind,
                const ExecutionPoint& point,
                const Maybe<ExecutionPoint>& temporaryCheckpoint);
 
@@ -454,6 +462,9 @@ class NavigationState
     // of how much time has elapsed.
     bool mAlwaysSaveTemporaryCheckpoints;
 
+    // Checkpoints for all time warp targets that have been generated.
+    Vector<std::pair<uint64_t, size_t>, 0, UntrackedAllocPolicy> mTimeWarpTargetCheckpoints;
+
     // Note: NavigationState is initially zeroed.
     NavigationState()
       : mPhase(&mForwardPhase)
@@ -501,6 +512,10 @@ class NavigationState
 
     void restoreCheckpoint(size_t checkpoint) {
         mPhase->restoreCheckpoint(checkpoint);
+    }
+
+    void runToPoint(const ExecutionPoint& target) {
+        mPhase->runToPoint(target);
     }
 
     void handleDebuggerRequest(JS::replay::CharBuffer* requestBuffer) {
@@ -588,7 +603,8 @@ ThisProcessCanRewind()
 }
 
 void
-BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector& breakpoints)
+BreakpointPausedPhase::enter(const ExecutionPoint& point, bool atRecordingEndpoint,
+                             const BreakpointVector& breakpoints)
 {
     MOZ_RELEASE_ASSERT(point.hasPosition());
 
@@ -626,8 +642,8 @@ BreakpointPausedPhase::enter(const ExecutionPoint& point, const BreakpointVector
         }
     }
 
-    bool endpoint = breakpoints.empty();
-    JS::replay::hooks.hitBreakpointReplay(endpoint, breakpoints.begin(), breakpoints.length());
+    JS::replay::hooks.hitBreakpointReplay(atRecordingEndpoint,
+                                          breakpoints.begin(), breakpoints.length());
 
     // When rewinding is allowed we will rewind before resuming to erase side effects.
     MOZ_RELEASE_ASSERT(!ThisProcessCanRewind());
@@ -826,7 +842,17 @@ CheckpointPausedPhase::resume(bool forward)
 void
 CheckpointPausedPhase::restoreCheckpoint(size_t checkpoint)
 {
-    enter(checkpoint, /* rewind = */ true, /* atRecordingEndpoint = */ false);
+    bool rewind = checkpoint != mCheckpoint;
+    enter(checkpoint, rewind, /* atRecordingEndpoint = */ false);
+}
+
+void
+CheckpointPausedPhase::runToPoint(const ExecutionPoint& point)
+{
+    MOZ_RELEASE_ASSERT(point.checkpoint == mCheckpoint);
+    ResumeExecution();
+    gNavigation->mReachBreakpointPhase.enter(CheckpointId(point.checkpoint), /* rewind = */ false,
+                                             point, /* temporaryCheckpoint = */ Nothing());
 }
 
 void
@@ -881,8 +907,10 @@ ForwardPhase::positionHit(const ExecutionPoint& point)
     BreakpointVector hitBreakpoints;
     GetAllBreakpointHits(point, hitBreakpoints);
 
-    if (!hitBreakpoints.empty())
-        gNavigation->mBreakpointPausedPhase.enter(point, hitBreakpoints);
+    if (!hitBreakpoints.empty()) {
+        gNavigation->mBreakpointPausedPhase.enter(point, /* atRecordingEndpoint = */ false,
+                                                  hitBreakpoints);
+    }
 }
 
 void
@@ -890,7 +918,8 @@ ForwardPhase::hitRecordingEndpoint(const ExecutionPoint& point)
 {
     if (point.hasPosition()) {
         BreakpointVector emptyBreakpoints;
-        gNavigation->mBreakpointPausedPhase.enter(point, emptyBreakpoints);
+        gNavigation->mBreakpointPausedPhase.enter(point, /* atRecordingEndpoint = */ true,
+                                                  emptyBreakpoints);
     } else {
         gNavigation->mCheckpointPausedPhase.enter(point.checkpoint, /* rewind = */ false,
                                                   /* atRecordingEndpoint = */ true);
@@ -903,6 +932,7 @@ ForwardPhase::hitRecordingEndpoint(const ExecutionPoint& point)
 
 void
 ReachBreakpointPhase::enter(const CheckpointId& start,
+                            bool rewind,
                             const ExecutionPoint& point,
                             const Maybe<ExecutionPoint>& temporaryCheckpoint)
 {
@@ -917,8 +947,12 @@ ReachBreakpointPhase::enter(const CheckpointId& start,
 
     gNavigation->setPhase(this);
 
-    RestoreCheckpointAndResume(start);
-    MOZ_CRASH("Unreachable");
+    if (rewind) {
+        RestoreCheckpointAndResume(start);
+        MOZ_CRASH("Unreachable");
+    } else {
+        afterCheckpoint(start);
+    }
 }
 
 void
@@ -972,9 +1006,8 @@ ReachBreakpointPhase::positionHit(const ExecutionPoint& point)
     if (mPoint == point) {
         BreakpointVector hitBreakpoints;
         GetAllBreakpointHits(point, hitBreakpoints);
-        MOZ_RELEASE_ASSERT(!hitBreakpoints.empty());
-
-        gNavigation->mBreakpointPausedPhase.enter(point, hitBreakpoints);
+        gNavigation->mBreakpointPausedPhase.enter(point, /* atRecordingEndpoint = */ false,
+                                                  hitBreakpoints);
     }
 }
 
@@ -1131,7 +1164,8 @@ FindLastHitPhase::onRegionEnd()
         if (tracked.lastHit.hasPosition() &&
             tracked.lastHitCount < lastBreakpoint.ref().lastHitCount)
         {
-            gNavigation->mReachBreakpointPhase.enter(mStart, lastBreakpoint.ref().lastHit,
+            gNavigation->mReachBreakpointPhase.enter(mStart, /* rewind = */ true,
+                                                     lastBreakpoint.ref().lastHit,
                                                      Some(tracked.lastHit));
             MOZ_CRASH("Unreachable");
         }
@@ -1139,7 +1173,8 @@ FindLastHitPhase::onRegionEnd()
 
     // There was no suitable place for a temporary checkpoint, so rewind to the
     // last checkpoint and play forward to the last breakpoint hit we found.
-    gNavigation->mReachBreakpointPhase.enter(mStart, lastBreakpoint.ref().lastHit, Nothing());
+    gNavigation->mReachBreakpointPhase.enter(mStart, /* rewind = */ true,
+                                             lastBreakpoint.ref().lastHit, Nothing());
     MOZ_CRASH("Unreachable");
 }
 
@@ -1150,11 +1185,11 @@ FindLastHitPhase::onRegionEnd()
 // Replay phases can install handlers on ExecutionPositions that call back
 // into the phase's positionHit method when the position is reached.
 
-static ExecutionPoint
-NewExecutionPoint(const ExecutionPosition& pos)
+/* static */ ExecutionPoint
+ReplayDebugger::NewExecutionPoint(const ExecutionPosition& pos)
 {
     return ExecutionPoint(gNavigation->lastCheckpoint().mNormal,
-                          ReplayDebugger::gProgressCounter, pos);
+                          gProgressCounter, pos);
 }
 
 // Handler installed for hits on a script/pc.
@@ -1174,7 +1209,7 @@ ScriptPcHandler(JSContext* cx, unsigned argc, Value* vp)
     size_t frameIndex = ReplayDebugger::CountScriptFrames(cx) - 1;
 
     ExecutionPosition pos(ExecutionPosition::OnStep, scriptId, offset, frameIndex);
-    gNavigation->positionHit(NewExecutionPoint(pos));
+    gNavigation->positionHit(ReplayDebugger::NewExecutionPoint(pos));
 
     args.rval().setUndefined();
     return true;
@@ -1186,7 +1221,7 @@ EnterFrameHandler(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     ExecutionPosition pos(ExecutionPosition::EnterFrame);
-    gNavigation->positionHit(NewExecutionPoint(pos));
+    gNavigation->positionHit(ReplayDebugger::NewExecutionPoint(pos));
 
     args.rval().setUndefined();
     return true;
@@ -1204,7 +1239,7 @@ ReplayDebugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* 
     if (!scriptId)
         return ok;
 
-    size_t frameIndex = ReplayDebugger::CountScriptFrames(cx) - 1;
+    size_t frameIndex = CountScriptFrames(cx) - 1;
 
     // Update the frame return state in case we hit a breakpoint here.
     gPopFrameThrowing = !ok;
@@ -1297,6 +1332,9 @@ class DebuggerHandlerManager
             break;
           }
           case ExecutionPosition::NewScript:
+          case ExecutionPosition::ConsoleMessage:
+          case ExecutionPosition::ForcedPause:
+          case ExecutionPosition::WarpTarget:
             break;
           default:
             MOZ_CRASH("Bad execution position kind");
@@ -1360,6 +1398,50 @@ ReplayDebugger::HandleBreakpointsForNewScript(JSScript* script, size_t scriptId,
         ExecutionPosition pos(ExecutionPosition::NewScript);
         gNavigation->positionHit(NewExecutionPoint(pos));
     }
+}
+
+/* static */ void
+ReplayDebugger::HandleBreakpointsForConsoleMessage()
+{
+    ExecutionPosition pos(ExecutionPosition::ConsoleMessage);
+    gNavigation->positionHit(NewExecutionPoint(pos));
+}
+
+/* static */ uint64_t
+ReplayDebugger::newTimeWarpTarget(JSContext* cx)
+{
+    if (cx->runtime() != gMainRuntime)
+        return 0;
+
+    uint64_t progress = ++gProgressCounter;
+
+    ExecutionPosition pos(ExecutionPosition::WarpTarget);
+    gNavigation->positionHit(NewExecutionPoint(pos));
+
+    if (gNavigation->mTimeWarpTargetCheckpoints.empty() ||
+        progress > gNavigation->mTimeWarpTargetCheckpoints.back().first)
+    {
+        size_t checkpoint = gNavigation->lastCheckpoint().mNormal;
+        TRY(gNavigation->mTimeWarpTargetCheckpoints.emplaceBack(progress, checkpoint));
+    }
+
+    return progress;
+}
+
+/* static */ ExecutionPoint
+ReplayDebugger::WarpTargetExecutionPoint(uint64_t timeWarpTarget)
+{
+    Maybe<size_t> checkpoint;
+    for (auto entry : gNavigation->mTimeWarpTargetCheckpoints) {
+        if (entry.first == timeWarpTarget) {
+            checkpoint.emplace(entry.second);
+            break;
+        }
+    }
+    MOZ_RELEASE_ASSERT(checkpoint.isSome());
+
+    return ExecutionPoint(checkpoint.ref(), timeWarpTarget,
+                          ExecutionPosition(ExecutionPosition::WarpTarget));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1444,6 +1526,12 @@ RestoreCheckpointHook(size_t id)
 }
 
 static void
+RunToPointHook(const ExecutionPoint& point)
+{
+    gNavigation->runToPoint(point);
+}
+
+static void
 RespondAfterRecoveringFromDivergenceHook()
 {
     MOZ_RELEASE_ASSERT(gNavigation->mPhase == &gNavigation->mBreakpointPausedPhase);
@@ -1479,11 +1567,13 @@ ReplayDebugger::Initialize()
         JS::replay::hooks.debugRequestReplay = DebugRequestHook;
         JS::replay::hooks.resumeReplay = ResumeHook;
         JS::replay::hooks.restoreCheckpointReplay = RestoreCheckpointHook;
+        JS::replay::hooks.runToPointReplay = RunToPointHook;
         JS::replay::hooks.respondAfterRecoveringFromDivergence = RespondAfterRecoveringFromDivergenceHook;
         JS::replay::hooks.setBreakpointReplay = SetBreakpointHook;
         JS::replay::hooks.alwaysSaveTemporaryCheckpoints = AlwaysSaveTemporaryCheckpointsHook;
         JS::replay::hooks.getRecordingEndpoint = GetRecordingEndpointHook;
         JS::replay::hooks.setRecordingEndpoint = SetRecordingEndpointHook;
+        JS::replay::hooks.consoleMessageReplay = ReplayDebugger::onConsoleMessage;
 
         SetCheckpointHooks(::BeforeCheckpointHook, ::AfterCheckpointHook);
     }

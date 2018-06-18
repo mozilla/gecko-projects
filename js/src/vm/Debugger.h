@@ -699,6 +699,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool setOnNewPromise(JSContext* cx, unsigned argc, Value* vp);
     static bool getOnPromiseSettled(JSContext* cx, unsigned argc, Value* vp);
     static bool setOnPromiseSettled(JSContext* cx, unsigned argc, Value* vp);
+    static bool getOnReplayForcedPause(JSContext* cx, unsigned argc, Value* vp);
+    static bool setOnReplayForcedPause(JSContext* cx, unsigned argc, Value* vp);
+    static bool getOnConsoleMessage(JSContext* cx, unsigned argc, Value* vp);
+    static bool setOnConsoleMessage(JSContext* cx, unsigned argc, Value* vp);
     static bool getUncaughtExceptionHook(JSContext* cx, unsigned argc, Value* vp);
     static bool setUncaughtExceptionHook(JSContext* cx, unsigned argc, Value* vp);
     static bool getAllowUnobservedAsmJS(JSContext* cx, unsigned argc, Value* vp);
@@ -720,10 +724,12 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static bool findScripts(JSContext* cx, unsigned argc, Value* vp);
     static bool findObjects(JSContext* cx, unsigned argc, Value* vp);
     static bool findAllGlobals(JSContext* cx, unsigned argc, Value* vp);
+    static bool findAllConsoleMessages(JSContext* cx, unsigned argc, Value* vp);
     static bool makeGlobalObjectReference(JSContext* cx, unsigned argc, Value* vp);
     static bool replayResumeBackward(JSContext* cx, unsigned argc, Value* vp);
     static bool replayResumeForward(JSContext* cx, unsigned argc, Value* vp);
     static bool replayPause(JSContext* cx, unsigned argc, Value* vp);
+    static bool replayTimeWarp(JSContext* cx, unsigned argc, Value* vp);
     static bool replayingContent(JSContext* cx, unsigned argc, Value* vp);
     static bool setupTraceLoggerScriptCalls(JSContext* cx, unsigned argc, Value* vp);
     static bool drainTraceLoggerScriptCalls(JSContext* cx, unsigned argc, Value* vp);

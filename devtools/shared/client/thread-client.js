@@ -1,3 +1,4 @@
+/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -242,6 +243,25 @@ ThreadClient.prototype = {
    */
   breakOnNext: function(onResponse) {
     return this._doInterrupt("onNext", onResponse);
+  },
+
+  /**
+   * Warp through time to an execution point in the past or future.
+   *
+   * @param object aTarget
+   *        Description of the warp destination.
+   * @param function aOnResponse
+   *        Called with the response packet.
+   */
+  timeWarp: function(aTarget, aOnResponse) {
+    let warp = () => {
+      this._doResume({ type: "warp", target: aTarget }, true, aOnResponse);
+    };
+    if (this.paused) {
+      warp();
+    } else {
+      this.interrupt(warp);
+    }
   },
 
   /**

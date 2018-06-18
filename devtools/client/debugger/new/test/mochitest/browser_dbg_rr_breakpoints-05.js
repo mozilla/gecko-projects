@@ -15,8 +15,9 @@ async function test() {
 
   let client = await attachDebugger(tab);
   await client.interrupt();
-  client.rewind();
-  await once(Services.ppmm, "HitRecordingBeginning");
+
+  // Rewind to the beginning of the recording.
+  await rewindToLine(client, undefined);
 
   await setBreakpoint(client, "doc_rr_basic.html", 21);
   await resumeToLine(client, 21);

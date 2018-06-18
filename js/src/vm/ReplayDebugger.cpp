@@ -13,6 +13,10 @@
 
 using namespace js;
 using mozilla::Maybe;
+using mozilla::Nothing;
+using mozilla::Some;
+using JS::replay::ExecutionPosition;
+using JS::replay::ExecutionPoint;
 
 #define TRY(op) do { if (!(op)) MOZ_CRASH(#op); } while (false)
 
@@ -107,6 +111,22 @@ void
 ReplayDebugger::pause()
 {
     JS::replay::hooks.pauseMiddleman();
+}
+
+static Maybe<ExecutionPoint> DecodeExecutionPoint(JSContext* cx, HandleValue point);
+
+bool
+ReplayDebugger::timeWarp(JSContext* cx, HandleValue target)
+{
+    Maybe<ExecutionPoint> targetPoint = DecodeExecutionPoint(cx, target);
+    if (targetPoint.isNothing()) {
+        JS_ReportErrorASCII(cx, "Could not decode time warp target");
+        return false;
+    }
+    for (ReplayDebugger* dbg : gReplayDebuggers)
+        dbg->invalidateAfterUnpause();
+    JS::replay::hooks.timeWarpMiddleman(targetPoint.ref());
+    return true;
 }
 
 bool
@@ -322,10 +342,11 @@ struct ReplayDebugger::Activity
         return handlify(str ? StringValue(str) : NullValue());
     }
 
-    size_t getMaybeScalarProperty(HandleObject obj, const char* property) {
+    size_t getMaybeScalarProperty(HandleObject obj, const char* property,
+                                  size_t defaultValue = 0) {
         HandleValue v = getValueProperty(obj, property);
         if (v.isUndefined())
-            return 0;
+            return defaultValue;
         return valueToScalar(v);
     }
 
@@ -335,6 +356,40 @@ struct ReplayDebugger::Activity
 
     void defineProperty(HandleObject obj, const char* property, const char16_t* v) {
         defineProperty(obj, property, handlify(v));
+    }
+
+    HandleObject newExecutionPoint(const ExecutionPoint& point) {
+        HandleObject res = newObject();
+        defineProperty(res, "checkpoint", point.checkpoint);
+        defineProperty(res, "progress", point.progress);
+        defineProperty(res, "kind", point.position.kind);
+        if (point.position.script != ExecutionPosition::EMPTY_SCRIPT)
+            defineProperty(res, "script", point.position.script);
+        if (point.position.offset != ExecutionPosition::EMPTY_OFFSET)
+            defineProperty(res, "offset", point.position.offset);
+        if (point.position.frameIndex != ExecutionPosition::EMPTY_FRAME_INDEX)
+            defineProperty(res, "frameIndex", point.position.frameIndex);
+        return res;
+    }
+
+    Maybe<ExecutionPoint> decodeExecutionPoint(HandleValue value) {
+        if (!value.isObject())
+            return Nothing();
+        HandleObject point = handlify(&value.toObject());
+        size_t checkpoint = getScalarProperty(point, "checkpoint");
+        uint64_t progress = getScalarProperty(point, "progress");
+        ExecutionPosition::Kind kind =
+            (ExecutionPosition::Kind) getScalarProperty(point, "kind");
+        size_t script = getMaybeScalarProperty(point, "script",
+                                               ExecutionPosition::EMPTY_SCRIPT);
+        size_t offset = getMaybeScalarProperty(point, "offset",
+                                               ExecutionPosition::EMPTY_OFFSET);
+        size_t frameIndex = getMaybeScalarProperty(point, "frameIndex",
+                                                   ExecutionPosition::EMPTY_FRAME_INDEX);
+        if (!success())
+            return Nothing();
+        return Some(ExecutionPoint(checkpoint, progress,
+                                   ExecutionPosition(kind, script, offset, frameIndex)));
     }
 
     HandleObject sendRequest(HandleObject request);
@@ -496,6 +551,13 @@ ReplayDebugger::Activity::sendRequest(HandleObject request)
         return nullptr;
     }
     return response;
+}
+
+static Maybe<ExecutionPoint>
+DecodeExecutionPoint(JSContext* cx, HandleValue point)
+{
+    ReplayDebugger::Activity a(cx);
+    return a.decodeExecutionPoint(point);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -874,8 +936,6 @@ ReplayDebugger::getNewestFrame(JSContext* cx, MutableHandleValue rv)
         HandleObject data = a.getObjectData(obj);
         if (a.getStringProperty(data, "type"))
             rv.setObject(*obj);
-    } else {
-        rv.setNull();
     }
     return a.success();
 }
@@ -1545,10 +1605,21 @@ ReplayDebugger::envVariable(JSContext* cx, HandleObject obj, CallArgs& args)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Breakpoints
+// Console message functions
 ///////////////////////////////////////////////////////////////////////////////
 
-typedef JS::replay::ExecutionPosition ExecutionPosition;
+bool
+ReplayDebugger::findAllConsoleMessages(JSContext* cx, MutableHandleValue rv)
+{
+    Activity a(cx);
+    HandleObject request = a.newRequestObject("findConsoleMessages");
+    rv.setObjectOrNull(a.sendRequest(request));
+    return a.success();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Breakpoints
+///////////////////////////////////////////////////////////////////////////////
 
 struct ReplayDebugger::Breakpoint
 {
@@ -1870,6 +1941,56 @@ ReplayDebugger::setOnPopFrame(JSContext* cx, HandleValue handler)
 }
 
 bool
+ReplayDebugger::getOnForcedPause(JSContext* cx, MutableHandleValue rv)
+{
+    JS_ReportErrorASCII(cx, "get onForcedPause is NYI on replay debuggers");
+    return false;
+}
+
+bool
+ReplayDebugger::setOnForcedPause(JSContext* cx, HandleValue handler)
+{
+    if (handler.isUndefined()) {
+        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+                return breakpoint.position.kind == ExecutionPosition::ForcedPause;
+            });
+        return true;
+    }
+    if (!handler.isObject()) {
+        JS_ReportErrorASCII(cx, "onForcedPause handler must be an object");
+        return false;
+    }
+
+    ExecutionPosition position(ExecutionPosition::ForcedPause);
+    return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
+}
+
+bool
+ReplayDebugger::getOnConsoleMessage(JSContext* cx, MutableHandleValue rv)
+{
+    JS_ReportErrorASCII(cx, "get onConsoleMessage is NYI on replay debuggers");
+    return false;
+}
+
+bool
+ReplayDebugger::setOnConsoleMessage(JSContext* cx, HandleValue handler)
+{
+    if (handler.isUndefined()) {
+        ClearReplayBreakpoints(cx, debugger, [=](const Breakpoint& breakpoint) {
+                return breakpoint.position.kind == ExecutionPosition::ConsoleMessage;
+            });
+        return true;
+    }
+    if (!handler.isObject()) {
+        JS_ReportErrorASCII(cx, "onConsoleMessage handler must be an object");
+        return false;
+    }
+
+    ExecutionPosition position(ExecutionPosition::ConsoleMessage);
+    return SetReplayBreakpoint(cx, debugger->toJSObject(), &handler.toObject(), position);
+}
+
+bool
 ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
 {
     RootedObject handler(cx, breakpoint->handler);
@@ -1885,6 +2006,7 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
             return false;
         break;
       case ExecutionPosition::OnStep:
+      case ExecutionPosition::ForcedPause:
         if (!Call(cx, handlerValue, frameValue, &rv))
             return false;
         break;
@@ -1929,6 +2051,15 @@ ReplayDebugger::hitBreakpoint(JSContext* cx, Breakpoint* breakpoint)
         RootedValue scriptValue(cx, ObjectValue(*obj));
 
         if (!Call(cx, handlerValue, debuggerValue, scriptValue, &rv))
+            return false;
+        break;
+      }
+      case ExecutionPosition::ConsoleMessage: {
+        Activity a(cx);
+        HandleObject request = a.newRequestObject("getNewConsoleMessage");
+        HandleObject message = a.sendRequest(request);
+        RootedValue messageValue(cx, ObjectValue(*message));
+        if (!Call(cx, handlerValue, debuggerValue, messageValue, &rv))
             return false;
         break;
       }
@@ -2200,6 +2331,96 @@ ReplayDebugger::onNewScript(JSContext* cx, HandleScript script, bool toplevel)
     HandleBreakpointsForNewScript(script, gDebuggerScripts.length() - 1, toplevel);
 }
 
+static HandleObject
+CloneObjectForJSON(ReplayDebugger::Activity& a, HandleObject obj,
+                   MutableHandle<GCVector<JSObject*>> seen)
+{
+    MOZ_RELEASE_ASSERT(!mozilla::recordreplay::AreThreadEventsDisallowed());
+
+    for (JSObject* existing : seen) {
+        if (existing == obj)
+            return nullptr;
+    }
+    if (!seen.append(obj))
+        return nullptr;
+
+    HandleObject result = obj->is<ArrayObject>() ? a.newArray() : a.newObject();
+
+    Rooted<IdVector> props(a.cx, IdVector(a.cx));
+    {
+        AutoCompartment ac(a.cx, obj);
+        if (!JS_Enumerate(a.cx, obj, &props)) {
+            JS_ClearPendingException(a.cx);
+            return result;
+        }
+    }
+    for (size_t i = 0; i < props.length(); i++) {
+        a.cx->markId(props[i]);
+        RootedValue v(a.cx);
+        {
+            AutoCompartment ac(a.cx, obj);
+            if (!JS_GetPropertyById(a.cx, obj, props[i], &v)) {
+                JS_ClearPendingException(a.cx);
+                continue;
+            }
+        }
+        RootedValue nv(a.cx, v);
+        if (v.isObject()) {
+            if (v.toObject().is<JSFunction>())
+                continue;
+            nv.setObjectOrNull(CloneObjectForJSON(a, a.handlify(&v.toObject()), seen));
+        } else if (!a.cx->compartment()->wrap(a.cx, &nv)) {
+            return nullptr;
+        }
+        if (!JS_DefinePropertyById(a.cx, result, props[i], nv, JSPROP_ENUMERATE))
+            return nullptr;
+    }
+    return result;
+}
+
+static Vector<JSObject*, 0, SystemAllocPolicy> gDebuggerConsoleMessages;
+
+/* static */ void
+ReplayDebugger::onConsoleMessage(JSContext* cx, const char* messageType, HandleValue event,
+                                 uint64_t timeWarpTarget)
+{
+    MOZ_RELEASE_ASSERT(mozilla::recordreplay::IsRecordingOrReplaying());
+
+    if (mozilla::recordreplay::AreThreadEventsDisallowed() || cx->runtime() != gMainRuntime)
+        return;
+
+    // Each console message advances the progress counter, to preserve the
+    // ProgressCounter invariant as for onNewScript.
+    gProgressCounter++;
+
+    // If a warp target was provided, use that for this console message,
+    // otherwise the warp target is the current execution point.
+    ExecutionPoint point =
+        timeWarpTarget
+        ? WarpTargetExecutionPoint(timeWarpTarget)
+        : NewExecutionPoint(ExecutionPosition(ExecutionPosition::ConsoleMessage));
+
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+
+    if (gDebuggerConsoleMessages.empty() && !gDebuggerConsoleMessages.append(nullptr))
+        oomUnsafe.crash("ReplayDebugger::onConsoleMessage");
+
+    Rooted<GCVector<JSObject*>> seen(cx, GCVector<JSObject*>(cx));
+    RootedObject obj(cx, &event.toObject());
+
+    AutoCompartment ac(cx, *gHookGlobal);
+
+    Activity a(cx);
+    HandleObject res = CloneObjectForJSON(a, obj, &seen);
+    a.defineProperty(res, "messageType", messageType);
+    a.defineProperty(res, "executionPoint", a.newExecutionPoint(point));
+
+    if (!a.success() || !gDebuggerConsoleMessages.append(res))
+        oomUnsafe.crash("ReplayDebugger::onConsoleMessage");
+
+    HandleBreakpointsForConsoleMessage();
+}
+
 /* static */ void
 ReplayDebugger::markRoots(JSTracer* trc)
 {
@@ -2211,6 +2432,8 @@ ReplayDebugger::markRoots(JSTracer* trc)
         TraceRoot(trc, &gDebuggerScripts[i], "ReplayDebugger::markRoots script");
     for (size_t i = 1; i < gDebuggerScriptSources.length(); i++)
         TraceRoot(trc, &gDebuggerScriptSources[i], "ReplayDebugger::markRoots script source");
+    for (size_t i = 1; i < gDebuggerConsoleMessages.length(); i++)
+        TraceRoot(trc, &gDebuggerConsoleMessages[i], "ReplayDebugger::markRoots console message");
     for (size_t i = 1; i < gDebuggerPausedObjects.length(); i++)
         TraceRoot(trc, &gDebuggerPausedObjects[i], "ReplayDebugger::markRoots object");
 }
@@ -2400,6 +2623,22 @@ Respond_getNewScript(ReplayDebugger::Activity& a, HandleObject request)
 {
     MOZ_RELEASE_ASSERT(gDebuggerScripts.length() > 1);
     return ScriptDescriptorObject(a, gDebuggerScripts.length() - 1);
+}
+
+static HandleObject
+Respond_findConsoleMessages(ReplayDebugger::Activity& a, HandleObject request)
+{
+    HandleObject response = a.newArray();
+    for (size_t i = 1; i < gDebuggerConsoleMessages.length(); i++)
+        a.pushArray(response, a.handlify(gDebuggerConsoleMessages[i]));
+    return response;
+}
+
+static HandleObject
+Respond_getNewConsoleMessage(ReplayDebugger::Activity& a, HandleObject request)
+{
+    MOZ_RELEASE_ASSERT(gDebuggerConsoleMessages.length() > 1);
+    return a.handlify(gDebuggerConsoleMessages.back());
 }
 
 static HandleObject
@@ -2934,6 +3173,8 @@ Respond_popFrameResult(ReplayDebugger::Activity& a, HandleObject request)
 #define FOR_EACH_REQUEST(Macro)                 \
     Macro(findScripts)                          \
     Macro(getNewScript)                         \
+    Macro(findConsoleMessages)                  \
+    Macro(getNewConsoleMessage)                 \
     Macro(getContent)                           \
     Macro(getSource)                            \
     Macro(getStructure)                         \

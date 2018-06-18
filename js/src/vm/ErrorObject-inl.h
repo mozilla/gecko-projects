@@ -38,4 +38,10 @@ js::ErrorObject::stack() const
     return getReservedSlotRef(STACK_SLOT).toObjectOrNull();
 }
 
+inline uint64_t
+js::ErrorObject::timeWarpTarget() const
+{
+    return (uint64_t) getReservedSlot(TIME_WARP_SLOT).toDouble();
+}
+
 #endif /* vm_ErrorObject_inl_h */

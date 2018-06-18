@@ -349,12 +349,13 @@ ReplayingChildResponsibleForSavingCheckpoint(size_t aId)
   return (firstMajor < secondMajor) ? gSecondReplayingChild : gFirstReplayingChild;
 }
 
-// Return whether the active child is explicitly paused somewhere, or has
-// started rewinding after being explicitly paused. Standby roles must save all
-// intermediate checkpoints they are responsible for, in the range from their
-// most recent major checkpoint up to the checkpoint where the active child can
-// rewind to.
-static bool ActiveChildIsPausedOrRewinding();
+// Returns a checkpoint if the active child is explicitly paused swomewhere,
+// has started rewinding after being explicitly paused, or is attempting to
+// warp to an execution point. The checkpoint returned is the latest one which
+// should be saved, and standby roles must save all intermediate checkpoints
+// they are responsible for, in the range from their most recent major
+// checkpoint up to the returned checkpoint.
+static Maybe<size_t> ActiveChildTargetCheckpoint();
 
 // Notify a child it does not need to save aCheckpoint, unless it is a major
 // checkpoint for the child.
@@ -383,17 +384,16 @@ ChildRoleStandby::Poke()
   do {
     // Intermediate checkpoints are only saved when the active child is paused
     // or rewinding.
-    if (!ActiveChildIsPausedOrRewinding()) {
+    Maybe<size_t> targetCheckpoint = ActiveChildTargetCheckpoint();
+    if (targetCheckpoint.isNothing()) {
       break;
     }
 
     // The startpoint of the range is the most recent major checkpoint prior to
-    // the active child's position.
-    size_t targetCheckpoint = gActiveChild->RewindTargetCheckpoint();
-    size_t lastMajorCheckpoint = LastMajorCheckpointPreceding(mProcess, targetCheckpoint);
+    // the target.
+    size_t lastMajorCheckpoint = LastMajorCheckpointPreceding(mProcess, targetCheckpoint.ref());
 
-    // If there is no major checkpoint prior to the active child's position,
-    // just idle.
+    // If there is no major checkpoint prior to the target, just idle.
     if (lastMajorCheckpoint == CheckpointId::Invalid) {
       return;
     }
@@ -401,22 +401,24 @@ ChildRoleStandby::Poke()
     // If we haven't reached the last major checkpoint, we need to run forward
     // without saving intermediate checkpoints.
     if (mProcess->LastCheckpoint() < lastMajorCheckpoint) {
-      break;
+      ClearIfSavedNonMajorCheckpoint(mProcess, mProcess->LastCheckpoint() + 1);
+      mProcess->SendMessage(ResumeMessage(/* aForward = */ true));
+      return;
     }
 
     // The endpoint of the range is the checkpoint prior to either the active
     // child's current position, or the other replaying child's most recent
     // major checkpoint.
     size_t otherMajorCheckpoint =
-      LastMajorCheckpointPreceding(OtherReplayingChild(mProcess), targetCheckpoint);
+      LastMajorCheckpointPreceding(OtherReplayingChild(mProcess), targetCheckpoint.ref());
     if (otherMajorCheckpoint > lastMajorCheckpoint) {
-      MOZ_RELEASE_ASSERT(otherMajorCheckpoint <= targetCheckpoint);
-      targetCheckpoint = otherMajorCheckpoint - 1;
+      MOZ_RELEASE_ASSERT(otherMajorCheckpoint <= targetCheckpoint.ref());
+      targetCheckpoint.ref() = otherMajorCheckpoint - 1;
     }
 
     // Find the first checkpoint in the fill range which we have not saved.
     Maybe<size_t> missingCheckpoint;
-    for (size_t i = lastMajorCheckpoint; i <= targetCheckpoint; i++) {
+    for (size_t i = lastMajorCheckpoint; i <= targetCheckpoint.ref(); i++) {
       if (!mProcess->HasSavedCheckpoint(i)) {
         missingCheckpoint.emplace(i);
         break;
@@ -573,13 +575,21 @@ SpawnReplayingChildren()
 
 // Change the current active child, and select a new role for the old one.
 static void
-SwitchActiveChild(ChildProcessInfo* aChild)
+SwitchActiveChild(ChildProcessInfo* aChild, bool aRecoverPosition = true)
 {
   MOZ_RELEASE_ASSERT(aChild != gActiveChild);
   ChildProcessInfo* oldActiveChild = gActiveChild;
   aChild->WaitUntilPaused();
   if (!aChild->IsRecording()) {
-    aChild->Recover(gActiveChild);
+    if (aRecoverPosition) {
+      aChild->Recover(gActiveChild);
+    } else {
+      Vector<SetBreakpointMessage*> breakpoints;
+      gActiveChild->GetInstalledBreakpoints(breakpoints);
+      for (SetBreakpointMessage* msg : breakpoints) {
+        aChild->SendMessage(*msg);
+      }
+    }
   }
   aChild->SetRole(MakeUnique<ChildRoleActive>());
   if (oldActiveChild->IsRecording()) {
@@ -745,6 +755,9 @@ SaveRecording(const ipc::FileDescriptor& aFile)
 // checkpoint that needs to be saved for the child to rewind.
 static size_t gLastExplicitPause;
 
+// Any checkpoint we are trying to warp to and pause.
+static Maybe<size_t> gTimeWarpTarget;
+
 static bool
 HasSavedCheckpointsInRange(ChildProcessInfo* aChild, size_t aStart, size_t aEnd)
 {
@@ -764,7 +777,8 @@ static bool
 IsUserBreakpoint(JS::replay::ExecutionPosition::Kind aKind)
 {
   MOZ_RELEASE_ASSERT(aKind != JS::replay::ExecutionPosition::Invalid);
-  return aKind != JS::replay::ExecutionPosition::NewScript;
+  return aKind != JS::replay::ExecutionPosition::NewScript
+      && aKind != JS::replay::ExecutionPosition::ConsoleMessage;
 }
 
 static void
@@ -810,10 +824,16 @@ MarkActiveChildExplicitPause()
   PokeChildren();
 }
 
-static bool
-ActiveChildIsPausedOrRewinding()
+static Maybe<size_t>
+ActiveChildTargetCheckpoint()
 {
-  return gActiveChild->RewindTargetCheckpoint() <= gLastExplicitPause;
+  if (gTimeWarpTarget.isSome()) {
+    return gTimeWarpTarget;
+  }
+  if (gActiveChild->RewindTargetCheckpoint() <= gLastExplicitPause) {
+    return Some(gActiveChild->RewindTargetCheckpoint());
+  }
+  return Nothing();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -938,6 +958,9 @@ static bool gChildExecuteBackward = false;
 // main thread. This will continue execution in the preferred direction.
 static bool gResumeForwardOrBackward = false;
 
+// Hit any breakpoints installed for forced pauses.
+static void HitForcedPauseBreakpoints(bool aRecordingBoundary);
+
 static void
 HookResume(bool aForward)
 {
@@ -951,19 +974,20 @@ HookResume(bool aForward)
   // When rewinding, make sure the active child can rewind to the previous
   // checkpoint.
   if (!aForward && !gActiveChild->HasSavedCheckpoint(gActiveChild->RewindTargetCheckpoint())) {
-    MOZ_RELEASE_ASSERT(ActiveChildIsPausedOrRewinding());
     size_t targetCheckpoint = gActiveChild->RewindTargetCheckpoint();
 
     // Don't rewind if we are at the beginning of the recording.
     if (targetCheckpoint == CheckpointId::Invalid) {
       SendMessageToUIProcess("HitRecordingBeginning");
+      HitForcedPauseBreakpoints(true);
       return;
     }
 
     // Find the replaying child responsible for saving the target checkpoint.
     // We should have explicitly paused before rewinding and given fill roles
     // to the replaying children.
-    ChildProcessInfo* targetChild = ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint);
+    ChildProcessInfo* targetChild =
+      ReplayingChildResponsibleForSavingCheckpoint(targetCheckpoint);
     MOZ_RELEASE_ASSERT(targetChild != gActiveChild);
 
     // This process will be the new active child, so make sure it has saved the
@@ -982,8 +1006,8 @@ HookResume(bool aForward)
       // Look for a recording child we can transition into.
       MOZ_RELEASE_ASSERT(!gActiveChild->IsRecording());
       if (!gRecordingChild) {
-        MarkActiveChildExplicitPause();
         SendMessageToUIProcess("HitRecordingEndpoint");
+        HitForcedPauseBreakpoints(true);
         return;
       }
 
@@ -998,6 +1022,56 @@ HookResume(bool aForward)
   }
 
   gActiveChild->SendMessage(ResumeMessage(aForward));
+}
+
+static void
+HookTimeWarp(const JS::replay::ExecutionPoint& aTarget)
+{
+  gActiveChild->WaitUntilPaused();
+
+  // There is no preferred direction of travel after warping.
+  gResumeForwardOrBackward = false;
+  gChildExecuteForward = false;
+  gChildExecuteBackward = false;
+
+  // Make sure the active child can rewind to the checkpoint prior to the
+  // warp target.
+  MOZ_RELEASE_ASSERT(gTimeWarpTarget.isNothing());
+  gTimeWarpTarget.emplace(aTarget.checkpoint);
+
+  PokeChildren();
+
+  if (!gActiveChild->HasSavedCheckpoint(aTarget.checkpoint)) {
+    // Find the replaying child responsible for saving the target checkpoint.
+    ChildProcessInfo* targetChild = ReplayingChildResponsibleForSavingCheckpoint(aTarget.checkpoint);
+
+    if (targetChild == gActiveChild) {
+      // Switch to the other replaying child while this one saves the necessary
+      // checkpoint.
+      SwitchActiveChild(OtherReplayingChild(gActiveChild));
+    }
+
+    // This process will be the new active child, so make sure it has saved the
+    // checkpoint we need it to.
+    targetChild->WaitUntil([=]() {
+        return targetChild->HasSavedCheckpoint(aTarget.checkpoint)
+            && targetChild->IsPaused();
+      });
+
+    SwitchActiveChild(targetChild, /* aRecoverPosition = */ false);
+  }
+
+  gTimeWarpTarget.reset();
+
+  if (!gActiveChild->IsPausedAtCheckpoint() || gActiveChild->LastCheckpoint() != aTarget.checkpoint) {
+    gActiveChild->SendMessage(RestoreCheckpointMessage(aTarget.checkpoint));
+    gActiveChild->WaitUntilPaused();
+  }
+
+  gActiveChild->SendMessage(RunToPointMessage(aTarget));
+
+  gActiveChild->WaitUntilPaused();
+  HitForcedPauseBreakpoints(false);
 }
 
 static void
@@ -1043,11 +1117,16 @@ RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
 }
 
 static void
-HitBreakpoint(uint32_t* aBreakpoints, size_t aNumBreakpoints)
+HitBreakpoint(uint32_t* aBreakpoints, size_t aNumBreakpoints, bool aRecordingBoundary)
 {
+  if (!gActiveChild->IsPaused()) {
+    Print("Warning: Process resumed before breakpoints were hit.\n");
+    delete[] aBreakpoints;
+    return;
+  }
+
   MarkActiveChildExplicitPause();
 
-  MOZ_RELEASE_ASSERT(!gResumeForwardOrBackward);
   gResumeForwardOrBackward = true;
 
   // Call breakpoint handlers until one of them explicitly resumes forward or
@@ -1059,9 +1138,10 @@ HitBreakpoint(uint32_t* aBreakpoints, size_t aNumBreakpoints)
     }
   }
 
-  // If the child was not explicitly resumed by any breakpoint handler, resume
-  // travel in whichever direction it was going previously.
-  if (gResumeForwardOrBackward) {
+  // If the child was not explicitly resumed by any breakpoint handler, and we
+  // are not at a forced pause at the recording boundary, resume travel in
+  // whichever direction it was going previously.
+  if (gResumeForwardOrBackward && !aRecordingBoundary) {
     ResumeForwardOrBackward();
   }
 
@@ -1074,7 +1154,23 @@ RecvHitBreakpoint(const HitBreakpointMessage& aMsg)
   uint32_t* breakpoints = new uint32_t[aMsg.NumBreakpoints()];
   PodCopy(breakpoints, aMsg.Breakpoints(), aMsg.NumBreakpoints());
   gMainThreadMessageLoop->PostTask(NewRunnableFunction("HitBreakpoint", HitBreakpoint,
-                                                       breakpoints, aMsg.NumBreakpoints()));
+                                                       breakpoints, aMsg.NumBreakpoints(), false));
+}
+
+static void
+HitForcedPauseBreakpoints(bool aRecordingBoundary)
+{
+  Vector<uint32_t> breakpoints;
+  gActiveChild->GetMatchingInstalledBreakpoints([=](JS::replay::ExecutionPosition::Kind aKind) {
+      return aKind == JS::replay::ExecutionPosition::ForcedPause;
+    }, breakpoints);
+  if (!breakpoints.empty()) {
+    uint32_t* newBreakpoints = new uint32_t[breakpoints.length()];
+    PodCopy(newBreakpoints, breakpoints.begin(), breakpoints.length());
+    gMainThreadMessageLoop->PostTask(NewRunnableFunction("HitBreakpoint", HitBreakpoint,
+                                                         newBreakpoints, breakpoints.length(),
+                                                         aRecordingBoundary));
+  }
 }
 
 static void
@@ -1083,6 +1179,7 @@ InitDebuggerHooks()
   JS::replay::hooks.debugRequestMiddleman = HookDebuggerRequest;
   JS::replay::hooks.setBreakpointMiddleman = HookSetBreakpoint;
   JS::replay::hooks.resumeMiddleman = HookResume;
+  JS::replay::hooks.timeWarpMiddleman = HookTimeWarp;
   JS::replay::hooks.pauseMiddleman = HookPause;
   JS::replay::hooks.canRewindMiddleman = CanRewind;
 }

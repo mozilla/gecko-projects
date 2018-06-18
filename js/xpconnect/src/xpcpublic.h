@@ -579,8 +579,10 @@ class ErrorReport : public ErrorBase {
     void LogToConsole();
     // Log to console, using the given stack object (which should be a stack of
     // the sort that JS::CaptureCurrentStack produces).  aStack is allowed to be
-    // null.
-    void LogToConsoleWithStack(JS::HandleObject aStack);
+    // null.  aTimeWarpTarget optionally indicates where the error occurred, for
+    // use when recording/replaying.
+    void LogToConsoleWithStack(JS::HandleObject aStack,
+                               uint64_t aTimeWarpTarget = 0);
 
     // Produce an error event message string from the given JSErrorReport.  Note
     // that this may produce an empty string if aReport doesn't have a

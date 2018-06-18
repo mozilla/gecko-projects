@@ -92,6 +92,10 @@ function WebConsoleActor(connection, parentActor) {
     selectedObjectActor: true, // 44+
     fetchCacheDescriptor: true,
   };
+
+  if (this.dbg.replaying && !isWorker) {
+    this.dbg.onConsoleMessage = this.onReplayingMessage.bind(this);
+  }
 }
 
 WebConsoleActor.prototype =
@@ -446,6 +450,13 @@ WebConsoleActor.prototype =
    *         Debuggee value for |value|.
    */
   makeDebuggeeValue: function(value, useObjectGlobal) {
+    if (this.dbg.replaying) {
+      if (typeof value == "object") {
+        throw new Error("Object makeDebuggeeValue not supported with replaying debugger");
+      } else {
+        return value;
+      }
+    }
     if (useObjectGlobal && isObject(value)) {
       try {
         let global = Cu.getGlobalForObject(value);
@@ -557,6 +568,31 @@ WebConsoleActor.prototype =
       objectActor: this.createValueGrip(dbgObj),
       inspectFromAnnotation,
     });
+  },
+
+  /**
+   * When using a replaying debugger, all messages we have seen so far.
+   */
+  replayingMessages: null,
+
+  /**
+   * When using a replaying debugger, this helper returns whether a message has
+   * been seen before. When the process rewinds or plays back through regions
+   * of execution that have executed before, we will see the same messages
+   * again.
+   */
+  isDuplicateReplayingMessage: function(msg) {
+    if (!this.replayingMessages) {
+      this.replayingMessages = {};
+    }
+    // The progress counter on the message is unique across all messages in the
+    // replaying process.
+    let progress = msg.executionPoint.progress;
+    if (this.replayingMessages[progress]) {
+      return true;
+    }
+    this.replayingMessages[progress] = true;
+    return false;
   },
 
   // Request handlers for known packet types.
@@ -810,10 +846,27 @@ WebConsoleActor.prototype =
 
     let messages = [];
 
+    let replayingMessages = [];
+    if (this.dbg.replaying) {
+      this.dbg.findAllConsoleMessages().forEach((msg) => {
+        if (!this.isDuplicateReplayingMessage(msg)) {
+          replayingMessages.push(msg);
+        }
+      });
+    }
+
     while (types.length > 0) {
       let type = types.shift();
       switch (type) {
         case "ConsoleAPI": {
+          replayingMessages.forEach((msg) => {
+            if (msg.messageType == "ConsoleAPI") {
+              let message = this.prepareConsoleMessageForRemote(msg);
+              message._type = type;
+              messages.push(message);
+            }
+          });
+
           if (!this.consoleAPIListener) {
             break;
           }
@@ -839,6 +892,14 @@ WebConsoleActor.prototype =
           break;
         }
         case "PageError": {
+          replayingMessages.forEach((msg) => {
+            if (msg.messageType == "PageError") {
+              let message = this.prepareReplayingPageErrorForRemote(msg);
+              message._type = type;
+              messages.push(message);
+            }
+          });
+
           if (!this.consoleServiceListener) {
             break;
           }
@@ -1532,6 +1593,29 @@ WebConsoleActor.prototype =
   // Event handlers for various listeners.
 
   /**
+   * Handle console messages sent to us from a replaying process via the
+   * debugger.
+   */
+  onReplayingMessage: function(msg) {
+    if (this.isDuplicateReplayingMessage(msg)) {
+      return;
+    }
+
+    if (msg.messageType == "ConsoleAPI") {
+      this.onConsoleAPICall(msg);
+    }
+
+    if (msg.messageType == "PageError") {
+      let packet = {
+        from: this.actorID,
+        type: "pageError",
+        pageError: this.prepareReplayingPageErrorForRemote(msg),
+      };
+      this.conn.send(packet);
+    }
+  },
+
+  /**
    * Handler for messages received from the ConsoleServiceListener. This method
    * sends the nsIConsoleMessage to the remote Web Console client.
    *
@@ -1623,6 +1707,47 @@ WebConsoleActor.prototype =
       private: pageError.isFromPrivateWindow,
       stacktrace: stack,
       notes: notesArray,
+    };
+  },
+
+  /**
+   * Prepare the information we have been sent about a script error from a
+   * replaying process for sending to the client.
+   */
+  prepareReplayingPageErrorForRemote: function(msg) {
+    // The replaying process' message is intended for the terminal and includes
+    // the message text, file/line, and stack entries on separate lines.
+    // Pattern match to get the information we want.
+    let parse = (fn, fallback) => {
+      try { return fn(); } catch (e) { return fallback; }
+    };
+    let lines = msg.message.split('\n');
+    let errorMessage = parse(() => /\"(.*?)\"/.exec(lines[0])[1], "<Unknown>");
+    let errorFile = parse(() => /\{file: \"(.*?)\"/.exec(lines[0])[1], "");
+    let errorLine = parse(() => /line: (\d+)\}/.exec(lines[0])[1], 0);
+    lines.shift();
+    let stack = [];
+    for (let line of lines) {
+      try {
+        let arr = /(.*?)@(.*):(\d+):(\d+)$/.exec(line);
+        stack.push({
+          filename: arr[2],
+          lineNumber: arr[3],
+          columnNumber: arr[4],
+          functionName: arr[1],
+        });
+      } catch (e) {}
+    }
+
+    return {
+      errorMessage: this._createStringGrip(errorMessage),
+      sourceName: errorFile,
+      lineNumber: errorLine,
+      timeStamp: msg.timeStamp,
+      warning: msg.logLevel == msg.warn,
+      error: msg.logLevel == msg.error,
+      stacktrace: stack,
+      executionPoint: msg.executionPoint,
     };
   },
 

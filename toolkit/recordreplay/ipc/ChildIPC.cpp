@@ -18,6 +18,8 @@
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/VsyncDispatcher.h"
+#include "nsIScriptError.h"
+#include "xpcprivate.h"
 
 #include "InfallibleVector.h"
 #include "MemorySnapshot.h"
@@ -141,6 +143,13 @@ ChannelMessageHandler(Message* aMsg)
     const RestoreCheckpointMessage& nmsg = (const RestoreCheckpointMessage&) *aMsg;
     PauseMainThreadAndInvokeCallback([=]() {
         JS::replay::hooks.restoreCheckpointReplay(nmsg.mCheckpoint);
+      });
+    break;
+  }
+  case MessageType::RunToPoint: {
+    const RunToPointMessage& nmsg = (const RunToPointMessage&) *aMsg;
+    PauseMainThreadAndInvokeCallback([=]() {
+        JS::replay::hooks.runToPointReplay(nmsg.mTarget);
       });
     break;
   }
@@ -457,6 +466,39 @@ NotifyPaintComplete()
   MOZ_RELEASE_ASSERT(gPendingPaint);
   gPendingPaint = false;
   gMonitor->Notify();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Console Logging
+///////////////////////////////////////////////////////////////////////////////
+
+void
+LogMessage(nsIConsoleMessage* aMessage)
+{
+  // For now, only report script error messages to the console when
+  // recording/replaying.
+  nsCOMPtr<nsIScriptError> scriptError = do_QueryInterface(aMessage);
+  if (!scriptError) {
+    return;
+  }
+
+  uint64_t warpTarget;
+  scriptError->GetTimeWarpTarget(&warpTarget);
+
+  dom::AutoJSAPI jsapi;
+  if (!jsapi.Init(xpc::PrivilegedJunkScope())) {
+    return;
+  }
+
+  JSContext* cx = jsapi.cx();
+  xpcObjectHelper helper(aMessage);
+  JS::Rooted<JS::Value> messageValue(cx);
+  nsresult err;
+  if (XPCConvert::NativeInterface2JSObject(&messageValue, helper, &NS_GET_IID(nsIScriptError), true, &err)) {
+    JS::replay::hooks.consoleMessageReplay(cx, "PageError", messageValue, warpTarget);
+  }
+
+  JS_ClearPendingException(cx);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

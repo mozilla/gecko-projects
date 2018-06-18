@@ -256,10 +256,17 @@ public:
   bool IsPausedAtCheckpoint();
   bool IsPausedAtRecordingEndpoint();
 
-  // Return whether this process is paused at a breakpoint whose kind matches
-  // the supplied filter.
+  // Get all breakpoints currently installed for this process.
+  void GetInstalledBreakpoints(Vector<SetBreakpointMessage*>& aBreakpoints);
+
   typedef std::function<bool(JS::replay::ExecutionPosition::Kind)> BreakpointFilter;
+
+  // Return whether this process is paused at a breakpoint matching a filter.
   bool IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter);
+
+  // Get the ids of all installed breakpoints matching a filter.
+  void GetMatchingInstalledBreakpoints(const BreakpointFilter& aFilter,
+                                       Vector<uint32_t>& aBreakpointIds);
 
   // Get the checkpoint at or earlier to the process' position. This is either
   // the last reached checkpoint or the previous one.

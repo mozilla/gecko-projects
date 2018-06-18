@@ -41,13 +41,20 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     static const char* progressString(const char* why, JSScript* script, jsbytecode* pc = nullptr);
 
     static void onNewScript(JSContext* cx, HandleScript script, bool toplevel = true);
+    static void onConsoleMessage(JSContext* cx, const char* messageType, HandleValue event,
+                                 uint64_t timeWarpTarget);
+
+    static uint64_t newTimeWarpTarget(JSContext* cx);
 
     // Debugger methods.
     bool findScripts(JSContext* cx, MutableHandle<GCVector<JSObject*>> scriptObjects);
     void resumeBackward();
     void resumeForward();
     void pause();
+    bool timeWarp(JSContext* cx, HandleValue target);
     bool content(JSContext* cx, CallArgs& args);
+    bool setOnForcedPause(JSContext* cx, HandleValue handler);
+    bool getOnForcedPause(JSContext* cx, MutableHandleValue rv);
 
     // Generic methods.
     bool notYetImplemented(JSContext* cx, HandleObject obj, CallArgs& args);
@@ -145,6 +152,11 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     bool envNames(JSContext* cx, HandleObject obj, CallArgs& args);
     bool envVariable(JSContext* cx, HandleObject obj, CallArgs& args);
 
+    // Console messages.
+    bool setOnConsoleMessage(JSContext* cx, HandleValue handler);
+    bool getOnConsoleMessage(JSContext* cx, MutableHandleValue rv);
+    bool findAllConsoleMessages(JSContext* cx, MutableHandleValue rv);
+
     struct Breakpoint;
     static bool hitBreakpointMiddleman(JSContext* cx, size_t id);
 
@@ -224,9 +236,18 @@ class ReplayDebugger : public mozilla::LinkedListElement<ReplayDebugger>
     static JSScript* IdScript(size_t id);
     static size_t ScriptId(JSScript* script);
 
+    // Construct an execution point for the current location.
+    static JS::replay::ExecutionPoint NewExecutionPoint(const JS::replay::ExecutionPosition& pos);
+
+    // Get an execution point to use for a warp target we have seen.
+    static JS::replay::ExecutionPoint WarpTargetExecutionPoint(uint64_t timeWarpTarget);
+
     // Install any necessary breakpoints on a newly created script, and hit any
-    // installed OnNewScript breakpoints.
+    // installed NewScript breakpoints.
     static void HandleBreakpointsForNewScript(JSScript* script, size_t id, bool toplevel);
+
+    // Hit any installed ConsoleMessage breakpoints.
+    static void HandleBreakpointsForConsoleMessage();
 
     // Clear the mapping from IDs to objects used when paused at a breakpoint.
     static void ClearDebuggerPausedObjects();

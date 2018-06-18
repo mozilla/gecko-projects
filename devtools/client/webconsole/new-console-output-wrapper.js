@@ -1,3 +1,4 @@
+/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -146,6 +147,9 @@ NewConsoleOutputWrapper.prototype = {
           store.dispatch(actions.showObjectInSidebar(rootActorId, messageId));
         } : null;
 
+        let messageData = getMessage(store.getState(), message.messageId);
+        let executionPoint = messageData.executionPoint;
+
         let menu = createContextMenu(this.hud, this.parentNode, {
           actor,
           clipboardText,
@@ -153,7 +157,8 @@ NewConsoleOutputWrapper.prototype = {
           message,
           serviceContainer,
           openSidebar,
-          rootActorId
+          rootActorId,
+          executionPoint,
         });
 
         // Emit the "menu-open" event for testing.

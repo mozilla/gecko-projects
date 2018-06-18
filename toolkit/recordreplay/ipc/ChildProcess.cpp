@@ -49,7 +49,7 @@ ChildProcessInfo::ChildProcessInfo(UniquePtr<ChildRole> aRole, bool aRecording)
   static bool gFirst = false;
   if (!gFirst) {
     gFirst = true;
-    gChildrenAreDebugging = !!getenv("WAIT_AT_START");
+    gChildrenAreDebugging = getenv("WAIT_AT_START") || getenv("MIDDLEMAN_WAIT_AT_START");
     gRestartEnabled = !getenv("NO_RESTARTS");
   }
 
@@ -111,6 +111,27 @@ ChildProcessInfo::IsPausedAtRecordingEndpoint()
   return false;
 }
 
+void
+ChildProcessInfo::GetInstalledBreakpoints(Vector<SetBreakpointMessage*>& aBreakpoints)
+{
+  for (Message* msg : mMessages) {
+    if (msg->mType == MessageType::SetBreakpoint) {
+      SetBreakpointMessage* nmsg = static_cast<SetBreakpointMessage*>(msg);
+      for (SetBreakpointMessage*& existing : aBreakpoints) {
+        if (existing->mId == nmsg->mId) {
+          aBreakpoints.erase(&existing);
+          break;
+        }
+      }
+      if (nmsg->mPosition.kind != JS::replay::ExecutionPosition::Invalid) {
+        if (!aBreakpoints.append(nmsg)) {
+          MOZ_CRASH("OOM");
+        }
+      }
+    }
+  }
+}
+
 bool
 ChildProcessInfo::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
 {
@@ -118,29 +139,37 @@ ChildProcessInfo::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
     return false;
   }
 
+  Vector<SetBreakpointMessage*> installed;
+  GetInstalledBreakpoints(installed);
+
   HitBreakpointMessage* npaused = static_cast<HitBreakpointMessage*>(mPausedMessage);
   for (size_t i = 0; i < npaused->NumBreakpoints(); i++) {
     uint32_t breakpointId = npaused->Breakpoints()[i];
 
-    // Find the last time we sent a SetBreakpoint message to this process for
-    // this breakpoint ID.
-    SetBreakpointMessage* lastSet = nullptr;
-    for (Message* msg : mMessages) {
-      if (msg->mType == MessageType::SetBreakpoint) {
-        SetBreakpointMessage* nmsg = static_cast<SetBreakpointMessage*>(msg);
-        if (nmsg->mId == breakpointId) {
-          lastSet = nmsg;
-        }
+    // Note: this test isn't quite right if new breakpoints have been installed
+    // since the child paused, though this does not affect current callers.
+    for (SetBreakpointMessage* msg : installed) {
+      if (msg->mId == breakpointId && aFilter(msg->mPosition.kind)) {
+        return true;
       }
-    }
-    MOZ_RELEASE_ASSERT(lastSet &&
-                       lastSet->mPosition.kind != JS::replay::ExecutionPosition::Invalid);
-    if (aFilter(lastSet->mPosition.kind)) {
-      return true;
     }
   }
 
   return false;
+}
+
+void
+ChildProcessInfo::GetMatchingInstalledBreakpoints(const BreakpointFilter& aFilter,
+                                                  Vector<uint32_t>& aBreakpointIds)
+{
+  Vector<SetBreakpointMessage*> installed;
+  GetInstalledBreakpoints(installed);
+
+  for (SetBreakpointMessage* msg : installed) {
+    if (aFilter(msg->mPosition.kind) && !aBreakpointIds.append(msg->mId)) {
+      MOZ_CRASH("OOM");
+    }
+  }
 }
 
 void
@@ -253,6 +282,7 @@ ChildProcessInfo::SendMessage(const Message& aMsg)
   switch (aMsg.mType) {
   case MessageType::Resume:
   case MessageType::RestoreCheckpoint:
+  case MessageType::RunToPoint:
     free(mPausedMessage);
     mPausedMessage = nullptr;
     MOZ_FALLTHROUGH;
@@ -268,6 +298,7 @@ ChildProcessInfo::SendMessage(const Message& aMsg)
   switch (aMsg.mType) {
   case MessageType::Resume:
   case MessageType::RestoreCheckpoint:
+  case MessageType::RunToPoint:
   case MessageType::DebuggerRequest:
   case MessageType::SetBreakpoint:
     mMessages.emplaceBack(aMsg.Clone());

@@ -19,16 +19,41 @@ namespace replay {
 typedef mozilla::Vector<char16_t> CharBuffer;
 
 // Identification for an execution position --- anyplace a breakpoint can be
-// created --- during JS execution in a child process.
+// created, or where a process can warp to --- during JS execution in a child
+// process.
 struct ExecutionPosition
 {
     enum Kind {
         Invalid,
-        Break,       // No frameIndex
+
+        // Break at a script offset. Requires script/offset.
+        Break,
+
+        // Break for an on-step handler within a frame.
+        // Requires script/offset/frameIndex.
         OnStep,
-        OnPop,       // No offset, script/frameIndex is optional
-        EnterFrame,  // No offset/script/frameIndex
-        NewScript,   // No offset/script/frameIndex
+
+        // Break either when any frame is popped, or when a specific frame is
+        // popped. Requires script/frameIndex in the latter case.
+        OnPop,
+
+        // Break when entering any frame.
+        EnterFrame,
+
+        // Break when a new top-level script is created.
+        NewScript,
+
+        // Break when a message is logged to the web console.
+        ConsoleMessage,
+
+        // Break when the debugger should pause even if no breakpoint has been
+        // set: the beginning or end of the replay has been reached, or a time
+        // warp has reached its destination.
+        ForcedPause,
+
+        // Does not correspond with a breakpoint, but identifies execution
+        // points that can be warped to later.
+        WarpTarget
     } kind;
     size_t script;
     size_t offset;
@@ -75,6 +100,9 @@ struct ExecutionPosition
           case OnPop: return "OnPop";
           case EnterFrame: return "EnterFrame";
           case NewScript: return "NewScript";
+          case ConsoleMessage: return "ConsoleMessage";
+          case ForcedPause: return "ForcedPause";
+          case WarpTarget: return "WarpTarget";
         }
         MOZ_CRASH("Bad ExecutionPosition kind");
     }
@@ -156,8 +184,12 @@ struct Hooks
     // Notify the middleman about a checkpoint that was hit.
     void (*hitCheckpointReplay)(size_t id, bool endpoint);
 
-    // Direct the child process to rewind to a specific checkpoint.
+    // Direct the child process to change its execution point.
     void (*restoreCheckpointReplay)(size_t id);
+    void (*runToPointReplay)(const ExecutionPoint& target);
+
+    // Direct the child process to warp to a specific point.
+    void (*timeWarpMiddleman)(const ExecutionPoint& target);
 
     // Return whether the middleman is able to restore earlier checkpoints
     // (possibly by changing the active child process).
@@ -181,6 +213,10 @@ struct Hooks
     // Notify the debugger that it should always save temporary checkpoints,
     // for testing.
     void (*alwaysSaveTemporaryCheckpoints)();
+
+    // Notify the debugger about a console message that was generated.
+    void (*consoleMessageReplay)(JSContext* cx, const char* messageType, HandleValue event,
+                                 uint64_t timeWarpTarget);
 };
 
 extern Hooks hooks;
