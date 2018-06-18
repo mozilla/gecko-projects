@@ -80,7 +80,7 @@ struct SavedCheckpoint
   CheckpointId mCheckpoint;
   SavedThreadStack mStacks[MaxRecordedThreadId];
 
-  SavedCheckpoint(CheckpointId aCheckpoint)
+  explicit SavedCheckpoint(CheckpointId aCheckpoint)
     : mCheckpoint(aCheckpoint)
   {}
 
