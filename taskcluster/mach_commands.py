@@ -265,9 +265,6 @@ class MachCommands(MachCommandBase):
                      help='TaskGroupId to which the action applies')
     @CommandArgument('--input', default=None,
                      help='Action input (.yml or .json)')
-    @CommandArgument('--task', default=None,
-                     help='Task definition (.yml or .json; if omitted, the task will be'
-                          'fetched from the queue)')
     @CommandArgument('callback', default=None,
                      help='Action callback name (Python function name)')
     def test_action_callback(self, **options):
@@ -288,12 +285,6 @@ class MachCommands(MachCommandBase):
         try:
             self.setup_logging()
             task_id = options['task_id']
-            if options['task']:
-                task = load_data(options['task'])
-            elif task_id:
-                task = get_task_definition(task_id)
-            else:
-                task = None
 
             if options['input']:
                 input = load_data(options['input'])
@@ -308,7 +299,6 @@ class MachCommands(MachCommandBase):
             return taskgraph.actions.trigger_action_callback(
                     task_group_id=options['task_group_id'],
                     task_id=task_id,
-                    task=task,
                     input=input,
                     callback=options['callback'],
                     parameters=parameters,
