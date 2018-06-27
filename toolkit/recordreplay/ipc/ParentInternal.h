@@ -51,6 +51,22 @@ void Shutdown();
 // Monitor used for synchronizing between the main and channel or message loop threads.
 static Monitor* gMonitor;
 
+// Allow the child process to resume execution.
+void Resume(bool aForward);
+
+// Pause the child process at the next opportunity.
+void Pause();
+
+// Direct the child process to warp to a specific point.
+void TimeWarp(const js::ExecutionPoint& target);
+
+// Send a JSON request to the child process, and synchronously wait for a
+// response.
+void SendRequest(const js::CharBuffer& aBuffer, js::CharBuffer* aResponse);
+
+// Set or clear a breakpoint in the child process.
+void SetBreakpoint(size_t aId, const js::ExecutionPosition& aPosition);
+
 ///////////////////////////////////////////////////////////////////////////////
 // Graphics
 ///////////////////////////////////////////////////////////////////////////////
@@ -259,7 +275,7 @@ public:
   // Get all breakpoints currently installed for this process.
   void GetInstalledBreakpoints(Vector<SetBreakpointMessage*>& aBreakpoints);
 
-  typedef std::function<bool(JS::replay::ExecutionPosition::Kind)> BreakpointFilter;
+  typedef std::function<bool(js::ExecutionPosition::Kind)> BreakpointFilter;
 
   // Return whether this process is paused at a breakpoint matching a filter.
   bool IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter);

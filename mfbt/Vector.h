@@ -1526,7 +1526,7 @@ Vector<T, N, AP>::replaceRawBuffer(T* aP, size_t aLength, size_t aCapacity)
     mTail.mCapacity = kInlineCapacity;
     Impl::moveConstruct(mBegin, aP, aP + aLength);
     Impl::destroy(aP, aP + aLength);
-    this->template free_(aP, aLength);
+    this->template free_(aP, aCapacity);
   } else {
     mBegin = aP;
     mLength = aLength;

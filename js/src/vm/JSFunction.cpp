@@ -51,7 +51,6 @@
 #include "vm/Xdr.h"
 #include "wasm/AsmJS.h"
 
-#include "vm/Debugger-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Stack-inl.h"

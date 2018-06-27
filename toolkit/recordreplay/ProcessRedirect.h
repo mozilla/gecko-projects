@@ -80,8 +80,8 @@ struct Redirection
   const char* mName;
 
   // Address of the function which is being redirected. The code for this
-  // this function is modified so that attempts to call this function will
-  // instead call mNewFunction.
+  // function is modified so that attempts to call this function will instead
+  // call mNewFunction.
   uint8_t* mBaseFunction;
 
   // Function with the same signature as mBaseFunction, which may have
@@ -762,6 +762,8 @@ NewLeakyArray(size_t aSize)
 // size_t result(void* a0, void* a1) {
 //   return aFunction(a0, a1, aArgument);
 // }
+//
+// Supported positions for the bound argument are 1, 2, and 3.
 void*
 BindFunctionArgument(void* aFunction, void* aArgument, size_t aArgumentPosition,
                      Assembler& aAssembler);

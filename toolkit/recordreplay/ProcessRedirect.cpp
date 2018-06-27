@@ -151,7 +151,8 @@ MaybeInternalJumpTarget(uint8_t* aIpStart, uint8_t* aIpEnd)
     // with redirecting the initial bytes of the function. Ideally we would
     // find these backedges with some binary analysis, but this is easier said
     // than done, especially since there doesn't seem to be a standard way to
-    // determine the extent of a symbol's code on OSX.
+    // determine the extent of a symbol's code on OSX. Use strstr to avoid
+    // issues with goo in the symbol names.
     if ((strstr(startName, "CTRunGetGlyphs") &&
          !strstr(startName, "CTRunGetGlyphsPtr")) ||
         (strstr(startName, "CTRunGetPositions") &&
@@ -181,7 +182,6 @@ RedirectFailure(const char* aFormat, ...)
   char buf[4096];
   VsprintfLiteral(buf, aFormat, ap);
   va_end(ap);
-  buf[sizeof(buf) - 1] = 0;
   gRedirectFailures.emplaceBack(strdup(buf));
 }
 

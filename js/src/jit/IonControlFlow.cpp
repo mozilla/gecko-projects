@@ -933,9 +933,9 @@ ControlFlowGenerator::processWhileOrForInLoop(jssrcnote* sn)
     jsbytecode* exitpc = GetNextPc(ifne);
     jsbytecode* continuepc = pc;
 
-    CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
+    CFGBlock* header = CFGBlock::New(alloc(), loopEntry);
 
-    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, stackPhiCount, loopEntry);
+    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, stackPhiCount);
     if (LoopEntryCanIonOsr(loopEntry))
         ins->setCanOsr();
 
@@ -967,12 +967,8 @@ ControlFlowGenerator::processBrokenLoop(CFGState& state)
     MOZ_ASSERT(!current);
 
     {
-        MOZ_RELEASE_ASSERT(state.loop.entry->stopIns()->isLoopEntry());
-        jsbytecode* loopEntryPc = state.loop.entry->stopIns()->toLoopEntry()->loopEntryPc();
-
         state.loop.entry->setStopIns(
-            CFGGoto::New(alloc(), state.loop.entry->stopIns()->toLoopEntry()->successor(),
-                         /* popAmount = */ 0, /* brokenLoopEntry = */ loopEntryPc));
+            CFGGoto::New(alloc(), state.loop.entry->stopIns()->toLoopEntry()->successor()));
     }
 
     // If the loop started with a condition (while/for) then even if the
@@ -1485,9 +1481,9 @@ ControlFlowGenerator::processForLoop(JSOp op, jssrcnote* sn)
 
     MOZ_ASSERT(JSOp(*loopEntry) == JSOP_LOOPENTRY);
 
-    CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
+    CFGBlock* header = CFGBlock::New(alloc(), loopEntry);
 
-    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0, loopEntry);
+    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0);
     if (LoopEntryCanIonOsr(loopEntry))
         ins->setCanOsr();
 
@@ -1553,9 +1549,9 @@ ControlFlowGenerator::processDoWhileLoop(jssrcnote* sn)
 
     jsbytecode* loopEntry = GetNextPc(loopHead);
 
-    CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
+    CFGBlock* header = CFGBlock::New(alloc(), loopEntry);
 
-    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0, loopEntry);
+    CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0);
     if (LoopEntryCanIonOsr(loopEntry))
         ins->setCanOsr();
 

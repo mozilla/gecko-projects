@@ -15,17 +15,17 @@
 namespace mozilla {
 namespace recordreplay {
 
-typedef std::unordered_map<const void*, JS::PersistentRootedObject*> WeakPointerRootMap;
+typedef std::unordered_map<const void*, UniquePtr<JS::PersistentRootedObject>> WeakPointerRootMap;
 static WeakPointerRootMap* gWeakPointerRootMap;
 
 static StaticMutexNotRecorded gWeakPointerMutex;
 
-static JS::PersistentRootedObject*
+static UniquePtr<JS::PersistentRootedObject>
 NewRoot(JSObject* aJSObj)
 {
   MOZ_RELEASE_ASSERT(aJSObj);
   JSContext* cx = dom::danger::GetJSContext();
-  JS::PersistentRootedObject* root = new JS::PersistentRootedObject(cx);
+  UniquePtr<JS::PersistentRootedObject> root = MakeUnique<JS::PersistentRootedObject>(cx);
   *root = aJSObj;
   return root;
 }
@@ -44,7 +44,6 @@ RecordReplayInterface_SetWeakPointerJSRoot(const void* aPtr, JSObject* aJSObj)
     if (aJSObj) {
       *iter->second = aJSObj;
     } else {
-      delete iter->second;
       gWeakPointerRootMap->erase(aPtr);
     }
   } else if (aJSObj) {

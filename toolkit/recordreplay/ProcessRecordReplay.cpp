@@ -6,7 +6,7 @@
 
 #include "ProcessRecordReplay.h"
 
-#include "ipc/ChildIPC.h"
+#include "ipc/ChildInternal.h"
 #include "mozilla/Compression.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Sprintf.h"
@@ -224,7 +224,7 @@ FlushRecording()
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
   // Save the endpoint of the recording.
-  JS::replay::ExecutionPoint endpoint = JS::replay::hooks.getRecordingEndpoint();
+  js::ExecutionPoint endpoint = navigation::GetRecordingEndpoint();
   Stream* endpointStream = gRecordingFile->OpenStream(StreamName::Main, 0);
   endpointStream->WriteScalar(++gNumEndpoints);
   endpointStream->WriteBytes(&endpoint, sizeof(endpoint));
@@ -277,10 +277,10 @@ HitRecordingEndpoint()
   // Check if there is a new endpoint in the endpoint data stream.
   Stream* endpointStream = gRecordingFile->OpenStream(StreamName::Main, 0);
   if (!endpointStream->AtEnd()) {
-    JS::replay::ExecutionPoint endpoint;
+    js::ExecutionPoint endpoint;
     size_t index = endpointStream->ReadScalar();
     endpointStream->ReadBytes(&endpoint, sizeof(endpoint));
-    JS::replay::hooks.setRecordingEndpoint(index, endpoint);
+    navigation::SetRecordingEndpoint(index, endpoint);
     return true;
   }
 
@@ -311,16 +311,14 @@ HitEndOfRecording()
   }
 }
 
-extern "C" {
-
-MOZ_EXPORT bool
-RecordReplayInterface_SpewEnabled()
+bool
+SpewEnabled()
 {
   return gSpewEnabled;
 }
 
-MOZ_EXPORT void
-RecordReplayInterface_InternalPrint(const char* aFormat, va_list aArgs)
+void
+InternalPrint(const char* aFormat, va_list aArgs)
 {
   char buf1[2048];
   VsprintfLiteral(buf1, aFormat, aArgs);
@@ -328,8 +326,6 @@ RecordReplayInterface_InternalPrint(const char* aFormat, va_list aArgs)
   SprintfLiteral(buf2, "Spew[%d]: %s", gPid, buf1);
   DirectPrint(buf2);
 }
-
-} // extern "C"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Record/Replay Assertions
@@ -428,6 +424,9 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
 
   if (IsRecording()) {
     thread->Asserts().WriteScalar(thread->Events().StreamPosition());
+    if (thread->IsMainThread()) {
+      thread->Asserts().WriteScalar(*ExecutionProgressCounter());
+    }
     thread->Asserts().WriteScalar((textLen << 1) | AssertionBit);
     thread->Asserts().WriteBytes(text, textLen);
   } else {
@@ -439,6 +438,13 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
     size_t streamPos = thread->Asserts().ReadScalar();
     if (streamPos != thread->Events().StreamPosition()) {
       match = false;
+    }
+    size_t progress = 0;
+    if (thread->IsMainThread()) {
+      progress = thread->Asserts().ReadScalar();
+      if (progress != *ExecutionProgressCounter()) {
+        match = false;
+      }
     }
     size_t assertLen = thread->Asserts().ReadScalar() >> 1;
 
@@ -466,10 +472,11 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
       }
 
       child::ReportFatalError("Assertion Mismatch: Thread %d\n"
-                              "Recorded: %s [%d]\n"
-                              "Replayed: %s [%d]\n",
-                              (int) thread->Id(), buffer, (int) streamPos, text,
-                              (int) thread->Events().StreamPosition());
+                              "Recorded: %s [%d,%d]\n"
+                              "Replayed: %s [%d,%d]\n",
+                              (int) thread->Id(), buffer, (int) streamPos, (int) progress, text,
+                              (int) thread->Events().StreamPosition(),
+                              (int) (thread->IsMainThread() ? *ExecutionProgressCounter() : 0));
       Unreachable();
     }
 

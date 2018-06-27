@@ -28,19 +28,6 @@ struct ParamTraits<mozilla::EventMessage> :
                                   mozilla::EventMessage::eEventMessage_MaxValue>
 {};
 
-template <typename T>
-static inline bool
-MaybeResetHandledByAPZ(T* aResult)
-{
-  // Even if the UI process is using APZ, recording/replaying processes never
-  // do, as APZ does not work with the special layers constructed by middleman
-  // processes.
-  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
-    aResult->mHandledByAPZ = false;
-  }
-  return true;
-}
-
 template<>
 struct ParamTraits<mozilla::BaseEventFlags>
 {
@@ -53,8 +40,7 @@ struct ParamTraits<mozilla::BaseEventFlags>
 
   static bool Read(const Message* aMsg, PickleIterator* aIter, paramType* aResult)
   {
-    return aMsg->ReadBytesInto(aIter, aResult, sizeof(*aResult)) &&
-           MaybeResetHandledByAPZ(aResult);
+    return aMsg->ReadBytesInto(aIter, aResult, sizeof(*aResult));
   }
 };
 
@@ -1187,8 +1173,7 @@ struct ParamTraits<mozilla::MultiTouchInput>
     return ReadParam(aMsg, aIter, static_cast<mozilla::InputData*>(aResult)) &&
            ReadParam(aMsg, aIter, &aResult->mType) &&
            ReadParam(aMsg, aIter, &aResult->mTouches) &&
-           ReadParam(aMsg, aIter, &aResult->mHandledByAPZ) &&
-           MaybeResetHandledByAPZ(aResult);
+           ReadParam(aMsg, aIter, &aResult->mHandledByAPZ);
   }
 };
 
@@ -1234,8 +1219,7 @@ struct ParamTraits<mozilla::MouseInput>
            ReadParam(aMsg, aIter, &aResult->mButtons) &&
            ReadParam(aMsg, aIter, &aResult->mOrigin) &&
            ReadParam(aMsg, aIter, &aResult->mLocalOrigin) &&
-           ReadParam(aMsg, aIter, &aResult->mHandledByAPZ) &&
-           MaybeResetHandledByAPZ(aResult);
+           ReadParam(aMsg, aIter, &aResult->mHandledByAPZ);
   }
 };
 
@@ -1285,8 +1269,7 @@ struct ParamTraits<mozilla::PanGestureInput>
            ReadParam(aMsg, aIter, &aResult->mHandledByAPZ) &&
            ReadParam(aMsg, aIter, &aResult->mFollowedByMomentum) &&
            ReadParam(aMsg, aIter, &aResult->mRequiresContentResponseIfCannotScrollHorizontallyInStartDirection) &&
-           ReadParam(aMsg, aIter, &aResult->mOverscrollBehaviorAllowsSwipe) &&
-           MaybeResetHandledByAPZ(aResult);
+           ReadParam(aMsg, aIter, &aResult->mOverscrollBehaviorAllowsSwipe);
   }
 };
 
@@ -1423,8 +1406,7 @@ struct ParamTraits<mozilla::ScrollWheelInput>
            ReadParam(aMsg, aIter, &aResult->mIsMomentum) &&
            ReadParam(aMsg, aIter,
                      &aResult->mAllowToOverrideSystemScrollSpeed) &&
-           ReadParam(aMsg, aIter, &aResult->mWheelDeltaAdjustmentStrategy) &&
-           MaybeResetHandledByAPZ(aResult);
+           ReadParam(aMsg, aIter, &aResult->mWheelDeltaAdjustmentStrategy);
   }
 };
 

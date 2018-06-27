@@ -9,11 +9,11 @@
 
 #include "base/process.h"
 
-#include "js/ReplayHooks.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/Maybe.h"
 
 #include "File.h"
+#include "JSControl.h"
 #include "Monitor.h"
 
 namespace mozilla {
@@ -261,9 +261,9 @@ struct SetBreakpointMessage : public Message
 
   // New position of the breakpoint. If this is invalid then the breakpoint is
   // being cleared.
-  JS::replay::ExecutionPosition mPosition;
+  js::ExecutionPosition mPosition;
 
-  SetBreakpointMessage(size_t aId, const JS::replay::ExecutionPosition& aPosition)
+  SetBreakpointMessage(size_t aId, const js::ExecutionPosition& aPosition)
     : Message(MessageType::SetBreakpoint, sizeof(*this))
     , mId(aId)
     , mPosition(aPosition)
@@ -295,9 +295,9 @@ struct RestoreCheckpointMessage : public Message
 struct RunToPointMessage : public Message
 {
   // The target execution point.
-  JS::replay::ExecutionPoint mTarget;
+  js::ExecutionPoint mTarget;
 
-  explicit RunToPointMessage(const JS::replay::ExecutionPoint& aTarget)
+  explicit RunToPointMessage(const js::ExecutionPoint& aTarget)
     : Message(MessageType::RunToPoint, sizeof(*this))
     , mTarget(aTarget)
   {}
@@ -433,7 +433,7 @@ private:
   Monitor mMonitor;
 
   // Buffer for message data received from the other side of the channel.
-  InfallibleVector<char, 0, AllocPolicy<UntrackedMemoryKind::Generic>> mMessageBuffer;
+  InfallibleVector<char, 0, AllocPolicy<MemoryKind::Generic>> mMessageBuffer;
 
   // The number of bytes of data already in the message buffer.
   size_t mMessageBytes;

@@ -9,8 +9,6 @@
 
 #include "vm/Debugger.h"
 
-#include "vm/ReplayDebugger.h"
-
 #include "vm/Stack-inl.h"
 
 /* static */ inline bool
@@ -24,8 +22,6 @@ js::Debugger::onLeaveFrame(JSContext* cx, AbstractFramePtr frame, jsbytecode* pc
     MOZ_ASSERT_IF(evalTraps, frame.isDebuggee());
     if (frame.isDebuggee())
         ok = slowPathOnLeaveFrame(cx, frame, pc, ok);
-    if (mozilla::recordreplay::IsRecordingOrReplaying())
-        ok = ReplayDebugger::onLeaveFrame(cx, frame, pc, ok);
     MOZ_ASSERT(!inFrameMaps(frame));
     return ok;
 }
@@ -125,53 +121,5 @@ js::DebuggerObject::promise() const
 
     return &referent->as<PromiseObject>();
 }
-
-/* static */ void
-js::Debugger::onNewScript(JSContext* cx, HandleScript script)
-{
-    // We early return in slowPathOnNewScript for self-hosted scripts, so we can
-    // ignore those in our assertion here.
-    MOZ_ASSERT_IF(!script->compartment()->creationOptions().invisibleToDebugger() &&
-                  !script->selfHosted(),
-                  script->compartment()->firedOnNewGlobalObject);
-
-    // The script may not be ready to be interrogated by the debugger.
-    if (script->hideScriptFromDebugger())
-        return;
-
-    if (script->compartment()->isDebuggee())
-        slowPathOnNewScript(cx, script);
-    if (mozilla::recordreplay::IsRecordingOrReplaying())
-        ReplayDebugger::onNewScript(cx, script);
-}
-
-namespace js {
-
-static inline bool
-EnsureFunctionHasScript(JSContext* cx, HandleFunction fun)
-{
-    if (fun->isInterpretedLazy()) {
-        AutoCompartment ac(cx, fun);
-        return !!JSFunction::getOrCreateScript(cx, fun);
-    }
-    return true;
-}
-
-static inline JSScript*
-GetOrCreateFunctionScript(JSContext* cx, HandleFunction fun)
-{
-    MOZ_ASSERT(fun->isInterpreted());
-    if (!EnsureFunctionHasScript(cx, fun))
-        return nullptr;
-    return fun->nonLazyScript();
-}
-
-static inline bool
-IsValidHook(const Value& v)
-{
-    return v.isUndefined() || (v.isObject() && v.toObject().isCallable());
-}
-
-} // namespace js
 
 #endif /* vm_Debugger_inl_h */

@@ -28,7 +28,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/SystemGroup.h"
-#include "mozilla/recordreplay/ChildIPC.h"
 
 #if defined(ANDROID)
 #include <android/log.h>
@@ -216,10 +215,6 @@ LogMessageRunnable::Run()
 
   for (int32_t i = 0; i < listeners.Count(); ++i) {
     listeners[i]->Observe(mMessage);
-  }
-
-  if (recordreplay::IsRecordingOrReplaying()) {
-    recordreplay::child::LogMessage(mMessage);
   }
 
   mService->SetDoneDelivering();

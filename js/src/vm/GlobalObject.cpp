@@ -33,7 +33,6 @@
 #include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
-#include "vm/ReplayDebugger.h"
 
 #include "vm/JSCompartment-inl.h"
 #include "vm/JSObject-inl.h"
@@ -511,8 +510,6 @@ GlobalObject::new_(JSContext* cx, const Class* clasp, JSPrincipals* principals,
 
         if (hookOption == JS::FireOnNewGlobalHook)
             JS_FireOnNewGlobalObject(cx, global);
-        if (mozilla::recordreplay::IsRecordingOrReplaying())
-            ReplayDebugger::NoteNewGlobalObject(cx, global);
     }
 
     return global;

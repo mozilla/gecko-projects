@@ -40,7 +40,7 @@ class SystemAllocPolicy
     template <typename T> T* pod_realloc(T* p, size_t oldSize, size_t newSize) {
         return maybe_pod_realloc<T>(p, oldSize, newSize);
     }
-    template <typename T> void free_(T* p, size_t numElems) { js_free(p); }
+    template <typename T> void free_(T* p, size_t numElems = 0) { js_free(p); }
     void reportAllocOverflow() const {}
     bool checkSimulatedOOM() const {
         return !js::oom::ShouldFailWithOOM();
@@ -120,7 +120,7 @@ class TempAllocPolicy
     }
 
     template <typename T>
-    void free_(T* p, size_t numElems) {
+    void free_(T* p, size_t numElems = 0) {
         js_free(p);
     }
 
@@ -162,7 +162,7 @@ class ZoneAllocPolicy
     template <typename T> inline T* pod_calloc(size_t numElems);
     template <typename T> inline T* pod_realloc(T* p, size_t oldSize, size_t newSize);
 
-    template <typename T> void free_(T* p, size_t numElems) { js_free(p); }
+    template <typename T> void free_(T* p, size_t numElems = 0) { js_free(p); }
     void reportAllocOverflow() const {}
 
     MOZ_MUST_USE bool checkSimulatedOOM() const {

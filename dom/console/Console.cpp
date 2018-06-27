@@ -9,7 +9,6 @@
 #include "mozilla/dom/ConsoleBinding.h"
 #include "ConsoleCommon.h"
 
-#include "js/ReplayHooks.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/Exceptions.h"
@@ -1754,10 +1753,6 @@ Console::ProcessCallData(JSContext* aCx, ConsoleCallData* aData,
 
   if (NS_FAILED(mStorage->RecordEvent(innerID, outerID, eventValue))) {
     NS_WARNING("Failed to record a console event.");
-  }
-
-  if (recordreplay::IsRecordingOrReplaying()) {
-    JS::replay::hooks.consoleMessageReplay(aCx, "ConsoleAPI", eventValue, 0);
   }
 }
 

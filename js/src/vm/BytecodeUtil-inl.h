@@ -97,24 +97,17 @@ NegateCompareOp(JSOp op)
 class BytecodeRange {
   public:
     BytecodeRange(JSContext* cx, JSScript* script)
-      : script(cx, script), pc(script->code()), code(script->code()), end(pc + script->length())
+      : script(cx, script), pc(script->code()), end(pc + script->length())
     {}
-    BytecodeRange(JSContext* cx, jsbytecode* code, size_t length)
-      : script(cx), pc(code), code(code), end(code + length)
-    {
-        // Note: care should be taken when using this constructor with APIs
-        // that can GC that any associated script is rooted.
-    }
     bool empty() const { return pc == end; }
     jsbytecode* frontPC() const { return pc; }
     JSOp frontOpcode() const { return JSOp(*pc); }
-    size_t frontOffset() const { return pc - code; }
+    size_t frontOffset() const { return script->pcToOffset(pc); }
     void popFront() { pc += GetBytecodeLength(pc); }
 
   private:
     RootedScript script;
     jsbytecode* pc;
-    jsbytecode* code;
     jsbytecode* end;
 };
 

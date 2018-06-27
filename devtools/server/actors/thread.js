@@ -668,7 +668,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       switch (steppingType) {
       case "step":
         if (rewinding) {
-          this.dbg.onPopFrame = onEnterFrame;
+          this.dbg.replayingOnPopFrame = onEnterFrame;
         } else {
           this.dbg.onEnterFrame = onEnterFrame;
         }

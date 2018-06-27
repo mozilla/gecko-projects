@@ -740,7 +740,8 @@ private:
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
 
-  enum RecordReplayState {
+  enum RecordReplayState
+  {
     eNotRecordingOrReplaying,
     eRecording,
     eReplaying
@@ -1247,6 +1248,10 @@ public:
   bool CanCommunicateWith(ContentParentId aOtherProcess);
 
   nsresult SaveRecording(nsIFile* aFile, bool* aRetval);
+
+  bool IsRecordingOrReplaying() const {
+    return mRecordReplayState != eNotRecordingOrReplaying;
+  }
 
 private:
 

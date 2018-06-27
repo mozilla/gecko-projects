@@ -178,6 +178,10 @@ TabParent::TabParent(nsIContentParent* aManager,
   // When the input event queue is disabled, we don't need to handle the case
   // that some input events are dispatched before PBrowserConstructor.
   mIsReadyToHandleInputEvents = !ContentParent::IsInputEventQueueSupported();
+
+  if (Manager()->AsContentParent()->IsRecordingOrReplaying()) {
+    ++gNumRenderedRecordReplayTabs;
+  }
 }
 
 TabParent::~TabParent()
@@ -2890,6 +2894,8 @@ TabParent::GetDocShellIsActive(bool* aIsActive)
   return NS_OK;
 }
 
+/* static */ size_t TabParent::gNumRenderedRecordReplayTabs;
+
 NS_IMETHODIMP
 TabParent::SetRenderLayers(bool aEnabled)
 {
@@ -2916,6 +2922,14 @@ TabParent::SetRenderLayers(bool aEnabled)
   // will be ignored.
   if (!aEnabled && mPreserveLayers) {
     return NS_OK;
+  }
+
+  if (Manager()->AsContentParent()->IsRecordingOrReplaying()) {
+    if (aEnabled) {
+      ++gNumRenderedRecordReplayTabs;
+    } else {
+      --gNumRenderedRecordReplayTabs;
+    }
   }
 
   mRenderLayers = aEnabled;

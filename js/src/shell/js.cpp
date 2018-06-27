@@ -105,7 +105,6 @@
 #include "vm/Monitor.h"
 #include "vm/MutexIDs.h"
 #include "vm/Printer.h"
-#include "vm/ReplayDebugger.h"
 #include "vm/Shape.h"
 #include "vm/SharedArrayObject.h"
 #include "vm/Time.h"
@@ -9298,9 +9297,6 @@ main(int argc, char** argv, char** envp)
     DestructSharedArrayBufferMailbox();
 
     CancelOffThreadJobsForRuntime(cx);
-
-    if (ReplayDebugger::gProgressCounter)
-        fprintf(stderr, "ProgressCounter: %llu\n", ReplayDebugger::gProgressCounter);
 
     JS_DestroyContext(cx);
     return result;

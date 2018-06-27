@@ -500,10 +500,11 @@ RR_recv(int aSockFd, void* aBuf, size_t aLength, int aFlags)
 {
   RecordReplayFunction(recv, ssize_t, aSockFd, aBuf, aLength, aFlags);
   events.CheckInput(aLength);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    MOZ_RELEASE_ASSERT((size_t) rval <= aLength);
-    events.RecordOrReplayBytes(aBuf, rval);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  MOZ_RELEASE_ASSERT((size_t) rval <= aLength);
+  events.RecordOrReplayBytes(aBuf, rval);
   return rval;
 }
 
@@ -527,24 +528,25 @@ RR_recvmsg(int aSockFd, struct msghdr* aMsg, int aFlags)
   }
   delete[] initialLengths;
 
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayValue(&aMsg->msg_flags);
-    events.RecordOrReplayValue(&aMsg->msg_controllen);
-    events.RecordOrReplayBytes(aMsg->msg_control, aMsg->msg_controllen);
-
-    size_t nbytes = (size_t) rval;
-    events.RecordOrReplayValue(&aMsg->msg_iovlen);
-    for (int i = 0; i < aMsg->msg_iovlen && nbytes; i++) {
-      struct iovec* iov = &aMsg->msg_iov[i];
-      events.RecordOrReplayValue(&iov->iov_len);
-
-      size_t iovbytes = nbytes <= iov->iov_len ? nbytes : iov->iov_len;
-      events.RecordOrReplayBytes(iov->iov_base, iovbytes);
-      nbytes -= iovbytes;
-    }
-    MOZ_RELEASE_ASSERT(nbytes == 0);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
 
+  events.RecordOrReplayValue(&aMsg->msg_flags);
+  events.RecordOrReplayValue(&aMsg->msg_controllen);
+  events.RecordOrReplayBytes(aMsg->msg_control, aMsg->msg_controllen);
+
+  size_t nbytes = (size_t) rval;
+  events.RecordOrReplayValue(&aMsg->msg_iovlen);
+  for (int i = 0; i < aMsg->msg_iovlen && nbytes; i++) {
+    struct iovec* iov = &aMsg->msg_iov[i];
+    events.RecordOrReplayValue(&iov->iov_len);
+
+    size_t iovbytes = nbytes <= iov->iov_len ? nbytes : iov->iov_len;
+    events.RecordOrReplayBytes(iov->iov_base, iovbytes);
+    nbytes -= iovbytes;
+  }
+  MOZ_RELEASE_ASSERT(nbytes == 0);
   return rval;
 }
 
@@ -567,14 +569,16 @@ RR_kevent(int aKq, const struct kevent* aChanges, int aChangeCount,
 {
   RecordReplayFunction(kevent, ssize_t,
                        aKq, aChanges, aChangeCount, aEvents, aEventCount, aTimeout);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    // Copy the kevents verbatim. Note that kevent has an opaque pointer field
-    // |udata| whose value could potentially vary between recording and replay.
-    // Fortunately, all mozilla callers of this function only use scalar values
-    // in |udata| so we don't need to be smarter here.
-    events.CheckInput(aEventCount);
-    events.RecordOrReplayBytes(aEvents, aEventCount * sizeof(struct kevent));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+
+  // Copy the kevents verbatim. Note that kevent has an opaque pointer field
+  // |udata| whose value could potentially vary between recording and replay.
+  // Fortunately, all mozilla callers of this function only use scalar values
+  // in |udata| so we don't need to be smarter here.
+  events.CheckInput(aEventCount);
+  events.RecordOrReplayBytes(aEvents, aEventCount * sizeof(struct kevent));
   return rval;
 }
 
@@ -585,11 +589,13 @@ RR_kevent64(int aKq, const struct kevent64_s* aChanges, int aChangeCount,
 {
   RecordReplayFunction(kevent64, ssize_t,
                        aKq, aChanges, aChangeCount, aEvents, aEventCount, aFlags, aTimeout);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    // Copy the kevents verbatim, as for kevent().
-    events.CheckInput(aEventCount);
-    events.RecordOrReplayBytes(aEvents, aEventCount * sizeof(struct kevent64_s));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+
+  // Copy the kevents verbatim, as for kevent().
+  events.CheckInput(aEventCount);
+  events.RecordOrReplayBytes(aEvents, aEventCount * sizeof(struct kevent64_s));
   return rval;
 }
 
@@ -632,7 +638,7 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
       memory = aAddress;
     } else {
       memory = AllocateMemoryTryAddress(aAddress, RoundupSizeToPageBoundary(aSize),
-                                        TrackedMemoryKind);
+                                        MemoryKind::Tracked);
     }
   } else {
     // We have to call mmap itself, which can change memory protection flags
@@ -646,7 +652,7 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
       MOZ_RELEASE_ASSERT(memory == aAddress);
       RestoreWritableFixedMemory(memory, RoundupSizeToPageBoundary(aSize));
     } else if (memory && memory != (void*)-1) {
-      RegisterAllocatedMemory(memory, RoundupSizeToPageBoundary(aSize), TrackedMemoryKind);
+      RegisterAllocatedMemory(memory, RoundupSizeToPageBoundary(aSize), MemoryKind::Tracked);
     }
   }
 
@@ -664,7 +670,7 @@ RR_mmap(void* aAddress, size_t aSize, int aProt, int aFlags, int aFd, off_t aOff
 static ssize_t
 RR_munmap(void* aAddress, size_t aSize)
 {
-  DeallocateMemory(aAddress, aSize, TrackedMemoryKind);
+  DeallocateMemory(aAddress, aSize, MemoryKind::Tracked);
   return 0;
 }
 
@@ -672,11 +678,12 @@ static ssize_t
 RR_read(int aFd, void* aBuf, size_t aCount)
 {
   RecordReplayFunction(read, ssize_t, aFd, aBuf, aCount);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aCount);
-    MOZ_RELEASE_ASSERT((size_t)rval <= aCount);
-    events.RecordOrReplayBytes(aBuf, rval);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aCount);
+  MOZ_RELEASE_ASSERT((size_t)rval <= aCount);
+  events.RecordOrReplayBytes(aBuf, rval);
   return rval;
 }
 
@@ -684,11 +691,12 @@ static ssize_t
 RR___read_nocancel(int aFd, void* aBuf, size_t aCount)
 {
   RecordReplayFunction(__read_nocancel, ssize_t, aFd, aBuf, aCount);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aCount);
-    MOZ_RELEASE_ASSERT((size_t)rval <= aCount);
-    events.RecordOrReplayBytes(aBuf, rval);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aCount);
+  MOZ_RELEASE_ASSERT((size_t)rval <= aCount);
+  events.RecordOrReplayBytes(aBuf, rval);
   return rval;
 }
 
@@ -696,11 +704,12 @@ static ssize_t
 RR_pread(int aFd, void* aBuf, size_t aCount, size_t aOffset)
 {
   RecordReplayFunction(pread, ssize_t, aFd, aBuf, aCount, aOffset);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aCount);
-    MOZ_RELEASE_ASSERT(!aBuf || (size_t) rval <= aCount);
-    events.RecordOrReplayBytes(aBuf, rval);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aCount);
+  MOZ_RELEASE_ASSERT(!aBuf || (size_t) rval <= aCount);
+  events.RecordOrReplayBytes(aBuf, rval);
   return rval;
 }
 
@@ -729,9 +738,10 @@ static ssize_t
 RR_pipe(int* aFds)
 {
   RecordReplayFunction(pipe, ssize_t, aFds);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayBytes(aFds, 2 * sizeof(int));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayBytes(aFds, 2 * sizeof(int));
   return rval;
 }
 
@@ -739,9 +749,10 @@ static ssize_t
 RR_socketpair(int aDomain, int aType, int aProtocol, int* aFds)
 {
   RecordReplayFunction(socketpair, ssize_t, aDomain, aType, aProtocol, aFds);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayBytes(aFds, 2 * sizeof(int));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayBytes(aFds, 2 * sizeof(int));
   return rval;
 }
 
@@ -749,9 +760,10 @@ static ssize_t
 RR_fileport_makeport(int aFd, size_t* aPortName)
 {
   RecordReplayFunction(fileport_makeport, ssize_t, aFd, aPortName);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayValue(aPortName);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayValue(aPortName);
   return rval;
 }
 
@@ -760,31 +772,37 @@ RR_getsockopt(int aSockFd, int aLevel, int aOptName, void* aOptVal, int* aOptLen
 {
   int initoptlen = *aOptLen;
   RecordReplayFunction(getsockopt, ssize_t, aSockFd, aLevel, aOptName, aOptVal, aOptLen);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput((size_t) initoptlen);
-    events.RecordOrReplayValue(aOptLen);
-    MOZ_RELEASE_ASSERT(*aOptLen <= initoptlen);
-    events.RecordOrReplayBytes(aOptVal, *aOptLen);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput((size_t) initoptlen);
+  events.RecordOrReplayValue(aOptLen);
+  MOZ_RELEASE_ASSERT(*aOptLen <= initoptlen);
+  events.RecordOrReplayBytes(aOptVal, *aOptLen);
   return rval;
 }
 
 static ssize_t
 RR_gettimeofday(struct timeval* aTimeVal, struct timezone* aTimeZone)
 {
+  // If we have diverged from the recording, just get the actual current time
+  // rather than causing the current debugger operation to fail. This function
+  // is frequently called via e.g. JS natives which the debugger will execute.
   if (HasDivergedFromRecording()) {
     AutoEnsurePassThroughThreadEvents pt;
     return OriginalCall(gettimeofday, ssize_t, aTimeVal, aTimeZone);
   }
+
   RecordReplayFunction(gettimeofday, ssize_t, aTimeVal, aTimeZone);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput((aTimeVal ? 1 : 0) | (aTimeZone ? 2 : 0));
-    if (aTimeVal) {
-      events.RecordOrReplayBytes(aTimeVal, sizeof(struct timeval));
-    }
-    if (aTimeZone) {
-      events.RecordOrReplayBytes(aTimeZone, sizeof(struct timezone));
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.CheckInput((aTimeVal ? 1 : 0) | (aTimeZone ? 2 : 0));
+  if (aTimeVal) {
+    events.RecordOrReplayBytes(aTimeVal, sizeof(struct timeval));
+  }
+  if (aTimeZone) {
+    events.RecordOrReplayBytes(aTimeZone, sizeof(struct timezone));
   }
   return rval;
 }
@@ -823,10 +841,11 @@ RR_getattrlist(const char* aPath, struct attrlist* aAttrList,
                void* aAttrBuf, size_t aAttrBufSize, unsigned long aOptions)
 {
   RecordReplayFunction(getattrlist, ssize_t, aPath, aAttrList, aAttrBuf, aAttrBufSize, aOptions);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aAttrBufSize);
-    events.RecordOrReplayBytes(aAttrBuf, aAttrBufSize);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aAttrBufSize);
+  events.RecordOrReplayBytes(aAttrBuf, aAttrBufSize);
   return rval;
 }
 
@@ -835,9 +854,10 @@ RR_getattrlist(const char* aPath, struct attrlist* aAttrList,
   RR_ ##aName(size_t a0, aBufType* aBuf)                \
   {                                                     \
     RecordReplayFunction(aName, ssize_t, a0, aBuf);     \
-    if (!RecordOrReplayHadErrorNegative(rrf)) {         \
-      events.RecordOrReplayBytes(aBuf, sizeof(aBufType)); \
+    if (RecordOrReplayHadErrorNegative(rrf)) {          \
+      return rval;                                      \
     }                                                   \
+    events.RecordOrReplayBytes(aBuf, sizeof(aBufType)); \
     return rval;                                        \
   }
 
@@ -851,10 +871,11 @@ static ssize_t
 RR_readlink(const char* aPath, char* aBuf, size_t aBufSize)
 {
   RecordReplayFunction(readlink, ssize_t, aPath, aBuf, aBufSize);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aBufSize);
-    events.RecordOrReplayBytes(aBuf, aBufSize);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aBufSize);
+  events.RecordOrReplayBytes(aBuf, aBufSize);
   return rval;
 }
 
@@ -862,11 +883,12 @@ static ssize_t
 RR___getdirentries64(int aFd, void* aBuf, size_t aBufSize, size_t* aPosition)
 {
   RecordReplayFunction(__getdirentries64, ssize_t, aFd, aBuf, aBufSize, aPosition);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aBufSize);
-    events.RecordOrReplayBytes(aBuf, aBufSize);
-    events.RecordOrReplayValue(aPosition);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aBufSize);
+  events.RecordOrReplayBytes(aBuf, aBufSize);
+  events.RecordOrReplayValue(aPosition);
   return rval;
 }
 
@@ -877,14 +899,15 @@ RR_getdirentriesattr(int aFd, struct attrlist* aAttrList,
 {
   RecordReplayFunction(getdirentriesattr, ssize_t,
                        aFd, aAttrList, aBuffer, aBuffersize, aCount, aBase, aNewState, aOptions);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aBuffersize);
-    events.RecordOrReplayBytes(aAttrList, sizeof(struct attrlist));
-    events.RecordOrReplayBytes(aBuffer, aBuffersize);
-    events.RecordOrReplayValue(aCount);
-    events.RecordOrReplayValue(aBase);
-    events.RecordOrReplayValue(aNewState);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aBuffersize);
+  events.RecordOrReplayBytes(aAttrList, sizeof(struct attrlist));
+  events.RecordOrReplayBytes(aBuffer, aBuffersize);
+  events.RecordOrReplayValue(aCount);
+  events.RecordOrReplayValue(aBase);
+  events.RecordOrReplayValue(aNewState);
   return rval;
 }
 
@@ -892,9 +915,10 @@ static ssize_t
 RR_getrusage(int aWho, struct rusage* aUsage)
 {
   RecordReplayFunction(getrusage, ssize_t, aWho, aUsage);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayBytes(aUsage, sizeof(*aUsage));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayBytes(aUsage, sizeof(*aUsage));
   return rval;
 }
 
@@ -902,9 +926,10 @@ static ssize_t
 RR___getrlimit(int aWho, struct rlimit* aLimit)
 {
   RecordReplayFunction(__getrlimit, ssize_t, aWho, aLimit);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayBytes(aLimit, sizeof(*aLimit));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayBytes(aLimit, sizeof(*aLimit));
   return rval;
 }
 
@@ -914,11 +939,12 @@ static ssize_t
 RR_sigprocmask(int aHow, const sigset_t* aSet, sigset_t* aOldSet)
 {
   RecordReplayFunction(sigprocmask, ssize_t, aHow, aSet, aOldSet);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(!!aOldSet);
-    if (aOldSet) {
-      events.RecordOrReplayBytes(aOldSet, sizeof(*aOldSet));
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.CheckInput(!!aOldSet);
+  if (aOldSet) {
+    events.RecordOrReplayBytes(aOldSet, sizeof(*aOldSet));
   }
   return rval;
 }
@@ -927,11 +953,12 @@ static ssize_t
 RR_sigaltstack(const stack_t* aSs, stack_t* aOldSs)
 {
   RecordReplayFunction(sigaltstack, ssize_t, aSs, aOldSs);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(!!aOldSs);
-    if (aOldSs) {
-      events.RecordOrReplayBytes(aOldSs, sizeof(*aOldSs));
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.CheckInput(!!aOldSs);
+  if (aOldSs) {
+    events.RecordOrReplayBytes(aOldSs, sizeof(*aOldSs));
   }
   return rval;
 }
@@ -940,11 +967,12 @@ static ssize_t
 RR_sigaction(int aSignum, const struct sigaction* aAct, struct sigaction* aOldAct)
 {
   RecordReplayFunction(sigaction, ssize_t, aSignum, aAct, aOldAct);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(!!aOldAct);
-    if (aOldAct) {
-      events.RecordOrReplayBytes(aOldAct, sizeof(struct sigaction));
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.CheckInput(!!aOldAct);
+  if (aOldAct) {
+    events.RecordOrReplayBytes(aOldAct, sizeof(struct sigaction));
   }
   return rval;
 }
@@ -953,11 +981,12 @@ static ssize_t
 RR___pthread_sigmask(int aHow, const sigset_t* aSet, sigset_t* aOldSet)
 {
   RecordReplayFunction(__pthread_sigmask, ssize_t, aHow, aSet, aOldSet);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(!!aOldSet);
-    if (aOldSet) {
-      events.RecordOrReplayBytes(aOldSet, sizeof(sigset_t));
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.CheckInput(!!aOldSet);
+  if (aOldSet) {
+    events.RecordOrReplayBytes(aOldSet, sizeof(sigset_t));
   }
   return rval;
 }
@@ -966,10 +995,11 @@ static ssize_t
 RR___fsgetpath(void* aBuf, size_t aBufSize, void* aFsId, uint64_t aObjId)
 {
   RecordReplayFunction(__fsgetpath, ssize_t, aBuf, aBufSize, aFsId, aObjId);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aBufSize);
-    events.RecordOrReplayBytes(aBuf, aBufSize);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aBufSize);
+  events.RecordOrReplayBytes(aBuf, aBufSize);
   return rval;
 }
 
@@ -997,16 +1027,17 @@ RR___sysctl(int* aName, size_t aNamelen, void* aOld, size_t* aOldlenp,
 {
   size_t initlen = aOldlenp ? *aOldlenp : 0;
   RecordReplayFunction(__sysctl, ssize_t, aName, aNamelen, aOld, aOldlenp, aNewData, aNewLen);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput((aOld ? 1 : 0) | (aOldlenp ? 2 : 0));
-    events.CheckInput(initlen);
-    if (aOldlenp) {
-      events.RecordOrReplayValue(aOldlenp);
-    }
-    if (aOld) {
-      MOZ_RELEASE_ASSERT(aOldlenp);
-      events.RecordOrReplayBytes(aOld, *aOldlenp);
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.CheckInput((aOld ? 1 : 0) | (aOldlenp ? 2 : 0));
+  events.CheckInput(initlen);
+  if (aOldlenp) {
+    events.RecordOrReplayValue(aOldlenp);
+  }
+  if (aOld) {
+    MOZ_RELEASE_ASSERT(aOldlenp);
+    events.RecordOrReplayBytes(aOld, *aOldlenp);
   }
   return rval;
 }
@@ -1017,9 +1048,10 @@ static ssize_t
 RR_getaudit_addr(auditinfo_addr_t* aAuditInfo, size_t aLength)
 {
   RecordReplayFunction(getaudit_addr, ssize_t, aAuditInfo, aLength);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayBytes(aAuditInfo, sizeof(*aAuditInfo));
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayBytes(aAuditInfo, sizeof(*aAuditInfo));
   return rval;
 }
 
@@ -1030,14 +1062,15 @@ RR___select(int aFdCount, fd_set* aReadFds, fd_set* aWriteFds,
             fd_set* aExceptFds, timeval* aTimeout)
 {
   RecordReplayFunction(__select, ssize_t, aFdCount, aReadFds, aWriteFds, aExceptFds, aTimeout);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayBytes(aReadFds, sizeof(fd_set));
-    events.RecordOrReplayBytes(aWriteFds, sizeof(fd_set));
-    events.RecordOrReplayBytes(aExceptFds, sizeof(fd_set));
-    events.CheckInput(!!aTimeout);
-    if (aTimeout) {
-      events.RecordOrReplayBytes(aTimeout, sizeof(timeval));
-    }
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
+  }
+  events.RecordOrReplayBytes(aReadFds, sizeof(fd_set));
+  events.RecordOrReplayBytes(aWriteFds, sizeof(fd_set));
+  events.RecordOrReplayBytes(aExceptFds, sizeof(fd_set));
+  events.CheckInput(!!aTimeout);
+  if (aTimeout) {
+    events.RecordOrReplayBytes(aTimeout, sizeof(timeval));
   }
   return rval;
 }
@@ -1049,9 +1082,10 @@ static ssize_t
 RR_guarded_kqueue_np(size_t* aGuard, int aFlags)
 {
   RecordReplayFunction(guarded_kqueue_np, ssize_t, aGuard, aFlags);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.RecordOrReplayValue(aGuard);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.RecordOrReplayValue(aGuard);
   return rval;
 }
 
@@ -1059,10 +1093,11 @@ static ssize_t
 RR_csops(pid_t aPid, uint32_t aOps, void* aBuf, size_t aBufSize)
 {
   RecordReplayFunction(csops, ssize_t, aPid, aOps, aBuf, aBufSize);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aBufSize);
-    events.RecordOrReplayBytes(aBuf, aBufSize);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aBufSize);
+  events.RecordOrReplayBytes(aBuf, aBufSize);
   return rval;
 }
 
@@ -1070,10 +1105,11 @@ static ssize_t
 RR___getlogin(char* aName, size_t aLength)
 {
   RecordReplayFunction(__getlogin, ssize_t, aName, aLength);
-  if (!RecordOrReplayHadErrorNegative(rrf)) {
-    events.CheckInput(aLength);
-    events.RecordOrReplayBytes(aName, aLength);
+  if (RecordOrReplayHadErrorNegative(rrf)) {
+    return rval;
   }
+  events.CheckInput(aLength);
+  events.RecordOrReplayBytes(aName, aLength);
   return rval;
 }
 
@@ -1094,8 +1130,10 @@ RR___workq_kernreturn(size_t a0, size_t a1, size_t a2, size_t a3)
 static void
 RR_start_wqthread(size_t a0, size_t a1, size_t a2, size_t a3, size_t a4, size_t a5, size_t a6, size_t a7)
 {
-  // Suspend this thread if system threads should not be running. We are too
-  // early in initialization of this thread to do anything else.
+  // When replaying we don't want system threads to run, but by the time we
+  // initialize the record/replay system GCD has already started running.
+  // Use this redirection to watch for new threads being spawned by GCD, and
+  // suspend them immediately.
   if (IsReplaying()) {
     Thread::WaitForeverNoIdle();
   }
@@ -1335,13 +1373,14 @@ RR_getenv(char* aName)
   {                                                                     \
     MOZ_RELEASE_ASSERT(aResult);                                        \
     RecordReplayFunction(aName, struct tm*, aTime, aResult);            \
-    if (!RecordOrReplayHadErrorZero(rrf)) {                             \
-      events.RecordOrReplayBytes(aResult, sizeof(struct tm));           \
+    if (RecordOrReplayHadErrorZero(rrf)) {                              \
+      return nullptr;                                                   \
     }                                                                   \
+    events.RecordOrReplayBytes(aResult, sizeof(struct tm));             \
     if (IsRecording()) {                                                \
-      MOZ_RELEASE_ASSERT(!rval || rval == aResult);                     \
+      MOZ_RELEASE_ASSERT(rval == aResult);                              \
     }                                                                   \
-    return rval ? aResult : nullptr;                                    \
+    return aResult;                                                     \
   }
 
 RecordReplayTimeFunction(localtime_r)
@@ -1466,14 +1505,14 @@ static kern_return_t
 RR_mach_vm_allocate(vm_map_t aTarget, mach_vm_address_t* aAddress,
                     mach_vm_size_t aSize, int aFlags)
 {
-  *aAddress = (mach_vm_address_t) AllocateMemory(aSize, TrackedMemoryKind);
+  *aAddress = (mach_vm_address_t) AllocateMemory(aSize, MemoryKind::Tracked);
   return KERN_SUCCESS;
 }
 
 static kern_return_t
 RR_mach_vm_deallocate(vm_map_t aTarget, mach_vm_address_t aAddress, mach_vm_size_t aSize)
 {
-  DeallocateMemory((void*) aAddress, aSize, TrackedMemoryKind);
+  DeallocateMemory((void*) aAddress, aSize, MemoryKind::Tracked);
   return KERN_SUCCESS;
 }
 
@@ -1576,6 +1615,9 @@ __asm(
 
   // Count how many stack arguments we need to copy.
   "movq $64, %rsi;"
+
+  // Enter the loop below. The compiler might not place this block of code
+  // adjacent to the loop, so perform the jump explicitly.
   "jmp _RecordReplayInvokeObjCMessage_Loop;"
 
   // Copy each stack argument to the stack.
@@ -1745,6 +1787,9 @@ __asm(
 
   // Count how many stack arguments we need to save.
   "movq $64, %rsi;"
+
+  // Enter the loop below. The compiler might not place this block of code
+  // adjacent to the loop, so perform the jump explicitly.
   "jmp _RR_objc_msgSend_Loop;"
 
   // Save stack arguments into the structure.

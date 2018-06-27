@@ -1031,11 +1031,8 @@ InitFromBailout(JSContext* cx, size_t frameNo,
                 break;
         }
         op = JSOp(*pc);
-        if (skippedLoopEntry && ReplayDebugger::trackProgress(script)) {
-            if (const char* str = ReplayDebugger::progressString("SkippedLoopEntry", script, skippedLoopEntry))
-                fprintf(stderr, "%s", str);
-            ReplayDebugger::gProgressCounter++;
-        }
+        if (skippedLoopEntry && script->trackRecordReplayProgress())
+            mozilla::recordreplay::AdvanceExecutionProgressCounter();
     }
 
     const uint32_t pcOff = script->pcToOffset(pc);
@@ -1223,8 +1220,8 @@ InitFromBailout(JSContext* cx, size_t frameNo,
             JitSpew(JitSpew_BaselineBailouts, "      Adjusted framesize -= %d: %d",
                     int(sizeof(Value) * numUnsynced), int(frameSize));
 
-            // If envChain is nullptr, then bailout is occurring during argument check.
-            // In this case, resume into the prologue.
+            // If envChain is nullptr, then bailout is occurring during argument check
+            // or early in the script's execution. In this case, resume into the prologue.
             uint8_t* opReturnAddr;
             if (envChain == nullptr) {
                 // Global and eval scripts expect the env chain in R1, so only
@@ -1234,17 +1231,10 @@ InitFromBailout(JSContext* cx, size_t frameNo,
                 opReturnAddr = baselineScript->prologueEntryAddr();
                 JitSpew(JitSpew_BaselineBailouts, "      Resuming into prologue.");
 
-                // The comment above is wrong and there are times when we end
-                // up here even though the script has started executing. Undo
-                // the progress for any loop entry we thought we were skipping
+                // Undo the progress for any loop entry we thought we were skipping
                 // over earlier.
-                if (skippedLoopEntry && ReplayDebugger::trackProgress(script)) {
-                    if (const char* str = ReplayDebugger::progressString("UndoSkippedLoopEntry",
-                                                                         script, skippedLoopEntry)) {
-                        fprintf(stderr, "%s", str);
-                    }
-                    ReplayDebugger::gProgressCounter--;
-                }
+                if (skippedLoopEntry && script->trackRecordReplayProgress())
+                    --*mozilla::recordreplay::ExecutionProgressCounter();
             } else {
                 opReturnAddr = nativeCodeForPC;
             }

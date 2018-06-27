@@ -24,6 +24,7 @@ var { assert } = DevToolsUtils;
 var { TabSources } = require("./utils/TabSources");
 var makeDebugger = require("./utils/make-debugger");
 const Debugger = require("Debugger");
+const ReplayDebugger = require("./replay/debugger");
 const EventEmitter = require("devtools/shared/event-emitter");
 const InspectorUtils = require("InspectorUtils");
 
@@ -223,6 +224,12 @@ function TabActor(connection) {
   // Used by the ChromeActor to list all frames in the Browser Toolbox
   this.listenForNewDocShells = false;
 
+  let canRewind = false;
+  if (Debugger.recordReplayProcessKind() == "Middleman") {
+    let replayDebugger = new ReplayDebugger();
+    canRewind = replayDebugger.canRewind();
+  }
+
   this.traits = {
     reconfigure: true,
     // Supports frame listing via `listFrames` request and `frameUpdate` events
@@ -234,7 +241,7 @@ function TabActor(connection) {
     // Supports the logInPage request.
     logInPage: true,
     // Supports requests related to rewinding.
-    canRewind: Debugger.allDebuggersCanRewind(),
+    canRewind,
   };
 
   this._workerActorList = null;

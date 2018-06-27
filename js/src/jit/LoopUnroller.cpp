@@ -7,7 +7,8 @@
 #include "jit/LoopUnroller.h"
 
 #include "jit/MIRGraph.h"
-#include "vm/ReplayDebugger.h"
+
+#include "vm/JSScript-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -289,7 +290,7 @@ LoopUnroller::go(LoopIterationBound* bound)
         unrolledHeader->setEntryResumePoint(rp);
 
         // Perform an interrupt check at the start of the unrolled loop.
-        unrolledHeader->add(MInterruptCheck::New(alloc, graph.entryBlock()->info().script(), nullptr));
+        unrolledHeader->add(MInterruptCheck::New(alloc));
     }
 
     // Generate code for the test in the unrolled loop.
@@ -404,7 +405,9 @@ jit::UnrollLoops(MIRGraph& graph, const LoopIterationBoundVector& bounds)
     if (bounds.empty())
         return true;
 
-    if (ReplayDebugger::trackProgress(graph.entryBlock()->info().script()))
+    // Loop unrolling interferes with the progress tracking performed when
+    // recording/replaying.
+    if (graph.entryBlock()->info().script()->trackRecordReplayProgress())
         return true;
 
     for (size_t i = 0; i < bounds.length(); i++) {

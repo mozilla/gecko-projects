@@ -676,7 +676,7 @@ BytecodeFlowsToBitop(jsbytecode* pc)
 }
 
 extern bool
-IsValidBytecodeOffset(JSContext* cx, jsbytecode* code, size_t length, size_t offset);
+IsValidBytecodeOffset(JSContext* cx, JSScript* script, size_t offset);
 
 inline bool
 FlowsIntoNext(JSOp op)
@@ -915,7 +915,7 @@ GetNextPc(jsbytecode* pc)
 typedef Vector<jsbytecode*, 4, SystemAllocPolicy> PcVector;
 
 bool GetSuccessorBytecodes(jsbytecode* pc, PcVector& successors);
-bool GetPredecessorBytecodes(jsbytecode* code, jsbytecode* end, jsbytecode* pc, PcVector& predecessors);
+bool GetPredecessorBytecodes(JSScript* script, jsbytecode* pc, PcVector& predecessors);
 
 #if defined(DEBUG)
 /*

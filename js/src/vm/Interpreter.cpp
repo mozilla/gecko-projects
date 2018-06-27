@@ -2054,11 +2054,8 @@ CASE(JSOP_LOOPENTRY)
             goto leave_on_safe_point;
         }
     }
-    if (ReplayDebugger::trackProgress(script)) {
-        if (const char* str = ReplayDebugger::progressString("Interpreter", script, REGS.pc))
-            fprintf(stderr, "%s", str);
-        ReplayDebugger::gProgressCounter++;
-    }
+    if (script->trackRecordReplayProgress())
+        mozilla::recordreplay::AdvanceExecutionProgressCounter();
 END_CASE(JSOP_LOOPENTRY)
 
 CASE(JSOP_LINENO)

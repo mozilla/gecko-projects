@@ -43,7 +43,10 @@ namespace mozilla {
  *      Responsible for OOM reporting when null is returned.  The old allocation
  *      size is passed in, in addition to the new allocation size requested.
  *  - template <typename T> void free_(T*, size_t)
- *      The capacity passed in should match the original allocation.
+ *      The capacity passed in must match the old allocation size.
+ *  - template <typename T> void free_(T*)
+ *      Frees a buffer without knowing its allocated size. This might not be
+ *      implemented by allocation policies that need the allocation size.
  *  - void reportAllocOverflow() const
  *      Called on allocation overflow (that is, an allocation implicitly tried
  *      to allocate more than the available memory space -- think allocating an
@@ -116,7 +119,7 @@ public:
   }
 
   template <typename T>
-  void free_(T* aPtr, size_t aNumElems)
+  void free_(T* aPtr, size_t aNumElems = 0)
   {
     free(aPtr);
   }
@@ -178,7 +181,7 @@ public:
   }
 
   template <typename T>
-  void free_(T* aPtr, size_t aNumElems)
+  void free_(T* aPtr, size_t aNumElems = 0)
   {
     MOZ_CRASH("NeverAllocPolicy::free_");
   }

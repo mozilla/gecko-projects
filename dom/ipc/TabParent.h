@@ -596,6 +596,10 @@ public:
   void SetReadyToHandleInputEvents() { mIsReadyToHandleInputEvents = true; }
   bool IsReadyToHandleInputEvents() { return mIsReadyToHandleInputEvents; }
 
+  static bool AreRecordReplayTabsRendered() {
+    return gNumRenderedRecordReplayTabs != 0;
+  }
+
 protected:
   bool ReceiveMessage(const nsString& aMessage,
                       bool aSync,
@@ -790,6 +794,9 @@ private:
   // not ready to handle it. We will resend it when the next time we fire a
   // mouse event and the TabChild is ready.
   bool mIsMouseEnterIntoWidgetEventSuppressed;
+
+  // How many record/replay tabs are being rendered by this process.
+  static size_t gNumRenderedRecordReplayTabs;
 
 public:
   static TabParent* GetTabParentFromLayersId(layers::LayersId aLayersId);

@@ -8374,13 +8374,11 @@ class MCheckOverRecursed
 // Check whether we need to fire the interrupt handler.
 class MInterruptCheck : public MNullaryInstruction
 {
-    CompilerScript script_;
-    jsbytecode* pc_;
+    bool trackRecordReplayProgress_;
 
-    MInterruptCheck(JSScript* script, jsbytecode* pc)
+    MInterruptCheck()
       : MNullaryInstruction(classOpcode),
-        script_(script),
-        pc_(pc)
+        trackRecordReplayProgress_(false)
     {
         setGuard();
     }
@@ -8393,11 +8391,11 @@ class MInterruptCheck : public MNullaryInstruction
         return AliasSet::None();
     }
 
-    JSScript* script() const {
-        return script_;
+    bool trackRecordReplayProgress() const {
+        return trackRecordReplayProgress_;
     }
-    jsbytecode* pc() const {
-        return pc_;
+    void setTrackRecordReplayProgress() {
+        trackRecordReplayProgress_ = true;
     }
 };
 

@@ -489,12 +489,15 @@ class CFGUnaryControlInstruction : public CFGAryControlInstruction<1>
 class CFGGoto : public CFGUnaryControlInstruction
 {
     const size_t popAmount_;
-    jsbytecode* brokenLoopEntry_;
 
-    explicit CFGGoto(CFGBlock* block, size_t popAmount = 0, jsbytecode* brokenLoopEntry = nullptr)
+    explicit CFGGoto(CFGBlock* block)
       : CFGUnaryControlInstruction(block),
-        popAmount_(popAmount),
-        brokenLoopEntry_(brokenLoopEntry)
+        popAmount_(0)
+    {}
+
+    CFGGoto(CFGBlock* block, size_t popAmount_)
+      : CFGUnaryControlInstruction(block),
+        popAmount_(popAmount_)
     {}
 
   public:
@@ -503,15 +506,11 @@ class CFGGoto : public CFGUnaryControlInstruction
 
     static CFGGoto* CopyWithNewTargets(TempAllocator& alloc, CFGGoto* old, CFGBlock* block)
     {
-        return new(alloc) CFGGoto(block, old->popAmount(), old->brokenLoopEntry());
+        return new(alloc) CFGGoto(block, old->popAmount());
     }
 
     size_t popAmount() const {
         return popAmount_;
-    }
-
-    jsbytecode* brokenLoopEntry() const {
-        return brokenLoopEntry_;
     }
 };
 
@@ -554,25 +553,22 @@ class CFGLoopEntry : public CFGUnaryControlInstruction
     bool isForIn_;
     size_t stackPhiCount_;
     jsbytecode* loopStopPc_;
-    jsbytecode* loopEntryPc_;
 
-    CFGLoopEntry(CFGBlock* block, size_t stackPhiCount, jsbytecode* loopEntryPc)
+    CFGLoopEntry(CFGBlock* block, size_t stackPhiCount)
       : CFGUnaryControlInstruction(block),
         canOsr_(false),
         isForIn_(false),
         stackPhiCount_(stackPhiCount),
-        loopStopPc_(nullptr),
-        loopEntryPc_(loopEntryPc)
+        loopStopPc_(nullptr)
     {}
 
     CFGLoopEntry(CFGBlock* block, bool canOsr, bool isForIn, size_t stackPhiCount,
-                 jsbytecode* loopStopPc, jsbytecode* loopEntryPc)
+                 jsbytecode* loopStopPc)
       : CFGUnaryControlInstruction(block),
         canOsr_(canOsr),
         isForIn_(isForIn),
         stackPhiCount_(stackPhiCount),
-        loopStopPc_(loopStopPc),
-        loopEntryPc_(loopEntryPc)
+        loopStopPc_(loopStopPc)
     {}
 
   public:
@@ -583,8 +579,7 @@ class CFGLoopEntry : public CFGUnaryControlInstruction
                                             CFGBlock* loopEntry)
     {
         return new(alloc) CFGLoopEntry(loopEntry, old->canOsr(), old->isForIn(),
-                                       old->stackPhiCount(), old->loopStopPc(),
-                                       old->loopEntryPc());
+                                       old->stackPhiCount(), old->loopStopPc());
     }
 
     void setCanOsr() {
@@ -613,10 +608,6 @@ class CFGLoopEntry : public CFGUnaryControlInstruction
 
     void setLoopStopPc(jsbytecode* loopStopPc) {
         loopStopPc_ = loopStopPc;
-    }
-
-    jsbytecode* loopEntryPc() const {
-        return loopEntryPc_;
     }
 };
 

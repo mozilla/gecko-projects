@@ -19,13 +19,20 @@
 namespace mozilla {
 namespace recordreplay {
 
-// HashTable stabilization is used with specific hashtable classes which are
-// based on callbacks. When the table is constructed, if we are
-// recording/replaying then the callbacks are replaced with an alternate set
-// that produces consistent hash numbers between recording and replay. If
-// during replay the additions and removals to the tables occur in the same
-// order that they did during recording, then the structure of the tables and
-// the order in which elements are visited during iteration will be the same.
+// Hash tables frequently incorporate pointer values into the hash numbers they
+// compute, which are not guaranteed to be the same between recording and
+// replaying and consequently lead to inconsistent hash numbers and iteration
+// order between recording and replaying, which can in turn affect the order in
+// which recorded events occur. HashTable stabilization is designed to deal
+// with this problem, for specific kinds of hashtables (PLD and PL tables)
+// which are based on callbacks.
+//
+// When the table is constructed, if we are recording/replaying then the
+// callbacks are replaced with an alternate set that produces consistent hash
+// numbers between recording and replay. If during replay the additions and
+// removals to the tables occur in the same order that they did during
+// recording, then the structure of the tables and the order in which elements
+// are visited during iteration will be the same.
 //
 // Ensuring that hash numbers are consistent is done as follows: for each
 // table, we keep track of the keys that are in the table. When computing the
@@ -57,7 +64,7 @@ class StableHashTableInfo
   struct HashInfo {
     InfallibleVector<KeyInfo> mKeys;
   };
-  typedef std::unordered_map<HashNumber, HashInfo*> HashToKeyMap;
+  typedef std::unordered_map<HashNumber, UniquePtr<HashInfo>> HashToKeyMap;
   HashToKeyMap mHashToKey;
 
   // Table mapping key pointers to their original hash number.
@@ -69,9 +76,9 @@ class StableHashTableInfo
   const void* mLastKey;
   HashNumber mLastNewHash;
 
-  // The number of new hashes that have been generated. This increases
-  // monotonically.
-  uint32_t mNewHashCount;
+  // Counter for generating new hash numbers for entries added to the table.
+  // This increases monotonically, though it is fine if it overflows.
+  uint32_t mHashGenerator;
 
   // Buffer with executable memory for use in binding functions.
   uint8_t* mCallbackStorage;
@@ -82,7 +89,7 @@ class StableHashTableInfo
     HashToKeyMap::iterator iter = mHashToKey.find(aOriginalHash);
     MOZ_ASSERT(iter != mHashToKey.end());
 
-    HashInfo* hashInfo = iter->second;
+    HashInfo* hashInfo = iter->second.get();
     for (KeyInfo& keyInfo : hashInfo->mKeys) {
       if (keyInfo.mKey == aKey) {
         if (aHashInfo) {
@@ -99,16 +106,16 @@ public:
     : mMagic(MagicNumber)
     , mLastKey(nullptr)
     , mLastNewHash(0)
-    , mNewHashCount(0)
+    , mHashGenerator(0)
     , mCallbackStorage(nullptr)
   {
     // Use AllocateMemory, as the result will have RWX permissions.
-    mCallbackStorage = (uint8_t*) AllocateMemory(CallbackStorageCapacity, TrackedMemoryKind);
+    mCallbackStorage = (uint8_t*) AllocateMemory(CallbackStorageCapacity, MemoryKind::Tracked);
   }
 
   ~StableHashTableInfo() {
     MOZ_ASSERT(mHashToKey.empty());
-    DeallocateMemory(mCallbackStorage, CallbackStorageCapacity, TrackedMemoryKind);
+    DeallocateMemory(mCallbackStorage, CallbackStorageCapacity, MemoryKind::Tracked);
   }
 
   bool AppearsValid() {
@@ -117,13 +124,10 @@ public:
 
   void AddKey(HashNumber aOriginalHash, const void* aKey, HashNumber aNewHash) {
     HashToKeyMap::iterator iter = mHashToKey.find(aOriginalHash);
-    HashInfo* hashInfo;
-    if (iter != mHashToKey.end()) {
-      hashInfo = iter->second;
-    } else {
-      hashInfo = new HashInfo();
-      mHashToKey.insert(HashToKeyMap::value_type(aOriginalHash, hashInfo));
+    if (iter == mHashToKey.end()) {
+      iter = mHashToKey.insert(HashToKeyMap::value_type(aOriginalHash, MakeUnique<HashInfo>())).first;
     }
+    HashInfo* hashInfo = iter->second.get();
 
     KeyInfo key;
     key.mKey = aKey;
@@ -139,7 +143,6 @@ public:
     hashInfo->mKeys.erase(keyInfo);
 
     if (hashInfo->mKeys.length() == 0) {
-      delete hashInfo;
       mHashToKey.erase(aOriginalHash);
     }
 
@@ -159,7 +162,7 @@ public:
   {
     HashToKeyMap::const_iterator iter = mHashToKey.find(aOriginalHash);
     if (iter != mHashToKey.end()) {
-      HashInfo* hashInfo = iter->second;
+      HashInfo* hashInfo = iter->second.get();
       for (const KeyInfo& keyInfo : hashInfo->mKeys) {
         if (aMatch(keyInfo.mKey)) {
           *aNewHash = keyInfo.mNewHash;
@@ -176,25 +179,31 @@ public:
     return iter->second;
   }
 
+  class Assembler : public recordreplay::Assembler {
+  public:
+    Assembler(StableHashTableInfo& aInfo)
+      : recordreplay::Assembler(aInfo.mCallbackStorage, CallbackStorageCapacity)
+    {}
+  };
+
   // Use the callback storage buffer to create a new function T which has one
   // fewer argument than S and calls S with aArgument bound to the last
   // argument position. See BindFunctionArgument in ProcessRedirect.h
   template <typename S, typename T>
-  void NewBoundFunction(Maybe<Assembler>& aAssembler, S aFunction, void* aArgument,
+  void NewBoundFunction(Assembler& aAssembler, S aFunction, void* aArgument,
                         size_t aArgumentPosition, T* aTarget) {
-    if (!aAssembler) {
-      aAssembler.emplace(mCallbackStorage, size_t(CallbackStorageCapacity));
-    }
     void* nfn = BindFunctionArgument(BitwiseCast<void*>(aFunction), aArgument, aArgumentPosition,
-                                     aAssembler.ref());
+                                     aAssembler);
     BitwiseCast(nfn, aTarget);
   }
 
   // Set the last queried key for this table, and generate a new hash number
   // for it.
   HashNumber SetLastKey(const void* aKey) {
+    // Remember the last key queried, so that if it is then added to the table
+    // we know what hash number to use.
     mLastKey = aKey;
-    mLastNewHash = mNewHashCount++;
+    mLastNewHash = mHashGenerator++;
     return mLastNewHash;
   }
 
@@ -214,11 +223,11 @@ public:
   void MoveContentsFrom(StableHashTableInfo& aOther) {
     mHashToKey = std::move(aOther.mHashToKey);
     mKeyToHash = std::move(aOther.mKeyToHash);
-    mNewHashCount = aOther.mNewHashCount;
+    mHashGenerator = aOther.mHashGenerator;
 
     aOther.mHashToKey.clear();
     aOther.mKeyToHash.clear();
-    aOther.mNewHashCount = 0;
+    aOther.mHashGenerator = 0;
 
     mLastKey = aOther.mLastKey = nullptr;
     mLastNewHash = aOther.mLastNewHash = 0;
@@ -347,7 +356,7 @@ GeneratePLHashTableCallbacks(PLHashFunction* aKeyHash,
 {
   PLHashTableInfo* info = new PLHashTableInfo(*aKeyHash, *aKeyCompare, *aValueCompare,
                                               *aAllocOps, *aAllocPrivate);
-  Maybe<Assembler> assembler;
+  PLHashTableInfo::Assembler assembler(*info);
   info->NewBoundFunction(assembler, PLHashComputeHash, info, 1, aKeyHash);
   *aAllocOps = &gWrapPLHashAllocOps;
   *aAllocPrivate = info;
@@ -446,7 +455,7 @@ MOZ_EXPORT const PLDHashTableOps*
 RecordReplayInterface_InternalGeneratePLDHashTableCallbacks(const PLDHashTableOps* aOps)
 {
   PLDHashTableInfo* info = new PLDHashTableInfo(aOps);
-  Maybe<Assembler> assembler;
+  PLDHashTableInfo::Assembler assembler(*info);
   info->NewBoundFunction(assembler, PLDHashTableComputeHash, info, 1, &info->mNewOps.hashKey);
   info->mNewOps.matchEntry = aOps->matchEntry;
   info->NewBoundFunction(assembler, PLDHashTableMoveEntry, info, 3, &info->mNewOps.moveEntry);

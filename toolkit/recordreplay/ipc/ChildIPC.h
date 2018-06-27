@@ -11,8 +11,6 @@
 #include "mozilla/gfx/2D.h"
 #include "Units.h"
 
-class nsIConsoleMessage;
-
 namespace mozilla {
 
 class VsyncObserver;
@@ -71,9 +69,6 @@ void ReportFatalError(const char* aFormat, ...);
 // Mark a time span when the main thread is idle.
 void BeginIdleTime();
 void EndIdleTime();
-
-// Note a console message being logged.
-void LogMessage(nsIConsoleMessage* aMessage);
 
 } // namespace child
 } // namespace recordreplay

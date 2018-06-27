@@ -123,7 +123,7 @@ class JitAllocPolicy
         return maybe_pod_realloc<T>(ptr, oldSize, newSize);
     }
     template <typename T>
-    void free_(T* p, size_t numElems) {
+    void free_(T* p, size_t numElems = 0) {
     }
     void reportAllocOverflow() const {
     }

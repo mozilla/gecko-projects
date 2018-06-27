@@ -265,7 +265,7 @@ public:
     }
 
     template <typename T>
-    void free_(T* aPtr, size_t aNumElems)
+    void free_(T* aPtr, size_t aNumElems = 0)
     {
         free_impl(aPtr);
     }

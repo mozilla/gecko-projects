@@ -774,11 +774,11 @@ HasSavedCheckpointsInRange(ChildProcessInfo* aChild, size_t aStart, size_t aEnd)
 // child to inspect its state. This excludes breakpoints set for things
 // internal to the debugger.
 static bool
-IsUserBreakpoint(JS::replay::ExecutionPosition::Kind aKind)
+IsUserBreakpoint(js::ExecutionPosition::Kind aKind)
 {
-  MOZ_RELEASE_ASSERT(aKind != JS::replay::ExecutionPosition::Invalid);
-  return aKind != JS::replay::ExecutionPosition::NewScript
-      && aKind != JS::replay::ExecutionPosition::ConsoleMessage;
+  MOZ_RELEASE_ASSERT(aKind != js::ExecutionPosition::Invalid);
+  return aKind != js::ExecutionPosition::NewScript
+      && aKind != js::ExecutionPosition::ConsoleMessage;
 }
 
 static void
@@ -849,9 +849,6 @@ MainThreadMessageLoop()
   return gMainThreadMessageLoop;
 }
 
-// Initialize hooks used by the debugger.
-static void InitDebuggerHooks();
-
 // Contents of the prefs shmem block that is sent to the child on startup.
 static char* gShmemPrefs;
 static size_t gShmemPrefsLen;
@@ -879,7 +876,6 @@ InitializeMiddleman(int aArgc, char* aArgv[], base::ProcessId aParentPid)
   MOZ_RELEASE_ASSERT(gProcessKind == ProcessKind::MiddlemanRecording ||
                      gProcessKind == ProcessKind::MiddlemanReplaying);
 
-  InitDebuggerHooks();
   InitializeGraphicsMemory();
 
   gMonitor = new Monitor();
@@ -902,19 +898,17 @@ InitializeMiddleman(int aArgc, char* aArgv[], base::ProcessId aParentPid)
 ///////////////////////////////////////////////////////////////////////////////
 
 // Buffer for receiving the next debugger response.
-static JS::replay::CharBuffer* gResponseBuffer;
+static js::CharBuffer* gResponseBuffer;
 
 static void
 RecvDebuggerResponse(const DebuggerResponseMessage& aMsg)
 {
   MOZ_RELEASE_ASSERT(gResponseBuffer && gResponseBuffer->empty());
-  if (!gResponseBuffer->append(aMsg.Buffer(), aMsg.BufferSize())) {
-    MOZ_CRASH("RecvDebuggerResponse");
-  }
+  gResponseBuffer->append(aMsg.Buffer(), aMsg.BufferSize());
 }
 
-static void
-HookDebuggerRequest(const JS::replay::CharBuffer& aBuffer, JS::replay::CharBuffer* aResponse)
+void
+SendRequest(const js::CharBuffer& aBuffer, js::CharBuffer* aResponse)
 {
   MaybeCreateCheckpointInRecordingChild();
   gActiveChild->WaitUntilPaused();
@@ -933,8 +927,8 @@ HookDebuggerRequest(const JS::replay::CharBuffer& aBuffer, JS::replay::CharBuffe
   gResponseBuffer = nullptr;
 }
 
-static void
-HookSetBreakpoint(size_t aId, const JS::replay::ExecutionPosition& aPosition)
+void
+SetBreakpoint(size_t aId, const js::ExecutionPosition& aPosition)
 {
   MaybeCreateCheckpointInRecordingChild();
   gActiveChild->WaitUntilPaused();
@@ -961,8 +955,8 @@ static bool gResumeForwardOrBackward = false;
 // Hit any breakpoints installed for forced pauses.
 static void HitForcedPauseBreakpoints(bool aRecordingBoundary);
 
-static void
-HookResume(bool aForward)
+void
+Resume(bool aForward)
 {
   gActiveChild->WaitUntilPaused();
 
@@ -1024,8 +1018,8 @@ HookResume(bool aForward)
   gActiveChild->SendMessage(ResumeMessage(aForward));
 }
 
-static void
-HookTimeWarp(const JS::replay::ExecutionPoint& aTarget)
+void
+TimeWarp(const js::ExecutionPoint& aTarget)
 {
   gActiveChild->WaitUntilPaused();
 
@@ -1037,13 +1031,13 @@ HookTimeWarp(const JS::replay::ExecutionPoint& aTarget)
   // Make sure the active child can rewind to the checkpoint prior to the
   // warp target.
   MOZ_RELEASE_ASSERT(gTimeWarpTarget.isNothing());
-  gTimeWarpTarget.emplace(aTarget.checkpoint);
+  gTimeWarpTarget.emplace(aTarget.mCheckpoint);
 
   PokeChildren();
 
-  if (!gActiveChild->HasSavedCheckpoint(aTarget.checkpoint)) {
+  if (!gActiveChild->HasSavedCheckpoint(aTarget.mCheckpoint)) {
     // Find the replaying child responsible for saving the target checkpoint.
-    ChildProcessInfo* targetChild = ReplayingChildResponsibleForSavingCheckpoint(aTarget.checkpoint);
+    ChildProcessInfo* targetChild = ReplayingChildResponsibleForSavingCheckpoint(aTarget.mCheckpoint);
 
     if (targetChild == gActiveChild) {
       // Switch to the other replaying child while this one saves the necessary
@@ -1054,7 +1048,7 @@ HookTimeWarp(const JS::replay::ExecutionPoint& aTarget)
     // This process will be the new active child, so make sure it has saved the
     // checkpoint we need it to.
     targetChild->WaitUntil([=]() {
-        return targetChild->HasSavedCheckpoint(aTarget.checkpoint)
+        return targetChild->HasSavedCheckpoint(aTarget.mCheckpoint)
             && targetChild->IsPaused();
       });
 
@@ -1063,8 +1057,8 @@ HookTimeWarp(const JS::replay::ExecutionPoint& aTarget)
 
   gTimeWarpTarget.reset();
 
-  if (!gActiveChild->IsPausedAtCheckpoint() || gActiveChild->LastCheckpoint() != aTarget.checkpoint) {
-    gActiveChild->SendMessage(RestoreCheckpointMessage(aTarget.checkpoint));
+  if (!gActiveChild->IsPausedAtCheckpoint() || gActiveChild->LastCheckpoint() != aTarget.mCheckpoint) {
+    gActiveChild->SendMessage(RestoreCheckpointMessage(aTarget.mCheckpoint));
     gActiveChild->WaitUntilPaused();
   }
 
@@ -1074,8 +1068,8 @@ HookTimeWarp(const JS::replay::ExecutionPoint& aTarget)
   HitForcedPauseBreakpoints(false);
 }
 
-static void
-HookPause()
+void
+Pause()
 {
   MaybeCreateCheckpointInRecordingChild();
   gActiveChild->WaitUntilPaused();
@@ -1094,7 +1088,7 @@ ResumeForwardOrBackward()
   MOZ_RELEASE_ASSERT(!gChildExecuteForward || !gChildExecuteBackward);
 
   if (gResumeForwardOrBackward && (gChildExecuteForward || gChildExecuteBackward)) {
-    HookResume(gChildExecuteForward);
+    Resume(gChildExecuteForward);
   }
 }
 
@@ -1108,7 +1102,7 @@ RecvHitCheckpoint(const HitCheckpointMessage& aMsg)
   // the process to pause. Immediately resume if the main thread is blocked.
   if (MainThreadIsWaitingForIPDLReply()) {
     MOZ_RELEASE_ASSERT(gChildExecuteForward);
-    HookResume(true);
+    Resume(true);
   } else if (!gResumeForwardOrBackward) {
     gResumeForwardOrBackward = true;
     gMainThreadMessageLoop->PostTask(NewRunnableFunction("ResumeForwardOrBackward",
@@ -1133,7 +1127,7 @@ HitBreakpoint(uint32_t* aBreakpoints, size_t aNumBreakpoints, bool aRecordingBou
   // backward travel.
   for (size_t i = 0; i < aNumBreakpoints && gResumeForwardOrBackward; i++) {
     AutoSafeJSContext cx;
-    if (!JS::replay::hooks.hitBreakpointMiddleman(cx, aBreakpoints[i])) {
+    if (!js::HitBreakpoint(cx, aBreakpoints[i])) {
       Print("Warning: hitBreakpoint hook threw an exception.\n");
     }
   }
@@ -1154,15 +1148,16 @@ RecvHitBreakpoint(const HitBreakpointMessage& aMsg)
   uint32_t* breakpoints = new uint32_t[aMsg.NumBreakpoints()];
   PodCopy(breakpoints, aMsg.Breakpoints(), aMsg.NumBreakpoints());
   gMainThreadMessageLoop->PostTask(NewRunnableFunction("HitBreakpoint", HitBreakpoint,
-                                                       breakpoints, aMsg.NumBreakpoints(), false));
+                                                       breakpoints, aMsg.NumBreakpoints(),
+                                                       /* aRecordingBoundary = */ false));
 }
 
 static void
 HitForcedPauseBreakpoints(bool aRecordingBoundary)
 {
   Vector<uint32_t> breakpoints;
-  gActiveChild->GetMatchingInstalledBreakpoints([=](JS::replay::ExecutionPosition::Kind aKind) {
-      return aKind == JS::replay::ExecutionPosition::ForcedPause;
+  gActiveChild->GetMatchingInstalledBreakpoints([=](js::ExecutionPosition::Kind aKind) {
+      return aKind == js::ExecutionPosition::ForcedPause;
     }, breakpoints);
   if (!breakpoints.empty()) {
     uint32_t* newBreakpoints = new uint32_t[breakpoints.length()];
@@ -1171,17 +1166,6 @@ HitForcedPauseBreakpoints(bool aRecordingBoundary)
                                                          newBreakpoints, breakpoints.length(),
                                                          aRecordingBoundary));
   }
-}
-
-static void
-InitDebuggerHooks()
-{
-  JS::replay::hooks.debugRequestMiddleman = HookDebuggerRequest;
-  JS::replay::hooks.setBreakpointMiddleman = HookSetBreakpoint;
-  JS::replay::hooks.resumeMiddleman = HookResume;
-  JS::replay::hooks.timeWarpMiddleman = HookTimeWarp;
-  JS::replay::hooks.pauseMiddleman = HookPause;
-  JS::replay::hooks.canRewindMiddleman = CanRewind;
 }
 
 } // namespace parent

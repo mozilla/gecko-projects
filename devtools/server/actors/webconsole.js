@@ -894,7 +894,7 @@ WebConsoleActor.prototype =
         case "PageError": {
           replayingMessages.forEach((msg) => {
             if (msg.messageType == "PageError") {
-              let message = this.prepareReplayingPageErrorForRemote(msg);
+              let message = this.preparePageErrorForRemote(msg);
               message._type = type;
               messages.push(message);
             }
@@ -1609,7 +1609,7 @@ WebConsoleActor.prototype =
       let packet = {
         from: this.actorID,
         type: "pageError",
-        pageError: this.prepareReplayingPageErrorForRemote(msg),
+        pageError: this.preparePageErrorForRemote(msg),
       };
       this.conn.send(packet);
     }
@@ -1707,47 +1707,7 @@ WebConsoleActor.prototype =
       private: pageError.isFromPrivateWindow,
       stacktrace: stack,
       notes: notesArray,
-    };
-  },
-
-  /**
-   * Prepare the information we have been sent about a script error from a
-   * replaying process for sending to the client.
-   */
-  prepareReplayingPageErrorForRemote: function(msg) {
-    // The replaying process' message is intended for the terminal and includes
-    // the message text, file/line, and stack entries on separate lines.
-    // Pattern match to get the information we want.
-    let parse = (fn, fallback) => {
-      try { return fn(); } catch (e) { return fallback; }
-    };
-    let lines = msg.message.split('\n');
-    let errorMessage = parse(() => /\"(.*?)\"/.exec(lines[0])[1], "<Unknown>");
-    let errorFile = parse(() => /\{file: \"(.*?)\"/.exec(lines[0])[1], "");
-    let errorLine = parse(() => /line: (\d+)\}/.exec(lines[0])[1], 0);
-    lines.shift();
-    let stack = [];
-    for (let line of lines) {
-      try {
-        let arr = /(.*?)@(.*):(\d+):(\d+)$/.exec(line);
-        stack.push({
-          filename: arr[2],
-          lineNumber: arr[3],
-          columnNumber: arr[4],
-          functionName: arr[1],
-        });
-      } catch (e) {}
-    }
-
-    return {
-      errorMessage: this._createStringGrip(errorMessage),
-      sourceName: errorFile,
-      lineNumber: errorLine,
-      timeStamp: msg.timeStamp,
-      warning: msg.logLevel == msg.warn,
-      error: msg.logLevel == msg.error,
-      stacktrace: stack,
-      executionPoint: msg.executionPoint,
+      executionPoint: pageError.executionPoint,
     };
   },
 

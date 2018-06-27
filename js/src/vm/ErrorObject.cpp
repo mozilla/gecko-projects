@@ -81,10 +81,15 @@ js::ErrorObject::init(JSContext* cx, Handle<ErrorObject*> obj, JSExnType type,
     if (message)
         obj->setSlotWithType(cx, messageShape, StringValue(message));
 
-    // Make sure we don't truncate the time warp target by storing it as a double.
-    uint64_t timeWarpTarget = ReplayDebugger::newTimeWarpTarget(cx);
-    MOZ_RELEASE_ASSERT(timeWarpTarget == (uint64_t) (double) timeWarpTarget);
-    obj->initReservedSlot(TIME_WARP_SLOT, DoubleValue(timeWarpTarget));
+    // When recording/replaying and running on the main thread, get a counter
+    // which the devtools can use to warp to this point in the future.
+    if (mozilla::recordreplay::IsRecordingOrReplaying() && !cx->runtime()->parentRuntime) {
+        uint64_t timeWarpTarget = mozilla::recordreplay::NewTimeWarpTarget();
+
+        // Make sure we don't truncate the time warp target by storing it as a double.
+        MOZ_RELEASE_ASSERT(timeWarpTarget == (uint64_t) (double) timeWarpTarget);
+        obj->initReservedSlot(TIME_WARP_SLOT, DoubleValue(timeWarpTarget));
+    }
 
     return true;
 }

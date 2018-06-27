@@ -223,16 +223,9 @@ InterpreterFrame::prologue(JSContext* cx)
             lexicalEnv = &cx->global()->lexicalEnvironment();
             varObjRoot = cx->global();
         }
-        if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObjRoot)) {
-            // Treat this as a script entry, for consistency with Ion.
-            if (ReplayDebugger::trackProgress(script)) {
-                if (const char* str = ReplayDebugger::progressString("GlobalDeclarationFailure", script))
-                    fprintf(stderr, "%s", str);
-                ReplayDebugger::gProgressCounter++;
-            }
+        if (!probes::EnterScript(cx, script, nullptr, this))
             return false;
-        }
-        return probes::EnterScript(cx, script, nullptr, this);
+        return CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObjRoot);
     }
 
     if (isModuleFrame())

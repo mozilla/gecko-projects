@@ -16,7 +16,6 @@
 #include "vm/JSContext.h"
 #include "vm/JSONParser.h"
 
-#include "vm/Debugger-inl.h"
 #include "vm/Interpreter-inl.h"
 
 using namespace js;

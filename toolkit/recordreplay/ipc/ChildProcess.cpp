@@ -123,7 +123,7 @@ ChildProcessInfo::GetInstalledBreakpoints(Vector<SetBreakpointMessage*>& aBreakp
           break;
         }
       }
-      if (nmsg->mPosition.kind != JS::replay::ExecutionPosition::Invalid) {
+      if (nmsg->mPosition.IsValid()) {
         if (!aBreakpoints.append(nmsg)) {
           MOZ_CRASH("OOM");
         }
@@ -149,7 +149,7 @@ ChildProcessInfo::IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter)
     // Note: this test isn't quite right if new breakpoints have been installed
     // since the child paused, though this does not affect current callers.
     for (SetBreakpointMessage* msg : installed) {
-      if (msg->mId == breakpointId && aFilter(msg->mPosition.kind)) {
+      if (msg->mId == breakpointId && aFilter(msg->mPosition.mKind)) {
         return true;
       }
     }
@@ -166,7 +166,7 @@ ChildProcessInfo::GetMatchingInstalledBreakpoints(const BreakpointFilter& aFilte
   GetInstalledBreakpoints(installed);
 
   for (SetBreakpointMessage* msg : installed) {
-    if (aFilter(msg->mPosition.kind) && !aBreakpointIds.append(msg->mId)) {
+    if (aFilter(msg->mPosition.mKind) && !aBreakpointIds.append(msg->mId)) {
       MOZ_CRASH("OOM");
     }
   }
@@ -340,7 +340,7 @@ ChildProcessInfo::Recover(bool aPaused, Message* aPausedMessage, size_t aLastChe
   for (Message* msg : mMessages) {
     if (msg->mType == MessageType::SetBreakpoint) {
       SetBreakpointMessage* nmsg = static_cast<SetBreakpointMessage*>(msg);
-      SendMessageRaw(SetBreakpointMessage(nmsg->mId, JS::replay::ExecutionPosition()));
+      SendMessageRaw(SetBreakpointMessage(nmsg->mId, js::ExecutionPosition()));
     }
     free(msg);
   }

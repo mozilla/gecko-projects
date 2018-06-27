@@ -26,7 +26,6 @@
 #include "wasm/WasmGenerator.h"
 
 #include "gc/PrivateIterators-inl.h"
-#include "vm/Debugger-inl.h"
 #include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"

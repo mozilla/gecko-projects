@@ -113,7 +113,7 @@ struct AllocPolicyBasedFreePolicy
 {
   void operator()(const void* ptr) {
     AllocPolicy policy;
-    policy.free_(const_cast<void*>(ptr), 0);
+    policy.free_(const_cast<void*>(ptr));
   }
 };
 
@@ -139,7 +139,7 @@ class MOZ_STACK_CLASS SprintfState final : private mozilla::PrintfTarget, privat
     }
 
     ~SprintfState() {
-        this->free_(mBase, 0);
+        this->free_(mBase);
     }
 
     bool vprint(const char* format, va_list ap_list) MOZ_FORMAT_PRINTF(2, 0) {
@@ -165,11 +165,13 @@ class MOZ_STACK_CLASS SprintfState final : private mozilla::PrintfTarget, privat
         if (off + len >= mMaxlen) {
             /* Grow the buffer */
             newlen = mMaxlen + ((len > 32) ? len : 32);
-            newbase = static_cast<char*>(this->maybe_pod_realloc(mBase, mMaxlen, newlen));
+            newbase = this->template maybe_pod_malloc<char>(newlen);
             if (!newbase) {
                 /* Ran out of memory */
                 return false;
             }
+            memcpy(newbase, mBase, mMaxlen);
+            this->free_(mBase);
             mBase = newbase;
             mMaxlen = newlen;
             mCur = mBase + off;

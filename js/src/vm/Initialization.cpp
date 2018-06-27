@@ -27,7 +27,6 @@
 #endif // ENABLE_INTL_API
 #include "vm/DateTime.h"
 #include "vm/HelperThreads.h"
-#include "vm/ReplayDebugger.h"
 #include "vm/Runtime.h"
 #include "vm/Time.h"
 #include "vm/TraceLogging.h"
@@ -134,8 +133,6 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
 #ifdef JS_SIMULATOR
     RETURN_IF_FAIL(js::jit::SimulatorProcess::initialize());
 #endif
-
-    js::ReplayDebugger::Initialize();
 
     libraryInitState = InitState::Running;
     return nullptr;

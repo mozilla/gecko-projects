@@ -10,7 +10,8 @@
 #include "vm/Probes.h"
 
 #include "vm/JSContext.h"
-#include "vm/ReplayDebugger.h"
+
+#include "vm/JSScript-inl.h"
 
 namespace js {
 
@@ -48,11 +49,8 @@ probes::EnterScript(JSContext* cx, JSScript* script, JSFunction* maybeFun,
         fp->setPushedGeckoProfilerFrame();
     }
 
-    if (ReplayDebugger::trackProgress(script)) {
-        if (const char* str = ReplayDebugger::progressString("EnterScript", script))
-            fprintf(stderr, "%s", str);
-        ReplayDebugger::gProgressCounter++;
-    }
+    if (script->trackRecordReplayProgress())
+        mozilla::recordreplay::AdvanceExecutionProgressCounter();
 
     return true;
 }

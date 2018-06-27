@@ -93,16 +93,16 @@ Lock::New(void* aNativeLock)
     info->ReadAndNotifyNextOwner(thread);
   }
 
+  // Tolerate new locks being created with identical pointers, even if there
+  // was no DestroyLock call for the old one.
+  Destroy(aNativeLock);
+
   AutoWriteSpinLock ex(gLocksLock);
   thread->BeginDisallowEvents();
 
   if (!gLocks) {
     gLocks = new LockMap();
   }
-
-  // Tolerate new locks being created with identical pointers, even if there
-  // was no DestroyLock call for the old one.
-  gLocks->erase(aNativeLock);
 
   gLocks->insert(LockMap::value_type(aNativeLock, new Lock(id)));
 

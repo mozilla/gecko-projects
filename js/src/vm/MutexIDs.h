@@ -46,7 +46,6 @@
   _(ProcessExecutableRegion,     500) \
   _(OffThreadPromiseState,       500) \
   _(BufferStreamState,           500) \
-  _(ReplayContentSet,            500) \
   _(SharedArrayGrow,             500) \
   _(RuntimeScriptData,           500) \
   _(WasmSigIdSet,                500) \
