@@ -35,7 +35,8 @@ def make_task_description(config, jobs):
             build_number=release_config['build_number']
         )
         job['worker']['product'] = job['shipping-product']
-        job['worker']['branch'] = config.params['project']
+        branch = config.params['head_repository'].split('https://hg.mozilla.org/')[1]
+        job['worker']['branch'] = branch
 
         # locales files has different structure between mobile and desktop
         locales_file = job['locales-file']
