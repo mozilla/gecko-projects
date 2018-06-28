@@ -502,25 +502,6 @@ task_description_schema = Schema({
         Required('max-run-time'): int,
         Required('product'): basestring,
     }, {
-        Required('implementation'): 'beetmover-maven',
-
-        Required('max-run-time', default=600): int,
-        Required('release-properties'): {
-            'app-name': basestring,
-            'app-version': basestring,
-            'branch': basestring,
-            'build-id': basestring,
-            'artifact-id': basestring,
-            'hash-type': basestring,
-            'platform': basestring,
-        },
-
-        Required('upstream-artifacts'): [{
-            Required('taskId'): taskref_or_string,
-            Required('taskType'): basestring,
-            Required('paths'): [basestring],
-        }],
-    }, {
         Required('implementation'): 'balrog',
         Required('balrog-action'): Any(*BALROG_ACTIONS),
         Optional('product'): basestring,
@@ -1086,15 +1067,6 @@ def build_beetmover_push_to_release_payload(config, task, task_def):
     }
 
 
-@payload_builder('beetmover-maven')
-def build_beetmover_maven_payload(config, task, task_def):
-    build_beetmover_payload(config, task, task_def)
-
-    task_def['payload']['artifact_id'] = task['worker']['release-properties']['artifact-id']
-
-    del task_def['payload']['releaseProperties']['hashType']
-    del task_def['payload']['releaseProperties']['platform']
-
 @payload_builder('balrog')
 def build_balrog_payload(config, task, task_def):
     worker = task['worker']
@@ -1344,9 +1316,11 @@ def set_defaults(config, tasks):
             worker.setdefault('env', {})
             worker.setdefault('os-groups', [])
             worker.setdefault('chain-of-trust', False)
-        elif worker['implementation'] in (
-            'scriptworker-signing', 'beetmover', 'beetmover-push-to-release', 'beetmover-maven',
-        ):
+        elif worker['implementation'] == 'scriptworker-signing':
+            worker.setdefault('max-run-time', 600)
+        elif worker['implementation'] == 'beetmover':
+            worker.setdefault('max-run-time', 600)
+        elif worker['implementation'] == 'beetmover-push-to-release':
             worker.setdefault('max-run-time', 600)
         elif worker['implementation'] == 'push-apk':
             worker.setdefault('commit', False)
