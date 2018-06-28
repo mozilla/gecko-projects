@@ -184,9 +184,12 @@ scriptworker:
             - 'project:releng:beetmover:bucket:release'
             - 'project:releng:beetmover:bucket:nightly'
             - 'project:releng:beetmover:bucket:partner'
+            - 'project:releng:beetmover:bucket:maven'
         'scriptworker-prov-v1/beetmoverworker-dev':
             - 'project:releng:beetmover:bucket:dep'
             - 'project:releng:beetmover:bucket:dep-partner'
+            # TODO name it maven-staging
+            - 'project:releng:beetmover:bucket:maven'
         'scriptworker-prov-v1/balrogworker-v1':
             - 'project:releng:balrog:server:nightly'
             - 'project:releng:balrog:server:aurora'
