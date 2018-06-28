@@ -27,7 +27,8 @@ using layers::Stringify;
 class NewRenderer : public RendererEvent
 {
 public:
-  NewRenderer(wr::DocumentHandle** aDocHandle, layers::CompositorBridgeParentBase* aBridge,
+  NewRenderer(wr::DocumentHandle** aDocHandle,
+              layers::CompositorBridgeParent* aBridge,
               uint32_t* aMaxTextureSize,
               bool* aUseANGLE,
               RefPtr<widget::CompositorWidget>&& aWidget,
@@ -38,7 +39,7 @@ public:
     , mMaxTextureSize(aMaxTextureSize)
     , mUseANGLE(aUseANGLE)
     , mBridge(aBridge)
-    , mCompositorWidget(Move(aWidget))
+    , mCompositorWidget(std::move(aWidget))
     , mTask(aTask)
     , mSize(aSize)
     , mSyncHandle(aHandle)
@@ -55,7 +56,7 @@ public:
   {
     layers::AutoCompleteTask complete(mTask);
 
-    UniquePtr<RenderCompositor> compositor = RenderCompositor::Create(Move(mCompositorWidget));
+    UniquePtr<RenderCompositor> compositor = RenderCompositor::Create(std::move(mCompositorWidget));
     if (!compositor) {
       // RenderCompositor::Create puts a message into gfxCriticalNote if it is nullptr
       return;
@@ -74,8 +75,8 @@ public:
     MOZ_ASSERT(wrRenderer);
 
     RefPtr<RenderThread> thread = &aRenderThread;
-    auto renderer = MakeUnique<RendererOGL>(Move(thread),
-                                            Move(compositor),
+    auto renderer = MakeUnique<RendererOGL>(std::move(thread),
+                                            std::move(compositor),
                                             aWindowId,
                                             wrRenderer,
                                             mBridge);
@@ -94,14 +95,14 @@ public:
       }
     }
 
-    aRenderThread.AddRenderer(aWindowId, Move(renderer));
+    aRenderThread.AddRenderer(aWindowId, std::move(renderer));
   }
 
 private:
   wr::DocumentHandle** mDocHandle;
   uint32_t* mMaxTextureSize;
   bool* mUseANGLE;
-  layers::CompositorBridgeParentBase* mBridge;
+  layers::CompositorBridgeParent* mBridge;
   RefPtr<widget::CompositorWidget> mCompositorWidget;
   layers::SynchronousTask* mTask;
   LayoutDeviceIntSize mSize;
@@ -133,23 +134,15 @@ private:
 };
 
 
-TransactionBuilder::TransactionBuilder()
+TransactionBuilder::TransactionBuilder(bool aUseSceneBuilderThread)
+  : mUseSceneBuilderThread(gfxPrefs::WebRenderAsyncSceneBuild() && aUseSceneBuilderThread)
 {
-  // We need the if statement to avoid miscompilation on windows, see
-  // bug 1449982 comment 22.
-  if (gfxPrefs::WebRenderAsyncSceneBuild()) {
-    mTxn = wr_transaction_new(true);
-    mResourceUpdates = wr_resource_updates_new();
-  } else {
-    mResourceUpdates = wr_resource_updates_new();
-    mTxn = wr_transaction_new(false);
-  }
+  mTxn = wr_transaction_new(mUseSceneBuilderThread);
 }
 
 TransactionBuilder::~TransactionBuilder()
 {
   wr_transaction_delete(mTxn);
-  wr_resource_updates_delete(mResourceUpdates);
 }
 
 void
@@ -210,15 +203,6 @@ TransactionBuilder::UpdateDynamicProperties(const nsTArray<wr::WrOpacityProperty
       aOpacityArray.IsEmpty() ?  nullptr : aOpacityArray.Elements(),
       aOpacityArray.Length(),
       aTransformArray.IsEmpty() ?  nullptr : aTransformArray.Elements(),
-      aTransformArray.Length());
-}
-
-void
-TransactionBuilder::AppendTransformProperties(const nsTArray<wr::WrTransformProperty>& aTransformArray)
-{
-  wr_transaction_append_transform_properties(
-      mTxn,
-      aTransformArray.IsEmpty() ? nullptr : aTransformArray.Elements(),
       aTransformArray.Length());
 }
 
@@ -294,9 +278,9 @@ WebRenderAPI::Create(layers::CompositorBridgeParent* aBridge,
   // the next time we need to access the DocumentHandle object.
   layers::SynchronousTask task("Create Renderer");
   auto event = MakeUnique<NewRenderer>(&docHandle, aBridge, &maxTextureSize, &useANGLE,
-                                       Move(aWidget), &task, aSize,
+                                       std::move(aWidget), &task, aSize,
                                        &syncHandle);
-  RenderThread::Get()->RunEvent(aWindowId, Move(event));
+  RenderThread::Get()->RunEvent(aWindowId, std::move(event));
 
   task.Wait();
 
@@ -353,7 +337,7 @@ WebRenderAPI::~WebRenderAPI()
 
     layers::SynchronousTask task("Destroy WebRenderAPI");
     auto event = MakeUnique<RemoveRenderer>(&task);
-    RunOnRenderThread(Move(event));
+    RunOnRenderThread(std::move(event));
     task.Wait();
 
     wr_api_shut_down(mDocHandle);
@@ -365,8 +349,7 @@ WebRenderAPI::~WebRenderAPI()
 void
 WebRenderAPI::SendTransaction(TransactionBuilder& aTxn)
 {
-  wr_transaction_update_resources(aTxn.Raw(), aTxn.RawUpdates());
-  wr_api_send_transaction(mDocHandle, aTxn.Raw());
+  wr_api_send_transaction(mDocHandle, aTxn.Raw(), aTxn.UseSceneBuilderThread());
 }
 
 bool
@@ -382,7 +365,8 @@ WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
 }
 
 void
-WebRenderAPI::Readback(gfx::IntSize size,
+WebRenderAPI::Readback(const TimeStamp& aStartTime,
+                       gfx::IntSize size,
                        uint8_t *buffer,
                        uint32_t buffer_size)
 {
@@ -390,8 +374,10 @@ WebRenderAPI::Readback(gfx::IntSize size,
     {
         public:
             explicit Readback(layers::SynchronousTask* aTask,
+                              TimeStamp aStartTime,
                               gfx::IntSize aSize, uint8_t *aBuffer, uint32_t aBufferSize)
                 : mTask(aTask)
+                , mStartTime(aStartTime)
                 , mSize(aSize)
                 , mBuffer(aBuffer)
                 , mBufferSize(aBufferSize)
@@ -406,25 +392,26 @@ WebRenderAPI::Readback(gfx::IntSize size,
 
             virtual void Run(RenderThread& aRenderThread, WindowId aWindowId) override
             {
-                aRenderThread.UpdateAndRender(aWindowId, /* aReadback */ true);
+                aRenderThread.UpdateAndRender(aWindowId, mStartTime, /* aReadback */ true);
                 wr_renderer_readback(aRenderThread.GetRenderer(aWindowId)->GetRenderer(),
                                      mSize.width, mSize.height, mBuffer, mBufferSize);
                 layers::AutoCompleteTask complete(mTask);
             }
 
             layers::SynchronousTask* mTask;
+            TimeStamp mStartTime;
             gfx::IntSize mSize;
             uint8_t *mBuffer;
             uint32_t mBufferSize;
     };
 
     layers::SynchronousTask task("Readback");
-    auto event = MakeUnique<Readback>(&task, size, buffer, buffer_size);
+    auto event = MakeUnique<Readback>(&task, aStartTime, size, buffer, buffer_size);
     // This event will be passed from wr_backend thread to renderer thread. That
     // implies that all frame data have been processed when the renderer runs this
     // read-back event. Then, we could make sure this read-back event gets the
     // latest result.
-    RunOnRenderThread(Move(event));
+    RunOnRenderThread(std::move(event));
 
     task.Wait();
 }
@@ -459,7 +446,7 @@ WebRenderAPI::Pause()
     auto event = MakeUnique<PauseEvent>(&task);
     // This event will be passed from wr_backend thread to renderer thread. That
     // implies that all frame data have been processed when the renderer runs this event.
-    RunOnRenderThread(Move(event));
+    RunOnRenderThread(std::move(event));
 
     task.Wait();
 }
@@ -497,7 +484,7 @@ WebRenderAPI::Resume()
     auto event = MakeUnique<ResumeEvent>(&task, &result);
     // This event will be passed from wr_backend thread to renderer thread. That
     // implies that all frame data have been processed when the renderer runs this event.
-    RunOnRenderThread(Move(event));
+    RunOnRenderThread(std::move(event));
 
     task.Wait();
     return result;
@@ -544,7 +531,7 @@ WebRenderAPI::WaitFlushed()
     auto event = MakeUnique<WaitFlushedEvent>(&task);
     // This event will be passed from wr_backend thread to renderer thread. That
     // implies that all frame data have been processed when the renderer runs this event.
-    RunOnRenderThread(Move(event));
+    RunOnRenderThread(std::move(event));
 
     task.Wait();
 }
@@ -563,14 +550,14 @@ WebRenderAPI::Capture()
 void
 TransactionBuilder::Clear()
 {
-  wr_resource_updates_clear(mResourceUpdates);
+  wr_resource_updates_clear(mTxn);
 }
 
 void
 TransactionBuilder::AddImage(ImageKey key, const ImageDescriptor& aDescriptor,
                              wr::Vec<uint8_t>& aBytes)
 {
-  wr_resource_updates_add_image(mResourceUpdates,
+  wr_resource_updates_add_image(mTxn,
                                 key,
                                 &aDescriptor,
                                 &aBytes.inner);
@@ -580,7 +567,7 @@ void
 TransactionBuilder::AddBlobImage(ImageKey key, const ImageDescriptor& aDescriptor,
                                  wr::Vec<uint8_t>& aBytes)
 {
-  wr_resource_updates_add_blob_image(mResourceUpdates,
+  wr_resource_updates_add_blob_image(mTxn,
                                      key,
                                      &aDescriptor,
                                      &aBytes.inner);
@@ -593,7 +580,7 @@ TransactionBuilder::AddExternalImage(ImageKey key,
                                      wr::WrExternalImageBufferType aBufferType,
                                      uint8_t aChannelIndex)
 {
-  wr_resource_updates_add_external_image(mResourceUpdates,
+  wr_resource_updates_add_external_image(mTxn,
                                          key,
                                          &aDescriptor,
                                          aExtID,
@@ -617,7 +604,7 @@ TransactionBuilder::UpdateImageBuffer(ImageKey aKey,
                                       const ImageDescriptor& aDescriptor,
                                       wr::Vec<uint8_t>& aBytes)
 {
-  wr_resource_updates_update_image(mResourceUpdates,
+  wr_resource_updates_update_image(mTxn,
                                    aKey,
                                    &aDescriptor,
                                    &aBytes.inner);
@@ -629,7 +616,7 @@ TransactionBuilder::UpdateBlobImage(ImageKey aKey,
                                     wr::Vec<uint8_t>& aBytes,
                                     const wr::DeviceUintRect& aDirtyRect)
 {
-  wr_resource_updates_update_blob_image(mResourceUpdates,
+  wr_resource_updates_update_blob_image(mTxn,
                                         aKey,
                                         &aDescriptor,
                                         &aBytes.inner,
@@ -643,7 +630,7 @@ TransactionBuilder::UpdateExternalImage(ImageKey aKey,
                                         wr::WrExternalImageBufferType aBufferType,
                                         uint8_t aChannelIndex)
 {
-  wr_resource_updates_update_external_image(mResourceUpdates,
+  wr_resource_updates_update_external_image(mTxn,
                                             aKey,
                                             &aDescriptor,
                                             aExtID,
@@ -654,25 +641,25 @@ TransactionBuilder::UpdateExternalImage(ImageKey aKey,
 void
 TransactionBuilder::DeleteImage(ImageKey aKey)
 {
-  wr_resource_updates_delete_image(mResourceUpdates, aKey);
+  wr_resource_updates_delete_image(mTxn, aKey);
 }
 
 void
 TransactionBuilder::AddRawFont(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes, uint32_t aIndex)
 {
-  wr_resource_updates_add_raw_font(mResourceUpdates, aKey, &aBytes.inner, aIndex);
+  wr_resource_updates_add_raw_font(mTxn, aKey, &aBytes.inner, aIndex);
 }
 
 void
 TransactionBuilder::AddFontDescriptor(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes, uint32_t aIndex)
 {
-  wr_resource_updates_add_font_descriptor(mResourceUpdates, aKey, &aBytes.inner, aIndex);
+  wr_resource_updates_add_font_descriptor(mTxn, aKey, &aBytes.inner, aIndex);
 }
 
 void
 TransactionBuilder::DeleteFont(wr::FontKey aKey)
 {
-  wr_resource_updates_delete_font(mResourceUpdates, aKey);
+  wr_resource_updates_delete_font(mTxn, aKey);
 }
 
 void
@@ -683,7 +670,7 @@ TransactionBuilder::AddFontInstance(wr::FontInstanceKey aKey,
                                     const wr::FontInstancePlatformOptions* aPlatformOptions,
                                     wr::Vec<uint8_t>& aVariations)
 {
-  wr_resource_updates_add_font_instance(mResourceUpdates, aKey, aFontKey, aGlyphSize,
+  wr_resource_updates_add_font_instance(mTxn, aKey, aFontKey, aGlyphSize,
                                         aOptions, aPlatformOptions,
                                         &aVariations.inner);
 }
@@ -691,7 +678,7 @@ TransactionBuilder::AddFontInstance(wr::FontInstanceKey aKey,
 void
 TransactionBuilder::DeleteFontInstance(wr::FontInstanceKey aKey)
 {
-  wr_resource_updates_delete_font_instance(mResourceUpdates, aKey);
+  wr_resource_updates_delete_font_instance(mTxn, aKey);
 }
 
 class FrameStartTime : public RendererEvent
@@ -724,7 +711,7 @@ void
 WebRenderAPI::SetFrameStartTime(const TimeStamp& aTime)
 {
   auto event = MakeUnique<FrameStartTime>(aTime);
-  RunOnRenderThread(Move(event));
+  RunOnRenderThread(std::move(event));
 }
 
 void
@@ -737,6 +724,7 @@ WebRenderAPI::RunOnRenderThread(UniquePtr<RendererEvent> aEvent)
 DisplayListBuilder::DisplayListBuilder(PipelineId aId,
                                        const wr::LayoutSize& aContentSize,
                                        size_t aCapacity)
+  : mActiveFixedPosTracker(nullptr)
 {
   MOZ_COUNT_CTOR(DisplayListBuilder);
   mWrState = wr_state_new(aId, aContentSize, aCapacity);
@@ -803,10 +791,10 @@ DisplayListBuilder::PushStackingContext(const wr::LayoutRect& aBounds,
 }
 
 void
-DisplayListBuilder::PopStackingContext()
+DisplayListBuilder::PopStackingContext(bool aIsReferenceFrame)
 {
   WRDL_LOG("PopStackingContext\n", mWrState);
-  wr_dp_pop_stacking_context(mWrState);
+  wr_dp_pop_stacking_context(mWrState, aIsReferenceFrame);
 }
 
 wr::WrClipChainId
@@ -1098,9 +1086,10 @@ DisplayListBuilder::PushYCbCrInterleavedImage(const wr::LayoutRect& aBounds,
 void
 DisplayListBuilder::PushIFrame(const wr::LayoutRect& aBounds,
                                bool aIsBackfaceVisible,
-                               PipelineId aPipeline)
+                               PipelineId aPipeline,
+                               bool aIgnoreMissingPipeline)
 {
-  wr_dp_push_iframe(mWrState, aBounds, aIsBackfaceVisible, aPipeline);
+  wr_dp_push_iframe(mWrState, aBounds, aIsBackfaceVisible, aPipeline, aIgnoreMissingPipeline);
 }
 
 void
@@ -1230,6 +1219,14 @@ DisplayListBuilder::PushBoxShadow(const wr::LayoutRect& aRect,
                         aClipMode);
 }
 
+Maybe<layers::FrameMetrics::ViewID>
+DisplayListBuilder::GetContainingFixedPosScrollTarget(const ActiveScrolledRoot* aAsr)
+{
+  return mActiveFixedPosTracker
+      ? mActiveFixedPosTracker->GetScrollTargetForASR(aAsr)
+      : Nothing();
+}
+
 void
 DisplayListBuilder::SetHitTestInfo(const layers::FrameMetrics::ViewID& aScrollId,
                                    gfx::CompositorHitTestInfo aHitInfo)
@@ -1243,6 +1240,29 @@ void
 DisplayListBuilder::ClearHitTestInfo()
 {
   wr_clear_item_tag(mWrState);
+}
+
+DisplayListBuilder::FixedPosScrollTargetTracker::FixedPosScrollTargetTracker(
+    DisplayListBuilder& aBuilder,
+    const ActiveScrolledRoot* aAsr,
+    layers::FrameMetrics::ViewID aScrollId)
+  : mParentTracker(aBuilder.mActiveFixedPosTracker)
+  , mBuilder(aBuilder)
+  , mAsr(aAsr)
+  , mScrollId(aScrollId)
+{
+  aBuilder.mActiveFixedPosTracker = this;
+}
+
+DisplayListBuilder::FixedPosScrollTargetTracker::~FixedPosScrollTargetTracker()
+{
+  mBuilder.mActiveFixedPosTracker = mParentTracker;
+}
+
+Maybe<layers::FrameMetrics::ViewID>
+DisplayListBuilder::FixedPosScrollTargetTracker::GetScrollTargetForASR(const ActiveScrolledRoot* aAsr)
+{
+  return aAsr == mAsr ? Some(mScrollId) : Nothing();
 }
 
 } // namespace wr

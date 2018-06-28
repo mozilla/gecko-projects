@@ -30,6 +30,8 @@ from mach.decorators import (
     Command,
 )
 
+here = os.path.abspath(os.path.dirname(__file__))
+
 
 @CommandProvider
 class MachCommands(MachCommandBase):
@@ -65,6 +67,10 @@ class MachCommands(MachCommandBase):
                      default=False,
                      action='store_true',
                      help='Verbose output.')
+    @CommandArgument('--python',
+                     help='Version of Python for Pipenv to use. When given a '
+                          'Python version, Pipenv will automatically scan your '
+                          'system for a Python that matches that given version.')
     @CommandArgument('-j', '--jobs',
                      default=1,
                      type=int,
@@ -91,8 +97,10 @@ class MachCommands(MachCommandBase):
                          subsuite=None,
                          verbose=False,
                          jobs=1,
+                         python=None,
                          **kwargs):
-        self._activate_virtualenv()
+        python = python or self.virtualenv_manager.python_path
+        self.activate_pipenv(pipfile=None, args=['--python', python], populate=True)
 
         if test_objects is None:
             from moztest.resolve import TestResolver
@@ -114,7 +122,11 @@ class MachCommands(MachCommandBase):
         elif subsuite:
             filters.append(mpf.subsuite(subsuite))
 
-        tests = mp.active_tests(filters=filters, disabled=False, **mozinfo.info)
+        tests = mp.active_tests(
+            filters=filters,
+            disabled=False,
+            python=self.virtualenv_manager.version_info[0],
+            **mozinfo.info)
 
         if not tests:
             submsg = "for subsuite '{}' ".format(subsuite) if subsuite else ""

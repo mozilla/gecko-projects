@@ -21,8 +21,9 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Unused.h"
 #include "nsCRTGlue.h"
-#include "nsNSSCertificate.h"
+#include "nsNSSCertHelper.h"
 #include "nsNSSCertValidity.h"
+#include "nsNSSCertificate.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nss.h"
@@ -575,7 +576,7 @@ NSSCertDBTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
       return Result::FATAL_ERROR_NO_MEMORY;
     }
     Result tempRV = DoOCSPRequest(aiaLocation, mOriginAttributes,
-                                  Move(ocspRequest), GetOCSPTimeout(),
+                                  std::move(ocspRequest), GetOCSPTimeout(),
                                   ocspResponse);
     MOZ_ASSERT((tempRV != Success) || ocspResponse.length() > 0);
     if (tempRV != Success) {
@@ -783,7 +784,7 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
   UniqueCERTCertList certListCopy = nsNSSCertList::DupCertList(certList);
 
   // This adopts the list
-  RefPtr<nsNSSCertList> nssCertList = new nsNSSCertList(Move(certListCopy));
+  RefPtr<nsNSSCertList> nssCertList = new nsNSSCertList(std::move(certListCopy));
   if (!nssCertList) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
@@ -877,7 +878,8 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
   // handshake. To determine this, we check mHostname: If it isn't set, this is
   // not TLS, so don't run the algorithm.
   if (mHostname && CertDNIsInList(root.get(), RootSymantecDNs) &&
-      mDistrustedCAPolicy != DistrustedCAPolicy::Permit) {
+      ((mDistrustedCAPolicy & DistrustedCAPolicy::DistrustSymantecRoots) ||
+       (mDistrustedCAPolicy & DistrustedCAPolicy::DistrustSymantecRootsRegardlessOfDate))) {
 
     rootCert = nullptr; // Clear the state for Segment...
     nsCOMPtr<nsIX509CertList> intCerts;
@@ -893,9 +895,9 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
     // (new Date("2016-06-01T00:00:00Z")).getTime() * 1000
     static const PRTime JUNE_1_2016 = 1464739200000000;
 
-    PRTime permitAfterDate = 0; // 0 indicates there is no permitAfterDate
-    if (mDistrustedCAPolicy == DistrustedCAPolicy::DistrustSymantecRoots) {
-      permitAfterDate = JUNE_1_2016;
+    PRTime permitAfterDate = JUNE_1_2016;
+    if (mDistrustedCAPolicy & DistrustedCAPolicy::DistrustSymantecRootsRegardlessOfDate) {
+      permitAfterDate = 0; // 0 indicates there is no permitAfterDate
     }
 
     bool isDistrusted = false;
@@ -910,7 +912,7 @@ NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
     }
   }
 
-  mBuiltChain = Move(certList);
+  mBuiltChain = std::move(certList);
 
   return Success;
 }
@@ -1178,13 +1180,13 @@ DisableMD5()
 }
 
 bool
-LoadLoadableRoots(const nsCString& dir, const nsCString& modNameUTF8)
+LoadLoadableRoots(const nsCString& dir)
 {
   // If a module exists with the same name, make a best effort attempt to delete
   // it. Note that it isn't possible to delete the internal module, so checking
   // the return value would be detrimental in that case.
   int unusedModType;
-  Unused << SECMOD_DeleteModule(modNameUTF8.get(), &unusedModType);
+  Unused << SECMOD_DeleteModule(kRootModuleName, &unusedModType);
   // Some NSS command-line utilities will load a roots module under the name
   // "Root Certs" if there happens to be a `DLL_PREFIX "nssckbi" DLL_SUFFIX`
   // file in the directory being operated on. In some cases this can cause us to
@@ -1203,7 +1205,7 @@ LoadLoadableRoots(const nsCString& dir, const nsCString& modNameUTF8)
   fullLibraryPath.ReplaceSubstring("\"", "\\\"");
 
   nsAutoCString pkcs11ModuleSpec("name=\"");
-  pkcs11ModuleSpec.Append(modNameUTF8);
+  pkcs11ModuleSpec.Append(kRootModuleName);
   pkcs11ModuleSpec.AppendLiteral("\" library=\"");
   pkcs11ModuleSpec.Append(fullLibraryPath);
   pkcs11ModuleSpec.AppendLiteral("\"");
@@ -1223,10 +1225,9 @@ LoadLoadableRoots(const nsCString& dir, const nsCString& modNameUTF8)
 }
 
 void
-UnloadLoadableRoots(const char* modNameUTF8)
+UnloadLoadableRoots()
 {
-  MOZ_ASSERT(modNameUTF8);
-  UniqueSECMODModule rootsModule(SECMOD_FindModule(modNameUTF8));
+  UniqueSECMODModule rootsModule(SECMOD_FindModule(kRootModuleName));
 
   if (rootsModule) {
     SECMOD_UnloadUserModule(rootsModule.get());

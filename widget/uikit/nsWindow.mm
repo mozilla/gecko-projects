@@ -148,7 +148,7 @@ private:
     event.mClickCount = 1;
     event.button = WidgetMouseEvent::eLeftButton;
     event.mTime = PR_IntervalNow();
-    event.inputSource = MouseEventBinding::MOZ_SOURCE_UNKNOWN;
+    event.inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
 
     nsEventStatus status;
     aWindow->DispatchEvent(&event, status);
@@ -271,7 +271,7 @@ private:
 - (void)drawUsingOpenGL
 {
     ALOG("drawUsingOpenGL");
-  AUTO_PROFILER_LABEL("ChildView::drawUsingOpenGL", GRAPHICS);
+  AUTO_PROFILER_LABEL("ChildView::drawUsingOpenGL", OTHER);
 
   if (!mGeckoChild->IsVisible())
     return;
@@ -326,7 +326,7 @@ private:
     [self drawUsingOpenGL];
     return;
   }
-  AUTO_PROFILER_LABEL("ChildView::drawRect", GRAPHICS);
+  AUTO_PROFILER_LABEL("ChildView::drawRect", OTHER);
 
   // The CGContext that drawRect supplies us with comes with a transform that
   // scales one user space unit to one Cocoa point, which can consist of

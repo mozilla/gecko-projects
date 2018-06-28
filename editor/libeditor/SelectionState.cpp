@@ -126,12 +126,12 @@ SelectionState::IsEqual(SelectionState* aSelState)
 
     IgnoredErrorResult rv;
     int16_t compResult =
-      myRange->CompareBoundaryPoints(RangeBinding::START_TO_START, *itsRange, rv);
+      myRange->CompareBoundaryPoints(Range_Binding::START_TO_START, *itsRange, rv);
     if (rv.Failed() || compResult) {
       return false;
     }
     compResult =
-      myRange->CompareBoundaryPoints(RangeBinding::END_TO_END, *itsRange, rv);
+      myRange->CompareBoundaryPoints(Range_Binding::END_TO_END, *itsRange, rv);
     if (rv.Failed() || compResult) {
       return false;
     }
@@ -639,6 +639,8 @@ RangeUpdater::DidMoveNode(nsINode* aOldParent, int32_t aOldOffset,
  ******************************************************************************/
 
 RangeItem::RangeItem()
+  : mStartOffset{0}
+  , mEndOffset{0}
 {
 }
 

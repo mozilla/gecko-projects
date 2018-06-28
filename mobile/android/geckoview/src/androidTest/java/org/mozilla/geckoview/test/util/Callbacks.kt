@@ -8,14 +8,16 @@ package org.mozilla.geckoview.test.util
 import org.mozilla.geckoview.GeckoResponse
 import org.mozilla.geckoview.GeckoSession
 
+import android.view.inputmethod.CursorAnchorInfo
+import android.view.inputmethod.ExtractedText
+import android.view.inputmethod.ExtractedTextRequest
+
 class Callbacks private constructor() {
-    object Default : All {
-    }
+    object Default : All
 
     interface All : ContentDelegate, NavigationDelegate, PermissionDelegate, ProgressDelegate,
-                    PromptDelegate, ScrollDelegate, SelectionActionDelegate,
-                    TrackingProtectionDelegate {
-    }
+                    PromptDelegate, ScrollDelegate, SelectionActionDelegate, TextInputDelegate,
+                    TrackingProtectionDelegate
 
     interface ContentDelegate : GeckoSession.ContentDelegate {
         override fun onTitleChange(session: GeckoSession, title: String) {
@@ -34,6 +36,9 @@ class Callbacks private constructor() {
         }
 
         override fun onExternalResponse(session: GeckoSession, response: GeckoSession.WebResponseInfo) {
+        }
+
+        override fun onCrash(session: GeckoSession) {
         }
     }
 
@@ -63,7 +68,7 @@ class Callbacks private constructor() {
             callback.reject()
         }
 
-        override fun onContentPermissionRequest(session: GeckoSession, uri: String, type: Int, access: String, callback: GeckoSession.PermissionDelegate.Callback) {
+        override fun onContentPermissionRequest(session: GeckoSession, uri: String, type: Int, access: String?, callback: GeckoSession.PermissionDelegate.Callback) {
             callback.reject()
         }
 
@@ -132,6 +137,26 @@ class Callbacks private constructor() {
         }
 
         override fun onHideAction(session: GeckoSession, reason: Int) {
+        }
+    }
+
+    interface TextInputDelegate : GeckoSession.TextInputDelegate {
+        override fun restartInput(session: GeckoSession, reason: Int) {
+        }
+
+        override fun showSoftInput(session: GeckoSession) {
+        }
+
+        override fun hideSoftInput(session: GeckoSession) {
+        }
+
+        override fun updateSelection(session: GeckoSession, selStart: Int, selEnd: Int, compositionStart: Int, compositionEnd: Int) {
+        }
+
+        override fun updateExtractedText(session: GeckoSession, request: ExtractedTextRequest, text: ExtractedText) {
+        }
+
+        override fun updateCursorAnchorInfo(session: GeckoSession, info: CursorAnchorInfo) {
         }
     }
 }

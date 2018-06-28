@@ -227,7 +227,7 @@ FromImageBitmap(WebGLContext* webgl, const char* funcName, TexImageTarget target
                 uint32_t width, uint32_t height, uint32_t depth,
                 const dom::ImageBitmap& imageBitmap)
 {
-    UniquePtr<dom::ImageBitmapCloneData> cloneData = Move(imageBitmap.ToCloneData());
+    UniquePtr<dom::ImageBitmapCloneData> cloneData = imageBitmap.ToCloneData();
     if (!cloneData) {
       return nullptr;
     }
@@ -460,7 +460,7 @@ ValidateTexOrSubImage(WebGLContext* webgl, const char* funcName, TexImageTarget 
     if (!blob || !blob->Validate(webgl, funcName, pi))
         return nullptr;
 
-    return Move(blob);
+    return blob;
 }
 
 void
@@ -1146,10 +1146,10 @@ WebGLTexture::TexStorage(const char* funcName, TexTarget target, GLsizei levels,
         const auto lastLevelHeight = uint32_t(height) >> lastLevel;
 
         // If these are all zero, then some earlier level was the final 1x1(x1) level.
-        bool ok = lastLevelWidth && lastLevelHeight;
+        bool ok = lastLevelWidth || lastLevelHeight;
         if (target == LOCAL_GL_TEXTURE_3D) {
             const auto lastLevelDepth = uint32_t(depth) >> lastLevel;
-            ok &= bool(lastLevelDepth);
+            ok |= bool(lastLevelDepth);
         }
         return ok;
     }();

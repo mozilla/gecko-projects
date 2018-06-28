@@ -31,7 +31,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/IntegerRange.h"
-#include "nsHostObjectProtocolHandler.h"
+#include "mozilla/dom/FontTableURIProtocolHandler.h"
 #include "nsITimer.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
@@ -145,7 +145,6 @@ class RefreshDriverTimer {
 public:
   RefreshDriverTimer()
     : mLastFireEpoch(0)
-    , mLastFireSkipped(false)
   {
   }
 
@@ -233,11 +232,6 @@ public:
 
   virtual TimeDuration GetTimerRate() = 0;
 
-  bool LastTickSkippedAnyPaints() const
-  {
-    return mLastFireSkipped;
-  }
-
   TimeStamp GetIdleDeadlineHint(TimeStamp aDefault)
   {
     MOZ_ASSERT(NS_IsMainThread());
@@ -305,8 +299,6 @@ protected:
       }
 
       TickDriver(driver, aJsNow, aNow);
-
-      mLastFireSkipped = mLastFireSkipped || driver->mSkippedPaints;
     }
   }
 
@@ -319,7 +311,6 @@ protected:
 
     mLastFireEpoch = jsnow;
     mLastFireTime = now;
-    mLastFireSkipped = false;
 
     LOG("[%p] ticking drivers...", this);
     // RD is short for RefreshDriver
@@ -338,7 +329,6 @@ protected:
   }
 
   int64_t mLastFireEpoch;
-  bool mLastFireSkipped;
   TimeStamp mLastFireTime;
   TimeStamp mTargetTime;
 
@@ -946,7 +936,6 @@ protected:
 
     mLastFireEpoch = jsnow;
     mLastFireTime = now;
-    mLastFireSkipped = false;
 
     nsTArray<RefPtr<nsRefreshDriver>> drivers(mContentRefreshDrivers);
     drivers.AppendElements(mRootRefreshDrivers);
@@ -956,7 +945,6 @@ protected:
         !drivers[index]->IsTestControllingRefreshesEnabled())
     {
       TickDriver(drivers[index], jsnow, now);
-      mLastFireSkipped = mLastFireSkipped || drivers[index]->SkippedPaints();
     }
 
     mNextDriverIndex++;
@@ -1072,21 +1060,12 @@ nsRefreshDriver::DefaultInterval()
 // Backends which block on swap/present/etc should try to not block
 // when layout.frame_rate=0 - to comply with "ASAP" as much as possible.
 double
-nsRefreshDriver::GetRegularTimerInterval(bool *outIsDefault) const
+nsRefreshDriver::GetRegularTimerInterval() const
 {
   int32_t rate = Preferences::GetInt("layout.frame_rate", -1);
   if (rate < 0) {
     rate = gfxPlatform::GetDefaultFrameRate();
-    if (outIsDefault) {
-      *outIsDefault = true;
-    }
-  } else {
-    if (outIsDefault) {
-      *outIsDefault = false;
-    }
-  }
-
-  if (rate == 0) {
+  } else if (rate == 0) {
     rate = 10000;
   }
 
@@ -1114,12 +1093,6 @@ nsRefreshDriver::GetMinRecomputeVisibilityInterval()
   return TimeDuration::FromMilliseconds(interval);
 }
 
-double
-nsRefreshDriver::GetRefreshTimerInterval() const
-{
-  return mThrottled ? GetThrottledTimerInterval() : GetRegularTimerInterval();
-}
-
 RefreshDriverTimer*
 nsRefreshDriver::ChooseTimer() const
 {
@@ -1131,8 +1104,7 @@ nsRefreshDriver::ChooseTimer() const
   }
 
   if (!sRegularRateTimer) {
-    bool isDefault = true;
-    double rate = GetRegularTimerInterval(&isDefault);
+    double rate = GetRegularTimerInterval();
 
     // Try to use vsync-base refresh timer first for sRegularRateTimer.
     CreateVsyncRefreshTimer();
@@ -1375,7 +1347,7 @@ nsRefreshDriver::EnsureTimerStarted(EnsureTimerStartedFlags aFlags)
     // XXXdholbert Exclude SVG-in-opentype fonts from this optimization, until
     // they receive refresh-driver ticks from their client docs (bug 1107252).
     nsIURI* uri = mPresContext->Document()->GetDocumentURI();
-    if (!uri || !IsFontTableURI(uri)) {
+    if (!uri || !mozilla::dom::IsFontTableURI(uri)) {
       MOZ_ASSERT(!mActiveTimer,
                  "image doc refresh driver should never have its own timer");
       return;
@@ -1609,7 +1581,7 @@ void
 nsRefreshDriver::DispatchPendingEvents()
 {
   // Swap out the current pending events
-  nsTArray<PendingEvent> pendingEvents(Move(mPendingEvents));
+  nsTArray<PendingEvent> pendingEvents(std::move(mPendingEvents));
   for (PendingEvent& event : pendingEvents) {
     event.mTarget->DispatchEvent(*event.mEvent);
   }
@@ -1791,7 +1763,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     return;
   }
 
-  AUTO_PROFILER_LABEL("nsRefreshDriver::Tick", GRAPHICS);
+  AUTO_PROFILER_LABEL("nsRefreshDriver::Tick", LAYOUT);
 
   // We're either frozen or we were disconnected (likely in the middle
   // of a tick iteration).  Just do nothing here, since our
@@ -2173,12 +2145,6 @@ void
 nsRefreshDriver::FinishedWaitingForTransaction()
 {
   mWaitingForTransaction = false;
-  if (mSkippedPaints &&
-      !IsInRefresh() &&
-      (HasObservers() || HasImageRequests())) {
-    AUTO_PROFILER_TRACING("Paint", "RefreshDriverTick");
-    DoRefresh();
-  }
   mSkippedPaints = false;
   mWarningThreshold = 1;
 }

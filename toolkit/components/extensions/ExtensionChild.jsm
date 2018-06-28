@@ -467,9 +467,18 @@ class Messenger {
           },
         };
 
+        const childManager = this.context.viewType == "background" ? this.context.childManager : null;
         MessageChannel.addListener(this.messageManagers, "Extension:Message", listener);
+        if (childManager) {
+          childManager.callParentFunctionNoReturn("runtime.addMessagingListener",
+                                                  ["onMessage"]);
+        }
         return () => {
           MessageChannel.removeListener(this.messageManagers, "Extension:Message", listener);
+          if (childManager) {
+            childManager.callParentFunctionNoReturn("runtime.removeMessagingListener",
+                                                    ["onMessage"]);
+          }
         };
       },
     }).api();
@@ -552,9 +561,18 @@ class Messenger {
           },
         };
 
+        const childManager = this.context.viewType == "background" ? this.context.childManager : null;
         MessageChannel.addListener(this.messageManagers, "Extension:Connect", listener);
+        if (childManager) {
+          childManager.callParentFunctionNoReturn("runtime.addMessagingListener",
+                                                  ["onConnect"]);
+        }
         return () => {
           MessageChannel.removeListener(this.messageManagers, "Extension:Connect", listener);
+          if (childManager) {
+            childManager.callParentFunctionNoReturn("runtime.removeMessagingListener",
+                                                    ["onConnect"]);
+          }
         };
       },
     }).api();
@@ -596,10 +614,13 @@ class BrowserExtensionContent extends EventEmitter {
     });
 
     this.webAccessibleResources = data.webAccessibleResources.map(res => new MatchGlob(res));
-    this.whiteListedHosts = new MatchPatternSet(data.whiteListedHosts, {ignorePath: true});
     this.permissions = data.permissions;
     this.optionalPermissions = data.optionalPermissions;
     this.principal = data.principal;
+
+    let restrictSchemes = !this.hasPermission("mozillaAddons");
+
+    this.whiteListedHosts = new MatchPatternSet(data.whiteListedHosts, {restrictSchemes, ignorePath: true});
 
     this.apiManager = this.getAPIManager();
 
@@ -627,7 +648,7 @@ class BrowserExtensionContent extends EventEmitter {
         let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
 
         this.whiteListedHosts = new MatchPatternSet([...patterns, ...permissions.origins],
-                                                    {ignorePath: true});
+                                                    {restrictSchemes, ignorePath: true});
       }
 
       if (this.policy) {

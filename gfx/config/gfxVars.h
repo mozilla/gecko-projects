@@ -34,13 +34,16 @@ class gfxVarReceiver;
   _(PDMWMFDisableD3D11Dlls,     nsCString,        nsCString())          \
   _(PDMWMFDisableD3D9Dlls,      nsCString,        nsCString())          \
   _(DXInterop2Blocked,          bool,             false)                \
+  _(DXNV12Blocked,              bool,             false)                \
   _(UseWebRender,               bool,             false)                \
   _(UseWebRenderANGLE,          bool,             false)                \
   _(UseWebRenderDCompWin,       bool,             false)                \
   _(UseWebRenderProgramBinary,  bool,             false)                \
+  _(UseWebRenderProgramBinaryDisk, bool,          false)                \
   _(WebRenderDebugFlags,        int32_t,          0)                    \
   _(ScreenDepth,                int32_t,          0)                    \
   _(GREDirectory,               nsString,         nsString())           \
+  _(ProfDirectory,              nsString,         nsString())           \
   _(UseOMTP,                    bool,             false)                \
   _(AllowD3D11KeyedMutex,       bool,             false)                \
 

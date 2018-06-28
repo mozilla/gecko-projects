@@ -18,7 +18,6 @@
 #include "nsHTMLParts.h"
 #include "nsIPresShell.h"
 #include "nsIServiceManager.h"
-#include "nsIDOMNode.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h"
 #include "nsIFrameInlines.h"
@@ -34,7 +33,7 @@ nsTableWrapperFrame::GetLogicalBaseline(WritingMode aWritingMode) const
 {
   nsIFrame* kid = mFrames.FirstChild();
   if (!kid) {
-    NS_NOTREACHED("no inner table");
+    MOZ_ASSERT_UNREACHABLE("no inner table");
     return nsContainerFrame::GetLogicalBaseline(aWritingMode);
   }
 
@@ -123,6 +122,10 @@ nsTableWrapperFrame::AppendFrames(ChildListID     aListID,
   // just tell the pres shell.
   PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
+  // The presence of caption frames makes us sort our display
+  // list differently, so mark us as changed for the new
+  // ordering.
+  MarkNeedsDisplayItemRebuild();
 }
 
 void
@@ -142,6 +145,7 @@ nsTableWrapperFrame::InsertFrames(ChildListID     aListID,
   // just tell the pres shell.
   PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
+  MarkNeedsDisplayItemRebuild();
 }
 
 void
@@ -163,6 +167,7 @@ nsTableWrapperFrame::RemoveFrame(ChildListID  aListID,
 
   PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                 NS_FRAME_HAS_DIRTY_CHILDREN);
+  MarkNeedsDisplayItemRebuild();
 }
 
 void
@@ -666,7 +671,7 @@ nsTableWrapperFrame::GetCaptionOrigin(uint32_t             aCaptionSide,
       aOrigin.B(aWM) = aInnerMargin.BStart(aWM) + aCaptionMargin.BStart(aWM);
       break;
     default:
-      NS_NOTREACHED("Unknown caption alignment type");
+      MOZ_ASSERT_UNREACHABLE("Unknown caption alignment type");
       break;
   }
   return NS_OK;
@@ -758,7 +763,7 @@ nsTableWrapperFrame::GetInnerOrigin(uint32_t             aCaptionSide,
                        aCaptionMargin.BStartEnd(aWM);
       break;
     default:
-      NS_NOTREACHED("Unknown caption alignment type");
+      MOZ_ASSERT_UNREACHABLE("Unknown caption alignment type");
       break;
   }
   return NS_OK;

@@ -7,7 +7,11 @@
 #ifndef gc_DeletePolicy_h
 #define gc_DeletePolicy_h
 
+#include "gc/Barrier.h"
 #include "js/TracingAPI.h"
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
 
 namespace js {
 namespace gc {
@@ -26,6 +30,9 @@ struct ClearEdgesTracer : public JS::CallbackTracer
     void onObjectEdge(JSObject** objp) override;
     void onStringEdge(JSString** strp) override;
     void onSymbolEdge(JS::Symbol** symp) override;
+#ifdef ENABLE_BIGINT
+    void onBigIntEdge(JS::BigInt** bip) override;
+#endif
     void onScriptEdge(JSScript** scriptp) override;
     void onShapeEdge(js::Shape** shapep) override;
     void onObjectGroupEdge(js::ObjectGroup** groupp) override;
@@ -67,8 +74,13 @@ struct GCManagedDeletePolicy
     void operator()(const T* constPtr) {
         if (constPtr) {
             auto ptr = const_cast<T*>(constPtr);
-            gc::ClearEdgesTracer trc;
-            ptr->trace(&trc);
+            if (JS::RuntimeHeapIsCollecting()) {
+                MOZ_ASSERT(js::CurrentThreadIsGCSweeping());
+                // Do not attempt to clear out storebuffer edges.
+            } else {
+                gc::ClearEdgesTracer trc;
+                ptr->trace(&trc);
+            }
             js_delete(ptr);
         }
     }

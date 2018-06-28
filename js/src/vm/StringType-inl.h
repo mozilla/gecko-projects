@@ -16,8 +16,8 @@
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "gc/StoreBuffer.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
+#include "vm/Realm.h"
 
 #include "gc/StoreBuffer-inl.h"
 
@@ -229,7 +229,7 @@ JSFlatString::new_(JSContext* cx, const CharT* chars, size_t length)
         return nullptr;
 
     JSFlatString* str;
-    if (cx->compartment()->isAtomsCompartment())
+    if (cx->zone()->isAtomsZone())
         str = js::Allocate<js::NormalAtom, allowGC>(cx);
     else
         str = js::Allocate<JSFlatString, allowGC>(cx, js::gc::DefaultHeap);
@@ -273,7 +273,7 @@ template <js::AllowGC allowGC>
 MOZ_ALWAYS_INLINE JSThinInlineString*
 JSThinInlineString::new_(JSContext* cx)
 {
-    if (cx->compartment()->isAtomsCompartment())
+    if (cx->zone()->isAtomsZone())
         return (JSThinInlineString*)(js::Allocate<js::NormalAtom, allowGC>(cx));
 
     return js::Allocate<JSThinInlineString, allowGC>(cx, js::gc::DefaultHeap);
@@ -283,7 +283,7 @@ template <js::AllowGC allowGC>
 MOZ_ALWAYS_INLINE JSFatInlineString*
 JSFatInlineString::new_(JSContext* cx)
 {
-    if (cx->compartment()->isAtomsCompartment())
+    if (cx->zone()->isAtomsZone())
         return (JSFatInlineString*)(js::Allocate<js::FatInlineAtom, allowGC>(cx));
 
     return js::Allocate<JSFatInlineString, allowGC>(cx, js::gc::DefaultHeap);

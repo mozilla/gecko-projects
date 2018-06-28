@@ -6,9 +6,9 @@
 
 #include "AnimationHelper.h"
 #include "mozilla/ComputedTimingFunction.h" // for ComputedTimingFunction
-#include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // for dom::FillMode
+#include "mozilla/dom/AnimationEffectBinding.h" // for dom::FillMode
 #include "mozilla/dom/KeyframeEffectBinding.h" // for dom::IterationComposite
-#include "mozilla/dom/KeyframeEffectReadOnly.h" // for dom::KeyFrameEffectReadOnly
+#include "mozilla/dom/KeyframeEffect.h" // for dom::KeyFrameEffectReadOnly
 #include "mozilla/dom/Nullable.h" // for dom::Nullable
 #include "mozilla/layers/CompositorThread.h" // for CompositorThreadHolder
 #include "mozilla/layers/LayerAnimationUtils.h" // for TimingFunctionToComputedTimingFunction
@@ -94,13 +94,13 @@ CompositorAnimationStorage::SetAnimatedValue(uint64_t aId,
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   auto count = mAnimatedValues.Count();
   AnimatedValue* value = mAnimatedValues.LookupOrAdd(aId,
-                                                     Move(aTransformInDevSpace),
-                                                     Move(aFrameTransform),
+                                                     std::move(aTransformInDevSpace),
+                                                     std::move(aFrameTransform),
                                                      aData);
   if (count == mAnimatedValues.Count()) {
     MOZ_ASSERT(value->mType == AnimatedValue::TRANSFORM);
-    value->mTransform.mTransformInDevSpace = Move(aTransformInDevSpace);
-    value->mTransform.mFrameTransform = Move(aFrameTransform);
+    value->mTransform.mTransformInDevSpace = std::move(aTransformInDevSpace);
+    value->mTransform.mFrameTransform = std::move(aFrameTransform);
     value->mTransform.mData = aData;
   }
 }
@@ -112,8 +112,8 @@ CompositorAnimationStorage::SetAnimatedValue(uint64_t aId,
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   const TransformData dontCare = {};
   SetAnimatedValue(aId,
-                   Move(aTransformInDevSpace),
-                   Move(gfx::Matrix4x4()),
+                   std::move(aTransformInDevSpace),
+                   gfx::Matrix4x4(),
                    dontCare);
 }
 
@@ -233,7 +233,7 @@ AnimationHelper::SampleAnimationForEachNode(
         .MultDouble(animation.playbackRate());
 
     ComputedTiming computedTiming =
-      dom::AnimationEffectReadOnly::GetComputedTimingAt(
+      dom::AnimationEffect::GetComputedTimingAt(
         dom::Nullable<TimeDuration>(elapsedDuration), animData.mTiming,
         animation.playbackRate());
 
@@ -254,7 +254,7 @@ AnimationHelper::SampleAnimationForEachNode(
     // FIXME Bug 1455476: We should do this optimizations for the case where
     // the layer has multiple animations.
     if (iEnd == 1 &&
-        !dom::KeyframeEffectReadOnly::HasComputedTimingChanged(
+        !dom::KeyframeEffect::HasComputedTimingChanged(
           computedTiming,
           iterCompositeOperation,
           animData.mProgressOnLastCompose,
@@ -581,8 +581,8 @@ AnimationHelper::SetAnimations(
       animation.iterationStart(),
       static_cast<dom::PlaybackDirection>(animation.direction()),
       static_cast<dom::FillMode>(animation.fillMode()),
-      Move(AnimationUtils::TimingFunctionToComputedTimingFunction(
-           animation.easingFunction()))
+      AnimationUtils::TimingFunctionToComputedTimingFunction(
+           animation.easingFunction())
     };
     InfallibleTArray<Maybe<ComputedTimingFunction>>& functions =
       data->mFunctions;
@@ -672,7 +672,7 @@ AnimationHelper::SampleAnimations(CompositorAnimationStorage* aStorage,
         nsPoint origin = transformData.origin();
         // we expect all our transform data to arrive in device pixels
         gfx::Point3D transformOrigin = transformData.transformOrigin();
-        nsDisplayTransform::FrameTransformProperties props(Move(list),
+        nsDisplayTransform::FrameTransformProperties props(std::move(list),
                                                            transformOrigin);
 
         gfx::Matrix4x4 transform =
@@ -694,7 +694,7 @@ AnimationHelper::SampleAnimations(CompositorAnimationStorage* aStorage,
                             1);
 
         aStorage->SetAnimatedValue(iter.Key(),
-                                   Move(transform), Move(frameTransform),
+                                   std::move(transform), std::move(frameTransform),
                                    transformData);
         break;
       }

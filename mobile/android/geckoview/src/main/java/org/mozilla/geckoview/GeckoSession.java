@@ -46,6 +46,9 @@ import android.support.annotation.NonNull;
 import android.support.annotation.StringDef;
 import android.util.Base64;
 import android.util.Log;
+import android.view.inputmethod.CursorAnchorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 
 public class GeckoSession extends LayerSession
                           implements Parcelable {
@@ -101,13 +104,14 @@ public class GeckoSession extends LayerSession
         new GeckoSessionHandler<ContentDelegate>(
             "GeckoViewContent", this,
             new String[]{
+                "GeckoView:ContentCrash",
                 "GeckoView:ContextMenu",
                 "GeckoView:DOMTitleChanged",
                 "GeckoView:DOMWindowFocus",
                 "GeckoView:DOMWindowClose",
                 "GeckoView:ExternalResponse",
                 "GeckoView:FullScreenEnter",
-                "GeckoView:FullScreenExit"
+                "GeckoView:FullScreenExit",
             }
         ) {
             @Override
@@ -116,7 +120,10 @@ public class GeckoSession extends LayerSession
                                       final GeckoBundle message,
                                       final EventCallback callback) {
 
-                if ("GeckoView:ContextMenu".equals(event)) {
+                if ("GeckoView:ContentCrash".equals(event)) {
+                    close();
+                    delegate.onCrash(GeckoSession.this);
+                } else if ("GeckoView:ContextMenu".equals(event)) {
                     final int type = getContentElementType(
                         message.getString("elementType"));
 
@@ -294,7 +301,7 @@ public class GeckoSession extends LayerSession
                 "GeckoView:AndroidPermission",
                 "GeckoView:ContentPermission",
                 "GeckoView:MediaPermission"
-            }, /* alwaysListen */ true
+            }
         ) {
             @Override
             public void handleMessage(final PermissionDelegate delegate,
@@ -315,7 +322,7 @@ public class GeckoSession extends LayerSession
                     final int type;
                     if ("geolocation".equals(typeString)) {
                         type = PermissionDelegate.PERMISSION_GEOLOCATION;
-                    } else if ("desktop_notification".equals(typeString)) {
+                    } else if ("desktop-notification".equals(typeString)) {
                         type = PermissionDelegate.PERMISSION_DESKTOP_NOTIFICATION;
                     } else {
                         throw new IllegalArgumentException("Unknown permission request: " + typeString);
@@ -742,8 +749,14 @@ public class GeckoSession extends LayerSession
     }
 
     private GeckoBundle createInitData() {
-        final GeckoBundle initData = new GeckoBundle(1);
+        final GeckoBundle initData = new GeckoBundle(2);
         initData.putBundle("settings", mSettings.toBundle());
+
+        final GeckoBundle modules = new GeckoBundle(mSessionHandlers.length);
+        for (final GeckoSessionHandler<?> handler : mSessionHandlers) {
+            modules.putBoolean(handler.getName(), handler.isEnabled());
+        }
+        initData.putBundle("modules", modules);
         return initData;
     }
 
@@ -827,15 +840,6 @@ public class GeckoSession extends LayerSession
     private void onWindowChanged(int change, boolean inProgress) {
         if ((change == WINDOW_OPEN || change == WINDOW_TRANSFER_IN) && !inProgress) {
             mTextInput.onWindowChanged(mWindow);
-        }
-
-        if (change == WINDOW_CLOSE) {
-            // Detach when window is closing, and reattach immediately after window is closed.
-            // We reattach immediate after closing because we want any actions performed while the
-            // session is closed to be properly queued, until the session is open again.
-            for (final GeckoSessionHandler<?> handler : mSessionHandlers) {
-                handler.setSessionIsReady(this, !inProgress);
-            }
         }
     }
 
@@ -1891,6 +1895,17 @@ public class GeckoSession extends LayerSession
          * @param response the WebResponseInfo for the external response
          */
         void onExternalResponse(GeckoSession session, WebResponseInfo response);
+
+        /**
+         * The content process hosting this GeckoSession has crashed. The
+         * GeckoSession is now closed and unusable. You may call
+         * {@link #open(GeckoRuntime)} to recover the session, but no state
+         * is preserved. Most applications will want to call
+         * {@link #loadUri(Uri)} or {@link #restoreState(SessionState)} at this point.
+         *
+         * @param session The GeckoSession that crashed.
+         */
+        void onCrash(GeckoSession session);
     }
 
     public interface SelectionActionDelegate {
@@ -2619,50 +2634,55 @@ public class GeckoSession extends LayerSession
         public void onScrollChanged(GeckoSession session, int scrollX, int scrollY);
     }
 
-    private final TrackingProtection mTrackingProtection = new TrackingProtection(this);
-
     /**
      * GeckoSession applications implement this interface to handle tracking
      * protection events.
      **/
     public interface TrackingProtectionDelegate {
+        @Retention(RetentionPolicy.SOURCE)
         @IntDef(flag = true,
-                value = {CATEGORY_AD, CATEGORY_ANALYTIC, CATEGORY_SOCIAL,
-                         CATEGORY_CONTENT})
+                value = { CATEGORY_NONE, CATEGORY_AD, CATEGORY_ANALYTIC,
+                          CATEGORY_SOCIAL, CATEGORY_CONTENT, CATEGORY_ALL,
+                          CATEGORY_TEST })
         public @interface Category {}
+        static final int CATEGORY_NONE = 0;
+        /**
+         * Block advertisement trackers.
+         */
         static final int CATEGORY_AD = 1 << 0;
+        /**
+         * Block analytics trackers.
+         */
         static final int CATEGORY_ANALYTIC = 1 << 1;
+        /**
+         * Block social trackers.
+         */
         static final int CATEGORY_SOCIAL = 1 << 2;
+        /**
+         * Block content trackers.
+         */
         static final int CATEGORY_CONTENT = 1 << 3;
+        /**
+         * Block Gecko test trackers (used for tests).
+         */
+        static final int CATEGORY_TEST = 1 << 4;
+        /**
+         * Block all known trackers.
+         */
+        static final int CATEGORY_ALL = (1 << 5) - 1;
 
         /**
          * A tracking element has been blocked from loading.
+         * Set blocked tracker categories via GeckoRuntimeSettings and enable
+         * tracking protection via GeckoSessionSettings.
          *
         * @param session The GeckoSession that initiated the callback.
         * @param uri The URI of the blocked element.
         * @param categories The tracker categories of the blocked element.
-        *                   One or more of the {@link TrackingProtectionDelegate#CATEGORY_AD}
-        *                   flags.
+        *                   One or more of the {@link #CATEGORY_AD CATEGORY_*} flags.
         */
         void onTrackerBlocked(GeckoSession session, String uri,
                               @Category int categories);
-    }
-
-    /**
-     * Enable tracking protection.
-     * @param categories The categories of trackers that should be blocked.
-     *                   Use one or more of the {@link TrackingProtectionDelegate#CATEGORY_AD}
-     *                   flags.
-     **/
-    public void enableTrackingProtection(@TrackingProtectionDelegate.Category int categories) {
-        mTrackingProtection.enable(categories);
-    }
-
-    /**
-     * Disable tracking protection.
-     **/
-    public void disableTrackingProtection() {
-        mTrackingProtection.disable();
     }
 
     /**
@@ -2915,5 +2935,95 @@ public class GeckoSession extends LayerSession
          */
         void onMediaPermissionRequest(GeckoSession session, String uri, MediaSource[] video,
                                       MediaSource[] audio, MediaCallback callback);
+    }
+
+    /**
+     * Interface that SessionTextInput uses for performing operations such as opening and closing
+     * the software keyboard. If the delegate is not set, these operations are forwarded to the
+     * system {@link android.view.inputmethod.InputMethodManager} automatically.
+     */
+    public interface TextInputDelegate {
+        @Retention(RetentionPolicy.SOURCE)
+        @IntDef({RESTART_REASON_FOCUS, RESTART_REASON_BLUR, RESTART_REASON_CONTENT_CHANGE})
+        @interface RestartReason {}
+        /** Restarting input due to an input field gaining focus. */
+        int RESTART_REASON_FOCUS = 0;
+        /** Restarting input due to an input field losing focus. */
+        int RESTART_REASON_BLUR = 1;
+        /**
+         * Restarting input due to the content of the input field changing. For example, the
+         * input field type may have changed, or the current composition may have been committed
+         * outside of the input method.
+         */
+        int RESTART_REASON_CONTENT_CHANGE = 2;
+
+        /**
+         * Reset the input method, and discard any existing states such as the current composition
+         * or current autocompletion. Because the current focused editor may have changed, as
+         * part of the reset, a custom input method would normally call {@link
+         * SessionTextInput#onCreateInputConnection} to update its knowledge of the focused editor.
+         * Note that {@code restartInput} should be used to detect changes in focus, rather than
+         * {@link #showSoftInput} or {@link #hideSoftInput}, because focus changes are not always
+         * accompanied by requests to show or hide the soft input. This method is always called,
+         * even in viewless mode.
+         *
+         * @param session Session instance.
+         * @param reason Reason for the reset.
+         */
+        void restartInput(@NonNull GeckoSession session, @RestartReason int reason);
+
+        /**
+         * Display the soft input. May be called consecutively, even if the soft input is
+         * already shown. This method is always called, even in viewless mode.
+         *
+         * @param session Session instance.
+         * @see #hideSoftInput
+         * */
+        void showSoftInput(@NonNull GeckoSession session);
+
+        /**
+         * Hide the soft input. May be called consecutively, even if the soft input is
+         * already hidden. This method is always called, even in viewless mode.
+         *
+         * @param session Session instance.
+         * @see #showSoftInput
+         * */
+        void hideSoftInput(@NonNull GeckoSession session);
+
+        /**
+         * Update the soft input on the current selection. This method is <i>not</i> called
+         * in viewless mode.
+         *
+         * @param session Session instance.
+         * @param selStart Start offset of the selection.
+         * @param selEnd End offset of the selection.
+         * @param compositionStart Composition start offset, or -1 if there is no composition.
+         * @param compositionEnd Composition end offset, or -1 if there is no composition.
+         */
+        void updateSelection(@NonNull GeckoSession session, int selStart, int selEnd,
+                             int compositionStart, int compositionEnd);
+
+        /**
+         * Update the soft input on the current extracted text, as requested through
+         * {@link android.view.inputmethod.InputConnection#getExtractedText}.
+         * Consequently, this method is <i>not</i> called in viewless mode.
+         *
+         * @param session Session instance.
+         * @param request The extract text request.
+         * @param text The extracted text.
+         */
+        void updateExtractedText(@NonNull GeckoSession session,
+                                 @NonNull ExtractedTextRequest request,
+                                 @NonNull ExtractedText text);
+
+        /**
+         * Update the cursor-anchor information as requested through
+         * {@link android.view.inputmethod.InputConnection#requestCursorUpdates}.
+         * Consequently, this method is <i>not</i> called in viewless mode.
+         *
+         * @param session Session instance.
+         * @param info Cursor-anchor information.
+         */
+        void updateCursorAnchorInfo(@NonNull GeckoSession session, @NonNull CursorAnchorInfo info);
     }
 }

@@ -7,7 +7,7 @@
 #include "nsWebBrowserFind.h"
 
 // Only need this for NS_FIND_CONTRACTID,
-// else we could use nsIDOMRange.h and nsIFind.h.
+// else we could use nsRange.h and nsIFind.h.
 #include "nsFind.h"
 
 #include "nsIComponentManager.h"
@@ -20,7 +20,6 @@
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsISelectionController.h"
 #include "nsIFrame.h"
 #include "nsITextControlFrame.h"
@@ -399,8 +398,7 @@ nsWebBrowserFind::SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow,
     nsCOMPtr<nsIFocusManager> fm = do_GetService(FOCUSMANAGER_CONTRACTID);
     if (fm) {
       if (tcFrame) {
-        RefPtr<Element> newFocusedElement =
-          content->IsElement() ? content->AsElement() : nullptr;
+        RefPtr<Element> newFocusedElement = Element::FromNode(content);
         fm->SetFocus(newFocusedElement, nsIFocusManager::FLAG_NOSCROLL);
       } else {
         RefPtr<Element> result;
@@ -424,25 +422,23 @@ nsWebBrowserFind::SetSelectionAndScroll(nsPIDOMWindowOuter* aWindow,
 
 // Adapted from TextServicesDocument::GetDocumentContentRootNode
 nsresult
-nsWebBrowserFind::GetRootNode(nsIDOMDocument* aDomDoc, nsIDOMNode** aNode)
+nsWebBrowserFind::GetRootNode(nsIDocument* aDoc, Element** aNode)
 {
+  NS_ENSURE_ARG_POINTER(aDoc);
   NS_ENSURE_ARG_POINTER(aNode);
   *aNode = 0;
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDomDoc);
-  NS_ENSURE_ARG_POINTER(doc);
-
-  if (doc->IsHTMLOrXHTML()) {
-    Element* body = doc->GetBody();
+  if (aDoc->IsHTMLOrXHTML()) {
+    Element* body = aDoc->GetBody();
     NS_ENSURE_ARG_POINTER(body);
-    NS_ADDREF(*aNode = body->AsDOMNode());
+    NS_ADDREF(*aNode = body);
     return NS_OK;
   }
 
   // For non-HTML documents, the content root node will be the doc element.
-  Element* root = doc->GetDocumentElement();
+  Element* root = aDoc->GetDocumentElement();
   NS_ENSURE_ARG_POINTER(root);
-  NS_ADDREF(*aNode = root->AsDOMNode());
+  NS_ADDREF(*aNode = root);
   return NS_OK;
 }
 
@@ -450,11 +446,10 @@ nsresult
 nsWebBrowserFind::SetRangeAroundDocument(nsRange* aSearchRange,
                                          nsRange* aStartPt,
                                          nsRange* aEndPt,
-                                         nsIDOMDocument* aDoc)
+                                         nsIDocument* aDoc)
 {
-  nsCOMPtr<nsIDOMNode> bodyNode;
-  nsresult rv = GetRootNode(aDoc, getter_AddRefs(bodyNode));
-  nsCOMPtr<nsIContent> bodyContent(do_QueryInterface(bodyNode));
+  RefPtr<Element> bodyContent;
+  nsresult rv = GetRootNode(aDoc, getter_AddRefs(bodyContent));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_ARG_POINTER(bodyContent);
 
@@ -484,7 +479,7 @@ nsWebBrowserFind::SetRangeAroundDocument(nsRange* aSearchRange,
 nsresult
 nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
                                   nsRange* aStartPt, nsRange* aEndPt,
-                                  nsIDOMDocument* aDoc, Selection* aSel,
+                                  nsIDocument* aDoc, Selection* aSel,
                                   bool aWrap)
 {
   NS_ENSURE_ARG_POINTER(aSel);
@@ -495,12 +490,10 @@ nsWebBrowserFind::GetSearchLimits(nsRange* aSearchRange,
     return SetRangeAroundDocument(aSearchRange, aStartPt, aEndPt, aDoc);
   }
 
-  // Need bodyNode, for the start/end of the document
-  nsCOMPtr<nsIDOMNode> bodyNode;
-  nsresult rv = GetRootNode(aDoc, getter_AddRefs(bodyNode));
+  // Need bodyContent, for the start/end of the document
+  RefPtr<Element> bodyContent;
+  nsresult rv = GetRootNode(aDoc, getter_AddRefs(bodyContent));
   NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIContent> bodyContent(do_QueryInterface(bodyNode));
   NS_ENSURE_ARG_POINTER(bodyContent);
 
   uint32_t childCount = bodyContent->GetChildCount();
@@ -725,20 +718,9 @@ nsWebBrowserFind::SearchInFrame(nsPIDOMWindowOuter* aWindow, bool aWrapping,
   RefPtr<nsRange> endPt = new nsRange(theDoc);
   NS_ENSURE_ARG_POINTER(endPt);
 
-  nsCOMPtr<nsIDOMRange> foundRange;
+  RefPtr<nsRange> foundRange;
 
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(theDoc);
-  MOZ_ASSERT(domDoc);
-
-  // If !aWrapping, search from selection to end
-  if (!aWrapping)
-    rv = GetSearchLimits(searchRange, startPt, endPt, domDoc, sel, false);
-
-  // If aWrapping, search the part of the starting frame
-  // up to the point where we left off.
-  else
-    rv = GetSearchLimits(searchRange, startPt, endPt, domDoc, sel, true);
-
+  rv = GetSearchLimits(searchRange, startPt, endPt, theDoc, sel, aWrapping);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = find->Find(mSearchString.get(), searchRange, startPt, endPt,
@@ -749,7 +731,7 @@ nsWebBrowserFind::SearchInFrame(nsPIDOMWindowOuter* aWindow, bool aWrapping,
     sel->RemoveAllRanges(IgnoreErrors());
     // Beware! This may flush notifications via synchronous
     // ScrollSelectionIntoView.
-    SetSelectionAndScroll(aWindow, static_cast<nsRange*>(foundRange.get()));
+    SetSelectionAndScroll(aWindow, foundRange);
   }
 
   return rv;

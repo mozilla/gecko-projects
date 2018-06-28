@@ -8,9 +8,10 @@ import os
 import logging
 import attr
 import yaml
+from mozpack import path
 
 from .util.schema import validate_schema, Schema
-from voluptuous import Required
+from voluptuous import Required, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,14 @@ graph_config_schema = Schema({
     },
     Required('release-promotion'): {
         Required('products'): [basestring],
+        Required('flavors'): {basestring: {
+            Required('product'): basestring,
+            Required('target-tasks-method'): basestring,
+            Optional('release-type'): basestring,
+            Optional('rebuild-kinds'): [basestring],
+            Optional('version-bump'): bool,
+            Optional('partial-updates'): bool,
+        }},
     },
     Required('scriptworker'): {
         # Prefix to add to scopes controlling scriptworkers
@@ -63,6 +72,18 @@ class GraphConfig(object):
     def __getitem__(self, name):
         return self._config[name]
 
+    @property
+    def taskcluster_yml(self):
+        if path.split(self.root_dir)[-2:] != ['taskcluster', 'ci']:
+            raise Exception(
+                "Not guessing path to `.taskcluster.yml`. "
+                "Graph config in non-standard location."
+            )
+        return os.path.join(
+            os.path.dirname(os.path.dirname(self.root_dir)),
+            ".taskcluster.yml",
+        )
+
 
 def validate_graph_config(config):
     return validate_schema(graph_config_schema, config, "Invalid graph configuration:")
@@ -75,7 +96,7 @@ def load_graph_config(root_dir):
 
     logger.debug("loading config from `{}`".format(config_yml))
     with open(config_yml) as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
 
     validate_graph_config(config)
     return GraphConfig(config=config, root_dir=root_dir)

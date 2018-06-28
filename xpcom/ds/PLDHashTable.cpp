@@ -239,12 +239,12 @@ PLDHashTable::operator=(PLDHashTable&& aOther)
   new (KnownNotNull, this) PLDHashTable(ops, aOther.mEntrySize, 0);
 
   // Move non-const pieces over.
-  mHashShift = Move(aOther.mHashShift);
-  mEntryCount = Move(aOther.mEntryCount);
-  mRemovedCount = Move(aOther.mRemovedCount);
+  mHashShift = std::move(aOther.mHashShift);
+  mEntryCount = std::move(aOther.mEntryCount);
+  mRemovedCount = std::move(aOther.mRemovedCount);
   mEntryStore.Set(aOther.mEntryStore.Get(), &mGeneration);
 #ifdef DEBUG
-  mChecker = Move(aOther.mChecker);
+  mChecker = std::move(aOther.mChecker);
 #endif
 
   recordreplay::MovePLDHashTableContents(aOther.mOps, mOps);

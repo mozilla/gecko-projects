@@ -23,7 +23,7 @@
 #include <cairo.h>
 #include <cairo-ft.h>
 
-#ifdef MOZ_CONTENT_SANDBOX
+#if defined(MOZ_CONTENT_SANDBOX) && defined (XP_LINUX)
 #include "mozilla/SandboxBroker.h"
 #endif
 
@@ -139,7 +139,8 @@ protected:
     cairo_scaled_font_t*
     CreateScaledFont(FcPattern* aRenderPattern,
                      gfxFloat aAdjustedSize,
-                     const gfxFontStyle *aStyle);
+                     const gfxFontStyle *aStyle,
+                     FT_Face aFTFace);
 
     // override to pull data from FTFace
     virtual nsresult
@@ -305,7 +306,7 @@ public:
                      uint32_t aLength) override;
 
     bool FindAndAddFamilies(const nsAString& aFamily,
-                            nsTArray<gfxFontFamily*>* aOutput,
+                            nsTArray<FamilyAndGeneric>* aOutput,
                             FindFamiliesFlags aFlags,
                             gfxFontStyle* aStyle = nullptr,
                             gfxFloat aDevToCssSize = 1.0) override;
@@ -318,7 +319,7 @@ public:
     // override to use fontconfig lookup for generics
     void AddGenericFonts(mozilla::FontFamilyType aGenericType,
                          nsAtom* aLanguage,
-                         nsTArray<gfxFontFamily*>& aFamilyList) override;
+                         nsTArray<FamilyAndGeneric>& aFamilyList) override;
 
     void ClearLangGroupPrefFonts() override;
 
@@ -326,6 +327,13 @@ public:
     void ClearGenericMappings() {
         mGenericMappings.Clear();
     }
+
+    // map lang group ==> lang string
+    // When aForFontEnumerationThread is true, this method will avoid using
+    // LanguageService::LookupLanguage, because it is not safe for off-main-
+    // thread use (except by stylo traversal, which does the necessary locking)
+    void GetSampleLangForGroup(nsAtom* aLanguage, nsACString& aLangStr,
+                               bool aForFontEnumerationThread = false);
 
     static FT_Library GetFTLibrary();
 
@@ -365,6 +373,10 @@ protected:
 
     gfxFontFamily* CreateFontFamily(const nsAString& aName) const override;
 
+    // helper method for finding an appropriate lang string
+    bool TryLangForGroup(const nsACString& aOSLang, nsAtom* aLangGroup,
+                         nsACString& aLang, bool aForFontEnumerationThread);
+
 #ifdef MOZ_BUNDLED_FONTS
     void ActivateBundledFonts();
     nsCString mBundledFontsPath;
@@ -388,7 +400,7 @@ protected:
     // these pointers will be invalidated. InitFontList() flushes the cache
     // in this case.
     nsDataHashtable<nsCStringHashKey,
-                    nsTArray<gfxFontFamily*>> mFcSubstituteCache;
+                    nsTArray<FamilyAndGeneric>> mFcSubstituteCache;
 
     nsCOMPtr<nsITimer> mCheckFontUpdatesTimer;
     nsCountedRef<FcConfig> mLastConfig;

@@ -190,7 +190,7 @@ public:
                           gfxContext* aThebesContext) override;
 
   already_AddRefed<SourceSurface>
-  RenderNode(nsIDOMNode* aNode,
+  RenderNode(nsINode* aNode,
              nsIntRegion* aRegion,
              const LayoutDeviceIntPoint aPoint,
              LayoutDeviceIntRect* aScreenRect,
@@ -245,6 +245,9 @@ public:
   void ScheduleViewManagerFlush(PaintType aType = PAINT_DEFAULT) override;
   void ClearMouseCaptureOnView(nsView* aView) override;
   bool IsVisible() override;
+  void SuppressDisplayport(bool aEnabled) override;
+  void RespectDisplayportSuppression(bool aEnabled) override;
+  bool IsDisplayportSuppressed() override;
 
   already_AddRefed<AccessibleCaretEventHub> GetAccessibleCaretEventHub() const override;
 
@@ -278,13 +281,11 @@ public:
   NS_IMETHOD CompleteScroll(bool aForward) override;
   NS_IMETHOD CompleteMove(bool aForward, bool aExtend) override;
   NS_IMETHOD SelectAll() override;
-  NS_IMETHOD CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool *_retval) override;
+  NS_IMETHOD CheckVisibility(nsINode *node, int16_t startOffset, int16_t EndOffset, bool *_retval) override;
   nsresult CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset,
                                   int16_t aEndOffset, bool* aRetval) override;
 
   // nsIDocumentObserver
-  NS_DECL_NSIDOCUMENTOBSERVER_BEGINUPDATE
-  NS_DECL_NSIDOCUMENTOBSERVER_ENDUPDATE
   NS_DECL_NSIDOCUMENTOBSERVER_BEGINLOAD
   NS_DECL_NSIDOCUMENTOBSERVER_ENDLOAD
   NS_DECL_NSIDOCUMENTOBSERVER_CONTENTSTATECHANGED
@@ -756,7 +757,6 @@ private:
   // The reflow root under which we're currently reflowing.  Null when
   // not in reflow.
   nsIFrame* mCurrentReflowRoot;
-  uint32_t mUpdateCount;
 #endif
 
 #ifdef MOZ_REFLOW_PERF
@@ -832,6 +832,8 @@ private:
   // Used in case we need re-dispatch event after sending pointer event,
   // when target of pointer event was deleted during executing user handlers.
   nsCOMPtr<nsIContent> mPointerEventTarget;
+
+  int32_t mActiveSuppressDisplayport;
 
   // The focus sequence number of the last processed input event
   uint64_t mAPZFocusSequenceNumber;

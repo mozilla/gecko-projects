@@ -565,7 +565,7 @@ impl<E: TElement> StyleSharingCache<E> {
             },
         };
 
-        if element.is_native_anonymous() {
+        if element.is_in_native_anonymous_subtree() {
             debug!("Failing to insert into the cache: NAC");
             return;
         }
@@ -656,7 +656,7 @@ impl<E: TElement> StyleSharingCache<E> {
             return None;
         }
 
-        if target.is_native_anonymous() {
+        if target.is_in_native_anonymous_subtree() {
             debug!("{:?} Cannot share style: NAC", target.element);
             return None;
         }
@@ -681,7 +681,7 @@ impl<E: TElement> StyleSharingCache<E> {
         nth_index_cache: &mut NthIndexCache,
         selector_flags_map: &mut SelectorFlagsMap<E>,
     ) -> Option<ResolvedElementStyles> {
-        debug_assert!(!target.is_native_anonymous());
+        debug_assert!(!target.is_in_native_anonymous_subtree());
 
         // Check that we have the same parent, or at least that the parents
         // share styles and permit sharing across their children. The latter
@@ -815,7 +815,11 @@ impl<E: TElement> StyleSharingCache<E> {
         Some(candidate.element.borrow_data().unwrap().share_styles())
     }
 
-    /// Attempts to find an element in the cache with the given primary rule node and parent.
+    /// Attempts to find an element in the cache with the given primary rule
+    /// node and parent.
+    ///
+    /// FIXME(emilio): re-measure this optimization, and remove if it's not very
+    /// useful... It's probably not worth the complexity / obscure bugs.
     pub fn lookup_by_rules(
         &mut self,
         shared_context: &SharedStyleContext,
@@ -841,7 +845,15 @@ impl<E: TElement> StyleSharingCache<E> {
             if style.visited_rules() != visited_rules {
                 return None;
             }
-
+            // NOTE(emilio): We only need to check name / namespace because we
+            // do name-dependent style adjustments, like the display: contents
+            // to display: none adjustment.
+            if target.namespace() != candidate.element.namespace() {
+                return None;
+            }
+            if target.local_name() != candidate.element.local_name() {
+                return None;
+            }
             // Rule nodes and styles are computed independent of the element's
             // actual visitedness, but at the end of the cascade (in
             // `adjust_for_visited`) we do store the visitedness as a flag in
@@ -853,6 +865,7 @@ impl<E: TElement> StyleSharingCache<E> {
             // FIXME(jryans): This seems like it breaks the constant time
             // requirements of visited, assuming we get a cache hit on only one
             // of unvisited vs. visited.
+            // TODO(emilio): We no longer have such a flag, remove this check.
             if target.is_visited_link() != candidate.element.is_visited_link() {
                 return None;
             }

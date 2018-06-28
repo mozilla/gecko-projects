@@ -15,12 +15,15 @@
 #include "mozilla/ReflowInput.h"
 #include "mozilla/ShapeUtils.h"
 #include "nsBlockFrame.h"
+#include "nsDeviceContext.h"
 #include "nsError.h"
 #include "nsImageRenderer.h"
 #include "nsIPresShell.h"
 #include "nsMemory.h"
 
 using namespace mozilla;
+using namespace mozilla::image;
+using namespace mozilla::gfx;
 
 int32_t nsFloatManager::sCachedFloatManagerCount = 0;
 void* nsFloatManager::sCachedFloatManagers[NS_FLOAT_MANAGER_CACHE_SIZE];
@@ -144,7 +147,8 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBCoord, nscoord aBSize,
       (mFloats[floatCount-1].mLeftBEnd <= blockStart &&
        mFloats[floatCount-1].mRightBEnd <= blockStart)) {
     return nsFlowAreaRect(aWM, aContentArea.IStart(aWM), aBCoord,
-                          aContentArea.ISize(aWM), aBSize, false);
+                          aContentArea.ISize(aWM), aBSize,
+                          nsFlowAreaRectFlags::NO_FLAGS);
   }
 
   nscoord blockEnd;
@@ -170,6 +174,7 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBCoord, nscoord aBSize,
   // Walk backwards through the floats until we either hit the front of
   // the list or we're above |blockStart|.
   bool haveFloats = false;
+  bool mayWiden = false;
   for (uint32_t i = floatCount; i > 0; --i) {
     const FloatInfo &fi = mFloats[i-1];
     if (fi.mLeftBEnd <= blockStart && fi.mRightBEnd <= blockStart) {
@@ -218,6 +223,10 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBCoord, nscoord aBSize,
           // callers want and disagrees for other callers, so we should
           // probably provide better information at some point.
           haveFloats = true;
+
+          // Our area may widen in the block direction if this float may
+          // narrow in the block direction.
+          mayWiden = mayWiden || fi.MayNarrowInBlockDirection(aShapeType);
         }
       } else {
         // A right float
@@ -227,6 +236,7 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBCoord, nscoord aBSize,
           lineRight = lineLeftEdge;
           // See above.
           haveFloats = true;
+          mayWiden = mayWiden || fi.MayNarrowInBlockDirection(aShapeType);
         }
       }
 
@@ -245,8 +255,12 @@ nsFloatManager::GetFlowArea(WritingMode aWM, nscoord aBCoord, nscoord aBSize,
                         : mLineLeft - lineRight +
                           LogicalSize(aWM, aContainerSize).ISize(aWM);
 
+  nsFlowAreaRectFlags flags =
+    (haveFloats ? nsFlowAreaRectFlags::HAS_FLOATS : nsFlowAreaRectFlags::NO_FLAGS) |
+    (mayWiden ? nsFlowAreaRectFlags::MAY_WIDEN : nsFlowAreaRectFlags::NO_FLAGS);
+
   return nsFlowAreaRect(aWM, inlineStart, blockStart - mBlockStart,
-                        lineRight - lineLeft, blockSize, haveFloats);
+                        lineRight - lineLeft, blockSize, flags);
 }
 
 void
@@ -278,7 +292,7 @@ nsFloatManager::AddFloat(nsIFrame* aFloatFrame, const LogicalRect& aMarginRect,
   if (thisBEnd > sideBEnd)
     sideBEnd = thisBEnd;
 
-  mFloats.AppendElement(Move(info));
+  mFloats.AppendElement(std::move(info));
 }
 
 // static
@@ -532,6 +546,14 @@ public:
   virtual nscoord BEnd() const = 0;
   virtual bool IsEmpty() const = 0;
 
+  // Does this shape possibly get inline narrower in the BStart() to BEnd()
+  // span when proceeding in the block direction? This is false for unrounded
+  // rectangles that span all the way to BEnd(), but could be true for other
+  // shapes. Note that we don't care if the BEnd() falls short of the margin
+  // rect -- the ShapeInfo can only affect float behavior in the span between
+  // BStart() and BEnd().
+  virtual bool MayNarrowInBlockDirection() const = 0;
+
   // Translate the current origin by the specified offsets.
   virtual void Translate(nscoord aLineLeft, nscoord aBlockStart) = 0;
 
@@ -730,7 +752,13 @@ public:
     return mCenter.y + mRadii.height + mShapeMargin;
   }
   bool IsEmpty() const override {
-    return mRadii.IsEmpty();
+    // An EllipseShapeInfo is never empty, because an ellipse or circle with
+    // a zero radius acts like a point, and an ellipse with one zero radius
+    // acts like a line.
+    return false;
+  }
+  bool MayNarrowInBlockDirection() const override {
+    return true;
   }
 
   void Translate(nscoord aLineLeft, nscoord aBlockStart) override
@@ -822,9 +850,11 @@ nsFloatManager::EllipseShapeInfo::EllipseShapeInfo(const nsPoint& aCenter,
   dfType usedMargin5X = CalcUsedShapeMargin5X(aShapeMargin,
                                               aAppUnitsPerDevPixel);
 
+  // Calculate the bounds of one quadrant of the ellipse, in integer device
+  // pixels. These bounds are equal to the rectangle defined by the radii,
+  // plus the shape-margin value in both dimensions.
   const LayoutDeviceIntSize bounds =
-    LayoutDevicePixel::FromAppUnitsRounded(mRadii,
-                                           aAppUnitsPerDevPixel) +
+    LayoutDevicePixel::FromAppUnitsRounded(mRadii, aAppUnitsPerDevPixel) +
     LayoutDeviceIntSize(usedMargin5X / 5, usedMargin5X / 5);
 
   // Since our distance field is computed with a 5x5 neighborhood, but only
@@ -863,11 +893,17 @@ nsFloatManager::EllipseShapeInfo::EllipseShapeInfo(const nsPoint& aCenter,
     // Find the i intercept of the ellipse edge for this block row, and
     // adjust it to compensate for the expansion of the inline dimension.
     // If we're in the expanded region, or if we're using a b that's more
-    // than the bStart of the ellipse, the intercept is nscoord_MIN.
-    const int32_t iIntercept = (bIsInExpandedRegion ||
-                                bIsMoreThanEllipseBEnd) ? nscoord_MIN :
+    // than the bEnd of the ellipse, the intercept is nscoord_MIN.
+    // We have one other special case to consider: when the ellipse has no
+    // height. In that case we treat the bInAppUnits == 0 case as
+    // intercepting at the width of the ellipse. All other cases solve
+    // the intersection mathematically.
+    const int32_t iIntercept =
+      (bIsInExpandedRegion || bIsMoreThanEllipseBEnd) ? nscoord_MIN :
       iExpand + NSAppUnitsToIntPixels(
-        XInterceptAtY(bInAppUnits, mRadii.width, mRadii.height),
+        (!!mRadii.height || bInAppUnits) ?
+        XInterceptAtY(bInAppUnits, mRadii.width, mRadii.height) :
+        mRadii.width,
         aAppUnitsPerDevPixel);
 
     // Set iMax in preparation for this block row.
@@ -884,8 +920,10 @@ nsFloatManager::EllipseShapeInfo::EllipseShapeInfo(const nsPoint& aCenter,
         // Case 1: Expanded reqion pixel.
         df[index] = MAX_MARGIN_5X;
       } else if ((int32_t)i <= iIntercept) {
-        // Case 2: Pixel within the ellipse.
-        df[index] = 0;
+        // Case 2: Pixel within the ellipse, or just outside the edge of it.
+        // Having a positive height indicates that there's an area we can
+        // be inside of.
+        df[index] = (!!mRadii.height) ? 0 : 5;
       } else {
         // Case 3: Other pixel.
 
@@ -918,15 +956,23 @@ nsFloatManager::EllipseShapeInfo::EllipseShapeInfo(const nsPoint& aCenter,
         if (df[index] <= usedMargin5X) {
           MOZ_ASSERT(iMax < (int32_t)i);
           iMax = i;
+        } else {
+          // Since we're computing the bottom-right quadrant, there's no way
+          // for a later i value in this row to be within the usedMargin5X
+          // value. Likewise, every row beyond us will encounter this
+          // condition with an i value less than or equal to our i value now.
+          // Since our chamfer only looks upward and leftward, we can stop
+          // calculating for the rest of the row, because the distance field
+          // values there will never be looked at in a later row's chamfer
+          // calculation.
+          break;
         }
       }
     }
 
-    NS_WARNING_ASSERTION(bIsInExpandedRegion || iMax > nscoord_MIN,
-                         "Once past the expanded region, we should always "
-                         "find a pixel within the shape-margin distance for "
-                         "each block row.");
-
+    // It's very likely, though not guaranteed that we will find an pixel
+    // within the shape-margin distance for each block row. This may not
+    // always be true due to rounding errors.
     if (iMax > nscoord_MIN) {
       // Origin for this interval is at the center of the ellipse, adjusted
       // in the positive block direction by bInAppUnits.
@@ -959,7 +1005,7 @@ nsFloatManager::EllipseShapeInfo::LineEdge(const nscoord aBStart,
   // We are checking against our intervals. Make sure we have some.
   if (mIntervals.IsEmpty()) {
     NS_WARNING("With mShapeMargin > 0, we can't proceed without intervals.");
-    return 0;
+    return aIsLineLeft ? nscoord_MAX : nscoord_MIN;
   }
 
   // Map aBStart and aBEnd into our intervals. Our intervals are calculated
@@ -992,12 +1038,26 @@ nsFloatManager::EllipseShapeInfo::LineEdge(const nscoord aBStart,
 
   MOZ_ASSERT(bSmallestWithinIntervals >= mCenter.y &&
              bSmallestWithinIntervals < BEnd(),
-             "We should have a block value within the intervals.");
+             "We should have a block value within the float area.");
 
   size_t index = MinIntervalIndexContainingY(mIntervals,
                                              bSmallestWithinIntervals);
-  MOZ_ASSERT(index < mIntervals.Length(),
-             "We should have found a matching interval for this block value.");
+  if (index >= mIntervals.Length()) {
+    // This indicates that our intervals don't cover the block value
+    // bSmallestWithinIntervals. This can happen when rounding error in the
+    // distance field calculation resulted in the last block pixel row not
+    // contributing to the float area. As long as we're within one block pixel
+    // past the last interval, this is an expected outcome.
+#ifdef DEBUG
+    nscoord onePixelPastLastInterval =
+      mIntervals[mIntervals.Length() - 1].YMost() +
+      mIntervals[mIntervals.Length() - 1].Height();
+    NS_WARNING_ASSERTION(bSmallestWithinIntervals < onePixelPastLastInterval,
+                         "We should have found a matching interval for this "
+                         "block value.");
+#endif
+    return aIsLineLeft ? nscoord_MAX : nscoord_MIN;
+  }
 
   // The interval is storing the line right value. If aIsLineLeft is true,
   // return the line right value reflected about the center. Since this is
@@ -1034,7 +1094,7 @@ public:
   RoundedBoxShapeInfo(const nsRect& aRect,
                       UniquePtr<nscoord[]> aRadii)
     : mRect(aRect)
-    , mRadii(Move(aRadii))
+    , mRadii(std::move(aRadii))
     , mShapeMargin(0)
   {}
 
@@ -1049,7 +1109,17 @@ public:
                     const nscoord aBEnd) const override;
   nscoord BStart() const override { return mRect.y; }
   nscoord BEnd() const override { return mRect.YMost(); }
-  bool IsEmpty() const override { return mRect.IsEmpty(); }
+  bool IsEmpty() const override {
+    // A RoundedBoxShapeInfo is never empty, because if it is collapsed to
+    // zero area, it acts like a point. If it is collapsed further, to become
+    // inside-out, it acts like a rect in the same shape as the inside-out
+    // rect.
+    return false;
+  }
+  bool MayNarrowInBlockDirection() const override {
+    // Only possible to narrow if there are non-null mRadii.
+    return !!mRadii;
+  }
 
   void Translate(nscoord aLineLeft, nscoord aBlockStart) override
   {
@@ -1104,7 +1174,7 @@ nsFloatManager::RoundedBoxShapeInfo::RoundedBoxShapeInfo(const nsRect& aRect,
   nscoord aShapeMargin,
   int32_t aAppUnitsPerDevPixel)
   : mRect(aRect)
-  , mRadii(Move(aRadii))
+  , mRadii(std::move(aRadii))
   , mShapeMargin(aShapeMargin)
 {
   MOZ_ASSERT(mShapeMargin > 0 && !EachCornerHasBalancedRadii(mRadii.get()),
@@ -1236,14 +1306,21 @@ public:
                     const nscoord aBEnd) const override;
   nscoord BStart() const override { return mBStart; }
   nscoord BEnd() const override { return mBEnd; }
-  bool IsEmpty() const override { return mEmpty; }
+  bool IsEmpty() const override {
+    // A PolygonShapeInfo is never empty, because the parser prevents us from
+    // creating a shape with no vertices. If we only have 1 vertex, the
+    // shape acts like a point. With 2 non-coincident vertices, the shape
+    // acts like a line.
+    return false;
+  }
+  bool MayNarrowInBlockDirection() const override { return true; }
 
   void Translate(nscoord aLineLeft, nscoord aBlockStart) override;
 
 private:
-  // Helper method for determining if the vertices define a float area at
-  // all, and to set mBStart and mBEnd based on the vertices' y extent.
-  void ComputeEmptinessAndExtent();
+  // Helper method for determining the mBStart and mBEnd based on the
+  // vertices' y extent.
+  void ComputeExtent();
 
   // Helper method for implementing LineLeft() and LineRight().
   nscoord ComputeLineIntercept(
@@ -1271,15 +1348,10 @@ private:
   // The intervals are stored in ascending order on y.
   nsTArray<nsRect> mIntervals;
 
-  // If mEmpty is true, that means the polygon encloses no area.
-  bool mEmpty = false;
-
-  // Computed block start and block end value of the polygon shape.
-  //
-  // If mEmpty is false, their initial values nscoord_MAX and nscoord_MIN
-  // are used as sentinels for computing min() and max() in the
-  // constructor, and mBStart is guaranteed to be less than or equal to
-  // mBEnd. If mEmpty is true, their values do not matter.
+  // Computed block start and block end value of the polygon shape. These
+  // initial values are set to correct values in ComputeExtent(), which is
+  // called from all constructors. Afterwards, mBStart is guaranteed to be
+  // less than or equal to mBEnd.
   nscoord mBStart = nscoord_MAX;
   nscoord mBEnd = nscoord_MIN;
 };
@@ -1287,7 +1359,7 @@ private:
 nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(nsTArray<nsPoint>&& aVertices)
   : mVertices(aVertices)
 {
-  ComputeEmptinessAndExtent();
+  ComputeExtent();
 }
 
 nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
@@ -1300,13 +1372,7 @@ nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
   MOZ_ASSERT(aShapeMargin > 0, "This constructor should only be used for a "
                                "polygon with a positive shape-margin.");
 
-  ComputeEmptinessAndExtent();
-
-  // If we're empty, then the float area stays empty, even with a positive
-  // shape-margin.
-  if (mEmpty) {
-    return;
-  }
+  ComputeExtent();
 
   // With a positive aShapeMargin, we have to calculate a distance
   // field from the opaque pixels, then build intervals based on
@@ -1385,8 +1451,6 @@ nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
     nscoord bInAppUnits = (b - kbExpansionPerSide) * aAppUnitsPerDevPixel;
     bool bIsInExpandedRegion(b < kbExpansionPerSide ||
                              b >= bSize - kbExpansionPerSide);
-    bool bIsLessThanPolygonBStart(bInAppUnits < mBStart);
-    bool bIsMoreThanPolygonBEnd(bInAppUnits >= mBEnd);
 
     // We now figure out the i values that correspond to the left edge and
     // the right edge of the polygon at one-dev-pixel-thick strip of b. We
@@ -1396,6 +1460,8 @@ nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
     // get out, we have to subtract away the aMarginRect.x value before
     // converting the app units to dev pixels.
     nscoord bInAppUnitsMarginRect = bInAppUnits + aMarginRect.y;
+    bool bIsLessThanPolygonBStart(bInAppUnitsMarginRect < mBStart);
+    bool bIsMoreThanPolygonBEnd(bInAppUnitsMarginRect > mBEnd);
 
     const int32_t iLeftEdge = (bIsInExpandedRegion ||
                                bIsLessThanPolygonBStart ||
@@ -1426,9 +1492,11 @@ nsFloatManager::PolygonShapeInfo::PolygonShapeInfo(
           bIsInExpandedRegion) {
         // Case 1: Expanded pixel.
         df[index] = MAX_MARGIN_5X;
-      } else if ((int32_t)i >= iLeftEdge && (int32_t)i < iRightEdge) {
-        // Case 2: Polygon pixel.
-        df[index] = 0;
+      } else if ((int32_t)i >= iLeftEdge && (int32_t)i <= iRightEdge) {
+        // Case 2: Polygon pixel, either inside or just adjacent to the right
+        // edge. We need this special distinction to detect a space between
+        // edges that is less than one dev pixel.
+        df[index] = (int32_t)i < iRightEdge ? 0 : 5;
       } else {
         // Case 3: Other pixel.
 
@@ -1581,8 +1649,6 @@ nscoord
 nsFloatManager::PolygonShapeInfo::LineLeft(const nscoord aBStart,
                                            const nscoord aBEnd) const
 {
-  MOZ_ASSERT(!mEmpty, "Shouldn't be called if the polygon encloses no area.");
-
   // Use intervals if we have them.
   if (!mIntervals.IsEmpty()) {
     return LineEdge(mIntervals, aBStart, aBEnd, true);
@@ -1604,8 +1670,6 @@ nscoord
 nsFloatManager::PolygonShapeInfo::LineRight(const nscoord aBStart,
                                             const nscoord aBEnd) const
 {
-  MOZ_ASSERT(!mEmpty, "Shouldn't be called if the polygon encloses no area.");
-
   // Use intervals if we have them.
   if (!mIntervals.IsEmpty()) {
     return LineEdge(mIntervals, aBStart, aBEnd, false);
@@ -1619,44 +1683,8 @@ nsFloatManager::PolygonShapeInfo::LineRight(const nscoord aBStart,
 }
 
 void
-nsFloatManager::PolygonShapeInfo::ComputeEmptinessAndExtent()
+nsFloatManager::PolygonShapeInfo::ComputeExtent()
 {
-  // Polygons with fewer than three vertices result in an empty area.
-  // https://drafts.csswg.org/css-shapes/#funcdef-polygon
-  if (mVertices.Length() < 3) {
-    mEmpty = true;
-    return;
-  }
-
-  auto Determinant = [] (const nsPoint& aP0, const nsPoint& aP1) {
-    // Returns the determinant of the 2x2 matrix [aP0 aP1].
-    // https://en.wikipedia.org/wiki/Determinant#2_.C3.97_2_matrices
-    return aP0.x * aP1.y - aP0.y * aP1.x;
-  };
-
-  // See if we have any vertices that are non-collinear with the first two.
-  // (If a polygon's vertices are all collinear, it encloses no area.)
-  bool isEntirelyCollinear = true;
-  const nsPoint& p0 = mVertices[0];
-  const nsPoint& p1 = mVertices[1];
-  for (size_t i = 2; i < mVertices.Length(); ++i) {
-    const nsPoint& p2 = mVertices[i];
-
-    // If the determinant of the matrix formed by two points is 0, that
-    // means they're collinear with respect to the origin. Here, if it's
-    // nonzero, then p1 and p2 are non-collinear with respect to p0, i.e.
-    // the three points are non-collinear.
-    if (Determinant(p2 - p0, p1 - p0) != 0) {
-      isEntirelyCollinear = false;
-      break;
-    }
-  }
-
-  if (isEntirelyCollinear) {
-    mEmpty = true;
-    return;
-  }
-
   // mBStart and mBEnd are the lower and the upper bounds of all the
   // vertex.y, respectively. The vertex.y is actually on the block-axis of
   // the float manager's writing mode.
@@ -1664,6 +1692,9 @@ nsFloatManager::PolygonShapeInfo::ComputeEmptinessAndExtent()
     mBStart = std::min(mBStart, vertex.y);
     mBEnd = std::max(mBEnd, vertex.y);
   }
+
+  MOZ_ASSERT(mBStart <= mBEnd, "Start of float area should be less than "
+                               "or equal to the end.");
 }
 
 nscoord
@@ -1679,6 +1710,16 @@ nsFloatManager::PolygonShapeInfo::ComputeLineIntercept(
   const size_t len = mVertices.Length();
   nscoord lineIntercept = aLineInterceptInitialValue;
 
+  // We have some special treatment of horizontal lines between vertices.
+  // Generally, we can ignore the impact of the horizontal lines since their
+  // endpoints will be included in the lines preceeding or following them.
+  // However, it's possible the polygon is entirely a horizontal line,
+  // possibly built from more than one horizontal segment. In such a case,
+  // we need to have the horizontal line(s) contribute to the line intercepts.
+  // We do this by accepting horizontal lines until we find a non-horizontal
+  // line, after which all further horizontal lines are ignored.
+  bool canIgnoreHorizontalLines = false;
+
   // Iterate each line segment {p0, p1}, {p1, p2}, ..., {pn, p0}.
   for (size_t i = 0; i < len; ++i) {
     const nsPoint* smallYVertex = &mVertices[i];
@@ -1690,24 +1731,46 @@ nsFloatManager::PolygonShapeInfo::ComputeLineIntercept(
       std::swap(smallYVertex, bigYVertex);
     }
 
-    if (aBStart >= bigYVertex->y || aBEnd <= smallYVertex->y ||
-        smallYVertex->y == bigYVertex->y) {
-      // Skip computing the intercept if a) the band doesn't intersect the
-      // line segment (even if it crosses one of two the vertices); or b)
-      // the line segment is horizontal. It's OK because the two end points
-      // forming this horizontal segment will still be considered if each of
-      // them is forming another non-horizontal segment with other points.
+    // Generally, we need to ignore line segments that either don't intersect
+    // the band, or merely touch it. However, if the polygon has no block extent
+    // (it is a point, or a horizontal line), and the band touches the line
+    // segment, we let that line segment through.
+    if ((aBStart >= bigYVertex->y || aBEnd <= smallYVertex->y) &&
+        !(mBStart == mBEnd && aBStart == bigYVertex->y)) {
+      // Skip computing the intercept if the band doesn't intersect the
+      // line segment.
       continue;
     }
 
-    nscoord bStartLineIntercept =
-      aBStart <= smallYVertex->y
-        ? smallYVertex->x
-        : XInterceptAtY(aBStart, *smallYVertex, *bigYVertex);
-    nscoord bEndLineIntercept =
-      aBEnd >= bigYVertex->y
-        ? bigYVertex->x
-        : XInterceptAtY(aBEnd, *smallYVertex, *bigYVertex);
+    nscoord bStartLineIntercept;
+    nscoord bEndLineIntercept;
+
+    if (smallYVertex->y == bigYVertex->y) {
+      // The line is horizontal; see if we can ignore it.
+      if (canIgnoreHorizontalLines) {
+        continue;
+      }
+
+      // For a horizontal line that we can't ignore, we treat the two x value
+      // ends as the bStartLineIntercept and bEndLineIntercept. It doesn't
+      // matter which is applied to which, because they'll both be applied
+      // to aCompareOp.
+      bStartLineIntercept = smallYVertex->x;
+      bEndLineIntercept = bigYVertex->x;
+    } else {
+      // This is not a horizontal line. We can now ignore all future
+      // horizontal lines.
+      canIgnoreHorizontalLines = true;
+
+      bStartLineIntercept =
+        aBStart <= smallYVertex->y
+          ? smallYVertex->x
+          : XInterceptAtY(aBStart, *smallYVertex, *bigYVertex);
+      bEndLineIntercept =
+        aBEnd >= bigYVertex->y
+          ? bigYVertex->x
+          : XInterceptAtY(aBEnd, *smallYVertex, *bigYVertex);
+    }
 
     // If either new intercept is more extreme than lineIntercept (per
     // aCompareOp), then update lineIntercept to that value.
@@ -1776,6 +1839,7 @@ public:
   nscoord BStart() const override { return mBStart; }
   nscoord BEnd() const override { return mBEnd; }
   bool IsEmpty() const override { return mIntervals.IsEmpty(); }
+  bool MayNarrowInBlockDirection() const override { return true; }
 
   void Translate(nscoord aLineLeft, nscoord aBlockStart) override;
 
@@ -1906,9 +1970,6 @@ nsFloatManager::ImageShapeInfo::ImageShapeInfo(
     // we calculate a dfOffset value which is the top left of the content
     // rect relative to the margin rect.
     nsPoint offsetPoint = aContentRect.TopLeft() - aMarginRect.TopLeft();
-    MOZ_ASSERT(offsetPoint.x >= 0 && offsetPoint.y >= 0,
-               "aContentRect should be within aMarginRect, which we need "
-               "for our math to make sense.");
     LayoutDeviceIntPoint dfOffset =
       LayoutDevicePixel::FromAppUnitsRounded(offsetPoint,
                                              aAppUnitsPerDevPixel);
@@ -1990,10 +2051,10 @@ nsFloatManager::ImageShapeInfo::ImageShapeInfo(
             row >= hEx - kExpansionPerSide) {
           // Case 1: Expanded pixel.
           df[index] = MAX_MARGIN_5X;
-        } else if (col >= (uint32_t)dfOffset.x &&
-                   col < (uint32_t)(dfOffset.x + w) &&
-                   row >= (uint32_t)dfOffset.y &&
-                   row < (uint32_t)(dfOffset.y + h) &&
+        } else if ((int32_t)col >= dfOffset.x &&
+                   (int32_t)col < (dfOffset.x + aImageSize.width) &&
+                   (int32_t)row >= dfOffset.y &&
+                   (int32_t)row < (dfOffset.y + aImageSize.height) &&
                    aAlphaPixels[col - dfOffset.x +
                                 (row - dfOffset.y) * aStride] > threshold) {
           // Case 2: Image pixel that is opaque.
@@ -2328,12 +2389,13 @@ nsFloatManager::FloatInfo::FloatInfo(nsIFrame* aFrame,
     return;
   }
 
-  const StyleShapeSource& shapeOutside = mFrame->StyleDisplay()->mShapeOutside;
+  const nsStyleDisplay* styleDisplay = mFrame->StyleDisplay();
+  const StyleShapeSource& shapeOutside = styleDisplay->mShapeOutside;
 
   nscoord shapeMargin = (shapeOutside.GetType() == StyleShapeSourceType::None)
    ? 0
    : nsLayoutUtils::ResolveToLength<true>(
-       mFrame->StyleDisplay()->mShapeMargin,
+       styleDisplay->mShapeMargin,
        LogicalSize(aWM, aContainerSize).ISize(aWM));
 
   switch (shapeOutside.GetType()) {
@@ -2346,7 +2408,7 @@ nsFloatManager::FloatInfo::FloatInfo(nsIFrame* aFrame,
       return;
 
     case StyleShapeSourceType::Image: {
-      float shapeImageThreshold = mFrame->StyleDisplay()->mShapeImageThreshold;
+      float shapeImageThreshold = styleDisplay->mShapeImageThreshold;
       mShapeInfo = ShapeInfo::CreateImageShape(shapeOutside.GetShapeImage(),
                                                shapeImageThreshold,
                                                shapeMargin,
@@ -2393,11 +2455,11 @@ nsFloatManager::FloatInfo::FloatInfo(nsIFrame* aFrame,
 
 #ifdef NS_BUILD_REFCNT_LOGGING
 nsFloatManager::FloatInfo::FloatInfo(FloatInfo&& aOther)
-  : mFrame(Move(aOther.mFrame))
-  , mLeftBEnd(Move(aOther.mLeftBEnd))
-  , mRightBEnd(Move(aOther.mRightBEnd))
-  , mRect(Move(aOther.mRect))
-  , mShapeInfo(Move(aOther.mShapeInfo))
+  : mFrame(std::move(aOther.mFrame))
+  , mLeftBEnd(std::move(aOther.mLeftBEnd))
+  , mRightBEnd(std::move(aOther.mRightBEnd))
+  , mRect(std::move(aOther.mRect))
+  , mShapeInfo(std::move(aOther.mShapeInfo))
 {
   MOZ_COUNT_CTOR(nsFloatManager::FloatInfo);
 }
@@ -2487,6 +2549,26 @@ nsFloatManager::FloatInfo::IsEmpty(ShapeType aShapeType) const
     return IsEmpty();
   }
   return mShapeInfo->IsEmpty();
+}
+
+bool
+nsFloatManager::FloatInfo::MayNarrowInBlockDirection(ShapeType aShapeType) const
+{
+  // This function mirrors the cases of the three argument versions of
+  // LineLeft() and LineRight(). This function returns true if and only if
+  // either of those functions could possibly return "narrower" values with
+  // increasing aBStart values. "Narrower" means closer to the far end of
+  // the float shape.
+  if (aShapeType == ShapeType::Margin) {
+    return false;
+  }
+
+  MOZ_ASSERT(aShapeType == ShapeType::ShapeOutside);
+  if (!mShapeInfo) {
+    return false;
+  }
+
+  return mShapeInfo->MayNarrowInBlockDirection();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2628,7 +2710,7 @@ nsFloatManager::ShapeInfo::CreateInset(
       logicalRadii[i] = aShapeMargin;
     }
     return MakeUnique<RoundedBoxShapeInfo>(logicalInsetRect,
-                                           Move(logicalRadii));
+                                           std::move(logicalRadii));
   }
 
   // If we have radii, and they have balanced/equal corners, we can inflate
@@ -2734,7 +2816,7 @@ nsFloatManager::ShapeInfo::CreatePolygon(
   }
 
   if (aShapeMargin == 0) {
-    return MakeUnique<PolygonShapeInfo>(Move(vertices));
+    return MakeUnique<PolygonShapeInfo>(std::move(vertices));
   }
 
   nsRect marginRect = ConvertToFloatLogical(aMarginRect, aWM, aContainerSize);
@@ -2742,7 +2824,7 @@ nsFloatManager::ShapeInfo::CreatePolygon(
   // We have to use the full constructor for PolygonShapeInfo. This
   // computes the float area using a rasterization method.
   int32_t appUnitsPerDevPixel = aFrame->PresContext()->AppUnitsPerDevPixel();
-  return MakeUnique<PolygonShapeInfo>(Move(vertices), aShapeMargin,
+  return MakeUnique<PolygonShapeInfo>(std::move(vertices), aShapeMargin,
                                       appUnitsPerDevPixel, marginRect);
 }
 

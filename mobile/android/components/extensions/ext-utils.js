@@ -520,6 +520,10 @@ class Tab extends TabBase {
     return this.nativeTab.getActive();
   }
 
+  get highlighted() {
+    return this.active;
+  }
+
   get selected() {
     return this.nativeTab.getActive();
   }
@@ -568,11 +572,10 @@ class Tab extends TabBase {
 
 // Manages tab-specific context data and dispatches tab select and close events.
 class TabContext extends EventEmitter {
-  constructor(getDefaults, extension) {
+  constructor(getDefaultPrototype) {
     super();
 
-    this.extension = extension;
-    this.getDefaults = getDefaults;
+    this.getDefaultPrototype = getDefaultPrototype;
     this.tabData = new Map();
 
     GlobalEventDispatcher.registerListener(this, [
@@ -583,7 +586,8 @@ class TabContext extends EventEmitter {
 
   get(tabId) {
     if (!this.tabData.has(tabId)) {
-      this.tabData.set(tabId, this.getDefaults());
+      let data = Object.create(this.getDefaultPrototype(tabId));
+      this.tabData.set(tabId, data);
     }
 
     return this.tabData.get(tabId);
@@ -661,6 +665,10 @@ class Window extends WindowBase {
     for (let nativeTab of this.window.BrowserApp.tabs) {
       yield tabManager.getWrapper(nativeTab);
     }
+  }
+
+  * getHighlightedTabs() {
+    yield this.activeTab;
   }
 
   get activeTab() {

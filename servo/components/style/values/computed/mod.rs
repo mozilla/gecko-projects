@@ -30,7 +30,6 @@ use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent
 use super::specified;
 
 pub use app_units::Au;
-pub use properties::animated_properties::TransitionProperty;
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignContent, AlignItems, JustifyContent, JustifyItems, SelfAlignment};
 #[cfg(feature = "gecko")]
@@ -43,7 +42,7 @@ pub use self::font::{FontSize, FontSizeAdjust, FontStretch, FontSynthesis, FontV
 pub use self::font::{FontFamily, FontLanguageOverride, FontStyle, FontVariantEastAsian, FontVariationSettings};
 pub use self::font::{FontFeatureSettings, FontVariantLigatures, FontVariantNumeric};
 pub use self::font::{MozScriptLevel, MozScriptMinSize, MozScriptSizeMultiplier, XLang, XTextZoom};
-pub use self::box_::{AnimationIterationCount, AnimationName, Contain, Display};
+pub use self::box_::{AnimationIterationCount, AnimationName, Contain, Display, TransitionProperty};
 pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective};
 pub use self::box_::{ScrollSnapType, TouchAction, VerticalAlign, WillChange};
 pub use self::color::{Color, ColorPropertyValue, RGBAColor};
@@ -56,6 +55,7 @@ pub use self::inherited_box::{ImageOrientation, Orientation};
 #[cfg(feature = "gecko")]
 pub use self::gecko::ScrollSnapPoint;
 pub use self::rect::LengthOrNumberRect;
+pub use self::resolution::Resolution;
 pub use super::{Auto, Either, None_};
 pub use super::specified::{BorderStyle, TextDecorationLine};
 pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNumber, LengthOrPercentage};
@@ -77,7 +77,7 @@ pub use self::text::{TextAlign, TextEmphasisPosition, TextEmphasisStyle, TextOve
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, TimingFunction, Transform, TransformOperation};
 pub use self::transform::{TransformOrigin, TransformStyle, Translate};
-pub use self::ui::{CaretColor, Cursor, MozForceBrokenImageIcon};
+pub use self::ui::{ColorOrAuto, Cursor, MozForceBrokenImageIcon};
 #[cfg(feature = "gecko")]
 pub use self::ui::CursorImage;
 
@@ -105,6 +105,7 @@ pub mod outline;
 pub mod percentage;
 pub mod position;
 pub mod rect;
+pub mod resolution;
 pub mod svg;
 pub mod table;
 pub mod text;

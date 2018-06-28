@@ -10,6 +10,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
 });
 
+const {debug, warn} = GeckoViewUtils.initLogging("GeckoViewStartup", this);
+
 function GeckoViewStartup() {
 }
 
@@ -36,6 +38,7 @@ GeckoViewStartup.prototype = {
 
   /* ----------  nsIObserver  ---------- */
   observe: function(aSubject, aTopic, aData) {
+    debug `observe: ${aTopic}`;
     switch (aTopic) {
       case "app-startup": {
         // Parent and content process.
@@ -46,6 +49,20 @@ GeckoViewStartup.prototype = {
             "getUserMedia:request",
             "PeerConnection:request",
           ],
+          ppmm: [
+            "GeckoView:AddCameraPermission",
+          ],
+        });
+
+        GeckoViewUtils.addLazyGetter(this, "GeckoViewConsole", {
+          module: "resource://gre/modules/GeckoViewConsole.jsm",
+        });
+
+        GeckoViewUtils.addLazyPrefObserver({
+          name: "geckoview.console.enabled",
+          default: false,
+        }, {
+          handler: _ => this.GeckoViewConsole,
         });
 
         if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_DEFAULT) {
@@ -54,6 +71,13 @@ GeckoViewStartup.prototype = {
 
           Services.mm.loadFrameScript(
               "chrome://geckoview/content/GeckoViewPromptContent.js", true);
+
+          GeckoViewUtils.addLazyGetter(this, "ContentCrashHandler", {
+            module: "resource://gre/modules/ContentCrashHandler.jsm",
+            observers: [
+              "ipc:content-shutdown",
+            ]
+          });
         }
         break;
       }

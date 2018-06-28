@@ -37,6 +37,11 @@ then
   PARAMS="${PARAMS} --blocklist"
 fi
 
+if [ ! -z "${DO_REMOTE_SETTINGS}" ]
+then
+  PARAMS="${PARAMS} --remote-settings"
+fi
+
 export ARTIFACTS_DIR="/home/worker/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
 
@@ -75,4 +80,4 @@ END
 fi
 
 # shellcheck disable=SC2086
-/home/worker/scripts/periodic_file_updates.sh -p "${PRODUCT}" -b "${BRANCH}" ${PARAMS}
+/home/worker/scripts/periodic_file_updates.sh -p "${PRODUCT}" -b "${BRANCH}" -a ${PARAMS}

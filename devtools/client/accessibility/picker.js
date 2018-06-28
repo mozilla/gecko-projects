@@ -23,7 +23,7 @@ class Picker {
   }
 
   get walker() {
-    return this._panel._walker;
+    return this._panel.walker;
   }
 
   get pickerButton() {
@@ -71,8 +71,8 @@ class Picker {
   updateButton() {
     this.pickerButton.description = this.getStr("accessibility.pick");
     this.pickerButton.className = "accessibility";
-    this.pickerButton.disabled = !this._panel._front.enabled;
-    if (!this._panel._front.enabled && this.isPicking) {
+    this.pickerButton.disabled = !this._panel.front.enabled;
+    if (!this._panel.front.enabled && this.isPicking) {
       this.cancel();
     }
   }
@@ -141,7 +141,7 @@ class Picker {
 
     await this.walker.cancelPick();
 
-    this._telemetry.toolClosed("accessibilityPickerUsed");
+    this._telemetry.toolClosed("accessibility_picker");
 
     this.walker.off("picker-accessible-hovered", this.onPickerAccessibleHovered);
     this.walker.off("picker-accessible-picked", this.onPickerAccessiblePicked);
@@ -171,7 +171,9 @@ class Picker {
     this.walker.on("picker-accessible-canceled", this.onPickerAccessibleCanceled);
 
     await this.walker.pick(doFocus);
-    this._telemetry.toolOpened("accessibilityPickerUsed");
+
+    this._telemetry.toolOpened("accessibility_picker");
+
     this.emit("picker-started");
   }
 

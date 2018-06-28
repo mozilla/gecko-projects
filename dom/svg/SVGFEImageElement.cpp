@@ -29,7 +29,7 @@ namespace dom {
 JSObject*
 SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEImageElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEImageElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[3] =
@@ -43,7 +43,6 @@ nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[3] =
 // nsISupports methods
 
 NS_IMPL_ISUPPORTS_INHERITED(SVGFEImageElement, SVGFEImageElementBase,
-                            nsIDOMNode,
                             imgINotificationObserver, nsIImageLoadingContent)
 
 //----------------------------------------------------------------------
@@ -198,7 +197,7 @@ SVGFEImageElement::IntrinsicState() const
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEImageElement)
 

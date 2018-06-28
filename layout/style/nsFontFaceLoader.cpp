@@ -52,10 +52,11 @@ nsFontFaceLoader::nsFontFaceLoader(gfxUserFontEntry* aUserFontEntry,
                                    nsIURI* aFontURI,
                                    FontFaceSet* aFontFaceSet,
                                    nsIChannel* aChannel)
-  : mUserFontEntry(aUserFontEntry),
-    mFontURI(aFontURI),
-    mFontFaceSet(aFontFaceSet),
-    mChannel(aChannel)
+  : mUserFontEntry(aUserFontEntry)
+  , mFontURI(aFontURI)
+  , mFontFaceSet(aFontFaceSet)
+  , mChannel(aChannel)
+  , mStreamLoader(nullptr)
 {
   MOZ_ASSERT(mFontFaceSet,
              "We should get a valid FontFaceSet from the caller!");
@@ -173,7 +174,7 @@ nsFontFaceLoader::LoadTimerCallback(nsITimer* aTimer, void* aClosure)
       break;
 
     default:
-      NS_NOTREACHED("strange font-display value");
+      MOZ_ASSERT_UNREACHABLE("strange font-display value");
       break;
   }
 

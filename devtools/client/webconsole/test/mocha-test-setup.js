@@ -23,8 +23,17 @@ pref("devtools.webconsole.ui.filterbar", false);
 pref("devtools.webconsole.inputHistoryCount", 50);
 pref("devtools.webconsole.persistlog", false);
 pref("devtools.webconsole.timestampMessages", false);
-pref("devtools.webconsole.autoMultiline", true);
 pref("devtools.webconsole.sidebarToggle", true);
+pref("devtools.webconsole.jsterm.codeMirror", false);
+
+global.loader = {
+  lazyServiceGetter: () => {},
+  lazyRequireGetter: (context, name, path) => {
+    if (path === "devtools/shared/async-storage") {
+      global[name] = require("devtools/client/webconsole/test/fixtures/async-storage");
+    }
+  }
+};
 
 // Point to vendored-in files and mocks when needed.
 const requireHacker = require("require-hacker");
@@ -43,6 +52,8 @@ requireHacker.global_hook("default", (path, module) => {
     case "react":
     case "devtools/client/shared/vendor/react":
       return getModule("devtools/client/shared/vendor/react-dev");
+    case "chrome":
+      return `module.exports = { Cc: {}, Ci: {}, Cu: {} }`;
   }
 
   // Some modules depend on Chrome APIs which don't work in mocha. When such a module
@@ -58,13 +69,17 @@ requireHacker.global_hook("default", (path, module) => {
     case "Services.default":
       return `module.exports = require("devtools-modules/src/Services")`;
     case "devtools/shared/client/object-client":
+    case "devtools/shared/client/long-string-client":
       return `() => {}`;
     case "devtools/client/netmonitor/src/components/TabboxPanel":
-      return "{}";
     case "devtools/client/webconsole/utils/context-menu":
       return "{}";
+    case "devtools/client/shared/telemetry":
+      return `module.exports = function() {}`;
     case "devtools/shared/event-emitter":
       return `module.exports = require("devtools-modules/src/utils/event-emitter")`;
+    case "devtools/client/shared/unicode-url":
+      return `module.exports = require("devtools-modules/src/unicode-url")`;
   }
 
   // We need to rewrite all the modules assuming the root is mozilla-central and give them

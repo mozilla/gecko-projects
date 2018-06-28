@@ -9,6 +9,7 @@
 #include "ClientHandleChild.h"
 #include "ClientHandleOpChild.h"
 #include "ClientManager.h"
+#include "ClientPrincipalUtils.h"
 #include "ClientState.h"
 #include "mozilla/dom/PClientManagerChild.h"
 #include "mozilla/dom/ServiceWorkerDescriptor.h"
@@ -48,15 +49,17 @@ ClientHandle::StartOp(const ClientOpConstructorArgs& aArgs,
   RefPtr<ClientHandle> kungFuGrip = this;
 
   MaybeExecute([aArgs, kungFuGrip, aRejectCallback,
-                resolve = Move(aResolveCallback)] (ClientHandleChild* aActor) {
+                resolve = std::move(aResolveCallback)] (ClientHandleChild* aActor) {
+    MOZ_DIAGNOSTIC_ASSERT(aActor);
     ClientHandleOpChild* actor =
-      new ClientHandleOpChild(kungFuGrip, aArgs, Move(resolve),
-                              Move(aRejectCallback));
+      new ClientHandleOpChild(kungFuGrip, aArgs, std::move(resolve),
+                              std::move(aRejectCallback));
     if (!aActor->SendPClientHandleOpConstructor(actor, aArgs)) {
       // Constructor failure will call reject callback via ActorDestroy()
       return;
     }
   }, [aRejectCallback] {
+    MOZ_DIAGNOSTIC_ASSERT(aRejectCallback);
     aRejectCallback(NS_ERROR_DOM_INVALID_STATE_ERR);
   });
 }
@@ -119,6 +122,11 @@ ClientHandle::Control(const ServiceWorkerDescriptor& aServiceWorker)
 {
   RefPtr<GenericPromise::Private> outerPromise =
     new GenericPromise::Private(__func__);
+
+  // We should never have a cross-origin controller.  Since this would be
+  // same-origin policy violation we do a full release assertion here.
+  MOZ_RELEASE_ASSERT(ClientMatchPrincipalInfo(mClientInfo.PrincipalInfo(),
+                                              aServiceWorker.PrincipalInfo()));
 
   StartOp(ClientControlledArgs(aServiceWorker.ToIPC()),
     [outerPromise](const ClientOpResult& aResult) {
@@ -195,7 +203,7 @@ ClientHandle::OnDetach()
   }
 
   RefPtr<GenericPromise> ref(mDetachPromise);
-  return Move(ref);
+  return ref;
 }
 
 } // namespace dom

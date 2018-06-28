@@ -775,7 +775,7 @@ nsTableRowFrame::ReflowChildren(nsPresContext*           aPresContext,
     nsTableCellFrame *cellFrame = do_QueryFrame(kidFrame);
     if (!cellFrame) {
       // XXXldb nsCSSFrameConstructor needs to enforce this!
-      NS_NOTREACHED("yikes, a non-row child");
+      MOZ_ASSERT_UNREACHABLE("yikes, a non-row child");
 
       // it's an unknown frame type, give it a generic reflow and ignore the results
       TableCellReflowInput
@@ -1424,7 +1424,7 @@ void nsTableRowFrame::InitHasCellWithStyleBSize(nsTableFrame* aTableFrame)
   for (nsIFrame* kidFrame : mFrames) {
     nsTableCellFrame *cellFrame = do_QueryFrame(kidFrame);
     if (!cellFrame) {
-      NS_NOTREACHED("Table row has a non-cell child.");
+      MOZ_ASSERT_UNREACHABLE("Table row has a non-cell child.");
       continue;
     }
     // Ignore row-spanning cells
@@ -1444,7 +1444,7 @@ void
 nsTableRowFrame::InvalidateFrame(uint32_t aDisplayItemKey, bool aRebuildDisplayItems)
 {
   nsIFrame::InvalidateFrame(aDisplayItemKey, aRebuildDisplayItems);
-  if (GetTableFrame()->IsBorderCollapse() && StyleBorder()->HasBorder()) {
+  if (GetTableFrame()->IsBorderCollapse()) {
     GetParent()->InvalidateFrameWithRect(GetVisualOverflowRect() + GetPosition(), aDisplayItemKey, false);
   }
 }

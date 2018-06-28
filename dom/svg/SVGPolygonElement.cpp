@@ -20,7 +20,7 @@ namespace dom {
 JSObject*
 SVGPolygonElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGPolygonElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGPolygonElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -32,7 +32,7 @@ SVGPolygonElement::SVGPolygonElement(already_AddRefed<mozilla::dom::NodeInfo>& a
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGPolygonElement)
 

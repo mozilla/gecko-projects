@@ -259,7 +259,7 @@ AudioBuffer::Create(nsPIDOMWindowInner* aWindow, float aSampleRate,
   if (rv.Failed()) {
     return nullptr;
   }
-  buffer->mSharedChannels = Move(aInitialContents);
+  buffer->mSharedChannels = std::move(aInitialContents);
 
   return buffer.forget();
 }
@@ -267,7 +267,7 @@ AudioBuffer::Create(nsPIDOMWindowInner* aWindow, float aSampleRate,
 JSObject*
 AudioBuffer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AudioBufferBinding::Wrap(aCx, this, aGivenProto);
+  return AudioBuffer_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 static void

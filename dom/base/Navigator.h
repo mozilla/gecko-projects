@@ -142,7 +142,7 @@ public:
                                nsAString& aUserAgent);
 
   // Clears the user agent cache by calling:
-  // NavigatorBinding::ClearCachedUserAgentValue(this);
+  // Navigator_Binding::ClearCachedUserAgentValue(this);
   void ClearUserAgentCache();
 
   bool Vibrate(uint32_t aDuration);
@@ -158,7 +158,10 @@ public:
   bool CookieEnabled();
   void GetBuildID(nsAString& aBuildID, CallerType aCallerType,
                   ErrorResult& aRv) const;
-  bool JavaEnabled(CallerType aCallerType, ErrorResult& aRv);
+  bool JavaEnabled()
+  {
+    return false;
+  }
   uint64_t HardwareConcurrency();
   bool TaintEnabled()
   {

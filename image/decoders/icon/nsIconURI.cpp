@@ -509,23 +509,19 @@ nsMozIconURI::SchemeIs(const char* aScheme, bool* aEquals)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsMozIconURI::Clone(nsIURI** result)
 {
+  nsresult rv;
   nsCOMPtr<nsIURL> newIconURL;
   if (mIconURL) {
-    nsCOMPtr<nsIURI> newURI;
-    nsresult rv = mIconURL->Clone(getter_AddRefs(newURI));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    newIconURL = do_QueryInterface(newURI, &rv);
+    newIconURL = do_QueryInterface(mIconURL, &rv);
     if (NS_FAILED(rv)) {
       return rv;
     }
   }
 
-  nsMozIconURI* uri = new nsMozIconURI();
+  RefPtr<nsMozIconURI> uri = new nsMozIconURI();
   newIconURL.swap(uri->mIconURL);
   uri->mSize = mSize;
   uri->mContentType = mContentType;
@@ -533,7 +529,7 @@ nsMozIconURI::Clone(nsIURI** result)
   uri->mStockIcon = mStockIcon;
   uri->mIconSize = mIconSize;
   uri->mIconState = mIconState;
-  NS_ADDREF(*result = uri);
+  uri.forget(result);
 
   return NS_OK;
 }
@@ -715,7 +711,17 @@ nsMozIconURI::Deserialize(const URIParams& aParams)
   mContentType = params.contentType();
   mFileName = params.fileName();
   mStockIcon = params.stockIcon();
+
+  if (params.iconSize() < -1 ||
+      params.iconSize() >= (int32_t) ArrayLength(kSizeStrings)) {
+    return false;
+  }
   mIconSize = params.iconSize();
+
+  if (params.iconState() < -1 ||
+      params.iconState() >= (int32_t) ArrayLength(kStateStrings)) {
+    return false;
+  }
   mIconState = params.iconState();
 
   return true;

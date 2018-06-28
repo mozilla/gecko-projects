@@ -86,6 +86,7 @@ class JS_PUBLIC_API(JSTracer)
     bool isCallbackTracer() const { return tag_ == TracerKindTag::Callback; }
     inline JS::CallbackTracer* asCallbackTracer();
     bool traceWeakEdges() const { return traceWeakEdges_; }
+    bool canSkipJsids() const { return canSkipJsids_; }
 #ifdef DEBUG
     bool checkEdges() { return checkEdges_; }
 #endif
@@ -104,6 +105,7 @@ class JS_PUBLIC_API(JSTracer)
 #endif
       , tag_(tag)
       , traceWeakEdges_(true)
+      , canSkipJsids_(false)
     {}
 
 #ifdef DEBUG
@@ -123,6 +125,7 @@ class JS_PUBLIC_API(JSTracer)
   protected:
     TracerKindTag tag_;
     bool traceWeakEdges_;
+    bool canSkipJsids_;
 };
 
 namespace JS {
@@ -148,6 +151,9 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
     virtual void onObjectEdge(JSObject** objp) { onChild(JS::GCCellPtr(*objp)); }
     virtual void onStringEdge(JSString** strp) { onChild(JS::GCCellPtr(*strp)); }
     virtual void onSymbolEdge(JS::Symbol** symp) { onChild(JS::GCCellPtr(*symp)); }
+#ifdef ENABLE_BIGINT
+    virtual void onBigIntEdge(JS::BigInt** bip) { onChild(JS::GCCellPtr(*bip)); }
+#endif
     virtual void onScriptEdge(JSScript** scriptp) { onChild(JS::GCCellPtr(*scriptp)); }
     virtual void onShapeEdge(js::Shape** shapep) {
         onChild(JS::GCCellPtr(*shapep, JS::TraceKind::Shape));
@@ -240,6 +246,9 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
     void dispatchToOnEdge(JSObject** objp) { onObjectEdge(objp); }
     void dispatchToOnEdge(JSString** strp) { onStringEdge(strp); }
     void dispatchToOnEdge(JS::Symbol** symp) { onSymbolEdge(symp); }
+#ifdef ENABLE_BIGINT
+    void dispatchToOnEdge(JS::BigInt** bip) { onBigIntEdge(bip); }
+#endif
     void dispatchToOnEdge(JSScript** scriptp) { onScriptEdge(scriptp); }
     void dispatchToOnEdge(js::Shape** shapep) { onShapeEdge(shapep); }
     void dispatchToOnEdge(js::ObjectGroup** groupp) { onObjectGroupEdge(groupp); }
@@ -252,6 +261,12 @@ class JS_PUBLIC_API(CallbackTracer) : public JSTracer
   protected:
     void setTraceWeakEdges(bool value) {
         traceWeakEdges_ = value;
+    }
+
+    // If this is set to false, then the tracer will skip some jsids
+    // to improve performance. This is needed for the cycle collector.
+    void setCanSkipJsids(bool value) {
+        canSkipJsids_ = value;
     }
 
   private:
@@ -399,7 +414,7 @@ extern JS_PUBLIC_API(void)
 TraceChildren(JSTracer* trc, GCCellPtr thing);
 
 using ZoneSet = js::HashSet<Zone*, js::DefaultHasher<Zone*>, js::SystemAllocPolicy>;
-using CompartmentSet = js::HashSet<JSCompartment*, js::DefaultHasher<JSCompartment*>,
+using CompartmentSet = js::HashSet<JS::Compartment*, js::DefaultHasher<JS::Compartment*>,
                                    js::SystemAllocPolicy>;
 
 /**

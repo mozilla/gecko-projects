@@ -38,6 +38,10 @@
 #include "nsTHashtable.h"
 #include "jsapi.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/PlacesObservers.h"
+#include "mozilla/dom/PlacesVisit.h"
+#include "mozilla/dom/ProcessGlobal.h"
+#include "mozilla/dom/ScriptSettings.h"
 
 // Initial size for the cache holding visited status observers.
 #define VISIT_OBSERVERS_INITIAL_CACHE_LENGTH 64
@@ -83,7 +87,7 @@ struct VisitData {
   , referrerVisitId(0)
   , titleChanged(false)
   , shouldUpdateFrecency(true)
-  , redirect(false)
+  , useFrecencyRedirectBonus(false)
   {
     guid.SetIsVoid(true);
     title.SetIsVoid(true);
@@ -105,7 +109,7 @@ struct VisitData {
   , referrerVisitId(0)
   , titleChanged(false)
   , shouldUpdateFrecency(true)
-  , redirect(false)
+  , useFrecencyRedirectBonus(false)
   {
     MOZ_ASSERT(aURI);
     if (aURI) {
@@ -164,124 +168,10 @@ struct VisitData {
   // Indicates whether frecency should be updated for this visit.
   bool shouldUpdateFrecency;
 
-  // Whether this is a redirect source.
-  bool redirect;
+  // Whether to override the visit type bonus with a redirect bonus when
+  // calculating frecency on the most recent visit.
+  bool useFrecencyRedirectBonus;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-//// nsVisitData
-
-class nsVisitData : public nsIVisitData
-{
-public:
-  explicit nsVisitData(nsIURI* aURI,
-                       int64_t aVisitId,
-                       PRTime aTime,
-                       int64_t aReferrerVisitId,
-                       int32_t aTransitionType,
-                       const nsACString& aGuid,
-                       bool aHidden,
-                       uint32_t aVisitCount,
-                       uint32_t aTyped,
-                       const nsAString& aLastKnownTitle)
-    : mURI(aURI)
-    , mVisitId(aVisitId)
-    , mTime(aTime)
-    , mReferrerVisitId(aReferrerVisitId)
-    , mTransitionType(aTransitionType)
-    , mGuid(aGuid)
-    , mHidden(aHidden)
-    , mVisitCount(aVisitCount)
-    , mTyped(aTyped)
-    , mLastKnownTitle(aLastKnownTitle)
-  {
-    MOZ_ASSERT(NS_IsMainThread(),
-               "nsVisitData should only be constructed on the main thread.");
-  }
-
-  NS_DECL_ISUPPORTS
-
-  NS_IMETHOD GetUri(nsIURI** aUri) override
-  {
-    NS_ENSURE_ARG_POINTER(aUri);
-    *aUri = mURI;
-    NS_IF_ADDREF(*aUri);
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetVisitId(int64_t* aVisitId) override
-  {
-    *aVisitId = mVisitId;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetTime(PRTime* aTime) override
-  {
-    *aTime = mTime;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetReferrerId(int64_t* aReferrerVisitId) override
-  {
-    *aReferrerVisitId = mReferrerVisitId;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetTransitionType(uint32_t* aTransitionType) override
-  {
-    *aTransitionType = mTransitionType;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetGuid(nsACString& aGuid) override
-  {
-    aGuid.Assign(mGuid);
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetHidden(bool* aHidden) override
-  {
-    *aHidden = mHidden;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetVisitCount(uint32_t* aVisitCount) override
-  {
-    *aVisitCount = mVisitCount;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetTyped(uint32_t* aTyped) override
-  {
-    *aTyped = mTyped;
-    return NS_OK;
-  }
-
-  NS_IMETHOD GetLastKnownTitle(nsAString& aLastKnownTitle) override
-  {
-    aLastKnownTitle.Assign(mLastKnownTitle);
-    return NS_OK;
-  }
-
-private:
-  virtual ~nsVisitData() {
-    MOZ_ASSERT(NS_IsMainThread(),
-               "nsVisitData should only be destructed on the main thread.");
-  };
-
-  nsCOMPtr<nsIURI> mURI;
-  int64_t mVisitId;
-  PRTime mTime;
-  int64_t mReferrerVisitId;
-  uint32_t mTransitionType;
-  nsCString mGuid;
-  bool mHidden;
-  uint32_t mVisitCount;
-  uint32_t mTyped;
-  nsString mLastKnownTitle;
-};
-
-NS_IMPL_ISUPPORTS(nsVisitData, nsIVisitData)
 
 ////////////////////////////////////////////////////////////////////////////////
 //// RemoveVisitsFilter
@@ -693,7 +583,7 @@ public:
       AutoTArray<URIParams, 1> uris;
       URIParams uri;
       SerializeURI(mURI, uri);
-      uris.AppendElement(Move(uri));
+      uris.AppendElement(std::move(uri));
       history->NotifyVisitedParent(uris);
     }
 
@@ -780,21 +670,28 @@ public:
       aNavHistory->NotifyTitleChange(aURI, aPlace.title, aPlace.guid);
     }
 
+    aNavHistory->UpdateDaysOfHistory(aPlace.visitTime);
+
     return NS_OK;
   }
 
   void AddPlaceForNotify(const VisitData& aPlace,
                          nsIURI* aURI,
-                         nsCOMArray<nsIVisitData>& aPlaces) {
+                         Sequence<OwningNonNull<PlacesEvent>>& aEvents) {
     if (aPlace.transitionType != nsINavHistoryService::TRANSITION_EMBED) {
-      nsCOMPtr<nsIVisitData> notifyPlace = new nsVisitData(
-        aURI, aPlace.visitId, aPlace.visitTime,
-        aPlace.referrerVisitId, aPlace.transitionType,
-        aPlace.guid, aPlace.hidden,
-        aPlace.visitCount + 1, // Add current visit.
-        static_cast<uint32_t>(aPlace.typed),
-        aPlace.title);
-      aPlaces.AppendElement(notifyPlace.forget());
+      RefPtr<PlacesVisit> vd = new PlacesVisit();
+      vd->mVisitId = aPlace.visitId;
+      vd->mUrl.Assign(NS_ConvertUTF8toUTF16(aPlace.spec));
+      vd->mVisitTime = aPlace.visitTime / 1000;
+      vd->mReferringVisitId = aPlace.referrerVisitId;
+      vd->mTransitionType = aPlace.transitionType;
+      vd->mPageGuid.Assign(aPlace.guid);
+      vd->mHidden = aPlace.hidden;
+      vd->mVisitCount = aPlace.visitCount + 1; // Add current visit
+      vd->mTypedCount = static_cast<uint32_t>(aPlace.typed);
+      vd->mLastKnownTitle.Assign(aPlace.title);
+      bool success = !!aEvents.AppendElement(vd.forget(), fallible);
+      MOZ_RELEASE_ASSERT(success);
     }
   }
 
@@ -817,7 +714,7 @@ public:
     nsCOMPtr<nsIObserverService> obsService =
       mozilla::services::GetObserverService();
 
-    nsCOMArray<nsIVisitData> places;
+    Sequence<OwningNonNull<PlacesEvent>> events;
     nsCOMArray<nsIURI> uris;
     if (mPlaces.Length() > 0) {
       for (uint32_t i = 0; i < mPlaces.Length(); ++i) {
@@ -826,7 +723,7 @@ public:
         if (!uri) {
           return NS_ERROR_UNEXPECTED;
         }
-        AddPlaceForNotify(mPlaces[i], uri, places);
+        AddPlaceForNotify(mPlaces[i], uri, events);
         uris.AppendElement(uri.forget());
       }
     } else {
@@ -835,11 +732,12 @@ public:
       if (!uri) {
         return NS_ERROR_UNEXPECTED;
       }
-      AddPlaceForNotify(mPlace, uri, places);
+      AddPlaceForNotify(mPlace, uri, events);
       uris.AppendElement(uri.forget());
     }
-    if (places.Length() > 0) {
-      navHistory->NotifyOnVisits(places.Elements(), places.Length());
+
+    if (events.Length() > 0) {
+      PlacesObservers::NotifyListeners(events);
     }
 
     PRTime now = PR_Now();
@@ -851,7 +749,7 @@ public:
 
         URIParams serializedUri;
         SerializeURI(uris[i], serializedUri);
-        serializableUris.AppendElement(Move(serializedUri));
+        serializableUris.AppendElement(std::move(serializedUri));
       }
       mHistory->NotifyVisitedParent(serializableUris);
     } else {
@@ -861,7 +759,7 @@ public:
 
       URIParams serializedUri;
       SerializeURI(uris[0], serializedUri);
-      serializableUris.AppendElement(Move(serializedUri));
+      serializableUris.AppendElement(std::move(serializedUri));
       mHistory->NotifyVisitedParent(serializableUris);
     }
 
@@ -1270,7 +1168,7 @@ public:
 
     {
       // Trigger an update for all the hosts of the places we inserted
-      nsAutoCString query("DELETE FROM moz_updatehostsinsert_temp");
+      nsAutoCString query("DELETE FROM moz_updateoriginsinsert_temp");
       nsCOMPtr<mozIStorageStatement> stmt = mHistory->GetStatement(query);
       NS_ENSURE_STATE(stmt);
       mozStorageStatementScoper scoper(stmt);
@@ -1489,8 +1387,7 @@ private:
 
       rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("page_id"), aPlace.placeId);
       NS_ENSURE_SUCCESS(rv, rv);
-
-      rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("redirect"), aPlace.redirect);
+      rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("redirect"), aPlace.useFrecencyRedirectBonus);
       NS_ENSURE_SUCCESS(rv, rv);
 
       rv = stmt->Execute();
@@ -2065,7 +1962,7 @@ private:
     {
       // Hosts accumulated during the places delete are updated through a trigger
       // (see nsPlacesTriggers.h).
-      nsAutoCString query("DELETE FROM moz_updatehostsdelete_temp");
+      nsAutoCString query("DELETE FROM moz_updateoriginsdelete_temp");
       nsCOMPtr<mozIStorageStatement> stmt = mHistory->GetStatement(query);
       NS_ENSURE_STATE(stmt);
       mozStorageStatementScoper scoper(stmt);
@@ -2840,8 +2737,13 @@ History::VisitURI(nsIURI* aURI,
   }
 
   place.SetTransitionType(transitionType);
-  place.redirect = aFlags & IHistory::REDIRECT_SOURCE;
-  place.hidden = GetHiddenState(place.redirect, place.transitionType);
+  bool isRedirect = aFlags & IHistory::REDIRECT_SOURCE;
+  if (isRedirect) {
+    place.useFrecencyRedirectBonus =
+      (aFlags & IHistory::REDIRECT_SOURCE_PERMANENT) ||
+      transitionType != nsINavHistoryService::TRANSITION_TYPED;
+  }
+  place.hidden = GetHiddenState(isRedirect, place.transitionType);
 
   // Error pages should never be autocompleted.
   if (aFlags & IHistory::UNRECOVERABLE_ERROR) {

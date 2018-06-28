@@ -83,13 +83,13 @@ ObjectActor.prototype = {
    * Returns a grip for this actor for returning in a protocol message.
    */
   grip: function() {
-    let g = {
+    const g = {
       "type": "object",
       "actor": this.actorID,
       "class": this.obj.class,
     };
 
-    let unwrapped = DevToolsUtils.unwrap(this.obj);
+    const unwrapped = DevToolsUtils.unwrap(this.obj);
 
     // Unsafe objects must be treated carefully.
     if (!DevToolsUtils.isSafeDebuggerObject(this.obj)) {
@@ -157,13 +157,13 @@ ObjectActor.prototype = {
       raw = null;
     }
 
-    for (let fn of previewers[this.obj.class] || previewers.Object) {
+    for (const fn of previewers[this.obj.class] || previewers.Object) {
       try {
         if (fn(this, g, raw)) {
           break;
         }
       } catch (e) {
-        let msg = "ObjectActor.prototype.grip previewer function";
+        const msg = "ObjectActor.prototype.grip previewer function";
         DevToolsUtils.reportException(msg, e);
       }
     }
@@ -177,7 +177,7 @@ ObjectActor.prototype = {
    */
   _createPromiseState: function() {
     const { state, value, reason } = getPromiseState(this.obj);
-    let promiseState = { state };
+    const promiseState = { state };
 
     if (state == "fulfilled") {
       promiseState.value = this.hooks.createValueGrip(value);
@@ -266,7 +266,7 @@ ObjectActor.prototype = {
    *        The protocol request object.
    */
   onEnumProperties: function(request) {
-    let actor = new PropertyIteratorActor(this, request.options);
+    const actor = new PropertyIteratorActor(this, request.options);
     this.registeredPool.addActor(actor);
     this.iterators.add(actor);
     return { iterator: actor.form() };
@@ -276,7 +276,7 @@ ObjectActor.prototype = {
    * Creates an actor to iterate over entries of a Map/Set-like object.
    */
   onEnumEntries: function() {
-    let actor = new PropertyIteratorActor(this, { enumEntries: true });
+    const actor = new PropertyIteratorActor(this, { enumEntries: true });
     this.registeredPool.addActor(actor);
     this.iterators.add(actor);
     return { iterator: actor.form() };
@@ -286,7 +286,7 @@ ObjectActor.prototype = {
    * Creates an actor to iterate over an object symbols properties.
    */
   onEnumSymbols: function() {
-    let actor = new SymbolIteratorActor(this);
+    const actor = new SymbolIteratorActor(this);
     this.registeredPool.addActor(actor);
     this.iterators.add(actor);
     return { iterator: actor.form() };
@@ -324,14 +324,14 @@ ObjectActor.prototype = {
       }
     }
 
-    let ownProperties = Object.create(null);
-    let ownSymbols = [];
+    const ownProperties = Object.create(null);
+    const ownSymbols = [];
 
-    for (let name of names) {
+    for (const name of names) {
       ownProperties[name] = this._propertyDescriptor(name);
     }
 
-    for (let sym of symbols) {
+    for (const sym of symbols) {
       ownSymbols.push({
         name: sym.toString(),
         descriptor: this._propertyDescriptor(sym)
@@ -359,7 +359,7 @@ ObjectActor.prototype = {
    *         defined by the remote debugging protocol.
    */
   _findSafeGetterValues: function(ownProperties, limit = 0) {
-    let safeGetterValues = Object.create(null);
+    const safeGetterValues = Object.create(null);
     let obj = this.obj;
     let level = 0, i = 0;
 
@@ -378,8 +378,8 @@ ObjectActor.prototype = {
     }
 
     while (obj && DevToolsUtils.isSafeDebuggerObject(obj)) {
-      let getters = this._findSafeGetters(obj);
-      for (let name of getters) {
+      const getters = this._findSafeGetters(obj);
+      for (const name of getters) {
         // Avoid overwriting properties from prototypes closer to this.obj. Also
         // avoid providing safeGetterValues from prototypes if property |name|
         // is already defined as an own property.
@@ -405,7 +405,7 @@ ObjectActor.prototype = {
           continue;
         }
 
-        let result = getter.call(this.obj);
+        const result = getter.call(this.obj);
         if (result && !("throw" in result)) {
           let getterValue = undefined;
           if ("return" in result) {
@@ -455,7 +455,7 @@ ObjectActor.prototype = {
       return object._safeGetters;
     }
 
-    let getters = new Set();
+    const getters = new Set();
 
     if (!DevToolsUtils.isSafeDebuggerObject(object)) {
       object._safeGetters = getters;
@@ -470,7 +470,7 @@ ObjectActor.prototype = {
       // allowed: "cannot modify properties of a WrappedNative". See bug 952093.
     }
 
-    for (let name of names) {
+    for (const name of names) {
       let desc = null;
       try {
         desc = object.getOwnPropertyDescriptor(name);
@@ -579,7 +579,7 @@ ObjectActor.prototype = {
       return undefined;
     }
 
-    let retval = {
+    const retval = {
       configurable: desc.configurable,
       enumerable: desc.enumerable
     };
@@ -646,7 +646,7 @@ ObjectActor.prototype = {
                         " 'Function' class." };
     }
 
-    let envActor = this.hooks.createEnvironmentActor(this.obj.environment,
+    const envActor = this.hooks.createEnvironmentActor(this.obj.environment,
                                                      this.registeredPool);
     if (!envActor) {
       return { error: "notDebuggee",
@@ -671,7 +671,7 @@ ObjectActor.prototype = {
                         "object grips with a 'Promise' class." };
     }
 
-    let promises = this.obj.promiseDependentPromises
+    const promises = this.obj.promiseDependentPromises
                            .map(p => this.hooks.createValueGrip(p));
 
     return { promises };
@@ -688,11 +688,11 @@ ObjectActor.prototype = {
     }
 
     let stack = this.obj.promiseAllocationSite;
-    let allocationStacks = [];
+    const allocationStacks = [];
 
     while (stack) {
       if (stack.source) {
-        let source = this._getSourceOriginalLocation(stack);
+        const source = this._getSourceOriginalLocation(stack);
 
         if (source) {
           allocationStacks.push(source);
@@ -717,11 +717,11 @@ ObjectActor.prototype = {
     }
 
     let stack = this.obj.promiseResolutionSite;
-    let fulfillmentStacks = [];
+    const fulfillmentStacks = [];
 
     while (stack) {
       if (stack.source) {
-        let source = this._getSourceOriginalLocation(stack);
+        const source = this._getSourceOriginalLocation(stack);
 
         if (source) {
           fulfillmentStacks.push(source);
@@ -746,11 +746,11 @@ ObjectActor.prototype = {
     }
 
     let stack = this.obj.promiseResolutionSite;
-    let rejectionStacks = [];
+    const rejectionStacks = [];
 
     while (stack) {
       if (stack.source) {
-        let source = this._getSourceOriginalLocation(stack);
+        const source = this._getSourceOriginalLocation(stack);
 
         if (source) {
           rejectionStacks.push(source);

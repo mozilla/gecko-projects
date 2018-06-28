@@ -13,7 +13,6 @@
 #include "mozilla/dom/HTMLFormElement.h"
 #include "nsGenericHTMLElement.h" // nsGenericHTMLFormElement
 #include "nsIDocument.h"
-#include "nsIDOMNode.h"
 #include "nsIFormControl.h"
 #include "RadioNodeList.h"
 #include "jsfriendapi.h"
@@ -355,7 +354,7 @@ HTMLFormControlsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
 /* virtual */ JSObject*
 HTMLFormControlsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLFormControlsCollectionBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLFormControlsCollection_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

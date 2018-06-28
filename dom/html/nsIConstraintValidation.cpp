@@ -107,9 +107,11 @@ nsIConstraintValidation::CheckValidity()
   nsCOMPtr<nsIContent> content = do_QueryInterface(this);
   NS_ASSERTION(content, "This class should be inherited by HTML elements only!");
 
-  nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(), content,
+  nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(),
+                                       content,
                                        NS_LITERAL_STRING("invalid"),
-                                       false, true);
+                                       CanBubble::eNo,
+                                       Cancelable::eYes);
   return false;
 }
 
@@ -130,13 +132,15 @@ nsIConstraintValidation::ReportValidity()
     return true;
   }
 
-  nsCOMPtr<nsIContent> content = do_QueryInterface(this);
-  MOZ_ASSERT(content, "This class should be inherited by HTML elements only!");
+  nsCOMPtr<Element> element = do_QueryInterface(this);
+  MOZ_ASSERT(element, "This class should be inherited by HTML elements only!");
 
   bool defaultAction = true;
-  nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(), content,
+  nsContentUtils::DispatchTrustedEvent(element->OwnerDoc(), element,
                                        NS_LITERAL_STRING("invalid"),
-                                       false, true, &defaultAction);
+                                       CanBubble::eNo,
+                                       Cancelable::eYes,
+                                       &defaultAction);
   if (!defaultAction) {
     return false;
   }
@@ -160,7 +164,7 @@ nsIConstraintValidation::ReportValidity()
 
   nsCOMPtr<nsIMutableArray> invalidElements =
     do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-  invalidElements->AppendElement(content);
+  invalidElements->AppendElement(element);
 
   NS_ENSURE_SUCCESS(rv, true);
   nsCOMPtr<nsISupports> inst;
@@ -175,13 +179,17 @@ nsIConstraintValidation::ReportValidity()
     }
   }
 
-  if (content->IsHTMLElement(nsGkAtoms::input) &&
-      nsContentUtils::IsFocusedContent(content)) {
-    HTMLInputElement* inputElement = HTMLInputElement::FromNode(content);
+  if (element->IsHTMLElement(nsGkAtoms::input) &&
+      // We don't use nsContentUtils::IsFocusedContent here, because it doesn't
+      // really do what we want for number controls: it's true for the
+      // anonymous textnode inside, but not the number control itself.  We can
+      // use the focus state, though, because that gets synced to the number
+      // control by the anonymous text control.
+      element->State().HasState(NS_EVENT_STATE_FOCUS)) {
+    HTMLInputElement* inputElement = HTMLInputElement::FromNode(element);
     inputElement->UpdateValidityUIBits(true);
   }
 
-  dom::Element* element = content->AsElement();
   element->UpdateState(true);
   return false;
 }

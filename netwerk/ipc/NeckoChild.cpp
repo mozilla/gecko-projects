@@ -32,6 +32,7 @@
 #include "nsIOService.h"
 #include "nsINetworkPredictor.h"
 #include "nsINetworkPredictorVerifier.h"
+#include "nsINetworkLinkService.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "nsNetUtil.h"
 
@@ -75,7 +76,8 @@ NeckoChild::AllocPHttpChannelChild(const PBrowserOrId& browser,
 {
   // We don't allocate here: instead we always use IPDL constructor that takes
   // an existing HttpChildChannel
-  NS_NOTREACHED("AllocPHttpChannelChild should not be called on child");
+  MOZ_ASSERT_UNREACHABLE("AllocPHttpChannelChild should not be called on "
+                         "child");
   return nullptr;
 }
 
@@ -94,7 +96,8 @@ NeckoChild::AllocPStunAddrsRequestChild()
 {
   // We don't allocate here: instead we always use IPDL constructor that takes
   // an existing object
-  NS_NOTREACHED("AllocPStunAddrsRequestChild should not be called on child");
+  MOZ_ASSERT_UNREACHABLE("AllocPStunAddrsRequestChild should not be called "
+                         "on child");
   return nullptr;
 }
 
@@ -115,7 +118,7 @@ NeckoChild::AllocPAltDataOutputStreamChild(
         PHttpChannelChild* channel)
 {
   // We don't allocate here: see HttpChannelChild::OpenAlternativeOutputStream()
-  NS_NOTREACHED("AllocPAltDataOutputStreamChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPAltDataOutputStreamChild should not be called");
   return nullptr;
 }
 
@@ -151,7 +154,7 @@ PCookieServiceChild*
 NeckoChild::AllocPCookieServiceChild()
 {
   // We don't allocate here: see nsCookieService::GetSingleton()
-  NS_NOTREACHED("AllocPCookieServiceChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPCookieServiceChild should not be called");
   return nullptr;
 }
 
@@ -169,7 +172,7 @@ PWyciwygChannelChild*
 NeckoChild::AllocPWyciwygChannelChild()
 {
   // We don't allocate here: see nsWyciwygProtocolHandler::NewChannel2()
-  NS_NOTREACHED("AllocPWyciwygChannelChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPWyciwygChannelChild should not be called");
   return nullptr;
 }
 
@@ -188,7 +191,7 @@ NeckoChild::AllocPWebSocketChild(const PBrowserOrId& browser,
                                  const SerializedLoadContext& aSerialized,
                                  const uint32_t& aSerial)
 {
-  NS_NOTREACHED("AllocPWebSocketChild should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPWebSocketChild should not be called");
   return nullptr;
 }
 
@@ -291,7 +294,7 @@ NeckoChild::AllocPTCPServerSocketChild(const uint16_t& aLocalPort,
                                   const uint16_t& aBacklog,
                                   const bool& aUseArrayBuffers)
 {
-  NS_NOTREACHED("AllocPTCPServerSocket should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPTCPServerSocket should not be called");
   return nullptr;
 }
 
@@ -307,7 +310,7 @@ PUDPSocketChild*
 NeckoChild::AllocPUDPSocketChild(const Principal& aPrincipal,
                                  const nsCString& aFilter)
 {
-  NS_NOTREACHED("AllocPUDPSocket should not be called");
+  MOZ_ASSERT_UNREACHABLE("AllocPUDPSocket should not be called");
   return nullptr;
 }
 
@@ -323,12 +326,11 @@ NeckoChild::DeallocPUDPSocketChild(PUDPSocketChild* child)
 PDNSRequestChild*
 NeckoChild::AllocPDNSRequestChild(const nsCString& aHost,
                                   const OriginAttributes& aOriginAttributes,
-                                  const uint32_t& aFlags,
-                                  const nsCString& aNetworkInterface)
+                                  const uint32_t& aFlags)
 {
   // We don't allocate here: instead we always use IPDL constructor that takes
   // an existing object
-  NS_NOTREACHED("AllocPDNSRequestChild should not be called on child");
+  MOZ_ASSERT_UNREACHABLE("AllocPDNSRequestChild should not be called on child");
   return nullptr;
 }
 
@@ -451,6 +453,16 @@ NeckoChild::RecvSpeculativeConnectRequest()
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult
+NeckoChild::RecvNetworkChangeNotification(nsCString const& type)
+{
+  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+  if (obsService) {
+    obsService->NotifyObservers(nullptr, NS_NETWORK_LINK_TOPIC,
+                                NS_ConvertUTF8toUTF16(type).get());
+  }
+  return IPC_OK();
+}
+
 } // namespace net
 } // namespace mozilla
-

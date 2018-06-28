@@ -138,7 +138,7 @@ gfxFontCache::Observer::Observe(nsISupports *aSubject,
             fontCache->FlushShapedWordCaches();
         }
     } else {
-        NS_NOTREACHED("unexpected notification topic");
+        MOZ_ASSERT_UNREACHABLE("unexpected notification topic");
     }
     return NS_OK;
 }
@@ -2038,6 +2038,7 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
         }
 
         if (fontParams.haveColorGlyphs &&
+            !gfxPlatform::GetPlatform()->HasNativeColrFontSupport() &&
             RenderColorGlyph(runParams.dt, runParams.context,
                              fontParams.scaledFont,
                              fontParams.drawOptions,
@@ -2553,7 +2554,7 @@ gfxFont::Measure(const gfxTextRun *aTextRun,
     if (aBoundingBoxType == TIGHT_HINTED_OUTLINE_EXTENTS &&
         mAntialiasOption != kAntialiasNone) {
         if (!mNonAAFont) {
-            mNonAAFont = Move(CopyWithAntialiasOption(kAntialiasNone));
+            mNonAAFont = CopyWithAntialiasOption(kAntialiasNone);
         }
         // if font subclass doesn't implement CopyWithAntialiasOption(),
         // it will return null and we'll proceed to use the existing font
@@ -3364,7 +3365,7 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
                               const char16_t *aText,
                               uint32_t        aOffset,
                               uint32_t        aLength,
-                              uint8_t         aMatchType,
+                              gfxTextRange::MatchType aMatchType,
                               gfx::ShapedTextFlags aOrientation,
                               Script          aScript,
                               bool            aSyntheticLower,
@@ -3539,7 +3540,7 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
                               const uint8_t  *aText,
                               uint32_t        aOffset,
                               uint32_t        aLength,
-                              uint8_t         aMatchType,
+                              gfxTextRange::MatchType aMatchType,
                               gfx::ShapedTextFlags aOrientation,
                               Script          aScript,
                               bool            aSyntheticLower,
@@ -4074,7 +4075,7 @@ gfxFont::CreateVerticalMetrics()
     metrics->xHeight = metrics->emHeight / 2;
     metrics->capHeight = metrics->maxAscent;
 
-    return Move(metrics);
+    return std::move(metrics);
 }
 
 gfxFloat
@@ -4211,15 +4212,16 @@ gfxFontStyle::gfxFontStyle(FontSlantStyle aStyle,
 PLDHashNumber
 gfxFontStyle::Hash() const
 {
-    return mozilla::HashGeneric(systemFont, style.ForHash(),
-                                stretch.ForHash(), weight.ForHash(),
-                                size, sizeAdjust,
-                                nsRefPtrHashKey<nsAtom>::HashKey(language));
-    /* XXX
-    return (style + (systemFont << 7) + (weight.ForHash() << 8) +
-            uint32_t(size*1000) + int32_t(sizeAdjust*1000)) ^
-            nsRefPtrHashKey<nsAtom>::HashKey(language);
-    */
+    uint32_t hash =
+        variationSettings.IsEmpty()
+            ? 0
+            : mozilla::HashBytes(variationSettings.Elements(),
+                                 variationSettings.Length() *
+                                     sizeof(gfxFontVariation));
+    return mozilla::AddToHash(hash, systemFont, style.ForHash(),
+                              stretch.ForHash(), weight.ForHash(),
+                              size, int32_t(sizeAdjust * 1000.0f),
+                              nsRefPtrHashKey<nsAtom>::HashKey(language));
 }
 
 void

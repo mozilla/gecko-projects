@@ -15,11 +15,15 @@
 #endif
 
 #include "private/pprio.h"
+#include "prerror.h"
 
+#include "IOActivityMonitor.h"
 #include "nsFileStreams.h"
 #include "nsIFile.h"
 #include "nsReadLine.h"
 #include "nsIClassInfoImpl.h"
+#include "nsLiteralString.h"
+#include "nsSocketTransport2.h"    // for ErrorAccordingToNSPR()
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/Unused.h"
 #include "mozilla/FileUtils.h"
@@ -29,6 +33,8 @@
 typedef mozilla::ipc::FileDescriptor::PlatformHandleType FileHandleType;
 
 using namespace mozilla::ipc;
+using namespace mozilla::net;
+
 using mozilla::DebugOnly;
 using mozilla::Maybe;
 using mozilla::Nothing;
@@ -266,7 +272,7 @@ nsFileStreamBase::Write(const char *buf, uint32_t count, uint32_t *result)
 nsresult
 nsFileStreamBase::WriteFrom(nsIInputStream *inStr, uint32_t count, uint32_t *_retval)
 {
-    NS_NOTREACHED("WriteFrom (see source comment)");
+    MOZ_ASSERT_UNREACHABLE("WriteFrom (see source comment)");
     return NS_ERROR_NOT_IMPLEMENTED;
     // File streams intentionally do not support this method.
     // If you need something like this, then you should wrap
@@ -297,7 +303,7 @@ nsFileStreamBase::MaybeOpen(nsIFile* aFile, int32_t aIoFlags,
         nsresult rv = aFile->Clone(getter_AddRefs(file));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        mOpenParams.localFile = do_QueryInterface(file);
+        mOpenParams.localFile = file.forget();
         NS_ENSURE_TRUE(mOpenParams.localFile, NS_ERROR_UNEXPECTED);
 
         mState = eDeferredOpen;
@@ -355,7 +361,22 @@ nsFileStreamBase::DoOpen()
                                                    &fd);
     }
 
+    if (rv == NS_OK && IOActivityMonitor::IsActive()) {
+      auto nativePath = mOpenParams.localFile->NativePath();
+      if (!nativePath.IsEmpty()) {
+        // registering the file to the activity monitor
+        #ifdef XP_WIN
+        // 16 bits unicode
+        IOActivityMonitor::MonitorFile(fd, NS_ConvertUTF16toUTF8(nativePath.get()).get());
+        #else
+        // 8 bit unicode
+        IOActivityMonitor::MonitorFile(fd, nativePath.get());
+        #endif
+      }
+    }
+
     CleanUpOpen();
+
     if (NS_FAILED(rv)) {
         mState = eError;
         mErrorValue = rv;
@@ -428,13 +449,8 @@ nsFileInputStream::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
 {
     NS_ENSURE_NO_AGGREGATION(aOuter);
 
-    nsFileInputStream* stream = new nsFileInputStream();
-    if (stream == nullptr)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(stream);
-    nsresult rv = stream->QueryInterface(aIID, aResult);
-    NS_RELEASE(stream);
-    return rv;
+    RefPtr<nsFileInputStream> stream = new nsFileInputStream();
+    return stream->QueryInterface(aIID, aResult);
 }
 
 nsresult
@@ -706,13 +722,8 @@ nsFileOutputStream::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
 {
     NS_ENSURE_NO_AGGREGATION(aOuter);
 
-    nsFileOutputStream* stream = new nsFileOutputStream();
-    if (stream == nullptr)
-        return NS_ERROR_OUT_OF_MEMORY;
-    NS_ADDREF(stream);
-    nsresult rv = stream->QueryInterface(aIID, aResult);
-    NS_RELEASE(stream);
-    return rv;
+    RefPtr<nsFileOutputStream> stream = new nsFileOutputStream();
+    return stream->QueryInterface(aIID, aResult);
 }
 
 NS_IMETHODIMP

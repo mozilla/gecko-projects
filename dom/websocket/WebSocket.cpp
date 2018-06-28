@@ -951,7 +951,7 @@ WebSocket::~WebSocket()
 JSObject*
 WebSocket::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return WebSocketBinding::Wrap(cx, this, aGivenProto);
+  return WebSocket_Binding::Wrap(cx, this, aGivenProto);
 }
 
 void
@@ -1865,7 +1865,7 @@ WebSocketImpl::InitializeConnection(nsIPrincipal* aPrincipal)
   // and aPrincipal are same origin.
   MOZ_ASSERT(!doc || doc->NodePrincipal()->Equals(aPrincipal));
 
-  rv = wsChannel->InitLoadInfo(doc ? doc->AsDOMNode() : nullptr,
+  rv = wsChannel->InitLoadInfo(doc,
                                doc ? doc->NodePrincipal() : aPrincipal,
                                aPrincipal,
                                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
@@ -2024,8 +2024,9 @@ WebSocket::CreateAndDispatchMessageEvent(const nsACString& aData,
 
   RefPtr<MessageEvent> event = new MessageEvent(this, nullptr, nullptr);
 
-  event->InitMessageEvent(nullptr, MESSAGE_EVENT_STRING, false, false,
-                          jsData, mImpl->mUTF16Origin, EmptyString(), nullptr,
+  event->InitMessageEvent(nullptr, MESSAGE_EVENT_STRING, CanBubble::eNo,
+                          Cancelable::eNo, jsData, mImpl->mUTF16Origin,
+                          EmptyString(), nullptr,
                           Sequence<OwningNonNull<MessagePort>>());
   event->SetTrusted(true);
 
@@ -2783,7 +2784,7 @@ public:
                            already_AddRefed<nsIRunnable> aEvent)
     : WorkerRunnable(aWorkerRef->Private(), WorkerThreadUnchangedBusyCount)
     , mWebSocketImpl(aImpl)
-    , mEvent(Move(aEvent))
+    , mEvent(std::move(aEvent))
   {
   }
 

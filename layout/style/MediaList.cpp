@@ -30,7 +30,7 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(MediaList)
 JSObject*
 MediaList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaListBinding::Wrap(aCx, this, aGivenProto);
+  return MediaList_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -45,11 +45,6 @@ template<typename Func>
 nsresult
 MediaList::DoMediaChange(Func aCallback)
 {
-  nsCOMPtr<nsIDocument> doc;
-  if (mStyleSheet) {
-    doc = mStyleSheet->GetAssociatedDocument();
-  }
-  mozAutoDocUpdate updateBatch(doc, UPDATE_STYLE, true);
   if (mStyleSheet) {
     mStyleSheet->WillDirty();
   }

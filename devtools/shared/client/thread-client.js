@@ -26,8 +26,8 @@ const noop = () => {};
  * protocol details in a traditional JavaScript API.
  *
  * @param client DebuggerClient|TabClient
- *        The parent of the thread (tab for tab-scoped debuggers, DebuggerClient
- *        for chrome debuggers).
+ *        The parent of the thread (tab for target-scoped debuggers,
+ *        DebuggerClient for chrome debuggers).
  * @param actor string
  *        The actor ID for this thread.
  */
@@ -461,6 +461,17 @@ ThreadClient.prototype = {
   }),
 
   /**
+   * Toggle pausing via breakpoints in the server.
+   *
+   * @param skip boolean
+   *        Whether the server should skip pausing via breakpoints
+   */
+  skipBreakpoints: DebuggerClient.requester({
+    type: "skipBreakpoints",
+    skip: arg(0),
+  }),
+
+  /**
    * An array of cached frames. Clients can observe the framesadded and
    * framescleared event to keep up to date on changes to this cache,
    * and can fill it using the fillFrames method.
@@ -503,7 +514,7 @@ ThreadClient.prototype = {
       return false;
     }
 
-    let numFrames = this._frameCache.length;
+    const numFrames = this._frameCache.length;
 
     this.getFrames(numFrames, total - numFrames, (response) => {
       if (response.error) {
@@ -511,14 +522,14 @@ ThreadClient.prototype = {
         return;
       }
 
-      let threadGrips = DevToolsUtils.values(this._threadGrips);
+      const threadGrips = DevToolsUtils.values(this._threadGrips);
 
-      for (let i in response.frames) {
-        let frame = response.frames[i];
+      for (const i in response.frames) {
+        const frame = response.frames[i];
         if (!frame.where.source) {
           // Older servers use urls instead, so we need to resolve
           // them to source actors
-          for (let grip of threadGrips) {
+          for (const grip of threadGrips) {
             if (grip instanceof SourceClient && grip.url === frame.url) {
               frame.where.source = grip._form;
             }
@@ -560,7 +571,7 @@ ThreadClient.prototype = {
       return this._pauseGrips[grip.actor];
     }
 
-    let client = new ObjectClient(this.client, grip);
+    const client = new ObjectClient(this.client, grip);
     this._pauseGrips[grip.actor] = client;
     return client;
   },
@@ -580,7 +591,7 @@ ThreadClient.prototype = {
       return this[gripCacheName][grip.actor];
     }
 
-    let client = new LongStringClient(this.client, grip);
+    const client = new LongStringClient(this.client, grip);
     this[gripCacheName][grip.actor] = client;
     return client;
   },
@@ -622,7 +633,7 @@ ThreadClient.prototype = {
       return this[gripCacheName][grip.actor];
     }
 
-    let client = new ArrayBufferClient(this.client, grip);
+    const client = new ArrayBufferClient(this.client, grip);
     this[gripCacheName][grip.actor] = client;
     return client;
   },
@@ -645,7 +656,7 @@ ThreadClient.prototype = {
    *        The property name of the grip cache we want to clear.
    */
   _clearObjectClients: function(gripCacheName) {
-    for (let id in this[gripCacheName]) {
+    for (const id in this[gripCacheName]) {
       this[gripCacheName][id].valid = false;
     }
     this[gripCacheName] = {};

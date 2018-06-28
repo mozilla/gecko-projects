@@ -83,7 +83,7 @@ var ADDON_PROPERTIES = ["id", "type", "version", "creator", "developers",
                         "supportURL", "contributionURL",
                         "averageRating", "reviewCount", "reviewURL",
                         "weeklyDownloads", "dailyUsers",
-                        "sourceURI", "size", "updateDate"];
+                        "sourceURI", "updateDate"];
 
 // Results of getAddonsByIDs
 var GET_RESULTS = [{
@@ -122,7 +122,6 @@ var GET_RESULTS = [{
   reviewURL:              BASE_URL + "/review1.html",
   weeklyDownloads:        3333,
   sourceURI:              BASE_URL + INSTALL_URL2,
-  size:                   5555,
   updateDate:             new Date(1265033045000),
 }, {
   id:                     "test_AddonRepository_1@tests.mozilla.org",
@@ -259,7 +258,8 @@ add_task(async function test_getAddonsByID_fails() {
   Services.prefs.setCharPref(GET_TEST.preference, GET_TEST.preferenceValue);
 
   await Assert.rejects(
-    AddonRepository.getAddonsByIDs(GET_TEST.failedIDs));
+    AddonRepository.getAddonsByIDs(GET_TEST.failedIDs),
+    /Error: GET.*?failed/);
 });
 
 // Tests success of AddonRepository.getAddonsByIDs()

@@ -38,7 +38,7 @@ StructuredCloneBlob::Constructor(GlobalObject& aGlobal, JS::HandleValue aValue,
 
   RefPtr<StructuredCloneBlob> holder = StructuredCloneBlob::Create();
 
-  Maybe<JSAutoCompartment> ac;
+  Maybe<JSAutoRealm> ar;
   JS::RootedValue value(cx, aValue);
 
   if (aTargetGlobal) {
@@ -49,7 +49,7 @@ StructuredCloneBlob::Constructor(GlobalObject& aGlobal, JS::HandleValue aValue,
       return nullptr;
     }
 
-    ac.emplace(cx, targetGlobal);
+    ar.emplace(cx, targetGlobal);
 
     if (!JS_WrapValue(cx, &value)) {
       aRv.NoteJSContextException(cx);
@@ -63,7 +63,7 @@ StructuredCloneBlob::Constructor(GlobalObject& aGlobal, JS::HandleValue aValue,
       return nullptr;
     }
 
-    ac.emplace(cx, obj);
+    ar.emplace(cx, obj);
     value = JS::ObjectValue(*obj);
   }
 
@@ -87,7 +87,7 @@ StructuredCloneBlob::Deserialize(JSContext* aCx, JS::HandleObject aTargetScope,
   }
 
   {
-    JSAutoCompartment ac(aCx, scope);
+    JSAutoRealm ar(aCx, scope);
 
     Read(xpc::NativeGlobal(scope), aCx, aResult, aRv);
     if (aRv.Failed()) {
@@ -142,7 +142,7 @@ StructuredCloneBlob::ReadStructuredCloneInternal(JSContext* aCx, JSStructuredClo
     BlobImpls().AppendElements(&aHolder->BlobImpls()[blobOffset], blobCount);
   }
 
-  JSStructuredCloneData data;
+  JSStructuredCloneData data(mStructuredCloneScope);
   while (length) {
     size_t size;
     char* buffer = data.AllocateBytes(length, &size);
@@ -155,7 +155,7 @@ StructuredCloneBlob::ReadStructuredCloneInternal(JSContext* aCx, JSStructuredClo
   mBuffer = MakeUnique<JSAutoStructuredCloneBuffer>(mStructuredCloneScope,
                                                     &StructuredCloneHolder::sCallbacks,
                                                     this);
-  mBuffer->adopt(Move(data), version, &StructuredCloneHolder::sCallbacks);
+  mBuffer->adopt(std::move(data), version, &StructuredCloneHolder::sCallbacks);
 
   return true;
 }
@@ -181,7 +181,7 @@ StructuredCloneBlob::WriteStructuredClone(JSContext* aCx, JSStructuredCloneWrite
 bool
 StructuredCloneBlob::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto, JS::MutableHandleObject aResult)
 {
-    return StructuredCloneHolderBinding::Wrap(aCx, this, aGivenProto, aResult);
+    return StructuredCloneHolder_Binding::Wrap(aCx, this, aGivenProto, aResult);
 }
 
 

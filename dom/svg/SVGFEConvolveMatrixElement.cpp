@@ -22,7 +22,7 @@ namespace dom {
 JSObject*
 SVGFEConvolveMatrixElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEConvolveMatrixElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEConvolveMatrixElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFEConvolveMatrixElement::sNumberInfo[2] =
@@ -79,7 +79,7 @@ nsSVGElement::NumberListInfo SVGFEConvolveMatrixElement::sNumberListInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEConvolveMatrixElement)
 

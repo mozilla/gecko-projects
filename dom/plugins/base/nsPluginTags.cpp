@@ -303,19 +303,25 @@ nsPluginTag::nsPluginTag(uint32_t aId,
                          bool aFromExtension,
                          int32_t aSandboxLevel,
                          uint32_t aBlocklistState)
-  : nsIInternalPluginTag(aName, aDescription, aFileName, aVersion, aMimeTypes,
-                         aMimeDescriptions, aExtensions),
-    mId(aId),
-    mContentProcessRunningCount(0),
-    mLibrary(nullptr),
-    mIsFlashPlugin(aIsFlashPlugin),
-    mSupportsAsyncRender(aSupportsAsyncRender),
-    mLastModifiedTime(aLastModifiedTime),
-    mSandboxLevel(aSandboxLevel),
-    mIsSandboxLoggingEnabled(false),
-    mNiceFileName(),
-    mIsFromExtension(aFromExtension),
-    mBlocklistState(aBlocklistState)
+  : nsIInternalPluginTag(aName,
+                         aDescription,
+                         aFileName,
+                         aVersion,
+                         aMimeTypes,
+                         aMimeDescriptions,
+                         aExtensions)
+  , mId(aId)
+  , mContentProcessRunningCount(0)
+  , mHadLocalInstance(false)
+  , mLibrary(nullptr)
+  , mIsFlashPlugin(aIsFlashPlugin)
+  , mSupportsAsyncRender(aSupportsAsyncRender)
+  , mLastModifiedTime(aLastModifiedTime)
+  , mSandboxLevel(aSandboxLevel)
+  , mIsSandboxLoggingEnabled(false)
+  , mNiceFileName()
+  , mIsFromExtension(aFromExtension)
+  , mBlocklistState(aBlocklistState)
 {
 }
 
@@ -419,9 +425,9 @@ nsPluginTag::InitSandboxLevel()
   }
 
 #if defined(_AMD64_)
-  // As level 2 is now the default NPAPI sandbox level for 64-bit flash, we
-  // don't want to allow a lower setting. This should be changed if the
-  // firefox.js pref file is changed.
+  // Level 3 is now the default NPAPI sandbox level for 64-bit flash.
+  // We permit the user to drop the sandbox level by at most 1.  This should
+  // be kept up to date with the default value in the firefox.js pref file.
   if (mIsFlashPlugin && mSandboxLevel < 2) {
     mSandboxLevel = 2;
   }

@@ -394,7 +394,7 @@ public:
 
   /**
    * GetMouseInputSource() returns a pointing device information.  The value is
-   * one of MouseEventBinding::MOZ_SOURCE_*.  This method MUST be called during
+   * one of MouseEvent_Binding::MOZ_SOURCE_*.  This method MUST be called during
    * mouse message handling.
    */
   static uint16_t GetMouseInputSource();
@@ -453,7 +453,8 @@ public:
    * nsIWidget::SynthethizeNative*Event().
    */
   static void SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
-                                        uint32_t aModifiers);
+                                        uint32_t aModifiers,
+                                        UINT aMessage);
 
   /**
   * Does device have touch support

@@ -139,10 +139,21 @@ public:
   RefPtr<ClientOpPromise>
   Control(const ClientControlledArgs& aArgs);
 
+  // Inherit the controller from a local parent client.  This requires both
+  // setting our immediate controller field and also updating the parent-side
+  // data structure.
+  void
+  InheritController(const ServiceWorkerDescriptor& aServiceWorker);
+
   // Get the ClientSource's current controlling service worker, if one has
   // been set.
   const Maybe<ServiceWorkerDescriptor>&
   GetController() const;
+
+  // Note that the client has reached DOMContentLoaded.  Only applies to window
+  // clients.
+  void
+  NoteDOMContentLoaded();
 
   RefPtr<ClientOpPromise>
   Focus(const ClientFocusArgs& aArgs);

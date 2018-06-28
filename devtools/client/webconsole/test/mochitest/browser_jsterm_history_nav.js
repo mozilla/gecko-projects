@@ -12,11 +12,19 @@ const TEST_URI = "data:text/html;charset=utf-8,<p>bug 660806 - history " +
                  "navigation must not show the autocomplete popup";
 
 add_task(async function() {
-  let { jsterm } = await openNewTabAndConsole(TEST_URI);
-  let popup = jsterm.autocompletePopup;
+  // Run test with legacy JsTerm
+  await testHistory();
+  // And then run it with the CodeMirror-powered one.
+  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
+  await testHistory();
+});
+
+async function testHistory() {
+  const { jsterm } = await openNewTabAndConsole(TEST_URI);
+  const popup = jsterm.autocompletePopup;
 
   // The autocomplete popup should never be displayed during the test.
-  let onShown = function() {
+  const onShown = function() {
     ok(false, "popup shown");
   };
 
@@ -39,7 +47,7 @@ add_task(async function() {
   // Wait for the execution to complete and clear the value.
   await waitFor(() => !jsterm.lastInputValue);
 
-  let onSetInputValue = jsterm.once("set-input-value");
+  const onSetInputValue = jsterm.once("set-input-value");
   EventUtils.synthesizeKey("KEY_ArrowUp");
   await onSetInputValue;
 
@@ -52,4 +60,4 @@ add_task(async function() {
 
   ok(!popup.isOpen, "popup is not open");
   popup.off("popup-opened", onShown);
-});
+}

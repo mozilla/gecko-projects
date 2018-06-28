@@ -19,7 +19,7 @@ namespace dom {
 JSObject*
 SVGScriptElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGScriptElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGScriptElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGScriptElement::sStringInfo[2] =
@@ -32,7 +32,6 @@ nsSVGElement::StringInfo SVGScriptElement::sStringInfo[2] =
 // nsISupports methods
 
 NS_IMPL_ISUPPORTS_INHERITED(SVGScriptElement, SVGScriptElementBase,
-                            nsIDOMNode,
                             nsIScriptLoaderObserver,
                             nsIScriptElement, nsIMutationObserver)
 
@@ -52,7 +51,7 @@ SVGScriptElement::~SVGScriptElement()
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 nsresult
 SVGScriptElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,

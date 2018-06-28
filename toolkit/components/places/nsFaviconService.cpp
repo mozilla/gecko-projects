@@ -127,7 +127,6 @@ NS_IMPL_CLASSINFO(nsFaviconService, nullptr, 0, NS_FAVICONSERVICE_CID)
 NS_IMPL_ISUPPORTS_CI(
   nsFaviconService
 , nsIFaviconService
-, mozIAsyncFavicons
 , nsITimerCallback
 , nsINamed
 )
@@ -265,7 +264,10 @@ nsFaviconService::GetDefaultFavicon(nsIURI** _retval)
                             NS_LITERAL_CSTRING(FAVICON_DEFAULT_URL));
     NS_ENSURE_SUCCESS(rv, rv);
   }
-  return mDefaultIcon->Clone(_retval);
+
+  nsCOMPtr<nsIURI> uri = mDefaultIcon;
+  uri.forget(_retval);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -550,13 +552,13 @@ nsFaviconService::ReplaceFaviconDataFromDataURL(nsIURI* aFaviconURI,
   NS_ENSURE_TRUE(loadingPrincipal, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsILoadInfo> loadInfo =
-    new mozilla::LoadInfo(loadingPrincipal,
-                          nullptr, // aTriggeringPrincipal
-                          nullptr, // aLoadingNode
-                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
-                          nsILoadInfo::SEC_ALLOW_CHROME |
-                          nsILoadInfo::SEC_DISALLOW_SCRIPT,
-                          nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON);
+    new mozilla::net::LoadInfo(loadingPrincipal,
+                               nullptr, // aTriggeringPrincipal
+                               nullptr, // aLoadingNode
+                               nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
+                               nsILoadInfo::SEC_ALLOW_CHROME |
+                               nsILoadInfo::SEC_DISALLOW_SCRIPT,
+                               nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON);
 
   nsCOMPtr<nsIChannel> channel;
   rv = protocolHandler->NewChannel2(dataURI, loadInfo, getter_AddRefs(channel));

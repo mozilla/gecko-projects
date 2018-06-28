@@ -13,6 +13,7 @@
 #include "nsSize.h"
 #include "nsDocument.h"
 #include "nsIDocument.h"
+#include "nsImageFrame.h"
 #include "nsIScriptContext.h"
 #include "nsIURL.h"
 #include "nsIIOService.h"
@@ -43,7 +44,7 @@
 
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStates.h"
-#include "mozilla/GenericSpecifiedValuesInlines.h"
+#include "mozilla/MappedDeclarations.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
 #include "nsLayoutUtils.h"
@@ -247,13 +248,13 @@ HTMLImageElement::ParseAttribute(int32_t aNamespaceID,
 
 void
 HTMLImageElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                        GenericSpecifiedValues* aData)
+                                        MappedDeclarations& aDecls)
 {
-  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 nsChangeHint
@@ -266,8 +267,8 @@ HTMLImageElement::GetAttributeChangeHint(const nsAtom* aAttribute,
       aAttribute == nsGkAtoms::ismap) {
     retval |= nsChangeHint_ReconstructFrame;
   } else if (aAttribute == nsGkAtoms::alt) {
-    if (aModType == MutationEventBinding::ADDITION ||
-        aModType == MutationEventBinding::REMOVAL) {
+    if (aModType == MutationEvent_Binding::ADDITION ||
+        aModType == MutationEvent_Binding::REMOVAL) {
       retval |= nsChangeHint_ReconstructFrame;
     }
   }
@@ -851,7 +852,7 @@ HTMLImageElement::GetCORSMode()
 JSObject*
 HTMLImageElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLImageElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLImageElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 #ifdef DEBUG
@@ -949,7 +950,7 @@ HTMLImageElement::InResponsiveMode()
 }
 
 bool
-HTMLImageElement::SelectedSourceMatchesLast(nsIURI* aSelectedSource, double aSelectedDensity)
+HTMLImageElement::SelectedSourceMatchesLast(nsIURI* aSelectedSource)
 {
   // If there was no selected source previously, we don't want to short-circuit the load.
   // Similarly for if there is no newly selected source.
@@ -957,32 +958,58 @@ HTMLImageElement::SelectedSourceMatchesLast(nsIURI* aSelectedSource, double aSel
     return false;
   }
   bool equal = false;
-  return NS_SUCCEEDED(mLastSelectedSource->Equals(aSelectedSource, &equal)) && equal &&
-      aSelectedDensity == mCurrentDensity;
+  return NS_SUCCEEDED(mLastSelectedSource->Equals(aSelectedSource, &equal)) && equal;
 }
 
 nsresult
 HTMLImageElement::LoadSelectedImage(bool aForce, bool aNotify, bool aAlwaysLoad)
 {
-  nsresult rv = NS_ERROR_FAILURE;
+  double currentDensity = 1.0; // default to 1.0 for the src attribute case
+
+  // Helper to update state when only density may have changed (i.e., the source
+  // to load hasn't changed, and we don't do any request at all). We need (apart
+  // from updating our internal state) to tell the image frame because its
+  // intrinsic size may have changed.
+  //
+  // In the case we actually trigger a new load, that load will trigger a call
+  // to nsImageFrame::NotifyNewCurrentRequest, which takes care of that for us.
+  auto UpdateDensityOnly = [&]() -> void {
+    if (mCurrentDensity == currentDensity) {
+      return;
+    }
+    mCurrentDensity = currentDensity;
+    if (nsImageFrame* f = do_QueryFrame(GetPrimaryFrame())) {
+      f->ResponsiveContentDensityChanged();
+    }
+  };
 
   if (aForce) {
-    // In responsive mode we generally want to re-run the full
-    // selection algorithm whenever starting a new load, per
-    // spec. This also causes us to re-resolve the URI as appropriate.
-    if (!UpdateResponsiveSource() && !aAlwaysLoad) {
+    // In responsive mode we generally want to re-run the full selection
+    // algorithm whenever starting a new load, per spec.
+    //
+    // This also causes us to re-resolve the URI as appropriate.
+    const bool sourceChanged = UpdateResponsiveSource();
+
+    if (mResponsiveSelector) {
+      currentDensity = mResponsiveSelector->GetSelectedImageDensity();
+    }
+
+    if (!sourceChanged && !aAlwaysLoad) {
+      UpdateDensityOnly();
       return NS_OK;
     }
+  } else if (mResponsiveSelector) {
+    currentDensity = mResponsiveSelector->GetSelectedImageDensity();
   }
 
+  nsresult rv = NS_ERROR_FAILURE;
   nsCOMPtr<nsIURI> selectedSource;
-  double currentDensity = 1.0; // default to 1.0 for the src attribute case
   if (mResponsiveSelector) {
     nsCOMPtr<nsIURI> url = mResponsiveSelector->GetSelectedImageURL();
     nsCOMPtr<nsIPrincipal> triggeringPrincipal = mResponsiveSelector->GetSelectedImageTriggeringPrincipal();
     selectedSource = url;
-    currentDensity = mResponsiveSelector->GetSelectedImageDensity();
-    if (!aAlwaysLoad && SelectedSourceMatchesLast(selectedSource, currentDensity)) {
+    if (!aAlwaysLoad && SelectedSourceMatchesLast(selectedSource)) {
+      UpdateDensityOnly();
       return NS_OK;
     }
     if (url) {
@@ -995,12 +1022,11 @@ HTMLImageElement::LoadSelectedImage(bool aForce, bool aNotify, bool aAlwaysLoad)
       CancelImageRequests(aNotify);
       rv = NS_OK;
     } else {
-      nsIDocument* doc = GetOurOwnerDoc();
-      if (doc) {
-        StringToURI(src, doc, getter_AddRefs(selectedSource));
-        if (!aAlwaysLoad && SelectedSourceMatchesLast(selectedSource, currentDensity)) {
-          return NS_OK;
-        }
+      nsIDocument* doc = OwnerDoc();
+      StringToURI(src, doc, getter_AddRefs(selectedSource));
+      if (!aAlwaysLoad && SelectedSourceMatchesLast(selectedSource)) {
+        UpdateDensityOnly();
+        return NS_OK;
       }
 
       // If we have a srcset attribute or are in a <picture> element,

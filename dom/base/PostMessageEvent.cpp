@@ -77,7 +77,7 @@ PostMessageEvent::Run()
       targetWindow->IsDying())
     return NS_OK;
 
-  JSAutoCompartment ac(cx, targetWindow->GetWrapper());
+  JSAutoRealm ar(cx, targetWindow->GetWrapper());
 
   // Ensure that any origin which might have been provided is the origin of this
   // window's document.  Note that we do this *now* instead of when postMessage
@@ -160,7 +160,7 @@ PostMessageEvent::Run()
   }
 
   event->InitMessageEvent(nullptr, NS_LITERAL_STRING("message"),
-                          false /*non-bubbling */, false /*cancelable */,
+                          CanBubble::eNo, Cancelable::eNo,
                           messageData, mCallerOrigin,
                           EmptyString(), source, ports);
 

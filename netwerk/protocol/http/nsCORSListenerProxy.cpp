@@ -35,7 +35,6 @@
 #include "nsILoadGroup.h"
 #include "nsILoadContext.h"
 #include "nsIConsoleService.h"
-#include "nsIDOMNode.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDOMWindow.h"
 #include "nsINetworkInterceptController.h"
@@ -49,6 +48,7 @@
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::net;
 
 #define PREFLIGHT_CACHE_SIZE 100
 
@@ -419,6 +419,9 @@ nsCORSListenerProxy::nsCORSListenerProxy(nsIStreamListener* aOuter,
     mWithCredentials(aWithCredentials && !gDisableCORSPrivateData),
     mRequestApproved(false),
     mHasBeenCrossSite(false),
+#ifdef DEBUG
+    mInited(false),
+#endif
     mMutex("nsCORSListenerProxy")
 {
 }
@@ -566,11 +569,8 @@ nsCORSListenerProxy::CheckRequestApproved(nsIRequest* aRequest)
     return NS_ERROR_DOM_BAD_URI;
   }
 
-  nsCOMPtr<nsIHttpChannelInternal> internal = do_QueryInterface(aRequest);
-  NS_ENSURE_STATE(internal);
-  bool responseSynthesized = false;
-  if (NS_SUCCEEDED(internal->GetResponseSynthesized(&responseSynthesized)) &&
-      responseSynthesized) {
+  nsCOMPtr<nsILoadInfo> loadInfo = http->GetLoadInfo();
+  if (loadInfo && loadInfo->GetServiceWorkerTaintingSynthesized()) {
     // For synthesized responses, we don't need to perform any checks.
     // Note: This would be unsafe if we ever changed our behavior to allow
     // service workers to intercept CORS preflights.
@@ -1270,15 +1270,9 @@ nsCORSPreflightListener::OnStartRequest(nsIRequest *aRequest,
 {
 #ifdef DEBUG
   {
-    nsCOMPtr<nsIHttpChannelInternal> internal = do_QueryInterface(aRequest);
-    bool responseSynthesized = false;
-    if (internal &&
-        NS_SUCCEEDED(internal->GetResponseSynthesized(&responseSynthesized))) {
-      // For synthesized responses, we don't need to perform any checks.
-      // This would be unsafe if we ever changed our behavior to allow
-      // service workers to intercept CORS preflights.
-      MOZ_ASSERT(!responseSynthesized);
-    }
+    nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
+    nsCOMPtr<nsILoadInfo> loadInfo = channel ? channel->GetLoadInfo() : nullptr;
+    MOZ_ASSERT(!loadInfo || !loadInfo->GetServiceWorkerTaintingSynthesized());
   }
 #endif
 
@@ -1491,9 +1485,9 @@ nsCORSListenerProxy::StartCORSPreflight(nsIChannel* aRequestChannel,
   // Either it wasn't cached or the cached result has expired. Build a
   // channel for the OPTIONS request.
 
-  nsCOMPtr<nsILoadInfo> loadInfo = static_cast<mozilla::LoadInfo*>
+  nsCOMPtr<nsILoadInfo> loadInfo = static_cast<mozilla::net::LoadInfo*>
     (originalLoadInfo.get())->CloneForNewRequest();
-  static_cast<mozilla::LoadInfo*>(loadInfo.get())->SetIsPreflight();
+  static_cast<mozilla::net::LoadInfo*>(loadInfo.get())->SetIsPreflight();
 
   nsCOMPtr<nsILoadGroup> loadGroup;
   rv = aRequestChannel->GetLoadGroup(getter_AddRefs(loadGroup));

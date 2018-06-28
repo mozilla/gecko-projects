@@ -262,7 +262,7 @@ class MUse : public TempObject, public InlineListNode<MUse>
     // Move constructor for use in vectors. When an MUse is moved, it stays
     // in its containing use list.
     MUse(MUse&& other)
-      : InlineListNode<MUse>(mozilla::Move(other)),
+      : InlineListNode<MUse>(std::move(other)),
         producer_(other.producer_), consumer_(other.consumer_)
     { }
 
@@ -1251,23 +1251,23 @@ class MInstruction
 #define TRIVIAL_NEW_WRAPPERS                                                \
     template <typename... Args>                                             \
     static MThisOpcode* New(TempAllocator& alloc, Args&&... args) {         \
-        return new(alloc) MThisOpcode(mozilla::Forward<Args>(args)...);     \
+        return new(alloc) MThisOpcode(std::forward<Args>(args)...);     \
     }                                                                       \
     template <typename... Args>                                             \
     static MThisOpcode* New(TempAllocator::Fallible alloc, Args&&... args)  \
     {                                                                       \
-        return new(alloc) MThisOpcode(mozilla::Forward<Args>(args)...);     \
+        return new(alloc) MThisOpcode(std::forward<Args>(args)...);     \
     }
 
 #define TRIVIAL_NEW_WRAPPERS_WITH_ALLOC                                     \
     template <typename... Args>                                             \
     static MThisOpcode* New(TempAllocator& alloc, Args&&... args) {         \
-        return new(alloc) MThisOpcode(alloc, mozilla::Forward<Args>(args)...); \
+        return new(alloc) MThisOpcode(alloc, std::forward<Args>(args)...); \
     }                                                                       \
     template <typename... Args>                                             \
     static MThisOpcode* New(TempAllocator::Fallible alloc, Args&&... args)  \
     {                                                                       \
-        return new(alloc) MThisOpcode(alloc, mozilla::Forward<Args>(args)...); \
+        return new(alloc) MThisOpcode(alloc, std::forward<Args>(args)...); \
     }
 
 // These macros are used as a syntactic sugar for writting getOperand
@@ -4249,6 +4249,7 @@ class MCall
 
     bool needsArgCheck_:1;
     bool needsClassCheck_:1;
+    bool maybeCrossRealm_:1;
 
     MCall(WrappedFunction* target, uint32_t numActualArgs, bool construct, bool ignoresReturnValue)
       : MVariadicInstruction(classOpcode),
@@ -4257,7 +4258,8 @@ class MCall
         construct_(construct),
         ignoresReturnValue_(ignoresReturnValue),
         needsArgCheck_(true),
-        needsClassCheck_(true)
+        needsClassCheck_(true),
+        maybeCrossRealm_(true)
     {
         setResultType(MIRType::Value);
     }
@@ -4284,6 +4286,13 @@ class MCall
     }
     void disableClassCheck() {
         needsClassCheck_ = false;
+    }
+
+    bool maybeCrossRealm() const {
+        return maybeCrossRealm_;
+    }
+    void setNotCrossRealm() {
+        maybeCrossRealm_ = false;
     }
 
     MDefinition* getFunction() const {
@@ -4412,6 +4421,7 @@ class MApplyArgs
   protected:
     // Monomorphic cache of single target from TI, or nullptr.
     WrappedFunction* target_;
+    bool maybeCrossRealm_ = true;
 
     MApplyArgs(WrappedFunction* target, MDefinition* fun, MDefinition* argc, MDefinition* self)
       : MTernaryInstruction(classOpcode, fun, argc, self),
@@ -4429,6 +4439,13 @@ class MApplyArgs
     // For TI-informed monomorphic callsites.
     WrappedFunction* getSingleTarget() const {
         return target_;
+    }
+
+    bool maybeCrossRealm() const {
+        return maybeCrossRealm_;
+    }
+    void setNotCrossRealm() {
+        maybeCrossRealm_ = false;
     }
 
     bool possiblyCalls() const override {
@@ -4450,6 +4467,7 @@ class MApplyArray
   protected:
     // Monomorphic cache of single target from TI, or nullptr.
     WrappedFunction* target_;
+    bool maybeCrossRealm_ = true;
 
     MApplyArray(WrappedFunction* target, MDefinition* fun, MDefinition* elements, MDefinition* self)
       : MTernaryInstruction(classOpcode, fun, elements, self),
@@ -4466,6 +4484,13 @@ class MApplyArray
     // For TI-informed monomorphic callsites.
     WrappedFunction* getSingleTarget() const {
         return target_;
+    }
+
+    bool maybeCrossRealm() const {
+        return maybeCrossRealm_;
+    }
+    void setNotCrossRealm() {
+        maybeCrossRealm_ = false;
     }
 
     bool possiblyCalls() const override {
@@ -7041,7 +7066,7 @@ class MRandom : public MNullaryInstruction
 
 class MSign
   : public MUnaryInstruction,
-    public NoFloatPolicy<0>::Data
+    public SignPolicy::Data
 {
   private:
     MSign(MDefinition* input, MIRType resultType)
@@ -7049,6 +7074,7 @@ class MSign
     {
         MOZ_ASSERT(IsNumberType(input->type()));
         MOZ_ASSERT(resultType == MIRType::Int32 || resultType == MIRType::Double);
+        specialization_ = input->type();
         setResultType(resultType);
         setMovable();
     }
@@ -10140,20 +10166,21 @@ class MStoreElementHole
     ALLOW_CLONE(MStoreElementHole)
 };
 
-// Try to store a value to a dense array slots vector. May fail due to the object being frozen.
-// Cannot be used on an object that has extra indexed properties.
+// Try to store a value to a dense array slots vector. May fail due to the
+// object being non-extensible/sealed/frozen. Cannot be used on an object that
+// has extra indexed properties.
 class MFallibleStoreElement
   : public MQuaternaryInstruction,
     public MStoreElementCommon,
     public MixPolicy<SingleObjectPolicy, NoFloatPolicy<3> >::Data
 {
-    bool strict_;
+    bool needsHoleCheck_;
 
     MFallibleStoreElement(MDefinition* object, MDefinition* elements,
                           MDefinition* index, MDefinition* value,
-                          bool strict)
+                          bool needsHoleCheck)
       : MQuaternaryInstruction(classOpcode, object, elements, index, value),
-        strict_(strict)
+        needsHoleCheck_(needsHoleCheck)
     {
         MOZ_ASSERT(elements->type() == MIRType::Elements);
         MOZ_ASSERT(index->type() == MIRType::Int32);
@@ -10167,8 +10194,8 @@ class MFallibleStoreElement
     AliasSet getAliasSet() const override {
         return AliasSet::Store(AliasSet::ObjectFields | AliasSet::Element);
     }
-    bool strict() const {
-        return strict_;
+    bool needsHoleCheck() const {
+        return needsHoleCheck_;
     }
 
     ALLOW_CLONE(MFallibleStoreElement)
@@ -15245,7 +15272,7 @@ bool ElementAccessIsTypedArray(CompilerConstraintList* constraints,
                                Scalar::Type* arrayType);
 bool ElementAccessIsPacked(CompilerConstraintList* constraints, MDefinition* obj);
 bool ElementAccessMightBeCopyOnWrite(CompilerConstraintList* constraints, MDefinition* obj);
-bool ElementAccessMightBeFrozen(CompilerConstraintList* constraints, MDefinition* obj);
+bool ElementAccessMightBeNonExtensible(CompilerConstraintList* constraints, MDefinition* obj);
 AbortReasonOr<bool>
 ElementAccessHasExtraIndexedProperty(IonBuilder* builder, MDefinition* obj);
 MIRType DenseNativeElementType(CompilerConstraintList* constraints, MDefinition* obj);

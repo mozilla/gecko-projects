@@ -123,7 +123,6 @@ public abstract class GeckoApp extends GeckoActivity
     public static final String ACTION_ALERT_CALLBACK       = "org.mozilla.gecko.ALERT_CALLBACK";
     public static final String ACTION_HOMESCREEN_SHORTCUT  = "org.mozilla.gecko.BOOKMARK";
     public static final String ACTION_WEBAPP               = "org.mozilla.gecko.WEBAPP";
-    public static final String ACTION_DEBUG                = "org.mozilla.gecko.DEBUG";
     public static final String ACTION_LAUNCH_SETTINGS      = "org.mozilla.gecko.SETTINGS";
     public static final String ACTION_LOAD                 = "org.mozilla.gecko.LOAD";
     public static final String ACTION_INIT_PW              = "org.mozilla.gecko.INIT_PW";
@@ -901,6 +900,12 @@ public abstract class GeckoApp extends GeckoActivity
 
     @Override
     public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
+        // Won't happen, as we don't use the GeckoView download support in Fennec
+    }
+
+    @Override
+    public void onCrash(final GeckoSession session) {
+        // Won't happen, as we don't use e10s in Fennec
     }
 
     protected void setFullScreen(final boolean fullscreen) {
@@ -998,6 +1003,18 @@ public abstract class GeckoApp extends GeckoActivity
             return;
         }
 
+        // To prevent races, register startup events before launching the Gecko thread.
+        EventDispatcher.getInstance().registerGeckoThreadListener(this,
+                "Gecko:Ready",
+                null);
+
+        EventDispatcher.getInstance().registerUiThreadListener(this,
+                "Gecko:CorruptAPK",
+                "Update:Check",
+                "Update:Download",
+                "Update:Install",
+                null);
+
         if (sAlreadyLoaded) {
             // This happens when the GeckoApp activity is destroyed by Android
             // without killing the entire application (see Bug 769269).
@@ -1005,15 +1022,14 @@ public abstract class GeckoApp extends GeckoActivity
             // also happen if we're not the first activity to run within a session.
             mIsRestoringActivity = true;
             Telemetry.addToHistogram("FENNEC_RESTORING_ACTIVITY", 1);
-
         } else {
             final String action = intent.getAction();
             final String[] args = GeckoApplication.getDefaultGeckoArgs();
-            final int flags = ACTION_DEBUG.equals(action) ? GeckoThread.FLAG_DEBUGGING : 0;
 
             sAlreadyLoaded = true;
-            GeckoThread.initMainProcess(/* profile */ null, args,
-                                        intent.getExtras(), flags);
+            if (GeckoApplication.getRuntime() == null) {
+                GeckoApplication.createRuntime(this, intent);
+            }
 
             // Speculatively pre-fetch the profile in the background.
             ThreadUtils.postToBackgroundThread(new Runnable() {
@@ -1029,20 +1045,6 @@ public abstract class GeckoApp extends GeckoActivity
                 GeckoThread.speculativeConnect(uri);
             }
         }
-
-        // To prevent races, register startup events before launching the Gecko thread.
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
-            "Gecko:Ready",
-            null);
-
-        EventDispatcher.getInstance().registerUiThreadListener(this,
-            "Gecko:CorruptAPK",
-            "Update:Check",
-            "Update:Download",
-            "Update:Install",
-            null);
-
-        GeckoThread.launch();
 
         Bundle stateBundle = IntentUtils.getBundleExtraSafe(getIntent(), EXTRA_STATE_BUNDLE);
         if (stateBundle != null) {
@@ -1081,7 +1083,7 @@ public abstract class GeckoApp extends GeckoActivity
         if (mLayerView.getSession() != null) {
             mLayerView.getSession().close();
         }
-        mLayerView.setSession(session, GeckoRuntime.getDefault(this));
+        mLayerView.setSession(session, GeckoApplication.getRuntime());
         mLayerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
         getAppEventDispatcher().registerGeckoThreadListener(this,

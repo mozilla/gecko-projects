@@ -12,6 +12,8 @@ from mozterm import Terminal
 from . import base
 from .process import strstatus
 from ..handlers import SummaryHandler
+import six
+from functools import reduce
 
 
 def format_seconds(total):
@@ -60,7 +62,7 @@ class MachFormatter(base.BaseFormatter):
         return test_id
 
     def _get_file_name(self, test_id):
-        if isinstance(test_id, (str, unicode)):
+        if isinstance(test_id, (str, six.text_type)):
             return test_id
 
         if isinstance(test_id, tuple):
@@ -69,7 +71,7 @@ class MachFormatter(base.BaseFormatter):
         assert False, "unexpected test_id"
 
     def suite_start(self, data):
-        num_tests = reduce(lambda x, y: x + len(y), data['tests'].itervalues(), 0)
+        num_tests = reduce(lambda x, y: x + len(y), six.itervalues(data['tests']), 0)
         action = self.term.yellow(data['action'].upper())
         name = ""
         if 'name' in data:
@@ -99,12 +101,14 @@ class MachFormatter(base.BaseFormatter):
         name = data.get("subtest", test)
         rv = "%s %s" % (self._format_expected(
             data["status"], data.get("expected", data["status"])), name)
-        if 'message' in data:
-            rv += " - %s" % data['message']
-
-        if 'stack' in data:
-            rv += "\n%s\n" % self.term.dim(data['stack'].strip('\n'))
+        if "message" in data:
+            rv += " - %s" % data["message"]
+        if "stack" in data:
+            rv += self._format_stack(data["stack"])
         return rv
+
+    def _format_stack(self, stack):
+        return "\n%s\n" % self.term.dim(stack.strip("\n"))
 
     def _format_suite_summary(self, suite, summary):
         count = summary['counts']
@@ -198,6 +202,8 @@ class MachFormatter(base.BaseFormatter):
                 message = unexpected[0].get("message", "")
                 if message:
                     rv += " - %s" % message
+                if "stack" in data:
+                    rv += self._format_stack(data["stack"])
             elif not self.verbose:
                 rv += "\n"
                 for d in unexpected:
@@ -243,7 +249,7 @@ class MachFormatter(base.BaseFormatter):
             expected = "%i" % data["min_expected"]
 
         action = self.term.red("ASSERT")
-        return "%s: Assertion count %i, expected %i assertions\n" % (
+        return "%s: Assertion count %i, expected %s assertions\n" % (
                 action, data["count"], expected)
 
     def process_output(self, data):

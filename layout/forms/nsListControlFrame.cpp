@@ -158,8 +158,9 @@ nsListControlFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostD
   if (ShouldFireDropDownEvent()) {
     nsContentUtils::AddScriptRunner(
       new AsyncEventDispatcher(mContent,
-                               NS_LITERAL_STRING("mozhidedropdown"), true,
-                               true));
+                               NS_LITERAL_STRING("mozhidedropdown"),
+                               CanBubble::eYes,
+                               ChromeOnlyDispatch::eYes));
   }
 
   nsCheckboxRadioFrame::RegUnRegAccessKey(static_cast<nsIFrame*>(this), false);
@@ -368,8 +369,8 @@ nsListControlFrame::Reflow(nsPresContext*           aPresContext,
                            nsReflowStatus&          aStatus)
 {
   MOZ_ASSERT(aStatus.IsEmpty(), "Caller should pass a fresh reflow status!");
-  MOZ_ASSERT(aReflowInput.ComputedISize() != NS_UNCONSTRAINEDSIZE,
-             "Must have a computed inline size");
+  NS_WARNING_ASSERTION(aReflowInput.ComputedISize() != NS_UNCONSTRAINEDSIZE,
+                       "Must have a computed inline size");
 
   SchedulePaint();
 
@@ -1174,14 +1175,10 @@ nsListControlFrame::GetNumberOfOptions()
 //----------------------------------------------------------------------
 bool nsListControlFrame::CheckIfAllFramesHere()
 {
-  // Get the number of optgroups and options
-  //int32_t numContentItems = 0;
-  nsCOMPtr<nsIDOMNode> node(do_QueryInterface(mContent));
-  if (node) {
-    // XXX Need to find a fail proff way to determine that
-    // all the frames are there
-    mIsAllFramesHere = true;//NS_OK == CountAllChild(node, numContentItems);
-  }
+  // XXX Need to find a fail proof way to determine that
+  // all the frames are there
+  mIsAllFramesHere = true;
+
   // now make sure we have a frame each piece of content
 
   return mIsAllFramesHere;
@@ -1391,12 +1388,14 @@ nsListControlFrame::FireOnInputAndOnChange()
   nsCOMPtr<nsIContent> content = mContent;
   // Dispatch the input event.
   nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(), content,
-                                       NS_LITERAL_STRING("input"), true,
-                                       false);
+                                       NS_LITERAL_STRING("input"),
+                                       CanBubble::eYes,
+                                       Cancelable::eNo);
   // Dispatch the change event.
   nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(), content,
-                                       NS_LITERAL_STRING("change"), true,
-                                       false);
+                                       NS_LITERAL_STRING("change"),
+                                       CanBubble::eYes,
+                                       Cancelable::eNo);
 }
 
 NS_IMETHODIMP
@@ -1789,7 +1788,8 @@ FireShowDropDownEvent(nsIContent* aContent, bool aShow, bool aIsSourceTouchEvent
       eventName = NS_LITERAL_STRING("mozhidedropdown");
     }
     nsContentUtils::DispatchChromeEvent(aContent->OwnerDoc(), aContent,
-                                        eventName, true, false);
+                                        eventName, CanBubble::eYes,
+                                        Cancelable::eNo);
     return true;
   }
 
@@ -1855,7 +1855,7 @@ nsListControlFrame::MouseDown(dom::Event* aMouseEvent)
       }
 
       uint16_t inputSource = mouseEvent->MozInputSource();
-      bool isSourceTouchEvent = inputSource == MouseEventBinding::MOZ_SOURCE_TOUCH;
+      bool isSourceTouchEvent = inputSource == MouseEvent_Binding::MOZ_SOURCE_TOUCH;
       if (FireShowDropDownEvent(mContent, !mComboboxFrame->IsDroppedDownOrHasParentPopup(),
                                 isSourceTouchEvent)) {
         return NS_OK;

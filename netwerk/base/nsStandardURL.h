@@ -163,6 +163,7 @@ protected:
     // returns NS_ERROR_NO_INTERFACE if the url does not map to a file
     virtual nsresult EnsureFile();
 
+    virtual nsresult Clone(nsIURI** aURI);
     virtual nsresult SetSpecInternal(const nsACString &input);
     virtual nsresult SetScheme(const nsACString &input);
     virtual nsresult SetUserPass(const nsACString &input);
@@ -340,7 +341,7 @@ public:
         NS_IMETHOD
         Write(nsIObjectOutputStream *aOutputStream) override
         {
-            NS_NOTREACHED("Use nsIURIMutator.read() instead");
+            MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
             return NS_ERROR_NOT_IMPLEMENTED;
         }
 
@@ -474,7 +475,9 @@ public:
             return NS_OK;
         }
 
-        explicit TemplatedMutator() = default;
+        explicit TemplatedMutator() : mMarkedFileURL(false)
+        {
+        }
     private:
         virtual ~TemplatedMutator() = default;
 

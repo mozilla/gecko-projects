@@ -143,6 +143,7 @@ struct NoteWeakMapChildrenTracer : public JS::CallbackTracer
     : JS::CallbackTracer(aRt), mCb(aCb), mTracedAny(false), mMap(nullptr),
       mKey(nullptr), mKeyDelegate(nullptr)
   {
+    setCanSkipJsids(true);
   }
   void onChild(const JS::GCCellPtr& aThing) override;
   nsCycleCollectionNoteRootCallback& mCb;
@@ -399,6 +400,7 @@ struct TraversalTracer : public JS::CallbackTracer
   TraversalTracer(JSRuntime* aRt, nsCycleCollectionTraversalCallback& aCb)
     : JS::CallbackTracer(aRt, DoNotTraceWeakMaps), mCb(aCb)
   {
+    setCanSkipJsids(true);
   }
   void onChild(const JS::GCCellPtr& aThing) override;
   nsCycleCollectionTraversalCallback& mCb;
@@ -950,7 +952,7 @@ public:
   {
     auto clone = MakeUnique<MinorGCMarker>(GetTracingType(), mReason);
     clone->SetCustomTime(GetTime());
-    return UniquePtr<AbstractTimelineMarker>(Move(clone));
+    return UniquePtr<AbstractTimelineMarker>(std::move(clone));
   }
 };
 
@@ -1271,7 +1273,7 @@ CycleCollectedJSRuntime::GarbageCollect(uint32_t aReason) const
 
   JSContext* cx = CycleCollectedJSContext::Get()->Context();
   JS::PrepareForFullGC(cx);
-  JS::GCForReason(cx, GC_NORMAL, gcreason);
+  JS::NonIncrementalGC(cx, GC_NORMAL, gcreason);
 }
 
 void
@@ -1425,6 +1427,8 @@ IncrementalFinalizeRunnable::ReleaseNow(bool aLimited)
 NS_IMETHODIMP
 IncrementalFinalizeRunnable::Run()
 {
+  AUTO_PROFILER_LABEL("IncrementalFinalizeRunnable::Run", GCCC);
+
   if (mRuntime->mFinalizeRunnable != this) {
     /* These items were already processed synchronously in JSGC_END. */
     MOZ_ASSERT(!mDeferredFinalizeFunctions.Length());
@@ -1660,12 +1664,10 @@ CycleCollectedJSRuntime::ErrorInterceptor::interceptError(JSContext* cx, const J
   // so nothing such should happen.
   nsContentUtils::ExtractErrorValues(cx, value, details.mFilename, &details.mLine, &details.mColumn, details.mMessage);
 
-  nsAutoCString stack;
   JS::UniqueChars buf = JS::FormatStackDump(cx, nullptr, /* showArgs = */ false, /* showLocals = */ false, /* showThisProps = */ false);
-  stack.Append(buf.get());
   CopyUTF8toUTF16(buf.get(), details.mStack);
 
-  mThrownError.emplace(Move(details));
+  mThrownError.emplace(std::move(details));
 }
 
 void

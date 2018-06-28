@@ -73,6 +73,10 @@ profileDir.append("extensions");
 function run_test() {
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "2", "2");
 
+  // Unpacked extensions are never signed, so this can only run with
+  // signature checks disabled.
+  Services.prefs.setBoolPref(PREF_XPI_SIGNATURES_REQUIRED, false);
+
   add_task(run_proxy_tests);
 
   if (gHaveSymlinks)
@@ -144,7 +148,7 @@ async function run_proxy_tests() {
                      fixURL(addon.getResourceURI("install.rdf").spec),
                      `Resource URLs resolve as expected`);
 
-        addon.uninstall();
+        await addon.uninstall();
       }
     }
 
@@ -204,7 +208,7 @@ async function run_symlink_tests() {
   let addon = await AddonManager.getAddonByID(METADATA.id);
   Assert.notEqual(addon, null);
 
-  addon.uninstall();
+  await addon.uninstall();
 
   await promiseRestartManager();
   await promiseShutdownManager();

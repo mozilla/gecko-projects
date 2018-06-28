@@ -796,7 +796,7 @@ nsJSContext::ConvertSupportsTojsvals(nsISupports* aArgs,
           NS_ASSERTION(prim == nullptr,
                        "Don't pass nsISupportsPrimitives - use nsIVariant!");
 #endif
-          JSAutoCompartment ac(cx, aScope);
+          JSAutoRealm ar(cx, aScope);
           rv = nsContentUtils::WrapNative(cx, arg, thisVal);
         }
       }
@@ -987,7 +987,7 @@ nsJSContext::AddSupportsPrimitiveTojsvals(nsISupports *aArg, JS::Value *aArgv)
 
       JS::Rooted<JSObject*> scope(cx, GetWindowProxy());
       JS::Rooted<JS::Value> v(cx);
-      JSAutoCompartment ac(cx, scope);
+      JSAutoRealm ar(cx, scope);
       nsresult rv = nsContentUtils::WrapNative(cx, data, iid, &v);
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1122,7 +1122,7 @@ nsJSContext::InitClasses(JS::Handle<JSObject*> aGlobalObj)
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
-  JSAutoCompartment ac(cx, aGlobalObj);
+  JSAutoRealm ar(cx, aGlobalObj);
 
   // Attempt to initialize profiling functions
   ::JS_DefineProfilingFunctions(cx, aGlobalObj);
@@ -1181,7 +1181,7 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
                                IsShrinking aShrinking,
                                int64_t aSliceMillis)
 {
-  AUTO_PROFILER_LABEL_DYNAMIC_CSTR("nsJSContext::GarbageCollectNow", GC,
+  AUTO_PROFILER_LABEL_DYNAMIC_CSTR("nsJSContext::GarbageCollectNow", GCCC,
                                    JS::gcreason::ExplainReason(aReason));
 
   MOZ_ASSERT_IF(aSliceMillis, aIncremental == IncrementalGC);
@@ -1227,14 +1227,14 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
   if (aIncremental == IncrementalGC) {
     JS::StartIncrementalGC(cx, gckind, aReason, aSliceMillis);
   } else {
-    JS::GCForReason(cx, gckind, aReason);
+    JS::NonIncrementalGC(cx, gckind, aReason);
   }
 }
 
 static void
 FinishAnyIncrementalGC()
 {
-  AUTO_PROFILER_LABEL("FinishAnyIncrementalGC", GC);
+  AUTO_PROFILER_LABEL("FinishAnyIncrementalGC", GCCC);
 
   if (sCCLockedOut) {
     AutoJSAPI jsapi;
@@ -1284,7 +1284,9 @@ FireForgetSkippable(uint32_t aSuspected, bool aRemoveChildless,
     if (!aDeadline.IsNull()) {
       if (aDeadline < now) {
         // This slice overflowed the idle period.
-        idleDuration = aDeadline - startTimeStamp;
+        if (aDeadline > startTimeStamp) {
+          idleDuration = aDeadline - startTimeStamp;
+        }
       } else {
         idleDuration = duration;
       }
@@ -1485,7 +1487,7 @@ nsJSContext::CycleCollectNow(nsICycleCollectorListener *aListener)
     return;
   }
 
-  AUTO_PROFILER_LABEL("nsJSContext::CycleCollectNow", CC);
+  AUTO_PROFILER_LABEL("nsJSContext::CycleCollectNow", GCCC);
 
   gCCStats.PrepareForCycleCollectionSlice(TimeStamp());
   nsCycleCollector_collect(aListener);
@@ -1502,7 +1504,7 @@ nsJSContext::RunCycleCollectorSlice(TimeStamp aDeadline)
 
   AUTO_PROFILER_TRACING("CC", aDeadline.IsNull() ? "CCSlice" : "IdleCCSlice");
 
-  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorSlice", CC);
+  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorSlice", GCCC);
 
   gCCStats.PrepareForCycleCollectionSlice(aDeadline);
 
@@ -1560,7 +1562,7 @@ nsJSContext::RunCycleCollectorWorkSlice(int64_t aWorkBudget)
     return;
   }
 
-  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorWorkSlice", CC);
+  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorWorkSlice", GCCC);
 
   gCCStats.PrepareForCycleCollectionSlice();
 
@@ -2271,9 +2273,9 @@ class NotifyGCEndRunnable : public Runnable
   nsString mMessage;
 
 public:
-  explicit NotifyGCEndRunnable(const nsString& aMessage)
+  explicit NotifyGCEndRunnable(nsString&& aMessage)
     : mozilla::Runnable("NotifyGCEndRunnable")
-    , mMessage(aMessage)
+    , mMessage(std::move(aMessage))
   {
   }
 
@@ -2331,7 +2333,7 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
             Telemetry::CanRecordExtended()) {
           nsString json;
           json.Adopt(aDesc.formatJSON(aCx, PR_Now()));
-          RefPtr<NotifyGCEndRunnable> notify = new NotifyGCEndRunnable(json);
+          RefPtr<NotifyGCEndRunnable> notify = new NotifyGCEndRunnable(std::move(json));
           SystemGroup::Dispatch(TaskCategory::GarbageCollection, notify.forget());
         }
       }
@@ -2575,7 +2577,7 @@ AsmJSCacheOpenEntryForRead(JS::Handle<JSObject*> aGlobal,
                            intptr_t *aHandle)
 {
   nsIPrincipal* principal =
-    nsJSPrincipals::get(JS_GetCompartmentPrincipals(js::GetObjectCompartment(aGlobal)));
+    nsJSPrincipals::get(JS::GetRealmPrincipals(js::GetNonCCWObjectRealm(aGlobal)));
   return asmjscache::OpenEntryForRead(principal, aBegin, aLimit, aSize, aMemory,
                                       aHandle);
 }
@@ -2589,7 +2591,7 @@ AsmJSCacheOpenEntryForWrite(JS::Handle<JSObject*> aGlobal,
                             intptr_t* aHandle)
 {
   nsIPrincipal* principal =
-    nsJSPrincipals::get(JS_GetCompartmentPrincipals(js::GetObjectCompartment(aGlobal)));
+    nsJSPrincipals::get(JS::GetRealmPrincipals(js::GetNonCCWObjectRealm(aGlobal)));
   return asmjscache::OpenEntryForWrite(principal, aBegin, aEnd, aSize, aMemory,
                                        aHandle);
 }

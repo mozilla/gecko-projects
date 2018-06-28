@@ -30,6 +30,7 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/NotNull.h"
+#include "mozilla/Scoped.h"
 #include "mozilla/UniquePtr.h"
 #include "MainThreadUtils.h"
 #include "nsILabelableRunnable.h"
@@ -341,7 +342,7 @@ protected:
         : mId(0)
         , mSide(aSide)
         , mManager(nullptr)
-        , mState(Move(aState))
+        , mState(std::move(aState))
     {}
 
     friend class IToplevelProtocol;
@@ -465,7 +466,7 @@ public:
 
     void SetTransport(UniquePtr<Transport> aTrans)
     {
-        mTrans = Move(aTrans);
+        mTrans = std::move(aTrans);
     }
 
     Transport* GetTransport() const { return mTrans.get(); }
@@ -813,7 +814,11 @@ public:
 
     Endpoint()
       : mValid(false)
-    {}
+      , mMode(static_cast<mozilla::ipc::Transport::Mode>(0))
+      , mMyPid(0)
+      , mOtherPid(0)
+    {
+    }
 
     Endpoint(const PrivateIPDLInterface&,
              mozilla::ipc::Transport::Mode aMode,
@@ -888,7 +893,7 @@ public:
             return false;
         }
         mValid = false;
-        aActor->SetTransport(Move(t));
+        aActor->SetTransport(std::move(t));
         return true;
     }
 

@@ -306,7 +306,7 @@ MediaSource::SourceBufferIsActive(SourceBuffer* aSourceBuffer)
   // It will be resolved once the HTMLMediaElement modifies its readyState.
   MozPromiseHolder<ActiveCompletionPromise> holder;
   RefPtr<ActiveCompletionPromise> promise = holder.Ensure(__func__);
-  mCompletionPromises.AppendElement(Move(holder));
+  mCompletionPromises.AppendElement(std::move(holder));
   return promise;
 }
 
@@ -634,7 +634,7 @@ MediaSource::GetParentObject() const
 JSObject*
 MediaSource::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaSourceBinding::Wrap(aCx, this, aGivenProto);
+  return MediaSource_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaSource, DOMEventTargetHelper,

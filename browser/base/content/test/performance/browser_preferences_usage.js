@@ -90,7 +90,7 @@ add_task(async function startup() {
       max: 75,
     },
     "extensions.getAddons.cache.enabled": {
-      min: 10,
+      min: 9,
       max: 55,
     },
   };
@@ -116,35 +116,27 @@ add_task(async function open_10_tabs() {
       max: 25,
     },
     "security.insecure_connection_icon.pbmode.enabled": {
-      min: 17,
-      max: 25,
+      min: 10,
+      max: 18,
     },
     "security.insecure_connection_icon.enabled": {
-      min: 17,
-      max: 25,
+      min: 10,
+      max: 18,
     },
     "security.insecure_connection_text.enabled": {
-      min: 17,
-      max: 25,
+      min: 10,
+      max: 18,
     },
     "security.insecure_connection_text.pbmode.enabled": {
-      min: 17,
-      max: 25,
+      min: 10,
+      max: 18,
     },
     "dom.ipc.processCount": {
       min: 10,
       max: 15,
     },
-    "media.autoplay.enabled": {
-      min: 10,
-      max: 30,
-    },
     "browser.startup.record": {
       max: 20,
-    },
-    "media.block-autoplay-until-in-foreground": {
-      min: 10,
-      max: 30,
     },
     "dom.max_chrome_script_run_time": {
       max: 20,
@@ -179,20 +171,20 @@ add_task(async function navigate_around() {
       max: 110,
     },
     "security.insecure_connection_icon.pbmode.enabled": {
-      min: 50,
-      max: 55,
+      min: 20,
+      max: 30,
     },
     "security.insecure_connection_icon.enabled": {
-      min: 50,
-      max: 55,
+      min: 20,
+      max: 30,
     },
     "security.insecure_connection_text.enabled": {
-      min: 50,
-      max: 55,
+      min: 20,
+      max: 30,
     },
     "security.insecure_connection_text.pbmode.enabled": {
-      min: 50,
-      max: 55,
+      min: 20,
+      max: 30,
     },
     "browser.chrome.favicons": {
       min: 50,

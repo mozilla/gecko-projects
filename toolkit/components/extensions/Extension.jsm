@@ -41,6 +41,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
+  ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
   ExtensionCommon: "resource://gre/modules/ExtensionCommon.jsm",
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.jsm",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.jsm",
@@ -53,8 +54,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   OS: "resource://gre/modules/osfile.jsm",
   PluralForm: "resource://gre/modules/PluralForm.jsm",
   Schemas: "resource://gre/modules/Schemas.jsm",
-  setTimeout: "resource://gre/modules/Timer.jsm",
   TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
+  XPIProvider: "resource://gre/modules/addons/XPIProvider.jsm",
 });
 
 XPCOMUtils.defineLazyGetter(
@@ -97,14 +98,22 @@ var {
 const {
   EventEmitter,
   getUniqueId,
+  promiseTimeout,
 } = ExtensionUtils;
 
 XPCOMUtils.defineLazyGetter(this, "console", ExtensionUtils.getConsole);
 
 XPCOMUtils.defineLazyGetter(this, "LocaleData", () => ExtensionCommon.LocaleData);
 
-// The maximum time to wait for extension shutdown blockers to complete.
-const SHUTDOWN_BLOCKER_MAX_MS = 8000;
+// The userContextID reserved for the extension storage (its purpose is ensuring that the IndexedDB
+// storage used by the browser.storage.local API is not directly accessible from the extension code).
+XPCOMUtils.defineLazyGetter(this, "WEBEXT_STORAGE_USER_CONTEXT_ID", () => {
+  return ContextualIdentityService.getDefaultPrivateIdentity(
+    "userContextIdInternal.webextStorageLocal").userContextId;
+});
+
+// The maximum time to wait for extension child shutdown blockers to complete.
+const CHILD_SHUTDOWN_TIMEOUT_MS = 8000;
 
 /**
  * Classify an individual permission from a webextension manifest
@@ -220,16 +229,22 @@ var UninstallObserver = {
     }
 
     if (!Services.prefs.getBoolPref(LEAVE_STORAGE_PREF, false)) {
-      // Clear browser.local.storage
+      // Clear browser.storage.local backends.
       AsyncShutdown.profileChangeTeardown.addBlocker(
-        `Clear Extension Storage ${addon.id}`,
-        ExtensionStorage.clear(addon.id));
+        `Clear Extension Storage ${addon.id} (File Backend)`,
+        ExtensionStorage.clear(addon.id, {shouldNotifyListeners: false}));
 
       // Clear any IndexedDB storage created by the extension
       let baseURI = Services.io.newURI(`moz-extension://${uuid}/`);
       let principal = Services.scriptSecurityManager.createCodebasePrincipal(
         baseURI, {});
       Services.qms.clearStoragesForPrincipal(principal);
+
+      // Clear any storage.local data stored in the IDBBackend.
+      let storagePrincipal = Services.scriptSecurityManager.createCodebasePrincipal(baseURI, {
+        userContextId: WEBEXT_STORAGE_USER_CONTEXT_ID,
+      });
+      Services.qms.clearStoragesForPrincipal(storagePrincipal);
 
       // Clear localStorage created by the extension
       let storage = Services.domStorageManager.getStorage(null, principal);
@@ -510,6 +525,7 @@ class ExtensionData {
     return this.experimentsAllowed && manifest.experiment_apis;
   }
 
+  // eslint-disable-next-line complexity
   async parseManifest() {
     let [manifest] = await Promise.all([
       this.readJSON("manifest.json"),
@@ -596,6 +612,8 @@ class ExtensionData {
     };
 
     if (this.type === "extension") {
+      let restrictSchemes = !(this.isPrivileged && manifest.permissions.includes("mozillaAddons"));
+
       for (let perm of manifest.permissions) {
         if (perm === "geckoProfiler" && !this.isPrivileged) {
           const acceptedExtensions = Services.prefs.getStringPref("extensions.geckoProfiler.acceptedExtensionIds", "");
@@ -607,10 +625,15 @@ class ExtensionData {
 
         let type = classifyPermission(perm);
         if (type.origin) {
-          let matcher = new MatchPattern(perm, {ignorePath: true});
+          try {
+            let matcher = new MatchPattern(perm, {restrictSchemes, ignorePath: true});
 
-          perm = matcher.pattern;
-          originPermissions.add(perm);
+            perm = matcher.pattern;
+            originPermissions.add(perm);
+          } catch (e) {
+            this.manifestWarning(`Invalid host permission: ${perm}`);
+            continue;
+          }
         } else if (type.api) {
           apiNames.add(type.api);
         }
@@ -800,9 +823,26 @@ class ExtensionData {
     await this.apiManager.lazyInit();
 
     this.webAccessibleResources = manifestData.webAccessibleResources.map(res => new MatchGlob(res));
-    this.whiteListedHosts = new MatchPatternSet(manifestData.originPermissions);
+    this.whiteListedHosts = new MatchPatternSet(manifestData.originPermissions, {restrictSchemes: !this.hasPermission("mozillaAddons")});
 
     return this.manifest;
+  }
+
+  hasPermission(perm, includeOptional = false) {
+    let manifest_ = "manifest:";
+    if (perm.startsWith(manifest_)) {
+      return this.manifest[perm.substr(manifest_.length)] != null;
+    }
+
+    if (this.permissions.has(perm)) {
+      return true;
+    }
+
+    if (includeOptional && this.manifest.optional_permissions.includes(perm)) {
+      return true;
+    }
+
+    return false;
   }
 
   getAPIManager() {
@@ -1128,14 +1168,14 @@ class ExtensionData {
 
 const PROXIED_EVENTS = new Set(["test-harness-message", "add-permissions", "remove-permissions"]);
 
-const shutdownPromises = new Map();
-
 class BootstrapScope {
   install(data, reason) {}
   uninstall(data, reason) {
     AsyncShutdown.profileChangeTeardown.addBlocker(
       `Uninstalling add-on: ${data.id}`,
-      Management.emit("uninstall", {id: data.id}));
+      Management.emit("uninstall", {id: data.id}).then(() => {
+        Management.emit("uninstall-complete", {id: data.id});
+      }));
   }
 
   update(data, reason) {
@@ -1149,8 +1189,9 @@ class BootstrapScope {
   }
 
   shutdown(data, reason) {
-    this.extension.shutdown(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
+    let result = this.extension.shutdown(this.BOOTSTRAP_REASON_TO_STRING_MAP[reason]);
     this.extension = null;
+    return result;
   }
 }
 
@@ -1248,6 +1289,7 @@ class Extension extends ExtensionData {
     this.baseURL = this.getURL("");
     this.baseURI = Services.io.newURI(this.baseURL).QueryInterface(Ci.nsIURL);
     this.principal = this.createPrincipal();
+
     this.views = new Set();
     this._backgroundPageFrameLoader = null;
 
@@ -1274,7 +1316,7 @@ class Extension extends ExtensionData {
         let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
 
         this.whiteListedHosts = new MatchPatternSet(new Set([...patterns, ...permissions.origins]),
-                                                    {ignorePath: true});
+                                                    {restrictSchemes: !this.hasPermission("mozillaAddons"), ignorePath: true});
       }
 
       this.policy.permissions = Array.from(this.permissions);
@@ -1369,8 +1411,8 @@ class Extension extends ExtensionData {
     this.emit("test-harness-message", ...args);
   }
 
-  createPrincipal(uri = this.baseURI) {
-    return Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
+  createPrincipal(uri = this.baseURI, originAttributes = {}) {
+    return Services.scriptSecurityManager.createCodebasePrincipal(uri, originAttributes);
   }
 
   // Checks that the given URL is a child of our baseURI.
@@ -1427,7 +1469,7 @@ class Extension extends ExtensionData {
     if (this.dontSaveStartupData) {
       return;
     }
-    AddonManagerPrivate.setStartupData(this.id, this.startupData);
+    XPIProvider.setStartupData(this.id, this.startupData);
   }
 
   async _parseManifest() {
@@ -1644,17 +1686,7 @@ class Extension extends ExtensionData {
     }
   }
 
-  startup() {
-    this.startupPromise = this._startup();
-
-    return this.startupPromise;
-  }
-
-  async _startup() {
-    if (shutdownPromises.has(this.id)) {
-      await shutdownPromises.get(this.id);
-    }
-
+  async startup() {
     // Create a temporary policy object for the devtools and add-on
     // manager callers that depend on it being available early.
     this.policy = new WebExtensionPolicy({
@@ -1724,8 +1756,6 @@ class Extension extends ExtensionData {
 
       throw errors;
     }
-
-    this.startupPromise = null;
   }
 
   cleanupGeneratedFile() {
@@ -1748,45 +1778,6 @@ class Extension extends ExtensionData {
   }
 
   async shutdown(reason) {
-    let promise = this._shutdown(reason);
-
-    let blocker = () => {
-      return Promise.race([
-        promise,
-        new Promise(resolve => setTimeout(resolve, SHUTDOWN_BLOCKER_MAX_MS)),
-      ]);
-    };
-
-    AsyncShutdown.profileChangeTeardown.addBlocker(
-      `Extension Shutdown: ${this.id} (${this.manifest && this.name})`,
-      blocker);
-
-    // If we already have a shutdown promise for this extension, wait
-    // for it to complete before replacing it with a new one. This can
-    // sometimes happen during tests with rapid startup/shutdown cycles
-    // of multiple versions.
-    if (shutdownPromises.has(this.id)) {
-      await shutdownPromises.get(this.id);
-    }
-
-    let cleanup = () => {
-      shutdownPromises.delete(this.id);
-      AsyncShutdown.profileChangeTeardown.removeBlocker(blocker);
-    };
-    shutdownPromises.set(this.id, promise.then(cleanup, cleanup));
-
-    return Promise.resolve(promise);
-  }
-
-  async _shutdown(reason) {
-    try {
-      if (this.startupPromise) {
-        await this.startupPromise;
-      }
-    } catch (e) {
-      Cu.reportError(e);
-    }
-
     this.shutdownReason = reason;
     this.hasShutdown = true;
 
@@ -1828,7 +1819,15 @@ class Extension extends ExtensionData {
     Management.emit("shutdown", this);
     this.emit("shutdown");
 
-    await this.broadcast("Extension:Shutdown", {id: this.id});
+    const TIMED_OUT = Symbol();
+
+    let result = await Promise.race([
+      this.broadcast("Extension:Shutdown", {id: this.id}),
+      promiseTimeout(CHILD_SHUTDOWN_TIMEOUT_MS).then(() => TIMED_OUT),
+    ]);
+    if (result === TIMED_OUT) {
+      Cu.reportError(`Timeout while waiting for extension child to shutdown: ${this.policy.debugName}`);
+    }
 
     MessageChannel.abortResponses({extensionId: this.id});
 
@@ -1843,23 +1842,6 @@ class Extension extends ExtensionData {
     }
   }
 
-  hasPermission(perm, includeOptional = false) {
-    let manifest_ = "manifest:";
-    if (perm.startsWith(manifest_)) {
-      return this.manifest[perm.substr(manifest_.length)] != null;
-    }
-
-    if (this.permissions.has(perm)) {
-      return true;
-    }
-
-    if (includeOptional && this.manifest.optional_permissions.includes(perm)) {
-      return true;
-    }
-
-    return false;
-  }
-
   get name() {
     return this.manifest.name;
   }
@@ -1867,7 +1849,7 @@ class Extension extends ExtensionData {
   get optionalOrigins() {
     if (this._optionalOrigins == null) {
       let origins = this.manifest.optional_permissions.filter(perm => classifyPermission(perm).origin);
-      this._optionalOrigins = new MatchPatternSet(origins, {ignorePath: true});
+      this._optionalOrigins = new MatchPatternSet(origins, {restrictSchemes: !this.hasPermission("mozillaAddons"), ignorePath: true});
     }
     return this._optionalOrigins;
   }
@@ -1887,7 +1869,7 @@ class Dictionary extends ExtensionData {
   async startup(reason) {
     this.dictionaries = {};
     for (let [lang, path] of Object.entries(this.startupData.dictionaries)) {
-      let uri = Services.io.newURI(path, null, this.rootURI);
+      let uri = Services.io.newURI(path.slice(0, -4) + ".aff", null, this.rootURI);
       this.dictionaries[lang] = uri;
 
       spellCheck.addDictionary(lang, uri);
@@ -1898,9 +1880,7 @@ class Dictionary extends ExtensionData {
 
   async shutdown(reason) {
     if (reason !== "APP_SHUTDOWN") {
-      for (let [lang, file] of Object.entries(this.dictionaries)) {
-        spellCheck.removeDictionary(lang, file);
-      }
+      XPIProvider.unregisterDictionaries(this.dictionaries);
     }
   }
 }

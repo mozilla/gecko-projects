@@ -811,7 +811,7 @@ button > hbox > label {
   border: 7px solid transparent;
   border-top-color: #d7b600;
   top: 100%;
-  offset-inline-start: calc(50% - 7px);
+  inset-inline-start: calc(50% - 7px);
 }
 
 .search-tooltip::after {
@@ -820,7 +820,7 @@ button > hbox > label {
   border: 6px solid transparent;
   border-top-color: #ffe900;
   top: 100%;
-  offset-inline-start: calc(50% - 6px);
+  inset-inline-start: calc(50% - 6px);
 }
 
 .search-tooltip-parent {
@@ -873,11 +873,11 @@ menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .me
   line-height: 30px;
 }
 
-.no-results-container:nth-child(2) {
+.no-results-image-container {
   margin-top: 64px;
 }
 
-.no-results-container:nth-child(2) > image {
+.no-results-image {
   list-style-image: url("chrome://browser/skin/preferences/in-content/no-search-results.svg");
   width: 380px;
   height: 293px;

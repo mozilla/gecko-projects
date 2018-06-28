@@ -80,7 +80,6 @@ EXPORTS += [
     'nsIDocument.h',
     'nsIDocumentInlines.h',
     'nsIDocumentObserver.h',
-    'nsIDOMClassInfo.h',
     'nsIGlobalObject.h',
     'nsImageLoadingContent.h',
     'nsIMutationObserver.h',
@@ -191,6 +190,7 @@ EXPORTS.mozilla.dom += [
     'IntlUtils.h',
     'Link.h',
     'Location.h',
+    'MessageBroadcaster.h',
     'MessageListenerManager.h',
     'MessageManagerGlobal.h',
     'MessageSender.h',
@@ -200,8 +200,14 @@ EXPORTS.mozilla.dom += [
     'NodeInfo.h',
     'NodeInfoInlines.h',
     'NodeIterator.h',
+    'ParentProcessMessageManager.h',
+    'PlacesEvent.h',
+    'PlacesObservers.h',
+    'PlacesVisit.h',
+    'PlacesWeakCallbackWrapper.h',
     'Pose.h',
     'ProcessGlobal.h',
+    'ProcessMessageManager.h',
     'ResponsiveImageSelector.h',
     'SameProcessMessageQueue.h',
     'ScreenOrientation.h',
@@ -272,6 +278,7 @@ UNIFIED_SOURCES += [
     'IntlUtils.cpp',
     'Link.cpp',
     'Location.cpp',
+    'MessageBroadcaster.cpp',
     'MessageListenerManager.cpp',
     'MessageManagerGlobal.cpp',
     'MessageSender.cpp',
@@ -345,9 +352,11 @@ UNIFIED_SOURCES += [
     'nsXHTMLContentSerializer.cpp',
     'nsXMLContentSerializer.cpp',
     'nsXMLNameSpaceMap.cpp',
+    'ParentProcessMessageManager.cpp',
     'Pose.cpp',
     'PostMessageEvent.cpp',
     'ProcessGlobal.cpp',
+    'ProcessMessageManager.cpp',
     'ResponsiveImageSelector.cpp',
     'SameProcessMessageQueue.cpp',
     'ScreenOrientation.cpp',
@@ -383,6 +392,13 @@ if CONFIG['MOZ_WEBRTC']:
 if CONFIG['FUZZING']:
     UNIFIED_SOURCES += [
         'FuzzingFunctions.cpp',
+    ]
+
+if CONFIG['MOZ_PLACES']:
+    UNIFIED_SOURCES += [
+        'PlacesEvent.cpp',
+        'PlacesObservers.cpp',
+        'PlacesWeakCallbackWrapper.cpp',
     ]
 
 # these files couldn't be in UNIFIED_SOURCES for now for reasons given below:

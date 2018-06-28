@@ -26,7 +26,7 @@ namespace mozilla
 RsdparsaSdpMediaSection::RsdparsaSdpMediaSection(size_t level,
       RsdparsaSessionHandle session, const RustMediaSection* const section,
       const RsdparsaSdpAttributeList* sessionLevel)
-  : SdpMediaSection(level), mSession(Move(session)),
+  : SdpMediaSection(level), mSession(std::move(session)),
     mSection(section)
 {
   switch(sdp_rust_get_media_type(section)) {
@@ -42,7 +42,7 @@ RsdparsaSdpMediaSection::RsdparsaSdpMediaSection(size_t level,
   }
 
   RsdparsaSessionHandle attributeSession(sdp_new_reference(mSession.get()));
-  mAttributeList.reset(new RsdparsaSdpAttributeList(Move(attributeSession),
+  mAttributeList.reset(new RsdparsaSdpAttributeList(std::move(attributeSession),
                                                     section,
                                                     sessionLevel));
 
@@ -59,7 +59,7 @@ RsdparsaSdpMediaSection::GetPort() const
 void
 RsdparsaSdpMediaSection::SetPort(unsigned int port)
 {
-  // TODO, see Bug 1433093
+  sdp_set_media_port(mSection, port);
 }
 
 unsigned int
@@ -138,21 +138,73 @@ RsdparsaSdpMediaSection::AddCodec(const std::string& pt,
                                   const std::string& name,
                                   uint32_t clockrate, uint16_t channels)
 {
-  //TODO: see Bug 1438289
+  StringView rustName{name.c_str(),name.size()};
+
+  // call the rust interface
+  auto nr = sdp_media_add_codec(mSection, std::stoul(pt),rustName,clockrate,channels);
+
+  if (NS_SUCCEEDED(nr)) {
+    // If the rust call was successful, adjust the shadow C++ structures
+    mFormats.push_back(pt);
+
+    // Add a rtpmap in mAttributeList
+    SdpRtpmapAttributeList* rtpmap = new SdpRtpmapAttributeList();
+    if (mAttributeList->HasAttribute(SdpAttribute::kRtpmapAttribute)) {
+      const SdpRtpmapAttributeList& old = mAttributeList->GetRtpmap();
+      for (auto it = old.mRtpmaps.begin(); it != old.mRtpmaps.end(); ++it) {
+        rtpmap->mRtpmaps.push_back(*it);
+      }
+    }
+
+    SdpRtpmapAttributeList::CodecType codec = SdpRtpmapAttributeList::kOtherCodec;
+    if (name == "opus") {
+      codec = SdpRtpmapAttributeList::kOpus;
+    } else if (name == "VP8") {
+      codec = SdpRtpmapAttributeList::kVP8;
+    } else if (name == "VP9") {
+      codec = SdpRtpmapAttributeList::kVP9;
+    } else if (name == "H264") {
+      codec = SdpRtpmapAttributeList::kH264;
+    }
+
+    rtpmap->PushEntry(pt, codec, name, clockrate, channels);
+    mAttributeList->SetAttribute(rtpmap);
+  }
+
 }
 
 void
 RsdparsaSdpMediaSection::ClearCodecs()
 {
+  // Clear the codecs in rust
+  sdp_media_clear_codecs(mSection);
 
-  //TODO: see Bug 1438289
+  mFormats.clear();
+  mAttributeList->RemoveAttribute(SdpAttribute::kRtpmapAttribute);
+  mAttributeList->RemoveAttribute(SdpAttribute::kFmtpAttribute);
+  mAttributeList->RemoveAttribute(SdpAttribute::kSctpmapAttribute);
+  mAttributeList->RemoveAttribute(SdpAttribute::kRtcpFbAttribute);
 }
 
 void
 RsdparsaSdpMediaSection::AddDataChannel(const std::string& name, uint16_t port,
                                         uint16_t streams, uint32_t message_size)
 {
-  //TODO: See 1438290
+  StringView rustName{name.c_str(), name.size()};
+  auto nr = sdp_media_add_datachannel(mSection, rustName, port,
+                                      streams, message_size);
+  if (NS_SUCCEEDED(nr)) {
+    // Update the formats
+    mFormats.clear();
+    LoadFormats();
+
+    // Update the attribute list
+    RsdparsaSessionHandle sessHandle(sdp_new_reference(mSession.get()));
+    auto sessAttributes = mAttributeList->mSessionAttributes;
+    mAttributeList.reset(new RsdparsaSdpAttributeList(std::move(sessHandle),
+                                                      mSection,
+                                                      sessAttributes));
+  }
 }
 
 void
@@ -222,8 +274,6 @@ RsdparsaSdpMediaSection::LoadConnection()
       mConnection = convertRustConnection(conn);
     }
   } else if (sdp_session_has_connection(mSession.get())){
-    // TODO: rsdparsa needs to ensure there is a connection at the session level
-    // if it is missing at a media level. See Bug 1438539.
     nr = sdp_get_session_connection(mSession.get(), &conn);
     if (NS_SUCCEEDED(nr)) {
       mConnection = convertRustConnection(conn);
@@ -232,4 +282,3 @@ RsdparsaSdpMediaSection::LoadConnection()
 }
 
 } // namespace mozilla
-

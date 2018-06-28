@@ -33,84 +33,47 @@ userExtDir.append(gAppInfo.ID);
 registerDirectory("XREUSysExt", userExtDir.parent);
 
 
-const BOOTSTRAP = `
-  ChromeUtils.import("resource://xpcshell-data/BootstrapMonitor.jsm").monitor(this);
-`;
-
 const ADDONS = {
   test_bootstrap1_1: {
     "install.rdf": {
       id: "bootstrap1@tests.mozilla.org",
-      version: "1.0",
-      bootstrap: "true",
-      multiprocessCompatible: "true",
 
       name: "Test Bootstrap 1",
-      description: "Test Description",
 
       iconURL: "chrome://foo/skin/icon.png",
       aboutURL: "chrome://foo/content/about.xul",
       optionsURL: "chrome://foo/content/options.xul",
-
-      targetApplications: [{
-        id: "xpcshell@tests.mozilla.org",
-        minVersion: "1",
-        maxVersion: "1"}],
     },
-    "bootstrap.js": BOOTSTRAP,
+    "bootstrap.js": BOOTSTRAP_MONITOR_BOOTSTRAP_JS,
   },
   test_bootstrap1_2: {
     "install.rdf": {
       id: "bootstrap1@tests.mozilla.org",
       version: "2.0",
-      bootstrap: "true",
 
       name: "Test Bootstrap 1",
-      description: "Test Description",
-
-      targetApplications: [{
-        id: "xpcshell@tests.mozilla.org",
-        minVersion: "1",
-        maxVersion: "1"}],
     },
-    "bootstrap.js": BOOTSTRAP,
+    "bootstrap.js": BOOTSTRAP_MONITOR_BOOTSTRAP_JS,
   },
   test_bootstrap1_3: {
     "install.rdf": {
       id: "bootstrap1@tests.mozilla.org",
       version: "3.0",
-      bootstrap: "true",
 
       name: "Test Bootstrap 1",
-      description: "Test Description",
 
       targetApplications: [{
         id: "undefined",
         minVersion: "1",
         maxVersion: "1"}],
     },
-    "bootstrap.js": BOOTSTRAP,
+    "bootstrap.js": BOOTSTRAP_MONITOR_BOOTSTRAP_JS,
   },
   test_bootstrap2_1: {
     "install.rdf": {
       id: "bootstrap2@tests.mozilla.org",
-      version: "1.0",
-      bootstrap: "true",
-      multiprocessCompatible: "true",
-
-      name: "Test Bootstrap 2",
-      description: "Test Description",
-
-      iconURL: "chrome://foo/skin/icon.png",
-      aboutURL: "chrome://foo/content/about.xul",
-      optionsURL: "chrome://foo/content/options.xul",
-
-      targetApplications: [{
-        id: "xpcshell@tests.mozilla.org",
-        minVersion: "1",
-        maxVersion: "1"}],
     },
-    "bootstrap.js": BOOTSTRAP,
+    "bootstrap.js": BOOTSTRAP_MONITOR_BOOTSTRAP_JS,
   },
 };
 
@@ -167,7 +130,7 @@ async function checkBootstrappedPref() {
   let XPIScope = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", {});
 
   let data = new Map();
-  for (let entry of XPIScope.XPIStates.bootstrappedAddons()) {
+  for (let entry of XPIScope.XPIStates.enabledAddons()) {
     data.set(entry.id, entry);
   }
 
@@ -215,9 +178,6 @@ add_task(async function test_1() {
   equal(install.name, "Test Bootstrap 1");
   equal(install.state, AddonManager.STATE_DOWNLOADED);
   notEqual(install.addon.syncGUID, null);
-  ok(install.addon.hasResource("install.rdf"));
-  ok(install.addon.hasResource("bootstrap.js"));
-  ok(!install.addon.hasResource("foo.bar"));
   equal(install.addon.operationsRequiringRestart &
                AddonManager.OP_NEEDS_RESTART_INSTALL, 0);
   do_check_not_in_crash_annotation(ID1, "1.0");
@@ -236,8 +196,6 @@ add_task(async function test_1() {
         "onInstallStarted",
         "onInstallEnded",
       ], function() {
-        ok(addon.hasResource("install.rdf"));
-
         // startup should not have been called yet.
         BootstrapMonitor.checkAddonNotStarted(ID1);
         resolve();
@@ -267,16 +225,10 @@ add_task(async function test_1() {
   BootstrapMonitor.checkAddonStarted(ID1, "1.0");
   equal(getStartupReason(), ADDON_INSTALL);
   equal(getStartupOldVersion(), undefined);
-  ok(b1.hasResource("install.rdf"));
-  ok(b1.hasResource("bootstrap.js"));
-  ok(!b1.hasResource("foo.bar"));
   do_check_in_crash_annotation(ID1, "1.0");
 
   let dir = do_get_addon_root_uri(profileDir, ID1);
   equal(b1.getResourceURI("bootstrap.js").spec, dir + "bootstrap.js");
-
-  let list = await AddonManager.getAddonsWithOperationsByTypes(null);
-  equal(list.length, 0);
 });
 
 // Tests that disabling doesn't require a restart
@@ -291,8 +243,10 @@ add_task(async function test_2() {
 
   equal(b1.operationsRequiringRestart &
         AddonManager.OP_NEEDS_RESTART_DISABLE, 0);
-  b1.userDisabled = true;
+  await b1.disable();
   ensure_test_completed();
+
+  await new Promise(executeSoon);
 
   notEqual(b1, null);
   equal(b1.version, "1.0");
@@ -356,7 +310,7 @@ add_task(async function test_4() {
 
   equal(b1.operationsRequiringRestart &
                AddonManager.OP_NEEDS_RESTART_ENABLE, 0);
-  b1.userDisabled = false;
+  await b1.enable();
   ensure_test_completed();
 
   notEqual(b1, null);
@@ -406,7 +360,6 @@ add_task(async function test_5() {
   ok(!b1.userDisabled);
   ok(b1.isActive);
   ok(!b1.isSystem);
-  ok(!isExtensionInAddonsList(profileDir, b1.id));
 
   await checkBootstrappedPref();
 });
@@ -475,7 +428,7 @@ add_task(async function test_7() {
 
   equal(b1.operationsRequiringRestart &
         AddonManager.OP_NEEDS_RESTART_UNINSTALL, 0);
-  b1.uninstall();
+  await b1.uninstall();
 
   await checkBootstrappedPref();
 
@@ -553,9 +506,6 @@ add_task(async function test_10() {
   equal(install.version, "2.0");
   equal(install.name, "Test Bootstrap 1");
   equal(install.state, AddonManager.STATE_DOWNLOADED);
-  ok(install.addon.hasResource("install.rdf"));
-  ok(install.addon.hasResource("bootstrap.js"));
-  ok(!install.addon.hasResource("foo.bar"));
   do_check_not_in_crash_annotation(ID1, "2.0");
 
   await Promise.all([
@@ -586,9 +536,6 @@ add_task(async function test_10() {
   BootstrapMonitor.checkAddonStarted(ID1, "2.0");
   equal(getStartupReason(), ADDON_INSTALL);
   equal(getStartupOldVersion(), undefined);
-  ok(b1.hasResource("install.rdf"));
-  ok(b1.hasResource("bootstrap.js"));
-  ok(!b1.hasResource("foo.bar"));
   do_check_in_crash_annotation(ID1, "2.0");
 
   prepare_test({}, [
@@ -653,7 +600,7 @@ add_task(async function test_11() {
     ]
   });
 
-  b1.userDisabled = true;
+  await b1.disable();
 
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
   BootstrapMonitor.checkAddonNotStarted(ID1);
@@ -661,7 +608,7 @@ add_task(async function test_11() {
   equal(getShutdownNewVersion(), undefined);
   do_check_not_in_crash_annotation(ID1, "1.0");
 
-  b1.uninstall();
+  await b1.uninstall();
 
   ensure_test_completed();
   BootstrapMonitor.checkAddonNotInstalled(ID1);
@@ -693,7 +640,7 @@ add_task(async function test_12() {
   equal(getStartupOldVersion(), undefined);
   do_check_in_crash_annotation(ID1, "1.0");
 
-  b1.uninstall();
+  await b1.uninstall();
 
   await promiseRestartManager();
   await checkBootstrappedPref();
@@ -759,7 +706,7 @@ add_task(async function test_13() {
   do_check_not_in_crash_annotation(ID1, "3.0");
 
   await checkBootstrappedPref();
-  b1.uninstall();
+  await b1.uninstall();
 });
 
 // Tests that a bootstrapped extension with an invalid target application entry
@@ -784,7 +731,7 @@ add_task(async function test_14() {
   do_check_not_in_crash_annotation(ID1, "3.0");
 
   await checkBootstrappedPref();
-  b1.uninstall();
+  await b1.uninstall();
 });
 
 // Tests that upgrading a disabled bootstrapped extension still calls uninstall
@@ -805,7 +752,7 @@ add_task(async function test_15() {
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
   BootstrapMonitor.checkAddonStarted(ID1, "1.0");
 
-  b1.userDisabled = true;
+  await b1.disable();
   ok(!b1.isActive);
   BootstrapMonitor.checkAddonInstalled(ID1, "1.0");
   BootstrapMonitor.checkAddonNotStarted(ID1);
@@ -854,7 +801,7 @@ add_task(async function test_15() {
   BootstrapMonitor.checkAddonInstalled(ID1, "2.0");
   BootstrapMonitor.checkAddonNotStarted(ID1);
 
-  b1_2.uninstall();
+  await b1_2.uninstall();
 });
 
 // Tests that bootstrapped extensions don't get loaded when in safe mode
@@ -901,7 +848,7 @@ add_task(async function test_16() {
   BootstrapMonitor.checkAddonStarted(ID1, "1.0");
 
   let b1_3 = await AddonManager.getAddonByID(ID1);
-  b1_3.uninstall();
+  await b1_3.uninstall();
 });
 
 // Check that a bootstrapped extension in a non-profile location is loaded
@@ -985,10 +932,10 @@ add_task(async function test_19() {
   equal(getInstallReason(), ADDON_DOWNGRADE);
   equal(getStartupReason(), ADDON_DOWNGRADE);
 
-  equal(getShutdownNewVersion(), undefined);
-  equal(getUninstallNewVersion(), undefined);
-  equal(getInstallOldVersion(), undefined);
-  equal(getStartupOldVersion(), undefined);
+  equal(getShutdownNewVersion(), "1.0");
+  equal(getUninstallNewVersion(), "1.0");
+  equal(getInstallOldVersion(), "2.0");
+  equal(getStartupOldVersion(), "2.0");
 
   await checkBootstrappedPref();
 });
@@ -1116,7 +1063,7 @@ add_task(async function test_22() {
   equal(getStartupOldVersion(), undefined);
 
   await checkBootstrappedPref();
-  b1_2.uninstall();
+  await b1_2.uninstall();
 });
 
 
@@ -1142,9 +1089,6 @@ add_task(async function test_23() {
       equal(install.version, "1.0");
       equal(install.name, "Test Bootstrap 1");
       equal(install.state, AddonManager.STATE_DOWNLOADED);
-      ok(install.addon.hasResource("install.rdf"));
-      ok(install.addon.hasResource("bootstrap.js"));
-      ok(!install.addon.hasResource("foo.bar"));
       equal(install.addon.operationsRequiringRestart &
                    AddonManager.OP_NEEDS_RESTART_INSTALL, 0);
       do_check_not_in_crash_annotation(ID1, "1.0");
@@ -1162,7 +1106,6 @@ add_task(async function test_23() {
     install.install();
   });
 
-  ok(install.addon.hasResource("install.rdf"));
   await checkBootstrappedPref();
 
   let installs = await AddonManager.getAllInstalls();
@@ -1183,21 +1126,15 @@ add_task(async function test_23() {
   BootstrapMonitor.checkAddonStarted(ID1, "1.0");
   equal(getStartupReason(), ADDON_INSTALL);
   equal(getStartupOldVersion(), undefined);
-  ok(b1.hasResource("install.rdf"));
-  ok(b1.hasResource("bootstrap.js"));
-  ok(!b1.hasResource("foo.bar"));
   do_check_in_crash_annotation(ID1, "1.0");
 
   let dir = do_get_addon_root_uri(profileDir, ID1);
   equal(b1.getResourceURI("bootstrap.js").spec, dir + "bootstrap.js");
 
-  let list = await AddonManager.getAddonsWithOperationsByTypes(null);
-  equal(list.length, 0);
-
   await promiseRestartManager();
 
   let b1_2 = await AddonManager.getAddonByID(ID1);
-  b1_2.uninstall();
+  await b1_2.uninstall();
 });
 
 // Tests that we recover from a broken preference

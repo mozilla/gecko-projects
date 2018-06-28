@@ -6,7 +6,6 @@
 
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/ShadowRoot.h"
-#include "mozilla/dom/ShadowRootBinding.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "ChildIterator.h"
 #include "nsContentUtils.h"
@@ -18,6 +17,7 @@
 #include "mozilla/ServoStyleRuleMap.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
+#include "mozilla/dom/StyleSheetList.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -121,7 +121,7 @@ ShadowRoot::SetIsComposedDocParticipant(bool aIsComposedDocParticipant)
 JSObject*
 ShadowRoot::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::ShadowRootBinding::Wrap(aCx, this, aGivenProto);
+  return mozilla::dom::ShadowRoot_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -132,7 +132,7 @@ ShadowRoot::CloneInternalDataFrom(ShadowRoot* aOther)
     StyleSheet* sheet = aOther->SheetAt(i);
     if (sheet->IsApplicable()) {
       RefPtr<StyleSheet> clonedSheet =
-        sheet->Clone(nullptr, nullptr, nullptr, nullptr);
+        sheet->Clone(nullptr, nullptr, this, nullptr);
       if (clonedSheet) {
         AppendStyleSheet(*clonedSheet.get());
       }
@@ -234,8 +234,10 @@ ShadowRoot::RemoveSlot(HTMLSlotElement* aSlot)
                         "Slot to deregister wasn't found?");
   if (currentSlots->Length() == 1) {
     MOZ_ASSERT(currentSlots->ElementAt(0) == aSlot);
-    mSlotMap.Remove(name);
 
+    InvalidateStyleAndLayoutOnSubtree(aSlot);
+
+    mSlotMap.Remove(name);
     if (!aSlot->AssignedNodes().IsEmpty()) {
       aSlot->ClearAssignedNodes();
       aSlot->EnqueueSlotChangeEvent();
@@ -253,6 +255,7 @@ ShadowRoot::RemoveSlot(HTMLSlotElement* aSlot)
     return;
   }
 
+  InvalidateStyleAndLayoutOnSubtree(aSlot);
   HTMLSlotElement* replacementSlot = currentSlots->ElementAt(0);
   const nsTArray<RefPtr<nsINode>>& assignedNodes = aSlot->AssignedNodes();
   bool slottedNodesChanged = !assignedNodes.IsEmpty();
@@ -308,9 +311,7 @@ ShadowRoot::ApplicableRulesChanged()
 
   nsIDocument* doc = OwnerDoc();
   if (nsIPresShell* shell = doc->GetShell()) {
-    doc->BeginUpdate(UPDATE_STYLE);
     shell->RecordShadowStyleChange(*this);
-    doc->EndUpdate(UPDATE_STYLE);
   }
 }
 
@@ -320,48 +321,6 @@ ShadowRoot::InsertSheetAt(size_t aIndex, StyleSheet& aSheet)
   DocumentOrShadowRoot::InsertSheetAt(aIndex, aSheet);
   if (aSheet.IsApplicable()) {
     InsertSheetIntoAuthorData(aIndex, aSheet);
-  }
-}
-
-void
-ShadowRoot::AppendStyleSheet(StyleSheet& aSheet)
-{
-  DocumentOrShadowRoot::AppendStyleSheet(aSheet);
-  if (aSheet.IsApplicable()) {
-    Servo_AuthorStyles_AppendStyleSheet(mServoStyles.get(), &aSheet);
-    if (mStyleRuleMap) {
-      mStyleRuleMap->SheetAdded(aSheet);
-    }
-    ApplicableRulesChanged();
-  }
-}
-
-void
-ShadowRoot::InsertSheet(StyleSheet* aSheet, nsIContent* aLinkingContent)
-{
-  nsCOMPtr<nsIStyleSheetLinkingElement>
-    linkingElement = do_QueryInterface(aLinkingContent);
-
-  // FIXME(emilio, bug 1410578): <link> should probably also be allowed here.
-  MOZ_ASSERT(linkingElement, "The only styles in a ShadowRoot should come "
-                             "from <style>.");
-
-  linkingElement->SetStyleSheet(aSheet); // This sets the ownerNode on the sheet
-
-  // Find the correct position to insert into the style sheet list (must
-  // be in tree order).
-  for (size_t i = 0; i <= SheetCount(); i++) {
-    if (i == SheetCount()) {
-      AppendStyleSheet(*aSheet);
-      return;
-    }
-
-    StyleSheet* sheet = SheetAt(i);
-    nsINode* sheetOwningNode = sheet->GetOwnerNode();
-    if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwningNode)) {
-      InsertSheetAt(i, *aSheet);
-      return;
-    }
   }
 }
 
@@ -391,13 +350,23 @@ ShadowRoot::InsertSheetIntoAuthorData(size_t aIndex, StyleSheet& aSheet)
   ApplicableRulesChanged();
 }
 
+// FIXME(emilio): This needs to notify document observers and such,
+// presumably.
 void
 ShadowRoot::StyleSheetApplicableStateChanged(StyleSheet& aSheet, bool aApplicable)
 {
-  MOZ_ASSERT(mStyleSheets.Contains(&aSheet));
+  int32_t index = IndexOfSheet(aSheet);
+  if (index < 0) {
+    // NOTE(emilio): @import sheets are handled in the relevant RuleAdded
+    // notification, which only notifies after the sheet is loaded.
+    //
+    // This setup causes weirdness in other places, we may want to fix this in
+    // bug 1465031.
+    MOZ_DIAGNOSTIC_ASSERT(aSheet.GetParentSheet(),
+                          "It'd better be an @import sheet");
+    return;
+  }
   if (aApplicable) {
-    int32_t index = IndexOfSheet(aSheet);
-    MOZ_RELEASE_ASSERT(index >= 0);
     InsertSheetIntoAuthorData(size_t(index), aSheet);
   } else {
     if (mStyleRuleMap) {
@@ -411,12 +380,14 @@ ShadowRoot::StyleSheetApplicableStateChanged(StyleSheet& aSheet, bool aApplicabl
 void
 ShadowRoot::RemoveSheet(StyleSheet* aSheet)
 {
-  DocumentOrShadowRoot::RemoveSheet(*aSheet);
-  if (aSheet->IsApplicable()) {
+  MOZ_ASSERT(aSheet);
+  RefPtr<StyleSheet> sheet = DocumentOrShadowRoot::RemoveSheet(*aSheet);
+  MOZ_ASSERT(sheet);
+  if (sheet->IsApplicable()) {
     if (mStyleRuleMap) {
-      mStyleRuleMap->SheetRemoved(*aSheet);
+      mStyleRuleMap->SheetRemoved(*sheet);
     }
-    Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), aSheet);
+    Servo_AuthorStyles_RemoveStyleSheet(mServoStyles.get(), sheet);
     ApplicableRulesChanged();
   }
 }

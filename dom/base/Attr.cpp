@@ -99,8 +99,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 // QueryInterface implementation for Attr
 NS_INTERFACE_TABLE_HEAD(Attr)
   NS_WRAPPERCACHE_INTERFACE_TABLE_ENTRY
-  NS_INTERFACE_TABLE(Attr, nsINode, nsIAttribute, nsIDOMNode,
-                     EventTarget)
+  NS_INTERFACE_TABLE(Attr, nsINode, nsIAttribute, EventTarget)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(Attr)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
@@ -290,18 +289,6 @@ Attr::InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-nsresult
-Attr::InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
-                               bool aNotify)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-void
-Attr::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
-{
-}
-
 void
 Attr::RemoveChildNode(nsIContent* aKid, bool aNotify)
 {
@@ -328,7 +315,7 @@ Attr::Shutdown()
 JSObject*
 Attr::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return AttrBinding::Wrap(aCx, this, aGivenProto);
+  return Attr_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

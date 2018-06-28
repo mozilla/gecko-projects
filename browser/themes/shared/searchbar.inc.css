@@ -49,7 +49,11 @@
   border-top: 1px solid var(--panel-separator-color);
   margin: 0;
   padding: 3px 6px;
-  color: var(--autocomplete-popup-secondary-color);
+  color: var(--panel-disabled-color);
+}
+
+:root[lwt-popup-brighttext] .search-panel-header {
+  color: var(--autocomplete-popup-color);
 }
 
 .search-panel-header > label {
@@ -84,7 +88,7 @@
   background-size: 1px auto;
   background-repeat: no-repeat;
   background-position: right center;
-  color: var(--autocomplete-popup-secondary-color);
+  color: var(--panel-disabled-color);
 }
 
 .searchbar-engine-one-off-item:-moz-locale-dir(rtl) {

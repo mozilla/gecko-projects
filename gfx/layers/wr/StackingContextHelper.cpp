@@ -28,18 +28,18 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              const LayoutDeviceRect& aBounds,
                                              const gfx::Matrix4x4* aBoundTransform,
                                              const wr::WrAnimationProperty* aAnimation,
-                                             float* aOpacityPtr,
-                                             gfx::Matrix4x4* aTransformPtr,
-                                             gfx::Matrix4x4* aPerspectivePtr,
+                                             const float* aOpacityPtr,
+                                             const gfx::Matrix4x4* aTransformPtr,
+                                             const gfx::Matrix4x4* aPerspectivePtr,
                                              const gfx::CompositionOp& aMixBlendMode,
                                              bool aBackfaceVisible,
                                              bool aIsPreserve3D,
-                                             const Maybe<gfx::Matrix4x4>& aTransformForScrollData,
+                                             const Maybe<nsDisplayTransform*>& aDeferredTransformItem,
                                              const wr::WrClipId* aClipNodeId,
                                              bool aRasterizeLocally)
   : mBuilder(&aBuilder)
   , mScale(1.0f, 1.0f)
-  , mTransformForScrollData(aTransformForScrollData)
+  , mDeferredTransformItem(aDeferredTransformItem)
   , mIsPreserve3D(aIsPreserve3D)
   , mRasterizeLocally(aRasterizeLocally || aParentSC.mRasterizeLocally)
 {
@@ -51,6 +51,11 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
       && !aParentSC.mIsPreserve3D) {
     mInheritedTransform = transform2d * aParentSC.mInheritedTransform;
     mScale = mInheritedTransform.ScaleFactors(true);
+    if (aAnimation) {
+      mSnappingSurfaceTransform = gfx::Matrix::Scaling(mScale.width, mScale.height);
+    } else {
+      mSnappingSurfaceTransform = transform2d * aParentSC.mSnappingSurfaceTransform;
+    }
   } else {
     mInheritedTransform = aParentSC.mInheritedTransform;
     mScale = aParentSC.mScale;
@@ -80,14 +85,14 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
 StackingContextHelper::~StackingContextHelper()
 {
   if (mBuilder) {
-    mBuilder->PopStackingContext();
+    mBuilder->PopStackingContext(mReferenceFrameId.isSome());
   }
 }
 
-const Maybe<gfx::Matrix4x4>&
-StackingContextHelper::GetTransformForScrollData() const
+const Maybe<nsDisplayTransform*>&
+StackingContextHelper::GetDeferredTransformItem() const
 {
-  return mTransformForScrollData;
+  return mDeferredTransformItem;
 }
 
 } // namespace layers

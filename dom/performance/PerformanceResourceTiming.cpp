@@ -29,7 +29,7 @@ PerformanceResourceTiming::PerformanceResourceTiming(UniquePtr<PerformanceTiming
                                                      Performance* aPerformance,
                                                      const nsAString& aName)
   : PerformanceEntry(aPerformance->GetParentObject(), aName, NS_LITERAL_STRING("resource"))
-  , mTimingData(Move(aPerformanceTiming))
+  , mTimingData(std::move(aPerformanceTiming))
   , mPerformance(aPerformance)
 {
   MOZ_ASSERT(aPerformance, "Parent performance object should be provided");
@@ -69,7 +69,7 @@ PerformanceResourceTiming::StartTime() const
 JSObject*
 PerformanceResourceTiming::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PerformanceResourceTimingBinding::Wrap(aCx, this, aGivenProto);
+  return PerformanceResourceTiming_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 size_t

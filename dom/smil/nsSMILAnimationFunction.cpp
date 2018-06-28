@@ -269,7 +269,7 @@ nsSMILAnimationFunction::ComposeResult(const nsISMILAttr& aSMILAttr,
 
   // If additive animation isn't required or isn't supported, set the value.
   if (!isAdditive || NS_FAILED(aResult.SandwichAdd(result))) {
-    aResult = Move(result);
+    aResult = std::move(result);
   }
 }
 
@@ -610,8 +610,8 @@ nsSMILAnimationFunction::ComputePacedPosition(const nsSMILValueArray& aValues,
     }
   }
 
-  NS_NOTREACHED("shouldn't complete loop & get here -- if we do, "
-                "then aSimpleProgress was probably out of bounds");
+  MOZ_ASSERT_UNREACHABLE("shouldn't complete loop & get here -- if we do, "
+                         "then aSimpleProgress was probably out of bounds");
   return NS_ERROR_FAILURE;
 }
 

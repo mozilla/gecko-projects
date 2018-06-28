@@ -438,10 +438,59 @@ ClientSource::Control(const ClientControlledArgs& aArgs)
   return ref.forget();
 }
 
+void
+ClientSource::InheritController(const ServiceWorkerDescriptor& aServiceWorker)
+{
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+
+  // If we are in legacy child-side intercept mode then we must tell the current
+  // process SWM that this client inherited a controller.  This will only update
+  // the local SWM data and not send any messages to the ClientManagerService.
+  //
+  // Note, we only do this when inheriting the controller for main thread
+  // windows.  The legacy mode never proprly marked inherited blob URL workers
+  // controlled in the SWM.
+  if (!ServiceWorkerParentInterceptEnabled() && GetDocShell()) {
+    AssertIsOnMainThread();
+    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    if (swm) {
+      swm->NoteInheritedController(mClientInfo, aServiceWorker);
+    }
+  }
+
+  // Also tell the parent-side ClientManagerService that the controller was
+  // inherited.  This is necessary for clients.matchAll() to work properly.
+  // In parent-side intercept mode this will also note the inheritance in
+  // the parent-side SWM.
+  MaybeExecute([aServiceWorker](PClientSourceChild* aActor) {
+    aActor->SendInheritController(ClientControlledArgs(aServiceWorker.ToIPC()));
+  });
+
+  // Finally, record the new controller in our local ClientSource for any
+  // immediate synchronous access.
+  SetController(aServiceWorker);
+}
+
 const Maybe<ServiceWorkerDescriptor>&
 ClientSource::GetController() const
 {
   return mController;
+}
+
+void
+ClientSource::NoteDOMContentLoaded()
+{
+  if (mController.isSome() && !ServiceWorkerParentInterceptEnabled()) {
+    AssertIsOnMainThread();
+    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    if (swm) {
+      swm->MaybeCheckNavigationUpdate(mClientInfo);
+    }
+  }
+
+  MaybeExecute([] (PClientSourceChild* aActor) {
+    aActor->SendNoteDOMContentLoaded();
+  });
 }
 
 RefPtr<ClientOpPromise>
@@ -578,21 +627,29 @@ ClientSource::PostMessage(const ClientPostMessageArgs& aArgs)
     CopyUTF8toUTF16(origin, init.mOrigin);
   }
 
-  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-  if (!swm) {
-    // Shutting down. Just don't deliver this message.
-    ref = ClientOpPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
-    return ref.forget();
+  RefPtr<ServiceWorker> instance;
+
+  if (ServiceWorkerParentInterceptEnabled()) {
+    instance = globalObject->GetOrCreateServiceWorker(source);
+  } else {
+    // If we are in legacy child-side intercept mode then we need to verify
+    // this registration exists in the current process.
+    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    if (!swm) {
+      // Shutting down. Just don't deliver this message.
+      ref = ClientOpPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+      return ref.forget();
+    }
+
+    RefPtr<ServiceWorkerRegistrationInfo> reg =
+      swm->GetRegistration(principal, source.Scope());
+    if (reg) {
+      instance = globalObject->GetOrCreateServiceWorker(source);
+    }
   }
 
-  RefPtr<ServiceWorkerRegistrationInfo> reg =
-    swm->GetRegistration(principal, source.Scope());
-  if (reg) {
-    RefPtr<ServiceWorker> instance =
-      globalObject->GetOrCreateServiceWorker(source);
-    if (instance) {
-      init.mSource.SetValue().SetAsServiceWorker() = instance;
-    }
+  if (instance) {
+    init.mSource.SetValue().SetAsServiceWorker() = instance;
   }
 
   RefPtr<MessageEvent> event =
@@ -640,7 +697,7 @@ ClientSource::Claim(const ClientClaimArgs& aArgs)
   auto holder =
     MakeRefPtr<DOMMozPromiseRequestHolder<GenericPromise>>(innerWindow->AsGlobal());
 
-  RefPtr<GenericPromise> p = swm->MaybeClaimClient(doc, swd);
+  RefPtr<GenericPromise> p = swm->MaybeClaimClient(mClientInfo, swd);
   p->Then(mEventTarget, __func__,
     [outerPromise, holder] (bool aResult) {
       holder->Complete();

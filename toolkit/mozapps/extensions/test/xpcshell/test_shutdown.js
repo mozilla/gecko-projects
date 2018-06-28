@@ -18,13 +18,13 @@ const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "AddonScreenshot", "AddonType", "startup", "shutdown",
                         "addonIsActive", "registerProvider", "unregisterProvider",
                         "addStartupChange", "removeStartupChange",
-                        "getNewSideloads", "getNewDistroAddons",
+                        "getNewSideloads",
                         "recordTimestamp", "recordSimpleMeasure",
                         "recordException", "getSimpleMeasures", "simpleTimer",
                         "setTelemetryDetails", "getTelemetryDetails",
                         "callNoUpdateListeners", "backgroundUpdateTimerHandler",
                         "hasUpgradeListener", "getUpgradeListener",
-                        "isDBLoaded", "BOOTSTRAP_REASONS"];
+                        "isDBLoaded", "recordTiming", "BOOTSTRAP_REASONS"];
 
 async function test_functions() {
   for (let prop in AddonManager) {

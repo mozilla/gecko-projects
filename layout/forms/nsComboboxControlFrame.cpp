@@ -26,7 +26,6 @@
 #include "nsViewManager.h"
 #include "nsIContentInlines.h"
 #include "nsIDOMEventListener.h"
-#include "nsIDOMNode.h"
 #include "nsISelectControlFrame.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/Event.h"
@@ -1679,8 +1678,8 @@ void nsComboboxControlFrame::FireValueChangeEvent()
 {
   // Fire ValueChange event to indicate data value of combo box has changed
   nsContentUtils::AddScriptRunner(
-    new AsyncEventDispatcher(mContent, NS_LITERAL_STRING("ValueChange"), true,
-                             false));
+    new AsyncEventDispatcher(mContent, NS_LITERAL_STRING("ValueChange"),
+                             CanBubble::eYes, ChromeOnlyDispatch::eNo));
 }
 
 void

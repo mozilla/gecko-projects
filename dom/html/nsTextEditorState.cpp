@@ -14,7 +14,6 @@
 #include "nsEditorCID.h"
 #include "nsLayoutCID.h"
 #include "nsITextControlFrame.h"
-#include "nsIDOMDocument.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsTextControlFrame.h"
 #include "nsIControllers.h"
@@ -326,7 +325,7 @@ public:
   NS_IMETHOD ScrollLine(bool aForward) override;
   NS_IMETHOD ScrollCharacter(bool aRight) override;
   NS_IMETHOD SelectAll(void) override;
-  NS_IMETHOD CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool* _retval) override;
+  NS_IMETHOD CheckVisibility(nsINode *node, int16_t startOffset, int16_t EndOffset, bool* _retval) override;
   virtual nsresult CheckVisibilityContent(nsIContent* aNode, int16_t aStartOffset, int16_t aEndOffset, bool* aRetval) override;
 
 private:
@@ -767,7 +766,7 @@ nsTextInputSelectionImpl::SelectAll()
 }
 
 NS_IMETHODIMP
-nsTextInputSelectionImpl::CheckVisibility(nsIDOMNode *node, int16_t startOffset, int16_t EndOffset, bool *_retval)
+nsTextInputSelectionImpl::CheckVisibility(nsINode *node, int16_t startOffset, int16_t EndOffset, bool *_retval)
 {
   if (!mPresShellWeak) return NS_ERROR_NOT_INITIALIZED;
   nsresult result;
@@ -1725,7 +1724,10 @@ nsTextEditorState::SetSelectionRange(uint32_t aStart, uint32_t aEnd,
     // It sure would be nice if we had an existing Element* or so to work with.
     nsCOMPtr<nsINode> node = do_QueryInterface(mTextCtrlElement);
     RefPtr<AsyncEventDispatcher> asyncDispatcher =
-      new AsyncEventDispatcher(node, NS_LITERAL_STRING("select"), true, false);
+      new AsyncEventDispatcher(node,
+                               NS_LITERAL_STRING("select"),
+                               CanBubble::eYes,
+                               ChromeOnlyDispatch::eNo);
     asyncDispatcher->PostDOMEvent();
   }
 
@@ -1795,7 +1797,7 @@ DirectionToName(nsITextControlFrame::SelectionDirection dir, nsAString& aDirecti
   } else if (dir == nsITextControlFrame::eBackward) {
     aDirection.AssignLiteral("backward");
   } else {
-    NS_NOTREACHED("Invalid SelectionDirection value");
+    MOZ_ASSERT_UNREACHABLE("Invalid SelectionDirection value");
   }
 }
 
@@ -2016,7 +2018,7 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
   // called yet, we need to notify it here because editor may be destroyed
   // before EditAction() is called if selection listener causes flushing layout.
   if (mTextListener && mTextEditor && mEditorInitialized &&
-      mTextEditor->IsInEditAction()) {
+      mTextEditor->IsInEditSubAction()) {
     mTextListener->OnEditActionHandled();
   }
 

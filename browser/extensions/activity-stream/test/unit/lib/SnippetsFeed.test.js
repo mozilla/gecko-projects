@@ -64,14 +64,6 @@ describe("SnippetsFeed", () => {
     sandbox.stub(global.Services.prefs, "getIntPref")
       .withArgs("devtools.selfxss.count")
       .returns(5);
-    sandbox.stub(global.AddonManager, "getActiveAddons")
-      .resolves({
-        addons: [
-          Object.assign({id: "foo"}, FAKE_ADDONS.foo),
-          Object.assign({id: "bar"}, FAKE_ADDONS.bar)
-        ],
-        fullData: true
-      });
 
     const getStub = sandbox.stub();
     getStub.withArgs("previousSessionEnd").resolves(42);
@@ -104,7 +96,6 @@ describe("SnippetsFeed", () => {
     assert.deepEqual(action.data.selectedSearchEngine, searchData);
     assert.propertyVal(action.data, "defaultBrowser", true);
     assert.propertyVal(action.data, "isDevtoolsUser", true);
-    assert.deepEqual(action.data.addonInfo, FAKE_ADDONS);
     assert.deepEqual(action.data.blockList, [1]);
     assert.propertyVal(action.data, "previousSessionEnd", 42);
   });
@@ -196,10 +187,10 @@ describe("SnippetsFeed", () => {
   });
   it("should call .getTotalBookmarksCount when TOTAL_BOOKMARKS_REQUEST is received", async () => {
     const feed = new SnippetsFeed();
-    const browser = {};
+    const portId = "1234";
     sandbox.spy(feed, "getTotalBookmarksCount");
-    feed.onAction({type: at.TOTAL_BOOKMARKS_REQUEST, _target: {browser}});
-    assert.calledWith(feed.getTotalBookmarksCount, browser);
+    feed.onAction({type: at.TOTAL_BOOKMARKS_REQUEST, meta: {fromTarget: portId}});
+    assert.calledWith(feed.getTotalBookmarksCount, portId);
   });
   it("should dispatch a TOTAL_BOOKMARKS_RESPONSE action when .getTotalBookmarksCount is called", async () => {
     const feed = new SnippetsFeed();
@@ -222,6 +213,30 @@ describe("SnippetsFeed", () => {
     await feed.getTotalBookmarksCount(browser);
 
     assert.calledWith(feed.store.dispatch, ac.OnlyToOneContent(action, browser));
+  });
+  it("should respond with ADDONS_INFO_RESPONSE when ADDONS_INFO_REQUEST is received", async () => {
+    sandbox.stub(global.AddonManager, "getActiveAddons")
+      .resolves({
+        addons: [
+          Object.assign({id: "foo"}, FAKE_ADDONS.foo),
+          Object.assign({id: "bar"}, FAKE_ADDONS.bar)
+        ],
+        fullData: true
+      });
+    const portId = "1234";
+    const feed = new SnippetsFeed();
+    feed.store = {dispatch: sandbox.stub()};
+    const expectedAction = {
+      type: at.ADDONS_INFO_RESPONSE,
+      data: {
+        isFullData: true,
+        addons: FAKE_ADDONS
+      }
+    };
+
+    await feed.onAction({type: at.ADDONS_INFO_REQUEST, meta: {fromTarget: portId}});
+
+    assert.calledWith(feed.store.dispatch, ac.OnlyToOneContent(expectedAction, portId));
   });
   it("should return true for isDevtoolsUser is devtools.selfxss.count is 5", async () => {
     sandbox.stub(global.Services.prefs, "getIntPref")

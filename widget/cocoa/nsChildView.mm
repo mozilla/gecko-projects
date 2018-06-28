@@ -1808,6 +1808,10 @@ nsChildView::SetInputContext(const InputContext& aContext,
     }
   }
 
+  // IMEInputHandler::IsEditableContent() returns false when both
+  // IsASCIICableOnly() and IsIMEEnabled() return false.  So, be careful
+  // when you change the following code.  You might need to change
+  // IMEInputHandler::IsEditableContent() too.
   mInputContext = aContext;
   switch (aContext.mIMEState.mEnabled) {
     case IMEState::ENABLED:
@@ -2708,8 +2712,8 @@ nsChildView::SendMayStartSwipe(const mozilla::PanGestureInput& aSwipeStartEvent)
   nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
 
   uint32_t direction = (aSwipeStartEvent.mPanDisplacement.x > 0.0)
-    ? (uint32_t)dom::SimpleGestureEventBinding::DIRECTION_RIGHT
-    : (uint32_t)dom::SimpleGestureEventBinding::DIRECTION_LEFT;
+    ? (uint32_t)dom::SimpleGestureEvent_Binding::DIRECTION_RIGHT
+    : (uint32_t)dom::SimpleGestureEvent_Binding::DIRECTION_LEFT;
 
   // We're ready to start the animation. Tell Gecko about it, and at the same
   // time ask it if it really wants to start an animation for this event.
@@ -2742,8 +2746,8 @@ nsChildView::TrackScrollEventAsSwipe(const mozilla::PanGestureInput& aSwipeStart
   }
 
   uint32_t direction = (aSwipeStartEvent.mPanDisplacement.x > 0.0)
-    ? (uint32_t)dom::SimpleGestureEventBinding::DIRECTION_RIGHT
-    : (uint32_t)dom::SimpleGestureEventBinding::DIRECTION_LEFT;
+    ? (uint32_t)dom::SimpleGestureEvent_Binding::DIRECTION_RIGHT
+    : (uint32_t)dom::SimpleGestureEvent_Binding::DIRECTION_LEFT;
 
   mSwipeTracker = new SwipeTracker(*this, aSwipeStartEvent,
                                    aAllowedDirections, direction);
@@ -2903,6 +2907,17 @@ nsChildView::ReportSwipeStarted(uint64_t aInputBlockId,
     }
     mSwipeEventQueue = nullptr;
   }
+}
+
+nsEventStatus
+nsChildView::DispatchAPZInputEvent(InputData& aEvent)
+{
+  if (mAPZC) {
+    uint64_t inputBlockId = 0;
+    ScrollableLayerGuid guid;
+    return mAPZC->InputBridge()->ReceiveInputEvent(aEvent, &guid, &inputBlockId);
+  }
+  return nsEventStatus_eIgnore;
 }
 
 void
@@ -3329,6 +3344,13 @@ NSEvent* gLastDragMouseDownEvent = nil;
                                                name:NSViewGlobalFrameDidChangeNotification
                                              object:self];
 
+  [[NSDistributedNotificationCenter defaultCenter]
+           addObserver:self
+              selector:@selector(systemMetricsChanged)
+                  name:@"AppleInterfaceThemeChangedNotification"
+                object:nil
+    suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+
   return self;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
@@ -3751,7 +3773,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return;
   }
 
-  AUTO_PROFILER_LABEL("ChildView::drawRect", GRAPHICS);
+  AUTO_PROFILER_LABEL("ChildView::drawRect", OTHER);
 
   // The CGContext that drawRect supplies us with comes with a transform that
   // scales one user space unit to one Cocoa point, which can consist of
@@ -3817,7 +3839,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)drawUsingOpenGL
 {
-  AUTO_PROFILER_LABEL("ChildView::drawUsingOpenGL", GRAPHICS);
+  AUTO_PROFILER_LABEL("ChildView::drawUsingOpenGL", OTHER);
 
   if (![self isUsingOpenGL] || !mGeckoChild->IsVisible())
     return;
@@ -3986,7 +4008,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
       }
       widgetArray.AppendElement(mGeckoChild);
       nsCOMPtr<nsIRunnable> releaserRunnable =
-        new WidgetsReleaserRunnable(Move(widgetArray));
+        new WidgetsReleaserRunnable(std::move(widgetArray));
       NS_DispatchToMainThread(releaserRunnable);
     }
 
@@ -4158,15 +4180,15 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   // Record the left/right direction.
   if (deltaX > 0.0)
-    geckoEvent.mDirection |= dom::SimpleGestureEventBinding::DIRECTION_LEFT;
+    geckoEvent.mDirection |= dom::SimpleGestureEvent_Binding::DIRECTION_LEFT;
   else if (deltaX < 0.0)
-    geckoEvent.mDirection |= dom::SimpleGestureEventBinding::DIRECTION_RIGHT;
+    geckoEvent.mDirection |= dom::SimpleGestureEvent_Binding::DIRECTION_RIGHT;
 
   // Record the up/down direction.
   if (deltaY > 0.0)
-    geckoEvent.mDirection |= dom::SimpleGestureEventBinding::DIRECTION_UP;
+    geckoEvent.mDirection |= dom::SimpleGestureEvent_Binding::DIRECTION_UP;
   else if (deltaY < 0.0)
-    geckoEvent.mDirection |= dom::SimpleGestureEventBinding::DIRECTION_DOWN;
+    geckoEvent.mDirection |= dom::SimpleGestureEvent_Binding::DIRECTION_DOWN;
 
   // Send the event.
   mGeckoChild->DispatchWindowEvent(geckoEvent);
@@ -4179,66 +4201,117 @@ NSEvent* gLastDragMouseDownEvent = nil;
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if (!anEvent || !mGeckoChild ||
-      [self beginOrEndGestureForEventPhase:anEvent]) {
+  if (!mGeckoChild) {
     return;
   }
 
-  nsAutoRetainCocoaObject kungFuDeathGrip(self);
+  if (gfxPrefs::APZAllowZooming()) {
+    NSPoint locationInWindow = nsCocoaUtils::EventLocationForWindow(anEvent, [self window]);
+    ScreenPoint position = ViewAs<ScreenPixel>(
+      [self convertWindowCoordinatesRoundDown:locationInWindow],
+      PixelCastJustification::LayoutDeviceIsScreenForUntransformedEvent);
 
-  float deltaZ = [anEvent deltaZ];
+    PRIntervalTime eventIntervalTime = PR_IntervalNow();
+    TimeStamp eventTimeStamp = nsCocoaUtils::GetEventTimeStamp([anEvent timestamp]);
+    NSEventPhase eventPhase = [anEvent phase];
+    PinchGestureInput::PinchGestureType pinchGestureType;
 
-  EventMessage msg;
-  switch (mGestureState) {
-  case eGestureState_StartGesture:
-    msg = eMagnifyGestureStart;
-    mGestureState = eGestureState_MagnifyGesture;
-    break;
+    switch (eventPhase) {
+      case NSEventPhaseBegan: {
+        pinchGestureType = PinchGestureInput::PINCHGESTURE_START;
+        break;
+      }
+      case NSEventPhaseChanged: {
+        pinchGestureType = PinchGestureInput::PINCHGESTURE_SCALE;
+        break;
+      }
+      case NSEventPhaseEnded: {
+        pinchGestureType = PinchGestureInput::PINCHGESTURE_END;
+        break;
+      }
+      default: {
+        NS_WARNING("Unexpected phase for pinch gesture event.");
+        return;
+      }
+    }
 
-  case eGestureState_MagnifyGesture:
-    msg = eMagnifyGestureUpdate;
-    break;
+    PinchGestureInput event{pinchGestureType,
+                            eventIntervalTime,
+                            eventTimeStamp,
+                            position,
+                            100.0,
+                            100.0 * (1.0 - [anEvent magnification]),
+                            nsCocoaUtils::ModifiersForEvent(anEvent)};
 
-  case eGestureState_None:
-  case eGestureState_RotateGesture:
-  default:
-    return;
-  }
+    if (pinchGestureType == PinchGestureInput::PINCHGESTURE_END) {
+      event.mFocusPoint = PinchGestureInput::BothFingersLifted<ScreenPixel>();
+    }
 
-  // This sends the pinch gesture value as a fake wheel event that has the
-  // control key pressed so that pages can implement custom pinch gesture
-  // handling. It may seem strange that this doesn't use a wheel event with
-  // the deltaZ property set, but this matches Chrome's behavior as described
-  // at https://code.google.com/p/chromium/issues/detail?id=289887
-  //
-  // The intent of the formula below is to produce numbers similar to Chrome's
-  // implementation of this feature. Chrome implements deltaY using the formula
-  // "-100 * log(1 + [event magnification])" which is unfortunately incorrect.
-  // All deltas for a single pinch gesture should sum to 0 if the start and end
-  // of a pinch gesture end up in the same place. This doesn't happen in Chrome
-  // because they followed Apple's misleading documentation, which implies that
-  // "1 + [event magnification]" is the scale factor. The scale factor is
-  // instead "pow(ratio, [event magnification])" so "[event magnification]" is
-  // already in log space.
-  //
-  // The multiplication by the backing scale factor below counteracts the
-  // division by the backing scale factor in WheelEvent.
-  WidgetWheelEvent geckoWheelEvent(true, EventMessage::eWheel, mGeckoChild);
-  [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoWheelEvent];
-  double backingScale = mGeckoChild->BackingScaleFactor();
-  geckoWheelEvent.mDeltaY = -100.0 * [anEvent magnification] * backingScale;
-  geckoWheelEvent.mModifiers |= MODIFIER_CONTROL;
-  mGeckoChild->DispatchWindowEvent(geckoWheelEvent);
+    mGeckoChild->DispatchAPZInputEvent(event);
+  } else {
 
-  // If the fake wheel event wasn't stopped, then send a normal magnify event.
-  if (!geckoWheelEvent.mFlags.mDefaultPrevented) {
-    WidgetSimpleGestureEvent geckoEvent(true, msg, mGeckoChild);
-    geckoEvent.mDelta = deltaZ;
-    [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
-    mGeckoChild->DispatchWindowEvent(geckoEvent);
+    if (!anEvent ||
+        [self beginOrEndGestureForEventPhase:anEvent]) {
+      return;
+    }
 
-    // Keep track of the cumulative magnification for the final "magnify" event.
-    mCumulativeMagnification += deltaZ;
+    nsAutoRetainCocoaObject kungFuDeathGrip(self);
+
+    float deltaZ = [anEvent deltaZ];
+
+    EventMessage msg;
+    switch (mGestureState) {
+    case eGestureState_StartGesture:
+      msg = eMagnifyGestureStart;
+      mGestureState = eGestureState_MagnifyGesture;
+      break;
+
+    case eGestureState_MagnifyGesture:
+      msg = eMagnifyGestureUpdate;
+      break;
+
+    case eGestureState_None:
+    case eGestureState_RotateGesture:
+    default:
+      return;
+    }
+
+    // This sends the pinch gesture value as a fake wheel event that has the
+    // control key pressed so that pages can implement custom pinch gesture
+    // handling. It may seem strange that this doesn't use a wheel event with
+    // the deltaZ property set, but this matches Chrome's behavior as described
+    // at https://code.google.com/p/chromium/issues/detail?id=289887
+    //
+    // The intent of the formula below is to produce numbers similar to Chrome's
+    // implementation of this feature. Chrome implements deltaY using the formula
+    // "-100 * log(1 + [event magnification])" which is unfortunately incorrect.
+    // All deltas for a single pinch gesture should sum to 0 if the start and end
+    // of a pinch gesture end up in the same place. This doesn't happen in Chrome
+    // because they followed Apple's misleading documentation, which implies that
+    // "1 + [event magnification]" is the scale factor. The scale factor is
+    // instead "pow(ratio, [event magnification])" so "[event magnification]" is
+    // already in log space.
+    //
+    // The multiplication by the backing scale factor below counteracts the
+    // division by the backing scale factor in WheelEvent.
+    WidgetWheelEvent geckoWheelEvent(true, EventMessage::eWheel, mGeckoChild);
+    [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoWheelEvent];
+    double backingScale = mGeckoChild->BackingScaleFactor();
+    geckoWheelEvent.mDeltaY = -100.0 * [anEvent magnification] * backingScale;
+    geckoWheelEvent.mModifiers |= MODIFIER_CONTROL;
+    mGeckoChild->DispatchWindowEvent(geckoWheelEvent);
+
+    // If the fake wheel event wasn't stopped, then send a normal magnify event.
+    if (!geckoWheelEvent.mFlags.mDefaultPrevented) {
+      WidgetSimpleGestureEvent geckoEvent(true, msg, mGeckoChild);
+      geckoEvent.mDelta = deltaZ;
+      [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
+      mGeckoChild->DispatchWindowEvent(geckoEvent);
+
+      // Keep track of the cumulative magnification for the final "magnify" event.
+      mCumulativeMagnification += deltaZ;
+    }
+
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -4306,9 +4379,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
   geckoEvent.mDelta = -rotation;
   if (rotation > 0.0) {
     geckoEvent.mDirection =
-      dom::SimpleGestureEventBinding::ROTATION_COUNTERCLOCKWISE;
+      dom::SimpleGestureEvent_Binding::ROTATION_COUNTERCLOCKWISE;
   } else {
-    geckoEvent.mDirection = dom::SimpleGestureEventBinding::ROTATION_CLOCKWISE;
+    geckoEvent.mDirection = dom::SimpleGestureEvent_Binding::ROTATION_CLOCKWISE;
   }
 
   // Send the event.
@@ -4399,10 +4472,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
       geckoEvent.mDelta = -mCumulativeRotation;
       if (mCumulativeRotation > 0.0) {
         geckoEvent.mDirection =
-          dom::SimpleGestureEventBinding::ROTATION_COUNTERCLOCKWISE;
+          dom::SimpleGestureEvent_Binding::ROTATION_COUNTERCLOCKWISE;
       } else {
         geckoEvent.mDirection =
-          dom::SimpleGestureEventBinding::ROTATION_CLOCKWISE;
+          dom::SimpleGestureEvent_Binding::ROTATION_CLOCKWISE;
       }
 
       // Send the event.
@@ -4580,6 +4653,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
   // This might destroy our widget (and null out mGeckoChild).
   bool defaultPrevented =
     (mGeckoChild->DispatchInputEvent(&geckoEvent) == nsEventStatus_eConsumeNoDefault);
+
+  if (!mGeckoChild) {
+    return;
+  }
 
   // Check to see if we are double-clicking in draggable parts of the window.
   if (!defaultPrevented && [theEvent clickCount] == 2 &&
@@ -5219,8 +5296,8 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
     Preferences::GetBool("mousewheel.enable_pixel_scrolling", true);
 
   outWheelEvent->mDeltaMode =
-    usePreciseDeltas ? dom::WheelEventBinding::DOM_DELTA_PIXEL
-                     : dom::WheelEventBinding::DOM_DELTA_LINE;
+    usePreciseDeltas ? dom::WheelEvent_Binding::DOM_DELTA_PIXEL
+                     : dom::WheelEvent_Binding::DOM_DELTA_LINE;
   outWheelEvent->mIsMomentum = nsCocoaUtils::IsMomentumScrollEvent(aMouseEvent);
 }
 
@@ -5297,7 +5374,7 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
     MOZ_ASSERT(aOutGeckoEvent->pressure >= 0.0 &&
                aOutGeckoEvent->pressure <= 1.0);
   }
-  aOutGeckoEvent->inputSource = dom::MouseEventBinding::MOZ_SOURCE_PEN;
+  aOutGeckoEvent->inputSource = dom::MouseEvent_Binding::MOZ_SOURCE_PEN;
   aOutGeckoEvent->tiltX = lround([aPointerEvent tilt].x * 90);
   aOutGeckoEvent->tiltY = lround([aPointerEvent tilt].y * 90);
   aOutGeckoEvent->tangentialPressure = [aPointerEvent tangentialPressure];
@@ -6087,7 +6164,7 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
       if (!NS_SUCCEEDED(dragSession->GetCanDrop(&canDrop)) || !canDrop) {
         [self doDragAction:eDragExit sender:aSender];
 
-        nsCOMPtr<nsIDOMNode> sourceNode;
+        nsCOMPtr<nsINode> sourceNode;
         dragSession->GetSourceNode(getter_AddRefs(sourceNode));
         if (!sourceNode) {
           mDragService->EndDragSession(
@@ -6145,7 +6222,7 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
       }
       case eDragExit:
       case eDrop: {
-        nsCOMPtr<nsIDOMNode> sourceNode;
+        nsCOMPtr<nsINode> sourceNode;
         dragSession->GetSourceNode(getter_AddRefs(sourceNode));
         if (!sourceNode) {
           // We're leaving a window while doing a drag that was

@@ -361,7 +361,7 @@ decorate_task(
 // Enrollment works for prefs with only a user branch value, and no default value.
 decorate_task(
   PreferenceRollouts.withTestMock,
-  async function simple_recipe_enrollment(setExperimentActiveStub, sendEventStub) {
+  async function simple_recipe_enrollment() {
     const recipe = {
       id: 1,
       arguments: {
@@ -380,6 +380,92 @@ decorate_task(
     is(Services.prefs.getIntPref("test.pref"), 2, "original user branch value still visible");
     is(Services.prefs.getDefaultBranch("").getIntPref("test.pref"), 1, "default branch was set");
     is(Services.prefs.getIntPref("app.normandy.startupRolloutPrefs.test.pref"), 1, "startup pref is est");
+
+    // Cleanup
+    Services.prefs.getDefaultBranch("").deleteBranch("test.pref");
+  },
+);
+
+// When running a rollout a second time on a pref that doesn't have an existing
+// value, the previous value is handled correctly.
+decorate_task(
+  PreferenceRollouts.withTestMock,
+  withSendEventStub,
+  async function(sendEventStub) {
+    const recipe = {
+      id: 1,
+      arguments: {
+        slug: "test-rollout",
+        preferences: [{preferenceName: "test.pref", value: 1}],
+      },
+    };
+
+    // run once
+    let action = new PreferenceRolloutAction();
+    await action.runRecipe(recipe);
+    await action.finalize();
+
+    // run a second time
+    action = new PreferenceRolloutAction();
+    await action.runRecipe(recipe);
+    await action.finalize();
+
+    Assert.deepEqual(
+      sendEventStub.args,
+      [["enroll", "preference_rollout", "test-rollout", {}]],
+      "only an enrollment event should be generated",
+    );
+
+    Assert.deepEqual(
+      await PreferenceRollouts.getAll(),
+      [{
+        slug: "test-rollout",
+        state: PreferenceRollouts.STATE_ACTIVE,
+        preferences: [{preferenceName: "test.pref", value: 1, previousValue: null}],
+      }],
+      "the DB should have the correct value stored for previousValue",
+    );
+  },
+);
+
+// New rollouts that are no-ops should send errors
+decorate_task(
+  PreferenceRollouts.withTestMock,
+  withStub(TelemetryEnvironment, "setExperimentActive"),
+  withSendEventStub,
+  async function no_op_new_recipe(setExperimentActiveStub, sendEventStub) {
+    Services.prefs.getDefaultBranch("").setIntPref("test.pref", 1);
+
+    const recipe = {
+      id: 1,
+      arguments: {
+        slug: "test-rollout",
+        preferences: [{preferenceName: "test.pref", value: 1}],
+      },
+    };
+
+    const action = new PreferenceRolloutAction();
+    await action.runRecipe(recipe);
+    await action.finalize();
+
+    is(Services.prefs.getIntPref("test.pref"), 1, "pref should not change");
+
+    // start up pref isn't set
+    is(Services.prefs.getPrefType(
+      "app.normandy.startupRolloutPrefs.test.pref"),
+      Services.prefs.PREF_INVALID,
+      "startup pref1 should not be set",
+    );
+
+    // rollout was not stored
+    Assert.deepEqual(await PreferenceRollouts.getAll(), [], "Rollout should not be stored in db");
+
+    Assert.deepEqual(
+      sendEventStub.args,
+      [["enrollFailed", "preference_rollout", recipe.arguments.slug, {reason: "would-be-no-op"}]],
+      "an enrollment failure event should be sent"
+    );
+    Assert.deepEqual(setExperimentActiveStub.args, [], "a telemetry experiment should not be activated");
 
     // Cleanup
     Services.prefs.getDefaultBranch("").deleteBranch("test.pref");

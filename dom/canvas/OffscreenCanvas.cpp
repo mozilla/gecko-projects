@@ -64,7 +64,7 @@ JSObject*
 OffscreenCanvas::WrapObject(JSContext* aCx,
                             JS::Handle<JSObject*> aGivenProto)
 {
-  return OffscreenCanvasBinding::Wrap(aCx, this, aGivenProto);
+  return OffscreenCanvas_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<OffscreenCanvas>
@@ -161,7 +161,7 @@ OffscreenCanvas::GetContext(JSContext* aCx,
           gl::GLScreenBuffer::CreateFactory(gl, caps, forwarder, flags);
 
         if (factory)
-          screen->Morph(Move(factory));
+          screen->Morph(std::move(factory));
       }
     }
   }

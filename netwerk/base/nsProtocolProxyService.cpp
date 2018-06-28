@@ -802,7 +802,7 @@ NS_INTERFACE_MAP_BEGIN(nsProtocolProxyService)
 NS_INTERFACE_MAP_ENTRY(nsIProtocolProxyService)
 NS_INTERFACE_MAP_ENTRY(nsIProtocolProxyService2)
 NS_INTERFACE_MAP_ENTRY(nsIObserver)
-if ( aIID.Equals(NS_GET_IID(nsProtocolProxyService)) )  foundInterface = static_cast<nsIProtocolProxyService2*>(this); else
+NS_INTERFACE_MAP_ENTRY_CONCRETE(nsProtocolProxyService)
 NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIProtocolProxyService)
 NS_IMPL_QUERY_CLASSINFO(nsProtocolProxyService)
 NS_INTERFACE_MAP_END
@@ -1878,7 +1878,7 @@ nsProtocolProxyService::RegisterFilter(nsIProtocolProxyFilter *filter,
     UnregisterFilter(filter); // remove this filter if we already have it
 
     RefPtr<FilterLink> link = new FilterLink(position, filter);
-    return InsertFilterLink(Move(link));
+    return InsertFilterLink(std::move(link));
 }
 
 NS_IMETHODIMP
@@ -1888,7 +1888,7 @@ nsProtocolProxyService::RegisterChannelFilter(nsIProtocolProxyChannelFilter *cha
     UnregisterChannelFilter(channelFilter);  // remove this filter if we already have it
 
     RefPtr<FilterLink> link = new FilterLink(position, channelFilter);
-    return InsertFilterLink(Move(link));
+    return InsertFilterLink(std::move(link));
 }
 
 nsresult
@@ -2451,7 +2451,7 @@ nsProtocolProxyService::PruneProxyInfo(const nsProtocolInfo &info,
     nsProxyInfo *head = nullptr;
     CallQueryInterface(*list, &head);
     if (!head) {
-        NS_NOTREACHED("nsIProxyInfo must QI to nsProxyInfo");
+        MOZ_ASSERT_UNREACHABLE("nsIProxyInfo must QI to nsProxyInfo");
         return;
     }
     NS_RELEASE(*list);

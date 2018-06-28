@@ -77,7 +77,7 @@ public:
     , mReservationSize(0)
     , mCommitOffset(0)
   {
-    *this = Move(aOther);
+    *this = std::move(aOther);
   }
 
   MMPolicyInProcess& operator=(MMPolicyInProcess&& aOther)
@@ -152,6 +152,11 @@ public:
   bool FlushInstructionCache() const
   {
     return !!::FlushInstructionCache(::GetCurrentProcess(), nullptr, 0);
+  }
+
+  static DWORD GetTrampWriteProtFlags()
+  {
+    return PAGE_EXECUTE_READWRITE;
   }
 
 protected:
@@ -266,7 +271,7 @@ public:
     , mReservationSize(0)
     , mCommitOffset(0)
   {
-    *this = Move(aOther);
+    *this = std::move(aOther);
   }
 
   MMPolicyOutOfProcess(const MMPolicyOutOfProcess& aOther) = delete;
@@ -368,6 +373,11 @@ public:
   bool FlushInstructionCache() const
   {
     return !!::FlushInstructionCache(mProcess, nullptr, 0);
+  }
+
+  static DWORD GetTrampWriteProtFlags()
+  {
+    return PAGE_READWRITE;
   }
 
 protected:

@@ -21,6 +21,7 @@
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
 
+#include "vm/Compartment-inl.h"
 #include "vm/Debugger-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -164,7 +165,7 @@ mozilla::Atomic<uint64_t> gIDGenerator(0);
 static MOZ_ALWAYS_INLINE bool
 ShouldCaptureDebugInfo(JSContext* cx)
 {
-    return cx->options().asyncStack() || cx->compartment()->isDebuggee();
+    return cx->options().asyncStack() || cx->realm()->isDebuggee();
 }
 
 static mozilla::Maybe<mozilla::TimeStamp>
@@ -683,7 +684,7 @@ EnqueuePromiseReactionJob(JSContext* cx, HandleObject reactionObj,
     // compartment, where the job creation should take place anyway.
     Rooted<PromiseReactionRecord*> reaction(cx);
     RootedValue handlerArg(cx, handlerArg_);
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (!IsProxy(reactionObj)) {
         MOZ_RELEASE_ASSERT(reactionObj->is<PromiseReactionRecord>());
         reaction = &reactionObj->as<PromiseReactionRecord>();
@@ -694,7 +695,7 @@ EnqueuePromiseReactionJob(JSContext* cx, HandleObject reactionObj,
         }
         reaction = &UncheckedUnwrap(reactionObj)->as<PromiseReactionRecord>();
         MOZ_RELEASE_ASSERT(reaction->is<PromiseReactionRecord>());
-        ac.emplace(cx, reaction);
+        ar.emplace(cx, reaction);
         if (!reaction->compartment()->wrap(cx, &handlerArg))
             return false;
     }
@@ -715,7 +716,7 @@ EnqueuePromiseReactionJob(JSContext* cx, HandleObject reactionObj,
     // That guarantees that the embedding ends up with the right entry global.
     // This is relevant for some html APIs like fetch that derive information
     // from said global.
-    mozilla::Maybe<AutoCompartment> ac2;
+    mozilla::Maybe<AutoRealm> ar2;
     if (handler.isObject()) {
         RootedObject handlerObj(cx, &handler.toObject());
 
@@ -725,7 +726,7 @@ EnqueuePromiseReactionJob(JSContext* cx, HandleObject reactionObj,
         // reaction to a content compartment's Promise instance.
         handlerObj = UncheckedUnwrap(handlerObj);
         MOZ_ASSERT(handlerObj);
-        ac2.emplace(cx, handlerObj);
+        ar2.emplace(cx, handlerObj);
 
         // We need to wrap the reaction to store it on the job function.
         if (!cx->compartment()->wrap(cx, &reactionVal))
@@ -769,7 +770,7 @@ EnqueuePromiseReactionJob(JSContext* cx, HandleObject reactionObj,
     if (objectFromIncumbentGlobal) {
         objectFromIncumbentGlobal = CheckedUnwrap(objectFromIncumbentGlobal);
         MOZ_ASSERT(objectFromIncumbentGlobal);
-        global = &objectFromIncumbentGlobal->global();
+        global = &objectFromIncumbentGlobal->nonCCWGlobal();
     }
 
     // Note: the global we pass here might be from a different compartment
@@ -833,7 +834,7 @@ FulfillMaybeWrappedPromise(JSContext *cx, HandleObject promiseObj, HandleValue v
     Rooted<PromiseObject*> promise(cx);
     RootedValue value(cx, value_);
 
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (!IsProxy(promiseObj)) {
         promise = &promiseObj->as<PromiseObject>();
     } else {
@@ -842,7 +843,7 @@ FulfillMaybeWrappedPromise(JSContext *cx, HandleObject promiseObj, HandleValue v
             return false;
         }
         promise = &UncheckedUnwrap(promiseObj)->as<PromiseObject>();
-        ac.emplace(cx, promise);
+        ar.emplace(cx, promise);
         if (!promise->compartment()->wrap(cx, &value))
             return false;
     }
@@ -867,7 +868,7 @@ enum GetCapabilitiesExecutorSlots {
 static MOZ_MUST_USE PromiseObject*
 CreatePromiseObjectWithoutResolutionFunctions(JSContext* cx)
 {
-    Rooted<PromiseObject*> promise(cx, CreatePromiseObjectInternal(cx));
+    PromiseObject* promise = CreatePromiseObjectInternal(cx);
     if (!promise)
         return nullptr;
 
@@ -1016,7 +1017,7 @@ RejectMaybeWrappedPromise(JSContext *cx, HandleObject promiseObj, HandleValue re
     Rooted<PromiseObject*> promise(cx);
     RootedValue reason(cx, reason_);
 
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (!IsProxy(promiseObj)) {
         promise = &promiseObj->as<PromiseObject>();
     } else {
@@ -1025,7 +1026,7 @@ RejectMaybeWrappedPromise(JSContext *cx, HandleObject promiseObj, HandleValue re
             return false;
         }
         promise = &UncheckedUnwrap(promiseObj)->as<PromiseObject>();
-        ac.emplace(cx, promise);
+        ar.emplace(cx, promise);
 
         // The rejection reason might've been created in a compartment with higher
         // privileges than the Promise's. In that case, object-type rejection
@@ -1041,7 +1042,7 @@ RejectMaybeWrappedPromise(JSContext *cx, HandleObject promiseObj, HandleValue re
             // floor.
             RootedObject realReason(cx, UncheckedUnwrap(&reason.toObject()));
             RootedValue realReasonVal(cx, ObjectValue(*realReason));
-            RootedObject realGlobal(cx, &realReason->global());
+            RootedObject realGlobal(cx, &realReason->nonCCWGlobal());
             ReportErrorToGlobal(cx, realGlobal, realReasonVal);
 
             // Async stacks are only properly adopted if there's at least one
@@ -1194,7 +1195,7 @@ PromiseReactionJob(JSContext* cx, unsigned argc, Value* vp)
     // We can find the triggering global via the job's reaction record. To go
     // back, we check if the reaction is a wrapper and if so, unwrap it and
     // enter its compartment.
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (!IsProxy(reactionObj)) {
         MOZ_RELEASE_ASSERT(reactionObj->is<PromiseReactionRecord>());
     } else {
@@ -1204,7 +1205,7 @@ PromiseReactionJob(JSContext* cx, unsigned argc, Value* vp)
             return false;
         }
         MOZ_RELEASE_ASSERT(reactionObj->is<PromiseReactionRecord>());
-        ac.emplace(cx, reactionObj);
+        ar.emplace(cx, reactionObj);
     }
 
     // Steps 1-2.
@@ -1359,7 +1360,7 @@ EnqueuePromiseResolveThenableJob(JSContext* cx, HandleValue promiseToResolve_,
     // This is relevant for some html APIs like fetch that derive information
     // from said global.
     RootedObject then(cx, CheckedUnwrap(&thenVal.toObject()));
-    AutoCompartment ac(cx, then);
+    AutoRealm ar(cx, then);
 
     RootedAtom funName(cx, cx->names().empty);
     RootedFunction job(cx, NewNativeFunction(cx, PromiseResolveThenableJob, 0, funName,
@@ -1489,9 +1490,9 @@ CreatePromiseObjectInternal(JSContext* cx, HandleObject proto /* = nullptr */,
     // All state stored in a Promise's fixed slots must be created in the
     // same compartment, so we get all of that out of the way here.
     // (Except for the resolution functions, which are created below.)
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (protoIsWrapped)
-        ac.emplace(cx, proto);
+        ar.emplace(cx, proto);
 
     PromiseObject* promise = NewObjectWithClassProto<PromiseObject>(cx, proto);
     if (!promise)
@@ -1585,7 +1586,7 @@ PromiseConstructor(JSContext* cx, unsigned argc, Value* vp)
 
         newTarget = unwrappedNewTarget;
         {
-            AutoCompartment ac(cx, newTarget);
+            AutoRealm ar(cx, newTarget);
             Handle<GlobalObject*> global = cx->global();
             RootedObject promiseCtor(cx, GlobalObject::getOrCreatePromiseConstructor(cx, global));
             if (!promiseCtor)
@@ -1664,7 +1665,7 @@ PromiseObject::create(JSContext* cx, HandleObject executor, HandleObject proto /
     MOZ_ASSERT(promise->getFixedSlot(PromiseSlot_RejectFunction).isUndefined(),
                "Slot must be undefined so initFixedSlot can be used");
     if (needsWrapping) {
-        AutoCompartment ac(cx, promise);
+        AutoRealm ar(cx, promise);
         RootedObject wrappedRejectFn(cx, rejectFn);
         if (!cx->compartment()->wrap(cx, &wrappedRejectFn))
             return nullptr;
@@ -1989,7 +1990,7 @@ PerformPromiseAll(JSContext *cx, JS::ForOfIterator& iterator, HandleObject C,
     // PromiseAllResolveElement.
     RootedObject valuesArray(cx);
     if (unwrappedPromiseObj) {
-        JSAutoCompartment ac(cx, unwrappedPromiseObj);
+        JSAutoRealm ar(cx, unwrappedPromiseObj);
         valuesArray = NewDenseFullyAllocatedArray(cx, 0);
     } else {
         valuesArray = NewDenseFullyAllocatedArray(cx, 0);
@@ -2048,10 +2049,10 @@ PerformPromiseAll(JSContext *cx, JS::ForOfIterator& iterator, HandleObject C,
         }
 
         // Step h.
-        { // Scope for the JSAutoCompartment we need to work with valuesArray.  We
+        { // Scope for the JSAutoRealm we need to work with valuesArray.  We
             // mostly do this for performance; we could go ahead and do the define via
             // a cross-compartment proxy instead...
-            JSAutoCompartment ac(cx, valuesArray);
+            JSAutoRealm ar(cx, valuesArray);
             indexId = INT_TO_JSID(index);
             if (!DefineDataProperty(cx, valuesArray, indexId, UndefinedHandleValue))
                 return false;
@@ -2150,7 +2151,7 @@ PromiseAllResolveElementFunction(JSContext* cx, unsigned argc, Value* vp)
     // Step 8.
     // The index is guaranteed to be initialized to `undefined`.
     if (valuesListIsWrapped) {
-        AutoCompartment ac(cx, values);
+        AutoRealm ar(cx, values);
         if (!cx->compartment()->wrap(cx, &xVal))
             return false;
     }
@@ -2526,7 +2527,7 @@ MOZ_MUST_USE PromiseObject*
 js::CreatePromiseObjectForAsync(JSContext* cx, HandleValue generatorVal)
 {
     // Step 1.
-    Rooted<PromiseObject*> promise(cx, CreatePromiseObjectWithoutResolutionFunctions(cx));
+    PromiseObject* promise = CreatePromiseObjectWithoutResolutionFunctions(cx);
     if (!promise)
         return nullptr;
 
@@ -3085,8 +3086,8 @@ IsPromiseThenOrCatchRetValImplicitlyUsed(JSContext* cx)
     if (!cx->options().asyncStack())
         return false;
 
-    // If devtools is opened, the current compartment will become debuggee.
-    if (cx->compartment()->isDebuggee())
+    // If devtools is opened, the current realm will become debuggee.
+    if (cx->realm()->isDebuggee())
         return true;
 
     // There are 2 profilers, and they can be independently enabled.
@@ -3343,7 +3344,7 @@ BlockOnPromise(JSContext* cx, HandleValue promiseVal, HandleObject blockedPromis
     RootedObject unwrappedPromiseObj(cx, promiseObj);
     RootedObject blockedPromise(cx, blockedPromise_);
 
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (IsProxy(promiseObj)) {
         unwrappedPromiseObj = CheckedUnwrap(promiseObj);
         if (!unwrappedPromiseObj) {
@@ -3354,7 +3355,7 @@ BlockOnPromise(JSContext* cx, HandleValue promiseVal, HandleObject blockedPromis
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
             return false;
         }
-        ac.emplace(cx, unwrappedPromiseObj);
+        ar.emplace(cx, unwrappedPromiseObj);
         if (!cx->compartment()->wrap(cx, &blockedPromise))
             return false;
     }
@@ -3385,9 +3386,9 @@ AddPromiseReaction(JSContext* cx, Handle<PromiseObject*> promise,
     // objects we have here aren't necessarily from the same compartment. In
     // order to store the reaction on the promise, we have to ensure that it
     // is properly wrapped.
-    mozilla::Maybe<AutoCompartment> ac;
+    mozilla::Maybe<AutoRealm> ar;
     if (promise->compartment() != cx->compartment()) {
-        ac.emplace(cx, promise);
+        ar.emplace(cx, promise);
         if (!cx->compartment()->wrap(cx, &reactionVal))
             return false;
     }
@@ -3643,7 +3644,7 @@ OffThreadPromiseTask::run(JSContext* cx, MaybeShuttingDown maybeShuttingDown)
         // We can't leave a pending exception when returning to the caller so do
         // the same thing as Gecko, which is to ignore the error. This should
         // only happen due to OOM or interruption.
-        AutoCompartment ac(cx, promise_);
+        AutoRealm ar(cx, promise_);
         if (!resolve(cx, promise_))
             cx->clearPendingException();
     }

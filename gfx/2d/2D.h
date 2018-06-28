@@ -46,14 +46,13 @@ typedef _cairo_surface cairo_surface_t;
 struct _cairo_scaled_font;
 typedef _cairo_scaled_font cairo_scaled_font_t;
 
-struct _FcPattern;
-typedef _FcPattern FcPattern;
-
 struct FT_LibraryRec_;
 typedef FT_LibraryRec_* FT_Library;
 
 struct FT_FaceRec_;
 typedef FT_FaceRec_* FT_Face;
+
+typedef int FT_Error;
 
 struct ID3D11Texture2D;
 struct ID3D11Device;
@@ -473,13 +472,35 @@ public:
    *
    * Use IsMapped() to verify whether Map() succeeded or not.
    */
-  class ScopedMap {
+  class ScopedMap final {
   public:
     explicit ScopedMap(DataSourceSurface* aSurface, MapType aType)
       : mSurface(aSurface)
       , mIsMapped(aSurface->Map(aType, &mMap)) {}
 
-    virtual ~ScopedMap()
+    ScopedMap(ScopedMap&& aOther)
+      : mSurface(std::move(aOther.mSurface))
+      , mMap(aOther.mMap)
+      , mIsMapped(aOther.mIsMapped)
+    {
+      aOther.mMap.mData = nullptr;
+      aOther.mIsMapped = false;
+    }
+
+    ScopedMap& operator=(ScopedMap&& aOther)
+    {
+      if (mIsMapped) {
+        mSurface->Unmap();
+      }
+      mSurface = std::move(aOther.mSurface);
+      mMap = aOther.mMap;
+      mIsMapped = aOther.mIsMapped;
+      aOther.mMap.mData = nullptr;
+      aOther.mIsMapped = false;
+      return *this;
+    }
+
+    ~ScopedMap()
     {
       if (mIsMapped) {
         mSurface->Unmap();
@@ -507,6 +528,9 @@ public:
     bool IsMapped() const { return mIsMapped; }
 
   private:
+    ScopedMap(const ScopedMap& aOther) = delete;
+    ScopedMap& operator=(const ScopedMap& aOther) = delete;
+
     RefPtr<DataSourceSurface> mSurface;
     MappedSurface mMap;
     bool mIsMapped;
@@ -855,6 +879,8 @@ public:
   }
 
   virtual bool CanSerialize() { return false; }
+
+  virtual bool HasVariationSettings() { return false; }
 
   void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
     mUserData.Add(key, userData, destroy);
@@ -1616,17 +1642,6 @@ public:
   static already_AddRefed<DrawTarget>
     CreateDrawTargetForData(BackendType aBackend, unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat, bool aUninitialized = false);
 
-  static already_AddRefed<ScaledFont>
-    CreateScaledFontForNativeFont(const NativeFont &aNativeFont,
-                                  const RefPtr<UnscaledFont>& aUnscaledFont,
-                                  Float aSize);
-
-#ifdef MOZ_WIDGET_GTK
-  static already_AddRefed<ScaledFont>
-    CreateScaledFontForFontconfigFont(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern,
-                                      const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize);
-#endif
-
 #ifdef XP_DARWIN
   static already_AddRefed<ScaledFont>
     CreateScaledFontForMacFont(CGFontRef aCGFont, const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
@@ -1655,15 +1670,17 @@ public:
     CreateUnscaledFontFromFontDescriptor(FontType aType, const uint8_t* aData, uint32_t aDataLength, uint32_t aIndex);
 
   /**
-   * This creates a scaled font with an associated cairo_scaled_font_t, and
-   * must be used when using the Cairo backend. The NativeFont and
-   * cairo_scaled_font_t* parameters must correspond to the same font.
+   * Creates a ScaledFont from the supplied NativeFont.
+   *
+   * If aScaledFont is supplied, this creates a scaled font with an associated
+   * cairo_scaled_font_t. The NativeFont and cairo_scaled_font_t* parameters must
+   * correspond to the same font.
    */
   static already_AddRefed<ScaledFont>
-    CreateScaledFontWithCairo(const NativeFont &aNativeFont,
-                              const RefPtr<UnscaledFont>& aUnscaledFont,
-                              Float aSize,
-                              cairo_scaled_font_t* aScaledFont);
+    CreateScaledFontForNativeFont(const NativeFont &aNativeFont,
+                                  const RefPtr<UnscaledFont>& aUnscaledFont,
+                                  Float aSize,
+                                  cairo_scaled_font_t* aScaledFont = nullptr);
 
   /**
    * This creates a simple data source surface for a certain size. It allocates
@@ -1763,6 +1780,7 @@ public:
   static FT_Face NewFTFace(FT_Library aFTLibrary, const char* aFileName, int aFaceIndex);
   static FT_Face NewFTFaceFromData(FT_Library aFTLibrary, const uint8_t* aData, size_t aDataSize, int aFaceIndex);
   static void ReleaseFTFace(FT_Face aFace);
+  static FT_Error LoadFTGlyph(FT_Face aFace, uint32_t aGlyphIndex, int32_t aFlags);
 
 private:
   static FT_Library mFTLibrary;

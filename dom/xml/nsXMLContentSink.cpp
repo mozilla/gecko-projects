@@ -401,9 +401,9 @@ nsXMLContentSink::OnTransformDone(nsresult aResult,
   if (rootElement) {
     NS_ASSERTION(mDocument->ComputeIndexOf(rootElement) != -1,
                  "rootElement not in doc?");
-    mDocument->BeginUpdate(UPDATE_CONTENT_MODEL);
+    mDocument->BeginUpdate();
     nsNodeUtils::ContentInserted(mDocument, rootElement);
-    mDocument->EndUpdate(UPDATE_CONTENT_MODEL);
+    mDocument->EndUpdate();
   }
 
   // Start the layout process
@@ -461,6 +461,24 @@ nsXMLContentSink::SetParser(nsParserBase* aParser)
   return NS_OK;
 }
 
+static bool
+FindIsAttrValue(const char16_t** aAtts, const char16_t** aResult)
+{
+  RefPtr<nsAtom> prefix, localName;
+  for (; *aAtts; aAtts += 2) {
+    int32_t nameSpaceID;
+    nsContentUtils::SplitExpatName(aAtts[0], getter_AddRefs(prefix),
+                                   getter_AddRefs(localName), &nameSpaceID);
+    if (nameSpaceID == kNameSpaceID_None && localName == nsGkAtoms::is) {
+      *aResult = aAtts[1];
+
+      return true;
+    }
+  }
+
+  return false;
+}
+
 nsresult
 nsXMLContentSink::CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
                                 mozilla::dom::NodeInfo* aNodeInfo, uint32_t aLineNumber,
@@ -475,7 +493,17 @@ nsXMLContentSink::CreateElement(const char16_t** aAtts, uint32_t aAttsCount,
 
   RefPtr<mozilla::dom::NodeInfo> ni = aNodeInfo;
   RefPtr<Element> content;
-  rv = NS_NewElement(getter_AddRefs(content), ni.forget(), aFromParser);
+
+  const char16_t* is = nullptr;
+  if ((aNodeInfo->NamespaceEquals(kNameSpaceID_XHTML) ||
+       aNodeInfo->NamespaceEquals(kNameSpaceID_XUL)) &&
+      FindIsAttrValue(aAtts, &is)) {
+    const nsDependentString isStr(is);
+    rv = NS_NewElement(getter_AddRefs(content), ni.forget(), aFromParser, &isStr);
+  } else {
+    rv = NS_NewElement(getter_AddRefs(content), ni.forget(), aFromParser);
+  }
+
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aNodeInfo->Equals(nsGkAtoms::script, kNameSpaceID_XHTML)
@@ -1539,7 +1567,7 @@ nsXMLContentSink::FlushTags()
   ++mInNotification;
   {
     // Scope so we call EndUpdate before we decrease mInNotification
-    mozAutoDocUpdate updateBatch(mDocument, UPDATE_CONTENT_MODEL, true);
+    mozAutoDocUpdate updateBatch(mDocument, true);
     mBeganUpdate = true;
 
     // Don't release last text node in case we need to add to it again

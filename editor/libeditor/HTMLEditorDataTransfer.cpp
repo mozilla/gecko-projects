@@ -38,8 +38,6 @@
 #include "nsGkAtoms.h"
 #include "nsIClipboard.h"
 #include "nsIContent.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMNode.h"
 #include "nsIDocument.h"
 #include "nsIFile.h"
 #include "nsIInputStream.h"
@@ -94,18 +92,24 @@ HTMLEditor::LoadHTML(const nsAString& aInputString)
   // force IME commit; set up rules sniffing and batching
   CommitComposition();
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::loadHTML, nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this,
+                                      EditSubAction::eInsertHTMLSource,
+                                      nsIEditor::eNext);
 
   // Get selection
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_STATE(selection);
 
-  RulesInfo ruleInfo(EditAction::loadHTML);
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertHTMLSource);
   bool cancel, handled;
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   if (cancel) {
     return NS_OK; // rules canceled the operation
   }
@@ -160,7 +164,7 @@ HTMLEditor::LoadHTML(const nsAString& aInputString)
     }
   }
 
-  return rules->DidDoAction(selection, &ruleInfo, rv);
+  return rules->DidDoAction(selection, subActionInfo, rv);
 }
 
 NS_IMETHODIMP
@@ -170,25 +174,6 @@ HTMLEditor::InsertHTML(const nsAString& aInString)
 
   return DoInsertHTMLWithContext(aInString, empty, empty, empty,
                                  nullptr,  nullptr, 0, true, true, false);
-}
-
-NS_IMETHODIMP
-HTMLEditor::InsertHTMLWithContext(const nsAString& aInputString,
-                                  const nsAString& aContextStr,
-                                  const nsAString& aInfoStr,
-                                  const nsAString& aFlavor,
-                                  nsIDOMDocument* aSourceDoc,
-                                  nsIDOMNode* aDestNode,
-                                  int32_t aDestOffset,
-                                  bool aDeleteSelection)
-{
-  nsCOMPtr<nsIDocument> sourceDoc = do_QueryInterface(aSourceDoc);
-  nsCOMPtr<nsINode> destNode = do_QueryInterface(aDestNode);
-  return DoInsertHTMLWithContext(aInputString, aContextStr, aInfoStr,
-                                 aFlavor, sourceDoc, destNode, aDestOffset,
-                                 aDeleteSelection,
-                                 /* trusted input */ true,
-                                 /* clear style */ false);
 }
 
 nsresult
@@ -211,7 +196,9 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
   // force IME commit; set up rules sniffing and batching
   CommitComposition();
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::htmlPaste, nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, EditSubAction::ePasteHTMLContent,
+                                      nsIEditor::eNext);
 
   // Get selection
   RefPtr<Selection> selection = GetSelection();
@@ -337,9 +324,9 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
   }
 
   // give rules a chance to handle or cancel
-  RulesInfo ruleInfo(EditAction::insertElement);
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertElement);
   bool cancel, handled;
-  rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
+  rv = rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
   NS_ENSURE_SUCCESS(rv, rv);
   if (cancel) {
     return NS_OK; // rules canceled the operation
@@ -693,7 +680,7 @@ HTMLEditor::DoInsertHTMLWithContext(const nsAString& aInputString,
     }
   }
 
-  return rules->DidDoAction(selection, &ruleInfo, rv);
+  return rules->DidDoAction(selection, subActionInfo, rv);
 }
 
 bool
@@ -745,7 +732,7 @@ HTMLEditor::StripFormattingNodes(nsIContent& aNode,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 HTMLEditor::PrepareTransferable(nsITransferable** aTransferable)
 {
   return NS_OK;
@@ -1047,7 +1034,7 @@ HTMLEditor::InsertObject(const nsACString& aType,
     nsCOMPtr<nsINode> node = do_QueryInterface(aDestinationNode);
     MOZ_ASSERT(node);
 
-    nsCOMPtr<nsIDOMBlob> domBlob = Blob::Create(node->GetOwnerGlobal(), blob);
+    RefPtr<Blob> domBlob = Blob::Create(node->GetOwnerGlobal(), blob);
     NS_ENSURE_TRUE(domBlob, NS_ERROR_FAILURE);
 
     return utils->SlurpBlob(domBlob, node->OwnerDoc()->GetWindow(), br);
@@ -1431,7 +1418,7 @@ HTMLEditor::Paste(int32_t aSelectionType)
                                 bHavePrivateHTMLFlavor, true);
 }
 
-NS_IMETHODIMP
+nsresult
 HTMLEditor::PasteTransferable(nsITransferable* aTransferable)
 {
   // Use an invalid value for the clipboard type as data comes from aTransferable
@@ -1527,29 +1514,24 @@ HTMLEditor::CanPaste(int32_t aSelectionType,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-HTMLEditor::CanPasteTransferable(nsITransferable* aTransferable,
-                                 bool* aCanPaste)
+bool
+HTMLEditor::CanPasteTransferable(nsITransferable* aTransferable)
 {
-  NS_ENSURE_ARG_POINTER(aCanPaste);
-
   // can't paste if readonly
   if (!IsModifiable()) {
-    *aCanPaste = false;
-    return NS_OK;
+    return false;
   }
 
   // If |aTransferable| is null, assume that a paste will succeed.
   if (!aTransferable) {
-    *aCanPaste = true;
-    return NS_OK;
+    return true;
   }
 
   // Peek in |aTransferable| to see if it contains a supported MIME type.
 
   // Use the flavors depending on the current editor mask
   const char ** flavors;
-  unsigned length;
+  size_t length;
   if (IsPlaintextEditor()) {
     flavors = textEditorFlavors;
     length = ArrayLength(textEditorFlavors);
@@ -1558,20 +1540,18 @@ HTMLEditor::CanPasteTransferable(nsITransferable* aTransferable,
     length = ArrayLength(textHtmlEditorFlavors);
   }
 
-  for (unsigned int i = 0; i < length; i++, flavors++) {
+  for (size_t i = 0; i < length; i++, flavors++) {
     nsCOMPtr<nsISupports> data;
     uint32_t dataLen;
     nsresult rv = aTransferable->GetTransferData(*flavors,
                                                  getter_AddRefs(data),
                                                  &dataLen);
     if (NS_SUCCEEDED(rv) && data) {
-      *aCanPaste = true;
-      return NS_OK;
+      return true;
     }
   }
 
-  *aCanPaste = false;
-  return NS_OK;
+  return false;
 }
 
 /**
@@ -1593,20 +1573,24 @@ HTMLEditor::PasteAsCitedQuotation(const nsAString& aCitation,
                                   int32_t aSelectionType)
 {
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::insertQuotation,
-                               nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, EditSubAction::eInsertQuotation,
+                                      nsIEditor::eNext);
 
   // get selection
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   // give rules a chance to handle or cancel
-  RulesInfo ruleInfo(EditAction::insertElement);
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertElement);
   bool cancel, handled;
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   if (cancel || handled) {
     return NS_OK; // rules canceled the operation
   }
@@ -1623,6 +1607,7 @@ HTMLEditor::PasteAsCitedQuotation(const nsAString& aCitation,
   rv = selection->Collapse(newNode, 0);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // XXX Why don't we call HTMLEditRules::DidDoAction() after Paste()?
   return Paste(aSelectionType);
 }
 
@@ -1750,7 +1735,7 @@ HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
     // If no newline found, lineStart is now strEnd and we can finish up,
     // inserting from curHunk to lineStart then returning.
     const nsAString &curHunk = Substring(hunkStart, lineStart);
-    nsCOMPtr<nsIDOMNode> dummyNode;
+    nsCOMPtr<nsINode> dummyNode;
     if (curHunkIsQuoted) {
       rv = InsertAsPlaintextQuotation(curHunk, false,
                                       getter_AddRefs(dummyNode));
@@ -1773,7 +1758,7 @@ HTMLEditor::InsertTextWithQuotations(const nsAString& aStringToInsert)
 
 NS_IMETHODIMP
 HTMLEditor::InsertAsQuotation(const nsAString& aQuotedText,
-                              nsIDOMNode** aNodeInserted)
+                              nsINode** aNodeInserted)
 {
   if (IsPlaintextEditor()) {
     return InsertAsPlaintextQuotation(aQuotedText, true, aNodeInserted);
@@ -1791,23 +1776,27 @@ HTMLEditor::InsertAsQuotation(const nsAString& aQuotedText,
 nsresult
 HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
                                        bool aAddCites,
-                                       nsIDOMNode** aNodeInserted)
+                                       nsINode** aNodeInserted)
 {
   // get selection
   RefPtr<Selection> selection = GetSelection();
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::insertQuotation,
-                               nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, EditSubAction::eInsertQuotation,
+                                      nsIEditor::eNext);
 
   // give rules a chance to handle or cancel
-  RulesInfo ruleInfo(EditAction::insertElement);
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertElement);
   bool cancel, handled;
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   if (cancel || handled) {
     return NS_OK; // rules canceled the operation
   }
@@ -1856,7 +1845,7 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
   // don't need to know the inserted node.
 
   if (aNodeInserted && NS_SUCCEEDED(rv)) {
-    *aNodeInserted = GetAsDOMNode(newNode);
+    *aNodeInserted = newNode;
     NS_IF_ADDREF(*aNodeInserted);
   }
 
@@ -1867,6 +1856,8 @@ HTMLEditor::InsertAsPlaintextQuotation(const nsAString& aQuotedText,
       selection->Collapse(afterNewNode);
     }
   }
+
+  // XXX Why don't we call HTMLEditRules::DidDoAction() here?
   return rv;
 }
 
@@ -1886,7 +1877,7 @@ NS_IMETHODIMP
 HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
                                    const nsAString& aCitation,
                                    bool aInsertHTML,
-                                   nsIDOMNode** aNodeInserted)
+                                   nsINode** aNodeInserted)
 {
   // Don't let anyone insert html into a "plaintext" editor:
   if (IsPlaintextEditor()) {
@@ -1899,16 +1890,20 @@ HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
   NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
   AutoPlaceholderBatch beginBatching(this);
-  AutoRules beginRulesSniffing(this, EditAction::insertQuotation,
-                               nsIEditor::eNext);
+  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+                                      *this, EditSubAction::eInsertQuotation,
+                                      nsIEditor::eNext);
 
   // give rules a chance to handle or cancel
-  RulesInfo ruleInfo(EditAction::insertElement);
+  EditSubActionInfo subActionInfo(EditSubAction::eInsertElement);
   bool cancel, handled;
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
-  nsresult rv = rules->WillDoAction(selection, &ruleInfo, &cancel, &handled);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsresult rv =
+    rules->WillDoAction(selection, subActionInfo, &cancel, &handled);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
   if (cancel || handled) {
     return NS_OK; // rules canceled the operation
   }
@@ -1936,7 +1931,7 @@ HTMLEditor::InsertAsCitedQuotation(const nsAString& aQuotedText,
   }
 
   if (aNodeInserted && NS_SUCCEEDED(rv)) {
-    *aNodeInserted = GetAsDOMNode(newNode);
+    *aNodeInserted = newNode;
     NS_IF_ADDREF(*aNodeInserted);
   }
 

@@ -43,7 +43,7 @@ namespace wasm {
 
 class Instance
 {
-    JSCompartment* const            compartment_;
+    JS::Realm* const                realm_;
     ReadBarrieredWasmInstanceObject object_;
     jit::TrampolinePtr              jsJitArgsRectifier_;
     jit::TrampolinePtr              jsJitExceptionHandler_;
@@ -55,7 +55,7 @@ class Instance
     bool                            enterFrameTrapsEnabled_;
 
     // Internal helpers:
-    const void** addressOfSigId(const SigIdDesc& sigId) const;
+    const void** addressOfFuncTypeId(const FuncTypeIdDesc& funcTypeId) const;
     FuncImportTls& funcImportTls(const FuncImport& fi);
     TableTls& tableTls(const TableDesc& td) const;
 
@@ -81,7 +81,7 @@ class Instance
     bool init(JSContext* cx);
     void trace(JSTracer* trc);
 
-    JSCompartment* compartment() const { return compartment_; }
+    JS::Realm* realm() const { return realm_; }
     const Code& code() const { return *code_; }
     const CodeTier& code(Tier t) const { return code_->codeTier(t); }
     DebugState& debug() { return *debug_; }

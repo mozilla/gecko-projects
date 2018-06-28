@@ -10,6 +10,7 @@
 #include <memory>
 #include "cert.h"
 #include "keyhi.h"
+#include "p12.h"
 #include "pk11pub.h"
 #include "pkcs11uri.h"
 #include "sslexp.h"
@@ -41,6 +42,10 @@ struct ScopedDelete {
   void operator()(SSLResumptionTokenInfo* token) {
     SSL_DestroyResumptionTokenInfo(token);
   }
+  void operator()(SEC_PKCS12DecoderContext* dcx) {
+    SEC_PKCS12DecoderFinish(dcx);
+  }
+  void operator()(CERTDistNames* names) { CERT_FreeDistNames(names); }
 };
 
 template <class T>
@@ -73,6 +78,8 @@ SCOPED(PLArenaPool);
 SCOPED(PK11Context);
 SCOPED(PK11GenericObject);
 SCOPED(SSLResumptionTokenInfo);
+SCOPED(SEC_PKCS12DecoderContext);
+SCOPED(CERTDistNames);
 
 #undef SCOPED
 

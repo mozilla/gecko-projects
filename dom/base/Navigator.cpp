@@ -615,31 +615,6 @@ Navigator::GetDoNotTrack(nsAString &aResult)
   }
 }
 
-bool
-Navigator::JavaEnabled(CallerType aCallerType, ErrorResult& aRv)
-{
-  Telemetry::AutoTimer<Telemetry::CHECK_JAVA_ENABLED> telemetryTimer;
-
-  // Return true if we have a handler for the java mime
-  nsAutoString javaMIME;
-  Preferences::GetString("plugin.java.mime", javaMIME);
-  NS_ENSURE_TRUE(!javaMIME.IsEmpty(), false);
-
-  if (!mMimeTypes) {
-    if (!mWindow) {
-      aRv.Throw(NS_ERROR_UNEXPECTED);
-      return false;
-    }
-    mMimeTypes = new nsMimeTypeArray(mWindow);
-  }
-
-  RefreshMIMEArray();
-
-  nsMimeType *mimeType = mMimeTypes->NamedItem(javaMIME, aCallerType);
-
-  return mimeType && mimeType->GetEnabledPlugin();
-}
-
 uint64_t
 Navigator::HardwareConcurrency()
 {
@@ -1404,7 +1379,7 @@ Navigator::NotifyVRDisplaysUpdated()
 void
 Navigator::NotifyActiveVRDisplaysChanged()
 {
-  NavigatorBinding::ClearCachedActiveVRDisplaysValue(this);
+  Navigator_Binding::ClearCachedActiveVRDisplaysValue(this);
 }
 
 VRServiceTest*
@@ -1522,7 +1497,7 @@ Navigator::OnNavigation()
 JSObject*
 Navigator::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return NavigatorBinding::Wrap(cx, this, aGivenProto);
+  return Navigator_Binding::Wrap(cx, this, aGivenProto);
 }
 
 /* static */
@@ -1669,7 +1644,7 @@ Navigator::AppName(nsAString& aAppName, bool aUsePrefOverriddenValue)
 void
 Navigator::ClearUserAgentCache()
 {
-  NavigatorBinding::ClearCachedUserAgentValue(this);
+  Navigator_Binding::ClearCachedUserAgentValue(this);
 }
 
 nsresult

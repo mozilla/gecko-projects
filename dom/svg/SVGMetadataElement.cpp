@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGMetadataElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGMetadataElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGMetadataElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -35,7 +35,7 @@ SVGMetadataElement::Init()
 
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGMetadataElement)
 

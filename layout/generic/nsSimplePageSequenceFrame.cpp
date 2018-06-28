@@ -720,6 +720,8 @@ void
 nsSimplePageSequenceFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                             const nsDisplayListSet& aLists)
 {
+  aBuilder->SetInPageSequence(true);
+  aBuilder->SetDisablePartialUpdates(true);
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   nsDisplayList content;
@@ -749,10 +751,11 @@ nsSimplePageSequenceFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 
   content.AppendToTop(
-      MakeDisplayItem<nsDisplayTransform>(aBuilder, this, &content, content.GetVisibleRect(),
+      MakeDisplayItem<nsDisplayTransform>(aBuilder, this, &content, content.GetBuildingRect(),
                                           ::ComputePageSequenceTransform));
 
   aLists.Content()->AppendToTop(&content);
+  aBuilder->SetInPageSequence(false);
 }
 
 //------------------------------------------------------------------------------

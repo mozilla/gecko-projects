@@ -27,7 +27,6 @@
 #include "nsReadableUtils.h"
 #include "mozilla/net/MozURL_ffi.h"
 
-
 //
 // setenv MOZ_LOG nsStandardURL:5
 //
@@ -2274,7 +2273,7 @@ nsStandardURL::StartClone()
     return clone;
 }
 
-NS_IMETHODIMP
+nsresult
 nsStandardURL::Clone(nsIURI **result)
 {
     return CloneInternal(eHonorRef, EmptyCString(), result);
@@ -3215,7 +3214,7 @@ nsStandardURL::Init(uint32_t urlType,
         mParser = net_GetNoAuthURLParser();
         break;
     default:
-        NS_NOTREACHED("bad urlType");
+        MOZ_ASSERT_UNREACHABLE("bad urlType");
         return NS_ERROR_INVALID_ARG;
     }
     mDefaultPort = defaultPort;
@@ -3274,7 +3273,7 @@ nsStandardURL::SetDefaultPort(int32_t aNewDefaultPort)
 NS_IMETHODIMP
 nsStandardURL::Read(nsIObjectInputStream *stream)
 {
-    NS_NOTREACHED("Use nsIURIMutator.read() instead");
+    MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -3300,7 +3299,7 @@ nsStandardURL::ReadPrivate(nsIObjectInputStream *stream)
         mParser = net_GetNoAuthURLParser();
         break;
       default:
-        NS_NOTREACHED("bad urlType");
+        MOZ_ASSERT_UNREACHABLE("bad urlType");
         return NS_ERROR_FAILURE;
     }
 
@@ -3493,8 +3492,10 @@ FromIPCSegment(const nsACString& aSpec, const ipc::StandardURLSegment& aSegment,
         return false;
     }
 
+    CheckedInt<uint32_t> segmentLen = aSegment.position();
+    segmentLen += aSegment.length();
     // Make sure the segment does not extend beyond the spec.
-    if (NS_WARN_IF(aSegment.position() + aSegment.length() > aSpec.Length())) {
+    if (NS_WARN_IF(!segmentLen.isValid() || segmentLen.value() > aSpec.Length())) {
         return false;
     }
 
@@ -3558,7 +3559,7 @@ nsStandardURL::Deserialize(const URIParams& aParams)
             mParser = net_GetNoAuthURLParser();
             break;
         default:
-            NS_NOTREACHED("bad urlType");
+            MOZ_ASSERT_UNREACHABLE("bad urlType");
             return false;
     }
 
@@ -3685,5 +3686,5 @@ nsStandardURL::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
 nsresult
 Test_NormalizeIPv4(const nsACString& host, nsCString& result)
 {
-    return nsStandardURL::NormalizeIPv4(host, result);
+    return mozilla::net::nsStandardURL::NormalizeIPv4(host, result);
 }

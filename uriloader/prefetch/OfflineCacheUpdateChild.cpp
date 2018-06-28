@@ -105,7 +105,7 @@ OfflineCacheUpdateChild::GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserve
 }
 
 void
-OfflineCacheUpdateChild::SetDocument(nsIDOMDocument *aDocument)
+OfflineCacheUpdateChild::SetDocument(nsIDocument *aDocument)
 {
     // The design is one document for one cache update on the content process.
     NS_ASSERTION(!mDocument, "Setting more then a single document on a child offline cache update");
@@ -116,11 +116,10 @@ OfflineCacheUpdateChild::SetDocument(nsIDOMDocument *aDocument)
     // If it were loaded from an offline cache then it has already
     // been associated with it and must not be again cached as
     // implicit (which are the reasons we collect documents here).
-    nsCOMPtr<nsIDocument> document = do_QueryInterface(aDocument);
-    if (!document)
+    if (!aDocument)
         return;
 
-    nsIChannel* channel = document->GetChannel();
+    nsIChannel* channel = aDocument->GetChannel();
     nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
         do_QueryInterface(channel);
     if (!appCacheChannel)
@@ -135,7 +134,7 @@ OfflineCacheUpdateChild::SetDocument(nsIDOMDocument *aDocument)
 }
 
 nsresult
-OfflineCacheUpdateChild::AssociateDocument(nsIDOMDocument *aDocument,
+OfflineCacheUpdateChild::AssociateDocument(nsIDocument *aDocument,
                                         nsIApplicationCache *aApplicationCache)
 {
     // Check that the document that requested this update was
@@ -175,7 +174,7 @@ NS_IMETHODIMP
 OfflineCacheUpdateChild::Init(nsIURI *aManifestURI,
                               nsIURI *aDocumentURI,
                               nsIPrincipal *aLoadingPrincipal,
-                              nsIDOMDocument *aDocument,
+                              nsIDocument *aDocument,
                               nsIFile *aCustomProfileDir)
 {
     nsresult rv;
@@ -227,8 +226,8 @@ OfflineCacheUpdateChild::InitPartial(nsIURI *aManifestURI,
                                   nsIURI *aDocumentURI,
                                   nsIPrincipal *aLoadingPrincipal)
 {
-    NS_NOTREACHED("Not expected to do partial offline cache updates"
-                  " on the child process");
+    MOZ_ASSERT_UNREACHABLE("Not expected to do partial offline cache updates"
+                           " on the child process");
     // For now leaving this method, we may discover we need it.
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -238,8 +237,8 @@ OfflineCacheUpdateChild::InitForUpdateCheck(nsIURI *aManifestURI,
                                             nsIPrincipal* aLoadingPrincipal,
                                             nsIObserver *aObserver)
 {
-    NS_NOTREACHED("Not expected to do only update checks"
-                  " from the child process");
+    MOZ_ASSERT_UNREACHABLE("Not expected to do only update checks"
+                           " from the child process");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 

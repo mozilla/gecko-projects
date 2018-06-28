@@ -27,9 +27,9 @@
 #include "vm/Xdr.h"
 
 #include "gc/AtomMarking-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
+#include "vm/Realm-inl.h"
 #include "vm/StringType-inl.h"
 
 using namespace js;
@@ -121,7 +121,8 @@ js::AtomToPrintableString(JSContext* cx, JSAtom* atom, JSAutoByteString* bytes)
     JSString* str = QuoteString(cx, atom, 0);
     if (!str)
         return nullptr;
-    return bytes->encodeLatin1(cx, str);
+    bytes->initBytes(EncodeLatin1(cx, str));
+    return bytes->ptr();
 }
 
 #define DEFINE_PROTO_STRING(name,init,clasp) const char js_##name##_str[] = #name;
@@ -255,14 +256,14 @@ TracePinnedAtoms(JSTracer* trc, const AtomSet& atoms)
 }
 
 void
-js::TraceAtoms(JSTracer* trc, AutoLockForExclusiveAccess& lock)
+js::TraceAtoms(JSTracer* trc, const AutoAccessAtomsZone& access)
 {
     JSRuntime* rt = trc->runtime();
 
     if (rt->atomsAreFinished())
         return;
 
-    TracePinnedAtoms(trc, rt->atoms(lock));
+    TracePinnedAtoms(trc, rt->atoms(access));
     if (rt->atomsAddedWhileSweeping())
         TracePinnedAtoms(trc, *rt->atomsAddedWhileSweeping());
 }
@@ -385,8 +386,11 @@ AtomizeAndCopyChars(JSContext* cx, const CharT* tbchars, size_t length, PinningB
         AtomSet::Ptr pp = cx->permanentAtoms().readonlyThreadsafeLookup(lookup);
         if (pp) {
             JSAtom* atom = pp->asPtr(cx);
-            if (zonePtr)
-                mozilla::Unused << zone->atomCache().add(*zonePtr, AtomStateEntry(atom, false));
+            if (zonePtr && !zone->atomCache().add(*zonePtr, AtomStateEntry(atom, false))) {
+                ReportOutOfMemory(cx);
+                return nullptr;
+            }
+
             return atom;
         }
     }
@@ -402,8 +406,10 @@ AtomizeAndCopyChars(JSContext* cx, const CharT* tbchars, size_t length, PinningB
 
     cx->atomMarking().inlinedMarkAtom(cx, atom);
 
-    if (zonePtr)
-        mozilla::Unused << zone->atomCache().add(*zonePtr, AtomStateEntry(atom, false));
+    if (zonePtr && !zone->atomCache().add(*zonePtr, AtomStateEntry(atom, false))) {
+        ReportOutOfMemory(cx);
+        return nullptr;
+    }
 
     return atom;
 }
@@ -451,7 +457,7 @@ AtomizeAndCopyCharsInner(JSContext* cx, const CharT* tbchars, size_t length, Pin
 
     JSAtom* atom;
     {
-        AutoAtomsCompartment ac(cx, lock);
+        AutoAtomsZone az(cx, lock);
 
         JSFlatString* flat = NewStringCopyN<NoGC>(cx, tbchars, length);
         if (!flat) {
@@ -585,7 +591,7 @@ js::IndexToIdSlow(JSContext* cx, uint32_t index, MutableHandleId idp)
     if (!atom)
         return false;
 
-    idp.set(JSID_FROM_BITS((size_t)atom));
+    idp.set(JSID_FROM_BITS((size_t)atom | JSID_TYPE_STRING));
     return true;
 }
 
@@ -636,6 +642,14 @@ ToAtomSlow(JSContext* cx, typename MaybeRooted<Value, allowGC>::HandleType arg)
         }
         return nullptr;
     }
+#ifdef ENABLE_BIGINT
+    if (v.isBigInt()) {
+        JSAtom* atom = BigIntToAtom(cx, v.toBigInt());
+        if (!allowGC && !atom)
+            cx->recoverFromOutOfMemory();
+        return atom;
+    }
+#endif
     MOZ_ASSERT(v.isUndefined());
     return cx->names().undefined;
 }

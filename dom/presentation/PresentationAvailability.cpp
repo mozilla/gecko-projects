@@ -121,7 +121,7 @@ PresentationAvailability::DisconnectFromOwner()
 PresentationAvailability::WrapObject(JSContext* aCx,
                                      JS::Handle<JSObject*> aGivenProto)
 {
-  return PresentationAvailabilityBinding::Wrap(aCx, this, aGivenProto);
+  return PresentationAvailability_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool
@@ -195,7 +195,7 @@ PresentationAvailability::UpdateAvailabilityAndDispatchEvent(bool aIsAvailable)
   if (!mPromises.IsEmpty()) {
     // Use the first availability change notification to resolve promise.
     do {
-      nsTArray<RefPtr<Promise>> promises = Move(mPromises);
+      nsTArray<RefPtr<Promise>> promises = std::move(mPromises);
 
       if (nsContentUtils::ShouldResistFingerprinting()) {
         continue;

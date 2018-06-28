@@ -45,17 +45,24 @@ StructuredCloneFile::operator==(const StructuredCloneFile& aOther) const
 }
 
 inline
-StructuredCloneReadInfo::StructuredCloneReadInfo()
-  : mDatabase(nullptr)
+StructuredCloneReadInfo::StructuredCloneReadInfo(JS::StructuredCloneScope aScope)
+  : mData(aScope)
+  , mDatabase(nullptr)
   , mHasPreprocessInfo(false)
 {
   MOZ_COUNT_CTOR(StructuredCloneReadInfo);
 }
 
 inline
+StructuredCloneReadInfo::StructuredCloneReadInfo()
+ : StructuredCloneReadInfo(JS::StructuredCloneScope::DifferentProcessForIndexedDB)
+{
+}
+
+inline
 StructuredCloneReadInfo::StructuredCloneReadInfo(
                              StructuredCloneReadInfo&& aCloneReadInfo)
-  : mData(Move(aCloneReadInfo.mData))
+  : mData(std::move(aCloneReadInfo.mData))
 {
   MOZ_ASSERT(&aCloneReadInfo != this);
   MOZ_COUNT_CTOR(StructuredCloneReadInfo);
@@ -71,7 +78,7 @@ StructuredCloneReadInfo::StructuredCloneReadInfo(
 inline
 StructuredCloneReadInfo::StructuredCloneReadInfo(
                              SerializedStructuredCloneReadInfo&& aCloneReadInfo)
-  : mData(Move(aCloneReadInfo.data().data))
+  : mData(std::move(aCloneReadInfo.data().data))
   , mDatabase(nullptr)
   , mHasPreprocessInfo(aCloneReadInfo.hasPreprocessInfo())
 {
@@ -89,7 +96,7 @@ StructuredCloneReadInfo::operator=(StructuredCloneReadInfo&& aCloneReadInfo)
 {
   MOZ_ASSERT(&aCloneReadInfo != this);
 
-  mData = Move(aCloneReadInfo.mData);
+  mData = std::move(aCloneReadInfo.mData);
   mFiles.Clear();
   mFiles.SwapElements(aCloneReadInfo.mFiles);
   mDatabase = aCloneReadInfo.mDatabase;

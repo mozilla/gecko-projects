@@ -94,6 +94,9 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver
 {
     friend class ProcessLink;
     friend class ThreadLink;
+#ifdef FUZZING
+    friend class ProtocolFuzzerHelper;
+#endif
 
     class CxxStackFrame;
     class InterruptFrame;
@@ -111,7 +114,7 @@ public:
         UntypedCallbackHolder(ActorIdType aActorId,
                               RejectCallback&& aReject)
             : mActorId(aActorId)
-            , mReject(Move(aReject))
+            , mReject(std::move(aReject))
         {}
 
         virtual ~UntypedCallbackHolder() {}
@@ -130,12 +133,12 @@ public:
         CallbackHolder(ActorIdType aActorId,
                        ResolveCallback<Value>&& aResolve,
                        RejectCallback&& aReject)
-            : UntypedCallbackHolder(aActorId, Move(aReject))
-            , mResolve(Move(aResolve))
+            : UntypedCallbackHolder(aActorId, std::move(aReject))
+            , mResolve(std::move(aResolve))
         {}
 
         void Resolve(Value&& aReason) {
-            mResolve(Move(aReason));
+            mResolve(std::move(aReason));
         }
 
         ResolveCallback<Value> mResolve;
@@ -233,8 +236,8 @@ private:
 
         UniquePtr<UntypedCallbackHolder> callback =
             MakeUnique<CallbackHolder<Value>>(
-                aActorId, Move(aResolve), Move(aReject));
-        mPendingResponses.insert(std::make_pair(seqno, Move(callback)));
+                aActorId, std::move(aResolve), std::move(aReject));
+        mPendingResponses.insert(std::make_pair(seqno, std::move(callback)));
         gUnresolvedResponses++;
     }
 

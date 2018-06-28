@@ -58,8 +58,8 @@ private:
                                                   nullptr);
     event->InitMessageEvent(nullptr,
                             NS_LITERAL_STRING("message"),
-                            false, // canBubble
-                            true, // cancelable
+                            CanBubble::eNo,
+                            Cancelable::eYes,
                             data,
                             EmptyString(),
                             EmptyString(),
@@ -103,7 +103,7 @@ private:
     JS::Rooted<JSObject*> global(aCx, globalScope->GetWrapper());
 
     ErrorResult rv;
-    JSAutoCompartment ac(aCx, global);
+    JSAutoRealm ar(aCx, global);
     workerinternals::LoadMainScript(aWorkerPrivate, mScriptURL,
                                     DebuggerScript, rv);
     rv.WouldReportJSException();

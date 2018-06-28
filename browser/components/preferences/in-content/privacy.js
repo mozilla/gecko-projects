@@ -29,6 +29,9 @@ const TRACKING_PROTECTION_KEY = "websites.trackingProtectionMode";
 const TRACKING_PROTECTION_PREFS = ["privacy.trackingprotection.enabled",
                                    "privacy.trackingprotection.pbmode.enabled"];
 
+const PREF_OPT_OUT_STUDIES_ENABLED = "app.shield.optoutstudies.enabled";
+const PREF_NORMANDY_ENABLED = "app.normandy.enabled";
+
 XPCOMUtils.defineLazyGetter(this, "AlertsServiceDND", function() {
   try {
     let alertsService = Cc["@mozilla.org/alerts-service;1"]
@@ -73,6 +76,10 @@ Preferences.addAll([
   // Do not track
   { id: "privacy.donottrackheader.enabled", type: "bool" },
 
+  // Media
+  { id: "media.autoplay.enabled", type: "bool" },
+  { id: "media.autoplay.enabled.user-gestures-needed", type: "bool" },
+
   // Popups
   { id: "dom.disable_open_during_load", type: "bool" },
   // Passwords
@@ -111,7 +118,17 @@ Preferences.addAll([
 
   { id: "browser.safebrowsing.downloads.remote.block_potentially_unwanted", type: "bool" },
   { id: "browser.safebrowsing.downloads.remote.block_uncommon", type: "bool" },
+
 ]);
+
+// Study opt out
+if (AppConstants.MOZ_DATA_REPORTING) {
+  Preferences.addAll([
+    // Preference instances for prefs that we need to monitor while the page is open.
+    { id: PREF_OPT_OUT_STUDIES_ENABLED, type: "bool" },
+    { id: PREF_UPLOAD_ENABLED, type: "bool" },
+  ]);
+}
 
 // Data Choices tab
 if (AppConstants.NIGHTLY_BUILD) {
@@ -241,6 +258,8 @@ var gPrivacyPane = {
 
     this._updateSanitizeSettingsButton();
     this.initializeHistoryMode();
+    this.updateAutoplayMediaControls();
+    this.updateAutoplayMediaControlsVisibility();
     this.updateHistoryModePane();
     this.updatePrivacyMicroControls();
     this.initAutoStartPrivateBrowsingReverter();
@@ -257,6 +276,10 @@ var gPrivacyPane = {
       gPrivacyPane.trackingProtectionReadPrefs.bind(gPrivacyPane));
     Preferences.get("privacy.trackingprotection.pbmode.enabled").on("change",
       gPrivacyPane.trackingProtectionReadPrefs.bind(gPrivacyPane));
+    Preferences.get("media.autoplay.enabled").on("change",
+     gPrivacyPane.updateAutoplayMediaControls.bind(gPrivacyPane));
+    Preferences.get("media.autoplay.enabled.user-gestures-needed").on("change",
+     gPrivacyPane.updateAutoplayMediaControlsVisibility.bind(gPrivacyPane));
     setEventListener("historyMode", "command", function() {
       gPrivacyPane.updateHistoryModePane();
       gPrivacyPane.updateHistoryModePrefs();
@@ -319,6 +342,10 @@ var gPrivacyPane = {
       gPrivacyPane.showMicrophoneExceptions);
     setEventListener("popupPolicyButton", "command",
       gPrivacyPane.showPopupExceptions);
+    setEventListener("autoplayMediaPolicy", "command",
+      gPrivacyPane.toggleAutoplayMedia);
+    setEventListener("autoplayMediaPolicyButton", "command",
+      gPrivacyPane.showAutoplayMediaExceptions);
     setEventListener("notificationsDoNotDisturb", "command",
       gPrivacyPane.toggleDoNotDisturbNotifications);
 
@@ -380,6 +407,7 @@ var gPrivacyPane = {
       this.initSubmitHealthReport();
       setEventListener("submitHealthReportBox", "command",
         gPrivacyPane.updateSubmitHealthReport);
+      this.initOptOutStudyCheckbox();
     }
     this._initA11yState();
     let signonBundle = document.getElementById("signonBundle");
@@ -957,6 +985,44 @@ var gPrivacyPane = {
   },
 
 
+  // MEDIA
+
+  /**
+   * media.autoplay.enabled works the opposite to most of the other preferences.
+   * The checkbox enabled sets the pref to false
+   */
+  toggleAutoplayMedia(event) {
+    Services.prefs.setBoolPref("media.autoplay.enabled", !event.target.checked);
+  },
+
+  updateAutoplayMediaControls() {
+    let autoPlayEnabled = Preferences.get("media.autoplay.enabled").value;
+    document.getElementById("autoplayMediaPolicy").checked = !autoPlayEnabled;
+    document.getElementById("autoplayMediaPolicyButton").disabled = autoPlayEnabled;
+  },
+
+  /**
+   * Show the controls for the new media autoplay behaviour behind a pref for now
+   */
+  updateAutoplayMediaControlsVisibility() {
+    document.getElementById("autoplayMediaBox").hidden =
+      !Services.prefs.getBoolPref("media.autoplay.enabled.user-gestures-needed", false);
+  },
+
+  /**
+   * Displays the autoplay exceptions dialog where specific site autoplay preferences
+   * can be set.
+   */
+  showAutoplayMediaExceptions() {
+    var params = {
+      blockVisible: false, sessionVisible: false, allowVisible: true,
+      prefilledHost: "", permissionType: "autoplay-media"
+    };
+
+    gSubDialog.open("chrome://browser/content/preferences/permissions.xul",
+      "resizable=yes", params);
+  },
+
   // POP-UPS
 
   /**
@@ -1363,6 +1429,68 @@ var gPrivacyPane = {
   updateSubmitHealthReport() {
     let checkbox = document.getElementById("submitHealthReportBox");
     Services.prefs.setBoolPref(PREF_UPLOAD_ENABLED, checkbox.checked);
+  },
+
+
+  /**
+   * Initialize the opt-out-study preference checkbox into about:preferences and
+   * handles events coming from the UI for it.
+   */
+  initOptOutStudyCheckbox(doc) {
+    const allowedByPolicy = Services.policies.isAllowed("Shield");
+    const checkbox = document.getElementById("optOutStudiesEnabled");
+
+    function updateStudyCheckboxState() {
+      // The checkbox should be disabled if any of the below are true. This
+      // prevents the user from changing the value in the box.
+      //
+      // * the policy forbids shield
+      // * the Shield Study preference is locked
+      // * the FHR pref is false
+      //
+      // The checkbox should match the value of the preference only if all of
+      // these are true. Otherwise, the checkbox should remain unchecked. This
+      // is because in these situations, Shield studies are always disabled, and
+      // so showing a checkbox would be confusing.
+      //
+      // * the policy allows Shield
+      // * the FHR pref is true
+      // * Normandy is enabled
+
+      const checkboxMatchesPref = (
+        allowedByPolicy &&
+        Services.prefs.getBoolPref(PREF_UPLOAD_ENABLED, false) &&
+        Services.prefs.getBoolPref(PREF_NORMANDY_ENABLED, false)
+      );
+
+      if (checkboxMatchesPref) {
+        if (Services.prefs.getBoolPref(PREF_OPT_OUT_STUDIES_ENABLED, false)) {
+          checkbox.setAttribute("checked", "checked");
+        } else {
+          checkbox.removeAttribute("checked");
+        }
+        checkbox.setAttribute("preference", PREF_OPT_OUT_STUDIES_ENABLED);
+      } else {
+        checkbox.removeAttribute("preference");
+        checkbox.removeAttribute("checked");
+      }
+
+      const isDisabled = (
+        !allowedByPolicy ||
+        Services.prefs.prefIsLocked(PREF_OPT_OUT_STUDIES_ENABLED) ||
+        !Services.prefs.getBoolPref(PREF_UPLOAD_ENABLED, false)
+      );
+
+      // We can't use checkbox.disabled here because the XBL binding may not be present,
+      // in which case setting the property won't work properly.
+      if (isDisabled) {
+        checkbox.setAttribute("disabled", "true");
+      } else {
+        checkbox.removeAttribute("disabled");
+      }
+    }
+    Preferences.get(PREF_UPLOAD_ENABLED).on("change", updateStudyCheckboxState);
+    updateStudyCheckboxState();
   },
 
   observe(aSubject, aTopic, aData) {

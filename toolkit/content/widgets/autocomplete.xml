@@ -990,10 +990,15 @@
             let itemExists = this._currentIndex < existingItemsCount;
 
             let originalValue, originalText, originalType;
-            let value = controller.getValueAt(this._currentIndex);
+            let style = controller.getStyleAt(this._currentIndex);
+            let value =
+              style &&
+                style.includes("autofill") &&
+                style.includes("heuristic") ?
+              controller.getFinalCompleteValueAt(this._currentIndex) :
+              controller.getValueAt(this._currentIndex);
             let label = controller.getLabelAt(this._currentIndex);
             let comment = controller.getCommentAt(this._currentIndex);
-            let style = controller.getStyleAt(this._currentIndex);
             let image = controller.getImageAt(this._currentIndex);
             // trim the leading/trailing whitespace
             let trimmedSearchString = controller.searchString.replace(/^\s+/, "").replace(/\s+$/, "");
@@ -1001,7 +1006,7 @@
             if (itemExists) {
               item = this.richlistbox.childNodes[this._currentIndex];
 
-              // Url may be a modified version of value, see _adjustACItem().
+              // Url may be a modified version of value, see _adjustAcItem().
               originalValue = item.getAttribute("url") || item.getAttribute("ac-value");
               originalText = item.getAttribute("ac-text");
               originalType = item.getAttribute("originaltype");
@@ -1945,7 +1950,7 @@
             displayUrl = this._unescapeUrl(displayUrl);
           }
           // For performance reasons we may want to limit the displayUrl size.
-          if (popup.textRunsMaxLen) {
+          if (popup.textRunsMaxLen && displayUrl) {
             displayUrl = displayUrl.substr(0, popup.textRunsMaxLen);
           }
           this.setAttribute("displayurl", displayUrl);
@@ -2015,12 +2020,17 @@
           if (Array.isArray(title)) {
             // For performance reasons we may want to limit the title size.
             if (popup.textRunsMaxLen) {
-              title = title.map(t => t.substr(0, popup.textRunsMaxLen));
+              title.forEach(t => {
+                // Limit all the even items.
+                for (let i = 0; i < t.length; i += 2) {
+                  t[i] = t[i].substr(0, popup.textRunsMaxLen);
+                }
+              });
             }
             this._setUpEmphasisedSections(this._titleText, title);
           } else {
             // For performance reasons we may want to limit the title size.
-            if (popup.textRunsMaxLen) {
+            if (popup.textRunsMaxLen && title) {
               title = title.substr(0, popup.textRunsMaxLen);
             }
             this._setUpDescription(this._titleText, title, false);

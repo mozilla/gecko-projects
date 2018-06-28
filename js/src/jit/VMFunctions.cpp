@@ -10,13 +10,14 @@
 #include "frontend/BytecodeCompiler.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/BaselineIC.h"
-#include "jit/JitCompartment.h"
 #include "jit/JitFrames.h"
+#include "jit/JitRealm.h"
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
 #include "vm/ArrayObject.h"
 #include "vm/Debugger.h"
 #include "vm/Interpreter.h"
+#include "vm/SelfHosting.h"
 #include "vm/TraceLogging.h"
 
 #include "jit/BaselineFrame-inl.h"
@@ -335,6 +336,12 @@ StringsEqual(JSContext* cx, HandleString lhs, HandleString rhs, bool* res)
 template bool StringsEqual<true>(JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
 template bool StringsEqual<false>(JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
 
+typedef bool (*StringCompareFn)(JSContext*, HandleString, HandleString, bool*);
+const VMFunction StringsEqualInfo =
+    FunctionInfo<StringCompareFn>(jit::StringsEqual<true>, "StringsEqual");
+const VMFunction StringsNotEqualInfo =
+    FunctionInfo<StringCompareFn>(jit::StringsEqual<false>, "StringsEqual");
+
 bool StringSplitHelper(JSContext* cx, HandleString str, HandleString sep,
                        HandleObjectGroup group, uint32_t limit,
                        MutableHandleValue result)
@@ -640,8 +647,11 @@ CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget, MutableHa
         RootedFunction fun(cx, &callee->as<JSFunction>());
         if (fun->isInterpreted() && fun->isConstructor()) {
             JSScript* script = JSFunction::getOrCreateScript(cx, fun);
+            if (!script)
+                return false;
+            AutoRealm ar(cx, script);
             AutoKeepTypeScripts keepTypes(cx);
-            if (!script || !script->ensureHasTypes(cx, keepTypes))
+            if (!script->ensureHasTypes(cx, keepTypes))
                 return false;
             if (!js::CreateThis(cx, fun, script, newTarget, GenericObject, rval))
                 return false;
@@ -688,11 +698,11 @@ GetDynamicName(JSContext* cx, JSObject* envChain, JSString* str, Value* vp)
 }
 
 void
-PostWriteBarrier(JSRuntime* rt, JSObject* obj)
+PostWriteBarrier(JSRuntime* rt, js::gc::Cell* cell)
 {
     AutoUnsafeCallWithABI unsafe;
-    MOZ_ASSERT(!IsInsideNursery(obj));
-    rt->gc.storeBuffer().putWholeCell(obj);
+    MOZ_ASSERT(!IsInsideNursery(cell));
+    rt->gc.storeBuffer().putWholeCell(cell);
 }
 
 static const size_t MAX_WHOLE_CELL_BUFFER_SIZE = 4096;
@@ -743,12 +753,13 @@ template void
 PostWriteElementBarrier<IndexInBounds::Maybe>(JSRuntime* rt, JSObject* obj, int32_t index);
 
 void
-PostGlobalWriteBarrier(JSRuntime* rt, JSObject* obj)
+PostGlobalWriteBarrier(JSRuntime* rt, GlobalObject* obj)
 {
-    MOZ_ASSERT(obj->is<GlobalObject>());
-    if (!obj->compartment()->globalWriteBarriered) {
+    MOZ_ASSERT(obj->JSObject::is<GlobalObject>());
+
+    if (!obj->realm()->globalWriteBarriered) {
         PostWriteBarrier(rt, obj);
-        obj->compartment()->globalWriteBarriered = 1;
+        obj->realm()->globalWriteBarriered = 1;
     }
 }
 
@@ -777,7 +788,7 @@ WrapObjectPure(JSContext* cx, JSObject* obj)
     MOZ_ASSERT(obj);
     MOZ_ASSERT(cx->compartment() != obj->compartment());
 
-    // From: JSCompartment::getNonWrapperObjectForCurrentCompartment
+    // From: Compartment::getNonWrapperObjectForCurrentCompartment
     // Note that if the object is same-compartment, but has been wrapped into a
     // different compartment, we need to unwrap it and return the bare same-
     // compartment object. Note again that windows are always wrapped by a
@@ -926,22 +937,14 @@ InterpretResume(JSContext* cx, HandleObject obj, HandleValue val, HandleProperty
 {
     MOZ_ASSERT(obj->is<GeneratorObject>());
 
-    RootedValue selfHostedFun(cx);
-    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().InterpretGeneratorResume,
-                                         &selfHostedFun))
-    {
-        return false;
-    }
-
-    MOZ_ASSERT(selfHostedFun.toObject().is<JSFunction>());
-
     FixedInvokeArgs<3> args(cx);
 
     args[0].setObject(*obj);
     args[1].set(val);
     args[2].setString(kind);
 
-    return Call(cx, selfHostedFun, UndefinedHandleValue, args, rval);
+    return CallSelfHostedFunction(cx, cx->names().InterpretGeneratorResume, UndefinedHandleValue,
+                                  args, rval);
 }
 
 bool
@@ -1143,7 +1146,7 @@ bool
 GlobalHasLiveOnDebuggerStatement(JSContext* cx)
 {
     AutoUnsafeCallWithABI unsafe;
-    return cx->compartment()->isDebuggee() &&
+    return cx->realm()->isDebuggee() &&
            Debugger::hasLiveHook(cx->global(), Debugger::OnDebuggerStatement);
 }
 
@@ -1198,7 +1201,7 @@ bool
 DebugLeaveLexicalEnv(JSContext* cx, BaselineFrame* frame, jsbytecode* pc)
 {
     MOZ_ASSERT(frame->script()->baselineScript()->hasDebugInstrumentation());
-    if (cx->compartment()->isDebuggee())
+    if (cx->realm()->isDebuggee())
         DebugEnvironments::onPopLexical(cx, frame, pc);
     return true;
 }
@@ -1478,25 +1481,6 @@ ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber)
 }
 
 bool
-ThrowReadOnlyError(JSContext* cx, HandleObject obj, int32_t index)
-{
-    // We have to throw different errors depending on whether |index| is past
-    // the array length, etc. It's simpler to just call SetProperty to ensure
-    // we match the interpreter.
-
-    RootedValue objVal(cx, ObjectValue(*obj));
-    RootedValue indexVal(cx, Int32Value(index));
-    RootedId id(cx);
-    if (!ValueToId<CanGC>(cx, indexVal, &id))
-        return false;
-
-    ObjectOpResult result;
-    MOZ_ALWAYS_FALSE(SetProperty(cx, obj, id, UndefinedHandleValue, objVal, result) &&
-                     result.checkStrictErrorOrWarning(cx, obj, id, /* strict = */ true));
-    return false;
-}
-
-bool
 ThrowBadDerivedReturn(JSContext* cx, HandleValue v)
 {
     ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK, v, nullptr);
@@ -1534,6 +1518,8 @@ bool
 CallNativeGetter(JSContext* cx, HandleFunction callee, HandleObject obj,
                  MutableHandleValue result)
 {
+    AutoRealm ar(cx, callee);
+
     MOZ_ASSERT(callee->isNative());
     JSNative natfun = callee->native();
 
@@ -1551,6 +1537,8 @@ CallNativeGetter(JSContext* cx, HandleFunction callee, HandleObject obj,
 bool
 CallNativeSetter(JSContext* cx, HandleFunction callee, HandleObject obj, HandleValue rhs)
 {
+    AutoRealm ar(cx, callee);
+
     MOZ_ASSERT(callee->isNative());
     JSNative natfun = callee->native();
 

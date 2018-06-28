@@ -78,7 +78,7 @@ CloneFunctionObjectIfNotSingleton(JSContext* cx, HandleFunction fun, HandleObjec
                          ? extendedFinalizeKind
                          : finalizeKind;
 
-    if (CanReuseScriptForClone(cx->compartment(), fun, parent))
+    if (CanReuseScriptForClone(cx->realm(), fun, parent))
         return CloneFunctionReuseScript(cx, fun, parent, kind, newKind, proto);
 
     RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
@@ -144,7 +144,7 @@ JSFunction::create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap he
                "building of metadata for it");
     fun = SetNewObjectMetadata(cx, fun);
 
-    js::gc::TraceCreateObject(fun);
+    js::gc::gcTracer.traceCreateObject(fun);
 
     return fun;
 }

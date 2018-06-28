@@ -173,7 +173,7 @@ public:
         // That happens in WebRenderCompositableHolder.
 
         wr::LayoutRect r = wr::ToRoundedLayoutRect(bounds);
-        aBuilder.PushIFrame(r, !BackfaceIsHidden(), data->GetPipelineId().ref());
+        aBuilder.PushIFrame(r, !BackfaceIsHidden(), data->GetPipelineId().ref(), /*ignoreMissingPipelines*/ false);
 
         gfx::Matrix4x4 scTransform;
         gfxRect destGFXRect = mFrame->PresContext()->AppUnitsToGfxUnits(dest);
@@ -264,7 +264,7 @@ nsHTMLCanvasFrame::GetCanvasSize()
                "we should've required <canvas> width/height attrs to be "
                "unsigned (non-negative) values");
   } else {
-    NS_NOTREACHED("couldn't get canvas size");
+    MOZ_ASSERT_UNREACHABLE("couldn't get canvas size");
   }
 
   return size;
@@ -375,7 +375,7 @@ nsHTMLCanvasFrame::Reflow(nsPresContext*           aPresContext,
   LogicalSize availSize = aReflowInput.ComputedSize(childWM);
   availSize.BSize(childWM) = NS_UNCONSTRAINEDSIZE;
   NS_ASSERTION(!childFrame->GetNextSibling(), "HTML canvas should have 1 kid");
-  ReflowOutput childDesiredSize(aReflowInput.GetWritingMode(), aMetrics.mFlags);
+  ReflowOutput childDesiredSize(aReflowInput.GetWritingMode());
   ReflowInput childReflowInput(aPresContext, aReflowInput, childFrame,
                                      availSize);
   ReflowChild(childFrame, aPresContext, childDesiredSize, childReflowInput,

@@ -15,10 +15,10 @@
 #include "nsWindowDefs.h"
 #include "KeyboardLayout.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
-#include "mozilla/HangMonitor.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/WindowsVersion.h"
@@ -37,7 +37,7 @@
 #include "nsNetCID.h"
 #include "prtime.h"
 #ifdef MOZ_PLACES
-#include "mozIAsyncFavicons.h"
+#include "nsIFaviconService.h"
 #endif
 #include "nsIIconURI.h"
 #include "nsIDownloader.h"
@@ -764,7 +764,7 @@ WinUtils::WaitForMessage(DWORD aTimeoutMs)
         // We executed an APC that would have woken up the hang monitor. Since
         // there are no more APCs pending and we are now going to sleep again,
         // we should notify the hang monitor.
-        mozilla::HangMonitor::Suspend();
+        mozilla::BackgroundHangMonitor().NotifyWait();
       }
       continue;
     }
@@ -1078,12 +1078,12 @@ WinUtils::GetNativeMessage(UINT aInternalMessage)
 uint16_t
 WinUtils::GetMouseInputSource()
 {
-  int32_t inputSource = dom::MouseEventBinding::MOZ_SOURCE_MOUSE;
+  int32_t inputSource = dom::MouseEvent_Binding::MOZ_SOURCE_MOUSE;
   LPARAM lParamExtraInfo = ::GetMessageExtraInfo();
   if ((lParamExtraInfo & TABLET_INK_SIGNATURE) == TABLET_INK_CHECK) {
     inputSource = (lParamExtraInfo & TABLET_INK_TOUCH) ?
-      dom::MouseEventBinding::MOZ_SOURCE_TOUCH :
-      dom::MouseEventBinding::MOZ_SOURCE_PEN;
+      dom::MouseEvent_Binding::MOZ_SOURCE_TOUCH :
+      dom::MouseEvent_Binding::MOZ_SOURCE_PEN;
   }
   return static_cast<uint16_t>(inputSource);
 }
@@ -1322,7 +1322,7 @@ AsyncFaviconDataReady::OnComplete(nsIURI *aFaviconURI,
   int32_t stride = 4 * size.width;
 
   // AsyncEncodeAndWriteIcon takes ownership of the heap allocated buffer
-  nsCOMPtr<nsIRunnable> event = new AsyncEncodeAndWriteIcon(path, Move(data),
+  nsCOMPtr<nsIRunnable> event = new AsyncEncodeAndWriteIcon(path, std::move(data),
                                                             stride,
                                                             size.width,
                                                             size.height,
@@ -1342,7 +1342,7 @@ AsyncEncodeAndWriteIcon::AsyncEncodeAndWriteIcon(const nsAString &aIconPath,
                                                  const bool aURLShortcut) :
   mURLShortcut(aURLShortcut),
   mIconPath(aIconPath),
-  mBuffer(Move(aBuffer)),
+  mBuffer(std::move(aBuffer)),
   mStride(aStride),
   mWidth(aWidth),
   mHeight(aHeight)
@@ -1464,21 +1464,18 @@ NS_IMETHODIMP AsyncDeleteAllFaviconsFromDisk::Run()
   nsresult rv = mJumpListCacheDir->AppendNative(
       nsDependentCString(FaviconHelper::kJumpListCacheDir));
   NS_ENSURE_SUCCESS(rv, rv);
-  nsCOMPtr<nsISimpleEnumerator> entries;
+
+  nsCOMPtr<nsIDirectoryEnumerator> entries;
   rv = mJumpListCacheDir->GetDirectoryEntries(getter_AddRefs(entries));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Loop through each directory entry and remove all ICO files found
   do {
-    bool hasMore = false;
-    if (NS_FAILED(entries->HasMoreElements(&hasMore)) || !hasMore)
+    nsCOMPtr<nsIFile> currFile;
+    if (NS_FAILED(entries->GetNextFile(getter_AddRefs(currFile))) ||
+        !currFile)
       break;
 
-    nsCOMPtr<nsISupports> supp;
-    if (NS_FAILED(entries->GetNext(getter_AddRefs(supp))))
-      break;
-
-    nsCOMPtr<nsIFile> currFile(do_QueryInterface(supp));
     nsAutoString path;
     if (NS_FAILED(currFile->GetPath(path)))
       continue;
@@ -1649,7 +1646,7 @@ nsresult
 {
 #ifdef MOZ_PLACES
   // Obtain the favicon service and get the favicon for the specified page
-  nsCOMPtr<mozIAsyncFavicons> favIconSvc(
+  nsCOMPtr<nsIFaviconService> favIconSvc(
     do_GetService("@mozilla.org/browser/favicon-service;1"));
   NS_ENSURE_TRUE(favIconSvc, NS_ERROR_FAILURE);
 
@@ -1745,7 +1742,14 @@ WinUtils::ToIntRect(const RECT& aRect)
 bool
 WinUtils::IsIMEEnabled(const InputContext& aInputContext)
 {
-  return IsIMEEnabled(aInputContext.mIMEState.mEnabled);
+  if (!IsIMEEnabled(aInputContext.mIMEState.mEnabled)) {
+    return false;
+  }
+  if (aInputContext.mIMEState.mEnabled == IMEState::PLUGIN &&
+      aInputContext.mHTMLInputType.EqualsLiteral("password")) {
+    return false;
+  }
+  return true;
 }
 
 /* static */
@@ -1759,12 +1763,40 @@ WinUtils::IsIMEEnabled(IMEState::Enabled aIMEState)
 /* static */
 void
 WinUtils::SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
-                                    uint32_t aModifiers)
+                                    uint32_t aModifiers,
+                                    UINT aMessage)
 {
-  for (uint32_t i = 0; i < ArrayLength(sModifierKeyMap); ++i) {
-    const uint32_t* map = sModifierKeyMap[i];
-    if (aModifiers & map[0]) {
-      aArray->AppendElement(KeyPair(map[1], map[2]));
+  MOZ_ASSERT(!(aModifiers & nsIWidget::ALTGRAPH) ||
+             !(aModifiers & (nsIWidget::CTRL_L | nsIWidget::ALT_R)));
+  if (aMessage == WM_KEYUP) {
+    // If AltGr is released, ControlLeft key is released first, then,
+    // AltRight key is released.
+    if (aModifiers & nsIWidget::ALTGRAPH) {
+      aArray->AppendElement(
+                KeyPair(VK_CONTROL, VK_LCONTROL, ScanCode::eControlLeft));
+      aArray->AppendElement(
+                KeyPair(VK_MENU, VK_RMENU, ScanCode::eAltRight));
+    }
+    for (uint32_t i = ArrayLength(sModifierKeyMap); i; --i) {
+      const uint32_t* map = sModifierKeyMap[i - 1];
+      if (aModifiers & map[0]) {
+        aArray->AppendElement(KeyPair(map[1], map[2], map[3]));
+      }
+    }
+  } else {
+    for (uint32_t i = 0; i < ArrayLength(sModifierKeyMap); ++i) {
+      const uint32_t* map = sModifierKeyMap[i];
+      if (aModifiers & map[0]) {
+        aArray->AppendElement(KeyPair(map[1], map[2], map[3]));
+      }
+    }
+    // If AltGr is pressed, ControlLeft key is pressed first, then,
+    // AltRight key is pressed.
+    if (aModifiers & nsIWidget::ALTGRAPH) {
+      aArray->AppendElement(
+                KeyPair(VK_CONTROL, VK_LCONTROL, ScanCode::eControlLeft));
+      aArray->AppendElement(
+                KeyPair(VK_MENU, VK_RMENU, ScanCode::eAltRight));
     }
   }
 }

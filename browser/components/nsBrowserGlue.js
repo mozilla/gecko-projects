@@ -28,10 +28,6 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
     "chrome,all,dialog=no,extrachrome,menubar,resizable,scrollbars,status," +
     "location,toolbar,personalbar," +
     `left=${screenX},top=${screenY}`;
-
-  if (Services.prefs.getBoolPref("browser.suppress_first_window_animation"))
-    browserWindowFeatures += ",suppressanimation";
-
   let win = Services.ww.openWindow(null, "about:blank", null,
                                    browserWindowFeatures, null);
 
@@ -76,9 +72,12 @@ ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
   TelemetryTimestamps.add("blankWindowShown");
 })();
 
-Cu.importGlobalProperties(["fetch"]);
+XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
-XPCOMUtils.defineLazyServiceGetter(this, "WindowsUIUtils", "@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils");
+XPCOMUtils.defineLazyServiceGetters(this, {
+  WindowsUIUtils: ["@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils"],
+  aboutNewTabService: ["@mozilla.org/browser/aboutnewtab-service;1", "nsIAboutNewTabService"]
+});
 XPCOMUtils.defineLazyGetter(this, "WeaveService", () =>
   Cc["@mozilla.org/weave/service;1"].getService().wrappedJSObject
 );
@@ -86,6 +85,7 @@ XPCOMUtils.defineLazyGetter(this, "WeaveService", () =>
 // lazy module getters
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AboutPrivateBrowsingHandler: "resource:///modules/aboutpages/AboutPrivateBrowsingHandler.jsm",
   AddonManager: "resource://gre/modules/AddonManager.jsm",
   AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.jsm",
   AsyncPrefs: "resource://gre/modules/AsyncPrefs.jsm",
@@ -95,13 +95,12 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   BookmarkHTMLUtils: "resource://gre/modules/BookmarkHTMLUtils.jsm",
   BookmarkJSONUtils: "resource://gre/modules/BookmarkJSONUtils.jsm",
   BrowserErrorReporter: "resource:///modules/BrowserErrorReporter.jsm",
-  BrowserUITelemetry: "resource:///modules/BrowserUITelemetry.jsm",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   ContentClick: "resource:///modules/ContentClick.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
   CustomizableUI: "resource:///modules/CustomizableUI.jsm",
-  DateTimePickerHelper: "resource://gre/modules/DateTimePickerHelper.jsm",
+  DateTimePickerParent: "resource://gre/modules/DateTimePickerParent.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
   Feeds: "resource:///modules/Feeds.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
@@ -132,6 +131,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   RemotePrompt: "resource:///modules/RemotePrompt.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
+  SavantShieldStudy: "resource:///modules/SavantShieldStudy.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
   ShellService: "resource:///modules/ShellService.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
@@ -141,7 +141,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.jsm",
 });
 
-/* global AboutHome:false, ContentPrefServiceParent:false, ContentSearch:false,
+/* global ContentPrefServiceParent:false, ContentSearch:false,
           UpdateListener:false, webrtcUI:false */
 
 /**
@@ -152,7 +152,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 let initializedModules = {};
 
 [
-  ["AboutHome", "resource:///modules/AboutHome.jsm", "init"],
   ["ContentPrefServiceParent", "resource://gre/modules/ContentPrefServiceParent.jsm", "alwaysInit"],
   ["ContentSearch", "resource:///modules/ContentSearch.jsm", "init"],
   ["UpdateListener", "resource://gre/modules/UpdateListener.jsm", "init"],
@@ -179,6 +178,10 @@ XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
 
 XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
   return Services.strings.createBundle("chrome://browser/locale/browser.properties");
+});
+
+XPCOMUtils.defineLazyGetter(this, "gTabbrowserBundle", function() {
+  return Services.strings.createBundle("chrome://browser/locale/tabbrowser.properties");
 });
 
 const global = this;
@@ -210,8 +213,6 @@ const listeners = {
   },
 
   mm: {
-    "AboutHome:MaybeShowMigrateMessage": ["AboutHome"],
-    "AboutHome:RequestUpdate": ["AboutHome"],
     "Content:Click": ["ContentClick"],
     "ContentSearch": ["ContentSearch"],
     "FormValidation:ShowPopup": ["FormValidationHandler"],
@@ -226,6 +227,9 @@ const listeners = {
     "RemoteLogins:autoCompleteLogins": ["LoginManagerParent"],
     "RemoteLogins:removeLogin": ["LoginManagerParent"],
     "RemoteLogins:insecureLoginFormPresent": ["LoginManagerParent"],
+    // For Savant Shield study, bug 1465685. Study on desktop only.
+    "LoginStats:LoginFillSuccessful": ["LoginManagerParent"],
+    "LoginStats:LoginEncountered": ["LoginManagerParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
     "WCCR:registerProtocolHandler": ["Feeds"],
     "WCCR:registerContentHandler": ["Feeds"],
@@ -373,11 +377,48 @@ BrowserGlue.prototype = {
   },
 
   _sendMainPingCentrePing() {
-    const ACTIVITY_STREAM_ID = "activity-stream";
+    let newTabSetting;
+    let homePageSetting;
+
+    // Check whether or not about:home and about:newtab have been overridden at this point.
+    // Different settings are encoded as follows:
+    //   * Value 0: default
+    //   * Value 1: about:blank
+    //   * Value 2: web extension
+    //   * Value 3: other custom URL(s)
+    // Settings for about:newtab and about:home are combined in a bitwise manner.
+
+    // Note that a user could use about:blank and web extension at the same time
+    // to overwrite the about:newtab, but the web extension takes priority, so the
+    // ordering matters in the following check.
+    if (Services.prefs.getBoolPref("browser.newtabpage.enabled") &&
+                                   !aboutNewTabService.overridden) {
+      newTabSetting = 0;
+    } else if (aboutNewTabService.newTabURL.startsWith("moz-extension://")) {
+      newTabSetting = 2;
+    } else if (!Services.prefs.getBoolPref("browser.newtabpage.enabled")) {
+      newTabSetting = 1;
+    } else {
+      newTabSetting = 3;
+    }
+
+    const homePageURL = Services.prefs.getComplexValue("browser.startup.homepage",
+                                                       Ci.nsIPrefLocalizedString).data;
+    if (homePageURL === "about:home") {
+      homePageSetting = 0;
+    } else if (homePageURL === "about:blank") {
+      homePageSetting = 1;
+    } else if (homePageURL.startsWith("moz-extension://")) {
+      homePageSetting = 2;
+    } else {
+      homePageSetting = 3;
+    }
+
     const payload = {
       event: "AS_ENABLED",
-      value: true
+      value: newTabSetting | (homePageSetting << 2)
     };
+    const ACTIVITY_STREAM_ID = "activity-stream";
     const options = {filter: ACTIVITY_STREAM_ID};
     this.pingCentre.sendPing(payload, options);
   },
@@ -706,6 +747,9 @@ BrowserGlue.prototype = {
       iconURL: "resource:///chrome/browser/content/browser/defaultthemes/light.icon.svg",
       textcolor: "black",
       accentcolor: "white",
+      popup: "#fff",
+      popup_text: "#0c0c0d",
+      popup_border: "#ccc",
       author: vendorShortName,
     });
     LightweightThemeManager.addBuiltInTheme({
@@ -719,6 +763,7 @@ BrowserGlue.prototype = {
       popup_text: "rgb(249, 249, 250)",
       popup_border: "#27272b",
       toolbar_field_text: "rgb(249, 249, 250)",
+      toolbar_field_border: "rgba(249, 249, 250, 0.2)",
       author: vendorShortName,
     });
 
@@ -1002,7 +1047,7 @@ BrowserGlue.prototype = {
     this._checkForOldBuildUpdates();
 
     AutoCompletePopup.init();
-    DateTimePickerHelper.init();
+    DateTimePickerParent.init();
     // Check if Sync is configured
     if (Services.prefs.prefHasUserValue("services.sync.username")) {
       WeaveService.init();
@@ -1011,6 +1056,8 @@ BrowserGlue.prototype = {
     PageThumbs.init();
 
     NewTabUtils.init();
+
+    AboutPrivateBrowsingHandler.init();
 
     PageActions.init();
 
@@ -1062,15 +1109,19 @@ BrowserGlue.prototype = {
 
     PageThumbs.uninit();
     NewTabUtils.uninit();
+    AboutPrivateBrowsingHandler.uninit();
     AutoCompletePopup.uninit();
-    DateTimePickerHelper.uninit();
+    DateTimePickerParent.uninit();
 
-    // Browser errors are only collected on Nightly
-    if (AppConstants.NIGHTLY_BUILD && AppConstants.MOZ_DATA_REPORTING) {
+    // Browser errors are only collected on Nightly, but telemetry for
+    // them is collected on all channels.
+    if (AppConstants.MOZ_DATA_REPORTING) {
       this.browserErrorReporter.uninit();
     }
 
     Normandy.uninit();
+
+    SavantShieldStudy.uninit();
   },
 
   // All initial windows have opened.
@@ -1080,13 +1131,13 @@ BrowserGlue.prototype = {
     }
     this._windowsWereRestored = true;
 
-    // Browser errors are only collected on Nightly
-    if (AppConstants.NIGHTLY_BUILD && AppConstants.MOZ_DATA_REPORTING) {
+    // Browser errors are only collected on Nightly, but telemetry for
+    // them is collected on all channels.
+    if (AppConstants.MOZ_DATA_REPORTING) {
       this.browserErrorReporter.init();
     }
 
     BrowserUsageTelemetry.init();
-    BrowserUITelemetry.init();
 
     // Show update notification, if needed.
     if (Services.prefs.prefHasUserValue("app.update.postupdate"))
@@ -1227,6 +1278,10 @@ BrowserGlue.prototype = {
     Services.tm.idleDispatchToMainThread(() => {
       Blocklist.loadBlocklistAsync();
     });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      SavantShieldStudy.init();
+    });
   },
 
   /**
@@ -1314,36 +1369,27 @@ BrowserGlue.prototype = {
     // 4. The browser is currently in Private Browsing mode
     // 5. The browser will be restarted.
     //
-    // Otherwise these are the conditions and the associated dialogs that will be shown:
-    // 1. aQuitType == "lastwindow" or "quit" and browser.showQuitWarning == true
-    //    - The quit dialog will be shown
-    // 2. aQuitType == "lastwindow" && browser.tabs.warnOnClose == true
-    //    - The "closing multiple tabs" dialog will be shown
+    // Otherwise, we will show the "closing multiple tabs" dialog.
     //
     // aQuitType == "lastwindow" is overloaded. "lastwindow" is used to indicate
     // "the last window is closing but we're not quitting (a non-browser window is open)"
     // and also "we're quitting by closing the last window".
 
-    if (aQuitType == "restart")
+    if (aQuitType == "restart" || aQuitType == "os-restart")
       return;
 
     var windowcount = 0;
     var pagecount = 0;
-    var browserEnum = Services.wm.getEnumerator("navigator:browser");
-    let allWindowsPrivate = true;
-    while (browserEnum.hasMoreElements()) {
-      // XXXbz should we skip closed windows here?
+    for (let win of BrowserWindowTracker.orderedWindows) {
+      if (win.closed) {
+        continue;
+      }
       windowcount++;
-
-      var browser = browserEnum.getNext();
-      if (!PrivateBrowsingUtils.isWindowPrivate(browser))
-        allWindowsPrivate = false;
-      var tabbrowser = browser.ownerGlobal.gBrowser;
+      let tabbrowser = win.gBrowser;
       if (tabbrowser)
         pagecount += tabbrowser.browsers.length - tabbrowser._numPinnedTabs;
     }
 
-    this._saveSession = false;
     if (pagecount < 2)
       return;
 
@@ -1356,80 +1402,26 @@ BrowserGlue.prototype = {
 
     var sessionWillBeRestored = Services.prefs.getIntPref("browser.startup.page") == 3 ||
                                 Services.prefs.getBoolPref("browser.sessionstore.resume_session_once");
-    if (sessionWillBeRestored || !Services.prefs.getBoolPref("browser.warnOnQuit"))
+    if (sessionWillBeRestored || !Services.prefs.getBoolPref("browser.warnOnQuit") ||
+        !Services.prefs.getBoolPref("browser.tabs.warnOnClose"))
       return;
 
-    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let win = BrowserWindowTracker.getTopWindow();
 
-    // On last window close or quit && showQuitWarning, we want to show the
-    // quit warning.
-    if (!Services.prefs.getBoolPref("browser.showQuitWarning")) {
-      if (aQuitType == "lastwindow") {
-        // If aQuitType is "lastwindow" and we aren't showing the quit warning,
-        // we should show the window closing warning instead. warnAboutClosing
-        // tabs checks browser.tabs.warnOnClose and returns if it's ok to close
-        // the window. It doesn't actually close the window.
-        aCancelQuit.data =
-          !win.gBrowser.warnAboutClosingTabs(win.gBrowser.closingTabsEnum.ALL);
-      }
-      return;
-    }
-
-    let prompt = Services.prompt;
-    let quitBundle = Services.strings.createBundle("chrome://browser/locale/quitDialog.properties");
-    let appName = gBrandBundle.GetStringFromName("brandShortName");
-    let quitDialogTitle = quitBundle.formatStringFromName("quitDialogTitle",
-                                                          [appName], 1);
-    let neverAskText = quitBundle.GetStringFromName("neverAsk2");
-    let neverAsk = {value: false};
-
-    let choice;
-    if (allWindowsPrivate) {
-      let text = quitBundle.formatStringFromName("messagePrivate", [appName], 1);
-      let flags = prompt.BUTTON_TITLE_IS_STRING * prompt.BUTTON_POS_0 +
-                  prompt.BUTTON_TITLE_IS_STRING * prompt.BUTTON_POS_1 +
-                  prompt.BUTTON_POS_0_DEFAULT;
-      choice = prompt.confirmEx(win, quitDialogTitle, text, flags,
-                                quitBundle.GetStringFromName("quitTitle"),
-                                quitBundle.GetStringFromName("cancelTitle"),
-                                null,
-                                neverAskText, neverAsk);
-
-      // The order of the buttons differs between the prompt.confirmEx calls
-      // here so we need to fix this for proper handling below.
-      if (choice == 0) {
-        choice = 2;
-      }
+    // warnAboutClosingTabs checks browser.tabs.warnOnClose and returns if it's
+    // ok to close the window. It doesn't actually close the window.
+    if (windowcount == 1) {
+      aCancelQuit.data =
+        !win.gBrowser.warnAboutClosingTabs(win.gBrowser.closingTabsEnum.ALL);
     } else {
-      let text = quitBundle.formatStringFromName(
-        windowcount == 1 ? "messageNoWindows" : "message", [appName], 1);
-      let flags = prompt.BUTTON_TITLE_IS_STRING * prompt.BUTTON_POS_0 +
-                  prompt.BUTTON_TITLE_IS_STRING * prompt.BUTTON_POS_1 +
-                  prompt.BUTTON_TITLE_IS_STRING * prompt.BUTTON_POS_2 +
-                  prompt.BUTTON_POS_0_DEFAULT;
-      choice = prompt.confirmEx(win, quitDialogTitle, text, flags,
-                                quitBundle.GetStringFromName("saveTitle"),
-                                quitBundle.GetStringFromName("cancelTitle"),
-                                quitBundle.GetStringFromName("quitTitle"),
-                                neverAskText, neverAsk);
-    }
-
-    switch (choice) {
-    case 2: // Quit
-      if (neverAsk.value)
-        Services.prefs.setBoolPref("browser.showQuitWarning", false);
-      break;
-    case 1: // Cancel
-      aCancelQuit.QueryInterface(Ci.nsISupportsPRBool);
-      aCancelQuit.data = true;
-      break;
-    case 0: // Save & Quit
-      this._saveSession = true;
-      if (neverAsk.value) {
-        // always save state when shutting down
-        Services.prefs.setIntPref("browser.startup.page", 3);
-      }
-      break;
+      // More than 1 window. Compose our own message.
+      let tabSubstring = gTabbrowserBundle.GetStringFromName("tabs.closeWarningMultipleWindowsTabSnippet");
+      tabSubstring = PluralForm.get(pagecount, tabSubstring).replace(/#1/, pagecount);
+      let windowString = gTabbrowserBundle.GetStringFromName("tabs.closeWarningMultipleWindows");
+      windowString = PluralForm.get(windowcount, windowString).replace(/#1/, windowcount);
+      windowString = windowString.replace(/%(?:1$)?S/i, tabSubstring);
+      aCancelQuit.data =
+        !win.gBrowser.warnAboutClosingTabs(win.gBrowser.closingTabsEnum.ALL, null, windowString);
     }
   },
 
@@ -1827,7 +1819,7 @@ BrowserGlue.prototype = {
       // children, or if it has a persisted currentset value.
       let toolbarIsCustomized = xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "currentset");
       let getToolbarFolderCount = () => {
-        let toolbarFolder = PlacesUtils.getFolderContents(PlacesUtils.toolbarFolderId).root;
+        let toolbarFolder = PlacesUtils.getFolderContents(PlacesUtils.bookmarks.toolbarGuid).root;
         let toolbarChildCount = toolbarFolder.childCount;
         toolbarFolder.containerOpen = false;
         return toolbarChildCount;
@@ -1843,7 +1835,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 68;
+    const UI_VERSION = 69;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -2203,6 +2195,17 @@ BrowserGlue.prototype = {
       // Remove blocklists legacy storage, now relying on IndexedDB.
       OS.File.remove(OS.Path.join(OS.Constants.Path.profileDir,
                                   "kinto.sqlite"), {ignoreAbsent: true});
+    }
+
+    if (currentUIVersion < 69) {
+      // Clear old social prefs from profile (bug 1460675)
+      let socialPrefs = Services.prefs.getBranch("social.");
+      if (socialPrefs) {
+        let socialPrefsArray = socialPrefs.getChildList("");
+        for (let item of socialPrefsArray) {
+          Services.prefs.clearUserPref("social." + item);
+        }
+      }
     }
 
     // Update the migration version.
@@ -2779,6 +2782,9 @@ const ContentPermissionIntegration = {
       case "midi": {
         return new PermissionUI.MIDIPermissionPrompt(request);
       }
+      case "autoplay-media": {
+        return new PermissionUI.AutoplayPermissionPrompt(request);
+      }
     }
     return undefined;
   },
@@ -2807,6 +2813,7 @@ ContentPermissionPrompt.prototype = {
    *        The request that we're to show a prompt for.
    */
   prompt(request) {
+    let type;
     try {
       // Only allow exactly one permission request here.
       let types = request.types.QueryInterface(Ci.nsIArray);
@@ -2816,7 +2823,7 @@ ContentPermissionPrompt.prototype = {
           Cr.NS_ERROR_UNEXPECTED);
       }
 
-      let type = types.queryElementAt(0, Ci.nsIContentPermissionType).type;
+      type = types.queryElementAt(0, Ci.nsIContentPermissionType).type;
       let combinedIntegration =
         Integration.contentPermission.getCombined(ContentPermissionIntegration);
 
@@ -2830,8 +2837,15 @@ ContentPermissionPrompt.prototype = {
 
       permissionPrompt.prompt();
 
-      let schemeHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_ORIGIN_SCHEME");
-      let scheme = 0;
+    } catch (ex) {
+      Cu.reportError(ex);
+      request.cancel();
+      throw ex;
+    }
+
+    let schemeHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_ORIGIN_SCHEME");
+    let scheme = 0;
+    try {
       // URI is null for system principals.
       if (request.principal.URI) {
         switch (request.principal.URI.scheme) {
@@ -2843,23 +2857,26 @@ ContentPermissionPrompt.prototype = {
             break;
         }
       }
-      schemeHistogram.add(type, scheme);
-
-      // request.element should be the browser element in e10s.
-      if (request.element && request.element.contentPrincipal) {
-        let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_THIRD_PARTY_ORIGIN");
-        let isThirdParty = request.principal.origin != request.element.contentPrincipal.origin;
-        thirdPartyHistogram.add(type, isThirdParty);
-      }
-
-      let userInputHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_HANDLING_USER_INPUT");
-      userInputHistogram.add(type, request.isHandlingUserInput);
-
     } catch (ex) {
-      Cu.reportError(ex);
-      request.cancel();
-      throw ex;
+      // If the request principal is not available at this point,
+      // the request has likely been cancelled before being shown to the
+      // user. We shouldn't record this request.
+      if (ex.result != Cr.NS_ERROR_FAILURE) {
+        Cu.reportError(ex);
+      }
+      return;
     }
+    schemeHistogram.add(type, scheme);
+
+    // request.element should be the browser element in e10s.
+    if (request.element && request.element.contentPrincipal) {
+      let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_THIRD_PARTY_ORIGIN");
+      let isThirdParty = request.principal.origin != request.element.contentPrincipal.origin;
+      thirdPartyHistogram.add(type, isThirdParty);
+    }
+
+    let userInputHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_HANDLING_USER_INPUT");
+    userInputHistogram.add(type, request.isHandlingUserInput);
   },
 };
 

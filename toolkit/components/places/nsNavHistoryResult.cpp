@@ -19,6 +19,8 @@
 #include "nsUnicharUtils.h"
 #include "prtime.h"
 #include "nsQueryObject.h"
+#include "mozilla/dom/PlacesObservers.h"
+#include "mozilla/dom/PlacesVisit.h"
 
 #include "nsCycleCollectionParticipant.h"
 
@@ -99,7 +101,7 @@ getUpdateRequirements(const RefPtr<nsNavHistoryQuery>& aQuery,
   bool nonTimeBasedItems = false;
   bool domainBasedItems = false;
 
-  if (aQuery->Folders().Length() > 0 ||
+  if (aQuery->Parents().Length() > 0 ||
       aQuery->OnlyBookmarked() ||
       aQuery->Tags().Length() > 0 ||
       (aOptions->QueryType() == nsINavHistoryQueryOptions::QUERY_TYPE_BOOKMARKS &&
@@ -562,7 +564,7 @@ nsNavHistoryContainerResultNode::AreChildrenVisible()
 {
   nsNavHistoryResult* result = GetResult();
   if (!result) {
-    NS_NOTREACHED("Invalid result");
+    MOZ_ASSERT_UNREACHABLE("Invalid result");
     return false;
   }
 
@@ -908,15 +910,6 @@ nsresult nsNavHistoryContainerResultNode::Refresh() {
   return NS_OK;
 }
 
-void
-nsNavHistoryContainerResultNode::GetSortingAnnotation(nsACString& aAnnotation)
-{
-  if (mParent)
-    mParent->GetSortingAnnotation(aAnnotation);
-  else if (mResult)
-    aAnnotation.Assign(mResult->mSortingAnnotation);
-}
-
 /**
  * @return the sorting comparator function for the give sort type, or null if
  * there is no comparator.
@@ -944,10 +937,6 @@ nsNavHistoryContainerResultNode::GetSortingComparator(uint16_t aSortType)
       return &SortComparison_VisitCountLess;
     case nsINavHistoryQueryOptions::SORT_BY_VISITCOUNT_DESCENDING:
       return &SortComparison_VisitCountGreater;
-    case nsINavHistoryQueryOptions::SORT_BY_ANNOTATION_ASCENDING:
-      return &SortComparison_AnnotationLess;
-    case nsINavHistoryQueryOptions::SORT_BY_ANNOTATION_DESCENDING:
-      return &SortComparison_AnnotationGreater;
     case nsINavHistoryQueryOptions::SORT_BY_DATEADDED_ASCENDING:
       return &SortComparison_DateAddedLess;
     case nsINavHistoryQueryOptions::SORT_BY_DATEADDED_DESCENDING:
@@ -965,7 +954,7 @@ nsNavHistoryContainerResultNode::GetSortingComparator(uint16_t aSortType)
     case nsINavHistoryQueryOptions::SORT_BY_FRECENCY_DESCENDING:
       return &SortComparison_FrecencyGreater;
     default:
-      NS_NOTREACHED("Bad sorting type");
+      MOZ_ASSERT_UNREACHABLE("Bad sorting type");
       return nullptr;
   }
 }
@@ -979,15 +968,12 @@ nsNavHistoryContainerResultNode::GetSortingComparator(uint16_t aSortType)
  * have to completely rebuild the visible list after this.
  */
 void
-nsNavHistoryContainerResultNode::RecursiveSort(
-    const char* aData, SortComparator aComparator)
+nsNavHistoryContainerResultNode::RecursiveSort(SortComparator aComparator)
 {
-  void* data = const_cast<void*>(static_cast<const void*>(aData));
-
-  mChildren.Sort(aComparator, data);
+  mChildren.Sort(aComparator, nullptr);
   for (int32_t i = 0; i < mChildren.Count(); ++i) {
     if (mChildren[i]->IsContainer())
-      mChildren[i]->GetAsContainer()->RecursiveSort(aData, aComparator);
+      mChildren[i]->GetAsContainer()->RecursiveSort(aComparator);
   }
 }
 
@@ -999,7 +985,7 @@ nsNavHistoryContainerResultNode::RecursiveSort(
 uint32_t
 nsNavHistoryContainerResultNode::FindInsertionPoint(
     nsNavHistoryResultNode* aNode, SortComparator aComparator,
-    const char* aData, bool* aItemExists)
+    bool* aItemExists)
 {
   if (aItemExists)
     (*aItemExists) = false;
@@ -1007,18 +993,16 @@ nsNavHistoryContainerResultNode::FindInsertionPoint(
   if (mChildren.Count() == 0)
     return 0;
 
-  void* data = const_cast<void*>(static_cast<const void*>(aData));
-
   // The common case is the beginning or the end because this is used to insert
   // new items that are added to history, which is usually sorted by date.
   int32_t res;
-  res = aComparator(aNode, mChildren[0], data);
+  res = aComparator(aNode, mChildren[0], nullptr);
   if (res <= 0) {
     if (aItemExists && res == 0)
       (*aItemExists) = true;
     return 0;
   }
-  res = aComparator(aNode, mChildren[mChildren.Count() - 1], data);
+  res = aComparator(aNode, mChildren[mChildren.Count() - 1], nullptr);
   if (res >= 0) {
     if (aItemExists && res == 0)
       (*aItemExists) = true;
@@ -1031,7 +1015,7 @@ nsNavHistoryContainerResultNode::FindInsertionPoint(
     if (beginRange == endRange)
       return endRange;
     uint32_t center = beginRange + (endRange - beginRange) / 2;
-    int32_t res = aComparator(aNode, mChildren[center], data);
+    int32_t res = aComparator(aNode, mChildren[center], nullptr);
     if (res <= 0) {
       endRange = center; // left side
       if (aItemExists && res == 0)
@@ -1053,23 +1037,21 @@ nsNavHistoryContainerResultNode::FindInsertionPoint(
 */
 bool
 nsNavHistoryContainerResultNode::DoesChildNeedResorting(uint32_t aIndex,
-    SortComparator aComparator, const char* aData)
+    SortComparator aComparator)
 {
   NS_ASSERTION(aIndex < uint32_t(mChildren.Count()),
                "Input index out of range");
   if (mChildren.Count() == 1)
     return false;
 
-  void* data = const_cast<void*>(static_cast<const void*>(aData));
-
   if (aIndex > 0) {
     // compare to previous item
-    if (aComparator(mChildren[aIndex - 1], mChildren[aIndex], data) > 0)
+    if (aComparator(mChildren[aIndex - 1], mChildren[aIndex], nullptr) > 0)
       return true;
   }
   if (aIndex < uint32_t(mChildren.Count()) - 1) {
     // compare to next item
-    if (aComparator(mChildren[aIndex], mChildren[aIndex + 1], data) > 0)
+    if (aComparator(mChildren[aIndex], mChildren[aIndex + 1], nullptr) > 0)
       return true;
   }
   return false;
@@ -1227,146 +1209,6 @@ int32_t nsNavHistoryContainerResultNode::SortComparison_URIGreater(
     nsNavHistoryResultNode* a, nsNavHistoryResultNode* b, void* closure)
 {
   return -SortComparison_URILess(a, b, closure);
-}
-
-int32_t nsNavHistoryContainerResultNode::SortComparison_AnnotationLess(
-    nsNavHistoryResultNode* a, nsNavHistoryResultNode* b, void* closure)
-{
-  nsAutoCString annoName(static_cast<char*>(closure));
-  NS_ENSURE_TRUE(!annoName.IsEmpty(), 0);
-
-  bool a_itemAnno = false;
-  bool b_itemAnno = false;
-
-  // Not used for item annos
-  nsCOMPtr<nsIURI> a_uri, b_uri;
-  if (a->mItemId != -1) {
-    a_itemAnno = true;
-  } else {
-    nsAutoCString spec;
-    if (NS_SUCCEEDED(a->GetUri(spec))){
-      MOZ_ALWAYS_SUCCEEDS(NS_NewURI(getter_AddRefs(a_uri), spec));
-    }
-    NS_ENSURE_TRUE(a_uri, 0);
-  }
-
-  if (b->mItemId != -1) {
-    b_itemAnno = true;
-  } else {
-    nsAutoCString spec;
-    if (NS_SUCCEEDED(b->GetUri(spec))) {
-      MOZ_ALWAYS_SUCCEEDS(NS_NewURI(getter_AddRefs(b_uri), spec));
-    }
-    NS_ENSURE_TRUE(b_uri, 0);
-  }
-
-  nsAnnotationService* annosvc = nsAnnotationService::GetAnnotationService();
-  NS_ENSURE_TRUE(annosvc, 0);
-
-  bool a_hasAnno, b_hasAnno;
-  if (a_itemAnno) {
-    NS_ENSURE_SUCCESS(annosvc->ItemHasAnnotation(a->mItemId, annoName,
-                                                 &a_hasAnno), 0);
-  } else {
-    NS_ENSURE_SUCCESS(annosvc->PageHasAnnotation(a_uri, annoName,
-                                                 &a_hasAnno), 0);
-  }
-  if (b_itemAnno) {
-    NS_ENSURE_SUCCESS(annosvc->ItemHasAnnotation(b->mItemId, annoName,
-                                                 &b_hasAnno), 0);
-  } else {
-    NS_ENSURE_SUCCESS(annosvc->PageHasAnnotation(b_uri, annoName,
-                                                 &b_hasAnno), 0);
-  }
-
-  int32_t value = 0;
-  if (a_hasAnno || b_hasAnno) {
-    uint16_t annoType;
-    if (a_hasAnno) {
-      if (a_itemAnno) {
-        NS_ENSURE_SUCCESS(annosvc->GetItemAnnotationType(a->mItemId,
-                                                         annoName,
-                                                         &annoType), 0);
-      } else {
-        NS_ENSURE_SUCCESS(annosvc->GetPageAnnotationType(a_uri, annoName,
-                                                         &annoType), 0);
-      }
-    }
-    if (b_hasAnno) {
-      uint16_t b_type;
-      if (b_itemAnno) {
-        NS_ENSURE_SUCCESS(annosvc->GetItemAnnotationType(b->mItemId,
-                                                         annoName,
-                                                         &b_type), 0);
-      } else {
-        NS_ENSURE_SUCCESS(annosvc->GetPageAnnotationType(b_uri, annoName,
-                                                         &b_type), 0);
-      }
-      // We better make the API not support this state, really
-      // XXXmano: this is actually wrong for double<->int and int64_t<->int32_t
-      if (a_hasAnno && b_type != annoType)
-        return 0;
-      annoType = b_type;
-    }
-
-#define GET_ANNOTATIONS_VALUES(METHOD_ITEM, METHOD_PAGE, A_VAL, B_VAL)        \
-        if (a_hasAnno) {                                                      \
-          if (a_itemAnno) {                                                   \
-            NS_ENSURE_SUCCESS(annosvc->METHOD_ITEM(a->mItemId, annoName,      \
-                                                   A_VAL), 0);                \
-          } else {                                                            \
-            NS_ENSURE_SUCCESS(annosvc->METHOD_PAGE(a_uri, annoName,           \
-                                                   A_VAL), 0);                \
-          }                                                                   \
-        }                                                                     \
-        if (b_hasAnno) {                                                      \
-          if (b_itemAnno) {                                                   \
-            NS_ENSURE_SUCCESS(annosvc->METHOD_ITEM(b->mItemId, annoName,      \
-                                                   B_VAL), 0);                \
-          } else {                                                            \
-            NS_ENSURE_SUCCESS(annosvc->METHOD_PAGE(b_uri, annoName,           \
-                                                   B_VAL), 0);                \
-          }                                                                   \
-        }
-
-    if (annoType == nsIAnnotationService::TYPE_STRING) {
-      nsAutoString a_val, b_val;
-      GET_ANNOTATIONS_VALUES(GetItemAnnotationString,
-                             GetPageAnnotationString, a_val, b_val);
-      value = SortComparison_StringLess(a_val, b_val);
-    }
-    else if (annoType == nsIAnnotationService::TYPE_INT32) {
-      int32_t a_val = 0, b_val = 0;
-      GET_ANNOTATIONS_VALUES(GetItemAnnotationInt32,
-                             GetPageAnnotationInt32, &a_val, &b_val);
-      value = (a_val < b_val) ? -1 : (a_val > b_val) ? 1 : 0;
-    }
-    else if (annoType == nsIAnnotationService::TYPE_INT64) {
-      int64_t a_val = 0, b_val = 0;
-      GET_ANNOTATIONS_VALUES(GetItemAnnotationInt64,
-                             GetPageAnnotationInt64, &a_val, &b_val);
-      value = (a_val < b_val) ? -1 : (a_val > b_val) ? 1 : 0;
-    }
-    else if (annoType == nsIAnnotationService::TYPE_DOUBLE) {
-      double a_val = 0, b_val = 0;
-      GET_ANNOTATIONS_VALUES(GetItemAnnotationDouble,
-                             GetPageAnnotationDouble, &a_val, &b_val);
-      value = (a_val < b_val) ? -1 : (a_val > b_val) ? 1 : 0;
-    }
-  }
-
-  // Note we also fall back to the title-sorting route one of the items didn't
-  // have the annotation set or if both had it set but in a different storage
-  // type
-  if (value == 0)
-    return SortComparison_TitleLess(a, b, nullptr);
-
-  return value;
-}
-int32_t nsNavHistoryContainerResultNode::SortComparison_AnnotationGreater(
-    nsNavHistoryResultNode* a, nsNavHistoryResultNode* b, void* closure)
-{
-  return -SortComparison_AnnotationLess(a, b, closure);
 }
 
 /**
@@ -1558,11 +1400,8 @@ nsNavHistoryContainerResultNode::InsertSortedChild(
       container->FillStats();
     }
 
-    nsAutoCString sortingAnnotation;
-    GetSortingAnnotation(sortingAnnotation);
     bool itemExists;
     uint32_t position = FindInsertionPoint(aNode, comparator,
-                                           sortingAnnotation.get(),
                                            &itemExists);
     if (aIgnoreDuplicates && itemExists)
       return NS_OK;
@@ -1589,16 +1428,13 @@ nsNavHistoryContainerResultNode::EnsureItemPosition(uint32_t aIndex) {
   if (!comparator)
     return false;
 
-  nsAutoCString sortAnno;
-  GetSortingAnnotation(sortAnno);
-  if (!DoesChildNeedResorting(aIndex, comparator, sortAnno.get()))
+  if (!DoesChildNeedResorting(aIndex, comparator))
     return false;
 
   RefPtr<nsNavHistoryResultNode> node(mChildren[aIndex]);
   mChildren.RemoveObjectAt(aIndex);
 
-  uint32_t newIndex = FindInsertionPoint(
-                          node, comparator,sortAnno.get(), nullptr);
+  uint32_t newIndex = FindInsertionPoint(node, comparator, nullptr);
   mChildren.InsertObjectAt(node.get(), newIndex);
 
   if (AreChildrenVisible()) {
@@ -2059,7 +1895,8 @@ nsNavHistoryQueryResultNode::GetHasChildren(bool* aHasChildren)
       resultType == nsINavHistoryQueryOptions::RESULTS_AS_SITE_QUERY) {
     nsNavHistory* history = nsNavHistory::GetHistoryService();
     NS_ENSURE_TRUE(history, NS_ERROR_OUT_OF_MEMORY);
-    return history->GetHasHistoryEntries(aHasChildren);
+    *aHasChildren = history->hasHistoryEntries();
+    return NS_OK;
   }
 
   //XXX: For other containers queries we must:
@@ -2163,8 +2000,6 @@ nsNavHistoryQueryResultNode::FillChildren()
     // then have proper visit counts and dates.
     SortComparator comparator = GetSortingComparator(GetSortType());
     if (comparator) {
-      nsAutoCString sortingAnnotation;
-      GetSortingAnnotation(sortingAnnotation);
       // Usually containers queries results comes already sorted from the
       // database, but some locales could have special rules to sort by title.
       // RecursiveSort won't apply these rules to containers in containers
@@ -2179,10 +2014,12 @@ nsNavHistoryQueryResultNode::FillChildren()
       if (IsContainersQuery() &&
           sortType == mOptions->SortingMode() &&
           (sortType == nsINavHistoryQueryOptions::SORT_BY_TITLE_ASCENDING ||
-           sortType == nsINavHistoryQueryOptions::SORT_BY_TITLE_DESCENDING))
-        nsNavHistoryContainerResultNode::RecursiveSort(sortingAnnotation.get(), comparator);
-      else
-        RecursiveSort(sortingAnnotation.get(), comparator);
+           sortType == nsINavHistoryQueryOptions::SORT_BY_TITLE_DESCENDING)) {
+        nsNavHistoryContainerResultNode::RecursiveSort(comparator);
+      }
+      else {
+        RecursiveSort(comparator);
+      }
     }
   }
 
@@ -2351,28 +2188,14 @@ nsNavHistoryQueryResultNode::GetSortType()
 
 
 void
-nsNavHistoryQueryResultNode::GetSortingAnnotation(nsACString& aAnnotation) {
-  if (mParent) {
-    // use our sorting, we are not the root
-    mOptions->GetSortingAnnotation(aAnnotation);
-  }
-  else if (mResult) {
-    aAnnotation.Assign(mResult->mSortingAnnotation);
-  }
-}
-
-void
-nsNavHistoryQueryResultNode::RecursiveSort(
-    const char* aData, SortComparator aComparator)
+nsNavHistoryQueryResultNode::RecursiveSort(SortComparator aComparator)
 {
-  void* data = const_cast<void*>(static_cast<const void*>(aData));
-
   if (!IsContainersQuery())
-    mChildren.Sort(aComparator, data);
+    mChildren.Sort(aComparator, nullptr);
 
   for (int32_t i = 0; i < mChildren.Count(); ++i) {
     if (mChildren[i]->IsContainer())
-      mChildren[i]->GetAsContainer()->RecursiveSort(aData, aComparator);
+      mChildren[i]->GetAsContainer()->RecursiveSort(aComparator);
   }
 }
 
@@ -3031,7 +2854,8 @@ nsNavHistoryQueryResultNode::OnItemMoved(int64_t aFolder,
                                          const nsACString& aGUID,
                                          const nsACString& aOldParentGUID,
                                          const nsACString& aNewParentGUID,
-                                         uint16_t aSource)
+                                         uint16_t aSource,
+                                         const nsACString& aURI)
 {
   // 1. The query cannot be affected by the item's position
   // 2. For the time being, we cannot optimize this not to update
@@ -3216,14 +3040,14 @@ NS_IMETHODIMP
 nsNavHistoryFolderResultNode::GetQuery(nsINavHistoryQuery** _query)
 {
   // get the query object
-  nsCOMPtr<nsINavHistoryQuery> query;
-  nsNavHistory* history = nsNavHistory::GetHistoryService();
-  NS_ENSURE_TRUE(history, NS_ERROR_OUT_OF_MEMORY);
-  nsresult rv = history->GetNewQuery(getter_AddRefs(query));
-  NS_ENSURE_SUCCESS(rv, rv);
+  RefPtr<nsNavHistoryQuery> query = new nsNavHistoryQuery();
 
+  nsTArray<nsCString> parents;
   // query just has the folder ID set and nothing else
-  rv = query->SetFolders(&mTargetFolderItemId, 1);
+  if (!parents.AppendElement(mTargetFolderGuid)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  nsresult rv = query->SetParents(parents);
   NS_ENSURE_SUCCESS(rv, rv);
 
   query.forget(_query);
@@ -3293,9 +3117,7 @@ nsNavHistoryFolderResultNode::OnChildrenFilled()
     // then have proper visit counts and dates.
     SortComparator comparator = GetSortingComparator(GetSortType());
     if (comparator) {
-      nsAutoCString sortingAnnotation;
-      GetSortingAnnotation(sortingAnnotation);
-      RecursiveSort(sortingAnnotation.get(), comparator);
+      RecursiveSort(comparator);
     }
   }
 
@@ -3628,13 +3450,14 @@ nsNavHistoryFolderResultNode::OnItemAdded(int64_t aItemId,
   // here, try to do something reasonable if the bookmark service gives us
   // a bogus index.
   if (aIndex < 0) {
-    NS_NOTREACHED("Invalid index for item adding: <0");
+    MOZ_ASSERT_UNREACHABLE("Invalid index for item adding: <0");
     aIndex = 0;
   }
   else if (aIndex > mChildren.Count()) {
     if (!excludeItems) {
       // Something wrong happened while updating indexes.
-      NS_NOTREACHED("Invalid index for item adding: greater than count");
+      MOZ_ASSERT_UNREACHABLE("Invalid index for item adding: greater than "
+                             "count");
     }
     aIndex = mChildren.Count();
   }
@@ -3676,7 +3499,7 @@ nsNavHistoryFolderResultNode::OnItemAdded(int64_t aItemId,
   else if (aItemType == nsINavBookmarksService::TYPE_FOLDER) {
     nsNavBookmarks* bookmarks = nsNavBookmarks::GetBookmarksService();
     NS_ENSURE_TRUE(bookmarks, NS_ERROR_OUT_OF_MEMORY);
-    rv = bookmarks->ResultNodeForContainer(aItemId,
+    rv = bookmarks->ResultNodeForContainer(PromiseFlatCString(aGUID),
                                            new nsNavHistoryQueryOptions(),
                                            getter_AddRefs(node));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -3860,7 +3683,7 @@ nsNavHistoryResultNode::OnItemChanged(int64_t aItemId,
       NOTIFY_RESULT_OBSERVERS(result, NodeKeywordChanged(this, aNewValue));
   }
   else
-    NS_NOTREACHED("Unknown bookmark property changing.");
+    MOZ_ASSERT_UNREACHABLE("Unknown bookmark property changing.");
 
   if (!mParent)
     return NS_OK;
@@ -3990,12 +3813,23 @@ nsNavHistoryFolderResultNode::OnItemMoved(int64_t aItemId,
                                           const nsACString& aGUID,
                                           const nsACString& aOldParentGUID,
                                           const nsACString& aNewParentGUID,
-                                          uint16_t aSource)
+                                          uint16_t aSource,
+                                          const nsACString& aURI)
 {
   NS_ASSERTION(aOldParent == mTargetFolderItemId || aNewParent == mTargetFolderItemId,
                "Got a bookmark message that doesn't belong to us");
 
   RESTART_AND_RETURN_IF_ASYNC_PENDING();
+
+  bool excludeItems = mOptions->ExcludeItems();
+  if (excludeItems &&
+      (aItemType == nsINavBookmarksService::TYPE_SEPARATOR ||
+       (aItemType == nsINavBookmarksService::TYPE_BOOKMARK &&
+        !StringBeginsWith(aURI, NS_LITERAL_CSTRING("place:"))))) {
+    // This is a bookmark or a separator, so we don't need to handle this if
+    // we're excluding items.
+    return NS_OK;
+  }
 
   uint32_t index;
   nsNavHistoryResultNode* node = FindChildById(aItemId, &index);
@@ -4008,12 +3842,6 @@ nsNavHistoryFolderResultNode::OnItemMoved(int64_t aItemId,
     return NS_OK;
   if (!node && aOldParent == mTargetFolderItemId)
     return NS_OK;
-
-  bool excludeItems = mOptions->ExcludeItems();
-  if (node && excludeItems && (node->IsURI() || node->IsSeparator())) {
-    // Don't update items when we aren't displaying them.
-    return NS_OK;
-  }
 
   if (!StartIncrementalUpdate())
     return NS_OK; // entire container was refreshed for us
@@ -4133,7 +3961,6 @@ nsNavHistoryResult::nsNavHistoryResult(nsNavHistoryContainerResultNode* aRoot,
   , mSuppressNotifications(false)
 {
   mSortingMode = aOptions->SortingMode();
-  MOZ_ALWAYS_SUCCEEDS(aOptions->GetSortingAnnotation(mSortingAnnotation));
 
   mRootNode->mResult = this;
   MOZ_ASSERT(mRootNode->mIndentLevel == -1,
@@ -4171,6 +3998,9 @@ nsNavHistoryResult::StopObserving()
     nsNavHistory* history = nsNavHistory::GetHistoryService();
     if (history) {
       history->RemoveObserver(this);
+      AutoTArray<PlacesEventType, 1> events;
+      events.AppendElement(PlacesEventType::Page_visited);
+      PlacesObservers::RemoveListener(events, this);
       mIsHistoryObserver = false;
     }
   }
@@ -4183,6 +4013,9 @@ nsNavHistoryResult::AddHistoryObserver(nsNavHistoryQueryResultNode* aNode)
       nsNavHistory* history = nsNavHistory::GetHistoryService();
       NS_ASSERTION(history, "Can't create history service");
       history->AddObserver(this, true);
+      AutoTArray<PlacesEventType, 1> events;
+      events.AppendElement(PlacesEventType::Page_visited);
+      PlacesObservers::AddListener(events, this);
       mIsHistoryObserver = true;
   }
   // Don't add duplicate observers.  In some case we don't unregister when
@@ -4200,7 +4033,7 @@ nsNavHistoryResult::AddAllBookmarksObserver(nsNavHistoryQueryResultNode* aNode)
   if (!mIsAllBookmarksObserver && !mIsBookmarkFolderObserver) {
     nsNavBookmarks* bookmarks = nsNavBookmarks::GetBookmarksService();
     if (!bookmarks) {
-      NS_NOTREACHED("Can't create bookmark service");
+      MOZ_ASSERT_UNREACHABLE("Can't create bookmark service");
       return;
     }
     bookmarks->AddObserver(this, true);
@@ -4240,7 +4073,7 @@ nsNavHistoryResult::AddBookmarkFolderObserver(nsNavHistoryFolderResultNode* aNod
   if (!mIsBookmarkFolderObserver && !mIsAllBookmarksObserver) {
     nsNavBookmarks* bookmarks = nsNavBookmarks::GetBookmarksService();
     if (!bookmarks) {
-      NS_NOTREACHED("Can't create bookmark service");
+      MOZ_ASSERT_UNREACHABLE("Can't create bookmark service");
       return;
     }
     bookmarks->AddObserver(this, true);
@@ -4337,25 +4170,11 @@ nsNavHistoryResult::SetSortingMode(uint16_t aSortingMode)
   if (comparator) {
     nsNavHistory* history = nsNavHistory::GetHistoryService();
     NS_ENSURE_TRUE(history, NS_ERROR_OUT_OF_MEMORY);
-    mRootNode->RecursiveSort(mSortingAnnotation.get(), comparator);
+    mRootNode->RecursiveSort(comparator);
   }
 
   NOTIFY_RESULT_OBSERVERS(this, SortingChanged(aSortingMode));
   NOTIFY_RESULT_OBSERVERS(this, InvalidateContainer(mRootNode));
-  return NS_OK;
-}
-
-
-NS_IMETHODIMP
-nsNavHistoryResult::GetSortingAnnotation(nsACString& _result) {
-  _result.Assign(mSortingAnnotation);
-  return NS_OK;
-}
-
-
-NS_IMETHODIMP
-nsNavHistoryResult::SetSortingAnnotation(const nsACString& aSortingAnnotation) {
-  mSortingAnnotation.Assign(aSortingAnnotation);
   return NS_OK;
 }
 
@@ -4409,7 +4228,7 @@ NS_IMETHODIMP
 nsNavHistoryResult::GetRoot(nsINavHistoryContainerResultNode** aRoot)
 {
   if (!mRootNode) {
-    NS_NOTREACHED("Root is null");
+    MOZ_ASSERT_UNREACHABLE("Root is null");
     *aRoot = nullptr;
     return NS_ERROR_FAILURE;
   }
@@ -4669,25 +4488,26 @@ nsNavHistoryResult::OnItemMoved(int64_t aItemId,
                                 const nsACString& aGUID,
                                 const nsACString& aOldParentGUID,
                                 const nsACString& aNewParentGUID,
-                                uint16_t aSource)
+                                uint16_t aSource,
+                                const nsACString& aURI)
 {
   ENUMERATE_BOOKMARK_FOLDER_OBSERVERS(aOldParent,
       OnItemMoved(aItemId, aOldParent, aOldIndex, aNewParent, aNewIndex,
-                  aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource));
+                  aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource, aURI));
   if (aNewParent != aOldParent) {
     ENUMERATE_BOOKMARK_FOLDER_OBSERVERS(aNewParent,
         OnItemMoved(aItemId, aOldParent, aOldIndex, aNewParent, aNewIndex,
-                    aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource));
+                    aItemType, aGUID, aOldParentGUID, aNewParentGUID, aSource, aURI));
   }
   ENUMERATE_ALL_BOOKMARKS_OBSERVERS(OnItemMoved(aItemId, aOldParent, aOldIndex,
                                                 aNewParent, aNewIndex,
                                                 aItemType, aGUID,
                                                 aOldParentGUID,
-                                                aNewParentGUID, aSource));
+                                                aNewParentGUID, aSource, aURI));
   ENUMERATE_HISTORY_OBSERVERS(OnItemMoved(aItemId, aOldParent, aOldIndex,
                                           aNewParent, aNewIndex, aItemType,
                                           aGUID, aOldParentGUID,
-                                          aNewParentGUID, aSource));
+                                          aNewParentGUID, aSource, aURI));
   return NS_OK;
 }
 
@@ -4779,32 +4599,27 @@ nsNavHistoryResult::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
 }
 
 
-NS_IMETHODIMP
-nsNavHistoryResult::OnVisits(nsIVisitData** aVisits,
-                             uint32_t aVisitsCount) {
-  for (uint32_t i = 0; i < aVisitsCount; ++i) {
-    nsIVisitData* place = aVisits[i];
+void
+nsNavHistoryResult::HandlePlacesEvent(const PlacesEventSequence& aEvents) {
+  for (const auto& event : aEvents) {
+    if (NS_WARN_IF(event->Type() != PlacesEventType::Page_visited)) {
+      continue;
+    }
+
+    const dom::PlacesVisit* visit = event->AsPlacesVisit();
+    if (NS_WARN_IF(!visit)) {
+      continue;
+    }
+
     nsCOMPtr<nsIURI> uri;
-    MOZ_ALWAYS_SUCCEEDS(place->GetUri(getter_AddRefs(uri)));
-    int64_t visitId;
-    MOZ_ALWAYS_SUCCEEDS(place->GetVisitId(&visitId));
-    PRTime time;
-    MOZ_ALWAYS_SUCCEEDS(place->GetTime(&time));
-    uint32_t transitionType;
-    MOZ_ALWAYS_SUCCEEDS(place->GetTransitionType(&transitionType));
-    nsCString guid;
-    MOZ_ALWAYS_SUCCEEDS(place->GetGuid(guid));
-    bool hidden;
-    MOZ_ALWAYS_SUCCEEDS(place->GetHidden(&hidden));
-    uint32_t visitCount;
-    MOZ_ALWAYS_SUCCEEDS(place->GetVisitCount(&visitCount));
-    nsString lastKnownTitle;
-    MOZ_ALWAYS_SUCCEEDS(place->GetLastKnownTitle(lastKnownTitle));
-    nsresult rv = OnVisit(uri, visitId, time, transitionType, guid, hidden,
-                          visitCount, lastKnownTitle);
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_ALWAYS_SUCCEEDS(NS_NewURI(getter_AddRefs(uri), visit->mUrl));
+    if (!uri) {
+      return;
+    }
+    OnVisit(uri, visit->mVisitId, visit->mVisitTime * 1000,
+            visit->mTransitionType, visit->mPageGuid,
+            visit->mHidden, visit->mVisitCount, visit->mLastKnownTitle);
   }
-  return NS_OK;
 }
 
 

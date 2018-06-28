@@ -280,9 +280,7 @@ public:
   void NotifyLoadID(uint32_t aLoadID);
 
   // Notifies the cache that the channel has closed with the given status.
-  void NotifyDataEnded(uint32_t aLoadID,
-                       nsresult aStatus,
-                       bool aReopenOnError = false);
+  void NotifyDataEnded(uint32_t aLoadID, nsresult aStatus);
 
   // Notifies the stream that the suspend status of the client has changed.
   // Main thread only.
@@ -302,7 +300,16 @@ public:
   // the stream ended normally we return the length we actually got.
   // If we've successfully read data beyond the originally reported length,
   // we return the end of the data we've read.
-  int64_t GetLength();
+  int64_t GetLength() const;
+  // Return the length and offset where next channel data will write to. Main
+  // thread only.
+  // This method should be removed as part of bug 1464045.
+  struct LengthAndOffset
+  {
+    int64_t mLength;
+    int64_t mOffset;
+  };
+  LengthAndOffset GetLengthAndOffset() const;
   // Returns the unique resource ID. Call only on the main thread or while
   // holding the media cache lock.
   int64_t GetResourceID() { return mResourceID; }
@@ -409,7 +416,12 @@ private:
 
   private:
     struct Entry : public nsUint32HashKey {
-      explicit Entry(KeyTypePointer aKey) : nsUint32HashKey(aKey) { }
+      explicit Entry(KeyTypePointer aKey)
+        : nsUint32HashKey(aKey)
+        , mNextBlock(0)
+        , mPrevBlock(0)
+      {
+      }
       Entry(const Entry& toCopy) : nsUint32HashKey(&toCopy.GetKey()),
         mNextBlock(toCopy.mNextBlock), mPrevBlock(toCopy.mPrevBlock) {}
 
@@ -459,9 +471,7 @@ private:
                                  bool aSeekable,
                                  int64_t aLength);
 
-  void NotifyDataEndedInternal(uint32_t aLoadID,
-                               nsresult aStatus,
-                               bool aReopenOnError);
+  void NotifyDataEndedInternal(uint32_t aLoadID, nsresult aStatus);
 
   void UpdateDownloadStatistics(AutoLock&);
 

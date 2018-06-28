@@ -23,7 +23,7 @@
 #include <algorithm>
 
 using namespace mozilla;
-using namespace mozilla::dom::SVGPathSegBinding;
+using namespace mozilla::dom::SVGPathSeg_Binding;
 using namespace mozilla::gfx;
 
 static bool IsMoveto(uint16_t aSegType)
@@ -486,7 +486,7 @@ SVGPathData::BuildPath(PathBuilder* builder,
       break;
 
     default:
-      NS_NOTREACHED("Bad path segment type");
+      MOZ_ASSERT_UNREACHABLE("Bad path segment type");
       return nullptr; // according to spec we'd use everything up to the bad seg anyway
     }
 

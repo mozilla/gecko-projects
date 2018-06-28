@@ -19,6 +19,7 @@
 #include "nsNetCID.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
+#include "nsQueryObject.h"
 #include "mozilla/ipc/URIUtils.h"
 
 using namespace mozilla::ipc;
@@ -47,10 +48,7 @@ NS_INTERFACE_MAP_BEGIN(nsJARURI)
   NS_INTERFACE_MAP_ENTRY(nsIClassInfo)
   NS_INTERFACE_MAP_ENTRY(nsINestedURI)
   NS_INTERFACE_MAP_ENTRY(nsIIPCSerializableURI)
-  // see nsJARURI::Equals
-  if (aIID.Equals(NS_GET_IID(nsJARURI)))
-      foundInterface = reinterpret_cast<nsISupports*>(this);
-  else
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(nsJARURI)
 NS_INTERFACE_MAP_END
 
 nsresult
@@ -109,7 +107,7 @@ nsJARURI::CreateEntryURL(const nsACString& entryFilename,
 NS_IMETHODIMP
 nsJARURI::Read(nsIObjectInputStream *aStream)
 {
-    NS_NOTREACHED("Use nsIURIMutator.read() instead");
+    MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -337,8 +335,7 @@ nsJARURI::SetSpecWithBase(const nsACString &aSpec, nsIURI* aBaseURL)
         if (!aBaseURL)
             return NS_ERROR_MALFORMED_URI;
 
-        RefPtr<nsJARURI> otherJAR;
-        aBaseURL->QueryInterface(NS_GET_IID(nsJARURI), getter_AddRefs(otherJAR));
+        RefPtr<nsJARURI> otherJAR = do_QueryObject(aBaseURL);
         NS_ENSURE_TRUE(otherJAR, NS_NOINTERFACE);
 
         mJARFile = otherJAR->mJARFile;
@@ -564,8 +561,7 @@ nsJARURI::EqualsInternal(nsIURI *other,
     if (!other)
         return NS_OK;	// not equal
 
-    RefPtr<nsJARURI> otherJAR;
-    other->QueryInterface(NS_GET_IID(nsJARURI), getter_AddRefs(otherJAR));
+    RefPtr<nsJARURI> otherJAR = do_QueryObject(other);
     if (!otherJAR)
         return NS_OK;   // not equal
 
@@ -594,7 +590,7 @@ nsJARURI::SchemeIs(const char *i_Scheme, bool *o_Equals)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsJARURI::Clone(nsIURI **result)
 {
     nsresult rv;
@@ -914,15 +910,11 @@ nsJARURI::CloneWithJARFileInternal(nsIURI *jarFile,
         return NS_ERROR_INVALID_ARG;
     }
 
-    nsresult rv;
-
-    nsCOMPtr<nsIURI> newJARFile;
-    rv = jarFile->Clone(getter_AddRefs(newJARFile));
-    if (NS_FAILED(rv)) return rv;
-
+    nsresult rv = NS_OK;
+    nsCOMPtr<nsIURI> newJARFile = jarFile;
     nsCOMPtr<nsIURI> newJAREntryURI;
     if (refHandlingMode == eHonorRef) {
-      rv = mJAREntry->Clone(getter_AddRefs(newJAREntryURI));
+      newJAREntryURI = mJAREntry;
     } else if (refHandlingMode == eReplaceRef) {
       rv = mJAREntry->CloneWithNewRef(newRef, getter_AddRefs(newJAREntryURI));
     } else {
@@ -933,11 +925,10 @@ nsJARURI::CloneWithJARFileInternal(nsIURI *jarFile,
     nsCOMPtr<nsIURL> newJAREntry(do_QueryInterface(newJAREntryURI));
     NS_ASSERTION(newJAREntry, "This had better QI to nsIURL!");
 
-    nsJARURI* uri = new nsJARURI();
-    NS_ADDREF(uri);
+    RefPtr<nsJARURI> uri = new nsJARURI();
     uri->mJARFile = newJARFile;
     uri->mJAREntry = newJAREntry;
-    *result = uri;
+    uri.forget(result);
 
     return NS_OK;
 }

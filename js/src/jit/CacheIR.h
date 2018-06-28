@@ -43,8 +43,8 @@ enum class BaselineCacheIRStubKind;
 // This class stores the CacheIR and the location of GC things stored in the
 // stub, for the GC.
 //
-// JitCompartment has a CacheIRStubInfo* -> JitCode* weak map that's used to
-// share both the IR and JitCode between CacheIR stubs. This HashMap owns the
+// JitZone has a CacheIRStubInfo* -> JitCode* weak map that's used to share both
+// the IR and JitCode between Baseline CacheIR stubs. This HashMap owns the
 // stubInfo (it uses UniquePtr), so once there are no references left to the
 // shared stub code, we can also free the CacheIRStubInfo.
 //
@@ -395,6 +395,7 @@ void LoadShapeWrapperContents(MacroAssembler& masm, Register obj, Register dst, 
 // Class to record CacheIR + some additional metadata for code generation.
 class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
 {
+    JSContext* cx_;
     CompactBufferWriter buffer_;
 
     uint32_t nextOperandId_;
@@ -414,6 +415,8 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     static const size_t MaxOperandIds = 20;
     static const size_t MaxStubDataSizeInBytes = 20 * sizeof(uintptr_t);
     bool tooLarge_;
+
+    void assertSameCompartment(JSObject*);
 
     void writeOp(CacheOp op) {
         MOZ_ASSERT(uint32_t(op) <= UINT8_MAX);
@@ -471,6 +474,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
   public:
     explicit CacheIRWriter(JSContext* cx)
       : CustomAutoRooter(cx),
+        cx_(cx),
         nextOperandId_(0),
         nextInstructionId_(0),
         numInputOperands_(0),
@@ -585,8 +589,10 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         guardShape(obj, shape);
     }
     void guardXrayExpandoShapeAndDefaultProto(ObjOperandId obj, JSObject* shapeWrapper) {
+        assertSameCompartment(shapeWrapper);
         writeOpWithOperandId(CacheOp::GuardXrayExpandoShapeAndDefaultProto, obj);
-        buffer_.writeByte(uint32_t(!!shapeWrapper));        addStubField(uintptr_t(shapeWrapper), StubField::Type::JSObject);
+        buffer_.writeByte(uint32_t(!!shapeWrapper));
+        addStubField(uintptr_t(shapeWrapper), StubField::Type::JSObject);
     }
     // Guard rhs[slot] == prototypeObject
     void guardFunctionPrototype(ObjOperandId rhs, uint32_t slot, ObjOperandId protoId) {
@@ -621,6 +627,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         guardGroup(obj, group);
     }
     void guardProto(ObjOperandId obj, JSObject* proto) {
+        assertSameCompartment(proto);
         writeOpWithOperandId(CacheOp::GuardProto, obj);
         addStubField(uintptr_t(proto), StubField::Type::JSObject);
     }
@@ -652,6 +659,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::GuardNotDOMProxy, obj);
     }
     void guardSpecificObject(ObjOperandId obj, JSObject* expected) {
+        assertSameCompartment(expected);
         writeOpWithOperandId(CacheOp::GuardSpecificObject, obj);
         addStubField(uintptr_t(expected), StubField::Type::JSObject);
     }
@@ -675,9 +683,10 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::GuardMagicValue, val);
         buffer_.writeByte(uint32_t(magic));
     }
-    void guardCompartment(ObjOperandId obj, JSObject* global, JSCompartment* compartment) {
+    void guardCompartment(ObjOperandId obj, JSObject* global, JS::Compartment* compartment) {
+        assertSameCompartment(global);
         writeOpWithOperandId(CacheOp::GuardCompartment, obj);
-        // Add a reference to the compartment's global to keep it alive.
+        // Add a reference to a global in the compartment to keep it alive.
         addStubField(uintptr_t(global), StubField::Type::JSObject);
         // Use RawWord, because compartments never move and it can't be GCed.
         addStubField(uintptr_t(compartment), StubField::Type::RawWord);
@@ -752,6 +761,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         return res;
     }
     ObjOperandId loadObject(JSObject* obj) {
+        assertSameCompartment(obj);
         ObjOperandId res(nextOperandId_++);
         writeOpWithOperandId(CacheOp::LoadObject, res);
         addStubField(uintptr_t(obj), StubField::Type::JSObject);
@@ -863,7 +873,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     }
 
     void storeTypedObjectReferenceProperty(ObjOperandId obj, uint32_t offset,
-                                           TypedThingLayout layout, ReferenceTypeDescr::Type type,
+                                           TypedThingLayout layout, ReferenceType type,
                                            ValOperandId rhs)
     {
         writeOpWithOperandId(CacheOp::StoreTypedObjectReferenceProperty, obj);
@@ -923,6 +933,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::CallScriptedSetter, obj);
         addStubField(uintptr_t(setter), StubField::Type::JSObject);
         writeOperandId(rhs);
+        buffer_.writeByte(cx_->realm() != setter->realm());
     }
     void callNativeSetter(ObjOperandId obj, JSFunction* setter, ValOperandId rhs) {
         writeOpWithOperandId(CacheOp::CallNativeSetter, obj);
@@ -1069,6 +1080,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void callScriptedGetterResult(ObjOperandId obj, JSFunction* getter) {
         writeOpWithOperandId(CacheOp::CallScriptedGetterResult, obj);
         addStubField(uintptr_t(getter), StubField::Type::JSObject);
+        buffer_.writeByte(cx_->realm() != getter->realm());
     }
     void callNativeGetterResult(ObjOperandId obj, JSFunction* getter) {
         writeOpWithOperandId(CacheOp::CallNativeGetterResult, obj);
@@ -1215,8 +1227,8 @@ class MOZ_RAII CacheIRReader
     uint32_t uint32Immediate() { return buffer_.readUnsigned(); }
     void* pointer() { return buffer_.readRawPointer(); }
 
-    ReferenceTypeDescr::Type referenceTypeDescrType() {
-        return ReferenceTypeDescr::Type(buffer_.readByte());
+    ReferenceType referenceTypeDescrType() {
+        return ReferenceType(buffer_.readByte());
     }
 
     uint8_t readByte() {

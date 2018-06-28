@@ -8,7 +8,6 @@
 
 generated_resources := \
   AndroidManifest.xml \
-  res/raw/browsersearch.json \
   res/raw/suggestedsites.json \
   res/values/strings.xml \
   $(NULL)
@@ -27,7 +26,6 @@ chrome-%::
 	$(MAKE) \
 	  res/values$(AB_rCD)/strings.xml \
 	  res/raw$(AB_rCD)/suggestedsites.json \
-	  res/raw$(AB_rCD)/browsersearch.json \
 	  AB_CD=$*
 
 include $(topsrcdir)/config/rules.mk
@@ -50,7 +48,7 @@ $(ABS_DIST)/fennec/$(OMNIJAR_NAME): FORCE
 
 .PHONY: features
 features::
-	$(call py_action,generate_builtin_addons,chrome/chrome/content/built_in_addons.json)
+	$(call py_action,generate_builtin_addons,--features=features chrome/chrome/content/built_in_addons.json)
 
 ifndef MOZILLA_OFFICIAL
 # Targets built very early during a Gradle build.  In automation,

@@ -451,6 +451,7 @@ nsTextControlFrame::CreateRootNode()
   MOZ_ASSERT(!mRootNode);
 
   mRootNode = CreateEmptyDiv(*this);
+  mRootNode->SetIsNativeAnonymousRoot();
 
   mMutationObserver = new nsAnonDivObserver(*this);
   mRootNode->AddMutationObserver(mMutationObserver);
@@ -463,9 +464,6 @@ nsTextControlFrame::CreateRootNode()
   // sheet and is still applied even if author styles are disabled.
   nsAutoString classValue;
   classValue.AppendLiteral("anonymous-div");
-  if (GetWrapCols() > 0) {
-    classValue.AppendLiteral(" wrap");
-  }
 
   if (!IsSingleLineTextControl()) {
     // We can't just inherit the overflow because setting visible overflow will
@@ -791,7 +789,7 @@ void nsTextControlFrame::SetFocus(bool aOn, bool aRepaint)
       nsresult rv = mContent->OwnerDoc()->Dispatch(TaskCategory::Other,
                                                    do_AddRef(event));
       if (NS_SUCCEEDED(rv)) {
-        mScrollEvent = Move(event);
+        mScrollEvent = std::move(event);
       }
     }
   }
@@ -1414,16 +1412,6 @@ nsTextControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     }
     kid = kid->GetNextSibling();
   }
-}
-
-mozilla::dom::Element*
-nsTextControlFrame::GetPseudoElement(CSSPseudoElementType aType)
-{
-  if (aType == CSSPseudoElementType::placeholder) {
-    return mPlaceholderDiv;
-  }
-
-  return nsContainerFrame::GetPseudoElement(aType);
 }
 
 NS_IMETHODIMP

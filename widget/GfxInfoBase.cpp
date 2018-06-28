@@ -19,7 +19,6 @@
 #include "mozilla/Observer.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
-#include "nsIDOMNode.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
 #include "nsIXULAppInfo.h"
@@ -39,10 +38,10 @@ using namespace mozilla::widget;
 using namespace mozilla;
 using mozilla::MutexAutoLock;
 
-nsTArray<GfxDriverInfo>* GfxInfoBase::mDriverInfo;
-nsTArray<dom::GfxInfoFeatureStatus>* GfxInfoBase::mFeatureStatus;
-bool GfxInfoBase::mDriverInfoObserverInitialized;
-bool GfxInfoBase::mShutdownOccurred;
+nsTArray<GfxDriverInfo>* GfxInfoBase::sDriverInfo;
+nsTArray<dom::GfxInfoFeatureStatus>* GfxInfoBase::sFeatureStatus;
+bool GfxInfoBase::sDriverInfoObserverInitialized;
+bool GfxInfoBase::sShutdownOccurred;
 
 // Observes for shutdown so that the child GfxDriverInfo list is freed.
 class ShutdownObserver : public nsIObserver
@@ -59,23 +58,23 @@ public:
   {
     MOZ_ASSERT(strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0);
 
-    delete GfxInfoBase::mDriverInfo;
-    GfxInfoBase::mDriverInfo = nullptr;
+    delete GfxInfoBase::sDriverInfo;
+    GfxInfoBase::sDriverInfo = nullptr;
 
-    delete GfxInfoBase::mFeatureStatus;
-    GfxInfoBase::mFeatureStatus = nullptr;
+    delete GfxInfoBase::sFeatureStatus;
+    GfxInfoBase::sFeatureStatus = nullptr;
 
     for (uint32_t i = 0; i < DeviceFamilyMax; i++) {
-      delete GfxDriverInfo::mDeviceFamilies[i];
-      GfxDriverInfo::mDeviceFamilies[i] = nullptr;
+      delete GfxDriverInfo::sDeviceFamilies[i];
+      GfxDriverInfo::sDeviceFamilies[i] = nullptr;
     }
 
     for (uint32_t i = 0; i < DeviceVendorMax; i++) {
-      delete GfxDriverInfo::mDeviceVendors[i];
-      GfxDriverInfo::mDeviceVendors[i] = nullptr;
+      delete GfxDriverInfo::sDeviceVendors[i];
+      GfxDriverInfo::sDeviceVendors[i] = nullptr;
     }
 
-    GfxInfoBase::mShutdownOccurred = true;
+    GfxInfoBase::sShutdownOccurred = true;
 
     return NS_OK;
   }
@@ -85,10 +84,10 @@ NS_IMPL_ISUPPORTS(ShutdownObserver, nsIObserver)
 
 void InitGfxDriverInfoShutdownObserver()
 {
-  if (GfxInfoBase::mDriverInfoObserverInitialized)
+  if (GfxInfoBase::sDriverInfoObserverInitialized)
     return;
 
-  GfxInfoBase::mDriverInfoObserverInitialized = true;
+  GfxInfoBase::sDriverInfoObserverInitialized = true;
 
   nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
   if (!observerService) {
@@ -180,6 +179,9 @@ GetPrefNameForFeature(int32_t aFeature)
       break;
     case nsIGfxInfo::FEATURE_WEBRENDER:
       name = BLACKLIST_PREF_BRANCH "webrender";
+      break;
+    case nsIGfxInfo::FEATURE_DX_NV12:
+      name = BLACKLIST_PREF_BRANCH "dx.nv12";
       break;
     case nsIGfxInfo::FEATURE_VP8_HW_DECODE:
     case nsIGfxInfo::FEATURE_VP9_HW_DECODE:
@@ -373,6 +375,8 @@ BlacklistFeatureToGfxFeature(const nsAString& aFeature)
     return nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX;
   else if (aFeature.EqualsLiteral("WEBRENDER"))
     return nsIGfxInfo::FEATURE_WEBRENDER;
+  else if (aFeature.EqualsLiteral("DX_NV12"))
+    return nsIGfxInfo::FEATURE_DX_NV12;
   // We do not support FEATURE_VP8_HW_DECODE and FEATURE_VP9_HW_DECODE
   // in downloadable blocklist.
 
@@ -634,9 +638,9 @@ GfxInfoBase::GetFeatureStatus(int32_t aFeature, nsACString& aFailureId, int32_t*
 
   if (XRE_IsContentProcess()) {
     // Use the cached data received from the parent process.
-    MOZ_ASSERT(mFeatureStatus);
+    MOZ_ASSERT(sFeatureStatus);
     bool success = false;
-    for (const auto& fs : *mFeatureStatus) {
+    for (const auto& fs : *sFeatureStatus) {
       if (fs.feature() == aFeature) {
         aFailureId = fs.failureId();
         *aStatus = fs.status();
@@ -889,8 +893,8 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
 void
 GfxInfoBase::SetFeatureStatus(const nsTArray<dom::GfxInfoFeatureStatus>& aFS)
 {
-  MOZ_ASSERT(!mFeatureStatus);
-  mFeatureStatus = new nsTArray<dom::GfxInfoFeatureStatus>(aFS);
+  MOZ_ASSERT(!sFeatureStatus);
+  sFeatureStatus = new nsTArray<dom::GfxInfoFeatureStatus>(aFS);
 }
 
 nsresult
@@ -912,7 +916,7 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
     return NS_OK;
   }
 
-  if (mShutdownOccurred) {
+  if (sShutdownOccurred) {
     // This is futile; we've already commenced shutdown and our blocklists have
     // been deleted. We may want to look into resurrecting the blocklist instead
     // but for now, just don't even go there.
@@ -943,8 +947,8 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
   if (aDriverInfo.Length()) {
     status = FindBlocklistedDeviceInList(aDriverInfo, aSuggestedVersion, aFeature, aFailureId, os);
   } else {
-    if (!mDriverInfo) {
-      mDriverInfo = new nsTArray<GfxDriverInfo>();
+    if (!sDriverInfo) {
+      sDriverInfo = new nsTArray<GfxDriverInfo>();
     }
     status = FindBlocklistedDeviceInList(GetGfxDriverInfo(), aSuggestedVersion, aFeature, aFailureId, os);
   }
@@ -1003,6 +1007,7 @@ GfxInfoBase::EvaluateDownloadedBlacklist(nsTArray<GfxDriverInfo>& aDriverInfo)
     nsIGfxInfo::FEATURE_ADVANCED_LAYERS,
     nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX,
     nsIGfxInfo::FEATURE_WEBRENDER,
+    nsIGfxInfo::FEATURE_DX_NV12,
     0
   };
 

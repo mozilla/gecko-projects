@@ -126,7 +126,7 @@ extern "C" {
                        mach_msg_header_t* reply);
 
   // This symbol must be visible to dlsym() - see
-  // http://code.google.com/p/google-breakpad/issues/detail?id=345 for details.
+  // https://bugs.chromium.org/p/google-breakpad/issues/detail?id=345 for details.
   kern_return_t catch_exception_raise(mach_port_t target_port,
                                       mach_port_t failed_thread,
                                       mach_port_t task,
@@ -356,6 +356,11 @@ bool ExceptionHandler::WriteMinidumpWithException(
     bool report_current_thread) {
   bool result = false;
 
+#if TARGET_OS_IPHONE
+  // _exit() should never be called on iOS.
+  exit_after_write = false;
+#endif
+
   if (directCallback_) {
     if (directCallback_(callback_context_,
                         exception_type,
@@ -459,7 +464,7 @@ kern_return_t ForwardException(mach_port_t task, mach_port_t failed_thread,
 
   kern_return_t result;
   // TODO: Handle the case where |target_behavior| has MACH_EXCEPTION_CODES
-  // set. https://code.google.com/p/google-breakpad/issues/detail?id=551
+  // set. https://bugs.chromium.org/p/google-breakpad/issues/detail?id=551
   switch (target_behavior) {
     case EXCEPTION_DEFAULT:
       result = exception_raise(target_port, failed_thread, task, exception,
@@ -561,34 +566,39 @@ void* ExceptionHandler::WaitForMessage(void* exception_handler_class) {
           self->SuspendThreads();
 
 #if USE_PROTECTED_ALLOCATIONS
-        if (gBreakpadAllocator)
-          gBreakpadAllocator->Unprotect();
+          if (gBreakpadAllocator)
+            gBreakpadAllocator->Unprotect();
 #endif
 
-        int subcode = 0;
-        if (receive.exception == EXC_BAD_ACCESS && receive.code_count > 1)
-          subcode = receive.code[1];
+          int subcode = 0;
+          if (receive.exception == EXC_BAD_ACCESS && receive.code_count > 1)
+            subcode = receive.code[1];
 
-        // Generate the minidump with the exception data.
-        self->WriteMinidumpWithException(receive.exception, receive.code[0],
-                                         subcode, NULL, receive.thread.name,
-                                         true, false);
+          // Generate the minidump with the exception data.
+          self->WriteMinidumpWithException(receive.exception, receive.code[0],
+                                           subcode, NULL, receive.thread.name,
+                                           true, false);
 
 #if USE_PROTECTED_ALLOCATIONS
-        // This may have become protected again within
-        // WriteMinidumpWithException, but it needs to be unprotected for
-        // UninstallHandler.
-        if (gBreakpadAllocator)
-          gBreakpadAllocator->Unprotect();
+          // This may have become protected again within
+          // WriteMinidumpWithException, but it needs to be unprotected for
+          // UninstallHandler.
+          if (gBreakpadAllocator)
+            gBreakpadAllocator->Unprotect();
 #endif
 
-        self->UninstallHandler(true);
+          self->UninstallHandler(true);
 
 #if USE_PROTECTED_ALLOCATIONS
-        if (gBreakpadAllocator)
-          gBreakpadAllocator->Protect();
+          if (gBreakpadAllocator)
+            gBreakpadAllocator->Protect();
 #endif
+          // It's not safe to call exc_server with threads suspended.
+          // exc_server can trigger dlsym(3) calls which deadlock if
+          // another thread is paused while in dlopen(3).
+          self->ResumeThreads();
         }
+
         // Pass along the exception to the server, which will setup the
         // message and call catch_exception_raise() and put the return
         // code into the reply.

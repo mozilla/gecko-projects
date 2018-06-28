@@ -26,7 +26,6 @@
 #include "nsNSSASN1Object.h"
 #include "nsNSSCertHelper.h"
 #include "nsNSSCertValidity.h"
-#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
 #include "nsPK11TokenDB.h"
 #include "nsPKCS12Blob.h"
 #include "nsProxyRelease.h"
@@ -63,8 +62,6 @@ NS_IMPL_ISUPPORTS(nsNSSCertificate,
                   nsIX509Cert,
                   nsISerializable,
                   nsIClassInfo)
-
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
 /*static*/ nsNSSCertificate*
 nsNSSCertificate::Create(CERTCertificate* cert)
@@ -195,18 +192,16 @@ nsNSSCertificate::MarkForPermDeletion()
 /**
  * Appends a pipnss bundle string to the given string.
  *
- * @param nssComponent For accessing the string bundle.
  * @param bundleKey Key for the string to append.
  * @param currentText The text to append to, using commas as separators.
  */
 template<size_t N>
 void
-AppendBundleString(const NotNull<nsCOMPtr<nsINSSComponent>>& nssComponent,
-                   const char (&bundleKey)[N],
-        /*in/out*/ nsAString& currentText)
+AppendBundleStringCommaSeparated(const char (&bundleKey)[N],
+                      /*in/out*/ nsAString& currentText)
 {
   nsAutoString bundleString;
-  nsresult rv = nssComponent->GetPIPNSSBundleString(bundleKey, bundleString);
+  nsresult rv = GetPIPNSSBundleString(bundleKey, bundleString);
   if (NS_FAILED(rv)) {
     return;
   }
@@ -221,11 +216,6 @@ NS_IMETHODIMP
 nsNSSCertificate::GetKeyUsages(nsAString& text)
 {
   text.Truncate();
-
-  nsCOMPtr<nsINSSComponent> nssComponent = do_GetService(kNSSComponentCID);
-  if (!nssComponent) {
-    return NS_ERROR_FAILURE;
-  }
 
   if (!mCert) {
     return NS_ERROR_FAILURE;
@@ -246,28 +236,26 @@ nsNSSCertificate::GetKeyUsages(nsAString& text)
     keyUsage = keyUsageItem.data[0];
   }
 
-  NotNull<nsCOMPtr<nsINSSComponent>> wrappedNSSComponent =
-    WrapNotNull(nssComponent);
   if (keyUsage & KU_DIGITAL_SIGNATURE) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUSign", text);
+    AppendBundleStringCommaSeparated("CertDumpKUSign", text);
   }
   if (keyUsage & KU_NON_REPUDIATION) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUNonRep", text);
+    AppendBundleStringCommaSeparated("CertDumpKUNonRep", text);
   }
   if (keyUsage & KU_KEY_ENCIPHERMENT) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUEnc", text);
+    AppendBundleStringCommaSeparated("CertDumpKUEnc", text);
   }
   if (keyUsage & KU_DATA_ENCIPHERMENT) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUDEnc", text);
+    AppendBundleStringCommaSeparated("CertDumpKUDEnc", text);
   }
   if (keyUsage & KU_KEY_AGREEMENT) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUKA", text);
+    AppendBundleStringCommaSeparated("CertDumpKUKA", text);
   }
   if (keyUsage & KU_KEY_CERT_SIGN) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUCertSign", text);
+    AppendBundleStringCommaSeparated("CertDumpKUCertSign", text);
   }
   if (keyUsage & KU_CRL_SIGN) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUCRLSign", text);
+    AppendBundleStringCommaSeparated("CertDumpKUCRLSign", text);
   }
 
   return NS_OK;
@@ -362,12 +350,13 @@ nsNSSCertificate::GetDisplayName(nsAString& aDisplayName)
     mCert->emailAddr
   };
 
-  nsAutoCString nameOption;
-  for (auto nameOptionPtr : nameOptions) {
-    nameOption.Assign(nameOptionPtr);
-    if (nameOption.Length() > 0 && IsUTF8(nameOption)) {
-      CopyUTF8toUTF16(nameOption, aDisplayName);
-      return NS_OK;
+  for (auto nameOption : nameOptions) {
+    if (nameOption) {
+      size_t len = strlen(nameOption);
+      if (len > 0) {
+        LossyUTF8ToUTF16(nameOption, len, aDisplayName);
+        return NS_OK;
+      }
     }
   }
 
@@ -378,14 +367,9 @@ NS_IMETHODIMP
 nsNSSCertificate::GetEmailAddress(nsAString& aEmailAddress)
 {
   if (mCert->emailAddr) {
-    CopyUTF8toUTF16(mCert->emailAddr, aEmailAddress);
+    LossyUTF8ToUTF16(mCert->emailAddr, strlen(mCert->emailAddr), aEmailAddress);
   } else {
-    nsresult rv;
-    nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
-    if (NS_FAILED(rv) || !nssComponent) {
-      return NS_ERROR_FAILURE;
-    }
-    nssComponent->GetPIPNSSBundleString("CertNoEmailAddress", aEmailAddress);
+    GetPIPNSSBundleString("CertNoEmailAddress", aEmailAddress);
   }
   return NS_OK;
 }
@@ -398,28 +382,23 @@ nsNSSCertificate::GetEmailAddresses(uint32_t* aLength, char16_t*** aAddresses)
 
   *aLength = 0;
 
-  const char* aAddr;
-  for (aAddr = CERT_GetFirstEmailAddress(mCert.get())
-       ;
-       aAddr
-       ;
-       aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr))
-  {
+  for (const char* aAddr = CERT_GetFirstEmailAddress(mCert.get());
+       aAddr;
+       aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr)) {
     ++(*aLength);
   }
 
   *aAddresses = (char16_t**) moz_xmalloc(sizeof(char16_t*) * (*aLength));
-  if (!*aAddresses)
+  if (!*aAddresses) {
     return NS_ERROR_OUT_OF_MEMORY;
+  }
 
-  uint32_t iAddr;
-  for (aAddr = CERT_GetFirstEmailAddress(mCert.get()), iAddr = 0
-       ;
-       aAddr
-       ;
-       aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr), ++iAddr)
-  {
-    (*aAddresses)[iAddr] = ToNewUnicode(NS_ConvertUTF8toUTF16(aAddr));
+  uint32_t iAddr = 0;
+  for (const char* aAddr = CERT_GetFirstEmailAddress(mCert.get());
+       aAddr;
+       aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr)) {
+    (*aAddresses)[iAddr] = ToNewUnicode(nsDependentCString(aAddr));
+    iAddr++;
   }
 
   return NS_OK;
@@ -432,25 +411,20 @@ nsNSSCertificate::ContainsEmailAddress(const nsAString& aEmailAddress,
   NS_ENSURE_ARG(result);
   *result = false;
 
-  const char* aAddr = nullptr;
-  for (aAddr = CERT_GetFirstEmailAddress(mCert.get())
-       ;
-       aAddr
-       ;
-       aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr))
-  {
-    NS_ConvertUTF8toUTF16 certAddr(aAddr);
+  for (const char* aAddr = CERT_GetFirstEmailAddress(mCert.get());
+       aAddr;
+       aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr)) {
+    nsAutoString certAddr;
+    LossyUTF8ToUTF16(aAddr, strlen(aAddr), certAddr);
     ToLowerCase(certAddr);
 
     nsAutoString testAddr(aEmailAddress);
     ToLowerCase(testAddr);
 
-    if (certAddr == testAddr)
-    {
+    if (certAddr == testAddr) {
       *result = true;
       break;
     }
-
   }
 
   return NS_OK;
@@ -463,7 +437,7 @@ nsNSSCertificate::GetCommonName(nsAString& aCommonName)
   if (mCert) {
     UniquePORTString commonName(CERT_GetCommonName(&mCert->subject));
     if (commonName) {
-      aCommonName = NS_ConvertUTF8toUTF16(commonName.get());
+      LossyUTF8ToUTF16(commonName.get(), strlen(commonName.get()), aCommonName);
     }
   }
   return NS_OK;
@@ -476,7 +450,8 @@ nsNSSCertificate::GetOrganization(nsAString& aOrganization)
   if (mCert) {
     UniquePORTString organization(CERT_GetOrgName(&mCert->subject));
     if (organization) {
-      aOrganization = NS_ConvertUTF8toUTF16(organization.get());
+      LossyUTF8ToUTF16(organization.get(), strlen(organization.get()),
+                       aOrganization);
     }
   }
   return NS_OK;
@@ -489,7 +464,7 @@ nsNSSCertificate::GetIssuerCommonName(nsAString& aCommonName)
   if (mCert) {
     UniquePORTString commonName(CERT_GetCommonName(&mCert->issuer));
     if (commonName) {
-      aCommonName = NS_ConvertUTF8toUTF16(commonName.get());
+      LossyUTF8ToUTF16(commonName.get(), strlen(commonName.get()), aCommonName);
     }
   }
   return NS_OK;
@@ -502,7 +477,8 @@ nsNSSCertificate::GetIssuerOrganization(nsAString& aOrganization)
   if (mCert) {
     UniquePORTString organization(CERT_GetOrgName(&mCert->issuer));
     if (organization) {
-      aOrganization = NS_ConvertUTF8toUTF16(organization.get());
+      LossyUTF8ToUTF16(organization.get(), strlen(organization.get()),
+                       aOrganization);
     }
   }
   return NS_OK;
@@ -515,7 +491,8 @@ nsNSSCertificate::GetIssuerOrganizationUnit(nsAString& aOrganizationUnit)
   if (mCert) {
     UniquePORTString organizationUnit(CERT_GetOrgUnitName(&mCert->issuer));
     if (organizationUnit) {
-      aOrganizationUnit = NS_ConvertUTF8toUTF16(organizationUnit.get());
+      LossyUTF8ToUTF16(organizationUnit.get(), strlen(organizationUnit.get()),
+                       aOrganizationUnit);
     }
   }
   return NS_OK;
@@ -528,7 +505,8 @@ nsNSSCertificate::GetOrganizationalUnit(nsAString& aOrganizationalUnit)
   if (mCert) {
     UniquePORTString orgunit(CERT_GetOrgUnitName(&mCert->subject));
     if (orgunit) {
-      aOrganizationalUnit = NS_ConvertUTF8toUTF16(orgunit.get());
+      LossyUTF8ToUTF16(orgunit.get(), strlen(orgunit.get()),
+                       aOrganizationalUnit);
     }
   }
   return NS_OK;
@@ -539,7 +517,8 @@ nsNSSCertificate::GetSubjectName(nsAString& _subjectName)
 {
   _subjectName.Truncate();
   if (mCert->subjectName) {
-    _subjectName = NS_ConvertUTF8toUTF16(mCert->subjectName);
+    LossyUTF8ToUTF16(mCert->subjectName, strlen(mCert->subjectName),
+                     _subjectName);
   }
   return NS_OK;
 }
@@ -639,7 +618,7 @@ nsNSSCertificate::GetIssuerName(nsAString& _issuerName)
 {
   _issuerName.Truncate();
   if (mCert->issuerName) {
-    _issuerName = NS_ConvertUTF8toUTF16(mCert->issuerName);
+    LossyUTF8ToUTF16(mCert->issuerName, strlen(mCert->issuerName), _issuerName);
   }
   return NS_OK;
 }
@@ -692,31 +671,22 @@ nsNSSCertificate::GetSha1Fingerprint(nsAString& _sha1Fingerprint)
 NS_IMETHODIMP
 nsNSSCertificate::GetTokenName(nsAString& aTokenName)
 {
-  aTokenName.Truncate();
-  if (mCert) {
-    // HACK alert
-    // When the trust of a builtin cert is modified, NSS copies it into the
-    // cert db.  At this point, it is now "managed" by the user, and should
-    // not be listed with the builtins.  However, in the collection code
-    // used by PK11_ListCerts, the cert is found in the temp db, where it
-    // has been loaded from the token.  Though the trust is correct (grabbed
-    // from the cert db), the source is wrong.  I believe this is a safe
-    // way to work around this.
-    if (mCert->slot) {
-      char* token = PK11_GetTokenName(mCert->slot);
-      if (token) {
-        aTokenName = NS_ConvertUTF8toUTF16(token);
-      }
-    } else {
-      nsresult rv;
-      nsAutoString tok;
-      nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
-      if (NS_FAILED(rv)) return rv;
-      rv = nssComponent->GetPIPNSSBundleString("InternalToken", tok);
-      if (NS_SUCCEEDED(rv))
-        aTokenName = tok;
-    }
+  MOZ_ASSERT(mCert);
+  if (!mCert) {
+    return NS_ERROR_FAILURE;
   }
+  UniquePK11SlotInfo internalSlot(PK11_GetInternalSlot());
+  if (!internalSlot) {
+    return NS_ERROR_FAILURE;
+  }
+  nsCOMPtr<nsIPK11Token> token(
+    new nsPK11Token(mCert->slot ? mCert->slot : internalSlot.get()));
+  nsAutoCString tmp;
+  nsresult rv = token->GetTokenName(tmp);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  aTokenName.Assign(NS_ConvertUTF8toUTF16(tmp));
   return NS_OK;
 }
 
@@ -847,7 +817,7 @@ NS_IMPL_ISUPPORTS_CI(nsNSSCertList,
 nsNSSCertList::nsNSSCertList(UniqueCERTCertList certList)
 {
   if (certList) {
-    mCertList = Move(certList);
+    mCertList = std::move(certList);
   } else {
     mCertList = UniqueCERTCertList(CERT_NewCertList());
   }

@@ -35,7 +35,7 @@ The first step to adding a new histogram is to choose the histogram type that be
 
 .. note::
 
-    Ony ``flag`` and ``count`` histograms have default values. All other histograms start out empty and are only submitted if a value is recorded.
+    Only ``flag`` and ``count`` histograms have default values. All other histograms start out empty and are only submitted if a value is recorded.
 
 ``boolean``
 -----------
@@ -211,7 +211,7 @@ Optional. This field is a list of products this histogram can be recorded on. Cu
 - ``geckoview``
 - ``all`` (record on all products)
 
-If this field is left out it defaults to ``firefox, fennec``.
+If this field is left out it defaults to ``all``.
 
 Changing a histogram
 ====================

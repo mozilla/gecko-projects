@@ -187,7 +187,7 @@ public:
         // next column or page and try again there.
         return false;
       }
-      NS_NOTREACHED("avail space rect with zero height!");
+      MOZ_ASSERT_UNREACHABLE("avail space rect with zero height!");
       *aBCoord += 1;
     }
     return true;
@@ -254,7 +254,7 @@ public:
   // The coordinates within the float manager where the block is being
   // placed <b>after</b> taking into account the blocks border and
   // padding. This, therefore, represents the inner "content area" (in
-  // spacemanager coordinates) where child frames will be placed,
+  // float manager coordinates) where child frames will be placed,
   // including child blocks and floats.
   nscoord mFloatManagerI, mFloatManagerB;
 

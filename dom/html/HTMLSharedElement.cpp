@@ -12,7 +12,7 @@
 #include "mozilla/dom/HTMLParamElementBinding.h"
 #include "mozilla/dom/HTMLQuoteElementBinding.h"
 
-#include "mozilla/GenericSpecifiedValuesInlines.h"
+#include "mozilla/MappedDeclarations.h"
 #include "nsAttrValueInlines.h"
 #include "nsStyleConsts.h"
 #include "nsMappedAttributes.h"
@@ -79,21 +79,21 @@ HTMLSharedElement::ParseAttribute(int32_t aNamespaceID,
 
 static void
 DirectoryMapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                               GenericSpecifiedValues* aData)
+                               MappedDeclarations& aDecls)
 {
-  if (!aData->PropertyIsSet(eCSSProperty_list_style_type)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_list_style_type)) {
     // type: enum
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::type);
     if (value) {
       if (value->Type() == nsAttrValue::eEnum) {
-        aData->SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
+        aDecls.SetKeywordValue(eCSSProperty_list_style_type, value->GetEnumValue());
       } else {
-        aData->SetKeywordValue(eCSSProperty_list_style_type, NS_STYLE_LIST_STYLE_DISC);
+        aDecls.SetKeywordValue(eCSSProperty_list_style_type, NS_STYLE_LIST_STYLE_DISC);
       }
     }
   }
 
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
@@ -283,23 +283,23 @@ JSObject*
 HTMLSharedElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
   if (mNodeInfo->Equals(nsGkAtoms::param)) {
-    return HTMLParamElementBinding::Wrap(aCx, this, aGivenProto);
+    return HTMLParamElement_Binding::Wrap(aCx, this, aGivenProto);
   }
   if (mNodeInfo->Equals(nsGkAtoms::base)) {
-    return HTMLBaseElementBinding::Wrap(aCx, this, aGivenProto);
+    return HTMLBaseElement_Binding::Wrap(aCx, this, aGivenProto);
   }
   if (mNodeInfo->Equals(nsGkAtoms::dir)) {
-    return HTMLDirectoryElementBinding::Wrap(aCx, this, aGivenProto);
+    return HTMLDirectoryElement_Binding::Wrap(aCx, this, aGivenProto);
   }
   if (mNodeInfo->Equals(nsGkAtoms::q) ||
       mNodeInfo->Equals(nsGkAtoms::blockquote)) {
-    return HTMLQuoteElementBinding::Wrap(aCx, this, aGivenProto);
+    return HTMLQuoteElement_Binding::Wrap(aCx, this, aGivenProto);
   }
   if (mNodeInfo->Equals(nsGkAtoms::head)) {
-    return HTMLHeadElementBinding::Wrap(aCx, this, aGivenProto);
+    return HTMLHeadElement_Binding::Wrap(aCx, this, aGivenProto);
   }
   MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::html));
-  return HTMLHtmlElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLHtmlElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

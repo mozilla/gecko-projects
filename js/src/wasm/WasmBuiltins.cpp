@@ -168,6 +168,10 @@ wasm::HandleThrow(JSContext* cx, WasmFrameIter& iter)
     RootedWasmInstanceObject keepAlive(cx, iter.instance()->object());
 
     for (; !iter.done(); ++iter) {
+        // Wasm code can enter same-compartment realms, so reset cx->realm to
+        // this frame's realm.
+        cx->setRealmForJitExceptionHandler(iter.instance()->realm());
+
         if (!iter.debugEnabled())
             continue;
 
@@ -347,9 +351,9 @@ CoerceInPlace_JitEntry(int funcExportIndex, TlsData* tlsData, Value* argv)
     const Code& code = tlsData->instance->code();
     const FuncExport& fe = code.metadata(code.stableTier()).funcExports[funcExportIndex];
 
-    for (size_t i = 0; i < fe.sig().args().length(); i++) {
+    for (size_t i = 0; i < fe.funcType().args().length(); i++) {
         HandleValue arg = HandleValue::fromMarkedLocation(&argv[i]);
-        switch (fe.sig().args()[i]) {
+        switch (fe.funcType().args()[i].code()) {
           case ValType::I32: {
             int32_t i32;
             if (!ToInt32(cx, arg, &i32))
@@ -1038,10 +1042,10 @@ wasm::SymbolicAddressTarget(SymbolicAddress sym)
 }
 
 static Maybe<ABIFunctionType>
-ToBuiltinABIFunctionType(const Sig& sig)
+ToBuiltinABIFunctionType(const FuncType& funcType)
 {
-    const ValTypeVector& args = sig.args();
-    ExprType ret = sig.ret();
+    const ValTypeVector& args = funcType.args();
+    ExprType ret = funcType.ret();
 
     uint32_t abiType;
     switch (ret) {
@@ -1054,7 +1058,7 @@ ToBuiltinABIFunctionType(const Sig& sig)
         return Nothing();
 
     for (size_t i = 0; i < args.length(); i++) {
-        switch (args[i]) {
+        switch (args[i].code()) {
           case ValType::F32: abiType |= (ArgType_Float32 << (ArgType_Shift * (i + 1))); break;
           case ValType::F64: abiType |= (ArgType_Double << (ArgType_Shift * (i + 1))); break;
           default: return Nothing();
@@ -1065,14 +1069,14 @@ ToBuiltinABIFunctionType(const Sig& sig)
 }
 
 void*
-wasm::MaybeGetBuiltinThunk(HandleFunction f, const Sig& sig)
+wasm::MaybeGetBuiltinThunk(HandleFunction f, const FuncType& funcType)
 {
     MOZ_ASSERT(builtinThunks);
 
     if (!f->isNative() || !f->hasJitInfo() || f->jitInfo()->type() != JSJitInfo::InlinableNative)
         return nullptr;
 
-    Maybe<ABIFunctionType> abiType = ToBuiltinABIFunctionType(sig);
+    Maybe<ABIFunctionType> abiType = ToBuiltinABIFunctionType(funcType);
     if (!abiType)
         return nullptr;
 

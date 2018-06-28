@@ -66,6 +66,9 @@ SingleTouchData::SingleTouchData(int32_t aIdentifier,
 }
 
 SingleTouchData::SingleTouchData()
+  : mIdentifier(0)
+  , mRotationAngle(0.0)
+  , mForce(0.0)
 {
 }
 
@@ -91,6 +94,7 @@ MultiTouchInput::MultiTouchInput(MultiTouchType aType, uint32_t aTime,
 
 MultiTouchInput::MultiTouchInput()
   : InputData(MULTITOUCH_INPUT)
+  , mType(MULTITOUCH_START)
   , mHandledByAPZ(false)
 {
 }
@@ -273,7 +277,7 @@ MultiTouchInput::ToWidgetMouseEvent(nsIWidget* aWidget) const
 
   event.mTime = mTime;
   event.button = WidgetMouseEvent::eLeftButton;
-  event.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
+  event.inputSource = MouseEvent_Binding::MOZ_SOURCE_TOUCH;
   event.mModifiers = modifiers;
   event.mFlags.mHandledByAPZ = mHandledByAPZ;
   event.mFocusSequenceNumber = mFocusSequenceNumber;
@@ -491,6 +495,7 @@ MouseInput::ToWidgetMouseEvent(nsIWidget* aWidget) const
 
 PanGestureInput::PanGestureInput()
   : InputData(PANGESTURE_INPUT)
+  , mType(PANGESTURE_MAYSTART)
   , mLineOrPageDeltaX(0)
   , mLineOrPageDeltaY(0)
   , mUserDeltaMultiplierX(1.0)
@@ -546,7 +551,7 @@ PanGestureInput::ToWidgetWheelEvent(nsIWidget* aWidget) const
     RoundedToInt(ViewAs<LayoutDevicePixel>(mPanStartPoint,
       PixelCastJustification::LayoutDeviceIsScreenForUntransformedEvent));
   wheelEvent.buttons = 0;
-  wheelEvent.mDeltaMode = WheelEventBinding::DOM_DELTA_PIXEL;
+  wheelEvent.mDeltaMode = WheelEvent_Binding::DOM_DELTA_PIXEL;
   wheelEvent.mMayHaveMomentum = true; // pan inputs may have momentum
   wheelEvent.mIsMomentum = IsMomentum();
   wheelEvent.mLineOrPageDeltaX = mLineOrPageDeltaX;
@@ -591,6 +596,7 @@ PanGestureInput::UserMultipliedLocalPanDisplacement() const
 
 PinchGestureInput::PinchGestureInput()
   : InputData(PINCHGESTURE_INPUT)
+  , mType(PINCHGESTURE_START)
 {
 }
 
@@ -640,6 +646,7 @@ PinchGestureInput::TransformToLocal(const ScreenToParentLayerMatrix4x4& aTransfo
 
 TapGestureInput::TapGestureInput()
   : InputData(TAPGESTURE_INPUT)
+  , mType(TAPGESTURE_LONG)
 {
 }
 
@@ -676,7 +683,11 @@ TapGestureInput::TransformToLocal(const ScreenToParentLayerMatrix4x4& aTransform
 
 ScrollWheelInput::ScrollWheelInput()
   : InputData(SCROLLWHEEL_INPUT)
+  , mDeltaType(SCROLLDELTA_LINE)
+  , mScrollMode(SCROLLMODE_INSTANT)
   , mHandledByAPZ(false)
+  , mDeltaX(0.0)
+  , mDeltaY(0.0)
   , mLineOrPageDeltaX(0)
   , mLineOrPageDeltaY(0)
   , mScrollSeriesNumber(0)
@@ -745,11 +756,11 @@ ScrollWheelInput::ScrollDeltaType
 ScrollWheelInput::DeltaTypeForDeltaMode(uint32_t aDeltaMode)
 {
   switch (aDeltaMode) {
-  case WheelEventBinding::DOM_DELTA_LINE:
+  case WheelEvent_Binding::DOM_DELTA_LINE:
     return SCROLLDELTA_LINE;
-  case WheelEventBinding::DOM_DELTA_PAGE:
+  case WheelEvent_Binding::DOM_DELTA_PAGE:
     return SCROLLDELTA_PAGE;
-  case WheelEventBinding::DOM_DELTA_PIXEL:
+  case WheelEvent_Binding::DOM_DELTA_PIXEL:
     return SCROLLDELTA_PIXEL;
   default:
     MOZ_CRASH();
@@ -762,12 +773,12 @@ ScrollWheelInput::DeltaModeForDeltaType(ScrollDeltaType aDeltaType)
 {
   switch (aDeltaType) {
   case ScrollWheelInput::SCROLLDELTA_LINE:
-    return WheelEventBinding::DOM_DELTA_LINE;
+    return WheelEvent_Binding::DOM_DELTA_LINE;
   case ScrollWheelInput::SCROLLDELTA_PAGE:
-    return WheelEventBinding::DOM_DELTA_PAGE;
+    return WheelEvent_Binding::DOM_DELTA_PAGE;
   case ScrollWheelInput::SCROLLDELTA_PIXEL:
   default:
-    return WheelEventBinding::DOM_DELTA_PIXEL;
+    return WheelEvent_Binding::DOM_DELTA_PIXEL;
   }
 }
 
@@ -862,6 +873,7 @@ KeyboardInput::KeyboardInput(const WidgetKeyboardEvent& aEvent)
 
 KeyboardInput::KeyboardInput()
   : InputData(KEYBOARD_INPUT)
+  , mType(KEY_DOWN)
   , mKeyCode(0)
   , mCharCode(0)
   , mHandledByAPZ(false)

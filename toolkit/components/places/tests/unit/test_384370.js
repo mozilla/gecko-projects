@@ -1,6 +1,3 @@
-const LOAD_IN_SIDEBAR_ANNO = "bookmarkProperties/loadInSidebar";
-const DESCRIPTION_ANNO = "bookmarkProperties/description";
-
 var tagData = [
   { uri: uri("http://slint.us"), tags: ["indie", "kentucky", "music"] },
   { uri: uri("http://en.wikipedia.org/wiki/Diplodocus"), tags: ["dinosaur", "dj", "rad word"] }
@@ -80,7 +77,7 @@ async function validate(infoMsg) {
 // Tests a bookmarks datastore that has a set of bookmarks, etc
 // that flex each supported field and feature.
 async function testMenuBookmarks() {
-  let root = PlacesUtils.getFolderContents(PlacesUtils.bookmarksMenuFolderId).root;
+  let root = PlacesUtils.getFolderContents(PlacesUtils.bookmarks.menuGuid).root;
   Assert.equal(root.childCount, 3);
 
   let separatorNode = root.getChild(1);
@@ -94,10 +91,6 @@ async function testMenuBookmarks() {
 
   Assert.equal(PlacesUtils.asQuery(folderNode).hasChildren, true);
 
-  Assert.equal("folder test comment",
-              PlacesUtils.annotations.getItemAnnotation(folderNode.itemId,
-                                                        DESCRIPTION_ANNO));
-
   // open test folder, and test the children
   folderNode.containerOpen = true;
   Assert.equal(folderNode.childCount, 1);
@@ -105,8 +98,6 @@ async function testMenuBookmarks() {
   let bookmarkNode = folderNode.getChild(0);
   Assert.equal("http://test/post", bookmarkNode.uri);
   Assert.equal("test post keyword", bookmarkNode.title);
-  Assert.ok(PlacesUtils.annotations.itemHasAnnotation(bookmarkNode.itemId,
-                                                      LOAD_IN_SIDEBAR_ANNO));
   Assert.equal(bookmarkNode.dateAdded, 1177375336000000);
 
   let entry = await PlacesUtils.keywords.fetch({ url: bookmarkNode.uri });
@@ -115,16 +106,13 @@ async function testMenuBookmarks() {
 
   Assert.equal("ISO-8859-1",
                (await PlacesUtils.getCharsetForURI(NetUtil.newURI(bookmarkNode.uri))));
-  Assert.equal("item description",
-              PlacesUtils.annotations.getItemAnnotation(bookmarkNode.itemId,
-                                                        DESCRIPTION_ANNO));
 
   folderNode.containerOpen = false;
   root.containerOpen = false;
 }
 
 async function testToolbarBookmarks() {
-  let root = PlacesUtils.getFolderContents(PlacesUtils.toolbarFolderId).root;
+  let root = PlacesUtils.getFolderContents(PlacesUtils.bookmarks.toolbarGuid).root;
 
   // child count (add 3 for pre-existing items)
   Assert.equal(root.childCount, bookmarkData.length + 3);
@@ -158,7 +146,7 @@ async function testToolbarBookmarks() {
 }
 
 function testUnfiledBookmarks() {
-  let root = PlacesUtils.getFolderContents(PlacesUtils.unfiledBookmarksFolderId).root;
+  let root = PlacesUtils.getFolderContents(PlacesUtils.bookmarks.unfiledGuid).root;
   // child count (add 1 for pre-existing item)
   Assert.equal(root.childCount, bookmarkData.length + 1);
   for (let i = 1; i < root.childCount; ++i) {

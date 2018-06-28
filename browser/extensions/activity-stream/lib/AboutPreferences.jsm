@@ -3,12 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-Cu.importGlobalProperties(["fetch"]);
 ChromeUtils.import("resource://gre/modules/Services.jsm");
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 const {actionTypes: at} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
 
-const PREFERENCES_LOADED_EVENT = "sync-pane-loaded";
+XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
+
+const PREFERENCES_LOADED_EVENT = "home-pane-loaded";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
 // These "section" objects are formatted in a way to be similar to the ones from
@@ -30,7 +32,7 @@ const PREFS_BEFORE_SECTIONS = [
       descString: "prefs_topsites_description"
     },
     icon: "topsites",
-    maxRows: 2,
+    maxRows: 4,
     rowsPref: "topSitesRows"
   }
 ];
@@ -84,6 +86,10 @@ this.AboutPreferences = class AboutPreferences {
         break;
       case at.SETTINGS_OPEN:
         action._target.browser.ownerGlobal.openPreferences("paneHome", {origin: "aboutHome"});
+        break;
+      // This is used to open the web extension settings page for an extension
+      case at.OPEN_WEBEXT_SETTINGS:
+        action._target.browser.ownerGlobal.BrowserOpenAddonsMgr(`addons://detail/${encodeURIComponent(action.data)}`);
         break;
     }
   }
@@ -227,6 +233,7 @@ this.AboutPreferences = class AboutPreferences {
 
           // Add appropriate number of localized entries to the dropdown
           const menulist = createAppend("menulist", detailHbox);
+          menulist.setAttribute("crop", "none");
           const menupopup = createAppend("menupopup", menulist);
           for (let num = 1; num <= maxRows; num++) {
             const plurals = formatString({id: "prefs_section_rows_option", values: {num}});

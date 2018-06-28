@@ -22,7 +22,6 @@
 #include "nsGkAtoms.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
-#include "nsIDOMNode.h" // for Find
 #include "nsPIDOMWindow.h"
 #include "nsDOMString.h"
 #include "nsIStreamListener.h"
@@ -203,7 +202,7 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(nsHTMLDocument,
 JSObject*
 nsHTMLDocument::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLDocumentBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLDocument_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsresult
@@ -891,7 +890,7 @@ nsHTMLDocument::GetDomain(nsAString& aDomain)
   nsCOMPtr<nsIURI> uri = GetDomainURI();
 
   if (!uri) {
-    SetDOMStringToNull(aDomain);
+    aDomain.Truncate();
     return;
   }
 
@@ -901,8 +900,8 @@ nsHTMLDocument::GetDomain(nsAString& aDomain)
     CopyUTF8toUTF16(hostName, aDomain);
   } else {
     // If we can't get the host from the URI (e.g. about:, javascript:,
-    // etc), just return an null string.
-    SetDOMStringToNull(aDomain);
+    // etc), just return an empty string.
+    aDomain.Truncate();
   }
 }
 
@@ -1020,7 +1019,7 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain, ErrorResult& rv)
   }
 
   if (aDomain.IsEmpty()) {
-    rv.Throw(NS_ERROR_DOM_BAD_DOCUMENT_DOMAIN);
+    rv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
 
@@ -1037,7 +1036,7 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain, ErrorResult& rv)
   nsCOMPtr<nsIURI> newURI = RegistrableDomainSuffixOfInternal(aDomain, uri);
   if (!newURI) {
     // Error: illegal domain
-    rv.Throw(NS_ERROR_DOM_BAD_DOCUMENT_DOMAIN);
+    rv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return;
   }
 
@@ -1069,6 +1068,24 @@ nsHTMLDocument::CreateDummyChannelForCookies(nsIURI* aCodebaseURI)
     return nullptr;
   }
   pbChannel->SetPrivate(loadContext->UsePrivateBrowsing());
+
+  nsCOMPtr<nsIHttpChannel> docHTTPChannel =
+    do_QueryInterface(GetChannel());
+  if (docHTTPChannel) {
+    bool isTracking = docHTTPChannel->GetIsTrackingResource();
+    if (isTracking) {
+      // If our document channel is from a tracking resource, we must
+      // override our channel's tracking status.
+      nsCOMPtr<nsIHttpChannel> httpChannel =
+        do_QueryInterface(channel);
+      MOZ_ASSERT(httpChannel, "How come we're coming from an HTTP doc but "
+                              "we don't have an HTTP channel here?");
+      if (httpChannel) {
+        httpChannel->OverrideTrackingResource(isTracking);
+      }
+    }
+  }
+
   return channel.forget();
 }
 
@@ -1086,6 +1103,11 @@ nsHTMLDocument::GetCookie(nsAString& aCookie, ErrorResult& rv)
   // is prohibited.
   if (mSandboxFlags & SANDBOXED_ORIGIN) {
     rv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return;
+  }
+
+  if (nsContentUtils::StorageDisabledByAntiTracking(GetInnerWindow(), nullptr,
+                                                    nullptr)) {
     return;
   }
 
@@ -1179,7 +1201,7 @@ nsHTMLDocument::Open(JSContext* /* unused */,
                      bool aReplace,
                      ErrorResult& rv)
 {
-  MOZ_ASSERT(nsContentUtils::CanCallerAccess(static_cast<nsIDOMDocument*>(this)),
+  MOZ_ASSERT(nsContentUtils::CanCallerAccess(this),
              "XOW should have caught this!");
 
   nsCOMPtr<nsPIDOMWindowInner> window = GetInnerWindow();
@@ -1209,7 +1231,7 @@ nsHTMLDocument::Open(JSContext* cx,
   // Implements the "When called with two arguments (or fewer)" steps here:
   // https://html.spec.whatwg.org/multipage/webappapis.html#opening-the-input-stream
 
-  MOZ_ASSERT(nsContentUtils::CanCallerAccess(static_cast<nsIDOMDocument*>(this)),
+  MOZ_ASSERT(nsContentUtils::CanCallerAccess(this),
              "XOW should have caught this!");
   if (!IsHTMLDocument() || mDisableDocWrite) {
     // No calling document.open() on XHTML
@@ -1356,13 +1378,46 @@ nsHTMLDocument::Open(JSContext* cx,
 
   // The open occurred after the document finished loading.
   // So we reset the document and then reinitialize it.
+  nsCOMPtr<nsIDocShell> curDocShell = GetDocShell();
+  nsCOMPtr<nsIDocShellTreeItem> parent;
+  if (curDocShell) {
+    curDocShell->GetSameTypeParent(getter_AddRefs(parent));
+  }
+  
+  // We are using the same technique as in nsDocShell to figure
+  // out the content policy type. If there is no same type parent,
+  // we know we are loading a new top level document.
+  nsContentPolicyType policyType;
+  if (!parent) {
+    policyType = nsIContentPolicy::TYPE_DOCUMENT;
+  } else {
+    Element* requestingElement = nullptr;
+    nsPIDOMWindowInner* window = GetInnerWindow();
+    if (window) {
+      nsPIDOMWindowOuter* outer =
+        nsPIDOMWindowOuter::GetFromCurrentInner(window);
+      if (outer) {
+        nsGlobalWindowOuter* win = nsGlobalWindowOuter::Cast(outer);
+        requestingElement = win->AsOuter()->GetFrameElementInternal();
+      }
+    }
+    if (requestingElement) {
+      policyType = requestingElement->IsHTMLElement(nsGkAtoms::iframe) ?
+        nsIContentPolicy::TYPE_INTERNAL_IFRAME : nsIContentPolicy::TYPE_INTERNAL_FRAME;
+    } else {
+      // If we have lost our frame element by now, just assume we're
+      // an iframe since that's more common.
+      policyType = nsIContentPolicy::TYPE_INTERNAL_IFRAME;
+    }
+  }
+
   nsCOMPtr<nsIChannel> channel;
   nsCOMPtr<nsILoadGroup> group = do_QueryReferent(mDocumentLoadGroup);
   aError = NS_NewChannel(getter_AddRefs(channel),
                          uri,
                          callerDoc,
                          nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL,
-                         nsIContentPolicy::TYPE_OTHER,
+                         policyType,
                          nullptr, // PerformanceStorage
                          group);
 
@@ -1451,7 +1506,7 @@ nsHTMLDocument::Open(JSContext* cx,
     nsCOMPtr<nsIScriptGlobalObject> newScope(do_QueryReferent(mScopeObject));
     JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
     if (oldScope && newScope != oldScope && wrapper) {
-      JSAutoCompartment ac(cx, wrapper);
+      JSAutoRealm ar(cx, wrapper);
       mozilla::dom::ReparentWrapper(cx, wrapper, aError);
       if (aError.Failed()) {
         return nullptr;
@@ -1538,10 +1593,10 @@ nsHTMLDocument::Open(JSContext* cx,
   SetReadyStateInternal(nsIDocument::READYSTATE_LOADING);
 
   // After changing everything around, make sure that the principal on the
-  // document's compartment exactly matches NodePrincipal().
+  // document's realm exactly matches NodePrincipal().
   DebugOnly<JSObject*> wrapper = GetWrapperPreserveColor();
   MOZ_ASSERT_IF(wrapper,
-                JS_GetCompartmentPrincipals(js::GetObjectCompartment(wrapper)) ==
+                JS::GetRealmPrincipals(js::GetNonCCWObjectRealm(wrapper)) ==
                 nsJSPrincipals::get(NodePrincipal()));
 
   return kungFuDeathGrip.forget();
@@ -1889,64 +1944,49 @@ nsHTMLDocument::ReleaseEvents()
   WarnOnceAbout(nsIDocument::eUseOfReleaseEvents);
 }
 
-nsISupports*
-nsHTMLDocument::ResolveName(const nsAString& aName, nsWrapperCache **aCache)
+bool
+nsHTMLDocument::ResolveName(JSContext* aCx, const nsAString& aName,
+                            JS::MutableHandle<JS::Value> aRetval, ErrorResult& aError)
 {
   nsIdentifierMapEntry *entry = mIdentifierMap.GetEntry(aName);
   if (!entry) {
-    *aCache = nullptr;
-    return nullptr;
+    return false;
   }
 
   nsBaseContentList *list = entry->GetNameContentList();
   uint32_t length = list ? list->Length() : 0;
 
+  nsIContent *node;
   if (length > 0) {
-    if (length == 1) {
-      // Only one element in the list, return the element instead of returning
-      // the list.
-      nsIContent *node = list->Item(0);
-      *aCache = node;
-      return node;
+    if (length > 1) {
+      // The list contains more than one element, return the whole list.
+      if (!ToJSValue(aCx, list, aRetval)) {
+        aError.NoteJSContextException(aCx);
+        return false;
+      }
+      return true;
     }
 
-    // The list contains more than one element, return the whole list.
-    *aCache = list;
-    return list;
+    // Only one element in the list, return the element instead of returning
+    // the list.
+    node = list->Item(0);
+  } else {
+    // No named items were found, see if there's one registerd by id for aName.
+    Element *e = entry->GetIdElement();
+  
+    if (!e || !nsGenericHTMLElement::ShouldExposeIdAsHTMLDocumentProperty(e)) {
+      return false;
+    }
+
+    node = e;
   }
 
-  // No named items were found, see if there's one registerd by id for aName.
-  Element *e = entry->GetIdElement();
-
-  if (e && nsGenericHTMLElement::ShouldExposeIdAsHTMLDocumentProperty(e)) {
-    *aCache = e;
-    return e;
+  if (!ToJSValue(aCx, node, aRetval)) {
+    aError.NoteJSContextException(aCx);
+    return false;
   }
 
-  *aCache = nullptr;
-  return nullptr;
-}
-
-void
-nsHTMLDocument::NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
-                            JS::MutableHandle<JSObject*> aRetval,
-                            ErrorResult& rv)
-{
-  nsWrapperCache* cache;
-  nsISupports* supp = ResolveName(aName, &cache);
-  if (!supp) {
-    aFound = false;
-    aRetval.set(nullptr);
-    return;
-  }
-
-  JS::Rooted<JS::Value> val(cx);
-  if (!dom::WrapObject(cx, supp, cache, nullptr, &val)) {
-    rv.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return;
-  }
-  aFound = true;
-  aRetval.set(&val.toObject());
+  return true;
 }
 
 void
@@ -2111,11 +2151,11 @@ nsHTMLDocument::MaybeEditingStateChanged()
 }
 
 void
-nsHTMLDocument::EndUpdate(nsUpdateType aUpdateType)
+nsHTMLDocument::EndUpdate()
 {
   const bool reset = !mPendingMaybeEditingStateChanged;
   mPendingMaybeEditingStateChanged = true;
-  nsDocument::EndUpdate(aUpdateType);
+  nsDocument::EndUpdate();
   if (reset) {
     mPendingMaybeEditingStateChanged = false;
   }
@@ -2265,7 +2305,7 @@ nsHTMLDocument::TearingDownEditor()
 
     presShell->SetAgentStyleSheets(agentSheets);
 
-    presShell->RestyleForCSSRuleChanges();
+    presShell->ApplicableStylesChanged();
   }
 }
 
@@ -2433,7 +2473,7 @@ nsHTMLDocument::EditingStateChanged()
     rv = presShell->SetAgentStyleSheets(agentSheets);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    presShell->RestyleForCSSRuleChanges();
+    presShell->ApplicableStylesChanged();
 
     // Adjust focused element with new style but blur event shouldn't be fired
     // until mEditingState is modified with newState.

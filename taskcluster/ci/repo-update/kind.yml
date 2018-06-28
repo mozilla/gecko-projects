@@ -5,13 +5,49 @@
 loader: taskgraph.loader.transform:loader
 
 transforms:
+   - taskgraph.transforms.repo_update:transforms
    - taskgraph.transforms.task:transforms
+
+
+job-defaults:
+   worker:
+      env:
+         DO_HSTS:
+            by-project:
+               mozilla-central: "1"
+               mozilla-esr60: "1"
+               mozilla-beta: "1"
+               default: ""
+         DO_HPKP:
+            by-project:
+               mozilla-central: "1"
+               mozilla-esr60: "1"
+               mozilla-beta: "1"
+               default: ""
+         DO_BLOCKLIST:
+            by-project:
+               mozilla-central: "1"
+               mozilla-esr60: "1"
+               mozilla-beta: "1"
+               mozilla-release: "1"
+               default: ""
+         DO_REMOTE_SETTINGS:
+            by-project:
+               mozilla-central: "1"
+               mozilla-esr60: "1"
+               mozilla-beta: "1"
+               mozilla-release: "1"
+               default: ""
+         USE_MOZILLA_CENTRAL:
+            by-project:
+               mozilla-central: "1"
+               default: ""
 
 
 jobs:
    hsts-hpkp-blocklist:
       name: periodic_file_update
-      description: HSTS, HPKP, and Blocklist update
+      description: HSTS, HPKP, Blocklist and remote settings update
       run-on-projects: []  # Only run via cron
       treeherder:
          kind: build
@@ -25,13 +61,8 @@ jobs:
          docker-image: {in-tree: periodic-updates}
          max-run-time: 3600  # Sometimes takes ~40 minutes
          env:
-            DO_HSTS: "1"
-            DO_HPKP: "1"
-            DO_BLOCKLIST: "1"
-            USE_MOZILLA_CENTRAL: "1"
-            BRANCH: mozilla-central
             PRODUCT: firefox
-            REVIEWERS: "sfraser, aki"
+            REVIEWERS: "mtabara, jlund"
          command:
             - /runme.sh
          taskcluster-proxy: true
@@ -44,6 +75,9 @@ jobs:
               type: file
             - name: 'public/build/blocklist.diff'
               path: '/home/worker/artifacts/blocklist.diff'
+              type: file
+            - name: 'public/build/remote-settings.diff'
+              path: '/home/worker/artifacts/remote-settings.diff'
               type: file
       scopes:
          - secrets:get:project/releng/gecko/build/level-{level}/arc-phabricator-token

@@ -112,7 +112,7 @@ WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources)
   nsTArray<ipc::Shmem> largeShmems;
   aResources.Flush(resourceUpdates, smallShmems, largeShmems);
 
-  this->SendUpdateResources(resourceUpdates, Move(smallShmems), largeShmems);
+  this->SendUpdateResources(resourceUpdates, std::move(smallShmems), largeShmems);
 }
 
 void
@@ -144,7 +144,7 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
   this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
                            GetFwdTransactionId(), aTransactionId,
                            aContentSize, dlData, aDL.dl_desc, aScrollData,
-                           Move(resourceUpdates), Move(smallShmems), largeShmems,
+                           std::move(resourceUpdates), std::move(smallShmems), largeShmems,
                            mIdNamespace, aTxnStartTime, fwdTime);
 
   mParentCommands.Clear();
@@ -154,6 +154,8 @@ WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
 
 void
 WebRenderBridgeChild::EndEmptyTransaction(const FocusTarget& aFocusTarget,
+                                          const ScrollUpdatesMap& aUpdates,
+                                          uint32_t aPaintSequenceNumber,
                                           TransactionId aTransactionId,
                                           const mozilla::TimeStamp& aTxnStartTime)
 {
@@ -165,7 +167,7 @@ WebRenderBridgeChild::EndEmptyTransaction(const FocusTarget& aFocusTarget,
   fwdTime = TimeStamp::Now();
 #endif
 
-  this->SendEmptyTransaction(aFocusTarget,
+  this->SendEmptyTransaction(aFocusTarget, aUpdates, aPaintSequenceNumber,
                              mParentCommands, mDestroyedActors,
                              GetFwdTransactionId(), aTransactionId,
                              mIdNamespace, aTxnStartTime, fwdTime);
@@ -287,9 +289,7 @@ WebRenderBridgeChild::GetFontKeyForScaledFont(gfx::ScaledFont* aScaledFont)
 {
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(aScaledFont);
-  MOZ_ASSERT((aScaledFont->GetType() == gfx::FontType::DWRITE) ||
-             (aScaledFont->GetType() == gfx::FontType::MAC) ||
-             (aScaledFont->GetType() == gfx::FontType::FONTCONFIG));
+  MOZ_ASSERT(aScaledFont->CanSerialize());
 
   wr::FontInstanceKey instanceKey = { wr::IdNamespace { 0 }, 0 };
   if (mFontInstanceKeys.Get(aScaledFont, &instanceKey)) {
@@ -393,10 +393,10 @@ WebRenderBridgeChild::GetLayersIPCActor()
 void
 WebRenderBridgeChild::SyncWithCompositor()
 {
-  auto compositorBridge = GetCompositorBridgeChild();
-  if (compositorBridge && compositorBridge->IPCOpen()) {
-    compositorBridge->SendSyncWithCompositor();
+  if (!IPCOpen()) {
+    return;
   }
+  SendSyncWithCompositor();
 }
 
 void

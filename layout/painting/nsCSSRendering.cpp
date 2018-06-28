@@ -77,7 +77,10 @@ static int gFrameTreeLockCount = 0;
 struct InlineBackgroundData
 {
   InlineBackgroundData()
-      : mFrame(nullptr), mLineContainer(nullptr)
+      : mFrame(nullptr), mLineContainer(nullptr),
+        mContinuationPoint(0), mUnbrokenMeasure(0), 
+        mLineContinuationPoint(0), mPIStartBorderData{},
+        mBidiEnabled(false), mVertical(false)
   {
   }
 
@@ -655,7 +658,7 @@ nsCSSRendering::PaintBorder(nsPresContext* aPresContext,
   NS_FOR_CSS_SIDES(side) {
     nscolor color = aComputedStyle->
       GetVisitedDependentColor(nsStyleBorder::BorderColorFieldFor(side));
-    newStyleBorder.mBorderColor[side] = StyleComplexColor::FromColor(color);
+    newStyleBorder.BorderColorFor(side) = StyleComplexColor::FromColor(color);
   }
   return PaintBorderWithStyleBorder(aPresContext, aRenderingContext, aForFrame,
                                     aDirtyRect, aBorderArea, newStyleBorder,
@@ -689,7 +692,7 @@ nsCSSRendering::CreateBorderRenderer(nsPresContext* aPresContext,
   NS_FOR_CSS_SIDES(side) {
     nscolor color = aComputedStyle->
       GetVisitedDependentColor(nsStyleBorder::BorderColorFieldFor(side));
-    newStyleBorder.mBorderColor[side] = StyleComplexColor::FromColor(color);
+    newStyleBorder.BorderColorFor(side) = StyleComplexColor::FromColor(color);
   }
   return CreateBorderRendererWithStyleBorder(aPresContext, aDrawTarget,
                                              aForFrame, aDirtyRect, aBorderArea,
@@ -767,7 +770,7 @@ nsCSSRendering::CreateWebRenderCommandsForBorder(nsDisplayItem* aItem,
                                                         aForFrame,
                                                         aBorderArea,
                                                         *styleBorder,
-                                                        aItem->GetVisibleRect(),
+                                                        aItem->GetPaintRect(),
                                                         aForFrame->GetSkipSides(),
                                                         flags,
                                                         &result);
@@ -858,7 +861,7 @@ ConstructBorderRenderer(nsPresContext* aPresContext,
   // pull out styles, colors
   NS_FOR_CSS_SIDES (i) {
     borderStyles[i] = aStyleBorder.GetBorderStyle(i);
-    borderColors[i] = aStyleBorder.mBorderColor[i].CalcColor(aComputedStyle);
+    borderColors[i] = aStyleBorder.BorderColorFor(i).CalcColor(aComputedStyle);
   }
 
   PrintAsFormatString(" borderStyles: %d %d %d %d\n", borderStyles[0], borderStyles[1], borderStyles[2], borderStyles[3]);
@@ -1034,7 +1037,9 @@ GetOutlineInnerRect(nsIFrame* aFrame)
     aFrame->GetProperty(nsIFrame::OutlineInnerRectProperty());
   if (savedOutlineInnerRect)
     return *savedOutlineInnerRect;
-  NS_NOTREACHED("we should have saved a frame property");
+
+  // FIXME bug 1221888
+  NS_ERROR("we should have saved a frame property");
   return nsRect(nsPoint(0, 0), aFrame->GetSize());
 }
 
@@ -1517,12 +1522,7 @@ nsCSSRendering::GetShadowColor(nsCSSShadowItem* aShadow,
                                float aOpacity)
 {
   // Get the shadow color; if not specified, use the foreground color
-  nscolor shadowColor;
-  if (aShadow->mHasColor)
-    shadowColor = aShadow->mColor;
-  else
-    shadowColor = aFrame->StyleColor()->mColor;
-
+  nscolor shadowColor = aShadow->mColor.CalcColor(aFrame);
   Color color = Color::FromABGR(shadowColor);
   color.a *= aOpacity;
   return color;
@@ -2162,13 +2162,10 @@ IsOpaqueBorderEdge(const nsStyleBorder& aBorder, mozilla::Side aSide)
   if (aBorder.mBorderImageSource.GetType() != eStyleImageType_Null)
     return false;
 
-  StyleComplexColor color = aBorder.mBorderColor[aSide];
+  StyleComplexColor color = aBorder.BorderColorFor(aSide);
   // We don't know the foreground color here, so if it's being used
   // we must assume it might be transparent.
-  if (!color.IsNumericColor()) {
-    return false;
-  }
-  return NS_GET_A(color.mColor) == 255;
+  return !color.MaybeTransparent();
 }
 
 /**
@@ -2334,7 +2331,7 @@ nsCSSRendering::GetImageLayerClip(const nsStyleImageLayers::Layer& aLayer,
   aClipState->mBGClipArea = clipBorderArea;
 
   if (aForFrame->IsScrollFrame() &&
-      NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL == aLayer.mAttachment) {
+      StyleImageLayerAttachment::Local == aLayer.mAttachment) {
     // As of this writing, this is still in discussion in the CSS Working Group
     // http://lists.w3.org/Archives/Public/www-style/2013Jul/0250.html
 
@@ -2947,7 +2944,7 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
   LayoutFrameType frameType = aForFrame->Type();
   nsIFrame* geometryFrame = aForFrame;
   if (MOZ_UNLIKELY(frameType == LayoutFrameType::Scroll &&
-                   NS_STYLE_IMAGELAYER_ATTACHMENT_LOCAL == aLayer.mAttachment)) {
+                   StyleImageLayerAttachment::Local == aLayer.mAttachment)) {
     nsIScrollableFrame* scrollableFrame = do_QueryFrame(aForFrame);
     positionArea = nsRect(
       scrollableFrame->GetScrolledFrame()->GetPosition()
@@ -3008,7 +3005,7 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
   }
 
   nsIFrame* attachedToFrame = aForFrame;
-  if (NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED == aLayer.mAttachment) {
+  if (StyleImageLayerAttachment::Fixed == aLayer.mAttachment) {
     // If it's a fixed background attachment, then the image is placed
     // relative to the viewport, which is the area of the root frame
     // in a screen context or the page content frame in a print context.
@@ -3260,8 +3257,22 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
   nsBackgroundLayerState state(aForFrame, &aLayer.mImage, irFlags);
   if (!state.mImageRenderer.PrepareImage()) {
     // There's no image or it's not ready to be painted.
-    if (aOutIsTransformedFixed) {
-      *aOutIsTransformedFixed = false;
+    if (aOutIsTransformedFixed &&
+        StyleImageLayerAttachment::Fixed == aLayer.mAttachment) {
+
+      nsIFrame* attachedToFrame = aPresContext->PresShell()->GetRootFrame();
+      NS_ASSERTION(attachedToFrame, "no root frame");
+      nsIFrame* pageContentFrame = nullptr;
+      if (aPresContext->IsPaginated()) {
+        pageContentFrame = nsLayoutUtils::GetClosestFrameOfType(
+          aForFrame, LayoutFrameType::PageContent);
+        if (pageContentFrame) {
+          attachedToFrame = pageContentFrame;
+        }
+        // else this is an embedded shell and its root frame is what we want
+      }
+
+      *aOutIsTransformedFixed = nsLayoutUtils::IsTransformed(aForFrame, attachedToFrame);
     }
     return state;
   }
@@ -3283,7 +3294,7 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
   // where the background can be drawn to the viewport.
   nsRect bgClipRect = aBGClipRect;
 
-  if (NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED == aLayer.mAttachment &&
+  if (StyleImageLayerAttachment::Fixed == aLayer.mAttachment &&
       !transformedFixed &&
       (aFlags & nsCSSRendering::PAINTBG_TO_WINDOW)) {
     bgClipRect = positionArea + aBorderArea.TopLeft();

@@ -32,8 +32,8 @@ using namespace mozilla::gfx;
 namespace mozilla {
 namespace dom {
 
-using namespace SVGPreserveAspectRatioBinding;
-using namespace SVGSVGElementBinding;
+using namespace SVGPreserveAspectRatio_Binding;
+using namespace SVGSVGElement_Binding;
 
 nsSVGEnumMapping SVGSVGElement::sZoomAndPanMap[] = {
   {&nsGkAtoms::disable, SVG_ZOOMANDPAN_DISABLE},
@@ -72,7 +72,7 @@ DOMSVGTranslatePoint::Copy()
 nsISupports*
 DOMSVGTranslatePoint::GetParentObject()
 {
-  return static_cast<nsIDOMNode*>(mElement);
+  return ToSupports(mElement);
 }
 
 void
@@ -102,7 +102,7 @@ DOMSVGTranslatePoint::MatrixTransform(SVGMatrix& matrix)
 JSObject*
 SVGSVGElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGSVGElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGSVGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -123,9 +123,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SVGSVGElement,
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(SVGSVGElement,
-                                             SVGSVGElementBase,
-                                             nsIDOMNode)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(SVGSVGElement,
+                                               SVGSVGElementBase)
 
 SVGView::SVGView()
 {
@@ -157,7 +156,7 @@ SVGSVGElement::~SVGSVGElement()
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT_AND_PARSER(SVGSVGElement)
 
@@ -495,15 +494,6 @@ SVGSVGElement::BindToTree(nsIDocument* aDocument,
                                               aBindingParent,
                                               aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv,rv);
-
-  nsIDocument* doc = GetComposedDoc();
-  if (doc) {
-    // Setup the style sheet during binding, not element construction,
-    // because we could move the root SVG element from the document
-    // that created it to another document.
-    auto cache = nsLayoutStylesheetCache::Singleton();
-    doc->EnsureOnDemandBuiltInUASheet(cache->SVGSheet());
-  }
 
   if (mTimedDocumentRoot && smilController) {
     rv = mTimedDocumentRoot->SetParent(smilController);

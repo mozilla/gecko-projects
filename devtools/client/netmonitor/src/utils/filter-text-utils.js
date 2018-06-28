@@ -43,21 +43,21 @@ const { getUnicodeUrl } = require("devtools/client/shared/unicode-url");
 */
 
 function parseFilters(query) {
-  let flags = [];
-  let text = [];
-  let parts = query.split(/\s+/);
+  const flags = [];
+  const text = [];
+  const parts = query.split(/\s+/);
 
-  for (let part of parts) {
+  for (const part of parts) {
     if (!part) {
       continue;
     }
-    let colonIndex = part.indexOf(":");
+    const colonIndex = part.indexOf(":");
     if (colonIndex === -1) {
       text.push(part);
       continue;
     }
     let key = part.substring(0, colonIndex);
-    let negative = key.startsWith("-");
+    const negative = key.startsWith("-");
     if (negative) {
       key = key.substring(1);
     }
@@ -93,7 +93,7 @@ function processFlagFilter(type, value) {
         multiplier = 1024 * 1024;
         value = value.substring(0, value.length - 1);
       }
-      let quantity = Number(value);
+      const quantity = Number(value);
       if (isNaN(quantity)) {
         return null;
       }
@@ -104,6 +104,10 @@ function processFlagFilter(type, value) {
 }
 
 function isFlagFilterMatch(item, { type, value, negative }) {
+  if (value == null) {
+    return false;
+  }
+
   // Ensures when filter token is exactly a flag ie. "remote-ip:", all values are shown
   if (value.length < 1) {
     return true;
@@ -120,7 +124,7 @@ function isFlagFilterMatch(item, { type, value, negative }) {
       match = item.method.toLowerCase() === value;
       break;
     case "protocol":
-      let protocol = item.httpVersion;
+      const protocol = item.httpVersion;
       match = typeof protocol === "string" ?
                 protocol.toLowerCase().includes(value) : false;
       break;
@@ -128,19 +132,19 @@ function isFlagFilterMatch(item, { type, value, negative }) {
       match = item.urlDetails.host.toLowerCase().includes(value);
       break;
     case "remote-ip":
-      match = getFormattedIPAndPort(item.remoteAddress, item.remotePort)
-        .toLowerCase().includes(value);
+      const data = getFormattedIPAndPort(item.remoteAddress, item.remotePort);
+      match = data ? data.toLowerCase().includes(value) : false;
       break;
     case "has-response-header":
       if (typeof item.responseHeaders === "object") {
-        let { headers } = item.responseHeaders;
+        const { headers } = item.responseHeaders;
         match = headers.findIndex(h => h.name.toLowerCase() === value) > -1;
       } else {
         match = false;
       }
       break;
     case "cause":
-      let causeType = item.cause.type;
+      const causeType = item.cause.type;
       match = typeof causeType === "string" ?
                 causeType.toLowerCase().includes(value) : false;
       break;
@@ -180,7 +184,7 @@ function isFlagFilterMatch(item, { type, value, negative }) {
       break;
     case "regexp":
       try {
-        let pattern = new RegExp(value);
+        const pattern = new RegExp(value);
         match = pattern.test(item.url);
       } catch (e) {
         match = false;
@@ -188,9 +192,9 @@ function isFlagFilterMatch(item, { type, value, negative }) {
       break;
     case "set-cookie-domain":
       if (responseCookies.length > 0) {
-        let host = item.urlDetails.host;
-        let i = responseCookies.findIndex(c => {
-          let domain = c.hasOwnProperty("domain") ? c.domain : host;
+        const host = item.urlDetails.host;
+        const i = responseCookies.findIndex(c => {
+          const domain = c.hasOwnProperty("domain") ? c.domain : host;
           return domain.includes(value);
         });
         match = i > -1;
@@ -218,9 +222,9 @@ function isSizeMatch(value, size) {
 }
 
 function isTextFilterMatch({ url }, text) {
-  let lowerCaseUrl = getUnicodeUrl(url).toLowerCase();
+  const lowerCaseUrl = getUnicodeUrl(url).toLowerCase();
   let lowerCaseText = text.toLowerCase();
-  let textLength = text.length;
+  const textLength = text.length;
   // Support negative filtering
   if (text.startsWith("-") && textLength > 1) {
     lowerCaseText = lowerCaseText.substring(1, textLength);
@@ -236,14 +240,14 @@ function isFreetextMatch(item, text) {
     return true;
   }
 
-  let filters = parseFilters(text);
+  const filters = parseFilters(text);
   let match = true;
 
-  for (let textFilter of filters.text) {
+  for (const textFilter of filters.text) {
     match = match && isTextFilterMatch(item, textFilter);
   }
 
-  for (let flagFilter of filters.flags) {
+  for (const flagFilter of filters.flags) {
     match = match && isFlagFilterMatch(item, flagFilter);
   }
 

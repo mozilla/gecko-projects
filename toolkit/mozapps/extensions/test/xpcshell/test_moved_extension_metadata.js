@@ -49,9 +49,7 @@ const ADDONS = [
   {
     "install.rdf": {
       id: "addon2@tests.mozilla.org",
-      version: "1.0",
       name: "Test 2",
-      bootstrap: true,
 
       targetApplications: [{
         id: "xpcshell@tests.mozilla.org",
@@ -142,7 +140,7 @@ add_task(async function test_2() {
  Assert.ok(isExtensionInBootstrappedList(userDir, a2.id));
  Assert.equal(Services.prefs.getIntPref("bootstraptest.active_version"), 1);
 
- a2.userDisabled = true;
+ await a2.disable();
  Assert.equal(Services.prefs.getIntPref("bootstraptest.active_version"), 0);
 
  await promiseShutdownManager();

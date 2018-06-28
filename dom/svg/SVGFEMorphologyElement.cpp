@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFEMorphologyElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEMorphologyElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEMorphologyElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberPairInfo SVGFEMorphologyElement::sNumberPairInfo[1] =
@@ -47,7 +47,7 @@ nsSVGElement::StringInfo SVGFEMorphologyElement::sStringInfo[2] =
 };
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEMorphologyElement)

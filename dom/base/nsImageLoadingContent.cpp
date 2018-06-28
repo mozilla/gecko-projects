@@ -34,7 +34,6 @@
 #include "nsIStreamListener.h"
 
 #include "nsIFrame.h"
-#include "nsIDOMNode.h"
 
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
@@ -135,6 +134,10 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
                               int32_t aType,
                               const nsIntRect* aData)
 {
+  MOZ_ASSERT(aRequest, "no request?");
+  MOZ_ASSERT(aRequest == mCurrentRequest || aRequest == mPendingRequest,
+             "Forgot to cancel a previous request?");
+
   if (aType == imgINotificationObserver::IS_ANIMATED) {
     return OnImageIsAnimated(aRequest);
   }
@@ -142,14 +145,6 @@ nsImageLoadingContent::Notify(imgIRequest* aRequest,
   if (aType == imgINotificationObserver::UNLOCKED_DRAW) {
     OnUnlockedDraw();
     return NS_OK;
-  }
-
-  if (aType == imgINotificationObserver::LOAD_COMPLETE) {
-    // We should definitely have a request here
-    MOZ_ASSERT(aRequest, "no request?");
-
-    MOZ_ASSERT(aRequest == mCurrentRequest || aRequest == mPendingRequest,
-               "Unknown request");
   }
 
   {
@@ -474,7 +469,7 @@ nsImageLoadingContent::AddObserver(imgINotificationObserver* aObserver)
   }
 
   mScriptedObservers.AppendElement(
-    new ScriptedImageObserver(aObserver, Move(currentReq), Move(pendingReq)));
+    new ScriptedImageObserver(aObserver, std::move(currentReq), std::move(pendingReq)));
 }
 
 void
@@ -493,7 +488,7 @@ nsImageLoadingContent::RemoveObserver(imgINotificationObserver* aObserver)
   do {
     --i;
     if (mScriptedObservers[i]->mObserver == aObserver) {
-      observer = Move(mScriptedObservers[i]);
+      observer = std::move(mScriptedObservers[i]);
       mScriptedObservers.RemoveElementAt(i);
       break;
     }
@@ -523,10 +518,10 @@ nsImageLoadingContent::ClearScriptedRequests(int32_t aRequestType, nsresult aRea
     RefPtr<imgRequestProxy> req;
     switch (aRequestType) {
     case CURRENT_REQUEST:
-      req = Move(observers[i]->mCurrentRequest);
+      req = std::move(observers[i]->mCurrentRequest);
       break;
     case PENDING_REQUEST:
-      req = Move(observers[i]->mPendingRequest);
+      req = std::move(observers[i]->mPendingRequest);
       break;
     default:
       NS_ERROR("Unknown request type");
@@ -593,7 +588,7 @@ nsImageLoadingContent::MakePendingScriptedRequestsCurrent()
     if (observer->mCurrentRequest) {
       observer->mCurrentRequest->CancelAndForgetObserver(NS_BINDING_ABORTED);
     }
-    observer->mCurrentRequest = Move(observer->mPendingRequest);
+    observer->mCurrentRequest = std::move(observer->mPendingRequest);
   } while (i > 0);
 }
 
@@ -627,12 +622,6 @@ nsImageLoadingContent::GetRequest(int32_t aRequestType,
   *aRequest = GetRequest(aRequestType, result).take();
 
   return result.StealNSResult();
-}
-
-NS_IMETHODIMP_(bool)
-nsImageLoadingContent::CurrentRequestHasSize()
-{
-  return HaveSize(mCurrentRequest);
 }
 
 NS_IMETHODIMP_(void)
@@ -1267,7 +1256,10 @@ nsImageLoadingContent::FireEvent(const nsAString& aEventType, bool aIsCancelable
   nsCOMPtr<nsINode> thisNode = do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
 
   RefPtr<AsyncEventDispatcher> loadBlockingAsyncDispatcher =
-    new LoadBlockingAsyncEventDispatcher(thisNode, aEventType, false, false);
+    new LoadBlockingAsyncEventDispatcher(thisNode,
+                                         aEventType,
+                                         CanBubble::eNo,
+                                         ChromeOnlyDispatch::eNo);
   loadBlockingAsyncDispatcher->PostDOMEvent();
 
   if (aIsCancelable) {

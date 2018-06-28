@@ -59,8 +59,9 @@ class MOZ_STACK_CLASS BytecodeCompiler
     bool checkLength();
     bool createScriptSource(const Maybe<uint32_t>& parameterListEnd);
     bool canLazilyParse();
-    bool createParser();
-    bool createSourceAndParser(const Maybe<uint32_t>& parameterListEnd = Nothing());
+    bool createParser(ParseGoal goal);
+    bool createSourceAndParser(ParseGoal goal,
+                               const Maybe<uint32_t>& parameterListEnd = Nothing());
 
     // If toString{Start,End} are not explicitly passed, assume the script's
     // offsets in the source used to parse it are the same as what should be
@@ -193,7 +194,7 @@ BytecodeCompiler::createScriptSource(const Maybe<uint32_t>& parameterListEnd)
 
     scriptSource = sourceObject->source();
 
-    if (!cx->compartment()->behaviors().discardSource()) {
+    if (!cx->realm()->behaviors().discardSource()) {
         if (options.sourceIsLazy) {
             scriptSource->setSourceRetrievable();
         } else if (!scriptSource->setSourceCopy(cx, sourceBuffer)) {
@@ -208,8 +209,8 @@ bool
 BytecodeCompiler::canLazilyParse()
 {
     return options.canLazilyParse &&
-           !cx->compartment()->behaviors().disableLazyParsing() &&
-           !cx->compartment()->behaviors().discardSource() &&
+           !cx->realm()->behaviors().disableLazyParsing() &&
+           !cx->realm()->behaviors().discardSource() &&
            !options.sourceIsLazy &&
            !cx->lcovEnabled() &&
            // Disabled during record/replay. The replay debugger requires
@@ -219,7 +220,7 @@ BytecodeCompiler::canLazilyParse()
 }
 
 bool
-BytecodeCompiler::createParser()
+BytecodeCompiler::createParser(ParseGoal goal)
 {
     usedNames.emplace(cx);
     if (!usedNames->init())
@@ -227,23 +228,25 @@ BytecodeCompiler::createParser()
 
     if (canLazilyParse()) {
         syntaxParser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                             /* foldConstants = */ false, *usedNames, nullptr, nullptr);
-
+                             /* foldConstants = */ false, *usedNames, nullptr, nullptr,
+                             sourceObject, goal);
         if (!syntaxParser->checkOptions())
             return false;
     }
 
     parser.emplace(cx, alloc, options, sourceBuffer.get(), sourceBuffer.length(),
-                   /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr);
+                   /* foldConstants = */ true, *usedNames, syntaxParser.ptrOr(nullptr), nullptr,
+                   sourceObject, goal);
     parser->ss = scriptSource;
     return parser->checkOptions();
 }
 
 bool
-BytecodeCompiler::createSourceAndParser(const Maybe<uint32_t>& parameterListEnd /* = Nothing() */)
+BytecodeCompiler::createSourceAndParser(ParseGoal goal,
+                                        const Maybe<uint32_t>& parameterListEnd /* = Nothing() */)
 {
     return createScriptSource(parameterListEnd) &&
-           createParser();
+           createParser(goal);
 }
 
 bool
@@ -317,7 +320,7 @@ BytecodeCompiler::deoptimizeArgumentsInEnclosingScripts(JSContext* cx, HandleObj
 JSScript*
 BytecodeCompiler::compileScript(HandleObject environment, SharedContext* sc)
 {
-    if (!createSourceAndParser())
+    if (!createSourceAndParser(ParseGoal::Script))
         return nullptr;
 
     TokenStreamPosition startPosition(keepAtoms, parser->tokenStream);
@@ -393,7 +396,7 @@ BytecodeCompiler::compileEvalScript(HandleObject environment, HandleScope enclos
 ModuleObject*
 BytecodeCompiler::compileModule()
 {
-    if (!createSourceAndParser())
+    if (!createSourceAndParser(ParseGoal::Module))
         return nullptr;
 
     Rooted<ModuleObject*> module(cx, ModuleObject::create(cx));
@@ -452,7 +455,7 @@ BytecodeCompiler::compileStandaloneFunction(MutableHandleFunction fun,
     MOZ_ASSERT(fun);
     MOZ_ASSERT(fun->isTenured());
 
-    if (!createSourceAndParser(parameterListEnd))
+    if (!createSourceAndParser(ParseGoal::Script, parameterListEnd))
         return false;
 
     TokenStreamPosition startPosition(keepAtoms, parser->tokenStream);
@@ -745,6 +748,8 @@ bool
 frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const char16_t* chars, size_t length)
 {
     MOZ_ASSERT(cx->compartment() == lazy->functionNonDelazifying()->compartment());
+    // We can't be running this script unless we've run its parent.
+    MOZ_ASSERT(!lazy->isEnclosingScriptLazy());
 
     AutoAssertReportedException assertException(cx);
 
@@ -777,9 +782,11 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
     UsedNameTracker usedNames(cx);
     if (!usedNames.init())
         return false;
+
+    RootedScriptSourceObject sourceObject(cx, &lazy->sourceObject());
     Parser<FullParseHandler, char16_t> parser(cx, cx->tempLifoAlloc(), options, chars, length,
                                               /* foldConstants = */ true, usedNames, nullptr,
-                                              lazy);
+                                              lazy, sourceObject, lazy->parseGoal());
     if (!parser.checkOptions())
         return false;
 
@@ -789,9 +796,6 @@ frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy, const cha
                                                   lazy->asyncKind());
     if (!pn)
         return false;
-
-    RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
-    MOZ_ASSERT(sourceObject);
 
     Rooted<JSScript*> script(cx, JSScript::Create(cx, options, sourceObject,
                                                   lazy->sourceStart(), lazy->sourceEnd(),

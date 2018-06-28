@@ -157,7 +157,7 @@ WebGLBuffer::BufferData(GLenum target, size_t size, const void* data, GLenum usa
     mUsage = usage;
     mByteLength = size;
     mFetchInvalidator.InvalidateCaches();
-    mIndexCache = Move(newIndexCache);
+    mIndexCache = std::move(newIndexCache);
 
     if (mIndexCache) {
         if (!mIndexRanges.empty()) {
@@ -422,7 +422,7 @@ WebGLBuffer::ResetLastUpdateFenceId() const
 JSObject*
 WebGLBuffer::WrapObject(JSContext* cx, JS::Handle<JSObject*> givenProto)
 {
-    return dom::WebGLBufferBinding::Wrap(cx, this, givenProto);
+    return dom::WebGLBuffer_Binding::Wrap(cx, this, givenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(WebGLBuffer)

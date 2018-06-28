@@ -75,22 +75,19 @@ static WindowsDllInterceptor sUser32Intercept;
 static HWND sWinlessPopupSurrogateHWND = nullptr;
 static User32TrackPopupMenu sUser32TrackPopupMenuStub = nullptr;
 
-typedef HIMC (WINAPI *Imm32ImmGetContext)(HWND hWND);
-typedef LONG (WINAPI *Imm32ImmGetCompositionString)(HIMC hIMC,
-                                                    DWORD dwIndex,
-                                                    LPVOID lpBuf,
-                                                    DWORD dwBufLen);
-typedef BOOL (WINAPI *Imm32ImmSetCandidateWindow)(HIMC hIMC,
-                                                  LPCANDIDATEFORM lpCandidate);
-typedef BOOL (WINAPI *Imm32ImmNotifyIME)(HIMC hIMC, DWORD dwAction,
-                                        DWORD dwIndex, DWORD dwValue);
 static WindowsDllInterceptor sImm32Intercept;
-static Imm32ImmGetContext sImm32ImmGetContextStub = nullptr;
-static Imm32ImmGetCompositionString sImm32ImmGetCompositionStringStub = nullptr;
-static Imm32ImmSetCandidateWindow sImm32ImmSetCandidateWindowStub = nullptr;
-static Imm32ImmNotifyIME sImm32ImmNotifyIME = nullptr;
+static decltype(ImmGetContext)* sImm32ImmGetContextStub = nullptr;
+static decltype(ImmGetCompositionStringW)* sImm32ImmGetCompositionStringStub =
+                                             nullptr;
+static decltype(ImmSetCandidateWindow)* sImm32ImmSetCandidateWindowStub =
+                                          nullptr;
+static decltype(ImmNotifyIME)* sImm32ImmNotifyIME = nullptr;
+static decltype(ImmAssociateContextEx)* sImm32ImmAssociateContextExStub =
+                                          nullptr;
 static PluginInstanceChild* sCurrentPluginInstance = nullptr;
 static const HIMC sHookIMC = (const HIMC)0xefefefef;
+static bool sPopupMenuHookSet;
+static bool sSetWindowLongHookSet;
 
 using mozilla::gfx::SharedDIB;
 
@@ -139,6 +136,7 @@ PluginInstanceChild::PluginInstanceChild(const NPPluginFuncs* aPluginIface,
 #if defined(XP_DARWIN) || defined (XP_WIN)
     , mContentsScaleFactor(1.0)
 #endif
+    , mCSSZoomFactor(0.0)
     , mPostingKeyEvents(0)
     , mPostingKeyEventsOutdated(0)
     , mDrawingModel(kDefaultDrawingModel)
@@ -163,6 +161,7 @@ PluginInstanceChild::PluginInstanceChild(const NPPluginFuncs* aPluginIface,
     , mShColorSpace(nullptr)
     , mShContext(nullptr)
     , mCGLayer(nullptr)
+    , mCARefreshTimer(0)
     , mCurrentEvent(nullptr)
 #endif
     , mLayersRendering(false)
@@ -180,6 +179,7 @@ PluginInstanceChild::PluginInstanceChild(const NPPluginFuncs* aPluginIface,
     , mDestroyed(false)
 #ifdef XP_WIN
     , mLastKeyEventConsumed(false)
+    , mLastEnableIMEState(true)
 #endif // #ifdef XP_WIN
     , mStackDepth(0)
 {
@@ -304,7 +304,8 @@ PluginInstanceChild::InternalGetNPObjectForValue(NPNVariable aValue,
             break;
 
         default:
-            NS_NOTREACHED("Don't know what to do with this value type!");
+            MOZ_ASSERT_UNREACHABLE("Don't know what to do with this value "
+                                   "type!");
     }
 
 #ifdef DEBUG
@@ -520,14 +521,15 @@ PluginInstanceChild::NPN_GetValue(NPNVariable aVar,
         *static_cast<double*>(aValue) = mCSSZoomFactor;
         return NPERR_NO_ERROR;
     }
+
 #ifdef DEBUG
     case NPNVjavascriptEnabledBool:
     case NPNVasdEnabledBool:
     case NPNVisOfflineBool:
     case NPNVSupportsXEmbedBool:
     case NPNVSupportsWindowless:
-        NS_NOTREACHED("NPNVariable should be handled in PluginModuleChild.");
-        MOZ_FALLTHROUGH;
+        MOZ_FALLTHROUGH_ASSERT("NPNVariable should be handled in "
+                               "PluginModuleChild.");
 #endif
 
     default:
@@ -1124,7 +1126,7 @@ PluginInstanceChild::AnswerCreateChildPluginWindow(NativeWindowHandle* aChildPlu
     *aChildPluginWindow = mPluginWindowHWND;
     return IPC_OK();
 #else
-    NS_NOTREACHED("PluginInstanceChild::CreateChildPluginWindow not implemented!");
+    MOZ_ASSERT_UNREACHABLE("CreateChildPluginWindow not implemented!");
     return IPC_FAIL_NO_REASON(this);
 #endif
 }
@@ -1137,7 +1139,7 @@ PluginInstanceChild::RecvCreateChildPopupSurrogate(const NativeWindowHandle& aNe
     CreateWinlessPopupSurrogate();
     return IPC_OK();
 #else
-    NS_NOTREACHED("PluginInstanceChild::CreateChildPluginWindow not implemented!");
+    MOZ_ASSERT_UNREACHABLE("CreateChildPluginWindow not implemented!");
     return IPC_FAIL_NO_REASON(this);
 #endif
 }
@@ -1223,7 +1225,7 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
       break;
 
       default:
-          NS_NOTREACHED("Bad plugin window type.");
+          MOZ_ASSERT_UNREACHABLE("Bad plugin window type.");
           return IPC_FAIL_NO_REASON(this);
       break;
     }
@@ -1506,7 +1508,7 @@ PluginInstanceChild::PluginWindowProcInternal(HWND hWnd,
     PluginInstanceChild* self = reinterpret_cast<PluginInstanceChild*>(
         GetProp(hWnd, kPluginInstanceChildProperty));
     if (!self) {
-        NS_NOTREACHED("Badness!");
+        MOZ_ASSERT_UNREACHABLE("Badness!");
         return 0;
     }
 
@@ -1901,8 +1903,15 @@ PluginInstanceChild::SetWindowLongWHook(HWND hWnd,
 void
 PluginInstanceChild::HookSetWindowLongPtr()
 {
-    if (!(GetQuirks() & QUIRK_FLASH_HOOK_SETLONGPTR))
+    if (!(GetQuirks() & QUIRK_FLASH_HOOK_SETLONGPTR)) {
         return;
+    }
+
+    // Only pass through here once
+    if (sSetWindowLongHookSet) {
+        return;
+    }
+    sSetWindowLongHookSet = true;
 
     sUser32Intercept.Init("user32.dll");
 #ifdef _WIN64
@@ -1982,19 +1991,23 @@ PluginInstanceChild::TrackPopupHookProc(HMENU hMenu,
 void
 PluginInstanceChild::InitPopupMenuHook()
 {
-    if (!(GetQuirks() & QUIRK_WINLESS_TRACKPOPUP_HOOK) ||
-        sUser32TrackPopupMenuStub)
+    if (!(GetQuirks() & QUIRK_WINLESS_TRACKPOPUP_HOOK)) {
         return;
+    }
+
+    // Only pass through here once
+    if (sPopupMenuHookSet) {
+        return;
+    }
+    sPopupMenuHookSet = true;
 
     // Note, once WindowsDllInterceptor is initialized for a module,
     // it remains initialized for that particular module for it's
     // lifetime. Additional instances are needed if other modules need
     // to be hooked.
-    if (!sUser32TrackPopupMenuStub) {
-        sUser32Intercept.Init("user32.dll");
-        sUser32Intercept.AddHook("TrackPopupMenu", reinterpret_cast<intptr_t>(TrackPopupHookProc),
-                                 (void**) &sUser32TrackPopupMenuStub);
-    }
+    sUser32Intercept.Init("user32.dll");
+    sUser32Intercept.AddHook("TrackPopupMenu", reinterpret_cast<intptr_t>(TrackPopupHookProc),
+                             (void**) &sUser32TrackPopupMenuStub);
 }
 
 void
@@ -2105,6 +2118,30 @@ PluginInstanceChild::ImmNotifyIME(HIMC aIMC, DWORD aAction, DWORD aIndex,
     return TRUE;
 }
 
+// static
+BOOL
+PluginInstanceChild::ImmAssociateContextExProc(HWND hWND, HIMC hImc,
+                                               DWORD dwFlags)
+{
+    PluginInstanceChild* self = sCurrentPluginInstance;
+    if (!self) {
+        // If ImmAssociateContextEx calls unexpected window message,
+        // we can use child instance object from window property if available.
+        self = reinterpret_cast<PluginInstanceChild*>(
+                   GetProp(hWND, kFlashThrottleProperty));
+        NS_WARNING_ASSERTION(self, "Cannot find PluginInstanceChild");
+    }
+
+    // HIMC is always nullptr on Flash's windowless
+    if (!hImc && self) {
+        // Store the last IME state since Flash may call ImmAssociateContextEx
+        // before taking focus.
+        self->mLastEnableIMEState = !!(dwFlags & IACE_DEFAULT);
+        self->SendEnableIME(self->mLastEnableIMEState);
+    }
+    return sImm32ImmAssociateContextExStub(hWND, hImc, dwFlags);
+}
+
 void
 PluginInstanceChild::InitImm32Hook()
 {
@@ -2138,6 +2175,10 @@ PluginInstanceChild::InitImm32Hook()
         "ImmNotifyIME",
         reinterpret_cast<intptr_t>(ImmNotifyIME),
         (void**)&sImm32ImmNotifyIME);
+    sImm32Intercept.AddHook(
+        "ImmAssociateContextEx",
+        reinterpret_cast<intptr_t>(ImmAssociateContextExProc),
+        (void**)&sImm32ImmAssociateContextExStub);
 }
 
 void
@@ -2176,6 +2217,7 @@ PluginInstanceChild::WinlessHandleEvent(NPEvent& event)
     AutoRestore<PluginInstanceChild *> pluginInstance(sCurrentPluginInstance);
     if (event.event == WM_IME_STARTCOMPOSITION ||
         event.event == WM_IME_COMPOSITION ||
+        event.event == WM_LBUTTONDOWN ||
         event.event == WM_KILLFOCUS) {
       sCurrentPluginInstance = this;
     }
@@ -2189,6 +2231,27 @@ PluginInstanceChild::WinlessHandleEvent(NPEvent& event)
 
     if (IsWindow(focusHwnd)) {
       SetFocus(focusHwnd);
+    }
+
+    // This is hack of Flash's behaviour.
+    //
+    // When moving focus from chrome to plugin by mouse click, Gecko sends
+    // mouse message (such as WM_LBUTTONDOWN etc) at first, then sends
+    // WM_SETFOCUS. But Flash will call ImmAssociateContextEx on WM_LBUTTONDOWN
+    // even if it doesn't receive WM_SETFOCUS.
+    //
+    // In this situation, after sending mouse message, content process will be
+    // activated and set input context with PLUGIN.  So after activating
+    // content process, we have to set current IME state again.
+
+    if (event.event == WM_SETFOCUS) {
+        // When focus is changed from chrome process to plugin process,
+        // Flash may call ImmAssociateContextEx before receiving WM_SETFOCUS.
+        SendEnableIME(mLastEnableIMEState);
+    } else if (event.event == WM_KILLFOCUS) {
+        // Flash always calls ImmAssociateContextEx by taking focus.
+        // Although this flag doesn't have to be reset, I add it for safety.
+        mLastEnableIMEState = true;
     }
 
     return handled;
@@ -2235,7 +2298,7 @@ PluginInstanceChild::WinlessHiddenFlashWndProc(HWND hWnd,
     PluginInstanceChild* self = reinterpret_cast<PluginInstanceChild*>(
         GetProp(hWnd, kFlashThrottleProperty));
     if (!self) {
-        NS_NOTREACHED("Badness!");
+        MOZ_ASSERT_UNREACHABLE("Badness!");
         return 0;
     }
 
@@ -2269,7 +2332,7 @@ PluginInstanceChild::EnumThreadWindowsCallback(HWND hWnd,
 {
     PluginInstanceChild* self = reinterpret_cast<PluginInstanceChild*>(aParam);
     if (!self) {
-        NS_NOTREACHED("Enum befuddled!");
+        MOZ_ASSERT_UNREACHABLE("Enum befuddled!");
         return FALSE;
     }
 
@@ -2393,7 +2456,7 @@ PluginInstanceChild::AnswerSetPluginFocus()
     ::SetFocus(mPluginWindowHWND);
     return IPC_OK();
 #else
-    NS_NOTREACHED("PluginInstanceChild::AnswerSetPluginFocus not implemented!");
+    MOZ_ASSERT_UNREACHABLE("AnswerSetPluginFocus not implemented!");
     return IPC_FAIL_NO_REASON(this);
 #endif
 }
@@ -2413,7 +2476,7 @@ PluginInstanceChild::AnswerUpdateWindow()
     }
     return IPC_OK();
 #else
-    NS_NOTREACHED("PluginInstanceChild::AnswerUpdateWindow not implemented!");
+    MOZ_ASSERT_UNREACHABLE("AnswerUpdateWindow not implemented!");
     return IPC_FAIL_NO_REASON(this);
 #endif
 }

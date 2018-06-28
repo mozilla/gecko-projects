@@ -106,7 +106,7 @@ already_AddRefed<Promise>
 Promise::Resolve(nsIGlobalObject* aGlobal, JSContext* aCx,
                  JS::Handle<JS::Value> aValue, ErrorResult& aRv)
 {
-  JSAutoCompartment ac(aCx, aGlobal->GetGlobalJSObject());
+  JSAutoRealm ar(aCx, aGlobal->GetGlobalJSObject());
   JS::Rooted<JSObject*> p(aCx,
                           JS::CallOriginalPromiseResolve(aCx, aValue));
   if (!p) {
@@ -122,7 +122,7 @@ already_AddRefed<Promise>
 Promise::Reject(nsIGlobalObject* aGlobal, JSContext* aCx,
                 JS::Handle<JS::Value> aValue, ErrorResult& aRv)
 {
-  JSAutoCompartment ac(aCx, aGlobal->GetGlobalJSObject());
+  JSAutoRealm ar(aCx, aGlobal->GetGlobalJSObject());
   JS::Rooted<JSObject*> p(aCx,
                           JS::CallOriginalPromiseReject(aCx, aValue));
   if (!p) {
@@ -362,7 +362,7 @@ public:
   WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
              JS::MutableHandle<JSObject*> aWrapper)
   {
-    return PromiseNativeHandlerBinding::Wrap(aCx, this, aGivenProto, aWrapper);
+    return PromiseNativeHandler_Binding::Wrap(aCx, this, aGivenProto, aWrapper);
   }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -520,7 +520,7 @@ Promise::GlobalJSObject() const
   return mGlobal->GetGlobalJSObject();
 }
 
-JSCompartment*
+JS::Compartment*
 Promise::Compartment() const
 {
   return js::GetObjectCompartment(GlobalJSObject());

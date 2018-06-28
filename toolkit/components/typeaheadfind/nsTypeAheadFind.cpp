@@ -25,15 +25,12 @@
 #include "nsCRT.h"
 #include "nsGenericHTMLElement.h"
 
-#include "nsIDOMNode.h"
 #include "nsIFrame.h"
 #include "nsFrameTraversal.h"
 #include "nsIImageDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsTextFragment.h"
-#include "nsIDOMNSEditableElement.h"
 #include "nsIEditor.h"
 
 #include "nsIDocShellTreeItem.h"
@@ -49,6 +46,8 @@
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/Link.h"
 #include "mozilla/dom/RangeBinding.h"
 #include "mozilla/dom/Selection.h"
@@ -441,7 +440,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
 
   // XXXbz Should this really be ignoring errors?
   int16_t rangeCompareResult =
-    mStartPointRange->CompareBoundaryPoints(RangeBinding::START_TO_START,
+    mStartPointRange->CompareBoundaryPoints(Range_Binding::START_TO_START,
                                             *mSearchRange, IgnoreErrors());
   // No need to wrap find in doc if starting at beginning
   bool hasWrapped = (rangeCompareResult < 0);
@@ -453,10 +452,8 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
 
   while (true) {    // ----- Outer while loop: go through all docs -----
     while (true) {  // === Inner while loop: go through a single doc ===
-      nsCOMPtr<nsIDOMRange> tempFoundRange;
       mFind->Find(mTypeAheadBuffer.get(), mSearchRange, mStartPointRange,
-                  mEndPointRange, getter_AddRefs(tempFoundRange));
-      returnRange = static_cast<nsRange*>(tempFoundRange.get());
+                  mEndPointRange, getter_AddRefs(returnRange));
       if (!returnRange) {
         break;  // Nothing found in this doc, go to outer loop (try next doc)
       }
@@ -497,7 +494,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
           // to continue at the start of returnRange.
           IgnoredErrorResult rv;
           int16_t compareResult =
-            mStartPointRange->CompareBoundaryPoints(RangeBinding::START_TO_END,
+            mStartPointRange->CompareBoundaryPoints(Range_Binding::START_TO_END,
                                                     *returnRange, rv);
           if (!rv.Failed() && compareResult <= 0) {
             // OK to start at the end of mStartPointRange
@@ -513,7 +510,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
           // need to continue at the end of returnRange.
           IgnoredErrorResult rv;
           int16_t compareResult =
-            mStartPointRange->CompareBoundaryPoints(RangeBinding::END_TO_START,
+            mStartPointRange->CompareBoundaryPoints(Range_Binding::END_TO_START,
                                                     *returnRange, rv);
           if (!rv.Failed() && compareResult >= 0) {
             // OK to start at the start of mStartPointRange
@@ -580,33 +577,38 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
         // chain of parent nodes to see if we find one.
         nsCOMPtr<nsINode> node = returnRange->GetStartContainer();
         while (node) {
-          nsCOMPtr<nsIDOMNSEditableElement> editable = do_QueryInterface(node);
-          if (editable) {
-            // Inside an editable element.  Get the correct selection
-            // controller and selection.
-            nsCOMPtr<nsIEditor> editor;
-            editable->GetEditor(getter_AddRefs(editor));
-            NS_ASSERTION(editor, "Editable element has no editor!");
-            if (!editor) {
-              break;
-            }
-            editor->GetSelectionController(
-              getter_AddRefs(selectionController));
-            if (selectionController) {
-              selection = selectionController->GetSelection(
-                nsISelectionController::SELECTION_NORMAL);
-            }
-            mFoundEditable = do_QueryInterface(node);
+          nsCOMPtr<nsIEditor> editor;
+          if (auto input = HTMLInputElement::FromNode(node)) {
+            editor = input->GetEditor();
+          } else if (auto textarea = HTMLTextAreaElement::FromNode(node)) {
+            editor = textarea->GetEditor();
+          } else {
+            node = node->GetParentNode();
+            continue;
+          }
 
-            if (!shouldFocusEditableElement)
-              break;
-
-            // Otherwise move focus/caret to editable element
-            if (fm)
-              fm->SetFocus(mFoundEditable, 0);
+          // Inside an editable element.  Get the correct selection
+          // controller and selection.
+          NS_ASSERTION(editor, "Editable element has no editor!");
+          if (!editor) {
             break;
           }
-          node = node->GetParentNode();
+          editor->GetSelectionController(getter_AddRefs(selectionController));
+          if (selectionController) {
+            selection = selectionController->GetSelection(
+              nsISelectionController::SELECTION_NORMAL);
+          }
+          mFoundEditable = node->AsElement();
+
+          if (!shouldFocusEditableElement) {
+            break;
+          }
+
+          // Otherwise move focus/caret to editable element
+          if (fm) {
+            fm->SetFocus(mFoundEditable, 0);
+          }
+          break;
         }
 
         // If we reach here without setting mFoundEditable, then something
@@ -900,7 +902,7 @@ nsTypeAheadFind::RangeStartsInsideLink(nsRange *aRange,
   nsCOMPtr<nsIContent> startContent =
     do_QueryInterface(aRange->GetStartContainer());
   if (!startContent) {
-    NS_NOTREACHED("startContent should never be null");
+    MOZ_ASSERT_UNREACHABLE("startContent should never be null");
     return;
   }
   nsCOMPtr<nsIContent> origContent = startContent;
@@ -1162,7 +1164,7 @@ nsTypeAheadFind::GetSelection(nsIPresShell *aPresShell,
 }
 
 NS_IMETHODIMP
-nsTypeAheadFind::GetFoundRange(nsIDOMRange** aFoundRange)
+nsTypeAheadFind::GetFoundRange(nsRange** aFoundRange)
 {
   NS_ENSURE_ARG_POINTER(aFoundRange);
   if (mFoundRange == nullptr) {
@@ -1175,12 +1177,11 @@ nsTypeAheadFind::GetFoundRange(nsIDOMRange** aFoundRange)
 }
 
 NS_IMETHODIMP
-nsTypeAheadFind::IsRangeVisible(nsIDOMRange *aRange,
+nsTypeAheadFind::IsRangeVisible(nsRange* aRange,
                                 bool aMustBeInViewPort,
                                 bool *aResult)
 {
-  nsRange* range = static_cast<nsRange*>(aRange);
-  nsCOMPtr<nsINode> node = range->GetStartContainer();
+  nsCOMPtr<nsINode> node = aRange->GetStartContainer();
 
   nsIDocument* doc = node->OwnerDoc();
   nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
@@ -1189,7 +1190,7 @@ nsTypeAheadFind::IsRangeVisible(nsIDOMRange *aRange,
   }
   RefPtr<nsPresContext> presContext = presShell->GetPresContext();
   RefPtr<nsRange> ignored;
-  *aResult = IsRangeVisible(presShell, presContext, range,
+  *aResult = IsRangeVisible(presShell, presContext, aRange,
                             aMustBeInViewPort, false,
                             getter_AddRefs(ignored),
                             nullptr);
@@ -1366,11 +1367,10 @@ nsTypeAheadFind::IsRangeVisible(nsIPresShell *aPresShell,
 }
 
 NS_IMETHODIMP
-nsTypeAheadFind::IsRangeRendered(nsIDOMRange *aRange,
-                                bool *aResult)
+nsTypeAheadFind::IsRangeRendered(nsRange* aRange,
+                                 bool* aResult)
 {
-  nsRange* range = static_cast<nsRange*>(aRange);
-  nsINode* node = range->GetStartContainer();
+  nsINode* node = aRange->GetStartContainer();
 
   nsIDocument* doc = node->OwnerDoc();
   nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
@@ -1378,7 +1378,7 @@ nsTypeAheadFind::IsRangeRendered(nsIDOMRange *aRange,
     return NS_ERROR_UNEXPECTED;
   }
   RefPtr<nsPresContext> presContext = presShell->GetPresContext();
-  *aResult = IsRangeRendered(presShell, presContext, range);
+  *aResult = IsRangeRendered(presShell, presContext, aRange);
   return NS_OK;
 }
 

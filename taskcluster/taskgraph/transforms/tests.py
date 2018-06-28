@@ -21,10 +21,8 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
-from taskgraph.util.treeherder import split_symbol, join_symbol
+from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
 from taskgraph.util.platforms import platform_family
-from taskgraph import files_changed
-from mozpack.path import match as mozpackmatch
 from taskgraph.util.schema import (
     validate_schema,
     optionally_keyed_by,
@@ -32,6 +30,8 @@ from taskgraph.util.schema import (
 )
 from taskgraph.util.taskcluster import get_artifact_path
 from mozbuild.schedules import INCLUSIVE_COMPONENTS
+
+from taskgraph.util.perfile import perfile_number_of_chunks
 
 from voluptuous import (
     Any,
@@ -42,7 +42,6 @@ from voluptuous import (
 
 import copy
 import logging
-import math
 
 # default worker types keyed by instance-size
 LINUX_WORKER_TYPES = {
@@ -283,10 +282,6 @@ test_description_schema = Schema({
         # If true, tooltool downloads will be enabled via relengAPIProxy.
         Required('tooltool-downloads'): bool,
 
-        # This mozharness script also runs in Buildbot and tries to read a
-        # buildbot config file, so tell it not to do so in TaskCluster
-        Required('no-read-buildbot-config'): bool,
-
         # Add --blob-upload-branch=<project> mozharness parameter
         Optional('include-blob-upload-branch'): bool,
 
@@ -383,7 +378,6 @@ test_description_schema = Schema({
         'test-platform',
         Any(basestring, None),
     ),
-
 }, required=True)
 
 
@@ -414,7 +408,7 @@ def set_defaults(config, tests):
             test.setdefault('e10s', True)
 
         # software-gl-layers is only meaningful on linux unittests, where it defaults to True
-        if test['test-platform'].startswith('linux') and test['suite'] != 'talos':
+        if test['test-platform'].startswith('linux') and test['suite'] not in ['talos', 'raptor']:
             test.setdefault('allow-software-gl-layers', True)
         else:
             test['allow-software-gl-layers'] = False
@@ -437,19 +431,14 @@ def set_defaults(config, tests):
         test.setdefault('max-run-time', 3600)
         test.setdefault('reboot', False)
         test.setdefault('virtualization', 'virtual')
-        test.setdefault('run-on-projects', 'built-projects')
-        test.setdefault('chunks', 1)
-        test.setdefault('instance-size', 'default')
         test.setdefault('loopback-audio', False)
         test.setdefault('loopback-video', False)
         test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
-        test.setdefault('max-run-time', 3600)
         test.setdefault('checkout', False)
 
         test['mozharness'].setdefault('extra-options', [])
         test['mozharness'].setdefault('requires-signed-builds', False)
         test['mozharness'].setdefault('tooltool-downloads', False)
-        test['mozharness'].setdefault('no-read-buildbot-config', False)
         test['mozharness'].setdefault('set-moz-node-path', False)
         test['mozharness'].setdefault('chunked', False)
         test['mozharness'].setdefault('chunking-args', 'this-chunk')
@@ -555,9 +544,9 @@ def set_treeherder_machine_platform(config, tests):
         'win64-pgo/opt': 'windows10-64/pgo',
         # The build names for Android platforms have partially evolved over the
         # years and need to be translated.
-        'android-api-16/debug': 'android-4-3-armv7-api16/debug',
-        'android-api-16/opt': 'android-4-3-armv7-api16/opt',
-        'android-x86/opt': 'android-4-2-x86/opt',
+        'android-api-16/debug': 'android-em-4-3-armv7-api16/debug',
+        'android-api-16/opt': 'android-em-4-3-armv7-api16/opt',
+        'android-x86/opt': 'android-em-4-2-x86/opt',
         'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
     }
     for test in tests:
@@ -569,6 +558,8 @@ def set_treeherder_machine_platform(config, tests):
         # Since it's unclear if the regular macOS builds can be removed from
         # the table, workaround the issue for QR.
         if '-qr' in test['test-platform']:
+            test['treeherder-machine-platform'] = test['test-platform']
+        elif 'android-hw' in test['test-platform']:
             test['treeherder-machine-platform'] = test['test-platform']
         else:
             test['treeherder-machine-platform'] = translation.get(
@@ -606,13 +597,14 @@ def set_tier(config, tests):
                                          'windows10-64-pgo/opt',
                                          'windows10-64-devedition/opt',
                                          'windows10-64-nightly/opt',
+                                         'windows10-64-asan/opt',
                                          'macosx64/opt',
                                          'macosx64/debug',
                                          'macosx64-nightly/opt',
                                          'macosx64-devedition/opt',
-                                         'android-4.3-arm7-api-16/opt',
-                                         'android-4.3-arm7-api-16/debug',
-                                         'android-4.2-x86/opt']:
+                                         'android-em-4.3-arm7-api-16/opt',
+                                         'android-em-4.3-arm7-api-16/debug',
+                                         'android-em-4.2-x86/opt']:
                 test['tier'] = 1
             else:
                 test['tier'] = 2
@@ -695,6 +687,8 @@ def handle_suite_category(config, tests):
             pass
         elif script == 'android_emulator_unittest.py':
             category_arg = '--test-suite'
+        elif script == 'android_hardware_unittest.py':
+            category_arg = '--test-suite'
         elif script == 'desktop_unittest.py':
             category_arg = '--{}-suite'.format(suite)
 
@@ -709,16 +703,19 @@ def handle_suite_category(config, tests):
 
 @transforms.add
 def enable_code_coverage(config, tests):
-    """Enable code coverage for the linux64-ccov/.* & linux64-jsdcov/.* & win64-ccov/.*
-    build-platforms"""
+    """Enable code coverage for the ccov and jsdcov build-platforms"""
     for test in tests:
-        if 'ccov' in test['build-platform'] and not test['test-name'].startswith('test-verify'):
+        if 'ccov' in test['build-platform']:
+            # do not run tests on fuzzing or opt build
+            if 'opt' in test['build-platform'] or 'fuzzing' in test['build-platform']:
+                test['run-on-projects'] = []
+                continue
             test['mozharness'].setdefault('extra-options', []).append('--code-coverage')
             test['instance-size'] = 'xlarge'
-            # Ensure we don't run on inbound/autoland/beta, but if the test is try only, ignore it
-            if 'mozilla-central' in test['run-on-projects'] or \
-                    test['run-on-projects'] == 'built-projects':
-                test['run-on-projects'] = ['mozilla-central', 'try']
+            # Ensure we always run on the projects defined by the build, unless the test
+            # is try only or shouldn't run at all.
+            if test['run-on-projects'] not in [[], ['try']]:
+                test['run-on-projects'] = 'built-projects'
 
             # Ensure we don't optimize test suites out.
             # We always want to run all test suites for coverage purposes.
@@ -743,10 +740,10 @@ def enable_code_coverage(config, tests):
                 if 'linux' in test['build-platform']:
                     test['docker-image'] = {"in-tree": "desktop1604-test"}
         elif test['build-platform'] == 'linux64-jsdcov/opt':
-            # Ensure we don't run on inbound/autoland/beta, but if the test is try only, ignore it
-            if 'mozilla-central' in test['run-on-projects'] or \
-                    test['run-on-projects'] == 'built-projects':
-                test['run-on-projects'] = ['mozilla-central', 'try']
+            # Ensure we always run on the projects defined by the build, unless the test
+            # is try only or shouldn't run at all.
+            if test['run-on-projects'] not in [[], ['try']]:
+                test['run-on-projects'] = 'built-projects'
             test['mozharness'].setdefault('extra-options', []).append('--jsd-code-coverage')
         yield test
 
@@ -795,10 +792,15 @@ def split_chunks(config, tests):
     them and assigning 'this-chunk' appropriately and updating the treeherder
     symbol."""
     for test in tests:
-        if test['suite'].startswith('test-verify'):
-            test['chunks'] = perfile_number_of_chunks(config, test['test-name'])
-            if test['chunks'] == 0:
-                continue
+        if test['suite'].startswith('test-verify') or \
+           test['suite'].startswith('test-coverage'):
+            env = config.params.get('try_task_config', {}) or {}
+            env = env.get('templates', {}).get('env', {})
+            test['chunks'] = perfile_number_of_chunks(env.get('MOZHARNESS_TEST_PATHS', ''),
+                                                      config.params.get('head_repository', ''),
+                                                      config.params.get('head_rev', ''),
+                                                      test['test-name'])
+
             # limit the number of chunks we run for test-verify mode because
             # test-verify is comprehensive and takes a lot of time, if we have
             # >30 tests changed, this is probably an import of external tests,
@@ -807,7 +809,7 @@ def split_chunks(config, tests):
             if test['chunks'] > maximum_number_verify_chunks:
                 test['chunks'] = maximum_number_verify_chunks
 
-        if test['chunks'] == 1:
+        if test['chunks'] <= 1:
             test['this-chunk'] = 1
             yield test
             continue
@@ -818,56 +820,10 @@ def split_chunks(config, tests):
             chunked['this-chunk'] = this_chunk
 
             # add the chunk number to the TH symbol
-            group, symbol = split_symbol(chunked['treeherder-symbol'])
-            symbol += str(this_chunk)
-            chunked['treeherder-symbol'] = join_symbol(group, symbol)
+            chunked['treeherder-symbol'] = add_suffix(
+                chunked['treeherder-symbol'], this_chunk)
 
             yield chunked
-
-
-def perfile_number_of_chunks(config, type):
-    # A rough estimate of how many chunks we need based on simple rules
-    # for determining what a test file is.
-
-    # TODO: Make this flexible based on coverage vs verify || test type
-    tests_per_chunk = 10.0
-
-    if type.startswith('test-verify-wpt'):
-        file_patterns = ['testing/web-platform/tests/**']
-    elif type.startswith('test-verify-gpu'):
-        file_patterns = ['**/*webgl*/**/test_*',
-                         '**/dom/canvas/**/test_*',
-                         '**/gfx/tests/**/test_*',
-                         '**/devtools/canvasdebugger/**/browser_*',
-                         '**/reftest*/**']
-    elif type.startswith('test-verify'):
-        file_patterns = ['**/test_*',
-                         '**/browser_*',
-                         '**/crashtest*/**',
-                         'js/src/test/test/',
-                         'js/src/test/non262/',
-                         'js/src/test/test262/']
-
-    changed_files = files_changed.get_changed_files(config.params.get('head_repository'),
-                                                    config.params.get('head_rev'))
-    test_count = 0
-    for pattern in file_patterns:
-        for path in changed_files:
-            if mozpackmatch(path, pattern):
-                gpu = False
-                if type == 'test-verify-e10s':
-                    # file_patterns for test-verify will pick up some gpu tests, lets ignore
-                    # in the case of reftest, we will not have any in the regular case
-                    gpu_dirs = ['dom/canvas', 'gfx/tests', 'devtools/canvasdebugger', 'webgl']
-                    for gdir in gpu_dirs:
-                        if len(path.split(gdir)) > 1:
-                            gpu = True
-
-                if not gpu:
-                    test_count += 1
-
-    chunks = test_count/tests_per_chunk
-    return int(math.ceil(chunks))
 
 
 @transforms.add
@@ -881,20 +837,6 @@ def allow_software_gl_layers(config, tests):
             # This should be set always once bug 1296086 is resolved.
             test['mozharness'].setdefault('extra-options', [])\
                               .append("--allow-software-gl-layers")
-
-        yield test
-
-
-@transforms.add
-def reftest_win7_slowmode(config, tests):
-    """
-    Win7 needs time to render fonts, so for the reftest-fonts, add --run-slow
-    """
-    for test in tests:
-        if test['build-platform'].startswith('win32') and \
-           'font' in test['suite']:
-            test['mozharness'].setdefault('extra-options', [])\
-                              .append("--run-slower")
 
         yield test
 
@@ -994,6 +936,16 @@ def set_worker_type(config, tests):
                 ]
             # now we have the right platform set the worker type accordingly
             test['worker-type'] = win_worker_type_platform[test['virtualization']]
+        elif test_platform.startswith('android-hw-g5'):
+            if test['suite'] == 'raptor':
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-g5'
+            else:
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-g5'
+        elif test_platform.startswith('android-hw-p2'):
+            if test['suite'] == 'raptor':
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-perf-p2'
+            else:
+                test['worker-type'] = 'proj-autophone/gecko-t-ap-unit-p2'
         elif test_platform.startswith('linux') or test_platform.startswith('android'):
             if test.get('suite', '') == 'talos' and \
                  not test['build-platform'].startswith('linux64-ccov'):

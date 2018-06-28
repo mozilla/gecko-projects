@@ -73,7 +73,7 @@ nsAccUtils::SetAccGroupAttrs(nsIPersistentProperties *aAttributes,
 }
 
 int32_t
-nsAccUtils::GetDefaultLevel(Accessible* aAccessible)
+nsAccUtils::GetDefaultLevel(const Accessible* aAccessible)
 {
   roles::Role role = aAccessible->Role();
 
@@ -92,7 +92,7 @@ nsAccUtils::GetDefaultLevel(Accessible* aAccessible)
 }
 
 int32_t
-nsAccUtils::GetARIAOrDefaultLevel(Accessible* aAccessible)
+nsAccUtils::GetARIAOrDefaultLevel(const Accessible* aAccessible)
 {
   int32_t level = 0;
   nsCoreUtils::GetUIntAttr(aAccessible->GetContent(),
@@ -320,7 +320,7 @@ nsAccUtils::ConvertToScreenCoords(int32_t aX, int32_t aY,
     }
 
     default:
-      NS_NOTREACHED("invalid coord type!");
+      MOZ_ASSERT_UNREACHABLE("invalid coord type!");
   }
 
   return coords;
@@ -352,7 +352,7 @@ nsAccUtils::ConvertScreenCoordsTo(int32_t *aX, int32_t *aY,
     }
 
     default:
-    NS_NOTREACHED("invalid coord type!");
+      MOZ_ASSERT_UNREACHABLE("invalid coord type!");
   }
 }
 

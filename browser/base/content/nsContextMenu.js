@@ -150,9 +150,6 @@ nsContextMenu.prototype = {
 
     // Initialize (disable/remove) menu items.
     this.initItems();
-
-    // Register this opening of the menu with telemetry:
-    this._checkTelemetryForMenu(aXulMenu);
   },
 
   setContext() {
@@ -253,7 +250,7 @@ nsContextMenu.prototype = {
       if (this.isRemote) {
         InlineSpellCheckerUI.initFromRemote(gContextMenuContentData.spellInfo);
       } else {
-        InlineSpellCheckerUI.init(this.target.QueryInterface(Ci.nsIDOMNSEditableElement).editor);
+        InlineSpellCheckerUI.init(this.target.editor);
         InlineSpellCheckerUI.initFromEvent(document.popupRangeParent,
                                            document.popupRangeOffset);
       }
@@ -863,6 +860,9 @@ nsContextMenu.prototype = {
 
   // Open clicked-in frame in the same window.
   showOnlyThisFrame() {
+    urlSecurityCheck(gContextMenuContentData.docLocation,
+                     this.browser.contentPrincipal,
+                     Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
     let referrer = gContextMenuContentData.referrer;
     openWebLinkIn(gContextMenuContentData.docLocation, "current", {
       disallowInheritPrincipal: true,
@@ -921,6 +921,9 @@ nsContextMenu.prototype = {
   },
 
   viewImageDesc(e) {
+    urlSecurityCheck(this.imageDescURL,
+                     this.principal,
+                     Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
     openUILink(this.imageDescURL, e, { disallowInheritPrincipal: true,
                                        referrerURI: gContextMenuContentData.documentURIObject,
                                        triggeringPrincipal: this.principal,
@@ -933,6 +936,10 @@ nsContextMenu.prototype = {
   },
 
   reloadImage() {
+    urlSecurityCheck(this.mediaURL,
+                     this.principal,
+                     Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
+
     this.browser.messageManager.sendAsyncMessage("ContextMenu:ReloadImage",
                                                  null, { target: this.target });
   },
@@ -961,10 +968,13 @@ nsContextMenu.prototype = {
                                  triggeringPrincipal: systemPrincipal});
       }, Cu.reportError);
     } else {
+      urlSecurityCheck(this.mediaURL,
+                       this.principal,
+                       Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
       openUILink(this.mediaURL, e, { disallowInheritPrincipal: true,
                                      referrerURI,
                                      forceAllowDataURI: true,
-                                     triggeringPrincipal: this.browser.contentPrincipal
+                                     triggeringPrincipal: this.principal,
       });
     }
   },
@@ -1005,9 +1015,13 @@ nsContextMenu.prototype = {
 
   // Change current window to the URL of the background image.
   viewBGImage(e) {
+    urlSecurityCheck(this.bgImageURL,
+                     this.principal,
+                     Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
+
     openUILink(this.bgImageURL, e, { disallowInheritPrincipal: true,
                                      referrerURI: gContextMenuContentData.documentURIObject,
-                                     triggeringPrincipal: this.browser.contentPrincipal
+                                     triggeringPrincipal: this.principal,
     });
   },
 
@@ -1428,8 +1442,7 @@ nsContextMenu.prototype = {
 
       window.top.PlacesCommandHook.bookmarkLink(PlacesUtils.bookmarksMenuFolderId,
                                                 uri.spec,
-                                                message.data.title,
-                                                message.data.description)
+                                                message.data.title)
                                   .catch(Cu.reportError);
     };
     mm.addMessageListener("ContextMenu:BookmarkFrame:Result", onMessage);
@@ -1510,64 +1523,6 @@ nsContextMenu.prototype = {
                                                          selectedText]);
     menuItem.label = menuLabel;
     menuItem.accessKey = gNavigatorBundle.getString("contextMenuSearch.accesskey");
-  },
-
-  _getTelemetryClickInfo(aXulMenu) {
-    this._onPopupHiding = () => {
-      aXulMenu.ownerDocument.removeEventListener("command", activationHandler, true);
-      aXulMenu.removeEventListener("popuphiding", this._onPopupHiding, true);
-      delete this._onPopupHiding;
-
-      let eventKey = [
-          this._telemetryPageContext,
-          this._telemetryHadCustomItems ? "withcustom" : "withoutcustom"
-      ];
-      let target = this._telemetryClickID || "close-without-interaction";
-      BrowserUITelemetry.registerContextMenuInteraction(eventKey, target);
-    };
-    let activationHandler = (e) => {
-      // Deal with command events being routed to command elements; figure out
-      // what triggered the event (which will have the right e.target)
-      if (e.sourceEvent) {
-        e = e.sourceEvent;
-      }
-      // Target should be in the menu (this catches using shortcuts for items
-      // not in the menu while the menu is up)
-      if (!aXulMenu.contains(e.target)) {
-        return;
-      }
-
-      // Check if this is a page menu item:
-      if (e.target.hasAttribute(PageMenuParent.GENERATEDITEMID_ATTR)) {
-        this._telemetryClickID = "custom-page-item";
-      } else {
-        this._telemetryClickID = (e.target.id || "unknown").replace(/^context-/i, "");
-      }
-    };
-    aXulMenu.ownerDocument.addEventListener("command", activationHandler, true);
-    aXulMenu.addEventListener("popuphiding", this._onPopupHiding, true);
-  },
-
-  _getTelemetryPageContextInfo() {
-    let rv = [];
-    for (let k of ["isContentSelected", "onLink", "onImage", "onCanvas", "onVideo", "onAudio",
-                   "onTextInput", "inWebExtBrowser", "inTabBrowser"]) {
-      if (this[k]) {
-        rv.push(k.replace(/^(?:is|on)(.)/, (match, firstLetter) => firstLetter.toLowerCase()));
-      }
-    }
-    if (!rv.length) {
-      rv.push("other");
-    }
-
-    return JSON.stringify(rv);
-  },
-
-  _checkTelemetryForMenu(aXulMenu) {
-    this._telemetryClickID = null;
-    this._telemetryPageContext = this._getTelemetryPageContextInfo();
-    this._telemetryHadCustomItems = this.hasPageMenu;
-    this._getTelemetryClickInfo(aXulMenu);
   },
 
   createContainerMenu(aEvent) {

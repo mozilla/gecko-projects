@@ -63,14 +63,14 @@ public:
       mDocument = nullptr;
     } else {
       mDocument = aCurrentDoc;
-      aCurrentDoc->BeginUpdate(UPDATE_CONTENT_MODEL);
+      aCurrentDoc->BeginUpdate();
     }
   }
 
   ~nsHtml5OtherDocUpdate()
   {
     if (MOZ_UNLIKELY(mDocument)) {
-      mDocument->EndUpdate(UPDATE_CONTENT_MODEL);
+      mDocument->EndUpdate();
     }
   }
 
@@ -80,6 +80,11 @@ private:
 
 nsHtml5TreeOperation::nsHtml5TreeOperation()
   : mOpCode(eTreeOpUninitialized)
+  , mOne{}
+  , mTwo{}
+  , mThree{}
+  , mFour{}
+  , mFive{}
 {
   MOZ_COUNT_CTOR(nsHtml5TreeOperation);
 }

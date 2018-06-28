@@ -539,6 +539,7 @@ static size_t opt_dirty_max = DIRTY_MAX_DEFAULT;
 static void*
 base_alloc(size_t aSize);
 
+<<<<<<< working copy
 // Set to true once the allocator has been initialized. Malloc may be called
 // non-deterministically when recording/replaying, so this atomic's accesses
 // are not recorded.
@@ -546,6 +547,28 @@ static Atomic<bool, SequentiallyConsistent,
 	      recordreplay::Behavior::DontPreserve> malloc_initialized(false);
 
 static StaticMutex gInitLock;
+||||||| base
+// Set to true once the allocator has been initialized.
+static Atomic<bool> malloc_initialized(false);
+
+static StaticMutex gInitLock;
+=======
+// Set to true once the allocator has been initialized.
+#if defined(_MSC_VER) && !defined(__clang__)
+// MSVC may create a static initializer for an Atomic<bool>, which may actually
+// run after `malloc_init` has been called once, which triggers multiple
+// initializations.
+// We work around the problem by not using an Atomic<bool> at all. There is a
+// theoretical problem with using `malloc_initialized` non-atomically, but
+// practically, this is only true if `malloc_init` is never called before
+// threads are created.
+static bool malloc_initialized;
+#else
+static Atomic<bool> malloc_initialized;
+#endif
+
+static StaticMutex gInitLock = { STATIC_MUTEX_INIT };
+>>>>>>> merge rev
 
 // ***************************************************************************
 // Statistics data structures.
@@ -1639,9 +1662,13 @@ pages_copy(void* dest, const void* src, size_t n)
   MOZ_ASSERT(n >= VM_COPY_MIN);
   MOZ_ASSERT((void*)((uintptr_t)src & ~gPageSizeMask) == src);
 
-  vm_copy(
+  kern_return_t r = vm_copy(
     mach_task_self(), (vm_address_t)src, (vm_size_t)n, (vm_address_t)dest);
+  if (r != KERN_SUCCESS) {
+    MOZ_CRASH("vm_copy() failed");
+  }
 }
+
 #endif
 
 template<size_t Bits>

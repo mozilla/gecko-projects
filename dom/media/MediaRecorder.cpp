@@ -288,7 +288,7 @@ class MediaRecorder::Session: public PrincipalChangeObserver<MediaStreamTrack>,
                                nsTArray<nsTArray<uint8_t>>&& aBuffer)
       : Runnable("StoreEncodedBufferRunnable")
       , mSession(aSession)
-      , mBuffer(Move(aBuffer))
+      , mBuffer(std::move(aBuffer))
     {}
 
     NS_IMETHOD
@@ -719,7 +719,7 @@ private:
 
     // Append pulled data into cache buffer.
     NS_DispatchToMainThread(new StoreEncodedBufferRunnable(this,
-                                                           Move(encodedBuf)));
+                                                           std::move(encodedBuf)));
 
     // Whether push encoded data back to onDataAvailable automatically or we
     // need a flush.
@@ -752,31 +752,31 @@ private:
     mMediaStream = aStream;
     aStream->RegisterTrackListener(this);
 
-    uint8_t trackTypes = 0;
-    nsTArray<RefPtr<mozilla::dom::AudioStreamTrack>> audioTracks;
-    aStream->GetAudioTracks(audioTracks);
-    if (!audioTracks.IsEmpty()) {
-      trackTypes |= ContainerWriter::CREATE_AUDIO_TRACK;
-    }
-
-    nsTArray<RefPtr<mozilla::dom::VideoStreamTrack>> videoTracks;
-    aStream->GetVideoTracks(videoTracks);
-    if (!videoTracks.IsEmpty()) {
-      trackTypes |= ContainerWriter::CREATE_VIDEO_TRACK;
-    }
-
     nsTArray<RefPtr<mozilla::dom::MediaStreamTrack>> tracks;
     aStream->GetTracks(tracks);
+    uint8_t trackTypes = 0;
+    int32_t audioTracks = 0;
+    int32_t videoTracks = 0;
     for (auto& track : tracks) {
       if (track->Ended()) {
         continue;
       }
 
       ConnectMediaStreamTrack(*track);
+
+      if (track->AsAudioStreamTrack()) {
+        ++audioTracks;
+        trackTypes |= ContainerWriter::CREATE_AUDIO_TRACK;
+      } else if (track->AsVideoStreamTrack()) {
+        ++videoTracks;
+        trackTypes |= ContainerWriter::CREATE_VIDEO_TRACK;
+      } else {
+        MOZ_CRASH("Unexpected track type");
+      }
     }
 
-    if (audioTracks.Length() > 1 ||
-        videoTracks.Length() > 1) {
+    if (audioTracks > 1 ||
+        videoTracks > 1) {
       // When MediaRecorder supports multiple tracks, we should set up a single
       // MediaInputPort from the input stream, and let main thread check
       // track principals async later.
@@ -1059,7 +1059,7 @@ private:
 
     // Append pulled data into cache buffer.
     NS_DispatchToMainThread(new StoreEncodedBufferRunnable(this,
-                                                           Move(encodedBuf)));
+                                                           std::move(encodedBuf)));
 
     RefPtr<Session> self = this;
     NS_DispatchToMainThread(NewRunnableFrom([self, mime]() {
@@ -1159,7 +1159,7 @@ private:
     }
 
     {
-      auto tracks(Move(mMediaStreamTracks));
+      auto tracks(std::move(mMediaStreamTracks));
       for (RefPtr<MediaStreamTrack>& track : tracks) {
         track->RemovePrincipalChangeObserver(this);
       }
@@ -1256,6 +1256,9 @@ MediaRecorder::MediaRecorder(DOMMediaStream& aSourceMediaStream,
   : DOMEventTargetHelper(aOwnerWindow)
   , mAudioNodeOutput(0)
   , mState(RecordingState::Inactive)
+  , mAudioBitsPerSecond(0)
+  , mVideoBitsPerSecond(0)
+  , mBitsPerSecond(0)
 {
   MOZ_ASSERT(aOwnerWindow);
   mDOMStream = &aSourceMediaStream;
@@ -1269,6 +1272,9 @@ MediaRecorder::MediaRecorder(AudioNode& aSrcAudioNode,
   : DOMEventTargetHelper(aOwnerWindow)
   , mAudioNodeOutput(aSrcOutput)
   , mState(RecordingState::Inactive)
+  , mAudioBitsPerSecond(0)
+  , mVideoBitsPerSecond(0)
+  , mBitsPerSecond(0)
 {
   MOZ_ASSERT(aOwnerWindow);
 
@@ -1428,7 +1434,7 @@ MediaRecorder::RequestData(ErrorResult& aResult)
 JSObject*
 MediaRecorder::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaRecorderBinding::Wrap(aCx, this, aGivenProto);
+  return MediaRecorder_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<MediaRecorder>

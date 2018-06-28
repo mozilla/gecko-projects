@@ -15,12 +15,11 @@ const {nsIHttpActivityObserver, nsISocketTransport} = Ci;
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-ChromeUtils.defineModuleGetter(this, "ExtensionUtils",
-                               "resource://gre/modules/ExtensionUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "WebRequestUpload",
-                               "resource://gre/modules/WebRequestUpload.jsm");
-
-XPCOMUtils.defineLazyGetter(this, "ExtensionError", () => ExtensionUtils.ExtensionError);
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ExtensionUtils: "resource://gre/modules/ExtensionUtils.jsm",
+  WebRequestUpload: "resource://gre/modules/WebRequestUpload.jsm",
+  SecurityInfo: "resource://gre/modules/SecurityInfo.jsm",
+});
 
 function runLater(job) {
   Services.tm.dispatchToMainThread(job);
@@ -39,7 +38,7 @@ function parseExtra(extra, allowed = [], optionsObj = {}) {
   if (extra) {
     for (let ex of extra) {
       if (!allowed.includes(ex)) {
-        throw new ExtensionError(`Invalid option ${ex}`);
+        throw new ExtensionUtils.ExtensionError(`Invalid option ${ex}`);
       }
     }
   }
@@ -748,7 +747,15 @@ HttpObserverManager = {
 
         if (registerFilter && opts.blocking && opts.extension) {
           data.registerTraceableChannel = (extension, tabParent) => {
-            channel.registerTraceableChannel(extension, tabParent);
+            // `channel` is a ChannelWrapper, which contains the actual
+            // underlying nsIChannel in `channel.channel`.  For startup events
+            // that are held until the extension background page is started,
+            // it is possible that the underlying channel can be closed and
+            // cleaned up between the time the event occurred and the time
+            // we reach this code.
+            if (channel.channel) {
+              channel.registerTraceableChannel(extension, tabParent);
+            }
           };
         }
 
@@ -758,8 +765,10 @@ HttpObserverManager = {
         }
 
         if (opts.responseHeaders) {
-          responseHeaders = responseHeaders || new ResponseHeaderChanger(channel);
-          data.responseHeaders = responseHeaders.toArray();
+          try {
+            responseHeaders = responseHeaders || new ResponseHeaderChanger(channel);
+            data.responseHeaders = responseHeaders.toArray();
+          } catch (e) { /* headers may not be available on some redirects */ }
         }
 
         if (opts.requestBody && channel.canModify) {
@@ -993,6 +1002,13 @@ var WebRequest = {
 
   // nsIHttpActivityObserver.
   onErrorOccurred: onErrorOccurred,
+
+  getSecurityInfo: (details) => {
+    let channel = ChannelWrapper.getRegisteredChannel(details.id, details.extension, details.tabParent);
+    if (channel) {
+      return SecurityInfo.getSecurityInfo(channel.channel, details.options);
+    }
+  },
 };
 
 Services.ppmm.loadProcessScript("resource://gre/modules/WebRequestContent.js", true);

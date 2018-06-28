@@ -340,13 +340,8 @@ CacheFileContextEvictor::LoadEvictInfoFromDisk()
 
   sDiskAlreadySearched = true;
 
-  nsCOMPtr<nsISimpleEnumerator> enumerator;
-  rv = mCacheDirectory->GetDirectoryEntries(getter_AddRefs(enumerator));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsCOMPtr<nsIDirectoryEnumerator> dirEnum = do_QueryInterface(enumerator, &rv);
+  nsCOMPtr<nsIDirectoryEnumerator> dirEnum;
+  rv = mCacheDirectory->GetDirectoryEntries(getter_AddRefs(dirEnum));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -669,7 +664,7 @@ CacheFileContextEvictor::EvictEntries()
     CacheIndex::RemoveEntry(&hash);
   }
 
-  NS_NOTREACHED("We should never get here");
+  MOZ_ASSERT_UNREACHABLE("We should never get here");
   return NS_OK;
 }
 

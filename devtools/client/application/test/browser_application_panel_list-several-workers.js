@@ -14,14 +14,15 @@ const OTHER_SCOPE_URL = URL_ROOT + "service-workers/scope-page.html";
 add_task(async function() {
   await enableApplicationPanel();
 
-  let { panel, target } = await openNewTabAndApplicationPanel(SIMPLE_URL);
-  let doc = panel.panelWin.document;
+  const { panel, target } = await openNewTabAndApplicationPanel(SIMPLE_URL);
+  const doc = panel.panelWin.document;
 
   info("Wait until the service worker appears in the application panel");
   await waitUntil(() => getWorkerContainers(doc).length === 1);
 
   info("Wait until the unregister button is displayed for the service worker");
-  await waitUntil(() => getWorkerContainers(doc)[0].querySelector(".unregister-button"));
+  await waitUntil(() => getWorkerContainers(doc)[0]
+    .querySelector(".js-unregister-button"));
 
   ok(true, "First service worker registration is displayed");
 
@@ -32,7 +33,8 @@ add_task(async function() {
   await waitUntil(() => getWorkerContainers(doc).length === 2);
 
   info("Wait until the unregister button is displayed for the service worker");
-  await waitUntil(() => getWorkerContainers(doc)[1].querySelector(".unregister-button"));
+  await waitUntil(() => getWorkerContainers(doc)[1]
+    .querySelector(".js-unregister-button"));
 
   ok(true, "Second service worker registration is displayed");
 

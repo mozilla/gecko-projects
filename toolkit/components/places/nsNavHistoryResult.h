@@ -12,6 +12,7 @@
 #ifndef nsNavHistoryResult_h_
 #define nsNavHistoryResult_h_
 
+#include "INativePlacesEventCallback.h"
 #include "nsTArray.h"
 #include "nsInterfaceHashtable.h"
 #include "nsDataHashtable.h"
@@ -98,7 +99,8 @@ private:
 class nsNavHistoryResult final : public nsSupportsWeakReference,
                                  public nsINavHistoryResult,
                                  public nsINavBookmarkObserver,
-                                 public nsINavHistoryObserver
+                                 public nsINavHistoryObserver,
+                                 public mozilla::places::INativePlacesEventCallback
 {
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_NAVHISTORYRESULT_IID)
@@ -107,8 +109,6 @@ public:
   NS_DECL_NSINAVHISTORYRESULT
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsNavHistoryResult, nsINavHistoryResult)
   NS_DECL_BOOKMARK_HISTORY_OBSERVER_EXTERNAL(override)
-  NS_IMETHOD OnVisits(nsIVisitData** aVisits,
-                      uint32_t aVisitsCount) override;
 
   void AddHistoryObserver(nsNavHistoryQueryResultNode* aNode);
   void AddBookmarkFolderObserver(nsNavHistoryFolderResultNode* aNode, int64_t aFolder);
@@ -144,9 +144,6 @@ public:
   // This var states the fact we need to apply sortingMode in such a situation.
   bool mNeedsToApplySortingMode;
 
-  // The sorting annotation to be used for in SORT_BY_ANNOTATION_* modes
-  nsCString mSortingAnnotation;
-
   // node observers
   bool mIsHistoryObserver;
   bool mIsBookmarkFolderObserver;
@@ -176,6 +173,8 @@ public:
 
   ContainerObserverList mRefreshParticipants;
   void requestRefresh(nsNavHistoryContainerResultNode* aContainer);
+
+  void HandlePlacesEvent(const PlacesEventSequence& aEvents) override;
 
   void OnMobilePrefChanged();
 
@@ -488,15 +487,12 @@ public:
   // Sorting methods.
   typedef nsCOMArray<nsNavHistoryResultNode>::nsCOMArrayComparatorFunc SortComparator;
   virtual uint16_t GetSortType();
-  virtual void GetSortingAnnotation(nsACString& aSortingAnnotation);
 
   static SortComparator GetSortingComparator(uint16_t aSortType);
-  virtual void RecursiveSort(const char* aData,
-                             SortComparator aComparator);
+  virtual void RecursiveSort(SortComparator aComparator);
   uint32_t FindInsertionPoint(nsNavHistoryResultNode* aNode, SortComparator aComparator,
-                              const char* aData, bool* aItemExists);
-  bool DoesChildNeedResorting(uint32_t aIndex, SortComparator aComparator,
-                                const char* aData);
+                              bool* aItemExists);
+  bool DoesChildNeedResorting(uint32_t aIndex, SortComparator aComparator);
 
   static int32_t SortComparison_StringLess(const nsAString& a, const nsAString& b);
 
@@ -525,12 +521,6 @@ public:
                                                nsNavHistoryResultNode* b,
                                                void* closure);
   static int32_t SortComparison_VisitCountGreater(nsNavHistoryResultNode* a,
-                                                  nsNavHistoryResultNode* b,
-                                                  void* closure);
-  static int32_t SortComparison_AnnotationLess(nsNavHistoryResultNode* a,
-                                               nsNavHistoryResultNode* b,
-                                               void* closure);
-  static int32_t SortComparison_AnnotationGreater(nsNavHistoryResultNode* a,
                                                   nsNavHistoryResultNode* b,
                                                   void* closure);
   static int32_t SortComparison_DateAddedLess(nsNavHistoryResultNode* a,
@@ -664,9 +654,7 @@ public:
   nsresult Refresh() override;
 
   virtual uint16_t GetSortType() override;
-  virtual void GetSortingAnnotation(nsACString& aSortingAnnotation) override;
-  virtual void RecursiveSort(const char* aData,
-                             SortComparator aComparator) override;
+  virtual void RecursiveSort(SortComparator aComparator) override;
 
   nsresult NotifyIfTagsChanged(nsIURI* aURI);
 

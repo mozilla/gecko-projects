@@ -12,7 +12,9 @@
 #include "nsICSSDeclaration.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/URLExtraData.h"
+#include "nsAttrValue.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
 #include "nsCompatibility.h"
@@ -21,6 +23,7 @@ class nsIPrincipal;
 class nsIDocument;
 struct JSContext;
 class JSObject;
+struct DeclarationBlockMutationClosure;
 
 namespace mozilla {
 class DeclarationBlock;
@@ -28,6 +31,29 @@ namespace css {
 class Loader;
 class Rule;
 } // namespace css
+namespace dom {
+class Element;
+}
+
+struct MutationClosureData
+{
+  MutationClosureData()
+    : mClosure(nullptr)
+    , mElement(nullptr)
+    , mModType(0)
+  {
+  }
+
+  // mClosure is non-null as long as the closure hasn't been called.
+  // This is needed so that it can be guaranteed that
+  // InlineStyleDeclarationWillChange is always called before
+  // SetInlineStyleDeclaration.
+  void (*mClosure)(void*);
+  mozilla::dom::Element* mElement;
+  Maybe<nsAttrValue> mOldValue;
+  uint8_t mModType;
+};
+
 } // namespace mozilla
 
 class nsDOMCSSDeclaration : public nsICSSDeclaration
@@ -67,10 +93,6 @@ public:
                   mozilla::ErrorResult& aRv) override;
   NS_IMETHOD GetPropertyValue(const nsAString & propertyName,
                               nsAString & _retval) override;
-  virtual already_AddRefed<mozilla::dom::CSSValue>
-    GetPropertyCSSValue(const nsAString & propertyName,
-                        mozilla::ErrorResult& aRv) override;
-  using nsICSSDeclaration::GetPropertyCSSValue;
   NS_IMETHOD RemoveProperty(const nsAString & propertyName,
                             nsAString & _retval) override;
   void GetPropertyPriority(const nsAString & propertyName,
@@ -115,13 +137,13 @@ public:
 
   // Information needed to parse a declaration for Servo side.
   // Put this in public so other Servo parsing functions can reuse this.
-  struct MOZ_STACK_CLASS ServoCSSParsingEnvironment
+  struct MOZ_STACK_CLASS ParsingEnvironment
   {
     RefPtr<mozilla::URLExtraData> mUrlExtraData;
     nsCompatibility mCompatMode;
     mozilla::css::Loader* mLoader;
 
-    ServoCSSParsingEnvironment(mozilla::URLExtraData* aUrlData,
+    ParsingEnvironment(mozilla::URLExtraData* aUrlData,
                                nsCompatibility aCompatMode,
                                mozilla::css::Loader* aLoader)
       : mUrlExtraData(aUrlData)
@@ -129,7 +151,7 @@ public:
       , mLoader(aLoader)
     {}
 
-    ServoCSSParsingEnvironment(already_AddRefed<mozilla::URLExtraData> aUrlData,
+    ParsingEnvironment(already_AddRefed<mozilla::URLExtraData> aUrlData,
                                nsCompatibility aCompatMode,
                                mozilla::css::Loader* aLoader)
       : mUrlExtraData(aUrlData)
@@ -139,27 +161,32 @@ public:
   };
 
 protected:
-  // The reason for calling GetCSSDeclaration.
+  // The reason for calling GetOrCreateCSSDeclaration.
   enum Operation {
-    // We are calling GetCSSDeclaration so that we can read from it.  Does not
-    // allocate a new declaration if we don't have one yet; returns nullptr in
-    // this case.
+    // We are calling GetOrCreateCSSDeclaration so that we can read from it.
+    // Does not allocate a new declaration if we don't have one yet; returns
+    // nullptr in this case.
     eOperation_Read,
 
-    // We are calling GetCSSDeclaration so that we can set a property on it
-    // or re-parse the whole declaration.  Allocates a new declaration if we
-    // don't have one yet and calls AttributeWillChange.  A nullptr return value
-    // indicates an error allocating the declaration.
+    // We are calling GetOrCreateCSSDeclaration so that we can set a property on
+    // it or re-parse the whole declaration.  Allocates a new declaration if we
+    // don't have one yet. A nullptr return value indicates an error allocating
+    // the declaration.
     eOperation_Modify,
 
-    // We are calling GetCSSDeclaration so that we can remove a property from
-    // it.  Does not allocates a new declaration if we don't have one yet;
-    // returns nullptr in this case.  If we do have a declaration, calls
-    // AttributeWillChange.
+    // We are calling GetOrCreateCSSDeclaration so that we can remove a property
+    // from it. Does not allocate a new declaration if we don't have one yet;
+    // returns nullptr in this case.
     eOperation_RemoveProperty
   };
-  virtual mozilla::DeclarationBlock* GetCSSDeclaration(Operation aOperation) = 0;
-  virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl) = 0;
+
+  // If aOperation is eOperation_Modify, aCreated must be non-null and
+  // the call may set it to point to the newly created object.
+  virtual mozilla::DeclarationBlock* GetOrCreateCSSDeclaration(
+    Operation aOperation, mozilla::DeclarationBlock** aCreated) = 0;
+
+  virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl,
+                                     mozilla::MutationClosureData* aClosureData) = 0;
   // Document that we must call BeginUpdate/EndUpdate on around the
   // calls to SetCSSDeclaration and the style rule mutation that leads
   // to it.
@@ -170,13 +197,13 @@ protected:
   // mCompatMode may not be set to anything meaningful.
   // If aSubjectPrincipal is passed, it should be the subject principal of the
   // scripted caller that initiated the parser.
-  virtual ServoCSSParsingEnvironment
-  GetServoCSSParsingEnvironment(nsIPrincipal* aSubjectPrincipal = nullptr) const = 0;
+  virtual ParsingEnvironment
+  GetParsingEnvironment(nsIPrincipal* aSubjectPrincipal = nullptr) const = 0;
 
-  // An implementation for GetServoCSSParsingEnvironment for callers wrapping a
+  // An implementation for GetParsingEnvironment for callers wrapping a
   // css::Rule.
-  static ServoCSSParsingEnvironment
-    GetServoCSSParsingEnvironmentForRule(const mozilla::css::Rule* aRule);
+  static ParsingEnvironment
+    GetParsingEnvironmentForRule(const mozilla::css::Rule* aRule);
 
   nsresult ParsePropertyValue(const nsCSSPropertyID aPropID,
                               const nsAString& aPropValue,
@@ -191,12 +218,19 @@ protected:
   nsresult RemovePropertyInternal(nsCSSPropertyID aPropID);
   nsresult RemovePropertyInternal(const nsAString& aProperty);
 
+  virtual void
+  GetPropertyChangeClosure(DeclarationBlockMutationClosure* aClosure,
+                           mozilla::MutationClosureData* aClosureData)
+  {
+  }
+
 protected:
   virtual ~nsDOMCSSDeclaration();
 
 private:
   template<typename ServoFunc>
   inline nsresult ModifyDeclaration(nsIPrincipal* aSubjectPrincipal,
+                                    mozilla::MutationClosureData* aClosureData,
                                     ServoFunc aServoFunc);
 };
 

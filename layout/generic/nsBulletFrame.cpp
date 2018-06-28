@@ -144,7 +144,7 @@ nsBulletFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle)
       DeregisterAndCancelImageRequest();
 
       // Register the new request.
-      mImageRequest = Move(newRequestClone);
+      mImageRequest = std::move(newRequestClone);
       RegisterImageRequest(/* aKnownToBeAnimated = */ false);
     }
   } else {
@@ -715,7 +715,7 @@ void nsDisplayBullet::Paint(nsDisplayListBuilder* aBuilder,
   }
 
   ImgDrawResult result = static_cast<nsBulletFrame*>(mFrame)->
-    PaintBullet(*aCtx, ToReferenceFrame(), mVisibleRect, flags,
+    PaintBullet(*aCtx, ToReferenceFrame(), GetPaintRect(), flags,
                 mDisableSubpixelAA);
 
   nsDisplayBulletGeometry::UpdateDrawResult(this, result);
@@ -1413,7 +1413,7 @@ nsBulletFrame::RegisterImageRequest(bool aKnownToBeAnimated)
                                                     &isRequestRegistered);
     }
 
-    isRequestRegistered = mRequestRegistered;
+    mRequestRegistered = isRequestRegistered;
   }
 }
 
@@ -1431,7 +1431,7 @@ nsBulletFrame::DeregisterAndCancelImageRequest()
                                           mImageRequest,
                                           &isRequestRegistered);
 
-    isRequestRegistered = mRequestRegistered;
+    mRequestRegistered = isRequestRegistered;
 
     // Cancel the image request and forget about it.
     mImageRequest->CancelAndForgetObserver(NS_ERROR_FAILURE);

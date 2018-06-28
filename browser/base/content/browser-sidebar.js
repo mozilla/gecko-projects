@@ -393,7 +393,6 @@ var SidebarUI = {
       }
 
       this._fireFocusedEvent();
-      BrowserUITelemetry.countSidebarEvent(commandID, "show");
     });
   },
 
@@ -422,10 +421,6 @@ var SidebarUI = {
       if (!sidebarBroadcaster) {
         reject(new Error("Invalid sidebar broadcaster specified: " + commandID));
         return;
-      }
-
-      if (this.isOpen && commandID != this.currentID) {
-        BrowserUITelemetry.countSidebarEvent(this.currentID, "hide");
       }
 
       let broadcasters = document.querySelectorAll("broadcaster[group=sidebar]");
@@ -485,17 +480,6 @@ var SidebarUI = {
   },
 
   /**
-  * Sets the webpage favicon in sidebar
-  *
-  */
-  setWebPageIcon(url) {
-    let iconURL = "url(page-icon:" + url + ")";
-    if (this._box.getAttribute("sidebarcommand") == "viewWebPanelsSidebar") {
-      this._icon.style.setProperty("--sidebar-webpage-icon", iconURL);
-    }
-  },
-
-  /**
    * Hide the sidebar.
    *
    * @param {DOMNode} [triggerNode] Node, usually a button, that triggered the
@@ -535,7 +519,6 @@ var SidebarUI = {
     if (triggerNode) {
       updateToggleControlLabel(triggerNode);
     }
-    BrowserUITelemetry.countSidebarEvent(commandID, "hide");
   },
 };
 

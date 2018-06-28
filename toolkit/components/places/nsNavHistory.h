@@ -7,7 +7,6 @@
 #define nsNavHistory_h_
 
 #include "nsINavHistoryService.h"
-#include "nsPIPlacesDatabase.h"
 #include "nsINavBookmarksService.h"
 #include "nsIFaviconService.h"
 #include "nsIGlobalHistory2.h"
@@ -66,21 +65,28 @@
 // The guid of the mobile bookmarks virtual query.
 #define MOBILE_BOOKMARKS_VIRTUAL_GUID "mobile____v"
 
-class nsNavHistory;
-class QueryKeyValuePair;
+#define ROOT_GUID "root________"
+#define MENU_ROOT_GUID "menu________"
+#define TOOLBAR_ROOT_GUID "toolbar_____"
+#define UNFILED_ROOT_GUID "unfiled_____"
+#define TAGS_ROOT_GUID "tags________"
+#define MOBILE_ROOT_GUID "mobile______"
+
+class nsIAutoCompleteController;
 class nsIEffectiveTLDService;
 class nsIIDNService;
+class nsNavHistory;
+class PlacesDecayFrecencyCallback;
 class PlacesSQLQueryBuilder;
-class nsIAutoCompleteController;
 
 // nsNavHistory
 
 class nsNavHistory final : public nsSupportsWeakReference
                          , public nsINavHistoryService
                          , public nsIObserver
-                         , public nsPIPlacesDatabase
                          , public mozIStorageVacuumParticipant
 {
+  friend class PlacesDecayFrecencyCallback;
   friend class PlacesSQLQueryBuilder;
 
 public:
@@ -89,7 +95,6 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSINAVHISTORYSERVICE
   NS_DECL_NSIOBSERVER
-  NS_DECL_NSPIPLACESDATABASE
   NS_DECL_MOZISTORAGEVACUUMPARTICIPANT
 
   /**
@@ -332,6 +337,12 @@ public:
   uint32_t GetRecentFlags(nsIURI *aURI);
 
   /**
+   * Whether there are visits.
+   * Note: This may cause synchronous I/O.
+   */
+  bool hasHistoryEntries();
+
+  /**
    * Registers a TRANSITION_EMBED visit for the session.
    *
    * @param aURI
@@ -424,9 +435,10 @@ public:
   }
 
   /**
-   * Fires onVisits event to nsINavHistoryService observers
+   * Updates and invalidates the mDaysOfHistory cache. Should be
+   * called whenever a visit is added.
    */
-  void NotifyOnVisits(nsIVisitData** aVisits, uint32_t aVisitsCount);
+  void UpdateDaysOfHistory(PRTime visitTime);
 
   /**
    * Fires onTitleChanged event to nsINavHistoryService observers
@@ -438,7 +450,7 @@ public:
   /**
    * Fires onFrecencyChanged event to nsINavHistoryService observers
    */
-  void NotifyFrecencyChanged(nsIURI* aURI,
+  void NotifyFrecencyChanged(const nsACString& aSpec,
                              int32_t aNewFrecency,
                              const nsACString& aGUID,
                              bool aHidden,
@@ -457,6 +469,13 @@ public:
                                            const nsACString& aGUID,
                                            bool aHidden,
                                            PRTime aLastVisitDate) const;
+
+  /**
+   * Returns true if frecency is currently being decayed.
+   *
+   * @return True if frecency is being decayed, false if not.
+   */
+  bool IsFrecencyDecaying() const;
 
   /**
    * Store last insterted id for a table.
@@ -571,7 +590,7 @@ protected:
     VisitHashKey(const VisitHashKey& aOther)
     : nsURIHashKey(aOther)
     {
-      NS_NOTREACHED("Do not call me!");
+      MOZ_ASSERT_UNREACHABLE("Do not call me!");
     }
     PRTime visitTime;
   };
@@ -616,8 +635,13 @@ protected:
   int32_t mUnvisitedTypedBonus;
   int32_t mReloadVisitBonus;
 
+  void DecayFrecencyCompleted(uint16_t reason);
+  uint32_t mDecayFrecencyPendingCount;
+
+  nsresult RecalculateFrecencyStatsInternal();
+
   // in nsNavHistoryQuery.cpp
-  nsresult TokensToQuery(const nsTArray<QueryKeyValuePair>& aTokens,
+  nsresult TokensToQuery(const nsTArray<mozilla::places::QueryKeyValuePair>& aTokens,
                          nsNavHistoryQuery* aQuery,
                          nsNavHistoryQueryOptions* aOptions);
 

@@ -12,6 +12,7 @@
 #include "mozilla/AutoRestore.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEvents.h"
 
@@ -175,17 +176,14 @@ GetKeyNameForNativeKeyCode(unsigned short aNativeKeyCode)
 }
 
 static const char*
-GetCharacters(const NSString* aString)
+GetCharacters(const nsAString& aString)
 {
-  nsAutoString str;
-  nsCocoaUtils::GetStringForNSString(aString, str);
-  if (str.IsEmpty()) {
+  if (aString.IsEmpty()) {
     return "";
   }
-
   nsAutoString escapedStr;
-  for (uint32_t i = 0; i < str.Length(); i++) {
-    char16_t ch = str[i];
+  for (uint32_t i = 0; i < aString.Length(); i++) {
+    char16_t ch = aString.CharAt(i);
     if (ch < 0x20) {
       nsPrintfCString utf8str("(U+%04X)", ch);
       escapedStr += NS_ConvertUTF8toUTF16(utf8str);
@@ -201,6 +199,14 @@ GetCharacters(const NSString* aString)
   // the result will be freed automatically by cocoa.
   NSString* result = nsCocoaUtils::ToNSString(escapedStr);
   return [result UTF8String];
+}
+
+static const char*
+GetCharacters(const NSString* aString)
+{
+  nsAutoString str;
+  nsCocoaUtils::GetStringForNSString(aString, str);
+  return GetCharacters(str);
 }
 
 static const char*
@@ -828,6 +834,14 @@ TISInputSourceWrapper::IsForRTLLanguage()
 }
 
 bool
+TISInputSourceWrapper::IsForJapaneseLanguage()
+{
+  nsAutoString lang;
+  GetPrimaryLanguage(lang);
+  return lang.EqualsLiteral("ja");
+}
+
+bool
 TISInputSourceWrapper::IsInitializedByCurrentInputSource()
 {
   return mInputSource == ::TISCopyCurrentKeyboardInputSource();
@@ -1202,10 +1216,13 @@ TISInputSourceWrapper::WillDispatchKeyboardEvent(
     char16_t uniChar = static_cast<char16_t>(aKeyEvent.mCharCode);
     MOZ_LOG(gLog, LogLevel::Info,
       ("%p TISInputSourceWrapper::WillDispatchKeyboardEvent, "
-       "aNativeKeyEvent=%p, [aNativeKeyEvent characters]=\"%s\", "
+       "aNativeKeyEvent=%p, aInsertString=%p (\"%s\"), "
+       "[aNativeKeyEvent characters]=\"%s\", "
        "aKeyEvent={ mMessage=%s, mCharCode=0x%X(%s) }, kbType=0x%X, "
        "IsOpenedIMEMode()=%s",
-       this, aNativeKeyEvent, utf8Chars.get(),
+       this, aNativeKeyEvent, aInsertString,
+       aInsertString ? GetCharacters(*aInsertString) : "",
+       GetCharacters([aNativeKeyEvent characters]),
        GetGeckoKeyEventType(aKeyEvent), aKeyEvent.mCharCode,
        uniChar ? NS_ConvertUTF16toUTF8(&uniChar, 1).get() : "",
        static_cast<unsigned int>(kbType), TrueOrFalse(IsOpenedIMEMode())));
@@ -1227,6 +1244,14 @@ TISInputSourceWrapper::WillDispatchKeyboardEvent(
     ("%p TISInputSourceWrapper::WillDispatchKeyboardEvent, "
      "aKeyEvent.mKeyCode=0x%X, aKeyEvent.mCharCode=0x%X",
      this, aKeyEvent.mKeyCode, aKeyEvent.mCharCode));
+
+  // If aInsertString is not nullptr (it means InsertText() is called)
+  // and it acutally inputs a character, we don't need to append alternative
+  // charCode values since such keyboard event shouldn't be handled as
+  // a shortcut key.
+  if (aInsertString && charCode) {
+    return;
+  }
 
   TISInputSourceWrapper USLayout("com.apple.keylayout.US");
   bool isRomanKeyboardLayout = IsASCIICapable();
@@ -2439,6 +2464,11 @@ TextInputHandler::InsertText(NSAttributedString* aAttrString,
     return;
   }
 
+  MOZ_LOG(gLog, LogLevel::Info,
+    ("%p IMEInputHandler::InsertText, "
+     "maybe dispatches eKeyPress event without control, alt and meta modifiers",
+     this));
+
   // Dispatch keypress event with char instead of compositionchange event
   WidgetKeyboardEvent keypressEvent(true, eKeyPress, widget);
   // XXX Why do we need to dispatch keypress event for not inputting any
@@ -2459,12 +2489,6 @@ TextInputHandler::InsertText(NSAttributedString* aAttrString,
     // FYI: TextEventDispatcher will set mKeyCode to 0 for printable key's
     //      keypress events even if they don't cause inputting non-empty string.
   }
-
-  // Remove basic modifiers from keypress event because if they are included,
-  // nsPlaintextEditor ignores the event.
-  keypressEvent.mModifiers &= ~(MODIFIER_CONTROL |
-                                MODIFIER_ALT |
-                                MODIFIER_META);
 
   // TODO:
   // If mCurrentKeyEvent.mKeyEvent is null, the text should be inputted as
@@ -3035,6 +3059,35 @@ IMEInputHandler::OnCurrentTextInputSourceChange(CFNotificationCenterRef aCenter,
   tis.InitByCurrentInputSource();
   if (tis.IsOpenedIMEMode()) {
     tis.GetInputSourceID(sLatestIMEOpenedModeInputSourceID);
+    // Collect Input Source ID which includes input mode in most cases.
+    // However, if it's Japanese IME, collecting input mode (e.g.,
+    // "HiraganaKotei") does not make sense because in most languages,
+    // input mode changes "how to input", but Japanese IME changes
+    // "which type of characters to input".  I.e., only Japanese IME
+    // users may use multiple input modes.  If we'd collect each type of
+    // input mode of Japanese IMEs, it'd be difficult to count actual
+    // users of each IME from the result.  So, only when active IME is
+    // a Japanese IME, we should use Bundle ID which does not contain
+    // input mode instead.
+    nsAutoString key;
+    if (tis.IsForJapaneseLanguage()) {
+      tis.GetBundleID(key);
+    } else {
+      tis.GetInputSourceID(key);
+    }
+    // 72 is kMaximumKeyStringLength in TelemetryScalar.cpp
+    if (key.Length() > 72) {
+      if (NS_IS_LOW_SURROGATE(key[72 - 1]) &&
+          NS_IS_HIGH_SURROGATE(key[72 - 2])) {
+        key.Truncate(72 - 2);
+      } else {
+        key.Truncate(72 - 1);
+      }
+      // U+2026 is "..."
+      key.Append(char16_t(0x2026));
+    }
+    Telemetry::ScalarSet(Telemetry::ScalarID::WIDGET_IME_NAME_ON_MAC,
+                         key, true);
   }
 
   if (MOZ_LOG_TEST(gLog, LogLevel::Info)) {
@@ -3130,15 +3183,18 @@ IMEInputHandler::DebugPrintAllIMEModes()
       TISInputSourceRef inputSource = static_cast<TISInputSourceRef>(
         const_cast<void *>(::CFArrayGetValueAtIndex(list, i)));
       tis.InitByTISInputSourceRef(inputSource);
-      nsAutoString name, isid;
+      nsAutoString name, isid, bundleID;
       tis.GetLocalizedName(name);
       tis.GetInputSourceID(isid);
+      tis.GetBundleID(bundleID);
       MOZ_LOG(gLog, LogLevel::Info,
-        ("  %s\t<%s>%s%s\n",
+        ("  %s\t<%s>%s%s\n"
+         "    bundled in <%s>\n",
          NS_ConvertUTF16toUTF8(name).get(),
          NS_ConvertUTF16toUTF8(isid).get(),
          tis.IsASCIICapable() ? "" : "\t(Isn't ASCII capable)",
-         tis.IsEnabled() ? "" : "\t(Isn't Enabled)"));
+         tis.IsEnabled() ? "" : "\t(Isn't Enabled)",
+         NS_ConvertUTF16toUTF8(bundleID).get()));
     }
     ::CFRelease(list);
   }
@@ -3254,10 +3310,23 @@ IMEInputHandler::WillDispatchKeyboardEvent(
     TISInputSourceWrapper tis;
     tis.InitByLayoutID(KeyboardLayoutOverrideRef().mKeyboardLayout, true);
     tis.WillDispatchKeyboardEvent(nativeEvent, insertString, aKeyboardEvent);
-    return;
+  } else {
+    TISInputSourceWrapper::CurrentInputSource().
+      WillDispatchKeyboardEvent(nativeEvent, insertString, aKeyboardEvent);
   }
-  TISInputSourceWrapper::CurrentInputSource().
-    WillDispatchKeyboardEvent(nativeEvent, insertString, aKeyboardEvent);
+
+  // Remove basic modifiers from keypress event because if they are included
+  // but this causes inputting text, since TextEditor won't handle eKeyPress
+  // events whose ctrlKey, altKey or metaKey is true as text input.
+  // Note that this hack should be used only when an editor has focus because
+  // this is a hack for TextEditor and modifier key information may be
+  // important for current web app.
+  if (IsEditableContent() && insertString &&
+      aKeyboardEvent.mMessage == eKeyPress && aKeyboardEvent.mCharCode) {
+    aKeyboardEvent.mModifiers &= ~(MODIFIER_CONTROL |
+                                   MODIFIER_ALT |
+                                   MODIFIER_META);
+  }
 }
 
 void
@@ -3752,7 +3821,7 @@ IMEInputHandler::MaybeDispatchCurrentKeydownEvent(bool aIsProcessedByIME)
   MOZ_LOG(gLog, LogLevel::Info,
     ("%p IMEInputHandler::MaybeDispatchKeydownEvent, aIsProcessedByIME=%s "
      "currentKeyEvent={ mKeyEvent(%p)={ type=%s, keyCode=%s (0x%X) } }, "
-     "aIsProcesedBy=%s, IsDeadKeyComposing()=%s",
+     "aIsProcessedBy=%s, IsDeadKeyComposing()=%s",
      this, TrueOrFalse(aIsProcessedByIME), nativeEvent,
      GetNativeKeyEventType(nativeEvent),
      GetKeyNameForNativeKeyCode([nativeEvent keyCode]), [nativeEvent keyCode],
@@ -4418,6 +4487,7 @@ IMEInputHandler::IMEInputHandler(nsChildView* aWidget,
   , mPendingMethods(0)
   , mIMECompositionString(nullptr)
   , mIMECompositionStart(UINT32_MAX)
+  , mRangeForWritingMode()
   , mIsIMEComposing(false)
   , mIsDeadKeyComposing(false)
   , mIsIMEEnabled(true)

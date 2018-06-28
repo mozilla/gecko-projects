@@ -12,7 +12,6 @@
 #include "nsImageLoadingContent.h"
 #include "nsITextControlElement.h"
 #include "nsITimer.h"
-#include "nsIDOMNSEditableElement.h"
 #include "nsCOMPtr.h"
 #include "nsIConstraintValidation.h"
 #include "mozilla/UniquePtr.h"
@@ -125,7 +124,6 @@ public:
 class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
                                public nsImageLoadingContent,
                                public nsITextControlElement,
-                               public nsIDOMNSEditableElement,
                                public nsIConstraintValidation
 {
   friend class AfterSetFilesOrDirectoriesCallback;
@@ -163,16 +161,6 @@ public:
 
   // EventTarget
   virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) override;
-
-  // nsIDOMNSEditableElement
-  NS_IMETHOD GetEditor(nsIEditor** aEditor) override
-  {
-    nsCOMPtr<nsIEditor> editor = GetEditor();
-    editor.forget(aEditor);
-    return NS_OK;
-  }
-
-  NS_IMETHOD SetUserInput(const nsAString& aInput) override;
 
   // Overriden nsIFormControl methods
   NS_IMETHOD Reset() override;
@@ -1237,10 +1225,10 @@ protected:
       case VALUE_MODE_VALUE:
       case VALUE_MODE_FILENAME:
         return mValueChanged;
-      default:
-        NS_NOTREACHED("We should not be there: there are no other modes.");
-        return false;
     }
+
+    MOZ_ASSERT_UNREACHABLE("We should not be there: there are no other modes.");
+    return false;
   }
 
   /**
@@ -1679,7 +1667,7 @@ protected:
 
 private:
   static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    GenericSpecifiedValues* aGenericData);
+                                    MappedDeclarations&);
 
   /**
    * Returns true if this input's type will fire a DOM "change" event when it

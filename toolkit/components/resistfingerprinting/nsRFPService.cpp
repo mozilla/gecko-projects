@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Preferences.h"
@@ -982,7 +983,7 @@ nsRFPService::GetSpoofedKeyCodeInfo(const nsIDocument* aDoc,
     // If the content-langauge is not given, we try to get langauge from the HTML
     // lang attribute.
     if (language.IsEmpty()) {
-      Element* elm = aDoc->GetHtmlElement();
+      dom::Element* elm = aDoc->GetHtmlElement();
 
       if (elm) {
         elm->GetLang(language);
@@ -1067,7 +1068,7 @@ nsRFPService::GetSpoofedCode(const nsIDocument* aDoc,
   // We need to change the 'Left' with 'Right' if the location indicates
   // it's a right key.
   if (aKeyboardEvent->mLocation ==
-        dom::KeyboardEventBinding::DOM_KEY_LOCATION_RIGHT &&
+        dom::KeyboardEvent_Binding::DOM_KEY_LOCATION_RIGHT &&
       StringEndsWith(aOut, NS_LITERAL_STRING("Left"))) {
     aOut.ReplaceLiteral(aOut.Length() - 4, 4, u"Right");
   }

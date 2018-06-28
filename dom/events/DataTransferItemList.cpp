@@ -37,7 +37,7 @@ JSObject*
 DataTransferItemList::WrapObject(JSContext* aCx,
                                  JS::Handle<JSObject*> aGivenProto)
 {
-  return DataTransferItemListBinding::Wrap(aCx, this, aGivenProto);
+  return DataTransferItemList_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 already_AddRefed<DataTransferItemList>
@@ -92,7 +92,6 @@ DataTransferItemList::Remove(uint32_t aIndex,
   }
 
   if (aIndex >= Length()) {
-    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return;
   }
 
@@ -361,10 +360,8 @@ DataTransferItemList::SetDataWithPrincipal(const nsAString& aType,
 
         DataTransferItem::eKind oldKind = item->Kind();
         item->SetData(aData);
-        if (oldKind != item->Kind()) {
-          // Types list may have changed, even if aIndex == 0.
-          mDataTransfer->TypesListMayHaveChanged();
-        }
+
+        mDataTransfer->TypesListMayHaveChanged();
 
         if (aIndex != 0) {
           // If the item changes from being a file to not a file or vice-versa,

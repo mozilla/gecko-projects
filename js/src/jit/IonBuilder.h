@@ -45,7 +45,7 @@ class IonBuilder
 {
 
   public:
-    IonBuilder(JSContext* analysisContext, CompileCompartment* comp,
+    IonBuilder(JSContext* analysisContext, CompileRealm* realm,
                const JitCompileOptions& options, TempAllocator* temp,
                MIRGraph* graph, CompilerConstraintList* constraints,
                BaselineInspector* inspector, CompileInfo* info,
@@ -288,7 +288,7 @@ class IonBuilder
     AbortReasonOr<Ok> setPropTryReferenceTypedObjectValue(bool* emitted,
                                                           MDefinition* typedObj,
                                                           const LinearSum& byteOffset,
-                                                          ReferenceTypeDescr::Type type,
+                                                          ReferenceType type,
                                                           MDefinition* value,
                                                           PropertyName* name);
     AbortReasonOr<Ok> setPropTryScalarPropOfTypedObject(bool* emitted,
@@ -385,7 +385,7 @@ class IonBuilder
                                                     ScalarTypeDescr::Type type);
     AbortReasonOr<Ok> pushReferenceLoadFromTypedObject(MDefinition* typedObj,
                                                        const LinearSum& byteOffset,
-                                                       ReferenceTypeDescr::Type type,
+                                                       ReferenceType type,
                                                        PropertyName* name);
 
     // jsop_setelem() helpers.
@@ -591,6 +591,7 @@ class IonBuilder
     AbortReasonOr<Ok> jsop_checkobjcoercible();
     AbortReasonOr<Ok> jsop_pushcallobj();
     AbortReasonOr<Ok> jsop_implicitthis(PropertyName* name);
+    AbortReasonOr<Ok> jsop_importmeta();
 
     /* Inlining. */
 
@@ -967,7 +968,7 @@ class IonBuilder
         return callerBuilder_ != nullptr;
     }
 
-    const JSAtomState& names() { return compartment->runtime()->names(); }
+    const JSAtomState& names() { return realm->runtime()->names(); }
 
     bool hadActionableAbort() const {
         MOZ_ASSERT(!actionableAbortScript_ ||

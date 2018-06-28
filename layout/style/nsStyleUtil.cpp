@@ -243,7 +243,7 @@ nsStyleUtil::AppendEscapedCSSFontFamilyList(
     if (defaultGeneric != eFamily_none) {
       FontFamilyName(defaultGeneric).AppendToString(aResult);
     } else {
-      NS_NOTREACHED("No fonts to serialize");
+      MOZ_ASSERT_UNREACHABLE("No fonts to serialize");
     }
     return;
   }
@@ -285,7 +285,7 @@ nsStyleUtil::AppendAngleValue(const nsStyleCoord& aAngle, nsAString& aResult)
     case eStyleUnit_Grad:   aResult.AppendLiteral("grad"); break;
     case eStyleUnit_Radian: aResult.AppendLiteral("rad");  break;
     case eStyleUnit_Turn:   aResult.AppendLiteral("turn"); break;
-    default: NS_NOTREACHED("unrecognized angle unit");
+    default: MOZ_ASSERT_UNREACHABLE("unrecognized angle unit");
   }
 }
 
@@ -344,7 +344,7 @@ nsStyleUtil::AppendPaintOrderValue(uint8_t aValue,
         break;
 
       default:
-        NS_NOTREACHED("unexpected paint-order component value");
+        MOZ_ASSERT_UNREACHABLE("unexpected paint-order component value");
     }
     aValue >>= NS_STYLE_PAINT_ORDER_BITWIDTH;
   }
@@ -538,7 +538,7 @@ nsStyleUtil::ComputeFunctionalAlternates(const nsCSSValueList* aList,
     if (!nsCSSProps::FindKeyword(key,
                                  nsCSSProps::kFontVariantAlternatesFuncsKTable,
                                  alternate)) {
-      NS_NOTREACHED("keyword not a font-variant-alternates value");
+      MOZ_ASSERT_UNREACHABLE("keyword not a font-variant-alternates value");
       continue;
     }
     v.alternate = alternate;
@@ -602,61 +602,6 @@ nsStyleUtil::AppendUnicodeRange(const nsCSSValue& aValue, nsAString& aResult)
   }
   buf.Truncate(buf.Length() - 2); // remove the last comma-space
   CopyASCIItoUTF16(buf, aResult);
-}
-
-/* static */ void
-nsStyleUtil::AppendSerializedFontSrc(const nsCSSValue& aValue,
-                                     nsAString& aResult)
-{
-  // A src: descriptor is represented as an array value; each entry in
-  // the array can be eCSSUnit_URL, eCSSUnit_Local_Font, or
-  // eCSSUnit_Font_Format.  Blocks of eCSSUnit_Font_Format may appear
-  // only after one of the first two.  (css3-fonts only contemplates
-  // annotating URLs with formats, but we handle the general case.)
-
-  MOZ_ASSERT(aValue.GetUnit() == eCSSUnit_Array,
-             "improper value unit for src:");
-
-  const nsCSSValue::Array& sources = *aValue.GetArrayValue();
-  size_t i = 0;
-
-  while (i < sources.Count()) {
-    nsAutoString formats;
-
-    if (sources[i].GetUnit() == eCSSUnit_URL) {
-      aResult.AppendLiteral("url(");
-      nsDependentCSubstring url(sources[i].GetURLStructValue()->GetString());
-      nsStyleUtil::AppendEscapedCSSString(NS_ConvertUTF8toUTF16(url), aResult);
-      aResult.Append(')');
-    } else if (sources[i].GetUnit() == eCSSUnit_Local_Font) {
-      aResult.AppendLiteral("local(");
-      nsDependentString local(sources[i].GetStringBufferValue());
-      nsStyleUtil::AppendEscapedCSSString(local, aResult);
-      aResult.Append(')');
-    } else {
-      NS_NOTREACHED("entry in src: descriptor with improper unit");
-      i++;
-      continue;
-    }
-
-    i++;
-    formats.Truncate();
-    while (i < sources.Count() &&
-           sources[i].GetUnit() == eCSSUnit_Font_Format) {
-      formats.Append('"');
-      formats.Append(sources[i].GetStringBufferValue());
-      formats.AppendLiteral("\", ");
-      i++;
-    }
-    if (formats.Length() > 0) {
-      formats.Truncate(formats.Length() - 2); // remove the last comma
-      aResult.AppendLiteral(" format(");
-      aResult.Append(formats);
-      aResult.Append(')');
-    }
-    aResult.AppendLiteral(", ");
-  }
-  aResult.Truncate(aResult.Length() - 2); // remove the last comma-space
 }
 
 /* static */ void

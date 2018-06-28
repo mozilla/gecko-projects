@@ -6,6 +6,7 @@
 
 #include "ServiceWorkerPrivate.h"
 
+#include "ServiceWorkerCloneData.h"
 #include "ServiceWorkerManager.h"
 #include "nsContentUtils.h"
 #include "nsICacheInfoChannel.h"
@@ -23,6 +24,8 @@
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/CycleCollectedJSContext.h" // for MicroTaskRunnable
+#include "mozilla/JSObjectHolder.h"
 #include "mozilla/dom/Client.h"
 #include "mozilla/dom/ClientIPCTypes.h"
 #include "mozilla/dom/DOMPrefs.h"
@@ -37,6 +40,7 @@
 #include "mozilla/dom/WorkerRef.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
+#include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/Unused.h"
 
 using namespace mozilla;
@@ -50,7 +54,6 @@ using mozilla::ipc::PrincipalInfo;
 NS_IMPL_CYCLE_COLLECTING_NATIVE_ADDREF(ServiceWorkerPrivate)
 NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE(ServiceWorkerPrivate)
 NS_IMPL_CYCLE_COLLECTION(ServiceWorkerPrivate, mSupportsArray)
-
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(ServiceWorkerPrivate, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(ServiceWorkerPrivate, Release)
 
@@ -500,20 +503,21 @@ public:
 };
 
 class SendMessageEventRunnable final : public ExtendableEventWorkerRunnable
-                                     , public StructuredCloneHolder
 {
   const ClientInfoAndState mClientInfoAndState;
+  RefPtr<ServiceWorkerCloneData> mData;
 
 public:
   SendMessageEventRunnable(WorkerPrivate*  aWorkerPrivate,
                            KeepAliveToken* aKeepAliveToken,
-                           const ClientInfoAndState& aClientInfoAndState)
+                           const ClientInfoAndState& aClientInfoAndState,
+                           RefPtr<ServiceWorkerCloneData>&& aData)
     : ExtendableEventWorkerRunnable(aWorkerPrivate, aKeepAliveToken)
-    , StructuredCloneHolder(CloningSupported, TransferringSupported,
-                            StructuredCloneScope::SameProcessDifferentThread)
     , mClientInfoAndState(aClientInfoAndState)
+    , mData(std::move(aData))
   {
     MOZ_ASSERT(NS_IsMainThread());
+    MOZ_DIAGNOSTIC_ASSERT(mData);
   }
 
   bool
@@ -522,13 +526,13 @@ public:
     JS::Rooted<JS::Value> messageData(aCx);
     nsCOMPtr<nsIGlobalObject> sgo = aWorkerPrivate->GlobalScope();
     ErrorResult rv;
-    Read(sgo, aCx, &messageData, rv);
+    mData->Read(aCx, &messageData, rv);
     if (NS_WARN_IF(rv.Failed())) {
       return true;
     }
 
     Sequence<OwningNonNull<MessagePort>> ports;
-    if (!TakeTransferredPortsAsSequence(ports)) {
+    if (!mData->TakeTransferredPortsAsSequence(ports)) {
       return true;
     }
 
@@ -563,34 +567,18 @@ public:
 } // anonymous namespace
 
 nsresult
-ServiceWorkerPrivate::SendMessageEvent(JSContext* aCx,
-                                       JS::Handle<JS::Value> aMessage,
-                                       const Sequence<JSObject*>& aTransferable,
+ServiceWorkerPrivate::SendMessageEvent(RefPtr<ServiceWorkerCloneData>&& aData,
                                        const ClientInfoAndState& aClientInfoAndState)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  ErrorResult rv(SpawnWorkerIfNeeded(MessageEvent));
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
-
-  JS::Rooted<JS::Value> transferable(aCx, JS::UndefinedHandleValue);
-
-  rv = nsContentUtils::CreateJSValueFromSequenceOfObject(aCx, aTransferable,
-                                                         &transferable);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
+  nsresult rv = SpawnWorkerIfNeeded(MessageEvent);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   RefPtr<KeepAliveToken> token = CreateEventKeepAliveToken();
   RefPtr<SendMessageEventRunnable> runnable =
-    new SendMessageEventRunnable(mWorkerPrivate, token, aClientInfoAndState);
-
-  runnable->Write(aCx, aMessage, transferable, JS::CloneDataPolicy(), rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
+    new SendMessageEventRunnable(mWorkerPrivate, token, aClientInfoAndState,
+                                 std::move(aData));
 
   if (!runnable->Dispatch()) {
     return NS_ERROR_FAILURE;

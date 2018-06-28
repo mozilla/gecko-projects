@@ -125,7 +125,7 @@ OCSPRequest::OCSPRequest(const nsCString& aiaLocation,
   , mLoader(nullptr)
   , mAIALocation(aiaLocation)
   , mOriginAttributes(originAttributes)
-  , mPOSTData(Move(ocspRequest))
+  , mPOSTData(std::move(ocspRequest))
   , mTimeout(timeout)
   , mTimeoutTimer(nullptr)
   , mStartTime()
@@ -281,12 +281,6 @@ OCSPRequest::Run()
       return NotifyDone(rv, lock);
     }
   }
-
-  // If we don't set a load group, the above origin attributes won't be honored
-  // by necko. This seems to be a bug or at least an API confusion issue, hence
-  // bug 1456742.
-  nsCOMPtr<nsILoadGroup> lg = do_CreateInstance(NS_LOADGROUP_CONTRACTID);
-  channel->SetLoadGroup(lg);
 
   nsCOMPtr<nsIInputStream> uploadStream;
   rv = NS_NewByteInputStream(getter_AddRefs(uploadStream),
@@ -477,7 +471,7 @@ DoOCSPRequest(const nsCString& aiaLocation,
   }
 
   RefPtr<OCSPRequest> request(new OCSPRequest(aiaLocation, originAttributes,
-                                              Move(ocspRequest), timeout));
+                                              std::move(ocspRequest), timeout));
   rv = request->DispatchToMainThreadAndWait();
   if (NS_FAILED(rv)) {
     return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
@@ -960,16 +954,17 @@ AccumulateCipherSuite(Telemetry::HistogramID probe, const SSLChannelInfo& channe
 
 // In the case of session resumption, the AuthCertificate hook has been bypassed
 // (because we've previously successfully connected to our peer). That being the
-// case, we unfortunately don't know if the peer's server certificate verified
-// as extended validation or not. To address this, we attempt to build a
-// verified EV certificate chain here using as much of the original context as
-// possible (e.g. stapled OCSP responses, SCTs, the hostname, the first party
-// domain, etc.). Note that because we are on the socket thread, this must not
-// cause any network requests, hence the use of FLAG_LOCAL_ONLY.
-// Similarly, we need to determine the certificate's CT status.
+// case, we unfortunately don't know what the verified certificate chain was, if
+// the peer's server certificate verified as extended validation, or what its CT
+// status is (if enabled). To address this, we attempt to build a certificate
+// chain here using as much of the original context as possible (e.g. stapled
+// OCSP responses, SCTs, the hostname, the first party domain, etc.). Note that
+// because we are on the socket thread, this must not cause any network
+// requests, hence the use of FLAG_LOCAL_ONLY.
 static void
-DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
-                                    PRFileDesc* fd, nsNSSSocketInfo* infoObject)
+RebuildVerifiedCertificateInformation(RefPtr<nsSSLStatus> sslStatus,
+                                      PRFileDesc* fd,
+                                      nsNSSSocketInfo* infoObject)
 {
   MOZ_ASSERT(sslStatus);
   MOZ_ASSERT(fd);
@@ -1007,8 +1002,7 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
     sctsFromTLSExtension = nullptr;
   }
 
-  int flags = mozilla::psm::CertVerifier::FLAG_LOCAL_ONLY |
-              mozilla::psm::CertVerifier::FLAG_MUST_BE_EV;
+  int flags = mozilla::psm::CertVerifier::FLAG_LOCAL_ONLY;
   if (!infoObject->SharedState().IsOCSPStaplingEnabled() ||
       !infoObject->SharedState().IsOCSPMustStapleEnabled()) {
     flags |= CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
@@ -1036,6 +1030,11 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
     nullptr, // pinning telemetry
     &certificateTransparencyInfo);
 
+  if (rv != Success) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("HandshakeCallback: couldn't rebuild verified certificate info"));
+  }
+
   RefPtr<nsNSSCertificate> nssc(nsNSSCertificate::Create(cert.get()));
   if (rv == Success && evOidPolicy != SEC_OID_UNKNOWN) {
     sslStatus->SetCertificateTransparencyInfo(certificateTransparencyInfo);
@@ -1050,7 +1049,7 @@ DetermineEVAndCTStatusAndSetNewCert(RefPtr<nsSSLStatus> sslStatus,
 
   if (rv == Success) {
     sslStatus->SetCertificateTransparencyInfo(certificateTransparencyInfo);
-    sslStatus->SetSucceededCertChain(Move(builtChain));
+    sslStatus->SetSucceededCertChain(std::move(builtChain));
   }
 }
 
@@ -1254,7 +1253,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
            ("HandshakeCallback KEEPING existing cert\n"));
   } else {
-    DetermineEVAndCTStatusAndSetNewCert(status, fd, infoObject);
+    RebuildVerifiedCertificateInformation(status, fd, infoObject);
   }
 
   nsCOMPtr<nsIX509CertList> succeededCertChain;

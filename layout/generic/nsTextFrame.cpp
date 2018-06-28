@@ -2328,11 +2328,11 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
   UniquePtr<nsTransformingTextRunFactory> transformingFactory;
   if (anyTextTransformStyle) {
     transformingFactory =
-      MakeUnique<nsCaseTransformTextRunFactory>(Move(transformingFactory));
+      MakeUnique<nsCaseTransformTextRunFactory>(std::move(transformingFactory));
   }
   if (anyMathMLStyling) {
     transformingFactory =
-      MakeUnique<MathMLTextRunFactory>(Move(transformingFactory), mathFlags,
+      MakeUnique<MathMLTextRunFactory>(std::move(transformingFactory), mathFlags,
                                        sstyScriptLevel, fontInflation);
   }
   nsTArray<RefPtr<nsTransformedCharStyle>> styles;
@@ -2380,7 +2380,7 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
     if (transformingFactory) {
       textRun = transformingFactory->MakeTextRun(text, transformedLength,
                                                  &params, fontGroup, flags, flags2,
-                                                 Move(styles), true);
+                                                 std::move(styles), true);
       if (textRun) {
         // ownership of the factory has passed to the textrun
         // TODO: bug 1285316: clean up ownership transfer from the factory to
@@ -2397,7 +2397,7 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
     if (transformingFactory) {
       textRun = transformingFactory->MakeTextRun(text, transformedLength,
                                                  &params, fontGroup, flags, flags2,
-                                                 Move(styles), true);
+                                                 std::move(styles), true);
       if (textRun) {
         // ownership of the factory has passed to the textrun
         // TODO: bug 1285316: clean up ownership transfer from the factory to
@@ -3379,7 +3379,7 @@ PropertyProvider::ComputeJustification(
   }
 
   if (aAssignments) {
-    *aAssignments = Move(assignments);
+    *aAssignments = std::move(assignments);
   }
   return info;
 }
@@ -3988,7 +3988,7 @@ nsTextPaintStyle::GetSelectionUnderlineForPaint(int32_t  aIndex,
   NS_ASSERTION(aIndex >= 0 && aIndex < 5, "Index out of range");
 
   nsSelectionStyle* selectionStyle = GetSelectionStyle(aIndex);
-  if (selectionStyle->mUnderlineStyle == NS_STYLE_BORDER_STYLE_NONE ||
+  if (selectionStyle->mUnderlineStyle == NS_STYLE_TEXT_DECORATION_STYLE_NONE ||
       selectionStyle->mUnderlineColor == NS_TRANSPARENT ||
       selectionStyle->mUnderlineRelativeSize <= 0.0f)
     return false;
@@ -5124,7 +5124,7 @@ nsDisplayText::RenderToContext(gfxContext* aCtx, nsDisplayListBuilder* aBuilder,
   // This is temporary until we do this in the actual calculation of text extents.
   auto A2D = mFrame->PresContext()->AppUnitsPerDevPixel();
   LayoutDeviceRect extraVisible =
-    LayoutDeviceRect::FromAppUnits(mVisibleRect, A2D);
+    LayoutDeviceRect::FromAppUnits(GetPaintRect(), A2D);
   extraVisible.Inflate(1);
 
   gfxRect pixelVisible(extraVisible.x, extraVisible.y,
@@ -6246,8 +6246,8 @@ nsTextFrame::PaintOneShadow(const PaintShadowParams& aParams,
   gfx::Point shadowOffset(aShadowDetails->mXOffset, aShadowDetails->mYOffset);
   nscoord blurRadius = std::max(aShadowDetails->mRadius, 0);
 
-  nscolor shadowColor = aShadowDetails->mHasColor ? aShadowDetails->mColor
-                                                  : aParams.foregroundColor;
+  nscolor shadowColor =
+    aShadowDetails->mColor.CalcColor(aParams.foregroundColor);
 
   if (auto* textDrawer = aParams.context->GetTextDrawer()) {
     wr::Shadow wrShadow;
@@ -9455,8 +9455,6 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     IsFloatingFirstLetterChild() || IsInitialLetterChild()
     ? gfxFont::TIGHT_HINTED_OUTLINE_EXTENTS
     : gfxFont::LOOSE_INK_EXTENTS;
-  NS_ASSERTION(!(NS_REFLOW_CALC_BOUNDING_METRICS & aMetrics.mFlags),
-               "We shouldn't be passed NS_REFLOW_CALC_BOUNDING_METRICS anymore");
 
   int32_t limitLength = length;
   int32_t forceBreak = aLineLayout.GetForcedBreakPosition(this);
@@ -10420,7 +10418,11 @@ nsTextFrame::CountGraphemeClusters() const
 bool
 nsTextFrame::HasNonSuppressedText()
 {
-  if (HasAnyStateBits(TEXT_ISNOT_ONLY_WHITESPACE)) {
+  if (HasAnyStateBits(TEXT_ISNOT_ONLY_WHITESPACE |
+                      // If we haven't reflowed yet, or are currently doing so,
+                      // just return true because we can't be sure.
+                      NS_FRAME_FIRST_REFLOW |
+                      NS_FRAME_IN_REFLOW)) {
     return true;
   }
 

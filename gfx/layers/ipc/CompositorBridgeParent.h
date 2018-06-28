@@ -113,7 +113,9 @@ public:
   virtual bool SetTestSampleTime(const LayersId& aId,
                                  const TimeStamp& aTime) { return true; }
   virtual void LeaveTestMode(const LayersId& aId) { }
-  virtual void ApplyAsyncProperties(LayerTransactionParent* aLayerTree) = 0;
+  enum class TransformsToSkip : uint8_t { NoneOfThem = 0, APZ = 1 };
+  virtual void ApplyAsyncProperties(LayerTransactionParent* aLayerTree,
+                                    TransformsToSkip aSkip) = 0;
   virtual void SetTestAsyncScrollOffset(const LayersId& aLayersId,
                                         const FrameMetrics::ViewID& aScrollId,
                                         const CSSPoint& aPoint) = 0;
@@ -138,13 +140,7 @@ public:
 
   virtual void ObserveLayerUpdate(LayersId aLayersId, uint64_t aEpoch, bool aActive) = 0;
 
-  virtual void DidComposite(LayersId aId, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd) {}
-
-  virtual void NotifyPipelineRendered(const wr::PipelineId& aPipelineId,
-                                      const wr::Epoch& aEpoch,
-                                      TimeStamp& aCompositeStart,
-                                      TimeStamp& aCompositeEnd) { MOZ_ASSERT_UNREACHABLE("WebRender only"); }
-  virtual void NotifyPipelineRemoved(const wr::PipelineId& aPipelineId) { MOZ_ASSERT_UNREACHABLE("WebRender only"); }
+  virtual void DidComposite(LayersId aId, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd) = 0;
 
   // HostIPCAllocator
   base::ProcessId GetChildProcessId() override;
@@ -175,12 +171,18 @@ public:
     return false;
   }
 
+<<<<<<< working copy
   virtual void NotifyWebRenderError(wr::WebRenderError aError) {}
 
   virtual void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr) {
     MOZ_CRASH();
   }
 
+||||||| base
+  virtual void NotifyWebRenderError(wr::WebRenderError aError) {}
+
+=======
+>>>>>>> merge rev
 protected:
   ~CompositorBridgeParentBase() override;
 
@@ -189,6 +191,8 @@ protected:
 private:
   RefPtr<CompositorManagerParent> mCompositorManager;
 };
+
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(CompositorBridgeParentBase::TransformsToSkip)
 
 class CompositorBridgeParent final : public CompositorBridgeParentBase
                                    , public CompositorController
@@ -249,7 +253,8 @@ public:
   bool SetTestSampleTime(const LayersId& aId,
                          const TimeStamp& aTime) override;
   void LeaveTestMode(const LayersId& aId) override;
-  void ApplyAsyncProperties(LayerTransactionParent* aLayerTree) override;
+  void ApplyAsyncProperties(LayerTransactionParent* aLayerTree,
+                            TransformsToSkip aSkip) override;
   CompositorAnimationStorage* GetAnimationStorage();
   void SetTestAsyncScrollOffset(const LayersId& aLayersId,
                                 const FrameMetrics::ViewID& aScrollId,
@@ -276,7 +281,12 @@ public:
 
   bool IsSameProcess() const override;
 
-  void NotifyWebRenderError(wr::WebRenderError aError) override;
+  void NotifyWebRenderError(wr::WebRenderError aError);
+  void NotifyPipelineRendered(const wr::PipelineId& aPipelineId,
+                              const wr::Epoch& aEpoch,
+                              TimeStamp& aCompositeStart,
+                              TimeStamp& aCompositeEnd);
+  RefPtr<AsyncImagePipelineManager> GetAsyncImagePipelineManager() const;
 
   PCompositorWidgetParent* AllocPCompositorWidgetParent(const CompositorWidgetInitData& aInitData) override;
   bool DeallocPCompositorWidgetParent(PCompositorWidgetParent* aActor) override;
@@ -486,6 +496,7 @@ public:
   Maybe<TimeStamp> GetTestingTimeStamp() const;
 
   static CompositorBridgeParent* GetCompositorBridgeParentFromLayersId(const LayersId& aLayersId);
+  static RefPtr<CompositorBridgeParent> GetCompositorBridgeParentFromWindowId(const wr::WindowId& aWindowId);
 
   /**
    * This returns a reference to the IAPZCTreeManager "controller subinterface"
@@ -581,14 +592,8 @@ protected:
    */
   bool CanComposite();
 
-  using CompositorBridgeParentBase::DidComposite;
+  void DidComposite(LayersId aId, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd) override;
   void DidComposite(TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd);
-
-  void NotifyPipelineRendered(const wr::PipelineId& aPipelineId,
-                              const wr::Epoch& aEpoch,
-                              TimeStamp& aCompositeStart,
-                              TimeStamp& aCompositeEnd) override;
-  void NotifyPipelineRemoved(const wr::PipelineId& aPipelineId) override;
 
   void NotifyDidComposite(TransactionId aTransactionId, TimeStamp& aCompositeStart, TimeStamp& aCompositeEnd);
 

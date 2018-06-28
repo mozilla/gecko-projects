@@ -16,10 +16,6 @@ XBLChildrenElement::~XBLChildrenElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(XBLChildrenElement,
-                            Element,
-                            nsIDOMNode)
-
 NS_IMPL_ELEMENT_CLONE(XBLChildrenElement)
 
 nsresult
@@ -197,5 +193,5 @@ nsAnonymousContentList::IndexOf(nsIContent* aContent)
 JSObject*
 nsAnonymousContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return mozilla::dom::NodeListBinding::Wrap(cx, this, aGivenProto);
+  return mozilla::dom::NodeList_Binding::Wrap(cx, this, aGivenProto);
 }

@@ -14,6 +14,7 @@
 
 #include "AnimationCommon.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/dom/Animation.h"
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/Flex.h"
@@ -26,7 +27,6 @@
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIDocumentInlines.h"
 #include "mozilla/dom/DocumentTimeline.h"
-#include "nsIDOMDocument.h"
 #include "nsIContentIterator.h"
 #include "nsFlexContainerFrame.h"
 #include "nsFocusManager.h"
@@ -59,7 +59,7 @@
 #include "mozilla/AnimationComparator.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/ContentEvents.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -136,8 +136,8 @@
 #include "mozilla/dom/CSSPseudoElement.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/ElementBinding.h"
-#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/VRDisplay.h"
@@ -182,8 +182,8 @@ Check##type##Size<sizeof(type), opt_size + EXTRA_DOM_ELEMENT_BYTES> g##type##CES
 
 // Note that mozjemalloc uses a 16 byte quantum, so 128 is a bin/bucket size.
 ASSERT_ELEMENT_SIZE(Element, 120);
-ASSERT_ELEMENT_SIZE(HTMLDivElement, 128);
-ASSERT_ELEMENT_SIZE(HTMLSpanElement, 128);
+ASSERT_ELEMENT_SIZE(HTMLDivElement, 120);
+ASSERT_ELEMENT_SIZE(HTMLSpanElement, 120);
 
 #undef ASSERT_ELEMENT_SIZE
 #undef EXTRA_DOM_ELEMENT_BYTES
@@ -1224,6 +1224,16 @@ Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
     return nullptr;
   }
 
+  if (StaticPrefs::dom_webcomponents_shadowdom_report_usage()) {
+    OwnerDoc()->ReportShadowDOMUsage();
+  }
+
+  return AttachShadowWithoutNameChecks(aInit.mMode);
+}
+
+already_AddRefed<ShadowRoot>
+Element::AttachShadowWithoutNameChecks(ShadowRootMode aMode)
+{
   nsAutoScriptBlocker scriptBlocker;
 
   RefPtr<mozilla::dom::NodeInfo> nodeInfo =
@@ -1244,7 +1254,7 @@ Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
    *    and mode is init’s mode.
    */
   RefPtr<ShadowRoot> shadowRoot =
-    new ShadowRoot(this, aInit.mMode, nodeInfo.forget());
+    new ShadowRoot(this, aMode, nodeInfo.forget());
 
   shadowRoot->SetIsComposedDocParticipant(IsInComposedDoc());
 
@@ -1253,10 +1263,42 @@ Element::AttachShadow(const ShadowRootInit& aInit, ErrorResult& aError)
    */
   SetShadowRoot(shadowRoot);
 
+  // Dispatch a "shadowrootattached" event for devtools.
+  {
+    AsyncEventDispatcher* dispatcher =
+      new AsyncEventDispatcher(this,
+                               NS_LITERAL_STRING("shadowrootattached"),
+                               CanBubble::eYes,
+                               ChromeOnlyDispatch::eYes,
+                               Composed::eYes);
+    dispatcher->PostDOMEvent();
+  }
+
   /**
    * 6. Return shadow.
    */
   return shadowRoot.forget();
+}
+
+void
+Element::UnattachShadow()
+{
+  if (!GetShadowRoot()) {
+    return;
+  }
+
+  nsAutoScriptBlocker scriptBlocker;
+
+  if (nsIDocument* doc = GetComposedDoc()) {
+    if (nsIPresShell* shell = doc->GetShell()) {
+      shell->DestroyFramesForAndRestyle(this);
+    }
+  }
+  MOZ_ASSERT(!GetPrimaryFrame());
+
+  // Simply unhook the shadow root from the element.
+  MOZ_ASSERT(!GetShadowRoot()->HasSlots(), "Won't work when shadow root has slots!");
+  SetShadowRoot(nullptr);
 }
 
 void
@@ -1667,14 +1709,6 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
-  // Propagate scoped style sheet tracking bit.
-  if (mParent->IsContent()) {
-    nsIContent* parent = mParent->AsContent();
-    if (ShadowRoot* shadowRootParent = ShadowRoot::FromNode(parent)) {
-      parent = shadowRootParent->GetHost();
-    }
-  }
-
   // This has to be here, rather than in nsGenericHTMLElement::BindToTree,
   //  because it has to happen after updating the parent pointer, but before
   //  recursively binding the kids.
@@ -1761,29 +1795,14 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
-  // Pseudo-elements implemented by JS must have the NODE_IS_NATIVE_ANONYMOUS
-  // flag set on them. For C++-created pseudo-elements, this is done in
-  // nsCSSFrameConstructor::GetAnonymousContent, but any JS that creates
-  // pseudo-elements would run after that. So we set that flag here,
-  // when the element implementing the pseudo is inserted into the document.
-  // We maintain the invariant that any NAC-implemented pseudo-element's
-  // anonymous ancestors are also flagged as NAC, which the style system relies on.
-  if (aDocument) {
+  // FIXME(emilio): Why is this needed? The element shouldn't even be styled in
+  // the first place, we should style it properly eventually.
+  //
+  // Also, if this _is_ needed, then it's wrong and should use GetComposedDoc()
+  // to account for Shadow DOM.
+  if (aDocument && MayHaveAnimations()) {
     CSSPseudoElementType pseudoType = GetPseudoElementType();
-    if (pseudoType != CSSPseudoElementType::NotPseudo &&
-        nsCSSPseudoElements::PseudoElementIsJSCreatedNAC(pseudoType)) {
-      SetFlags(NODE_IS_NATIVE_ANONYMOUS);
-      nsIContent* parent = aParent;
-      while (parent && !parent->IsRootOfNativeAnonymousSubtree()) {
-        MOZ_ASSERT(parent->IsInNativeAnonymousSubtree());
-        parent->SetFlags(NODE_IS_NATIVE_ANONYMOUS);
-        parent = parent->GetParent();
-      }
-      MOZ_ASSERT(parent);
-    }
-
-    if (MayHaveAnimations() &&
-        (pseudoType == CSSPseudoElementType::NotPseudo ||
+    if ((pseudoType == CSSPseudoElementType::NotPseudo ||
          pseudoType == CSSPseudoElementType::before ||
          pseudoType == CSSPseudoElementType::after) &&
         EffectSet::GetEffectSet(this, pseudoType)) {
@@ -2013,16 +2032,12 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   }
 
   if (aDeep) {
-    // Do the kids. Don't call GetChildCount() here since that'll force
-    // XUL to generate template children, which there is no need for since
-    // all we're going to do is unbind them anyway.
-    uint32_t i, n = mAttrsAndChildren.ChildCount();
-
-    for (i = 0; i < n; ++i) {
+    for (nsIContent* child = GetFirstChild(); child;
+         child = child->GetNextSibling()) {
       // Note that we pass false for aNullParent here, since we don't want
       // the kids to forget us.  We _do_ want them to forget their binding
       // parent, though, since this only walks non-anonymous kids.
-      mAttrsAndChildren.ChildAt(i)->UnbindFromTree(true, false);
+      child->UnbindFromTree(true, false);
     }
   }
 
@@ -2043,7 +2058,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 nsDOMCSSAttributeDeclaration*
-Element::GetSMILOverrideStyle()
+Element::SMILOverrideStyle()
 {
   Element::nsExtendedDOMSlots* slots = ExtendedDOMSlots();
 
@@ -2118,10 +2133,15 @@ Element::GetMappedAttributes() const
   return mAttrsAndChildren.GetMapped();
 }
 
+void
+Element::InlineStyleDeclarationWillChange(MutationClosureData& aData)
+{
+  MOZ_ASSERT_UNREACHABLE("Element::InlineStyleDeclarationWillChange");
+}
+
 nsresult
-Element::SetInlineStyleDeclaration(DeclarationBlock* aDeclaration,
-                                   const nsAString* aSerialized,
-                                   bool aNotify)
+Element::SetInlineStyleDeclaration(DeclarationBlock& aDeclaration,
+                                   MutationClosureData& aData)
 {
   MOZ_ASSERT_UNREACHABLE("Element::SetInlineStyleDeclaration");
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -2266,7 +2286,7 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
     inputSource = sourceMouseEvent->inputSource;
   } else if (aSourceEvent->mClass == eKeyboardEventClass) {
     event.mFlags.mIsPositionless = true;
-    inputSource = MouseEventBinding::MOZ_SOURCE_KEYBOARD;
+    inputSource = MouseEvent_Binding::MOZ_SOURCE_KEYBOARD;
   }
   event.pressure = pressure;
   event.mClickCount = clickCount;
@@ -2415,8 +2435,8 @@ Element::MaybeCheckSameAttrVal(int32_t aNamespaceID,
     }
   }
   *aModType = modification ?
-    static_cast<uint8_t>(MutationEventBinding::MODIFICATION) :
-    static_cast<uint8_t>(MutationEventBinding::ADDITION);
+    static_cast<uint8_t>(MutationEvent_Binding::MODIFICATION) :
+    static_cast<uint8_t>(MutationEvent_Binding::ADDITION);
   return false;
 }
 
@@ -2451,7 +2471,7 @@ Element::SetSingleClassFromParser(nsAtom* aSingleClassName)
   nsAttrValue value(aSingleClassName);
 
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, false);
+  mozAutoDocUpdate updateBatch(document, false);
 
   // In principle, BeforeSetAttr should be called here if a node type
   // existed that wanted to do something special for class, but there
@@ -2464,7 +2484,7 @@ Element::SetSingleClassFromParser(nsAtom* aSingleClassName)
                           nullptr, // old value
                           value,
                           nullptr,
-                          static_cast<uint8_t>(MutationEventBinding::ADDITION),
+                          static_cast<uint8_t>(MutationEvent_Binding::ADDITION),
                           false, // hasListeners
                           false, // notify
                           kCallAfterSetAttr,
@@ -2521,7 +2541,7 @@ Element::SetAttr(int32_t aNamespaceID, nsAtom* aName,
   // Hold a script blocker while calling ParseAttribute since that can call
   // out to id-observers
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
 
   nsresult rv = BeforeSetAttr(aNamespaceID, aName, &value, aNotify);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2579,7 +2599,7 @@ Element::SetParsedAttr(int32_t aNamespaceID, nsAtom* aName,
   PreIdMaybeChange(aNamespaceID, aName, &value);
 
   nsIDocument* document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
   return SetAttrAndNotify(aNamespaceID, aName, aPrefix,
                           oldValueSet ? &oldValue : nullptr,
                           aParsedValue, nullptr, modType, hasListeners, aNotify,
@@ -2680,7 +2700,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
 
       LifecycleCallbackArgs args = {
         nsDependentAtomString(aName),
-        aModType == MutationEventBinding::ADDITION ?
+        aModType == MutationEvent_Binding::ADDITION ?
           VoidString() : nsDependentAtomString(oldValueAtom),
         nsDependentAtomString(newValueAtom),
         (ns.IsEmpty() ? VoidString() : ns)
@@ -2911,11 +2931,11 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
   }
 
   nsIDocument *document = GetComposedDoc();
-  mozAutoDocUpdate updateBatch(document, UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(document, aNotify);
 
   if (aNotify) {
     nsNodeUtils::AttributeWillChange(this, aNameSpaceID, aName,
-                                     MutationEventBinding::REMOVAL,
+                                     MutationEvent_Binding::REMOVAL,
                                      nullptr);
   }
 
@@ -2998,7 +3018,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
     // We can always pass oldValue here since there is no new value which could
     // have corrupted it.
     nsNodeUtils::AttributeChanged(this, aNameSpaceID, aName,
-                                  MutationEventBinding::REMOVAL, &oldValue);
+                                  MutationEvent_Binding::REMOVAL, &oldValue);
   }
 
   if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::dir) {
@@ -3015,7 +3035,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName,
     oldValue.ToString(value);
     if (!value.IsEmpty())
       mutation.mPrevAttrValue = NS_Atomize(value);
-    mutation.mAttrChange = MutationEventBinding::REMOVAL;
+    mutation.mAttrChange = MutationEvent_Binding::REMOVAL;
 
     mozAutoSubtreeModified subtree(OwnerDoc(), this);
     (new AsyncEventDispatcher(this, mutation))->RunDOMEventWhenSafe();
@@ -3266,7 +3286,7 @@ Element::GetEventTargetParentForLinks(EventChainPreVisitor& aVisitor)
 
   default:
     // switch not in sync with the optimization switch earlier in this function
-    NS_NOTREACHED("switch statements not in sync");
+    MOZ_ASSERT_UNREACHABLE("switch statements not in sync");
   }
 }
 
@@ -3380,7 +3400,7 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
 
   default:
     // switch not in sync with the optimization switch earlier in this function
-    NS_NOTREACHED("switch statements not in sync");
+    MOZ_ASSERT_UNREACHABLE("switch statements not in sync");
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -3536,7 +3556,7 @@ Element::RequestFullscreen(CallerType aCallerType, ErrorResult& aError)
   auto request = MakeUnique<FullscreenRequest>(this);
   request->mIsCallerChrome = (aCallerType == CallerType::System);
 
-  OwnerDoc()->AsyncRequestFullScreen(Move(request));
+  OwnerDoc()->AsyncRequestFullScreen(std::move(request));
 }
 
 void
@@ -3680,11 +3700,11 @@ Element::Animate(const Nullable<ElementOrCSSPseudoElement>& aTarget,
   }
 
   // Animation constructor follows the standard Xray calling convention and
-  // needs to be called in the target element's compartment.
-  Maybe<JSAutoCompartment> ac;
+  // needs to be called in the target element's realm.
+  Maybe<JSAutoRealm> ar;
   if (js::GetContextCompartment(aContext) !=
       js::GetObjectCompartment(ownerGlobal->GetGlobalJSObject())) {
-    ac.emplace(aContext, ownerGlobal->GetGlobalJSObject());
+    ar.emplace(aContext, ownerGlobal->GetGlobalJSObject());
   }
 
   AnimationTimeline* timeline = referenceElement->OwnerDoc()->Timeline();
@@ -3776,7 +3796,7 @@ Element::GetAnimationsUnsorted(Element* aElement,
     return;
   }
 
-  for (KeyframeEffectReadOnly* effect : *effects) {
+  for (KeyframeEffect* effect : *effects) {
     MOZ_ASSERT(effect && effect->GetAnimation(),
                "Only effects associated with an animation should be "
                "added to an element's effect set");
@@ -3799,12 +3819,6 @@ void
 Element::SetInnerHTML(const nsAString& aInnerHTML, nsIPrincipal* aSubjectPrincipal, ErrorResult& aError)
 {
   SetInnerHTMLInternal(aInnerHTML, aError);
-}
-
-void
-Element::UnsafeSetInnerHTML(const nsAString& aInnerHTML, ErrorResult& aError)
-{
-  SetInnerHTMLInternal(aInnerHTML, aError, true);
 }
 
 void
@@ -3912,7 +3926,7 @@ Element::InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
   nsIDocument* doc = OwnerDoc();
 
   // Needed when insertAdjacentHTML is used in combination with contenteditable
-  mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, true);
+  mozAutoDocUpdate updateBatch(doc, true);
   nsAutoScriptLoaderDisabler sld(doc);
 
   // Batch possible DOMSubtreeModified events.
@@ -4274,10 +4288,27 @@ Element::SetCustomElementData(CustomElementData* aData)
   #if DEBUG
     nsAtom* name = NodeInfo()->NameAtom();
     nsAtom* type = aData->GetCustomElementType();
-    if (nsContentUtils::IsCustomElementName(name, NodeInfo()->NamespaceID())) {
-      MOZ_ASSERT(type == name);
-    } else {
-      MOZ_ASSERT(type != name);
+    if (NodeInfo()->NamespaceID() == kNameSpaceID_XHTML) {
+      if (nsContentUtils::IsCustomElementName(name, kNameSpaceID_XHTML)) {
+        MOZ_ASSERT(type == name);
+      } else {
+        MOZ_ASSERT(type != name);
+      }
+    } else { // kNameSpaceID_XUL
+      // Check to see if the tag name is a dashed name.
+      if (nsContentUtils::IsNameWithDash(name)) {
+        // Assert that a tag name with dashes is always an autonomous custom
+        // element.
+        MOZ_ASSERT(type == name);
+      } else {
+        // Could still be an autonomous custom element with a non-dashed tag name.
+        // Need the check below for sure.
+        if (type != name) {
+          // Assert that the name of the built-in custom element type is always
+          // a dashed name.
+          MOZ_ASSERT(nsContentUtils::IsNameWithDash(type));
+        }
+      }
     }
   #endif
   slots->mCustomElementData = aData;
@@ -4386,18 +4417,23 @@ AssertNoBitsPropagatedFrom(nsINode* aRoot)
 #endif
 }
 
-// Sets |aBits| on aElement and all of its flattened-tree ancestors up to and
-// including aStopAt or the root element (whichever is encountered first).
+// Sets `aBits` on `aElement` and all of its flattened-tree ancestors up to and
+// including aStopAt or the root element (whichever is encountered first), and
+// as long as `aBitsToStopAt` isn't found anywhere in the chain.
 static inline Element*
-PropagateBits(Element* aElement, uint32_t aBits, nsINode* aStopAt)
+PropagateBits(Element* aElement, uint32_t aBits, nsINode* aStopAt, uint32_t aBitsToStopAt)
 {
   Element* curr = aElement;
-  while (curr && !curr->HasAllFlags(aBits)) {
+  while (curr && !curr->HasAllFlags(aBitsToStopAt)) {
     curr->SetFlags(aBits);
     if (curr == aStopAt) {
       break;
     }
     curr = curr->GetFlattenedTreeParentElementForStyle();
+  }
+
+  if (aBitsToStopAt != aBits && curr) {
+    curr->SetFlags(aBits);
   }
 
   return curr;
@@ -4476,7 +4512,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     // We can't check for a frame here, since <frame> elements inside <frameset>
     // still need to generate a frame, even if they're display: none. :(
     //
-    // The servo traversal doesn't keep style data under display: none subtrees, 
+    // The servo traversal doesn't keep style data under display: none subtrees,
     // so in order for it to not need to cleanup each time anything happens in a
     // display: none subtree, we keep it clean.
     //
@@ -4510,7 +4546,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
   // propagating bits as we go.
   const bool reachedDocRoot =
     !parent->IsElement() ||
-    !PropagateBits(parent->AsElement(), aBits, existingRoot);
+    !PropagateBits(parent->AsElement(), aBits, existingRoot, aBits);
 
   uint32_t existingBits = doc->GetServoRestyleRootDirtyBits();
   if (!reachedDocRoot || existingRoot == doc) {
@@ -4522,7 +4558,9 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
     // now need to find the nearest common ancestor, so climb up from the
     // existing root, extending bits along the way.
     Element* rootParent = existingRoot->GetFlattenedTreeParentElementForStyle();
-    if (Element* commonAncestor = PropagateBits(rootParent, existingBits, aElement)) {
+    // We can stop at the first occurrence of `aBits` in order to find the
+    // common ancestor.
+    if (Element* commonAncestor = PropagateBits(rootParent, existingBits, aElement, aBits)) {
       MOZ_ASSERT(commonAncestor == aElement ||
                  commonAncestor == nsContentUtils::GetCommonFlattenedTreeAncestorForStyle(aElement, rootParent));
 
@@ -4534,6 +4572,7 @@ NoteDirtyElement(Element* aElement, uint32_t aBits)
         MOZ_ASSERT(curr->HasAllFlags(aBits));
         curr->UnsetFlags(aBits);
       }
+      AssertNoBitsPropagatedFrom(commonAncestor);
     } else {
       // We didn't find a common ancestor element. That means we're descended
       // from two different document style roots, so the common ancestor is the
@@ -4572,7 +4611,8 @@ Element::NoteDirtySubtreeForServo()
         existingRoot->AsElement(), this)) {
     PropagateBits(existingRoot->AsElement()->GetFlattenedTreeParentElementForStyle(),
                   existingBits,
-                  this);
+                  this,
+                  existingBits);
 
     doc->ClearServoRestyleRoot();
   }

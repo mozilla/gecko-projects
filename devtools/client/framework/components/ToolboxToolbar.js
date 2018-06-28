@@ -7,7 +7,7 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const {div, button} = dom;
-const {openWebLink} = require("devtools/client/shared/link");
+const {openDocLink} = require("devtools/client/shared/link");
 
 const Menu = require("devtools/client/framework/menu");
 const MenuItem = require("devtools/client/framework/menu-item");
@@ -56,6 +56,8 @@ class ToolboxToolbar extends Component {
       disableAutohide: PropTypes.bool,
       // Function to select a tool based on its id.
       selectTool: PropTypes.func,
+      // Function to turn the options panel on / off.
+      toggleOptions: PropTypes.func.isRequired,
       // Function to turn the split console on / off.
       toggleSplitConsole: PropTypes.func,
       // Function to turn the disable pop-up autohide behavior on / off.
@@ -86,18 +88,30 @@ class ToolboxToolbar extends Component {
    * render functions for how each of the sections is rendered.
    */
   render() {
-    const containerProps = {className: "devtools-tabbar"};
+    const classnames = ["devtools-tabbar"];
+    const startButtons = renderToolboxButtonsStart(this.props);
+    const endButtons = renderToolboxButtonsEnd(this.props);
+
+    if (!startButtons) {
+      classnames.push("devtools-tabbar-has-start");
+    }
+    if (!endButtons) {
+      classnames.push("devtools-tabbar-has-end");
+    }
+
     return this.props.canRender
       ? (
         div(
-          containerProps,
-          renderToolboxButtonsStart(this.props),
+          {
+            className: classnames.join(" ")
+          },
+          startButtons,
           ToolboxTabs(this.props),
-          renderToolboxButtonsEnd(this.props),
+          endButtons,
           renderToolboxControls(this.props)
         )
       )
-      : div(containerProps);
+      : div({ className: classnames.join(" ") });
   }
 }
 
@@ -181,7 +195,7 @@ function renderToolboxButtons({focusedButton, toolboxButtons, focusButton}, isSt
     });
 
   // Add the appropriate separator, if needed.
-  let children = renderedButtons;
+  const children = renderedButtons;
   if (renderedButtons.length) {
     if (isStart) {
       children.push(renderSeparator());
@@ -234,6 +248,8 @@ function renderSeparator() {
  *        (Only defined for the browser toolbox.)
  * @param {Function} selectTool
  *        Function to select a tool based on its id.
+ * @param {Function} toggleOptions
+ *        Function to turn the options panel on / off.
  * @param {Function} toggleSplitConsole
  *        Function to turn the split console on / off.
  * @param {Function} toggleNoAutohide
@@ -319,8 +335,10 @@ function renderToolboxControls(props) {
  *        Are we disabling the behavior where pop-ups are automatically
  *        closed when clicking outside them.
  *        (Only defined for the browser toolbox.)
- * @param {Function} props.selectTool
+ * @param {Function} selectTool
  *        Function to select a tool based on its id.
+ * @param {Function} toggleOptions
+ *        Function to turn the options panel on / off.
  * @param {Function} toggleSplitConsole
  *        Function to turn the split console on / off.
  * @param {Function} toggleNoAutohide
@@ -339,7 +357,7 @@ function showMeatballMenu(
     currentHostType,
     isSplitConsoleActive,
     disableAutohide,
-    selectTool,
+    toggleOptions,
     toggleSplitConsole,
     toggleNoAutohide,
     L10N,
@@ -402,7 +420,7 @@ function showMeatballMenu(
     id: "toolbox-meatball-menu-settings",
     label: L10N.getStr("toolbox.meatballMenu.settings.label"),
     accelerator: L10N.getStr("toolbox.help.key"),
-    click: () => selectTool("options"),
+    click: () => toggleOptions(),
   }));
 
   if (menu.items.length) {
@@ -414,7 +432,7 @@ function showMeatballMenu(
     id: "toolbox-meatball-menu-documentation",
     label: L10N.getStr("toolbox.meatballMenu.documentation.label"),
     click: () => {
-      openWebLink(
+      openDocLink(
         "https://developer.mozilla.org/docs/Tools?utm_source=devtools&utm_medium=tabbar-menu");
     },
   }));
@@ -424,7 +442,7 @@ function showMeatballMenu(
     id: "toolbox-meatball-menu-community",
     label: L10N.getStr("toolbox.meatballMenu.community.label"),
     click: () => {
-      openWebLink(
+      openDocLink(
         "https://discourse.mozilla.org/c/devtools?utm_source=devtools&utm_medium=tabbar-menu");
     },
   }));
@@ -434,5 +452,5 @@ function showMeatballMenu(
   const screenY = menuButton.ownerDocument.defaultView.mozInnerScreenY;
 
   // Display the popup below the button.
-  menu.popup(rect.left + screenX, rect.bottom + screenY, toolbox);
+  menu.popupWithZoom(rect.left + screenX, rect.bottom + screenY, toolbox);
 }

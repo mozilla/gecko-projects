@@ -348,6 +348,40 @@ textarea.jsterm-input-node:focus {
   border-bottom-right-radius: 0;
 }
 
+/* CodeMirror-powered JsTerm */
+.jsterm-cm .jsterm-input-container {
+  /* Always allow scrolling on input - it auto expands in js by setting height,
+     but don't want it to get bigger than the window. 24px = toolbar height. */
+  max-height: calc(90vh - 24px);
+}
+
+.jsterm-cm .jsterm-input-container > .CodeMirror {
+  border: 1px solid transparent;
+  font-size: inherit;
+  line-height: 16px;
+  padding-inline-start: 20px;
+  /* input icon */
+  background-image: var(--theme-command-line-image);
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+  background-position: 4px 4px;
+}
+
+.jsterm-cm .jsterm-input-container > .CodeMirror-focused {
+  background-image: var(--theme-command-line-image-focus);
+  border: 1px solid var(--blue-50);
+  transition: border-color 0.2s ease-in-out;
+}
+
+:root[platform="mac"] .jsterm-cm .jsterm-input-container > .CodeMirror {
+  border-radius: 0 0 4px 4px;
+}
+
+/* Unset the bottom right radius on the jsterm inputs when the sidebar is visible */
+:root[platform="mac"]  .jsterm-cm .sidebar ~ .jsterm-input-container > .CodeMirror {
+  border-bottom-right-radius: 0;
+}
+
 /* Security styles */
 
 .message.security > .indent {
@@ -506,30 +540,32 @@ a.learn-more-link.webconsole-learn-more-link {
       It can expand as much as it need.
     - filtered messages, containing the "X items hidden by filters" and the reset filters button.
       It should be on the same row than the primary bar if it fits there, or on its own 100% row if it is wrapped.
+    - close button, close the split console panel. This button will be displayed on righ-top of tool bar always.
     - secondary, containing the filter buttons (Error, Warning, …).
       It should be on its own 100% row.
 
   Basically here's what we can have :
 
-  -----------------------------------------------------------------------------------------------------------
-  | Clear button - Open filter bar button - Filter Input | X items hidden by filters - Reset Filters button |
-  -----------------------------------------------------------------------------------------------------------
-  | Error - Warning - Log - Info - Debug - CSS - Network - XHR                                              |
-  -----------------------------------------------------------------------------------------------------------
+  --------------------------------------------------------------------------------------------------------------------------
+  | Clear button - Open filter bar button - Filter Input | X items hidden by filters - Reset Filters button | Close button |
+  --------------------------------------------------------------------------------------------------------------------------
+  | Error - Warning - Log - Info - Debug - CSS - Network - XHR                                                             |
+  --------------------------------------------------------------------------------------------------------------------------
 
   or
 
-  ------------------------------------------------------------------------------------
-  | Clear button - Open filter bar button - Filter Input                             |
-  ------------------------------------------------------------------------------------
-  |                                X items hidden by filters  - Reset Filters button |
-  ------------------------------------------------------------------------------------
-  | Error - Warning - Log - Info - Debug - CSS - Network - XHR                       |
-  ------------------------------------------------------------------------------------
+  ---------------------------------------------------------------------------------------------------
+  | Clear button - Open filter bar button - Filter Input                             | Close button |
+  ---------------------------------------------------------------------------------------------------
+  |                                               X items hidden by filters  - Reset Filters button |
+  ---------------------------------------------------------------------------------------------------
+  | Error - Warning - Log - Info - Debug - CSS - Network - XHR                                      |
+  ---------------------------------------------------------------------------------------------------
 */
 .webconsole-filteringbar-wrapper {
-  display: flex;
+  display: grid;
   grid-row: 1 / 2;
+  grid-template-columns: 1fr auto auto;
   /* Wrap so the "Hidden messages" bar can go to its own row if needed */
   flex-wrap: wrap;
   --primary-toolbar-height: 29px;
@@ -549,6 +585,28 @@ a.learn-more-link.webconsole-learn-more-link {
   width: 100%;
   align-items: center;
   -moz-user-select: none;
+  grid-column: 1 / -1;
+}
+
+.split-console-close-button-wrapper {
+  min-height: var(--primary-toolbar-height);
+  /* We will need to display the close button in the right-top always. */
+  grid-column: -1 / -2;
+  grid-row: 1 / 2;
+  padding-inline-end: 0;
+}
+
+/* On OSX the cursor turns into a window-resizing cursor at the edges of the
+ * window, so bring the end of the close button in. */
+:root[platform="mac"] .split-console-close-button-wrapper,
+:root[platform="mac"] .webconsole-sidebar-toolbar {
+  padding-inline-end: 3px;
+}
+
+#split-console-close-button {
+  margin-inline-end: 0;
+  height: 100%;
+  margin: 0;
 }
 
 .webconsole-filterbar-primary .devtools-plaininput {
@@ -588,6 +646,17 @@ a.learn-more-link.webconsole-learn-more-link {
   line-height: var(--primary-toolbar-height);
 }
 
+@media (max-width: 965px) {
+  /* This media query will make filtered message element to be displayed in new
+    line. This width is based on greek localized size since it will longer than
+    other localized strings. */
+  .webconsole-filterbar-filtered-messages {
+    grid-row: 2 / 3;
+    grid-column: 1 / -1;
+    justify-self: stretch;
+  }
+}
+
 .webconsole-filterbar-filtered-messages .filter-message-text {
   font-style: italic;
   -moz-user-select: none;
@@ -598,7 +667,6 @@ a.learn-more-link.webconsole-learn-more-link {
 }
 
 .webconsole-output {
-  flex: 1;
   overflow: auto;
 }
 
@@ -923,6 +991,7 @@ body #output-container {
   grid-template-columns: minmax(200px, 1fr) auto;
   grid-template-rows: auto 1fr auto auto;
   height: 100%;
+  max-height: 100%;
   width: 100vw;
 }
 
@@ -987,11 +1056,13 @@ html[dir="rtl"] .webconsole-output-wrapper img.collapse-button.arrow:not(.expand
 }
 
 /* Apply the same color to both message arrows and ObjectInspector ones. */
-.webconsole-output-wrapper .message img.arrow {
+.webconsole-output-wrapper .message img.arrow,
+.webconsole-output-wrapper .sidebar img.arrow {
   background-color: #AFA8AB;
 }
 
-.theme-dark .webconsole-output-wrapper .message img.arrow {
+.theme-dark .webconsole-output-wrapper .message img.arrow,
+.theme-dark .webconsole-output-wrapper .sidebar img.arrow {
   background-color: #7F7E81;
 }
 
@@ -1001,6 +1072,13 @@ html[dir="rtl"] .webconsole-output-wrapper img.collapse-button.arrow:not(.expand
   grid-row: 1 / -1;
   grid-column: -1 / -2;
   background-color: var(--theme-sidebar-background);
+  border-inline-start: 1px solid var(--theme-splitter-color);
+}
+
+.sidebar .splitter {
+  /* Let the parent component handle the border. This is needed otherwise there is a visual
+     glitch between the input and the sidebar borders */
+  background-color: transparent;
 }
 
 .split-box.vert.sidebar {
@@ -1020,6 +1098,7 @@ html[dir="rtl"] .webconsole-output-wrapper img.collapse-button.arrow:not(.expand
   min-height: var(--primary-toolbar-height);
   display: flex;
   justify-content: end;
+  padding: 0;
 }
 
 .sidebar-contents {
@@ -1030,10 +1109,10 @@ html[dir="rtl"] .webconsole-output-wrapper img.collapse-button.arrow:not(.expand
 .webconsole-sidebar-toolbar .sidebar-close-button {
   padding: 4px 0;
   margin: 0;
-  margin-inline-end: -3px;
 }
 
 .sidebar-close-button::before {
+  fill: var(--theme-toolbar-photon-icon-color);
   background-image: var(--close-button-image);
 }
 
@@ -1043,4 +1122,9 @@ html[dir="rtl"] .webconsole-output-wrapper img.collapse-button.arrow:not(.expand
 
 .theme-twisty {
   cursor: default;
+}
+
+#split-console-close-button::before {
+  fill: var(--theme-toolbar-photon-icon-color);
+  background-image: var(--close-button-image);
 }

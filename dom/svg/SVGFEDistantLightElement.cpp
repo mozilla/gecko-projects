@@ -18,7 +18,7 @@ namespace dom {
 JSObject*
 SVGFEDistantLightElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEDistantLightElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEDistantLightElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGFEDistantLightElement::sNumberInfo[2] =
@@ -29,7 +29,7 @@ nsSVGElement::NumberInfo SVGFEDistantLightElement::sNumberInfo[2] =
 
 //----------------------------------------------------------------------
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEDistantLightElement)
 

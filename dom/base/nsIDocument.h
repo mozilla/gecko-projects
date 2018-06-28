@@ -16,7 +16,6 @@
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIContentViewer.h"
-#include "nsIDocumentObserver.h"         // for typedef (nsUpdateType)
 #include "nsIInterfaceRequestor.h"
 #include "nsILoadContext.h"
 #include "nsILoadGroup.h"                // for member (in nsCOMPtr)
@@ -93,7 +92,6 @@ class nsIDocShell;
 class nsIDocShellTreeItem;
 class nsIDocumentEncoder;
 class nsIDocumentObserver;
-class nsIDOMDocument;
 class nsIHTMLCollection;
 class nsILayoutHistoryState;
 class nsILoadContext;
@@ -118,6 +116,7 @@ class nsWindowSizes;
 class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
+class nsIXULWindow;
 
 namespace mozilla {
 class AbstractThread;
@@ -138,7 +137,6 @@ class Rule;
 } // namespace css
 
 namespace dom {
-class AboutCapabilities;
 class Animation;
 class AnonymousContent;
 class Attr;
@@ -550,9 +548,6 @@ public:
 
   nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
                              bool aNotify) override;
-  nsresult InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
-                                    bool aNotify) override;
-  void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) final;
   void RemoveChildNode(nsIContent* aKid, bool aNotify) final;
   nsresult Clone(mozilla::dom::NodeInfo* aNodeInfo,
                  nsINode **aResult,
@@ -801,53 +796,6 @@ public:
   }
 
   /**
-   * This gets fired when the element that an id refers to changes.
-   * This fires at difficult times. It is generally not safe to do anything
-   * which could modify the DOM in any way. Use
-   * nsContentUtils::AddScriptRunner.
-   * @return true to keep the callback in the callback set, false
-   * to remove it.
-   */
-  typedef bool (* IDTargetObserver)(Element* aOldElement,
-                                    Element* aNewelement, void* aData);
-
-  /**
-   * Add an IDTargetObserver for a specific ID. The IDTargetObserver
-   * will be fired whenever the content associated with the ID changes
-   * in the future. If aForImage is true, mozSetImageElement can override
-   * what content is associated with the ID. In that case the IDTargetObserver
-   * will be notified at those times when the result of LookupImageElement
-   * changes.
-   * At most one (aObserver, aData, aForImage) triple can be
-   * registered for each ID.
-   * @return the content currently associated with the ID.
-   */
-  Element* AddIDTargetObserver(nsAtom* aID, IDTargetObserver aObserver,
-                               void* aData, bool aForImage);
-  /**
-   * Remove the (aObserver, aData, aForImage) triple for a specific ID, if
-   * registered.
-   */
-  void RemoveIDTargetObserver(nsAtom* aID, IDTargetObserver aObserver,
-                              void* aData, bool aForImage);
-
-  /**
-   * Check that aId is not empty and log a message to the console
-   * service if it is.
-   * @returns true if aId looks correct, false otherwise.
-   */
-  inline bool CheckGetElementByIdArg(const nsAString& aId)
-  {
-    if (aId.IsEmpty()) {
-      ReportEmptyGetElementByIdArg();
-      return false;
-    }
-    return true;
-  }
-
-  void ReportEmptyGetElementByIdArg();
-
-  /**
    * Get the Content-Type of this document.
    */
   void GetContentType(nsAString& aContentType);
@@ -886,14 +834,6 @@ public:
   void SetBidiEnabled()
   {
     mBidiEnabled = true;
-  }
-
-  /**
-   * Check if the document contains (or has contained) any MathML elements.
-   */
-  bool GetMathMLEnabled() const
-  {
-    return mMathMLEnabled;
   }
 
   void SetMathMLEnabled()
@@ -1249,6 +1189,17 @@ public:
   nsViewportInfo GetViewportInfo(const mozilla::ScreenIntSize& aDisplaySize);
 
   /**
+   * It updates the viewport overflow type with the given two widths
+   * and the viewport setting of the document.
+   * This should only be called when there is out-of-reach overflow
+   * happens on the viewport, i.e. the viewport should be using
+   * `overflow: hidden`. And it should only be called on a top level
+   * content document.
+   */
+  void UpdateViewportOverflowType(nscoord aScrolledWidth,
+                                  nscoord aScrollportWidth);
+
+  /**
    * True iff this doc will ignore manual character encoding overrides.
    */
   virtual bool WillIgnoreCharsetOverride() {
@@ -1450,7 +1401,7 @@ public:
     {
       MOZ_ASSERT(NS_IsMainThread());
       SelectorCacheKey* key = new SelectorCacheKey(aSelector);
-      mTable.Put(key->mKey, Move(aSelectorList));
+      mTable.Put(key->mKey, std::move(aSelectorList));
       AddObject(key);
     }
 
@@ -1509,41 +1460,12 @@ public:
    * Style sheets are ordered, most significant last.
    */
 
-  /**
-   * These exists to allow us to on-demand load user-agent style sheets that
-   * would otherwise be loaded by nsDocumentViewer::CreateStyleSet. This allows
-   * us to keep the memory used by a document's rule cascade data (the stuff in
-   * its nsStyleSet's nsCSSRuleProcessors) - which can be considerable - lower
-   * than it would be if we loaded all built-in user-agent style sheets up
-   * front.
-   *
-   * By "built-in" user-agent style sheets we mean the user-agent style sheets
-   * that gecko itself supplies (such as html.css and svg.css) as opposed to
-   * user-agent level style sheets inserted by add-ons or the like.
-   *
-   * This function prepends the given style sheet to the document's style set
-   * in order to make sure that it does not override user-agent style sheets
-   * supplied by add-ons or by the app (Firefox OS or Firefox Mobile, for
-   * example), since their sheets should override built-in sheets.
-   *
-   * TODO We can get rid of the whole concept of delayed loading if we fix
-   * bug 77999.
-   */
-  void EnsureOnDemandBuiltInUASheet(mozilla::StyleSheet* aSheet);
-
   mozilla::dom::StyleSheetList* StyleSheets()
   {
     return &DocumentOrShadowRoot::EnsureDOMStyleSheets();
   }
 
-  /**
-   * Insert a sheet at a particular spot in the stylesheet list (zero-based)
-   * @param aSheet the sheet to insert
-   * @param aIndex the index to insert at.
-   * @throws no exceptions
-   */
-  void InsertStyleSheetAt(mozilla::StyleSheet* aSheet, size_t aIndex);
-
+  void InsertSheetAt(size_t aIndex, mozilla::StyleSheet&);
 
   /**
    * Replace the stylesheets in aOldSheets with the stylesheets in
@@ -1559,8 +1481,15 @@ public:
 
   /**
    * Add a stylesheet to the document
+   *
+   * TODO(emilio): This is only used by parts of editor that are no longer in
+   * use by m-c or c-c, so remove.
    */
-  void AddStyleSheet(mozilla::StyleSheet* aSheet);
+  void AddStyleSheet(mozilla::StyleSheet* aSheet)
+  {
+    MOZ_ASSERT(aSheet);
+    InsertSheetAt(SheetCount(), *aSheet);
+  }
 
   /**
    * Remove a stylesheet from the document
@@ -1908,8 +1837,9 @@ public:
   // BeginUpdate must be called before any batch of modifications of the
   // content model or of style data, EndUpdate must be called afterward.
   // To make this easy and painless, use the mozAutoDocUpdate helper class.
-  void BeginUpdate(nsUpdateType aUpdateType);
-  virtual void EndUpdate(nsUpdateType aUpdateType) = 0;
+  void BeginUpdate();
+  virtual void EndUpdate() = 0;
+  uint32_t UpdateNestingLevel() { return mUpdateNestLevel; }
 
   virtual void BeginLoad() = 0;
   virtual void EndLoad() = 0;
@@ -2058,7 +1988,13 @@ public:
   }
   bool LoadsFullXULStyleSheetUpFront()
   {
-    return IsXULDocument() || AllowXULXBL();
+    if (IsXULDocument()) {
+      return true;
+    }
+    if (IsSVGDocument()) {
+      return false;
+    }
+    return AllowXULXBL();
   }
 
   bool IsScriptEnabled();
@@ -3138,6 +3074,10 @@ public:
 
   nsIDocument* GetTopLevelContentDocument();
 
+  // Returns the associated XUL window if this is a top-level chrome document,
+  // null otherwise.
+  already_AddRefed<nsIXULWindow> GetXULWindowIfToplevelChrome() const;
+
   already_AddRefed<Element>
   CreateElement(const nsAString& aTagName,
                 const mozilla::dom::ElementCreationOptionsOrString& aOptions,
@@ -3185,9 +3125,6 @@ public:
   void GetReferrer(nsAString& aReferrer) const;
   void GetLastModified(nsAString& aLastModified) const;
   void GetReadyState(nsAString& aReadyState) const;
-
-  already_AddRefed<mozilla::dom::AboutCapabilities> GetAboutCapabilities(
-    ErrorResult& aRv);
 
   void GetTitle(nsAString& aTitle);
   void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv);
@@ -3430,23 +3367,25 @@ public:
 
   void PropagateUseCounters(nsIDocument* aParentDocument);
 
-  void SetDocumentIncCounter(mozilla::IncCounter aIncCounter, uint32_t inc = 1)
-  {
-    mIncCounters[aIncCounter] += inc;
-  }
-
+  // Called to track whether this document has had any interaction.
+  // This is used to track whether we should permit "beforeunload".
   void SetUserHasInteracted(bool aUserHasInteracted);
   bool UserHasInteracted()
   {
     return mUserHasInteracted;
   }
 
-  // This would be called when document get activated by specific user gestures
-  // and propagate the user activation flag to its parent.
-  void NotifyUserActivation();
+  // This should be called when this document receives events which are likely
+  // to be user interaction with the document, rather than the byproduct of
+  // interaction with the browser (i.e. a keypress to scroll the view port,
+  // keyboard shortcuts, etc). This is used to decide whether we should
+  // permit autoplay audible media. This also gesture activates all other
+  // content documents in this tab.
+  void NotifyUserGestureActivation();
 
-  // Return true if document has interacted by specific user gestures.
-  bool HasBeenUserActivated();
+  // Return true if NotifyUserGestureActivation() has been called on any
+  // document in the document tree.
+  bool HasBeenUserGestureActivated();
 
   bool HasScriptsBlockedBySandbox();
 
@@ -3584,6 +3523,8 @@ public:
    */
   nsIContent* GetContentInThisDocument(nsIFrame* aFrame) const;
 
+  void ReportShadowDOMUsage();
+
 protected:
   already_AddRefed<nsIPrincipal> MaybeDowngradePrincipal(nsIPrincipal* aPrincipal);
 
@@ -3653,7 +3594,6 @@ protected:
 
   void UpdateDocumentStates(mozilla::EventStates);
 
-  void AddOnDemandBuiltInUASheet(mozilla::StyleSheet* aSheet);
   void RemoveDocStyleSheetsFromStyleSets();
   void RemoveStyleSheetsFromStyleSets(
       const nsTArray<RefPtr<mozilla::StyleSheet>>& aSheets,
@@ -3741,14 +3681,6 @@ protected:
 
   // Return the same type parent docuement if exists, or return null.
   nsIDocument* GetSameTypeParentDocument();
-
-  // Return the first parent document with same pricipal, return nullptr if we
-  // can't find it.
-  nsIDocument* GetFirstParentDocumentWithSamePrincipal(nsIPrincipal* aPrincipal);
-
-  // Activate the flag 'mUserHasActivatedInteraction' by specific user gestures.
-  void ActivateByUserGesture();
-  void MaybeActivateByUserGesture(nsIPrincipal* aPrincipal);
 
   // Helpers for GetElementsByName.
   static bool MatchNameAttribute(mozilla::dom::Element* aElement,
@@ -3863,8 +3795,6 @@ protected:
   mozilla::EventStates mDocumentState;
 
   RefPtr<mozilla::dom::Promise> mReadyForIdle;
-
-  RefPtr<mozilla::dom::AboutCapabilities> mAboutCapabilities;
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
@@ -4100,6 +4030,8 @@ protected:
   // that we only report them once for the document.
   bool mReportedUseCounters: 1;
 
+  bool mHasReportedShadowDOMUsage: 1;
+
 #ifdef DEBUG
 public:
   bool mWillReparent: 1;
@@ -4286,15 +4218,15 @@ protected:
   // for this child document.
   std::bitset<mozilla::eUseCounter_Count> mNotifiedPageForUseCounter;
 
-  // Count the number of times something is seen in a document.
-  mozilla::Array<uint16_t, mozilla::eIncCounter_Count> mIncCounters;
-
   // Whether the user has interacted with the document or not:
   bool mUserHasInteracted;
 
-  // Whether the user has interacted with the document via some specific user
-  // gestures.
-  bool mUserHasActivatedInteraction;
+  // Whether the user has interacted with the document via a restricted
+  // set of gestures which are likely to be interaction with the document,
+  // and not events that are fired as a byproduct of the user interacting
+  // with the browser (events for like scrolling the page, keyboard short
+  // cuts, etc).
+  bool mUserGestureActivated;
 
   mozilla::TimeStamp mPageUnloadingEventTimeStamp;
 
@@ -4325,13 +4257,37 @@ protected:
   // Our update nesting level
   uint32_t mUpdateNestLevel;
 
-  enum ViewportType {
+  enum ViewportType : uint8_t {
     DisplayWidthHeight,
     Specified,
     Unknown
   };
 
   ViewportType mViewportType;
+
+  // Enum for how content in this document overflows viewport causing
+  // out-of-reach issue. Currently it only takes horizontal overflow
+  // into consideration. This enum and the corresponding field is only
+  // set and read on a top level content document.
+  enum class ViewportOverflowType : uint8_t {
+    // Viewport doesn't have out-of-reach overflow content, either
+    // because the content doesn't overflow, or the viewport doesn't
+    // have "overflow: hidden".
+    NoOverflow,
+
+    // All following items indicates that the content overflows the
+    // scroll port which causing out-of-reach content.
+
+    // Meta viewport is disabled or the document is in desktop mode.
+    Desktop,
+    // The content does not overflow the minimum-scale size. When there
+    // is no minimum scale specified, the default value used by Blink,
+    // 0.25, is used for this matter.
+    ButNotMinScaleSize,
+    // The content overflows the minimum-scale size.
+    MinScaleSize,
+  };
+  ViewportOverflowType mViewportOverflowType;
 
   PLDHashTable* mSubDocuments;
 
@@ -4434,7 +4390,6 @@ protected:
   nsCOMPtr<nsIRunnable> mMaybeEndOutermostXBLUpdateRunner;
   nsCOMPtr<nsIRequest> mOnloadBlocker;
 
-  nsTArray<RefPtr<mozilla::StyleSheet>> mOnDemandBuiltInUASheets;
   nsTArray<RefPtr<mozilla::StyleSheet>> mAdditionalSheets[AdditionalSheetTypeCount];
 
   // Member to store out last-selected stylesheet set.
@@ -4577,7 +4532,7 @@ NS_NewVideoDocument(nsIDocument** aInstancePtrResult);
 // -- this method will not attempt to get a principal based on aDocumentURI.
 // Also, both aDocumentURI and aBaseURI must not be null.
 nsresult
-NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
+NS_NewDOMDocument(nsIDocument** aInstancePtrResult,
                   const nsAString& aNamespaceURI,
                   const nsAString& aQualifiedName,
                   mozilla::dom::DocumentType* aDoctype,
@@ -4591,7 +4546,7 @@ NS_NewDOMDocument(nsIDOMDocument** aInstancePtrResult,
 // This is used only for xbl documents created from the startup cache.
 // Non-cached documents are created in the same manner as xml documents.
 nsresult
-NS_NewXBLDocument(nsIDOMDocument** aInstancePtrResult,
+NS_NewXBLDocument(nsIDocument** aInstancePtrResult,
                   nsIURI* aDocumentURI,
                   nsIURI* aBaseURI,
                   nsIPrincipal* aPrincipal);
@@ -4613,13 +4568,29 @@ nsINode::OwnerDocAsNode() const
   return OwnerDoc();
 }
 
+// ShouldUseXBLScope is defined here as a template so that we can get the faster
+// version of IsInAnonymousSubtree if we're statically known to be an
+// nsIContent.  we could try defining ShouldUseXBLScope separately on nsINode
+// and nsIContent, but then we couldn't put its nsINode implementation here
+// (because this header does not include nsIContent) and we can't put it in
+// nsIContent.h, because the definition of nsIContent::IsInAnonymousSubtree is
+// in nsIContentInlines.h.  And then we get include hell from people trying to
+// call nsINode::GetParentObject but not including nsIContentInlines.h and with
+// no really good way to include it.
+template<typename T>
+inline bool ShouldUseXBLScope(const T* aNode)
+{
+  return aNode->IsInAnonymousSubtree() &&
+         !aNode->IsAnonymousContentInSVGUseSubtree();
+}
+
 inline mozilla::dom::ParentObject
 nsINode::GetParentObject() const
 {
   mozilla::dom::ParentObject p(OwnerDoc());
     // Note that mUseXBLScope is a no-op for chrome, and other places where we
     // don't use XBL scopes.
-  p.mUseXBLScope = IsInAnonymousSubtree() && !IsAnonymousContentInSVGUseSubtree();
+  p.mUseXBLScope = ShouldUseXBLScope(this);
   return p;
 }
 

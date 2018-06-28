@@ -23,6 +23,7 @@ XPIDL_SOURCES += [
     'nsIKeygenThread.idl',
     'nsIKeyModule.idl',
     'nsILocalCertService.idl',
+    'nsINSSComponent.idl',
     'nsINSSErrorsService.idl',
     'nsINSSVersion.idl',
     'nsIPK11Token.idl',
@@ -68,6 +69,7 @@ EXPORTS += [
     'nsRandomGenerator.h',
     'nsSecurityHeaderParser.h',
     'NSSErrorsService.h',
+    'RootCertificateTelemetryUtils.h',
     'ScopedNSSTypes.h',
     'SharedCertVerifier.h',
 ]
@@ -108,7 +110,6 @@ UNIFIED_SOURCES += [
     'nsNSSCertTrust.cpp',
     'nsNSSCertValidity.cpp',
     'nsNSSComponent.cpp',
-    'nsNSSErrors.cpp',
     'nsNSSIOLayer.cpp',
     'nsNSSModule.cpp',
     'nsNSSVersion.cpp',

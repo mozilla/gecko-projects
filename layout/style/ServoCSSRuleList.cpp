@@ -8,19 +8,19 @@
 
 #include "mozilla/ServoCSSRuleList.h"
 
+#include "mozilla/dom/CSSCounterStyleRule.h"
+#include "mozilla/dom/CSSFontFaceRule.h"
+#include "mozilla/dom/CSSFontFeatureValuesRule.h" 
+#include "mozilla/dom/CSSImportRule.h"
+#include "mozilla/dom/CSSKeyframesRule.h"
+#include "mozilla/dom/CSSMediaRule.h"
+#include "mozilla/dom/CSSMozDocumentRule.h"
+#include "mozilla/dom/CSSNamespaceRule.h"
+#include "mozilla/dom/CSSPageRule.h"
+#include "mozilla/dom/CSSStyleRule.h"
+#include "mozilla/dom/CSSSupportsRule.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/ServoBindings.h"
-#include "mozilla/ServoCounterStyleRule.h"
-#include "mozilla/ServoDocumentRule.h"
-#include "mozilla/ServoImportRule.h"
-#include "mozilla/ServoFontFaceRule.h"
-#include "mozilla/ServoFontFeatureValuesRule.h"
-#include "mozilla/ServoKeyframesRule.h"
-#include "mozilla/ServoMediaRule.h"
-#include "mozilla/ServoNamespaceRule.h"
-#include "mozilla/ServoPageRule.h"
-#include "mozilla/ServoStyleRule.h"
-#include "mozilla/ServoSupportsRule.h"
 #include "mozilla/StyleSheet.h"
 
 using namespace mozilla::dom;
@@ -83,14 +83,14 @@ ServoCSSRuleList::GetRule(uint32_t aIndex)
     RefPtr<css::Rule> ruleObj = nullptr;
     switch (rule) {
 #define CASE_RULE(const_, name_)                                            \
-      case CSSRuleBinding::const_##_RULE: {                                 \
+      case CSSRule_Binding::const_##_RULE: {                                 \
         uint32_t line = 0, column = 0;                                      \
         RefPtr<RawServo##name_##Rule> rule =                                \
           Servo_CssRules_Get##name_##RuleAt(                                \
               mRawRules, aIndex, &line, &column                             \
           ).Consume();                                                      \
         MOZ_ASSERT(rule);                                                   \
-        ruleObj = new Servo##name_##Rule(rule.forget(), line, column);      \
+        ruleObj = new CSS##name_##Rule(rule.forget(), line, column);        \
         break;                                                              \
       }
       CASE_RULE(STYLE, Style)
@@ -99,13 +99,13 @@ ServoCSSRuleList::GetRule(uint32_t aIndex)
       CASE_RULE(NAMESPACE, Namespace)
       CASE_RULE(PAGE, Page)
       CASE_RULE(SUPPORTS, Supports)
-      CASE_RULE(DOCUMENT, Document)
+      CASE_RULE(DOCUMENT, MozDocument)
       CASE_RULE(IMPORT, Import)
       CASE_RULE(FONT_FEATURE_VALUES, FontFeatureValues)
       CASE_RULE(FONT_FACE, FontFace)
       CASE_RULE(COUNTER_STYLE, CounterStyle)
 #undef CASE_RULE
-      case CSSRuleBinding::KEYFRAME_RULE:
+      case CSSRule_Binding::KEYFRAME_RULE:
         MOZ_ASSERT_UNREACHABLE("keyframe rule cannot be here");
         return nullptr;
       default:

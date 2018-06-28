@@ -81,7 +81,6 @@
 #include "XULFormControlAccessible.h"
 #include "XULListboxAccessibleWrap.h"
 #include "XULMenuAccessibleWrap.h"
-#include "XULSliderAccessible.h"
 #include "XULTabAccessible.h"
 #include "XULTreeGridAccessibleWrap.h"
 #endif
@@ -405,8 +404,9 @@ NS_IMETHODIMP
 nsAccessibilityService::Observe(nsISupports *aSubject, const char *aTopic,
                          const char16_t *aData)
 {
-  if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID))
+  if (!nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     Shutdown();
+  }
 
   return NS_OK;
 }
@@ -1054,6 +1054,20 @@ nsAccessibilityService::CreateAccessible(nsINode* aNode,
   // Check frame and its visibility. Note, hidden frame allows visible
   // elements in subtree.
   if (!frame || !frame->StyleVisibility()->IsVisible()) {
+    // display:contents element doesn't have a frame, but retains the semantics.
+    // All its children are unaffected.
+    if (content->IsElement() && content->AsElement()->IsDisplayContents()) {
+      const HTMLMarkupMapInfo* markupMap =
+        mHTMLMarkupMap.Get(content->NodeInfo()->NameAtom());
+      if (markupMap && markupMap->new_func) {
+        RefPtr<Accessible> newAcc =
+          markupMap->new_func(content->AsElement(), aContext);
+        document->BindToDocument(newAcc, aria::GetRoleMap(content->AsElement()));
+        return newAcc;
+      }
+      return nullptr;
+    }
+
     if (aIsSubtreeHidden && !frame)
       *aIsSubtreeHidden = true;
 
@@ -1646,17 +1660,16 @@ nsAccessibilityService::RemoveNativeRootAccessible(Accessible* aAccessible)
 }
 
 bool
-nsAccessibilityService::HasAccessible(nsIDOMNode* aDOMNode)
+nsAccessibilityService::HasAccessible(nsINode* aDOMNode)
 {
-  nsCOMPtr<nsINode> node(do_QueryInterface(aDOMNode));
-  if (!node)
+  if (!aDOMNode)
     return false;
 
-  DocAccessible* document = GetDocAccessible(node->OwnerDoc());
+  DocAccessible* document = GetDocAccessible(aDOMNode->OwnerDoc());
   if (!document)
     return false;
 
-  return document->HasAccessible(node);
+  return document->HasAccessible(aDOMNode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

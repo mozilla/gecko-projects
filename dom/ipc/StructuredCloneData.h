@@ -48,26 +48,26 @@ class SharedJSAllocatedData final
 {
 public:
   explicit SharedJSAllocatedData(JSStructuredCloneData&& aData)
-    : mData(Move(aData))
+    : mData(std::move(aData))
   { }
 
   static already_AddRefed<SharedJSAllocatedData>
   CreateFromExternalData(const char* aData, size_t aDataLength)
   {
-    JSStructuredCloneData buf;
+    JSStructuredCloneData buf(JS::StructuredCloneScope::DifferentProcess);
     buf.AppendBytes(aData, aDataLength);
     RefPtr<SharedJSAllocatedData> sharedData =
-      new SharedJSAllocatedData(Move(buf));
+      new SharedJSAllocatedData(std::move(buf));
     return sharedData.forget();
   }
 
   static already_AddRefed<SharedJSAllocatedData>
   CreateFromExternalData(const JSStructuredCloneData& aData)
   {
-    JSStructuredCloneData buf;
+    JSStructuredCloneData buf(aData.scope());
     buf.Append(aData);
     RefPtr<SharedJSAllocatedData> sharedData =
-      new SharedJSAllocatedData(Move(buf));
+      new SharedJSAllocatedData(std::move(buf));
     return sharedData.forget();
   }
 
@@ -236,8 +236,7 @@ public:
   {
     auto iter = aData.Start();
     bool success = false;
-    mExternalData =
-      aData.Borrow<js::SystemAllocPolicy>(iter, aData.Size(), &success);
+    mExternalData = aData.Borrow(iter, aData.Size(), &success);
     mInitialized = true;
     return success;
   }
@@ -266,6 +265,11 @@ public:
     return mSharedData ? mSharedData->Data() : mExternalData;
   }
 
+  void InitScope(JS::StructuredCloneScope aScope)
+  {
+    Data().initScope(aScope);
+  }
+
   size_t DataLength() const
   {
     return mSharedData ? mSharedData->DataLength() : mExternalData.Size();
@@ -292,6 +296,9 @@ public:
 
 protected:
   explicit StructuredCloneData(TransferringSupport aSupportsTransferring);
+
+  already_AddRefed<SharedJSAllocatedData>
+  TakeSharedData();
 
 private:
   JSStructuredCloneData mExternalData;

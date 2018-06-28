@@ -17,7 +17,9 @@ struct RustSdpError;
 struct RustMediaSection;
 struct RustAttributeList;
 struct StringVec;
+struct U8Vec;
 struct U32Vec;
+struct U16Vec;
 struct RustHeapString;
 
 enum class RustSdpAddrType {
@@ -32,7 +34,7 @@ struct RustIpAddr {
 };
 
 struct StringView {
-  char* buf;
+  const char* buf;
   size_t len;
 };
 
@@ -94,10 +96,67 @@ struct RustSdpAttributeRtpmap {
   uint32_t channels;
 };
 
+struct RustSdpAttributeRtcpFb {
+  uint32_t payloadType;
+  uint32_t feedbackType;
+  StringView parameter;
+  StringView extra;
+};
+
+struct RustSdpAttributeRidParameters {
+  uint32_t max_width;
+  uint32_t max_height;
+  uint32_t max_fps;
+  uint32_t max_fs;
+  uint32_t max_br;
+  uint32_t max_pps;
+  StringVec* unknown;
+};
+
+struct RustSdpAttributeRid {
+  StringView id;
+  uint32_t direction;
+  U16Vec* formats;
+  RustSdpAttributeRidParameters params;
+  StringVec* depends;
+};
+
+struct RustSdpAttributeFmtpParameters {
+  // H264
+  uint32_t packetization_mode;
+  bool level_asymmetry_allowed;
+  uint32_t profile_level_id;
+  uint32_t max_fs;
+  uint32_t max_cpb;
+  uint32_t max_dpb;
+  uint32_t max_br;
+  uint32_t max_mbps;
+
+  // VP8 and VP9
+  // max_fs, already defined in H264
+  uint32_t max_fr;
+
+  // Opus
+  uint32_t maxplaybackrate;
+  bool usedtx;
+  bool stereo;
+  bool useinbandfec;
+  bool cbr;
+
+  // telephone-event
+  StringView dtmf_tones;
+
+  // Red codecs
+  U8Vec* encodings;
+
+  // Unknown
+  StringVec* unknown_tokens;
+};
+
 struct RustSdpAttributeFmtp {
   uint8_t payloadType;
   StringView codecName;
-  StringVec* tokens;
+  RustSdpAttributeFmtpParameters parameters;
 };
 
 struct RustSdpAttributeFlags {
@@ -142,6 +201,22 @@ struct RustSdpAttributeSctpmap {
   uint32_t channels;
 };
 
+struct RustSdpAttributeSimulcastId {
+  StringView id;
+  bool paused;
+};
+
+struct RustSdpAttributeSimulcastIdVec;
+struct RustSdpAttributeSimulcastVersion {
+  RustSdpAttributeSimulcastIdVec* ids;
+};
+
+struct RustSdpAttributeSimulcastVersionVec;
+struct RustSdpAttributeSimulcast {
+  RustSdpAttributeSimulcastVersionVec* send;
+  RustSdpAttributeSimulcastVersionVec* recv;
+};
+
 enum class RustDirection {
   kRustRecvonly,
   kRustSendonly,
@@ -173,6 +248,12 @@ nsresult string_vec_get_view(const StringVec* vec, size_t index,
 size_t u32_vec_len(const U32Vec* vec);
 nsresult u32_vec_get(const U32Vec* vec, size_t index, uint32_t* ret);
 
+size_t u16_vec_len(const U16Vec* vec);
+nsresult u16_vec_get(const U16Vec* vec, size_t index, uint16_t* ret);
+
+size_t u8_vec_len(const U8Vec* vec);
+nsresult u8_vec_get(const U8Vec* vec, size_t index, uint8_t* ret);
+
 void sdp_free_string(char* string);
 
 nsresult parse_sdp(const char* sdp, uint32_t length, bool fail_on_warning,
@@ -198,12 +279,17 @@ RustAttributeList* get_sdp_session_attributes(const RustSdpSession* aSess);
 size_t sdp_media_section_count(const RustSdpSession* aSess);
 RustMediaSection* sdp_get_media_section(const RustSdpSession* aSess,
                                         size_t aLevel);
+nsresult sdp_add_media_section(RustSdpSession* aSess, uint32_t aMediaType,
+                               uint32_t aDirection, uint32_t aPort,
+                               uint32_t aProtocol, uint32_t aAddrType,
+                               StringView aAddr);
 RustSdpMediaValue sdp_rust_get_media_type(const RustMediaSection* aMediaSec);
 RustSdpProtocolValue
 sdp_get_media_protocol(const RustMediaSection* aMediaSec);
 RustSdpFormatType sdp_get_format_type(const RustMediaSection* aMediaSec);
 StringVec* sdp_get_format_string_vec(const RustMediaSection* aMediaSec);
 U32Vec* sdp_get_format_u32_vec(const RustMediaSection* aMediaSec);
+void sdp_set_media_port(const RustMediaSection* aMediaSec, uint32_t aPort);
 uint32_t sdp_get_media_port(const RustMediaSection* aMediaSec);
 uint32_t sdp_get_media_port_count(const RustMediaSection* aMediaSec);
 uint32_t sdp_get_media_bandwidth(const RustMediaSection* aMediaSec,
@@ -214,6 +300,14 @@ nsresult sdp_get_media_connection(const RustMediaSection* aMediaSec,
 
 RustAttributeList*
 sdp_get_media_attribute_list(const RustMediaSection* aMediaSec);
+
+nsresult sdp_media_add_codec(const RustMediaSection* aMediaSec,
+                             uint8_t aPT, StringView aCodecName,
+                             uint32_t aClockrate, uint16_t channels);
+void sdp_media_clear_codecs(const RustMediaSection* aMediaSec);
+nsresult sdp_media_add_datachannel(const RustMediaSection* aMediaSec,
+                                   StringView aName, uint16_t aPort,
+                                   uint16_t streams, uint32_t aMessageSize);
 
 nsresult sdp_get_iceufrag(const RustAttributeList* aList, StringView* ret);
 nsresult sdp_get_icepwd(const RustAttributeList* aList, StringView* ret);
@@ -239,6 +333,8 @@ size_t sdp_get_fmtp(const RustAttributeList* aList, size_t listSize,
                     RustSdpAttributeFmtp* ret);
 
 int64_t sdp_get_ptime(const RustAttributeList* aList);
+int64_t sdp_get_max_msg_size(const RustAttributeList* aList);
+int64_t sdp_get_sctp_port(const RustAttributeList* aList);
 
 RustSdpAttributeFlags sdp_get_attribute_flags(const RustAttributeList* aList);
 
@@ -259,6 +355,11 @@ nsresult sdp_get_groups(const RustAttributeList* aList, size_t listSize,
 nsresult sdp_get_rtcp(const RustAttributeList* aList,
                       RustSdpAttributeRtcp* ret);
 
+
+size_t sdp_get_rtcpfb_count(const RustAttributeList* aList);
+void sdp_get_rtcpfbs(const RustAttributeList* aList, size_t listSize,
+                     RustSdpAttributeRtcpFb* ret);
+
 size_t sdp_get_imageattr_count(const RustAttributeList* aList);
 void sdp_get_imageattrs(const RustAttributeList* aList, size_t listSize,
                         StringView* ret);
@@ -266,6 +367,21 @@ void sdp_get_imageattrs(const RustAttributeList* aList, size_t listSize,
 size_t sdp_get_sctpmap_count(const RustAttributeList* aList);
 void sdp_get_sctpmaps(const RustAttributeList* aList, size_t listSize,
                       RustSdpAttributeSctpmap* ret);
+
+nsresult sdp_get_simulcast(const RustAttributeList* aList,
+                           RustSdpAttributeSimulcast* ret);
+
+size_t sdp_simulcast_get_version_count(
+                    const RustSdpAttributeSimulcastVersionVec* aVersionList);
+void sdp_simulcast_get_versions(
+                    const RustSdpAttributeSimulcastVersionVec* aversionList,
+                    size_t listSize,
+                    RustSdpAttributeSimulcastVersion* ret);
+
+size_t sdp_simulcast_get_ids_count(const RustSdpAttributeSimulcastIdVec* aAlts);
+void sdp_simulcast_get_ids(const RustSdpAttributeSimulcastIdVec* aAlts,
+                           size_t listSize,
+                           RustSdpAttributeSimulcastId* ret);
 
 RustDirection sdp_get_direction(const RustAttributeList* aList);
 
@@ -277,7 +393,7 @@ void sdp_get_remote_candidates(const RustAttributeList* aList,
 
 size_t sdp_get_rid_count(const RustAttributeList* aList);
 void sdp_get_rids(const RustAttributeList* aList, size_t listSize,
-                  StringView* ret);
+                  RustSdpAttributeRid* ret);
 
 
 size_t sdp_get_extmap_count(const RustAttributeList* aList);

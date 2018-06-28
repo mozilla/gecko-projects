@@ -33,7 +33,7 @@ namespace dom {
 JSObject*
 SVGPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGPathElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGPathElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -56,7 +56,7 @@ SVGPathElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGPathElement)
 

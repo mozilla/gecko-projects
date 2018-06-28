@@ -40,7 +40,7 @@ Worker::Constructor(const GlobalObject& aGlobal, const nsAString& aScriptURL,
 Worker::Worker(nsIGlobalObject* aGlobalObject,
                already_AddRefed<WorkerPrivate> aWorkerPrivate)
   : DOMEventTargetHelper(aGlobalObject)
-  , mWorkerPrivate(Move(aWorkerPrivate))
+  , mWorkerPrivate(std::move(aWorkerPrivate))
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->SetParentEventTargetRef(this);
@@ -55,7 +55,7 @@ JSObject*
 Worker::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   JS::Rooted<JSObject*> wrapper(aCx,
-    WorkerBinding::Wrap(aCx, this, aGivenProto));
+    Worker_Binding::Wrap(aCx, this, aGivenProto));
   if (wrapper) {
     // Most DOM objects don't assume they have a reflector. If they don't have
     // one and need one, they create it. But in workers code, we assume that the

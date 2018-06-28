@@ -273,10 +273,7 @@ PlacesController.prototype = {
       let node = this._view.selectedNode;
       PlacesUIUtils.showBookmarkDialog({ action: "add",
                                          type: "bookmark",
-                                         hiddenRows: [ "description",
-                                                        "keyword",
-                                                        "location",
-                                                        "loadInSidebar" ],
+                                         hiddenRows: [ "keyword", "location" ],
                                          uri: Services.io.newURI(node.uri),
                                          title: node.title
                                        }, window.top);
@@ -1096,7 +1093,7 @@ PlacesController.prototype = {
 
     if (hasData) {
       this.clipboard.setData(xferable,
-                             this.cutNodes.length > 0 ? this : null,
+                             aAction == "cut" ? this : null,
                              Ci.nsIClipboard.kGlobalClipboard);
     }
   },

@@ -4,9 +4,6 @@
 
 ChromeUtils.import("resource://gre/modules/BookmarkJSONUtils.jsm");
 
-const LOAD_IN_SIDEBAR_ANNO = "bookmarkProperties/loadInSidebar";
-const DESCRIPTION_ANNO = "bookmarkProperties/description";
-
 // An object representing the contents of bookmarks.json.
 var test_bookmarks = {
   menu: [
@@ -46,17 +43,14 @@ var test_bookmarks = {
     {
       guid: "OCyeUO5uu9FL",
       title: "test",
-      description: "folder test comment",
       dateAdded: 1177541020000000,
       lastModified: 1177541050000000,
       children: [
         { guid: "OCyeUO5uu9GX",
           title: "test post keyword",
-          description: "item description",
           dateAdded: 1177375336000000,
           lastModified: 1177375423000000,
           keyword: "test",
-          sidebar: true,
           postData: "hidden1%3Dbar&text1%3D%25s",
           charset: "ISO-8859-1"
         }
@@ -90,7 +84,31 @@ var test_bookmarks = {
       lastModified: 1507025844703000,
       url: "http://example.tld/tagged",
       tags: ["foo"],
-    }
+    },
+    { guid: "lOZGoFR1eXbl",
+      title: "Bookmarks Toolbar Shortcut",
+      dateAdded: 1507025843703000,
+      lastModified: 1507025844703000,
+      url: `place:parent=${PlacesUtils.bookmarks.toolbarGuid}`,
+    },
+    { guid: "7yJWnBVhjRtP",
+      title: "Folder Shortcut",
+      dateAdded: 1507025843703000,
+      lastModified: 1507025844703000,
+      url: `place:parent=OCyeUO5uu9FF`,
+    },
+    { guid: "vm5QXWuWc12l",
+      title: "Folder Shortcut 2",
+      dateAdded: 1507025843703000,
+      lastModified: 1507025844703000,
+      url: "place:invalidOldParentId=6123443&excludeItems=1",
+    },
+    { guid: "Icg1XlIozA1D",
+      title: "Folder Shortcut 3",
+      dateAdded: 1507025843703000,
+      lastModified: 1507025844703000,
+      url: `place:parent=OCyeUO5uu9FF&parent=${PlacesUtils.bookmarks.menuGuid}`,
+    },
   ]
 };
 
@@ -138,21 +156,7 @@ async function testImportedBookmarks() {
   for (let group in test_bookmarks) {
     info("[testImportedBookmarks()] Checking group '" + group + "'");
 
-    let root;
-    switch (group) {
-      case "menu":
-        root =
-          PlacesUtils.getFolderContents(PlacesUtils.bookmarksMenuFolderId).root;
-        break;
-      case "toolbar":
-        root =
-          PlacesUtils.getFolderContents(PlacesUtils.toolbarFolderId).root;
-        break;
-      case "unfiled":
-        root =
-          PlacesUtils.getFolderContents(PlacesUtils.unfiledBookmarksFolderId).root;
-        break;
-    }
+    let root = PlacesUtils.getFolderContents(PlacesUtils.bookmarks[`${group}Guid`]).root;
 
     let items = test_bookmarks[group];
     Assert.equal(root.childCount, items.length);
@@ -176,10 +180,6 @@ async function checkItem(aExpected, aNode) {
         break;
       case "title":
         Assert.equal(aNode.title, aExpected.title);
-        break;
-      case "description":
-        Assert.equal(PlacesUtils.annotations.getItemAnnotation(
-                     id, DESCRIPTION_ANNO), aExpected.description);
         break;
       case "dateAdded":
         Assert.equal(PlacesUtils.toPRTime(bookmark.dateAdded),
@@ -206,10 +206,6 @@ async function checkItem(aExpected, aNode) {
       }
       case "guid":
         Assert.equal(bookmark.guid, aExpected.guid);
-        break;
-      case "sidebar":
-        Assert.equal(PlacesUtils.annotations.itemHasAnnotation(
-                     id, LOAD_IN_SIDEBAR_ANNO), aExpected.sidebar);
         break;
       case "postData": {
         let entry = await PlacesUtils.keywords.fetch({ url: aNode.uri });

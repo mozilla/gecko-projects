@@ -7,8 +7,6 @@
 #include "mozilla/dom/HTMLFrameElement.h"
 #include "mozilla/dom/HTMLFrameElementBinding.h"
 
-class nsIDOMDocument;
-
 NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(Frame)
 
 namespace mozilla {
@@ -59,7 +57,7 @@ HTMLFrameElement::ParseAttribute(int32_t aNamespaceID,
 JSObject*
 HTMLFrameElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLFrameElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLFrameElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

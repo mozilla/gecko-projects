@@ -53,7 +53,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::dom::SVGTextContentElementBinding;
+using namespace mozilla::dom::SVGTextContentElement_Binding;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
@@ -362,7 +362,7 @@ GetBaselinePosition(nsTextFrame* aFrame,
       return (metrics.mAscent + metrics.mDescent) / 2.0;
   }
 
-  NS_NOTREACHED("unexpected dominant-baseline value");
+  MOZ_ASSERT_UNREACHABLE("unexpected dominant-baseline value");
   return aFrame->GetLogicalBaseline(writingMode);
 }
 
@@ -1333,8 +1333,9 @@ GetUndisplayedCharactersBeforeFrame(nsTextFrame* aFrame)
   TextNodeCorrespondence* correspondence =
     static_cast<TextNodeCorrespondence*>(value);
   if (!correspondence) {
-    NS_NOTREACHED("expected a TextNodeCorrespondenceProperty on nsTextFrame "
-                  "used for SVG text");
+    // FIXME bug 903785
+    NS_ERROR("expected a TextNodeCorrespondenceProperty on nsTextFrame "
+             "used for SVG text");
     return 0;
   }
   return correspondence->mUndisplayedCharacters;
@@ -1475,8 +1476,8 @@ TextNodeCorrespondenceRecorder::TraverseAndRecord(nsIFrame* aFrame)
     NS_ASSERTION(mNodeCharIndex == 0, "incorrect tracking of undisplayed "
                                       "characters in text nodes");
     if (!mNodeIterator.Current()) {
-      NS_NOTREACHED("incorrect tracking of correspondence between text frames "
-                    "and text nodes");
+      MOZ_ASSERT_UNREACHABLE("incorrect tracking of correspondence between "
+                             "text frames and text nodes");
     } else {
       // Each whole nsTextNode we find before we get to the text node for the
       // first text frame must be undisplayed.
@@ -1560,7 +1561,7 @@ public:
    * Constructs a TextFrameIterator for the specified SVGTextFrame
    * with an optional frame subtree to restrict iterated text frames to.
    */
-  explicit TextFrameIterator(SVGTextFrame* aRoot, nsIFrame* aSubtree = nullptr)
+  explicit TextFrameIterator(SVGTextFrame* aRoot, const nsIFrame* aSubtree = nullptr)
     : mRootFrame(aRoot),
       mSubtree(aSubtree),
       mCurrentFrame(aRoot),
@@ -1699,7 +1700,7 @@ private:
   /**
    * The frame for the subtree we are also interested in tracking.
    */
-  nsIFrame* mSubtree;
+  const nsIFrame* mSubtree;
 
   /**
    * The current value of the iterator.
@@ -1873,7 +1874,7 @@ public:
    */
   explicit TextRenderedRunIterator(SVGTextFrame* aSVGTextFrame,
                                    RenderedRunFilter aFilter = eAllFrames,
-                                   nsIFrame* aSubtree = nullptr)
+                                   const nsIFrame* aSubtree = nullptr)
     : mFrameIterator(FrameIfAnonymousChildReflowed(aSVGTextFrame), aSubtree),
       mFilter(aFilter),
       mTextElementCharIndex(0),
@@ -2439,10 +2440,12 @@ CharIterator::CharIterator(SVGTextFrame* aSVGTextFrame,
     mFrameForTrimCheck(nullptr),
     mTrimmedOffset(0),
     mTrimmedLength(0),
+    mTextRun(nullptr),
     mTextElementCharIndex(0),
     mGlyphStartTextElementCharIndex(0),
-    mLengthAdjustScaleFactor(aSVGTextFrame->mLengthAdjustScaleFactor)
-  , mPostReflow(aPostReflow)
+    mGlyphUndisplayedCharacters(0),
+    mLengthAdjustScaleFactor(aSVGTextFrame->mLengthAdjustScaleFactor),
+    mPostReflow(aPostReflow)
 {
   if (!AtEnd()) {
     mSkipCharsIterator = TextFrame()->EnsureTextRun(nsTextFrame::eInflated);
@@ -2772,7 +2775,8 @@ public:
       mContext(aContext),
       mFrame(aFrame),
       mCanvasTM(aCanvasTM),
-      mImgParams(aImgParams)
+      mImgParams(aImgParams),
+      mColor(0)
   {
   }
 
@@ -4881,7 +4885,7 @@ ShiftAnchoredChunk(nsTArray<CharPosition>& aCharPositions,
       shift -= aVisIEndEdge;
       break;
     default:
-      NS_NOTREACHED("unexpected value for aAnchorSide");
+      MOZ_ASSERT_UNREACHABLE("unexpected value for aAnchorSide");
   }
 
   if (shift != 0.0) {
@@ -5742,7 +5746,7 @@ SVGTextFrame::TransformFramePointToTextChild(const Point& aPoint,
  */
 gfxRect
 SVGTextFrame::TransformFrameRectFromTextChild(const nsRect& aRect,
-                                              nsIFrame* aChildFrame)
+                                              const nsIFrame* aChildFrame)
 {
   NS_ASSERTION(aChildFrame &&
                nsLayoutUtils::GetClosestFrameOfType

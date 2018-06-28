@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "XMLStylesheetProcessingInstruction.h"
-#include "mozilla/dom/XMLStylesheetProcessingInstructionBinding.h"
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
 
@@ -16,7 +15,6 @@ namespace dom {
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(XMLStylesheetProcessingInstruction,
                                              ProcessingInstruction,
-                                             nsIDOMNode,
                                              nsIStyleSheetLinkingElement)
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(XMLStylesheetProcessingInstruction)
@@ -34,12 +32,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 XMLStylesheetProcessingInstruction::~XMLStylesheetProcessingInstruction()
 {
-}
-
-JSObject*
-XMLStylesheetProcessingInstruction::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
-{
-  return XMLStylesheetProcessingInstructionBinding::Wrap(aCx, this, aGivenProto);
 }
 
 // nsIContent
@@ -72,7 +64,7 @@ XMLStylesheetProcessingInstruction::UnbindFromTree(bool aDeep, bool aNullParent)
   Unused << UpdateStyleSheetInternal(oldDoc, nullptr);
 }
 
-// nsIDOMNode
+// nsINode
 
 void
 XMLStylesheetProcessingInstruction::SetNodeValueInternal(const nsAString& aNodeValue,

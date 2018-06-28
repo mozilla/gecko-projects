@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use webrender::api::*;
 use webrender::intersect_for_tile;
+use euclid::size2;
 
 // Serialize/deserialize the blob.
 
@@ -25,6 +26,12 @@ fn deserialize_blob(blob: &[u8]) -> Result<ColorU, ()> {
     };
 }
 
+// perform floor((x * a) / 255. + 0.5) see "Three wrongs make a right" for derivation
+fn premul(x: u8, a: u8) -> u8 {
+    let t = (x as u32) * (a as u32) + 128;
+    ((t + (t >> 8)) >> 8) as u8
+}
+
 // This is the function that applies the deserialized drawing commands and generates
 // actual image data.
 fn render_blob(
@@ -35,7 +42,10 @@ fn render_blob(
 ) -> BlobImageResult {
     // Allocate storage for the result. Right now the resource cache expects the
     // tiles to have have no stride or offset.
-    let mut texels = vec![0u8; (descriptor.width * descriptor.height * descriptor.format.bytes_per_pixel()) as usize];
+    let buf_size = descriptor.size.width *
+        descriptor.size.height *
+        descriptor.format.bytes_per_pixel();
+    let mut texels = vec![0u8; (buf_size) as usize];
 
     // Generate a per-tile pattern to see it in the demo. For a real use case it would not
     // make sense for the rendered content to depend on its tile.
@@ -45,11 +55,12 @@ fn render_blob(
     };
 
     let mut dirty_rect = dirty_rect.unwrap_or(DeviceUintRect::new(
-        DeviceUintPoint::new(0, 0),
-        DeviceUintSize::new(descriptor.width, descriptor.height)));
+        DeviceUintPoint::origin(),
+        descriptor.size,
+    ));
 
     if let Some((tile_size, tile)) = tile {
-        dirty_rect = intersect_for_tile(dirty_rect, tile_size as u32, tile_size as u32,
+        dirty_rect = intersect_for_tile(dirty_rect, size2(tile_size as u32, tile_size as u32),
                                         tile_size, tile)
             .expect("empty rects should be culled by webrender");
     }
@@ -73,13 +84,14 @@ fn render_blob(
 
             match descriptor.format {
                 ImageFormat::BGRA8 => {
-                    texels[((y * descriptor.width + x) * 4 + 0) as usize] = color.b * checker + tc;
-                    texels[((y * descriptor.width + x) * 4 + 1) as usize] = color.g * checker + tc;
-                    texels[((y * descriptor.width + x) * 4 + 2) as usize] = color.r * checker + tc;
-                    texels[((y * descriptor.width + x) * 4 + 3) as usize] = color.a * checker + tc;
+                    let a = color.a * checker + tc;
+                    texels[((y * descriptor.size.width + x) * 4 + 0) as usize] = premul(color.b * checker + tc, a);
+                    texels[((y * descriptor.size.width + x) * 4 + 1) as usize] = premul(color.g * checker + tc, a);
+                    texels[((y * descriptor.size.width + x) * 4 + 2) as usize] = premul(color.r * checker + tc, a);
+                    texels[((y * descriptor.size.width + x) * 4 + 3) as usize] = a;
                 }
                 ImageFormat::R8 => {
-                    texels[(y * descriptor.width + x) as usize] = color.a * checker + tc;
+                    texels[(y * descriptor.size.width + x) as usize] = color.a * checker + tc;
                 }
                 _ => {
                     return Err(BlobImageError::Other(
@@ -92,8 +104,7 @@ fn render_blob(
 
     Ok(RasterizedBlobImage {
         data: texels,
-        width: descriptor.width,
-        height: descriptor.height,
+        size: descriptor.size,
     })
 }
 
@@ -127,12 +138,12 @@ impl CheckerboardRenderer {
 }
 
 impl BlobImageRenderer for CheckerboardRenderer {
-    fn add(&mut self, key: ImageKey, cmds: BlobImageData, tile_size: Option<TileSize>) {
+    fn add(&mut self, key: ImageKey, cmds: Arc<BlobImageData>, tile_size: Option<TileSize>) {
         self.image_cmds
             .insert(key, (deserialize_blob(&cmds[..]).unwrap(), tile_size));
     }
 
-    fn update(&mut self, key: ImageKey, cmds: BlobImageData, _dirty_rect: Option<DeviceUintRect>) {
+    fn update(&mut self, key: ImageKey, cmds: Arc<BlobImageData>, _dirty_rect: Option<DeviceUintRect>) {
         // Here, updating is just replacing the current version of the commands with
         // the new one (no incremental updates).
         self.image_cmds.get_mut(&key).unwrap().0 = deserialize_blob(&cmds[..]).unwrap();

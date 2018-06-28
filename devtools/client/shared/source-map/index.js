@@ -70,7 +70,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /******/ 	__webpack_require__.p = "/assets/build";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 3646);
+/******/ 	return __webpack_require__(__webpack_require__.s = 3727);
 /******/ })
 /************************************************************************/
 /******/ ({
@@ -430,11 +430,14 @@ const {
   isOriginalId
 } = __webpack_require__(3652);
 
-const { workerUtils: { WorkerDispatcher } } = __webpack_require__(3651);
+const {
+  workerUtils: { WorkerDispatcher }
+} = __webpack_require__(3651);
 
 const dispatcher = new WorkerDispatcher();
 
 const getOriginalURLs = dispatcher.task("getOriginalURLs");
+const getOriginalRanges = dispatcher.task("getOriginalRanges");
 const getGeneratedRanges = dispatcher.task("getGeneratedRanges", {
   queue: true
 });
@@ -458,6 +461,7 @@ module.exports = {
   isOriginalId,
   hasMappedSource,
   getOriginalURLs,
+  getOriginalRanges,
   getGeneratedRanges,
   getGeneratedLocation,
   getAllGeneratedLocations,
@@ -768,6 +772,14 @@ module.exports = {
   workerHandler,
   streamingWorkerHandler
 };
+
+/***/ }),
+
+/***/ 3727:
+/***/ (function(module, exports, __webpack_require__) {
+
+module.exports = __webpack_require__(3646);
+
 
 /***/ })
 

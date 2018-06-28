@@ -50,7 +50,11 @@
 }
 
 :root[lwt-popup-brighttext] {
-  --panel-separator-color: hsla(0,0%,80%,.25);
+  --panel-separator-color: rgba(249,249,250,.1);
+
+  --arrowpanel-dimmed: rgba(249,249,250,.1);
+  --arrowpanel-dimmed-further: rgba(249,249,250,.15);
+  --arrowpanel-dimmed-even-further: rgba(249,249,250,.2);
 }
 
 #menubar-items {
@@ -400,28 +404,8 @@ notification[value="translation"] menulist > .menulist-dropmarker {
 }
 
 /* Bookmarking panel */
-#editBookmarkPanelStarIcon {
-  list-style-image: url("chrome://browser/skin/bookmark.svg");
-  -moz-context-properties: fill;
-  fill: var(--toolbarbutton-icon-fill-attention);
-  width: 40px;
-  height: 40px;
-  margin: 4px;
-}
 
-#editBookmarkPanelTitle {
-  font-size: 130%;
-}
-
-#editBookmarkPanelHeader,
-#editBookmarkPanelContent {
-  margin-bottom: .5em;
-}
-
-/* Implements editBookmarkPanel resizing on folderTree un-collapse. */
-#editBMPanel_folderTree {
-  min-width: 27em;
-}
+%include ../shared/places/editBookmarkPanel.inc.css
 
 /* Content area */
 
@@ -559,25 +543,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
 %include ../shared/ctrlTab.inc.css
 %include ../shared/plugin-doorhanger.inc.css
 
-.gcli-panel {
-  padding: 0;
-}
-
-.gclitoolbar-input-node > .textbox-input-box > html|*.textbox-input::-moz-selection {
-  color: hsl(210,11%,16%);
-}
-
-/* Error counter */
-
-#developer-toolbar-toolbox-button[error-count]:before {
-  color: #FDF3DE;
-  min-width: 16px;
-  text-shadow: none;
-  background-image: linear-gradient(#B4211B, #8A1915);
-  border-radius: 1px;
-  margin-inline-end: 2px;
-}
-
 /* Customization mode */
 
 %include ../shared/customizableui/customizeMode.inc.css
@@ -688,8 +653,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   #titlebar-buttonbox {
     z-index: 1;
     -moz-box-align: center;
-    padding-top: 2px;
-    padding-bottom: 2px;
   }
 
   /* Render titlebar command buttons according to system config.

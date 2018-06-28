@@ -24,6 +24,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
+#include <math.h>
 
 typedef struct gr_face gr_face;
 
@@ -505,7 +506,8 @@ protected:
     // The caller will be responsible for ownership of the data.
     virtual nsresult CopyFontTable(uint32_t aTableTag,
                                    nsTArray<uint8_t>& aBuffer) {
-        NS_NOTREACHED("forgot to override either GetFontTable or CopyFontTable?");
+        MOZ_ASSERT_UNREACHABLE("forgot to override either GetFontTable or "
+                               "CopyFontTable?");
         return NS_ERROR_FAILURE;
     }
 
@@ -620,9 +622,9 @@ private:
         // the old, because the mHashtable pointer in mSharedBlobData (if
         // present) will not be updated.
         FontTableHashEntry(FontTableHashEntry&& toMove)
-            : KeyClass(mozilla::Move(toMove))
-            , mSharedBlobData(mozilla::Move(toMove.mSharedBlobData))
-            , mBlob(mozilla::Move(toMove.mBlob))
+            : KeyClass(std::move(toMove))
+            , mSharedBlobData(std::move(toMove.mSharedBlobData))
+            , mBlob(std::move(toMove.mBlob))
         {
             toMove.mSharedBlobData = nullptr;
             toMove.mBlob = nullptr;
@@ -690,20 +692,19 @@ gfxFontEntry::SupportsBold()
 // used when iterating over all fonts looking for a match for a given character
 struct GlobalFontMatch {
     GlobalFontMatch(const uint32_t aCharacter,
-                    const gfxFontStyle *aStyle) :
-        mCh(aCharacter), mStyle(aStyle),
-        mMatchRank(0.0f), mCount(0), mCmapsTested(0)
+                    const gfxFontStyle& aStyle) :
+        mStyle(aStyle), mCh(aCharacter),
+        mCount(0), mCmapsTested(0), mMatchDistance(INFINITY)
         {
-
         }
 
+    RefPtr<gfxFontEntry>   mBestMatch;   // current best match
+    RefPtr<gfxFontFamily>  mMatchedFamily; // the family it belongs to
+    const gfxFontStyle&    mStyle;       // style to match
     const uint32_t         mCh;          // codepoint to be matched
-    const gfxFontStyle*    mStyle;       // style to match
-    float                  mMatchRank;   // metric indicating closest match
-    RefPtr<gfxFontEntry> mBestMatch;   // current best match
-    RefPtr<gfxFontFamily> mMatchedFamily; // the family it belongs to
     uint32_t               mCount;       // number of fonts matched
     uint32_t               mCmapsTested; // number of cmaps tested
+    float                  mMatchDistance; // metric indicating closest match
 };
 
 class gfxFontFamily {
@@ -786,10 +787,10 @@ public:
 
     // checks for a matching font within the family
     // used as part of the font fallback process
-    void FindFontForChar(GlobalFontMatch *aMatchData);
+    void FindFontForChar(GlobalFontMatch* aMatchData);
 
     // checks all fonts for a matching font within the family
-    void SearchAllFontsForChar(GlobalFontMatch *aMatchData);
+    void SearchAllFontsForChar(GlobalFontMatch* aMatchData);
 
     // read in other family names, if any, and use functor to add each into cache
     virtual void ReadOtherFamilyNames(gfxPlatformFontList *aPlatformFontList);
@@ -923,6 +924,31 @@ protected:
         kBoldMask   = 0x01,
         kItalicMask = 0x02
     };
+};
+
+// Struct used in the gfxFontGroup font list to keep track of a font family
+// together with the CSS generic (if any) that was mapped to it in this
+// particular case (so it can be reported to the DevTools font inspector).
+struct FamilyAndGeneric final {
+    FamilyAndGeneric()
+        : mFamily(nullptr)
+        , mGeneric(mozilla::FontFamilyType::eFamily_none)
+    {
+    }
+    FamilyAndGeneric(const FamilyAndGeneric& aOther)
+        : mFamily(aOther.mFamily)
+        , mGeneric(aOther.mGeneric)
+    {
+    }
+    explicit FamilyAndGeneric(gfxFontFamily* aFamily,
+                              mozilla::FontFamilyType aGeneric =
+                                  mozilla::FontFamilyType::eFamily_none)
+        : mFamily(aFamily)
+        , mGeneric(aGeneric)
+    {
+    }
+    gfxFontFamily* mFamily;
+    mozilla::FontFamilyType mGeneric;
 };
 
 #endif

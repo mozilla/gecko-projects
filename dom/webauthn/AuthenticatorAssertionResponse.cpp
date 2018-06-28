@@ -54,7 +54,7 @@ JSObject*
 AuthenticatorAssertionResponse::WrapObject(JSContext* aCx,
                                            JS::Handle<JSObject*> aGivenProto)
 {
-  return AuthenticatorAssertionResponseBinding::Wrap(aCx, this, aGivenProto);
+  return AuthenticatorAssertionResponse_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -99,10 +99,16 @@ void
 AuthenticatorAssertionResponse::GetUserHandle(JSContext* aCx,
                                               JS::MutableHandle<JSObject*> aRetVal)
 {
-  if (!mUserHandleCachedObj) {
-    mUserHandleCachedObj = mUserHandle.ToArrayBuffer(aCx);
+  // Per https://w3c.github.io/webauthn/#ref-for-dom-authenticatorassertionresponse-userhandle%E2%91%A0
+  // this should return null if the handle is unset.
+  if (mUserHandle.IsEmpty()) {
+    aRetVal.set(nullptr);
+  } else {
+    if (!mUserHandleCachedObj) {
+      mUserHandleCachedObj = mUserHandle.ToArrayBuffer(aCx);
+    }
+    aRetVal.set(mUserHandleCachedObj);
   }
-  aRetVal.set(mUserHandleCachedObj);
 }
 
 nsresult

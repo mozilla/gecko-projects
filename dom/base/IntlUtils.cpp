@@ -33,7 +33,7 @@ IntlUtils::~IntlUtils()
 JSObject*
 IntlUtils::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IntlUtilsBinding::Wrap(aCx, this, aGivenProto);
+  return IntlUtils_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -88,7 +88,7 @@ IntlUtils::GetDisplayNames(const Sequence<nsString>& aLocales,
   }
 
   // Return the result as DisplayNameResult.
-  JSAutoCompartment ac(cx, &retVal.toObject());
+  JSAutoRealm ar(cx, &retVal.toObject());
   if (!aResult.Init(cx, retVal)) {
     aError.Throw(NS_ERROR_FAILURE);
   }
@@ -135,7 +135,7 @@ IntlUtils::GetLocaleInfo(const Sequence<nsString>& aLocales,
   }
 
   // Return the result as LocaleInfo.
-  JSAutoCompartment ac(cx, &retVal.toObject());
+  JSAutoRealm ar(cx, &retVal.toObject());
   if (!aResult.Init(cx, retVal)) {
     aError.Throw(NS_ERROR_FAILURE);
   }

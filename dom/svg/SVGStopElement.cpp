@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGStopElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGStopElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGStopElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::NumberInfo SVGStopElement::sNumberInfo =
@@ -30,7 +30,7 @@ SVGStopElement::SVGStopElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeIn
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGStopElement)
 

@@ -691,6 +691,14 @@ IonBuilder::inlineArrayPopShift(CallInfo& callInfo, MArrayPopShift::Mode mode)
         OBJECT_FLAG_LENGTH_OVERFLOW |
         OBJECT_FLAG_ITERATED;
 
+    // Don't optimize shift if the array may be non-extensible (this matters
+    // when there are holes). We check this here because there's no
+    // non-extensible ObjectElements flag so we would need an extra guard on the
+    // BaseShape flags. For pop this doesn't matter, guarding on the SEALED
+    // ObjectElements flag in JIT code is sufficient.
+    if (mode == MArrayPopShift::Shift)
+        unhandledFlags |= OBJECT_FLAG_NON_EXTENSIBLE_ELEMENTS;
+
     MDefinition* obj = convertUnboxedObjects(callInfo.thisArg());
     TemporaryTypeSet* thisTypes = obj->resultTypeSet();
     if (!thisTypes)
@@ -1386,7 +1394,7 @@ IonBuilder::inlineMathRandom(CallInfo& callInfo)
     // MRandom JIT code directly accesses the RNG. It's (barely) possible to
     // inline Math.random without it having been called yet, so ensure RNG
     // state that isn't guaranteed to be initialized already.
-    script()->compartment()->ensureRandomNumberGenerator();
+    script()->realm()->getOrCreateRandomNumberGenerator();
 
     callInfo.setImplicitlyUsedUnchecked();
 
@@ -1762,7 +1770,7 @@ IonBuilder::inlineStringSplitString(CallInfo& callInfo)
         return resultConstStringSplit;
 
     JSContext* cx = TlsContext.get();
-    ObjectGroup* group = ObjectGroupCompartment::getStringSplitStringGroup(cx);
+    ObjectGroup* group = ObjectGroupRealm::getStringSplitStringGroup(cx);
     if (!group)
         return InliningStatus_NotInlined;
     AutoSweepObjectGroup sweep(group);
@@ -2144,7 +2152,7 @@ IonBuilder::inlineRegExpMatcher(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     JSContext* cx = TlsContext.get();
-    if (!cx->compartment()->jitCompartment()->ensureRegExpMatcherStubExists(cx)) {
+    if (!cx->realm()->jitRealm()->ensureRegExpMatcherStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
         return InliningStatus_NotInlined;
     }
@@ -2188,7 +2196,7 @@ IonBuilder::inlineRegExpSearcher(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     JSContext* cx = TlsContext.get();
-    if (!cx->compartment()->jitCompartment()->ensureRegExpSearcherStubExists(cx)) {
+    if (!cx->realm()->jitRealm()->ensureRegExpSearcherStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
         return abort(AbortReason::Error);
     }
@@ -2232,7 +2240,7 @@ IonBuilder::inlineRegExpTester(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     JSContext* cx = TlsContext.get();
-    if (!cx->compartment()->jitCompartment()->ensureRegExpTesterStubExists(cx)) {
+    if (!cx->realm()->jitRealm()->ensureRegExpTesterStubExists(cx)) {
         cx->clearPendingException(); // OOM or overrecursion.
         return InliningStatus_NotInlined;
     }
@@ -2569,7 +2577,7 @@ IonBuilder::inlineObjectToString(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     // Make sure there's no Symbol.toStringTag property.
-    jsid toStringTag = SYMBOL_TO_JSID(compartment->runtime()->wellKnownSymbols().toStringTag);
+    jsid toStringTag = SYMBOL_TO_JSID(realm->runtime()->wellKnownSymbols().toStringTag);
     bool res;
     MOZ_TRY_VAR(res, testNotDefinedProperty(arg, toStringTag));
     if (!res)
@@ -3762,7 +3770,7 @@ IonBuilder::inlineConstructTypedObject(CallInfo& callInfo, TypeDescr* descr)
         return InliningStatus_NotInlined;
     }
 
-    if (size_t(descr->size()) > InlineTypedObject::MaximumSize)
+    if (!InlineTypedObject::canAccommodateType(descr))
         return InliningStatus_NotInlined;
 
     JSObject* obj = inspector->getTemplateObjectForClassHook(pc, descr->getClass());
@@ -3988,7 +3996,7 @@ IonBuilder::inlineConstructSimdObject(CallInfo& callInfo, SimdTypeDescr* descr)
 
     // Take the templateObject out of Baseline ICs, such that we can box
     // SIMD value type in the same kind of objects.
-    MOZ_ASSERT(size_t(descr->size(descr->type())) < InlineTypedObject::MaximumSize);
+    MOZ_ASSERT(InlineTypedObject::canAccommodateType(descr));
     MOZ_ASSERT(descr->getClass() == &SimdTypeDescr::class_,
                "getTemplateObjectForSimdCtor needs an update");
 

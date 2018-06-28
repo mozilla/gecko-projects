@@ -3,6 +3,7 @@
 == table-repaint-border-collapse.html table-repaint-border-collapse-ref.html
 == table-repaint-c.html table-repaint-c-ref.html
 == table-repaint-d.html table-repaint-d-ref.html
+== table-repaint-e.html table-repaint-e-ref.html
 == table-repaint-non-border-collapse.html table-repaint-non-border-collapse-ref.html
 == 540247-1.xul 540247-1-ref.xul
 == 543681-1.html 543681-1-ref.html
@@ -94,3 +95,7 @@ pref(layers.single-tile.enabled,false) != fast-scrolling.html about:blank
 == clip-path-invalidation-1b.html mask-invalidation-2-ref.html
 == clip-path-invalidation-1c.html mask-invalidation-2-ref.html
 == clip-path-invalidation-1d.html mask-invalidation-2-ref.html
+
+!= fractional-transform-1.html about:blank
+skip-if(/^Windows\x20NT\x2010\.0/.test(http.oscpu)) != fractional-transform-2.html about:blank
+!= fractional-transform-3.html about:blank

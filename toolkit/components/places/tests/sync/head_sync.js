@@ -135,8 +135,6 @@ async function fetchLocalTree(rootGuid) {
     let itemInfo = { guid, index, title, type };
     if (node.annos) {
       let syncableAnnos = node.annos.filter(anno => [
-        PlacesSyncUtils.bookmarks.DESCRIPTION_ANNO,
-        PlacesSyncUtils.bookmarks.SIDEBAR_ANNO,
         PlacesSyncUtils.bookmarks.SMART_BOOKMARKS_ANNO,
         PlacesUtils.LMANNO_FEEDURI,
         PlacesUtils.LMANNO_SITEURI,
@@ -253,11 +251,11 @@ BookmarkObserver.prototype = {
   },
   onItemVisited() {},
   onItemMoved(itemId, oldParentId, oldIndex, newParentId, newIndex, type, guid,
-              oldParentGuid, newParentGuid, source) {
+              oldParentGuid, newParentGuid, source, uri) {
     this.notifications.push({
       name: "onItemMoved",
       params: { itemId, oldParentId, oldIndex, newParentId, newIndex, type,
-                guid, oldParentGuid, newParentGuid, source },
+                guid, oldParentGuid, newParentGuid, source, uri },
     });
   },
 

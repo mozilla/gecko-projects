@@ -16,12 +16,20 @@
 class nsIInterceptedChannel;
 
 namespace mozilla {
+
+class JSObjectHolder;
+
 namespace dom {
 
 class ClientInfoAndState;
 class KeepAliveToken;
+class ServiceWorkerCloneData;
 class ServiceWorkerInfo;
 class ServiceWorkerRegistrationInfo;
+
+namespace ipc {
+class StructuredCloneData;
+} // namespace ipc
 
 class LifeCycleEventCallback : public Runnable
 {
@@ -82,8 +90,7 @@ public:
   explicit ServiceWorkerPrivate(ServiceWorkerInfo* aInfo);
 
   nsresult
-  SendMessageEvent(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-                   const Sequence<JSObject*>& aTransferable,
+  SendMessageEvent(RefPtr<ServiceWorkerCloneData>&& aData,
                    const ClientInfoAndState& aClientInfoAndState);
 
   // This is used to validate the worker script and continue the installation

@@ -8,15 +8,15 @@
 const TEST_URL = URL_ROOT + "doc_inspector_highlighter_xbl.xul";
 
 add_task(async function() {
-  let {inspector, toolbox, testActor} = await openInspectorForURL(TEST_URL);
+  const {inspector, toolbox, testActor} = await openInspectorForURL(TEST_URL);
 
   await startPicker(toolbox);
 
-  info("Selecting the scale");
-  await moveMouseOver("#scale");
+  info("Selecting the tree");
+  await moveMouseOver("#tree");
   await doKeyPick({key: "VK_RETURN", options: {}});
-  is(inspector.selection.nodeFront.className, "scale-slider",
-     "The .scale-slider inside the scale was selected");
+  is(inspector.selection.nodeFront.className, "tree-bodybox",
+     "The .tree-bodybox inside the tree was selected");
 
   function doKeyPick(msg) {
     info("Key pressed. Waiting for element to be picked");

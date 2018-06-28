@@ -84,8 +84,61 @@
 VARCACHE_PREF(
   "accessibility.monoaudio.enable",
    accessibility_monoaudio_enable,
+  RelaxedAtomicBool, false
+)
+
+//---------------------------------------------------------------------------
+// DOM prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "dom.webcomponents.shadowdom.report_usage",
+   dom_webcomponents_shadowdom_report_usage,
   bool, false
 )
+
+// Whether we disable triggering mutation events for changes to style
+// attribute via CSSOM.
+VARCACHE_PREF(
+  "dom.mutation-events.cssom.disabled",
+   dom_mutation_events_cssom_disabled,
+  bool, true
+)
+
+VARCACHE_PREF(
+  "dom.performance.enable_scheduler_timing",
+  dom_performance_enable_scheduler_timing,
+  RelaxedAtomicBool, false
+)
+
+// If true. then the service worker interception and the ServiceWorkerManager
+// will live in the parent process.  This only takes effect on browser start.
+// Note, this is not currently safe to use for normal browsing yet.
+PREF("dom.serviceWorkers.parent_intercept", bool, false)
+
+// Time in milliseconds for PaymentResponse to wait for
+// the Web page to call complete().
+VARCACHE_PREF(
+  "dom.payments.response.timeout",
+   dom_payments_response_timeout,
+  uint32_t, 5000
+)
+
+//---------------------------------------------------------------------------
+// Clear-Site-Data prefs
+//---------------------------------------------------------------------------
+
+#ifdef NIGHTLY
+# define PREF_VALUE true
+#else
+# define PREF_VALUE false
+#endif
+VARCACHE_PREF(
+  "dom.clearSiteData.enabled",
+   dom_clearSiteData_enabled,
+  bool, PREF_VALUE
+)
+#undef PREF_VALUE
 
 //---------------------------------------------------------------------------
 // Full-screen prefs
@@ -130,7 +183,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.initialdelay",
    html5_flushtimer_initialdelay,
-  int32_t, 120
+  RelaxedAtomicInt32, 120
 )
 
 // Time in milliseconds between the time a network buffer is seen and the timer
@@ -138,7 +191,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "html5.flushtimer.subsequentdelay",
    html5_flushtimer_subsequentdelay,
-  int32_t, 120
+  RelaxedAtomicInt32, 120
 )
 
 //---------------------------------------------------------------------------
@@ -149,6 +202,13 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "layout.css.parsing.parallel",
    layout_css_parsing_parallel,
+  bool, true
+)
+
+// Is CSS error reporting enabled?
+VARCACHE_PREF(
+  "layout.css.report_errors",
+  layout_css_report_errors,
   bool, true
 )
 
@@ -179,6 +239,13 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "layout.css.prefixes.gradients",
    layout_css_prefixes_gradients,
+  bool, true
+)
+
+// Whether the offset-* logical property aliases are enabled.
+VARCACHE_PREF(
+  "layout.css.offset-logical-properties.enabled",
+   layout_css_offset_logical_properties_enabled,
   bool, true
 )
 
@@ -236,6 +303,12 @@ VARCACHE_PREF(
 )
 #undef PREF_VALUE
 
+VARCACHE_PREF(
+  "layout.css.xul-display-values.content.enabled",
+   layout_css_xul_display_values_content_enabled,
+  bool, false
+)
+
 // Is support for CSS "grid-template-{columns,rows}: subgrid X" enabled?
 VARCACHE_PREF(
   "layout.css.grid-template-subgrid-value.enabled",
@@ -244,17 +317,11 @@ VARCACHE_PREF(
 )
 
 // Is support for variation fonts enabled?
-#ifdef EARLY_BETA_OR_EARLIER
-#define PREF_VALUE true
-#else
-#define PREF_VALUE false
-#endif
 VARCACHE_PREF(
   "layout.css.font-variations.enabled",
    layout_css_font_variations_enabled,
-  bool, PREF_VALUE
+  RelaxedAtomicBool, true
 )
-#undef PREF_VALUE
 
 // Are we emulating -moz-{inline}-box layout using CSS flexbox?
 VARCACHE_PREF(
@@ -334,7 +401,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.cache_size",
    MediaCacheSize,
-  uint32_t, PREF_VALUE
+  RelaxedAtomicUint32, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -379,7 +446,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.cache_resume_threshold",
    MediaCacheResumeThreshold,
-  int32_t, PREF_VALUE
+  RelaxedAtomicInt32, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -394,7 +461,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.cache_readahead_limit",
    MediaCacheReadaheadLimit,
-  int32_t, PREF_VALUE
+  RelaxedAtomicInt32, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -402,7 +469,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.resampling.enabled",
    MediaResamplingEnabled,
-  bool, false
+  RelaxedAtomicBool, false
 )
 
 #if defined(XP_WIN) || defined(XP_DARWIN) || defined(MOZ_PULSEAUDIO)
@@ -414,7 +481,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.forcestereo.enabled",
    MediaForcestereoEnabled,
-  bool, PREF_VALUE
+  RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -422,7 +489,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.ruin-av-sync.enabled",
    MediaRuinAvSyncEnabled,
-  bool, false
+  RelaxedAtomicBool, false
 )
 
 // Encrypted Media Extensions
@@ -474,7 +541,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.use-blank-decoder",
    MediaUseBlankDecoder,
-  bool, false
+  RelaxedAtomicBool, false
 )
 
 #if defined(XP_WIN)
@@ -485,7 +552,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.gpu-process-decoder",
    MediaGpuProcessDecoder,
-  bool, PREF_VALUE
+  RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -495,13 +562,13 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.android-media-codec.enabled",
    MediaAndroidMediaCodecEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 VARCACHE_PREF(
   "media.android-media-codec.preferred",
    MediaAndroidMediaCodecPreferred,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 #endif // ANDROID
@@ -549,7 +616,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.ffmpeg.enabled",
    MediaFfmpegEnabled,
-  bool, PREF_VALUE
+  RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -565,7 +632,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.ffvpx.enabled",
    MediaFfvpxEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 #endif
 
@@ -582,7 +649,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.wmf.enabled",
    MediaWmfEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // Whether DD should consider WMF-disabled a WMF failure, useful for testing.
@@ -595,7 +662,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.wmf.vp9.enabled",
    MediaWmfVp9Enabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 #endif // MOZ_WMF
@@ -609,7 +676,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.decoder.recycle.enabled",
    MediaDecoderRecycleEnabled,
-  bool, PREF_VALUE
+  RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -617,37 +684,37 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.decoder.skip-to-next-key-frame.enabled",
    MediaDecoderSkipToNextKeyFrameEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 VARCACHE_PREF(
   "media.gmp.decoder.enabled",
    MediaGmpDecoderEnabled,
-  bool, false
+  RelaxedAtomicBool, false
 )
 
 VARCACHE_PREF(
   "media.eme.audio.blank",
    MediaEmeAudioBlank,
-  bool, false
+  RelaxedAtomicBool, false
 )
 VARCACHE_PREF(
   "media.eme.video.blank",
    MediaEmeVideoBlank,
-  bool, false
+  RelaxedAtomicBool, false
 )
 
 VARCACHE_PREF(
   "media.eme.chromium-api.video-shmems",
    MediaEmeChromiumApiVideoShmems,
-  uint32_t, 6
+  RelaxedAtomicUint32, 6
 )
 
 // Whether to suspend decoding of videos in background tabs.
 VARCACHE_PREF(
   "media.suspend-bkgnd-video.enabled",
    MediaSuspendBkgndVideoEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // Delay, in ms, from time window goes to background to suspending
@@ -661,7 +728,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.dormant-on-pause-timeout-ms",
    MediaDormantOnPauseTimeoutMs,
-  int32_t, 5000
+  RelaxedAtomicInt32, 5000
 )
 
 VARCACHE_PREF(
@@ -732,14 +799,14 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.ogg.enabled",
    MediaOggEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // AV1
 VARCACHE_PREF(
   "media.av1.enabled",
    MediaAv1Enabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 // Flac
@@ -747,7 +814,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.ogg.flac.enabled",
    MediaOggFlacEnabled,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 VARCACHE_PREF(
@@ -777,7 +844,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.mp4.enabled",
    mediaMp4Enabled,
-  bool, PREF_VALUE
+  RelaxedAtomicBool, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -787,7 +854,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.playback.warnings-as-errors",
    MediaPlaybackWarningsAsErrors,
-  bool, false
+  RelaxedAtomicBool, false
 )
 
 // Resume video decoding when the cursor is hovering on a background tab to
@@ -814,7 +881,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "media.seamless-looping",
    MediaSeamlessLooping,
-  bool, true
+  RelaxedAtomicBool, true
 )
 
 //---------------------------------------------------------------------------
@@ -989,6 +1056,16 @@ VARCACHE_PREF(
   "view_source.editor.external",
    view_source_editor_external,
   bool, false
+)
+
+//---------------------------------------------------------------------------
+// Anti-Tracking prefs
+//---------------------------------------------------------------------------
+
+VARCACHE_PREF(
+  "privacy.restrict3rdpartystorage.enabled",
+   privacy_restrict3rdpartystorage_enabled,
+  RelaxedAtomicBool, false
 )
 
 //---------------------------------------------------------------------------

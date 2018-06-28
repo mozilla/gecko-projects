@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGDescElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGDescElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGDescElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -27,7 +27,7 @@ SVGDescElement::SVGDescElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeIn
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGDescElement)
 

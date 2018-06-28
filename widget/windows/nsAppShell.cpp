@@ -15,7 +15,7 @@
 #include "nsString.h"
 #include "WinIMEHandler.h"
 #include "mozilla/widget/AudioSession.h"
-#include "mozilla/HangMonitor.h"
+#include "mozilla/BackgroundHangMonitor.h"
 #include "nsIDOMWakeLockListener.h"
 #include "nsIPowerManagerService.h"
 #include "mozilla/StaticPtr.h"
@@ -26,6 +26,7 @@
 #include "ScreenHelperWin.h"
 #include "HeadlessScreenHelper.h"
 #include "mozilla/widget/ScreenManager.h"
+#include "mozilla/Atomics.h"
 
 #if defined(ACCESSIBILITY)
 #include "mozilla/a11y/Compatibility.h"
@@ -185,13 +186,23 @@ using mozilla::crashreporter::LSPAnnotate;
 
 //-------------------------------------------------------------------------
 
+// Note that since we're on x86-ish processors here, ReleaseAcquire is the
+// semantics that normal loads and stores would use anyway.
+static Atomic<size_t, ReleaseAcquire> sOutstandingNativeEventCallbacks;
+
 /*static*/ LRESULT CALLBACK
 nsAppShell::EventWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   if (uMsg == sAppShellGeckoMsgId) {
+    // The app shell might have been destroyed between this message being
+    // posted and being executed, so be extra careful.
+    if (!sOutstandingNativeEventCallbacks) {
+      return TRUE;
+    }
+
     nsAppShell *as = reinterpret_cast<nsAppShell *>(lParam);
     as->NativeEventCallback();
-    NS_RELEASE(as);
+    --sOutstandingNativeEventCallbacks;
     return TRUE;
   }
   return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -205,6 +216,9 @@ nsAppShell::~nsAppShell()
     // the UI thread.
     SendMessage(mEventWnd, WM_CLOSE, 0, 0);
   }
+
+  // Cancel any outstanding native event callbacks.
+  sOutstandingNativeEventCallbacks = 0;
 }
 
 #if defined(ACCESSIBILITY)
@@ -463,7 +477,7 @@ nsAppShell::ScheduleNativeEventCallback()
              "We should have created mEventWnd in Init, if this is called.");
 
   // Post a message to the hidden message window
-  NS_ADDREF_THIS(); // will be released when the event is processed
+  ++sOutstandingNativeEventCallbacks;
   {
     MutexAutoLock lock(mLastNativeEventScheduledMutex);
     // Time stamp this event so we can detect cases where the event gets
@@ -515,9 +529,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
       } else {
         // If we had UI activity we would be processing it now so we know we
         // have either kUIActivity or kActivityNoUIAVail.
-        mozilla::HangMonitor::NotifyActivity(
-          uiMessage ? mozilla::HangMonitor::kUIActivity :
-                      mozilla::HangMonitor::kActivityNoUIAVail);
+        mozilla::BackgroundHangMonitor().NotifyActivity();
 
         if (msg.message >= WM_KEYFIRST && msg.message <= WM_KEYLAST &&
             IMEHandler::ProcessRawKeyMessage(msg)) {
@@ -538,8 +550,9 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
       }
     } else if (mayWait) {
       // Block and wait for any posted application message
-      mozilla::HangMonitor::Suspend();
+      mozilla::BackgroundHangMonitor().NotifyWait();
       {
+        AUTO_PROFILER_LABEL("nsAppShell::ProcessNextNativeEvent::Wait", IDLE);
         AUTO_PROFILER_THREAD_SLEEP;
         WinUtils::WaitForMessage();
       }

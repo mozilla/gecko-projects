@@ -1271,7 +1271,7 @@ class ScriptMixin(PlatformMixin):
             repl_dict.update(dirs)
         if isinstance(exe, dict):
             found = False
-            # allow for searchable paths of the buildbot exe
+            # allow for searchable paths of the exe
             for name, path in exe.iteritems():
                 if isinstance(path, list) or isinstance(path, tuple):
                     path = [x % repl_dict for x in path]
@@ -1383,7 +1383,11 @@ class ScriptMixin(PlatformMixin):
                 self.info("Using partial env: %s" % pprint.pformat(partial_env))
                 env = self.query_env(partial_env=partial_env)
         else:
-            self.info("Using env: %s" % pprint.pformat(env))
+            if hasattr(self, 'previous_env') and env == self.previous_env:
+                self.info("Using env: (same as previous command)")
+            else:
+                self.info("Using env: %s" % pprint.pformat(env))
+                self.previous_env = env
 
         if output_parser is None:
             parser = OutputParser(config=self.config, log_obj=self.log_obj,
@@ -1569,7 +1573,7 @@ class ScriptMixin(PlatformMixin):
             shell = False
 
         p = subprocess.Popen(command, shell=shell, stdout=tmp_stdout,
-                             cwd=cwd, stderr=tmp_stderr, env=env)
+                             cwd=cwd, stderr=tmp_stderr, env=env, bufsize=0)
         # XXX: changed from self.debug to self.log due to this error:
         #      TypeError: debug() takes exactly 1 argument (2 given)
         self.log("Temporary files: %s and %s" % (tmp_stdout_filename, tmp_stderr_filename), level=DEBUG)
@@ -1865,7 +1869,7 @@ class BaseScript(ScriptMixin, LogMixin, object):
         # easy-to-write-hard-to-debug writable config.
         #
         # To allow for other, script-specific configurations
-        # (e.g., buildbot props json parsing), before locking,
+        # (e.g., props json parsing), before locking,
         # call self._pre_config_lock().  If needed, this method can
         # alter self.config.
         self._pre_config_lock(rw_config)

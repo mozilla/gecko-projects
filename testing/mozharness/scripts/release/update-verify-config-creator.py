@@ -52,6 +52,10 @@ class UpdateVerifyConfigCreator(BaseScript):
             "dest": "app_name",
             "help": "App name being tested. Eg: browser",
         }],
+        [["--branch-prefix"], {
+            "dest": "branch_prefix",
+            "help": "Prefix of release branch names. Eg: mozilla, comm",
+        }],
         [["--channel"], {
             "dest": "channel",
             "help": "Channel to run update verify against",
@@ -87,6 +91,7 @@ class UpdateVerifyConfigCreator(BaseScript):
         }],
         [["--partial-version"], {
             "dest": "partial_versions",
+            "default": [],
             "action": "append",
             "help": "A previous release version that is expected to receive a partial update. "
                     "Eg: 59.0b4. May be specified multiple times."
@@ -211,7 +216,6 @@ class UpdateVerifyConfigCreator(BaseScript):
         releases = json.load(ret)["releases"]
         for release_name, release_info in reversed(sorted(releases.items())):
             product, version = release_name.split("-", 1)
-            version = version.rstrip("esr")
             tag = "{}_{}_RELEASE".format(product.upper(), version.replace(".", "_"))
             # Product details has a "category" for releases that we can use to
             # determine the repo path. This will fail if any previous releases
@@ -219,11 +223,11 @@ class UpdateVerifyConfigCreator(BaseScript):
             # at the time of writing.
             branch = None
             if release_info["category"] == "dev":
-                branch = "releases/mozilla-beta"
+                branch = "releases/{}-beta".format(self.config['branch_prefix'])
             elif release_info["category"] == "esr":
-                branch = "releases/mozilla-esr{}".format(version[:2])
+                branch = "releases/{}-esr{}".format(self.config['branch_prefix'], version[:2])
             elif release_info["category"] in ("major", "stability"):
-                branch = "releases/mozilla-release"
+                branch = "releases/{}-release".format(self.config['branch_prefix'])
             if not branch:
                 raise Exception("Cannot determine branch, cannot continue!")
 

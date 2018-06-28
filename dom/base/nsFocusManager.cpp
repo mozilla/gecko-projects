@@ -18,8 +18,6 @@
 #include "nsIContentParent.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMChromeWindow.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMRange.h"
 #include "nsIHTMLDocument.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
@@ -370,8 +368,6 @@ nsFocusManager::GetRedirectedFocus(nsIContent* aContent)
 
 #ifdef MOZ_XUL
   if (aContent->IsXULElement()) {
-    nsCOMPtr<nsIDOMNode> inputField;
-
     if (aContent->IsXULElement(nsGkAtoms::textbox)) {
       return aContent->OwnerDoc()->
         GetAnonymousElementByAttribute(aContent, nsGkAtoms::anonid, NS_LITERAL_STRING("input"));
@@ -379,25 +375,10 @@ nsFocusManager::GetRedirectedFocus(nsIContent* aContent)
     else {
       nsCOMPtr<nsIDOMXULMenuListElement> menulist = do_QueryInterface(aContent);
       if (menulist) {
+        RefPtr<Element> inputField;
         menulist->GetInputField(getter_AddRefs(inputField));
+        return inputField;
       }
-      else if (aContent->IsXULElement(nsGkAtoms::scale)) {
-        nsCOMPtr<nsIDocument> doc = aContent->GetComposedDoc();
-        if (!doc)
-          return nullptr;
-
-        nsINodeList* children = doc->BindingManager()->GetAnonymousNodesFor(aContent);
-        if (children) {
-          nsIContent* child = children->Item(0);
-          if (child && child->IsXULElement(nsGkAtoms::slider))
-            return child->AsElement();
-        }
-      }
-    }
-
-    if (inputField) {
-      nsCOMPtr<Element> retval = do_QueryInterface(inputField);
-      return retval;
     }
   }
 #endif
@@ -742,9 +723,7 @@ nsFocusManager::WindowRaised(mozIDOMWindowProxy* aWindow)
       return NS_ERROR_FAILURE;
     }
 
-    if (!sTestMode) {
-      baseWindow->SetVisibility(true);
-    }
+    baseWindow->SetVisibility(true);
   }
 
   // If this is a parent or single process window, send the activate event.
@@ -1210,7 +1189,9 @@ nsFocusManager::ActivateOrDeactivate(nsPIDOMWindowOuter* aWindow, bool aActive)
                                               aActive ?
                                                 NS_LITERAL_STRING("activate") :
                                                 NS_LITERAL_STRING("deactivate"),
-                                              true, true, nullptr);
+                                              CanBubble::eYes,
+                                              Cancelable::eYes,
+                                              nullptr);
   }
 
   // Look for any remote child frames, iterate over them and send the activation notification.
@@ -1352,13 +1333,12 @@ nsFocusManager::SetFocusInner(Element* aNewContent, int32_t aFlags,
     // If the caller cannot access the current focused node, the caller should
     // not be able to steal focus from it. E.g., When the current focused node
     // is in chrome, any web contents should not be able to steal the focus.
-    nsCOMPtr<nsIDOMNode> domNode(do_QueryInterface(mFocusedElement));
-    sendFocusEvent = nsContentUtils::CanCallerAccess(domNode);
+    sendFocusEvent = nsContentUtils::CanCallerAccess(mFocusedElement);
     if (!sendFocusEvent && mMouseButtonEventHandlingDocument) {
       // However, while mouse button event is handling, the handling document's
       // script should be able to steal focus.
-      domNode = do_QueryInterface(mMouseButtonEventHandlingDocument);
-      sendFocusEvent = nsContentUtils::CanCallerAccess(domNode);
+      sendFocusEvent =
+        nsContentUtils::CanCallerAccess(mMouseButtonEventHandlingDocument);
     }
   }
 
@@ -3496,10 +3476,11 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
       }
     }
 
-    // If aStartContent is not in scope owned by aRootContent
-    // (e.g., aStartContent is already in shadow DOM),
+    // If aStartContent is not in a scope owned by the root element
+    // (i.e. aStartContent is already in shadow DOM),
     // search from scope including aStartContent
-    if (aRootContent != FindOwner(aStartContent)) {
+    nsIContent* rootElement = aRootContent->OwnerDoc()->GetRootElement();
+    if (rootElement != FindOwner(aStartContent)) {
       nsIContent* contentToFocus =
         GetNextTabbableContentInAncestorScopes(&aStartContent,
                                                aOriginalStartContent,

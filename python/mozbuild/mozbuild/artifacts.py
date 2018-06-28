@@ -144,13 +144,19 @@ class ArtifactJob(object):
 
     # We can tell our input is a test archive by this suffix, which happens to
     # be the same across platforms.
-    _test_archive_suffix = '.common.tests.zip'
+    _test_archive_suffixes = ('.common.tests.zip', '.common.tests.tar.gz')
 
-    def __init__(self, package_re, tests_re, log=None, download_symbols=False, substs=None):
+    def __init__(self, package_re, tests_re, log=None,
+                 download_symbols=False,
+                 download_host_bins=False,
+                 substs=None):
         self._package_re = re.compile(package_re)
         self._tests_re = None
         if tests_re:
             self._tests_re = re.compile(tests_re)
+        self._host_bins_re = None
+        if download_host_bins:
+            self._host_bins_re = re.compile(r'public/build/host/bin/(mar|mbsdiff)(.exe)?')
         self._log = log
         self._substs = substs
         self._symbols_archive_suffix = None
@@ -168,6 +174,8 @@ class ArtifactJob(object):
             name = artifact['name']
             if self._package_re and self._package_re.match(name):
                 yield name
+            elif self._host_bins_re and self._host_bins_re.match(name):
+                yield name
             elif self._tests_re and self._tests_re.match(name):
                 tests_artifact = name
                 yield name
@@ -182,10 +190,17 @@ class ArtifactJob(object):
                              'found none!'.format(re=self._tests_re))
 
     def process_artifact(self, filename, processed_filename):
-        if filename.endswith(ArtifactJob._test_archive_suffix) and self._tests_re:
+        if filename.endswith(ArtifactJob._test_archive_suffixes) and self._tests_re:
             return self.process_tests_artifact(filename, processed_filename)
         if self._symbols_archive_suffix and filename.endswith(self._symbols_archive_suffix):
             return self.process_symbols_archive(filename, processed_filename)
+        if self._host_bins_re:
+            # Turn 'HASH-mar.exe' into 'mar.exe'.  `filename` is a path on disk
+            # without the full path to the artifact, so we must reconstruct
+            # that path here.
+            orig_basename = os.path.basename(filename).split('-', 1)[1]
+            if self._host_bins_re.match('public/build/host/bin/{}'.format(orig_basename)):
+                return self.process_host_bin(filename, processed_filename)
         return self.process_package_artifact(filename, processed_filename)
 
     def process_package_artifact(self, filename, processed_filename):
@@ -236,6 +251,16 @@ class ArtifactJob(object):
                          {'destpath': destpath},
                          'Adding {destpath} to processed archive')
                 writer.add(destpath.encode('utf-8'), reader[filename])
+
+    def process_host_bin(self, filename, processed_filename):
+        with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
+            # Turn 'HASH-mar.exe' into 'mar.exe'.  `filename` is a path on disk
+            # without any of the path parts of the artifact, so we must inject
+            # the desired `host/bin` prefix here.
+            orig_basename = os.path.basename(filename).split('-', 1)[1]
+            destpath = mozpath.join('host/bin', orig_basename)
+            writer.add(destpath.encode('utf-8'), open(filename, 'rb'))
+
 
 class AndroidArtifactJob(ArtifactJob):
 
@@ -472,39 +497,55 @@ class WinArtifactJob(ArtifactJob):
 # The values correpsond to a pair of (<package regex>, <test archive regex>).
 JOB_DETAILS = {
     'android-api-16-opt': (AndroidArtifactJob, (r'(public/build/fennec-(.*)\.android-arm.apk|public/build/target\.apk)',
-                                                r'public/build/fennec-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
+                                                r'public/build/fennec-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                                r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'android-api-16-debug': (AndroidArtifactJob, (r'public/build/target\.apk',
-                                                  r'public/build/target\.common\.tests\.zip')),
+                                                  r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'android-x86-opt': (AndroidArtifactJob, (r'public/build/target\.apk',
-                                             r'public/build/target\.common\.tests\.zip')),
+                                             r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'linux-opt': (LinuxArtifactJob, (r'public/build/target\.tar\.bz2',
-                                     r'public/build/target\.common\.tests\.zip')),
+                                     r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'linux-debug': (LinuxArtifactJob, (r'public/build/target\.tar\.bz2',
-                                       r'public/build/target\.common\.tests\.zip')),
+                                       r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'linux64-opt': (LinuxArtifactJob, (r'public/build/target\.tar\.bz2',
-                                       r'public/build/target\.common\.tests\.zip')),
+                                       r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'linux64-debug': (LinuxArtifactJob, (r'public/build/target\.tar\.bz2',
-                                         r'public/build/target\.common\.tests\.zip')),
+                                         r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'macosx64-opt': (MacArtifactJob, (r'public/build/firefox-(.*)\.mac\.dmg|public/build/target\.dmg',
-                                      r'public/build/firefox-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
+                                      r'public/build/firefox-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                      r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
     'macosx64-debug': (MacArtifactJob, (r'public/build/firefox-(.*)\.mac\.dmg|public/build/target\.dmg',
-                                        r'public/build/firefox-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
-    'win32-opt': (WinArtifactJob, (r'public/build/firefox-(.*)\.win32\.zip|public/build/target\.zip',
-                                   r'public/build/firefox-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
-    'win32-debug': (WinArtifactJob, (r'public/build/firefox-(.*)\.win32\.zip|public/build/target\.zip',
-                                     r'public/build/firefox-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
-    'win64-opt': (WinArtifactJob, (r'public/build/firefox-(.*)\.win64\.zip|public/build/target\.zip',
-                                   r'public/build/firefox-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
-    'win64-debug': (WinArtifactJob, (r'public/build/firefox-(.*)\.win64\.zip|public/build/target\.zip',
-                                     r'public/build/firefox-(.*)\.common\.tests\.zip|public/build/target\.common\.tests\.zip')),
+                                        r'public/build/firefox-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                        r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'win32-opt': (WinArtifactJob, (r'public/build/firefox-(.*)\.win32\.(zip|tar\.gz)|'
+                                   r'public/build/target\.(zip|tar\.gz)',
+                                   r'public/build/firefox-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                   r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'win32-debug': (WinArtifactJob, (r'public/build/firefox-(.*)\.win32\.(zip|tar\.gz)|'
+                                     r'public/build/target\.(zip|tar\.gz)',
+                                     r'public/build/firefox-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                     r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'win64-opt': (WinArtifactJob, (r'public/build/firefox-(.*)\.win64\.(zip|tar\.gz)|'
+                                   r'public/build/target\.(zip|tar\.gz)',
+                                   r'public/build/firefox-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                   r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
+    'win64-debug': (WinArtifactJob, (r'public/build/firefox-(.*)\.win64\.(zip|tar\.gz)|public/build/target\.(zip|tar\.gz)',
+                                     r'public/build/firefox-(.*)\.common\.tests\.(zip|tar\.gz)|'
+                                     r'public/build/target\.common\.tests\.(zip|tar\.gz)')),
 }
 
 
 
-def get_job_details(job, log=None, download_symbols=False, substs=None):
+def get_job_details(job, log=None,
+                    download_symbols=False,
+                    download_host_bins=False,
+                    substs=None):
     cls, (package_re, tests_re) = JOB_DETAILS[job]
-    return cls(package_re, tests_re, log=log, download_symbols=download_symbols,
+    return cls(package_re, tests_re, log=log,
+               download_symbols=download_symbols,
+               download_host_bins=download_host_bins,
                substs=substs)
+
 
 def cachedmethod(cachefunc):
     '''Decorator to wrap a class or instance method with a memoizing callable that
@@ -632,9 +673,11 @@ class TaskCache(CacheManager):
         CacheManager.__init__(self, cache_dir, 'artifact_url', MAX_CACHED_TASKS, log=log, skip_cache=skip_cache)
 
     @cachedmethod(operator.attrgetter('_cache'))
-    def artifact_urls(self, tree, job, rev, download_symbols):
+    def artifact_urls(self, tree, job, rev, download_symbols, download_host_bins):
         try:
-            artifact_job = get_job_details(job, log=self._log, download_symbols=download_symbols)
+            artifact_job = get_job_details(job, log=self._log,
+                                           download_symbols=download_symbols,
+                                           download_host_bins=download_host_bins)
         except KeyError:
             self.log(logging.INFO, 'artifact',
                 {'job': job},
@@ -668,8 +711,7 @@ class TaskCache(CacheManager):
         for artifact_name in artifact_job.find_candidate_artifacts(artifacts):
             # We can easily extract the task ID from the URL.  We can't easily
             # extract the build ID; we use the .ini files embedded in the
-            # downloaded artifact for this.  We could also use the uploaded
-            # public/build/buildprops.json for this purpose.
+            # downloaded artifact for this.
             url = get_artifact_url(taskId, artifact_name)
             urls.append(url)
         if not urls:
@@ -861,6 +903,11 @@ class Artifacts(object):
 
         self._substs = substs
         self._download_symbols = self._substs.get('MOZ_ARTIFACT_BUILD_SYMBOLS', False)
+        # Host binaries are not produced for macOS consumers: that is, there's
+        # no macOS-hosted job to produce them at this time.  Therefore we
+        # enable this only for automation builds, which only require Linux and
+        # Windows host binaries.
+        self._download_host_bins = self._substs.get('MOZ_AUTOMATION', False)
         self._defines = defines
         self._tree = tree
         self._job = job or self._guess_artifact_job()
@@ -874,6 +921,7 @@ class Artifacts(object):
         try:
             self._artifact_job = get_job_details(self._job, log=self._log,
                                                  download_symbols=self._download_symbols,
+                                                 download_host_bins=self._download_host_bins,
                                                  substs=self._substs)
         except KeyError:
             self.log(logging.INFO, 'artifact',
@@ -1052,7 +1100,9 @@ class Artifacts(object):
 
     def find_pushhead_artifacts(self, task_cache, job, tree, pushhead):
         try:
-            urls = task_cache.artifact_urls(tree, job, pushhead, self._download_symbols)
+            urls = task_cache.artifact_urls(tree, job, pushhead,
+                                            self._download_symbols,
+                                            self._download_host_bins)
         except ValueError:
             return None
         if urls:

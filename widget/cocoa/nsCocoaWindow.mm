@@ -160,6 +160,7 @@ nsCocoaWindow::nsCocoaWindow()
 , mInResize(false)
 , mWindowTransformIsIdentity(true)
 , mNumModalDescendents(0)
+, mWindowAnimationBehavior(NSWindowAnimationBehaviorDefault)
 {
   if ([NSWindow respondsToSelector:@selector(setAllowsAutomaticWindowTabbing:)]) {
     // Disable automatic tabbing on 10.12. We need to do this before we
@@ -910,7 +911,7 @@ nsCocoaWindow::Show(bool bState)
               behavior = NSWindowAnimationBehaviorDocumentWindow;
               break;
             default:
-              NS_NOTREACHED("unexpected mAnimationType value");
+              MOZ_ASSERT_UNREACHABLE("unexpected mAnimationType value");
               // fall through
             case nsIWidget::eGenericWindowAnimation:
               behavior = NSWindowAnimationBehaviorDefault;

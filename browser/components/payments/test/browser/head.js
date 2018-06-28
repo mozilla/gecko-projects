@@ -112,9 +112,18 @@ function withNewDialogFrame(requestId, taskFn) {
 
   let args = {
     gBrowser,
-    url: `chrome://payments/content/paymentDialogWrapper.xhtml?requestId=${requestId}`,
+    url: `chrome://payments/content/paymentDialogWrapper.xul?requestId=${requestId}`,
   };
   return BrowserTestUtils.withNewTab(args, dialogTabTask);
+}
+
+async function withNewTabInPrivateWindow(args = {}, taskFn) {
+  let privateWin = await BrowserTestUtils.openNewBrowserWindow({private: true});
+  let tabArgs = Object.assign(args, {
+    browser: privateWin.gBrowser,
+  });
+  await withMerchantTab(tabArgs, taskFn);
+  await BrowserTestUtils.closeWindow(privateWin);
 }
 
 /**
@@ -131,21 +140,48 @@ function spawnTaskInNewDialog(requestId, contentTaskFn, args = null) {
   });
 }
 
-async function addSampleAddressesAndBasicCard() {
+async function addAddressRecord(address) {
   let onChanged = TestUtils.topicObserved("formautofill-storage-changed",
                                           (subject, data) => data == "add");
-  formAutofillStorage.addresses.add(PTU.Addresses.TimBL);
+  let guid = formAutofillStorage.addresses.add(address);
   await onChanged;
+  return guid;
+}
 
-  onChanged = TestUtils.topicObserved("formautofill-storage-changed",
-                                      (subject, data) => data == "add");
-  formAutofillStorage.addresses.add(PTU.Addresses.TimBL2);
+async function addCardRecord(card) {
+  let onChanged = TestUtils.topicObserved("formautofill-storage-changed",
+                                          (subject, data) => data == "add");
+  let guid = formAutofillStorage.creditCards.add(card);
   await onChanged;
+  return guid;
+}
 
-  onChanged = TestUtils.topicObserved("formautofill-storage-changed",
-                                      (subject, data) => data == "add");
-  formAutofillStorage.creditCards.add(PTU.BasicCards.JohnDoe);
-  await onChanged;
+/**
+ * Add address and creditCard records to the formautofill store
+ *
+ * @param {array=} addresses  - The addresses to add to the formautofill address store
+ * @param {array=} cards - The cards to add to the formautofill creditCards store
+ * @returns {Promise}
+ */
+async function addSampleAddressesAndBasicCard(
+  addresses = [
+    PTU.Addresses.TimBL,
+    PTU.Addresses.TimBL2,
+  ],
+  cards = [
+    PTU.BasicCards.JohnDoe,
+  ]) {
+  let guids = {};
+
+  for (let i = 0; i < addresses.length; i++) {
+    guids[`address${i + 1}GUID`] = await addAddressRecord(addresses[i]);
+  }
+
+  for (let i = 0; i < cards.length; i++) {
+    guids[`card${i + 1}GUID`] = await addCardRecord(cards[i]);
+  }
+
+  return guids;
 }
 
 /**
@@ -169,6 +205,22 @@ function checkPaymentAddressMatchesStorageAddress(paymentAddress, storageAddress
      `${storageAddress["family-name"]}`,
      "Recipient name should match");
   is(paymentAddress.phone, storageAddress.tel, "Phone should match");
+}
+
+/**
+ * Checks that a card from autofill storage matches a Payment Request MethodDetails response.
+ * @param {MethodDetails} methodDetails
+ * @param {object} card
+ * @param {string} msg to describe the check
+ */
+function checkPaymentMethodDetailsMatchesCard(methodDetails, card, msg) {
+  info(msg);
+  // The card expiry month should be a zero-padded two-digit string.
+  let cardExpiryMonth = card["cc-exp-month"].toString().padStart(2, "0");
+  is(methodDetails.cardholderName, card["cc-name"], "Check cardholderName");
+  is(methodDetails.cardNumber, card["cc-number"], "Check cardNumber");
+  is(methodDetails.expiryMonth, cardExpiryMonth, "Check expiryMonth");
+  is(methodDetails.expiryYear, card["cc-exp-year"], "Check expiryYear");
 }
 
 /**
@@ -206,6 +258,14 @@ async function setupPaymentDialog(browser, {methodData, details, options, mercha
   await dialogReadyPromise;
   info("dialog ready");
 
+  await spawnPaymentDialogTask(frame, () => {
+    let elementHeight = (element) =>
+      element.getBoundingClientRect().height;
+    content.isHidden = (element) => elementHeight(element) == 0;
+    content.isVisible = (element) => elementHeight(element) > 0;
+  });
+  info("helper functions injected into frame");
+
   return {win, requestId, frame};
 }
 
@@ -221,45 +281,24 @@ async function setupPaymentDialog(browser, {methodData, details, options, mercha
  * @param {string} options.origin
  */
 async function spawnInDialogForMerchantTask(merchantTaskFn, dialogTaskFn, taskArgs, {
+  browser,
   origin = "https://example.com",
 } = {
   origin: "https://example.com",
 }) {
   await withMerchantTab({
+    browser,
     url: origin + BLANK_PAGE_PATH,
   }, async merchBrowser => {
-    await ContentTask.spawn(merchBrowser, taskArgs, merchantTaskFn);
+    let {win, frame} = await setupPaymentDialog(merchBrowser, {
+      ...taskArgs,
+      merchantTaskFn,
+    });
 
-    const requests = getPaymentRequests();
-    is(requests.length, 1, "Should have one payment request");
-    let request = requests[0];
-    ok(!!request.requestId, "Got a payment request with an ID");
-
-    await spawnTaskInNewDialog(request.requestId, dialogTaskFn, taskArgs);
+    await spawnPaymentDialogTask(frame, dialogTaskFn, taskArgs);
+    spawnPaymentDialogTask(frame, PTU.DialogContentTasks.manuallyClickCancel);
+    await BrowserTestUtils.waitForCondition(() => win.closed, "dialog should be closed");
   });
-}
-
-async function spawnInDialogForPrivateMerchantTask(merchantTaskFn, dialogTaskFn, taskArgs, {
-  origin = "https://example.com",
-} = {
-  origin: "https://example.com",
-}) {
-  let privateWin = await BrowserTestUtils.openNewBrowserWindow({private: true});
-
-  await withMerchantTab({
-    url: origin + BLANK_PAGE_PATH,
-    browser: privateWin.gBrowser,
-  }, async merchBrowser => {
-    await ContentTask.spawn(merchBrowser, taskArgs, merchantTaskFn);
-
-    const requests = getPaymentRequests();
-    is(requests.length, 1, "Should have one payment request");
-    let request = requests[0];
-    ok(!!request.requestId, "Got a payment request with an ID");
-
-    await spawnTaskInNewDialog(request.requestId, dialogTaskFn, taskArgs);
-  });
-  await BrowserTestUtils.closeWindow(privateWin);
 }
 
 async function setupFormAutofillStorage() {
@@ -267,8 +306,8 @@ async function setupFormAutofillStorage() {
 }
 
 function cleanupFormAutofillStorage() {
-  formAutofillStorage.addresses._nukeAllRecords();
-  formAutofillStorage.creditCards._nukeAllRecords();
+  formAutofillStorage.addresses.removeAll();
+  formAutofillStorage.creditCards.removeAll();
 }
 
 add_task(async function setup_head() {
@@ -281,4 +320,171 @@ add_task(async function setup_head() {
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+async function selectPaymentDialogShippingAddressByCountry(frame, country) {
+  await spawnPaymentDialogTask(frame,
+                               PTU.DialogContentTasks.selectShippingAddressByCountry,
+                               country);
+}
+
+async function navigateToAddAddressPage(frame, aOptions = {
+  addLinkSelector: "address-picker a.add-link",
+  initialPageId: "payment-summary",
+}) {
+  await spawnPaymentDialogTask(frame, async (options) => {
+    let {
+      PaymentTestUtils,
+    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+
+    info("navigateToAddAddressPage: check were on the expected page first");
+    await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
+      info("current page state: " + state.page.id + " waiting for: " + options.initialPageId);
+      return state.page.id == options.initialPageId;
+    }, "Check summary page state");
+
+    // click through to add/edit address page
+    info("navigateToAddAddressPage: click the link");
+    let addLink = content.document.querySelector(options.addLinkSelector);
+    addLink.click();
+
+    info("navigateToAddAddressPage: wait for address page");
+    await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
+      return state.page.id == "address-page" && !state.page.guid;
+    }, "Check add page state");
+  }, aOptions);
+}
+
+async function fillInAddressForm(frame, aAddress, aOptions = {}) {
+  await spawnPaymentDialogTask(frame, async (args) => {
+    let {address, options = {}} = args;
+
+    // fill the form
+    info("manuallyAddAddress: fill the form with address: " + JSON.stringify(address));
+    for (let [key, val] of Object.entries(address)) {
+      let field = content.document.getElementById(key);
+      if (!field) {
+        ok(false, `${key} field not found`);
+      }
+      field.value = val;
+    }
+    let persistCheckbox = Cu.waiveXrays(
+        content.document.querySelector(options.checkboxSelector));
+    // only touch the checked state if explicitly told to in the options
+    if (options.hasOwnProperty("isTemporary")) {
+      info(`fillInAddressForm: toggling persistCheckbox as isTemporary is: ${options.isTemporary}`);
+      persistCheckbox.checked = !options.isTemporary;
+    }
+    info(`fillInAddressForm, persistCheckbox.checked: ${persistCheckbox.checked}`);
+  }, {address: aAddress, options: aOptions});
+}
+
+async function verifyPersistCheckbox(frame, aOptions = {}) {
+  await spawnPaymentDialogTask(frame, async (args) => {
+    let {options = {}} = args;
+    // ensure card/address is persisted or not based on the temporary option given
+    info("verifyPersistCheckbox");
+    let persistCheckbox = Cu.waiveXrays(
+        content.document.querySelector(options.checkboxSelector));
+
+    if (options.isEditing) {
+      ok(persistCheckbox.hidden, "checkbox should be hidden when editing an existing address");
+    } else {
+      ok(!persistCheckbox.hidden, "checkbox should be visible when adding a new address");
+      is(persistCheckbox.checked, options.expectPersist,
+         "persist checkbox is in the expected state");
+    }
+  }, {options: aOptions});
+}
+
+async function submitAddressForm(frame, aAddress, aOptions = {}) {
+  await spawnPaymentDialogTask(frame, async (args) => {
+    let {options = {}} = args;
+    let {
+      PaymentTestUtils,
+    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+
+    let oldAddresses = await PaymentTestUtils.DialogContentUtils.getCurrentState(content);
+
+    // submit the form to return to summary page
+    content.document.querySelector("address-form button:last-of-type").click();
+
+    let currState = await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
+      return state.page.id == "payment-summary";
+    }, "Switched back to payment-summary");
+
+    let savedCount = Object.keys(currState.savedAddresses).length;
+    let tempCount = Object.keys(currState.tempAddresses).length;
+    let oldSavedCount = Object.keys(oldAddresses.savedAddresses).length;
+    let oldTempCount = Object.keys(oldAddresses.tempAddresses).length;
+
+    if (options.isEditing) {
+      is(tempCount, oldTempCount, "tempAddresses count didn't change");
+      is(savedCount, oldSavedCount, "savedAddresses count didn't change");
+    } else if (options.expectPersist) {
+      is(tempCount, oldTempCount, "tempAddresses count didn't change");
+      is(savedCount, oldSavedCount + 1, "Entry added to savedAddresses");
+    } else {
+      is(tempCount, oldTempCount + 1, "Entry added to tempAddresses");
+      is(savedCount, oldSavedCount, "savedAddresses count didn't change");
+    }
+  }, {address: aAddress, options: aOptions});
+}
+
+async function manuallyAddAddress(frame, aAddress, aOptions = {}) {
+  let options = Object.assign({
+    expectPersist: true,
+    isEditing: false,
+  }, aOptions, {
+    checkboxSelector: "#address-page .persist-checkbox",
+  });
+  await navigateToAddAddressPage(frame);
+  await fillInAddressForm(frame, aAddress, options);
+  await verifyPersistCheckbox(frame, options);
+  await submitAddressForm(frame, aAddress, options);
+}
+
+async function navigateToAddCardPage(frame, aOptions = {
+  addLinkSelector: "payment-method-picker .add-link",
+}) {
+  await spawnPaymentDialogTask(frame, async (options) => {
+    let {
+      PaymentTestUtils,
+    } = ChromeUtils.import("resource://testing-common/PaymentTestUtils.jsm", {});
+
+    // check were on the summary page first
+    await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
+      return !state.page.id || (state.page.id == "payment-summary");
+    }, "Check summary page state");
+
+    // click through to add/edit card page
+    let addLink = content.document.querySelector(options.addLinkSelector);
+    addLink.click();
+
+    // wait for card page
+    await PaymentTestUtils.DialogContentUtils.waitForState(content, (state) => {
+      return state.page.id == "basic-card-page" && !state["basic-card-page"].guid;
+    }, "Check add page state");
+  }, aOptions);
+}
+
+async function fillInCardForm(frame, aCard, aOptions = {}) {
+  await spawnPaymentDialogTask(frame, async (args) => {
+    let {card, options = {}} = args;
+
+    // fill the form
+    info("fillInCardForm: fill the form with card: " + JSON.stringify(card));
+    for (let [key, val] of Object.entries(card)) {
+      let field = content.document.getElementById(key);
+      if (!field) {
+        ok(false, `${key} field not found`);
+      }
+      field.value = val;
+    }
+    let persistCheckbox = content.document.querySelector(options.checkboxSelector);
+    // only touch the checked state if explicitly told to in the options
+    if (options.hasOwnProperty("isTemporary")) {
+      Cu.waiveXrays(persistCheckbox).checked = !options.isTemporary;
+    }
+  }, {card: aCard, options: aOptions});
 }

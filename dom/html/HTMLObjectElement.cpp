@@ -14,7 +14,6 @@
 #include "nsError.h"
 #include "nsIDocument.h"
 #include "nsIPluginDocument.h"
-#include "nsIDOMDocument.h"
 #include "nsIObjectFrame.h"
 #include "nsNPAPIPluginInstance.h"
 #include "nsIWidget.h"
@@ -466,14 +465,14 @@ HTMLObjectElement::ParseAttribute(int32_t aNamespaceID,
 }
 
 void
-HTMLObjectElement::MapAttributesIntoRule(const nsMappedAttributes *aAttributes,
-                                         GenericSpecifiedValues *aData)
+HTMLObjectElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                         MappedDeclarations& aDecls)
 {
-  nsGenericHTMLFormElement::MapImageAlignAttributeInto(aAttributes, aData);
-  nsGenericHTMLFormElement::MapImageBorderAttributeInto(aAttributes, aData);
-  nsGenericHTMLFormElement::MapImageMarginAttributeInto(aAttributes, aData);
-  nsGenericHTMLFormElement::MapImageSizeAttributesInto(aAttributes, aData);
-  nsGenericHTMLFormElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLFormElement::MapImageAlignAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLFormElement::MapImageBorderAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLFormElement::MapImageMarginAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLFormElement::MapImageSizeAttributesInto(aAttributes, aDecls);
+  nsGenericHTMLFormElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 NS_IMETHODIMP_(bool)
@@ -547,7 +546,7 @@ JSObject*
 HTMLObjectElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   JS::Rooted<JSObject*> obj(aCx,
-    HTMLObjectElementBinding::Wrap(aCx, this, aGivenProto));
+    HTMLObjectElement_Binding::Wrap(aCx, this, aGivenProto));
   if (!obj) {
     return nullptr;
   }

@@ -418,7 +418,7 @@ private:
 
 // Cancelable runnable methods implement nsICancelableRunnable, and
 // Idle and IdleWithTimer also nsIIdleRunnable.
-enum RunnableKind
+enum class RunnableKind
 {
   Standard,
   Cancelable,
@@ -545,7 +545,7 @@ public:
   template <typename F>
   explicit RunnableFunction(const char* aName, F&& aFunction)
     : Runnable(aName)
-    , mFunction(Forward<F>(aFunction))
+    , mFunction(std::forward<F>(aFunction))
   { }
 
   NS_IMETHOD Run() override {
@@ -659,7 +659,7 @@ NS_NewRunnableFunction(const char* aName, Function&& aFunction)
   // to move if possible.
   return do_AddRef(
     new mozilla::detail::RunnableFunctionImpl<Function>(
-      aName, mozilla::Forward<Function>(aFunction)));
+      aName, std::forward<Function>(aFunction)));
 }
 
 namespace mozilla {
@@ -677,7 +677,7 @@ protected:
 };
 
 template <>
-class TimerBehaviour<IdleWithTimer>
+class TimerBehaviour<RunnableKind::IdleWithTimer>
 {
 public:
   nsITimer* GetTimer()
@@ -714,20 +714,20 @@ private:
 template<class ClassType,
          typename ReturnType = void,
          bool Owning = true,
-         mozilla::RunnableKind Kind = mozilla::Standard>
+         mozilla::RunnableKind Kind = mozilla::RunnableKind::Standard>
 class nsRunnableMethod
-  : public mozilla::Conditional<Kind == mozilla::Standard,
+  : public mozilla::Conditional<Kind == mozilla::RunnableKind::Standard,
                                 mozilla::Runnable,
                                 typename mozilla::Conditional<
-                                  Kind == mozilla::Cancelable,
+                                  Kind == mozilla::RunnableKind::Cancelable,
                                   mozilla::CancelableRunnable,
                                   mozilla::IdleRunnable>::Type>::Type,
     protected mozilla::detail::TimerBehaviour<Kind>
 {
-  using BaseType = typename mozilla::Conditional<Kind == mozilla::Standard,
+  using BaseType = typename mozilla::Conditional<Kind == mozilla::RunnableKind::Standard,
                                                  mozilla::Runnable,
                                                  typename mozilla::Conditional<
-                                                   Kind == mozilla::Cancelable,
+                                                   Kind == mozilla::RunnableKind::Cancelable,
                                                    mozilla::CancelableRunnable,
                                                    mozilla::IdleRunnable>::Type>::Type;
 public:
@@ -777,7 +777,8 @@ struct nsRunnableMethodReceiver<ClassType, false>
 static inline constexpr bool
 IsIdle(mozilla::RunnableKind aKind)
 {
-  return aKind == mozilla::Idle || aKind == mozilla::IdleWithTimer;
+  return aKind == mozilla::RunnableKind::Idle ||
+         aKind == mozilla::RunnableKind::IdleWithTimer;
 }
 
 template<typename PtrType, typename Method, bool Owning, mozilla::RunnableKind Kind>
@@ -791,7 +792,7 @@ struct nsRunnableMethodTraits<PtrType, R(C::*)(As...), Owning, Kind>
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
-  static const bool can_cancel = Kind == mozilla::Cancelable;
+  static const bool can_cancel = Kind == mozilla::RunnableKind::Cancelable;
 };
 
 template<typename PtrType, class C, typename R, bool Owning, mozilla::RunnableKind Kind, typename... As>
@@ -802,7 +803,7 @@ struct nsRunnableMethodTraits<PtrType, R(C::*)(As...) const, Owning, Kind>
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
-  static const bool can_cancel = Kind == mozilla::Cancelable;
+  static const bool can_cancel = Kind == mozilla::RunnableKind::Cancelable;
 };
 
 #ifdef NS_HAVE_STDCALL
@@ -814,7 +815,7 @@ struct nsRunnableMethodTraits<PtrType, R(__stdcall C::*)(As...), Owning, Kind>
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
-  static const bool can_cancel = Kind == mozilla::Cancelable;
+  static const bool can_cancel = Kind == mozilla::RunnableKind::Cancelable;
 };
 
 template<typename PtrType, class C, typename R, bool Owning, mozilla::RunnableKind Kind>
@@ -825,7 +826,7 @@ struct nsRunnableMethodTraits<PtrType, R(NS_STDCALL C::*)(), Owning, Kind>
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
-  static const bool can_cancel = Kind == mozilla::Cancelable;
+  static const bool can_cancel = Kind == mozilla::RunnableKind::Cancelable;
 };
 
 template<typename PtrType, class C, typename R, bool Owning, mozilla::RunnableKind Kind, typename... As>
@@ -836,7 +837,7 @@ struct nsRunnableMethodTraits<PtrType, R(__stdcall C::*)(As...) const, Owning, K
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
-  static const bool can_cancel = Kind == mozilla::Cancelable;
+  static const bool can_cancel = Kind == mozilla::RunnableKind::Cancelable;
 };
 
 template<typename PtrType, class C, typename R, bool Owning, mozilla::RunnableKind Kind>
@@ -847,7 +848,7 @@ struct nsRunnableMethodTraits<PtrType, R(NS_STDCALL C::*)() const, Owning, Kind>
                 "Stored class must inherit from method's class");
   typedef R return_type;
   typedef nsRunnableMethod<C, R, Owning, Kind> base_type;
-  static const bool can_cancel = Kind == mozilla::Cancelable;
+  static const bool can_cancel = Kind == mozilla::RunnableKind::Cancelable;
 };
 #endif
 
@@ -871,7 +872,7 @@ struct StoreCopyPassByValue
   typedef stored_type passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreCopyPassByValue(A&& a) : m(mozilla::Forward<A>(a)) {}
+  MOZ_IMPLICIT StoreCopyPassByValue(A&& a) : m(std::forward<A>(a)) {}
   passed_type PassAsParameter() { return m; }
 };
 template<typename S>
@@ -885,7 +886,7 @@ struct StoreCopyPassByConstLRef
   typedef const stored_type& passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreCopyPassByConstLRef(A&& a) : m(mozilla::Forward<A>(a)) {}
+  MOZ_IMPLICIT StoreCopyPassByConstLRef(A&& a) : m(std::forward<A>(a)) {}
   passed_type PassAsParameter() { return m; }
 };
 template<typename S>
@@ -899,7 +900,7 @@ struct StoreCopyPassByLRef
   typedef stored_type& passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreCopyPassByLRef(A&& a) : m(mozilla::Forward<A>(a)) {}
+  MOZ_IMPLICIT StoreCopyPassByLRef(A&& a) : m(std::forward<A>(a)) {}
   passed_type PassAsParameter() { return m; }
 };
 template<typename S>
@@ -913,8 +914,8 @@ struct StoreCopyPassByRRef
   typedef stored_type&& passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreCopyPassByRRef(A&& a) : m(mozilla::Forward<A>(a)) {}
-  passed_type PassAsParameter() { return mozilla::Move(m); }
+  MOZ_IMPLICIT StoreCopyPassByRRef(A&& a) : m(std::forward<A>(a)) {}
+  passed_type PassAsParameter() { return std::move(m); }
 };
 template<typename S>
 struct IsParameterStorageClass<StoreCopyPassByRRef<S>>
@@ -955,7 +956,7 @@ struct StoreRefPtrPassByPtr
   typedef T* passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreRefPtrPassByPtr(A&& a) : m(mozilla::Forward<A>(a)) {}
+  MOZ_IMPLICIT StoreRefPtrPassByPtr(A&& a) : m(std::forward<A>(a)) {}
   passed_type PassAsParameter() { return m.get(); }
 };
 template<typename S>
@@ -997,7 +998,7 @@ struct StoreCopyPassByConstPtr
   typedef const T* passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreCopyPassByConstPtr(A&& a) : m(mozilla::Forward<A>(a)) {}
+  MOZ_IMPLICIT StoreCopyPassByConstPtr(A&& a) : m(std::forward<A>(a)) {}
   passed_type PassAsParameter() { return &m; }
 };
 template<typename S>
@@ -1011,7 +1012,7 @@ struct StoreCopyPassByPtr
   typedef T* passed_type;
   stored_type m;
   template <typename A>
-  MOZ_IMPLICIT StoreCopyPassByPtr(A&& a) : m(mozilla::Forward<A>(a)) {}
+  MOZ_IMPLICIT StoreCopyPassByPtr(A&& a) : m(std::forward<A>(a)) {}
   passed_type PassAsParameter() { return &m; }
 };
 template<typename S>
@@ -1102,7 +1103,7 @@ struct NonParameterStorageClass
 // - T*        -> StorePtrPassByPtr<T>           : Store T*, pass T*.
 // - const T&  -> StoreConstRefPassByConstLRef<T>: Store const T&, pass const T&.
 // - T&        -> StoreRefPassByLRef<T>          : Store T&, pass T&.
-// - T&&       -> StoreCopyPassByRRef<T>         : Store T, pass Move(T).
+// - T&&       -> StoreCopyPassByRRef<T>         : Store T, pass std::move(T).
 // - RefPtr<T>, nsCOMPtr<T>
 //             -> StoreRefPtrPassByPtr<T>        : Store RefPtr<T>, pass T*
 // - Other T   -> StoreCopyPassByConstLRef<T>    : Store T, pass const T&.
@@ -1157,7 +1158,7 @@ struct RunnableMethodArguments final
   Tuple<typename ::detail::ParameterStorage<Ts>::Type...> mArguments;
   template <typename... As>
   explicit RunnableMethodArguments(As&&... aArguments)
-    : mArguments(Forward<As>(aArguments)...)
+    : mArguments(std::forward<As>(aArguments)...)
   {}
   template<typename C, typename M, typename... Args, size_t... Indices>
   static auto
@@ -1203,9 +1204,9 @@ public:
   explicit RunnableMethodImpl(const char* aName, ForwardedPtrType&& aObj,
                               Method aMethod, Args&&... aArgs)
     : BaseType(aName)
-    , mReceiver(Forward<ForwardedPtrType>(aObj))
+    , mReceiver(std::forward<ForwardedPtrType>(aObj))
     , mMethod(aMethod)
-    , mArgs(Forward<Args>(aArgs)...)
+    , mArgs(std::forward<Args>(aArgs)...)
   {
     static_assert(sizeof...(Storages) == sizeof...(Args), "Storages and Args should have equal sizes");
   }
@@ -1223,7 +1224,7 @@ public:
 
   nsresult Cancel()
   {
-    static_assert(Kind >= Cancelable, "Don't use me!");
+    static_assert(Kind >= RunnableKind::Cancelable, "Don't use me!");
     Revoke();
     return NS_OK;
   }
@@ -1260,66 +1261,66 @@ public:
 // Type aliases for NewRunnableMethod.
 template<typename PtrType, typename Method>
 using OwningRunnableMethod = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, true, Standard>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::Standard>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using OwningRunnableMethodImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, true, Standard, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::Standard, Storages...>;
 
 // Type aliases for NewCancelableRunnableMethod.
 template<typename PtrType, typename Method>
 using CancelableRunnableMethod = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, true, Cancelable>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::Cancelable>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using CancelableRunnableMethodImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, true, Cancelable, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::Cancelable, Storages...>;
 
 // Type aliases for NewIdleRunnableMethod.
 template<typename PtrType, typename Method>
 using IdleRunnableMethod = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, true, Idle>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::Idle>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using IdleRunnableMethodImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, true, Idle, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::Idle, Storages...>;
 
 // Type aliases for NewIdleRunnableMethodWithTimer.
 template<typename PtrType, typename Method>
 using IdleRunnableMethodWithTimer = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, true, IdleWithTimer>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::IdleWithTimer>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using IdleRunnableMethodWithTimerImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, true, IdleWithTimer, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, true, RunnableKind::IdleWithTimer, Storages...>;
 
 // Type aliases for NewNonOwningRunnableMethod.
 template<typename PtrType, typename Method>
 using NonOwningRunnableMethod = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, false, Standard>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::Standard>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using NonOwningRunnableMethodImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, false, Standard, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::Standard, Storages...>;
 
 // Type aliases for NonOwningCancelableRunnableMethod
 template<typename PtrType, typename Method>
 using NonOwningCancelableRunnableMethod = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, false, Cancelable>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::Cancelable>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using NonOwningCancelableRunnableMethodImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, false, Cancelable, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::Cancelable, Storages...>;
 
 // Type aliases for NonOwningIdleRunnableMethod
 template<typename PtrType, typename Method>
 using NonOwningIdleRunnableMethod = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, false, Idle>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::Idle>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using NonOwningIdleRunnableMethodImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, false, Idle, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::Idle, Storages...>;
 
 // Type aliases for NewIdleRunnableMethodWithTimer.
 template<typename PtrType, typename Method>
 using NonOwningIdleRunnableMethodWithTimer = typename ::nsRunnableMethodTraits<
-  typename RemoveReference<PtrType>::Type, Method, false, IdleWithTimer>::base_type;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::IdleWithTimer>::base_type;
 template<typename PtrType, typename Method, typename... Storages>
 using NonOwningIdleRunnableMethodWithTimerImpl = RunnableMethodImpl<
-  typename RemoveReference<PtrType>::Type, Method, false, IdleWithTimer, Storages...>;
+  typename RemoveReference<PtrType>::Type, Method, false, RunnableKind::IdleWithTimer, Storages...>;
 
 } // namespace detail
 
@@ -1383,7 +1384,7 @@ using NonOwningIdleRunnableMethodWithTimerImpl = RunnableMethodImpl<
 //   nsCOMPtr<nsIRunnable> event =
 //     mozilla::NewRunnableMethod<RefPtr<T>, nsTArray<U>>
 //         ("description", myObject, &MyClass::DoSomething,
-//          Move(ptr), Move(array));
+//          std::move(ptr), std::move(array));
 //
 // and there will be no extra AddRef/Release traffic, or copying of the array.
 //
@@ -1415,7 +1416,7 @@ NewRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod)
 {
   return do_AddRef(
     new detail::OwningRunnableMethodImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1424,7 +1425,7 @@ NewCancelableRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod)
 {
   return do_AddRef(
     new detail::CancelableRunnableMethodImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1433,7 +1434,7 @@ NewIdleRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod)
 {
   return do_AddRef(
     new detail::IdleRunnableMethodImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1444,7 +1445,7 @@ NewIdleRunnableMethodWithTimer(const char* aName,
 {
   return do_AddRef(
     new detail::IdleRunnableMethodWithTimerImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1453,7 +1454,7 @@ NewNonOwningRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod)
 {
   return do_AddRef(
     new detail::NonOwningRunnableMethodImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1463,7 +1464,7 @@ NewNonOwningCancelableRunnableMethod(const char* aName, PtrType&& aPtr,
 {
   return do_AddRef(
     new detail::NonOwningCancelableRunnableMethodImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1474,7 +1475,7 @@ NewNonOwningIdleRunnableMethod(const char* aName,
 {
   return do_AddRef(
     new detail::NonOwningIdleRunnableMethodImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 template<typename PtrType, typename Method>
@@ -1485,7 +1486,7 @@ NewNonOwningIdleRunnableMethodWithTimer(const char* aName,
 {
   return do_AddRef(
     new detail::NonOwningIdleRunnableMethodWithTimerImpl<PtrType, Method>(
-      aName, Forward<PtrType>(aPtr), aMethod));
+      aName, std::forward<PtrType>(aPtr), aMethod));
 }
 
 // Similar to NewRunnableMethod. Call like so:
@@ -1500,7 +1501,7 @@ NewRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod, Args&&... a
                 "<Storages...> size should be equal to number of arguments");
   return do_AddRef(
     new detail::OwningRunnableMethodImpl<PtrType, Method, Storages...>(
-      aName, Forward<PtrType>(aPtr), aMethod, mozilla::Forward<Args>(aArgs)...));
+      aName, std::forward<PtrType>(aPtr), aMethod, std::forward<Args>(aArgs)...));
 }
 
 template<typename... Storages, typename PtrType, typename Method, typename... Args>
@@ -1512,7 +1513,7 @@ NewNonOwningRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod,
                 "<Storages...> size should be equal to number of arguments");
   return do_AddRef(
     new detail::NonOwningRunnableMethodImpl<PtrType, Method, Storages...>(
-      aName, Forward<PtrType>(aPtr), aMethod, mozilla::Forward<Args>(aArgs)...));
+      aName, std::forward<PtrType>(aPtr), aMethod, std::forward<Args>(aArgs)...));
 }
 
 template<typename... Storages, typename PtrType, typename Method, typename... Args>
@@ -1524,7 +1525,7 @@ NewCancelableRunnableMethod(const char* aName, PtrType&& aPtr, Method aMethod,
                 "<Storages...> size should be equal to number of arguments");
   return do_AddRef(
     new detail::CancelableRunnableMethodImpl<PtrType, Method, Storages...>(
-      aName, Forward<PtrType>(aPtr), aMethod, mozilla::Forward<Args>(aArgs)...));
+      aName, std::forward<PtrType>(aPtr), aMethod, std::forward<Args>(aArgs)...));
 }
 
 template<typename... Storages, typename PtrType, typename Method, typename... Args>
@@ -1536,7 +1537,7 @@ NewNonOwningCancelableRunnableMethod(const char* aName, PtrType&& aPtr,
                 "<Storages...> size should be equal to number of arguments");
   return do_AddRef(
     new detail::NonOwningCancelableRunnableMethodImpl<PtrType, Method, Storages...>(
-      aName, Forward<PtrType>(aPtr), aMethod, mozilla::Forward<Args>(aArgs)...));
+      aName, std::forward<PtrType>(aPtr), aMethod, std::forward<Args>(aArgs)...));
 }
 
 template<typename... Storages,
@@ -1553,7 +1554,7 @@ NewIdleRunnableMethod(const char* aName,
                 "<Storages...> size should be equal to number of arguments");
   return do_AddRef(
     new detail::IdleRunnableMethodImpl<PtrType, Method, Storages...>(
-      aName, Forward<PtrType>(aPtr), aMethod, mozilla::Forward<Args>(aArgs)...));
+      aName, std::forward<PtrType>(aPtr), aMethod, std::forward<Args>(aArgs)...));
 }
 
 template<typename... Storages,
@@ -1570,7 +1571,7 @@ NewNonOwningIdleRunnableMethod(const char* aName,
                 "<Storages...> size should be equal to number of arguments");
   return do_AddRef(
     new detail::NonOwningIdleRunnableMethodImpl<PtrType, Method, Storages...>(
-      aName, Forward<PtrType>(aPtr), aMethod, mozilla::Forward<Args>(aArgs)...));
+      aName, std::forward<PtrType>(aPtr), aMethod, std::forward<Args>(aArgs)...));
 }
 
 } // namespace mozilla
@@ -1633,7 +1634,7 @@ public:
   {
     if (mEvent != aEvent) {
       Revoke();
-      mEvent = Move(aEvent);
+      mEvent = std::move(aEvent);
     }
     return *this;
   }

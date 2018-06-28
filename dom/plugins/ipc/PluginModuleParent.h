@@ -17,6 +17,7 @@
 #include "mozilla/plugins/PluginMessageUtils.h"
 #include "mozilla/plugins/PluginTypes.h"
 #include "mozilla/ipc/TaskFactory.h"
+#include "mozilla/RecursiveMutex.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Unused.h"
 #include "npapi.h"
@@ -317,9 +318,11 @@ protected:
      * This mutex protects the crash reporter when the Plugin Hang UI event
      * handler is executing off main thread. It is intended to protect both
      * the mCrashReporter variable in addition to the CrashReporterHost object
-     * that mCrashReporter refers to.
+     * that mCrashReporter refers to. Sometimes asynchronous crash reporter
+     * callbacks are dispatched synchronously while the caller is still holding
+     * the mutex. This requires recursive locking support in the mutex.
      */
-    mozilla::Mutex mCrashReporterMutex;
+    mozilla::RecursiveMutex mCrashReporterMutex;
     UniquePtr<ipc::CrashReporterHost> mCrashReporter;
 };
 
@@ -353,7 +356,7 @@ class PluginModuleContentParent : public PluginModuleParent
 
 class PluginModuleChromeParent
     : public PluginModuleParent
-    , public mozilla::HangMonitor::Annotator
+    , public mozilla::BackgroundHangAnnotator
 {
     friend class mozilla::ipc::CrashReporterHost;
     using TerminateChildProcessCallback =
@@ -477,7 +480,7 @@ private:
     PluginInstanceParent* GetManagingInstance(mozilla::ipc::IProtocol* aProtocol);
 
     virtual void
-    AnnotateHang(mozilla::HangMonitor::HangAnnotations& aAnnotations) override;
+    AnnotateHang(mozilla::BackgroundHangAnnotations& aAnnotations) override;
 
     virtual bool ShouldContinueFromReplyTimeout() override;
 

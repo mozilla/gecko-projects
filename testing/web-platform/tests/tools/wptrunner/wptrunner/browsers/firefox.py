@@ -55,6 +55,8 @@ def get_timeout_multiplier(test_type, run_info_data, **kwargs):
             return 4
         else:
             return 3
+    elif run_info_data["os"] == "android":
+        return 4
     return 1
 
 
@@ -87,11 +89,13 @@ def browser_kwargs(test_type, run_info_data, **kwargs):
 def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
                     **kwargs):
     executor_kwargs = base_executor_kwargs(test_type, server_config,
-                                           cache_manager, **kwargs)
+                                           cache_manager, run_info_data,
+                                           **kwargs)
     executor_kwargs["close_after_done"] = test_type != "reftest"
     executor_kwargs["timeout_multiplier"] = get_timeout_multiplier(test_type,
                                                                    run_info_data,
                                                                    **kwargs)
+    executor_kwargs["e10s"] = run_info_data["e10s"]
     capabilities = {}
     if test_type == "reftest":
         executor_kwargs["reftest_internal"] = kwargs["reftest_internal"]
@@ -110,6 +114,7 @@ def executor_kwargs(test_type, server_config, cache_manager, run_info_data,
         capabilities["acceptInsecureCerts"] = True
     if capabilities:
         executor_kwargs["capabilities"] = capabilities
+    executor_kwargs["debug"] = run_info_data["debug"]
     return executor_kwargs
 
 
@@ -122,7 +127,7 @@ def env_options():
     # network.dns.localDomains preference set below) to resolve the test
     # domains to localhost without relying on the network stack.
     #
-    # https://github.com/w3c/web-platform-tests/pull/9480
+    # https://github.com/web-platform-tests/wpt/pull/9480
     return {"server_host": "127.0.0.1",
             "bind_address": False,
             "supports_debugger": True}
@@ -130,6 +135,7 @@ def env_options():
 
 def run_info_extras(**kwargs):
     return {"e10s": kwargs["gecko_e10s"],
+            "verify": kwargs["verify"],
             "headless": "MOZ_HEADLESS" in os.environ}
 
 
@@ -370,7 +376,7 @@ class FirefoxBrowser(Browser):
         # local copy of certutil
         # TODO: Maybe only set this if certutil won't launch?
         env = os.environ.copy()
-        certutil_dir = os.path.dirname(self.binary)
+        certutil_dir = os.path.dirname(self.binary or self.certutil_binary)
         if mozinfo.isMac:
             env_var = "DYLD_LIBRARY_PATH"
         elif mozinfo.isUnix:

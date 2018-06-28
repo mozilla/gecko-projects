@@ -19,11 +19,11 @@ namespace dom {
 JSObject*
 SVGFESpecularLightingElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFESpecularLightingElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFESpecularLightingElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFESpecularLightingElement)
 

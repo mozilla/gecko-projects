@@ -9,7 +9,6 @@
 #include "HalImpl.h"
 #include "HalLog.h"
 #include "HalSandbox.h"
-#include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocument.h"
 #include "nsIDocShell.h"
@@ -439,14 +438,29 @@ UnregisterSensorObserver(SensorType aSensor, ISensorObserver *aObserver) {
   }
   DisableSensorNotifications(aSensor);
 
-  // Destroy sSensorObservers only if all observer lists are empty.
   for (int i = 0; i < NUM_SENSOR_TYPE; i++) {
     if (gSensorObservers[i].Length() > 0) {
       return;
     }
   }
-  delete [] gSensorObservers;
+
+  // We want to destroy gSensorObservers if all observer lists are
+  // empty, but we have to defer the deallocation via a runnable to
+  // mainthread (since we may be inside NotifySensorChange()/Broadcast()
+  // when it calls UnregisterSensorObserver()).
+  SensorObserverList* sensorlists = gSensorObservers;
   gSensorObservers = nullptr;
+
+  // Unlike DispatchToMainThread, DispatchToCurrentThread doesn't leak a runnable if
+  // it fails (and we assert we're on MainThread).
+  if (NS_FAILED(NS_DispatchToCurrentThread(NS_NewRunnableFunction("UnregisterSensorObserver",
+                                                                  [sensorlists]() -> void {
+      delete [] sensorlists;
+      }))))
+  {
+    // Still need to delete sensorlists if the dispatch fails
+    delete [] sensorlists;
+  }
 }
 
 void
@@ -571,84 +585,6 @@ UnlockScreenOrientation()
 {
   AssertMainThread();
   PROXY_IF_SANDBOXED(UnlockScreenOrientation());
-}
-
-void
-EnableSwitchNotifications(SwitchDevice aDevice) {
-  AssertMainThread();
-  PROXY_IF_SANDBOXED(EnableSwitchNotifications(aDevice));
-}
-
-void
-DisableSwitchNotifications(SwitchDevice aDevice) {
-  AssertMainThread();
-  PROXY_IF_SANDBOXED(DisableSwitchNotifications(aDevice));
-}
-
-typedef mozilla::ObserverList<SwitchEvent> SwitchObserverList;
-
-static SwitchObserverList *sSwitchObserverLists = nullptr;
-
-static SwitchObserverList&
-GetSwitchObserverList(SwitchDevice aDevice) {
-  MOZ_ASSERT(0 <= aDevice && aDevice < NUM_SWITCH_DEVICE);
-  if (sSwitchObserverLists == nullptr) {
-    sSwitchObserverLists = new SwitchObserverList[NUM_SWITCH_DEVICE];
-  }
-  return sSwitchObserverLists[aDevice];
-}
-
-static void
-ReleaseObserversIfNeeded() {
-  for (int i = 0; i < NUM_SWITCH_DEVICE; i++) {
-    if (sSwitchObserverLists[i].Length() != 0)
-      return;
-  }
-
-  //The length of every list is 0, no observer in the list.
-  delete [] sSwitchObserverLists;
-  sSwitchObserverLists = nullptr;
-}
-
-void
-RegisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver)
-{
-  AssertMainThread();
-  SwitchObserverList& observer = GetSwitchObserverList(aDevice);
-  observer.AddObserver(aObserver);
-  if (observer.Length() == 1) {
-    EnableSwitchNotifications(aDevice);
-  }
-}
-
-void
-UnregisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver)
-{
-  AssertMainThread();
-
-  if (!sSwitchObserverLists) {
-    return;
-  }
-
-  SwitchObserverList& observer = GetSwitchObserverList(aDevice);
-  if (!observer.RemoveObserver(aObserver) || observer.Length() > 0) {
-    return;
-  }
-
-  DisableSwitchNotifications(aDevice);
-  ReleaseObserversIfNeeded();
-}
-
-void
-NotifySwitchChange(const SwitchEvent& aEvent)
-{
-  // When callback this notification, main thread may call unregister function
-  // first. We should check if this pointer is valid.
-  if (!sSwitchObserverLists)
-    return;
-
-  SwitchObserverList& observer = GetSwitchObserverList(aEvent.device());
-  observer.Broadcast(aEvent);
 }
 
 bool

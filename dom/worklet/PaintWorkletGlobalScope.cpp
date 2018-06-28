@@ -18,8 +18,8 @@ bool
 PaintWorkletGlobalScope::WrapGlobalObject(JSContext* aCx,
                                           JS::MutableHandle<JSObject*> aReflector)
 {
-  JS::CompartmentOptions options;
-  return PaintWorkletGlobalScopeBinding::Wrap(aCx, this, this,
+  JS::RealmOptions options;
+  return PaintWorkletGlobalScope_Binding::Wrap(aCx, this, this,
                                               options,
                                               WorkletPrincipal::GetWorkletPrincipal(),
                                               true, aReflector);

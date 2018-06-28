@@ -190,29 +190,15 @@ config = {
             'options': ["--suite=reftest"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
-        "reftest-fonts": {
-            'options': ["--suite=reftest"],
-            'tests': ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
-        },
         "reftest-gpu": {
             'options': ["--suite=reftest",
                         "--setpref=layers.gpu-process.force-enabled=true"],
             'tests': ["tests/reftest/tests/layout/reftests/reftest.list"]
         },
-        "reftest-gpu-fonts": {
-            'options': ["--suite=reftest",
-                        "--setpref=layers.gpu-process.force-enabled=true"],
-            'tests': ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
-        },
         "reftest-no-accel": {
             "options": ["--suite=reftest",
                         "--setpref=layers.acceleration.disabled=true"],
             "tests": ["tests/reftest/tests/layout/reftests/reftest.list"]
-        },
-        "reftest-no-accel-fonts": {
-            "options": ["--suite=reftest",
-                        "--setpref=layers.acceleration.disabled=true"],
-            "tests": ["tests/reftest/tests/layout/reftests/reftest_fonts.list"]
         },
     },
     "all_xpcshell_suites": {
@@ -307,12 +293,7 @@ config = {
     ],
     "vcs_output_timeout": 1000,
     "minidump_save_path": "%(abs_work_dir)s/../minidumps",
-    "buildbot_max_log_size": 52428800,
-    "default_blob_upload_servers": [
-        "https://blobupload.elasticbeanstalk.com",
-    ],
     "structured_suites": ["reftest"],
-    'blob_uploader_auth_file': 'C:/builds/oauth.txt',
     "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": "win32-minidump_stackwalk.exe",
     "minidump_tooltool_manifest_path": "config/tooltool-manifests/win32/releng.manifest",

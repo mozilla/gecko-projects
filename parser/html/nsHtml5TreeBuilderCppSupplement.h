@@ -13,13 +13,27 @@
 #include "mozilla/UniquePtr.h"
 
 nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsHtml5OplessBuilder* aBuilder)
-  : scriptingEnabled(false)
+  : mode(0)
+  , originalMode(0)
+  , framesetOk(false)
+  , tokenizer(nullptr)
+  , scriptingEnabled(false)
+  , needToDropLF(false)
   , fragment(false)
   , contextName(nullptr)
   , contextNamespace(kNameSpaceID_None)
   , contextNode(nullptr)
+  , templateModePtr(0)
+  , stackNodesIdx(0)
+  , numStackNodes(0)
+  , currentPtr(0)
+  , listPtr(0)
   , formPointer(nullptr)
   , headPointer(nullptr)
+  , deepTreeSurrogateParent(nullptr)
+  , charBufferLen(0)
+  , quirks(false)
+  , isSrcdocDocument(false)
   , mBuilder(aBuilder)
   , mViewSource(nullptr)
   , mOpSink(nullptr)
@@ -38,13 +52,27 @@ nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsHtml5OplessBuilder* aBuilder)
 
 nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsAHtml5TreeOpSink* aOpSink,
                                        nsHtml5TreeOpStage* aStage)
-  : scriptingEnabled(false)
+  : mode(0)
+  , originalMode(0)
+  , framesetOk(false)
+  , tokenizer(nullptr)
+  , scriptingEnabled(false)
+  , needToDropLF(false)
   , fragment(false)
   , contextName(nullptr)
   , contextNamespace(kNameSpaceID_None)
   , contextNode(nullptr)
+  , templateModePtr(0)
+  , stackNodesIdx(0)
+  , numStackNodes(0)
+  , currentPtr(0)
+  , listPtr(0)
   , formPointer(nullptr)
   , headPointer(nullptr)
+  , deepTreeSurrogateParent(nullptr)
+  , charBufferLen(0)
+  , quirks(false)
+  , isSrcdocDocument(false)
   , mBuilder(nullptr)
   , mViewSource(nullptr)
   , mOpSink(aOpSink)
@@ -1176,7 +1204,7 @@ nsHtml5TreeBuilder::AllocateContentHandle()
     return nullptr;
   }
   if (mHandlesUsed == NS_HTML5_TREE_BUILDER_HANDLE_ARRAY_LENGTH) {
-    mOldHandles.AppendElement(Move(mHandles));
+    mOldHandles.AppendElement(std::move(mHandles));
     mHandles = mozilla::MakeUnique<nsIContent* []>(
       NS_HTML5_TREE_BUILDER_HANDLE_ARRAY_LENGTH);
     mHandlesUsed = 0;

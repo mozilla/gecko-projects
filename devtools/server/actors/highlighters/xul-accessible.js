@@ -6,7 +6,7 @@
 
 const { getBounds } = require("./utils/accessibility");
 const { createNode, isNodeValid } = require("./utils/markup");
-const { loadSheet } = require("devtools/shared/layout/utils");
+const { getCurrentZoom, loadSheet } = require("devtools/shared/layout/utils");
 
 /**
  * Stylesheet used for highlighter styling of accessible objects in chrome. It
@@ -53,7 +53,7 @@ class XULWindowAccessibleHighlighter {
    * Build highlighter markup.
    */
   _buildMarkup() {
-    let doc = this.win.document;
+    const doc = this.win.document;
     loadSheet(doc.ownerGlobal, ACCESSIBLE_BOUNDS_SHEET);
 
     this.container = createNode(this.win, {
@@ -80,7 +80,11 @@ class XULWindowAccessibleHighlighter {
    *                       information for the accessible object.
    */
   get _bounds() {
-    return getBounds(this.win, this.options);
+    // Zoom level for the top level browser window does not change and only inner frames
+    // do. So we need to get the zoom level of the current node's parent window.
+    const zoom = getCurrentZoom(this.currentNode);
+
+    return getBounds(this.win, { ...this.options, zoom });
   }
 
   /**
@@ -103,8 +107,8 @@ class XULWindowAccessibleHighlighter {
    * @return {Boolean} True if accessible is highlighted, false otherwise.
    */
   show(node, options = {}) {
-    let isSameNode = node === this.currentNode;
-    let hasBounds = options && typeof options.x == "number" &&
+    const isSameNode = node === this.currentNode;
+    const hasBounds = options && typeof options.x == "number" &&
                                typeof options.y == "number" &&
                                typeof options.w == "number" &&
                                typeof options.h == "number";
@@ -130,8 +134,8 @@ class XULWindowAccessibleHighlighter {
       this._highlightTimer = null;
     }
 
-    let shown = this._update();
-    let { duration } = this.options;
+    const shown = this._update();
+    const { duration } = this.options;
     if (shown && duration) {
       this._highlightTimer = setTimeout(() => {
         this._hideAccessibleBounds();
@@ -148,7 +152,7 @@ class XULWindowAccessibleHighlighter {
    */
   _update() {
     this._hideAccessibleBounds();
-    let bounds = this._bounds;
+    const bounds = this._bounds;
     if (!bounds) {
       return false;
     }
@@ -159,7 +163,7 @@ class XULWindowAccessibleHighlighter {
       boundsEl = this.bounds;
     }
 
-    let { left, top, width, height } = bounds;
+    const { left, top, width, height } = bounds;
     boundsEl.style.top = `${top}px`;
     boundsEl.style.left = `${left}px`;
     boundsEl.style.width = `${width}px`;

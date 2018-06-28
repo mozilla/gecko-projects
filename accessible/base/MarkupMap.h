@@ -28,7 +28,7 @@ MARKUPMAP(aside,
 
 MARKUPMAP(blockquote,
           New_HyperText,
-          roles::SECTION)
+          roles::BLOCKQUOTE)
 
 MARKUPMAP(dd,
           New_HTMLDefinition,
@@ -327,8 +327,9 @@ MARKUPMAP(summary,
 MARKUPMAP(
   table,
   [](Element* aElement, Accessible* aContext) -> Accessible* {
-     if (aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableType) {
-       return new ARIAGridAccessible(aElement, aContext->Document());
+     if (aElement->GetPrimaryFrame() &&
+         aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableType) {
+       return new ARIAGridAccessibleWrap(aElement, aContext->Document());
      }
      return nullptr;
   },
@@ -350,7 +351,7 @@ MARKUPMAP(
        // accessible, because there's no underlying table layout and thus native
        // HTML table cell class doesn't work.
        if (!aContext->IsHTMLTableRow()) {
-         return new ARIAGridCellAccessible(aElement, aContext->Document());
+         return new ARIAGridCellAccessibleWrap(aElement, aContext->Document());
        }
        if (aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::scope)) {
          return new HTMLTableHeaderCellAccessibleWrap(aElement, aContext->Document());
@@ -366,7 +367,7 @@ MARKUPMAP(
   [](Element* aElement, Accessible* aContext) -> Accessible* {
      if (aContext->IsTableRow() && aContext->GetContent() == aElement->GetParent()) {
        if (!aContext->IsHTMLTableRow()) {
-         return new ARIAGridCellAccessible(aElement, aContext->Document());
+         return new ARIAGridCellAccessibleWrap(aElement, aContext->Document());
        }
        return new HTMLTableHeaderCellAccessibleWrap(aElement, aContext->Document());
      }
@@ -390,12 +391,13 @@ MARKUPMAP(
      if (table) {
         nsIContent* parentContent = aElement->GetParent();
         nsIFrame* parentFrame = parentContent->GetPrimaryFrame();
-        if (!parentFrame->IsTableWrapperFrame()) {
+        if (parentFrame && !parentFrame->IsTableWrapperFrame()) {
           parentContent = parentContent->GetParent();
           parentFrame = parentContent->GetPrimaryFrame();
           if (table->GetContent() == parentContent &&
-              (!parentFrame->IsTableWrapperFrame() ||
-               aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableRowType)) {
+              ((parentFrame && !parentFrame->IsTableWrapperFrame()) ||
+               (aElement->GetPrimaryFrame() &&
+                aElement->GetPrimaryFrame()->AccessibleType() != eHTMLTableRowType))) {
             return new ARIARowAccessible(aElement, aContext->Document());
           }
         }

@@ -37,7 +37,7 @@ function verifySignatures() {
 
     info("Verifying signatures");
     let XPIscope = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", {});
-    XPIscope.XPIProvider.verifySignatures();
+    XPIscope.XPIDatabase.verifySignatures();
   });
 }
 
@@ -96,7 +96,7 @@ add_task(async function() {
   Assert.ok(!addon.isActive);
   Assert.equal(addon.signedState, AddonManager.SIGNEDSTATE_MISSING);
 
-  addon.uninstall();
+  await addon.uninstall();
 
   await promiseShutdownManager();
 });
@@ -128,7 +128,7 @@ add_task(async function() {
   Assert.ok(!addon.isActive);
   Assert.equal(addon.signedState, AddonManager.SIGNEDSTATE_MISSING);
 
-  addon.uninstall();
+  await addon.uninstall();
 
   await promiseShutdownManager();
 });

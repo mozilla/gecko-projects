@@ -70,7 +70,7 @@ return /******/ (function(modules) { // webpackBootstrap
 /******/ 	__webpack_require__.p = "/assets/build";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 3655);
+/******/ 	return __webpack_require__(__webpack_require__.s = 3730);
 /******/ })
 /************************************************************************/
 /******/ ({
@@ -668,12 +668,12 @@ const Grip = __webpack_require__(3656);
 // List of all registered template.
 // XXX there should be a way for extensions to register a new
 // or modify an existing rep.
-const reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor];
+const reps = [RegExp, StyleSheet, Event, DateTime, CommentNode, ElementNode, TextNode, Attribute, Func, PromiseRep, ArrayRep, Document, DocumentType, Window, ObjectWithText, ObjectWithURL, ErrorRep, GripArray, GripMap, GripMapEntry, Grip, Undefined, Null, StringRep, Number, SymbolRep, InfinityRep, NaNRep, Accessor, Obj];
 
 /**
  * Generic rep that is used for rendering native JS types or an object.
  * The right template used for rendering is picked automatically according
- * to the current value type. The value must be passed is as 'object'
+ * to the current value type. The value must be passed in as the 'object'
  * property.
  */
 const Rep = function (props) {
@@ -698,7 +698,7 @@ const Rep = function (props) {
  * @param noGrip {Boolean} If true, will only check reps not made for remote
  *                         objects.
  */
-function getRep(object, defaultRep = Obj, noGrip = false) {
+function getRep(object, defaultRep = Grip, noGrip = false) {
   for (let i = 0; i < reps.length; i++) {
     const rep = reps[i];
     try {
@@ -944,7 +944,7 @@ function getLinkifiedElements(text, cropLimit, openLink) {
           draggable: false,
           onClick: openLink ? e => {
             e.preventDefault();
-            openLink(token);
+            openLink(token, e);
           } : null
         }, linkText));
       }
@@ -1153,8 +1153,8 @@ function getLength(object) {
   return object.length;
 }
 
-function supportsObject(object) {
-  return Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]";
+function supportsObject(object, noGrip = false) {
+  return noGrip && (Array.isArray(object) || Object.prototype.toString.call(object) === "[object Arguments]");
 }
 
 const maxLengthMap = new Map();
@@ -1612,7 +1612,9 @@ const { nodeIsError, nodeIsPrimitive } = node;
 const selection = __webpack_require__(3698);
 
 const { MODE } = __webpack_require__(3645);
-const { REPS: { Rep, Grip } } = __webpack_require__(3647);
+const {
+  REPS: { Rep, Grip }
+} = __webpack_require__(3647);
 
 
 function shouldRenderRootsInReps(roots) {
@@ -2587,6 +2589,10 @@ module.exports = {
 "use strict";
 
 
+const { getValue, nodeHasFullText } = __webpack_require__(3667); /* This Source Code Form is subject to the terms of the Mozilla Public
+                                                                 * License, v. 2.0. If a copy of the MPL was not distributed with this
+                                                                 * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+
 async function enumIndexedProperties(objectClient, start, end) {
   try {
     const { iterator } = await objectClient.enumProperties({
@@ -2598,9 +2604,7 @@ async function enumIndexedProperties(objectClient, start, end) {
     console.error("Error in enumIndexedProperties", e);
     return {};
   }
-} /* This Source Code Form is subject to the terms of the Mozilla Public
-   * License, v. 2.0. If a copy of the MPL was not distributed with this
-   * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
+}
 
 async function enumNonIndexedProperties(objectClient, start, end) {
   try {
@@ -2645,8 +2649,14 @@ async function getPrototype(objectClient) {
   return objectClient.getPrototype();
 }
 
-async function getFullText(longStringClient, object) {
-  const { initial, length } = object;
+async function getFullText(longStringClient, item) {
+  const { initial, fullText, length } = getValue(item);
+
+  // Return fullText property if it exists so that it can be added to the
+  // loadedProperties map.
+  if (nodeHasFullText(item)) {
+    return Promise.resolve({ fullText });
+  }
 
   return new Promise((resolve, reject) => {
     longStringClient.substring(initial.length, length, response => {
@@ -2753,7 +2763,7 @@ function loadItemProperties(item, createObjectClient, createLongStringClient, lo
   }
 
   if (shouldLoadItemFullText(item, loadedProperties)) {
-    promises.push(getFullText(createLongStringClient(value), value));
+    promises.push(getFullText(createLongStringClient(value), item));
   }
 
   return Promise.all(promises).then(mergeResponses);
@@ -3076,7 +3086,9 @@ function nodeNeedsNumericalBuckets(item) {
 }
 
 function makeNodesForPromiseProperties(item) {
-  const { promiseState: { reason, value, state } } = getValue(item);
+  const {
+    promiseState: { reason, value, state }
+  } = getValue(item);
 
   const properties = [];
 
@@ -4397,6 +4409,10 @@ class Tree extends Component {
         onExpand: this._onExpand,
         onCollapse: this._onCollapse,
         onClick: e => {
+          // We can stop the propagation since click handler on the node can be
+          // created in `renderItem`.
+          e.stopPropagation();
+
           // Since the user just clicked the node, there's no need to check if
           // it should be scrolled into view.
           this._focus(item, { preventAutoScroll: true });
@@ -4430,6 +4446,7 @@ class Tree extends Component {
         }
 
         const { explicitOriginalTarget } = nativeEvent;
+
         // Only set default focus to the first tree node if the focus came
         // from outside the tree (e.g. by tabbing to the tree from other
         // external elements).
@@ -4757,8 +4774,8 @@ function isInterestingProp(value) {
   return type == "boolean" || type == "number" || type == "string" && value;
 }
 
-function supportsObject(object) {
-  return true;
+function supportsObject(object, noGrip = false) {
+  return noGrip;
 }
 
 // Exports from this module
@@ -5663,7 +5680,8 @@ function ElementNode(props) {
   if (isInTree) {
     if (onDOMNodeClick) {
       Object.assign(baseConfig, {
-        onClick: _ => onDOMNodeClick(object)
+        onClick: _ => onDOMNodeClick(object),
+        className: `${baseConfig.className} clickable`
       });
     }
 
@@ -6432,7 +6450,7 @@ class ObjectInspector extends Component {
         block: nodeIsBlock(item)
       }),
       onClick: e => {
-        if (e.metaKey && onCmdCtrlClick) {
+        if (onCmdCtrlClick && (isMacOS && e.metaKey || !isMacOS && e.ctrlKey)) {
           onCmdCtrlClick(item, {
             depth,
             event: e,
@@ -6885,6 +6903,14 @@ function reducer(state = {}, action) {
 
 
 module.exports = reducer;
+
+/***/ }),
+
+/***/ 3730:
+/***/ (function(module, exports, __webpack_require__) {
+
+module.exports = __webpack_require__(3655);
+
 
 /***/ })
 

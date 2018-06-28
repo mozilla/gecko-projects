@@ -53,10 +53,10 @@ using namespace mozilla::gfx;
 
 nsSVGElement::LengthInfo nsSVGFE::sLengthInfo[4] =
 {
-  { &nsGkAtoms::x, 0, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::y, 0, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
-  { &nsGkAtoms::width, 100, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
-  { &nsGkAtoms::height, 100, SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y }
+  { &nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
+  { &nsGkAtoms::width, 100, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
+  { &nsGkAtoms::height, 100, SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y }
 };
 
 //----------------------------------------------------------------------
@@ -66,11 +66,7 @@ NS_IMPL_ADDREF_INHERITED(nsSVGFE,nsSVGFEBase)
 NS_IMPL_RELEASE_INHERITED(nsSVGFE,nsSVGFEBase)
 
 NS_INTERFACE_MAP_BEGIN(nsSVGFE)
-   // nsISupports is an ambiguous base of nsSVGFE so we have to work
-   // around that
-   if ( aIID.Equals(NS_GET_IID(nsSVGFE)) )
-     foundInterface = static_cast<nsISupports*>(static_cast<void*>(this));
-   else
+   NS_INTERFACE_MAP_ENTRY_CONCRETE(nsSVGFE)
 NS_INTERFACE_MAP_END_INHERITING(nsSVGFEBase)
 
 //----------------------------------------------------------------------
@@ -245,11 +241,7 @@ NS_IMPL_ADDREF_INHERITED(SVGComponentTransferFunctionElement,SVGComponentTransfe
 NS_IMPL_RELEASE_INHERITED(SVGComponentTransferFunctionElement,SVGComponentTransferFunctionElementBase)
 
 NS_INTERFACE_MAP_BEGIN(SVGComponentTransferFunctionElement)
-   // nsISupports is an ambiguous base of nsSVGFE so we have to work
-   // around that
-   if ( aIID.Equals(NS_GET_IID(SVGComponentTransferFunctionElement)) )
-     foundInterface = static_cast<nsISupports*>(static_cast<void*>(this));
-   else
+   NS_INTERFACE_MAP_ENTRY_CONCRETE(SVGComponentTransferFunctionElement)
 NS_INTERFACE_MAP_END_INHERITING(SVGComponentTransferFunctionElementBase)
 
 
@@ -369,7 +361,7 @@ SVGComponentTransferFunctionElement::GetNumberInfo()
 /* virtual */ JSObject*
 SVGFEFuncRElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncRElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncRElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -385,7 +377,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncRElement)
 /* virtual */ JSObject*
 SVGFEFuncGElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncGElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -401,7 +393,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncGElement)
 /* virtual */ JSObject*
 SVGFEFuncBElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncBElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncBElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -417,7 +409,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEFuncBElement)
 /* virtual */ JSObject*
 SVGFEFuncAElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGFEFuncAElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGFEFuncAElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom
@@ -503,8 +495,8 @@ nsSVGFELightingElement::AddLightingAttributes(const FilterPrimitiveDescription& 
     return FilterPrimitiveDescription(PrimitiveType::Empty);
   }
 
-  ComputedStyle* style = frame->Style();
-  Color color(Color::FromABGR(style->StyleSVGReset()->mLightingColor));
+  const nsStyleSVGReset* styleSVGReset = frame->Style()->StyleSVGReset();
+  Color color(Color::FromABGR(styleSVGReset->mLightingColor.CalcColor(frame)));
   color.a = 1.f;
   float surfaceScale = mNumberAttributes[SURFACE_SCALE].GetAnimValue();
   Size kernelUnitLength =

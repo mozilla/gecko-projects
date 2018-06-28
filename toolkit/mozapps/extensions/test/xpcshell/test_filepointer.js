@@ -50,7 +50,6 @@ sourceDir.append("source");
 
 var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 testserver.registerDirectory("/data/", do_get_file("data"));
-testserver.registerDirectory("/addons/", do_get_file("addons"));
 gPort = testserver.identity.primaryPort;
 
 function promiseWritePointer(aId, aName) {
@@ -75,6 +74,10 @@ function promiseWriteRelativePointer(aId, aName) {
 
 add_task(async function setup() {
   ok(TEST_UNPACKED, "Pointer files only work with unpacked directories");
+
+  // Unpacked extensions are never signed, so this can only run with
+  // signature checks disabled.
+  Services.prefs.setBoolPref(PREF_XPI_SIGNATURES_REQUIRED, false);
 
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1");
 });
@@ -164,7 +167,7 @@ add_task(async function test_addon_over_pointer() {
   source.append(addon1.id);
   ok(source.exists());
 
-  addon.uninstall();
+  await addon.uninstall();
 });
 
 // Tests that uninstalling doesn't clobber the original sources
@@ -177,7 +180,7 @@ add_task(async function test_uninstall_pointer() {
   notEqual(addon, null);
   equal(addon.version, "1.0");
 
-  addon.uninstall();
+  await addon.uninstall();
 
   await promiseRestartManager();
 
@@ -220,6 +223,7 @@ add_task(async function test_bad_pointer_id() {
   equal(addon.version, "1.0");
 
   await promiseWriteInstallRDFForExtension(addon2, sourceDir, addon1.id);
+  setExtensionModifiedTime(dest, dest.lastModifiedTime - 5000);
 
   await promiseRestartManager();
 
@@ -282,7 +286,7 @@ add_task(async function test_replace_pointer() {
   notEqual(addon, null);
   equal(addon.version, "2.0");
 
-  addon.uninstall();
+  await addon.uninstall();
 });
 
 // Changes to the source files should be detected
@@ -295,7 +299,8 @@ add_task(async function test_change_pointer_sources() {
   notEqual(addon, null);
   equal(addon.version, "1.0");
 
-  await promiseWriteInstallRDFForExtension(addon1_2, sourceDir);
+  let dest = await promiseWriteInstallRDFForExtension(addon1_2, sourceDir);
+  setExtensionModifiedTime(dest, dest.lastModifiedTime - 5000);
 
   await promiseRestartManager();
 
@@ -303,7 +308,7 @@ add_task(async function test_change_pointer_sources() {
   notEqual(addon, null);
   equal(addon.version, "2.0");
 
-  addon.uninstall();
+  await addon.uninstall();
 });
 
 // Removing the add-on the pointer file points at should uninstall the add-on

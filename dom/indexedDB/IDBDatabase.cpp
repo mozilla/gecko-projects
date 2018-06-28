@@ -915,8 +915,7 @@ IDBDatabase::GetOrCreateFileActorForBlob(Blob* aBlob)
   // a) it is unique per blob, b) it is reference-counted so that we can
   // guarantee that it stays alive, and c) it doesn't hold the actual File
   // alive.
-  nsCOMPtr<nsIDOMBlob> blob = aBlob;
-  nsCOMPtr<nsIWeakReference> weakRef = do_GetWeakReference(blob);
+  nsCOMPtr<nsIWeakReference> weakRef = do_GetWeakReference(aBlob);
   MOZ_ASSERT(weakRef);
 
   PBackgroundIDBDatabaseFileChild* actor = nullptr;
@@ -1232,7 +1231,7 @@ IDBDatabase::PostHandleEvent(EventChainPostVisitor& aVisitor)
 JSObject*
 IDBDatabase::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBDatabaseBinding::Wrap(aCx, this, aGivenProto);
+  return IDBDatabase_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMETHODIMP

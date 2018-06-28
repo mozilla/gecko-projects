@@ -26,14 +26,14 @@ public:
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return MutationEventBinding::Wrap(aCx, this, aGivenProto);
+    return MutationEvent_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   void GetPrevValue(nsAString& aPrevValue) const;
   void GetNewValue(nsAString& aNewValue) const;
   void GetAttrName(nsAString& aAttrName) const;
 
-  already_AddRefed<nsINode> GetRelatedNode();
+  nsINode* GetRelatedNode();
 
   uint16_t AttrChange();
 

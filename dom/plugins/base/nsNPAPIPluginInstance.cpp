@@ -59,7 +59,6 @@ nsNPAPIPluginInstance::nsNPAPIPluginInstance()
 #ifdef XP_MACOSX
   , mCurrentPluginEvent(nullptr)
 #endif
-  , mHaveJavaC2PJSObjectQuirk(false)
   , mCachedParamLength(0)
   , mCachedParamNames(nullptr)
   , mCachedParamValues(nullptr)
@@ -784,7 +783,7 @@ nsNPAPIPluginInstance::DidComposite()
 nsresult
 nsNPAPIPluginInstance::NotifyPainted(void)
 {
-  NS_NOTREACHED("Dead code, shouldn't be called.");
+  MOZ_ASSERT_UNREACHABLE("Dead code, shouldn't be called.");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

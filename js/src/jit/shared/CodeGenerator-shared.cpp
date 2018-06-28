@@ -8,6 +8,8 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include <utility>
+
 #include "jit/CodeGenerator.h"
 #include "jit/CompactBuffer.h"
 #include "jit/JitcodeMap.h"
@@ -74,7 +76,8 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
     checkOsiPointRegisters(JitOptions.checkOsiPointRegisters),
 #endif
     frameDepth_(graph->paddedLocalSlotsSize() + graph->argumentsSize()),
-    frameInitialAdjustment_(0)
+    frameInitialAdjustment_(0),
+    frameClass_(FrameSizeClass::None())
 {
     if (gen->isProfilerInstrumentationEnabled())
         masm.enableProfilingInstrumentation();
@@ -106,7 +109,7 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
 
         // FrameSizeClass is only used for bailing, which cannot happen in
         // wasm code.
-        frameClass_ = FrameSizeClass::None();
+        MOZ_ASSERT(frameClass_ == FrameSizeClass::None());
     } else {
         frameClass_ = FrameSizeClass::FromDepth(frameDepth_);
     }
@@ -288,7 +291,7 @@ CodeGeneratorShared::dumpNativeToBytecodeEntries()
 {
 #ifdef JS_JITSPEW
     InlineScriptTree* topTree = gen->info().inlineScriptTree();
-    JitSpewStart(JitSpew_Profiling, "Native To Bytecode Entries for %s:%zu\n",
+    JitSpewStart(JitSpew_Profiling, "Native To Bytecode Entries for %s:%u\n",
                  topTree->script()->filename(), topTree->script()->lineno());
     for (unsigned i = 0; i < nativeToBytecodeList_.length(); i++)
         dumpNativeToBytecodeEntry(i);
@@ -311,7 +314,7 @@ CodeGeneratorShared::dumpNativeToBytecodeEntry(uint32_t idx)
         if (nextRef->tree == ref.tree)
             pcDelta = nextRef->pc - ref.pc;
     }
-    JitSpewStart(JitSpew_Profiling, "    %08zx [+%-6d] => %-6ld [%-4d] {%-10s} (%s:%zu",
+    JitSpewStart(JitSpew_Profiling, "    %08zx [+%-6d] => %-6ld [%-4d] {%-10s} (%s:%u",
                  ref.nativeOffset.offset(),
                  nativeDelta,
                  (long) (ref.pc - script->code()),
@@ -320,7 +323,7 @@ CodeGeneratorShared::dumpNativeToBytecodeEntry(uint32_t idx)
                  script->filename(), script->lineno());
 
     for (tree = tree->caller(); tree; tree = tree->caller()) {
-        JitSpewCont(JitSpew_Profiling, " <= %s:%zu", tree->script()->filename(),
+        JitSpewCont(JitSpew_Profiling, " <= %s:%u", tree->script()->filename(),
                                                     tree->script()->lineno());
     }
     JitSpewCont(JitSpew_Profiling, ")");
@@ -996,7 +999,7 @@ struct ReadTempTypeInfoVectorOp : public IonTrackedOptimizationsTypeInfo::ForEac
             if (!ty.trackType(accTypes_[i]))
                 oom_ = true;
         }
-        if (!types_->append(mozilla::Move(ty)))
+        if (!types_->append(std::move(ty)))
             oom_ = true;
         accTypes_.clear();
     }
@@ -1721,7 +1724,7 @@ CodeGeneratorShared::emitTracelogTree(bool isStart, const char* text,
     masm.Push(eventReg);
 
     PatchableTLEvent patchEvent(masm.movWithPatch(ImmWord(0), eventReg), text);
-    masm.propagateOOM(patchableTLEvents_.append(Move(patchEvent)));
+    masm.propagateOOM(patchableTLEvents_.append(std::move(patchEvent)));
 
     if (isStart)
         masm.tracelogStartId(loggerReg, eventReg);

@@ -191,7 +191,7 @@ bool
 WorkerGlobalScope::IsSecureContext() const
 {
   bool globalSecure =
-    JS_GetIsSecureContext(js::GetObjectCompartment(GetWrapperPreserveColor()));
+    JS::GetIsSecureContext(js::GetNonCCWObjectRealm(GetWrapperPreserveColor()));
   MOZ_ASSERT(globalSecure == mWorkerPrivate->IsSecureContext());
   return globalSecure;
 }
@@ -521,7 +521,7 @@ nsresult
 WorkerGlobalScope::Dispatch(TaskCategory aCategory,
                             already_AddRefed<nsIRunnable>&& aRunnable)
 {
-  return EventTargetFor(aCategory)->Dispatch(Move(aRunnable),
+  return EventTargetFor(aCategory)->Dispatch(std::move(aRunnable),
                                              NS_DISPATCH_NORMAL);
 }
 
@@ -548,7 +548,7 @@ WorkerGlobalScope::GetClientState() const
 {
   Maybe<ClientState> state;
   state.emplace(mWorkerPrivate->GetClientState());
-  return Move(state);
+  return state;
 }
 
 Maybe<ServiceWorkerDescriptor>
@@ -594,8 +594,8 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   mWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_ASSERT(!mWorkerPrivate->IsSharedWorker());
 
-  JS::CompartmentOptions options;
-  mWorkerPrivate->CopyJSCompartmentOptions(options);
+  JS::RealmOptions options;
+  mWorkerPrivate->CopyJSRealmOptions(options);
 
   const bool usesSystemPrincipal = mWorkerPrivate->UsesSystemPrincipal();
 
@@ -607,16 +607,16 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   const bool extraWarnings = usesSystemPrincipal &&
                              xpc::ExtraWarningsForSystemJS();
 
-  JS::CompartmentBehaviors& behaviors = options.behaviors();
+  JS::RealmBehaviors& behaviors = options.behaviors();
   behaviors.setDiscardSource(discardSource)
            .extraWarningsOverride().set(extraWarnings);
 
   const bool sharedMemoryEnabled = xpc::SharedMemoryEnabled();
 
-  JS::CompartmentCreationOptions& creationOptions = options.creationOptions();
+  JS::RealmCreationOptions& creationOptions = options.creationOptions();
   creationOptions.setSharedMemoryAndAtomicsEnabled(sharedMemoryEnabled);
 
-  return DedicatedWorkerGlobalScopeBinding::Wrap(aCx, this, this,
+  return DedicatedWorkerGlobalScope_Binding::Wrap(aCx, this, this,
                                                  options,
                                                  GetWorkerPrincipal(),
                                                  true, aReflector);
@@ -652,10 +652,10 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   mWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_ASSERT(mWorkerPrivate->IsSharedWorker());
 
-  JS::CompartmentOptions options;
-  mWorkerPrivate->CopyJSCompartmentOptions(options);
+  JS::RealmOptions options;
+  mWorkerPrivate->CopyJSRealmOptions(options);
 
-  return SharedWorkerGlobalScopeBinding::Wrap(aCx, this, this, options,
+  return SharedWorkerGlobalScope_Binding::Wrap(aCx, this, this, options,
                                               GetWorkerPrincipal(),
                                               true, aReflector);
 }
@@ -698,10 +698,10 @@ ServiceWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   mWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_ASSERT(mWorkerPrivate->IsServiceWorker());
 
-  JS::CompartmentOptions options;
-  mWorkerPrivate->CopyJSCompartmentOptions(options);
+  JS::RealmOptions options;
+  mWorkerPrivate->CopyJSRealmOptions(options);
 
-  return ServiceWorkerGlobalScopeBinding::Wrap(aCx, this, this, options,
+  return ServiceWorkerGlobalScope_Binding::Wrap(aCx, this, this, options,
                                                GetWorkerPrincipal(),
                                                true, aReflector);
 }
@@ -954,10 +954,10 @@ WorkerDebuggerGlobalScope::WrapGlobalObject(JSContext* aCx,
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
-  JS::CompartmentOptions options;
-  mWorkerPrivate->CopyJSCompartmentOptions(options);
+  JS::RealmOptions options;
+  mWorkerPrivate->CopyJSRealmOptions(options);
 
-  return WorkerDebuggerGlobalScopeBinding::Wrap(aCx, this, this, options,
+  return WorkerDebuggerGlobalScope_Binding::Wrap(aCx, this, this, options,
                                                 GetWorkerPrincipal(), true,
                                                 aReflector);
 }
@@ -1013,7 +1013,7 @@ WorkerDebuggerGlobalScope::LoadSubScript(JSContext* aCx,
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
-  Maybe<JSAutoCompartment> ac;
+  Maybe<JSAutoRealm> ar;
   if (aSandbox.WasPassed()) {
     JS::Rooted<JSObject*> sandbox(aCx, js::CheckedUnwrap(aSandbox.Value()));
     if (!IsWorkerDebuggerSandbox(sandbox)) {
@@ -1021,7 +1021,7 @@ WorkerDebuggerGlobalScope::LoadSubScript(JSContext* aCx,
       return;
     }
 
-    ac.emplace(aCx, sandbox);
+    ar.emplace(aCx, sandbox);
   }
 
   nsTArray<nsString> urls;
@@ -1134,7 +1134,7 @@ nsresult
 WorkerDebuggerGlobalScope::Dispatch(TaskCategory aCategory,
                                     already_AddRefed<nsIRunnable>&& aRunnable)
 {
-  return EventTargetFor(aCategory)->Dispatch(Move(aRunnable),
+  return EventTargetFor(aCategory)->Dispatch(std::move(aRunnable),
                                              NS_DISPATCH_NORMAL);
 }
 

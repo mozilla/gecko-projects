@@ -7,7 +7,7 @@
 #include "gc/AtomMarking-inl.h"
 
 #include "gc/PublicIterators.h"
-#include "vm/JSCompartment.h"
+#include "vm/Realm.h"
 
 #include "gc/GC-inl.h"
 #include "gc/Heap-inl.h"
@@ -29,12 +29,12 @@ namespace gc {
 // is done by manipulating the mark bitmaps in the chunks used for the atoms.
 // When the atoms zone is being collected, the mark bitmaps for the chunk(s)
 // used by the atoms are updated normally during marking. After marking
-// finishes, the chunk mark bitmaps are translated to a more efficient atom
-// mark bitmap (see below) that is stored on the zones which the GC collected
+// finishes, the chunk mark bitmaps are translated to a more efficient atom mark
+// bitmap (see below) that is stored on the zones which the GC collected
 // (computeBitmapFromChunkMarkBits). Before sweeping begins, the chunk mark
 // bitmaps are updated with any atoms that might be referenced by zones which
-// weren't collected (updateChunkMarkBits). The GC sweeping will then release
-// all atoms which are not marked by any zone.
+// weren't collected (markAtomsUsedByUncollectedZones). The GC sweeping will
+// then release all atoms which are not marked by any zone.
 //
 // The representation of atom mark bitmaps is as follows:
 //
@@ -83,7 +83,7 @@ AtomMarkingRuntime::computeBitmapFromChunkMarkBits(JSRuntime* runtime, DenseBitm
     if (!bitmap.ensureSpace(allocatedWords))
         return false;
 
-    Zone* atomsZone = runtime->unsafeAtomsCompartment()->zone();
+    Zone* atomsZone = runtime->unsafeAtomsZone();
     for (auto thingKind : AllAllocKinds()) {
         for (ArenaIter aiter(atomsZone, thingKind); !aiter.done(); aiter.next()) {
             Arena* arena = aiter.get();
@@ -96,8 +96,10 @@ AtomMarkingRuntime::computeBitmapFromChunkMarkBits(JSRuntime* runtime, DenseBitm
 }
 
 void
-AtomMarkingRuntime::updateZoneBitmap(Zone* zone, const DenseBitmap& bitmap)
+AtomMarkingRuntime::refineZoneBitmapForCollectedZone(Zone* zone, const DenseBitmap& bitmap)
 {
+    MOZ_ASSERT(zone->isCollectingFromAnyThread());
+
     if (zone->isAtomsZone())
         return;
 
@@ -110,14 +112,14 @@ AtomMarkingRuntime::updateZoneBitmap(Zone* zone, const DenseBitmap& bitmap)
 // Set any bits in the chunk mark bitmaps for atoms which are marked in bitmap.
 template <typename Bitmap>
 static void
-AddBitmapToChunkMarkBits(JSRuntime* runtime, Bitmap& bitmap)
+BitwiseOrIntoChunkMarkBits(JSRuntime* runtime, Bitmap& bitmap)
 {
     // Make sure that by copying the mark bits for one arena in word sizes we
     // do not affect the mark bits for other arenas.
     static_assert(ArenaBitmapBits == ArenaBitmapWords * JS_BITS_PER_WORD,
                   "ArenaBitmapWords must evenly divide ArenaBitmapBits");
 
-    Zone* atomsZone = runtime->unsafeAtomsCompartment()->zone();
+    Zone* atomsZone = runtime->unsafeAtomsZone();
     for (auto thingKind : AllAllocKinds()) {
         for (ArenaIter aiter(atomsZone, thingKind); !aiter.done(); aiter.next()) {
             Arena* arena = aiter.get();
@@ -128,7 +130,7 @@ AddBitmapToChunkMarkBits(JSRuntime* runtime, Bitmap& bitmap)
 }
 
 void
-AtomMarkingRuntime::updateChunkMarkBits(JSRuntime* runtime)
+AtomMarkingRuntime::markAtomsUsedByUncollectedZones(JSRuntime* runtime)
 {
     MOZ_ASSERT(CurrentThreadIsPerformingGC());
     MOZ_ASSERT(!runtime->hasHelperThreadZones());
@@ -145,11 +147,11 @@ AtomMarkingRuntime::updateChunkMarkBits(JSRuntime* runtime)
             if (!zone->isCollectingFromAnyThread())
                 zone->markedAtoms().bitwiseOrInto(markedUnion);
         }
-        AddBitmapToChunkMarkBits(runtime, markedUnion);
+        BitwiseOrIntoChunkMarkBits(runtime, markedUnion);
     } else {
         for (ZonesIter zone(runtime, SkipAtoms); !zone.done(); zone.next()) {
             if (!zone->isCollectingFromAnyThread())
-                AddBitmapToChunkMarkBits(runtime, zone->markedAtoms());
+                BitwiseOrIntoChunkMarkBits(runtime, zone->markedAtoms());
         }
     }
 }
@@ -190,7 +192,10 @@ AtomMarkingRuntime::markAtomValue(JSContext* cx, const Value& value)
         markAtom(cx, value.toSymbol());
         return;
     }
-    MOZ_ASSERT_IF(value.isGCThing(), value.isObject() || value.isPrivateGCThing());
+    MOZ_ASSERT_IF(value.isGCThing(),
+                  value.isObject() ||
+                  value.isPrivateGCThing() ||
+                  IF_BIGINT(value.isBigInt(), false));
 }
 
 void
@@ -272,7 +277,10 @@ AtomMarkingRuntime::valueIsMarked(Zone* zone, const Value& value)
     if (value.isSymbol())
         return atomIsMarked(zone, value.toSymbol());
 
-    MOZ_ASSERT_IF(value.isGCThing(), value.isObject() || value.isPrivateGCThing());
+    MOZ_ASSERT_IF(value.isGCThing(),
+                  value.isObject() ||
+                  value.isPrivateGCThing() ||
+                  IF_BIGINT(value.isBigInt(), false));
     return true;
 }
 

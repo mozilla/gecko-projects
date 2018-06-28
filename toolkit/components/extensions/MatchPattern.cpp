@@ -274,7 +274,8 @@ MatchPattern::Constructor(dom::GlobalObject& aGlobal,
                           ErrorResult& aRv)
 {
   RefPtr<MatchPattern> pattern = new MatchPattern(aGlobal.GetAsSupports());
-  pattern->Init(aGlobal.Context(), aPattern, aOptions.mIgnorePath, aRv);
+  pattern->Init(aGlobal.Context(), aPattern, aOptions.mIgnorePath,
+                aOptions.mRestrictSchemes, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -282,7 +283,8 @@ MatchPattern::Constructor(dom::GlobalObject& aGlobal,
 }
 
 void
-MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath, ErrorResult& aRv)
+MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath,
+                   bool aRestrictSchemes, ErrorResult& aRv)
 {
   RefPtr<AtomSet> permittedSchemes = AtomSet::Get<PERMITTED_SCHEMES>();
 
@@ -310,7 +312,9 @@ MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath, 
   RefPtr<nsAtom> scheme = NS_AtomizeMainThread(StringHead(aPattern, index));
   if (scheme == nsGkAtoms::_asterisk) {
     mSchemes = AtomSet::Get<WILDCARD_SCHEMES>();
-  } else if (permittedSchemes->Contains(scheme) || scheme == nsGkAtoms::moz_extension) {
+  } else if (!aRestrictSchemes ||
+             permittedSchemes->Contains(scheme) ||
+             scheme == nsGkAtoms::moz_extension) {
     mSchemes = new AtomSet({scheme});
   } else {
     aRv.Throw(NS_ERROR_INVALID_ARG);
@@ -323,34 +327,42 @@ MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath, 
   offset = index + 1;
   tail.Rebind(aPattern, offset);
 
-  if (!StringHead(tail, 2).EqualsLiteral("//")) {
-    aRv.Throw(NS_ERROR_INVALID_ARG);
-    return;
-  }
-
-  offset += 2;
-  tail.Rebind(aPattern, offset);
-  index = tail.FindChar('/');
-  if (index < 0) {
-    index = tail.Length();
-  }
-
-  auto host = StringHead(tail, index);
-  if (host.IsEmpty() && scheme != nsGkAtoms::file) {
-    aRv.Throw(NS_ERROR_INVALID_ARG);
-    return;
-  }
-
-  offset += index;
-  tail.Rebind(aPattern, offset);
-
-  if (host.EqualsLiteral("*")) {
+  if (scheme == nsGkAtoms::about) {
+    // about: URIs don't have hosts, so just treat the host as a wildcard and
+    // match on the path.
     mMatchSubdomain = true;
-  } else if (StringHead(host, 2).EqualsLiteral("*.")) {
-    mDomain = NS_ConvertUTF16toUTF8(Substring(host, 2));
-    mMatchSubdomain = true;
+    // And so, ignorePath doesn't make sense for about: matchers.
+    aIgnorePath = false;
   } else {
-    mDomain = NS_ConvertUTF16toUTF8(host);
+    if (!StringHead(tail, 2).EqualsLiteral("//")) {
+      aRv.Throw(NS_ERROR_INVALID_ARG);
+      return;
+    }
+
+    offset += 2;
+    tail.Rebind(aPattern, offset);
+    index = tail.FindChar('/');
+    if (index < 0) {
+      index = tail.Length();
+    }
+
+    auto host = StringHead(tail, index);
+    if (host.IsEmpty() && scheme != nsGkAtoms::file) {
+      aRv.Throw(NS_ERROR_INVALID_ARG);
+      return;
+    }
+
+    offset += index;
+    tail.Rebind(aPattern, offset);
+
+    if (host.EqualsLiteral("*")) {
+      mMatchSubdomain = true;
+    } else if (StringHead(host, 2).EqualsLiteral("*.")) {
+      mDomain = NS_ConvertUTF16toUTF8(Substring(host, 2));
+      mMatchSubdomain = true;
+    } else {
+      mDomain = NS_ConvertUTF16toUTF8(host);
+    }
   }
 
   /***************************************************************************
@@ -492,7 +504,7 @@ MatchPattern::Overlaps(const MatchPattern& aPattern) const
 JSObject*
 MatchPattern::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return MatchPatternBinding::Wrap(aCx, this, aGivenProto);
+  return MatchPattern_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ bool
@@ -535,12 +547,12 @@ MatchPatternSet::Constructor(dom::GlobalObject& aGlobal,
       if (!pattern) {
         return nullptr;
       }
-      patterns.AppendElement(Move(pattern));
+      patterns.AppendElement(std::move(pattern));
     }
   }
 
   RefPtr<MatchPatternSet> patternSet = new MatchPatternSet(aGlobal.GetAsSupports(),
-                                                           Move(patterns));
+                                                           std::move(patterns));
   return patternSet.forget();
 }
 
@@ -629,7 +641,7 @@ MatchPatternSet::OverlapsAll(const MatchPatternSet& aPatternSet) const
 JSObject*
 MatchPatternSet::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return MatchPatternSetBinding::Wrap(aCx, this, aGivenProto);
+  return MatchPatternSet_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 
@@ -728,7 +740,7 @@ MatchGlob::Matches(const nsAString& aString) const
     jsapi.Init();
     JSContext* cx = jsapi.cx();
 
-    JSAutoCompartment ac(cx, mRegExp);
+    JSAutoRealm ar(cx, mRegExp);
 
     JS::RootedObject regexp(cx, mRegExp);
     JS::RootedValue result(cx);
@@ -755,7 +767,7 @@ MatchGlob::Matches(const nsAString& aString) const
 JSObject*
 MatchGlob::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return MatchGlobBinding::Wrap(aCx, this, aGivenProto);
+  return MatchGlob_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 

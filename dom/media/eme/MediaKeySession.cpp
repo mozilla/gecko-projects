@@ -114,7 +114,7 @@ MediaKeySession::GetSessionId() const
 JSObject*
 MediaKeySession::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return MediaKeySessionBinding::Wrap(aCx, this, aGivenProto);
+  return MediaKeySession_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 double
@@ -312,7 +312,7 @@ MediaKeySession::GenerateRequest(const nsAString& aInitDataType,
   // Note: Remaining steps of generateRequest method continue in CDM.
 
   // Convert initData to hex for easier logging.
-  // Note: CreateSession() Move()s the data out of the array, so we have
+  // Note: CreateSession() std::move()s the data out of the array, so we have
   // to copy it here.
   nsAutoCString hexInitData(ToHexString(data));
   PromiseId pid = mKeys->StorePromise(promise);
@@ -441,7 +441,7 @@ MediaKeySession::Update(const ArrayBufferViewOrArrayBuffer& aResponse, ErrorResu
 
 
   // Convert response to hex for easier logging.
-  // Note: UpdateSession() Move()s the data out of the array, so we have
+  // Note: UpdateSession() std::move()s the data out of the array, so we have
   // to copy it here.
   nsAutoCString hexResponse(ToHexString(data));
 
@@ -607,7 +607,9 @@ MediaKeySession::DispatchKeyStatusesChange()
   UpdateKeyStatusMap();
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, NS_LITERAL_STRING("keystatuseschange"), false);
+    new AsyncEventDispatcher(this,
+                             NS_LITERAL_STRING("keystatuseschange"),
+                             CanBubble::eNo);
   asyncDispatcher->PostDOMEvent();
 }
 

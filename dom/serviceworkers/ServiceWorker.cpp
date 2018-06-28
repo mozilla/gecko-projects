@@ -8,6 +8,8 @@
 
 #include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
+#include "ServiceWorkerCloneData.h"
+#include "ServiceWorkerImpl.h"
 #include "ServiceWorkerManager.h"
 #include "ServiceWorkerPrivate.h"
 
@@ -61,7 +63,8 @@ ServiceWorker::Create(nsIGlobalObject* aOwner,
     return ref.forget();
   }
 
-  ref = new ServiceWorker(aOwner, aDescriptor, info);
+  RefPtr<ServiceWorker::Inner> inner = new ServiceWorkerImpl(info);
+  ref = new ServiceWorker(aOwner, aDescriptor, inner);
   return ref.forget();
 }
 
@@ -103,7 +106,7 @@ ServiceWorker::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  return ServiceWorkerBinding::Wrap(aCx, this, aGivenProto);
+  return ServiceWorker_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 ServiceWorkerState
@@ -147,7 +150,42 @@ ServiceWorker::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     return;
   }
 
-  mInner->PostMessage(GetParentObject(), aCx, aMessage, aTransferable, aRv);
+  nsPIDOMWindowInner* window = GetOwner();
+  if (NS_WARN_IF(!window || !window->GetExtantDoc())) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  auto storageAllowed = nsContentUtils::StorageAllowedForWindow(window);
+  if (storageAllowed != nsContentUtils::StorageAccess::eAllow) {
+    ServiceWorkerManager::LocalizeAndReportToAllClients(
+      mDescriptor.Scope(), "ServiceWorkerPostMessageStorageError",
+      nsTArray<nsString> { NS_ConvertUTF8toUTF16(mDescriptor.Scope()) });
+    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return;
+  }
+
+  Maybe<ClientInfo> clientInfo = window->GetClientInfo();
+  Maybe<ClientState> clientState = window->GetClientState();
+  if (NS_WARN_IF(clientInfo.isNothing() || clientState.isNothing())) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  JS::Rooted<JS::Value> transferable(aCx, JS::UndefinedValue());
+  aRv = nsContentUtils::CreateJSValueFromSequenceOfObject(aCx, aTransferable,
+                                                          &transferable);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  RefPtr<ServiceWorkerCloneData> data = new ServiceWorkerCloneData();
+  data->Write(aCx, aMessage, transferable, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  mInner->PostMessage(std::move(data), clientInfo.ref(), clientState.ref());
 }
 
 

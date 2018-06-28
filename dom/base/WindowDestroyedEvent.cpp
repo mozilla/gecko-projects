@@ -8,6 +8,7 @@
 #include "nsIAppStartup.h"
 #include "nsToolkitCompsCID.h"
 #include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 
 namespace mozilla {
 
@@ -15,7 +16,7 @@ namespace mozilla {
 // with principals that are either the system principal or an expanded principal.
 // This may not return true for all non-web-content compartments.
 struct BrowserCompartmentMatcher : public js::CompartmentFilter {
-  bool match(JSCompartment* aC) const override
+  bool match(JS::Compartment* aC) const override
   {
     nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(aC));
     return nsContentUtils::IsSystemOrExpandedPrincipal(pc);
@@ -110,8 +111,8 @@ WindowDestroyedEvent::Run()
 
         AutoSafeJSContext cx;
         JS::Rooted<JSObject*> obj(cx, currentInner->FastGetGlobalJSObject());
-        if (obj && !js::IsSystemCompartment(js::GetObjectCompartment(obj))) {
-          JSCompartment* cpt = js::GetObjectCompartment(obj);
+        if (obj && !js::IsSystemRealm(js::GetNonCCWObjectRealm(obj))) {
+          JS::Compartment* cpt = js::GetObjectCompartment(obj);
           nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(cpt));
 
           if (BasePrincipal::Cast(pc)->AddonPolicy()) {

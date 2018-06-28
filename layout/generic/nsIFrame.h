@@ -356,6 +356,10 @@ public:
   bool FirstLetterComplete() const { return mFirstLetterComplete; }
   void SetFirstLetterComplete() { mFirstLetterComplete = true; }
 
+#ifdef DEBUG
+  nsCString ToString() const;
+#endif
+
 private:
   StyleClear mBreakType;
   InlineBreak mInlineBreak;
@@ -612,7 +616,6 @@ public:
     , mFrameIsModified(false)
     , mHasOverrideDirtyRegion(false)
     , mMayHaveWillChangeBudget(false)
-    , mBuiltBlendContainer(false)
     , mIsPrimaryFrame(false)
     , mMayHaveTransformAnimation(false)
     , mMayHaveOpacityAnimation(false)
@@ -781,6 +784,7 @@ public:
   void SetComputedStyle(ComputedStyle* aStyle)
   {
     if (aStyle != mComputedStyle) {
+      MOZ_DIAGNOSTIC_ASSERT(PresShell() == aStyle->PresContextForFrame()->PresShell());
       RefPtr<ComputedStyle> oldComputedStyle = mComputedStyle.forget();
       mComputedStyle = aStyle;
       DidSetComputedStyle(oldComputedStyle);
@@ -796,6 +800,7 @@ public:
   void SetComputedStyleWithoutNotification(ComputedStyle* aStyle)
   {
     if (aStyle != mComputedStyle) {
+      MOZ_DIAGNOSTIC_ASSERT(PresShell() == aStyle->PresContextForFrame()->PresShell());
       mComputedStyle = aStyle;
     }
   }
@@ -1410,6 +1415,7 @@ public:
   bool GetMarginBoxBorderRadii(nscoord aRadii[8]) const;
   bool GetPaddingBoxBorderRadii(nscoord aRadii[8]) const;
   bool GetContentBoxBorderRadii(nscoord aRadii[8]) const;
+  bool GetBoxBorderRadii(nscoord aRadii[8], nsMargin aOffset, bool aIsOutset) const;
   bool GetShapeBoxBorderRadii(nscoord aRadii[8]) const;
 
   /**
@@ -1858,10 +1864,7 @@ public:
     return HasPerspective(StyleDisplay());
   }
 
-  bool ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const {
-    MOZ_ASSERT(aStyleDisplay == StyleDisplay());
-    return aStyleDisplay->HasPerspectiveStyle();
-  }
+  bool ChildrenHavePerspective(const nsStyleDisplay* aStyleDisplay) const;
   bool ChildrenHavePerspective() const {
     return ChildrenHavePerspective(StyleDisplay());
   }
@@ -2829,7 +2832,7 @@ public:
   };
   Matrix4x4Flagged GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                       nsIFrame **aOutAncestor,
-                                      uint32_t aFlags = 0);
+                                      uint32_t aFlags = 0) const;
 
   /**
    * Bit-flags to pass to IsFrameOfType()
@@ -3498,24 +3501,16 @@ public:
   virtual bool IsVisibleInSelection(mozilla::dom::Selection* aSelection);
 
   /**
-   * Determines if this frame has a container effect that requires
-   * it to paint as a visually atomic unit.
-   */
-  bool IsVisuallyAtomic(mozilla::EffectSet* aEffectSet,
-                        const nsStyleDisplay* aStyleDisplay,
-                        const nsStyleEffects* aStyleEffects);
-
-  /**
    * Determines if this frame is a stacking context.
    *
    * @param aIsPositioned The precomputed result of IsAbsPosContainingBlock
    * on the StyleDisplay().
-   * @param aIsVisuallyAtomic The precomputed result of IsVisuallyAtomic.
    */
-  bool IsStackingContext(const nsStyleDisplay* aStyleDisplay,
+  bool IsStackingContext(mozilla::EffectSet* aEffectSet,
+                         const nsStyleDisplay* aStyleDisplay,
                          const nsStylePosition* aStylePosition,
-                         bool aIsPositioned,
-                         bool aIsVisuallyAtomic);
+                         const nsStyleEffects* aStyleEffects,
+                         bool aIsPositioned);
   bool IsStackingContext();
 
   virtual bool HonorPrintBackgroundSettings() { return true; }
@@ -4006,14 +4001,6 @@ public:
     return !HasAllStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
 
-  /**
-   * Returns the content node within the anonymous content that this frame
-   * generated and which corresponds to the specified pseudo-element type,
-   * or nullptr if there is no such anonymous content.
-   */
-  virtual mozilla::dom::Element*
-  GetPseudoElement(mozilla::CSSPseudoElementType aType);
-
   /*
    * @param aStyleDisplay:  If the caller has this->StyleDisplay(), providing
    *   it here will improve performance.
@@ -4029,7 +4016,7 @@ public:
   /**
    * Returns true if the frame is scrolled out of view.
    */
-  bool IsScrolledOutOfView();
+  bool IsScrolledOutOfView() const;
 
   /**
    * Computes a 2D matrix from the -moz-window-transform and
@@ -4144,9 +4131,6 @@ public:
 
   bool MayHaveWillChangeBudget() { return mMayHaveWillChangeBudget; }
   void SetMayHaveWillChangeBudget(bool aHasBudget) { mMayHaveWillChangeBudget = aHasBudget; }
-
-  bool BuiltBlendContainer() { return mBuiltBlendContainer; }
-  void SetBuiltBlendContainer(bool aBuilt) { mBuiltBlendContainer = aBuilt; }
 
   /**
    * Returns the set of flags indicating the properties of the frame that the
@@ -4345,12 +4329,6 @@ protected:
    */
   bool mMayHaveWillChangeBudget : 1;
 
-  /**
-   * True if we built an nsDisplayBlendContainer last time
-   * we did retained display list building for this frame.
-   */
-  bool mBuiltBlendContainer : 1;
-
 private:
   /**
    * True if this is the primary frame for mContent.
@@ -4372,7 +4350,7 @@ private:
 
 protected:
 
-  // There is no gap left here.
+  // There is a 1-bit gap left here.
 
   // Helpers
   /**

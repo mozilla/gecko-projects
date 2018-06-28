@@ -34,8 +34,8 @@ public:
 
   // Accessible
   virtual TableCellAccessible* AsTableCell() override { return this; }
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual uint64_t NativeInteractiveState() const override;
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;
   virtual mozilla::a11y::GroupPos GroupPosition() override;
@@ -79,7 +79,7 @@ public:
   HTMLTableHeaderCellAccessible(nsIContent* aContent, DocAccessible* aDoc);
 
   // Accessible
-  virtual a11y::role NativeRole() override;
+  virtual a11y::role NativeRole() const override;
 };
 
 
@@ -99,7 +99,7 @@ public:
   NS_INLINE_DECL_REFCOUNTING_INHERITED(HTMLTableRowAccessible, AccessibleWrap)
 
   // Accessible
-  virtual a11y::role NativeRole() override;
+  virtual a11y::role NativeRole() const override;
   virtual mozilla::a11y::GroupPos GroupPosition() override;
 
 protected:
@@ -132,7 +132,7 @@ public:
   // TableAccessible
   virtual Accessible* Caption() const override;
   virtual void Summary(nsString& aSummary) override;
-  virtual uint32_t ColCount() override;
+  virtual uint32_t ColCount() const override;
   virtual uint32_t RowCount() override;
   virtual Accessible* CellAt(uint32_t aRowIndex, uint32_t aColumnIndex) override;
   virtual int32_t CellIndexAt(uint32_t aRowIdx, uint32_t aColIdx) override;
@@ -156,16 +156,15 @@ public:
   virtual void SelectRow(uint32_t aRowIdx) override;
   virtual void UnselectCol(uint32_t aColIdx) override;
   virtual void UnselectRow(uint32_t aRowIdx) override;
-  virtual bool IsProbablyLayoutTable() override;
   virtual Accessible* AsAccessible() override { return this; }
 
   // Accessible
   virtual TableAccessible* AsTable() override { return this; }
   virtual void Description(nsString& aDescription) override;
-  virtual a11y::role NativeRole() override;
-  virtual uint64_t NativeState() override;
+  virtual a11y::role NativeRole() const override;
+  virtual uint64_t NativeState() const override;
   virtual already_AddRefed<nsIPersistentProperties> NativeAttributes() override;
-  virtual Relation RelationByType(RelationType aRelationType) override;
+  virtual Relation RelationByType(RelationType aRelationType) const override;
 
   virtual bool InsertChildAt(uint32_t aIndex, Accessible* aChild) override;
 
@@ -173,7 +172,7 @@ protected:
   virtual ~HTMLTableAccessible() {}
 
   // Accessible
-  virtual ENameValueFlag NativeName(nsString& aName) override;
+  virtual ENameValueFlag NativeName(nsString& aName) const override;
 
   // HTMLTableAccessible
 
@@ -199,15 +198,6 @@ protected:
                                             TableSelection aTarget,
                                             bool aIsOuter);
 
-  /**
-   * Return true if table has an element with the given tag name.
-   *
-   * @param  aTagName     [in] tag name of searched element
-   * @param  aAllowEmpty  [in, optional] points if found element can be empty
-   *                       or contain whitespace text only.
-   */
-  bool HasDescendant(const nsAString& aTagName, bool aAllowEmpty = true);
-
 #ifdef SHOW_LAYOUT_HEURISTIC
   nsString mLayoutHeuristic;
 #endif
@@ -223,8 +213,8 @@ public:
     HyperTextAccessibleWrap(aContent, aDoc) { mType = eHTMLCaptionType; }
 
   // Accessible
-  virtual a11y::role NativeRole() override;
-  virtual Relation RelationByType(RelationType aRelationType) override;
+  virtual a11y::role NativeRole() const override;
+  virtual Relation RelationByType(RelationType aRelationType) const override;
 
 protected:
   virtual ~HTMLCaptionAccessible() { }

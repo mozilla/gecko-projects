@@ -15,9 +15,7 @@
 // Interfaces needed to be included
 #include "nsCopySupport.h"
 #include "nsISelectionController.h"
-#include "nsIDOMNode.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDOMRange.h"
 #include "nsIFormControl.h"
 #include "nsITransferable.h"
 #include "nsComponentManagerUtils.h"
@@ -30,6 +28,7 @@
 #include "nsIWebNavigation.h"
 #include "nsIDocShell.h"
 #include "nsIContent.h"
+#include "nsIContentInlines.h"
 #include "nsIImageLoadingContent.h"
 #include "nsITextControlElement.h"
 #include "nsUnicharUtils.h"

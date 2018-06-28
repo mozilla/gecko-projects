@@ -88,8 +88,7 @@ using namespace mozilla;
 
 /* directory enumerator */
 class nsDirEnumeratorUnix final
-  : public nsISimpleEnumerator
-  , public nsIDirectoryEnumerator
+  : public nsIDirectoryEnumerator
 {
 public:
   nsDirEnumeratorUnix();
@@ -169,7 +168,7 @@ nsDirEnumeratorUnix::GetNext(nsISupports** aResult)
   if (NS_FAILED(rv)) {
     return rv;
   }
-  NS_IF_ADDREF(*aResult = file);
+  file.forget(aResult);
   return NS_OK;
 }
 
@@ -224,10 +223,12 @@ nsDirEnumeratorUnix::Close()
 }
 
 nsLocalFile::nsLocalFile()
+  : mCachedStat()
 {
 }
 
 nsLocalFile::nsLocalFile(const nsACString& aFilePath)
+  : mCachedStat()
 {
   InitWithNativePath(aFilePath);
 }
@@ -730,20 +731,13 @@ nsLocalFile::CopyDirectoryTo(nsIFile* aNewParent)
     }
   }
 
-  nsCOMPtr<nsISimpleEnumerator> dirIterator;
+  nsCOMPtr<nsIDirectoryEnumerator> dirIterator;
   if (NS_FAILED(rv = GetDirectoryEntries(getter_AddRefs(dirIterator)))) {
     return rv;
   }
 
-  bool hasMore = false;
-  while (NS_SUCCEEDED(dirIterator->HasMoreElements(&hasMore)) && hasMore) {
-    nsCOMPtr<nsISupports> supports;
-    nsCOMPtr<nsIFile> entry;
-    rv = dirIterator->GetNext(getter_AddRefs(supports));
-    entry = do_QueryInterface(supports);
-    if (NS_FAILED(rv) || !entry) {
-      continue;
-    }
+  nsCOMPtr<nsIFile> entry;
+  while (NS_SUCCEEDED(dirIterator->GetNextFile(getter_AddRefs(entry))) && entry) {
     if (NS_FAILED(rv = entry->IsSymlink(&isSymlink))) {
       return rv;
     }
@@ -1850,7 +1844,7 @@ nsLocalFile::SetFollowLinks(bool aFollowLinks)
 }
 
 NS_IMETHODIMP
-nsLocalFile::GetDirectoryEntries(nsISimpleEnumerator** aEntries)
+nsLocalFile::GetDirectoryEntriesImpl(nsIDirectoryEnumerator** aEntries)
 {
   RefPtr<nsDirEnumeratorUnix> dir = new nsDirEnumeratorUnix();
 

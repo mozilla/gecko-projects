@@ -1528,7 +1528,7 @@ nsPipeInputStream::AsyncWait(nsIInputStreamCallback* aCallback,
 NS_IMETHODIMP
 nsPipeInputStream::Seek(int32_t aWhence, int64_t aOffset)
 {
-  NS_NOTREACHED("nsPipeInputStream::Seek");
+  MOZ_ASSERT_UNREACHABLE("nsPipeInputStream::Seek");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1549,7 +1549,7 @@ nsPipeInputStream::Tell(int64_t* aOffset)
 NS_IMETHODIMP
 nsPipeInputStream::SetEOF()
 {
-  NS_NOTREACHED("nsPipeInputStream::SetEOF");
+  MOZ_ASSERT_UNREACHABLE("nsPipeInputStream::SetEOF");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1634,7 +1634,7 @@ nsPipeInputStream::Search(const char* aForString,
     limit1 = limit2;
   }
 
-  NS_NOTREACHED("can't get here");
+  MOZ_ASSERT_UNREACHABLE("can't get here");
   return NS_ERROR_UNEXPECTED;    // keep compiler happy
 }
 

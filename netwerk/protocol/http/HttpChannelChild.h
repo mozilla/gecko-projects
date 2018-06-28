@@ -146,11 +146,12 @@ protected:
                                              const uint32_t& cacheKey,
                                              const nsCString& altDataType,
                                              const int64_t& altDataLen,
-                                             const OptionalIPCServiceWorkerDescriptor& aController,
-                                             const bool& aApplyConversion) override;
+                                             const bool& aApplyConversion,
+                                             const ResourceTimingStruct& aTiming) override;
   mozilla::ipc::IPCResult RecvFailedAsyncOpen(const nsresult& status) override;
   mozilla::ipc::IPCResult RecvRedirect1Begin(const uint32_t& registrarId,
                                              const URIParams& newURI,
+                                             const uint32_t& newLoadFlags,
                                              const uint32_t& redirectFlags,
                                              const ParentLoadInfoForwarderArgs& loadInfoForwarder,
                                              const nsHttpResponseHead& responseHead,
@@ -181,7 +182,7 @@ protected:
   GetAssociatedContentSecurity(nsIAssociatedContentSecurity** res = nullptr);
   virtual void DoNotifyListenerCleanup() override;
 
-  NS_IMETHOD GetResponseSynthesized(bool* aSynthesized) override;
+  virtual void DoAsyncAbort(nsresult aStatus) override;
 
   nsresult
   AsyncCall(void (HttpChannelChild::*funcPtr)(),
@@ -418,8 +419,8 @@ private:
                       const uint32_t& cacheKey,
                       const nsCString& altDataType,
                       const int64_t& altDataLen,
-                      const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
-                      const bool& aApplyConversion);
+                      const bool& aApplyConversion,
+                      const ResourceTimingStruct& aTiming);
   void MaybeDivertOnData(const nsCString& data,
                          const uint64_t& offset,
                          const uint32_t& count);
@@ -438,6 +439,7 @@ private:
   void HandleAsyncAbort();
   void Redirect1Begin(const uint32_t& registrarId,
                       const URIParams& newUri,
+                      const uint32_t& newLoadFlags,
                       const uint32_t& redirectFlags,
                       const ParentLoadInfoForwarderArgs& loadInfoForwarder,
                       const nsHttpResponseHead& responseHead,

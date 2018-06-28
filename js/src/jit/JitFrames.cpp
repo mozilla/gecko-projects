@@ -15,7 +15,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
-#include "jit/JitCompartment.h"
+#include "jit/JitRealm.h"
 #include "jit/JitSpewer.h"
 #include "jit/MacroAssembler.h"
 #include "jit/PcScriptCache.h"
@@ -174,7 +174,7 @@ static void
 HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame, ResumeFromException* rfe,
                    bool* overrecursed)
 {
-    if (cx->compartment()->isDebuggee()) {
+    if (cx->realm()->isDebuggee()) {
         // We need to bail when there is a catchable exception, and we are the
         // debuggee of a Debugger with a live onExceptionUnwind hook, or if a
         // Debugger has observed this frame (e.g., for onPop).
@@ -221,6 +221,10 @@ HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame, ResumeFromEx
         switch (tn->kind) {
           case JSTRY_FOR_IN:
           case JSTRY_DESTRUCTURING_ITERCLOSE:
+            // See corresponding comment in ProcessTryNotes.
+            if (inForOfIterClose)
+                break;
+
             MOZ_ASSERT_IF(tn->kind == JSTRY_FOR_IN,
                           JSOp(*(script->main() + tn->start + tn->length)) == JSOP_ENDITER);
             CloseLiveIteratorIon(cx, frame, tn);
@@ -360,16 +364,34 @@ static void
 CloseLiveIteratorsBaselineForUncatchableException(JSContext* cx, const JSJitFrameIter& frame,
                                                   jsbytecode* pc)
 {
+    bool inForOfIterClose = false;
     for (TryNoteIterBaseline tni(cx, frame.baselineFrame(), pc); !tni.done(); ++tni) {
         JSTryNote* tn = *tni;
+        switch (tn->kind) {
+          case JSTRY_FOR_IN: {
+            // See corresponding comment in ProcessTryNotes.
+            if (inForOfIterClose)
+                break;
 
-        if (tn->kind == JSTRY_FOR_IN) {
             uint8_t* framePointer;
             uint8_t* stackPointer;
             BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer, &stackPointer);
             Value iterValue(*(Value*) stackPointer);
             RootedObject iterObject(cx, &iterValue.toObject());
             UnwindIteratorForUncatchableException(iterObject);
+            break;
+          }
+
+          case JSTRY_FOR_OF_ITERCLOSE:
+            inForOfIterClose = true;
+            break;
+
+          case JSTRY_FOR_OF:
+            inForOfIterClose = false;
+            break;
+
+          default:
+            break;
         }
     }
 }
@@ -425,6 +447,10 @@ ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame, EnvironmentI
           }
 
           case JSTRY_FOR_IN: {
+            // See corresponding comment in ProcessTryNotes.
+            if (inForOfIterClose)
+                break;
+
             uint8_t* framePointer;
             uint8_t* stackPointer;
             BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer, &stackPointer);
@@ -435,6 +461,10 @@ ProcessTryNotesBaseline(JSContext* cx, const JSJitFrameIter& frame, EnvironmentI
           }
 
           case JSTRY_DESTRUCTURING_ITERCLOSE: {
+            // See corresponding comment in ProcessTryNotes.
+            if (inForOfIterClose)
+                break;
+
             uint8_t* framePointer;
             uint8_t* stackPointer;
             BaselineFrameAndStackPointersFromTryNote(tn, frame, &framePointer, &stackPointer);
@@ -631,13 +661,21 @@ HandleException(ResumeFromException* rfe)
     // iterating, we need a variant here that is automatically updated should
     // on-stack recompilation occur.
     DebugModeOSRVolatileJitFrameIter iter(cx);
-    while (!iter.done()) {
+    while (true) {
+        iter.skipNonScriptedJSFrames();
+        if (iter.done())
+            break;
+
         if (iter.isWasm()) {
             HandleExceptionWasm(cx, &iter.asWasm(), rfe);
             if (!iter.done())
                 ++iter;
             continue;
         }
+
+        // JIT code can enter same-compartment realms, so reset cx->realm to
+        // this frame's realm.
+        cx->setRealmForJitExceptionHandler(iter.realm());
 
         const JSJitFrameIter& frame = iter.asJSJit();
 
@@ -652,7 +690,7 @@ HandleException(ResumeFromException* rfe)
             bool invalidated = frame.checkInvalidation(&ionScript);
 
 #ifdef JS_TRACE_LOGGING
-            if (logger && cx->compartment()->isDebuggee() && logger->enabled()) {
+            if (logger && cx->realm()->isDebuggee() && logger->enabled()) {
                 logger->disable(/* force = */ true,
                                 "Forcefully disabled tracelogger, due to "
                                 "throwing an exception with an active Debugger "
@@ -1310,7 +1348,7 @@ TraceJitActivations(JSContext* cx, JSTracer* trc)
 void
 UpdateJitActivationsForMinorGC(JSRuntime* rt)
 {
-    MOZ_ASSERT(JS::CurrentThreadIsHeapMinorCollecting());
+    MOZ_ASSERT(JS::RuntimeHeapIsMinorCollecting());
     JSContext* cx = rt->mainContextFromOwnThread();
     for (JitActivationIterator activations(cx); !activations.done(); ++activations) {
         for (OnlyJSJitFrameIter iter(activations); !iter.done(); ++iter) {
@@ -1420,7 +1458,7 @@ RInstructionResults::RInstructionResults(JitFrameLayout* fp)
 }
 
 RInstructionResults::RInstructionResults(RInstructionResults&& src)
-  : results_(mozilla::Move(src.results_)),
+  : results_(std::move(src.results_)),
     fp_(src.fp_),
     initialized_(src.initialized_)
 {
@@ -1432,7 +1470,7 @@ RInstructionResults::operator=(RInstructionResults&& rhs)
 {
     MOZ_ASSERT(&rhs != this, "self-moves are prohibited");
     this->~RInstructionResults();
-    new(this) RInstructionResults(mozilla::Move(rhs));
+    new(this) RInstructionResults(std::move(rhs));
     return *this;
 }
 
@@ -1464,13 +1502,11 @@ RInstructionResults::isInitialized() const
     return initialized_;
 }
 
-#ifdef DEBUG
 size_t
 RInstructionResults::length() const
 {
     return results_->length();
 }
-#endif
 
 JitFrameLayout*
 RInstructionResults::frame() const
@@ -1513,6 +1549,7 @@ SnapshotIterator::SnapshotIterator()
   : snapshot_(nullptr, 0, 0, 0),
     recover_(snapshot_, nullptr, 0),
     fp_(nullptr),
+    machine_(nullptr),
     ionScript_(nullptr),
     instructionResults_(nullptr)
 {
@@ -1886,7 +1923,7 @@ SnapshotIterator::initInstructionResults(MaybeReadFallback& fallback)
     JitFrameLayout* fp = fallback.frame->jsFrame();
     RInstructionResults* results = fallback.activation->maybeIonFrameRecovery(fp);
     if (!results) {
-        AutoCompartment ac(cx, fallback.frame->script());
+        AutoRealm ar(cx, fallback.frame->script());
 
         // We do not have the result yet, which means that an observable stack
         // slot is requested.  As we do not want to bailout every time for the
@@ -1903,7 +1940,7 @@ SnapshotIterator::initInstructionResults(MaybeReadFallback& fallback)
         // cause a GC, we can ensure that the results are properly traced by the
         // activation.
         RInstructionResults tmp(fallback.frame->jsFrame());
-        if (!fallback.activation->registerIonFrameRecovery(mozilla::Move(tmp)))
+        if (!fallback.activation->registerIonFrameRecovery(std::move(tmp)))
             return false;
 
         results = fallback.activation->maybeIonFrameRecovery(fp);
@@ -1923,7 +1960,7 @@ SnapshotIterator::initInstructionResults(MaybeReadFallback& fallback)
     }
 
     MOZ_ASSERT(results->isInitialized());
-    MOZ_ASSERT(results->length() == recover_.numInstructions() - 1);
+    MOZ_RELEASE_ASSERT(results->length() == recover_.numInstructions() - 1);
     instructionResults_ = results;
     return true;
 }
@@ -2026,7 +2063,9 @@ SnapshotIterator::maybeReadAllocByIndex(size_t index)
 InlineFrameIterator::InlineFrameIterator(JSContext* cx, const JSJitFrameIter* iter)
   : calleeTemplate_(cx),
     calleeRVA_(),
-    script_(cx)
+    script_(cx),
+    pc_(nullptr),
+    numActualArgs_(0)
 {
     resetOn(iter);
 }
@@ -2037,7 +2076,9 @@ InlineFrameIterator::InlineFrameIterator(JSContext* cx, const InlineFrameIterato
     frameCount_(iter ? iter->frameCount_ : UINT32_MAX),
     calleeTemplate_(cx),
     calleeRVA_(),
-    script_(cx)
+    script_(cx),
+    pc_(nullptr),
+    numActualArgs_(0)
 {
     if (frame_) {
         machine_ = iter->machine_;
@@ -2292,7 +2333,7 @@ struct DumpOp {
     unsigned int i_;
     void operator()(const Value& v) {
         fprintf(stderr, "  actual (arg %d): ", i_);
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
         DumpValue(v);
 #else
         fprintf(stderr, "?\n");
@@ -2315,7 +2356,7 @@ InlineFrameIterator::dump() const
     if (isFunctionFrame()) {
         isFunction = true;
         fprintf(stderr, "  callee fun: ");
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
         DumpObject(callee(fallback));
 #else
         fprintf(stderr, "?\n");
@@ -2324,7 +2365,7 @@ InlineFrameIterator::dump() const
         fprintf(stderr, "  global frame, no callee\n");
     }
 
-    fprintf(stderr, "  file %s line %zu\n",
+    fprintf(stderr, "  file %s line %u\n",
             script()->filename(), script()->lineno());
 
     fprintf(stderr, "  script = %p, pc = %p\n", (void*) script(), pc());
@@ -2354,7 +2395,7 @@ InlineFrameIterator::dump() const
             }
         } else
             fprintf(stderr, "  slot %u: ", i);
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
         DumpValue(si.maybeRead(fallback));
 #else
         fprintf(stderr, "?\n");

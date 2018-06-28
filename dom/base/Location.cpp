@@ -221,7 +221,8 @@ Location::GetWritableURI(nsIURI** aURI, const nsACString* aNewRef)
   }
 
   if (!aNewRef) {
-    return uri->Clone(aURI);
+    uri.forget(aURI);
+    return NS_OK;
   }
 
   return uri->CloneWithNewRef(*aNewRef, aURI);
@@ -1002,7 +1003,7 @@ Location::CallerSubsumes(nsIPrincipal* aSubjectPrincipal)
 JSObject*
 Location::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return LocationBinding::Wrap(aCx, this, aGivenProto);
+  return Location_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // dom namespace

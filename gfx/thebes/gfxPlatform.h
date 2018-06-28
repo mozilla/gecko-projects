@@ -358,7 +358,8 @@ public:
      * gfxPlatformFontList *and* to call its InitFontList() method.
      */
     virtual gfxPlatformFontList *CreatePlatformFontList() {
-        NS_NOTREACHED("oops, this platform doesn't have a gfxPlatformFontList implementation");
+        MOZ_ASSERT_UNREACHABLE("oops, this platform doesn't have a "
+                               "gfxPlatformFontList implementation");
         return nullptr;
     }
 
@@ -737,6 +738,10 @@ public:
       return mHasVariationFontSupport;
     }
 
+    bool HasNativeColrFontSupport() const {
+      return mHasNativeColrFontSupport;
+    }
+
     // you probably want to use gfxVars::UseWebRender() instead of this
     static bool WebRenderPrefEnabled();
     // you probably want to use gfxVars::UseWebRender() instead of this
@@ -830,6 +835,10 @@ protected:
     // Whether the platform supports rendering OpenType font variations
     bool    mHasVariationFontSupport;
 
+    // Whether the platform font APIs have native support for COLR fonts.
+    // Set to true during initialization on platforms that implement this.
+    bool    mHasNativeColrFontSupport = false;
+
     // max character limit for words in word cache
     int32_t mWordCacheCharLimit;
 
@@ -875,6 +884,7 @@ private:
     void InitOMTPConfig();
 
     static bool IsDXInterop2Blocked();
+    static bool IsDXNV12Blocked();
 
     RefPtr<gfxASurface> mScreenReferenceSurface;
     nsCOMPtr<nsIObserver> mSRGBOverrideObserver;

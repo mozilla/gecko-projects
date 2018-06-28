@@ -770,8 +770,8 @@ public:
                                                         const ScrollUpdateInfo& aUpdateInfo);
   Maybe<ScrollUpdateInfo> GetPendingScrollInfoUpdate(FrameMetrics::ViewID aScrollId);
   void ClearPendingScrollInfoUpdate();
-private:
-  std::map<FrameMetrics::ViewID,ScrollUpdateInfo> mPendingScrollUpdates;
+protected:
+  ScrollUpdatesMap mPendingScrollUpdates;
 };
 
 /**
@@ -1292,6 +1292,7 @@ public:
   uint32_t GetScrollMetadataCount() const { return mScrollMetadata.Length(); }
   const nsTArray<ScrollMetadata>& GetAllScrollMetadata() { return mScrollMetadata; }
   bool HasScrollableFrameMetrics() const;
+  bool HasRootScrollableFrameMetrics() const;
   bool IsScrollableWithoutContent() const;
   const EventRegions& GetEventRegions() const { return mEventRegions; }
   ContainerLayer* GetParent() { return mParent; }

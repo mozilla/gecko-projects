@@ -79,9 +79,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.LocaleList;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
+import android.os.StrictMode;
 import android.os.SystemClock;
 import android.os.Vibrator;
 import android.provider.Settings;
@@ -111,7 +113,7 @@ public class GeckoAppShell
     // We have static members only.
     private GeckoAppShell() { }
 
-    private static final CrashHandler CRASH_HANDLER = new CrashHandler() {
+    private static class GeckoCrashHandler extends CrashHandler {
         @Override
         protected String getAppPackageName() {
             final Context appContext = getAppContext();
@@ -174,10 +176,18 @@ public class GeckoAppShell
     };
 
     private static String sAppNotes;
+    private static CrashHandler sCrashHandler;
 
-    public static CrashHandler ensureCrashHandling() {
-        // Crash handling is automatically enabled when GeckoAppShell is loaded.
-        return CRASH_HANDLER;
+    public static synchronized CrashHandler ensureCrashHandling() {
+        if (sCrashHandler == null) {
+            sCrashHandler = new GeckoCrashHandler();
+        }
+
+        return sCrashHandler;
+    }
+
+    public static synchronized boolean isCrashHandlingEnabled() {
+        return sCrashHandler != null;
     }
 
     @WrapForJNI(exceptionMode = "ignore")
@@ -280,8 +290,10 @@ public class GeckoAppShell
     }
 
     @WrapForJNI(exceptionMode = "ignore")
-    private static void handleUncaughtException(Throwable e) {
-        CRASH_HANDLER.uncaughtException(null, e);
+    private static synchronized void handleUncaughtException(Throwable e) {
+        if (sCrashHandler != null) {
+            sCrashHandler.uncaughtException(null, e);
+        }
     }
 
     private static float getLocationAccuracy(Location location) {
@@ -385,12 +397,13 @@ public class GeckoAppShell
 
     @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
     /* package */ static native void onSensorChanged(int hal_type, float x, float y, float z,
-                                                     float w, int accuracy, long time);
+                                                     float w, long time);
 
     @WrapForJNI(calledFrom = "any", dispatchTo = "gecko")
     /* package */ static native void onLocationChanged(double latitude, double longitude,
                                                        double altitude, float accuracy,
-                                                       float bearing, float speed, long time);
+                                                       float altitudeAccuracy,
+                                                       float heading, float speed, long time);
 
     private static class DefaultListeners implements SensorEventListener,
                                                      LocationListener,
@@ -402,26 +415,11 @@ public class GeckoAppShell
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
         }
 
-        private static int HalSensorAccuracyFor(int androidAccuracy) {
-            switch (androidAccuracy) {
-            case SensorManager.SENSOR_STATUS_UNRELIABLE:
-                return GeckoHalDefines.SENSOR_ACCURACY_UNRELIABLE;
-            case SensorManager.SENSOR_STATUS_ACCURACY_LOW:
-                return GeckoHalDefines.SENSOR_ACCURACY_LOW;
-            case SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM:
-                return GeckoHalDefines.SENSOR_ACCURACY_MED;
-            case SensorManager.SENSOR_STATUS_ACCURACY_HIGH:
-                return GeckoHalDefines.SENSOR_ACCURACY_HIGH;
-            }
-            return GeckoHalDefines.SENSOR_ACCURACY_UNKNOWN;
-        }
-
         @Override
         public void onSensorChanged(SensorEvent s) {
             int sensor_type = s.sensor.getType();
             int hal_type = 0;
             float x = 0.0f, y = 0.0f, z = 0.0f, w = 0.0f;
-            final int accuracy = HalSensorAccuracyFor(s.accuracy);
             // SensorEvent timestamp is in nanoseconds, Gecko expects microseconds.
             final long time = s.timestamp / 1000;
 
@@ -480,17 +478,41 @@ public class GeckoAppShell
                 break;
             }
 
-            GeckoAppShell.onSensorChanged(hal_type, x, y, z, w, accuracy, time);
+            GeckoAppShell.onSensorChanged(hal_type, x, y, z, w, time);
         }
 
         // Geolocation.
         @Override
         public void onLocationChanged(final Location location) {
             // No logging here: user-identifying information.
+
+            double altitude = location.hasAltitude()
+                            ? location.getAltitude()
+                            : Double.NaN;
+
+            float accuracy = location.hasAccuracy()
+                           ? location.getAccuracy()
+                           : Float.NaN;
+
+            float altitudeAccuracy = Build.VERSION.SDK_INT >= 26 &&
+                                     location.hasVerticalAccuracy()
+                                   ? location.getVerticalAccuracyMeters()
+                                   : Float.NaN;
+
+            float speed = location.hasSpeed()
+                        ? location.getSpeed()
+                        : Float.NaN;
+
+            float heading = location.hasBearing()
+                          ? location.getBearing()
+                          : Float.NaN;
+
+            // nsGeoPositionCoords will convert NaNs to null for optional
+            // properties of the JavaScript Coordinates object.
             GeckoAppShell.onLocationChanged(
                 location.getLatitude(), location.getLongitude(),
-                location.getAltitude(), location.getAccuracy(),
-                location.getBearing(), location.getSpeed(), location.getTime());
+                altitude, accuracy, altitudeAccuracy,
+                heading, speed, location.getTime());
         }
 
         @Override
@@ -938,7 +960,14 @@ public class GeckoAppShell
         if (geckoInterface == null) {
             return false;
         }
-        return geckoInterface.openUriExternal(targetURI, mimeType, packageName, className, action, title);
+        // Bug 1450449 - Downloaded files already are already in a public directory and aren't
+        // really owned exclusively by Firefox, so there's no real benefit to using
+        // content:// URIs here.
+        StrictMode.VmPolicy prevPolicy = StrictMode.getVmPolicy();
+        StrictMode.setVmPolicy(StrictMode.VmPolicy.LAX);
+        boolean success = geckoInterface.openUriExternal(targetURI, mimeType, packageName, className, action, title);
+        StrictMode.setVmPolicy(prevPolicy);
+        return success;
     }
 
     @WrapForJNI(dispatchTo = "gecko")
@@ -1841,45 +1870,43 @@ public class GeckoAppShell
 
     @WrapForJNI(calledFrom = "any")
     public static int getAudioOutputFramesPerBuffer() {
+        final int DEFAULT = 512;
+
         if (SysInfo.getVersion() < 17) {
-            return 0;
+            return DEFAULT;
         }
         final AudioManager am = (AudioManager)getApplicationContext()
                                 .getSystemService(Context.AUDIO_SERVICE);
         if (am == null) {
-            return 0;
+            return DEFAULT;
         }
         final String prop = am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
         if (prop == null) {
-            return 0;
+            return DEFAULT;
         }
         return Integer.parseInt(prop);
     }
 
     @WrapForJNI(calledFrom = "any")
     public static int getAudioOutputSampleRate() {
+        final int DEFAULT = 44100;
+
         if (SysInfo.getVersion() < 17) {
-            return 0;
+            return DEFAULT;
         }
         final AudioManager am = (AudioManager)getApplicationContext()
                                 .getSystemService(Context.AUDIO_SERVICE);
         if (am == null) {
-            return 0;
+            return DEFAULT;
         }
         final String prop = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
         if (prop == null) {
-            return 0;
+            return DEFAULT;
         }
         return Integer.parseInt(prop);
     }
 
-    @WrapForJNI
-    public static String getDefaultLocale() {
-        final Locale locale = Locale.getDefault();
-        if (Build.VERSION.SDK_INT >= 21) {
-            return locale.toLanguageTag();
-        }
-
+    private static String getLanguageTag(final Locale locale) {
         final StringBuilder out = new StringBuilder(locale.getLanguage());
         final String country = locale.getCountry();
         final String variant = locale.getVariant();
@@ -1891,5 +1918,27 @@ public class GeckoAppShell
         }
         // e.g. "en", "en-US", or "en-US-POSIX".
         return out.toString();
+    }
+
+    @WrapForJNI
+    public static String[] getDefaultLocales() {
+        // XXX We may have to convert some language codes such as "id" vs "in".
+        if (Build.VERSION.SDK_INT >= 24) {
+            final LocaleList localeList = LocaleList.getDefault();
+            String[] locales = new String[localeList.size()];
+            for (int i = 0; i < localeList.size(); i++) {
+                locales[i] = localeList.get(i).toLanguageTag();
+            }
+            return locales;
+        }
+        String[] locales = new String[1];
+        final Locale locale = Locale.getDefault();
+        if (Build.VERSION.SDK_INT >= 21) {
+            locales[0] = locale.toLanguageTag();
+            return locales;
+        }
+
+        locales[0] = getLanguageTag(locale);
+        return locales;
     }
 }

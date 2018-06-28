@@ -17,6 +17,7 @@ pub mod basic_shape;
 pub mod border;
 #[path = "box.rs"]
 pub mod box_;
+pub mod color;
 pub mod column;
 pub mod counters;
 pub mod effects;
@@ -156,7 +157,7 @@ impl SpecifiedValueInfo for CounterStyleOrNone {
 
 /// A wrapper of Non-negative values.
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf,
+#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, Hash, MallocSizeOf,
          PartialEq, PartialOrd, SpecifiedValueInfo, ToAnimatedZero,
          ToComputedValue, ToCss)]
 pub struct NonNegative<T>(pub T);

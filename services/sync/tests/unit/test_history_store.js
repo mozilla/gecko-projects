@@ -13,26 +13,11 @@ const TIMESTAMP3 = (Date.now() - 123894) * 1000;
 
 function promiseOnVisitObserved() {
   return new Promise(res => {
-    PlacesUtils.history.addObserver({
-      onBeginUpdateBatch: function onBeginUpdateBatch() {},
-      onEndUpdateBatch: function onEndUpdateBatch() {},
-      onPageChanged: function onPageChanged() {},
-      onTitleChanged: function onTitleChanged() {
-      },
-      onVisits: function onVisits() {
-        PlacesUtils.history.removeObserver(this);
-        res();
-      },
-      onDeleteVisits: function onDeleteVisits() {},
-      onPageExpired: function onPageExpired() {},
-      onDeleteURI: function onDeleteURI() {},
-      onClearHistory: function onClearHistory() {},
-      QueryInterface: ChromeUtils.generateQI([
-        Ci.nsINavHistoryObserver,
-        Ci.nsINavHistoryObserver_MOZILLA_1_9_1_ADDITIONS,
-        Ci.nsISupportsWeakReference
-      ])
-    }, true);
+    let listener = new PlacesWeakCallbackWrapper((events) => {
+      PlacesObservers.removeListener(["page-visited"], listener);
+      res();
+    });
+    PlacesObservers.addListener(["page-visited"], listener);
   });
 }
 
@@ -164,9 +149,9 @@ add_task(async function test_invalid_records() {
       + "(url, url_hash, title, rev_host, visit_count, last_visit_date) "
       + "VALUES ('invalid-uri', hash('invalid-uri'), 'Invalid URI', '.', 1, " + TIMESTAMP3 + ")"
     );
-    // Trigger the update on moz_hosts by deleting the added rows from
-    // moz_updatehostsinsert_temp
-    await db.execute("DELETE FROM moz_updatehostsinsert_temp");
+    // Trigger the update to the moz_origin tables by deleting the added rows
+    // from moz_updateoriginsinsert_temp
+    await db.executeCached("DELETE FROM moz_updateoriginsinsert_temp");
     // Add the corresponding visit to retain database coherence.
     await db.execute(
       "INSERT INTO moz_historyvisits "

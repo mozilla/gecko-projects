@@ -16,7 +16,7 @@ DebuggerServer.addTestGlobal = function(global) {
 };
 
 DebuggerServer.getTestGlobal = function(name) {
-  for (let g of gTestGlobals) {
+  for (const g of gTestGlobals) {
     if (g.__name == name) {
       return g;
     }
@@ -37,33 +37,33 @@ function TestTabList(connection) {
 
   // An array of actors for each global added with
   // DebuggerServer.addTestGlobal.
-  this._tabActors = [];
+  this._targetActors = [];
 
   // A pool mapping those actors' names to the actors.
-  this._tabActorPool = new ActorPool(connection);
+  this._targetActorPool = new ActorPool(connection);
 
-  for (let global of gTestGlobals) {
-    let actor = new TestTabActor(connection, global);
+  for (const global of gTestGlobals) {
+    const actor = new TestTargetActor(connection, global);
     actor.selected = false;
-    this._tabActors.push(actor);
-    this._tabActorPool.addActor(actor);
+    this._targetActors.push(actor);
+    this._targetActorPool.addActor(actor);
   }
-  if (this._tabActors.length > 0) {
-    this._tabActors[0].selected = true;
+  if (this._targetActors.length > 0) {
+    this._targetActors[0].selected = true;
   }
 
-  connection.addActorPool(this._tabActorPool);
+  connection.addActorPool(this._targetActorPool);
 }
 
 TestTabList.prototype = {
   constructor: TestTabList,
   getList: function() {
-    return Promise.resolve([...this._tabActors]);
+    return Promise.resolve([...this._targetActors]);
   }
 };
 
 function createRootActor(connection) {
-  let root = new RootActor(connection, {
+  const root = new RootActor(connection, {
     tabList: new TestTabList(connection),
     globalActorFactories: DebuggerServer.globalActorFactories,
   });
@@ -72,7 +72,7 @@ function createRootActor(connection) {
   return root;
 }
 
-function TestTabActor(connection, global) {
+function TestTargetActor(connection, global) {
   this.conn = connection;
   this._global = global;
   this._global.wrappedJSObject = global;
@@ -89,9 +89,9 @@ function TestTabActor(connection, global) {
   });
 }
 
-TestTabActor.prototype = {
-  constructor: TestTabActor,
-  actorPrefix: "TestTabActor",
+TestTargetActor.prototype = {
+  constructor: TestTargetActor,
+  actorPrefix: "TestTargetActor",
 
   get window() {
     return this._global;
@@ -109,14 +109,14 @@ TestTabActor.prototype = {
   },
 
   form: function() {
-    let response = { actor: this.actorID, title: this._global.__name };
+    const response = { actor: this.actorID, title: this._global.__name };
 
-    // Walk over tab actors added by extensions and add them to a new ActorPool.
-    let actorPool = new ActorPool(this.conn);
-    this._createExtraActors(DebuggerServer.tabActorFactories, actorPool);
+    // Walk over target-scoped actors and add them to a new ActorPool.
+    const actorPool = new ActorPool(this.conn);
+    this._createExtraActors(DebuggerServer.targetScopedActorFactories, actorPool);
     if (!actorPool.isEmpty()) {
-      this._tabActorPool = actorPool;
-      this.conn.addActorPool(this._tabActorPool);
+      this._targetActorPool = actorPool;
+      this.conn.addActorPool(this._targetActorPool);
     }
 
     this._appendExtraActors(response);
@@ -127,7 +127,7 @@ TestTabActor.prototype = {
   onAttach: function(request) {
     this._attached = true;
 
-    let response = { type: "tabAttached", threadActor: this.threadActor.actorID };
+    const response = { type: "tabAttached", threadActor: this.threadActor.actorID };
     this._appendExtraActors(response);
 
     return response;
@@ -149,21 +149,21 @@ TestTabActor.prototype = {
 
   removeActorByName: function(name) {
     const actor = this._extraActors[name];
-    if (this._tabActorPool) {
-      this._tabActorPool.removeActor(actor);
+    if (this._targetActorPool) {
+      this._targetActorPool.removeActor(actor);
     }
     delete this._extraActors[name];
   },
 
-  /* Support for DebuggerServer.addTabActor. */
+  /* Support for DebuggerServer.addTargetScopedActor. */
   _createExtraActors: createExtraActors,
   _appendExtraActors: appendExtraActors
 };
 
-TestTabActor.prototype.requestTypes = {
-  "attach": TestTabActor.prototype.onAttach,
-  "detach": TestTabActor.prototype.onDetach,
-  "reload": TestTabActor.prototype.onReload
+TestTargetActor.prototype.requestTypes = {
+  "attach": TestTargetActor.prototype.onAttach,
+  "detach": TestTargetActor.prototype.onDetach,
+  "reload": TestTargetActor.prototype.onReload
 };
 
 exports.register = function(handle) {

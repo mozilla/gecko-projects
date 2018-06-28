@@ -92,10 +92,10 @@
  * When saving or updating a credit-card record, the storage will encrypt the
  * value of "cc-number", store the encrypted number in "cc-number-encrypted"
  * field, and replace "cc-number" field with the masked number. These all happen
- * in "_computeFields". We do reverse actions in "_stripComputedFields", which
+ * in "computeFields". We do reverse actions in "_stripComputedFields", which
  * decrypts "cc-number-encrypted", restores it to "cc-number", and deletes
  * "cc-number-encrypted". Therefore, calling "_stripComputedFields" followed by
- * "_computeFields" can make sure the encrypt-related fields are up-to-date.
+ * "computeFields" can make sure the encrypt-related fields are up-to-date.
  *
  * In general, you have to decrypt the number by your own outside FormAutofillStorage
  * when necessary. However, you will get the decrypted records when querying
@@ -132,6 +132,8 @@ ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
 ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
 
+ChromeUtils.defineModuleGetter(this, "CreditCard",
+                               "resource://gre/modules/CreditCard.jsm");
 ChromeUtils.defineModuleGetter(this, "JSONFile",
                                "resource://gre/modules/JSONFile.jsm");
 ChromeUtils.defineModuleGetter(this, "FormAutofillNameUtils",
@@ -356,7 +358,7 @@ class AutofillRecords {
     } else {
       this._ensureMatchingVersion(record);
       recordToSave = record;
-      this._computeFields(recordToSave);
+      this.computeFields(recordToSave);
     }
 
     if (sourceSync) {
@@ -370,6 +372,7 @@ class AutofillRecords {
 
     Services.obs.notifyObservers({wrappedJSObject: {
       sourceSync,
+      guid: record.guid,
       collectionName: this._collectionName,
     }}, "formautofill-storage-changed", "add");
     return recordToSave.guid;
@@ -439,7 +442,7 @@ class AutofillRecords {
       syncMetadata.changeCounter += 1;
     }
 
-    this._computeFields(recordFound);
+    this.computeFields(recordFound);
     this._data[recordFoundIndex] = recordFound;
 
     this._store.saveSoon();
@@ -470,7 +473,10 @@ class AutofillRecords {
     recordFound.timeLastUsed = Date.now();
 
     this._store.saveSoon();
-    Services.obs.notifyObservers(null, "formautofill-storage-changed", "notifyUsed");
+    Services.obs.notifyObservers({wrappedJSObject: {
+      guid,
+      collectionName: this._collectionName,
+    }}, "formautofill-storage-changed", "notifyUsed");
   }
 
   /**
@@ -517,6 +523,7 @@ class AutofillRecords {
     this._store.saveSoon();
     Services.obs.notifyObservers({wrappedJSObject: {
       sourceSync,
+      guid,
       collectionName: this._collectionName,
     }}, "formautofill-storage-changed", "remove");
   }
@@ -748,7 +755,7 @@ class AutofillRecords {
       }
     }
 
-    this._computeFields(newRecord);
+    this.computeFields(newRecord);
   }
 
   /**
@@ -770,7 +777,7 @@ class AutofillRecords {
     // uploaded.
     this._getSyncMetaData(forkedLocalRecord, true);
 
-    this._computeFields(forkedLocalRecord);
+    this.computeFields(forkedLocalRecord);
     this._data.push(forkedLocalRecord);
 
     return forkedLocalRecord;
@@ -837,6 +844,8 @@ class AutofillRecords {
     this._store.saveSoon();
     Services.obs.notifyObservers({wrappedJSObject: {
       sourceSync: true,
+      guid: remoteRecord.guid,
+      forkedGUID,
       collectionName: this._collectionName,
     }}, "formautofill-storage-changed", "reconcile");
 
@@ -1141,7 +1150,7 @@ class AutofillRecords {
       this._stripComputedFields(record);
     }
 
-    hasChanges |= this._computeFields(record);
+    hasChanges |= this.computeFields(record);
     return hasChanges;
   }
 
@@ -1154,7 +1163,7 @@ class AutofillRecords {
       }
       if (typeof record[key] !== "string" &&
           typeof record[key] !== "number") {
-        throw new Error(`"${key}" contains invalid data type.`);
+        throw new Error(`"${key}" contains invalid data type: ${typeof record[key]}`);
       }
       if (!preserveEmptyFields && record[key] === "") {
         delete record[key];
@@ -1187,10 +1196,16 @@ class AutofillRecords {
     return mergedGUIDs;
   }
 
-  // A test-only helper.
-  _nukeAllRecords() {
+  /**
+   * Unconditionally remove all data and tombstones for this collection.
+   */
+  removeAll({sourceSync = false} = {}) {
     this._store.data[this._collectionName] = [];
-    // test-only, so there's no good reason to request a save!
+    this._store.saveSoon();
+    Services.obs.notifyObservers({wrappedJSObject: {
+      sourceSync,
+      collectionName: this._collectionName,
+    }}, "formautofill-storage-changed", "removeAll");
   }
 
   _stripComputedFields(record) {
@@ -1201,7 +1216,7 @@ class AutofillRecords {
   _recordReadProcessor(record) {}
 
   // An interface to be inherited.
-  _computeFields(record) {}
+  computeFields(record) {}
 
   // An interface to be inherited.
   _normalizeFields(record) {}
@@ -1222,7 +1237,7 @@ class Addresses extends AutofillRecords {
     }
   }
 
-  _computeFields(address) {
+  computeFields(address) {
     // NOTE: Remember to bump the schema version number if any of the existing
     //       computing algorithm changes. (No need to bump when just adding new
     //       computed fields.)
@@ -1481,14 +1496,7 @@ class CreditCards extends AutofillRecords {
     super(store, "creditCards", VALID_CREDIT_CARD_FIELDS, VALID_CREDIT_CARD_COMPUTED_FIELDS, CREDIT_CARD_SCHEMA_VERSION);
   }
 
-  _getMaskedCCNumber(ccNumber) {
-    if (ccNumber.length <= 4) {
-      throw new Error(`Invalid credit card number`);
-    }
-    return "*".repeat(ccNumber.length - 4) + ccNumber.substr(-4);
-  }
-
-  _computeFields(creditCard) {
+  computeFields(creditCard) {
     // NOTE: Remember to bump the schema version number if any of the existing
     //       computing algorithm changes. (No need to bump when just adding new
     //       computed fields.)
@@ -1525,7 +1533,7 @@ class CreditCards extends AutofillRecords {
     if (!("cc-number-encrypted" in creditCard)) {
       if ("cc-number" in creditCard) {
         let ccNumber = creditCard["cc-number"];
-        creditCard["cc-number"] = this._getMaskedCCNumber(ccNumber);
+        creditCard["cc-number"] = CreditCard.getLongMaskedNumber(ccNumber);
         creditCard["cc-number-encrypted"] = MasterPassword.encryptSync(ccNumber);
       } else {
         creditCard["cc-number-encrypted"] = "";
@@ -1565,7 +1573,8 @@ class CreditCards extends AutofillRecords {
 
   _normalizeCCNumber(creditCard) {
     if (creditCard["cc-number"]) {
-      creditCard["cc-number"] = FormAutofillUtils.normalizeCCNumber(creditCard["cc-number"]);
+      let card = new CreditCard({number: creditCard["cc-number"]});
+      creditCard["cc-number"] = card.number;
       if (!creditCard["cc-number"]) {
         delete creditCard["cc-number"];
       }
@@ -1573,84 +1582,21 @@ class CreditCards extends AutofillRecords {
   }
 
   _normalizeCCExpirationDate(creditCard) {
-    if (creditCard["cc-exp-month"]) {
-      let expMonth = parseInt(creditCard["cc-exp-month"], 10);
-      if (isNaN(expMonth) || expMonth < 1 || expMonth > 12) {
-        delete creditCard["cc-exp-month"];
-      } else {
-        creditCard["cc-exp-month"] = expMonth;
-      }
+    let card = new CreditCard({
+      expirationMonth: creditCard["cc-exp-month"],
+      expirationYear: creditCard["cc-exp-year"],
+      expirationString: creditCard["cc-exp"],
+    });
+    if (card.expirationMonth) {
+      creditCard["cc-exp-month"] = card.expirationMonth;
+    } else {
+      delete creditCard["cc-exp-month"];
     }
-
-    if (creditCard["cc-exp-year"]) {
-      let expYear = parseInt(creditCard["cc-exp-year"], 10);
-      if (isNaN(expYear) || expYear < 0) {
-        delete creditCard["cc-exp-year"];
-      } else if (expYear < 100) {
-        // Enforce 4 digits years.
-        creditCard["cc-exp-year"] = expYear + 2000;
-      } else {
-        creditCard["cc-exp-year"] = expYear;
-      }
+    if (card.expirationYear) {
+      creditCard["cc-exp-year"] = card.expirationYear;
+    } else {
+      delete creditCard["cc-exp-year"];
     }
-
-    if (creditCard["cc-exp"] && (!creditCard["cc-exp-month"] || !creditCard["cc-exp-year"])) {
-      let rules = [
-        {
-          regex: "(\\d{4})[-/](\\d{1,2})",
-          yearIndex: 1,
-          monthIndex: 2,
-        },
-        {
-          regex: "(\\d{1,2})[-/](\\d{4})",
-          yearIndex: 2,
-          monthIndex: 1,
-        },
-        {
-          regex: "(\\d{1,2})[-/](\\d{1,2})",
-        },
-        {
-          regex: "(\\d{2})(\\d{2})",
-        },
-      ];
-
-      for (let rule of rules) {
-        let result = new RegExp(`(?:^|\\D)${rule.regex}(?!\\d)`).exec(creditCard["cc-exp"]);
-        if (!result) {
-          continue;
-        }
-
-        let expYear, expMonth;
-
-        if (!rule.yearIndex || !rule.monthIndex) {
-          expMonth = parseInt(result[1], 10);
-          if (expMonth > 12) {
-            expYear = parseInt(result[1], 10);
-            expMonth = parseInt(result[2], 10);
-          } else {
-            expYear = parseInt(result[2], 10);
-          }
-        } else {
-          expYear = parseInt(result[rule.yearIndex], 10);
-          expMonth = parseInt(result[rule.monthIndex], 10);
-        }
-
-        if (expMonth < 1 || expMonth > 12) {
-          continue;
-        }
-
-        if (expYear < 100) {
-          expYear += 2000;
-        } else if (expYear < 2000) {
-          continue;
-        }
-
-        creditCard["cc-exp-month"] = expMonth;
-        creditCard["cc-exp-year"] = expYear;
-        break;
-      }
-    }
-
     delete creditCard["cc-exp"];
   }
 
@@ -1673,7 +1619,7 @@ class CreditCards extends AutofillRecords {
           if (MasterPassword.isEnabled) {
             // Compare the masked numbers instead when the master password is
             // enabled because we don't want to leak the credit card number.
-            return this._getMaskedCCNumber(clonedTargetCreditCard[field]) == creditCard[field];
+            return CreditCard.getLongMaskedNumber(clonedTargetCreditCard[field]) == creditCard[field];
           }
           return clonedTargetCreditCard[field] == MasterPassword.decryptSync(creditCard["cc-number-encrypted"]);
         }

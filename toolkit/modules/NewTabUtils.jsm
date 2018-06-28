@@ -8,7 +8,7 @@ var EXPORTED_SYMBOLS = ["NewTabUtils"];
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.importGlobalProperties(["btoa"]);
+Cu.importGlobalProperties(["btoa", "URL"]);
 
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
   "resource://gre/modules/PlacesUtils.jsm");
@@ -549,6 +549,9 @@ var PlacesProvider = {
    */
   init: function PlacesProvider_init() {
     PlacesUtils.history.addObserver(this, true);
+    this._placesObserver =
+      new PlacesWeakCallbackWrapper(this.handlePlacesEvents.bind(this));
+    PlacesObservers.addListener(["page-visited"], this._placesObserver);
   },
 
   /**
@@ -616,8 +619,7 @@ var PlacesProvider = {
 
     // Execute the query.
     let query = PlacesUtils.history.getNewQuery();
-    let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase);
-    db.asyncExecuteLegacyQuery(query, options, callback);
+    PlacesUtils.history.asyncExecuteLegacyQuery(query, options, callback);
   },
 
   /**
@@ -657,11 +659,11 @@ var PlacesProvider = {
     }
   },
 
-  onVisits(aVisits) {
+  handlePlacesEvents(aEvents) {
     if (!this._batchProcessingDepth) {
-      for (let visit of aVisits) {
-        if (visit.visitCount == 1 && visit.lastKnownTitle) {
-          this.onTitleChanged(visit.uri, visit.lastKnownTitle, visit.guid);
+      for (let event of aEvents) {
+        if (event.visitCount == 1 && event.lastKnownTitle) {
+          this.onTitleChanged(event.url, event.lastKnownTitle, event.pageGuid);
         }
       }
     }
@@ -712,8 +714,11 @@ var PlacesProvider = {
    * Called by the history service.
    */
   onTitleChanged: function PlacesProvider_onTitleChanged(aURI, aNewTitle, aGUID) {
+    if (aURI instanceof Ci.nsIURI) {
+      aURI = aURI.spec;
+    }
     this._callObservers("onLinkChanged", {
-      url: aURI.spec,
+      url: aURI,
       title: aNewTitle
     });
   },
@@ -961,6 +966,13 @@ var ActivityStreamProvider = {
                     pocket_id: item.item_id,
                     open_url: item.open_url
                   }));
+
+  // Append the query param to let Pocket know this item came from highlights
+  for (let item of items) {
+    let url = new URL(item.open_url);
+    url.searchParams.append("src", "fx_new_tab");
+    item.open_url = url.href;
+  }
 
     return this._processHighlights(items, aOptions, "pocket");
   },

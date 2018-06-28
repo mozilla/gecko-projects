@@ -942,10 +942,15 @@ public:
       direction(sdp::kSend)
     {}
 
+    // Remove this function. See Bug 1469702
     bool Parse(std::istream& is, std::string* error);
+    // Remove this function. See Bug 1469702
     bool ParseParameters(std::istream& is, std::string* error);
+    // Remove this function. See Bug 1469702
     bool ParseDepend(std::istream& is, std::string* error);
+    // Remove this function. See Bug 1469702
     bool ParseFormats(std::istream& is, std::string* error);
+
     void Serialize(std::ostream& os) const;
     void SerializeParameters(std::ostream& os) const;
     bool HasFormat(const std::string& format) const;
@@ -970,7 +975,15 @@ public:
   };
 
   virtual void Serialize(std::ostream& os) const override;
+
+  // Remove this function. See Bug 1469702
   bool PushEntry(const std::string& raw, std::string* error, size_t* errorPos);
+
+  void PushEntry(const std::string& id, sdp::Direction dir,
+                 const std::vector<uint16_t>& formats,
+                 const EncodingConstraints& constraints,
+                 const std::vector<std::string>& dependIds);
+
 
   std::vector<Rid> mRids;
 };
@@ -1444,7 +1457,7 @@ public:
   public:
     Fmtp(const std::string& aFormat, UniquePtr<Parameters> aParameters)
         : format(aFormat),
-          parameters(Move(aParameters))
+          parameters(std::move(aParameters))
     {
     }
 
@@ -1482,7 +1495,7 @@ public:
   void
   PushEntry(const std::string& format, UniquePtr<Parameters> parameters)
   {
-    mFmtps.push_back(Fmtp(format, Move(parameters)));
+    mFmtps.push_back(Fmtp(format, std::move(parameters)));
   }
 
   std::vector<Fmtp> mFmtps;

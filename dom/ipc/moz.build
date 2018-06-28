@@ -39,7 +39,6 @@ EXPORTS.mozilla.dom += [
     'TabContext.h',
     'TabMessageUtils.h',
     'TabParent.h',
-    'TelemetryScrollProbe.h',
     'URLClassifierChild.h',
     'URLClassifierParent.h',
 ]
@@ -73,7 +72,6 @@ UNIFIED_SOURCES += [
     'TabContext.cpp',
     'TabMessageUtils.cpp',
     'TabParent.cpp',
-    'TelemetryScrollProbe.cpp',
     'URLClassifierParent.cpp',
 ]
 
@@ -175,3 +173,14 @@ CXXFLAGS += CONFIG['TK_CFLAGS']
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['NIGHTLY_BUILD']:
+    DEFINES['ASYNC_CONTENTPROC_LAUNCH'] = True
+
+if CONFIG['FUZZING'] and CONFIG['FUZZING_INTERFACES']:
+    TEST_DIRS += [
+        'fuzztest'
+    ]
+
+# Add libFuzzer configuration directives
+include('/tools/fuzzing/libfuzzer-config.mozbuild')

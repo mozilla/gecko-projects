@@ -80,7 +80,7 @@ BuildKeyNameFromFontName(nsAString &aName)
 class AutoFTFace {
 public:
     explicit AutoFTFace(FT2FontEntry* aFontEntry)
-        : mFace(nullptr), mFontDataBuf(nullptr), mOwnsFace(false)
+        : mFace(nullptr), mFontDataBuf(nullptr), mDataLength(0), mOwnsFace(false)
     {
         if (aFontEntry->mFTFace) {
             mFace = aFontEntry->mFTFace;
@@ -230,6 +230,8 @@ FT2FontEntry::Clone() const
     return fe;
 }
 
+static cairo_user_data_key_t sFTFaceKey;
+
 gfxFont*
 FT2FontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle)
 {
@@ -241,15 +243,19 @@ FT2FontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle)
     RefPtr<UnscaledFontFreeType> unscaledFont(mUnscaledFont);
     if (!unscaledFont) {
         unscaledFont =
-            mFilename.IsEmpty() ?
-                new UnscaledFontFreeType(mFTFace) :
+            !mFilename.IsEmpty() && mFilename[0] == '/' ?
                 new UnscaledFontFreeType(mFilename.BeginReading(),
-                                         mFTFontIndex);
+                                         mFTFontIndex) :
+                new UnscaledFontFreeType(mFTFace);
         mUnscaledFont = unscaledFont;
     }
 
-    gfxFont *font = new gfxFT2Font(unscaledFont, scaledFont, this,
-                                   aFontStyle);
+    cairo_font_face_t* face = cairo_scaled_font_get_font_face(scaledFont);
+    FT_Face ftFace = static_cast<FT_Face>(cairo_font_face_get_user_data(face, &sFTFaceKey));
+
+    gfxFont *font = new gfxFT2Font(unscaledFont, scaledFont,
+                                   ftFace ? ftFace : mFTFace,
+                                   this, aFontStyle);
     cairo_scaled_font_destroy(scaledFont);
     return font;
 }
@@ -471,7 +477,7 @@ FT2FontEntry::CairoFontFace(const gfxFontStyle* aStyle)
         // Create a separate FT_Face because we need to apply custom
         // variation settings to it.
         FT_Face ftFace;
-        if (!mFilename.IsEmpty()) {
+        if (!mFilename.IsEmpty() && mFilename[0] == '/') {
             ftFace = Factory::NewFTFace(nullptr, mFilename.get(), mFTFontIndex);
         } else {
             auto ufd = reinterpret_cast<FTUserFontData*>(
@@ -487,8 +493,7 @@ FT2FontEntry::CairoFontFace(const gfxFontStyle* aStyle)
                                                   coords.Length());
         // Set up user data to properly release the FT_Face when the cairo face
         // is deleted.
-        static cairo_user_data_key_t sDestroyFaceKey;
-        if (cairo_font_face_set_user_data(cairoFace, &sDestroyFaceKey, ftFace,
+        if (cairo_font_face_set_user_data(cairoFace, &sFTFaceKey, ftFace,
                     (cairo_destroy_func_t)&Factory::ReleaseFTFace)) {
             // set_user_data failed! discard, and fall back to default face
             cairo_font_face_destroy(cairoFace);
@@ -947,7 +952,7 @@ WillShutdownObserver::Observe(nsISupports *aSubject,
     if (!nsCRT::strcmp(aTopic, NS_XPCOM_WILL_SHUTDOWN_OBSERVER_ID)) {
         mFontList->WillShutdown();
     } else {
-        NS_NOTREACHED("unexpected notification topic");
+        MOZ_ASSERT_UNREACHABLE("unexpected notification topic");
     }
     return NS_OK;
 }
@@ -1006,7 +1011,7 @@ gfxFT2FontList::AppendFacesFromCachedFaceList(
         int32_t colon = minStyle.FindChar(':');
         if (colon > 0) {
             maxStyle.Assign(minStyle.BeginReading() + colon + 1);
-            minStyle.Truncate(colon - 1);
+            minStyle.Truncate(colon);
         }
 
         beginning = end + 1;
@@ -1060,7 +1065,11 @@ AppendToFaceList(nsCString& aFaceList,
     aFaceList.Append(',');
     aFaceList.AppendInt(aFontEntry->mFTFontIndex);
     aFaceList.Append(',');
-    aFaceList.Append(aFontEntry->IsItalic() ? '1' : '0');
+    // Note that ToString() appends to the destination string without
+    // replacing existing contents (see FontPropertyTypes.h)
+    aFontEntry->SlantStyle().Min().ToString(aFaceList);
+    aFaceList.Append(':');
+    aFontEntry->SlantStyle().Max().ToString(aFaceList);
     aFaceList.Append(',');
     aFaceList.AppendFloat(aFontEntry->Weight().Min().ToFloat());
     aFaceList.Append(':');
@@ -1668,7 +1677,7 @@ gfxFT2FontList::WillShutdown()
         memcpy(buf.get(), &mJarModifiedTime, bufSize);
 
         cache->PutBuffer(JAR_LAST_MODIFED_TIME,
-                         Move(buf), bufSize);
+                         std::move(buf), bufSize);
     }
     mFontNameCache = nullptr;
 }

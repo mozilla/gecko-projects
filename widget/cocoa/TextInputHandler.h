@@ -224,6 +224,7 @@ public:
   }
 
   bool IsForRTLLanguage();
+  bool IsForJapaneseLanguage();
   bool IsInitializedByCurrentInputSource();
 
   enum {
@@ -1088,6 +1089,10 @@ public:
   bool IsIMEOpened();
   bool IsIMEEnabled() { return mIsIMEEnabled; }
   bool IsASCIICapableOnly() { return mIsASCIICapableOnly; }
+  bool IsEditableContent() const
+  {
+    return mIsIMEEnabled || mIsASCIICapableOnly;
+  }
   bool IgnoreIMECommit() { return mIgnoreIMECommit; }
 
   void CommitIMEComposition();

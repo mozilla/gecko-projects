@@ -179,12 +179,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <field name="handleEnterInstance">null</field>
 
       <!--
-        For performance reasons we want to limit the size of the text runs we
-        build and show to the user.
-      -->
-      <field name="textRunsMaxLen">255</field>
-
-      <!--
         Since we never want scrollbars, we always use the maxResults value.
       -->
       <property name="maxRows"
@@ -797,6 +791,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             // set value and try to confirm it. UnifiedComplete should always
             // resolve to a valid url.
             try {
+              url = url.trim();
               new URL(url);
             } catch (ex) {
               let lastLocationChange = browser.lastLocationChange;
@@ -1753,11 +1748,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
   <binding id="urlbar-rich-result-popup" extends="chrome://global/content/bindings/autocomplete.xml#autocomplete-rich-result-popup">
 
-    <resources>
-      <stylesheet src="chrome://browser/content/search/searchbarBindings.css"/>
-      <stylesheet src="chrome://browser/skin/searchbar.css"/>
-    </resources>
-
     <content ignorekeys="true" level="top" consumeoutsideclicks="never"
              aria-owns="richlistbox">
       <xul:deck anonid="search-suggestions-notification"
@@ -1804,6 +1794,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
     </content>
 
     <implementation>
+      <!--
+        For performance reasons we want to limit the size of the text runs we
+        build and show to the user.
+      -->
+      <field name="textRunsMaxLen">255</field>
+
       <field name="DOMWindowUtils">
         window.QueryInterface(Ci.nsIInterfaceRequestor)
               .getInterface(Ci.nsIDOMWindowUtils);
@@ -2306,10 +2302,6 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               let firstStyle = this.input.mController.getStyleAt(0);
               if (firstStyle.includes("autofill")) {
                 let uri = this.input.mController.getFinalCompleteValueAt(0);
-                // "http" will be stripped out, but other scheme won't.
-                if (!uri.includes("://")) {
-                  uri = "http://" + uri;
-                }
                 this.maybeSetupSpeculativeConnect(uri);
               } else if (firstStyle.includes("searchengine") &&
                          this.input.browserSearchSuggestEnabled &&

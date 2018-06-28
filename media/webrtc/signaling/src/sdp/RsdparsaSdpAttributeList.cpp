@@ -13,6 +13,8 @@
 #include <ostream>
 #include "mozilla/Assertions.h"
 
+#include <limits>
+
 namespace mozilla
 {
 
@@ -440,6 +442,9 @@ RsdparsaSdpAttributeList::LoadAttribute(RustAttributeList *attributeList,
       case SdpAttribute::kEndOfCandidatesAttribute:
         LoadFlags(attributeList);
         return;
+      case SdpAttribute::kMaxMessageSizeAttribute:
+        LoadMaxMessageSize(attributeList);
+        return ;
       case SdpAttribute::kMidAttribute:
         LoadMid(attributeList);
         return;
@@ -454,6 +459,9 @@ RsdparsaSdpAttributeList::LoadAttribute(RustAttributeList *attributeList,
         return;
       case SdpAttribute::kRtcpAttribute:
         LoadRtcp(attributeList);
+        return;
+      case SdpAttribute::kRtcpFbAttribute:
+        LoadRtcpFb(attributeList);
         return;
       case SdpAttribute::kImageattrAttribute:
         LoadImageattr(attributeList);
@@ -470,19 +478,22 @@ RsdparsaSdpAttributeList::LoadAttribute(RustAttributeList *attributeList,
       case SdpAttribute::kRidAttribute:
         LoadRids(attributeList);
         return;
+      case SdpAttribute::kSctpPortAttribute:
+        LoadSctpPort(attributeList);
+        return ;
       case SdpAttribute::kExtmapAttribute:
         LoadExtmap(attributeList);
         return;
+      case SdpAttribute::kSimulcastAttribute:
+        LoadSimulcast(attributeList);
+        return;
+
       case SdpAttribute::kDtlsMessageAttribute:
       case SdpAttribute::kLabelAttribute:
       case SdpAttribute::kMaxptimeAttribute:
       case SdpAttribute::kSsrcGroupAttribute:
-      case SdpAttribute::kMaxMessageSizeAttribute:
-      case SdpAttribute::kRtcpFbAttribute:
       case SdpAttribute::kRtcpRsizeAttribute:
-      case SdpAttribute::kSctpPortAttribute:
       case SdpAttribute::kCandidateAttribute:
-      case SdpAttribute::kSimulcastAttribute:
       case SdpAttribute::kConnectionAttribute:
       case SdpAttribute::kIceMismatchAttribute:
         // TODO: Not implemented, or not applicable.
@@ -693,19 +704,85 @@ RsdparsaSdpAttributeList::LoadRtpmap(RustAttributeList* attributeList)
 void
 RsdparsaSdpAttributeList::LoadFmtp(RustAttributeList* attributeList)
 {
-  // TODO: Not implemented, see Bug 1432918
-#if 0
   size_t numFmtp = sdp_get_fmtp_count(attributeList);
     if (numFmtp == 0) {
     return;
   }
   auto rustFmtps = MakeUnique<RustSdpAttributeFmtp[]>(numFmtp);
-  size_t numValidFmtp = sdp_get_fmtp(attributeList, numFmtp,
-                                        rustFmtps.get());
+  size_t numValidFmtp = sdp_get_fmtp(attributeList, numFmtp,rustFmtps.get());
+  auto fmtpList = MakeUnique<SdpFmtpAttributeList>();
   for(size_t i = 0; i < numValidFmtp; i++) {
-    RustSdpAttributeFmtp& fmtp = rustFmtps[i];
+    const RustSdpAttributeFmtp& fmtp = rustFmtps[i];
+    uint8_t payloadType = fmtp.payloadType;
+    std::string codecName = convertStringView(fmtp.codecName);
+    const RustSdpAttributeFmtpParameters& rustFmtpParameters = fmtp.parameters;
+
+    UniquePtr<SdpFmtpAttributeList::Parameters> fmtpParameters;
+
+    // use the upper case version of the codec name
+    std::transform(codecName.begin(), codecName.end(),
+                   codecName.begin(), ::toupper);
+
+    if(codecName == "H264"){
+      SdpFmtpAttributeList::H264Parameters h264Parameters;
+
+      h264Parameters.packetization_mode = rustFmtpParameters.packetization_mode;
+      h264Parameters.level_asymmetry_allowed =
+                                  rustFmtpParameters.level_asymmetry_allowed;
+      h264Parameters.profile_level_id = rustFmtpParameters.profile_level_id;
+      h264Parameters.max_mbps = rustFmtpParameters.max_mbps;
+      h264Parameters.max_fs = rustFmtpParameters.max_fs;
+      h264Parameters.max_cpb = rustFmtpParameters.max_cpb;
+      h264Parameters.max_dpb = rustFmtpParameters.max_dpb;
+      h264Parameters.max_br = rustFmtpParameters.max_br;
+
+      // TODO(bug 1466859): Support sprop-parameter-sets
+
+      fmtpParameters.reset(new SdpFmtpAttributeList::H264Parameters(
+                                                    std::move(h264Parameters)));
+    } else if(codecName == "OPUS"){
+      SdpFmtpAttributeList::OpusParameters opusParameters;
+
+      opusParameters.maxplaybackrate = rustFmtpParameters.maxplaybackrate;
+      opusParameters.stereo = rustFmtpParameters.stereo;
+      opusParameters.useInBandFec = rustFmtpParameters.useinbandfec;
+
+      fmtpParameters.reset(new SdpFmtpAttributeList::OpusParameters(
+                                                    std::move(opusParameters)));
+    } else if((codecName == "VP8") || (codecName == "VP9")){
+      SdpFmtpAttributeList::VP8Parameters
+                                    vp8Parameters(codecName == "VP8" ?
+                                                  SdpRtpmapAttributeList::kVP8 :
+                                                  SdpRtpmapAttributeList::kVP9);
+
+      vp8Parameters.max_fs = rustFmtpParameters.max_fs;
+      vp8Parameters.max_fr = rustFmtpParameters.max_fr;
+
+      fmtpParameters.reset(new SdpFmtpAttributeList::VP8Parameters(
+                                                     std::move(vp8Parameters)));
+    } else if(codecName == "TELEPHONE-EVENT"){
+      SdpFmtpAttributeList::TelephoneEventParameters telephoneEventParameters;
+
+      telephoneEventParameters.dtmfTones =
+                              convertStringView(rustFmtpParameters.dtmf_tones);
+
+      fmtpParameters.reset(new SdpFmtpAttributeList::TelephoneEventParameters(
+                                          std::move(telephoneEventParameters)));
+    } else if(codecName == "RED") {
+      SdpFmtpAttributeList::RedParameters redParameters;
+
+      redParameters.encodings = convertU8Vec(rustFmtpParameters.encodings);
+
+      fmtpParameters.reset(new SdpFmtpAttributeList::RedParameters(
+                                                     std::move(redParameters)));
+    } else{
+      // The parameter set is unknown so skip it
+      continue;
+    }
+
+    fmtpList->PushEntry(std::to_string(payloadType), std::move(fmtpParameters));
   }
-#endif
+  SetAttribute(fmtpList.release());
 }
 
 void
@@ -733,6 +810,16 @@ RsdparsaSdpAttributeList::LoadFlags(RustAttributeList* attributeList)
   }
   if (flags.endOfCandidates) {
     SetAttribute(new SdpFlagAttribute(SdpAttribute::kEndOfCandidatesAttribute));
+  }
+}
+
+void
+RsdparsaSdpAttributeList::LoadMaxMessageSize(RustAttributeList* attributeList)
+{
+  int64_t max_msg_size = sdp_get_max_msg_size(attributeList);
+  if (max_msg_size >= 0) {
+    SetAttribute(new SdpNumberAttribute(SdpAttribute::kMaxMessageSizeAttribute,
+                                        static_cast<uint32_t>(max_msg_size)));
   }
 }
 
@@ -847,6 +934,90 @@ RsdparsaSdpAttributeList::LoadRtcp(RustAttributeList* attributeList)
 }
 
 void
+RsdparsaSdpAttributeList::LoadRtcpFb(RustAttributeList* attributeList)
+{
+  auto rtcpfbsCount = sdp_get_rtcpfb_count(attributeList);
+  if (!rtcpfbsCount) {
+    return;
+  }
+
+  auto rustRtcpfbs = MakeUnique<RustSdpAttributeRtcpFb[]>(rtcpfbsCount);
+  sdp_get_rtcpfbs(attributeList, rtcpfbsCount, rustRtcpfbs.get());
+
+  auto rtcpfbList = MakeUnique<SdpRtcpFbAttributeList>();
+  for(size_t i = 0; i < rtcpfbsCount; i++) {
+    RustSdpAttributeRtcpFb& rtcpfb = rustRtcpfbs[i];
+    uint32_t payloadTypeU32 = rtcpfb.payloadType;
+
+    std::stringstream ss;
+    if(payloadTypeU32 == std::numeric_limits<uint32_t>::max()){
+      ss << "*";
+    } else {
+      ss << payloadTypeU32;
+    }
+
+    uint32_t feedbackType = rtcpfb.feedbackType;
+    std::string parameter = convertStringView(rtcpfb.parameter);
+    std::string extra = convertStringView(rtcpfb.extra);
+
+    rtcpfbList->PushEntry(ss.str(), static_cast<SdpRtcpFbAttributeList::Type>(feedbackType), parameter, extra);
+  }
+
+  SetAttribute(rtcpfbList.release());
+}
+
+SdpSimulcastAttribute::Versions
+LoadSimulcastVersions(const RustSdpAttributeSimulcastVersionVec*
+                      rustVersionList)
+{
+  size_t rustVersionCount = sdp_simulcast_get_version_count(rustVersionList);
+  auto rustVersionArray = MakeUnique<RustSdpAttributeSimulcastVersion[]>
+                                   (rustVersionCount);
+  sdp_simulcast_get_versions(rustVersionList, rustVersionCount,
+                             rustVersionArray.get());
+
+  SdpSimulcastAttribute::Versions versions;
+  versions.type = SdpSimulcastAttribute::Versions::kRid;
+
+  for(size_t i = 0; i < rustVersionCount; i++) {
+    const RustSdpAttributeSimulcastVersion& rustVersion = rustVersionArray[i];
+    size_t rustIdCount = sdp_simulcast_get_ids_count(rustVersion.ids);
+    if (!rustIdCount) {
+      continue;
+    }
+
+    SdpSimulcastAttribute::Version version;
+    auto rustIdArray = MakeUnique<RustSdpAttributeSimulcastId[]>(rustIdCount);
+    sdp_simulcast_get_ids(rustVersion.ids, rustIdCount, rustIdArray.get());
+
+    for(size_t j = 0; j < rustIdCount; j++){
+      const RustSdpAttributeSimulcastId& rustId = rustIdArray[j];
+      std::string id = convertStringView(rustId.id);
+      // TODO: Bug 1225877. Added support for 'paused'-state
+      version.choices.push_back(id);
+    }
+
+    versions.push_back(version);
+  }
+
+  return versions;
+}
+
+void
+RsdparsaSdpAttributeList::LoadSimulcast(RustAttributeList* attributeList)
+{
+  RustSdpAttributeSimulcast rustSimulcast;
+  if (NS_SUCCEEDED(sdp_get_simulcast(attributeList, &rustSimulcast))) {
+    auto simulcast = MakeUnique<SdpSimulcastAttribute>();
+
+    simulcast->sendVersions = LoadSimulcastVersions(rustSimulcast.send);
+    simulcast->recvVersions = LoadSimulcastVersions(rustSimulcast.recv);
+
+    SetAttribute(simulcast.release());
+  }
+}
+
+void
 RsdparsaSdpAttributeList::LoadImageattr(RustAttributeList* attributeList)
 {
   size_t numImageattrs = sdp_get_imageattr_count(attributeList);
@@ -940,19 +1111,42 @@ RsdparsaSdpAttributeList::LoadRids(RustAttributeList* attributeList)
   if (numRids == 0) {
     return;
   }
-  auto rustRids = MakeUnique<StringView[]>(numRids);
-  sdp_get_rids(attributeList, numRids,
-               rustRids.get());
-  auto rids = MakeUnique<SdpRidAttributeList>();
+
+  auto rustRids = MakeUnique<RustSdpAttributeRid[]>(numRids);
+  sdp_get_rids(attributeList, numRids, rustRids.get());
+
+  auto ridList = MakeUnique<SdpRidAttributeList>();
   for(size_t i = 0; i < numRids; i++) {
-    std::string rid = convertStringView(rustRids[i]);
-    std::string error;
-    size_t errorPos;
-    if (!rids->PushEntry(rid, &error, &errorPos)) {
-      // TODO: handle error, see Bug 1438237
-    }
+    const RustSdpAttributeRid& rid = rustRids[i];
+
+    std::string id = convertStringView(rid.id);
+    auto direction = static_cast<sdp::Direction>(rid.direction);
+    std::vector<uint16_t> formats = convertU16Vec(rid.formats);
+
+    EncodingConstraints parameters;
+    parameters.maxWidth = rid.params.max_width;
+    parameters.maxHeight = rid.params.max_height;
+    parameters.maxFps = rid.params.max_fps;
+    parameters.maxFs = rid.params.max_fs;
+    parameters.maxBr = rid.params.max_br;
+    parameters.maxPps = rid.params.max_pps;
+
+    std::vector<std::string> depends = convertStringVec(rid.depends);
+
+    ridList->PushEntry(id, direction, formats, parameters, depends);
   }
-  SetAttribute(rids.release());
+
+  SetAttribute(ridList.release());
+}
+
+void
+RsdparsaSdpAttributeList::LoadSctpPort(RustAttributeList* attributeList)
+{
+  int64_t port = sdp_get_sctp_port(attributeList);
+  if (port >= 0) {
+    SetAttribute(new SdpNumberAttribute(SdpAttribute::kSctpPortAttribute,
+                                        static_cast<uint32_t>(port)));
+  }
 }
 
 void

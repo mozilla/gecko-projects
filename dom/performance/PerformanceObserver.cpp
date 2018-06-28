@@ -99,7 +99,7 @@ PerformanceObserver::Constructor(const GlobalObject& aGlobal,
 JSObject*
 PerformanceObserver::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PerformanceObserverBinding::Wrap(aCx, this, aGivenProto);
+  return PerformanceObserver_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -134,11 +134,10 @@ PerformanceObserver::QueueEntry(PerformanceEntry* aEntry)
   mQueuedEntries.AppendElement(aEntry);
 }
 
-static const char16_t *const sValidTypeNames[4] = {
+static const char16_t *const sValidTypeNames[3] = {
   u"mark",
   u"measure",
   u"resource",
-  u"server"
 };
 
 void

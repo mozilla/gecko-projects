@@ -4,12 +4,11 @@
 
 "use strict";
 
-const {Ci, Cu} = require("chrome");
-
-const protocol = require("devtools/shared/protocol");
-const {nodeSpec, nodeListSpec} = require("devtools/shared/specs/node");
-
+const { Cu } = require("chrome");
+const Services = require("Services");
 const InspectorUtils = require("InspectorUtils");
+const protocol = require("devtools/shared/protocol");
+const { nodeSpec, nodeListSpec } = require("devtools/shared/specs/node");
 
 loader.lazyRequireGetter(this, "colorUtils", "devtools/shared/css/color", true);
 
@@ -27,6 +26,9 @@ loader.lazyRequireGetter(this, "LongStringActor", "devtools/server/actors/string
 loader.lazyRequireGetter(this, "getFontPreviewData", "devtools/server/actors/styles", true);
 loader.lazyRequireGetter(this, "CssLogic", "devtools/server/actors/inspector/css-logic", true);
 loader.lazyRequireGetter(this, "EventParsers", "devtools/server/actors/inspector/event-parsers", true);
+
+const SUBGRID_ENABLED =
+  Services.prefs.getBoolPref("layout.css.grid-template-subgrid-value.enabled");
 
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
 const FONT_FAMILY_PREVIEW_TEXT = "The quick brown fox jumps over the lazy dog";
@@ -93,10 +95,10 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       return this.actorID;
     }
 
-    let parentNode = this.walker.parentNode(this);
-    let inlineTextChild = this.walker.inlineTextChild(this);
+    const parentNode = this.walker.parentNode(this);
+    const inlineTextChild = this.walker.inlineTextChild(this);
 
-    let form = {
+    const form = {
       actor: this.actorID,
       baseURI: this.rawNode.baseURI,
       parent: parentNode ? parentNode.actorID : undefined,
@@ -144,10 +146,10 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    * API.
    */
   watchDocument: function(doc, callback) {
-    let node = this.rawNode;
+    const node = this.rawNode;
     // Create the observer on the node's actor.  The node will make sure
     // the observer is cleaned up when the actor is released.
-    let observer = new doc.defaultView.MutationObserver(callback);
+    const observer = new doc.defaultView.MutationObserver(callback);
     observer.mergeAttributeRecords = true;
     observer.observe(node, {
       nativeAnonymousChildList: true,
@@ -177,13 +179,13 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   },
 
   get isShadowRoot() {
-    let isFragment = this.rawNode.nodeType === Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE;
+    const isFragment = this.rawNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
     return isFragment && !!this.rawNode.host;
   },
 
   get isShadowHost() {
-    let shadowRoot = this.rawNode.shadowRoot;
-    return shadowRoot && shadowRoot.nodeType === Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE;
+    const shadowRoot = this.rawNode.openOrClosedShadowRoot;
+    return shadowRoot && shadowRoot.nodeType === Node.DOCUMENT_FRAGMENT_NODE;
   },
 
   get isDirectShadowHostChild() {
@@ -192,8 +194,12 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       return false;
     }
 
-    let parentNode = this.rawNode.parentNode;
-    return parentNode && !!parentNode.shadowRoot;
+    const parentNode = this.rawNode.parentNode;
+    return parentNode && !!parentNode.openOrClosedShadowRoot;
+  },
+
+  get isTemplateElement() {
+    return this.rawNode instanceof this.rawNode.ownerGlobal.HTMLTemplateElement;
   },
 
   // Estimate the number of children that the walker will return without making
@@ -205,13 +211,13 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       return 0;
     }
 
-    let rawNode = this.rawNode;
+    const rawNode = this.rawNode;
     let numChildren = rawNode.childNodes.length;
-    let hasAnonChildren = rawNode.nodeType === Ci.nsIDOMNode.ELEMENT_NODE &&
+    const hasAnonChildren = rawNode.nodeType === Node.ELEMENT_NODE &&
                           rawNode.ownerDocument.getAnonymousNodes(rawNode);
 
-    let hasContentDocument = rawNode.contentDocument;
-    let hasSVGDocument = rawNode.getSVGDocument && rawNode.getSVGDocument();
+    const hasContentDocument = rawNode.contentDocument;
+    const hasSVGDocument = rawNode.getSVGDocument && rawNode.getSVGDocument();
     if (numChildren === 0 && (hasContentDocument || hasSVGDocument)) {
       // This might be an iframe with virtual children.
       numChildren = 1;
@@ -239,36 +245,48 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   get displayType() {
     // Consider all non-element nodes as displayed.
     if (InspectorActorUtils.isNodeDead(this) ||
-        this.rawNode.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE ||
+        this.rawNode.nodeType !== Node.ELEMENT_NODE ||
         this.isAfterPseudoElement ||
         this.isBeforePseudoElement) {
       return null;
     }
 
-    let style = this.computedStyle;
+    const style = this.computedStyle;
     if (!style) {
       return null;
     }
 
-    return style.display;
+    let display = null;
+    try {
+      display = style.display;
+    } catch (e) {
+      // Fails for <scrollbar> elements.
+    }
+
+    if (SUBGRID_ENABLED &&
+        (display === "grid" || display === "inline-grid") &&
+        (style.gridTemplateRows === "subgrid" ||
+         style.gridTemplateColumns === "subgrid")) {
+      display = "subgrid";
+    }
+
+    return display;
   },
 
   /**
-   * Is the node's display computed style value other than "none"
+   * Is the node currently displayed?
    */
   get isDisplayed() {
-    // Consider all non-element nodes as displayed.
-    if (InspectorActorUtils.isNodeDead(this) ||
-        this.rawNode.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
+    const type = this.displayType;
+
+    // Consider all non-elements or elements with no display-types to be displayed.
+    if (!type) {
       return true;
     }
 
-    let style = this.computedStyle;
-    if (!style) {
-      return true;
-    }
-
-    return style.display !== "none";
+    // Otherwise consider elements to be displayed only if their display-types is other
+    // than "none"".
+    return type !== "none";
   },
 
   /**
@@ -277,8 +295,8 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    * check if there are any event listeners.
    */
   get _hasEventListeners() {
-    let parsers = this._eventParsers;
-    for (let [, {hasListeners}] of parsers) {
+    const parsers = this._eventParsers;
+    for (const [, {hasListeners}] of parsers) {
       try {
         if (hasListeners && hasListeners(this.rawNode)) {
           return true;
@@ -302,11 +320,11 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   },
 
   writePseudoClassLocks: function() {
-    if (this.rawNode.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
+    if (this.rawNode.nodeType !== Node.ELEMENT_NODE) {
       return undefined;
     }
     let ret = undefined;
-    for (let pseudo of PSEUDO_CLASSES) {
+    for (const pseudo of PSEUDO_CLASSES) {
       if (InspectorUtils.hasPseudoClassLock(this.rawNode, pseudo)) {
         ret = ret || [];
         ret.push(pseudo);
@@ -322,19 +340,19 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    *         Node for which we are to get listeners.
    */
   getEventListeners: function(node) {
-    let parsers = this._eventParsers;
-    let dbg = this.parent().tabActor.makeDebugger();
-    let listenerArray = [];
+    const parsers = this._eventParsers;
+    const dbg = this.parent().targetActor.makeDebugger();
+    const listenerArray = [];
 
-    for (let [, {getListeners, normalizeListener}] of parsers) {
+    for (const [, {getListeners, normalizeListener}] of parsers) {
       try {
-        let listeners = getListeners(node);
+        const listeners = getListeners(node);
 
         if (!listeners) {
           continue;
         }
 
-        for (let listener of listeners) {
+        for (const listener of listeners) {
           if (normalizeListener) {
             listener.normalizeListener = normalizeListener;
           }
@@ -385,26 +403,26 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    *           }
    */
   processHandlerForEvent: function(node, listenerArray, dbg, listener) {
-    let { handler } = listener;
-    let global = Cu.getGlobalForObject(handler);
-    let globalDO = dbg.addDebuggee(global);
+    const { handler } = listener;
+    const global = Cu.getGlobalForObject(handler);
+    const globalDO = dbg.addDebuggee(global);
     let listenerDO = globalDO.makeDebuggeeValue(handler);
 
-    let { normalizeListener } = listener;
+    const { normalizeListener } = listener;
 
     if (normalizeListener) {
       listenerDO = normalizeListener(listenerDO, listener);
     }
 
-    let { capturing } = listener;
+    const { capturing } = listener;
     let dom0 = false;
     let functionSource = handler.toString();
-    let hide = listener.hide || {};
+    const hide = listener.hide || {};
     let line = 0;
     let native = false;
-    let override = listener.override || {};
-    let tags = listener.tags || "";
-    let type = listener.type || "";
+    const override = listener.override || {};
+    const tags = listener.tags || "";
+    const type = listener.type || "";
     let url = "";
 
     // If the listener is an object with a 'handleEvent' method, use that.
@@ -427,10 +445,10 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       listenerDO = listenerDO.boundTargetFunction;
     }
 
-    let { isArrowFunction, name, script, parameterNames } = listenerDO;
+    const { isArrowFunction, name, script, parameterNames } = listenerDO;
 
     if (script) {
-      let scriptSource = script.source.text;
+      const scriptSource = script.source.text;
 
       // Scripts are provided via script tags. If it wasn't provided by a
       // script tag it must be a DOM0 event.
@@ -470,8 +488,8 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     // parameters are often missing e.g. if Array.sort is used as a handler.
     // If they are missing we provide the parameters ourselves.
     if (parameterNames && parameterNames.length > 0) {
-      let prefix = "function " + name + "()";
-      let paramString = parameterNames.join(", ");
+      const prefix = "function " + name + "()";
+      const paramString = parameterNames.join(", ");
 
       if (functionSource.startsWith(prefix)) {
         functionSource = functionSource.substr(prefix.length);
@@ -489,7 +507,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       origin = url + ((dom0 || line === 0) ? "" : ":" + line);
     }
 
-    let eventObj = {
+    const eventObj = {
       type: override.type || type,
       handler: override.handler || functionSource.trim(),
       origin: override.origin || origin,
@@ -592,14 +610,16 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    * Get all event listeners that are listening on this node.
    */
   getEventListenerInfo: function() {
-    let node = this.rawNode;
+    const node = this.rawNode;
 
     if (this.rawNode.nodeName.toLowerCase() === "html") {
-      let winListeners = this.getEventListeners(node.ownerGlobal) || [];
-      let docElementListeners = this.getEventListeners(node) || [];
-      let docListeners = this.getEventListeners(node.parentNode) || [];
+      const winListeners = this.getEventListeners(node.ownerGlobal) || [];
+      const docElementListeners = this.getEventListeners(node) || [];
+      const docListeners = this.getEventListeners(node.parentNode) || [];
 
-      return [...winListeners, ...docElementListeners, ...docListeners];
+      return [...winListeners, ...docElementListeners, ...docListeners].sort((a, b) => {
+        return a.type.localeCompare(b.type);
+      });
     }
     return this.getEventListeners(node);
   },
@@ -618,8 +638,8 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    * be queued for any changes made.
    */
   modifyAttributes: function(modifications) {
-    let rawNode = this.rawNode;
-    for (let change of modifications) {
+    const rawNode = this.rawNode;
+    for (const change of modifications) {
       if (change.newValue == null) {
         if (change.attributeNamespace) {
           rawNode.removeAttributeNS(change.attributeNamespace,
@@ -644,13 +664,13 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    * The image data is transmitted as a base64 encoded png data-uri.
    */
   getFontFamilyDataURL: function(font, fillStyle = "black") {
-    let doc = this.rawNode.ownerDocument;
-    let options = {
+    const doc = this.rawNode.ownerDocument;
+    const options = {
       previewText: FONT_FAMILY_PREVIEW_TEXT,
       previewFontSize: FONT_FAMILY_PREVIEW_TEXT_SIZE,
       fillStyle: fillStyle
     };
-    let { dataURL, size } = getFontPreviewData(font, doc, options);
+    const { dataURL, size } = getFontPreviewData(font, doc, options);
 
     return { data: LongStringActor(this.conn, dataURL), size: size };
   },
@@ -665,10 +685,10 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   getClosestBackgroundColor: function() {
     let current = this.rawNode;
     while (current) {
-      let computedStyle = CssLogic.getComputedStyle(current);
-      let currentStyle = computedStyle.getPropertyValue("background-color");
+      const computedStyle = CssLogic.getComputedStyle(current);
+      const currentStyle = computedStyle.getPropertyValue("background-color");
       if (colorUtils.isValidCSSColor(currentStyle)) {
-        let currentCssColor = new colorUtils.CssColor(currentStyle);
+        const currentCssColor = new colorUtils.CssColor(currentStyle);
         if (!currentCssColor.isTransparent()) {
           return currentCssColor.rgba;
         }
@@ -729,7 +749,7 @@ const NodeListActor = protocol.ActorClassWithSpec(nodeListSpec, {
    * Get a range of the items from the node list.
    */
   items: function(start = 0, end = this.nodeList.length) {
-    let items = Array.prototype.slice.call(this.nodeList, start, end)
+    const items = Array.prototype.slice.call(this.nodeList, start, end)
       .map(item => this.walker._ref(item));
     return this.walker.attachElements(items);
   },

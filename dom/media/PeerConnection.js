@@ -1581,9 +1581,9 @@ class RTCPeerConnection {
     }
     // Must determine the type where we still know if entries are undefined.
     let type;
-    if (maxPacketLifeTime) {
+    if (maxPacketLifeTime !== undefined) {
       type = Ci.IPeerConnection.kDataChannelPartialReliableTimed;
-    } else if (maxRetransmits) {
+    } else if (maxRetransmits !== undefined) {
       type = Ci.IPeerConnection.kDataChannelPartialReliableRexmit;
     } else {
       type = Ci.IPeerConnection.kDataChannelReliable;
@@ -1801,7 +1801,10 @@ class PeerConnectionObserver {
         break;
 
       case "IceConnectionState":
-        this.handleIceConnectionStateChange(this._dompc._pc.iceConnectionState);
+        let connState = this._dompc._pc.iceConnectionState;
+        this._dompc._queueTaskWithClosedCheck(() => {
+          this.handleIceConnectionStateChange(connState);
+        });
         break;
 
       case "IceGatheringState":

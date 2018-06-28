@@ -130,15 +130,15 @@ FlattenAssignedNodes(HTMLSlotElement* aSlot, nsTArray<RefPtr<nsINode>>& aNodes)
 
   // If assignedNodes is empty, use children of slot as fallback content.
   if (assignedNodes.IsEmpty()) {
-    for (nsIContent* child = aSlot->AsContent()->GetFirstChild();
+    for (nsIContent* child = aSlot->GetFirstChild();
          child;
          child = child->GetNextSibling()) {
       if (!child->IsSlotable()) {
         continue;
       }
 
-      if (child->IsHTMLElement(nsGkAtoms::slot)) {
-        FlattenAssignedNodes(HTMLSlotElement::FromNode(child), aNodes);
+      if (auto* slot = HTMLSlotElement::FromNode(child)) {
+        FlattenAssignedNodes(slot, aNodes);
       } else {
         aNodes.AppendElement(child);
       }
@@ -146,11 +146,9 @@ FlattenAssignedNodes(HTMLSlotElement* aSlot, nsTArray<RefPtr<nsINode>>& aNodes)
     return;
   }
 
-  for (uint32_t i = 0; i < assignedNodes.Length(); i++) {
-    nsINode* assignedNode = assignedNodes[i];
-    if (assignedNode->IsHTMLElement(nsGkAtoms::slot)) {
-      FlattenAssignedNodes(
-        HTMLSlotElement::FromNode(assignedNode->AsContent()), aNodes);
+  for (const RefPtr<nsINode>& assignedNode : assignedNodes) {
+    if (auto* slot = HTMLSlotElement::FromNode(assignedNode)) {
+      FlattenAssignedNodes(slot, aNodes);
     } else {
       aNodes.AppendElement(assignedNode);
     }
@@ -240,14 +238,15 @@ HTMLSlotElement::FireSlotChangeEvent()
 {
   nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
                                        static_cast<nsIContent*>(this),
-                                       NS_LITERAL_STRING("slotchange"), true,
-                                       false);
+                                       NS_LITERAL_STRING("slotchange"),
+                                       CanBubble::eYes,
+                                       Cancelable::eNo);
 }
 
 JSObject*
 HTMLSlotElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLSlotElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLSlotElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

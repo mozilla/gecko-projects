@@ -27,23 +27,14 @@ const ThemeVariableMap = [
     lwtProperty: "tab_line",
     optionalElementID: "tabbrowser-tabs"
   }],
+  ["--lwt-background-tab-separator-color", {
+    lwtProperty: "tab_background_separator",
+  }],
   ["--toolbar-bgcolor", {
     lwtProperty: "toolbarColor"
   }],
   ["--toolbar-color", {
     lwtProperty: "toolbar_text"
-  }],
-  ["--lwt-toolbar-field-border-color", {
-    lwtProperty: "toolbar_field_border"
-  }],
-  ["--lwt-toolbar-field-focus", {
-    lwtProperty: "toolbar_field_focus"
-  }],
-  ["--lwt-toolbar-field-focus-color", {
-    lwtProperty: "toolbar_field_text_focus"
-  }],
-  ["--toolbar-field-focus-border-color", {
-    lwtProperty: "toolbar_field_border_focus"
   }],
   ["--urlbar-separator-color", {
     lwtProperty: "toolbar_field_separator"
@@ -77,28 +68,7 @@ const ThemeVariableMap = [
     lwtProperty: "popup"
   }],
   ["--autocomplete-popup-color", {
-    lwtProperty: "popup_text",
-    processColor(rgbaChannels, element) {
-      const secondaryVariable = "--autocomplete-popup-secondary-color";
-
-      if (!rgbaChannels) {
-        element.removeAttribute("lwt-popup-brighttext");
-        element.style.removeProperty(secondaryVariable);
-        return null;
-      }
-
-      let {r, g, b, a} = rgbaChannels;
-      let luminance = 0.2125 * r + 0.7154 * g + 0.0721 * b;
-
-      if (luminance <= 110) {
-        element.removeAttribute("lwt-popup-brighttext");
-      } else {
-        element.setAttribute("lwt-popup-brighttext", "true");
-      }
-
-      element.style.setProperty(secondaryVariable, `rgba(${r}, ${g}, ${b}, 0.5)`);
-      return `rgba(${r}, ${g}, ${b}, ${a})`;
-    }
+    lwtProperty: "popup_text"
   }],
   ["--autocomplete-popup-border-color", {
     lwtProperty: "popup_border"

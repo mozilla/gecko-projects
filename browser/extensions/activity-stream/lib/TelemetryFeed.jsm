@@ -368,8 +368,10 @@ this.TelemetryFeed = class TelemetryFeed {
   createASRouterEvent(action) {
     const appInfo = this.store.getState().App;
     const ping = {
+      client_id: "n/a",
       addon_version: appInfo.version,
-      locale: Services.locale.getAppLocaleAsLangTag()
+      locale: Services.locale.getAppLocaleAsLangTag(),
+      impression_id: this._impressionId
     };
     return Object.assign(ping, action.data);
   }
@@ -406,9 +408,7 @@ this.TelemetryFeed = class TelemetryFeed {
 
   handleASRouterUserEvent(action) {
     let event = this.createASRouterEvent(action);
-    // TODO call this.sendASRouterEvent(event) once the ping gets finalized
-    // and data reviewed
-    console.log(event); // eslint-disable-line
+    this.sendASRouterEvent(event);
   }
 
   handleUndesiredEvent(action) {
@@ -490,8 +490,13 @@ this.TelemetryFeed = class TelemetryFeed {
   }
 
   uninit() {
-    Services.obs.removeObserver(this.browserOpenNewtabStart,
-      "browser-open-newtab-start");
+    try {
+      Services.obs.removeObserver(this.browserOpenNewtabStart,
+        "browser-open-newtab-start");
+    } catch (e) {
+      // Operation can fail when uninit is called before
+      // init has finished setting up the observer
+    }
 
     // Only uninit if the getter has initialized it
     if (Object.prototype.hasOwnProperty.call(this, "pingCentre")) {

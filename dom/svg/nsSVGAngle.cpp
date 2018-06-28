@@ -19,8 +19,8 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::dom::SVGAngleBinding;
-using namespace mozilla::dom::SVGMarkerElementBinding;
+using namespace mozilla::dom::SVGAngle_Binding;
+using namespace mozilla::dom::SVGMarkerElement_Binding;
 
 static nsStaticAtom** const unitMap[] =
 {
@@ -60,7 +60,7 @@ GetUnitString(nsAString& unit, uint16_t unitType)
     return;
   }
 
-  NS_NOTREACHED("Unknown unit type");
+  MOZ_ASSERT_UNREACHABLE("Unknown unit type");
 }
 
 static uint16_t
@@ -123,7 +123,7 @@ nsSVGAngle::GetDegreesPerUnit(uint8_t aUnit)
   case SVG_ANGLETYPE_GRAD:
     return 90.0f / 100.0f;
   default:
-    NS_NOTREACHED("Unknown unit type");
+    MOZ_ASSERT_UNREACHABLE("Unknown unit type");
     return 0;
   }
 }
@@ -356,7 +356,7 @@ nsSVGAngle::ToSMILAttr(nsSVGElement *aSVGElement)
   }
   // SMILOrient would not be useful for general angle attributes (also,
   // "orient" is the only animatable <angle>-valued attribute in SVG 1.1).
-  NS_NOTREACHED("Trying to animate unknown angle attribute.");
+  MOZ_ASSERT_UNREACHABLE("Trying to animate unknown angle attribute.");
   return nullptr;
 }
 
@@ -381,7 +381,7 @@ nsSVGAngle::SMILOrient::ValueFromString(const nsAString& aStr,
     val.mU.mOrient.mUnit = unitType;
     val.mU.mOrient.mOrientType = SVG_MARKER_ORIENT_ANGLE;
   }
-  aValue = Move(val);
+  aValue = std::move(val);
   aPreventCachingOfSandwich = false;
 
   return NS_OK;

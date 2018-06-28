@@ -8,7 +8,6 @@
 #define vm_StringType_h
 
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/PodOperations.h"
 #include "mozilla/Range.h"
 #include "mozilla/TextUtils.h"
 
@@ -23,6 +22,7 @@
 #include "gc/Rooting.h"
 #include "js/CharacterEncoding.h"
 #include "js/RootingAPI.h"
+#include "js/UniquePtr.h"
 #include "util/Text.h"
 #include "vm/Printer.h"
 
@@ -316,7 +316,7 @@ class JSString : public js::gc::Cell
                       "Inline char16_t chars must fit in a JSString");
 
         /* Ensure js::shadow::String has the same layout. */
-        using js::shadow::String;
+        using JS::shadow::String;
         static_assert(offsetof(JSString, d.u1.length) == offsetof(String, length),
                       "shadow::String length offset must match JSString");
         static_assert(offsetof(JSString, d.u1.flags) == offsetof(String, flags),
@@ -603,7 +603,7 @@ class JSString : public js::gc::Cell
         return kind;
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dump(); // Debugger-friendly stderr dump.
     void dump(js::GenericPrinter& out);
     void dumpNoNewline(js::GenericPrinter& out);
@@ -667,8 +667,8 @@ class JSString : public js::gc::Cell
 class JSRope : public JSString
 {
     template <typename CharT>
-    bool copyCharsInternal(JSContext* cx, js::ScopedJSFreePtr<CharT>& out,
-                           bool nullTerminate) const;
+    js::UniquePtr<CharT[], JS::FreePolicy> copyCharsInternal(JSContext* cx,
+                                                             bool nullTerminate) const;
 
     enum UsingBarrier { WithIncrementalBarrier, NoBarrier };
 
@@ -690,16 +690,21 @@ class JSRope : public JSString
                                typename js::MaybeRooted<JSString*, allowGC>::HandleType right,
                                size_t length, js::gc::InitialHeap = js::gc::DefaultHeap);
 
-    bool copyLatin1Chars(JSContext* cx,
-                         js::ScopedJSFreePtr<JS::Latin1Char>& out) const;
-    bool copyTwoByteChars(JSContext* cx, js::ScopedJSFreePtr<char16_t>& out) const;
+    js::UniquePtr<JS::Latin1Char[], JS::FreePolicy> copyLatin1Chars(JSContext* maybecx) const;
+    JS::UniqueTwoByteChars copyTwoByteChars(JSContext* maybecx) const;
 
-    bool copyLatin1CharsZ(JSContext* cx,
-                          js::ScopedJSFreePtr<JS::Latin1Char>& out) const;
-    bool copyTwoByteCharsZ(JSContext* cx, js::ScopedJSFreePtr<char16_t>& out) const;
+    js::UniquePtr<JS::Latin1Char[], JS::FreePolicy> copyLatin1CharsZ(JSContext* maybecx) const;
+    JS::UniqueTwoByteChars copyTwoByteCharsZ(JSContext* maybecx) const;
 
     template <typename CharT>
-    bool copyChars(JSContext* cx, js::ScopedJSFreePtr<CharT>& out) const;
+    js::UniquePtr<CharT[], JS::FreePolicy> copyChars(JSContext* maybecx) const;
+
+    // Hash function specific for ropes that avoids allocating a temporary
+    // string. There are still allocations internally so it's technically
+    // fallible.
+    //
+    // Returns the same value as if this were a linear string being hashed.
+    MOZ_MUST_USE bool hash(uint32_t* outhHash) const;
 
     JSString* leftChild() const {
         MOZ_ASSERT(isRope());
@@ -713,7 +718,7 @@ class JSRope : public JSString
 
     void traceChildren(JSTracer* trc);
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentation(js::GenericPrinter& out, int indent) const;
 #endif
 
@@ -809,7 +814,7 @@ class JSLinearString : public JSString
         return hasLatin1Chars() ? latin1Chars(nogc)[index] : twoByteChars(nogc)[index];
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentationChars(js::GenericPrinter& out, int indent) const;
 #endif
 };
@@ -851,7 +856,7 @@ class JSDependentString : public JSLinearString
     static inline JSLinearString* new_(JSContext* cx, JSLinearString* base,
                                        size_t start, size_t length);
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentation(js::GenericPrinter& out, int indent) const;
 #endif
 
@@ -945,7 +950,7 @@ class JSFlatString : public JSLinearString
 
     inline void finalize(js::FreeOp* fop);
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentation(js::GenericPrinter& out, int indent) const;
 #endif
 };
@@ -966,7 +971,7 @@ class JSExtensibleString : public JSFlatString
         return d.s.u3.capacity;
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentation(js::GenericPrinter& out, int indent) const;
 #endif
 };
@@ -994,7 +999,7 @@ class JSInlineString : public JSFlatString
     template<typename CharT>
     static bool lengthFits(size_t length);
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentation(js::GenericPrinter& out, int indent) const;
 #endif
 
@@ -1121,7 +1126,7 @@ class JSExternalString : public JSLinearString
      */
     JSFlatString* ensureFlat(JSContext* cx);
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dumpRepresentation(js::GenericPrinter& out, int indent) const;
 #endif
 };
@@ -1180,7 +1185,7 @@ class JSAtom : public JSFlatString
     inline js::HashNumber hash() const;
     inline void initHash(js::HashNumber hash);
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void dump(js::GenericPrinter& out);
     void dump();
 #endif
@@ -1280,19 +1285,17 @@ class StaticStrings
     static const size_t SMALL_CHAR_LIMIT    = 128U;
     static const size_t NUM_SMALL_CHARS     = 64U;
 
-    JSAtom* length2StaticTable[NUM_SMALL_CHARS * NUM_SMALL_CHARS];
+    JSAtom* length2StaticTable[NUM_SMALL_CHARS * NUM_SMALL_CHARS] = {}; // zeroes
 
   public:
     /* We keep these public for the JITs. */
     static const size_t UNIT_STATIC_LIMIT   = 256U;
-    JSAtom* unitStaticTable[UNIT_STATIC_LIMIT];
+    JSAtom* unitStaticTable[UNIT_STATIC_LIMIT] = {}; // zeroes
 
     static const size_t INT_STATIC_LIMIT    = 256U;
-    JSAtom* intStaticTable[INT_STATIC_LIMIT];
+    JSAtom* intStaticTable[INT_STATIC_LIMIT] = {}; // zeroes
 
-    StaticStrings() {
-        mozilla::PodZero(this);
-    }
+    StaticStrings() = default;
 
     bool init(JSContext* cx);
     void trace(JSTracer* trc);
@@ -1587,6 +1590,12 @@ SubstringKernel(JSContext* cx, HandleString str, int32_t beginInt, int32_t lengt
 /*** Conversions *********************************************************************************/
 
 /*
+ * Convert a string to a printable C string.
+ */
+UniqueChars
+EncodeLatin1(JSContext* cx, JSString* str);
+
+/*
  * Convert a value to a printable C string.
  *
  * As the function name implies, any characters in a converted printable string will be Latin1
@@ -1730,18 +1739,17 @@ JSLinearString::chars(const JS::AutoRequireNoGC& nogc) const
 }
 
 template <>
-MOZ_ALWAYS_INLINE bool
-JSRope::copyChars<JS::Latin1Char>(JSContext* cx,
-                                  js::ScopedJSFreePtr<JS::Latin1Char>& out) const
+MOZ_ALWAYS_INLINE js::UniquePtr<JS::Latin1Char[], JS::FreePolicy>
+JSRope::copyChars<JS::Latin1Char>(JSContext* maybecx) const
 {
-    return copyLatin1Chars(cx, out);
+    return copyLatin1Chars(maybecx);
 }
 
 template <>
-MOZ_ALWAYS_INLINE bool
-JSRope::copyChars<char16_t>(JSContext* cx, js::ScopedJSFreePtr<char16_t>& out) const
+MOZ_ALWAYS_INLINE JS::UniqueTwoByteChars
+JSRope::copyChars<char16_t>(JSContext* maybecx) const
 {
-    return copyTwoByteChars(cx, out);
+    return copyTwoByteChars(maybecx);
 }
 
 template<>

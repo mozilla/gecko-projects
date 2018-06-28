@@ -20,7 +20,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ServoBindingTypes.h"
 #include "mozilla/ServoUtils.h"
-#include "mozilla/DeclarationBlockInlines.h"
+#include "mozilla/DeclarationBlock.h"
 #include "nsContentUtils.h"
 #include "nsReadableUtils.h"
 #include "nsHTMLCSSStyleSheet.h"
@@ -150,7 +150,7 @@ nsAttrValue::nsAttrValue(already_AddRefed<DeclarationBlock> aValue,
                          const nsAString* aSerialized)
     : mBits(0)
 {
-  SetTo(Move(aValue), aSerialized);
+  SetTo(std::move(aValue), aSerialized);
 }
 
 nsAttrValue::nsAttrValue(const nsIntMargin& aValue)
@@ -327,7 +327,7 @@ nsAttrValue::SetTo(const nsAttrValue& aOther)
         // the same size so it doesn't really matter which one we assign
         cont->mValue.mSVGAngle = otherCont->mValue.mSVGAngle;
       } else {
-        NS_NOTREACHED("unknown type stored in MiscContainer");
+        MOZ_ASSERT_UNREACHABLE("unknown type stored in MiscContainer");
       }
       break;
     }
@@ -593,7 +593,7 @@ nsAttrValue::ToString(nsAString& aResult) const
 #ifdef DEBUG
     case eColor:
     {
-      NS_NOTREACHED("color attribute without string data");
+      MOZ_ASSERT_UNREACHABLE("color attribute without string data");
       aResult.Truncate();
       break;
     }
@@ -778,7 +778,7 @@ nsAttrValue::GetEnumString(nsAString& aResult, bool aRealTag) const
     table++;
   }
 
-  NS_NOTREACHED("couldn't find value in EnumTable");
+  MOZ_ASSERT_UNREACHABLE("couldn't find value in EnumTable");
 }
 
 uint32_t
@@ -899,7 +899,7 @@ nsAttrValue::HashValue() const
         // All SVG types are just pointers to classes so we can treat them alike
         return NS_PTR_TO_INT32(cont->mValue.mSVGAngle);
       }
-      NS_NOTREACHED("unknown type stored in MiscContainer");
+      MOZ_ASSERT_UNREACHABLE("unknown type stored in MiscContainer");
       return 0;
     }
   }
@@ -1009,7 +1009,7 @@ nsAttrValue::Equals(const nsAttrValue& aOther) const
         MOZ_ASSERT(false, "Comparing nsAttrValues that point to SVG data");
         return false;
       }
-      NS_NOTREACHED("unknown type stored in MiscContainer");
+      MOZ_ASSERT_UNREACHABLE("unknown type stored in MiscContainer");
       return false;
     }
   }
@@ -1263,7 +1263,7 @@ nsAttrValue::ParseAtomArray(const nsAString& aValue)
 
   AtomArray* array = GetAtomArrayValue();
 
-  if (!array->AppendElement(Move(classAtom))) {
+  if (!array->AppendElement(std::move(classAtom))) {
     Reset();
     return;
   }
@@ -1278,7 +1278,7 @@ nsAttrValue::ParseAtomArray(const nsAString& aValue)
 
     classAtom = NS_AtomizeMainThread(Substring(start, iter));
 
-    if (!array->AppendElement(Move(classAtom))) {
+    if (!array->AppendElement(std::move(classAtom))) {
       Reset();
       return;
     }
@@ -1331,7 +1331,7 @@ nsAttrValue::SetIntValueAndType(int32_t aValue, ValueType aType,
       }
       default:
       {
-        NS_NOTREACHED("unknown integer type");
+        MOZ_ASSERT_UNREACHABLE("unknown integer type");
         break;
       }
     }
@@ -1701,7 +1701,7 @@ nsAttrValue::ParseStyleAttribute(const nsAString& aString,
 
   RefPtr<URLExtraData> data = new URLExtraData(baseURI, docURI,
                                                 principal);
-  RefPtr<DeclarationBlock> decl = ServoDeclarationBlock::
+  RefPtr<DeclarationBlock> decl = DeclarationBlock::
     FromCssText(aString, data,
                 ownerDoc->GetCompatibilityMode(),
                 ownerDoc->CSSLoader());
@@ -1949,7 +1949,7 @@ nsAttrValue::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
       if (Type() == eCSSDeclaration && container->mValue.mCSSDeclaration) {
         // TODO: mCSSDeclaration might be owned by another object which
         //       would make us count them twice, bug 677493.
-        // Bug 1281964: For ServoDeclarationBlock if we do measure we'll
+        // Bug 1281964: For DeclarationBlock if we do measure we'll
         // need a way to call the Servo heap_size_of function.
         //n += container->mCSSDeclaration->SizeOfIncludingThis(aMallocSizeOf);
       } else if (Type() == eAtomArray && container->mValue.mAtomArray) {

@@ -108,6 +108,7 @@
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/layers/IAPZCTreeManager.h" // for layers::ZoomToRectBehavior
 #include "mozilla/dom/Promise.h"
+#include "mozilla/ServoBindings.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/dom/TimeoutManager.h"
@@ -182,7 +183,7 @@ public:
 };
 
 NativeInputRunnable::NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent)
-  : PrioritizableRunnable(Move(aEvent), nsIRunnablePriority::PRIORITY_INPUT)
+  : PrioritizableRunnable(std::move(aEvent), nsIRunnablePriority::PRIORITY_INPUT)
 {
 }
 
@@ -190,7 +191,7 @@ NativeInputRunnable::NativeInputRunnable(already_AddRefed<nsIRunnable>&& aEvent)
 NativeInputRunnable::Create(already_AddRefed<nsIRunnable>&& aEvent)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  nsCOMPtr<nsIRunnable> event(new NativeInputRunnable(Move(aEvent)));
+  nsCOMPtr<nsIRunnable> event(new NativeInputRunnable(std::move(aEvent)));
   return event.forget();
 }
 
@@ -719,7 +720,7 @@ nsDOMWindowUtils::SendMouseEventToWindow(const nsAString& aType,
                                          uint32_t aIdentifier,
                                          uint8_t aOptionalArgCount)
 {
-  AUTO_PROFILER_LABEL("nsDOMWindowUtils::SendMouseEventToWindow", EVENTS);
+  AUTO_PROFILER_LABEL("nsDOMWindowUtils::SendMouseEventToWindow", OTHER);
 
   return SendMouseEventCommon(aType, aX, aY, aButton, aClickCount, aModifiers,
                               aIgnoreRootScrollFrame, aPressure,
@@ -1238,7 +1239,7 @@ nsDOMWindowUtils::GetWidgetForElement(Element* aElement)
 NS_IMETHODIMP
 nsDOMWindowUtils::GarbageCollect(nsICycleCollectorListener *aListener)
 {
-  AUTO_PROFILER_LABEL("nsDOMWindowUtils::GarbageCollect", GC);
+  AUTO_PROFILER_LABEL("nsDOMWindowUtils::GarbageCollect", GCCC);
 
   nsJSContext::GarbageCollectNow(JS::gcreason::DOM_UTILS);
   nsJSContext::CycleCollectNow(aListener);
@@ -1362,7 +1363,7 @@ nsDOMWindowUtils::NodesFromRect(float aX, float aY,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetTranslationNodes(nsIDOMNode* aRoot,
+nsDOMWindowUtils::GetTranslationNodes(nsINode* aRoot,
                                       nsITranslationNodeList** aRetVal)
 {
   NS_ENSURE_ARG_POINTER(aRetVal);
@@ -1429,7 +1430,7 @@ nsDOMWindowUtils::GetTranslationNodes(nsIDOMNode* aRoot,
           isTranslationRoot = !parentInList;
         }
 
-        list->AppendElement(content->AsDOMNode(), isTranslationRoot);
+        list->AppendElement(content, isTranslationRoot);
         --limit;
         break;
       }
@@ -1827,7 +1828,7 @@ nsDOMWindowUtils::GetFullZoom(float* aFullZoom)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::DispatchDOMEventViaPresShell(nsIDOMNode* aTarget,
+nsDOMWindowUtils::DispatchDOMEventViaPresShell(nsINode* aTarget,
                                                Event* aEvent,
                                                bool aTrusted,
                                                bool* aRetVal)
@@ -2509,15 +2510,14 @@ nsDOMWindowUtils::GetAsyncPanZoomEnabled(bool *aResult)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
+nsDOMWindowUtils::SetAsyncScrollOffset(Element* aElement,
                                        float aX, float aY)
 {
-  nsCOMPtr<Element> element = do_QueryInterface(aNode);
-  if (!element) {
+  if (!aElement) {
     return NS_ERROR_INVALID_ARG;
   }
   FrameMetrics::ViewID viewId;
-  if (!nsLayoutUtils::FindIDFor(element, &viewId)) {
+  if (!nsLayoutUtils::FindIDFor(aElement, &viewId)) {
     return NS_ERROR_UNEXPECTED;
   }
   nsIWidget* widget = GetWidget();
@@ -2545,14 +2545,13 @@ nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::SetAsyncZoom(nsIDOMNode* aRootElement, float aValue)
+nsDOMWindowUtils::SetAsyncZoom(Element* aRootElement, float aValue)
 {
-  nsCOMPtr<Element> element = do_QueryInterface(aRootElement);
-  if (!element) {
+  if (!aRootElement) {
     return NS_ERROR_INVALID_ARG;
   }
   FrameMetrics::ViewID viewId;
-  if (!nsLayoutUtils::FindIDFor(element, &viewId)) {
+  if (!nsLayoutUtils::FindIDFor(aRootElement, &viewId)) {
     return NS_ERROR_UNEXPECTED;
   }
   nsIWidget* widget = GetWidget();
@@ -2906,7 +2905,14 @@ nsDOMWindowUtils::CheckAndClearPaintedState(Element* aElement, bool* aResult)
     }
   }
 
-  *aResult = frame->CheckAndClearPaintedState();
+  while (frame) {
+    if (!frame->CheckAndClearPaintedState()) {
+      *aResult = false;
+      return NS_OK;
+    }
+    frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame);
+  }
+  *aResult = true;
   return NS_OK;
 }
 
@@ -2935,7 +2941,14 @@ nsDOMWindowUtils::CheckAndClearDisplayListState(Element* aElement, bool* aResult
     }
   }
 
-  *aResult = frame->CheckAndClearDisplayListState();
+  while (frame) {
+    if (!frame->CheckAndClearDisplayListState()) {
+      *aResult = false;
+      return NS_OK;
+    }
+    frame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(frame);
+  }
+  *aResult = true;
   return NS_OK;
 
 }
@@ -3469,7 +3482,7 @@ nsDOMWindowUtils::AddSheet(nsIPreloadedStyleSheet* aSheet, uint32_t aSheetType)
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(sheet, NS_ERROR_FAILURE);
 
-  if (sheet->GetAssociatedDocument()) {
+  if (sheet->GetAssociatedDocumentOrShadowRoot()) {
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -3567,11 +3580,10 @@ nsDOMWindowUtils::GetIsParentWindowMainWidgetVisible(bool* aIsVisible)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::IsNodeDisabledForEvents(nsIDOMNode* aNode, bool* aRetVal)
+nsDOMWindowUtils::IsNodeDisabledForEvents(nsINode* aNode, bool* aRetVal)
 {
   *aRetVal = false;
-  nsCOMPtr<nsINode> n = do_QueryInterface(aNode);
-  nsINode* node = n;
+  nsINode* node = aNode;
   while (node) {
     if (node->IsNodeOfType(nsINode::eHTML_FORM_CONTROL)) {
       nsCOMPtr<nsIFormControl> fc = do_QueryInterface(node);
@@ -3628,19 +3640,20 @@ nsDOMWindowUtils::DispatchEventToChromeOnly(EventTarget* aTarget,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMWindowUtils::RequestCompositorProperty(const nsAString& property,
-                                            float* aResult)
+static Result<nsIFrame*, nsresult>
+GetTargetFrame(const Element* aElement, const nsAString& aPseudoElement)
 {
-  if (nsIWidget* widget = GetWidget()) {
-    mozilla::layers::LayerManager* manager = widget->GetLayerManager();
-    if (manager) {
-      *aResult = manager->RequestProperty(property);
-      return NS_OK;
+  nsIFrame* frame = aElement->GetPrimaryFrame();
+  if (!aPseudoElement.IsEmpty()) {
+    if (aPseudoElement.EqualsLiteral("::before")) {
+      frame = nsLayoutUtils::GetBeforeFrame(aElement);
+    } else if (aPseudoElement.EqualsLiteral("::after")) {
+      frame = nsLayoutUtils::GetAfterFrame(aElement);
+    } else {
+      return Err(NS_ERROR_INVALID_ARG);
     }
   }
-
-  return NS_ERROR_NOT_AVAILABLE;
+  return frame;
 }
 
 NS_IMETHODIMP
@@ -3653,17 +3666,13 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement,
     return NS_ERROR_INVALID_ARG;
   }
 
-  RefPtr<nsROCSSPrimitiveValue> cssValue = nullptr;
-  nsIFrame* frame = aElement->GetPrimaryFrame();
-  if (!aPseudoElement.IsEmpty()) {
-    if (aPseudoElement.EqualsLiteral("::before")) {
-      frame = nsLayoutUtils::GetBeforeFrame(aElement);
-    } else if (aPseudoElement.EqualsLiteral("::after")) {
-      frame = nsLayoutUtils::GetAfterFrame(aElement);
-    } else {
-      return NS_ERROR_INVALID_ARG;
-    }
+  auto frameOrError = GetTargetFrame(aElement, aPseudoElement);
+  if (frameOrError.isErr()) {
+    return frameOrError.unwrapErr();
   }
+  nsIFrame* frame = frameOrError.unwrap();
+
+  RefPtr<nsROCSSPrimitiveValue> cssValue = nullptr;
   if (frame && nsLayoutUtils::AreAsyncAnimationsEnabled()) {
     RefPtr<LayerManager> widgetLayerManager;
     if (nsIWidget* widget = GetWidget()) {
@@ -3734,6 +3743,67 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement,
   }
   aResult.Truncate();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetOMTCTransform(Element* aElement,
+                                   const nsAString& aPseudoElement,
+                                   nsAString& aResult)
+{
+  if (!aElement) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  if (GetWebRenderBridge()) {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
+  auto frameOrError = GetTargetFrame(aElement, aPseudoElement);
+  if (frameOrError.isErr()) {
+    return frameOrError.unwrapErr();
+  }
+
+  nsIFrame* frame = frameOrError.unwrap();
+  aResult.Truncate();
+  if (!frame) {
+    return NS_OK;
+  }
+
+  DisplayItemType itemType = DisplayItemType::TYPE_TRANSFORM;
+  if (nsLayoutUtils::HasEffectiveAnimation(frame, eCSSProperty_opacity) &&
+      !frame->IsTransformed()) {
+    itemType = DisplayItemType::TYPE_OPACITY;
+  }
+
+  Layer* layer = FrameLayerBuilder::GetDedicatedLayer(frame, itemType);
+  if (!layer) {
+    return NS_OK;
+  }
+
+  ShadowLayerForwarder* forwarder = layer->Manager()->AsShadowForwarder();
+  if (!forwarder || !forwarder->HasShadowManager()) {
+    return NS_OK;
+  }
+
+  MaybeTransform transform;
+  forwarder->GetShadowManager()->
+    SendGetTransform(layer->AsShadowableLayer()->GetShadow(), &transform);
+  if (transform.type() != MaybeTransform::TMatrix4x4) {
+    return NS_OK;
+  }
+
+  Matrix4x4 matrix = transform.get_Matrix4x4();
+  RefPtr<nsROCSSPrimitiveValue> cssValue =
+    nsComputedDOMStyle::MatrixToCSSValue(matrix);
+  if (!cssValue) {
+    return NS_OK;
+  }
+
+  nsAutoString text;
+  ErrorResult rv;
+  cssValue->GetCssText(text, rv);
+  aResult.Assign(text);
+  return rv.StealNSResult();
 }
 
 namespace {
@@ -4066,7 +4136,7 @@ nsDOMWindowUtils::TriggerDeviceReset()
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::ForceUseCounterFlush(nsIDOMNode *aNode)
+nsDOMWindowUtils::ForceUseCounterFlush(nsINode *aNode)
 {
   NS_ENSURE_ARG_POINTER(aNode);
 
@@ -4108,7 +4178,7 @@ NS_IMETHODIMP
 nsDOMWindowUtils::RespectDisplayPortSuppression(bool aEnabled)
 {
   nsCOMPtr<nsIPresShell> shell(GetPresShell());
-  APZCCallbackHelper::RespectDisplayPortSuppression(aEnabled, shell);
+  shell->RespectDisplayportSuppression(aEnabled);
   return NS_OK;
 }
 
@@ -4278,13 +4348,6 @@ nsDOMWindowUtils::EnsureDirtyRootFrame()
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMWindowUtils::GetIsStyledByServo(bool* aStyledByServo)
-{
-  *aStyledByServo = true;
-  return NS_OK;
-}
-
 NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsITranslationNodeList)
@@ -4294,7 +4357,7 @@ NS_IMPL_ADDREF(nsTranslationNodeList)
 NS_IMPL_RELEASE(nsTranslationNodeList)
 
 NS_IMETHODIMP
-nsTranslationNodeList::Item(uint32_t aIndex, nsIDOMNode** aRetVal)
+nsTranslationNodeList::Item(uint32_t aIndex, nsINode** aRetVal)
 {
   NS_ENSURE_ARG_POINTER(aRetVal);
   NS_IF_ADDREF(*aRetVal = mNodes.SafeElementAt(aIndex));

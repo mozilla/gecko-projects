@@ -68,8 +68,13 @@ struct null_t {
 
 struct SerializedStructuredCloneBuffer final
 {
-  SerializedStructuredCloneBuffer() {}
+  SerializedStructuredCloneBuffer()
+   : data(JS::StructuredCloneScope::Unassigned)
+  {
+  }
+
   SerializedStructuredCloneBuffer(const SerializedStructuredCloneBuffer& aOther)
+   : SerializedStructuredCloneBuffer()
   {
     *this = aOther;
   }
@@ -78,6 +83,7 @@ struct SerializedStructuredCloneBuffer final
   operator=(const SerializedStructuredCloneBuffer& aOther)
   {
     data.Clear();
+    data.initScope(aOther.data.scope());
     data.Append(aOther.data);
     return *this;
   }
@@ -876,7 +882,7 @@ struct ParamTraits<JSStructuredCloneData>
       return false;
     }
 
-    *aResult = JSStructuredCloneData(Move(out));
+    *aResult = JSStructuredCloneData(std::move(out), JS::StructuredCloneScope::DifferentProcess);
 
     return true;
   }
@@ -936,7 +942,7 @@ struct ParamTraits<mozilla::Maybe<T>>
       if (!ReadParam(msg, iter, &tmp)) {
         return false;
       }
-      *result = mozilla::Some(mozilla::Move(tmp));
+      *result = mozilla::Some(std::move(tmp));
     } else {
       *result = mozilla::Nothing();
     }

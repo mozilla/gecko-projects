@@ -90,6 +90,8 @@ public:
                                              const TimeStamp& aTxnStartTime,
                                              const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvEmptyTransaction(const FocusTarget& aFocusTarget,
+                                               const ScrollUpdatesMap& aUpdates,
+                                               const uint32_t& aPaintSequenceNumber,
                                                InfallibleTArray<WebRenderParentCommand>&& aCommands,
                                                InfallibleTArray<OpDestroy>&& aToDestroy,
                                                const uint64_t& aFwdTransactionId,
@@ -106,6 +108,7 @@ public:
   mozilla::ipc::IPCResult RecvClearCachedResources() override;
   mozilla::ipc::IPCResult RecvScheduleComposite() override;
   mozilla::ipc::IPCResult RecvCapture() override;
+  mozilla::ipc::IPCResult RecvSyncWithCompositor() override;
 
   mozilla::ipc::IPCResult RecvSetConfirmedTargetAPZC(const uint64_t& aBlockId,
                                                      nsTArray<ScrollableLayerGuid>&& aTargets) override;
@@ -191,6 +194,8 @@ private:
 
   void UpdateAPZFocusState(const FocusTarget& aFocus);
   void UpdateAPZScrollData(const wr::Epoch& aEpoch, WebRenderScrollData&& aData);
+  void UpdateAPZScrollOffsets(ScrollUpdatesMap&& aUpdates,
+                              uint32_t aPaintSequenceNumber);
 
   bool UpdateResources(const nsTArray<OpUpdateResource>& aResourceUpdates,
                        const nsTArray<RefCountedShmem>& aSmallShmems,
@@ -233,6 +238,10 @@ private:
 
   wr::Epoch GetNextWrEpoch();
 
+  void FlushSceneBuilds();
+  void FlushFrameGeneration();
+  void FlushFramePresentation();
+
 private:
   struct PendingTransactionId {
     PendingTransactionId(const wr::Epoch& aEpoch, TransactionId aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
@@ -250,7 +259,7 @@ private:
   struct CompositorAnimationIdsForEpoch {
     CompositorAnimationIdsForEpoch(const wr::Epoch& aEpoch, InfallibleTArray<uint64_t>&& aIds)
       : mEpoch(aEpoch)
-      , mIds(Move(aIds))
+      , mIds(std::move(aIds))
     {
     }
 

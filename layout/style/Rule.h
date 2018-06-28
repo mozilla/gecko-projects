@@ -10,6 +10,7 @@
 #define mozilla_css_Rule_h___
 
 #include "mozilla/dom/CSSRuleBinding.h"
+#include "mozilla/dom/DocumentOrShadowRoot.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsISupports.h"
@@ -44,7 +45,7 @@ protected:
   {
   }
 
-  virtual ~Rule() {}
+  virtual ~Rule() = default;
 
 public:
 
@@ -60,11 +61,12 @@ public:
 
   StyleSheet* GetStyleSheet() const { return mSheet; }
 
-  // Return the document the rule lives in, if any
-  nsIDocument* GetDocument() const
+  // Return the document the rule applies to, if any.
+  //
+  // Suitable for style updates, and that's about it.
+  nsIDocument* GetComposedDoc() const
   {
-    StyleSheet* sheet = GetStyleSheet();
-    return sheet ? sheet->GetAssociatedDocument() : nullptr;
+    return mSheet ? mSheet->GetComposedDoc() : nullptr;
   }
 
   virtual void SetStyleSheet(StyleSheet* aSheet);
@@ -75,11 +77,11 @@ public:
 #ifdef DEBUG
     if (aRule) {
       int16_t type = aRule->Type();
-      MOZ_ASSERT(type == dom::CSSRuleBinding::MEDIA_RULE ||
-                 type == dom::CSSRuleBinding::DOCUMENT_RULE ||
-                 type == dom::CSSRuleBinding::SUPPORTS_RULE ||
-                 (type == dom::CSSRuleBinding::KEYFRAMES_RULE &&
-                  Type() == dom::CSSRuleBinding::KEYFRAME_RULE));
+      MOZ_ASSERT(type == dom::CSSRule_Binding::MEDIA_RULE ||
+                 type == dom::CSSRule_Binding::DOCUMENT_RULE ||
+                 type == dom::CSSRule_Binding::SUPPORTS_RULE ||
+                 (type == dom::CSSRule_Binding::KEYFRAMES_RULE &&
+                  Type() == dom::CSSRule_Binding::KEYFRAME_RULE));
     }
 #endif
     mParentRule = aRule;
@@ -99,7 +101,14 @@ public:
   void SetCssText(const nsAString& aCssText);
   Rule* GetParentRule() const;
   StyleSheet* GetParentStyleSheet() const { return GetStyleSheet(); }
-  nsIDocument* GetParentObject() const { return GetDocument(); }
+  nsINode* GetParentObject() const
+  {
+    if (!mSheet) {
+      return nullptr;
+    }
+    auto* associated = mSheet->GetAssociatedDocumentOrShadowRoot();
+    return associated ? &associated->AsNode() : nullptr;
+  }
 
 protected:
   // True if we're known-live for cycle collection purposes.

@@ -12,6 +12,7 @@ const EXPORTED_SYMBOLS = ["BrowserTabs"];
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://services-sync/main.js");
 ChromeUtils.import("resource:///modules/sessionstore/TabStateFlusher.jsm");
+ChromeUtils.import("resource://tps/logger.jsm");
 
 // Unfortunately, due to where TPS is run, we can't directly reuse the logic from
 // BrowserTestUtils.jsm. Moreover, we can't resolve the URI it loads the content
@@ -69,19 +70,21 @@ var BrowserTabs = {
    */
   Find(uri, title, profile) {
     // Find the uri in Weave's list of tabs for the given profile.
-    let engine = Weave.Service.engineManager.get("tabs");
-    for (let [, client] of Object.entries(engine.getAllClients())) {
-      if (!client.tabs) {
+    let tabEngine = Weave.Service.engineManager.get("tabs");
+    for (let client of Weave.Service.clientsEngine.remoteClients) {
+      let tabClient = tabEngine.getClientById(client.id);
+      if (!tabClient || !tabClient.tabs) {
         continue;
       }
-      for (let key in client.tabs) {
-        let tab = client.tabs[key];
+      for (let key in tabClient.tabs) {
+        let tab = tabClient.tabs[key];
         let weaveTabUrl = tab.urlHistory[0];
-        if (uri == weaveTabUrl && profile == client.clientName)
+        if (uri == weaveTabUrl && profile == client.name)
           if (title == undefined || title == tab.title)
             return true;
+        }
+        Logger.logInfo(`Dumping tabs for ${client.clientName}...\n` + JSON.stringify(client.tabs));
       }
-    }
     return false;
   },
 };

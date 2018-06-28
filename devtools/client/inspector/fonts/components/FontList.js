@@ -17,17 +17,15 @@ class FontList extends PureComponent {
     return {
       fontOptions: PropTypes.shape(Types.fontOptions).isRequired,
       fonts: PropTypes.arrayOf(PropTypes.shape(Types.font)).isRequired,
-      isCurrentElementFonts: PropTypes.bool.isRequired,
       onPreviewFonts: PropTypes.func.isRequired,
       onToggleFontHighlight: PropTypes.func.isRequired,
     };
   }
 
   render() {
-    let {
+    const {
       fonts,
       fontOptions,
-      isCurrentElementFonts,
       onPreviewFonts,
       onToggleFontHighlight
     } = this.props;
@@ -40,7 +38,6 @@ class FontList extends PureComponent {
         key: i,
         font,
         fontOptions,
-        isForCurrentElement: isCurrentElementFonts,
         onPreviewFonts,
         onToggleFontHighlight,
       }))

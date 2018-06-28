@@ -15,7 +15,6 @@ XPIDL_MODULE = 'places'
 
 if CONFIG['MOZ_PLACES']:
     XPIDL_SOURCES += [
-        'mozIAsyncFavicons.idl',
         'mozIAsyncHistory.idl',
         'mozIAsyncLivemarks.idl',
         'mozIColorAnalyzer.idl',
@@ -25,12 +24,12 @@ if CONFIG['MOZ_PLACES']:
         'nsIFaviconService.idl',
         'nsINavBookmarksService.idl',
         'nsITaggingService.idl',
-        'nsPIPlacesDatabase.idl',
     ]
 
     EXPORTS.mozilla.places = [
         'Database.h',
         'History.h',
+        'INativePlacesEventCallback.h',
         'Shutdown.h',
     ]
 

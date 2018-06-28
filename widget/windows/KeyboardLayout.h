@@ -44,15 +44,31 @@ class nsIIdleServiceInternal;
 namespace mozilla {
 namespace widget {
 
-static const uint32_t sModifierKeyMap[][3] = {
-  { nsIWidget::CAPS_LOCK, VK_CAPITAL, 0 },
-  { nsIWidget::NUM_LOCK,  VK_NUMLOCK, 0 },
-  { nsIWidget::SHIFT_L,   VK_SHIFT,   VK_LSHIFT },
-  { nsIWidget::SHIFT_R,   VK_SHIFT,   VK_RSHIFT },
-  { nsIWidget::CTRL_L,    VK_CONTROL, VK_LCONTROL },
-  { nsIWidget::CTRL_R,    VK_CONTROL, VK_RCONTROL },
-  { nsIWidget::ALT_L,     VK_MENU,    VK_LMENU },
-  { nsIWidget::ALT_R,     VK_MENU,    VK_RMENU }
+enum ScanCode : uint16_t
+{
+  eCapsLock =                   0x003A,
+  eNumLock =                    0xE045,
+  eShiftLeft =                  0x002A,
+  eShiftRight =                 0x0036,
+  eControlLeft =                0x001D,
+  eControlRight =               0xE01D,
+  eAltLeft =                    0x0038,
+  eAltRight =                   0xE038,
+};
+
+// 0: nsIWidget's native modifier flag
+// 1: Virtual keycode which does not distinguish whether left or right location.
+// 2: Virtual keycode which distinguishes whether left or right location.
+// 3: Scan code.
+static const uint32_t sModifierKeyMap[][4] = {
+  { nsIWidget::CAPS_LOCK, VK_CAPITAL, 0,           ScanCode::eCapsLock },
+  { nsIWidget::NUM_LOCK,  VK_NUMLOCK, 0,           ScanCode::eNumLock },
+  { nsIWidget::SHIFT_L,   VK_SHIFT,   VK_LSHIFT,   ScanCode::eShiftLeft },
+  { nsIWidget::SHIFT_R,   VK_SHIFT,   VK_RSHIFT,   ScanCode::eShiftRight },
+  { nsIWidget::CTRL_L,    VK_CONTROL, VK_LCONTROL, ScanCode::eControlLeft },
+  { nsIWidget::CTRL_R,    VK_CONTROL, VK_RCONTROL, ScanCode::eControlRight },
+  { nsIWidget::ALT_L,     VK_MENU,    VK_LMENU,    ScanCode::eAltLeft },
+  { nsIWidget::ALT_R,     VK_MENU,    VK_RMENU,    ScanCode::eAltRight }
 };
 
 class KeyboardLayout;
@@ -93,6 +109,11 @@ public:
   {
     MOZ_ASSERT(mChars.Length() == mModifiers.Length());
     return mChars.Length();
+  }
+
+  bool IsProducingCharsWithAltGr() const
+  {
+    return !IsEmpty() && (ModifiersAt(0) & MODIFIER_ALTGRAPH) != 0;
   }
 
   void FillModifiers(Modifiers aModifiers);
@@ -161,29 +182,53 @@ public:
 class VirtualKey
 {
 public:
-  //  0 - Normal
-  //  1 - Shift
-  //  2 - Control
-  //  3 - Control + Shift
-  //  4 - Alt
-  //  5 - Alt + Shift
-  //  6 - Alt + Control (AltGr)
-  //  7 - Alt + Control + Shift (AltGr + Shift)
-  //  8 - CapsLock
-  //  9 - CapsLock + Shift
-  // 10 - CapsLock + Control
-  // 11 - CapsLock + Control + Shift
-  // 12 - CapsLock + Alt
-  // 13 - CapsLock + Alt + Shift
-  // 14 - CapsLock + Alt + Control (CapsLock + AltGr)
-  // 15 - CapsLock + Alt + Control + Shift (CapsLock + AltGr + Shift)
+  enum ShiftStateIndex : uint8_t
+  {
+    //  0 - Normal
+    eNormal = 0,
+    //  1 - Shift
+    eShift,
+    //  2 - Control
+    eControl,
+    //  3 - Control + Shift
+    eControlShift,
+    //  4 - Alt
+    eAlt,
+    //  5 - Alt + Shift
+    eAltShift,
+    //  6 - Alt + Control (AltGr)
+    eAltGr,
+    //  7 - Alt + Control + Shift (AltGr + Shift)
+    eAltGrShift,
+    //  8 - CapsLock
+    eWithCapsLock,
+    //  9 - CapsLock + Shift
+    eShiftWithCapsLock,
+    // 10 - CapsLock + Control
+    eControlWithCapsLock,
+    // 11 - CapsLock + Control + Shift
+    eControlShiftWithCapsLock,
+    // 12 - CapsLock + Alt
+    eAltWithCapsLock,
+    // 13 - CapsLock + Alt + Shift
+    eAltShiftWithCapsLock,
+    // 14 - CapsLock + Alt + Control (CapsLock + AltGr)
+    eAltGrWithCapsLock,
+    // 15 - CapsLock + Alt + Control + Shift (CapsLock + AltGr + Shift)
+    eAltGrShiftWithCapsLock,
+  };
 
   enum ShiftStateFlag
   {
     STATE_SHIFT    = 0x01,
     STATE_CONTROL  = 0x02,
     STATE_ALT      = 0x04,
-    STATE_CAPSLOCK = 0x08
+    STATE_CAPSLOCK = 0x08,
+    // ShiftState needs to have AltGr state separately since this is necessary
+    // for lossless conversion with Modifiers.
+    STATE_ALTGRAPH = 0x80,
+    // Useful to remove or check Ctrl and Alt flags.
+    STATE_CONTROL_ALT = STATE_CONTROL | STATE_ALT,
   };
 
   typedef uint8_t ShiftState;
@@ -195,6 +240,10 @@ public:
     return ModifiersToShiftState(aModKeyState.GetModifiers());
   }
   static Modifiers ShiftStateToModifiers(ShiftState aShiftState);
+  static bool IsAltGrIndex(uint8_t aIndex)
+  {
+    return (aIndex & STATE_CONTROL_ALT) == STATE_CONTROL_ALT;
+  }
 
 private:
   union KeyShiftState
@@ -213,12 +262,24 @@ private:
   KeyShiftState mShiftStates[16];
   uint16_t mIsDeadKey;
 
+  static uint8_t ToShiftStateIndex(ShiftState aShiftState)
+  {
+    if (!(aShiftState & STATE_ALTGRAPH)) {
+      MOZ_ASSERT(aShiftState <= eAltGrShiftWithCapsLock);
+      return static_cast<uint8_t>(aShiftState);
+    }
+    uint8_t index = aShiftState & ~STATE_ALTGRAPH;
+    index |= (STATE_ALT | STATE_CONTROL);
+    MOZ_ASSERT(index <= eAltGrShiftWithCapsLock);
+    return index;
+  }
+
   void SetDeadKey(ShiftState aShiftState, bool aIsDeadKey)
   {
     if (aIsDeadKey) {
-      mIsDeadKey |= 1 << aShiftState;
+      mIsDeadKey |= 1 << ToShiftStateIndex(aShiftState);
     } else {
-      mIsDeadKey &= ~(1 << aShiftState);
+      mIsDeadKey &= ~(1 << ToShiftStateIndex(aShiftState));
     }
   }
 
@@ -227,12 +288,49 @@ public:
 
   bool IsDeadKey(ShiftState aShiftState) const
   {
-    return (mIsDeadKey & (1 << aShiftState)) != 0;
+    return (mIsDeadKey & (1 << ToShiftStateIndex(aShiftState))) != 0;
+  }
+
+  /**
+   * IsChangedByAltGr() is useful to check if a key with AltGr produces
+   * different character(s) from the key without AltGr.
+   * Note that this is designed for checking if a keyboard layout has AltGr
+   * key.  So, this result may not exactly correct for the key since it's
+   * okay to fails in some edge cases when we check all keys which produce
+   * character(s) in a layout.
+   */
+  bool IsChangedByAltGr(ShiftState aShiftState) const
+  {
+    MOZ_ASSERT(aShiftState == ToShiftStateIndex(aShiftState));
+    MOZ_ASSERT(IsAltGrIndex(aShiftState));
+    MOZ_ASSERT(IsDeadKey(aShiftState) ||
+               mShiftStates[aShiftState].Normal.Chars[0]);
+    const ShiftState kShiftStateWithoutAltGr =
+      aShiftState - ShiftStateIndex::eAltGr;
+    if (IsDeadKey(aShiftState) != IsDeadKey(kShiftStateWithoutAltGr)) {
+      return false;
+    }
+    if (IsDeadKey(aShiftState)) {
+      return mShiftStates[aShiftState].DeadKey.DeadChar !=
+               mShiftStates[kShiftStateWithoutAltGr].DeadKey.DeadChar;
+    }
+    for(size_t i = 0; i < 4; i++) {
+      if (mShiftStates[aShiftState].Normal.Chars[i] !=
+            mShiftStates[kShiftStateWithoutAltGr].Normal.Chars[i]) {
+        return true;
+      }
+      if (!mShiftStates[aShiftState].Normal.Chars[i] &&
+          !mShiftStates[kShiftStateWithoutAltGr].Normal.Chars[i]) {
+        return false;
+      }
+    }
+    return false;
   }
 
   void AttachDeadKeyTable(ShiftState aShiftState,
                           const DeadKeyTable* aDeadKeyTable)
   {
+    MOZ_ASSERT(aShiftState == ToShiftStateIndex(aShiftState));
     mShiftStates[aShiftState].DeadKey.Table = aDeadKeyTable;
   }
 
@@ -244,7 +342,8 @@ public:
   inline char16_t GetCompositeChar(ShiftState aShiftState,
                                     char16_t aBaseChar) const
   {
-    return mShiftStates[aShiftState].DeadKey.Table->GetCompositeChar(aBaseChar);
+    return mShiftStates[ToShiftStateIndex(aShiftState)].
+             DeadKey.Table->GetCompositeChar(aBaseChar);
   }
 
   char16_t GetCompositeChar(const ModifierKeyState& aModKeyState,
@@ -253,12 +352,44 @@ public:
     return GetCompositeChar(ModifierKeyStateToShiftState(aModKeyState),
                             aBaseChar);
   }
+
+  /**
+   * GetNativeUniChars() returns character(s) which is produced by the
+   * key with given modifiers.  This does NOT return proper MODIFIER_ALTGRAPH
+   * state because this is raw accessor of the database of this key.
+   */
   UniCharsAndModifiers GetNativeUniChars(ShiftState aShiftState) const;
   UniCharsAndModifiers GetNativeUniChars(
                          const ModifierKeyState& aModKeyState) const
   {
     return GetNativeUniChars(ModifierKeyStateToShiftState(aModKeyState));
   }
+
+  /**
+   * GetUniChars() returns characters and modifiers which are not consumed
+   * to input the character.
+   * For example, if you specify Ctrl key but the key produces no character
+   * with Ctrl, this returns character(s) which is produced by the key
+   * without Ctrl.  So, the result is useful to decide KeyboardEvent.key
+   * value.
+   * Another example is, if you specify Ctrl key and the key produces
+   * different character(s) from the case without Ctrl key, this returns
+   * the character(s) *without* MODIFIER_CONTROL.  This modifier information
+   * is useful for eKeyPress since TextEditor does not treat eKeyPress events
+   * whose modifier includes MODIFIER_ALT and/or MODIFIER_CONTROL.
+   *
+   * @param aShiftState         Modifiers which you want to retrieve
+   *                            KeyboardEvent.key value for the key with.
+   *                            If AltGr key is pressed, this should include
+   *                            STATE_ALTGRAPH and should NOT include
+   *                            STATE_ALT nor STATE_CONTROL.
+   *                            If both Alt and Ctrl are pressed to emulate
+   *                            AltGr, this should include both STATE_ALT and
+   *                            STATE_CONTROL but should NOT include
+   *                            MODIFIER_ALTGRAPH.
+   *                            Then, this returns proper modifiers when
+   *                            this key produces no character with AltGr.
+   */
   UniCharsAndModifiers GetUniChars(ShiftState aShiftState) const;
   UniCharsAndModifiers GetUniChars(const ModifierKeyState& aModKeyState) const
   {
@@ -352,6 +483,34 @@ public:
    */
   static bool IsControlChar(char16_t aChar);
 
+  bool IsControl() const { return mModKeyState.IsControl(); }
+  bool IsAlt() const { return mModKeyState.IsAlt(); }
+  bool MaybeEmulatingAltGraph() const;
+  Modifiers GetModifiers() const { return mModKeyState.GetModifiers(); }
+  const ModifierKeyState& ModifierKeyStateRef() const
+  {
+    return mModKeyState;
+  }
+  VirtualKey::ShiftState GetShiftState() const
+  {
+    return VirtualKey::ModifierKeyStateToShiftState(mModKeyState);
+  }
+
+  /**
+   * GenericVirtualKeyCode() returns virtual keycode which cannot distinguish
+   * position of modifier keys.  E.g., VK_CONTROL for both ControlLeft and
+   * ControlRight.
+   */
+  uint8_t GenericVirtualKeyCode() const { return mOriginalVirtualKeyCode; }
+
+  /**
+   * SpecificVirtualKeyCode() returns virtual keycode which can distinguish
+   * position of modifier keys.  E.g., returns VK_LCONTROL or VK_RCONTROL
+   * instead of VK_CONTROL.  If the key message is synthesized with not
+   * enough information, this prefers left position's keycode.
+   */
+  uint8_t SpecificVirtualKeyCode() const { return mVirtualKeyCode; }
+
 private:
   NativeKey* mLastInstance;
   // mRemovingMsg is set at removing a char message from
@@ -417,25 +576,31 @@ private:
   uint32_t mShiftedLatinChar;
   uint32_t mUnshiftedLatinChar;
 
-  WORD    mScanCode;
-  bool    mIsExtended;
-  bool    mIsDeadKey;
+  WORD mScanCode;
+  bool mIsExtended;
+  // mIsRepeat is true if the key message is caused by the auto-repeat
+  // feature.
+  bool mIsRepeat;
+  bool mIsDeadKey;
   // mIsPrintableKey is true if the key may be a printable key without
   // any modifier keys.  Otherwise, false.
   // Please note that the event may not cause any text input even if this
   // is true.  E.g., it might be dead key state or Ctrl key may be pressed.
-  bool    mIsPrintableKey;
+  bool mIsPrintableKey;
+  // mIsSkippableInRemoteProcess is false if the key event shouldn't be
+  // skipped in the remote process even if it's too old event.
+  bool mIsSkippableInRemoteProcess;
   // mCharMessageHasGone is true if the message is a keydown message and
   // it's followed by at least one char message but it's gone at removing
   // from the queue.  This could occur if PeekMessage() or something is
   // hooked by odd tool.
-  bool    mCharMessageHasGone;
+  bool mCharMessageHasGone;
   // mIsOverridingKeyboardLayout is true if the instance temporarily overriding
   // keyboard layout with specified by the constructor.
-  bool    mIsOverridingKeyboardLayout;
+  bool mIsOverridingKeyboardLayout;
   // mCanIgnoreModifierStateAtKeyPress is true if it's allowed to remove
   // Ctrl or Alt modifier state at dispatching eKeyPress.
-  bool    mCanIgnoreModifierStateAtKeyPress;
+  bool mCanIgnoreModifierStateAtKeyPress;
 
   nsTArray<FakeCharMsg>* mFakeCharMsgs;
 
@@ -451,50 +616,22 @@ private:
   }
 
   void InitWithAppCommand();
-  void InitWithKeyChar();
+  void InitWithKeyOrChar();
+
+  /**
+   * InitIsSkippableForKeyOrChar() initializes mIsSkippableInRemoteProcess with
+   * mIsRepeat and previous key message information.  So, this must be called
+   * after mIsRepeat is initialized.
+   */
+  void InitIsSkippableForKeyOrChar(const MSG& aLastKeyMSG);
 
   /**
    * InitCommittedCharsAndModifiersWithFollowingCharMessages() initializes
-   * mCommittedCharsAndModifiers with mFollowingCharMsgs and aModKeyState.
+   * mCommittedCharsAndModifiers with mFollowingCharMsgs and mModKeyState.
    * If mFollowingCharMsgs includes non-printable char messages, they are
    * ignored (skipped).
    */
-  void InitCommittedCharsAndModifiersWithFollowingCharMessages(
-         const ModifierKeyState& aModKeyState);
-
-  /**
-   * Returns true if the key event is caused by auto repeat.
-   */
-  bool IsRepeat() const
-  {
-    switch (mMsg.message) {
-      case WM_KEYDOWN:
-      case WM_SYSKEYDOWN:
-      case WM_CHAR:
-      case WM_SYSCHAR:
-      case WM_DEADCHAR:
-      case WM_SYSDEADCHAR:
-      case MOZ_WM_KEYDOWN:
-        return ((mMsg.lParam & (1 << 30)) != 0);
-      case WM_APPCOMMAND:
-        if (mVirtualKeyCode) {
-          // If we can map the WM_APPCOMMAND to a virtual keycode, we can trust
-          // the result of GetKeyboardState().
-          BYTE kbdState[256];
-          memset(kbdState, 0, sizeof(kbdState));
-          ::GetKeyboardState(kbdState);
-          return !!kbdState[mVirtualKeyCode];
-        }
-        // If there is no virtual keycode for the command, we dispatch both
-        // keydown and keyup events from WM_APPCOMMAND handler.  Therefore,
-        // even if WM_APPCOMMAND is caused by auto key repeat, web apps receive
-        // a pair of DOM keydown and keyup events.  I.e., KeyboardEvent.repeat
-        // should be never true of such keys.
-        return false;
-      default:
-        return false;
-    }
-  }
+  void InitCommittedCharsAndModifiersWithFollowingCharMessages();
 
   UINT GetScanCodeWithExtendedFlag() const;
 
@@ -714,6 +851,8 @@ private:
 
   static const MSG sEmptyMSG;
 
+  static MSG sLastKeyOrCharMSG;
+
   static MSG sLastKeyMSG;
 
   static bool IsEmptyMSG(const MSG& aMSG)
@@ -728,10 +867,10 @@ private:
 
 public:
   /**
-   * Returns last key MSG.  If no key MSG has been received yet, the result
+   * Returns last key or char MSG.  If no MSG has been received yet, the result
    * is empty MSG (i.e., .message is WM_NULL).
    */
-  static const MSG& LastKeyMSG() { return sLastKeyMSG; }
+  static const MSG& LastKeyOrCharMSG() { return sLastKeyOrCharMSG; }
 };
 
 class KeyboardLayout
@@ -746,11 +885,22 @@ public:
   static bool IsPrintableCharKey(uint8_t aVirtualKey);
 
   /**
+   * HasAltGr() returns true if the keyboard layout's AltRight key is AltGr
+   * key.
+   */
+  bool HasAltGr() const { return mHasAltGr; }
+
+  /**
    * IsDeadKey() returns true if aVirtualKey is a dead key with aModKeyState.
    * This method isn't stateful.
    */
   bool IsDeadKey(uint8_t aVirtualKey,
                  const ModifierKeyState& aModKeyState) const;
+  bool IsDeadKey(const NativeKey& aNativeKey) const
+  {
+    return IsDeadKey(aNativeKey.GenericVirtualKeyCode(),
+                     aNativeKey.ModifierKeyStateRef());
+  }
 
   /**
    * IsInDeadKeySequence() returns true when it's in a dead key sequence.
@@ -765,6 +915,11 @@ public:
    */
   bool IsSysKey(uint8_t aVirtualKey,
                 const ModifierKeyState& aModKeyState) const;
+  bool IsSysKey(const NativeKey& aNativeKey) const
+  {
+    return IsSysKey(aNativeKey.GenericVirtualKeyCode(),
+                    aNativeKey.ModifierKeyStateRef());
+  }
 
   /**
    * GetUniCharsAndModifiers() returns characters which are inputted by
@@ -772,24 +927,20 @@ public:
    * Note that if the combination causes text input, the result's Ctrl and
    * Alt key state are never active.
    */
-  UniCharsAndModifiers GetUniCharsAndModifiers(
-                         uint8_t aVirtualKey,
-                         const ModifierKeyState& aModKeyState) const
+  UniCharsAndModifiers
+  GetUniCharsAndModifiers(uint8_t aVirtualKey,
+                          const ModifierKeyState& aModKeyState) const
   {
     VirtualKey::ShiftState shiftState =
       VirtualKey::ModifierKeyStateToShiftState(aModKeyState);
     return GetUniCharsAndModifiers(aVirtualKey, shiftState);
   }
-
-  /**
-   * GetNativeUniCharsAndModifiers() returns characters which are inputted by
-   * aVirtualKey with aModKeyState.  The method isn't stateful.
-   * Note that different from GetUniCharsAndModifiers(), this returns
-   * actual modifier state of Ctrl and Alt.
-   */
-  UniCharsAndModifiers GetNativeUniCharsAndModifiers(
-                         uint8_t aVirtualKey,
-                         const ModifierKeyState& aModKeyState) const;
+  UniCharsAndModifiers
+  GetUniCharsAndModifiers(const NativeKey& aNativeKey) const
+  {
+    return GetUniCharsAndModifiers(aNativeKey.GenericVirtualKeyCode(),
+                                   aNativeKey.GetShiftState());
+  }
 
   /**
    * OnLayoutChange() must be called before the first keydown message is
@@ -885,14 +1036,15 @@ private:
 
   bool mIsOverridden;
   bool mIsPendingToRestoreKeyboardLayout;
+  bool mHasAltGr;
 
   static inline int32_t GetKeyIndex(uint8_t aVirtualKey);
   static int CompareDeadKeyEntries(const void* aArg1, const void* aArg2,
                                    void* aData);
   static bool AddDeadKeyEntry(char16_t aBaseChar, char16_t aCompositeChar,
-                                DeadKeyEntry* aDeadKeyArray, uint32_t aEntries);
+                              DeadKeyEntry* aDeadKeyArray, uint32_t aEntries);
   bool EnsureDeadKeyActive(bool aIsActive, uint8_t aDeadKey,
-                             const PBYTE aDeadKeyKbdState);
+                           const PBYTE aDeadKeyKbdState);
   uint32_t GetDeadKeyCombinations(uint8_t aDeadKey,
                                   const PBYTE aDeadKeyKbdState,
                                   uint16_t aShiftStatesWithBaseChars,
@@ -901,8 +1053,7 @@ private:
   /**
    * Activates or deactivates dead key state.
    */
-  void ActivateDeadKeyState(const NativeKey& aNativeKey,
-                            const ModifierKeyState& aModKeyState);
+  void ActivateDeadKeyState(const NativeKey& aNativeKey);
   void DeactivateDeadKeyState();
 
   const DeadKeyTable* AddDeadKeyTable(const DeadKeyEntry* aDeadKeyArray,
@@ -927,8 +1078,7 @@ private:
    * WM_KEYDOWN.  Additionally, computes current inputted character(s) and set
    * them to the aNativeKey.
    */
-  void InitNativeKey(NativeKey& aNativeKey,
-                     const ModifierKeyState& aModKeyState);
+  void InitNativeKey(NativeKey& aNativeKey);
 
   /**
    * MaybeInitNativeKeyAsDeadKey() initializes aNativeKey only when aNativeKey
@@ -939,24 +1089,21 @@ private:
    * be caused by aNativeKey.
    * Returns true when this initializes aNativeKey.  Otherwise, false.
    */
-  bool MaybeInitNativeKeyAsDeadKey(NativeKey& aNativeKey,
-                                   const ModifierKeyState& aModKeyState);
+  bool MaybeInitNativeKeyAsDeadKey(NativeKey& aNativeKey);
 
   /**
    * MaybeInitNativeKeyWithCompositeChar() may initialize aNativeKey with
    * proper composite character when dead key produces a composite character.
    * Otherwise, just returns false.
    */
-  bool MaybeInitNativeKeyWithCompositeChar(
-         NativeKey& aNativeKey,
-         const ModifierKeyState& aModKeyState);
+  bool MaybeInitNativeKeyWithCompositeChar(NativeKey& aNativeKey);
 
   /**
    * See the comment of GetUniCharsAndModifiers() below.
    */
-  UniCharsAndModifiers GetUniCharsAndModifiers(
-                         uint8_t aVirtualKey,
-                         VirtualKey::ShiftState aShiftState) const;
+  UniCharsAndModifiers
+  GetUniCharsAndModifiers(uint8_t aVirtualKey,
+                          VirtualKey::ShiftState aShiftState) const;
 
   /**
    * GetDeadUniCharsAndModifiers() returns dead chars which are stored in

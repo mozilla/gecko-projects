@@ -1238,7 +1238,7 @@ public:
                        uint32_t aLength)
     : Runnable("nsHtml5DataAvailable")
     , mStreamParser(aStreamParser)
-    , mData(Move(aData))
+    , mData(std::move(aData))
     , mLength(aLength)
   {
   }
@@ -1276,7 +1276,7 @@ nsHtml5StreamParser::OnDataAvailable(nsIRequest* aRequest,
     NS_ASSERTION(totalRead <= aLength, "Read more bytes than were available?");
 
     nsCOMPtr<nsIRunnable> dataAvailable =
-      new nsHtml5DataAvailable(this, Move(data), totalRead);
+      new nsHtml5DataAvailable(this, std::move(data), totalRead);
     if (NS_FAILED(
           mEventTarget->Dispatch(dataAvailable, nsIThread::DISPATCH_NORMAL))) {
       NS_WARNING("Dispatching DataAvailable event failed.");
@@ -1499,7 +1499,7 @@ nsHtml5StreamParser::ParseAvailableData()
             FlushTreeOpsAndDisarmTimer();
             return; // no more data and not expecting more
           default:
-            NS_NOTREACHED("It should be impossible to reach this.");
+            MOZ_ASSERT_UNREACHABLE("It should be impossible to reach this.");
             return;
         }
       }
@@ -1587,9 +1587,11 @@ nsHtml5StreamParser::ContinueAfterScripts(nsHtml5Tokenizer* aTokenizer,
   {
     mozilla::MutexAutoLock speculationAutoLock(mSpeculationMutex);
     if (mSpeculations.IsEmpty()) {
-      NS_NOTREACHED("ContinueAfterScripts called without speculations.");
+      MOZ_ASSERT_UNREACHABLE("ContinueAfterScripts called without "
+                             "speculations.");
       return;
     }
+
     nsHtml5Speculation* speculation = mSpeculations.ElementAt(0);
     if (aLastWasCR || !aTokenizer->isInDataState() ||
         !aTreeBuilder->snapshotMatches(speculation->GetSnapshot())) {
@@ -1842,8 +1844,8 @@ nsresult
 nsHtml5StreamParser::DispatchToMain(already_AddRefed<nsIRunnable>&& aRunnable)
 {
   if (mDocGroup) {
-    return mDocGroup->Dispatch(TaskCategory::Network, Move(aRunnable));
+    return mDocGroup->Dispatch(TaskCategory::Network, std::move(aRunnable));
   }
   return SchedulerGroup::UnlabeledDispatch(TaskCategory::Network,
-                                           Move(aRunnable));
+                                           std::move(aRunnable));
 }

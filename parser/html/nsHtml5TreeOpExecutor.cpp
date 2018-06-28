@@ -25,7 +25,6 @@
 #include "nsHtml5TreeOpExecutor.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIContentViewer.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIHTMLDocument.h"
@@ -138,7 +137,7 @@ nsHtml5TreeOpExecutor::~nsHtml5TreeOpExecutor()
 NS_IMETHODIMP
 nsHtml5TreeOpExecutor::WillParse()
 {
-  NS_NOTREACHED("No one should call this");
+  MOZ_ASSERT_UNREACHABLE("No one should call this");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -223,14 +222,14 @@ nsHtml5TreeOpExecutor::DidBuildModel(bool aTerminated)
 NS_IMETHODIMP
 nsHtml5TreeOpExecutor::WillInterrupt()
 {
-  NS_NOTREACHED("Don't call. For interface compat only.");
+  MOZ_ASSERT_UNREACHABLE("Don't call. For interface compat only.");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 nsHtml5TreeOpExecutor::WillResume()
 {
-  NS_NOTREACHED("Don't call. For interface compat only.");
+  MOZ_ASSERT_UNREACHABLE("Don't call. For interface compat only.");
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -863,7 +862,7 @@ nsHtml5TreeOpExecutor::MoveOpsFrom(nsTArray<nsHtml5TreeOperation>& aOpQueue)
 {
   MOZ_RELEASE_ASSERT(mFlushState == eNotFlushing,
                      "Ops added to mOpQueue during tree op execution.");
-  mOpQueue.AppendElements(Move(aOpQueue));
+  mOpQueue.AppendElements(std::move(aOpQueue));
 }
 
 void
@@ -1144,8 +1143,7 @@ nsHtml5TreeOpExecutor::AddSpeculationCSP(const nsAString& aCSP)
 
   nsIPrincipal* principal = mDocument->NodePrincipal();
   nsCOMPtr<nsIContentSecurityPolicy> preloadCsp;
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(mDocument);
-  nsresult rv = principal->EnsurePreloadCSP(domDoc, getter_AddRefs(preloadCsp));
+  nsresult rv = principal->EnsurePreloadCSP(mDocument, getter_AddRefs(preloadCsp));
   NS_ENSURE_SUCCESS_VOID(rv);
 
   // please note that meta CSPs and CSPs delivered through a header need

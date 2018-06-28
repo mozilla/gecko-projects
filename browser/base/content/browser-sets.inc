@@ -132,10 +132,6 @@
                  sidebarurl="chrome://browser/content/places/historySidebar.xul"
                  oncommand="SidebarUI.toggle('viewHistorySidebar');"/>
 
-    <broadcaster id="viewWebPanelsSidebar" autoCheck="false"
-                 type="checkbox" group="sidebar" sidebarurl="chrome://browser/content/web-panels.xul"
-                 oncommand="SidebarUI.toggle('viewWebPanelsSidebar');"/>
-
     <broadcaster id="bookmarkThisPageBroadcaster"
                  label="&bookmarkThisPageCmd.label;"
                  bookmarklabel="&bookmarkThisPageCmd.label;"
@@ -189,6 +185,7 @@
     </broadcaster>
     <broadcaster id="reportPhishingBroadcaster" disabled="true"/>
     <broadcaster id="reportPhishingErrorBroadcaster" disabled="true"/>
+<<<<<<< working copy
     <broadcaster id="devtoolsMenuBroadcaster_RecordExecution"
                  label="&devtoolsRecordExecution.label;"
                  command="Tools:RecordExecution"/>
@@ -198,6 +195,10 @@
     <broadcaster id="devtoolsMenuBroadcaster_ReplayExecution"
                  label="&devtoolsReplayExecution.label;"
                  command="Tools:ReplayExecution"/>
+||||||| base
+=======
+    <broadcaster id="trackingProtectionBroadcaster" enabled="false"/>
+>>>>>>> merge rev
   </broadcasterset>
 
   <keyset id="mainKeyset">

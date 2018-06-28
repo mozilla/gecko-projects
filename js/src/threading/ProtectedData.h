@@ -9,7 +9,7 @@
 
 #include "threading/Thread.h"
 
-namespace JS { struct Zone; }
+namespace JS { class Zone; }
 
 namespace js {
 
@@ -73,7 +73,7 @@ class ProtectedData
   public:
     template <typename... Args>
     explicit ProtectedData(const Check& check, Args&&... args)
-      : value(mozilla::Forward<Args>(args)...)
+      : value(std::forward<Args>(args)...)
 #ifdef JS_HAS_PROTECTED_DATA_CHECKS
       , check(check)
 #endif
@@ -137,7 +137,7 @@ class ProtectedDataNoCheckArgs : public ProtectedData<Check, T>
   public:
     template <typename... Args>
     explicit ProtectedDataNoCheckArgs(Args&&... args)
-      : ProtectedData<Check, T>(Check(), mozilla::Forward<Args>(args)...)
+      : ProtectedData<Check, T>(Check(), std::forward<Args>(args)...)
     {}
 
     template <typename U>
@@ -153,7 +153,7 @@ class ProtectedDataZoneArg : public ProtectedData<Check, T>
   public:
     template <typename... Args>
     explicit ProtectedDataZoneArg(JS::Zone* zone, Args&&... args)
-      : ProtectedData<Check, T>(Check(zone), mozilla::Forward<Args>(args)...)
+      : ProtectedData<Check, T>(Check(zone), std::forward<Args>(args)...)
     {}
 
     template <typename U>
@@ -316,7 +316,7 @@ class ProtectedDataWriteOnce
   public:
     template <typename... Args>
     explicit ProtectedDataWriteOnce(Args&&... args)
-      : value(mozilla::Forward<Args>(args)...)
+      : value(std::forward<Args>(args)...)
 #ifdef JS_HAS_PROTECTED_DATA_CHECKS
       , nwrites(0)
 #endif

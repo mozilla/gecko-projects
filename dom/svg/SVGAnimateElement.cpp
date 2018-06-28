@@ -15,7 +15,7 @@ namespace dom {
 JSObject*
 SVGAnimateElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGAnimateElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGAnimateElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -27,7 +27,7 @@ SVGAnimateElement::SVGAnimateElement(already_AddRefed<mozilla::dom::NodeInfo>& a
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGAnimateElement)
 

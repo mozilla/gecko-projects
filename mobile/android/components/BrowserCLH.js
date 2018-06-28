@@ -116,7 +116,7 @@ BrowserCLH.prototype = {
 
       case "chrome-document-interactive":
       case "content-document-interactive": {
-        let contentWin = subject.QueryInterface(Ci.nsIDOMDocument).defaultView;
+        let contentWin = subject.defaultView;
         let win = GeckoViewUtils.getChromeWindow(contentWin);
         let dispatcher = GeckoViewUtils.getDispatcherForWindow(win);
         if (!win || !dispatcher || win !== contentWin) {
@@ -185,6 +185,8 @@ BrowserCLH.prototype = {
       mozSystemGroup: true,
     };
 
+    // NOTE: Much of this logic is duplicated in browser/base/content/content.js
+    // for desktop.
     aWindow.addEventListener("DOMFormHasPassword", event => {
       this.LoginManagerContent.onDOMFormHasPassword(event, event.target.ownerGlobal.top);
     }, options);

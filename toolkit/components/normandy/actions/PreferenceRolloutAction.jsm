@@ -70,6 +70,13 @@ class PreferenceRolloutAction extends BaseAction {
       }
 
     } else { // new enrollment
+      // Check if this rollout would be a no-op, which is not allowed.
+      if (newRollout.preferences.every(({value, previousValue}) => value === previousValue)) {
+        TelemetryEvents.sendEvent("enrollFailed", "preference_rollout", args.slug, {reason: "would-be-no-op"});
+        // Throw so that this recipe execution is marked as a failure
+        throw new Error(`New rollout ${args.slug} does not change any preferences.`);
+      }
+
       await PreferenceRollouts.add(newRollout);
 
       for (const {preferenceName, value} of args.preferences) {
@@ -103,6 +110,7 @@ class PreferenceRolloutAction extends BaseAction {
     for (const prefSpec of preferences) {
       if (existingManagedPrefs.has(prefSpec.preferenceName)) {
         TelemetryEvents.sendEvent("enrollFailed", "preference_rollout", slug, {reason: "conflict", preference: prefSpec.preferenceName});
+        // Throw so that this recipe execution is marked as a failure
         throw new Error(`Cannot start rollout ${slug}. Preference ${prefSpec.preferenceName} is already managed.`);
       }
       const existingPrefType = Services.prefs.getPrefType(prefSpec.preferenceName);
@@ -115,6 +123,7 @@ class PreferenceRolloutAction extends BaseAction {
           slug,
           {reason: "invalid type", preference: prefSpec.preferenceName},
         );
+        // Throw so that this recipe execution is marked as a failure
         throw new Error(
           `Cannot start rollout "${slug}" on "${prefSpec.preferenceName}". ` +
           `Existing preference is of type ${existingPrefType}, but rollout ` +
@@ -143,12 +152,12 @@ class PreferenceRolloutAction extends BaseAction {
       let oldValue = null;
       if (oldPrefSpecs.has(prefSpec.preferenceName)) {
         let oldPrefSpec = oldPrefSpecs.get(prefSpec.preferenceName);
-        if (oldPrefSpec.previousValue !== prefSpec.previousValue) {
-          this.log.debug(`updating ${existingRollout.slug}: ${prefSpec.preferenceName} previous value changed from ${oldPrefSpec.previousValue} to ${prefSpec.previousValue}`);
-          prefSpec.previousValue = oldPrefSpec.previousValue;
-          anyChanged = true;
-        }
         oldValue = oldPrefSpec.value;
+
+        // Trust the old rollout for the values of `previousValue`, but don't
+        // consider this a change, since it already matches the DB, and doesn't
+        // have any other stateful effect.
+        prefSpec.previousValue = oldPrefSpec.previousValue;
       }
       if (oldValue !== newPrefSpecs.get(prefSpec.preferenceName).value) {
         anyChanged = true;

@@ -9,6 +9,10 @@ var EXPORTED_SYMBOLS = ["GeckoViewContent"];
 ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  Services: "resource://gre/modules/Services.jsm",
+});
+
 class GeckoViewContent extends GeckoViewModule {
   onInit() {
     this.registerListener([
@@ -20,28 +24,30 @@ class GeckoViewContent extends GeckoViewModule {
     ]);
 
     this.messageManager.addMessageListener("GeckoView:SaveStateFinish", this);
-
-    this.registerContent("chrome://geckoview/content/GeckoViewContent.js");
   }
 
   onEnable() {
-    this.window.addEventListener("MozDOMFullScreen:Entered", this,
+    this.window.addEventListener("MozDOMFullscreen:Entered", this,
                                  /* capture */ true, /* untrusted */ false);
-    this.window.addEventListener("MozDOMFullScreen:Exited", this,
+    this.window.addEventListener("MozDOMFullscreen:Exited", this,
                                  /* capture */ true, /* untrusted */ false);
 
     this.messageManager.addMessageListener("GeckoView:DOMFullscreenExit", this);
     this.messageManager.addMessageListener("GeckoView:DOMFullscreenRequest", this);
+
+    Services.obs.addObserver(this, "oop-frameloader-crashed");
   }
 
   onDisable() {
-    this.window.removeEventListener("MozDOMFullScreen:Entered", this,
+    this.window.removeEventListener("MozDOMFullscreen:Entered", this,
                                     /* capture */ true);
-    this.window.removeEventListener("MozDOMFullScreen:Exited", this,
+    this.window.removeEventListener("MozDOMFullscreen:Exited", this,
                                     /* capture */ true);
 
     this.messageManager.removeMessageListener("GeckoView:DOMFullscreenExit", this);
     this.messageManager.removeMessageListener("GeckoView:DOMFullscreenRequest", this);
+
+    Services.obs.removeObserver(this, "oop-frameloader-crashed");
   }
 
   // Bundle event handler.
@@ -121,6 +127,25 @@ class GeckoViewContent extends GeckoViewModule {
         this._saveStateCallbacks.get(aMsg.data.id).onSuccess(aMsg.data.state);
         this._saveStateCallbacks.delete(aMsg.data.id);
         break;
+    }
+  }
+
+  // nsIObserver event handler
+  observe(aSubject, aTopic, aData) {
+    debug `observe: ${aTopic}`;
+
+    switch (aTopic) {
+      case "oop-frameloader-crashed": {
+        const browser = aSubject.ownerElement;
+        if (!browser || browser != this.browser) {
+          return;
+        }
+
+        this.eventDispatcher.sendRequest({
+          type: "GeckoView:ContentCrash"
+        });
+      }
+      break;
     }
   }
 }

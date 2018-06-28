@@ -23,8 +23,6 @@ Comment::~Comment()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(Comment, CharacterData, nsIDOMNode)
-
 already_AddRefed<CharacterData>
 Comment::CloneDataNode(mozilla::dom::NodeInfo *aNodeInfo, bool aCloneText) const
 {
@@ -70,7 +68,7 @@ Comment::Constructor(const GlobalObject& aGlobal,
 JSObject*
 Comment::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return CommentBinding::Wrap(aCx, this, aGivenProto);
+  return Comment_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

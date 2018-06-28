@@ -125,7 +125,8 @@ HTMLLinkElement::HasDeferredDNSPrefetchRequest()
 }
 
 nsresult
-HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
+HTMLLinkElement::BindToTree(nsIDocument* aDocument,
+                            nsIContent* aParent,
                             nsIContent* aBindingParent,
                             bool aCompileEventHandlers)
 {
@@ -136,12 +137,8 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                                                  aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Link must be inert in ShadowRoot.
-  if (aDocument && !GetContainingShadow()) {
-    aDocument->RegisterPendingLinkUpdate(this);
-  }
-
-  if (IsInComposedDoc()) {
+  if (nsIDocument* doc = GetComposedDoc()) {
+    doc->RegisterPendingLinkUpdate(this);
     TryDNSPrefetchOrPreconnectOrPrefetchOrPreloadOrPrerender();
   }
 
@@ -182,12 +179,8 @@ HTMLLinkElement::UnbindFromTree(bool aDeep, bool aNullParent)
 
   // If this is reinserted back into the document it will not be
   // from the parser.
-  nsCOMPtr<nsIDocument> oldDoc = GetUncomposedDoc();
-
-  // Check for a ShadowRoot because link elements are inert in a
-  // ShadowRoot.
-  ShadowRoot* oldShadowRoot = GetBindingParent() ?
-    GetBindingParent()->GetShadowRoot() : nullptr;
+  nsIDocument* oldDoc = GetUncomposedDoc();
+  ShadowRoot* oldShadowRoot = GetContainingShadow();
 
   CreateAndDispatchEvent(oldDoc, NS_LITERAL_STRING("DOMLinkRemoved"));
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
@@ -251,7 +244,10 @@ HTMLLinkElement::CreateAndDispatchEvent(nsIDocument* aDoc,
     return;
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, aEventName, true, true);
+    new AsyncEventDispatcher(this,
+                             aEventName,
+                             CanBubble::eYes,
+                             ChromeOnlyDispatch::eYes);
   // Always run async in order to avoid running script when the content
   // sink isn't expecting it.
   asyncDispatcher->PostDOMEvent();
@@ -483,7 +479,7 @@ HTMLLinkElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
 JSObject*
 HTMLLinkElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLLinkElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLLinkElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void

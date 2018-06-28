@@ -22,6 +22,7 @@
 #include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "nsIThread.h"
+#include "nsITimer.h"
 
 #include "jsapi.h"
 #include "js/GCAnnotations.h"
@@ -43,6 +44,7 @@ namespace loader {
         Parent,
         Web,
         Extension,
+        Privileged,
     };
 
     template <typename T>
@@ -379,6 +381,8 @@ private:
 
     void PrepareCacheWriteInternal();
 
+    void FinishContentStartup();
+
     // Returns a file pointer for the cache file with the given name in the
     // current profile.
     Result<nsCOMPtr<nsIFile>, nsresult>
@@ -390,7 +394,7 @@ private:
 
     void DecodeNextBatch(size_t chunkSize, JS::HandleObject scope = nullptr);
 
-    static void OffThreadDecodeCallback(void* token, void* context);
+    static void OffThreadDecodeCallback(JS::OffThreadToken* token, void* context);
     void MaybeFinishOffThreadDecode();
     void DoFinishOffThreadDecode();
 
@@ -439,7 +443,7 @@ private:
     Vector<CachedScript*> mParsingScripts;
 
     // The token for the completed off-thread decode task.
-    void* mToken = nullptr;
+    JS::OffThreadToken* mToken = nullptr;
 
     // True if a runnable has been dispatched to the main thread to finish an
     // off-thread decode operation.
@@ -459,6 +463,7 @@ private:
 
     nsCOMPtr<nsIFile> mProfD;
     nsCOMPtr<nsIThread> mSaveThread;
+    nsCOMPtr<nsITimer> mSaveTimer;
 
     // The mmapped cache data from this session's cache file.
     AutoMemMap mCacheData;

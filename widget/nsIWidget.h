@@ -143,6 +143,7 @@ typedef void* nsNativeWidget;
 #ifdef MOZ_X11
 #define NS_NATIVE_COMPOSITOR_DISPLAY   105
 #endif // MOZ_X11
+#define NS_NATIVE_EGL_WINDOW           106
 #endif
 #ifdef MOZ_WIDGET_ANDROID
 #define NS_JAVA_SURFACE                100
@@ -1495,20 +1496,25 @@ class nsIWidget : public nsISupports
     virtual MOZ_MUST_USE nsresult
     BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) = 0;
 
-    enum Modifiers {
-        CAPS_LOCK = 0x01, // when CapsLock is active
-        NUM_LOCK = 0x02, // when NumLock is active
-        SHIFT_L = 0x0100,
-        SHIFT_R = 0x0200,
-        CTRL_L = 0x0400,
-        CTRL_R = 0x0800,
-        ALT_L = 0x1000, // includes Option
-        ALT_R = 0x2000,
-        COMMAND_L = 0x4000,
-        COMMAND_R = 0x8000,
-        HELP = 0x10000,
-        FUNCTION = 0x100000,
-        NUMERIC_KEY_PAD = 0x01000000 // when the key is coming from the keypad
+    enum Modifiers
+    {
+      CAPS_LOCK =       0x00000001, // when CapsLock is active
+      NUM_LOCK =        0x00000002, // when NumLock is active
+      SHIFT_L =         0x00000100,
+      SHIFT_R =         0x00000200,
+      CTRL_L =          0x00000400,
+      CTRL_R =          0x00000800,
+      ALT_L =           0x00001000, // includes Option
+      ALT_R =           0x00002000,
+      COMMAND_L =       0x00004000,
+      COMMAND_R =       0x00008000,
+      HELP =            0x00010000,
+      ALTGRAPH =        0x00020000, // AltGr key on Windows.  This emulates
+                                    // AltRight key behavior of keyboard
+                                    // layouts which maps AltGr to AltRight
+                                    // key.
+      FUNCTION =        0x00100000,
+      NUMERIC_KEY_PAD = 0x01000000 // when the key is coming from the keypad
     };
     /**
      * Utility method intended for testing. Dispatches native key events
@@ -1821,6 +1827,13 @@ public:
      */
     virtual void DefaultProcOfPluginEvent(
                    const mozilla::WidgetPluginEvent& aEvent) = 0;
+
+    /*
+     * Enable or Disable IME by windowless plugin.
+     */
+    virtual void EnableIMEForPlugin(bool aEnable)
+    {
+    }
 
     /*
      * Notifies the input context changes.

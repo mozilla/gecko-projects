@@ -22,7 +22,7 @@ namespace dom {
 JSObject*
 SVGMPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGMPathElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGMPathElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGMPathElement::sStringInfo[2] =
@@ -49,7 +49,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(SVGMPathElement,
                                              SVGMPathElementBase,
-                                             nsIDOMNode,
                                              nsIMutationObserver)
 
 // Constructor
@@ -65,7 +64,7 @@ SVGMPathElement::~SVGMPathElement()
 }
 
 //----------------------------------------------------------------------
-// nsIDOMNode methods
+// nsINode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGMPathElement)
 

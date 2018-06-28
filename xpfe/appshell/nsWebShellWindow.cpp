@@ -41,7 +41,6 @@
 #include "nsIWebProgressListener.h"
 
 #include "nsIDocument.h"
-#include "nsIDOMNode.h"
 #include "nsIDocumentLoaderFactory.h"
 #include "nsIObserverService.h"
 
@@ -284,7 +283,7 @@ nsWebShellWindow::WindowMoved(nsIWidget* aWidget, int32_t x, int32_t y)
     nsContentUtils::DispatchChromeEvent(mDocShell->GetDocument(),
                                         eventTarget,
                                         NS_LITERAL_STRING("MozUpdateWindowPos"),
-                                        false, false, nullptr);
+                                        CanBubble::eNo, Cancelable::eNo, nullptr);
   }
 
   // Persist position, but not immediately, in case this OS is firing
@@ -607,7 +606,7 @@ nsWebShellWindow::OnProgressChange(nsIWebProgress *aProgress,
                                    int32_t aCurTotalProgress,
                                    int32_t aMaxTotalProgress)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -664,7 +663,7 @@ nsWebShellWindow::OnLocationChange(nsIWebProgress *aProgress,
                                    nsIURI *aURI,
                                    uint32_t aFlags)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -674,7 +673,7 @@ nsWebShellWindow::OnStatusChange(nsIWebProgress* aWebProgress,
                                  nsresult aStatus,
                                  const char16_t* aMessage)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -683,7 +682,7 @@ nsWebShellWindow::OnSecurityChange(nsIWebProgress *aWebProgress,
                                    nsIRequest *aRequest,
                                    uint32_t state)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 

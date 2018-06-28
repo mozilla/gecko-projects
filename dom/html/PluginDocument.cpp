@@ -90,7 +90,8 @@ PluginStreamListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
   nsCOMPtr<nsIStreamListener> objListener = do_QueryInterface(objlc);
 
   if (!objListener) {
-    NS_NOTREACHED("PluginStreamListener without appropriate content node");
+    MOZ_ASSERT_UNREACHABLE("PluginStreamListener without appropriate content "
+                           "node");
     return NS_BINDING_ABORTED;
   }
 
@@ -100,7 +101,7 @@ PluginStreamListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
   // channel, so it can proceed with a load normally once it gets OnStartRequest
   nsresult rv = objlc->InitializeFromChannel(request);
   if (NS_FAILED(rv)) {
-    NS_NOTREACHED("InitializeFromChannel failed");
+    MOZ_ASSERT_UNREACHABLE("InitializeFromChannel failed");
     return rv;
   }
 
@@ -130,15 +131,15 @@ PluginDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject
   MediaDocument::SetScriptGlobalObject(aScriptGlobalObject);
 
   if (aScriptGlobalObject) {
-    if (!mPluginContent) {
+    if (!InitialSetupHasBeenDone()) {
       // Create synthetic document
 #ifdef DEBUG
       nsresult rv =
 #endif
         CreateSyntheticPluginDocument();
       NS_ASSERTION(NS_SUCCEEDED(rv), "failed to create synthetic document");
+      InitialSetupDone();
     }
-    BecomeInteractive();
   } else {
     mStreamListener = nullptr;
   }

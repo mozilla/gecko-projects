@@ -108,8 +108,7 @@ HTMLMetaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 
       nsIPrincipal* principal = aDocument->NodePrincipal();
       nsCOMPtr<nsIContentSecurityPolicy> csp;
-      nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(aDocument);
-      principal->EnsureCSP(domDoc, getter_AddRefs(csp));
+      principal->EnsureCSP(aDocument, getter_AddRefs(csp));
       if (csp) {
         if (LOG_ENABLED()) {
           nsAutoCString documentURIspec;
@@ -157,14 +156,17 @@ HTMLMetaElement::CreateAndDispatchEvent(nsIDocument* aDoc,
     return;
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, aEventName, true, true);
+    new AsyncEventDispatcher(this,
+                             aEventName,
+                             CanBubble::eYes,
+                             ChromeOnlyDispatch::eYes);
   asyncDispatcher->RunDOMEventWhenSafe();
 }
 
 JSObject*
 HTMLMetaElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLMetaElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLMetaElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

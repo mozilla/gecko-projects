@@ -35,7 +35,7 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::dom::SVGPreserveAspectRatioBinding;
+using namespace mozilla::dom::SVGPreserveAspectRatio_Binding;
 using namespace mozilla::gfx;
 
 SVGSVGElement*
@@ -598,7 +598,7 @@ SVGContentUtils::GetViewBoxTransform(float aViewportWidth, float aViewportHeight
         f = aViewportHeight - a * aViewboxHeight;
         break;
       default:
-        NS_NOTREACHED("Unknown value for align");
+        MOZ_ASSERT_UNREACHABLE("Unknown value for align");
       }
     }
     else if (
@@ -623,10 +623,10 @@ SVGContentUtils::GetViewBoxTransform(float aViewportWidth, float aViewportHeight
         e = aViewportWidth - a * aViewboxWidth;
         break;
       default:
-        NS_NOTREACHED("Unknown value for align");
+        MOZ_ASSERT_UNREACHABLE("Unknown value for align");
       }
     }
-    else NS_NOTREACHED("Unknown value for meetOrSlice");
+    else MOZ_ASSERT_UNREACHABLE("Unknown value for meetOrSlice");
   }
 
   if (aViewboxX) e += -a * aViewboxX;

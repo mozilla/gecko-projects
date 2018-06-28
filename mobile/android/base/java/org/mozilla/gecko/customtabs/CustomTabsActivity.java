@@ -37,6 +37,7 @@ import org.mozilla.gecko.Clipboard;
 import org.mozilla.gecko.DoorHangerPopup;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.FormAssistPopup;
+import org.mozilla.gecko.GeckoApplication;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.R;
@@ -131,7 +132,7 @@ public class CustomTabsActivity extends AppCompatActivity
         mGeckoSession.setProgressDelegate(this);
         mGeckoSession.setContentDelegate(this);
 
-        mGeckoView.setSession(mGeckoSession, GeckoRuntime.getDefault(this));
+        mGeckoView.setSession(mGeckoSession, GeckoApplication.ensureRuntime(this));
 
         mPromptService = new PromptService(this, mGeckoView.getEventDispatcher());
         mDoorHangerPopup = new DoorHangerPopup(this, mGeckoView.getEventDispatcher());
@@ -721,6 +722,12 @@ public class CustomTabsActivity extends AppCompatActivity
 
     @Override
     public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
+        // Won't happen, as we don't use the GeckoView download support in Fennec
+    }
+
+    @Override
+    public void onCrash(final GeckoSession session) {
+        // Won't happen, as we don't use e10s in Fennec
     }
 
     @Override // ActionModePresenter

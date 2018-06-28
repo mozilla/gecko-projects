@@ -12,14 +12,18 @@
 namespace mozilla {
 namespace dom {
 
-AudioWorkletGlobalScope::AudioWorkletGlobalScope() = default;
+AudioWorkletGlobalScope::AudioWorkletGlobalScope()
+  : mCurrentFrame(0)
+  , mCurrentTime(0)
+  , mSampleRate(0.0)
+{}
 
 bool
 AudioWorkletGlobalScope::WrapGlobalObject(JSContext* aCx,
                                           JS::MutableHandle<JSObject*> aReflector)
 {
-  JS::CompartmentOptions options;
-  return AudioWorkletGlobalScopeBinding::Wrap(aCx, this, this,
+  JS::RealmOptions options;
+  return AudioWorkletGlobalScope_Binding::Wrap(aCx, this, this,
                                               options,
                                               WorkletPrincipal::GetWorkletPrincipal(),
                                               true, aReflector);
@@ -30,6 +34,21 @@ AudioWorkletGlobalScope::RegisterProcessor(const nsAString& aType,
                                            VoidFunction& aProcessorCtor)
 {
   // Nothing to do here.
+}
+
+uint64_t AudioWorkletGlobalScope::CurrentFrame() const
+{
+  return mCurrentFrame;
+}
+
+double AudioWorkletGlobalScope::CurrentTime() const
+{
+  return mCurrentTime;
+}
+
+float AudioWorkletGlobalScope::SampleRate() const
+{
+  return mSampleRate;
 }
 
 } // dom namespace

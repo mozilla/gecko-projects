@@ -7,7 +7,6 @@
 var testserver = AddonTestUtils.createHttpServer({hosts: ["example.com"]});
 
 // register files with server
-testserver.registerDirectory("/addons/", do_get_file("addons"));
 testserver.registerDirectory("/data/", do_get_file("data"));
 
 // The test extension uses an insecure update url.
@@ -259,7 +258,7 @@ add_task(async function setup() {
   let addons = await getAddons(IDS);
   for (let [id, addon] of Object.entries(ADDONS)) {
     if (addon.initialState) {
-      Object.assign(addons.get(id), addon.initialState);
+      await setInitialState(addons.get(id), addon.initialState);
     }
     if (addon.findUpdates) {
       await promiseUpdates(addons.get(id));
