@@ -24,6 +24,7 @@
 #include "jit/BaselineFrame-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
+#include "vm/NativeObject-inl.h"
 
 namespace js {
 
@@ -36,7 +37,7 @@ InterpreterFrame::environmentChain() const
 inline GlobalObject&
 InterpreterFrame::global() const
 {
-    return environmentChain()->global();
+    return script()->global();
 }
 
 inline JSObject&
@@ -496,7 +497,7 @@ AbstractFramePtr::pushVarEnvironment(JSContext* cx, HandleScope scope)
 inline JS::Realm*
 AbstractFramePtr::realm() const
 {
-    return environmentChain()->realm();
+    return environmentChain()->nonCCWRealm();
 }
 
 inline unsigned

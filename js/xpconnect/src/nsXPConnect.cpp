@@ -14,6 +14,8 @@
 #include "xpcprivate.h"
 #include "XPCWrapper.h"
 #include "jsfriendapi.h"
+#include "js/ProfilingStack.h"
+#include "GeckoProfiler.h"
 #include "nsJSEnvironment.h"
 #include "nsThreadUtils.h"
 #include "nsDOMJSUtils.h"
@@ -37,7 +39,6 @@
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
 #include "nsScriptError.h"
-#include "jsfriendapi.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -71,6 +72,10 @@ nsXPConnect::nsXPConnect()
     : mShuttingDown(false)
 {
     XPCJSContext::InitTLS();
+
+#ifdef MOZ_GECKO_PROFILER
+    JS::SetProfilingThreadCallbacks(profiler_register_thread, profiler_unregister_thread);
+#endif
 
     XPCJSContext* xpccx = XPCJSContext::NewXPCJSContext(nullptr);
     if (!xpccx) {
@@ -964,14 +969,14 @@ void
 SetLocationForGlobal(JSObject* global, const nsACString& location)
 {
     MOZ_ASSERT(global);
-    CompartmentPrivate::Get(global)->SetLocation(location);
+    RealmPrivate::Get(global)->SetLocation(location);
 }
 
 void
 SetLocationForGlobal(JSObject* global, nsIURI* locationURI)
 {
     MOZ_ASSERT(global);
-    CompartmentPrivate::Get(global)->SetLocationURI(locationURI);
+    RealmPrivate::Get(global)->SetLocationURI(locationURI);
 }
 
 } // namespace xpc
@@ -1174,7 +1179,7 @@ IsChromeOrXBL(JSContext* cx, JSObject* /* unused */)
     MOZ_ASSERT(NS_IsMainThread());
     JS::Realm* realm = JS::GetCurrentRealmOrNull(cx);
     MOZ_ASSERT(realm);
-    JSCompartment* c = JS::GetCompartmentForRealm(realm);
+    JS::Compartment* c = JS::GetCompartmentForRealm(realm);
 
     // For remote XUL, we run XBL in the XUL scope. Given that we care about
     // compat and not security for remote XUL, we just always claim to be XBL.

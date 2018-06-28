@@ -103,13 +103,14 @@
 #include "TouchManager.h"
 #include "DecoderDoctorLogger.h"
 #include "MediaDecoder.h"
+#include "mozilla/ClearSiteData.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
 #include "mozilla/dom/WebIDLGlobalNameHash.h"
 #include "mozilla/dom/ipc/IPCBlobInputStreamStorage.h"
 #include "mozilla/dom/U2FTokenManager.h"
 #include "mozilla/dom/PointerEventHandler.h"
-#include "nsHostObjectProtocolHandler.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "nsThreadManager.h"
 
 using namespace mozilla;
@@ -285,6 +286,8 @@ nsLayoutStatics::Initialize()
 
   nsThreadManager::InitializeShutdownObserver();
 
+  ClearSiteData::Initialize();
+
   return NS_OK;
 }
 
@@ -392,5 +395,5 @@ nsLayoutStatics::Shutdown()
 
   PromiseDebugging::Shutdown();
 
-  nsHostObjectProtocolHandler::RemoveDataEntries();
+  BlobURLProtocolHandler::RemoveDataEntries();
 }

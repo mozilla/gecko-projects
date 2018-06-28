@@ -16,9 +16,9 @@ from mozharness.base.transfer import TransferMixin
 try_config_options = [
     [["--try-message"],
      {"action": "store",
-     "dest": "try_message",
-     "default": None,
-     "help": "try syntax string to select tests to run",
+      "dest": "try_message",
+      "default": None,
+      "help": "try syntax string to select tests to run",
       }],
 ]
 
@@ -27,7 +27,7 @@ test_flavors = {
     'chrome': {},
     'devtools-chrome': {},
     'mochitest': {},
-    'xpcshell' :{},
+    'xpcshell': {},
     'reftest': {
         "path": lambda x: os.path.join("tests", "reftest", "tests", x)
     },
@@ -44,6 +44,7 @@ test_flavors = {
         "path": lambda x: os.path.join("tests", x.split("testing" + os.path.sep)[1])
     },
 }
+
 
 class TryToolsMixin(TransferMixin):
     """Utility functions for an interface between try syntax and out test harnesses.
@@ -86,26 +87,6 @@ class TryToolsMixin(TransferMixin):
             msg = self.config["try_message"]
         elif 'TRY_COMMIT_MSG' in os.environ:
             msg = os.environ['TRY_COMMIT_MSG']
-        elif self._is_try():
-            # This commit message was potentially truncated or not available
-            # (e.g. if running in TaskCluster), get the full message from hg.
-            repo_url = 'https://hg.mozilla.org/%s/'
-            rev = os.environ.get('GECKO_HEAD_REV')
-            repo_path = self.config.get('branch')
-            if repo_path:
-                repo_url = repo_url % repo_path
-            else:
-                repo_url = os.environ.get('GECKO_HEAD_REPOSITORY',
-                                          repo_url % 'try')
-            if not repo_url.endswith('/'):
-                repo_url += '/'
-
-            url = '{}json-pushes?changeset={}&full=1'.format(repo_url, rev)
-
-            pushinfo = self.load_json_from_url(url)
-            for k, v in pushinfo.items():
-                if isinstance(v, dict) and 'changesets' in v:
-                    msg = v['changesets'][-1]['desc']
 
         if not msg:
             self.warning('Try message not found.')
@@ -177,6 +158,7 @@ class TryToolsMixin(TransferMixin):
                          ' and forward them to the underlying test harness command.'))
 
         label_dict = {}
+
         def label_from_val(val):
             if val in label_dict:
                 return label_dict[val]
@@ -239,7 +221,7 @@ class TryToolsMixin(TransferMixin):
                       'files: %s.' % ','.join(self.try_test_paths[flavor]))
             args.extend(['--this-chunk=1', '--total-chunks=1'])
 
-            path_func = test_flavors[flavor].get("path", lambda x:x)
+            path_func = test_flavors[flavor].get("path", lambda x: x)
             tests = [path_func(os.path.normpath(item)) for item in self.try_test_paths[flavor]]
         else:
             tests = []

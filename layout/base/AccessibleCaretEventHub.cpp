@@ -25,6 +25,9 @@
 #include "nsITimer.h"
 #include "nsPresContext.h"
 
+using namespace mozilla;
+using namespace mozilla::dom;
+
 namespace mozilla {
 
 #undef AC_LOG
@@ -551,7 +554,7 @@ AccessibleCaretEventHub::HandleTouchEvent(WidgetTouchEvent* aEvent)
                                        : mActiveTouchId);
   nsPoint point = GetTouchEventPosition(aEvent, id);
 
-  mManager->SetLastInputSource(MouseEventBinding::MOZ_SOURCE_TOUCH);
+  mManager->SetLastInputSource(MouseEvent_Binding::MOZ_SOURCE_TOUCH);
 
   switch (aEvent->mMessage) {
     case eTouchStart:
@@ -587,7 +590,7 @@ AccessibleCaretEventHub::HandleTouchEvent(WidgetTouchEvent* aEvent)
 nsEventStatus
 AccessibleCaretEventHub::HandleKeyboardEvent(WidgetKeyboardEvent* aEvent)
 {
-  mManager->SetLastInputSource(MouseEventBinding::MOZ_SOURCE_KEYBOARD);
+  mManager->SetLastInputSource(MouseEvent_Binding::MOZ_SOURCE_KEYBOARD);
 
   switch (aEvent->mMessage) {
     case eKeyUp:

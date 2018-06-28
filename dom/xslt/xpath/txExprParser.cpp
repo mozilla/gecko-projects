@@ -21,8 +21,6 @@
 #include "txXPathNode.h"
 #include "txXPathOptimizer.h"
 
-using mozilla::Move;
-
 /**
  * Creates an Attribute Value Template using the given value
  * This should move to XSLProcessor class
@@ -116,7 +114,7 @@ txExprParser::createAVT(const nsAString& aAttrValue,
 
         // Add expression, create a concat() call if necessary
         if (!expr) {
-            expr = Move(newExpr);
+            expr = std::move(newExpr);
         }
         else {
             if (!concat) {
@@ -250,7 +248,7 @@ txExprParser::createBinaryExpr(nsAutoPtr<Expr>& left, nsAutoPtr<Expr>& right,
             break;
 
         default:
-            NS_NOTREACHED("operator tokens should be already checked");
+            MOZ_ASSERT_UNREACHABLE("operator tokens should be already checked");
             return NS_ERROR_UNEXPECTED;
     }
     NS_ENSURE_TRUE(expr, NS_ERROR_OUT_OF_MEMORY);
@@ -312,7 +310,7 @@ txExprParser::createExpr(txExprLexer& lexer, txIParseContext* aContext,
                    <= precedence(static_cast<Token*>(ops.peek()))) {
                 // can't use expr as argument due to order of evaluation
                 nsAutoPtr<Expr> left(static_cast<Expr*>(exprs.pop()));
-                nsAutoPtr<Expr> right(Move(expr));
+                nsAutoPtr<Expr> right(std::move(expr));
                 rv = createBinaryExpr(left, right,
                                       static_cast<Token*>(ops.pop()),
                                       getter_Transfers(expr));
@@ -331,7 +329,7 @@ txExprParser::createExpr(txExprLexer& lexer, txIParseContext* aContext,
 
     while (NS_SUCCEEDED(rv) && !exprs.isEmpty()) {
         nsAutoPtr<Expr> left(static_cast<Expr*>(exprs.pop()));
-        nsAutoPtr<Expr> right(Move(expr));
+        nsAutoPtr<Expr> right(std::move(expr));
         rv = createBinaryExpr(left, right, static_cast<Token*>(ops.pop()),
                               getter_Transfers(expr));
     }
@@ -714,7 +712,7 @@ txExprParser::createPathExpr(txExprLexer& lexer, txIParseContext* aContext,
 
         expr.forget();
     }
-    NS_NOTREACHED("internal xpath parser error");
+    MOZ_ASSERT_UNREACHABLE("internal xpath parser error");
     return NS_ERROR_UNEXPECTED;
 }
 
@@ -848,7 +846,7 @@ txExprParser::parseParameters(FunctionCall* aFnCall, txExprLexer& lexer,
         }
     }
 
-    NS_NOTREACHED("internal xpath parser error");
+    MOZ_ASSERT_UNREACHABLE("internal xpath parser error");
     return NS_ERROR_UNEXPECTED;
 }
 

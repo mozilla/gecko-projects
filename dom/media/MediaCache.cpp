@@ -522,6 +522,7 @@ MediaCacheStream::MediaCacheStream(ChannelMediaResource* aClient,
   , mStreamOffset(0)
   , mPlaybackBytesPerSecond(10000)
   , mPinCount(0)
+  , mNotifyDataEndedStatus(NS_ERROR_NOT_INITIALIZED)
   , mMetadataInPartialBlockBuffer(false)
   , mIsPrivateBrowsing(aIsPrivateBrowsing)
 {
@@ -2513,7 +2514,7 @@ MediaCacheStream::GetNextCachedDataInternal(AutoLock&, int64_t aOffset)
     ++blockIndex;
   }
 
-  NS_NOTREACHED("Should return in loop");
+  MOZ_ASSERT_UNREACHABLE("Should return in loop");
   return -1;
 }
 

@@ -74,6 +74,8 @@ nsAsyncStreamCopier::nsAsyncStreamCopier()
     , mChunkSize(nsIOService::gDefaultSegmentSize)
     , mStatus(NS_OK)
     , mIsPending(false)
+    , mCloseSource{ false }
+    , mCloseSink{ false }
     , mShouldSniffBuffering(false)
 {
     LOG(("Creating nsAsyncStreamCopier @%p\n", this));
@@ -202,14 +204,14 @@ nsAsyncStreamCopier::Cancel(nsresult status)
 NS_IMETHODIMP
 nsAsyncStreamCopier::Suspend()
 {
-    NS_NOTREACHED("nsAsyncStreamCopier::Suspend");
+    MOZ_ASSERT_UNREACHABLE("nsAsyncStreamCopier::Suspend");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 nsAsyncStreamCopier::Resume()
 {
-    NS_NOTREACHED("nsAsyncStreamCopier::Resume");
+    MOZ_ASSERT_UNREACHABLE("nsAsyncStreamCopier::Resume");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 

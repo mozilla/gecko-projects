@@ -25,15 +25,14 @@ var EXPORTED_SYMBOLS = [
 
 /* globals DownloadAddonInstall, LocalAddonInstall */
 
-Cu.importGlobalProperties(["TextDecoder", "TextEncoder", "fetch"]);
-
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 
+XPCOMUtils.defineLazyGlobalGetters(this, ["TextDecoder", "TextEncoder", "fetch"]);
+
 XPCOMUtils.defineLazyModuleGetters(this, {
   AddonRepository: "resource://gre/modules/addons/AddonRepository.jsm",
-  AddonSettings: "resource://gre/modules/addons/AddonSettings.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   CertUtils: "resource://gre/modules/CertUtils.jsm",
   ExtensionData: "resource://gre/modules/Extension.jsm",
@@ -481,11 +480,7 @@ async function loadManifestFromWebManifest(aUri, aPackage) {
     else
       addon.optionsType = AddonManager.OPTIONS_TYPE_INLINE_BROWSER;
 
-    if (manifest.options_ui.browser_style === null)
-      logger.warn("Please specify whether you want browser_style " +
-          "or not in your options_ui options.");
-    else
-      addon.optionsBrowserStyle = manifest.options_ui.browser_style;
+    addon.optionsBrowserStyle = manifest.options_ui.browser_style;
   }
 
   // WebExtensions don't use iconURLs
@@ -964,9 +959,9 @@ function shouldVerifySignedState(aAddon) {
   if (aAddon.location.name == KEY_APP_SYSTEM_DEFAULTS)
     return false;
 
-  // Otherwise only check signatures if signing is enabled and the add-on is one
-  // of the signed types.
-  return AddonSettings.ADDON_SIGNING && XPIDatabase.SIGNED_TYPES.has(aAddon.type);
+  // Otherwise only check signatures if the add-on is one of the signed
+  // types.
+  return XPIDatabase.SIGNED_TYPES.has(aAddon.type);
 }
 
 /**

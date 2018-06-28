@@ -17,6 +17,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/Unused.h"
 
 #include <chrono>
 #ifdef JS_POSIX_NSPR
@@ -43,6 +44,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <thread>
+#include <utility>
 #ifdef XP_UNIX
 # include <sys/mman.h>
 # include <sys/stat.h>
@@ -112,10 +114,11 @@
 #include "vm/WrapperObject.h"
 #include "wasm/WasmJS.h"
 
+#include "vm/Compartment-inl.h"
 #include "vm/ErrorObject-inl.h"
 #include "vm/Interpreter-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/JSObject-inl.h"
+#include "vm/Realm-inl.h"
 #include "vm/Stack-inl.h"
 
 using namespace js;
@@ -282,7 +285,7 @@ static OffThreadJob*
 NewOffThreadJob(JSContext* cx, ScriptKind kind, OffThreadJob::Source&& source)
 {
     ShellContext* sc = GetShellContext(cx);
-    UniquePtr<OffThreadJob> job(cx->new_<OffThreadJob>(sc, kind, Move(source)));
+    UniquePtr<OffThreadJob> job(cx->new_<OffThreadJob>(sc, kind, std::move(source)));
     if (!job)
         return nullptr;
 
@@ -422,7 +425,7 @@ OffThreadJob::OffThreadJob(ShellContext* sc, ScriptKind kind, Source&& source)
     monitor(sc->offThreadMonitor),
     state(RUNNING),
     token(nullptr),
-    source(Move(source))
+    source(std::move(source))
 {
     MOZ_RELEASE_ASSERT(id > 0, "Off-thread job IDs exhausted");
 }
@@ -497,7 +500,6 @@ static bool enableWasmGc = false;
 static bool enableTestWasmAwaitTier2 = false;
 static bool enableAsyncStacks = false;
 static bool enableStreams = false;
-static bool enableArrayProtoValues = true;
 #ifdef JS_GC_ZEAL
 static uint32_t gZealBits = 0;
 static uint32_t gZealFrequency = 0;
@@ -882,7 +884,7 @@ InitModuleLoader(JSContext* cx)
     // the module loader for the current compartment.
 
     uint32_t srcLen = moduleloader::GetRawScriptsSize();
-    ScopedJSFreePtr<char> src(cx->pod_malloc<char>(srcLen));
+    UniqueChars src(cx->pod_malloc<char>(srcLen));
     if (!src || !DecompressString(moduleloader::compressedSources, moduleloader::GetCompressedSize(),
                                   reinterpret_cast<unsigned char*>(src.get()), srcLen))
     {
@@ -898,7 +900,7 @@ InitModuleLoader(JSContext* cx)
     options.strictOption = true;
 
     RootedValue rv(cx);
-    return Evaluate(cx, options, src, srcLen, &rv);
+    return Evaluate(cx, options, src.get(), srcLen, &rv);
 }
 
 static bool
@@ -1479,15 +1481,22 @@ Options(JSContext* cx, unsigned argc, Value* vp)
         if (!opt.encodeUtf8(cx, str))
             return false;
 
-        if (strcmp(opt.ptr(), "strict") == 0)
+        if (strcmp(opt.ptr(), "strict") == 0) {
             JS::ContextOptionsRef(cx).toggleExtraWarnings();
-        else if (strcmp(opt.ptr(), "werror") == 0)
+        } else if (strcmp(opt.ptr(), "werror") == 0) {
+            // Disallow toggling werror when there are off-thread jobs, to avoid
+            // confusing CompileError::throwError.
+            ShellContext* sc = GetShellContext(cx);
+            if (!sc->offThreadJobs.empty()) {
+                JS_ReportErrorASCII(cx, "can't toggle werror when there are off-thread jobs");
+                return false;
+            }
             JS::ContextOptionsRef(cx).toggleWerror();
-        else if (strcmp(opt.ptr(), "throw_on_asmjs_validation_failure") == 0)
+        } else if (strcmp(opt.ptr(), "throw_on_asmjs_validation_failure") == 0) {
             JS::ContextOptionsRef(cx).toggleThrowOnAsmJSValidationFailure();
-        else if (strcmp(opt.ptr(), "strict_mode") == 0)
+        } else if (strcmp(opt.ptr(), "strict_mode") == 0) {
             JS::ContextOptionsRef(cx).toggleStrictMode();
-        else {
+        } else {
             JS_ReportErrorUTF8(cx,
                                "unknown option name '%s'."
                                " The valid names are strict,"
@@ -1500,19 +1509,19 @@ Options(JSContext* cx, unsigned argc, Value* vp)
     UniqueChars names = DuplicateString("");
     bool found = false;
     if (names && oldContextOptions.extraWarnings()) {
-        names = JS_sprintf_append(Move(names), "%s%s", found ? "," : "", "strict");
+        names = JS_sprintf_append(std::move(names), "%s%s", found ? "," : "", "strict");
         found = true;
     }
     if (names && oldContextOptions.werror()) {
-        names = JS_sprintf_append(Move(names), "%s%s", found ? "," : "", "werror");
+        names = JS_sprintf_append(std::move(names), "%s%s", found ? "," : "", "werror");
         found = true;
     }
     if (names && oldContextOptions.throwOnAsmJSValidationFailure()) {
-        names = JS_sprintf_append(Move(names), "%s%s", found ? "," : "", "throw_on_asmjs_validation_failure");
+        names = JS_sprintf_append(std::move(names), "%s%s", found ? "," : "", "throw_on_asmjs_validation_failure");
         found = true;
     }
     if (names && oldContextOptions.strictMode()) {
-        names = JS_sprintf_append(Move(names), "%s%s", found ? "," : "", "strict_mode");
+        names = JS_sprintf_append(std::move(names), "%s%s", found ? "," : "", "strict_mode");
         found = true;
     }
     if (!names) {
@@ -1660,7 +1669,7 @@ my_LargeAllocFailCallback()
     if (!cx || cx->helperThread())
         return;
 
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapBusy());
+    MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
 
     JS::PrepareForFullGC(cx);
     cx->runtime()->gc.gc(GC_NORMAL, JS::gcreason::SHARED_MEMORY_LIMIT);
@@ -2639,7 +2648,7 @@ PCToLine(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 
 static void
 UpdateSwitchTableBounds(JSContext* cx, HandleScript script, unsigned offset,
@@ -2752,7 +2761,7 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
             break;
 
           case SRC_TABLESWITCH: {
-            JSOp op = JSOp(script->code()[offset]);
+            mozilla::DebugOnly<JSOp> op = JSOp(script->code()[offset]);
             MOZ_ASSERT(op == JSOP_TABLESWITCH);
             if (!sp->jsprintf(" length %u", unsigned(GetSrcNoteOffset(sn, 0))))
                 return false;
@@ -2761,7 +2770,7 @@ SrcNotes(JSContext* cx, HandleScript script, Sprinter* sp)
             break;
           }
           case SRC_CONDSWITCH: {
-            JSOp op = JSOp(script->code()[offset]);
+            mozilla::DebugOnly<JSOp> op = JSOp(script->code()[offset]);
             MOZ_ASSERT(op == JSOP_CONDSWITCH);
             if (!sp->jsprintf(" length %u", unsigned(GetSrcNoteOffset(sn, 0))))
                 return false;
@@ -3243,7 +3252,7 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
 /* Pretend we can always preserve wrappers for dummy DOM objects. */
 static bool
@@ -3439,7 +3448,7 @@ NewSandbox(JSContext* cx, bool lazy)
 
     {
         JSAutoRealm ar(cx, obj);
-        if (!lazy && !JS_InitStandardClasses(cx, obj))
+        if (!lazy && !JS::InitRealmStandardClasses(cx))
             return nullptr;
 
         RootedValue value(cx, BooleanValue(lazy));
@@ -3592,6 +3601,7 @@ WorkerMain(void* arg)
 
     sc->isWorker = true;
     JS_SetContextPrivate(cx, sc);
+    JS_SetGrayGCRootsTracer(cx, TraceGrayRoots, nullptr);
     SetWorkerContextOptions(cx);
     JS::SetBuildIdOp(cx, ShellBuildId);
 
@@ -4127,7 +4137,7 @@ ClearLastWarning(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 static bool
 StackDump(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -4704,7 +4714,7 @@ OffThreadCompileScript(JSContext* cx, unsigned argc, Value* vp)
     }
 
     OffThreadJob* job = NewOffThreadJob(cx, ScriptKind::Script,
-                                        OffThreadJob::Source(Move(ownedChars)));
+                                        OffThreadJob::Source(std::move(ownedChars)));
     if (!job)
         return false;
 
@@ -4790,7 +4800,7 @@ OffThreadCompileModule(JSContext* cx, unsigned argc, Value* vp)
     }
 
     OffThreadJob* job = NewOffThreadJob(cx, ScriptKind::Module,
-                                        OffThreadJob::Source(Move(ownedChars)));
+                                        OffThreadJob::Source(std::move(ownedChars)));
     if (!job)
         return false;
 
@@ -4895,7 +4905,7 @@ OffThreadDecodeScript(JSContext* cx, unsigned argc, Value* vp)
     }
 
     OffThreadJob* job = NewOffThreadJob(cx, ScriptKind::DecodeScript,
-                                        OffThreadJob::Source(Move(loadBuffer)));
+                                        OffThreadJob::Source(std::move(loadBuffer)));
     if (!job)
         return false;
 
@@ -4970,11 +4980,12 @@ class AutoCStringVector
         for (size_t i = 0; i < argv_.length(); i++)
             js_free(argv_[i]);
     }
-    bool append(char* arg) {
-        if (!argv_.append(arg)) {
-            js_free(arg);
+    bool append(UniqueChars&& arg) {
+        if (!argv_.append(arg.get()))
             return false;
-        }
+
+        // Now owned by this vector.
+        mozilla::Unused << arg.release();
         return true;
     }
     char* const* get() const {
@@ -4986,22 +4997,22 @@ class AutoCStringVector
     char* operator[](size_t i) const {
         return argv_[i];
     }
-    void replace(size_t i, char* arg) {
+    void replace(size_t i, UniqueChars arg) {
         js_free(argv_[i]);
-        argv_[i] = arg;
+        argv_[i] = arg.release();
     }
-    char* back() const {
+    const char* back() const {
         return argv_.back();
     }
-    void replaceBack(char* arg) {
+    void replaceBack(UniqueChars arg) {
         js_free(argv_.back());
-        argv_.back() = arg;
+        argv_.back() = arg.release();
     }
 };
 
 #if defined(XP_WIN)
 static bool
-EscapeForShell(AutoCStringVector& argv)
+EscapeForShell(JSContext* cx, AutoCStringVector& argv)
 {
     // Windows will break arguments in argv by various spaces, so we wrap each
     // argument in quotes and escape quotes within. Even with quotes, \ will be
@@ -5018,12 +5029,12 @@ EscapeForShell(AutoCStringVector& argv)
                 newLen++;
         }
 
-        char* escaped = (char*)js_malloc(newLen);
+        UniqueChars escaped(cx->pod_malloc<char>(newLen));
         if (!escaped)
             return false;
 
         char* src = argv[i];
-        char* dst = escaped;
+        char* dst = escaped.get();
         *dst++ = '\"';
         while (*src) {
             if (*src == '\"' || *src == '\\')
@@ -5032,9 +5043,9 @@ EscapeForShell(AutoCStringVector& argv)
         }
         *dst++ = '\"';
         *dst++ = '\0';
-        MOZ_ASSERT(escaped + newLen == dst);
+        MOZ_ASSERT(escaped.get() + newLen == dst);
 
-        argv.replace(i, escaped);
+        argv.replace(i, std::move(escaped));
     }
     return true;
 }
@@ -5063,13 +5074,14 @@ NestedShell(JSContext* cx, unsigned argc, Value* vp)
         JS_ReportErrorNumberASCII(cx, my_GetErrorMessage, nullptr, JSSMSG_NESTED_FAIL);
         return false;
     }
-    if (!argv.append(js_strdup(sArgv[0])))
+    UniqueChars shellPath = DuplicateString(cx, sArgv[0]);
+    if (!shellPath || !argv.append(std::move(shellPath)))
         return false;
 
     // Propagate selected flags from the current shell
     for (unsigned i = 0; i < sPropagatedFlags.length(); i++) {
-        char* cstr = js_strdup(sPropagatedFlags[i]);
-        if (!cstr || !argv.append(cstr))
+        UniqueChars flags = DuplicateString(cx, sPropagatedFlags[i]);
+        if (!flags || !argv.append(std::move(flags)))
             return false;
     }
 
@@ -5077,16 +5089,22 @@ NestedShell(JSContext* cx, unsigned argc, Value* vp)
     RootedString str(cx);
     for (unsigned i = 0; i < args.length(); i++) {
         str = ToString(cx, args[i]);
-        if (!str || !argv.append(JS_EncodeString(cx, str)))
+        if (!str)
+            return false;
+
+        UniqueChars arg(JS_EncodeString(cx, str));
+        if (!arg || !argv.append(std::move(arg)))
             return false;
 
         // As a special case, if the caller passes "--js-cache", replace that
         // with "--js-cache=$(jsCacheDir)"
         if (!strcmp(argv.back(), "--js-cache") && jsCacheDir) {
             UniqueChars newArg = JS_smprintf("--js-cache=%s", jsCacheDir);
-            if (!newArg)
+            if (!newArg) {
+                JS_ReportOutOfMemory(cx);
                 return false;
-            argv.replaceBack(newArg.release());
+            }
+            argv.replaceBack(std::move(newArg));
         }
     }
 
@@ -5096,7 +5114,7 @@ NestedShell(JSContext* cx, unsigned argc, Value* vp)
 
     int status = 0;
 #if defined(XP_WIN)
-    if (!EscapeForShell(argv))
+    if (!EscapeForShell(cx, argv))
         return false;
     status = _spawnv(_P_WAIT, sArgv[0], argv.get());
 #else
@@ -5225,7 +5243,7 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
     JS::RealmBehaviors& behaviors = options.behaviors();
 
     SetStandardRealmOptions(options);
-    options.creationOptions().setNewZone();
+    options.creationOptions().setNewCompartmentAndZone();
 
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.length() == 1 && args[0].isObject()) {
@@ -5245,7 +5263,12 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
         if (!JS_GetProperty(cx, opts, "sameZoneAs", &v))
             return false;
         if (v.isObject())
-            creationOptions.setExistingZone(UncheckedUnwrap(&v.toObject()));
+            creationOptions.setNewCompartmentInExistingZone(UncheckedUnwrap(&v.toObject()));
+
+        if (!JS_GetProperty(cx, opts, "sameCompartmentAs", &v))
+            return false;
+        if (v.isObject() && !fuzzingSafe)
+            creationOptions.setExistingCompartment(UncheckedUnwrap(&v.toObject()));
 
         if (!JS_GetProperty(cx, opts, "disableLazyParsing", &v))
             return false;
@@ -5444,11 +5467,11 @@ WithSourceHook(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     mozilla::UniquePtr<SourceHook> savedHook = js::ForgetSourceHook(cx);
-    js::SetSourceHook(cx, Move(hook));
+    js::SetSourceHook(cx, std::move(hook));
 
     RootedObject fun(cx, &args[1].toObject());
     bool result = Call(cx, UndefinedHandleValue, fun, JS::HandleValueArray::empty(), args.rval());
-    js::SetSourceHook(cx, Move(savedHook));
+    js::SetSourceHook(cx, std::move(savedHook));
     return result;
 }
 
@@ -5542,7 +5565,7 @@ SingleStepCallback(void* arg, jit::Simulator* sim, void* pc)
         sc->stacks.back().length() != stack.length() ||
         !PodEqual(sc->stacks.back().begin(), stack.begin(), stack.length()))
     {
-        if (!sc->stacks.append(Move(stack)))
+        if (!sc->stacks.append(std::move(stack)))
             oomUnsafe.crash("stacks.append");
     }
 }
@@ -5943,8 +5966,13 @@ ConsumeBufferSource(JSContext* cx, JS::HandleObject obj, JS::MimeType, JS::Strea
     }
 
     auto job = cx->make_unique<BufferStreamJob>(consumer);
-    if (!job || !job->bytes.resize(byteLength))
+    if (!job)
         return false;
+
+    if (!job->bytes.resize(byteLength)) {
+        JS_ReportOutOfMemory(cx);
+        return false;
+    }
 
     memcpy(job->bytes.begin(), dataPointer.unwrap(), byteLength);
 
@@ -5953,11 +5981,19 @@ ConsumeBufferSource(JSContext* cx, JS::HandleObject obj, JS::MimeType, JS::Strea
     {
         auto state = bufferStreamState->lock();
         MOZ_ASSERT(!state->shutdown);
-        if (!state->jobs.append(Move(job)))
+        if (!state->jobs.append(std::move(job))) {
+            JS_ReportOutOfMemory(cx);
             return false;
+        }
     }
 
-    return jobPtr->thread.init(BufferStreamMain, jobPtr);
+    {
+        AutoEnterOOMUnsafeRegion oomUnsafe;
+        if (!jobPtr->thread.init(BufferStreamMain, jobPtr))
+            oomUnsafe.crash("ConsumeBufferSource");
+    }
+
+    return true;
 }
 
 static bool
@@ -6475,7 +6511,7 @@ class ShellAutoEntryMonitor : JS::dbg::AutoEntryMonitor {
                 oom = true;
                 return;
             }
-            oom = !log.append(mozilla::Move(displayIdStr));
+            oom = !log.append(std::move(displayIdStr));
             return;
         }
 
@@ -6488,7 +6524,7 @@ class ShellAutoEntryMonitor : JS::dbg::AutoEntryMonitor {
         enteredWithoutExit = true;
 
         UniqueChars label(JS_smprintf("eval:%s", JS_GetScriptFilename(script)));
-        oom = !label || !log.append(mozilla::Move(label));
+        oom = !label || !log.append(std::move(label));
     }
 
     void Exit(JSContext* cx) override {
@@ -6843,7 +6879,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "throwError()",
 "  Throw an error from JS_ReportError."),
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     JS_FN_HELP("disassemble", DisassembleToString, 1, 0,
 "disassemble([fun/code])",
 "  Return the disassembly for the given function or code.\n"
@@ -8266,7 +8302,7 @@ NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
         JSAutoRealm ar(cx, glob);
 
 #ifndef LAZY_STANDARD_CLASSES
-        if (!JS_InitStandardClasses(cx, glob))
+        if (!JS::InitRealmStandardClasses(cx))
             return nullptr;
 #endif
 
@@ -8510,7 +8546,6 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
     enableAsyncStacks = !op.getBoolOption("no-async-stacks");
     enableStreams = op.getBoolOption("enable-streams");
-    enableArrayProtoValues = !op.getBoolOption("no-array-proto-values");
 
     JS::ContextOptionsRef(cx).setBaseline(enableBaseline)
                              .setIon(enableIon)
@@ -8524,8 +8559,7 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
                              .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
                              .setNativeRegExp(enableNativeRegExp)
                              .setAsyncStack(enableAsyncStacks)
-                             .setStreams(enableStreams)
-                             .setArrayProtoValues(enableArrayProtoValues);
+                             .setStreams(enableStreams);
 
     if (op.getBoolOption("no-unboxed-objects"))
         jit::JitOptions.disableUnboxedObjects = true;
@@ -8776,14 +8810,15 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     enableDisassemblyDumps = op.getBoolOption('D');
     cx->runtime()->profilingScripts = enableCodeCoverage || enableDisassemblyDumps;
 
-    jsCacheDir = op.getStringOption("js-cache");
-    if (jsCacheDir) {
+    if (const char* jsCacheOpt = op.getStringOption("js-cache")) {
+        UniqueChars jsCacheChars;
         if (!op.getBoolOption("no-js-cache-per-process"))
-            jsCacheDir = JS_smprintf("%s/%u", jsCacheDir, (unsigned)getpid()).release();
+            jsCacheChars = JS_smprintf("%s/%u", jsCacheOpt, (unsigned)getpid());
         else
-            jsCacheDir = JS_strdup(cx, jsCacheDir);
-        if (!jsCacheDir)
+            jsCacheChars = DuplicateString(jsCacheOpt);
+        if (!jsCacheChars)
             return false;
+        jsCacheDir = jsCacheChars.release();
         jsCacheAsmJSPath = JS_smprintf("%s/asmjs.cache", jsCacheDir).release();
     }
 
@@ -8819,8 +8854,8 @@ SetWorkerContextOptions(JSContext* cx)
 #endif
                              .setTestWasmAwaitTier2(enableTestWasmAwaitTier2)
                              .setNativeRegExp(enableNativeRegExp)
-                             .setStreams(enableStreams)
-                             .setArrayProtoValues(enableArrayProtoValues);
+                             .setStreams(enableStreams);
+
     cx->runtime()->setOffthreadIonCompilationEnabled(offthreadCompilation);
     cx->runtime()->profilingScripts = enableCodeCoverage || enableDisassemblyDumps;
 
@@ -8890,7 +8925,7 @@ Shell(JSContext* cx, OptionParser* op, char** envp)
 
     if (enableDisassemblyDumps) {
         AutoReportException are(cx);
-        if (!js::DumpCompartmentPCCounts(cx))
+        if (!js::DumpRealmPCCounts(cx))
             result = EXITCODE_OUT_OF_MEMORY;
     }
 
@@ -8915,6 +8950,9 @@ Shell(JSContext* cx, OptionParser* op, char** envp)
     return result;
 }
 
+// Used to allocate memory when jemalloc isn't yet initialized.
+JS_DECLARE_NEW_METHODS(SystemAlloc_New, malloc, static)
+
 static void
 SetOutputFile(const char* const envVar,
               RCFile* defaultOut,
@@ -8925,9 +8963,12 @@ SetOutputFile(const char* const envVar,
     const char* outPath = getenv(envVar);
     FILE* newfp;
     if (outPath && *outPath && (newfp = fopen(outPath, "w")))
-        outFile = js_new<RCFile>(newfp);
+        outFile = SystemAlloc_New<RCFile>(newfp);
     else
         outFile = defaultOut;
+
+    if (!outFile)
+        MOZ_CRASH("Failed to allocate output file");
 
     outFile->acquire();
     *outFileP = outFile;
@@ -9070,7 +9111,6 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-native-regexp", "Disable native regexp compilation")
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
         || !op.addBoolOption('\0', "enable-streams", "Enable WHATWG Streams")
-        || !op.addBoolOption('\0', "no-array-proto-values", "Remove Array.prototype.values")
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "

@@ -16,6 +16,10 @@ var _devtoolsContextmenu = require("devtools/client/debugger/new/dist/vendors").
 
 var _reactRedux = require("devtools/client/shared/vendor/react-redux");
 
+var _SourceIcon = require("../shared/SourceIcon");
+
+var _SourceIcon2 = _interopRequireDefault(_SourceIcon);
+
 var _selectors = require("../../selectors/index");
 
 var _sourceTree = require("../../actions/source-tree");
@@ -156,21 +160,12 @@ class SourcesTree extends _react.Component {
     const {
       projectRoot
     } = this.props;
-    const {
-      sourceTree
-    } = this.state;
 
     if (!projectRoot) {
       return null;
     }
 
-    const sourceContents = sourceTree.contents[0];
-    let rootLabel = projectRoot.split("/").pop();
-
-    if (sourceContents && sourceContents.name !== rootLabel) {
-      rootLabel = sourceContents.contents[0].name;
-    }
-
+    const rootLabel = projectRoot.split("/").pop();
     return _react2.default.createElement("div", {
       key: "root",
       className: "sources-clear-root-container"
@@ -311,8 +306,8 @@ var _initialiseProps = function () {
     }
 
     const source = this.getSource(item);
-    return _react2.default.createElement("img", {
-      className: (0, _classnames2.default)((0, _source.getSourceClassnames)(source), "source-icon")
+    return _react2.default.createElement(_SourceIcon2.default, {
+      source: source
     });
   };
 
@@ -448,7 +443,7 @@ const mapStateToProps = state => {
     debuggeeUrl: (0, _selectors.getDebuggeeUrl)(state),
     expanded: (0, _selectors.getExpandedState)(state),
     projectRoot: (0, _selectors.getProjectDirectoryRoot)(state),
-    sources: (0, _selectors.getSources)(state)
+    sources: (0, _selectors.getRelativeSources)(state)
   };
 };
 

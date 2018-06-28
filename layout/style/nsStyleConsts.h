@@ -232,6 +232,8 @@ enum class StyleOrient : uint8_t {
 };
 
 // See nsStyleDisplay
+//
+// These need to be in sync with WillChangeBits in box.rs.
 #define NS_STYLE_WILL_CHANGE_STACKING_CONTEXT   (1<<0)
 #define NS_STYLE_WILL_CHANGE_TRANSFORM          (1<<1)
 #define NS_STYLE_WILL_CHANGE_SCROLL             (1<<2)
@@ -343,7 +345,7 @@ enum class StyleContent : uint8_t {
   AltContent
 };
 
-// See nsStyleColor
+// See nsStyleUserInterface
 #define NS_STYLE_CURSOR_AUTO                    1
 #define NS_STYLE_CURSOR_CROSSHAIR               2
 #define NS_STYLE_CURSOR_DEFAULT                 3    // ie: an arrow
@@ -689,7 +691,7 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_FRAME_SCROLL                   7
 #define NS_STYLE_FRAME_NOSCROLL                 8
 
-// See nsStyleDisplay.mOverflow
+// See nsStyleDisplay.mOverflow{X,Y}
 #define NS_STYLE_OVERFLOW_VISIBLE               0
 #define NS_STYLE_OVERFLOW_HIDDEN                1
 #define NS_STYLE_OVERFLOW_SCROLL                2
@@ -1098,7 +1100,7 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_TEXT_RENDERING_OPTIMIZELEGIBILITY 2
 #define NS_STYLE_TEXT_RENDERING_GEOMETRICPRECISION 3
 
-// adjust-color
+// color-adjust
 #define NS_STYLE_COLOR_ADJUST_ECONOMY               0
 #define NS_STYLE_COLOR_ADJUST_EXACT                 1
 

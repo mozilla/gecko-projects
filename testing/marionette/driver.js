@@ -5,7 +5,6 @@
 "use strict";
 /* global XPCNativeWrapper */
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -47,6 +46,7 @@ const {pprint} = ChromeUtils.import("chrome://marionette/content/format.js", {})
 ChromeUtils.import("chrome://marionette/content/interaction.js");
 ChromeUtils.import("chrome://marionette/content/l10n.js");
 ChromeUtils.import("chrome://marionette/content/legacyaction.js");
+const {Log} = ChromeUtils.import("chrome://marionette/content/log.js", {});
 ChromeUtils.import("chrome://marionette/content/modal.js");
 const {MarionettePrefs} = ChromeUtils.import("chrome://marionette/content/prefs.js", {});
 ChromeUtils.import("chrome://marionette/content/proxy.js");
@@ -57,7 +57,8 @@ const {
   TimedPromise,
 } = ChromeUtils.import("chrome://marionette/content/sync.js", {});
 
-Cu.importGlobalProperties(["URL"]);
+XPCOMUtils.defineLazyGetter(this, "logger", Log.get);
+XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
 this.EXPORTED_SYMBOLS = ["GeckoDriver"];
 
@@ -76,7 +77,6 @@ const SUPPORTED_STRATEGIES = new Set([
   element.Strategy.AnonAttribute,
 ]);
 
-const logger = Log.repository.getLogger("Marionette");
 const globalMessageManager = Services.mm;
 
 /**
@@ -3651,9 +3651,7 @@ GeckoDriver.prototype.commands = {
   "getTitle": GeckoDriver.prototype.getTitle,
   "getWindowHandle": GeckoDriver.prototype.getWindowHandle,
   "getWindowHandles": GeckoDriver.prototype.getWindowHandles,
-  "getWindowPosition": GeckoDriver.prototype.getWindowRect, // redirect for compatibility
   "getWindowRect": GeckoDriver.prototype.getWindowRect,
-  "getWindowSize": GeckoDriver.prototype.getWindowRect, // redirect for compatibility
   "goBack": GeckoDriver.prototype.goBack,
   "goForward": GeckoDriver.prototype.goForward,
   "isElementDisplayed": GeckoDriver.prototype.isElementDisplayed,
@@ -3667,9 +3665,7 @@ GeckoDriver.prototype.commands = {
   "sendKeysToDialog": GeckoDriver.prototype.sendKeysToDialog,
   "sendKeysToElement": GeckoDriver.prototype.sendKeysToElement,
   "setTimeouts": GeckoDriver.prototype.setTimeouts,
-  "setWindowPosition": GeckoDriver.prototype.setWindowRect, // redirect for compatibility
   "setWindowRect": GeckoDriver.prototype.setWindowRect,
-  "setWindowSize": GeckoDriver.prototype.setWindowRect, // redirect for compatibility
   "switchToFrame": GeckoDriver.prototype.switchToFrame,
   "switchToParentFrame": GeckoDriver.prototype.switchToParentFrame,
   "switchToShadowRoot": GeckoDriver.prototype.switchToShadowRoot,

@@ -68,10 +68,7 @@ class JitCode : public gc::TenuredCell
     bool hasBytecodeMap_ : 1;         // Whether the code object has been registered with
                                       // native=>bytecode mapping tables.
 
-    JitCode()
-      : code_(nullptr),
-        pool_(nullptr)
-    { }
+    JitCode() = delete;
     JitCode(uint8_t* code, uint32_t bufferSize, uint32_t headerSize, ExecutablePool* pool,
             CodeKind kind)
       : code_(code),
@@ -428,7 +425,7 @@ struct IonScript
     }
     MOZ_MUST_USE bool addTraceLoggerEvent(TraceLoggerEvent& event) {
         MOZ_ASSERT(event.hasTextId());
-        return traceLoggerEvents_.append(mozilla::Move(event));
+        return traceLoggerEvents_.append(std::move(event));
     }
     const uint8_t* snapshots() const {
         return reinterpret_cast<const uint8_t*>(this) + snapshots_;

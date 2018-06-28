@@ -410,6 +410,36 @@ task_description_schema = Schema({
             Required('name'): basestring,
         }],
     }, {
+        Required('implementation'): 'script-engine-autophone',
+        Required('os'): Any('macosx', 'linux'),
+
+        # A link for an executable to download
+        Optional('context'): basestring,
+
+        # Tells the worker whether machine should reboot
+        # after the task is finished.
+        Optional('reboot'):
+            Any(False, 'always', 'never', 'on-exception', 'on-failure'),
+
+        # the command to run
+        Optional('command'): [taskref_or_string],
+
+        # environment variables
+        Optional('env'): {basestring: taskref_or_string},
+
+        # artifacts to extract from the task image after completion
+        Optional('artifacts'): [{
+            # type of artifact -- simple file, or recursive directory
+            Required('type'): Any('file', 'directory'),
+
+            # task image path from which to read artifact
+            Required('path'): basestring,
+
+            # name of the produced artifact (root of the names for
+            # type=directory)
+            Required('name'): basestring,
+        }],
+    }, {
         Required('implementation'): 'scriptworker-signing',
 
         # the maximum time to run, in seconds
@@ -551,7 +581,7 @@ task_description_schema = Schema({
         Required('locales'): basestring,
     }, {
         Required('implementation'): 'treescript',
-        Required('tag'): bool,
+        Required('tags'): [Any('buildN', 'release', None)],
         Required('bump'): bool,
         Optional('bump-files'): [basestring],
         Optional('repo-param-prefix'): basestring,
@@ -792,6 +822,17 @@ def build_docker_worker_payload(config, task, task_def):
     if 'max-run-time' in worker:
         payload['maxRunTime'] = worker['max-run-time']
 
+    run_task = payload.get('command', [''])[0].endswith('run-task')
+
+    # run-task exits EXIT_PURGE_CACHES if there is a problem with caches.
+    # Automatically retry the tasks and purge caches if we see this exit
+    # code.
+    # TODO move this closer to code adding run-task once bug 1469697 is
+    # addressed.
+    if run_task:
+        worker.setdefault('retry-exit-status', []).append(72)
+        worker.setdefault('purge-caches-exit-status', []).append(72)
+
     payload['onExitStatus'] = {}
     if 'retry-exit-status' in worker:
         payload['onExitStatus']['retry'] = worker['retry-exit-status']
@@ -807,8 +848,6 @@ def build_docker_worker_payload(config, task, task_def):
                 'expires': task_def['expires'],  # always expire with the task
             }
         payload['artifacts'] = artifacts
-
-    run_task = payload.get('command', [''])[0].endswith('run-task')
 
     if isinstance(worker.get('docker-image'), basestring):
         out_of_tree_image = worker['docker-image']
@@ -1153,14 +1192,19 @@ def build_treescript_payload(config, task, task_def):
 
     task_def['payload'] = {}
     task_def.setdefault('scopes', [])
-    if worker['tag']:
+    if worker['tags']:
+        tag_names = []
         product = task['shipping-product'].upper()
         version = release_config['version'].replace('.', '_')
         buildnum = release_config['build_number']
-        tag_names = [
-            "{}_{}_BUILD{}".format(product, version, buildnum),
-            "{}_{}_RELEASE".format(product, version)
-        ]
+        if 'buildN' in worker['tags']:
+            tag_names.extend([
+                "{}_{}_BUILD{}".format(product, version, buildnum),
+            ])
+        if 'release' in worker['tags']:
+            tag_names.extend([
+              "{}_{}_RELEASE".format(product, version)
+            ])
         tag_info = {
             'tags': tag_names,
             'revision': config.params['{}head_rev'.format(worker.get('repo-param-prefix', ''))],
@@ -1217,6 +1261,29 @@ def build_macosx_engine_payload(config, task, task_def):
 
     if task.get('needs-sccache'):
         raise Exception('needs-sccache not supported in native-engine')
+
+
+@payload_builder('script-engine-autophone')
+def build_script_engine_autophone_payload(config, task, task_def):
+    worker = task['worker']
+    artifacts = map(lambda artifact: {
+        'name': artifact['name'],
+        'path': artifact['path'],
+        'type': artifact['type'],
+        'expires': task_def['expires'],
+    }, worker.get('artifacts', []))
+
+    task_def['payload'] = {
+        'context': worker['context'],
+        'command': worker['command'],
+        'env': worker['env'],
+        'artifacts': artifacts,
+    }
+    if worker.get('reboot'):
+        task_def['payload'] = worker['reboot']
+
+    if task.get('needs-sccache'):
+        raise Exception('needs-sccache not supported in taskcluster-worker')
 
 
 transforms = TransformSequence()

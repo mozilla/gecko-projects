@@ -136,7 +136,7 @@ window._gBrowser = {
 
   _removingTabs: [],
 
-  _multiSelectedTabsMap: new WeakMap(),
+  _multiSelectedTabsSet: new WeakSet(),
 
   _lastMultiSelectedTabRef: null,
 
@@ -1040,6 +1040,7 @@ window._gBrowser = {
         }
       });
       newTab.dispatchEvent(event);
+      Services.telemetry.recordEvent("savant", "tab", "select", null, { subcategory: "frame" });
 
       this._tabAttrModified(oldTab, ["selected"]);
       this._tabAttrModified(newTab, ["selected"]);
@@ -1284,6 +1285,7 @@ window._gBrowser = {
                                                   [brandShortName]);
       isContentTitle = true;
     } else {
+      // See if we can use the URI as the title.
       if (browser.currentURI.displaySpec) {
         try {
           title = this.mURIFixup.createExposableURI(browser.currentURI).displaySpec;
@@ -1293,25 +1295,24 @@ window._gBrowser = {
       }
 
       if (title && !isBlankPageURL(title)) {
-        // At this point, we now have a URI.
-        // Let's try to unescape it using a character set
-        // in case the URI is not ASCII.
-        try {
-          // If it's a long data: URI that uses base64 encoding, truncate to
-          // a reasonable length rather than trying to display the entire thing.
-          // We can't shorten arbitrary URIs like this, as bidi etc might mean
-          // we need the trailing characters for display. But a base64-encoded
-          // data-URI is plain ASCII, so this is OK for tab-title display.
-          // (See bug 1408854.)
-          if (title.length > 500 && title.match(/^data:[^,]+;base64,/)) {
-            title = title.substring(0, 500) + "\u2026";
-          } else {
-            var characterSet = browser.characterSet;
+        // If it's a long data: URI that uses base64 encoding, truncate to a
+        // reasonable length rather than trying to display the entire thing,
+        // which can be slow.
+        // We can't shorten arbitrary URIs like this, as bidi etc might mean
+        // we need the trailing characters for display. But a base64-encoded
+        // data-URI is plain ASCII, so this is OK for tab-title display.
+        // (See bug 1408854.)
+        if (title.length > 500 && title.match(/^data:[^,]+;base64,/)) {
+          title = title.substring(0, 500) + "\u2026";
+        } else {
+          // Try to unescape not-ASCII URIs using the current character set.
+          try {
+            let characterSet = browser.characterSet;
             title = Services.textToSubURI.unEscapeNonAsciiURI(characterSet, title);
-          }
-        } catch (ex) { /* Do nothing. */ }
+          } catch (ex) { /* Do nothing. */ }
+        }
       } else {
-        // Still no title? Fall back to our untitled string.
+        // No suitable URI? Fall back to our untitled string.
         title = this.tabContainer.emptyTabTitle;
       }
     }
@@ -2460,6 +2461,7 @@ window._gBrowser = {
     var detail = aEventDetail || {};
     var evt = new CustomEvent("TabOpen", { bubbles: true, detail });
     t.dispatchEvent(evt);
+    Services.telemetry.recordEvent("savant", "tab", "open", null, { subcategory: "frame" });
 
     if (!usingPreloadedContent && aOriginPrincipal && aURI) {
       let { URI_INHERITS_SECURITY_CONTEXT } = Ci.nsIProtocolHandler;
@@ -2523,7 +2525,7 @@ window._gBrowser = {
     return t;
   },
 
-  warnAboutClosingTabs(aCloseTabs, aTab) {
+  warnAboutClosingTabs(aCloseTabs, aTab, aOptionalMessage) {
     var tabsToClose;
     switch (aCloseTabs) {
       case this.closingTabsEnum.ALL:
@@ -2566,9 +2568,14 @@ window._gBrowser = {
     // solve the problem of windows "obscuring" the prompt.
     // see bug #350299 for more details
     window.focus();
-    var warningMessage =
-      PluralForm.get(tabsToClose, gTabBrowserBundle.GetStringFromName("tabs.closeWarningMultiple"))
-      .replace("#1", tabsToClose);
+    var warningMessage;
+    if (aOptionalMessage) {
+      warningMessage = aOptionalMessage;
+    } else {
+      warningMessage =
+        PluralForm.get(tabsToClose, gTabBrowserBundle.GetStringFromName("tabs.closeWarningMultiple"))
+          .replace("#1", tabsToClose);
+    }
     var buttonPressed =
       ps.confirmEx(window,
         gTabBrowserBundle.GetStringFromName("tabs.closeWarningTitle"),
@@ -2624,8 +2631,8 @@ window._gBrowser = {
       return;
     }
 
-    let selectedTabs = ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap)
-                                    .filter(tab => tab.isConnected);
+    let selectedTabs = ChromeUtils.nondeterministicGetWeakSetKeys(this._multiSelectedTabsSet)
+                                  .filter(tab => tab.isConnected);
     this.removeCollectionOfTabs(selectedTabs);
   },
 
@@ -2847,6 +2854,7 @@ window._gBrowser = {
     // inspect the tab that's about to close.
     var evt = new CustomEvent("TabClose", { bubbles: true, detail: { adoptedBy: aAdoptedByTab } });
     aTab.dispatchEvent(evt);
+    Services.telemetry.recordEvent("savant", "tab", "close", null, { subcategory: "frame" });
 
     if (aTab.linkedPanel) {
       if (!aAdoptedByTab && !gMultiProcessBrowser) {
@@ -3624,13 +3632,17 @@ window._gBrowser = {
     return SessionStore.duplicateTab(window, aTab, 0, aRestoreTabImmediately);
   },
 
-  addToMultiSelectedTabs(aTab) {
+  addToMultiSelectedTabs(aTab, skipPositionalAttributes) {
     if (aTab.multiselected) {
       return;
     }
 
     aTab.setAttribute("multiselected", "true");
-    this._multiSelectedTabsMap.set(aTab, null);
+    this._multiSelectedTabsSet.add(aTab);
+
+    if (!skipPositionalAttributes) {
+      this.tabContainer._setPositionalAttributes();
+    }
   },
 
   /**
@@ -3652,8 +3664,9 @@ window._gBrowser = {
       [indexOfTab1, indexOfTab2] : [indexOfTab2, indexOfTab1];
 
     for (let i = lowerIndex; i <= higherIndex; i++) {
-      this.addToMultiSelectedTabs(tabs[i]);
+      this.addToMultiSelectedTabs(tabs[i], true);
     }
+    this.tabContainer._setPositionalAttributes();
   },
 
   removeFromMultiSelectedTabs(aTab) {
@@ -3661,28 +3674,32 @@ window._gBrowser = {
       return;
     }
     aTab.removeAttribute("multiselected");
-    this._multiSelectedTabsMap.delete(aTab);
+    this.tabContainer._setPositionalAttributes();
+    this._multiSelectedTabsSet.delete(aTab);
   },
 
-  clearMultiSelectedTabs() {
-    const selectedTabs = ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap);
+  clearMultiSelectedTabs(updatePositionalAttributes) {
+    const selectedTabs = ChromeUtils.nondeterministicGetWeakSetKeys(this._multiSelectedTabsSet);
     for (let tab of selectedTabs) {
       if (tab.isConnected && tab.multiselected) {
         tab.removeAttribute("multiselected");
       }
     }
-    this._multiSelectedTabsMap = new WeakMap();
+    this._multiSelectedTabsSet = new WeakSet();
+    if (updatePositionalAttributes) {
+      this.tabContainer._setPositionalAttributes();
+    }
   },
 
   get multiSelectedTabsCount() {
-    return ChromeUtils.nondeterministicGetWeakMapKeys(this._multiSelectedTabsMap)
+    return ChromeUtils.nondeterministicGetWeakSetKeys(this._multiSelectedTabsSet)
       .filter(tab => tab.isConnected && !tab.closing)
       .length;
   },
 
   get lastMultiSelectedTab() {
     let tab = this._lastMultiSelectedTabRef ? this._lastMultiSelectedTabRef.get() : null;
-    if (tab && tab.isConnected && this._multiSelectedTabsMap.has(tab)) {
+    if (tab && tab.isConnected && this._multiSelectedTabsSet.has(tab)) {
       return tab;
     }
     return gBrowser.selectedTab;
@@ -3690,6 +3707,30 @@ window._gBrowser = {
 
   set lastMultiSelectedTab(aTab) {
     this._lastMultiSelectedTabRef = Cu.getWeakReference(aTab);
+  },
+
+  toggleMuteAudioOnMultiSelectedTabs(aTab) {
+    const selectedTabs = ChromeUtils.nondeterministicGetWeakSetKeys(this._multiSelectedTabsSet)
+                                    .filter(tab => tab.isConnected);
+    let tabsToToggle;
+
+    if (aTab.activeMediaBlocked) {
+      tabsToToggle = selectedTabs.filter(tab =>
+        tab.activeMediaBlocked || tab.linkedBrowser.audioMuted
+      );
+    } else {
+      let tabMuted = aTab.linkedBrowser.audioMuted;
+      tabsToToggle = selectedTabs.filter(tab =>
+        // When a user is looking to mute selected tabs, then media-blocked tabs
+        // should not be toggled. Otherwise those media-blocked tabs are going into a
+        // playing and unmuted state.
+        tab.linkedBrowser.audioMuted == tabMuted && !tab.activeMediaBlocked ||
+        tab.activeMediaBlocked && tabMuted
+      );
+    }
+    for (let tab of tabsToToggle) {
+      tab.toggleMuteAudio();
+    }
   },
 
   activateBrowserForPrintPreview(aBrowser) {
@@ -3761,9 +3802,12 @@ window._gBrowser = {
 
     if (AppConstants.platform != "macosx") {
       if (aEvent.ctrlKey && !aEvent.shiftKey && !aEvent.metaKey &&
-          aEvent.keyCode == KeyEvent.DOM_VK_F4 &&
-          !this.selectedTab.pinned) {
-        this.removeCurrentTab({ animate: true });
+          aEvent.keyCode == KeyEvent.DOM_VK_F4) {
+        if (gBrowser.multiSelectedTabsCount) {
+          gBrowser.removeMultiSelectedTabs();
+        } else if (!this.selectedTab.pinned) {
+          this.removeCurrentTab({ animate: true });
+        }
         aEvent.preventDefault();
       }
     }

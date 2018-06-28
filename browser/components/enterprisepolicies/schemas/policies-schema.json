@@ -145,7 +145,7 @@
     "DisableAppUpdate": {
       "description": "Prevent the browser from updating.",
       "first_available": "60.0",
-      "enterprise_only": true,
+      "machine_only": true,
 
       "type": "boolean"
     },
@@ -274,7 +274,7 @@
     "DisableSystemAddonUpdate": {
       "description": "Prevent the browser from installing and updating system addons.",
       "first_available": "60.0",
-      "enterprise_only": true,
+      "machine_only": true,
 
       "type": "boolean"
     },
@@ -460,6 +460,122 @@
       "type": "URLorEmpty"
     },
 
+    "Permissions": {
+      "description": "Configure permissions for camera, microphone, location and notifications.",
+      "first_available": "60.0",
+
+      "type": "object",
+      "properties": {
+        "Camera": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        },
+
+        "Microphone": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        },
+
+        "Location": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        },
+
+        "Notifications": {
+          "type": "object",
+          "properties": {
+            "Allow": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "Block": {
+              "type": "array",
+              "items": {
+                "type": "origin"
+              }
+            },
+
+            "BlockNewRequests": {
+              "type": "boolean"
+            },
+
+            "Locked": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+
     "PopupBlocking": {
       "description": "Allow or deny popup usage.",
       "first_available": "60.0",
@@ -601,6 +717,12 @@
         },
         "PreventInstalls": {
           "type": "boolean"
+        },
+        "Remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

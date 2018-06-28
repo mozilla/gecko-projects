@@ -155,7 +155,7 @@ StructuredCloneBlob::ReadStructuredCloneInternal(JSContext* aCx, JSStructuredClo
   mBuffer = MakeUnique<JSAutoStructuredCloneBuffer>(mStructuredCloneScope,
                                                     &StructuredCloneHolder::sCallbacks,
                                                     this);
-  mBuffer->adopt(Move(data), version, &StructuredCloneHolder::sCallbacks);
+  mBuffer->adopt(std::move(data), version, &StructuredCloneHolder::sCallbacks);
 
   return true;
 }
@@ -181,7 +181,7 @@ StructuredCloneBlob::WriteStructuredClone(JSContext* aCx, JSStructuredCloneWrite
 bool
 StructuredCloneBlob::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto, JS::MutableHandleObject aResult)
 {
-    return StructuredCloneHolderBinding::Wrap(aCx, this, aGivenProto, aResult);
+    return StructuredCloneHolder_Binding::Wrap(aCx, this, aGivenProto, aResult);
 }
 
 

@@ -6,13 +6,15 @@
 
 #include "jit/CacheIRCompiler.h"
 
+#include <utility>
+
 #include "jit/IonIC.h"
 #include "jit/SharedICHelpers.h"
 
 #include "builtin/Boolean-inl.h"
 
 #include "jit/MacroAssembler-inl.h"
-#include "vm/JSCompartment-inl.h"
+#include "vm/Realm-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -1226,7 +1228,7 @@ CacheIRCompiler::addFailurePath(FailurePath** failure)
         return true;
     }
 
-    if (!failurePaths.append(Move(newFailure)))
+    if (!failurePaths.append(std::move(newFailure)))
         return false;
 
     *failure = &failurePaths.back();
@@ -1725,7 +1727,7 @@ CacheIRCompiler::emitLoadEnclosingEnvironment()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
     Register reg = allocator.defineRegister(masm, reader.objOperandId());
-    masm.extractObject(Address(obj, EnvironmentObject::offsetOfEnclosingEnvironment()), reg);
+    masm.unboxObject(Address(obj, EnvironmentObject::offsetOfEnclosingEnvironment()), reg);
     return true;
 }
 
@@ -1930,6 +1932,9 @@ CacheIRCompiler::emitTruncateDoubleToUInt32()
     ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
     Register res = allocator.defineRegister(masm, reader.int32OperandId());
 
+    Label int32, done;
+    masm.branchTestInt32(Assembler::Equal, val, &int32);
+
     Label doneTruncate,  truncateABICall;
     if (mode_ != Mode::Baseline)
         masm.push(FloatReg0);
@@ -1958,6 +1963,13 @@ CacheIRCompiler::emitTruncateDoubleToUInt32()
     masm.bind(&doneTruncate);
     if (mode_ != Mode::Baseline)
         masm.pop(FloatReg0);
+
+    masm.jump(&done);
+    masm.bind(&int32);
+
+    masm.unboxInt32(val, res);
+
+    masm.bind(&done);
     return true;
 }
 
@@ -2430,13 +2442,13 @@ CacheIRCompiler::emitLoadTypedObjectResultShared(const Address& fieldAddr, Regis
         masm.loadFromTypedArray(type, fieldAddr, output.valueReg(),
                                 /* allowDouble = */ true, scratch, nullptr);
     } else {
-        ReferenceTypeDescr::Type type = ReferenceTypeFromSimpleTypeDescrKey(typeDescr);
+        ReferenceType type = ReferenceTypeFromSimpleTypeDescrKey(typeDescr);
         switch (type) {
-          case ReferenceTypeDescr::TYPE_ANY:
+          case ReferenceType::TYPE_ANY:
             masm.loadValue(fieldAddr, output.valueReg());
             break;
 
-          case ReferenceTypeDescr::TYPE_OBJECT: {
+          case ReferenceType::TYPE_OBJECT: {
             Label notNull, done;
             masm.loadPtr(fieldAddr, scratch);
             masm.branchTestPtr(Assembler::NonZero, scratch, scratch, &notNull);
@@ -2448,7 +2460,7 @@ CacheIRCompiler::emitLoadTypedObjectResultShared(const Address& fieldAddr, Regis
             break;
           }
 
-          case ReferenceTypeDescr::TYPE_STRING:
+          case ReferenceType::TYPE_STRING:
             masm.loadPtr(fieldAddr, scratch);
             masm.tagValue(JSVAL_TYPE_STRING, scratch, output.valueReg());
             break;
@@ -2611,26 +2623,6 @@ CacheIRCompiler::emitLoadObjectTruthyResult()
 }
 
 bool
-CacheIRCompiler::emitCompareStringResult()
-{
-    AutoOutputRegister output(*this);
-
-    Register left = allocator.useRegister(masm, reader.stringOperandId());
-    Register right = allocator.useRegister(masm, reader.stringOperandId());
-    JSOp op = reader.jsop();
-
-    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
-
-    FailurePath* failure;
-    if (!addFailurePath(&failure))
-        return false;
-
-    masm.compareStrings(op, left, right, scratch, failure->label());
-    masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
-    return true;
-}
-
-bool
 CacheIRCompiler::emitComparePointerResultShared(bool symbol)
 {
     AutoOutputRegister output(*this);
@@ -2684,18 +2676,18 @@ CacheIRCompiler::emitBreakpoint()
 }
 
 void
-CacheIRCompiler::emitStoreTypedObjectReferenceProp(ValueOperand val, ReferenceTypeDescr::Type type,
+CacheIRCompiler::emitStoreTypedObjectReferenceProp(ValueOperand val, ReferenceType type,
                                                    const Address& dest, Register scratch)
 {
     // Callers will post-barrier this store.
 
     switch (type) {
-      case ReferenceTypeDescr::TYPE_ANY:
+      case ReferenceType::TYPE_ANY:
         EmitPreBarrier(masm, dest, MIRType::Value);
         masm.storeValue(val, dest);
         break;
 
-      case ReferenceTypeDescr::TYPE_OBJECT: {
+      case ReferenceType::TYPE_OBJECT: {
         EmitPreBarrier(masm, dest, MIRType::Object);
         Label isNull, done;
         masm.branchTestObject(Assembler::NotEqual, val, &isNull);
@@ -2708,7 +2700,7 @@ CacheIRCompiler::emitStoreTypedObjectReferenceProp(ValueOperand val, ReferenceTy
         break;
       }
 
-      case ReferenceTypeDescr::TYPE_STRING:
+      case ReferenceType::TYPE_STRING:
         EmitPreBarrier(masm, dest, MIRType::String);
         masm.unboxString(val, scratch);
         masm.storePtr(scratch, dest);
@@ -3116,6 +3108,51 @@ CacheIRCompiler::emitMegamorphicLoadSlotResult()
     if (JitOptions.spectreJitToCxxCalls)
         masm.speculationBarrier();
 
+    return true;
+}
+
+bool
+CacheIRCompiler::emitMegamorphicStoreSlot()
+{
+    Register obj = allocator.useRegister(masm, reader.objOperandId());
+    StubFieldOffset name(reader.stubOffset(), StubField::Type::String);
+    ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+    bool needsTypeBarrier = reader.readBool();
+
+    AutoScratchRegister scratch1(allocator, masm);
+    AutoScratchRegister scratch2(allocator, masm);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    masm.Push(val);
+    masm.moveStackPtrTo(val.scratchReg());
+
+    LiveRegisterSet volatileRegs(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
+    volatileRegs.takeUnchecked(scratch1);
+    volatileRegs.takeUnchecked(scratch2);
+    volatileRegs.takeUnchecked(val);
+    masm.PushRegsInMask(volatileRegs);
+
+    masm.setupUnalignedABICall(scratch1);
+    masm.loadJSContext(scratch1);
+    masm.passABIArg(scratch1);
+    masm.passABIArg(obj);
+    emitLoadStubField(name, scratch2);
+    masm.passABIArg(scratch2);
+    masm.passABIArg(val.scratchReg());
+    if (needsTypeBarrier)
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (SetNativeDataProperty<true>)));
+    else
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (SetNativeDataProperty<false>)));
+    masm.mov(ReturnReg, scratch1);
+    masm.PopRegsInMask(volatileRegs);
+
+    masm.loadValue(Address(masm.getStackPointer(), 0), val);
+    masm.adjustStack(sizeof(Value));
+
+    masm.branchIfFalseBool(scratch1, failure->label());
     return true;
 }
 

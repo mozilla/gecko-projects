@@ -14,6 +14,8 @@
 
 namespace js {
 
+class AutoLockHelperThreadState;
+
 // A generic task used to dispatch work to the helper thread system.
 // Users supply a function pointer to call.
 //
@@ -142,7 +144,7 @@ class GCParallelTaskHelper : public GCParallelTask
       : GCParallelTask(runtime, &runTaskTyped)
     {}
     GCParallelTaskHelper(GCParallelTaskHelper&& other)
-      : GCParallelTask(mozilla::Move(other))
+      : GCParallelTask(std::move(other))
     {}
 
   private:

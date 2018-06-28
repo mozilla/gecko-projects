@@ -178,7 +178,7 @@ nsChromeRegistryContent::GetFlagsFromPackage(const nsCString& aPackage,
 // All functions following only make sense in chrome, and therefore assert
 
 #define CONTENT_NOTREACHED() \
-  NS_NOTREACHED("Content should not be calling this")
+  MOZ_ASSERT_UNREACHABLE("Content should not be calling this")
 
 #define CONTENT_NOT_IMPLEMENTED() \
   CONTENT_NOTREACHED();           \
@@ -239,13 +239,6 @@ nsChromeRegistryContent::Observe(nsISupports* aSubject, const char* aTopic,
 }
 
 NS_IMETHODIMP
-nsChromeRegistryContent::GetStyleOverlays(nsIURI *aChromeURL,
-                                          nsISimpleEnumerator **aResult)
-{
-  CONTENT_NOT_IMPLEMENTED();
-}
-
-NS_IMETHODIMP
 nsChromeRegistryContent::GetXULOverlays(nsIURI *aChromeURL,
                                         nsISimpleEnumerator **aResult)
 {
@@ -279,14 +272,6 @@ nsChromeRegistryContent::ManifestSkin(ManifestProcessingContext& cx,
 void
 nsChromeRegistryContent::ManifestOverlay(ManifestProcessingContext& cx, int lineno,
                                          char *const * argv, int flags)
-{
-  CONTENT_NOTREACHED();
-}
-
-void
-nsChromeRegistryContent::ManifestStyle(ManifestProcessingContext& cx,
-                                       int lineno,
-                                       char *const * argv, int flags)
 {
   CONTENT_NOTREACHED();
 }

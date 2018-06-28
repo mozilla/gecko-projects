@@ -49,6 +49,8 @@ public:
       , mGlobalObject(aGlobal)
       , mPromise(aPromise)
       , mCharset(aOptions.mCharset)
+      , mToken(nullptr)
+      , mScriptLength(0)
     {
         mOptions.setNoScriptRval(!aOptions.mHasReturnValue)
                 .setCanLazilyParse(aOptions.mLazilyParse)
@@ -336,7 +338,7 @@ PrecompiledScript::HasReturnValue()
 JSObject*
 PrecompiledScript::WrapObject(JSContext* aCx, HandleObject aGivenProto)
 {
-    return PrecompiledScriptBinding::Wrap(aCx, this, aGivenProto);
+    return PrecompiledScript_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 bool

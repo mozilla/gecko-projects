@@ -159,6 +159,8 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "AudioStreamTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "AudioWorkletNode", insecureContext: false, disabled: true},
+// IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "AuthenticatorAssertionResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "AuthenticatorAttestationResponse"},
@@ -877,15 +879,15 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "SourceBufferList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisErrorEvent", insecureContext: true, android: false},
+    {name: "SpeechSynthesisErrorEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisEvent", insecureContext: true, android: false},
+    {name: "SpeechSynthesisEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesis", insecureContext: true, android: false},
+    {name: "SpeechSynthesis", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisUtterance", insecureContext: true, android: false},
+    {name: "SpeechSynthesisUtterance", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisVoice", insecureContext: true, android: false},
+    {name: "SpeechSynthesisVoice", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "SpecialPowers", insecureContext: true, xbl: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!

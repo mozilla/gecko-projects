@@ -107,6 +107,26 @@ def _windows(session, exclude=None):
     return set(wins)
 
 
+def add_event_listeners(session):
+    """Register listeners for tracked events on element."""
+    def add_event_listeners(element, tracked_events):
+        element.session.execute_script("""
+            let element = arguments[0];
+            let trackedEvents = arguments[1];
+
+            if (!("events" in window)) {
+              window.events = [];
+            }
+
+            for (var i = 0; i < trackedEvents.length; i++) {
+              element.addEventListener(trackedEvents[i], function (event) {
+                window.events.push(event.type);
+              });
+            }
+            """, args=(element, tracked_events))
+    return add_event_listeners
+
+
 def create_frame(session):
     """Create an `iframe` element in the current browsing context and insert it
     into the document. Return a reference to the newly-created element."""
@@ -182,6 +202,10 @@ def session(configuration, request):
     request.addfinalizer(lambda: _ensure_valid_window(_current_session))
     request.addfinalizer(lambda: _restore_timeouts(_current_session))
 
+    return _current_session
+
+
+def current_session():
     return _current_session
 
 

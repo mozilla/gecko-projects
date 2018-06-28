@@ -31,7 +31,6 @@ using namespace js::frontend;
 
 using JS::AutoValueArray;
 using mozilla::DebugOnly;
-using mozilla::Forward;
 
 enum ASTType {
     AST_ERROR = -1,
@@ -283,8 +282,7 @@ class NodeBuilder
             }
 
             if (!funv.isObject() || !funv.toObject().is<JSFunction>()) {
-                ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_NOT_FUNCTION,
-                                      JSDVG_SEARCH_STACK, funv, nullptr, nullptr, nullptr);
+                ReportValueError(cx, JSMSG_NOT_FUNCTION, JSDVG_SEARCH_STACK, funv, nullptr);
                 return false;
             }
 
@@ -322,7 +320,7 @@ class NodeBuilder
         // Recursive loop to store the arguments into args. This eventually
         // bottoms out in a call to the non-template callbackHelper() above.
         args[i].set(head);
-        return callbackHelper(fun, args, i + 1, Forward<Arguments>(tail)...);
+        return callbackHelper(fun, args, i + 1, std::forward<Arguments>(tail)...);
     }
 
     // Invoke a user-defined callback. The actual signature is:
@@ -335,7 +333,7 @@ class NodeBuilder
         if (!iargs.init(cx, sizeof...(args) - 2 + size_t(saveLoc)))
             return false;
 
-        return callbackHelper(fun, iargs, 0, Forward<Arguments>(args)...);
+        return callbackHelper(fun, iargs, 0, std::forward<Arguments>(args)...);
     }
 
     // WARNING: Returning a Handle is non-standard, but it works in this case
@@ -388,7 +386,7 @@ class NodeBuilder
         // `name` and `value`. This eventually bottoms out in a call to the
         // non-template newNodeHelper() above.
         return defineProperty(obj, name, value)
-               && newNodeHelper(obj, Forward<Arguments>(rest)...);
+               && newNodeHelper(obj, std::forward<Arguments>(rest)...);
     }
 
     // Create a node object with "type" and "loc" properties, as well as zero
@@ -402,7 +400,7 @@ class NodeBuilder
     MOZ_MUST_USE bool newNode(ASTType type, TokenPos* pos, Arguments&&... args) {
         RootedObject node(cx);
         return createNode(type, pos, &node) &&
-               newNodeHelper(node, Forward<Arguments>(args)...);
+               newNodeHelper(node, std::forward<Arguments>(args)...);
     }
 
     MOZ_MUST_USE bool listNode(ASTType type, const char* propName, NodeVector& elts, TokenPos* pos,
@@ -3353,7 +3351,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
     if (!src)
         return false;
 
-    ScopedJSFreePtr<char> filename;
+    UniqueChars filename;
     uint32_t lineno = 1;
     bool loc = true;
     RootedObject builder(cx);
@@ -3363,9 +3361,8 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
 
     if (!arg.isNullOrUndefined()) {
         if (!arg.isObject()) {
-            ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE,
-                                  JSDVG_SEARCH_STACK, arg, nullptr,
-                                  "not an object", nullptr);
+            ReportValueError(cx, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK, arg, nullptr,
+                             "not an object");
             return false;
         }
 
@@ -3393,7 +3390,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
                 if (!str)
                     return false;
 
-                filename = JS_EncodeString(cx, str);
+                filename.reset(JS_EncodeString(cx, str));
                 if (!filename)
                     return false;
             }
@@ -3415,9 +3412,8 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
 
         if (!prop.isNullOrUndefined()) {
             if (!prop.isObject()) {
-                ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE,
-                                      JSDVG_SEARCH_STACK, prop, nullptr,
-                                      "not an object", nullptr);
+                ReportValueError(cx, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK, prop, nullptr,
+                                 "not an object");
                 return false;
             }
             builder = &prop.toObject();
@@ -3430,8 +3426,8 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
             return false;
 
         if (!prop.isString()) {
-            ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK,
-                                  prop, nullptr, "not 'script' or 'module'", nullptr);
+            ReportValueError(cx, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK, prop, nullptr,
+                             "not 'script' or 'module'");
             return false;
         }
 
@@ -3455,7 +3451,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
     }
 
     /* Extract the builder methods first to report errors before parsing. */
-    ASTSerializer serialize(cx, loc, filename, lineno);
+    ASTSerializer serialize(cx, loc, filename.get(), lineno);
     if (!serialize.init(builder))
         return false;
 
@@ -3468,7 +3464,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
         return false;
 
     CompileOptions options(cx);
-    options.setFileAndLine(filename, lineno);
+    options.setFileAndLine(filename.get(), lineno);
     options.setCanLazilyParse(false);
     options.allowHTMLComments = target == ParseGoal::Script;
     mozilla::Range<const char16_t> chars = linearChars.twoByteRange();

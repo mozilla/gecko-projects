@@ -11,6 +11,8 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/TypeTraits.h"
 
+#include <utility>
+
 #include "jsfriendapi.h"
 #include "jsnum.h"
 
@@ -28,21 +30,23 @@
 #include "js/Vector.h"
 #include "js/Wrapper.h"
 #include "proxy/ScriptedProxyHandler.h"
+#include "util/Text.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/DebuggerMemory.h"
 #include "vm/GeckoProfiler.h"
 #include "vm/GeneratorObject.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/Realm.h"
 #include "vm/TraceLogging.h"
 #include "vm/WrapperObject.h"
 #include "wasm/WasmInstance.h"
 
 #include "gc/GC-inl.h"
 #include "vm/BytecodeUtil-inl.h"
+#include "vm/Compartment-inl.h"
 #include "vm/GeckoProfiler-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
@@ -270,9 +274,8 @@ ValueToIdentifier(JSContext* cx, HandleValue v, MutableHandleId id)
         return false;
     if (!JSID_IS_ATOM(id) || !IsIdentifier(JSID_TO_ATOM(id))) {
         RootedValue val(cx, v);
-        ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE,
-                              JSDVG_SEARCH_STACK, val, nullptr, "not an identifier",
-                              nullptr);
+        ReportValueError(cx, JSMSG_UNEXPECTED_TYPE, JSDVG_SEARCH_STACK, val, nullptr,
+                         "not an identifier");
         return false;
     }
     return true;
@@ -448,25 +451,17 @@ ValueToStableChars(JSContext* cx, const char *fnname, HandleValue value,
     return true;
 }
 
-EvalOptions::~EvalOptions()
-{
-    js_free(const_cast<char*>(filename_));
-}
-
 bool
 EvalOptions::setFilename(JSContext* cx, const char* filename)
 {
-    char* copy = nullptr;
+    JS::UniqueChars copy;
     if (filename) {
-        copy = JS_strdup(cx, filename);
+        copy = DuplicateString(cx, filename);
         if (!copy)
             return false;
     }
 
-    // EvalOptions always owns filename_, so this cast is okay.
-    js_free(const_cast<char*>(filename_));
-
-    filename_ = copy;
+    filename_ = std::move(copy);
     return true;
 }
 
@@ -526,13 +521,11 @@ RequireGlobalObject(JSContext* cx, HandleValue dbgobj, HandleObject referent)
         }
 
         if (obj->is<GlobalObject>()) {
-            ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_WRAPPER_IN_WAY,
-                                  JSDVG_SEARCH_STACK, dbgobj, nullptr,
-                                  isWrapper, isWindowProxy);
+            ReportValueError(cx, JSMSG_DEBUG_WRAPPER_IN_WAY, JSDVG_SEARCH_STACK, dbgobj, nullptr,
+                             isWrapper, isWindowProxy);
         } else {
-            ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_BAD_REFERENT,
-                                  JSDVG_SEARCH_STACK, dbgobj, nullptr,
-                                  "a global object", nullptr);
+            ReportValueError(cx, JSMSG_DEBUG_BAD_REFERENT, JSDVG_SEARCH_STACK, dbgobj, nullptr,
+                             "a global object");
         }
         return false;
     }
@@ -2226,7 +2219,7 @@ Debugger::slowPathOnLogAllocationSite(JSContext* cx, HandleObject obj, HandleSav
     mozilla::DebugOnly<ReadBarriered<Debugger*>*> begin = dbgs.begin();
 
     // Root all the Debuggers while we're iterating over them;
-    // appendAllocationSite calls JSCompartment::wrap, and thus can GC.
+    // appendAllocationSite calls Compartment::wrap, and thus can GC.
     //
     // SpiderMonkey protocol is generally for the caller to prove that it has
     // rooted the stuff it's asking you to operate on (i.e. by passing a
@@ -2418,9 +2411,9 @@ class MOZ_RAII ExecutionObservableFrame : public Debugger::ExecutionObservableSe
     }
 
     Zone* singleZone() const override {
-        // We never inline across compartments, let alone across zones, so
+        // We never inline across realms, let alone across zones, so
         // frames_'s script's zone is the only one of interest.
-        return frame_.script()->compartment()->zone();
+        return frame_.script()->zone();
     }
 
     JSScript* singleScriptForZoneInvalidation() const override {
@@ -2479,7 +2472,7 @@ class MOZ_RAII ExecutionObservableScript : public Debugger::ExecutionObservableS
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    Zone* singleZone() const override { return script_->compartment()->zone(); }
+    Zone* singleZone() const override { return script_->zone(); }
     JSScript* singleScriptForZoneInvalidation() const override { return script_; }
     bool shouldRecompileOrInvalidate(JSScript* script) const override {
         return script->hasBaselineScript() && script == script_;
@@ -2562,10 +2555,10 @@ MarkBaselineScriptActiveIfObservable(JSScript* script, const Debugger::Execution
 static bool
 AppendAndInvalidateScript(JSContext* cx, Zone* zone, JSScript* script, Vector<JSScript*>& scripts)
 {
-    // Enter the script's compartment as addPendingRecompile attempts to
+    // Enter the script's realm as addPendingRecompile attempts to
     // cancel off-thread compilations, whose books are kept on the
-    // script's compartment.
-    MOZ_ASSERT(script->compartment()->zone() == zone);
+    // script's realm.
+    MOZ_ASSERT(script->zone() == zone);
     AutoRealm ar(cx, script);
     zone->types.addPendingRecompile(cx, script);
     return scripts.append(script);
@@ -3281,7 +3274,7 @@ Debugger::findZoneEdges(Zone* zone, js::gc::ZoneComponentFinder& finder)
             /*
              * For debugger cross compartment wrappers, add edges in the
              * opposite direction to those already added by
-             * JSCompartment::findOutgoingEdges and above.  This ensure that
+             * Compartment::findOutgoingEdges and above.  This ensure that
              * debuggers and their debuggees are finalized in the same group.
              */
             if (dbg->debuggeeZones.has(zone) ||
@@ -3757,7 +3750,7 @@ Debugger::addAllGlobalsAsDebuggees(JSContext* cx, unsigned argc, Value* vp)
         for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
             if (r == dbg->object->realm() || r->creationOptions().invisibleToDebugger())
                 continue;
-            r->compartment()->scheduledForDestruction = false;
+            r->compartment()->gcState.scheduledForDestruction = false;
             GlobalObject* global = r->maybeGlobal();
             if (global) {
                 Rooted<GlobalObject*> rg(cx, global);
@@ -3955,8 +3948,8 @@ Debugger::construct(JSContext* cx, unsigned argc, Value* vp)
 
     /* Add the initial debuggees, if any. */
     for (unsigned i = 0; i < args.length(); i++) {
-        Rooted<GlobalObject*>
-            debuggee(cx, &args[i].toObject().as<ProxyObject>().private_().toObject().global());
+        JSObject& wrappedObj = args[i].toObject().as<ProxyObject>().private_().toObject();
+        Rooted<GlobalObject*> debuggee(cx, &wrappedObj.deprecatedGlobal());
         if (!debugger->addDebuggeeGlobal(cx, debuggee))
             return false;
     }
@@ -4232,14 +4225,18 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         cx(cx),
         debugger(dbg),
         iterMarker(&cx->runtime()->gc),
-        compartments(cx->zone()),
+        realms(cx->zone()),
         url(cx),
         displayURLString(cx),
         hasSource(false),
         source(cx, AsVariant(static_cast<ScriptSourceObject*>(nullptr))),
-        innermostForCompartment(cx->zone()),
+        hasLine(false),
+        line(0),
+        innermost(false),
+        innermostForRealm(cx->zone()),
         vector(cx, ScriptVector(cx)),
-        wasmInstanceVector(cx, WasmInstanceObjectVector(cx))
+        wasmInstanceVector(cx, WasmInstanceObjectVector(cx)),
+        oom(false)
     {}
 
     /*
@@ -4247,8 +4244,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
      * haven't enough memory.
      */
     bool init() {
-        if (!compartments.init() ||
-            !innermostForCompartment.init())
+        if (!realms.init() ||
+            !innermostForRealm.init())
         {
             ReportOutOfMemory(cx);
             return false;
@@ -4411,21 +4408,21 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     }
 
     /*
-     * Search all relevant compartments and the stack for scripts matching
+     * Search all relevant realms and the stack for scripts matching
      * this query, and append the matching scripts to |vector|.
      */
     bool findScripts() {
         if (!prepareQuery() || !delazifyScripts())
             return false;
 
-        JSCompartment* singletonComp = nullptr;
-        if (compartments.count() == 1)
-            singletonComp = compartments.all().front();
+        Realm* singletonRealm = nullptr;
+        if (realms.count() == 1)
+            singletonRealm = realms.all().front();
 
-        /* Search each compartment for debuggee scripts. */
+        /* Search each realm for debuggee scripts. */
         MOZ_ASSERT(vector.empty());
         oom = false;
-        IterateScripts(cx, singletonComp, this, considerScript);
+        IterateScripts(cx, singletonRealm, this, considerScript);
         if (oom) {
             ReportOutOfMemory(cx);
             return false;
@@ -4438,11 +4435,11 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         /*
          * For most queries, we just accumulate results in 'vector' as we find
          * them. But if this is an 'innermost' query, then we've accumulated the
-         * results in the 'innermostForCompartment' map. In that case, we now need to
+         * results in the 'innermostForRealm' map. In that case, we now need to
          * walk that map and populate 'vector'.
          */
         if (innermost) {
-            for (CompartmentToScriptMap::Range r = innermostForCompartment.all();
+            for (RealmToScriptMap::Range r = innermostForRealm.all();
                  !r.empty();
                  r.popFront())
             {
@@ -4484,14 +4481,13 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     /* The debugger for which we conduct queries. */
     Debugger* debugger;
 
-    /* Require the set of compartments to stay fixed while the ScriptQuery is alive. */
+    /* Require the set of realms to stay fixed while the ScriptQuery is alive. */
     gc::AutoEnterIteration iterMarker;
 
-    typedef HashSet<JSCompartment*, DefaultHasher<JSCompartment*>, ZoneAllocPolicy>
-        CompartmentSet;
+    using RealmSet = HashSet<Realm*, DefaultHasher<Realm*>, ZoneAllocPolicy>;
 
-    /* A script must be in one of these compartments to match the query. */
-    CompartmentSet compartments;
+    /* A script must be in one of these realms to match the query. */
+    RealmSet realms;
 
     /* If this is a string, matching scripts have urls equal to it. */
     RootedValue url;
@@ -4520,15 +4516,14 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     /* True if the query has an 'innermost' property whose value is true. */
     bool innermost;
 
-    typedef HashMap<JSCompartment*, JSScript*, DefaultHasher<JSCompartment*>, ZoneAllocPolicy>
-        CompartmentToScriptMap;
+    using RealmToScriptMap = HashMap<Realm*, JSScript*, DefaultHasher<Realm*>, ZoneAllocPolicy>;
 
     /*
-     * For 'innermost' queries, a map from compartments to the innermost script
-     * we've seen so far in that compartment. (Template instantiation code size
+     * For 'innermost' queries, a map from realms to the innermost script
+     * we've seen so far in that realm. (Template instantiation code size
      * explosion ho!)
      */
-    CompartmentToScriptMap innermostForCompartment;
+    RealmToScriptMap innermostForRealm;
 
     /*
      * Accumulate the scripts in an Rooted<ScriptVector>, instead of creating
@@ -4545,14 +4540,14 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     /* Indicates whether OOM has occurred while matching. */
     bool oom;
 
-    bool addCompartment(JSCompartment* comp) {
-        return compartments.put(comp);
+    bool addRealm(Realm* realm) {
+        return realms.put(realm);
     }
 
     /* Arrange for this ScriptQuery to match only scripts that run in |global|. */
     bool matchSingleGlobal(GlobalObject* global) {
-        MOZ_ASSERT(compartments.count() == 0);
-        if (!addCompartment(global->compartment())) {
+        MOZ_ASSERT(realms.count() == 0);
+        if (!addRealm(global->realm())) {
             ReportOutOfMemory(cx);
             return false;
         }
@@ -4564,10 +4559,10 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
      * globals.
      */
     bool matchAllDebuggeeGlobals() {
-        MOZ_ASSERT(compartments.count() == 0);
-        /* Build our compartment set from the debugger's set of debuggee globals. */
+        MOZ_ASSERT(realms.count() == 0);
+        /* Build our realm set from the debugger's set of debuggee globals. */
         for (WeakGlobalObjectSet::Range r = debugger->debuggees.all(); !r.empty(); r.popFront()) {
-            if (!addCompartment(r.front()->compartment())) {
+            if (!addRealm(r.front()->realm())) {
                 ReportOutOfMemory(cx);
                 return false;
             }
@@ -4591,11 +4586,10 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     }
 
     bool delazifyScripts() {
-        // All scripts in debuggee compartments must be visible, so delazify
+        // All scripts in debuggee realms must be visible, so delazify
         // everything.
-        for (auto r = compartments.all(); !r.empty(); r.popFront()) {
-            JSCompartment* comp = r.front();
-            Realm* realm = JS::GetRealmForCompartment(comp);
+        for (auto r = realms.all(); !r.empty(); r.popFront()) {
+            Realm* realm = r.front();
             if (!realm->ensureDelazifyScriptsForDebugger(cx))
                 return false;
         }
@@ -4610,7 +4604,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
 
     /*
      * If |script| matches this query, append it to |vector| or place it in
-     * |innermostForCompartment|, as appropriate. Set |oom| if an out of memory
+     * |innermostForRealm|, as appropriate. Set |oom| if an out of memory
      * condition occurred.
      */
     void consider(JSScript* script, const JS::AutoRequireNoGC& nogc) {
@@ -4619,8 +4613,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         // initialized from fullyInit{FromEmitter,Trivial} due to errors.
         if (oom || script->selfHosted() || !script->code())
             return;
-        JSCompartment* compartment = script->compartment();
-        if (!compartments.has(compartment))
+        Realm* realm = script->realm();
+        if (!realms.has(realm))
             return;
         if (urlCString.ptr()) {
             bool gotFilename = false;
@@ -4659,15 +4653,15 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
              * For 'innermost' queries, we don't place scripts in |vector| right
              * away; we may later find another script that is nested inside this
              * one. Instead, we record the innermost script we've found so far
-             * for each compartment in innermostForCompartment, and only
-             * populate |vector| at the bottom of findScripts, when we've
-             * traversed all the scripts.
+             * for each realm in innermostForRealm, and only populate |vector|
+             * at the bottom of findScripts, when we've traversed all the
+             * scripts.
              *
              * So: check this script against the innermost one we've found so
-             * far (if any), as recorded in innermostForCompartment, and replace
-             * that if it's better.
+             * far (if any), as recorded in innermostForRealm, and replace that
+             * if it's better.
              */
-            CompartmentToScriptMap::AddPtr p = innermostForCompartment.lookupForAdd(compartment);
+            RealmToScriptMap::AddPtr p = innermostForRealm.lookupForAdd(realm);
             if (p) {
                 /* Is our newly found script deeper than the last one we found? */
                 JSScript* incumbent = p->value();
@@ -4679,9 +4673,9 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
             } else {
                 /*
                  * This is the first matching script we've encountered for this
-                 * compartment, so it is thus the innermost such script.
+                 * realm, so it is thus the innermost such script.
                  */
-                if (!innermostForCompartment.add(p, compartment, script)) {
+                if (!innermostForRealm.add(p, realm, script)) {
                     oom = true;
                     return;
                 }
@@ -4781,6 +4775,9 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
     /* The vector that we are accumulating results in. */
     AutoObjectVector objects;
 
+    /* The set of debuggee compartments. */
+    JS::CompartmentSet debuggeeCompartments;
+
     /*
      * Parse the query object |query|, and prepare to match only the objects it
      * specifies.
@@ -4814,6 +4811,18 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
     bool findObjects() {
         if (!prepareQuery())
             return false;
+
+        if (!debuggeeCompartments.init()) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+
+        for (WeakGlobalObjectSet::Range r = dbg->allDebuggees(); !r.empty(); r.popFront()) {
+            if (!debuggeeCompartments.put(r.front()->compartment())) {
+                ReportOutOfMemory(cx);
+                return false;
+            }
+        }
 
         {
             /*
@@ -4865,11 +4874,21 @@ class MOZ_STACK_CLASS Debugger::ObjectQuery
          * therefore we don't need to follow edges to or from this non-debuggee
          * node.
          */
-        JSCompartment* comp = referent.compartment();
-        if (comp && !dbg->isDebuggeeUnbarriered(JS::GetRealmForCompartment(comp))) {
+        JS::Compartment* comp = referent.compartment();
+        if (comp && !debuggeeCompartments.has(comp)) {
             traversal.abandonReferent();
             return true;
         }
+
+        /*
+         * If the referent has an associated realm and it's not a debuggee
+         * realm, skip it. Don't abandonReferent() here like above: realms
+         * within a compartment can reference each other without going through
+         * cross-compartment wrappers.
+         */
+        Realm* realm = referent.realm();
+        if (realm && !dbg->isDebuggeeUnbarriered(realm))
+            return true;
 
         /*
          * If the referent is an object and matches our query's restrictions,
@@ -4974,7 +4993,7 @@ Debugger::findAllGlobals(JSContext* cx, unsigned argc, Value* vp)
             if (r->creationOptions().invisibleToDebugger())
                 continue;
 
-            r->compartment()->scheduledForDestruction = false;
+            r->compartment()->gcState.scheduledForDestruction = false;
 
             GlobalObject* global = r->maybeGlobal();
 
@@ -5343,9 +5362,8 @@ DebuggerScript_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
         return nullptr;
 
     if (!GetScriptReferent(thisobj).is<ReferentT>()) {
-        ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_BAD_REFERENT,
-                              JSDVG_SEARCH_STACK, args.thisv(), nullptr,
-                              refname, nullptr);
+        ReportValueError(cx, JSMSG_DEBUG_BAD_REFERENT, JSDVG_SEARCH_STACK, args.thisv(), nullptr,
+                         refname);
         return nullptr;
     }
 
@@ -5449,7 +5467,10 @@ struct DebuggerScriptGetLineCountMatcher
     JSContext* cx_;
     double totalLines;
 
-    explicit DebuggerScriptGetLineCountMatcher(JSContext* cx) : cx_(cx) {}
+    explicit DebuggerScriptGetLineCountMatcher(JSContext* cx)
+      : cx_(cx),
+        totalLines(0.0)
+    {}
     using ReturnType = bool;
 
     ReturnType match(HandleScript script) {
@@ -6673,7 +6694,11 @@ class DebuggerScriptIsInCatchScopeMatcher
     bool isInCatch_;
 
   public:
-    explicit DebuggerScriptIsInCatchScopeMatcher(JSContext* cx, size_t offset) : cx_(cx), offset_(offset) { }
+    explicit DebuggerScriptIsInCatchScopeMatcher(JSContext* cx, size_t offset)
+      : cx_(cx),
+        offset_(offset),
+        isInCatch_(false)
+    { }
     using ReturnType = bool;
 
     inline bool isInCatch() const { return isInCatch_; }
@@ -6989,9 +7014,8 @@ DebuggerSource_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
         return nullptr;
 
     if (!GetSourceReferent(thisobj).is<ReferentT>()) {
-        ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_BAD_REFERENT,
-                              JSDVG_SEARCH_STACK, args.thisv(), nullptr,
-                              refname, nullptr);
+        ReportValueError(cx, JSMSG_DEBUG_BAD_REFERENT, JSDVG_SEARCH_STACK, args.thisv(), nullptr,
+                         refname);
         return nullptr;
     }
 
@@ -7074,9 +7098,8 @@ DebuggerSource_getBinary(JSContext* cx, unsigned argc, Value* vp)
     THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get binary)", args, obj, referent);
 
     if (!referent.is<WasmInstanceObject*>()) {
-        ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_BAD_REFERENT,
-                              JSDVG_SEARCH_STACK, args.thisv(), nullptr,
-                              "a wasm source", nullptr);
+        ReportValueError(cx, JSMSG_DEBUG_BAD_REFERENT, JSDVG_SEARCH_STACK, args.thisv(), nullptr,
+                         "a wasm source");
         return false;
     }
 
@@ -8079,9 +8102,8 @@ DebuggerFrame::requireScriptReferent(JSContext* cx, HandleDebuggerFrame frame)
     AbstractFramePtr referent = DebuggerFrame::getReferent(frame);
     if (!referent.hasScript()) {
         RootedValue frameobj(cx, ObjectValue(*frame));
-        ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_BAD_REFERENT,
-                              JSDVG_SEARCH_STACK, frameobj, nullptr,
-                              "a script frame", nullptr);
+        ReportValueError(cx, JSMSG_DEBUG_BAD_REFERENT, JSDVG_SEARCH_STACK, frameobj, nullptr,
+                         "a script frame");
         return false;
     }
     return true;
@@ -8420,8 +8442,7 @@ DebuggerArguments::create(JSContext* cx, HandleObject proto, HandleDebuggerFrame
             return nullptr;
         id = INT_TO_JSID(i);
         if (!getobj ||
-            !NativeDefineAccessorProperty(cx, obj, id,
-                                          JS_DATA_TO_FUNC_PTR(GetterOp, getobj.get()), nullptr,
+            !NativeDefineAccessorProperty(cx, obj, id, getobj, nullptr,
                                           JSPROP_ENUMERATE | JSPROP_GETTER))
         {
             return nullptr;
@@ -9942,7 +9963,7 @@ DebuggerObject::getGlobal(JSContext* cx, HandleDebuggerObject object,
     RootedObject referent(cx, object->referent());
     Debugger* dbg = object->owner();
 
-    RootedObject global(cx, &referent->global());
+    RootedObject global(cx, &referent->deprecatedGlobal());
     return dbg->wrapDebuggeeObject(cx, global, result);
 }
 
@@ -10658,7 +10679,7 @@ DebuggerObject::unwrap(JSContext* cx, HandleDebuggerObject object,
     // Don't allow unwrapping to create a D.O whose referent is in an
     // invisible-to-Debugger global. (If our referent is a *wrapper* to such,
     // and the wrapper is in a visible realm, that's fine.)
-    if (unwrapped->realm()->creationOptions().invisibleToDebugger()) {
+    if (unwrapped->deprecatedRealm()->creationOptions().invisibleToDebugger()) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_INVISIBLE_COMPARTMENT);
         return false;
     }
@@ -10689,13 +10710,11 @@ DebuggerObject::requireGlobal(JSContext* cx, HandleDebuggerObject object)
 
         RootedValue dbgobj(cx, ObjectValue(*object));
         if (referent->is<GlobalObject>()) {
-            ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_WRAPPER_IN_WAY,
-                                  JSDVG_SEARCH_STACK, dbgobj, nullptr,
-                                  isWrapper, isWindowProxy);
+            ReportValueError(cx, JSMSG_DEBUG_WRAPPER_IN_WAY, JSDVG_SEARCH_STACK, dbgobj, nullptr,
+                             isWrapper, isWindowProxy);
         } else {
-            ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_DEBUG_BAD_REFERENT,
-                                  JSDVG_SEARCH_STACK, dbgobj, nullptr,
-                                  "a global object", nullptr);
+            ReportValueError(cx, JSMSG_DEBUG_BAD_REFERENT, JSDVG_SEARCH_STACK, dbgobj, nullptr,
+                             "a global object");
         }
         return false;
     }
@@ -10803,7 +10822,7 @@ DebuggerEnvironment_checkThis(JSContext* cx, const CallArgs& args, const char* f
      */
     if (requireDebuggee) {
         Rooted<Env*> env(cx, static_cast<Env*>(nthisobj->getPrivate()));
-        if (!Debugger::fromChildJSObject(nthisobj)->observesGlobal(&env->global())) {
+        if (!Debugger::fromChildJSObject(nthisobj)->observesGlobal(&env->nonCCWGlobal())) {
             JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_NOT_DEBUGGEE,
                                       "Debugger.Environment", "environment");
             return nullptr;
@@ -11153,7 +11172,7 @@ DebuggerEnvironment::isDebuggee() const
     MOZ_ASSERT(referent());
     MOZ_ASSERT(!referent()->is<EnvironmentObject>());
 
-    return owner()->observesGlobal(&referent()->global());
+    return owner()->observesGlobal(&referent()->nonCCWGlobal());
 }
 
 bool
@@ -11536,7 +11555,27 @@ Debugger::isDebuggerCrossCompartmentEdge(JSObject* obj, const gc::Cell* target)
 
     return referent == target;
 }
-#endif
+
+static void
+CheckDebuggeeThingRealm(Realm* realm, bool invisibleOk)
+{
+    MOZ_ASSERT(!realm->creationOptions().mergeable());
+    MOZ_ASSERT_IF(!invisibleOk, !realm->creationOptions().invisibleToDebugger());
+}
+
+void
+js::CheckDebuggeeThing(JSScript* script, bool invisibleOk)
+{
+    CheckDebuggeeThingRealm(script->realm(), invisibleOk);
+}
+
+void
+js::CheckDebuggeeThing(JSObject* obj, bool invisibleOk)
+{
+    if (Realm* realm = JS::GetObjectRealmOrNull(obj))
+        CheckDebuggeeThingRealm(realm, invisibleOk);
+}
+#endif // DEBUG
 
 
 /*** JS::dbg::GarbageCollectionEvent **************************************************************/

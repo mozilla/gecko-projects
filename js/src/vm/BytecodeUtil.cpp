@@ -36,22 +36,23 @@
 #include "js/CharacterEncoding.h"
 #include "js/Printf.h"
 #include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "vm/CodeCoverage.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/JSAtom.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
+#include "vm/Realm.h"
 #include "vm/Shape.h"
 
 #include "gc/PrivateIterators-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
+#include "vm/Realm-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -190,12 +191,12 @@ DumpPCCounts(JSContext* cx, HandleScript script, Sprinter* sp)
 }
 
 bool
-js::DumpCompartmentPCCounts(JSContext* cx)
+js::DumpRealmPCCounts(JSContext* cx)
 {
     Rooted<GCVector<JSScript*>> scripts(cx, GCVector<JSScript*>(cx));
     for (auto iter = cx->zone()->cellIter<JSScript>(); !iter.done(); iter.next()) {
         JSScript* script = iter;
-        if (script->compartment() != cx->compartment())
+        if (script->realm() != cx->realm())
             continue;
         if (script->hasScriptCounts()) {
             if (!scripts.append(script))
@@ -328,12 +329,12 @@ class BytecodeParser
           : parsed(false),
             stackDepth(0),
             offsetStack(nullptr)
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
             ,
             stackDepthAfter(0),
             offsetStackAfter(nullptr),
             jumpOrigins(alloc)
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
         {}
 
         // Whether this instruction has been analyzed to get its output defines
@@ -349,7 +350,7 @@ class BytecodeParser
         // |stackDepth - 1|.
         OffsetAndDefIndex* offsetStack;
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
         // stack depth after this opcode.
         uint32_t stackDepthAfter;
 
@@ -369,7 +370,7 @@ class BytecodeParser
         // A list of offsets of the bytecode that jumps to this bytecode,
         // exclusing previous bytecode.
         Vector<JumpInfo, 0, LifoAllocPolicy<Fallible>> jumpOrigins;
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
         bool captureOffsetStack(LifoAlloc& alloc, const OffsetAndDefIndex* stack, uint32_t depth) {
             stackDepth = depth;
@@ -383,7 +384,7 @@ class BytecodeParser
             return true;
         }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
         bool captureOffsetStackAfter(LifoAlloc& alloc, const OffsetAndDefIndex* stack,
                                      uint32_t depth) {
             stackDepthAfter = depth;
@@ -400,7 +401,7 @@ class BytecodeParser
         bool addJump(uint32_t from, JumpKind kind) {
             return jumpOrigins.append(JumpInfo(from, kind));
         }
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
         // When control-flow merges, intersect the stacks, marking slots that
         // are defined by different offsets and/or defIndices merged.
@@ -426,12 +427,12 @@ class BytecodeParser
 
     Bytecode** codeArray_;
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     // Dedicated mode for stack dump.
     // Capture stack after each opcode, and also enable special handling for
     // some opcodes to make stack transition clearer.
     bool isStackDump;
-#endif /* DEBUG */
+#endif
 
   public:
     BytecodeParser(JSContext* cx, JSScript* script)
@@ -442,14 +443,14 @@ class BytecodeParser
 #ifdef DEBUG
         ,
         isStackDump(false)
-#endif /* DEBUG */
+#endif
     {}
 
     bool parse();
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     bool isReachable(const jsbytecode* pc) { return maybeCode(pc); }
-#endif /* DEBUG */
+#endif
 
     uint32_t stackDepthAtPC(uint32_t offset) {
         // Sometimes the code generator in debug mode asks about the stack depth
@@ -461,7 +462,7 @@ class BytecodeParser
         return stackDepthAtPC(script_->pcToOffset(pc));
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     uint32_t stackDepthAfterPC(uint32_t offset) {
         return getCode(offset).stackDepthAfter;
     }
@@ -488,7 +489,7 @@ class BytecodeParser
         return script_->offsetToPC(offsetAndDefIndex.offset());
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     const OffsetAndDefIndex& offsetForStackOperandAfterPC(uint32_t offset, int operand) {
         Bytecode& code = getCode(offset);
         if (operand < 0) {
@@ -514,7 +515,7 @@ class BytecodeParser
     void setStackDump() {
         isStackDump = true;
     }
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
   private:
     LifoAlloc& alloc() {
@@ -541,7 +542,7 @@ class BytecodeParser
         return codeArray_[offset];
     }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     Bytecode* maybeCode(const jsbytecode* pc) { return maybeCode(script_->pcToOffset(pc)); }
 #endif
 
@@ -970,7 +971,7 @@ BytecodeParser::parse()
     return true;
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 
 bool
 js::ReconstructStackDepth(JSContext* cx, JSScript* script, jsbytecode* pc, uint32_t* depth, bool* reachablePC)
@@ -1144,17 +1145,21 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
             ReportOutOfMemory(cx);
             return false;
         }
-        bytes->initBytes(Move(copy));
+        bytes->initBytes(std::move(copy));
         return true;
     }
 
-    if (JS::CurrentThreadIsHeapBusy() || !cx->isAllocAllowed()) {
+    if (JS::RuntimeHeapIsBusy()
+#ifdef DEBUG
+        || !cx->isAllocAllowed()
+#endif
+        ) {
         UniqueChars source = JS_smprintf("<value>");
         if (!source) {
             ReportOutOfMemory(cx);
             return false;
         }
-        bytes->initBytes(Move(source));
+        bytes->initBytes(std::move(source));
         return true;
     }
 
@@ -1194,7 +1199,7 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
         if (!AtomToPrintableString(cx, bi.name(), &nameBytes))
             return false;
 
-        source = JS_sprintf_append(Move(source), "%s: ", nameBytes.ptr());
+        source = JS_sprintf_append(std::move(source), "%s: ", nameBytes.ptr());
         if (!source) {
             ReportOutOfMemory(cx);
             return false;
@@ -1203,27 +1208,27 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
         BindingLocation loc = bi.location();
         switch (loc.kind()) {
           case BindingLocation::Kind::Global:
-            source = JS_sprintf_append(Move(source), "global");
+            source = JS_sprintf_append(std::move(source), "global");
             break;
 
           case BindingLocation::Kind::Frame:
-            source = JS_sprintf_append(Move(source), "frame slot %u", loc.slot());
+            source = JS_sprintf_append(std::move(source), "frame slot %u", loc.slot());
             break;
 
           case BindingLocation::Kind::Environment:
-            source = JS_sprintf_append(Move(source), "env slot %u", loc.slot());
+            source = JS_sprintf_append(std::move(source), "env slot %u", loc.slot());
             break;
 
           case BindingLocation::Kind::Argument:
-            source = JS_sprintf_append(Move(source), "arg slot %u", loc.slot());
+            source = JS_sprintf_append(std::move(source), "arg slot %u", loc.slot());
             break;
 
           case BindingLocation::Kind::NamedLambdaCallee:
-            source = JS_sprintf_append(Move(source), "named lambda callee");
+            source = JS_sprintf_append(std::move(source), "named lambda callee");
             break;
 
           case BindingLocation::Kind::Import:
-            source = JS_sprintf_append(Move(source), "import");
+            source = JS_sprintf_append(std::move(source), "import");
             break;
         }
 
@@ -1233,7 +1238,7 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
         }
 
         if (!bi.isLast()) {
-            source = JS_sprintf_append(Move(source), ", ");
+            source = JS_sprintf_append(std::move(source), ", ");
             if (!source) {
                 ReportOutOfMemory(cx);
                 return false;
@@ -1241,13 +1246,13 @@ ToDisassemblySource(JSContext* cx, HandleScope scope, JSAutoByteString* bytes)
         }
     }
 
-    source = JS_sprintf_append(Move(source), "}");
+    source = JS_sprintf_append(std::move(source), "}");
     if (!source) {
         ReportOutOfMemory(cx);
         return false;
     }
 
-    bytes->initBytes(Move(source));
+    bytes->initBytes(std::move(source));
     return true;
 }
 
@@ -1580,7 +1585,7 @@ js::Disassemble1(JSContext* cx, JS::Handle<JSScript*> script, jsbytecode* pc, un
     return Disassemble1(cx, script, pc, loc, lines, nullptr, sp);
 }
 
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
 namespace {
 /*
@@ -1621,22 +1626,22 @@ struct ExpressionDecompiler
     BytecodeParser parser;
     Sprinter sprinter;
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     // Dedicated mode for stack dump.
     // Generates an expression for stack dump, including internal state,
     // and also disables special handling for self-hosted code.
     bool isStackDump;
-#endif /* DEBUG */
+#endif
 
     ExpressionDecompiler(JSContext* cx, JSScript* script)
         : cx(cx),
           script(cx, script),
           parser(cx, script),
           sprinter(cx)
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
           ,
           isStackDump(false)
-#endif /* DEBUG */
+#endif
     {}
     bool init();
     bool decompilePCForStackOperand(jsbytecode* pc, int i);
@@ -1648,12 +1653,12 @@ struct ExpressionDecompiler
     bool write(const char* s);
     bool write(JSString* str);
     bool getOutput(char** out);
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
     void setStackDump() {
         isStackDump = true;
         parser.setStackDump();
     }
-#endif /* DEBUG */
+#endif
 };
 
 bool
@@ -2169,7 +2174,7 @@ ExpressionDecompiler::getOutput(char** res)
 
 }  // anonymous namespace
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 static bool
 DecompileAtPCForStackDump(JSContext* cx, HandleScript script,
                           const OffsetAndDefIndex& offsetAndDefIndex, Sprinter* sp)
@@ -2186,12 +2191,11 @@ DecompileAtPCForStackDump(JSContext* cx, HandleScript script,
     if (!ed.getOutput(&result))
         return false;
 
-    if (!sp->put(result))
-        return false;
-
-    return true;
+    bool ok = sp->put(result);
+    js_free(result);
+    return ok;
 }
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
 static bool
 FindStartPC(JSContext* cx, const FrameIter& iter, int spindex, int skipStackHits, const Value& v,
@@ -2319,10 +2323,10 @@ js::DecompileValueGenerator(JSContext* cx, int spindex, HandleValue v,
     }
     if (!fallback) {
         if (v.isUndefined())
-            return UniqueChars(JS_strdup(cx, js_undefined_str)); // Prevent users from seeing "(void 0)"
+            return DuplicateString(cx, js_undefined_str); // Prevent users from seeing "(void 0)"
         fallback = ValueToSource(cx, v);
         if (!fallback)
-            return UniqueChars(nullptr);
+            return nullptr;
     }
 
     return UniqueChars(JS_EncodeString(cx, fallback));
@@ -2397,7 +2401,7 @@ DecompileArgumentFromStack(JSContext* cx, int formalIndex, char** res)
     return ed.getOutput(res);
 }
 
-char*
+UniqueChars
 js::DecompileArgument(JSContext* cx, int formalIndex, HandleValue v)
 {
     {
@@ -2406,18 +2410,18 @@ js::DecompileArgument(JSContext* cx, int formalIndex, HandleValue v)
             return nullptr;
         if (result) {
             if (strcmp(result, "(intermediate value)"))
-                return result;
+                return UniqueChars(result);
             js_free(result);
         }
     }
     if (v.isUndefined())
-        return JS_strdup(cx, js_undefined_str); // Prevent users from seeing "(void 0)"
+        return DuplicateString(cx, js_undefined_str); // Prevent users from seeing "(void 0)"
 
     RootedString fallback(cx, ValueToSource(cx, v));
     if (!fallback)
         return nullptr;
 
-    return JS_EncodeString(cx, fallback);
+    return UniqueChars(JS_EncodeString(cx, fallback));
 }
 
 bool
@@ -2896,6 +2900,7 @@ GenerateLcovInfo(JSContext* cx, JS::Realm* realm, GenericPrinter& out)
     {
         js::gc::AutoPrepareForTracing apft(cx);
     }
+
     Rooted<ScriptVector> topScripts(cx, ScriptVector(cx));
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         for (auto script = zone->cellIter<JSScript>(); !script.done(); script.next()) {
@@ -2987,10 +2992,8 @@ js::GetCodeCoverageSummary(JSContext* cx, size_t* length)
 
     ptrdiff_t len = out.stringEnd() - out.string();
     char* res = cx->pod_malloc<char>(len + 1);
-    if (!res) {
-        JS_ReportOutOfMemory(cx);
+    if (!res)
         return nullptr;
-    }
 
     js_memcpy(res, out.string(), len);
     res[len] = 0;

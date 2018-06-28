@@ -60,8 +60,8 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    *         the UI has closed, there is no resolution value.
    */
   toggle(window, tab, options = {}) {
-    let action = this.isActiveForTab(tab) ? "close" : "open";
-    let completed = this[action + "IfNeeded"](window, tab, options);
+    const action = this.isActiveForTab(tab) ? "close" : "open";
+    const completed = this[action + "IfNeeded"](window, tab, options);
     completed.catch(console.error);
     return completed;
   },
@@ -88,11 +88,6 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
       this.showRemoteOnlyNotification(window, tab, options);
       return promise.reject(new Error("RDM only available for remote tabs."));
     }
-    // Remove this once we support this case in bug 1306975.
-    if (tab.linkedBrowser.hasAttribute("usercontextid")) {
-      this.showNoContainerTabsNotification(window, tab, options);
-      return promise.reject(new Error("RDM not available for container tabs."));
-    }
     if (!this.isActiveForTab(tab)) {
       this.initMenuCheckListenerFor(window);
 
@@ -117,7 +112,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
       }
       tel.keyedScalarAdd("devtools.responsive.open_trigger", trigger, 1);
 
-      let ui = new ResponsiveUI(window, tab);
+      const ui = new ResponsiveUI(window, tab);
       this.activeTabs.set(tab, ui);
       await this.setMenuCheckFor(tab, window);
       await ui.inited;
@@ -242,13 +237,13 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
   },
 
   initMenuCheckListenerFor(window) {
-    let { tabContainer } = window.gBrowser;
+    const { tabContainer } = window.gBrowser;
     tabContainer.addEventListener("TabSelect", this.handleMenuCheck);
   },
 
   removeMenuCheckListenerFor(window) {
     if (window && window.gBrowser && window.gBrowser.tabContainer) {
-      let { tabContainer } = window.gBrowser;
+      const { tabContainer } = window.gBrowser;
       tabContainer.removeEventListener("TabSelect", this.handleMenuCheck);
     }
   },
@@ -256,7 +251,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
   async setMenuCheckFor(tab, window = tab.ownerGlobal) {
     await startup(window);
 
-    let menu = window.document.getElementById("menu_responsiveUI");
+    const menu = window.document.getElementById("menu_responsiveUI");
     if (menu) {
       menu.setAttribute("checked", this.isActiveForTab(tab));
     }
@@ -266,14 +261,6 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
     showNotification(window, tab, {
       command: trigger == "command",
       msg: l10n.getStr("responsive.remoteOnly"),
-      priority: PriorityLevels.PRIORITY_CRITICAL_MEDIUM,
-    });
-  },
-
-  showNoContainerTabsNotification(window, tab, { trigger } = {}) {
-    showNotification(window, tab, {
-      command: trigger == "command",
-      msg: l10n.getStr("responsive.noContainerTabs"),
       priority: PriorityLevels.PRIORITY_CRITICAL_MEDIUM,
     });
   },
@@ -341,7 +328,7 @@ ResponsiveUI.prototype = {
   async init() {
     debug("Init start");
 
-    let ui = this;
+    const ui = this;
 
     // Watch for tab close and window close so we can clean up RDM synchronously
     this.tab.addEventListener("TabClose", this);
@@ -353,11 +340,14 @@ ResponsiveUI.prototype = {
       tab: this.tab,
       containerURL: TOOL_URL,
       async getInnerBrowser(containerBrowser) {
-        let toolWindow = ui.toolWindow = containerBrowser.contentWindow;
+        const toolWindow = ui.toolWindow = containerBrowser.contentWindow;
         toolWindow.addEventListener("message", ui);
         debug("Wait until init from inner");
         await message.request(toolWindow, "init");
-        toolWindow.addInitialViewport("about:blank");
+        toolWindow.addInitialViewport({
+          uri: "about:blank",
+          userContextId: ui.tab.userContextId,
+        });
         debug("Wait until browser mounted");
         await message.wait(toolWindow, "browser-mounted");
         return ui.getViewportBrowser();
@@ -400,8 +390,8 @@ ResponsiveUI.prototype = {
     // If our tab is about to be closed, there's not enough time to exit
     // gracefully, but that shouldn't be a problem since the tab will go away.
     // So, skip any waiting when we're about to close the tab.
-    let isWindowClosing = options && options.reason === "unload";
-    let isTabContentDestroying =
+    const isWindowClosing = options && options.reason === "unload";
+    const isTabContentDestroying =
       isWindowClosing || (options && (options.reason === "TabClose" ||
                                       options.reason === "BeforeTabRemotenessChange"));
 
@@ -436,7 +426,7 @@ ResponsiveUI.prototype = {
     }
 
     // Destroy local state
-    let swap = this.swap;
+    const swap = this.swap;
     this.browserWindow = null;
     this.tab = null;
     this.inited = null;
@@ -446,7 +436,7 @@ ResponsiveUI.prototype = {
     // Close the debugger client used to speak with emulation actor.
     // The actor handles clearing any overrides itself, so it's not necessary to clear
     // anything on shutdown client side.
-    let clientClosed = this.client.close();
+    const clientClosed = this.client.close();
     if (!isTabContentDestroying) {
       await clientClosed;
     }
@@ -467,7 +457,7 @@ ResponsiveUI.prototype = {
     DebuggerServer.registerAllActors();
     this.client = new DebuggerClient(DebuggerServer.connectPipe());
     await this.client.connect();
-    let { tab } = await this.client.getTab();
+    const { tab } = await this.client.getTab();
     this.emulationFront = EmulationFront(this.client, tab);
   },
 
@@ -486,12 +476,12 @@ ResponsiveUI.prototype = {
 
   reloadOnChange(id) {
     this.showReloadNotification();
-    let pref = RELOAD_CONDITION_PREF_PREFIX + id;
+    const pref = RELOAD_CONDITION_PREF_PREFIX + id;
     return Services.prefs.getBoolPref(pref, false);
   },
 
   handleEvent(event) {
-    let { browserWindow, tab } = this;
+    const { browserWindow, tab } = this;
 
     switch (event.type) {
       case "message":
@@ -538,7 +528,7 @@ ResponsiveUI.prototype = {
   },
 
   async onChangeDevice(event) {
-    let { userAgent, pixelRatio, touch } = event.data.device;
+    const { userAgent, pixelRatio, touch } = event.data.device;
     let reloadNeeded = false;
     await this.updateDPPX(pixelRatio);
     reloadNeeded |= await this.updateUserAgent(userAgent) &&
@@ -553,20 +543,20 @@ ResponsiveUI.prototype = {
   },
 
   async onChangeNetworkThrottling(event) {
-    let { enabled, profile } = event.data;
+    const { enabled, profile } = event.data;
     await this.updateNetworkThrottling(enabled, profile);
     // Used by tests
     this.emit("network-throttling-changed");
   },
 
   onChangePixelRatio(event) {
-    let { pixelRatio } = event.data;
+    const { pixelRatio } = event.data;
     this.updateDPPX(pixelRatio);
   },
 
   async onChangeTouchSimulation(event) {
-    let { enabled } = event.data;
-    let reloadNeeded = await this.updateTouchSimulation(enabled) &&
+    const { enabled } = event.data;
+    const reloadNeeded = await this.updateTouchSimulation(enabled) &&
                        this.reloadOnChange("touchSimulation");
     if (reloadNeeded) {
       this.getViewportBrowser().reload();
@@ -576,7 +566,7 @@ ResponsiveUI.prototype = {
   },
 
   onContentResize(event) {
-    let { width, height } = event.data;
+    const { width, height } = event.data;
     this.emit("content-resize", {
       width,
       height,
@@ -584,7 +574,7 @@ ResponsiveUI.prototype = {
   },
 
   onExit() {
-    let { browserWindow, tab } = this;
+    const { browserWindow, tab } = this;
     ResponsiveUIManager.closeIfNeeded(browserWindow, tab);
   },
 
@@ -630,8 +620,8 @@ ResponsiveUI.prototype = {
       await this.emulationFront.clearNetworkThrottling();
       return false;
     }
-    let data = throttlingProfiles.find(({ id }) => id == profile);
-    let { download, upload, latency } = data;
+    const data = throttlingProfiles.find(({ id }) => id == profile);
+    const { download, upload, latency } = data;
     await this.emulationFront.setNetworkThrottling({
       downloadThroughput: download,
       uploadThroughput: upload,

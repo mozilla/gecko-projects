@@ -327,7 +327,7 @@ var PingPicker = {
       pingName = bundle.formatStringFromName("namedPing", [pingName, pingTypeText], 2);
       pingNameSpan.textContent = pingName;
       let explanation = bundle.GetStringFromName("pingDetails");
-      fragment = BrowserUtils.getLocalizedFragment(document, explanation, pingLink, pingNameSpan, pingTypeText);
+      fragment = BrowserUtils.getLocalizedFragment(document, explanation, pingLink, pingNameSpan);
     } else {
       // Change sidebar heading text.
       controls.classList.add("hidden");
@@ -340,6 +340,7 @@ var PingPicker = {
     }
 
     let pingExplanation = document.getElementById("ping-explanation");
+    removeAllChildNodes(pingExplanation);
     pingExplanation.appendChild(fragment);
     pingExplanation.querySelector(".change-ping").addEventListener("click", (ev) => {
       document.getElementById("ping-picker").classList.remove("hidden");
@@ -998,32 +999,6 @@ function SymbolicationRequest_fetchSymbols() {
   this.symbolRequest.send(requestJSON);
 };
 
-var ChromeHangs = {
-
-  symbolRequest: null,
-
-  /**
-   * Renders raw chrome hang data
-   */
-  render: function ChromeHangs_render(chromeHangs) {
-    setHasData("chrome-hangs-section", !!chromeHangs);
-    if (!chromeHangs) {
-      return;
-    }
-
-    let stacks = chromeHangs.stacks;
-    let memoryMap = chromeHangs.memoryMap;
-    let durations = chromeHangs.durations;
-
-    StackRenderer.renderStacks("chrome-hangs", stacks, memoryMap,
-                               (index) => this.renderHangHeader(index, durations));
-  },
-
-  renderHangHeader: function ChromeHangs_renderHangHeader(aIndex, aDurations) {
-    StackRenderer.renderHeader("chrome-hangs", [aIndex + 1, aDurations[aIndex]]);
-  }
-};
-
 var CapturedStacks = {
   symbolRequest: null,
 
@@ -1226,7 +1201,6 @@ var Search = {
   // A list of ids of sections that do not support search.
   blacklist: [
     "late-writes-section",
-    "chrome-hangs-section",
     "raw-payload-section"
   ],
 
@@ -1734,47 +1708,6 @@ var KeyedScalars = {
   },
 };
 
-var Events = {
-  /**
-   * Render the event data - if present - from the payload in a simple table.
-   * @param aPayload A payload object to render the data from.
-   */
-  render(aPayload) {
-    let eventsSection = document.getElementById("events");
-    removeAllChildNodes(eventsSection);
-
-    let processesSelect = document.getElementById("processes");
-    let selectedProcess = processesSelect.selectedOptions.item(0).getAttribute("value");
-
-    if (!aPayload.processes ||
-        !selectedProcess ||
-        !(selectedProcess in aPayload.processes)) {
-      return;
-    }
-
-    let events = aPayload.processes[selectedProcess].events || {};
-    let hasData = Array.from(processesSelect.options).some((option) => {
-      let value = option.getAttribute("value");
-      let evts = aPayload.processes[value].events;
-      return evts && Object.keys(evts).length > 0;
-    });
-    setHasData("events-section", hasData);
-    if (Object.keys(events).length > 0) {
-      const headings = [
-        "timestampHeader",
-        "categoryHeader",
-        "methodHeader",
-        "objectHeader",
-        "valuesHeader",
-        "extraHeader",
-      ].map(h => bundle.GetStringFromName(h));
-
-      const table = GenericTable.render(events, headings);
-      eventsSection.appendChild(table);
-    }
-  },
-};
-
 /**
  * Helper function for showing either the toggle element or "No data collected" message for a section
  *
@@ -1992,30 +1925,6 @@ function setupListeners() {
     function(aEvent) {
       Settings.detachObservers();
   }, {once: true});
-
-  document.getElementById("chrome-hangs-fetch-symbols").addEventListener("click",
-    function() {
-      if (!gPingData) {
-        return;
-      }
-
-      let hangs = gPingData.payload.chromeHangs;
-      let req = new SymbolicationRequest("chrome-hangs",
-                                         ChromeHangs.renderHangHeader,
-                                         hangs.memoryMap,
-                                         hangs.stacks,
-                                         hangs.durations);
-      req.fetchSymbols();
-  });
-
-  document.getElementById("chrome-hangs-hide-symbols").addEventListener("click",
-    function() {
-      if (!gPingData) {
-        return;
-      }
-
-      ChromeHangs.render(gPingData.payload.chromeHangs);
-  });
 
   document.getElementById("captured-stacks-fetch-symbols").addEventListener("click",
     function() {
@@ -2397,16 +2306,10 @@ function displayRichPingData(ping, updatePayloadList) {
   // Show keyed histogram data
   KeyedHistogramSection.render(payload);
 
-  // Show event data.
-  Events.render(payload);
-
   // Show captured stacks.
   CapturedStacks.render(payload);
 
   LateWritesSingleton.renderLateWrites(payload.lateWrites);
-
-  // Show chrome hang stacks
-  ChromeHangs.render(payload.chromeHangs);
 
   // Show simple measurements
   SimpleMeasurements.render(payload);

@@ -127,10 +127,10 @@ var Policies = {
       addAllowDenyPermissions("cookie", param.Allow, param.Block);
 
       if (param.Block) {
-        const hosts = param.Block.map(uri => uri.host).sort().join("\n");
+        const hosts = param.Block.map(url => url.hostname).sort().join("\n");
         runOncePerModification("clearCookiesForBlockedHosts", hosts, () => {
           for (let blocked of param.Block) {
-            Services.cookies.removeCookiesWithOriginAttributes("{}", blocked.host);
+            Services.cookies.removeCookiesWithOriginAttributes("{}", blocked.hostname);
           }
         });
       }
@@ -508,9 +508,9 @@ var Policies = {
       // |homepages| will be a string containing a pipe-separated ('|') list of
       // URLs because that is what the "Home page" section of about:preferences
       // (and therefore what the pref |browser.startup.homepage|) accepts.
-      let homepages = param.URL.spec;
+      let homepages = param.URL.href;
       if (param.Additional && param.Additional.length > 0) {
-        homepages += "|" + param.Additional.map(url => url.spec).join("|");
+        homepages += "|" + param.Additional.map(url => url.href).join("|");
       }
       if (param.Locked) {
         setAndLockPref("browser.startup.homepage", homepages);
@@ -563,19 +563,43 @@ var Policies = {
 
   "OverrideFirstRunPage": {
     onProfileAfterChange(manager, param) {
-      let url = param ? param.spec : "";
+      let url = param ? param.href : "";
       setAndLockPref("startup.homepage_welcome_url", url);
     }
   },
 
   "OverridePostUpdatePage": {
     onProfileAfterChange(manager, param) {
-      let url = param ? param.spec : "";
+      let url = param ? param.href : "";
       setAndLockPref("startup.homepage_override_url", url);
       // The pref startup.homepage_override_url is only used
       // as a fallback when the update.xml file hasn't provided
       // a specific post-update URL.
       manager.disallowFeature("postUpdateCustomPage");
+    }
+  },
+
+  "Permissions": {
+    onBeforeUIStartup(manager, param) {
+      if (param.Camera) {
+        addAllowDenyPermissions("camera", param.Camera.Allow, param.Camera.Block);
+        setDefaultPermission("camera", param.Camera);
+      }
+
+      if (param.Microphone) {
+        addAllowDenyPermissions("microphone", param.Microphone.Allow, param.Microphone.Block);
+        setDefaultPermission("microphone", param.Microphone);
+      }
+
+      if (param.Location) {
+        addAllowDenyPermissions("geo", param.Location.Allow, param.Location.Block);
+        setDefaultPermission("geo", param.Location);
+      }
+
+      if (param.Notifications) {
+        addAllowDenyPermissions("desktop-notification", param.Notifications.Allow, param.Notifications.Block);
+        setDefaultPermission("desktop-notification", param.Notifications);
+      }
     }
   },
 
@@ -646,6 +670,23 @@ var Policies = {
     },
     onAllWindowsRestored(manager, param) {
       Services.search.init(() => {
+        if (param.Remove) {
+          // Only rerun if the list of engine names has changed.
+          runOncePerModification("removeSearchEngines",
+                                 JSON.stringify(param.Remove),
+                                 () => {
+            for (let engineName of param.Remove) {
+              let engine = Services.search.getEngineByName(engineName);
+              if (engine) {
+                try {
+                  Services.search.removeEngine(engine);
+                } catch (ex) {
+                  log.error("Unable to remove the search engine", ex);
+                }
+              }
+            }
+          });
+        }
         if (param.Add) {
           // Only rerun if the list of engine names has changed.
           let engineNameList = param.Add.map(engine => engine.Name);
@@ -672,7 +713,7 @@ var Policies = {
           });
         }
         if (param.Default) {
-          runOnce("setDefaultSearchEngine", () => {
+          runOncePerModification("setDefaultSearchEngine", param.Default, () => {
             let defaultEngine;
             try {
               defaultEngine = Services.search.getEngineByName(param.Default);
@@ -770,6 +811,34 @@ function setDefaultPref(prefName, prefValue) {
 }
 
 /**
+ * setDefaultPermission
+ *
+ * Helper function to set preferences appropriately for the policy
+ *
+ * @param {string} policyName
+ *        The name of the policy to set
+ * @param {object} policyParam
+ *        The object containing param for the policy
+ */
+function setDefaultPermission(policyName, policyParam) {
+  if ("BlockNewRequests" in policyParam) {
+    let prefName = "permissions.default." + policyName;
+
+    if (policyParam.BlockNewRequests) {
+      if (policyParam.Locked) {
+        setAndLockPref(prefName, 2);
+      } else {
+        setDefaultPref(prefName, 2);
+      }
+    } else if (policyParam.Locked) {
+      setAndLockPref(prefName, 0);
+    } else {
+      setDefaultPref(prefName, 0);
+    }
+  }
+}
+
+/**
  * addAllowDenyPermissions
  *
  * Helper function to call the permissions manager (Services.perms.add)
@@ -788,18 +857,18 @@ function addAllowDenyPermissions(permissionName, allowList, blockList) {
 
   for (let origin of allowList) {
     try {
-      Services.perms.add(origin,
+      Services.perms.add(Services.io.newURI(origin.href),
                          permissionName,
                          Ci.nsIPermissionManager.ALLOW_ACTION,
                          Ci.nsIPermissionManager.EXPIRE_POLICY);
     } catch (ex) {
       log.error(`Added by default for ${permissionName} permission in the permission
-      manager - ${origin.spec}`);
+      manager - ${origin.href}`);
     }
   }
 
   for (let origin of blockList) {
-    Services.perms.add(origin,
+    Services.perms.add(Services.io.newURI(origin.href),
                        permissionName,
                        Ci.nsIPermissionManager.DENY_ACTION,
                        Ci.nsIPermissionManager.EXPIRE_POLICY);

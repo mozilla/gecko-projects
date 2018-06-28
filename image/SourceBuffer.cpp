@@ -37,7 +37,7 @@ SourceBufferIterator::operator=(SourceBufferIterator&& aOther)
     mOwner->OnIteratorRelease();
   }
 
-  mOwner = Move(aOther.mOwner);
+  mOwner = std::move(aOther.mOwner);
   mState = aOther.mState;
   mData = aOther.mData;
   mChunkCount = aOther.mChunkCount;
@@ -159,7 +159,7 @@ SourceBuffer::AppendChunk(Maybe<Chunk>&& aChunk)
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (MOZ_UNLIKELY(!mChunks.AppendElement(Move(*aChunk), fallible))) {
+  if (MOZ_UNLIKELY(!mChunks.AppendElement(std::move(*aChunk), fallible))) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -463,7 +463,7 @@ SourceBuffer::Append(const char* aData, size_t aLength)
         return HandleError(NS_ERROR_OUT_OF_MEMORY);
       }
 
-      if (MOZ_UNLIKELY(NS_FAILED(AppendChunk(Move(nextChunk))))) {
+      if (MOZ_UNLIKELY(NS_FAILED(AppendChunk(std::move(nextChunk))))) {
         return HandleError(NS_ERROR_OUT_OF_MEMORY);
       }
     }
@@ -517,12 +517,16 @@ SourceBuffer::AppendFromInputStream(nsIInputStream* aInputStream,
   }
 
   if (bytesRead != aCount) {
-    // Only some of the given data was read. We must have failed in
-    // SourceBuffer::Append but ReadSegments swallowed the error.
+    // Only some of the given data was read. We may have failed in
+    // SourceBuffer::Append but ReadSegments swallowed the error. Otherwise the
+    // stream itself failed to yield the data.
     MutexAutoLock lock(mMutex);
-    MOZ_ASSERT(mStatus);
-    MOZ_ASSERT(NS_FAILED(*mStatus));
-    return *mStatus;
+    if (mStatus) {
+      MOZ_ASSERT(NS_FAILED(*mStatus));
+      return *mStatus;
+    }
+
+    MOZ_ASSERT_UNREACHABLE("AppendToSourceBuffer should consume everything");
   }
 
   return rv;

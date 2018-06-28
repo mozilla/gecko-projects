@@ -40,27 +40,6 @@ module.exports = {
       "mozilla/browser-window": true
     }
   }, {
-    // XXX Bug 1436303. These directories are still being fixed, so turn off
-    // mozilla/no-cc-etc for now.
-    "files": [
-      "devtools/**"
-    ],
-    "rules": {
-      "mozilla/no-define-cc-etc": "off",
-    }
-  }, {
-    // XXX Bug 1452706. These directories are still being fixed, so turn off
-    //  mozilla/require-expected-throws-or-rejects for now.
-    "files": [
-      "devtools/client/inspector/extensions/test/head_devtools_inspector_sidebar.js",
-      "storage/test/unit/**",
-      "toolkit/components/extensions/**",
-      "toolkit/mozapps/extensions/test/xpcshell/**"
-    ],
-    "rules": {
-      "mozilla/require-expected-throws-or-rejects": "off",
-    }
-  }, {
     // XXX Bug 1452706. These directories are still being fixed, so turn off
     //  mozilla/require-expected-throws-or-rejects for now.
     "files": [

@@ -271,9 +271,6 @@ pref("browser.chrome.site_icons", true);
 pref("browser.chrome.favicons", true);
 // browser.warnOnQuit == false will override all other possible prompts when quitting or restarting
 pref("browser.warnOnQuit", true);
-// browser.showQuitWarning specifically controls the quit warning dialog. We
-// might still show the window closing dialog with showQuitWarning == false.
-pref("browser.showQuitWarning", false);
 pref("browser.fullscreen.autohide", true);
 pref("browser.overlink-delay", 80);
 
@@ -983,6 +980,9 @@ pref("app.productInfo.baseURL", "https://www.mozilla.org/firefox/features/");
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
 
+// Indicates if new certificate error page (enabled) or not
+pref("browser.security.newcerterrorpage.enabled", false);
+
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
 
@@ -1488,18 +1488,18 @@ pref("privacy.trackingprotection.ui.enabled", true);
 pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");
 
+// Always enable newtab segregation using containers
+pref("privacy.usercontext.about_newtab_segregation.enabled", true);
 // Enable Contextual Identity Containers
 #ifdef NIGHTLY_BUILD
 pref("privacy.userContext.enabled", true);
 pref("privacy.userContext.ui.enabled", true);
-pref("privacy.usercontext.about_newtab_segregation.enabled", true);
 
 // 0 disables long press, 1 when clicked, the menu is shown, 2 the menu is shown after X milliseconds.
 pref("privacy.userContext.longPressBehavior", 2);
 #else
 pref("privacy.userContext.enabled", false);
 pref("privacy.userContext.ui.enabled", false);
-pref("privacy.usercontext.about_newtab_segregation.enabled", false);
 
 // 0 disables long press, 1 when clicked, the menu is shown, 2 the menu is shown after X milliseconds.
 pref("privacy.userContext.longPressBehavior", 0);
@@ -1723,3 +1723,7 @@ pref("app.shield.optoutstudies.enabled", true);
 #else
 pref("app.shield.optoutstudies.enabled", false);
 #endif
+
+// Savant Shield study preferences
+pref("shield.savant.enabled", false);
+pref("shield.savant.loglevel", "warn");

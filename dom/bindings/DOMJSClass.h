@@ -8,6 +8,7 @@
 #define mozilla_dom_DOMJSClass_h
 
 #include "jsfriendapi.h"
+#include "js/Wrapper.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Likely.h"
@@ -42,13 +43,13 @@ namespace dom {
  *
  * Since we want [SecureContext] exposure to depend on the privileges of the
  * running code (rather than the privileges of an object's creator), this
- * function checks to see whether the given JSContext's Compartment is flagged
+ * function checks to see whether the given JSContext's Realm is flagged
  * as a Secure Context.  That allows us to make sure that system principal code
  * (which is marked as a Secure Context) can access Secure Context API on an
- * object in a different compartment, regardless of whether the other
- * compartment is a Secure Context or not.
+ * object in a different realm, regardless of whether the other realm is a
+ * Secure Context or not.
  *
- * Checking the JSContext's Compartment doesn't work for expanded principal
+ * Checking the JSContext's Realm doesn't work for expanded principal
  * globals accessing a Secure Context web page though (e.g. those used by frame
  * scripts).  To handle that we fall back to checking whether the JSObject came
  * from a Secure Context.
@@ -60,8 +61,9 @@ namespace dom {
 inline bool
 IsSecureContextOrObjectIsFromSecureContext(JSContext* aCx, JSObject* aObj)
 {
-  return JS::RealmCreationOptionsRef(js::GetContextCompartment(aCx)).secureContext() ||
-         JS::RealmCreationOptionsRef(js::GetObjectCompartment(aObj)).secureContext();
+  MOZ_ASSERT(!js::IsWrapper(aObj));
+  return JS::GetIsSecureContext(js::GetContextRealm(aCx)) ||
+         JS::GetIsSecureContext(js::GetNonCCWObjectRealm(aObj));
 }
 
 typedef bool
@@ -154,6 +156,7 @@ struct PrefableDisablers {
 template<typename T>
 struct Prefable {
   inline bool isEnabled(JSContext* cx, JS::Handle<JSObject*> obj) const {
+    MOZ_ASSERT(!js::IsWrapper(obj));
     if (MOZ_LIKELY(!disablers)) {
       return true;
     }

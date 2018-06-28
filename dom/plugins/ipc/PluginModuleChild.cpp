@@ -82,7 +82,7 @@ bool
 PluginModuleChild::CreateForContentProcess(Endpoint<PPluginModuleChild>&& aEndpoint)
 {
     auto* child = new PluginModuleChild(false);
-    return child->InitForContent(Move(aEndpoint));
+    return child->InitForContent(std::move(aEndpoint));
 }
 
 PluginModuleChild::PluginModuleChild(bool aIsChrome)
@@ -182,7 +182,7 @@ mozilla::ipc::IPCResult
 PluginModuleChild::RecvInitProfiler(Endpoint<mozilla::PProfilerChild>&& aEndpoint)
 {
 #ifdef MOZ_GECKO_PROFILER
-    mProfilerController = ChildProfilerController::Create(Move(aEndpoint));
+    mProfilerController = ChildProfilerController::Create(std::move(aEndpoint));
 #endif
     return IPC_OK();
 }
@@ -730,7 +730,7 @@ PluginModuleChild::RecvSetAudioSessionData(const nsID& aId,
 mozilla::ipc::IPCResult
 PluginModuleChild::RecvInitPluginModuleChild(Endpoint<PPluginModuleChild>&& aEndpoint)
 {
-    if (!CreateForContentProcess(Move(aEndpoint))) {
+    if (!CreateForContentProcess(std::move(aEndpoint))) {
         return IPC_FAIL(this, "CreateForContentProcess failed");
     }
     return IPC_OK();
@@ -741,7 +741,7 @@ PluginModuleChild::RecvInitPluginFunctionBroker(Endpoint<PFunctionBrokerChild>&&
 {
 #if defined(XP_WIN)
     MOZ_ASSERT(mIsChrome);
-    if (!FunctionBrokerChild::Initialize(Move(aEndpoint))) {
+    if (!FunctionBrokerChild::Initialize(std::move(aEndpoint))) {
       return IPC_FAIL(this,
                       "InitPluginFunctionBroker failed to initialize broker child.");
     }
@@ -875,6 +875,14 @@ _useragent(NPP aNPP);
 static void*
 _memalloc (uint32_t size);
 
+// Deprecated entry points for the old Java plugin.
+static void* /* OJI type: JRIEnv* */
+_getjavaenv(void);
+
+// Deprecated entry points for the old Java plugin.
+static void* /* OJI type: jref */
+_getjavapeer(NPP aNPP);
+
 static bool
 _invoke(NPP aNPP, NPObject* npobj, NPIdentifier method, const NPVariant *args,
         uint32_t argCount, NPVariant *result);
@@ -979,8 +987,8 @@ const NPNetscapeFuncs PluginModuleChild::sBrowserFuncs = {
     mozilla::plugins::child::_memfree,
     mozilla::plugins::child::_memflush,
     mozilla::plugins::child::_reloadplugins,
-    nullptr, // _getjavaenv, unimplemented
-    nullptr, // _getjavapeer, unimplemented
+    mozilla::plugins::child::_getjavaenv,
+    mozilla::plugins::child::_getjavapeer,
     mozilla::plugins::child::_geturlnotify,
     mozilla::plugins::child::_posturlnotify,
     mozilla::plugins::child::_getvalue,
@@ -1128,7 +1136,7 @@ _getvalue(NPP aNPP,
         }
     }
 
-    NS_NOTREACHED("Shouldn't get here!");
+    MOZ_ASSERT_UNREACHABLE("Shouldn't get here!");
     return NPERR_GENERIC_ERROR;
 }
 
@@ -1294,6 +1302,21 @@ _memalloc(uint32_t aSize)
 {
     PLUGIN_LOG_DEBUG_FUNCTION;
     return moz_xmalloc(aSize);
+}
+
+// Deprecated entry points for the old Java plugin.
+void* /* OJI type: JRIEnv* */
+_getjavaenv(void)
+{
+    PLUGIN_LOG_DEBUG_FUNCTION;
+    return 0;
+}
+
+void* /* OJI type: jref */
+_getjavapeer(NPP aNPP)
+{
+    PLUGIN_LOG_DEBUG_FUNCTION;
+    return 0;
 }
 
 bool
@@ -1819,7 +1842,7 @@ PluginModuleChild::AnswerModuleSupportsAsyncRender(bool* aResult)
     *aResult = gChromeInstance->mAsyncRenderSupport;
     return IPC_OK();
 #else
-    NS_NOTREACHED("Shouldn't get here!");
+    MOZ_ASSERT_UNREACHABLE("Shouldn't get here!");
     return IPC_FAIL_NO_REASON(this);
 #endif
 }

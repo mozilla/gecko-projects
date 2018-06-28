@@ -2,8 +2,7 @@ load(libdir + "wasm-binary.js");
 
 const { extractStackFrameFunction } = WasmHelpers;
 
-const Module = WebAssembly.Module;
-const CompileError = WebAssembly.CompileError;
+const { Module, RuntimeError, CompileError } = WebAssembly;
 
 const magicError = /failed to match magic number/;
 const unknownSection = /expected custom section/;
@@ -282,8 +281,8 @@ const v2vSigSection = sigSection([v2vSig]);
 const i2vSig = {args:[I32Code], ret:VoidCode};
 const v2vBody = funcBody({locals:[], body:[]});
 
-assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: U32MAX_LEB } ])), CompileError, /too many signatures/);
-assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: [1, 0], } ])), CompileError, /expected function form/);
+assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: U32MAX_LEB } ])), CompileError, /too many types/);
+assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: [1, 0], } ])), CompileError, /expected type form/);
 assertErrorMessage(() => wasmEval(moduleWithSections([ {name: typeId, body: [1, FuncCode, ...U32MAX_LEB], } ])), CompileError, /too many arguments in signature/);
 
 assertThrowsInstanceOf(() => wasmEval(moduleWithSections([{name: typeId, body: [1]}])), CompileError);
@@ -460,6 +459,15 @@ assertWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsecti
 assertNoWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), [4, 0]])])));
 assertWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), [4, 1]])])), nameWarning);
 assertNoWarning(() => wasmEval(moduleWithSections([nameSection([moduleNameSubsection('hi'), [4, 1, 42]])])));
+
+// Provide a module name but no function names.
+assertErrorMessage(() => wasmEval(moduleWithSections([
+    v2vSigSection,
+    declSection([0]),
+    exportSection([{funcIndex: 0, name: "f"}]),
+    bodySection([funcBody({locals:[], body:[UnreachableCode]})]),
+    nameSection([moduleNameSubsection('hi')])])
+).f(), RuntimeError, /unreachable/);
 
 // Diagnose nonstandard block signature types.
 for (var bad of [0xff, 0, 1, 0x3f])

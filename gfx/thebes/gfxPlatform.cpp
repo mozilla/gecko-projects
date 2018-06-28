@@ -162,6 +162,7 @@ static Mutex* gGfxPlatformPrefsLock = nullptr;
 static qcms_profile *gCMSOutputProfile = nullptr;
 static qcms_profile *gCMSsRGBProfile = nullptr;
 
+static bool gCMSRGBTransformFailed = false;
 static qcms_transform *gCMSRGBTransform = nullptr;
 static qcms_transform *gCMSInverseRGBTransform = nullptr;
 static qcms_transform *gCMSRGBATransform = nullptr;
@@ -616,6 +617,9 @@ WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
   GFX_WEBRENDER_DEBUG(".disable-batching",   1 << 5)
   GFX_WEBRENDER_DEBUG(".epochs",             1 << 6)
   GFX_WEBRENDER_DEBUG(".compact-profiler",   1 << 7)
+  GFX_WEBRENDER_DEBUG(".echo-driver-messages", 1 << 8)
+  GFX_WEBRENDER_DEBUG(".new-frame-indicator", 1 << 9)
+  GFX_WEBRENDER_DEBUG(".new-scene-indicator", 1 << 10)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -1058,7 +1062,7 @@ gfxPlatform::InitLayersIPC()
       layers::PaintThread::Start();
     }
   } else if (XRE_IsParentProcess()) {
-    if (gfxVars::UseWebRender()) {
+    if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS) && gfxVars::UseWebRender()) {
       wr::RenderThread::Start();
     }
 
@@ -1834,7 +1838,7 @@ gfxPlatform::GetBackendPrefs() const
   data.mCanvasDefault = BackendType::CAIRO;
   data.mContentDefault = BackendType::CAIRO;
 
-  return mozilla::Move(data);
+  return data;
 }
 
 void
@@ -2085,7 +2089,7 @@ gfxPlatform::GetCMSsRGBProfile()
 qcms_transform *
 gfxPlatform::GetCMSRGBTransform()
 {
-    if (!gCMSRGBTransform) {
+    if (!gCMSRGBTransform && !gCMSRGBTransformFailed) {
         qcms_profile *inProfile, *outProfile;
         outProfile = GetCMSOutputProfile();
         inProfile = GetCMSsRGBProfile();
@@ -2096,6 +2100,9 @@ gfxPlatform::GetCMSRGBTransform()
         gCMSRGBTransform = qcms_transform_create(inProfile, QCMS_DATA_RGB_8,
                                               outProfile, QCMS_DATA_RGB_8,
                                              QCMS_INTENT_PERCEPTUAL);
+        if (!gCMSRGBTransform) {
+            gCMSRGBTransformFailed = true;
+        }
     }
 
     return gCMSRGBTransform;
@@ -2311,7 +2318,8 @@ gfxPlatform::Optimal2DFormatForContent(gfxContentType aContent)
     case SurfaceFormat::R5G6B5_UINT16:
       return mozilla::gfx::SurfaceFormat::R5G6B5_UINT16;
     default:
-      NS_NOTREACHED("unknown gfxImageFormat for gfxContentType::COLOR");
+      MOZ_ASSERT_UNREACHABLE("unknown gfxImageFormat for "
+                             "gfxContentType::COLOR");
       return mozilla::gfx::SurfaceFormat::B8G8R8A8;
     }
   case gfxContentType::ALPHA:
@@ -2319,7 +2327,7 @@ gfxPlatform::Optimal2DFormatForContent(gfxContentType aContent)
   case gfxContentType::COLOR_ALPHA:
     return mozilla::gfx::SurfaceFormat::B8G8R8A8;
   default:
-    NS_NOTREACHED("unknown gfxContentType");
+    MOZ_ASSERT_UNREACHABLE("unknown gfxContentType");
     return mozilla::gfx::SurfaceFormat::B8G8R8A8;
   }
 }
@@ -2335,7 +2343,7 @@ gfxPlatform::OptimalFormatForContent(gfxContentType aContent)
   case gfxContentType::COLOR_ALPHA:
     return SurfaceFormat::A8R8G8B8_UINT32;
   default:
-    NS_NOTREACHED("unknown gfxContentType");
+    MOZ_ASSERT_UNREACHABLE("unknown gfxContentType");
     return SurfaceFormat::A8R8G8B8_UINT32;
   }
 }
@@ -2591,6 +2599,15 @@ gfxPlatform::InitWebRenderConfig()
                                       discardFailureId);
       }
     }
+  }
+
+  // If the user set the pref to force-disable, let's do that. This will
+  // override all the other enabling prefs (gfx.webrender.enabled,
+  // gfx.webrender.all, and gfx.webrender.all.qualified).
+  if (gfxPrefs::WebRenderForceDisabled()) {
+    featureWebRender.UserDisable(
+      "User force-disabled WR",
+      NS_LITERAL_CSTRING("FEATURE_FAILURE_USER_FORCE_DISABLED"));
   }
 
   // HW_COMPOSITING being disabled implies interfacing with the GPU might break

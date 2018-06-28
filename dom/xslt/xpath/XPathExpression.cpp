@@ -17,8 +17,6 @@
 #include "mozilla/dom/Text.h"
 #include "mozilla/dom/XPathResultBinding.h"
 
-using mozilla::Move;
-
 namespace mozilla {
 namespace dom {
 
@@ -54,7 +52,7 @@ private:
 XPathExpression::XPathExpression(nsAutoPtr<Expr>&& aExpression,
                                  txResultRecycler* aRecycler,
                                  nsIDocument *aDocument)
-    : mExpression(Move(aExpression)),
+    : mExpression(std::move(aExpression)),
       mRecycler(aRecycler),
       mDocument(do_GetWeakReference(aDocument)),
       mCheckDocument(aDocument != nullptr)
@@ -100,7 +98,7 @@ XPathExpression::EvaluateWithContext(nsINode& aContextNode,
         return nullptr;
     }
 
-    if (aType > XPathResultBinding::FIRST_ORDERED_NODE_TYPE) {
+    if (aType > XPathResult_Binding::FIRST_ORDERED_NODE_TYPE) {
         aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
         return nullptr;
     }

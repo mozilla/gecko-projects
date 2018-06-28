@@ -790,7 +790,7 @@ nsPluginHost::InstantiatePluginInstance(const nsACString& aMimeType, nsIURI* aUR
 #endif
 
   if (aMimeType.IsEmpty()) {
-    NS_NOTREACHED("Attempting to spawn a plugin with no mime type");
+    MOZ_ASSERT_UNREACHABLE("Attempting to spawn a plugin with no mime type");
     return NS_ERROR_FAILURE;
   }
 
@@ -1781,9 +1781,14 @@ class GetSitesClosure : public nsIGetSitesWithDataCallback {
 public:
   NS_DECL_ISUPPORTS
   GetSitesClosure(const nsACString& domain, nsPluginHost* host)
-  : domain(domain), host(host), keepWaiting(true)
+    : domain(domain)
+    , host(host)
+    , result{ false }
+    , keepWaiting(true)
+    , retVal(NS_ERROR_NOT_INITIALIZED)
   {
   }
+
   NS_IMETHOD SitesWithData(InfallibleTArray<nsCString>& sites) override {
     retVal = HandleGetSites(sites);
     keepWaiting = false;

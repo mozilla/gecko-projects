@@ -2,11 +2,7 @@
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from helper_shadowdom.js */
-
 "use strict";
-
-loadHelperScript("helper_shadowdom.js");
 
 // Test that the markup view is correctly displayed when a component has children but no
 // slots are available under the shadow root.
@@ -53,10 +49,10 @@ const TEST_URL = `data:text/html;charset=utf-8,
 add_task(async function() {
   await enableWebComponents();
 
-  let {inspector} = await openInspectorForURL(TEST_URL);
+  const {inspector} = await openInspectorForURL(TEST_URL);
 
   // We expect that host children are correctly displayed when no slots are defined.
-  let beforeTree = `
+  const beforeTree = `
   class="root"
     no-slot-component
       #shadow-root
@@ -74,14 +70,14 @@ add_task(async function() {
       class="nested"
         class="has-before"
           ::before`;
-  await checkTreeFromRootSelector(beforeTree, ".root", inspector);
+  await assertMarkupViewAsTree(beforeTree, ".root", inspector);
 
   info("Move the non-slotted element with class has-before and check the pseudo appears");
-  let mutated = waitForNMutations(inspector, "childList", 2);
-  let pseudoMutated = waitForMutation(inspector, "nativeAnonymousChildList");
+  const mutated = waitForNMutations(inspector, "childList", 2);
+  const pseudoMutated = waitForMutation(inspector, "nativeAnonymousChildList");
   ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
-    let root = content.document.querySelector(".root");
-    let hasBeforeEl = content.document.querySelector("no-slot-component .has-before");
+    const root = content.document.querySelector(".root");
+    const hasBeforeEl = content.document.querySelector("no-slot-component .has-before");
     root.appendChild(hasBeforeEl);
   });
   await mutated;
@@ -89,7 +85,7 @@ add_task(async function() {
 
   // As the non-slotted has-before is moved into the tree, the before pseudo is expected
   // to appear.
-  let afterTree = `
+  const afterTree = `
     class="root"
       no-slot-component
         #shadow-root
@@ -108,5 +104,5 @@ add_task(async function() {
             ::before
       class="has-before"
         ::before`;
-  await checkTreeFromRootSelector(afterTree, ".root", inspector);
+  await assertMarkupViewAsTree(afterTree, ".root", inspector);
 });

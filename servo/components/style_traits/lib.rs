@@ -106,12 +106,12 @@ pub enum StyleParseErrorKind<'i> {
     PropertyDeclarationValueNotExhausted,
     /// An unexpected dimension token was encountered.
     UnexpectedDimension(CowRcStr<'i>),
-    /// Expected identifier not found.
-    ExpectedIdentifier(Token<'i>),
     /// Missing or invalid media feature name.
     MediaQueryExpectedFeatureName(CowRcStr<'i>),
     /// Missing or invalid media feature value.
     MediaQueryExpectedFeatureValue,
+    /// A media feature range operator was not expected.
+    MediaQueryUnexpectedOperator,
     /// min- or max- properties must have a value.
     RangedExpressionWithNoValue,
     /// A function was encountered that was not expected.
@@ -177,7 +177,11 @@ pub enum ValueParseErrorKind<'i> {
 
 impl<'i> StyleParseErrorKind<'i> {
     /// Create an InvalidValue parse error
-    pub fn new_invalid(name: CowRcStr<'i>, value_error: ParseError<'i>) -> ParseError<'i> {
+    pub fn new_invalid<S>(name: S, value_error: ParseError<'i>) -> ParseError<'i>
+    where
+        S: Into<CowRcStr<'i>>,
+    {
+        let name = name.into();
         let variant = match value_error.kind {
             cssparser::ParseErrorKind::Custom(StyleParseErrorKind::ValueError(e)) => {
                 match e {

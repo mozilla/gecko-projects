@@ -8,11 +8,12 @@ import os
 
 from manifestparser import TestManifest
 from mozlog import get_proxy_logger
+from utils import transform_platform
 
 here = os.path.abspath(os.path.dirname(__file__))
 raptor_ini = os.path.join(here, 'raptor.ini')
 tests_dir = os.path.join(here, 'tests')
-LOG = get_proxy_logger(component="manifest")
+LOG = get_proxy_logger(component="raptor-manifest")
 
 required_settings = ['apps', 'type', 'page_cycles', 'test_url', 'measure',
                      'unit', 'lower_is_better', 'alert_threshold']
@@ -43,6 +44,9 @@ def validate_test_ini(test_details):
     valid_settings = True
 
     for setting in required_settings:
+        # measure setting not required for benchmark type tests
+        if setting == 'measure' and test_details['type'] == 'benchmark':
+            continue
         if setting not in test_details:
             valid_settings = False
             LOG.info("setting '%s' is required but not found in %s"
@@ -59,13 +63,14 @@ def validate_test_ini(test_details):
     return valid_settings
 
 
-def write_test_settings_json(test_details):
+def write_test_settings_json(test_details, oskey):
     # write test settings json file with test details that the control
     # server will provide for the web ext
+    test_url = transform_platform(test_details['test_url'], oskey)
     test_settings = {
         "raptor-options": {
             "type": test_details['type'],
-            "test_url": test_details['test_url'],
+            "test_url": test_url,
             "page_cycles": int(test_details['page_cycles'])
         }
     }
@@ -81,8 +86,10 @@ def write_test_settings_json(test_details):
     if test_details.get("page_timeout", None) is not None:
         test_settings['raptor-options']['page_timeout'] = int(test_details['page_timeout'])
     test_settings['raptor-options']['unit'] = test_details.get("unit", "ms")
-    test_settings['raptor-options']['lower_is_better'] = \
-        bool(test_details.get("lower_is_better", True))
+    if test_details.get("lower_is_better", "true") == "false":
+        test_settings['raptor-options']['lower_is_better'] = False
+    else:
+        test_settings['raptor-options']['lower_is_better'] = True
     if test_details.get("alert_threshold", None) is not None:
         test_settings['raptor-options']['alert_threshold'] = float(test_details['alert_threshold'])
 
@@ -95,7 +102,7 @@ def write_test_settings_json(test_details):
         LOG.info("abort: exception writing test settings json!")
 
 
-def get_raptor_test_list(args):
+def get_raptor_test_list(args, oskey):
     '''
     A test ini (i.e. raptor-firefox-tp6.ini) will have one or more subtests inside,
     each with it's own name ([the-ini-file-test-section]).
@@ -142,7 +149,7 @@ def get_raptor_test_list(args):
     if len(tests_to_run) != 0:
         for test in tests_to_run:
             if validate_test_ini(test):
-                write_test_settings_json(test)
+                write_test_settings_json(test, oskey)
             else:
                 # test doesn't have valid settings, remove it from available list
                 LOG.info("test %s is not valid due to missing settings" % test['name'])

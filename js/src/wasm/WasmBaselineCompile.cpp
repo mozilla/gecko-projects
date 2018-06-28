@@ -110,6 +110,8 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 
+#include <utility>
+
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/JitAllocPolicy.h"
@@ -1008,6 +1010,8 @@ BaseLocalIter::BaseLocalIter(const ValTypeVector& locals, size_t argsLength, boo
     index_(0),
     localSize_(debugEnabled ? DebugFrame::offsetOfFrame() : 0),
     reservedSize_(localSize_),
+    frameOffset_(0),
+    mirType_(MIRType::Undefined),
     done_(false)
 {
     MOZ_ASSERT(argsLength <= locals.length());
@@ -1934,7 +1938,7 @@ class BaseCompiler final : public BaseCompilerInterface
     MOZ_MUST_USE bool emitFunction();
     void emitInitStackLocals();
 
-    const SigWithId& sig() const { return *env_.funcSigs[func_.index]; }
+    const FuncTypeWithId& funcType() const { return *env_.funcTypes[func_.index]; }
 
     // Used by some of the ScratchRegister implementations.
     operator MacroAssembler&() const { return masm; }
@@ -2308,7 +2312,7 @@ class BaseCompiler final : public BaseCompilerInterface
 
     template<typename... Args>
     void push(Args&&... args) {
-        stk_.infallibleEmplaceBack(Stk(Forward<Args>(args)...));
+        stk_.infallibleEmplaceBack(Stk(std::forward<Args>(args)...));
     }
 
     void pushConstRef(intptr_t v) {
@@ -3355,7 +3359,7 @@ class BaseCompiler final : public BaseCompilerInterface
         JitSpew(JitSpew_Codegen, "# Emitting wasm baseline code");
 
         GenerateFunctionPrologue(masm,
-                                 env_.funcSigs[func_.index]->id,
+                                 env_.funcTypes[func_.index]->id,
                                  env_.mode == CompileMode::Tier1 ? Some(func_.index) : Nothing(),
                                  &offsets_);
 
@@ -3378,7 +3382,7 @@ class BaseCompiler final : public BaseCompilerInterface
 
         // Copy arguments from registers to stack.
 
-        const ValTypeVector& args = sig().args();
+        const ValTypeVector& args = funcType().args();
 
         for (ABIArgIter<const ValTypeVector> i(args); !i.done(); i++) {
             if (!i->argInRegister())
@@ -3415,7 +3419,7 @@ class BaseCompiler final : public BaseCompilerInterface
         MOZ_ASSERT(env_.debugEnabled());
         size_t debugFrameOffset = masm.framePushed() - DebugFrame::offsetOfFrame();
         Address resultsAddress(masm.getStackPointer(), debugFrameOffset + DebugFrame::offsetOfResults());
-        switch (sig().ret()) {
+        switch (funcType().ret()) {
           case ExprType::Void:
             break;
           case ExprType::I32:
@@ -3442,7 +3446,7 @@ class BaseCompiler final : public BaseCompilerInterface
         MOZ_ASSERT(env_.debugEnabled());
         size_t debugFrameOffset = masm.framePushed() - DebugFrame::offsetOfFrame();
         Address resultsAddress(masm.getStackPointer(), debugFrameOffset + DebugFrame::offsetOfResults());
-        switch (sig().ret()) {
+        switch (funcType().ret()) {
           case ExprType::Void:
             break;
           case ExprType::I32:
@@ -3758,10 +3762,10 @@ class BaseCompiler final : public BaseCompilerInterface
 
     // Precondition: sync()
 
-    void callIndirect(uint32_t sigIndex, const Stk& indexVal, const FunctionCall& call)
+    void callIndirect(uint32_t funcTypeIndex, const Stk& indexVal, const FunctionCall& call)
     {
-        const SigWithId& sig = env_.sigs[sigIndex];
-        MOZ_ASSERT(sig.id.kind() != SigIdDesc::Kind::None);
+        const FuncTypeWithId& funcType = env_.types[funcTypeIndex].funcType();
+        MOZ_ASSERT(funcType.id.kind() != FuncTypeIdDesc::Kind::None);
 
         MOZ_ASSERT(env_.tables.length() == 1);
         const TableDesc& table = env_.tables[0];
@@ -3769,7 +3773,7 @@ class BaseCompiler final : public BaseCompilerInterface
         loadI32(indexVal, RegI32(WasmTableCallIndexReg));
 
         CallSiteDesc desc(call.lineOrBytecode, CallSiteDesc::Dynamic);
-        CalleeDesc callee = CalleeDesc::wasmTable(table, sig.id);
+        CalleeDesc callee = CalleeDesc::wasmTable(table, funcType.id);
         masm.wasmCallIndirect(desc, callee, NeedsBoundsCheck(true));
     }
 
@@ -7731,7 +7735,7 @@ BaseCompiler::emitReturn()
     if (deadCode_)
         return true;
 
-    doReturn(sig().ret(), PopStack(true));
+    doReturn(funcType().ret(), PopStack(true));
     deadCode_ = true;
 
     return true;
@@ -7817,16 +7821,16 @@ BaseCompiler::emitCall()
 
     sync();
 
-    const Sig& sig = *env_.funcSigs[funcIndex];
+    const FuncType& funcType = *env_.funcTypes[funcIndex];
     bool import = env_.funcIsImport(funcIndex);
 
-    uint32_t numArgs = sig.args().length();
+    uint32_t numArgs = funcType.args().length();
     size_t stackSpace = stackConsumed(numArgs);
 
     FunctionCall baselineCall(lineOrBytecode);
     beginCall(baselineCall, UseABI::Wasm, import ? InterModule::True : InterModule::False);
 
-    if (!emitCallArgs(sig.args(), &baselineCall))
+    if (!emitCallArgs(funcType.args(), &baselineCall))
         return false;
 
     if (import)
@@ -7838,7 +7842,7 @@ BaseCompiler::emitCall()
 
     popValueStackBy(numArgs);
 
-    pushReturnedIfNonVoid(baselineCall, sig.ret());
+    pushReturnedIfNonVoid(baselineCall, funcType.ret());
 
     return true;
 }
@@ -7848,10 +7852,10 @@ BaseCompiler::emitCallIndirect()
 {
     uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
-    uint32_t sigIndex;
+    uint32_t funcTypeIndex;
     Nothing callee_;
     BaseOpIter::ValueVector args_;
-    if (!iter_.readCallIndirect(&sigIndex, &callee_, &args_))
+    if (!iter_.readCallIndirect(&funcTypeIndex, &callee_, &args_))
         return false;
 
     if (deadCode_)
@@ -7859,11 +7863,11 @@ BaseCompiler::emitCallIndirect()
 
     sync();
 
-    const SigWithId& sig = env_.sigs[sigIndex];
+    const FuncTypeWithId& funcType = env_.types[funcTypeIndex].funcType();
 
     // Stack: ... arg1 .. argn callee
 
-    uint32_t numArgs = sig.args().length();
+    uint32_t numArgs = funcType.args().length();
     size_t stackSpace = stackConsumed(numArgs + 1);
 
     // The arguments must be at the stack top for emitCallArgs, so pop the
@@ -7875,16 +7879,16 @@ BaseCompiler::emitCallIndirect()
     FunctionCall baselineCall(lineOrBytecode);
     beginCall(baselineCall, UseABI::Wasm, InterModule::True);
 
-    if (!emitCallArgs(sig.args(), &baselineCall))
+    if (!emitCallArgs(funcType.args(), &baselineCall))
         return false;
 
-    callIndirect(sigIndex, callee, baselineCall);
+    callIndirect(funcTypeIndex, callee, baselineCall);
 
     endCall(baselineCall, stackSpace);
 
     popValueStackBy(numArgs);
 
-    pushReturnedIfNonVoid(baselineCall, sig.ret());
+    pushReturnedIfNonVoid(baselineCall, funcType.ret());
 
     return true;
 }
@@ -8828,6 +8832,9 @@ BaseCompiler::emitInstanceCall(uint32_t lineOrBytecode, const MIRTypeVector& sig
 
     popValueStackBy(numArgs);
 
+    // Note, a number of clients of emitInstanceCall currently assume that the
+    // following operation does not destroy ReturnReg.
+
     pushReturnedIfNonVoid(baselineCall, retType);
 }
 
@@ -9242,7 +9249,7 @@ BaseCompiler::emitMemFill()
 bool
 BaseCompiler::emitBody()
 {
-    if (!iter_.readFunctionStart(sig().ret()))
+    if (!iter_.readFunctionStart(funcType().ret()))
         return false;
 
     initControl(controlItem());
@@ -9324,7 +9331,7 @@ BaseCompiler::emitBody()
 
             if (iter_.controlStackEmpty()) {
                 if (!deadCode_)
-                    doReturn(sig().ret(), PopStack(false));
+                    doReturn(funcType().ret(), PopStack(false));
                 return iter_.readFunctionEnd(iter_.end());
             }
             NEXT();
@@ -9779,7 +9786,6 @@ BaseCompiler::emitBody()
             CHECK_NEXT(emitComparison(emitCompareF64, ValType::F64, Assembler::DoubleGreaterThanOrEqual));
 
           // Sign extensions
-#ifdef ENABLE_WASM_SIGNEXTEND_OPS
           case uint16_t(Op::I32Extend8S):
             CHECK_NEXT(emitConversion(emitExtendI32_8, ValType::I32, ValType::I32));
           case uint16_t(Op::I32Extend16S):
@@ -9790,7 +9796,6 @@ BaseCompiler::emitBody()
             CHECK_NEXT(emitConversion(emitExtendI64_16, ValType::I64, ValType::I64));
           case uint16_t(Op::I64Extend32S):
             CHECK_NEXT(emitConversion(emitExtendI64_32, ValType::I64, ValType::I64));
-#endif
 
           // Memory Related
           case uint16_t(Op::GrowMemory):
@@ -10131,7 +10136,7 @@ BaseCompiler::init()
         return false;
     }
 
-    if (!fr.setupLocals(locals_, sig().args(), env_.debugEnabled(), &localInfo_))
+    if (!fr.setupLocals(locals_, funcType().args(), env_.debugEnabled(), &localInfo_))
         return false;
 
     return true;
@@ -10204,7 +10209,7 @@ js::wasm::BaselineCompileFunctions(const ModuleEnvironment& env, LifoAlloc& lifo
         // Build the local types vector.
 
         ValTypeVector locals;
-        if (!locals.appendAll(env.funcSigs[func.index]->args()))
+        if (!locals.appendAll(env.funcTypes[func.index]->args()))
             return false;
         if (!DecodeLocalEntries(d, env.kind, env.gcTypesEnabled, &locals))
             return false;

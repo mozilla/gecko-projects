@@ -5,7 +5,7 @@ fuzzy-if(Android,16,244) fuzzy-if(webrender,47,6) == marker-basic.html marker-ba
 skip-if(Android) fuzzy-if(webrender,47,18) == bidi-simple.html bidi-simple-ref.html # Fails on Android due to anti-aliasing
 skip-if(!gtkWidget) fuzzy-if(gtkWidget,2,289) == bidi-simple-scrolled.html bidi-simple-scrolled-ref.html # Fails on Windows and OSX due to anti-aliasing
 fuzzy-if(Android,24,4000) fuzzy-if(cocoaWidget,1,40) fuzzy-if(asyncPan&&!layersGPUAccelerated,149,1836) == scroll-rounding.html scroll-rounding-ref.html # bug 760264
-fuzzy(16,454) fails-if(gtkWidget) fuzzy-if(webrender&&!gtkWidget,50-85,459-499) == anonymous-block.html anonymous-block-ref.html # gtkWidget:bug 1309103, fuzzy: subpixel aa
+fuzzy(16,454) fails-if(gtkWidget) fuzzy-if(webrender&&!gtkWidget,50-85,459-499) skip-if(OSX&&!isDebugBuild&&verify) == anonymous-block.html anonymous-block-ref.html # gtkWidget:bug 1309103, fuzzy: subpixel aa
 fuzzy-if(webrender,47,3) == false-marker-overlap.html false-marker-overlap-ref.html
 == visibility-hidden.html visibility-hidden-ref.html
 fuzzy-if(asyncPan&&!layersGPUAccelerated,102,1724) fuzzy-if(gtkWidget,10,8) fuzzy-if(webrender,47,24) == block-padding.html block-padding-ref.html
@@ -25,7 +25,7 @@ fuzzy-if(gtkWidget,10,2) == atomic-under-marker.html atomic-under-marker-ref.htm
 fuzzy(1,2616) skip-if(Android) fuzzy-if(asyncPan&&!layersGPUAccelerated,102,12352) fails-if(gtkWidget) == xulscroll.html xulscroll-ref.html # gtkWidget:bug 1309107, bug 1328771
 == combobox-zoom.html combobox-zoom-ref.html
 == dynamic-change-1.html dynamic-change-1-ref.html
-== float-edges-1-ref.html float-edges-1-ref.html
+== float-edges-1.html float-edges-1-ref.html
 
 # The vertical-text pref setting can be removed after bug 1138384 lands
 == vertical-decorations-1.html vertical-decorations-1-ref.html

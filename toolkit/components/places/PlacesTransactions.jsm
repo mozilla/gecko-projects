@@ -181,7 +181,7 @@ ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.defineModuleGetter(this, "PlacesUtils",
                                "resource://gre/modules/PlacesUtils.jsm");
 
-Cu.importGlobalProperties(["URL"]);
+XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
 function setTimeout(callback, ms) {
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -1249,25 +1249,34 @@ PT.NewLivemark.prototype = Object.seal({
  * Required Input Properties: guid, newParentGuid.
  * Optional Input Properties  newIndex.
  */
-PT.Move = DefineTransaction(["guid", "newParentGuid"], ["newIndex"]);
+PT.Move = DefineTransaction(["guids", "newParentGuid"], ["newIndex"]);
 PT.Move.prototype = Object.seal({
-  async execute({ guid, newParentGuid, newIndex }) {
-    let originalInfo = await PlacesUtils.bookmarks.fetch(guid);
-    if (!originalInfo)
-      throw new Error("Cannot move a non-existent item");
-    let updateInfo = { guid, parentGuid: newParentGuid, index: newIndex };
-    updateInfo = await PlacesUtils.bookmarks.update(updateInfo);
+  async execute({ guids, newParentGuid, newIndex }) {
+    let originalInfos = [];
+    let index = newIndex;
 
-    // Moving down in the same parent takes in count removal of the item
-    // so to revert positions we must move to oldIndex + 1.
-    if (newParentGuid == originalInfo.parentGuid &&
-        originalInfo.index > updateInfo.index) {
-      originalInfo.index++;
+    for (let guid of guids) {
+      // We need to save the original data for undo.
+      let originalInfo = await PlacesUtils.bookmarks.fetch(guid);
+      if (!originalInfo)
+        throw new Error("Cannot move a non-existent item");
+
+      originalInfos.push(originalInfo);
     }
 
-    this.undo = PlacesUtils.bookmarks.update.bind(PlacesUtils.bookmarks, originalInfo);
-    this.redo = PlacesUtils.bookmarks.update.bind(PlacesUtils.bookmarks, updateInfo);
-    return guid;
+    await PlacesUtils.bookmarks.moveToFolder(guids, newParentGuid, index);
+
+    this.undo = async function() {
+      // Undo has the potential for moving multiple bookmarks to multiple different
+      // folders and positions, which is very complicated to manage. Therefore we do
+      // individual moves one at a time and hopefully everything is put back approximately
+      // where it should be.
+      for (let info of originalInfos) {
+        await PlacesUtils.bookmarks.update(info);
+      }
+    };
+    this.redo = PlacesUtils.bookmarks.moveToFolder.bind(PlacesUtils.bookmarks, guids, newParentGuid, index);
+    return guids;
   }
 });
 
@@ -1344,48 +1353,6 @@ PT.EditUrl.prototype = Object.seal({
     };
   }
 });
-
-/**
- * Transaction for setting annotations for an item.
- *
- * Required Input Properties: guid, annotationObject
- */
-PT.Annotate = DefineTransaction(["guids", "annotations"]);
-PT.Annotate.prototype = {
-  async execute({ guids, annotations }) {
-    let undoAnnosForItemId = new Map();
-    for (let guid of guids) {
-      let itemId = await PlacesUtils.promiseItemId(guid);
-      let currentAnnos = await PlacesUtils.promiseAnnotationsForItem(itemId);
-
-      let undoAnnos = [];
-      for (let newAnno of annotations) {
-        let currentAnno = currentAnnos.find(a => a.name == newAnno.name);
-        if (currentAnno) {
-          undoAnnos.push(currentAnno);
-        } else {
-          // An unset value removes the annotation.
-          undoAnnos.push({ name: newAnno.name });
-        }
-      }
-      undoAnnosForItemId.set(itemId, undoAnnos);
-
-      PlacesUtils.setAnnotationsForItem(itemId, annotations);
-    }
-
-    this.undo = function() {
-      for (let [itemId, undoAnnos] of undoAnnosForItemId) {
-        PlacesUtils.setAnnotationsForItem(itemId, undoAnnos);
-      }
-    };
-    this.redo = async function() {
-      for (let guid of guids) {
-        let itemId = await PlacesUtils.promiseItemId(guid);
-        PlacesUtils.setAnnotationsForItem(itemId, annotations);
-      }
-    };
-  }
-};
 
 /**
  * Transaction for setting the keyword for a bookmark.

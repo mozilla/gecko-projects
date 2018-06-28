@@ -197,29 +197,19 @@ DataTransfer::~DataTransfer()
 
 // static
 already_AddRefed<DataTransfer>
-DataTransfer::Constructor(const GlobalObject& aGlobal,
-                          const nsAString& aEventType, bool aIsExternal,
-                          ErrorResult& aRv)
+DataTransfer::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
 {
-  nsAutoCString onEventType("on");
-  AppendUTF16toUTF8(aEventType, onEventType);
-  RefPtr<nsAtom> eventTypeAtom = NS_Atomize(onEventType);
-  if (!eventTypeAtom) {
-    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return nullptr;
-  }
 
-  EventMessage eventMessage = nsContentUtils::GetEventMessage(eventTypeAtom);
   RefPtr<DataTransfer> transfer = new DataTransfer(aGlobal.GetAsSupports(),
-                                                     eventMessage, aIsExternal,
-                                                     -1);
+                                                   eCopy, /* is external */ false, /* clipboard type */ -1);
+  transfer->mEffectAllowed = nsIDragService::DRAGDROP_ACTION_NONE;
   return transfer.forget();
 }
 
 JSObject*
 DataTransfer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return DataTransferBinding::Wrap(aCx, this, aGivenProto);
+  return DataTransfer_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -596,7 +586,7 @@ DataTransfer::PrincipalMaySetData(const nsAString& aType,
 void
 DataTransfer::TypesListMayHaveChanged()
 {
-  DataTransferBinding::ClearCachedTypesValue(this);
+  DataTransfer_Binding::ClearCachedTypesValue(this);
 }
 
 already_AddRefed<DataTransfer>

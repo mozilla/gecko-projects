@@ -479,7 +479,7 @@ WebRenderBridgeParent::RecvDeleteCompositorAnimations(InfallibleTArray<uint64_t>
   }
 
   // Once mWrEpoch has been rendered, we can delete these compositor animations
-  mCompositorAnimationsToDelete.push(CompositorAnimationIdsForEpoch(mWrEpoch, Move(aIds)));
+  mCompositorAnimationsToDelete.push(CompositorAnimationIdsForEpoch(mWrEpoch, std::move(aIds)));
   return IPC_OK();
 }
 
@@ -559,7 +559,7 @@ WebRenderBridgeParent::UpdateAPZScrollData(const wr::Epoch& aEpoch,
   }
   LayersId rootLayersId = cbp->RootLayerTreeId();
   if (RefPtr<APZUpdater> apz = cbp->GetAPZUpdater()) {
-    apz->UpdateScrollDataAndTreeState(rootLayersId, GetLayersId(), aEpoch, Move(aData));
+    apz->UpdateScrollDataAndTreeState(rootLayersId, GetLayersId(), aEpoch, std::move(aData));
   }
 }
 
@@ -573,7 +573,7 @@ WebRenderBridgeParent::UpdateAPZScrollOffsets(ScrollUpdatesMap&& aUpdates,
   }
   LayersId rootLayersId = cbp->RootLayerTreeId();
   if (RefPtr<APZUpdater> apz = cbp->GetAPZUpdater()) {
-    apz->UpdateScrollOffsets(rootLayersId, GetLayersId(), Move(aUpdates), aPaintSequenceNumber);
+    apz->UpdateScrollOffsets(rootLayersId, GetLayersId(), std::move(aUpdates), aPaintSequenceNumber);
   }
 }
 
@@ -650,9 +650,9 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   // Also note that this needs to happen before the display list transaction is
   // sent to WebRender, so that the UpdateHitTestingTree call is guaranteed to
   // be in the updater queue at the time that the scene swap completes.
-  UpdateAPZScrollData(wrEpoch, Move(const_cast<WebRenderScrollData&>(aScrollData)));
+  UpdateAPZScrollData(wrEpoch, std::move(const_cast<WebRenderScrollData&>(aScrollData)));
 
-  wr::Vec<uint8_t> dlData(Move(dl));
+  wr::Vec<uint8_t> dlData(std::move(dl));
 
   // If id namespaces do not match, it means the command is obsolete, probably
   // because the tab just moved to a new window.
@@ -677,10 +677,10 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
 
     mApi->SendTransaction(txn);
 
-    ScheduleGenerateFrame();
-
-    if (ShouldParentObserveEpoch()) {
-      mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), true);
+    if (!gfxPrefs::WebRenderAsyncSceneBuild()) {
+      // With async-scene-build enabled, we will trigger this after the scene
+      // build is done, so we don't need to do it here.
+      ScheduleGenerateFrame();
     }
   }
 
@@ -691,6 +691,10 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     // though DisplayList was not pushed to webrender.
     TimeStamp now = TimeStamp::Now();
     mCompositorBridge->DidComposite(GetLayersId(), now, now);
+  }
+
+  if (ShouldParentObserveEpoch()) {
+    mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), true);
   }
 
   wr::IpcResourceUpdateQueue::ReleaseShmems(this, aSmallShmems);
@@ -732,7 +736,7 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
     // function signature due to the way the IPDL generator works. We remove the
     // const so that we can move this structure all the way to the desired
     // destination.
-    UpdateAPZScrollOffsets(Move(const_cast<ScrollUpdatesMap&>(aUpdates)), aPaintSequenceNumber);
+    UpdateAPZScrollOffsets(std::move(const_cast<ScrollUpdatesMap&>(aUpdates)), aPaintSequenceNumber);
     scheduleComposite = true;
   }
 
@@ -765,6 +769,10 @@ WebRenderBridgeParent::RecvEmptyTransaction(const FocusTarget& aFocusTarget,
   } else if (sendDidComposite) {
     TimeStamp now = TimeStamp::Now();
     mCompositorBridge->DidComposite(GetLayersId(), now, now);
+  }
+
+  if (ShouldParentObserveEpoch()) {
+    mCompositorBridge->ObserveLayerUpdate(GetLayersId(), GetChildLayerObserverEpoch(), true);
   }
 
   return IPC_OK();
@@ -837,7 +845,7 @@ WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<Web
       }
       case WebRenderParentCommand::TOpAddCompositorAnimations: {
         const OpAddCompositorAnimations& op = cmd.get_OpAddCompositorAnimations();
-        CompositorAnimations data(Move(op.data()));
+        CompositorAnimations data(std::move(op.data()));
         if (data.animations().Length()) {
           mAnimStorage->SetAnimations(data.id(), data.animations());
           mActiveAnimations.insert(data.id());
@@ -941,6 +949,7 @@ WebRenderBridgeParent::RecvGetSnapshot(PTextureParent* aTexture)
     return IPC_FAIL_NO_REASON(this);
   }
 
+  TimeStamp start = TimeStamp::Now();
   MOZ_ASSERT(bufferTexture->GetBufferDescriptor().type() == BufferDescriptor::TRGBDescriptor);
   DebugOnly<uint32_t> stride = ImageDataSerializer::GetRGBStride(bufferTexture->GetBufferDescriptor().get_RGBDescriptor());
   uint8_t* buffer = bufferTexture->GetBuffer();
@@ -956,7 +965,7 @@ WebRenderBridgeParent::RecvGetSnapshot(PTextureParent* aTexture)
 
   FlushSceneBuilds();
   FlushFrameGeneration();
-  mApi->Readback(size, buffer, buffer_size);
+  mApi->Readback(start, size, buffer, buffer_size);
 
   return IPC_OK();
 }
@@ -1389,7 +1398,8 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
     return;
   }
 
-  mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
+  TimeStamp start = TimeStamp::Now();
+  mAsyncImageManager->SetCompositionTime(start);
 
   {
     // TODO: We can improve upon this by using two transactions: one for everything that
@@ -1434,7 +1444,7 @@ WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::In
 
   SetAPZSampleTime();
 
-  wr::RenderThread::Get()->IncPendingFrameCount(mApi->GetId());
+  wr::RenderThread::Get()->IncPendingFrameCount(mApi->GetId(), start);
 
 #if defined(ENABLE_FRAME_LATENCY_LOG)
   auto startTime = TimeStamp::Now();
@@ -1615,6 +1625,14 @@ WebRenderBridgeParent::ClearResources()
   if (mWidget) {
     mCompositorScheduler->Destroy();
   }
+
+  // Before tearing down mApi we should make sure the above transaction has been
+  // flushed back to the render backend thread. Otherwise the cleanup messages
+  // that the WebRenderAPI destructor triggers can race ahead of the transaction
+  // (because it goes directly to the RB thread, bypassing the scene builder
+  // thread) and clear caches etc. that are still in use.
+  FlushSceneBuilds();
+
   mAnimStorage = nullptr;
   mCompositorScheduler = nullptr;
   mAsyncImageManager = nullptr;

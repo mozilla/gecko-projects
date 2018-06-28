@@ -10,19 +10,19 @@
 #include "gc/Allocator.h"
 #include "gc/Rooting.h"
 #include "util/StringBuffer.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSContext.h"
+#include "vm/Realm.h"
 
-#include "vm/JSCompartment-inl.h"
+#include "vm/Realm-inl.h"
 
 using JS::Symbol;
 using namespace js;
 
 Symbol*
 Symbol::newInternal(JSContext* cx, JS::SymbolCode code, uint32_t hash, JSAtom* description,
-                    AutoLockForExclusiveAccess& lock)
+                    const AutoAccessAtomsZone& access)
 {
-    MOZ_ASSERT(cx->zone() == cx->atomsZone(lock));
+    MOZ_ASSERT(cx->zone() == cx->atomsZone(access));
 
     // Following js::AtomizeString, we grudgingly forgo last-ditch GC here.
     Symbol* p = Allocate<JS::Symbol, NoGC>(cx);
@@ -94,7 +94,7 @@ Symbol::for_(JSContext* cx, HandleString description)
     return sym;
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 void
 Symbol::dump()
 {
@@ -124,7 +124,7 @@ Symbol::dump(js::GenericPrinter& out)
         out.printf("<Invalid Symbol code=%u>", unsigned(code_));
     }
 }
-#endif  // DEBUG
+#endif  // defined(DEBUG) || defined(JS_JITSPEW)
 
 bool
 js::SymbolDescriptiveString(JSContext* cx, Symbol* sym, MutableHandleValue result)

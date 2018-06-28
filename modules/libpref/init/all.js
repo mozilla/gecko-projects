@@ -375,7 +375,6 @@ pref("media.wmf.dxva.enabled", true);
 pref("media.wmf.dxva.d3d11.enabled", true);
 pref("media.wmf.dxva.max-videos", 8);
 pref("media.wmf.low-latency.enabled", false);
-pref("media.wmf.amd.vp9.enabled", false);
 pref("media.wmf.amd.highres.enabled", true);
 pref("media.wmf.allow-unsupported-resolutions", false);
 pref("media.wmf.use-nv12-format", true);
@@ -605,9 +604,6 @@ pref("layers.amd-switchable-gfx.enabled", true);
 // Whether to use async panning and zooming
 pref("layers.async-pan-zoom.enabled", true);
 
-// Whether to enable event region building during painting
-pref("layout.event-regions.enabled", false);
-
 // Whether to enable arbitrary layer geometry for OpenGL compositor
 pref("layers.geometry.opengl.enabled", true);
 
@@ -622,11 +618,7 @@ pref("layers.geometry.d3d11.enabled", true);
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
 pref("apz.allow_zooming", false);
-#ifdef NIGHTLY_BUILD
 pref("apz.android.chrome_fling_physics.enabled", true);
-#else
-pref("apz.android.chrome_fling_physics.enabled", false);
-#endif
 pref("apz.android.chrome_fling_physics.friction", "0.015");
 pref("apz.android.chrome_fling_physics.inflexion", "0.35");
 pref("apz.android.chrome_fling_physics.stop_threshold", "0.1");
@@ -821,8 +813,6 @@ pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "skia");
 pref("gfx.canvas.azure.backends", "skia");
-// Accelerated cg canvas where available (10.7+)
-pref("gfx.canvas.azure.accelerated", true);
 #else
 pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.content.azure.backends", "skia");
@@ -862,6 +852,11 @@ pref("gfx.webrender.enabled", false);
 #endif
 #endif
 
+// Also expose a pref to allow users to force-disable WR. This is exposed
+// on all channels because WR can be enabled on qualified hardware on all
+// channels.
+pref("gfx.webrender.force-disabled", false);
+
 #ifdef XP_WIN
 pref("gfx.webrender.force-angle", true);
 pref("gfx.webrender.dcomp-win.enabled", true);
@@ -877,7 +872,6 @@ pref("gfx.webrender.highlight-painted-layers", false);
 pref("gfx.webrender.async-scene-build", true);
 pref("gfx.webrender.blob-images", true);
 pref("gfx.webrender.blob.invalidation", true);
-pref("gfx.webrender.hit-test", true);
 
 // WebRender debugging utilities.
 pref("gfx.webrender.debug.texture-cache", false);
@@ -889,6 +883,9 @@ pref("gfx.webrender.debug.gpu-sample-queries", false);
 pref("gfx.webrender.debug.disable-batching", false);
 pref("gfx.webrender.debug.epochs", false);
 pref("gfx.webrender.debug.compact-profiler", false);
+pref("gfx.webrender.debug.echo-driver-messages", false);
+pref("gfx.webrender.debug.new-frame-indicator", false);
+pref("gfx.webrender.debug.new-scene-indicator", false);
 
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
@@ -963,6 +960,8 @@ pref("accessibility.mouse_focuses_formcontrol", false);
 
 // Type Ahead Find
 pref("accessibility.typeaheadfind", true);
+// Enable FAYT by pressing / or "
+pref("accessibility.typeaheadfind.manual", true);
 pref("accessibility.typeaheadfind.autostart", true);
 // casesensitive: controls the find bar's case-sensitivity
 //     0 - "never"  (case-insensitive)
@@ -1137,6 +1136,11 @@ pref("print.print_via_parent", true);
 #else
 pref("print.print_via_parent", false);
 #endif
+
+// Variation fonts can't always be embedded in certain output formats
+// such as PDF. To work around this, draw the variation fonts using
+// paths instead of using font embedding.
+pref("print.font-variations-as-paths", true);
 
 // Pref used by the spellchecker extension to control the
 // maximum number of misspelled words that will be underlined
@@ -1332,8 +1336,6 @@ pref("dom.webcomponents.customelements.enabled", false);
 #endif
 
 pref("javascript.enabled",                  true);
-// Enable Array.prototype.values
-pref("javascript.options.array_prototype_values", true);
 pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     false);
@@ -1770,8 +1772,12 @@ pref("network.http.focused_window_transaction_ratio", "0.9");
 
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
+#ifdef ANDROID
+// disabled because of bug 1382274
+pref("network.http.active_tab_priority", false);
+#else
 pref("network.http.active_tab_priority", true);
-// </http>
+#endif
 
 // default values for FTP
 // in a DSCP environment this should be 40 (0x28, or AF11), per RFC-4594,
@@ -1997,7 +2003,11 @@ pref("network.dns.ipv4OnlyDomains", "");
 pref("network.dns.disableIPv6", false);
 
 // This is the number of dns cache entries allowed
+#ifdef ANDROID
 pref("network.dnsCacheEntries", 400);
+#else
+pref("network.dnsCacheEntries", 800);
+#endif
 
 // In the absence of OS TTLs, the DNS cache TTL value
 pref("network.dnsCacheExpiration", 60);
@@ -2123,7 +2133,12 @@ pref("network.auth.private-browsing-sso", false);
 
 // Control how throttling of http responses works - number of ms that each
 // suspend and resume period lasts (prefs named appropriately)
+#ifdef ANDROID
+// disabled because of bug 1382274
+pref("network.http.throttle.enable", false);
+#else
 pref("network.http.throttle.enable", true);
+#endif
 pref("network.http.throttle.version", 2);
 
 // V1 prefs
@@ -2495,7 +2510,7 @@ pref("security.csp.enableStrictDynamic", true);
 
 #if defined(DEBUG) && !defined(ANDROID)
 // about:welcome has been added until Bug 1448359 is fixed at which time home, newtab, and welcome will all be removed.
-pref("csp.content_privileged_about_uris_without_csp", "blank,home,newtab,printpreview,srcdoc,welcome");
+pref("csp.content_privileged_about_uris_without_csp", "blank,blocked,home,newtab,printpreview,srcdoc,welcome");
 #endif
 
 #ifdef NIGHTLY_BUILD
@@ -2980,11 +2995,7 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 pref("layout.css.scroll-snap.enabled", true);
 
 // Is support for CSS shape-outside enabled?
-#ifdef NIGHTLY_BUILD
 pref("layout.css.shape-outside.enabled", true);
-#else
-pref("layout.css.shape-outside.enabled", false);
-#endif
 
 // Is support for document.fonts enabled?
 pref("layout.css.font-loading-api.enabled", true);
@@ -3049,6 +3060,9 @@ pref("layout.idle_period.required_quiescent_frames", 2);
 // end and the start of the next tick to avoid jank.
 pref("layout.idle_period.time_limit", 1);
 
+// Whether -webkit-appearance is aliased to -moz-appearance
+pref("layout.css.webkit-appearance.enabled", false);
+
 // Is support for the Web Animations API enabled?
 // Before enabling this by default, make sure also CSSPseudoElement interface
 // has been spec'ed properly, or we should add a separate pref for
@@ -3108,12 +3122,6 @@ pref("input_event_queue.default_duration_per_event", 1);
 // The number of processed input events we use to predict the amount of time
 // required to process the following input events.
 pref("input_event_queue.count_for_prediction", 9);
-
-// Hang monitor timeout after which we kill the browser, in seconds
-// (0 is disabled)
-// Disabled on all platforms per bug 705748 until the found issues are
-// resolved.
-pref("hangmonitor.timeout", 0);
 
 pref("plugins.load_appdir_plugins", false);
 // If true, plugins will be click to play
@@ -4940,6 +4948,9 @@ pref("extensions.webextensions.tabhide.enabled", true);
 
 pref("extensions.webextensions.background-delayed-startup", false);
 
+// Whether or not the installed extensions should be migrated to the storage.local IndexedDB backend.
+pref("extensions.webextensions.ExtensionStorageIDB.enabled", false);
+
 // Report Site Issue button
 pref("extensions.webcompat-reporter.newIssueEndpoint", "https://webcompat.com/issues/new");
 #if defined(MOZ_DEV_EDITION) || defined(NIGHTLY_BUILD)
@@ -5122,11 +5133,18 @@ pref("memory.blob_report.stack_frames", 0);
 // observers (bug 780507).
 pref("dom.idle-observers-api.fuzz_time.disabled", true);
 
-// Minimum delay in milliseconds between network activity notifications (0 means
-// no notifications). The delay is the same for both download and upload, though
+// Activates the activity monitor
+pref("io.activity.enabled", false);
+
+// Minimum delay in milliseconds between I/O activity notifications (0 means
+// no notifications). I/O activity includes socket and disk files.
+//
+// The delay is the same for both read and write, though
 // they are handled separately. This pref is only read once at startup:
 // a restart is required to enable a new value.
-pref("network.activity.intervalMilliseconds", 0);
+//
+// io.activity.enabled needs to be set to true
+pref("io.activity.intervalMilliseconds", 0);
 
 // If true, reuse the same global for (almost) everything loaded by the component
 // loader (JS components, JSMs, etc). This saves memory, but makes it possible
@@ -5296,8 +5314,9 @@ pref("network.trr.confirmationNS", "example.com");
 // hardcode the resolution of the hostname in network.trr.uri instead of
 // relying on the system resolver to do it for you
 pref("network.trr.bootstrapAddress", "");
-// TRR blacklist entry expire time (in seconds). Default is 20 minutes.
-pref("network.trr.blacklist-duration", 1200);
+// TRR blacklist entry expire time (in seconds). Default is one minute.
+// Meant to survive basically a page load.
+pref("network.trr.blacklist-duration", 60);
 // Single TRR request timeout, in milliseconds
 pref("network.trr.request-timeout", 3000);
 // Allow AAAA entries to be used "early", before the A results are in
@@ -5471,9 +5490,11 @@ pref("layout.accessiblecaret.use_long_tap_injector", false);
 // By default, carets become tilt only when they are overlapping.
 pref("layout.accessiblecaret.always_tilt", false);
 
-// Selection change notifications generated by Javascript hide
-// AccessibleCarets and close UI interaction by default.
-pref("layout.accessiblecaret.allow_script_change_updates", false);
+// 0 = by default, always hide carets for selection changes due to JS calls.
+// 1 = update any visible carets for selection changes due to JS calls,
+//     but don't show carets if carets are hidden.
+// 2 = always show carets for selection changes due to JS calls.
+pref("layout.accessiblecaret.script_change_update_mode", 0);
 
 // Allow one caret to be dragged across the other caret without any limitation.
 // This matches the built-in convention for all desktop platforms.

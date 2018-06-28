@@ -24,7 +24,7 @@
 #include "mozilla/ServoBindings.h" // Servo_GetProperties_Overriding_Animation
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleAnimationValue.h"
-#include "mozilla/TypeTraits.h" // For Forward<>
+#include "mozilla/TypeTraits.h" // For std::forward<>
 #include "nsContentUtils.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSPropertyIDSet.h"
@@ -106,6 +106,13 @@ IsMatchForCompositor(const KeyframeEffect& aEffect,
 
   if (!aEffect.HasEffectiveAnimationOfProperty(aProperty)) {
     return MatchForCompositor::No;
+  }
+
+  // If we know that the animation is not visible, we don't need to send the
+  // animation to the compositor.
+  if (!aFrame->IsVisibleOrMayHaveVisibleDescendants() ||
+      aFrame->IsScrolledOutOfView()) {
+    return MatchForCompositor::NoAndBlockThisProperty;
   }
 
   return animation->IsPlaying()
@@ -481,8 +488,8 @@ EffectCompositor::GetElementToRestyle(dom::Element* aElement,
     return nsLayoutUtils::GetAfterPseudo(aElement);
   }
 
-  NS_NOTREACHED("Should not try to get the element to restyle for a pseudo "
-                "other that :before or :after");
+  MOZ_ASSERT_UNREACHABLE("Should not try to get the element to restyle for "
+                         "a pseudo other that :before or :after");
   return nullptr;
 }
 

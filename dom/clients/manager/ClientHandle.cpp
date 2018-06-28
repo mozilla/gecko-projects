@@ -49,17 +49,17 @@ ClientHandle::StartOp(const ClientOpConstructorArgs& aArgs,
   RefPtr<ClientHandle> kungFuGrip = this;
 
   MaybeExecute([aArgs, kungFuGrip, aRejectCallback,
-                resolve = Move(aResolveCallback)] (ClientHandleChild* aActor) {
-    MOZ_RELEASE_ASSERT(aActor);
+                resolve = std::move(aResolveCallback)] (ClientHandleChild* aActor) {
+    MOZ_DIAGNOSTIC_ASSERT(aActor);
     ClientHandleOpChild* actor =
-      new ClientHandleOpChild(kungFuGrip, aArgs, Move(resolve),
-                              Move(aRejectCallback));
+      new ClientHandleOpChild(kungFuGrip, aArgs, std::move(resolve),
+                              std::move(aRejectCallback));
     if (!aActor->SendPClientHandleOpConstructor(actor, aArgs)) {
       // Constructor failure will call reject callback via ActorDestroy()
       return;
     }
   }, [aRejectCallback] {
-    MOZ_RELEASE_ASSERT(aRejectCallback);
+    MOZ_DIAGNOSTIC_ASSERT(aRejectCallback);
     aRejectCallback(NS_ERROR_DOM_INVALID_STATE_ERR);
   });
 }
@@ -203,7 +203,7 @@ ClientHandle::OnDetach()
   }
 
   RefPtr<GenericPromise> ref(mDetachPromise);
-  return Move(ref);
+  return ref;
 }
 
 } // namespace dom

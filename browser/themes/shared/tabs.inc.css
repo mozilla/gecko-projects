@@ -535,6 +535,7 @@
   background-repeat: repeat-x;
 }
 
+.tab-line[multiselected],
 .tab-line[selected=true] {
   background-color: var(--tab-line-color);
 }
@@ -566,20 +567,35 @@
   background-color: rgba(255,255,255,.1);
 }
 
-.tab-line:not([selected=true]) {
+.tab-line:not([selected=true]):not([multiselected]) {
   opacity: 0;
   transform: scaleX(0);
   transition: transform 250ms var(--animation-easing-function), opacity 250ms var(--animation-easing-function);
 }
 
-.tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]) {
+.tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]) {
   background-color: rgba(0,0,0,.2);
   opacity: 1;
   transform: none;
 }
 
-#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]) {
+#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]) {
   background-color: rgba(255,255,255,.2);
+}
+
+.tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected],
+#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true])[multiselected] {
+  opacity: 0.5;
+}
+
+/* Tab multi-selected */
+
+.tabbrowser-tab[multiselected] > .tab-stack > .tab-background:not([selected=true]) {
+  background-color: rgba(0,0,0,.1);
+}
+
+#TabsToolbar[brighttext] > #tabbrowser-tabs > .tabbrowser-tab[multiselected] > .tab-stack > .tab-background:not([selected=true]) {
+  background-color: rgba(255,255,255,.1);
 }
 
 /* Pinned tabs */
@@ -665,9 +681,11 @@
 %else
 :root[tabsintitlebar]:not([extradragspace]) .tabbrowser-tab::after,
 %endif
-/* Show full height tab separators on hover. */
+/* Show full height tab separators on hover and multiselection. */
 .tabbrowser-tab:hover::after,
-#tabbrowser-tabs:not([movingtab]) > .tabbrowser-tab[beforehovered]::after {
+#tabbrowser-tabs:not([movingtab]) > .tabbrowser-tab[beforehovered]::after,
+.tabbrowser-tab[multiselected]::after,
+.tabbrowser-tab[before-multiselected]::after {
   margin-top: var(--tabs-top-border-width);
   margin-bottom: 0;
 }
@@ -735,39 +753,66 @@
   min-height: 12px;
 }
 
-.alltabs-item > .menu-iconic-left > .menu-iconic-icon {
-  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
+#appMenu-allTabsView {
+  --blue-40: #45a1ff;
+  max-width: 42em;
+}
+
+.all-tabs-item > .all-tabs-secondary-button {
+  padding: 0;
+  padding-inline-start: 6px;
+  opacity: .8;
   -moz-context-properties: fill;
   fill: currentColor;
 }
 
-.alltabs-item[busy] > .menu-iconic-left > .menu-iconic-icon {
-  list-style-image: url("chrome://global/skin/icons/loading.png");
+.all-tabs-secondary-button:hover {
+  opacity: 1;
 }
 
-@media (min-resolution: 1.1dppx) {
-  .alltabs-item[busy] > .menu-iconic-left > .menu-iconic-icon {
-    list-style-image: url("chrome://global/skin/icons/loading@2x.png");
-  }
+.all-tabs-item:hover {
+  background-color: var(--arrowpanel-dimmed)
 }
 
-.alltabs-item[tabIsVisible] {
-  /* box-shadow instead of background-color to work around native styling */
-  box-shadow: inset -5px 0 ThreeDShadow;
+.all-tabs-item > .all-tabs-button > .tab-throbber-fallback {
+  display: block;
+  margin-inline-end: 0;
 }
 
-.alltabs-endimage[soundplaying],
-.alltabs-endimage[muted],
-.alltabs-endimage[activemedia-blocked] {
+.all-tabs-item[selected] {
+  box-shadow: inset 4px 0 var(--blue-40);
+}
+
+.all-tabs-item[tabIsVisible] {
+  box-shadow: inset -4px 0 ThreeDShadow;
+}
+
+.all-tabs-item[selected][tabIsVisible] {
+  box-shadow: inset -4px 0 ThreeDShadow, inset 4px 0 var(--blue-40);
+}
+
+.all-tabs-button,
+.all-tabs-secondary-button {
+  background-color: transparent !important;
+}
+
+.all-tabs-secondary-button > label {
+  display: none;
+  margin: 0 5.5px;
+}
+
+.all-tabs-secondary-button[soundplaying] {
   list-style-image: url(chrome://browser/skin/tabbrowser/tab-audio-playing.svg);
-  -moz-context-properties: fill;
-  fill: currentColor;
 }
 
-.alltabs-endimage[muted] {
+.all-tabs-secondary-button[muted] {
   list-style-image: url(chrome://browser/skin/tabbrowser/tab-audio-muted.svg);
 }
 
-.alltabs-endimage[activemedia-blocked] {
-  list-style-image: url(chrome://browser/skin/tabbrowser/tab-audio-blocked.svg);
+.undo-close-tab {
+  list-style-image: url(chrome://browser/skin/undo.svg);
+}
+
+.undo-close-tab > .toolbarbutton-icon:-moz-locale-dir(rtl) {
+  transform: scaleX(-1);
 }

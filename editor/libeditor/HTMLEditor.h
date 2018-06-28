@@ -70,7 +70,6 @@ class HTMLEditor final : public TextEditor
                        , public nsITableEditor
                        , public nsIHTMLInlineTableEditor
                        , public nsIEditorStyleSheets
-                       , public nsICSSLoaderObserver
                        , public nsStubMutationObserver
 {
 public:
@@ -116,10 +115,6 @@ public:
   // nsISelectionListener overrides
   NS_DECL_NSISELECTIONLISTENER
 
-  // nsICSSLoaderObserver
-  NS_IMETHOD StyleSheetLoaded(StyleSheet* aSheet,
-                              bool aWasAlternate, nsresult aStatus) override;
-
   HTMLEditor();
 
   nsHTMLDocument* GetHTMLDocument() const;
@@ -127,6 +122,10 @@ public:
   virtual void PreDestroy(bool aDestroyingFrames) override;
 
   bool GetReturnInParagraphCreatesNewParagraph();
+
+  /**
+   * Returns the deepest container of the selection
+   */
   Element* GetSelectionContainer();
 
   // TextEditor overrides
@@ -143,8 +142,6 @@ public:
 
   NS_IMETHOD DeleteNode(nsINode* aNode) override;
 
-  NS_IMETHOD SelectAll() override;
-
   NS_IMETHOD DebugUnitTests(int32_t* outNumTests,
                             int32_t* outNumTestsFailed) override;
 
@@ -157,7 +154,6 @@ public:
   virtual already_AddRefed<nsIContent> FindSelectionRoot(
                                          nsINode *aNode) override;
   virtual bool IsAcceptableInputEvent(WidgetGUIEvent* aGUIEvent) override;
-  virtual already_AddRefed<nsIContent> GetInputEventTargetContent() override;
   virtual nsresult GetPreferredIMEState(widget::IMEState* aState) override;
 
   /**
@@ -286,6 +282,12 @@ public:
 
   already_AddRefed<Element>
   GetElementOrParentByTagName(const nsAString& aTagName, nsINode* aNode);
+
+  /**
+    * Get an active editor's editing host in DOM window.  If this editor isn't
+    * active in the DOM window, this returns NULL.
+    */
+  Element* GetActiveEditingHost();
 
 protected: // May be called by friends.
   /****************************************************************************
@@ -434,10 +436,10 @@ protected: // May be called by friends.
   nsresult RelativeChangeElementZIndex(Element& aElement, int32_t aChange,
                                        int32_t* aReturn);
 
+  virtual bool IsModifiableNode(nsINode* aNode) override;
+
   virtual bool IsBlockNode(nsINode *aNode) override;
   using EditorBase::IsBlockNode;
-
-  virtual bool IsModifiableNode(nsINode* aNode) override;
 
   /**
    * returns true if aParentTag can contain a child of type aChildTag.
@@ -746,6 +748,8 @@ protected: // Called by helper classes.
 protected: // Shouldn't be used by friend classes
   virtual ~HTMLEditor();
 
+  virtual nsresult SelectAllInternal() override;
+
   /**
    * InsertNodeIntoProperAncestorWithTransaction() attempts to insert aNode
    * into the document, at aPointToInsert.  Checks with strict dtd to see if
@@ -776,12 +780,6 @@ protected: // Shouldn't be used by friend classes
    * ranges is deleted first.
    */
   nsresult InsertBrElementAtSelectionWithTransaction();
-
-  /**
-   * RemoveStyleSheetWithTransaction() removes the given URL stylesheet
-   * from mStyleSheets and mStyleSheetURLs.
-   */
-  nsresult RemoveStyleSheetWithTransaction(const nsAString& aURL);
 
   nsresult LoadHTML(const nsAString& aInputString);
 
@@ -907,6 +905,8 @@ protected: // Shouldn't be used by friend classes
    *            Otherwise, returns null.
    */
   already_AddRefed<nsINode> GetFocusedNode();
+
+  virtual already_AddRefed<nsIContent> GetInputEventTargetContent() override;
 
   /**
    * Return TRUE if aElement is a table-related elemet and caret was set.

@@ -89,10 +89,8 @@ browser/extensions/pdfjs/content/web**
 # generated or library files in pocket
 browser/extensions/pocket/content/panels/js/tmpl.js
 browser/extensions/pocket/content/panels/js/vendor/**
-# generated or library files in activity-stream
-browser/extensions/activity-stream/data/content/activity-stream.bundle.js
-browser/extensions/activity-stream/test/**
-browser/extensions/activity-stream/vendor/**
+# Activity Stream has incompatible eslintrc. `npm run lint` from its directory
+browser/extensions/activity-stream/**
 # The only file in browser/locales/ is pre-processed.
 browser/locales/**
 # imported from chromium
@@ -129,10 +127,6 @@ devtools/client/commandline/**
 # Soon to be removed, the new/ directory is explicitly excluded below due to
 # also being an imported repository.
 devtools/client/debugger/**
-# Soon to be removed
-devtools/client/webconsole/old/net/**
-devtools/client/webconsole/old/test/**
-devtools/client/webconsole/old/webconsole.js
 
 # Ignore devtools imported repositories
 devtools/client/debugger/new/**

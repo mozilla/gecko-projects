@@ -497,16 +497,22 @@ CompositorBridgeParent::StopAndClearResources()
   }
 
   if (mWrBridge) {
+    // Ensure we are not holding the sIndirectLayerTreesLock when destroying
+    // the WebRenderBridgeParent instances because it may block on WR.
+    std::vector<RefPtr<WebRenderBridgeParent>> indirectBridgeParents;
     { // scope lock
       MonitorAutoLock lock(*sIndirectLayerTreesLock);
-      ForEachIndirectLayerTree([] (LayerTreeState* lts, LayersId) -> void {
+      ForEachIndirectLayerTree([&] (LayerTreeState* lts, LayersId) -> void {
         if (lts->mWrBridge) {
-          lts->mWrBridge->Destroy();
-          lts->mWrBridge = nullptr;
+          indirectBridgeParents.emplace_back(lts->mWrBridge.forget());
         }
         lts->mParent = nullptr;
       });
     }
+    for (const RefPtr<WebRenderBridgeParent>& bridge : indirectBridgeParents) {
+      bridge->Destroy();
+    }
+    indirectBridgeParents.clear();
 
     // Ensure we are not holding the sIndirectLayerTreesLock here because we
     // are going to block on WR threads in order to shut it down properly.
@@ -858,9 +864,9 @@ void
 CompositorBridgeParent::ScheduleTask(already_AddRefed<CancelableRunnable> task, int time)
 {
   if (time == 0) {
-    MessageLoop::current()->PostTask(Move(task));
+    MessageLoop::current()->PostTask(std::move(task));
   } else {
-    MessageLoop::current()->PostDelayedTask(Move(task), time);
+    MessageLoop::current()->PostDelayedTask(std::move(task), time);
   }
 }
 
@@ -1119,8 +1125,8 @@ CompositorBridgeParent::RecvRemotePluginsReady()
   }
   return IPC_OK();
 #else
-  NS_NOTREACHED("CompositorBridgeParent::RecvRemotePluginsReady calls "
-                "unexpected on this platform.");
+  MOZ_ASSERT_UNREACHABLE("CompositorBridgeParent::RecvRemotePluginsReady calls "
+                         "unexpected on this platform.");
   return IPC_FAIL_NO_REASON(this);
 #endif
 }
@@ -1386,7 +1392,8 @@ CompositorBridgeParent::LeaveTestMode(const LayersId& aId)
 }
 
 void
-CompositorBridgeParent::ApplyAsyncProperties(LayerTransactionParent* aLayerTree)
+CompositorBridgeParent::ApplyAsyncProperties(LayerTransactionParent* aLayerTree,
+                                             TransformsToSkip aSkip)
 {
   // NOTE: This should only be used for testing. For example, when mTestTime is
   // non-empty, or when called from test-only methods like
@@ -1399,8 +1406,7 @@ CompositorBridgeParent::ApplyAsyncProperties(LayerTransactionParent* aLayerTree)
 
     TimeStamp time = mTestTime.valueOr(mCompositorScheduler->GetLastComposeTime());
     bool requestNextFrame =
-      mCompositionManager->TransformShadowTree(time, mVsyncRate,
-        AsyncCompositionManager::TransformsToSkip::APZ);
+      mCompositionManager->TransformShadowTree(time, mVsyncRate, aSkip);
     if (!requestNextFrame) {
       CancelCurrentCompositeTask();
       // Pretend we composited in case someone is waiting for this event.
@@ -1852,7 +1858,7 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
     // Same as for mApzUpdater, but for the sampler thread.
     mApzSampler->SetWebRenderWindowId(windowId);
   }
-  RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(this, Move(widget), windowId, aSize);
+  RefPtr<wr::WebRenderAPI> api = wr::WebRenderAPI::Create(this, std::move(widget), windowId, aSize);
   if (!api) {
     mWrBridge = WebRenderBridgeParent::CreateDestroyed(aPipelineId);
     mWrBridge.get()->AddRef(); // IPDL reference
@@ -1866,7 +1872,7 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const wr::PipelineId& aPipel
   txn.SetRootPipeline(aPipelineId);
   api->SendTransaction(txn);
   RefPtr<CompositorAnimationStorage> animStorage = GetAnimationStorage();
-  mWrBridge = new WebRenderBridgeParent(this, aPipelineId, mWidget, nullptr, Move(api), Move(asyncMgr), Move(animStorage));
+  mWrBridge = new WebRenderBridgeParent(this, aPipelineId, mWidget, nullptr, std::move(api), std::move(asyncMgr), std::move(animStorage));
   mWrBridge.get()->AddRef(); // IPDL reference
 
   *aIdNamespace = mWrBridge->GetIdNamespace();
@@ -2045,7 +2051,7 @@ CompositorBridgeParent::AllocPCompositorWidgetParent(const CompositorWidgetInitD
   widget->AddRef();
 
 #ifdef XP_WIN
-  if (DeviceManagerDx::Get()->CanUseDComp()) {
+  if (mOptions.UseWebRender() && DeviceManagerDx::Get()->CanUseDComp()) {
     widget->AsWindows()->EnsureCompositorWindow();
   }
 #endif

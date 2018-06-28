@@ -379,18 +379,6 @@ nsFocusManager::GetRedirectedFocus(nsIContent* aContent)
         menulist->GetInputField(getter_AddRefs(inputField));
         return inputField;
       }
-      else if (aContent->IsXULElement(nsGkAtoms::scale)) {
-        nsCOMPtr<nsIDocument> doc = aContent->GetComposedDoc();
-        if (!doc)
-          return nullptr;
-
-        nsINodeList* children = doc->BindingManager()->GetAnonymousNodesFor(aContent);
-        if (children) {
-          nsIContent* child = children->Item(0);
-          if (child && child->IsXULElement(nsGkAtoms::slider))
-            return child->AsElement();
-        }
-      }
     }
   }
 #endif
@@ -735,9 +723,7 @@ nsFocusManager::WindowRaised(mozIDOMWindowProxy* aWindow)
       return NS_ERROR_FAILURE;
     }
 
-    if (!sTestMode) {
-      baseWindow->SetVisibility(true);
-    }
+    baseWindow->SetVisibility(true);
   }
 
   // If this is a parent or single process window, send the activate event.
@@ -1203,7 +1189,9 @@ nsFocusManager::ActivateOrDeactivate(nsPIDOMWindowOuter* aWindow, bool aActive)
                                               aActive ?
                                                 NS_LITERAL_STRING("activate") :
                                                 NS_LITERAL_STRING("deactivate"),
-                                              true, true, nullptr);
+                                              CanBubble::eYes,
+                                              Cancelable::eYes,
+                                              nullptr);
   }
 
   // Look for any remote child frames, iterate over them and send the activation notification.
@@ -3488,10 +3476,11 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
       }
     }
 
-    // If aStartContent is not in scope owned by aRootContent
-    // (e.g., aStartContent is already in shadow DOM),
+    // If aStartContent is not in a scope owned by the root element
+    // (i.e. aStartContent is already in shadow DOM),
     // search from scope including aStartContent
-    if (aRootContent != FindOwner(aStartContent)) {
+    nsIContent* rootElement = aRootContent->OwnerDoc()->GetRootElement();
+    if (rootElement != FindOwner(aStartContent)) {
       nsIContent* contentToFocus =
         GetNextTabbableContentInAncestorScopes(&aStartContent,
                                                aOriginalStartContent,

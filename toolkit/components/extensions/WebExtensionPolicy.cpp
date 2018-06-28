@@ -105,7 +105,7 @@ WebExtensionPolicy::WebExtensionPolicy(GlobalObject& aGlobal,
     if (aRv.Failed()) {
       return;
     }
-    mContentScripts.AppendElement(Move(contentScript));
+    mContentScripts.AppendElement(std::move(contentScript));
   }
 
   nsresult rv = NS_NewURI(getter_AddRefs(mBaseURI), aInit.mBaseURL);
@@ -237,12 +237,12 @@ WebExtensionPolicy::RegisterContentScript(WebExtensionContentScript& script,
 
   RefPtr<WebExtensionContentScript> newScript = &script;
 
-  if (!mContentScripts.AppendElement(Move(newScript), fallible)) {
+  if (!mContentScripts.AppendElement(std::move(newScript), fallible)) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
 
-  WebExtensionPolicyBinding::ClearCachedContentScriptsValue(this);
+  WebExtensionPolicy_Binding::ClearCachedContentScriptsValue(this);
 }
 
 void
@@ -254,7 +254,7 @@ WebExtensionPolicy::UnregisterContentScript(const WebExtensionContentScript& scr
     return;
   }
 
-  WebExtensionPolicyBinding::ClearCachedContentScriptsValue(this);
+  WebExtensionPolicy_Binding::ClearCachedContentScriptsValue(this);
 }
 
 /* static */ bool
@@ -402,7 +402,7 @@ WebExtensionPolicy::Localize(const nsAString& aInput, nsString& aOutput) const
 JSObject*
 WebExtensionPolicy::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return WebExtensionPolicyBinding::Wrap(aCx, this, aGivenProto);
+  return WebExtensionPolicy_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -537,7 +537,7 @@ WebExtensionContentScript::MatchesURI(const URLInfo& aURL) const
 JSObject*
 WebExtensionContentScript::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return WebExtensionContentScriptBinding::Wrap(aCx, this, aGivenProto);
+  return WebExtensionContentScript_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 

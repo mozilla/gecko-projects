@@ -42,7 +42,7 @@ public:
     , mStream(aStream)
     , mAbstractMainThread(aMainThread)
   {
-    mFinishPromise = Move(aPromise);
+    mFinishPromise = std::move(aPromise);
   }
 
   void NotifyOutput(MediaStreamGraph* aGraph, GraphTime aCurrentTime) override
@@ -184,7 +184,7 @@ DecodedStreamData::DecodedStreamData(OutputStreamManager* aOutputStreamManager,
   , mHaveSentFinishVideo(false)
   , mStream(aOutputStreamManager->Graph()->CreateSourceStream())
   // DecodedStreamGraphListener will resolve this promise.
-  , mListener(new DecodedStreamGraphListener(mStream, Move(aPromise), aMainThread))
+  , mListener(new DecodedStreamGraphListener(mStream, std::move(aPromise), aMainThread))
   // mPlaying is initially true because MDSM won't start playback until playing
   // becomes true. This is consistent with the settings of AudioSink.
   , mPlaying(true)
@@ -193,17 +193,22 @@ DecodedStreamData::DecodedStreamData(OutputStreamManager* aOutputStreamManager,
   , mAbstractMainThread(aMainThread)
 {
   mStream->AddListener(mListener);
-  mOutputStreamManager->Connect(mStream);
+  TrackID audioTrack = TRACK_NONE;
+  TrackID videoTrack = TRACK_NONE;
 
   // Initialize tracks.
   if (aInit.mInfo.HasAudio()) {
-    mStream->AddAudioTrack(aInit.mInfo.mAudio.mTrackId,
+    audioTrack = aInit.mInfo.mAudio.mTrackId;
+    mStream->AddAudioTrack(audioTrack,
                            aInit.mInfo.mAudio.mRate,
                            0, new AudioSegment());
   }
   if (aInit.mInfo.HasVideo()) {
-    mStream->AddTrack(aInit.mInfo.mVideo.mTrackId, 0, new VideoSegment());
+    videoTrack = aInit.mInfo.mVideo.mTrackId;
+    mStream->AddTrack(videoTrack, 0, new VideoSegment());
   }
+
+  mOutputStreamManager->Connect(mStream, audioTrack, videoTrack);
 }
 
 DecodedStreamData::~DecodedStreamData()
@@ -317,11 +322,11 @@ DecodedStream::Start(const TimeUnit& aStartTime, const MediaInfo& aInfo)
     R(PlaybackInfoInit&& aInit, Promise&& aPromise,
       OutputStreamManager* aManager, AbstractThread* aMainThread)
       : Runnable("CreateDecodedStreamData")
-      , mInit(Move(aInit))
+      , mInit(std::move(aInit))
       , mOutputStreamManager(aManager)
       , mAbstractMainThread(aMainThread)
     {
-      mPromise = Move(aPromise);
+      mPromise = std::move(aPromise);
     }
     NS_IMETHOD Run() override
     {
@@ -334,12 +339,12 @@ DecodedStream::Start(const TimeUnit& aStartTime, const MediaInfo& aInfo)
         return NS_OK;
       }
       mData = MakeUnique<DecodedStreamData>(
-        mOutputStreamManager, Move(mInit), Move(mPromise), mAbstractMainThread);
+        mOutputStreamManager, std::move(mInit), std::move(mPromise), mAbstractMainThread);
       return NS_OK;
     }
     UniquePtr<DecodedStreamData> ReleaseData()
     {
-      return Move(mData);
+      return std::move(mData);
     }
   private:
     PlaybackInfoInit mInit;
@@ -355,7 +360,7 @@ DecodedStream::Start(const TimeUnit& aStartTime, const MediaInfo& aInfo)
     aStartTime, aInfo
   };
   nsCOMPtr<nsIRunnable> r =
-    new R(Move(init), Move(promise), mOutputStreamManager, mAbstractMainThread);
+    new R(std::move(init), std::move(promise), mOutputStreamManager, mAbstractMainThread);
   SyncRunnable::DispatchToThread(
     SystemGroup::EventTargetFor(mozilla::TaskCategory::Other), r);
   mData = static_cast<R*>(r.get())->ReleaseData();
@@ -380,7 +385,7 @@ DecodedStream::Stop()
 
   // Clear mData immediately when this playback session ends so we won't
   // send data to the wrong stream in SendData() in next playback session.
-  DestroyData(Move(mData));
+  DestroyData(std::move(mData));
 }
 
 bool
@@ -802,7 +807,7 @@ DecodedStream::GetDebugInfo()
   if (mData) {
     AppendStringIfNotEmpty(str, mData->GetDebugInfo());
   }
-  return Move(str);
+  return std::move(str);
 }
 
 } // namespace mozilla

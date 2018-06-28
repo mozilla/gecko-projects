@@ -15,11 +15,10 @@ import sys
 import shlex
 
 # load modules from parent dir
-sys.path.insert(1, os.path.dirname(sys.path[0]))
+sys.path.insert(1, os.path.dirname(sys.path[0]))  # noqa
 
 from mozharness.base.errors import MakefileErrorList
 from mozharness.base.script import BaseScript
-from mozharness.base.transfer import TransferMixin
 from mozharness.base.vcs.vcsbase import VCSMixin
 from mozharness.mozilla.automation import AutomationMixin
 from mozharness.mozilla.building.buildbase import (
@@ -28,9 +27,6 @@ from mozharness.mozilla.building.buildbase import (
 )
 from mozharness.mozilla.l10n.locales import LocalesMixin
 from mozharness.mozilla.mar import MarMixin
-from mozharness.mozilla.release import ReleaseMixin
-from mozharness.mozilla.updates.balrog import BalrogMixin
-from mozharness.base.python import VirtualenvMixin
 
 try:
     import simplejson as json
@@ -49,62 +45,26 @@ FAILURE_STR = "Failed"
 
 # mandatory configuration options, without them, this script will not work
 # it's a list of values that are already known before starting a build
-configuration_tokens = ('branch',
-                        'platform',
-                        'update_channel',
-                        )
-# some other values such as "%(version)s", "%(buildid)s", ...
+configuration_tokens = ('branch', 'update_channel')
+
+# some other values such as "%(version)s", ...
 # are defined at run time and they cannot be enforced in the _pre_config_lock
 # phase
-runtime_config_tokens = ('buildid', 'version', 'locale', 'from_buildid',
-                         'abs_objdir', 'revision',
-                         'to_buildid', 'en_us_binary_url',
-                         'en_us_installer_binary_url', 'mar_tools_url',
-                         'who')
+runtime_config_tokens = ('version', 'locale', 'abs_objdir', 'revision',
+                         'en_us_installer_binary_url')
 
 
 # DesktopSingleLocale {{{1
-class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
-                          VCSMixin, BaseScript, BalrogMixin, MarMixin,
-                          VirtualenvMixin, TransferMixin):
+class DesktopSingleLocale(LocalesMixin, AutomationMixin,
+                          VCSMixin, BaseScript, MarMixin):
     """Manages desktop repacks"""
     config_options = [[
-        ['--balrog-config', ],
-        {"action": "extend",
-         "dest": "config_files",
-         "type": "string",
-         "help": "Specify the balrog configuration file"}
-    ], [
-        ['--branch-config', ],
-        {"action": "extend",
-         "dest": "config_files",
-         "type": "string",
-         "help": "Specify the branch configuration file"}
-    ], [
-        ['--environment-config', ],
-        {"action": "extend",
-         "dest": "config_files",
-         "type": "string",
-         "help": "Specify the environment (staging, production, ...) configuration file"}
-    ], [
-        ['--platform-config', ],
-        {"action": "extend",
-         "dest": "config_files",
-         "type": "string",
-         "help": "Specify the platform configuration file"}
-    ], [
         ['--locale', ],
         {"action": "extend",
          "dest": "locales",
          "type": "string",
          "help": "Specify the locale(s) to sign and update. Optionally pass"
                  " revision separated by colon, en-GB:default."}
-    ], [
-        ['--locales-file', ],
-        {"action": "store",
-         "dest": "locales_file",
-         "type": "string",
-         "help": "Specify a file to determine which locales to sign and update"}
     ], [
         ['--tag-override', ],
         {"action": "store",
@@ -118,30 +78,6 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
          "type": "string",
          "help": "Override the gecko revision to use (otherwise use automation supplied"
                  " value, or en-US revision) "}
-    ], [
-        ['--user-repo-override', ],
-        {"action": "store",
-         "dest": "user_repo_override",
-         "type": "string",
-         "help": "Override the user repo path for all repos"}
-    ], [
-        ['--release-config-file', ],
-        {"action": "store",
-         "dest": "release_config_file",
-         "type": "string",
-         "help": "Specify the release config file to use"}
-    ], [
-        ['--this-chunk', ],
-        {"action": "store",
-         "dest": "this_locale_chunk",
-         "type": "int",
-         "help": "Specify which chunk of locales to run"}
-    ], [
-        ['--total-chunks', ],
-        {"action": "store",
-         "dest": "total_locale_chunks",
-         "type": "int",
-         "help": "Specify the total number of chunks of locales"}
     ], [
         ['--en-us-installer-url', ],
         {"action": "store",
@@ -163,30 +99,16 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
         # fxbuild style:
         buildscript_kwargs = {
             'all_actions': [
-                "clobber",
-                "pull",
                 "clone-locales",
                 "list-locales",
                 "setup",
                 "repack",
-                "taskcluster-upload",
-                "funsize-props",
-                "submit-to-balrog",
                 "summary",
             ],
             'config': {
                 "ignore_locales": ["en-US"],
                 "locales_dir": "browser/locales",
-                "buildid_section": "App",
-                "buildid_option": "BuildID",
-                "application_ini": "application.ini",
                 "log_name": "single_locale",
-                "appName": "Firefox",
-                "hashType": "sha512",
-                'virtualenv_modules': [
-                    'requests==2.8.1',
-                ],
-                'virtualenv_path': 'venv',
             },
         }
 
@@ -198,8 +120,6 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
             **buildscript_kwargs
         )
 
-        self.buildid = None
-        self.make_ident_output = None
         self.bootstrap_env = None
         self.upload_env = None
         self.revision = None
@@ -327,9 +247,6 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
         config = self.config
         replace_dict = self.query_abs_dirs()
 
-        replace_dict['en_us_binary_url'] = config.get('en_us_binary_url')
-        # Override en_us_binary_url if packageUrl is passed as a property from
-        # the en-US build
         bootstrap_env = self.query_env(partial_env=config.get("bootstrap_env"),
                                        replace_dict=replace_dict)
         for binary in self._mar_binaries():
@@ -367,33 +284,6 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
         l10n_env = self._query_upload_env().copy()
         l10n_env.update(self.query_bootstrap_env())
         return l10n_env
-
-    def _query_make_ident_output(self):
-        """Get |make ident| output from the objdir.
-        Only valid after setup is run.
-       """
-        if self.make_ident_output:
-            return self.make_ident_output
-        dirs = self.query_abs_dirs()
-        self.make_ident_output = self._get_output_from_make(
-            target=["ident"],
-            cwd=dirs['abs_locales_dir'],
-            env=self.query_bootstrap_env())
-        return self.make_ident_output
-
-    def _query_buildid(self):
-        """Get buildid from the objdir.
-        Only valid after setup is run.
-       """
-        if self.buildid:
-            return self.buildid
-        r = re.compile(r"buildid (\d+)")
-        output = self._query_make_ident_output()
-        for line in output.splitlines():
-            match = r.match(line)
-            if match:
-                self.buildid = match.groups()[0]
-        return self.buildid
 
     def _query_revision(self):
         """ Get the gecko revision in this order of precedence
@@ -439,12 +329,7 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
         Only valid after setup is run."""
         if self.version:
             return self.version
-        config = self.config
-        if config.get('release_config_file'):
-            release_config = self.query_release_config()
-            self.version = release_config['version']
-        else:
-            self.version = self._query_make_variable("MOZ_APP_VERSION")
+        self.version = self._query_make_variable("MOZ_APP_VERSION")
         return self.version
 
     def _map(self, func, items):
@@ -474,7 +359,7 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
             prop_value = "%s  %s" % (prop_value, message)
         else:
             prop_value = message
-        self.set_property(prop_key, prop_value, write_to_file=True)
+        self.set_property(prop_key, prop_value)
         BaseScript.add_failure(self, locale, message=message, **kwargs)
 
     def query_failed_locales(self):
@@ -488,44 +373,9 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
         locales = self.query_locales()
         for locale in locales:
             self.locales_property.setdefault(locale, SUCCESS_STR)
-        self.set_property("locales",
-                          json.dumps(self.locales_property),
-                          write_to_file=True)
+        self.set_property("locales", json.dumps(self.locales_property))
 
     # Actions {{{2
-    def pull(self):
-        """pulls source code"""
-        config = self.config
-        dirs = self.query_abs_dirs()
-        repos = []
-        # replace dictionary for repos
-        # we need to interpolate some values:
-        # branch, branch_repo
-        # and user_repo_override if exists
-        replace_dict = {}
-        if config.get("user_repo_override"):
-            replace_dict['user_repo_override'] = config['user_repo_override']
-        # this is OK so early because we get it from automation, or
-        # the command line for local dev
-        replace_dict['revision'] = self._query_revision()
-
-        for repository in config['repos']:
-            current_repo = {}
-            for key, value in repository.iteritems():
-                try:
-                    current_repo[key] = value % replace_dict
-                except TypeError:
-                    # pass through non-interpolables, like booleans
-                    current_repo[key] = value
-                except KeyError:
-                    self.error('not all the values in "{0}" can be replaced. Check your '
-                               'configuration'.format(value))
-                    raise
-            repos.append(current_repo)
-        self.info("repositories: %s" % repos)
-        self.vcs_checkout_repos(repos, parent_dir=dirs['abs_work_dir'],
-                                tag_override=config.get('tag_override'))
-
     def clone_locales(self):
         self.pull_locale_source()
 
@@ -766,44 +616,10 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, AutomationMixin,
         self.abs_dirs = abs_dirs
         return self.abs_dirs
 
-    def submit_to_balrog(self):
-        """submit to balrog"""
-        self.info("Reading build properties...")
-        # get platform, appName and hashType from configuration
-        # common values across different locales
-        config = self.config
-        platform = config["platform"]
-        appName = config['appName']
-        branch = config['branch']
-        # values from configuration
-        self.set_property("branch", branch)
-        self.set_property("appName", appName)
-        # it's hardcoded to sha512 in balrog.py
-        self.set_property("platform", platform)
-        # values common to the current repacks
-        self.set_property("buildid", self._query_buildid())
-        self.set_property("appVersion", self.query_version())
-
-        # YAY
-        def balrog_props_wrapper(locale):
-            env = self._query_upload_env()
-            props_path = os.path.join(env["UPLOAD_PATH"], locale,
-                                      'balrog_props.json')
-            self.generate_balrog_props(props_path)
-            return SUCCESS
-
-        self._map(balrog_props_wrapper, self.query_locales())
-
     def _mar_binaries(self):
         """returns a tuple with mar and mbsdiff paths"""
         config = self.config
         return (config['mar'], config['mbsdiff'])
-
-    def _mar_dir(self, dirname):
-        """returns the full path of dirname;
-            dirname is an entry in configuration"""
-        dirs = self.query_abs_dirs()
-        return os.path.join(dirs['abs_objdir'], self.config[dirname])
 
     # TODO: replace with ToolToolMixin
     def _get_tooltool_auth_file(self):

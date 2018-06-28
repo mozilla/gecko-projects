@@ -24,7 +24,6 @@
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
 #include "nsScrollbarButtonFrame.h"
-#include "nsISliderListener.h"
 #include "nsIScrollableFrame.h"
 #include "nsIScrollbarMediator.h"
 #include "nsISupportsImpl.h"
@@ -99,9 +98,9 @@ nsSliderFrame::nsSliderFrame(ComputedStyle* aStyle)
 nsSliderFrame::~nsSliderFrame()
 {
   if (mSuppressionActive) {
-    APZCCallbackHelper::SuppressDisplayport(false, PresContext() ?
-                                                   PresShell() :
-                                                   nullptr);
+    if (nsIPresShell* shell = PresShell()) {
+      shell->SuppressDisplayport(false);
+    }
   }
 }
 
@@ -203,50 +202,6 @@ nsSliderFrame::GetIntegerAttribute(nsIContent* content, nsAtom* atom, int32_t de
     return defaultValue;
 }
 
-class nsValueChangedRunnable : public Runnable
-{
-public:
-  nsValueChangedRunnable(nsISliderListener* aListener,
-                         nsAtom* aWhich,
-                         int32_t aValue,
-                         bool aUserChanged)
-    : mozilla::Runnable("nsValueChangedRunnable")
-    , mListener(aListener)
-    , mWhich(aWhich)
-    , mValue(aValue)
-    , mUserChanged(aUserChanged)
-  {}
-
-  NS_IMETHOD Run() override
-  {
-    return mListener->ValueChanged(nsDependentAtomString(mWhich),
-                                   mValue, mUserChanged);
-  }
-
-  nsCOMPtr<nsISliderListener> mListener;
-  RefPtr<nsAtom> mWhich;
-  int32_t mValue;
-  bool mUserChanged;
-};
-
-class nsDragStateChangedRunnable : public Runnable
-{
-public:
-  nsDragStateChangedRunnable(nsISliderListener* aListener, bool aDragBeginning)
-    : mozilla::Runnable("nsDragStateChangedRunnable")
-    , mListener(aListener)
-    , mDragBeginning(aDragBeginning)
-  {}
-
-  NS_IMETHOD Run() override
-  {
-    return mListener->DragStateChanged(mDragBeginning);
-  }
-
-  nsCOMPtr<nsISliderListener> mListener;
-  bool mDragBeginning;
-};
-
 nsresult
 nsSliderFrame::AttributeChanged(int32_t aNameSpaceID,
                                 nsAtom* aAttribute,
@@ -266,17 +221,6 @@ nsSliderFrame::AttributeChanged(int32_t aNameSpaceID,
       int32_t current = GetCurrentPosition(scrollbar);
       int32_t min = GetMinPosition(scrollbar);
       int32_t max = GetMaxPosition(scrollbar);
-
-      // inform the parent <scale> that the minimum or maximum changed
-      nsIFrame* parent = GetParent();
-      if (parent) {
-        nsCOMPtr<nsISliderListener> sliderListener = do_QueryInterface(parent->GetContent());
-        if (sliderListener) {
-          nsContentUtils::AddScriptRunner(
-            new nsValueChangedRunnable(sliderListener, aAttribute,
-                                       aAttribute == nsGkAtoms::minpos ? min : max, false));
-        }
-      }
 
       if (current < min || current > max)
       {
@@ -858,16 +802,6 @@ nsSliderFrame::CurrentPositionChanged()
   }
 
   mCurPos = curPos;
-
-  // inform the parent <scale> if it exists that the value changed
-  nsIFrame* parent = GetParent();
-  if (parent) {
-    nsCOMPtr<nsISliderListener> sliderListener = do_QueryInterface(parent->GetContent());
-    if (sliderListener) {
-      nsContentUtils::AddScriptRunner(
-        new nsValueChangedRunnable(sliderListener, nsGkAtoms::curpos, mCurPos, mUserChanged));
-    }
-  }
 }
 
 static void UpdateAttribute(Element* aScrollbar, nscoord aNewPos, bool aNotify, bool aIsSmooth) {
@@ -1113,7 +1047,9 @@ nsSliderFrame::StartAPZDrag(WidgetGUIEvent* aEvent)
     return;
   }
 
-  nsCOMPtr<nsIContent> scrollbar = GetContentOfBox(scrollbarBox);
+  if (!nsLayoutUtils::HasDisplayPort(scrollableContent)) {
+    return;
+  }
 
   nsIPresShell* shell = PresShell();
   uint64_t inputblockId = InputAPZContext::GetInputBlockId();
@@ -1123,10 +1059,6 @@ nsSliderFrame::StartAPZDrag(WidgetGUIEvent* aEvent)
                                  float(AppUnitsPerCSSPixel())),
                                isHorizontal ? ScrollDirection::eHorizontal :
                                               ScrollDirection::eVertical);
-
-  if (!nsLayoutUtils::HasDisplayPort(scrollableContent)) {
-    return;
-  }
 
   // It's important to set this before calling nsIWidget::StartAsyncScrollbarDrag(),
   // because in some configurations, that can call AsyncScrollbarDragRejected()
@@ -1257,16 +1189,6 @@ void
 nsSliderFrame::DragThumb(bool aGrabMouseEvents)
 {
   mDragFinished = !aGrabMouseEvents;
-
-  // inform the parent <scale> that a drag is beginning or ending
-  nsIFrame* parent = GetParent();
-  if (parent) {
-    nsCOMPtr<nsISliderListener> sliderListener = do_QueryInterface(parent->GetContent());
-    if (sliderListener) {
-      nsContentUtils::AddScriptRunner(
-        new nsDragStateChangedRunnable(sliderListener, aGrabMouseEvents));
-    }
-  }
 
   nsIPresShell::SetCapturingContent(aGrabMouseEvents ? GetContent() : nullptr,
                                     aGrabMouseEvents ? CAPTURE_IGNOREALLOWED : 0);
@@ -1620,8 +1542,9 @@ void
 nsSliderFrame::SuppressDisplayport()
 {
   if (!mSuppressionActive) {
-    MOZ_ASSERT(PresShell());
-    APZCCallbackHelper::SuppressDisplayport(true, PresShell());
+    nsIPresShell* shell = PresShell();
+    MOZ_ASSERT(shell);
+    shell->SuppressDisplayport(true);
     mSuppressionActive = true;
   }
 }
@@ -1630,8 +1553,9 @@ void
 nsSliderFrame::UnsuppressDisplayport()
 {
   if (mSuppressionActive) {
-    MOZ_ASSERT(PresShell());
-    APZCCallbackHelper::SuppressDisplayport(false, PresShell());
+    nsIPresShell* shell = PresShell();
+    MOZ_ASSERT(shell);
+    shell->SuppressDisplayport(false);
     mSuppressionActive = false;
   }
 }

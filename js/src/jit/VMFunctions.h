@@ -751,7 +751,7 @@ CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget, MutableHa
 void GetDynamicName(JSContext* cx, JSObject* scopeChain, JSString* str, Value* vp);
 
 void PostWriteBarrier(JSRuntime* rt, js::gc::Cell* cell);
-void PostGlobalWriteBarrier(JSRuntime* rt, JSObject* obj);
+void PostGlobalWriteBarrier(JSRuntime* rt, GlobalObject* obj);
 
 enum class IndexInBounds { Yes, Maybe };
 
@@ -952,6 +952,9 @@ void
 CloseIteratorFromIon(JSContext* cx, JSObject* obj);
 
 extern const VMFunction SetObjectElementInfo;
+
+extern const VMFunction StringsEqualInfo;
+extern const VMFunction StringsNotEqualInfo;
 
 } // namespace jit
 } // namespace js

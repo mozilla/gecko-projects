@@ -842,8 +842,14 @@ nsWindow::GetDesktopToDeviceScale()
 void
 nsWindow::SetParent(nsIWidget *aNewParent)
 {
-    if (mContainer || !mGdkWindow) {
-        NS_NOTREACHED("nsWindow::SetParent called illegally");
+    if (!mGdkWindow) {
+        MOZ_ASSERT_UNREACHABLE("The native window has already been destroyed");
+        return;
+    }
+
+    if (mContainer) {
+        // FIXME bug 1469183
+        NS_ERROR("nsWindow should not have a container here");
         return;
     }
 
@@ -1518,7 +1524,7 @@ nsWindow::GetClientBounds()
 void
 nsWindow::UpdateClientOffset()
 {
-    AUTO_PROFILER_LABEL("nsWindow::UpdateClientOffset", GRAPHICS);
+    AUTO_PROFILER_LABEL("nsWindow::UpdateClientOffset", OTHER);
 
     if (!mIsTopLevel || !mShell || !mIsX11Display ||
         gtk_window_get_window_type(GTK_WINDOW(mShell)) == GTK_WINDOW_POPUP) {
@@ -2067,6 +2073,12 @@ nsWindow::OnExposeEvent(cairo_t *cr)
     if (!mGdkWindow || mIsFullyObscured || !mHasMappedToplevel)
         return FALSE;
 
+#ifdef MOZ_WAYLAND
+    // Window does not have visible wl_surface yet.
+    if (!mIsX11Display && !GetWaylandSurface())
+        return FALSE;
+#endif
+
     nsIWidgetListener *listener = GetListener();
     if (!listener)
         return FALSE;
@@ -2364,7 +2376,7 @@ nsWindow::OnConfigureEvent(GtkWidget *aWidget, GdkEventConfigure *aEvent)
         //
         // These windows should not be moved by the window manager, and so any
         // change in position is a result of our direction.  mBounds has
-        // already been set in Move() or Resize(), and that is more
+        // already been set in std::move() or Resize(), and that is more
         // up-to-date than the position in the ConfigureNotify event if the
         // event is from an earlier window move.
         //
@@ -3232,7 +3244,7 @@ nsWindow::OnScrollEvent(GdkEventScroll *aEvent)
         return;
 #endif
     WidgetWheelEvent wheelEvent(true, eWheel, this);
-    wheelEvent.mDeltaMode = dom::WheelEventBinding::DOM_DELTA_LINE;
+    wheelEvent.mDeltaMode = dom::WheelEvent_Binding::DOM_DELTA_LINE;
     switch (aEvent->direction) {
 #if GTK_CHECK_VERSION(3,4,0)
     case GDK_SCROLL_SMOOTH:
@@ -3713,7 +3725,7 @@ nsWindow::Create(nsIWidget* aParent,
         if (Preferences::GetBool("mozilla.widget.use-argb-visuals", false))
             useAlphaVisual = true;
 
-#ifdef GL_PROVIDER_GLX
+#ifdef MOZ_X11
         // Ensure gfxPlatform is initialized, since that is what initializes
         // gfxVars, used below.
         Unused << gfxPlatform::GetPlatform();
@@ -3740,7 +3752,7 @@ nsWindow::Create(nsIWidget* aParent,
                                                                    visualId));
             }
         } else
-#endif // GL_PROVIDER_GLX
+#endif // MOZ_X11
         {
             if (useAlphaVisual) {
                 GdkScreen *screen = gtk_widget_get_screen(mShell);

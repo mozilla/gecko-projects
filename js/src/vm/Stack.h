@@ -77,7 +77,7 @@ class Instance;
 // activation are contiguous: whenever C++ calls back into JS, a new activation is
 // pushed.
 //
-// Every activation is tied to a single JSContext and JSCompartment. This means we
+// Every activation is tied to a single JSContext and JS::Compartment. This means we
 // can reconstruct a given context's stack by skipping activations belonging to other
 // contexts. This happens whenever an embedding enters the JS engine on cx1 and
 // then, from a native called by the JS engine, reenters the VM on cx2.
@@ -302,7 +302,7 @@ class InterpreterFrame
         PREV_UP_TO_DATE        =       0x20,  /* see DebugScopes::updateLiveScopes */
 
         /*
-         * See comment above 'isDebuggee' in JSCompartment.h for explanation of
+         * See comment above 'isDebuggee' in Realm.h for explanation of
          * invariants of debuggee compartments, scripts, and frames.
          */
         DEBUGGEE               =       0x40,  /* Execution is being observed by Debugger */
@@ -1383,7 +1383,7 @@ namespace jit {
     class JitActivation;
 } // namespace jit
 
-// This class is separate from Activation, because it calls JSCompartment::wrap()
+// This class is separate from Activation, because it calls Compartment::wrap()
 // which can GC and walk the stack. It's not safe to do that within the
 // JitActivation constructor.
 class MOZ_RAII ActivationEntryMonitor
@@ -1411,7 +1411,7 @@ class Activation
 {
   protected:
     JSContext* cx_;
-    JSCompartment* compartment_;
+    JS::Compartment* compartment_;
     Activation* prev_;
     Activation* prevProfiling_;
 
@@ -1451,7 +1451,7 @@ class Activation
     JSContext* cx() const {
         return cx_;
     }
-    JSCompartment* compartment() const {
+    JS::Compartment* compartment() const {
         return compartment_;
     }
     Activation* prev() const {
@@ -1671,7 +1671,7 @@ class JitActivation : public Activation
   protected:
     // Used to verify that live registers don't change between a VM call and
     // the OsiPoint that follows it. Protected to silence Clang warning.
-    uint32_t checkRegs_;
+    uint32_t checkRegs_ = 0;
     RegisterDump regs_;
 #endif
 
@@ -1950,8 +1950,14 @@ class JitFrameIter
     bool done() const;
     void operator++();
 
+    JS::Realm* realm() const;
+
     // Operations which have an effect only on JIT frames.
     void skipNonScriptedJSFrames();
+
+    // Returns true iff this is a JIT frame with a self-hosted script. Note: be
+    // careful, JitFrameIter does not consider functions inlined by Ion.
+    bool isSelfHostedIgnoringInlining() const;
 };
 
 // A JitFrameIter that skips all the non-JSJit frames, skipping interleaved
@@ -2046,7 +2052,7 @@ class FrameIter
     FrameIter& operator++();
 
     JS::Realm* realm() const;
-    JSCompartment* compartment() const;
+    JS::Compartment* compartment() const;
     Activation* activation() const { return data_.activations_.activation(); }
 
     bool isInterp() const {

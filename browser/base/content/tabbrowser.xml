@@ -79,6 +79,7 @@
       </xul:hbox>
       <xul:arrowscrollbox anonid="arrowscrollbox" orient="horizontal" flex="1"
                           style="min-width: 1px;"
+                          clicktoscroll="true"
                           class="tabbrowser-arrowscrollbox">
 <!--
  This is a hack to circumvent bug 472020, otherwise the tabs show up on the
@@ -220,6 +221,12 @@
                   }
                   popup.className = "new-tab-popup";
                   popup.setAttribute("position", "after_end");
+                  popup.addEventListener("popupshowing", event => {
+                    createUserContextMenu(event, {
+                      useAccessKeys: false,
+                      showDefaultTab: Services.prefs.getIntPref("privacy.userContext.longPressBehavior") == 1
+                    });
+                  });
                   parent.appendChild(popup);
 
                   // longPressBehavior == 2 means that the menu is shown after X
@@ -295,6 +302,17 @@
           hoveredTab = this.querySelector("tab:hover");
           if (hoveredTab) {
             hoveredTab._mouseenter();
+          }
+
+          // Update before-multiselected attributes.
+          // gBrowser may not be initialized yet, so avoid using it
+          for (let i = 0; i < visibleTabs.length - 1; i++) {
+            let tab = visibleTabs[i];
+            let nextTab = visibleTabs[i + 1];
+            tab.removeAttribute("before-multiselected");
+            if (nextTab.multiselected) {
+              tab.setAttribute("before-multiselected", "true");
+            }
           }
         ]]></body>
       </method>
@@ -1544,7 +1562,7 @@
       <xul:stack class="tab-stack" flex="1">
         <xul:vbox xbl:inherits="selected=visuallyselected,fadein"
                   class="tab-background">
-          <xul:hbox xbl:inherits="selected=visuallyselected"
+          <xul:hbox xbl:inherits="selected=visuallyselected,multiselected,before-multiselected"
                     class="tab-line"/>
           <xul:spacer flex="1"/>
           <xul:hbox class="tab-bottom-line"/>
@@ -1581,7 +1599,7 @@
                     onunderflow="this.removeAttribute('textoverflow');"
                     flex="1">
             <xul:label class="tab-text tab-label"
-                       xbl:inherits="xbl:text=label,accesskey,fadein,pinned,selected=visuallyselected,attention,multiselected"
+                       xbl:inherits="xbl:text=label,accesskey,fadein,pinned,selected=visuallyselected,attention"
                        role="presentation"/>
           </xul:hbox>
           <xul:image xbl:inherits="soundplaying,soundplaying-scheduledremoval,pinned,muted,blocked,selected=visuallyselected,activemedia-blocked"
@@ -1665,6 +1683,11 @@
       <property name="multiselected" readonly="true">
         <getter>
           return this.getAttribute("multiselected") == "true";
+        </getter>
+      </property>
+      <property name="beforeMultiselected" readonly="true">
+        <getter>
+          return this.getAttribute("before-multiselected") == "true";
         </getter>
       </property>
       <!--
@@ -1885,7 +1908,6 @@
                 browser.unmute();
               }
               this.removeAttribute("muted");
-              BrowserUITelemetry.countTabMutingEvent("unmute", aMuteReason);
               hist.add(1 /* unmute */);
             } else {
               if (this.linkedPanel) {
@@ -1893,7 +1915,6 @@
                 browser.mute();
               }
               this.setAttribute("muted", "true");
-              BrowserUITelemetry.countTabMutingEvent("mute", aMuteReason);
               hist.add(0 /* mute */);
             }
             this.muteReason = aMuteReason || null;
@@ -1992,23 +2013,37 @@
             // Ctrl (Cmd for mac) key is pressed
             if (this.multiselected) {
               gBrowser.removeFromMultiSelectedTabs(this);
-            } else {
-              gBrowser.addToMultiSelectedTabs(this);
+              if (this == gBrowser.selectedTab) {
+                gBrowser.selectedTab = gBrowser.lastMultiSelectedTab;
+              }
+            } else if (this != gBrowser.selectedTab) {
+              for (let tab of [this, gBrowser.selectedTab]) {
+                gBrowser.addToMultiSelectedTabs(tab);
+              }
               gBrowser.lastMultiSelectedTab = this;
             }
             return;
           }
 
           const overCloseButton = event.originalTarget.getAttribute("anonid") == "close-button";
-          if (gBrowser.multiSelectedTabsCount > 0 && !overCloseButton) {
+          if (gBrowser.multiSelectedTabsCount > 0 && !overCloseButton && !this._overPlayingIcon) {
             // Tabs were previously multi-selected and user clicks on a tab
             // without holding Ctrl/Cmd Key
-            gBrowser.clearMultiSelectedTabs();
+
+            // Force positional attributes to update when the
+            // target (of the click) is the "active" tab.
+            let updatePositionalAttr = gBrowser.selectedTab == this;
+
+            gBrowser.clearMultiSelectedTabs(updatePositionalAttr);
           }
         }
 
         if (this._overPlayingIcon) {
-          this.toggleMuteAudio();
+          if (this.multiselected) {
+            gBrowser.toggleMuteAudioOnMultiSelectedTabs(this);
+          } else {
+            this.toggleMuteAudio();
+          }
           return;
         }
 
@@ -2052,128 +2087,6 @@
         }
       ]]>
       </handler>
-    </handlers>
-  </binding>
-
-  <binding id="tabbrowser-alltabs-popup"
-           extends="chrome://global/content/bindings/popup.xml#popup">
-    <implementation>
-      <method name="_updateTabsVisibilityStatus">
-        <body><![CDATA[
-          var tabContainer = gBrowser.tabContainer;
-          // We don't want menu item decoration unless there is overflow.
-          if (tabContainer.getAttribute("overflow") != "true") {
-            return;
-          }
-
-          let windowUtils = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                                  .getInterface(Ci.nsIDOMWindowUtils);
-          let arrowScrollboxRect = windowUtils.getBoundsWithoutFlushing(tabContainer.arrowScrollbox);
-          for (let menuitem of this.childNodes) {
-            let curTab = menuitem.tab;
-            if (!curTab) {
-              // "Undo close tab", menuseparator, or entries put here by addons.
-              continue;
-            }
-            let curTabRect = windowUtils.getBoundsWithoutFlushing(curTab);
-            if (curTabRect.left >= arrowScrollboxRect.left &&
-                curTabRect.right <= arrowScrollboxRect.right) {
-              menuitem.setAttribute("tabIsVisible", "true");
-            } else {
-              menuitem.removeAttribute("tabIsVisible");
-            }
-          }
-        ]]></body>
-      </method>
-
-      <method name="_initializeTabsPopups">
-        <parameter name="event"/>
-        <body><![CDATA[
-          if (this._tabsPopups) {
-            return;
-          }
-          // These TabsPopup objects will handle creating menuitem elements
-          // for tabs in this popup. They have their own popupshowing and
-          // popuphidden listeners to manage the items.
-          //
-          // Since gBrowser isn't initialized yet in the constructor these are
-          // created on the first popupshowing event. The initial event is
-          // proxied once the popups are created.
-          this._tabsPopups = [
-            new TabsPopup({
-              className: "alltabs-item",
-              filterFn: (tab) => !tab.pinned && !tab.hidden,
-              popup: document.getElementById("alltabs-popup"),
-              onPopulate: () => this._updateTabsVisibilityStatus(),
-            }),
-            new TabsPopup({
-              filterFn: (tab) => tab.hidden && tab.soundPlaying,
-              popup: document.getElementById("alltabs-popup"),
-              insertBefore: document.getElementById("alltabs-popup-separator-3"),
-            }),
-            new TabsPopup({
-              filterFn: (tab) => tab.hidden,
-              popup: document.getElementById("alltabs_hiddenTabsMenu"),
-            }),
-          ];
-          this._tabsPopups.forEach(popup => popup.handleEvent(event));
-        ]]></body>
-      </method>
-    </implementation>
-
-    <handlers>
-      <handler event="popupshowing">
-      <![CDATA[
-        if (event.target.getAttribute("id") == "alltabs_containersMenuTab") {
-          createUserContextMenu(event, {useAccessKeys: false});
-          return;
-        } else if (event.target != this) {
-          return;
-        }
-
-        let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
-
-        if (event.target.getAttribute("anonid") == "newtab-popup" ||
-            event.target.id == "newtab-popup") {
-          createUserContextMenu(event, {
-            useAccessKeys: false,
-            showDefaultTab: Services.prefs.getIntPref("privacy.userContext.longPressBehavior") == 1
-          });
-        } else {
-          document.getElementById("alltabs-popup-separator-1").hidden = !containersEnabled;
-          let containersTab = document.getElementById("alltabs_containersTab");
-
-          containersTab.hidden = !containersEnabled;
-          if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-            containersTab.setAttribute("disabled", "true");
-          }
-
-          document.getElementById("alltabs_undoCloseTab").disabled =
-            SessionStore.getClosedTabCount(window) == 0;
-
-          let showHiddenTabs = gBrowser.visibleTabs.length < gBrowser.tabs.length;
-          document.getElementById("alltabs_hiddenTabs").hidden = !showHiddenTabs;
-          document.getElementById("alltabs-popup-separator-3").hidden = !showHiddenTabs;
-
-          this._initializeTabsPopups(event);
-        }
-      ]]></handler>
-
-      <handler event="DOMMenuItemActive">
-      <![CDATA[
-        var tab = event.target.tab;
-        if (tab) {
-          let overLink = tab.linkedBrowser.currentURI.displaySpec;
-          if (overLink == "about:blank")
-            overLink = "";
-          XULBrowserWindow.setOverLink(overLink, null);
-        }
-      ]]></handler>
-
-      <handler event="DOMMenuItemInactive">
-      <![CDATA[
-        XULBrowserWindow.setOverLink("", null);
-      ]]></handler>
     </handlers>
   </binding>
 

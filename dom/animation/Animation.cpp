@@ -13,7 +13,7 @@
 #include "mozilla/AutoRestore.h"
 #include "mozilla/AsyncEventDispatcher.h" // For AsyncEventDispatcher
 #include "mozilla/Maybe.h" // For Maybe
-#include "mozilla/TypeTraits.h" // For Forward<>
+#include "mozilla/TypeTraits.h" // For std::forward<>
 #include "nsAnimationManager.h" // For CSSAnimation
 #include "nsDOMMutationObserver.h" // For nsAutoAnimationMutationBatch
 #include "nsIDocument.h" // For nsIDocument
@@ -43,7 +43,7 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 JSObject*
 Animation::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::AnimationBinding::Wrap(aCx, this, aGivenProto);
+  return dom::Animation_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 // ---------------------------------------------------------------------------

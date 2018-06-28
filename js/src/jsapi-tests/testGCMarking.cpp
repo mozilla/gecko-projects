@@ -10,7 +10,7 @@
 #include "js/RootingAPI.h"
 #include "js/SliceBudget.h"
 #include "jsapi-tests/tests.h"
-#include "vm/JSCompartment.h"
+#include "vm/Realm.h"
 
 static bool
 ConstructCCW(JSContext* cx, const JSClass* globalClasp,
@@ -136,10 +136,10 @@ BEGIN_TEST(testTracingIncomingCCWs)
 END_TEST(testTracingIncomingCCWs)
 
 static size_t
-countWrappers(JSCompartment* comp)
+countWrappers(JS::Compartment* comp)
 {
     size_t count = 0;
-    for (JSCompartment::WrapperEnum e(comp); !e.empty(); e.popFront())
+    for (JS::Compartment::WrapperEnum e(comp); !e.empty(); e.popFront())
         ++count;
     return count;
 }

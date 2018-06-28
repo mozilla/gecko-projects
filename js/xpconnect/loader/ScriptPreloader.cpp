@@ -32,8 +32,9 @@
 #include "nsXULAppAPI.h"
 #include "xpcpublic.h"
 
-#define DELAYED_STARTUP_TOPIC "browser-delayed-startup-finished"
+#define STARTUP_COMPLETE_TOPIC "browser-delayed-startup-finished"
 #define DOC_ELEM_INSERTED_TOPIC "document-element-inserted"
+#define CACHE_WRITE_TOPIC "browser-idle-startup-tasks-finished"
 #define CLEANUP_TOPIC "xpcom-shutdown"
 #define SHUTDOWN_TOPIC "quit-application-granted"
 #define CACHE_INVALIDATE_TOPIC "startupcache-invalidate"
@@ -231,8 +232,9 @@ ScriptPreloader::ScriptPreloader()
 
     if (XRE_IsParentProcess()) {
         // In the parent process, we want to freeze the script cache as soon
-        // as delayed startup for the first browser window has completed.
-        obs->AddObserver(this, DELAYED_STARTUP_TOPIC, false);
+        // as idle tasks for the first browser window have completed.
+        obs->AddObserver(this, STARTUP_COMPLETE_TOPIC, false);
+        obs->AddObserver(this, CACHE_WRITE_TOPIC, false);
     } else {
         // In the child process, we need to freeze the script cache before any
         // untrusted code has been executed. The insertion of the first DOM
@@ -338,12 +340,16 @@ nsresult
 ScriptPreloader::Observe(nsISupports* subject, const char* topic, const char16_t* data)
 {
     nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-    if (!strcmp(topic, DELAYED_STARTUP_TOPIC)) {
-        obs->RemoveObserver(this, DELAYED_STARTUP_TOPIC);
+    if (!strcmp(topic, STARTUP_COMPLETE_TOPIC)) {
+        obs->RemoveObserver(this, STARTUP_COMPLETE_TOPIC);
 
         MOZ_ASSERT(XRE_IsParentProcess());
 
         mStartupFinished = true;
+    } else if (!strcmp(topic, CACHE_WRITE_TOPIC)) {
+        obs->RemoveObserver(this, CACHE_WRITE_TOPIC);
+        MOZ_ASSERT(mStartupFinished);
+        MOZ_ASSERT(XRE_IsParentProcess());
 
         if (mChildCache) {
             Unused << NS_NewNamedThread("SaveScripts",
@@ -384,7 +390,7 @@ ScriptPreloader::GetCacheFile(const nsAString& suffix)
 
     MOZ_TRY(cacheFile->Append(mBaseName + suffix));
 
-    return Move(cacheFile);
+    return std::move(cacheFile);
 }
 
 static const uint8_t MAGIC[] = "mozXDRcachev001";
@@ -540,7 +546,7 @@ ScriptPreloader::InitCacheInternal(JS::HandleObject scope)
             return Err(NS_ERROR_UNEXPECTED);
         }
 
-        mPendingScripts = Move(scripts);
+        mPendingScripts = std::move(scripts);
         cleanup.release();
     }
 
@@ -809,7 +815,7 @@ ScriptPreloader::NoteScript(const nsCString& url, const nsCString& cachePath,
         MOZ_ASSERT(!script->HasArray());
 
         script->mSize = xdrData.Length();
-        script->mXDRData.construct<nsTArray<uint8_t>>(Forward<nsTArray<uint8_t>>(xdrData));
+        script->mXDRData.construct<nsTArray<uint8_t>>(std::forward<nsTArray<uint8_t>>(xdrData));
 
         auto& data = script->Array();
         script->mXDRRange.emplace(data.Elements(), data.Length());

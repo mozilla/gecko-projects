@@ -10,7 +10,7 @@
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
-#include "mozilla/GenericSpecifiedValuesInlines.h"
+#include "mozilla/MappedDeclarations.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEditor.h"
@@ -473,14 +473,13 @@ nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
     }
   }
 
-  // We need to consider a labels element is removed from tree,
-  // it needs to update labels list and its root as well.
+  nsStyledElement::UnbindFromTree(aDeep, aNullParent);
+
+  // Invalidate .labels list. It will be repopulated when used the next time.
   nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots();
   if (slots && slots->mLabelsList) {
     slots->mLabelsList->MaybeResetRoot(SubtreeRoot());
   }
-
-  nsStyledElement::UnbindFromTree(aDeep, aNullParent);
 }
 
 HTMLFormElement*
@@ -1163,25 +1162,25 @@ nsGenericHTMLElement::ParseScrollingValue(const nsAString& aString,
 }
 
 static inline void
-MapLangAttributeInto(const nsMappedAttributes* aAttributes, GenericSpecifiedValues* aData)
+MapLangAttributeInto(const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls)
 {
   const nsAttrValue* langValue = aAttributes->GetAttr(nsGkAtoms::lang);
   if (!langValue) {
     return;
   }
   MOZ_ASSERT(langValue->Type() == nsAttrValue::eAtom);
-  aData->SetIdentAtomValueIfUnset(eCSSProperty__x_lang,
+  aDecls.SetIdentAtomValueIfUnset(eCSSProperty__x_lang,
                                   langValue->GetAtomValue());
-  if (!aData->PropertyIsSet(eCSSProperty_text_emphasis_position)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_text_emphasis_position)) {
     const nsAtom* lang = langValue->GetAtomValue();
     if (nsStyleUtil::MatchesLanguagePrefix(lang, u"zh")) {
-      aData->SetKeywordValue(eCSSProperty_text_emphasis_position,
+      aDecls.SetKeywordValue(eCSSProperty_text_emphasis_position,
                              NS_STYLE_TEXT_EMPHASIS_POSITION_DEFAULT_ZH);
     } else if (nsStyleUtil::MatchesLanguagePrefix(lang, u"ja") ||
                nsStyleUtil::MatchesLanguagePrefix(lang, u"mn")) {
       // This branch is currently no part of the spec.
       // See bug 1040668 comment 69 and comment 75.
-      aData->SetKeywordValue(eCSSProperty_text_emphasis_position,
+      aDecls.SetKeywordValue(eCSSProperty_text_emphasis_position,
                              NS_STYLE_TEXT_EMPHASIS_POSITION_DEFAULT);
     }
   }
@@ -1192,36 +1191,36 @@ MapLangAttributeInto(const nsMappedAttributes* aAttributes, GenericSpecifiedValu
  */
 void
 nsGenericHTMLElement::MapCommonAttributesIntoExceptHidden(const nsMappedAttributes* aAttributes,
-                                                          GenericSpecifiedValues* aData)
+                                                          MappedDeclarations& aDecls)
 {
-  if (!aData->PropertyIsSet(eCSSProperty__moz_user_modify)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty__moz_user_modify)) {
     const nsAttrValue* value =
       aAttributes->GetAttr(nsGkAtoms::contenteditable);
     if (value) {
       if (value->Equals(nsGkAtoms::_empty, eCaseMatters) ||
           value->Equals(nsGkAtoms::_true, eIgnoreCase)) {
-        aData->SetKeywordValue(eCSSProperty__moz_user_modify,
+        aDecls.SetKeywordValue(eCSSProperty__moz_user_modify,
                                StyleUserModify::ReadWrite);
       }
       else if (value->Equals(nsGkAtoms::_false, eIgnoreCase)) {
-          aData->SetKeywordValue(eCSSProperty__moz_user_modify,
+          aDecls.SetKeywordValue(eCSSProperty__moz_user_modify,
                                  StyleUserModify::ReadOnly);
       }
     }
   }
 
-  MapLangAttributeInto(aAttributes, aData);
+  MapLangAttributeInto(aAttributes, aDecls);
 }
 
 void
 nsGenericHTMLElement::MapCommonAttributesInto(const nsMappedAttributes* aAttributes,
-                                              GenericSpecifiedValues* aData)
+                                              MappedDeclarations& aDecls)
 {
-  MapCommonAttributesIntoExceptHidden(aAttributes, aData);
+  MapCommonAttributesIntoExceptHidden(aAttributes, aDecls);
 
-  if (!aData->PropertyIsSet(eCSSProperty_display)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_display)) {
     if (aAttributes->IndexOfAttr(nsGkAtoms::hidden) >= 0) {
-      aData->SetKeywordValue(eCSSProperty_display, StyleDisplay::None);
+      aDecls.SetKeywordValue(eCSSProperty_display, StyleDisplay::None);
     }
   }
 }
@@ -1276,25 +1275,25 @@ nsGenericHTMLElement::sBackgroundColorAttributeMap[] = {
 
 void
 nsGenericHTMLElement::MapImageAlignAttributeInto(const nsMappedAttributes* aAttributes,
-                                                 GenericSpecifiedValues* aData)
+                                                 MappedDeclarations& aDecls)
 {
   const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
   if (value && value->Type() == nsAttrValue::eEnum) {
     int32_t align = value->GetEnumValue();
-    if (!aData->PropertyIsSet(eCSSProperty_float)) {
+    if (!aDecls.PropertyIsSet(eCSSProperty_float)) {
       if (align == NS_STYLE_TEXT_ALIGN_LEFT) {
-        aData->SetKeywordValue(eCSSProperty_float, StyleFloat::Left);
+        aDecls.SetKeywordValue(eCSSProperty_float, StyleFloat::Left);
       } else if (align == NS_STYLE_TEXT_ALIGN_RIGHT) {
-        aData->SetKeywordValue(eCSSProperty_float, StyleFloat::Right);
+        aDecls.SetKeywordValue(eCSSProperty_float, StyleFloat::Right);
       }
     }
-    if (!aData->PropertyIsSet(eCSSProperty_vertical_align)) {
+    if (!aDecls.PropertyIsSet(eCSSProperty_vertical_align)) {
       switch (align) {
       case NS_STYLE_TEXT_ALIGN_LEFT:
       case NS_STYLE_TEXT_ALIGN_RIGHT:
         break;
       default:
-        aData->SetKeywordValue(eCSSProperty_vertical_align, align);
+        aDecls.SetKeywordValue(eCSSProperty_vertical_align, align);
         break;
       }
     }
@@ -1303,31 +1302,31 @@ nsGenericHTMLElement::MapImageAlignAttributeInto(const nsMappedAttributes* aAttr
 
 void
 nsGenericHTMLElement::MapDivAlignAttributeInto(const nsMappedAttributes* aAttributes,
-                                               GenericSpecifiedValues* aData)
+                                               MappedDeclarations& aDecls)
 {
-  if (!aData->PropertyIsSet(eCSSProperty_text_align)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_text_align)) {
     // align: enum
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
     if (value && value->Type() == nsAttrValue::eEnum)
-      aData->SetKeywordValue(eCSSProperty_text_align, value->GetEnumValue());
+      aDecls.SetKeywordValue(eCSSProperty_text_align, value->GetEnumValue());
   }
 }
 
 void
 nsGenericHTMLElement::MapVAlignAttributeInto(const nsMappedAttributes* aAttributes,
-                                             GenericSpecifiedValues* aData)
+                                             MappedDeclarations& aDecls)
 {
-  if (!aData->PropertyIsSet(eCSSProperty_vertical_align)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_vertical_align)) {
     // align: enum
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::valign);
     if (value && value->Type() == nsAttrValue::eEnum)
-      aData->SetKeywordValue(eCSSProperty_vertical_align, value->GetEnumValue());
+      aDecls.SetKeywordValue(eCSSProperty_vertical_align, value->GetEnumValue());
   }
 }
 
 void
 nsGenericHTMLElement::MapImageMarginAttributeInto(const nsMappedAttributes* aAttributes,
-                                                  GenericSpecifiedValues* aData)
+                                                  MappedDeclarations& aDecls)
 {
   const nsAttrValue* value;
 
@@ -1335,14 +1334,14 @@ nsGenericHTMLElement::MapImageMarginAttributeInto(const nsMappedAttributes* aAtt
   value = aAttributes->GetAttr(nsGkAtoms::hspace);
   if (value) {
     if (value->Type() == nsAttrValue::eInteger) {
-      aData->SetPixelValueIfUnset(eCSSProperty_margin_left,
+      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_left,
                                   (float)value->GetIntegerValue());
-      aData->SetPixelValueIfUnset(eCSSProperty_margin_right,
+      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_right,
                                   (float)value->GetIntegerValue());
     } else if (value->Type() == nsAttrValue::ePercent) {
-      aData->SetPercentValueIfUnset(eCSSProperty_margin_left,
+      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_left,
                                     value->GetPercentValue());
-      aData->SetPercentValueIfUnset(eCSSProperty_margin_right,
+      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_right,
                                     value->GetPercentValue());
     }
   }
@@ -1351,14 +1350,14 @@ nsGenericHTMLElement::MapImageMarginAttributeInto(const nsMappedAttributes* aAtt
   value = aAttributes->GetAttr(nsGkAtoms::vspace);
   if (value) {
     if (value->Type() == nsAttrValue::eInteger) {
-      aData->SetPixelValueIfUnset(eCSSProperty_margin_top,
+      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_top,
                                   (float)value->GetIntegerValue());
-      aData->SetPixelValueIfUnset(eCSSProperty_margin_bottom,
+      aDecls.SetPixelValueIfUnset(eCSSProperty_margin_bottom,
                                   (float)value->GetIntegerValue());
     } else if (value->Type() == nsAttrValue::ePercent) {
-      aData->SetPercentValueIfUnset(eCSSProperty_margin_top,
+      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_top,
                                     value->GetPercentValue());
-      aData->SetPercentValueIfUnset(eCSSProperty_margin_bottom,
+      aDecls.SetPercentValueIfUnset(eCSSProperty_margin_bottom,
                                     value->GetPercentValue());
     }
   }
@@ -1366,16 +1365,16 @@ nsGenericHTMLElement::MapImageMarginAttributeInto(const nsMappedAttributes* aAtt
 
 void
 nsGenericHTMLElement::MapWidthAttributeInto(const nsMappedAttributes* aAttributes,
-                                            GenericSpecifiedValues* aData)
+                                            MappedDeclarations& aDecls)
 {
   // width: value
-  if (!aData->PropertyIsSet(eCSSProperty_width)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_width)) {
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::width);
     if (value && value->Type() == nsAttrValue::eInteger) {
-      aData->SetPixelValue(eCSSProperty_width,
+      aDecls.SetPixelValue(eCSSProperty_width,
                            (float)value->GetIntegerValue());
     } else if (value && value->Type() == nsAttrValue::ePercent) {
-      aData->SetPercentValue(eCSSProperty_width,
+      aDecls.SetPercentValue(eCSSProperty_width,
                              value->GetPercentValue());
     }
   }
@@ -1383,16 +1382,16 @@ nsGenericHTMLElement::MapWidthAttributeInto(const nsMappedAttributes* aAttribute
 
 void
 nsGenericHTMLElement::MapHeightAttributeInto(const nsMappedAttributes* aAttributes,
-                                             GenericSpecifiedValues* aData)
+                                             MappedDeclarations& aDecls)
 {
   // height: value
-  if (!aData->PropertyIsSet(eCSSProperty_height)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_height)) {
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::height);
     if (value && value->Type() == nsAttrValue::eInteger) {
-      aData->SetPixelValue(eCSSProperty_height,
+      aDecls.SetPixelValue(eCSSProperty_height,
                            (float)value->GetIntegerValue());
     } else if (value && value->Type() == nsAttrValue::ePercent) {
-      aData->SetPercentValue(eCSSProperty_height,
+      aDecls.SetPercentValue(eCSSProperty_height,
                              value->GetPercentValue());
     }
   }
@@ -1400,15 +1399,15 @@ nsGenericHTMLElement::MapHeightAttributeInto(const nsMappedAttributes* aAttribut
 
 void
 nsGenericHTMLElement::MapImageSizeAttributesInto(const nsMappedAttributes* aAttributes,
-                                                 GenericSpecifiedValues* aData)
+                                                 MappedDeclarations& aDecls)
 {
-  nsGenericHTMLElement::MapWidthAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapHeightAttributeInto(aAttributes, aData);
+  nsGenericHTMLElement::MapWidthAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapHeightAttributeInto(aAttributes, aDecls);
 }
 
 void
 nsGenericHTMLElement::MapImageBorderAttributeInto(const nsMappedAttributes* aAttributes,
-                                                  GenericSpecifiedValues* aData)
+                                                  MappedDeclarations& aDecls)
 {
   // border: pixels
   const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::border);
@@ -1419,60 +1418,60 @@ nsGenericHTMLElement::MapImageBorderAttributeInto(const nsMappedAttributes* aAtt
   if (value->Type() == nsAttrValue::eInteger)
     val = value->GetIntegerValue();
 
-  aData->SetPixelValueIfUnset(eCSSProperty_border_top_width, (float)val);
-  aData->SetPixelValueIfUnset(eCSSProperty_border_right_width, (float)val);
-  aData->SetPixelValueIfUnset(eCSSProperty_border_bottom_width, (float)val);
-  aData->SetPixelValueIfUnset(eCSSProperty_border_left_width, (float)val);
+  aDecls.SetPixelValueIfUnset(eCSSProperty_border_top_width, (float)val);
+  aDecls.SetPixelValueIfUnset(eCSSProperty_border_right_width, (float)val);
+  aDecls.SetPixelValueIfUnset(eCSSProperty_border_bottom_width, (float)val);
+  aDecls.SetPixelValueIfUnset(eCSSProperty_border_left_width, (float)val);
 
-  aData->SetKeywordValueIfUnset(eCSSProperty_border_top_style,
+  aDecls.SetKeywordValueIfUnset(eCSSProperty_border_top_style,
                                 NS_STYLE_BORDER_STYLE_SOLID);
-  aData->SetKeywordValueIfUnset(eCSSProperty_border_right_style,
+  aDecls.SetKeywordValueIfUnset(eCSSProperty_border_right_style,
                                 NS_STYLE_BORDER_STYLE_SOLID);
-  aData->SetKeywordValueIfUnset(eCSSProperty_border_bottom_style,
+  aDecls.SetKeywordValueIfUnset(eCSSProperty_border_bottom_style,
                                 NS_STYLE_BORDER_STYLE_SOLID);
-  aData->SetKeywordValueIfUnset(eCSSProperty_border_left_style,
+  aDecls.SetKeywordValueIfUnset(eCSSProperty_border_left_style,
                                 NS_STYLE_BORDER_STYLE_SOLID);
 
-  aData->SetCurrentColorIfUnset(eCSSProperty_border_top_color);
-  aData->SetCurrentColorIfUnset(eCSSProperty_border_right_color);
-  aData->SetCurrentColorIfUnset(eCSSProperty_border_bottom_color);
-  aData->SetCurrentColorIfUnset(eCSSProperty_border_left_color);
+  aDecls.SetCurrentColorIfUnset(eCSSProperty_border_top_color);
+  aDecls.SetCurrentColorIfUnset(eCSSProperty_border_right_color);
+  aDecls.SetCurrentColorIfUnset(eCSSProperty_border_bottom_color);
+  aDecls.SetCurrentColorIfUnset(eCSSProperty_border_left_color);
 }
 
 void
 nsGenericHTMLElement::MapBackgroundInto(const nsMappedAttributes* aAttributes,
-                                        GenericSpecifiedValues* aData)
+                                        MappedDeclarations& aDecls)
 {
 
-  if (!aData->PropertyIsSet(eCSSProperty_background_image)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_background_image)) {
     // background
     nsAttrValue* value =
       const_cast<nsAttrValue*>(aAttributes->GetAttr(nsGkAtoms::background));
     if (value) {
-      aData->SetBackgroundImage(*value);
+      aDecls.SetBackgroundImage(*value);
     }
   }
 }
 
 void
 nsGenericHTMLElement::MapBGColorInto(const nsMappedAttributes* aAttributes,
-                                     GenericSpecifiedValues* aData)
+                                     MappedDeclarations& aDecls)
 {
-  if (!aData->PropertyIsSet(eCSSProperty_background_color)) {
+  if (!aDecls.PropertyIsSet(eCSSProperty_background_color)) {
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::bgcolor);
     nscolor color;
     if (value && value->GetColorValue(color)) {
-      aData->SetColorValue(eCSSProperty_background_color, color);
+      aDecls.SetColorValue(eCSSProperty_background_color, color);
     }
   }
 }
 
 void
 nsGenericHTMLElement::MapBackgroundAttributesInto(const nsMappedAttributes* aAttributes,
-                                                  GenericSpecifiedValues* aData)
+                                                  MappedDeclarations& aDecls)
 {
-  MapBackgroundInto(aAttributes, aData);
-  MapBGColorInto(aAttributes, aData);
+  MapBackgroundInto(aAttributes, aDecls);
+  MapBGColorInto(aAttributes, aDecls);
 }
 
 //----------------------------------------------------------------------
@@ -2443,7 +2442,7 @@ nsGenericHTMLElement::Click(CallerType aCallerType)
   WidgetMouseEvent event(aCallerType == CallerType::System,
                          eMouseClick, nullptr, WidgetMouseEvent::eReal);
   event.mFlags.mIsPositionless = true;
-  event.inputSource = MouseEventBinding::MOZ_SOURCE_UNKNOWN;
+  event.inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
 
   EventDispatcher::Dispatch(static_cast<nsIContent*>(this), context, &event);
 
@@ -2566,7 +2565,7 @@ nsGenericHTMLElement::DispatchSimulatedClick(nsGenericHTMLElement* aElement,
 {
   WidgetMouseEvent event(aIsTrusted, eMouseClick, nullptr,
                          WidgetMouseEvent::eReal);
-  event.inputSource = MouseEventBinding::MOZ_SOURCE_KEYBOARD;
+  event.inputSource = MouseEvent_Binding::MOZ_SOURCE_KEYBOARD;
   event.mFlags.mIsPositionless = true;
   return EventDispatcher::Dispatch(ToSupports(aElement), aPresContext, &event);
 }
@@ -2765,7 +2764,7 @@ nsGenericHTMLFormElementWithState::GetPrimaryPresState()
   if (!result) {
     UniquePtr<PresState> newState = NewPresState();
     result = newState.get();
-    history->AddState(mStateKey, Move(newState));
+    history->AddState(mStateKey, std::move(newState));
   }
 
   return result;

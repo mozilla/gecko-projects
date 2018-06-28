@@ -1178,7 +1178,7 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
                                IsShrinking aShrinking,
                                int64_t aSliceMillis)
 {
-  AUTO_PROFILER_LABEL_DYNAMIC_CSTR("nsJSContext::GarbageCollectNow", GC,
+  AUTO_PROFILER_LABEL_DYNAMIC_CSTR("nsJSContext::GarbageCollectNow", GCCC,
                                    JS::gcreason::ExplainReason(aReason));
 
   MOZ_ASSERT_IF(aSliceMillis, aIncremental == IncrementalGC);
@@ -1231,7 +1231,7 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
 static void
 FinishAnyIncrementalGC()
 {
-  AUTO_PROFILER_LABEL("FinishAnyIncrementalGC", GC);
+  AUTO_PROFILER_LABEL("FinishAnyIncrementalGC", GCCC);
 
   if (sCCLockedOut) {
     AutoJSAPI jsapi;
@@ -1281,7 +1281,9 @@ FireForgetSkippable(uint32_t aSuspected, bool aRemoveChildless,
     if (!aDeadline.IsNull()) {
       if (aDeadline < now) {
         // This slice overflowed the idle period.
-        idleDuration = aDeadline - startTimeStamp;
+        if (aDeadline > startTimeStamp) {
+          idleDuration = aDeadline - startTimeStamp;
+        }
       } else {
         idleDuration = duration;
       }
@@ -1482,7 +1484,7 @@ nsJSContext::CycleCollectNow(nsICycleCollectorListener *aListener)
     return;
   }
 
-  AUTO_PROFILER_LABEL("nsJSContext::CycleCollectNow", CC);
+  AUTO_PROFILER_LABEL("nsJSContext::CycleCollectNow", GCCC);
 
   gCCStats.PrepareForCycleCollectionSlice(TimeStamp());
   nsCycleCollector_collect(aListener);
@@ -1499,7 +1501,7 @@ nsJSContext::RunCycleCollectorSlice(TimeStamp aDeadline)
 
   AUTO_PROFILER_TRACING("CC", aDeadline.IsNull() ? "CCSlice" : "IdleCCSlice");
 
-  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorSlice", CC);
+  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorSlice", GCCC);
 
   gCCStats.PrepareForCycleCollectionSlice(aDeadline);
 
@@ -1557,7 +1559,7 @@ nsJSContext::RunCycleCollectorWorkSlice(int64_t aWorkBudget)
     return;
   }
 
-  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorWorkSlice", CC);
+  AUTO_PROFILER_LABEL("nsJSContext::RunCycleCollectorWorkSlice", GCCC);
 
   gCCStats.PrepareForCycleCollectionSlice();
 
@@ -2261,9 +2263,9 @@ class NotifyGCEndRunnable : public Runnable
   nsString mMessage;
 
 public:
-  explicit NotifyGCEndRunnable(const nsString& aMessage)
+  explicit NotifyGCEndRunnable(nsString&& aMessage)
     : mozilla::Runnable("NotifyGCEndRunnable")
-    , mMessage(aMessage)
+    , mMessage(std::move(aMessage))
   {
   }
 
@@ -2321,7 +2323,7 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
             Telemetry::CanRecordExtended()) {
           nsString json;
           json.Adopt(aDesc.formatJSON(aCx, PR_Now()));
-          RefPtr<NotifyGCEndRunnable> notify = new NotifyGCEndRunnable(json);
+          RefPtr<NotifyGCEndRunnable> notify = new NotifyGCEndRunnable(std::move(json));
           SystemGroup::Dispatch(TaskCategory::GarbageCollection, notify.forget());
         }
       }

@@ -163,7 +163,6 @@ function messageManagerFromWindow(win) {
 
 // This object maps to the "child" process (even in the single-process case).
 var LoginManagerContent = {
-
   __formFillService: null, // FormFillController, for username autocompleting
   get _formFillService() {
     if (!this.__formFillService)
@@ -348,6 +347,15 @@ var LoginManagerContent = {
                              messageData);
   },
 
+  setupEventListeners(global) {
+    global.addEventListener("pageshow", (event) => {
+      this.onPageShow(event, global.content);
+    });
+    global.addEventListener("blur", (event) => {
+      this.onUsernameInput(event);
+    });
+  },
+
   setupProgressListener(window) {
     if (!LoginHelper.formlessCaptureEnabled) {
       return;
@@ -438,8 +446,14 @@ var LoginManagerContent = {
   _fetchLoginsFromParentAndFillForm(form, window) {
     this._detectInsecureFormLikes(window);
 
+    const isPrivateWindow = PrivateBrowsingUtils.isContentWindowPrivate(window);
+
     let messageManager = messageManagerFromWindow(window);
-    messageManager.sendAsyncMessage("LoginStats:LoginEncountered");
+    messageManager.sendAsyncMessage("LoginStats:LoginEncountered",
+                                    {
+                                      isPrivateWindow,
+                                      isPwmgrEnabled: gEnabled,
+                                    });
 
     if (!gEnabled) {
       return;

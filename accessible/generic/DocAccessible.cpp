@@ -680,14 +680,18 @@ NS_IMETHODIMP
 DocAccessible::OnPivotChanged(nsIAccessiblePivot* aPivot,
                               nsIAccessible* aOldAccessible,
                               int32_t aOldStart, int32_t aOldEnd,
+                              nsIAccessible* aNewAccessible,
+                              int32_t aNewStart, int32_t aNewEnd,
                               PivotMoveReason aReason,
                               bool aIsFromUserInput)
 {
   RefPtr<AccEvent> event =
     new AccVCChangeEvent(
       this, (aOldAccessible ? aOldAccessible->ToInternalAccessible() : nullptr),
-      aOldStart, aOldEnd, aReason,
-      aIsFromUserInput ? eFromUserInput : eNoUserInput);
+      aOldStart, aOldEnd,
+      (aNewAccessible ? aNewAccessible->ToInternalAccessible() : nullptr),
+      aNewStart, aNewEnd,
+      aReason, aIsFromUserInput ? eFromUserInput : eNoUserInput);
   nsEventShell::FireEvent(event);
 
   return NS_OK;
@@ -717,7 +721,7 @@ DocAccessible::AttributeWillChange(dom::Element* aElement,
   // Update dependent IDs cache. Take care of elements that are accessible
   // because dependent IDs cache doesn't contain IDs from non accessible
   // elements.
-  if (aModType != dom::MutationEventBinding::ADDITION)
+  if (aModType != dom::MutationEvent_Binding::ADDITION)
     RemoveDependentIDsFor(accessible, aAttribute);
 
   if (aAttribute == nsGkAtoms::id) {
@@ -735,7 +739,7 @@ DocAccessible::AttributeWillChange(dom::Element* aElement,
   // need to newly expose it as a toggle button) etc.
   if (aAttribute == nsGkAtoms::aria_checked ||
       aAttribute == nsGkAtoms::aria_pressed) {
-    mARIAAttrOldValue = (aModType != dom::MutationEventBinding::ADDITION) ?
+    mARIAAttrOldValue = (aModType != dom::MutationEvent_Binding::ADDITION) ?
       nsAccUtils::GetARIAToken(aElement, aAttribute) : nullptr;
     return;
   }
@@ -790,8 +794,8 @@ DocAccessible::AttributeChanged(dom::Element* aElement,
   // its accessible will be created later. It doesn't make sense to keep
   // dependent IDs for non accessible elements. For the second case we'll update
   // dependent IDs cache when its accessible is created.
-  if (aModType == dom::MutationEventBinding::MODIFICATION ||
-      aModType == dom::MutationEventBinding::ADDITION) {
+  if (aModType == dom::MutationEvent_Binding::MODIFICATION ||
+      aModType == dom::MutationEvent_Binding::ADDITION) {
     AddDependentIDsFor(accessible, aAttribute);
   }
 }
@@ -959,11 +963,13 @@ DocAccessible::ARIAAttributeChanged(Accessible* aAccessible, nsAtom* aAttribute)
 
   // The activedescendant universal property redirects accessible focus events
   // to the element with the id that activedescendant points to. Make sure
-  // the tree up to date before processing.
+  // the tree up to date before processing. In other words, when a node has just
+  // been inserted, the tree won't be up to date yet, so we must always schedule
+  // an async notification so that a newly inserted node will be present in
+  // the tree.
   if (aAttribute == nsGkAtoms::aria_activedescendant) {
-    mNotificationController->HandleNotification<DocAccessible, Accessible>
+    mNotificationController->ScheduleNotification<DocAccessible, Accessible>
       (this, &DocAccessible::ARIAActiveDescendantChanged, aAccessible);
-
     return;
   }
 

@@ -251,11 +251,6 @@ panelview[mainview] > .panel-header {
   pointer-events: auto;
 }
 
-.new-tab-popup,
-#alltabs-popup {
-  -moz-binding: url("chrome://browser/content/tabbrowser.xml#tabbrowser-alltabs-popup");
-}
-
 toolbar[printpreview="true"] {
   -moz-binding: url("chrome://global/content/printPreviewBindings.xml#printpreviewtoolbar");
 }
@@ -844,7 +839,6 @@ toolbarspring {
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */
 @media (resolution: 2dppx) {
-  #alltabs-popup > .menuitem-iconic > .menu-iconic-left > .menu-iconic-icon,
   .menuitem-with-favicon > .menu-iconic-left > .menu-iconic-icon {
     image-rendering: -moz-crisp-edges;
   }
@@ -996,8 +990,8 @@ browser[tabmodalPromptShowing] {
 }
 
 #statuspanel[mirror] {
-  offset-inline-start: auto;
-  offset-inline-end: 0;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
 }
 
 #statuspanel[sizelimit] {
@@ -1409,16 +1403,6 @@ toolbarpaletteitem:not([place="palette"]) > .toolbarpaletteitem-box {
 #pageActionContextMenu[state=extensionPinned] > .pageActionContextMenuItem.extensionPinned,
 #pageActionContextMenu[state=extensionUnpinned] > .pageActionContextMenuItem.extensionUnpinned {
   visibility: visible;
-}
-
-
-/* Favicon in Open Bookmark in Sidebar */
-#sidebar-box[sidebarcommand="viewWebPanelsSidebar"] > #sidebar-header > #sidebar-switcher-target > #sidebar-icon {
-  list-style-image: var(--sidebar-webpage-icon, url(chrome://mozapps/skin/places/defaultFavicon.svg) );
-  -moz-context-properties: fill;
-  fill: currentColor;
-  width: 16px;
-  height: 16px;
 }
 
 /* WebExtension Sidebars */

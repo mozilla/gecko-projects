@@ -12,8 +12,8 @@
 #include "vm/AsyncFunction.h"
 #include "vm/GlobalObject.h"
 #include "vm/Iteration.h"
-#include "vm/JSCompartment.h"
 #include "vm/ProxyObject.h"
+#include "vm/Realm.h"
 #include "vm/Shape.h"
 #include "vm/Xdr.h"
 #include "wasm/WasmInstance.h"
@@ -145,9 +145,8 @@ CallObject::createSingleton(JSContext* cx, HandleShape shape)
     MOZ_ASSERT(CanBeFinalizedInBackground(kind, &CallObject::class_));
     kind = gc::GetBackgroundAllocKind(kind);
 
-    ObjectGroupRealm& realm = ObjectGroupRealm::getForNewObject(cx);
-    RootedObjectGroup group(cx, ObjectGroup::lazySingletonGroup(cx, realm, &class_,
-                                                                TaggedProto(nullptr)));
+    RootedObjectGroup group(cx, ObjectGroup::lazySingletonGroup(cx, /* oldGroup = */ nullptr,
+                                                                &class_, TaggedProto(nullptr)));
     if (!group)
         return nullptr;
 
@@ -2523,12 +2522,15 @@ DebugEnvironments::ensureRealmData(JSContext* cx)
         return debugEnvs;
 
     auto debugEnvs = cx->make_unique<DebugEnvironments>(cx, cx->zone());
-    if (!debugEnvs || !debugEnvs->init()) {
+    if (!debugEnvs)
+        return nullptr;
+
+    if (!debugEnvs->init()) {
         ReportOutOfMemory(cx);
         return nullptr;
     }
 
-    realm->debugEnvsRef() = Move(debugEnvs);
+    realm->debugEnvsRef() = std::move(debugEnvs);
     return realm->debugEnvs();
 }
 
@@ -2552,7 +2554,7 @@ DebugEnvironments::addDebugEnvironment(JSContext* cx, Handle<EnvironmentObject*>
                                        Handle<DebugEnvironmentProxy*> debugEnv)
 {
     MOZ_ASSERT(cx->realm() == env->realm());
-    MOZ_ASSERT(cx->realm() == debugEnv->realm());
+    MOZ_ASSERT(cx->realm() == debugEnv->nonCCWRealm());
 
     if (!CanUseDebugEnvironmentMaps(cx))
         return true;
@@ -2585,7 +2587,7 @@ DebugEnvironments::addDebugEnvironment(JSContext* cx, const EnvironmentIter& ei,
                                        Handle<DebugEnvironmentProxy*> debugEnv)
 {
     MOZ_ASSERT(!ei.hasSyntacticEnvironment());
-    MOZ_ASSERT(cx->realm() == debugEnv->realm());
+    MOZ_ASSERT(cx->realm() == debugEnv->nonCCWRealm());
     // Generators should always have environments.
     MOZ_ASSERT_IF(ei.scope().is<FunctionScope>(),
                   !ei.scope().as<FunctionScope>().canonicalFunction()->isGenerator() &&
@@ -2867,7 +2869,7 @@ DebugEnvironments::updateLiveEnvironments(JSContext* cx)
             continue;
 
         AbstractFramePtr frame = i.abstractFramePtr();
-        if (frame.environmentChain()->realm() != cx->realm())
+        if (frame.realm() != cx->realm())
             continue;
 
         if (frame.isFunctionFrame()) {
@@ -2896,7 +2898,7 @@ DebugEnvironments::updateLiveEnvironments(JSContext* cx)
 
         if (frame.prevUpToDate())
             return true;
-        MOZ_ASSERT(frame.environmentChain()->realm()->isDebuggee());
+        MOZ_ASSERT(frame.realm()->isDebuggee());
         frame.setPrevUpToDate();
     }
 
@@ -2935,7 +2937,7 @@ DebugEnvironments::unsetPrevUpToDateUntil(JSContext* cx, AbstractFramePtr until)
         if (frame == until)
             return;
 
-        if (frame.environmentChain()->realm() != cx->realm())
+        if (frame.realm() != cx->realm())
             continue;
 
         frame.unsetPrevUpToDate();
@@ -3329,7 +3331,7 @@ js::CheckLexicalNameConflict(JSContext* cx, Handle<LexicalEnvironmentObject*> le
     const char* redeclKind = nullptr;
     RootedId id(cx, NameToId(name));
     RootedShape shape(cx);
-    if (varObj->is<GlobalObject>() && varObj->realm()->isInVarNames(name)) {
+    if (varObj->is<GlobalObject>() && varObj->as<GlobalObject>().realm()->isInVarNames(name)) {
         // ES 15.1.11 step 5.a
         redeclKind = "var";
     } else if ((shape = lexicalEnv->lookup(cx, name))) {

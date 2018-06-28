@@ -7,7 +7,7 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const {div, button} = dom;
-const {openWebLink} = require("devtools/client/shared/link");
+const {openDocLink} = require("devtools/client/shared/link");
 
 const Menu = require("devtools/client/framework/menu");
 const MenuItem = require("devtools/client/framework/menu-item");
@@ -88,18 +88,30 @@ class ToolboxToolbar extends Component {
    * render functions for how each of the sections is rendered.
    */
   render() {
-    const containerProps = {className: "devtools-tabbar"};
+    const classnames = ["devtools-tabbar"];
+    const startButtons = renderToolboxButtonsStart(this.props);
+    const endButtons = renderToolboxButtonsEnd(this.props);
+
+    if (!startButtons) {
+      classnames.push("devtools-tabbar-has-start");
+    }
+    if (!endButtons) {
+      classnames.push("devtools-tabbar-has-end");
+    }
+
     return this.props.canRender
       ? (
         div(
-          containerProps,
-          renderToolboxButtonsStart(this.props),
+          {
+            className: classnames.join(" ")
+          },
+          startButtons,
           ToolboxTabs(this.props),
-          renderToolboxButtonsEnd(this.props),
+          endButtons,
           renderToolboxControls(this.props)
         )
       )
-      : div(containerProps);
+      : div({ className: classnames.join(" ") });
   }
 }
 
@@ -183,7 +195,7 @@ function renderToolboxButtons({focusedButton, toolboxButtons, focusButton}, isSt
     });
 
   // Add the appropriate separator, if needed.
-  let children = renderedButtons;
+  const children = renderedButtons;
   if (renderedButtons.length) {
     if (isStart) {
       children.push(renderSeparator());
@@ -420,7 +432,7 @@ function showMeatballMenu(
     id: "toolbox-meatball-menu-documentation",
     label: L10N.getStr("toolbox.meatballMenu.documentation.label"),
     click: () => {
-      openWebLink(
+      openDocLink(
         "https://developer.mozilla.org/docs/Tools?utm_source=devtools&utm_medium=tabbar-menu");
     },
   }));
@@ -430,7 +442,7 @@ function showMeatballMenu(
     id: "toolbox-meatball-menu-community",
     label: L10N.getStr("toolbox.meatballMenu.community.label"),
     click: () => {
-      openWebLink(
+      openDocLink(
         "https://discourse.mozilla.org/c/devtools?utm_source=devtools&utm_medium=tabbar-menu");
     },
   }));

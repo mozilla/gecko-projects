@@ -37,6 +37,7 @@
 #include "vm/Shape.h"
 #include "vm/TypedArrayObject.h"
 
+#include "vm/Compartment-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/ReceiverGuard-inl.h"
@@ -627,7 +628,7 @@ CreatePropertyIterator(JSContext* cx, Handle<JSObject*> objBeingIterated,
 /**
  * Initialize a sentinel NativeIterator whose purpose is only to act as the
  * start/end of the circular linked list of NativeIterators in
- * JSCompartment::enumerators.
+ * ObjectRealm::enumerators.
  */
 NativeIterator::NativeIterator()
 {
@@ -636,7 +637,7 @@ NativeIterator::NativeIterator()
     JS_POISON(static_cast<void*>(this), 0xCC, sizeof(*this), MemCheckKind::MakeUndefined);
 
     // These are the only two fields in sentinel NativeIterators that are
-    // examined, in JSCompartment::sweepNativeIterators.  Everything else is
+    // examined, in ObjectRealm::sweepNativeIterators.  Everything else is
     // only examined *if* it's a NativeIterator being traced by a
     // PropertyIteratorObject that owns it, and nothing owns this iterator.
     prev_ = next_ = this;
@@ -979,7 +980,8 @@ Realm::getOrCreateIterResultTemplateObject(JSContext* cx)
 
     // Create a new group for the template.
     Rooted<TaggedProto> proto(cx, templateObject->taggedProto());
-    RootedObjectGroup group(cx, ObjectGroupRealm::makeGroup(cx, templateObject->getClass(),
+    RootedObjectGroup group(cx, ObjectGroupRealm::makeGroup(cx, templateObject->realm(),
+                                                            templateObject->getClass(),
                                                             proto));
     if (!group)
         return iterResultTemplate_; // = nullptr

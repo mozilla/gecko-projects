@@ -60,6 +60,7 @@ const PREF_OTHER_DEFAULTS = new Map([
 const QUERYTYPE_FILTERED            = 0;
 const QUERYTYPE_AUTOFILL_ORIGIN     = 1;
 const QUERYTYPE_AUTOFILL_URL        = 2;
+const QUERYTYPE_ADAPTIVE            = 3;
 
 // This separator is used as an RTL-friendly way to split the title and tags.
 // It can also be used by an nsIAutoCompleteResult consumer to re-split the
@@ -80,6 +81,10 @@ const MAXIMUM_ALLOWED_EXTENSION_MATCHES = 6;
 
 // After this time, we'll give up waiting for the extension to return matches.
 const MAXIMUM_ALLOWED_EXTENSION_TIME_MS = 3000;
+
+// By default we add remote tabs that have been used less than this time ago.
+// Any remaining remote tabs are added in queue if no other results are found.
+const RECENT_REMOTE_TAB_THRESHOLD_MS = 259200000; // 72 hours.
 
 // A regex that matches "single word" hostnames for whitelisting purposes.
 // The hostname will already have been checked for general validity, so we
@@ -388,7 +393,7 @@ const SQL_URL_PREFIX_BOOKMARKED_QUERY = urlQuery(
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-Cu.importGlobalProperties(["fetch"]);
+XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
@@ -890,6 +895,7 @@ function Search(searchString, searchParam, autocompleteListener,
 
   this._searchTokens =
     this.filterTokens(getUnfilteredSearchTokens(this._searchString));
+  this._keywordSubstitute = null;
 
   this._prohibitSearchSuggestions = prohibitSearchSuggestions;
 
@@ -929,6 +935,13 @@ function Search(searchString, searchParam, autocompleteListener,
       this._previousSearchMatchTypes.push(MATCHTYPE.GENERAL);
     }
   }
+
+  // Used to limit the number of adaptive results.
+  this._adaptiveCount = 0;
+  this._extraAdaptiveRows = [];
+
+  // Used to limit the number of remote tab results.
+  this._extraRemoteTabRows = [];
 
   // This is a replacement for this._result.matchCount, to be used when you need
   // to check how many "current" matches have been inserted.
@@ -1107,9 +1120,8 @@ Search.prototype = {
     // 8) open pages not supported by history (this._switchToTabQuery)
     // 9) query based on match behavior
     //
-    // (6) only gets ran if we get any filtered tokens, since if there are no
-    // tokens, there is nothing to match. This is the *first* query we check if
-    // we want to run, but it gets queued to be run later.
+    // (6) only gets run if we get any filtered tokens, since if there are no
+    // tokens, there is nothing to match.
     //
     // (1), (4), (5) only get run if actions are enabled. When actions are
     // enabled, the first result is always a special result (resulting from one
@@ -1118,15 +1130,6 @@ Search.prototype = {
     // first result is an inline completion result, that will also be the
     // default result and therefore be autofilled (this also happens if actions
     // are not enabled).
-
-    // Get the final query, based on the tokens found in the search string.
-    let queries = [];
-    // "openpage" behavior is supported by the default query.
-    // _switchToTabQuery instead returns only pages not supported by history.
-    if (this.hasBehavior("openpage")) {
-      queries.push(this._switchToTabQuery);
-    }
-    queries.push(this._searchQuery);
 
     // Check for Preloaded Sites Expiry before Autofill
     await this._checkPreloadedSitesExpiry();
@@ -1204,11 +1207,33 @@ Search.prototype = {
         return;
     }
 
+    // Get the final query, based on the tokens found in the search string and
+    // the keyword substitution, if any.
+    let queries = [];
+    // "openpage" behavior is supported by the default query.
+    // _switchToTabQuery instead returns only pages not supported by history.
+    if (this.hasBehavior("openpage")) {
+      queries.push(this._switchToTabQuery);
+    }
+    queries.push(this._searchQuery);
+
     // Finally run all the other queries.
     for (let [query, params] of queries) {
       await conn.executeCached(query, params, this._onResultRow.bind(this));
       if (!this.pending)
         return;
+    }
+
+    // If we have some unused adaptive matches, add them now.
+    while (this._extraAdaptiveRows.length &&
+           this._currentMatchCount < Prefs.get("maxRichResults")) {
+      this._addFilteredQueryMatch(this._extraAdaptiveRows.shift());
+    }
+
+    // If we have some unused remote tab matches, add them now.
+    while (this._extraRemoteTabRows.length &&
+          this._currentMatchCount < Prefs.get("maxRichResults")) {
+      this._addMatch(this._extraRemoteTabRows.shift());
     }
 
     // Ideally we should wait until MATCH_BOUNDARY_ANYWHERE, but that query
@@ -1488,7 +1513,7 @@ Search.prototype = {
   async _matchPlacesKeyword() {
     // The first word could be a keyword, so that's what we'll search.
     let keyword = this._searchTokens[0];
-    let entry = await PlacesUtils.keywords.fetch(this._searchTokens[0]);
+    let entry = await PlacesUtils.keywords.fetch(keyword);
     if (!entry)
       return false;
 
@@ -1527,6 +1552,9 @@ Search.prototype = {
       style,
       frecency: Infinity
     });
+    if (!this._keywordSubstitute) {
+      this._keywordSubstitute = entry.url.host;
+    }
     return true;
   },
 
@@ -1603,6 +1631,9 @@ Search.prototype = {
     let query = this._trimmedOriginalSearchString.substr(alias.length + 1);
 
     this._addSearchEngineMatch(match, query);
+    if (!this._keywordSubstitute) {
+      this._keywordSubstitute = match.resultDomain;
+    }
     return true;
   },
 
@@ -1691,7 +1722,7 @@ Search.prototype = {
       return;
     }
     let matches = await PlacesRemoteTabsAutocompleteProvider.getMatches(this._originalSearchString);
-    for (let {url, title, icon, deviceName} of matches) {
+    for (let {url, title, icon, deviceName, lastUsed} of matches) {
       // It's rare that Sync supplies the icon for the page (but if it does, it
       // is a string URL)
       if (!icon) {
@@ -1712,7 +1743,11 @@ Search.prototype = {
         frecency: FRECENCY_DEFAULT + 1,
         icon,
       };
-      this._addMatch(match);
+      if (lastUsed > (Date.now() - RECENT_REMOTE_TAB_THRESHOLD_MS)) {
+        this._addMatch(match);
+      } else {
+        this._extraRemoteTabRows.push(match);
+      }
     }
   },
 
@@ -1722,18 +1757,19 @@ Search.prototype = {
     let flags = Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
                 Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
     let fixupInfo = null;
+    let searchUrl = this._trimmedOriginalSearchString;
     try {
-      fixupInfo = Services.uriFixup.getFixupURIInfo(this._originalSearchString,
+      fixupInfo = Services.uriFixup.getFixupURIInfo(searchUrl,
                                                     flags);
     } catch (e) {
       if (e.result == Cr.NS_ERROR_MALFORMED_URI && !Prefs.get("keyword.enabled")) {
         let value = PlacesUtils.mozActionURI("visiturl", {
-          url: this._originalSearchString,
-          input: this._originalSearchString,
+          url: searchUrl,
+          input: searchUrl,
         });
         this._addMatch({
           value,
-          comment: this._originalSearchString,
+          comment: searchUrl,
           style: "action visiturl",
           frecency: Infinity
         });
@@ -1770,7 +1806,7 @@ Search.prototype = {
 
     let value = PlacesUtils.mozActionURI("visiturl", {
       url: escapedURL,
-      input: this._originalSearchString,
+      input: searchUrl,
     });
 
     let match = {
@@ -1787,7 +1823,7 @@ Search.prototype = {
     // By default we won't provide an icon, but for the subset of urls with a
     // host we'll check for a typed slash and set favicon for the host part.
     if (hostExpected &&
-        (this._trimmedOriginalSearchString.endsWith("/") || uri.pathQueryRef.length > 1)) {
+        (searchUrl.endsWith("/") || uri.pathQueryRef.length > 1)) {
       match.icon = `page-icon:${uri.prePath}/`;
     }
 
@@ -1805,6 +1841,9 @@ Search.prototype = {
       case QUERYTYPE_AUTOFILL_URL:
         this._result.setDefaultIndex(0);
         this._addURLAutofillMatch(row);
+        break;
+      case QUERYTYPE_ADAPTIVE:
+        this._addAdaptiveQueryMatch(row);
         break;
       case QUERYTYPE_FILTERED:
         this._addFilteredQueryMatch(row);
@@ -2116,6 +2155,22 @@ Search.prototype = {
     });
   },
 
+  // This is the same as _addFilteredQueryMatch, but it only returns a few
+  // results, caching the others. If at the end we don't find other results, we
+  // can add these.
+  _addAdaptiveQueryMatch(row) {
+    // Allow one quarter of the results to be adaptive results.
+    // Note: ideally adaptive results should have their own provider and the
+    // results muxer should decide what to show.  But that's too complex to
+    // support in the current code, so that's left for a future refactoring.
+    if (this._adaptiveCount < Math.ceil(Prefs.get("maxRichResults") / 4)) {
+      this._addFilteredQueryMatch(row);
+    } else {
+      this._extraAdaptiveRows.push(row);
+    }
+    this._adaptiveCount++;
+  },
+
   _addFilteredQueryMatch(row) {
     let match = {};
     match.placeId = row.getResultByIndex(QUERYINDEX_PLACEID);
@@ -2217,6 +2272,21 @@ Search.prototype = {
   },
 
   /**
+   * Get the search string with the keyword substitution applied.
+   * If the user-provided string starts with a keyword that gave a heuristic
+   * result, it can provide a substitute string (e.g. the domain that keyword
+   * will search) so that the history/bookmark results we show will correspond
+   * to the keyword search rather than searching for the literal keyword.
+   */
+  get _keywordSubstitutedSearchString() {
+    let tokens = this._searchTokens;
+    if (this._keywordSubstitute) {
+      tokens = [this._keywordSubstitute, ...this._searchTokens.slice(1)];
+    }
+    return tokens.join(" ");
+  },
+
+  /**
    * Obtains the search query to be used based on the previously set search
    * preferences (accessed by this.hasBehavior).
    *
@@ -2235,7 +2305,7 @@ Search.prototype = {
         searchBehavior: this._behavior,
         // We only want to search the tokens that we are left with - not the
         // original search string.
-        searchString: this._searchTokens.join(" "),
+        searchString: this._keywordSubstitutedSearchString,
         userContextId: this._userContextId,
         // Limit the query to the the maximum number of desired results.
         // This way we can avoid doing more work than needed.
@@ -2259,7 +2329,7 @@ Search.prototype = {
         searchBehavior: this._behavior,
         // We only want to search the tokens that we are left with - not the
         // original search string.
-        searchString: this._searchTokens.join(" "),
+        searchString: this._keywordSubstitutedSearchString,
         userContextId: this._userContextId,
         maxResults: Prefs.get("maxRichResults")
       }
@@ -2278,7 +2348,7 @@ Search.prototype = {
       {
         parent: PlacesUtils.tagsFolderId,
         search_string: this._searchString,
-        query_type: QUERYTYPE_FILTERED,
+        query_type: QUERYTYPE_ADAPTIVE,
         matchBehavior: this._matchBehavior,
         searchBehavior: this._behavior,
         userContextId: this._userContextId,

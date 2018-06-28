@@ -27,7 +27,6 @@ XULMAP_TYPE(radio, XULRadioButtonAccessible)
 XULMAP_TYPE(radiogroup, XULRadioGroupAccessible)
 XULMAP_TYPE(richlistbox, XULListboxAccessibleWrap)
 XULMAP_TYPE(richlistitem, XULListitemAccessible)
-XULMAP_TYPE(scale, XULSliderAccessible)
 XULMAP_TYPE(statusbar, XULStatusBarAccessible)
 XULMAP_TYPE(tab, XULTabAccessible)
 XULMAP_TYPE(tabpanels, XULTabpanelsAccessible)
@@ -150,16 +149,6 @@ XULMAP(
 )
 
 XULMAP(
-  thumb,
-  [](Element* aElement, Accessible* aContext) -> Accessible* {
-    if (aElement->ClassList()->Contains(NS_LITERAL_STRING("scale-thumb"))) {
-      return new XULThumbAccessible(aElement, aContext->Document());
-    }
-    return nullptr;
-  }
-)
-
-XULMAP(
   tree,
   [](Element* aElement, Accessible* aContext) -> Accessible* {
     nsIContent* child = nsTreeUtils::GetDescendantChild(aElement,
@@ -172,8 +161,7 @@ XULMAP(
       return nullptr;
 
     RefPtr<nsTreeColumns> treeCols = treeFrame->Columns();
-    int32_t count = 0;
-    treeCols->GetCount(&count);
+    uint32_t count = treeCols->Count();
 
     // Outline of list accessible.
     if (count == 1) {

@@ -936,7 +936,7 @@ public:
   {
     auto clone = MakeUnique<MinorGCMarker>(GetTracingType(), mReason);
     clone->SetCustomTime(GetTime());
-    return UniquePtr<AbstractTimelineMarker>(Move(clone));
+    return UniquePtr<AbstractTimelineMarker>(std::move(clone));
   }
 };
 
@@ -1405,6 +1405,8 @@ IncrementalFinalizeRunnable::ReleaseNow(bool aLimited)
 NS_IMETHODIMP
 IncrementalFinalizeRunnable::Run()
 {
+  AUTO_PROFILER_LABEL("IncrementalFinalizeRunnable::Run", GCCC);
+
   if (mRuntime->mFinalizeRunnable != this) {
     /* These items were already processed synchronously in JSGC_END. */
     MOZ_ASSERT(!mDeferredFinalizeFunctions.Length());
@@ -1634,12 +1636,10 @@ CycleCollectedJSRuntime::ErrorInterceptor::interceptError(JSContext* cx, const J
   // so nothing such should happen.
   nsContentUtils::ExtractErrorValues(cx, value, details.mFilename, &details.mLine, &details.mColumn, details.mMessage);
 
-  nsAutoCString stack;
   JS::UniqueChars buf = JS::FormatStackDump(cx, nullptr, /* showArgs = */ false, /* showLocals = */ false, /* showThisProps = */ false);
-  stack.Append(buf.get());
   CopyUTF8toUTF16(buf.get(), details.mStack);
 
-  mThrownError.emplace(Move(details));
+  mThrownError.emplace(std::move(details));
 }
 
 void

@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/dom/PaymentResponse.h"
 #include "mozilla/dom/BasicCardPaymentBinding.h"
 #include "BasicCardPayment.h"
@@ -22,10 +23,11 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(PaymentResponse)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PaymentResponse)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
 NS_INTERFACE_MAP_END
 
 PaymentResponse::PaymentResponse(nsPIDOMWindowInner* aWindow,
-                                 const nsAString& aInternalId,
+                                 PaymentRequest* aRequest,
                                  const nsAString& aRequestId,
                                  const nsAString& aMethodName,
                                  const nsAString& aShippingOption,
@@ -36,7 +38,7 @@ PaymentResponse::PaymentResponse(nsPIDOMWindowInner* aWindow,
                                  const nsAString& aPayerPhone)
   : mOwner(aWindow)
   , mCompleteCalled(false)
-  , mInternalId(aInternalId)
+  , mRequest(aRequest)
   , mRequestId(aRequestId)
   , mMethodName(aMethodName)
   , mDetails(aDetails)
@@ -49,6 +51,11 @@ PaymentResponse::PaymentResponse(nsPIDOMWindowInner* aWindow,
 
   // TODO: from https://github.com/w3c/browser-payment-api/issues/480
   // Add payerGivenName + payerFamilyName to PaymentAddress
+  NS_NewTimerWithCallback(getter_AddRefs(mTimer),
+                          this,
+                          StaticPrefs::dom_payments_response_timeout(),
+                          nsITimer::TYPE_ONE_SHOT,
+                          aWindow->EventTargetFor(TaskCategory::Other));
 }
 
 PaymentResponse::~PaymentResponse()
@@ -58,7 +65,7 @@ PaymentResponse::~PaymentResponse()
 JSObject*
 PaymentResponse::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PaymentResponseBinding::Wrap(aCx, this, aGivenProto);
+  return PaymentResponse_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -136,25 +143,30 @@ PaymentResponse::Complete(PaymentComplete result, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(mOwner);
-  ErrorResult errResult;
-  RefPtr<Promise> promise = Promise::Create(global, errResult);
-  if (errResult.Failed()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
   mCompleteCalled = true;
+
+  if (mTimer) {
+    mTimer->Cancel();
+    mTimer = nullptr;
+  }
 
   RefPtr<PaymentRequestManager> manager = PaymentRequestManager::GetSingleton();
   if (NS_WARN_IF(!manager)) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
-  nsresult rv = manager->CompletePayment(mInternalId, result);
+  nsresult rv = manager->CompletePayment(mRequest, result);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    promise->MaybeReject(NS_ERROR_FAILURE);
-    return promise.forget();
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsIGlobalObject* global = mOwner->AsGlobal();
+  ErrorResult errResult;
+  RefPtr<Promise> promise = Promise::Create(global, errResult);
+  if (errResult.Failed()) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
   }
 
   mPromise = promise;
@@ -164,10 +176,29 @@ PaymentResponse::Complete(PaymentComplete result, ErrorResult& aRv)
 void
 PaymentResponse::RespondComplete()
 {
-  MOZ_ASSERT(mPromise);
+  // mPromise may be null when timing out
+  if (mPromise) {
+    mPromise->MaybeResolve(JS::UndefinedHandleValue);
+    mPromise = nullptr;
+  }
+}
 
-  mPromise->MaybeResolve(JS::UndefinedHandleValue);
-  mPromise = nullptr;
+NS_IMETHODIMP
+PaymentResponse::Notify(nsITimer *timer)
+{
+  mTimer = nullptr;
+  if (mCompleteCalled) {
+    return NS_OK;
+  }
+
+  mCompleteCalled = true;
+
+  RefPtr<PaymentRequestManager> manager = PaymentRequestManager::GetSingleton();
+  if (NS_WARN_IF(!manager)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return manager->CompletePayment(mRequest, PaymentComplete::Unknown, true);
 }
 
 } // namespace dom

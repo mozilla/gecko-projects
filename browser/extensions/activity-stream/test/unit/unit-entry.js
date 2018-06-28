@@ -171,12 +171,14 @@ const TEST_GLOBAL = {
   },
   XPCOMUtils: {
     defineLazyGetter(_1, _2, f) { f(); },
+    defineLazyGlobalGetters() {},
     defineLazyModuleGetter() {},
     defineLazyServiceGetter() {},
     generateQI() { return {}; }
   },
   EventEmitter,
-  ShellService: {isDefaultBrowser: () => true}
+  ShellService: {isDefaultBrowser: () => true},
+  FilterExpressions: {eval() { return Promise.resolve(true); }}
 };
 overrider.set(TEST_GLOBAL);
 

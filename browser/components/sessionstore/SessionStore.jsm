@@ -1626,7 +1626,13 @@ var SessionStoreInternal = {
           const observeTopic = topic => {
             let deferred = PromiseUtils.defer();
             const cleanup = () => Services.obs.removeObserver(deferred.resolve, topic);
-            Services.obs.addObserver(deferred.resolve, topic);
+            Services.obs.addObserver(subject => {
+              // Skip abort on ipc:content-shutdown if not abnormal/crashed
+              subject.QueryInterface(Ci.nsIPropertyBag2);
+              if (!(topic == "ipc:content-shutdown" && !subject.get("abnormal"))) {
+                deferred.resolve();
+              }
+            }, topic);
             deferred.promise.then(cleanup, cleanup);
             return deferred;
           };
@@ -2024,11 +2030,25 @@ var SessionStoreInternal = {
     this._crashedBrowsers.delete(browser.permanentKey);
     aTab.removeAttribute("crashed");
 
+    let {userTypedValue = "", userTypedClear = 0} = browser;
+
+    let cacheState = TabStateCache.get(browser);
+    if (cacheState === undefined && userTypedValue) {
+      // Discard was likely called before state can be cached.  Update
+      // the persistent tab state cache with browser information so a
+      // restore will be successful.  This information is necessary for
+      // restoreTabContent in ContentRestore.jsm to work properly.
+      TabStateCache.update(browser, {
+        userTypedValue,
+        userTypedClear: 1,
+      });
+    }
+
     TAB_LAZY_STATES.set(aTab, {
       url: browser.currentURI.spec,
       title: aTab.label,
-      userTypedValue: browser.userTypedValue || "",
-      userTypedClear: browser.userTypedClear || 0
+      userTypedValue,
+      userTypedClear,
     });
   },
 

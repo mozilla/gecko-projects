@@ -321,12 +321,6 @@ public:
       const nsTArray<ScrollableLayerGuid>& aTargets) override;
 
   /**
-   * Helper function for SetTargetAPZC when used with single-target events,
-   * such as mouse wheel events.
-   */
-  void SetTargetAPZC(uint64_t aInputBlockId, const ScrollableLayerGuid& aTarget);
-
-  /**
    * Updates any zoom constraints contained in the <meta name="viewport"> tag.
    * If the |aConstraints| is Nothing() then previously-provided constraints for
    * the given |aGuid| are cleared.
@@ -377,9 +371,10 @@ public:
 
   /**
    * Find the hit testing node for the scrollbar thumb that matches these
-   * drag metrics.
+   * drag metrics. Initializes aOutThumbNode with the node, if there is one.
    */
-  RefPtr<HitTestingTreeNode> FindScrollThumbNode(const AsyncDragMetrics& aDragMetrics);
+  void FindScrollThumbNode(const AsyncDragMetrics& aDragMetrics,
+                           HitTestingTreeNodeAutoLock& aOutThumbNode);
 
   /**
    * Sets allowed touch behavior values for current touch-session for specific

@@ -7,8 +7,17 @@
 
 const { require, loader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
 
-Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/shared/test/telemetry-test-helpers.js", this);
+try {
+  Services.scriptloader.loadSubScript(
+    "chrome://mochitests/content/browser/devtools/client/shared/test/telemetry-test-helpers.js", this);
+} catch (e) {
+  ok(false,
+    "MISSING DEPENDENCY ON telemetry-test-helpers.js\n" +
+    "Please add the following line in browser.ini:\n" +
+    "  !/devtools/client/shared/test/telemetry-test-helpers.js\n"
+  );
+  throw e;
+}
 
 /* exported loader, either, click, dblclick, mousedown, rightMousedown, key */
 // All tests are asynchronous.
@@ -61,7 +70,7 @@ const key = (id, win = window) => {
   const PrefUtils = require("devtools/client/performance/test/helpers/prefs");
 
   // Make sure all the prefs are reverted to their defaults once tests finish.
-  let stopObservingPrefs = PrefUtils.whenUnknownPrefChanged("devtools.performance",
+  const stopObservingPrefs = PrefUtils.whenUnknownPrefChanged("devtools.performance",
     pref => {
       ok(false, `Unknown pref changed: ${pref}. Please add it to test/helpers/prefs.js ` +
         "to make sure it's reverted to its default value when the tests finishes, " +

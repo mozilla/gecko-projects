@@ -9,13 +9,10 @@
 using namespace mozilla;
 
 nsHtml5SpeculativeLoad::nsHtml5SpeculativeLoad()
-  :
-#ifdef DEBUG
-  mOpCode(eSpeculativeLoadUninitialized)
-  ,
-#endif
-  mIsAsync(false)
+  : mOpCode(eSpeculativeLoadUninitialized)
+  , mIsAsync(false)
   , mIsDefer(false)
+  , mEncoding(nullptr)
 {
   MOZ_COUNT_CTOR(nsHtml5SpeculativeLoad);
   new (&mCharsetOrSrcset) nsString;
@@ -147,7 +144,7 @@ nsHtml5SpeculativeLoad::Perform(nsHtml5TreeOpExecutor* aExecutor)
       aExecutor->Preconnect(mUrlOrSizes, mCrossOriginOrMedia);
       break;
     default:
-      NS_NOTREACHED("Bogus speculative load.");
+      MOZ_ASSERT_UNREACHABLE("Bogus speculative load.");
       break;
   }
 }

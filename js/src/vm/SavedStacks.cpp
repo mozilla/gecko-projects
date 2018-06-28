@@ -29,8 +29,8 @@
 #include "util/StringBuffer.h"
 #include "vm/Debugger.h"
 #include "vm/GeckoProfiler.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSScript.h"
+#include "vm/Realm.h"
 #include "vm/SavedFrame.h"
 #include "vm/Time.h"
 #include "vm/WrapperObject.h"
@@ -43,7 +43,6 @@
 using mozilla::AddToHash;
 using mozilla::DebugOnly;
 using mozilla::Maybe;
-using mozilla::Move;
 using mozilla::Nothing;
 using mozilla::Some;
 
@@ -785,15 +784,15 @@ public:
 
         MOZ_RELEASE_ASSERT(cx->realm());
         if (obj)
-            MOZ_RELEASE_ASSERT(obj->realm());
+            MOZ_RELEASE_ASSERT(obj->deprecatedRealm());
 
         // Note that obj might be null here, since we're doing this before
         // UnwrapSavedFrame.
-        if (obj && cx->realm() != obj->realm())
+        if (obj && cx->realm() != obj->deprecatedRealm())
         {
             JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes;
             if (subsumes && subsumes(cx->realm()->principals(),
-                                     obj->realm()->principals()))
+                                     obj->deprecatedRealm()->principals()))
             {
                 ar_.emplace(cx, obj);
             }
@@ -1292,7 +1291,7 @@ SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame,
     }
 
     AutoGeckoProfilerEntry labelFrame(cx, "js::SavedStacks::saveCurrentStack");
-    return insertFrames(cx, frame, mozilla::Move(capture));
+    return insertFrames(cx, frame, std::move(capture));
 }
 
 bool

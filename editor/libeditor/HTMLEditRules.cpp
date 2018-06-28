@@ -1102,111 +1102,6 @@ MarginPropertyAtomForIndent(nsINode& aNode)
 }
 
 nsresult
-HTMLEditRules::GetIndentState(bool* aCanIndent,
-                              bool* aCanOutdent)
-{
-  if (NS_WARN_IF(!aCanIndent) || NS_WARN_IF(!aCanOutdent)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  if (NS_WARN_IF(!CanHandleEditAction())) {
-    return NS_ERROR_EDITOR_DESTROYED;
-  }
-
-  // XXX Looks like that this is implementation of
-  //     nsIHTMLEditor::getIndentState() however nobody calls this method
-  //     even with the interface method.
-  *aCanIndent = true;
-  *aCanOutdent = false;
-
-  Selection* selection = mHTMLEditor->GetSelection();
-  if (NS_WARN_IF(!selection)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  AutoSafeEditorData setData(*this, *mHTMLEditor, *selection);
-
-  // contruct a list of nodes to act on.
-  nsTArray<OwningNonNull<nsINode>> arrayOfNodes;
-  nsresult rv =
-    GetNodesFromSelection(EditSubAction::eIndent, arrayOfNodes,
-                          TouchContent::no);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  // examine nodes in selection for blockquotes or list elements;
-  // these we can outdent.  Note that we return true for canOutdent
-  // if *any* of the selection is outdentable, rather than all of it.
-  bool useCSS = HTMLEditorRef().IsCSSEnabled();
-  for (auto& curNode : Reversed(arrayOfNodes)) {
-    if (HTMLEditUtils::IsNodeThatCanOutdent(curNode)) {
-      *aCanOutdent = true;
-      break;
-    } else if (useCSS) {
-      // we are in CSS mode, indentation is done using the margin-left (or margin-right) property
-      nsAtom& marginProperty = MarginPropertyAtomForIndent(curNode);
-      nsAutoString value;
-      // retrieve its specified value
-      CSSEditUtils::GetSpecifiedProperty(*curNode, marginProperty, value);
-      float f;
-      RefPtr<nsAtom> unit;
-      // get its number part and its unit
-      CSSEditUtils::ParseLength(value, &f, getter_AddRefs(unit));
-      // if the number part is strictly positive, outdent is possible
-      if (0 < f) {
-        *aCanOutdent = true;
-        break;
-      }
-    }
-  }
-
-  if (*aCanOutdent) {
-    return NS_OK;
-  }
-
-  // if we haven't found something to outdent yet, also check the parents
-  // of selection endpoints.  We might have a blockquote or list item
-  // in the parent hierarchy.
-
-  Element* rootElement = HTMLEditorRef().GetRoot();
-  if (NS_WARN_IF(!rootElement)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Test selection start container hierarchy.
-  EditorRawDOMPoint selectionStartPoint(
-                      EditorBase::GetStartPoint(&SelectionRef()));
-  if (NS_WARN_IF(!selectionStartPoint.IsSet())) {
-    return NS_ERROR_FAILURE;
-  }
-  for (nsINode* node = selectionStartPoint.GetContainer();
-       node && node != rootElement;
-       node = node->GetParentNode()) {
-    if (HTMLEditUtils::IsNodeThatCanOutdent(node)) {
-      *aCanOutdent = true;
-      return NS_OK;
-    }
-  }
-
-  // Test selection end container hierarchy.
-  EditorRawDOMPoint selectionEndPoint(EditorBase::GetEndPoint(&SelectionRef()));
-  if (NS_WARN_IF(!selectionEndPoint.IsSet())) {
-    return NS_ERROR_FAILURE;
-  }
-  for (nsINode* node = selectionEndPoint.GetContainer();
-       node && node != rootElement;
-       node = node->GetParentNode()) {
-    if (HTMLEditUtils::IsNodeThatCanOutdent(node)) {
-      *aCanOutdent = true;
-      return NS_OK;
-    }
-  }
-  return NS_OK;
-}
-
-
-nsresult
 HTMLEditRules::GetParagraphState(bool* aMixed,
                                  nsAString& outFormat)
 {
@@ -6021,8 +5916,7 @@ HTMLEditRules::CreateStyleForInsertText(nsIDocument& aDocument)
   }
 
   // process clearing any styles first
-  UniquePtr<PropItem> item =
-    Move(HTMLEditorRef().mTypeInState->TakeClearProperty());
+  UniquePtr<PropItem> item = HTMLEditorRef().mTypeInState->TakeClearProperty();
 
   {
     // Transactions may set selection, but we will set selection if necessary.
@@ -6040,14 +5934,14 @@ HTMLEditRules::CreateStyleForInsertText(nsIDocument& aDocument)
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      item = Move(HTMLEditorRef().mTypeInState->TakeClearProperty());
+      item = HTMLEditorRef().mTypeInState->TakeClearProperty();
       weDidSomething = true;
     }
   }
 
   // then process setting any styles
   int32_t relFontSize = HTMLEditorRef().mTypeInState->TakeRelativeFontSize();
-  item = Move(HTMLEditorRef().mTypeInState->TakeSetProperty());
+  item = HTMLEditorRef().mTypeInState->TakeSetProperty();
 
   if (item || relFontSize) {
     // we have at least one style to add; make a new text node to insert style
@@ -7824,6 +7718,9 @@ HTMLEditRules::BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem)
       return splitEndInlineResult.Rv();
     }
     EditorRawDOMPoint splitPointAtEnd(splitEndInlineResult.SplitPoint());
+    if (NS_WARN_IF(!splitPointAtEnd.IsSet())) {
+      return NS_ERROR_FAILURE;
+    }
     aRangeItem.mEndContainer = splitPointAtEnd.GetContainer();
     aRangeItem.mEndOffset = splitPointAtEnd.Offset();
   }
@@ -7848,6 +7745,9 @@ HTMLEditRules::BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem)
     //     only start point of aRangeItem.  Shouldn't we modify end point here
     //     if it's collapsed?
     EditorRawDOMPoint splitPointAtStart(splitStartInlineResult.SplitPoint());
+    if (NS_WARN_IF(!splitPointAtStart.IsSet())) {
+      return NS_ERROR_FAILURE;
+    }
     aRangeItem.mStartContainer = splitPointAtStart.GetContainer();
     aRangeItem.mStartOffset = splitPointAtStart.Offset();
   }
@@ -9282,7 +9182,7 @@ HTMLEditRules::JoinNearestEditableNodesWithTransaction(
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
-    *aNewFirstChildOfRightNode = Move(ret);
+    *aNewFirstChildOfRightNode = std::move(ret);
     return NS_OK;
   }
 
@@ -9322,7 +9222,7 @@ HTMLEditRules::JoinNearestEditableNodesWithTransaction(
     }
     return NS_OK;
   }
-  *aNewFirstChildOfRightNode = Move(ret);
+  *aNewFirstChildOfRightNode = std::move(ret);
   return NS_OK;
 }
 
@@ -10425,7 +10325,7 @@ HTMLEditRules::UpdateDocChangeRange(nsRange* aRange)
     // compare starts of ranges
     ErrorResult error;
     int16_t result =
-      mDocChangeRange->CompareBoundaryPoints(RangeBinding::START_TO_START,
+      mDocChangeRange->CompareBoundaryPoints(Range_Binding::START_TO_START,
                                              *aRange, error);
     if (error.ErrorCodeIs(NS_ERROR_NOT_INITIALIZED)) {
       // This will happen is mDocChangeRange is non-null, but the range is
@@ -10449,7 +10349,7 @@ HTMLEditRules::UpdateDocChangeRange(nsRange* aRange)
 
     // compare ends of ranges
     result =
-      mDocChangeRange->CompareBoundaryPoints(RangeBinding::END_TO_END,
+      mDocChangeRange->CompareBoundaryPoints(Range_Binding::END_TO_END,
                                              *aRange, error);
     if (NS_WARN_IF(error.Failed())) {
       return error.StealNSResult();

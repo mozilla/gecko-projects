@@ -554,6 +554,12 @@ var BrowserApp = {
       // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
       InitLater(() => SafeBrowsing.init(), window, "SafeBrowsing");
 
+      // This should always go last, since the idle tasks (except for the ones with
+      // timeouts) should execute in order. Note that this observer notification is
+      // not guaranteed to fire, since the window could close before we get here.
+      InitLater(() => {
+        Services.obs.notifyObservers(window, "browser-idle-startup-tasks-finished");
+      });
     }, {once: true});
   },
 
@@ -897,7 +903,8 @@ var BrowserApp = {
                 return;
             }
 
-            ContentAreaUtils.saveImageURL(aTarget.currentRequestFinalURI.spec, null, "SaveImageTitle",
+            let uri = aTarget.currentRequestFinalURI || aTarget.currentURI;
+            ContentAreaUtils.saveImageURL(uri.spec, null, "SaveImageTitle",
                                           false, true, aTarget.ownerDocument.documentURIObject,
                                           aTarget.ownerDocument);
         });
@@ -5621,7 +5628,7 @@ var IdentityHandler = {
       return this.IDENTITY_MODE_IDENTIFIED;
     }
 
-    let whitelist = /^about:(about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|fennec|firefox|feedback|home|license|logins|logo|memory|mozilla|networking|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
+    let whitelist = /^about:(about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|experiments|fennec|firefox|feedback|home|license|logins|logo|memory|mozilla|networking|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
     if (uri.schemeIs("about") && whitelist.test(uri.spec)) {
         return this.IDENTITY_MODE_CHROMEUI;
     }

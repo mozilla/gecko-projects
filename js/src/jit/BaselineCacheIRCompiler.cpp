@@ -9,13 +9,14 @@
 #include "jit/CacheIR.h"
 #include "jit/Linker.h"
 #include "jit/SharedICHelpers.h"
+#include "jit/VMFunctions.h"
 #include "proxy/DeadObjectProxy.h"
 #include "proxy/Proxy.h"
 
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SharedICHelpers-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
+#include "vm/Realm-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -535,51 +536,6 @@ BaselineCacheIRCompiler::emitLoadDynamicSlotResult()
 }
 
 bool
-BaselineCacheIRCompiler::emitMegamorphicStoreSlot()
-{
-    Register obj = allocator.useRegister(masm, reader.objOperandId());
-    Address nameAddr = stubAddress(reader.stubOffset());
-    ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
-    bool needsTypeBarrier = reader.readBool();
-
-    AutoScratchRegister scratch1(allocator, masm);
-    AutoScratchRegister scratch2(allocator, masm);
-
-    FailurePath* failure;
-    if (!addFailurePath(&failure))
-        return false;
-
-    masm.Push(val);
-    masm.moveStackPtrTo(val.scratchReg());
-
-    LiveRegisterSet volatileRegs(GeneralRegisterSet::Volatile(), liveVolatileFloatRegs());
-    volatileRegs.takeUnchecked(scratch1);
-    volatileRegs.takeUnchecked(scratch2);
-    volatileRegs.takeUnchecked(val);
-    masm.PushRegsInMask(volatileRegs);
-
-    masm.setupUnalignedABICall(scratch1);
-    masm.loadJSContext(scratch1);
-    masm.passABIArg(scratch1);
-    masm.passABIArg(obj);
-    masm.loadPtr(nameAddr, scratch2);
-    masm.passABIArg(scratch2);
-    masm.passABIArg(val.scratchReg());
-    if (needsTypeBarrier)
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (SetNativeDataProperty<true>)));
-    else
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, (SetNativeDataProperty<false>)));
-    masm.mov(ReturnReg, scratch1);
-    masm.PopRegsInMask(volatileRegs);
-
-    masm.loadValue(Address(masm.getStackPointer(), 0), val);
-    masm.adjustStack(sizeof(Value));
-
-    masm.branchIfFalseBool(scratch1, failure->label());
-    return true;
-}
-
-bool
 BaselineCacheIRCompiler::emitGuardHasGetterSetter()
 {
     Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -618,6 +574,7 @@ BaselineCacheIRCompiler::emitCallScriptedGetterResult()
 
     Register obj = allocator.useRegister(masm, reader.objOperandId());
     Address getterAddr(stubAddress(reader.stubOffset()));
+    bool isCrossRealm = reader.readBool();
 
     AutoScratchRegister code(allocator, masm);
     AutoScratchRegister callee(allocator, masm);
@@ -638,6 +595,9 @@ BaselineCacheIRCompiler::emitCallScriptedGetterResult()
 
     AutoStubFrame stubFrame(*this);
     stubFrame.enter(masm, scratch);
+
+    if (isCrossRealm)
+        masm.switchToObjectRealm(callee, scratch);
 
     // Align the stack such that the JitFrameLayout is aligned on
     // JitStackAlignment.
@@ -667,6 +627,10 @@ BaselineCacheIRCompiler::emitCallScriptedGetterResult()
     masm.callJit(code);
 
     stubFrame.leave(masm, true);
+
+    if (isCrossRealm)
+        masm.switchToBaselineFrameRealm(R1.scratchReg());
+
     return true;
 }
 
@@ -981,6 +945,48 @@ BaselineCacheIRCompiler::emitCallStringSplitResult()
 }
 
 bool
+BaselineCacheIRCompiler::emitCompareStringResult()
+{
+    AutoOutputRegister output(*this);
+
+    Register left = allocator.useRegister(masm, reader.stringOperandId());
+    Register right = allocator.useRegister(masm, reader.stringOperandId());
+    JSOp op = reader.jsop();
+
+    AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
+
+    FailurePath* failure;
+    if (!addFailurePath(&failure))
+        return false;
+
+    allocator.discardStack(masm);
+
+    Label slow, done;
+    masm.compareStrings(op, left, right, scratch, &slow);
+    masm.jump(&done);
+    masm.bind(&slow);
+    {
+        AutoStubFrame stubFrame(*this);
+        stubFrame.enter(masm, scratch);
+
+        masm.Push(right);
+        masm.Push(left);
+
+        if (!callVM(masm, (op == JSOP_EQ || op == JSOP_STRICTEQ) ?
+                             StringsEqualInfo :
+                             StringsNotEqualInfo))
+        {
+            return false;
+        }
+        stubFrame.leave(masm);
+        masm.mov(ReturnReg, scratch);
+    }
+    masm.bind(&done);
+    masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
+    return true;
+}
+
+bool
 BaselineCacheIRCompiler::callTypeUpdateIC(Register obj, ValueOperand val, Register scratch,
                                           LiveGeneralRegisterSet saveRegs)
 {
@@ -1245,7 +1251,7 @@ BaselineCacheIRCompiler::emitStoreTypedObjectReferenceProperty()
     ObjOperandId objId = reader.objOperandId();
     Address offsetAddr = stubAddress(reader.stubOffset());
     TypedThingLayout layout = reader.typedThingLayout();
-    ReferenceTypeDescr::Type type = reader.referenceTypeDescrType();
+    ReferenceType type = reader.referenceTypeDescrType();
 
     // Allocate the fixed registers first. These need to be fixed for
     // callTypeUpdateIC.
@@ -1256,7 +1262,7 @@ BaselineCacheIRCompiler::emitStoreTypedObjectReferenceProperty()
     AutoScratchRegister scratch2(allocator, masm);
 
     // We don't need a type update IC if the property is always a string.
-    if (type != ReferenceTypeDescr::TYPE_STRING) {
+    if (type != ReferenceType::TYPE_STRING) {
         LiveGeneralRegisterSet saveRegs;
         saveRegs.add(obj);
         saveRegs.add(val);
@@ -1737,6 +1743,7 @@ BaselineCacheIRCompiler::emitCallScriptedSetter()
     Register obj = allocator.useRegister(masm, reader.objOperandId());
     Address setterAddr(stubAddress(reader.stubOffset()));
     ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
+    bool isCrossRealm = reader.readBool();
 
     // First, ensure our setter is non-lazy. This also loads the callee in
     // scratch1.
@@ -1753,6 +1760,9 @@ BaselineCacheIRCompiler::emitCallScriptedSetter()
 
     AutoStubFrame stubFrame(*this);
     stubFrame.enter(masm, scratch2);
+
+    if (isCrossRealm)
+        masm.switchToObjectRealm(scratch1, scratch2);
 
     // Align the stack such that the JitFrameLayout is aligned on
     // JitStackAlignment.
@@ -1791,6 +1801,10 @@ BaselineCacheIRCompiler::emitCallScriptedSetter()
     masm.callJit(scratch1);
 
     stubFrame.leave(masm, true);
+
+    if (isCrossRealm)
+        masm.switchToBaselineFrameRealm(R1.scratchReg());
+
     return true;
 }
 

@@ -118,7 +118,7 @@ NS_IMPL_RELEASE_INHERITED(nsSimpleContentList, nsBaseContentList)
 JSObject*
 nsSimpleContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return NodeListBinding::Wrap(cx, this, aGivenProto);
+  return NodeList_Binding::Wrap(cx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(nsEmptyContentList, nsBaseContentList, mRoot)
@@ -134,7 +134,7 @@ NS_IMPL_RELEASE_INHERITED(nsEmptyContentList, nsBaseContentList)
 JSObject*
 nsEmptyContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLCollectionBinding::Wrap(cx, this, aGivenProto);
+  return HTMLCollection_Binding::Wrap(cx, this, aGivenProto);
 }
 
 mozilla::dom::Element*
@@ -461,7 +461,7 @@ nsContentList::~nsContentList()
 JSObject*
 nsContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLCollectionBinding::Wrap(cx, this, aGivenProto);
+  return HTMLCollection_Binding::Wrap(cx, this, aGivenProto);
 }
 
 NS_IMPL_ISUPPORTS_INHERITED(nsContentList, nsBaseContentList,
@@ -852,7 +852,8 @@ nsContentList::MatchSelf(nsIContent *aContent)
 }
 
 void
-nsContentList::PopulateSelf(uint32_t aNeededLength)
+nsContentList::PopulateSelf(uint32_t aNeededLength,
+                            uint32_t aExpectedElementsIfDirty)
 {
   if (!mRootNode) {
     return;
@@ -861,7 +862,7 @@ nsContentList::PopulateSelf(uint32_t aNeededLength)
   ASSERT_IN_SYNC;
 
   uint32_t count = mElements.Length();
-  NS_ASSERTION(mState != LIST_DIRTY || count == 0,
+  NS_ASSERTION(mState != LIST_DIRTY || count == aExpectedElementsIfDirty,
                "Reset() not called when setting state to LIST_DIRTY?");
 
   if (count >= aNeededLength) // We're all set
@@ -1036,7 +1037,7 @@ nsContentList::AssertInSync()
 JSObject*
 nsCachableElementsByNameNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return NodeListBinding::Wrap(cx, this, aGivenProto);
+  return NodeList_Binding::Wrap(cx, this, aGivenProto);
 }
 
 void
@@ -1063,7 +1064,7 @@ nsCachableElementsByNameNodeList::AttributeChanged(Element* aElement,
 JSObject*
 nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLCollectionBinding::Wrap(cx, this, aGivenProto);
+  return HTMLCollection_Binding::Wrap(cx, this, aGivenProto);
 }
 
 //-----------------------------------------------------
@@ -1072,7 +1073,7 @@ nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JS::Handle<JSObje
 JSObject*
 nsLabelsNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> aGivenProto)
 {
-  return NodeListBinding::Wrap(cx, this, aGivenProto);
+  return NodeList_Binding::Wrap(cx, this, aGivenProto);
 }
 
 void
@@ -1153,7 +1154,8 @@ nsLabelsNodeList::MaybeResetRoot(nsINode* aRootNode)
 }
 
 void
-nsLabelsNodeList::PopulateSelf(uint32_t aNeededLength)
+nsLabelsNodeList::PopulateSelf(uint32_t aNeededLength,
+                               uint32_t aExpectedElementsIfDirty)
 {
   if (!mRootNode) {
     return;
@@ -1163,7 +1165,8 @@ nsLabelsNodeList::PopulateSelf(uint32_t aNeededLength)
   nsINode* cur = mRootNode;
   if (mElements.IsEmpty() && cur->IsElement() && Match(cur->AsElement())) {
     mElements.AppendElement(cur->AsElement());
+    ++aExpectedElementsIfDirty;
   }
 
-  nsContentList::PopulateSelf(aNeededLength);
+  nsContentList::PopulateSelf(aNeededLength, aExpectedElementsIfDirty);
 }

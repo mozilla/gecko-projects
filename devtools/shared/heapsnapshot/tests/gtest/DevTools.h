@@ -30,7 +30,7 @@ using namespace testing;
 struct DevTools : public ::testing::Test {
   bool                       _initialized;
   JSContext*                 cx;
-  JSCompartment*             compartment;
+  JS::Compartment*           compartment;
   JS::Zone*                  zone;
   JS::PersistentRootedObject global;
 
@@ -98,7 +98,7 @@ struct DevTools : public ::testing::Test {
 
     /* Populate the global object with the standard globals, like Object and
        Array. */
-    if (!JS_InitStandardClasses(cx, newGlobal))
+    if (!JS::InitRealmStandardClasses(cx))
       return nullptr;
 
     return newGlobal;
@@ -130,7 +130,7 @@ class MOZ_STACK_CLASS FakeNode
 {
 public:
   JS::ubi::EdgeVector edges;
-  JSCompartment*      compartment;
+  JS::Compartment*    compartment;
   JS::Zone*           zone;
   size_t              size;
 
@@ -164,7 +164,7 @@ class Concrete<FakeNode> : public Base
     return get().zone;
   }
 
-  JSCompartment* compartment() const override {
+  JS::Compartment* compartment() const override {
     return get().compartment;
   }
 
@@ -192,7 +192,7 @@ void AddEdge(FakeNode& node, FakeNode& referent, const char16_t* edgeName = null
   }
 
   JS::ubi::Edge edge(ownedEdgeName, &referent);
-  ASSERT_TRUE(node.edges.append(mozilla::Move(edge)));
+  ASSERT_TRUE(node.edges.append(std::move(edge)));
 }
 
 

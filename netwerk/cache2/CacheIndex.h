@@ -120,7 +120,7 @@ public:
   }
   CacheIndexEntry(const CacheIndexEntry& aOther)
   {
-    NS_NOTREACHED("CacheIndexEntry copy constructor is forbidden!");
+    MOZ_ASSERT_UNREACHABLE("CacheIndexEntry copy constructor is forbidden!");
   }
   ~CacheIndexEntry()
   {
@@ -1209,6 +1209,7 @@ private:
     explicit DiskConsumptionObserver(nsWeakPtr const& aWeakObserver)
       : Runnable("net::CacheIndex::DiskConsumptionObserver")
       , mObserver(aWeakObserver)
+      , mSize(0)
     {
     }
     virtual ~DiskConsumptionObserver() {

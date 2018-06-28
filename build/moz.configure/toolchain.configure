@@ -8,6 +8,7 @@ imply_option('--enable-release', mozilla_official)
 imply_option('--enable-release', depends_if('MOZ_AUTOMATION')(lambda x: True))
 
 js_option('--enable-release',
+          default=milestone.is_release_or_beta,
           help='Build with more conservative, release engineering-oriented '
                'options. This may slow down builds.')
 
@@ -144,7 +145,7 @@ include('android-ndk.configure', when=compiling_android)
 # This needs to happen before any compilation test is done.
 
 option('--enable-macos-target', env='MACOSX_DEPLOYMENT_TARGET', nargs=1,
-       default='10.7', help='Set the minimum MacOS version needed at runtime')
+       default='10.9', help='Set the minimum MacOS version needed at runtime')
 
 
 @depends('--enable-macos-target', target)
@@ -637,22 +638,27 @@ def vc_compiler_path(host, target, vs_major_version, env, vs_release_name):
 
 @depends(vc_compiler_path)
 @imports('os')
+@imports(_from='os', _import='environ')
 def toolchain_search_path(vc_compiler_path):
+    result = [environ.get('PATH')]
+
     if vc_compiler_path:
-        result = [os.environ.get('PATH')]
         result.extend(vc_compiler_path)
 
-        # Also add in the location to which `mach bootstrap` or
-        # `mach artifact toolchain` installs clang.
-        mozbuild_state_dir = os.environ.get('MOZBUILD_STATE_PATH',
-                                            os.path.expanduser(os.path.join('~', '.mozbuild')))
-        bootstrap_clang_path = os.path.join(mozbuild_state_dir, 'clang', 'bin')
-        result.append(bootstrap_clang_path)
+    # Also add in the location to which `mach bootstrap` or
+    # `mach artifact toolchain` installs clang.
+    mozbuild_state_dir = environ.get('MOZBUILD_STATE_PATH',
+                                     os.path.expanduser(os.path.join('~', '.mozbuild')))
+    bootstrap_clang_path = os.path.join(mozbuild_state_dir, 'clang', 'bin')
+    result.append(bootstrap_clang_path)
 
+    if vc_compiler_path:
         # We're going to alter PATH for good in windows.configure, but we also
-        # need to do it for the valid_compiler() check below.
-        os.environ['PATH'] = os.pathsep.join(result)
-        return result
+        # need to do it for the valid_compiler() check below. This is only needed
+        # on Windows, where MSVC needs PATH set to find dlls.
+        environ['PATH'] = os.pathsep.join(result)
+
+    return result
 
 
 @template
@@ -1308,7 +1314,57 @@ fxc = check_prog('FXC', ('fxc.exe', 'fxc2.exe'), when=depends(target)
 wine = check_prog('WINE', ['wine'], when=depends(target, host)
                   (lambda t, h: t.kernel == 'WINNT' and h.kernel == 'Linux'))
 
-# Security Hardening
+# LTO
+# ==============================================================
+
+js_option('--enable-lto',
+          nargs='?',
+          choices=('full', 'thin'),
+          help='Enable LTO')
+
+
+@depends('--enable-lto', c_compiler)
+@imports('multiprocessing')
+def lto(value, c_compiler):
+    flags = []
+    ldflags = []
+
+    # clang and clang-cl
+    if c_compiler.type in ('clang', 'clang-cl'):
+        # Until Bug 1457168 is fixed, we have to hardcode -fuse-ld=lld here
+        if c_compiler.type == 'clang':
+            flags.append("-fuse-ld=lld")
+
+        if len(value) and value[0].lower() == 'full':
+            flags.append("-flto")
+            ldflags.append("-flto")
+        elif value:
+            flags.append("-flto=thin")
+            ldflags.append("-flto=thin")
+
+    # gcc and other compilers
+    elif value:
+        num_cores = multiprocessing.cpu_count()
+        flags.append("-flto")
+        flags.append("-flifetime-dse=1")
+
+        ldflags.append("-flto=%s" % num_cores)
+        ldflags.append("-flifetime-dse=1")
+
+    return namespace(
+        enabled="1" if value else None,
+        flags=flags,
+        ldflags=ldflags
+    )
+
+
+add_old_configure_assignment('MOZ_LTO', lto.enabled)
+add_old_configure_assignment('MOZ_LTO_CFLAGS', lto.flags)
+add_old_configure_assignment('MOZ_LTO_LDFLAGS', lto.ldflags)
+
+imply_option('--enable-linker', 'lld', when='--enable-lto')
+
+# ASAN
 # ==============================================================
 
 js_option('--enable-address-sanitizer', help='Enable Address Sanitizer')
@@ -1321,6 +1377,9 @@ def asan(value):
 
 add_old_configure_assignment('MOZ_ASAN', asan)
 
+
+# Security Hardening
+# ==============================================================
 
 option('--enable-hardening', env='MOZ_SECURITY_HARDENING',
        help='Enables security hardening compiler options')
@@ -1375,6 +1434,22 @@ def security_hardening_cflags(hardening_flag, asan, optimize, c_compiler, target
 add_old_configure_assignment('MOZ_HARDENING_CFLAGS', security_hardening_cflags.flags)
 add_old_configure_assignment('MOZ_HARDENING_CFLAGS_JS', security_hardening_cflags.js_flags)
 imply_option('--enable-pie', depends_if('--enable-hardening')(lambda v: v))
+
+# Code Coverage
+# ==============================================================
+
+js_option('--enable-coverage', env='MOZ_CODE_COVERAGE',
+          help='Enable code coverage')
+
+
+@depends('--enable-coverage')
+def code_coverage(value):
+    if value:
+        return True
+
+
+set_config('MOZ_CODE_COVERAGE', code_coverage)
+set_define('MOZ_CODE_COVERAGE', code_coverage)
 
 # ==============================================================
 
@@ -1451,14 +1526,19 @@ set_config('MOZ_RUST_DEFAULT_FLAGS', rust_compiler_flags)
 # ==============================================================
 
 
-@depends(rustc_opt_level, debug_rust, 'MOZ_AUTOMATION')
-def cargo_incremental(opt_level, debug_rust, automation):
+@depends(rustc_opt_level, debug_rust, 'MOZ_AUTOMATION', code_coverage)
+def cargo_incremental(opt_level, debug_rust, automation, code_coverage):
     """Return a value for the CARGO_INCREMENTAL environment variable."""
 
     # We never want to use incremental compilation in automation.  sccache
     # handles our automation use case much better than incremental compilation
     # would.
     if automation:
+        return '0'
+
+    # Coverage instrumentation doesn't play well with incremental compilation
+    # https://github.com/rust-lang/rust/issues/50203.
+    if code_coverage:
         return '0'
 
     # Incremental compilation is automatically turned on for debug builds, so
@@ -1498,74 +1578,68 @@ option('--enable-gold',
 imply_option('--enable-linker', 'gold', when='--enable-gold')
 
 js_option('--enable-linker', nargs=1,
-          help='Select the linker {bfd, gold, lld, lld-*, other}',
+          help='Select the linker {bfd, gold, lld, lld-*}',
           when=is_linker_option_enabled)
 
 
-@depends('--enable-linker', c_compiler, developer_options,
+@depends('--enable-linker', c_compiler, developer_options, '--enable-gold',
          extra_toolchain_flags, when=is_linker_option_enabled)
 @checking('for linker', lambda x: x.KIND)
 @imports('os')
 @imports('shutil')
-def select_linker(linker, c_compiler, developer_options, toolchain_flags):
+def select_linker(linker, c_compiler, developer_options, enable_gold,
+                  toolchain_flags):
 
-    linker = linker[0] if linker else 'other'
+    linker = linker[0] if linker else None
 
-    if linker not in ('bfd', 'gold', 'lld', 'other') and not linker.startswith("lld-"):
+    if linker not in ('bfd', 'gold', 'lld', None) and not linker.startswith("lld-"):
         # Check that we are trying to use a supported linker
         die('Unsupported linker ' + linker)
 
     # Check the kind of linker
     version_check = ['-Wl,--version']
     cmd_base = c_compiler.wrapper + [c_compiler.compiler] + c_compiler.flags
-    # Generate the compiler flag
-    linker_flag = ["-fuse-ld=" + linker] if linker != "other" else []
-    cmd = cmd_base + linker_flag + version_check
-    if toolchain_flags:
-        cmd += toolchain_flags
 
-    if (linker == 'gold' or developer_options) and linker != 'bfd':
-        if 'GNU gold' in check_cmd_output(*cmd).decode('utf-8'):
-            # We have detected gold, will build with -fuse-ld=gold
-            return namespace(
-                KIND='gold',
-                LINKER_FLAG=linker_flag,
-            )
+    def try_linker(linker):
+        # Generate the compiler flag
+        linker_flag = ["-fuse-ld=" + linker] if linker else []
+        cmd = cmd_base + linker_flag + version_check
+        if toolchain_flags:
+            cmd += toolchain_flags
 
-        # gold is only required if --enable-gold is used.
-        if linker == 'gold':
-            die('Could not find gold')
-        # Else fallthrough.
+        cmd_output = check_cmd_output(*cmd).decode('utf-8')
+        if 'GNU ld' in cmd_output:
+            # We are using the normal linker
+            kind = 'bfd'
 
-    cmd_output = check_cmd_output(*cmd).decode('utf-8')
-    # using decode because ld can be localized and python will
-    # have problems with french accent for example
-    if 'GNU ld' in cmd_output:
-        # We are using the normal linker
+        elif 'GNU gold' in cmd_output:
+            kind = 'gold'
+
+        elif 'LLD' in cmd_output:
+            kind = 'lld'
+
+        else:
+            kind = 'unknown'
+
         return namespace(
-            KIND='bfd'
-        )
-
-    # Special case for Android. In the ndk, it is gold
-    if 'GNU gold' in cmd_output:
-        return namespace(
-            KIND='gold'
-        )
-
-    if 'LLD' in cmd_output:
-        return namespace(
-            KIND='lld',
+            KIND=kind,
             LINKER_FLAG=linker_flag,
         )
-    elif linker.startswith('lld'):
-        # We forced the lld linker but could not find the string
-        # when checking, fail the build
+
+    result = try_linker(linker)
+
+    if (linker is None and enable_gold.origin == 'default' and
+            developer_options and result.KIND == 'bfd'):
+        gold = try_linker('gold')
+
+        if gold.KIND == 'gold':
+            result = gold
+
+    # If an explicit linker was given, error out if what we found is different.
+    if linker and not linker.startswith(result.KIND):
         die("Could not use {} as linker".format(linker))
 
-    # For other platforms without gold or the GNU linker
-    return namespace(
-        KIND='other'
-    )
+    return result
 
 
 set_config('LD_IS_BFD', depends(select_linker.KIND)
@@ -1584,22 +1658,6 @@ js_option('--enable-mozsearch-plugin', env='ENABLE_MOZSEARCH_PLUGIN',
 
 add_old_configure_assignment('ENABLE_MOZSEARCH_PLUGIN',
                              depends_if('--enable-mozsearch-plugin')(lambda _: True))
-
-# Code Coverage
-# ==============================================================
-
-js_option('--enable-coverage', env='MOZ_CODE_COVERAGE',
-          help='Enable code coverage')
-
-
-@depends('--enable-coverage')
-def code_coverage(value):
-    if value:
-        return True
-
-
-set_config('MOZ_CODE_COVERAGE', code_coverage)
-set_define('MOZ_CODE_COVERAGE', code_coverage)
 
 # Libstdc++ compatibility hacks
 # ==============================================================

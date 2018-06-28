@@ -44,7 +44,7 @@ using namespace mozilla::dom;
 JSObject*
 nsRange::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return RangeBinding::Wrap(aCx, this, aGivenProto);
+  return Range_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 DocGroup*
@@ -2293,25 +2293,25 @@ nsRange::CompareBoundaryPoints(uint16_t aHow, nsRange& aOtherRange,
   uint32_t ourOffset, otherOffset;
 
   switch (aHow) {
-    case RangeBinding::START_TO_START:
+    case Range_Binding::START_TO_START:
       ourNode = mStart.Container();
       ourOffset = mStart.Offset();
       otherNode = aOtherRange.GetStartContainer();
       otherOffset = aOtherRange.StartOffset();
       break;
-    case RangeBinding::START_TO_END:
+    case Range_Binding::START_TO_END:
       ourNode = mEnd.Container();
       ourOffset = mEnd.Offset();
       otherNode = aOtherRange.GetStartContainer();
       otherOffset = aOtherRange.StartOffset();
       break;
-    case RangeBinding::END_TO_START:
+    case Range_Binding::END_TO_START:
       ourNode = mStart.Container();
       ourOffset = mStart.Offset();
       otherNode = aOtherRange.GetEndContainer();
       otherOffset = aOtherRange.EndOffset();
       break;
-    case RangeBinding::END_TO_END:
+    case Range_Binding::END_TO_END:
       ourNode = mEnd.Container();
       ourOffset = mEnd.Offset();
       otherNode = aOtherRange.GetEndContainer();
@@ -3157,7 +3157,7 @@ nsRange::GetClientRectsAndTexts(
 
 nsresult
 nsRange::GetUsedFontFaces(nsTArray<nsAutoPtr<InspectorFontFace>>& aResult,
-                          uint32_t aMaxRanges)
+                          uint32_t aMaxRanges, bool aSkipCollapsedWhitespace)
 {
   NS_ENSURE_TRUE(mStart.Container(), NS_ERROR_UNEXPECTED);
 
@@ -3201,23 +3201,26 @@ nsRange::GetUsedFontFaces(nsTArray<nsAutoPtr<InspectorFontFace>>& aResult,
          int32_t offset = startContainer == endContainer ?
            mEnd.Offset() : content->GetText()->GetLength();
          nsLayoutUtils::GetFontFacesForText(frame, mStart.Offset(), offset,
-                                            true, fontFaces, aMaxRanges);
+                                            true, fontFaces, aMaxRanges,
+                                            aSkipCollapsedWhitespace);
          continue;
        }
        if (node == endContainer) {
          nsLayoutUtils::GetFontFacesForText(frame, 0, mEnd.Offset(),
-                                            true, fontFaces, aMaxRanges);
+                                            true, fontFaces, aMaxRanges,
+                                            aSkipCollapsedWhitespace);
          continue;
        }
     }
 
-    nsLayoutUtils::GetFontFacesForFrames(frame, fontFaces, aMaxRanges);
+    nsLayoutUtils::GetFontFacesForFrames(frame, fontFaces, aMaxRanges,
+                                         aSkipCollapsedWhitespace);
   }
 
   // Take ownership of the InspectorFontFaces in the table and move them into
   // the aResult outparam.
   for (auto iter = fontFaces.Iter(); !iter.Done(); iter.Next()) {
-    aResult.AppendElement(Move(iter.Data()));
+    aResult.AppendElement(std::move(iter.Data()));
   }
 
   return NS_OK;

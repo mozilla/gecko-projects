@@ -13,9 +13,7 @@
 #include "nsPresContext.h"
 #include "nsCSSProps.h"
 #include "nsCSSValue.h"
-#ifdef XP_WIN
 #include "mozilla/LookAndFeel.h"
-#endif
 #include "nsDeviceContext.h"
 #include "nsIBaseWindow.h"
 #include "nsIDocShell.h"
@@ -847,7 +845,7 @@ nsMediaFeatures::features[] = {
     &nsGkAtoms::_moz_is_resource_document,
     nsMediaFeature::eMinMaxNotAllowed,
     nsMediaFeature::eBoolInteger,
-    nsMediaFeature::eNoRequirements,
+    nsMediaFeature::eUserAgentAndChromeOnly,
     { nullptr },
     GetIsResourceDocument
   },

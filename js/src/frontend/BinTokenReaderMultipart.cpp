@@ -11,6 +11,8 @@
 #include "mozilla/EndianUtils.h"
 #include "mozilla/Maybe.h"
 
+#include <utility>
+
 #include "frontend/BinSource-macros.h"
 #include "frontend/BinSourceRuntimeSupport.h"
 
@@ -124,7 +126,7 @@ BinTokenReaderMultipart::readHeader()
     if (!slicesTable_.reserve(stringsNumberOfEntries))
         return raiseOOM();
     if (!variantsTable_.init())
-        return cx_->alreadyReportedError();
+        return raiseOOM();
 
     RootedAtom atom(cx_);
     for (uint32_t i = 0; i < stringsNumberOfEntries; ++i) {
@@ -144,7 +146,7 @@ BinTokenReaderMultipart::readHeader()
 
         // Populate `slicesTable_`: i => slice
         Chars slice((const char*)current_, byteLen);
-        slicesTable_.infallibleAppend(Move(slice)); // We have reserved before entering the loop.
+        slicesTable_.infallibleAppend(std::move(slice)); // We have reserved before entering the loop.
 
         current_ += byteLen;
     }
@@ -342,7 +344,8 @@ BinTokenReaderMultipart::AutoBase::init()
 }
 
 BinTokenReaderMultipart::AutoBase::AutoBase(BinTokenReaderMultipart& reader)
-    : reader_(reader)
+    : initialized_(false)
+    , reader_(reader)
 { }
 
 BinTokenReaderMultipart::AutoBase::~AutoBase()

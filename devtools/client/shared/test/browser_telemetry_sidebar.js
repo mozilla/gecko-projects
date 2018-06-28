@@ -11,6 +11,13 @@ const OPTOUT = Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTOUT;
 // opened we make use of setTimeout() to create tool active times.
 const TOOL_DELAY = 200;
 
+var animationPanelId;
+if (Services.prefs.getBoolPref("devtools.new-animationinspector.enabled")) {
+  animationPanelId = "newanimationinspector";
+} else {
+  animationPanelId = "animationinspector";
+}
+
 const DATA = [
   {
     timestamp: null,
@@ -20,6 +27,17 @@ const DATA = [
     value: null,
     extra: {
       oldpanel: "computedview",
+      newpanel: animationPanelId
+    }
+  },
+  {
+    timestamp: null,
+    category: "devtools.main",
+    method: "sidepanel_changed",
+    object: "inspector",
+    value: null,
+    extra: {
+      oldpanel: animationPanelId,
       newpanel: "fontinspector"
     }
   },
@@ -53,6 +71,17 @@ const DATA = [
     value: null,
     extra: {
       oldpanel: "computedview",
+      newpanel: animationPanelId
+    }
+  },
+  {
+    timestamp: null,
+    category: "devtools.main",
+    method: "sidepanel_changed",
+    object: "inspector",
+    value: null,
+    extra: {
+      oldpanel: animationPanelId,
       newpanel: "fontinspector"
     }
   },
@@ -91,8 +120,8 @@ add_task(async function() {
   await addTab(TEST_URI);
   startTelemetry();
 
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let toolbox = await gDevTools.showToolbox(target, "inspector");
+  const target = TargetFactory.forTab(gBrowser.selectedTab);
+  const toolbox = await gDevTools.showToolbox(target, "inspector");
   info("inspector opened");
 
   await testSidebar(toolbox);
@@ -106,9 +135,9 @@ add_task(async function() {
 function testSidebar(toolbox) {
   info("Testing sidebar");
 
-  let inspector = toolbox.getCurrentPanel();
+  const inspector = toolbox.getCurrentPanel();
   let sidebarTools = ["computedview", "layoutview", "fontinspector",
-                      "animationinspector"];
+                      animationPanelId];
 
   // Concatenate the array with itself so that we can open each tool twice.
   sidebarTools = [...sidebarTools, ...sidebarTools];
@@ -116,7 +145,7 @@ function testSidebar(toolbox) {
   return new Promise(resolve => {
     // See TOOL_DELAY for why we need setTimeout here
     setTimeout(function selectSidebarTab() {
-      let tool = sidebarTools.pop();
+      const tool = sidebarTools.pop();
       if (tool) {
         inspector.sidebar.select(tool);
         setTimeout(function() {
@@ -150,7 +179,7 @@ function checkEventTelemetry() {
                                                   event[4] === null
   );
 
-  for (let i in DATA) {
+  for (const i in DATA) {
     const [ timestamp, category, method, object, value, extra ] = events[i];
     const expected = DATA[i];
 

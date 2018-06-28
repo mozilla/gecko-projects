@@ -18,6 +18,7 @@ DevToolsModules(
     'commands.js',
     'constants.js',
     'index.css',
+    'index.js',
     'manager.js',
     'reducers.js',
     'responsive-ua.css',
@@ -29,4 +30,4 @@ XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 BROWSER_CHROME_MANIFESTS += ['test/browser/browser.ini']
 
 with Files('**'):
-    BUG_COMPONENT = ('Firefox', 'Developer Tools: Responsive Design Mode')
+    BUG_COMPONENT = ('DevTools', 'Responsive Design Mode')

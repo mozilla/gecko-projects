@@ -94,7 +94,7 @@ public:
 
   virtual JSObject* WrapObjectInternal(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override
   {
-    return TouchEventBinding::Wrap(aCx, this, aGivenProto);
+    return TouchEvent_Binding::Wrap(aCx, this, aGivenProto);
   }
 
   already_AddRefed<TouchList>
@@ -128,6 +128,7 @@ public:
                       TouchList* aTargetTouches,
                       TouchList* aChangedTouches);
 
+  static bool PlatformSupportsTouch();
   static bool PrefEnabled(JSContext* aCx, JSObject* aGlobal);
   static bool PrefEnabled(nsIDocShell* aDocShell);
 

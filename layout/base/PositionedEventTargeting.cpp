@@ -23,6 +23,9 @@
 #include <algorithm>
 #include "LayersLogging.h"
 
+using namespace mozilla;
+using namespace mozilla::dom;
+
 // If debugging this code you may wish to enable this logging, and also
 // uncomment the DumpFrameTree call near the bottom of the file.
 #define PET_LOG(...)
@@ -237,7 +240,6 @@ GetClickableAncestor(nsIFrame* aFrame, nsAtom* stopAt = nullptr, nsAutoString* a
     if (content->IsAnyOfXULElements(nsGkAtoms::button,
                                     nsGkAtoms::checkbox,
                                     nsGkAtoms::radio,
-                                    nsGkAtoms::autorepeatbutton,
                                     nsGkAtoms::menu,
                                     nsGkAtoms::menubutton,
                                     nsGkAtoms::menuitem,
@@ -578,7 +580,7 @@ FindFrameTargetedByInputEvent(WidgetGUIEvent* aEvent,
   if (aEvent->mClass == eMouseEventClass &&
       prefs->mTouchOnly &&
       aEvent->AsMouseEvent()->inputSource !=
-        MouseEventBinding::MOZ_SOURCE_TOUCH) {
+        MouseEvent_Binding::MOZ_SOURCE_TOUCH) {
     PET_LOG("Mouse input event is not from a touch source\n");
     return target;
   }

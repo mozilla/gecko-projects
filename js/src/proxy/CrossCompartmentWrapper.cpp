@@ -11,8 +11,9 @@
 #include "vm/WrapperObject.h"
 
 #include "gc/Nursery-inl.h"
-#include "vm/JSCompartment-inl.h"
+#include "vm/Compartment-inl.h"
 #include "vm/JSObject-inl.h"
+#include "vm/Realm-inl.h"
 
 using namespace js;
 
@@ -278,7 +279,7 @@ struct AutoCloseIterator
 };
 
 static JSObject*
-Reify(JSContext* cx, JSCompartment* origin, HandleObject objp)
+Reify(JSContext* cx, JS::Compartment* origin, HandleObject objp)
 {
     Rooted<PropertyIteratorObject*> iterObj(cx, &objp->as<PropertyIteratorObject>());
     NativeIterator* ni = iterObj->getNativeIterator();
@@ -491,7 +492,7 @@ CrossCompartmentWrapper::boxedValue_unbox(JSContext* cx, HandleObject wrapper, M
 const CrossCompartmentWrapper CrossCompartmentWrapper::singleton(0u);
 
 bool
-js::IsCrossCompartmentWrapper(JSObject* obj)
+js::IsCrossCompartmentWrapper(const JSObject* obj)
 {
     return IsWrapper(obj) &&
            !!(Wrapper::wrapperHandler(obj)->flags() & Wrapper::CROSS_COMPARTMENT);
@@ -512,7 +513,7 @@ NukeRemovedCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper)
 JS_FRIEND_API(void)
 js::NukeCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper)
 {
-    JSCompartment* comp = wrapper->compartment();
+    JS::Compartment* comp = wrapper->compartment();
     auto ptr = comp->lookupWrapper(Wrapper::wrappedObject(wrapper));
     if (ptr)
         comp->removeWrapper(ptr);
@@ -530,7 +531,7 @@ js::NukeCrossCompartmentWrapper(JSContext* cx, JSObject* wrapper)
 JS_FRIEND_API(bool)
 js::NukeCrossCompartmentWrappers(JSContext* cx,
                                  const CompartmentFilter& sourceFilter,
-                                 JSCompartment* target,
+                                 JS::Compartment* target,
                                  js::NukeReferencesToWindow nukeReferencesToWindow,
                                  js::NukeReferencesFromTarget nukeReferencesFromTarget)
 {
@@ -551,7 +552,7 @@ js::NukeCrossCompartmentWrappers(JSContext* cx,
         // won't be iterated, we can exclude them easily because they have
         // compartment nullptr. Use Maybe to avoid copying from conditionally
         // initializing NonStringWrapperEnum.
-        mozilla::Maybe<JSCompartment::NonStringWrapperEnum> e;
+        mozilla::Maybe<Compartment::NonStringWrapperEnum> e;
         if (MOZ_LIKELY(!nukeAll))
             e.emplace(c, target);
         else
@@ -613,8 +614,8 @@ js::RemapWrapper(JSContext* cx, JSObject* wobjArg, JSObject* newTargetArg)
     MOZ_ASSERT(!JS_IsDeadWrapper(origTarget),
                "We don't want a dead proxy in the wrapper map");
     Value origv = ObjectValue(*origTarget);
-    Realm* wrealm = wobj->realm();
-    JSCompartment* wcompartment = wobj->compartment();
+    Realm* wrealm = wobj->deprecatedRealm();
+    JS::Compartment* wcompartment = wobj->compartment();
 
     AutoDisableProxyCheck adpc;
 
@@ -678,13 +679,12 @@ js::RemapAllWrappersForObject(JSContext* cx, JSObject* oldTargetArg,
     RootedObject newTarget(cx, newTargetArg);
 
     AutoWrapperVector toTransplant(cx);
-    if (!toTransplant.reserve(cx->runtime()->numCompartments))
-        return false;
 
     for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
         if (WrapperMap::Ptr wp = c->lookupWrapper(origv)) {
             // We found a wrapper. Remember and root it.
-            toTransplant.infallibleAppend(WrapperValue(wp));
+            if (!toTransplant.append(WrapperValue(wp)))
+                return false;
         }
     }
 
@@ -712,7 +712,7 @@ js::RecomputeWrappers(JSContext* cx, const CompartmentFilter& sourceFilter,
         }
 
         // Iterate over the wrappers, filtering appropriately.
-        for (JSCompartment::NonStringWrapperEnum e(c, targetFilter); !e.empty(); e.popFront()) {
+        for (Compartment::NonStringWrapperEnum e(c, targetFilter); !e.empty(); e.popFront()) {
             // Filter out non-objects.
             CrossCompartmentKey& k = e.front().mutableKey();
             if (!k.is<JSObject*>())

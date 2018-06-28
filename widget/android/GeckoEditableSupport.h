@@ -101,7 +101,7 @@ class GeckoEditableSupport final
     AutoTArray<IMETextChange, 4> mIMETextChanges;
     RefPtr<TextRangeArray> mIMERanges;
     int32_t mIMEMaskEventsCount; // Mask events when > 0.
-    bool mIMEUpdatingContext;
+    int32_t mIMEFocusCount; // We are focused when > 0.
     bool mIMESelectionChanged;
     bool mIMETextChangedDuringFlush;
     bool mIMEMonitorCursor;
@@ -143,17 +143,17 @@ public:
     {
         struct IMEEvent : nsAppShell::LambdaEvent<Functor>
         {
-            explicit IMEEvent(Functor&& l) : nsAppShell::LambdaEvent<Functor>(Move(l)) {}
+            explicit IMEEvent(Functor&& l) : nsAppShell::LambdaEvent<Functor>(std::move(l)) {}
 
-            nsAppShell::Event::Type ActivityType() const override
+            bool IsUIEvent() const override
             {
                 using GES = GeckoEditableSupport;
                 if (this->lambda.IsTarget(&GES::OnKeyEvent) ||
                         this->lambda.IsTarget(&GES::OnImeReplaceText) ||
                         this->lambda.IsTarget(&GES::OnImeUpdateComposition)) {
-                    return nsAppShell::Event::Type::kUIActivity;
+                    return true;
                 }
-                return nsAppShell::Event::Type::kGeneralActivity;
+                return false;
             }
 
             void Run() override
@@ -167,7 +167,7 @@ public:
             }
         };
         nsAppShell::PostEvent(mozilla::MakeUnique<IMEEvent>(
-                mozilla::Move(aCall)));
+                std::move(aCall)));
     }
 
     // Constructor for main process GeckoEditableChild.
@@ -180,7 +180,7 @@ public:
         , mEditableAttached(!mIsRemote)
         , mIMERanges(new TextRangeArray())
         , mIMEMaskEventsCount(1) // Mask IME events since there's no focus yet
-        , mIMEUpdatingContext(false)
+        , mIMEFocusCount(0)
         , mIMESelectionChanged(false)
         , mIMETextChangedDuringFlush(false)
         , mIMEMonitorCursor(false)

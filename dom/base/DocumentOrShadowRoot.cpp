@@ -35,14 +35,6 @@ DocumentOrShadowRoot::EnsureDOMStyleSheets()
 }
 
 void
-DocumentOrShadowRoot::AppendSheet(StyleSheet& aSheet)
-{
-  aSheet.SetAssociatedDocumentOrShadowRoot(
-    this, StyleSheet::OwnedByDocumentOrShadowRoot);
-  mStyleSheets.AppendElement(&aSheet);
-}
-
-void
 DocumentOrShadowRoot::InsertSheetAt(size_t aIndex, StyleSheet& aSheet)
 {
   aSheet.SetAssociatedDocumentOrShadowRoot(
@@ -57,7 +49,7 @@ DocumentOrShadowRoot::RemoveSheet(StyleSheet& aSheet)
   if (index == mStyleSheets.NoIndex) {
     return nullptr;
   }
-  RefPtr<StyleSheet> sheet = Move(mStyleSheets[index]);
+  RefPtr<StyleSheet> sheet = std::move(mStyleSheets[index]);
   mStyleSheets.RemoveElementAt(index);
   sheet->ClearAssociatedDocumentOrShadowRoot();
   return sheet.forget();

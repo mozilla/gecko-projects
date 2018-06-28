@@ -49,6 +49,10 @@ class ProtectedRegionTree
         Region(uintptr_t addr, size_t size) : first(addr),
                                               last(addr + (size - 1)) {}
 
+        // This function compares 2 memory regions. If they overlap they are
+        // considered as identical. This is used for querying if an address is
+        // included in a range, or if an address is already registered as a
+        // protected region.
         static int compare(const Region& A, const Region& B) {
             if (A.last < B.first)
                 return -1;
@@ -65,7 +69,9 @@ class ProtectedRegionTree
   public:
     ProtectedRegionTree()
       : lock(mutexid::ProtectedRegionTree),
-        alloc(4096),
+        // Here "false" is used to not use the memory protection mechanism of
+        // LifoAlloc in order to prevent dead-locks.
+        alloc(4096, false),
         tree(&alloc)
     {
         sProtectedRegionsInit = true;

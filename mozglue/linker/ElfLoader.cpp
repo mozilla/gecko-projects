@@ -26,6 +26,7 @@ Atomic<size_t, ReleaseAcquire> gPageSize;
 
 #if defined(ANDROID)
 #include <sys/syscall.h>
+#include <sys/system_properties.h>
 #include <math.h>
 
 #include <android/api-level.h>
@@ -311,6 +312,56 @@ LeafName(const char *path)
   return path;
 }
 
+#if defined(ANDROID)
+/**
+ * Return the current Android version, or 0 on failure.
+ */
+int
+GetAndroidSDKVersion() {
+  static int version = 0;
+  if (version) {
+    return version;
+  }
+
+  char version_string[PROP_VALUE_MAX] = {'\0'};
+  int len = __system_property_get("ro.build.version.sdk", version_string);
+  if (len) {
+    version = static_cast<int>(strtol(version_string, nullptr, 10));
+  }
+  return version;
+}
+#endif
+
+/**
+ * Run the given lambda while holding the internal lock of the system linker.
+ * To take the lock, we call the system dl_iterate_phdr and invoke the lambda
+ * from the callback, which is called while the lock is held. Return true on
+ * success.
+ */
+template<class Lambda>
+static bool
+RunWithSystemLinkerLock(Lambda&& aLambda) {
+  if (!dl_iterate_phdr) {
+    // No dl_iterate_phdr support.
+    return false;
+  }
+
+#if defined(ANDROID)
+  if (GetAndroidSDKVersion() < 23) {
+    // dl_iterate_phdr is _not_ protected by a lock on Android < 23.
+    // Also return false here if we failed to get the version.
+    return false;
+  }
+#endif
+
+  dl_iterate_phdr([] (dl_phdr_info*, size_t, void* lambda) -> int {
+    (*static_cast<Lambda*>(lambda))();
+    // Return 1 to stop iterating.
+    return 1;
+  }, &aLambda);
+  return true;
+}
+
 } /* Anonymous namespace */
 
 /**
@@ -576,7 +627,9 @@ ElfLoader::Register(CustomElf *handle)
 {
   Register(static_cast<LibHandle *>(handle));
   if (dbg) {
-    dbg.Add(handle);
+    // We could race with the system linker when modifying the debug map, so
+    // only do so while holding the system linker's internal lock.
+    RunWithSystemLinkerLock([this, handle] { dbg.Add(handle); });
   }
 }
 
@@ -603,7 +656,9 @@ ElfLoader::Forget(CustomElf *handle)
 {
   Forget(static_cast<LibHandle *>(handle));
   if (dbg) {
-    dbg.Remove(handle);
+    // We could race with the system linker when modifying the debug map, so
+    // only do so while holding the system linker's internal lock.
+    RunWithSystemLinkerLock([this, handle] { dbg.Remove(handle); });
   }
 }
 
@@ -911,21 +966,11 @@ public:
 
     page = firstPage;
     int ret = mprotect(page, length, prot | PROT_WRITE);
-    if (ret != 0) {
-      success = false;
-      WARN("mprotect(%p, %zu, %o) = %d (errno=%d; %s)",
-           page, length, prot | PROT_WRITE, ret, errno, strerror(errno));
-      return;
-    }
-
-    // XXX bug 1460989: on some devices, mprotect appears to return 0 for
-    // success even after _failing_ to make the page writable. Therefore, check
-    // for write access again instead of relying on the mprotect return value.
-    int newProt = getProt(start, &end);
-    success = (newProt != -1) && (newProt & PROT_WRITE);
+    success = ret == 0;
     if (!success) {
-      WARN("mprotect(%p, %zu, %o) returned 0 but page is not writable: %o",
-           page, length, prot | PROT_WRITE, newProt);
+      ERROR("mprotect(%p, %zu, %d) = %d (errno=%d; %s)",
+            page, length, prot | PROT_WRITE, ret,
+            errno, strerror(errno));
     }
   }
 

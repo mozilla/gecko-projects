@@ -99,6 +99,7 @@ class AnimationInspector {
     } = this;
 
     const target = this.inspector.target;
+    const direction = this.win.document.dir;
     this.animationsFront = new AnimationsFront(target.client, target.form);
     this.animationsFront.setWalkerActor(this.inspector.walker);
 
@@ -114,6 +115,7 @@ class AnimationInspector {
       App(
         {
           addAnimationsCurrentTimeListener,
+          direction,
           emitEventForTest,
           getAnimatedPropertyMap,
           getAnimationsCurrentTime,
@@ -186,6 +188,23 @@ class AnimationInspector {
   }
 
   /**
+   * This function calls AnimationsFront.setCurrentTimes with considering the createdTime
+   * which was introduced bug 1454392.
+   *
+   * @param {Number} currentTime
+   */
+  async doSetCurrentTimes(currentTime) {
+    const { animations, timeScale } = this.state;
+
+    // If currentTime is not defined in timeScale (which happens when connected
+    // to server older than FF62), set currentTime as it is. See bug 1454392.
+    currentTime = typeof timeScale.currentTime === "undefined"
+                    ? currentTime : currentTime + timeScale.minStartTime;
+    await this.animationsFront.setCurrentTimes(animations, currentTime, true,
+                                               { relativeToCreatedTime: true });
+  }
+
+  /**
    * Return a map of animated property from given animation actor.
    *
    * @param {Object} animation
@@ -235,7 +254,7 @@ class AnimationInspector {
   getComputedStyle(property, styles) {
     this.simulatedElement.style.cssText = "";
 
-    for (let propertyName in styles) {
+    for (const propertyName in styles) {
       this.simulatedElement.style.setProperty(propertyName, styles[propertyName]);
     }
 
@@ -309,10 +328,7 @@ class AnimationInspector {
     // sice the scrubber position is related the currentTime.
     // Also, don't update the state of removed animations since React components
     // may refer to the same instance still.
-    await this.updateAnimations(animations);
-
-    // Get rid of animations that were removed during async updateAnimations().
-    animations = animations.filter(animation => !!animation.state.type);
+    animations = await this.updateAnimations(animations);
 
     this.updateState(animations.concat(addedAnimations));
   }
@@ -386,18 +402,12 @@ class AnimationInspector {
       return;
     }
 
-    const { animations, timeScale } = this.state;
+    let animations = this.state.animations;
     this.isCurrentTimeSet = true;
-    // If currentTime is not defined in timeScale (which happens when connected
-    // to server older than FF62), set currentTime as it is. See bug 1454392.
-    currentTime =
-      typeof timeScale.currentTime === "undefined"
-        ? currentTime : currentTime + timeScale.minStartTime;
 
     try {
-      await this.animationsFront.setCurrentTimes(animations, currentTime, true,
-                                                 { relativeToCreatedTime: true });
-      await this.updateAnimations(animations);
+      await this.doSetCurrentTimes(currentTime);
+      animations = await this.updateAnimations(animations);
     } catch (e) {
       // Expected if we've already been destroyed or other node have been selected
       // in the meantime.
@@ -408,12 +418,12 @@ class AnimationInspector {
     this.isCurrentTimeSet = false;
 
     if (shouldRefresh) {
-      this.updateState([...animations]);
+      this.updateState(animations);
     }
   }
 
   async setAnimationsPlaybackRate(playbackRate) {
-    const animations = this.state.animations;
+    let animations = this.state.animations;
     // "changed" event on each animation will fire respectively when the playback
     // rate changed. Since for each occurrence of event, change of UI is urged.
     // To avoid this, disable the listeners once in order to not capture the event.
@@ -421,7 +431,7 @@ class AnimationInspector {
 
     try {
       await this.animationsFront.setPlaybackRates(animations, playbackRate);
-      await this.updateAnimations(animations);
+      animations = await this.updateAnimations(animations);
     } catch (e) {
       // Expected if we've already been destroyed or other node have been selected
       // in the meantime.
@@ -431,7 +441,7 @@ class AnimationInspector {
       this.setAnimationStateChangedListenerEnabled(true);
     }
 
-    await this.updateState([...animations]);
+    await this.updateState(animations);
   }
 
   async setAnimationsPlayState(doPlay) {
@@ -440,13 +450,12 @@ class AnimationInspector {
         await this.inspector.target.actorHasMethod("animations", "pauseSome");
     }
 
-    const { animations, timeScale } = this.state;
+    let { animations, timeScale } = this.state;
 
     try {
       if (doPlay && animations.every(animation =>
                       timeScale.getEndTime(animation) <= animation.state.currentTime)) {
-        await this.animationsFront.setCurrentTimes(animations, 0, true,
-                                                   { relativeToCreatedTime: true });
+        await this.doSetCurrentTimes(0);
       }
 
       // If the server does not support pauseSome/playSome function, (which happens
@@ -464,7 +473,7 @@ class AnimationInspector {
         await this.animationsFront.pauseAll();
       }
 
-      await this.updateAnimations(animations);
+      animations = await this.updateAnimations(animations);
     } catch (e) {
       // Expected if we've already been destroyed or other node have been selected
       // in the meantime.
@@ -472,7 +481,7 @@ class AnimationInspector {
       return;
     }
 
-    await this.updateState([...animations]);
+    await this.updateState(animations);
   }
 
   /**
@@ -619,31 +628,29 @@ class AnimationInspector {
     done();
   }
 
-  updateAnimations(animations) {
-    if (!animations.length) {
-      return Promise.resolve();
-    }
+  async updateAnimations(animations) {
+    let error = null;
 
-    return new Promise((resolve, reject) => {
-      let count = 0;
-      let error = null;
-
-      for (const animation of animations) {
+    const promises = animations.map(animation => {
+      return new Promise(resolve => {
         animation.refreshState().catch(e => {
           error = e;
         }).finally(() => {
-          count += 1;
-
-          if (count === animations.length) {
-            if (error) {
-              reject(error);
-            } else {
-              resolve();
-            }
-          }
+          resolve();
         });
-      }
+      });
     });
+    await Promise.all(promises);
+
+    if (error) {
+      throw new Error(error);
+    }
+
+    // Even when removal animation on inspected document, updateAnimations
+    // might be called before onAnimationsMutation due to the async timing.
+    // Return the animations as result of updateAnimations after getting rid of
+    // the animations since they should not display.
+    return animations.filter(anim => !!anim.state.type);
   }
 
   updateState(animations) {

@@ -16,7 +16,7 @@
 
 #include "gc/PublicIterators.h"
 #include "util/Windows.h"
-#include "vm/JSCompartment.h"
+#include "vm/Realm.h"
 #include "vm/Runtime.h"
 
 namespace js {
@@ -153,7 +153,7 @@ PerformanceMonitoring::commit()
     // The move operation is generally constant time, unless
     // `recentGroups_.length()` is very small, in which case
     // it's fast just because it's small.
-    PerformanceGroupVector recentGroups(Move(recentGroups_));
+    PerformanceGroupVector recentGroups(std::move(recentGroups_));
     recentGroups_ = PerformanceGroupVector(); // Reconstruct after `Move`.
 
     bool success = true;
@@ -236,8 +236,8 @@ AutoStopwatch::AutoStopwatch(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IM
 {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
-    JSCompartment* compartment = cx_->compartment();
-    if (MOZ_UNLIKELY(compartment->scheduledForDestruction))
+    JS::Compartment* compartment = cx_->compartment();
+    if (MOZ_UNLIKELY(compartment->gcState.scheduledForDestruction))
         return;
 
     JSRuntime* runtime = cx_->runtime();
@@ -275,8 +275,8 @@ AutoStopwatch::~AutoStopwatch()
         return;
     }
 
-    JSCompartment* compartment = cx_->compartment();
-    if (MOZ_UNLIKELY(compartment->scheduledForDestruction))
+    JS::Compartment* compartment = cx_->compartment();
+    if (MOZ_UNLIKELY(compartment->gcState.scheduledForDestruction))
         return;
 
     JSRuntime* runtime = cx_->runtime();
@@ -588,6 +588,7 @@ PerformanceGroup::Release()
     if (refCount_ > 0)
         return;
 
+    JS::AutoSuppressGCAnalysis nogc;
     this->Delete();
 }
 

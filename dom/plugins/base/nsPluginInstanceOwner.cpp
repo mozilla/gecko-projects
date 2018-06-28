@@ -123,7 +123,7 @@ public:
   {
     nsContentUtils::DispatchTrustedEvent(mContent->OwnerDoc(), mContent,
         mFinished ? NS_LITERAL_STRING("MozPaintWaitFinished") : NS_LITERAL_STRING("MozPaintWait"),
-        true, true);
+        CanBubble::eYes, Cancelable::eYes);
     return NS_OK;
   }
 
@@ -258,6 +258,7 @@ nsPluginInstanceOwner::GetCurrentImageSize()
 
 nsPluginInstanceOwner::nsPluginInstanceOwner()
   : mPluginWindow(nullptr)
+  , mLastEventloopNestingLevel(0)
 {
   // create nsPluginNativeWindow object, it is derived from NPWindow
   // struct and allows to manipulate native window procedure
@@ -2002,7 +2003,7 @@ void nsPluginInstanceOwner::PerformDelayedBlurs()
   nsContentUtils::DispatchTrustedEvent(content->OwnerDoc(),
                                        windowRoot,
                                        NS_LITERAL_STRING("MozPerformDelayedBlur"),
-                                       false, false, nullptr);
+                                       CanBubble::eNo, Cancelable::eNo, nullptr);
 }
 
 #endif
@@ -2140,11 +2141,11 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
         int32_t delta = 0;
         if (wheelEvent->mLineOrPageDeltaY) {
           switch (wheelEvent->mDeltaMode) {
-            case WheelEventBinding::DOM_DELTA_PAGE:
+            case WheelEvent_Binding::DOM_DELTA_PAGE:
               pluginEvent.event = WM_MOUSEWHEEL;
               delta = -WHEEL_DELTA * wheelEvent->mLineOrPageDeltaY;
               break;
-            case WheelEventBinding::DOM_DELTA_LINE: {
+            case WheelEvent_Binding::DOM_DELTA_LINE: {
               UINT linesPerWheelDelta = 0;
               if (NS_WARN_IF(!::SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0,
                                                      &linesPerWheelDelta, 0))) {
@@ -2160,7 +2161,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
               delta *= wheelEvent->mLineOrPageDeltaY;
               break;
             }
-            case WheelEventBinding::DOM_DELTA_PIXEL:
+            case WheelEvent_Binding::DOM_DELTA_PIXEL:
             default:
               // We don't support WM_GESTURE with this path.
               MOZ_ASSERT(!pluginEvent.event);
@@ -2168,11 +2169,11 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
           }
         } else if (wheelEvent->mLineOrPageDeltaX) {
           switch (wheelEvent->mDeltaMode) {
-            case WheelEventBinding::DOM_DELTA_PAGE:
+            case WheelEvent_Binding::DOM_DELTA_PAGE:
               pluginEvent.event = WM_MOUSEHWHEEL;
               delta = -WHEEL_DELTA * wheelEvent->mLineOrPageDeltaX;
               break;
-            case WheelEventBinding::DOM_DELTA_LINE: {
+            case WheelEvent_Binding::DOM_DELTA_LINE: {
               pluginEvent.event = WM_MOUSEHWHEEL;
               UINT charsPerWheelDelta = 0;
               // FYI: SPI_GETWHEELSCROLLCHARS is available on Vista or later.
@@ -2189,7 +2190,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
               delta *= wheelEvent->mLineOrPageDeltaX;
               break;
             }
-            case WheelEventBinding::DOM_DELTA_PIXEL:
+            case WheelEvent_Binding::DOM_DELTA_PIXEL:
             default:
               // We don't support WM_GESTURE with this path.
               MOZ_ASSERT(!pluginEvent.event);
@@ -2823,7 +2824,7 @@ nsresult nsPluginInstanceOwner::Init(nsIContent* aContent)
     // document is destroyed before we try to create the new one.
     objFrame->PresContext()->EnsureVisible();
   } else {
-    NS_NOTREACHED("Should not be initializing plugin without a frame");
+    MOZ_ASSERT_UNREACHABLE("Should not be initializing plugin without a frame");
     return NS_ERROR_FAILURE;
   }
 

@@ -2,11 +2,7 @@
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from helper_shadowdom.js */
-
 "use strict";
-
-loadHelperScript("helper_shadowdom.js");
 
 // Test that slot elements are correctly updated when slotted elements are being removed
 // from the DOM.
@@ -31,44 +27,44 @@ const TEST_URL = `data:text/html;charset=utf-8,
 add_task(async function() {
   await enableWebComponents();
 
-  let {inspector} = await openInspectorForURL(TEST_URL);
+  const {inspector} = await openInspectorForURL(TEST_URL);
 
   // <test-component> is a shadow host.
   info("Find and expand the test-component shadow DOM host.");
-  let hostFront = await getNodeFront("test-component", inspector);
+  const hostFront = await getNodeFront("test-component", inspector);
   await inspector.markup.expandNode(hostFront);
   await waitForMultipleChildrenUpdates(inspector);
 
   info("Test that expanding a shadow host shows shadow root and direct host children.");
-  let {markup} = inspector;
-  let hostContainer = markup.getContainer(hostFront);
-  let childContainers = hostContainer.getChildContainers();
+  const {markup} = inspector;
+  const hostContainer = markup.getContainer(hostFront);
+  const childContainers = hostContainer.getChildContainers();
 
   is(childContainers.length, 3, "Expecting 3 children: shadowroot, 2 host children");
-  checkText(childContainers[0], "#shadow-root");
-  checkText(childContainers[1], "div");
-  checkText(childContainers[2], "div");
+  assertContainerHasText(childContainers[0], "#shadow-root");
+  assertContainerHasText(childContainers[1], "div");
+  assertContainerHasText(childContainers[2], "div");
 
   info("Expand the shadow root");
-  let shadowRootContainer = childContainers[0];
+  const shadowRootContainer = childContainers[0];
   await expandContainer(inspector, shadowRootContainer);
 
-  let shadowChildContainers = shadowRootContainer.getChildContainers();
+  const shadowChildContainers = shadowRootContainer.getChildContainers();
   is(shadowChildContainers.length, 1, "Expecting 1 child slot");
-  checkText(shadowChildContainers[0], "slot");
+  assertContainerHasText(shadowChildContainers[0], "slot");
 
   info("Expand the slot");
-  let slotContainer = shadowChildContainers[0];
+  const slotContainer = shadowChildContainers[0];
   await expandContainer(inspector, slotContainer);
 
   let slotChildContainers = slotContainer.getChildContainers();
   is(slotChildContainers.length, 2, "Expecting 2 slotted children");
-  slotChildContainers.forEach(container => checkSlotted(container));
+  slotChildContainers.forEach(container => assertContainerSlotted(container));
 
   await deleteNode(inspector, "#el1");
   slotChildContainers = slotContainer.getChildContainers();
   is(slotChildContainers.length, 1, "Expecting 1 slotted child");
-  checkSlotted(slotChildContainers[0]);
+  assertContainerSlotted(slotChildContainers[0]);
 
   await deleteNode(inspector, "#el2");
   slotChildContainers = slotContainer.getChildContainers();
@@ -84,8 +80,8 @@ async function deleteNode(inspector, selector) {
   await clickContainer(selector, inspector);
 
   info("Delete the node");
-  let mutated = inspector.once("markupmutation");
-  let updated = inspector.once("inspector-updated");
+  const mutated = inspector.once("markupmutation");
+  const updated = inspector.once("inspector-updated");
   EventUtils.sendKey("delete", inspector.panelWin);
   await mutated;
   await updated;

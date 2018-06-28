@@ -38,8 +38,8 @@
 #include "gc/GC-inl.h"
 #include "gc/Nursery-inl.h"
 #include "gc/PrivateIterators-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/NativeObject-inl.h"
+#include "vm/Realm-inl.h"
 #include "vm/StringType-inl.h"
 #include "vm/UnboxedObject-inl.h"
 
@@ -268,9 +268,8 @@ js::CheckTracedThing(JSTracer* trc, T* thing)
      * thread during compacting GC and reading the contents of the thing by
      * IsThingPoisoned would be racy in this case.
      */
-    MOZ_ASSERT_IF(JS::CurrentThreadIsHeapBusy() &&
-                  !zone->isGCCompacting() &&
-                  !rt->gc.isBackgroundSweeping(),
+    MOZ_ASSERT_IF(JS::RuntimeHeapIsBusy() &&
+                  !zone->isGCSweeping() && !zone->isGCFinished() && !zone->isGCCompacting(),
                   !IsThingPoisoned(thing) || !InFreeList(thing->asTenured().arena(), thing));
 #endif
 }
@@ -905,9 +904,10 @@ template <typename T>
 bool
 js::GCMarker::mark(T* thing)
 {
+    if (IsInsideNursery(thing))
+        return false;
     AssertShouldMarkInZone(thing);
     TenuredCell* cell = TenuredCell::fromPointer(thing);
-    MOZ_ASSERT(!IsInsideNursery(cell));
 
     if (!TypeParticipatesInCC<T>::value)
         return cell->markIfUnmarked(MarkColor::Black);
@@ -1466,12 +1466,12 @@ CallTraceHook(Functor f, JSTracer* trc, JSObject* obj, CheckGeneration check, Ar
 
     if (clasp->isTrace(InlineTypedObject::obj_trace)) {
         Shape** pshape = obj->as<InlineTypedObject>().addressOfShapeFromGC();
-        f(pshape, mozilla::Forward<Args>(args)...);
+        f(pshape, std::forward<Args>(args)...);
 
         InlineTypedObject& tobj = obj->as<InlineTypedObject>();
         if (tobj.typeDescr().hasTraceList()) {
             VisitTraceList(f, tobj.typeDescr().traceList(), tobj.inlineTypedMemForGC(),
-                           mozilla::Forward<Args>(args)...);
+                           std::forward<Args>(args)...);
         }
 
         return nullptr;
@@ -1480,7 +1480,7 @@ CallTraceHook(Functor f, JSTracer* trc, JSObject* obj, CheckGeneration check, Ar
     if (clasp == &UnboxedPlainObject::class_) {
         JSObject** pexpando = obj->as<UnboxedPlainObject>().addressOfExpando();
         if (*pexpando)
-            f(pexpando, mozilla::Forward<Args>(args)...);
+            f(pexpando, std::forward<Args>(args)...);
 
         UnboxedPlainObject& unboxed = obj->as<UnboxedPlainObject>();
         const UnboxedLayout& layout = check == CheckGeneration::DoChecks
@@ -1488,7 +1488,7 @@ CallTraceHook(Functor f, JSTracer* trc, JSObject* obj, CheckGeneration check, Ar
                                       : unboxed.layoutDontCheckGeneration();
         if (layout.traceList()) {
             VisitTraceList(f, layout.traceList(), unboxed.data(),
-                           mozilla::Forward<Args>(args)...);
+                           std::forward<Args>(args)...);
         }
 
         return nullptr;
@@ -1506,19 +1506,19 @@ static void
 VisitTraceList(F f, const int32_t* traceList, uint8_t* memory, Args&&... args)
 {
     while (*traceList != -1) {
-        f(reinterpret_cast<JSString**>(memory + *traceList), mozilla::Forward<Args>(args)...);
+        f(reinterpret_cast<JSString**>(memory + *traceList), std::forward<Args>(args)...);
         traceList++;
     }
     traceList++;
     while (*traceList != -1) {
         JSObject** objp = reinterpret_cast<JSObject**>(memory + *traceList);
         if (*objp)
-            f(objp, mozilla::Forward<Args>(args)...);
+            f(objp, std::forward<Args>(args)...);
         traceList++;
     }
     traceList++;
     while (*traceList != -1) {
-        f(reinterpret_cast<Value*>(memory + *traceList), mozilla::Forward<Args>(args)...);
+        f(reinterpret_cast<Value*>(memory + *traceList), std::forward<Args>(args)...);
         traceList++;
     }
 }
@@ -2563,7 +2563,7 @@ GCMarker::checkZone(void* p)
 
 size_t
 GCMarker::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                              const AutoLockForExclusiveAccess& lock) const
+                              const AutoAccessAtomsZone& access) const
 {
     size_t size = stack.sizeOfExcludingThis(mallocSizeOf);
     for (ZonesIter zone(runtime(), WithAtoms); !zone.done(); zone.next())
@@ -2575,7 +2575,7 @@ GCMarker::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
 Zone*
 GCMarker::stackContainsCrossZonePointerTo(const Cell* target) const
 {
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapCollecting());
+    MOZ_ASSERT(!JS::RuntimeHeapIsCollecting());
 
     Zone* targetZone = target->asTenured().zone();
 
@@ -3214,7 +3214,7 @@ CheckIsMarkedThing(T* thingp)
     MOZ_ASSERT_IF(!ThingIsPermanentAtomOrWellKnownSymbol(*thingp),
                   CurrentThreadCanAccessRuntime(rt) ||
                   CurrentThreadCanAccessZone((*thingp)->zoneFromAnyThread()) ||
-                  (JS::CurrentThreadIsHeapCollecting() && rt->gc.state() == State::Sweep));
+                  (JS::RuntimeHeapIsCollecting() && rt->gc.state() == State::Sweep));
 #endif
 }
 
@@ -3299,7 +3299,7 @@ js::gc::IsAboutToBeFinalizedInternal(T** thingp)
         return false;
 
     if (IsInsideNursery(thing)) {
-        return JS::CurrentThreadIsHeapMinorCollecting() &&
+        return JS::RuntimeHeapIsMinorCollecting() &&
                !Nursery::getForwardedPointer(reinterpret_cast<Cell**>(thingp));
     }
 
@@ -3514,8 +3514,8 @@ UnmarkGrayGCThing(JSRuntime* rt, JS::GCCellPtr thing)
 JS_FRIEND_API(bool)
 JS::UnmarkGrayGCThingRecursively(JS::GCCellPtr thing)
 {
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapCollecting());
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapCycleCollecting());
+    MOZ_ASSERT(!JS::RuntimeHeapIsCollecting());
+    MOZ_ASSERT(!JS::RuntimeHeapIsCycleCollecting());
 
     JSRuntime* rt = thing.asCell()->runtimeFromMainThread();
     gcstats::AutoPhase outerPhase(rt->gc.stats(), gcstats::PhaseKind::BARRIER);

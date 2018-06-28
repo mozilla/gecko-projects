@@ -554,7 +554,7 @@ webgl::LinkedProgramInfo::GetDrawFetchLimits(const char* const funcName) const
 
     // --
 
-    return mDrawFetchCache.Insert(vao.get(), Move(fetchLimits), Move(cacheDeps));
+    return mDrawFetchCache.Insert(vao.get(), std::move(fetchLimits), std::move(cacheDeps));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1709,7 +1709,7 @@ webgl::LinkedProgramInfo::MapFragDataName(const nsCString& userName,
 JSObject*
 WebGLProgram::WrapObject(JSContext* js, JS::Handle<JSObject*> givenProto)
 {
-    return dom::WebGLProgramBinding::Wrap(js, this, givenProto);
+    return dom::WebGLProgram_Binding::Wrap(js, this, givenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLProgram, mVertShader, mFragShader)

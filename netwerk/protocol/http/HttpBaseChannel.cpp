@@ -42,6 +42,7 @@
 #include "nsINetworkInterceptController.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceStorage.h"
+#include "mozilla/Services.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
@@ -199,6 +200,8 @@ HttpBaseChannel::HttpBaseChannel()
   , mReferrerPolicy(NS_GetDefaultReferrerPolicy())
   , mRedirectCount(0)
   , mInternalRedirectCount(0)
+  , mChannelCreationTime(0)
+  , mAsyncOpenTimeOverriden(false)
   , mForcePending(false)
   , mCorsIncludeCredentials(false)
   , mCorsMode(nsIHttpChannelInternal::CORS_MODE_NO_CORS)
@@ -219,10 +222,13 @@ HttpBaseChannel::HttpBaseChannel()
   , mAltDataForChild(false)
   , mForceMainDocumentChannel(false)
   , mIsTrackingResource(false)
+  , mChannelId(0)
   , mLastRedirectFlags(0)
   , mReqContentLength(0U)
   , mPendingInputStreamLengthOperation(false)
 {
+  this->mSelfAddr.inet = {};
+  this->mPeerAddr.inet = {};
   LOG(("Creating HttpBaseChannel @%p\n", this));
 
   // Subfields of unions cannot be targeted in an initializer list.
@@ -307,7 +313,7 @@ HttpBaseChannel::ReleaseMainThreadOnlyReferences()
     arrayToRelease.AppendElement(nonTailRemover.forget());
   }
 
-  NS_DispatchToMainThread(new ProxyReleaseRunnable(Move(arrayToRelease)));
+  NS_DispatchToMainThread(new ProxyReleaseRunnable(std::move(arrayToRelease)));
 }
 
 void
@@ -472,21 +478,6 @@ HttpBaseChannel::GetLoadFlags(nsLoadFlags *aLoadFlags)
 NS_IMETHODIMP
 HttpBaseChannel::SetLoadFlags(nsLoadFlags aLoadFlags)
 {
-  bool synthesized = false;
-  nsresult rv = GetResponseSynthesized(&synthesized);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // If this channel is marked as awaiting a synthesized response,
-  // modifying certain load flags can interfere with the implementation
-  // of the network interception logic. This takes care of a couple
-  // known cases that attempt to mark channels as anonymous due
-  // to cross-origin redirects; since the response is entirely synthesized
-  // this is an unnecessary precaution.
-  // This should be removed when bug 1201683 is fixed.
-  if (synthesized && aLoadFlags != mLoadFlags) {
-    aLoadFlags &= ~LOAD_ANONYMOUS;
-  }
-
   mLoadFlags = aLoadFlags;
   return NS_OK;
 }
@@ -1562,6 +1553,17 @@ HttpBaseChannel::GetIsTrackingResource(bool* aIsTrackingResource)
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::OverrideTrackingResource(bool aIsTracking)
+{
+  LOG(("HttpBaseChannel::OverrideTrackingResource(%d) %p "
+       "mIsTrackingResource=%d",
+      (int) aIsTracking, this, (int) mIsTrackingResource));
+
+  mIsTrackingResource = aIsTracking;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetTransferSize(uint64_t *aTransferSize)
 {
   *aTransferSize = mTransferSize;
@@ -2331,7 +2333,7 @@ HttpBaseChannel::GetProtocolVersion(nsACString& aProtocolVersion)
   }
 
   if (mResponseHead) {
-    uint32_t version = mResponseHead->Version();
+    HttpVersion version = mResponseHead->Version();
     aProtocolVersion.Assign(nsHttp::GetProtocolVersion(version));
     return NS_OK;
   }
@@ -2379,7 +2381,7 @@ HttpBaseChannel::GetTopWindowURI(nsIURI **aTopWindowURI)
   // Only compute the top window URI once. In e10s, this must be computed in the
   // child. The parent gets the top window URI through HttpChannelOpenArgs.
   if (!mTopWindowURI) {
-    util = do_GetService(THIRDPARTYUTIL_CONTRACTID);
+    util = services::GetThirdPartyUtil();
     if (!util) {
       return NS_ERROR_NOT_AVAILABLE;
     }
@@ -2423,10 +2425,10 @@ HttpBaseChannel::SetDocumentURI(nsIURI *aDocumentURI)
 NS_IMETHODIMP
 HttpBaseChannel::GetRequestVersion(uint32_t *major, uint32_t *minor)
 {
-  nsHttpVersion version = mRequestHead.Version();
+  HttpVersion version = mRequestHead.Version();
 
-  if (major) { *major = version / 10; }
-  if (minor) { *minor = version % 10; }
+  if (major) { *major = static_cast<uint32_t>(version) / 10; }
+  if (minor) { *minor = static_cast<uint32_t>(version) % 10; }
 
   return NS_OK;
 }
@@ -2440,10 +2442,10 @@ HttpBaseChannel::GetResponseVersion(uint32_t *major, uint32_t *minor)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsHttpVersion version = mResponseHead->Version();
+  HttpVersion version = mResponseHead->Version();
 
-  if (major) { *major = version / 10; }
-  if (minor) { *minor = version % 10; }
+  if (major) { *major = static_cast<uint32_t>(version) / 10; }
+  if (minor) { *minor = static_cast<uint32_t>(version) % 10; }
 
   return NS_OK;
 }
@@ -2607,7 +2609,7 @@ HttpBaseChannel::AddSecurityMessage(const nsAString &aMessageTag,
   // Delay the object construction until requested.
   // See TakeAllSecurityMessages()
   Pair<nsString, nsString> pair(aMessageTag, aMessageCategory);
-  mSecurityConsoleMessages.AppendElement(Move(pair));
+  mSecurityConsoleMessages.AppendElement(std::move(pair));
 
   nsCOMPtr<nsIConsoleService> console(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
   if (!console) {
@@ -3783,14 +3785,28 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
       newTimedChannel->SetInternalRedirectCount(mInternalRedirectCount);
     }
 
+    TimeStamp oldAsyncOpenTime;
+    oldTimedChannel->GetAsyncOpen(&oldAsyncOpenTime);
+
+    if (redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL) {
+      TimeStamp oldChannelCreationTimestamp;
+      oldTimedChannel->GetChannelCreation(&oldChannelCreationTimestamp);
+
+      if (!oldChannelCreationTimestamp.IsNull()) {
+        newTimedChannel->SetChannelCreation(oldChannelCreationTimestamp);
+      }
+
+      if (!oldAsyncOpenTime.IsNull()) {
+        newTimedChannel->SetAsyncOpen(oldAsyncOpenTime);
+      }
+    }
+
     // If the RedirectStart is null, we will use the AsyncOpen value of the
     // previous channel (this is the first redirect in the redirects chain).
     if (mRedirectStartTimeStamp.IsNull()) {
       // Only do this for real redirects.  Internal redirects should be hidden.
       if (!(redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL)) {
-        TimeStamp asyncOpen;
-        oldTimedChannel->GetAsyncOpen(&asyncOpen);
-        newTimedChannel->SetRedirectStart(asyncOpen);
+        newTimedChannel->SetRedirectStart(oldAsyncOpenTime);
       }
     } else {
       newTimedChannel->SetRedirectStart(mRedirectStartTimeStamp);
@@ -3928,8 +3944,25 @@ HttpBaseChannel::GetChannelCreation(TimeStamp* _retval) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::SetChannelCreation(TimeStamp aValue) {
+  MOZ_DIAGNOSTIC_ASSERT(!aValue.IsNull());
+  TimeDuration adjust = aValue - mChannelCreationTimestamp;
+  mChannelCreationTimestamp = aValue;
+  mChannelCreationTime += (PRTime)adjust.ToMicroseconds();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetAsyncOpen(TimeStamp* _retval) {
   *_retval = mAsyncOpenTime;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetAsyncOpen(TimeStamp aValue) {
+  MOZ_DIAGNOSTIC_ASSERT(!aValue.IsNull());
+  mAsyncOpenTime = aValue;
+  mAsyncOpenTimeOverriden = true;
   return NS_OK;
 }
 

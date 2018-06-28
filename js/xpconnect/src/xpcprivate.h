@@ -293,12 +293,10 @@ public:
 class XPCRootSetElem
 {
 public:
-    XPCRootSetElem()
+    XPCRootSetElem() :
+        mNext(nullptr),
+        mSelfp(nullptr)
     {
-#ifdef DEBUG
-        mNext = nullptr;
-        mSelfp = nullptr;
-#endif
     }
 
     ~XPCRootSetElem()
@@ -560,7 +558,7 @@ public:
                                  JSFinalizeStatus status,
                                  void* data);
     static void WeakPointerZonesCallback(JSContext* cx, void* data);
-    static void WeakPointerCompartmentCallback(JSContext* cx, JSCompartment* comp, void* data);
+    static void WeakPointerCompartmentCallback(JSContext* cx, JS::Compartment* comp, void* data);
 
     inline void AddVariantRoot(XPCTraceableVariant* variant);
     inline void AddWrappedJSRoot(nsXPCWrappedJS* wrappedJS);
@@ -837,7 +835,7 @@ public:
 
     nsIPrincipal*
     GetPrincipal() const {
-        JSCompartment* c = js::GetObjectCompartment(mGlobalJSObject);
+        JS::Compartment* c = js::GetObjectCompartment(mGlobalJSObject);
         return nsJSPrincipals::get(JS_GetCompartmentPrincipals(c));
     }
 
@@ -919,7 +917,7 @@ public:
 
     nsAutoPtr<JSObject2JSObjectMap> mWaiverWrapperMap;
 
-    JSCompartment* Compartment() const { return js::GetObjectCompartment(mGlobalJSObject); }
+    JS::Compartment* Compartment() const { return js::GetObjectCompartment(mGlobalJSObject); }
 
     bool IsContentXBLScope() { return xpc::IsContentXBLCompartment(Compartment()); }
     bool AllowContentXBLScope();
@@ -1870,7 +1868,7 @@ protected:
     void Unlink();
 
 private:
-    JSCompartment* Compartment() const {
+    JS::Compartment* Compartment() const {
         return js::GetObjectCompartment(mJSObj.unbarrieredGet());
     }
 
@@ -2834,16 +2832,11 @@ class CompartmentPrivate
     CompartmentPrivate(const CompartmentPrivate&) = delete;
 
 public:
-    enum LocationHint {
-        LocationHintRegular,
-        LocationHintAddon
-    };
-
-    explicit CompartmentPrivate(JSCompartment* c);
+    explicit CompartmentPrivate(JS::Compartment* c);
 
     ~CompartmentPrivate();
 
-    static CompartmentPrivate* Get(JSCompartment* compartment)
+    static CompartmentPrivate* Get(JS::Compartment* compartment)
     {
         MOZ_ASSERT(compartment);
         void* priv = JS_GetCompartmentPrivate(compartment);
@@ -2852,7 +2845,7 @@ public:
 
     static CompartmentPrivate* Get(JSObject* object)
     {
-        JSCompartment* compartment = js::GetObjectCompartment(object);
+        JS::Compartment* compartment = js::GetObjectCompartment(object);
         return Get(compartment);
     }
 
@@ -2911,48 +2904,6 @@ public:
     // by a security wrapper. See XrayWrapper.cpp.
     bool wrapperDenialWarnings[WrapperDenialTypeCount];
 
-    const nsACString& GetLocation() {
-        if (location.IsEmpty() && locationURI) {
-
-            nsCOMPtr<nsIXPConnectWrappedJS> jsLocationURI =
-                 do_QueryInterface(locationURI);
-            if (jsLocationURI) {
-                // We cannot call into JS-implemented nsIURI objects, because
-                // we are iterating over the JS heap at this point.
-                location =
-                    NS_LITERAL_CSTRING("<JS-implemented nsIURI location>");
-            } else if (NS_FAILED(locationURI->GetSpec(location))) {
-                location = NS_LITERAL_CSTRING("<unknown location>");
-            }
-        }
-        return location;
-    }
-    bool GetLocationURI(nsIURI** aURI) {
-        return GetLocationURI(LocationHintRegular, aURI);
-    }
-    bool GetLocationURI(LocationHint aLocationHint, nsIURI** aURI) {
-        if (locationURI) {
-            nsCOMPtr<nsIURI> rval = locationURI;
-            rval.forget(aURI);
-            return true;
-        }
-        return TryParseLocationURI(aLocationHint, aURI);
-    }
-    void SetLocation(const nsACString& aLocation) {
-        if (aLocation.IsEmpty())
-            return;
-        if (!location.IsEmpty() || locationURI)
-            return;
-        location = aLocation;
-    }
-    void SetLocationURI(nsIURI* aLocationURI) {
-        if (!aLocationURI)
-            return;
-        if (locationURI)
-            return;
-        locationURI = aLocationURI;
-    }
-
     JSObject2WrappedJSMap* GetWrappedJSMap() const { return mWrappedJSMap; }
     void UpdateWeakPointersAfterGC();
 
@@ -2961,14 +2912,10 @@ public:
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
 private:
-    nsCString location;
-    nsCOMPtr<nsIURI> locationURI;
     JSObject2WrappedJSMap* mWrappedJSMap;
-
-    bool TryParseLocationURI(LocationHint aType, nsIURI** aURI);
 };
 
-bool IsUniversalXPConnectEnabled(JSCompartment* compartment);
+bool IsUniversalXPConnectEnabled(JS::Compartment* compartment);
 bool IsUniversalXPConnectEnabled(JSContext* cx);
 bool EnableUniversalXPConnect(JSContext* cx);
 
@@ -2984,13 +2931,18 @@ CrashIfNotInAutomation()
 //
 // Following the ECMAScript spec, a realm contains a global (e.g. an inner
 // Window) and its associated scripts and objects; a compartment may contain
-// several same-origin, same-principal realms.
+// several same-origin realms.
 class RealmPrivate
 {
     RealmPrivate() = delete;
     RealmPrivate(const RealmPrivate&) = delete;
 
 public:
+    enum LocationHint {
+        LocationHintRegular,
+        LocationHintAddon
+    };
+
     explicit RealmPrivate(JS::Realm* realm);
 
     static RealmPrivate* Get(JS::Realm* realm)
@@ -3015,6 +2967,55 @@ public:
     // Our XPCWrappedNativeScope. This is non-null if and only if this is an
     // XPConnect realm.
     XPCWrappedNativeScope* scope;
+
+    const nsACString& GetLocation() {
+        if (location.IsEmpty() && locationURI) {
+
+            nsCOMPtr<nsIXPConnectWrappedJS> jsLocationURI =
+                 do_QueryInterface(locationURI);
+            if (jsLocationURI) {
+                // We cannot call into JS-implemented nsIURI objects, because
+                // we are iterating over the JS heap at this point.
+                location =
+                    NS_LITERAL_CSTRING("<JS-implemented nsIURI location>");
+            } else if (NS_FAILED(locationURI->GetSpec(location))) {
+                location = NS_LITERAL_CSTRING("<unknown location>");
+            }
+        }
+        return location;
+    }
+    bool GetLocationURI(LocationHint aLocationHint, nsIURI** aURI) {
+        if (locationURI) {
+            nsCOMPtr<nsIURI> rval = locationURI;
+            rval.forget(aURI);
+            return true;
+        }
+        return TryParseLocationURI(aLocationHint, aURI);
+    }
+    bool GetLocationURI(nsIURI** aURI) {
+        return GetLocationURI(LocationHintRegular, aURI);
+    }
+
+    void SetLocation(const nsACString& aLocation) {
+        if (aLocation.IsEmpty())
+            return;
+        if (!location.IsEmpty() || locationURI)
+            return;
+        location = aLocation;
+    }
+    void SetLocationURI(nsIURI* aLocationURI) {
+        if (!aLocationURI)
+            return;
+        if (locationURI)
+            return;
+        locationURI = aLocationURI;
+    }
+
+private:
+    nsCString location;
+    nsCOMPtr<nsIURI> locationURI;
+
+    bool TryParseLocationURI(LocationHint aType, nsIURI** aURI);
 };
 
 inline XPCWrappedNativeScope*

@@ -171,8 +171,8 @@ gfxUserFontEntry::Matches(const nsTArray<gfxFontFaceSrc>& aFontFaceSrcList,
 gfxFont*
 gfxUserFontEntry::CreateFontInstance(const gfxFontStyle* aFontStyle)
 {
-    NS_NOTREACHED("should only be creating a gfxFont"
-                  " with an actual platform font entry");
+    MOZ_ASSERT_UNREACHABLE("should only be creating a gfxFont"
+                           " with an actual platform font entry");
 
     // userfont entry is a container, can't create font from the container
     return nullptr;
@@ -894,8 +894,12 @@ gfxUserFontEntry::FontDataDownloadComplete(const uint8_t* aFontData,
         free((void*)aFontData);
     }
 
-    // error occurred, load next src if load not yet timed out
-    if (mFontDataLoadingState != LOADING_TIMED_OUT) {
+    // Error occurred.  Make sure the FontFace's promise is rejected if the
+    // load timed out, or else load the next src.
+    if (mFontDataLoadingState == LOADING_TIMED_OUT) {
+      mFontDataLoadingState = LOADING_FAILED;
+      SetLoadState(STATUS_FAILED);
+    } else {
       LoadNextSrc();
     }
 
@@ -1143,7 +1147,7 @@ gfxUserFontSet::UserFontCache::Flusher::Observe(nsISupports* aSubject,
             i.Get()->GetFontEntry()->DisconnectSVG();
         }
     } else {
-        NS_NOTREACHED("unexpected topic");
+        MOZ_ASSERT_UNREACHABLE("unexpected topic");
     }
 
     return NS_OK;

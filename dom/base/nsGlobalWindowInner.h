@@ -365,6 +365,8 @@ public:
 
   void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
+  void NoteDOMContentLoaded();
+
   virtual nsresult FireDelayedDOMEvents() override;
 
   virtual nsresult SetNewDocument(nsIDocument *aDocument,
@@ -978,6 +980,8 @@ public:
   already_AddRefed<nsWindowRoot> GetWindowRoot(mozilla::ErrorResult& aError);
 
   bool ShouldReportForServiceWorkerScope(const nsAString& aScope);
+
+  void PropagateClearSiteDataReload(const nsACString& aOrigin);
 
   already_AddRefed<mozilla::dom::InstallTriggerImpl> GetInstallTrigger();
 

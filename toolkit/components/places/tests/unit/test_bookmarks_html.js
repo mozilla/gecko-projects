@@ -4,9 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const LOAD_IN_SIDEBAR_ANNO = "bookmarkProperties/loadInSidebar";
-const DESCRIPTION_ANNO = "bookmarkProperties/description";
-
 // An object representing the contents of bookmarks.preplaces.html.
 var test_bookmarks = {
   menu: [
@@ -34,16 +31,13 @@ var test_bookmarks = {
       type: Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR
     },
     { title: "test",
-      description: "folder test comment",
       dateAdded: 1177541020000000,
       lastModified: 1177541050000000,
       children: [
         { title: "test post keyword",
-          description: "item description",
           dateAdded: 1177375336000000,
           lastModified: 1177375423000000,
           keyword: "test",
-          sidebar: true,
           postData: "hidden1%3Dbar&text1%3D%25s",
           charset: "ISO-8859-1",
           url: "http://test/post"
@@ -294,11 +288,6 @@ function checkItem(aExpected, aNode) {
         case "title":
           Assert.equal(aNode.title, aExpected.title);
           break;
-        case "description":
-          Assert.equal(PlacesUtils.annotations
-                                  .getItemAnnotation(id, DESCRIPTION_ANNO),
-                       aExpected.description);
-          break;
         case "dateAdded":
           Assert.equal(PlacesUtils.toPRTime(bookmark.dateAdded),
                        aExpected.dateAdded);
@@ -322,11 +311,6 @@ function checkItem(aExpected, aNode) {
           Assert.equal(entry.keyword, aExpected.keyword);
           break;
         }
-        case "sidebar":
-          Assert.equal(PlacesUtils.annotations
-                                  .itemHasAnnotation(id, LOAD_IN_SIDEBAR_ANNO),
-                       aExpected.sidebar);
-          break;
         case "postData": {
           let entry = await PlacesUtils.keywords.fetch({ url: aNode.uri });
           Assert.equal(entry.postData, aExpected.postData);

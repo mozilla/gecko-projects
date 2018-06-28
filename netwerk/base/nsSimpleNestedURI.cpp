@@ -80,7 +80,7 @@ nsSimpleNestedURI::SetRef(const nsACString &aRef)
 NS_IMETHODIMP
 nsSimpleNestedURI::Read(nsIObjectInputStream *aStream)
 {
-    NS_NOTREACHED("Use nsIURIMutator.read() instead");
+    MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -208,9 +208,9 @@ nsSimpleNestedURI::StartClone(nsSimpleURI::RefHandlingEnum refHandlingMode,
     NS_ENSURE_TRUE(mInnerURI, nullptr);
 
     nsCOMPtr<nsIURI> innerClone;
-    nsresult rv;
+    nsresult rv = NS_OK;
     if (refHandlingMode == eHonorRef) {
-        rv = mInnerURI->Clone(getter_AddRefs(innerClone));
+        innerClone = mInnerURI;
     } else if (refHandlingMode == eReplaceRef) {
         rv = mInnerURI->CloneWithNewRef(newRef, getter_AddRefs(innerClone));
     } else {

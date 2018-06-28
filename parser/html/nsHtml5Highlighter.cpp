@@ -233,7 +233,7 @@ nsHtml5Highlighter::Transition(int32_t aState, bool aReconsume, int32_t aPos)
           mAmpersand = CurrentNode();
           break;
         default:
-          NS_NOTREACHED("Impossible transition.");
+          MOZ_ASSERT_UNREACHABLE("Impossible transition.");
           break;
       }
       break;
@@ -657,7 +657,7 @@ nsIContent**
 nsHtml5Highlighter::AllocateContentHandle()
 {
   if (mHandlesUsed == NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH) {
-    mOldHandles.AppendElement(Move(mHandles));
+    mOldHandles.AppendElement(std::move(mHandles));
     mHandles =
       MakeUnique<nsIContent* []>(NS_HTML5_HIGHLIGHTER_HANDLE_ARRAY_LENGTH);
     mHandlesUsed = 0;

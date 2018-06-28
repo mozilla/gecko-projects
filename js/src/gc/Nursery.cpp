@@ -24,8 +24,8 @@
 #if defined(DEBUG)
 #include "vm/EnvironmentObject.h"
 #endif
-#include "vm/JSCompartment.h"
 #include "vm/JSONPrinter.h"
+#include "vm/Realm.h"
 #include "vm/Time.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/TypeInference.h"
@@ -354,7 +354,7 @@ void*
 js::Nursery::allocate(size_t size)
 {
     MOZ_ASSERT(isEnabled());
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapBusy());
+    MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(runtime()));
     MOZ_ASSERT_IF(currentChunk_ == currentStartChunk_, position() >= currentStartPosition_);
     MOZ_ASSERT(position() % CellAlignBytes == 0);
@@ -772,7 +772,7 @@ js::Nursery::collect(JS::gcreason::Reason reason)
         }
     }
 
-    mozilla::Maybe<AutoTraceSession> session;
+    mozilla::Maybe<AutoGCSession> session;
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         if (shouldPretenure && zone->allocNurseryStrings && zone->tenuredStrings >= 30 * 1000) {
             if (!session.isSome())
@@ -846,7 +846,7 @@ void
 js::Nursery::doCollection(JS::gcreason::Reason reason, TenureCountCache& tenureCounts)
 {
     JSRuntime* rt = runtime();
-    AutoTraceSession session(rt, JS::HeapState::MinorCollecting);
+    AutoGCSession session(rt, JS::HeapState::MinorCollecting);
     AutoSetThreadIsPerformingGC performingGC;
     AutoStopVerifyingBarriers av(rt, false);
     AutoDisableProxyCheck disableStrictProxyChecking;

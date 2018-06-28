@@ -65,7 +65,7 @@ with Files("ContentWebRTC.jsm"):
     BUG_COMPONENT = ("Firefox", "Device Permissions")
 
 with Files("ExtensionsUI.jsm"):
-    BUG_COMPONENT = ("Toolkit", "WebExtensions: General")
+    BUG_COMPONENT = ("WebExtensions", "General")
 
 with Files("LaterRun.jsm"):
     BUG_COMPONENT = ("Firefox", "Tours")
@@ -103,11 +103,11 @@ with Files("SiteDataManager.jsm"):
 with Files("SitePermissions.jsm"):
     BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
 
-with Files("TabsPopup.jsm"):
+with Files("TabsList.jsm"):
     BUG_COMPONENT = ("Firefox", "Tabbed Browser")
 
 with Files("ThemeVariableMap.jsm"):
-    BUG_COMPONENT = ("Toolkit", "WebExtensions: Themes")
+    BUG_COMPONENT = ("WebExtensions", "Themes")
 
 with Files("TransientPrefs.jsm"):
     BUG_COMPONENT = ("Firefox", "Preferences")
@@ -138,8 +138,8 @@ EXTRA_JS_MODULES += [
     'AboutNewTab.jsm',
     'AsyncTabSwitcher.jsm',
     'AttributionCode.jsm',
+    'BlockedSiteContent.jsm',
     'BrowserErrorReporter.jsm',
-    'BrowserUITelemetry.jsm',
     'BrowserUsageTelemetry.jsm',
     'BrowserWindowTracker.jsm',
     'ContentClick.jsm',
@@ -156,6 +156,7 @@ EXTRA_JS_MODULES += [
     'FormValidationHandler.jsm',
     'LaterRun.jsm',
     'LightWeightThemeWebInstallListener.jsm',
+    'NetErrorContent.jsm',
     'OpenInTabsUtils.jsm',
     'PageActions.jsm',
     'PageInfoListener.jsm',
@@ -167,10 +168,11 @@ EXTRA_JS_MODULES += [
     'ReaderParent.jsm',
     'RemotePrompt.jsm',
     'Sanitizer.jsm',
+    'SavantShieldStudy.jsm',
     'SchedulePressure.jsm',
     'SiteDataManager.jsm',
     'SitePermissions.jsm',
-    'TabsPopup.jsm',
+    'TabsList.jsm',
     'ThemeVariableMap.jsm',
     'TransientPrefs.jsm',
     'webrtcUI.jsm',

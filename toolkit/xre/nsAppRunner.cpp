@@ -9,6 +9,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/FilePreferences.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/CmdLineAndEnvUtils.h"
 #include "mozilla/IOInterposer.h"
@@ -2183,6 +2184,14 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
   if (offline) {
     SaveToEnv("XRE_START_OFFLINE=1");
   }
+  if (gRestartedByOS) {
+    // Re-add this argument when actually starting the application.
+    char** newArgv = (char**) realloc(gRestartArgv, sizeof(char*) * (gRestartArgc + 2));
+    NS_ENSURE_TRUE(newArgv, NS_ERROR_OUT_OF_MEMORY);
+    gRestartArgv = newArgv;
+    gRestartArgv[gRestartArgc++] = const_cast<char*>("-os-restarted");
+    gRestartArgv[gRestartArgc] = nullptr;
+  }
 
   return LaunchChild(aNative);
 }
@@ -3803,7 +3812,7 @@ namespace startup {
     nsCOMPtr<nsIFile> crashFile;
     MOZ_TRY(aProfLD->Clone(getter_AddRefs(crashFile)));
     MOZ_TRY(crashFile->Append(FILE_STARTUP_INCOMPLETE));
-    return Move(crashFile);
+    return std::move(crashFile);
   }
 }
 }
@@ -4564,6 +4573,10 @@ XREMain::XRE_mainRun()
 
   mDirProvider.DoStartup();
 
+  // As FilePreferences need the profile directory, we must initialize right here.
+  mozilla::FilePreferences::InitDirectoriesWhitelist();
+  mozilla::FilePreferences::InitPrefs();
+
   OverrideDefaultLocaleIfNeeded();
 
   nsCString userAgentLocale;
@@ -5174,7 +5187,6 @@ BrowserTabsRemoteAutostart()
 
   gBrowserTabsRemoteStatus = status;
 
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::E10S_STATUS, status);
   return gBrowserTabsRemoteAutostart;
 }
 

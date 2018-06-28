@@ -71,6 +71,8 @@ class GeckoInstance(object):
         # Make sure Shield doesn't hit the network.
         # Removed in Firefox 60.
         "extensions.shield-recipe-client.api_url": "",
+        # Disable extensions compatibility dialogue.
+        # Removed in Firefox 61.
         "extensions.showMismatchUI": False,
         # Turn off extension updates so they don't bother tests
         "extensions.update.enabled": False,
@@ -90,9 +92,6 @@ class GeckoInstance(object):
         # Do not scan Wifi
         "geo.wifi.scan": False,
 
-        # No hang monitor
-        "hangmonitor.timeout": 0,
-
         "javascript.options.showInConsole": True,
 
         # Enable Marionette component
@@ -102,6 +101,9 @@ class GeckoInstance(object):
 
         # Disable recommended automation prefs in CI
         "marionette.prefs.recommended": False,
+
+        # Disable download and usage of OpenH264, and Widevine plugins
+        "media.gmp-manager.updateEnabled": False,
 
         "media.volume_scale": "0.01",
 
@@ -545,7 +547,7 @@ class DesktopInstance(GeckoInstance):
         # Disable browser animations
         "toolkit.cosmeticAnimations.enabled": False,
 
-        # Do not warn on exit when multiple tabs are open
+        # Do not warn when closing all open tabs
         "browser.tabs.warnOnClose": False,
         # Do not warn when closing all other open tabs
         "browser.tabs.warnOnCloseOtherTabs": False,

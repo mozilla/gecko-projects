@@ -400,12 +400,12 @@ class TabBase {
 
   /**
    * @property {boolean} highlighted
-   *        Alias for `active`.
+   *        Returns true if the tab is highlighted.
    *        @readonly
    *        @abstract
    */
   get highlighted() {
-    return this.active;
+    throw new Error("Not implemented");
   }
 
   /**
@@ -579,8 +579,8 @@ class TabBase {
       id: this.id,
       index: this.index,
       windowId: this.windowId,
-      highlighted: this.selected,
-      active: this.selected,
+      highlighted: this.highlighted,
+      active: this.active,
       pinned: this.pinned,
       status: this.status,
       hidden: this.hidden,

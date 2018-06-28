@@ -1288,7 +1288,7 @@ NS_INTERFACE_MAP_END_INHERITING(mozilla::net::nsSimpleURI)
 NS_IMETHODIMP
 nsJSURI::Read(nsIObjectInputStream *aStream)
 {
-    NS_NOTREACHED("Use nsIURIMutator.read() instead");
+    MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1376,16 +1376,7 @@ nsJSURI::Deserialize(const mozilla::ipc::URIParams& aParams)
 nsJSURI::StartClone(mozilla::net::nsSimpleURI::RefHandlingEnum refHandlingMode,
                     const nsACString& newRef)
 {
-    nsCOMPtr<nsIURI> baseClone;
-    if (mBaseURI) {
-      // Note: We preserve ref on *base* URI, regardless of ref handling mode.
-      nsresult rv = mBaseURI->Clone(getter_AddRefs(baseClone));
-      if (NS_FAILED(rv)) {
-        return nullptr;
-      }
-    }
-
-    nsJSURI* url = new nsJSURI(baseClone);
+    nsJSURI* url = new nsJSURI(mBaseURI);
     SetRefOnClone(url, refHandlingMode, newRef);
     return url;
 }

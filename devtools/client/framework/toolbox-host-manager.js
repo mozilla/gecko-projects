@@ -44,6 +44,11 @@ function ToolboxHostManager(target, hostType, hostOptions) {
 
   if (!hostType) {
     hostType = Services.prefs.getCharPref(LAST_HOST);
+    if (!Hosts[hostType]) {
+      // If the preference value is unexpected, restore to the default value.
+      Services.prefs.clearUserPref(LAST_HOST);
+      hostType = Services.prefs.getCharPref(LAST_HOST);
+    }
   }
   this.host = this.createHost(hostType, hostOptions);
   this.hostType = hostType;
@@ -58,12 +63,12 @@ ToolboxHostManager.prototype = {
     // We have to listen on capture as no event fires on bubble
     this.host.frame.addEventListener("unload", this, true);
 
-    let toolbox = new Toolbox(this.target, toolId, this.host.type,
+    const toolbox = new Toolbox(this.target, toolId, this.host.type,
                               this.host.frame.contentWindow, this.frameId);
 
     // Prevent reloading the toolbox when loading the tools in a tab
     // (e.g. from about:debugging)
-    let location = this.host.frame.contentWindow.location;
+    const location = this.host.frame.contentWindow.location;
     if (!location.href.startsWith("about:devtools-toolbox")) {
       this.host.frame.setAttribute("src", "about:devtools-toolbox");
     }
@@ -99,26 +104,27 @@ ToolboxHostManager.prototype = {
     if (!event.data) {
       return;
     }
+    const msg = event.data;
     // Toolbox document is still chrome and disallow identifying message
     // origin via event.source as it is null. So use a custom id.
-    if (event.data.frameId != this.frameId) {
+    if (msg.frameId != this.frameId) {
       return;
     }
-    switch (event.data.name) {
+    switch (msg.name) {
       case "switch-host":
-        this.switchHost(event.data.hostType);
+        this.switchHost(msg.hostType);
         break;
       case "raise-host":
         this.host.raise();
         break;
       case "set-host-title":
-        this.host.setTitle(event.data.title);
+        this.host.setTitle(msg.title);
         break;
     }
   },
 
   postMessage(data) {
-    let window = this.host.frame.contentWindow;
+    const window = this.host.frame.contentWindow;
     window.postMessage(data, "*");
   },
 
@@ -147,7 +153,7 @@ ToolboxHostManager.prototype = {
       throw new Error("Unknown hostType: " + hostType);
     }
 
-    let newHost = new Hosts[hostType](this.target.tab, options);
+    const newHost = new Hosts[hostType](this.target.tab, options);
     return newHost;
   },
 
@@ -158,18 +164,18 @@ ToolboxHostManager.prototype = {
       hostType = Services.prefs.getCharPref(PREVIOUS_HOST);
 
       // Handle the case where the previous host happens to match the current
-      // host. If so, switch to bottom if it's not already used, and side if not.
+      // host. If so, switch to bottom if it's not already used, and right side if not.
       if (hostType === this.hostType) {
         if (hostType === Toolbox.HostType.BOTTOM) {
-          hostType = Toolbox.HostType.SIDE;
+          hostType = Toolbox.HostType.RIGHT;
         } else {
           hostType = Toolbox.HostType.BOTTOM;
         }
       }
     }
-    let iframe = this.host.frame;
-    let newHost = this.createHost(hostType);
-    let newIframe = await newHost.create();
+    const iframe = this.host.frame;
+    const newHost = this.createHost(hostType);
+    const newIframe = await newHost.create();
     // change toolbox document's parent to the new host
     newIframe.swapFrameLoaders(iframe);
 

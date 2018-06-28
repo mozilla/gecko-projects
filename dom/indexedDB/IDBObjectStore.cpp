@@ -84,7 +84,7 @@ struct IDBObjectStore::StructuredCloneWriteInfo
   }
 
   StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo)
-    : mCloneBuffer(Move(aCloneWriteInfo.mCloneBuffer))
+    : mCloneBuffer(std::move(aCloneWriteInfo.mCloneBuffer))
     , mDatabase(aCloneWriteInfo.mDatabase)
     , mOffsetToKeyProp(aCloneWriteInfo.mOffsetToKeyProp)
   {
@@ -465,7 +465,7 @@ private:
       reinterpret_cast<uint8_t*>(compiled.BeginWriting()), compiledSize);
 
     MOZ_ALWAYS_SUCCEEDS(NS_NewCStringInputStream(getter_AddRefs(mStream),
-                                                 Move(compiled)));
+                                                 std::move(compiled)));
 
     mModule = nullptr;
 
@@ -657,7 +657,8 @@ StructuredCloneWriteCallback(JSContext* aCx,
     } else {
       nsCOMPtr<nsIInputStream> stream(new WasmCompiledModuleStream(module));
 
-      blobImpl = StreamBlobImpl::Create(stream, EmptyString(), UINT64_MAX);
+      blobImpl = StreamBlobImpl::Create(stream.forget(), EmptyString(),
+                                        UINT64_MAX);
     }
 
     RefPtr<Blob> compiledBlob = Blob::Create(nullptr, blobImpl);
@@ -1841,7 +1842,7 @@ IDBObjectStore::AddOrPut(JSContext* aCx,
 
   ObjectStoreAddPutParams commonParams;
   commonParams.objectStoreId() = Id();
-  commonParams.cloneInfo().data().data = Move(cloneWriteInfo.mCloneBuffer.data());
+  commonParams.cloneInfo().data().data = std::move(cloneWriteInfo.mCloneBuffer.data());
   commonParams.cloneInfo().offsetToKeyProp() = cloneWriteInfo.mOffsetToKeyProp;
   commonParams.key() = key;
   commonParams.indexUpdateInfos().SwapElements(updateInfo);
@@ -2187,7 +2188,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBObjectStore)
 JSObject*
 IDBObjectStore::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return IDBObjectStoreBinding::Wrap(aCx, this, aGivenProto);
+  return IDBObjectStore_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsPIDOMWindowInner*
@@ -2640,7 +2641,7 @@ IDBObjectStore::OpenCursorInternal(bool aKeysOnly,
     SerializedKeyRange serializedKeyRange;
     keyRange->ToSerialized(serializedKeyRange);
 
-    optionalKeyRange = Move(serializedKeyRange);
+    optionalKeyRange = std::move(serializedKeyRange);
   } else {
     optionalKeyRange = void_t();
   }
@@ -2651,17 +2652,17 @@ IDBObjectStore::OpenCursorInternal(bool aKeysOnly,
   if (aKeysOnly) {
     ObjectStoreOpenKeyCursorParams openParams;
     openParams.objectStoreId() = objectStoreId;
-    openParams.optionalKeyRange() = Move(optionalKeyRange);
+    openParams.optionalKeyRange() = std::move(optionalKeyRange);
     openParams.direction() = direction;
 
-    params = Move(openParams);
+    params = std::move(openParams);
   } else {
     ObjectStoreOpenCursorParams openParams;
     openParams.objectStoreId() = objectStoreId;
-    openParams.optionalKeyRange() = Move(optionalKeyRange);
+    openParams.optionalKeyRange() = std::move(optionalKeyRange);
     openParams.direction() = direction;
 
-    params = Move(openParams);
+    params = std::move(openParams);
   }
 
   RefPtr<IDBRequest> request = GenerateRequest(aCx, this);

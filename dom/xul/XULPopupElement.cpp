@@ -31,7 +31,7 @@ NS_NewXULPopupElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
 JSObject*
 XULPopupElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return XULPopupElementBinding::Wrap(aCx, this, aGivenProto);
+  return XULPopupElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsIFrame*
@@ -213,7 +213,7 @@ XULPopupElement::GetState(nsString& aState)
       case ePopupClosed:
         break;
       default:
-        NS_NOTREACHED("Bad popup state");
+        MOZ_ASSERT_UNREACHABLE("Bad popup state");
         break;
     }
   }

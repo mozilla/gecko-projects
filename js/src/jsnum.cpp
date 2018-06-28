@@ -29,6 +29,9 @@
 #include "js/Conversions.h"
 #include "util/DoubleToString.h"
 #include "util/StringBuffer.h"
+#ifdef ENABLE_BIGINT
+#include "vm/BigIntType.h"
+#endif
 #include "vm/GlobalObject.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -83,7 +86,7 @@ ComputeAccurateDecimalInteger(JSContext* cx, const CharT* start, const CharT* en
                               double* dp)
 {
     size_t length = end - start;
-    ScopedJSFreePtr<char> cstr(cx->pod_malloc<char>(length + 1));
+    UniqueChars cstr(cx->pod_malloc<char>(length + 1));
     if (!cstr)
         return false;
 
@@ -98,7 +101,7 @@ ComputeAccurateDecimalInteger(JSContext* cx, const CharT* start, const CharT* en
         return false;
 
     char* estr;
-    *dp = js_strtod_harder(cx->dtoaState, cstr, &estr);
+    *dp = js_strtod_harder(cx->dtoaState, cstr.get(), &estr);
 
     return true;
 }
@@ -487,8 +490,14 @@ Number(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (args.length() > 0) {
-        if (!ToNumber(cx, args[0]))
+        // BigInt proposal section 6.2, steps 2a-c.
+        if (!ToNumeric(cx, args[0]))
             return false;
+#ifdef ENABLE_BIGINT
+        if (args[0].isBigInt())
+            args[0].setNumber(BigInt::numberValue(args[0].toBigInt()));
+#endif
+        MOZ_ASSERT(args[0].isNumber());
     }
 
     if (!args.isConstructing()) {
@@ -1326,6 +1335,7 @@ NumberToStringWithBase(JSContext* cx, double d, int base)
 
     ToCStringBuf cbuf;
     char* numStr;
+    size_t numStrLen;
 
     Realm* realm = cx->realm();
 
@@ -1346,9 +1356,9 @@ NumberToStringWithBase(JSContext* cx, double d, int base)
         if (JSFlatString* str = realm->dtoaCache.lookup(base, d))
             return str;
 
-        size_t len;
-        numStr = Int32ToCString(&cbuf, i, &len, base);
+        numStr = Int32ToCString(&cbuf, i, &numStrLen, base);
         MOZ_ASSERT(!cbuf.dbuf && numStr >= cbuf.sbuf && numStr < cbuf.sbuf + cbuf.sbufSize);
+        MOZ_ASSERT(numStrLen == strlen(numStr));
     } else {
         if (JSFlatString* str = realm->dtoaCache.lookup(base, d))
             return str;
@@ -1362,9 +1372,11 @@ NumberToStringWithBase(JSContext* cx, double d, int base)
                       !cbuf.dbuf && numStr >= cbuf.sbuf && numStr < cbuf.sbuf + cbuf.sbufSize);
         MOZ_ASSERT_IF(base != 10,
                       cbuf.dbuf && cbuf.dbuf == numStr);
+
+        numStrLen = strlen(numStr);
     }
 
-    JSFlatString* s = NewStringCopyZ<allowGC>(cx, numStr);
+    JSFlatString* s = NewStringCopyN<allowGC>(cx, numStr, numStrLen);
     if (!s)
         return nullptr;
 
@@ -1460,10 +1472,6 @@ js::NumberValueToStringBuffer(JSContext* cx, const Value& v, StringBuffer& sb)
         cstrlen = strlen(cstr);
     }
 
-    /*
-     * Inflate to char16_t string.  The input C-string characters are < 127, so
-     * even if char16_t units are UTF-8, all chars should map to one char16_t.
-     */
     MOZ_ASSERT(!cbuf.dbuf && cstrlen < cbuf.sbufSize);
     return sb.append(cstr, cstrlen);
 }
@@ -1606,6 +1614,34 @@ js::ToNumberSlow(JSContext* cx, HandleValue v_, double* out)
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, errnum);
     }
     return false;
+}
+
+// BigInt proposal section 3.1.6
+bool
+js::ToNumericSlow(JSContext* cx, MutableHandleValue vp)
+{
+    MOZ_ASSERT(!vp.isNumber());
+#ifdef ENABLE_BIGINT
+    MOZ_ASSERT(!vp.isBigInt());
+#endif
+
+    // Step 1.
+    if (!vp.isPrimitive()) {
+        if (cx->helperThread())
+            return false;
+        if (!ToPrimitive(cx, JSTYPE_NUMBER, vp))
+            return false;
+    }
+
+    // Step 2.
+#ifdef ENABLE_BIGINT
+    if (vp.isBigInt()) {
+        return true;
+    }
+#endif
+
+    // Step 3.
+    return ToNumber(cx, vp);
 }
 
 /*

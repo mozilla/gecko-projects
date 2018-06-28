@@ -1381,7 +1381,7 @@ ScriptLoader::ProcessExternalScript(nsIScriptElement* aElement,
     mozilla::net::ReferrerPolicy ourRefPolicy = mDocument->GetReferrerPolicy();
     request = CreateLoadRequest(aScriptKind, scriptURI, aElement,
                                 ourCORSMode, sriMetadata, ourRefPolicy);
-    request->mTriggeringPrincipal = Move(principal);
+    request->mTriggeringPrincipal = std::move(principal);
     request->mIsInline = false;
     request->SetScriptMode(aElement->GetScriptDeferred(),
                            aElement->GetScriptAsync());
@@ -1960,7 +1960,7 @@ ScriptLoader::ProcessRequest(ScriptLoadRequest* aRequest)
     nsContentUtils::DispatchTrustedEvent(scriptElem->OwnerDoc(),
                                          scriptElem,
                                          NS_LITERAL_STRING("beforescriptexecute"),
-                                         true, true, &runScript);
+                                         CanBubble::eYes, Cancelable::eYes, &runScript);
   }
 
   // Inner window could have gone away after firing beforescriptexecute
@@ -1982,7 +1982,7 @@ ScriptLoader::ProcessRequest(ScriptLoadRequest* aRequest)
     nsContentUtils::DispatchTrustedEvent(scriptElem->OwnerDoc(),
                                          scriptElem,
                                          NS_LITERAL_STRING("afterscriptexecute"),
-                                         true, false);
+                                         CanBubble::eYes, Cancelable::eNo);
   }
 
   FireScriptEvaluated(rv, aRequest);

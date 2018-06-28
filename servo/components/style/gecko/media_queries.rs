@@ -7,7 +7,7 @@
 use app_units::AU_PER_PX;
 use app_units::Au;
 use context::QuirksMode;
-use cssparser::{BasicParseErrorKind, Parser, RGBA};
+use cssparser::{Parser, RGBA, Token};
 use euclid::Size2D;
 use euclid::TypedScale;
 use gecko::values::{convert_nscolor_to_rgba, convert_rgba_to_nscolor};
@@ -23,7 +23,7 @@ use properties::ComputedValues;
 use servo_arc::Arc;
 use std::fmt::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
-use str::starts_with_ignore_ascii_case;
+use str::{starts_with_ignore_ascii_case, string_as_ascii_lowercase};
 use string_cache::Atom;
 use style_traits::{CSSPixel, CssWriter, DevicePixel};
 use style_traits::{ParseError, StyleParseErrorKind, ToCss};
@@ -62,6 +62,27 @@ pub struct Device {
     /// Whether any styles computed in the document relied on the viewport size
     /// by using vw/vh/vmin/vmax units.
     used_viewport_size: AtomicBool,
+}
+
+impl fmt::Debug for Device {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use nsstring::nsCString;
+
+        let mut doc_uri = nsCString::new();
+        unsafe {
+            let doc =
+                &*self.pres_context().mDocument.raw::<structs::nsIDocument>();
+
+            bindings::Gecko_nsIURI_Debug(
+                doc.mDocumentURI.raw::<structs::nsIURI>(),
+                &mut doc_uri,
+            )
+        };
+
+        f.debug_struct("Device")
+            .field("document_url", &doc_uri)
+            .finish()
+    }
 }
 
 unsafe impl Sync for Device {}
@@ -118,8 +139,7 @@ impl Device {
 
     /// Set the font size of the root element (for rem)
     pub fn set_root_font_size(&self, size: Au) {
-        self.root_font_size
-            .store(size.0 as isize, Ordering::Relaxed)
+        self.root_font_size.store(size.0 as isize, Ordering::Relaxed)
     }
 
     /// Sets the body text color for the "inherit color from body" quirk.
@@ -229,26 +249,59 @@ impl Device {
 }
 
 /// The kind of matching that should be performed on a media feature value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
 pub enum Range {
     /// At least the specified value.
     Min,
     /// At most the specified value.
     Max,
-    /// Exactly the specified value.
-    Equal,
 }
 
-/// A expression for gecko contains a reference to the media feature, the value
-/// the media query contained, and the range to evaluate.
-#[derive(Clone, Debug)]
-pub struct Expression {
+/// The operator that was specified in this media feature.
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
+enum Operator {
+    Equal,
+    GreaterThan,
+    GreaterThanEqual,
+    LessThan,
+    LessThanEqual,
+}
+
+impl ToCss for Operator {
+    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
+    where
+        W: fmt::Write,
+    {
+        dest.write_str(match *self {
+            Operator::Equal => "=",
+            Operator::LessThan => "<",
+            Operator::LessThanEqual => "<=",
+            Operator::GreaterThan => ">",
+            Operator::GreaterThanEqual => ">=",
+        })
+    }
+}
+
+/// Either a `Range` or an `Operator`.
+///
+/// Ranged media features are not allowed with operations (that'd make no
+/// sense).
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq)]
+enum RangeOrOperator {
+    Range(Range),
+    Operator(Operator),
+}
+
+/// A feature expression for gecko contains a reference to the media feature,
+/// the value the media query contained, and the range to evaluate.
+#[derive(Clone, Debug, MallocSizeOf)]
+pub struct MediaFeatureExpression {
     feature: &'static nsMediaFeature,
     value: Option<MediaExpressionValue>,
-    range: Range,
+    range_or_operator: Option<RangeOrOperator>,
 }
 
-impl ToCss for Expression {
+impl ToCss for MediaFeatureExpression {
     fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
     where
         W: fmt::Write,
@@ -259,10 +312,12 @@ impl ToCss for Expression {
         {
             dest.write_str("-webkit-")?;
         }
-        match self.range {
-            Range::Min => dest.write_str("min-")?,
-            Range::Max => dest.write_str("max-")?,
-            Range::Equal => {},
+
+        if let Some(RangeOrOperator::Range(range)) = self.range_or_operator {
+            match range {
+                Range::Min => dest.write_str("min-")?,
+                Range::Max => dest.write_str("max-")?,
+            }
         }
 
         // NB: CssStringWriter not needed, feature names are under control.
@@ -270,8 +325,15 @@ impl ToCss for Expression {
             Atom::from_static(*self.feature.mName)
         })?;
 
-        if let Some(ref val) = self.value {
+        if let Some(RangeOrOperator::Operator(op)) = self.range_or_operator {
+            dest.write_char(' ')?;
+            op.to_css(dest)?;
+            dest.write_char(' ')?;
+        } else if self.value.is_some() {
             dest.write_str(": ")?;
+        }
+
+        if let Some(ref val) = self.value {
             val.to_css(dest, self)?;
         }
 
@@ -279,10 +341,10 @@ impl ToCss for Expression {
     }
 }
 
-impl PartialEq for Expression {
-    fn eq(&self, other: &Expression) -> bool {
+impl PartialEq for MediaFeatureExpression {
+    fn eq(&self, other: &Self) -> bool {
         self.feature.mName == other.feature.mName && self.value == other.value &&
-            self.range == other.range
+            self.range_or_operator == other.range_or_operator
     }
 }
 
@@ -294,7 +356,7 @@ impl PartialEq for Expression {
 /// If the first, this would need to store the relevant values.
 ///
 /// See: https://github.com/w3c/csswg-drafts/issues/1968
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, MallocSizeOf, PartialEq)]
 pub enum MediaExpressionValue {
     /// A length.
     Length(Length),
@@ -317,7 +379,10 @@ pub enum MediaExpressionValue {
 }
 
 impl MediaExpressionValue {
-    fn from_css_value(for_expr: &Expression, css_value: &nsCSSValue) -> Option<Self> {
+    fn from_css_value(
+        for_expr: &MediaFeatureExpression,
+        css_value: &nsCSSValue,
+    ) -> Option<Self> {
         // NB: If there's a null value, that means that we don't support the
         // feature.
         if css_value.mUnit == nsCSSUnit::eCSSUnit_Null {
@@ -375,7 +440,7 @@ impl MediaExpressionValue {
 }
 
 impl MediaExpressionValue {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>, for_expr: &Expression) -> fmt::Result
+    fn to_css<W>(&self, dest: &mut CssWriter<W>, for_expr: &MediaFeatureExpression) -> fmt::Result
     where
         W: fmt::Write,
     {
@@ -517,17 +582,53 @@ fn parse_feature_value<'i, 't>(
     Ok(value)
 }
 
-impl Expression {
+/// Consumes an operation or a colon, or returns an error.
+fn consume_operation_or_colon(
+    input: &mut Parser,
+) -> Result<Option<Operator>, ()> {
+    let first_delim = {
+        let next_token = match input.next() {
+            Ok(t) => t,
+            Err(..) => return Err(()),
+        };
+
+        match *next_token {
+            Token::Colon => return Ok(None),
+            Token::Delim(oper) => oper,
+            _ => return Err(()),
+        }
+    };
+    Ok(Some(match first_delim {
+        '=' => Operator::Equal,
+        '>' => {
+            if input.try(|i| i.expect_delim('=')).is_ok() {
+                Operator::GreaterThanEqual
+            } else {
+                Operator::GreaterThan
+            }
+        }
+        '<' => {
+            if input.try(|i| i.expect_delim('=')).is_ok() {
+                Operator::LessThanEqual
+            } else {
+                Operator::LessThan
+            }
+        }
+        _ => return Err(()),
+    }))
+}
+
+impl MediaFeatureExpression {
     /// Trivially construct a new expression.
     fn new(
         feature: &'static nsMediaFeature,
         value: Option<MediaExpressionValue>,
-        range: Range,
+        range_or_operator: Option<RangeOrOperator>,
     ) -> Self {
         Self {
             feature,
             value,
-            range,
+            range_or_operator,
         }
     }
 
@@ -540,116 +641,145 @@ impl Expression {
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        input.expect_parenthesis_block().map_err(|err| {
-            err.location.new_custom_error(match err.kind {
-                BasicParseErrorKind::UnexpectedToken(t) => {
-                    StyleParseErrorKind::ExpectedIdentifier(t)
-                },
-                _ => StyleParseErrorKind::UnspecifiedError,
-            })
-        })?;
-
+        input.expect_parenthesis_block()?;
         input.parse_nested_block(|input| {
-            // FIXME: remove extra indented block when lifetimes are non-lexical
-            let feature;
-            let range;
+            Self::parse_in_parenthesis_block(context, input)
+        })
+    }
+
+    /// Parse a media feature expression where we've already consumed the
+    /// parenthesis.
+    pub fn parse_in_parenthesis_block<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
+        // FIXME: remove extra indented block when lifetimes are non-lexical
+        let feature;
+        let range;
+        {
+            let location = input.current_source_location();
+            let ident = input.expect_ident()?;
+
+            let mut flags = 0;
+
+            if context.chrome_rules_enabled() || context.stylesheet_origin == Origin::UserAgent
             {
-                let location = input.current_source_location();
-                let ident = input.expect_ident().map_err(|err| {
-                    err.location.new_custom_error(match err.kind {
-                        BasicParseErrorKind::UnexpectedToken(t) => {
-                            StyleParseErrorKind::ExpectedIdentifier(t)
-                        },
-                        _ => StyleParseErrorKind::UnspecifiedError,
-                    })
-                })?;
+                flags |= structs::nsMediaFeature_RequirementFlags_eUserAgentAndChromeOnly;
+            }
 
-                let mut flags = 0;
+            let result = {
+                let mut feature_name = &**ident;
 
-                if context.chrome_rules_enabled() || context.stylesheet_origin == Origin::UserAgent
+                if unsafe { structs::StaticPrefs_sVarCache_layout_css_prefixes_webkit } &&
+                    starts_with_ignore_ascii_case(feature_name, "-webkit-")
                 {
-                    flags |= structs::nsMediaFeature_RequirementFlags_eUserAgentAndChromeOnly;
+                    feature_name = &feature_name[8..];
+                    flags |= structs::nsMediaFeature_RequirementFlags_eHasWebkitPrefix;
+                    if unsafe {
+                        structs::StaticPrefs_sVarCache_layout_css_prefixes_device_pixel_ratio_webkit
+                    } {
+                        flags |= structs::nsMediaFeature_RequirementFlags_eWebkitDevicePixelRatioPrefEnabled;
+                    }
                 }
 
-                let result = {
-                    let mut feature_name = &**ident;
-
-                    if unsafe { structs::StaticPrefs_sVarCache_layout_css_prefixes_webkit } &&
-                        starts_with_ignore_ascii_case(feature_name, "-webkit-")
-                    {
-                        feature_name = &feature_name[8..];
-                        flags |= structs::nsMediaFeature_RequirementFlags_eHasWebkitPrefix;
-                        if unsafe {
-                            structs::StaticPrefs_sVarCache_layout_css_prefixes_device_pixel_ratio_webkit
-                        } {
-                            flags |= structs::nsMediaFeature_RequirementFlags_eWebkitDevicePixelRatioPrefEnabled;
-                        }
-                    }
-
-                    let range = if starts_with_ignore_ascii_case(feature_name, "min-") {
-                        feature_name = &feature_name[4..];
-                        Range::Min
-                    } else if starts_with_ignore_ascii_case(feature_name, "max-") {
-                        feature_name = &feature_name[4..];
-                        Range::Max
-                    } else {
-                        Range::Equal
-                    };
-
-                    let atom = Atom::from(feature_name);
-                    match find_feature(|f| atom.as_ptr() == unsafe { *f.mName as *mut _ }) {
-                        Some(f) => Ok((f, range)),
-                        None => Err(()),
-                    }
+                let range = if starts_with_ignore_ascii_case(feature_name, "min-") {
+                    feature_name = &feature_name[4..];
+                    Some(Range::Min)
+                } else if starts_with_ignore_ascii_case(feature_name, "max-") {
+                    feature_name = &feature_name[4..];
+                    Some(Range::Max)
+                } else {
+                    None
                 };
 
-                match result {
-                    Ok((f, r)) => {
-                        feature = f;
-                        range = r;
-                    },
-                    Err(()) => {
-                        return Err(location.new_custom_error(
-                            StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone()),
-                        ))
-                    },
+                let atom = Atom::from(string_as_ascii_lowercase(feature_name));
+                match find_feature(|f| atom.as_ptr() == unsafe { *f.mName as *mut _ }) {
+                    Some(f) => Ok((f, range)),
+                    None => Err(()),
                 }
+            };
 
-                if (feature.mReqFlags & !flags) != 0 {
+            match result {
+                Ok((f, r)) => {
+                    feature = f;
+                    range = r;
+                },
+                Err(()) => {
                     return Err(location.new_custom_error(
                         StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone()),
+                    ))
+                },
+            }
+
+            if (feature.mReqFlags & !flags) != 0 {
+                return Err(location.new_custom_error(
+                    StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone()),
+                ));
+            }
+
+            if range.is_some() &&
+                feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed
+            {
+                return Err(location.new_custom_error(
+                    StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone()),
+                ));
+            }
+        }
+
+        let feature_allows_ranges =
+            feature.mRangeType == nsMediaFeature_RangeType::eMinMaxAllowed;
+
+        let operator = input.try(consume_operation_or_colon);
+        let operator = match operator {
+            Err(..) => {
+                // If there's no colon, this is a media query of the
+                // form '(<feature>)', that is, there's no value
+                // specified.
+                //
+                // Gecko doesn't allow ranged expressions without a
+                // value, so just reject them here too.
+                if range.is_some() {
+                    return Err(input.new_custom_error(
+                        StyleParseErrorKind::RangedExpressionWithNoValue
                     ));
                 }
 
-                if range != Range::Equal &&
-                    feature.mRangeType != nsMediaFeature_RangeType::eMinMaxAllowed
-                {
-                    return Err(location.new_custom_error(
-                        StyleParseErrorKind::MediaQueryExpectedFeatureName(ident.clone()),
+                return Ok(Self::new(feature, None, None));
+            }
+            Ok(operator) => operator,
+        };
+
+        let range_or_operator = match range {
+            Some(range) => {
+                if operator.is_some() {
+                    return Err(input.new_custom_error(
+                        StyleParseErrorKind::MediaQueryUnexpectedOperator
                     ));
                 }
+                Some(RangeOrOperator::Range(range))
             }
-
-            // If there's no colon, this is a media query of the form
-            // '(<feature>)', that is, there's no value specified.
-            //
-            // Gecko doesn't allow ranged expressions without a value, so just
-            // reject them here too.
-            if input.try(|i| i.expect_colon()).is_err() {
-                if range != Range::Equal {
-                    return Err(input.new_custom_error(StyleParseErrorKind::RangedExpressionWithNoValue));
+            None => {
+                match operator {
+                    Some(operator) => {
+                        if !feature_allows_ranges {
+                            return Err(input.new_custom_error(
+                                StyleParseErrorKind::MediaQueryUnexpectedOperator
+                            ));
+                        }
+                        Some(RangeOrOperator::Operator(operator))
+                    }
+                    None => None,
                 }
-                return Ok(Expression::new(feature, None, range));
             }
+        };
 
-            let value =
-                parse_feature_value(feature, feature.mValueType, context, input).map_err(|err| {
-                    err.location
-                        .new_custom_error(StyleParseErrorKind::MediaQueryExpectedFeatureValue)
-                })?;
+        let value =
+            parse_feature_value(feature, feature.mValueType, context, input).map_err(|err| {
+                err.location
+                    .new_custom_error(StyleParseErrorKind::MediaQueryExpectedFeatureValue)
+            })?;
 
-            Ok(Expression::new(feature, Some(value), range))
-        })
+        Ok(Self::new(feature, Some(value), range_or_operator))
     }
 
     /// Returns whether this media query evaluates to true for the given device.
@@ -684,8 +814,8 @@ impl Expression {
         use std::cmp::Ordering;
 
         debug_assert!(
-            self.range == Range::Equal ||
-                self.feature.mRangeType == nsMediaFeature_RangeType::eMinMaxAllowed,
+            self.feature.mRangeType == nsMediaFeature_RangeType::eMinMaxAllowed ||
+            self.range_or_operator.is_none(),
             "Whoops, wrong range"
         );
 
@@ -710,7 +840,7 @@ impl Expression {
         };
 
         // FIXME(emilio): Handle the possible floating point errors?
-        let cmp = match (required_value, actual_value) {
+        let cmp = match (actual_value, required_value) {
             (&Length(ref one), &Length(ref other)) => {
                 computed::Context::for_media_query_evaluation(device, quirks_mode, |context| {
                     one.to_computed_value(&context)
@@ -730,11 +860,11 @@ impl Expression {
                     if (*device.pres_context).mOverrideDPPX > 0.0 {
                         self::Resolution::Dppx((*device.pres_context).mOverrideDPPX).to_dpi()
                     } else {
-                        other.to_dpi()
+                        one.to_dpi()
                     }
                 };
 
-                one.to_dpi().partial_cmp(&actual_dpi).unwrap()
+                actual_dpi.partial_cmp(&other.to_dpi()).unwrap()
             },
             (&Ident(ref one), &Ident(ref other)) => {
                 debug_assert_ne!(
@@ -753,10 +883,31 @@ impl Expression {
             _ => unreachable!(),
         };
 
-        cmp == Ordering::Equal || match self.range {
-            Range::Min => cmp == Ordering::Less,
-            Range::Equal => false,
-            Range::Max => cmp == Ordering::Greater,
+        let range_or_op = match self.range_or_operator {
+            Some(r) => r,
+            None => return cmp == Ordering::Equal,
+        };
+
+        match range_or_op {
+            RangeOrOperator::Range(range) => {
+                cmp == Ordering::Equal || match range {
+                    Range::Min => cmp == Ordering::Greater,
+                    Range::Max => cmp == Ordering::Less,
+                }
+            }
+            RangeOrOperator::Operator(op) => {
+                match op {
+                    Operator::Equal => cmp == Ordering::Equal,
+                    Operator::GreaterThan => cmp == Ordering::Greater,
+                    Operator::GreaterThanEqual => {
+                        cmp == Ordering::Equal || cmp == Ordering::Greater
+                    }
+                    Operator::LessThan => cmp == Ordering::Less,
+                    Operator::LessThanEqual => {
+                        cmp == Ordering::Equal || cmp == Ordering::Less
+                    }
+                }
+            }
         }
     }
 }

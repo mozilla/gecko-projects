@@ -47,12 +47,13 @@
 #include "vm/HelperThreads.h"
 #include "vm/Iteration.h"
 #include "vm/JSAtom.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/Realm.h"
 #include "vm/Shape.h"
 
+#include "vm/Compartment-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Stack-inl.h"
@@ -894,36 +895,26 @@ js::ReportIsNotDefined(JSContext* cx, HandlePropertyName name)
     ReportIsNotDefined(cx, id);
 }
 
-bool
-js::ReportIsNullOrUndefined(JSContext* cx, int spindex, HandleValue v,
-                            HandleString fallback)
+void
+js::ReportIsNullOrUndefined(JSContext* cx, int spindex, HandleValue v)
 {
-    bool ok;
+    MOZ_ASSERT(v.isNullOrUndefined());
 
-    UniqueChars bytes = DecompileValueGenerator(cx, spindex, v, fallback);
+    UniqueChars bytes = DecompileValueGenerator(cx, spindex, v, nullptr);
     if (!bytes)
-        return false;
+        return;
 
-    if (strcmp(bytes.get(), js_undefined_str) == 0 ||
-        strcmp(bytes.get(), js_null_str) == 0) {
-        ok = JS_ReportErrorFlagsAndNumberLatin1(cx, JSREPORT_ERROR,
-                                                GetErrorMessage, nullptr,
-                                                JSMSG_NO_PROPERTIES,
-                                                bytes.get());
+    if (strcmp(bytes.get(), js_undefined_str) == 0 || strcmp(bytes.get(), js_null_str) == 0) {
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NO_PROPERTIES,
+                                   bytes.get());
     } else if (v.isUndefined()) {
-        ok = JS_ReportErrorFlagsAndNumberLatin1(cx, JSREPORT_ERROR,
-                                                GetErrorMessage, nullptr,
-                                                JSMSG_UNEXPECTED_TYPE,
-                                                bytes.get(), js_undefined_str);
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
+                                   bytes.get(), js_undefined_str);
     } else {
         MOZ_ASSERT(v.isNull());
-        ok = JS_ReportErrorFlagsAndNumberLatin1(cx, JSREPORT_ERROR,
-                                                GetErrorMessage, nullptr,
-                                                JSMSG_UNEXPECTED_TYPE,
-                                                bytes.get(), js_null_str);
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_UNEXPECTED_TYPE,
+                                   bytes.get(), js_null_str);
     }
-
-    return ok;
 }
 
 void
@@ -949,18 +940,14 @@ js::ReportValueErrorFlags(JSContext* cx, unsigned flags, const unsigned errorNum
                           int spindex, HandleValue v, HandleString fallback,
                           const char* arg1, const char* arg2)
 {
-    UniqueChars bytes;
-    bool ok;
-
     MOZ_ASSERT(js_ErrorFormatString[errorNumber].argCount >= 1);
     MOZ_ASSERT(js_ErrorFormatString[errorNumber].argCount <= 3);
-    bytes = DecompileValueGenerator(cx, spindex, v, fallback);
+    UniqueChars bytes = DecompileValueGenerator(cx, spindex, v, fallback);
     if (!bytes)
         return false;
 
-    ok = JS_ReportErrorFlagsAndNumberLatin1(cx, flags, GetErrorMessage, nullptr, errorNumber,
-                                            bytes.get(), arg1, arg2);
-    return ok;
+    return JS_ReportErrorFlagsAndNumberLatin1(cx, flags, GetErrorMessage, nullptr, errorNumber,
+                                              bytes.get(), arg1, arg2);
 }
 
 JSObject*
@@ -1045,7 +1032,11 @@ InternalEnqueuePromiseJobCallback(JSContext* cx, JS::HandleObject job,
                                   JS::HandleObject incumbentGlobal, void* data)
 {
     MOZ_ASSERT(job);
-    return cx->jobQueue->append(job);
+    if (!cx->jobQueue->append(job)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+    return true;
 }
 
 namespace {
@@ -1219,9 +1210,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
     helperThread_(nullptr),
     options_(options),
     arenas_(nullptr),
-#ifdef DEBUG
-    enterRealmDepth_(0),
-#endif
     jitActivation(nullptr),
     activation_(nullptr),
     profilingActivation_(nullptr),
@@ -1244,7 +1232,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
 #endif
     autoFlushICache_(nullptr),
     dtoaState(nullptr),
-    heapState(JS::HeapState::Idle),
     suppressGC(0),
 #ifdef DEBUG
     ionCompiling(false),
@@ -1264,7 +1251,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
     inUnsafeRegion(0),
     generationalDisabled(0),
     compactingDisabledCount(0),
-    keepAtoms(0),
     suppressProfilerSampling(false),
     tempLifoAlloc_((size_t)TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     debuggerMutations(0),
@@ -1553,7 +1539,7 @@ JS::AutoCheckRequestDepth::AutoCheckRequestDepth(JSContext* cxArg)
   : cx(cxArg->helperThread() ? nullptr : cxArg)
 {
     if (cx) {
-        MOZ_ASSERT(cx->requestDepth || JS::CurrentThreadIsHeapBusy());
+        MOZ_ASSERT(cx->requestDepth || JS::RuntimeHeapIsBusy());
         MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
         cx->checkRequestDepth++;
     }

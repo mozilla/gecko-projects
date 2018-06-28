@@ -31,6 +31,30 @@ const { ORDERED_PROPS } = require("devtools/client/accessibility/constants");
 Services.prefs.setBoolPref("devtools.accessibility.enabled", true);
 
 /**
+ * Enable accessibility service and wait for a11y init event.
+ * @return {Object}  instance of accessibility service.
+ */
+async function initA11y() {
+  if (Services.appinfo.accessibilityEnabled) {
+    return Cc["@mozilla.org/accessibilityService;1"].getService(
+      Ci.nsIAccessibilityService);
+  }
+
+  const initPromise = new Promise(resolve => {
+    const observe = () => {
+      Services.obs.removeObserver(observe, "a11y-init-or-shutdown");
+      resolve();
+    };
+    Services.obs.addObserver(observe, "a11y-init-or-shutdown");
+  });
+
+  const a11yService = Cc["@mozilla.org/accessibilityService;1"].getService(
+    Ci.nsIAccessibilityService);
+  await initPromise;
+  return a11yService;
+}
+
+/**
  * Wait for accessibility service to shut down. We consider it shut down when
  * an "a11y-init-or-shutdown" event is received with a value of "0".
  */
@@ -45,7 +69,7 @@ function shutdownA11y() {
   Cu.forceShrinkingGC();
 
   return new Promise(resolve => {
-    let observe = (subject, topic, data) => {
+    const observe = (subject, topic, data) => {
       if (data === "0") {
         Services.obs.removeObserver(observe, "a11y-init-or-shutdown");
         resolve();
@@ -77,14 +101,17 @@ const EXPANDABLE_PROPS = ["actions", "states", "attributes"];
 async function addTestTab(url) {
   info("Adding a new test tab with URL: '" + url + "'");
 
-  let tab = await addTab(url);
-  let panel = await initAccessibilityPanel(tab);
-  let win = panel.panelWin;
-  let doc = win.document;
-  let store = win.view.store;
+  const tab = await addTab(url);
+  const panel = await initAccessibilityPanel(tab);
+  const win = panel.panelWin;
+  const doc = win.document;
+  const store = win.view.store;
 
-  EventUtils.sendMouseEvent({ type: "click" },
-    doc.getElementById("accessibility-enable-button"), win);
+  const enableButton = doc.getElementById("accessibility-enable-button");
+  // If enable button is not found, asume the tool is already enabled.
+  if (enableButton) {
+    EventUtils.sendMouseEvent({ type: "click" }, enableButton, win);
+  }
 
   await waitUntilState(store, state =>
     state.accessibles.size === 1 && state.details.accessible &&
@@ -110,12 +137,13 @@ async function addTestTab(url) {
  * cleanup function to make sure that the panel is still present.
  */
 async function disableAccessibilityInspector(env) {
-  let { doc, win, panel } = env;
+  const { doc, win, panel } = env;
   // Disable accessibility service through the panel and wait for the shutdown
   // event.
-  let shutdown = panel._front.once("shutdown");
-  EventUtils.sendMouseEvent({ type: "click" },
-    doc.getElementById("accessibility-disable-button"), win);
+  const shutdown = panel.front.once("shutdown");
+  const disableButton = await BrowserTestUtils.waitForCondition(() =>
+    doc.getElementById("accessibility-disable-button"), "Wait for the disable button.");
+  EventUtils.sendMouseEvent({ type: "click" }, disableButton, win);
   await shutdown;
 }
 
@@ -128,8 +156,8 @@ async function disableAccessibilityInspector(env) {
  * @return a promise that is resolved once the panel is open.
  */
 async function initAccessibilityPanel(tab = gBrowser.selectedTab) {
-  let target = TargetFactory.forTab(tab);
-  let toolbox = await gDevTools.showToolbox(target, "accessibility");
+  const target = TargetFactory.forTab(tab);
+  const toolbox = await gDevTools.showToolbox(target, "accessibility");
   return toolbox.getCurrentPanel();
 }
 
@@ -140,7 +168,7 @@ async function initAccessibilityPanel(tab = gBrowser.selectedTab) {
  */
 async function checkTreeState(doc, expected) {
   info("Checking tree state.");
-  let hasExpectedStructure = await BrowserTestUtils.waitForCondition(() =>
+  const hasExpectedStructure = await BrowserTestUtils.waitForCondition(() =>
     [...doc.querySelectorAll(".treeRow")].every((row, i) =>
       row.querySelector(".treeLabelCell").textContent === expected[i].role &&
       row.querySelector(".treeValueCell").textContent === expected[i].name),
@@ -158,8 +186,8 @@ async function checkTreeState(doc, expected) {
 async function checkSidebarState(store, expectedState) {
   info("Checking sidebar state.");
   await waitUntilState(store, ({ details }) => {
-    for (let key of ORDERED_PROPS) {
-      let expected = expectedState[key];
+    for (const key of ORDERED_PROPS) {
+      const expected = expectedState[key];
       if (expected === undefined) {
         continue;
       }
@@ -195,9 +223,9 @@ function selectRow(doc, rowNumber) {
  * @param  {Number}   rowNumber number of the row/tree node to be toggled.
  */
 async function toggleRow(doc, rowNumber) {
-  let win = doc.defaultView;
-  let twisty = doc.querySelectorAll(".theme-twisty")[rowNumber];
-  let expected = !twisty.classList.contains("open");
+  const win = doc.defaultView;
+  const twisty = doc.querySelectorAll(".theme-twisty")[rowNumber];
+  const expected = !twisty.classList.contains("open");
 
   info(`${expected ? "Expanding" : "Collapsing"} row ${rowNumber}.`);
 
@@ -223,14 +251,14 @@ async function toggleRow(doc, rowNumber) {
  *                       structure as the return value of 'addTestTab' funciton)
  */
 async function runA11yPanelTests(tests, env) {
-  for (let { desc, action, expected } of tests) {
+  for (const { desc, action, expected } of tests) {
     info(desc);
 
     if (action) {
       await action(env);
     }
 
-    let { tree, sidebar } = expected;
+    const { tree, sidebar } = expected;
     if (tree) {
       await checkTreeState(env.doc, tree);
     }
@@ -278,7 +306,7 @@ function addA11yPanelTestsTask(tests, uri, msg) {
 function addA11YPanelTask(msg, uri, task) {
   add_task(async function a11YPanelTask() {
     info(msg);
-    let env = await addTestTab(buildURL(uri));
+    const env = await addTestTab(buildURL(uri));
     await task(env);
     await disableAccessibilityInspector(env);
   });

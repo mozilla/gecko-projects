@@ -384,25 +384,22 @@ nsImageFrame::GetSourceToDestTransform(nsTransform2D& aTransform)
   // XXXbz does this introduce rounding errors because of the cast to
   // float?  Should we just manually add that stuff in every time
   // instead?
-  aTransform.SetToTranslate(float(destRect.x),
-                            float(destRect.y));
+  aTransform.SetToTranslate(float(destRect.x), float(destRect.y));
 
-  // Set the scale factors, based on destRect and intrinsic size.
-  if (mIntrinsicSize.width.GetUnit() == eStyleUnit_Coord &&
-      mIntrinsicSize.width.GetCoordValue() != 0 &&
-      mIntrinsicSize.height.GetUnit() == eStyleUnit_Coord &&
-      mIntrinsicSize.height.GetCoordValue() != 0 &&
-      mIntrinsicSize.width.GetCoordValue() != destRect.width &&
-      mIntrinsicSize.height.GetCoordValue() != destRect.height) {
 
-    aTransform.SetScale(float(destRect.width)  /
-                        float(mIntrinsicSize.width.GetCoordValue()),
-                        float(destRect.height) /
-                        float(mIntrinsicSize.height.GetCoordValue()));
-    return true;
+  // NOTE(emilio): This intrinsicSize is not the same as the layout intrinsic
+  // size (mIntrinsicSize), which can be scaled due to ResponsiveImageSelector,
+  // see ScaleIntrinsicSizeForDensity.
+  nsSize intrinsicSize;
+  if (!mImage ||
+      !NS_SUCCEEDED(mImage->GetIntrinsicSize(&intrinsicSize)) ||
+      intrinsicSize.IsEmpty()) {
+    return false;
   }
 
-  return false;
+  aTransform.SetScale(float(destRect.width)  / float(intrinsicSize.width),
+                      float(destRect.height) / float(intrinsicSize.height));
+  return true;
 }
 
 // This function checks whether the given request is the current request for our
@@ -575,8 +572,7 @@ nsImageFrame::OnSizeAvailable(imgIRequest* aRequest, imgIContainer* aImage)
    *   one frame = 1
    *   one loop = 2
    */
-  nsPresContext *presContext = PresContext();
-  aImage->SetAnimationMode(presContext->ImageAnimationMode());
+  aImage->SetAnimationMode(PresContext()->ImageAnimationMode());
 
   if (IsPendingLoad(aRequest)) {
     // We don't care
@@ -604,7 +600,7 @@ nsImageFrame::OnSizeAvailable(imgIRequest* aRequest, imgIContainer* aImage)
 
   MarkNeedsDisplayItemRebuild();
 
-  if (intrinsicSizeChanged && (mState & IMAGE_GOTINITIALREFLOW)) {
+  if (intrinsicSizeChanged && GotInitialReflow()) {
     // Now we need to reflow if we have an unconstrained size and have
     // already gotten the initial reflow
     if (!(mState & IMAGE_SIZECONSTRAINED)) {
@@ -627,7 +623,7 @@ nsImageFrame::OnFrameUpdate(imgIRequest* aRequest, const nsIntRect* aRect)
 {
   NS_ENSURE_ARG_POINTER(aRect);
 
-  if (!(mState & IMAGE_GOTINITIALREFLOW)) {
+  if (!GotInitialReflow()) {
     // Don't bother to do anything; we have a reflow coming up!
     return NS_OK;
   }
@@ -692,7 +688,7 @@ nsImageFrame::OnLoadComplete(imgIRequest* aRequest, nsresult aStatus)
 void
 nsImageFrame::ResponsiveContentDensityChanged()
 {
-  if (!(mState & IMAGE_GOTINITIALREFLOW)) {
+  if (!GotInitialReflow()) {
     return;
   }
 
@@ -733,7 +729,7 @@ nsImageFrame::NotifyNewCurrentRequest(imgIRequest* aRequest, nsresult aStatus)
     mIntrinsicRatio.SizeTo(0, 0);
   }
 
-  if (mState & IMAGE_GOTINITIALREFLOW) { // do nothing if we haven't gotten the initial reflow yet
+  if (GotInitialReflow()) {
     if (intrinsicSizeChanged) {
       if (!(mState & IMAGE_SIZECONSTRAINED)) {
         PresShell()->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
@@ -976,12 +972,6 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
     AddStateBits(IMAGE_SIZECONSTRAINED);
   } else {
     RemoveStateBits(IMAGE_SIZECONSTRAINED);
-  }
-
-  // XXXldb These two bits are almost exact opposites (except in the
-  // middle of the initial reflow); remove IMAGE_GOTINITIALREFLOW.
-  if (GetStateBits() & NS_FRAME_FIRST_REFLOW) {
-    AddStateBits(IMAGE_GOTINITIALREFLOW);
   }
 
   mComputedSize =
@@ -1266,7 +1256,7 @@ struct nsRecessedBorder : public nsStyleBorder {
     : nsStyleBorder(aPresContext)
   {
     NS_FOR_CSS_SIDES(side) {
-      mBorderColor[side] = StyleComplexColor::FromColor(NS_RGB(0, 0, 0));
+      BorderColorFor(side) = StyleComplexColor::FromColor(NS_RGB(0, 0, 0));
       mBorder.Side(side) = aBorderWidth;
       // Note: use SetBorderStyle here because we want to affect
       // mComputedBorder
@@ -1875,8 +1865,7 @@ nsImageFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 bool
 nsImageFrame::ShouldDisplaySelection()
 {
-  nsPresContext* presContext = PresContext();
-  int16_t displaySelection = presContext->PresShell()->GetSelectionFlags();
+  int16_t displaySelection = PresShell()->GetSelectionFlags();
   if (!(displaySelection & nsISelectionDisplay::DISPLAY_IMAGES))
     return false;//no need to check the blue border, we cannot be drawn selected
 
@@ -1956,7 +1945,7 @@ nsImageFrame::GetAnchorHREFTargetAndNode(nsIURI** aHref, nsString& aTarget,
     if (link) {
       nsCOMPtr<nsIURI> href = content->GetHrefURI();
       if (href) {
-        href->Clone(aHref);
+        href.forget(aHref);
       }
       status = (*aHref != nullptr);
 

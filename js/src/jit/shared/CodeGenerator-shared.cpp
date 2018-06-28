@@ -8,6 +8,8 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include <utility>
+
 #include "jit/CodeGenerator.h"
 #include "jit/CompactBuffer.h"
 #include "jit/JitcodeMap.h"
@@ -73,7 +75,8 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
     checkOsiPointRegisters(JitOptions.checkOsiPointRegisters),
 #endif
     frameDepth_(graph->paddedLocalSlotsSize() + graph->argumentsSize()),
-    frameInitialAdjustment_(0)
+    frameInitialAdjustment_(0),
+    frameClass_(FrameSizeClass::None())
 {
     if (gen->isProfilerInstrumentationEnabled())
         masm.enableProfilingInstrumentation();
@@ -105,7 +108,7 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
 
         // FrameSizeClass is only used for bailing, which cannot happen in
         // wasm code.
-        frameClass_ = FrameSizeClass::None();
+        MOZ_ASSERT(frameClass_ == FrameSizeClass::None());
     } else {
         frameClass_ = FrameSizeClass::FromDepth(frameDepth_);
     }
@@ -992,7 +995,7 @@ struct ReadTempTypeInfoVectorOp : public IonTrackedOptimizationsTypeInfo::ForEac
             if (!ty.trackType(accTypes_[i]))
                 oom_ = true;
         }
-        if (!types_->append(mozilla::Move(ty)))
+        if (!types_->append(std::move(ty)))
             oom_ = true;
         accTypes_.clear();
     }
@@ -1717,7 +1720,7 @@ CodeGeneratorShared::emitTracelogTree(bool isStart, const char* text,
     masm.Push(eventReg);
 
     PatchableTLEvent patchEvent(masm.movWithPatch(ImmWord(0), eventReg), text);
-    masm.propagateOOM(patchableTLEvents_.append(Move(patchEvent)));
+    masm.propagateOOM(patchableTLEvents_.append(std::move(patchEvent)));
 
     if (isStart)
         masm.tracelogStartId(loggerReg, eventReg);

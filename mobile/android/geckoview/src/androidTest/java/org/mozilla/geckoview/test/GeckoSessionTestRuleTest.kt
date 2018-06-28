@@ -7,9 +7,12 @@ package org.mozilla.geckoview.test
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.AssertCalled
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.ChildCrashedException
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.ClosedSessionAtStart
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.IgnoreCrash
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.NullDelegate
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.RejectedPromiseException
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.ReuseSession
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.Setting
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.TimeoutException
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.TimeoutMillis
@@ -341,6 +344,20 @@ class GeckoSessionTestRuleTest : BaseSessionTest(noErrorCollector = true) {
             @AssertCalled
             override fun onPageStop(session: GeckoSession, success: Boolean) {
                 throw IllegalStateException()
+            }
+        })
+    }
+
+    @Test fun waitUntilCalled_zeroCount() {
+        // Support having @AssertCalled(count = 0) annotations for waitUntilCalled calls.
+        sessionRule.session.loadTestPath(HELLO_HTML_PATH)
+        sessionRule.waitUntilCalled(object : Callbacks.ProgressDelegate, Callbacks.ScrollDelegate {
+            @AssertCalled(count = 1)
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
+            }
+
+            @AssertCalled(count = 0)
+            override fun onScrollChanged(session: GeckoSession, scrollX: Int, scrollY: Int) {
             }
         })
     }
@@ -1118,7 +1135,7 @@ class GeckoSessionTestRuleTest : BaseSessionTest(noErrorCollector = true) {
     }
 
     @Test fun delegateDuringNextWait_hasPrecedenceWithSpecificSession() {
-        var newSession = sessionRule.createOpenSession()
+        val newSession = sessionRule.createOpenSession()
         var counter = 0
 
         newSession.delegateDuringNextWait(object : Callbacks.ProgressDelegate {
@@ -1143,7 +1160,7 @@ class GeckoSessionTestRuleTest : BaseSessionTest(noErrorCollector = true) {
     }
 
     @Test fun delegateDuringNextWait_specificSessionOverridesAll() {
-        var newSession = sessionRule.createOpenSession()
+        val newSession = sessionRule.createOpenSession()
         var counter = 0
 
         newSession.delegateDuringNextWait(object : Callbacks.ProgressDelegate {
@@ -1543,5 +1560,122 @@ class GeckoSessionTestRuleTest : BaseSessionTest(noErrorCollector = true) {
         sessionRule.forceGarbageCollection()
         sessionRule.session.reload()
         sessionRule.session.waitForPageStop()
+    }
+
+    private interface TestDelegate {
+        fun onDelegate(foo: String, bar: String): Int
+    }
+
+    @Test fun addExternalDelegateUntilTestEnd() {
+        lateinit var delegate: TestDelegate
+
+        sessionRule.addExternalDelegateUntilTestEnd(
+                TestDelegate::class, { newDelegate -> delegate = newDelegate }, { },
+                object : TestDelegate {
+            @AssertCalled(count = 1)
+            override fun onDelegate(foo: String, bar: String): Int {
+                assertThat("First argument should be correct", foo, equalTo("foo"))
+                assertThat("Second argument should be correct", bar, equalTo("bar"))
+                return 42
+            }
+        })
+
+        assertThat("Delegate should be registered", delegate, notNullValue())
+        assertThat("Delegate return value should be correct",
+                   delegate.onDelegate("foo", "bar"), equalTo(42))
+        sessionRule.performTestEndCheck()
+    }
+
+    @Test(expected = AssertionError::class)
+    fun addExternalDelegateUntilTestEnd_throwOnNotCalled() {
+        sessionRule.addExternalDelegateUntilTestEnd(TestDelegate::class, { }, { },
+                                                    object : TestDelegate {
+            @AssertCalled(count = 1)
+            override fun onDelegate(foo: String, bar: String): Int {
+                return 42
+            }
+        })
+        sessionRule.performTestEndCheck()
+    }
+
+    @Test fun addExternalDelegateDuringNextWait() {
+        var delegate: Runnable? = null
+
+        sessionRule.addExternalDelegateDuringNextWait(Runnable::class,
+                                                      { newDelegate -> delegate = newDelegate },
+                                                      { delegate = null }, Runnable { })
+
+        assertThat("Delegate should be registered", delegate, notNullValue())
+        delegate?.run()
+
+        mainSession.reload()
+        mainSession.waitForPageStop()
+        mainSession.forCallbacksDuringWait(Runnable @AssertCalled(count = 1) {})
+
+        assertThat("Delegate should be unregistered after wait", delegate, nullValue())
+    }
+
+    @Test fun addExternalDelegateDuringNextWait_hasPrecedence() {
+        var delegate: TestDelegate? = null
+        val register = { newDelegate: TestDelegate -> delegate = newDelegate }
+        val unregister = { _: TestDelegate -> delegate = null }
+
+        sessionRule.addExternalDelegateDuringNextWait(TestDelegate::class, register, unregister,
+                object : TestDelegate {
+                    @AssertCalled(count = 1)
+                    override fun onDelegate(foo: String, bar: String): Int {
+                        return 24
+                    }
+                })
+
+        sessionRule.addExternalDelegateUntilTestEnd(TestDelegate::class, register, unregister,
+                object : TestDelegate {
+                    @AssertCalled(count = 1)
+                    override fun onDelegate(foo: String, bar: String): Int {
+                        return 42
+                    }
+                })
+
+        assertThat("Wait delegate should be registered", delegate, notNullValue())
+        assertThat("Wait delegate return value should be correct",
+                delegate?.onDelegate("", ""), equalTo(24))
+
+        mainSession.reload()
+        mainSession.waitForPageStop()
+
+        assertThat("Test delegate should still be registered", delegate, notNullValue())
+        assertThat("Test delegate return value should be correct",
+                delegate?.onDelegate("", ""), equalTo(42))
+        sessionRule.performTestEndCheck()
+    }
+
+    @IgnoreCrash
+    @ReuseSession(false)
+    @Test fun contentCrashIgnored() {
+        assumeThat(sessionRule.env.isMultiprocess, equalTo(true))
+        // Cannot test x86 debug builds due to Gecko's "ah_crap_handler"
+        // that waits for debugger to attach during a SIGSEGV.
+        assumeThat(sessionRule.env.isDebugBuild && sessionRule.env.cpuArch == "x86",
+                   equalTo(false))
+
+        mainSession.loadUri(CONTENT_CRASH_URL)
+        mainSession.waitUntilCalled(object : Callbacks.ContentDelegate {
+            @AssertCalled(count = 1)
+            override fun onCrash(session: GeckoSession) = Unit
+        })
+    }
+
+    @Test(expected = ChildCrashedException::class)
+    @ReuseSession(false)
+    fun contentCrashFails() {
+        assumeThat(sessionRule.env.isMultiprocess, equalTo(true))
+        assumeThat(sessionRule.env.shouldShutdownOnCrash(), equalTo(false))
+        // Cannot test x86 debug builds due to Gecko's "ah_crap_handler"
+        // that waits for debugger to attach during a SIGSEGV.
+        assumeThat(sessionRule.env.isDebugBuild && sessionRule.env.cpuArch == "x86",
+                   equalTo(false))
+
+        sessionRule.session.loadUri(CONTENT_CRASH_URL)
+        sessionRule.waitForPageStop()
     }
 }

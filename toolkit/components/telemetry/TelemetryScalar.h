@@ -6,6 +6,7 @@
 #ifndef TelemetryScalar_h__
 #define TelemetryScalar_h__
 
+#include "nsTArray.h"
 #include "mozilla/TelemetryScalarEnums.h"
 #include "mozilla/TelemetryProcessEnums.h"
 
@@ -96,6 +97,11 @@ nsresult SerializeScalars(mozilla::JSONWriter &aWriter);
 nsresult SerializeKeyedScalars(mozilla::JSONWriter &aWriter);
 nsresult DeserializePersistedScalars(JSContext* aCx, JS::HandleValue aData);
 nsresult DeserializePersistedKeyedScalars(JSContext* aCx, JS::HandleValue aData);
+// Mark deserialization as in progress.
+// After this, all scalar operations are recorded into the pending operations list.
+void DeserializationStarted();
+// Apply all operations from the pending operations list and mark deserialization finished afterwards.
+void ApplyPendingOperations();
 } // namespace TelemetryScalar
 
 #endif // TelemetryScalar_h__

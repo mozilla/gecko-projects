@@ -1241,6 +1241,12 @@ HyperTextAccessible::TextBounds(int32_t aStartOffset, int32_t aEndOffset,
     return nsIntRect();
   }
 
+  if (CharacterCount() == 0) {
+    nsPresContext* presContext = mDoc->PresContext();
+    // Empty content, use our own bound to at least get x,y coordinates
+    return GetFrame()->GetScreenRectInAppUnits().
+      ToNearestPixels(presContext->AppUnitsPerDevPixel());
+  }
 
   int32_t childIdx = GetChildIndexAtOffset(startOffset);
   if (childIdx == -1)
@@ -1253,7 +1259,7 @@ HyperTextAccessible::TextBounds(int32_t aStartOffset, int32_t aEndOffset,
   while (childIdx < static_cast<int32_t>(ChildCount())) {
     nsIFrame* frame = GetChildAt(childIdx++)->GetFrame();
     if (!frame) {
-      NS_NOTREACHED("No frame for a child!");
+      MOZ_ASSERT_UNREACHABLE("No frame for a child!");
       continue;
     }
 
@@ -1499,7 +1505,7 @@ HyperTextAccessible::CaretLineNumber()
     caretFrame = parentFrame;
   }
 
-  NS_NOTREACHED("DOM ancestry had this hypertext but frame ancestry didn't");
+  MOZ_ASSERT_UNREACHABLE("DOM ancestry had this hypertext but frame ancestry didn't");
   return lineNumber;
 }
 
@@ -1807,7 +1813,7 @@ HyperTextAccessible::SelectionRanges(nsTArray<a11y::TextRange>* aRanges) const
 
     TextRange tr(IsTextField() ? const_cast<HyperTextAccessible*>(this) : mDoc,
                     startContainer, startOffset, endContainer, endOffset);
-    *(aRanges->AppendElement()) = Move(tr);
+    *(aRanges->AppendElement()) = std::move(tr);
   }
 }
 

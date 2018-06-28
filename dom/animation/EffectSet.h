@@ -90,7 +90,7 @@ public:
   public:
     explicit Iterator(EffectSet& aEffectSet)
       : mEffectSet(aEffectSet)
-      , mHashIterator(mozilla::Move(aEffectSet.mEffects.Iter()))
+      , mHashIterator(aEffectSet.mEffects.Iter())
       , mIsEndIterator(false)
     {
 #ifdef DEBUG
@@ -100,7 +100,7 @@ public:
 
     Iterator(Iterator&& aOther)
       : mEffectSet(aOther.mEffectSet)
-      , mHashIterator(mozilla::Move(aOther.mHashIterator))
+      , mHashIterator(std::move(aOther.mHashIterator))
       , mIsEndIterator(aOther.mIsEndIterator)
     {
 #ifdef DEBUG
@@ -170,13 +170,13 @@ public:
   size_t Count() const { return mEffects.Count(); }
 
 
-  const TimeStamp& LastTransformSyncTime() const
+  const TimeStamp& LastOverflowAnimationSyncTime() const
   {
-    return mLastTransformSyncTime;
+    return mLastOverflowAnimationSyncTime;
   }
-  void UpdateLastTransformSyncTime(const TimeStamp& aRefreshTime)
+  void UpdateLastOverflowAnimationSyncTime(const TimeStamp& aRefreshTime)
   {
-    mLastTransformSyncTime = aRefreshTime;
+    mLastOverflowAnimationSyncTime = aRefreshTime;
   }
 
   bool CascadeNeedsUpdate() const { return mCascadeNeedsUpdate; }
@@ -207,11 +207,14 @@ private:
   OwningEffectSet mEffects;
 
 
-  // Refresh driver timestamp from the moment when transform animations in this
-  // effect set were last updated and sent to the compositor. This is used for
-  // transform animations that run on the compositor but need to be updated on
-  // the main thread periodically (e.g. so scrollbars can be updated).
-  TimeStamp mLastTransformSyncTime;
+  // Refresh driver timestamp from the moment when the animations which produce
+  // overflow change hints in this effect set were last updated.
+
+  // This is used for animations whose main-thread restyling is throttled either
+  // because they are running on the compositor or because they are not visible.
+  // We still need to update them on the main thread periodically, however (e.g.
+  // so scrollbars can be updated), so this tracks the last time we did that.
+  TimeStamp mLastOverflowAnimationSyncTime;
 
   // Dirty flag to represent when the mPropertiesWithImportantRules and
   // mPropertiesForAnimationsLevel on effects in this set might need to be

@@ -397,6 +397,10 @@ release-partner-repack-beetmover
 ------------------------------
 Moves the partner repacks to S3 buckets.
 
+release-early-tagging
+---------------------
+Utilises treescript to perform tagging that should happen near the start of a release.
+
 release-eme-free-repack
 ----------------------
 Generates customized versions of releases for eme-free repacks.
@@ -467,6 +471,13 @@ Dummy tasks to consolidate beetmover-checksums dependencies to avoid taskcluster
 post-langpack-dummy
 ------------------------------
 Dummy tasks to consolidate language pack beetmover dependencies to avoid taskcluster limits on number of dependencies per task.
+
+fetch
+-----
+
+Tasks that obtain something from a remote service and re-expose it as a
+task artifact. These tasks are used to effectively cache and re-host
+remote content so it is reliably and deterministically available.
 
 packages
 --------

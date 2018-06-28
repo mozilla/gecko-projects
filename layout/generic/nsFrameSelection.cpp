@@ -587,7 +587,7 @@ nsAtom *GetTag(nsINode *aNode)
   nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
   if (!content)
   {
-    NS_NOTREACHED("bad node passed to GetTag()");
+    MOZ_ASSERT_UNREACHABLE("bad node passed to GetTag()");
     return nullptr;
   }
 
@@ -1464,7 +1464,7 @@ nsFrameSelection::LookUpSelection(nsIContent *aContent,
   for (size_t j = 0; j < ArrayLength(mDomSelections); j++) {
     if (mDomSelections[j]) {
       details = mDomSelections[j]->LookUpSelection(aContent, aContentOffset,
-                                                   aContentLength, Move(details),
+                                                   aContentLength, std::move(details),
                                                    kPresentSelectionTypes[j],
                                                    aSlowCheck);
     }

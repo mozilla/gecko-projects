@@ -23,6 +23,7 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/TypeTraits.h"
 
+#include <memory>
 #include <new>
 
 #include "jsapi.h"
@@ -53,7 +54,6 @@ using namespace js;
 using namespace js::gc;
 
 using mozilla::Maybe;
-using mozilla::Move;
 using mozilla::Nothing;
 using mozilla::PodCopy;
 using mozilla::PodZero;
@@ -186,7 +186,7 @@ ParseContext::Scope::addPossibleAnnexBFunctionBox(ParseContext* pc, FunctionBox*
             return false;
     }
 
-    return possibleAnnexBFunctionBoxes_->append(funbox);
+    return maybeReportOOM(pc, possibleAnnexBFunctionBoxes_->append(funbox));
 }
 
 bool
@@ -425,7 +425,7 @@ UsedNameTracker::noteUse(JSContext* cx, JSAtom* name, uint32_t scriptId, uint32_
         UsedNameInfo info(cx);
         if (!info.noteUsedInScope(scriptId, scopeId))
             return false;
-        if (!map_.add(p, name, Move(info)))
+        if (!map_.add(p, name, std::move(info)))
             return false;
     }
 
@@ -621,7 +621,7 @@ GeneralParser<ParseHandler, CharT>::error(unsigned errorNumber, ...)
 
     ErrorMetadata metadata;
     if (tokenStream.computeErrorMetadata(&metadata, pos().begin))
-        ReportCompileError(context, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
+        ReportCompileError(context, std::move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
 
     va_end(args);
 }
@@ -636,7 +636,7 @@ GeneralParser<ParseHandler, CharT>::errorWithNotes(UniquePtr<JSErrorNotes> notes
 
     ErrorMetadata metadata;
     if (tokenStream.computeErrorMetadata(&metadata, pos().begin)) {
-        ReportCompileError(context, Move(metadata), Move(notes), JSREPORT_ERROR, errorNumber,
+        ReportCompileError(context, std::move(metadata), std::move(notes), JSREPORT_ERROR, errorNumber,
                            args);
     }
 
@@ -652,7 +652,7 @@ GeneralParser<ParseHandler, CharT>::errorAt(uint32_t offset, unsigned errorNumbe
 
     ErrorMetadata metadata;
     if (tokenStream.computeErrorMetadata(&metadata, offset))
-        ReportCompileError(context, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
+        ReportCompileError(context, std::move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
 
     va_end(args);
 }
@@ -667,7 +667,7 @@ GeneralParser<ParseHandler, CharT>::errorWithNotesAt(UniquePtr<JSErrorNotes> not
 
     ErrorMetadata metadata;
     if (tokenStream.computeErrorMetadata(&metadata, offset)) {
-        ReportCompileError(context, Move(metadata), Move(notes), JSREPORT_ERROR, errorNumber,
+        ReportCompileError(context, std::move(metadata), std::move(notes), JSREPORT_ERROR, errorNumber,
                            args);
     }
 
@@ -684,7 +684,7 @@ GeneralParser<ParseHandler, CharT>::warning(unsigned errorNumber, ...)
     ErrorMetadata metadata;
     bool result =
         tokenStream.computeErrorMetadata(&metadata, pos().begin) &&
-        anyChars.compileWarning(Move(metadata), nullptr, JSREPORT_WARNING, errorNumber, args);
+        anyChars.compileWarning(std::move(metadata), nullptr, JSREPORT_WARNING, errorNumber, args);
 
     va_end(args);
     return result;
@@ -701,7 +701,7 @@ GeneralParser<ParseHandler, CharT>::warningAt(uint32_t offset, unsigned errorNum
     bool result = tokenStream.computeErrorMetadata(&metadata, offset);
     if (result) {
         result =
-            anyChars.compileWarning(Move(metadata), nullptr, JSREPORT_WARNING, errorNumber, args);
+            anyChars.compileWarning(std::move(metadata), nullptr, JSREPORT_WARNING, errorNumber, args);
     }
 
     va_end(args);
@@ -776,7 +776,7 @@ ParserBase::warningNoOffset(unsigned errorNumber, ...)
     anyChars.computeErrorMetadataNoOffset(&metadata);
 
     bool result =
-        anyChars.compileWarning(Move(metadata), nullptr, JSREPORT_WARNING, errorNumber, args);
+        anyChars.compileWarning(std::move(metadata), nullptr, JSREPORT_WARNING, errorNumber, args);
 
     va_end(args);
     return result;
@@ -791,7 +791,7 @@ ParserBase::errorNoOffset(unsigned errorNumber, ...)
     ErrorMetadata metadata;
     anyChars.computeErrorMetadataNoOffset(&metadata);
 
-    ReportCompileError(context, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
+    ReportCompileError(context, std::move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
 
     va_end(args);
 }
@@ -856,9 +856,10 @@ PerHandlerParser<ParseHandler>::PerHandlerParser(JSContext* cx, LifoAlloc& alloc
                                                  bool foldConstants, UsedNameTracker& usedNames,
                                                  LazyScript* lazyOuterFunction,
                                                  ScriptSourceObject* sourceObject,
-                                                 ParseGoal parseGoal)
+                                                 ParseGoal parseGoal, void* internalSyntaxParser)
   : ParserBase(cx, alloc, options, foldConstants, usedNames, sourceObject, parseGoal),
-    handler(cx, alloc, lazyOuterFunction)
+    handler(cx, alloc, lazyOuterFunction),
+    internalSyntaxParser_(internalSyntaxParser)
 {
 
 }
@@ -873,17 +874,10 @@ GeneralParser<ParseHandler, CharT>::GeneralParser(JSContext* cx, LifoAlloc& allo
                                                   LazyScript* lazyOuterFunction,
                                                   ScriptSourceObject* sourceObject,
                                                   ParseGoal parseGoal)
-  : Base(cx, alloc, options, foldConstants, usedNames, lazyOuterFunction, sourceObject, parseGoal),
+  : Base(cx, alloc, options, foldConstants, usedNames, syntaxParser, lazyOuterFunction,
+         sourceObject, parseGoal),
     tokenStream(cx, options, chars, length)
-{
-    // The Mozilla specific JSOPTION_EXTRA_WARNINGS option adds extra warnings
-    // which are not generated if functions are parsed lazily. Note that the
-    // standard "use strict" does not inhibit lazy parsing.
-    if (options.extraWarningsOption)
-        disableSyntaxParser();
-    else
-        setSyntaxParser(syntaxParser);
-}
+{}
 
 template <typename CharT>
 void
@@ -1131,7 +1125,7 @@ GeneralParser<ParseHandler, CharT>::reportMissingClosing(unsigned errorNumber, u
         return;
     }
 
-    errorWithNotes(Move(notes), errorNumber);
+    errorWithNotes(std::move(notes), errorNumber);
 }
 
 template <class ParseHandler, typename CharT>
@@ -1173,7 +1167,7 @@ GeneralParser<ParseHandler, CharT>::reportRedeclaration(HandlePropertyName name,
         return;
     }
 
-    errorWithNotesAt(Move(notes), pos.begin, JSMSG_REDECLARED_VAR,
+    errorWithNotesAt(std::move(notes), pos.begin, JSMSG_REDECLARED_VAR,
                      DeclarationKindString(prevKind), bytes.ptr());
 }
 
@@ -1767,7 +1761,7 @@ typename Scope::Data*
 NewEmptyBindingData(JSContext* cx, LifoAlloc& alloc, uint32_t numBindings)
 {
     using Data = typename Scope::Data;
-    size_t allocSize = Scope::sizeOfData(numBindings);
+    size_t allocSize = SizeOfData<typename Scope::Data>(numBindings);
     auto* bindings = alloc.allocInSize<Data>(allocSize, numBindings);
     if (!bindings)
         ReportOutOfMemory(cx);
@@ -1781,48 +1775,47 @@ NewEmptyBindingData(JSContext* cx, LifoAlloc& alloc, uint32_t numBindings)
 static MOZ_MUST_USE BindingName*
 FreshlyInitializeBindings(BindingName* cursor, const Vector<BindingName>& bindings)
 {
-    for (const BindingName& binding : bindings)
-        new (cursor++) BindingName(binding);
-    return cursor;
+    return std::uninitialized_copy(bindings.begin(), bindings.end(), cursor);
 }
 
 Maybe<GlobalScope::Data*>
 NewGlobalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& alloc, ParseContext* pc)
 {
-
-    Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
     Vector<BindingName> lets(context);
     Vector<BindingName> consts(context);
 
     bool allBindingsClosedOver = pc->sc()->allBindingsClosedOver();
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
-        BindingName binding(bi.name(), allBindingsClosedOver || bi.closedOver());
+        bool closedOver = allBindingsClosedOver || bi.closedOver();
+
         switch (bi.kind()) {
-          case BindingKind::Var:
-            if (bi.declarationKind() == DeclarationKind::BodyLevelFunction) {
-                if (!funs.append(binding))
-                    return Nothing();
-            } else {
-                if (!vars.append(binding))
-                    return Nothing();
-            }
+          case BindingKind::Var: {
+            bool isTopLevelFunction = bi.declarationKind() == DeclarationKind::BodyLevelFunction;
+            BindingName binding(bi.name(), closedOver, isTopLevelFunction);
+            if (!vars.append(binding))
+                return Nothing();
             break;
-          case BindingKind::Let:
+          }
+          case BindingKind::Let: {
+            BindingName binding(bi.name(), closedOver);
             if (!lets.append(binding))
                 return Nothing();
             break;
-          case BindingKind::Const:
+          }
+          case BindingKind::Const: {
+            BindingName binding(bi.name(), closedOver);
             if (!consts.append(binding))
                 return Nothing();
             break;
+          }
           default:
             MOZ_CRASH("Bad global scope BindingKind");
         }
     }
 
     GlobalScope::Data* bindings = nullptr;
-    uint32_t numBindings = funs.length() + vars.length() + lets.length() + consts.length();
+    uint32_t numBindings = vars.length() + lets.length() + consts.length();
 
     if (numBindings > 0) {
         bindings = NewEmptyBindingData<GlobalScope>(context, alloc, numBindings);
@@ -1833,9 +1826,6 @@ NewGlobalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& al
         BindingName* start = bindings->trailingNames.start();
         BindingName* cursor = start;
 
-        cursor = FreshlyInitializeBindings(cursor, funs);
-
-        bindings->varStart = cursor - start;
         cursor = FreshlyInitializeBindings(cursor, vars);
 
         bindings->letStart = cursor - start;
@@ -1929,25 +1919,20 @@ ParserBase::newModuleScopeData(ParseContext::Scope& scope)
 Maybe<EvalScope::Data*>
 NewEvalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& alloc, ParseContext* pc)
 {
-    Vector<BindingName> funs(context);
     Vector<BindingName> vars(context);
 
     for (BindingIter bi = scope.bindings(pc); bi; bi++) {
         // Eval scopes only contain 'var' bindings. Make all bindings aliased
         // for now.
         MOZ_ASSERT(bi.kind() == BindingKind::Var);
-        BindingName binding(bi.name(), true);
-        if (bi.declarationKind() == DeclarationKind::BodyLevelFunction) {
-            if (!funs.append(binding))
-                return Nothing();
-        } else {
-            if (!vars.append(binding))
-                return Nothing();
-        }
+        bool isTopLevelFunction = bi.declarationKind() == DeclarationKind::BodyLevelFunction;
+        BindingName binding(bi.name(), true, isTopLevelFunction);
+        if (!vars.append(binding))
+            return Nothing();
     }
 
     EvalScope::Data* bindings = nullptr;
-    uint32_t numBindings = funs.length() + vars.length();
+    uint32_t numBindings = vars.length();
 
     if (numBindings > 0) {
         bindings = NewEmptyBindingData<EvalScope>(context, alloc, numBindings);
@@ -1957,11 +1942,6 @@ NewEvalScopeData(JSContext* context, ParseContext::Scope& scope, LifoAlloc& allo
         BindingName* start = bindings->trailingNames.start();
         BindingName* cursor = start;
 
-        // Keep track of what vars are functions. This is only used in BCE to omit
-        // superfluous DEFVARs.
-        cursor = FreshlyInitializeBindings(cursor, funs);
-
-        bindings->varStart = cursor - start;
         cursor = FreshlyInitializeBindings(cursor, vars);
 
         bindings->length = numBindings;
@@ -5453,14 +5433,21 @@ Parser<FullParseHandler, CharT>::checkExportedNamesForObjectBinding(ParseNode* p
     for (ParseNode* node = pn->pn_head; node; node = node->pn_next) {
         MOZ_ASSERT(node->isKind(ParseNodeKind::MutateProto) ||
                    node->isKind(ParseNodeKind::Colon) ||
-                   node->isKind(ParseNodeKind::Shorthand));
+                   node->isKind(ParseNodeKind::Shorthand) ||
+                   node->isKind(ParseNodeKind::Spread));
 
-        ParseNode* target = node->isKind(ParseNodeKind::MutateProto)
-            ? node->pn_kid
-            : node->pn_right;
+        ParseNode* target;
+        if (node->isKind(ParseNodeKind::Spread)) {
+            target = node->pn_kid;
+        } else {
+            if (node->isKind(ParseNodeKind::MutateProto))
+                target = node->pn_kid;
+            else
+                target = node->pn_right;
 
-        if (target->isKind(ParseNodeKind::Assign))
-            target = target->pn_left;
+            if (target->isKind(ParseNodeKind::Assign))
+                target = target->pn_left;
+        }
 
         if (!checkExportedNamesForDeclaration(target))
             return false;

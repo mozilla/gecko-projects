@@ -24,7 +24,7 @@
 
 #include "frontend/ParseContext-inl.h"
 #include "frontend/ParseNode-inl.h"
-
+#include "vm/JSContext-inl.h"
 
 // # About compliance with EcmaScript
 //
@@ -74,6 +74,35 @@ namespace js {
 namespace frontend {
 
 using UsedNamePtr = UsedNameTracker::UsedNameMap::Ptr;
+
+BinASTParserBase::BinASTParserBase(JSContext* cx, LifoAlloc& alloc, UsedNameTracker& usedNames)
+  : AutoGCRooter(cx, AutoGCRooter::Tag::BinParser)
+  , cx_(cx)
+  , alloc_(alloc)
+  , traceListHead_(nullptr)
+  , usedNames_(usedNames)
+  , nodeAlloc_(cx, alloc)
+  , keepAtoms_(cx)
+  , parseContext_(nullptr)
+  , factory_(cx, alloc, nullptr, SourceKind::Binary)
+{
+    cx->frontendCollectionPool().addActiveCompilation();
+    tempPoolMark_ = alloc.mark();
+}
+
+BinASTParserBase::~BinASTParserBase()
+{
+    alloc_.release(tempPoolMark_);
+
+    /*
+     * The parser can allocate enormous amounts of memory for large functions.
+     * Eagerly free the memory now (which otherwise won't be freed until the
+     * next GC) to avoid unnecessary OOMs.
+     */
+    alloc_.freeAllIfHugeAndUnused();
+
+    cx_->frontendCollectionPool().removeActiveCompilation();
+}
 
 // ------------- Toplevel constructions
 
@@ -136,14 +165,12 @@ BinASTParser<Tok>::buildFunctionBox(GeneratorKind generatorKind,
     // Allocate the function before walking down the tree.
     RootedFunction fun(cx_);
     BINJS_TRY_VAR(fun, AllocNewFunction(cx_, atom, syntax, generatorKind, functionAsyncKind, nullptr));
-    BINJS_TRY_DECL(funbox, alloc_.new_<FunctionBox>(cx_,
-        traceListHead_,
-        fun,
-        /* toStringStart = */ 0,
-        Directives(parseContext_),
-        /* extraWarning = */ false,
-        generatorKind,
-        functionAsyncKind));
+
+    auto* funbox = alloc_.new_<FunctionBox>(cx_, traceListHead_, fun, /* toStringStart = */ 0,
+                                            Directives(parseContext_), /* extraWarning = */ false,
+                                            generatorKind, functionAsyncKind);
+    if (!funbox)
+        return raiseOOM();
 
     traceListHead_ = funbox;
     funbox->initWithEnclosingParseContext(parseContext_, syntax);
@@ -456,7 +483,7 @@ BinASTParser<Tok>::reportErrorNoOffsetVA(unsigned errorNumber, va_list args)
     metadata.lineNumber = 0;
     metadata.columnNumber = offset();
     metadata.isMuted = options().mutedErrors();
-    ReportCompileError(cx_, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
+    ReportCompileError(cx_, std::move(metadata), nullptr, JSREPORT_ERROR, errorNumber, args);
 }
 
 template<typename Tok> void
@@ -467,7 +494,7 @@ BinASTParser<Tok>::errorAtVA(uint32_t offset, unsigned errorNumber, va_list* arg
     metadata.lineNumber = 0;
     metadata.columnNumber = offset;
     metadata.isMuted = options().mutedErrors();
-    ReportCompileError(cx_, Move(metadata), nullptr, JSREPORT_ERROR, errorNumber, *args);
+    ReportCompileError(cx_, std::move(metadata), nullptr, JSREPORT_ERROR, errorNumber, *args);
 }
 
 template<typename Tok> bool
@@ -483,11 +510,11 @@ BinASTParser<Tok>::reportExtraWarningErrorNumberVA(UniquePtr<JSErrorNotes> notes
     metadata.isMuted = options().mutedErrors();
 
     if (options().werrorOption) {
-        ReportCompileError(cx_, Move(metadata), Move(notes), JSREPORT_STRICT, errorNumber, *args);
+        ReportCompileError(cx_, std::move(metadata), std::move(notes), JSREPORT_STRICT, errorNumber, *args);
         return false;
     }
 
-    return ReportCompileWarning(cx_, Move(metadata), Move(notes), JSREPORT_STRICT | JSREPORT_WARNING, errorNumber, *args);
+    return ReportCompileWarning(cx_, std::move(metadata), std::move(notes), JSREPORT_STRICT | JSREPORT_WARNING, errorNumber, *args);
 }
 
 bool

@@ -336,6 +336,12 @@ StringsEqual(JSContext* cx, HandleString lhs, HandleString rhs, bool* res)
 template bool StringsEqual<true>(JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
 template bool StringsEqual<false>(JSContext* cx, HandleString lhs, HandleString rhs, bool* res);
 
+typedef bool (*StringCompareFn)(JSContext*, HandleString, HandleString, bool*);
+const VMFunction StringsEqualInfo =
+    FunctionInfo<StringCompareFn>(jit::StringsEqual<true>, "StringsEqual");
+const VMFunction StringsNotEqualInfo =
+    FunctionInfo<StringCompareFn>(jit::StringsEqual<false>, "StringsEqual");
+
 bool StringSplitHelper(JSContext* cx, HandleString str, HandleString sep,
                        HandleObjectGroup group, uint32_t limit,
                        MutableHandleValue result)
@@ -641,8 +647,11 @@ CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget, MutableHa
         RootedFunction fun(cx, &callee->as<JSFunction>());
         if (fun->isInterpreted() && fun->isConstructor()) {
             JSScript* script = JSFunction::getOrCreateScript(cx, fun);
+            if (!script)
+                return false;
+            AutoRealm ar(cx, script);
             AutoKeepTypeScripts keepTypes(cx);
-            if (!script || !script->ensureHasTypes(cx, keepTypes))
+            if (!script->ensureHasTypes(cx, keepTypes))
                 return false;
             if (!js::CreateThis(cx, fun, script, newTarget, GenericObject, rval))
                 return false;
@@ -744,9 +753,10 @@ template void
 PostWriteElementBarrier<IndexInBounds::Maybe>(JSRuntime* rt, JSObject* obj, int32_t index);
 
 void
-PostGlobalWriteBarrier(JSRuntime* rt, JSObject* obj)
+PostGlobalWriteBarrier(JSRuntime* rt, GlobalObject* obj)
 {
-    MOZ_ASSERT(obj->is<GlobalObject>());
+    MOZ_ASSERT(obj->JSObject::is<GlobalObject>());
+
     if (!obj->realm()->globalWriteBarriered) {
         PostWriteBarrier(rt, obj);
         obj->realm()->globalWriteBarriered = 1;
@@ -778,7 +788,7 @@ WrapObjectPure(JSContext* cx, JSObject* obj)
     MOZ_ASSERT(obj);
     MOZ_ASSERT(cx->compartment() != obj->compartment());
 
-    // From: JSCompartment::getNonWrapperObjectForCurrentCompartment
+    // From: Compartment::getNonWrapperObjectForCurrentCompartment
     // Note that if the object is same-compartment, but has been wrapped into a
     // different compartment, we need to unwrap it and return the bare same-
     // compartment object. Note again that windows are always wrapped by a
@@ -1508,6 +1518,8 @@ bool
 CallNativeGetter(JSContext* cx, HandleFunction callee, HandleObject obj,
                  MutableHandleValue result)
 {
+    AutoRealm ar(cx, callee);
+
     MOZ_ASSERT(callee->isNative());
     JSNative natfun = callee->native();
 
@@ -1525,6 +1537,8 @@ CallNativeGetter(JSContext* cx, HandleFunction callee, HandleObject obj,
 bool
 CallNativeSetter(JSContext* cx, HandleFunction callee, HandleObject obj, HandleValue rhs)
 {
+    AutoRealm ar(cx, callee);
+
     MOZ_ASSERT(callee->isNative());
     JSNative natfun = callee->native();
 

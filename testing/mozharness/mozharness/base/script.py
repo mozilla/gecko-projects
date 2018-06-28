@@ -1573,7 +1573,7 @@ class ScriptMixin(PlatformMixin):
             shell = False
 
         p = subprocess.Popen(command, shell=shell, stdout=tmp_stdout,
-                             cwd=cwd, stderr=tmp_stderr, env=env)
+                             cwd=cwd, stderr=tmp_stderr, env=env, bufsize=0)
         # XXX: changed from self.debug to self.log due to this error:
         #      TypeError: debug() takes exactly 1 argument (2 given)
         self.log("Temporary files: %s and %s" % (tmp_stdout_filename, tmp_stderr_filename), level=DEBUG)
@@ -2136,7 +2136,7 @@ class BaseScript(ScriptMixin, LogMixin, object):
         return self.abs_dirs
 
     def dump_config(self, file_path=None, config=None,
-                    console_output=False, exit_on_finish=False):
+                    console_output=True, exit_on_finish=False):
         """Dump self.config to localconfig.json
         """
         config = config or self.config

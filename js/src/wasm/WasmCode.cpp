@@ -276,7 +276,7 @@ ModuleSegment::ModuleSegment(Tier tier,
                              UniqueCodeBytes codeBytes,
                              uint32_t codeLength,
                              const LinkDataTier& linkData)
-  : CodeSegment(Move(codeBytes), codeLength, CodeSegment::Kind::Module),
+  : CodeSegment(std::move(codeBytes), codeLength, CodeSegment::Kind::Module),
     tier_(tier),
     outOfBoundsCode_(base() + linkData.outOfBoundsOffset),
     unalignedAccessCode_(base() + linkData.unalignedAccessOffset),
@@ -296,7 +296,7 @@ ModuleSegment::create(Tier tier, MacroAssembler& masm, const LinkDataTier& linkD
     // We'll flush the icache after static linking, in initialize().
     masm.executableCopy(codeBytes.get(), /* flushICache = */ false);
 
-    return js::MakeUnique<ModuleSegment>(tier, Move(codeBytes), codeLength, linkData);
+    return js::MakeUnique<ModuleSegment>(tier, std::move(codeBytes), codeLength, linkData);
 }
 
 /* static */ UniqueModuleSegment
@@ -310,7 +310,7 @@ ModuleSegment::create(Tier tier, const Bytes& unlinkedBytes, const LinkDataTier&
 
     memcpy(codeBytes.get(), unlinkedBytes.begin(), codeLength);
 
-    return js::MakeUnique<ModuleSegment>(tier, Move(codeBytes), codeLength, linkData);
+    return js::MakeUnique<ModuleSegment>(tier, std::move(codeBytes), codeLength, linkData);
 }
 
 bool
@@ -377,7 +377,7 @@ ModuleSegment::deserialize(const uint8_t* cursor, const LinkDataTier& linkData,
     if (!cursor)
         return nullptr;
 
-    *segment = js::MakeUnique<ModuleSegment>(Tier::Serialized, Move(bytes), length, linkData);
+    *segment = js::MakeUnique<ModuleSegment>(Tier::Serialized, std::move(bytes), length, linkData);
     if (!*segment)
         return nullptr;
 
@@ -393,14 +393,14 @@ ModuleSegment::lookupRange(const void* pc) const
 size_t
 FuncExport::serializedSize() const
 {
-    return sig_.serializedSize() +
+    return funcType_.serializedSize() +
            sizeof(pod);
 }
 
 uint8_t*
 FuncExport::serialize(uint8_t* cursor) const
 {
-    cursor = sig_.serialize(cursor);
+    cursor = funcType_.serialize(cursor);
     cursor = WriteBytes(cursor, &pod, sizeof(pod));
     return cursor;
 }
@@ -408,7 +408,7 @@ FuncExport::serialize(uint8_t* cursor) const
 const uint8_t*
 FuncExport::deserialize(const uint8_t* cursor)
 {
-    (cursor = sig_.deserialize(cursor)) &&
+    (cursor = funcType_.deserialize(cursor)) &&
     (cursor = ReadBytes(cursor, &pod, sizeof(pod)));
     return cursor;
 }
@@ -416,20 +416,20 @@ FuncExport::deserialize(const uint8_t* cursor)
 size_t
 FuncExport::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
-    return sig_.sizeOfExcludingThis(mallocSizeOf);
+    return funcType_.sizeOfExcludingThis(mallocSizeOf);
 }
 
 size_t
 FuncImport::serializedSize() const
 {
-    return sig_.serializedSize() +
+    return funcType_.serializedSize() +
            sizeof(pod);
 }
 
 uint8_t*
 FuncImport::serialize(uint8_t* cursor) const
 {
-    cursor = sig_.serialize(cursor);
+    cursor = funcType_.serialize(cursor);
     cursor = WriteBytes(cursor, &pod, sizeof(pod));
     return cursor;
 }
@@ -437,7 +437,7 @@ FuncImport::serialize(uint8_t* cursor) const
 const uint8_t*
 FuncImport::deserialize(const uint8_t* cursor)
 {
-    (cursor = sig_.deserialize(cursor)) &&
+    (cursor = funcType_.deserialize(cursor)) &&
     (cursor = ReadBytes(cursor, &pod, sizeof(pod)));
     return cursor;
 }
@@ -445,7 +445,7 @@ FuncImport::deserialize(const uint8_t* cursor)
 size_t
 FuncImport::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
-    return sig_.sizeOfExcludingThis(mallocSizeOf);
+    return funcType_.sizeOfExcludingThis(mallocSizeOf);
 }
 
 static size_t
@@ -546,7 +546,7 @@ LazyStubSegment::create(const CodeTier& codeTier, size_t length)
     if (!codeBytes)
         return nullptr;
 
-    auto segment = js::MakeUnique<LazyStubSegment>(Move(codeBytes), length);
+    auto segment = js::MakeUnique<LazyStubSegment>(std::move(codeBytes), length);
     if (!segment || !segment->initialize(codeTier))
         return nullptr;
 
@@ -587,7 +587,7 @@ LazyStubSegment::addStubs(size_t codeLength, const Uint32Vector& funcExportIndic
         codeRanges_.back().offsetBy(offsetInSegment);
         i++;
 
-        if (funcExports[funcExportIndex].sig().temporarilyUnsupportedAnyRef())
+        if (funcExports[funcExportIndex].funcType().temporarilyUnsupportedAnyRef())
             continue;
 
         const CodeRange& jitRange = codeRanges[i];
@@ -648,7 +648,7 @@ LazyStubTier::createMany(HasGcTypes gcTypesEnabled, const Uint32Vector& funcExpo
     DebugOnly<uint32_t> numExpectedRanges = 0;
     for (uint32_t funcExportIndex : funcExportIndices) {
         const FuncExport& fe = funcExports[funcExportIndex];
-        numExpectedRanges += fe.sig().temporarilyUnsupportedAnyRef() ? 1 : 2;
+        numExpectedRanges += fe.funcType().temporarilyUnsupportedAnyRef() ? 1 : 2;
         void* calleePtr = moduleSegmentBase +
                           moduleRanges[fe.interpCodeRangeIndex()].funcNormalEntry();
         Maybe<ImmPtr> callee;
@@ -682,7 +682,7 @@ LazyStubTier::createMany(HasGcTypes gcTypesEnabled, const Uint32Vector& funcExpo
         if (!newSegment)
             return false;
         lastStubSegmentIndex_ = stubSegments_.length();
-        if (!stubSegments_.emplaceBack(Move(newSegment)))
+        if (!stubSegments_.emplaceBack(std::move(newSegment)))
             return false;
     }
 
@@ -718,11 +718,11 @@ LazyStubTier::createMany(HasGcTypes gcTypesEnabled, const Uint32Vector& funcExpo
         size_t exportIndex;
         MOZ_ALWAYS_FALSE(BinarySearch(ProjectLazyFuncIndex(exports_), 0, exports_.length(),
                                       fe.funcIndex(), &exportIndex));
-        MOZ_ALWAYS_TRUE(exports_.insert(exports_.begin() + exportIndex, Move(lazyExport)));
+        MOZ_ALWAYS_TRUE(exports_.insert(exports_.begin() + exportIndex, std::move(lazyExport)));
 
         // Functions with anyref in their sig have only one entry (interp).
         // All other functions get an extra jit entry.
-        interpRangeIndex += fe.sig().temporarilyUnsupportedAnyRef() ? 1 : 2;
+        interpRangeIndex += fe.funcType().temporarilyUnsupportedAnyRef() ? 1 : 2;
     }
 
     return true;
@@ -746,7 +746,7 @@ LazyStubTier::createOne(uint32_t funcExportIndex, const CodeTier& codeTier)
     const CodeRangeVector& codeRanges = segment->codeRanges();
 
     // Functions that have anyref in their sig don't get a jit entry.
-    if (codeTier.metadata().funcExports[funcExportIndex].sig().temporarilyUnsupportedAnyRef()) {
+    if (codeTier.metadata().funcExports[funcExportIndex].funcType().temporarilyUnsupportedAnyRef()) {
         MOZ_ASSERT(codeRanges.length() >= 1);
         MOZ_ASSERT(codeRanges.back().isInterpEntry());
         return true;
@@ -851,7 +851,7 @@ size_t
 Metadata::serializedSize() const
 {
     return sizeof(pod()) +
-           SerializedVectorSize(sigIds) +
+           SerializedVectorSize(funcTypeIds) +
            SerializedPodVectorSize(globals) +
            SerializedPodVectorSize(tables) +
            SerializedPodVectorSize(funcNames) +
@@ -863,7 +863,7 @@ Metadata::serializedSize() const
 size_t
 Metadata::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
-    return SizeOfVectorExcludingThis(sigIds, mallocSizeOf) +
+    return SizeOfVectorExcludingThis(funcTypeIds, mallocSizeOf) +
            globals.sizeOfExcludingThis(mallocSizeOf) +
            tables.sizeOfExcludingThis(mallocSizeOf) +
            funcNames.sizeOfExcludingThis(mallocSizeOf) +
@@ -877,7 +877,7 @@ Metadata::serialize(uint8_t* cursor) const
 {
     MOZ_ASSERT(!debugEnabled && debugFuncArgTypes.empty() && debugFuncReturnTypes.empty());
     cursor = WriteBytes(cursor, &pod(), sizeof(pod()));
-    cursor = SerializeVector(cursor, sigIds);
+    cursor = SerializeVector(cursor, funcTypeIds);
     cursor = SerializePodVector(cursor, globals);
     cursor = SerializePodVector(cursor, tables);
     cursor = SerializePodVector(cursor, funcNames);
@@ -891,7 +891,7 @@ Metadata::serialize(uint8_t* cursor) const
 Metadata::deserialize(const uint8_t* cursor)
 {
     (cursor = ReadBytes(cursor, &pod(), sizeof(pod()))) &&
-    (cursor = DeserializeVector(cursor, &sigIds)) &&
+    (cursor = DeserializeVector(cursor, &funcTypeIds)) &&
     (cursor = DeserializePodVector(cursor, &globals)) &&
     (cursor = DeserializePodVector(cursor, &tables)) &&
     (cursor = DeserializePodVector(cursor, &funcNames)) &&
@@ -1006,7 +1006,7 @@ CodeTier::deserialize(const uint8_t* cursor, const LinkDataTier& linkData,
     if (!cursor)
         return nullptr;
 
-    *codeTier = js::MakeUnique<CodeTier>(Move(metadata), Move(segment));
+    *codeTier = js::MakeUnique<CodeTier>(std::move(metadata), std::move(segment));
     if (!*codeTier)
         return nullptr;
 
@@ -1079,10 +1079,10 @@ JumpTables::init(CompileMode mode, const ModuleSegment& ms, const CodeRangeVecto
 }
 
 Code::Code(UniqueCodeTier tier1, const Metadata& metadata, JumpTables&& maybeJumpTables)
-  : tier1_(Move(tier1)),
+  : tier1_(std::move(tier1)),
     metadata_(&metadata),
     profilingLabels_(mutexid::WasmCodeProfilingLabels, CacheableCharsVector()),
-    jumpTables_(Move(maybeJumpTables))
+    jumpTables_(std::move(maybeJumpTables))
 {}
 
 bool
@@ -1107,7 +1107,7 @@ Code::setTier2(UniqueCodeTier tier2, const ShareableBytes& bytecode,
     if (!tier2->initialize(*this, bytecode, linkData, *metadata_))
         return false;
 
-    tier2_ = Move(tier2);
+    tier2_ = std::move(tier2);
 
     return true;
 }
@@ -1324,7 +1324,7 @@ Code::ensureProfilingLabels(const Bytes* maybeBytecode, bool profilingEnabled) c
                 return;
         }
 
-        ((CacheableCharsVector&)labels)[codeRange.funcIndex()] = Move(label);
+        ((CacheableCharsVector&)labels)[codeRange.funcIndex()] = std::move(label);
     }
 }
 
@@ -1416,7 +1416,7 @@ Code::deserialize(const uint8_t* cursor,
     if (!jumpTables.init(CompileMode::Once, codeTier->segment(), codeTier->metadata().codeRanges))
         return nullptr;
 
-    MutableCode code = js_new<Code>(Move(codeTier), metadata, Move(jumpTables));
+    MutableCode code = js_new<Code>(std::move(codeTier), metadata, std::move(jumpTables));
     if (!code || !code->initialize(bytecode, linkData.tier(Tier::Serialized)))
         return nullptr;
 

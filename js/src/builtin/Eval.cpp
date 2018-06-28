@@ -222,8 +222,7 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
     MOZ_ASSERT_IF(evalType == INDIRECT_EVAL, IsGlobalLexicalEnvironment(env));
     AssertInnerizedEnvironmentChain(cx, *env);
 
-    Rooted<GlobalObject*> envGlobal(cx, &env->global());
-    if (!GlobalObject::isRuntimeCodeGenEnabled(cx, envGlobal)) {
+    if (!GlobalObject::isRuntimeCodeGenEnabled(cx, cx->global())) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CSP_BLOCKED_EVAL);
         return false;
     }
@@ -263,11 +262,14 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
         const char* filename;
         bool mutedErrors;
         uint32_t pcOffset;
-        DescribeScriptedCallerForCompilation(cx, &maybeScript, &filename, &lineno, &pcOffset,
-                                             &mutedErrors,
-                                             evalType == DIRECT_EVAL
-                                             ? CALLED_FROM_JSOP_EVAL
-                                             : NOT_CALLED_FROM_JSOP_EVAL);
+        if (evalType == DIRECT_EVAL) {
+            DescribeScriptedCallerForDirectEval(cx, callerScript, pc, &filename, &lineno,
+                                                &pcOffset, &mutedErrors);
+            maybeScript = callerScript;
+        } else {
+            DescribeScriptedCallerForCompilation(cx, &maybeScript, &filename, &lineno, &pcOffset,
+                                                 &mutedErrors);
+        }
 
         const char* introducerFilename = filename;
         if (maybeScript && maybeScript->scriptSource()->introducerFilename())
@@ -325,8 +327,7 @@ js::DirectEvalStringFromIon(JSContext* cx,
 {
     AssertInnerizedEnvironmentChain(cx, *env);
 
-    Rooted<GlobalObject*> envGlobal(cx, &env->global());
-    if (!GlobalObject::isRuntimeCodeGenEnabled(cx, envGlobal)) {
+    if (!GlobalObject::isRuntimeCodeGenEnabled(cx, cx->global())) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CSP_BLOCKED_EVAL);
         return false;
     }
@@ -346,17 +347,16 @@ js::DirectEvalStringFromIon(JSContext* cx,
     esg.lookupInEvalCache(linearStr, callerScript, pc);
 
     if (!esg.foundScript()) {
-        RootedScript maybeScript(cx);
         const char* filename;
         unsigned lineno;
         bool mutedErrors;
         uint32_t pcOffset;
-        DescribeScriptedCallerForCompilation(cx, &maybeScript, &filename, &lineno, &pcOffset,
-                                             &mutedErrors, CALLED_FROM_JSOP_EVAL);
+        DescribeScriptedCallerForDirectEval(cx, callerScript, pc, &filename, &lineno, &pcOffset,
+                                            &mutedErrors);
 
         const char* introducerFilename = filename;
-        if (maybeScript && maybeScript->scriptSource()->introducerFilename())
-            introducerFilename = maybeScript->scriptSource()->introducerFilename();
+        if (callerScript->scriptSource()->introducerFilename())
+            introducerFilename = callerScript->scriptSource()->introducerFilename();
 
         RootedScope enclosing(cx, callerScript->innermostScope(pc));
 
@@ -368,7 +368,8 @@ js::DirectEvalStringFromIon(JSContext* cx,
 
         if (introducerFilename) {
             options.setFileAndLine(filename, 1);
-            options.setIntroductionInfo(introducerFilename, "eval", lineno, maybeScript, pcOffset);
+            options.setIntroductionInfo(introducerFilename, "eval", lineno, callerScript,
+                                        pcOffset);
         } else {
             options.setFileAndLine("eval", 1);
             options.setIntroductionType("eval");
@@ -401,8 +402,7 @@ js::IndirectEval(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    Rooted<GlobalObject*> global(cx, &args.callee().global());
-    RootedObject globalLexical(cx, &global->lexicalEnvironment());
+    RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
 
     // Note we'll just pass |undefined| here, then return it directly (or throw
     // if runtime codegen is disabled), if no argument is provided.
@@ -442,7 +442,7 @@ ExecuteInExtensibleLexicalEnvironment(JSContext* cx, HandleScript scriptArg, Han
     MOZ_RELEASE_ASSERT(scriptArg->hasNonSyntacticScope());
 
     RootedScript script(cx, scriptArg);
-    if (script->compartment() != cx->compartment()) {
+    if (script->realm() != cx->realm()) {
         script = CloneGlobalScript(cx, ScopeKind::NonSyntactic, script);
         if (!script)
             return false;

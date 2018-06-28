@@ -311,6 +311,8 @@ public:
 
   SVGUserUnitList()
     : mList(nullptr)
+    , mElement(nullptr)
+    , mAxis(0)
   {}
 
   void Init(const SVGLengthList *aList, nsSVGElement *aElement, uint8_t aAxis) {
@@ -338,7 +340,7 @@ public:
 
   bool HasPercentageValueAt(uint32_t aIndex) const {
     const SVGLength& length = (*mList)[aIndex];
-    return length.GetUnit() == dom::SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE;
+    return length.GetUnit() == dom::SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE;
   }
 
 private:

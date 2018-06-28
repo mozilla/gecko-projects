@@ -9,7 +9,7 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
-Cu.importGlobalProperties(["Element"]);
+XPCOMUtils.defineLazyGlobalGetters(this, ["Element"]);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
@@ -209,8 +209,7 @@ let InternalFaviconLoader = {
 };
 
 var PlacesUIUtils = {
-  LOAD_IN_SIDEBAR_ANNO: "bookmarkProperties/loadInSidebar",
-  DESCRIPTION_ANNO: "bookmarkProperties/description",
+  LAST_USED_FOLDERS_META_KEY: "bookmarks/lastusedfolders",
 
   /**
    * Makes a URI from a spec, and do fixup
@@ -656,8 +655,8 @@ var PlacesUIUtils = {
   },
 
   /**
-   * Loads the node's URL in the appropriate tab or window or as a web
-   * panel given the user's preference specified by modifier keys tracked by a
+   * Loads the node's URL in the appropriate tab or window given the
+   * user's preference specified by modifier keys tracked by a
    * DOM mouse/key event.
    * @param   aNode
    *          An uri result node.
@@ -689,8 +688,7 @@ var PlacesUIUtils = {
   },
 
   /**
-   * Loads the node's URL in the appropriate tab or window or as a
-   * web panel.
+   * Loads the node's URL in the appropriate tab or window.
    * see also openUILinkIn
    */
   openNodeIn: function PUIU_openNodeIn(aNode, aWhere, aView, aPrivate) {
@@ -708,19 +706,6 @@ var PlacesUIUtils = {
           this.markPageAsFollowedBookmark(aNode.uri);
         else
           this.markPageAsTyped(aNode.uri);
-      }
-
-      // Check whether the node is a bookmark which should be opened as
-      // a web panel
-      if (aWhere == "current" && isBookmark) {
-        if (PlacesUtils.annotations
-                       .itemHasAnnotation(aNode.itemId, this.LOAD_IN_SIDEBAR_ANNO)) {
-          let browserWin = BrowserWindowTracker.getTopWindow();
-          if (browserWin) {
-            browserWin.openWebPanel(aNode.title, aNode.uri);
-            return;
-          }
-        }
       }
 
       aWindow.openTrustedLinkIn(aNode.uri, aWhere, {
@@ -911,7 +896,7 @@ var PlacesUIUtils = {
     } else {
       let insertionIndex = await insertionPoint.getIndex();
       itemsCount = items.length;
-      transactions = await getTransactionsForTransferItems(
+      transactions = getTransactionsForTransferItems(
         items, insertionIndex, insertionPoint.guid, !doCopy);
     }
 
@@ -931,10 +916,8 @@ var PlacesUIUtils = {
       // If we're not a tag, then we need to get the ids of the items to select.
       batchingItem = async () => {
         for (let transaction of transactions) {
-          let guid = await transaction.transact();
-          if (guid) {
-            guidsToSelect.push(guid);
-          }
+          let result = await transaction.transact();
+          guidsToSelect = guidsToSelect.concat(result);
         }
       };
     }
@@ -1032,7 +1015,7 @@ var PlacesUIUtils = {
     if (win.top.XULBrowserWindow) {
       win.top.XULBrowserWindow.setOverLink(url, null);
     }
-  }
+  },
 };
 
 // These are lazy getters to avoid importing PlacesUtils immediately.
@@ -1124,8 +1107,8 @@ function getResultForBatching(viewOrElement) {
  *                         copy them.
  * @return {Array} Returns an array of created PlacesTransactions.
  */
-async function getTransactionsForTransferItems(items, insertionIndex,
-                                               insertionParentGuid, doMove) {
+function getTransactionsForTransferItems(items, insertionIndex,
+                                         insertionParentGuid, doMove) {
   let canMove = true;
   for (let item of items) {
     if (!PlacesUIUtils.SUPPORTED_FLAVORS.includes(item.type)) {
@@ -1157,57 +1140,17 @@ async function getTransactionsForTransferItems(items, insertionIndex,
     doMove = false;
   }
 
-  return doMove ? getTransactionsForMove(items, insertionIndex, insertionParentGuid) :
-                  getTransactionsForCopy(items, insertionIndex, insertionParentGuid);
-}
-
-/**
- * Processes a set of transfer items and returns an array of transactions.
- *
- * @param {Array} items A list of unwrapped nodes to get transactions for.
- * @param {Integer} insertionIndex The requested index for insertion.
- * @param {String} insertionParentGuid The guid of the parent folder to insert
- *                                     or move the items to.
- * @return {Array} Returns an array of created PlacesTransactions.
- */
-async function getTransactionsForMove(items, insertionIndex,
-                                      insertionParentGuid) {
-  let transactions = [];
-  let index = insertionIndex;
-
-  for (let item of items) {
-    if (index != -1 && item.itemGuid) {
-      // Note: we use the parent from the existing bookmark as the sidebar
-      // gives us an unwrapped.parent that is actually a query and not the real
-      // parent.
-      let existingBookmark = await PlacesUtils.bookmarks.fetch(item.itemGuid);
-
-      // If we're dropping on the same folder, then we may need to adjust
-      // the index to insert at the correct place.
-      if (existingBookmark && insertionParentGuid == existingBookmark.parentGuid) {
-        if (index > existingBookmark.index) {
-          // If we're dragging down, we need to go one lower to insert at
-          // the real point as moving the element changes the index of
-          // everything below by 1.
-          index--;
-        } else if (index == existingBookmark.index) {
-          // This isn't moving so we skip it.
-          continue;
-        }
-      }
-    }
-
-    transactions.push(PlacesTransactions.Move({
-      guid: item.itemGuid,
-      newIndex: index,
+  if (doMove) {
+    // Move is simple, we pass the transaction a list of GUIDs and where to move
+    // them to.
+    return [PlacesTransactions.Move({
+      guids: items.map(item => item.itemGuid),
       newParentGuid: insertionParentGuid,
-    }));
-
-    if (index != -1 && item.itemGuid) {
-      index++;
-    }
+      newIndex: insertionIndex,
+    })];
   }
-  return transactions;
+
+  return getTransactionsForCopy(items, insertionIndex, insertionParentGuid);
 }
 
 /**
@@ -1219,8 +1162,8 @@ async function getTransactionsForMove(items, insertionIndex,
  *                                     or move the items to.
  * @return {Array} Returns an array of created PlacesTransactions.
  */
-async function getTransactionsForCopy(items, insertionIndex,
-                                      insertionParentGuid) {
+function getTransactionsForCopy(items, insertionIndex,
+                                insertionParentGuid) {
   let transactions = [];
   let index = insertionIndex;
 

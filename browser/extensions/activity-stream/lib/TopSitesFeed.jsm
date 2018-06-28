@@ -30,6 +30,7 @@ const MIN_FAVICON_SIZE = 96;
 const CACHED_LINK_PROPS_TO_MIGRATE = ["screenshot", "customScreenshot"];
 const PINNED_FAVICON_PROPS_TO_MIGRATE = ["favicon", "faviconRef", "faviconSize"];
 const SECTION_ID = "topsites";
+const ROWS_PREF = "topSitesRows";
 
 this.TopSitesFeed = class TopSitesFeed {
   constructor() {
@@ -88,8 +89,7 @@ this.TopSitesFeed = class TopSitesFeed {
   }
 
   async getLinksWithDefaults() {
-    // Get at least 2 rows so toggling between 1 and 2 rows has sites
-    const numItems = Math.max(this.store.getState().Prefs.values.topSitesRows, 2) * TOP_SITES_MAX_SITES_PER_ROW;
+    const numItems = this.store.getState().Prefs.values[ROWS_PREF] * TOP_SITES_MAX_SITES_PER_ROW;
     const frecent = (await this.frecentCache.request({
       numItems,
       topsiteFrecency: FRECENCY_THRESHOLD
@@ -309,6 +309,13 @@ this.TopSitesFeed = class TopSitesFeed {
       await this._pinSiteAt(site, index);
       this._broadcastPinnedSitesUpdated();
     } else {
+      // Bug 1458658. If the top site is being pinned from an 'Add a Top Site' option,
+      // then we want to make sure to unblock that link if it has previously been
+      // blocked. We know if the site has been added because the index will be -1.
+      if (index === -1) {
+        NewTabUtils.blockedLinks.unblock({url: site.url});
+        this.frecentCache.expire();
+      }
       this.insert(action);
     }
   }
@@ -329,7 +336,7 @@ this.TopSitesFeed = class TopSitesFeed {
     // Don't insert any pins past the end of the visible top sites. Otherwise,
     // we can end up with a bunch of pinned sites that can never be unpinned again
     // from the UI.
-    const topSitesCount = this.store.getState().Prefs.values.topSitesRows * TOP_SITES_MAX_SITES_PER_ROW;
+    const topSitesCount = this.store.getState().Prefs.values[ROWS_PREF] * TOP_SITES_MAX_SITES_PER_ROW;
     if (index >= topSitesCount) {
       return;
     }
@@ -378,7 +385,7 @@ this.TopSitesFeed = class TopSitesFeed {
     // pinned in the slot (unless it's the last slot, then it replaces).
     this._insertPin(
       action.data.site, index,
-      action.data.draggedFromIndex !== undefined ? action.data.draggedFromIndex : this.store.getState().Prefs.values.topSitesRows * TOP_SITES_MAX_SITES_PER_ROW);
+      action.data.draggedFromIndex !== undefined ? action.data.draggedFromIndex : this.store.getState().Prefs.values[ROWS_PREF] * TOP_SITES_MAX_SITES_PER_ROW);
 
     await this._clearLinkCustomScreenshot(action.data.site);
     this._broadcastPinnedSitesUpdated();
@@ -395,6 +402,7 @@ this.TopSitesFeed = class TopSitesFeed {
       // All these actions mean we need new top sites
       case at.MIGRATION_COMPLETED:
       case at.PLACES_HISTORY_CLEARED:
+      case at.PLACES_LINK_DELETED:
         this.frecentCache.expire();
         this.refresh({broadcast: true});
         break;
@@ -410,6 +418,8 @@ this.TopSitesFeed = class TopSitesFeed {
       case at.PREF_CHANGED:
         if (action.data.name === DEFAULT_SITES_PREF) {
           this.refreshDefaults(action.data.value);
+        } else if (action.data.name === ROWS_PREF) {
+          this.refresh({broadcast: true});
         }
         break;
       case at.UPDATE_SECTION_PREFS:

@@ -7,6 +7,7 @@
 #include "mozilla/dom/FontFace.h"
 
 #include <algorithm>
+#include "mozilla/dom/CSSFontFaceRule.h"
 #include "mozilla/dom/FontFaceBinding.h"
 #include "mozilla/dom/FontFaceSet.h"
 #include "mozilla/dom/Promise.h"
@@ -15,7 +16,6 @@
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoCSSParser.h"
-#include "mozilla/ServoFontFaceRule.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoUtils.h"
 #include "mozilla/StaticPrefs.h"
@@ -130,7 +130,7 @@ FontFace::~FontFace()
 JSObject*
 FontFace::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return FontFaceBinding::Wrap(aCx, this, aGivenProto);
+  return FontFace_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 static FontFaceLoadStatus
@@ -147,7 +147,7 @@ LoadStateToStatus(gfxUserFontEntry::UserFontLoadState aLoadState)
     case gfxUserFontEntry::UserFontLoadState::STATUS_FAILED:
       return FontFaceLoadStatus::Error;
   }
-  NS_NOTREACHED("invalid aLoadState value");
+  MOZ_ASSERT_UNREACHABLE("invalid aLoadState value");
   return FontFaceLoadStatus::Error;
 }
 

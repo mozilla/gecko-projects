@@ -234,9 +234,6 @@ static FrameCtorDebugFlags gFlags[] = {
 
 //------------------------------------------------------------------
 
-nsIFrame*
-NS_NewAutoRepeatBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle);
-
 nsContainerFrame*
 NS_NewRootBoxFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle);
 
@@ -572,7 +569,7 @@ GetLastIBSplitSibling(nsIFrame* aFrame)
       return static_cast<nsContainerFrame*>(frame);
     }
   }
-  NS_NOTREACHED("unreachable code");
+  MOZ_ASSERT_UNREACHABLE("unreachable code");
   return nullptr;
 }
 
@@ -1817,7 +1814,7 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
     }
 
     case eStyleContentType_Uninitialized:
-      NS_NOTREACHED("uninitialized content type");
+      MOZ_ASSERT_UNREACHABLE("uninitialized content type");
       return nullptr;
   }
 
@@ -4292,7 +4289,6 @@ nsCSSFrameConstructor::FindXULTagData(Element* aElement,
     SCROLLABLE_XUL_CREATE(thumb, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(checkbox, NS_NewButtonBoxFrame),
     SCROLLABLE_XUL_CREATE(radio, NS_NewButtonBoxFrame),
-    SCROLLABLE_XUL_CREATE(autorepeatbutton, NS_NewAutoRepeatBoxFrame),
     SCROLLABLE_XUL_CREATE(titlebar, NS_NewTitleBarFrame),
     SCROLLABLE_XUL_CREATE(resizer, NS_NewResizerFrame),
     SCROLLABLE_XUL_CREATE(toolbarpaletteitem, NS_NewBoxFrame),
@@ -4473,19 +4469,25 @@ nsCSSFrameConstructor::FindXULDisplayData(const nsStyleDisplay* aDisplay,
     return nullptr;
   }
 
-  // If we're emulating -moz-box with flexbox, then treat it as non-XUL and
-  // return null (except for scrollcorners which have to be XUL becuase their
-  // parent reflows them with BoxReflow() which means they have to get
-  // actual-XUL frames).
-  if (StaticPrefs::layout_css_emulate_moz_box_with_flex() &&
-      aElement && !aElement->IsXULElement(nsGkAtoms::scrollcorner) &&
-      (aDisplay->mDisplay == StyleDisplay::MozBox ||
-       aDisplay->mDisplay == StyleDisplay::MozInlineBox)) {
-    return nullptr;
-  }
-
   MOZ_ASSERT(aDisplay->mDisplay <= StyleDisplay::MozPopup,
              "Someone added a new display value?");
+
+  if (aDisplay->mDisplay == StyleDisplay::MozBox ||
+      aDisplay->mDisplay == StyleDisplay::MozInlineBox) {
+    if (!aElement->IsInNativeAnonymousSubtree() &&
+        aElement->OwnerDoc()->IsContentDocument()) {
+      aElement->OwnerDoc()->WarnOnceAbout(nsIDocument::eMozBoxOrInlineBoxDisplay);
+    }
+
+    // If we're emulating -moz-box with flexbox, then treat it as non-XUL and
+    // return null (except for scrollcorners which have to be XUL becuase their
+    // parent reflows them with BoxReflow() which means they have to get
+    // actual-XUL frames).
+    if (StaticPrefs::layout_css_emulate_moz_box_with_flex() &&
+        !aElement->IsXULElement(nsGkAtoms::scrollcorner)) {
+      return nullptr;
+    }
+  }
 
   const FrameConstructionDataByDisplay& data =
     sXULDisplayData[size_t(aDisplay->mDisplay) - size_t(StyleDisplay::MozBox)];
@@ -7682,7 +7684,7 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent* aStartChild,
   AutoFrameConstructionItemList items(this);
   ParentType parentType = GetParentType(frameType);
   FlattenedChildIterator iter(insertion.mContainer);
-  bool haveNoXBLChildren = (!iter.XBLInvolved() || !iter.GetNextChild());
+  bool haveNoXBLChildren = !iter.XBLInvolved() || !iter.GetNextChild();
   if (aStartChild->GetPreviousSibling() &&
       parentType == eTypeBlock && haveNoXBLChildren) {
     // If there's a text node in the normal content list just before the
@@ -8596,15 +8598,6 @@ nsCSSFrameConstructor::CreateContinuingFrame(nsPresContext*    aPresContext,
   } else if (LayoutFrameType::ImageControl == frameType) {
     newFrame = NS_NewImageControlFrame(shell, computedStyle);
     newFrame->Init(content, aParentFrame, aFrame);
-  } else if (LayoutFrameType::Placeholder == frameType) {
-    // create a continuing out of flow frame
-    nsIFrame* oofFrame = nsPlaceholderFrame::GetRealFrameForPlaceholder(aFrame);
-    nsIFrame* oofContFrame =
-      CreateContinuingFrame(aPresContext, oofFrame, aParentFrame);
-    newFrame =
-      CreatePlaceholderFrameFor(shell, content, oofContFrame,
-                                aParentFrame, aFrame,
-                                aFrame->GetStateBits() & PLACEHOLDER_TYPE_MASK);
   } else if (LayoutFrameType::FieldSet == frameType) {
     nsContainerFrame* fieldset = NS_NewFieldSetFrame(shell, computedStyle);
 
@@ -12179,7 +12172,7 @@ Iterator::AppendItemsToList(nsCSSFrameConstructor* aFCtor, const Iterator& aEnd,
   }
 
   // Move our entire list of items into the empty target list.
-  aTargetList.mItems = Move(mList.mItems);
+  aTargetList.mItems = std::move(mList.mItems);
 
   // Copy over the various counters
   aTargetList.mInlineCount = mList.mInlineCount;

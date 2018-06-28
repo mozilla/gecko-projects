@@ -179,7 +179,7 @@ typedef mozilla::Vector<KeyedHistogramSnapshotsArray> KeyedHistogramProcessSnaps
 
 class KeyedHistogram {
 public:
-  KeyedHistogram(HistogramID id, const HistogramInfo& info);
+  KeyedHistogram(HistogramID id, const HistogramInfo& info, bool expired);
   ~KeyedHistogram();
   nsresult GetHistogram(const nsCString& name, Histogram** histogram);
   Histogram* GetHistogram(const nsCString& name);
@@ -198,6 +198,8 @@ public:
 
   bool IsEmpty() const { return mHistogramMap.IsEmpty(); }
 
+  bool IsExpired() const { return mIsExpired; }
+
 private:
   typedef nsBaseHashtableET<nsCStringHashKey, Histogram*> KeyedHistogramEntry;
   typedef AutoHashtable<KeyedHistogramEntry> KeyedHistogramMapType;
@@ -205,6 +207,7 @@ private:
 
   const HistogramID mId;
   const HistogramInfo& mHistogramInfo;
+  bool mIsExpired;
 };
 
 } // namespace
@@ -236,6 +239,9 @@ StringToHistogramIdMap gNameToHistogramIDMap(HistogramCount);
 
 // To simplify logic below we use a single histogram instance for all expired histograms.
 Histogram* gExpiredHistogram = nullptr;
+
+// The single placeholder for expired keyed histograms.
+KeyedHistogram* gExpiredKeyedHistogram = nullptr;
 
 // This tracks whether recording is enabled for specific histograms.
 // To utilize C++ initialization rules, we invert the meaning to "disabled".
@@ -384,7 +390,21 @@ internal_GetKeyedHistogramById(HistogramID histogramId, ProcessID processId,
   }
 
   const HistogramInfo& info = gHistogramInfos[histogramId];
-  kh = new KeyedHistogram(histogramId, info);
+  const bool isExpired = IsExpiredVersion(info.expiration());
+
+  // If the keyed histogram is expired, set its storage to the expired
+  // keyed histogram.
+  if (isExpired) {
+    if (!gExpiredKeyedHistogram) {
+      // If we don't have an expired keyed histogram, create one.
+      gExpiredKeyedHistogram = new KeyedHistogram(histogramId, info, true /* expired */);
+      MOZ_ASSERT(gExpiredKeyedHistogram);
+    }
+    kh = gExpiredKeyedHistogram;
+  } else {
+    kh = new KeyedHistogram(histogramId, info, false /* expired */);
+  }
+
   internal_SetKeyedHistogramInStorage(histogramId, processId, kh);
 
   return kh;
@@ -899,10 +919,11 @@ internal_ReflectKeyedHistogram(const KeyedHistogramSnapshotData& aSnapshot,
   return NS_OK;
 }
 
-KeyedHistogram::KeyedHistogram(HistogramID id, const HistogramInfo& info)
+KeyedHistogram::KeyedHistogram(HistogramID id, const HistogramInfo& info, bool expired)
   : mHistogramMap()
   , mId(id)
   , mHistogramInfo(info)
+  , mIsExpired(expired)
 {
 }
 
@@ -966,6 +987,11 @@ KeyedHistogram::Add(const nsCString& key, uint32_t sample,
   // has been checked in its owner process.
   if (!canRecordDataset ||
     (aProcessType == ProcessID::Parent && !internal_IsRecordingEnabled(mId))) {
+    return NS_OK;
+  }
+
+  // Don't record if expired.
+  if (IsExpired()) {
     return NS_OK;
   }
 
@@ -1074,7 +1100,7 @@ KeyedHistogram::GetSnapshot(const StaticMutexAutoLock& aLock,
     }
 
     // Append to the final snapshot.
-    aSnapshot.Put(iter.Get()->GetKey(), mozilla::Move(keySnapshot));
+    aSnapshot.Put(iter.Get()->GetKey(), std::move(keySnapshot));
   }
 
   if (aClearSubsession) {
@@ -1134,7 +1160,7 @@ internal_GetKeyedHistogramsSnapshot(const StaticMutexAutoLock& aLock,
       KeyedHistogram* keyed = internal_GetKeyedHistogramById(id,
                                                              ProcessID(process),
                                                              /* instantiate = */ false);
-      if (!keyed || (aSkipEmpty && keyed->IsEmpty())) {
+      if (!keyed || (aSkipEmpty && keyed->IsEmpty()) || keyed->IsExpired()) {
         continue;
       }
 
@@ -1144,7 +1170,7 @@ internal_GetKeyedHistogramsSnapshot(const StaticMutexAutoLock& aLock,
         return NS_ERROR_FAILURE;
       }
 
-      if (!hArray.emplaceBack(KeyedHistogramSnapshotInfo{mozilla::Move(snapshot), id})) {
+      if (!hArray.emplaceBack(KeyedHistogramSnapshotInfo{std::move(snapshot), id})) {
         return NS_ERROR_OUT_OF_MEMORY;
       }
     }
@@ -2000,7 +2026,8 @@ void TelemetryHistogram::DeInitializeGlobalState()
   // FactoryGet `new`s Histograms for us, but requires us to manually delete.
   if (XRE_IsParentProcess()) {
     for (size_t i = 0; i < HistogramCount * size_t(ProcessID::Count); ++i) {
-      if (i < HistogramCount * size_t(ProcessID::Count)) {
+      if (i < HistogramCount * size_t(ProcessID::Count)
+          && gKeyedHistogramStorage[i] != gExpiredKeyedHistogram) {
         delete gKeyedHistogramStorage[i];
       }
       if (gHistogramStorage[i] != gExpiredHistogram) {
@@ -2012,6 +2039,8 @@ void TelemetryHistogram::DeInitializeGlobalState()
   }
   delete gExpiredHistogram;
   gExpiredHistogram = nullptr;
+  delete gExpiredKeyedHistogram;
+  gExpiredKeyedHistogram = nullptr;
 }
 
 #ifdef DEBUG
@@ -2909,7 +2938,7 @@ TelemetryHistogram::DeserializeHistograms(JSContext* aCx, JS::HandleValue aData)
 
       // Finally append the deserialized data to the storage.
       if (!deserializedProcessData.emplaceBack(
-        MakeTuple(mozilla::Move(histogramName), mozilla::Move(deserializedCounts), sum))) {
+        MakeTuple(std::move(histogramName), std::move(deserializedCounts), sum))) {
         return NS_ERROR_OUT_OF_MEMORY;
       }
     }
@@ -2954,7 +2983,7 @@ TelemetryHistogram::DeserializeHistograms(JSContext* aCx, JS::HandleValue aData)
         }
 
         // Update the data for the histogram.
-        h->AddSampleSet(base::PersistedSampleSet(mozilla::Move(mozilla::Get<1>(histogramData)),
+        h->AddSampleSet(base::PersistedSampleSet(std::move(mozilla::Get<1>(histogramData)),
                                                  mozilla::Get<2>(histogramData)));
       }
     }
@@ -3090,8 +3119,8 @@ TelemetryHistogram::DeserializeKeyedHistograms(JSContext* aCx, JS::HandleValue a
 
         // Finally append the deserialized data to the storage.
         if (!deserializedProcessData.emplaceBack(
-          MakeTuple(nsCString(NS_ConvertUTF16toUTF8(histogramName)), mozilla::Move(keyName),
-                    mozilla::Move(deserializedCounts), sum))) {
+          MakeTuple(nsCString(NS_ConvertUTF16toUTF8(histogramName)), std::move(keyName),
+                    std::move(deserializedCounts), sum))) {
           return NS_ERROR_OUT_OF_MEMORY;
         }
       }
@@ -3148,7 +3177,7 @@ TelemetryHistogram::DeserializeKeyedHistograms(JSContext* aCx, JS::HandleValue a
         }
 
         // Update the data for the histogram.
-        h->AddSampleSet(base::PersistedSampleSet(mozilla::Move(mozilla::Get<2>(histogramData)),
+        h->AddSampleSet(base::PersistedSampleSet(std::move(mozilla::Get<2>(histogramData)),
                                                  mozilla::Get<3>(histogramData)));
       }
     }

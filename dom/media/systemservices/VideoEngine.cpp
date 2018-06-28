@@ -68,9 +68,25 @@ VideoEngine::CreateVideoCapture(int32_t& id, const char* deviceUniqueIdUTF8) {
 		         webrtc::VideoCaptureFactory::Create(deviceUniqueIdUTF8));
   } else {
 #ifndef WEBRTC_ANDROID
+#ifdef MOZ_X11
+    webrtc::VideoCaptureModule* captureModule;
+    auto type = mCaptureDevInfo.type;
+    nsresult result = NS_DispatchToMainThread(media::NewRunnableFrom(
+      [&captureModule, id, deviceUniqueIdUTF8, type]() -> nsresult {
+        captureModule = webrtc::DesktopCaptureImpl::Create(id, deviceUniqueIdUTF8, type);
+        return NS_OK;
+      }), nsIEventTarget::DISPATCH_SYNC);
+
+    if (result == NS_OK) {
+      entry = CaptureEntry(id, captureModule);
+    } else {
+      return;
+    }
+#else
     entry = CaptureEntry(
 	      id,
 	      webrtc::DesktopCaptureImpl::Create(id, deviceUniqueIdUTF8, mCaptureDevInfo.type));
+#endif
 #else
     MOZ_ASSERT("CreateVideoCapture NO DESKTOP CAPTURE IMPL ON ANDROID" == nullptr);
 #endif
@@ -194,7 +210,7 @@ VideoEngine::Create(UniquePtr<const webrtc::Config>&& aConfig)
   LOG((__PRETTY_FUNCTION__));
   LOG(("Creating new VideoEngine with CaptureDeviceType %s",
        aConfig->Get<webrtc::CaptureDeviceInfo>().TypeName()));
-  return do_AddRef(new VideoEngine(Move(aConfig)));
+  return do_AddRef(new VideoEngine(std::move(aConfig)));
 }
 
 VideoEngine::CaptureEntry::CaptureEntry(int32_t aCapnum,
@@ -240,6 +256,7 @@ VideoEngine::GenerateId() {
 }
 
 VideoEngine::VideoEngine(UniquePtr<const webrtc::Config>&& aConfig):
+  mId(0),
   mCaptureDevInfo(aConfig->Get<webrtc::CaptureDeviceInfo>()),
   mDeviceInfo(nullptr),
   mConfig(std::move(aConfig))

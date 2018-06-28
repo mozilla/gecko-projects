@@ -86,7 +86,7 @@ typedef JSConstScalarSpec<int32_t> JSConstIntegerSpec;
 namespace js {
 
 inline JS::Realm* GetContextRealm(const JSContext* cx);
-inline JSCompartment* GetContextCompartment(const JSContext* cx);
+inline JS::Compartment* GetContextCompartment(const JSContext* cx);
 inline JS::Zone* GetContextZone(const JSContext* cx);
 
 // Whether the current thread is permitted access to any part of the specified
@@ -118,43 +118,43 @@ enum class HeapState {
 };
 
 JS_PUBLIC_API(HeapState)
-CurrentThreadHeapState();
+RuntimeHeapState();
 
 static inline bool
-CurrentThreadIsHeapBusy()
+RuntimeHeapIsBusy()
 {
-    return CurrentThreadHeapState() != HeapState::Idle;
+    return RuntimeHeapState() != HeapState::Idle;
 }
 
 static inline bool
-CurrentThreadIsHeapTracing()
+RuntimeHeapIsTracing()
 {
-    return CurrentThreadHeapState() == HeapState::Tracing;
+    return RuntimeHeapState() == HeapState::Tracing;
 }
 
 static inline bool
-CurrentThreadIsHeapMajorCollecting()
+RuntimeHeapIsMajorCollecting()
 {
-    return CurrentThreadHeapState() == HeapState::MajorCollecting;
+    return RuntimeHeapState() == HeapState::MajorCollecting;
 }
 
 static inline bool
-CurrentThreadIsHeapMinorCollecting()
+RuntimeHeapIsMinorCollecting()
 {
-    return CurrentThreadHeapState() == HeapState::MinorCollecting;
+    return RuntimeHeapState() == HeapState::MinorCollecting;
 }
 
 static inline bool
-CurrentThreadIsHeapCollecting()
+RuntimeHeapIsCollecting()
 {
-    HeapState state = CurrentThreadHeapState();
+    HeapState state = RuntimeHeapState();
     return state == HeapState::MajorCollecting || state == HeapState::MinorCollecting;
 }
 
 static inline bool
-CurrentThreadIsHeapCycleCollecting()
+RuntimeHeapIsCycleCollecting()
 {
-    return CurrentThreadHeapState() == HeapState::CycleCollecting;
+    return RuntimeHeapState() == HeapState::CycleCollecting;
 }
 
 // Decorates the Unlinking phase of CycleCollection so that accidental use
@@ -162,6 +162,8 @@ CurrentThreadIsHeapCycleCollecting()
 class MOZ_STACK_CLASS JS_PUBLIC_API(AutoEnterCycleCollection)
 {
 #ifdef DEBUG
+    JSRuntime* runtime_;
+
   public:
     explicit AutoEnterCycleCollection(JSRuntime* rt);
     ~AutoEnterCycleCollection();

@@ -58,6 +58,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/AudioTrack.h"
 #include "mozilla/dom/AudioTrackList.h"
+#include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/dom/HTMLAudioElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
@@ -84,7 +85,6 @@
 #include "nsError.h"
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
-#include "nsHostObjectProtocolHandler.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICachingChannel.h"
 #include "nsICategoryManager.h"
@@ -130,7 +130,7 @@ static mozilla::LazyLogModule gMediaElementEventsLog("nsMediaElementEvents");
 
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
-using namespace mozilla::dom::HTMLMediaElementBinding;
+using namespace mozilla::dom::HTMLMediaElement_Binding;
 
 namespace mozilla {
 namespace dom {
@@ -294,7 +294,7 @@ public:
     : nsMediaEvent(
         "HTMLMediaElement::nsResolveOrRejectPendingPlayPromisesRunner",
         aElement)
-    , mPromises(Move(aPromises))
+    , mPromises(std::move(aPromises))
     , mError(aError)
   {
     mElement->mPendingPlayPromisesRunners.AppendElement(this);
@@ -328,7 +328,7 @@ public:
     HTMLMediaElement* aElement,
     nsTArray<RefPtr<PlayPromise>>&& aPendingPlayPromises)
     : nsResolveOrRejectPendingPlayPromisesRunner(aElement,
-                                                 Move(aPendingPlayPromises))
+                                                 std::move(aPendingPlayPromises))
   {
   }
 
@@ -364,7 +364,8 @@ public:
     LOG_EVENT(LogLevel::Debug,
               ("%p Dispatching simple event source error", mElement.get()));
     return nsContentUtils::DispatchTrustedEvent(
-      mElement->OwnerDoc(), mSource, NS_LITERAL_STRING("error"), false, false);
+      mElement->OwnerDoc(), mSource, NS_LITERAL_STRING("error"),
+      CanBubble::eNo, Cancelable::eNo);
   }
 };
 
@@ -1434,8 +1435,7 @@ public:
       mOwner->OwnerDoc(),
       static_cast<nsIContent*>(mOwner),
       NS_LITERAL_STRING("OpenMediaWithExternalApp"),
-      true,
-      true);
+      CanBubble::eYes, Cancelable::eYes);
   }
 
   RefPtr<MediaError> mError;
@@ -1478,6 +1478,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLMediaElement,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mErrorSink->mError)
   for (uint32_t i = 0; i < tmp->mOutputStreams.Length(); ++i) {
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOutputStreams[i].mStream)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOutputStreams[i].mPreCreatedTracks)
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlayed);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTextTrackManager)
@@ -1725,6 +1726,14 @@ HTMLMediaElement::ShutdownDecoder()
   if (mMediaSource) {
     mMediaSource->CompletePendingTransactions();
   }
+  for (OutputMediaStream& out : mOutputStreams) {
+    if (!out.mCapturingDecoder) {
+      continue;
+    }
+    out.mNextAvailableTrackID = std::max<TrackID>(
+      mDecoder->NextAvailableTrackIDFor(out.mStream->GetInputStream()),
+      out.mNextAvailableTrackID);
+  }
   mDecoder->Shutdown();
   DDUNLINKCHILD(mDecoder.get());
   mDecoder = nullptr;
@@ -1803,7 +1812,6 @@ HTMLMediaElement::AbortExistingLoads()
   mPendingEncryptedInitData.Reset();
   mWaitingForKey = NOT_WAITING_FOR_KEY;
   mSourcePointer = nullptr;
-  mAttemptPlayUponLoadedMetadata = false;
 
   mTags = nullptr;
 
@@ -1988,7 +1996,7 @@ HTMLMediaElement::Load()
        IsAllowedToPlay(),
        OwnerDoc(),
        DocumentOrigin(OwnerDoc()).get(),
-       OwnerDoc() ? OwnerDoc()->HasBeenUserActivated() : 0,
+       OwnerDoc() ? OwnerDoc()->HasBeenUserGestureActivated() : 0,
        mMuted,
        mVolume));
 
@@ -2465,7 +2473,7 @@ HTMLMediaElement::LoadFromSourceChildren()
     // If we fail to load, loop back and try loading the next resource.
     DispatchAsyncSourceError(child);
   }
-  NS_NOTREACHED("Execution should not reach here!");
+  MOZ_ASSERT_UNREACHABLE("Execution should not reach here!");
 }
 
 void
@@ -2712,12 +2720,6 @@ HTMLMediaElement::FastSeek(double aTime, ErrorResult& aRv)
 already_AddRefed<Promise>
 HTMLMediaElement::SeekToNextFrame(ErrorResult& aRv)
 {
-  if (mSeekDOMPromise) {
-    // We can't perform NextFrameSeek while seek is already in action.
-    // Just return the pending seek promise.
-    return do_AddRef(mSeekDOMPromise);
-  }
-
   /* This will cause JIT code to be kept around longer, to help performance
    * when using SeekToNextFrame to iterate through every frame of a video.
    */
@@ -3453,7 +3455,7 @@ HTMLMediaElement::AddCaptureMediaTrackToOutputStream(
     processedOutputSource, destinationTrackID);
 
   Pair<nsString, RefPtr<MediaInputPort>> p(aTrack->GetId(), port);
-  aOutputStream.mTrackPorts.AppendElement(Move(p));
+  aOutputStream.mTrackPorts.AppendElement(std::move(p));
 
   if (mSrcStreamIsPlaying) {
     processedOutputSource->SetTrackEnabled(destinationTrackID,
@@ -3538,6 +3540,7 @@ HTMLMediaElement::CaptureStreamInternal(StreamCaptureBehavior aFinishBehavior,
     out->mCapturingDecoder = true;
     mDecoder->AddOutputStream(
       out->mStream->GetInputStream()->AsProcessedStream(),
+      out->mNextAvailableTrackID,
       aFinishBehavior == StreamCaptureBehavior::FINISH_WHEN_ENDED);
   } else if (mSrcStream) {
     out->mCapturingMediaStream = true;
@@ -3551,21 +3554,23 @@ HTMLMediaElement::CaptureStreamInternal(StreamCaptureBehavior aFinishBehavior,
 
   if (mDecoder) {
     if (HasAudio()) {
-      TrackID audioTrackId = mMediaInfo.mAudio.mTrackId;
+      TrackID audioTrackId = out->mNextAvailableTrackID++;
       RefPtr<MediaStreamTrackSource> trackSource =
         getter->GetMediaStreamTrackSource(audioTrackId);
       RefPtr<MediaStreamTrack> track = out->mStream->CreateDOMTrack(
         audioTrackId, MediaSegment::AUDIO, trackSource);
+      out->mPreCreatedTracks.AppendElement(track);
       out->mStream->AddTrackInternal(track);
       LOG(LogLevel::Debug,
           ("Created audio track %d for captured decoder", audioTrackId));
     }
     if (IsVideo() && HasVideo() && !out->mCapturingAudioOnly) {
-      TrackID videoTrackId = mMediaInfo.mVideo.mTrackId;
+      TrackID videoTrackId = out->mNextAvailableTrackID++;
       RefPtr<MediaStreamTrackSource> trackSource =
         getter->GetMediaStreamTrackSource(videoTrackId);
       RefPtr<MediaStreamTrack> track = out->mStream->CreateDOMTrack(
         videoTrackId, MediaSegment::VIDEO, trackSource);
+      out->mPreCreatedTracks.AppendElement(track);
       out->mStream->AddTrackInternal(track);
       LOG(LogLevel::Debug,
           ("Created video track %d for captured decoder", videoTrackId));
@@ -3873,11 +3878,12 @@ NS_IMPL_ISUPPORTS(HTMLMediaElement::ShutdownObserver, nsIObserver)
 HTMLMediaElement::HTMLMediaElement(
   already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
+  , mWatchManager(this, OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
   , mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other))
   , mAbstractMainThread(OwnerDoc()->AbstractMainThreadFor(TaskCategory::Other))
   , mShutdownObserver(new ShutdownObserver)
   , mPlayed(new TimeRanges(ToSupports(OwnerDoc())))
-  , mPaused(true, *this)
+  , mPaused(true, "HTMLMediaElement::mPaused")
   , mErrorSink(new ErrorSink(this))
   , mAudioChannelWrapper(new AudioChannelAgentCallback(this))
 {
@@ -3885,6 +3891,8 @@ HTMLMediaElement::HTMLMediaElement(
   MOZ_ASSERT(mAbstractMainThread);
 
   DecoderDoctorLogger::LogConstruction(this);
+
+  mWatchManager.Watch(mPaused, &HTMLMediaElement::UpdateWakeLock);
 
   ErrorResult rv;
 
@@ -4032,12 +4040,7 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
   // 4.8.12.8 - Step 1:
   // If the media element is not allowed to play, return a promise rejected
   // with a "NotAllowedError" DOMException and abort these steps.
-  // Note: IsAllowedToPlay() needs to know whether there is an audio track
-  // in the resource, and for that we need to be at readyState HAVE_METADATA
-  // or above. So only reject here if we're at readyState HAVE_METADATA. If
-  // we're below that, we'll we delay fulfilling the play promise until we've
-  // reached readyState >= HAVE_METADATA below.
-  if (mReadyState >= HAVE_METADATA && !IsAllowedToPlay()) {
+  if (!IsAllowedToPlay()) {
     // NOTE: for promise-based-play, will return a rejected promise here.
     LOG(LogLevel::Debug,
         ("%p Play() promise rejected because not allowed to play.", this));
@@ -4091,17 +4094,8 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
       SetCurrentTime(0);
     }
     if (!mPausedForInactiveDocumentOrChannel) {
-      if (mReadyState < HAVE_METADATA) {
-        // We don't know whether the autoplay policy will allow us to play yet,
-        // as we don't yet know whether the media has audio tracks. So delay
-        // starting playback until we've loaded metadata.
-        mAttemptPlayUponLoadedMetadata = true;
-      } else {
-        mDecoder->Play();
-      }
+      mDecoder->Play();
     }
-  } else if (mReadyState < HAVE_METADATA) {
-    mAttemptPlayUponLoadedMetadata = true;
   }
 
   if (mCurrentPlayRangeStart == -1.0) {
@@ -4162,8 +4156,7 @@ HTMLMediaElement::PlayInternal(ErrorResult& aRv)
         NotifyAboutPlaying();
         break;
     }
-  } else if (mReadyState >= HAVE_FUTURE_DATA &&
-             !mAttemptPlayUponLoadedMetadata) {
+  } else if (mReadyState >= HAVE_FUTURE_DATA) {
     // 7. Otherwise, if the media element's readyState attribute has the value
     //    HAVE_FUTURE_DATA or HAVE_ENOUGH_DATA, take pending play promises and
     //    queue a task to resolve pending play promises with the result.
@@ -4184,31 +4177,20 @@ HTMLMediaElement::MaybeDoLoad()
   }
 }
 
-HTMLMediaElement::WakeLockBoolWrapper&
-HTMLMediaElement::WakeLockBoolWrapper::operator=(bool val)
-{
-  if (mValue == val) {
-    return *this;
-  }
-
-  mValue = val;
-  UpdateWakeLock();
-  return *this;
-}
-
 void
-HTMLMediaElement::WakeLockBoolWrapper::UpdateWakeLock()
+HTMLMediaElement::UpdateWakeLock()
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  bool playing = !mValue;
+  // Ensure we have a wake lock if we're playing audibly. This ensures the
+  // device doesn't sleep while playing.
+  bool playing = !mPaused;
   bool isAudible =
-    mOuter.Volume() > 0.0 && !mOuter.mMuted && mOuter.mIsAudioTrackAudible;
-  // when playing audible media.
+    Volume() > 0.0 && !mMuted && mIsAudioTrackAudible;
+  // WakeLock when playing audible media.
   if (playing && isAudible) {
-    mOuter.WakeLockCreate();
+    WakeLockCreate();
   } else {
-    mOuter.WakeLockRelease();
+    WakeLockRelease();
   }
 }
 
@@ -4238,11 +4220,11 @@ HTMLMediaElement::WakeLockRelease()
 }
 
 HTMLMediaElement::OutputMediaStream::OutputMediaStream()
-  : mFinishWhenEnded(false)
+  : mNextAvailableTrackID(1)
+  , mFinishWhenEnded(false)
   , mCapturingAudioOnly(false)
   , mCapturingDecoder(false)
   , mCapturingMediaStream(false)
-  , mNextAvailableTrackID(1)
 {
 }
 
@@ -4855,7 +4837,7 @@ HTMLMediaElement::SetupDecoder(DecoderType* aDecoder, LoadArgs&&... aArgs)
        aDecoder,
        aDecoder->ContainerType().OriginalString().Data()));
 
-  nsresult rv = aDecoder->Load(Forward<LoadArgs>(aArgs)...);
+  nsresult rv = aDecoder->Load(std::forward<LoadArgs>(aArgs)...);
   if (NS_FAILED(rv)) {
     aDecoder->Shutdown();
     LOG(LogLevel::Debug, ("%p Failed to load for decoder %p", this, aDecoder));
@@ -4968,6 +4950,7 @@ HTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder)
 
     ms.mCapturingDecoder = true;
     aDecoder->AddOutputStream(ms.mStream->GetInputStream()->AsProcessedStream(),
+                              ms.mNextAvailableTrackID,
                               ms.mFinishWhenEnded);
   }
 
@@ -4994,7 +4977,7 @@ HTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder)
     mDecoder->Suspend();
   }
 
-  if (!mPaused && !mAttemptPlayUponLoadedMetadata) {
+  if (!mPaused) {
     SetPlayedOrSeeked(true);
     if (!mPausedForInactiveDocumentOrChannel) {
       mDecoder->Play();
@@ -5420,7 +5403,7 @@ HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
 
   mIsEncrypted =
     aInfo->IsEncrypted() || mPendingEncryptedInitData.IsEncrypted();
-  mTags = Move(aTags);
+  mTags = std::move(aTags);
   mLoadedDataFired = false;
   ChangeReadyState(HAVE_METADATA);
 
@@ -6041,16 +6024,6 @@ HTMLMediaElement::ChangeReadyState(nsMediaReadyState aState)
 
   UpdateAudioChannelPlayingState();
 
-  if (oldState < HAVE_METADATA && mReadyState >= HAVE_METADATA &&
-      mAttemptPlayUponLoadedMetadata) {
-    mAttemptPlayUponLoadedMetadata = false;
-    if (!mPaused && !IsAllowedToPlay()) {
-      mPaused = true;
-      DispatchAsyncEvent(NS_LITERAL_STRING("pause"));
-      AsyncRejectPendingPlayPromises(NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR);
-    }
-  }
-
   // Handle raising of "waiting" event during seek (see 4.8.10.9)
   // or
   // 4.8.12.7 Ready states:
@@ -6205,7 +6178,6 @@ HTMLMediaElement::CheckAutoplayDataReady()
     if (mCurrentPlayRangeStart == -1.0) {
       mCurrentPlayRangeStart = CurrentTime();
     }
-    MOZ_ASSERT(!mAttemptPlayUponLoadedMetadata);
     mDecoder->Play();
   } else if (mSrcStream) {
     SetPlayedOrSeeked(true);
@@ -6336,7 +6308,9 @@ HTMLMediaElement::DispatchEvent(const nsAString& aName)
   }
 
   return nsContentUtils::DispatchTrustedEvent(
-    OwnerDoc(), static_cast<nsIContent*>(this), aName, false, false);
+    OwnerDoc(), static_cast<nsIContent*>(this), aName,
+    CanBubble::eNo,
+    Cancelable::eNo);
 }
 
 void
@@ -6569,7 +6543,6 @@ HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement,
       if (mDecoder) {
         mDecoder->Resume();
         if (!mPaused && !mDecoder->IsEnded()) {
-          MOZ_ASSERT(!mAttemptPlayUponLoadedMetadata);
           mDecoder->Play();
         }
       }
@@ -6732,7 +6705,7 @@ HTMLMediaElement::GetNextSource()
       return child->AsElement();
     }
   }
-  NS_NOTREACHED("Execution should not reach here!");
+  MOZ_ASSERT_UNREACHABLE("Execution should not reach here!");
   return nullptr;
 }
 
@@ -6985,12 +6958,12 @@ HTMLMediaElement::IsAllowedToPlay()
 {
   if (!AutoplayPolicy::IsMediaElementAllowedToPlay(WrapNotNull(this))) {
 #if defined(MOZ_WIDGET_ANDROID)
-    nsContentUtils::DispatchTrustedEvent(
+    nsContentUtils::DispatchChromeEvent(
       OwnerDoc(),
       static_cast<nsIContent*>(this),
       NS_LITERAL_STRING("MozAutoplayMediaBlocked"),
-      false,
-      false);
+      CanBubble::eNo,
+      Cancelable::eNo);
 #endif
     LOG(LogLevel::Debug,
         ("%p %s AutoplayPolicy blocked autoplay.", this, __func__));
@@ -7564,7 +7537,7 @@ HTMLMediaElement::NotifyAudioPlaybackChanged(AudibleChangedReasons aReason)
     mAudioChannelWrapper->NotifyAudioPlaybackChanged(aReason);
   }
   // only request wake lock for audible media.
-  mPaused.UpdateWakeLock();
+  UpdateWakeLock();
 }
 
 bool
@@ -7794,7 +7767,7 @@ HTMLMediaElement::AbstractMainThread() const
 nsTArray<RefPtr<PlayPromise>>
 HTMLMediaElement::TakePendingPlayPromises()
 {
-  return Move(mPendingPlayPromises);
+  return std::move(mPendingPlayPromises);
 }
 
 void
@@ -7944,6 +7917,21 @@ HTMLMediaElement::RemoveMediaTracks()
   }
 
   mMediaTracksConstructed = false;
+
+  for (OutputMediaStream& ms : mOutputStreams) {
+    if (!ms.mCapturingDecoder) {
+      continue;
+    }
+    for (RefPtr<MediaStreamTrack>& t : ms.mPreCreatedTracks) {
+      if (t->Ended()) {
+        continue;
+      }
+      mAbstractMainThread->Dispatch(NewRunnableMethod(
+        "dom::HTMLMediaElement::RemoveMediaTracks",
+        t, &MediaStreamTrack::OverrideEnded));
+    }
+    ms.mPreCreatedTracks.Clear();
+  }
 }
 
 class MediaElementGMPCrashHelper : public GMPCrashHelper

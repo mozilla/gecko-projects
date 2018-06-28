@@ -109,8 +109,8 @@ wasm::HasSupport(JSContext* cx)
            HasAvailableCompilerTier(cx);
 }
 
-bool
-wasm::ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, Val* val)
+static bool
+ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, Val* val)
 {
     switch (targetType.code()) {
       case ValType::I32: {
@@ -140,8 +140,8 @@ wasm::ToWebAssemblyValue(JSContext* cx, ValType targetType, HandleValue v, Val* 
     }
 }
 
-Value
-wasm::ToJSValue(const Val& val)
+static Value
+ToJSValue(const Val& val)
 {
     switch (val.type().code()) {
       case ValType::I32:
@@ -338,7 +338,7 @@ wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj
         return false;
 
     MutableCompileArgs compileArgs = cx->new_<CompileArgs>();
-    if (!compileArgs || !compileArgs->initFromContext(cx, Move(scriptedCaller)))
+    if (!compileArgs || !compileArgs->initFromContext(cx, std::move(scriptedCaller)))
         return false;
 
     UniqueChars error;
@@ -608,14 +608,14 @@ KindToString(JSContext* cx, const KindNames& names, DefinitionKind kind)
 }
 
 static JSString*
-SigToString(JSContext* cx, const Sig& sig)
+FuncTypeToString(JSContext* cx, const FuncType& funcType)
 {
     StringBuffer buf(cx);
     if (!buf.append('('))
         return nullptr;
 
     bool first = true;
-    for (ValType arg : sig.args()) {
+    for (ValType arg : funcType.args()) {
         if (!first && !buf.append(", ", strlen(", ")))
             return nullptr;
 
@@ -629,8 +629,8 @@ SigToString(JSContext* cx, const Sig& sig)
     if (!buf.append(") -> (", strlen(") -> (")))
         return nullptr;
 
-    if (sig.ret() != ExprType::Void) {
-        const char* retStr = ToCString(sig.ret());
+    if (funcType.ret() != ExprType::Void) {
+        const char* retStr = ToCString(funcType.ret());
         if (!buf.append(retStr, strlen(retStr)))
             return nullptr;
     }
@@ -688,10 +688,10 @@ WasmModuleObject::imports(JSContext* cx, unsigned argc, Value* vp)
         props.infallibleAppend(IdValuePair(NameToId(names.kind), StringValue(kindStr)));
 
         if (fuzzingSafe && import.kind == DefinitionKind::Function) {
-            JSString* sigStr = SigToString(cx, funcImports[numFuncImport++].sig());
-            if (!sigStr)
+            JSString* ftStr = FuncTypeToString(cx, funcImports[numFuncImport++].funcType());
+            if (!ftStr)
                 return false;
-            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(sigStr))))
+            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(ftStr))))
                 return false;
         }
 
@@ -746,10 +746,10 @@ WasmModuleObject::exports(JSContext* cx, unsigned argc, Value* vp)
         props.infallibleAppend(IdValuePair(NameToId(names.kind), StringValue(kindStr)));
 
         if (fuzzingSafe && exp.kind() == DefinitionKind::Function) {
-            JSString* sigStr = SigToString(cx, funcExports[numFuncExport++].sig());
-            if (!sigStr)
+            JSString* ftStr = FuncTypeToString(cx, funcExports[numFuncExport++].funcType());
+            if (!ftStr)
                 return false;
-            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(sigStr))))
+            if (!props.append(IdValuePair(NameToId(names.signature), StringValue(ftStr))))
                 return false;
         }
 
@@ -871,7 +871,7 @@ InitCompileArgs(JSContext* cx, const char* introducer)
     if (!compileArgs)
         return nullptr;
 
-    if (!compileArgs->initFromContext(cx, Move(scriptedCaller)))
+    if (!compileArgs->initFromContext(cx, std::move(scriptedCaller)))
         return nullptr;
 
     return compileArgs;
@@ -1108,10 +1108,10 @@ WasmInstanceObject::create(JSContext* cx,
     auto* instance = cx->new_<Instance>(cx,
                                         obj,
                                         code,
-                                        Move(debug),
-                                        Move(tlsData),
+                                        std::move(debug),
+                                        std::move(tlsData),
                                         memory,
-                                        Move(tables),
+                                        std::move(tables),
                                         funcImports,
                                         globalImportValues,
                                         globalObjs);
@@ -1300,8 +1300,8 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
     if (!EnsureLazyEntryStub(instance, funcExportIndex, funcExport))
         return false;
 
-    const Sig& sig = funcExport.sig();
-    unsigned numArgs = sig.args().length();
+    const FuncType& funcType = funcExport.funcType();
+    unsigned numArgs = funcType.args().length();
 
     if (instance.isAsmJS()) {
         // asm.js needs to act like a normal JS function which means having the
@@ -1322,7 +1322,7 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
         // Functions with anyref don't have jit entries yet, so they should
         // mostly behave like asm.js functions. Pretend it's the case, until
         // jit entries are implemented.
-        JSFunction::Flags flags = sig.temporarilyUnsupportedAnyRef()
+        JSFunction::Flags flags = funcType.temporarilyUnsupportedAnyRef()
                                 ? JSFunction::ASMJS_NATIVE
                                 : JSFunction::WASM_FUN;
 
@@ -1331,7 +1331,7 @@ WasmInstanceObject::getExportedFunction(JSContext* cx, HandleWasmInstanceObject 
         if (!fun)
             return false;
 
-        if (sig.temporarilyUnsupportedAnyRef())
+        if (funcType.temporarilyUnsupportedAnyRef())
             fun->setAsmJSIndex(funcIndex);
         else
             fun->setWasmJitEntry(instance.code().getAddressOfJitEntry(funcIndex));
@@ -1903,7 +1903,7 @@ WasmTableObject::construct(JSContext* cx, unsigned argc, Value* vp)
     }
 
     Limits limits;
-    if (!GetLimits(cx, obj, MaxTableInitialLength, UINT32_MAX, "Table", &limits,
+    if (!GetLimits(cx, obj, MaxTableInitialLength, MaxTableMaximumLength, "Table", &limits,
                    Shareable::False))
     {
         return false;
@@ -2392,7 +2392,7 @@ Reject(JSContext* cx, const CompileArgs& args, Handle<PromiseObject*> promise,
     if (!str)
         return false;
 
-    RootedString message(cx, NewLatin1StringZ(cx, Move(str)));
+    RootedString message(cx, NewLatin1StringZ(cx, std::move(str)));
     if (!message)
         return false;
 
@@ -2539,7 +2539,7 @@ WebAssembly_compile(JSContext* cx, unsigned argc, Value* vp)
     if (!GetBufferSource(cx, callArgs, "WebAssembly.compile", &task->bytecode))
         return RejectWithPendingException(cx, promise, callArgs);
 
-    if (!StartOffThreadPromiseHelperTask(cx, Move(task)))
+    if (!StartOffThreadPromiseHelperTask(cx, std::move(task)))
         return false;
 
     callArgs.rval().setObject(*promise);
@@ -2597,7 +2597,7 @@ WebAssembly_instantiate(JSContext* cx, unsigned argc, Value* vp)
         if (!GetBufferSource(cx, firstArg, JSMSG_WASM_BAD_BUF_MOD_ARG, &task->bytecode))
             return RejectWithPendingException(cx, promise, callArgs);
 
-        if (!StartOffThreadPromiseHelperTask(cx, Move(task)))
+        if (!StartOffThreadPromiseHelperTask(cx, std::move(task)))
             return false;
     }
 
@@ -2811,7 +2811,7 @@ class CompileStreamTask : public PromiseHelperTask, public JS::StreamConsumer
           case JS::StreamConsumer::EndOfFile:
             switch (streamState_.lock().get()) {
               case Env: {
-                SharedBytes bytecode = js_new<ShareableBytes>(Move(envBytes_));
+                SharedBytes bytecode = js_new<ShareableBytes>(std::move(envBytes_));
                 if (!bytecode) {
                     rejectAndDestroyBeforeHelperThreadStarted(JSMSG_OUT_OF_MEMORY);
                     return;
@@ -2892,6 +2892,7 @@ class CompileStreamTask : public PromiseHelperTask, public JS::StreamConsumer
         instantiate_(instantiate),
         importObj_(cx, importObj),
         streamState_(mutexid::WasmStreamStatus, Env),
+        codeSection_{},
         codeStreamEnd_(nullptr),
         exclusiveCodeStreamEnd_(mutexid::WasmCodeStreamEnd, nullptr),
         exclusiveTailBytes_(mutexid::WasmTailBytesPtr, nullptr),

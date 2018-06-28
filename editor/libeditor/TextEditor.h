@@ -105,8 +105,6 @@ public:
 
   virtual dom::EventTarget* GetDOMEventTarget() override;
 
-  virtual already_AddRefed<nsIContent> GetInputEventTargetContent() override;
-
   /**
    * InsertTextAsAction() inserts aStringToInsert at selection.
    * Although this method is implementation of nsIPlaintextEditor.insertText(),
@@ -172,6 +170,12 @@ public:
    */
   void OnCompositionEnd(WidgetCompositionEvent& aCompositionEndEvent);
 
+  /**
+   * OnDrop() is called from EditorEventListener::Drop that is handler of drop
+   * event.
+   */
+  nsresult OnDrop(dom::DragEvent* aDropEvent);
+
 protected: // May be called by friends.
   /****************************************************************************
    * Some classes like TextEditRules, HTMLEditRules, WSRunObject which are
@@ -193,8 +197,6 @@ protected: // May be called by friends.
                                             bool aSuppressTransaction) override;
   using EditorBase::RemoveAttributeOrEquivalent;
   using EditorBase::SetAttributeOrEquivalent;
-
-  virtual nsresult InsertFromDrop(dom::DragEvent* aDropEvent) override;
 
   /**
    * DeleteSelectionWithTransaction() removes selected content or content
@@ -359,6 +361,8 @@ protected: // Shouldn't be used by friend classes
    *                    for committing the composition, returns false.
    */
   bool EnsureComposition(WidgetCompositionEvent& aCompositionEvent);
+
+  virtual already_AddRefed<nsIContent> GetInputEventTargetContent() override;
 
 protected:
   nsCOMPtr<nsIDocumentEncoder> mCachedDocumentEncoder;

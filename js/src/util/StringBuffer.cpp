@@ -7,6 +7,7 @@
 #include "util/StringBuffer.h"
 
 #include "mozilla/Range.h"
+#include "mozilla/Unused.h"
 
 #include "vm/JSObject-inl.h"
 #include "vm/StringType-inl.h"
@@ -67,7 +68,7 @@ StringBuffer::inflateChars()
     twoByte.infallibleAppend(latin1Chars().begin(), latin1Chars().length());
 
     cb.destroy();
-    cb.construct<TwoByteCharBuffer>(Move(twoByte));
+    cb.construct<TwoByteCharBuffer>(std::move(twoByte));
     return true;
 }
 
@@ -79,7 +80,7 @@ FinishStringFlat(JSContext* cx, StringBuffer& sb, Buffer& cb)
     if (!sb.append('\0'))
         return nullptr;
 
-    ScopedJSFreePtr<CharT> buf(ExtractWellSized<CharT>(cx, cb));
+    UniquePtr<CharT[], JS::FreePolicy> buf(ExtractWellSized<CharT>(cx, cb));
     if (!buf)
         return nullptr;
 
@@ -93,7 +94,7 @@ FinishStringFlat(JSContext* cx, StringBuffer& sb, Buffer& cb)
      */
     cx->updateMallocCounter(sizeof(CharT) * len);
 
-    buf.forget();
+    mozilla::Unused << buf.release();
     return str;
 }
 

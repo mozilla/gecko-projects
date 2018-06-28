@@ -2607,9 +2607,9 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::RecomputeWrappers(HandleValue vobj, JSContext* cx)
 {
     // Determine the compartment of the given object, if any.
-    JSCompartment* c = vobj.isObject()
-                       ? js::GetObjectCompartment(js::UncheckedUnwrap(&vobj.toObject()))
-                       : nullptr;
+    JS::Compartment* c = vobj.isObject()
+                         ? js::GetObjectCompartment(js::UncheckedUnwrap(&vobj.toObject()))
+                         : nullptr;
 
     // If no compartment was given, recompute all.
     if (!c)
@@ -2630,7 +2630,7 @@ nsXPCComponents_Utils::SetWantXrays(HandleValue vscope, JSContext* cx)
     JSObject* scopeObj = js::UncheckedUnwrap(&vscope.toObject());
     MOZ_DIAGNOSTIC_ASSERT(!mozJSComponentLoader::Get()->IsLoaderGlobal(scopeObj),
                           "Don't call Cu.setWantXrays() in a JSM that shares its global");
-    JSCompartment* compartment = js::GetObjectCompartment(scopeObj);
+    JS::Compartment* compartment = js::GetObjectCompartment(scopeObj);
     CompartmentPrivate::Get(scopeObj)->wantXrays = true;
     bool ok = js::RecomputeWrappers(cx, js::SingleCompartment(compartment),
                                     js::AllCompartments());
@@ -2729,7 +2729,7 @@ nsXPCComponents_Utils::CrashIfNotInAutomation()
 NS_IMETHODIMP
 nsXPCComponents_Utils::NukeSandbox(HandleValue obj, JSContext* cx)
 {
-    AUTO_PROFILER_LABEL("nsXPCComponents_Utils::NukeSandbox", JS);
+    AUTO_PROFILER_LABEL("nsXPCComponents_Utils::NukeSandbox", OTHER);
     NS_ENSURE_TRUE(obj.isObject(), NS_ERROR_INVALID_ARG);
     JSObject* wrapper = &obj.toObject();
     NS_ENSURE_TRUE(IsWrapper(wrapper), NS_ERROR_INVALID_ARG);
@@ -3011,9 +3011,9 @@ nsXPCComponents_Utils::GetObjectPrincipal(HandleValue val, JSContext* cx,
 }
 
 NS_IMETHODIMP
-nsXPCComponents_Utils::GetCompartmentLocation(HandleValue val,
-                                              JSContext* cx,
-                                              nsACString& result)
+nsXPCComponents_Utils::GetRealmLocation(HandleValue val,
+                                        JSContext* cx,
+                                        nsACString& result)
 {
     if (!val.isObject())
         return NS_ERROR_INVALID_ARG;
@@ -3021,7 +3021,7 @@ nsXPCComponents_Utils::GetCompartmentLocation(HandleValue val,
     obj = js::CheckedUnwrap(obj);
     MOZ_ASSERT(obj);
 
-    result = xpc::CompartmentPrivate::Get(obj)->GetLocation();
+    result = xpc::RealmPrivate::Get(obj)->GetLocation();
     return NS_OK;
 }
 

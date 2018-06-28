@@ -15,6 +15,7 @@ using mozilla::DebugOnly;
 ControlFlowGenerator::ControlFlowGenerator(TempAllocator& temp, JSScript* script)
   : script(script),
     current(nullptr),
+    pc(nullptr),
     alloc_(temp),
     blocks_(temp),
     cfgStack_(temp),
@@ -82,7 +83,7 @@ ControlFlowGraph::init(TempAllocator& alloc, const CFGBlockVector& blocks)
 
         block.setStopPc(blocks[i]->stopPc());
         block.setId(i);
-        blocks_.infallibleAppend(mozilla::Move(block));
+        blocks_.infallibleAppend(std::move(block));
     }
 
     for (size_t i = 0; i < blocks.length(); i++) {
@@ -933,7 +934,7 @@ ControlFlowGenerator::processWhileOrForInLoop(jssrcnote* sn)
     jsbytecode* exitpc = GetNextPc(ifne);
     jsbytecode* continuepc = pc;
 
-    CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
+    CFGBlock* header = CFGBlock::New(alloc(), loopEntry);
 
     CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, stackPhiCount);
     if (LoopEntryCanIonOsr(loopEntry))
@@ -1481,7 +1482,7 @@ ControlFlowGenerator::processForLoop(JSOp op, jssrcnote* sn)
 
     MOZ_ASSERT(JSOp(*loopEntry) == JSOP_LOOPENTRY);
 
-    CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
+    CFGBlock* header = CFGBlock::New(alloc(), loopEntry);
 
     CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0);
     if (LoopEntryCanIonOsr(loopEntry))
@@ -1549,7 +1550,7 @@ ControlFlowGenerator::processDoWhileLoop(jssrcnote* sn)
 
     jsbytecode* loopEntry = GetNextPc(loopHead);
 
-    CFGBlock* header = CFGBlock::New(alloc(), GetNextPc(loopEntry));
+    CFGBlock* header = CFGBlock::New(alloc(), loopEntry);
 
     CFGLoopEntry* ins = CFGLoopEntry::New(alloc(), header, 0);
     if (LoopEntryCanIonOsr(loopEntry))

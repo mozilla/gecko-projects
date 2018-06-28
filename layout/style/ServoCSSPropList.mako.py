@@ -58,9 +58,6 @@ def is_internal(prop):
     OTHER_INTERNALS = [
         "-moz-context-properties",
         "-moz-control-character-visibility",
-        "-moz-window-opacity",
-        "-moz-window-transform",
-        "-moz-window-transform-origin",
     ]
     return prop.name in OTHER_INTERNALS
 
@@ -70,6 +67,46 @@ def method(prop):
     if prop.name.startswith("-x-"):
         return prop.camel_case[1:]
     return prop.camel_case
+
+# Colors, integers and lengths are easy as well.
+#
+# TODO(emilio): This will go away once the rest of the longhands have been
+# moved or perhaps using a blacklist for the ones with non-layout-dependence
+# but other non-trivial dependence like scrollbar colors.
+SERIALIZED_PREDEFINED_TYPES = [
+    "Color",
+    "Integer",
+    "Length",
+    "Opacity",
+]
+
+def serialized_by_servo(prop):
+    # If the property requires layout information, no such luck.
+    if "GETCS_NEEDS_LAYOUT_FLUSH" in prop.flags:
+        return False
+    # No shorthands yet.
+    if prop.type() == "shorthand":
+        return False
+    # Keywords are all fine, except -moz-osx-font-smoothing, which does
+    # resistfingerprinting stuff.
+    if prop.keyword and prop.name != "-moz-osx-font-smoothing":
+        return True
+    if prop.predefined_type in SERIALIZED_PREDEFINED_TYPES:
+        return True
+    # TODO(emilio): Enable the rest of the longhands.
+    return False
+
+def exposed_on_getcs(prop):
+    if prop.type() == "longhand":
+        if is_internal(prop):
+            return False
+        # We currently don't expose logical properties in GetCS.
+        # See bug 1116638.
+        if prop.logical:
+            return False
+        return True
+    if prop.type() == "shorthand":
+        return "SHORTHAND_IN_GETCS" in prop.flags
 
 def flags(prop):
     result = []
@@ -85,7 +122,11 @@ def flags(prop):
         result.append("GetCSNeedsLayoutFlush")
     if "CAN_ANIMATE_ON_COMPOSITOR" in prop.flags:
         result.append("CanAnimateOnCompositor")
-    return ", ".join('"CSSPropFlags::{}"'.format(flag) for flag in result)
+    if exposed_on_getcs(prop):
+        result.append("ExposedOnGetCS")
+    if serialized_by_servo(prop):
+        result.append("SerializedByServo")
+    return ", ".join('"{}"'.format(flag) for flag in result)
 
 def pref(prop):
     if prop.gecko_pref:

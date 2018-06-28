@@ -4,9 +4,13 @@
 "use strict";
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-Cu.importGlobalProperties(["fetch"]);
+ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 const {ASRouterActions: ra} = ChromeUtils.import("resource://activity-stream/common/Actions.jsm", {});
 const {OnboardingMessageProvider} = ChromeUtils.import("resource://activity-stream/lib/OnboardingMessageProvider.jsm", {});
+
+ChromeUtils.defineModuleGetter(this, "ASRouterTargeting",
+  "resource://activity-stream/lib/ASRouterTargeting.jsm");
 
 const INCOMING_MESSAGE_NAME = "ASRouter:child-to-parent";
 const OUTGOING_MESSAGE_NAME = "ASRouter:parent-to-child";
@@ -101,17 +105,6 @@ const MessageLoaderUtils = {
 };
 
 this.MessageLoaderUtils = MessageLoaderUtils;
-
-/**
- * getRandomItemFromArray
- *
- * @param {Array} arr An array of items
- * @returns one of the items in the array
- */
-function getRandomItemFromArray(arr) {
-  const index = Math.floor(Math.random() * arr.length);
-  return arr[index];
-}
 
 /**
  * @class _ASRouter - Keeps track of all messages, UI surfaces, and
@@ -233,34 +226,60 @@ class _ASRouter {
     this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "ADMIN_SET_STATE", data: state});
   }
 
-  _getBundledMessages(originalMessage) {
-    let bundledMessages = [];
-    bundledMessages.push({content: originalMessage.content, id: originalMessage.id});
-    for (const msg of this.state.messages) {
-      if (msg.bundled && msg.template === originalMessage.template && msg.id !== originalMessage.id && !this.state.blockList.includes(msg.id)) {
-        // only copy the content - that's what the UI cares about
-        bundledMessages.push({content: msg.content, id: msg.id});
+  async _getBundledMessages(originalMessage, target, force = false) {
+    let result = [{content: originalMessage.content, id: originalMessage.id}];
+
+    // First, find all messages of same template. These are potential matching targeting candidates
+    let bundledMessagesOfSameTemplate = this._getUnblockedMessages()
+                                          .filter(msg => msg.bundled && msg.template === originalMessage.template && msg.id !== originalMessage.id);
+
+    if (force) {
+      // Forcefully show the messages without targeting matching - this is for about:newtab#asrouter to show the messages
+      for (const message of bundledMessagesOfSameTemplate) {
+        result.push({content: message.content, id: message.id});
+        // Stop once we have enough messages to fill a bundle
+        if (result.length === originalMessage.bundled) {
+          break;
+        }
       }
-      if (bundledMessages.length === originalMessage.bundled) {
-        break;
+    } else {
+      while (bundledMessagesOfSameTemplate.length) {
+        // Find a message that matches the targeting context - or break if there are no matching messages
+        const message = await ASRouterTargeting.findMatchingMessage(bundledMessagesOfSameTemplate, target);
+        if (!message) {
+          /* istanbul ignore next */ // Code coverage in mochitests
+          break;
+        }
+        // Only copy the content of the message (that's what the UI cares about)
+        // Also delete the message we picked so we don't pick it again
+        result.push({content: message.content, id: message.id});
+        bundledMessagesOfSameTemplate.splice(bundledMessagesOfSameTemplate.findIndex(msg => msg.id === message.id), 1);
+        // Stop once we have enough messages to fill a bundle
+        if (result.length === originalMessage.bundled) {
+          break;
+        }
       }
     }
-    return {bundle: bundledMessages, provider: originalMessage.provider, template: originalMessage.template};
+
+    // If we did not find enough messages to fill the bundle, do not send the bundle down
+    if (result.length < originalMessage.bundled) {
+      return null;
+    }
+    return {bundle: result, provider: originalMessage.provider, template: originalMessage.template};
   }
 
-  async sendNextMessage(target) {
-    let message;
-    let bundledMessages;
+  _getUnblockedMessages() {
+    let {state} = this;
+    return state.messages.filter(item => !state.blockList.includes(item.id));
+  }
 
-    await this.setState(state => {
-      message = getRandomItemFromArray(state.messages.filter(item => item.id !== state.lastMessageId && !state.blockList.includes(item.id)));
-      return {lastMessageId: message ? message.id : null};
-    });
+  async _sendMessageToTarget(message, target, force = false) {
+    let bundledMessages;
     // If this message needs to be bundled with other messages of the same template, find them and bundle them together
     if (message && message.bundled) {
-      bundledMessages = this._getBundledMessages(message);
+      bundledMessages = await this._getBundledMessages(message, target, force);
     }
-    if (message && !bundledMessages) {
+    if (message && !message.bundled) {
       // If we only need to send 1 message, send the message
       target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_MESSAGE", data: message});
     } else if (bundledMessages) {
@@ -271,18 +290,19 @@ class _ASRouter {
     }
   }
 
-  async setMessageById(id) {
+  async sendNextMessage(target) {
+    const msgs = this._getUnblockedMessages();
+    let message = await ASRouterTargeting.findMatchingMessage(msgs, target);
+    await this.setState({lastMessageId: message ? message.id : null});
+
+    await this._sendMessageToTarget(message, target);
+  }
+
+  async setMessageById(id, target, force = true) {
     await this.setState({lastMessageId: id});
     const newMessage = this.getMessageById(id);
-    if (newMessage) {
-      // If this message needs to be bundled with other messages of the same template, find them and bundle them together
-      if (newMessage.bundled) {
-        let bundledMessages = this._getBundledMessages(newMessage);
-        this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_BUNDLED_MESSAGES", data: bundledMessages});
-      } else {
-        this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "SET_MESSAGE", data: newMessage});
-      }
-    }
+
+    await this._sendMessageToTarget(newMessage, target, force);
   }
 
   async blockById(idOrIds) {
@@ -354,7 +374,7 @@ class _ASRouter {
         });
         break;
       case "OVERRIDE_MESSAGE":
-        await this.setMessageById(action.data.id);
+        await this.setMessageById(action.data.id, target);
         break;
       case "ADMIN_CONNECT_STATE":
         target.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {type: "ADMIN_SET_STATE", data: this.state});

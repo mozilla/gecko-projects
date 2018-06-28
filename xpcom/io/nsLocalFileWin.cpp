@@ -42,6 +42,7 @@
 #include "prproces.h"
 #include "prlink.h"
 
+#include "mozilla/FilePreferences.h"
 #include "mozilla/Mutex.h"
 #include "SpecialSystemDirectory.h"
 
@@ -749,7 +750,7 @@ public:
         return rv;
       }
 
-      mNext = do_QueryInterface(file);
+      mNext = file.forget();
     }
     *aResult = mNext != nullptr;
     if (!*aResult) {
@@ -767,10 +768,7 @@ public:
       return rv;
     }
 
-    *aResult = mNext;        // might return nullptr
-    NS_IF_ADDREF(*aResult);
-
-    mNext = nullptr;
+    mNext.forget(aResult);
     return NS_OK;
   }
 
@@ -782,9 +780,7 @@ public:
     if (NS_FAILED(rv) || !hasMore) {
       return rv;
     }
-    *aResult = mNext;
-    NS_IF_ADDREF(*aResult);
-    mNext = nullptr;
+    mNext.forget(aResult);
     return NS_OK;
   }
 
@@ -1047,6 +1043,10 @@ nsLocalFile::InitWithPath(const nsAString& aFilePath)
   // on windows.  Also, it must have a colon at after the first char.
   if (FindCharInReadable(L'/', begin, end)) {
     return NS_ERROR_FILE_UNRECOGNIZED_PATH;
+  }
+
+  if (FilePreferences::IsBlockedUNCPath(aFilePath)) {
+    return NS_ERROR_FILE_ACCESS_DENIED;
   }
 
   if (secondChar != L':' && (secondChar != L'\\' || firstChar != L'\\')) {
@@ -1801,6 +1801,10 @@ nsLocalFile::CopySingleFile(nsIFile* aSourceFile, nsIFile* aDestParent,
       !IsRemoteFilePath(destPath.get(), path2Remote) ||
       path1Remote || path2Remote) {
     dwCopyFlags |= COPY_FILE_NO_BUFFERING;
+  }
+
+  if (FilePreferences::IsBlockedUNCPath(destPath)) {
+    return NS_ERROR_FILE_ACCESS_DENIED;
   }
 
   if (!move) {
@@ -2942,6 +2946,7 @@ nsLocalFile::IsExecutable(bool* aResult)
       "scf",         // Windows explorer command
       "scr",
       "sct",
+      "settingcontent-ms",
       "shb",
       "shs",
       "url",

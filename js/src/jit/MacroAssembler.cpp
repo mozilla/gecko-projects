@@ -1787,6 +1787,57 @@ MacroAssembler::loadJSContext(Register dest)
     movePtr(ImmPtr(jcx->runtime->mainContextPtr()), dest);
 }
 
+static const uint8_t*
+ContextRealmPtr()
+{
+    return (static_cast<const uint8_t*>(GetJitContext()->runtime->mainContextPtr()) +
+            JSContext::offsetOfRealm());
+}
+
+void
+MacroAssembler::switchToRealm(Register realm)
+{
+    storePtr(realm, AbsoluteAddress(ContextRealmPtr()));
+}
+
+void
+MacroAssembler::switchToRealm(const void* realm, Register scratch)
+{
+    MOZ_ASSERT(realm);
+
+    movePtr(ImmPtr(realm), scratch);
+    switchToRealm(scratch);
+}
+
+void
+MacroAssembler::switchToObjectRealm(Register obj, Register scratch)
+{
+    loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
+    loadPtr(Address(scratch, ObjectGroup::offsetOfRealm()), scratch);
+    switchToRealm(scratch);
+}
+
+void
+MacroAssembler::switchToBaselineFrameRealm(Register scratch)
+{
+    Address envChain(BaselineFrameReg, BaselineFrame::reverseOffsetOfEnvironmentChain());
+    loadPtr(envChain, scratch);
+    switchToObjectRealm(scratch, scratch);
+}
+
+void
+MacroAssembler::debugAssertContextRealm(const void* realm, Register scratch)
+{
+#ifdef DEBUG
+    Label ok;
+    movePtr(ImmPtr(realm), scratch);
+    branchPtr(Assembler::Equal, AbsoluteAddress(ContextRealmPtr()),
+              scratch, &ok);
+    assumeUnreachable("Unexpected context realm");
+    bind(&ok);
+#endif
+}
+
 void
 MacroAssembler::guardGroupHasUnanalyzedNewScript(Register group, Register scratch, Label* fail)
 {
@@ -2808,6 +2859,7 @@ MacroAssembler::MacroAssembler(JSContext* cx)
 #ifdef DEBUG
     inCall_(false),
 #endif
+    dynamicAlignment_(false),
     emitProfilingInstrumentation_(false)
 {
     jitContext_.emplace(cx, (js::jit::TempAllocator*)nullptr);
@@ -2827,6 +2879,7 @@ MacroAssembler::MacroAssembler()
 #ifdef DEBUG
     inCall_(false),
 #endif
+    dynamicAlignment_(false),
     emitProfilingInstrumentation_(false)
 {
     JitContext* jcx = GetJitContext();
@@ -2853,6 +2906,7 @@ MacroAssembler::MacroAssembler(WasmToken, TempAllocator& alloc)
 #ifdef DEBUG
     inCall_(false),
 #endif
+    dynamicAlignment_(false),
     emitProfilingInstrumentation_(false)
 {
     moveResolver_.setAllocator(alloc);
@@ -3277,17 +3331,19 @@ MacroAssembler::branchTestObjCompartment(Condition cond, Register obj, const Add
     MOZ_ASSERT(obj != scratch);
     loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
     loadPtr(Address(scratch, ObjectGroup::offsetOfRealm()), scratch);
+    loadPtr(Address(scratch, Realm::offsetOfCompartment()), scratch);
     branchPtr(cond, compartment, scratch, label);
 }
 
 void
 MacroAssembler::branchTestObjCompartment(Condition cond, Register obj,
-                                         const JSCompartment* compartment, Register scratch,
+                                         const JS::Compartment* compartment, Register scratch,
                                          Label* label)
 {
     MOZ_ASSERT(obj != scratch);
     loadPtr(Address(obj, JSObject::offsetOfGroup()), scratch);
     loadPtr(Address(scratch, ObjectGroup::offsetOfRealm()), scratch);
+    loadPtr(Address(scratch, Realm::offsetOfCompartment()), scratch);
     branchPtr(cond, scratch, ImmPtr(compartment), label);
 }
 
@@ -3520,16 +3576,16 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
 
     MOZ_ASSERT(callee.which() == wasm::CalleeDesc::WasmTable);
 
-    // Write the sig-id into the ABI sig-id register.
-    wasm::SigIdDesc sigId = callee.wasmTableSigId();
-    switch (sigId.kind()) {
-      case wasm::SigIdDesc::Kind::Global:
-        loadWasmGlobalPtr(sigId.globalDataOffset(), WasmTableCallSigReg);
+    // Write the functype-id into the ABI functype-id register.
+    wasm::FuncTypeIdDesc funcTypeId = callee.wasmTableSigId();
+    switch (funcTypeId.kind()) {
+      case wasm::FuncTypeIdDesc::Kind::Global:
+        loadWasmGlobalPtr(funcTypeId.globalDataOffset(), WasmTableCallSigReg);
         break;
-      case wasm::SigIdDesc::Kind::Immediate:
-        move32(Imm32(sigId.immediate()), WasmTableCallSigReg);
+      case wasm::FuncTypeIdDesc::Kind::Immediate:
+        move32(Imm32(funcTypeId.immediate()), WasmTableCallSigReg);
         break;
-      case wasm::SigIdDesc::Kind::None:
+      case wasm::FuncTypeIdDesc::Kind::None:
         break;
     }
 

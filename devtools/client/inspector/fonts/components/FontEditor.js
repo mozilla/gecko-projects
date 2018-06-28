@@ -6,6 +6,7 @@
 
 const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const { PluralForm } = require("devtools/shared/plural-form");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const FontMeta = createFactory(require("./FontMeta"));
@@ -40,7 +41,7 @@ class FontEditor extends PureComponent {
    */
   getAxisStep(min, max) {
     let step = 1;
-    let delta = parseInt(max, 10) - parseInt(min, 10);
+    const delta = parseInt(max, 10) - parseInt(min, 10);
 
     if (delta <= 1) {
       step = 0.001;
@@ -80,7 +81,64 @@ class FontEditor extends PureComponent {
     });
   }
 
-  renderFontFamily(font, onToggleFontHighlight) {
+  renderFamilesNotUsed(familiesNotUsed = []) {
+    if (!familiesNotUsed.length) {
+      return null;
+    }
+
+    const familiesNotUsedLabel = PluralForm
+      .get(familiesNotUsed.length, getStr("fontinspector.familiesNotUsedLabel"))
+      .replace("#1", familiesNotUsed.length);
+
+    const familiesList = familiesNotUsed.map(family => {
+      return dom.div(
+        {
+          className: "font-family-unused",
+        },
+        family
+      );
+    });
+
+    return dom.details(
+      {},
+      dom.summary(
+        {
+          className: "font-family-unused-header",
+        },
+        familiesNotUsedLabel
+      ),
+      familiesList
+    );
+  }
+
+  /**
+   * Render font family, font name, and metadata for all fonts used on selected node.
+   *
+   * @param {Array} fonts
+   *        Fonts used on selected node.
+   * @param {Array} families
+   *        Font familes declared on selected node.
+   * @param {Function} onToggleFontHighlight
+   *        Callback to trigger in-context highlighting of text that uses a font.
+   * @return {DOMNode}
+   */
+  renderFontFamily(fonts, families, onToggleFontHighlight) {
+    if (!fonts.length) {
+      return null;
+    }
+
+    const fontList = dom.ul(
+      {
+        className: "fonts-list"
+      },
+      fonts.map(font => {
+        return dom.li(
+          {},
+          FontMeta({ font, onToggleFontHighlight })
+        );
+      })
+    );
+
     return dom.label(
       {
         className: "font-control font-control-family",
@@ -95,27 +153,28 @@ class FontEditor extends PureComponent {
         {
           className: "font-control-box",
         },
-        FontMeta({ font, onToggleFontHighlight })
+        fontList,
+        this.renderFamilesNotUsed(families.notUsed)
       )
     );
   }
 
   renderFontSize(value) {
-    return FontSize({
+    return value && FontSize({
       onChange: this.props.onPropertyChange,
       value,
     });
   }
 
   renderFontStyle(value) {
-    return FontStyle({
+    return value && FontStyle({
       onChange: this.props.onPropertyChange,
       value,
     });
   }
 
   renderFontWeight(value) {
-    return FontWeight({
+    return value && FontWeight({
       onChange: this.props.onPropertyChange,
       value,
     });
@@ -180,26 +239,40 @@ class FontEditor extends PureComponent {
     );
   }
 
+  renderWarning() {
+    return dom.div(
+      {
+        className: "devtools-sidepanel-no-result"
+      },
+      getStr("fontinspector.noFontsOnSelectedElement")
+    );
+  }
+
   render() {
     const { fontEditor, onToggleFontHighlight } = this.props;
-    const { fonts, axes, instance, properties } = fontEditor;
-    const usedFonts = fonts.filter(font => font.used);
-    // If no used fonts were found, pick the first available font.
-    // Else, pick the first used font regardless of how many there are.
-    const font = usedFonts.length === 0 ? fonts[0] : usedFonts[0];
+    const { fonts, families, axes, instance, properties } = fontEditor;
+    // Pick the first font to show editor controls regardless of how many fonts are used.
+    const font = fonts[0];
     const hasFontAxes = font && font.variationAxes;
-    const hasFontInstances = font && font.variationInstances.length > 0;
+    const hasFontInstances = font && font.variationInstances
+      && font.variationInstances.length > 0;
     const hasSlantOrItalicAxis = hasFontAxes && font.variationAxes.find(axis => {
       return axis.tag === "slnt" || axis.tag === "ital";
     });
     const hasWeightAxis = hasFontAxes && font.variationAxes.find(axis => {
       return axis.tag === "wght";
     });
+    // Check for falsy font-weight value (undefined or empty string).
+    const hasWeight = properties["font-weight"] != null;
 
     return dom.div(
-      {},
+      {
+        id: "font-editor"
+      },
+      // Render empty state message for nodes that don't have font properties.
+      !hasWeight && this.renderWarning(),
       // Always render UI for font family, format and font file URL.
-      this.renderFontFamily(font, onToggleFontHighlight),
+      this.renderFontFamily(fonts, families, onToggleFontHighlight),
       // Render UI for font variation instances if they are defined.
       hasFontInstances && this.renderInstances(font.variationInstances, instance),
       // Always render UI for font size.

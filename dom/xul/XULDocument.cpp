@@ -295,14 +295,14 @@ NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(XULDocument,
 void
 XULDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
 {
-    NS_NOTREACHED("Reset");
+    MOZ_ASSERT_UNREACHABLE("Reset");
 }
 
 void
 XULDocument::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
                         nsIPrincipal* aPrincipal)
 {
-    NS_NOTREACHED("ResetToURI");
+    MOZ_ASSERT_UNREACHABLE("ResetToURI");
 }
 
 void
@@ -472,42 +472,12 @@ XULDocument::EndLoad()
         nsXULPrototypeCache::GetInstance()->WritePrototype(mCurrentPrototype);
     }
 
-    if (IsOverlayAllowed(uri)) {
-        nsCOMPtr<nsIXULOverlayProvider> reg =
-            mozilla::services::GetXULOverlayProviderService();
-
-        if (reg) {
-            nsCOMPtr<nsISimpleEnumerator> overlays;
-            rv = reg->GetStyleOverlays(uri, getter_AddRefs(overlays));
-            if (NS_FAILED(rv)) return;
-
-            bool moreSheets;
-            nsCOMPtr<nsISupports> next;
-            nsCOMPtr<nsIURI> sheetURI;
-
-            while (NS_SUCCEEDED(rv = overlays->HasMoreElements(&moreSheets)) &&
-                   moreSheets) {
-                overlays->GetNext(getter_AddRefs(next));
-
-                sheetURI = do_QueryInterface(next);
-                if (!sheetURI) {
-                    NS_ERROR("Chrome registry handed me a non-nsIURI object!");
-                    continue;
-                }
-
-                if (IsChromeURI(sheetURI)) {
-                    mCurrentPrototype->AddStyleSheetReference(sheetURI);
-                }
-            }
-        }
-
-        if (isChrome && useXULCache) {
-            // If it's a chrome prototype document, then notify any
-            // documents that raced to load the prototype, and awaited
-            // its load completion via proto->AwaitLoadDone().
-            rv = mCurrentPrototype->NotifyLoadDone();
-            if (NS_FAILED(rv)) return;
-        }
+    if (IsOverlayAllowed(uri) && isChrome && useXULCache) {
+        // If it's a chrome prototype document, then notify any
+        // documents that raced to load the prototype, and awaited
+        // its load completion via proto->AwaitLoadDone().
+        rv = mCurrentPrototype->NotifyLoadDone();
+        if (NS_FAILED(rv)) return;
     }
 
     OnPrototypeLoadDone(true);
@@ -525,10 +495,6 @@ nsresult
 XULDocument::OnPrototypeLoadDone(bool aResumeWalk)
 {
     nsresult rv;
-
-    // Add the style overlays from chrome registry, if any.
-    rv = AddPrototypeSheets();
-    if (NS_FAILED(rv)) return rv;
 
     rv = PrepareToWalk();
     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to prepare for walk");
@@ -2598,7 +2564,7 @@ XULDocument::ResumeWalk()
             break;
 
             default:
-                NS_NOTREACHED("Unexpected nsXULPrototypeNode::Type value");
+                MOZ_ASSERT_UNREACHABLE("Unexpected nsXULPrototypeNode::Type");
             }
         }
 
@@ -2667,15 +2633,6 @@ XULDocument::DoneWalking()
     // XXXldb This is where we should really be setting the chromehidden
     // attribute.
 
-    {
-        uint32_t count = mOverlaySheets.Length();
-        for (uint32_t i = 0; i < count; ++i) {
-            AddStyleSheet(mOverlaySheets[i]);
-        }
-    }
-
-    mOverlaySheets.Clear();
-
     if (!mDocumentLoaded) {
         // Make sure we don't reenter here from StartLayout().  Note that
         // setting mDocumentLoaded to true here means that if StartLayout()
@@ -2692,8 +2649,8 @@ XULDocument::DoneWalking()
             this,
             static_cast<nsIDocument*>(this),
             NS_LITERAL_STRING("MozBeforeInitialXULLayout"),
-            true,
-            false);
+            CanBubble::eYes,
+            Cancelable::eNo);
 
         // Before starting layout, check whether we're a toplevel chrome
         // window.  If we are, setup some state so that we don't have to restyle
@@ -3311,35 +3268,6 @@ XULDocument::AddAttributes(nsXULPrototypeElement* aPrototype,
                                valueStr,
                                false);
         if (NS_FAILED(rv)) return rv;
-    }
-
-    return NS_OK;
-}
-
-
-nsresult
-XULDocument::AddPrototypeSheets()
-{
-    nsresult rv;
-
-    const nsCOMArray<nsIURI>& sheets = mCurrentPrototype->GetStyleSheetReferences();
-
-    for (int32_t i = 0; i < sheets.Count(); i++) {
-        nsCOMPtr<nsIURI> uri = sheets[i];
-
-        RefPtr<StyleSheet> incompleteSheet;
-        rv = CSSLoader()->LoadSheet(
-          uri, mCurrentPrototype->DocumentPrincipal(), this, &incompleteSheet);
-
-        // XXXldb We need to prevent bogus sheets from being held in the
-        // prototype's list, but until then, don't propagate the failure
-        // from LoadSheet (and thus exit the loop).
-        if (NS_SUCCEEDED(rv)) {
-            ++mPendingSheets;
-            if (!mOverlaySheets.AppendElement(incompleteSheet)) {
-                return NS_ERROR_OUT_OF_MEMORY;
-            }
-        }
     }
 
     return NS_OK;
@@ -3965,7 +3893,7 @@ XULDocument::CachedChromeStreamListener::OnDataAvailable(nsIRequest *request,
                                                          uint64_t aSourceOffset,
                                                          uint32_t aCount)
 {
-    NS_NOTREACHED("CachedChromeStream doesn't receive data");
+    MOZ_ASSERT_UNREACHABLE("CachedChromeStream doesn't receive data");
     return NS_ERROR_UNEXPECTED;
 }
 
@@ -4158,7 +4086,7 @@ XULDocument::ThreadSafeGetDocumentLWTheme() const
 JSObject*
 XULDocument::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return XULDocumentBinding::Wrap(aCx, this, aGivenProto);
+  return XULDocument_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

@@ -112,11 +112,12 @@ MacroAssemblerMIPS64Compat::convertDoubleToInt32(FloatRegister src, Register des
         ma_b(dest, Imm32(1), fail, Assembler::Equal);
     }
 
-    // Truncate double to int ; if result is inexact fail
+    // Truncate double to int ; if result is inexact or invalid fail.
     as_truncwd(ScratchFloat32Reg, src);
     as_cfc1(ScratchRegister, Assembler::FCSR);
     moveFromFloat32(ScratchFloat32Reg, dest);
-    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseI, 1);
+    ma_ext(ScratchRegister, ScratchRegister, Assembler::CauseI, 6);
+    as_andi(ScratchRegister, ScratchRegister, 0x11);//masking for Inexact and Invalid flag.
     ma_b(ScratchRegister, Imm32(0), fail, Assembler::NotEqual);
 }
 
@@ -2157,7 +2158,7 @@ MacroAssembler::branchValueIsNurseryObject(Condition cond, ValueOperand value,
     Label done;
     branchTestObject(Assembler::NotEqual, value, cond == Assembler::Equal ? &done : label);
 
-    extractObject(value, SecondScratchReg);
+    unboxObject(value, SecondScratchReg);
     orPtr(Imm32(gc::ChunkMask), SecondScratchReg);
     branch32(cond, Address(SecondScratchReg, gc::ChunkLocationOffsetFromLastByte),
              Imm32(int32_t(gc::ChunkLocation::Nursery)), label);

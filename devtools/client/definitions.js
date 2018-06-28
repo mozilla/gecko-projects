@@ -6,6 +6,7 @@
 
 const Services = require("Services");
 const osString = Services.appinfo.OS;
+const { Cu } = require("chrome");
 
 // Panels
 loader.lazyGetter(this, "OptionsPanel", () => require("devtools/client/framework/toolbox-options").OptionsPanel);
@@ -13,8 +14,7 @@ loader.lazyGetter(this, "InspectorPanel", () => require("devtools/client/inspect
 loader.lazyGetter(this, "WebConsolePanel", () => require("devtools/client/webconsole/panel").WebConsolePanel);
 loader.lazyGetter(this, "DebuggerPanel", () => require("devtools/client/debugger/panel").DebuggerPanel);
 loader.lazyGetter(this, "NewDebuggerPanel", () => require("devtools/client/debugger/new/panel").DebuggerPanel);
-loader.lazyGetter(this, "StyleEditorPanel", () => require("devtools/client/styleeditor/styleeditor-panel").StyleEditorPanel);
-loader.lazyGetter(this, "ShaderEditorPanel", () => require("devtools/client/shadereditor/panel").ShaderEditorPanel);
+loader.lazyGetter(this, "StyleEditorPanel", () => require("devtools/client/styleeditor/panel").StyleEditorPanel);
 loader.lazyGetter(this, "CanvasDebuggerPanel", () => require("devtools/client/canvasdebugger/panel").CanvasDebuggerPanel);
 loader.lazyGetter(this, "WebAudioEditorPanel", () => require("devtools/client/webaudioeditor/panel").WebAudioEditorPanel);
 loader.lazyGetter(this, "MemoryPanel", () => require("devtools/client/memory/panel").MemoryPanel);
@@ -22,12 +22,13 @@ loader.lazyGetter(this, "PerformancePanel", () => require("devtools/client/perfo
 loader.lazyGetter(this, "NewPerformancePanel", () => require("devtools/client/performance-new/panel").PerformancePanel);
 loader.lazyGetter(this, "NetMonitorPanel", () => require("devtools/client/netmonitor/panel").NetMonitorPanel);
 loader.lazyGetter(this, "StoragePanel", () => require("devtools/client/storage/panel").StoragePanel);
-loader.lazyGetter(this, "ScratchpadPanel", () => require("devtools/client/scratchpad/scratchpad-panel").ScratchpadPanel);
-loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/dom-panel").DomPanel);
-loader.lazyGetter(this, "AccessibilityPanel", () => require("devtools/client/accessibility/accessibility-panel").AccessibilityPanel);
+loader.lazyGetter(this, "ScratchpadPanel", () => require("devtools/client/scratchpad/panel").ScratchpadPanel);
+loader.lazyGetter(this, "DomPanel", () => require("devtools/client/dom/panel").DomPanel);
+loader.lazyGetter(this, "AccessibilityPanel", () => require("devtools/client/accessibility/panel").AccessibilityPanel);
 loader.lazyGetter(this, "ApplicationPanel", () => require("devtools/client/application/panel").ApplicationPanel);
 
 // Other dependencies
+loader.lazyRequireGetter(this, "AccessibilityStartup", "devtools/client/accessibility/accessibility-startup", true);
 loader.lazyRequireGetter(this, "CommandUtils", "devtools/client/shared/developer-toolbar", true);
 loader.lazyRequireGetter(this, "CommandState", "devtools/shared/gcli/command-state", true);
 loader.lazyRequireGetter(this, "ResponsiveUIManager", "devtools/client/responsive.html/manager", true);
@@ -69,13 +70,13 @@ Tools.inspector = {
   accesskey: l10n("inspector.accesskey"),
   ordinal: 1,
   icon: "chrome://devtools/skin/images/tool-inspector.svg",
-  url: "chrome://devtools/content/inspector/inspector.xhtml",
+  url: "chrome://devtools/content/inspector/index.xhtml",
   label: l10n("inspector.label"),
   panelLabel: l10n("inspector.panelLabel"),
   get tooltip() {
     if (osString == "Darwin") {
-      let cmdShiftC = "Cmd+Shift+" + l10n("inspector.commandkey");
-      let cmdOptC = "Cmd+Opt+" + l10n("inspector.commandkey");
+      const cmdShiftC = "Cmd+Shift+" + l10n("inspector.commandkey");
+      const cmdOptC = "Cmd+Opt+" + l10n("inspector.commandkey");
       return l10n("inspector.mac.tooltip", cmdShiftC, cmdOptC);
     }
 
@@ -104,13 +105,13 @@ Tools.webConsole = {
   id: "webconsole",
   accesskey: l10n("webConsoleCmd.accesskey"),
   ordinal: 2,
-  url: "chrome://devtools/content/webconsole/webconsole.html",
+  url: "chrome://devtools/content/webconsole/index.html",
   get browserConsoleUsesHTML() {
     return Services.prefs.getBoolPref("devtools.browserconsole.html");
   },
   get browserConsoleURL() {
     return this.browserConsoleUsesHTML ?
-      "chrome://devtools/content/webconsole/webconsole.html" :
+      "chrome://devtools/content/webconsole/index.html" :
       "chrome://devtools/content/webconsole/browserconsole.xul";
   },
   icon: "chrome://devtools/skin/images/tool-webconsole.svg",
@@ -148,7 +149,7 @@ Tools.jsdebugger = {
   accesskey: l10n("debuggerMenu.accesskey"),
   ordinal: 3,
   icon: "chrome://devtools/skin/images/tool-debugger.svg",
-  url: "chrome://devtools/content/debugger/debugger.xul",
+  url: "chrome://devtools/content/debugger/index.xul",
   label: l10n("ToolboxDebugger.label"),
   panelLabel: l10n("ToolboxDebugger.panelLabel"),
   get tooltip() {
@@ -175,7 +176,7 @@ function switchDebugger() {
       return new NewDebuggerPanel(iframeWindow, toolbox);
     };
   } else {
-    Tools.jsdebugger.url = "chrome://devtools/content/debugger/debugger.xul";
+    Tools.jsdebugger.url = "chrome://devtools/content/debugger/index.xul";
     Tools.jsdebugger.build = function(iframeWindow, toolbox) {
       return new DebuggerPanel(iframeWindow, toolbox);
     };
@@ -194,7 +195,7 @@ Tools.styleEditor = {
   visibilityswitch: "devtools.styleeditor.enabled",
   accesskey: l10n("open.accesskey"),
   icon: "chrome://devtools/skin/images/tool-styleeditor.svg",
-  url: "chrome://devtools/content/styleeditor/styleeditor.xul",
+  url: "chrome://devtools/content/styleeditor/index.xul",
   label: l10n("ToolboxStyleEditor.label"),
   panelLabel: l10n("ToolboxStyleEditor.panelLabel"),
   get tooltip() {
@@ -218,7 +219,7 @@ Tools.shaderEditor = {
   ordinal: 5,
   visibilityswitch: "devtools.shadereditor.enabled",
   icon: "chrome://devtools/skin/images/tool-shadereditor.svg",
-  url: "chrome://devtools/content/shadereditor/shadereditor.xul",
+  url: "chrome://devtools/content/shadereditor/index.xul",
   label: l10n("ToolboxShaderEditor.label"),
   panelLabel: l10n("ToolboxShaderEditor.panelLabel"),
   tooltip: l10n("ToolboxShaderEditor.tooltip"),
@@ -228,7 +229,13 @@ Tools.shaderEditor = {
   },
 
   build: function(iframeWindow, toolbox) {
-    return new ShaderEditorPanel(iframeWindow, toolbox);
+    const { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-loader.js", {});
+    const browserRequire = BrowserLoader({
+      baseURI: "resource://devtools/client/shadereditor/",
+      window: iframeWindow
+    }).require;
+    const { ShaderEditorPanel } = browserRequire("devtools/client/shadereditor/panel");
+    return new ShaderEditorPanel(toolbox);
   }
 };
 
@@ -237,7 +244,7 @@ Tools.canvasDebugger = {
   ordinal: 6,
   visibilityswitch: "devtools.canvasdebugger.enabled",
   icon: "chrome://devtools/skin/images/tool-canvas.svg",
-  url: "chrome://devtools/content/canvasdebugger/canvasdebugger.xul",
+  url: "chrome://devtools/content/canvasdebugger/index.xul",
   label: l10n("ToolboxCanvasDebugger.label"),
   panelLabel: l10n("ToolboxCanvasDebugger.panelLabel"),
   tooltip: l10n("ToolboxCanvasDebugger.tooltip"),
@@ -270,7 +277,7 @@ Tools.performance = {
 
 function switchPerformancePanel() {
   if (Services.prefs.getBoolPref("devtools.performance.new-panel-enabled", false)) {
-    Tools.performance.url = "chrome://devtools/content/performance-new/perf.xhtml";
+    Tools.performance.url = "chrome://devtools/content/performance-new/index.xhtml";
     Tools.performance.build = function(frame, target) {
       return new NewPerformancePanel(frame, target);
     };
@@ -281,7 +288,7 @@ function switchPerformancePanel() {
       return true;
     };
   } else {
-    Tools.performance.url = "chrome://devtools/content/performance/performance.xul";
+    Tools.performance.url = "chrome://devtools/content/performance/index.xul";
     Tools.performance.build = function(frame, target) {
       return new PerformancePanel(frame, target);
     };
@@ -301,7 +308,7 @@ Tools.memory = {
   id: "memory",
   ordinal: 8,
   icon: "chrome://devtools/skin/images/tool-memory.svg",
-  url: "chrome://devtools/content/memory/memory.xhtml",
+  url: "chrome://devtools/content/memory/index.xhtml",
   visibilityswitch: "devtools.memory.enabled",
   label: l10n("memory.label"),
   panelLabel: l10n("memory.panelLabel"),
@@ -347,7 +354,7 @@ Tools.storage = {
   accesskey: l10n("storage.accesskey"),
   visibilityswitch: "devtools.storage.enabled",
   icon: "chrome://devtools/skin/images/tool-storage.svg",
-  url: "chrome://devtools/content/storage/storage.xul",
+  url: "chrome://devtools/content/storage/index.xul",
   label: l10n("storage.label"),
   menuLabel: l10n("storage.menuLabel"),
   panelLabel: l10n("storage.panelLabel"),
@@ -372,7 +379,7 @@ Tools.webAudioEditor = {
   ordinal: 11,
   visibilityswitch: "devtools.webaudioeditor.enabled",
   icon: "chrome://devtools/skin/images/tool-webaudio.svg",
-  url: "chrome://devtools/content/webaudioeditor/webaudioeditor.xul",
+  url: "chrome://devtools/content/webaudioeditor/index.xul",
   label: l10n("ToolboxWebAudioEditor1.label"),
   panelLabel: l10n("ToolboxWebAudioEditor1.panelLabel"),
   tooltip: l10n("ToolboxWebAudioEditor1.tooltip"),
@@ -391,7 +398,7 @@ Tools.scratchpad = {
   ordinal: 12,
   visibilityswitch: "devtools.scratchpad.enabled",
   icon: "chrome://devtools/skin/images/tool-scratchpad.svg",
-  url: "chrome://devtools/content/scratchpad/scratchpad.xul",
+  url: "chrome://devtools/content/scratchpad/index.xul",
   label: l10n("scratchpad.label"),
   panelLabel: l10n("scratchpad.panelLabel"),
   tooltip: l10n("scratchpad.tooltip"),
@@ -413,7 +420,7 @@ Tools.dom = {
   ordinal: 13,
   visibilityswitch: "devtools.dom.enabled",
   icon: "chrome://devtools/skin/images/tool-dom.svg",
-  url: "chrome://devtools/content/dom/dom.html",
+  url: "chrome://devtools/content/dom/index.html",
   label: l10n("dom.label"),
   panelLabel: l10n("dom.panelLabel"),
   get tooltip() {
@@ -439,7 +446,7 @@ Tools.accessibility = {
   modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
   visibilityswitch: "devtools.accessibility.enabled",
   icon: "chrome://devtools/skin/images/tool-accessibility.svg",
-  url: "chrome://devtools/content/accessibility/accessibility.html",
+  url: "chrome://devtools/content/accessibility/index.html",
   label: l10n("accessibility.label"),
   panelLabel: l10n("accessibility.panelLabel"),
   get tooltip() {
@@ -452,7 +459,12 @@ Tools.accessibility = {
   },
 
   build(iframeWindow, toolbox) {
-    return new AccessibilityPanel(iframeWindow, toolbox);
+    const startup = toolbox.getToolStartup("accessibility");
+    return new AccessibilityPanel(iframeWindow, toolbox, startup);
+  },
+
+  buildToolStartup(toolbox) {
+    return new AccessibilityStartup(toolbox);
   }
 };
 
@@ -462,9 +474,9 @@ Tools.application = {
   visibilityswitch: "devtools.application.enabled",
   icon: "chrome://devtools/skin/images/tool-application.svg",
   url: "chrome://devtools/content/application/index.html",
-  label: "Application",
-  panelLabel: "Application",
-  tooltip: "Application",
+  label: l10n("application.label"),
+  panelLabel: l10n("application.panellabel"),
+  tooltip: l10n("application.tooltip"),
   inMenu: false,
   hiddenInOptions: true,
 
@@ -551,8 +563,8 @@ exports.ToolboxButtons = [
                       osString == "Darwin" ? "Cmd+Opt+M" : "Ctrl+Shift+M"),
     isTargetSupported: target => target.isLocalTab,
     onClick(event, toolbox) {
-      let tab = toolbox.target.tab;
-      let browserWindow = tab.ownerDocument.defaultView;
+      const tab = toolbox.target.tab;
+      const browserWindow = tab.ownerDocument.defaultView;
       ResponsiveUIManager.handleGcliCommand(browserWindow, tab,
         "resize toggle", null);
     },

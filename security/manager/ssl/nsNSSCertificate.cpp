@@ -26,7 +26,6 @@
 #include "nsNSSASN1Object.h"
 #include "nsNSSCertHelper.h"
 #include "nsNSSCertValidity.h"
-#include "nsNSSComponent.h" // for PIPNSS string bundle calls.
 #include "nsPK11TokenDB.h"
 #include "nsPKCS12Blob.h"
 #include "nsProxyRelease.h"
@@ -63,8 +62,6 @@ NS_IMPL_ISUPPORTS(nsNSSCertificate,
                   nsIX509Cert,
                   nsISerializable,
                   nsIClassInfo)
-
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
 /*static*/ nsNSSCertificate*
 nsNSSCertificate::Create(CERTCertificate* cert)
@@ -195,18 +192,16 @@ nsNSSCertificate::MarkForPermDeletion()
 /**
  * Appends a pipnss bundle string to the given string.
  *
- * @param nssComponent For accessing the string bundle.
  * @param bundleKey Key for the string to append.
  * @param currentText The text to append to, using commas as separators.
  */
 template<size_t N>
 void
-AppendBundleString(const NotNull<nsCOMPtr<nsINSSComponent>>& nssComponent,
-                   const char (&bundleKey)[N],
-        /*in/out*/ nsAString& currentText)
+AppendBundleStringCommaSeparated(const char (&bundleKey)[N],
+                      /*in/out*/ nsAString& currentText)
 {
   nsAutoString bundleString;
-  nsresult rv = nssComponent->GetPIPNSSBundleString(bundleKey, bundleString);
+  nsresult rv = GetPIPNSSBundleString(bundleKey, bundleString);
   if (NS_FAILED(rv)) {
     return;
   }
@@ -221,11 +216,6 @@ NS_IMETHODIMP
 nsNSSCertificate::GetKeyUsages(nsAString& text)
 {
   text.Truncate();
-
-  nsCOMPtr<nsINSSComponent> nssComponent = do_GetService(kNSSComponentCID);
-  if (!nssComponent) {
-    return NS_ERROR_FAILURE;
-  }
 
   if (!mCert) {
     return NS_ERROR_FAILURE;
@@ -246,28 +236,26 @@ nsNSSCertificate::GetKeyUsages(nsAString& text)
     keyUsage = keyUsageItem.data[0];
   }
 
-  NotNull<nsCOMPtr<nsINSSComponent>> wrappedNSSComponent =
-    WrapNotNull(nssComponent);
   if (keyUsage & KU_DIGITAL_SIGNATURE) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUSign", text);
+    AppendBundleStringCommaSeparated("CertDumpKUSign", text);
   }
   if (keyUsage & KU_NON_REPUDIATION) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUNonRep", text);
+    AppendBundleStringCommaSeparated("CertDumpKUNonRep", text);
   }
   if (keyUsage & KU_KEY_ENCIPHERMENT) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUEnc", text);
+    AppendBundleStringCommaSeparated("CertDumpKUEnc", text);
   }
   if (keyUsage & KU_DATA_ENCIPHERMENT) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUDEnc", text);
+    AppendBundleStringCommaSeparated("CertDumpKUDEnc", text);
   }
   if (keyUsage & KU_KEY_AGREEMENT) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUKA", text);
+    AppendBundleStringCommaSeparated("CertDumpKUKA", text);
   }
   if (keyUsage & KU_KEY_CERT_SIGN) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUCertSign", text);
+    AppendBundleStringCommaSeparated("CertDumpKUCertSign", text);
   }
   if (keyUsage & KU_CRL_SIGN) {
-    AppendBundleString(wrappedNSSComponent, "CertDumpKUCRLSign", text);
+    AppendBundleStringCommaSeparated("CertDumpKUCRLSign", text);
   }
 
   return NS_OK;
@@ -381,12 +369,7 @@ nsNSSCertificate::GetEmailAddress(nsAString& aEmailAddress)
   if (mCert->emailAddr) {
     LossyUTF8ToUTF16(mCert->emailAddr, strlen(mCert->emailAddr), aEmailAddress);
   } else {
-    nsresult rv;
-    nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
-    if (NS_FAILED(rv) || !nssComponent) {
-      return NS_ERROR_FAILURE;
-    }
-    nssComponent->GetPIPNSSBundleString("CertNoEmailAddress", aEmailAddress);
+    GetPIPNSSBundleString("CertNoEmailAddress", aEmailAddress);
   }
   return NS_OK;
 }
@@ -688,31 +671,22 @@ nsNSSCertificate::GetSha1Fingerprint(nsAString& _sha1Fingerprint)
 NS_IMETHODIMP
 nsNSSCertificate::GetTokenName(nsAString& aTokenName)
 {
-  aTokenName.Truncate();
-  if (mCert) {
-    // HACK alert
-    // When the trust of a builtin cert is modified, NSS copies it into the
-    // cert db.  At this point, it is now "managed" by the user, and should
-    // not be listed with the builtins.  However, in the collection code
-    // used by PK11_ListCerts, the cert is found in the temp db, where it
-    // has been loaded from the token.  Though the trust is correct (grabbed
-    // from the cert db), the source is wrong.  I believe this is a safe
-    // way to work around this.
-    if (mCert->slot) {
-      char* token = PK11_GetTokenName(mCert->slot);
-      if (token) {
-        aTokenName = NS_ConvertUTF8toUTF16(token);
-      }
-    } else {
-      nsresult rv;
-      nsAutoString tok;
-      nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
-      if (NS_FAILED(rv)) return rv;
-      rv = nssComponent->GetPIPNSSBundleString("InternalToken", tok);
-      if (NS_SUCCEEDED(rv))
-        aTokenName = tok;
-    }
+  MOZ_ASSERT(mCert);
+  if (!mCert) {
+    return NS_ERROR_FAILURE;
   }
+  UniquePK11SlotInfo internalSlot(PK11_GetInternalSlot());
+  if (!internalSlot) {
+    return NS_ERROR_FAILURE;
+  }
+  nsCOMPtr<nsIPK11Token> token(
+    new nsPK11Token(mCert->slot ? mCert->slot : internalSlot.get()));
+  nsAutoCString tmp;
+  nsresult rv = token->GetTokenName(tmp);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  aTokenName.Assign(NS_ConvertUTF8toUTF16(tmp));
   return NS_OK;
 }
 
@@ -843,7 +817,7 @@ NS_IMPL_ISUPPORTS_CI(nsNSSCertList,
 nsNSSCertList::nsNSSCertList(UniqueCERTCertList certList)
 {
   if (certList) {
-    mCertList = Move(certList);
+    mCertList = std::move(certList);
   } else {
     mCertList = UniqueCERTCertList(CERT_NewCertList());
   }

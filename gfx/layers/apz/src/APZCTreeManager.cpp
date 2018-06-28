@@ -302,13 +302,13 @@ APZCTreeManager::NotifyLayerTreeAdopted(LayersId aLayersId,
     MutexAutoLock lock(aOldApzcTreeManager->mTestDataLock);
     auto it = aOldApzcTreeManager->mTestData.find(aLayersId);
     if (it != aOldApzcTreeManager->mTestData.end()) {
-      adoptedData = Move(it->second);
+      adoptedData = std::move(it->second);
       aOldApzcTreeManager->mTestData.erase(it);
     }
   }
   if (adoptedData) {
     MutexAutoLock lock(mTestDataLock);
-    mTestData[aLayersId] = Move(adoptedData);
+    mTestData[aLayersId] = std::move(adoptedData);
   }
 }
 
@@ -363,7 +363,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
   if (gfxPrefs::APZTestLoggingEnabled()) {
     MutexAutoLock lock(mTestDataLock);
     UniquePtr<APZTestData> ptr = MakeUnique<APZTestData>();
-    auto result = mTestData.insert(std::make_pair(aOriginatingLayersId, Move(ptr)));
+    auto result = mTestData.insert(std::make_pair(aOriginatingLayersId, std::move(ptr)));
     testData = result.first->second.get();
     testData->StartNewPaint(aPaintSequenceNumber);
   }
@@ -507,7 +507,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(LayersId aRootLayerTreeId,
   { // scope lock and update our mApzcMap before we destroy all the unused
     // APZC instances
     MutexAutoLock lock(mMapLock);
-    mApzcMap = Move(state.mApzcMap);
+    mApzcMap = std::move(state.mApzcMap);
     mScrollThumbInfo.clear();
     // For non-webrender, state.mScrollThumbs will be empty so this will be a
     // no-op.
@@ -1746,7 +1746,7 @@ APZCTreeManager::ProcessTouchInputForScrollbarDrag(MultiTouchInput& aTouchInput,
   // reuse code in InputQueue and APZC for handling scrollbar mouse-drags.
   MouseInput mouseInput{MultiTouchTypeToMouseType(aTouchInput.mType),
                         MouseInput::LEFT_BUTTON,
-                        dom::MouseEventBinding::MOZ_SOURCE_TOUCH,
+                        dom::MouseEvent_Binding::MOZ_SOURCE_TOUCH,
                         WidgetMouseEvent::eLeftButtonFlag,
                         aTouchInput.mTouches[0].mScreenPoint,
                         aTouchInput.mTime,
@@ -2040,15 +2040,6 @@ APZCTreeManager::SetTargetAPZC(uint64_t aInputBlockId,
     target = GetMultitouchTarget(target, apzc);
   }
   mInputQueue->SetConfirmedTargetApzc(aInputBlockId, target);
-}
-
-void
-APZCTreeManager::SetTargetAPZC(uint64_t aInputBlockId, const ScrollableLayerGuid& aTarget)
-{
-  APZThreadUtils::AssertOnControllerThread();
-
-  RefPtr<AsyncPanZoomController> apzc = GetTargetAPZC(aTarget);
-  mInputQueue->SetConfirmedTargetApzc(aInputBlockId, apzc);
 }
 
 void
@@ -2469,7 +2460,7 @@ APZCTreeManager::GetTargetAPZC(const ScreenPoint& aPoint,
   CompositorHitTestInfo hitResult = CompositorHitTestInfo::eInvisibleToHitTest;
   HitTestingTreeNode* scrollbarNode = nullptr;
   RefPtr<AsyncPanZoomController> target;
-  if (gfx::gfxVars::UseWebRender() && gfxPrefs::WebRenderHitTest()) {
+  if (gfx::gfxVars::UseWebRender()) {
     target = GetAPZCAtPointWR(aPoint, &hitResult, &scrollbarNode);
   } else {
     target = GetAPZCAtPoint(mRootNode, aPoint, &hitResult, &scrollbarNode);
@@ -2519,12 +2510,9 @@ APZCTreeManager::GetAPZCAtPointWR(const ScreenPoint& aHitTestPoint,
   result = GetTargetAPZC(layersId, scrollId);
   if (!result) {
     // It falls back to the root
-    // Re-enable these assertions once bug 1391318 is fixed. For now there are
-    // race conditions with the WR hit-testing code that make these assertions
-    // fail.
-    //MOZ_ASSERT(scrollId == FrameMetrics::NULL_SCROLL_ID);
+    MOZ_ASSERT(scrollId == FrameMetrics::NULL_SCROLL_ID);
     result = FindRootApzcForLayersId(layersId);
-    //MOZ_ASSERT(result);
+    MOZ_ASSERT(result);
   }
 
   bool isScrollbar = bool(hitInfo & gfx::CompositorHitTestInfo::eScrollbar);
@@ -2609,21 +2597,26 @@ APZCTreeManager::SetLongTapEnabled(bool aLongTapEnabled)
   GestureEventListener::SetLongTapEnabled(aLongTapEnabled);
 }
 
-RefPtr<HitTestingTreeNode>
-APZCTreeManager::FindScrollThumbNode(const AsyncDragMetrics& aDragMetrics)
+void
+APZCTreeManager::FindScrollThumbNode(const AsyncDragMetrics& aDragMetrics,
+                                     HitTestingTreeNodeAutoLock& aOutThumbNode)
 {
   if (!aDragMetrics.mDirection) {
     // The AsyncDragMetrics has not been initialized yet - there will be
     // no matching node, so don't bother searching the tree.
-    return RefPtr<HitTestingTreeNode>();
+    return;
   }
 
   RecursiveMutexAutoLock lock(mTreeLock);
 
-  return DepthFirstSearch<ReverseIterator>(mRootNode.get(),
+  RefPtr<HitTestingTreeNode> result = DepthFirstSearch<ReverseIterator>(
+      mRootNode.get(),
       [&aDragMetrics](HitTestingTreeNode* aNode) {
         return aNode->MatchesScrollDragMetrics(aDragMetrics);
       });
+  if (result) {
+    aOutThumbNode.Initialize(lock, result.forget(), mTreeLock);
+  }
 }
 
 AsyncPanZoomController*

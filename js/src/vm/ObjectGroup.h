@@ -233,8 +233,8 @@ class ObjectGroup : public gc::TenuredCell
         return res;
     }
 
-    JSCompartment* compartment() const { return JS::GetCompartmentForRealm(realm_); }
-    JSCompartment* maybeCompartment() const { return compartment(); }
+    JS::Compartment* compartment() const { return JS::GetCompartmentForRealm(realm_); }
+    JS::Compartment* maybeCompartment() const { return compartment(); }
     JS::Realm* realm() const { return realm_; }
 
   public:
@@ -533,7 +533,7 @@ class ObjectGroup : public gc::TenuredCell
     static ObjectGroup* defaultNewGroup(JSContext* cx, const Class* clasp,
                                         TaggedProto proto,
                                         JSObject* associated = nullptr);
-    static ObjectGroup* lazySingletonGroup(JSContext* cx, ObjectGroupRealm& realm,
+    static ObjectGroup* lazySingletonGroup(JSContext* cx, ObjectGroup* oldGroup,
                                            const Class* clasp, TaggedProto proto);
 
     static void setDefaultNewGroupUnknown(JSContext* cx, ObjectGroupRealm& realm,
@@ -628,7 +628,11 @@ class ObjectGroupRealm
         JSObject* associated_;
 
       public:
-        DefaultNewGroupCache() { purge(); }
+        DefaultNewGroupCache()
+          : associated_(nullptr)
+        {
+            purge();
+        }
 
         void purge() {
             group_ = nullptr;
@@ -695,7 +699,7 @@ class ObjectGroupRealm
     void replaceDefaultNewGroup(const Class* clasp, TaggedProto proto, JSObject* associated,
                                 ObjectGroup* group);
 
-    static ObjectGroup* makeGroup(JSContext* cx, const Class* clasp,
+    static ObjectGroup* makeGroup(JSContext* cx, JS::Realm* realm, const Class* clasp,
                                   Handle<TaggedProto> proto,
                                   ObjectGroupFlags initialFlags = 0);
 

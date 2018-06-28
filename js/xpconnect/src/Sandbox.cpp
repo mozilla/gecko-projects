@@ -26,7 +26,6 @@
 #include "xpcprivate.h"
 #include "xpc_make_class.h"
 #include "XPCWrapper.h"
-#include "XrayWrapper.h"
 #include "Crypto.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/BlobBinding.h"
@@ -334,9 +333,9 @@ SandboxCreateFetch(JSContext* cx, HandleObject obj)
     MOZ_ASSERT(JS_IsGlobalObject(obj));
 
     return JS_DefineFunction(cx, obj, "fetch", SandboxFetchPromise, 2, 0) &&
-        dom::RequestBinding::GetConstructorObject(cx) &&
-        dom::ResponseBinding::GetConstructorObject(cx) &&
-        dom::HeadersBinding::GetConstructorObject(cx);
+        dom::Request_Binding::GetConstructorObject(cx) &&
+        dom::Response_Binding::GetConstructorObject(cx) &&
+        dom::Headers_Binding::GetConstructorObject(cx);
 }
 
 static bool
@@ -509,25 +508,81 @@ NS_IMPL_RELEASE(nsXPCComponents_utils_Sandbox)
                        XPC_SCRIPTABLE_WANT_CONSTRUCT)
 #include "xpc_map_end.h" /* This #undef's the above. */
 
-const xpc::SandboxProxyHandler xpc::sandboxProxyHandler;
+class SandboxProxyHandler : public js::Wrapper {
+public:
+    constexpr SandboxProxyHandler() : js::Wrapper(0)
+    {
+    }
+
+    virtual bool getOwnPropertyDescriptor(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                          JS::Handle<jsid> id,
+                                          JS::MutableHandle<JS::PropertyDescriptor> desc) const override;
+
+    // We just forward the high-level methods to the BaseProxyHandler versions
+    // which implement them in terms of lower-level methods.
+    virtual bool has(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                     bool* bp) const override;
+    virtual bool get(JSContext* cx, JS::Handle<JSObject*> proxy, JS::HandleValue receiver,
+                     JS::Handle<jsid> id, JS::MutableHandle<JS::Value> vp) const override;
+    virtual bool set(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                     JS::Handle<JS::Value> v, JS::Handle<JS::Value> receiver,
+                     JS::ObjectOpResult& result) const override;
+
+    virtual bool getPropertyDescriptor(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                       JS::Handle<jsid> id,
+                                       JS::MutableHandle<JS::PropertyDescriptor> desc) const override;
+    virtual bool hasOwn(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                        bool* bp) const override;
+    virtual bool getOwnEnumerablePropertyKeys(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                              JS::AutoIdVector& props) const override;
+    virtual JSObject* enumerate(JSContext* cx, JS::Handle<JSObject*> proxy) const override;
+};
+
+static const SandboxProxyHandler sandboxProxyHandler;
+
+namespace xpc {
 
 bool
-xpc::IsSandboxPrototypeProxy(JSObject* obj)
+IsSandboxPrototypeProxy(JSObject* obj)
 {
     return js::IsProxy(obj) &&
-           js::GetProxyHandler(obj) == &xpc::sandboxProxyHandler;
+           js::GetProxyHandler(obj) == &sandboxProxyHandler;
 }
 
+}
+
+// A proxy handler that lets us wrap callables and invoke them with
+// the correct this object, while forwarding all other operations down
+// to them directly.
+class SandboxCallableProxyHandler : public js::Wrapper {
+public:
+    constexpr SandboxCallableProxyHandler() : js::Wrapper(0)
+    {
+    }
+
+    virtual bool call(JSContext* cx, JS::Handle<JSObject*> proxy,
+                      const JS::CallArgs& args) const override;
+
+    static const size_t SandboxProxySlot = 0;
+
+    static inline JSObject* getSandboxProxy(JS::Handle<JSObject*> proxy)
+    {
+        return &js::GetProxyReservedSlot(proxy, SandboxProxySlot).toObject();
+    }
+};
+
+static const SandboxCallableProxyHandler sandboxCallableProxyHandler;
+
 bool
-xpc::SandboxCallableProxyHandler::call(JSContext* cx, JS::Handle<JSObject*> proxy,
-                                       const JS::CallArgs& args) const
+SandboxCallableProxyHandler::call(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                  const JS::CallArgs& args) const
 {
     // We forward the call to our underlying callable.
 
     // Get our SandboxProxyHandler proxy.
     RootedObject sandboxProxy(cx, getSandboxProxy(proxy));
     MOZ_ASSERT(js::IsProxy(sandboxProxy) &&
-               js::GetProxyHandler(sandboxProxy) == &xpc::sandboxProxyHandler);
+               js::GetProxyHandler(sandboxProxy) == &sandboxProxyHandler);
 
     // The global of the sandboxProxy is the sandbox global, and the
     // target object is the original proto.
@@ -582,8 +637,6 @@ xpc::SandboxCallableProxyHandler::call(JSContext* cx, JS::Handle<JSObject*> prox
     return JS::Call(cx, thisVal, func, args, args.rval());
 }
 
-const xpc::SandboxCallableProxyHandler xpc::sandboxCallableProxyHandler;
-
 /*
  * Wrap a callable such that if we're called with oldThisObj as the
  * "this" we will instead call it with newThisObj as the this.
@@ -596,15 +649,14 @@ WrapCallable(JSContext* cx, HandleObject callable, HandleObject sandboxProtoProx
     // callable as the private.  We put the given sandboxProtoProxy in
     // an extra slot, and our call() hook depends on that.
     MOZ_ASSERT(js::IsProxy(sandboxProtoProxy) &&
-               js::GetProxyHandler(sandboxProtoProxy) ==
-                 &xpc::sandboxProxyHandler);
+               js::GetProxyHandler(sandboxProtoProxy) == &sandboxProxyHandler);
 
     RootedValue priv(cx, ObjectValue(*callable));
     // We want to claim to have the same proto as our wrapped callable, so set
     // ourselves up with a lazy proto.
     js::ProxyOptions options;
     options.setLazyProto(true);
-    JSObject* obj = js::NewProxyObject(cx, &xpc::sandboxCallableProxyHandler,
+    JSObject* obj = js::NewProxyObject(cx, &sandboxCallableProxyHandler,
                                        priv, nullptr, options);
     if (obj) {
         js::SetProxyReservedSlot(obj, SandboxCallableProxyHandler::SandboxProxySlot,
@@ -649,10 +701,10 @@ IsMaybeWrappedDOMConstructor(JSObject* obj)
 }
 
 bool
-xpc::SandboxProxyHandler::getPropertyDescriptor(JSContext* cx,
-                                                JS::Handle<JSObject*> proxy,
-                                                JS::Handle<jsid> id,
-                                                JS::MutableHandle<PropertyDescriptor> desc) const
+SandboxProxyHandler::getPropertyDescriptor(JSContext* cx,
+                                           JS::Handle<JSObject*> proxy,
+                                           JS::Handle<jsid> id,
+                                           JS::MutableHandle<PropertyDescriptor> desc) const
 {
     JS::RootedObject obj(cx, wrappedObject(proxy));
 
@@ -688,11 +740,10 @@ xpc::SandboxProxyHandler::getPropertyDescriptor(JSContext* cx,
 }
 
 bool
-xpc::SandboxProxyHandler::getOwnPropertyDescriptor(JSContext* cx,
-                                                   JS::Handle<JSObject*> proxy,
-                                                   JS::Handle<jsid> id,
-                                                   JS::MutableHandle<PropertyDescriptor> desc)
-                                                   const
+SandboxProxyHandler::getOwnPropertyDescriptor(JSContext* cx,
+                                              JS::Handle<JSObject*> proxy,
+                                              JS::Handle<jsid> id,
+                                              JS::MutableHandle<PropertyDescriptor> desc) const
 {
     if (!getPropertyDescriptor(cx, proxy, id, desc))
         return false;
@@ -709,8 +760,8 @@ xpc::SandboxProxyHandler::getOwnPropertyDescriptor(JSContext* cx,
  */
 
 bool
-xpc::SandboxProxyHandler::has(JSContext* cx, JS::Handle<JSObject*> proxy,
-                              JS::Handle<jsid> id, bool* bp) const
+SandboxProxyHandler::has(JSContext* cx, JS::Handle<JSObject*> proxy,
+                         JS::Handle<jsid> id, bool* bp) const
 {
     // This uses getPropertyDescriptor for backward compatibility with
     // the old BaseProxyHandler::has implementation.
@@ -722,17 +773,17 @@ xpc::SandboxProxyHandler::has(JSContext* cx, JS::Handle<JSObject*> proxy,
     return true;
 }
 bool
-xpc::SandboxProxyHandler::hasOwn(JSContext* cx, JS::Handle<JSObject*> proxy,
-                                 JS::Handle<jsid> id, bool* bp) const
+SandboxProxyHandler::hasOwn(JSContext* cx, JS::Handle<JSObject*> proxy,
+                            JS::Handle<jsid> id, bool* bp) const
 {
     return BaseProxyHandler::hasOwn(cx, proxy, id, bp);
 }
 
 bool
-xpc::SandboxProxyHandler::get(JSContext* cx, JS::Handle<JSObject*> proxy,
-                              JS::Handle<JS::Value> receiver,
-                              JS::Handle<jsid> id,
-                              JS::MutableHandle<Value> vp) const
+SandboxProxyHandler::get(JSContext* cx, JS::Handle<JSObject*> proxy,
+                         JS::Handle<JS::Value> receiver,
+                         JS::Handle<jsid> id,
+                         JS::MutableHandle<Value> vp) const
 {
     // This uses getPropertyDescriptor for backward compatibility with
     // the old BaseProxyHandler::get implementation.
@@ -764,25 +815,25 @@ xpc::SandboxProxyHandler::get(JSContext* cx, JS::Handle<JSObject*> proxy,
 }
 
 bool
-xpc::SandboxProxyHandler::set(JSContext* cx, JS::Handle<JSObject*> proxy,
-                              JS::Handle<jsid> id,
-                              JS::Handle<Value> v,
-                              JS::Handle<Value> receiver,
-                              JS::ObjectOpResult& result) const
+SandboxProxyHandler::set(JSContext* cx, JS::Handle<JSObject*> proxy,
+                         JS::Handle<jsid> id,
+                         JS::Handle<Value> v,
+                         JS::Handle<Value> receiver,
+                         JS::ObjectOpResult& result) const
 {
     return BaseProxyHandler::set(cx, proxy, id, v, receiver, result);
 }
 
 bool
-xpc::SandboxProxyHandler::getOwnEnumerablePropertyKeys(JSContext* cx,
-                                                       JS::Handle<JSObject*> proxy,
-                                                       AutoIdVector& props) const
+SandboxProxyHandler::getOwnEnumerablePropertyKeys(JSContext* cx,
+                                                  JS::Handle<JSObject*> proxy,
+                                                  AutoIdVector& props) const
 {
     return BaseProxyHandler::getOwnEnumerablePropertyKeys(cx, proxy, props);
 }
 
 JSObject*
-xpc::SandboxProxyHandler::enumerate(JSContext* cx, JS::Handle<JSObject*> proxy) const
+SandboxProxyHandler::enumerate(JSContext* cx, JS::Handle<JSObject*> proxy) const
 {
     return BaseProxyHandler::enumerate(cx, proxy);
 }
@@ -881,82 +932,82 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
     // to be requested either in |Cu.importGlobalProperties| or
     // |wantGlobalProperties| of a sandbox.
     if (Blob &&
-        !dom::BlobBinding::GetConstructorObject(cx))
+        !dom::Blob_Binding::GetConstructorObject(cx))
         return false;
 
-    if (ChromeUtils && !dom::ChromeUtilsBinding::GetConstructorObject(cx))
+    if (ChromeUtils && !dom::ChromeUtils_Binding::GetConstructorObject(cx))
         return false;
 
-    if (CSS && !dom::CSSBinding::GetConstructorObject(cx))
+    if (CSS && !dom::CSS_Binding::GetConstructorObject(cx))
         return false;
 
-    if (CSSRule && !dom::CSSRuleBinding::GetConstructorObject(cx))
+    if (CSSRule && !dom::CSSRule_Binding::GetConstructorObject(cx))
         return false;
 
     if (Directory &&
-        !dom::DirectoryBinding::GetConstructorObject(cx))
+        !dom::Directory_Binding::GetConstructorObject(cx))
         return false;
 
     if (DOMParser &&
-        !dom::DOMParserBinding::GetConstructorObject(cx))
+        !dom::DOMParser_Binding::GetConstructorObject(cx))
         return false;
 
     if (Element &&
-        !dom::ElementBinding::GetConstructorObject(cx))
+        !dom::Element_Binding::GetConstructorObject(cx))
         return false;
 
     if (Event &&
-        !dom::EventBinding::GetConstructorObject(cx))
+        !dom::Event_Binding::GetConstructorObject(cx))
         return false;
 
     if (File &&
-        !dom::FileBinding::GetConstructorObject(cx))
+        !dom::File_Binding::GetConstructorObject(cx))
         return false;
 
-    if (FileReader && !dom::FileReaderBinding::GetConstructorObject(cx))
+    if (FileReader && !dom::FileReader_Binding::GetConstructorObject(cx))
         return false;
 
     if (FormData &&
-        !dom::FormDataBinding::GetConstructorObject(cx))
+        !dom::FormData_Binding::GetConstructorObject(cx))
         return false;
 
     if (InspectorUtils &&
-        !dom::InspectorUtilsBinding::GetConstructorObject(cx))
+        !dom::InspectorUtils_Binding::GetConstructorObject(cx))
         return false;
 
     if (MessageChannel &&
-        (!dom::MessageChannelBinding::GetConstructorObject(cx) ||
-         !dom::MessagePortBinding::GetConstructorObject(cx)))
+        (!dom::MessageChannel_Binding::GetConstructorObject(cx) ||
+         !dom::MessagePort_Binding::GetConstructorObject(cx)))
         return false;
 
-    if (Node && !dom::NodeBinding::GetConstructorObject(cx))
+    if (Node && !dom::Node_Binding::GetConstructorObject(cx))
         return false;
 
-    if (NodeFilter && !dom::NodeFilterBinding::GetConstructorObject(cx))
+    if (NodeFilter && !dom::NodeFilter_Binding::GetConstructorObject(cx))
         return false;
 
     if (TextDecoder &&
-        !dom::TextDecoderBinding::GetConstructorObject(cx))
+        !dom::TextDecoder_Binding::GetConstructorObject(cx))
         return false;
 
     if (TextEncoder &&
-        !dom::TextEncoderBinding::GetConstructorObject(cx))
+        !dom::TextEncoder_Binding::GetConstructorObject(cx))
         return false;
 
     if (URL &&
-        !dom::URLBinding::GetConstructorObject(cx))
+        !dom::URL_Binding::GetConstructorObject(cx))
         return false;
 
     if (URLSearchParams &&
-        !dom::URLSearchParamsBinding::GetConstructorObject(cx))
+        !dom::URLSearchParams_Binding::GetConstructorObject(cx))
         return false;
 
     if (XMLHttpRequest &&
-        !dom::XMLHttpRequestBinding::GetConstructorObject(cx))
+        !dom::XMLHttpRequest_Binding::GetConstructorObject(cx))
         return false;
 
     if (XMLSerializer &&
-        !dom::XMLSerializerBinding::GetConstructorObject(cx))
+        !dom::XMLSerializer_Binding::GetConstructorObject(cx))
         return false;
 
     if (atob &&
@@ -1040,11 +1091,11 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
         creationOptions.setSharedMemoryAndAtomicsEnabled(true);
 
     if (options.sameZoneAs)
-        creationOptions.setExistingZone(js::UncheckedUnwrap(options.sameZoneAs));
+        creationOptions.setNewCompartmentInExistingZone(js::UncheckedUnwrap(options.sameZoneAs));
     else if (options.freshZone)
-        creationOptions.setNewZone();
+        creationOptions.setNewCompartmentAndZone();
     else
-        creationOptions.setSystemZone();
+        creationOptions.setNewCompartmentInSystemZone();
 
     creationOptions.setInvisibleToDebugger(options.invisibleToDebugger)
                    .setTrace(TraceXPCGlobal);
@@ -1083,7 +1134,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
 
         // Ensure |Object.prototype| is instantiated before prototype-
         // splicing below.
-        if (!JS_GetObjectPrototype(cx, sandbox))
+        if (!JS::GetRealmObjectPrototype(cx))
             return NS_ERROR_XPC_UNEXPECTED;
 
         if (options.proto) {
@@ -1114,8 +1165,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
                 // Wrap it up in a proxy that will do the right thing in terms
                 // of this-binding for methods.
                 RootedValue priv(cx, ObjectValue(*options.proto));
-                options.proto = js::NewProxyObject(cx, &xpc::sandboxProxyHandler,
-                                                   priv, nullptr);
+                options.proto = js::NewProxyObject(cx, &sandboxProxyHandler, priv, nullptr);
                 if (!options.proto)
                     return NS_ERROR_OUT_OF_MEMORY;
             }

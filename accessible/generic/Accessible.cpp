@@ -13,6 +13,7 @@
 #include "nsAccUtils.h"
 #include "nsAccessibilityService.h"
 #include "ApplicationAccessible.h"
+#include "nsAccessiblePivot.h"
 #include "nsGenericHTMLElement.h"
 #include "NotificationController.h"
 #include "nsEventShell.h"
@@ -255,13 +256,13 @@ Accessible::AccessKey() const
   switch (Preferences::GetInt("ui.key.generalAccessKey", -1)) {
   case -1:
     break;
-  case dom::KeyboardEventBinding::DOM_VK_SHIFT:
+  case dom::KeyboardEvent_Binding::DOM_VK_SHIFT:
     return KeyBinding(key, KeyBinding::kShift);
-  case dom::KeyboardEventBinding::DOM_VK_CONTROL:
+  case dom::KeyboardEvent_Binding::DOM_VK_CONTROL:
     return KeyBinding(key, KeyBinding::kControl);
-  case dom::KeyboardEventBinding::DOM_VK_ALT:
+  case dom::KeyboardEvent_Binding::DOM_VK_ALT:
     return KeyBinding(key, KeyBinding::kAlt);
-  case dom::KeyboardEventBinding::DOM_VK_META:
+  case dom::KeyboardEvent_Binding::DOM_VK_META:
     return KeyBinding(key, KeyBinding::kMeta);
   default:
     return KeyBinding();
@@ -357,7 +358,7 @@ Accessible::VisibilityState() const
       if (deckFrame->GetContent()->IsXULElement(nsGkAtoms::tabpanels))
         return states::OFFSCREEN;
 
-      NS_NOTREACHED("Children of not selected deck panel are not accessible.");
+      MOZ_ASSERT_UNREACHABLE("Children of not selected deck panel are not accessible.");
       return states::INVISIBLE;
     }
 
@@ -877,7 +878,7 @@ Accessible::HandleAccEvent(AccEvent* aEvent)
     MOZ_ASSERT(ipcDoc);
     if (ipcDoc) {
       uint64_t id = aEvent->GetAccessible()->IsDoc() ? 0 :
-        reinterpret_cast<uintptr_t>(aEvent->GetAccessible());
+        reinterpret_cast<uintptr_t>(aEvent->GetAccessible()->UniqueID());
 
       switch(aEvent->GetEventType()) {
         case nsIAccessibleEvent::EVENT_SHOW:
@@ -920,8 +921,20 @@ Accessible::HandleAccEvent(AccEvent* aEvent)
         case nsIAccessibleEvent::EVENT_SELECTION_REMOVE: {
           AccSelChangeEvent* selEvent = downcast_accEvent(aEvent);
           uint64_t widgetID = selEvent->Widget()->IsDoc() ? 0 :
-            reinterpret_cast<uintptr_t>(selEvent->Widget());
+            reinterpret_cast<uintptr_t>(selEvent->Widget()->UniqueID());
           ipcDoc->SendSelectionEvent(id, widgetID, aEvent->GetEventType());
+          break;
+        }
+        case nsIAccessibleEvent::EVENT_VIRTUALCURSOR_CHANGED: {
+          AccVCChangeEvent* vcEvent = downcast_accEvent(aEvent);
+          Accessible* position = vcEvent->NewAccessible();
+          Accessible* oldPosition = vcEvent->OldAccessible();
+          ipcDoc->SendVirtualCursorChangeEvent(id,
+            oldPosition ? reinterpret_cast<uintptr_t>(oldPosition->UniqueID()) : 0,
+            vcEvent->OldStartOffset(), vcEvent->OldEndOffset(),
+            position ? reinterpret_cast<uintptr_t>(position->UniqueID()) : 0,
+            vcEvent->NewStartOffset(), vcEvent->NewEndOffset(),
+            vcEvent->Reason(), vcEvent->IsFromUserInput());
           break;
         }
 #if defined(XP_WIN)
@@ -1957,8 +1970,8 @@ Accessible::AppendTextTo(nsAString& aText, uint32_t aStartOffset,
     return;
   }
 
-  NS_ASSERTION(mParent,
-               "Called on accessible unbound from tree. Result can be wrong.");
+  MOZ_ASSERT(mParent,
+             "Called on accessible unbound from tree. Result can be wrong.");
 
   if (frame->IsBrFrame()) {
     aText += kForcedNewLineChar;

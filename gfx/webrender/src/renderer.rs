@@ -16,7 +16,7 @@ use api::{RenderApiSender, RenderNotifier, TexelRect, TextureTarget};
 use api::{channel};
 use api::DebugCommand;
 use api::channel::PayloadReceiverHelperMethods;
-use batch::{BatchKind, BatchTextures, BrushBatchKind, TransformBatchKind};
+use batch::{BatchKind, BatchTextures, BrushBatchKind};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use debug_colors;
@@ -82,7 +82,7 @@ cfg_if! {
     if #[cfg(feature = "debug_renderer")] {
         use api::ColorU;
         use debug_render::DebugRenderer;
-        use profiler::Profiler;
+        use profiler::{Profiler, ChangeIndicator};
         use query::GpuTimer;
     }
 }
@@ -114,7 +114,7 @@ const GPU_TAG_BRUSH_MIXBLEND: GpuProfileTag = GpuProfileTag {
 };
 const GPU_TAG_BRUSH_BLEND: GpuProfileTag = GpuProfileTag {
     label: "B_Blend",
-    color: debug_colors::LIGHTBLUE,
+    color: debug_colors::ORANGE,
 };
 const GPU_TAG_BRUSH_IMAGE: GpuProfileTag = GpuProfileTag {
     label: "B_Image",
@@ -148,14 +148,6 @@ const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag {
     label: "TextRun",
     color: debug_colors::BLUE,
 };
-const GPU_TAG_PRIM_BORDER_CORNER: GpuProfileTag = GpuProfileTag {
-    label: "BorderCorner",
-    color: debug_colors::DARKSLATEGREY,
-};
-const GPU_TAG_PRIM_BORDER_EDGE: GpuProfileTag = GpuProfileTag {
-    label: "BorderEdge",
-    color: debug_colors::LAVENDER,
-};
 const GPU_TAG_BLUR: GpuProfileTag = GpuProfileTag {
     label: "Blur",
     color: debug_colors::VIOLET,
@@ -178,25 +170,6 @@ const GPU_SAMPLER_TAG_TRANSPARENT: GpuProfileTag = GpuProfileTag {
     color: debug_colors::BLACK,
 };
 
-impl TransformBatchKind {
-    #[cfg(feature = "debugger")]
-    fn debug_name(&self) -> &'static str {
-        match *self {
-            TransformBatchKind::TextRun(..) => "TextRun",
-            TransformBatchKind::BorderCorner => "BorderCorner",
-            TransformBatchKind::BorderEdge => "BorderEdge",
-        }
-    }
-
-    fn sampler_tag(&self) -> GpuProfileTag {
-        match *self {
-            TransformBatchKind::TextRun(..) => GPU_TAG_PRIM_TEXT_RUN,
-            TransformBatchKind::BorderCorner => GPU_TAG_PRIM_BORDER_CORNER,
-            TransformBatchKind::BorderEdge => GPU_TAG_PRIM_BORDER_EDGE,
-        }
-    }
-}
-
 impl BatchKind {
     #[cfg(feature = "debugger")]
     fn debug_name(&self) -> &'static str {
@@ -213,7 +186,7 @@ impl BatchKind {
                     BrushBatchKind::LinearGradient => "Brush (LinearGradient)",
                 }
             }
-            BatchKind::Transformable(_, batch_kind) => batch_kind.debug_name(),
+            BatchKind::TextRun(_) => "TextRun",
         }
     }
 
@@ -231,7 +204,7 @@ impl BatchKind {
                     BrushBatchKind::LinearGradient => GPU_TAG_BRUSH_LINEAR_GRADIENT,
                 }
             }
-            BatchKind::Transformable(_, batch_kind) => batch_kind.sampler_tag(),
+            BatchKind::TextRun(_) => GPU_TAG_PRIM_TEXT_RUN,
         }
     }
 }
@@ -248,6 +221,8 @@ bitflags! {
         const EPOCHS            = 1 << 6;
         const COMPACT_PROFILER  = 1 << 7;
         const ECHO_DRIVER_MESSAGES = 1 << 8;
+        const NEW_FRAME_INDICATOR = 1 << 9;
+        const NEW_SCENE_INDICATOR = 1 << 10;
     }
 }
 
@@ -438,6 +413,16 @@ pub(crate) mod desc {
                 count: 2,
                 kind: VertexAttributeKind::F32,
             },
+            VertexAttribute {
+                name: "aClipParams1",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aClipParams2",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
         ],
     };
 
@@ -621,7 +606,6 @@ pub(crate) enum VertexArrayKind {
     Primitive,
     Blur,
     Clip,
-    DashAndDot,
     VectorStencil,
     VectorCover,
     Border,
@@ -1375,6 +1359,11 @@ pub struct Renderer {
     profile_counters: RendererProfileCounters,
     #[cfg(feature = "debug_renderer")]
     profiler: Profiler,
+    #[cfg(feature = "debug_renderer")]
+    new_frame_indicator: ChangeIndicator,
+    #[cfg(feature = "debug_renderer")]
+    new_scene_indicator: ChangeIndicator,
+
     last_time: u64,
 
     pub gpu_profile: GpuProfiler<GpuProfileTag>,
@@ -1777,6 +1766,10 @@ impl Renderer {
             profile_counters: RendererProfileCounters::new(),
             #[cfg(feature = "debug_renderer")]
             profiler: Profiler::new(),
+            #[cfg(feature = "debug_renderer")]
+            new_frame_indicator: ChangeIndicator::new(),
+            #[cfg(feature = "debug_renderer")]
+            new_scene_indicator: ChangeIndicator::new(),
             max_texture_size: max_device_size,
             max_recorded_profiles: options.max_recorded_profiles,
             clear_color: options.clear_color,
@@ -1866,6 +1859,11 @@ impl Renderer {
                     texture_update_list,
                     profile_counters,
                 ) => {
+                    if doc.is_new_scene {
+                        #[cfg(feature = "debug_renderer")]
+                        self.new_scene_indicator.changed();
+                    }
+
                     // Add a new document to the active set, expressed as a `Vec` in order
                     // to re-order based on `DocumentLayer` during rendering.
                     match self.active_documents.iter().position(|&(id, _)| id == document_id) {
@@ -1978,16 +1976,6 @@ impl Renderer {
             debug_server::BatchKind::Cache,
             "Zero Clears",
             target.zero_clears.len(),
-        );
-        debug_target.add(
-            debug_server::BatchKind::Clip,
-            "Clear",
-            target.clip_batcher.border_clears.len(),
-        );
-        debug_target.add(
-            debug_server::BatchKind::Clip,
-            "Borders",
-            target.clip_batcher.borders.len(),
         );
         debug_target.add(
             debug_server::BatchKind::Clip,
@@ -2150,6 +2138,12 @@ impl Renderer {
             }
             DebugCommand::EnableGpuSampleQueries(enable) => {
                 self.set_debug_flag(DebugFlags::GPU_SAMPLE_QUERIES, enable);
+            }
+            DebugCommand::EnableNewFrameIndicator(enable) => {
+                self.set_debug_flag(DebugFlags::NEW_FRAME_INDICATOR, enable);
+            }
+            DebugCommand::EnableNewSceneIndicator(enable) => {
+                self.set_debug_flag(DebugFlags::NEW_SCENE_INDICATOR, enable);
             }
             DebugCommand::EnableDualSourceBlending(_) => {
                 panic!("Should be handled by render backend");
@@ -2394,6 +2388,23 @@ impl Renderer {
                     );
                 }
             }
+
+            if self.debug_flags.contains(DebugFlags::NEW_FRAME_INDICATOR) {
+                self.new_frame_indicator.changed();
+                self.new_frame_indicator.draw(
+                    0.0, 0.0,
+                    ColorU::new(0, 110, 220, 255),
+                    self.debug.get_mut(&mut self.device)
+                );
+            }
+
+            if self.debug_flags.contains(DebugFlags::NEW_SCENE_INDICATOR) {
+                self.new_scene_indicator.draw(
+                    160.0, 0.0,
+                    ColorU::new(220, 30, 10, 255),
+                    self.debug.get_mut(&mut self.device)
+                );
+            }
         }
 
         if self.debug_flags.contains(DebugFlags::ECHO_DRIVER_MESSAGES) {
@@ -2614,6 +2625,12 @@ impl Renderer {
         vertex_array_kind: VertexArrayKind,
         stats: &mut RendererStats,
     ) {
+        // If we end up with an empty draw call here, that means we have
+        // probably introduced unnecessary batch breaks during frame
+        // building - so we should be catching this earlier and removing
+        // the batch.
+        debug_assert!(!data.is_empty());
+
         let vao = get_vao(vertex_array_kind, &self.vaos, &self.gpu_glyph_renderer);
 
         self.device.bind_vao(vao);
@@ -2887,8 +2904,18 @@ impl Renderer {
 
             for alpha_batch_container in &target.alpha_batch_containers {
                 if let Some(target_rect) = alpha_batch_container.target_rect {
+                    // Note: `framebuffer_target_rect` needs a Y-flip before going to GL
+                    let rect = if render_target.is_none() {
+                        let mut rect = target_rect
+                            .intersection(&framebuffer_target_rect.to_i32())
+                            .unwrap_or(DeviceIntRect::zero());
+                        rect.origin.y = target_size.height as i32 - rect.origin.y - rect.size.height;
+                        rect
+                    } else {
+                        target_rect
+                    };
                     self.device.enable_scissor();
-                    self.device.set_scissor_rect(target_rect);
+                    self.device.set_scissor_rect(rect);
                 }
 
                 // Draw opaque batches front-to-back for maximum
@@ -2930,8 +2957,18 @@ impl Renderer {
 
         for alpha_batch_container in &target.alpha_batch_containers {
             if let Some(target_rect) = alpha_batch_container.target_rect {
+                // Note: `framebuffer_target_rect` needs a Y-flip before going to GL
+                let rect = if render_target.is_none() {
+                    let mut rect = target_rect
+                        .intersection(&framebuffer_target_rect.to_i32())
+                        .unwrap_or(DeviceIntRect::zero());
+                    rect.origin.y = target_size.height as i32 - rect.origin.y - rect.size.height;
+                    rect
+                } else {
+                    target_rect
+                };
                 self.device.enable_scissor();
-                self.device.set_scissor_rect(target_rect);
+                self.device.set_scissor_rect(rect);
             }
 
             for batch in &alpha_batch_container.alpha_batches {
@@ -3145,41 +3182,6 @@ impl Renderer {
         // Draw the clip items into the tiled alpha mask.
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_CACHE_CLIP);
-
-            // If we have border corner clips, the first step is to clear out the
-            // area in the clip mask. This allows drawing multiple invididual clip
-            // in regions below.
-            if !target.clip_batcher.border_clears.is_empty() {
-                let _gm2 = self.gpu_profile.start_marker("clip borders [clear]");
-                self.device.set_blend(false);
-                self.shaders.cs_clip_border
-                    .bind(&mut self.device, projection, &mut self.renderer_errors);
-                self.draw_instanced_batch(
-                    &target.clip_batcher.border_clears,
-                    VertexArrayKind::DashAndDot,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
-            }
-
-            // Draw any dots or dashes for border corners.
-            if !target.clip_batcher.borders.is_empty() {
-                let _gm2 = self.gpu_profile.start_marker("clip borders");
-                // We are masking in parts of the corner (dots or dashes) here.
-                // Blend mode is set to max to allow drawing multiple dots.
-                // The individual dots and dashes in a border never overlap, so using
-                // a max blend mode here is fine.
-                self.device.set_blend(true);
-                self.device.set_blend_mode_max();
-                self.shaders.cs_clip_border
-                    .bind(&mut self.device, projection, &mut self.renderer_errors);
-                self.draw_instanced_batch(
-                    &target.clip_batcher.borders,
-                    VertexArrayKind::DashAndDot,
-                    &BatchTextures::no_texture(),
-                    stats,
-                );
-            }
 
             // switch to multiplicative blending
             self.device.set_blend(true);
@@ -4533,7 +4535,6 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
         VertexArrayKind::Blur => &vaos.blur_vao,
-        VertexArrayKind::DashAndDot => &vaos.dash_and_dot_vao,
         VertexArrayKind::VectorStencil => &gpu_glyph_renderer.vector_stencil_vao,
         VertexArrayKind::VectorCover => &gpu_glyph_renderer.vector_cover_vao,
         VertexArrayKind::Border => &vaos.border_vao,
@@ -4549,7 +4550,6 @@ fn get_vao<'a>(vertex_array_kind: VertexArrayKind,
         VertexArrayKind::Primitive => &vaos.prim_vao,
         VertexArrayKind::Clip => &vaos.clip_vao,
         VertexArrayKind::Blur => &vaos.blur_vao,
-        VertexArrayKind::DashAndDot => &vaos.dash_and_dot_vao,
         VertexArrayKind::VectorStencil | VertexArrayKind::VectorCover => unreachable!(),
         VertexArrayKind::Border => &vaos.border_vao,
     }

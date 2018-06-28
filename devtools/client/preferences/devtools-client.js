@@ -9,7 +9,7 @@ pref("devtools.webide.enabled", true);
 pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
-pref("devtools.toolbox.previousHost", "side");
+pref("devtools.toolbox.previousHost", "right");
 pref("devtools.toolbox.selectedTool", "webconsole");
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
@@ -36,11 +36,17 @@ pref("devtools.inspector.enabled", true);
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.remote", false);
 
-// Show the 3 pane onboarding tooltip in the inspector
+// Show the 3 pane onboarding tooltip in the inspector only in release or beta builds.
+#if defined(RELEASE_OR_BETA)
 pref("devtools.inspector.show-three-pane-tooltip", true);
+#else
+pref("devtools.inspector.show-three-pane-tooltip", false);
+#endif
 // Enable the 3 pane mode in the inspector
 pref("devtools.inspector.three-pane-enabled", true);
-
+// Whether or not this is the first run of the 3 pane mode. Used to reset the default
+// inspector sidebar widths for its first run.
+pref("devtools.inspector.three-pane-first-run", true);
 // Collapse pseudo-elements by default in the rule-view
 pref("devtools.inspector.show_pseudo_elements", false);
 // The default size for image preview tooltips in the rule-view/computed-view/markup-view
@@ -55,12 +61,8 @@ pref("devtools.inspector.flexboxHighlighter.enabled", false);
 pref("devtools.inspector.shapesHighlighter.enabled", true);
 // Enable the Flexbox Inspector panel
 pref("devtools.flexboxinspector.enabled", false);
-// Enable the new Animation Inspector in Nightly only
-#if defined(NIGHTLY_BUILD)
+// Enable the new Animation Inspector
 pref("devtools.new-animationinspector.enabled", true);
-#else
-pref("devtools.new-animationinspector.enabled", false);
-#endif
 // Enable the Variable Fonts editor
 pref("devtools.inspector.fonteditor.enabled", false);
 // Enable the font highlight-on-hover feature
@@ -265,10 +267,6 @@ pref("devtools.netmonitor.persistlog", false);
 // in the Web Console to display a timestamp, or |false| to not display
 // any timestamps.
 pref("devtools.webconsole.timestampMessages", false);
-
-// Web Console automatic multiline mode: |true| if you want incomplete statements
-// to automatically trigger multiline editing (equivalent to shift + enter).
-pref("devtools.webconsole.autoMultiline", true);
 
 // Enable the webconsole sidebar toggle in Nightly builds.
 #if defined(NIGHTLY_BUILD)

@@ -2070,13 +2070,13 @@ nsBlockFrame::PropagateFloatDamage(BlockReflowInput& aState,
 
 #ifdef REALLY_NOISY_REFLOW
     printf("nsBlockFrame::PropagateFloatDamage %p was = %d, is=%d\n",
-           this, wasImpactedByFloat, floatAvailableSpace.mHasFloats);
+           this, wasImpactedByFloat, floatAvailableSpace.HasFloats());
 #endif
 
       // Mark the line dirty if it was or is affected by a float
       // We actually only really need to reflow if the amount of impact
       // changes, but that's not straightforward to check
-      if (wasImpactedByFloat || floatAvailableSpace.mHasFloats) {
+      if (wasImpactedByFloat || floatAvailableSpace.HasFloats()) {
         aLine->MarkDirty();
       }
     }
@@ -2822,7 +2822,7 @@ nsBlockFrame::ReflowLine(BlockReflowInput& aState,
       nsFlowAreaRect r = aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
                                                                aLine->BSize(),
                                                                nullptr);
-      if (r.mHasFloats) {
+      if (r.HasFloats()) {
         LogicalRect so =
           aLine->GetOverflowArea(eScrollableOverflow, wm, aLine->mContainerSize);
         nscoord s = r.mRect.IStart(wm);
@@ -3433,8 +3433,8 @@ nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
     nsFloatManager::SavedState floatManagerState;
     nsReflowStatus frameReflowStatus;
     do {
-      if (floatAvailableSpace.mHasFloats) {
-        // Set if floatAvailableSpace.mHasFloats is true for any
+      if (floatAvailableSpace.HasFloats()) {
+        // Set if floatAvailableSpace.HasFloats() is true for any
         // iteration of the loop.
         aLine->SetLineIsImpactedByFloat(true);
       }
@@ -3600,7 +3600,7 @@ nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
       // then pushing it to the next page would give it more room. Note that
       // isImpacted doesn't include impact from the block's own floats.
       bool forceFit = aState.IsAdjacentWithTop() && clearance <= 0 &&
-        !floatAvailableSpace.mHasFloats;
+        !floatAvailableSpace.HasFloats();
       nsCollapsingMargin collapsedBEndMargin;
       nsOverflowAreas overflowAreas;
       *aKeepReflowGoing = brc.PlaceBlock(*blockHtmlRI, forceFit, aLine.get(),
@@ -3890,11 +3890,11 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
 
   // We need to set this flag on the line if any of our reflow passes
   // are impacted by floats.
-  if (aFloatAvailableSpace.mHasFloats)
+  if (aFloatAvailableSpace.HasFloats())
     aLine->SetLineIsImpactedByFloat(true);
 #ifdef REALLY_NOISY_REFLOW
   printf("nsBlockFrame::DoReflowInlineFrames %p impacted = %d\n",
-         this, aFloatAvailableSpace.mHasFloats);
+         this, aFloatAvailableSpace.HasFloats());
 #endif
 
   WritingMode outerWM = aState.mReflowInput.GetWritingMode();
@@ -3920,7 +3920,7 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
 
   aLineLayout.BeginLineReflow(iStart, aState.mBCoord,
                               availISize, availBSize,
-                              aFloatAvailableSpace.mHasFloats,
+                              aFloatAvailableSpace.HasFloats(),
                               false, /*XXX isTopOfPage*/
                               lineWM, aState.mContainerSize);
 
@@ -3942,7 +3942,7 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
   int32_t i;
   nsIFrame* frame = aLine->mFirstChild;
 
-  if (aFloatAvailableSpace.mHasFloats) {
+  if (aFloatAvailableSpace.HasFloats()) {
     // There is a soft break opportunity at the start of the line, because
     // we can always move this line down below float(s).
     if (aLineLayout.NotifyOptionalBreakPosition(
@@ -4035,42 +4035,42 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
     // floats and the first element in the line doesn't fit with
     // the floats.
     //
-    // What we do is to advance past the first float we find and
-    // then reflow the line all over again.
+    // If there's block space available, we either try to reflow the line
+    // past the current band (if it's non-zero and the band definitely won't
+    // widen around a shape-outside), otherwise we try one pixel down. If
+    // there's no block space available, we push the line to the next
+    // page/column.
     NS_ASSERTION(NS_UNCONSTRAINEDSIZE !=
                  aFloatAvailableSpace.mRect.BSize(outerWM),
                  "unconstrained block size on totally empty line");
 
     // See the analogous code for blocks in BlockReflowInput::ClearFloats.
-    if (aFloatAvailableSpace.mRect.BSize(outerWM) > 0) {
-      NS_ASSERTION(aFloatAvailableSpace.mHasFloats,
+    nscoord bandBSize = aFloatAvailableSpace.mRect.BSize(outerWM);
+    if (bandBSize > 0 ||
+        NS_UNCONSTRAINEDSIZE == aState.mReflowInput.AvailableBSize()) {
+      NS_ASSERTION(bandBSize == 0 || aFloatAvailableSpace.HasFloats(),
                    "redo line on totally empty line with non-empty band...");
       // We should never hit this case if we've placed floats on the
       // line; if we have, then the GetFloatAvailableSpace call is wrong
-      // and needs to happen after the caller pops the space manager
+      // and needs to happen after the caller pops the float manager
       // state.
       aState.FloatManager()->AssertStateMatches(aFloatStateBeforeLine);
-      aState.mBCoord += aFloatAvailableSpace.mRect.BSize(outerWM);
+
+      if (!aFloatAvailableSpace.MayWiden() && bandBSize > 0) {
+        // Move it down far enough to clear the current band.
+        aState.mBCoord += bandBSize;
+      } else {
+        // Move it down by one dev pixel.
+        aState.mBCoord += aState.mPresContext->DevPixelsToAppUnits(1);
+      }
+
       aFloatAvailableSpace = aState.GetFloatAvailableSpace();
     } else {
-      NS_ASSERTION(NS_UNCONSTRAINEDSIZE != aState.mReflowInput.AvailableBSize(),
-                   "We shouldn't be running out of height here");
-      if (NS_UNCONSTRAINEDSIZE == aState.mReflowInput.AvailableBSize()) {
-        // just move it down a bit to try to get out of this mess
-        aState.mBCoord += 1;
-        // We should never hit this case if we've placed floats on the
-        // line; if we have, then the GetFloatAvailableSpace call is wrong
-        // and needs to happen after the caller pops the space manager
-        // state.
-        aState.FloatManager()->AssertStateMatches(aFloatStateBeforeLine);
-        aFloatAvailableSpace = aState.GetFloatAvailableSpace();
-      } else {
-        // There's nowhere to retry placing the line, so we want to push
-        // it to the next page/column where its contents can fit not
-        // next to a float.
-        lineReflowStatus = LineReflowStatus::Truncated;
-        PushTruncatedLine(aState, aLine, aKeepReflowGoing);
-      }
+      // There's nowhere to retry placing the line, so we want to push
+      // it to the next page/column where its contents can fit not
+      // next to a float.
+      lineReflowStatus = LineReflowStatus::Truncated;
+      PushTruncatedLine(aState, aLine, aKeepReflowGoing);
     }
 
     // XXX: a small optimization can be done here when paginating:
@@ -4084,7 +4084,7 @@ nsBlockFrame::DoReflowInlineFrames(BlockReflowInput& aState,
     // no point in placing the line.
     if (!aState.mReflowStatus.IsInlineBreakBefore()) {
       if (!PlaceLine(aState, aLineLayout, aLine, aFloatStateBeforeLine,
-                     aFloatAvailableSpace.mRect, aAvailableSpaceBSize,
+                     aFloatAvailableSpace, aAvailableSpaceBSize,
                      aKeepReflowGoing)) {
         lineReflowStatus = LineReflowStatus::RedoMoreFloats;
         // PlaceLine already called GetAvailableSpaceForBSize for us.
@@ -4474,7 +4474,7 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
                         nsLineLayout& aLineLayout,
                         LineIterator aLine,
                         nsFloatManager::SavedState *aFloatStateBeforeLine,
-                        LogicalRect& aFloatAvailableSpace,
+                        nsFlowAreaRect& aFlowArea,
                         nscoord& aAvailableSpaceBSize,
                         bool* aKeepReflowGoing)
 {
@@ -4541,31 +4541,31 @@ nsBlockFrame::PlaceLine(BlockReflowInput& aState,
     // Prepare data for redoing the line.
     aState.mLineBSize = Some(aLine->BSize());
 
-    // Since we want to redo the line, we update aFloatAvailableSpace by
-    // using the aFloatStateBeforeLine, which is the float manager's state
-    // before the line is placed.
-    LogicalRect oldFloatAvailableSpace(aFloatAvailableSpace);
-    aFloatAvailableSpace =
-      aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
-                                            aAvailableSpaceBSize,
-                                            aFloatStateBeforeLine).mRect;
-    NS_ASSERTION(aFloatAvailableSpace.BStart(wm) ==
+    // Since we want to redo the line, we update aFlowArea by using the
+    // aFloatStateBeforeLine, which is the float manager's state before the
+    // line is placed.
+    LogicalRect oldFloatAvailableSpace(aFlowArea.mRect);
+    aFlowArea = aState.GetFloatAvailableSpaceForBSize(aLine->BStart(),
+                                                      aAvailableSpaceBSize,
+                                                      aFloatStateBeforeLine);
+
+    NS_ASSERTION(aFlowArea.mRect.BStart(wm) ==
                  oldFloatAvailableSpace.BStart(wm), "yikes");
     // Restore the BSize to the position of the next band.
-    aFloatAvailableSpace.BSize(wm) = oldFloatAvailableSpace.BSize(wm);
+    aFlowArea.mRect.BSize(wm) = oldFloatAvailableSpace.BSize(wm);
 
     // Enforce both IStart() and IEnd() never move outwards to prevent
     // infinite grow-shrink loops.
     const nscoord iStartDiff =
-      aFloatAvailableSpace.IStart(wm) - oldFloatAvailableSpace.IStart(wm);
+      aFlowArea.mRect.IStart(wm) - oldFloatAvailableSpace.IStart(wm);
     const nscoord iEndDiff =
-      aFloatAvailableSpace.IEnd(wm) - oldFloatAvailableSpace.IEnd(wm);
+      aFlowArea.mRect.IEnd(wm) - oldFloatAvailableSpace.IEnd(wm);
     if (iStartDiff < 0) {
-      aFloatAvailableSpace.IStart(wm) -= iStartDiff;
-      aFloatAvailableSpace.ISize(wm) += iStartDiff;
+      aFlowArea.mRect.IStart(wm) -= iStartDiff;
+      aFlowArea.mRect.ISize(wm) += iStartDiff;
     }
     if (iEndDiff > 0) {
-      aFloatAvailableSpace.ISize(wm) -= iEndDiff;
+      aFlowArea.mRect.ISize(wm) -= iEndDiff;
     }
 
     return false;
@@ -6519,7 +6519,7 @@ nsBlockFrame::RecoverFloatsFor(nsIFrame*       aFrame,
 
   // Only blocks have floats
   nsBlockFrame* block = nsLayoutUtils::GetAsBlock(aFrame);
-  // Don't recover any state inside a block that has its own space manager
+  // Don't recover any state inside a block that has its own float manager
   // (we don't currently have any blocks like this, though, thanks to our
   // use of extra frames for 'overflow')
   if (block && !nsBlockFrame::BlockNeedsFloatManager(block)) {
@@ -7436,7 +7436,7 @@ nsBlockFrame::GetNearestAncestorBlock(nsIFrame* aCandidate)
     // Not a block. Check its parent next.
     aCandidate = aCandidate->GetParent();
   }
-  NS_NOTREACHED("Fell off frame tree looking for ancestor block!");
+  MOZ_ASSERT_UNREACHABLE("Fell off frame tree looking for ancestor block!");
   return nullptr;
 }
 

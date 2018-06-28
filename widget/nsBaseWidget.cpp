@@ -972,7 +972,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
           aInputBlockId,
           aPreventDefault));
       });
-  mAPZEventState = new APZEventState(this, mozilla::Move(callback));
+  mAPZEventState = new APZEventState(this, std::move(callback));
 
   mSetAllowedTouchBehaviorCallback = [treeManager](uint64_t aInputBlockId,
                                                    const nsTArray<TouchBehaviorFlags>& aFlags)
@@ -1083,8 +1083,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
   if (mAPZC && !InputAPZContext::WasRoutedToChildProcess() && aInputBlockId) {
     // EventStateManager did not route the event into the child process.
     // It's safe to communicate to APZ that the event has been processed.
-    // TODO: Eventually we'll be able to move the SendSetTargetAPZCNotification
-    // call into APZEventState::Process*Event() as well.
+    UniquePtr<DisplayportSetListener> postLayerization;
     if (WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent()) {
       if (touchEvent->mMessage == eTouchStart) {
         if (gfxPrefs::TouchActionEnabled()) {
@@ -1092,14 +1091,14 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
               GetDocument(), *(original->AsTouchEvent()), aInputBlockId,
               mSetAllowedTouchBehaviorCallback);
         }
-        APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
+        postLayerization = APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
             *(original->AsTouchEvent()), aGuid, aInputBlockId);
       }
       mAPZEventState->ProcessTouchEvent(*touchEvent, aGuid, aInputBlockId,
           aApzResponse, status);
     } else if (WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent()) {
       MOZ_ASSERT(wheelEvent->mFlags.mHandledByAPZ);
-      APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
+      postLayerization = APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
           *(original->AsWheelEvent()), aGuid, aInputBlockId);
       if (wheelEvent->mCanTriggerSwipe) {
         ReportSwipeStarted(aInputBlockId, wheelEvent->TriggersSwipe());
@@ -1107,9 +1106,12 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
       mAPZEventState->ProcessWheelEvent(*wheelEvent, aGuid, aInputBlockId);
     } else if (WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent()) {
       MOZ_ASSERT(mouseEvent->mFlags.mHandledByAPZ);
-      APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
+      postLayerization = APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
           *(original->AsMouseEvent()), aGuid, aInputBlockId);
       mAPZEventState->ProcessMouseEvent(*mouseEvent, aGuid, aInputBlockId);
+    }
+    if (postLayerization && postLayerization->Register()) {
+      Unused << postLayerization.release();
     }
   }
 
@@ -2271,7 +2273,8 @@ void
 nsBaseWidget::RegisterPluginWindowForRemoteUpdates()
 {
 #if !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
-  NS_NOTREACHED("nsBaseWidget::RegisterPluginWindowForRemoteUpdates not implemented!");
+  MOZ_ASSERT_UNREACHABLE("nsBaseWidget::RegisterPluginWindowForRemoteUpdates "
+                         "not implemented!");
   return;
 #else
   MOZ_ASSERT(NS_IsMainThread());
@@ -2289,7 +2292,8 @@ void
 nsBaseWidget::UnregisterPluginWindowForRemoteUpdates()
 {
 #if !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
-  NS_NOTREACHED("nsBaseWidget::UnregisterPluginWindowForRemoteUpdates not implemented!");
+  MOZ_ASSERT_UNREACHABLE("nsBaseWidget::UnregisterPluginWindowForRemoteUpdates "
+                         "not implemented!");
   return;
 #else
   MOZ_ASSERT(NS_IsMainThread());
@@ -2320,7 +2324,8 @@ nsIWidget*
 nsIWidget::LookupRegisteredPluginWindow(uintptr_t aWindowID)
 {
 #if !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
-  NS_NOTREACHED("nsBaseWidget::LookupRegisteredPluginWindow not implemented!");
+  MOZ_ASSERT_UNREACHABLE("nsBaseWidget::LookupRegisteredPluginWindow "
+                         "not implemented!");
   return nullptr;
 #else
   MOZ_ASSERT(NS_IsMainThread());
@@ -2335,7 +2340,8 @@ nsIWidget::UpdateRegisteredPluginWindowVisibility(uintptr_t aOwnerWidget,
                                                   nsTArray<uintptr_t>& aPluginIds)
 {
 #if !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
-  NS_NOTREACHED("nsBaseWidget::UpdateRegisteredPluginWindowVisibility not implemented!");
+  MOZ_ASSERT_UNREACHABLE("nsBaseWidget::UpdateRegisteredPluginWindowVisibility"
+                         " not implemented!");
   return;
 #else
   MOZ_ASSERT(NS_IsMainThread());

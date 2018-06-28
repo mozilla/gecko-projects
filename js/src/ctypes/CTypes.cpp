@@ -39,6 +39,7 @@
 #include "gc/Policy.h"
 #include "gc/Zone.h"
 #include "jit/AtomicOperations.h"
+#include "js/UniquePtr.h"
 #include "js/Vector.h"
 #include "util/Windows.h"
 #include "vm/JSContext.h"
@@ -97,10 +98,8 @@ GetDeflatedUTF8StringLength(JSContext* maybecx, const CharT* chars,
         js::gc::AutoSuppressGC suppress(maybecx);
         char buffer[10];
         SprintfLiteral(buffer, "0x%x", c);
-        JS_ReportErrorFlagsAndNumberASCII(maybecx, JSREPORT_ERROR,
-                                          GetErrorMessage,
-                                          nullptr, JSMSG_BAD_SURROGATE_CHAR,
-                                          buffer);
+        JS_ReportErrorNumberASCII(maybecx, GetErrorMessage, nullptr, JSMSG_BAD_SURROGATE_CHAR,
+                                  buffer);
     }
     return (size_t) -1;
 }
@@ -3609,10 +3608,8 @@ ImplicitConvert(JSContext* cx,
 
         char** charBuffer = static_cast<char**>(buffer);
         *charBuffer = cx->pod_malloc<char>(nbytes + 1);
-        if (!*charBuffer) {
-          JS_ReportAllocationOverflow(cx);
+        if (!*charBuffer)
           return false;
-        }
 
         ASSERT_OK(DeflateStringToUTF8Buffer(cx, sourceLinear, *charBuffer, &nbytes));
         (*charBuffer)[nbytes] = 0;
@@ -3625,10 +3622,8 @@ ImplicitConvert(JSContext* cx,
         // to modify the string.)
         char16_t** char16Buffer = static_cast<char16_t**>(buffer);
         *char16Buffer = cx->pod_malloc<char16_t>(sourceLength + 1);
-        if (!*char16Buffer) {
-          JS_ReportAllocationOverflow(cx);
+        if (!*char16Buffer)
           return false;
-        }
 
         *freePointer = true;
         if (sourceLinear->hasLatin1Chars()) {
@@ -3791,10 +3786,8 @@ ImplicitConvert(JSContext* cx,
         size_t elementSize = CType::GetSize(baseType);
         size_t arraySize = elementSize * targetLength;
         auto intermediate = cx->make_pod_array<char>(arraySize);
-        if (!intermediate) {
-          JS_ReportAllocationOverflow(cx);
+        if (!intermediate)
           return false;
-        }
 
         RootedValue item(cx);
         for (uint32_t i = 0; i < sourceLength; ++i) {
@@ -3875,10 +3868,8 @@ ImplicitConvert(JSContext* cx,
       // Convert into an intermediate, in case of failure.
       size_t structSize = CType::GetSize(targetType);
       auto intermediate = cx->make_pod_array<char>(structSize);
-      if (!intermediate) {
-        JS_ReportAllocationOverflow(cx);
+      if (!intermediate)
         return false;
-      }
 
       const FieldInfoHash* fields = StructType::GetFieldInfo(targetType);
       if (props.length() != fields->count()) {
@@ -5740,25 +5731,21 @@ ArrayType::BuildFFIType(JSContext* cx, JSObject* obj)
   // but some libffi platforms currently require that it be meaningful. I'm
   // looking at you, x86_64.
   auto ffiType = cx->make_unique<ffi_type>();
-  if (!ffiType) {
-    JS_ReportOutOfMemory(cx);
+  if (!ffiType)
     return nullptr;
-  }
 
   ffiType->type = FFI_TYPE_STRUCT;
   ffiType->size = CType::GetSize(obj);
   ffiType->alignment = CType::GetAlignment(obj);
   ffiType->elements = cx->pod_malloc<ffi_type*>(length + 1);
-  if (!ffiType->elements) {
-    JS_ReportAllocationOverflow(cx);
+  if (!ffiType->elements)
     return nullptr;
-  }
 
   for (size_t i = 0; i < length; ++i)
     ffiType->elements[i] = ffiBaseType;
   ffiType->elements[length] = nullptr;
 
-  return Move(ffiType);
+  return ffiType;
 }
 
 bool
@@ -6165,8 +6152,7 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
 
       if (!JS_DefineUCProperty(cx, prototype,
              nameChars.twoByteChars(), name->length(),
-             JS_DATA_TO_FUNC_PTR(JSNative, getterObj.get()),
-             JS_DATA_TO_FUNC_PTR(JSNative, setterObj.get()),
+             getterObj, setterObj,
              JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_GETTER | JSPROP_SETTER))
       {
         return false;
@@ -6223,7 +6209,7 @@ StructType::DefineInternal(JSContext* cx, JSObject* typeObj_, JSObject* fieldsOb
   }
 
   // Move the field hash to the heap and store it in the typeObj.
-  FieldInfoHash *heapHash = cx->new_<FieldInfoHash>(mozilla::Move(fields.get()));
+  FieldInfoHash *heapHash = cx->new_<FieldInfoHash>(std::move(fields.get()));
   if (!heapHash) {
     JS_ReportOutOfMemory(cx);
     return false;
@@ -6253,18 +6239,14 @@ StructType::BuildFFIType(JSContext* cx, JSObject* obj)
   size_t structAlign = CType::GetAlignment(obj);
 
   auto ffiType = cx->make_unique<ffi_type>();
-  if (!ffiType) {
-    JS_ReportOutOfMemory(cx);
+  if (!ffiType)
     return nullptr;
-  }
   ffiType->type = FFI_TYPE_STRUCT;
 
   size_t count = len != 0 ? len + 1 : 2;
   auto elements = cx->make_pod_array<ffi_type*>(count);
-  if (!elements) {
-    JS_ReportOutOfMemory(cx);
+  if (!elements)
     return nullptr;
-  }
 
   if (len != 0) {
     elements[len] = nullptr;
@@ -6306,7 +6288,7 @@ StructType::BuildFFIType(JSContext* cx, JSObject* obj)
   ffiType->alignment = structAlign;
 #endif
 
-  return Move(ffiType);
+  return ffiType;
 }
 
 bool
@@ -6900,10 +6882,8 @@ CreateFunctionInfo(JSContext* cx,
                    const HandleValueArray& args)
 {
   FunctionInfo* fninfo(cx->new_<FunctionInfo>());
-  if (!fninfo) {
-    JS_ReportOutOfMemory(cx);
+  if (!fninfo)
     return false;
-  }
 
   // Stash the FunctionInfo in a reserved slot.
   JS_SetReservedSlot(typeObj, SLOT_FNINFO, PrivateValue(fninfo));
@@ -7720,10 +7700,8 @@ CData::Create(JSContext* cx,
   // attach the buffer. since it might not be 2-byte aligned, we need to
   // allocate an aligned space for it and store it there. :(
   char** buffer = cx->new_<char*>();
-  if (!buffer) {
-    JS_ReportOutOfMemory(cx);
+  if (!buffer)
     return nullptr;
-  }
 
   char* data;
   if (!ownResult) {
@@ -8396,7 +8374,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, Value* vp)
                      valCodeType);
   }
 
-  ScopedJSFreePtr<void> cargs(malloc(sizeArg));
+  UniquePtr<void, JS::FreePolicy> cargs(malloc(sizeArg));
 
   if (!ImplicitConvert(cx, valData, objArgType, cargs.get(),
                        ConversionType::Finalizer, &freePointer,
@@ -8411,10 +8389,9 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, Value* vp)
 
   // 4. Prepare buffer for holding return value
 
-  ScopedJSFreePtr<void> rvalue;
+  UniquePtr<void, JS::FreePolicy> rvalue;
   if (CType::GetTypeCode(returnType) != TYPE_void_t) {
-    rvalue = malloc(Align(CType::GetSize(returnType),
-                          sizeof(ffi_arg)));
+    rvalue.reset(malloc(Align(CType::GetSize(returnType), sizeof(ffi_arg))));
   } //Otherwise, simply do not allocate
 
   // 5. Create |objResult|
@@ -8468,18 +8445,18 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, Value* vp)
   }
 
   // 7. Store C information as private
-  ScopedJSFreePtr<CDataFinalizer::Private>
+  UniquePtr<CDataFinalizer::Private, JS::FreePolicy>
     p((CDataFinalizer::Private*)malloc(sizeof(CDataFinalizer::Private)));
 
   memmove(&p->CIF, &funInfoFinalizer->mCIF, sizeof(ffi_cif));
 
-  p->cargs = cargs.forget();
-  p->rvalue = rvalue.forget();
+  p->cargs = cargs.release();
+  p->rvalue = rvalue.release();
   p->cargs_size = sizeArg;
   p->code = code;
 
 
-  JS_SetPrivate(objResult, p.forget());
+  JS_SetPrivate(objResult, p.release());
   args.rval().setObject(*objResult);
   return true;
 }
@@ -8723,10 +8700,8 @@ Int64Base::Construct(JSContext* cx,
 
   // attach the Int64's data
   uint64_t* buffer = cx->new_<uint64_t>(data);
-  if (!buffer) {
-    JS_ReportOutOfMemory(cx);
+  if (!buffer)
     return nullptr;
-  }
 
   JS_SetReservedSlot(result, SLOT_INT64, PrivateValue(buffer));
 

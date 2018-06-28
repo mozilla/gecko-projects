@@ -18,6 +18,7 @@
 #include "imgICache.h"
 #include "imgIContainer.h"
 #include "imgIEncoder.h"
+#include "nsNetUtil.h" // for NS_NewBufferedInputStream
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 #include "nsContentUtils.h"
@@ -48,8 +49,8 @@ public:
                      imgIContainerCallback* aCallback,
                      nsIEventTarget* aCallbackEventTarget)
     : Runnable("ImageDecoderHelper")
-    , mImage(Move(aImage))
-    , mInputStream(Move(aInputStream))
+    , mImage(std::move(aImage))
+    , mInputStream(std::move(aInputStream))
     , mEventTarget(aEventTarget)
     , mCallback(aCallback)
     , mCallbackEventTarget(aCallbackEventTarget)

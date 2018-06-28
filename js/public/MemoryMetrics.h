@@ -711,7 +711,10 @@ struct ZoneStats
     macro(Other,   MallocHeap,  baselineStubsOptimized) \
     macro(Other,   MallocHeap,  cachedCFG) \
     macro(Other,   MallocHeap,  uniqueIdMap) \
-    macro(Other,   MallocHeap,  shapeTables)
+    macro(Other,   MallocHeap,  shapeTables) \
+    macro(Other,   MallocHeap,  compartmentObjects) \
+    macro(Other,   MallocHeap,  crossCompartmentWrappersTables) \
+    macro(Other,   MallocHeap,  compartmentsPrivateData)
 
     ZoneStats()
       : FOR_EACH_SIZE(ZERO_SIZE)
@@ -726,12 +729,12 @@ struct ZoneStats
 
     ZoneStats(ZoneStats&& other)
       : FOR_EACH_SIZE(COPY_OTHER_SIZE)
-        unusedGCThings(mozilla::Move(other.unusedGCThings)),
-        stringInfo(mozilla::Move(other.stringInfo)),
-        shapeInfo(mozilla::Move(other.shapeInfo)),
+        unusedGCThings(std::move(other.unusedGCThings)),
+        stringInfo(std::move(other.stringInfo)),
+        shapeInfo(std::move(other.shapeInfo)),
         extra(other.extra),
         allStrings(other.allStrings),
-        notableStrings(mozilla::Move(other.notableStrings)),
+        notableStrings(std::move(other.notableStrings)),
         isTotals(other.isTotals)
     {
         other.allStrings = nullptr;
@@ -827,12 +830,10 @@ struct RealmStats
     macro(Other,   MallocHeap, innerViewsTable) \
     macro(Other,   MallocHeap, lazyArrayBuffersTable) \
     macro(Other,   MallocHeap, objectMetadataTable) \
-    macro(Other,   MallocHeap, crossCompartmentWrappersTable) \
     macro(Other,   MallocHeap, savedStacksSet) \
     macro(Other,   MallocHeap, varNamesSet) \
     macro(Other,   MallocHeap, nonSyntacticLexicalScopesTable) \
     macro(Other,   MallocHeap, jitRealm) \
-    macro(Other,   MallocHeap, privateData) \
     macro(Other,   MallocHeap, scriptCountsMap)
 
     RealmStats()
@@ -846,10 +847,10 @@ struct RealmStats
 
     RealmStats(RealmStats&& other)
       : FOR_EACH_SIZE(COPY_OTHER_SIZE)
-        classInfo(mozilla::Move(other.classInfo)),
+        classInfo(std::move(other.classInfo)),
         extra(other.extra),
         allClasses(other.allClasses),
-        notableClasses(mozilla::Move(other.notableClasses)),
+        notableClasses(std::move(other.notableClasses)),
         isTotals(other.isTotals)
     {
         other.allClasses = nullptr;

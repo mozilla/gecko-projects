@@ -124,12 +124,12 @@ XULTreeAccessible::Value(nsString& aValue) const
   int32_t currentIndex;
   selection->GetCurrentIndex(&currentIndex);
   if (currentIndex >= 0) {
-    nsCOMPtr<nsITreeColumn> keyCol;
+    RefPtr<nsTreeColumn> keyCol;
 
-    nsCOMPtr<nsITreeColumns> cols;
+    RefPtr<nsTreeColumns> cols;
     mTree->GetColumns(getter_AddRefs(cols));
     if (cols)
-      cols->GetKeyColumn(getter_AddRefs(keyCol));
+      keyCol = cols->GetKeyColumn();
 
     mTreeView->GetCellText(currentIndex, keyCol, aValue);
   }
@@ -166,8 +166,7 @@ XULTreeAccessible::NativeRole() const
     return roles::LIST;
 
   RefPtr<nsTreeColumns> cols = treeFrame->Columns();
-  nsCOMPtr<nsITreeColumn> primaryCol;
-  cols->GetPrimaryColumn(getter_AddRefs(primaryCol));
+  nsTreeColumn* primaryCol = cols->GetPrimaryColumn();
 
   return primaryCol ? roles::OUTLINE : roles::LIST;
 }
@@ -195,7 +194,7 @@ XULTreeAccessible::ChildAtPoint(int32_t aX, int32_t aY,
   int32_t clientY = presContext->DevPixelsToIntCSSPixels(aY) - rootRect.Y();
 
   int32_t row = -1;
-  nsCOMPtr<nsITreeColumn> column;
+  RefPtr<nsTreeColumn> column;
   nsAutoString childEltUnused;
   mTree->GetCellAt(clientX, clientY, &row, getter_AddRefs(column),
                    childEltUnused);
@@ -618,7 +617,7 @@ XULTreeAccessible::TreeViewInvalidated(int32_t aStartRow, int32_t aEndRow,
     endRow = rowCount - 1;
   }
 
-  nsCOMPtr<nsITreeColumns> treeColumns;
+  RefPtr<nsTreeColumns> treeColumns;
   mTree->GetColumns(getter_AddRefs(treeColumns));
   if (!treeColumns)
     return;
@@ -626,12 +625,9 @@ XULTreeAccessible::TreeViewInvalidated(int32_t aStartRow, int32_t aEndRow,
   int32_t endCol = aEndCol;
 
   if (endCol == -1) {
-    int32_t colCount = 0;
-    rv = treeColumns->GetCount(&colCount);
-    if (NS_FAILED(rv))
-      return;
-
-    endCol = colCount - 1;
+    // We need to make sure to cast to int32_t before we do the subtraction, in
+    // case the column count is 0.
+    endCol = static_cast<int32_t>(treeColumns->Count()) - 1;
   }
 
   for (int32_t rowIdx = aStartRow; rowIdx <= endRow; ++rowIdx) {
@@ -728,7 +724,7 @@ XULTreeItemAccessibleBase::BoundsInCSSPixels() const
     return nsIntRect();
   }
 
-  nsCOMPtr<nsITreeColumn> column = nsCoreUtils::GetFirstSensibleColumn(mTree);
+  RefPtr<nsTreeColumn> column = nsCoreUtils::GetFirstSensibleColumn(mTree);
 
   int32_t x = 0, y = 0, width = 0, height = 0;
   nsresult rv = mTree->GetCoordsForCellItem(mRow, column, EmptyString(),
@@ -983,21 +979,21 @@ XULTreeItemAccessibleBase::DispatchClickEvent(nsIContent* aContent,
   if (IsDefunct())
     return;
 
-  nsCOMPtr<nsITreeColumns> columns;
+  RefPtr<nsTreeColumns> columns;
   mTree->GetColumns(getter_AddRefs(columns));
   if (!columns)
     return;
 
   // Get column and pseudo element.
-  nsCOMPtr<nsITreeColumn> column;
+  RefPtr<nsTreeColumn> column;
   nsAutoString pseudoElm;
 
   if (aActionIndex == eAction_Click) {
     // Key column is visible and clickable.
-    columns->GetKeyColumn(getter_AddRefs(column));
+    column = columns->GetKeyColumn();
   } else {
     // Primary column contains a twisty we should click on.
-    columns->GetPrimaryColumn(getter_AddRefs(column));
+    column = columns->GetPrimaryColumn();
     pseudoElm = NS_LITERAL_STRING("twisty");
   }
 
@@ -1028,11 +1024,10 @@ XULTreeItemAccessibleBase::IsExpandable() const
     bool isEmpty = false;
     mTreeView->IsContainerEmpty(mRow, &isEmpty);
     if (!isEmpty) {
-      nsCOMPtr<nsITreeColumns> columns;
+      RefPtr<nsTreeColumns> columns;
       mTree->GetColumns(getter_AddRefs(columns));
-      nsCOMPtr<nsITreeColumn> primaryColumn;
       if (columns) {
-        columns->GetPrimaryColumn(getter_AddRefs(primaryColumn));
+        nsTreeColumn* primaryColumn = columns->GetPrimaryColumn();
         if (primaryColumn &&
             !nsCoreUtils::IsColumnHidden(primaryColumn))
           return true;
@@ -1044,7 +1039,7 @@ XULTreeItemAccessibleBase::IsExpandable() const
 }
 
 void
-XULTreeItemAccessibleBase::GetCellName(nsITreeColumn* aColumn, nsAString& aName) const
+XULTreeItemAccessibleBase::GetCellName(nsTreeColumn* aColumn, nsAString& aName) const
 {
 
   mTreeView->GetCellText(mRow, aColumn, aName);
@@ -1116,15 +1111,14 @@ XULTreeItemAccessible::Shutdown()
 role
 XULTreeItemAccessible::NativeRole() const
 {
-  nsCOMPtr<nsITreeColumns> columns;
+  RefPtr<nsTreeColumns> columns;
   mTree->GetColumns(getter_AddRefs(columns));
   if (!columns) {
     NS_ERROR("No tree columns object in the tree!");
     return roles::NOTHING;
   }
 
-  nsCOMPtr<nsITreeColumn> primaryColumn;
-  columns->GetPrimaryColumn(getter_AddRefs(primaryColumn));
+  nsTreeColumn* primaryColumn = columns->GetPrimaryColumn();
 
   return primaryColumn ? roles::OUTLINEITEM : roles::LISTITEM;
 }

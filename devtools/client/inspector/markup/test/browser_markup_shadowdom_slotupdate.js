@@ -2,11 +2,7 @@
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* import-globals-from helper_shadowdom.js */
-
 "use strict";
-
-loadHelperScript("helper_shadowdom.js");
 
 // Test that slotted elements are correctly updated when the slot attribute is modified
 // on already slotted elements.
@@ -33,7 +29,7 @@ const TEST_URL = `data:text/html;charset=utf-8,
 add_task(async function() {
   await enableWebComponents();
 
-  let {inspector} = await openInspectorForURL(TEST_URL);
+  const {inspector} = await openInspectorForURL(TEST_URL);
 
   const tree = `
     test-component
@@ -48,10 +44,10 @@ add_task(async function() {
       slot1-2
       slot2-1
       slot2-2`;
-  await checkTreeFromRootSelector(tree, "test-component", inspector);
+  await assertMarkupViewAsTree(tree, "test-component", inspector);
 
   info("Listening for the markupmutation event");
-  let mutated = inspector.once("markupmutation");
+  const mutated = inspector.once("markupmutation");
   ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     content.document.getElementById("to-update").setAttribute("slot", "slot1");
   });
@@ -71,5 +67,5 @@ add_task(async function() {
       slot1-2
       slot2-1
       slot2-2`;
-  await checkTreeFromRootSelector(mutatedTree, "test-component", inspector);
+  await assertMarkupViewAsTree(mutatedTree, "test-component", inspector);
 });

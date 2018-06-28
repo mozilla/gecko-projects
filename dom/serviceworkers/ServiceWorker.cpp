@@ -8,6 +8,7 @@
 
 #include "nsIDocument.h"
 #include "nsPIDOMWindow.h"
+#include "ServiceWorkerCloneData.h"
 #include "ServiceWorkerImpl.h"
 #include "ServiceWorkerManager.h"
 #include "ServiceWorkerPrivate.h"
@@ -18,7 +19,6 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ServiceWorkerGlobalScopeBinding.h"
 #include "mozilla/dom/WorkerPrivate.h"
-#include "mozilla/dom/ipc/StructuredCloneData.h"
 
 #ifdef XP_WIN
 #undef PostMessage
@@ -106,7 +106,7 @@ ServiceWorker::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  return ServiceWorkerBinding::Wrap(aCx, this, aGivenProto);
+  return ServiceWorker_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 ServiceWorkerState
@@ -179,13 +179,13 @@ ServiceWorker::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     return;
   }
 
-  ipc::StructuredCloneData data;
-  data.Write(aCx, aMessage, transferable, aRv);
+  RefPtr<ServiceWorkerCloneData> data = new ServiceWorkerCloneData();
+  data->Write(aCx, aMessage, transferable, aRv);
   if (aRv.Failed()) {
     return;
   }
 
-  mInner->PostMessage(Move(data), clientInfo.ref(), clientState.ref());
+  mInner->PostMessage(std::move(data), clientInfo.ref(), clientState.ref());
 }
 
 

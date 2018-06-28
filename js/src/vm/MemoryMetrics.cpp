@@ -17,9 +17,9 @@
 #include "vm/BigIntType.h"
 #endif
 #include "vm/HelperThreads.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/Realm.h"
 #include "vm/Runtime.h"
 #include "vm/Shape.h"
 #include "vm/StringType.h"
@@ -30,7 +30,6 @@
 #include "wasm/WasmModule.h"
 
 using mozilla::MallocSizeOf;
-using mozilla::Move;
 using mozilla::PodCopy;
 
 using namespace js;
@@ -82,24 +81,26 @@ EqualStringsPure(JSString* s1, JSString* s2)
         return false;
 
     const Char1* c1;
-    ScopedJSFreePtr<Char1> ownedChars1;
+    UniquePtr<Char1[], JS::FreePolicy> ownedChars1;
     JS::AutoCheckCannotGC nogc;
     if (s1->isLinear()) {
         c1 = s1->asLinear().chars<Char1>(nogc);
     } else {
-        if (!s1->asRope().copyChars<Char1>(/* tcx */ nullptr, ownedChars1))
+        ownedChars1 = s1->asRope().copyChars<Char1>(/* tcx */ nullptr);
+        if (!ownedChars1)
             MOZ_CRASH("oom");
-        c1 = ownedChars1;
+        c1 = ownedChars1.get();
     }
 
     const Char2* c2;
-    ScopedJSFreePtr<Char2> ownedChars2;
+    UniquePtr<Char2[], JS::FreePolicy> ownedChars2;
     if (s2->isLinear()) {
         c2 = s2->asLinear().chars<Char2>(nogc);
     } else {
-        if (!s2->asRope().copyChars<Char2>(/* tcx */ nullptr, ownedChars2))
+        ownedChars2 = s2->asRope().copyChars<Char2>(/* tcx */ nullptr);
+        if (!ownedChars2)
             MOZ_CRASH("oom");
-        c2 = ownedChars2;
+        c2 = ownedChars2.get();
     }
 
     return EqualChars(c1, c2, s1->length());
@@ -149,14 +150,15 @@ static void
 StoreStringChars(char* buffer, size_t bufferSize, JSString* str)
 {
     const CharT* chars;
-    ScopedJSFreePtr<CharT> ownedChars;
+    UniquePtr<CharT[], JS::FreePolicy> ownedChars;
     JS::AutoCheckCannotGC nogc;
     if (str->isLinear()) {
         chars = str->asLinear().chars<CharT>(nogc);
     } else {
-        if (!str->asRope().copyChars<CharT>(/* tcx */ nullptr, ownedChars))
+        ownedChars = str->asRope().copyChars<CharT>(/* tcx */ nullptr);
+        if (!ownedChars)
             MOZ_CRASH("oom");
-        chars = ownedChars;
+        chars = ownedChars.get();
     }
 
     // We might truncate |str| even if it's much shorter than 1024 chars, if
@@ -182,7 +184,7 @@ NotableStringInfo::NotableStringInfo(JSString* str, const StringInfo& info)
 }
 
 NotableStringInfo::NotableStringInfo(NotableStringInfo&& info)
-  : StringInfo(Move(info)),
+  : StringInfo(std::move(info)),
     length(info.length)
 {
     buffer = info.buffer;
@@ -193,7 +195,7 @@ NotableStringInfo& NotableStringInfo::operator=(NotableStringInfo&& info)
 {
     MOZ_ASSERT(this != &info, "self-move assignment is prohibited");
     this->~NotableStringInfo();
-    new (this) NotableStringInfo(Move(info));
+    new (this) NotableStringInfo(std::move(info));
     return *this;
 }
 
@@ -214,7 +216,7 @@ NotableClassInfo::NotableClassInfo(const char* className, const ClassInfo& info)
 }
 
 NotableClassInfo::NotableClassInfo(NotableClassInfo&& info)
-  : ClassInfo(Move(info))
+  : ClassInfo(std::move(info))
 {
     className_ = info.className_;
     info.className_ = nullptr;
@@ -224,7 +226,7 @@ NotableClassInfo& NotableClassInfo::operator=(NotableClassInfo&& info)
 {
     MOZ_ASSERT(this != &info, "self-move assignment is prohibited");
     this->~NotableClassInfo();
-    new (this) NotableClassInfo(Move(info));
+    new (this) NotableClassInfo(std::move(info));
     return *this;
 }
 
@@ -245,7 +247,7 @@ NotableScriptSourceInfo::NotableScriptSourceInfo(const char* filename, const Scr
 }
 
 NotableScriptSourceInfo::NotableScriptSourceInfo(NotableScriptSourceInfo&& info)
-  : ScriptSourceInfo(Move(info))
+  : ScriptSourceInfo(std::move(info))
 {
     filename_ = info.filename_;
     info.filename_ = nullptr;
@@ -255,7 +257,7 @@ NotableScriptSourceInfo& NotableScriptSourceInfo::operator=(NotableScriptSourceI
 {
     MOZ_ASSERT(this != &info, "self-move assignment is prohibited");
     this->~NotableScriptSourceInfo();
-    new (this) NotableScriptSourceInfo(Move(info));
+    new (this) NotableScriptSourceInfo(std::move(info));
     return *this;
 }
 
@@ -328,7 +330,10 @@ StatsZoneCallback(JSRuntime* rt, void* data, Zone* zone)
                                  &zStats.cachedCFG,
                                  &zStats.uniqueIdMap,
                                  &zStats.shapeTables,
-                                 &rtStats->runtime.atomsMarkBitmaps);
+                                 &rtStats->runtime.atomsMarkBitmaps,
+                                 &zStats.compartmentObjects,
+                                 &zStats.crossCompartmentWrappersTables,
+                                 &zStats.compartmentsPrivateData);
 }
 
 static void
@@ -356,12 +361,10 @@ StatsRealmCallback(JSContext* cx, void* data, Handle<Realm*> realm)
                                   &realmStats.innerViewsTable,
                                   &realmStats.lazyArrayBuffersTable,
                                   &realmStats.objectMetadataTable,
-                                  &realmStats.crossCompartmentWrappersTable,
                                   &realmStats.savedStacksSet,
                                   &realmStats.varNamesSet,
                                   &realmStats.nonSyntacticLexicalScopesTable,
                                   &realmStats.jitRealm,
-                                  &realmStats.privateData,
                                   &realmStats.scriptCountsMap);
 }
 
@@ -461,7 +464,7 @@ StatsCellCallback(JSRuntime* rt, void* data, void* thing, JS::TraceKind traceKin
     switch (traceKind) {
       case JS::TraceKind::Object: {
         JSObject* obj = static_cast<JSObject*>(thing);
-        RealmStats& realmStats = obj->realm()->realmStats();
+        RealmStats& realmStats = obj->maybeCCWRealm()->realmStats();
         JS::ClassInfo info;        // This zeroes all the sizes.
         info.objectsGCHeap += thingSize;
 
@@ -763,7 +766,7 @@ CollectRuntimeStatsHelper(JSContext* cx, RuntimeStats* rtStats, ObjectPrivateVis
                           bool anonymize, IterateCellCallback statsCellCallback)
 {
     JSRuntime* rt = cx->runtime();
-    if (!rtStats->realmStatsVector.reserve(rt->numCompartments))
+    if (!rtStats->realmStatsVector.reserve(rt->numRealms))
         return false;
 
     size_t totalZones = rt->gc.zones().length() + 1; // + 1 for the atoms zone.

@@ -66,7 +66,7 @@ namespace dom {
 
 // Forward declare GetConstructorObject methods.
 #define HTML_TAG(_tag, _classname, _interfacename)                             \
-namespace HTML##_interfacename##ElementBinding {                               \
+namespace HTML##_interfacename##Element_Binding {                               \
   JSObject* GetConstructorObject(JSContext*);                                  \
 }
 #define HTML_OTHER(_tag)
@@ -77,12 +77,12 @@ namespace HTML##_interfacename##ElementBinding {                               \
 typedef JSObject* (*constructorGetterCallback)(JSContext*);
 
 // Mapping of html tag and GetConstructorObject methods.
-#define HTML_TAG(_tag, _classname, _interfacename) HTML##_interfacename##ElementBinding::GetConstructorObject,
+#define HTML_TAG(_tag, _classname, _interfacename) HTML##_interfacename##Element_Binding::GetConstructorObject,
 #define HTML_OTHER(_tag) nullptr,
 // We use eHTMLTag_foo (where foo is the tag) which is defined in nsHTMLTags.h
 // to index into this array.
 static const constructorGetterCallback sConstructorGetterCallback[] = {
-  HTMLUnknownElementBinding::GetConstructorObject,
+  HTMLUnknownElement_Binding::GetConstructorObject,
 #include "nsHTMLTagList.h"
 #undef HTML_TAG
 #undef HTML_OTHER
@@ -184,7 +184,7 @@ struct TErrorResult<CleanupPolicy>::Message {
     return GetErrorArgCount(mErrorNumber) == mArgs.Length();
   }
 
-  bool operator==(const TErrorResult<CleanupPolicy>::Message& aRight)
+  bool operator==(const TErrorResult<CleanupPolicy>::Message& aRight) const
   {
     return mErrorNumber == aRight.mErrorNumber &&
            mArgs == aRight.mArgs;
@@ -341,7 +341,7 @@ struct TErrorResult<CleanupPolicy>::DOMExceptionInfo {
   nsCString mMessage;
   nsresult mRv;
 
-  bool operator==(const TErrorResult<CleanupPolicy>::DOMExceptionInfo& aRight)
+  bool operator==(const TErrorResult<CleanupPolicy>::DOMExceptionInfo& aRight) const
   {
     return mRv == aRight.mRv &&
            mMessage == aRight.mMessage;
@@ -507,6 +507,32 @@ TErrorResult<CleanupPolicy>::operator=(TErrorResult<CleanupPolicy>&& aRHS)
   mResult = aRHS.mResult;
   aRHS.mResult = NS_OK;
   return *this;
+}
+
+template<typename CleanupPolicy>
+bool
+TErrorResult<CleanupPolicy>::operator==(const ErrorResult& aRight) const
+{
+  auto right = reinterpret_cast<const TErrorResult<CleanupPolicy>*>(&aRight);
+
+  if (mResult != right->mResult) {
+    return false;
+  }
+
+  if (IsJSException()) {
+    // js exceptions are always non-equal
+    return false;
+  }
+
+  if (IsErrorWithMessage()) {
+    return *mExtra.mMessage == *right->mExtra.mMessage;
+  }
+
+  if (IsDOMException()) {
+    return *mExtra.mDOMExceptionInfo == *right->mExtra.mDOMExceptionInfo;
+  }
+
+  return true;
 }
 
 template<typename CleanupPolicy>
@@ -2281,8 +2307,8 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg, ErrorResult& aErr
 
   JSAutoRealm oldAr(aCx, oldParent);
 
-  JSCompartment* oldCompartment = js::GetObjectCompartment(oldParent);
-  JSCompartment* newCompartment = js::GetObjectCompartment(newParent);
+  JS::Compartment* oldCompartment = js::GetObjectCompartment(oldParent);
+  JS::Compartment* newCompartment = js::GetObjectCompartment(newParent);
   if (oldCompartment == newCompartment) {
     MOZ_ASSERT(oldParent == newParent);
     return;
@@ -3800,9 +3826,9 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
 
     JS::Rooted<JSObject*> constructor(aCx);
     if (ns == kNameSpaceID_XUL) {
-      constructor = XULElementBinding::GetConstructorObject(aCx);
+      constructor = XULElement_Binding::GetConstructorObject(aCx);
     } else {
-      constructor = HTMLElementBinding::GetConstructorObject(aCx);
+      constructor = HTMLElement_Binding::GetConstructorObject(aCx);
     }
 
     if (!constructor) {
@@ -3833,9 +3859,9 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
           definition->mLocalName == nsGkAtoms::popup ||
           definition->mLocalName == nsGkAtoms::panel ||
           definition->mLocalName == nsGkAtoms::tooltip) {
-        cb = XULPopupElementBinding::GetConstructorObject;
+        cb = XULPopupElement_Binding::GetConstructorObject;
       } else {
-        cb = XULElementBinding::GetConstructorObject;
+        cb = XULElement_Binding::GetConstructorObject;
       }
     }
 
@@ -4010,23 +4036,19 @@ class DeprecationWarningRunnable final : public WorkerProxyToMainThreadRunnable
   nsIDocument::DeprecatedOperations mOperation;
 
 public:
-  DeprecationWarningRunnable(WorkerPrivate* aWorkerPrivate,
-                             nsIDocument::DeprecatedOperations aOperation)
-    : WorkerProxyToMainThreadRunnable(aWorkerPrivate)
-    , mOperation(aOperation)
-  {
-    MOZ_ASSERT(aWorkerPrivate);
-    aWorkerPrivate->AssertIsOnWorkerThread();
-  }
+  explicit DeprecationWarningRunnable(nsIDocument::DeprecatedOperations aOperation)
+    : mOperation(aOperation)
+  {}
 
 private:
   void
-  RunOnMainThread() override
+  RunOnMainThread(WorkerPrivate* aWorkerPrivate) override
   {
     MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(aWorkerPrivate);
 
     // Walk up to our containing page
-    WorkerPrivate* wp = mWorkerPrivate;
+    WorkerPrivate* wp = aWorkerPrivate;
     while (wp->GetParent()) {
       wp = wp->GetParent();
     }
@@ -4038,7 +4060,7 @@ private:
   }
 
   void
-  RunBackOnWorkerThreadForCleanup() override
+  RunBackOnWorkerThreadForCleanup(WorkerPrivate* aWorkerPrivate) override
   {}
 };
 
@@ -4076,8 +4098,8 @@ DeprecationWarning(const GlobalObject& aGlobal,
   }
 
   RefPtr<DeprecationWarningRunnable> runnable =
-    new DeprecationWarningRunnable(workerPrivate, aOperation);
-  runnable->Dispatch();
+    new DeprecationWarningRunnable(aOperation);
+  runnable->Dispatch(workerPrivate);
 }
 
 namespace binding_detail {

@@ -9,6 +9,7 @@
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/ThreadLocal.h"
+#include "mozilla/Unused.h"
 
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
@@ -46,10 +47,11 @@
 #include "jit/ValueNumbering.h"
 #include "jit/WasmBCE.h"
 #include "js/Printf.h"
+#include "js/UniquePtr.h"
 #include "util/Windows.h"
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
-#include "vm/JSCompartment.h"
+#include "vm/Realm.h"
 #include "vm/TraceLogging.h"
 #include "vtune/VTuneWrapper.h"
 
@@ -59,9 +61,9 @@
 #include "jit/shared/Lowering-shared-inl.h"
 #include "vm/Debugger-inl.h"
 #include "vm/EnvironmentObject-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
+#include "vm/Realm-inl.h"
 #include "vm/Stack-inl.h"
 
 #if defined(ANDROID)
@@ -391,7 +393,8 @@ JSContext::freeOsrTempData()
 }
 
 JitRealm::JitRealm()
-  : stubCodes_(nullptr)
+  : stubCodes_(nullptr),
+    stringsCanBeInNursery(false)
 {
 }
 
@@ -582,16 +585,16 @@ jit::LazyLinkTopActivation(JSContext* cx, LazyLinkExitFrameLayout* frame)
 }
 
 /* static */ void
-JitRuntime::Trace(JSTracer* trc, AutoLockForExclusiveAccess& lock)
+JitRuntime::Trace(JSTracer* trc, const AutoAccessAtomsZone& access)
 {
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapMinorCollecting());
+    MOZ_ASSERT(!JS::RuntimeHeapIsMinorCollecting());
 
     // Shared stubs are allocated in the atoms zone, so do not iterate
     // them after the atoms heap after it has been "finished."
     if (trc->runtime()->atomsAreFinished())
         return;
 
-    Zone* zone = trc->runtime()->atomsZone(lock);
+    Zone* zone = trc->runtime()->atomsZone(access);
     for (auto i = zone->cellIter<JitCode>(); !i.done(); i.next()) {
         JitCode* code = i;
         TraceRoot(trc, &code, "wrapper");
@@ -778,7 +781,7 @@ JitCode::traceChildren(JSTracer* trc)
     }
     if (dataRelocTableBytes_) {
         // If we're moving objects, we need writable JIT code.
-        bool movingObjects = JS::CurrentThreadIsHeapMinorCollecting() || zone()->isGCCompacting();
+        bool movingObjects = JS::RuntimeHeapIsMinorCollecting() || zone()->isGCCompacting();
         MaybeAutoWritableJitCode awjc(this, movingObjects ? Reprotect : DontReprotect);
 
         uint8_t* start = code_ + dataRelocTableOffset();
@@ -844,6 +847,7 @@ IonScript::IonScript(IonCompilationId compilationId)
     safepointsStart_(0),
     safepointsSize_(0),
     frameSlots_(0),
+    argumentSlots_(0),
     frameSize_(0),
     bailoutTable_(0),
     bailoutEntries_(0),
@@ -852,10 +856,15 @@ IonScript::IonScript(IonCompilationId compilationId)
     snapshots_(0),
     snapshotsListSize_(0),
     snapshotsRVATableSize_(0),
+    recovers_(0),
+    recoversSize_(0),
     constantTable_(0),
     constantEntries_(0),
+    sharedStubList_(0),
+    sharedStubEntries_(0),
     invalidationCount_(0),
     compilationId_(compilationId),
+    optimizationLevel_(OptimizationLevel::Normal),
     osrPcMismatchCounter_(0),
     fallbackStubSpace_()
 {
@@ -2038,13 +2047,11 @@ IonCompile(JSContext* cx, JSScript* script,
 
     TrackPropertiesForSingletonScopes(cx, script, baselineFrame);
 
-    LifoAlloc* alloc = cx->new_<LifoAlloc>(TempAllocator::PreferredLifoChunkSize);
+    auto alloc = cx->make_unique<LifoAlloc>(TempAllocator::PreferredLifoChunkSize);
     if (!alloc)
         return AbortReason::Alloc;
 
-    ScopedJSDeletePtr<LifoAlloc> autoDelete(alloc);
-
-    TempAllocator* temp = alloc->new_<TempAllocator>(alloc);
+    TempAllocator* temp = alloc->new_<TempAllocator>(alloc.get());
     if (!temp)
         return AbortReason::Alloc;
 
@@ -2177,16 +2184,15 @@ IonCompile(JSContext* cx, JSScript* script,
 
         // The allocator and associated data will be destroyed after being
         // processed in the finishedOffThreadCompilations list.
-        autoDelete.forget();
+        mozilla::Unused << alloc.release();
 
         return AbortReason::NoAbort;
     }
 
     bool succeeded = false;
     {
-        ScopedJSDeletePtr<CodeGenerator> codegen;
         AutoEnterAnalysis enter(cx);
-        codegen = CompileBackEnd(builder);
+        UniquePtr<CodeGenerator> codegen(CompileBackEnd(builder));
         if (!codegen) {
             JitSpew(JitSpew_IonAbort, "Failed during back-end compilation.");
             if (cx->isExceptionPending())
@@ -2194,7 +2200,7 @@ IonCompile(JSContext* cx, JSScript* script,
             return AbortReason::Disable;
         }
 
-        succeeded = LinkCodeGen(cx, builder, codegen);
+        succeeded = LinkCodeGen(cx, builder, codegen.get());
     }
 
     if (succeeded)

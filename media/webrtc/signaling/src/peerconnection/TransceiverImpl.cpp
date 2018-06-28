@@ -69,8 +69,9 @@ TransceiverImpl::TransceiverImpl(
       mMainThread.get(),
       mStsThread.get(),
       IsVideo(),
-      mSendTrack,
       mConduit);
+
+  mTransmitPipeline->SetTrack(mSendTrack);
 }
 
 TransceiverImpl::~TransceiverImpl() = default;
@@ -158,7 +159,7 @@ TransceiverImpl::UpdateSendTrack(dom::MediaStreamTrack* aSendTrack)
   MOZ_MTLOG(ML_DEBUG, mPCHandle << "[" << mMid << "]: " << __FUNCTION__ <<
                       "(" << aSendTrack << ")");
   mSendTrack = aSendTrack;
-  return mTransmitPipeline->ReplaceTrack(mSendTrack);
+  return mTransmitPipeline->SetTrack(mSendTrack);
 }
 
 nsresult
@@ -362,6 +363,12 @@ TransceiverImpl::SyncWithJS(dom::RTCRtpTransceiver& aJsTransceiver,
 {
   MOZ_MTLOG(ML_DEBUG, mPCHandle << "[" << mMid << "]: " << __FUNCTION__
                       << " Syncing with JS transceiver");
+
+  if (!mTransmitPipeline) {
+    // Shutdown_m has already been called, probably due to pc.close(). Just
+    // nod and smile.
+    return;
+  }
 
   // Update stopped, both ways, since either JSEP or JS can stop these
   if (mJsepTransceiver->IsStopped()) {
@@ -602,7 +609,7 @@ bool
 TransceiverImpl::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
                             JS::MutableHandle<JSObject*> aReflector)
 {
-  return dom::TransceiverImplBinding::Wrap(aCx, this, aGivenProto, aReflector);
+  return dom::TransceiverImpl_Binding::Wrap(aCx, this, aGivenProto, aReflector);
 }
 
 already_AddRefed<dom::MediaStreamTrack>

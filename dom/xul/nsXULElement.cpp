@@ -630,7 +630,7 @@ nsXULElement::PerformAccesskey(bool aKeyCausesActivation,
         }
         if (aKeyCausesActivation &&
             !content->IsAnyOfXULElements(nsGkAtoms::textbox, nsGkAtoms::menulist)) {
-          elm->ClickWithInputSource(MouseEventBinding::MOZ_SOURCE_KEYBOARD, aIsTrustedEvent);
+          elm->ClickWithInputSource(MouseEvent_Binding::MOZ_SOURCE_KEYBOARD, aIsTrustedEvent);
         }
     } else {
         return content->PerformAccesskey(aKeyCausesActivation, aIsTrustedEvent);
@@ -765,10 +765,7 @@ nsXULElement::BindToTree(nsIDocument* aDocument,
 
   nsIDocument* doc = GetComposedDoc();
 #ifdef DEBUG
-  if (doc &&
-      !doc->LoadsFullXULStyleSheetUpFront() &&
-      !doc->IsUnstyledDocument()) {
-
+  if (doc && !doc->AllowXULXBL() && !doc->IsUnstyledDocument()) {
     // To save CPU cycles and memory, non-XUL documents only load the user
     // agent style sheet rules for a minimal set of XUL elements such as
     // 'scrollbar' that may be created implicitly for their content (those
@@ -825,103 +822,6 @@ nsXULElement::UnbindFromTree(bool aDeep, bool aNullParent)
     }
 
     nsStyledElement::UnbindFromTree(aDeep, aNullParent);
-}
-
-void
-nsXULElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
-{
-    nsCOMPtr<nsIContent> oldKid = mAttrsAndChildren.GetSafeChildAt(aIndex);
-    if (!oldKid) {
-      return;
-    }
-
-    // On the removal of a <treeitem>, <treechildren>, or <treecell> element,
-    // the possibility exists that some of the items in the removed subtree
-    // are selected (and therefore need to be deselected). We need to account for this.
-    nsCOMPtr<nsIDOMXULMultiSelectControlElement> controlElement;
-    nsCOMPtr<nsIListBoxObject> listBox;
-    bool fireSelectionHandler = false;
-
-    // -1 = do nothing, -2 = null out current item
-    // anything else = index to re-set as current
-    int32_t newCurrentIndex = -1;
-
-    if (oldKid->NodeInfo()->Equals(nsGkAtoms::listitem, kNameSpaceID_XUL)) {
-      // This is the nasty case. We have (potentially) a slew of selected items
-      // and cells going away.
-      // First, retrieve the tree.
-      // Check first whether this element IS the tree
-      controlElement = do_QueryObject(this);
-
-      // If it's not, look at our parent
-      if (!controlElement)
-        GetParentTree(getter_AddRefs(controlElement));
-      nsCOMPtr<nsIContent> controlContent(do_QueryInterface(controlElement));
-      RefPtr<nsXULElement> xulElement = FromNodeOrNull(controlContent);
-
-      if (xulElement) {
-        // Iterate over all of the items and find out if they are contained inside
-        // the removed subtree.
-        int32_t length;
-        controlElement->GetSelectedCount(&length);
-        for (int32_t i = 0; i < length; i++) {
-          nsCOMPtr<nsIDOMXULSelectControlItemElement> item;
-          controlElement->MultiGetSelectedItem(i, getter_AddRefs(item));
-          nsCOMPtr<nsINode> node = do_QueryInterface(item);
-          if (node == oldKid &&
-              NS_SUCCEEDED(controlElement->RemoveItemFromSelection(item))) {
-            length--;
-            i--;
-            fireSelectionHandler = true;
-          }
-        }
-
-        nsCOMPtr<nsIDOMXULSelectControlItemElement> curItem;
-        controlElement->GetCurrentItem(getter_AddRefs(curItem));
-        nsCOMPtr<nsIContent> curNode = do_QueryInterface(curItem);
-        if (curNode && nsContentUtils::ContentIsDescendantOf(curNode, oldKid)) {
-            // Current item going away
-            nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(IgnoreErrors());
-            listBox = do_QueryInterface(box);
-            if (listBox) {
-              listBox->GetIndexOfItem(oldKid->AsElement(), &newCurrentIndex);
-            }
-
-            // If any of this fails, we'll just set the current item to null
-            if (newCurrentIndex == -1)
-              newCurrentIndex = -2;
-        }
-      }
-    }
-
-    nsStyledElement::RemoveChildAt_Deprecated(aIndex, aNotify);
-
-    if (newCurrentIndex == -2) {
-        controlElement->SetCurrentItem(nullptr);
-    } else if (newCurrentIndex > -1) {
-        // Make sure the index is still valid
-        int32_t treeRows;
-        listBox->GetRowCount(&treeRows);
-        if (treeRows > 0) {
-            newCurrentIndex = std::min((treeRows - 1), newCurrentIndex);
-            RefPtr<Element> newCurrentItem;
-            listBox->GetItemAtIndex(newCurrentIndex, getter_AddRefs(newCurrentItem));
-            nsCOMPtr<nsIDOMXULSelectControlItemElement> xulCurItem = do_QueryInterface(newCurrentItem);
-            if (xulCurItem)
-                controlElement->SetCurrentItem(xulCurItem);
-        } else {
-            controlElement->SetCurrentItem(nullptr);
-        }
-    }
-
-    nsIDocument* doc;
-    if (fireSelectionHandler && (doc = GetComposedDoc())) {
-      nsContentUtils::DispatchTrustedEvent(doc,
-                                           static_cast<nsIContent*>(this),
-                                           NS_LITERAL_STRING("select"),
-                                           false,
-                                           true);
-    }
 }
 
 void
@@ -1011,8 +911,8 @@ nsXULElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
       nsContentUtils::DispatchTrustedEvent(doc,
                                            static_cast<nsIContent*>(this),
                                            NS_LITERAL_STRING("select"),
-                                           false,
-                                           true);
+                                           CanBubble::eNo,
+                                           Cancelable::eYes);
     }
 }
 
@@ -1316,7 +1216,7 @@ nsXULElement::DispatchXULCommand(const EventChainVisitor& aVisitor,
         // sourceEvent will be the original command event that we're
         // handling.
         RefPtr<Event> event = aVisitor.mDOMEvent;
-        uint16_t inputSource = MouseEventBinding::MOZ_SOURCE_UNKNOWN;
+        uint16_t inputSource = MouseEvent_Binding::MOZ_SOURCE_UNKNOWN;
         while (event) {
             NS_ENSURE_STATE(event->GetOriginalTarget() != commandElt);
             RefPtr<XULCommandEvent> commandEvent = event->AsXULCommandEvent();
@@ -1405,8 +1305,8 @@ nsXULElement::GetAttributeChangeHint(const nsAtom* aAttribute,
     nsChangeHint retval(nsChangeHint(0));
 
     if (aAttribute == nsGkAtoms::value &&
-        (aModType == MutationEventBinding::REMOVAL ||
-         aModType == MutationEventBinding::ADDITION)) {
+        (aModType == MutationEvent_Binding::REMOVAL ||
+         aModType == MutationEvent_Binding::ADDITION)) {
       if (IsAnyOfXULElements(nsGkAtoms::label, nsGkAtoms::description))
         // Label and description dynamically morph between a normal
         // block and a cropping single-line XUL text frame.  If the
@@ -1498,7 +1398,7 @@ nsXULElement::LoadSrc()
 
         (new AsyncEventDispatcher(this,
                                   NS_LITERAL_STRING("XULFrameLoaderCreated"),
-                                  /* aBubbles */ true))->RunDOMEventWhenSafe();
+                                  CanBubble::eYes))->RunDOMEventWhenSafe();
     }
 
     frameLoader->LoadFrame(false);
@@ -1605,7 +1505,7 @@ nsXULElement::GetParentTree(nsIDOMXULMultiSelectControlElement** aTreeElement)
 void
 nsXULElement::Click(CallerType aCallerType)
 {
-  ClickWithInputSource(MouseEventBinding::MOZ_SOURCE_UNKNOWN,
+  ClickWithInputSource(MouseEvent_Binding::MOZ_SOURCE_UNKNOWN,
                        aCallerType == CallerType::System);
 }
 
@@ -1974,7 +1874,7 @@ nsXULElement::IsEventAttributeNameInternal(nsAtom *aName)
 JSObject*
 nsXULElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-    return dom::XULElementBinding::Wrap(aCx, this, aGivenProto);
+    return dom::XULElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULPrototypeNode)

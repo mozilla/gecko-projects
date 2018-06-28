@@ -28,6 +28,7 @@
   grid-template-columns: 1fr auto;
   grid-column-gap: 10px;
   padding: 10px 20px;
+  overflow: auto;
 }
 
 #font-container .theme-twisty {
@@ -76,11 +77,21 @@
   color: transparent;
 }
 
-.font-name {
-  margin: 0;
-  font-size: 1.2em;
+.font-name,
+.font-family-name {
   font-weight: normal;
   white-space: nowrap;
+}
+
+.font-name {
+  margin-bottom: 0.6em;
+  font-size: 1em;
+  color: var(--grey-50);
+}
+
+.font-family-name {
+  margin-bottom: 0.2em;
+  font-size: 1.2em;
 }
 
 .font-css-code {
@@ -91,7 +102,7 @@
   color: var(--theme-toolbar-color);
   grid-column: span 2;
   position: relative;
-  offset-inline-start: -4px;
+  inset-inline-start: -4px;
 }
 
 .font-css-code-expander::before {
@@ -143,6 +154,17 @@
   min-width: 80px;
   margin-right: 10px;
   -moz-user-select: none;
+}
+
+.font-family-unused-header {
+  -moz-user-select: none;
+  margin-bottom: .7em;
+  cursor: pointer;
+}
+
+.font-family-unused {
+  margin-bottom: .3em;
+  color: var(--grey-50);
 }
 
 .font-instance-select:active{

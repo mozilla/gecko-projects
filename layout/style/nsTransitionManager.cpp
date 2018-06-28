@@ -41,6 +41,7 @@ using mozilla::TimeDuration;
 using mozilla::dom::Animation;
 using mozilla::dom::AnimationPlayState;
 using mozilla::dom::CSSTransition;
+using mozilla::dom::Nullable;
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -118,7 +119,7 @@ ElementPropertyTransition::UpdateStartValueFromReplacedTransition()
     if (startValue.mServo) {
       mKeyframes[0].mPropertyValues[0].mServoDeclarationBlock =
         Servo_AnimationValue_Uncompute(startValue.mServo).Consume();
-      mProperties[0].mSegments[0].mFromValue = Move(startValue);
+      mProperties[0].mSegments[0].mFromValue = std::move(startValue);
     }
   }
 
@@ -130,7 +131,7 @@ ElementPropertyTransition::UpdateStartValueFromReplacedTransition()
 JSObject*
 CSSTransition::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return dom::CSSTransitionBinding::Wrap(aCx, this, aGivenProto);
+  return dom::CSSTransition_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void
@@ -321,7 +322,7 @@ CSSTransition::QueueEvents(const StickyTimeDuration& aActiveTime)
   mPreviousTransitionPhase = currentPhase;
 
   if (!events.IsEmpty()) {
-    presContext->AnimationEventDispatcher()->QueueEvents(Move(events));
+    presContext->AnimationEventDispatcher()->QueueEvents(std::move(events));
   }
 }
 
@@ -489,6 +490,9 @@ nsTransitionManager::DoUpdateTransitions(
       for (nsCSSPropertyID p = nsCSSPropertyID(0);
            p < eCSSProperty_COUNT_no_shorthands;
            p = nsCSSPropertyID(p + 1)) {
+        if (!nsCSSProps::IsEnabled(p, CSSEnabledState::eForAllContent)) {
+          continue;
+        }
         startedAny |=
           ConsiderInitiatingTransition(p, aDisp, i, aElement, aPseudoType,
                                        aElementTransitions,
@@ -606,7 +610,7 @@ AppendKeyframe(double aOffset,
     RefPtr<RawServoDeclarationBlock> decl =
       Servo_AnimationValue_Uncompute(aValue.mServo).Consume();
     frame.mPropertyValues.AppendElement(
-      Move(PropertyValuePair(aProperty, Move(decl))));
+      PropertyValuePair(aProperty, std::move(decl)));
   } else {
     MOZ_CRASH("old style system disabled");
   }
@@ -621,14 +625,14 @@ GetTransitionKeyframes(nsCSSPropertyID aProperty,
 {
   nsTArray<Keyframe> keyframes(2);
 
-  Keyframe& fromFrame = AppendKeyframe(0.0, aProperty, Move(aStartValue),
+  Keyframe& fromFrame = AppendKeyframe(0.0, aProperty, std::move(aStartValue),
                                        keyframes);
   if (aTimingFunction.mType != nsTimingFunction::Type::Linear) {
     fromFrame.mTimingFunction.emplace();
     fromFrame.mTimingFunction->Init(aTimingFunction);
   }
 
-  AppendKeyframe(1.0, aProperty, Move(aEndValue), keyframes);
+  AppendKeyframe(1.0, aProperty, std::move(aEndValue), keyframes);
 
   return keyframes;
 }
@@ -665,13 +669,6 @@ nsTransitionManager::ConsiderInitiatingTransition(
   }
 
   aPropertiesChecked.AddProperty(aProperty);
-
-  // Ignore disabled properties. We can arrive here if the transition-property
-  // is 'all' and the disabled property has a default value which derives value
-  // from another property, e.g. color.
-  if (!nsCSSProps::IsEnabled(aProperty, CSSEnabledState::eForAllContent)) {
-    return false;
-  }
 
   if (!IsTransitionable(aProperty)) {
     return false;
@@ -833,7 +830,7 @@ nsTransitionManager::ConsiderInitiatingTransition(
                                   effectOptions);
 
   pt->SetKeyframes(GetTransitionKeyframes(aProperty,
-                                          Move(startValue), Move(endValue), tf),
+                                          std::move(startValue), std::move(endValue), tf),
                    &aNewStyle);
 
   RefPtr<CSSTransition> animation =

@@ -374,14 +374,12 @@ function ReadTests() {
             });
         } else if (manifests) {
             // Parse reftest manifests
-            // XXX There is a race condition in the manifest parsing code which
-            // sometimes shows up on Android jsreftests (bug 1416125). It seems
-            // adding/removing log statements can change its frequency.
             logger.debug("Reading " + manifests.length + " manifests");
             manifests = JSON.parse(manifests);
             g.urlsFilterRegex = manifests[null];
 
             var globalFilter = manifests.hasOwnProperty("") ? new RegExp(manifests[""]) : null;
+            delete manifests[""];
             var manifestURLs = Object.keys(manifests);
 
             // Ensure we read manifests from higher up the directory tree first so that we
@@ -1510,9 +1508,6 @@ function RecvLog(type, msg)
         TestBuffer(msg);
     } else if (type == "warning") {
         logger.warning(msg);
-    } else if (type == "error") {
-        logger.error("REFTEST TEST-UNEXPECTED-FAIL | " + g.currentURL + " | " + msg + "\n");
-        ++g.testResults.Exception;
     } else {
         logger.error("REFTEST TEST-UNEXPECTED-FAIL | " + g.currentURL + " | unknown log type " + type + "\n");
         ++g.testResults.Exception;

@@ -594,7 +594,7 @@
                         aliases.append(alias)
             %>
             % if aliases:
-            #[css(aliases = "${','.join(aliases)}")]
+            #[parse(aliases = "${','.join(aliases)}")]
             % endif
             % endif
             ${to_camel_case(variant)},
@@ -809,8 +809,10 @@
         use values::generics::rect::Rect;
         use values::specified;
 
-        pub fn parse_value<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                                   -> Result<Longhands, ParseError<'i>> {
+        pub fn parse_value<'i, 't>(
+            context: &ParserContext,
+            input: &mut Parser<'i, 't>,
+        ) -> Result<Longhands, ParseError<'i>> {
             let rect = Rect::parse_with(context, input, |_c, i| {
             % if allow_quirks:
                 ${parser_function}_quirky(_c, i, specified::AllowQuirks::Yes)
@@ -854,7 +856,7 @@
         elif len(maybe_size) == 1:
             size = maybe_size[0]
         def phys_ident(side, phy_side):
-            return to_rust_ident(name.replace(side, phy_side).replace("offset-", ""))
+            return to_rust_ident(name.replace(side, phy_side).replace("inset-", ""))
     %>
     % if side is not None:
         use logical_geometry::PhysicalSide;

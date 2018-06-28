@@ -32,8 +32,8 @@ using namespace mozilla::gfx;
 namespace mozilla {
 namespace dom {
 
-using namespace SVGPreserveAspectRatioBinding;
-using namespace SVGSVGElementBinding;
+using namespace SVGPreserveAspectRatio_Binding;
+using namespace SVGSVGElement_Binding;
 
 nsSVGEnumMapping SVGSVGElement::sZoomAndPanMap[] = {
   {&nsGkAtoms::disable, SVG_ZOOMANDPAN_DISABLE},
@@ -102,7 +102,7 @@ DOMSVGTranslatePoint::MatrixTransform(SVGMatrix& matrix)
 JSObject*
 SVGSVGElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGSVGElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGSVGElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 //----------------------------------------------------------------------
@@ -494,15 +494,6 @@ SVGSVGElement::BindToTree(nsIDocument* aDocument,
                                               aBindingParent,
                                               aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv,rv);
-
-  nsIDocument* doc = GetComposedDoc();
-  if (doc) {
-    // Setup the style sheet during binding, not element construction,
-    // because we could move the root SVG element from the document
-    // that created it to another document.
-    auto cache = nsLayoutStylesheetCache::Singleton();
-    doc->EnsureOnDemandBuiltInUASheet(cache->SVGSheet());
-  }
 
   if (mTimedDocumentRoot && smilController) {
     rv = mTimedDocumentRoot->SetParent(smilController);

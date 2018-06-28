@@ -31,7 +31,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/IntegerRange.h"
-#include "nsHostObjectProtocolHandler.h"
+#include "mozilla/dom/FontTableURIProtocolHandler.h"
 #include "nsITimer.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
@@ -1347,7 +1347,7 @@ nsRefreshDriver::EnsureTimerStarted(EnsureTimerStartedFlags aFlags)
     // XXXdholbert Exclude SVG-in-opentype fonts from this optimization, until
     // they receive refresh-driver ticks from their client docs (bug 1107252).
     nsIURI* uri = mPresContext->Document()->GetDocumentURI();
-    if (!uri || !IsFontTableURI(uri)) {
+    if (!uri || !mozilla::dom::IsFontTableURI(uri)) {
       MOZ_ASSERT(!mActiveTimer,
                  "image doc refresh driver should never have its own timer");
       return;
@@ -1581,7 +1581,7 @@ void
 nsRefreshDriver::DispatchPendingEvents()
 {
   // Swap out the current pending events
-  nsTArray<PendingEvent> pendingEvents(Move(mPendingEvents));
+  nsTArray<PendingEvent> pendingEvents(std::move(mPendingEvents));
   for (PendingEvent& event : pendingEvents) {
     event.mTarget->DispatchEvent(*event.mEvent);
   }
@@ -1763,7 +1763,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     return;
   }
 
-  AUTO_PROFILER_LABEL("nsRefreshDriver::Tick", GRAPHICS);
+  AUTO_PROFILER_LABEL("nsRefreshDriver::Tick", LAYOUT);
 
   // We're either frozen or we were disconnected (likely in the middle
   // of a tick iteration).  Just do nothing here, since our

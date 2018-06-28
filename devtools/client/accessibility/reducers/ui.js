@@ -3,8 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-/* global gToolbox */
-
 const {
   ENABLE,
   DISABLE,
@@ -76,8 +74,8 @@ function onUnhighlight(state) {
 }
 
 function updateExpandedNodes(state, ancestry) {
-  let expanded = new Set(state.expanded);
-  let path = ancestry.reduceRight((accPath, { accessible }) => {
+  const expanded = new Set(state.expanded);
+  const path = ancestry.reduceRight((accPath, { accessible }) => {
     accPath = TreeView.subPath(accPath, accessible.actorID);
     expanded.add(accPath);
     return accPath;
@@ -92,7 +90,7 @@ function onHighlight(state, { accessible, response: ancestry, error }) {
     return state;
   }
 
-  let { expanded } = updateExpandedNodes(state, ancestry);
+  const { expanded } = updateExpandedNodes(state, ancestry);
   return Object.assign({}, state, { expanded, highlighted: accessible });
 }
 
@@ -102,8 +100,8 @@ function onSelect(state, { accessible, response: ancestry, error }) {
     return state;
   }
 
-  let { path, expanded } = updateExpandedNodes(state, ancestry);
-  let selected = TreeView.subPath(path, accessible.actorID);
+  const { path, expanded } = updateExpandedNodes(state, ancestry);
+  const selected = TreeView.subPath(path, accessible.actorID);
 
   return Object.assign({}, state, { expanded, selected });
 }
@@ -135,8 +133,7 @@ function onCanBeEnabledChange(state, { canBeEnabled }) {
  * @return {Object}  updated state
  */
 function onReset(state, { accessibility }) {
-  let { enabled, canBeDisabled, canBeEnabled } = accessibility;
-  toggleHighlightTool(enabled);
+  const { enabled, canBeDisabled, canBeEnabled } = accessibility;
   return Object.assign({}, state, { enabled, canBeDisabled, canBeEnabled });
 }
 
@@ -153,16 +150,7 @@ function onToggle(state, { error }, enabled) {
     return state;
   }
 
-  toggleHighlightTool(enabled);
   return Object.assign({}, state, { enabled });
-}
-
-function toggleHighlightTool(enabled) {
-  if (enabled) {
-    gToolbox.highlightTool("accessibility");
-  } else {
-    gToolbox.unhighlightTool("accessibility");
-  }
 }
 
 exports.ui = ui;

@@ -191,7 +191,7 @@ bool
 WorkerGlobalScope::IsSecureContext() const
 {
   bool globalSecure =
-    JS_GetIsSecureContext(js::GetObjectCompartment(GetWrapperPreserveColor()));
+    JS::GetIsSecureContext(js::GetNonCCWObjectRealm(GetWrapperPreserveColor()));
   MOZ_ASSERT(globalSecure == mWorkerPrivate->IsSecureContext());
   return globalSecure;
 }
@@ -521,7 +521,7 @@ nsresult
 WorkerGlobalScope::Dispatch(TaskCategory aCategory,
                             already_AddRefed<nsIRunnable>&& aRunnable)
 {
-  return EventTargetFor(aCategory)->Dispatch(Move(aRunnable),
+  return EventTargetFor(aCategory)->Dispatch(std::move(aRunnable),
                                              NS_DISPATCH_NORMAL);
 }
 
@@ -548,7 +548,7 @@ WorkerGlobalScope::GetClientState() const
 {
   Maybe<ClientState> state;
   state.emplace(mWorkerPrivate->GetClientState());
-  return Move(state);
+  return state;
 }
 
 Maybe<ServiceWorkerDescriptor>
@@ -616,7 +616,7 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   JS::RealmCreationOptions& creationOptions = options.creationOptions();
   creationOptions.setSharedMemoryAndAtomicsEnabled(sharedMemoryEnabled);
 
-  return DedicatedWorkerGlobalScopeBinding::Wrap(aCx, this, this,
+  return DedicatedWorkerGlobalScope_Binding::Wrap(aCx, this, this,
                                                  options,
                                                  GetWorkerPrincipal(),
                                                  true, aReflector);
@@ -655,7 +655,7 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   JS::RealmOptions options;
   mWorkerPrivate->CopyJSRealmOptions(options);
 
-  return SharedWorkerGlobalScopeBinding::Wrap(aCx, this, this, options,
+  return SharedWorkerGlobalScope_Binding::Wrap(aCx, this, this, options,
                                               GetWorkerPrincipal(),
                                               true, aReflector);
 }
@@ -701,7 +701,7 @@ ServiceWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   JS::RealmOptions options;
   mWorkerPrivate->CopyJSRealmOptions(options);
 
-  return ServiceWorkerGlobalScopeBinding::Wrap(aCx, this, this, options,
+  return ServiceWorkerGlobalScope_Binding::Wrap(aCx, this, this, options,
                                                GetWorkerPrincipal(),
                                                true, aReflector);
 }
@@ -957,7 +957,7 @@ WorkerDebuggerGlobalScope::WrapGlobalObject(JSContext* aCx,
   JS::RealmOptions options;
   mWorkerPrivate->CopyJSRealmOptions(options);
 
-  return WorkerDebuggerGlobalScopeBinding::Wrap(aCx, this, this, options,
+  return WorkerDebuggerGlobalScope_Binding::Wrap(aCx, this, this, options,
                                                 GetWorkerPrincipal(), true,
                                                 aReflector);
 }
@@ -1134,7 +1134,7 @@ nsresult
 WorkerDebuggerGlobalScope::Dispatch(TaskCategory aCategory,
                                     already_AddRefed<nsIRunnable>&& aRunnable)
 {
-  return EventTargetFor(aCategory)->Dispatch(Move(aRunnable),
+  return EventTargetFor(aCategory)->Dispatch(std::move(aRunnable),
                                              NS_DISPATCH_NORMAL);
 }
 

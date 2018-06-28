@@ -586,7 +586,7 @@ load 1039454-1.html
 load 1042489.html
 load 1054010-1.html
 load 1058954-1.html
-pref(dom.webcomponents.shadowdom.enabled,true) pref(dom.webcomponents.customelements.enabled,true) load 1059138-1.html
+skip-if(verify&&isDebugBuild&&(gtkWidget||OSX)) pref(dom.webcomponents.shadowdom.enabled,true) pref(dom.webcomponents.customelements.enabled,true) load 1059138-1.html
 load 1134531.html
 load 1134667.html
 load 1137723-1.html
@@ -676,6 +676,7 @@ load 1401709.html
 load 1401807.html
 load 1404222-empty-shape.html
 load 1405443.html
+load 1406252-1.html
 load 1415185.html
 load 1416544.html
 load 1427824.html
@@ -688,3 +689,4 @@ load 1460158-2.html
 load 1460158-3.html
 load 1461039.html
 load 1461979-1.html
+load 1467239.html

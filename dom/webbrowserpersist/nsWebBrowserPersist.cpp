@@ -619,11 +619,7 @@ nsWebBrowserPersist::SerializeNextFile()
             }
 
             // Make a URI to save the data to.
-            nsCOMPtr<nsIURI> fileAsURI;
-            rv = data->mDataPath->Clone(getter_AddRefs(fileAsURI));
-            if (NS_WARN_IF(NS_FAILED(rv))) {
-                break;
-            }
+            nsCOMPtr<nsIURI> fileAsURI = data->mDataPath;
             rv = AppendPathToURI(fileAsURI, data->mFilename, fileAsURI);
             if (NS_WARN_IF(NS_FAILED(rv))) {
                 break;
@@ -1799,7 +1795,7 @@ nsWebBrowserPersist::FinishSaveDocumentInternal(nsIURI* aFile,
           "nsWebBrowserPersist::FinishSaveDocumentInternal",
           this,
           saveMethod,
-          mozilla::Move(toWalk));
+          std::move(toWalk));
         NS_DispatchToCurrentThread(saveLater);
     } else {
         // Done walking DOMs; on to the serialization phase.
@@ -2528,11 +2524,9 @@ nsWebBrowserPersist::URIData::GetLocalURI(nsIURI *targetBaseURI, nsCString& aSpe
     nsresult rv;
     nsCOMPtr<nsIURI> fileAsURI;
     if (mFile) {
-        rv = mFile->Clone(getter_AddRefs(fileAsURI));
-        NS_ENSURE_SUCCESS(rv, rv);
+        fileAsURI = mFile;
     } else {
-        rv = mDataPath->Clone(getter_AddRefs(fileAsURI));
-        NS_ENSURE_SUCCESS(rv, rv);
+        fileAsURI = mDataPath;
         rv = AppendPathToURI(fileAsURI, mFilename, fileAsURI);
         NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -2655,16 +2649,12 @@ nsWebBrowserPersist::SaveSubframeContent(
     filenameWithExt.Append(aData->mSubFrameExt);
 
     // Work out the path for the subframe
-    nsCOMPtr<nsIURI> frameURI;
-    rv = mCurrentDataPath->Clone(getter_AddRefs(frameURI));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIURI> frameURI = mCurrentDataPath;
     rv = AppendPathToURI(frameURI, filenameWithExt, frameURI);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Work out the path for the subframe data
-    nsCOMPtr<nsIURI> frameDataURI;
-    rv = mCurrentDataPath->Clone(getter_AddRefs(frameDataURI));
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIURI> frameDataURI = mCurrentDataPath;
     nsAutoString newFrameDataPath(aData->mFilename);
 
     // Append _data
@@ -2691,7 +2681,7 @@ nsWebBrowserPersist::SaveSubframeContent(
         toWalk->mDocument = aFrameContent;
         toWalk->mFile = frameURI;
         toWalk->mDataPath = frameDataURI;
-        mWalkStack.AppendElement(mozilla::Move(toWalk));
+        mWalkStack.AppendElement(std::move(toWalk));
     } else {
         rv = StoreURI(aURISpec.get());
     }

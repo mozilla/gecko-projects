@@ -1027,7 +1027,7 @@ AddLengthProperty(JSContext* cx, HandleArrayObject obj)
 
     return NativeObject::addAccessorProperty(cx, obj, lengthId,
                                              array_length_getter, array_length_setter,
-                                             JSPROP_PERMANENT | JSPROP_SHADOWABLE);
+                                             JSPROP_PERMANENT);
 }
 
 static bool
@@ -3553,10 +3553,9 @@ static const JSFunctionSpec array_methods[] = {
     /* ES7 additions */
     JS_SELF_HOSTED_FN("includes",    "ArrayIncludes",    2,0),
 
-#ifdef NIGHTLY_BUILD
+    /* Future additions */
     JS_SELF_HOSTED_FN("flatMap",     "ArrayFlatMap",     1,0),
     JS_SELF_HOSTED_FN("flat",        "ArrayFlat",        0,0),
-#endif
 
     JS_FS_END
 };
@@ -4188,16 +4187,8 @@ js::ArraySpeciesLookup::initialize(JSContext* cx)
 void
 js::ArraySpeciesLookup::reset()
 {
+    JS_POISON(this, 0xBB, sizeof(this), MemCheckKind::MakeUndefined);
     state_ = State::Uninitialized;
-    arrayProto_ = nullptr;
-    arrayConstructor_ = nullptr;
-    arrayConstructorShape_ = nullptr;
-#ifdef DEBUG
-    arraySpeciesShape_ = nullptr;
-    canonicalSpeciesFunc_ = nullptr;
-#endif
-    arrayProtoShape_ = nullptr;
-    arrayProtoConstructorSlot_ = -1;
 }
 
 bool

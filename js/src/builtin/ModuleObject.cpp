@@ -1140,7 +1140,7 @@ ModuleObject::createNamespace(JSContext* cx, HandleModuleObject self, HandleObje
         return nullptr;
     }
 
-    auto ns = ModuleNamespaceObject::create(cx, self, exports, Move(bindings));
+    auto ns = ModuleNamespaceObject::create(cx, self, exports, std::move(bindings));
     if (!ns)
         return nullptr;
 
@@ -1490,14 +1490,21 @@ ModuleBuilder::processExportObjectBinding(frontend::ParseNode* pn)
     for (ParseNode* node = pn->pn_head; node; node = node->pn_next) {
         MOZ_ASSERT(node->isKind(ParseNodeKind::MutateProto) ||
                    node->isKind(ParseNodeKind::Colon) ||
-                   node->isKind(ParseNodeKind::Shorthand));
+                   node->isKind(ParseNodeKind::Shorthand) ||
+                   node->isKind(ParseNodeKind::Spread));
 
-        ParseNode* target = node->isKind(ParseNodeKind::MutateProto)
-            ? node->pn_kid
-            : node->pn_right;
+        ParseNode* target;
+        if (node->isKind(ParseNodeKind::Spread)) {
+            target = node->pn_kid;
+        } else {
+            if (node->isKind(ParseNodeKind::MutateProto))
+                target = node->pn_kid;
+            else
+                target = node->pn_right;
 
-        if (target->isKind(ParseNodeKind::Assign))
-            target = target->pn_left;
+            if (target->isKind(ParseNodeKind::Assign))
+                target = target->pn_left;
+        }
 
         if (!processExportBinding(target))
             return false;
@@ -1655,7 +1662,11 @@ js::GetOrCreateModuleMetaObject(JSContext* cx, HandleObject moduleArg)
         return nullptr;
 
     JS::ModuleMetadataHook func = cx->runtime()->moduleMetadataHook;
-    MOZ_ASSERT(func);
+    if (!func) {
+        JS_ReportErrorASCII(cx, "Module metadata hook not set");
+        return nullptr;
+    }
+
     if (!func(cx, module, metaObject))
         return nullptr;
 

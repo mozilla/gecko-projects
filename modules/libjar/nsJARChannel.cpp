@@ -464,16 +464,7 @@ nsJARChannel::OpenLocalFile()
         return rv;
     }
 
-    // clone mJarURI
-    nsCOMPtr<nsIURI> clonedURI;
-    rv = mJarURI->Clone(getter_AddRefs(clonedURI));
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-    }
-    nsCOMPtr<nsIJARURI> clonedJarURI = do_QueryInterface(clonedURI, &rv);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-    }
+    nsCOMPtr<nsIJARURI> localJARURI = mJarURI;
 
     nsAutoCString jarEntry(mJarEntry);
     nsAutoCString innerJarEntry(mInnerJarEntry);
@@ -484,7 +475,7 @@ nsJARChannel::OpenLocalFile()
                                    [self,
                                    jarCache,
                                    clonedFile,
-                                   clonedJarURI,
+                                   localJARURI,
                                    jarEntry,
                                    innerJarEntry] () mutable {
 
@@ -492,12 +483,9 @@ nsJARChannel::OpenLocalFile()
         nsresult rv = CreateLocalJarInput(jarCache,
                                           clonedFile,
                                           innerJarEntry,
-                                          clonedJarURI,
+                                          localJARURI,
                                           jarEntry,
                                           getter_AddRefs(input));
-
-        NS_ReleaseOnMainThreadSystemGroup("nsJARChannel::clonedJarURI",
-                                          clonedJarURI.forget());
 
         nsCOMPtr<nsIRunnable> target;
         if (NS_SUCCEEDED(rv)) {
@@ -943,7 +931,7 @@ nsJARChannel::Open(nsIInputStream **stream)
 
     // If mJarFile was not set by LookupFile, we can't open a channel.
     if (!mJarFile) {
-        NS_NOTREACHED("only file-backed jars are supported");
+        MOZ_ASSERT_UNREACHABLE("only file-backed jars are supported");
         return NS_ERROR_NOT_IMPLEMENTED;
     }
 

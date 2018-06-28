@@ -184,6 +184,9 @@ ViewportFrame::BuildDisplayListForTopLayer(nsDisplayListBuilder* aBuilder,
   if (nsCanvasFrame* canvasFrame = shell->GetCanvasFrame()) {
     if (Element* container = canvasFrame->GetCustomContentContainer()) {
       if (nsIFrame* frame = container->GetPrimaryFrame()) {
+        MOZ_ASSERT(frame->StyleDisplay()->mTopLayer != NS_STYLE_TOP_LAYER_NONE,
+                   "ua.css should ensure this");
+        MOZ_ASSERT(frame->GetStateBits() & NS_FRAME_OUT_OF_FLOW);
         BuildDisplayListForTopLayerFrame(aBuilder, frame, aList);
       }
     }

@@ -116,7 +116,7 @@ XPathEvaluator::CreateExpression(const nsAString & aExpression,
         return nullptr;
     }
 
-    return new XPathExpression(Move(expression), mRecycler, aDocument);
+    return new XPathExpression(std::move(expression), mRecycler, aDocument);
 }
 
 bool
@@ -124,7 +124,7 @@ XPathEvaluator::WrapObject(JSContext* aCx,
                            JS::Handle<JSObject*> aGivenProto,
                            JS::MutableHandle<JSObject*> aReflector)
 {
-    return dom::XPathEvaluatorBinding::Wrap(aCx, this, aGivenProto, aReflector);
+    return dom::XPathEvaluator_Binding::Wrap(aCx, this, aGivenProto, aReflector);
 }
 
 /* static */ XPathEvaluator*

@@ -110,7 +110,7 @@ public:
     // HRTFDatabaseLoader needs to be fetched on the main thread.
     already_AddRefed<HRTFDatabaseLoader> loader =
       HRTFDatabaseLoader::createAndLoadAsynchronouslyIfNecessary(NodeMainThread()->Context()->SampleRate());
-    mHRTFPanner = new HRTFPanner(NodeMainThread()->Context()->SampleRate(), Move(loader));
+    mHRTFPanner = new HRTFPanner(NodeMainThread()->Context()->SampleRate(), std::move(loader));
   }
 
   void SetInt32Parameter(uint32_t aIndex, int32_t aParam) override
@@ -125,7 +125,7 @@ public:
           mPanningModelFunction = &PannerNodeEngine::HRTFPanningFunction;
           break;
         default:
-          NS_NOTREACHED("We should never see the alternate names here");
+          MOZ_ASSERT_UNREACHABLE("We should never see alternate names here");
           break;
       }
       break;
@@ -141,7 +141,7 @@ public:
           mDistanceModelFunction = &PannerNodeEngine::ExponentialGainFunction;
           break;
         default:
-          NS_NOTREACHED("We should never see the alternate names here");
+          MOZ_ASSERT_UNREACHABLE("We should never see alternate names here");
           break;
       }
       break;
@@ -391,7 +391,7 @@ PannerNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 JSObject*
 PannerNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return PannerNodeBinding::Wrap(aCx, this, aGivenProto);
+  return PannerNode_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 void PannerNode::DestroyMediaStream()

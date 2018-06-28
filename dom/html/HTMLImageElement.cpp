@@ -44,7 +44,7 @@
 
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStates.h"
-#include "mozilla/GenericSpecifiedValuesInlines.h"
+#include "mozilla/MappedDeclarations.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
 #include "nsLayoutUtils.h"
@@ -248,13 +248,13 @@ HTMLImageElement::ParseAttribute(int32_t aNamespaceID,
 
 void
 HTMLImageElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                        GenericSpecifiedValues* aData)
+                                        MappedDeclarations& aDecls)
 {
-  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aData);
-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aDecls);
+  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 nsChangeHint
@@ -267,8 +267,8 @@ HTMLImageElement::GetAttributeChangeHint(const nsAtom* aAttribute,
       aAttribute == nsGkAtoms::ismap) {
     retval |= nsChangeHint_ReconstructFrame;
   } else if (aAttribute == nsGkAtoms::alt) {
-    if (aModType == MutationEventBinding::ADDITION ||
-        aModType == MutationEventBinding::REMOVAL) {
+    if (aModType == MutationEvent_Binding::ADDITION ||
+        aModType == MutationEvent_Binding::REMOVAL) {
       retval |= nsChangeHint_ReconstructFrame;
     }
   }
@@ -852,7 +852,7 @@ HTMLImageElement::GetCORSMode()
 JSObject*
 HTMLImageElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLImageElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLImageElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 #ifdef DEBUG

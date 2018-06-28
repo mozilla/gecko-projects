@@ -93,6 +93,9 @@ PuppetWidget::PuppetWidget(TabChild* aTabChild)
   , mDefaultScale(-1)
   , mCursorHotspotX(0)
   , mCursorHotspotY(0)
+  , mEnabled(false)
+  , mVisible(false)
+  , mNeedIMEStateInit(false)
   , mIgnoreCompositionEvents(false)
 {
   // Setting 'Unknown' means "not yet cached".
@@ -769,14 +772,7 @@ PuppetWidget::SetInputContext(const InputContext& aContext,
   if (!mTabChild) {
     return;
   }
-  mTabChild->SendSetInputContext(aContext.mIMEState.mEnabled,
-                                 aContext.mIMEState.mOpen,
-                                 aContext.mHTMLInputType,
-                                 aContext.mHTMLInputInputmode,
-                                 aContext.mActionHint,
-                                 aContext.mInPrivateBrowsing,
-                                 aAction.mCause,
-                                 aAction.mFocusChange);
+  mTabChild->SendSetInputContext(aContext, aAction);
 }
 
 InputContext
@@ -798,11 +794,7 @@ PuppetWidget::GetInputContext()
   // chrome widget is set to new context.
   InputContext context;
   if (mTabChild) {
-    IMEState::Enabled enabled;
-    IMEState::Open open;
-    mTabChild->SendGetInputContext(&enabled, &open);
-    context.mIMEState.mEnabled = enabled;
-    context.mIMEState.mOpen = open;
+    mTabChild->SendGetInputContext(&context.mIMEState);
   }
   return context;
 }

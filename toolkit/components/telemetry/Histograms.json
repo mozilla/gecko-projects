@@ -6595,7 +6595,7 @@
   "FX_URLBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dzeber@mozilla.com"],
-    "expires_in_version": "63",
+    "expires_in_version": "never",
     "releaseChannelCollection": "opt-out",
     "kind": "categorical",
     "labels": [
@@ -6612,7 +6612,7 @@
   "FX_SEARCHBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dzeber@mozilla.com"],
-    "expires_in_version": "63",
+    "expires_in_version": "never",
     "releaseChannelCollection": "opt-out",
     "kind": "categorical",
     "labels": [
@@ -7192,6 +7192,19 @@
     "kind": "count",
     "description": "Count of TelemetrySession scheduler ticks that were delayed long enough to suspect sleep."
   },
+  "TELEMETRY_EVENT_PING_SENT": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
+    "bug_numbers": [1460595],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": [
+      "periodic",
+      "max",
+      "shutdown"
+    ],
+    "description": "Number of 'event' pings sent, by reason"
+  },
   "TELEMETRY_TEST_FLAG": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
@@ -7417,6 +7430,18 @@
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
     "expires_in_version": "4",
     "kind": "flag",
+    "description": "a testing histogram; not meant to be touched"
+  },
+  "TELEMETRY_TEST_EXPIRED_KEYED": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "4",
+    "kind": "linear",
+    "keyed": true,
+    "low": 1,
+    "high": 2147483646,
+    "n_buckets": 10,
+    "bug_numbers": [1468809],
     "description": "a testing histogram; not meant to be touched"
   },
   "TELEMETRY_TEST_CONTENT_PROCESS": {
@@ -11152,22 +11177,6 @@
     "kind": "boolean",
     "description": "Intercepted fetch sending back same Request object. File bugs in Core::DOM in case of a Telemetry regression."
   },
-  "E10S_STATUS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 12,
-    "releaseChannelCollection": "opt-out",
-    "bug_numbers": [1241294],
-    "description": "Why e10s is enabled or disabled (0=ENABLED_BY_USER, 1=ENABLED_BY_DEFAULT, 2=DISABLED_BY_USER, 3=DISABLED_IN_SAFE_MODE, 4=DISABLED_FOR_ACCESSIBILITY, 5=DISABLED_FOR_MAC_GFX, 6=DISABLED_FOR_BIDI, 7=DISABLED_FOR_ADDONS, 8=FORCE_DISABLED, 9=DISABLED_FOR_XPLAYERS, 10=DISABLED_FOR_OS_VERSION)"
-  },
-  "E10S_BLOCKED_FROM_RUNNING": {
-    "record_in_processes": ["main", "content"],
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "Whether the e10s pref was set but it was blocked from running due to blacklisted conditions"
-  },
   "ONBEFOREUNLOAD_PROMPT_ACTION" : {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "45",
@@ -12805,7 +12814,7 @@
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50,
-    "description": "Time spent in the paint pipeline for content."
+    "description": "Time spent in the paint pipeline for content in milliseconds."
   },
   "CONTENT_LARGE_PAINT_PHASE_WEIGHT": {
     "record_in_processes": ["main", "content"],
@@ -12813,10 +12822,11 @@
     "bug_numbers": [1309442],
     "expires_in_version": "66",
     "keyed": true,
+    "keys": ["dl", "flb", "fr", "r"],
     "kind": "linear",
     "high": 100,
     "n_buckets": 10,
-    "description": "Percentage of time taken by phases in expensive content paints."
+    "description": "Percentages of times for phases in an expensive content paint relative to the time spent in the entire expensive paint. (\"dl\" = Display list, \"flb\" = Frame layer builder, \"fr\" = Flush rasterization, \"r\" = Rasterization)"
   },
   "CONTENT_SMALL_PAINT_PHASE_WEIGHT": {
     "record_in_processes": ["main", "content"],
@@ -12824,10 +12834,11 @@
     "bug_numbers": [1430897],
     "expires_in_version": "66",
     "keyed": true,
+    "keys": ["dl", "flb", "fr", "r"],
     "kind": "linear",
     "high": 100,
     "n_buckets": 10,
-    "description": "Percentage of time taken by phases in normal content paints."
+    "description": "Percentages of times for phases in a normal content paint relative to the time spent in the entire normal paint. (\"dl\" = Display list, \"flb\" = Frame layer builder, \"fr\" = Flush rasterization, \"r\" = Rasterization)"
   },
   "NARRATE_CONTENT_BY_LANGUAGE_2": {
     "record_in_processes": ["main", "content"],
@@ -12913,17 +12924,6 @@
     "bug_numbers": [1314220],
     "description": "The time duration from tab's media was blocked to unblocked. Now we record from 1 to 90 seconds, but the record by milliseconds, so the bucket is like [1000ms, 2000ms], [2000ms, 3000ms], e.t.c.",
     "releaseChannelCollection": "opt-out"
-  },
-  "MAIN_THREAD_RUNNABLE_MS": {
-    "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["wmccloskey@mozilla.com", "farre@mozilla.com"],
-    "expires_in_version": "70",
-    "kind": "exponential",
-    "keyed": true,
-    "high": 10000,
-    "n_buckets": 10,
-    "bug_numbers": [1331804],
-    "description": "The time a given main thread runnable took to run (in milliseconds). The key comes from the runnables nsINamed::name value."
   },
   "MOZ_CHUNKED_ARRAYBUFFER_IN_XHR": {
     "record_in_processes": ["main", "content"],
@@ -13262,16 +13262,6 @@
     "bug_numbers": [1345540],
     "description": "Time (ms) for the APZ handled wheel event spent in handlers."
   },
-  "TIME_BETWEEN_UNLABELED_RUNNABLES_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["wmccloskey@mozilla.com", "farre@mozilla.com"],
-    "expires_in_version": "70",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 30,
-    "bug_numbers": [1351021],
-    "description": "Every time we run an unlabeled runnable, this histogram records the time (in ms) since the last unlabeled runnable ran."
-  },
   "VFC_INVALIDATE_LOCK_WAIT_MS": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["jwwang@mozilla.com"],
@@ -13361,17 +13351,6 @@
     "keyed": true,
     "description": "Measures the number of milliseconds we spend processing sync IPC messages in the receiving process, keyed by message name. Note: only messages that take over 500 microseconds are included in this probe."
   },
-  "IDLE_RUNNABLE_BUDGET_OVERUSE_MS": {
-    "record_in_processes": ["main", "content", "gpu"],
-    "alert_emails": ["farre@mozilla.com"],
-    "expires_in_version": "70",
-    "kind": "exponential",
-    "keyed": true,
-    "high": 10000,
-    "n_buckets": 10,
-    "bug_numbers": [1292600],
-    "description": "The time a given runnable exceeds its budget as set in nsIRunnable::SetDeadline (in milliseconds). The key comes from the runnables nsINamed::name value."
-  },
   "WEBEXT_BACKGROUND_PAGE_LOAD_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["addons-dev-internal@mozilla.com"],
@@ -13446,7 +13425,7 @@
     "releaseChannelCollection": "opt-out",
     "high": 50000,
     "n_buckets": 100,
-    "description": "The amount of time it takes to perform a get via storage.local."
+    "description": "The amount of time it takes to perform a get via storage.local using the JSONFile backend."
   },
   "WEBEXT_STORAGE_LOCAL_SET_MS": {
     "record_in_processes": ["main", "content"],
@@ -13457,7 +13436,39 @@
     "releaseChannelCollection": "opt-out",
     "high": 50000,
     "n_buckets": 100,
-    "description": "The amount of time it takes to perform a set via storage.local."
+    "description": "The amount of time it takes to perform a set via storage.local using the JSONFile backend."
+  },
+  "WEBEXT_STORAGE_LOCAL_IDB_GET_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "bug_numbers": [1465120],
+    "expires_in_version": "67",
+    "kind": "exponential",
+    "releaseChannelCollection": "opt-out",
+    "high": 50000,
+    "n_buckets": 100,
+    "description": "The amount of time it takes to perform a get via storage.local using the IndexedDB backend."
+  },
+  "WEBEXT_STORAGE_LOCAL_IDB_SET_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "bug_numbers": [1465120],
+    "expires_in_version": "67",
+    "kind": "exponential",
+    "releaseChannelCollection": "opt-out",
+    "high": 50000,
+    "n_buckets": 100,
+    "description": "The amount of time it takes to perform a set via storage.local using the IndexedDB backend."
+  },
+  "WEBEXT_STORAGE_LOCAL_IDB_MIGRATE_RESULT_COUNT": {
+    "record_in_processes": ["main"],
+    "bug_numbers": [1465129],
+    "alert_emails": ["addons-dev-internal@mozilla.com"],
+    "expires_in_version": "67",
+    "kind": "categorical",
+    "labels": ["success", "failure"],
+    "releaseChannelCollection": "opt-out",
+    "description": "The number of times a storage.local backend data migration has been completed and results in one of the categories."
   },
   "EXTENSION_UPDATE_TYPE": {
     "record_in_processes": ["main"],
@@ -13804,5 +13815,15 @@
     "high": 50,
     "n_buckets": 20,
     "description": "Total number of doc groups per tab group, including docgroups fully in bfcache. Collected at the point when the top level document of the tab group is unloaded."
+  },
+  "HIDDEN_VIEWPORT_OVERFLOW_TYPE": {
+    "record_in_processes": ["content"],
+    "alert_emails": ["xquan@mozilla.com", "botond@mozilla.com"],
+    "bug_numbers": [1423013, 1423017],
+    "expires_in_version": "65",
+    "kind": "categorical",
+    "releaseChannelCollection": "opt-out",
+    "labels": ["NoOverflow", "Desktop", "ButNotMinScaleSize", "MinScaleSize"],
+    "description": "How common are different types of out-of-reach viewport overflow?"
   }
 }

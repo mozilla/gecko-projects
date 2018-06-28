@@ -34,10 +34,8 @@ function extend(child, supertype) {
 function PlacesItemProps(props) {
   this.location = null;
   this.uri = null;
-  this.loadInSidebar = null;
   this.keyword = null;
   this.title = null;
-  this.description = null;
   this.after = null;
   this.before = null;
   this.folder = null;
@@ -262,31 +260,6 @@ PlacesItem.prototype = {
   },
 
   /**
-   * CheckDescription
-   *
-   * Compares the description of this places item with an expected
-   * description.
-   *
-   * @param expectedDescription The description this places item is
-   *        expected to have
-   * @return true if the actual and expected descriptions match, or if
-   *         there is no expected description; otherwise false
-   */
-  async CheckDescription(expectedDescription) {
-    if (expectedDescription != null) {
-      // Use PlacesSyncUtils as it gives us the description.
-      let info = await PlacesSyncUtils.bookmarks.fetch(this.props.guid);
-      if (info.description != expectedDescription) {
-        Logger.logPotentialError("Invalid description, expected: " +
-          expectedDescription + ", actual: " + info.description + " for " +
-          this.toString());
-        return false;
-      }
-    }
-    return true;
-  },
-
-  /**
    * CheckPosition
    *
    * Verifies the position of this places item.
@@ -337,31 +310,6 @@ PlacesItem.prototype = {
         index: PlacesUtils.bookmarks.DEFAULT_INDEX,
       });
       this.props.parentGuid = newfolderGuid;
-    }
-  },
-
-  /**
-   * SetDescription
-   *
-   * Updates the description for this places item.
-   *
-   * @param description The new description to set; if null, no changes are
-   *        made
-   * @return nothing
-   */
-  async SetDescription(description) {
-    let itemId = await PlacesUtils.promiseItemId(this.props.guid);
-
-    if (description != null) {
-      if (description != "")
-        PlacesUtils.annotations.setItemAnnotation(itemId,
-                                      "bookmarkProperties/description",
-                                      description,
-                                      0,
-                                      PlacesUtils.annotations.EXPIRE_NEVER);
-      else
-        PlacesUtils.annotations.removeItemAnnotation(itemId,
-                                         "bookmarkProperties/description");
     }
   },
 
@@ -444,29 +392,6 @@ Bookmark.prototype = {
   },
 
   /**
-   * SetLoadInSidebar
-   *
-   * Updates this bookmark's loadInSidebar property.
-   *
-   * @param loadInSidebar if true, the loadInSidebar property will be set,
-   *        if false, it will be cleared, and any other value will result
-   *        in no change
-   * @return nothing
-   */
-  async SetLoadInSidebar(loadInSidebar) {
-    let itemId = await PlacesUtils.promiseItemId(this.props.guid);
-    if (loadInSidebar)
-      PlacesUtils.annotations.setItemAnnotation(itemId,
-                                    "bookmarkProperties/loadInSidebar",
-                                    true,
-                                    0,
-                                    PlacesUtils.annotations.EXPIRE_NEVER);
-    else if (!loadInSidebar)
-      PlacesUtils.annotations.removeItemAnnotation(itemId,
-                                       "bookmarkProperties/loadInSidebar");
-  },
-
-  /**
    * SetUri
    *
    * Updates this bookmark's URI.
@@ -519,8 +444,6 @@ Bookmark.prototype = {
                                                      title: this.props.title});
     this.props.guid = guid;
     await this.SetKeyword(this.props.keyword);
-    await this.SetDescription(this.props.description);
-    await this.SetLoadInSidebar(this.props.loadInSidebar);
     await this.SetTags(this.props.tags);
     return this.props.guid;
   },
@@ -535,8 +458,6 @@ Bookmark.prototype = {
    */
   async Update() {
     Logger.AssertTrue(this.props.guid, "Invalid guid during Update");
-    await this.SetDescription(this.updateProps.description);
-    await this.SetLoadInSidebar(this.updateProps.loadInSidebar);
     await this.SetTitle(this.updateProps.title);
     await this.SetUri(this.updateProps.uri);
     await this.SetKeyword(this.updateProps.keyword);
@@ -569,9 +490,6 @@ Bookmark.prototype = {
       Logger.logPotentialError(this.toString() + " not found");
       return null;
     }
-    if (!(await this.CheckDescription(this.props.description))) {
-      return null;
-    }
     if (this.props.keyword != null) {
       let {keyword} = await PlacesSyncUtils.bookmarks.fetch(this.props.guid);
       if (keyword != this.props.keyword) {
@@ -580,21 +498,6 @@ Bookmark.prototype = {
           " for " + this.toString());
         return null;
       }
-    }
-    let itemId = await PlacesUtils.promiseItemId(this.props.guid);
-    let loadInSidebar = PlacesUtils.annotations.itemHasAnnotation(
-      itemId,
-      "bookmarkProperties/loadInSidebar");
-    if (loadInSidebar)
-      loadInSidebar = PlacesUtils.annotations.getItemAnnotation(
-        itemId,
-        "bookmarkProperties/loadInSidebar");
-    if (this.props.loadInSidebar != null &&
-        loadInSidebar != this.props.loadInSidebar) {
-      Logger.logPotentialError("Incorrect loadInSidebar setting - expected: " +
-        this.props.loadInSidebar + ", actual: " + loadInSidebar +
-        " for " + this.toString());
-      return null;
     }
     if (this.props.tags != null) {
       try {
@@ -665,7 +568,6 @@ BookmarkFolder.prototype = {
                                                      type: PlacesUtils.bookmarks.TYPE_FOLDER,
                                                      });
     this.props.guid = guid;
-    await this.SetDescription(this.props.description);
     return this.props.parentGuid;
   },
 
@@ -688,9 +590,6 @@ BookmarkFolder.prototype = {
                               PlacesUtils.bookmarks.TYPE_FOLDER,
                               this.props.folder);
     if (this.props.guid == null) {
-      return null;
-    }
-    if (!(await this.CheckDescription(this.props.description))) {
       return null;
     }
     if (!(await this.CheckPosition(this.props.before,
@@ -727,7 +626,6 @@ BookmarkFolder.prototype = {
     await this.SetLocation(this.updateProps.location);
     await this.SetPosition(this.updateProps.position);
     await this.SetTitle(this.updateProps.folder);
-    await this.SetDescription(this.updateProps.description);
   },
 };
 

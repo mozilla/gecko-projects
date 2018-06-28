@@ -38,7 +38,6 @@
 #include "nsCycleCollector.h"
 #include "jsapi.h"
 #include "js/MemoryMetrics.h"
-#include "mozilla/dom/GeneratedAtomList.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptLoader.h"
@@ -78,7 +77,6 @@ static MOZ_THREAD_LOCAL(XPCJSContext*) gTlsContext;
 using namespace mozilla;
 using namespace xpc;
 using namespace JS;
-using mozilla::dom::PerThreadAtomCache;
 using mozilla::dom::AutoEntryScript;
 
 static void WatchdogMain(void* arg);
@@ -647,7 +645,7 @@ XPCJSContext::InterruptCallback(JSContext* cx)
         JS::Rooted<JSObject*> proto(cx);
         if (!JS_GetPrototype(cx, global, &proto))
             return false;
-        if (proto && IsSandboxPrototypeProxy(proto) &&
+        if (proto && xpc::IsSandboxPrototypeProxy(proto) &&
             (proto = js::CheckedUnwrap(proto, /* stopAtWindowProxy = */ false)))
         {
             win = WindowGlobalOrNull(proto);
@@ -812,8 +810,6 @@ ReloadPrefsCallback(const char* pref, void* data)
     bool fuzzingEnabled = Preferences::GetBool("fuzzing.enabled");
 #endif
 
-    bool arrayProtoValues = Preferences::GetBool(JS_OPTIONS_DOT_STR "array_prototype_values");
-
     JS::ContextOptionsRef(cx).setBaseline(useBaseline)
                              .setIon(useIon)
                              .setAsmJS(useAsmJS)
@@ -833,8 +829,7 @@ ReloadPrefsCallback(const char* pref, void* data)
                              .setFuzzing(fuzzingEnabled)
 #endif
                              .setStreams(streams)
-                             .setExtraWarnings(extraWarnings)
-                             .setArrayProtoValues(arrayProtoValues);
+                             .setExtraWarnings(extraWarnings);
 
     nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
     if (xr) {
@@ -904,10 +899,6 @@ XPCJSContext::~XPCJSContext()
 
     if (mCallContext)
         mCallContext->SystemIsBeingShutDown();
-
-    auto rtPrivate = static_cast<PerThreadAtomCache*>(JS_GetContextPrivate(Context()));
-    delete rtPrivate;
-    JS_SetContextPrivate(Context(), nullptr);
 
     PROFILER_CLEAR_JS_CONTEXT();
 
@@ -1004,10 +995,6 @@ XPCJSContext::Initialize(XPCJSContext* aPrimaryContext)
 
     MOZ_ASSERT(Context());
     JSContext* cx = Context();
-
-    auto cxPrivate = new PerThreadAtomCache();
-    memset(cxPrivate, 0, sizeof(PerThreadAtomCache));
-    JS_SetContextPrivate(cx, cxPrivate);
 
     // The JS engine permits us to set different stack limits for system code,
     // trusted script, and untrusted script. We have tests that ensure that

@@ -179,8 +179,7 @@ class GridInspector {
    *         The color to use.
    */
   getInitialGridColor(nodeFront, customColor, fallbackColor) {
-    let highlighted = this._highlighters &&
-      nodeFront == this.highlighters.gridHighlighterShown;
+    const highlighted = nodeFront == this.highlighters.gridHighlighterShown;
 
     let color;
     if (customColor) {
@@ -205,9 +204,9 @@ class GridInspector {
    *         The NodeFront for which we need the color.
    */
   getGridColorForNodeFront(nodeFront) {
-    let { grids } = this.store.getState();
+    const { grids } = this.store.getState();
 
-    for (let grid of grids) {
+    for (const grid of grids) {
       if (grid.nodeFront === nodeFront) {
         return grid.color;
       }
@@ -284,7 +283,7 @@ class GridInspector {
       return;
     }
 
-    let currentUrl = this.inspector.target.url;
+    const currentUrl = this.inspector.target.url;
 
     // Log how many CSS Grid elements DevTools sees.
     if (currentUrl != this.inspector.previousURL) {
@@ -294,12 +293,12 @@ class GridInspector {
 
     // Get the hostname, if there is no hostname, fall back on protocol
     // ex: `data:` uri, and `about:` pages
-    let hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
-    let customColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
+    const hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+    const customColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
 
-    let grids = [];
+    const grids = [];
     for (let i = 0; i < gridFronts.length; i++) {
-      let grid = gridFronts[i];
+      const grid = gridFronts[i];
       let nodeFront = grid.containerNodeFront;
 
       // If the GridFront didn't yet have access to the NodeFront for its container, then
@@ -315,11 +314,10 @@ class GridInspector {
         }
       }
 
-      let colorForHost = customColors[hostname] ? customColors[hostname][i] : null;
-      let fallbackColor = GRID_COLORS[i % GRID_COLORS.length];
-      let color = this.getInitialGridColor(nodeFront, colorForHost, fallbackColor);
-      let highlighted = this._highlighters &&
-        nodeFront == this.highlighters.gridHighlighterShown;
+      const colorForHost = customColors[hostname] ? customColors[hostname][i] : null;
+      const fallbackColor = GRID_COLORS[i % GRID_COLORS.length];
+      const color = this.getInitialGridColor(nodeFront, colorForHost, fallbackColor);
+      const highlighted = nodeFront == this.highlighters.gridHighlighterShown;
 
       grids.push({
         id: i,
@@ -452,8 +450,7 @@ class GridInspector {
         oldNodeFronts.sort().join(",") == newNodeFronts.sort().join(",")) {
       // Same list of containers, but let's check if the geometry of the current grid has
       // changed, if it hasn't we can safely abort.
-      if (!this._highlighters ||
-          !this.highlighters.gridHighlighterShown ||
+      if (!this.highlighters.gridHighlighterShown ||
           (this.highlighters.gridHighlighterShown &&
            !this.haveCurrentFragmentsChanged(newGridFronts))) {
         return;
@@ -476,14 +473,14 @@ class GridInspector {
   async onSetGridOverlayColor(node, color) {
     this.store.dispatch(updateGridColor(node, color));
 
-    let { grids } = this.store.getState();
-    let currentUrl = this.inspector.target.url;
+    const { grids } = this.store.getState();
+    const currentUrl = this.inspector.target.url;
     // Get the hostname, if there is no hostname, fall back on protocol
     // ex: `data:` uri, and `about:` pages
-    let hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
-    let customGridColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
+    const hostname = parseURL(currentUrl).hostname || parseURL(currentUrl).protocol;
+    const customGridColors = await asyncStorage.getItem("gridInspectorHostColors") || {};
 
-    for (let grid of grids) {
+    for (const grid of grids) {
       if (grid.nodeFront === node) {
         if (!customGridColors[hostname]) {
           customGridColors[hostname] = [];
@@ -571,9 +568,9 @@ class GridInspector {
       this.telemetry.scalarSet(TELEMETRY_GRID_AREAS_OVERLAY_CHECKED, 1);
     }
 
-    let { grids } = this.store.getState();
+    const { grids } = this.store.getState();
 
-    for (let grid of grids) {
+    for (const grid of grids) {
       if (grid.highlighted) {
         this.highlighters.showGridHighlighter(grid.nodeFront);
       }
@@ -597,9 +594,9 @@ class GridInspector {
       this.telemetry.scalarSet(TELEMETRY_GRID_LINE_NUMBERS_CHECKED, 1);
     }
 
-    let { grids } = this.store.getState();
+    const { grids } = this.store.getState();
 
-    for (let grid of grids) {
+    for (const grid of grids) {
       if (grid.highlighted) {
         this.highlighters.showGridHighlighter(grid.nodeFront);
       }
@@ -623,9 +620,9 @@ class GridInspector {
       this.telemetry.scalarSet(TELEMETRY_INFINITE_LINES_CHECKED, 1);
     }
 
-    let { grids } = this.store.getState();
+    const { grids } = this.store.getState();
 
-    for (let grid of grids) {
+    for (const grid of grids) {
       if (grid.highlighted) {
         this.highlighters.showGridHighlighter(grid.nodeFront);
       }

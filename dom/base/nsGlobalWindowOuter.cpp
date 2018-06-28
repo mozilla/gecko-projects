@@ -1564,11 +1564,11 @@ SelectZone(nsGlobalWindowInner* aNewInner,
 
     // If we have a top-level window, use its zone.
     if (top && top->GetGlobalJSObject()) {
-      return aOptions.setExistingZone(top->GetGlobalJSObject());
+      return aOptions.setNewCompartmentInExistingZone(top->GetGlobalJSObject());
     }
   }
 
-  return aOptions.setNewZone();
+  return aOptions.setNewCompartmentAndZone();
 }
 
 /**
@@ -1607,7 +1607,7 @@ CreateNativeGlobalForInner(JSContext* aCx,
   uint32_t flags = needComponents ? 0 : xpc::OMIT_COMPONENTS_OBJECT;
   flags |= xpc::DONT_FIRE_ONNEWGLOBALHOOK;
 
-  if (!WindowBinding::Wrap(aCx, aNewInner, aNewInner, options,
+  if (!Window_Binding::Wrap(aCx, aNewInner, aNewInner, options,
                            nsJSPrincipals::get(aPrincipal), false, aGlobal) ||
       !xpc::InitGlobalObject(aCx, aGlobal, flags)) {
     return NS_ERROR_FAILURE;
@@ -1758,11 +1758,8 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
       nsJSPrincipals::get(JS::GetRealmPrincipals(realm));
     aDocument->NodePrincipal()->Equals(existing, &sameOrigin);
     MOZ_ASSERT(sameOrigin);
-
-    JSCompartment* compartment = JS::GetCompartmentForRealm(realm);
     MOZ_ASSERT_IF(aDocument == oldDoc,
-                  xpc::GetCompartmentPrincipal(compartment) ==
-                  aDocument->NodePrincipal());
+                  xpc::GetRealmPrincipal(realm) == aDocument->NodePrincipal());
 #endif
     if (aDocument != oldDoc) {
       JS::SetRealmPrincipals(realm,
@@ -2072,8 +2069,8 @@ nsGlobalWindowOuter::DispatchDOMWindowCreated()
 
   // Fire DOMWindowCreated at chrome event listeners
   nsContentUtils::DispatchChromeEvent(mDoc, mDoc, NS_LITERAL_STRING("DOMWindowCreated"),
-                                      true /* bubbles */,
-                                      false /* not cancellable */);
+                                      CanBubble::eYes,
+                                      Cancelable::eNo);
 
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
@@ -3775,7 +3772,8 @@ nsGlobalWindowOuter::DispatchCustomEvent(const nsAString& aEventName)
 {
   bool defaultActionEnabled = true;
   nsContentUtils::DispatchTrustedEvent(mDoc, ToSupports(this), aEventName,
-                                       true, true, &defaultActionEnabled);
+                                       CanBubble::eYes, Cancelable::eYes,
+                                       &defaultActionEnabled);
 
   return defaultActionEnabled;
 }
@@ -6694,35 +6692,12 @@ nsGlobalWindowOuter::GetComputedStyleHelperOuter(Element& aElt,
                                                  const nsAString& aPseudoElt,
                                                  bool aDefaultStylesOnly)
 {
-  if (!mDocShell) {
+  if (!mDoc) {
     return nullptr;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = mDocShell->GetPresShell();
-
-  if (!presShell) {
-    // Try flushing frames on our parent in case there's a pending
-    // style change that will create the presshell.
-    auto* parent = nsGlobalWindowOuter::Cast(GetPrivateParent());
-    if (!parent) {
-      return nullptr;
-    }
-
-    parent->FlushPendingNotifications(FlushType::Frames);
-
-    // Might have killed mDocShell
-    if (!mDocShell) {
-      return nullptr;
-    }
-
-    presShell = mDocShell->GetPresShell();
-    if (!presShell) {
-      return nullptr;
-    }
-  }
-
   RefPtr<nsICSSDeclaration> compStyle =
-    NS_NewComputedDOMStyle(&aElt, aPseudoElt, presShell,
+    NS_NewComputedDOMStyle(&aElt, aPseudoElt, mDoc,
                            aDefaultStylesOnly ? nsComputedDOMStyle::eDefaultOnly :
                                                 nsComputedDOMStyle::eAll);
 
@@ -7572,9 +7547,9 @@ nsGlobalWindowOuter::Dispatch(TaskCategory aCategory,
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   if (GetDocGroup()) {
-    return GetDocGroup()->Dispatch(aCategory, Move(aRunnable));
+    return GetDocGroup()->Dispatch(aCategory, std::move(aRunnable));
   }
-  return DispatcherTrait::Dispatch(aCategory, Move(aRunnable));
+  return DispatcherTrait::Dispatch(aCategory, std::move(aRunnable));
 }
 
 nsISerialEventTarget*

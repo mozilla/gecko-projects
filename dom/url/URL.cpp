@@ -31,7 +31,7 @@ NS_INTERFACE_MAP_END
 JSObject*
 URL::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return URLBinding::Wrap(aCx, this, aGivenProto);
+  return URL_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<URL>
@@ -367,7 +367,7 @@ URL::UpdateURLSearchParams()
 void
 URL::SetURI(already_AddRefed<nsIURI> aURI)
 {
-  mURI = Move(aURI);
+  mURI = std::move(aURI);
   MOZ_ASSERT(mURI);
 }
 

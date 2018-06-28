@@ -464,7 +464,14 @@ nsHttpConnectionMgr::DoShiftReloadConnectionCleanup(nsHttpConnectionInfo *aCI)
 class SpeculativeConnectArgs : public ARefBase
 {
 public:
-    SpeculativeConnectArgs() { mOverridesOK = false; }
+    SpeculativeConnectArgs()
+        : mParallelSpeculativeConnectLimit(0)
+        , mIgnoreIdle(false)
+        , mIsFromPredictor(false)
+        , mAllow1918(false)
+    {
+        mOverridesOK = false;
+    }
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SpeculativeConnectArgs, override)
 
 public: // intentional!
@@ -1122,7 +1129,7 @@ nsHttpConnectionMgr::PreparePendingQForDispatching(
 
     // Append elements in |remainingPendingQ| to |pendingQ|. The order in
     // |pendingQ| is like: [focusedWindowTrans...nonFocusedWindowTrans].
-    pendingQ.AppendElements(Move(remainingPendingQ));
+    pendingQ.AppendElements(std::move(remainingPendingQ));
 }
 
 bool
@@ -2956,7 +2963,7 @@ nsHttpConnectionMgr::OnMsgUpdateParam(int32_t inParam, ARefBase *)
         mThrottleMaxTime = TimeDuration::FromMilliseconds(value);
         break;
     default:
-        NS_NOTREACHED("unexpected parameter name");
+        MOZ_ASSERT_UNREACHABLE("unexpected parameter name");
     }
 }
 

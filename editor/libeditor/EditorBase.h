@@ -22,6 +22,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsGkAtoms.h"
 #include "nsIDocument.h"                // for nsIDocument
+#include "nsIContentInlines.h"          // for nsINode::IsEditable()
 #include "nsIEditor.h"                  // for nsIEditor, etc.
 #include "nsIObserver.h"                // for NS_DECL_NSIOBSERVER, etc.
 #include "nsIPlaintextEditor.h"         // for nsIPlaintextEditor, etc.
@@ -50,7 +51,6 @@ class nsIWidget;
 class nsRange;
 
 namespace mozilla {
-class AddStyleSheetTransaction;
 class AutoSelectionRestorer;
 class AutoTopLevelEditSubActionNotifier;
 class AutoTransactionsConserveSelection;
@@ -72,7 +72,6 @@ class InsertNodeTransaction;
 class InsertTextTransaction;
 class JoinNodeTransaction;
 class PlaceholderTransaction;
-class RemoveStyleSheetTransaction;
 class SplitNodeResult;
 class SplitNodeTransaction;
 class TextComposition;
@@ -312,14 +311,6 @@ public:
 
   RangeUpdater& RangeUpdaterRef() { return mRangeUpdater; }
 
-  enum NotificationForEditorObservers
-  {
-    eNotifyEditorObserversOfEnd,
-    eNotifyEditorObserversOfBefore,
-    eNotifyEditorObserversOfCancel
-  };
-  void NotifyEditorObservers(NotificationForEditorObservers aNotification);
-
   /**
    * Set or unset TextInputListener.  If setting non-nullptr when the editor
    * already has a TextInputListener, this will crash in debug build.
@@ -331,8 +322,6 @@ public:
    * already has an IMEContentObserver, this will crash in debug build.
    */
   void SetIMEContentObserver(IMEContentObserver* aIMEContentObserver);
-
-  virtual bool IsModifiableNode(nsINode* aNode);
 
   /**
    * Returns current composition.
@@ -358,7 +347,21 @@ public:
    */
   nsresult CommitComposition();
 
-  void SwitchTextDirectionTo(uint32_t aDirection);
+  /**
+   * ToggleTextDirection() toggles text-direction of the root element.
+   */
+  nsresult ToggleTextDirection();
+
+  /**
+   * SwitchTextDirectionTo() sets the text-direction of the root element to
+   * LTR or RTL.
+   */
+  enum class TextDirection
+  {
+    eLTR,
+    eRTL,
+  };
+  void SwitchTextDirectionTo(TextDirection aTextDirection);
 
   /**
    * Finalizes selection and caret for the editor.
@@ -621,11 +624,6 @@ public:
   }
 
   /**
-   * Get the input event target. This might return null.
-   */
-  virtual already_AddRefed<nsIContent> GetInputEventTargetContent() = 0;
-
-  /**
    * Get the focused content, if we're focused.  Returns null otherwise.
    */
   virtual nsIContent* GetFocusedContent();
@@ -659,8 +657,6 @@ public:
    * added here.
    */
   void OnFocus(dom::EventTarget* aFocusEventTarget);
-
-  virtual nsresult InsertFromDrop(dom::DragEvent* aDropEvent) = 0;
 
   /** Resyncs spellchecking state (enabled/disabled).  This should be called
     * when anything that affects spellchecking state changes, such as the
@@ -1498,6 +1494,8 @@ protected: // May be called by friends.
     return aNode->NodeType() == nsINode::TEXT_NODE;
   }
 
+  virtual bool IsModifiableNode(nsINode* aNode);
+
   /**
    * GetNodeAtRangeOffsetPoint() returns the node at this position in a range,
    * assuming that the container is the node itself if it's a text node, or
@@ -1636,6 +1634,13 @@ protected: // Shouldn't be used by friend classes
    */
   virtual ~EditorBase();
 
+  /**
+   * SelectAllInternal() should be used instead of SelectAll() in editor
+   * because SelectAll() creates AutoEditActionSetter but we should avoid
+   * to create it as far as possible.
+   */
+  virtual nsresult SelectAllInternal();
+
   nsresult DetermineCurrentDirection();
   void FireInputEvent();
 
@@ -1755,6 +1760,11 @@ protected: // Shouldn't be used by friend classes
   virtual void RemoveEventListeners();
 
   /**
+   * Get the input event target. This might return null.
+   */
+  virtual already_AddRefed<nsIContent> GetInputEventTargetContent() = 0;
+
+  /**
    * Return true if spellchecking should be enabled for this editor.
    */
   bool GetDesiredSpellCheckState();
@@ -1822,10 +1832,25 @@ protected: // Shouldn't be used by friend classes
                                           int32_t aDestOffset,
                                           bool aDoDeleteSelection) = 0;
 
+  enum NotificationForEditorObservers
+  {
+    eNotifyEditorObserversOfEnd,
+    eNotifyEditorObserversOfBefore,
+    eNotifyEditorObserversOfCancel
+  };
+  void NotifyEditorObservers(NotificationForEditorObservers aNotification);
+
 private:
   nsCOMPtr<nsISelectionController> mSelectionController;
   nsCOMPtr<nsIDocument> mDocument;
 
+
+  /**
+   * SetTextDirectionTo() sets text-direction of the root element.
+   * Should use SwitchTextDirectionTo() or ToggleTextDirection() instead.
+   * This is a helper class of them.
+   */
+  nsresult SetTextDirectionTo(TextDirection aTextDirection);
 protected:
   enum Tristate
   {
@@ -1924,6 +1949,7 @@ protected:
   friend class CompositionTransaction;
   friend class CreateElementTransaction;
   friend class CSSEditUtils;
+  friend class DeleteNodeTransaction;
   friend class DeleteTextTransaction;
   friend class HTMLEditRules;
   friend class HTMLEditUtils;

@@ -93,7 +93,7 @@ StreamFilter::Connect()
       GetCurrentThreadSerialEventTarget(),
       __func__,
       [=] (mozilla::ipc::Endpoint<PStreamFilterChild>&& aEndpoint) {
-        self->FinishConnect(Move(aEndpoint));
+        self->FinishConnect(std::move(aEndpoint));
       },
       [=] (mozilla::ipc::ResponseRejectReason aReason) {
         self->mActor->RecvInitialized(false);
@@ -108,7 +108,7 @@ StreamFilter::Connect()
       NewRunnableMethod<mozilla::ipc::Endpoint<PStreamFilterChild>&&>(
         "StreamFilter::FinishConnect",
         this, &StreamFilter::FinishConnect,
-        Move(endpoint)));
+        std::move(endpoint)));
   }
 }
 
@@ -177,7 +177,7 @@ StreamFilter::Write(const ArrayBufferOrUint8Array& aData, ErrorResult& aRv)
   }
 
   if (ok) {
-    mActor->Write(Move(data), aRv);
+    mActor->Write(std::move(data), aRv);
   }
 }
 
@@ -295,7 +295,7 @@ StreamFilter::IsAllowedInContext(JSContext* aCx, JSObject* /* unused */)
 JSObject*
 StreamFilter::WrapObject(JSContext* aCx, HandleObject aGivenProto)
 {
-  return StreamFilterBinding::Wrap(aCx, this, aGivenProto);
+  return StreamFilter_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(StreamFilter)

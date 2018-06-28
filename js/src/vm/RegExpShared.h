@@ -163,7 +163,7 @@ class RegExpShared : public gc::TenuredCell
 
     // Register a table with this RegExpShared, and take ownership.
     bool addTable(JitCodeTable table) {
-        return tables.append(Move(table));
+        return tables.append(std::move(table));
     }
 
     /* Accessors */
@@ -234,7 +234,9 @@ class RegExpZone
         JSAtom* atom;
         uint16_t flag;
 
-        Key() {}
+        Key()
+          : atom(nullptr), flag(0)
+        { }
         Key(JSAtom* atom, RegExpFlag flag)
           : atom(atom), flag(flag)
         { }

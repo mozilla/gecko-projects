@@ -98,9 +98,6 @@ public:
   virtual int32_t ComputeIndexOf(const nsINode* aPossibleChild) const override;
   virtual nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
                                      bool aNotify) override;
-  virtual nsresult InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
-                                            bool aNotify) override;
-  virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) override;
   virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
   virtual void GetTextContentInternal(nsAString& aTextContent,
                                       mozilla::OOMReporter& aError) override;
@@ -192,7 +189,7 @@ public:
     /**
      * Holds any SMIL override style declaration for this element.
      */
-    RefPtr<mozilla::DeclarationBlock> mSMILOverrideStyleDeclaration;
+    RefPtr<DeclarationBlock> mSMILOverrideStyleDeclaration;
 
     /**
     * The controllers of the XUL Element.

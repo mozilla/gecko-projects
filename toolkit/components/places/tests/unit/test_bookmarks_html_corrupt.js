@@ -3,9 +3,6 @@
  * if a malformed uri is found.
  */
 
-const DESCRIPTION_ANNO = "bookmarkProperties/description";
-const LOAD_IN_SIDEBAR_ANNO = "bookmarkProperties/loadInSidebar";
-
 const TEST_FAVICON_PAGE_URL = "http://en-US.www.mozilla.com/en-US/firefox/central/";
 const TEST_FAVICON_DATA_SIZE = 580;
 
@@ -65,9 +62,7 @@ var database_check = async function() {
   });
   Assert.equal(PlacesUtils.toPRTime(bookmark.dateAdded), 1177541020000000);
   Assert.equal(PlacesUtils.toPRTime(bookmark.lastModified), 1177541050000000);
-  Assert.equal("folder test comment",
-               PlacesUtils.annotations.getItemAnnotation(folderNode.itemId,
-                                                         DESCRIPTION_ANNO));
+
   // open test folder, and test the children
   PlacesUtils.asQuery(folderNode);
   Assert.equal(folderNode.hasChildren, true);
@@ -82,17 +77,11 @@ var database_check = async function() {
   Assert.equal("test", entry.keyword);
   Assert.equal("hidden1%3Dbar&text1%3D%25s", entry.postData);
 
-  Assert.ok(PlacesUtils.annotations.itemHasAnnotation(bookmarkNode.itemId,
-                                                      LOAD_IN_SIDEBAR_ANNO));
   Assert.equal(bookmarkNode.dateAdded, 1177375336000000);
   Assert.equal(bookmarkNode.lastModified, 1177375423000000);
 
   Assert.equal((await PlacesUtils.getCharsetForURI(NetUtil.newURI(bookmarkNode.uri))),
                "ISO-8859-1");
-
-  Assert.equal("item description",
-               PlacesUtils.annotations.getItemAnnotation(bookmarkNode.itemId,
-                                                         DESCRIPTION_ANNO));
 
   // clean up
   folderNode.containerOpen = false;

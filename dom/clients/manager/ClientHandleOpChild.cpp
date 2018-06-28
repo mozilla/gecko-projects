@@ -36,12 +36,12 @@ ClientHandleOpChild::ClientHandleOpChild(ClientHandle* aClientHandle,
                                          const ClientOpCallback&& aResolveCallback,
                                          const ClientOpCallback&& aRejectCallback)
   : mClientHandle(aClientHandle)
-  , mResolveCallback(Move(aResolveCallback))
-  , mRejectCallback(Move(aRejectCallback))
+  , mResolveCallback(std::move(aResolveCallback))
+  , mRejectCallback(std::move(aRejectCallback))
 {
-  MOZ_RELEASE_ASSERT(mClientHandle);
-  MOZ_RELEASE_ASSERT(mResolveCallback);
-  MOZ_RELEASE_ASSERT(mRejectCallback);
+  MOZ_DIAGNOSTIC_ASSERT(mClientHandle);
+  MOZ_DIAGNOSTIC_ASSERT(mResolveCallback);
+  MOZ_DIAGNOSTIC_ASSERT(mRejectCallback);
 }
 
 } // namespace dom

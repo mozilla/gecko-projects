@@ -285,7 +285,7 @@ nsAutoCompleteController::HandleText(bool *_retval)
     // we should reopen it forcibly even if the value is empty.
     if (popupClosedByCompositionStart && handlingCompositionCommit) {
       bool cancel;
-      HandleKeyNavigation(dom::KeyboardEventBinding::DOM_VK_DOWN, &cancel);
+      HandleKeyNavigation(dom::KeyboardEvent_Binding::DOM_VK_DOWN, &cancel);
       return NS_OK;
     }
     ClosePopup();
@@ -435,10 +435,10 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
   input->GetDisableAutoComplete(&disabled);
   NS_ENSURE_TRUE(!disabled, NS_OK);
 
-  if (aKey == dom::KeyboardEventBinding::DOM_VK_UP ||
-      aKey == dom::KeyboardEventBinding::DOM_VK_DOWN ||
-      aKey == dom::KeyboardEventBinding::DOM_VK_PAGE_UP ||
-      aKey == dom::KeyboardEventBinding::DOM_VK_PAGE_DOWN)
+  if (aKey == dom::KeyboardEvent_Binding::DOM_VK_UP ||
+      aKey == dom::KeyboardEvent_Binding::DOM_VK_DOWN ||
+      aKey == dom::KeyboardEvent_Binding::DOM_VK_PAGE_UP ||
+      aKey == dom::KeyboardEvent_Binding::DOM_VK_PAGE_DOWN)
   {
     // Prevent the input from handling up/down events, as it may move
     // the cursor to home/end on some systems
@@ -447,10 +447,10 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
     bool isOpen = false;
     input->GetPopupOpen(&isOpen);
     if (isOpen) {
-      bool reverse = aKey == dom::KeyboardEventBinding::DOM_VK_UP ||
-                      aKey == dom::KeyboardEventBinding::DOM_VK_PAGE_UP ? true : false;
-      bool page = aKey == dom::KeyboardEventBinding::DOM_VK_PAGE_UP ||
-                    aKey == dom::KeyboardEventBinding::DOM_VK_PAGE_DOWN ? true : false;
+      bool reverse = aKey == dom::KeyboardEvent_Binding::DOM_VK_UP ||
+                      aKey == dom::KeyboardEvent_Binding::DOM_VK_PAGE_UP ? true : false;
+      bool page = aKey == dom::KeyboardEvent_Binding::DOM_VK_PAGE_UP ||
+                    aKey == dom::KeyboardEvent_Binding::DOM_VK_PAGE_DOWN ? true : false;
 
       // Fill in the value of the textbox with whatever is selected in the popup
       // if the completeSelectedIndex attribute is set.  We check this before
@@ -508,13 +508,13 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
       // shortcuts for up and down move to the beginning and end of the field
       // otherwise.
       int32_t start, end;
-      if (aKey == dom::KeyboardEventBinding::DOM_VK_UP) {
+      if (aKey == dom::KeyboardEvent_Binding::DOM_VK_UP) {
         input->GetSelectionStart(&start);
         input->GetSelectionEnd(&end);
         if (start > 0 || start != end)
           *_retval = false;
       }
-      else if (aKey == dom::KeyboardEventBinding::DOM_VK_DOWN) {
+      else if (aKey == dom::KeyboardEvent_Binding::DOM_VK_DOWN) {
         nsAutoString text;
         input->GetTextValue(text);
         input->GetSelectionStart(&start);
@@ -554,10 +554,10 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
         }
       }
     }
-  } else if (   aKey == dom::KeyboardEventBinding::DOM_VK_LEFT
-             || aKey == dom::KeyboardEventBinding::DOM_VK_RIGHT
+  } else if (   aKey == dom::KeyboardEvent_Binding::DOM_VK_LEFT
+             || aKey == dom::KeyboardEvent_Binding::DOM_VK_RIGHT
 #ifndef XP_MACOSX
-             || aKey == dom::KeyboardEventBinding::DOM_VK_HOME
+             || aKey == dom::KeyboardEvent_Binding::DOM_VK_HOME
 #endif
             )
   {
@@ -574,32 +574,30 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
       // For completeSelectedIndex autocomplete fields, if the popup shouldn't
       // close when the caret is moved, don't adjust the text value or caret
       // position.
+      bool completeSelection;
+      input->GetCompleteSelectedIndex(&completeSelection);
       if (isOpen) {
         bool noRollup;
         input->GetNoRollupOnCaretMove(&noRollup);
         if (noRollup) {
-          bool completeSelection;
-          input->GetCompleteSelectedIndex(&completeSelection);
           if (completeSelection) {
             return NS_OK;
           }
         }
       }
 
+      int32_t selectionEnd;
+      input->GetSelectionEnd(&selectionEnd);
+      int32_t selectionStart;
+      input->GetSelectionStart(&selectionStart);
+      bool shouldCompleteSelection =
+        (uint32_t)selectionEnd == mPlaceholderCompletionString.Length() &&
+        selectionStart < selectionEnd;
       int32_t selectedIndex;
       popup->GetSelectedIndex(&selectedIndex);
-      bool shouldComplete;
-      input->GetCompleteDefaultIndex(&shouldComplete);
-      if (selectedIndex >= 0) {
-        // The pop-up is open and has a selection, take its value
-        nsAutoString value;
-        if (NS_SUCCEEDED(GetResultValueAt(selectedIndex, false, value))) {
-          SetValueOfInputTo(
-            value, nsIAutoCompleteInput::TEXTVALUE_REASON_COMPLETESELECTED);
-          input->SelectTextRange(value.Length(), value.Length());
-        }
-      }
-      else if (shouldComplete) {
+      bool completeDefaultIndex;
+      input->GetCompleteDefaultIndex(&completeDefaultIndex);
+      if (completeDefaultIndex && shouldCompleteSelection) {
         // We usually try to preserve the casing of what user has typed, but
         // if he wants to autocomplete, we will replace the value with the
         // actual autocomplete result. Note that the autocomplete input can also
@@ -624,6 +622,15 @@ nsAutoCompleteController::HandleKeyNavigation(uint32_t aKey, bool *_retval)
               value, nsIAutoCompleteInput::TEXTVALUE_REASON_COMPLETEDEFAULT);
             input->SelectTextRange(value.Length(), value.Length());
           }
+        }
+      } else if (!completeDefaultIndex && !completeSelection &&
+                 selectedIndex >= 0) {
+        // The pop-up is open and has a selection, take its value
+        nsAutoString value;
+        if (NS_SUCCEEDED(GetResultValueAt(selectedIndex, false, value))) {
+          SetValueOfInputTo(
+            value, nsIAutoCompleteInput::TEXTVALUE_REASON_COMPLETESELECTED);
+          input->SelectTextRange(value.Length(), value.Length());
         }
       }
 
@@ -1529,8 +1536,20 @@ nsAutoCompleteController::CompleteDefaultIndex(int32_t aResultIndex)
   nsAutoString resultValue;
   if (NS_SUCCEEDED(GetDefaultCompleteValue(aResultIndex, true, resultValue))) {
     CompleteValue(resultValue);
-
     mDefaultIndexCompleted = true;
+  } else {
+    // Reset the search string again, in case it was completed with
+    // mPlaceholderCompletionString, but the actually received result doesn't
+    // have a default index result. Only reset the input when necessary, to
+    // avoid triggering unnecessary new searches.
+    nsAutoString inputValue;
+    input->GetTextValue(inputValue);
+    if (!inputValue.Equals(mSearchString)) {
+      SetValueOfInputTo(mSearchString,
+                        nsIAutoCompleteInput::TEXTVALUE_REASON_REVERT);
+      input->SelectTextRange(mSearchString.Length(), mSearchString.Length());
+    }
+    mPlaceholderCompletionString.Truncate();
   }
 
   return NS_OK;

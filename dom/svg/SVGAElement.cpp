@@ -14,6 +14,7 @@
 #include "nsContentUtils.h"
 #include "nsGkAtoms.h"
 #include "nsSVGString.h"
+#include "nsIContentInlines.h"
 #include "nsIURI.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(A)
@@ -24,7 +25,7 @@ namespace dom {
 JSObject*
 SVGAElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return SVGAElementBinding::Wrap(aCx, this, aGivenProto);
+  return SVGAElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 nsSVGElement::StringInfo SVGAElement::sStringInfo[3] =

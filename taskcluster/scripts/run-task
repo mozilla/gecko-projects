@@ -28,6 +28,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import stat
 import subprocess
@@ -468,7 +469,7 @@ def vcs_checkout(source_repo, dest, store_path,
 
 
 def main(args):
-    print_line(b'setup', b'run-task started\n')
+    print_line(b'setup', b'run-task started in %s\n' % os.getcwd().encode('utf-8'))
     running_as_root = IS_POSIX and os.getuid() == 0
 
     # Arguments up to '--' are ours. After are for the main task
@@ -506,18 +507,13 @@ def main(args):
     if 'HG_STORE_PATH' in os.environ:
         os.environ['HG_STORE_PATH'] = os.path.expanduser(os.environ['HG_STORE_PATH'])
 
-    if IS_POSIX:
-        if running_as_root:
-            user, group, gids = get_posix_user_group(args.user, args.group)
-            uid = user.pw_uid
-            gid = group.gr_gid
-        else:
-            print('error: run-task must be run as root on POSIX platforms')
-            return 1
-    else:
-        uid = gid = gids = None
+    uid = gid = gids = None
+    if IS_POSIX and running_as_root:
+        user, group, gids = get_posix_user_group(args.user, args.group)
+        uid = user.pw_uid
+        gid = group.gr_gid
 
-    if os.path.exists("/dev/kvm"):
+    if running_as_root and os.path.exists("/dev/kvm"):
         # Ensure kvm permissions for worker, required for Android x86
         st = os.stat("/dev/kvm")
         os.chmod("/dev/kvm", st.st_mode | 0o666)
@@ -712,9 +708,10 @@ def main(args):
         print('task should be defined in terms of non-symbolic revision')
         return 1
 
+    use_artifact_path = os.environ.get('USE_ARTIFACT_PATH')
+
     def prepare_use_artifact(key, url):
         print_line(b'setup', b'fetching artifact from %s\n' % url.encode('utf-8'))
-        use_artifact_path = os.environ['USE_ARTIFACT_PATH']
         path = os.path.join(use_artifact_path, key)
         if not os.path.isdir(path):
             os.makedirs(path)
@@ -732,7 +729,11 @@ def main(args):
             for url in urls:
                 prepare_use_artifact(key, url)
 
-    return run_and_prefix_output(b'task', task_args)
+    try:
+        return run_and_prefix_output(b'task', task_args)
+    finally:
+        if use_artifact_path and os.path.isdir(use_artifact_path):
+            shutil.rmtree(use_artifact_path)
 
 
 if __name__ == '__main__':

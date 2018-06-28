@@ -1141,8 +1141,10 @@ HTMLFormElement::PostPasswordEvent()
   }
 
   mFormPasswordEventDispatcher =
-    new AsyncEventDispatcher(this, NS_LITERAL_STRING("DOMFormHasPassword"),
-                             true, true);
+    new AsyncEventDispatcher(this,
+                             NS_LITERAL_STRING("DOMFormHasPassword"),
+                             CanBubble::eYes,
+                             ChromeOnlyDispatch::eYes);
   mFormPasswordEventDispatcher->PostDOMEvent();
 }
 
@@ -1570,7 +1572,7 @@ HTMLFormElement::FlushPendingSubmission()
   if (mPendingSubmission) {
     // Transfer owning reference so that the submissioin doesn't get deleted
     // if we reenter
-    nsAutoPtr<HTMLFormSubmission> submission = Move(mPendingSubmission);
+    nsAutoPtr<HTMLFormSubmission> submission = std::move(mPendingSubmission);
 
     SubmitSubmission(submission);
   }
@@ -1670,8 +1672,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
       return NS_OK;
     }
 
-    rv = docURI->Clone(getter_AddRefs(actionURL));
-    NS_ENSURE_SUCCESS(rv, rv);
+    actionURL = docURI;
   } else {
     nsCOMPtr<nsIURI> baseURL = GetBaseURI();
     NS_ASSERTION(baseURL, "No Base URL found in Form Submit!\n");
@@ -1872,7 +1873,8 @@ HTMLFormElement::CheckFormValidity(nsIMutableArray* aInvalidElements) const
       nsContentUtils::DispatchTrustedEvent(sortedControls[i]->OwnerDoc(),
                                            static_cast<nsIContent*>(sortedControls[i]),
                                            NS_LITERAL_STRING("invalid"),
-                                           false, true, &defaultAction);
+                                           CanBubble::eNo, Cancelable::eYes,
+                                           &defaultAction);
 
       // Add all unhandled invalid controls to aInvalidElements if the caller
       // requested them.
@@ -2103,7 +2105,7 @@ HTMLFormElement::OnProgressChange(nsIWebProgress* aWebProgress,
                                   int32_t aCurTotalProgress,
                                   int32_t aMaxTotalProgress)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2113,7 +2115,7 @@ HTMLFormElement::OnLocationChange(nsIWebProgress* aWebProgress,
                                   nsIURI* location,
                                   uint32_t aFlags)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2123,7 +2125,7 @@ HTMLFormElement::OnStatusChange(nsIWebProgress* aWebProgress,
                                 nsresult aStatus,
                                 const char16_t* aMessage)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2132,7 +2134,7 @@ HTMLFormElement::OnSecurityChange(nsIWebProgress* aWebProgress,
                                   nsIRequest* aRequest,
                                   uint32_t state)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2546,7 +2548,7 @@ HTMLFormElement::RemoveElementFromPastNamesMap(Element* aElement)
 JSObject*
 HTMLFormElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLFormElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLFormElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

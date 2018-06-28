@@ -176,7 +176,18 @@ nsContentSecurityManager::CheckFTPSubresourceLoad(nsIChannel* aChannel)
   }
 
   nsContentPolicyType type = loadInfo->GetExternalContentPolicyType();
-  if (type == nsIContentPolicy::TYPE_DOCUMENT) {
+
+  // Allow top-level FTP documents and save-as download of FTP files on
+  // HTTP pages.
+  if (type == nsIContentPolicy::TYPE_DOCUMENT ||
+      type == nsIContentPolicy::TYPE_SAVEAS_DOWNLOAD) {
+    return NS_OK;
+  }
+
+  // Allow the system principal to load everything. This is meant to
+  // temporarily fix downloads and pdf.js.
+  nsIPrincipal* triggeringPrincipal = loadInfo->TriggeringPrincipal();
+  if (nsContentUtils::IsSystemPrincipal(triggeringPrincipal)) {
     return NS_OK;
   }
 
@@ -193,7 +204,6 @@ nsContentSecurityManager::CheckFTPSubresourceLoad(nsIChannel* aChannel)
   }
 
   // Allow loading FTP subresources in FTP documents, like XML.
-  nsIPrincipal* triggeringPrincipal = loadInfo->TriggeringPrincipal();
   nsCOMPtr<nsIURI> triggeringURI;
   triggeringPrincipal->GetURI(getter_AddRefs(triggeringURI));
   if (triggeringURI && nsContentUtils::SchemeIs(triggeringURI, "ftp")) {

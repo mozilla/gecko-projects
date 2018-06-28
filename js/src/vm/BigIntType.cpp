@@ -8,6 +8,9 @@
 
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/HashFunctions.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/Range.h"
+#include "mozilla/RangedPtr.h"
 
 #include <gmp.h>
 #include <math.h>
@@ -23,6 +26,10 @@
 #include "vm/SelfHosting.h"
 
 using namespace js;
+
+using mozilla::Maybe;
+using mozilla::Range;
+using mozilla::RangedPtr;
 
 // The following functions are wrappers for use with
 // mp_set_memory_functions. GMP passes extra arguments to the realloc
@@ -95,6 +102,29 @@ BigInt::createFromBoolean(JSContext* cx, bool b)
     return x;
 }
 
+BigInt*
+BigInt::createFromBytes(JSContext* cx, int sign, void* bytes, size_t nbytes)
+{
+    BigInt* x = Allocate<BigInt>(cx);
+    if (!x)
+        return nullptr;
+    // Initialize num_ to zero before calling mpz_import.
+    mpz_init(x->num_);
+
+    if (nbytes == 0)
+        return x;
+
+    mpz_import(x->num_, nbytes,
+               -1, // order: least significant word first
+               1, // size: one byte per "word"
+               0, // endianness: native
+               0, // nail bits: none; use full words
+               bytes);
+    if (sign < 0)
+        mpz_neg(x->num_, x->num_);
+    return x;
+}
+
 // BigInt proposal section 5.1.1
 static bool
 IsInteger(double d)
@@ -159,8 +189,25 @@ js::ToBigInt(JSContext* cx, HandleValue val)
     if (v.isBoolean())
         return BigInt::createFromBoolean(cx, v.toBoolean());
 
+    if (v.isString()) {
+        RootedString str(cx, v.toString());
+        return StringToBigInt(cx, str, 0);
+    }
+
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_BIGINT);
     return nullptr;
+}
+
+// ES 2019 draft 6.1.6
+double
+BigInt::numberValue(BigInt* x)
+{
+    // mpz_get_d may cause a hardware overflow trap, so use
+    // mpz_get_d_2exp to get the fractional part and exponent
+    // separately.
+    signed long int exp;
+    double d = mpz_get_d_2exp(&exp, x->num_);
+    return ldexp(d, exp);
 }
 
 JSLinearString*
@@ -177,6 +224,122 @@ BigInt::toString(JSContext* cx, BigInt* x, uint8_t radix)
     mpz_get_str(str.get(), radix, x->num_);
 
     return NewStringCopyZ<CanGC>(cx, str.get());
+}
+
+// BigInt proposal section 7.2
+template <typename CharT>
+bool
+js::StringToBigIntImpl(const Range<const CharT>& chars, uint8_t radix,
+                       HandleBigInt res)
+{
+    const RangedPtr<const CharT> end = chars.end();
+    RangedPtr<const CharT> s = chars.begin();
+    Maybe<int8_t> sign;
+
+    s = SkipSpace(s.get(), end.get());
+
+    if (s != end && s[0] == '+') {
+        sign.emplace(1);
+        s++;
+    } else if (s != end && s[0] == '-') {
+        sign.emplace(-1);
+        s++;
+    }
+
+    if (!radix) {
+        radix = 10;
+
+        if (end - s >= 2 && s[0] == '0') {
+            if (s[1] == 'x' || s[1] == 'X') {
+                radix = 16;
+                s += 2;
+            } else if (s[1] == 'o' || s[1] == 'O') {
+                radix = 8;
+                s += 2;
+            } else if (s[1] == 'b' || s[1] == 'B') {
+                radix = 2;
+                s += 2;
+            }
+
+            if (radix != 10 && s == end)
+                return false;
+        }
+    }
+
+    if (sign && radix != 10)
+        return false;
+
+    mpz_set_ui(res->num_, 0);
+
+    for (; s < end; s++) {
+        unsigned digit;
+        if (!mozilla::IsAsciiAlphanumeric(s[0])) {
+            s = SkipSpace(s.get(), end.get());
+            if (s == end)
+                break;
+            return false;
+        }
+        digit = mozilla::AsciiAlphanumericToNumber(s[0]);
+        if (digit >= radix)
+            return false;
+        mpz_mul_ui(res->num_, res->num_, radix);
+        mpz_add_ui(res->num_, res->num_, digit);
+    }
+
+    if (sign.valueOr(1) < 0)
+        mpz_neg(res->num_, res->num_);
+
+    return true;
+}
+
+BigInt*
+js::StringToBigInt(JSContext* cx, HandleString str, uint8_t radix)
+{
+    RootedBigInt res(cx, BigInt::create(cx));
+
+    JSLinearString* linear = str->ensureLinear(cx);
+    if (!linear)
+        return nullptr;
+
+    {
+        JS::AutoCheckCannotGC nogc;
+        if (linear->hasLatin1Chars()) {
+            if (StringToBigIntImpl(linear->latin1Range(nogc), radix, res))
+                return res;
+        } else {
+            if (StringToBigIntImpl(linear->twoByteRange(nogc), radix, res))
+                return res;
+        }
+    }
+
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_BIGINT_INVALID_SYNTAX);
+    return nullptr;
+}
+
+size_t
+BigInt::byteLength(BigInt* x)
+{
+    if (mpz_sgn(x->num_) == 0)
+        return 0;
+    return JS_HOWMANY(mpz_sizeinbase(x->num_, 2), 8);
+}
+
+void
+BigInt::writeBytes(BigInt* x, RangedPtr<uint8_t> buffer)
+{
+#ifdef DEBUG
+    // Check that the buffer being filled is large enough to hold the
+    // integer we're writing. The result of the RangedPtr addition is
+    // restricted to the buffer's range.
+    size_t reprSize = byteLength(x);
+    MOZ_ASSERT(buffer + reprSize, "out of bounds access to buffer");
+#endif
+
+    size_t count;
+    // cf. mpz_import parameters in createFromBytes, above.
+    mpz_export(buffer.get(), &count, -1, 1, 0, 0, x->num_);
+    MOZ_ASSERT(count == reprSize);
 }
 
 void
@@ -198,6 +361,12 @@ bool
 BigInt::toBoolean()
 {
     return mpz_sgn(num_) != 0;
+}
+
+int8_t
+BigInt::sign()
+{
+    return mpz_sgn(num_);
 }
 
 js::HashNumber

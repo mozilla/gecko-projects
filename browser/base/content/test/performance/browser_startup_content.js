@@ -26,9 +26,13 @@ const blacklist = {
     "resource:///modules/ContentWebRTC.jsm",
     "resource://gre/modules/InlineSpellChecker.jsm",
     "resource://gre/modules/InlineSpellCheckerContent.jsm",
+    "resource://gre/modules/LoginHelper.jsm",
+    "resource://gre/modules/LoginManagerContent.jsm",
     "resource://gre/modules/Promise.jsm",
     "resource://gre/modules/Task.jsm",
     "resource://gre/modules/osfile.jsm",
+    "resource://pdf.js/PdfJs.jsm",
+    "resource://pdf.js/PdfStreamConverter.jsm",
   ]),
   services: new Set([
     "@mozilla.org/base/telemetry-startup;1",

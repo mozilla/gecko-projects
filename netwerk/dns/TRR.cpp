@@ -122,7 +122,7 @@ TRR::Run()
 {
   MOZ_ASSERT(NS_IsMainThread());
   if ((gTRRService == nullptr) || NS_FAILED(SendHTTPRequest())) {
-    FailData();
+    FailData(NS_ERROR_FAILURE);
     // The dtor will now be run
   }
   return NS_OK;
@@ -254,7 +254,7 @@ TRR::SendHTTPRequest()
     }
     uint32_t streamLength = body.Length();
     nsCOMPtr<nsIInputStream> uploadStream;
-    rv = NS_NewCStringInputStream(getter_AddRefs(uploadStream), Move(body));
+    rv = NS_NewCStringInputStream(getter_AddRefs(uploadStream), std::move(body));
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = uploadChannel->ExplicitSetUploadStream(uploadStream,
@@ -394,7 +394,7 @@ TRR::ReceivePush(nsIHttpChannel *pushed, nsHostRecord *pushedRec)
 
   RefPtr<nsHostRecord> hostRecord;
   nsresult rv;
-  rv = mHostResolver->GetHostRecord(mHost.get(),
+  rv = mHostResolver->GetHostRecord(mHost,
                                     pushedRec->flags, pushedRec->af,
                                     pushedRec->pb,
                                     pushedRec->originSuffix,
@@ -824,7 +824,7 @@ nsresult
 TRR::ReturnData()
 {
   // create and populate an AddrInfo instance to pass on
-  nsAutoPtr<AddrInfo> ai(new AddrInfo(mHost.get(), mType));
+  nsAutoPtr<AddrInfo> ai(new AddrInfo(mHost, mType));
   DOHaddr *item;
   uint32_t ttl = AddrInfo::NO_TTL_DATA;
   while ((item = static_cast<DOHaddr*>(mDNS.mAddresses.popFirst()))) {
@@ -850,16 +850,16 @@ TRR::ReturnData()
 }
 
 nsresult
-TRR::FailData()
+TRR::FailData(nsresult error)
 {
   if (!mHostResolver) {
     return NS_ERROR_FAILURE;
   }
   // create and populate an TRR AddrInfo instance to pass on to signal that
   // this comes from TRR
-  AddrInfo *ai = new AddrInfo(mHost.get(), mType);
+  AddrInfo *ai = new AddrInfo(mHost, mType);
 
-  (void)mHostResolver->CompleteLookup(mRec, NS_ERROR_FAILURE, ai, mPB);
+  (void)mHostResolver->CompleteLookup(mRec, error, ai, mPB);
   mHostResolver = nullptr;
   mRec = nullptr;
   return NS_OK;
@@ -933,7 +933,7 @@ TRR::OnStopRequest(nsIRequest *aRequest,
       // try and parse missing content-types, but otherwise require udpwireformat
       LOG(("TRR:OnStopRequest %p %s %d should fail due to content type %s\n",
            this, mHost.get(), mType, contentType.get()));
-      FailData();
+      FailData(NS_ERROR_UNEXPECTED);
       return NS_OK;
     }
 
@@ -952,7 +952,7 @@ TRR::OnStopRequest(nsIRequest *aRequest,
 
   LOG(("TRR:OnStopRequest %p status %x mFailed %d\n",
        this, (int)aStatusCode, mFailed));
-  FailData();
+  FailData(NS_ERROR_UNKNOWN_HOST);
   return NS_OK;
 }
 

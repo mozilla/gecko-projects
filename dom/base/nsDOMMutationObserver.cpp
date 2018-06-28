@@ -23,10 +23,7 @@
 #include "nsThreadUtils.h"
 
 using namespace mozilla;
-
-using mozilla::dom::TreeOrderComparator;
-using mozilla::dom::Animation;
-using mozilla::dom::Element;
+using namespace mozilla::dom;
 
 AutoTArray<RefPtr<nsDOMMutationObserver>, 4>*
   nsDOMMutationObserver::sScheduledMutationObservers = nullptr;
@@ -736,7 +733,7 @@ nsDOMMutationObserver::Observe(nsINode& aTarget,
   r->SetAttributeOldValue(attributeOldValue);
   r->SetCharacterDataOldValue(characterDataOldValue);
   r->SetNativeAnonymousChildList(nativeAnonymousChildList);
-  r->SetAttributeFilter(Move(filters));
+  r->SetAttributeFilter(std::move(filters));
   r->SetAllAttributes(allAttrs);
   r->SetAnimations(animations);
   r->RemoveClones();

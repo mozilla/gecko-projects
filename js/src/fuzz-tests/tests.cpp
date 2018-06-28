@@ -21,7 +21,6 @@ using namespace mozilla;
 
 JS::PersistentRootedObject gGlobal;
 JSContext* gCx = nullptr;
-JSCompartment* gOldCompartment = nullptr;
 
 static const JSClass*
 getGlobalClass()
@@ -57,7 +56,7 @@ jsfuzz_createGlobal(JSContext* cx, JSPrincipals* principals)
 
     // Populate the global object with the standard globals like Object and
     // Array.
-    if (!JS_InitStandardClasses(cx, newGlobal))
+    if (!JS::InitRealmStandardClasses(cx))
         return nullptr;
 
     return newGlobal;

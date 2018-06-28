@@ -77,7 +77,10 @@ static int gFrameTreeLockCount = 0;
 struct InlineBackgroundData
 {
   InlineBackgroundData()
-      : mFrame(nullptr), mLineContainer(nullptr)
+      : mFrame(nullptr), mLineContainer(nullptr),
+        mContinuationPoint(0), mUnbrokenMeasure(0), 
+        mLineContinuationPoint(0), mPIStartBorderData{},
+        mBidiEnabled(false), mVertical(false)
   {
   }
 
@@ -655,7 +658,7 @@ nsCSSRendering::PaintBorder(nsPresContext* aPresContext,
   NS_FOR_CSS_SIDES(side) {
     nscolor color = aComputedStyle->
       GetVisitedDependentColor(nsStyleBorder::BorderColorFieldFor(side));
-    newStyleBorder.mBorderColor[side] = StyleComplexColor::FromColor(color);
+    newStyleBorder.BorderColorFor(side) = StyleComplexColor::FromColor(color);
   }
   return PaintBorderWithStyleBorder(aPresContext, aRenderingContext, aForFrame,
                                     aDirtyRect, aBorderArea, newStyleBorder,
@@ -689,7 +692,7 @@ nsCSSRendering::CreateBorderRenderer(nsPresContext* aPresContext,
   NS_FOR_CSS_SIDES(side) {
     nscolor color = aComputedStyle->
       GetVisitedDependentColor(nsStyleBorder::BorderColorFieldFor(side));
-    newStyleBorder.mBorderColor[side] = StyleComplexColor::FromColor(color);
+    newStyleBorder.BorderColorFor(side) = StyleComplexColor::FromColor(color);
   }
   return CreateBorderRendererWithStyleBorder(aPresContext, aDrawTarget,
                                              aForFrame, aDirtyRect, aBorderArea,
@@ -858,7 +861,7 @@ ConstructBorderRenderer(nsPresContext* aPresContext,
   // pull out styles, colors
   NS_FOR_CSS_SIDES (i) {
     borderStyles[i] = aStyleBorder.GetBorderStyle(i);
-    borderColors[i] = aStyleBorder.mBorderColor[i].CalcColor(aComputedStyle);
+    borderColors[i] = aStyleBorder.BorderColorFor(i).CalcColor(aComputedStyle);
   }
 
   PrintAsFormatString(" borderStyles: %d %d %d %d\n", borderStyles[0], borderStyles[1], borderStyles[2], borderStyles[3]);
@@ -1034,7 +1037,9 @@ GetOutlineInnerRect(nsIFrame* aFrame)
     aFrame->GetProperty(nsIFrame::OutlineInnerRectProperty());
   if (savedOutlineInnerRect)
     return *savedOutlineInnerRect;
-  NS_NOTREACHED("we should have saved a frame property");
+
+  // FIXME bug 1221888
+  NS_ERROR("we should have saved a frame property");
   return nsRect(nsPoint(0, 0), aFrame->GetSize());
 }
 
@@ -1517,12 +1522,7 @@ nsCSSRendering::GetShadowColor(nsCSSShadowItem* aShadow,
                                float aOpacity)
 {
   // Get the shadow color; if not specified, use the foreground color
-  nscolor shadowColor;
-  if (aShadow->mHasColor)
-    shadowColor = aShadow->mColor;
-  else
-    shadowColor = aFrame->StyleColor()->mColor;
-
+  nscolor shadowColor = aShadow->mColor.CalcColor(aFrame);
   Color color = Color::FromABGR(shadowColor);
   color.a *= aOpacity;
   return color;
@@ -2162,13 +2162,10 @@ IsOpaqueBorderEdge(const nsStyleBorder& aBorder, mozilla::Side aSide)
   if (aBorder.mBorderImageSource.GetType() != eStyleImageType_Null)
     return false;
 
-  StyleComplexColor color = aBorder.mBorderColor[aSide];
+  StyleComplexColor color = aBorder.BorderColorFor(aSide);
   // We don't know the foreground color here, so if it's being used
   // we must assume it might be transparent.
-  if (!color.IsNumericColor()) {
-    return false;
-  }
-  return NS_GET_A(color.mColor) == 255;
+  return !color.MaybeTransparent();
 }
 
 /**

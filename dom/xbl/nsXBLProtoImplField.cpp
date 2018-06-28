@@ -47,6 +47,7 @@ nsXBLProtoImplField::nsXBLProtoImplField(const char16_t* aName, const char16_t* 
 
 nsXBLProtoImplField::nsXBLProtoImplField(const bool aIsReadOnly)
   : mNext(nullptr),
+    mName(nullptr),
     mFieldText(nullptr),
     mFieldTextLength(0),
     mLineNumber(0)
@@ -360,9 +361,7 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (!::JS_DefinePropertyById(aCx, aTargetClassObject, id,
-                               JS_DATA_TO_FUNC_PTR(JSNative, get.get()),
-                               JS_DATA_TO_FUNC_PTR(JSNative, set.get()),
+  if (!::JS_DefinePropertyById(aCx, aTargetClassObject, id, get, set,
                                AccessorAttributes())) {
     return NS_ERROR_OUT_OF_MEMORY;
   }

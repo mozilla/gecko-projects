@@ -24,9 +24,9 @@
 #include "vm/GeckoProfiler.h"
 
 #include "vm/GeckoProfiler-inl.h"
-#include "vm/JSCompartment-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
+#include "vm/Realm-inl.h"
 
 using namespace js;
 
@@ -108,7 +108,7 @@ JS::ubi::Concrete<JSString>::size(mozilla::MallocSizeOf mallocSizeOf) const
 
 const char16_t JS::ubi::Concrete<JSString>::concreteTypeName[] = u"JSString";
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 
 template <typename CharT>
 /*static */ void
@@ -250,7 +250,7 @@ JSString::equals(const char* s)
 
     return StringEqualsAscii(linear, s);
 }
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
 template <typename CharT>
 static MOZ_ALWAYS_INLINE bool
@@ -279,55 +279,59 @@ AllocChars(JSString* str, size_t length, CharT** chars, size_t* capacity)
     return *chars != nullptr;
 }
 
-bool
-JSRope::copyLatin1CharsZ(JSContext* cx, ScopedJSFreePtr<Latin1Char>& out) const
+UniquePtr<Latin1Char[], JS::FreePolicy>
+JSRope::copyLatin1CharsZ(JSContext* maybecx) const
 {
-    return copyCharsInternal<Latin1Char>(cx, out, true);
+    return copyCharsInternal<Latin1Char>(maybecx, true);
 }
 
-bool
-JSRope::copyTwoByteCharsZ(JSContext* cx, ScopedJSFreePtr<char16_t>& out) const
+UniqueTwoByteChars
+JSRope::copyTwoByteCharsZ(JSContext* maybecx) const
 {
-    return copyCharsInternal<char16_t>(cx, out, true);
+    return copyCharsInternal<char16_t>(maybecx, true);
 }
 
-bool
-JSRope::copyLatin1Chars(JSContext* cx, ScopedJSFreePtr<Latin1Char>& out) const
+UniquePtr<Latin1Char[], JS::FreePolicy>
+JSRope::copyLatin1Chars(JSContext* maybecx) const
 {
-    return copyCharsInternal<Latin1Char>(cx, out, false);
+    return copyCharsInternal<Latin1Char>(maybecx, false);
 }
 
-bool
-JSRope::copyTwoByteChars(JSContext* cx, ScopedJSFreePtr<char16_t>& out) const
+UniqueTwoByteChars
+JSRope::copyTwoByteChars(JSContext* maybecx) const
 {
-    return copyCharsInternal<char16_t>(cx, out, false);
+    return copyCharsInternal<char16_t>(maybecx, false);
 }
 
 template <typename CharT>
-bool
-JSRope::copyCharsInternal(JSContext* cx, ScopedJSFreePtr<CharT>& out,
-                          bool nullTerminate) const
+UniquePtr<CharT[], JS::FreePolicy>
+JSRope::copyCharsInternal(JSContext* maybecx, bool nullTerminate) const
 {
     // Left-leaning ropes are far more common than right-leaning ropes, so
     // perform a non-destructive traversal of the rope, right node first,
     // splatting each node's characters into a contiguous buffer.
 
     size_t n = length();
-    if (cx)
-        out.reset(cx->pod_malloc<CharT>(n + 1));
+
+    UniquePtr<CharT[], JS::FreePolicy> out;
+    if (maybecx)
+        out.reset(maybecx->pod_malloc<CharT>(n + 1));
     else
         out.reset(js_pod_malloc<CharT>(n + 1));
 
     if (!out)
-        return false;
+        return nullptr;
 
     Vector<const JSString*, 8, SystemAllocPolicy> nodeStack;
     const JSString* str = this;
-    CharT* end = out + str->length();
+    CharT* end = out.get() + str->length();
     while (true) {
         if (str->isRope()) {
-            if (!nodeStack.append(str->asRope().leftChild()))
-                return false;
+            if (!nodeStack.append(str->asRope().leftChild())) {
+                if (maybecx)
+                    ReportOutOfMemory(maybecx);
+                return nullptr;
+            }
             str = str->asRope().rightChild();
         } else {
             end -= str->length();
@@ -338,12 +342,12 @@ JSRope::copyCharsInternal(JSContext* cx, ScopedJSFreePtr<CharT>& out,
         }
     }
 
-    MOZ_ASSERT(end == out);
+    MOZ_ASSERT(end == out.get());
 
     if (nullTerminate)
         out[n] = 0;
 
-    return true;
+    return out;
 }
 
 template <typename CharT>
@@ -393,7 +397,7 @@ JSRope::hash(uint32_t* outHash) const
     return true;
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 void
 JSRope::dumpRepresentation(js::GenericPrinter& out, int indent) const
 {
@@ -816,7 +820,7 @@ JSDependentString::undepend(JSContext* cx)
            : undependInternal<char16_t>(cx);
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 void
 JSDependentString::dumpRepresentation(js::GenericPrinter& out, int indent) const
 {
@@ -1385,7 +1389,7 @@ JSExternalString::ensureFlat(JSContext* cx)
     return &this->asFlat();
 }
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 void
 JSAtom::dump(js::GenericPrinter& out)
 {
@@ -1409,7 +1413,7 @@ JSExternalString::dumpRepresentation(js::GenericPrinter& out, int indent) const
     out.printf("%*sfinalizer: ((JSStringFinalizer*) %p)\n", indent, "", externalFinalizer());
     dumpRepresentationChars(out, indent);
 }
-#endif /* DEBUG */
+#endif /* defined(DEBUG) || defined(JS_JITSPEW) */
 
 JSLinearString*
 js::NewDependentString(JSContext* cx, JSString* baseArg, size_t start, size_t length)
@@ -1502,13 +1506,13 @@ NewStringDeflated(JSContext* cx, const char16_t* s, size_t n)
     if (JSInlineString::lengthFits<Latin1Char>(n))
         return NewInlineStringDeflated<allowGC>(cx, mozilla::Range<const char16_t>(s, n));
 
-    ScopedJSFreePtr<Latin1Char> news(cx->pod_malloc<Latin1Char>(n + 1));
+    UniquePtr<Latin1Char[], JS::FreePolicy> news(cx->pod_malloc<Latin1Char>(n + 1));
     if (!news)
         return nullptr;
 
     for (size_t i = 0; i < n; i++) {
         MOZ_ASSERT(s[i] <= JSString::MAX_LATIN1_CHAR);
-        news.get()[i] = Latin1Char(s[i]);
+        news[i] = Latin1Char(s[i]);
     }
     news[n] = '\0';
 
@@ -1516,7 +1520,7 @@ NewStringDeflated(JSContext* cx, const char16_t* s, size_t n)
     if (!str)
         return nullptr;
 
-    news.forget();
+    mozilla::Unused << news.release();
     return str;
 }
 
@@ -1604,7 +1608,7 @@ NewStringCopyNDontDeflate(JSContext* cx, const CharT* s, size_t n)
     if (JSInlineString::lengthFits<CharT>(n))
         return NewInlineString<allowGC>(cx, mozilla::Range<const CharT>(s, n));
 
-    ScopedJSFreePtr<CharT> news(cx->pod_malloc<CharT>(n + 1));
+    UniquePtr<CharT[], JS::FreePolicy> news(cx->pod_malloc<CharT>(n + 1));
     if (!news) {
         if (!allowGC)
             cx->recoverFromOutOfMemory();
@@ -1618,7 +1622,7 @@ NewStringCopyNDontDeflate(JSContext* cx, const CharT* s, size_t n)
     if (!str)
         return nullptr;
 
-    news.forget();
+    mozilla::Unused << news.release();
     return str;
 }
 
@@ -1772,7 +1776,7 @@ NewMaybeExternalString(JSContext* cx, const char16_t* s, size_t n, const JSStrin
 
 } /* namespace js */
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_JITSPEW)
 void
 JSExtensibleString::dumpRepresentation(js::GenericPrinter& out, int indent) const
 {
@@ -2002,6 +2006,29 @@ JSString::fillWithRepresentatives(JSContext* cx, HandleArrayObject array)
 
 
 /*** Conversions *********************************************************************************/
+
+UniqueChars
+js::EncodeLatin1(JSContext* cx, JSString* str)
+{
+    JSLinearString* linear = str->ensureLinear(cx);
+    if (!linear)
+        return nullptr;
+
+    JS::AutoCheckCannotGC nogc;
+    if (linear->hasTwoByteChars()) {
+        Latin1CharsZ chars = JS::LossyTwoByteCharsToNewLatin1CharsZ(cx, linear->twoByteRange(nogc));
+        return UniqueChars(chars.c_str());
+    }
+
+    size_t len = str->length();
+    Latin1Char* buf = cx->pod_malloc<Latin1Char>(len + 1);
+    if (!buf)
+        return nullptr;
+
+    mozilla::PodCopy(buf, linear->latin1Chars(nogc), len);
+    buf[len] = '\0';
+    return UniqueChars(reinterpret_cast<char*>(buf));
+}
 
 const char*
 js::ValueToPrintableLatin1(JSContext* cx, const Value& vArg, JSAutoByteString* bytes,

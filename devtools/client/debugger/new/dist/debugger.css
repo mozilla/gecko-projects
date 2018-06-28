@@ -1045,11 +1045,12 @@ html .toggle-button.end.vertical svg {
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 .search-shadow {
-  margin: 1px;
+  border: 1px solid transparent;
 }
 
 .search-shadow.focused {
-  box-shadow: var(--theme-focus-box-shadow-textbox);
+  border: 1px solid var(--blue-50);
+  transition: border-color 0.2s ease-in-out;
 }
 
 .search-field {
@@ -1758,6 +1759,37 @@ menuseparator {
 
 .function-signature .comma {
   color: var(--object-color);
+}
+.source-icon {
+  position: relative;
+  background-color: var(--theme-comment);
+  mask-size: 100%;
+  display: inline-block;
+  margin-inline-end: 5px;
+}
+
+.source-icon,
+.source-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.source-icon.prettyPrint {
+  mask: url("chrome://devtools/skin/images/debugger/prettyPrint.svg") no-repeat;
+  mask-size: 100%;
+  background: var(--theme-highlight-blue);
+  fill: var(--theme-textbox-box-shadow);
+}
+
+.source-icon.blackBox {
+  mask: url("chrome://devtools/skin/images/debugger/blackBox.svg") no-repeat;
+  mask-size: 100%;
+  background: var(--theme-highlight-blue);
+}
+
+.source-icon.react {
+  mask-size: 100%;
+  background: var(--theme-highlight-bluegrey);
 }
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -2630,7 +2662,7 @@ button.jump-definition {
 }
 
 .theme-dark .editor-wrapper {
-  --debug-expression-background: #54617e;
+  --debug-expression-background: rgba(202, 227, 255, 0.3);
   --debug-line-border: #7786a2;
 }
 
@@ -2679,7 +2711,7 @@ html[dir="rtl"] .editor-mount {
 :not(.empty-line):not(.new-breakpoint) > .CodeMirror-gutter-wrapper:hover {
   width: 60px;
   height: 13px;
-  left: -55px !important;
+  margin-left: -25px;
   background-color: var(--gutter-hover-background-color) !important;
   mask: url("chrome://devtools/skin/images/debugger/breakpoint.svg") no-repeat;
   mask-size: 100%;
@@ -2902,37 +2934,6 @@ debug-expression-error {
   border-radius: 2px;
   margin: 0 -1px -1px -1px;
 }
-.source-icon {
-  position: relative;
-  background-color: var(--theme-comment);
-  mask-size: 100%;
-  display: inline-block;
-  margin-inline-end: 5px;
-}
-
-.source-icon,
-.source-icon svg {
-  width: 15px;
-  height: 15px;
-}
-
-.source-icon.prettyPrint {
-  mask: url("chrome://devtools/skin/images/debugger/prettyPrint.svg") no-repeat;
-  mask-size: 100%;
-  background: var(--theme-highlight-blue);
-  fill: var(--theme-textbox-box-shadow);
-}
-
-.source-icon.blackBox {
-  mask: url("chrome://devtools/skin/images/debugger/blackBox.svg") no-repeat;
-  mask-size: 100%;
-  background: var(--theme-highlight-blue);
-}
-
-.source-icon.react {
-  mask-size: 100%;
-  background: var(--theme-highlight-bluegrey);
-}
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -3066,7 +3067,6 @@ html .breakpoints-list .breakpoint.paused {
   color: var(--theme-comment);
   min-width: 16px;
   text-align: right;
-  margin-top: -1px;
 }
 
 html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
@@ -3089,7 +3089,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
   flex-grow: 1;
   text-overflow: ellipsis;
   overflow: hidden;
-  padding-top: 3px;
+  padding-top: 2px;
   font-size: 11px;
 }
 
@@ -3118,8 +3118,8 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
 }
 
 .breakpoint .close-btn {
-  offset-inline-end: 15px;
-  offset-inline-start: auto;
+  inset-inline-end: 15px;
+  inset-inline-start: auto;
   position: absolute;
   top: 8px;
   display: none;
@@ -3268,7 +3268,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
 
 .expression-container__close-btn {
   position: absolute;
-  offset-inline-end: 0px;
+  inset-inline-end: 0px;
   top: 1px;
 }
 
@@ -3861,8 +3861,6 @@ html[dir="rtl"] .object-node {
   flex-direction: column;
   flex: 1;
   white-space: nowrap;
-  -moz-user-select: none;
-  user-select: none;
   --breakpoint-expression-right-clear-space: 36px;
   --breakpoint-expression-height: 2.4em;
 }
@@ -3954,8 +3952,8 @@ html[dir="rtl"] .object-node {
 .welcomebox .command-bar-button {
   position: absolute;
   top: auto;
-  offset-inline-end: 0;
-  offset-inline-start: auto;
+  inset-inline-end: 0;
+  inset-inline-start: auto;
   bottom: 0;
 }
 

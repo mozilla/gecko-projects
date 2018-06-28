@@ -662,7 +662,7 @@ nsPrintJob::DoCommonPrint(bool                    aIsPrintPreview,
     mProgressDialogIsShown = pps != nullptr;
 
     if (mIsDoingPrintPreview) {
-      mOldPrtPreview = Move(mPrtPreview);
+      mOldPrtPreview = std::move(mPrtPreview);
     }
   } else {
     mProgressDialogIsShown = false;
@@ -1413,8 +1413,8 @@ nsPrintJob::BuildDocTree(nsIDocShell*      aParentNode,
         po->mParent = aPO.get();
         nsresult rv = po->Init(childAsShell, doc, aPO->mPrintPreview);
         if (NS_FAILED(rv))
-          NS_NOTREACHED("Init failed?");
-        aPO->mKids.AppendElement(Move(po));
+          MOZ_ASSERT_UNREACHABLE("Init failed?");
+        aPO->mKids.AppendElement(std::move(po));
         aDocList->AppendElement(aPO->mKids.LastElement().get());
         BuildDocTree(childAsShell, aDocList, aPO->mKids.LastElement());
       }
@@ -1641,7 +1641,7 @@ nsPrintJob::FirePrintingErrorEvent(nsresult aPrintError)
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(doc, event);
-  asyncDispatcher->mOnlyChromeDispatch = true;
+  asyncDispatcher->mOnlyChromeDispatch = ChromeOnlyDispatch::eYes;
   asyncDispatcher->RunDOMEventWhenSafe();
 
   // Inform any progress listeners of the Error.
@@ -1992,8 +1992,9 @@ nsPrintJob::FirePrintPreviewUpdateEvent()
   if (mIsDoingPrintPreview && !mIsDoingPrinting) {
     nsCOMPtr<nsIContentViewer> cv = do_QueryInterface(mDocViewerPrint);
     (new AsyncEventDispatcher(
-       cv->GetDocument(), NS_LITERAL_STRING("printPreviewUpdate"), true, true)
-    )->RunDOMEventWhenSafe();
+       cv->GetDocument(), NS_LITERAL_STRING("printPreviewUpdate"),
+       CanBubble::eYes, ChromeOnlyDispatch::eYes
+    ))->RunDOMEventWhenSafe();
   }
 }
 
@@ -2090,7 +2091,7 @@ nsPrintJob::OnProgressChange(nsIWebProgress* aWebProgress,
                              int32_t aCurTotalProgress,
                              int32_t aMaxTotalProgress)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2100,7 +2101,7 @@ nsPrintJob::OnLocationChange(nsIWebProgress* aWebProgress,
                              nsIURI* aLocation,
                              uint32_t aFlags)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2110,7 +2111,7 @@ nsPrintJob::OnStatusChange(nsIWebProgress* aWebProgress,
                            nsresult aStatus,
                            const char16_t* aMessage)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2119,7 +2120,7 @@ nsPrintJob::OnSecurityChange(nsIWebProgress* aWebProgress,
                              nsIRequest* aRequest,
                              uint32_t aState)
 {
-  NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+  MOZ_ASSERT_UNREACHABLE("notification excluded in AddProgressListener(...)");
   return NS_OK;
 }
 
@@ -2344,16 +2345,9 @@ nsPrintJob::ReflowPrintObject(const UniquePtr<nsPrintObject>& aPO)
   UniquePtr<ServoStyleSet> styleSet =
     mDocViewerPrint->CreateStyleSet(aPO->mDocument);
 
-  if (aPO->mDocument->IsSVGDocument()) {
-    // The SVG document only loads minimal-xul.css, so it doesn't apply other
-    // styles. We should add ua.css for applying style which related to print.
-    auto cache = nsLayoutStylesheetCache::Singleton();
-    styleSet->PrependStyleSheet(SheetType::Agent, cache->UASheet());
-  }
-
   aPO->mPresShell = aPO->mDocument->CreateShell(aPO->mPresContext,
                                                 aPO->mViewManager,
-                                                Move(styleSet));
+                                                std::move(styleSet));
   if (!aPO->mPresShell) {
     return NS_ERROR_FAILURE;
   }
@@ -3474,7 +3468,7 @@ nsPrintJob::FinishPrintPreview()
 
   // PrintPreview was built using the mPrt (code reuse)
   // then we assign it over
-  mPrtPreview = Move(mPrt);
+  mPrtPreview = std::move(mPrt);
 
 #endif // NS_PRINT_PREVIEW
 

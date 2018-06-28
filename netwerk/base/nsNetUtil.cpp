@@ -725,7 +725,7 @@ NS_NewInputStreamChannelInternal(nsIChannel** outChannel,
   rv = isc->SetURI(aUri);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIInputStream> stream = Move(aStream);
+  nsCOMPtr<nsIInputStream> stream = std::move(aStream);
   rv = isc->SetContentStream(stream);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -776,7 +776,7 @@ NS_NewInputStreamChannelInternal(nsIChannel** outChannel,
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsCOMPtr<nsIInputStream> stream = Move(aStream);
+  nsCOMPtr<nsIInputStream> stream = std::move(aStream);
 
   return NS_NewInputStreamChannelInternal(outChannel,
                                           aUri,
@@ -895,7 +895,7 @@ NS_NewInputStreamPump(nsIInputStreamPump** aResult,
                       bool aCloseWhenDone /* = false */,
                       nsIEventTarget* aMainThreadTarget /* = nullptr */)
 {
-    nsCOMPtr<nsIInputStream> stream = Move(aStream);
+    nsCOMPtr<nsIInputStream> stream = std::move(aStream);
 
     nsresult rv;
     nsCOMPtr<nsIInputStreamPump> pump =
@@ -1485,7 +1485,7 @@ NS_NewBufferedOutputStream(nsIOutputStream** aResult,
                            already_AddRefed<nsIOutputStream> aOutputStream,
                            uint32_t aBufferSize)
 {
-    nsCOMPtr<nsIOutputStream> outputStream = Move(aOutputStream);
+    nsCOMPtr<nsIOutputStream> outputStream = std::move(aOutputStream);
 
     nsresult rv;
     nsCOMPtr<nsIBufferedOutputStream> out =
@@ -1504,7 +1504,7 @@ NS_NewBufferedInputStream(nsIInputStream** aResult,
                           already_AddRefed<nsIInputStream> aInputStream,
                           uint32_t aBufferSize)
 {
-    nsCOMPtr<nsIInputStream> inputStream = Move(aInputStream);
+    nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
 
     nsresult rv;
     nsCOMPtr<nsIBufferedInputStream> in =
@@ -1520,26 +1520,22 @@ NS_NewBufferedInputStream(nsIInputStream** aResult,
 
 namespace {
 
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 8192
 
-class BufferWriter final : public Runnable
-                         , public nsIInputStreamCallback
+class BufferWriter final : public nsIInputStreamCallback
 {
 public:
-    NS_DECL_ISUPPORTS_INHERITED
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     BufferWriter(nsIInputStream* aInputStream,
                  void* aBuffer, int64_t aCount)
-        : Runnable("BufferWriterRunnable")
-        , mMonitor("BufferWriter.mMonitor")
+        : mMonitor("BufferWriter.mMonitor")
         , mInputStream(aInputStream)
         , mBuffer(aBuffer)
         , mCount(aCount)
         , mWrittenData(0)
         , mBufferType(aBuffer ? eExternal : eInternal)
-        , mAsyncResult(NS_OK)
         , mBufferSize(0)
-        , mCompleted(false)
     {
         MOZ_ASSERT(aInputStream);
         MOZ_ASSERT(aCount == -1 || aCount > 0);
@@ -1549,6 +1545,8 @@ public:
     nsresult
     Write()
     {
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
+
         // Let's make the inputStream buffered if it's not.
         if (!NS_InputStreamIsBuffered(mInputStream)) {
             nsCOMPtr<nsIInputStream> bufferedStream;
@@ -1575,15 +1573,15 @@ public:
     uint64_t
     WrittenData() const
     {
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
         return mWrittenData;
     }
 
     void*
     StealBuffer()
     {
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
         MOZ_ASSERT(mBufferType == eInternal);
-
-        MonitorAutoLock lock(mMonitor);
 
         void* buffer = mBuffer;
 
@@ -1608,6 +1606,8 @@ private:
     nsresult
     WriteSync()
     {
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
+
         uint64_t length = (uint64_t)mCount;
 
         if (mCount == -1) {
@@ -1640,6 +1640,8 @@ private:
     nsresult
     WriteAsync()
     {
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
+
         if (mCount > 0 && mBufferType == eInternal) {
             mBuffer = malloc(mCount);
             if (NS_WARN_IF(!mBuffer)) {
@@ -1647,119 +1649,96 @@ private:
             }
         }
 
-        nsCOMPtr<nsIEventTarget> target =
-            do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
-        if (!target) {
-            return NS_ERROR_FAILURE;
+        while (true) {
+            if (mCount == -1 && !MaybeExpandBufferSize()) {
+                return NS_ERROR_OUT_OF_MEMORY;
+            }
+
+            uint64_t offset = mWrittenData;
+            uint64_t length = mCount == -1 ? BUFFER_SIZE : mCount;
+
+            // Let's try to read data directly.
+            uint32_t writtenData;
+            nsresult rv = mAsyncInputStream->ReadSegments(NS_CopySegmentToBuffer,
+                                                         static_cast<char*>(mBuffer) + offset,
+                                                         length, &writtenData);
+
+            // Operation completed. Nothing more to read.
+            if (NS_SUCCEEDED(rv) && writtenData == 0) {
+                return NS_OK;
+            }
+
+            // If we succeeded, let's try to read again.
+            if (NS_SUCCEEDED(rv)) {
+                mWrittenData += writtenData;
+                if (mCount != -1) {
+                    MOZ_ASSERT(mCount >= writtenData);
+                    mCount -= writtenData;
+                }
+
+                continue;
+            }
+
+            // Async wait...
+            if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
+                rv = MaybeCreateTaskQueue();
+                if (NS_WARN_IF(NS_FAILED(rv))) {
+                    return rv;
+                }
+
+                MonitorAutoLock lock(mMonitor);
+
+                rv = mAsyncInputStream->AsyncWait(this, 0, length, mTaskQueue);
+                if (NS_WARN_IF(NS_FAILED(rv))) {
+                    return rv;
+                }
+
+                lock.Wait();
+                continue;
+            }
+
+            // Otherwise, let's propagate the error.
+            return rv;
         }
 
-        mTaskQueue = new TaskQueue(target.forget());
-
-        MonitorAutoLock lock(mMonitor);
-
-        nsCOMPtr<nsIRunnable> runnable = this;
-        nsresult rv = mTaskQueue->Dispatch(runnable.forget());
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        lock.Wait();
-
-        mCompleted = true;
-        return mAsyncResult;
+        MOZ_ASSERT_UNREACHABLE("We should not be here");
+        return NS_ERROR_FAILURE;
     }
 
-    // This method runs on the I/O Thread when the owning thread is blocked by
-    // the mMonitor. It is called multiple times until mCount is greater than 0
-    // or until there is something to read in the stream.
-    NS_IMETHOD
-    Run() override
+    nsresult
+    MaybeCreateTaskQueue()
     {
-        MOZ_ASSERT(mAsyncInputStream);
-        MOZ_ASSERT(!mInputStream);
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
 
-        MonitorAutoLock lock(mMonitor);
-
-        if (mCompleted) {
-            return NS_OK;
-        }
-
-        if (mCount == 0) {
-            OperationCompleted(lock, NS_OK);
-            return NS_OK;
-        }
-
-        if (mCount == -1 && !MaybeExpandBufferSize()) {
-            OperationCompleted(lock, NS_ERROR_OUT_OF_MEMORY);
-            return NS_OK;
-        }
-
-        uint64_t offset = mWrittenData;
-        uint64_t length = mCount == -1 ? BUFFER_SIZE : mCount;
-
-        // Let's try to read it directly.
-        uint32_t writtenData;
-        nsresult rv = mAsyncInputStream->ReadSegments(NS_CopySegmentToBuffer,
-                                                     static_cast<char*>(mBuffer) + offset,
-                                                     length, &writtenData);
-
-        // Operation completed.
-        if (NS_SUCCEEDED(rv) && writtenData == 0) {
-            OperationCompleted(lock, NS_OK);
-            return NS_OK;
-        }
-
-        // If we succeeded, let's try to read again.
-        if (NS_SUCCEEDED(rv)) {
-            mWrittenData += writtenData;
-            if (mCount != -1) {
-                MOZ_ASSERT(mCount >= writtenData);
-                mCount -= writtenData;
+        if (!mTaskQueue) {
+            nsCOMPtr<nsIEventTarget> target =
+                do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
+            if (!target) {
+                return NS_ERROR_FAILURE;
             }
 
-            nsCOMPtr<nsIRunnable> runnable = this;
-            rv = mTaskQueue->Dispatch(runnable.forget());
-            if (NS_WARN_IF(NS_FAILED(rv))) {
-                OperationCompleted(lock, rv);
-            }
-
-            return NS_OK;
+            mTaskQueue = new TaskQueue(target.forget());
         }
 
-        // Async wait...
-        if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
-            rv = mAsyncInputStream->AsyncWait(this, 0, length, mTaskQueue);
-            if (NS_WARN_IF(NS_FAILED(rv))) {
-                OperationCompleted(lock, rv);
-            }
-            return NS_OK;
-        }
-
-        // Error.
-        OperationCompleted(lock, rv);
         return NS_OK;
     }
 
     NS_IMETHOD
     OnInputStreamReady(nsIAsyncInputStream* aStream) override
     {
-        MOZ_ASSERT(aStream == mAsyncInputStream);
-        // The stream is ready, let's read it again.
-        return Run();
-    }
+        MOZ_ASSERT(!NS_IsMainThread());
 
-    // This function is called from the I/O thread and it will unblock the
-    // owning thread.
-    void
-    OperationCompleted(MonitorAutoLock& aLock, nsresult aRv)
-    {
-        mAsyncResult = aRv;
-
-        // This will unlock the owning thread.
-        aLock.Notify();
+        // We have something to read. Let's unlock the main-thread.
+        MonitorAutoLock lock(mMonitor);
+        lock.Notify();
+        return NS_OK;
     }
 
     bool
     MaybeExpandBufferSize()
     {
+        NS_ASSERT_OWNINGTHREAD(BufferWriter);
+
         MOZ_ASSERT(mCount == -1);
 
         if (mBufferSize >= mWrittenData + BUFFER_SIZE) {
@@ -1789,6 +1768,8 @@ private:
         return true;
     }
 
+    // All the members of this class are touched on the owning thread only. The
+    // monitor is only used to communicate when there is more data to read.
     Monitor mMonitor;
 
     nsCOMPtr<nsIInputStream> mInputStream;
@@ -1810,12 +1791,10 @@ private:
     } mBufferType;
 
     // The following set if needed for the async read.
-    nsresult mAsyncResult;
     uint64_t mBufferSize;
-    Atomic<bool> mCompleted;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(BufferWriter, Runnable, nsIInputStreamCallback)
+NS_IMPL_ISUPPORTS(BufferWriter, nsIInputStreamCallback)
 
 } // anonymous namespace
 
@@ -2568,7 +2547,7 @@ NS_RelaxStrictFileOriginPolicy(nsIURI *aTargetURI,
 {
   if (!NS_URIIsLocalFile(aTargetURI)) {
     // This is probably not what the caller intended
-    NS_NOTREACHED("NS_RelaxStrictFileOriginPolicy called with non-file URI");
+    MOZ_ASSERT_UNREACHABLE("NS_RelaxStrictFileOriginPolicy called with non-file URI");
     return false;
   }
 

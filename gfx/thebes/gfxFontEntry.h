@@ -506,7 +506,8 @@ protected:
     // The caller will be responsible for ownership of the data.
     virtual nsresult CopyFontTable(uint32_t aTableTag,
                                    nsTArray<uint8_t>& aBuffer) {
-        NS_NOTREACHED("forgot to override either GetFontTable or CopyFontTable?");
+        MOZ_ASSERT_UNREACHABLE("forgot to override either GetFontTable or "
+                               "CopyFontTable?");
         return NS_ERROR_FAILURE;
     }
 
@@ -621,9 +622,9 @@ private:
         // the old, because the mHashtable pointer in mSharedBlobData (if
         // present) will not be updated.
         FontTableHashEntry(FontTableHashEntry&& toMove)
-            : KeyClass(mozilla::Move(toMove))
-            , mSharedBlobData(mozilla::Move(toMove.mSharedBlobData))
-            , mBlob(mozilla::Move(toMove.mBlob))
+            : KeyClass(std::move(toMove))
+            , mSharedBlobData(std::move(toMove.mSharedBlobData))
+            , mBlob(std::move(toMove.mBlob))
         {
             toMove.mSharedBlobData = nullptr;
             toMove.mBlob = nullptr;
@@ -923,6 +924,31 @@ protected:
         kBoldMask   = 0x01,
         kItalicMask = 0x02
     };
+};
+
+// Struct used in the gfxFontGroup font list to keep track of a font family
+// together with the CSS generic (if any) that was mapped to it in this
+// particular case (so it can be reported to the DevTools font inspector).
+struct FamilyAndGeneric final {
+    FamilyAndGeneric()
+        : mFamily(nullptr)
+        , mGeneric(mozilla::FontFamilyType::eFamily_none)
+    {
+    }
+    FamilyAndGeneric(const FamilyAndGeneric& aOther)
+        : mFamily(aOther.mFamily)
+        , mGeneric(aOther.mGeneric)
+    {
+    }
+    explicit FamilyAndGeneric(gfxFontFamily* aFamily,
+                              mozilla::FontFamilyType aGeneric =
+                                  mozilla::FontFamilyType::eFamily_none)
+        : mFamily(aFamily)
+        , mGeneric(aGeneric)
+    {
+    }
+    gfxFontFamily* mFamily;
+    mozilla::FontFamilyType mGeneric;
 };
 
 #endif

@@ -302,23 +302,23 @@ public:
 
   // XXXbz Maybe we should codegen a class holding these constants and
   // inherit from it...
-  static const auto ELEMENT_NODE = mozilla::dom::NodeBinding::ELEMENT_NODE;
-  static const auto ATTRIBUTE_NODE = mozilla::dom::NodeBinding::ATTRIBUTE_NODE;
-  static const auto TEXT_NODE = mozilla::dom::NodeBinding::TEXT_NODE;
+  static const auto ELEMENT_NODE = mozilla::dom::Node_Binding::ELEMENT_NODE;
+  static const auto ATTRIBUTE_NODE = mozilla::dom::Node_Binding::ATTRIBUTE_NODE;
+  static const auto TEXT_NODE = mozilla::dom::Node_Binding::TEXT_NODE;
   static const auto CDATA_SECTION_NODE =
-    mozilla::dom::NodeBinding::CDATA_SECTION_NODE;
+    mozilla::dom::Node_Binding::CDATA_SECTION_NODE;
   static const auto ENTITY_REFERENCE_NODE =
-    mozilla::dom::NodeBinding::ENTITY_REFERENCE_NODE;
-  static const auto ENTITY_NODE = mozilla::dom::NodeBinding::ENTITY_NODE;
+    mozilla::dom::Node_Binding::ENTITY_REFERENCE_NODE;
+  static const auto ENTITY_NODE = mozilla::dom::Node_Binding::ENTITY_NODE;
   static const auto PROCESSING_INSTRUCTION_NODE =
-    mozilla::dom::NodeBinding::PROCESSING_INSTRUCTION_NODE;
-  static const auto COMMENT_NODE = mozilla::dom::NodeBinding::COMMENT_NODE;
-  static const auto DOCUMENT_NODE = mozilla::dom::NodeBinding::DOCUMENT_NODE;
+    mozilla::dom::Node_Binding::PROCESSING_INSTRUCTION_NODE;
+  static const auto COMMENT_NODE = mozilla::dom::Node_Binding::COMMENT_NODE;
+  static const auto DOCUMENT_NODE = mozilla::dom::Node_Binding::DOCUMENT_NODE;
   static const auto DOCUMENT_TYPE_NODE =
-    mozilla::dom::NodeBinding::DOCUMENT_TYPE_NODE;
+    mozilla::dom::Node_Binding::DOCUMENT_TYPE_NODE;
   static const auto DOCUMENT_FRAGMENT_NODE =
-    mozilla::dom::NodeBinding::DOCUMENT_FRAGMENT_NODE;
-  static const auto NOTATION_NODE = mozilla::dom::NodeBinding::NOTATION_NODE;
+    mozilla::dom::Node_Binding::DOCUMENT_FRAGMENT_NODE;
+  static const auto NOTATION_NODE = mozilla::dom::Node_Binding::NOTATION_NODE;
 
   template<class T>
   using Sequence = mozilla::dom::Sequence<T>;
@@ -822,29 +822,6 @@ public:
                                      bool aNotify) = 0;
 
   /**
-   * Insert a content node at a particular index.  This method handles calling
-   * BindToTree on the child appropriately.
-   *
-   * @param aKid the content to insert
-   * @param aIndex the index it is being inserted at (the index it will have
-   *        after it is inserted)
-   * @param aNotify whether to notify the document (current document for
-   *        nsIContent, and |this| for nsIDocument) that the insert has
-   *        occurred
-   *
-   * @throws NS_ERROR_DOM_HIERARCHY_REQUEST_ERR if one attempts to have more
-   * than one element node as a child of a document.  Doing this will also
-   * assert -- you shouldn't be doing it!  Check with
-   * nsIDocument::GetRootElement() first if you're not sure.  Apart from this
-   * one constraint, this doesn't do any checking on whether aKid is a valid
-   * child of |this|.
-   *
-   * @throws NS_ERROR_OUT_OF_MEMORY in some cases (from BindToTree).
-   */
-  virtual nsresult InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
-                                            bool aNotify) = 0;
-
-  /**
    * Append a content node to the end of the child list.  This method handles
    * calling BindToTree on the child appropriately.
    *
@@ -864,24 +841,8 @@ public:
    */
   nsresult AppendChildTo(nsIContent* aKid, bool aNotify)
   {
-    return InsertChildAt_Deprecated(aKid, GetChildCount(), aNotify);
+    return InsertChildBefore(aKid, nullptr, aNotify);
   }
-
-  /**
-   * NOTE: this function is going to be removed soon (hopefully!) Don't use it
-   * in new code.
-   *
-   * Remove a child from this node.  This method handles calling UnbindFromTree
-   * on the child appropriately.
-   *
-   * @param aIndex the index of the child to remove
-   * @param aNotify whether to notify the document (current document for
-   *        nsIContent, and |this| for nsIDocument) that the remove has
-   *        occurred
-   *
-   * Note: If there is no child at aIndex, this method will simply do nothing.
-   */
-  virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) = 0;
 
   /**
    * Remove a child from this node.  This method handles calling UnbindFromTree
@@ -1249,7 +1210,7 @@ public:
     }
   }
 
-  bool IsEditable() const;
+  inline bool IsEditable() const;
 
   /**
    * Returns true if |this| or any of its ancestors is native anonymous.
@@ -1477,7 +1438,7 @@ private:
       }
       cur = parent;
     }
-    NS_NOTREACHED("How did we get here?");
+    MOZ_ASSERT_UNREACHABLE("How did we get here?");
   }
 
 public:
@@ -1859,10 +1820,12 @@ public:
   mozilla::dom::Element* GetPreviousElementSibling() const;
   mozilla::dom::Element* GetNextElementSibling() const;
 
-  void Before(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
-  void After(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
-  void ReplaceWith(const Sequence<OwningNodeOrString>& aNodes,
-                   ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void Before(const Sequence<OwningNodeOrString>& aNodes,
+                                 ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void After(const Sequence<OwningNodeOrString>& aNodes,
+                                ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void ReplaceWith(const Sequence<OwningNodeOrString>& aNodes,
+                                      ErrorResult& aRv);
   /**
    * Remove this node from its parent, if any.
    */
@@ -1872,8 +1835,10 @@ public:
   mozilla::dom::Element* GetFirstElementChild() const;
   mozilla::dom::Element* GetLastElementChild() const;
 
-  void Prepend(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
-  void Append(const Sequence<OwningNodeOrString>& aNodes, ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void Prepend(const Sequence<OwningNodeOrString>& aNodes,
+                                  ErrorResult& aRv);
+  MOZ_CAN_RUN_SCRIPT void Append(const Sequence<OwningNodeOrString>& aNodes,
+                                 ErrorResult& aRv);
 
   void GetBoxQuads(const BoxQuadOptions& aOptions,
                    nsTArray<RefPtr<DOMQuad> >& aResult,

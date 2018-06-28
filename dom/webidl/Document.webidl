@@ -472,7 +472,7 @@ partial interface Document {
 // by user gesture.
 partial interface Document {
   [ChromeOnly]
-  void notifyUserActivation();
+  void notifyUserGestureActivation();
 };
 
 // Extension to give chrome and XBL JS the ability to determine whether
@@ -495,11 +495,6 @@ enum FlashClassification {
 partial interface Document {
   [ChromeOnly]
   readonly attribute FlashClassification documentFlashClassification;
-};
-
-// Allows about: pages to query aboutCapabilities
-partial interface Document {
-  [Throws, Func="nsDocument::CallerIsTrustedAboutPage"] readonly attribute AboutCapabilities aboutCapabilities;
 };
 
 Document implements XPathEvaluator;

@@ -1422,7 +1422,7 @@ CacheFile::ReleaseOutsideLock(RefPtr<nsISupports> aObject)
 {
   AssertOwnsLock();
 
-  mObjsToRelease.AppendElement(Move(aObject));
+  mObjsToRelease.AppendElement(std::move(aObject));
 }
 
 nsresult
@@ -2116,7 +2116,7 @@ StatusToTelemetryEnum(nsresult aStatus)
       return 1; // other error
   }
 
-  NS_NOTREACHED("We should never get here");
+  MOZ_ASSERT_UNREACHABLE("We should never get here");
 }
 
 nsresult

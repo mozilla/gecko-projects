@@ -269,7 +269,6 @@ class MachCommands(MachCommandBase):
                      help='Action callback name (Python function name)')
     def test_action_callback(self, **options):
         import taskgraph.parameters
-        from taskgraph.util.taskcluster import get_task_definition
         import taskgraph.actions
         import yaml
 

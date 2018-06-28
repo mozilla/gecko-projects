@@ -32,6 +32,32 @@ NS_INTERFACE_MAP_BEGIN(InputStreamLengthWrapper)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIInputStream)
 NS_INTERFACE_MAP_END
 
+/* static */ already_AddRefed<nsIInputStream>
+InputStreamLengthWrapper::MaybeWrap(already_AddRefed<nsIInputStream> aInputStream,
+                                    int64_t aLength)
+{
+  nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
+  MOZ_ASSERT(inputStream);
+
+  nsCOMPtr<nsIInputStreamLength> length = do_QueryInterface(inputStream);
+  if (length) {
+    return inputStream.forget();
+  }
+
+  nsCOMPtr<nsIAsyncInputStreamLength> asyncLength = do_QueryInterface(inputStream);
+  if (asyncLength) {
+    return inputStream.forget();
+  }
+
+  nsCOMPtr<nsIAsyncInputStream> asyncStream = do_QueryInterface(inputStream);
+  if (!asyncStream) {
+    return inputStream.forget();
+  }
+
+  inputStream = new InputStreamLengthWrapper(inputStream.forget(), aLength);
+  return inputStream.forget();
+}
+
 InputStreamLengthWrapper::InputStreamLengthWrapper(already_AddRefed<nsIInputStream> aInputStream,
                                                    int64_t aLength)
   : mWeakCloneableInputStream(nullptr)
@@ -44,7 +70,7 @@ InputStreamLengthWrapper::InputStreamLengthWrapper(already_AddRefed<nsIInputStre
 {
   MOZ_ASSERT(mLength >= 0);
 
-  nsCOMPtr<nsIInputStream> inputStream = mozilla::Move(aInputStream);
+  nsCOMPtr<nsIInputStream> inputStream = std::move(aInputStream);
   SetSourceStream(inputStream.forget());
 }
 
@@ -65,7 +91,7 @@ InputStreamLengthWrapper::SetSourceStream(already_AddRefed<nsIInputStream> aInpu
 {
   MOZ_ASSERT(!mInputStream);
 
-  mInputStream = mozilla::Move(aInputStream);
+  mInputStream = std::move(aInputStream);
 
   nsCOMPtr<nsICloneableInputStream> cloneableStream =
     do_QueryInterface(mInputStream);

@@ -8,7 +8,7 @@
 
 #include "gc/GCInternals.h"
 #include "js/HashTable.h"
-#include "vm/JSCompartment.h"
+#include "vm/Realm.h"
 #include "vm/Runtime.h"
 
 #include "gc/PrivateIterators-inl.h"
@@ -51,7 +51,7 @@ js::IterateHeapUnbarriered(JSContext* cx, void* data,
                            IterateArenaCallback arenaCallback,
                            IterateCellCallback cellCallback)
 {
-    AutoPrepareForTracing prop(cx);
+    AutoPrepareForTracing prep(cx);
 
     for (ZonesIter zone(cx->runtime(), WithAtoms); !zone.done(); zone.next()) {
         (*zoneCallback)(cx->runtime(), data, zone);
@@ -67,7 +67,7 @@ js::IterateHeapUnbarrieredForZone(JSContext* cx, Zone* zone, void* data,
                                   IterateArenaCallback arenaCallback,
                                   IterateCellCallback cellCallback)
 {
-    AutoPrepareForTracing prop(cx);
+    AutoPrepareForTracing prep(cx);
 
     (*zoneCallback)(cx->runtime(), data, zone);
     IterateRealmsArenasCellsUnbarriered(cx, zone, data,
@@ -85,18 +85,17 @@ js::IterateChunks(JSContext* cx, void* data, IterateChunkCallback chunkCallback)
 }
 
 void
-js::IterateScripts(JSContext* cx, JSCompartment* compartment,
-                   void* data, IterateScriptCallback scriptCallback)
+js::IterateScripts(JSContext* cx, Realm* realm, void* data, IterateScriptCallback scriptCallback)
 {
     MOZ_ASSERT(!cx->suppressGC);
     AutoEmptyNursery empty(cx);
     AutoPrepareForTracing prep(cx);
     JS::AutoSuppressGCAnalysis nogc;
 
-    if (compartment) {
-        Zone* zone = compartment->zone();
+    if (realm) {
+        Zone* zone = realm->zone();
         for (auto script = zone->cellIter<JSScript>(empty); !script.done(); script.next()) {
-            if (script->compartment() == compartment)
+            if (script->realm() == realm)
                 scriptCallback(cx->runtime(), data, script, nogc);
         }
     } else {
@@ -121,7 +120,7 @@ IterateGrayObjects(Zone* zone, GCThingCallback cellCallback, void* data)
 void
 js::IterateGrayObjects(Zone* zone, GCThingCallback cellCallback, void* data)
 {
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapBusy());
+    MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
     AutoPrepareForTracing prep(TlsContext.get());
     ::IterateGrayObjects(zone, cellCallback, data);
 }
@@ -130,7 +129,7 @@ void
 js::IterateGrayObjectsUnderCC(Zone* zone, GCThingCallback cellCallback, void* data)
 {
     mozilla::DebugOnly<JSRuntime*> rt = zone->runtimeFromMainThread();
-    MOZ_ASSERT(JS::CurrentThreadIsHeapCycleCollecting());
+    MOZ_ASSERT(JS::RuntimeHeapIsCycleCollecting());
     MOZ_ASSERT(!rt->gc.isIncrementalGCInProgress());
     ::IterateGrayObjects(zone, cellCallback, data);
 }
@@ -152,6 +151,19 @@ JS::IterateRealms(JSContext* cx, void* data, JS::IterateRealmCallback realmCallb
 
     Rooted<Realm*> realm(cx);
     for (RealmsIter r(cx->runtime()); !r.done(); r.next()) {
+        realm = r;
+        (*realmCallback)(cx, data, realm);
+    }
+}
+
+JS_PUBLIC_API(void)
+JS::IterateRealmsInCompartment(JSContext* cx, JS::Compartment* compartment, void* data,
+                               JS::IterateRealmCallback realmCallback)
+{
+    AutoTraceSession session(cx->runtime());
+
+    Rooted<Realm*> realm(cx);
+    for (RealmsInCompartmentIter r(compartment); !r.done(); r.next()) {
         realm = r;
         (*realmCallback)(cx, data, realm);
     }

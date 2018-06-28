@@ -381,7 +381,7 @@ PersistenceThreadPersist()
   }
 
   // Build the JSON structure: give up the ownership of jsonWriter.
-  mozilla::JSONWriter w(mozilla::Move(jsonWriter));
+  mozilla::JSONWriter w(std::move(jsonWriter));
   w.Start();
 
   w.StartObjectProperty("scalars");
@@ -446,6 +446,9 @@ PersistenceThreadLoadData()
         if (!fileContent.IsEmpty()) {
           MainThreadParsePersistedProbes(fileContent);
         }
+
+        TelemetryScalar::ApplyPendingOperations();
+
         // Arm the timer.
         MainThreadArmPersistenceTimer();
         // Notify that we're good to take snapshots!
@@ -512,6 +515,9 @@ TelemetryGeckoViewPersistence::InitPersistence()
   }
 
   gPersistenceThread = thread.forget();
+
+  // From now on all scalar operations should be recorded.
+  TelemetryScalar::DeserializationStarted();
 
   // Trigger the loading of the persistence data. After the function
   // completes it will automatically arm the persistence timer.

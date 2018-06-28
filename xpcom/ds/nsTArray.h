@@ -538,7 +538,7 @@ public:
     static_assert(!mozilla::IsSame<E_NoCV*, A_NoCV>::value,
                   "For safety, we disallow constructing nsTArray<E> elements "
                   "from E* pointers. See bug 960591.");
-    new (static_cast<void*>(aE)) E(mozilla::Forward<A>(aArg));
+    new (static_cast<void*>(aE)) E(std::forward<A>(aArg));
   }
   // Invoke the destructor in place.
   static inline void Destruct(E* aE) { aE->~E(); }
@@ -659,7 +659,7 @@ struct nsTArray_CopyWithConstructors
       while (destElemEnd != destElem) {
         --destElemEnd;
         --srcElemEnd;
-        traits::Construct(destElemEnd, mozilla::Move(*srcElemEnd));
+        traits::Construct(destElemEnd, std::move(*srcElemEnd));
         traits::Destruct(srcElemEnd);
       }
     } else {
@@ -678,7 +678,7 @@ struct nsTArray_CopyWithConstructors
     MOZ_ASSERT(srcElemEnd <= destElem || srcElemEnd > destElemEnd);
 #endif
     while (destElem != destElemEnd) {
-      traits::Construct(destElem, mozilla::Move(*srcElem));
+      traits::Construct(destElem, std::move(*srcElem));
       traits::Destruct(srcElem);
       ++destElem;
       ++srcElem;
@@ -1493,7 +1493,7 @@ public:
                              const mozilla::fallible_t&)
   {
     return InsertElementAt<Item, FallibleAlloc>(aIndex,
-                                                mozilla::Forward<Item>(aItem));
+                                                std::forward<Item>(aItem));
   }
 
   // Reconstruct the element at the given index, and return a pointer to the
@@ -1558,7 +1558,7 @@ protected:
   {
     index_type index = IndexOfFirstElementGt<Item, Comparator>(aItem, aComp);
     return InsertElementAt<Item, ActualAlloc>(
-      index, mozilla::Forward<Item>(aItem));
+      index, std::forward<Item>(aItem));
   }
 public:
 
@@ -1568,7 +1568,7 @@ public:
                                  const mozilla::fallible_t&)
   {
     return InsertElementSorted<Item, Comparator, FallibleAlloc>(
-      mozilla::Forward<Item>(aItem), aComp);
+      std::forward<Item>(aItem), aComp);
   }
 
   // A variation on the InsertElementSorted method defined above.
@@ -1578,7 +1578,7 @@ protected:
   {
     nsDefaultComparator<elem_type, Item> comp;
     return InsertElementSorted<Item, decltype(comp), ActualAlloc>(
-      mozilla::Forward<Item>(aItem), comp);
+      std::forward<Item>(aItem), comp);
   }
 public:
 
@@ -1587,7 +1587,7 @@ public:
   elem_type* InsertElementSorted(Item&& aItem, const mozilla::fallible_t&)
   {
     return InsertElementSorted<Item, FallibleAlloc>(
-      mozilla::Forward<Item>(aItem));
+      std::forward<Item>(aItem));
   }
 
   // This method appends elements to the end of this array.
@@ -1661,7 +1661,7 @@ public:
   elem_type* AppendElements(nsTArray_Impl<Item, Allocator>&& aArray,
                             const mozilla::fallible_t&)
   {
-    return AppendElements<Item, Allocator>(mozilla::Move(aArray));
+    return AppendElements<Item, Allocator>(std::move(aArray));
   }
 
   // Append a new element, move constructing if possible.
@@ -1676,7 +1676,7 @@ public:
   elem_type* AppendElement(Item&& aItem,
                            const mozilla::fallible_t&)
   {
-    return AppendElement<Item, FallibleAlloc>(mozilla::Forward<Item>(aItem));
+    return AppendElement<Item, FallibleAlloc>(std::forward<Item>(aItem));
   }
 
   // Append new elements without copy-constructing. This is useful to avoid
@@ -1738,7 +1738,7 @@ public:
   MOZ_MUST_USE
   elem_type PopLastElement()
   {
-    elem_type elem = mozilla::Move(LastElement());
+    elem_type elem = std::move(LastElement());
     RemoveLastElement();
     return elem;
   }
@@ -2236,7 +2236,7 @@ nsTArray_Impl<E, Alloc>::InsertElementAt(index_type aIndex, Item&& aItem) -> ele
   this->template ShiftData<ActualAlloc>(aIndex, 0, 1, sizeof(elem_type),
                                         MOZ_ALIGNOF(elem_type));
   elem_type* elem = Elements() + aIndex;
-  elem_traits::Construct(elem, mozilla::Forward<Item>(aItem));
+  elem_traits::Construct(elem, std::forward<Item>(aItem));
   return elem;
 }
 
@@ -2290,7 +2290,7 @@ nsTArray_Impl<E, Alloc>::AppendElement(Item&& aItem) -> elem_type*
     return nullptr;
   }
   elem_type* elem = Elements() + Length();
-  elem_traits::Construct(elem, mozilla::Forward<Item>(aItem));
+  elem_traits::Construct(elem, std::forward<Item>(aItem));
   this->mHdr->mLength += 1;
   return elem;
 }
@@ -2331,7 +2331,7 @@ public:
   nsTArray() {}
   explicit nsTArray(size_type aCapacity) : base_type(aCapacity) {}
   explicit nsTArray(const nsTArray& aOther) : base_type(aOther) {}
-  MOZ_IMPLICIT nsTArray(nsTArray&& aOther) : base_type(mozilla::Move(aOther)) {}
+  MOZ_IMPLICIT nsTArray(nsTArray&& aOther) : base_type(std::move(aOther)) {}
   MOZ_IMPLICIT nsTArray(std::initializer_list<E> aIL) : base_type(aIL) {}
 
   template<class Allocator>
@@ -2341,7 +2341,7 @@ public:
   }
   template<class Allocator>
   MOZ_IMPLICIT nsTArray(nsTArray_Impl<E, Allocator>&& aOther)
-    : base_type(mozilla::Move(aOther))
+    : base_type(std::move(aOther))
   {
   }
 
@@ -2358,13 +2358,13 @@ public:
   }
   self_type& operator=(self_type&& aOther)
   {
-    base_type::operator=(mozilla::Move(aOther));
+    base_type::operator=(std::move(aOther));
     return *this;
   }
   template<class Allocator>
   self_type& operator=(nsTArray_Impl<E, Allocator>&& aOther)
   {
-    base_type::operator=(mozilla::Move(aOther));
+    base_type::operator=(std::move(aOther));
     return *this;
   }
 
@@ -2394,7 +2394,7 @@ public:
   explicit FallibleTArray(size_type aCapacity) : base_type(aCapacity) {}
   explicit FallibleTArray(const FallibleTArray<E>& aOther) : base_type(aOther) {}
   FallibleTArray(FallibleTArray<E>&& aOther)
-    : base_type(mozilla::Move(aOther))
+    : base_type(std::move(aOther))
   {
   }
 
@@ -2405,7 +2405,7 @@ public:
   }
   template<class Allocator>
   explicit FallibleTArray(nsTArray_Impl<E, Allocator>&& aOther)
-    : base_type(mozilla::Move(aOther))
+    : base_type(std::move(aOther))
   {
   }
 
@@ -2422,13 +2422,13 @@ public:
   }
   self_type& operator=(self_type&& aOther)
   {
-    base_type::operator=(mozilla::Move(aOther));
+    base_type::operator=(std::move(aOther));
     return *this;
   }
   template<class Allocator>
   self_type& operator=(nsTArray_Impl<E, Allocator>&& aOther)
   {
-    base_type::operator=(mozilla::Move(aOther));
+    base_type::operator=(std::move(aOther));
     return *this;
   }
 };
@@ -2448,6 +2448,7 @@ public:
   typedef typename base_type::elem_type elem_type;
 
   AutoTArray()
+    : mAlign()
   {
     Init();
   }
@@ -2460,12 +2461,14 @@ public:
   }
 
   explicit AutoTArray(const base_type& aOther)
+    : mAlign()
   {
     Init();
     this->AppendElements(aOther);
   }
 
   explicit AutoTArray(base_type&& aOther)
+    : mAlign()
   {
     Init();
     this->SwapElements(aOther);
@@ -2479,6 +2482,7 @@ public:
   }
 
   MOZ_IMPLICIT AutoTArray(std::initializer_list<E> aIL)
+    : mAlign()
   {
     Init();
     this->AppendElements(aIL.begin(), aIL.size());

@@ -31,7 +31,6 @@
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsTextFragment.h"
-#include "nsIDOMNSEditableElement.h"
 #include "nsIEditor.h"
 
 #include "nsIDocShellTreeItem.h"
@@ -47,6 +46,8 @@
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/Link.h"
 #include "mozilla/dom/RangeBinding.h"
 #include "mozilla/dom/Selection.h"
@@ -439,7 +440,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
 
   // XXXbz Should this really be ignoring errors?
   int16_t rangeCompareResult =
-    mStartPointRange->CompareBoundaryPoints(RangeBinding::START_TO_START,
+    mStartPointRange->CompareBoundaryPoints(Range_Binding::START_TO_START,
                                             *mSearchRange, IgnoreErrors());
   // No need to wrap find in doc if starting at beginning
   bool hasWrapped = (rangeCompareResult < 0);
@@ -493,7 +494,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
           // to continue at the start of returnRange.
           IgnoredErrorResult rv;
           int16_t compareResult =
-            mStartPointRange->CompareBoundaryPoints(RangeBinding::START_TO_END,
+            mStartPointRange->CompareBoundaryPoints(Range_Binding::START_TO_END,
                                                     *returnRange, rv);
           if (!rv.Failed() && compareResult <= 0) {
             // OK to start at the end of mStartPointRange
@@ -509,7 +510,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
           // need to continue at the end of returnRange.
           IgnoredErrorResult rv;
           int16_t compareResult =
-            mStartPointRange->CompareBoundaryPoints(RangeBinding::END_TO_START,
+            mStartPointRange->CompareBoundaryPoints(Range_Binding::END_TO_START,
                                                     *returnRange, rv);
           if (!rv.Failed() && compareResult >= 0) {
             // OK to start at the start of mStartPointRange
@@ -576,33 +577,38 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
         // chain of parent nodes to see if we find one.
         nsCOMPtr<nsINode> node = returnRange->GetStartContainer();
         while (node) {
-          nsCOMPtr<nsIDOMNSEditableElement> editable = do_QueryInterface(node);
-          if (editable) {
-            // Inside an editable element.  Get the correct selection
-            // controller and selection.
-            nsCOMPtr<nsIEditor> editor;
-            editable->GetEditor(getter_AddRefs(editor));
-            NS_ASSERTION(editor, "Editable element has no editor!");
-            if (!editor) {
-              break;
-            }
-            editor->GetSelectionController(
-              getter_AddRefs(selectionController));
-            if (selectionController) {
-              selection = selectionController->GetSelection(
-                nsISelectionController::SELECTION_NORMAL);
-            }
-            mFoundEditable = do_QueryInterface(node);
+          nsCOMPtr<nsIEditor> editor;
+          if (auto input = HTMLInputElement::FromNode(node)) {
+            editor = input->GetEditor();
+          } else if (auto textarea = HTMLTextAreaElement::FromNode(node)) {
+            editor = textarea->GetEditor();
+          } else {
+            node = node->GetParentNode();
+            continue;
+          }
 
-            if (!shouldFocusEditableElement)
-              break;
-
-            // Otherwise move focus/caret to editable element
-            if (fm)
-              fm->SetFocus(mFoundEditable, 0);
+          // Inside an editable element.  Get the correct selection
+          // controller and selection.
+          NS_ASSERTION(editor, "Editable element has no editor!");
+          if (!editor) {
             break;
           }
-          node = node->GetParentNode();
+          editor->GetSelectionController(getter_AddRefs(selectionController));
+          if (selectionController) {
+            selection = selectionController->GetSelection(
+              nsISelectionController::SELECTION_NORMAL);
+          }
+          mFoundEditable = node->AsElement();
+
+          if (!shouldFocusEditableElement) {
+            break;
+          }
+
+          // Otherwise move focus/caret to editable element
+          if (fm) {
+            fm->SetFocus(mFoundEditable, 0);
+          }
+          break;
         }
 
         // If we reach here without setting mFoundEditable, then something
@@ -896,7 +902,7 @@ nsTypeAheadFind::RangeStartsInsideLink(nsRange *aRange,
   nsCOMPtr<nsIContent> startContent =
     do_QueryInterface(aRange->GetStartContainer());
   if (!startContent) {
-    NS_NOTREACHED("startContent should never be null");
+    MOZ_ASSERT_UNREACHABLE("startContent should never be null");
     return;
   }
   nsCOMPtr<nsIContent> origContent = startContent;

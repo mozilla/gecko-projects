@@ -547,9 +547,9 @@ EditorEventListener::KeyUp(const WidgetKeyboardEvent* aKeyboardEvent)
   if ((aKeyboardEvent->mKeyCode == NS_VK_SHIFT ||
        aKeyboardEvent->mKeyCode == NS_VK_CONTROL) &&
       mShouldSwitchTextDirection && editorBase->IsPlaintextEditor()) {
-    editorBase->SwitchTextDirectionTo(mSwitchToRTL ?
-      nsIPlaintextEditor::eEditorRightToLeft :
-      nsIPlaintextEditor::eEditorLeftToRight);
+    editorBase->SwitchTextDirectionTo(
+                  mSwitchToRTL ? EditorBase::TextDirection::eRTL :
+                                 EditorBase::TextDirection::eLTR);
     mShouldSwitchTextDirection = false;
   }
   return NS_OK;
@@ -898,8 +898,8 @@ EditorEventListener::Drop(DragEvent* aDragEvent)
 
   aDragEvent->StopPropagation();
   aDragEvent->PreventDefault();
-  RefPtr<EditorBase> editorBase(mEditorBase);
-  return editorBase->InsertFromDrop(aDragEvent);
+  RefPtr<TextEditor> textEditor = mEditorBase->AsTextEditor();
+  return textEditor->OnDrop(aDragEvent);
 }
 
 bool

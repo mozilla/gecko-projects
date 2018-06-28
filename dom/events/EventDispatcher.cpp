@@ -222,7 +222,7 @@ public:
 
   void SetRetargetedTouchTarget(Maybe<nsTArray<RefPtr<EventTarget>>>&& aTargets)
   {
-    mRetargetedTouchTargets = Move(aTargets);
+    mRetargetedTouchTargets = std::move(aTargets);
   }
 
   bool HasRetargetTouchTargets()
@@ -236,11 +236,13 @@ public:
     MOZ_ASSERT(aTouchEvent,
                "mRetargetedTouchTargets should be empty when dispatching non-touch events.");
 
-    WidgetTouchEvent::TouchArray& touches = aTouchEvent->mTouches;
-    MOZ_ASSERT(!touches.Length() ||
-               touches.Length() == mRetargetedTouchTargets->Length());
-    for (uint32_t i = 0; i < touches.Length(); ++i) {
-      touches[i]->mTarget = mRetargetedTouchTargets->ElementAt(i);
+    if (mRetargetedTouchTargets.isSome()) {
+      WidgetTouchEvent::TouchArray& touches = aTouchEvent->mTouches;
+      MOZ_ASSERT(!touches.Length() ||
+                 touches.Length() == mRetargetedTouchTargets->Length());
+      for (uint32_t i = 0; i < touches.Length(); ++i) {
+        touches[i]->mTarget = mRetargetedTouchTargets->ElementAt(i);
+      }
     }
 
     if (aDOMEvent) {
@@ -266,7 +268,7 @@ public:
   void SetInitialTargetTouches(Maybe<nsTArray<RefPtr<dom::Touch>>>&&
                                  aInitialTargetTouches)
   {
-    mInitialTargetTouches = Move(aInitialTargetTouches);
+    mInitialTargetTouches = std::move(aInitialTargetTouches);
   }
 
   void SetForceContentDispatch(bool aForce)
@@ -484,7 +486,7 @@ EventTargetChainItem::GetEventTargetParent(EventChainPreVisitor& aVisitor)
   SetPreHandleEventOnly(aVisitor.mWantsPreHandleEvent && !aVisitor.mCanHandle);
   SetRootOfClosedTree(aVisitor.mRootOfClosedTree);
   SetRetargetedRelatedTarget(aVisitor.mRetargetedRelatedTarget);
-  SetRetargetedTouchTarget(Move(aVisitor.mRetargetedTouchTargets));
+  SetRetargetedTouchTarget(std::move(aVisitor.mRetargetedTouchTargets));
   mItemFlags = aVisitor.mItemFlags;
   mItemData = aVisitor.mItemData;
 }
@@ -794,7 +796,7 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
                           EventDispatchingCallback* aCallback,
                           nsTArray<EventTarget*>* aTargets)
 {
-  AUTO_PROFILER_LABEL("EventDispatcher::Dispatch", EVENTS);
+  AUTO_PROFILER_LABEL("EventDispatcher::Dispatch", OTHER);
 
   NS_ASSERTION(aEvent, "Trying to dispatch without WidgetEvent!");
   NS_ENSURE_TRUE(!aEvent->mFlags.mIsBeingDispatched,
@@ -1009,7 +1011,7 @@ EventDispatcher::Dispatch(nsISupports* aTarget,
         for (uint32_t i = 0; i < targetTouches->Length(); ++i) {
           initialTargetTouches->AppendElement(targetTouches->Item(i));
         }
-        targetEtci->SetInitialTargetTouches(Move(initialTargetTouches));
+        targetEtci->SetInitialTargetTouches(std::move(initialTargetTouches));
         targetTouches->Clear();
       }
     }

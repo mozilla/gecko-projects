@@ -33,10 +33,8 @@ class SVGLength
 public:
 
   SVGLength()
-#ifdef DEBUG
     : mValue(0.0f)
-    , mUnit(dom::SVGLengthBinding::SVG_LENGTHTYPE_UNKNOWN) // caught by IsValid()
-#endif
+    , mUnit(dom::SVGLength_Binding::SVG_LENGTHTYPE_UNKNOWN) // caught by IsValid()
   {}
 
   SVGLength(float aValue, uint8_t aUnit)
@@ -120,12 +118,12 @@ public:
                                 uint8_t aAxis) const;
 
   bool IsPercentage() const {
-    return mUnit == dom::SVGLengthBinding::SVG_LENGTHTYPE_PERCENTAGE;
+    return mUnit == dom::SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE;
   }
 
   static bool IsValidUnitType(uint16_t unit) {
-    return unit > dom::SVGLengthBinding::SVG_LENGTHTYPE_UNKNOWN &&
-           unit <= dom::SVGLengthBinding::SVG_LENGTHTYPE_PC;
+    return unit > dom::SVGLength_Binding::SVG_LENGTHTYPE_UNKNOWN &&
+           unit <= dom::SVGLength_Binding::SVG_LENGTHTYPE_PC;
   }
 
   /**

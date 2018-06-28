@@ -1707,18 +1707,8 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         return result.succeed();
     }
 
-    // Non-standard hack: Allow redefining non-configurable properties if
-    // JSPROP_REDEFINE_NONCONFIGURABLE is set _and_ the object is a non-DOM
-    // global. The idea is that a DOM object can never have such a thing on
-    // its proto chain directly on the web, so we should be OK optimizing
-    // access to accessors found on such an object. Bug 1105518 contemplates
-    // removing this hack.
-    bool skipRedefineChecks = (desc.attributes() & JSPROP_REDEFINE_NONCONFIGURABLE) &&
-                              obj->is<GlobalObject>() &&
-                              !obj->getClass()->isDOMClass();
-
     // Step 4.
-    if (!IsConfigurable(shapeAttrs) && !skipRedefineChecks) {
+    if (!IsConfigurable(shapeAttrs)) {
         if (desc.hasConfigurable() && desc.configurable())
             return result.fail(JSMSG_CANT_REDEFINE_PROP);
         if (desc.hasEnumerable() && desc.enumerable() != IsEnumerable(shapeAttrs))
@@ -1753,7 +1743,7 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         }
     } else if (desc.isDataDescriptor() != IsDataDescriptor(shapeAttrs)) {
         // Step 6.
-        if (!IsConfigurable(shapeAttrs) && !skipRedefineChecks)
+        if (!IsConfigurable(shapeAttrs))
             return result.fail(JSMSG_CANT_REDEFINE_PROP);
 
         // Fill in desc fields with default values (steps 6.b.i and 6.c.i).
@@ -1763,7 +1753,7 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         bool frozen = !IsConfigurable(shapeAttrs) && !IsWritable(shapeAttrs);
 
         // Step 7.a.i.1.
-        if (frozen && desc.hasWritable() && desc.writable() && !skipRedefineChecks)
+        if (frozen && desc.hasWritable() && desc.writable())
             return result.fail(JSMSG_CANT_REDEFINE_PROP);
 
         if (frozen || !desc.hasValue()) {
@@ -1780,13 +1770,13 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
                 MOZ_ASSERT(!cx->helperThread());
                 if (!SameValue(cx, desc.value(), currentValue, &same))
                     return false;
-                if (!same && !skipRedefineChecks)
+                if (!same)
                     return result.fail(JSMSG_CANT_REDEFINE_PROP);
             }
         }
 
         // Step 7.a.i.3.
-        if (frozen && !skipRedefineChecks)
+        if (frozen)
             return result.succeed();
 
         // Fill in desc.[[Writable]].
@@ -1802,8 +1792,7 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         if (desc.hasSetterObject()) {
             // Step 8.a.i.
             if (!IsConfigurable(shapeAttrs) &&
-                desc.setterObject() != prop.shape()->setterObject() &&
-                !skipRedefineChecks)
+                desc.setterObject() != prop.shape()->setterObject())
             {
                 return result.fail(JSMSG_CANT_REDEFINE_PROP);
             }
@@ -1814,8 +1803,7 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         if (desc.hasGetterObject()) {
             // Step 8.a.ii.
             if (!IsConfigurable(shapeAttrs) &&
-                desc.getterObject() != prop.shape()->getterObject() &&
-                !skipRedefineChecks)
+                desc.getterObject() != prop.shape()->getterObject())
             {
                 return result.fail(JSMSG_CANT_REDEFINE_PROP);
             }
@@ -1836,16 +1824,6 @@ js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
 }
 
 bool
-js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
-                                 GetterOp getter, SetterOp setter, unsigned attrs,
-                                 ObjectOpResult& result)
-{
-    Rooted<PropertyDescriptor> desc(cx);
-    desc.initFields(nullptr, UndefinedHandleValue, attrs, getter, setter);
-    return NativeDefineProperty(cx, obj, id, desc, result);
-}
-
-bool
 js::NativeDefineDataProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
                              HandleValue value, unsigned attrs, ObjectOpResult& result)
 {
@@ -1856,11 +1834,15 @@ js::NativeDefineDataProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
 
 bool
 js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
-                                 JSGetterOp getter, JSSetterOp setter, unsigned attrs)
+                                 GetterOp getter, SetterOp setter, unsigned attrs)
 {
+    Rooted<PropertyDescriptor> desc(cx);
+    desc.initFields(nullptr, UndefinedHandleValue, attrs, getter, setter);
+
     ObjectOpResult result;
-    if (!NativeDefineAccessorProperty(cx, obj, id, getter, setter, attrs, result))
+    if (!NativeDefineProperty(cx, obj, id, desc, result))
         return false;
+
     if (!result) {
         // Off-thread callers should not get here: they must call this
         // function only with known-valid arguments. Populating a new
@@ -1869,6 +1851,34 @@ js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj, HandleId
         result.reportError(cx, obj, id);
         return false;
     }
+
+    return true;
+}
+
+bool
+js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
+                                 HandleObject getter, HandleObject setter, unsigned attrs)
+{
+    Rooted<PropertyDescriptor> desc(cx);
+    {
+        GetterOp getterOp = JS_DATA_TO_FUNC_PTR(GetterOp, getter.get());
+        SetterOp setterOp = JS_DATA_TO_FUNC_PTR(SetterOp, setter.get());
+        desc.initFields(nullptr, UndefinedHandleValue, attrs, getterOp, setterOp);
+    }
+
+    ObjectOpResult result;
+    if (!NativeDefineProperty(cx, obj, id, desc, result))
+        return false;
+
+    if (!result) {
+        // Off-thread callers should not get here: they must call this
+        // function only with known-valid arguments. Populating a new
+        // PlainObject with configurable properties is fine.
+        MOZ_ASSERT(!cx->helperThread());
+        result.reportError(cx, obj, id);
+        return false;
+    }
+
     return true;
 }
 
@@ -1888,14 +1898,6 @@ js::NativeDefineDataProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
         return false;
     }
     return true;
-}
-
-bool
-js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj, PropertyName* name,
-                                 JSGetterOp getter, JSSetterOp setter, unsigned attrs)
-{
-    RootedId id(cx, NameToId(name));
-    return NativeDefineAccessorProperty(cx, obj, id, getter, setter, attrs);
 }
 
 bool
@@ -1933,7 +1935,7 @@ DefineNonexistentProperty(JSContext* cx, HandleNativeObject obj, HandleId id,
             MOZ_ASSERT(index >= obj->as<TypedArrayObject>().length());
 
             // We (wrongly) ignore out of range defines.
-            return result.succeed();
+            return result.failSoft(JSMSG_BAD_INDEX);
         }
     } else if (obj->is<ArgumentsObject>()) {
         // If this method is called with either |length| or |@@iterator|, the
@@ -2448,7 +2450,7 @@ MaybeReportUndeclaredVarAssignment(JSContext* cx, HandleString propname)
     unsigned flags;
     {
         jsbytecode* pc;
-        JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
+        JSScript* script = cx->currentScript(&pc, JSContext::AllowCrossRealm::Allow);
         if (!script)
             return true;
 
@@ -2640,9 +2642,12 @@ SetDenseOrTypedArrayElement(JSContext* cx, HandleNativeObject obj, uint32_t inde
         // current behavior.  (ES6 currently says to throw for this in
         // strict mode code, so we may eventually need to change.)
         uint32_t len = obj->as<TypedArrayObject>().length();
-        if (index < len)
+        if (index < len) {
             TypedArrayObject::setElement(obj->as<TypedArrayObject>(), index, d);
-        return result.succeed();
+            return result.succeed();
+        }
+
+        return result.failSoft(JSMSG_BAD_INDEX);
     }
 
     if (WouldDefinePastNonwritableLength(obj, index))
@@ -2696,23 +2701,7 @@ SetExistingProperty(JSContext* cx, HandleNativeObject obj, HandleId id, HandleVa
             // result is |shape|.
 
             // Steps 5.e.i-ii.
-            if (pobj->is<ArrayObject>() && id == NameToId(cx->names().length)) {
-                Rooted<ArrayObject*> arr(cx, &pobj->as<ArrayObject>());
-                return ArraySetLength(cx, arr, id, shape->attributes(), v, result);
-            }
             return NativeSetExistingDataProperty(cx, pobj, shape, v, result);
-        }
-
-        // SpiderMonkey special case: assigning to an inherited slotless
-        // property causes the setter to be called, instead of shadowing,
-        // unless the existing property is JSPROP_SHADOWABLE (see bug 552432).
-        if (!shape->isDataProperty() && !shape->hasShadowable()) {
-            // Even weirder sub-special-case: inherited slotless data property
-            // with default setter. Wut.
-            if (shape->hasDefaultSetter())
-                return result.succeed();
-
-            return CallJSSetterOp(cx, shape->setterOp(), obj, id, v, result);
         }
 
         // Shadow pobj[id] by defining a new data property receiver[id].

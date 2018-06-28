@@ -144,13 +144,13 @@ public:
     WindowEvent(Lambda&& aLambda,
                 InstanceType&& aInstance)
         : Runnable("nsWindowEvent")
-        , mLambda(mozilla::Move(aLambda))
-        , mInstance(Forward<InstanceType>(aInstance))
+        , mLambda(std::move(aLambda))
+        , mInstance(std::forward<InstanceType>(aInstance))
     {}
 
     explicit WindowEvent(Lambda&& aLambda)
         : Runnable("nsWindowEvent")
-        , mLambda(mozilla::Move(aLambda))
+        , mLambda(std::move(aLambda))
         , mInstance(mLambda.GetThisArg())
     {}
 
@@ -183,7 +183,7 @@ namespace {
     template<class Lambda> bool
     DispatchToUiThread(const char* aName, Lambda&& aLambda) {
         if (RefPtr<nsThread> uiThread = GetAndroidUiThread()) {
-            uiThread->Dispatch(NS_NewRunnableFunction(aName, Move(aLambda)));
+            uiThread->Dispatch(NS_NewRunnableFunction(aName, std::move(aLambda)));
             return true;
         }
         return false;
@@ -199,7 +199,7 @@ nsWindow::NativePtr<Impl>::Attach(Instance aInstance, nsWindow* aWindow,
     MOZ_ASSERT(!mPtr && !mImpl);
 
     Impl* const impl = new Impl(
-            this, aWindow, mozilla::Forward<Args>(aArgs)...);
+            this, aWindow, std::forward<Args>(aArgs)...);
     mImpl = impl;
 
     // CallAttachNative transfers ownership of impl.
@@ -255,7 +255,7 @@ public:
     template<typename Functor>
     static void OnNativeCall(Functor&& aCall)
     {
-        NS_DispatchToMainThread(new WindowEvent<Functor>(mozilla::Move(aCall)));
+        NS_DispatchToMainThread(new WindowEvent<Functor>(std::move(aCall)));
     }
 
     GeckoViewSupport(nsWindow* aWindow,
@@ -331,7 +331,7 @@ class nsWindow::NPZCSupport final
     public:
         InputEvent(const NPZCSupport* aNPZCSupport, Lambda&& aLambda)
             : mNPZC(aNPZCSupport->mNPZC)
-            , mLambda(mozilla::Move(aLambda))
+            , mLambda(std::move(aLambda))
         {}
 
         void Run() override
@@ -353,9 +353,9 @@ class nsWindow::NPZCSupport final
             return mLambda(window);
         }
 
-        nsAppShell::Event::Type ActivityType() const override
+        bool IsUIEvent() const override
         {
-            return nsAppShell::Event::Type::kUIActivity;
+            return true;
         }
     };
 
@@ -364,7 +364,7 @@ class nsWindow::NPZCSupport final
     {
         // Use priority queue for input events.
         nsAppShell::PostEvent(MakeUnique<InputEvent<Lambda>>(
-                this, mozilla::Move(aLambda)));
+                this, std::move(aLambda)));
     }
 
 public:
@@ -439,7 +439,7 @@ public:
         uiThread->Dispatch(NewRunnableFunction(
                 "OnDetachRunnable",
                 static_cast<void(*)(const NPZCRef&)>(callDestroy),
-                mozilla::Move(npzc)), nsIThread::DISPATCH_NORMAL);
+                std::move(npzc)), nsIThread::DISPATCH_NORMAL);
     }
 
     const PanZoomController::Ref& GetJavaNPZC() const
@@ -609,7 +609,7 @@ public:
 
         ScreenPoint origin = ScreenPoint(aX, aY);
 
-        MouseInput input(mouseType, buttonType, MouseEventBinding::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
+        MouseInput input(mouseType, buttonType, MouseEvent_Binding::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
 
         ScrollableLayerGuid guid;
         uint64_t blockId;
@@ -797,11 +797,11 @@ class nsWindow::LayerViewSupport final
     public:
         static UniquePtr<Event> MakeEvent(UniquePtr<Event>&& event)
         {
-            return MakeUnique<LayerViewEvent>(mozilla::Move(event));
+            return MakeUnique<LayerViewEvent>(std::move(event));
         }
 
         explicit LayerViewEvent(UniquePtr<Event>&& event)
-            : nsAppShell::ProxyEvent(mozilla::Move(event))
+            : nsAppShell::ProxyEvent(std::move(event))
         {}
 
         void PostTo(LinkedList<Event>& queue) override
@@ -957,7 +957,7 @@ public:
 
         public:
             explicit OnResumedEvent(LayerSession::Compositor::GlobalRef&& aCompositor)
-                : mCompositor(mozilla::Move(aCompositor))
+                : mCompositor(std::move(aCompositor))
             {}
 
             void Run() override
@@ -2006,7 +2006,7 @@ nsWindow::DispatchHitTest(const WidgetTouchEvent& aEvent)
                                  WidgetMouseEvent::eReal);
         hittest.mRefPoint = aEvent.mTouches[0]->mRefPoint;
         hittest.mIgnoreRootScrollFrame = true;
-        hittest.inputSource = MouseEventBinding::MOZ_SOURCE_TOUCH;
+        hittest.inputSource = MouseEvent_Binding::MOZ_SOURCE_TOUCH;
         nsEventStatus status;
         DispatchEvent(&hittest, status);
 
@@ -2320,7 +2320,7 @@ nsWindow::RecvScreenPixels(Shmem&& aMem, const ScreenIntSize& aSize)
 {
   MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
   if (NativePtr<LayerViewSupport>::Locked lvs{mLayerViewSupport}) {
-    lvs->RecvScreenPixels(mozilla::Move(aMem), aSize);
+    lvs->RecvScreenPixels(std::move(aMem), aSize);
   }
 }
 

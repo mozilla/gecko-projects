@@ -362,7 +362,7 @@ NS_INTERFACE_MAP_END_INHERITING(nsSimpleNestedURI)
 NS_IMETHODIMP
 nsNestedAboutURI::Read(nsIObjectInputStream *aStream)
 {
-    NS_NOTREACHED("Use nsIURIMutator.read() instead");
+    MOZ_ASSERT_UNREACHABLE("Use nsIURIMutator.read() instead");
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -425,9 +425,9 @@ nsNestedAboutURI::StartClone(nsSimpleURI::RefHandlingEnum aRefHandlingMode,
     NS_ENSURE_TRUE(mInnerURI, nullptr);
 
     nsCOMPtr<nsIURI> innerClone;
-    nsresult rv;
+    nsresult rv = NS_OK;
     if (aRefHandlingMode == eHonorRef) {
-        rv = mInnerURI->Clone(getter_AddRefs(innerClone));
+        innerClone = mInnerURI;
     } else if (aRefHandlingMode == eReplaceRef) {
         rv = mInnerURI->CloneWithNewRef(aNewRef, getter_AddRefs(innerClone));
     } else {

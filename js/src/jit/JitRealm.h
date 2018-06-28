@@ -11,6 +11,8 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 
+#include <utility>
+
 #include "builtin/TypedObject.h"
 #include "jit/CompileInfo.h"
 #include "jit/ICStubSpace.h"
@@ -30,8 +32,16 @@ class FrameSizeClass;
 struct EnterJitData
 {
     explicit EnterJitData(JSContext* cx)
-      : envChain(cx),
-        result(cx)
+      : jitcode(nullptr),
+        osrFrame(nullptr),
+        calleeToken(nullptr),
+        maxArgv(nullptr),
+        maxArgc(0),
+        numActualArgs(0),
+        osrNumStackValues(0),
+        envChain(cx),
+        result(cx),
+        constructing(false)
     {}
 
     uint8_t* jitcode;
@@ -191,7 +201,7 @@ class JitRuntime
     ~JitRuntime();
     MOZ_MUST_USE bool initialize(JSContext* cx, js::AutoLockForExclusiveAccess& lock);
 
-    static void Trace(JSTracer* trc, js::AutoLockForExclusiveAccess& lock);
+    static void Trace(JSTracer* trc, const js::AutoAccessAtomsZone& access);
     static void TraceJitcodeGlobalTableForMinorGC(JSTracer* trc);
     static MOZ_MUST_USE bool MarkJitcodeGlobalTableIteratively(GCMarker* marker);
     static void SweepJitcodeGlobalTable(JSRuntime* rt);
@@ -351,10 +361,10 @@ struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
     UniquePtr<CacheIRStubInfo, JS::FreePolicy> stubInfo;
 
     explicit CacheIRStubKey(CacheIRStubInfo* info) : stubInfo(info) {}
-    CacheIRStubKey(CacheIRStubKey&& other) : stubInfo(Move(other.stubInfo)) { }
+    CacheIRStubKey(CacheIRStubKey&& other) : stubInfo(std::move(other.stubInfo)) { }
 
     void operator=(CacheIRStubKey&& other) {
-        stubInfo = Move(other.stubInfo);
+        stubInfo = std::move(other.stubInfo);
     }
 };
 
@@ -417,7 +427,7 @@ class JitZone
     {
         auto p = baselineCacheIRStubCodes_.lookupForAdd(lookup);
         MOZ_ASSERT(!p);
-        return baselineCacheIRStubCodes_.add(p, Move(key), stubCode);
+        return baselineCacheIRStubCodes_.add(p, std::move(key), stubCode);
     }
 
     CacheIRStubInfo* getIonCacheIRStubInfo(const CacheIRStubKey::Lookup& key) {
@@ -433,7 +443,7 @@ class JitZone
             return false;
         IonCacheIRStubInfoSet::AddPtr p = ionCacheIRStubInfoSet_.lookupForAdd(lookup);
         MOZ_ASSERT(!p);
-        return ionCacheIRStubInfoSet_.add(p, Move(key));
+        return ionCacheIRStubInfoSet_.add(p, std::move(key));
     }
     void purgeIonCacheIRStubInfo() {
         ionCacheIRStubInfoSet_.finish();
@@ -514,7 +524,7 @@ class JitRealm
     JSObject* getSimdTemplateObjectFor(JSContext* cx, Handle<SimdTypeDescr*> descr) {
         ReadBarrieredObject& tpl = simdTemplateObjects_[descr->type()];
         if (!tpl)
-            tpl.set(TypedObject::createZeroed(cx, descr, 0, gc::TenuredHeap));
+            tpl.set(TypedObject::createZeroed(cx, descr, gc::TenuredHeap));
         return tpl.get();
     }
 

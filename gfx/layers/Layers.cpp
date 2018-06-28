@@ -593,6 +593,17 @@ Layer::HasScrollableFrameMetrics() const
 }
 
 bool
+Layer::HasRootScrollableFrameMetrics() const
+{
+  for (uint32_t i = 0; i < GetScrollMetadataCount(); i++) {
+    if (GetFrameMetrics(i).IsScrollable() && GetFrameMetrics(i).IsRootContent()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
 Layer::IsScrollableWithoutContent() const
 {
   // A scrollable container layer with no children
@@ -1145,7 +1156,7 @@ SortLayersWithBSPTree(nsTArray<Layer*>& aArray)
     polygon.TransformToScreenSpace(transform);
 
     if (polygon.GetPoints().Length() >= 3) {
-      inputLayers.push_back(LayerPolygon(layer, Move(polygon)));
+      inputLayers.push_back(LayerPolygon(layer, std::move(polygon)));
     }
   }
 
@@ -1206,7 +1217,7 @@ ContainerLayer::SortChildrenBy3DZOrder(SortMode aSortMode)
       // Sort the 3D layers.
       if (toSort.Length() > 0) {
         nsTArray<LayerPolygon> sorted = SortLayersWithBSPTree(toSort);
-        drawOrder.AppendElements(Move(sorted));
+        drawOrder.AppendElements(std::move(sorted));
 
         toSort.ClearAndRetainStorage();
       }

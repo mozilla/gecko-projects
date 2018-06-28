@@ -16,6 +16,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsComponentManagerUtils.h"
+#include "nsTreeColumns.h"
 
 using namespace mozilla;
 
@@ -651,17 +652,17 @@ NS_IMETHODIMP nsTreeSelection::SetCurrentIndex(int32_t aIndex)
     new AsyncEventDispatcher(treeElt,
                              (aIndex != -1 ? DOMMenuItemActive :
                                              DOMMenuItemInactive),
-                             true, false);
+                             CanBubble::eYes, ChromeOnlyDispatch::eNo);
   return asyncDispatcher->PostDOMEvent();
 }
 
-NS_IMETHODIMP nsTreeSelection::GetCurrentColumn(nsITreeColumn** aCurrentColumn)
+NS_IMETHODIMP nsTreeSelection::GetCurrentColumn(nsTreeColumn** aCurrentColumn)
 {
   NS_IF_ADDREF(*aCurrentColumn = mCurrentColumn);
   return NS_OK;
 }
 
-NS_IMETHODIMP nsTreeSelection::SetCurrentColumn(nsITreeColumn* aCurrentColumn)
+NS_IMETHODIMP nsTreeSelection::SetCurrentColumn(nsTreeColumn* aCurrentColumn)
 {
   if (!mTree) {
     return NS_ERROR_UNEXPECTED;
@@ -834,7 +835,8 @@ nsTreeSelection::FireOnSelectHandler()
   NS_ENSURE_STATE(elt);
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(elt, NS_LITERAL_STRING("select"), true, false);
+    new AsyncEventDispatcher(elt, NS_LITERAL_STRING("select"),
+                             CanBubble::eYes, ChromeOnlyDispatch::eNo);
   asyncDispatcher->RunDOMEventWhenSafe();
   return NS_OK;
 }

@@ -6,6 +6,8 @@
 
 #include "jit/RematerializedFrame.h"
 
+#include <utility>
+
 #include "jit/JitFrames.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/Debugger.h"
@@ -34,13 +36,16 @@ RematerializedFrame::RematerializedFrame(JSContext* cx, uint8_t* top, unsigned n
                                          InlineFrameIterator& iter, MaybeReadFallback& fallback)
   : prevUpToDate_(false),
     isDebuggee_(iter.script()->isDebuggee()),
+    hasInitialEnv_(false),
     isConstructing_(iter.isConstructing()),
     hasCachedSavedFrame_(false),
     top_(top),
     pc_(iter.pc()),
     frameNo_(iter.frameNo()),
     numActualArgs_(numActualArgs),
-    script_(iter.script())
+    script_(iter.script()),
+    envChain_(nullptr),
+    argsObj_(nullptr)
 {
     if (iter.isFunctionFrame())
         callee_ = iter.callee(fallback);
@@ -103,7 +108,7 @@ RematerializedFrame::RematerializeInlineFrames(JSContext* cx, uint8_t* top,
         ++iter;
     }
 
-    frames = Move(tempFrames.get());
+    frames = std::move(tempFrames.get());
     return true;
 }
 

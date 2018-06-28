@@ -2,11 +2,12 @@ use std::slice;
 use libc::{size_t, uint8_t, uint16_t, uint32_t, int64_t};
 
 use rsdparsa::SdpSession;
-use rsdparsa::attribute_type::{SdpAttribute, SdpAttributeFingerprint, SdpAttributeSetup, SdpAttributeSsrc, SdpAttributeRtpmap, SdpAttributeMsid, SdpAttributeMsidSemantic, SdpAttributeGroupSemantic, SdpAttributeGroup, SdpAttributeRtcp, SdpAttributeSctpmap, SdpAttributeRemoteCandidate, SdpAttributeExtmap, SdpAttributeDirection};
+use rsdparsa::attribute_type::*;
 use nserror::{nsresult, NS_OK, NS_ERROR_INVALID_ARG};
 
 use types::StringView;
 use network::RustIpAddr;
+
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -318,10 +319,69 @@ pub unsafe extern "C" fn sdp_get_rtpmaps(attributes: *const Vec<SdpAttribute>, r
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct RustSdpAttributeFmtpParameters {
+
+    // H264
+    pub packetization_mode: uint32_t,
+    pub level_asymmetry_allowed: bool,
+    pub profile_level_id: uint32_t,
+    pub max_fs: uint32_t,
+    pub max_cpb: uint32_t,
+    pub max_dpb: uint32_t,
+    pub max_br: uint32_t,
+    pub max_mbps: uint32_t,
+
+    // VP8 and VP9
+    // max_fs, already defined in H264
+    pub max_fr: uint32_t,
+
+    // Opus
+    pub maxplaybackrate: uint32_t,
+    pub usedtx: bool,
+    pub stereo: bool,
+    pub useinbandfec: bool,
+    pub cbr: bool,
+
+    // telephone-event
+    pub dtmf_tones: StringView,
+
+    // Red
+    pub encodings: *const Vec<uint8_t>,
+
+    // Unknown
+    pub unknown_tokens: *const Vec<String>,
+}
+
+impl<'a> From<&'a SdpAttributeFmtpParameters> for RustSdpAttributeFmtpParameters {
+    fn from(other: &SdpAttributeFmtpParameters) -> Self {
+        RustSdpAttributeFmtpParameters{
+                packetization_mode: other.packetization_mode,
+                level_asymmetry_allowed: other.level_asymmetry_allowed,
+                profile_level_id: other.profile_level_id,
+                max_fs: other.max_fs,
+                max_cpb: other.max_cpb,
+                max_dpb: other.max_dpb,
+                max_br: other.max_br,
+                max_mbps: other.max_mbps,
+                usedtx: other.usedtx,
+                stereo: other.stereo,
+                useinbandfec: other.useinbandfec,
+                cbr: other.cbr,
+                max_fr: other.max_fr,
+                maxplaybackrate: other.maxplaybackrate,
+                dtmf_tones: StringView::from(other.dtmf_tones.as_str()),
+                encodings: &other.encodings,
+                unknown_tokens: &other.unknown_tokens,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct RustSdpAttributeFmtp {
     pub payload_type: uint8_t,
     pub codec_name: StringView,
-    pub tokens: *const Vec<String>,
+    pub parameters: RustSdpAttributeFmtpParameters,
 }
 
 #[no_mangle]
@@ -342,7 +402,8 @@ fn find_payload_type(attributes: &[SdpAttribute], payload_type: u8) -> Option<&S
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sdp_get_fmtp(attributes: *const Vec<SdpAttribute>, ret_size: size_t, ret_fmtp: *mut RustSdpAttributeFmtp) -> size_t {
+pub unsafe extern "C" fn sdp_get_fmtp(attributes: *const Vec<SdpAttribute>, ret_size: size_t,
+                                                ret_fmtp: *mut RustSdpAttributeFmtp) -> size_t {
     let fmtps = (*attributes).iter().filter_map(|x| if let SdpAttribute::Fmtp(ref data) = *x {
         Some(data)
     } else {
@@ -354,8 +415,8 @@ pub unsafe extern "C" fn sdp_get_fmtp(attributes: *const Vec<SdpAttribute>, ret_
             rust_fmtps.push( RustSdpAttributeFmtp{
                 payload_type: fmtp.payload_type as u8,
                 codec_name: StringView::from(rtpmap.codec_name.as_str()),
-                tokens: &fmtp.tokens
-            }
+                parameters: RustSdpAttributeFmtpParameters::from(&fmtp.parameters),
+                }
             );
         }
     }
@@ -570,6 +631,47 @@ pub unsafe extern "C" fn sdp_get_rtcp(attributes: *const Vec<SdpAttribute>, ret:
     NS_ERROR_INVALID_ARG
 }
 
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustSdpAttributeRtcpFb {
+    pub payload_type: u32,
+    pub feedback_type: u32,
+    pub parameter: StringView,
+    pub extra: StringView
+}
+
+impl<'a> From<&'a SdpAttributeRtcpFb> for RustSdpAttributeRtcpFb {
+    fn from(other: &SdpAttributeRtcpFb) -> Self {
+        RustSdpAttributeRtcpFb {
+            payload_type: match other.payload_type{
+                SdpAttributePayloadType::Wildcard => u32::max_value(),
+                SdpAttributePayloadType::PayloadType(x) => x as u32,
+            },
+            feedback_type: other.feedback_type.clone() as u32,
+            parameter: StringView::from(other.parameter.as_str()),
+            extra: StringView::from(other.extra.as_str()),
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_get_rtcpfb_count(attributes: *const Vec<SdpAttribute>) -> size_t {
+    count_attribute((*attributes).as_slice(), RustSdpAttributeType::Rtcpfb)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_get_rtcpfbs(attributes: *const Vec<SdpAttribute>, ret_size: size_t, ret_rtcpfbs: *mut RustSdpAttributeRtcpFb) {
+    let attrs: Vec<_> = (*attributes).iter().filter_map(|x| if let SdpAttribute::Rtcpfb(ref data) = *x {
+        Some(RustSdpAttributeRtcpFb::from(data))
+    } else {
+        None
+    }).collect();
+    let rtcpfbs = slice::from_raw_parts_mut(ret_rtcpfbs, ret_size);
+    rtcpfbs.clone_from_slice(attrs.as_slice());
+}
+
+
 #[no_mangle]
 pub unsafe extern "C" fn sdp_get_imageattr_count(attributes: *const Vec<SdpAttribute>) -> size_t {
     count_attribute((*attributes).as_slice(), RustSdpAttributeType::ImageAttr)
@@ -616,6 +718,98 @@ pub unsafe extern "C" fn sdp_get_sctpmaps(attributes: *const Vec<SdpAttribute>, 
     }).collect();
     let sctpmaps = slice::from_raw_parts_mut(ret_sctpmaps, ret_size);
     sctpmaps.copy_from_slice(attrs.as_slice());
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustSdpAttributeSimulcastId {
+    pub id: StringView,
+    pub paused: bool,
+}
+
+impl<'a> From<&'a SdpAttributeSimulcastId> for RustSdpAttributeSimulcastId {
+    fn from(other: &SdpAttributeSimulcastId) -> Self {
+        RustSdpAttributeSimulcastId{
+            id: StringView::from(other.id.as_str()),
+            paused: other.paused
+        }
+    }
+}
+
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustSdpAttributeSimulcastVersion {
+    pub ids: *const Vec<SdpAttributeSimulcastId>
+}
+
+impl<'a> From<&'a SdpAttributeSimulcastVersion> for RustSdpAttributeSimulcastVersion {
+    fn from(other: &SdpAttributeSimulcastVersion) -> Self {
+        RustSdpAttributeSimulcastVersion {
+            ids: &other.ids,
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_simulcast_get_ids_count(ids: *const Vec<SdpAttributeSimulcastId>)
+                                                    -> size_t {
+    (*ids).len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_simulcast_get_ids(ids: *const Vec<SdpAttributeSimulcastId>,
+                                               ret_size: size_t,
+                                               ret: *mut RustSdpAttributeSimulcastId) {
+    let rust_ids: Vec<_> = (*ids).iter().map(RustSdpAttributeSimulcastId::from).collect();
+    let ids = slice::from_raw_parts_mut(ret, ret_size);
+    ids.clone_from_slice(rust_ids.as_slice());
+}
+
+#[repr(C)]
+pub struct RustSdpAttributeSimulcast {
+    pub send: *const Vec<SdpAttributeSimulcastVersion>,
+    pub receive: *const Vec<SdpAttributeSimulcastVersion>,
+}
+
+impl<'a> From<&'a SdpAttributeSimulcast> for RustSdpAttributeSimulcast {
+    fn from(other: &SdpAttributeSimulcast) -> Self {
+        RustSdpAttributeSimulcast {
+            send: &other.send,
+            receive: &other.receive,
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_simulcast_get_version_count(
+                            version_list: *const Vec<SdpAttributeSimulcastVersion>)
+                            -> size_t {
+    (*version_list).len()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_simulcast_get_versions(
+                          version_list: *const Vec<SdpAttributeSimulcastVersion>,
+                          ret_size: size_t, ret: *mut RustSdpAttributeSimulcastVersion) {
+    let rust_versions_list: Vec<_> = (*version_list).iter()
+                                             .map(RustSdpAttributeSimulcastVersion::from)
+                                             .collect();
+    let versions = slice::from_raw_parts_mut(ret, ret_size);
+    versions.clone_from_slice(rust_versions_list.as_slice())
+}
+
+
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_get_simulcast(attributes: *const Vec<SdpAttribute>,
+                                           ret: *mut RustSdpAttributeSimulcast) -> nsresult {
+    let attr = get_attribute((*attributes).as_slice(), RustSdpAttributeType::Simulcast);
+    if let Some(&SdpAttribute::Simulcast(ref data)) = attr {
+        *ret = RustSdpAttributeSimulcast::from(data);
+        return NS_OK;
+    }
+    NS_ERROR_INVALID_ARG
 }
 
 #[repr(C)]
@@ -700,20 +894,69 @@ pub unsafe extern "C" fn sdp_get_remote_candidates(attributes: *const Vec<SdpAtt
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustSdpAttributeRidParameters {
+    pub max_width: uint32_t,
+    pub max_height: uint32_t,
+    pub max_fps: uint32_t,
+    pub max_fs: uint32_t,
+    pub max_br: uint32_t,
+    pub max_pps: uint32_t,
+    pub unknown:*const Vec<String>
+}
+
+impl<'a> From<&'a SdpAttributeRidParameters> for RustSdpAttributeRidParameters {
+     fn from(other: &SdpAttributeRidParameters) -> Self {
+         RustSdpAttributeRidParameters {
+             max_width: other.max_width,
+             max_height: other.max_height,
+             max_fps: other.max_fps,
+             max_fs: other.max_fs,
+             max_br: other.max_br,
+             max_pps: other.max_pps,
+
+             unknown: &other.unknown
+         }
+     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RustSdpAttributeRid {
+    pub id: StringView,
+    pub direction: uint32_t,
+    pub formats: *const Vec<uint16_t>,
+    pub params: RustSdpAttributeRidParameters,
+    pub depends: *const Vec<String>,
+}
+
+impl<'a> From<&'a SdpAttributeRid> for RustSdpAttributeRid {
+    fn from(other: &SdpAttributeRid) -> Self {
+        RustSdpAttributeRid {
+            id: StringView::from(other.id.as_str()),
+            direction: other.direction.clone() as uint32_t,
+            formats: &other.formats,
+            params: RustSdpAttributeRidParameters::from(&other.params),
+            depends: &other.depends,
+        }
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn sdp_get_rid_count(attributes: *const Vec<SdpAttribute>) -> size_t {
     count_attribute((*attributes).as_slice(), RustSdpAttributeType::Rid)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sdp_get_rids(attributes: *const Vec<SdpAttribute>, ret_size: size_t, ret_rids: *mut StringView) {
-    let attrs: Vec<_> = (*attributes).iter().filter_map(|x| if let SdpAttribute::Rid(ref string) = *x {
-        Some(StringView::from(string.as_str()))
+pub unsafe extern "C" fn sdp_get_rids(attributes: *const Vec<SdpAttribute>, ret_size: size_t, ret_rids: *mut RustSdpAttributeRid) {
+    let attrs: Vec<_> = (*attributes).iter().filter_map(|x| if let SdpAttribute::Rid(ref data) = *x {
+        Some(RustSdpAttributeRid::from(data))
     } else {
         None
     }).collect();
     let rids = slice::from_raw_parts_mut(ret_rids, ret_size);
-    rids.copy_from_slice(attrs.as_slice());
+    rids.clone_from_slice(attrs.as_slice());
 }
 
 #[repr(C)]

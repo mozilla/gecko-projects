@@ -218,7 +218,7 @@ public:
     : mIsSome(false)
   {
     if (aOther.mIsSome) {
-      emplace(Move(*aOther));
+      emplace(std::move(*aOther));
       aOther.reset();
     }
   }
@@ -234,7 +234,7 @@ public:
     : mIsSome(false)
   {
     if (aOther.isSome()) {
-      emplace(Move(*aOther));
+      emplace(std::move(*aOther));
       aOther.reset();
     }
   }
@@ -278,9 +278,9 @@ public:
 
     if (aOther.mIsSome) {
       if (mIsSome) {
-        ref() = Move(aOther.ref());
+        ref() = std::move(aOther.ref());
       } else {
-        emplace(Move(*aOther));
+        emplace(std::move(*aOther));
       }
       aOther.reset();
     } else {
@@ -297,9 +297,9 @@ public:
   {
     if (aOther.isSome()) {
       if (mIsSome) {
-        ref() = Move(aOther.ref());
+        ref() = std::move(aOther.ref());
       } else {
-        emplace(Move(*aOther));
+        emplace(std::move(*aOther));
       }
       aOther.reset();
     } else {
@@ -327,7 +327,7 @@ public:
     if (isSome()) {
       return ref();
     }
-    return Forward<V>(aDefault);
+    return std::forward<V>(aDefault);
   }
 
   /*
@@ -596,7 +596,7 @@ void
 Maybe<T>::emplace(Args&&... aArgs)
 {
   MOZ_DIAGNOSTIC_ASSERT(!mIsSome);
-  ::new (KnownNotNull, data()) T(Forward<Args>(aArgs)...);
+  ::new (KnownNotNull, data()) T(std::forward<Args>(aArgs)...);
   mIsSome = true;
 }
 
@@ -617,7 +617,7 @@ Maybe<U>
 Some(T&& aValue)
 {
   Maybe<U> value;
-  value.emplace(Forward<T>(aValue));
+  value.emplace(std::forward<T>(aValue));
   return value;
 }
 

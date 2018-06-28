@@ -243,11 +243,11 @@ ServiceWorkerInfo::RemoveListener(Listener* aListener)
 }
 
 void
-ServiceWorkerInfo::PostMessage(ipc::StructuredCloneData&& aData,
+ServiceWorkerInfo::PostMessage(RefPtr<ServiceWorkerCloneData>&& aData,
                                const ClientInfo& aClientInfo,
                                const ClientState& aClientState)
 {
-  mServiceWorkerPrivate->SendMessageEvent(Move(aData),
+  mServiceWorkerPrivate->SendMessageEvent(std::move(aData),
                                           ClientInfoAndState(aClientInfo.ToIPC(),
                                                              aClientState.ToIPC()));
 }

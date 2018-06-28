@@ -13,13 +13,14 @@ DIRS += [
 ]
 
 DevToolsModules(
-    'accessibility-panel.js',
+    'accessibility-startup.js',
     'accessibility-view.js',
     'accessibility.css',
     'constants.js',
+    'panel.js',
     'picker.js',
     'provider.js',
 )
 
 with Files('**'):
-    BUG_COMPONENT = ('Firefox', 'Developer Tools: Accessibility')
+    BUG_COMPONENT = ('DevTools', 'Accessibility Tools')

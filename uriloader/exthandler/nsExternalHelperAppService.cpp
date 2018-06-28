@@ -480,6 +480,7 @@ static const nsDefaultMimeTypeEntry defaultMimeEntries[] =
   { IMAGE_ICO, "ico" },
   { TEXT_PLAIN, "properties" },
   { TEXT_PLAIN, "locale" },
+  { TEXT_PLAIN, "ftl" },
 #if defined(MOZ_WMF)
   { VIDEO_MP4, "mp4" },
   { AUDIO_MP4, "m4a" },
@@ -1212,7 +1213,10 @@ nsExternalAppHandler::nsExternalAppHandler(nsIMIMEInfo * aMIMEInfo,
 , mForceSave(aForceSave)
 , mCanceled(false)
 , mStopRequestIssued(false)
+, mIsFileChannel(false)
 , mReason(aReason)
+, mTempFileIsExecutable(false)
+, mTimeDownloadStarted(0)
 , mContentLength(-1)
 , mProgress(0)
 , mSaver(nullptr)

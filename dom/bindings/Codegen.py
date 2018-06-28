@@ -56,7 +56,7 @@ def toStringBool(arg):
 
 
 def toBindingNamespace(arg):
-    return arg + "Binding"
+    return arg + "_Binding"
 
 
 def isTypeCopyConstructible(type):
@@ -1579,7 +1579,7 @@ class CGAbstractMethod(CGThing):
     def _auto_profiler_label(self):
         profiler_label_and_jscontext = self.profiler_label_and_jscontext()
         if profiler_label_and_jscontext:
-            return 'AUTO_PROFILER_LABEL_FAST("%s", OTHER, %s);' % profiler_label_and_jscontext
+            return 'AUTO_PROFILER_LABEL_FAST("%s", DOM, %s);' % profiler_label_and_jscontext
         return None
 
     def declare(self):
@@ -1743,14 +1743,14 @@ class CGClassFinalizeHook(CGAbstractClassHook):
 def objectMovedHook(descriptor, hookName, obj, old):
     assert descriptor.wrapperCache
     return fill("""
-	if (self) {
-	  UpdateWrapper(self, self, ${obj}, ${old});
-	}
+        if (self) {
+          UpdateWrapper(self, self, ${obj}, ${old});
+        }
 
-	return 0;
-	""",
-	obj=obj,
-	old=old)
+        return 0;
+        """,
+        obj=obj,
+        old=old)
 
 
 class CGClassObjectMovedHook(CGAbstractClassHook):
@@ -2869,10 +2869,10 @@ class CGCollectJSONAttributesMethod(CGAbstractMethod):
     Generate the CollectJSONAttributes method for an interface descriptor
     """
     def __init__(self, descriptor, toJSONMethod):
-        args = [Argument('JSContext*', 'aCx'),
+        args = [Argument('JSContext*', 'cx'),
                 Argument('JS::Handle<JSObject*>', 'obj'),
                 Argument('%s*' % descriptor.nativeType, 'self'),
-                Argument('JS::Rooted<JSObject*>&', 'aResult')]
+                Argument('JS::Rooted<JSObject*>&', 'result')]
         CGAbstractMethod.__init__(self, descriptor, 'CollectJSONAttributes',
                                   'bool', args, canRunScript=True)
         self.toJSONMethod = toJSONMethod
@@ -2882,15 +2882,16 @@ class CGCollectJSONAttributesMethod(CGAbstractMethod):
         interface = self.descriptor.interface
         toJSONCondition = PropertyDefiner.getControllingCondition(self.toJSONMethod,
                                                                   self.descriptor)
+        needUnwrappedObj = False
         for m in interface.members:
             if m.isAttr() and not m.isStatic() and m.type.isJSONType():
                 getAndDefine = fill(
                     """
-                    JS::Rooted<JS::Value> temp(aCx);
-                    if (!get_${name}(aCx, obj, self, JSJitGetterCallArgs(&temp))) {
+                    JS::Rooted<JS::Value> temp(cx);
+                    if (!get_${name}(cx, obj, self, JSJitGetterCallArgs(&temp))) {
                       return false;
                     }
-                    if (!JS_DefineProperty(aCx, aResult, "${name}", temp, JSPROP_ENUMERATE)) {
+                    if (!JS_DefineProperty(cx, result, "${name}", temp, JSPROP_ENUMERATE)) {
                       return false;
                     }
                     """,
@@ -2901,12 +2902,13 @@ class CGCollectJSONAttributesMethod(CGAbstractMethod):
                 # possibly be disabled, but other things might be.
                 condition = PropertyDefiner.getControllingCondition(m, self.descriptor)
                 if condition.hasDisablers() and condition != toJSONCondition:
+                    needUnwrappedObj = True;
                     ret += fill(
                         """
                         // This is unfortunately a linear scan through sAttributes, but we
                         // only do it for things which _might_ be disabled, which should
                         // help keep the performance problems down.
-                        if (IsGetterEnabled(aCx, obj, (JSJitGetterOp)get_${name}, sAttributes)) {
+                        if (IsGetterEnabled(cx, unwrappedObj, (JSJitGetterOp)get_${name}, sAttributes)) {
                           $*{getAndDefine}
                         }
                         """,
@@ -2921,6 +2923,21 @@ class CGCollectJSONAttributesMethod(CGAbstractMethod):
                         """,
                         getAndDefine=getAndDefine)
         ret += 'return true;\n'
+
+        if needUnwrappedObj:
+            ret= fill(
+                """
+                JS::Rooted<JSObject*> unwrappedObj(cx, js::CheckedUnwrap(obj));
+                if (!unwrappedObj) {
+                  // How did that happen?  We managed to get called with that
+                  // object as "this"!  Just give up on sanity.
+                  return false;
+                }
+
+                $*{ret}
+                """,
+                ret=ret);
+
         return ret
 
 
@@ -3739,6 +3756,8 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
 
         return fill(
             """
+            static_assert(!IsBaseOf<NonRefcountedDOMObject, ${nativeType}>::value,
+                          "Shouldn't have wrappercached things that are not refcounted.");
             $*{assertInheritance}
             MOZ_ASSERT_IF(aGivenProto, js::IsObjectInContextCompartment(aGivenProto, aCx));
             MOZ_ASSERT(!aCache->GetWrapper(),
@@ -3790,6 +3809,7 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
 
             return true;
             """,
+            nativeType=self.descriptor.nativeType,
             assertInheritance=AssertInheritanceChain(self.descriptor),
             declareProto=DeclareProto(),
             createObject=CreateBindingJSObject(self.descriptor, self.properties),
@@ -12903,10 +12923,8 @@ class CGDictionary(CGThing):
 
     def assignmentOperator(self):
         body = CGList([])
-        if self.dictionary.parent:
-            body.append(CGGeneric(
-                "%s::operator=(aOther);\n" %
-                self.makeClassName(self.dictionary.parent)))
+        body.append(CGGeneric("%s::operator=(aOther);\n" % self.base()))
+
         for m, _ in self.memberInfo:
             memberName = self.makeMemberName(m.identifier.name)
             if m.canHaveMissingValue():
@@ -13621,13 +13639,13 @@ class CGRegisterGlobalNames(CGAbstractMethod):
         def getCheck(desc):
             if not desc.isExposedConditionally():
                 return "nullptr"
-            return "%sBinding::ConstructorEnabled" % desc.name
+            return "%s_Binding::ConstructorEnabled" % desc.name
 
         define = ""
         currentOffset = 0
         for (name, desc) in getGlobalNames(self.config):
             length = len(name)
-            define += "WebIDLGlobalNameHash::Register(%i, %i, %sBinding::CreateInterfaceObjects, %s, constructors::id::%s);\n" % (
+            define += "WebIDLGlobalNameHash::Register(%i, %i, %s_Binding::CreateInterfaceObjects, %s, constructors::id::%s);\n" % (
                 currentOffset, length, desc.name, getCheck(desc), desc.name)
             currentOffset += length + 1 # Add trailing null.
         return define
@@ -14900,7 +14918,7 @@ class CGExampleClass(CGBindingImplClass):
             ${returnType}
             ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto${reflectorArg})
             {
-              return ${ifaceName}Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
+              return ${ifaceName}_Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
             }
 
             """)
@@ -15033,7 +15051,7 @@ class CGJSImplMethod(CGJSImplMember):
 
     def getArgs(self, returnType, argList):
         if self.isConstructor:
-            # Skip the JSCompartment bits for constructors; it's handled
+            # Skip the JS::Compartment bits for constructors; it's handled
             # manually in getImpl.  But we do need our aGivenProto argument.  We
             # allow it to be omitted if the default proto is desired.
             return (CGNativeMember.getArgs(self, returnType, argList) +
@@ -15316,7 +15334,7 @@ class CGJSImplClass(CGBindingImplClass):
     def getWrapObjectBody(self):
         return fill(
             """
-            JS::Rooted<JSObject*> obj(aCx, ${name}Binding::Wrap(aCx, this, aGivenProto));
+            JS::Rooted<JSObject*> obj(aCx, ${name}_Binding::Wrap(aCx, this, aGivenProto));
             if (!obj) {
               return nullptr;
             }
@@ -16836,7 +16854,7 @@ class CGIterableMethodGenerator(CGGeneric):
             typedef ${iterClass} itrType;
             RefPtr<itrType> result(new itrType(self,
                                                  itrType::IterableIteratorType::${itrMethod},
-                                                 &${ifaceName}IteratorBinding::Wrap));
+                                                 &${ifaceName}Iterator_Binding::Wrap));
             """,
             iterClass=iteratorNativeType(descriptor),
             ifaceName=descriptor.interface.identifier.name,
@@ -17129,12 +17147,12 @@ class GlobalGenRoots():
     @staticmethod
     def ResolveSystemBinding(config):
         curr = CGList([], "\n")
-        
+
         descriptors = config.getDescriptors(hasInterfaceObject=True,
                                             isExposedInSystemGlobals=True,
                                             register=True)
         properties = [desc.name for desc in descriptors]
-        
+
         curr.append(CGStringTable("IdString", properties, static=True))
 
         initValues = []
@@ -17153,7 +17171,7 @@ class GlobalGenRoots():
               ProtoGetter define;
               PinnedStringId id;
             };
-          
+
             static SystemProperty properties[] = {
               $*{init}
             };
@@ -17618,7 +17636,7 @@ class CGEventClass(CGBindingImplClass):
                          extradeclarations=baseDeclarations)
 
     def getWrapObjectBody(self):
-        return "return %sBinding::Wrap(aCx, this, aGivenProto);\n" % self.descriptor.name
+        return "return %s_Binding::Wrap(aCx, this, aGivenProto);\n" % self.descriptor.name
 
     def needCC(self):
         return (len(self.membersNeedingCC) != 0 or

@@ -347,12 +347,12 @@ class JS_FRIEND_API(GCCellPtr)
 template <typename F, typename... Args>
 auto
 DispatchTyped(F f, GCCellPtr thing, Args&&... args)
-  -> decltype(f(static_cast<JSObject*>(nullptr), mozilla::Forward<Args>(args)...))
+  -> decltype(f(static_cast<JSObject*>(nullptr), std::forward<Args>(args)...))
 {
     switch (thing.kind()) {
 #define JS_EXPAND_DEF(name, type, _) \
       case JS::TraceKind::name: \
-          return f(&thing.as<type>(), mozilla::Forward<Args>(args)...);
+          return f(&thing.as<type>(), std::forward<Args>(args)...);
       JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
 #undef JS_EXPAND_DEF
       default:
@@ -591,10 +591,10 @@ IsIncrementalBarrierNeededOnTenuredGCThing(const JS::GCCellPtr thing)
     MOZ_ASSERT(thing);
     MOZ_ASSERT(!js::gc::IsInsideNursery(thing.asCell()));
 
-    // TODO: I'd like to assert !CurrentThreadIsHeapBusy() here but this gets
+    // TODO: I'd like to assert !RuntimeHeapIsBusy() here but this gets
     // called while we are tracing the heap, e.g. during memory reporting
     // (see bug 1313318).
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapCollecting());
+    MOZ_ASSERT(!JS::RuntimeHeapIsCollecting());
 
     JS::Zone* zone = JS::GetTenuredGCThingZone(thing);
     return JS::shadow::Zone::asShadowZone(zone)->needsIncrementalBarrier();
@@ -632,7 +632,7 @@ EdgeNeedsSweepUnbarriered(JSObject** objp)
     // This function does not handle updating nursery pointers. Raw JSObject
     // pointers should be updated separately or replaced with
     // JS::Heap<JSObject*> which handles this automatically.
-    MOZ_ASSERT(!JS::CurrentThreadIsHeapMinorCollecting());
+    MOZ_ASSERT(!JS::RuntimeHeapIsMinorCollecting());
     if (IsInsideNursery(reinterpret_cast<Cell*>(*objp)))
         return false;
 

@@ -21,12 +21,12 @@ class nsDisplayXULImage;
 class nsImageBoxListener final : public imgINotificationObserver
 {
 public:
-  nsImageBoxListener();
+  explicit nsImageBoxListener(nsImageBoxFrame *frame);
 
   NS_DECL_ISUPPORTS
   NS_DECL_IMGINOTIFICATIONOBSERVER
 
-  void SetFrame(nsImageBoxFrame *frame) { mFrame = frame; }
+  void ClearFrame() { mFrame = nullptr; }
 
 private:
   virtual ~nsImageBoxListener();
@@ -96,13 +96,13 @@ public:
                         const nsRect& aDirtyRect,
                         nsPoint aPt, uint32_t aFlags);
 
-  ImgDrawResult CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
-                                     mozilla::wr::IpcResourceUpdateQueue& aResources,
-                                     const mozilla::layers::StackingContextHelper& aSc,
-                                     mozilla::layers::WebRenderLayerManager* aManager,
-                                     nsDisplayItem* aItem,
-                                     nsPoint aPt,
-                                     uint32_t aFlags);
+  Maybe<ImgDrawResult> CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
+                                               mozilla::wr::IpcResourceUpdateQueue& aResources,
+                                               const mozilla::layers::StackingContextHelper& aSc,
+                                               mozilla::layers::WebRenderLayerManager* aManager,
+                                               nsDisplayItem* aItem,
+                                               nsPoint aPt,
+                                               uint32_t aFlags);
 
   bool CanOptimizeToImageLayer();
 

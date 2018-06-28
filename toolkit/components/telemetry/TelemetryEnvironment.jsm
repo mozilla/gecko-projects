@@ -233,6 +233,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["general.smoothScroll", {what: RECORD_PREF_VALUE}],
   ["gfx.direct2d.disabled", {what: RECORD_PREF_VALUE}],
   ["gfx.direct2d.force-enabled", {what: RECORD_PREF_VALUE}],
+  ["gfx.webrender.force-disabled", {what: RECORD_PREF_VALUE}],
   ["layers.acceleration.disabled", {what: RECORD_PREF_VALUE}],
   ["layers.acceleration.force-enabled", {what: RECORD_PREF_VALUE}],
   ["layers.async-pan-zoom.enabled", {what: RECORD_PREF_VALUE}],
@@ -1352,14 +1353,6 @@ EnvironmentCache.prototype = {
       xpcomAbi: Services.appinfo.XPCOMABI,
       updaterAvailable: AppConstants.MOZ_UPDATER,
     };
-
-    // Add |architecturesInBinary| only for Mac Universal builds.
-    if ("@mozilla.org/xpcom/mac-utils;1" in Cc) {
-      let macUtils = Cc["@mozilla.org/xpcom/mac-utils;1"].getService(Ci.nsIMacUtils);
-      if (macUtils && macUtils.isUniversalBinary) {
-        buildData.architecturesInBinary = macUtils.architecturesInBinary;
-      }
-    }
 
     return buildData;
   },

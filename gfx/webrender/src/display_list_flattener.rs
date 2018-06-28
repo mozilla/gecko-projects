@@ -8,25 +8,25 @@ use api::{ClipId, ColorF, ComplexClipRegion, DeviceIntPoint, DeviceIntRect, Devi
 use api::{DevicePixelScale, DeviceUintRect, DisplayItemRef, Epoch, ExtendMode, ExternalScrollId};
 use api::{FilterOp, FontInstanceKey, GlyphInstance, GlyphOptions, GlyphRasterSpace, GradientStop};
 use api::{IframeDisplayItem, ImageKey, ImageRendering, ItemRange, LayoutPoint};
-use api::{LayoutPrimitiveInfo, LayoutRect, LayoutVector2D, LayoutSize, LayoutTransform};
+use api::{LayoutPrimitiveInfo, LayoutRect, LayoutSize, LayoutTransform, LayoutVector2D};
 use api::{LineOrientation, LineStyle, LocalClip, NinePatchBorderSource, PipelineId};
-use api::{PropertyBinding, RepeatMode, ScrollFrameDisplayItem, ScrollSensitivity, Shadow};
-use api::{SpecificDisplayItem, StackingContext, StickyFrameDisplayItem, TexelRect};
+use api::{PropertyBinding, ReferenceFrame, RepeatMode, ScrollFrameDisplayItem, ScrollSensitivity};
+use api::{Shadow, SpecificDisplayItem, StackingContext, StickyFrameDisplayItem, TexelRect};
 use api::{TransformStyle, YuvColorSpace, YuvData};
-use app_units::Au;
 use clip::{ClipRegion, ClipSource, ClipSources, ClipStore};
 use clip_scroll_node::{ClipScrollNode, NodeType, StickyFrameInfo};
 use clip_scroll_tree::{ClipChainIndex, ClipScrollNodeIndex, ClipScrollTree};
 use euclid::{SideOffsets2D, vec2};
 use frame_builder::{FrameBuilder, FrameBuilderConfig};
 use glyph_rasterizer::FontInstance;
+use gpu_cache::GpuCacheHandle;
 use gpu_types::BrushFlags;
 use hit_test::{HitTestingItem, HitTestingRun};
 use image::simplify_repeated_primitive;
 use internal_types::{FastHashMap, FastHashSet};
 use picture::PictureCompositeMode;
-use prim_store::{BrushClipMaskKind, BrushKind, BrushPrimitive, BrushSegmentDescriptor, CachedGradient};
-use prim_store::{CachedGradientIndex, EdgeAaSegmentMask, ImageSource};
+use prim_store::{BrushClipMaskKind, BrushKind, BrushPrimitive, BrushSegmentDescriptor};
+use prim_store::{EdgeAaSegmentMask, ImageSource};
 use prim_store::{BorderSource, BrushSegment, PictureIndex, PrimitiveContainer, PrimitiveIndex, PrimitiveStore};
 use prim_store::{OpacityBinding, ScrollNodeAndClipChain, TextRunPrimitiveCpu};
 use render_backend::{DocumentView};
@@ -157,10 +157,6 @@ pub struct DisplayListFlattener<'a> {
     /// output textures.
     output_pipelines: &'a FastHashSet<PipelineId>,
 
-    /// A list of replacements to make in order to properly handle fixed position
-    /// content as well as stacking contexts that create reference frames.
-    replacements: Vec<(ClipId, ClipId)>,
-
     /// The data structure that converting between ClipId and the various index
     /// types that the ClipScrollTree uses.
     id_to_index_mapper: ClipIdToIndexMapper,
@@ -193,9 +189,6 @@ pub struct DisplayListFlattener<'a> {
     /// The configuration to use for the FrameBuilder. We consult this in
     /// order to determine the default font.
     pub config: FrameBuilderConfig,
-
-    /// The gradients collecting during display list flattening.
-    pub cached_gradients: Vec<CachedGradient>,
 }
 
 impl<'a> DisplayListFlattener<'a> {
@@ -208,6 +201,7 @@ impl<'a> DisplayListFlattener<'a> {
         output_pipelines: &FastHashSet<PipelineId>,
         frame_builder_config: &FrameBuilderConfig,
         new_scene: &mut Scene,
+        scene_id: u64,
     ) -> FrameBuilder {
         // We checked that the root pipeline is available on the render backend.
         let root_pipeline_id = scene.root_pipeline_id.unwrap();
@@ -225,11 +219,9 @@ impl<'a> DisplayListFlattener<'a> {
             font_instances,
             config: *frame_builder_config,
             pipeline_epochs: Vec::new(),
-            replacements: Vec::new(),
             output_pipelines,
             id_to_index_mapper: ClipIdToIndexMapper::default(),
             hit_testing_runs: recycle_vec(old_builder.hit_testing_runs),
-            cached_gradients: recycle_vec(old_builder.cached_gradients),
             scrollbar_prims: recycle_vec(old_builder.scrollbar_prims),
             reference_frame_stack: Vec::new(),
             picture_stack: Vec::new(),
@@ -259,19 +251,9 @@ impl<'a> DisplayListFlattener<'a> {
             view.inner_rect,
             background_color,
             view.window_size,
-            flattener
+            scene_id,
+            flattener,
         )
-    }
-
-    /// Since WebRender still handles fixed position and reference frame content internally
-    /// we need to apply this table of id replacements only to the id that affects the
-    /// position of a node. We can eventually remove this when clients start handling
-    /// reference frames themselves. This method applies these replacements.
-    fn apply_scroll_frame_id_replacement(&self, index: ClipId) -> ClipId {
-        match self.replacements.last() {
-            Some(&(to_replace, replacement)) if to_replace == index => replacement,
-            _ => index,
-        }
     }
 
     fn get_complex_clips(
@@ -282,14 +264,7 @@ impl<'a> DisplayListFlattener<'a> {
         if complex_clips.is_empty() {
             return vec![];
         }
-
-        self.scene
-            .pipelines
-            .get(&pipeline_id)
-            .expect("No display list?")
-            .display_list
-            .get(complex_clips)
-            .collect()
+        self.scene.get_display_list_for_pipeline(pipeline_id).get(complex_clips).collect()
     }
 
     fn get_clip_chain_items(
@@ -300,14 +275,7 @@ impl<'a> DisplayListFlattener<'a> {
         if items.is_empty() {
             return vec![];
         }
-
-        self.scene
-            .pipelines
-            .get(&pipeline_id)
-            .expect("No display list?")
-            .display_list
-            .get(items)
-            .collect()
+        self.scene.get_display_list_for_pipeline(pipeline_id).get(items).collect()
     }
 
     fn flatten_root(&mut self, pipeline: &'a ScenePipeline, frame_size: &LayoutSize) {
@@ -378,6 +346,10 @@ impl<'a> DisplayListFlattener<'a> {
                     Some(item) => item,
                     None => break,
                 };
+
+                if SpecificDisplayItem::PopReferenceFrame == *item.item() {
+                    return;
+                }
 
                 if SpecificDisplayItem::PopStackingContext == *item.item() {
                     return;
@@ -462,15 +434,37 @@ impl<'a> DisplayListFlattener<'a> {
         );
     }
 
+    fn flatten_reference_frame(
+        &mut self,
+        traversal: &mut BuiltDisplayListIter<'a>,
+        pipeline_id: PipelineId,
+        item: &DisplayItemRef,
+        reference_frame: &ReferenceFrame,
+        scroll_node_id: ClipId,
+        reference_frame_relative_offset: LayoutVector2D,
+    ) {
+        self.push_reference_frame(
+            reference_frame.id,
+            Some(scroll_node_id),
+            pipeline_id,
+            reference_frame.transform,
+            reference_frame.perspective,
+            reference_frame_relative_offset + item.rect().origin.to_vector(),
+        );
+
+        self.flatten_items(traversal, pipeline_id, LayoutVector2D::zero());
+
+        self.pop_reference_frame();
+    }
+
     fn flatten_stacking_context(
         &mut self,
         traversal: &mut BuiltDisplayListIter<'a>,
         pipeline_id: PipelineId,
         item: &DisplayItemRef,
         stacking_context: &StackingContext,
-        unreplaced_scroll_id: ClipId,
         scroll_node_id: ClipId,
-        mut reference_frame_relative_offset: LayoutVector2D,
+        reference_frame_relative_offset: LayoutVector2D,
         is_backface_visible: bool,
     ) {
         // Avoid doing unnecessary work for empty stacking contexts.
@@ -481,52 +475,20 @@ impl<'a> DisplayListFlattener<'a> {
 
         let composition_operations = {
             // TODO(optimization?): self.traversal.display_list()
-            let display_list = &self
-                .scene
-                .pipelines
-                .get(&pipeline_id)
-                .expect("No display list?!")
-                .display_list;
+            let display_list = self.scene.get_display_list_for_pipeline(pipeline_id);
             CompositeOps::new(
                 stacking_context.filter_ops_for_compositing(display_list, item.filters()),
                 stacking_context.mix_blend_mode_for_compositing(),
             )
         };
 
-        let bounds = item.rect();
-        reference_frame_relative_offset += bounds.origin.to_vector();
-
-        // If we have a transformation or a perspective, we should have been assigned a new
-        // reference frame id. This means this stacking context establishes a new reference frame.
-        // Descendant fixed position content will be positioned relative to us.
-        if let Some(reference_frame_id) = stacking_context.reference_frame_id {
-            debug_assert!(
-                stacking_context.transform.is_some() ||
-                stacking_context.perspective.is_some()
-            );
-
-            self.push_reference_frame(
-                reference_frame_id,
-                Some(scroll_node_id),
-                pipeline_id,
-                stacking_context.transform,
-                stacking_context.perspective,
-                reference_frame_relative_offset,
-            );
-            self.replacements.push((unreplaced_scroll_id, reference_frame_id));
-            reference_frame_relative_offset = LayoutVector2D::zero();
-        }
-
-        // We apply the replacements one more time in case we need to set it to a replacement
-        // that we just pushed above.
-        let final_scroll_node = self.apply_scroll_frame_id_replacement(unreplaced_scroll_id);
         self.push_stacking_context(
             pipeline_id,
             composition_operations,
             stacking_context.transform_style,
             is_backface_visible,
             false,
-            final_scroll_node,
+            scroll_node_id,
             stacking_context.clip_node_id,
             stacking_context.glyph_raster_space,
         );
@@ -534,13 +496,8 @@ impl<'a> DisplayListFlattener<'a> {
         self.flatten_items(
             traversal,
             pipeline_id,
-            reference_frame_relative_offset,
+            reference_frame_relative_offset + item.rect().origin.to_vector(),
         );
-
-        if stacking_context.reference_frame_id.is_some() {
-            self.replacements.pop();
-            self.pop_reference_frame();
-        }
 
         self.pop_stacking_context();
     }
@@ -608,10 +565,7 @@ impl<'a> DisplayListFlattener<'a> {
         pipeline_id: PipelineId,
         reference_frame_relative_offset: LayoutVector2D,
     ) -> Option<BuiltDisplayListIter<'a>> {
-        let mut clip_and_scroll_ids = item.clip_and_scroll();
-        let unreplaced_scroll_id = clip_and_scroll_ids.scroll_node_id;
-        clip_and_scroll_ids.scroll_node_id =
-            self.apply_scroll_frame_id_replacement(clip_and_scroll_ids.scroll_node_id);
+        let clip_and_scroll_ids = item.clip_and_scroll();
         let clip_and_scroll = self.id_to_index_mapper.map_clip_and_scroll(&clip_and_scroll_ids);
 
         let prim_info = item.get_layout_primitive_info(&reference_frame_relative_offset);
@@ -680,7 +634,6 @@ impl<'a> DisplayListFlattener<'a> {
                     info.gradient.start_point,
                     info.gradient.end_point,
                     item.gradient_stops(),
-                    item.display_list().get(item.gradient_stops()).count(),
                     info.gradient.extend_mode,
                     info.tile_size,
                     info.tile_spacing,
@@ -723,7 +676,6 @@ impl<'a> DisplayListFlattener<'a> {
                     &prim_info,
                     info,
                     item.gradient_stops(),
-                    item.display_list().get(item.gradient_stops()).count(),
                 );
             }
             SpecificDisplayItem::PushStackingContext(ref info) => {
@@ -733,12 +685,24 @@ impl<'a> DisplayListFlattener<'a> {
                     pipeline_id,
                     &item,
                     &info.stacking_context,
-                    unreplaced_scroll_id,
                     clip_and_scroll_ids.scroll_node_id,
                     reference_frame_relative_offset,
                     prim_info.is_backface_visible,
                 );
                 return Some(subtraversal);
+            }
+            SpecificDisplayItem::PushReferenceFrame(ref info) => {
+                let mut subtraversal = item.sub_iter();
+                self.flatten_reference_frame(
+                    &mut subtraversal,
+                    pipeline_id,
+                    &item,
+                    &info.reference_frame,
+                    clip_and_scroll_ids.scroll_node_id,
+                    reference_frame_relative_offset,
+                );
+                return Some(subtraversal);
+
             }
             SpecificDisplayItem::Iframe(ref info) => {
                 self.flatten_iframe(
@@ -792,7 +756,7 @@ impl<'a> DisplayListFlattener<'a> {
             // Do nothing; these are dummy items for the display list parser
             SpecificDisplayItem::SetGradientStops => {}
 
-            SpecificDisplayItem::PopStackingContext => {
+            SpecificDisplayItem::PopStackingContext | SpecificDisplayItem::PopReferenceFrame => {
                 unreachable!("Should have returned in parent method.")
             }
             SpecificDisplayItem::PushShadow(shadow) => {
@@ -1526,7 +1490,6 @@ impl<'a> DisplayListFlattener<'a> {
         info: &LayoutPrimitiveInfo,
         border_item: &BorderDisplayItem,
         gradient_stops: ItemRange<GradientStop>,
-        gradient_stops_count: usize,
     ) {
         let rect = info.rect;
         let create_segments = |outset: SideOffsets2D<f32>| {
@@ -1771,7 +1734,6 @@ impl<'a> DisplayListFlattener<'a> {
                     border.gradient.start_point - segment_rel,
                     border.gradient.end_point - segment_rel,
                     gradient_stops,
-                    gradient_stops_count,
                     border.gradient.extend_mode,
                     segment.size,
                     LayoutSize::zero(),
@@ -1807,14 +1769,10 @@ impl<'a> DisplayListFlattener<'a> {
         start_point: LayoutPoint,
         end_point: LayoutPoint,
         stops: ItemRange<GradientStop>,
-        stops_count: usize,
         extend_mode: ExtendMode,
         stretch_size: LayoutSize,
         mut tile_spacing: LayoutSize,
     ) {
-        let gradient_index = CachedGradientIndex(self.cached_gradients.len());
-        self.cached_gradients.push(CachedGradient::new());
-
         let mut prim_rect = info.rect;
         simplify_repeated_primitive(&stretch_size, &mut tile_spacing, &mut prim_rect);
         let info = LayoutPrimitiveInfo {
@@ -1843,12 +1801,11 @@ impl<'a> DisplayListFlattener<'a> {
         let prim = BrushPrimitive::new(
             BrushKind::LinearGradient {
                 stops_range: stops,
-                stops_count,
                 extend_mode,
                 reverse_stops,
                 start_point: sp,
                 end_point: ep,
-                gradient_index,
+                stops_handle: GpuCacheHandle::new(),
                 stretch_size,
                 tile_spacing,
                 visible_tiles: Vec::new(),
@@ -1874,9 +1831,6 @@ impl<'a> DisplayListFlattener<'a> {
         stretch_size: LayoutSize,
         mut tile_spacing: LayoutSize,
     ) {
-        let gradient_index = CachedGradientIndex(self.cached_gradients.len());
-        self.cached_gradients.push(CachedGradient::new());
-
         let mut prim_rect = info.rect;
         simplify_repeated_primitive(&stretch_size, &mut tile_spacing, &mut prim_rect);
         let info = LayoutPrimitiveInfo {
@@ -1892,7 +1846,7 @@ impl<'a> DisplayListFlattener<'a> {
                 start_radius,
                 end_radius,
                 ratio_xy,
-                gradient_index,
+                stops_handle: GpuCacheHandle::new(),
                 stretch_size,
                 tile_spacing,
                 visible_tiles: Vec::new(),
@@ -1931,16 +1885,6 @@ impl<'a> DisplayListFlattener<'a> {
 
             // Trivial early out checks
             if font_instance.size.0 <= 0 {
-                return;
-            }
-
-            // Sanity check - anything with glyphs bigger than this
-            // is probably going to consume too much memory to render
-            // efficiently anyway. This is specifically to work around
-            // the font_advance.html reftest, which creates a very large
-            // font as a crash test - the rendering is also ignored
-            // by the azure renderer.
-            if font_instance.size >= Au::from_px(4096) {
                 return;
             }
 
@@ -2094,7 +2038,8 @@ pub fn build_scene(config: &FrameBuilderConfig, request: SceneRequest) -> BuiltS
         &request.view,
         &request.output_pipelines,
         config,
-        &mut new_scene
+        &mut new_scene,
+        request.scene_id,
     );
 
     BuiltScene {

@@ -100,14 +100,14 @@ MIRGenerator::abort(AbortReason r)
             break;
         }
     }
-    return Err(mozilla::Move(r));
+    return Err(std::move(r));
 }
 
 mozilla::GenericErrorResult<AbortReason>
 MIRGenerator::abortFmt(AbortReason r, const char* message, va_list ap)
 {
     JitSpewVA(JitSpew_IonAbort, message, ap);
-    return Err(mozilla::Move(r));
+    return Err(std::move(r));
 }
 
 mozilla::GenericErrorResult<AbortReason>
@@ -489,6 +489,8 @@ MBasicBlock::MBasicBlock(MIRGraph& graph, const CompileInfo& info, BytecodeSite*
     info_(info),
     predecessors_(graph.alloc()),
     stackPosition_(info_.firstStackSlot()),
+    id_(0),
+    domIndex_(0),
     numDominated_(0),
     pc_(site->pc()),
     lir_(nullptr),

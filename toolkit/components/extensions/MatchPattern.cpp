@@ -331,6 +331,8 @@ MatchPattern::Init(JSContext* aCx, const nsAString& aPattern, bool aIgnorePath,
     // about: URIs don't have hosts, so just treat the host as a wildcard and
     // match on the path.
     mMatchSubdomain = true;
+    // And so, ignorePath doesn't make sense for about: matchers.
+    aIgnorePath = false;
   } else {
     if (!StringHead(tail, 2).EqualsLiteral("//")) {
       aRv.Throw(NS_ERROR_INVALID_ARG);
@@ -502,7 +504,7 @@ MatchPattern::Overlaps(const MatchPattern& aPattern) const
 JSObject*
 MatchPattern::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return MatchPatternBinding::Wrap(aCx, this, aGivenProto);
+  return MatchPattern_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ bool
@@ -545,12 +547,12 @@ MatchPatternSet::Constructor(dom::GlobalObject& aGlobal,
       if (!pattern) {
         return nullptr;
       }
-      patterns.AppendElement(Move(pattern));
+      patterns.AppendElement(std::move(pattern));
     }
   }
 
   RefPtr<MatchPatternSet> patternSet = new MatchPatternSet(aGlobal.GetAsSupports(),
-                                                           Move(patterns));
+                                                           std::move(patterns));
   return patternSet.forget();
 }
 
@@ -639,7 +641,7 @@ MatchPatternSet::OverlapsAll(const MatchPatternSet& aPatternSet) const
 JSObject*
 MatchPatternSet::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return MatchPatternSetBinding::Wrap(aCx, this, aGivenProto);
+  return MatchPatternSet_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 
@@ -765,7 +767,7 @@ MatchGlob::Matches(const nsAString& aString) const
 JSObject*
 MatchGlob::WrapObject(JSContext* aCx, JS::HandleObject aGivenProto)
 {
-  return MatchGlobBinding::Wrap(aCx, this, aGivenProto);
+  return MatchGlob_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 

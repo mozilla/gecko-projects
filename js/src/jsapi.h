@@ -309,15 +309,11 @@ struct JSWrapObjectCallbacks
 };
 
 typedef void
-(* JSDestroyCompartmentCallback)(JSFreeOp* fop, JSCompartment* compartment);
+(* JSDestroyCompartmentCallback)(JSFreeOp* fop, JS::Compartment* compartment);
 
 typedef size_t
 (* JSSizeOfIncludingThisCompartmentCallback)(mozilla::MallocSizeOf mallocSizeOf,
-                                             JSCompartment* compartment);
-
-typedef void
-(* JSCompartmentNameCallback)(JSContext* cx, JSCompartment* compartment,
-                              char* buf, size_t bufsize);
+                                             JS::Compartment* compartment);
 
 /**
  * Callback used by memory reporting to ask the embedder how much memory an
@@ -480,9 +476,7 @@ static const uint8_t JSPROP_READONLY =         0x02;
 /* property cannot be deleted */
 static const uint8_t JSPROP_PERMANENT =        0x04;
 
-/* Passed to JS_Define(UC)Property* and JS_DefineElement if getters/setters are
-   JSGetterOp/JSSetterOp */
-static const uint8_t JSPROP_PROPOP_ACCESSORS = 0x08;
+/* (0x08 is unused) */
 
 /* property holds getter function */
 static const uint8_t JSPROP_GETTER =           0x10;
@@ -498,13 +492,6 @@ static const unsigned JSFUN_CONSTRUCTOR =     0x400;
 
 /* | of all the JSFUN_* flags */
 static const unsigned JSFUN_FLAGS_MASK =      0x400;
-
-/*
- * If set, will allow redefining a non-configurable property, but only on a
- * non-DOM global.  This is a temporary hack that will need to go away in bug
- * 1105518.
- */
-static const unsigned JSPROP_REDEFINE_NONCONFIGURABLE = 0x1000;
 
 /*
  * Resolve hooks and enumerate hooks must pass this flag when calling
@@ -723,7 +710,6 @@ class JS_PUBLIC_API(ContextOptions) {
 #ifdef FUZZING
         , fuzzing_(false)
 #endif
-        , arrayProtoValues_(true)
     {
     }
 
@@ -887,12 +873,6 @@ class JS_PUBLIC_API(ContextOptions) {
     }
 #endif
 
-    bool arrayProtoValues() const { return arrayProtoValues_; }
-    ContextOptions& setArrayProtoValues(bool flag) {
-        arrayProtoValues_ = flag;
-        return *this;
-    }
-
     void disableOptionsForSafeMode() {
         setBaseline(false);
         setIon(false);
@@ -929,7 +909,6 @@ class JS_PUBLIC_API(ContextOptions) {
 #ifdef FUZZING
     bool fuzzing_ : 1;
 #endif
-    bool arrayProtoValues_ : 1;
 
 };
 
@@ -962,9 +941,6 @@ JS_SetDestroyCompartmentCallback(JSContext* cx, JSDestroyCompartmentCallback cal
 extern JS_PUBLIC_API(void)
 JS_SetSizeOfIncludingThisCompartmentCallback(JSContext* cx,
                                              JSSizeOfIncludingThisCompartmentCallback callback);
-
-extern JS_PUBLIC_API(void)
-JS_SetCompartmentNameCallback(JSContext* cx, JSCompartmentNameCallback callback);
 
 extern JS_PUBLIC_API(void)
 JS_SetWrapObjectCallbacks(JSContext* cx, const JSWrapObjectCallbacks* callbacks);
@@ -1000,10 +976,10 @@ JS_GetErrorType(const JS::Value& val);
 #endif // defined(NIGHTLY_BUILD)
 
 extern JS_PUBLIC_API(void)
-JS_SetCompartmentPrivate(JSCompartment* compartment, void* data);
+JS_SetCompartmentPrivate(JS::Compartment* compartment, void* data);
 
 extern JS_PUBLIC_API(void*)
-JS_GetCompartmentPrivate(JSCompartment* compartment);
+JS_GetCompartmentPrivate(JS::Compartment* compartment);
 
 extern JS_PUBLIC_API(void)
 JS_SetZoneUserData(JS::Zone* zone, void* data);
@@ -1108,9 +1084,16 @@ using IterateRealmCallback = void (*)(JSContext* cx, void* data, Handle<Realm*> 
 extern JS_PUBLIC_API(void)
 IterateRealms(JSContext* cx, void* data, IterateRealmCallback realmCallback);
 
+/**
+ * Like IterateRealms, but only iterates realms in |compartment|.
+ */
+extern JS_PUBLIC_API(void)
+IterateRealmsInCompartment(JSContext* cx, JS::Compartment* compartment, void* data,
+                           IterateRealmCallback realmCallback);
+
 } // namespace JS
 
-typedef void (*JSIterateCompartmentCallback)(JSContext* cx, void* data, JSCompartment* compartment);
+typedef void (*JSIterateCompartmentCallback)(JSContext* cx, void* data, JS::Compartment* compartment);
 
 /**
  * This function calls |compartmentCallback| on every compartment. Beware that
@@ -1136,16 +1119,6 @@ JS_MarkCrossZoneId(JSContext* cx, jsid id);
  */
 extern JS_PUBLIC_API(void)
 JS_MarkCrossZoneIdValue(JSContext* cx, const JS::Value& value);
-
-/**
- * Initialize standard JS class constructors, prototypes, and any top-level
- * functions and constants associated with the standard classes (e.g. isNaN
- * for Number).
- *
- * NB: This sets cx's global object to obj if it was null.
- */
-extern JS_PUBLIC_API(bool)
-JS_InitStandardClasses(JSContext* cx, JS::Handle<JSObject*> obj);
 
 /**
  * Resolve id, which must contain either a string or an int, to a standard
@@ -1206,41 +1179,6 @@ ProtoKeyToId(JSContext* cx, JSProtoKey key, JS::MutableHandleId idp);
 
 extern JS_PUBLIC_API(JSProtoKey)
 JS_IdToProtoKey(JSContext* cx, JS::HandleId id);
-
-/**
- * Returns the original value of |Function.prototype| from the global object in
- * which |forObj| was created.
- */
-extern JS_PUBLIC_API(JSObject*)
-JS_GetFunctionPrototype(JSContext* cx, JS::HandleObject forObj);
-
-/**
- * Returns the original value of |Object.prototype| from the global object in
- * which |forObj| was created.
- */
-extern JS_PUBLIC_API(JSObject*)
-JS_GetObjectPrototype(JSContext* cx, JS::HandleObject forObj);
-
-/**
- * Returns the original value of |Array.prototype| from the global object in
- * which |forObj| was created.
- */
-extern JS_PUBLIC_API(JSObject*)
-JS_GetArrayPrototype(JSContext* cx, JS::HandleObject forObj);
-
-/**
- * Returns the original value of |Error.prototype| from the global
- * object of the current compartment of cx.
- */
-extern JS_PUBLIC_API(JSObject*)
-JS_GetErrorPrototype(JSContext* cx);
-
-/**
- * Returns the %IteratorPrototype% object that all built-in iterator prototype
- * chains go through for the global object of the current compartment of cx.
- */
-extern JS_PUBLIC_API(JSObject*)
-JS_GetIteratorPrototype(JSContext* cx);
 
 extern JS_PUBLIC_API(JSObject*)
 JS_GetGlobalForObject(JSContext* cx, JSObject* obj);
@@ -1356,9 +1294,6 @@ JS_freeop(JSFreeOp* fop, void* p);
 
 extern JS_PUBLIC_API(void)
 JS_updateMallocCounter(JSContext* cx, size_t nbytes);
-
-extern JS_PUBLIC_API(char*)
-JS_strdup(JSContext* cx, const char* s);
 
 /**
  * Set the size of the native stack that should not be exceed. To disable
@@ -1525,9 +1460,6 @@ private:
 namespace JS {
 namespace detail {
 
-/* NEVER DEFINED, DON'T USE.  For use by JS_CAST_NATIVE_TO only. */
-inline int CheckIsNative(JSNative native);
-
 /* NEVER DEFINED, DON'T USE.  For use by JS_CAST_STRING_TO only. */
 template<size_t N>
 inline int
@@ -1536,18 +1468,8 @@ CheckIsCharacterLiteral(const char (&arr)[N]);
 /* NEVER DEFINED, DON'T USE.  For use by JS_CAST_INT32_TO only. */
 inline int CheckIsInt32(int32_t value);
 
-/* NEVER DEFINED, DON'T USE.  For use by JS_PROPERTYOP_GETTER only. */
-inline int CheckIsGetterOp(JSGetterOp op);
-
-/* NEVER DEFINED, DON'T USE.  For use by JS_PROPERTYOP_SETTER only. */
-inline int CheckIsSetterOp(JSSetterOp op);
-
 } // namespace detail
 } // namespace JS
-
-#define JS_CAST_NATIVE_TO(v, To) \
-  (static_cast<void>(sizeof(JS::detail::CheckIsNative(v))), \
-   reinterpret_cast<To>(v))
 
 #define JS_CAST_STRING_TO(s, To) \
   (static_cast<void>(sizeof(JS::detail::CheckIsCharacterLiteral(s))), \
@@ -1560,14 +1482,6 @@ inline int CheckIsSetterOp(JSSetterOp op);
 #define JS_CHECK_ACCESSOR_FLAGS(flags) \
   (static_cast<mozilla::EnableIf<((flags) & ~(JSPROP_ENUMERATE | JSPROP_PERMANENT)) == 0>::Type>(0), \
    (flags))
-
-#define JS_PROPERTYOP_GETTER(v) \
-  (static_cast<void>(sizeof(JS::detail::CheckIsGetterOp(v))), \
-   reinterpret_cast<JSNative>(v))
-
-#define JS_PROPERTYOP_SETTER(v) \
-  (static_cast<void>(sizeof(JS::detail::CheckIsSetterOp(v))), \
-   reinterpret_cast<JSNative>(v))
 
 #define JS_PS_ACCESSOR_SPEC(name, getter, setter, flags, extraFlags) \
     { name, uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | extraFlags), \
@@ -1715,17 +1629,20 @@ JS_GetConstructor(JSContext* cx, JS::Handle<JSObject*> proto);
 
 namespace JS {
 
-// Specification for which zone a newly created compartment should use.
-enum ZoneSpecifier {
-    // Use the single runtime wide system zone. The meaning of this zone is
-    // left to the embedder.
-    SystemZone,
+// Specification for which compartment/zone a newly created realm should use.
+enum class CompartmentSpecifier {
+    // Create a new realm and compartment in the single runtime wide system
+    // zone. The meaning of this zone is left to the embedder.
+    NewCompartmentInSystemZone,
 
-    // Use a particular existing zone.
-    ExistingZone,
+    // Create a new realm and compartment in a particular existing zone.
+    NewCompartmentInExistingZone,
 
-    // Create a new zone.
-    NewZone
+    // Create a new zone/compartment.
+    NewCompartmentAndZone,
+
+    // Create a new realm in an existing compartment.
+    ExistingCompartment,
 };
 
 /**
@@ -1741,8 +1658,8 @@ class JS_PUBLIC_API(RealmCreationOptions)
   public:
     RealmCreationOptions()
       : traceGlobal_(nullptr),
-        zoneSpec_(NewZone),
-        zone_(nullptr),
+        compSpec_(CompartmentSpecifier::NewCompartmentAndZone),
+        comp_(nullptr),
         invisibleToDebugger_(false),
         mergeable_(false),
         preserveJitCode_(false),
@@ -1760,13 +1677,21 @@ class JS_PUBLIC_API(RealmCreationOptions)
         return *this;
     }
 
-    JS::Zone* zone() const { return zone_; }
-    ZoneSpecifier zoneSpecifier() const { return zoneSpec_; }
+    JS::Zone* zone() const {
+        MOZ_ASSERT(compSpec_ == CompartmentSpecifier::NewCompartmentInExistingZone);
+        return zone_;
+    }
+    JS::Compartment* compartment() const {
+        MOZ_ASSERT(compSpec_ == CompartmentSpecifier::ExistingCompartment);
+        return comp_;
+    }
+    CompartmentSpecifier compartmentSpecifier() const { return compSpec_; }
 
-    // Set the zone to use for the realm. See ZoneSpecifier above.
-    RealmCreationOptions& setSystemZone();
-    RealmCreationOptions& setExistingZone(JSObject* obj);
-    RealmCreationOptions& setNewZone();
+    // Set the compartment/zone to use for the realm. See CompartmentSpecifier above.
+    RealmCreationOptions& setNewCompartmentInSystemZone();
+    RealmCreationOptions& setNewCompartmentInExistingZone(JSObject* obj);
+    RealmCreationOptions& setNewCompartmentAndZone();
+    RealmCreationOptions& setExistingCompartment(JSObject* obj);
 
     // Certain scopes (i.e. XBL compilation scopes) are implementation details
     // of the embedding, and references to them should never leak out to script.
@@ -1823,8 +1748,11 @@ class JS_PUBLIC_API(RealmCreationOptions)
 
   private:
     JSTraceOp traceGlobal_;
-    ZoneSpecifier zoneSpec_;
-    JS::Zone* zone_;
+    CompartmentSpecifier compSpec_;
+    union {
+        JS::Compartment* comp_;
+        JS::Zone* zone_;
+    };
     bool invisibleToDebugger_;
     bool mergeable_;
     bool preserveJitCode_;
@@ -1955,19 +1883,13 @@ class JS_PUBLIC_API(RealmOptions)
 };
 
 JS_PUBLIC_API(const RealmCreationOptions&)
-RealmCreationOptionsRef(JSCompartment* compartment);
-
-JS_PUBLIC_API(const RealmCreationOptions&)
-RealmCreationOptionsRef(JSObject* obj);
+RealmCreationOptionsRef(JS::Realm* realm);
 
 JS_PUBLIC_API(const RealmCreationOptions&)
 RealmCreationOptionsRef(JSContext* cx);
 
 JS_PUBLIC_API(RealmBehaviors&)
-RealmBehaviorsRef(JSCompartment* compartment);
-
-JS_PUBLIC_API(RealmBehaviors&)
-RealmBehaviorsRef(JSObject* obj);
+RealmBehaviorsRef(JS::Realm* realm);
 
 JS_PUBLIC_API(RealmBehaviors&)
 RealmBehaviorsRef(JSContext* cx);
@@ -2094,9 +2016,6 @@ class WrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
         return (desc().attrs & bits) == bits;
     }
 
-    // Non-API attributes bit used internally for arguments objects.
-    enum { SHADOWABLE = JSPROP_INTERNAL_USE_BIT };
-
   public:
     // Descriptors with JSGetterOp/JSSetterOp are considered data
     // descriptors. It's complicated.
@@ -2152,16 +2071,15 @@ class WrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
                                      JSPROP_IGNORE_VALUE |
                                      JSPROP_GETTER |
                                      JSPROP_SETTER |
-                                     JSPROP_REDEFINE_NONCONFIGURABLE |
                                      JSPROP_RESOLVING |
-                                     SHADOWABLE)) == 0);
+                                     JSPROP_INTERNAL_USE_BIT)) == 0);
         MOZ_ASSERT(!hasAll(JSPROP_IGNORE_ENUMERATE | JSPROP_ENUMERATE));
         MOZ_ASSERT(!hasAll(JSPROP_IGNORE_PERMANENT | JSPROP_PERMANENT));
         if (isAccessorDescriptor()) {
             MOZ_ASSERT(!has(JSPROP_READONLY));
             MOZ_ASSERT(!has(JSPROP_IGNORE_READONLY));
             MOZ_ASSERT(!has(JSPROP_IGNORE_VALUE));
-            MOZ_ASSERT(!has(SHADOWABLE));
+            MOZ_ASSERT(!has(JSPROP_INTERNAL_USE_BIT));
             MOZ_ASSERT(value().isUndefined());
             MOZ_ASSERT_IF(!has(JSPROP_GETTER), !getter());
             MOZ_ASSERT_IF(!has(JSPROP_SETTER), !setter());
@@ -2174,7 +2092,6 @@ class WrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_PERMANENT));
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_READONLY));
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_VALUE));
-        MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_REDEFINE_NONCONFIGURABLE));
 #endif
     }
 
@@ -2186,9 +2103,8 @@ class WrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
                                      JSPROP_READONLY |
                                      JSPROP_GETTER |
                                      JSPROP_SETTER |
-                                     JSPROP_REDEFINE_NONCONFIGURABLE |
                                      JSPROP_RESOLVING |
-                                     SHADOWABLE)) == 0);
+                                     JSPROP_INTERNAL_USE_BIT)) == 0);
         MOZ_ASSERT_IF(isAccessorDescriptor(), has(JSPROP_GETTER) && has(JSPROP_SETTER));
 #endif
     }
@@ -2479,6 +2395,10 @@ JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JSNa
                       JSNative setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
+JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::HandleObject getter,
+                      JS::HandleObject setter, unsigned attrs);
+
+extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::HandleObject value,
                       unsigned attrs);
 
@@ -2505,6 +2425,10 @@ JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JS::Han
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JSNative getter,
                   JSNative setter, unsigned attrs);
+
+extern JS_PUBLIC_API(bool)
+JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JS::HandleObject getter,
+                  JS::HandleObject setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JS::HandleObject value,
@@ -2541,7 +2465,7 @@ JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, s
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    JSNative getter, JSNative setter, unsigned attrs);
+                    JS::HandleObject getter, JS::HandleObject setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
@@ -2568,8 +2492,8 @@ JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JS::Handle
                  unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
-JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JSNative getter,
-                 JSNative setter, unsigned attrs);
+JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JS::HandleObject getter,
+                 JS::HandleObject setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JS::HandleObject value,
@@ -6248,7 +6172,7 @@ struct JS_PUBLIC_API(FirstSubsumedFrame)
     }
 
     FirstSubsumedFrame& operator=(FirstSubsumedFrame&& rhs) {
-        new (this) FirstSubsumedFrame(mozilla::Move(rhs));
+        new (this) FirstSubsumedFrame(std::move(rhs));
         return *this;
     }
 

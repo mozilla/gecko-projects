@@ -7,21 +7,21 @@
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(
-    this, "env", "@mozilla.org/process/environment;1", "nsIEnvironment");
-ChromeUtils.defineModuleGetter(this, "Log",
-    "resource://gre/modules/Log.jsm");
 const {
   EnvironmentPrefs,
   MarionettePrefs,
 } = ChromeUtils.import("chrome://marionette/content/prefs.js", {});
-ChromeUtils.defineModuleGetter(this, "Preferences",
-    "resource://gre/modules/Preferences.jsm");
-XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let log = Log.repository.getLogger("Marionette");
-  log.addAppender(new Log.DumpAppender());
-  return log;
+
+XPCOMUtils.defineLazyModuleGetters(this, {
+  Log: "chrome://marionette/content/log.js",
+  Preferences: "resource://gre/modules/Preferences.jsm",
+  TCPListener: "chrome://marionette/content/server.js",
 });
+
+XPCOMUtils.defineLazyGetter(this, "log", Log.get);
+
+XPCOMUtils.defineLazyServiceGetter(
+    this, "env", "@mozilla.org/process/environment;1", "nsIEnvironment");
 
 const NOTIFY_RUNNING = "remote-active";
 
@@ -80,18 +80,6 @@ const RECOMMENDED_PREFS = new Map([
   // inconsistently.
   ["browser.download.panel.shown", true],
 
-  // Do not show the EULA notification.
-  //
-  // This should also be set in the profile prior to starting Firefox,
-  // as it is picked up at runtime.
-  ["browser.EULA.override", true],
-
-  // Never start the browser in offline mode
-  //
-  // This should also be set in the profile prior to starting Firefox,
-  // as it is picked up at runtime.
-  ["browser.offline", false],
-
   // Background thumbnails in particular cause grief, and disabling
   // thumbnails in general cannot hurt
   ["browser.pagethumbnails.capturing_disabled", true],
@@ -120,19 +108,22 @@ const RECOMMENDED_PREFS = new Map([
   // as it is picked up at runtime.
   ["browser.shell.checkDefaultBrowser", false],
 
-  // Start with a blank page (about:blank)
-  ["browser.startup.page", 0],
-
   // Do not redirect user when a milstone upgrade of Firefox is detected
   ["browser.startup.homepage_override.mstone", "ignore"],
 
-  // Disable browser animations
+  // Disable browser animations (tabs, fullscreen, sliding alerts)
   ["toolkit.cosmeticAnimations.enabled", false],
 
-  // Do not allow background tabs to be zombified, otherwise for tests
-  // that open additional tabs, the test harness tab itself might get
+  // Do not close the window when the last tab gets closed
+  ["browser.tabs.closeWindowWithLastTab", false],
+
+  // Do not allow background tabs to be zombified on Android, otherwise for
+  // tests that open additional tabs, the test harness tab itself might get
   // unloaded
   ["browser.tabs.disableBackgroundZombification", false],
+
+  // Do not warn when closing all open tabs
+  ["browser.tabs.warnOnClose", false],
 
   // Do not warn when closing all other open tabs
   ["browser.tabs.warnOnCloseOtherTabs", false],
@@ -152,9 +143,8 @@ const RECOMMENDED_PREFS = new Map([
   // network connections.
   ["browser.urlbar.suggest.searches", false],
 
-  // Turn off the location bar search suggestions opt-in.  It interferes with
-  // tests that don't expect it to be there.
-  ["browser.urlbar.userMadeSearchSuggestionsChoice", true],
+  // Do not warn on quitting Firefox
+  ["browser.warnOnQuit", false],
 
   // Do not show datareporting policy notifications which can
   // interfere with tests
@@ -223,11 +213,11 @@ const RECOMMENDED_PREFS = new Map([
   // Do not scan Wifi
   ["geo.wifi.scan", false],
 
-  // No hang monitor
-  ["hangmonitor.timeout", 0],
-
   // Show chrome errors and warnings in the error console
   ["javascript.options.showInConsole", true],
+
+  // Do not prompt with long usernames or passwords in URLs
+  ["network.http.phishy-userpass-length", 255],
 
   // Do not prompt for temporary redirects
   ["network.http.prompt-temp-redirect", false],
@@ -272,7 +262,7 @@ const RECOMMENDED_PREFS = new Map([
 const isRemote = Services.appinfo.processType ==
     Services.appinfo.PROCESS_TYPE_CONTENT;
 
-class MarionetteMainProcess {
+class MarionetteParentProcess {
   constructor() {
     this.server = null;
 
@@ -283,9 +273,6 @@ class MarionetteMainProcess {
     // indicates that all pending window checks have been completed
     // and that we are ready to start the Marionette server
     this.finalUIStartup = false;
-
-    log.level = MarionettePrefs.logLevel;
-    Services.ppmm.initialProcessData["Marionette:Log"] = {level: log.level};
 
     this.enabled = env.exists(ENV_ENABLED);
     this.alteredPrefs = new Set();
@@ -312,7 +299,7 @@ class MarionetteMainProcess {
         return this.running;
 
       default:
-        log.warn("Unknown IPC message to main process: " + name);
+        log.warn("Unknown IPC message to parent process: " + name);
         return null;
     }
   }
@@ -323,7 +310,7 @@ class MarionetteMainProcess {
     switch (topic) {
       case "nsPref:changed":
         if (this.enabled) {
-          this.init();
+          this.init(false);
         } else {
           this.uninit();
         }
@@ -417,7 +404,7 @@ class MarionetteMainProcess {
     }, {once: true});
   }
 
-  init() {
+  init(quit = true) {
     if (this.running || !this.enabled || !this.finalUIStartup) {
       log.debug(`Init aborted (running=${this.running}, ` +
                 `enabled=${this.enabled}, finalUIStartup=${this.finalUIStartup})`);
@@ -445,14 +432,15 @@ class MarionetteMainProcess {
       }
 
       try {
-        const {TCPListener} = ChromeUtils.import("chrome://marionette/content/server.js", {});
-        let listener = new TCPListener(MarionettePrefs.port);
-        listener.start();
-        this.server = listener;
+        this.server = new TCPListener(MarionettePrefs.port);
+        this.server.start();
       } catch (e) {
         log.fatal("Remote protocol server failed to start", e);
         this.uninit();
-        Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+        if (quit) {
+          Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+        }
+        return;
       }
 
       env.set(ENV_ENABLED, "1");
@@ -462,14 +450,14 @@ class MarionetteMainProcess {
   }
 
   uninit() {
+    for (let k of this.alteredPrefs) {
+      log.debug(`Resetting recommended pref ${k}`);
+      Preferences.reset(k);
+    }
+    this.alteredPrefs.clear();
+
     if (this.running) {
       this.server.stop();
-      for (let k of this.alteredPrefs) {
-        log.debug(`Resetting recommended pref ${k}`);
-        Preferences.reset(k);
-      }
-      this.alteredPrefs.clear();
-
       Services.obs.notifyObservers(this, NOTIFY_RUNNING);
       log.debug("Remote service is inactive");
     }
@@ -488,7 +476,7 @@ class MarionetteContentProcess {
   get running() {
     let reply = Services.cpmm.sendSyncMessage("Marionette:IsRunning");
     if (reply.length == 0) {
-      log.warn("No reply from main process");
+      log.warn("No reply from parent process");
       return false;
     }
     return reply[0];
@@ -511,7 +499,7 @@ const MarionetteFactory = {
       if (isRemote) {
         this.instance_ = new MarionetteContentProcess();
       } else {
-        this.instance_ = new MarionetteMainProcess();
+        this.instance_ = new MarionetteParentProcess();
       }
     }
 

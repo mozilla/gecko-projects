@@ -4,12 +4,7 @@
 
 /* import-globals-from controller.js */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-const PTV_interfaces = [Ci.nsITreeView,
-                        Ci.nsINavHistoryResultObserver,
-                        Ci.nsISupportsWeakReference];
 
 /**
  * This returns the key for any node/details object.
@@ -61,17 +56,11 @@ PlacesTreeView.prototype = {
     return this.__xulStore;
   },
 
-  QueryInterface: ChromeUtils.generateQI(PTV_interfaces),
-
-  // Bug 761494:
-  // ----------
-  // Some addons use methods from nsINavHistoryResultObserver and
-  // nsINavHistoryResultTreeViewer, without QIing to these interfaces first.
-  // That's not a problem when the view is retrieved through the
-  // <tree>.view getter (which returns the wrappedJSObject of this object),
-  // it raises an issue when the view retrieved through the treeBoxObject.view
-  // getter.  Thus, to avoid breaking addons, the interfaces are prefetched.
-  classInfo: XPCOMUtils.generateCI({ interfaces: PTV_interfaces }),
+  QueryInterface: ChromeUtils.generateQI([
+    Ci.nsITreeView,
+    Ci.nsINavHistoryResultObserver,
+    Ci.nsISupportsWeakReference
+  ]),
 
   /**
    * This is called once both the result and the tree are set.
@@ -1646,7 +1635,6 @@ PlacesTreeView.prototype = {
 
     let oldSort = this._result.sortingMode;
     let newSort;
-    let newSortingAnnotation = "";
     const NHQO = Ci.nsINavHistoryQueryOptions;
     switch (this._getColumnType(aColumn)) {
       case this.COLUMN_TYPE_TITLE:
@@ -1721,7 +1709,6 @@ PlacesTreeView.prototype = {
       default:
         throw Cr.NS_ERROR_INVALID_ARG;
     }
-    this._result.sortingAnnotation = newSortingAnnotation;
     this._result.sortingMode = newSort;
   },
 

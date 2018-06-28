@@ -24,7 +24,6 @@
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Unused.h"
 
@@ -80,7 +79,6 @@ using mozilla::Atomic;
 using mozilla::DebugOnly;
 using mozilla::EnumeratedArray;
 using mozilla::Maybe;
-using mozilla::Move;
 using mozilla::MallocSizeOf;
 using mozilla::Nothing;
 using mozilla::PodZero;
@@ -654,6 +652,7 @@ class Val
 
     ValType type() const { return type_; }
     bool isSimd() const { return IsSimdType(type()); }
+    static constexpr size_t sizeofLargestValue() { return sizeof(u); }
 
     uint32_t i32() const { MOZ_ASSERT(type_ == ValType::I32); return u.i32_; }
     uint64_t i64() const { MOZ_ASSERT(type_ == ValType::I64); return u.i64_; }
@@ -682,26 +681,26 @@ class Val
 
 typedef Vector<Val, 0, SystemAllocPolicy> ValVector;
 
-// The Sig class represents a WebAssembly function signature which takes a list
-// of value types and returns an expression type. The engine uses two in-memory
-// representations of the argument Vector's memory (when elements do not fit
-// inline): normal malloc allocation (via SystemAllocPolicy) and allocation in
-// a LifoAlloc (via LifoAllocPolicy). The former Sig objects can have any
-// lifetime since they own the memory. The latter Sig objects must not outlive
-// the associated LifoAlloc mark/release interval (which is currently the
-// duration of module validation+compilation). Thus, long-lived objects like
-// WasmModule must use malloced allocation.
+// The FuncType class represents a WebAssembly function signature which takes a
+// list of value types and returns an expression type. The engine uses two
+// in-memory representations of the argument Vector's memory (when elements do
+// not fit inline): normal malloc allocation (via SystemAllocPolicy) and
+// allocation in a LifoAlloc (via LifoAllocPolicy). The former FuncType objects
+// can have any lifetime since they own the memory. The latter FuncType objects
+// must not outlive the associated LifoAlloc mark/release interval (which is
+// currently the duration of module validation+compilation). Thus, long-lived
+// objects like WasmModule must use malloced allocation.
 
-class Sig
+class FuncType
 {
     ValTypeVector args_;
     ExprType ret_;
 
   public:
-    Sig() : args_(), ret_(ExprType::Void) {}
-    Sig(ValTypeVector&& args, ExprType ret) : args_(Move(args)), ret_(ret) {}
+    FuncType() : args_(), ret_(ExprType::Void) {}
+    FuncType(ValTypeVector&& args, ExprType ret) : args_(std::move(args)), ret_(ret) {}
 
-    MOZ_MUST_USE bool clone(const Sig& rhs) {
+    MOZ_MUST_USE bool clone(const FuncType& rhs) {
         ret_ = rhs.ret_;
         MOZ_ASSERT(args_.empty());
         return args_.appendAll(rhs.args_);
@@ -717,10 +716,10 @@ class Sig
             hn = mozilla::AddToHash(hn, HashNumber(vt.code()));
         return hn;
     }
-    bool operator==(const Sig& rhs) const {
+    bool operator==(const FuncType& rhs) const {
         return ret() == rhs.ret() && EqualContainers(args(), rhs.args());
     }
-    bool operator!=(const Sig& rhs) const {
+    bool operator!=(const FuncType& rhs) const {
         return !(*this == rhs);
     }
 
@@ -743,15 +742,40 @@ class Sig
         return false;
     }
 
-    WASM_DECLARE_SERIALIZABLE(Sig)
+    WASM_DECLARE_SERIALIZABLE(FuncType)
 };
 
-struct SigHashPolicy
+struct FuncTypeHashPolicy
 {
-    typedef const Sig& Lookup;
-    static HashNumber hash(Lookup sig) { return sig.hash(); }
-    static bool match(const Sig* lhs, Lookup rhs) { return *lhs == rhs; }
+    typedef const FuncType& Lookup;
+    static HashNumber hash(Lookup ft) { return ft.hash(); }
+    static bool match(const FuncType* lhs, Lookup rhs) { return *lhs == rhs; }
 };
+
+// Structure type.
+//
+// The Module owns a dense array of Struct values that represent the structure
+// types that the module knows about.  It is created from the sparse array of
+// types in the ModuleEnvironment when the Module is created.
+
+class StructType
+{
+  public:
+    ValTypeVector fields_;       // Scalar types of fields
+    Uint32Vector  fieldOffsets_; // Byte offsets into an object for corresponding field
+
+  public:
+    StructType() : fields_(), fieldOffsets_() {}
+
+    StructType(ValTypeVector&& fields, Uint32Vector&& fieldOffsets)
+      : fields_(std::move(fields)),
+        fieldOffsets_(std::move(fieldOffsets))
+    {}
+
+    WASM_DECLARE_SERIALIZABLE(StructType)
+};
+
+typedef Vector<StructType, 0, SystemAllocPolicy> StructTypeVector;
 
 // An InitExpr describes a deferred initializer expression, used to initialize
 // a global or a table element offset. Such expressions are created during
@@ -773,7 +797,7 @@ class InitExpr
             uint32_t index_;
             ValType type_;
         } global;
-        U() {}
+        U() : global{} {}
     } u;
 
   public:
@@ -810,7 +834,7 @@ struct CacheableChars : UniqueChars
 {
     CacheableChars() = default;
     explicit CacheableChars(char* ptr) : UniqueChars(ptr) {}
-    MOZ_IMPLICIT CacheableChars(UniqueChars&& rhs) : UniqueChars(Move(rhs)) {}
+    MOZ_IMPLICIT CacheableChars(UniqueChars&& rhs) : UniqueChars(std::move(rhs)) {}
     WASM_DECLARE_SERIALIZABLE(CacheableChars)
 };
 
@@ -830,7 +854,7 @@ struct Import
 
     Import() = default;
     Import(UniqueChars&& module, UniqueChars&& field, DefinitionKind kind)
-      : module(Move(module)), field(Move(field)), kind(kind)
+      : module(std::move(module)), field(std::move(field)), kind(kind)
     {}
 
     WASM_DECLARE_SERIALIZABLE(Import)
@@ -896,7 +920,7 @@ class GlobalDesc
                     ValType type_;
                     uint32_t index_;
                 } import;
-                U() {}
+                U() : import{} {}
             } val;
             unsigned offset_;
             bool isMutable_;
@@ -1008,7 +1032,7 @@ struct ElemSegment
 
     ElemSegment() = default;
     ElemSegment(uint32_t tableIndex, InitExpr offset, Uint32Vector&& elemFuncIndices)
-      : tableIndex(tableIndex), offset(offset), elemFuncIndices(Move(elemFuncIndices))
+      : tableIndex(tableIndex), offset(offset), elemFuncIndices(std::move(elemFuncIndices))
     {}
 
     Uint32Vector& elemCodeRangeIndices(Tier t) {
@@ -1035,7 +1059,7 @@ struct ElemSegment
 
     void setTier2(Uint32Vector&& elemCodeRangeIndices) const {
         MOZ_ASSERT(elemCodeRangeIndices2_.length() == 0);
-        elemCodeRangeIndices2_ = Move(elemCodeRangeIndices);
+        elemCodeRangeIndices2_ = std::move(elemCodeRangeIndices);
     }
 
     WASM_DECLARE_SERIALIZABLE(ElemSegment)
@@ -1057,18 +1081,18 @@ struct DataSegment
 
 typedef Vector<DataSegment, 0, SystemAllocPolicy> DataSegmentVector;
 
-// SigIdDesc describes a signature id that can be used by call_indirect and
-// table-entry prologues to structurally compare whether the caller and callee's
-// signatures *structurally* match. To handle the general case, a Sig is
-// allocated and stored in a process-wide hash table, so that pointer equality
-// implies structural equality. As an optimization for the 99% case where the
-// Sig has a small number of parameters, the Sig is bit-packed into a uint32
-// immediate value so that integer equality implies structural equality. Both
-// cases can be handled with a single comparison by always setting the LSB for
-// the immediates (the LSB is necessarily 0 for allocated Sig pointers due to
-// alignment).
+// FuncTypeIdDesc describes a function type that can be used by call_indirect
+// and table-entry prologues to structurally compare whether the caller and
+// callee's signatures *structurally* match. To handle the general case, a
+// FuncType is allocated and stored in a process-wide hash table, so that
+// pointer equality implies structural equality. As an optimization for the 99%
+// case where the FuncType has a small number of parameters, the FuncType is
+// bit-packed into a uint32 immediate value so that integer equality implies
+// structural equality. Both cases can be handled with a single comparison by
+// always setting the LSB for the immediates (the LSB is necessarily 0 for
+// allocated FuncType pointers due to alignment).
 
-class SigIdDesc
+class FuncTypeIdDesc
 {
   public:
     enum class Kind { None, Immediate, Global };
@@ -1078,15 +1102,15 @@ class SigIdDesc
     Kind kind_;
     size_t bits_;
 
-    SigIdDesc(Kind kind, size_t bits) : kind_(kind), bits_(bits) {}
+    FuncTypeIdDesc(Kind kind, size_t bits) : kind_(kind), bits_(bits) {}
 
   public:
     Kind kind() const { return kind_; }
-    static bool isGlobal(const Sig& sig);
+    static bool isGlobal(const FuncType& funcType);
 
-    SigIdDesc() : kind_(Kind::None), bits_(0) {}
-    static SigIdDesc global(const Sig& sig, uint32_t globalDataOffset);
-    static SigIdDesc immediate(const Sig& sig);
+    FuncTypeIdDesc() : kind_(Kind::None), bits_(0) {}
+    static FuncTypeIdDesc global(const FuncType& funcType, uint32_t globalDataOffset);
+    static FuncTypeIdDesc immediate(const FuncType& funcType);
 
     bool isGlobal() const { return kind_ == Kind::Global; }
 
@@ -1094,24 +1118,121 @@ class SigIdDesc
     uint32_t globalDataOffset() const { MOZ_ASSERT(kind_ == Kind::Global); return bits_; }
 };
 
-// SigWithId pairs a Sig with SigIdDesc, describing either how to compile code
-// that compares this signature's id or, at instantiation what signature ids to
-// allocate in the global hash and where to put them.
+// FuncTypeWithId pairs a FuncType with FuncTypeIdDesc, describing either how to
+// compile code that compares this signature's id or, at instantiation what
+// signature ids to allocate in the global hash and where to put them.
 
-struct SigWithId : Sig
+struct FuncTypeWithId : FuncType
 {
-    SigIdDesc id;
+    FuncTypeIdDesc id;
 
-    SigWithId() = default;
-    explicit SigWithId(Sig&& sig) : Sig(Move(sig)), id() {}
-    SigWithId(Sig&& sig, SigIdDesc id) : Sig(Move(sig)), id(id) {}
-    void operator=(Sig&& rhs) { Sig::operator=(Move(rhs)); }
+    FuncTypeWithId() = default;
+    explicit FuncTypeWithId(FuncType&& funcType) : FuncType(std::move(funcType)), id() {}
+    FuncTypeWithId(FuncType&& funcType, FuncTypeIdDesc id) : FuncType(std::move(funcType)), id(id) {}
+    void operator=(FuncType&& rhs) { FuncType::operator=(std::move(rhs)); }
 
-    WASM_DECLARE_SERIALIZABLE(SigWithId)
+    WASM_DECLARE_SERIALIZABLE(FuncTypeWithId)
 };
 
-typedef Vector<SigWithId, 0, SystemAllocPolicy> SigWithIdVector;
-typedef Vector<const SigWithId*, 0, SystemAllocPolicy> SigWithIdPtrVector;
+typedef Vector<FuncTypeWithId, 0, SystemAllocPolicy> FuncTypeWithIdVector;
+typedef Vector<const FuncTypeWithId*, 0, SystemAllocPolicy> FuncTypeWithIdPtrVector;
+
+// A tagged container for the various types that can be present in a wasm
+// module's type section.
+
+class TypeDef
+{
+    enum { IsFuncType, IsStructType, IsNone } tag_;
+    union {
+        FuncTypeWithId funcType_;
+        StructType     structType_;
+    };
+
+  public:
+    TypeDef() : tag_(IsNone), structType_(StructType()) {}
+
+    explicit TypeDef(FuncType&& funcType)
+      : tag_(IsFuncType),
+        funcType_(FuncTypeWithId(std::move(funcType)))
+    {}
+
+    explicit TypeDef(StructType&& structType)
+      : tag_(IsStructType),
+        structType_(std::move(structType))
+    {}
+
+    TypeDef(TypeDef&& td) : tag_(td.tag_), structType_(StructType()) {
+        switch (tag_) {
+          case IsFuncType:   funcType_ = std::move(td.funcType_); break;
+          case IsStructType: structType_ = std::move(td.structType_); break;
+          case IsNone:       break;
+        }
+    }
+
+    ~TypeDef() {
+        switch (tag_) {
+          case IsFuncType:   funcType_.~FuncTypeWithId(); break;
+          case IsStructType: structType_.~StructType(); break;
+          case IsNone:       break;
+        }
+    }
+
+    TypeDef& operator=(TypeDef&& that) {
+        tag_ = that.tag_;
+        switch (tag_) {
+          case IsFuncType:   funcType_ = std::move(that.funcType_); break;
+          case IsStructType: structType_ = std::move(that.structType_); break;
+          case IsNone:       break;
+        }
+        return *this;
+    }
+
+    bool isFuncType() const {
+        return tag_ == IsFuncType;
+    }
+
+    bool isStructType() const {
+        return tag_ == IsStructType;
+    }
+
+    const FuncTypeWithId& funcType() const {
+        MOZ_ASSERT(isFuncType());
+        return funcType_;
+    }
+
+    FuncTypeWithId& funcType() {
+        MOZ_ASSERT(isFuncType());
+        return funcType_;
+    }
+
+    // p has to point to the funcType_ embedded within a TypeDef for this to be
+    // valid.
+    static const TypeDef* fromFuncTypeWithIdPtr(const FuncTypeWithId* p) {
+        const TypeDef* q = (const TypeDef*)((char*)p - offsetof(TypeDef, funcType_));
+        MOZ_ASSERT(q->tag_ == IsFuncType);
+        return q;
+    }
+
+    const StructType& structType() const {
+        MOZ_ASSERT(isStructType());
+        return structType_;
+    }
+
+    StructType& structType() {
+        MOZ_ASSERT(isStructType());
+        return structType_;
+    }
+
+    // p has to point to the struct_ embedded within a TypeDef for this to be
+    // valid.
+    static const TypeDef* fromStructPtr(const StructType* p) {
+        const TypeDef* q = (const TypeDef*)((char*)p - offsetof(TypeDef, structType_));
+        MOZ_ASSERT(q->tag_ == IsStructType);
+        return q;
+    }
+};
+
+typedef Vector<TypeDef, 0, SystemAllocPolicy> TypeDefVector;
 
 // A wasm::Trap represents a wasm-defined trap that can occur during execution
 // which triggers a WebAssembly.RuntimeError. Generated code may jump to a Trap
@@ -1479,7 +1600,10 @@ class CallSiteDesc
         LeaveFrame, // call to a leave frame handler
         Breakpoint  // call to instruction breakpoint
     };
-    CallSiteDesc() {}
+    CallSiteDesc()
+      : lineOrBytecode_(0),
+        kind_(0)
+    {}
     explicit CallSiteDesc(Kind kind)
       : lineOrBytecode_(0), kind_(kind)
     {
@@ -1500,7 +1624,7 @@ class CallSite : public CallSiteDesc
     uint32_t returnAddressOffset_;
 
   public:
-    CallSite() {}
+    CallSite() : returnAddressOffset_(0) {}
 
     CallSite(CallSiteDesc desc, uint32_t returnAddressOffset)
       : CallSiteDesc(desc),
@@ -1878,7 +2002,7 @@ class CalleeDesc
     // which_ shall be initialized in the static constructors
     MOZ_INIT_OUTSIDE_CTOR Which which_;
     union U {
-        U() {}
+        U() : funcIndex_(0) {}
         uint32_t funcIndex_;
         struct {
             uint32_t globalDataOffset_;
@@ -1887,7 +2011,7 @@ class CalleeDesc
             uint32_t globalDataOffset_;
             uint32_t minLength_;
             bool external_;
-            SigIdDesc sigId_;
+            FuncTypeIdDesc funcTypeId_;
         } table;
         SymbolicAddress builtin_;
     } u;
@@ -1906,13 +2030,13 @@ class CalleeDesc
         c.u.import.globalDataOffset_ = globalDataOffset;
         return c;
     }
-    static CalleeDesc wasmTable(const TableDesc& desc, SigIdDesc sigId) {
+    static CalleeDesc wasmTable(const TableDesc& desc, FuncTypeIdDesc funcTypeId) {
         CalleeDesc c;
         c.which_ = WasmTable;
         c.u.table.globalDataOffset_ = desc.globalDataOffset;
         c.u.table.minLength_ = desc.limits.initial;
         c.u.table.external_ = desc.external;
-        c.u.table.sigId_ = sigId;
+        c.u.table.funcTypeId_ = funcTypeId;
         return c;
     }
     static CalleeDesc asmJSTable(const TableDesc& desc) {
@@ -1959,9 +2083,9 @@ class CalleeDesc
         MOZ_ASSERT(which_ == WasmTable);
         return u.table.external_;
     }
-    SigIdDesc wasmTableSigId() const {
+    FuncTypeIdDesc wasmTableSigId() const {
         MOZ_ASSERT(which_ == WasmTable);
-        return u.table.sigId_;
+        return u.table.funcTypeId_;
     }
     uint32_t wasmTableMinLength() const {
         MOZ_ASSERT(which_ == WasmTable);
@@ -1994,7 +2118,7 @@ static const unsigned PageSize = 64 * 1024;
 // catch the overflow. MaxMemoryAccessSize is a conservative approximation of
 // the maximum guard space needed to catch all unaligned overflows.
 
-static const unsigned MaxMemoryAccessSize = sizeof(Val);
+static const unsigned MaxMemoryAccessSize = Val::sizeofLargestValue();
 
 #ifdef WASM_HUGE_MEMORY
 

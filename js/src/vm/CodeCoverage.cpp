@@ -20,8 +20,8 @@
 
 #include "util/Text.h"
 #include "vm/BytecodeUtil.h"
-#include "vm/JSCompartment.h"
 #include "vm/JSScript.h"
+#include "vm/Realm.h"
 #include "vm/Runtime.h"
 #include "vm/Time.h"
 
@@ -63,8 +63,8 @@
 namespace js {
 namespace coverage {
 
-LCovSource::LCovSource(LifoAlloc* alloc, const char* name)
-  : name_(name),
+LCovSource::LCovSource(LifoAlloc* alloc, UniqueChars name)
+  : name_(std::move(name)),
     outFN_(alloc),
     outFNDA_(alloc),
     numFunctionsFound_(0),
@@ -80,7 +80,7 @@ LCovSource::LCovSource(LifoAlloc* alloc, const char* name)
 }
 
 LCovSource::LCovSource(LCovSource&& src)
-  : name_(src.name_),
+  : name_(std::move(src.name_)),
     outFN_(src.outFN_),
     outFNDA_(src.outFNDA_),
     numFunctionsFound_(src.numFunctionsFound_),
@@ -88,18 +88,12 @@ LCovSource::LCovSource(LCovSource&& src)
     outBRDA_(src.outBRDA_),
     numBranchesFound_(src.numBranchesFound_),
     numBranchesHit_(src.numBranchesHit_),
-    linesHit_(Move(src.linesHit_)),
+    linesHit_(std::move(src.linesHit_)),
     numLinesInstrumented_(src.numLinesInstrumented_),
     numLinesHit_(src.numLinesHit_),
     maxLineHit_(src.maxLineHit_),
     hasTopLevelScript_(src.hasTopLevelScript_)
 {
-    src.name_ = nullptr;
-}
-
-LCovSource::~LCovSource()
-{
-    js_delete(name_);
 }
 
 void
@@ -109,7 +103,7 @@ LCovSource::exportInto(GenericPrinter& out) const
     if (!hasTopLevelScript_)
         return;
 
-    out.printf("SF:%s\n", name_);
+    out.printf("SF:%s\n", name_.get());
 
     outFN_.exportInto(out);
     outFNDA_.exportInto(out);
@@ -509,14 +503,14 @@ LCovRealm::lookupOrAdd(JS::Realm* realm, const char* name)
         }
     }
 
-    char* source_name = js_strdup(name);
+    UniqueChars source_name = DuplicateString(name);
     if (!source_name) {
         outTN_.reportOutOfMemory();
         return nullptr;
     }
 
     // Allocate a new LCovSource for the current top-level.
-    if (!sources_->append(Move(LCovSource(&alloc_, source_name)))) {
+    if (!sources_->emplaceBack(&alloc_, std::move(source_name))) {
         outTN_.reportOutOfMemory();
         return nullptr;
     }
@@ -562,13 +556,13 @@ LCovRealm::writeRealmName(JS::Realm* realm)
     // thus we escape invalid chracters with a "_" symbol in front of its
     // hexadecimal code.
     outTN_.put("TN:");
-    if (cx->runtime()->compartmentNameCallback) {
+    if (cx->runtime()->realmNameCallback) {
         char name[1024];
         {
             // Hazard analysis cannot tell that the callback does not GC.
             JS::AutoSuppressGCAnalysis nogc;
-            JSCompartment* comp = JS::GetCompartmentForRealm(realm);
-            (*cx->runtime()->compartmentNameCallback)(cx, comp, name, sizeof(name));
+            Rooted<Realm*> rootedRealm(cx, realm);
+            (*cx->runtime()->realmNameCallback)(cx, rootedRealm, name, sizeof(name));
         }
         for (char *s = name; s < name + sizeof(name) && *s; s++) {
             if (('a' <= *s && *s <= 'z') ||

@@ -17,7 +17,7 @@
 #include "mozilla/dom/HTMLOptionElement.h"
 #include "mozilla/dom/HTMLSelectElementBinding.h"
 #include "mozilla/dom/UnionTypes.h"
-#include "mozilla/GenericSpecifiedValuesInlines.h"
+#include "mozilla/MappedDeclarations.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentList.h"
 #include "nsError.h"
@@ -215,28 +215,6 @@ HTMLSelectElement::InsertChildBefore(nsIContent* aKid,
     safeMutation.MutationFailed();
   }
   return rv;
-}
-
-nsresult
-HTMLSelectElement::InsertChildAt_Deprecated(nsIContent* aKid,
-                                            uint32_t aIndex,
-                                            bool aNotify)
-{
-  SafeOptionListMutation safeMutation(this, this, aKid, aIndex, aNotify);
-  nsresult rv =
-    nsGenericHTMLFormElementWithState::InsertChildAt_Deprecated(aKid, aIndex,
-                                                                aNotify);
-  if (NS_FAILED(rv)) {
-    safeMutation.MutationFailed();
-  }
-  return rv;
-}
-
-void
-HTMLSelectElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
-{
-  SafeOptionListMutation safeMutation(this, this, nullptr, aIndex, aNotify);
-  nsGenericHTMLFormElementWithState::RemoveChildAt_Deprecated(aIndex, aNotify);
 }
 
 void
@@ -1295,10 +1273,10 @@ HTMLSelectElement::ParseAttribute(int32_t aNamespaceID,
 
 void
 HTMLSelectElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                         GenericSpecifiedValues* aData)
+                                         MappedDeclarations& aDecls)
 {
-  nsGenericHTMLFormElementWithState::MapImageAlignAttributeInto(aAttributes, aData);
-  nsGenericHTMLFormElementWithState::MapCommonAttributesInto(aAttributes, aData);
+  nsGenericHTMLFormElementWithState::MapImageAlignAttributeInto(aAttributes, aDecls);
+  nsGenericHTMLFormElementWithState::MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 nsChangeHint
@@ -1437,12 +1415,12 @@ HTMLSelectElement::SaveState()
       if (value.IsEmpty()) {
         state.indices().AppendElement(optIndex);
       } else {
-        state.values().AppendElement(Move(value));
+        state.values().AppendElement(std::move(value));
       }
     }
   }
 
-  presState->contentData() = Move(state);
+  presState->contentData() = std::move(state);
 
   if (mDisabledChanged) {
     // We do not want to save the real disabled state but the disabled
@@ -1836,7 +1814,7 @@ HTMLSelectElement::SetPreviewValue(const nsAString& aValue)
 JSObject*
 HTMLSelectElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLSelectElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLSelectElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 } // namespace dom

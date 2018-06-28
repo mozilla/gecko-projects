@@ -22,7 +22,6 @@
 #include "HTMLEditRules.h"
 #include "HTMLEditUtils.h"
 #include "HTMLURIRefObject.h"
-#include "StyleSheetTransactions.h"
 #include "TextEditUtils.h"
 #include "TypeInState.h"
 
@@ -270,7 +269,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLEditor)
   NS_INTERFACE_MAP_ENTRY(nsIHTMLInlineTableEditor)
   NS_INTERFACE_MAP_ENTRY(nsITableEditor)
   NS_INTERFACE_MAP_ENTRY(nsIEditorStyleSheets)
-  NS_INTERFACE_MAP_ENTRY(nsICSSLoaderObserver)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
 NS_INTERFACE_MAP_END_INHERITING(TextEditor)
 
@@ -1445,7 +1443,7 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
     }
     CloneAttributesWithTransaction(*rootElement, *divElement);
 
-    return BeginningOfDocument();
+    return MaybeCollapseSelectionAtFirstEditableNode(false);
   }
 
   rv = LoadHTML(Substring(beginbody, endtotal));
@@ -1485,7 +1483,7 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString)
   CloneAttributesWithTransaction(*rootElement, *child->AsElement());
 
   // place selection at first editable content
-  return BeginningOfDocument();
+  return MaybeCollapseSelectionAtFirstEditableNode(false);
 }
 
 EditorRawDOMPoint
@@ -1992,19 +1990,6 @@ HTMLEditor::GetAlignment(bool* aMixed,
 
   RefPtr<HTMLEditRules> htmlRules(mRules->AsHTMLEditRules());
   return htmlRules->GetAlignment(aMixed, aAlign);
-}
-
-NS_IMETHODIMP
-HTMLEditor::GetIndentState(bool* aCanIndent,
-                           bool* aCanOutdent)
-{
-  if (!mRules) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  NS_ENSURE_TRUE(aCanIndent && aCanOutdent, NS_ERROR_NULL_POINTER);
-
-  RefPtr<HTMLEditRules> htmlRules(mRules->AsHTMLEditRules());
-  return htmlRules->GetIndentState(aCanIndent, aCanOutdent);
 }
 
 NS_IMETHODIMP
@@ -2857,25 +2842,6 @@ HTMLEditor::SetHTMLBackgroundColorWithTransaction(const nsAString& aColor)
 }
 
 NS_IMETHODIMP
-HTMLEditor::SetBodyAttribute(const nsAString& aAttribute,
-                             const nsAString& aValue)
-{
-  // TODO: Check selection for Cell, Row, Column or table and do color on appropriate level
-
-  MOZ_ASSERT(IsInitialized(), "The HTMLEditor hasn't been initialized yet");
-
-  // Set the background color attribute on the body tag
-  RefPtr<Element> rootElement = GetRoot();
-  if (NS_WARN_IF(!rootElement)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Use the editor method that goes through the transaction system
-  RefPtr<nsAtom> attributeAtom = NS_Atomize(aAttribute);
-  return SetAttributeWithTransaction(*rootElement, *attributeAtom, aValue);
-}
-
-NS_IMETHODIMP
 HTMLEditor::GetLinkedObjects(nsIArray** aNodeList)
 {
   NS_ENSURE_TRUE(aNodeList, NS_ERROR_NULL_POINTER);
@@ -2912,74 +2878,6 @@ HTMLEditor::GetLinkedObjects(nsIArray** aNodeList)
 
   nodes.forget(aNodeList);
   return NS_OK;
-}
-
-
-NS_IMETHODIMP
-HTMLEditor::AddStyleSheet(const nsAString& aURL)
-{
-  // Enable existing sheet if already loaded.
-  if (EnableExistingStyleSheet(aURL)) {
-    return NS_OK;
-  }
-
-  // Lose the previously-loaded sheet so there's nothing to replace
-  // This pattern is different from Override methods because
-  //  we must wait to remove mLastStyleSheetURL and add new sheet
-  //  at the same time (in StyleSheetLoaded callback) so they are undoable together
-  mLastStyleSheetURL.Truncate();
-  return ReplaceStyleSheet(aURL);
-}
-
-NS_IMETHODIMP
-HTMLEditor::ReplaceStyleSheet(const nsAString& aURL)
-{
-  // Enable existing sheet if already loaded.
-  if (EnableExistingStyleSheet(aURL)) {
-    // Disable last sheet if not the same as new one
-    if (!mLastStyleSheetURL.IsEmpty() && !mLastStyleSheetURL.Equals(aURL)) {
-      return EnableStyleSheet(mLastStyleSheetURL, false);
-    }
-    return NS_OK;
-  }
-
-  // Make sure the pres shell doesn't disappear during the load.
-  if (NS_WARN_IF(!IsInitialized())) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-  nsCOMPtr<nsIPresShell> ps = GetPresShell();
-  NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
-
-  nsCOMPtr<nsIURI> uaURI;
-  nsresult rv = NS_NewURI(getter_AddRefs(uaURI), aURL);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return ps->GetDocument()->CSSLoader()->LoadSheet(
-    uaURI, false, nullptr, nullptr, this);
-}
-
-NS_IMETHODIMP
-HTMLEditor::RemoveStyleSheet(const nsAString& aURL)
-{
-  return RemoveStyleSheetWithTransaction(aURL);
-}
-
-nsresult
-HTMLEditor::RemoveStyleSheetWithTransaction(const nsAString& aURL)
-{
-  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
-  if (NS_WARN_IF(!sheet)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  RefPtr<RemoveStyleSheetTransaction> transaction =
-    RemoveStyleSheetTransaction::Create(*this, *sheet);
-  nsresult rv = DoTransaction(transaction);
-  if (NS_SUCCEEDED(rv)) {
-    mLastStyleSheetURL.Truncate();        // forget it
-  }
-  // Remove it from our internal list
-  return RemoveStyleSheetFromList(aURL);
 }
 
 
@@ -3068,8 +2966,7 @@ HTMLEditor::RemoveOverrideStyleSheet(const nsAString& aURL)
 }
 
 NS_IMETHODIMP
-HTMLEditor::EnableStyleSheet(const nsAString& aURL,
-                             bool aEnable)
+HTMLEditor::EnableStyleSheet(const nsAString& aURL, bool aEnable)
 {
   RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
   NS_ENSURE_TRUE(sheet, NS_OK); // Don't fail if sheet not found
@@ -3466,37 +3363,6 @@ HTMLEditor::DebugUnitTests(int32_t* outNumTests,
 #endif
 }
 
-NS_IMETHODIMP
-HTMLEditor::StyleSheetLoaded(StyleSheet* aSheet,
-                             bool aWasDeferred,
-                             nsresult aStatus)
-{
-  AutoPlaceholderBatch batchIt(this);
-
-  if (!mLastStyleSheetURL.IsEmpty()) {
-    RemoveStyleSheetWithTransaction(mLastStyleSheetURL);
-  }
-
-  RefPtr<AddStyleSheetTransaction> transaction =
-    AddStyleSheetTransaction::Create(*this, *aSheet);
-  nsresult rv = DoTransaction(transaction);
-  if (NS_SUCCEEDED(rv)) {
-    // Get the URI, then url spec from the sheet
-    nsAutoCString spec;
-    rv = aSheet->GetSheetURI()->GetSpec(spec);
-
-    if (NS_SUCCEEDED(rv)) {
-      // Save it so we can remove before applying the next one
-      CopyASCIItoUTF16(spec, mLastStyleSheetURL);
-
-      // Also save in our arrays of urls and sheets
-      AddNewStyleSheetToList(mLastStyleSheetURL, aSheet);
-    }
-  }
-
-  return NS_OK;
-}
-
 void
 HTMLEditor::OnStartToHandleTopLevelEditSubAction(
               EditSubAction aEditSubAction,
@@ -3588,13 +3454,24 @@ HTMLEditor::SelectEntireDocument(Selection* aSelection)
   return EditorBase::SelectEntireDocument(aSelection);
 }
 
-NS_IMETHODIMP
-HTMLEditor::SelectAll()
+nsresult
+HTMLEditor::SelectAllInternal()
 {
   CommitComposition();
+  if (NS_WARN_IF(Destroyed())) {
+    return NS_ERROR_EDITOR_DESTROYED;
+  }
+
+  // XXX Perhaps, we should check whether we still have focus since composition
+  //     event listener may have already moved focus to different editing
+  //     host or other element.  So, perhaps, we need to retrieve anchor node
+  //     before committing composition and check if selection is still in
+  //     same editing host.
 
   RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_STATE(selection);
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsINode* anchorNode = selection->GetAnchorNode();
   if (NS_WARN_IF(!anchorNode) || NS_WARN_IF(!anchorNode->IsContent())) {
@@ -3611,7 +3488,9 @@ HTMLEditor::SelectAll()
     rootContent = anchorContent->GetSelectionRootContent(ps);
   }
 
-  NS_ENSURE_TRUE(rootContent, NS_ERROR_UNEXPECTED);
+  if (NS_WARN_IF(!rootContent)) {
+    return NS_ERROR_UNEXPECTED;
+  }
 
   Maybe<mozilla::dom::Selection::AutoUserInitiated> userSelection;
   if (!rootContent->IsEditable()) {
@@ -3619,6 +3498,7 @@ HTMLEditor::SelectAll()
   }
   ErrorResult errorResult;
   selection->SelectAllChildren(*rootContent, errorResult);
+  NS_WARNING_ASSERTION(!errorResult.Failed(), "SelectAllChildren() failed");
   return errorResult.StealNSResult();
 }
 
@@ -4709,14 +4589,6 @@ HTMLEditor::EndUpdateViewBatch()
   return CheckSelectionStateForAnonymousButtons(selection);
 }
 
-NS_IMETHODIMP
-HTMLEditor::GetSelectionContainer(Element** aReturn)
-{
-  RefPtr<Element> container = GetSelectionContainer();
-  container.forget(aReturn);
-  return NS_OK;
-}
-
 Element*
 HTMLEditor::GetSelectionContainer()
 {
@@ -4964,7 +4836,7 @@ HTMLEditor::NotifyRootChanged()
     return;
   }
 
-  rv = BeginningOfDocument();
+  rv = MaybeCollapseSelectionAtFirstEditableNode(false);
   if (NS_FAILED(rv)) {
     return;
   }

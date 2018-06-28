@@ -25,7 +25,6 @@
 #include "JoinNodeTransaction.h"        // for JoinNodeTransaction
 #include "PlaceholderTransaction.h"     // for PlaceholderTransaction
 #include "SplitNodeTransaction.h"       // for SplitNodeTransaction
-#include "StyleSheetTransactions.h"     // for AddStyleSheetTransaction, etc.
 #include "TextEditUtils.h"              // for TextEditUtils
 #include "mozilla/CheckedInt.h"         // for CheckedInt
 #include "mozilla/ComputedStyle.h"      // for ComputedStyle
@@ -71,7 +70,7 @@
 #include "nsGenericHTMLElement.h"       // for nsGenericHTMLElement
 #include "nsGkAtoms.h"                  // for nsGkAtoms, nsGkAtoms::dir
 #include "nsIAbsorbingTransaction.h"    // for nsIAbsorbingTransaction
-#include "nsAtom.h"                    // for nsAtom
+#include "nsAtom.h"                     // for nsAtom
 #include "nsIContent.h"                 // for nsIContent
 #include "nsIDocument.h"                // for nsIDocument
 #include "nsIDOMEventListener.h"        // for nsIDOMEventListener
@@ -742,7 +741,7 @@ EditorBase::DoTransaction(Selection* aSelection, nsITransaction* aTxn)
 {
   if (mPlaceholderBatch && !mPlaceholderTransaction) {
     mPlaceholderTransaction =
-      PlaceholderTransaction::Create(*this, mPlaceholderName, Move(mSelState));
+      PlaceholderTransaction::Create(*this, mPlaceholderName, std::move(mSelState));
     MOZ_ASSERT(mSelState.isNothing());
 
     // We will recurse, but will not hit this case in the nested call
@@ -1019,11 +1018,37 @@ EditorBase::SelectAll()
   if (!IsInitialized()) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  ForceCompositionEnd();
+
+  nsresult rv = SelectAllInternal();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
+}
+
+nsresult
+EditorBase::SelectAllInternal()
+{
+  MOZ_ASSERT(IsInitialized());
+
+  CommitComposition();
+  if (NS_WARN_IF(Destroyed())) {
+    return NS_ERROR_EDITOR_DESTROYED;
+  }
+
+  // XXX Do we need to keep handling after committing composition causes moving
+  //     focus to different element?  Although TextEditor has independent
+  //     selection, so, we may not see any odd behavior even in such case.
 
   RefPtr<Selection> selection = GetSelection();
-  NS_ENSURE_TRUE(selection, NS_ERROR_NOT_INITIALIZED);
-  return SelectEntireDocument(selection);
+  if (NS_WARN_IF(!selection)) {
+    return NS_ERROR_FAILURE;
+  }
+  nsresult rv = SelectEntireDocument(selection);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2306,9 +2331,8 @@ NS_IMETHODIMP
 EditorBase::DebugUnitTests(int32_t* outNumTests,
                            int32_t* outNumTestsFailed)
 {
-#ifdef DEBUG
-  NS_NOTREACHED("This should never get called. Overridden by subclasses");
-#endif
+  MOZ_ASSERT_UNREACHABLE("This should never get called. Overridden by "
+                         "subclasses");
   return NS_OK;
 }
 
@@ -2900,7 +2924,7 @@ EditorBase::NotifyDocumentListeners(
       break;
     }
     default:
-      NS_NOTREACHED("Unknown notification");
+      MOZ_ASSERT_UNREACHABLE("Unknown notification");
   }
 
   return rv;
@@ -3588,7 +3612,7 @@ EditorBase::FindNextLeafNode(nsINode* aCurrentNode,
     cur = parent;
   }
 
-  NS_NOTREACHED("What part of for(;;) do you not understand?");
+  MOZ_ASSERT_UNREACHABLE("What part of for(;;) do you not understand?");
   return nullptr;
 }
 
@@ -3643,7 +3667,7 @@ EditorBase::GetRightmostChild(nsINode* aCurrentNode,
     cur = next;
   }
 
-  NS_NOTREACHED("What part of for(;;) do you not understand?");
+  MOZ_ASSERT_UNREACHABLE("What part of for(;;) do you not understand?");
   return nullptr;
 }
 
@@ -3667,7 +3691,7 @@ EditorBase::GetLeftmostChild(nsINode* aCurrentNode,
     cur = next;
   }
 
-  NS_NOTREACHED("What part of for(;;) do you not understand?");
+  MOZ_ASSERT_UNREACHABLE("What part of for(;;) do you not understand?");
   return nullptr;
 }
 
@@ -4819,66 +4843,92 @@ EditorBase::DetermineCurrentDirection()
   return NS_OK;
 }
 
-NS_IMETHODIMP
-EditorBase::SwitchTextDirection()
+nsresult
+EditorBase::ToggleTextDirection()
 {
-  // Get the current root direction from its frame
-  Element* rootElement = GetExposedRoot();
+  // XXX Oddly, Chrome does not dispatch beforeinput event in this case but
+  //     dispatches input event.
 
   nsresult rv = DetermineCurrentDirection();
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
-  // Apply the opposite direction
   if (IsRightToLeft()) {
-    NS_ASSERTION(!IsLeftToRight(),
-                 "Unexpected mutually exclusive flag");
-    mFlags &= ~nsIPlaintextEditor::eEditorRightToLeft;
-    mFlags |= nsIPlaintextEditor::eEditorLeftToRight;
-    rv = rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::dir, NS_LITERAL_STRING("ltr"), true);
+    nsresult rv = SetTextDirectionTo(TextDirection::eLTR);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   } else if (IsLeftToRight()) {
-    NS_ASSERTION(!IsRightToLeft(),
-                 "Unexpected mutually exclusive flag");
-    mFlags |= nsIPlaintextEditor::eEditorRightToLeft;
-    mFlags &= ~nsIPlaintextEditor::eEditorLeftToRight;
-    rv = rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::dir, NS_LITERAL_STRING("rtl"), true);
+    nsresult rv = SetTextDirectionTo(TextDirection::eRTL);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
-  if (NS_SUCCEEDED(rv)) {
-    FireInputEvent();
-  }
+  // XXX When we don't change the text direction, do we really need to
+  //     dispatch input event?
+  FireInputEvent();
 
-  return rv;
+  return NS_OK;
 }
 
 void
-EditorBase::SwitchTextDirectionTo(uint32_t aDirection)
+EditorBase::SwitchTextDirectionTo(TextDirection aTextDirection)
 {
-  // Get the current root direction from its frame
-  Element* rootElement = GetExposedRoot();
+  // XXX Oddly, Chrome does not dispatch beforeinput event in this case but
+  //     dispatches input event.
 
   nsresult rv = DetermineCurrentDirection();
-  NS_ENSURE_SUCCESS_VOID(rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
 
-  // Apply the requested direction
-  if (aDirection == nsIPlaintextEditor::eEditorLeftToRight &&
-      IsRightToLeft()) {
-    NS_ASSERTION(!(mFlags & nsIPlaintextEditor::eEditorLeftToRight),
-                 "Unexpected mutually exclusive flag");
+  if (aTextDirection == TextDirection::eLTR && IsRightToLeft()) {
+    if (NS_WARN_IF(NS_FAILED(SetTextDirectionTo(aTextDirection)))) {
+      return;
+    }
+  } else if (aTextDirection == TextDirection::eRTL && IsLeftToRight()) {
+    if (NS_WARN_IF(NS_FAILED(SetTextDirectionTo(aTextDirection)))) {
+      return;
+    }
+  }
+
+  // XXX When we don't change the text direction, do we really need to
+  //     dispatch input event?
+  FireInputEvent();
+}
+
+nsresult
+EditorBase::SetTextDirectionTo(TextDirection aTextDirection)
+{
+  Element* rootElement = GetExposedRoot();
+
+  if (aTextDirection == TextDirection::eLTR) {
+    NS_ASSERTION(!IsLeftToRight(), "Unexpected mutually exclusive flag");
     mFlags &= ~nsIPlaintextEditor::eEditorRightToLeft;
     mFlags |= nsIPlaintextEditor::eEditorLeftToRight;
-    rv = rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::dir, NS_LITERAL_STRING("ltr"), true);
-  } else if (aDirection == nsIPlaintextEditor::eEditorRightToLeft &&
-             IsLeftToRight()) {
-    NS_ASSERTION(!(mFlags & nsIPlaintextEditor::eEditorRightToLeft),
-                 "Unexpected mutually exclusive flag");
-    mFlags |= nsIPlaintextEditor::eEditorRightToLeft;
-    mFlags &= ~nsIPlaintextEditor::eEditorLeftToRight;
-    rv = rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::dir, NS_LITERAL_STRING("rtl"), true);
+    nsresult rv = rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::dir,
+                                       NS_LITERAL_STRING("ltr"), true);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    return NS_OK;
   }
 
-  if (NS_SUCCEEDED(rv)) {
-    FireInputEvent();
+  if (aTextDirection == TextDirection::eRTL) {
+    NS_ASSERTION(!IsRightToLeft(), "Unexpected mutually exclusive flag");
+    mFlags |= nsIPlaintextEditor::eEditorRightToLeft;
+    mFlags &= ~nsIPlaintextEditor::eEditorLeftToRight;
+    nsresult rv = rootElement->SetAttr(kNameSpaceID_None, nsGkAtoms::dir,
+                                       NS_LITERAL_STRING("rtl"), true);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    return NS_OK;
   }
+
+  return NS_OK;
 }
 
 bool

@@ -23,7 +23,7 @@ HTMLFrameSetElement::~HTMLFrameSetElement()
 JSObject*
 HTMLFrameSetElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return HTMLFrameSetElementBinding::Wrap(aCx, this, aGivenProto);
+  return HTMLFrameSetElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 NS_IMPL_ELEMENT_CLONE(HTMLFrameSetElement)
@@ -295,7 +295,7 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
 
   aNumSpecs = count;
   // Transfer ownership to caller here
-  *aSpecs = Move(specs);
+  *aSpecs = std::move(specs);
 
   return NS_OK;
 }

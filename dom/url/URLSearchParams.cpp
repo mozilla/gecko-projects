@@ -359,7 +359,7 @@ URLSearchParams::~URLSearchParams()
 JSObject*
 URLSearchParams::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
-  return URLSearchParamsBinding::Wrap(aCx, this, aGivenProto);
+  return URLSearchParams_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /* static */ already_AddRefed<URLSearchParams>
@@ -627,7 +627,7 @@ URLSearchParams::GetSendInfo(nsIInputStream** aBody, uint64_t* aContentLength,
   Serialize(serialized);
   NS_ConvertUTF16toUTF8 converted(serialized);
   *aContentLength = converted.Length();
-  return NS_NewCStringInputStream(aBody, Move(converted));
+  return NS_NewCStringInputStream(aBody, std::move(converted));
 }
 
 } // namespace dom
