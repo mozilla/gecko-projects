@@ -184,7 +184,6 @@ scriptworker:
             - 'project:releng:beetmover:bucket:release'
             - 'project:releng:beetmover:bucket:nightly'
             - 'project:releng:beetmover:bucket:partner'
-            - 'project:releng:beetmover:bucket:maven'
         'scriptworker-prov-v1/beetmoverworker-dev':
             - 'project:releng:beetmover:bucket:dep'
             - 'project:releng:beetmover:bucket:dep-partner'
