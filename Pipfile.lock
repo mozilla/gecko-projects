@@ -52,6 +52,13 @@
             "index": "pypi",
             "version": "==2.5.0"
         },
+        "mozilla-version": {
+            "hashes": [
+                "sha256:f85570a12bb478aeb58938a68bb75b97a53e4bad2a4a4315e056807752a1ff1b"
+            ],
+            "index": "pypi",
+            "version": "==0.1.1"
+        },
         "pipenv": {
             "hashes": [
                 "sha256:04b9a8b02a3ff12a5502b335850cfdb192adcfd1d6bbdb7a7c47cae9ab9ddece",
