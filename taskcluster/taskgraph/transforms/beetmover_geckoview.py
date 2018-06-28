@@ -88,7 +88,7 @@ def make_task_description(config, jobs):
         if job.get('locale'):
             attributes['locale'] = job['locale']
 
-        bucket_scope = 'project:releng:beetmover:bucket:maven'
+        bucket_scope = 'project:releng:beetmover:bucket:maven-staging'
         # TODO Put this action elsewhere
         action_scope = 'project:releng:beetmover:action:push-to-maven'
         phase = get_phase(config)
