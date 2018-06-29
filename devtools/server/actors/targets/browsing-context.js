@@ -244,7 +244,7 @@ const browsingContextTargetPrototype = {
 
     let canRewind = false;
     if (Debugger.recordReplayProcessKind() == "Middleman") {
-      let replayDebugger = new ReplayDebugger();
+      const replayDebugger = new ReplayDebugger();
       canRewind = replayDebugger.canRewind();
     }
 

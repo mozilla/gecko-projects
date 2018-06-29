@@ -927,7 +927,7 @@ Vector<T, N, AP>::~Vector()
   MOZ_REENTRANCY_GUARD_ET_AL;
   Impl::destroy(beginNoCheck(), endNoCheck());
   if (!usingInlineStorage()) {
-    this->template free_(beginNoCheck(), mTail.mCapacity);
+    this->free_(beginNoCheck(), mTail.mCapacity);
   }
 }
 

@@ -144,8 +144,8 @@ WebConsoleOutputWrapper.prototype = {
           store.dispatch(actions.showObjectInSidebar(rootActorId, messageId));
         } : null;
 
-        let messageData = getMessage(store.getState(), message.messageId);
-        let executionPoint = messageData.executionPoint;
+        const messageData = getMessage(store.getState(), message.messageId);
+        const executionPoint = messageData.executionPoint;
 
         const menu = createContextMenu(this.hud, this.parentNode, {
           actor,

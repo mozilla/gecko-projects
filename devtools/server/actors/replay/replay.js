@@ -3,6 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// eslint-disable spaced-comment, brace-style
 
 "use strict";
 
@@ -17,27 +18,30 @@
 // might interact with the recording --- evaluating code or otherwise calling
 // into debuggees --- and the RecordReplayControl.maybeDivergeFromRecording
 // function should be used at any point where such interactions might occur.
+// eslint-disable spaced-comment
 
-let CC = Components.Constructor;
+"use strict";
+
+const CC = Components.Constructor;
 
 // Create a sandbox with the resources we need. require() doesn't work here.
-let sandbox = Cu.Sandbox(CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")());
+const sandbox = Cu.Sandbox(CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")());
 Cu.evalInSandbox(
   "Components.utils.import('resource://gre/modules/jsdebugger.jsm');" +
   "Components.utils.import('resource://gre/modules/Services.jsm');" +
   "addDebuggerToGlobal(this);",
   sandbox
 );
-let Debugger = sandbox.Debugger;
-let RecordReplayControl = sandbox.RecordReplayControl;
-let Services = sandbox.Services;
+const Debugger = sandbox.Debugger;
+const RecordReplayControl = sandbox.RecordReplayControl;
+const Services = sandbox.Services;
 
-let dbg = new Debugger();
+const dbg = new Debugger();
 
 // We are interested in debugging all globals in the process.
 dbg.onNewGlobalObject = function(global) {
   dbg.addDebuggee(global);
-}
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Utilities
@@ -45,7 +49,7 @@ dbg.onNewGlobalObject = function(global) {
 
 function assert(v) {
   if (!v) {
-    RecordReplayControl.dump("Assertion Failed: " + (new Error).stack + "\n");
+    RecordReplayControl.dump("Assertion Failed: " + (new Error()).stack + "\n");
     throw new Error("Assertion Failed!");
   }
 }
@@ -59,14 +63,14 @@ function IdMap() {
 IdMap.prototype = {
   add(object) {
     assert(object && !this._objectToId.has(object));
-    let id = this._idToObject.length;
+    const id = this._idToObject.length;
     this._idToObject.push(object);
     this._objectToId.set(object, id);
     return id;
   },
 
   getId(object) {
-    let id = this._objectToId.get(object);
+    const id = this._objectToId.get(object);
     return (id === undefined) ? 0 : id;
   },
 
@@ -115,14 +119,14 @@ function scriptFrameForIndex(index) {
 // Persistent Script State
 ///////////////////////////////////////////////////////////////////////////////
 
-let gScripts = new IdMap();
+const gScripts = new IdMap();
 
 function addScript(script) {
-  let id = gScripts.add(script);
+  const id = gScripts.add(script);
   script.getChildScripts().forEach(addScript);
 }
 
-let gScriptSources = new IdMap();
+const gScriptSources = new IdMap();
 
 function addScriptSource(source) {
   gScriptSources.add(source);
@@ -163,7 +167,7 @@ dbg.onNewScript = function(script) {
 // Console Message State
 ///////////////////////////////////////////////////////////////////////////////
 
-let gConsoleMessages = [];
+const gConsoleMessages = [];
 
 function newConsoleMessage(messageType, executionPoint, contents) {
   // Each new console message advances the progress counter, to make sure
@@ -183,7 +187,7 @@ function newConsoleMessage(messageType, executionPoint, contents) {
 
 function convertStack(stack) {
   if (stack) {
-    let { source, line, column, functionDisplayName } = stack;
+    const { source, line, column, functionDisplayName } = stack;
     return { source, line, column, functionDisplayName, parent: convertStack(stack.parent) };
   }
   return null;
@@ -203,7 +207,7 @@ Services.console.registerListener({
         executionPoint = RecordReplayControl.timeWarpTargetExecutionPoint(message.timeWarpTarget);
       }
 
-      let contents = JSON.parse(JSON.stringify(message));
+      const contents = JSON.parse(JSON.stringify(message));
       contents.stack = convertStack(message.stack);
       newConsoleMessage("PageError", executionPoint, contents);
     }
@@ -215,10 +219,10 @@ Services.obs.addObserver({
   QueryInterface: ChromeUtils.generateQI([Ci.nsIObserver]),
 
   observe(message, topic, data) {
-    let apiMessage = message.wrappedJSObject;
+    const apiMessage = message.wrappedJSObject;
 
-    let contents = {};
-    for (let id in apiMessage) {
+    const contents = {};
+    for (const id in apiMessage) {
       if (id != "wrappedJSObject") {
         contents[id] = JSON.parse(JSON.stringify(apiMessage[id]));
       }
@@ -233,31 +237,31 @@ Services.obs.addObserver({
 ///////////////////////////////////////////////////////////////////////////////
 
 // Position kinds we are expected to hit.
-let gPositionHandlerKinds = [];
+const gPositionHandlerKinds = [];
 
 // Handlers we tried to install but couldn't due to a script not existing.
-let gPendingPcHandlers = [];
+const gPendingPcHandlers = [];
 
 // Script/offset pairs where we have installed a breakpoint handler. We have to
 // avoid installing duplicate handlers here because they will both be called.
-let gInstalledPcHandlers = [];
+const gInstalledPcHandlers = [];
 
 // Callbacks to test whether a frame should have an OnPop handler.
-let gOnPopFilters = [];
+const gOnPopFilters = [];
 
 function ClearPositionHandlers() {
   dbg.clearAllBreakpoints();
   dbg.onEnterFrame = undefined;
 
-  gPositionHandlerKinds = [];
-  gPendingPcHandlers = [];
-  gInstalledPcHandlers = [];
-  gOnPopFilters = [];
+  gPositionHandlerKinds.length = 0;
+  gPendingPcHandlers.length = 0;
+  gInstalledPcHandlers.length = 0;
+  gOnPopFilters.length = 0;
 }
 
 function installPendingHandlers() {
-  let pending = gPendingPcHandlers;
-  gPendingPcHandlers = [];
+  let pending = gPendingPcHandlers.map(position => position);
+  gPendingPcHandlers.length = 0;
 
   pending.forEach(EnsurePositionHandler);
 }
@@ -270,7 +274,7 @@ function hitGlobalHandler(kind) {
 }
 
 // The completion state of any frame that is being popped.
-let gPopFrameResult = null;
+const gPopFrameResult = null;
 
 function onPopFrame(completion) {
   gPopFrameResult = completion;
@@ -355,7 +359,7 @@ function EnsurePositionHandler(position) {
 
 function GetEntryPosition(position) {
   if (position.kind == "Break" || position.kind == "OnStep") {
-    let script = gScripts.getObject(position.script);
+    const script = gScripts.getObject(position.script);
     if (script) {
       return {
         kind: "Break",
@@ -374,7 +378,7 @@ function GetEntryPosition(position) {
 let gPausedObjects = new IdMap();
 
 function getObjectId(obj) {
-  let id = gPausedObjects.getId(obj);
+  const id = gPausedObjects.getId(obj);
   if (!id && obj) {
     assert((obj instanceof Debugger.Object) ||
            (obj instanceof Debugger.Environment));
@@ -411,7 +415,7 @@ function ClearPausedState() {
 ///////////////////////////////////////////////////////////////////////////////
 
 function getScriptData(id) {
-  let script = gScripts.getObject(id);
+  const script = gScripts.getObject(id);
   return {
     id,
     sourceId: gScriptSources.getId(script.source),
@@ -432,10 +436,10 @@ function forwardToScript(name) {
 // Handlers
 ///////////////////////////////////////////////////////////////////////////////
 
-let gRequestHandlers = {
+const gRequestHandlers = {
 
   findScripts(request) {
-    let rv = [];
+    const rv = [];
     gScripts.forEach((id) => {
       rv.push(getScriptData(id));
     });
@@ -455,8 +459,8 @@ let gRequestHandlers = {
   },
 
   getSource(request) {
-    let source = gScriptSources.getObject(request.id);
-    let introductionScript = gScripts.getId(source.introductionScript);
+    const source = gScriptSources.getObject(request.id);
+    const introductionScript = gScripts.getId(source.introductionScript);
     return {
       id: request.id,
       text: source.text,
@@ -471,7 +475,7 @@ let gRequestHandlers = {
   },
 
   getObject(request) {
-    let object = gPausedObjects.getObject(request.id);
+    const object = gPausedObjects.getObject(request.id);
     if (object instanceof Debugger.Object) {
       return {
         id: request.id,
@@ -520,11 +524,11 @@ let gRequestHandlers = {
       }];
     }
 
-    let object = gPausedObjects.getObject(request.id);
-    let names = object.getOwnPropertyNames();
+    const object = gPausedObjects.getObject(request.id);
+    const names = object.getOwnPropertyNames();
 
     return names.map(name => {
-      let desc = object.getOwnPropertyDescriptor(name);
+      const desc = object.getOwnPropertyDescriptor(name);
       if ("value" in desc) desc.value = convertValue(desc.value);
       if ("get" in desc) desc.get = getObjectId(desc.get);
       if ("set" in desc) desc.set = getObjectId(desc.set);
@@ -537,8 +541,8 @@ let gRequestHandlers = {
       return [{name: "Unknown names", value: "Recording divergence in getEnvironmentNames" }];
     }
 
-    let env = gPausedObjects.getObject(request.id);
-    let names = env.names();
+    const env = gPausedObjects.getObject(request.id);
+    const names = env.names();
 
     return names.map(name => {
       return { name, value: convertValue(env.getVariable(name)) };
@@ -547,7 +551,7 @@ let gRequestHandlers = {
 
   getFrame(request) {
     if (request.index == -1 /* ReplayDebugger.prototype._newestFrameIndex */) {
-      let numFrames = countScriptFrames();
+      const numFrames = countScriptFrames();
       if (!numFrames) {
         // Return an empty object when there are no frames.
         return {};
@@ -555,7 +559,7 @@ let gRequestHandlers = {
       request.index = numFrames - 1;
     }
 
-    let frame = scriptFrameForIndex(request.index);
+    const frame = scriptFrameForIndex(request.index);
 
     let _arguments = null;
     if (frame.arguments) {
@@ -589,8 +593,8 @@ let gRequestHandlers = {
       return { throw: "Recording divergence in frameEvaluate" };
     }
 
-    let frame = scriptFrameForIndex(request.index);
-    let rv = frame.eval(request.text, request.options);
+    const frame = scriptFrameForIndex(request.index);
+    const rv = frame.eval(request.text, request.options);
     return convertCompletionValue(rv);
   },
 

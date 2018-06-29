@@ -141,13 +141,13 @@ const previewers = {
         if (desc && !desc.get && !desc.set) {
           value = Cu.unwaiveXrays(desc.value);
           value = ObjectUtils.makeDebuggeeValueIfNeeded(obj, value);
-          items.push(hooks.createValueGrip(value));
         }
       } else {
         // When recording/replaying we don't have a raw object, but also don't
         // need to deal with Xrays into the debuggee compartment.
-        let value = DevToolsUtils.getProperty(obj, i);
+        value = DevToolsUtils.getProperty(obj, i);
       }
+      items.push(hooks.createValueGrip(value));
 
       if (items.length == OBJECT_PREVIEW_MAX_ITEMS) {
         break;
@@ -452,12 +452,11 @@ previewers.Object = [
       return true;
     }
 
-    let raw = obj.unsafeDereference();
+    const raw = obj.unsafeDereference();
 
     // The raw object will be null/unavailable when interacting with a
     // replaying execution.
     if (raw) {
-      const raw = obj.unsafeDereference();
       const global = Cu.getGlobalForObject(DebuggerServer);
       const classProto = global[obj.class].prototype;
       // The Xray machinery for TypedArrays denies indexed access on the grounds

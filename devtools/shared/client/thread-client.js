@@ -161,8 +161,8 @@ ThreadClient.prototype = {
    * @param function aOnResponse
    *        Called with the response packet.
    */
-  rewind: function(aOnResponse) {
-    this._doResume(null, true, aOnResponse);
+  rewind: function(onResponse) {
+    this._doResume(null, true, onResponse);
   },
 
   /**
@@ -201,8 +201,8 @@ ThreadClient.prototype = {
    * @param function aOnResponse
    *        Called with the response packet.
    */
-  reverseStepOver: function(aOnResponse) {
-    return this._doResume({ type: "next" }, true, aOnResponse);
+  reverseStepOver: function(onResponse) {
+    return this._doResume({ type: "next" }, true, onResponse);
   },
 
   /**
@@ -211,8 +211,8 @@ ThreadClient.prototype = {
    * @param function aOnResponse
    *        Called with the response packet.
    */
-  reverseStepIn: function(aOnResponse) {
-    return this._doResume({ type: "step" }, true, aOnResponse);
+  reverseStepIn: function(onResponse) {
+    return this._doResume({ type: "step" }, true, onResponse);
   },
 
   /**
@@ -221,8 +221,8 @@ ThreadClient.prototype = {
    * @param function aOnResponse
    *        Called with the response packet.
    */
-  reverseStepOut: function(aOnResponse) {
-    return this._doResume({ type: "finish" }, true, aOnResponse);
+  reverseStepOut: function(onResponse) {
+    return this._doResume({ type: "finish" }, true, onResponse);
   },
 
   /**
@@ -253,9 +253,9 @@ ThreadClient.prototype = {
    * @param function aOnResponse
    *        Called with the response packet.
    */
-  timeWarp: function(aTarget, aOnResponse) {
-    let warp = () => {
-      this._doResume({ type: "warp", target: aTarget }, true, aOnResponse);
+  timeWarp: function(target, onResponse) {
+    const warp = () => {
+      this._doResume({ type: "warp", target }, true, onResponse);
     };
     if (this.paused) {
       warp();

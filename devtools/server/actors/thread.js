@@ -562,7 +562,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
 
       // A step has occurred if we reached a step target.
-      if (thread._intraFrameLocationIsStepTarget(startLocation, this.script, this.offset)) {
+      if (thread._intraFrameLocationIsStepTarget(startLocation,
+                                                 this.script, this.offset)) {
         return pauseAndRespond(this);
       }
 
@@ -577,9 +578,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    * should fire at.
    */
   _findReplayingStepOffsets: function(startLocation, frame, rewinding) {
-    let worklist = [frame.offset], seen = [], result = [];
+    const worklist = [frame.offset], seen = [], result = [];
     while (worklist.length) {
-      let offset = worklist.pop();
+      const offset = worklist.pop();
       if (seen.some((n) => n == offset)) {
         continue;
       }
@@ -589,10 +590,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
           result.push(offset);
         }
       } else {
-        let neighbors = rewinding
+        const neighbors = rewinding
             ? frame.script.getPredecessorOffsets(offset)
             : frame.script.getSuccessorOffsets(offset);
-        for (let n of neighbors) {
+        for (const n of neighbors) {
           worklist.push(n);
         }
       }
@@ -666,37 +667,38 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const stepFrame = this._getNextStepFrame(this.youngestFrame, rewinding);
     if (stepFrame) {
       switch (steppingType) {
-      case "step":
-        if (rewinding) {
-          this.dbg.replayingOnPopFrame = onEnterFrame;
-        } else {
-          this.dbg.onEnterFrame = onEnterFrame;
-        }
-        // Fall through.
-      case "break":
-      case "next":
-        if (stepFrame.script) {
-          if (this.dbg.replaying) {
-            let offsets = this._findReplayingStepOffsets(originalLocation, stepFrame, rewinding);
-            stepFrame.setReplayingOnStep(onStep, offsets);
+        case "step":
+          if (rewinding) {
+            this.dbg.replayingOnPopFrame = onEnterFrame;
           } else {
-            stepFrame.onStep = onStep;
+            this.dbg.onEnterFrame = onEnterFrame;
           }
-        }
-        // Fall through.
-      case "finish":
-        if (rewinding) {
-          let olderFrame = stepFrame.older;
-          while (olderFrame && !olderFrame.script) {
-            olderFrame = olderFrame.older;
+          // Fall through.
+        case "break":
+        case "next":
+          if (stepFrame.script) {
+            if (this.dbg.replaying) {
+              let offsets = this._findReplayingStepOffsets(originalLocation,
+                                                           stepFrame, rewinding);
+              stepFrame.setReplayingOnStep(onStep, offsets);
+            } else {
+              stepFrame.onStep = onStep;
+            }
           }
-          if (olderFrame) {
-            olderFrame.setReplayingOnStep(onStep, [olderFrame.offset]);
+          // Fall through.
+        case "finish":
+          if (rewinding) {
+            let olderFrame = stepFrame.older;
+            while (olderFrame && !olderFrame.script) {
+              olderFrame = olderFrame.older;
+            }
+            if (olderFrame) {
+              olderFrame.setReplayingOnStep(onStep, [olderFrame.offset]);
+            }
+          } else {
+            stepFrame.onPop = onPop;
           }
-        } else {
-          stepFrame.onPop = onPop;
-        }
-        break;
+          break;
       }
     }
 
@@ -773,7 +775,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       };
     }
 
-    let rewinding = request && request.rewind;
+    const rewinding = request && request.rewind;
     if (rewinding && !this.dbg.replaying) {
       return {
         error: "cantRewind",
@@ -800,12 +802,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       // When replaying execution in a separate process we need to explicitly
       // notify that process when to resume execution.
       if (this.dbg.replaying) {
-        if (request && request.resumeLimit && request.resumeLimit.type == "warp")
+        if (request && request.resumeLimit && request.resumeLimit.type == "warp") {
           this.dbg.replayTimeWarp(request.resumeLimit.target);
-        else if (rewinding)
+        } else if (rewinding) {
           this.dbg.replayResumeBackward();
-        else
+        } else {
           this.dbg.replayResumeForward();
+        }
       }
 
       const packet = this._resumed();
@@ -977,10 +980,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    * Helper method that returns the next frame when stepping.
    */
   _getNextStepFrame: function(frame, rewinding) {
-    let endOfFrame = rewinding ? (frame.offset == frame.script.mainOffset) : frame.reportedPop;
-    let stepFrame = endOfFrame ? frame.older : frame;
+    const endOfFrame =
+      rewinding ? (frame.offset == frame.script.mainOffset) : frame.reportedPop;
+    const stepFrame = endOfFrame ? frame.older : frame;
     if (!stepFrame || !stepFrame.script) {
-      stepFrame = null;
+      return null;
     }
     return stepFrame;
   },
@@ -1176,7 +1180,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       // onNext is set while replaying so that the client will treat us as paused
       // at a breakpoint. When replaying we may need to pause and interact with
       // the server even if there are no frames on the stack.
-      if (!this._pauseAndRespond(null, { type: "interrupted", onNext: this.dbg.replaying })) {
+      if (!this._pauseAndRespond(null, { type: "interrupted",
+                                         onNext: this.dbg.replaying })) {
         return { error: "notInterrupted" };
       }
 
@@ -1307,7 +1312,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // Clear DOM event breakpoints.
     // XPCShell tests don't use actual DOM windows for globals and cause
     // removeListenerForAllEvents to throw.
-    if (!isWorker && this.global && !this.dbg.replaying && !this.global.toString().includes("Sandbox")) {
+    if (!isWorker &&
+        this.global &&
+        !this.dbg.replaying &&
+        !this.global.toString().includes("Sandbox")) {
       Services.els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
       for (const [, bp] of this._hiddenBreakpoints) {
         bp.delete();

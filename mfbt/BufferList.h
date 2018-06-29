@@ -170,7 +170,7 @@ class BufferList : private AllocPolicy
   {
     if (mOwning) {
       for (Segment& segment : mSegments) {
-        this->template free_(segment.mData, segment.mCapacity);
+        this->free_(segment.mData, segment.mCapacity);
       }
     }
     mSegments.clear();

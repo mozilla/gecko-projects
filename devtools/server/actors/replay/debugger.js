@@ -3,6 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// eslint-disable spaced-comment, brace-style
 
 "use strict";
 
@@ -55,8 +56,9 @@ ReplayDebugger.prototype = {
   },
 
   _sendRequest(request) {
-    let data = RecordReplayControl.sendRequest(request);
-    //dump("SendRequest: " + JSON.stringify(request) + " -> " + JSON.stringify(data) + "\n");
+    const data = RecordReplayControl.sendRequest(request);
+    //dump("SendRequest: " +
+    //     JSON.stringify(request) + " -> " + JSON.stringify(data) + "\n");
     if (data.exception) {
       ThrowError(data.exception);
     }
@@ -64,7 +66,7 @@ ReplayDebugger.prototype = {
   },
 
   _setBreakpoint(handler, position, data) {
-    let id = RecordReplayControl.setBreakpoint(handler, position);
+    const id = RecordReplayControl.setBreakpoint(handler, position);
     this._breakpoints.push({id, position, data});
   },
 
@@ -80,7 +82,7 @@ ReplayDebugger.prototype = {
 
   _searchBreakpoints(callback) {
     for (let breakpoint of this._breakpoints) {
-      let v = callback(breakpoint);
+      const v = callback(breakpoint);
       if (v) {
         return v;
       }
@@ -91,7 +93,7 @@ ReplayDebugger.prototype = {
   // This is called on all ReplayDebuggers whenever the child process is about
   // to unpause. Clear out all data that is invalidated as a result.
   invalidateAfterUnpause() {
-    this._frames.forEach(frame => { if (frame) frame._invalidate() });
+    this._frames.forEach(frame => frame._invalidate());
     this._frames.length = 0;
 
     this._objects.forEach(obj => obj._invalidate());
@@ -106,7 +108,7 @@ ReplayDebugger.prototype = {
     if (!id) {
       return null;
     }
-    let rv = this._scripts[id];
+    const rv = this._scripts[id];
     if (rv) {
       return rv;
     }
@@ -123,7 +125,7 @@ ReplayDebugger.prototype = {
   findScripts() {
     // Note: Debugger's findScripts() method takes a query argument, which
     // we ignore here.
-    let data = this._sendRequest({ type: "findScripts" });
+    const data = this._sendRequest({ type: "findScripts" });
     return data.map(script => this._addScript(script));
   },
 
@@ -137,7 +139,7 @@ ReplayDebugger.prototype = {
 
   _getSource(id) {
     if (!this._scriptSources[id]) {
-      let data = this._sendRequest({ type: "getSource", id });
+      const data = this._sendRequest({ type: "getSource", id });
       this._scriptSources[id] = new ReplayDebuggerScriptSource(this, data);
     }
     return this._scriptSources[id];
@@ -149,11 +151,16 @@ ReplayDebugger.prototype = {
 
   _getObject(id) {
     if (id && !this._objects[id]) {
-      let data = this._sendRequest({ type: "getObject", id });
+      const data = this._sendRequest({ type: "getObject", id });
       switch (data.kind) {
-      case "Object": this._objects[id] = new ReplayDebuggerObject(this, data); break;
-      case "Environment": this._objects[id] = new ReplayDebuggerEnvironment(this, data); break;
-      default: ThrowError("Unknown object kind");
+        case "Object":
+          this._objects[id] = new ReplayDebuggerObject(this, data);
+          break;
+        case "Environment":
+          this._objects[id] = new ReplayDebuggerEnvironment(this, data);
+          break;
+        default:
+          ThrowError("Unknown object kind");
       }
     }
     return this._objects[id];
@@ -161,11 +168,17 @@ ReplayDebugger.prototype = {
 
   _convertValue(value) {
     if (value && typeof value == "object") {
-      if (value.object) return this._getObject(value.object);
-      if (value.special == "undefined") return undefined;
-      if (value.special == "NaN") return NaN;
-      if (value.special == "Infinity") return Infinity;
-      if (value.special == "-Infinity") return -Infinity;
+      if (value.object) {
+        return this._getObject(value.object);
+      } else if (value.special == "undefined") {
+        return undefined;
+      } else if (value.special == "NaN") {
+        return NaN;
+      } else if (value.special == "Infinity") {
+        return Infinity;
+      } else if (value.special == "-Infinity") {
+        return -Infinity;
+      }
     }
     return value;
   },
@@ -177,6 +190,7 @@ ReplayDebugger.prototype = {
     if ("throw" in value) {
       return { throw: this._convertValue(value.throw) };
     }
+    // eslint-disable-next-line consistent-return
     ThrowError("Unexpected completion value");
   },
 
@@ -201,14 +215,7 @@ ReplayDebugger.prototype = {
     let data = this._sendRequest({ type: "getFrame", index });
 
     if (index == this._newestFrameIndex) {
-      if ("index" in data) {
-        index = data.index;
-      }
-
-      // Fill in the older frames.
-      while (index >= this._frames.length) {
-        this._frames.push(null);
-      }
+      index = ("index" in data) ? data.index : 0;
     }
 
     this._frames[index] = new ReplayDebuggerFrame(this, data);
@@ -240,7 +247,9 @@ ReplayDebugger.prototype = {
     }
   },
 
-  _getNewScript() { return this._addScript(this._sendRequest({ type: "getNewScript" })) },
+  _getNewScript() {
+    return this._addScript(this._sendRequest({ type: "getNewScript" }));
+  },
 
   get onNewScript() { return this._breakpointKindGetter("NewScript"); },
   set onNewScript(handler) {
@@ -271,15 +280,19 @@ ReplayDebugger.prototype = {
     }
   },
 
-  get onReplayForcedPause() { return this._breakpointKindGetter("ForcedPause"); },
+  get onReplayForcedPause() {
+    return this._breakpointKindGetter("ForcedPause");
+  },
   set onReplayForcedPause(handler) {
     this._breakpointKindSetter("ForcedPause", handler,
                                () => handler.call(this, this.getNewestFrame()));
   },
 
-  _getNewConsoleMessage() { return this._sendRequest({ type: "getNewConsoleMessage" }) },
+  _getNewConsoleMessage() { return this._sendRequest({ type: "getNewConsoleMessage" }); },
 
-  get onConsoleMessage() { return this._breakpointKindGetter("ConsoleMessage"); },
+  get onConsoleMessage() {
+    return this._breakpointKindGetter("ConsoleMessage");
+  },
   set onConsoleMessage(handler) {
     this._breakpointKindSetter("ConsoleMessage", handler,
                                () => handler.call(this, this._getNewConsoleMessage()));
@@ -328,9 +341,9 @@ ReplayDebuggerScript.prototype = {
     });
   },
 
-  get isGeneratorFunction() { NYI() },
-  get isAsyncFunction() { NYI() },
-  get format() { NYI() },
+  get isGeneratorFunction() { NYI(); },
+  get isAsyncFunction() { NYI(); },
+  get format() { NYI(); },
   getChildScripts: NYI,
   getAllOffsets: NYI,
   getAllColumnOffsets: NYI,
@@ -359,8 +372,8 @@ ReplayDebuggerScriptSource.prototype = {
   get sourceMapURL() { return this._data.sourceMapURL; },
   get element() { return null; },
 
-  get binary() { NYI() },
-  get elementAttributeName() { NYI() },
+  get binary() { NYI(); },
+  get elementAttributeName() { NYI(); },
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -392,8 +405,8 @@ ReplayDebuggerFrame.prototype = {
   get live() { return true; },
 
   eval(text, options) {
-    let rv = this._dbg._sendRequest({ type: "frameEvaluate",
-                                      index: this._data.index, text, options });
+    const rv = this._dbg._sendRequest({ type: "frameEvaluate",
+                                        index: this._data.index, text, options });
     return this._dbg._convertCompletionValue(rv);
   },
 
@@ -440,7 +453,7 @@ ReplayDebuggerFrame.prototype = {
   set onPop(handler) {
     if (handler) {
       this._dbg._setBreakpoint(() => {
-          let result = this._dbg._sendRequest({ type: "popFrameResult" });
+          const result = this._dbg._sendRequest({ type: "popFrameResult" });
           handler.call(this._dbg.getNewestFrame(), this._dbg._convertCompletionValue(result));
         },
         { kind: "OnPop", script: this._data.script, frameIndex: this._data.index },
@@ -458,7 +471,7 @@ ReplayDebuggerFrame.prototype = {
     return this._dbg._getFrame(this._data.index - 1);
   },
 
-  get implementation() { NYI() },
+  get implementation() { NYI(); },
   evalWithBindings: NYI,
 };
 
@@ -523,7 +536,7 @@ ReplayDebuggerObject.prototype = {
 
   _ensureProperties() {
     if (!this._properties) {
-      let properties = this._dbg._sendRequest({
+      const properties = this._dbg._sendRequest({
         type: "getObjectProperties",
         id: this._data.id
       });
@@ -537,14 +550,14 @@ ReplayDebuggerObject.prototype = {
     }
   },
 
-  get allocationSite() { NYI() },
-  get errorMessageName() { NYI() },
-  get errorNotes() { NYI() },
-  get errorLineNumber() { NYI() },
-  get errorColumnNumber() { NYI() },
-  get proxyTarget() { NYI() },
-  get proxyHandler() { NYI() },
-  get isPromise() { NYI() },
+  get allocationSite() { NYI(); },
+  get errorMessageName() { NYI(); },
+  get errorNotes() { NYI(); },
+  get errorLineNumber() { NYI(); },
+  get errorColumnNumber() { NYI(); },
+  get proxyTarget() { NYI(); },
+  get proxyHandler() { NYI(); },
+  get isPromise() { NYI(); },
   call: NYI,
   apply: NYI,
   asEnvironment: NYI,
@@ -585,7 +598,7 @@ ReplayDebuggerEnvironment.prototype = {
 
   _ensureNames() {
     if (!this._names) {
-      let names = this._dbg._sendRequest({ type: "getEnvironmentNames", id: this._data.id });
+      const names = this._dbg._sendRequest({ type: "getEnvironmentNames", id: this._data.id });
       this._names = {};
       names.forEach(({ name, value }) => {
         this._names[name] = this._dbg._convertValue(value);
@@ -627,7 +640,7 @@ function NotAllowed() {
 
 function ThrowError(msg)
 {
-  let error = new Error(msg);
+  const error = new Error(msg);
   dump("ReplayDebugger Server Error: " + msg + " Stack: " + error.stack + "\n");
   throw error;
 }

@@ -588,7 +588,7 @@ WebConsoleActor.prototype =
     }
     // The progress counter on the message is unique across all messages in the
     // replaying process.
-    let progress = msg.executionPoint.progress;
+    const progress = msg.executionPoint.progress;
     if (this.replayingMessages[progress]) {
       return true;
     }
@@ -847,7 +847,7 @@ WebConsoleActor.prototype =
 
     const messages = [];
 
-    let replayingMessages = [];
+    const replayingMessages = [];
     if (this.dbg.replaying) {
       this.dbg.findAllConsoleMessages().forEach((msg) => {
         if (!this.isDuplicateReplayingMessage(msg)) {
@@ -862,7 +862,7 @@ WebConsoleActor.prototype =
         case "ConsoleAPI": {
           replayingMessages.forEach((msg) => {
             if (msg.messageType == "ConsoleAPI") {
-              let message = this.prepareConsoleMessageForRemote(msg);
+              const message = this.prepareConsoleMessageForRemote(msg);
               message._type = type;
               messages.push(message);
             }
@@ -895,7 +895,7 @@ WebConsoleActor.prototype =
         case "PageError": {
           replayingMessages.forEach((msg) => {
             if (msg.messageType == "PageError") {
-              let message = this.preparePageErrorForRemote(msg);
+              const message = this.preparePageErrorForRemote(msg);
               message._type = type;
               messages.push(message);
             }
@@ -1607,7 +1607,7 @@ WebConsoleActor.prototype =
     }
 
     if (msg.messageType == "PageError") {
-      let packet = {
+      const packet = {
         from: this.actorID,
         type: "pageError",
         pageError: this.preparePageErrorForRemote(msg),

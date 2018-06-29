@@ -181,7 +181,7 @@ public:
 
   class Assembler : public recordreplay::Assembler {
   public:
-    Assembler(StableHashTableInfo& aInfo)
+    explicit Assembler(StableHashTableInfo& aInfo)
       : recordreplay::Assembler(aInfo.mCallbackStorage, CallbackStorageCapacity)
     {}
   };

@@ -64,7 +64,12 @@ const { reportException } = require("devtools/shared/DevToolsUtils");
  *              |findDebuggees|) to the |Debugger| instance.
  */
 module.exports = function makeDebugger({ findDebuggees, shouldAddNewGlobalAsDebuggee }) {
-  const dbg = (Debugger.recordReplayProcessKind() == "Middleman") ? new ReplayDebugger() : new Debugger();
+  let dbg;
+  if (Debugger.recordReplayProcessKind() == "Middleman") {
+    dbg = new ReplayDebugger();
+  } else {
+    dbg = new Debugger();
+  }
   EventEmitter.decorate(dbg);
 
   dbg.allowUnobservedAsmJS = true;

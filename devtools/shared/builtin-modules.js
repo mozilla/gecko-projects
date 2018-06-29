@@ -235,7 +235,7 @@ defineLazyGetter(exports.modules, "Debugger", () => {
 
 defineLazyGetter(exports.modules, "RecordReplayControl", () => {
   // addDebuggerToGlobal also adds the RecordReplayControl object.
-  let sandbox = Cu.Sandbox(CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")());
+  const sandbox = Cu.Sandbox(CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")());
   Cu.evalInSandbox(
     "Components.utils.import('resource://gre/modules/jsdebugger.jsm');" +
     "addDebuggerToGlobal(this);",

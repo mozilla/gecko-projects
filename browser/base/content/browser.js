@@ -7309,7 +7309,7 @@ function BeginRecordExecution() {
 
 function SaveRecordedExecution() {
   let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-  let window = gBrowser.ownerDocument.defaultView;
+  let window = gBrowser.ownerGlobal;
   fp.init(window, null, Ci.nsIFilePicker.modeSave);
   fp.open(rv => {
     if (rv == Ci.nsIFilePicker.returnOK || rv == Ci.nsIFilePicker.returnReplace) {
@@ -7323,7 +7323,7 @@ function SaveRecordedExecution() {
 
 function BeginReplayExecution() {
   let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-  let window = gBrowser.ownerDocument.defaultView;
+  let window = gBrowser.ownerGlobal;
   fp.init(window, null, Ci.nsIFilePicker.modeOpen);
   fp.open(rv => {
     if (rv == Ci.nsIFilePicker.returnOK || rv == Ci.nsIFilePicker.returnReplace) {

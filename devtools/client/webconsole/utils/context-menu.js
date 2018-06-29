@@ -13,7 +13,6 @@ const { MESSAGE_SOURCE } = require("devtools/client/webconsole/constants");
 
 const clipboardHelper = require("devtools/shared/platform/clipboard");
 const { l10n } = require("devtools/client/webconsole/utils/messages");
-const { getMessage } = require("devtools/client/webconsole/selectors/messages");
 
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
@@ -189,8 +188,8 @@ function createContextMenu(hud, parentNode, {
       label: l10n.getStr("webconsole.menu.timeWarp.label"),
       disabled: false,
       click: () => {
-        let toolbox = gDevTools.getToolbox(hud.owner.target);
-        let threadClient = toolbox.threadClient;
+        const toolbox = gDevTools.getToolbox(hud.owner.target);
+        const threadClient = toolbox.threadClient;
         threadClient.timeWarp(executionPoint);
       },
     }));

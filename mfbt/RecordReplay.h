@@ -15,6 +15,7 @@
 #include "mozilla/Types.h"
 
 #include <functional>
+#include <stdarg.h>
 
 struct PLDHashTableOps;
 struct JSContext;

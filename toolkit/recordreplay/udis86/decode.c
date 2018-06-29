@@ -346,7 +346,7 @@ decode_a(struct ud* u, struct ud_operand *op)
  * -----------------------------------------------------------------------------
  */
 static int
-decode_gpr(register struct ud* u, unsigned int s, unsigned char rm)
+decode_gpr(struct ud* u, unsigned int s, unsigned char rm)
 {
   switch (s) {
     case 64:
@@ -810,7 +810,7 @@ decode_operands(struct ud* u)
  * -----------------------------------------------------------------------------
  */
 static void
-clear_insn(register struct ud* u)
+clear_insn(struct ud* u)
 {
   u->error     = 0;
   u->pfx_seg   = 0;
