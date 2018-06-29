@@ -10,16 +10,14 @@ from __future__ import absolute_import, print_function, unicode_literals
 from mozilla_version.firefox import FirefoxVersion
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.transforms.beetmover import craft_release_properties as beetmover_craft_release_properties
+from taskgraph.transforms.beetmover import \
+    craft_release_properties as beetmover_craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import validate_schema, Schema
-from taskgraph.util.scriptworker import (get_beetmover_bucket_scope,
-                                         get_beetmover_action_scope,
-                                         get_phase,
+from taskgraph.util.scriptworker import (get_phase,
                                          get_worker_type_for_scope)
-from taskgraph.util.taskcluster import get_artifact_prefix
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
+from voluptuous import Required, Optional
 
 # Only these old checksums format are supported
 # http://maven.apache.org/plugins/maven-install-plugin/examples/installing-checksums.html
@@ -130,9 +128,12 @@ def make_task_worker(config, jobs):
     for job in jobs:
         valid_beetmover_job = len(job['dependencies']) == 1 and 'build' in job['dependencies']
         if not valid_beetmover_job:
-            raise NotImplementedError("Beetmover-geckoview must have a single dependency. Got: {}".format(job['dependencies']))
+            raise NotImplementedError(
+                'Beetmover-geckoview must have a single dependency. Got: {}'.format(
+                    job['dependencies']
+                )
+            )
 
-        platform = job["attributes"]["build_platform"]
         build_task = list(job["dependencies"].keys())[0]
         build_task_ref = "<" + str(build_task) + ">"
 

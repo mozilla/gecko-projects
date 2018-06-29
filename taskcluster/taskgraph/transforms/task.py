@@ -1095,6 +1095,7 @@ def build_beetmover_maven_payload(config, task, task_def):
     del task_def['payload']['releaseProperties']['hashType']
     del task_def['payload']['releaseProperties']['platform']
 
+
 @payload_builder('balrog')
 def build_balrog_payload(config, task, task_def):
     worker = task['worker']
