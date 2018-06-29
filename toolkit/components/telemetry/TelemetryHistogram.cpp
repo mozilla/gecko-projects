@@ -37,14 +37,8 @@ using base::BooleanHistogram;
 using base::CountHistogram;
 using base::FlagHistogram;
 using base::LinearHistogram;
-<<<<<<< working copy
-using mozilla::StaticMutexNotRecorded;
-||||||| base
-using mozilla::StaticMutex;
-=======
 using mozilla::MakeTuple;
-using mozilla::StaticMutex;
->>>>>>> merge rev
+using mozilla::StaticMutexNotRecorded;
 using mozilla::StaticMutexAutoLock;
 using mozilla::Telemetry::HistogramAccumulation;
 using mozilla::Telemetry::KeyedHistogramAccumulation;
@@ -121,7 +115,7 @@ namespace TelemetryIPCAccumulator = mozilla::TelemetryIPCAccumulator;
 // a normal Mutex would show up as a leak in BloatView.  StaticMutex
 // also has the "OffTheBooks" property, so it won't show as a leak
 // in BloatView.
-static StaticMutex gTelemetryHistogramMutex;
+static StaticMutexNotRecorded gTelemetryHistogramMutex;
 
 
 ////////////////////////////////////////////////////////////////////////
@@ -1191,26 +1185,6 @@ internal_GetKeyedHistogramsSnapshot(const StaticMutexAutoLock& aLock,
 //
 // PRIVATE: thread-unsafe helpers for the external interface
 
-<<<<<<< working copy
-// This is a StaticMutex rather than a plain Mutex (1) so that
-// it gets initialised in a thread-safe manner the first time
-// it is used, and (2) because it is never de-initialised, and
-// a normal Mutex would show up as a leak in BloatView.  StaticMutex
-// also has the "OffTheBooks" property, so it won't show as a leak
-// in BloatView.
-static StaticMutexNotRecorded gTelemetryHistogramMutex;
-
-||||||| base
-// This is a StaticMutex rather than a plain Mutex (1) so that
-// it gets initialised in a thread-safe manner the first time
-// it is used, and (2) because it is never de-initialised, and
-// a normal Mutex would show up as a leak in BloatView.  StaticMutex
-// also has the "OffTheBooks" property, so it won't show as a leak
-// in BloatView.
-static StaticMutex gTelemetryHistogramMutex;
-
-=======
->>>>>>> merge rev
 namespace {
 
 bool

@@ -1393,19 +1393,15 @@ ProcessHasSignalHandlers()
         return sHaveSignalHandlers;
     sTriedInstallSignalHandlers = true;
 
-<<<<<<< working copy
-    // Signal handlers are currently disabled when recording or replaying.
-    if (mozilla::recordreplay::IsRecordingOrReplaying())
-        return false;
-
-||||||| base
-=======
 #if defined (JS_CODEGEN_NONE)
     // If there is no JIT, then there should be no Wasm signal handlers.
     return false;
 #endif
 
->>>>>>> merge rev
+    // Signal handlers are currently disabled when recording or replaying.
+    if (mozilla::recordreplay::IsRecordingOrReplaying())
+        return false;
+
 #if defined(ANDROID) && defined(MOZ_LINKER)
     // Signal handling is broken on some android systems.
     if (IsSignalHandlingBroken())

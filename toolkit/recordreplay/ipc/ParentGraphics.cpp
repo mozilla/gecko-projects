@@ -296,7 +296,7 @@ UpdateBrowserGraphics(dom::TabChild* aBrowser, const PaintMessage& aMsg)
                               now,
                               TimeStamp());
   TRY(LTC->SendUpdate(txn));
-  TRY(aBrowser->SendForcePaintNoOp(aBrowser->LayerObserverEpoch()));
+  TRY(aBrowser->SendPaintWhileInterruptingJSNoOp(aBrowser->LayerObserverEpoch()));
 
   if (layersInfo->mDestroyAction) {
     layersInfo->mDestroyAction();

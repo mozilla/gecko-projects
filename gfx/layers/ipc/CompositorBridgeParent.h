@@ -171,18 +171,10 @@ public:
     return false;
   }
 
-<<<<<<< working copy
-  virtual void NotifyWebRenderError(wr::WebRenderError aError) {}
-
   virtual void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr) {
     MOZ_CRASH();
   }
 
-||||||| base
-  virtual void NotifyWebRenderError(wr::WebRenderError aError) {}
-
-=======
->>>>>>> merge rev
 protected:
   ~CompositorBridgeParentBase() override;
 

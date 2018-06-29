@@ -1749,7 +1749,6 @@ IonBuilder::visitLoopEntry(CFGLoopEntry* loopEntry)
     setCurrent(header);
     pc = header->pc();
 
-<<<<<<< working copy
     return Ok();
 }
 
@@ -1760,29 +1759,8 @@ IonBuilder::jsop_loopentry()
 
     MInterruptCheck* check = MInterruptCheck::New(alloc());
     current->add(check);
-||||||| base
-    initLoopEntry();
-    return Ok();
-}
-
-bool
-IonBuilder::initLoopEntry()
-{
-    current->add(MInterruptCheck::New(alloc()));
-=======
-    return Ok();
-}
-
-AbortReasonOr<Ok>
-IonBuilder::jsop_loopentry()
-{
-    MOZ_ASSERT(*pc == JSOP_LOOPENTRY);
-
-    current->add(MInterruptCheck::New(alloc()));
->>>>>>> merge rev
     insertRecompileCheck();
 
-<<<<<<< working copy
     if (script()->trackRecordReplayProgress()) {
         check->setTrackRecordReplayProgress();
 
@@ -1792,11 +1770,6 @@ IonBuilder::jsop_loopentry()
     }
 
     return Ok();
-||||||| base
-    return true;
-=======
-    return Ok();
->>>>>>> merge rev
 }
 
 AbortReasonOr<Ok>
@@ -2420,19 +2393,12 @@ IonBuilder::inspectOpcode(JSOp op)
         return Ok();
       }
 
-<<<<<<< working copy
-      case JSOP_LOOPENTRY:
-        return jsop_loopentry();
-
-||||||| base
-=======
       case JSOP_IMPORTMETA:
         return jsop_importmeta();
 
       case JSOP_LOOPENTRY:
         return jsop_loopentry();
 
->>>>>>> merge rev
       // ===== NOT Yet Implemented =====
       // Read below!
 

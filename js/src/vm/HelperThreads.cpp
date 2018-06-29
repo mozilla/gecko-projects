@@ -1579,15 +1579,7 @@ js::GCParallelTask::runFromHelperThread(AutoLockHelperThreadState& lock)
 
     {
         AutoUnlockHelperThreadState parallelSection(lock);
-<<<<<<< working copy
         TimeStamp timeStart = ReallyNow();
-        TlsContext.get()->heapState = JS::HeapState::MajorCollecting;
-||||||| base
-        TimeStamp timeStart = TimeStamp::Now();
-        TlsContext.get()->heapState = JS::HeapState::MajorCollecting;
-=======
-        TimeStamp timeStart = TimeStamp::Now();
->>>>>>> merge rev
         runTask();
         duration_ = TimeSince(timeStart);
     }
@@ -1871,7 +1863,7 @@ HelperThread::destroy()
 void
 HelperThread::ensureRegisteredWithProfiler()
 {
-    if (registered)
+    if (registered || mozilla::recordreplay::IsRecordingOrReplaying())
         return;
 
     JS::RegisterThreadCallback callback = HelperThreadState().registerThread;
@@ -2312,27 +2304,6 @@ GlobalHelperThreadState::trace(JSTracer* trc)
         parseTask->trace(trc);
 }
 
-void
-<<<<<<< working copy
-HelperThread::handleGCHelperWorkload(AutoLockHelperThreadState& locked)
-{
-    MOZ_ASSERT(HelperThreadState().canStartGCHelperTask(locked));
-    MOZ_ASSERT(idle());
-
-    currentTask.emplace(HelperThreadState().gcHelperWorklist(locked).popCopy());
-    GCHelperState* task = gcHelperTask();
-
-    AutoSetContextRuntime ascr(task->runtime());
-
-    {
-        AutoUnlockHelperThreadState unlock(locked);
-        task->work();
-    }
-
-    currentTask.reset();
-    HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, locked);
-}
-
 /* static */ void
 HelperThread::WakeupAll()
 {
@@ -2341,29 +2312,6 @@ HelperThread::WakeupAll()
 }
 
 void
-||||||| base
-HelperThread::handleGCHelperWorkload(AutoLockHelperThreadState& locked)
-{
-    MOZ_ASSERT(HelperThreadState().canStartGCHelperTask(locked));
-    MOZ_ASSERT(idle());
-
-    currentTask.emplace(HelperThreadState().gcHelperWorklist(locked).popCopy());
-    GCHelperState* task = gcHelperTask();
-
-    AutoSetContextRuntime ascr(task->runtime());
-
-    {
-        AutoUnlockHelperThreadState unlock(locked);
-        task->work();
-    }
-
-    currentTask.reset();
-    HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, locked);
-}
-
-void
-=======
->>>>>>> merge rev
 JSContext::setHelperThread(HelperThread* thread)
 {
     if (helperThread_)

@@ -41,7 +41,7 @@ ChildProcessInfo::ChildProcessInfo(UniquePtr<ChildRole> aRole, bool aRecording)
   , mLastCheckpoint(CheckpointId::Invalid)
   , mNumRecoveredMessages(0)
   , mNumRestarts(0)
-  , mRole(Move(aRole))
+  , mRole(std::move(aRole))
   , mPauseNeeded(false)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -187,7 +187,7 @@ ChildProcessInfo::SetRole(UniquePtr<ChildRole> aRole)
 
   PrintSpew("SetRole:%d %s\n", (int) GetId(), ChildRole::TypeString(aRole->GetType()));
 
-  mRole = Move(aRole);
+  mRole = std::move(aRole);
   mRole->SetProcess(this);
   mRole->Initialize();
 }
@@ -259,7 +259,7 @@ ChildProcessInfo::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
         free(msg);
       }
     }
-    mMessages = Move(newMessages);
+    mMessages = std::move(newMessages);
   }
 
   // The primordial HitCheckpoint messages is not forwarded to the role, as it

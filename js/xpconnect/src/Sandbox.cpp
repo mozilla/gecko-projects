@@ -1129,23 +1129,8 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     {
         JSAutoRealm ar(cx, sandbox);
 
-<<<<<<< working copy
-        nsCOMPtr<nsIScriptObjectPrincipal> sbp =
-            new SandboxPrivate(principal, sandbox);
-
-        // Pass on ownership of sbp to |sandbox|.
-        RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, sbp);
-        JS_SetPrivate(sandbox, sbp.forget().take());
-||||||| base
-        nsCOMPtr<nsIScriptObjectPrincipal> sbp =
-            new SandboxPrivate(principal, sandbox);
-
-        // Pass on ownership of sbp to |sandbox|.
-        JS_SetPrivate(sandbox, sbp.forget().take());
-=======
         // This creates a SandboxPrivate and passes ownership of it to |sandbox|.
         SandboxPrivate::Create(principal, sandbox);
->>>>>>> merge rev
 
         // Ensure |Object.prototype| is instantiated before prototype-
         // splicing below.

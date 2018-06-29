@@ -185,7 +185,7 @@
     </broadcaster>
     <broadcaster id="reportPhishingBroadcaster" disabled="true"/>
     <broadcaster id="reportPhishingErrorBroadcaster" disabled="true"/>
-<<<<<<< working copy
+    <broadcaster id="trackingProtectionBroadcaster" enabled="false"/>
     <broadcaster id="devtoolsMenuBroadcaster_RecordExecution"
                  label="&devtoolsRecordExecution.label;"
                  command="Tools:RecordExecution"/>
@@ -195,10 +195,6 @@
     <broadcaster id="devtoolsMenuBroadcaster_ReplayExecution"
                  label="&devtoolsReplayExecution.label;"
                  command="Tools:ReplayExecution"/>
-||||||| base
-=======
-    <broadcaster id="trackingProtectionBroadcaster" enabled="false"/>
->>>>>>> merge rev
   </broadcasterset>
 
   <keyset id="mainKeyset">

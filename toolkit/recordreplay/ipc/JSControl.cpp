@@ -174,7 +174,7 @@ InvalidateReplayDebuggersAfterUnpause(JSContext* aCx)
 {
   RootedValue rval(aCx);
   for (auto root : gReplayDebuggers) {
-    JSAutoCompartment ac(aCx, *root);
+    JSAutoRealm ac(aCx, *root);
     if (!JS_CallFunctionName(aCx, *root, "invalidateAfterUnpause",
                              HandleValueArray::empty(), &rval))
     {
@@ -314,7 +314,7 @@ HitBreakpoint(JSContext* aCx, size_t aId)
   InstalledBreakpoint* breakpoint = gBreakpoints[aId];
   MOZ_RELEASE_ASSERT(breakpoint);
 
-  JSAutoCompartment ac(aCx, breakpoint->mHandler);
+  JSAutoRealm ac(aCx, breakpoint->mHandler);
 
   RootedValue handlerValue(aCx, ObjectValue(*breakpoint->mHandler));
   RootedValue rval(aCx);
@@ -380,7 +380,7 @@ SetupDevtoolsSandbox()
   gDevtoolsSandbox = new PersistentRootedObject(cx);
   *gDevtoolsSandbox = ::js::UncheckedUnwrap(&v.toObject());
 
-  JSAutoCompartment ac(cx, *gDevtoolsSandbox);
+  JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
   ErrorResult er;
   dom::GlobalObject global(cx, *gDevtoolsSandbox);
@@ -407,7 +407,7 @@ ProcessRequest(const char16_t* aRequest, size_t aRequestLength, CharBuffer* aRes
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoCompartment ac(cx, *gDevtoolsSandbox);
+  JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
   RootedValue requestValue(cx);
   if (!JS_ParseJSON(cx, aRequest, aRequestLength, &requestValue)) {
@@ -440,7 +440,7 @@ EnsurePositionHandler(const ExecutionPosition& aPosition)
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoCompartment ac(cx, *gDevtoolsSandbox);
+  JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
   RootedObject obj(cx, EncodeExecutionPosition(cx, aPosition));
   if (!obj) {
@@ -460,7 +460,7 @@ ClearPositionHandlers()
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoCompartment ac(cx, *gDevtoolsSandbox);
+  JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
   RootedValue rval(cx);
   if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ClearPositionHandlers",
@@ -474,7 +474,7 @@ ClearPausedState()
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoCompartment ac(cx, *gDevtoolsSandbox);
+  JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
   RootedValue rval(cx);
   if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ClearPausedState",
@@ -488,7 +488,7 @@ GetEntryPosition(const ExecutionPosition& aPosition)
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoCompartment ac(cx, *gDevtoolsSandbox);
+  JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
   RootedObject positionObject(cx, EncodeExecutionPosition(cx, aPosition));
   if (!positionObject) {

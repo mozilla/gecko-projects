@@ -11,12 +11,8 @@ DIRS += [
     'highlighters',
     'inspector',
     'object',
-<<<<<<< working copy
     'replay',
-||||||| base
-=======
     'targets',
->>>>>>> merge rev
     'utils',
     'webconsole',
     'worker',

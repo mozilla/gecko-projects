@@ -91,7 +91,7 @@ ReplayDebugger.prototype = {
   // This is called on all ReplayDebuggers whenever the child process is about
   // to unpause. Clear out all data that is invalidated as a result.
   invalidateAfterUnpause() {
-    this._frames.forEach(frame => frame._invalidate());
+    this._frames.forEach(frame => { if (frame) frame._invalidate() });
     this._frames.length = 0;
 
     this._objects.forEach(obj => obj._invalidate());
@@ -103,12 +103,14 @@ ReplayDebugger.prototype = {
   /////////////////////////////////////////////////////////
 
   _getScript(id) {
-    if (id) {
-      let rv = this._scripts[id];
-      assert(rv);
+    if (!id) {
+      return null;
+    }
+    let rv = this._scripts[id];
+    if (rv) {
       return rv;
     }
-    return null;
+    return this._addScript(this._sendRequest({ type: "getScript", id }));
   },
 
   _addScript(data) {

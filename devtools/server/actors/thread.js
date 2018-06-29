@@ -283,15 +283,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
 
       // Put ourselves in the paused state.
-<<<<<<< working copy
       if (!this._pauseAndRespond(null, { type: "attached" })) {
-||||||| base
-      let packet = this._paused();
-      if (!packet) {
-=======
-      const packet = this._paused();
-      if (!packet) {
->>>>>>> merge rev
         return { error: "notAttached" };
       }
 
@@ -379,9 +371,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
       packet.why = reason;
 
-<<<<<<< working copy
       if (frame) {
-        let generatedLocation = this.sources.getFrameLocation(frame);
+        const generatedLocation = this.sources.getFrameLocation(frame);
         this.sources.getOriginalLocation(generatedLocation).then((originalLocation) => {
           if (!originalLocation.originalSourceActor) {
             // The only time the source actor will be null is if there
@@ -395,37 +386,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
             );
             return undefined;
           }
-||||||| base
-      let generatedLocation = this.sources.getFrameLocation(frame);
-      this.sources.getOriginalLocation(generatedLocation).then((originalLocation) => {
-        if (!originalLocation.originalSourceActor) {
-          // The only time the source actor will be null is if there
-          // was a sourcemap and it tried to look up the original
-          // location but there was no original URL. This is a strange
-          // scenario so we simply don't pause.
-          DevToolsUtils.reportException(
-            "ThreadActor",
-            new Error("Attempted to pause in a script with a sourcemap but " +
-                      "could not find original location.")
-          );
-          return undefined;
-        }
-=======
-      const generatedLocation = this.sources.getFrameLocation(frame);
-      this.sources.getOriginalLocation(generatedLocation).then((originalLocation) => {
-        if (!originalLocation.originalSourceActor) {
-          // The only time the source actor will be null is if there
-          // was a sourcemap and it tried to look up the original
-          // location but there was no original URL. This is a strange
-          // scenario so we simply don't pause.
-          DevToolsUtils.reportException(
-            "ThreadActor",
-            new Error("Attempted to pause in a script with a sourcemap but " +
-                      "could not find original location.")
-          );
-          return undefined;
-        }
->>>>>>> merge rev
 
           packet.frame.where = {
             source: originalLocation.originalSourceActor.form(),
@@ -679,17 +639,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    *          rejected with an error packet.
    */
   _handleResumeLimit: async function(request) {
-<<<<<<< working copy
-    let steppingType = request.resumeLimit.type;
-    let rewinding = request.rewind;
-    if (!["break", "step", "next", "finish", "warp"].includes(steppingType)) {
-||||||| base
-    let steppingType = request.resumeLimit.type;
-    if (!["break", "step", "next", "finish"].includes(steppingType)) {
-=======
     const steppingType = request.resumeLimit.type;
-    if (!["break", "step", "next", "finish"].includes(steppingType)) {
->>>>>>> merge rev
+    const rewinding = request.rewind;
+    if (!["break", "step", "next", "finish", "warp"].includes(steppingType)) {
       return Promise.reject({
         error: "badParameterType",
         message: "Unknown resumeLimit type"
@@ -709,17 +661,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       rewinding
     );
 
-<<<<<<< working copy
     // Make sure there is still a frame on the stack if we are to continue
     // stepping.
-    let stepFrame = this._getNextStepFrame(this.youngestFrame, rewinding);
-||||||| base
-    // Make sure there is still a frame on the stack if we are to continue stepping.
-    let stepFrame = this._getNextStepFrame(this.youngestFrame);
-=======
-    // Make sure there is still a frame on the stack if we are to continue stepping.
-    const stepFrame = this._getNextStepFrame(this.youngestFrame);
->>>>>>> merge rev
+    const stepFrame = this._getNextStepFrame(this.youngestFrame, rewinding);
     if (stepFrame) {
       switch (steppingType) {
       case "step":
@@ -853,7 +797,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         this._maybeListenToEvents(request);
       }
 
-<<<<<<< working copy
       // When replaying execution in a separate process we need to explicitly
       // notify that process when to resume execution.
       if (this.dbg.replaying) {
@@ -865,12 +808,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
           this.dbg.replayResumeForward();
       }
 
-      let packet = this._resumed();
-||||||| base
-      let packet = this._resumed();
-=======
       const packet = this._resumed();
->>>>>>> merge rev
       this._popThreadPause();
       // Tell anyone who cares of the resume (as of now, that's the xpcshell harness and
       // devtools-startup.js when handling the --wait-for-jsdebugger flag)
@@ -1219,16 +1157,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     try {
       // If execution should pause just before the next JavaScript bytecode is
       // executed, just set an onEnterFrame handler.
-<<<<<<< working copy
       if (request.when == "onNext" && !this.dbg.replaying) {
-        let onEnterFrame = (frame) => {
-||||||| base
-      if (request.when == "onNext") {
-        let onEnterFrame = (frame) => {
-=======
-      if (request.when == "onNext") {
         const onEnterFrame = (frame) => {
->>>>>>> merge rev
           return this._pauseAndRespond(frame, { type: "interrupted", onNext: true });
         };
         this.dbg.onEnterFrame = onEnterFrame;
@@ -1242,19 +1172,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
       // If execution should pause immediately, just put ourselves in the paused
       // state.
-<<<<<<< working copy
       //
       // onNext is set while replaying so that the client will treat us as paused
       // at a breakpoint. When replaying we may need to pause and interact with
       // the server even if there are no frames on the stack.
       if (!this._pauseAndRespond(null, { type: "interrupted", onNext: this.dbg.replaying })) {
-||||||| base
-      let packet = this._paused();
-      if (!packet) {
-=======
-      const packet = this._paused();
-      if (!packet) {
->>>>>>> merge rev
         return { error: "notInterrupted" };
       }
 
@@ -1849,17 +1771,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     } else {
       sourceActor = this.sources.createNonSourceMappedActor(source);
     }
-<<<<<<< working copy
-    let bpActors = [...this.breakpointActorMap.findActors()];
-||||||| base
-
-    let sourceActor = this.sources.createNonSourceMappedActor(source);
-    let bpActors = [...this.breakpointActorMap.findActors()];
-=======
-
-    const sourceActor = this.sources.createNonSourceMappedActor(source);
     const bpActors = [...this.breakpointActorMap.findActors()];
->>>>>>> merge rev
 
     if (this._options.useSourceMaps) {
       const promises = [];

@@ -165,7 +165,7 @@ protected:
   static T* NewWithData(size_t aBufferSize, Args&&... aArgs) {
     size_t size = sizeof(T) + aBufferSize * sizeof(Elem);
     void* ptr = malloc(size);
-    return new(ptr) T(size, Forward<Args>(aArgs)...);
+    return new(ptr) T(size, std::forward<Args>(aArgs)...);
   }
 };
 

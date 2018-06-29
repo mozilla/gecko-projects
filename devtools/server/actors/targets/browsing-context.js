@@ -29,20 +29,10 @@ var {
 var { DebuggerServer } = require("devtools/server/main");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { assert } = DevToolsUtils;
-<<<<<<< working copy
-var { TabSources } = require("./utils/TabSources");
-var makeDebugger = require("./utils/make-debugger");
-const Debugger = require("Debugger");
-const ReplayDebugger = require("./replay/debugger");
-const EventEmitter = require("devtools/shared/event-emitter");
-||||||| base
-var { TabSources } = require("./utils/TabSources");
-var makeDebugger = require("./utils/make-debugger");
-const EventEmitter = require("devtools/shared/event-emitter");
-=======
 var { TabSources } = require("devtools/server/actors/utils/TabSources");
 var makeDebugger = require("devtools/server/actors/utils/make-debugger");
->>>>>>> merge rev
+const Debugger = require("Debugger");
+const ReplayDebugger = require("devtools/server/actors/replay/debugger");
 const InspectorUtils = require("InspectorUtils");
 
 const EXTENSION_CONTENT_JSM = "resource://gre/modules/ExtensionContent.jsm";
@@ -248,43 +238,15 @@ const browsingContextTargetPrototype = {
       shouldAddNewGlobalAsDebuggee: this._shouldAddNewGlobalAsDebuggee
     });
 
-<<<<<<< working copy
-  let canRewind = false;
-  if (Debugger.recordReplayProcessKind() == "Middleman") {
-    let replayDebugger = new ReplayDebugger();
-    canRewind = replayDebugger.canRewind();
-  }
-
-  this.traits = {
-    reconfigure: true,
-    // Supports frame listing via `listFrames` request and `frameUpdate` events
-    // as well as frame switching via `switchToFrame` request
-    frames: true,
-    // Do not require to send reconfigure request to reset the document state
-    // to what it was before using the TabActor
-    noTabReconfigureOnClose: true,
-    // Supports the logInPage request.
-    logInPage: true,
-    // Supports requests related to rewinding.
-    canRewind,
-  };
-||||||| base
-  this.traits = {
-    reconfigure: true,
-    // Supports frame listing via `listFrames` request and `frameUpdate` events
-    // as well as frame switching via `switchToFrame` request
-    frames: true,
-    // Do not require to send reconfigure request to reset the document state
-    // to what it was before using the TabActor
-    noTabReconfigureOnClose: true,
-    // Supports the logInPage request.
-    logInPage: true,
-  };
-=======
     // Flag eventually overloaded by sub classes in order to watch new docshells
     // Used by the ParentProcessTargetActor to list all frames in the Browser Toolbox
     this.listenForNewDocShells = false;
->>>>>>> merge rev
+
+    let canRewind = false;
+    if (Debugger.recordReplayProcessKind() == "Middleman") {
+      let replayDebugger = new ReplayDebugger();
+      canRewind = replayDebugger.canRewind();
+    }
 
     this.traits = {
       reconfigure: true,
@@ -296,6 +258,8 @@ const browsingContextTargetPrototype = {
       noTabReconfigureOnClose: true,
       // Supports the logInPage request.
       logInPage: true,
+      // Supports requests related to rewinding.
+      canRewind,
     };
 
     this._workerTargetActorList = null;

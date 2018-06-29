@@ -56,7 +56,7 @@ public:
   }
 
   template<typename U> void append(U&& aU) {
-    if (!Vector().append(Forward<U>(aU))) {
+    if (!Vector().append(std::forward<U>(aU))) {
       MOZ_CRASH();
     }
   }
@@ -74,17 +74,17 @@ public:
   }
 
   template<typename... Args> void emplaceBack(Args&&... aArgs) {
-    if (!Vector().emplaceBack(Forward<Args>(aArgs)...)) {
+    if (!Vector().emplaceBack(std::forward<Args>(aArgs)...)) {
       MOZ_CRASH();
     }
   }
 
   template<typename... Args> void infallibleEmplaceBack(Args&&... aArgs) {
-    Vector().infallibleEmplaceBack(Forward<Args>(aArgs)...);
+    Vector().infallibleEmplaceBack(std::forward<Args>(aArgs)...);
   }
 
   template<typename U> void insert(T* aP, U&& aVal) {
-    if (!Vector().insert(aP, Forward<U>(aVal))) {
+    if (!Vector().insert(aP, std::forward<U>(aVal))) {
       MOZ_CRASH();
     }
   }

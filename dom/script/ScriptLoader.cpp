@@ -2342,31 +2342,6 @@ ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest)
             } else {
               // Main thread parsing (inline and small scripts)
               LOG(("ScriptLoadRequest (%p): Compile And Exec", aRequest));
-<<<<<<< working copy
-              nsAutoString inlineData;
-              SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
-
-              if (recordreplay::IsRecordingOrReplaying()) {
-                recordreplay::NoteContentParse(this, options.filename(), "application/javascript",
-                                               srcBuf.get(), srcBuf.length());
-              }
-
-              rv = exec.CompileAndExec(options, srcBuf, &script);
-              if (start) {
-                AccumulateTimeDelta(encodeBytecode
-                                    ? DOM_SCRIPT_MAIN_THREAD_PARSE_ENCODE_EXEC_MS
-                                    : DOM_SCRIPT_MAIN_THREAD_PARSE_EXEC_MS,
-                                    start);
-||||||| base
-              nsAutoString inlineData;
-              SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
-              rv = exec.CompileAndExec(options, srcBuf, &script);
-              if (start) {
-                AccumulateTimeDelta(encodeBytecode
-                                    ? DOM_SCRIPT_MAIN_THREAD_PARSE_ENCODE_EXEC_MS
-                                    : DOM_SCRIPT_MAIN_THREAD_PARSE_EXEC_MS,
-                                    start);
-=======
               if (aRequest->IsBinASTSource()) {
                 rv = exec.DecodeBinASTAndExec(options,
                                               aRequest->ScriptBinASTData().begin(),
@@ -2376,8 +2351,13 @@ ScriptLoader::EvaluateScript(ScriptLoadRequest* aRequest)
                 MOZ_ASSERT(aRequest->IsTextSource());
                 nsAutoString inlineData;
                 SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
+
+                if (recordreplay::IsRecordingOrReplaying()) {
+                  recordreplay::NoteContentParse(this, options.filename(), "application/javascript",
+                                                 srcBuf.get(), srcBuf.length());
+                }
+
                 rv = exec.CompileAndExec(options, srcBuf, &script);
->>>>>>> merge rev
               }
             }
           }

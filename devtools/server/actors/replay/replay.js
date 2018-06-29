@@ -442,6 +442,10 @@ let gRequestHandlers = {
     return rv;
   },
 
+  getScript(request) {
+    return getScriptData(request.id);
+  },
+
   getNewScript(request) {
     return getScriptData(gScripts.lastId());
   },

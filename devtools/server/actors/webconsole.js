@@ -1380,8 +1380,7 @@ WebConsoleActor.prototype =
     // (One Debugger will treat a different Debugger's Debugger.Object instances
     // as ordinary objects, not as references to be followed, so mixing
     // debuggers causes strange behaviors.)
-<<<<<<< working copy
-    let dbg = frame ? frameActor.threadActor.dbg : this.dbg;
+    const dbg = frame ? frameActor.threadActor.dbg : this.dbg;
 
     // If the debugger is replaying then we can't yet introduce new bindings
     // for the eval, so compute the result now.
@@ -1405,11 +1404,6 @@ WebConsoleActor.prototype =
       };
     }
 
-||||||| base
-    let dbg = frame ? frameActor.threadActor.dbg : this.dbg;
-=======
-    const dbg = frame ? frameActor.threadActor.dbg : this.dbg;
->>>>>>> merge rev
     let dbgWindow = dbg.makeGlobalObjectReference(this.evalWindow);
 
     // If we have an object to bind to |_self|, create a Debugger.Object

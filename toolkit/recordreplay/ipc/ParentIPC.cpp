@@ -567,7 +567,7 @@ SpawnReplayingChildren()
     firstRole = MakeUnique<ChildRoleActive>();
   }
   gFirstReplayingChild =
-    new ChildProcessInfo(Move(firstRole), /* aRecording = */ false);
+    new ChildProcessInfo(std::move(firstRole), /* aRecording = */ false);
   gSecondReplayingChild =
     new ChildProcessInfo(MakeUnique<ChildRoleStandby>(), /* aRecording = */ false);
   AssignMajorCheckpoint(gSecondReplayingChild, CheckpointId::First);

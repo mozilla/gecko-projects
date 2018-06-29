@@ -128,19 +128,11 @@ class HangMonitorChild
  private:
   void ShutdownOnThread();
 
-<<<<<<< working copy
   // Ordering of this atomic is not preserved while recording/replaying, as it
   // may be accessed during the JS interrupt callback.
   static Atomic<HangMonitorChild*, SequentiallyConsistent,
                 recordreplay::Behavior::DontPreserve> sInstance;
-  UniquePtr<BackgroundHangMonitor> mForcePaintMonitor;
-||||||| base
-  static Atomic<HangMonitorChild*> sInstance;
-  UniquePtr<BackgroundHangMonitor> mForcePaintMonitor;
-=======
-  static Atomic<HangMonitorChild*> sInstance;
   UniquePtr<BackgroundHangMonitor> mPaintWhileInterruptingJSMonitor;
->>>>>>> merge rev
 
   const RefPtr<ProcessHangMonitor> mHangMonitor;
   Monitor mMonitor;
@@ -358,18 +350,10 @@ HangMonitorChild::InterruptCallback()
     mPaintWhileInterruptingJS = false;
   }
 
-<<<<<<< working copy
   // Don't paint from the interrupt callback when recording or replaying, as
   // the interrupt callback is triggered non-deterministically.
-  if (forcePaint && !recordreplay::IsRecordingOrReplaying()) {
-    RefPtr<TabChild> tabChild = TabChild::FindTabChild(forcePaintTab);
-||||||| base
-  if (forcePaint) {
-    RefPtr<TabChild> tabChild = TabChild::FindTabChild(forcePaintTab);
-=======
-  if (paintWhileInterruptingJS) {
+  if (paintWhileInterruptingJS && !recordreplay::IsRecordingOrReplaying()) {
     RefPtr<TabChild> tabChild = TabChild::FindTabChild(paintWhileInterruptingJSTab);
->>>>>>> merge rev
     if (tabChild) {
       js::AutoAssertNoContentJS nojs(mContext);
       tabChild->PaintWhileInterruptingJS(paintWhileInterruptingJSEpoch,

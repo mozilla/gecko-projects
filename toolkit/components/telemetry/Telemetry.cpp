@@ -194,20 +194,8 @@ private:
   AutoHashtable<SlowSQLEntryType> mPrivateSQL;
   AutoHashtable<SlowSQLEntryType> mSanitizedSQL;
   Mutex mHashMutex;
-<<<<<<< working copy
-  HangReports mHangReports;
-  Mutex mHangReportsMutex;
   Atomic<bool, SequentiallyConsistent, recordreplay::Behavior::DontPreserve> mCanRecordBase;
   Atomic<bool, SequentiallyConsistent, recordreplay::Behavior::DontPreserve> mCanRecordExtended;
-||||||| base
-  HangReports mHangReports;
-  Mutex mHangReportsMutex;
-  Atomic<bool> mCanRecordBase;
-  Atomic<bool> mCanRecordExtended;
-=======
-  Atomic<bool> mCanRecordBase;
-  Atomic<bool> mCanRecordExtended;
->>>>>>> merge rev
 
 #if defined(MOZ_GECKO_PROFILER)
   // Stores data about stacks captured on demand.

@@ -414,15 +414,11 @@ struct HelperThread
     static void ThreadMain(void* arg);
     void threadLoop();
 
-<<<<<<< working copy
     static void WakeupAll();
 
-||||||| base
-=======
     void ensureRegisteredWithProfiler();
     void unregisterWithProfilerIfNeeded();
 
->>>>>>> merge rev
   private:
     struct TaskSpec
     {

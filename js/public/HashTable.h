@@ -1318,16 +1318,8 @@ class HashTable : private AllocPolicy
     {
         Entry* end = oldTable + capacity;
         for (Entry* e = oldTable; e < end; ++e)
-<<<<<<< working copy
-            e->destroyIfLive();
-        alloc.template free_(oldTable, capacity);
-||||||| base
-            e->destroyIfLive();
-        alloc.free_(oldTable);
-=======
             e->~Entry();
-        alloc.free_(oldTable);
->>>>>>> merge rev
+        alloc.template free_(oldTable, capacity);
     }
 
   public:

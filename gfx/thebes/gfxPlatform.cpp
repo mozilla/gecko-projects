@@ -1061,18 +1061,10 @@ gfxPlatform::InitLayersIPC()
     if (gfxVars::UseOMTP() && !recordreplay::IsRecordingOrReplaying()) {
       layers::PaintThread::Start();
     }
-<<<<<<< working copy
   }
 
   if (XRE_IsParentProcess() || recordreplay::IsRecordingOrReplaying()) {
-    if (gfxVars::UseWebRender()) {
-||||||| base
-  } else if (XRE_IsParentProcess()) {
-    if (gfxVars::UseWebRender()) {
-=======
-  } else if (XRE_IsParentProcess()) {
     if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS) && gfxVars::UseWebRender()) {
->>>>>>> merge rev
       wr::RenderThread::Start();
     }
 

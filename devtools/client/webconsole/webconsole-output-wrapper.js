@@ -144,16 +144,10 @@ WebConsoleOutputWrapper.prototype = {
           store.dispatch(actions.showObjectInSidebar(rootActorId, messageId));
         } : null;
 
-<<<<<<< working copy
         let messageData = getMessage(store.getState(), message.messageId);
         let executionPoint = messageData.executionPoint;
 
-        let menu = createContextMenu(this.hud, this.parentNode, {
-||||||| base
-        let menu = createContextMenu(this.hud, this.parentNode, {
-=======
         const menu = createContextMenu(this.hud, this.parentNode, {
->>>>>>> merge rev
           actor,
           clipboardText,
           variableText,

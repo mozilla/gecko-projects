@@ -130,20 +130,10 @@ class ProfilingStackFrame
     // See the "Concurrency considerations" paragraph at the top of this file
     // for more details.
 
-<<<<<<< working copy
-    // Descriptive label for this entry. Must be a static string! Can be an
-    // empty string, but not a null pointer.
-    mozilla::Atomic<const char*, mozilla::ReleaseAcquire,
-                    mozilla::recordreplay::Behavior::DontPreserve> label_;
-||||||| base
-    // Descriptive label for this entry. Must be a static string! Can be an
-    // empty string, but not a null pointer.
-    mozilla::Atomic<const char*, mozilla::ReleaseAcquire> label_;
-=======
     // Descriptive label for this stack frame. Must be a static string! Can be
     // an empty string, but not a null pointer.
-    mozilla::Atomic<const char*, mozilla::ReleaseAcquire> label_;
->>>>>>> merge rev
+    mozilla::Atomic<const char*, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve> label_;
 
     // An additional descriptive string of this frame which is combined with
     // |label_| in profiler output. Need not be (and usually isn't) static. Can
@@ -151,43 +141,17 @@ class ProfilingStackFrame
     mozilla::Atomic<const char*, mozilla::ReleaseAcquire,
                     mozilla::recordreplay::Behavior::DontPreserve> dynamicString_;
 
-<<<<<<< working copy
-    // Stack pointer for non-JS entries, the script pointer otherwise.
+    // Stack pointer for non-JS stack frames, the script pointer otherwise.
     mozilla::Atomic<void*, mozilla::ReleaseAcquire,
                     mozilla::recordreplay::Behavior::DontPreserve> spOrScript;
-||||||| base
-    // Stack pointer for non-JS entries, the script pointer otherwise.
-    mozilla::Atomic<void*, mozilla::ReleaseAcquire> spOrScript;
-=======
-    // Stack pointer for non-JS stack frames, the script pointer otherwise.
-    mozilla::Atomic<void*, mozilla::ReleaseAcquire> spOrScript;
->>>>>>> merge rev
 
-<<<<<<< working copy
-    // Line number for non-JS entries, the bytecode offset otherwise.
+    // Line number for non-JS stack frames, the bytecode offset otherwise.
     mozilla::Atomic<int32_t, mozilla::ReleaseAcquire,
                     mozilla::recordreplay::Behavior::DontPreserve> lineOrPcOffset;
-||||||| base
-    // Line number for non-JS entries, the bytecode offset otherwise.
-    mozilla::Atomic<int32_t, mozilla::ReleaseAcquire> lineOrPcOffset;
-=======
-    // Line number for non-JS stack frames, the bytecode offset otherwise.
-    mozilla::Atomic<int32_t, mozilla::ReleaseAcquire> lineOrPcOffset;
->>>>>>> merge rev
 
-<<<<<<< working copy
-    // Bits 0...1 hold the Kind. Bits 2...3 are unused. Bits 4...12 hold the
-    // Category.
+    // Bits 0...1 hold the Kind. Bits 2...31 hold the category.
     mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
                     mozilla::recordreplay::Behavior::DontPreserve> kindAndCategory_;
-||||||| base
-    // Bits 0...1 hold the Kind. Bits 2...3 are unused. Bits 4...12 hold the
-    // Category.
-    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> kindAndCategory_;
-=======
-    // Bits 0...1 hold the Kind. Bits 2...31 hold the category.
-    mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire> kindAndCategory_;
->>>>>>> merge rev
 
     static int32_t pcToOffset(JSScript* aScript, jsbytecode* aPc);
 
@@ -472,14 +436,8 @@ class ProfilingStack final
     // current thread.
     //
     // This is effectively a unique pointer.
-<<<<<<< working copy
-    mozilla::Atomic<js::ProfileEntry*, mozilla::SequentiallyConsistent,
-                    mozilla::recordreplay::Behavior::DontPreserve> entries { nullptr };
-||||||| base
-    mozilla::Atomic<js::ProfileEntry*> entries { nullptr };
-=======
-    mozilla::Atomic<js::ProfilingStackFrame*> frames { nullptr };
->>>>>>> merge rev
+    mozilla::Atomic<js::ProfilingStackFrame*, mozilla::SequentiallyConsistent,
+                    mozilla::recordreplay::Behavior::DontPreserve> frames { nullptr };
 
     // This may exceed the capacity, so instead use the stackSize() method to
     // determine the number of valid frames in stackFrames. When this is less

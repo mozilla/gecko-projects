@@ -16,6 +16,7 @@ const { l10n } = require("devtools/client/webconsole/utils/messages");
 const { getMessage } = require("devtools/client/webconsole/selectors/messages");
 
 loader.lazyRequireGetter(this, "openContentLink", "devtools/client/shared/link", true);
+loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 
 /**
  * Create a Menu instance for the webconsole.

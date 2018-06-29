@@ -179,17 +179,11 @@ public:
 
 private:
   const char* const mLogName;
-<<<<<<< working copy
+  const CorruptionCanaryForStatics mCanary;
 
   // As for LogModule::mLevel, don't preserve behavior for this atomic when
   // recording/replaying.
   Atomic<LogModule*, ReleaseAcquire, recordreplay::Behavior::DontPreserve> mLog;
-||||||| base
-  Atomic<LogModule*, ReleaseAcquire> mLog;
-=======
-  const CorruptionCanaryForStatics mCanary;
-  Atomic<LogModule*, ReleaseAcquire> mLog;
->>>>>>> merge rev
 };
 
 namespace detail {

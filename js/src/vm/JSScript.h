@@ -1011,15 +1011,8 @@ class JSScript : public js::gc::TenuredCell
     // Number of times the script has been called or has had backedges taken.
     // When running in ion, also increased for any inlined scripts. Reset if
     // the script's JIT code is forcibly discarded.
-<<<<<<< working copy
-    mozilla::Atomic<uint32_t,
-                    mozilla::Relaxed,
-                    mozilla::recordreplay::Behavior::DontPreserve> warmUpCount;
-||||||| base
-    mozilla::Atomic<uint32_t, mozilla::Relaxed> warmUpCount;
-=======
-    mozilla::Atomic<uint32_t, mozilla::Relaxed> warmUpCount = {};
->>>>>>> merge rev
+    mozilla::Atomic<uint32_t, mozilla::Relaxed,
+                    mozilla::recordreplay::Behavior::DontPreserve> warmUpCount = {};
 
     // 16-bit fields.
 

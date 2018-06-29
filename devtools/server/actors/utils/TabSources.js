@@ -579,7 +579,7 @@ TabSources.prototype = {
    *          Returns an object of the form { source, line, column }
    */
   getScriptOffsetLocation: function(script, offset) {
-    let {lineNumber, columnNumber} = script.getOffsetLocation(offset);
+    const {lineNumber, columnNumber} = script.getOffsetLocation(offset);
     return new GeneratedLocation(
       this.createNonSourceMappedActor(script.source),
       lineNumber,
@@ -600,25 +600,7 @@ TabSources.prototype = {
     if (!frame || !frame.script) {
       return new GeneratedLocation();
     }
-<<<<<<< working copy
     return this.getScriptOffsetLocation(frame.script, frame.offset);
-||||||| base
-    let {lineNumber, columnNumber} =
-        frame.script.getOffsetLocation(frame.offset);
-    return new GeneratedLocation(
-      this.createNonSourceMappedActor(frame.script.source),
-      lineNumber,
-      columnNumber
-    );
-=======
-    const {lineNumber, columnNumber} =
-        frame.script.getOffsetLocation(frame.offset);
-    return new GeneratedLocation(
-      this.createNonSourceMappedActor(frame.script.source),
-      lineNumber,
-      columnNumber
-    );
->>>>>>> merge rev
   },
 
   /**
