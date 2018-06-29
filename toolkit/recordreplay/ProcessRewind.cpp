@@ -115,8 +115,6 @@ SetSaveCheckpoint(size_t aCheckpoint, bool aSave)
 bool
 NewCheckpoint(bool aTemporary)
 {
-  StartCountdown(100000000);
-
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
   MOZ_RELEASE_ASSERT(IsReplaying() || !aTemporary);

@@ -130,12 +130,14 @@ struct Message
   // Total message size, including the header.
   uint32_t mSize;
 
+protected:
   Message(MessageType aType, uint32_t aSize)
     : mType(aType), mSize(aSize)
   {
     MOZ_RELEASE_ASSERT(mSize >= sizeof(*this));
   }
 
+public:
   Message* Clone() const {
     char* res = (char*) malloc(mSize);
     memcpy(res, this, mSize);

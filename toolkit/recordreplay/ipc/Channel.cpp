@@ -78,7 +78,7 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording, const MessageHandler& aHa
     struct sockaddr_un addr;
     GetSocketAddress(&addr, child::MiddlemanProcessId(), mId);
 
-    int rv = connect(mFd, (sockaddr*) &addr, SUN_LEN(&addr));
+    int rv = HANDLE_EINTR(connect(mFd, (sockaddr*) &addr, SUN_LEN(&addr)));
     MOZ_RELEASE_ASSERT(rv >= 0);
 
     DirectDeleteFile(addr.sun_path);
@@ -114,21 +114,19 @@ Channel::ThreadMain(void* aChannelArg)
   if (IsRecordingOrReplaying()) {
     HelloMessage msg;
 
-    int rv = recv(channel->mFd, &msg, sizeof(msg), MSG_WAITALL);
+    int rv = HANDLE_EINTR(recv(channel->mFd, &msg, sizeof(msg), MSG_WAITALL));
     MOZ_RELEASE_ASSERT(rv == sizeof(msg));
     MOZ_RELEASE_ASSERT(msg.mMagic == MagicValue);
   } else {
     MOZ_RELEASE_ASSERT(IsMiddleman());
 
-    struct sockaddr_un addr;
-    socklen_t len = sizeof(addr);
-    channel->mFd = accept(channel->mConnectionFd, (sockaddr*) &addr, &len);
+    channel->mFd = HANDLE_EINTR(accept(channel->mConnectionFd, nullptr, 0));
     MOZ_RELEASE_ASSERT(channel->mFd > 0);
 
     HelloMessage msg;
     msg.mMagic = MagicValue;
 
-    int rv = send(channel->mFd, &msg, sizeof(msg), 0);
+    int rv = HANDLE_EINTR(send(channel->mFd, &msg, sizeof(msg), 0));
     MOZ_RELEASE_ASSERT(rv == sizeof(msg));
   }
 
@@ -165,14 +163,10 @@ Channel::SendMessage(const Message& aMsg)
   const char* ptr = (const char*) &aMsg;
   size_t nbytes = aMsg.mSize;
   while (nbytes) {
-    int rv = send(mFd, ptr, nbytes, 0);
-    if (rv < 0) {
-      MOZ_RELEASE_ASSERT(errno == EINTR);
-    } else {
-      MOZ_RELEASE_ASSERT((size_t) rv <= nbytes);
-      ptr += rv;
-      nbytes -= rv;
-    }
+    int rv = HANDLE_EINTR(send(mFd, ptr, nbytes, 0));
+    MOZ_RELEASE_ASSERT((size_t) rv <= nbytes);
+    ptr += rv;
+    nbytes -= rv;
   }
 }
 
@@ -198,8 +192,8 @@ Channel::WaitForMessage()
       mMessageBuffer.appendN(0, messageSize - mMessageBuffer.length());
     }
 
-    ssize_t nbytes = recv(mFd, &mMessageBuffer[mMessageBytes],
-                          mMessageBuffer.length() - mMessageBytes, 0);
+    ssize_t nbytes = HANDLE_EINTR(recv(mFd, &mMessageBuffer[mMessageBytes],
+                                       mMessageBuffer.length() - mMessageBytes, 0));
     if (nbytes < 0) {
       MOZ_RELEASE_ASSERT(errno == EAGAIN);
       continue;
@@ -228,17 +222,6 @@ Channel::WaitForMessage()
   return res;
 }
 
-static char*
-WideCharString(const char16_t* aBuffer, size_t aBufferSize)
-{
-  char* buf = new char[aBufferSize + 1];
-  for (size_t i = 0; i < aBufferSize; i++) {
-    buf[i] = aBuffer[i];
-  }
-  buf[aBufferSize] = 0;
-  return buf;
-}
-
 void
 Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
 {
@@ -246,73 +229,65 @@ Channel::PrintMessage(const char* aPrefix, const Message& aMsg)
     return;
   }
   AutoEnsurePassThroughThreadEvents pt;
-  char* data = nullptr;
+  nsCString data;
   switch (aMsg.mType) {
   case MessageType::HitCheckpoint: {
     const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&) aMsg;
-    data = new char[128];
-    snprintf(data, 128, "Id %d Endpoint %d Duration %.2f ms",
-             (int) nmsg.mCheckpointId, nmsg.mRecordingEndpoint,
-             nmsg.mDurationMicroseconds / 1000.0);
+    data.AppendPrintf("Id %d Endpoint %d Duration %.2f ms",
+                      (int) nmsg.mCheckpointId, nmsg.mRecordingEndpoint,
+                      nmsg.mDurationMicroseconds / 1000.0);
     break;
   }
   case MessageType::HitBreakpoint: {
     const HitBreakpointMessage& nmsg = (const HitBreakpointMessage&) aMsg;
-    data = new char[(1 + nmsg.NumBreakpoints()) * 32];
-    int pos = snprintf(data, 32, "Endpoint %d", nmsg.mRecordingEndpoint);
+    data.AppendPrintf("Endpoint %d", nmsg.mRecordingEndpoint);
     for (size_t i = 0; i < nmsg.NumBreakpoints(); i++) {
-      pos += snprintf(data + pos, 32, " Id %d", nmsg.Breakpoints()[i]);
+      data.AppendPrintf(" Id %d", nmsg.Breakpoints()[i]);
     }
     break;
   }
   case MessageType::Resume: {
     const ResumeMessage& nmsg = (const ResumeMessage&) aMsg;
-    data = new char[128];
-    snprintf(data, 128, "Forward %d", nmsg.mForward);
+    data.AppendPrintf("Forward %d", nmsg.mForward);
     break;
   }
   case MessageType::RestoreCheckpoint: {
     const RestoreCheckpointMessage& nmsg = (const RestoreCheckpointMessage&) aMsg;
-    data = new char[128];
-    snprintf(data, 128, "Id %d", (int) nmsg.mCheckpoint);
+    data.AppendPrintf("Id %d", (int) nmsg.mCheckpoint);
     break;
   }
   case MessageType::SetBreakpoint: {
     const SetBreakpointMessage& nmsg = (const SetBreakpointMessage&) aMsg;
-    data = new char[128];
-    snprintf(data, 128, "Id %d, Kind %s, Script %d, Offset %d, Frame %d",
-             (int) nmsg.mId, nmsg.mPosition.KindString(), (int) nmsg.mPosition.mScript,
-             (int) nmsg.mPosition.mOffset, (int) nmsg.mPosition.mFrameIndex);
+    data.AppendPrintf("Id %d, Kind %s, Script %d, Offset %d, Frame %d",
+                      (int) nmsg.mId, nmsg.mPosition.KindString(), (int) nmsg.mPosition.mScript,
+                      (int) nmsg.mPosition.mOffset, (int) nmsg.mPosition.mFrameIndex);
     break;
   }
   case MessageType::DebuggerRequest: {
     const DebuggerRequestMessage& nmsg = (const DebuggerRequestMessage&) aMsg;
-    data = WideCharString(nmsg.Buffer(), nmsg.BufferSize());
+    data = NS_ConvertUTF16toUTF8(nsDependentString(nmsg.Buffer(), nmsg.BufferSize()));
     break;
   }
   case MessageType::DebuggerResponse: {
     const DebuggerResponseMessage& nmsg = (const DebuggerResponseMessage&) aMsg;
-    data = WideCharString(nmsg.Buffer(), nmsg.BufferSize());
+    data = NS_ConvertUTF16toUTF8(nsDependentString(nmsg.Buffer(), nmsg.BufferSize()));
     break;
   }
   case MessageType::SetIsActive: {
     const SetIsActiveMessage& nmsg = (const SetIsActiveMessage&) aMsg;
-    data = new char[32];
-    snprintf(data, 32, "%d", nmsg.mActive);
+    data.AppendPrintf("%d", nmsg.mActive);
     break;
   }
   case MessageType::SetSaveCheckpoint: {
     const SetSaveCheckpointMessage& nmsg = (const SetSaveCheckpointMessage&) aMsg;
-    data = new char[128];
-    snprintf(data, 128, "Id %d, Save %d", (int) nmsg.mCheckpoint, nmsg.mSave);
+    data.AppendPrintf("Id %d, Save %d", (int) nmsg.mCheckpoint, nmsg.mSave);
     break;
   }
   default:
     break;
   }
   const char* kind = IsMiddleman() ? "Middleman" : (IsRecording() ? "Recording" : "Replaying");
-  PrintSpew("%s%s:%d %s %s\n", kind, aPrefix, (int) mId, aMsg.TypeString(), data ? data : "");
-  delete[] data;
+  PrintSpew("%s%s:%d %s %s\n", kind, aPrefix, (int) mId, aMsg.TypeString(), data.get());
 }
 
 } // namespace recordreplay
