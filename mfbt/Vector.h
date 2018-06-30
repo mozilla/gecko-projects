@@ -144,7 +144,7 @@ struct VectorImpl
       new_(dst, std::move(*src));
     }
     VectorImpl::destroy(aV.beginNoCheck(), aV.endNoCheck());
-    aV.template free_(aV.mBegin, aV.mTail.mCapacity);
+    aV.free_(aV.mBegin, aV.mTail.mCapacity);
     aV.mBegin = newbuf;
     /* aV.mLength is unchanged. */
     aV.mTail.mCapacity = aNewCap;

@@ -3,7 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-// eslint-disable spaced-comment, brace-style
+/* eslint-disable spaced-comment, brace-style */
 
 "use strict";
 
@@ -274,7 +274,7 @@ function hitGlobalHandler(kind) {
 }
 
 // The completion state of any frame that is being popped.
-const gPopFrameResult = null;
+let gPopFrameResult = null;
 
 function onPopFrame(completion) {
   gPopFrameResult = completion;

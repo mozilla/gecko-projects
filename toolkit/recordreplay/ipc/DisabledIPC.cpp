@@ -16,8 +16,7 @@ namespace recordreplay {
 namespace child {
 
 void
-InitRecordingOrReplayingProcess(base::ProcessId aParentPid,
-				int* aArgc, char*** aArgv)
+InitRecordingOrReplayingProcess(int* aArgc, char*** aArgv)
 {
   MOZ_CRASH();
 }
@@ -128,7 +127,7 @@ SaveAllRecordingsDirectory()
 }
 
 void
-SaveRecording(const nsCString& aFilename)
+SaveRecording(const ipc::FileDescriptor& aFile)
 {
   MOZ_CRASH();
 }

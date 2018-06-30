@@ -413,7 +413,7 @@ private:
       return nullptr;
     }
     if (!mSegments.append(Segment(data, aSize, aCapacity))) {
-      this->template free_(data, aCapacity);
+      this->free_(data, aCapacity);
       return nullptr;
     }
     mSize += aSize;

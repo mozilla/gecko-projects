@@ -1319,7 +1319,7 @@ class HashTable : private AllocPolicy
         Entry* end = oldTable + capacity;
         for (Entry* e = oldTable; e < end; ++e)
             e->~Entry();
-        alloc.template free_(oldTable, capacity);
+        alloc.free_(oldTable, capacity);
     }
 
   public:
