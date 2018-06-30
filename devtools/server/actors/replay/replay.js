@@ -5,8 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* eslint-disable spaced-comment, brace-style */
 
-"use strict";
-
 // This file defines the logic that runs in the record/replay devtools sandbox.
 // This code is loaded into all recording/replaying processes, and responds to
 // requests and other instructions from the middleman via the exported symbols
@@ -122,7 +120,7 @@ function scriptFrameForIndex(index) {
 const gScripts = new IdMap();
 
 function addScript(script) {
-  const id = gScripts.add(script);
+  gScripts.add(script);
   script.getChildScripts().forEach(addScript);
 }
 
@@ -161,7 +159,7 @@ dbg.onNewScript = function(script) {
   // Check in case any handlers we need to install are on the scripts just
   // created.
   installPendingHandlers();
-}
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Console Message State
@@ -175,7 +173,8 @@ function newConsoleMessage(messageType, executionPoint, contents) {
   RecordReplayControl.advanceProgressCounter();
 
   if (!executionPoint) {
-    executionPoint = RecordReplayControl.currentExecutionPoint({ kind: "ConsoleMessage" });
+    executionPoint =
+      RecordReplayControl.currentExecutionPoint({ kind: "ConsoleMessage" });
   }
 
   contents.messageType = messageType;
@@ -188,7 +187,8 @@ function newConsoleMessage(messageType, executionPoint, contents) {
 function convertStack(stack) {
   if (stack) {
     const { source, line, column, functionDisplayName } = stack;
-    return { source, line, column, functionDisplayName, parent: convertStack(stack.parent) };
+    const parent = convertStack(stack.parent);
+    return { source, line, column, functionDisplayName, parent };
   }
   return null;
 }
@@ -204,7 +204,8 @@ Services.console.registerListener({
       // generated, rather than where it was reported to the console.
       let executionPoint;
       if (message.timeWarpTarget) {
-        executionPoint = RecordReplayControl.timeWarpTargetExecutionPoint(message.timeWarpTarget);
+        executionPoint =
+          RecordReplayControl.timeWarpTargetExecutionPoint(message.timeWarpTarget);
       }
 
       const contents = JSON.parse(JSON.stringify(message));
@@ -249,6 +250,7 @@ const gInstalledPcHandlers = [];
 // Callbacks to test whether a frame should have an OnPop handler.
 const gOnPopFilters = [];
 
+// eslint-disable-next-line no-unused-vars
 function ClearPositionHandlers() {
   dbg.clearAllBreakpoints();
   dbg.onEnterFrame = undefined;
@@ -260,7 +262,7 @@ function ClearPositionHandlers() {
 }
 
 function installPendingHandlers() {
-  let pending = gPendingPcHandlers.map(position => position);
+  const pending = gPendingPcHandlers.map(position => position);
   gPendingPcHandlers.length = 0;
 
   pending.forEach(EnsurePositionHandler);
@@ -315,48 +317,49 @@ function EnsurePositionHandler(position) {
   gPositionHandlerKinds[position.kind] = true;
 
   switch (position.kind) {
-  case "Break":
-  case "OnStep":
-    let debugScript;
-    if (position.script) {
-      debugScript = gScripts.getObject(position.script);
-      if (!debugScript) {
-        gPendingPcHandlers.push(position);
-        return;
+    case "Break":
+    case "OnStep":
+      let debugScript;
+      if (position.script) {
+        debugScript = gScripts.getObject(position.script);
+        if (!debugScript) {
+          gPendingPcHandlers.push(position);
+          return;
+        }
       }
-    }
 
-    gInstalledPcHandlers.forEach(({ script, offset }) => {
-      if (script == position.script && offset == position.offset) {
-        return;
-      }
-    });
-    gInstalledPcHandlers.push({ script: position.script, offset: position.offset });
+      gInstalledPcHandlers.forEach(({ script, offset }) => {
+        if (script == position.script && offset == position.offset) {
+          return;
+        }
+      });
+      gInstalledPcHandlers.push({ script: position.script, offset: position.offset });
 
-    debugScript.setBreakpoint(position.offset, {
-      hit() {
-        RecordReplayControl.positionHit({
-          kind: "OnStep",
-          script: position.script,
-          offset: position.offset,
-          frameIndex: countScriptFrames() - 1,
-        });
+      debugScript.setBreakpoint(position.offset, {
+        hit() {
+          RecordReplayControl.positionHit({
+            kind: "OnStep",
+            script: position.script,
+            offset: position.offset,
+            frameIndex: countScriptFrames() - 1,
+          });
+        }
+      });
+      break;
+    case "OnPop":
+      if (position.script) {
+        addOnPopFilter(frame => gScripts.getId(frame.script) == position.script);
+      } else {
+        addOnPopFilter(frame => true);
       }
-    });
-    break;
-  case "OnPop":
-    if (position.script) {
-      addOnPopFilter(frame => gScripts.getId(frame.script) == position.script);
-    } else {
-      addOnPopFilter(frame => true);
-    }
-    break;
-  case "EnterFrame":
-    dbg.onEnterFrame = onEnterFrame;
-    break;
+      break;
+    case "EnterFrame":
+      dbg.onEnterFrame = onEnterFrame;
+      break;
   }
 }
 
+// eslint-disable-next-line no-unused-vars
 function GetEntryPosition(position) {
   if (position.kind == "Break" || position.kind == "OnStep") {
     const script = gScripts.getObject(position.script);
@@ -388,11 +391,21 @@ function getObjectId(obj) {
 }
 
 function convertValue(value) {
-  if (value instanceof Debugger.Object) return { object: getObjectId(value) };
-  if (value === undefined) return { special: "undefined" };
-  if (value !== value) return { special: "NaN" };
-  if (value == Infinity) return { special: "Infinity" };
-  if (value == -Infinity) return { special: "-Infinity" };
+  if (value instanceof Debugger.Object) {
+    return { object: getObjectId(value) };
+  }
+  if (value === undefined) {
+    return { special: "undefined" };
+  }
+  if (value !== value) { // eslint-disable-line no-self-compare
+    return { special: "NaN" };
+  }
+  if (value == Infinity) {
+    return { special: "Infinity" };
+  }
+  if (value == -Infinity) {
+    return { special: "-Infinity" };
+  }
   return value;
 }
 
@@ -406,6 +419,7 @@ function convertCompletionValue(value) {
   throw new Error("Unexpected completion value");
 }
 
+// eslint-disable-next-line no-unused-vars
 function ClearPausedState() {
   gPausedObjects = new IdMap();
 }
@@ -529,16 +543,23 @@ const gRequestHandlers = {
 
     return names.map(name => {
       const desc = object.getOwnPropertyDescriptor(name);
-      if ("value" in desc) desc.value = convertValue(desc.value);
-      if ("get" in desc) desc.get = getObjectId(desc.get);
-      if ("set" in desc) desc.set = getObjectId(desc.set);
+      if ("value" in desc) {
+        desc.value = convertValue(desc.value);
+      }
+      if ("get" in desc) {
+        desc.get = getObjectId(desc.get);
+      }
+      if ("set" in desc) {
+        desc.set = getObjectId(desc.set);
+      }
       return { name, desc };
     });
   },
 
   getEnvironmentNames(request) {
     if (!RecordReplayControl.maybeDivergeFromRecording()) {
-      return [{name: "Unknown names", value: "Recording divergence in getEnvironmentNames" }];
+      return [{name: "Unknown names",
+               value: "Recording divergence in getEnvironmentNames" }];
     }
 
     const env = gPausedObjects.getObject(request.id);
@@ -611,6 +632,7 @@ const gRequestHandlers = {
   },
 };
 
+// eslint-disable-next-line no-unused-vars
 function ProcessRequest(request) {
   try {
     return gRequestHandlers[request.type](request);
@@ -620,6 +642,7 @@ function ProcessRequest(request) {
   }
 }
 
+// eslint-disable-next-line no-unused-vars
 var EXPORTED_SYMBOLS = [
   "EnsurePositionHandler",
   "ClearPositionHandlers",

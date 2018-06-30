@@ -678,8 +678,8 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         case "next":
           if (stepFrame.script) {
             if (this.dbg.replaying) {
-              let offsets = this._findReplayingStepOffsets(originalLocation,
-                                                           stepFrame, rewinding);
+              const offsets = this._findReplayingStepOffsets(originalLocation,
+                                                             stepFrame, rewinding);
               stepFrame.setReplayingOnStep(onStep, offsets);
             } else {
               stepFrame.onStep = onStep;

@@ -5,10 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* eslint-disable spaced-comment, brace-style */
 
-"use strict";
-
-const RecordReplayControl = require("RecordReplayControl");
-
 // When recording/replaying an execution with Web Replay, Devtools server code
 // runs in the middleman process instead of the recording/replaying process the
 // code is interested in.
@@ -19,6 +15,10 @@ const RecordReplayControl = require("RecordReplayControl");
 // created in the middleman process, and describe things that exist in the
 // recording/replaying process, inspecting them via the RecordReplayControl
 // interface.
+
+"use strict";
+
+const RecordReplayControl = require("RecordReplayControl");
 
 ///////////////////////////////////////////////////////////////////////////////
 // ReplayDebugger
@@ -81,7 +81,7 @@ ReplayDebugger.prototype = {
   },
 
   _searchBreakpoints(callback) {
-    for (let breakpoint of this._breakpoints) {
+    for (const breakpoint of this._breakpoints) {
       const v = callback(breakpoint);
       if (v) {
         return v;
@@ -190,8 +190,8 @@ ReplayDebugger.prototype = {
     if ("throw" in value) {
       return { throw: this._convertValue(value.throw) };
     }
-    // eslint-disable-next-line consistent-return
     ThrowError("Unexpected completion value");
+    return null // For eslint
   },
 
   /////////////////////////////////////////////////////////
@@ -212,7 +212,7 @@ ReplayDebugger.prototype = {
       }
     }
 
-    let data = this._sendRequest({ type: "getFrame", index });
+    const data = this._sendRequest({ type: "getFrame", index });
 
     if (index == this._newestFrameIndex) {
       index = ("index" in data) ? data.index : 0;
@@ -223,7 +223,7 @@ ReplayDebugger.prototype = {
   },
 
   getNewestFrame() {
-    let frame = this._getFrame(this._newestFrameIndex);
+    const frame = this._getFrame(this._newestFrameIndex);
 
     // If there is no frame then the object's data will have no type.
     return (frame && frame._data.type) ? frame : null;
@@ -325,9 +325,9 @@ ReplayDebuggerScript.prototype = {
   },
 
   getLineOffsets(line) { return this._forward("getLineOffsets", line); },
-  getOffsetLocation(offset) { return this._forward("getOffsetLocation", offset); },
-  getSuccessorOffsets(offset) { return this._forward("getSuccessorOffsets", offset); },
-  getPredecessorOffsets(offset) { return this._forward("getPredecessorOffsets", offset); },
+  getOffsetLocation(pc) { return this._forward("getOffsetLocation", pc); },
+  getSuccessorOffsets(pc) { return this._forward("getSuccessorOffsets", pc); },
+  getPredecessorOffsets(pc) { return this._forward("getPredecessorOffsets", pc); },
 
   setBreakpoint(offset, handler) {
     this._dbg._setBreakpoint(() => { handler.hit(this._dbg.getNewestFrame()); },
@@ -366,14 +366,16 @@ ReplayDebuggerScriptSource.prototype = {
   get url() { return this._data.url; },
   get displayURL() { return this._data.displayURL; },
   get elementAttributeName() { return this._data.elementAttributeName; },
-  get introductionScript() { return this._dbg._getScript(this._data.introductionScript); },
   get introductionOffset() { return this._data.introductionOffset; },
   get introductionType() { return this._data.introductionType; },
   get sourceMapURL() { return this._data.sourceMapURL; },
   get element() { return null; },
 
+  get introductionScript() {
+    return this._dbg._getScript(this._data.introductionScript);
+  },
+
   get binary() { NYI(); },
-  get elementAttributeName() { NYI(); },
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -384,7 +386,8 @@ function ReplayDebuggerFrame(dbg, data) {
   this._dbg = dbg;
   this._data = data;
   if (this._data.arguments) {
-    this._data.arguments = this._data.arguments.map(this._dbg._convertValue.bind(this._dbg));
+    this._data.arguments =
+      this._data.arguments.map(this._dbg._convertValue.bind(this._dbg));
   }
 }
 
@@ -431,7 +434,9 @@ ReplayDebuggerFrame.prototype = {
   },
 
   _clearOnStepBreakpoints() {
-    this._dbg._clearMatchingBreakpoints(({position}) => this._positionMatches(position, "OnStep"));
+    this._dbg._clearMatchingBreakpoints(
+      ({position}) => this._positionMatches(position, "OnStep")
+    );
   },
 
   setReplayingOnStep(handler, offsets) {
@@ -439,7 +444,10 @@ ReplayDebuggerFrame.prototype = {
     offsets.forEach(offset => {
       this._dbg._setBreakpoint(
         () => handler.call(this._dbg.getNewestFrame()),
-        { kind: "OnStep", script: this._data.script, offset, frameIndex: this._data.index },
+        { kind: "OnStep",
+          script: this._data.script,
+          offset,
+          frameIndex: this._data.index },
         handler);
     });
   },
@@ -454,12 +462,15 @@ ReplayDebuggerFrame.prototype = {
     if (handler) {
       this._dbg._setBreakpoint(() => {
           const result = this._dbg._sendRequest({ type: "popFrameResult" });
-          handler.call(this._dbg.getNewestFrame(), this._dbg._convertCompletionValue(result));
+          handler.call(this._dbg.getNewestFrame(),
+                       this._dbg._convertCompletionValue(result));
         },
         { kind: "OnPop", script: this._data.script, frameIndex: this._data.index },
         handler);
     } else {
-      this._dbg._clearMatchingBreakpoints(({position}) => this._positionMatches(position, "OnPop"));
+      this._dbg._clearMatchingBreakpoints(
+        ({position}) => this._positionMatches(position, "OnPop")
+      );
     }
   },
 
@@ -542,9 +553,15 @@ ReplayDebuggerObject.prototype = {
       });
       this._properties = {};
       properties.forEach(({name, desc}) => {
-        if ("value" in desc) desc.value = this._dbg._convertValue(desc.value);
-        if ("get" in desc) desc.get = this._dbg._getObject(desc.get);
-        if ("set" in desc) desc.set = this._dbg._getObject(desc.set);
+        if ("value" in desc) {
+          desc.value = this._dbg._convertValue(desc.value);
+        }
+        if ("get" in desc) {
+          desc.get = this._dbg._getObject(desc.get);
+        }
+        if ("set" in desc) {
+          desc.set = this._dbg._getObject(desc.set);
+        }
         this._properties[name] = desc;
       });
     }
@@ -598,7 +615,8 @@ ReplayDebuggerEnvironment.prototype = {
 
   _ensureNames() {
     if (!this._names) {
-      const names = this._dbg._sendRequest({ type: "getEnvironmentNames", id: this._data.id });
+      const names =
+        this._dbg._sendRequest({ type: "getEnvironmentNames", id: this._data.id });
       this._names = {};
       names.forEach(({ name, value }) => {
         this._names[name] = this._dbg._convertValue(value);

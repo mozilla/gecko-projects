@@ -18,7 +18,6 @@ namespace child {
 void
 InitRecordingOrReplayingProcess(int* aArgc, char*** aArgv)
 {
-  MOZ_CRASH();
 }
 
 char*

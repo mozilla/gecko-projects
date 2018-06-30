@@ -1587,7 +1587,7 @@ class HashTable : private AllocPolicy
         }
 
         // All entries have been destroyed, no need to destroyTable.
-        this->template free_(oldTable, oldCap);
+        this->free_(oldTable, oldCap);
         return Rehashed;
     }
 
