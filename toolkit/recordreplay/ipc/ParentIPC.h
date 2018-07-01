@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_ipc_ParentIPC_h
-#define mozilla_toolkit_recordreplay_ipc_ParentIPC_h
+#ifndef mozilla_recordreplay_ParentIPC_h
+#define mozilla_recordreplay_ParentIPC_h
 
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/ipc/MessageChannel.h"
@@ -63,4 +63,4 @@ void GetArgumentsForChildProcess(base::ProcessId aMiddlemanPid, uint32_t aChanne
 } // namespace recordreplay
 } // namespace mozilla
 
-#endif // mozilla_toolkit_recordreplay_ipc_ParentIPC_h
+#endif // mozilla_recordreplay_ParentIPC_h

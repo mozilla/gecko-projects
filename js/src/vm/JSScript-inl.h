@@ -214,10 +214,11 @@ JSScript::trackRecordReplayProgress() const
 {
     // Progress is only tracked when recording or replaying, and only for
     // scripts associated with the main thread's runtime. Whether self hosted
-    // scripts execute may depend on performed Ion optimizations, so they are
-    // ignored. Some scripts are internal to record/replay and run
-    // non-deterministically, so are also ignored.
-    return mozilla::recordreplay::IsRecordingOrReplaying()
+    // scripts execute may depend on performed Ion optimizations (for example,
+    // self hosted TypedObject logic), so they are ignored. Some scripts are
+    // internal to record/replay and run non-deterministically, so are also
+    // ignored.
+    return MOZ_UNLIKELY(mozilla::recordreplay::IsRecordingOrReplaying())
         && !runtimeFromAnyThread()->parentRuntime
         && !selfHosted()
         && !mozilla::recordreplay::IsInternalScript(filename());

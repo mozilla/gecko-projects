@@ -127,23 +127,17 @@ static inline bool AreThreadEventsPassedThrough();
 // RAII class for regions where thread events are passed through.
 struct MOZ_RAII AutoPassThroughThreadEvents
 {
-  AutoPassThroughThreadEvents(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    BeginPassThroughThreadEvents();
-  }
+  AutoPassThroughThreadEvents() { BeginPassThroughThreadEvents(); }
   ~AutoPassThroughThreadEvents() { EndPassThroughThreadEvents(); }
-private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 // As for AutoPassThroughThreadEvents, but may be used when events are already
 // passed through.
 struct MOZ_RAII AutoEnsurePassThroughThreadEvents
 {
-  AutoEnsurePassThroughThreadEvents(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
+  AutoEnsurePassThroughThreadEvents()
     : mPassedThrough(AreThreadEventsPassedThrough())
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     if (!mPassedThrough)
       BeginPassThroughThreadEvents();
   }
@@ -155,7 +149,6 @@ struct MOZ_RAII AutoEnsurePassThroughThreadEvents
   }
 
 private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
   bool mPassedThrough;
 };
 
@@ -170,13 +163,8 @@ static inline bool AreThreadEventsDisallowed();
 // RAII class for a region where thread events are disallowed.
 struct MOZ_RAII AutoDisallowThreadEvents
 {
-  AutoDisallowThreadEvents(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    BeginDisallowThreadEvents();
-  }
+  AutoDisallowThreadEvents() { BeginDisallowThreadEvents(); }
   ~AutoDisallowThreadEvents() { EndDisallowThreadEvents(); }
-private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 // Mark a region where thread events should have stack information captured.
@@ -187,13 +175,8 @@ static inline void EndCaptureEventStacks();
 // RAII class for a region where thread event stacks should be captured.
 struct MOZ_RAII AutoCaptureEventStacks
 {
-  AutoCaptureEventStacks(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    BeginCaptureEventStacks();
-  }
+  AutoCaptureEventStacks() { BeginCaptureEventStacks(); }
   ~AutoCaptureEventStacks() { EndCaptureEventStacks(); }
-private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 // Record or replay a value in the current thread's event stream.

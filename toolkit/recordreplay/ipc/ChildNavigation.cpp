@@ -58,18 +58,6 @@ ExecutionPointToString(const ExecutionPoint& aPoint, nsAutoCString& aStr)
 
 typedef AllocPolicy<MemoryKind::Navigation> UntrackedAllocPolicy;
 
-static CheckpointId
-NextTemporaryCheckpoint(const CheckpointId& aCheckpoint)
-{
-  return CheckpointId(aCheckpoint.mNormal, aCheckpoint.mTemporary + 1);
-}
-
-static CheckpointId
-NextNormalCheckpoint(const CheckpointId& aCheckpoint)
-{
-  return CheckpointId(aCheckpoint.mNormal + 1);
-}
-
 // Abstract class for where we are at in the navigation state machine.
 // Each subclass has a single instance contained in NavigationState (see below)
 // and it and all its data are allocated using untracked memory that is not
@@ -79,6 +67,7 @@ class NavigationPhase
   // All virtual members should only be accessed through NavigationState.
   friend class NavigationState;
 
+private:
   MOZ_NORETURN void Unsupported(const char* aOperation) {
     nsAutoCString str;
     ToString(str);
@@ -87,6 +76,7 @@ class NavigationPhase
     MOZ_CRASH("Unsupported navigation operation");
   }
 
+public:
   virtual void ToString(nsAutoCString& aStr) = 0;
 
   // The process has just reached or rewound to a checkpoint.
@@ -137,7 +127,8 @@ class NavigationPhase
 };
 
 // Information about a debugger request sent by the middleman.
-struct RequestInfo {
+struct RequestInfo
+{
   // JSON contents for the request and response.
   InfallibleVector<char16_t, 0, UntrackedAllocPolicy> mRequestBuffer;
   InfallibleVector<char16_t, 0, UntrackedAllocPolicy> mResponseBuffer;
@@ -158,9 +149,8 @@ typedef InfallibleVector<RequestInfo, 4, UntrackedAllocPolicy> UntrackedRequestV
 
 typedef InfallibleVector<uint32_t> BreakpointVector;
 
-// Phase when the replaying process is paused at any intra-checkpoint point,
-// which may or may not have any breakpoints.
-class BreakpointPausedPhase : public NavigationPhase
+// Phase when the replaying process is paused at a breakpoint.
+class BreakpointPausedPhase final : public NavigationPhase
 {
   // Where the pause is at.
   ExecutionPoint mPoint;
@@ -242,7 +232,7 @@ public:
 
 // Phase when the replaying process is running forward from a checkpoint to a
 // breakpoint at a particular execution point.
-class ReachBreakpointPhase : public NavigationPhase
+class ReachBreakpointPhase final : public NavigationPhase
 {
 private:
   // Where to start running from.
@@ -282,7 +272,7 @@ public:
 
 // Phase when the replaying process is searching forward from a checkpoint to
 // find the last point a breakpoint is hit before reaching an execution point.
-class FindLastHitPhase : public NavigationPhase
+class FindLastHitPhase final : public NavigationPhase
 {
   // Where we started searching from.
   CheckpointId mStart;
@@ -310,7 +300,7 @@ class FindLastHitPhase : public NavigationPhase
   };
   InfallibleVector<TrackedPosition, 4, UntrackedAllocPolicy> mTrackedPositions;
 
-  TrackedPosition FindTrackedPosition(const ExecutionPosition& aPos);
+  const TrackedPosition& FindTrackedPosition(const ExecutionPosition& aPos);
   void OnRegionEnd();
 
 public:
@@ -539,7 +529,7 @@ BreakpointPausedPhase::Enter(const ExecutionPoint& aPoint, bool aRecordingEndpoi
   gNavigation->SetPhase(this);
 
   if (ThisProcessCanRewind()) {
-    // Immediately save a temporary checkpoint and upate the point to be
+    // Immediately save a temporary checkpoint and update the point to be
     // in relation to this checkpoint. If we rewind due to a recording
     // divergence we will end up here.
     if (!gNavigation->SaveTemporaryCheckpoint(aPoint)) {
@@ -711,10 +701,10 @@ BreakpointPausedPhase::GetRecordingEndpoint()
 ///////////////////////////////////////////////////////////////////////////////
 
 void
-CheckpointPausedPhase::Enter(size_t aCheckpoint, bool aRewind, bool aRecordingEndpoint)
+CheckpointPausedPhase::Enter(size_t aCheckpoint, bool aRewind, bool aAtRecordingEndpoint)
 {
   mCheckpoint = aCheckpoint;
-  mAtRecordingEndpoint = aRecordingEndpoint;
+  mAtRecordingEndpoint = aAtRecordingEndpoint;
 
   gNavigation->SetPhase(this);
 
@@ -883,7 +873,7 @@ ReachBreakpointPhase::AfterCheckpoint(const CheckpointId& aCheckpoint)
     mStartTime = CurrentTime();
   } else {
     MOZ_RELEASE_ASSERT((aCheckpoint == mStart && mTemporaryCheckpoint.isNothing()) ||
-                       (aCheckpoint == NextTemporaryCheckpoint(mStart) &&
+                       (aCheckpoint == mStart.NextCheckpoint(/* aTemporary = */ true) &&
                         mSavedTemporaryCheckpoint));
   }
 
@@ -892,7 +882,7 @@ ReachBreakpointPhase::AfterCheckpoint(const CheckpointId& aCheckpoint)
 
 // The number of milliseconds to elapse during a ReachBreakpoint search before
 // we will save a temporary checkpoint.
-static const double TemporaryCheckpointThresholdMs = 10;
+static const double kTemporaryCheckpointThresholdMs = 10;
 
 void
 AlwaysSaveTemporaryCheckpoints()
@@ -907,7 +897,7 @@ ReachBreakpointPhase::PositionHit(const ExecutionPoint& aPoint)
     // We've reached the point at which we have the option of saving a
     // temporary checkpoint.
     double elapsedMs = (CurrentTime() - mStartTime) / 1000.0;
-    if (elapsedMs >= TemporaryCheckpointThresholdMs ||
+    if (elapsedMs >= kTemporaryCheckpointThresholdMs ||
         gNavigation->mAlwaysSaveTemporaryCheckpoints)
     {
       MOZ_RELEASE_ASSERT(!mSavedTemporaryCheckpoint);
@@ -968,9 +958,9 @@ FindLastHitPhase::Enter(const CheckpointId& aStart, const Maybe<ExecutionPoint>&
 void
 FindLastHitPhase::AfterCheckpoint(const CheckpointId& aCheckpoint)
 {
-  if (aCheckpoint == NextNormalCheckpoint(mStart)) {
+  if (aCheckpoint == mStart.NextCheckpoint(/* aTemporary = */ false)) {
     // We reached the next checkpoint, and are done searching.
-    MOZ_RELEASE_ASSERT(!mEnd.isSome());
+    MOZ_RELEASE_ASSERT(mEnd.isNothing());
     OnRegionEnd();
     Unreachable();
   }
@@ -1013,7 +1003,7 @@ FindLastHitPhase::HitRecordingEndpoint(const ExecutionPoint& aPoint)
   Unreachable();
 }
 
-FindLastHitPhase::TrackedPosition
+const FindLastHitPhase::TrackedPosition&
 FindLastHitPhase::FindTrackedPosition(const ExecutionPosition& aPos)
 {
   for (const TrackedPosition& tracked : mTrackedPositions) {
@@ -1033,7 +1023,7 @@ FindLastHitPhase::OnRegionEnd()
     if (!breakpoint.IsValid()) {
       continue;
     }
-    TrackedPosition tracked = FindTrackedPosition(breakpoint);
+    const TrackedPosition& tracked = FindTrackedPosition(breakpoint);
     if (tracked.mLastHit.HasPosition() &&
         (lastBreakpoint.isNothing() ||
          lastBreakpoint.ref().mLastHitCount < tracked.mLastHitCount))

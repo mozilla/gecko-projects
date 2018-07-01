@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_ipc_ChildInternal_h
-#define mozilla_toolkit_recordreplay_ipc_ChildInternal_h
+#ifndef mozilla_recordreplay_ChildInternal_h
+#define mozilla_recordreplay_ChildInternal_h
 
 #include "ChildIPC.h"
 #include "JSControl.h"
@@ -32,7 +32,7 @@ js::ExecutionPoint GetRecordingEndpoint();
 // In a replaying process, set the recording endpoint. |index| is used to
 // differentiate different endpoints that have been sequentially written to
 // the recording file as it has been flushed.
-void SetRecordingEndpoint(size_t index, const js::ExecutionPoint& endpoint);
+void SetRecordingEndpoint(size_t aIndex, const js::ExecutionPoint& aEndpoint);
 
 // Save temporary checkpoints at all opportunities during navigation.
 void AlwaysSaveTemporaryCheckpoints();
@@ -86,4 +86,4 @@ extern Monitor* gMonitor;
 } // namespace recordreplay
 } // namespace mozilla
 
-#endif // mozilla_toolkit_recordreplay_ipc_ChildInternal_h
+#endif // mozilla_recordreplay_ChildInternal_h

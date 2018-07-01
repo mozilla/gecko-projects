@@ -122,13 +122,7 @@ NewCheckpoint(bool aTemporary)
   navigation::BeforeCheckpoint();
 
   // Get the ID of the new checkpoint.
-  CheckpointId checkpoint = gRewindInfo->mLastCheckpoint;
-  if (aTemporary) {
-    checkpoint.mTemporary++;
-  } else {
-    checkpoint.mNormal++;
-    checkpoint.mTemporary = 0;
-  }
+  CheckpointId checkpoint = gRewindInfo->mLastCheckpoint.NextCheckpoint(aTemporary);
 
   // Save all checkpoints the middleman tells us to, and temporary checkpoints
   // (which the middleman never knows about).

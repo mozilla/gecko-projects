@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_CallFunction_h
-#define mozilla_toolkit_recordreplay_CallFunction_h
+#ifndef mozilla_recordreplay_CallFunction_h
+#define mozilla_recordreplay_CallFunction_h
 
 namespace mozilla {
 namespace recordreplay {
@@ -113,4 +113,4 @@ namespace recordreplay {
 } // recordreplay
 } // mozilla
 
-#endif // mozilla_toolkit_recordreplay_CallFunction_h
+#endif // mozilla_recordreplay_CallFunction_h

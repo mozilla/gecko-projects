@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_ProcessRecordReplay_h
-#define mozilla_toolkit_recordreplay_ProcessRecordReplay_h
+#ifndef mozilla_recordreplay_ProcessRecordReplay_h
+#define mozilla_recordreplay_ProcessRecordReplay_h
 
 #include "mozilla/PodOperations.h"
 #include "mozilla/RecordReplay.h"
@@ -258,7 +258,7 @@ void DumpTimers();
 // memory in the record/replay system. The routines below are used for handling
 // redirections for the raw system calls underlying the standard libraries, and
 // for cases where allocated memory should be untracked: the contents are
-// ignored when saving/restoring checkpoints.contents 
+// ignored when saving/restoring checkpoints.
 
 // Different kinds of memory used in the system.
 enum class MemoryKind {
@@ -392,4 +392,4 @@ void DirectSpawnThread(void (*aFunction)(void*), void* aArgument);
 } // recordreplay
 } // mozilla
 
-#endif // mozilla_toolkit_recordreplay_ProcessRecordReplay_h
+#endif // mozilla_recordreplay_ProcessRecordReplay_h

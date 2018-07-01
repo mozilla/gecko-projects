@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_ProcessRewind_h
-#define mozilla_toolkit_recordreplay_ProcessRewind_h
+#ifndef mozilla_recordreplay_ProcessRewind_h
+#define mozilla_recordreplay_ProcessRewind_h
 
 #include "mozilla/RecordReplay.h"
 
@@ -108,6 +108,11 @@ struct CheckpointId
   inline bool operator!=(const CheckpointId& o) const {
     return mNormal != o.mNormal || mTemporary != o.mTemporary;
   }
+
+  CheckpointId NextCheckpoint(bool aTemporary) const {
+    return CheckpointId(aTemporary ? mNormal : mNormal + 1,
+                        aTemporary ? mTemporary + 1 : 0);
+  }
 };
 
 // Initialize state needed for rewinding.
@@ -176,4 +181,4 @@ bool NewCheckpoint(bool aTemporary);
 } // namespace recordreplay
 } // namespace mozilla
 
-#endif // mozilla_toolkit_recordreplay_ProcessRewind_h
+#endif // mozilla_recordreplay_ProcessRewind_h

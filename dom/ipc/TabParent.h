@@ -591,8 +591,8 @@ public:
   void SetReadyToHandleInputEvents() { mIsReadyToHandleInputEvents = true; }
   bool IsReadyToHandleInputEvents() { return mIsReadyToHandleInputEvents; }
 
-  static bool AreRecordReplayTabsRendered() {
-    return gNumRenderedRecordReplayTabs != 0;
+  static bool AreRecordReplayTabsVisible() {
+    return gNumVisibleRecordReplayTabs != 0;
   }
 
 protected:
@@ -793,7 +793,13 @@ private:
   bool mIsMouseEnterIntoWidgetEventSuppressed;
 
   // How many record/replay tabs are being rendered by this process.
-  static size_t gNumRenderedRecordReplayTabs;
+  static size_t gNumVisibleRecordReplayTabs;
+
+  // Whether this tab is contributing to gNumVisibleRecordReplayTabs.
+  bool mIsVisibleRecordReplayTab;
+
+  // Update whether this is a visible record/replay tab.
+  void SetIsVisibleRecordReplayTab(bool aVisible);
 
 public:
   static TabParent* GetTabParentFromLayersId(layers::LayersId aLayersId);

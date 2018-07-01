@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_ipc_ChildIPC_h
-#define mozilla_toolkit_recordreplay_ipc_ChildIPC_h
+#ifndef mozilla_recordreplay_ChildIPC_h
+#define mozilla_recordreplay_ChildIPC_h
 
 #include "base/process.h"
 #include "mozilla/gfx/2D.h"
@@ -74,4 +74,4 @@ void EndIdleTime();
 } // namespace recordreplay
 } // namespace mozilla
 
-#endif // mozilla_toolkit_recordreplay_ipc_ChildIPC_h
+#endif // mozilla_recordreplay_ChildIPC_h

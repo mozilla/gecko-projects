@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_toolkit_recordreplay_MemorySnapshot_h
-#define mozilla_toolkit_recordreplay_MemorySnapshot_h
+#ifndef mozilla_recordreplay_MemorySnapshot_h
+#define mozilla_recordreplay_MemorySnapshot_h
 
 #include "mozilla/Types.h"
 #include "ProcessRecordReplay.h"
@@ -119,4 +119,4 @@ void MemoryZero(void* aDst, size_t aSize);
 } // namespace recordreplay
 } // namespace mozilla
 
-#endif // mozilla_toolkit_recordreplay_MemorySnapshot_h
+#endif // mozilla_recordreplay_MemorySnapshot_h
