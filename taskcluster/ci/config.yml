@@ -200,7 +200,7 @@ scriptworker:
 
 partner:
     release:
-        release-partner-repack: git@github.com:mozilla-partners/repack-manifests.git
+        release-partner-repack: git@github.com:nthomas-mozilla/partner-manifests.git  # maple hack
         release-eme-free-repack: git@github.com:mozilla-partners/mozilla-EME-free-manifest
     staging:
         release-partner-repack: git@github.com:mozilla-releng/staging-repack-manifests.git
