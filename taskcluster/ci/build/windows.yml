@@ -41,6 +41,7 @@ win32/opt:
         by-project:
             default: false
             mozilla-beta: true
+            maple: true
             mozilla-release: true
     worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
     worker:
@@ -285,6 +286,7 @@ win32-nightly/opt:
             mozilla-central: true
             try: true
             mozilla-beta: true
+            maple: true
             mozilla-release: true
     shipping-phase: build
     shipping-product: firefox
@@ -665,6 +667,7 @@ win32-devedition-nightly/opt:
             mozilla-central: true
             try: true
             mozilla-beta: true
+            maple: true
             mozilla-release: true
     shipping-phase: build
     shipping-product: devedition
