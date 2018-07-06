@@ -20,6 +20,7 @@
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 
+// Define to enable the countdown debugging thread. See StartCountdown().
 //#define WANT_COUNTDOWN_THREAD 1
 
 namespace mozilla {
@@ -208,6 +209,10 @@ struct SnapshotThreadWorklist {
 // 4. Snapshot threads are now unblocked from WaitUntilNoLongerActive(). The
 //    main thread does not unblock from ActivateEnd() until all snapshot
 //    threads have left WaitUntilNoLongerActive().
+//
+// The intent with this class is to ensure that the main thread knows exactly
+// when the snapshot threads are operating and that there is no potential for
+// races between them.
 class SnapshotThreadCondition {
   Atomic<bool, SequentiallyConsistent, Behavior::DontPreserve> mActive;
   Atomic<int32_t, SequentiallyConsistent, Behavior::DontPreserve> mCount;
@@ -238,7 +243,7 @@ class FreeRegionSet {
   void* mNextChunk;
 
   // Ensure there is a chunk available for the splay tree.
-  void MaybeRefillNextChunk();
+  void MaybeRefillNextChunk(AutoSpinLock& aLockHeld);
 
   // Get the next chunk from the free region set for this memory kind.
   void* TakeNextChunk();
@@ -267,8 +272,8 @@ class FreeRegionSet {
                     MyAllocPolicy, ChunkPages> Tree;
   Tree mRegions;
 
-  void InsertLockHeld(void* aAddress, size_t aSize);
-  void* ExtractLockHeld(size_t aSize);
+  void InsertLockHeld(void* aAddress, size_t aSize, AutoSpinLock& aLockHeld);
+  void* ExtractLockHeld(size_t aSize, AutoSpinLock& aLockHeld);
 
 public:
   explicit FreeRegionSet(MemoryKind aKind)
@@ -341,7 +346,7 @@ struct MemoryInfo {
   double mTimeTotals[(size_t) TimerKind::Count];
 
   // Information for memory allocation.
-  ssize_t mMemoryBalance[(size_t) MemoryKind::Count];
+  Atomic<ssize_t, Relaxed, Behavior::DontPreserve> mMemoryBalance[(size_t) MemoryKind::Count];
 
   // Recent dirty memory faults.
   void* mDirtyMemoryFaults[50];
@@ -403,6 +408,8 @@ CountdownThreadMain(void*)
 {
   while (true) {
     if (gMemoryInfo->mCountdown && --gMemoryInfo->mCountdown == 0) {
+      // When debugging hangs in the child process, we can break here in lldb
+      // to inspect what the process is doing.
       child::ReportFatalError("CountdownThread activated");
     }
     ThreadYield();
@@ -855,11 +862,10 @@ ProcessAllInitialMemoryRegions()
   UpdateNumTrackedRegionsForSnapshot();
 
   // Write protect all tracked memory.
-  SetMemoryChangesAllowed(false);
+  AutoDisallowMemoryChanges disallow;
   for (const AllocatedMemoryRegion& region : gMemoryInfo->mTrackedRegionsByAllocationOrder) {
     DirectWriteProtectMemory(region.mBase, region.mSize, region.mExecutable);
   }
-  SetMemoryChangesAllowed(true);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -910,13 +916,13 @@ FreeRegionSet::TakeNextChunk()
 }
 
 void
-FreeRegionSet::InsertLockHeld(void* aAddress, size_t aSize)
+FreeRegionSet::InsertLockHeld(void* aAddress, size_t aSize, AutoSpinLock& aLockHeld)
 {
   mRegions.insert(aSize, AllocatedMemoryRegion((uint8_t*) aAddress, aSize, true));
 }
 
 void
-FreeRegionSet::MaybeRefillNextChunk()
+FreeRegionSet::MaybeRefillNextChunk(AutoSpinLock& aLockHeld)
 {
   if (mNextChunk) {
     return;
@@ -926,7 +932,7 @@ FreeRegionSet::MaybeRefillNextChunk()
   size_t size = ChunkPages * PageSize;
   gMemoryInfo->mMemoryBalance[(size_t) mKind] += size;
 
-  mNextChunk = ExtractLockHeld(size);
+  mNextChunk = ExtractLockHeld(size, aLockHeld);
 
   if (!mNextChunk) {
     // Allocate memory from the system.
@@ -943,12 +949,12 @@ FreeRegionSet::Insert(void* aAddress, size_t aSize)
 
   AutoSpinLock lock(mLock);
 
-  MaybeRefillNextChunk();
-  InsertLockHeld(aAddress, aSize);
+  MaybeRefillNextChunk(lock);
+  InsertLockHeld(aAddress, aSize, lock);
 }
 
 void*
-FreeRegionSet::ExtractLockHeld(size_t aSize)
+FreeRegionSet::ExtractLockHeld(size_t aSize, AutoSpinLock& aLockHeld)
 {
   Maybe<AllocatedMemoryRegion> best =
     mRegions.lookupClosestLessOrEqual(aSize, /* aRemove = */ true);
@@ -956,7 +962,7 @@ FreeRegionSet::ExtractLockHeld(size_t aSize)
     MOZ_RELEASE_ASSERT(best.ref().mSize >= aSize);
     uint8_t* res = best.ref().mBase;
     if (best.ref().mSize > aSize) {
-      InsertLockHeld(res + aSize, best.ref().mSize - aSize);
+      InsertLockHeld(res + aSize, best.ref().mSize - aSize, aLockHeld);
     }
     MemoryZero(res, aSize);
     return res;
@@ -973,7 +979,7 @@ FreeRegionSet::Extract(void* aAddress, size_t aSize)
   AutoSpinLock lock(mLock);
 
   if (aAddress) {
-    MaybeRefillNextChunk();
+    MaybeRefillNextChunk(lock);
 
     // We were given a point at which to try to place the allocation. Look for
     // a free region which contains [aAddress, aAddress + aSize] entirely.
@@ -985,10 +991,10 @@ FreeRegionSet::Extract(void* aAddress, size_t aSize)
       if (regionBase <= addrBase && regionExtent >= addrExtent) {
         iter.removeEntry();
         if (regionBase < addrBase) {
-          InsertLockHeld(regionBase, addrBase - regionBase);
+          InsertLockHeld(regionBase, addrBase - regionBase, lock);
         }
         if (regionExtent > addrExtent) {
-          InsertLockHeld(addrExtent, regionExtent - addrExtent);
+          InsertLockHeld(addrExtent, regionExtent - addrExtent, lock);
         }
         MemoryZero(aAddress, aSize);
         return aAddress;
@@ -999,7 +1005,7 @@ FreeRegionSet::Extract(void* aAddress, size_t aSize)
 
   // No address hint, look for the smallest free region which is larger than
   // the desired allocation size.
-  return ExtractLockHeld(aSize);
+  return ExtractLockHeld(aSize, lock);
 }
 
 bool
@@ -1307,7 +1313,7 @@ TakeDiffMemorySnapshot()
 
   UpdateNumTrackedRegionsForSnapshot();
 
-  SetMemoryChangesAllowed(false);
+  AutoDisallowMemoryChanges disallow;
 
   // Stop all snapshot threads while we modify their worklists.
   gMemoryInfo->mSnapshotThreadsShouldIdle.ActivateBegin();
@@ -1328,8 +1334,6 @@ TakeDiffMemorySnapshot()
 
   // Allow snapshot threads to resume execution.
   gMemoryInfo->mSnapshotThreadsShouldIdle.ActivateEnd();
-
-  SetMemoryChangesAllowed(true);
 }
 
 void
@@ -1337,7 +1341,7 @@ RestoreMemoryToLastSavedCheckpoint()
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
-  SetMemoryChangesAllowed(false);
+  AutoDisallowMemoryChanges disallow;
 
   // Restore all dirty regions that have been modified since the last
   // checkpoint was saved/restored.
@@ -1347,8 +1351,6 @@ RestoreMemoryToLastSavedCheckpoint()
     DirectWriteProtectMemory(iter.ref().mBase, PageSize, iter.ref().mExecutable);
   }
   gMemoryInfo->mActiveDirty.clear();
-
-  SetMemoryChangesAllowed(true);
 }
 
 void
@@ -1357,14 +1359,12 @@ RestoreMemoryToLastSavedDiffCheckpoint()
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
   MOZ_RELEASE_ASSERT(gMemoryInfo->mActiveDirty.empty());
 
-  SetMemoryChangesAllowed(false);
+  AutoDisallowMemoryChanges disallow;
 
   // Wait while the snapshot threads restore all pages modified since the diff
   // snapshot was recorded.
   gMemoryInfo->mSnapshotThreadsShouldRestore.ActivateBegin();
   gMemoryInfo->mSnapshotThreadsShouldRestore.ActivateEnd();
-
-  SetMemoryChangesAllowed(true);
 }
 
 } // namespace recordreplay

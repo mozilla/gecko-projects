@@ -73,6 +73,12 @@ void EraseLastSavedDiffMemorySnapshot();
 // changes occur when they are not allowed then the process will crash.
 void SetMemoryChangesAllowed(bool aAllowed);
 
+struct MOZ_RAII AutoDisallowMemoryChanges
+{
+  AutoDisallowMemoryChanges() { SetMemoryChangesAllowed(false); }
+  ~AutoDisallowMemoryChanges() { SetMemoryChangesAllowed(true); }
+};
+
 // After a SEGV on the specified address, check if the violation occurred due
 // to the memory having been write protected by the snapshot mechanism. This
 // function returns whether the fault has been handled and execution may
@@ -92,9 +98,9 @@ void FixupFreeRegionsAfterRewind();
 void SetAllowIntentionalCrashes(bool aAllowed);
 
 // When WANT_COUNTDOWN_THREAD is defined (see MemorySnapshot.cpp), set a count
-// that, after a thread consumes it, causes the thread to busy-wait. This is
-// used for debugging and is a workaround for lldb often being unable to
-// interrupt a running process.
+// that, after a thread consumes it, causes the thread to report a fatal error.
+// This is used for debugging and is a workaround for lldb often being unable
+// to interrupt a running process.
 void StartCountdown(size_t aCount);
 
 // Per StartCountdown, set a countdown and remove it on destruction.

@@ -173,7 +173,7 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mHasPresented(false)
   , mHasBeforeUnload(false)
   , mIsMouseEnterIntoWidgetEventSuppressed(false)
-  , mIsVisibleRecordReplayTab(false)
+  , mIsActiveRecordReplayTab(false)
 {
   MOZ_ASSERT(aManager);
   // When the input event queue is disabled, we don't need to handle the case
@@ -183,7 +183,6 @@ TabParent::TabParent(nsIContentParent* aManager,
 
 TabParent::~TabParent()
 {
-  SetIsVisibleRecordReplayTab(false);
 }
 
 TabParent*
@@ -375,7 +374,7 @@ TabParent::DestroyInternal()
   }
 #endif
 
-  SetIsVisibleRecordReplayTab(false);
+  SetIsActiveRecordReplayTab(false);
 }
 
 void
@@ -2876,6 +2875,11 @@ TabParent::SetDocShellIsActive(bool isActive)
   // changing of the process priority.
   ProcessPriorityManager::TabActivityChanged(this, isActive);
 
+  // Keep track of how many active recording/replaying tabs there are.
+  if (Manager()->AsContentParent()->IsRecordingOrReplaying()) {
+    SetIsActiveRecordReplayTab(isActive);
+  }
+
   return NS_OK;
 }
 
@@ -2915,10 +2919,6 @@ TabParent::SetRenderLayers(bool aEnabled)
   }
 
   mRenderLayers = aEnabled;
-
-  if (Manager()->AsContentParent()->IsRecordingOrReplaying()) {
-    SetIsVisibleRecordReplayTab(aEnabled);
-  }
 
   SetRenderLayersInternal(aEnabled, false /* aForceRepaint */);
   return NS_OK;
@@ -3614,17 +3614,15 @@ TabParent::LiveResizeStopped()
   SuppressDisplayport(false);
 }
 
-/* static */ size_t TabParent::gNumVisibleRecordReplayTabs;
+/* static */ size_t TabParent::gNumActiveRecordReplayTabs;
 
 void
-TabParent::SetIsVisibleRecordReplayTab(bool aVisible)
+TabParent::SetIsActiveRecordReplayTab(bool aIsActive)
 {
-  if (aVisible && !mIsVisibleRecordReplayTab) {
-    gNumVisibleRecordReplayTabs++;
-  } else if (!aVisible && mIsVisibleRecordReplayTab) {
-    gNumVisibleRecordReplayTabs--;
+  if (aIsActive != mIsActiveRecordReplayTab) {
+    gNumActiveRecordReplayTabs += aIsActive ? 1 : -1;
+    mIsActiveRecordReplayTab = aIsActive;
   }
-  mIsVisibleRecordReplayTab = aVisible;
 }
 
 NS_IMETHODIMP

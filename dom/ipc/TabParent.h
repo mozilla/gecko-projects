@@ -591,8 +591,8 @@ public:
   void SetReadyToHandleInputEvents() { mIsReadyToHandleInputEvents = true; }
   bool IsReadyToHandleInputEvents() { return mIsReadyToHandleInputEvents; }
 
-  static bool AreRecordReplayTabsVisible() {
-    return gNumVisibleRecordReplayTabs != 0;
+  static bool AreRecordReplayTabsActive() {
+    return gNumActiveRecordReplayTabs != 0;
   }
 
 protected:
@@ -792,14 +792,14 @@ private:
   // mouse event and the TabChild is ready.
   bool mIsMouseEnterIntoWidgetEventSuppressed;
 
-  // How many record/replay tabs are being rendered by this process.
-  static size_t gNumVisibleRecordReplayTabs;
+  // How many record/replay tabs have active docshells in this process.
+  static size_t gNumActiveRecordReplayTabs;
 
-  // Whether this tab is contributing to gNumVisibleRecordReplayTabs.
-  bool mIsVisibleRecordReplayTab;
+  // Whether this tab is contributing to gNumActiveRecordReplayTabs.
+  bool mIsActiveRecordReplayTab;
 
-  // Update whether this is a visible record/replay tab.
-  void SetIsVisibleRecordReplayTab(bool aVisible);
+  // Update whether this is an active record/replay tab.
+  void SetIsActiveRecordReplayTab(bool aIsActive);
 
 public:
   static TabParent* GetTabParentFromLayersId(layers::LayersId aLayersId);

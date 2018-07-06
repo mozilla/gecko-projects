@@ -340,7 +340,7 @@ ChildProcessInfo::Recover(bool aPaused, Message* aPausedMessage, size_t aLastChe
   for (Message* msg : mMessages) {
     if (msg->mType == MessageType::SetBreakpoint) {
       SetBreakpointMessage* nmsg = static_cast<SetBreakpointMessage*>(msg);
-      SendMessageRaw(SetBreakpointMessage(nmsg->mId, js::ExecutionPosition()));
+      SendMessageRaw(SetBreakpointMessage(nmsg->mId, js::BreakpointPosition()));
     }
     free(msg);
   }

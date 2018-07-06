@@ -65,7 +65,7 @@ void TimeWarp(const js::ExecutionPoint& target);
 void SendRequest(const js::CharBuffer& aBuffer, js::CharBuffer* aResponse);
 
 // Set or clear a breakpoint in the child process.
-void SetBreakpoint(size_t aId, const js::ExecutionPosition& aPosition);
+void SetBreakpoint(size_t aId, const js::BreakpointPosition& aPosition);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Graphics
@@ -275,7 +275,7 @@ public:
   // Get all breakpoints currently installed for this process.
   void GetInstalledBreakpoints(Vector<SetBreakpointMessage*>& aBreakpoints);
 
-  typedef std::function<bool(js::ExecutionPosition::Kind)> BreakpointFilter;
+  typedef std::function<bool(js::BreakpointPosition::Kind)> BreakpointFilter;
 
   // Return whether this process is paused at a breakpoint matching a filter.
   bool IsPausedAtMatchingBreakpoint(const BreakpointFilter& aFilter);

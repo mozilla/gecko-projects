@@ -31,7 +31,7 @@ namespace js {
 // Identification for an execution position during JS execution in a child
 // process. Execution positions are places where breakpoints can be created or
 // where the child process can pause or warp to.
-struct ExecutionPosition
+struct BreakpointPosition
 {
   enum Kind {
     Invalid,
@@ -76,11 +76,11 @@ struct ExecutionPosition
   static const size_t EMPTY_OFFSET = (size_t) -1;
   static const size_t EMPTY_FRAME_INDEX = (size_t) -1;
 
-  ExecutionPosition()
+  BreakpointPosition()
     : mKind(Invalid), mScript(EMPTY_SCRIPT), mOffset(EMPTY_OFFSET), mFrameIndex(EMPTY_FRAME_INDEX)
   {}
 
-  explicit ExecutionPosition(Kind aKind,
+  explicit BreakpointPosition(Kind aKind,
                              size_t aScript = EMPTY_SCRIPT,
                              size_t aOffset = EMPTY_OFFSET,
                              size_t aFrameIndex = EMPTY_FRAME_INDEX)
@@ -89,17 +89,17 @@ struct ExecutionPosition
 
   bool IsValid() const { return mKind != Invalid; }
 
-  inline bool operator ==(const ExecutionPosition& o) const {
+  inline bool operator ==(const BreakpointPosition& o) const {
     return mKind == o.mKind
         && mScript == o.mScript
         && mOffset == o.mOffset
         && mFrameIndex == o.mFrameIndex;
   }
 
-  inline bool operator !=(const ExecutionPosition& o) const { return !(*this == o); }
+  inline bool operator !=(const BreakpointPosition& o) const { return !(*this == o); }
 
   // Return whether an execution point matching |o| also matches this.
-  inline bool Subsumes(const ExecutionPosition& o) const {
+  inline bool Subsumes(const BreakpointPosition& o) const {
     return (*this == o)
         || (mKind == OnPop && o.mKind == OnPop && mScript == EMPTY_SCRIPT)
         || (mKind == Break && o.mKind == OnStep && mScript == o.mScript && mOffset == o.mOffset);
@@ -117,7 +117,7 @@ struct ExecutionPosition
     case ForcedPause: return "ForcedPause";
     case WarpTarget: return "WarpTarget";
     }
-    MOZ_CRASH("Bad ExecutionPosition kind");
+    MOZ_CRASH("Bad BreakpointPosition kind");
   }
 
   const char* KindString() const {
@@ -134,13 +134,13 @@ struct ExecutionPoint
   // How much progress execution has made prior to reaching the position,
   // or zero if the execution point refers to the checkpoint itself.
   //
-  // A given ExecutionPosition may not be reached twice without an intervening
+  // A given BreakpointPosition may not be reached twice without an intervening
   // increment of the global progress counter.
   ProgressCounter mProgress;
 
   // The position reached after making the specified amount of progress,
   // invalid if the execution point refers to the checkpoint itself.
-  ExecutionPosition mPosition;
+  BreakpointPosition mPosition;
 
   ExecutionPoint()
     : mCheckpoint(CheckpointId::Invalid)
@@ -153,14 +153,14 @@ struct ExecutionPoint
   {}
 
   ExecutionPoint(size_t aCheckpoint, ProgressCounter aProgress,
-                 const ExecutionPosition& aPosition)
+                 const BreakpointPosition& aPosition)
     : mCheckpoint(aCheckpoint), mProgress(aProgress), mPosition(aPosition)
   {
     // ExecutionPoint positions must be as precise as possible, and cannot
     // subsume other positions.
-    MOZ_RELEASE_ASSERT(aPosition.mKind != ExecutionPosition::OnPop ||
-                       aPosition.mScript != ExecutionPosition::EMPTY_SCRIPT);
-    MOZ_RELEASE_ASSERT(aPosition.mKind != ExecutionPosition::Break);
+    MOZ_RELEASE_ASSERT(aPosition.mKind != BreakpointPosition::OnPop ||
+                       aPosition.mScript != BreakpointPosition::EMPTY_SCRIPT);
+    MOZ_RELEASE_ASSERT(aPosition.mKind != BreakpointPosition::Break);
   }
 
   bool HasPosition() const { return mPosition.IsValid(); }
@@ -193,7 +193,7 @@ void ProcessRequest(const char16_t* aRequest, size_t aRequestLength,
 
 // Ensure there is a handler in place that will call RecordReplayControl.positionHit
 // whenever the specified execution position is reached.
-void EnsurePositionHandler(const ExecutionPosition& aPosition);
+void EnsurePositionHandler(const BreakpointPosition& aPosition);
 
 // Clear all installed position handlers.
 void ClearPositionHandlers();
@@ -203,7 +203,7 @@ void ClearPausedState();
 
 // Given an execution position inside a script, get an execution position for
 // the entry point of that script, otherwise return nothing.
-Maybe<ExecutionPosition> GetEntryPosition(const ExecutionPosition& aPosition);
+Maybe<BreakpointPosition> GetEntryPosition(const BreakpointPosition& aPosition);
 
 } // namespace js
 } // namespace recordreplay

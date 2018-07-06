@@ -13,8 +13,10 @@
 namespace mozilla {
 namespace recordreplay {
 
+#define QuoteString(aString) #aString
+#define ExpandAndQuote(aMacro) QuoteString(aMacro)
+
 #define THREAD_STACK_TOP_SIZE 2048
-#define THREAD_STACK_TOP_SIZE_STR "2048"
 
 // Information about a thread's state, for use in saving or restoring checkpoints.
 // The contents of this structure are in preserved memory.
@@ -80,12 +82,12 @@ extern int
 SaveThreadStateOrReturnFromRestore(ThreadState* aInfo, int (*aSetjmpArg)(jmp_buf),
                                    int* aStackSeparator);
 
-#define THREAD_REGISTERS_OFFSET "8"
-#define THREAD_STACK_POINTER_OFFSET "160"
-#define THREAD_STACK_TOP_OFFSET "168"
-#define THREAD_STACK_TOP_BYTES_OFFSET "2216"
-#define THREAD_STACK_CONTENTS_OFFSET "2224"
-#define THREAD_STACK_BYTES_OFFSET "2232"
+#define THREAD_REGISTERS_OFFSET 8
+#define THREAD_STACK_POINTER_OFFSET 160
+#define THREAD_STACK_TOP_OFFSET 168
+#define THREAD_STACK_TOP_BYTES_OFFSET 2216
+#define THREAD_STACK_CONTENTS_OFFSET 2224
+#define THREAD_STACK_BYTES_OFFSET 2232
 
 __asm(
 "_SaveThreadStateOrReturnFromRestore:"
@@ -98,22 +100,22 @@ __asm(
 
   // Update |aInfo->mStackPointer|. Everything above this on the stack will be
   // restored after getting here from longjmp.
-  "movq %rsp, " THREAD_STACK_POINTER_OFFSET "(%rbx);"
+  "movq %rsp, " ExpandAndQuote(THREAD_STACK_POINTER_OFFSET) "(%rbx);"
 
   // Compute the number of bytes to store on the stack top.
   "subq %rsp, %rdx;" // rdx is the third arg reg
 
   // Bounds check against the size of the stack top buffer.
-  "cmpl $" THREAD_STACK_TOP_SIZE_STR ", %edx;"
+  "cmpl $" ExpandAndQuote(THREAD_STACK_TOP_SIZE) ", %edx;"
   "jg SaveThreadStateOrReturnFromRestore_crash;"
 
   // Store the number of bytes written to the stack top buffer.
-  "movq %rdx, " THREAD_STACK_TOP_BYTES_OFFSET "(%rbx);"
+  "movq %rdx, " ExpandAndQuote(THREAD_STACK_TOP_BYTES_OFFSET) "(%rbx);"
 
   // Load the start of the stack top buffer and the stack pointer.
   "movq %rsp, %r8;"
   "movq %rbx, %r9;"
-  "addq $" THREAD_STACK_TOP_OFFSET ", %r9;"
+  "addq $" ExpandAndQuote(THREAD_STACK_TOP_OFFSET) ", %r9;"
 
   "jmp SaveThreadStateOrReturnFromRestore_copyTopRestart;"
 
@@ -131,7 +133,7 @@ __asm(
 "SaveThreadStateOrReturnFromRestore_copyTopDone:"
 
   // Call setjmp, passing |aInfo->mRegisters|.
-  "addq $" THREAD_REGISTERS_OFFSET ", %rdi;"
+  "addq $" ExpandAndQuote(THREAD_REGISTERS_OFFSET) ", %rdi;"
   "callq *%rsi;" // rsi is the second arg reg
 
   // If setjmp returned zero, we just saved the state and are done.
@@ -143,9 +145,9 @@ __asm(
   // exclusively for this, don't touch the stack at all.
 
   // Load |mStackPointer|, |mStackContents|, and |mStackBytes| from |aInfo|.
-  "movq " THREAD_STACK_POINTER_OFFSET "(%rbx), %rcx;"
-  "movq " THREAD_STACK_CONTENTS_OFFSET "(%rbx), %r8;"
-  "movq " THREAD_STACK_BYTES_OFFSET "(%rbx), %r9;"
+  "movq " ExpandAndQuote(THREAD_STACK_POINTER_OFFSET) "(%rbx), %rcx;"
+  "movq " ExpandAndQuote(THREAD_STACK_CONTENTS_OFFSET) "(%rbx), %r8;"
+  "movq " ExpandAndQuote(THREAD_STACK_BYTES_OFFSET) "(%rbx), %r9;"
 
   // The stack pointer we loaded should be identical to the stack pointer we have.
   "cmpq %rsp, %rcx;"
@@ -178,12 +180,13 @@ __asm(
 bool
 SaveThreadState(size_t aId, int* aStackSeparator)
 {
-  MOZ_ASSERT(offsetof(ThreadState, mRegisters) == atol(THREAD_REGISTERS_OFFSET));
-  MOZ_ASSERT(offsetof(ThreadState, mStackPointer) == atol(THREAD_STACK_POINTER_OFFSET));
-  MOZ_ASSERT(offsetof(ThreadState, mStackTop) == atol(THREAD_STACK_TOP_OFFSET));
-  MOZ_ASSERT(offsetof(ThreadState, mStackTopBytes) == atol(THREAD_STACK_TOP_BYTES_OFFSET));
-  MOZ_ASSERT(offsetof(ThreadState, mStackContents) == atol(THREAD_STACK_CONTENTS_OFFSET));
-  MOZ_ASSERT(offsetof(ThreadState, mStackBytes) == atol(THREAD_STACK_BYTES_OFFSET));
+  static_assert(offsetof(ThreadState, mRegisters) == THREAD_REGISTERS_OFFSET &&
+                offsetof(ThreadState, mStackPointer) == THREAD_STACK_POINTER_OFFSET &&
+                offsetof(ThreadState, mStackTop) == THREAD_STACK_TOP_OFFSET &&
+                offsetof(ThreadState, mStackTopBytes) == THREAD_STACK_TOP_BYTES_OFFSET &&
+                offsetof(ThreadState, mStackContents) == THREAD_STACK_CONTENTS_OFFSET &&
+                offsetof(ThreadState, mStackBytes) == THREAD_STACK_BYTES_OFFSET,
+                "Incorrect ThreadState offsets");
 
   ThreadState* info = &gThreadState[aId];
   MOZ_RELEASE_ASSERT(!info->mShouldRestore);
@@ -256,20 +259,17 @@ SaveAllThreads(SavedCheckpoint& aSaved)
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
   AutoPassThroughThreadEvents pt; // setjmp may perform system calls.
-  SetMemoryChangesAllowed(false);
+  AutoDisallowMemoryChanges disallow;
 
   int stackSeparator = 0;
   if (!SaveThreadState(MainThreadId, &stackSeparator)) {
     // We just restored this state from a later point of execution.
-    SetMemoryChangesAllowed(true);
     return false;
   }
 
   for (size_t i = MainThreadId; i <= MaxRecordedThreadId; i++) {
     SaveThreadStack(aSaved.mStacks[i - 1], i);
   }
-
-  SetMemoryChangesAllowed(true);
   return true;
 }
 
@@ -278,6 +278,7 @@ RestoreAllThreads(const SavedCheckpoint& aSaved)
 {
   MOZ_RELEASE_ASSERT(Thread::CurrentIsMainThread());
 
+  // These will be matched by the Auto* classes in SaveAllThreads().
   BeginPassThroughThreadEvents();
   SetMemoryChangesAllowed(false);
 
@@ -285,8 +286,10 @@ RestoreAllThreads(const SavedCheckpoint& aSaved)
     RestoreStackForLoadingByThread(aSaved.mStacks[i - 1], i);
   }
 
+  // Restore this stack to its state when we saved it in SaveAllThreads(), and
+  // continue executing from there.
   RestoreThreadStack(MainThreadId);
-  MOZ_CRASH(); // RestoreThreadState does not return.
+  Unreachable();
 }
 
 void

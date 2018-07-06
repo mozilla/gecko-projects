@@ -12,11 +12,11 @@ namespace mozilla {
 namespace recordreplay {
 namespace navigation {
 
-typedef js::ExecutionPosition ExecutionPosition;
+typedef js::BreakpointPosition BreakpointPosition;
 typedef js::ExecutionPoint ExecutionPoint;
 
 static void
-ExecutionPositionToString(const ExecutionPosition& aPos, nsAutoCString& aStr)
+BreakpointPositionToString(const BreakpointPosition& aPos, nsAutoCString& aStr)
 {
   aStr.AppendPrintf("{ Kind: %s, Script: %d, Offset: %d, Frame: %d }",
                     aPos.KindString(), (int) aPos.mScript, (int) aPos.mOffset, (int) aPos.mFrameIndex);
@@ -28,7 +28,7 @@ ExecutionPointToString(const ExecutionPoint& aPoint, nsAutoCString& aStr)
   aStr.AppendPrintf("{ Checkpoint %d", (int) aPoint.mCheckpoint);
   if (aPoint.HasPosition()) {
     aStr.AppendPrintf(" Progress %llu Position ", aPoint.mProgress);
-    ExecutionPositionToString(aPoint.mPosition, aStr);
+    BreakpointPositionToString(aPoint.mPosition, aStr);
   }
   aStr.AppendPrintf(" }");
 }
@@ -286,7 +286,7 @@ class FindLastHitPhase final : public NavigationPhase
   // All positions we are interested in hits for, including all breakpoint
   // positions (and possibly other positions).
   struct TrackedPosition {
-    ExecutionPosition mPosition;
+    BreakpointPosition mPosition;
 
     // The last time this was hit so far, or invalid.
     ExecutionPoint mLastHit;
@@ -294,13 +294,13 @@ class FindLastHitPhase final : public NavigationPhase
     // The value of the counter when the last hit occurred.
     size_t mLastHitCount;
 
-    explicit TrackedPosition(const ExecutionPosition& aPosition)
+    explicit TrackedPosition(const BreakpointPosition& aPosition)
       : mPosition(aPosition), mLastHitCount(0)
     {}
   };
   InfallibleVector<TrackedPosition, 4, UntrackedAllocPolicy> mTrackedPositions;
 
-  const TrackedPosition& FindTrackedPosition(const ExecutionPosition& aPos);
+  const TrackedPosition& FindTrackedPosition(const BreakpointPosition& aPos);
   void OnRegionEnd();
 
 public:
@@ -336,9 +336,9 @@ class NavigationState
 
 public:
   // All the currently installed breakpoints, indexed by their ID.
-  InfallibleVector<ExecutionPosition, 4, UntrackedAllocPolicy> mBreakpoints;
+  InfallibleVector<BreakpointPosition, 4, UntrackedAllocPolicy> mBreakpoints;
 
-  ExecutionPosition& GetBreakpoint(size_t id) {
+  BreakpointPosition& GetBreakpoint(size_t id) {
     while (id >= mBreakpoints.length()) {
       mBreakpoints.emplaceBack();
     }
@@ -497,7 +497,7 @@ GetAllBreakpointHits(const ExecutionPoint& aPoint, BreakpointVector& aHitBreakpo
 {
   MOZ_RELEASE_ASSERT(aPoint.HasPosition());
   for (size_t id = 0; id < gNavigation->mBreakpoints.length(); id++) {
-    const ExecutionPosition& breakpoint = gNavigation->mBreakpoints[id];
+    const BreakpointPosition& breakpoint = gNavigation->mBreakpoints[id];
     if (breakpoint.IsValid() && breakpoint.Subsumes(aPoint.mPosition)) {
       aHitBreakpoints.append(id);
     }
@@ -791,7 +791,7 @@ ForwardPhase::Enter(const ExecutionPoint& aPoint)
   gNavigation->SetPhase(this);
 
   // Install handlers for all breakpoints.
-  for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
+  for (const BreakpointPosition& breakpoint : gNavigation->mBreakpoints) {
     if (breakpoint.IsValid()) {
       js::EnsurePositionHandler(breakpoint);
     }
@@ -937,15 +937,15 @@ FindLastHitPhase::Enter(const CheckpointId& aStart, const Maybe<ExecutionPoint>&
   gNavigation->SetPhase(this);
 
   // All breakpoints are tracked positions.
-  for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
+  for (const BreakpointPosition& breakpoint : gNavigation->mBreakpoints) {
     if (breakpoint.IsValid()) {
       mTrackedPositions.emplaceBack(breakpoint);
     }
   }
 
   // Entry points to scripts containing breakpoints are tracked positions.
-  for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
-    Maybe<ExecutionPosition> entry = GetEntryPosition(breakpoint);
+  for (const BreakpointPosition& breakpoint : gNavigation->mBreakpoints) {
+    Maybe<BreakpointPosition> entry = GetEntryPosition(breakpoint);
     if (entry.isSome()) {
       mTrackedPositions.emplaceBack(entry.ref());
     }
@@ -1004,7 +1004,7 @@ FindLastHitPhase::HitRecordingEndpoint(const ExecutionPoint& aPoint)
 }
 
 const FindLastHitPhase::TrackedPosition&
-FindLastHitPhase::FindTrackedPosition(const ExecutionPosition& aPos)
+FindLastHitPhase::FindTrackedPosition(const BreakpointPosition& aPos)
 {
   for (const TrackedPosition& tracked : mTrackedPositions) {
     if (tracked.mPosition == aPos) {
@@ -1019,7 +1019,7 @@ FindLastHitPhase::OnRegionEnd()
 {
   // Find the point of the last hit which coincides with a breakpoint.
   Maybe<TrackedPosition> lastBreakpoint;
-  for (const ExecutionPosition& breakpoint : gNavigation->mBreakpoints) {
+  for (const BreakpointPosition& breakpoint : gNavigation->mBreakpoints) {
     if (!breakpoint.IsValid()) {
       continue;
     }
@@ -1058,7 +1058,7 @@ FindLastHitPhase::OnRegionEnd()
   // Instead, try to place a temporary checkpoint at the last time the
   // breakpoint's script was entered. This optimizes for the case of stepping
   // around within a frame.
-  Maybe<ExecutionPosition> baseEntry = GetEntryPosition(lastBreakpoint.ref().mPosition);
+  Maybe<BreakpointPosition> baseEntry = GetEntryPosition(lastBreakpoint.ref().mPosition);
   if (baseEntry.isSome()) {
     TrackedPosition tracked = FindTrackedPosition(baseEntry.ref());
     if (tracked.mLastHit.HasPosition() &&
@@ -1121,7 +1121,7 @@ DebuggerRequest(js::CharBuffer* aRequestBuffer)
 }
 
 void
-SetBreakpoint(size_t aId, const ExecutionPosition& aPosition)
+SetBreakpoint(size_t aId, const BreakpointPosition& aPosition)
 {
   gNavigation->GetBreakpoint(aId) = aPosition;
 }
@@ -1177,14 +1177,14 @@ RecordReplayInterface_ExecutionProgressCounter()
 } // extern "C"
 
 ExecutionPoint
-CurrentExecutionPoint(const ExecutionPosition& aPosition)
+CurrentExecutionPoint(const BreakpointPosition& aPosition)
 {
   return ExecutionPoint(gNavigation->LastCheckpoint().mNormal,
                         gProgressCounter, aPosition);
 }
 
 void
-PositionHit(const ExecutionPosition& position)
+PositionHit(const BreakpointPosition& position)
 {
   AutoDisallowThreadEvents disallow;
   gNavigation->PositionHit(CurrentExecutionPoint(position));
@@ -1197,7 +1197,7 @@ RecordReplayInterface_NewTimeWarpTarget()
 {
   uint64_t progress = ++gProgressCounter;
 
-  PositionHit(ExecutionPosition(ExecutionPosition::WarpTarget));
+  PositionHit(BreakpointPosition(BreakpointPosition::WarpTarget));
 
   if (gNavigation->mTimeWarpTargetCheckpoints.empty() ||
       progress > gNavigation->mTimeWarpTargetCheckpoints.back().first)
@@ -1224,7 +1224,7 @@ TimeWarpTargetExecutionPoint(ProgressCounter aTarget)
   MOZ_RELEASE_ASSERT(checkpoint.isSome());
 
   return ExecutionPoint(checkpoint.ref(), aTarget,
-                        ExecutionPosition(ExecutionPosition::WarpTarget));
+                        BreakpointPosition(BreakpointPosition::WarpTarget));
 }
 
 bool

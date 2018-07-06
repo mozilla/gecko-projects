@@ -336,6 +336,8 @@ UpdateGraphicsInUIProcess(const PaintMessage* aMsg)
     return;
   }
 
+  fprintf(stderr, "UPDATE WIDTH %d HEIGHT %d\n", (int) gLastPaint.ref().mWidth, (int) gLastPaint.ref().mHeight);
+
   nsTArray<dom::PBrowserChild*> browsers;
   dom::ContentChild::GetSingleton()->ManagedPBrowserChild(browsers);
 

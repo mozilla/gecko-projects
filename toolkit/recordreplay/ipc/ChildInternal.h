@@ -39,7 +39,7 @@ void AlwaysSaveTemporaryCheckpoints();
 
 // Process incoming requests from the middleman.
 void DebuggerRequest(js::CharBuffer* aBuffer);
-void SetBreakpoint(size_t aId, const js::ExecutionPosition& aPosition);
+void SetBreakpoint(size_t aId, const js::BreakpointPosition& aPosition);
 void Resume(bool aForward);
 void RestoreCheckpoint(size_t aId);
 void RunToPoint(const js::ExecutionPoint& aPoint);
@@ -50,10 +50,10 @@ void RunToPoint(const js::ExecutionPoint& aPoint);
 bool MaybeDivergeFromRecording();
 
 // Notify navigation that an execution position was hit.
-void PositionHit(const js::ExecutionPosition& position);
+void PositionHit(const js::BreakpointPosition& position);
 
 // Get an execution point for hitting the specified position right now.
-js::ExecutionPoint CurrentExecutionPoint(const js::ExecutionPosition& aPosition);
+js::ExecutionPoint CurrentExecutionPoint(const js::BreakpointPosition& aPosition);
 
 // Convert an identifier from NewTimeWarpTarget which we have seen while
 // executing into an ExecutionPoint.

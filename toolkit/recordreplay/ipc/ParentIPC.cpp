@@ -774,11 +774,11 @@ HasSavedCheckpointsInRange(ChildProcessInfo* aChild, size_t aStart, size_t aEnd)
 // child to inspect its state. This excludes breakpoints set for things
 // internal to the debugger.
 static bool
-IsUserBreakpoint(js::ExecutionPosition::Kind aKind)
+IsUserBreakpoint(js::BreakpointPosition::Kind aKind)
 {
-  MOZ_RELEASE_ASSERT(aKind != js::ExecutionPosition::Invalid);
-  return aKind != js::ExecutionPosition::NewScript
-      && aKind != js::ExecutionPosition::ConsoleMessage;
+  MOZ_RELEASE_ASSERT(aKind != js::BreakpointPosition::Invalid);
+  return aKind != js::BreakpointPosition::NewScript
+      && aKind != js::BreakpointPosition::ConsoleMessage;
 }
 
 static void
@@ -928,7 +928,7 @@ SendRequest(const js::CharBuffer& aBuffer, js::CharBuffer* aResponse)
 }
 
 void
-SetBreakpoint(size_t aId, const js::ExecutionPosition& aPosition)
+SetBreakpoint(size_t aId, const js::BreakpointPosition& aPosition)
 {
   MaybeCreateCheckpointInRecordingChild();
   gActiveChild->WaitUntilPaused();
@@ -1156,8 +1156,8 @@ static void
 HitForcedPauseBreakpoints(bool aRecordingBoundary)
 {
   Vector<uint32_t> breakpoints;
-  gActiveChild->GetMatchingInstalledBreakpoints([=](js::ExecutionPosition::Kind aKind) {
-      return aKind == js::ExecutionPosition::ForcedPause;
+  gActiveChild->GetMatchingInstalledBreakpoints([=](js::BreakpointPosition::Kind aKind) {
+      return aKind == js::BreakpointPosition::ForcedPause;
     }, breakpoints);
   if (!breakpoints.empty()) {
     uint32_t* newBreakpoints = new uint32_t[breakpoints.length()];

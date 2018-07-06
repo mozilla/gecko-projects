@@ -59,14 +59,14 @@ Stream::ReadBytes(void* aData, size_t aSize)
 
     EnsureMemory(&mBallast, &mBallastSize, chunk.mCompressedSize, BallastMaxSize(),
                  DontCopyExistingData);
-    mFile->ReadChunk(mBallast, chunk);
+    mFile->ReadChunk(mBallast.get(), chunk);
 
     EnsureMemory(&mBuffer, &mBufferSize, chunk.mDecompressedSize, BUFFER_MAX,
                  DontCopyExistingData);
 
     size_t bytesWritten;
-    if (!Compression::LZ4::decompress((const char*) mBallast, chunk.mCompressedSize,
-                                      (char*) mBuffer, chunk.mDecompressedSize, &bytesWritten) ||
+    if (!Compression::LZ4::decompress(mBallast.get(), chunk.mCompressedSize,
+                                      mBuffer.get(), chunk.mDecompressedSize, &bytesWritten) ||
         bytesWritten != chunk.mDecompressedSize)
     {
       MOZ_CRASH();
@@ -167,7 +167,7 @@ Stream::CheckInput(size_t aValue)
 }
 
 void
-Stream::EnsureMemory(char** aBuf, size_t* aSize,
+Stream::EnsureMemory(UniquePtr<char[]>* aBuf, size_t* aSize,
                      size_t aNeededSize, size_t aMaxSize, ShouldCopy aCopy)
 {
   // Once a stream buffer grows, it never shrinks again. Buffers start out
@@ -177,13 +177,10 @@ Stream::EnsureMemory(char** aBuf, size_t* aSize,
   if (*aSize < aNeededSize) {
     size_t newSize = std::min(std::max<size_t>(256, aNeededSize * 2), aMaxSize);
     char* newBuf = new char[newSize];
-    if (*aBuf) {
-      if (aCopy == CopyExistingData) {
-        memcpy(newBuf, *aBuf, *aSize);
-      }
-      delete[] *aBuf;
+    if (*aBuf && aCopy == CopyExistingData) {
+      memcpy(newBuf, aBuf->get(), *aSize);
     }
-    *aBuf = newBuf;
+    aBuf->reset(newBuf);
     *aSize = newSize;
   }
 }
@@ -201,12 +198,12 @@ Stream::Flush(bool aTakeLock)
   EnsureMemory(&mBallast, &mBallastSize, bound, BallastMaxSize(),
                DontCopyExistingData);
 
-  size_t compressedSize = Compression::LZ4::compress((const char*) mBuffer, mBufferPos,
-                                                     (char*) mBallast);
+  size_t compressedSize = Compression::LZ4::compress(mBuffer.get(), mBufferPos, mBallast.get());
   MOZ_RELEASE_ASSERT(compressedSize != 0);
   MOZ_RELEASE_ASSERT((size_t)compressedSize <= bound);
 
-  StreamChunkLocation chunk = mFile->WriteChunk(mBallast, compressedSize, mBufferPos, aTakeLock);
+  StreamChunkLocation chunk =
+    mFile->WriteChunk(mBallast.get(), compressedSize, mBufferPos, aTakeLock);
   mChunks.append(chunk);
   MOZ_ALWAYS_TRUE(++mChunkIndex == mChunks.length());
 
@@ -222,9 +219,6 @@ Stream::BallastMaxSize()
 ///////////////////////////////////////////////////////////////////////////////
 // File
 ///////////////////////////////////////////////////////////////////////////////
-
-// We expect to find this at every index in a file.
-static const uint64_t MagicValue = 0xd3e7f5fa + 0;
 
 // Information in a file index about a chunk.
 struct FileIndexChunk
@@ -243,12 +237,15 @@ struct FileIndexChunk
   {}
 };
 
+// We expect to find this at every index in a file.
+static const uint64_t MagicValue = 0xd3e7f5fae445b3ac;
+
 // Index of chunks in a file. There is an index at the start of the file
 // (which is always empty) and at various places within the file itself.
 struct FileIndex
 {
   // This should match MagicValue.
-  uint32_t mMagic;
+  uint64_t mMagic;
 
   // How many FileIndexChunk instances follow this structure.
   uint32_t mNumChunks;
@@ -361,7 +358,7 @@ File::Flush()
 
   InfallibleVector<FileIndexChunk> newChunks;
   for (auto& vector : mStreams) {
-    for (Stream* stream : vector) {
+    for (const UniquePtr<Stream>& stream : vector) {
       if (stream) {
         stream->Flush(/* aTakeLock = */ false);
         for (size_t i = stream->mFlushedChunks; i < stream->mChunkIndex; i++) {
@@ -434,15 +431,15 @@ File::OpenStream(StreamName aName, size_t aNameIndex)
 
   auto& vector = mStreams[(size_t)aName];
 
-  if (aNameIndex >= vector.length()) {
-    vector.appendN(nullptr, aNameIndex + 1 - vector.length());
+  while (aNameIndex >= vector.length()) {
+    vector.emplaceBack();
   }
 
-  Stream*& stream = vector[aNameIndex];
+  UniquePtr<Stream>& stream = vector[aNameIndex];
   if (!stream) {
-    stream = new Stream(this, aName, aNameIndex);
+    stream.reset(new Stream(this, aName, aNameIndex));
   }
-  return stream;
+  return stream.get();
 }
 
 } // namespace recordreplay

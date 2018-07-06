@@ -263,9 +263,9 @@ struct SetBreakpointMessage : public Message
 
   // New position of the breakpoint. If this is invalid then the breakpoint is
   // being cleared.
-  js::ExecutionPosition mPosition;
+  js::BreakpointPosition mPosition;
 
-  SetBreakpointMessage(size_t aId, const js::ExecutionPosition& aPosition)
+  SetBreakpointMessage(size_t aId, const js::BreakpointPosition& aPosition)
     : Message(MessageType::SetBreakpoint, sizeof(*this))
     , mId(aId)
     , mPosition(aPosition)

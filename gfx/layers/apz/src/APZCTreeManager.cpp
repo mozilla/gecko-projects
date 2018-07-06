@@ -16,7 +16,7 @@
 #include "InputData.h"                  // for InputData, etc
 #include "Layers.h"                     // for Layer, etc
 #include "mozilla/dom/MouseEventBinding.h" // for MouseEvent constants
-#include "mozilla/dom/TabParent.h"      // for AreRecordReplayTabsVisible
+#include "mozilla/dom/TabParent.h"      // for AreRecordReplayTabsActive
 #include "mozilla/dom/Touch.h"          // for Touch
 #include "mozilla/gfx/gfxVars.h"        // for gfxVars
 #include "mozilla/gfx/GPUParent.h"      // for GPUParent
@@ -1137,10 +1137,10 @@ APZCTreeManager::ReceiveInputEvent(InputData& aEvent,
 {
   APZThreadUtils::AssertOnControllerThread();
 
-  // Ignore input events when there are visible tabs that are recording or
+  // Ignore input events when there are active tabs that are recording or
   // replaying. APZ does not work with the special layers constructed by
   // the middleman processes being communicated with here.
-  if (dom::TabParent::AreRecordReplayTabsVisible()) {
+  if (dom::TabParent::AreRecordReplayTabsActive()) {
     return nsEventStatus_eIgnore;
   }
 

@@ -38,23 +38,23 @@ NonNullObject(JSContext* aCx, HandleValue aValue)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ExecutionPosition and ExecutionPoint Conversion
+// BreakpointPosition and ExecutionPoint Conversion
 ///////////////////////////////////////////////////////////////////////////////
 
 static JSObject*
-EncodeExecutionPosition(JSContext* aCx, const ExecutionPosition& aPosition)
+EncodeBreakpointPosition(JSContext* aCx, const BreakpointPosition& aPosition)
 {
   RootedString kindString(aCx, JS_NewStringCopyZ(aCx, aPosition.KindString()));
   RootedObject obj(aCx, JS_NewObject(aCx, nullptr));
   if (!kindString || !obj ||
       !JS_DefineProperty(aCx, obj, "kind", kindString, JSPROP_ENUMERATE) ||
-      (aPosition.mScript != ExecutionPosition::EMPTY_SCRIPT &&
+      (aPosition.mScript != BreakpointPosition::EMPTY_SCRIPT &&
        !JS_DefineProperty(aCx, obj, "script",
                           (uint32_t) aPosition.mScript, JSPROP_ENUMERATE)) ||
-      (aPosition.mOffset != ExecutionPosition::EMPTY_OFFSET &&
+      (aPosition.mOffset != BreakpointPosition::EMPTY_OFFSET &&
        !JS_DefineProperty(aCx, obj, "offset",
                           (uint32_t) aPosition.mOffset, JSPROP_ENUMERATE)) ||
-      (aPosition.mFrameIndex != ExecutionPosition::EMPTY_FRAME_INDEX &&
+      (aPosition.mFrameIndex != BreakpointPosition::EMPTY_FRAME_INDEX &&
        !JS_DefineProperty(aCx, obj, "frameIndex",
                           (uint32_t) aPosition.mFrameIndex, JSPROP_ENUMERATE)))
   {
@@ -82,9 +82,9 @@ GetNumberProperty(JSContext* aCx, HandleObject aObject, const char* aProperty, b
 }
 
 static bool
-DecodeExecutionPosition(JSContext* aCx, HandleObject aObject, ExecutionPosition* aResult)
+DecodeBreakpointPosition(JSContext* aCx, HandleObject aObject, BreakpointPosition* aResult)
 {
-  *aResult = ExecutionPosition();
+  *aResult = BreakpointPosition();
 
   RootedValue v(aCx);
   if (!JS_GetProperty(aCx, aObject, "kind", &v)) {
@@ -92,17 +92,17 @@ DecodeExecutionPosition(JSContext* aCx, HandleObject aObject, ExecutionPosition*
   }
 
   RootedString str(aCx, ToString(aCx, v));
-  for (size_t i = ExecutionPosition::Invalid + 1; i < ExecutionPosition::KIND_LIMIT; i++) {
-    ExecutionPosition::Kind kind = (ExecutionPosition::Kind) i;
+  for (size_t i = BreakpointPosition::Invalid + 1; i < BreakpointPosition::KIND_LIMIT; i++) {
+    BreakpointPosition::Kind kind = (BreakpointPosition::Kind) i;
     bool match;
-    if (!JS_StringEqualsAscii(aCx, str, ExecutionPosition::StaticKindString(kind), &match))
+    if (!JS_StringEqualsAscii(aCx, str, BreakpointPosition::StaticKindString(kind), &match))
       return false;
     if (match) {
       aResult->mKind = kind;
       break;
     }
   }
-  if (aResult->mKind == ExecutionPosition::Invalid) {
+  if (aResult->mKind == BreakpointPosition::Invalid) {
     JS_ReportErrorASCII(aCx, "Could not decode execution position kind");
     return false;
   }
@@ -116,7 +116,7 @@ static JSObject*
 EncodeExecutionPoint(JSContext* aCx, const ExecutionPoint& aPoint)
 {
   RootedObject obj(aCx, JS_NewObject(aCx, nullptr));
-  RootedObject position(aCx, EncodeExecutionPosition(aCx, aPoint.mPosition));
+  RootedObject position(aCx, EncodeBreakpointPosition(aCx, aPoint.mPosition));
   if (!obj || !position ||
       !JS_DefineProperty(aCx, obj, "checkpoint", (double) aPoint.mCheckpoint, JSPROP_ENUMERATE) ||
       !JS_DefineProperty(aCx, obj, "progress", (double) aPoint.mProgress, JSPROP_ENUMERATE) ||
@@ -139,7 +139,7 @@ DecodeExecutionPoint(JSContext* aCx, HandleObject aObject, ExecutionPoint* aPoin
 
   RootedObject positionObject(aCx, NonNullObject(aCx, v));
   return positionObject
-      && DecodeExecutionPosition(aCx, positionObject, &aPoint->mPosition)
+      && DecodeBreakpointPosition(aCx, positionObject, &aPoint->mPosition)
       && GetNumberProperty(aCx, aObject, "checkpoint", true, &aPoint->mCheckpoint)
       && GetNumberProperty(aCx, aObject, "progress", true, &aPoint->mProgress);
 }
@@ -266,9 +266,9 @@ Middleman_SendRequest(JSContext* aCx, unsigned aArgc, Value* aVp)
 struct InstalledBreakpoint
 {
   PersistentRootedObject mHandler;
-  ExecutionPosition mPosition;
+  BreakpointPosition mPosition;
 
-  InstalledBreakpoint(JSContext* aCx, JSObject* aHandler, const ExecutionPosition& aPosition)
+  InstalledBreakpoint(JSContext* aCx, JSObject* aHandler, const BreakpointPosition& aPosition)
     : mHandler(aCx, aHandler), mPosition(aPosition)
   {}
 };
@@ -285,8 +285,8 @@ Middleman_SetBreakpoint(JSContext* aCx, unsigned aArgc, Value* aVp)
     return false;
   }
 
-  ExecutionPosition position;
-  if (!DecodeExecutionPosition(aCx, positionObject, &position)) {
+  BreakpointPosition position;
+  if (!DecodeBreakpointPosition(aCx, positionObject, &position)) {
     return false;
   }
 
@@ -343,7 +343,7 @@ Middleman_ClearBreakpoint(JSContext* aCx, unsigned aArgc, Value* aVp)
   delete gBreakpoints[breakpointId];
   gBreakpoints[breakpointId] = nullptr;
 
-  parent::SetBreakpoint(breakpointId, ExecutionPosition());
+  parent::SetBreakpoint(breakpointId, BreakpointPosition());
 
   args.rval().setUndefined();
   return true;
@@ -436,13 +436,13 @@ ProcessRequest(const char16_t* aRequest, size_t aRequestLength, CharBuffer* aRes
 }
 
 void
-EnsurePositionHandler(const ExecutionPosition& aPosition)
+EnsurePositionHandler(const BreakpointPosition& aPosition)
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
-  RootedObject obj(cx, EncodeExecutionPosition(cx, aPosition));
+  RootedObject obj(cx, EncodeBreakpointPosition(cx, aPosition));
   if (!obj) {
     MOZ_CRASH("EnsurePositionHandler");
   }
@@ -483,14 +483,14 @@ ClearPausedState()
   }
 }
 
-Maybe<ExecutionPosition>
-GetEntryPosition(const ExecutionPosition& aPosition)
+Maybe<BreakpointPosition>
+GetEntryPosition(const BreakpointPosition& aPosition)
 {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
 
-  RootedObject positionObject(cx, EncodeExecutionPosition(cx, aPosition));
+  RootedObject positionObject(cx, EncodeBreakpointPosition(cx, aPosition));
   if (!positionObject) {
     MOZ_CRASH("GetEntryPosition");
   }
@@ -507,8 +507,8 @@ GetEntryPosition(const ExecutionPosition& aPosition)
   }
 
   RootedObject rvalObject(cx, &rval.toObject());
-  ExecutionPosition entryPosition;
-  if (!DecodeExecutionPosition(cx, rvalObject, &entryPosition)) {
+  BreakpointPosition entryPosition;
+  if (!DecodeBreakpointPosition(cx, rvalObject, &entryPosition)) {
     MOZ_CRASH("GetEntryPosition");
   }
 
@@ -647,8 +647,8 @@ RecordReplay_PositionHit(JSContext* aCx, unsigned aArgc, Value* aVp)
     return false;
   }
 
-  ExecutionPosition position;
-  if (!DecodeExecutionPosition(aCx, obj, &position)) {
+  BreakpointPosition position;
+  if (!DecodeBreakpointPosition(aCx, obj, &position)) {
     return false;
   }
 
@@ -690,8 +690,8 @@ RecordReplay_CurrentExecutionPoint(JSContext* aCx, unsigned aArgc, Value* aVp)
     return false;
   }
 
-  ExecutionPosition position;
-  if (!DecodeExecutionPosition(aCx, obj, &position)) {
+  BreakpointPosition position;
+  if (!DecodeBreakpointPosition(aCx, obj, &position)) {
     return false;
   }
 

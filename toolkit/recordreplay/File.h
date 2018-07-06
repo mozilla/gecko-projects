@@ -13,6 +13,7 @@
 
 #include "mozilla/PodOperations.h"
 #include "mozilla/RecordReplay.h"
+#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace recordreplay {
@@ -24,7 +25,12 @@ namespace recordreplay {
 // about the state of the file handles which the process has opened. Data
 // written and read from files is automatically compressed with LZ4.
 //
-// File is threadsafe, but Stream is not.
+// Files are used internally for any disk accesses which the record/replay
+// infrastructure needs to make. Currently, this is only for accessing the
+// recording file.
+//
+// File is threadsafe for simultaneous read/read and write/write accesses.
+// Stream is not threadsafe.
 
 // A location of a chunk of a stream within a file.
 struct StreamChunkLocation
@@ -75,7 +81,7 @@ class Stream
   InfallibleVector<StreamChunkLocation> mChunks;
 
   // Data buffer.
-  char* mBuffer;
+  UniquePtr<char[]> mBuffer;
 
   // The maximum number of bytes to buffer before compressing and writing to
   // disk, and the maximum number of bytes that can be decompressed at once.
@@ -94,7 +100,7 @@ class Stream
   size_t mStreamPos;
 
   // Any buffer available for use when decompressing or compressing data.
-  char* mBallast;
+  UniquePtr<char[]> mBallast;
   size_t mBallastSize;
 
   // The number of chunks that have been completely read or written. When
@@ -119,11 +125,6 @@ class Stream
     , mChunkIndex(0)
     , mFlushedChunks(0)
   {}
-
-  ~Stream() {
-    delete[] mBuffer;
-    delete[] mBallast;
-  }
 
 public:
   StreamName Name() const { return mName; }
@@ -179,7 +180,7 @@ private:
     CopyExistingData
   };
 
-  void EnsureMemory(char** aBuf, size_t* aSize, size_t aNeededSize, size_t aMaxSize,
+  void EnsureMemory(UniquePtr<char[]>* aBuf, size_t* aSize, size_t aNeededSize, size_t aMaxSize,
                     ShouldCopy aCopy);
   void Flush(bool aTakeLock);
 
@@ -210,7 +211,7 @@ private:
   uint64_t mLastIndexOffset;
 
   // All streams in this file, indexed by stream name and name index.
-  typedef InfallibleVector<Stream*> StreamVector;
+  typedef InfallibleVector<UniquePtr<Stream>> StreamVector;
   StreamVector mStreams[(size_t) StreamName::Count];
 
   // Lock protecting access to this file.
@@ -226,9 +227,6 @@ private:
     mWriteOffset = 0;
     mLastIndexOffset = 0;
     for (auto& vector : mStreams) {
-      for (auto stream : vector) {
-        delete stream;
-      }
       vector.clear();
     }
     PodZero(&mLock);
