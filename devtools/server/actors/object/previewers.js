@@ -129,7 +129,6 @@ const previewers = {
     const items = grip.preview.items = [];
 
     for (let i = 0; i < length; ++i) {
-      let value;
       if (raw) {
         // Array Xrays filter out various possibly-unsafe properties (like
         // functions, and claim that the value is undefined instead. This
@@ -139,15 +138,18 @@ const previewers = {
         // Xrays on any indexed value props that we pull off of it.
         const desc = Object.getOwnPropertyDescriptor(Cu.waiveXrays(raw), i);
         if (desc && !desc.get && !desc.set) {
-          value = Cu.unwaiveXrays(desc.value);
+          let value = Cu.unwaiveXrays(desc.value);
           value = ObjectUtils.makeDebuggeeValueIfNeeded(obj, value);
+          items.push(hooks.createValueGrip(value));
+        } else {
+          items.push(null);
         }
       } else {
         // When recording/replaying we don't have a raw object, but also don't
         // need to deal with Xrays into the debuggee compartment.
-        value = DevToolsUtils.getProperty(obj, i);
+        const value = DevToolsUtils.getProperty(obj, i);
+        items.push(hooks.createValueGrip(value));
       }
-      items.push(hooks.createValueGrip(value));
 
       if (items.length == OBJECT_PREVIEW_MAX_ITEMS) {
         break;

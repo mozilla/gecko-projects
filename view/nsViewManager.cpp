@@ -1092,12 +1092,6 @@ nsViewManager::ProcessPendingUpdates()
     return;
   }
 
-  // Middleman processes only handle compositor updates that are sent from
-  // their replaying process.
-  if (recordreplay::IsMiddleman()) {
-    return;
-  }
-
   // Flush things like reflows by calling WillPaint on observer presShells.
   if (mPresShell) {
     mPresShell->GetPresContext()->RefreshDriver()->RevokeViewManagerFlush();

@@ -141,8 +141,11 @@ class BufferList : private AllocPolicy
 
     Clear();
 
-    if (!Init(aOther.mSize, (aOther.mSize + kSegmentAlignment - 1) & ~(kSegmentAlignment - 1)))
+    // We don't make an exact copy of aOther. Instead, create a single segment
+    // with enough space to hold all data in aOther.
+    if (!Init(aOther.mSize, (aOther.mSize + kSegmentAlignment - 1) & ~(kSegmentAlignment - 1))) {
       return false;
+    }
 
     size_t offset = 0;
     for (const Segment& segment : aOther.mSegments) {
