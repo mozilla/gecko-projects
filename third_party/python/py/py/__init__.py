@@ -18,12 +18,7 @@ except ImportError:
     import apipkg
     lib_not_mangled_by_packagers = False
     vendor_prefix = ''
-
-try:
-    from ._version import version as __version__
-except ImportError:
-    # broken installation, we don't even try
-    __version__ = "unknown"
+__version__ = '1.5.3'
 
 
 apipkg.initpkg(__name__, attr={'_apipkg': apipkg, 'error': error}, exportdefs={
