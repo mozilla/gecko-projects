@@ -57,7 +57,8 @@ public:
 private:
     virtual ~nsWebBrowserPersist();
     nsresult SaveURIInternal(
-        nsIURI *aURI, uint32_t aCacheKey, nsIURI *aReferrer,
+        nsIURI *aURI, nsIPrincipal* aTriggeringPrincipal,
+        uint32_t aCacheKey, nsIURI *aReferrer,
         uint32_t aReferrerPolicy, nsIInputStream *aPostData,
         const char *aExtraHeaders, nsIURI *aFile,
         bool aCalcFileExt, bool aIsPrivate);
@@ -93,7 +94,7 @@ private:
     static nsresult GetLocalFileFromURI(nsIURI *aURI, nsIFile **aLocalFile);
     static nsresult AppendPathToURI(nsIURI *aURI, const nsAString & aPath, nsCOMPtr<nsIURI>& aOutURI);
     nsresult MakeAndStoreLocalFilenameInURIMap(
-        nsIURI *aURI, bool aNeedsPersisting, URIData **aData);
+        nsIURI *aURI, nsIWebBrowserPersistDocument *aDoc, bool aNeedsPersisting, URIData **aData);
     nsresult MakeOutputStream(
         nsIURI *aFile, nsIOutputStream **aOutputStream);
     nsresult MakeOutputStreamFromFile(
@@ -112,16 +113,19 @@ private:
         nsIURI *aURI, nsString &aFilename);
     nsresult StoreURI(
         const char *aURI,
+        nsIWebBrowserPersistDocument *aDoc,
         bool aNeedsPersisting = true,
         URIData **aData = nullptr);
     nsresult StoreURI(
         nsIURI *aURI,
+        nsIWebBrowserPersistDocument *aDoc,
         bool aNeedsPersisting = true,
         URIData **aData = nullptr);
     bool DocumentEncoderExists(const char *aContentType);
 
     nsresult SaveSubframeContent(
         nsIWebBrowserPersistDocument *aFrameContent,
+        nsIWebBrowserPersistDocument *aParentDocument,
         const nsCString& aURISpec,
         URIData *aData);
     nsresult SendErrorStatusChange(

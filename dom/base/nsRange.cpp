@@ -298,7 +298,6 @@ nsRange::nsRange(nsINode* aNode)
   , mNextStartRef(nullptr)
   , mNextEndRef(nullptr)
   , mIsPositioned(false)
-  , mMaySpanAnonymousSubtrees(false)
   , mIsGenerated(false)
   , mCalledByJS(false)
 {
@@ -1147,7 +1146,7 @@ nsRange::IsValidOffset(nsINode* aNode, uint32_t aOffset)
 
 /* static */
 nsINode*
-nsRange::ComputeRootNode(nsINode* aNode, bool aMaySpanAnonymousSubtrees)
+nsRange::ComputeRootNode(nsINode* aNode)
 {
   if (!aNode) {
     return nullptr;
@@ -1159,36 +1158,30 @@ nsRange::ComputeRootNode(nsINode* aNode, bool aMaySpanAnonymousSubtrees)
     }
 
     nsIContent* content = aNode->AsContent();
-    if (!aMaySpanAnonymousSubtrees) {
-      // If the node is in a shadow tree then the ShadowRoot is the root.
-      ShadowRoot* containingShadow = content->GetContainingShadow();
-      if (containingShadow) {
-        return containingShadow;
-      }
 
-      // If the node has a binding parent, that should be the root.
-      // XXXbz maybe only for native anonymous content?
-      nsINode* root = content->GetBindingParent();
-      if (root) {
-        return root;
-      }
+    // If the node is in a shadow tree then the ShadowRoot is the root.
+    if (ShadowRoot* containingShadow = content->GetContainingShadow()) {
+      return containingShadow;
+    }
+
+    // If the node has a binding parent, that should be the root.
+    // XXXbz maybe only for native anonymous content?
+    if (nsINode* root = content->GetBindingParent()) {
+      return root;
     }
   }
 
   // Elements etc. must be in document or in document fragment,
   // text nodes in document, in document fragment or in attribute.
-  nsINode* root = aNode->GetUncomposedDoc();
-  if (root) {
+  if (nsINode* root = aNode->GetUncomposedDoc()) {
     return root;
   }
 
-  root = aNode->SubtreeRoot();
-
-  NS_ASSERTION(!root->IsDocument(),
+  NS_ASSERTION(!aNode->SubtreeRoot()->IsDocument(),
                "GetUncomposedDoc should have returned a doc");
 
   // We allow this because of backward compatibility.
-  return root;
+  return aNode->SubtreeRoot();
 }
 
 /* static */
@@ -1380,7 +1373,7 @@ nsRange::SelectNodesInContainer(nsINode* aContainer,
   MOZ_ASSERT(aStartContent && aContainer->ComputeIndexOf(aStartContent) != -1);
   MOZ_ASSERT(aEndContent && aContainer->ComputeIndexOf(aEndContent) != -1);
 
-  nsINode* newRoot = ComputeRootNode(aContainer, mMaySpanAnonymousSubtrees);
+  nsINode* newRoot = ComputeRootNode(aContainer);
   MOZ_ASSERT(newRoot);
   if (!newRoot) {
     return;
@@ -2583,8 +2576,6 @@ nsRange::CloneRange() const
 {
   RefPtr<nsRange> range = new nsRange(mOwner);
 
-  range->SetMaySpanAnonymousSubtrees(mMaySpanAnonymousSubtrees);
-
   range->DoSetRange(mStart.AsRaw(), mEnd.AsRaw(), mRoot);
 
   return range.forget();
@@ -3030,14 +3021,14 @@ nsRange::CollectClientRectsAndText(nsLayoutUtils::RectCallback* aCollector,
   nsCOMPtr<nsINode> endContainer = aEndContainer;
 
   // Flush out layout so our frames are up to date.
-  if (!aStartContainer->IsInUncomposedDoc()) {
+  if (!aStartContainer->IsInComposedDoc()) {
     return;
   }
 
   if (aFlushLayout) {
     aStartContainer->OwnerDoc()->FlushPendingNotifications(FlushType::Layout);
     // Recheck whether we're still in the document
-    if (!aStartContainer->IsInUncomposedDoc()) {
+    if (!aStartContainer->IsInComposedDoc()) {
       return;
     }
   }
@@ -3170,7 +3161,7 @@ nsRange::GetUsedFontFaces(nsTArray<nsAutoPtr<InspectorFontFace>>& aResult,
   doc->FlushPendingNotifications(FlushType::Frames);
 
   // Recheck whether we're still in the document
-  NS_ENSURE_TRUE(mStart.Container()->IsInUncomposedDoc(), NS_ERROR_UNEXPECTED);
+  NS_ENSURE_TRUE(mStart.Container()->IsInComposedDoc(), NS_ERROR_UNEXPECTED);
 
   // A table to map gfxFontEntry objects to InspectorFontFace objects.
   // (We hold on to the InspectorFontFaces strongly due to the nsAutoPtrs

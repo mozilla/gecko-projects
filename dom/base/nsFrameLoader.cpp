@@ -25,7 +25,7 @@
 #include "nsIWebProgress.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIDocShellLoadInfo.h"
+#include "nsDocShellLoadInfo.h"
 #include "nsIBaseWindow.h"
 #include "nsIBrowser.h"
 #include "nsContentUtils.h"
@@ -472,9 +472,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
   rv = CheckURILoad(mURIToLoad, mTriggeringPrincipal);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDocShellLoadInfo> loadInfo;
-  mDocShell->CreateLoadInfo(getter_AddRefs(loadInfo));
-  NS_ENSURE_TRUE(loadInfo, NS_ERROR_FAILURE);
+  RefPtr<nsDocShellLoadInfo> loadInfo = new nsDocShellLoadInfo();
 
   loadInfo->SetOriginalFrameSrc(mLoadingOriginalSrc);
   mLoadingOriginalSrc = false;
@@ -3346,6 +3344,8 @@ nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
 
   UIStateChangeType showAccelerators = UIStateChangeType_NoChange;
   UIStateChangeType showFocusRings = UIStateChangeType_NoChange;
+  uint64_t chromeOuterWindowID = 0;
+
   nsIDocument* doc = mOwnerContent->OwnerDoc();
   if (doc) {
     nsCOMPtr<nsPIWindowRoot> root = nsContentUtils::GetWindowRoot(doc);
@@ -3354,11 +3354,17 @@ nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
         root->ShowAccelerators() ? UIStateChangeType_Set : UIStateChangeType_Clear;
       showFocusRings =
         root->ShowFocusRings() ? UIStateChangeType_Set : UIStateChangeType_Clear;
+
+      nsPIDOMWindowOuter* outerWin = root->GetWindow();
+      if (outerWin) {
+        chromeOuterWindowID = outerWin->WindowID();
+      }
     }
   }
 
   bool tabContextUpdated =
     aTabContext->SetTabContext(OwnerIsMozBrowserFrame(),
+                               chromeOuterWindowID,
                                showAccelerators,
                                showFocusRings,
                                attrs,

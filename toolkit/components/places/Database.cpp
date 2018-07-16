@@ -77,7 +77,7 @@
 //   on URI lengths above 255 bytes
 #define PREF_HISTORY_MAXURLLEN_DEFAULT 2000
 
-#define PREF_MIGRATE_V48_FRECENCIES "places.database.migrateV48Frecencies"
+#define PREF_MIGRATE_V52_ORIGIN_FRECENCIES "places.database.migrateV52OriginFrecencies"
 
 // Maximum size for the WAL file.
 // For performance reasons this should be as large as possible, so that more
@@ -1151,7 +1151,7 @@ Database::InitSchema(bool* aDatabaseMigrated)
       mShouldConvertIconPayloads = false;
       nsFaviconService::ConvertUnsupportedPayloads(mMainConn);
     }
-    MigrateV48Frecencies();
+    MigrateV52OriginFrecencies();
   });
 
   // We are going to update the database, so everything from now on should be in
@@ -1311,7 +1311,12 @@ Database::InitSchema(bool* aDatabaseMigrated)
         NS_ENSURE_SUCCESS(rv, rv);
       }
 
-      // Firefox 62 uses schema version 51.
+      if (currentSchemaVersion < 52) {
+        rv = MigrateV52Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 62 uses schema version 52.
 
       // Schema Upgrades must add migration code here.
       // >>> IMPORTANT! <<<
@@ -1428,12 +1433,12 @@ Database::CheckRoots()
   // If the database has just been created, skip straight to the part where
   // we create the roots.
   if (mDatabaseStatus == nsINavHistoryService::DATABASE_STATUS_CREATE) {
-    return EnsureBookmarkRoots(0);
+    return EnsureBookmarkRoots(0, /* shouldReparentRoots */ false);
   }
 
   nsCOMPtr<mozIStorageStatement> stmt;
   nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
-    "SELECT guid, id, position FROM moz_bookmarks WHERE guid IN ( "
+    "SELECT guid, id, position, parent FROM moz_bookmarks WHERE guid IN ( "
       "'" ROOT_GUID "', '" MENU_ROOT_GUID "', '" TOOLBAR_ROOT_GUID "', "
       "'" TAGS_ROOT_GUID "', '" UNFILED_ROOT_GUID "', '" MOBILE_ROOT_GUID "' )"
     ), getter_AddRefs(stmt));
@@ -1442,12 +1447,16 @@ Database::CheckRoots()
   bool hasResult;
   nsAutoCString guid;
   int32_t maxPosition = 0;
+  bool shouldReparentRoots = false;
   while (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
     rv = stmt->GetUTF8String(0, guid);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    int64_t parentId = stmt->AsInt64(3);
+
     if (guid.EqualsLiteral(ROOT_GUID)) {
       mRootId = stmt->AsInt64(1);
+      shouldReparentRoots |= parentId != 0;
     }
     else {
       maxPosition = std::max(stmt->AsInt32(2), maxPosition);
@@ -1467,25 +1476,23 @@ Database::CheckRoots()
       else if (guid.EqualsLiteral(MOBILE_ROOT_GUID)) {
         mMobileRootId = stmt->AsInt64(1);
       }
+      shouldReparentRoots |= parentId != mRootId;
     }
   }
 
-  rv = EnsureBookmarkRoots(maxPosition + 1);
+  rv = EnsureBookmarkRoots(maxPosition + 1, shouldReparentRoots);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
 
 nsresult
-Database::EnsureBookmarkRoots(const int32_t startPosition)
+Database::EnsureBookmarkRoots(const int32_t startPosition,
+                              bool shouldReparentRoots)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsresult rv;
-
-  // Note: If the root is missing, we recreate it but we don't fix any
-  // remaining built-in folder parent ids. We leave these to a maintenance task,
-  // so that we're not needing to do extra checks on startup.
 
   if (mRootId < 1) {
     // The first root's title is an empty string.
@@ -1553,11 +1560,77 @@ Database::EnsureBookmarkRoots(const int32_t startPosition)
       if (NS_FAILED(rv)) return rv;
 
       rv = mobileRootSyncStatusStmt->Execute();
-      NS_ENSURE_SUCCESS(rv, rv);
+      if (NS_FAILED(rv)) return rv;
 
       mMobileRootId = mobileRootId;
     }
   }
+
+  if (!shouldReparentRoots) {
+    return NS_OK;
+  }
+
+  // At least one root had the wrong parent, so we need to ensure that
+  // all roots are parented correctly, fix their positions, and bump the
+  // Sync change counter.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "CREATE TEMP TRIGGER moz_ensure_bookmark_roots_trigger "
+    "AFTER UPDATE OF parent ON moz_bookmarks FOR EACH ROW "
+    "WHEN OLD.parent <> NEW.parent "
+    "BEGIN "
+      "UPDATE moz_bookmarks SET "
+        "syncChangeCounter = syncChangeCounter + 1 "
+      "WHERE id IN (OLD.parent, NEW.parent, NEW.id); "
+
+      "UPDATE moz_bookmarks SET "
+        "position = position - 1 "
+      "WHERE parent = OLD.parent AND position >= OLD.position; "
+
+      // Fix the positions of the root's old siblings. Since we've already
+      // moved the root, we need to exclude it from the subquery.
+      "UPDATE moz_bookmarks SET "
+        "position = IFNULL((SELECT MAX(position) + 1 FROM moz_bookmarks "
+                           "WHERE parent = NEW.parent AND "
+                                 "id <> NEW.id), 0)"
+      "WHERE id = NEW.id; "
+    "END"
+  ));
+  if (NS_FAILED(rv)) return rv;
+  auto guard = MakeScopeExit([&]() {
+    Unused << mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+      "DROP TRIGGER moz_ensure_bookmark_roots_trigger"));
+  });
+
+  nsCOMPtr<mozIStorageStatement> reparentStmt;
+  rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+    "UPDATE moz_bookmarks SET "
+      "parent = CASE id WHEN :root_id THEN 0 ELSE :root_id END "
+    "WHERE id IN (:root_id, :menu_root_id, :toolbar_root_id, :tags_root_id, "
+                 ":unfiled_root_id, :mobile_root_id)"
+  ), getter_AddRefs(reparentStmt));
+  if (NS_FAILED(rv)) return rv;
+
+  rv = reparentStmt->BindInt64ByName(NS_LITERAL_CSTRING("root_id"),
+                                     mRootId);
+  if (NS_FAILED(rv)) return rv;
+  rv = reparentStmt->BindInt64ByName(NS_LITERAL_CSTRING("menu_root_id"),
+                                     mMenuRootId);
+  if (NS_FAILED(rv)) return rv;
+  rv = reparentStmt->BindInt64ByName(NS_LITERAL_CSTRING("toolbar_root_id"),
+                                     mToolbarRootId);
+  if (NS_FAILED(rv)) return rv;
+  rv = reparentStmt->BindInt64ByName(NS_LITERAL_CSTRING("tags_root_id"),
+                                     mTagsRootId);
+  if (NS_FAILED(rv)) return rv;
+  rv = reparentStmt->BindInt64ByName(NS_LITERAL_CSTRING("unfiled_root_id"),
+                                     mUnfiledRootId);
+  if (NS_FAILED(rv)) return rv;
+  rv = reparentStmt->BindInt64ByName(NS_LITERAL_CSTRING("mobile_root_id"),
+                                     mMobileRootId);
+  if (NS_FAILED(rv)) return rv;
+
+  rv = reparentStmt->Execute();
+  if (NS_FAILED(rv)) return rv;
 
   return NS_OK;
 }
@@ -1597,6 +1670,8 @@ Database::InitFunctions()
   NS_ENSURE_SUCCESS(rv, rv);
   rv = SqrtFunction::create(mMainConn);
   NS_ENSURE_SUCCESS(rv, rv);
+  rv = NoteSyncChangeFunction::create(mMainConn);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -1624,6 +1699,10 @@ Database::InitTempEntities()
   NS_ENSURE_SUCCESS(rv, rv);
   rv = mMainConn->ExecuteSimpleSQL(CREATE_PLACES_AFTERDELETE_TRIGGER);
   NS_ENSURE_SUCCESS(rv, rv);
+  rv = mMainConn->ExecuteSimpleSQL(CREATE_UPDATEORIGINSUPDATE_TEMP);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = mMainConn->ExecuteSimpleSQL(CREATE_UPDATEORIGINSUPDATE_AFTERDELETE_TRIGGER);
+  NS_ENSURE_SUCCESS(rv, rv);
   rv = mMainConn->ExecuteSimpleSQL(CREATE_PLACES_AFTERUPDATE_FRECENCY_TRIGGER);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1639,6 +1718,8 @@ Database::InitTempEntities()
   rv = mMainConn->ExecuteSimpleSQL(CREATE_KEYWORDS_FOREIGNCOUNT_AFTERINSERT_TRIGGER);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = mMainConn->ExecuteSimpleSQL(CREATE_KEYWORDS_FOREIGNCOUNT_AFTERUPDATE_TRIGGER);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = mMainConn->ExecuteSimpleSQL(CREATE_BOOKMARKS_DELETED_AFTERINSERT_TRIGGER);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -2206,6 +2287,7 @@ Database::MigrateV44Up() {
       "UNION ALL "
       "SELECT b.id, b.guid FROM moz_bookmarks b "
       "JOIN itemsToRemove d ON d.id = b.parent "
+      "WHERE b.guid NOT IN ('menu________', 'toolbar_____', 'tags________', 'unfiled_____', 'mobile______') "
     ") "
     "DELETE FROM moz_bookmarks "
       "WHERE id IN (SELECT id FROM itemsToRemove) "
@@ -2374,13 +2456,6 @@ Database::MigrateV48Up() {
   ));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Setting this pref will cause InitSchema to begin async migration of
-  // frecencies to moz_origins.  The reason we don't defer the other steps
-  // above, like we do this one here, is because we want to make sure that the
-  // main data in moz_origins, prefix and host, are coherent in relation to
-  // moz_places.
-  Unused << Preferences::SetBool(PREF_MIGRATE_V48_FRECENCIES, true);
-
   // From this point on, nobody should use moz_hosts again.  Empty it so that we
   // don't leak the user's history, but don't remove it yet so that the user can
   // downgrade.
@@ -2392,102 +2467,14 @@ Database::MigrateV48Up() {
   return NS_OK;
 }
 
-namespace {
-
-class MigrateV48FrecenciesRunnable final : public Runnable
-{
-public:
-  NS_DECL_NSIRUNNABLE
-  explicit MigrateV48FrecenciesRunnable(mozIStorageConnection* aDBConn);
-private:
-  nsCOMPtr<mozIStorageConnection> mDBConn;
-};
-
-MigrateV48FrecenciesRunnable::MigrateV48FrecenciesRunnable(mozIStorageConnection* aDBConn)
-  : Runnable("places::MigrateV48FrecenciesRunnable")
-  , mDBConn(aDBConn)
-{
-}
-
-NS_IMETHODIMP
-MigrateV48FrecenciesRunnable::Run()
-{
-  if (NS_IsMainThread()) {
-    // Migration done.  Clear the pref.
-    Unused << Preferences::ClearUser(PREF_MIGRATE_V48_FRECENCIES);
-    return NS_OK;
-  }
-
-  // We do the work in chunks, or the wal journal may grow too much.
-  nsCOMPtr<mozIStorageStatement> updateStmt;
-  nsresult rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "UPDATE moz_origins "
-    "SET frecency = ( "
-      "SELECT MAX(frecency) "
-      "FROM moz_places "
-      "WHERE moz_places.origin_id = moz_origins.id "
-    ") "
-    "WHERE rowid IN ( "
-      "SELECT rowid "
-      "FROM moz_origins "
-      "WHERE frecency = -1 "
-      "LIMIT 400 "
-    ") "
-  ));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<mozIStorageStatement> selectStmt;
-  rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
-    "SELECT id FROM moz_origins WHERE frecency = -1 "
-  ), getter_AddRefs(selectStmt));
-  NS_ENSURE_SUCCESS(rv, rv);
-  bool hasResult = false;
-  rv = selectStmt->ExecuteStep(&hasResult);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (hasResult) {
-    // There are more results to handle. Re-dispatch to the same thread for the
-    // next chunk.
-    return NS_DispatchToCurrentThread(this);
-  }
-
-  // Re-dispatch to the main-thread to flip the migration pref.
-  return NS_DispatchToMainThread(this);
-}
-
-} // namespace
-
-void
-Database::MigrateV48Frecencies()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!Preferences::GetBool(PREF_MIGRATE_V48_FRECENCIES)) {
-    return;
-  }
-
-  RefPtr<MigrateV48FrecenciesRunnable> runnable =
-    new MigrateV48FrecenciesRunnable(mMainConn);
-  nsCOMPtr<nsIEventTarget> target = do_GetInterface(mMainConn);
-  MOZ_ASSERT(target);
-  Unused << target->Dispatch(runnable, NS_DISPATCH_NORMAL);
-}
-
 nsresult
 Database::MigrateV49Up() {
-  // Calculate initial frecency stats, which should have been done as part of
-  // the v48 migration but wasn't.
-  nsNavHistory *navHistory = nsNavHistory::GetHistoryService();
-  NS_ENSURE_STATE(navHistory);
-  nsresult rv = navHistory->RecalculateFrecencyStats(nullptr);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // These hidden preferences were added along with the v48 migration as part of
   // the frecency stats implementation but are now replaced with entries in the
   // moz_meta table.
   Unused << Preferences::ClearUser("places.frecency.stats.count");
   Unused << Preferences::ClearUser("places.frecency.stats.sum");
   Unused << Preferences::ClearUser("places.frecency.stats.sumOfSquares");
-
   return NS_OK;
 }
 
@@ -2648,6 +2635,131 @@ Database::MigrateV51Up()
   rv = stmt->BindUTF8StringByName(NS_LITERAL_CSTRING("anno_name"),  LAST_USED_ANNO);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = stmt->Execute();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+namespace {
+
+class MigrateV52OriginFrecenciesRunnable final : public Runnable
+{
+public:
+  NS_DECL_NSIRUNNABLE
+  explicit MigrateV52OriginFrecenciesRunnable(mozIStorageConnection* aDBConn);
+private:
+  nsCOMPtr<mozIStorageConnection> mDBConn;
+};
+
+MigrateV52OriginFrecenciesRunnable::MigrateV52OriginFrecenciesRunnable(mozIStorageConnection* aDBConn)
+  : Runnable("places::MigrateV52OriginFrecenciesRunnable")
+  , mDBConn(aDBConn)
+{
+}
+
+NS_IMETHODIMP
+MigrateV52OriginFrecenciesRunnable::Run()
+{
+  if (NS_IsMainThread()) {
+    // Migration done.  Clear the pref.
+    Unused << Preferences::ClearUser(PREF_MIGRATE_V52_ORIGIN_FRECENCIES);
+
+    // Now that frecencies have been migrated, recalculate the origin frecency
+    // stats.
+    nsNavHistory *navHistory = nsNavHistory::GetHistoryService();
+    NS_ENSURE_STATE(navHistory);
+    nsresult rv = navHistory->RecalculateOriginFrecencyStats(nullptr);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    return NS_OK;
+  }
+
+  // We do the work in chunks, or the wal journal may grow too much.
+  nsresult rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_origins "
+    "SET frecency = ( "
+      "SELECT CAST(TOTAL(frecency) AS INTEGER) "
+      "FROM moz_places "
+      "WHERE frecency > 0 AND moz_places.origin_id = moz_origins.id "
+    ") "
+    "WHERE id IN ( "
+      "SELECT id "
+      "FROM moz_origins "
+      "WHERE frecency < 0 "
+      "LIMIT 400 "
+    ") "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<mozIStorageStatement> selectStmt;
+  rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT 1 "
+    "FROM moz_origins "
+    "WHERE frecency < 0 "
+    "LIMIT 1 "
+  ), getter_AddRefs(selectStmt));
+  NS_ENSURE_SUCCESS(rv, rv);
+  bool hasResult = false;
+  rv = selectStmt->ExecuteStep(&hasResult);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (hasResult) {
+    // There are more results to handle. Re-dispatch to the same thread for the
+    // next chunk.
+    return NS_DispatchToCurrentThread(this);
+  }
+
+  // Re-dispatch to the main-thread to flip the migration pref.
+  return NS_DispatchToMainThread(this);
+}
+
+} // namespace
+
+void
+Database::MigrateV52OriginFrecencies()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!Preferences::GetBool(PREF_MIGRATE_V52_ORIGIN_FRECENCIES)) {
+    // The migration has already been completed.
+    return;
+  }
+
+  RefPtr<MigrateV52OriginFrecenciesRunnable> runnable(
+    new MigrateV52OriginFrecenciesRunnable(mMainConn));
+  nsCOMPtr<nsIEventTarget> target(do_GetInterface(mMainConn));
+  MOZ_ASSERT(target);
+  Unused << target->Dispatch(runnable, NS_DISPATCH_NORMAL);
+}
+
+nsresult
+Database::MigrateV52Up()
+{
+  // Before this migration, moz_origin.frecency is the max frecency of all
+  // places with the origin.  After this migration, it's the sum of frecencies
+  // of all places with the origin.
+  //
+  // Setting this pref will cause InitSchema to begin async migration, via
+  // MigrateV52OriginFrecencies.  When that migration is done, origin frecency
+  // stats are recalculated (see MigrateV52OriginFrecenciesRunnable::Run).
+  Unused << Preferences::SetBool(PREF_MIGRATE_V52_ORIGIN_FRECENCIES, true);
+
+  // Set all origin frecencies to -1 so that MigrateV52OriginFrecenciesRunnable
+  // will migrate them.
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_origins SET frecency = -1 "
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // This migration also renames these moz_meta keys that keep track of frecency
+  // stats.  (That happens when stats are recalculated.)  Delete the old ones.
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DELETE FROM moz_meta "
+    "WHERE key IN ( "
+      "'frecency_count', "
+      "'frecency_sum', "
+      "'frecency_sum_of_squares' "
+    ") "
+  ));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;

@@ -12,7 +12,6 @@
 #include "base/thread.h"                // for Thread
 #include "base/message_loop.h"
 #include "nsISupportsImpl.h"
-#include "nsRefPtrHashtable.h"
 #include "ThreadSafeRefcountingWithMainThreadDestruction.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/webrender/webrender_ffi.h"
@@ -207,7 +206,7 @@ private:
   std::unordered_map<uint64_t, WindowInfo*> mWindowInfos;
 
   Mutex mRenderTextureMapLock;
-  nsRefPtrHashtable<nsUint64HashKey, RenderTextureHost> mRenderTextures;
+  std::unordered_map<uint64_t, RefPtr<RenderTextureHost>> mRenderTextures;
   // Used to remove all RenderTextureHost that are going to be removed by
   // a deferred callback and remove them right away without waiting for the callback.
   // On device reset we have to remove all GL related resources right away.

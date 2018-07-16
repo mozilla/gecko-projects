@@ -126,8 +126,10 @@ nsCSSProps::AddRefTable(void)
       prefObserversInited = true;
       for (const PropertyPref* pref = kPropertyPrefTable;
            pref->mPropID != eCSSProperty_UNKNOWN; pref++) {
+        nsCString prefName;
+        prefName.AssignLiteral(pref->mPref, strlen(pref->mPref));
         bool* enabled = &gPropertyEnabled[pref->mPropID];
-        Preferences::AddBoolVarCache(enabled, pref->mPref);
+        Preferences::AddBoolVarCache(enabled, prefName);
       }
     }
   }
@@ -309,17 +311,6 @@ const KTableEntry nsCSSProps::kBorderStyleKTable[] = {
 
 const KTableEntry nsCSSProps::kBoxShadowTypeKTable[] = {
   { eCSSKeyword_inset, uint8_t(StyleBoxShadowType::Inset) },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kCounterSystemKTable[] = {
-  { eCSSKeyword_cyclic, NS_STYLE_COUNTER_SYSTEM_CYCLIC },
-  { eCSSKeyword_numeric, NS_STYLE_COUNTER_SYSTEM_NUMERIC },
-  { eCSSKeyword_alphabetic, NS_STYLE_COUNTER_SYSTEM_ALPHABETIC },
-  { eCSSKeyword_symbolic, NS_STYLE_COUNTER_SYSTEM_SYMBOLIC },
-  { eCSSKeyword_additive, NS_STYLE_COUNTER_SYSTEM_ADDITIVE },
-  { eCSSKeyword_fixed, NS_STYLE_COUNTER_SYSTEM_FIXED },
-  { eCSSKeyword_extends, NS_STYLE_COUNTER_SYSTEM_EXTENDS },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -582,17 +573,6 @@ const KTableEntry nsCSSProps::kFontSmoothingKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kFontSynthesisKTable[] = {
-  { eCSSKeyword_weight, NS_FONT_SYNTHESIS_WEIGHT },
-  { eCSSKeyword_style, NS_FONT_SYNTHESIS_STYLE },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontVariantAlternatesKTable[] = {
-  { eCSSKeyword_historical_forms, NS_FONT_VARIANT_ALTERNATES_HISTORICAL },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
 const KTableEntry nsCSSProps::kFontVariantAlternatesFuncsKTable[] = {
   { eCSSKeyword_stylistic, NS_FONT_VARIANT_ALTERNATES_STYLISTIC },
   { eCSSKeyword_styleset, NS_FONT_VARIANT_ALTERNATES_STYLESET },
@@ -600,43 +580,6 @@ const KTableEntry nsCSSProps::kFontVariantAlternatesFuncsKTable[] = {
   { eCSSKeyword_swash, NS_FONT_VARIANT_ALTERNATES_SWASH },
   { eCSSKeyword_ornaments, NS_FONT_VARIANT_ALTERNATES_ORNAMENTS },
   { eCSSKeyword_annotation, NS_FONT_VARIANT_ALTERNATES_ANNOTATION },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontVariantEastAsianKTable[] = {
-  { eCSSKeyword_jis78, NS_FONT_VARIANT_EAST_ASIAN_JIS78 },
-  { eCSSKeyword_jis83, NS_FONT_VARIANT_EAST_ASIAN_JIS83 },
-  { eCSSKeyword_jis90, NS_FONT_VARIANT_EAST_ASIAN_JIS90 },
-  { eCSSKeyword_jis04, NS_FONT_VARIANT_EAST_ASIAN_JIS04 },
-  { eCSSKeyword_simplified, NS_FONT_VARIANT_EAST_ASIAN_SIMPLIFIED },
-  { eCSSKeyword_traditional, NS_FONT_VARIANT_EAST_ASIAN_TRADITIONAL },
-  { eCSSKeyword_full_width, NS_FONT_VARIANT_EAST_ASIAN_FULL_WIDTH },
-  { eCSSKeyword_proportional_width, NS_FONT_VARIANT_EAST_ASIAN_PROP_WIDTH },
-  { eCSSKeyword_ruby, NS_FONT_VARIANT_EAST_ASIAN_RUBY },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontVariantLigaturesKTable[] = {
-  { eCSSKeyword_common_ligatures, NS_FONT_VARIANT_LIGATURES_COMMON },
-  { eCSSKeyword_no_common_ligatures, NS_FONT_VARIANT_LIGATURES_NO_COMMON },
-  { eCSSKeyword_discretionary_ligatures, NS_FONT_VARIANT_LIGATURES_DISCRETIONARY },
-  { eCSSKeyword_no_discretionary_ligatures, NS_FONT_VARIANT_LIGATURES_NO_DISCRETIONARY },
-  { eCSSKeyword_historical_ligatures, NS_FONT_VARIANT_LIGATURES_HISTORICAL },
-  { eCSSKeyword_no_historical_ligatures, NS_FONT_VARIANT_LIGATURES_NO_HISTORICAL },
-  { eCSSKeyword_contextual, NS_FONT_VARIANT_LIGATURES_CONTEXTUAL },
-  { eCSSKeyword_no_contextual, NS_FONT_VARIANT_LIGATURES_NO_CONTEXTUAL },
-  { eCSSKeyword_UNKNOWN, -1 }
-};
-
-const KTableEntry nsCSSProps::kFontVariantNumericKTable[] = {
-  { eCSSKeyword_lining_nums, NS_FONT_VARIANT_NUMERIC_LINING },
-  { eCSSKeyword_oldstyle_nums, NS_FONT_VARIANT_NUMERIC_OLDSTYLE },
-  { eCSSKeyword_proportional_nums, NS_FONT_VARIANT_NUMERIC_PROPORTIONAL },
-  { eCSSKeyword_tabular_nums, NS_FONT_VARIANT_NUMERIC_TABULAR },
-  { eCSSKeyword_diagonal_fractions, NS_FONT_VARIANT_NUMERIC_DIAGONAL_FRACTIONS },
-  { eCSSKeyword_stacked_fractions, NS_FONT_VARIANT_NUMERIC_STACKED_FRACTIONS },
-  { eCSSKeyword_slashed_zero, NS_FONT_VARIANT_NUMERIC_SLASHZERO },
-  { eCSSKeyword_ordinal, NS_FONT_VARIANT_NUMERIC_ORDINAL },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 

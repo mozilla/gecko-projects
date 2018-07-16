@@ -593,8 +593,34 @@ class GTestCommands(MachCommandBase):
               debugger_args):
 
         # We lazy build gtest because it's slow to link
-        self._run_make(directory="testing/gtest", target='gtest',
-                       print_directory=False, ensure_exit_code=True)
+        try:
+            config = self.config_environment
+        except Exception:
+            print("Please run |./mach build| before |./mach gtest|.")
+            return 1
+
+        active_backend = config.substs.get('BUILD_BACKENDS', [None])[0]
+        if 'Tup' in active_backend:
+            gtest_build_path = mozpath.join(self.topobjdir, '<gtest>')
+        else:
+            # This path happens build the necessary parts of the tree in the
+            # Make backend due to the odd nature of partial tree builds.
+            gtest_build_path = mozpath.relpath(mozpath.join(self.topobjdir,
+                                                            'toolkit', 'library',
+                                                            'gtest', 'rust'),
+                                               self.topsrcdir)
+
+        os.environ[b'LINK_GTEST_DURING_COMPILE'] = b'1'
+        res = self._mach_context.commands.dispatch('build', self._mach_context,
+                                                   what=[gtest_build_path])
+        del os.environ[b'LINK_GTEST_DURING_COMPILE']
+        if res:
+            print("Could not build xul-gtest")
+            return res
+
+        if self.substs.get('MOZ_WIDGET_TOOLKIT') == 'cocoa':
+            self._run_make(directory='browser/app', target='repackage',
+                           ensure_exit_code=True)
 
         app_path = self.get_binary_path('app')
         args = [app_path, '-unittest', '--gtest_death_test_style=threadsafe'];
@@ -1675,7 +1701,7 @@ class StaticAnalysis(MachCommandBase):
         # When no value is specified the default value is considered to be the source
         # in order to limit the dianostic message to the source files or folders.
         common_args.append('-header-filter=%s' %
-                           (header_filter if len(header_filter) else ''.join(source)))
+                           (header_filter if len(header_filter) else '|'.join(source)))
 
         if fix:
             common_args.append('-fix')
@@ -1692,7 +1718,7 @@ class StaticAnalysis(MachCommandBase):
             return 0
 
         args = [python, self._run_clang_tidy_path, '-p', self.topobjdir]
-        args += ['-j', str(jobs)] + source + common_args
+        args += ['-j', str(jobs)] + common_args + source
         cwd = self.topobjdir
 
         monitor = StaticAnalysisMonitor(self.topsrcdir, self.topobjdir, total)
@@ -1834,7 +1860,7 @@ class StaticAnalysis(MachCommandBase):
                               'Delete local helpers and reset static analysis helper tool cache')
     def clear_cache(self, verbose=False):
         self._set_log_level(verbose)
-        rc = self._get_clang_tools(force=True, download_if_needed=False,
+        rc = self._get_clang_tools(force=True, download_if_needed=True, skip_cache=True,
                                    verbose=verbose)
         if rc != 0:
             return rc

@@ -214,6 +214,21 @@ public final class GeckoRuntimeSettings implements Parcelable {
                      .set(TrackingProtection.buildPrefValue(categories));
             return this;
         }
+
+        /**
+         * Set whether or not web console messages should go to logcat.
+         *
+         * Note: If enabled, Gecko performance may be negatively impacted if
+         * content makes heavy use of the console API.
+         *
+         * @param enabled A flag determining whether or not web console messages should be
+         *                printed to logcat.
+         * @return The builder instance.
+         */
+        public @NonNull Builder consoleOutput(boolean enabled) {
+            mSettings.mConsoleOutput.set(enabled);
+            return this;
+        }
     }
 
     /* package */ GeckoRuntime runtime;
@@ -225,28 +240,30 @@ public final class GeckoRuntimeSettings implements Parcelable {
     private class Pref<T> {
         public final String name;
         public final T defaultValue;
-        private T value;
+        private T mValue;
+        private boolean mIsSet;
 
         public Pref(final String name, final T defaultValue) {
             GeckoRuntimeSettings.this.prefCount++;
 
             this.name = name;
             this.defaultValue = defaultValue;
-            value = defaultValue;
+            mValue = defaultValue;
         }
 
         public void set(T newValue) {
-            value = newValue;
+            mValue = newValue;
+            mIsSet = true;
             flush();
         }
 
         public T get() {
-            return value;
+            return mValue;
         }
 
         public void flush() {
             if (GeckoRuntimeSettings.this.runtime != null) {
-                GeckoRuntimeSettings.this.runtime.setPref(name, value);
+                GeckoRuntimeSettings.this.runtime.setPref(name, mValue, mIsSet);
             }
         }
     }
@@ -266,14 +283,16 @@ public final class GeckoRuntimeSettings implements Parcelable {
     /* package */ Pref<String> mTrackingProtection = new Pref<String>(
         "urlclassifier.trackingTable",
         TrackingProtection.buildPrefValue(TrackingProtectionDelegate.CATEGORY_ALL));
+    /* package */ Pref<Boolean> mConsoleOutput = new Pref<Boolean>(
+        "geckoview.console.enabled", false);
 
     /* package */ boolean mNativeCrashReporting;
     /* package */ boolean mJavaCrashReporting;
     /* package */ boolean mDebugPause;
 
     private final Pref<?>[] mPrefs = new Pref<?>[] {
-        mCookieBehavior, mCookieLifetime, mCookieLifetimeDays, mJavaScript,
-        mRemoteDebugging, mTrackingProtection, mWebFonts
+        mCookieBehavior, mCookieLifetime, mCookieLifetimeDays, mConsoleOutput,
+        mJavaScript, mRemoteDebugging, mTrackingProtection, mWebFonts
     };
 
     /* package */ GeckoRuntimeSettings() {
@@ -296,6 +315,9 @@ public final class GeckoRuntimeSettings implements Parcelable {
         mExtras = new Bundle(settings.getExtras());
 
         for (int i = 0; i < mPrefs.length; i++) {
+            if (!settings.mPrefs[i].mIsSet) {
+                continue;
+            }
             // We know this is safe.
             @SuppressWarnings("unchecked")
             final Pref<Object> uncheckedPref = (Pref<Object>) mPrefs[i];
@@ -429,7 +451,8 @@ public final class GeckoRuntimeSettings implements Parcelable {
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({ COOKIE_ACCEPT_ALL, COOKIE_ACCEPT_FIRST_PARTY,
               COOKIE_ACCEPT_NONE, COOKIE_ACCEPT_VISITED })
-    public @interface CookieBehavior {}
+    /* package */ @interface CookieBehavior {}
+
     /**
      * Accept first-party and third-party cookies and site data.
      */
@@ -475,7 +498,8 @@ public final class GeckoRuntimeSettings implements Parcelable {
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({ COOKIE_LIFETIME_NORMAL, COOKIE_LIFETIME_RUNTIME,
               COOKIE_LIFETIME_DAYS })
-    public @interface CookieLifetime {}
+    /* package */ @interface CookieLifetime {}
+
     /**
      * Accept default cookie lifetime.
      */
@@ -563,6 +587,31 @@ public final class GeckoRuntimeSettings implements Parcelable {
             @TrackingProtectionDelegate.Category int categories) {
         mTrackingProtection.set(TrackingProtection.buildPrefValue(categories));
         return this;
+    }
+
+    /**
+     * Set whether or not web console messages should go to logcat.
+     *
+     * Note: If enabled, Gecko performance may be negatively impacted if
+     * content makes heavy use of the console API.
+     *
+     * @param enabled A flag determining whether or not web console messages should be
+     *                printed to logcat.
+     * @return This GeckoRuntimeSettings instance.
+     */
+
+    public @NonNull GeckoRuntimeSettings setConsoleOutputEnabled(boolean enabled) {
+        mConsoleOutput.set(enabled);
+        return this;
+    }
+
+    /**
+     * Get whether or not web console messages are sent to logcat.
+     *
+     * @return This GeckoRuntimeSettings instance.
+     */
+    public boolean getConsoleOutputEnabled() {
+        return mConsoleOutput.get();
     }
 
     @Override // Parcelable

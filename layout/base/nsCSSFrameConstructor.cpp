@@ -106,7 +106,7 @@
 #include "nsThemeConstants.h"
 
 #ifdef MOZ_XUL
-#include "nsIRootBox.h"
+#include "nsIPopupContainer.h"
 #endif
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -319,6 +319,9 @@ NS_NewScrollbarFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle);
 
 nsIFrame*
 NS_NewScrollbarButtonFrame (nsIPresShell* aPresShell, ComputedStyle* aStyle);
+
+nsIFrame*
+NS_NewImageFrameForContentProperty(nsIPresShell*, ComputedStyle*);
 
 
 #ifdef NOISY_FINDFRAME
@@ -1051,9 +1054,10 @@ nsFrameConstructorState::nsFrameConstructorState(
     mCurrentPendingBindingInsertionPoint(nullptr)
 {
 #ifdef MOZ_XUL
-  nsIRootBox* rootBox = nsIRootBox::GetRootBox(aPresShell);
-  if (rootBox) {
-    mPopupItems.containingBlock = rootBox->GetPopupSetFrame();
+  nsIPopupContainer* popupContainer =
+    nsIPopupContainer::GetPopupContainer(aPresShell);
+  if (popupContainer) {
+    mPopupItems.containingBlock = popupContainer->GetPopupSetFrame();
   }
 #endif
   MOZ_COUNT_CTOR(nsFrameConstructorState);
@@ -1708,12 +1712,12 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
                                               uint32_t        aContentIndex)
 {
   // Get the content value
-  const nsStyleContentData &data =
+  const nsStyleContentData& data =
     aComputedStyle->StyleContent()->ContentAt(aContentIndex);
-  nsStyleContentType type = data.GetType();
+  const StyleContentType type = data.GetType();
 
   switch (type) {
-    case eStyleContentType_Image: {
+    case StyleContentType::Image: {
       imgRequestProxy* image = data.GetImage();
       if (!image) {
         // CSS had something specified that couldn't be converted to an
@@ -1727,12 +1731,12 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
       return CreateGenConImageContent(mDocument, image);
     }
 
-    case eStyleContentType_String:
+    case StyleContentType::String:
       return CreateGenConTextNode(aState,
                                   nsDependentString(data.GetString()),
                                   nullptr, nullptr);
 
-    case eStyleContentType_Attr: {
+    case StyleContentType::Attr: {
       const nsStyleContentAttr* attr = data.GetAttr();
       RefPtr<nsAtom> attrName = attr->mName;
       int32_t attrNameSpace = kNameSpaceID_None;
@@ -1752,15 +1756,15 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
       return content.forget();
     }
 
-    case eStyleContentType_Counter:
-    case eStyleContentType_Counters: {
+    case StyleContentType::Counter:
+    case StyleContentType::Counters: {
       nsStyleContentData::CounterFunction* counters = data.GetCounters();
       nsCounterList* counterList =
         mCounterManager.CounterListFor(counters->mIdent);
 
       nsCounterUseNode* node =
         new nsCounterUseNode(counters, aContentIndex,
-                             type == eStyleContentType_Counters);
+                             type == StyleContentType::Counters);
 
       nsGenConInitializer* initializer =
         new nsGenConInitializer(node, counterList,
@@ -1769,10 +1773,10 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
                                   initializer);
     }
 
-    case eStyleContentType_OpenQuote:
-    case eStyleContentType_CloseQuote:
-    case eStyleContentType_NoOpenQuote:
-    case eStyleContentType_NoCloseQuote: {
+    case StyleContentType::OpenQuote:
+    case StyleContentType::CloseQuote:
+    case StyleContentType::NoOpenQuote:
+    case StyleContentType::NoCloseQuote: {
       nsQuoteNode* node =
         new nsQuoteNode(type, aContentIndex);
 
@@ -1783,7 +1787,7 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
                                   initializer);
     }
 
-    case eStyleContentType_AltContent: {
+    case StyleContentType::AltContent: {
       // Use the "alt" attribute; if that fails and the node is an HTML
       // <input>, try the value attribute and then fall back to some default
       // localized text we have.
@@ -1813,7 +1817,7 @@ nsCSSFrameConstructor::CreateGeneratedContent(nsFrameConstructorState& aState,
       break;
     }
 
-    case eStyleContentType_Uninitialized:
+    case StyleContentType::Uninitialized:
       MOZ_ASSERT_UNREACHABLE("uninitialized content type");
       return nullptr;
   }
@@ -1916,6 +1920,11 @@ nsCSSFrameConstructor::CreateGeneratedContentItem(nsFrameConstructorState& aStat
       CreateGeneratedContent(aState, aParentContent, pseudoComputedStyle,
                              contentIndex);
     if (content) {
+      // We don't strictly have to set NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE
+      // here; it would get set under AppendChildTo.  But AppendChildTo might
+      // think that we're going from not being anonymous to being anonymous and
+      // do some extra work; setting the flag here avoids that.
+      content->SetFlags(NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE);
       container->AppendChildTo(content, false);
       if (content->IsElement()) {
         // If we created any children elements, Servo needs to traverse them, but
@@ -3979,9 +3988,9 @@ nsCSSFrameConstructor::ConstructFrameFromItemInternal(FrameConstructionItem& aIt
       // Icky XUL stuff, sadly
 
       if (aItem.mIsRootPopupgroup) {
-        NS_ASSERTION(nsIRootBox::GetRootBox(mPresShell) &&
-                     nsIRootBox::GetRootBox(mPresShell)->GetPopupSetFrame() ==
-                     newFrame,
+        NS_ASSERTION(nsIPopupContainer::GetPopupContainer(mPresShell) &&
+                     nsIPopupContainer::GetPopupContainer(mPresShell)->
+                      GetPopupSetFrame() == newFrame,
                      "Unexpected PopupSetFrame");
         aState.mPopupItems.containingBlock = newFrameAsContainer;
         aState.mHavePendingPopupgroup = false;
@@ -5620,6 +5629,17 @@ ShouldSuppressFrameInNonOpenDetails(const HTMLDetailsElement* aDetails,
   return true;
 }
 
+static bool
+ShouldCreateImageFrameForContent(ComputedStyle& aStyle)
+{
+  auto& content = *aStyle.StyleContent();
+  if (content.ContentCount() != 1) {
+    return false;
+  }
+
+  return content.ContentAt(0).GetType() == StyleContentType::Image;
+}
+
 void
 nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState& aState,
                                                          nsIContent* aContent,
@@ -5782,6 +5802,14 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
                          aFlags & ITEM_IS_WITHIN_SVG_TEXT,
                          aFlags & ITEM_ALLOWS_TEXT_PATH_CHILD,
                          computedStyle);
+    }
+
+    // Check for 'content: <image-url>' on the element (which makes us ignore
+    // 'display' values other than 'none' or 'contents').
+    if (!data && ShouldCreateImageFrameForContent(*computedStyle)) {
+      static const FrameConstructionData sImgData =
+        SIMPLE_FCDATA(NS_NewImageFrameForContentProperty);
+      data = &sImgData;
     }
 
     // Now check for XUL display types
@@ -8593,7 +8621,8 @@ nsCSSFrameConstructor::CreateContinuingFrame(nsPresContext*    aPresContext,
     newFrame = NS_NewFirstLetterFrame(shell, computedStyle);
     newFrame->Init(content, aParentFrame, aFrame);
   } else if (LayoutFrameType::Image == frameType) {
-    newFrame = NS_NewImageFrame(shell, computedStyle);
+    auto* imageFrame = static_cast<nsImageFrame*>(aFrame);
+    newFrame = imageFrame->CreateContinuingFrame(shell, computedStyle);
     newFrame->Init(content, aParentFrame, aFrame);
   } else if (LayoutFrameType::ImageControl == frameType) {
     newFrame = NS_NewImageControlFrame(shell, computedStyle);
@@ -8992,8 +9021,9 @@ nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(nsIFrame* aFrame)
 
 #ifdef MOZ_XUL
   if (aFrame->IsPopupSetFrame()) {
-    nsIRootBox* rootBox = nsIRootBox::GetRootBox(mPresShell);
-    if (rootBox && rootBox->GetPopupSetFrame() == aFrame) {
+    nsIPopupContainer* popupContainer =
+      nsIPopupContainer::GetPopupContainer(mPresShell);
+    if (popupContainer && popupContainer->GetPopupSetFrame() == aFrame) {
       ReconstructDocElementHierarchy(InsertionKind::Async);
       return true;
     }

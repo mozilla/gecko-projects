@@ -40,7 +40,7 @@ macro_rules! pseudo_class_name {
     (bare: [$(($css:expr, $name:ident, $gecko_type:tt, $state:tt, $flags:tt),)*],
      string: [$(($s_css:expr, $s_name:ident, $s_gecko_type:tt, $s_state:tt, $s_flags:tt),)*]) => {
         /// Our representation of a non tree-structural pseudo-class.
-        #[derive(Clone, Debug, Eq, PartialEq)]
+        #[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq)]
         pub enum NonTSPseudoClass {
             $(
                 #[doc = $css]
@@ -186,6 +186,9 @@ impl NonTSPseudoClass {
             // depends on the pref.
             NonTSPseudoClass::Fullscreen => unsafe {
                 mozilla::StaticPrefs_sVarCache_full_screen_api_unprefix_enabled
+            },
+            NonTSPseudoClass::Defined => unsafe {
+                structs::nsContentUtils_sIsCustomElementsEnabled
             },
             // Otherwise, a pseudo-class is enabled in content when it
             // doesn't have any enabled flag.

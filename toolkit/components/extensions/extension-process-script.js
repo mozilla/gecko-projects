@@ -16,18 +16,25 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionChild: "resource://gre/modules/ExtensionChild.jsm",
+  ExtensionCommon: "resource://gre/modules/ExtensionCommon.jsm",
   ExtensionContent: "resource://gre/modules/ExtensionContent.jsm",
   ExtensionPageChild: "resource://gre/modules/ExtensionPageChild.jsm",
 });
 
 ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "console", () => ExtensionUtils.getConsole());
+XPCOMUtils.defineLazyGetter(this, "console", () => ExtensionCommon.getConsole());
 
 const {
   DefaultWeakMap,
   getInnerWindowID,
 } = ExtensionUtils;
+
+const {sharedData} = Services.cpmm;
+
+function getData(extension, key = "") {
+  return sharedData.get(`extension/${extension.id}/${key}`);
+}
 
 // We need to avoid touching Services.appinfo here in order to prevent
 // the wrong version from being cached during xpcshell test startup.
@@ -300,20 +307,8 @@ ExtensionManager = {
     Services.cpmm.addMessageListener("Extension:RegisterContentScript", this);
     Services.cpmm.addMessageListener("Extension:UnregisterContentScripts", this);
 
-    let procData = Services.cpmm.initialProcessData || {};
-
-    for (let data of procData["Extension:Extensions"] || []) {
-      this.initExtension(data);
-    }
-
-    if (isContentProcess) {
-      // Make sure we handle new schema data until Schemas.jsm is loaded.
-      if (!procData["Extension:Schemas"]) {
-        procData["Extension:Schemas"] = new Map();
-      }
-      this.schemaJSON = procData["Extension:Schemas"];
-
-      Services.cpmm.addMessageListener("Schema:Add", this);
+    for (let id of sharedData.get("extensions/activeIDs") || []) {
+      this.initExtension(getData({id}));
     }
   },
 
@@ -335,6 +330,11 @@ ExtensionManager = {
         webAccessibleResources = extension.webAccessibleResources.map(host => new MatchGlob(host));
       }
 
+      let {backgroundScripts} = extension;
+      if (!backgroundScripts && WebExtensionPolicy.isExtensionProcess) {
+        ({backgroundScripts} = getData(extension, "extendedData") || {});
+      }
+
       policy = new WebExtensionPolicy({
         id: extension.id,
         mozExtensionHostname: extension.uuid,
@@ -345,12 +345,11 @@ ExtensionManager = {
         allowedOrigins,
         webAccessibleResources,
 
-        contentSecurityPolicy: extension.manifest.content_security_policy,
+        contentSecurityPolicy: extension.contentSecurityPolicy,
 
         localizeCallback,
 
-        backgroundScripts: (extension.manifest.background &&
-                            extension.manifest.background.scripts),
+        backgroundScripts,
 
         contentScripts: extension.contentScripts.map(script => parseScriptOptions(script, restrictSchemes)),
       });
@@ -362,13 +361,11 @@ ExtensionManager = {
       // a content process that crashed and it has been recreated).
       const registeredContentScripts = this.registeredContentScripts.get(policy);
 
-      if (extension.registeredContentScripts) {
-        for (let [scriptId, options] of extension.registeredContentScripts) {
-          const parsedOptions = parseScriptOptions(options, restrictSchemes);
-          const script = new WebExtensionContentScript(policy, parsedOptions);
-          policy.registerContentScript(script);
-          registeredContentScripts.set(scriptId, script);
-        }
+      for (let [scriptId, options] of getData(extension, "contentScripts") || []) {
+        const parsedOptions = parseScriptOptions(options, restrictSchemes);
+        const script = new WebExtensionContentScript(policy, parsedOptions);
+        policy.registerContentScript(script);
+        registeredContentScripts.set(scriptId, script);
       }
 
       policy.active = true;
@@ -378,6 +375,9 @@ ExtensionManager = {
   },
 
   initExtension(data) {
+    if (typeof data === "string") {
+      data = getData({id: data});
+    }
     let policy = this.initExtensionPolicy(data);
 
     DocumentManager.initExtension(policy);
@@ -411,23 +411,6 @@ ExtensionManager = {
       case "Extension:FlushJarCache": {
         ExtensionUtils.flushJarCache(data.path);
         Services.cpmm.sendAsyncMessage("Extension:FlushJarCacheComplete");
-        break;
-      }
-
-      case "Schema:Add": {
-        // If we're given a Map, the ordering of the initial items
-        // matters, so swap with our current data to make sure its
-        // entries appear first.
-        if (typeof data.get === "function") {
-          [this.schemaJSON, data] = [data, this.schemaJSON];
-
-          Services.cpmm.initialProcessData["Extension:Schemas"] =
-            this.schemaJSON;
-        }
-
-        for (let [url, schema] of data) {
-          this.schemaJSON.set(url, schema);
-        }
         break;
       }
 

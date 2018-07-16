@@ -48,6 +48,7 @@
 #include "mozilla/dom/SameProcessMessageQueue.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "mozilla/dom/ipc/SharedMap.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
@@ -999,6 +1000,19 @@ nsFrameMessageManager::GetInitialProcessData(JSContext* aCx,
   aInitialProcessData.set(init);
 }
 
+WritableSharedMap*
+nsFrameMessageManager::SharedData()
+{
+  if (!mChrome || !mIsProcessManager) {
+    MOZ_ASSERT(false, "Should only call this binding method on ppmm");
+    return nullptr;
+  }
+  if (!mSharedData) {
+    mSharedData = new WritableSharedMap();
+  }
+  return mSharedData;
+}
+
 already_AddRefed<ProcessMessageManager>
 nsFrameMessageManager::GetProcessMessageManager(ErrorResult& aError)
 {
@@ -1258,7 +1272,7 @@ nsMessageManagerScriptExecutor::LoadScriptInternal(JS::Handle<JSObject*> aGlobal
     // with a different WillRunInGlobalScope() value.
     bool shouldCache = !holder;
     TryCacheLoadAndCompileScript(aURL, aRunInGlobalScope,
-                                 shouldCache, &script);
+                                 shouldCache, aGlobal, &script);
   }
 
   AutoEntryScript aes(aGlobal, "message manager script load");
@@ -1283,6 +1297,7 @@ nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
   const nsAString& aURL,
   bool aRunInGlobalScope,
   bool aShouldCache,
+  JS::Handle<JSObject*> aGlobal,
   JS::MutableHandle<JSScript*> aScriptp)
 {
   nsCString url = NS_ConvertUTF16toUTF8(aURL);
@@ -1301,10 +1316,17 @@ nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
     return;
   }
 
-  // Compile the script in the compilation scope instead of the current global
-  // to avoid keeping the current compartment alive.
+  // If this script won't be cached, or there is only one of this type of
+  // message manager per process, treat this script as run-once. Run-once
+  // scripts can be compiled directly for the target global, and will be dropped
+  // from the preloader cache after they're executed and serialized.
+  bool isRunOnce = !aShouldCache || IsProcessScoped();
+
+  // If the script will be reused in this session, compile it in the compilation
+  // scope instead of the current global to avoid keeping the current
+  // compartment alive.
   AutoJSAPI jsapi;
-  if (!jsapi.Init(xpc::CompilationScope())) {
+  if (!jsapi.Init(isRunOnce ? aGlobal : xpc::CompilationScope())) {
     return;
   }
   JSContext* cx = jsapi.cx();
@@ -1371,20 +1393,16 @@ nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
   uri->GetScheme(scheme);
   // We don't cache data: scripts!
   if (aShouldCache && !scheme.EqualsLiteral("data")) {
-    ScriptPreloader::GetChildSingleton().NoteScript(url, url, script);
-    // Root the object also for caching.
-    auto* holder = new nsMessageManagerScriptHolder(cx, script, aRunInGlobalScope);
-    sCachedScripts->Put(aURL, holder);
-  }
-}
+    ScriptPreloader::GetChildSingleton().NoteScript(url, url, script, isRunOnce);
 
-void
-nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
-  const nsAString& aURL,
-  bool aRunInGlobalScope)
-{
-  JS::Rooted<JSScript*> script(RootingCx());
-  TryCacheLoadAndCompileScript(aURL, aRunInGlobalScope, true, &script);
+    // If this script will only run once per process, only cache it in the
+    // preloader cache, not the session cache.
+    if (!isRunOnce) {
+      // Root the object also for caching.
+      auto* holder = new nsMessageManagerScriptHolder(cx, script, aRunInGlobalScope);
+      sCachedScripts->Put(aURL, holder);
+    }
+  }
 }
 
 void

@@ -232,7 +232,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "layout.css.prefixes.device-pixel-ratio-webkit",
    layout_css_prefixes_device_pixel_ratio_webkit,
-  bool, false
+  bool, true
 )
 
 // Is -moz-prefixed gradient functions enabled?
@@ -246,7 +246,7 @@ VARCACHE_PREF(
 VARCACHE_PREF(
   "layout.css.offset-logical-properties.enabled",
    layout_css_offset_logical_properties_enabled,
-  bool, true
+  bool, false
 )
 
 // Should stray control characters be rendered visibly?
@@ -272,6 +272,24 @@ VARCACHE_PREF(
   "layout.css.frames-timing.enabled",
    layout_css_frames_timing_enabled,
   bool, PREF_VALUE
+)
+#undef PREF_VALUE
+
+// When the pref is true, CSSStyleDeclaration.setProperty always appends
+// new declarations (and discards old ones if they exist), otherwise, it
+// will update in-place when given property exists in the block, and
+// avoid updating at all when the existing property declaration is
+// identical to the new one.
+// See bug 1415330, bug 1460295, and bug 1461285 for some background.
+#ifdef RELEASE_OR_BETA
+# define PREF_VALUE false
+#else
+# define PREF_VALUE true
+#endif
+VARCACHE_PREF(
+  "layout.css.property-append-only",
+   layout_css_property_append_only,
+   bool, PREF_VALUE
 )
 #undef PREF_VALUE
 
@@ -809,14 +827,6 @@ VARCACHE_PREF(
   RelaxedAtomicBool, true
 )
 
-// Flac
-// Use new MediaFormatReader architecture for plain ogg.
-VARCACHE_PREF(
-  "media.ogg.flac.enabled",
-   MediaOggFlacEnabled,
-  RelaxedAtomicBool, true
-)
-
 VARCACHE_PREF(
   "media.flac.enabled",
    MediaFlacEnabled,
@@ -882,6 +892,48 @@ VARCACHE_PREF(
   "media.seamless-looping",
    MediaSeamlessLooping,
   RelaxedAtomicBool, true
+)
+
+VARCACHE_PREF(
+  "media.autoplay.block-event.enabled",
+   MediaBlockEventEnabled,
+  bool, false
+)
+
+VARCACHE_PREF(
+  "media.media-capabilities.enabled",
+   MediaCapabilitiesEnabled,
+  RelaxedAtomicBool, false
+)
+
+VARCACHE_PREF(
+  "media.benchmark.vp9.fps",
+   MediaBenchmarkVp9Fps,
+  RelaxedAtomicUint32, 0
+)
+
+VARCACHE_PREF(
+  "media.benchmark.vp9.threshold",
+   MediaBenchmarkVp9Threshold,
+  RelaxedAtomicUint32, 150
+)
+
+VARCACHE_PREF(
+  "media.benchmark.vp9.versioncheck",
+   MediaBenchmarkVp9Versioncheck,
+  RelaxedAtomicUint32, 0
+)
+
+VARCACHE_PREF(
+  "media.benchmark.frames",
+   MediaBenchmarkFrames,
+  RelaxedAtomicUint32, 300
+)
+
+VARCACHE_PREF(
+  "media.benchmark.timeout",
+   MediaBenchmarkTimeout,
+  RelaxedAtomicUint32, 1000
 )
 
 //---------------------------------------------------------------------------
@@ -1066,6 +1118,13 @@ VARCACHE_PREF(
   "privacy.restrict3rdpartystorage.enabled",
    privacy_restrict3rdpartystorage_enabled,
   RelaxedAtomicBool, false
+)
+
+// Anti-tracking permission expiration
+VARCACHE_PREF(
+  "privacy.restrict3rdpartystorage.expiration",
+   privacy_restrict3rdpartystorage_expiration,
+  uint32_t, 2592000000 // 30 days
 )
 
 //---------------------------------------------------------------------------

@@ -1094,7 +1094,7 @@ MarkupView.prototype = {
         || type === "events" || type === "pseudoClassLock") {
         container.update();
       } else if (type === "childList" || type === "nativeAnonymousChildList"
-        || type === "slotchange") {
+        || type === "slotchange" || type === "shadowRootAttached") {
         container.childrenDirty = true;
         // Update the children to take care of changes in the markup view DOM
         // and update container (and its subtree) DOM tree depth level for
@@ -1218,7 +1218,7 @@ MarkupView.prototype = {
 
     this.importNode(node);
 
-    while ((parent = parent.parentNode())) {
+    while ((parent = this._getParentInTree(parent))) {
       this.importNode(parent);
       this.expandNode(parent);
     }
@@ -1542,7 +1542,8 @@ MarkupView.prototype = {
         const end = this.telemetry.msSystemNow();
         this.telemetry.recordEvent("devtools.main", "edit_html", "inspector", null, {
           "made_changes": commit,
-          "time_open": end - start
+          "time_open": end - start,
+          "session_id": this.toolbox.sessionId
         });
       });
 
@@ -1625,7 +1626,7 @@ MarkupView.prototype = {
   _ensureVisible: function(node) {
     while (node) {
       const container = this.getContainer(node);
-      const parent = node.parentNode();
+      const parent = this._getParentInTree(node);
       if (!container.elt.parentNode) {
         const parentContainer = this.getContainer(parent);
         if (parentContainer) {
@@ -1660,11 +1661,11 @@ MarkupView.prototype = {
     let centered = null;
     let node = this.inspector.selection.nodeFront;
     while (node) {
-      if (node.parentNode() === container.node) {
+      if (this._getParentInTree(node) === container.node) {
         centered = node;
         break;
       }
-      node = node.parentNode();
+      node = this._getParentInTree(node);
     }
 
     return centered;
@@ -1856,6 +1857,18 @@ MarkupView.prototype = {
       maxNodes: maxChildren,
       center: centered
     });
+  },
+
+  /**
+   * The parent of a given node as rendered in the markup view is not necessarily
+   * node.parentNode(). For instance, shadow roots don't have a parentNode, but a host
+   * element. However they are represented as parent and children in the markup view.
+   *
+   * Use this method when you are interested in the parent of a node from the perspective
+   * of the markup-view tree, and not from the perspective of the actual DOM.
+   */
+  _getParentInTree: function(node) {
+    return node.parentOrHost();
   },
 
   /**

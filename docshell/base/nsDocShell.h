@@ -24,7 +24,6 @@
 #include "nsIClipboardCommands.h"
 #include "nsIDeprecationWarner.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellLoadInfo.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDOMStorageManager.h"
 #include "nsIInterfaceRequestor.h"
@@ -80,7 +79,6 @@ class nsIContentViewer;
 class nsIController;
 class nsIDocShellTreeOwner;
 class nsIDocument;
-class nsIGlobalHistory2;
 class nsIHttpChannel;
 class nsIMutableArray;
 class nsIPrompt;
@@ -377,6 +375,10 @@ public:
     return static_cast<nsDocShell*>(aDocShell);
   }
 
+  // Returns true if the current load is a force reload (started by holding
+  // shift while triggering reload)
+  bool IsForceReloading();
+
 private: // member functions
   friend class nsDSURIContentListener;
   friend class FramingChecker;
@@ -660,8 +662,7 @@ private: // member functions
                      uint32_t aChannelRedirectFlags);
 
   /**
-   * Helper function for adding a URI visit using IHistory. If IHistory is
-   * not available, the method tries nsIGlobalHistory2.
+   * Helper function for adding a URI visit using IHistory.
    *
    * The IHistory API maintains chains of visits, tracking both HTTP referrers
    * and redirects for a user session. VisitURI requires the current URI and
@@ -928,7 +929,6 @@ private: // data members
   nsCOMPtr<nsIContentViewer> mContentViewer;
   nsCOMPtr<nsIWidget> mParentWidget;
   RefPtr<mozilla::dom::ChildSHistory> mSessionHistory;
-  nsCOMPtr<nsIGlobalHistory2> mGlobalHistory;
   nsCOMPtr<nsIWebBrowserFind> mFind;
   nsCOMPtr<nsICommandManager> mCommandManager;
 

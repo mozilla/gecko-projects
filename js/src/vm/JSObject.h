@@ -49,6 +49,8 @@ bool SetImmutablePrototype(JSContext* cx, JS::HandleObject obj, bool* succeeded)
 }  /* namespace js */
 
 /*
+ * [SMDOC] JSObject layout
+ *
  * A JavaScript object.
  *
  * This is the base class for all objects exposed to JS script (as well as some
@@ -436,7 +438,7 @@ class JSObject : public js::gc::Cell
     inline js::GlobalObject& nonCCWGlobal() const;
 
     JS::Realm* nonCCWRealm() const {
-        MOZ_ASSERT(!js::IsCrossCompartmentWrapper(this));
+        MOZ_ASSERT(!js::UninlinedIsCrossCompartmentWrapper(this));
         return group_->realm();
     }
 

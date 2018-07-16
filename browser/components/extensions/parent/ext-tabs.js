@@ -24,6 +24,8 @@ var {
 } = ExtensionUtils;
 
 const TABHIDE_PREFNAME = "extensions.webextensions.tabhide.enabled";
+const MULTISELECT_PREFNAME = "browser.tabs.multiselect";
+XPCOMUtils.defineLazyPreferenceGetter(this, "gMultiSelectEnabled", MULTISELECT_PREFNAME, false);
 
 const TAB_HIDE_CONFIRMED_TYPE = "tabHideNotification";
 
@@ -124,7 +126,7 @@ const allProperties = new Set([
   "discarded",
   "favIconUrl",
   "hidden",
-  "isarticle",
+  "isArticle",
   "mutedInfo",
   "pinned",
   "sharingState",
@@ -148,6 +150,12 @@ class TabsUpdateFilterEventManager extends EventManager {
         // Default is to listen for all events.
         needsModified = filter.properties.some(p => allAttrs.has(p));
         filter.properties = new Set(filter.properties);
+        // TODO Bug 1465520 remove warning when ready.
+        if (filter.properties.has("isarticle")) {
+          extension.logger.warn("The isarticle filter name is deprecated, use isArticle.");
+          filter.properties.delete("isarticle");
+          filter.properties.add("isArticle");
+        }
       } else {
         filter.properties = allProperties;
       }
@@ -295,7 +303,7 @@ class TabsUpdateFilterEventManager extends EventManager {
         windowTracker.addListener(name, listener);
       }
 
-      if (filter.properties.has("isarticle")) {
+      if (filter.properties.has("isArticle")) {
         tabTracker.on("tab-isarticle", isArticleChangeListener);
       }
 
@@ -304,7 +312,7 @@ class TabsUpdateFilterEventManager extends EventManager {
           windowTracker.removeListener(name, listener);
         }
 
-        if (filter.properties.has("isarticle")) {
+        if (filter.properties.has("isArticle")) {
           tabTracker.off("tab-isarticle", isArticleChangeListener);
         }
       };
@@ -1238,8 +1246,8 @@ this.tabs = class extends ExtensionAPI {
         },
 
         highlight(highlightInfo) {
-          if (!Services.prefs.getBoolPref("browser.tabs.multiselect")) {
-            throw new ExtensionError("Multiple tab selection is not enabled.");
+          if (!gMultiSelectEnabled) {
+            throw new ExtensionError(`tabs.highlight is currently experimental and must be enabled with the ${MULTISELECT_PREFNAME} preference.`);
           }
           let {windowId, tabs} = highlightInfo;
           if (windowId == null) {
@@ -1251,18 +1259,13 @@ this.tabs = class extends ExtensionAPI {
           } else if (tabs.length == 0) {
             throw new ExtensionError("No highlighted tab.");
           }
-          tabs = tabs.map((tabIndex) => {
+          window.gBrowser.selectedTabs = tabs.map((tabIndex) => {
             let tab = window.gBrowser.tabs[tabIndex];
             if (!tab) {
               throw new ExtensionError("No tab at index: " + tabIndex);
             }
             return tab;
           });
-          window.gBrowser.clearMultiSelectedTabs();
-          window.gBrowser.selectedTab = tabs[0];
-          for (let tab of tabs) {
-            window.gBrowser.addToMultiSelectedTabs(tab);
-          }
           return windowManager.convert(window, {populate: true});
         },
       },

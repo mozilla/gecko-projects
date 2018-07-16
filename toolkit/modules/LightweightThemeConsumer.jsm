@@ -8,6 +8,9 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
+const DEFAULT_THEME_ID = "default-theme@mozilla.org";
+const ICONS = Services.prefs.getStringPref("extensions.webextensions.themes.icons.buttons", "").split(",");
+
 const toolkitVariableMap = [
   ["--lwt-accent-color", {
     lwtProperty: "accentcolor",
@@ -99,8 +102,10 @@ const toolkitVariableMap = [
 
 // Get the theme variables from the app resource directory.
 // This allows per-app variables.
-ChromeUtils.import("resource:///modules/ThemeVariableMap.jsm");
-
+ChromeUtils.defineModuleGetter(this, "ThemeContentPropertyList",
+  "resource:///modules/ThemeVariableMap.jsm");
+ChromeUtils.defineModuleGetter(this, "ThemeVariableMap",
+  "resource:///modules/ThemeVariableMap.jsm");
 ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
 
@@ -116,6 +121,12 @@ function LightweightThemeConsumer(aDocument) {
 
   this._win.addEventListener("resolutionchange", this);
   this._win.addEventListener("unload", this, { once: true });
+  this._win.addEventListener("EndSwapDocShells", this, true);
+  this._win.messageManager.addMessageListener("LightweightTheme:Request", this);
+
+  let darkThemeMediaQuery = this._win.matchMedia("(-moz-system-dark-theme)");
+  darkThemeMediaQuery.addListener(temp.LightweightThemeManager);
+  temp.LightweightThemeManager.systemThemeChanged(darkThemeMediaQuery);
 }
 
 LightweightThemeConsumer.prototype = {
@@ -131,12 +142,23 @@ LightweightThemeConsumer.prototype = {
       .QueryInterface(Ci.nsIInterfaceRequestor)
       .getInterface(Ci.nsIDOMWindowUtils);
 
-    const parsedData = JSON.parse(aData);
-    if (parsedData && parsedData.window && parsedData.window !== outerWindowID) {
+    let parsedData = JSON.parse(aData);
+    if (!parsedData) {
+      parsedData = { theme: null };
+    }
+
+    if (parsedData.window && parsedData.window !== outerWindowID) {
       return;
     }
 
-    this._update(parsedData);
+    this._update(parsedData.theme);
+  },
+
+  receiveMessage({ name, target }) {
+    if (name == "LightweightTheme:Request") {
+      let contentThemeData = _getContentProperties(this._doc, this._active, this._lastData);
+      target.messageManager.sendAsyncMessage("LightweightTheme:Update", contentThemeData);
+    }
   },
 
   handleEvent(aEvent) {
@@ -149,39 +171,46 @@ LightweightThemeConsumer.prototype = {
       case "unload":
         Services.obs.removeObserver(this, "lightweight-theme-styling-update");
         this._win.removeEventListener("resolutionchange", this);
+        this._win.removeEventListener("EndSwapDocShells", this, true);
         this._win = this._doc = null;
+        break;
+      case "EndSwapDocShells":
+        let contentThemeData = _getContentProperties(this._doc, this._active, this._lastData);
+        aEvent.target.messageManager.sendAsyncMessage("LightweightTheme:Update", contentThemeData);
         break;
     }
   },
 
   _update(aData) {
-    if (!aData) {
-      aData = { headerURL: "", footerURL: "", textcolor: "", accentcolor: "" };
-      this._lastData = aData;
-    } else {
-      this._lastData = aData;
+    this._lastData = aData;
+    if (aData) {
       aData = LightweightThemeImageOptimizer.optimize(aData, this._win.screen);
+    }
+
+    let active = this._active = !!aData && aData.id !== DEFAULT_THEME_ID;
+
+    if (!aData) {
+      aData = {};
     }
 
     let root = this._doc.documentElement;
 
-    if (aData.headerURL) {
+    if (active && aData.headerURL) {
       root.setAttribute("lwtheme-image", "true");
     } else {
       root.removeAttribute("lwtheme-image");
     }
 
-    let active = aData.accentcolor || aData.headerURL;
-    this._active = active;
-
-    if (aData.icons) {
-      let activeIcons = active ? Object.keys(aData.icons).join(" ") : "";
+    if (active && aData.icons) {
+      let activeIcons = Object.keys(aData.icons).join(" ");
       root.setAttribute("lwthemeicons", activeIcons);
-      for (let [name, value] of Object.entries(aData.icons)) {
-        _setImage(root, active, name, value);
-      }
     } else {
       root.removeAttribute("lwthemeicons");
+    }
+
+    for (let icon of ICONS) {
+      let value = aData.icons ? aData.icons[`--${icon}-icon`] : null;
+      _setImage(root, active, `--${icon}-icon`, value);
     }
 
     _setImage(root, active, "--lwt-header-image", aData.headerURL);
@@ -200,8 +229,28 @@ LightweightThemeConsumer.prototype = {
       root.setAttribute("lwthemefooter", "true");
     else
       root.removeAttribute("lwthemefooter");
+
+    let contentThemeData = _getContentProperties(this._doc, active, aData);
+
+    let browserMessageManager = this._win.getGroupMessageManager("browsers");
+    browserMessageManager.broadcastAsyncMessage(
+      "LightweightTheme:Update", contentThemeData
+    );
   }
 };
+
+function _getContentProperties(doc, active, data) {
+  if (!active) {
+    return {};
+  }
+  let properties = {};
+  for (let property in data) {
+    if (ThemeContentPropertyList.includes(property)) {
+      properties[property] = _parseRGBA(_sanitizeCSSColor(doc, data[property]));
+    }
+  }
+  return properties;
+}
 
 function _setImage(aRoot, aActive, aVariableName, aURLs) {
   if (aURLs && !Array.isArray(aURLs)) {

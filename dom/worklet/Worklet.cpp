@@ -10,6 +10,7 @@
 #include "PaintWorkletGlobalScope.h"
 
 #include "mozilla/dom/WorkletBinding.h"
+#include "mozilla/dom/AudioWorkletBinding.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/Fetch.h"
@@ -432,9 +433,19 @@ ExecutionRunnable::RunOnMainThread()
 // ---------------------------------------------------------------------------
 // WorkletLoadInfo
 
-WorkletLoadInfo::WorkletLoadInfo()
+WorkletLoadInfo::WorkletLoadInfo(nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal)
+  : mInnerWindowID(aWindow->WindowID())
+  , mDumpEnabled(DOMPrefs::DumpEnabled())
+  , mOriginAttributes(BasePrincipal::Cast(aPrincipal)->OriginAttributesRef())
+  , mPrincipal(aPrincipal)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  nsPIDOMWindowOuter* outerWindow = aWindow->GetOuterWindow();
+  if (outerWindow) {
+    mOuterWindowID = outerWindow->WindowID();
+  } else {
+    mOuterWindowID = 0;
+  }
 }
 
 WorkletLoadInfo::~WorkletLoadInfo()
@@ -471,6 +482,7 @@ Worklet::Worklet(nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal,
                  WorkletType aWorkletType)
   : mWindow(aWindow)
   , mWorkletType(aWorkletType)
+  , mWorkletLoadInfo(aWindow, aPrincipal)
 {
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(aPrincipal);
@@ -479,24 +491,6 @@ Worklet::Worklet(nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal,
 #ifdef RELEASE_OR_BETA
   MOZ_CRASH("This code should not go to release/beta yet!");
 #endif
-
-  // Reset mWorkletLoadInfo and populate it.
-
-  memset(&mWorkletLoadInfo, 0, sizeof(WorkletLoadInfo));
-
-  mWorkletLoadInfo.mInnerWindowID = aWindow->WindowID();
-
-  nsPIDOMWindowOuter* outerWindow = aWindow->GetOuterWindow();
-  if (outerWindow) {
-    mWorkletLoadInfo.mOuterWindowID = outerWindow->WindowID();
-  }
-
-  mWorkletLoadInfo.mOriginAttributes =
-    BasePrincipal::Cast(aPrincipal)->OriginAttributesRef();
-
-  mWorkletLoadInfo.mPrincipal = aPrincipal;
-
-  mWorkletLoadInfo.mDumpEnabled = DOMPrefs::DumpEnabled();
 }
 
 Worklet::~Worklet()
@@ -508,7 +502,11 @@ JSObject*
 Worklet::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  return Worklet_Binding::Wrap(aCx, this, aGivenProto);
+  if (mWorkletType == eAudioWorklet) {
+    return AudioWorklet_Binding::Wrap(aCx, this, aGivenProto);
+  } else {
+    return Worklet_Binding::Wrap(aCx, this, aGivenProto);
+  }
 }
 
 already_AddRefed<Promise>

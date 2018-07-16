@@ -45,6 +45,7 @@
 #include "mozilla/GuardObjects.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/webgpu/InstanceProvider.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsIIdleObserver.h"
 #include "nsIDocument.h"
@@ -63,7 +64,7 @@ class nsIBaseWindow;
 class nsIContent;
 class nsICSSDeclaration;
 class nsIDocShellTreeOwner;
-class nsIDOMOfflineResourceList;
+class nsDOMOfflineResourceList;
 class nsIScrollableFrame;
 class nsIControllers;
 class nsIJSID;
@@ -217,6 +218,7 @@ class nsGlobalWindowInner final
   , public nsIInterfaceRequestor
   , public PRCListStr
   , public nsAPostRefreshObserver
+  , public mozilla::webgpu::InstanceProvider
 {
 public:
   typedef mozilla::TimeStamp TimeStamp;
@@ -359,6 +361,9 @@ public:
 
   virtual RefPtr<mozilla::dom::ServiceWorker>
   GetOrCreateServiceWorker(const mozilla::dom::ServiceWorkerDescriptor& aDescriptor) override;
+
+  RefPtr<mozilla::dom::ServiceWorkerRegistration>
+  GetServiceWorkerRegistration(const mozilla::dom::ServiceWorkerRegistrationDescriptor& aDescriptor) const override;
 
   RefPtr<mozilla::dom::ServiceWorkerRegistration>
   GetOrCreateServiceWorkerRegistration(const mozilla::dom::ServiceWorkerRegistrationDescriptor& aDescriptor) override;
@@ -666,6 +671,7 @@ public:
                  mozilla::ErrorResult& aError);
   void SetOpener(JSContext* aCx, JS::Handle<JS::Value> aOpener,
                  mozilla::ErrorResult& aError);
+  void GetEvent(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval);
   already_AddRefed<nsPIDOMWindowOuter> GetParent(mozilla::ErrorResult& aError);
   nsPIDOMWindowOuter* GetScriptableParent() override;
   nsPIDOMWindowOuter* GetScriptableParentOrNull() override;
@@ -678,8 +684,8 @@ public:
        const nsAString& aName,
        const nsAString& aOptions,
        mozilla::ErrorResult& aError);
-  nsIDOMOfflineResourceList* GetApplicationCache(mozilla::ErrorResult& aError);
-  already_AddRefed<nsIDOMOfflineResourceList> GetApplicationCache() override;
+  nsDOMOfflineResourceList* GetApplicationCache(mozilla::ErrorResult& aError);
+  nsDOMOfflineResourceList* GetApplicationCache() override;
 
 #if defined(MOZ_WIDGET_ANDROID)
   int16_t Orientation(mozilla::dom::CallerType aCallerType) const;
@@ -701,9 +707,6 @@ public:
                         nsAString::const_iterator aEnd);
   static void
   ConvertDialogOptions(const nsAString& aOptions, nsAString& aResult);
-
-  mozilla::dom::Worklet*
-  GetAudioWorklet(mozilla::ErrorResult& aRv);
 
   mozilla::dom::Worklet*
   GetPaintWorklet(mozilla::ErrorResult& aRv);
@@ -1220,6 +1223,9 @@ public:
 public:
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() override;
 
+  // Get the parent principal, returns null if this is a toplevel window.
+  nsIPrincipal* GetTopLevelStorageAreaPrincipal();
+
 protected:
   static void NotifyDOMWindowDestroyed(nsGlobalWindowInner* aWindow);
   void NotifyWindowIDDestroyed(const char* aTopic);
@@ -1377,7 +1383,6 @@ protected:
   RefPtr<mozilla::dom::U2F> mU2F;
   RefPtr<mozilla::dom::cache::CacheStorage> mCacheStorage;
   RefPtr<mozilla::dom::Console> mConsole;
-  RefPtr<mozilla::dom::Worklet> mAudioWorklet;
   RefPtr<mozilla::dom::Worklet> mPaintWorklet;
   // We need to store an nsISupports pointer to this object because the
   // mozilla::dom::External class doesn't exist on b2g and using the type
@@ -1415,7 +1420,7 @@ protected:
   nsCOMPtr<nsIURI> mLastOpenedURI;
 #endif
 
-  nsCOMPtr<nsIDOMOfflineResourceList> mApplicationCache;
+  RefPtr<nsDOMOfflineResourceList> mApplicationCache;
 
   using XBLPrototypeHandlerTable = nsJSThingHashtable<nsPtrHashKey<nsXBLPrototypeHandler>, JSObject*>;
   mozilla::UniquePtr<XBLPrototypeHandlerTable> mCachedXBLPrototypeHandlers;

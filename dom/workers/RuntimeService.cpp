@@ -53,6 +53,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/Navigator.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsContentUtils.h"
 #include "nsCycleCollector.h"
 #include "nsDOMJSUtils.h"
@@ -584,14 +585,18 @@ class LogViolationDetailsRunnable final : public WorkerMainThreadRunnable
 {
   nsString mFileName;
   uint32_t mLineNum;
+  uint32_t mColumnNum;
 
 public:
   LogViolationDetailsRunnable(WorkerPrivate* aWorker,
                               const nsString& aFileName,
-                              uint32_t aLineNum)
+                              uint32_t aLineNum,
+                              uint32_t aColumnNum)
     : WorkerMainThreadRunnable(aWorker,
                                NS_LITERAL_CSTRING("RuntimeService :: LogViolationDetails"))
-    , mFileName(aFileName), mLineNum(aLineNum)
+    , mFileName(aFileName)
+    , mLineNum(aLineNum)
+    , mColumnNum(aColumnNum)
   {
     MOZ_ASSERT(aWorker);
   }
@@ -611,16 +616,17 @@ ContentSecurityPolicyAllows(JSContext* aCx)
   if (worker->GetReportCSPViolations()) {
     nsString fileName;
     uint32_t lineNum = 0;
+    uint32_t columnNum = 0;
 
     JS::AutoFilename file;
-    if (JS::DescribeScriptedCaller(aCx, &file, &lineNum) && file.get()) {
+    if (JS::DescribeScriptedCaller(aCx, &file, &lineNum, &columnNum) && file.get()) {
       fileName = NS_ConvertUTF8toUTF16(file.get());
     } else {
       MOZ_ASSERT(!JS_IsExceptionPending(aCx));
     }
 
     RefPtr<LogViolationDetailsRunnable> runnable =
-        new LogViolationDetailsRunnable(worker, fileName, lineNum);
+        new LogViolationDetailsRunnable(worker, fileName, lineNum, columnNum);
 
     ErrorResult rv;
     runnable->Dispatch(Killing, rv);
@@ -898,7 +904,8 @@ Wrap(JSContext *cx, JS::HandleObject existing, JS::HandleObject obj)
     MOZ_CRASH("There should be no edges from the debuggee to the debugger.");
   }
 
-  JSObject* originGlobal = js::GetGlobalForObjectCrossCompartment(obj);
+  // Note: the JS engine unwraps CCWs before calling this callback.
+  JSObject* originGlobal = JS::GetNonCCWObjectGlobal(obj);
 
   const js::Wrapper* wrapper = nullptr;
   if (IsWorkerDebuggerGlobal(originGlobal) ||
@@ -2231,6 +2238,21 @@ RuntimeService::ResumeWorkersForWindow(nsPIDOMWindowInner* aWindow)
   }
 }
 
+void
+RuntimeService::PropagateFirstPartyStorageAccessGranted(nsPIDOMWindowInner* aWindow)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(aWindow);
+  MOZ_ASSERT(StaticPrefs::privacy_restrict3rdpartystorage_enabled());
+
+  nsTArray<WorkerPrivate*> workers;
+  GetWorkersForWindow(aWindow, workers);
+
+  for (uint32_t index = 0; index < workers.Length(); index++) {
+    workers[index]->PropagateFirstPartyStorageAccessGranted();
+  }
+}
+
 nsresult
 RuntimeService::CreateSharedWorker(const GlobalObject& aGlobal,
                                    const nsAString& aScriptURL,
@@ -2620,7 +2642,8 @@ LogViolationDetailsRunnable::MainThreadRun()
         "Call to eval() or related function blocked by CSP.");
     if (mWorkerPrivate->GetReportCSPViolations()) {
       csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
-                               mFileName, scriptSample, mLineNum,
+                               nullptr, // triggering element
+                               mFileName, scriptSample, mLineNum, mColumnNum,
                                EmptyString(), EmptyString());
     }
   }
@@ -2824,6 +2847,18 @@ ResumeWorkersForWindow(nsPIDOMWindowInner* aWindow)
   RuntimeService* runtime = RuntimeService::GetService();
   if (runtime) {
     runtime->ResumeWorkersForWindow(aWindow);
+  }
+}
+
+void
+PropagateFirstPartyStorageAccessGrantedToWorkers(nsPIDOMWindowInner* aWindow)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(StaticPrefs::privacy_restrict3rdpartystorage_enabled());
+
+  RuntimeService* runtime = RuntimeService::GetService();
+  if (runtime) {
+    runtime->PropagateFirstPartyStorageAccessGranted(aWindow);
   }
 }
 

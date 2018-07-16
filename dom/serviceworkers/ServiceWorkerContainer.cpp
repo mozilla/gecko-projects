@@ -28,8 +28,11 @@
 #include "mozilla/dom/ServiceWorker.h"
 #include "mozilla/dom/ServiceWorkerContainerBinding.h"
 
+#include "RemoteServiceWorkerContainerImpl.h"
 #include "ServiceWorker.h"
 #include "ServiceWorkerContainerImpl.h"
+#include "ServiceWorkerRegistration.h"
+#include "ServiceWorkerUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -66,7 +69,14 @@ ServiceWorkerContainer::IsEnabled(JSContext* aCx, JSObject* aGlobal)
 already_AddRefed<ServiceWorkerContainer>
 ServiceWorkerContainer::Create(nsIGlobalObject* aGlobal)
 {
-  RefPtr<Inner> inner = new ServiceWorkerContainerImpl();
+  RefPtr<Inner> inner;
+  if (ServiceWorkerParentInterceptEnabled()) {
+    inner = new RemoteServiceWorkerContainerImpl();
+  } else {
+    inner = new ServiceWorkerContainerImpl();
+  }
+  NS_ENSURE_TRUE(inner, nullptr);
+
   RefPtr<ServiceWorkerContainer> ref =
     new ServiceWorkerContainer(aGlobal, inner.forget());
   return ref.forget();
@@ -544,7 +554,14 @@ ServiceWorkerContainer::GetReady(ErrorResult& aRv)
       RefPtr<ServiceWorkerRegistration> reg =
         global->GetOrCreateServiceWorkerRegistration(aDescriptor);
       NS_ENSURE_TRUE_VOID(reg);
-      outer->MaybeResolve(reg);
+
+      // Don't resolve the ready promise until the registration has
+      // reached the right version.  This ensures that the active
+      // worker property is set correctly on the registration.
+      reg->WhenVersionReached(aDescriptor.Version(),
+        [outer, reg] (bool aResult) {
+          outer->MaybeResolve(reg);
+        });
     }, [self, outer] (ErrorResult& aRv) {
       outer->MaybeReject(aRv);
     });

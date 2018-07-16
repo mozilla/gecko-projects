@@ -7135,11 +7135,10 @@ class MMathFunction
 
   private:
     Function function_;
-    const MathCache* cache_;
 
     // A nullptr cache means this function will neither access nor update the cache.
-    MMathFunction(MDefinition* input, Function function, const MathCache* cache)
-      : MUnaryInstruction(classOpcode, input), function_(function), cache_(cache)
+    MMathFunction(MDefinition* input, Function function)
+      : MUnaryInstruction(classOpcode, input), function_(function)
     {
         setResultType(MIRType::Double);
         specialization_ = MIRType::Double;
@@ -7153,9 +7152,7 @@ class MMathFunction
     Function function() const {
         return function_;
     }
-    const MathCache* cache() const {
-        return cache_;
-    }
+
     bool congruentTo(const MDefinition* ins) const override {
         if (!ins->isMathFunction())
             return false;
@@ -7815,11 +7812,9 @@ class MSinCos
   : public MUnaryInstruction,
     public FloatingPointPolicy<0>::Data
 {
-    const MathCache* cache_;
 
-    MSinCos(MDefinition *input, const MathCache *cache)
-      : MUnaryInstruction(classOpcode, input),
-        cache_(cache)
+    explicit MSinCos(MDefinition *input)
+      : MUnaryInstruction(classOpcode, input)
     {
         setResultType(MIRType::SinCosDouble);
         specialization_ = MIRType::Double;
@@ -7829,9 +7824,9 @@ class MSinCos
   public:
     INSTRUCTION_HEADER(SinCos)
 
-    static MSinCos *New(TempAllocator &alloc, MDefinition *input, const MathCache *cache)
+    static MSinCos *New(TempAllocator &alloc, MDefinition *input)
     {
-        return new (alloc) MSinCos(input, cache);
+        return new (alloc) MSinCos(input);
     }
     AliasSet getAliasSet() const override {
         return AliasSet::None();
@@ -7841,9 +7836,6 @@ class MSinCos
     }
     bool possiblyCalls() const override {
         return true;
-    }
-    const MathCache* cache() const {
-        return cache_;
     }
 };
 
@@ -12385,12 +12377,14 @@ class MSetDOMProperty
     public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >::Data
 {
     const JSJitSetterOp func_;
+    Realm* setterRealm_;
     DOMObjectKind objectKind_;
 
-    MSetDOMProperty(const JSJitSetterOp func, DOMObjectKind objectKind, MDefinition* obj,
-                    MDefinition* val)
+    MSetDOMProperty(const JSJitSetterOp func, DOMObjectKind objectKind, Realm* setterRealm,
+                    MDefinition* obj, MDefinition* val)
       : MBinaryInstruction(classOpcode, obj, val),
         func_(func),
+        setterRealm_(setterRealm),
         objectKind_(objectKind)
     { }
 
@@ -12401,6 +12395,9 @@ class MSetDOMProperty
 
     JSJitSetterOp fun() const {
         return func_;
+    }
+    Realm* setterRealm() const {
+        return setterRealm_;
     }
     DOMObjectKind objectKind() const {
         return objectKind_;
@@ -12517,11 +12514,14 @@ class MGetDOMPropertyBase
 class MGetDOMProperty
   : public MGetDOMPropertyBase
 {
+    Realm* getterRealm_;
     DOMObjectKind objectKind_;
 
   protected:
-    MGetDOMProperty(const JSJitInfo* jitinfo, DOMObjectKind objectKind)
+    MGetDOMProperty(const JSJitInfo* jitinfo, DOMObjectKind objectKind,
+                    Realm* getterRealm)
       : MGetDOMPropertyBase(classOpcode, jitinfo),
+        getterRealm_(getterRealm),
         objectKind_(objectKind)
     {}
 
@@ -12529,20 +12529,27 @@ class MGetDOMProperty
     INSTRUCTION_HEADER(GetDOMProperty)
 
     static MGetDOMProperty* New(TempAllocator& alloc, const JSJitInfo* info, DOMObjectKind objectKind,
-                                MDefinition* obj, MDefinition* guard, MDefinition* globalGuard)
+                                Realm* getterRealm, MDefinition* obj, MDefinition* guard,
+                                MDefinition* globalGuard)
     {
-        auto* res = new(alloc) MGetDOMProperty(info, objectKind);
+        auto* res = new(alloc) MGetDOMProperty(info, objectKind, getterRealm);
         if (!res || !res->init(alloc, obj, guard, globalGuard))
             return nullptr;
         return res;
     }
 
+    Realm* getterRealm() const {
+        return getterRealm_;
+    }
     DOMObjectKind objectKind() const {
         return objectKind_;
     }
 
     bool congruentTo(const MDefinition* ins) const override {
         if (!ins->isGetDOMProperty())
+            return false;
+
+        if (ins->toGetDOMProperty()->getterRealm() != getterRealm())
             return false;
 
         return baseCongruentTo(ins->toGetDOMProperty());

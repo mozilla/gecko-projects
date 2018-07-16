@@ -109,6 +109,20 @@ var PermissionPromptPrototype = {
   },
 
   /**
+   * Provides the preferred name to use in the permission popups,
+   * based on the principal URI (the URI.hostPort for any URI scheme
+   * besides the moz-extension one which should default to the
+   * extension name).
+   */
+  get principalName() {
+    if (this.principal.addonPolicy) {
+      return this.principal.addonPolicy.name;
+    }
+
+    return this.principal.URI.hostPort;
+  },
+
+  /**
    * If the nsIPermissionManager is being queried and written
    * to for this permission request, set this to the key to be
    * used. If this is undefined, user permissions will not be
@@ -232,6 +246,12 @@ var PermissionPromptPrototype = {
   onBeforeShow() {},
 
   /**
+   * If the prompt was be shown to the user, this callback will
+   * be called just after its been hidden.
+   */
+  onAfterShow() {},
+
+  /**
    * Will determine if a prompt should be shown to the user, and if so,
    * will show it.
    *
@@ -344,10 +364,19 @@ var PermissionPromptPrototype = {
     // Permission prompts are always persistent; the close button is controlled by a pref.
     options.persistent = true;
     options.hideClose = !Services.prefs.getBoolPref("privacy.permissionPrompts.showCloseButton");
-    // When the docshell of the browser is aboout to be swapped to another one,
-    // the "swapping" event is called. Returning true causes the notification
-    // to be moved to the new browser.
-    options.eventCallback = topic => topic == "swapping";
+    options.eventCallback = (topic) => {
+      // When the docshell of the browser is aboout to be swapped to another one,
+      // the "swapping" event is called. Returning true causes the notification
+      // to be moved to the new browser.
+      if (topic == "swapping") {
+        return true;
+      }
+      // The prompt has been removed, notify the PermissionUI.
+      if (topic == "removed") {
+        this.onAfterShow();
+      }
+      return false;
+    };
 
     this.onBeforeShow();
     chromeWin.PopupNotifications.show(this.browser,
@@ -427,7 +456,7 @@ GeolocationPermissionPrompt.prototype = {
     let options = {
       learnMoreURL: Services.urlFormatter.formatURLPref(pref),
       displayURI: false,
-      name: this.principal.URI.hostPort,
+      name: this.principalName,
     };
 
     if (this.principal.URI.schemeIs("file")) {
@@ -460,7 +489,7 @@ GeolocationPermissionPrompt.prototype = {
     }
 
     return gBrowserBundle.formatStringFromName("geolocation.shareWithSite3",
-                                                  ["<>"], 1);
+                                               ["<>"], 1);
   },
 
   get promptActions() {
@@ -535,7 +564,7 @@ DesktopNotificationPermissionPrompt.prototype = {
     return {
       learnMoreURL,
       displayURI: false,
-      name: this.principal.URI.hostPort,
+      name: this.principalName,
     };
   },
 
@@ -617,7 +646,7 @@ PersistentStoragePermissionPrompt.prototype = {
       checkbox,
       learnMoreURL,
       displayURI: false,
-      name: this.principal.URI.hostPort,
+      name: this.principalName,
     };
   },
 
@@ -684,7 +713,7 @@ MIDIPermissionPrompt.prototype = {
     // TODO (bug 1433235) We need a security/permissions explanation URL for this
     let options = {
       displayURI: false,
-      name: this.principal.URI.hostPort,
+      name: this.principalName,
     };
 
     if (this.principal.URI.schemeIs("file")) {
@@ -803,7 +832,27 @@ AutoplayPermissionPrompt.prototype = {
     }];
   },
 
+  onAfterShow() {
+    // Remove the event listener to prevent any leaks.
+    this.browser.removeEventListener(
+      "DOMAudioPlaybackStarted", this.handlePlaybackStart);
+  },
+
   onBeforeShow() {
+    // Hide the prompt if the tab starts playing media.
+    this.handlePlaybackStart = () => {
+      let chromeWin = this.browser.ownerGlobal;
+      if (!chromeWin.PopupNotifications) {
+        return;
+      }
+      let notification = chromeWin.PopupNotifications.getNotification(
+        this.notificationID, this.browser);
+      if (notification) {
+        chromeWin.PopupNotifications.remove(notification);
+      }
+    };
+    this.browser.addEventListener(
+      "DOMAudioPlaybackStarted", this.handlePlaybackStart);
   },
 };
 

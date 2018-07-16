@@ -584,6 +584,8 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
             const char16_t* chars = JS_GetTwoByteExternalStringChars(str);
             ws->AssignLiteral(chars, length);
         } else {
+            // We don't bother checking for a dynamic-atom external string,
+            // because we'd just need to copy out of it anyway.
             if (!AssignJSString(cx, *ws, str))
                 return false;
         }
@@ -642,7 +644,10 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
         if (!buffer) {
             return false;
         }
-        JS_EncodeStringToBuffer(cx, str, buffer, length);
+        if (!JS_EncodeStringToBuffer(cx, str, buffer, length)) {
+            free(buffer);
+            return false;
+        }
         buffer[length] = '\0';
         *((void**)d) = buffer;
         return true;
@@ -750,7 +755,9 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
         if (rs->Length() != uint32_t(length)) {
             return false;
         }
-        JS_EncodeStringToBuffer(cx, str, rs->BeginWriting(), length);
+        if (!JS_EncodeStringToBuffer(cx, str, rs->BeginWriting(), length)) {
+            return false;
+        }
 
         return true;
     }
@@ -806,7 +813,7 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
 
     case nsXPTType::T_PROMISE:
     {
-        nsIGlobalObject* glob = NativeGlobal(CurrentGlobalOrNull(cx));
+        nsIGlobalObject* glob = CurrentNativeGlobal(cx);
         if (!glob) {
             if (pErr) {
                 *pErr = NS_ERROR_UNEXPECTED;

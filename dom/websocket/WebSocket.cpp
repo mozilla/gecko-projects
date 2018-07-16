@@ -98,6 +98,7 @@ public:
   , mDisconnectingOrDisconnected(false)
   , mCloseEventWasClean(false)
   , mCloseEventCode(nsIWebSocketChannel::CLOSE_ABNORMAL)
+  , mPort(0)
   , mScriptLine(0)
   , mScriptColumn(0)
   , mInnerWindowID(0)
@@ -820,6 +821,11 @@ WebSocketImpl::ScheduleConnectionCloseEvents(nsISupports* aContext,
       aStatusCode = NS_OK;
     }
 
+    if (aStatusCode == NS_ERROR_NET_INADEQUATE_SECURITY) {
+      // TLS negotiation failed so we need to set status code to 1015.
+      mCloseEventCode = 1015;
+    }
+
     if (NS_FAILED(aStatusCode)) {
       ConsoleError();
       mFailed = true;
@@ -1392,7 +1398,7 @@ WebSocket::ConstructorCommon(const GlobalObject& aGlobal,
       new InitRunnable(workerPrivate, webSocketImpl, !!aTransportProvider, aUrl,
                        protocolArray, nsDependentCString(file.get()), lineno,
                        column);
-    runnable->Dispatch(Terminating, aRv);
+    runnable->Dispatch(Canceling, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -1495,7 +1501,7 @@ WebSocket::ConstructorCommon(const GlobalObject& aGlobal,
                "not yet implemented");
     RefPtr<AsyncOpenRunnable> runnable =
       new AsyncOpenRunnable(webSocket->mImpl);
-    runnable->Dispatch(Terminating, aRv);
+    runnable->Dispatch(Canceling, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }

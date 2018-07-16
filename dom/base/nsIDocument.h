@@ -2933,7 +2933,7 @@ public:
 
   void SetNavigationTiming(nsDOMNavigationTiming* aTiming);
 
-  Element* FindImageMap(const nsAString& aNormalizedMapName);
+  nsContentList* ImageMapList();
 
   // Add aLink to the set of links that need their status resolved.
   void RegisterPendingLinkUpdate(mozilla::dom::Link* aLink);
@@ -3681,6 +3681,8 @@ protected:
 
   // Return the same type parent docuement if exists, or return null.
   nsIDocument* GetSameTypeParentDocument();
+
+  void MaybeAllowStorageForOpener();
 
   // Helpers for GetElementsByName.
   static bool MatchNameAttribute(mozilla::dom::Element* aElement,

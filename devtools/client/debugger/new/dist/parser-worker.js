@@ -1181,6 +1181,7 @@ exports.isAwaitExpression = isAwaitExpression;
 exports.isYieldExpression = isYieldExpression;
 exports.isObjectShorthand = isObjectShorthand;
 exports.getObjectExpressionValue = getObjectExpressionValue;
+exports.getCode = getCode;
 exports.getVariableNames = getVariableNames;
 exports.getComments = getComments;
 exports.getSpecifiers = getSpecifiers;
@@ -1239,6 +1240,10 @@ function getObjectExpressionValue(node) {
 
   const shouldWrap = t.isObjectExpression(value);
   return shouldWrap ? `(${code})` : code;
+}
+
+function getCode(node) {
+  return (0, _generator2.default)(node).code;
 }
 
 function getVariableNames(path) {
@@ -1533,10 +1538,14 @@ function extractSymbol(path, symbols) {
   }
 
   if (t.isClassDeclaration(path)) {
+    const { loc, superClass } = path.node;
     symbols.classes.push({
       name: path.node.id.name,
-      parent: path.node.superClass,
-      location: path.node.loc
+      parent: superClass ? {
+        name: t.isMemberExpression(superClass) ? (0, _helpers.getCode)(superClass) : superClass.name,
+        location: superClass.loc
+      } : null,
+      location: loc
     });
   }
 
@@ -1673,7 +1682,8 @@ function extractSymbols(sourceId) {
     imports: [],
     literals: [],
     hasJsx: false,
-    hasTypes: false
+    hasTypes: false,
+    loading: false
   };
 
   const ast = (0, _ast.traverseAst)(sourceId, {

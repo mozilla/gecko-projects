@@ -62,24 +62,6 @@ nsJSUtils::GetCallingLocation(JSContext* aContext, nsAString& aFilename,
   return true;
 }
 
-nsIScriptGlobalObject *
-nsJSUtils::GetStaticScriptGlobal(JSObject* aObj)
-{
-  if (!aObj)
-    return nullptr;
-  return xpc::WindowGlobalOrNull(aObj);
-}
-
-nsIScriptContext *
-nsJSUtils::GetStaticScriptContext(JSObject* aObj)
-{
-  nsIScriptGlobalObject *nativeGlobal = GetStaticScriptGlobal(aObj);
-  if (!nativeGlobal)
-    return nullptr;
-
-  return nativeGlobal->GetScriptContext();
-}
-
 uint64_t
 nsJSUtils::GetCurrentlyRunningCodeInnerWindowID(JSContext *aContext)
 {
@@ -160,7 +142,7 @@ nsJSUtils::ExecutionContext::ExecutionContext(JSContext* aCx,
              CycleCollectedJSContext::Get()->MicroTaskLevel());
   MOZ_ASSERT(mRetValue.isUndefined());
 
-  MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(aGlobal) == aGlobal);
+  MOZ_ASSERT(JS_IsGlobalObject(aGlobal));
   if (MOZ_UNLIKELY(!xpc::Scriptability::Get(aGlobal).Allowed())) {
     mSkip = true;
     mRv = NS_OK;
@@ -472,8 +454,7 @@ nsJSUtils::CompileModule(JSContext* aCx,
 
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   MOZ_ASSERT(aSrcBuf.get());
-  MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(aEvaluationGlobal) ==
-             aEvaluationGlobal);
+  MOZ_ASSERT(JS_IsGlobalObject(aEvaluationGlobal));
   MOZ_ASSERT(JS::CurrentGlobalOrNull(aCx) == aEvaluationGlobal);
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(CycleCollectedJSContext::Get() &&

@@ -104,8 +104,10 @@ public:
   void Unlock()
   {
     MOZ_ASSERT(mLiveSet);
-    mLiveSet->Unlock();
-    mLiveSet = nullptr;
+    if (mLiveSet) {
+      mLiveSet->Unlock();
+      mLiveSet = nullptr;
+    }
   }
 
   LiveSetAutoLock(const LiveSetAutoLock& aOther) = delete;
@@ -244,7 +246,7 @@ Interceptor::Create(STAUniquePtr<IUnknown> aTarget, IInterceptorSink* aSink,
 
   detail::LiveSetAutoLock lock(GetLiveSet());
 
-  RefPtr<IWeakReference> existingWeak(std::move(GetLiveSet().Get(aTarget.get())));
+  RefPtr<IWeakReference> existingWeak(GetLiveSet().Get(aTarget.get()));
   if (existingWeak) {
     RefPtr<IWeakReferenceSource> existingStrong;
     if (SUCCEEDED(existingWeak->ToStrongRef(getter_AddRefs(existingStrong)))) {
@@ -542,12 +544,25 @@ Interceptor::GetInitialInterceptorForIID(detail::LiveSetAutoLock& aLiveSetLock,
   MOZ_ASSERT(aTargetIid != IID_IMarshal);
   MOZ_ASSERT(!IsProxy(aTarget.get()));
 
+  HRESULT hr = E_UNEXPECTED;
+
+  auto hasFailed = [&hr]() -> bool {
+    return FAILED(hr);
+  };
+
+  auto cleanup = [&aLiveSetLock]() -> void {
+    aLiveSetLock.Unlock();
+  };
+
+  ExecuteWhen<decltype(hasFailed), decltype(cleanup)>
+    onFail(hasFailed, cleanup);
+
   if (aTargetIid == IID_IUnknown) {
     // We must lock mInterceptorMapMutex so that nothing can race with us once
     // we have been published to the live set.
     MutexAutoLock lock(mInterceptorMapMutex);
 
-    HRESULT hr = PublishTarget(aLiveSetLock, nullptr, aTargetIid, std::move(aTarget));
+    hr = PublishTarget(aLiveSetLock, nullptr, aTargetIid, std::move(aTarget));
     ENSURE_HR_SUCCEEDED(hr);
 
     hr = QueryInterface(aTargetIid, aOutInterceptor);
@@ -559,7 +574,7 @@ Interceptor::GetInitialInterceptorForIID(detail::LiveSetAutoLock& aLiveSetLock,
   WeakReferenceSupport::StabilizeRefCount stabilizer(*this);
 
   RefPtr<IUnknown> unkInterceptor;
-  HRESULT hr = CreateInterceptor(aTargetIid,
+  hr = CreateInterceptor(aTargetIid,
                                  static_cast<WeakReferenceSupport*>(this),
                                  getter_AddRefs(unkInterceptor));
   ENSURE_HR_SUCCEEDED(hr);
@@ -878,7 +893,7 @@ Interceptor::DisconnectRemotesForTarget(IUnknown* aTarget)
 
   // It is not an error if the interceptor doesn't exist, so we return
   // S_FALSE instead of an error in that case.
-  RefPtr<IWeakReference> existingWeak(std::move(GetLiveSet().Get(aTarget)));
+  RefPtr<IWeakReference> existingWeak(GetLiveSet().Get(aTarget));
   if (!existingWeak) {
     return S_FALSE;
   }

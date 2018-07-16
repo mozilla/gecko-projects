@@ -8,11 +8,15 @@ package org.mozilla.geckoview.test.rule;
 import org.mozilla.gecko.gfx.GeckoDisplay;
 import org.mozilla.geckoview.BuildConfig;
 import org.mozilla.geckoview.GeckoResponse;
+import org.mozilla.geckoview.GeckoResult;
+import org.mozilla.geckoview.GeckoResult.OnExceptionListener;
+import org.mozilla.geckoview.GeckoResult.OnValueListener;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.SessionTextInput;
+import org.mozilla.geckoview.test.util.UiThreadUtils;
 import org.mozilla.geckoview.test.rdp.Actor;
 import org.mozilla.geckoview.test.rdp.Promise;
 import org.mozilla.geckoview.test.rdp.RDPConnection;
@@ -96,7 +100,6 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
 
     public static final String APK_URI_PREFIX = "resource://android/";
 
-    private static final Method sGetNextMessage;
     private static final Method sOnPageStart;
     private static final Method sOnPageStop;
     private static final Method sOnNewSession;
@@ -104,14 +107,12 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
 
     static {
         try {
-            sGetNextMessage = MessageQueue.class.getDeclaredMethod("next");
-            sGetNextMessage.setAccessible(true);
             sOnPageStart = GeckoSession.ProgressDelegate.class.getMethod(
                     "onPageStart", GeckoSession.class, String.class);
             sOnPageStop = GeckoSession.ProgressDelegate.class.getMethod(
                     "onPageStop", GeckoSession.class, boolean.class);
             sOnNewSession = GeckoSession.NavigationDelegate.class.getMethod(
-                    "onNewSession", GeckoSession.class, String.class, GeckoResponse.class);
+                    "onNewSession", GeckoSession.class, String.class);
             sOnCrash = GeckoSession.ContentDelegate.class.getMethod(
                     "onCrash", GeckoSession.class);
         } catch (final NoSuchMethodException e) {
@@ -337,12 +338,6 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         boolean value() default true;
     }
 
-    public static class TimeoutException extends RuntimeException {
-        public TimeoutException(final String detailMessage) {
-            super(detailMessage);
-        }
-    }
-
     public static class ChildCrashedException extends RuntimeException {
         public ChildCrashedException(final String detailMessage) {
             super(detailMessage);
@@ -403,7 +398,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
          */
         public Object getValue() {
             while (mPromise.isPending()) {
-                loopUntilIdle(mTimeoutMillis);
+                UiThreadUtils.loopUntilIdle(mTimeoutMillis);
             }
             if (mPromise.isRejected()) {
                 throw new RejectedPromiseException(mPromise.getReason());
@@ -870,40 +865,8 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
 
     private static final Set<Class<?>> DEFAULT_DELEGATES = getDefaultDelegates();
 
-    private static final class TimeoutRunnable implements Runnable {
-        private long timeout;
-
-        public void set(final long timeout) {
-            this.timeout = timeout;
-            cancel();
-            HANDLER.postDelayed(this, timeout);
-        }
-
-        public void cancel() {
-            HANDLER.removeCallbacks(this);
-        }
-
-        @Override
-        public void run() {
-            throw new TimeoutException("Timed out after " + timeout + "ms");
-        }
-    }
-
-    /* package */ static final Handler HANDLER = new Handler(Looper.getMainLooper());
-    private static final TimeoutRunnable TIMEOUT_RUNNABLE = new TimeoutRunnable();
-    private static final MessageQueue.IdleHandler IDLE_HANDLER = new MessageQueue.IdleHandler() {
-        @Override
-        public boolean queueIdle() {
-            final Message msg = Message.obtain(HANDLER);
-            msg.obj = HANDLER;
-            HANDLER.sendMessageAtFrontOfQueue(msg);
-            return false; // Remove this idle handler.
-        }
-    };
-
     private static GeckoRuntime sRuntime;
     private static RDPConnection sRDPConnection;
-    private static long sLongestWait;
     protected static GeckoSession sCachedSession;
     protected static Tab sCachedRDPTab;
 
@@ -959,6 +922,15 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
      */
     public @Nullable ErrorCollector getErrorCollector() {
         return mErrorCollector;
+    }
+
+    /**
+     * Get the current timeout value in milliseconds.
+     *
+     * @return The current timeout value in milliseconds.
+     */
+    public long getTimeoutMillis() {
+        return mTimeoutMillis;
     }
 
     /**
@@ -1219,34 +1191,50 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
                     }
                 }
 
-                if (call != null && sOnNewSession.equals(method)) {
-                    // We're delegating an onNewSession call.
-                    // Make sure we wait on the newly opened session, if any.
-                    final GeckoSession oldSession = (GeckoSession) args[0];
-                    @SuppressWarnings("unchecked")
-                    final GeckoResponse<GeckoSession> realResponse =
-                            (GeckoResponse<GeckoSession>) args[2];
-                    args[2] = new GeckoResponse<GeckoSession>() {
-                        @Override
-                        public void respond(final GeckoSession newSession) {
-                            realResponse.respond(newSession);
-                            // `realResponse` has opened the session at this point, so wait on it.
-                            if (oldSession.isOpen() && newSession != null) {
-                                GeckoSessionTestRule.this.waitForOpenSession(newSession);
-                            }
-                        }
-                    };
-                }
-
+                Object returnValue = null;
                 try {
                     mCurrentMethodCall = call;
-                    return method.invoke((call != null) ? call.target
+                    returnValue = method.invoke((call != null) ? call.target
                                                         : Callbacks.Default.INSTANCE, args);
                 } catch (final IllegalAccessException | InvocationTargetException e) {
                     throw unwrapRuntimeException(e);
                 } finally {
                     mCurrentMethodCall = null;
                 }
+
+                if (call == null || returnValue == null || !sOnNewSession.equals(method)) {
+                    return returnValue;
+                }
+
+                // We're delegating an onNewSession call.
+                // Make sure we wait on the newly opened session, if any.
+                final GeckoSession oldSession = (GeckoSession) args[0];
+
+                @SuppressWarnings("unchecked")
+                final GeckoResult<GeckoSession> result = (GeckoResult<GeckoSession>)returnValue;
+                final GeckoResult<GeckoSession> tmpResult = new GeckoResult<>();
+                result.then(new OnValueListener<GeckoSession, Void>() {
+                    @Override
+                    public GeckoResult<Void> onValue(final GeckoSession newSession) throws Throwable {
+                        tmpResult.complete(newSession);
+
+                        // GeckoSession has already hooked up its then() listener earlier,
+                        // so ours will run after. We can wait for the session to
+                        // open here.
+                        tmpResult.then(new OnValueListener<GeckoSession, Void>() {
+                            @Override
+                            public GeckoResult<Void> onValue(GeckoSession newSession) throws Throwable {
+                                if (oldSession.isOpen() && newSession != null) {
+                                    GeckoSessionTestRule.this.waitForOpenSession(newSession);
+                                }
+                                return null;
+                            }
+                        });
+                        return null;
+                    }
+                });
+
+                return tmpResult;
             }
         };
 
@@ -1261,7 +1249,8 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
                 new GeckoRuntimeSettings.Builder();
             runtimeSettingsBuilder.arguments(new String[] { "-purgecaches" })
                     .extras(InstrumentationRegistry.getArguments())
-                    .remoteDebuggingEnabled(true);
+                    .remoteDebuggingEnabled(true)
+                    .consoleOutput(true);
 
             if (env.isAutomation()) {
                 runtimeSettingsBuilder
@@ -1389,7 +1378,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
             };
 
             do {
-                loopUntilIdle(getDefaultTimeoutMillis());
+                UiThreadUtils.loopUntilIdle(getDefaultTimeoutMillis());
             } while (mCallRecordHandler != null);
 
         } finally {
@@ -1404,7 +1393,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
         if (sCachedSession != null && mIgnoreCrash) {
             // Make sure the cached session has been closed by crashes.
             while (sCachedSession.isOpen()) {
-                loopUntilIdle(mTimeoutMillis);
+                UiThreadUtils.loopUntilIdle(mTimeoutMillis);
             }
         }
 
@@ -1505,59 +1494,6 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
     @Override
     protected boolean shouldRunOnUiThread(final Description description) {
         return true;
-    }
-
-    /**
-     * Loop the current thread until the message queue is idle. If loop is already idle and
-     * timeout is not specified, return immediately. If loop is already idle and timeout is
-     * specified, wait for a message to arrive first; an exception is thrown if timeout
-     * expires during the wait.
-     *
-     * @param timeout Wait timeout in milliseconds or 0 to not wait.
-     */
-    protected static void loopUntilIdle(final long timeout) {
-        // Adapted from GeckoThread.pumpMessageLoop.
-        final MessageQueue queue = HANDLER.getLooper().getQueue();
-        if (timeout > 0) {
-            TIMEOUT_RUNNABLE.set(timeout);
-        } else {
-            queue.addIdleHandler(IDLE_HANDLER);
-        }
-
-        final long startTime = SystemClock.uptimeMillis();
-        try {
-            while (true) {
-                final Message msg;
-                try {
-                    msg = (Message) sGetNextMessage.invoke(queue);
-                } catch (final IllegalAccessException | InvocationTargetException e) {
-                    throw unwrapRuntimeException(e);
-                }
-                if (msg.getTarget() == HANDLER && msg.obj == HANDLER) {
-                    // Our idle signal.
-                    break;
-                } else if (msg.getTarget() == null) {
-                    HANDLER.getLooper().quit();
-                    return;
-                }
-                msg.getTarget().dispatchMessage(msg);
-
-                if (timeout > 0) {
-                    TIMEOUT_RUNNABLE.cancel();
-                    queue.addIdleHandler(IDLE_HANDLER);
-                }
-            }
-
-            final long waitDuration = SystemClock.uptimeMillis() - startTime;
-            if (waitDuration > sLongestWait) {
-                sLongestWait = waitDuration;
-                Log.i(LOGTAG, "New longest wait: " + waitDuration + "ms");
-            }
-        } finally {
-            if (timeout > 0) {
-                TIMEOUT_RUNNABLE.cancel();
-            }
-        }
     }
 
     /**
@@ -1795,7 +1731,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
 
         while (!calledAny || !methodCalls.isEmpty()) {
             while (index >= mCallRecords.size()) {
-                loopUntilIdle(mTimeoutMillis);
+                UiThreadUtils.loopUntilIdle(mTimeoutMillis);
             }
 
             final MethodCall recorded = mCallRecords.get(index).methodCall;
@@ -2157,7 +2093,7 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
     private Object evaluateJS(final @NonNull Tab tab, final @NonNull String js) {
         final Actor.Reply<Object> reply = tab.getConsole().evaluateJS(js);
         while (!reply.hasResult()) {
-            loopUntilIdle(mTimeoutMillis);
+            UiThreadUtils.loopUntilIdle(mTimeoutMillis);
         }
 
         final Object result = reply.get();
@@ -2371,5 +2307,56 @@ public class GeckoSessionTestRule extends UiThreadTestRule {
                                                       @NonNull final T impl) {
         addExternalDelegateDuringNextWait(JvmClassMappingKt.getJavaClass(delegate),
                                           register, unregister, impl);
+    }
+
+    /**
+     * This waits for the given result and returns it's value. If
+     * the result failed with an exception, it is rethrown.
+     *
+     * @param result A {@link GeckoResult} instance.
+     * @param <T> The type of the value held by the {@link GeckoResult}
+     * @return The value of the completed {@link GeckoResult}.
+     */
+    public <T> T waitForResult(@NonNull GeckoResult<T> result) {
+        final ResultHolder<T> holder = new ResultHolder<>(result);
+
+        try {
+            beforeWait();
+            while (!holder.isComplete) {
+                UiThreadUtils.loopUntilIdle(mTimeoutMillis);
+            }
+        } finally {
+            afterWait(mCallRecords.size());
+        }
+
+        if (holder.error != null) {
+            throw unwrapRuntimeException(holder.error);
+        }
+
+        return holder.value;
+    }
+
+    private static class ResultHolder<T> {
+        public T value;
+        public Throwable error;
+        public boolean isComplete;
+
+        public ResultHolder(GeckoResult<T> result) {
+            result.then(new OnValueListener<T, Void>() {
+                @Override
+                public GeckoResult<Void> onValue(T value) {
+                    ResultHolder.this.value = value;
+                    isComplete = true;
+                    return null;
+                }
+            }, new OnExceptionListener<Void>() {
+                @Override
+                public GeckoResult<Void> onException(Throwable error) {
+                    ResultHolder.this.error = error;
+                    isComplete = true;
+                    return null;
+                }
+            });
+        }
     }
 }

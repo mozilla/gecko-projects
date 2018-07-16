@@ -26,7 +26,6 @@ describe("ActivityStream", () => {
       "lib/TopSitesFeed.jsm": {TopSitesFeed: Fake},
       "lib/TopStoriesFeed.jsm": {TopStoriesFeed: Fake},
       "lib/HighlightsFeed.jsm": {HighlightsFeed: Fake},
-      "lib/ThemeFeed.jsm": {ThemeFeed: Fake},
       "lib/ASRouterFeed.jsm": {ASRouterFeed: Fake}
     }));
     as = new ActivityStream();
@@ -56,16 +55,6 @@ describe("ActivityStream", () => {
     });
     it("should call .store.init", () => {
       assert.calledOnce(as.store.init);
-    });
-    it("should pass to Store an INIT event with the right version", () => {
-      as = new ActivityStream({version: "1.2.3"});
-      sandbox.stub(as.store, "init");
-      sandbox.stub(as._defaultPrefs, "init");
-
-      as.init();
-
-      const [, action] = as.store.init.firstCall.args;
-      assert.propertyVal(action.data, "version", "1.2.3");
     });
     it("should pass to Store an INIT event for content", () => {
       as.init();
@@ -158,10 +147,6 @@ describe("ActivityStream", () => {
     });
     it("should create a Favicon feed", () => {
       const feed = as.feeds.get("feeds.favicon")();
-      assert.instanceOf(feed, Fake);
-    });
-    it("should create a Theme feed", () => {
-      const feed = as.feeds.get("feeds.theme")();
       assert.instanceOf(feed, Fake);
     });
     it("should create a ASRouter feed", () => {

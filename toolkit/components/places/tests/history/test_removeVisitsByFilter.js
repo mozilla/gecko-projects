@@ -134,9 +134,6 @@ add_task(async function test_removeVisitsByFilter() {
       deferred: PromiseUtils.defer(),
       onBeginUpdateBatch() {},
       onEndUpdateBatch() {},
-      onVisits(aVisits) {
-        this.deferred.reject(new Error("Unexpected call to onVisits " + aVisits.length));
-      },
       onTitleChanged(uri) {
         this.deferred.reject(new Error("Unexpected call to onTitleChanged " + uri.spec));
       },
@@ -322,6 +319,10 @@ add_task(async function test_error_cases() {
   Assert.throws(
     () => PlacesUtils.history.removeVisitsByFilter({beginDate: new Date(1000), endDate: new Date(0)}),
     /TypeError: `beginDate` should be at least as old/
+  );
+  Assert.throws(
+    () => PlacesUtils.history.removeVisitsByFilter({transition: -1}),
+    /TypeError: `transition` should be valid/
   );
 });
 

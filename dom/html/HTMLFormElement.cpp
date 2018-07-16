@@ -398,6 +398,8 @@ CollectOrphans(nsINode* aRemovalRoot,
 void
 HTMLFormElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
+  // Note, this is explicitly using uncomposed doc, since we count
+  // only forms in document.
   nsCOMPtr<nsIHTMLDocument> oldDocument = do_QueryInterface(GetUncomposedDoc());
 
   // Mark all of our controls as maybe being orphans
@@ -1647,7 +1649,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
   // Get the document to form the URL.
   // We'll also need it later to get the DOM window when notifying form submit
   // observers (bug 33203)
-  if (!IsInUncomposedDoc()) {
+  if (!IsInComposedDoc()) {
     return NS_OK; // No doc means don't submit, see Bug 28988
   }
 
@@ -1705,7 +1707,8 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
     // form-action is only enforced if explicitly defined in the
     // policy - do *not* consult default-src, see:
     // http://www.w3.org/TR/CSP2/#directive-default-src
-    rv = csp->Permits(actionURL, nsIContentSecurityPolicy::FORM_ACTION_DIRECTIVE,
+    rv = csp->Permits(this, actionURL,
+                      nsIContentSecurityPolicy::FORM_ACTION_DIRECTIVE,
                       true, &permitsFormAction);
     NS_ENSURE_SUCCESS(rv, rv);
     if (!permitsFormAction) {
@@ -1953,7 +1956,12 @@ HTMLFormElement::CheckValidFormSubmission()
           // Input elements can trigger a form submission and we want to
           // update the style in that case.
           if (mControls->mElements[i]->IsHTMLElement(nsGkAtoms::input) &&
-              nsContentUtils::IsFocusedContent(mControls->mElements[i])) {
+              // We don't use nsContentUtils::IsFocusedContent here, because it
+              // doesn't really do what we want for number controls: it's true
+              // for the anonymous textnode inside, but not the number control
+              // itself.  We can use the focus state, though, because that gets
+              // synced to the number control by the anonymous text control.
+              mControls->mElements[i]->State().HasState(NS_EVENT_STATE_FOCUS)) {
             static_cast<HTMLInputElement*>(mControls->mElements[i])
               ->UpdateValidityUIBits(true);
           }

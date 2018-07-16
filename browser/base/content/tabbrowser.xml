@@ -56,10 +56,8 @@
         // Ignore overflow events:
         // - from nested scrollable elements
         // - for vertical orientation
-        // - when the window is tiny initially
         if (event.originalTarget != this._scrollbox ||
-            event.detail == 0 ||
-            window.outerWidth <= 1) {
+            event.detail == 0) {
           return;
         }
 
@@ -113,7 +111,6 @@
 
           var tab = this.firstChild;
           tab.label = this.emptyTabTitle;
-          tab.setAttribute("onerror", "this.removeAttribute('image');");
 
           window.addEventListener("resize", this);
 
@@ -1995,6 +1992,10 @@
             event.stopPropagation();
           }
         }
+
+        if (event.button == 1) {
+          gBrowser.warmupTab(gBrowser._findTabToBlurTo(this));
+        }
       ]]>
       </handler>
       <handler event="mouseup">
@@ -2003,23 +2004,30 @@
 
       <handler event="click" button="0"><![CDATA[
         if (Services.prefs.getBoolPref("browser.tabs.multiselect")) {
-          if (event.shiftKey) {
-            const lastSelectedTab = gBrowser.lastMultiSelectedTab || gBrowser.selectedTab;
+          let shiftKey = event.shiftKey;
+          let accelKey = event.getModifierState("Accel");
+          if (shiftKey) {
+            const lastSelectedTab = gBrowser.lastMultiSelectedTab;
+            if (!accelKey) {
+              gBrowser.clearMultiSelectedTabs(true);
+            }
             gBrowser.addRangeToMultiSelectedTabs(lastSelectedTab, this);
-            gBrowser.lastMultiSelectedTab = this;
+            gBrowser.selectedTab = lastSelectedTab;
             return;
           }
-          if (event.getModifierState("Accel")) {
+          if (accelKey) {
             // Ctrl (Cmd for mac) key is pressed
             if (this.multiselected) {
               gBrowser.removeFromMultiSelectedTabs(this);
               if (this == gBrowser.selectedTab) {
-                gBrowser.selectedTab = gBrowser.lastMultiSelectedTab;
+                gBrowser.switchToNextMultiSelectedTab();
               }
+              gBrowser.updateActiveTabMultiSelectState();
             } else if (this != gBrowser.selectedTab) {
               for (let tab of [this, gBrowser.selectedTab]) {
-                gBrowser.addToMultiSelectedTabs(tab);
+                gBrowser.addToMultiSelectedTabs(tab, true);
               }
+              gBrowser.tabContainer._setPositionalAttributes();
               gBrowser.lastMultiSelectedTab = this;
             }
             return;

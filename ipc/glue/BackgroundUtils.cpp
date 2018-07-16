@@ -339,6 +339,15 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
     sandboxedLoadingPrincipalInfo = sandboxedLoadingPrincipalInfoTemp;
   }
 
+  OptionalPrincipalInfo topLevelStorageAreaPrincipalInfo = mozilla::void_t();
+  if (aLoadInfo->TopLevelStorageAreaPrincipal()) {
+    PrincipalInfo topLevelStorageAreaPrincipalInfoTemp;
+    rv = PrincipalToPrincipalInfo(aLoadInfo->TopLevelStorageAreaPrincipal(),
+                                  &topLevelStorageAreaPrincipalInfoTemp);
+    NS_ENSURE_SUCCESS(rv, rv);
+    topLevelStorageAreaPrincipalInfo = topLevelStorageAreaPrincipalInfoTemp;
+  }
+
   OptionalURIParams optionalResultPrincipalURI = mozilla::void_t();
   nsCOMPtr<nsIURI> resultPrincipalURI;
   Unused << aLoadInfo->GetResultPrincipalURI(getter_AddRefs(resultPrincipalURI));
@@ -399,6 +408,7 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
       triggeringPrincipalInfo,
       principalToInheritInfo,
       sandboxedLoadingPrincipalInfo,
+      topLevelStorageAreaPrincipalInfo,
       optionalResultPrincipalURI,
       aLoadInfo->GetSecurityFlags(),
       aLoadInfo->InternalContentPolicyType(),
@@ -477,6 +487,13 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  nsCOMPtr<nsIPrincipal> topLevelStorageAreaPrincipal;
+  if (loadInfoArgs.topLevelStorageAreaPrincipalInfo().type() != OptionalPrincipalInfo::Tvoid_t) {
+    topLevelStorageAreaPrincipal =
+      PrincipalInfoToPrincipal(loadInfoArgs.topLevelStorageAreaPrincipalInfo(), &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
   nsCOMPtr<nsIURI> resultPrincipalURI;
   if (loadInfoArgs.resultPrincipalURI().type() != OptionalURIParams::Tvoid_t) {
     resultPrincipalURI = DeserializeURI(loadInfoArgs.resultPrincipalURI());
@@ -543,6 +560,7 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
                           triggeringPrincipal,
                           principalToInherit,
                           sandboxedLoadingPrincipal,
+                          topLevelStorageAreaPrincipal,
                           resultPrincipalURI,
                           clientInfo,
                           reservedClientInfo,

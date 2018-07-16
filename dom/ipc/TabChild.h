@@ -87,7 +87,7 @@ class TabChildGlobal : public ContentFrameMessageManager,
 {
 public:
   explicit TabChildGlobal(TabChild* aTabChild);
-  void Init();
+
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TabChildGlobal, DOMEventTargetHelper)
 
@@ -105,6 +105,7 @@ public:
   virtual already_AddRefed<nsPIDOMWindowOuter> GetContent(ErrorResult& aError) override;
   virtual already_AddRefed<nsIDocShell> GetDocShell(ErrorResult& aError) override;
   virtual already_AddRefed<nsIEventTarget> GetTabEventTarget() override;
+  virtual uint64_t ChromeOuterWindowID() override;
 
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
   NS_DECL_NSICONTENTFRAMEMESSAGEMANAGER
@@ -831,7 +832,6 @@ private:
   layers::LayersId mLayersId;
   int64_t mBeforeUnloadListeners;
   CSSRect mUnscaledOuterRect;
-  nscolor mLastBackgroundColor;
   Maybe<bool> mLayersConnected;
   bool mDidFakeShow;
   bool mNotified;

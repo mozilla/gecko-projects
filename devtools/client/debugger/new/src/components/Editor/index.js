@@ -180,7 +180,7 @@ class Editor extends _react.PureComponent {
         return;
       }
 
-      const sourceLine = (0, _editor.toSourceLine)(selectedSource.get("id"), line);
+      const sourceLine = (0, _editor.toSourceLine)(selectedSource.id, line);
 
       if (ev.altKey) {
         return continueToHere(sourceLine);
@@ -261,6 +261,7 @@ class Editor extends _react.PureComponent {
     codeMirrorWrapper.tabIndex = 0;
     codeMirrorWrapper.addEventListener("keydown", e => this.onKeyDown(e));
     codeMirrorWrapper.addEventListener("click", e => this.onClick(e));
+    codeMirrorWrapper.addEventListener("mouseover", (0, _editor.onMouseOver)(codeMirror));
 
     const toggleFoldMarkerVisibility = e => {
       if (node instanceof HTMLElement) {
@@ -343,7 +344,7 @@ class Editor extends _react.PureComponent {
       selectedSource
     } = this.props;
     const line = (0, _editor.getCursorLine)(codeMirror);
-    return (0, _editor.toSourceLine)(selectedSource.get("id"), line);
+    return (0, _editor.toSourceLine)(selectedSource.id, line);
   }
 
   onKeyDown(e) {
@@ -438,8 +439,8 @@ class Editor extends _react.PureComponent {
         column
       } = (0, _editor.toEditorPosition)(nextProps.selectedLocation);
 
-      if ((0, _editor.hasDocument)(nextProps.selectedSource.get("id"))) {
-        const doc = (0, _editor.getDocument)(nextProps.selectedSource.get("id"));
+      if ((0, _editor.hasDocument)(nextProps.selectedSource.id)) {
+        const doc = (0, _editor.getDocument)(nextProps.selectedSource.id);
         const lineText = doc.getLine(line);
         column = Math.max(column, (0, _indentation.getIndentation)(lineText));
       }
@@ -477,12 +478,12 @@ class Editor extends _react.PureComponent {
       return (0, _editor.showLoading)(this.state.editor);
     }
 
-    if (selectedSource.get("error")) {
-      return this.showErrorMessage(selectedSource.get("error"));
+    if (selectedSource.error) {
+      return this.showErrorMessage(selectedSource.error);
     }
 
     if (selectedSource) {
-      return (0, _editor.showSourceText)(this.state.editor, selectedSource.toJS(), symbols);
+      return (0, _editor.showSourceText)(this.state.editor, selectedSource, symbols);
     }
   }
 
@@ -622,7 +623,7 @@ Editor.contextTypes = {
 
 const mapStateToProps = state => {
   const selectedSource = (0, _selectors.getSelectedSource)(state);
-  const sourceId = selectedSource ? selectedSource.get("id") : "";
+  const sourceId = selectedSource ? selectedSource.id : "";
   return {
     selectedLocation: (0, _selectors.getSelectedLocation)(state),
     selectedSource,
@@ -634,4 +635,13 @@ const mapStateToProps = state => {
   };
 };
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Editor);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, {
+  openConditionalPanel: _actions2.default.openConditionalPanel,
+  closeConditionalPanel: _actions2.default.closeConditionalPanel,
+  setContextMenu: _actions2.default.setContextMenu,
+  continueToHere: _actions2.default.continueToHere,
+  toggleBreakpoint: _actions2.default.toggleBreakpoint,
+  addOrToggleDisabledBreakpoint: _actions2.default.addOrToggleDisabledBreakpoint,
+  jumpToMappedLocation: _actions2.default.jumpToMappedLocation,
+  traverseResults: _actions2.default.traverseResults
+})(Editor);

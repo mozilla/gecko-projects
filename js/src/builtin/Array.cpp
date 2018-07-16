@@ -939,16 +939,6 @@ js::ArraySetLength(JSContext* cx, Handle<ArrayObject*> arr, HandleId id,
     return result.succeed();
 }
 
-bool
-js::WouldDefinePastNonwritableLength(HandleNativeObject obj, uint32_t index)
-{
-    if (!obj->is<ArrayObject>())
-        return false;
-
-    ArrayObject* arr = &obj->as<ArrayObject>();
-    return !arr->lengthIsWritable() && index >= arr->length();
-}
-
 static bool
 array_addProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v)
 {
@@ -1015,16 +1005,19 @@ ObjectMayHaveExtraIndexedProperties(JSObject* obj)
 static bool
 AddLengthProperty(JSContext* cx, HandleArrayObject obj)
 {
-    /*
-     * Add the 'length' property for a newly created array,
-     * and update the elements to be an empty array owned by the object.
-     * The shared emptyObjectElements singleton cannot be used for slow arrays,
-     * as accesses to 'length' will use the elements header.
-     */
+    // Add the 'length' property for a newly created array. Shapes are shared
+    // across realms within a zone and because we update the initial shape with
+    // a Shape that contains the length-property (in NewArray), it's possible
+    // the length property has already been defined.
+
+    Shape* shape = obj->lastProperty();
+    if (!shape->isEmptyShape()) {
+        MOZ_ASSERT(JSID_IS_ATOM(shape->propidRaw(), cx->names().length));
+        MOZ_ASSERT(shape->previous()->isEmptyShape());
+        return true;
+    }
 
     RootedId lengthId(cx, NameToId(cx->names().length));
-    MOZ_ASSERT(!obj->lookup(cx, lengthId));
-
     return NativeObject::addAccessorProperty(cx, obj, lengthId,
                                              array_length_getter, array_length_setter,
                                              JSPROP_PERMANENT);
@@ -1033,12 +1026,9 @@ AddLengthProperty(JSContext* cx, HandleArrayObject obj)
 static bool
 IsArrayConstructor(const JSObject* obj)
 {
-    // This must only return true if v is *the* Array constructor for the
-    // current compartment; we rely on the fact that any other Array
-    // constructor would be represented as a wrapper.
-    return obj->is<JSFunction>() &&
-           obj->as<JSFunction>().isNative() &&
-           obj->as<JSFunction>().native() == ArrayConstructor;
+    // Note: this also returns true for cross-realm Array constructors in the
+    // same compartment.
+    return IsNativeFunction(obj, ArrayConstructor);
 }
 
 static bool
@@ -1048,23 +1038,23 @@ IsArrayConstructor(const Value& v)
 }
 
 bool
-js::IsWrappedArrayConstructor(JSContext* cx, const Value& v, bool* result)
+js::IsCrossRealmArrayConstructor(JSContext* cx, const Value& v, bool* result)
 {
     if (!v.isObject()) {
         *result = false;
         return true;
     }
-    if (v.toObject().is<WrapperObject>()) {
-        JSObject* obj = CheckedUnwrap(&v.toObject());
+
+    JSObject* obj = &v.toObject();
+    if (obj->is<WrapperObject>()) {
+        obj = CheckedUnwrap(obj);
         if (!obj) {
             ReportAccessDenied(cx);
             return false;
         }
-
-        *result = IsArrayConstructor(obj);
-    } else {
-        *result = false;
     }
+
+    *result = IsArrayConstructor(obj) && obj->as<JSFunction>().realm() != cx->realm();
     return true;
 }
 
@@ -1097,6 +1087,11 @@ IsArraySpecies(JSContext* cx, HandleObject origArray)
 
     if (!IsArrayConstructor(ctor))
         return ctor.isUndefined();
+
+    // 9.4.2.3 Step 6.c. Use the current realm's constructor if |ctor| is a
+    // cross-realm Array constructor.
+    if (cx->realm() != ctor.toObject().as<JSFunction>().realm())
+        return true;
 
     jsid speciesId = SYMBOL_TO_JSID(cx->wellKnownSymbols().species);
     JSFunction* getter;

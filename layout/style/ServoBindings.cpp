@@ -191,13 +191,11 @@ Gecko_GetAssignedNodes(RawGeckoElementBorrowed aElement)
 }
 
 void
-Gecko_ComputedStyle_Init(
-    mozilla::ComputedStyle* aStyle,
-    const mozilla::ComputedStyle* aParentContext,
-    RawGeckoPresContextBorrowed aPresContext,
-    const ServoComputedData* aValues,
-    mozilla::CSSPseudoElementType aPseudoType,
-    nsAtom* aPseudoTag)
+Gecko_ComputedStyle_Init(mozilla::ComputedStyle* aStyle,
+                         RawGeckoPresContextBorrowed aPresContext,
+                         const ServoComputedData* aValues,
+                         mozilla::CSSPseudoElementType aPseudoType,
+                         nsAtom* aPseudoTag)
 {
   auto* presContext = const_cast<nsPresContext*>(aPresContext);
   new (KnownNotNull, aStyle) mozilla::ComputedStyle(
@@ -1425,27 +1423,6 @@ Gecko_CopyAlternateValuesFrom(nsFont* aDest, const nsFont* aSrc)
 }
 
 void
-Gecko_SetImageOrientation(nsStyleVisibility* aVisibility,
-                          uint8_t aOrientation, bool aFlip)
-{
-  aVisibility->mImageOrientation =
-    nsStyleImageOrientation::CreateAsOrientationAndFlip(aOrientation, aFlip);
-}
-
-void
-Gecko_SetImageOrientationAsFromImage(nsStyleVisibility* aVisibility)
-{
-  aVisibility->mImageOrientation = nsStyleImageOrientation::CreateAsFromImage();
-}
-
-void
-Gecko_CopyImageOrientationFrom(nsStyleVisibility* aDst,
-                               const nsStyleVisibility* aSrc)
-{
-  aDst->mImageOrientation = aSrc->mImageOrientation;
-}
-
-void
 Gecko_SetCounterStyleToName(CounterStylePtr* aPtr, nsAtom* aName,
                             RawGeckoPresContextBorrowed aPresContext)
 {
@@ -1628,11 +1605,10 @@ Gecko_SetContentDataImageValue(nsStyleContentData* aContent,
 }
 
 nsStyleContentData::CounterFunction*
-Gecko_SetCounterFunction(nsStyleContentData* aContent, nsStyleContentType aType)
+Gecko_SetCounterFunction(nsStyleContentData* aContent, StyleContentType aType)
 {
-  RefPtr<nsStyleContentData::CounterFunction>
-    counterFunc = new nsStyleContentData::CounterFunction();
-  nsStyleContentData::CounterFunction* ptr = counterFunc;
+  auto counterFunc = MakeRefPtr<nsStyleContentData::CounterFunction>();
+  auto* ptr = counterFunc.get();
   aContent->SetCounters(aType, counterFunc.forget());
   return ptr;
 }
@@ -1661,7 +1637,7 @@ Gecko_CreateGradient(uint8_t aShape,
 
   nsStyleGradientStop dummyStop = {
     nsStyleCoord(eStyleUnit_None),
-    StyleComplexColor::FromColor(NS_RGB(0, 0, 0)),
+    StyleComplexColor::Black(),
     0
   };
 

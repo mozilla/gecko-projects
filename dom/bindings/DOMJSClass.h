@@ -106,6 +106,7 @@ static const uint32_t SharedWorkerGlobalScope = 1u << 3;
 static const uint32_t ServiceWorkerGlobalScope = 1u << 4;
 static const uint32_t WorkerDebuggerGlobalScope = 1u << 5;
 static const uint32_t WorkletGlobalScope = 1u << 6;
+static const uint32_t AudioWorkletGlobalScope = 1u << 7;
 } // namespace GlobalNames
 
 struct PrefableDisablers {
@@ -120,7 +121,7 @@ struct PrefableDisablers {
     // globals; our IDL parser enforces that.  So as long as we check our
     // exposure set before checking "enabled" we will be ok.
     if (nonExposedGlobals &&
-        IsNonExposedGlobal(cx, js::GetGlobalForObjectCrossCompartment(obj),
+        IsNonExposedGlobal(cx, JS::GetNonCCWObjectGlobal(obj),
                            nonExposedGlobals)) {
       return false;
     }
@@ -130,8 +131,7 @@ struct PrefableDisablers {
     if (secureContext && !IsSecureContextOrObjectIsFromSecureContext(cx, obj)) {
       return false;
     }
-    if (enabledFunc &&
-        !enabledFunc(cx, js::GetGlobalForObjectCrossCompartment(obj))) {
+    if (enabledFunc && !enabledFunc(cx, JS::GetNonCCWObjectGlobal(obj))) {
       return false;
     }
     return true;

@@ -54,8 +54,6 @@ class JSONPrinter;
 class MapObject;
 class SetObject;
 
-void SetGCZeal(JSRuntime*, uint8_t, uint32_t);
-
 namespace gc {
 class AutoMaybeStartBackgroundAllocation;
 class AutoTraceSession;
@@ -104,6 +102,7 @@ class TenuringTracer : public JSTracer
   private:
     inline void insertIntoObjectFixupList(gc::RelocationOverlay* entry);
     inline void insertIntoStringFixupList(gc::RelocationOverlay* entry);
+
     template <typename T>
     inline T* allocTenured(JS::Zone* zone, gc::AllocKind kind);
 

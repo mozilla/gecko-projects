@@ -23,6 +23,7 @@
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/MessagePortTimelineMarker.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/TimelineMarker.h"
 #include "mozilla/Unused.h"
@@ -176,9 +177,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MessagePort,
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mPostMessageRunnable->mPort);
   }
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessages);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessagesForTheOtherPort);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mUnshippedEntangledPort);
+
+  tmp->CloseForced();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MessagePort,
@@ -196,8 +197,9 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(MessagePort, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(MessagePort, DOMEventTargetHelper)
 
-MessagePort::MessagePort(nsIGlobalObject* aGlobal)
+MessagePort::MessagePort(nsIGlobalObject* aGlobal, State aState)
   : DOMEventTargetHelper(aGlobal)
+  , mState(aState)
   , mMessageQueueEnabled(false)
   , mIsKeptAlive(false)
   , mHasBeenTransferredOrClosed(false)
@@ -221,9 +223,9 @@ MessagePort::Create(nsIGlobalObject* aGlobal, const nsID& aUUID,
 {
   MOZ_ASSERT(aGlobal);
 
-  RefPtr<MessagePort> mp = new MessagePort(aGlobal);
+  RefPtr<MessagePort> mp = new MessagePort(aGlobal, eStateUnshippedEntangled);
   mp->Initialize(aUUID, aDestinationUUID, 1 /* 0 is an invalid sequence ID */,
-                 false /* Neutered */, eStateUnshippedEntangled, aRv);
+                 false /* Neutered */, aRv);
   return mp.forget();
 }
 
@@ -234,10 +236,9 @@ MessagePort::Create(nsIGlobalObject* aGlobal,
 {
   MOZ_ASSERT(aGlobal);
 
-  RefPtr<MessagePort> mp = new MessagePort(aGlobal);
+  RefPtr<MessagePort> mp = new MessagePort(aGlobal, eStateEntangling);
   mp->Initialize(aIdentifier.uuid(), aIdentifier.destinationUuid(),
-                 aIdentifier.sequenceId(), aIdentifier.neutered(),
-                 eStateEntangling, aRv);
+                 aIdentifier.sequenceId(), aIdentifier.neutered(), aRv);
   return mp.forget();
 }
 
@@ -253,17 +254,15 @@ MessagePort::UnshippedEntangle(MessagePort* aEntangledPort)
 void
 MessagePort::Initialize(const nsID& aUUID,
                         const nsID& aDestinationUUID,
-                        uint32_t aSequenceID, bool mNeutered,
-                        State aState, ErrorResult& aRv)
+                        uint32_t aSequenceID, bool aNeutered,
+                        ErrorResult& aRv)
 {
   MOZ_ASSERT(mIdentifier);
   mIdentifier->uuid() = aUUID;
   mIdentifier->destinationUuid() = aDestinationUUID;
   mIdentifier->sequenceId() = aSequenceID;
 
-  mState = aState;
-
-  if (mNeutered) {
+  if (aNeutered) {
     // If this port is neutered we don't want to keep it alive artificially nor
     // we want to add listeners or WorkerRefs.
     mState = eStateDisentangled;
@@ -510,11 +509,10 @@ MessagePort::CloseInternal(bool aSoftly)
   }
 
   if (mState == eStateUnshippedEntangled) {
-    MOZ_ASSERT(mUnshippedEntangledPort);
+    MOZ_DIAGNOSTIC_ASSERT(mUnshippedEntangledPort);
 
     // This avoids loops.
     RefPtr<MessagePort> port = std::move(mUnshippedEntangledPort);
-    MOZ_ASSERT(mUnshippedEntangledPort == nullptr);
 
     mState = eStateDisentangledForClose;
     port->CloseInternal(aSoftly);
@@ -745,13 +743,13 @@ MessagePort::CloneAndDisentangle(MessagePortIdentifier& aIdentifier)
     MOZ_ASSERT(mUnshippedEntangledPort);
     MOZ_ASSERT(mMessagesForTheOtherPort.IsEmpty());
 
+    RefPtr<MessagePort> port = std::move(mUnshippedEntangledPort);
+
     // Disconnect the entangled port and connect it to PBackground.
-    if (!mUnshippedEntangledPort->ConnectToPBackground()) {
+    if (!port->ConnectToPBackground()) {
       // We are probably shutting down. We cannot proceed.
       return;
     }
-
-    mUnshippedEntangledPort = nullptr;
 
     // In this case, we don't need to be connected to the PBackground service.
     if (mMessages.IsEmpty()) {
@@ -802,7 +800,11 @@ MessagePort::Closed()
 bool
 MessagePort::ConnectToPBackground()
 {
-  mState = eStateEntangling;
+  RefPtr<MessagePort> self = this;
+  auto raii = MakeScopeExit([self] {
+    self->mState = eStateDisentangled;
+    self->UpdateMustKeepAlive();
+  });
 
   mozilla::ipc::PBackgroundChild* actorChild =
     mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread();
@@ -822,6 +824,9 @@ MessagePort::ConnectToPBackground()
   MOZ_ASSERT(mActor);
 
   mActor->SetPort(this);
+  mState = eStateEntangling;
+
+  raii.release();
   return true;
 }
 
@@ -849,10 +854,7 @@ MessagePort::UpdateMustKeepAlive()
 void
 MessagePort::DisconnectFromOwner()
 {
-  if (mIsKeptAlive) {
-    CloseForced();
-  }
-
+  CloseForced();
   DOMEventTargetHelper::DisconnectFromOwner();
 }
 

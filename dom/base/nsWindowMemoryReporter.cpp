@@ -25,6 +25,7 @@
 #endif
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 StaticRefPtr<nsWindowMemoryReporter> sWindowReporter;
 
@@ -342,6 +343,10 @@ CollectWindowReports(nsGlobalWindowInner *aWindow,
   REPORT_SIZE("/dom/performance/resource-entries",
               mDOMPerformanceResourceEntries,
               "Memory used for performance resource entries.");
+
+  REPORT_SIZE("/dom/media-query-lists", mDOMMediaQueryLists,
+              "Memory used by MediaQueryList objects for the window's "
+              "document.");
 
   REPORT_SIZE("/dom/other", mDOMOtherSize,
               "Memory used by a window's DOM that isn't measured by the "

@@ -16,7 +16,7 @@
  */
 
 
-/* fluent-dom@0.2.0 */
+/* fluent-dom@aa95b1f (July 10, 2018) */
 
 /* eslint no-console: ["error", { allow: ["warn", "error"] }] */
 /* global console */
@@ -109,7 +109,7 @@ class Localization {
    *
    * @returns {Localization}
    */
-  constructor(resourceIds, generateMessages = defaultGenerateMessages) {
+  constructor(resourceIds = [], generateMessages = defaultGenerateMessages) {
     this.resourceIds = resourceIds;
     this.generateMessages = generateMessages;
     this.ctxs =
@@ -119,11 +119,13 @@ class Localization {
   addResourceIds(resourceIds) {
     this.resourceIds.push(...resourceIds);
     this.onChange();
+    return this.resourceIds.length;
   }
 
   removeResourceIds(resourceIds) {
     this.resourceIds = this.resourceIds.filter(r => !resourceIds.includes(r));
     this.onChange();
+    return this.resourceIds.length;
   }
 
   /**
@@ -261,7 +263,6 @@ class Localization {
       case "nsPref:changed":
         switch (data) {
           case "intl.l10n.pseudo":
-            L10nRegistry.ctxCache.clear();
             this.onChange();
         }
         break;
@@ -277,6 +278,7 @@ class Localization {
   onChange() {
     this.ctxs =
       new CachedAsyncIterable(this.generateMessages(this.resourceIds));
+    this.ctxs.touchNext(2);
   }
 }
 

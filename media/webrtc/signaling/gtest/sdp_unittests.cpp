@@ -2966,8 +2966,6 @@ TEST_P(NewSdpTest, CheckMediaLevelIcePwd) {
 }
 
 TEST_P(NewSdpTest, CheckGroups) {
-  SKIP_TEST_WITH_RUST_PARSER; // See Bug 1444354
-
   ParseSdp(kBasicAudioVideoOffer);
   const SdpGroupAttributeList& group = mSdp->GetAttributeList().GetGroup();
   const SdpGroupAttributeList::Group& group1 = group.mGroups[0];
@@ -3253,7 +3251,6 @@ TEST_P(NewSdpTest, CheckSimulcast) {
 }
 
 TEST_P(NewSdpTest, CheckSctpmap) {
-  SKIP_TEST_WITH_RUST_PARSER; // See Bug 1432922
   ParseSdp(kBasicAudioVideoDataOffer);
   ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
   ASSERT_EQ(3U, mSdp->GetMediaSectionCount())
@@ -3275,6 +3272,18 @@ TEST_P(NewSdpTest, CheckSctpmap) {
               16,
               appsec.GetFormats()[0],
               sctpmap);
+}
+
+TEST_P(NewSdpTest, CheckMaxPtime) {
+  ParseSdp(kBasicAudioVideoOffer);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(3U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0)
+                          .GetAttributeList()
+                          .HasAttribute(SdpAttribute::kMaxptimeAttribute));
+  ASSERT_EQ(mSdp->GetMediaSection(0).GetAttributeList().GetMaxptime(), 20U);
 }
 
 const std::string kNewSctpportOfferDraft21 =
@@ -3713,29 +3722,6 @@ TEST_P(NewSdpTest, CheckSsrcInSessionLevel) {
   }
 }
 
-const std::string kSsrcGroupInSessionSDP =
-"v=0" CRLF
-"o=Mozilla-SIPUA-35.0a1 5184 0 IN IP4 0.0.0.0" CRLF
-"s=SIP Call" CRLF
-"c=IN IP4 224.0.0.1/100/12" CRLF
-"t=0 0" CRLF
-"a=ssrc-group:FID 5000" CRLF
-"m=video 9 RTP/SAVPF 120" CRLF
-"c=IN IP4 0.0.0.0" CRLF
-"a=rtpmap:120 VP8/90000" CRLF;
-
-// This may or may not parse, but if it does, the errant attribute
-// should be ignored.
-TEST_P(NewSdpTest, CheckSsrcGroupInSessionLevel) {
-  ParseSdp(kSsrcGroupInSessionSDP, false);
-  if (mSdp) {
-    ASSERT_FALSE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
-          SdpAttribute::kSsrcGroupAttribute));
-    ASSERT_FALSE(mSdp->GetAttributeList().HasAttribute(
-          SdpAttribute::kSsrcGroupAttribute));
-  }
-}
-
 const std::string kMalformedImageattr =
 "v=0" CRLF
 "o=Mozilla-SIPUA-35.0a1 5184 0 IN IP4 0.0.0.0" CRLF
@@ -3760,7 +3746,6 @@ TEST_P(NewSdpTest, CheckMalformedImageattr)
 }
 
 TEST_P(NewSdpTest, ParseInvalidSimulcastNoSuchSendRid) {
-  SKIP_TEST_WITH_RUST_PARSER; // See Bug 1432931
   ParseSdp("v=0" CRLF
            "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
            "s=SIP Call" CRLF
@@ -4063,6 +4048,75 @@ TEST_P(NewSdpTest, CheckAddMediaSection) {
     ASSERT_EQ(5U, mSdp->GetMediaSectionCount())
       << "Wrong number of media sections after adding media section";
   }
+}
+
+TEST_P(NewSdpTest, CheckAddDataChannel_Draft05) {
+  // Parse any valid sdp with a media section
+  ParseSdp("v=0" CRLF
+           "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
+           "s=SIP Call" CRLF
+           "c=IN IP4 198.51.100.7" CRLF
+           "b=CT:5000" CRLF
+           "t=0 0" CRLF
+           "m=application 56436 DTLS/SCTP 5000" CRLF);
+
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount());
+
+  auto& mediaSection = mSdp->GetMediaSection(0);
+  mediaSection.AddDataChannel("webrtc-datachannel", 6000, 16, 0);
+
+  ASSERT_FALSE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kMaxMessageSizeAttribute));
+  ASSERT_TRUE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kSctpmapAttribute));
+  ASSERT_TRUE(mediaSection.GetAttributeList().GetSctpmap().HasEntry("6000"));
+  ASSERT_EQ(16U, mediaSection.GetAttributeList().
+                 GetSctpmap().GetFirstEntry().streams);
+  ASSERT_EQ("webrtc-datachannel", mediaSection.GetAttributeList().
+                                  GetSctpmap().GetFirstEntry().name);
+
+  mediaSection.AddDataChannel("webrtc-datachannel", 15000, 8, 1800);
+
+  ASSERT_TRUE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kMaxMessageSizeAttribute));
+  ASSERT_EQ(1800U, mediaSection.GetAttributeList().GetMaxMessageSize());
+  ASSERT_TRUE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kSctpmapAttribute));
+  ASSERT_TRUE(mediaSection.GetAttributeList().GetSctpmap().HasEntry("15000"));
+  ASSERT_EQ(8U, mediaSection.GetAttributeList().
+                GetSctpmap().GetFirstEntry().streams);
+}
+
+TEST_P(NewSdpTest, CheckAddDataChannel) {
+  ParseSdp("v=0" CRLF
+           "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
+           "s=SIP Call" CRLF
+           "c=IN IP4 198.51.100.7" CRLF
+           "b=CT:5000" CRLF
+           "t=0 0" CRLF
+           "m=application 56436 UDP/DTLS/SCTP webrtc-datachannel" CRLF);
+
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount());
+
+  auto& mediaSection = mSdp->GetMediaSection(0);
+  mediaSection.AddDataChannel("webrtc-datachannel", 6000, 16, 0);
+
+  ASSERT_FALSE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kMaxMessageSizeAttribute));
+  ASSERT_TRUE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kSctpPortAttribute));
+  ASSERT_EQ(6000U, mediaSection.GetAttributeList().GetSctpPort());
+
+  mediaSection.AddDataChannel("webrtc-datachannel", 15000, 8, 1800);
+
+  ASSERT_TRUE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kMaxMessageSizeAttribute));
+  ASSERT_EQ(1800U, mediaSection.GetAttributeList().GetMaxMessageSize());
+  ASSERT_TRUE(mediaSection.GetAttributeList().
+              HasAttribute(SdpAttribute::kSctpPortAttribute));
+  ASSERT_EQ(15000U, mediaSection.GetAttributeList().GetSctpPort());
 }
 
 TEST(NewSdpTestNoFixture, CheckAttributeTypeSerialize) {

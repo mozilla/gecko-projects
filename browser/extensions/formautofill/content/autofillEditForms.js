@@ -29,7 +29,7 @@ class EditAutofillForm {
    */
   buildFormObject() {
     return Array.from(this._elements.form.elements).reduce((obj, input) => {
-      if (input.value && !input.disabled) {
+      if (!input.disabled) {
         obj[input.id] = input.value;
       }
       return obj;
@@ -96,6 +96,10 @@ class EditAddress extends EditAutofillForm {
     // Also need to use this._record so it has the default country selected.
     this.loadRecord(record);
     this.attachEventListeners();
+
+    if (config.novalidate) {
+      this.form.setAttribute("novalidate", "true");
+    }
   }
 
   loadRecord(record) {
@@ -115,10 +119,12 @@ class EditAddress extends EditAutofillForm {
    * @param  {string} country
    */
   formatForm(country) {
-    const {addressLevel1Label, postalCodeLabel, fieldsOrder} = this.getFormFormat(country);
+    const {addressLevel1Label, postalCodeLabel, fieldsOrder, postalCodePattern} =
+      this.getFormFormat(country);
     this._elements.addressLevel1Label.dataset.localization = addressLevel1Label;
     this._elements.postalCodeLabel.dataset.localization = postalCodeLabel;
     this.arrangeFields(fieldsOrder);
+    this.updatePostalCodeValidation(postalCodePattern);
   }
 
   arrangeFields(fieldsOrder) {
@@ -133,8 +139,10 @@ class EditAddress extends EditAutofillForm {
     let inputs = [];
     for (let i = 0; i < fieldsOrder.length; i++) {
       let {fieldId, newLine} = fieldsOrder[i];
-      let container = document.getElementById(`${fieldId}-container`);
-      inputs.push(...container.querySelectorAll("input, textarea, select"));
+      let container = this._elements.form.querySelector(`#${fieldId}-container`);
+      let containerInputs = [...container.querySelectorAll("input, textarea, select")];
+      containerInputs.forEach(function(input) { input.disabled = false; });
+      inputs.push(...containerInputs);
       container.style.display = "flex";
       container.style.order = i;
       container.style.pageBreakAfter = newLine ? "always" : "auto";
@@ -147,8 +155,20 @@ class EditAddress extends EditAutofillForm {
     }
     // Hide the remaining fields
     for (let field of fields) {
-      let container = document.getElementById(`${field}-container`);
+      let container = this._elements.form.querySelector(`#${field}-container`);
       container.style.display = "none";
+      for (let input of [...container.querySelectorAll("input, textarea, select")]) {
+        input.disabled = true;
+      }
+    }
+  }
+
+  updatePostalCodeValidation(postalCodePattern) {
+    let postalCodeInput = this._elements.form.querySelector("#postal-code");
+    if (postalCodePattern && postalCodeInput.style.display != "none") {
+      postalCodeInput.setAttribute("pattern", postalCodePattern);
+    } else {
+      postalCodeInput.removeAttribute("pattern");
     }
   }
 

@@ -4418,6 +4418,12 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     masm.Push(argObj);
     masm.moveStackPtrTo(argObj);
 
+    if (call->mir()->maybeCrossRealm()) {
+        // We use argJSContext as scratch register here.
+        masm.movePtr(ImmGCPtr(target->rawJSFunction()), argJSContext);
+        masm.switchToObjectRealm(argJSContext, argJSContext);
+    }
+
     // Construct native exit frame.
     uint32_t safepointOffset = masm.buildFakeExitFrame(argJSContext);
     masm.loadJSContext(argJSContext);
@@ -4445,6 +4451,14 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
         // Load the outparam vp[0] into output register(s).
         masm.loadValue(Address(masm.getStackPointer(), IonDOMMethodExitFrameLayout::offsetOfResult()),
                        JSReturnOperand);
+    }
+
+    // Switch back to the current realm if needed. Note: if the DOM method threw
+    // an exception, the exception handler will do this.
+    if (call->mir()->maybeCrossRealm()) {
+        static_assert(!JSReturnOperand.aliases(ReturnReg),
+                      "Clobbering ReturnReg should not affect the return value");
+        masm.switchToRealm(gen->realm->realmPtr(), ReturnReg);
     }
 
     // Until C++ code is instrumented against Spectre, prevent speculative
@@ -5370,7 +5384,7 @@ CodeGenerator::maybeCreateScriptCounts()
     if (!script)
         return nullptr;
 
-    UniquePtr<IonScriptCounts> counts(js_new<IonScriptCounts>());
+    auto counts = MakeUnique<IonScriptCounts>();
     if (!counts || !counts->init(graph.numBlocks()))
         return nullptr;
 
@@ -5391,7 +5405,7 @@ CodeGenerator::maybeCreateScriptCounts()
             if (block->entryResumePoint()->caller()) {
                 // Get the filename and line number of the inner script.
                 JSScript* innerScript = block->info().script();
-                description = (char*) js_calloc(200);
+                description = js_pod_calloc<char>(200);
                 if (description) {
                     snprintf(description, 200, "%s:%u",
                              innerScript->filename(), innerScript->lineno());
@@ -7123,6 +7137,7 @@ CodeGenerator::emitWasmCallBase(MWasmCall* mir, bool needsBoundsCheck)
     // TLS and pinned regs. The only case where where we don't have to reload
     // the TLS and pinned regs is when the callee preserves them.
     bool reloadRegs = true;
+    bool switchRealm = true;
 
     const wasm::CallSiteDesc& desc = mir->desc();
     const wasm::CalleeDesc& callee = mir->callee();
@@ -7130,6 +7145,7 @@ CodeGenerator::emitWasmCallBase(MWasmCall* mir, bool needsBoundsCheck)
       case wasm::CalleeDesc::Func:
         masm.call(desc, callee.funcIndex());
         reloadRegs = false;
+        switchRealm = false;
         break;
       case wasm::CalleeDesc::Import:
         masm.wasmCallImport(desc, callee);
@@ -7137,21 +7153,29 @@ CodeGenerator::emitWasmCallBase(MWasmCall* mir, bool needsBoundsCheck)
       case wasm::CalleeDesc::AsmJSTable:
       case wasm::CalleeDesc::WasmTable:
         masm.wasmCallIndirect(desc, callee, needsBoundsCheck);
-        reloadRegs = callee.which() == wasm::CalleeDesc::WasmTable && callee.wasmTableIsExternal();
+        reloadRegs = switchRealm =
+            (callee.which() == wasm::CalleeDesc::WasmTable && callee.wasmTableIsExternal());
         break;
       case wasm::CalleeDesc::Builtin:
         masm.call(desc, callee.builtin());
         reloadRegs = false;
+        switchRealm = false;
         break;
       case wasm::CalleeDesc::BuiltinInstanceMethod:
         masm.wasmCallBuiltinInstanceMethod(desc, mir->instanceArg(), callee.builtin());
+        switchRealm = false;
         break;
     }
 
     if (reloadRegs) {
         masm.loadWasmTlsRegFromFrame();
         masm.loadWasmPinnedRegsFromTls();
+        if (switchRealm)
+            masm.switchToWasmTlsRealm(ABINonArgReturnReg0, ABINonArgReturnReg1);
+    } else {
+        MOZ_ASSERT(!switchRealm);
     }
+
 
     if (mir->spIncrement())
         masm.reserveStack(mir->spIncrement());
@@ -7470,9 +7494,8 @@ CodeGenerator::visitPowD(LPowD* ins)
     MOZ_ASSERT(ToFloatRegister(ins->output()) == ReturnDoubleReg);
 }
 
-using PowFn = bool (*)(JSContext*, HandleValue, HandleValue, MutableHandleValue);
-static const VMFunction PowInfo =
-    FunctionInfo<PowFn>(js::math_pow_handle, "math_pow_handle");
+using PowFn = bool (*)(JSContext*, MutableHandleValue, MutableHandleValue, MutableHandleValue);
+static const VMFunction PowInfo = FunctionInfo<PowFn>(js::PowValues, "PowValues");
 
 void
 CodeGenerator::visitPowV(LPowV* ins)
@@ -7566,76 +7589,69 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD* ins)
 
     masm.setupUnalignedABICall(temp);
 
-    const MathCache* mathCache = ins->mir()->cache();
-    if (mathCache) {
-        masm.movePtr(ImmPtr(mathCache), temp);
-        masm.passABIArg(temp);
-    }
     masm.passABIArg(input, MoveOp::DOUBLE);
-
-#   define MAYBE_CACHED(fcn) (mathCache ? (void*)fcn ## _impl : (void*)fcn ## _uncached)
 
     void* funptr = nullptr;
     switch (ins->mir()->function()) {
       case MMathFunction::Log:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_log));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_log_impl);
         break;
       case MMathFunction::Sin:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_sin));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_sin_impl);
         break;
       case MMathFunction::Cos:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_cos));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_cos_impl);
         break;
       case MMathFunction::Exp:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_exp));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_exp_impl);
         break;
       case MMathFunction::Tan:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_tan));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_tan_impl);
         break;
       case MMathFunction::ATan:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_atan));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_atan_impl);
         break;
       case MMathFunction::ASin:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_asin));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_asin_impl);
         break;
       case MMathFunction::ACos:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_acos));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_acos_impl);
         break;
       case MMathFunction::Log10:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_log10));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_log10_impl);
         break;
       case MMathFunction::Log2:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_log2));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_log2_impl);
         break;
       case MMathFunction::Log1P:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_log1p));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_log1p_impl);
         break;
       case MMathFunction::ExpM1:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_expm1));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_expm1_impl);
         break;
       case MMathFunction::CosH:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_cosh));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_cosh_impl);
         break;
       case MMathFunction::SinH:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_sinh));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_sinh_impl);
         break;
       case MMathFunction::TanH:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_tanh));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_tanh_impl);
         break;
       case MMathFunction::ACosH:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_acosh));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_acosh_impl);
         break;
       case MMathFunction::ASinH:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_asinh));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_asinh_impl);
         break;
       case MMathFunction::ATanH:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_atanh));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_atanh_impl);
         break;
       case MMathFunction::Trunc:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_trunc_uncached);
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_trunc_impl);
         break;
       case MMathFunction::Cbrt:
-        funptr = JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED(js::math_cbrt));
+        funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_cbrt_impl);
         break;
       case MMathFunction::Floor:
         funptr = JS_FUNC_TO_DATA_PTR(void*, js::math_floor_impl);
@@ -8946,15 +8962,7 @@ CodeGenerator::visitSinCos(LSinCos *lir)
     masm.reserveStack(sizeof(double) * 2);
     masm.moveStackPtrTo(params);
 
-    const MathCache* mathCache = lir->mir()->cache();
-
     masm.setupUnalignedABICall(temp);
-    if (mathCache) {
-        masm.movePtr(ImmPtr(mathCache), temp);
-        masm.passABIArg(temp);
-    }
-
-#define MAYBE_CACHED_(fcn) (mathCache ? (void*)fcn ## _impl : (void*)fcn ## _uncached)
 
     masm.passABIArg(input, MoveOp::DOUBLE);
     masm.passABIArg(MoveOperand(params, sizeof(double), MoveOperand::EFFECTIVE_ADDRESS),
@@ -8962,8 +8970,7 @@ CodeGenerator::visitSinCos(LSinCos *lir)
     masm.passABIArg(MoveOperand(params, 0, MoveOperand::EFFECTIVE_ADDRESS),
                                 MoveOp::GENERAL);
 
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, MAYBE_CACHED_(js::math_sincos)));
-#undef MAYBE_CACHED_
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, js::math_sincos_impl));
 
     masm.loadDouble(Address(masm.getStackPointer(), 0), outputCos);
     masm.loadDouble(Address(masm.getStackPointer(), sizeof(double)), outputSin);
@@ -12245,6 +12252,12 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
     // Rooting will happen at GC time.
     masm.moveStackPtrTo(ObjectReg);
 
+    Realm* getterRealm = ins->mir()->getterRealm();
+    if (gen->realm->realmPtr() != getterRealm) {
+        // We use JSContextReg as scratch register here.
+        masm.switchToRealm(getterRealm, JSContextReg);
+    }
+
     uint32_t safepointOffset = masm.buildFakeExitFrame(JSContextReg);
     masm.loadJSContext(JSContextReg);
     masm.enterFakeExitFrame(JSContextReg, JSContextReg, ExitFrameType::IonDOMGetter);
@@ -12268,6 +12281,14 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
 
         masm.loadValue(Address(masm.getStackPointer(), IonDOMExitFrameLayout::offsetOfResult()),
                        JSReturnOperand);
+    }
+
+    // Switch back to the current realm if needed. Note: if the getter threw an
+    // exception, the exception handler will do this.
+    if (gen->realm->realmPtr() != getterRealm) {
+        static_assert(!JSReturnOperand.aliases(ReturnReg),
+                      "Clobbering ReturnReg should not affect the return value");
+        masm.switchToRealm(gen->realm->realmPtr(), ReturnReg);
     }
 
     // Until C++ code is instrumented against Spectre, prevent speculative
@@ -12350,6 +12371,12 @@ CodeGenerator::visitSetDOMProperty(LSetDOMProperty* ins)
     // Rooting will happen at GC time.
     masm.moveStackPtrTo(ObjectReg);
 
+    Realm* setterRealm = ins->mir()->setterRealm();
+    if (gen->realm->realmPtr() != setterRealm) {
+        // We use JSContextReg as scratch register here.
+        masm.switchToRealm(setterRealm, JSContextReg);
+    }
+
     uint32_t safepointOffset = masm.buildFakeExitFrame(JSContextReg);
     masm.loadJSContext(JSContextReg);
     masm.enterFakeExitFrame(JSContextReg, JSContextReg, ExitFrameType::IonDOMSetter);
@@ -12366,6 +12393,11 @@ CodeGenerator::visitSetDOMProperty(LSetDOMProperty* ins)
                      CheckUnsafeCallWithABI::DontCheckHasExitFrame);
 
     masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
+
+    // Switch back to the current realm if needed. Note: if the setter threw an
+    // exception, the exception handler will do this.
+    if (gen->realm->realmPtr() != setterRealm)
+        masm.switchToRealm(gen->realm->realmPtr(), ReturnReg);
 
     masm.adjustStack(IonDOMExitFrameLayout::Size());
 

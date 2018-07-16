@@ -6,8 +6,9 @@
 
 "use strict";
 
-const Services = require("Services");
+const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const EventEmitter = require("devtools/shared/event-emitter");
+const { getCurrentZoom } = require("devtools/shared/layout/utils");
 
 /**
  * A partial implementation of the Menu API provided by electron:
@@ -62,10 +63,7 @@ Menu.prototype.insert = function(pos, menuItem) {
  * @param Toolbox toolbox
  */
 Menu.prototype.popupWithZoom = function(x, y, toolbox) {
-  let zoom = parseFloat(Services.prefs.getCharPref("devtools.toolbox.zoomValue"));
-  if (!zoom || isNaN(zoom)) {
-    zoom = 1.0;
-  }
+  const zoom = getCurrentZoom(toolbox.doc);
   this.popup(x * zoom, y * zoom, toolbox);
 };
 
@@ -83,7 +81,12 @@ Menu.prototype.popupWithZoom = function(x, y, toolbox) {
  */
 Menu.prototype.popup = function(screenX, screenY, toolbox) {
   const doc = toolbox.doc;
-  const popupset = doc.querySelector("popupset");
+
+  let popupset = doc.querySelector("popupset");
+  if (!popupset) {
+    popupset = doc.createElementNS(XUL_NS, "popupset");
+    doc.documentElement.appendChild(popupset);
+  }
   // See bug 1285229, on Windows, opening the same popup multiple times in a
   // row ends up duplicating the popup. The newly inserted popup doesn't
   // dismiss the old one. So remove any previously displayed popup before
@@ -93,7 +96,7 @@ Menu.prototype.popup = function(screenX, screenY, toolbox) {
     popup.hidePopup();
   }
 
-  popup = doc.createElement("menupopup");
+  popup = doc.createElementNS(XUL_NS, "menupopup");
   popup.setAttribute("menu-api", "true");
   popup.setAttribute("consumeoutsideclicks", "true");
 
@@ -128,10 +131,10 @@ Menu.prototype._createMenuItems = function(parent) {
     }
 
     if (item.submenu) {
-      const menupopup = doc.createElement("menupopup");
+      const menupopup = doc.createElementNS(XUL_NS, "menupopup");
       item.submenu._createMenuItems(menupopup);
 
-      const menu = doc.createElement("menu");
+      const menu = doc.createElementNS(XUL_NS, "menu");
       menu.appendChild(menupopup);
       menu.setAttribute("label", item.label);
       if (item.disabled) {
@@ -148,10 +151,10 @@ Menu.prototype._createMenuItems = function(parent) {
       }
       parent.appendChild(menu);
     } else if (item.type === "separator") {
-      const menusep = doc.createElement("menuseparator");
+      const menusep = doc.createElementNS(XUL_NS, "menuseparator");
       parent.appendChild(menusep);
     } else {
-      const menuitem = doc.createElement("menuitem");
+      const menuitem = doc.createElementNS(XUL_NS, "menuitem");
       menuitem.setAttribute("label", item.label);
       menuitem.addEventListener("command", () => {
         item.click();

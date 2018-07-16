@@ -106,6 +106,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
   FxAccounts: "resource://gre/modules/FxAccounts.jsm",
+  HomePage: "resource:///modules/HomePage.jsm",
   HybridContentTelemetry: "resource://gre/modules/HybridContentTelemetry.jsm",
   Integration: "resource://gre/modules/Integration.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
@@ -129,6 +130,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ProcessHangMonitor: "resource:///modules/ProcessHangMonitor.jsm",
   ReaderParent: "resource:///modules/ReaderParent.jsm",
   RemotePrompt: "resource:///modules/RemotePrompt.jsm",
+  RemoteSettings: "resource://services-settings/remote-settings.js",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
   SavantShieldStudy: "resource:///modules/SavantShieldStudy.jsm",
@@ -402,8 +404,7 @@ BrowserGlue.prototype = {
       newTabSetting = 3;
     }
 
-    const homePageURL = Services.prefs.getComplexValue("browser.startup.homepage",
-                                                       Ci.nsIPrefLocalizedString).data;
+    const homePageURL = HomePage.get();
     if (homePageURL === "about:home") {
       homePageSetting = 0;
     } else if (homePageURL === "about:blank") {
@@ -428,9 +429,6 @@ BrowserGlue.prototype = {
     switch (topic) {
       case "notifications-open-settings":
         this._openPreferences("privacy", { origin: "notifOpenSettings" });
-        break;
-      case "prefservice:after-app-defaults":
-        this._onAppDefaults();
         break;
       case "final-ui-startup":
         this._beforeUIStartup();
@@ -486,7 +484,7 @@ BrowserGlue.prototype = {
           this._onDeviceDisconnected();
         }
         break;
-      case "fxaccounts:messages:display-tabs":
+      case "fxaccounts:commands:open-uri":
       case "weave:engine:clients:display-uris":
         this._onDisplaySyncURIs(subject);
         break;
@@ -515,15 +513,10 @@ BrowserGlue.prototype = {
         } else if (data == "force-ui-migration") {
           this._migrateUI();
         } else if (data == "force-distribution-customization") {
-          this._distributionCustomizer.applyPrefDefaults();
           this._distributionCustomizer.applyCustomizations();
           // To apply distribution bookmarks use "places-init-complete".
         } else if (data == "force-places-init") {
           this._initPlaces(false);
-        } else if (data == "smart-bookmarks-init") {
-          this.ensurePlacesDefaultQueriesInitialized().then(() => {
-            Services.obs.notifyObservers(null, "test-smart-bookmarks-done");
-          });
         } else if (data == "mock-alerts-service") {
           Object.defineProperty(this, "AlertsService", {
             value: subject.wrappedJSObject
@@ -625,7 +618,6 @@ BrowserGlue.prototype = {
   _init: function BG__init() {
     let os = Services.obs;
     os.addObserver(this, "notifications-open-settings");
-    os.addObserver(this, "prefservice:after-app-defaults");
     os.addObserver(this, "final-ui-startup");
     os.addObserver(this, "browser-delayed-startup-finished");
     os.addObserver(this, "sessionstore-windows-restored");
@@ -641,7 +633,7 @@ BrowserGlue.prototype = {
     os.addObserver(this, "fxaccounts:device_connected");
     os.addObserver(this, "fxaccounts:verify_login");
     os.addObserver(this, "fxaccounts:device_disconnected");
-    os.addObserver(this, "fxaccounts:messages:display-tabs");
+    os.addObserver(this, "fxaccounts:commands:open-uri");
     os.addObserver(this, "weave:engine:clients:display-uris");
     os.addObserver(this, "session-save");
     os.addObserver(this, "places-init-complete");
@@ -668,7 +660,6 @@ BrowserGlue.prototype = {
   _dispose: function BG__dispose() {
     let os = Services.obs;
     os.removeObserver(this, "notifications-open-settings");
-    os.removeObserver(this, "prefservice:after-app-defaults");
     os.removeObserver(this, "final-ui-startup");
     os.removeObserver(this, "sessionstore-windows-restored");
     os.removeObserver(this, "browser:purge-session-history");
@@ -684,7 +675,7 @@ BrowserGlue.prototype = {
     os.removeObserver(this, "fxaccounts:device_connected");
     os.removeObserver(this, "fxaccounts:verify_login");
     os.removeObserver(this, "fxaccounts:device_disconnected");
-    os.removeObserver(this, "fxaccounts:messages:display-tabs");
+    os.removeObserver(this, "fxaccounts:commands:open-uri");
     os.removeObserver(this, "weave:engine:clients:display-uris");
     os.removeObserver(this, "session-save");
     if (this._bookmarksBackupIdleTime) {
@@ -712,12 +703,6 @@ BrowserGlue.prototype = {
     os.removeObserver(this, "shield-init-complete");
   },
 
-  _onAppDefaults: function BG__onAppDefaults() {
-    // apply distribution customizations (prefs)
-    // other customizations are applied in _beforeUIStartup()
-    this._distributionCustomizer.applyPrefDefaults();
-  },
-
   // runs on startup, before the first command line handler is invoked
   // (i.e. before the first window is opened)
   _beforeUIStartup: function BG__beforeUIStartup() {
@@ -728,7 +713,6 @@ BrowserGlue.prototype = {
     }
 
     // apply distribution customizations
-    // prefs are applied in _onAppDefaults()
     this._distributionCustomizer.applyCustomizations();
 
     // handle any UI migration
@@ -764,7 +748,11 @@ BrowserGlue.prototype = {
       popup_border: "#27272b",
       toolbar_field_text: "rgb(249, 249, 250)",
       toolbar_field_border: "rgba(249, 249, 250, 0.2)",
+      ntp_background: "#2A2A2E",
+      ntp_text: "rgb(249, 249, 250)",
       author: vendorShortName,
+    }, {
+      useInDarkMode: true
     });
 
     Normandy.init();
@@ -1320,6 +1308,10 @@ BrowserGlue.prototype = {
       // can check the log.
       this._gmpInstallManager.simpleCheckAndInstall().catch(() => {});
     });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      RemoteSettings.init();
+    });
   },
 
   _createExtraDefaultProfile() {
@@ -1532,10 +1524,6 @@ BrowserGlue.prototype = {
    *
    * - browser.places.importBookmarksHTML
    *   Set to true will import the bookmarks.html file from the profile folder.
-   * - browser.places.smartBookmarksVersion
-   *   Set during HTML import to indicate that Smart Bookmarks were created.
-   *   Set to -1 to disable Smart Bookmarks creation.
-   *   Set to 0 to restore current Smart Bookmarks.
    * - browser.bookmarks.restore_default_bookmarks
    *   Set to true by safe-mode dialog to indicate we must restore default
    *   bookmarks.
@@ -1626,9 +1614,8 @@ BrowserGlue.prototype = {
         }
       }
 
-      // If bookmarks are not imported, then initialize smart bookmarks.  This
-      // happens during a common startup.
-      // Otherwise, if any kind of import runs, smart bookmarks creation should be
+      // Import default bookmarks when necessary.
+      // Otherwise, if any kind of import runs, default bookmarks creation should be
       // delayed till the import operations has finished.  Not doing so would
       // cause them to be overwritten by the newly imported bookmarks.
       if (!importBookmarks) {
@@ -1636,18 +1623,11 @@ BrowserGlue.prototype = {
         // This should always run after Places initialization.
         try {
           await this._distributionCustomizer.applyBookmarks();
-          await this.ensurePlacesDefaultQueriesInitialized();
         } catch (e) {
           Cu.reportError(e);
         }
       } else {
         // An import operation is about to run.
-        // Don't try to recreate smart bookmarks if autoExportHTML is true or
-        // smart bookmarks are disabled.
-        let smartBookmarksVersion = Services.prefs.getIntPref("browser.places.smartBookmarksVersion", 0);
-        if (!autoExportHTML && smartBookmarksVersion != -1)
-          Services.prefs.setIntPref("browser.places.smartBookmarksVersion", 0);
-
         let bookmarksUrl = null;
         if (restoreDefaultBookmarks) {
           // User wants to restore bookmarks.html file from default profile folder
@@ -1672,9 +1652,6 @@ BrowserGlue.prototype = {
             // Now apply distribution customized bookmarks.
             // This should always run after Places initialization.
             await this._distributionCustomizer.applyBookmarks();
-            // Ensure that smart bookmarks are created once the operation is
-            // complete.
-            await this.ensurePlacesDefaultQueriesInitialized();
           } catch (e) {
             Cu.reportError(e);
           }
@@ -2368,134 +2345,6 @@ BrowserGlue.prototype = {
     // and bookmarks before search suggestions.
     prefValue = prefValue || "general:5,suggestion:Infinity";
     Services.prefs.setCharPref(prefName, prefValue);
-  },
-
-  async ensurePlacesDefaultQueriesInitialized() {
-    // This is the current smart bookmarks version, it must be increased every
-    // time they change.
-    // When adding a new smart bookmark below, its newInVersion property must
-    // be set to the version it has been added in.  We will compare its value
-    // to users' smartBookmarksVersion and add new smart bookmarks without
-    // recreating old deleted ones.
-    const SMART_BOOKMARKS_VERSION = 8;
-    const SMART_BOOKMARKS_ANNO = "Places/SmartBookmark";
-    const SMART_BOOKMARKS_PREF = "browser.places.smartBookmarksVersion";
-
-    // TODO bug 399268: should this be a pref?
-    const MAX_RESULTS = 10;
-
-    // Get current smart bookmarks version.  If not set, create them.
-    let smartBookmarksCurrentVersion = Services.prefs.getIntPref(SMART_BOOKMARKS_PREF, 0);
-
-    // If version is current, or smart bookmarks are disabled, bail out.
-    if (smartBookmarksCurrentVersion == -1 ||
-        !Services.policies.isAllowed("defaultBookmarks") ||
-        smartBookmarksCurrentVersion >= SMART_BOOKMARKS_VERSION) {
-      return;
-    }
-
-    try {
-      let menuIndex = 0;
-      let toolbarIndex = 0;
-      let bundle = Services.strings.createBundle("chrome://browser/locale/places/places.properties");
-      let queryOptions = Ci.nsINavHistoryQueryOptions;
-
-      let smartBookmarks = {
-        MostVisited: {
-          title: bundle.GetStringFromName("mostVisitedTitle"),
-          url: "place:sort=" + queryOptions.SORT_BY_VISITCOUNT_DESCENDING +
-                    "&maxResults=" + MAX_RESULTS,
-          parentGuid: PlacesUtils.bookmarks.toolbarGuid,
-          newInVersion: 1
-        },
-        RecentTags: {
-          title: bundle.GetStringFromName("recentTagsTitle"),
-          url: "place:type=" + queryOptions.RESULTS_AS_TAGS_ROOT +
-                    "&sort=" + queryOptions.SORT_BY_LASTMODIFIED_DESCENDING +
-                    "&maxResults=" + MAX_RESULTS,
-          parentGuid: PlacesUtils.bookmarks.menuGuid,
-          newInVersion: 1
-        },
-      };
-
-      // Set current guid, parentGuid and index of existing Smart Bookmarks.
-      // We will use those to create a new version of the bookmark at the same
-      // position.
-      let smartBookmarkItemIds = PlacesUtils.annotations.getItemsWithAnnotation(SMART_BOOKMARKS_ANNO);
-      for (let itemId of smartBookmarkItemIds) {
-        let queryId = PlacesUtils.annotations.getItemAnnotation(itemId, SMART_BOOKMARKS_ANNO);
-        if (queryId in smartBookmarks) {
-          // Known smart bookmark.
-          let smartBookmark = smartBookmarks[queryId];
-          smartBookmark.guid = await PlacesUtils.promiseItemGuid(itemId);
-
-          if (!smartBookmark.url) {
-            await PlacesUtils.bookmarks.remove(smartBookmark.guid);
-            continue;
-          }
-
-          let bm = await PlacesUtils.bookmarks.fetch(smartBookmark.guid);
-          smartBookmark.parentGuid = bm.parentGuid;
-          smartBookmark.index = bm.index;
-        } else {
-          // We don't remove old Smart Bookmarks because user could still
-          // find them useful, or could have personalized them.
-          // Instead we remove the Smart Bookmark annotation.
-          PlacesUtils.annotations.removeItemAnnotation(itemId, SMART_BOOKMARKS_ANNO);
-        }
-      }
-
-      for (let queryId of Object.keys(smartBookmarks)) {
-        let smartBookmark = smartBookmarks[queryId];
-
-        // We update or create only changed or new smart bookmarks.
-        // Also we respect user choices, so we won't try to create a smart
-        // bookmark if it has been removed.
-        if (smartBookmarksCurrentVersion > 0 &&
-            smartBookmark.newInVersion <= smartBookmarksCurrentVersion &&
-            !smartBookmark.guid || !smartBookmark.url)
-          continue;
-
-        // Remove old version of the smart bookmark if it exists, since it
-        // will be replaced in place.
-        if (smartBookmark.guid) {
-          await PlacesUtils.bookmarks.remove(smartBookmark.guid);
-        }
-
-        // Create the new smart bookmark and store its updated guid.
-        if (!("index" in smartBookmark)) {
-          if (smartBookmark.parentGuid == PlacesUtils.bookmarks.toolbarGuid)
-            smartBookmark.index = toolbarIndex++;
-          else if (smartBookmark.parentGuid == PlacesUtils.bookmarks.menuGuid)
-            smartBookmark.index = menuIndex++;
-        }
-        smartBookmark = await PlacesUtils.bookmarks.insert(smartBookmark);
-        let itemId = await PlacesUtils.promiseItemId(smartBookmark.guid);
-        PlacesUtils.annotations.setItemAnnotation(itemId,
-                                                  SMART_BOOKMARKS_ANNO,
-                                                  queryId, 0,
-                                                  PlacesUtils.annotations.EXPIRE_NEVER);
-      }
-
-      // If we are creating all Smart Bookmarks from ground up, add a
-      // separator below them in the bookmarks menu.
-      if (smartBookmarksCurrentVersion == 0 &&
-          smartBookmarkItemIds.length == 0) {
-        let bm = await PlacesUtils.bookmarks.fetch({ parentGuid: PlacesUtils.bookmarks.menuGuid,
-                                                     index: menuIndex });
-        // Don't add a separator if the menu was empty or there is one already.
-        if (bm && bm.type != PlacesUtils.bookmarks.TYPE_SEPARATOR) {
-          await PlacesUtils.bookmarks.insert({ type: PlacesUtils.bookmarks.TYPE_SEPARATOR,
-                                               parentGuid: PlacesUtils.bookmarks.menuGuid,
-                                               index: menuIndex });
-        }
-      }
-    } catch (ex) {
-      Cu.reportError(ex);
-    } finally {
-      Services.prefs.setIntPref(SMART_BOOKMARKS_PREF, SMART_BOOKMARKS_VERSION);
-      Services.prefs.savePrefFile(null);
-    }
   },
 
   /**

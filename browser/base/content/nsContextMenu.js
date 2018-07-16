@@ -201,7 +201,6 @@ nsContextMenu.prototype = {
     this.onLink              = context.onLink;
     this.onLoadedImage       = context.onLoadedImage;
     this.onMailtoLink        = context.onMailtoLink;
-    this.onMathML            = context.onMathML;
     this.onMozExtLink        = context.onMozExtLink;
     this.onNumeric           = context.onNumeric;
     this.onPassword          = context.onPassword;
@@ -424,8 +423,6 @@ nsContextMenu.prototype = {
     // View source is always OK, unless in directory listing.
     this.showItem("context-viewpartialsource-selection",
                   this.isContentSelected);
-    this.showItem("context-viewpartialsource-mathml",
-                  this.onMathML && !this.isContentSelected);
 
     var shouldShow = !(this.isContentSelected ||
                        this.onImage || this.onCanvas ||
@@ -876,7 +873,7 @@ nsContextMenu.prototype = {
   },
 
   // View Partial Source
-  viewPartialSource(aContext) {
+  viewPartialSource() {
     let {browser} = this;
     let openSelectionFn = function() {
       let tabBrowser = gBrowser;
@@ -898,8 +895,7 @@ nsContextMenu.prototype = {
       return tabBrowser.getBrowserForTab(tab);
     };
 
-    let target = aContext == "mathml" ? this.target : null;
-    top.gViewSourceUtils.viewPartialSourceInBrowser(browser, target, openSelectionFn);
+    top.gViewSourceUtils.viewPartialSourceInBrowser(browser, openSelectionFn);
   },
 
   // Open new "view source" window with the frame's URL.
@@ -999,12 +995,22 @@ nsContextMenu.prototype = {
       target: this.target,
     });
 
+    // Cache this because we fetch the data async
+    let {documentURIObject} = gContextMenuContentData;
+
     let onMessage = (message) => {
       mm.removeMessageListener("ContextMenu:SaveVideoFrameAsImage:Result", onMessage);
+      // FIXME can we switch this to a blob URL?
       let dataURL = message.data.dataURL;
-      saveImageURL(dataURL, name, "SaveImageTitle", true, false,
-                   document.documentURIObject, null, null, null,
-                   isPrivate);
+      saveImageURL(dataURL, name, "SaveImageTitle",
+                   true, // bypass cache
+                   false, // don't skip prompt for where to save
+                   documentURIObject, // referrer
+                   null, // document
+                   null, // content type
+                   null, // content disposition
+                   isPrivate,
+                   this.principal);
     };
     mm.addMessageListener("ContextMenu:SaveVideoFrameAsImage:Result", onMessage);
   },
@@ -1242,13 +1248,15 @@ nsContextMenu.prototype = {
       this._canvasToBlobURL(this.target).then(function(blobURL) {
         saveImageURL(blobURL, "canvas.png", "SaveImageTitle",
                      true, false, referrerURI, null, null, null,
-                     isPrivate);
+                     isPrivate,
+                     document.nodePrincipal /* system, because blob: */);
       }, Cu.reportError);
     } else if (this.onImage) {
       urlSecurityCheck(this.mediaURL, this.principal);
       saveImageURL(this.mediaURL, null, "SaveImageTitle", false,
                    false, referrerURI, null, gContextMenuContentData.contentType,
-                   gContextMenuContentData.contentDisposition, isPrivate);
+                   gContextMenuContentData.contentDisposition, isPrivate,
+                   this.principal);
     } else if (this.onVideo || this.onAudio) {
       var dialogTitle = this.onVideo ? "SaveVideoTitle" : "SaveAudioTitle";
       this.saveHelper(this.mediaURL, null, dialogTitle, false, doc, referrerURI,
@@ -1424,13 +1432,13 @@ nsContextMenu.prototype = {
 
   bookmarkThisPage: function CM_bookmarkThisPage() {
     window.top.PlacesCommandHook
-              .bookmarkPage(this.browser, true)
+              .bookmarkPage()
               .catch(Cu.reportError);
   },
 
   bookmarkLink: function CM_bookmarkLink() {
-    window.top.PlacesCommandHook.bookmarkLink(PlacesUtils.bookmarksMenuFolderId,
-                                              this.linkURL, this.linkTextStr);
+    window.top.PlacesCommandHook.bookmarkLink(this.linkURL, this.linkTextStr)
+                                .catch(Cu.reportError);
   },
 
   addBookmarkForFrame: function CM_addBookmarkForFrame() {
@@ -1440,9 +1448,7 @@ nsContextMenu.prototype = {
     let onMessage = (message) => {
       mm.removeMessageListener("ContextMenu:BookmarkFrame:Result", onMessage);
 
-      window.top.PlacesCommandHook.bookmarkLink(PlacesUtils.bookmarksMenuFolderId,
-                                                uri.spec,
-                                                message.data.title)
+      window.top.PlacesCommandHook.bookmarkLink(uri.spec, message.data.title)
                                   .catch(Cu.reportError);
     };
     mm.addMessageListener("ContextMenu:BookmarkFrame:Result", onMessage);

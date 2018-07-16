@@ -146,32 +146,16 @@ function promiseTimeout(aTime) {
  */
 function promiseWaitForVisit(aUrl) {
   return new Promise(resolve => {
-
-    let uri = NetUtil.newURI(aUrl);
-
-    PlacesUtils.history.addObserver({
-      QueryInterface: ChromeUtils.generateQI([Ci.nsINavHistoryObserver]),
-      onBeginUpdateBatch() {},
-      onEndUpdateBatch() {},
-      onVisits(aVisits) {
-        Assert.equal(aVisits.length, 1);
-        let {
-          uri: visitUri,
-          time,
-          transitionType,
-        } = aVisits[0];
-        if (visitUri.equals(uri)) {
-          PlacesUtils.history.removeObserver(this);
-          resolve([time, transitionType]);
-        }
-      },
-      onTitleChanged() {},
-      onDeleteURI() {},
-      onClearHistory() {},
-      onPageChanged() {},
-      onDeleteVisits() {},
-    });
-
+    function listener(aEvents) {
+      Assert.equal(aEvents.length, 1);
+      let event = aEvents[0];
+      Assert.equal(event.type, "page-visited");
+      if (event.url == aUrl) {
+        PlacesObservers.removeListener(["page-visited"], listener);
+        resolve([event.visitTime, event.transitionType]);
+      }
+    }
+    PlacesObservers.addListener(["page-visited"], listener);
   });
 }
 
@@ -299,7 +283,8 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
 
       // Start the actual download process.
       persist.savePrivacyAwareURI(
-        sourceURI, 0, referrer, Ci.nsIHttpChannel.REFERRER_POLICY_UNSAFE_URL,
+        sourceURI, Services.scriptSecurityManager.getSystemPrincipal(),
+        0, referrer, Ci.nsIHttpChannel.REFERRER_POLICY_UNSAFE_URL,
         null, null, targetFile, isPrivate);
     }).catch(do_report_unexpected_exception);
 
@@ -593,6 +578,28 @@ function registerInterruptibleHandler(aPath, aFirstPartFn, aSecondPartFn) {
  */
 function isValidDate(aDate) {
   return aDate && aDate.getTime && !isNaN(aDate.getTime());
+}
+
+/**
+ * Waits for the download annotations to be set for the given page, required
+ * because the addDownload method will add these to the database asynchronously.
+ */
+function waitForAnnotation(sourceUriSpec, annotationName) {
+  let sourceUri = Services.io.newURI(sourceUriSpec);
+  return new Promise(resolve => {
+    PlacesUtils.annotations.addObserver({
+      onPageAnnotationSet(page, name) {
+        if (!page.equals(sourceUri) || name != annotationName) {
+          return;
+        }
+        PlacesUtils.annotations.removeObserver(this);
+        resolve();
+      },
+      onItemAnnotationSet() {},
+      onPageAnnotationRemoved() {},
+      onItemAnnotationRemoved() {},
+    });
+  });
 }
 
 /**

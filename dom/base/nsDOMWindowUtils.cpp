@@ -16,6 +16,7 @@
 #include "nsFocusManager.h"
 #include "nsFrameManager.h"
 #include "nsRefreshDriver.h"
+#include "mozilla/dom/Animation.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/Event.h"
@@ -2042,8 +2043,8 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
   nsresult rv = targetWidget->DispatchEvent(&queryEvent, status);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  auto* result = new nsQueryContentEventResult();
-  result->SetEventResult(widget, queryEvent);
+  auto* result = new nsQueryContentEventResult(queryEvent);
+  result->SetEventResult(widget);
   NS_ADDREF(*aResult = result);
   return NS_OK;
 }
@@ -3804,6 +3805,33 @@ nsDOMWindowUtils::GetOMTCTransform(Element* aElement,
   cssValue->GetCssText(text, rv);
   aResult.Assign(text);
   return rv.StealNSResult();
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::IsAnimationInPendingTracker(dom::Animation* aAnimation,
+                                              bool* aRetVal)
+{
+  MOZ_ASSERT(aRetVal);
+
+  if (!aAnimation) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsIDocument* doc = GetDocument();
+  if (!doc) {
+    *aRetVal = false;
+    return NS_OK;
+  }
+
+  PendingAnimationTracker* tracker = doc->GetPendingAnimationTracker();
+  if (!tracker) {
+    *aRetVal = false;
+    return NS_OK;
+  }
+
+  *aRetVal = tracker->IsWaitingToPlay(*aAnimation) ||
+             tracker->IsWaitingToPause(*aAnimation);
+  return NS_OK;
 }
 
 namespace {

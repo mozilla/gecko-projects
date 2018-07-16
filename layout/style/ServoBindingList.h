@@ -680,6 +680,10 @@ SERVO_BINDING_FUNC(Servo_MediaList_AppendMedium, void,
                    RawServoMediaListBorrowed list, const nsACString* new_medium)
 SERVO_BINDING_FUNC(Servo_MediaList_DeleteMedium, bool,
                    RawServoMediaListBorrowed list, const nsACString* old_medium)
+SERVO_BINDING_FUNC(Servo_MediaList_SizeOfIncludingThis, size_t,
+                   mozilla::MallocSizeOf malloc_size_of,
+                   mozilla::MallocSizeOf malloc_enclosing_size_of,
+                   RawServoMediaListBorrowed list)
 
 // CSS supports()
 SERVO_BINDING_FUNC(Servo_CSSSupports2, bool,
@@ -880,6 +884,10 @@ SERVO_BINDING_FUNC(Servo_ParseFontShorthandForMatching, bool,
                    nsCSSValueBorrowedMut stretch,
                    nsCSSValueBorrowedMut weight);
 
+SERVO_BINDING_FUNC(Servo_ResolveLogicalProperty,
+                   nsCSSPropertyID,
+                   nsCSSPropertyID,
+                   ComputedStyleBorrowed);
 SERVO_BINDING_FUNC(Servo_Property_IsShorthand, bool,
                    const nsACString* name, bool* found);
 SERVO_BINDING_FUNC(Servo_Property_IsInherited, bool,

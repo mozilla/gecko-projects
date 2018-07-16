@@ -773,6 +773,7 @@ nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
                                   nsIPrincipal* aTriggeringPrincipal,
                                   nsIURI* aSourceURI,
                                   uint32_t aLineNumber,
+                                  uint32_t aColumnNumber,
                                   const nsAString& aStyleText,
                                   nsresult* aRv)
 {
@@ -781,10 +782,6 @@ nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
   if (aRv) {
     *aRv = NS_OK;
   }
-
-  MOZ_ASSERT(!aElement || aElement->NodeInfo()->NameAtom() == nsGkAtoms::style,
-      "aElement passed to CSPAllowsInlineStyle "
-      "for an element that is not <style>");
 
   nsIPrincipal* principal = aPrincipal;
   if (aTriggeringPrincipal &&
@@ -808,20 +805,15 @@ nsStyleUtil::CSPAllowsInlineStyle(Element* aElement,
 
   // query the nonce
   nsAutoString nonce;
-  if (aElement) {
+  if (aElement && aElement->NodeInfo()->NameAtom() == nsGkAtoms::style) {
     aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::nonce, nonce);
-  }
-
-  nsCOMPtr<nsISupportsString> styleText(do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID));
-  if (styleText) {
-    styleText->SetData(aStyleText);
   }
 
   bool allowInlineStyle = true;
   rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_STYLESHEET,
                             nonce,
                             false, // aParserCreated only applies to scripts
-                            styleText, aLineNumber,
+                            aElement, aStyleText, aLineNumber, aColumnNumber,
                             &allowInlineStyle);
   NS_ENSURE_SUCCESS(rv, false);
 

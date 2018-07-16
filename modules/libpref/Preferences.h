@@ -39,11 +39,44 @@ class Pref;
 class PrefValue;
 } // namespace dom
 
+namespace ipc {
+class FileDescriptor;
+} // namespace ipc
+
 struct PrefsSizes;
 
+// Xlib.h defines Bool as a macro constant. Don't try to define this enum if
+// it's already been included.
+#ifndef Bool
+
+// Keep this in sync with PrefType in parser/src/lib.rs.
+enum class PrefType : uint8_t
+{
+  None = 0, // only used when neither the default nor user value is set
+  String = 1,
+  Int = 2,
+  Bool = 3,
+};
+
+#endif
+
 #ifdef XP_UNIX
+// We need to send two shared memory descriptors to every child process:
+//
+// 1) A read-only/write-protected snapshot of the initial state of the
+//    preference database. This memory is shared between all processes, and
+//    therefore cannot be modified once it has been created.
+//
+// 2) A set of changes on top of the snapshot, containing the current values of
+//    all preferences which have changed since it was created.
+//
+// Since the second set will be different for every process, and the first set
+// cannot be modified, it is unfortunately not possible to combine them into a
+// single file descriptor.
+//
 // XXX: bug 1440207 is about improving how fixed fds such as this are used.
 static const int kPrefsFileDescriptor = 8;
+static const int kPrefMapFileDescriptor = 9;
 #endif
 
 // Keep this in sync with PrefType in parser/src/lib.rs.
@@ -237,12 +270,35 @@ public:
 
   // Adds/Removes the observer for the root pref branch. See nsIPrefBranch.idl
   // for details.
-  static nsresult AddStrongObserver(nsIObserver* aObserver, const char* aPref);
-  static nsresult AddWeakObserver(nsIObserver* aObserver, const char* aPref);
-  static nsresult RemoveObserver(nsIObserver* aObserver, const char* aPref);
+  static nsresult AddStrongObserver(nsIObserver* aObserver,
+                                    const nsACString& aPref);
+  static nsresult AddWeakObserver(nsIObserver* aObserver,
+                                  const nsACString& aPref);
+  static nsresult RemoveObserver(nsIObserver* aObserver,
+                                 const nsACString& aPref);
+
+  template<int N>
+  static nsresult AddStrongObserver(nsIObserver* aObserver,
+                                    const char (&aPref)[N])
+  {
+    return AddStrongObserver(aObserver, nsLiteralCString(aPref));
+  }
+  template<int N>
+  static nsresult AddWeakObserver(nsIObserver* aObserver,
+                                  const char (&aPref)[N])
+  {
+    return AddWeakObserver(aObserver, nsLiteralCString(aPref));
+  }
+  template<int N>
+  static nsresult RemoveObserver(nsIObserver* aObserver, const char (&aPref)[N])
+  {
+    return RemoveObserver(aObserver, nsLiteralCString(aPref));
+  }
 
   // Adds/Removes two or more observers for the root pref branch. Pass to
   // aPrefs an array of const char* whose last item is nullptr.
+  // Note: All preference strings *must* be statically-allocated string
+  // literals.
   static nsresult AddStrongObservers(nsIObserver* aObserver,
                                      const char** aPrefs);
   static nsresult AddWeakObservers(nsIObserver* aObserver, const char** aPrefs);
@@ -250,14 +306,14 @@ public:
 
   // Registers/Unregisters the callback function for the aPref.
   static nsresult RegisterCallback(PrefChangedFunc aCallback,
-                                   const char* aPref,
+                                   const nsACString& aPref,
                                    void* aClosure = nullptr)
   {
     return RegisterCallback(aCallback, aPref, aClosure, ExactMatch);
   }
 
   static nsresult UnregisterCallback(PrefChangedFunc aCallback,
-                                     const char* aPref,
+                                     const nsACString& aPref,
                                      void* aClosure = nullptr)
   {
     return UnregisterCallback(aCallback, aPref, aClosure, ExactMatch);
@@ -266,7 +322,7 @@ public:
   // Like RegisterCallback, but also calls the callback immediately for
   // initialization.
   static nsresult RegisterCallbackAndCall(PrefChangedFunc aCallback,
-                                          const char* aPref,
+                                          const nsACString& aPref,
                                           void* aClosure = nullptr)
   {
     return RegisterCallbackAndCall(aCallback, aPref, aClosure, ExactMatch);
@@ -275,7 +331,7 @@ public:
   // Like RegisterCallback, but registers a callback for a prefix of multiple
   // pref names, not a single pref name.
   static nsresult RegisterPrefixCallback(PrefChangedFunc aCallback,
-                                         const char* aPref,
+                                         const nsACString& aPref,
                                          void* aClosure = nullptr)
   {
     return RegisterCallback(aCallback, aPref, aClosure, PrefixMatch);
@@ -284,7 +340,7 @@ public:
   // Like RegisterPrefixCallback, but also calls the callback immediately for
   // initialization.
   static nsresult RegisterPrefixCallbackAndCall(PrefChangedFunc aCallback,
-                                                const char* aPref,
+                                                const nsACString& aPref,
                                                 void* aClosure = nullptr)
   {
     return RegisterCallbackAndCall(aCallback, aPref, aClosure, PrefixMatch);
@@ -293,10 +349,64 @@ public:
   // Unregister a callback registered with RegisterPrefixCallback or
   // RegisterPrefixCallbackAndCall.
   static nsresult UnregisterPrefixCallback(PrefChangedFunc aCallback,
-                                           const char* aPref,
+                                           const nsACString& aPref,
                                            void* aClosure = nullptr)
   {
     return UnregisterCallback(aCallback, aPref, aClosure, PrefixMatch);
+  }
+
+  template<int N>
+  static nsresult RegisterCallback(PrefChangedFunc aCallback,
+                                   const char (&aPref)[N],
+                                   void* aClosure = nullptr)
+  {
+    return RegisterCallback(
+      aCallback, nsLiteralCString(aPref), aClosure, ExactMatch);
+  }
+
+  template<int N>
+  static nsresult UnregisterCallback(PrefChangedFunc aCallback,
+                                     const char (&aPref)[N],
+                                     void* aClosure = nullptr)
+  {
+    return UnregisterCallback(
+      aCallback, nsLiteralCString(aPref), aClosure, ExactMatch);
+  }
+
+  template<int N>
+  static nsresult RegisterCallbackAndCall(PrefChangedFunc aCallback,
+                                          const char (&aPref)[N],
+                                          void* aClosure = nullptr)
+  {
+    return RegisterCallbackAndCall(
+      aCallback, nsLiteralCString(aPref), aClosure, ExactMatch);
+  }
+
+  template<int N>
+  static nsresult RegisterPrefixCallback(PrefChangedFunc aCallback,
+                                         const char (&aPref)[N],
+                                         void* aClosure = nullptr)
+  {
+    return RegisterCallback(
+      aCallback, nsLiteralCString(aPref), aClosure, PrefixMatch);
+  }
+
+  template<int N>
+  static nsresult RegisterPrefixCallbackAndCall(PrefChangedFunc aCallback,
+                                                const char (&aPref)[N],
+                                                void* aClosure = nullptr)
+  {
+    return RegisterCallbackAndCall(
+      aCallback, nsLiteralCString(aPref), aClosure, PrefixMatch);
+  }
+
+  template<int N>
+  static nsresult UnregisterPrefixCallback(PrefChangedFunc aCallback,
+                                           const char (&aPref)[N],
+                                           void* aClosure = nullptr)
+  {
+    return UnregisterCallback(
+      aCallback, nsLiteralCString(aPref), aClosure, PrefixMatch);
   }
 
   // Adds the aVariable to cache table. |aVariable| must be a pointer for a
@@ -304,41 +414,108 @@ public:
   // but note that even if you modified it, the value isn't assigned to the
   // pref.
   static nsresult AddBoolVarCache(bool* aVariable,
-                                  const char* aPref,
+                                  const nsACString& aPref,
                                   bool aDefault = false,
                                   bool aSkipAssignment = false);
   template<MemoryOrdering Order>
   static nsresult AddAtomicBoolVarCache(Atomic<bool, Order>* aVariable,
-                                        const char* aPref,
+                                        const nsACString& aPref,
                                         bool aDefault = false,
                                         bool aSkipAssignment = false);
   static nsresult AddIntVarCache(int32_t* aVariable,
-                                 const char* aPref,
+                                 const nsACString& aPref,
                                  int32_t aDefault = 0,
                                  bool aSkipAssignment = false);
   template<MemoryOrdering Order>
   static nsresult AddAtomicIntVarCache(Atomic<int32_t, Order>* aVariable,
-                                       const char* aPref,
+                                       const nsACString& aPref,
                                        int32_t aDefault = 0,
                                        bool aSkipAssignment = false);
   static nsresult AddUintVarCache(uint32_t* aVariable,
-                                  const char* aPref,
+                                  const nsACString& aPref,
                                   uint32_t aDefault = 0,
                                   bool aSkipAssignment = false);
   template<MemoryOrdering Order>
   static nsresult AddAtomicUintVarCache(Atomic<uint32_t, Order>* aVariable,
-                                        const char* aPref,
+                                        const nsACString& aPref,
                                         uint32_t aDefault = 0,
                                         bool aSkipAssignment = false);
   static nsresult AddFloatVarCache(float* aVariable,
-                                   const char* aPref,
+                                   const nsACString& aPref,
                                    float aDefault = 0.0f,
                                    bool aSkipAssignment = false);
+
+  template<int N>
+  static nsresult AddBoolVarCache(bool* aVariable,
+                                  const char (&aPref)[N],
+                                  bool aDefault = false,
+                                  bool aSkipAssignment = false)
+  {
+    return AddBoolVarCache(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
+  template<MemoryOrdering Order, int N>
+  static nsresult AddAtomicBoolVarCache(Atomic<bool, Order>* aVariable,
+                                        const char (&aPref)[N],
+                                        bool aDefault = false,
+                                        bool aSkipAssignment = false)
+  {
+    return AddAtomicBoolVarCache<Order>(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
+  template<int N>
+  static nsresult AddIntVarCache(int32_t* aVariable,
+                                 const char (&aPref)[N],
+                                 int32_t aDefault = 0,
+                                 bool aSkipAssignment = false)
+  {
+    return AddIntVarCache(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
+  template<MemoryOrdering Order, int N>
+  static nsresult AddAtomicIntVarCache(Atomic<int32_t, Order>* aVariable,
+                                       const char (&aPref)[N],
+                                       int32_t aDefault = 0,
+                                       bool aSkipAssignment = false)
+  {
+    return AddAtomicIntVarCache<Order>(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
+  template<int N>
+  static nsresult AddUintVarCache(uint32_t* aVariable,
+                                  const char (&aPref)[N],
+                                  uint32_t aDefault = 0,
+                                  bool aSkipAssignment = false)
+  {
+    return AddUintVarCache(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
+  template<MemoryOrdering Order, int N>
+  static nsresult AddAtomicUintVarCache(Atomic<uint32_t, Order>* aVariable,
+                                        const char (&aPref)[N],
+                                        uint32_t aDefault = 0,
+                                        bool aSkipAssignment = false)
+  {
+    return AddAtomicUintVarCache<Order>(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
+  template<int N>
+  static nsresult AddFloatVarCache(float* aVariable,
+                                   const char (&aPref)[N],
+                                   float aDefault = 0.0f,
+                                   bool aSkipAssignment = false)
+  {
+    return AddFloatVarCache(
+      aVariable, nsLiteralCString(aPref), aDefault, aSkipAssignment);
+  }
 
   // When a content process is created these methods are used to pass changed
   // prefs in bulk from the parent process, via shared memory.
   static void SerializePreferences(nsCString& aStr);
   static void DeserializePreferences(char* aStr, size_t aPrefsLen);
+
+  static mozilla::ipc::FileDescriptor EnsureSnapshot(size_t* aSize);
+  static void InitSnapshot(const mozilla::ipc::FileDescriptor&, size_t aSize);
 
   // When a single pref is changed in the parent process, these methods are
   // used to pass the update to content processes.
@@ -405,18 +582,44 @@ private:
     bool aIsStartup);
 
   static nsresult RegisterCallback(PrefChangedFunc aCallback,
-                                   const char* aPref,
+                                   const nsACString& aPref,
                                    void* aClosure,
                                    MatchKind aMatchKind,
                                    bool aIsPriority = false);
   static nsresult UnregisterCallback(PrefChangedFunc aCallback,
-                                     const char* aPref,
+                                     const nsACString& aPref,
                                      void* aClosure,
                                      MatchKind aMatchKind);
   static nsresult RegisterCallbackAndCall(PrefChangedFunc aCallback,
-                                          const char* aPref,
+                                          const nsACString& aPref,
                                           void* aClosure,
                                           MatchKind aMatchKind);
+
+  static nsresult RegisterCallback(PrefChangedFunc aCallback,
+                                   const char* aPref,
+                                   void* aClosure,
+                                   MatchKind aMatchKind,
+                                   bool aIsPriority = false)
+  {
+    return RegisterCallback(
+      aCallback, nsDependentCString(aPref), aClosure, aMatchKind, aIsPriority);
+  }
+  static nsresult UnregisterCallback(PrefChangedFunc aCallback,
+                                     const char* aPref,
+                                     void* aClosure,
+                                     MatchKind aMatchKind)
+  {
+    return UnregisterCallback(
+      aCallback, nsDependentCString(aPref), aClosure, aMatchKind);
+  }
+  static nsresult RegisterCallbackAndCall(PrefChangedFunc aCallback,
+                                          const char* aPref,
+                                          void* aClosure,
+                                          MatchKind aMatchKind)
+  {
+    return RegisterCallbackAndCall(
+      aCallback, nsDependentCString(aPref), aClosure, aMatchKind);
+  }
 
 private:
   nsCOMPtr<nsIFile> mCurrentFile;

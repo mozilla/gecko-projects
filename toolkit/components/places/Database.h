@@ -19,7 +19,7 @@
 
 // This is the schema version. Update it at any schema change and add a
 // corresponding migrateVxx method below.
-#define DATABASE_SCHEMA_VERSION 51
+#define DATABASE_SCHEMA_VERSION 52
 
 // Fired after Places inited.
 #define TOPIC_PLACES_INIT_COMPLETE "places-init-complete"
@@ -302,7 +302,8 @@ protected:
   /**
    * Creates bookmark roots in a new DB.
    */
-  nsresult EnsureBookmarkRoots(const int32_t startPosition);
+  nsresult EnsureBookmarkRoots(const int32_t startPosition,
+                               bool shouldReparentRoots);
 
   /**
    * Initializes additionale SQLite functions, defined in SQLFunctions.h
@@ -338,8 +339,9 @@ protected:
   nsresult MigrateV49Up();
   nsresult MigrateV50Up();
   nsresult MigrateV51Up();
+  nsresult MigrateV52Up();
 
-  void MigrateV48Frecencies();
+  void MigrateV52OriginFrecencies();
 
   nsresult UpdateBookmarkRootTitles();
 

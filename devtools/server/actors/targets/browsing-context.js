@@ -290,7 +290,6 @@ const browsingContextTargetPrototype = {
   },
 
   _targetScopedActorPool: null,
-  _contextPool: null,
 
   /**
    * A constant prefix that will be used to form the actor ID by the server.
@@ -579,7 +578,7 @@ const browsingContextTargetPrototype = {
     }
 
     // Create a pool for context-lifetime actors.
-    this._pushContext();
+    this._createThreadActor();
 
     // on xpcshell, there is no document
     if (this.window) {
@@ -686,7 +685,7 @@ const browsingContextTargetPrototype = {
 
   _onWorkerTargetActorListChanged() {
     this._workerTargetActorList.onListChanged = null;
-    this.conn.sendActorEvent(this.actorID, "workerListChanged");
+    this.emit("workerListChanged");
   },
 
   observe(subject, topic, data) {
@@ -820,9 +819,7 @@ const browsingContextTargetPrototype = {
       return;
     }
 
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
+    this.emit("frameUpdate", {
       frames: windows
     });
   },
@@ -837,9 +834,7 @@ const browsingContextTargetPrototype = {
                         .QueryInterface(Ci.nsIInterfaceRequestor)
                         .getInterface(Ci.nsIDOMWindowUtils)
                         .outerWindowID;
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
+    this.emit("frameUpdate", {
       frames: [{
         id,
         destroy: true
@@ -848,36 +843,25 @@ const browsingContextTargetPrototype = {
   },
 
   _notifyDocShellDestroyAll() {
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
+    this.emit("frameUpdate", {
       destroyAll: true
     });
   },
 
   /**
-   * Creates a thread actor and a pool for context-lifetime actors. It then sets
-   * up the content window for debugging.
+   * Creates and manages the thread actor as part of the Browsing Context Target pool.
+   * This sets up the content window for being debugged
    */
-  _pushContext() {
-    assert(!this._contextPool, "Can't push multiple contexts");
-
-    this._contextPool = new ActorPool(this.conn);
-    this.conn.addActorPool(this._contextPool);
-
+  _createThreadActor() {
     this.threadActor = new ThreadActor(this, this.window);
-    this._contextPool.addActor(this.threadActor);
+    this.manage(this.threadActor);
   },
 
   /**
-   * Exits the current thread actor and removes the context-lifetime actor pool.
+   * Exits the current thread actor and removes it from the Browsing Context Target pool.
    * The content window is no longer being debugged after this call.
    */
-  _popContext() {
-    assert(!!this._contextPool, "No context to pop.");
-
-    this.conn.removeActorPool(this._contextPool);
-    this._contextPool = null;
+  _destroyThreadActor() {
     this.threadActor.exit();
     this.threadActor = null;
     this._sources = null;
@@ -911,7 +895,7 @@ const browsingContextTargetPrototype = {
       Services.obs.removeObserver(this, "webnavigation-destroy");
     }
 
-    this._popContext();
+    this._destroyThreadActor();
 
     // Shut down actors that belong to this target's pool.
     this._styleSheetActors.clear();
@@ -933,8 +917,7 @@ const browsingContextTargetPrototype = {
 
     this._attached = false;
 
-    this.conn.send({ from: this.actorID,
-                     type: "tabDetached" });
+    this.emit("tabDetached");
 
     return true;
   },
@@ -1257,9 +1240,7 @@ const browsingContextTargetPrototype = {
       configurable: true
     });
     this.emit("changed-toplevel-document");
-    this.conn.send({
-      from: this.actorID,
-      type: "frameUpdate",
+    this.emit("frameUpdate", {
       selected: this.outerWindowID
     });
   },
@@ -1365,9 +1346,7 @@ const browsingContextTargetPrototype = {
     }
     threadActor.disableAllBreakpoints();
 
-    this.conn.send({
-      from: this.actorID,
-      type: "tabNavigated",
+    this.emit("tabNavigated", {
       url: newURI,
       nativeConsoleAPI: true,
       state: "start",
@@ -1407,9 +1386,7 @@ const browsingContextTargetPrototype = {
       threadActor.dbg.enabled = true;
     }
 
-    this.conn.send({
-      from: this.actorID,
-      type: "tabNavigated",
+    this.emit("tabNavigated", {
       url: this.url,
       title: this.title,
       nativeConsoleAPI: this.hasNativeConsoleAPI(this.window),
@@ -1451,6 +1428,7 @@ const browsingContextTargetPrototype = {
    *
    */
   createStyleSheetActor(styleSheet) {
+    assert(!this.exited, "Target must not be exited to create a sheet actor.");
     if (this._styleSheetActors.has(styleSheet)) {
       return this._styleSheetActors.get(styleSheet);
     }

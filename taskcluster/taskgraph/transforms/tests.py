@@ -72,6 +72,11 @@ WINDOWS_WORKER_TYPES = {
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
+    'windows7-32-msvc': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win7-32',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win7-32-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
     'windows10-64': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
@@ -98,6 +103,11 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-asan': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
+    'windows10-64-msvc': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -587,6 +597,8 @@ def set_tier(config, tests):
                                          'linux64-pgo/opt',
                                          'linux64-devedition/opt',
                                          'linux64-asan/opt',
+                                         'linux64-qr/opt',
+                                         'linux64-qr/debug',
                                          'windows7-32/debug',
                                          'windows7-32/opt',
                                          'windows7-32-pgo/opt',
@@ -598,10 +610,14 @@ def set_tier(config, tests):
                                          'windows10-64-devedition/opt',
                                          'windows10-64-nightly/opt',
                                          'windows10-64-asan/opt',
+                                         'windows10-64-qr/opt',
+                                         'windows10-64-qr/debug',
                                          'macosx64/opt',
                                          'macosx64/debug',
                                          'macosx64-nightly/opt',
                                          'macosx64-devedition/opt',
+                                         'macosx64-qr/opt',
+                                         'macosx64-qr/debug',
                                          'android-em-4.3-arm7-api-16/opt',
                                          'android-em-4.3-arm7-api-16/debug',
                                          'android-em-4.2-x86/opt']:
@@ -722,6 +738,14 @@ def enable_code_coverage(config, tests):
             test.pop('schedules-component', None)
             test.pop('when', None)
             test['optimization'] = None
+
+            # Add a fetch task for the grcov binary.
+            if 'linux' in test['build-platform']:
+                test['fetches'] = ['grcov-linux-x86_64']
+            elif 'osx' in test['build-platform']:
+                test['fetches'] = ['grcov-osx-x86_64']
+            elif 'win' in test['build-platform']:
+                test['fetches'] = ['grcov-win-x86_64']
 
             if 'talos' in test['test-name']:
                 test['max-run-time'] = 7200
@@ -1048,6 +1072,8 @@ def make_job_description(config, tests):
         run['test'] = test
 
         jobdesc['worker-type'] = test.pop('worker-type')
+        if test.get('fetches'):
+            jobdesc['fetches'] = test.pop('fetches')
 
         yield jobdesc
 

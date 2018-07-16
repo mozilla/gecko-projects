@@ -26,7 +26,7 @@
 #include "nsIComponentManager.h"
 #include "nsBoxLayoutState.h"
 #include "nsIScrollableFrame.h"
-#include "nsIRootBox.h"
+#include "nsIPopupContainer.h"
 #include "nsIDocShell.h"
 #include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
@@ -71,7 +71,7 @@ DOMTimeStamp nsMenuPopupFrame::sLastKeyTime = 0;
 //  if someone changes one, please also change the other.
 uint32_t nsMenuPopupFrame::sTimeoutOfIncrementalSearch = 1000;
 
-const char* kPrefIncrementalSearchTimeout =
+const char kPrefIncrementalSearchTimeout[] =
   "ui.menu.incremental_search.timeout";
 
 // NS_NewMenuPopupFrame
@@ -176,10 +176,10 @@ nsMenuPopupFrame::Init(nsIContent*       aContent,
   if (aContent->NodeInfo()->Equals(nsGkAtoms::tooltip, kNameSpaceID_XUL) &&
       aContent->AsElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::_default,
                                          nsGkAtoms::_true, eIgnoreCase)) {
-    nsIRootBox* rootBox =
-      nsIRootBox::GetRootBox(PresContext()->GetPresShell());
-    if (rootBox) {
-      rootBox->SetDefaultTooltip(aContent->AsElement());
+    nsIPopupContainer* popupContainer =
+      nsIPopupContainer::GetPopupContainer(PresContext()->GetPresShell());
+    if (popupContainer) {
+      popupContainer->SetDefaultTooltip(aContent->AsElement());
     }
   }
 
@@ -2319,10 +2319,10 @@ nsMenuPopupFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDes
   if (pm)
     pm->PopupDestroyed(this);
 
-  nsIRootBox* rootBox =
-    nsIRootBox::GetRootBox(PresContext()->GetPresShell());
-  if (rootBox && rootBox->GetDefaultTooltip() == mContent) {
-    rootBox->SetDefaultTooltip(nullptr);
+  nsIPopupContainer* popupContainer =
+    nsIPopupContainer::GetPopupContainer(PresContext()->GetPresShell());
+  if (popupContainer && popupContainer->GetDefaultTooltip() == mContent) {
+    popupContainer->SetDefaultTooltip(nullptr);
   }
 
   nsBoxFrame::DestroyFrom(aDestructRoot, aPostDestroyData);

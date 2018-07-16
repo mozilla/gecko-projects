@@ -1,5 +1,5 @@
 use std::slice;
-use libc::{size_t, uint8_t, uint16_t, uint32_t, int64_t};
+use libc::{size_t, uint8_t, uint16_t, uint32_t, int64_t, uint64_t};
 
 use rsdparsa::SdpSession;
 use rsdparsa::attribute_type::*;
@@ -177,6 +177,16 @@ pub unsafe extern "C" fn sdp_get_iceoptions(attributes: *const Vec<SdpAttribute>
     let attr = get_attribute((*attributes).as_slice(), RustSdpAttributeType::IceOptions);
     if let Some(&SdpAttribute::IceOptions(ref options)) = attr {
         *ret = options;
+        return NS_OK;
+    }
+    NS_ERROR_INVALID_ARG
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_get_maxptime(attributes: *const Vec<SdpAttribute>, ret: *mut uint64_t) -> nsresult {
+    let attr = get_attribute((*attributes).as_slice(), RustSdpAttributeType::MaxPtime);
+    if let Some(&SdpAttribute::MaxPtime(ref max_ptime)) = attr {
+        *ret = *max_ptime;
         return NS_OK;
     }
     NS_ERROR_INVALID_ARG
@@ -434,6 +444,26 @@ pub unsafe extern "C" fn sdp_get_ptime(attributes: *const Vec<SdpAttribute>) -> 
     for attribute in (*attributes).iter() {
         if let SdpAttribute::Ptime(time) = *attribute {
             return time as int64_t;
+        }
+    }
+    -1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_get_max_msg_size(attributes: *const Vec<SdpAttribute>) -> int64_t {
+    for attribute in (*attributes).iter() {
+        if let SdpAttribute::MaxMessageSize(max_msg_size) = *attribute {
+            return max_msg_size as int64_t;
+        }
+    }
+    -1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sdp_get_sctp_port(attributes: *const Vec<SdpAttribute>) -> int64_t {
+    for attribute in (*attributes).iter() {
+        if let SdpAttribute::SctpPort(port) = *attribute {
+            return port as int64_t;
         }
     }
     -1
@@ -963,6 +993,7 @@ pub unsafe extern "C" fn sdp_get_rids(attributes: *const Vec<SdpAttribute>, ret_
 #[derive(Clone, Copy)]
 pub struct RustSdpAttributeExtmap {
     pub id: uint16_t,
+    pub direction_specified: bool,
     pub direction: RustDirection,
     pub url: StringView,
     pub extension_attributes: StringView
@@ -972,6 +1003,7 @@ impl<'a> From<&'a SdpAttributeExtmap> for RustSdpAttributeExtmap {
     fn from(other: &SdpAttributeExtmap) -> Self {
         RustSdpAttributeExtmap {
             id : other.id as uint16_t,
+            direction_specified: other.direction.is_some(),
             direction: RustDirection::from(&other.direction),
             url: StringView::from(other.url.as_str()),
             extension_attributes: StringView::from(&other.extension_attributes)

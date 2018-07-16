@@ -49,8 +49,7 @@ use gecko::values::round_border_to_device_pixels;
 use logical_geometry::WritingMode;
 use media_queries::Device;
 use properties::computed_value_flags::*;
-use properties::{longhands, Importance, LonghandId};
-use properties::{PropertyDeclaration, PropertyDeclarationBlock, PropertyDeclarationId};
+use properties::longhands;
 use rule_tree::StrongRuleNode;
 use selector_parser::PseudoElement;
 use servo_arc::{Arc, RawOffsetArc};
@@ -58,7 +57,7 @@ use std::marker::PhantomData;
 use std::mem::{forget, uninitialized, transmute, zeroed};
 use std::{cmp, ops, ptr};
 use values::{self, CustomIdent, Either, KeyframesName, None_};
-use values::computed::{NonNegativeLength, ToComputedValue, Percentage, TransitionProperty};
+use values::computed::{NonNegativeLength, Percentage, TransitionProperty};
 use values::computed::font::FontSize;
 use values::computed::effects::{BoxShadow, Filter, SimpleShadow};
 use values::computed::outline::OutlineStyle;
@@ -84,7 +83,6 @@ pub struct ComputedValues(::gecko_bindings::structs::mozilla::ComputedStyle);
 impl ComputedValues {
     pub fn new(
         device: &Device,
-        parent: Option<<&ComputedValues>,
         pseudo: Option<<&PseudoElement>,
         custom_properties: Option<Arc<CustomPropertiesMap>>,
         writing_mode: WritingMode,
@@ -106,7 +104,6 @@ impl ComputedValues {
             % endfor
         ).to_outer(
             device.pres_context(),
-            parent,
             pseudo.map(|p| p.pseudo_info())
         )
     }
@@ -121,7 +118,7 @@ impl ComputedValues {
             % for style_struct in data.style_structs:
             style_structs::${style_struct.name}::default(pres_context),
             % endfor
-        ).to_outer(pres_context, None, None)
+        ).to_outer(pres_context, None)
     }
 
     pub fn pseudo(&self) -> Option<PseudoElement> {
@@ -196,7 +193,6 @@ impl Clone for ComputedValuesInner {
 }
 
 type PseudoInfo = (*mut structs::nsAtom, structs::CSSPseudoElementType);
-type ParentComputedStyleInfo<'a> = Option< &'a ComputedValues>;
 
 impl ComputedValuesInner {
     pub fn new(custom_properties: Option<Arc<CustomPropertiesMap>>,
@@ -223,7 +219,6 @@ impl ComputedValuesInner {
     fn to_outer(
         self,
         pres_context: RawGeckoPresContextBorrowed,
-        parent: ParentComputedStyleInfo,
         info: Option<PseudoInfo>
     ) -> Arc<ComputedValues> {
         let (tag, ty) = if let Some(info) = info {
@@ -232,21 +227,24 @@ impl ComputedValuesInner {
             (ptr::null_mut(), structs::CSSPseudoElementType::NotPseudo)
         };
 
-        unsafe { self.to_outer_helper(pres_context, parent, ty, tag) }
+        unsafe { self.to_outer_helper(pres_context, ty, tag) }
     }
 
     unsafe fn to_outer_helper(
         self,
         pres_context: bindings::RawGeckoPresContextBorrowed,
-        parent: ParentComputedStyleInfo,
         pseudo_ty: structs::CSSPseudoElementType,
         pseudo_tag: *mut structs::nsAtom
     ) -> Arc<ComputedValues> {
         let arc = {
             let arc: Arc<ComputedValues> = Arc::new(uninitialized());
-            bindings::Gecko_ComputedStyle_Init(&arc.0 as *const _ as *mut _,
-                                                   parent, pres_context,
-                                                   &self, pseudo_ty, pseudo_tag);
+            bindings::Gecko_ComputedStyle_Init(
+                &arc.0 as *const _ as *mut _,
+                pres_context,
+                &self,
+                pseudo_ty,
+                pseudo_tag
+            );
             // We're simulating a move by having C++ do a memcpy and then forgetting
             // it on this end.
             forget(self);
@@ -306,30 +304,6 @@ impl ComputedValuesInner {
     #[allow(non_snake_case)]
     pub fn has_moz_binding(&self) -> bool {
         !self.get_box().gecko.mBinding.mRawPtr.is_null()
-    }
-
-    pub fn to_declaration_block(&self, property: PropertyDeclarationId) -> PropertyDeclarationBlock {
-        let value = match property {
-            % for prop in data.longhands:
-                % if prop.animatable:
-                    PropertyDeclarationId::Longhand(LonghandId::${prop.camel_case}) => {
-                        PropertyDeclaration::${prop.camel_case}(
-                            % if prop.boxed:
-                                Box::new(
-                            % endif
-                            longhands::${prop.ident}::SpecifiedValue::from_computed_value(
-                              &self.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}())
-                            % if prop.boxed:
-                                )
-                            % endif
-                        )
-                    },
-                % endif
-            % endfor
-            PropertyDeclarationId::Custom(_name) => unimplemented!(),
-            _ => unimplemented!()
-        };
-        PropertyDeclarationBlock::with_one(value, Importance::Normal)
     }
 }
 
@@ -693,14 +667,14 @@ def set_gecko_property(ffi_name, expr):
             SVGPaintKind::Color(color) => {
                 paint.mType = nsStyleSVGPaintType::eStyleSVGPaintType_Color;
                 unsafe {
-                    *paint.mPaint.mColor.as_mut() = convert_rgba_to_nscolor(&color);
+                    *paint.mPaint.mColor.as_mut() = color.into();
                 }
             }
         }
 
         paint.mFallbackType = match fallback {
             Some(Either::First(color)) => {
-                paint.mFallbackColor = convert_rgba_to_nscolor(&color);
+                paint.mFallbackColor = color.into();
                 nsStyleSVGFallbackType::eStyleSVGFallbackType_Color
             },
             Some(Either::Second(_)) => {
@@ -735,7 +709,7 @@ def set_gecko_property(ffi_name, expr):
 
         let fallback = match paint.mFallbackType {
             nsStyleSVGFallbackType::eStyleSVGFallbackType_Color => {
-                Some(Either::First(convert_nscolor_to_rgba(paint.mFallbackColor)))
+                Some(Either::First(paint.mFallbackColor.into()))
             },
             nsStyleSVGFallbackType::eStyleSVGFallbackType_None => {
                 Some(Either::Second(None_))
@@ -754,7 +728,8 @@ def set_gecko_property(ffi_name, expr):
                 })
             }
             nsStyleSVGPaintType::eStyleSVGPaintType_Color => {
-                unsafe { SVGPaintKind::Color(convert_nscolor_to_rgba(*paint.mPaint.mColor.as_ref())) }
+                let col = unsafe { *paint.mPaint.mColor.as_ref() };
+                SVGPaintKind::Color(col.into())
             }
         };
         SVGPaint {
@@ -4558,64 +4533,7 @@ fn static_assert() {
 
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="InheritedBox"
-                  skip_longhands="image-orientation">
-    // FIXME: Gecko uses a tricky way to store computed value of image-orientation
-    //        within an u8. We could inline following glue codes by implementing all
-    //        those tricky parts for Servo as well. But, it's not done yet just for
-    //        convenience.
-    pub fn set_image_orientation(&mut self, v: longhands::image_orientation::computed_value::T) {
-        use properties::longhands::image_orientation::computed_value::T;
-        match v {
-            T::FromImage => {
-                unsafe {
-                    bindings::Gecko_SetImageOrientationAsFromImage(&mut self.gecko);
-                }
-            },
-            T::AngleWithFlipped(ref orientation, flipped) => {
-                unsafe {
-                    bindings::Gecko_SetImageOrientation(&mut self.gecko, *orientation as u8, flipped);
-                }
-            }
-        }
-    }
-
-    pub fn copy_image_orientation_from(&mut self, other: &Self) {
-        unsafe {
-            bindings::Gecko_CopyImageOrientationFrom(&mut self.gecko, &other.gecko);
-        }
-    }
-
-    pub fn reset_image_orientation(&mut self, other: &Self) {
-        self.copy_image_orientation_from(other)
-    }
-
-    pub fn clone_image_orientation(&self) -> longhands::image_orientation::computed_value::T {
-        use gecko_bindings::structs::nsStyleImageOrientation_Angles;
-        use properties::longhands::image_orientation::computed_value::T;
-        use values::computed::Orientation;
-
-        let gecko_orientation = self.gecko.mImageOrientation.mOrientation;
-        if gecko_orientation & structs::nsStyleImageOrientation_Bits_FROM_IMAGE_MASK as u8 != 0 {
-            T::FromImage
-        } else {
-            const ANGLE0: u8 = nsStyleImageOrientation_Angles::ANGLE_0 as u8;
-            const ANGLE90: u8 = nsStyleImageOrientation_Angles::ANGLE_90 as u8;
-            const ANGLE180: u8 = nsStyleImageOrientation_Angles::ANGLE_180 as u8;
-            const ANGLE270: u8 = nsStyleImageOrientation_Angles::ANGLE_270 as u8;
-
-            let flip = gecko_orientation & structs::nsStyleImageOrientation_Bits_FLIP_MASK as u8 != 0;
-            let orientation =
-                match gecko_orientation & structs::nsStyleImageOrientation_Bits_ORIENTATION_MASK as u8 {
-                    ANGLE0 => Orientation::Angle0,
-                    ANGLE90 => Orientation::Angle90,
-                    ANGLE180 => Orientation::Angle180,
-                    ANGLE270 => Orientation::Angle270,
-                    _ => unreachable!()
-                };
-            T::AngleWithFlipped(orientation, flip)
-        }
-    }
+<%self:impl_trait style_struct_name="InheritedBox">
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="InheritedTable"
@@ -5489,8 +5407,7 @@ clip-path
         use values::generics::CounterStyleOrNone;
         use gecko_bindings::structs::nsStyleContentData;
         use gecko_bindings::structs::nsStyleContentAttr;
-        use gecko_bindings::structs::nsStyleContentType;
-        use gecko_bindings::structs::nsStyleContentType::*;
+        use gecko_bindings::structs::StyleContentType;
         use gecko_bindings::bindings::Gecko_ClearAndResizeStyleContents;
 
         // Converts a string as utf16, and returns an owned, zero-terminated raw buffer.
@@ -5505,19 +5422,19 @@ clip-path
 
         fn set_counter_function(
             data: &mut nsStyleContentData,
-            content_type: nsStyleContentType,
+            content_type: StyleContentType,
             name: &CustomIdent,
             sep: &str,
             style: CounterStyleOrNone,
             device: &Device,
         ) {
-            debug_assert!(content_type == eStyleContentType_Counter ||
-                          content_type == eStyleContentType_Counters);
+            debug_assert!(content_type == StyleContentType::Counter ||
+                          content_type == StyleContentType::Counters);
             let counter_func = unsafe {
                 bindings::Gecko_SetCounterFunction(data, content_type).as_mut().unwrap()
             };
             counter_func.mIdent.assign(name.0.as_slice());
-            if content_type == eStyleContentType_Counters {
+            if content_type == StyleContentType::Counters {
                 counter_func.mSeparator.assign_utf8(sep);
             }
             style.to_gecko_value(&mut counter_func.mCounterStyle, device);
@@ -5538,7 +5455,7 @@ clip-path
                     Gecko_ClearAndResizeStyleContents(&mut self.gecko, 1);
                     *self.gecko.mContents[0].mContent.mString.as_mut() = ptr::null_mut();
                 }
-                self.gecko.mContents[0].mType = eStyleContentType_AltContent;
+                self.gecko.mContents[0].mType = StyleContentType::AltContent;
             },
             Content::Items(items) => {
                 unsafe {
@@ -5554,7 +5471,7 @@ clip-path
                     }
                     match *item {
                         ContentItem::String(ref value) => {
-                            self.gecko.mContents[i].mType = eStyleContentType_String;
+                            self.gecko.mContents[i].mType = StyleContentType::String;
                             unsafe {
                                 // NB: we share allocators, so doing this is fine.
                                 *self.gecko.mContents[i].mContent.mString.as_mut() =
@@ -5562,7 +5479,7 @@ clip-path
                             }
                         }
                         ContentItem::Attr(ref attr) => {
-                            self.gecko.mContents[i].mType = eStyleContentType_Attr;
+                            self.gecko.mContents[i].mType = StyleContentType::Attr;
                             unsafe {
                                 // NB: we share allocators, so doing this is fine.
                                 let maybe_ns = attr.namespace.clone();
@@ -5581,17 +5498,17 @@ clip-path
                             }
                         }
                         ContentItem::OpenQuote
-                            => self.gecko.mContents[i].mType = eStyleContentType_OpenQuote,
+                            => self.gecko.mContents[i].mType = StyleContentType::OpenQuote,
                         ContentItem::CloseQuote
-                            => self.gecko.mContents[i].mType = eStyleContentType_CloseQuote,
+                            => self.gecko.mContents[i].mType = StyleContentType::CloseQuote,
                         ContentItem::NoOpenQuote
-                            => self.gecko.mContents[i].mType = eStyleContentType_NoOpenQuote,
+                            => self.gecko.mContents[i].mType = StyleContentType::NoOpenQuote,
                         ContentItem::NoCloseQuote
-                            => self.gecko.mContents[i].mType = eStyleContentType_NoCloseQuote,
+                            => self.gecko.mContents[i].mType = StyleContentType::NoCloseQuote,
                         ContentItem::Counter(ref name, ref style) => {
                             set_counter_function(
                                 &mut self.gecko.mContents[i],
-                                eStyleContentType_Counter,
+                                StyleContentType::Counter,
                                 &name,
                                 "",
                                 style.clone(),
@@ -5601,7 +5518,7 @@ clip-path
                         ContentItem::Counters(ref name, ref sep, ref style) => {
                             set_counter_function(
                                 &mut self.gecko.mContents[i],
-                                eStyleContentType_Counters,
+                                StyleContentType::Counters,
                                 &name,
                                 &sep,
                                 style.clone(),
@@ -5636,7 +5553,7 @@ clip-path
     pub fn clone_content(&self) -> longhands::content::computed_value::T {
         use {Atom, Namespace};
         use gecko::conversions::string_from_chars_pointer;
-        use gecko_bindings::structs::nsStyleContentType::*;
+        use gecko_bindings::structs::StyleContentType;
         use values::generics::counters::{Content, ContentItem};
         use values::computed::url::ComputedImageUrl;
         use values::{CustomIdent, Either};
@@ -5644,27 +5561,27 @@ clip-path
         use values::specified::Attr;
 
         if self.gecko.mContents.is_empty() {
-            return Content::Normal;
+            return Content::None;
         }
 
         if self.gecko.mContents.len() == 1 &&
-           self.gecko.mContents[0].mType == eStyleContentType_AltContent {
+           self.gecko.mContents[0].mType == StyleContentType::AltContent {
             return Content::MozAltContent;
         }
 
         Content::Items(
             self.gecko.mContents.iter().map(|gecko_content| {
                 match gecko_content.mType {
-                    eStyleContentType_OpenQuote => ContentItem::OpenQuote,
-                    eStyleContentType_CloseQuote => ContentItem::CloseQuote,
-                    eStyleContentType_NoOpenQuote => ContentItem::NoOpenQuote,
-                    eStyleContentType_NoCloseQuote => ContentItem::NoCloseQuote,
-                    eStyleContentType_String => {
+                    StyleContentType::OpenQuote => ContentItem::OpenQuote,
+                    StyleContentType::CloseQuote => ContentItem::CloseQuote,
+                    StyleContentType::NoOpenQuote => ContentItem::NoOpenQuote,
+                    StyleContentType::NoCloseQuote => ContentItem::NoCloseQuote,
+                    StyleContentType::String => {
                         let gecko_chars = unsafe { gecko_content.mContent.mString.as_ref() };
                         let string = unsafe { string_from_chars_pointer(*gecko_chars) };
                         ContentItem::String(string.into_boxed_str())
                     },
-                    eStyleContentType_Attr => {
+                    StyleContentType::Attr => {
                         let (namespace, attribute) = unsafe {
                             let s = &**gecko_content.mContent.mAttr.as_ref();
                             let ns = if s.mNamespaceURL.mRawPtr.is_null() {
@@ -5678,7 +5595,7 @@ clip-path
                         };
                         ContentItem::Attr(Attr { namespace, attribute })
                     },
-                    eStyleContentType_Counter | eStyleContentType_Counters => {
+                    StyleContentType::Counter | StyleContentType::Counters => {
                         let gecko_function =
                             unsafe { &**gecko_content.mContent.mCounters.as_ref() };
                         let ident = CustomIdent(Atom::from(&*gecko_function.mIdent));
@@ -5689,14 +5606,14 @@ clip-path
                             Either::Second(_) =>
                                 unreachable!("counter function shouldn't have single string type"),
                         };
-                        if gecko_content.mType == eStyleContentType_Counter {
+                        if gecko_content.mType == StyleContentType::Counter {
                             ContentItem::Counter(ident, style)
                         } else {
                             let separator = gecko_function.mSeparator.to_string();
                             ContentItem::Counters(ident, separator.into_boxed_str(), style)
                         }
                     },
-                    eStyleContentType_Image => {
+                    StyleContentType::Image => {
                         unsafe {
                             let gecko_image_request =
                                 &**gecko_content.mContent.mImage.as_ref();

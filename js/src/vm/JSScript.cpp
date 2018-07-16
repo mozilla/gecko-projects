@@ -2137,7 +2137,7 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 
         size_t byteLen = compressedLength ? compressedLength : (len * sizeof(char16_t));
         if (mode == XDR_DECODE) {
-            UniqueChars bytes(xdr->cx()->template pod_malloc<char>(Max<size_t>(byteLen, 1)));
+            auto bytes = xdr->cx()->template make_pod_array<char>(Max<size_t>(byteLen, 1));
             if (!bytes)
                 return xdr->fail(JS::TranscodeResult_Throw);
             MOZ_TRY(xdr->codeBytes(bytes.get(), byteLen));
@@ -2215,7 +2215,7 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
     return Ok();
 }
 
-// Format and return a cx->zone()->pod_malloc'ed URL for a generated script like:
+// Format and return a cx->pod_malloc'ed URL for a generated script like:
 //   {filename} line {lineno} > {introducer}
 // For example:
 //   foo.js line 7 > eval
@@ -2240,11 +2240,10 @@ js::FormatIntroducedFilename(JSContext* cx, const char* filename, unsigned linen
                  3 /* == strlen(" > ") */       +
                  introducerLen                  +
                  1 /* \0 */;
-    char* formatted = cx->zone()->pod_malloc<char>(len);
-    if (!formatted) {
-        ReportOutOfMemory(cx);
+    char* formatted = cx->pod_malloc<char>(len);
+    if (!formatted)
         return nullptr;
-    }
+
     mozilla::DebugOnly<size_t> checkLen = snprintf(formatted, len, "%s line %s > %s",
                                                    filename, linenoBuf, introducer);
     MOZ_ASSERT(checkLen == len - 1);
@@ -2332,6 +2331,8 @@ ScriptSource::setSourceMapURL(JSContext* cx, const char16_t* sourceMapURL)
 }
 
 /*
+ * [SMDOC] JSScript data layout (shared)
+ *
  * Shared script data management.
  *
  * SharedScriptData::data contains data that can be shared within a
@@ -2350,7 +2351,7 @@ js::SharedScriptData::new_(JSContext* cx, uint32_t codeLength,
 {
     size_t dataLength = natoms * sizeof(GCPtrAtom) + codeLength + srcnotesLength;
     size_t allocLength = offsetof(SharedScriptData, data_) + dataLength;
-    auto entry = reinterpret_cast<SharedScriptData*>(cx->zone()->pod_malloc<uint8_t>(allocLength));
+    auto entry = reinterpret_cast<SharedScriptData*>(cx->pod_malloc<uint8_t>(allocLength));
     if (!entry) {
         ReportOutOfMemory(cx);
         return nullptr;
@@ -2505,6 +2506,8 @@ js::FreeScriptData(JSRuntime* rt)
 }
 
 /*
+ * [SMDOC] JSScript data layout (unshared)
+ *
  * JSScript::data and SharedScriptData::data have complex,
  * manually-controlled, memory layouts.
  *
@@ -2728,12 +2731,12 @@ JSScript::initScriptName(JSContext* cx)
 }
 
 static inline uint8_t*
-AllocScriptData(JS::Zone* zone, size_t size)
+AllocScriptData(JSContext* cx, size_t size)
 {
     if (!size)
         return nullptr;
 
-    uint8_t* data = zone->pod_calloc<uint8_t>(JS_ROUNDUP(size, sizeof(Value)));
+    uint8_t* data = cx->pod_calloc<uint8_t>(JS_ROUNDUP(size, sizeof(Value)));
     if (!data)
         return nullptr;
     MOZ_ASSERT(size_t(data) % sizeof(Value) == 0);
@@ -2745,13 +2748,14 @@ JSScript::partiallyInit(JSContext* cx, HandleScript script, uint32_t nscopes,
                         uint32_t nconsts, uint32_t nobjects, uint32_t ntrynotes,
                         uint32_t nscopenotes, uint32_t nyieldoffsets, uint32_t nTypeSets)
 {
+    assertSameCompartment(cx, script);
+
     size_t size = ScriptDataSize(nscopes, nconsts, nobjects, ntrynotes,
                                  nscopenotes, nyieldoffsets);
-    script->data = AllocScriptData(script->zone(), size);
-    if (size && !script->data) {
-        ReportOutOfMemory(cx);
+    script->data = AllocScriptData(cx, size);
+    if (size && !script->data)
         return false;
-    }
+
     script->dataSize_ = size;
 
     MOZ_ASSERT(nTypeSets <= UINT16_MAX);
@@ -3460,11 +3464,9 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
     /* Script data */
 
     size_t size = src->dataSize();
-    UniquePtr<uint8_t, JS::FreePolicy> data(AllocScriptData(cx->zone(), size));
-    if (size && !data) {
-        ReportOutOfMemory(cx);
+    UniquePtr<uint8_t, JS::FreePolicy> data(AllocScriptData(cx, size));
+    if (size && !data)
         return false;
-    }
 
     /* Scopes */
 
@@ -3762,11 +3764,9 @@ JSScript::ensureHasDebugScript(JSContext* cx)
         return true;
 
     size_t nbytes = offsetof(DebugScript, breakpoints) + length() * sizeof(BreakpointSite*);
-    UniqueDebugScript debug(reinterpret_cast<DebugScript*>(zone()->pod_calloc<uint8_t>(nbytes)));
-    if (!debug) {
-        ReportOutOfMemory(cx);
+    UniqueDebugScript debug(reinterpret_cast<DebugScript*>(cx->pod_calloc<uint8_t>(nbytes)));
+    if (!debug)
         return false;
-    }
 
     /* Create realm's debugScriptMap if necessary. */
     if (!realm()->debugScriptMap) {
@@ -3824,6 +3824,8 @@ JSScript::incrementStepModeCount(JSContext* cx)
     assertSameCompartment(cx, this);
     MOZ_ASSERT(cx->realm()->isDebuggee());
 
+    AutoRealm ar(cx, this);
+
     if (!ensureHasDebugScript(cx))
         return false;
 
@@ -3845,6 +3847,8 @@ JSScript::decrementStepModeCount(FreeOp* fop)
 BreakpointSite*
 JSScript::getOrCreateBreakpointSite(JSContext* cx, jsbytecode* pc)
 {
+    AutoRealm ar(cx, this);
+
     if (!ensureHasDebugScript(cx))
         return nullptr;
 
@@ -3852,11 +3856,9 @@ JSScript::getOrCreateBreakpointSite(JSContext* cx, jsbytecode* pc)
     BreakpointSite*& site = debug->breakpoints[pcToOffset(pc)];
 
     if (!site) {
-        site = cx->zone()->new_<JSBreakpointSite>(this, pc);
-        if (!site) {
-            ReportOutOfMemory(cx);
+        site = cx->new_<JSBreakpointSite>(this, pc);
+        if (!site)
             return nullptr;
-        }
         debug->numSites++;
     }
 
@@ -4258,6 +4260,8 @@ LazyScript::CreateRaw(JSContext* cx, HandleFunction fun,
                       uint64_t packedFields, uint32_t sourceStart, uint32_t sourceEnd,
                       uint32_t toStringStart, uint32_t lineno, uint32_t column)
 {
+    assertSameCompartment(cx, fun);
+
     MOZ_ASSERT(sourceObject);
     union {
         PackedView p;
@@ -4275,11 +4279,9 @@ LazyScript::CreateRaw(JSContext* cx, HandleFunction fun,
 
     UniquePtr<uint8_t, JS::FreePolicy> table;
     if (bytes) {
-        table.reset(fun->zone()->pod_malloc<uint8_t>(bytes));
-        if (!table) {
-            ReportOutOfMemory(cx);
+        table.reset(cx->pod_malloc<uint8_t>(bytes));
+        if (!table)
             return nullptr;
-        }
     }
 
     LazyScript* res = Allocate<LazyScript>(cx);

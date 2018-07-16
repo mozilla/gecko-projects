@@ -247,10 +247,6 @@ body {
   border-radius: 8px;
   background: rgba(113, 113, 113, 0.5);
 }
-
-:root.theme-dark .CodeMirror-scrollbar-filler {
-  background: transparent;
-}
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
@@ -1781,6 +1777,16 @@ menuseparator {
   fill: var(--theme-textbox-box-shadow);
 }
 
+.source-icon.vue {
+  background: url("chrome://devtools/skin/images/debugger/vuejs.svg") 1px 1px no-repeat;
+  background-size: 15px;
+}
+
+.source-icon.angular {
+  background: url("chrome://devtools/skin/images/debugger/angular.svg") 1px 1px no-repeat;
+  background-size: 13px 13px;
+}
+
 .source-icon.blackBox {
   mask: url("chrome://devtools/skin/images/debugger/blackBox.svg") no-repeat;
   mask-size: 100%;
@@ -1882,13 +1888,13 @@ menuseparator {
   background: var(--theme-highlight-blue);
 }
 
-.source-footer .blackbox-summary {
+.source-footer .blackbox-summary,
+.source-footer .mapped-source {
   color: var(--theme-body-color);
+  padding-left: 2.5px;
 }
 
 .source-footer .mapped-source {
-  color: var(--theme-body-color);
-  padding: 2.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2700,32 +2706,6 @@ html[dir="rtl"] .editor-mount {
   direction: ltr;
 }
 
-.theme-light {
-  --gutter-hover-background-color: #dde1e4;
-}
-
-.theme-dark {
-  --gutter-hover-background-color: #414141;
-}
-
-:not(.empty-line):not(.new-breakpoint) > .CodeMirror-gutter-wrapper:hover {
-  width: 60px;
-  height: 13px;
-  margin-left: -25px;
-  background-color: var(--gutter-hover-background-color) !important;
-  mask: url("chrome://devtools/skin/images/debugger/breakpoint.svg") no-repeat;
-  mask-size: 100%;
-  mask-position: 0 1px;
-}
-
-:not(.empty-line):not(.new-breakpoint)
-  > .CodeMirror-gutter-wrapper:hover
-  > .CodeMirror-linenumber {
-  left: auto !important;
-  right: 6px;
-  color: var(--theme-body-color);
-}
-
 .editor-wrapper .breakpoints {
   position: absolute;
   top: 0;
@@ -2771,11 +2751,6 @@ html[dir="rtl"] .editor-mount {
   border-radius: 5px;
   border-color: blue;
   border: 1px solid #00b6ff;
-}
-
-.editor .breakpoint {
-  position: absolute;
-  right: -2px;
 }
 
 .editor.new-breakpoint.folding-enabled svg {
@@ -3118,8 +3093,8 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
 }
 
 .breakpoint .close-btn {
-  inset-inline-end: 15px;
-  inset-inline-start: auto;
+  offset-inline-end: 15px;
+  offset-inline-start: auto;
   position: absolute;
   top: 8px;
   display: none;
@@ -3268,7 +3243,7 @@ html[dir="rtl"] .breakpoints-list .breakpoint .breakpoint-line {
 
 .expression-container__close-btn {
   position: absolute;
-  inset-inline-end: 0px;
+  offset-inline-end: 0px;
   top: 1px;
 }
 
@@ -3952,8 +3927,8 @@ html[dir="rtl"] .object-node {
 .welcomebox .command-bar-button {
   position: absolute;
   top: auto;
-  inset-inline-end: 0;
-  inset-inline-start: auto;
+  offset-inline-end: 0;
+  offset-inline-start: auto;
   bottom: 0;
 }
 

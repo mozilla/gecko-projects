@@ -16,6 +16,7 @@
 #include "gc/Policy.h"
 #include "gc/PublicIterators.h"
 #include "js/HashTable.h"
+#include "js/UniquePtr.h"
 #include "util/Text.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -1628,15 +1629,13 @@ ShapeHasher::match(const Key k, const Lookup& l)
 static KidsHash*
 HashChildren(Shape* kid1, Shape* kid2)
 {
-    KidsHash* hash = js_new<KidsHash>();
-    if (!hash || !hash->init(2)) {
-        js_delete(hash);
+    auto hash = MakeUnique<KidsHash>();
+    if (!hash || !hash->init(2))
         return nullptr;
-    }
 
     hash->putNewInfallible(StackShape(kid1), kid1);
     hash->putNewInfallible(StackShape(kid2), kid2);
-    return hash;
+    return hash.release();
 }
 
 bool
@@ -2044,6 +2043,8 @@ IsOriginalProto(GlobalObject* global, JSProtoKey key, NativeObject& proto)
     if (global->getPrototype(key) != ObjectValue(proto))
         return false;
 
+    MOZ_ASSERT(&proto.global() == global);
+
     if (key == JSProto_Object) {
         MOZ_ASSERT(proto.staticPrototypeIsImmutable(),
                    "proto should be Object.prototype, whose prototype is "
@@ -2072,7 +2073,6 @@ GetInitialShapeProtoKey(TaggedProto proto, JSContext* cx)
     if (proto.isObject() && proto.toObject()->isNative()) {
         GlobalObject* global = cx->global();
         NativeObject& obj = proto.toObject()->as<NativeObject>();
-        MOZ_ASSERT(global == &obj.global());
 
         if (IsOriginalProto(global, JSProto_Object, obj))
             return JSProto_Object;

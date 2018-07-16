@@ -515,13 +515,13 @@ UnprivilegedJunkScope()
 JSObject*
 PrivilegedJunkScope()
 {
-    return XPCJSRuntime::Get()->PrivilegedJunkScope();
+    return XPCJSRuntime::Get()->LoaderGlobal();
 }
 
 JSObject*
 CompilationScope()
 {
-    return XPCJSRuntime::Get()->CompilationScope();
+    return XPCJSRuntime::Get()->LoaderGlobal();
 }
 
 nsGlobalWindowInner*
@@ -539,7 +539,7 @@ nsGlobalWindowInner*
 WindowGlobalOrNull(JSObject* aObj)
 {
     MOZ_ASSERT(aObj);
-    JSObject* glob = js::GetGlobalForObjectCrossCompartment(aObj);
+    JSObject* glob = JS::GetNonCCWObjectGlobal(aObj);
 
     return WindowOrNull(glob);
 }
@@ -1887,10 +1887,6 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
         KIND_HEAP, rtStats.runtime.interpreterStack,
         "JS interpreter frames.");
 
-    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/math-cache"),
-        KIND_HEAP, rtStats.runtime.mathCache,
-        "The math cache.");
-
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/shared-immutable-strings-cache"),
         KIND_HEAP, rtStats.runtime.sharedImmutableStringsCache,
         "Immutable strings (such as JS scripts' source text) shared across all JSRuntimes.");
@@ -2103,7 +2099,7 @@ class OrphanReporter : public JS::ObjectPrivateVisitor
         // https://bugzilla.mozilla.org/show_bug.cgi?id=773533#c11 explains
         // that we have to skip XBL elements because they violate certain
         // assumptions.  Yuk.
-        if (node && !node->IsInUncomposedDoc() &&
+        if (node && !node->IsInComposedDoc() &&
             !(node->IsElement() && node->AsElement()->IsInNamespace(kNameSpaceID_XBL)))
         {
             // This is an orphan node.  If we haven't already handled the
@@ -2821,8 +2817,7 @@ void
 XPCJSRuntime::Initialize(JSContext* cx)
 {
     mUnprivilegedJunkScope.init(cx, nullptr);
-    mPrivilegedJunkScope.init(cx, nullptr);
-    mCompilationScope.init(cx, nullptr);
+    mLoaderGlobal.init(cx, nullptr);
 
     // these jsids filled in later when we have a JSContext to work with.
     mStrIDs[0] = JSID_VOID;
@@ -3072,24 +3067,6 @@ XPCJSRuntime::InitSingletonScopes()
     rv = CreateSandboxObject(cx, &v, nullptr, unprivilegedJunkScopeOptions);
     MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
     mUnprivilegedJunkScope = js::UncheckedUnwrap(&v.toObject());
-
-    // Create the Privileged Junk Scope.
-    SandboxOptions privilegedJunkScopeOptions;
-    privilegedJunkScopeOptions.sandboxName.AssignLiteral("XPConnect Privileged Junk Compartment");
-    privilegedJunkScopeOptions.invisibleToDebugger = true;
-    privilegedJunkScopeOptions.wantComponents = false;
-    rv = CreateSandboxObject(cx, &v, nsXPConnect::SystemPrincipal(), privilegedJunkScopeOptions);
-    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-    mPrivilegedJunkScope = js::UncheckedUnwrap(&v.toObject());
-
-    // Create the Compilation Scope.
-    SandboxOptions compilationScopeOptions;
-    compilationScopeOptions.sandboxName.AssignLiteral("XPConnect Compilation Compartment");
-    compilationScopeOptions.invisibleToDebugger = true;
-    compilationScopeOptions.discardSource = ShouldDiscardSystemSource();
-    rv = CreateSandboxObject(cx, &v, /* principal = */ nullptr, compilationScopeOptions);
-    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-    mCompilationScope = js::UncheckedUnwrap(&v.toObject());
 }
 
 void
@@ -3100,10 +3077,20 @@ XPCJSRuntime::DeleteSingletonScopes()
     RefPtr<SandboxPrivate> sandbox = SandboxPrivate::GetPrivate(mUnprivilegedJunkScope);
     sandbox->ReleaseWrapper(sandbox);
     mUnprivilegedJunkScope = nullptr;
-    sandbox = SandboxPrivate::GetPrivate(mPrivilegedJunkScope);
-    sandbox->ReleaseWrapper(sandbox);
-    mPrivilegedJunkScope = nullptr;
-    sandbox = SandboxPrivate::GetPrivate(mCompilationScope);
-    sandbox->ReleaseWrapper(sandbox);
-    mCompilationScope = nullptr;
+    mLoaderGlobal = nullptr;
+}
+
+JSObject*
+XPCJSRuntime::LoaderGlobal()
+{
+    if (!mLoaderGlobal) {
+        RefPtr<mozJSComponentLoader> loader = mozJSComponentLoader::GetOrCreate();
+
+        dom::AutoJSAPI jsapi;
+        jsapi.Init();
+
+        mLoaderGlobal = loader->GetSharedGlobal(jsapi.cx());
+        MOZ_RELEASE_ASSERT(!JS_IsExceptionPending(jsapi.cx()));
+    }
+    return mLoaderGlobal;
 }

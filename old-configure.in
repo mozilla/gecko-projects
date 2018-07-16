@@ -78,6 +78,8 @@ dnl ========================================================
 MOZ_USE_PTHREADS=
 _PTHREAD_LDFLAGS=""
 
+LDFLAGS="$LDFLAGS $LINKER_LDFLAGS"
+
 MOZ_DEFAULT_COMPILER
 
 if test "$COMPILE_ENVIRONMENT"; then
@@ -534,8 +536,12 @@ if test "$GNU_CC"; then
     MKCSHLIB='$(CC) $(COMPUTED_C_LDFLAGS) $(PGO_CFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$(DSO_SONAME) -o $@'
     WARNINGS_AS_ERRORS='-Werror'
     DSO_CFLAGS=''
-    DSO_PIC_CFLAGS='-fPIC'
-    ASFLAGS="$ASFLAGS -fPIC"
+
+    if test "$OS_ARCH" != "WINNT" -o -z "$CLANG_CC"; then
+        DSO_PIC_CFLAGS='-fPIC'
+        ASFLAGS="$ASFLAGS -fPIC"
+    fi
+
     AC_MSG_CHECKING([for --noexecstack option to as])
     _SAVE_CFLAGS=$CFLAGS
     CFLAGS="$CFLAGS -Wa,--noexecstack"
@@ -854,8 +860,6 @@ case "$target" in
         MKSHLIB='$(CXX) $(DSO_LDOPTS) -o $@'
         MKCSHLIB='$(CC) $(DSO_LDOPTS) -o $@'
         RC='$(WINDRES)'
-        # Use static libgcc and libstdc++
-        LDFLAGS="$LDFLAGS -static"
         # Use temp file for windres (bug 213281)
         RCFLAGS='-O coff --use-temp-file'
         # mingw doesn't require kernel32, user32, and advapi32 explicitly
@@ -867,11 +871,19 @@ case "$target" in
         WIN32_CONSOLE_EXE_LDFLAGS=-mconsole
         WIN32_GUI_EXE_LDFLAGS=-mwindows
 
-        # GCC/binutils can't link to a function if we try to include dllexport function
-        # in the same library as dllimport caller. To work around it, we build NSPR
-        # and NSS with -mnop-fun-dllimport flag. The drawback of this solution is that
-        # function thunks need to be generated for cross-DLL calls.
-        MOZ_FOLD_LIBS_FLAGS="-mnop-fun-dllimport"
+        if test -z "$CLANG_CC"; then
+            # Use static libgcc and libstdc++
+            LDFLAGS="$LDFLAGS -static"
+
+            # GCC/binutils can't link to a function if we try to include dllexport function
+            # in the same library as dllimport caller. To work around it, we build NSPR
+            # and NSS with -mnop-fun-dllimport flag. The drawback of this solution is that
+            # function thunks need to be generated for cross-DLL calls.
+            MOZ_FOLD_LIBS_FLAGS="-mnop-fun-dllimport"
+        else
+            # Silence problematic clang warnings
+            CXXFLAGS="$CXXFLAGS -Wno-incompatible-ms-struct"
+        fi
     else
         TARGET_COMPILER_ABI=msvc
         if test "$AS_BIN"; then
@@ -1004,6 +1016,12 @@ case "$target" in
             # jemalloc uses __declspec(allocator) as a profiler hint,
             # which clang-cl doesn't understand.
             CXXFLAGS="$CXXFLAGS -Wno-ignored-attributes"
+            # __attribute__((unused)) really means "might be unused" and
+            # we use it to avoid warnings about things that are unused
+            # in some compilation units, but used in many others.  This
+            # warning insists on complaining about the latter case, which
+            # is annoying, and rather noisy.
+            CXXFLAGS="$CXXFLAGS -Wno-used-but-marked-unused"
         fi
         # make 'foo == bar;' error out
         CFLAGS="$CFLAGS -we4553"
@@ -1046,7 +1064,7 @@ case "$target" in
         ;;
     esac
 
-    if test -n "$GNU_CC"; then
+    if test -n "$GNU_CC" -a -z "$CLANG_CC"; then
         CFLAGS="$CFLAGS -fno-keep-inline-dllexport"
         CXXFLAGS="$CXXFLAGS -fno-keep-inline-dllexport"
     fi
@@ -1756,7 +1774,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.38, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.39, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 if test -z "$MOZ_SYSTEM_NSS"; then
@@ -2677,32 +2695,14 @@ fi # COMPILE_ENVIRONMENT
 dnl ========================================================
 dnl Gamepad support
 dnl ========================================================
-MOZ_GAMEPAD_BACKEND=stub
 
-case "$OS_TARGET" in
-Darwin)
-    if test -z "$MOZ_IOS"; then
-        MOZ_GAMEPAD_BACKEND=cocoa
-    fi
-    ;;
-WINNT)
-    MOZ_GAMEPAD_BACKEND=windows
-    ;;
-Linux)
+dnl Moved gamepad platform check to moz.build, linux header check still needed here.
+if test "$OS_TARGET" = "Linux"; then
     MOZ_CHECK_HEADER([linux/joystick.h])
     if test "$ac_cv_header_linux_joystick_h" != "yes"; then
       AC_MSG_ERROR([Can't find header linux/joystick.h, needed for gamepad support. Please install Linux kernel headers.])
     fi
-    MOZ_GAMEPAD_BACKEND=linux
-    ;;
-Android)
-    MOZ_GAMEPAD_BACKEND=android
-    ;;
-*)
-    ;;
-esac
-
-AC_SUBST(MOZ_GAMEPAD_BACKEND)
+fi
 
 dnl ========================================================
 dnl = Breakpad crash reporting (on by default on supported platforms)
@@ -3749,7 +3749,7 @@ else
   # These options are based on analyzing what the normal clang driver sends to
   # cc1 when given the "correct" dependency options.
   if test -n "$CLANG_CL"; then
-   _DEPEND_CFLAGS='-Xclang -MP -Xclang -MG -Xclang -dependency-file -Xclang $(MDDEPDIR)/$(@F).pp -Xclang -MT -Xclang $@'
+   _DEPEND_CFLAGS='-Xclang -MP -Xclang -dependency-file -Xclang $(MDDEPDIR)/$(@F).pp -Xclang -MT -Xclang $@'
   fi
   dnl Don't override this for MSVC
   if test -z "$_WIN32_MSVC"; then

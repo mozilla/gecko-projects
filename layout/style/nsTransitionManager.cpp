@@ -206,12 +206,18 @@ CSSTransition::QueueEvents(const StickyTimeDuration& aActiveTime)
     ComputedTiming computedTiming = mEffect->GetComputedTiming();
 
     currentPhase = static_cast<TransitionPhase>(computedTiming.mPhase);
-    intervalStartTime =
-      std::max(std::min(StickyTimeDuration(-mEffect->SpecifiedTiming().Delay()),
-                        computedTiming.mActiveDuration), zeroDuration);
-    intervalEndTime =
-      std::max(std::min((EffectEnd() - mEffect->SpecifiedTiming().Delay()),
-                        computedTiming.mActiveDuration), zeroDuration);
+    intervalStartTime = IntervalStartTime(computedTiming.mActiveDuration);
+    intervalEndTime = IntervalEndTime(computedTiming.mActiveDuration);
+  }
+
+  if (mPendingState != PendingState::NotPending &&
+      (mPreviousTransitionPhase == TransitionPhase::Idle ||
+       mPreviousTransitionPhase == TransitionPhase::Pending)) {
+    currentPhase = TransitionPhase::Pending;
+  }
+
+  if (currentPhase == mPreviousTransitionPhase) {
+    return;
   }
 
   // TimeStamps to use for ordering the events when they are dispatched. We
@@ -223,18 +229,11 @@ CSSTransition::QueueEvents(const StickyTimeDuration& aActiveTime)
   TimeStamp startTimeStamp = ElapsedTimeToTimeStamp(intervalStartTime);
   TimeStamp endTimeStamp   = ElapsedTimeToTimeStamp(intervalEndTime);
 
-  if (mPendingState != PendingState::NotPending &&
-      (mPreviousTransitionPhase == TransitionPhase::Idle ||
-       mPreviousTransitionPhase == TransitionPhase::Pending))
-  {
-    currentPhase = TransitionPhase::Pending;
-  }
-
   AutoTArray<AnimationEventInfo, 3> events;
 
   auto appendTransitionEvent = [&](EventMessage aMessage,
                                    const StickyTimeDuration& aElapsedTime,
-                                   const TimeStamp& aTimeStamp) {
+                                   const TimeStamp& aScheduledEventTimeStamp) {
     double elapsedTime = aElapsedTime.ToSeconds();
     if (aMessage == eTransitionCancel) {
       // 0 is an inappropriate value for this callsite. What we need to do is
@@ -248,7 +247,7 @@ CSSTransition::QueueEvents(const StickyTimeDuration& aActiveTime)
                                             mOwningElement.Target(),
                                             aMessage,
                                             elapsedTime,
-                                            aTimeStamp,
+                                            aScheduledEventTimeStamp,
                                             this));
   };
 
@@ -256,8 +255,9 @@ CSSTransition::QueueEvents(const StickyTimeDuration& aActiveTime)
   if ((mPreviousTransitionPhase != TransitionPhase::Idle &&
        mPreviousTransitionPhase != TransitionPhase::After) &&
       currentPhase == TransitionPhase::Idle) {
-    TimeStamp activeTimeStamp = ElapsedTimeToTimeStamp(aActiveTime);
-    appendTransitionEvent(eTransitionCancel, aActiveTime, activeTimeStamp);
+    appendTransitionEvent(eTransitionCancel,
+                          aActiveTime,
+                          GetTimelineCurrentTimeAsTimeStamp());
   }
 
   // All other events

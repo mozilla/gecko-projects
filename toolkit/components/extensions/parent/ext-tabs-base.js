@@ -18,9 +18,12 @@ var {
   DefaultMap,
   DefaultWeakMap,
   ExtensionError,
-  defineLazyGetter,
   getWinUtils,
 } = ExtensionUtils;
+
+var {
+  defineLazyGetter,
+} = ExtensionCommon;
 
 /**
  * The platform-specific type of native tab objects, which are wrapped by
@@ -1049,6 +1052,15 @@ class WindowBase {
   }
 
   /**
+   * Returns an iterator of TabBase objects for each highlighted tab in this window.
+   *
+   * @returns {Iterator<TabBase>}
+   */
+  getHighlightedTabs() {
+    throw new Error("Not implemented");
+  }
+
+  /**
    * @property {TabBase} The window's currently active tab.
    */
   get activeTab() {
@@ -1843,7 +1855,7 @@ class TabManagerBase {
     function* candidates(windowWrapper) {
       if (queryInfo) {
         let {active, highlighted, index} = queryInfo;
-        if (active === true || highlighted === true) {
+        if (active === true) {
           yield windowWrapper.activeTab;
           return;
         }
@@ -1852,6 +1864,10 @@ class TabManagerBase {
           if (tabWrapper) {
             yield tabWrapper;
           }
+          return;
+        }
+        if (highlighted === true) {
+          yield* windowWrapper.getHighlightedTabs();
           return;
         }
       }

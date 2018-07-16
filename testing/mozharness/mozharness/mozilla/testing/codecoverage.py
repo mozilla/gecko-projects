@@ -111,34 +111,20 @@ class CodeCoverageMixin(SingleTestMixin):
         # Get the path to the build machines gcno files.
         self.url_to_gcno = self.query_build_dir_url('target.code-coverage-gcno.zip')
         self.url_to_chrome_map = self.query_build_dir_url('chrome-map.json')
-        dirs = self.query_abs_dirs()
 
-        # Create the grcov directory, get the tooltool manifest, and finally
-        # download and unpack the grcov binary.
+        # Create the grcov directory, then download it.
+        # TODO: use the fetch-content script to download artifacts.
         self.grcov_dir = tempfile.mkdtemp()
+        ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{task}/artifacts/{artifact}'
+        for word in os.getenv('MOZ_FETCHES').split():
+            artifact, task = word.split('@', 1)
+            filename = os.path.basename(artifact)
+            url = ARTIFACT_URL.format(artifact=artifact, task=task)
+            self.download_file(url, parent_dir=self.grcov_dir)
 
-        if mozinfo.os == 'linux':
-            platform = 'linux64'
-            tar_file = 'grcov-linux-x86_64.tar.bz2'
-        elif mozinfo.os == 'win':
-            platform = 'win32'
-            tar_file = 'grcov-win-i686.tar.bz2'
-        elif mozinfo.os == 'mac':
-            platform = 'macosx64'
-            tar_file = 'grcov-osx-x86_64.tar.bz2'
-
-        manifest = os.path.join(dirs.get('abs_test_install_dir',
-                                         os.path.join(dirs['abs_work_dir'], 'tests')),
-                                'config/tooltool-manifests/%s/ccov.manifest' % platform)
-
-        self.tooltool_fetch(
-            manifest=manifest,
-            output_dir=self.grcov_dir,
-            cache=self.config.get('tooltool_cache')
-        )
-
-        with tarfile.open(os.path.join(self.grcov_dir, tar_file)) as tar:
-            tar.extractall(self.grcov_dir)
+            with tarfile.open(os.path.join(self.grcov_dir, filename), 'r') as tar:
+                tar.extractall(self.grcov_dir)
+            os.remove(os.path.join(self.grcov_dir, filename))
 
         # Download the gcno archive from the build machine.
         self.download_file(self.url_to_gcno, parent_dir=self.grcov_dir)
@@ -258,15 +244,6 @@ class CodeCoverageMixin(SingleTestMixin):
         rewriter = LcovFileRewriter(os.path.join(self.grcov_dir, 'chrome-map.json'))
         rewriter.rewrite_files(jsvm_files, jsvm_output_file, '')
 
-        # Zip gcda files (will be given in input to grcov).
-        file_path_gcda = os.path.join(os.getcwd(), 'code-coverage-gcda.zip')
-        with zipfile.ZipFile(file_path_gcda, 'w', zipfile.ZIP_STORED) as z:
-            for topdir, _, files in os.walk(gcov_dir):
-                for f in files:
-                    full_path = os.path.join(topdir, f)
-                    rel_path = os.path.relpath(full_path, gcov_dir)
-                    z.write(full_path, rel_path)
-
         # Run grcov on the zipped .gcno and .gcda files.
         grcov_command = [
             os.path.join(self.grcov_dir, 'grcov'),
@@ -274,7 +251,7 @@ class CodeCoverageMixin(SingleTestMixin):
             '-p', self.prefix,
             '--ignore-dir', 'gcc*',
             '--ignore-dir', 'vs2017_*',
-            os.path.join(self.grcov_dir, 'target.code-coverage-gcno.zip'), file_path_gcda
+            os.path.join(self.grcov_dir, 'target.code-coverage-gcno.zip'), gcov_dir
         ]
 
         if 'coveralls' in output_format:

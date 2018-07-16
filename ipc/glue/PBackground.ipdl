@@ -5,6 +5,7 @@
 include protocol PAsmJSCacheEntry;
 include protocol PBackgroundIDBFactory;
 include protocol PBackgroundIndexedDBUtils;
+include protocol PBackgroundLocalStorageCache;
 include protocol PBackgroundStorage;
 include protocol PBackgroundTest;
 include protocol PBroadcastChannel;
@@ -27,13 +28,18 @@ include protocol PMIDIPort;
 include protocol PQuota;
 include protocol PChildToParentStream;
 include protocol PParentToChildStream;
+include protocol PServiceWorker;
+include protocol PServiceWorkerContainer;
 include protocol PServiceWorkerManager;
+include protocol PServiceWorkerRegistration;
 include protocol PWebAuthnTransaction;
 include protocol PUDPSocket;
 include protocol PVsync;
 
 include DOMTypes;
 include IPCBlob;
+include IPCServiceWorkerDescriptor;
+include IPCServiceWorkerRegistrationDescriptor;
 include PBackgroundSharedTypes;
 include PBackgroundIDBSharedTypes;
 include PFileSystemParams;
@@ -41,6 +47,7 @@ include ProtocolTypes;
 include MIDITypes;
 
 include "mozilla/dom/cache/IPCUtils.h";
+include "mozilla/layers/LayersMessageUtils.h";
 
 using mozilla::dom::cache::Namespace
   from "mozilla/dom/cache/Types.h";
@@ -59,6 +66,7 @@ sync protocol PBackground
   manages PAsmJSCacheEntry;
   manages PBackgroundIDBFactory;
   manages PBackgroundIndexedDBUtils;
+  manages PBackgroundLocalStorageCache;
   manages PBackgroundStorage;
   manages PBackgroundTest;
   manages PBroadcastChannel;
@@ -81,7 +89,10 @@ sync protocol PBackground
   manages PQuota;
   manages PChildToParentStream;
   manages PParentToChildStream;
+  manages PServiceWorker;
+  manages PServiceWorkerContainer;
   manages PServiceWorkerManager;
+  manages PServiceWorkerRegistration;
   manages PWebAuthnTransaction;
   manages PUDPSocket;
   manages PVsync;
@@ -97,14 +108,11 @@ parent:
   // Use only for testing!
   async FlushPendingFileDeletions();
 
-  async PBackgroundStorage(nsString profilePath);
+  async PBackgroundLocalStorageCache(PrincipalInfo principalInfo,
+                                     nsCString originKey,
+                                     uint32_t privateBrowsingId);
 
-  async BroadcastLocalStorageChange(nsString documentURI,
-                                    nsString key,
-                                    nsString oldValue,
-                                    nsString newValue,
-                                    PrincipalInfo principalInfo,
-                                    bool isPrivate);
+  async PBackgroundStorage(nsString profilePath);
 
   async PVsync();
 
@@ -152,6 +160,12 @@ parent:
   // to the parent actor. See StorageActivityService.
   async StorageActivity(PrincipalInfo principalInfo);
 
+  async PServiceWorker(IPCServiceWorkerDescriptor aDescriptor);
+
+  async PServiceWorkerContainer();
+
+  async PServiceWorkerRegistration(IPCServiceWorkerRegistrationDescriptor aDescriptor);
+
 child:
   async PCache();
   async PCacheStreamControl();
@@ -159,13 +173,6 @@ child:
   async PParentToChildStream();
 
   async PPendingIPCBlob(IPCBlob blob);
-
-  async DispatchLocalStorageChange(nsString documentURI,
-                                   nsString key,
-                                   nsString oldValue,
-                                   nsString newValue,
-                                   PrincipalInfo principalInfo,
-                                   bool isPrivate);
 
 both:
   // PIPCBlobInputStream is created on the parent side only if the child starts

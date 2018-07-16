@@ -251,10 +251,6 @@ panelview[mainview] > .panel-header {
   pointer-events: auto;
 }
 
-toolbar[printpreview="true"] {
-  -moz-binding: url("chrome://global/content/printPreviewBindings.xml#printpreviewtoolbar");
-}
-
 toolbar[overflowable] > .customization-target {
   overflow: hidden;
 }
@@ -851,11 +847,6 @@ toolbarspring {
   html|*.tabs-container html|*.item-tabs-list html|*.item-icon-container {
     image-rendering: -moz-crisp-edges;
   }
-}
-
-#editBMPanel_tagsSelector {
-  /* override default listbox width from xul.css */
-  width: auto;
 }
 
 menupopup[emptyplacesresult="true"] > .hide-if-empty-places-result {

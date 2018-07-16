@@ -465,6 +465,18 @@ nsComputedDOMStyle::GetPropertyValue(const nsAString& aPropertyName,
     return NS_OK;
   }
 
+  if (nsCSSProps::PropHasFlags(prop, CSSPropFlags::IsLogical)) {
+    MOZ_ASSERT(entry);
+    MOZ_ASSERT(entry->mGetter == &nsComputedDOMStyle::DummyGetter);
+
+    prop = Servo_ResolveLogicalProperty(prop, mComputedStyle);
+    entry = GetComputedStyleMap()->FindEntryForProperty(prop);
+
+    MOZ_ASSERT(layoutFlushIsNeeded == entry->IsLayoutFlushNeeded(),
+               "Logical and physical property don't agree on whether layout is "
+               "needed");
+  }
+
   if (!nsCSSProps::PropHasFlags(prop, CSSPropFlags::SerializedByServo)) {
     if (RefPtr<CSSValue> value = (this->*entry->mGetter)()) {
       ErrorResult rv;
@@ -1202,175 +1214,6 @@ nsComputedDOMStyle::DoGetColumnRuleWidth()
   return val.forget();
 }
 
-static void
-AppendCounterStyle(CounterStyle* aStyle, nsAString& aString)
-{
-  AnonymousCounterStyle* anonymous = aStyle->AsAnonymous();
-  if (!anonymous) {
-    // want SetIdent
-    nsDependentAtomString type(aStyle->GetStyleName());
-    nsStyleUtil::AppendEscapedCSSIdent(type, aString);
-  } else if (anonymous->IsSingleString()) {
-    const nsTArray<nsString>& symbols = anonymous->GetSymbols();
-    MOZ_ASSERT(symbols.Length() == 1);
-    nsStyleUtil::AppendEscapedCSSString(symbols[0], aString);
-  } else {
-    aString.AppendLiteral("symbols(");
-
-    uint8_t system = anonymous->GetSystem();
-    NS_ASSERTION(system == NS_STYLE_COUNTER_SYSTEM_CYCLIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_NUMERIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_ALPHABETIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_SYMBOLIC ||
-                 system == NS_STYLE_COUNTER_SYSTEM_FIXED,
-                 "Invalid system for anonymous counter style.");
-    if (system != NS_STYLE_COUNTER_SYSTEM_SYMBOLIC) {
-      AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(
-              system, nsCSSProps::kCounterSystemKTable), aString);
-      aString.Append(' ');
-    }
-
-    const nsTArray<nsString>& symbols = anonymous->GetSymbols();
-    NS_ASSERTION(symbols.Length() > 0,
-                 "No symbols in the anonymous counter style");
-    for (size_t i = 0, iend = symbols.Length(); i < iend; i++) {
-      nsStyleUtil::AppendEscapedCSSString(symbols[i], aString);
-      aString.Append(' ');
-    }
-    aString.Replace(aString.Length() - 1, 1, char16_t(')'));
-  }
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetContent()
-{
-  const nsStyleContent *content = StyleContent();
-
-  if (content->ContentCount() == 0) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    val->SetIdent(eCSSKeyword_none);
-    return val.forget();
-  }
-
-  if (content->ContentCount() == 1 &&
-      content->ContentAt(0).GetType() == eStyleContentType_AltContent) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    val->SetIdent(eCSSKeyword__moz_alt_content);
-    return val.forget();
-  }
-
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-
-  for (uint32_t i = 0, i_end = content->ContentCount(); i < i_end; ++i) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-    const nsStyleContentData &data = content->ContentAt(i);
-    nsStyleContentType type = data.GetType();
-    switch (type) {
-      case eStyleContentType_String: {
-        nsAutoString str;
-        nsStyleUtil::AppendEscapedCSSString(
-          nsDependentString(data.GetString()), str);
-        val->SetString(str);
-        break;
-      }
-      case eStyleContentType_Image: {
-        nsCOMPtr<nsIURI> uri;
-        if (imgRequestProxy* image = data.GetImage()) {
-          image->GetURI(getter_AddRefs(uri));
-        }
-        val->SetURI(uri);
-        break;
-      }
-      case eStyleContentType_Attr: {
-        // XXXbholley: We don't correctly serialize namespaces here. Doing so
-        // would require either storing the prefix on the nsStyleContentAttr,
-        // or poking at the namespaces in the stylesheet to map from the
-        // namespace URL.
-        nsAutoString str;
-        nsStyleUtil::AppendEscapedCSSIdent(
-          nsDependentString(data.GetAttr()->mName->GetUTF16String()), str);
-        val->SetString(str, nsROCSSPrimitiveValue::CSS_ATTR);
-        break;
-      }
-      case eStyleContentType_Counter:
-      case eStyleContentType_Counters: {
-        /* FIXME: counters should really use an object */
-        nsAutoString str;
-        if (type == eStyleContentType_Counter) {
-          str.AppendLiteral("counter(");
-        }
-        else {
-          str.AppendLiteral("counters(");
-        }
-        nsStyleContentData::CounterFunction* counters = data.GetCounters();
-        nsStyleUtil::AppendEscapedCSSIdent(counters->mIdent, str);
-        if (type == eStyleContentType_Counters) {
-          str.AppendLiteral(", ");
-          nsStyleUtil::AppendEscapedCSSString(counters->mSeparator, str);
-        }
-        if (counters->mCounterStyle != CounterStyleManager::GetDecimalStyle()) {
-          str.AppendLiteral(", ");
-          AppendCounterStyle(counters->mCounterStyle, str);
-        }
-
-        str.Append(char16_t(')'));
-        val->SetString(str, nsROCSSPrimitiveValue::CSS_COUNTER);
-        break;
-      }
-      case eStyleContentType_OpenQuote:
-        val->SetIdent(eCSSKeyword_open_quote);
-        break;
-      case eStyleContentType_CloseQuote:
-        val->SetIdent(eCSSKeyword_close_quote);
-        break;
-      case eStyleContentType_NoOpenQuote:
-        val->SetIdent(eCSSKeyword_no_open_quote);
-        break;
-      case eStyleContentType_NoCloseQuote:
-        val->SetIdent(eCSSKeyword_no_close_quote);
-        break;
-      case eStyleContentType_AltContent:
-      default:
-        MOZ_ASSERT_UNREACHABLE("unexpected type");
-        break;
-    }
-    valueList->AppendCSSValue(val.forget());
-  }
-
-  return valueList.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetCounterIncrement()
-{
-  const nsStyleContent *content = StyleContent();
-
-  if (content->CounterIncrementCount() == 0) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    val->SetIdent(eCSSKeyword_none);
-    return val.forget();
-  }
-
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-
-  for (uint32_t i = 0, i_end = content->CounterIncrementCount(); i < i_end; ++i) {
-    RefPtr<nsROCSSPrimitiveValue> name = new nsROCSSPrimitiveValue;
-    RefPtr<nsROCSSPrimitiveValue> value = new nsROCSSPrimitiveValue;
-
-    const nsStyleCounterData& data = content->CounterIncrementAt(i);
-    nsAutoString escaped;
-    nsStyleUtil::AppendEscapedCSSIdent(data.mCounter, escaped);
-    name->SetString(escaped);
-    value->SetNumber(data.mValue); // XXX This should really be integer
-
-    valueList->AppendCSSValue(name.forget());
-    valueList->AppendCSSValue(value.forget());
-  }
-
-  return valueList.forget();
-}
-
 /* Convert the stored representation into a list of two values and then hand
  * it back.
  */
@@ -1706,36 +1549,6 @@ nsComputedDOMStyle::MatrixToCSSValue(const mozilla::gfx::Matrix4x4& matrix)
 }
 
 already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetCounterReset()
-{
-  const nsStyleContent *content = StyleContent();
-
-  if (content->CounterResetCount() == 0) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    val->SetIdent(eCSSKeyword_none);
-    return val.forget();
-  }
-
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-
-  for (uint32_t i = 0, i_end = content->CounterResetCount(); i < i_end; ++i) {
-    RefPtr<nsROCSSPrimitiveValue> name = new nsROCSSPrimitiveValue;
-    RefPtr<nsROCSSPrimitiveValue> value = new nsROCSSPrimitiveValue;
-
-    const nsStyleCounterData& data = content->CounterResetAt(i);
-    nsAutoString escaped;
-    nsStyleUtil::AppendEscapedCSSIdent(data.mCounter, escaped);
-    name->SetString(escaped);
-    value->SetNumber(data.mValue); // XXX This should really be integer
-
-    valueList->AppendCSSValue(name.forget());
-    valueList->AppendCSSValue(value.forget());
-  }
-
-  return valueList.forget();
-}
-
-already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetQuotes()
 {
   const auto& quotePairs = StyleList()->GetQuotePairs();
@@ -1767,46 +1580,6 @@ nsComputedDOMStyle::DoGetQuotes()
 }
 
 already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontFamily()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont* font = StyleFont();
-  nsAutoString fontlistStr;
-  nsStyleUtil::AppendEscapedCSSFontFamilyList(font->mFont.fontlist,
-                                              fontlistStr);
-  val->SetString(fontlistStr);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontSize()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  // Note: StyleFont()->mSize is the 'computed size';
-  // StyleFont()->mFont.size is the 'actual size'
-  val->SetAppUnits(StyleFont()->mSize);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontSizeAdjust()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont *font = StyleFont();
-
-  if (font->mFont.sizeAdjust >= 0.0f) {
-    val->SetNumber(font->mFont.sizeAdjust);
-  } else {
-    val->SetIdent(eCSSKeyword_none);
-  }
-
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetOsxFontSmoothing()
 {
   if (nsContentUtils::ShouldResistFingerprinting(
@@ -1816,162 +1589,6 @@ nsComputedDOMStyle::DoGetOsxFontSmoothing()
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   val->SetIdent(nsCSSProps::ValueToKeywordEnum(StyleFont()->mFont.smoothing,
                                                nsCSSProps::kFontSmoothingKTable));
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontStretch()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont* font = StyleFont();
-
-  // Chrome does not return keywords, so neither do we.
-  // See w3c/csswg-drafts#2605 for discussion though.
-  float stretch = font->mFont.stretch.Percentage();
-  MOZ_ASSERT(stretch >= 0.f,
-             "unexpected font-stretch value");
-  val->SetPercent(stretch / 100.f);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontStyle()
-{
-  const nsStyleFont* font = StyleFont();
-  const FontSlantStyle& style = font->mFont.style;
-
-  // FIXME(emilio): Once we get rid of GetPropertyCSSValue, this can, at least,
-  // get unified with nsStyleUtil::AppendFontSlantStyle.
-  //
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  if (style.IsNormal() || style.IsItalic()) {
-    auto keyword = style.IsNormal() ? eCSSKeyword_normal : eCSSKeyword_italic;
-    val->SetIdent(keyword);
-    return val.forget();
-  }
-
-  float angle = style.ObliqueAngle();
-  val->SetIdent(eCSSKeyword_oblique);
-  if (angle == FontSlantStyle::kDefaultAngle) {
-    return val.forget();
-  }
-
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-  valueList->AppendCSSValue(val.forget());
-
-  RefPtr<nsROCSSPrimitiveValue> angleVal = new nsROCSSPrimitiveValue;
-  angleVal->SetDegree(angle);
-  valueList->AppendCSSValue(angleVal.forget());
-
-  return valueList.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontWeight()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont* font = StyleFont();
-
-  float weight = font->mFont.weight.ToFloat();
-  MOZ_ASSERT(1.0f <= weight && weight <= 1000.0f,
-             "unexpected font-weight value");
-  val->SetNumber(weight);
-
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontFeatureSettings()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont* font = StyleFont();
-  if (font->mFont.fontFeatureSettings.IsEmpty()) {
-    val->SetIdent(eCSSKeyword_normal);
-  } else {
-    nsAutoString result;
-    nsStyleUtil::AppendFontFeatureSettings(font->mFont.fontFeatureSettings,
-                                           result);
-    val->SetString(result);
-  }
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontVariationSettings()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont* font = StyleFont();
-  if (font->mFont.fontVariationSettings.IsEmpty()) {
-    val->SetIdent(eCSSKeyword_normal);
-  } else {
-    nsAutoString result;
-    nsStyleUtil::AppendFontVariationSettings(font->mFont.fontVariationSettings,
-                                             result);
-    val->SetString(result);
-  }
-  return val.forget();
-}
-
-static void
-SerializeLanguageOverride(uint32_t aLanguageOverride, nsAString& aResult)
-{
-  aResult.Truncate();
-  uint32_t i;
-  for (i = 0; i < 4 ; i++) {
-    char16_t ch = aLanguageOverride >> 24;
-    MOZ_ASSERT(nsCRT::IsAscii(ch),
-               "Invalid tags, we should've handled this during computing!");
-    aResult.Append(ch);
-    aLanguageOverride = aLanguageOverride << 8;
-  }
-  // strip trailing whitespaces
-  while (i > 0 && aResult[i - 1] == ' ') {
-    i--;
-  }
-  aResult.Truncate(i);
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontLanguageOverride()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  const nsStyleFont* font = StyleFont();
-  if (font->mFont.languageOverride == 0) {
-    val->SetIdent(eCSSKeyword_normal);
-  } else {
-    nsAutoString serializedStr, escapedStr;
-    SerializeLanguageOverride(font->mFont.languageOverride, serializedStr);
-    nsStyleUtil::AppendEscapedCSSString(serializedStr, escapedStr);
-    val->SetString(escapedStr);
-  }
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontSynthesis()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  int32_t intValue = StyleFont()->mFont.synthesis;
-
-  if (0 == intValue) {
-    val->SetIdent(eCSSKeyword_none);
-  } else {
-    nsAutoString valueStr;
-
-    nsStyleUtil::AppendBitmaskCSSValue(nsCSSProps::kFontSynthesisKTable,
-                                       intValue,
-                                       NS_FONT_SYNTHESIS_WEIGHT,
-                                       NS_FONT_SYNTHESIS_STYLE,
-                                       valueStr);
-    val->SetString(valueStr);
-  }
-
   return val.forget();
 }
 
@@ -2003,108 +1620,6 @@ nsComputedDOMStyle::DoGetFontVariant()
 
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   val->SetIdent(keyword);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontVariantAlternates()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  int32_t intValue = StyleFont()->mFont.variantAlternates;
-
-  if (0 == intValue) {
-    val->SetIdent(eCSSKeyword_normal);
-    return val.forget();
-  }
-
-  // first, include enumerated values
-  nsAutoString valueStr;
-
-  nsStyleUtil::AppendBitmaskCSSValue(
-    nsCSSProps::kFontVariantAlternatesKTable,
-    intValue & NS_FONT_VARIANT_ALTERNATES_ENUMERATED_MASK,
-    NS_FONT_VARIANT_ALTERNATES_HISTORICAL,
-    NS_FONT_VARIANT_ALTERNATES_HISTORICAL, valueStr);
-
-  // next, include functional values if present
-  if (intValue & NS_FONT_VARIANT_ALTERNATES_FUNCTIONAL_MASK) {
-    nsStyleUtil::SerializeFunctionalAlternates(StyleFont()->mFont.alternateValues,
-                                               valueStr);
-  }
-
-  val->SetString(valueStr);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontVariantEastAsian()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  int32_t intValue = StyleFont()->mFont.variantEastAsian;
-
-  if (0 == intValue) {
-    val->SetIdent(eCSSKeyword_normal);
-  } else {
-    nsAutoString valueStr;
-
-    nsStyleUtil::AppendBitmaskCSSValue(nsCSSProps::kFontVariantEastAsianKTable,
-                                       intValue,
-                                       NS_FONT_VARIANT_EAST_ASIAN_JIS78,
-                                       NS_FONT_VARIANT_EAST_ASIAN_RUBY,
-                                       valueStr);
-    val->SetString(valueStr);
-  }
-
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontVariantLigatures()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  int32_t intValue = StyleFont()->mFont.variantLigatures;
-
-  if (0 == intValue) {
-    val->SetIdent(eCSSKeyword_normal);
-  } else if (NS_FONT_VARIANT_LIGATURES_NONE == intValue) {
-    val->SetIdent(eCSSKeyword_none);
-  } else {
-    nsAutoString valueStr;
-
-    nsStyleUtil::AppendBitmaskCSSValue(nsCSSProps::kFontVariantLigaturesKTable,
-                                       intValue,
-                                       NS_FONT_VARIANT_LIGATURES_NONE,
-                                       NS_FONT_VARIANT_LIGATURES_NO_CONTEXTUAL,
-                                       valueStr);
-    val->SetString(valueStr);
-  }
-
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetFontVariantNumeric()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  int32_t intValue = StyleFont()->mFont.variantNumeric;
-
-  if (0 == intValue) {
-    val->SetIdent(eCSSKeyword_normal);
-  } else {
-    nsAutoString valueStr;
-
-    nsStyleUtil::AppendBitmaskCSSValue(nsCSSProps::kFontVariantNumericKTable,
-                                       intValue,
-                                       NS_FONT_VARIANT_NUMERIC_LINING,
-                                       NS_FONT_VARIANT_NUMERIC_ORDINAL,
-                                       valueStr);
-    val->SetString(valueStr);
-  }
-
   return val.forget();
 }
 
@@ -3651,31 +3166,6 @@ nsComputedDOMStyle::DoGetZIndex()
 }
 
 already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetListStyleImage()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  nsCOMPtr<nsIURI> uri = StyleList()->GetListStyleImageURI();
-  if (!uri) {
-    val->SetIdent(eCSSKeyword_none);
-  } else {
-    val->SetURI(uri);
-  }
-
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetListStyleType()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  nsAutoString tmp;
-  AppendCounterStyle(StyleList()->mCounterStyle, tmp);
-  val->SetString(tmp);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetImageRegion()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
@@ -3904,14 +3394,6 @@ nsComputedDOMStyle::DoGetTextEmphasisStyle()
   valueList->AppendCSSValue(fillVal.forget());
   valueList->AppendCSSValue(shapeVal.forget());
   return valueList.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetTextIndent()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueToCoord(val, StyleText()->mTextIndent, false);
-  return val.forget();
 }
 
 already_AddRefed<CSSValue>
@@ -4261,27 +3743,6 @@ nsComputedDOMStyle::DoGetForceBrokenImageIcon()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   val->SetNumber(StyleUIReset()->mForceBrokenImageIcon);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetImageOrientation()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  nsAutoString string;
-  nsStyleImageOrientation orientation = StyleVisibility()->mImageOrientation;
-
-  if (orientation.IsFromImage()) {
-    string.AppendLiteral("from-image");
-  } else {
-    nsStyleUtil::AppendAngleValue(orientation.AngleAsCoord(), string);
-
-    if (orientation.IsFlipped()) {
-      string.AppendLiteral(" flip");
-    }
-  }
-
-  val->SetString(string);
   return val.forget();
 }
 
@@ -5201,7 +4662,7 @@ nsComputedDOMStyle::GetFallbackValue(const nsStyleSVGPaint* aPaint)
 {
   RefPtr<nsROCSSPrimitiveValue> fallback = new nsROCSSPrimitiveValue;
   if (aPaint->GetFallbackType() == eStyleSVGFallbackType_Color) {
-    SetToRGBAColor(fallback, aPaint->GetFallbackColor());
+    SetToRGBAColor(fallback, aPaint->GetFallbackColor(mComputedStyle));
   } else {
     fallback->SetIdent(eCSSKeyword_none);
   }
@@ -5223,7 +4684,7 @@ nsComputedDOMStyle::GetSVGPaintFor(bool aFill)
       val->SetIdent(eCSSKeyword_none);
       break;
     case eStyleSVGPaintType_Color:
-      SetToRGBAColor(val, paint->GetColor());
+      SetToRGBAColor(val, paint->GetColor(mComputedStyle));
       break;
     case eStyleSVGPaintType_Server: {
       SetValueToURLValue(paint->GetPaintServer(), val);
@@ -5596,14 +5057,6 @@ nsComputedDOMStyle::DoGetClipPath()
 {
   return GetShapeSource(StyleSVGReset()->mClipPath,
                         nsCSSProps::kClipPathGeometryBoxKTable);
-}
-
-already_AddRefed<CSSValue>
-nsComputedDOMStyle::DoGetShapeMargin()
-{
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueToCoord(val, StyleDisplay()->mShapeMargin, true);
-  return val.forget();
 }
 
 already_AddRefed<CSSValue>
@@ -6049,7 +5502,9 @@ nsComputedDOMStyle::RegisterPrefChangeCallbacks()
   ComputedStyleMap* data = GetComputedStyleMap();
   for (const auto* p = nsCSSProps::kPropertyPrefTable;
        p->mPropID != eCSSProperty_UNKNOWN; p++) {
-    Preferences::RegisterCallback(MarkComputedStyleMapDirty, p->mPref, data);
+    nsCString name;
+    name.AssignLiteral(p->mPref, strlen(p->mPref));
+    Preferences::RegisterCallback(MarkComputedStyleMapDirty, name, data);
   }
 }
 
@@ -6059,6 +5514,7 @@ nsComputedDOMStyle::UnregisterPrefChangeCallbacks()
   ComputedStyleMap* data = GetComputedStyleMap();
   for (const auto* p = nsCSSProps::kPropertyPrefTable;
        p->mPropID != eCSSProperty_UNKNOWN; p++) {
-    Preferences::UnregisterCallback(MarkComputedStyleMapDirty, p->mPref, data);
+    Preferences::UnregisterCallback(MarkComputedStyleMapDirty,
+                                    nsDependentCString(p->mPref), data);
   }
 }

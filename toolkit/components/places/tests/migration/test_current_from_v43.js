@@ -20,6 +20,7 @@ const EXPECTED_REMOVED_BOOKMARK_GUIDS = [
   "exaddon1____",
   "exaddon2____",
   "exaddon3____",
+  "test________",
 ];
 
 const EXPECTED_REMOVED_ANNOTATIONS = [
@@ -53,8 +54,15 @@ add_task(async function setup() {
   let db = await Sqlite.openConnection({ path });
 
   let rows = await db.execute(`SELECT * FROM moz_bookmarks_deleted`);
-
   Assert.equal(rows.length, 0, "Should be nothing in moz_bookmarks_deleted");
+
+
+  // Break roots parenting, to test for Bug 1472127.
+  await db.execute(`INSERT INTO moz_bookmarks (title, parent, position, guid)
+                    VALUES ("test", 1, 0, "test________")`);
+  await db.execute(`UPDATE moz_bookmarks
+                    SET parent = (SELECT id FROM moz_bookmarks WHERE guid = "test________")
+                    WHERE guid = "menu________"`);
 
   await assertItemIn(db, "moz_anno_attributes", "name", EXPECTED_REMOVED_ANNOTATIONS);
   await assertItemIn(db, "moz_bookmarks", "guid", EXPECTED_REMOVED_BOOKMARK_GUIDS);
@@ -94,6 +102,15 @@ add_task(async function test_roots_removed() {
     Assert.ok(EXPECTED_REMAINING_ROOTS.includes(guid),
       `Should have only the expected guids remaining, unexpected guid: ${guid}`);
   }
+
+  // Check the reparented menu now.
+  rows = await db.execute(`
+    SELECT id, parent FROM moz_bookmarks
+    WHERE guid = :guid
+  `, {guid: PlacesUtils.bookmarks.menuGuid});
+  Assert.equal(rows.length, 1, "Should have found the menu root.");
+  Assert.equal(rows[0].getResultByName("parent"), PlacesUtils.placesRootId,
+    "Should have moved the menu back to the Places root.");
 });
 
 add_task(async function test_tombstones_added() {

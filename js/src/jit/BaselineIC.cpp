@@ -2171,6 +2171,9 @@ static bool
 GetTemplateObjectForClassHook(JSContext* cx, JSNative hook, CallArgs& args,
                               MutableHandleObject templateObject)
 {
+    if (args.callee().nonCCWRealm() != cx->realm())
+        return true;
+
     if (hook == TypedObject::construct) {
         Rooted<TypeDescr*> descr(cx, &args.callee().as<TypeDescr>());
         templateObject.set(TypedObject::createZeroed(cx, descr, gc::TenuredHeap));
@@ -2246,9 +2249,6 @@ TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub, HandleScript script, jsb
     RootedObject obj(cx, &callee.toObject());
     if (!obj->is<JSFunction>()) {
         // Try to attach a stub for a call/construct hook on the object.
-        // Ignore proxies, which are special cased by callHook/constructHook.
-        if (obj->is<ProxyObject>())
-            return true;
         if (JSNative hook = constructing ? obj->constructHook() : obj->callHook()) {
             if (op != JSOP_FUNAPPLY && !isSpread && !createSingleton) {
                 RootedObject templateObject(cx);
@@ -3736,6 +3736,8 @@ ICCall_ClassHook::Compiler::generateStubCode(MacroAssembler& masm)
     // Note that this leaves the return address in TailCallReg.
     enterStubFrame(masm, regs.getAny());
 
+    masm.switchToObjectRealm(callee, regs.getAny());
+
     regs.add(scratch);
     pushCallArguments(masm, regs, argcReg, /* isJitCall = */ false, isConstructing_);
     regs.take(scratch);
@@ -3777,6 +3779,8 @@ ICCall_ClassHook::Compiler::generateStubCode(MacroAssembler& masm)
     masm.loadValue(Address(masm.getStackPointer(), NativeExitFrameLayout::offsetOfResult()), R0);
 
     leaveStubFrame(masm);
+
+    masm.switchToBaselineFrameRealm(R1.scratchReg());
 
     // Enter type monitor IC to type-check result.
     EmitEnterTypeMonitorIC(masm);
@@ -4866,10 +4870,13 @@ DoUnaryArithFallback(JSContext* cx, BaselineFrame* frame, ICUnaryArith_Fallback*
         res.setInt32(result);
         break;
       }
-      case JSOP_NEG:
-        if (!NegOperation(cx, val, res))
+      case JSOP_NEG: {
+        // We copy val here because the original value is needed below.
+        RootedValue valCopy(cx, val);
+        if (!NegOperation(cx, &valCopy, res))
             return false;
         break;
+      }
       default:
         MOZ_CRASH("Unexpected op");
     }

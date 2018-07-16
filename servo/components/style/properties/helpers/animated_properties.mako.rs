@@ -29,7 +29,7 @@ use hash::FnvHashMap;
 use super::ComputedValues;
 use values::CSSFloat;
 use values::animated::{Animate, Procedure, ToAnimatedValue, ToAnimatedZero};
-use values::animated::color::RGBA as AnimatedRGBA;
+use values::animated::color::Color as AnimatedColor;
 use values::animated::effects::Filter as AnimatedFilter;
 #[cfg(feature = "gecko")] use values::computed::TransitionProperty;
 use values::computed::{Angle, CalcLengthOrPercentage};
@@ -207,8 +207,8 @@ impl AnimatedProperty {
             % for prop in data.longhands:
             % if prop.animatable:
                 LonghandId::${prop.camel_case} => {
-                    let old_computed = old_style.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}();
-                    let new_computed = new_style.get_${prop.style_struct.ident.strip("_")}().clone_${prop.ident}();
+                    let old_computed = old_style.clone_${prop.ident}();
+                    let new_computed = new_style.clone_${prop.ident}();
                     AnimatedProperty::${prop.camel_case}(
                     % if prop.is_animatable_with_computed_value:
                         old_computed,
@@ -546,15 +546,13 @@ impl AnimationValue {
     /// Get an AnimationValue for an AnimatableLonghand from a given computed values.
     pub fn from_computed_values(
         property: LonghandId,
-        computed_values: &ComputedValues
+        style: &ComputedValues,
     ) -> Option<Self> {
         Some(match property {
             % for prop in data.longhands:
             % if prop.animatable:
             LonghandId::${prop.camel_case} => {
-                let computed = computed_values
-                    .get_${prop.style_struct.ident.strip("_")}()
-                    .clone_${prop.ident}();
+                let computed = style.clone_${prop.ident}();
                 AnimationValue::${prop.camel_case}(
                 % if prop.is_animatable_with_computed_value:
                     computed
@@ -2676,10 +2674,10 @@ impl ComputeSquaredDistance for ComputedTransform {
 }
 
 /// Animated SVGPaint
-pub type IntermediateSVGPaint = SVGPaint<AnimatedRGBA, ComputedUrl>;
+pub type IntermediateSVGPaint = SVGPaint<AnimatedColor, ComputedUrl>;
 
 /// Animated SVGPaintKind
-pub type IntermediateSVGPaintKind = SVGPaintKind<AnimatedRGBA, ComputedUrl>;
+pub type IntermediateSVGPaintKind = SVGPaintKind<AnimatedColor, ComputedUrl>;
 
 impl ToAnimatedZero for IntermediateSVGPaint {
     #[inline]

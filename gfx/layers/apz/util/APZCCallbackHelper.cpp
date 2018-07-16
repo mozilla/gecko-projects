@@ -74,11 +74,23 @@ RecenterDisplayPort(mozilla::layers::FrameMetrics& aFrameMetrics)
   aFrameMetrics.SetDisplayPortMargins(margins);
 }
 
+static already_AddRefed<nsIPresShell>
+GetPresShell(const nsIContent* aContent)
+{
+  nsCOMPtr<nsIPresShell> result;
+  if (nsIDocument* doc = aContent->GetComposedDoc()) {
+    result = doc->GetShell();
+  }
+  return result.forget();
+}
+
 static CSSPoint
 ScrollFrameTo(nsIScrollableFrame* aFrame, const FrameMetrics& aMetrics, bool& aSuccessOut)
 {
   aSuccessOut = false;
-  CSSPoint targetScrollPosition = aMetrics.GetScrollOffset();
+  CSSPoint targetScrollPosition = aMetrics.IsRootContent()
+    ? aMetrics.GetViewport().TopLeft()
+    : aMetrics.GetScrollOffset();
 
   if (!aFrame) {
     return targetScrollPosition;
@@ -93,18 +105,20 @@ ScrollFrameTo(nsIScrollableFrame* aFrame, const FrameMetrics& aMetrics, bool& aS
     return geckoScrollPosition;
   }
 
-  // If the frame is overflow:hidden on a particular axis, we don't want to allow
-  // user-driven scroll on that axis. Simply set the scroll position on that axis
-  // to whatever it already is. Note that this will leave the APZ's async scroll
-  // position out of sync with the gecko scroll position, but APZ can deal with that
-  // (by design). Note also that when we run into this case, even if both axes
-  // have overflow:hidden, we want to set aSuccessOut to true, so that the displayport
-  // follows the async scroll position rather than the gecko scroll position.
+  // If this is the root content with overflow:hidden, then APZ should not
+  // allow scrolling in such a way that moves the layout viewport.
+  //
+  // If this is overflow:hidden, but not the root content, then
+  // nsLayoutUtils::CalculateScrollableRectForFrame should have sized the
+  // scrollable rect in a way that prevents APZ from scrolling it at all.
+  //
+  // In either case, targetScrollPosition should be the same as
+  // geckoScrollPosition here.
   if (aFrame->GetScrollbarStyles().mVertical == NS_STYLE_OVERFLOW_HIDDEN) {
-    targetScrollPosition.y = geckoScrollPosition.y;
+    MOZ_ASSERT(targetScrollPosition.y == geckoScrollPosition.y);
   }
   if (aFrame->GetScrollbarStyles().mHorizontal == NS_STYLE_OVERFLOW_HIDDEN) {
-    targetScrollPosition.x = geckoScrollPosition.x;
+    MOZ_ASSERT(targetScrollPosition.x == geckoScrollPosition.x);
   }
 
   // If the scrollable frame is currently in the middle of an async or smooth
@@ -142,6 +156,11 @@ ScrollFrame(nsIContent* aContent,
   if (sf) {
     sf->ResetScrollInfoIfGeneration(aMetrics.GetScrollGeneration());
     sf->SetScrollableByAPZ(!aMetrics.IsScrollInfoLayer());
+    if (sf->IsRootScrollFrameOfDocument()) {
+      if (nsCOMPtr<nsIPresShell> shell = GetPresShell(aContent)) {
+        shell->SetVisualViewportOffset(CSSPoint::ToAppUnits(aMetrics.GetScrollOffset()));
+      }
+    }
   }
   bool scrollUpdated = false;
   CSSPoint apzScrollOffset = aMetrics.GetScrollOffset();
@@ -162,6 +181,15 @@ ScrollFrame(nsIContent* aContent,
       // actual scroll offset.
       APZCCallbackHelper::AdjustDisplayPortForScrollDelta(aMetrics, actualScrollOffset);
     }
+  } else if (aMetrics.IsRootContent() &&
+             aMetrics.GetScrollOffset() != aMetrics.GetViewport().TopLeft()) {
+    // APZ uses the visual viewport's offset to calculate where to place the
+    // display port, so the display port is misplaced when a pinch zoom occurs.
+    //
+    // We need to force a display port adjustment in the following paint to
+    // account for a difference between mScrollOffset and the actual scroll
+    // offset in repaints requested by AsyncPanZoomController::NotifyLayersUpdated.
+    APZCCallbackHelper::AdjustDisplayPortForScrollDelta(aMetrics, actualScrollOffset);
   } else {
     // For whatever reason we couldn't update the scroll offset on the scroll frame,
     // which means the data APZ used for its displayport calculation is stale. Fall
@@ -215,16 +243,6 @@ SetDisplayPortMargins(nsIPresShell* aPresShell,
               baseSize.width * nsPresContext::AppUnitsPerCSSPixel(),
               baseSize.height * nsPresContext::AppUnitsPerCSSPixel());
   nsLayoutUtils::SetDisplayPortBaseIfNotSet(aContent, base);
-}
-
-static already_AddRefed<nsIPresShell>
-GetPresShell(const nsIContent* aContent)
-{
-  nsCOMPtr<nsIPresShell> result;
-  if (nsIDocument* doc = aContent->GetComposedDoc()) {
-    result = doc->GetShell();
-  }
-  return result.forget();
 }
 
 static void

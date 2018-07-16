@@ -15,6 +15,11 @@ XPIDL_MODULE = 'dom'
 
 EXPORTS.mozilla.dom.ipc += [
     'IdType.h',
+    'MemMapSnapshot.h',
+    'SharedMap.h',
+    'SharedMapChangeEvent.h',
+    'SharedStringMap.h',
+    'StringTable.h',
     'StructuredCloneData.h',
 ]
 
@@ -39,7 +44,6 @@ EXPORTS.mozilla.dom += [
     'TabContext.h',
     'TabMessageUtils.h',
     'TabParent.h',
-    'TelemetryScrollProbe.h',
     'URLClassifierChild.h',
     'URLClassifierParent.h',
 ]
@@ -62,18 +66,20 @@ UNIFIED_SOURCES += [
     'ContentProcessHost.cpp',
     'ContentProcessManager.cpp',
     'FilePickerParent.cpp',
+    'MemMapSnapshot.cpp',
     'MemoryReportRequest.cpp',
     'nsIContentChild.cpp',
     'nsIContentParent.cpp',
     'PermissionMessageUtils.cpp',
     'PreallocatedProcessManager.cpp',
     'ProcessPriorityManager.cpp',
+    'SharedMap.cpp',
+    'SharedStringMap.cpp',
     'StructuredCloneData.cpp',
     'TabChild.cpp',
     'TabContext.cpp',
     'TabMessageUtils.cpp',
     'TabParent.cpp',
-    'TelemetryScrollProbe.cpp',
     'URLClassifierParent.cpp',
 ]
 
@@ -134,6 +140,7 @@ LOCAL_INCLUDES += [
     '/extensions/spellcheck/src',
     '/gfx/2d',
     '/hal/sandbox',
+    '/js/xpconnect/loader',
     '/layout/base',
     '/media/webrtc',
     '/netwerk/base',
@@ -170,6 +177,7 @@ JAR_MANIFESTS += ['jar.mn']
 BROWSER_CHROME_MANIFESTS += ['tests/browser.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
+XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell.ini']
 
 CXXFLAGS += CONFIG['TK_CFLAGS']
 

@@ -501,6 +501,10 @@ nsHttpChannel::OnBeforeConnect()
         mCaps |=  NS_HTTP_DISALLOW_SPDY;
     }
 
+    if (mTRR) {
+        mCaps |= NS_HTTP_LARGE_KEEPALIVE | NS_HTTP_DISABLE_TRR;
+    }
+
     // Finalize ConnectionInfo flags before SpeculativeConnect
     mConnectionInfo->SetAnonymous((mLoadFlags & LOAD_ANONYMOUS) != 0);
     mConnectionInfo->SetPrivate(mPrivateBrowsing);
@@ -758,7 +762,8 @@ nsHttpChannel::SpeculativeConnect()
         return;
 
     Unused << gHttpHandler->SpeculativeConnect(
-        mConnectionInfo, callbacks, mCaps & NS_HTTP_DISALLOW_SPDY);
+        mConnectionInfo, callbacks,
+        mCaps & (NS_HTTP_DISALLOW_SPDY | NS_HTTP_DISABLE_TRR));
 }
 
 void
@@ -973,9 +978,6 @@ nsHttpChannel::SetupTransaction()
 
     mUsedNetwork = 1;
 
-    if (mTRR) {
-        mCaps |= NS_HTTP_LARGE_KEEPALIVE;
-    }
     if (!mAllowSpdy) {
         mCaps |= NS_HTTP_DISALLOW_SPDY;
     }
@@ -6878,6 +6880,9 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
 
     LOG(("nsHttpChannel::OnStartRequest [this=%p request=%p status=%" PRIx32 "]\n",
          this, request, static_cast<uint32_t>(static_cast<nsresult>(mStatus))));
+
+    Telemetry::Accumulate(Telemetry::HTTP_CHANNEL_ONSTART_SUCCESS,
+                          NS_SUCCEEDED(mStatus));
 
     if (mRaceCacheWithNetwork) {
         LOG(("  racingNetAndCache - mFirstResponseSource:%d fromCache:%d fromNet:%d\n",

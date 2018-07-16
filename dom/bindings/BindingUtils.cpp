@@ -48,6 +48,7 @@
 #include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/HTMLEmbedElementBinding.h"
 #include "mozilla/dom/XULElementBinding.h"
+#include "mozilla/dom/XULFrameElementBinding.h"
 #include "mozilla/dom/XULPopupElementBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ResolveSystemBinding.h"
@@ -55,6 +56,7 @@
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/XrayExpandoClass.h"
+#include "mozilla/dom/XULScrollElementBinding.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "ipc/ErrorIPCUtils.h"
 #include "mozilla/UseCounter.h"
@@ -173,7 +175,11 @@ namespace binding_danger {
 
 template<typename CleanupPolicy>
 struct TErrorResult<CleanupPolicy>::Message {
-  Message() { MOZ_COUNT_CTOR(TErrorResult::Message); }
+  Message()
+    : mErrorNumber(dom::Err_Limit)
+  {
+    MOZ_COUNT_CTOR(TErrorResult::Message);
+  }
   ~Message() { MOZ_COUNT_DTOR(TErrorResult::Message); }
 
   nsTArray<nsString> mArgs;
@@ -1174,21 +1180,8 @@ XPCOMObjectToJsval(JSContext* cx, JS::Handle<JSObject*> scope,
                    xpcObjectHelper& helper, const nsIID* iid,
                    bool allowNativeWrapper, JS::MutableHandle<JS::Value> rval)
 {
-  if (!NativeInterface2JSObjectAndThrowIfFailed(cx, scope, rval, helper, iid,
-                                                allowNativeWrapper)) {
-    return false;
-  }
-
-#ifdef DEBUG
-  JSObject* jsobj = rval.toObjectOrNull();
-  if (jsobj &&
-      js::GetGlobalForObjectCrossCompartment(jsobj) == jsobj) {
-    NS_ASSERTION(js::GetObjectClass(jsobj)->flags & JSCLASS_IS_GLOBAL,
-                 "Why did we recreate this wrapper?");
-  }
-#endif
-
-  return true;
+  return NativeInterface2JSObjectAndThrowIfFailed(cx, scope, rval, helper, iid,
+                                                  allowNativeWrapper);
 }
 
 bool
@@ -1657,7 +1650,7 @@ ResolvePrototypeOrConstructor(JSContext* cx, JS::Handle<JSObject*> wrapper,
                               JS::MutableHandle<JS::PropertyDescriptor> desc,
                               bool& cacheOnHolder)
 {
-  JS::Rooted<JSObject*> global(cx, js::GetGlobalForObjectCrossCompartment(obj));
+  JS::Rooted<JSObject*> global(cx, JS::GetNonCCWObjectGlobal(obj));
   {
     JSAutoRealm ar(cx, global);
     ProtoAndIfaceCache& protoAndIfaceCache = *GetProtoAndIfaceCache(global);
@@ -2297,9 +2290,8 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg, ErrorResult& aErr
   const DOMJSClass* domClass = GetDOMClass(aObj);
 
   // DOM things are always parented to globals.
-  JS::Rooted<JSObject*> oldParent(aCx,
-                                  js::GetGlobalForObjectCrossCompartment(aObj));
-  MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(oldParent) == oldParent);
+  JS::Rooted<JSObject*> oldParent(aCx, JS::GetNonCCWObjectGlobal(aObj));
+  MOZ_ASSERT(JS_IsGlobalObject(oldParent));
 
   JS::Rooted<JSObject*> newParent(aCx,
                                   domClass->mGetAssociatedGlobal(aCx, aObj));
@@ -2429,7 +2421,7 @@ GlobalObject::GlobalObject(JSContext* aCx, JSObject* aObject)
     }
   }
 
-  mGlobalJSObject = js::GetGlobalForObjectCrossCompartment(obj);
+  mGlobalJSObject = JS::GetNonCCWObjectGlobal(obj);
 }
 
 nsISupports*
@@ -2893,7 +2885,9 @@ ConvertJSValueToByteString(JSContext* cx, JS::Handle<JS::Value> v,
     return false;
   }
 
-  JS_EncodeStringToBuffer(cx, s, result.BeginWriting(), length);
+  if (!JS_EncodeStringToBuffer(cx, s, result.BeginWriting(), length)) {
+    return false;
+  }
 
   return true;
 }
@@ -2946,7 +2940,8 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
                 GlobalNames::SharedWorkerGlobalScope |
                 GlobalNames::ServiceWorkerGlobalScope |
                 GlobalNames::WorkerDebuggerGlobalScope |
-                GlobalNames::WorkletGlobalScope)) == 0,
+                GlobalNames::WorkletGlobalScope |
+                GlobalNames::AudioWorkletGlobalScope)) == 0,
              "Unknown non-exposed global type");
 
   const char* name = js::GetObjectClass(aGlobal)->name;
@@ -2983,6 +2978,11 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
 
   if ((aNonExposedGlobals & GlobalNames::WorkletGlobalScope) &&
       !strcmp(name, "WorkletGlobalScope")) {
+    return true;
+  }
+
+  if ((aNonExposedGlobals & GlobalNames::AudioWorkletGlobalScope) &&
+      !strcmp(name, "AudioWorkletGlobalScope")) {
     return true;
   }
 
@@ -3057,7 +3057,7 @@ struct MaybeGlobalThisPolicy : public NormalThisPolicy
   {
     return aArgs.thisv().isObject() ?
       &aArgs.thisv().toObject() :
-      js::GetGlobalForObjectCrossCompartment(&aArgs.callee());
+      JS::GetNonCCWObjectGlobal(&aArgs.callee());
   }
 
   // We want the MaybeUnwrapThisObject of NormalThisPolicy.
@@ -3687,7 +3687,7 @@ GetDesiredProto(JSContext* aCx, const JS::CallArgs& aCallArgs,
 
   if (protoID != prototypes::id::_ID_Count) {
     ProtoAndIfaceCache& protoAndIfaceCache =
-      *GetProtoAndIfaceCache(js::GetGlobalForObjectCrossCompartment(newTarget));
+      *GetProtoAndIfaceCache(JS::GetNonCCWObjectGlobal(newTarget));
     aDesiredProto.set(protoAndIfaceCache.EntrySlotMustExist(protoID));
     if (newTarget != originalNewTarget) {
       return JS_WrapObject(aCx, aDesiredProto);
@@ -3860,6 +3860,12 @@ HTMLConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp,
           definition->mLocalName == nsGkAtoms::panel ||
           definition->mLocalName == nsGkAtoms::tooltip) {
         cb = XULPopupElement_Binding::GetConstructorObject;
+      } else if (definition->mLocalName == nsGkAtoms::iframe ||
+                 definition->mLocalName == nsGkAtoms::browser ||
+                 definition->mLocalName == nsGkAtoms::editor) {
+        cb = XULFrameElement_Binding::GetConstructorObject;
+      } else if (definition->mLocalName == nsGkAtoms::scrollbox) {
+          cb = XULScrollElement_Binding::GetConstructorObject;
       } else {
         cb = XULElement_Binding::GetConstructorObject;
       }

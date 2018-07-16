@@ -13,6 +13,8 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "useSeparateFileUriProcess",
                                       "browser.tabs.remote.separateFileUriProcess", false);
 XPCOMUtils.defineLazyPreferenceGetter(this, "allowLinkedWebInFileUriProcess",
                                       "browser.tabs.remote.allowLinkedWebInFileUriProcess", false);
+XPCOMUtils.defineLazyPreferenceGetter(this, "useSeparatePrivilegedContentProcess",
+                                      "browser.tabs.remote.separatePrivilegedContentProcess", false);
 ChromeUtils.defineModuleGetter(this, "Utils",
                                "resource://gre/modules/sessionstore/Utils.jsm");
 
@@ -35,6 +37,7 @@ const NOT_REMOTE = null;
 const WEB_REMOTE_TYPE = "web";
 const FILE_REMOTE_TYPE = "file";
 const EXTENSION_REMOTE_TYPE = "extension";
+const PRIVILEGED_REMOTE_TYPE = "privileged";
 
 // This must start with the WEB_REMOTE_TYPE above.
 const LARGE_ALLOCATION_REMOTE_TYPE = "webLargeAllocation";
@@ -82,6 +85,7 @@ var E10SUtils = {
   WEB_REMOTE_TYPE,
   FILE_REMOTE_TYPE,
   EXTENSION_REMOTE_TYPE,
+  PRIVILEGED_REMOTE_TYPE,
   LARGE_ALLOCATION_REMOTE_TYPE,
 
   canLoadURIInProcess(aURL, aProcess) {
@@ -153,6 +157,10 @@ var E10SUtils = {
 
         let flags = module.getURIFlags(aURI);
         if (flags & Ci.nsIAboutModule.URI_MUST_LOAD_IN_CHILD) {
+          if ((flags & Ci.nsIAboutModule.URI_CAN_LOAD_IN_PRIVILEGED_CHILD) &&
+              useSeparatePrivilegedContentProcess) {
+            return PRIVILEGED_REMOTE_TYPE;
+          }
           return DEFAULT_REMOTE_TYPE;
         }
 

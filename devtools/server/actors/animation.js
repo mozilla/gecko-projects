@@ -88,6 +88,7 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
     }
 
     this.createdTime = createdTime;
+    this.currentTimeAtCreated = player.currentTime;
   },
 
   destroy: function() {
@@ -336,6 +337,8 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       documentCurrentTime: this.node.ownerDocument.timeline.currentTime,
       // The time which this animation created.
       createdTime: this.createdTime,
+      // The time which an animation's current time when this animation has created.
+      currentTimeAtCreated: this.currentTimeAtCreated,
     };
   },
 
@@ -389,9 +392,8 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       }
 
       if (hasCurrentAnimation(changedAnimations)) {
-        // Only consider the state has having changed if any of delay, duration,
-        // iterationCount, iterationStart, or playbackRate has changed (for now
-        // at least).
+        // Only consider the state has having changed if any of effect timing properties,
+        // animationTimingFunction or playbackRate has changed.
         const newState = this.getState();
         const oldState = this.currentState;
         hasChanged = newState.delay !== oldState.delay ||
@@ -399,6 +401,11 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
                      newState.iterationStart !== oldState.iterationStart ||
                      newState.duration !== oldState.duration ||
                      newState.endDelay !== oldState.endDelay ||
+                     newState.direction !== oldState.direction ||
+                     newState.easing !== oldState.easing ||
+                     newState.fill !== oldState.fill ||
+                     newState.animationTimingFunction !==
+                       oldState.animationTimingFunction ||
                      newState.playbackRate !== oldState.playbackRate;
         break;
       }
@@ -618,8 +625,6 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
     this.allAnimationsPaused = false;
     this.targetActor.on("will-navigate", this.onWillNavigate);
     this.targetActor.on("navigate", this.onNavigate);
-
-    this.animationCreatedTimeMap = new Map();
   },
 
   destroy: function() {
@@ -629,9 +634,6 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
 
     this.stopAnimationPlayerUpdates();
     this.targetActor = this.observer = this.actors = this.walker = null;
-
-    this.animationCreatedTimeMap.clear();
-    this.animationCreatedTimeMap = null;
   },
 
   /**
@@ -657,8 +659,6 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
    * /devtools/server/actors/inspector
    */
   getAnimationPlayersForNode: function(nodeActor) {
-    this.updateAllAnimationsCreatedTime();
-
     const animations = nodeActor.rawNode.getAnimations({subtree: true});
 
     // Destroy previously stored actors
@@ -747,7 +747,6 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
           this.actors.splice(index, 1);
         }
 
-        this.updateAnimationCreatedTime(player);
         const createdTime = this.getCreatedTime(player);
         const actor = AnimationPlayerActor(this, player, createdTime);
         this.actors.push(actor);
@@ -965,39 +964,8 @@ exports.AnimationsActor = protocol.ActorClassWithSpec(animationsSpec, {
    * @param {Object} animation
    */
   getCreatedTime(animation) {
-    return this.animationCreatedTimeMap.get(animation);
-  },
-
-  /**
-   * Update all animation created time map.
-   */
-  updateAllAnimationsCreatedTime() {
-    const currentAnimations = this.getAllAnimations(this.targetActor.window.document);
-
-    // Remove invalid animations.
-    for (const previousAnimation of this.animationCreatedTimeMap.keys()) {
-      if (!currentAnimations.includes(previousAnimation)) {
-        this.animationCreatedTimeMap.delete(previousAnimation);
-      }
-    }
-
-    for (const animation of currentAnimations) {
-      this.updateAnimationCreatedTime(animation);
-    }
-  },
-
-  /**
-   * Update animation created time map.
-   *
-   * @param {Object} animation
-   */
-  updateAnimationCreatedTime(animation) {
-    if (!this.animationCreatedTimeMap.has(animation)) {
-      const createdTime =
-        animation.startTime ||
-        animation.timeline.currentTime - animation.currentTime / animation.playbackRate;
-      this.animationCreatedTimeMap.set(animation, createdTime);
-    }
+    return animation.startTime ||
+          animation.timeline.currentTime - animation.currentTime / animation.playbackRate;
   },
 
   /**

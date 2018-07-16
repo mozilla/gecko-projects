@@ -15,9 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 @register_callback_action(
-    title='Purge Caches',
-    name='purge-caches',
-    symbol='purge-caches',
+    title='Purge Worker Caches',
+    name='purge-cache',
+    symbol='purge-cache',
+    kind='hook',
+    generic=True,
     description=(
         'Purge any caches associated with this task '
         'across all workers of the same workertype as the task.'

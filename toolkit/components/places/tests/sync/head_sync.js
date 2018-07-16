@@ -18,6 +18,7 @@ ChromeUtils.import("resource://gre/modules/Log.jsm");
 ChromeUtils.import("resource://gre/modules/ObjectUtils.jsm");
 ChromeUtils.import("resource://gre/modules/PlacesSyncUtils.jsm");
 ChromeUtils.import("resource://gre/modules/SyncedBookmarksMirror.jsm");
+ChromeUtils.import("resource://services-common/utils.js");
 ChromeUtils.import("resource://testing-common/FileTestUtils.jsm");
 ChromeUtils.import("resource://testing-common/httpd.js");
 
@@ -135,7 +136,6 @@ async function fetchLocalTree(rootGuid) {
     let itemInfo = { guid, index, title, type };
     if (node.annos) {
       let syncableAnnos = node.annos.filter(anno => [
-        PlacesSyncUtils.bookmarks.SMART_BOOKMARKS_ANNO,
         PlacesUtils.LMANNO_FEEDURI,
         PlacesUtils.LMANNO_SITEURI,
       ].includes(anno.name));
@@ -259,12 +259,30 @@ BookmarkObserver.prototype = {
     });
   },
 
+  onPageAnnotationSet() {},
+  onItemAnnotationSet(itemId, name, source, dontUpdateLastModified) {
+    this.notifications.push({
+      name: "onItemAnnotationSet",
+      params: { itemId, name, source, dontUpdateLastModified },
+    });
+  },
+
+  onPageAnnotationRemoved() {},
+  onItemAnnotationRemoved(itemId, name, source) {
+    this.notifications.push({
+      name: "onItemAnnotationRemoved",
+      params: { itemId, name, source },
+    });
+  },
+
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsINavBookmarkObserver,
+    Ci.nsIAnnotationObserver,
   ]),
 
   check(expectedNotifications) {
     PlacesUtils.bookmarks.removeObserver(this);
+    PlacesUtils.annotations.removeObserver(this);
     if (!ObjectUtils.deepEqual(this.notifications, expectedNotifications)) {
       info(`Expected notifications: ${JSON.stringify(expectedNotifications)}`);
       info(`Actual notifications: ${JSON.stringify(this.notifications)}`);
@@ -279,6 +297,7 @@ BookmarkObserver.prototype = {
 function expectBookmarkChangeNotifications(options) {
   let observer = new BookmarkObserver(options);
   PlacesUtils.bookmarks.addObserver(observer);
+  PlacesUtils.annotations.addObserver(observer);
   return observer;
 }
 

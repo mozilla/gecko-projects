@@ -681,7 +681,7 @@ function saveMedia() {
         titleKey = "SaveAudioTitle";
 
       saveURL(url, null, titleKey, false, false, makeURI(item.baseURI),
-              null, gDocInfo.isContentWindowPrivate);
+              null, gDocInfo.isContentWindowPrivate, gDocInfo.principal);
     }
   } else {
     selectSaveFolder(function(aDirectory) {
@@ -689,7 +689,8 @@ function saveMedia() {
         var saveAnImage = function(aURIString, aChosenData, aBaseURI) {
           uniqueFile(aChosenData.file);
           internalSave(aURIString, null, null, null, null, false, "SaveImageTitle",
-                       aChosenData, aBaseURI, null, false, null, gDocInfo.isContentWindowPrivate);
+                       aChosenData, aBaseURI, null, false, null,
+                       gDocInfo.isContentWindowPrivate, gDocInfo.principal);
         };
 
         for (var i = 0; i < rowArray.length; i++) {

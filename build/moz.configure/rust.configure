@@ -67,8 +67,8 @@ def rust_compiler(rustc_info, cargo_info):
         You can install rust by running './mach bootstrap'
         or by directly running the installer from https://rustup.rs/
         '''))
-    rustc_min_version = Version('1.24.0')
-    cargo_min_version = Version('0.{}'.format(rustc_min_version.minor + 1))
+    rustc_min_version = Version('1.27.0')
+    cargo_min_version = rustc_min_version
 
     version = rustc_info.version
     if version < rustc_min_version:
@@ -149,7 +149,7 @@ def rust_triple_alias(host_or_target):
     """
     assert host_or_target in (host, target)
 
-    @depends(rustc, host_or_target, building_with_gcc, rust_supported_targets,
+    @depends(rustc, host_or_target, c_compiler, rust_supported_targets,
              when=rust_compiler)
     @imports('os')
     @imports('subprocess')
@@ -157,7 +157,7 @@ def rust_triple_alias(host_or_target):
     @imports(_from='mozbuild.shellutil', _import='quote')
     @imports(_from='tempfile', _import='mkstemp')
     @imports(_from='textwrap', _import='dedent')
-    def rust_target(rustc, host_or_target, building_with_gcc,
+    def rust_target(rustc, host_or_target, compiler_info,
                     rust_supported_targets):
         # Rust's --target options are similar to, but not exactly the same
         # as, the autoconf-derived targets we use.  An example would be that
@@ -169,7 +169,7 @@ def rust_triple_alias(host_or_target):
         # We correlate the autoconf-derived targets with the list of targets
         # rustc gives us with --print target-list.
         if host_or_target.kernel == 'WINNT':
-            if building_with_gcc:
+            if compiler_info.type in ('gcc', 'clang'):
                 host_or_target_os = 'windows-gnu'
             else:
                 host_or_target_os = 'windows-msvc'
@@ -275,6 +275,9 @@ def rust_tests(enable_rust_tests, rustdoc):
 
 
 set_config('MOZ_RUST_TESTS', rust_tests)
+
+# Bindgen can use rustfmt to format Rust file, but it's not required.
+rustfmt = check_prog('RUSTFMT', add_rustup_path('rustfmt'), allow_missing=True)
 
 option(env='WIN64_LINK', nargs=1, help='Path to link.exe that targets win64')
 option(env='WIN64_LIB', nargs=1, help='Paths to libraries for the win64 linker')

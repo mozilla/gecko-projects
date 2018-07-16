@@ -80,13 +80,13 @@ const WalkerFront = FrontClassWithSpec(walkerSpec, {
 
   /**
    * When reading an actor form off the wire, we want to hook it up to its
-   * parent front.  The protocol guarantees that the parent will be seen
-   * by the client in either a previous or the current request.
+   * parent or host front.  The protocol guarantees that the parent will
+   * be seen by the client in either a previous or the current request.
    * So if we've already seen this parent return it, otherwise create
    * a bare-bones stand-in node.  The stand-in node will be updated
    * with a real form by the end of the deserialization.
    */
-  ensureParentFront: function(id) {
+  ensureDOMNodeFront: function(id) {
     const front = this.get(id);
     if (front) {
       return front;
@@ -381,6 +381,8 @@ const WalkerFront = FrontClassWithSpec(walkerSpec, {
 
           // Release the document node and all of its children, even retained.
           this._releaseFront(targetFront, true);
+        } else if (change.type === "shadowRootAttached") {
+          targetFront._form.isShadowHost = true;
         } else if (change.type === "unretained") {
           // Retained orphans were force-released without the intervention of
           // client (probably a navigated frame).
@@ -397,6 +399,7 @@ const WalkerFront = FrontClassWithSpec(walkerSpec, {
         // mutation types.
         if (change.type === "inlineTextChild" ||
             change.type === "childList" ||
+            change.type === "shadowRootAttached" ||
             change.type === "nativeAnonymousChildList") {
           if (change.inlineTextChild) {
             targetFront.inlineTextChild =

@@ -1765,112 +1765,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText
   mozilla::LogicalSide TextEmphasisSide(mozilla::WritingMode aWM) const;
 };
 
-struct nsStyleImageOrientation
-{
-  static nsStyleImageOrientation CreateAsAngleAndFlip(double aRadians,
-                                                      bool aFlip) {
-    uint8_t orientation(0);
-
-    // Compute the final angle value, rounding to the closest quarter turn.
-    double roundedAngle = fmod(aRadians, 2 * M_PI);
-    if (roundedAngle < 0) {
-      roundedAngle = roundedAngle + 2 * M_PI;
-    }
-    if      (roundedAngle < 0.25 * M_PI) { orientation = ANGLE_0;  }
-    else if (roundedAngle < 0.75 * M_PI) { orientation = ANGLE_90; }
-    else if (roundedAngle < 1.25 * M_PI) { orientation = ANGLE_180;}
-    else if (roundedAngle < 1.75 * M_PI) { orientation = ANGLE_270;}
-    else                                 { orientation = ANGLE_0;  }
-
-    // Add a bit for 'flip' if needed.
-    if (aFlip) {
-      orientation |= FLIP_MASK;
-    }
-
-    return nsStyleImageOrientation(orientation);
-  }
-
-  static nsStyleImageOrientation CreateAsOrientationAndFlip(uint8_t aOrientation,
-                                                            bool aFlip) {
-    MOZ_ASSERT(aOrientation <= ANGLE_270);
-    if (aFlip) {
-      aOrientation |= FLIP_MASK;
-    }
-    return nsStyleImageOrientation(aOrientation);
-  }
-
-  static nsStyleImageOrientation CreateAsFlip() {
-    return nsStyleImageOrientation(FLIP_MASK);
-  }
-
-  static nsStyleImageOrientation CreateAsFromImage() {
-    return nsStyleImageOrientation(FROM_IMAGE_MASK);
-  }
-
-  // The default constructor yields 0 degrees of rotation and no flip.
-  nsStyleImageOrientation() : mOrientation(0) { }
-
-  bool IsDefault()   const { return mOrientation == 0; }
-  bool IsFlipped()   const { return mOrientation & FLIP_MASK; }
-  bool IsFromImage() const { return mOrientation & FROM_IMAGE_MASK; }
-  bool SwapsWidthAndHeight() const {
-    uint8_t angle = mOrientation & ORIENTATION_MASK;
-    return (angle == ANGLE_90) || (angle == ANGLE_270);
-  }
-
-  mozilla::image::Angle Angle() const {
-    switch (mOrientation & ORIENTATION_MASK) {
-      case ANGLE_0:   return mozilla::image::Angle::D0;
-      case ANGLE_90:  return mozilla::image::Angle::D90;
-      case ANGLE_180: return mozilla::image::Angle::D180;
-      case ANGLE_270: return mozilla::image::Angle::D270;
-      default:
-        MOZ_ASSERT_UNREACHABLE("Unexpected angle");
-        return mozilla::image::Angle::D0;
-    }
-  }
-
-  nsStyleCoord AngleAsCoord() const {
-    switch (mOrientation & ORIENTATION_MASK) {
-      case ANGLE_0:   return nsStyleCoord(0.0f,   eStyleUnit_Degree);
-      case ANGLE_90:  return nsStyleCoord(90.0f,  eStyleUnit_Degree);
-      case ANGLE_180: return nsStyleCoord(180.0f, eStyleUnit_Degree);
-      case ANGLE_270: return nsStyleCoord(270.0f, eStyleUnit_Degree);
-      default:
-        MOZ_ASSERT_UNREACHABLE("Unexpected angle");
-        return nsStyleCoord();
-    }
-  }
-
-  bool operator==(const nsStyleImageOrientation& aOther) const {
-    return aOther.mOrientation == mOrientation;
-  }
-
-  bool operator!=(const nsStyleImageOrientation& aOther) const {
-    return !(*this == aOther);
-  }
-
-protected:
-  enum Bits {
-    ORIENTATION_MASK = 0x1 | 0x2,  // The bottom two bits are the angle.
-    FLIP_MASK        = 0x4,        // Whether the image should be flipped.
-    FROM_IMAGE_MASK  = 0x8,        // Whether the image's inherent orientation
-  };                               // should be used.
-
-  enum Angles {
-    ANGLE_0   = 0,
-    ANGLE_90  = 1,
-    ANGLE_180 = 2,
-    ANGLE_270 = 3,
-  };
-
-  explicit nsStyleImageOrientation(uint8_t aOrientation)
-    : mOrientation(aOrientation)
-  { }
-
-  uint8_t mOrientation;
-};
-
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVisibility
 {
   explicit nsStyleVisibility(const nsPresContext* aContext);
@@ -1883,7 +1777,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleVisibility
 
   nsChangeHint CalcDifference(const nsStyleVisibility& aNewData) const;
 
-  nsStyleImageOrientation mImageOrientation;
+  mozilla::StyleImageOrientation mImageOrientation;
   uint8_t mDirection;                  // NS_STYLE_DIRECTION_*
   uint8_t mVisible;                    // NS_STYLE_VISIBILITY_VISIBLE_*
   uint8_t mImageRendering;             // NS_STYLE_IMAGE_RENDERING_*
@@ -2600,20 +2494,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTableBorder
   uint8_t       mEmptyCells;
 };
 
-enum nsStyleContentType {
-  eStyleContentType_String        = 1,
-  eStyleContentType_Image         = 10,
-  eStyleContentType_Attr          = 20,
-  eStyleContentType_Counter       = 30,
-  eStyleContentType_Counters      = 31,
-  eStyleContentType_OpenQuote     = 40,
-  eStyleContentType_CloseQuote    = 41,
-  eStyleContentType_NoOpenQuote   = 42,
-  eStyleContentType_NoCloseQuote  = 43,
-  eStyleContentType_AltContent    = 50,
-  eStyleContentType_Uninitialized
-};
-
 struct nsStyleContentAttr {
   RefPtr<nsAtom> mName; // Non-null.
   RefPtr<nsAtom> mNamespaceURL; // May be null.
@@ -2626,9 +2506,11 @@ struct nsStyleContentAttr {
 
 class nsStyleContentData
 {
+  using StyleContentType = mozilla::StyleContentType;
+
 public:
   nsStyleContentData()
-    : mType(eStyleContentType_Uninitialized)
+    : mType(StyleContentType::Uninitialized)
   {
     MOZ_COUNT_CTOR(nsStyleContentData);
     mContent.mString = nullptr;
@@ -2643,16 +2525,16 @@ public:
     return !(*this == aOther);
   }
 
-  nsStyleContentType GetType() const { return mType; }
+  StyleContentType GetType() const { return mType; }
 
   char16_t* GetString() const
   {
-    MOZ_ASSERT(mType == eStyleContentType_String);
+    MOZ_ASSERT(mType == StyleContentType::String);
     return mContent.mString;
   }
 
   const nsStyleContentAttr* GetAttr() const {
-    MOZ_ASSERT(mType == eStyleContentType_Attr);
+    MOZ_ASSERT(mType == StyleContentType::Attr);
     MOZ_ASSERT(mContent.mAttr);
     return mContent.mAttr;
    }
@@ -2676,8 +2558,8 @@ public:
 
   CounterFunction* GetCounters() const
   {
-    MOZ_ASSERT(mType == eStyleContentType_Counter ||
-               mType == eStyleContentType_Counters);
+    MOZ_ASSERT(mType == StyleContentType::Counter ||
+               mType == StyleContentType::Counters);
     MOZ_ASSERT(mContent.mCounters->mCounterStyle.IsResolved(),
                "Counter style should have been resolved");
     return mContent.mCounters;
@@ -2685,7 +2567,7 @@ public:
 
   nsStyleImageRequest* ImageRequest() const
   {
-    MOZ_ASSERT(mType == eStyleContentType_Image);
+    MOZ_ASSERT(mType == StyleContentType::Image);
     MOZ_ASSERT(mContent.mImage);
     return mContent.mImage;
   }
@@ -2695,34 +2577,34 @@ public:
     return ImageRequest()->get();
   }
 
-  void SetKeyword(nsStyleContentType aType)
+  void SetKeyword(StyleContentType aType)
   {
-    MOZ_ASSERT(aType == eStyleContentType_OpenQuote ||
-               aType == eStyleContentType_CloseQuote ||
-               aType == eStyleContentType_NoOpenQuote ||
-               aType == eStyleContentType_NoCloseQuote ||
-               aType == eStyleContentType_AltContent);
-    MOZ_ASSERT(mType == eStyleContentType_Uninitialized,
+    MOZ_ASSERT(aType == StyleContentType::OpenQuote ||
+               aType == StyleContentType::CloseQuote ||
+               aType == StyleContentType::NoOpenQuote ||
+               aType == StyleContentType::NoCloseQuote ||
+               aType == StyleContentType::AltContent);
+    MOZ_ASSERT(mType == StyleContentType::Uninitialized,
                "should only initialize nsStyleContentData once");
     mType = aType;
   }
 
-  void SetString(nsStyleContentType aType, const char16_t* aString)
+  void SetString(StyleContentType aType, const char16_t* aString)
   {
-    MOZ_ASSERT(aType == eStyleContentType_String);
+    MOZ_ASSERT(aType == StyleContentType::String);
     MOZ_ASSERT(aString);
-    MOZ_ASSERT(mType == eStyleContentType_Uninitialized,
+    MOZ_ASSERT(mType == StyleContentType::Uninitialized,
                "should only initialize nsStyleContentData once");
     mType = aType;
     mContent.mString = NS_strdup(aString);
   }
 
-  void SetCounters(nsStyleContentType aType,
+  void SetCounters(StyleContentType aType,
                    already_AddRefed<CounterFunction> aCounterFunction)
   {
-    MOZ_ASSERT(aType == eStyleContentType_Counter ||
-               aType == eStyleContentType_Counters);
-    MOZ_ASSERT(mType == eStyleContentType_Uninitialized,
+    MOZ_ASSERT(aType == StyleContentType::Counter ||
+               aType == StyleContentType::Counters);
+    MOZ_ASSERT(mType == StyleContentType::Uninitialized,
                "should only initialize nsStyleContentData once");
     mType = aType;
     mContent.mCounters = aCounterFunction.take();
@@ -2731,9 +2613,9 @@ public:
 
   void SetImageRequest(already_AddRefed<nsStyleImageRequest> aRequest)
   {
-    MOZ_ASSERT(mType == eStyleContentType_Uninitialized,
+    MOZ_ASSERT(mType == StyleContentType::Uninitialized,
                "should only initialize nsStyleContentData once");
-    mType = eStyleContentType_Image;
+    mType = StyleContentType::Image;
     mContent.mImage = aRequest.take();
     MOZ_ASSERT(mContent.mImage);
   }
@@ -2741,7 +2623,7 @@ public:
   void Resolve(nsPresContext*, const nsStyleContentData*);
 
 private:
-  nsStyleContentType mType;
+  StyleContentType mType;
   union {
     char16_t *mString;
     nsStyleContentAttr* mAttr;
@@ -2989,24 +2871,25 @@ public:
   nsStyleSVGPaintType Type() const { return mType; }
 
   void SetNone();
-  void SetColor(nscolor aColor);
+  void SetColor(mozilla::StyleComplexColor aColor);
   void SetPaintServer(mozilla::css::URLValue* aPaintServer,
                       nsStyleSVGFallbackType aFallbackType,
-                      nscolor aFallbackColor);
+                      mozilla::StyleComplexColor aFallbackColor);
   void SetPaintServer(mozilla::css::URLValue* aPaintServer) {
     SetPaintServer(aPaintServer, eStyleSVGFallbackType_NotSet,
-                   NS_RGB(0, 0, 0));
+                   mozilla::StyleComplexColor::Black());
   }
   void SetContextValue(nsStyleSVGPaintType aType,
                        nsStyleSVGFallbackType aFallbackType,
-                       nscolor aFallbackColor);
+                       mozilla::StyleComplexColor aFallbackColor);
   void SetContextValue(nsStyleSVGPaintType aType) {
-    SetContextValue(aType, eStyleSVGFallbackType_NotSet, NS_RGB(0, 0, 0));
+    SetContextValue(aType, eStyleSVGFallbackType_NotSet,
+                    mozilla::StyleComplexColor::Black());
   }
 
-  nscolor GetColor() const {
+  nscolor GetColor(mozilla::ComputedStyle* aComputedStyle) const {
     MOZ_ASSERT(mType == eStyleSVGPaintType_Color);
-    return mPaint.mColor;
+    return mPaint.mColor.CalcColor(aComputedStyle);
   }
 
   mozilla::css::URLValue* GetPaintServer() const {
@@ -3018,11 +2901,11 @@ public:
     return mFallbackType;
   }
 
-  nscolor GetFallbackColor() const {
+  nscolor GetFallbackColor(mozilla::ComputedStyle* aComputedStyle) const {
     MOZ_ASSERT(mType == eStyleSVGPaintType_Server ||
                mType == eStyleSVGPaintType_ContextFill ||
                mType == eStyleSVGPaintType_ContextStroke);
-    return mFallbackColor;
+    return mFallbackColor.CalcColor(aComputedStyle);
   }
 
   bool operator==(const nsStyleSVGPaint& aOther) const;
@@ -3034,13 +2917,15 @@ private:
   void Reset();
   void Assign(const nsStyleSVGPaint& aOther);
 
-  union {
-    nscolor mColor;
+  union ColorOrPaintServer {
+    mozilla::StyleComplexColor mColor;
     mozilla::css::URLValue* mPaintServer;
-  } mPaint;
+    explicit ColorOrPaintServer(mozilla::StyleComplexColor c) : mColor(c) {}
+  };
+  ColorOrPaintServer mPaint;
   nsStyleSVGPaintType mType;
   nsStyleSVGFallbackType mFallbackType;
-  nscolor mFallbackColor;
+  mozilla::StyleComplexColor mFallbackColor;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG

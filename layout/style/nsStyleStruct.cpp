@@ -1230,9 +1230,9 @@ nsStyleFilter::SetDropShadow(nsCSSShadowArray* aDropShadow)
 //
 nsStyleSVGReset::nsStyleSVGReset(const nsPresContext* aContext)
   : mMask(nsStyleImageLayers::LayerType::Mask)
-  , mStopColor(StyleComplexColor::FromColor(NS_RGB(0, 0, 0)))
-  , mFloodColor(StyleComplexColor::FromColor(NS_RGB(0, 0, 0)))
-  , mLightingColor(StyleComplexColor::FromColor(NS_RGB(255, 255, 255)))
+  , mStopColor(StyleComplexColor::Black())
+  , mFloodColor(StyleComplexColor::Black())
+  , mLightingColor(StyleComplexColor::White())
   , mStopOpacity(1.0f)
   , mFloodOpacity(1.0f)
   , mDominantBaseline(NS_STYLE_DOMINANT_BASELINE_AUTO)
@@ -1340,14 +1340,14 @@ nsStyleSVGReset::HasMask() const
 
 // nsStyleSVGPaint implementation
 nsStyleSVGPaint::nsStyleSVGPaint(nsStyleSVGPaintType aType)
-  : mType(aType)
+  : mPaint(StyleComplexColor::Black())
+  , mType(aType)
   , mFallbackType(eStyleSVGFallbackType_NotSet)
-  , mFallbackColor(NS_RGB(0, 0, 0))
+  , mFallbackColor(StyleComplexColor::Black())
 {
   MOZ_ASSERT(aType == nsStyleSVGPaintType(0) ||
              aType == eStyleSVGPaintType_None ||
              aType == eStyleSVGPaintType_Color);
-  mPaint.mColor = NS_RGB(0, 0, 0);
 }
 
 nsStyleSVGPaint::nsStyleSVGPaint(const nsStyleSVGPaint& aSource)
@@ -1368,7 +1368,7 @@ nsStyleSVGPaint::Reset()
     case eStyleSVGPaintType_None:
       break;
     case eStyleSVGPaintType_Color:
-      mPaint.mColor = NS_RGB(0, 0, 0);
+      mPaint.mColor = StyleComplexColor::Black();
       break;
     case eStyleSVGPaintType_Server:
       mPaint.mPaintServer->Release();
@@ -1377,7 +1377,7 @@ nsStyleSVGPaint::Reset()
     case eStyleSVGPaintType_ContextFill:
     case eStyleSVGPaintType_ContextStroke:
       mFallbackType = eStyleSVGFallbackType_NotSet;
-      mFallbackColor = NS_RGB(0, 0, 0);
+      mFallbackColor = StyleComplexColor::Black();
       break;
   }
   mType = nsStyleSVGPaintType(0);
@@ -1429,7 +1429,7 @@ nsStyleSVGPaint::SetNone()
 void
 nsStyleSVGPaint::SetContextValue(nsStyleSVGPaintType aType,
                                  nsStyleSVGFallbackType aFallbackType,
-                                 nscolor aFallbackColor)
+                                 StyleComplexColor aFallbackColor)
 {
   MOZ_ASSERT(aType == eStyleSVGPaintType_ContextFill ||
              aType == eStyleSVGPaintType_ContextStroke);
@@ -1440,7 +1440,7 @@ nsStyleSVGPaint::SetContextValue(nsStyleSVGPaintType aType,
 }
 
 void
-nsStyleSVGPaint::SetColor(nscolor aColor)
+nsStyleSVGPaint::SetColor(StyleComplexColor aColor)
 {
   Reset();
   mType = eStyleSVGPaintType_Color;
@@ -1450,7 +1450,7 @@ nsStyleSVGPaint::SetColor(nscolor aColor)
 void
 nsStyleSVGPaint::SetPaintServer(css::URLValue* aPaintServer,
                                 nsStyleSVGFallbackType aFallbackType,
-                                nscolor aFallbackColor)
+                                StyleComplexColor aFallbackColor)
 {
   MOZ_ASSERT(aPaintServer);
   Reset();
@@ -3286,7 +3286,7 @@ nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aNewL
 
 nsStyleBackground::nsStyleBackground(const nsPresContext* aContext)
   : mImage(nsStyleImageLayers::LayerType::Background)
-  , mBackgroundColor(StyleComplexColor::FromColor(NS_RGBA(0, 0, 0, 0)))
+  , mBackgroundColor(StyleComplexColor::Transparent())
 {
   MOZ_COUNT_CTOR(nsStyleBackground);
 }
@@ -3863,13 +3863,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
       }
     }
 
-    if (HasPerspectiveStyle() != aNewData.HasPerspectiveStyle()) {
-      // A change from/to being a containing block for position:fixed.
-      hint |= nsChangeHint_UpdateContainingBlock;
-    }
-
-    if (mChildPerspective != aNewData.mChildPerspective ||
-        mTransformStyle != aNewData.mTransformStyle ||
+    if (mTransformStyle != aNewData.mTransformStyle ||
         mTransformBox != aNewData.mTransformBox) {
       transformHint |= kUpdateOverflowAndRepaintHint;
     }
@@ -3885,6 +3879,16 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
         hint |= nsChangeHint_NeutralChange;
       }
     }
+  }
+
+  if (HasPerspectiveStyle() != aNewData.HasPerspectiveStyle()) {
+    // A change from/to being a containing block for position:fixed.
+    hint |= nsChangeHint_UpdateContainingBlock |
+            nsChangeHint_UpdateOverflow |
+            nsChangeHint_RepaintFrame;
+  } else if (mChildPerspective != aNewData.mChildPerspective) {
+    hint |= nsChangeHint_UpdateOverflow |
+            nsChangeHint_RepaintFrame;
   }
 
   // Note that the HasTransformStyle() != aNewData.HasTransformStyle()
@@ -4090,17 +4094,17 @@ nsStyleContentData::~nsStyleContentData()
 {
   MOZ_COUNT_DTOR(nsStyleContentData);
 
-  if (mType == eStyleContentType_Image) {
+  if (mType == StyleContentType::Image) {
     // FIXME(emilio): Is this needed now that URLs are not main thread only?
     NS_ReleaseOnMainThreadSystemGroup(
       "nsStyleContentData::mContent.mImage", dont_AddRef(mContent.mImage));
     mContent.mImage = nullptr;
-  } else if (mType == eStyleContentType_Counter ||
-             mType == eStyleContentType_Counters) {
+  } else if (mType == StyleContentType::Counter ||
+             mType == StyleContentType::Counters) {
     mContent.mCounters->Release();
-  } else if (mType == eStyleContentType_String) {
+  } else if (mType == StyleContentType::String) {
     free(mContent.mString);
-  } else if (mType == eStyleContentType_Attr) {
+  } else if (mType == StyleContentType::Attr) {
     delete mContent.mAttr;
   } else {
     MOZ_ASSERT(mContent.mString == nullptr, "Leaking due to missing case");
@@ -4112,19 +4116,19 @@ nsStyleContentData::nsStyleContentData(const nsStyleContentData& aOther)
 {
   MOZ_COUNT_CTOR(nsStyleContentData);
   switch (mType) {
-    case eStyleContentType_Image:
+    case StyleContentType::Image:
       mContent.mImage = aOther.mContent.mImage;
       mContent.mImage->AddRef();
       break;
-    case eStyleContentType_Counter:
-    case eStyleContentType_Counters:
+    case StyleContentType::Counter:
+    case StyleContentType::Counters:
       mContent.mCounters = aOther.mContent.mCounters;
       mContent.mCounters->AddRef();
       break;
-    case eStyleContentType_Attr:
+    case StyleContentType::Attr:
       mContent.mAttr = new nsStyleContentAttr(*aOther.mContent.mAttr);
       break;
-    case eStyleContentType_String:
+    case StyleContentType::String:
       mContent.mString = NS_strdup(aOther.mContent.mString);
       break;
     default:
@@ -4160,17 +4164,17 @@ nsStyleContentData::operator==(const nsStyleContentData& aOther) const
   if (mType != aOther.mType) {
     return false;
   }
-  if (mType == eStyleContentType_Image) {
+  if (mType == StyleContentType::Image) {
     return DefinitelyEqualImages(mContent.mImage, aOther.mContent.mImage);
   }
-  if (mType == eStyleContentType_Attr) {
+  if (mType == StyleContentType::Attr) {
     return *mContent.mAttr == *aOther.mContent.mAttr;
   }
-  if (mType == eStyleContentType_Counter ||
-      mType == eStyleContentType_Counters) {
+  if (mType == StyleContentType::Counter ||
+      mType == StyleContentType::Counters) {
     return *mContent.mCounters == *aOther.mContent.mCounters;
   }
-  if (mType == eStyleContentType_String) {
+  if (mType == StyleContentType::String) {
     return NS_strcmp(mContent.mString, aOther.mContent.mString) == 0;
   }
   MOZ_ASSERT(!mContent.mString && !aOther.mContent.mString);
@@ -4182,16 +4186,16 @@ nsStyleContentData::Resolve(
   nsPresContext* aPresContext, const nsStyleContentData* aOldStyle)
 {
   switch (mType) {
-    case eStyleContentType_Image:
+    case StyleContentType::Image:
       if (!mContent.mImage->IsResolved()) {
         const nsStyleImageRequest* oldRequest =
-          (aOldStyle && aOldStyle->mType == eStyleContentType_Image)
+          (aOldStyle && aOldStyle->mType == StyleContentType::Image)
           ? aOldStyle->mContent.mImage : nullptr;
         mContent.mImage->Resolve(aPresContext, oldRequest);
       }
       break;
-    case eStyleContentType_Counter:
-    case eStyleContentType_Counters: {
+    case StyleContentType::Counter:
+    case StyleContentType::Counters: {
       mContent.mCounters->
         mCounterStyle.Resolve(aPresContext->CounterStyleManager());
       break;

@@ -393,13 +393,6 @@ RsdparsaSdpAttributeList::GetSsrc() const
   return *static_cast<const SdpSsrcAttributeList*>(attr);
 }
 
-const SdpSsrcGroupAttributeList&
-RsdparsaSdpAttributeList::GetSsrcGroup() const
-{
-  // TODO: See Bug 1437166.
-  MOZ_CRASH("Not yet implemented");
-}
-
 void
 RsdparsaSdpAttributeList::LoadAttribute(RustAttributeList *attributeList,
                                         AttributeType type)
@@ -442,6 +435,9 @@ RsdparsaSdpAttributeList::LoadAttribute(RustAttributeList *attributeList,
       case SdpAttribute::kEndOfCandidatesAttribute:
         LoadFlags(attributeList);
         return;
+      case SdpAttribute::kMaxMessageSizeAttribute:
+        LoadMaxMessageSize(attributeList);
+        return ;
       case SdpAttribute::kMidAttribute:
         LoadMid(attributeList);
         return;
@@ -475,20 +471,23 @@ RsdparsaSdpAttributeList::LoadAttribute(RustAttributeList *attributeList,
       case SdpAttribute::kRidAttribute:
         LoadRids(attributeList);
         return;
+      case SdpAttribute::kSctpPortAttribute:
+        LoadSctpPort(attributeList);
+        return ;
       case SdpAttribute::kExtmapAttribute:
         LoadExtmap(attributeList);
         return;
       case SdpAttribute::kSimulcastAttribute:
         LoadSimulcast(attributeList);
         return;
+      case SdpAttribute::kMaxptimeAttribute:
+        LoadMaxPtime(attributeList);
+        return;
 
       case SdpAttribute::kDtlsMessageAttribute:
       case SdpAttribute::kLabelAttribute:
-      case SdpAttribute::kMaxptimeAttribute:
       case SdpAttribute::kSsrcGroupAttribute:
-      case SdpAttribute::kMaxMessageSizeAttribute:
       case SdpAttribute::kRtcpRsizeAttribute:
-      case SdpAttribute::kSctpPortAttribute:
       case SdpAttribute::kCandidateAttribute:
       case SdpAttribute::kConnectionAttribute:
       case SdpAttribute::kIceMismatchAttribute:
@@ -684,13 +683,6 @@ RsdparsaSdpAttributeList::LoadRtpmap(RustAttributeList* attributeList)
     std::string name = convertStringView(rtpmap.codecName);
     auto codec = strToCodecType(name);
     uint32_t channels = rtpmap.channels;
-    if (mIsVideo) {
-      // channels is expected to be 0 for video in higher level code,
-      // channels don't make sense, so the value is arbitrary. 1 is
-      // the arbitrary value for that code.
-      // TODO: handle this in Rust parser, see Bug 1436403
-      channels = 0;
-    }
     rtpmapList->PushEntry(payloadType, codec, name,
                           rtpmap.frequency, channels);
   }
@@ -810,6 +802,16 @@ RsdparsaSdpAttributeList::LoadFlags(RustAttributeList* attributeList)
 }
 
 void
+RsdparsaSdpAttributeList::LoadMaxMessageSize(RustAttributeList* attributeList)
+{
+  int64_t max_msg_size = sdp_get_max_msg_size(attributeList);
+  if (max_msg_size >= 0) {
+    SetAttribute(new SdpNumberAttribute(SdpAttribute::kMaxMessageSizeAttribute,
+                                        static_cast<uint32_t>(max_msg_size)));
+  }
+}
+
+void
 RsdparsaSdpAttributeList::LoadMid(RustAttributeList* attributeList)
 {
   StringView rustMid;
@@ -866,10 +868,7 @@ RsdparsaSdpAttributeList::LoadGroup(RustAttributeList* attributeList)
     return;
   }
   auto rustGroups = MakeUnique<RustSdpAttributeGroup[]>(numGroup);
-  nsresult nr = sdp_get_groups(attributeList, numGroup, rustGroups.get());
-  if (NS_FAILED(nr)) {
-    return;
-  }
+  sdp_get_groups(attributeList, numGroup, rustGroups.get());
   auto groups = MakeUnique<SdpGroupAttributeList>();
   for(size_t i = 0; i < numGroup; i++) {
     RustSdpAttributeGroup& group = rustGroups[i];
@@ -1126,6 +1125,16 @@ RsdparsaSdpAttributeList::LoadRids(RustAttributeList* attributeList)
 }
 
 void
+RsdparsaSdpAttributeList::LoadSctpPort(RustAttributeList* attributeList)
+{
+  int64_t port = sdp_get_sctp_port(attributeList);
+  if (port >= 0) {
+    SetAttribute(new SdpNumberAttribute(SdpAttribute::kSctpPortAttribute,
+                                        static_cast<uint32_t>(port)));
+  }
+}
+
+void
 RsdparsaSdpAttributeList::LoadExtmap(RustAttributeList* attributeList)
 {
   size_t numExtmap = sdp_get_extmap_count(attributeList);
@@ -1140,7 +1149,7 @@ RsdparsaSdpAttributeList::LoadExtmap(RustAttributeList* attributeList)
     RustSdpAttributeExtmap& rustExtmap = rustExtmaps[i];
     std::string name = convertStringView(rustExtmap.url);
     SdpDirectionAttribute::Direction direction;
-    bool directionSpecified = true;
+    bool directionSpecified = rustExtmap.direction_specified;
     switch(rustExtmap.direction) {
       case RustDirection::kRustRecvonly:
         direction = SdpDirectionAttribute::kRecvonly;
@@ -1152,9 +1161,7 @@ RsdparsaSdpAttributeList::LoadExtmap(RustAttributeList* attributeList)
         direction = SdpDirectionAttribute::kSendrecv;
         break;
       case RustDirection::kRustInactive:
-        // TODO: Fix this, see Bug 1438544
-        direction = SdpDirectionAttribute::kSendrecv;
-        directionSpecified = false;
+        direction = SdpDirectionAttribute::kInactive;
         break;
     }
     std::string extensionAttributes;
@@ -1165,6 +1172,16 @@ RsdparsaSdpAttributeList::LoadExtmap(RustAttributeList* attributeList)
   SetAttribute(extmaps.release());
 }
 
+void
+RsdparsaSdpAttributeList::LoadMaxPtime(RustAttributeList* attributeList)
+{
+  uint64_t maxPtime = 0;
+  nsresult nr = sdp_get_maxptime(attributeList, &maxPtime);
+  if (NS_SUCCEEDED(nr)) {
+    SetAttribute(new SdpNumberAttribute(SdpAttribute::kMaxptimeAttribute,
+                                        maxPtime));
+  }
+}
 
 bool
 RsdparsaSdpAttributeList::IsAllowedHere(SdpAttribute::AttributeType type)

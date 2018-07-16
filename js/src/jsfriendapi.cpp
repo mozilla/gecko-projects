@@ -8,6 +8,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/TimeStamp.h"
 
 #include <stdint.h>
 
@@ -382,6 +383,12 @@ js::IsFunctionObject(JSObject* obj)
     return obj->is<JSFunction>();
 }
 
+JS_FRIEND_API(bool)
+js::UninlinedIsCrossCompartmentWrapper(const JSObject* obj)
+{
+    return js::IsCrossCompartmentWrapper(obj);
+}
+
 JS_FRIEND_API(JSObject*)
 js::GetGlobalForObjectCrossCompartment(JSObject* obj)
 {
@@ -420,7 +427,7 @@ js::NotifyAnimationActivity(JSObject* obj)
 {
     MOZ_ASSERT(obj->is<GlobalObject>());
 
-    int64_t timeNow = PRMJ_Now();
+    auto timeNow = mozilla::TimeStamp::Now();
     obj->as<GlobalObject>().realm()->lastAnimationTime = timeNow;
     obj->runtimeFromMainThread()->lastAnimationTime = timeNow;
 }
@@ -1398,14 +1405,16 @@ js::detail::IdMatchesAtom(jsid id, JSString* atom)
 }
 
 JS_FRIEND_API(void)
-js::PrepareScriptEnvironmentAndInvoke(JSContext* cx, HandleObject scope, ScriptEnvironmentPreparer::Closure& closure)
+js::PrepareScriptEnvironmentAndInvoke(JSContext* cx, HandleObject global,
+                                      ScriptEnvironmentPreparer::Closure& closure)
 {
     MOZ_ASSERT(!cx->isExceptionPending());
+    MOZ_ASSERT(global->is<GlobalObject>());
 
     MOZ_RELEASE_ASSERT(cx->runtime()->scriptEnvironmentPreparer,
                        "Embedding needs to set a scriptEnvironmentPreparer callback");
 
-    cx->runtime()->scriptEnvironmentPreparer->invoke(scope, closure);
+    cx->runtime()->scriptEnvironmentPreparer->invoke(global, closure);
 }
 
 JS_FRIEND_API(void)

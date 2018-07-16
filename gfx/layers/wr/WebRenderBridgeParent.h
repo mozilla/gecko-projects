@@ -7,6 +7,7 @@
 #ifndef mozilla_layers_WebRenderBridgeParent_h
 #define mozilla_layers_WebRenderBridgeParent_h
 
+#include <unordered_map>
 #include <unordered_set>
 
 #include "CompositableHost.h"           // for CompositableHost, ImageCompositeNotificationInfo
@@ -53,7 +54,8 @@ public:
                         CompositorVsyncScheduler* aScheduler,
                         RefPtr<wr::WebRenderAPI>&& aApi,
                         RefPtr<AsyncImagePipelineManager>&& aImageMgr,
-                        RefPtr<CompositorAnimationStorage>&& aAnimStorage);
+                        RefPtr<CompositorAnimationStorage>&& aAnimStorage,
+                        TimeDuration aVsyncRate);
 
   static WebRenderBridgeParent* CreateDestroyed(const wr::PipelineId& aPipelineId);
 
@@ -87,6 +89,7 @@ public:
                                              nsTArray<RefCountedShmem>&& aSmallShmems,
                                              nsTArray<ipc::Shmem>&& aLargeShmems,
                                              const wr::IdNamespace& aIdNamespace,
+                                             const TimeStamp& aRefreshStartTime,
                                              const TimeStamp& aTxnStartTime,
                                              const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvEmptyTransaction(const FocusTarget& aFocusTarget,
@@ -97,6 +100,7 @@ public:
                                                const uint64_t& aFwdTransactionId,
                                                const TransactionId& aTransactionId,
                                                const wr::IdNamespace& aIdNamespace,
+                                               const TimeStamp& aRefreshStartTime,
                                                const TimeStamp& aTxnStartTime,
                                                const TimeStamp& aFwdTime) override;
   mozilla::ipc::IPCResult RecvSetFocusTarget(const FocusTarget& aFocusTarget) override;
@@ -150,6 +154,7 @@ public:
 
   void HoldPendingTransactionId(const wr::Epoch& aWrEpoch,
                                 TransactionId aTransactionId,
+                                const TimeStamp& aRefreshStartTime,
                                 const TimeStamp& aTxnStartTime,
                                 const TimeStamp& aFwdTime);
   TransactionId LastPendingTransactionId();
@@ -184,7 +189,8 @@ public:
   void UpdateWebRender(CompositorVsyncScheduler* aScheduler,
                        wr::WebRenderAPI* aApi,
                        AsyncImagePipelineManager* aImageMgr,
-                       CompositorAnimationStorage* aAnimStorage);
+                       CompositorAnimationStorage* aAnimStorage,
+                       const TextureFactoryIdentifier& aTextureFactoryIdentifier);
 
   void RemoveEpochDataPriorTo(const wr::Epoch& aRenderedEpoch);
 
@@ -203,6 +209,15 @@ private:
                        wr::TransactionBuilder& aUpdates);
   bool AddExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
                         wr::TransactionBuilder& aResources);
+  bool UpdateExternalImage(wr::ExternalImageId aExtId, wr::ImageKey aKey,
+                           const ImageIntRect& aDirtyRect,
+                           wr::TransactionBuilder& aResources);
+
+  bool PushExternalImageForTexture(wr::ExternalImageId aExtId,
+                                   wr::ImageKey aKey,
+                                   TextureHost* aTexture,
+                                   bool aIsUpdate,
+                                   wr::TransactionBuilder& aResources);
 
   void AddPipelineIdForCompositable(const wr::PipelineId& aPipelineIds,
                                     const CompositableHandle& aHandle,
@@ -210,9 +225,8 @@ private:
   void RemovePipelineIdForCompositable(const wr::PipelineId& aPipelineId,
                                        wr::TransactionBuilder& aTxn);
 
-  void AddExternalImageIdForCompositable(const ExternalImageId& aImageId,
-                                         const CompositableHandle& aHandle);
   void RemoveExternalImageId(const ExternalImageId& aImageId);
+  void ReleaseTextureOfImage(const wr::ImageKey& aKey);
 
   LayersId GetLayersId() const;
   void ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
@@ -229,6 +243,8 @@ private:
   bool SampleAnimations(nsTArray<wr::WrOpacityProperty>& aOpacityArray,
                         nsTArray<wr::WrTransformProperty>& aTransformArray);
 
+  bool IsRootWebRenderBridgeParent() const;
+
   CompositorBridgeParent* GetRootCompositorBridgeParent() const;
 
   RefPtr<WebRenderBridgeParent> GetRootWebRenderBridgeParent() const;
@@ -244,14 +260,20 @@ private:
 
 private:
   struct PendingTransactionId {
-    PendingTransactionId(const wr::Epoch& aEpoch, TransactionId aId, const TimeStamp& aTxnStartTime, const TimeStamp& aFwdTime)
+    PendingTransactionId(const wr::Epoch& aEpoch,
+                         TransactionId aId,
+                         const TimeStamp& aRefreshStartTime,
+                         const TimeStamp& aTxnStartTime,
+                         const TimeStamp& aFwdTime)
       : mEpoch(aEpoch)
       , mId(aId)
+      , mRefreshStartTime(aRefreshStartTime)
       , mTxnStartTime(aTxnStartTime)
       , mFwdTime(aFwdTime)
     {}
     wr::Epoch mEpoch;
     TransactionId mId;
+    TimeStamp mRefreshStartTime;
     TimeStamp mTxnStartTime;
     TimeStamp mFwdTime;
   };
@@ -277,10 +299,11 @@ private:
   // mActiveAnimations is used to avoid leaking animations when WebRenderBridgeParent is
   // destroyed abnormally and Tab move between different windows.
   std::unordered_set<uint64_t> mActiveAnimations;
-  nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mAsyncCompositables;
-  nsDataHashtable<nsUint64HashKey, RefPtr<WebRenderImageHost>> mExternalImageIds;
-  nsTHashtable<nsUint64HashKey> mSharedSurfaceIds;
+  std::unordered_map<uint64_t, RefPtr<WebRenderImageHost>> mAsyncCompositables;
+  std::unordered_map<uint64_t, CompositableTextureHostRef> mTextureHosts;
+  std::unordered_set<uint64_t> mSharedSurfaceIds;
 
+  TimeDuration mVsyncRate;
   TimeStamp mPreviousFrameTimeStamp;
   // These fields keep track of the latest layer observer epoch values in the child and the
   // parent. mChildLayerObserverEpoch is the latest epoch value received from the child.

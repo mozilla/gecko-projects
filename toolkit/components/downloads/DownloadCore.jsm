@@ -1731,19 +1731,21 @@ this.DownloadSaver.prototype = {
     // The start time is always available when we reach this point.
     let startPRTime = this.download.startTime.getTime() * 1000;
 
-    try {
-      gDownloadHistory.addDownload(sourceUri, referrerUri, startPRTime,
-                                   targetUri);
-    } catch (ex) {
-      if (!(ex instanceof Components.Exception) ||
-          ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
-        throw ex;
+    if ("@mozilla.org/browser/download-history;1" in Cc) {
+      try {
+        gDownloadHistory.addDownload(sourceUri, referrerUri, startPRTime,
+                                     targetUri);
+      } catch (ex) {
+        if (!(ex instanceof Components.Exception) ||
+            ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
+          throw ex;
+        }
+        //
+        // Under normal operation the download history service may not
+        // be available. We don't want all downloads that are public to fail
+        // when this happens so we'll ignore this error and this error only!
+        //
       }
-      //
-      // Under normal operation the download history service may not
-      // be available. We don't want all downloads that are public to fail
-      // when this happens so we'll ignore this error and this error only!
-      //
     }
   },
 
@@ -2363,14 +2365,8 @@ this.DownloadLegacySaver.prototype = {
    *
    * @param aRequest
    *        nsIRequest associated to the status update.
-   * @param aAlreadyAddedToHistory
-   *        Indicates that the nsIExternalHelperAppService component already
-   *        added the download to the browsing history, unless it was started
-   *        from a private browsing window.  When this parameter is false, the
-   *        download is added to the browsing history here.  Private downloads
-   *        are never added to history even if this parameter is false.
    */
-  onTransferStarted(aRequest, aAlreadyAddedToHistory) {
+  onTransferStarted(aRequest) {
     // Store a reference to the request, used in some cases when handling
     // completion, and also checked during the download by unit tests.
     this.request = aRequest;
@@ -2394,9 +2390,7 @@ this.DownloadLegacySaver.prototype = {
       this.download.source.referrer = aRequest.referrer.spec;
     }
 
-    if (!aAlreadyAddedToHistory) {
-      this.addToHistory();
-    }
+    this.addToHistory();
   },
 
   /**

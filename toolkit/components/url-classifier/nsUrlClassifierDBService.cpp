@@ -1673,7 +1673,7 @@ nsUrlClassifierDBService::Init()
     GETHASH_NOISE_DEFAULT);
 
   for (uint8_t i = 0; i < kObservedPrefs.Length(); i++) {
-    Preferences::AddStrongObserver(this, kObservedPrefs[i].get());
+    Preferences::AddStrongObserver(this, kObservedPrefs[i]);
   }
 
   return NS_OK;
@@ -2392,7 +2392,6 @@ nsUrlClassifierDBService::GetCacheInfo(const nsACString& aTable,
   NS_ENSURE_TRUE(gDbBackgroundThread, NS_ERROR_NOT_INITIALIZED);
 
   return mWorkerProxy->GetCacheInfo(aTable, aCallback);
-  return NS_OK;
 }
 
 nsresult
@@ -2496,7 +2495,7 @@ nsUrlClassifierDBService::Shutdown()
   nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
   if (prefs) {
     for (uint8_t i = 0; i < kObservedPrefs.Length(); i++) {
-      prefs->RemoveObserver(kObservedPrefs[i].get(), this);
+      prefs->RemoveObserver(kObservedPrefs[i], this);
     }
   }
 

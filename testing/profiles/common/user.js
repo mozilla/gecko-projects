@@ -1,11 +1,14 @@
 // Base preferences file used by both unittest and perf harnesses.
 /* globals user_pref */
 user_pref("app.update.enabled", false);
+user_pref("browser.chrome.guess_favicon", false);
 user_pref("browser.dom.window.dump.enabled", true);
 // Use an empty list of sites to avoid fetching
 user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
 user_pref("browser.newtabpage.activity-stream.feeds.snippets", false);
 user_pref("browser.newtabpage.activity-stream.tippyTop.service.endpoint", "");
+// For Activity Stream firstrun page, use an empty string to avoid fetching.
+user_pref("browser.newtabpage.activity-stream.fxaccounts.endpoint", "");
 // Tell the search service we are running in the US.  This also has the desired
 // side-effect of preventing our geoip lookup.
 user_pref("browser.search.countryCode", "US");
@@ -37,3 +40,5 @@ user_pref("media.gmp-manager.updateEnabled", false);
 // Make enablePrivilege continue to work for test code. :-(
 user_pref("security.turn_off_all_security_so_that_viruses_can_take_over_this_computer", true);
 user_pref("xpinstall.signatures.required", false);
+// Prevent Remote Settings to issue non local connections.
+user_pref("services.settings.server", "http://localhost/remote-settings-dummy/v1");

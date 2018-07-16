@@ -127,7 +127,7 @@ XrayAwareCalleeGlobal(JSObject* fun)
 
   if (!js::FunctionHasNativeReserved(fun)) {
       // Just a normal function, no Xrays involved.
-      return js::GetGlobalForObjectCrossCompartment(fun);
+      return JS::GetNonCCWObjectGlobal(fun);
   }
 
   // The functions we expect here have the Xray wrapper they're associated with
@@ -142,7 +142,7 @@ XrayAwareCalleeGlobal(JSObject* fun)
   MOZ_ASSERT(IsXrayWrapper(&v.toObject()));
 
   JSObject* xrayTarget = js::UncheckedUnwrap(&v.toObject());
-  return js::GetGlobalForObjectCrossCompartment(xrayTarget);
+  return JS::GetNonCCWObjectGlobal(xrayTarget);
 }
 
 JSObject*
@@ -233,8 +233,7 @@ ReportWrapperDenial(JSContext* cx, HandleId id, WrapperDenialType type, const ch
 
     // Compute the current window id if any.
     uint64_t windowId = 0;
-    nsGlobalWindowInner* win = WindowGlobalOrNull(CurrentGlobalOrNull(cx));
-    if (win)
+    if (nsGlobalWindowInner* win = CurrentWindowOrNull(cx))
       windowId = win->WindowID();
 
 

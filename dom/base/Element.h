@@ -150,7 +150,7 @@ public:
 #ifdef MOZILLA_INTERNAL_API
   explicit Element(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo) :
     FragmentOrElement(aNodeInfo),
-    mState(NS_EVENT_STATE_MOZ_READONLY)
+    mState(NS_EVENT_STATE_MOZ_READONLY | NS_EVENT_STATE_DEFINED)
   {
     MOZ_ASSERT(mNodeInfo->NodeType() == ELEMENT_NODE,
                "Bad NodeType in aNodeInfo");
@@ -520,6 +520,10 @@ public:
    */
   inline CustomElementData* GetCustomElementData() const
   {
+    if (!HasCustomElementData()) {
+      return nullptr;
+    }
+
     const nsExtendedDOMSlots* slots = GetExistingExtendedDOMSlots();
     return slots ? slots->mCustomElementData.get() : nullptr;
   }
@@ -549,6 +553,14 @@ public:
    */
   void SetCustomElementDefinition(CustomElementDefinition* aDefinition);
 
+  void SetDefined(bool aSet)
+  {
+    if (aSet) {
+      AddStates(NS_EVENT_STATE_DEFINED);
+    } else {
+      RemoveStates(NS_EVENT_STATE_DEFINED);
+    }
+  }
 protected:
   /**
    * Method to get the _intrinsic_ content state of this element.  This is the
@@ -582,6 +594,10 @@ protected:
 
   already_AddRefed<ShadowRoot> AttachShadowInternal(
     ShadowRootMode, ErrorResult& aError);
+
+  MOZ_CAN_RUN_SCRIPT
+  nsIScrollableFrame* GetScrollFrame(nsIFrame **aStyledFrame = nullptr,
+                                     FlushType aFlushType = FlushType::Layout);
 
 private:
   // Need to allow the ESM, nsGlobalWindow, and the focus manager to
@@ -1089,6 +1105,8 @@ public:
   void GetAttributeNS(const nsAString& aNamespaceURI,
                       const nsAString& aLocalName,
                       nsAString& aReturn);
+  bool ToggleAttribute(const nsAString& aName, const Optional<bool>& aForce,
+                       nsIPrincipal* aTriggeringPrincipal, ErrorResult& aError);
   void SetAttribute(const nsAString& aName, const nsAString& aValue,
                     nsIPrincipal* aTriggeringPrincipal, ErrorResult& aError);
   void SetAttributeNS(const nsAString& aNamespaceURI,
@@ -1899,8 +1917,6 @@ protected:
   InternalGetAttrNameFromQName(const nsAString& aStr,
                                nsAutoString* aNameToUse = nullptr) const;
 
-  nsIFrame* GetStyledFrame();
-
   virtual Element* GetNameSpaceElement() override
   {
     return this;
@@ -1970,10 +1986,6 @@ private:
    * @return the frame's client area
    */
   MOZ_CAN_RUN_SCRIPT nsRect GetClientAreaRect();
-
-  MOZ_CAN_RUN_SCRIPT
-  nsIScrollableFrame* GetScrollFrame(nsIFrame **aStyledFrame = nullptr,
-                                     FlushType aFlushType = FlushType::Layout);
 
   // Prevent people from doing pointless checks/casts on Element instances.
   void IsElement() = delete;

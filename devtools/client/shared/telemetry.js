@@ -45,6 +45,14 @@ class Telemetry {
   }
 
   /**
+   * The number of milliseconds since process start using monotonic
+   * timestamps (unaffected by system clock changes).
+   */
+  msSinceProcessStart() {
+    return Services.telemetry.msSinceProcessStart();
+  }
+
+  /**
    * Starts a timer associated with a telemetry histogram. The timer can be
    * directly associated with a histogram, or with a pair of a histogram and
    * an object.
@@ -634,6 +642,7 @@ function getChartsFromToolId(id) {
       countHist = `DEVTOOLS_${id}_OPENED_COUNT`;
       break;
     case "ACCESSIBILITY":
+    case "APPLICATION":
       timerHist = `DEVTOOLS_${id}_TIME_ACTIVE_SECONDS`;
       countScalar = `devtools.${lowerCaseId}.opened_count`;
       break;

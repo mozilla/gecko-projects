@@ -21,8 +21,8 @@ toolkit.jar:
 *  skin/classic/global/notification.css
 *  skin/classic/global/numberbox.css
    skin/classic/global/popup.css
-   skin/classic/global/printPreview.css
    skin/classic/global/radio.css
+   skin/classic/global/richlistbox.css
    skin/classic/global/scrollbox.css
    skin/classic/global/splitter.css
    skin/classic/global/tabbox.css
@@ -31,8 +31,6 @@ toolkit.jar:
    skin/classic/global/toolbarbutton.css
    skin/classic/global/tree.css
 *  skin/classic/global/alerts/alert.css                        (alerts/alert.css)
-   skin/classic/global/arrow/arrow-dn-hov.gif                  (arrow/arrow-dn-hov.gif)
-   skin/classic/global/arrow/arrow-up-hov.gif                  (arrow/arrow-up-hov.gif)
 
    skin/classic/global/icons/Authentication.png                (icons/Authentication.png)
    skin/classic/global/icons/blacklist_favicon.png             (icons/blacklist_favicon.png)
@@ -44,5 +42,6 @@ toolkit.jar:
 
 *  skin/classic/global/in-content/common.css                   (in-content/common.css)
 *  skin/classic/global/in-content/info-pages.css               (in-content/info-pages.css)
-   skin/classic/global/tree/twisty-clsd.png                    (tree/twisty-clsd.png)
-   skin/classic/global/tree/twisty-open.png                    (tree/twisty-open.png)
+   skin/classic/global/tree/twisty-collapsed.svg               (tree/twisty-collapsed.svg)
+   skin/classic/global/tree/twisty-collapsed-rtl.svg           (tree/twisty-collapsed-rtl.svg)
+   skin/classic/global/tree/twisty-expanded.svg                (tree/twisty-expanded.svg)

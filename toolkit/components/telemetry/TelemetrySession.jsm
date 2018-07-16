@@ -566,6 +566,17 @@ var TelemetrySession = Object.freeze({
   getMetadata(reason) {
     return Impl.getMetadata(reason);
   },
+
+  /**
+   * Reset the subsession and profile subsession counter.
+   * This should only be called when the profile should be considered completely new,
+   * e.g. after opting out of sending Telemetry
+   */
+  resetSubsessionCounter() {
+    Impl._subsessionCounter = 0;
+    Impl._profileSubsessionCounter = 0;
+  },
+
   /**
    * Used only for testing purposes.
    */
@@ -791,8 +802,6 @@ var Impl = {
 
     for (let ioCounter in this._startupIO)
       ret[ioCounter] = this._startupIO[ioCounter];
-
-    ret.savedPings = TelemetryStorage.pendingPingCount;
 
     let activeTicks = this._sessionActiveTicks;
     if (isSubsession) {

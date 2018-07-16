@@ -599,16 +599,16 @@ public:
   }
 
   /**
-   * Indicates how many times the surface has been invalidated.
+   * Yields a dirty rect of what has changed since it was last called.
    */
-  virtual int32_t Invalidations() const {
-    return -1;
+  virtual Maybe<IntRect> TakeDirtyRect() {
+    return Nothing();
   }
 
   /**
-   * Increment the invalidation counter.
+   * Indicate a region which has changed in the surface.
    */
-  virtual void Invalidate() { }
+  virtual void Invalidate(const IntRect& aDirtyRect) { }
 
 protected:
   bool mIsMapped;
@@ -898,13 +898,18 @@ public:
   virtual cairo_scaled_font_t* GetCairoScaledFont() { return nullptr; }
   virtual void SetCairoScaledFont(cairo_scaled_font_t* font) {}
 
+  Float GetSyntheticObliqueAngle() const { return mSyntheticObliqueAngle; }
+  void SetSyntheticObliqueAngle(Float aAngle) { mSyntheticObliqueAngle = aAngle; }
+
 protected:
   explicit ScaledFont(const RefPtr<UnscaledFont>& aUnscaledFont)
     : mUnscaledFont(aUnscaledFont)
+    , mSyntheticObliqueAngle(0.0f)
   {}
 
   UserData mUserData;
   RefPtr<UnscaledFont> mUnscaledFont;
+  Float mSyntheticObliqueAngle;
 
 private:
   static Atomic<uint32_t> sDeletionCounter;
@@ -1527,15 +1532,6 @@ public:
   virtual bool IsCaptureDT() const override { return true; }
 
   virtual void Dump() = 0;
-
-  /**
-   * Returns true if the recording only contains FillGlyph calls with
-   * a single font and color. Returns the list of Glyphs along with
-   * the font and color as outparams if so.
-   */
-  virtual bool ContainsOnlyColoredGlyphs(RefPtr<ScaledFont>& aScaledFont,
-                                         Color& aColor,
-                                         std::vector<Glyph>& aGlyphs) = 0;
 };
 
 class DrawEventRecorder : public RefCounted<DrawEventRecorder>

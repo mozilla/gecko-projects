@@ -82,6 +82,10 @@
 #include "WGLLibrary.h"
 #endif
 
+#if defined(MOZ_WIDGET_ANDROID)
+    #include "../../gfx/vr/gfxVRExternal.h"
+#endif
+
 // Generated
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
 
@@ -355,6 +359,20 @@ WebGLContext::OnMemoryPressure()
 // nsICanvasRenderingContextInternal
 //
 
+static bool
+IsFeatureInBlacklist(const nsCOMPtr<nsIGfxInfo>& gfxInfo, int32_t feature,
+                     nsCString* const out_blacklistId)
+{
+    int32_t status;
+    if (!NS_SUCCEEDED(gfxUtils::ThreadSafeGetFeatureStatus(gfxInfo, feature,
+                                                           *out_blacklistId, &status)))
+    {
+        return false;
+    }
+
+    return status != nsIGfxInfo::FEATURE_STATUS_OK;
+}
+
 NS_IMETHODIMP
 WebGLContext::SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
                                 ErrorResult& aRvForDictionaryInit)
@@ -378,12 +396,24 @@ WebGLContext::SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
     newOpts.failIfMajorPerformanceCaveat = attributes.mFailIfMajorPerformanceCaveat;
     newOpts.powerPreference = attributes.mPowerPreference;
 
-    if (attributes.mAlpha.WasPassed())
+    if (attributes.mAlpha.WasPassed()) {
         newOpts.alpha = attributes.mAlpha.Value();
+    }
 
     // Don't do antialiasing if we've disabled MSAA.
-    if (!gfxPrefs::MSAALevel())
-      newOpts.antialias = false;
+    if (!gfxPrefs::MSAALevel()) {
+        newOpts.antialias = false;
+    }
+
+    if (!gfxPrefs::WebGLForceMSAA()) {
+        const nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+
+        nsCString blocklistId;
+        if (IsFeatureInBlacklist(gfxInfo, nsIGfxInfo::FEATURE_WEBGL_MSAA, &blocklistId)) {
+            GenerateWarning("Disallowing antialiased backbuffers due to blacklisting.");
+            mOptions.antialias = false;
+        }
+    }
 
 #if 0
     GenerateWarning("aaHint: %d stencil: %d depth: %d alpha: %d premult: %d preserve: %d\n",
@@ -403,37 +433,6 @@ WebGLContext::SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
 
     mOptions = newOpts;
     return NS_OK;
-}
-
-/* So there are a number of points of failure here. We might fail based
- * on EGL vs. WGL, or we might fail to alloc a too-large size, or we
- * might not be able to create a context with a certain combo of context
- * creation attribs.
- *
- * We don't want to test the complete fallback matrix. (for now, at
- * least) Instead, attempt creation in this order:
- * 1. By platform API. (e.g. EGL vs. WGL)
- * 2. By context creation attribs.
- * 3. By size.
- *
- * That is, try to create headless contexts based on the platform API.
- * Next, create dummy-sized backbuffers for the contexts with the right
- * caps. Finally, resize the backbuffer to an acceptable size given the
- * requested size.
- */
-
-static bool
-IsFeatureInBlacklist(const nsCOMPtr<nsIGfxInfo>& gfxInfo, int32_t feature,
-                     nsCString* const out_blacklistId)
-{
-    int32_t status;
-    if (!NS_SUCCEEDED(gfxUtils::ThreadSafeGetFeatureStatus(gfxInfo, feature,
-                                                           *out_blacklistId, &status)))
-    {
-        return false;
-    }
-
-    return status != nsIGfxInfo::FEATURE_STATUS_OK;
 }
 
 static bool
@@ -476,160 +475,7 @@ HasAcceleratedLayers(const nsCOMPtr<nsIGfxInfo>& gfxInfo)
     return false;
 }
 
-static void
-PopulateCapFallbackQueue(const gl::SurfaceCaps& baseCaps,
-                         std::queue<gl::SurfaceCaps>* out_fallbackCaps)
-{
-    out_fallbackCaps->push(baseCaps);
-}
-
-static gl::SurfaceCaps
-BaseCaps(const WebGLContextOptions& options, WebGLContext* webgl)
-{
-    gl::SurfaceCaps baseCaps;
-
-    baseCaps.color = true;
-    baseCaps.alpha = true;
-    baseCaps.antialias = false;
-    baseCaps.depth = false;
-    baseCaps.stencil = false;
-    baseCaps.premultAlpha = options.premultipliedAlpha;
-    baseCaps.preserve = options.preserveDrawingBuffer;
-
-    if (!baseCaps.alpha) {
-        baseCaps.premultAlpha = true;
-    }
-
-    if (!gfxPrefs::WebGLForceMSAA()) {
-        const nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
-
-        nsCString blocklistId;
-        if (IsFeatureInBlacklist(gfxInfo, nsIGfxInfo::FEATURE_WEBGL_MSAA, &blocklistId)) {
-            webgl->GenerateWarning("Disallowing antialiased backbuffers due"
-                                   " to blacklisting.");
-            baseCaps.antialias = false;
-        }
-    }
-
-    return baseCaps;
-}
-
-////////////////////////////////////////
-
-static already_AddRefed<gl::GLContext>
-CreateGLWithEGL(const gl::SurfaceCaps& caps, gl::CreateContextFlags flags,
-                WebGLContext* webgl,
-                std::vector<WebGLContext::FailureReason>* const out_failReasons)
-{
-    const gfx::IntSize dummySize(16, 16);
-    nsCString failureId;
-    RefPtr<GLContext> gl = gl::GLContextProviderEGL::CreateOffscreen(dummySize, caps,
-                                                                     flags, &failureId);
-    if (gl && gl->IsANGLE()) {
-        gl = nullptr;
-    }
-
-    if (!gl) {
-        out_failReasons->push_back(WebGLContext::FailureReason(
-            failureId,
-            "Error during EGL OpenGL init."
-        ));
-        return nullptr;
-    }
-
-    return gl.forget();
-}
-
-static already_AddRefed<GLContext>
-CreateGLWithANGLE(const gl::SurfaceCaps& caps, gl::CreateContextFlags flags,
-                  WebGLContext* webgl,
-                  std::vector<WebGLContext::FailureReason>* const out_failReasons)
-{
-    const gfx::IntSize dummySize(16, 16);
-    nsCString failureId;
-    RefPtr<GLContext> gl = gl::GLContextProviderEGL::CreateOffscreen(dummySize, caps,
-                                                                     flags, &failureId);
-    if (gl && !gl->IsANGLE()) {
-        gl = nullptr;
-    }
-
-    if (!gl) {
-        out_failReasons->push_back(WebGLContext::FailureReason(
-            failureId,
-            "Error during ANGLE OpenGL init."
-        ));
-        return nullptr;
-    }
-
-    return gl.forget();
-}
-
-static already_AddRefed<gl::GLContext>
-CreateGLWithDefault(const gl::SurfaceCaps& caps, gl::CreateContextFlags flags,
-                    WebGLContext* webgl,
-                    std::vector<WebGLContext::FailureReason>* const out_failReasons)
-{
-    const gfx::IntSize dummySize(16, 16);
-    nsCString failureId;
-    RefPtr<GLContext> gl = gl::GLContextProvider::CreateOffscreen(dummySize, caps,
-                                                                  flags, &failureId);
-    if (gl && gl->IsANGLE()) {
-        gl = nullptr;
-    }
-
-    if (!gl) {
-        out_failReasons->push_back(WebGLContext::FailureReason(
-            failureId,
-            "Error during native OpenGL init."
-        ));
-        return nullptr;
-    }
-
-    return gl.forget();
-}
-
-////////////////////////////////////////
-
-bool
-WebGLContext::CreateAndInitGLWith(FnCreateGL_T fnCreateGL,
-                                  const gl::SurfaceCaps& baseCaps,
-                                  gl::CreateContextFlags flags,
-                                  std::vector<FailureReason>* const out_failReasons)
-{
-    std::queue<gl::SurfaceCaps> fallbackCaps;
-    PopulateCapFallbackQueue(baseCaps, &fallbackCaps);
-
-    MOZ_RELEASE_ASSERT(!gl, "GFX: Already have a context.");
-    RefPtr<gl::GLContext> potentialGL;
-    while (!fallbackCaps.empty()) {
-        const gl::SurfaceCaps& caps = fallbackCaps.front();
-        potentialGL = fnCreateGL(caps, flags, this, out_failReasons);
-        if (potentialGL)
-            break;
-
-        fallbackCaps.pop();
-    }
-    if (!potentialGL) {
-        out_failReasons->push_back(FailureReason("FEATURE_FAILURE_WEBGL_EXHAUSTED_CAPS",
-                                                 "Exhausted GL driver caps."));
-        return false;
-    }
-
-    FailureReason reason;
-
-    mGL_OnlyClearInDestroyResourcesAndContext = potentialGL;
-    MOZ_RELEASE_ASSERT(gl);
-    if (!InitAndValidateGL(&reason)) {
-        DestroyResourcesAndContext();
-        MOZ_RELEASE_ASSERT(!gl);
-
-        // The fail reason here should be specific enough for now.
-        out_failReasons->push_back(reason);
-        return false;
-    }
-
-    return true;
-}
+// --
 
 bool
 WebGLContext::CreateAndInitGL(bool forceEnabled,
@@ -660,7 +506,6 @@ WebGLContext::CreateAndInitGL(bool forceEnabled,
         }
     }
 
-    const gl::SurfaceCaps baseCaps = BaseCaps(mOptions, this);
     gl::CreateContextFlags flags = (gl::CreateContextFlags::NO_VALIDATION |
                                     gl::CreateContextFlags::PREFER_ROBUSTNESS);
     bool tryNativeGL = true;
@@ -705,7 +550,21 @@ WebGLContext::CreateAndInitGL(bool forceEnabled,
         flags |= gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE;
     }
 #endif
-    //////
+
+    // --
+
+    const auto surfaceCaps = [&]() {
+        auto ret = gl::SurfaceCaps::ForRGBA();
+        ret.premultAlpha = mOptions.premultipliedAlpha;
+        ret.preserve = mOptions.preserveDrawingBuffer;
+
+        if (!mOptions.alpha) {
+            ret.premultAlpha = true;
+        }
+        return ret;
+    }();
+
+    // --
 
     const bool useEGL = PR_GetEnv("MOZ_WEBGL_FORCE_EGL");
 
@@ -740,30 +599,63 @@ WebGLContext::CreateAndInitGL(bool forceEnabled,
         }
     }
 
-    //////
+    // --
 
-    if (tryNativeGL) {
-        if (useEGL)
-            return CreateAndInitGLWith(CreateGLWithEGL, baseCaps, flags, out_failReasons);
+    typedef decltype(gl::GLContextProviderEGL::CreateOffscreen) fnCreateOffscreenT;
+    const auto fnCreate = [&](fnCreateOffscreenT* const pfnCreateOffscreen,
+                              const char* const info)
+    {
+        const gfx::IntSize dummySize(1, 1);
+        nsCString failureId;
+        const RefPtr<GLContext> gl = pfnCreateOffscreen(dummySize, surfaceCaps, flags,
+                                                        &failureId);
+        if (!gl) {
+            out_failReasons->push_back(WebGLContext::FailureReason(failureId, info));
+        }
+        return gl;
+    };
 
-        if (CreateAndInitGLWith(CreateGLWithDefault, baseCaps, flags, out_failReasons))
-            return true;
+    const auto newGL = [&]() -> RefPtr<gl::GLContext> {
+        if (tryNativeGL) {
+            if (useEGL)
+                return fnCreate(&gl::GLContextProviderEGL::CreateOffscreen, "useEGL");
+
+            const auto ret = fnCreate(&gl::GLContextProvider::CreateOffscreen,
+                                      "tryNativeGL");
+            if (ret)
+                return ret;
+        }
+
+        if (tryANGLE) {
+            // Force enable alpha channel to make sure ANGLE use correct framebuffer format
+            MOZ_ASSERT(surfaceCaps.alpha);
+            return fnCreate(&gl::GLContextProviderEGL::CreateOffscreen, "tryANGLE");
+        }
+        return nullptr;
+    }();
+
+    if (!newGL) {
+        out_failReasons->push_back(FailureReason("FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS",
+                                                 "Exhausted GL driver options."));
+        return false;
     }
 
-    //////
+    // --
 
-    if (tryANGLE) {
-        // Force enable alpha channel to make sure ANGLE use correct framebuffer format
-        auto angleCaps = baseCaps;
-        angleCaps.alpha = true;
-        return CreateAndInitGLWith(CreateGLWithANGLE, angleCaps, flags, out_failReasons);
+    FailureReason reason;
+
+    mGL_OnlyClearInDestroyResourcesAndContext = newGL;
+    MOZ_RELEASE_ASSERT(gl);
+    if (!InitAndValidateGL(&reason)) {
+        DestroyResourcesAndContext();
+        MOZ_RELEASE_ASSERT(!gl);
+
+        // The fail reason here should be specific enough for now.
+        out_failReasons->push_back(reason);
+        return false;
     }
 
-    //////
-
-    out_failReasons->push_back(FailureReason("FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS",
-                                             "Exhausted GL driver options."));
-    return false;
+    return true;
 }
 
 // Fallback for resizes:
@@ -1045,7 +937,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
     }
 
     // Update our internal stuff:
-    mOptions.antialias = bool(mDefaultFB->mSamples);
+
+    mOptions.antialias &= bool(mDefaultFB->mSamples);
 
     if (!mOptions.alpha) {
         // We always have alpha.
@@ -2401,6 +2294,55 @@ WebGLContext::GetUnpackSize(bool isFunc3D, uint32_t width, uint32_t height,
     return totalBytes;
 }
 
+
+#if defined(MOZ_WIDGET_ANDROID)
+already_AddRefed<layers::SharedSurfaceTextureClient>
+WebGLContext::GetVRFrame()
+{
+  if (IsContextLost()) {
+    ForceRestoreContext();
+  }
+
+  int frameId = gfx::impl::VRDisplayExternal::sPushIndex;
+  static int lastFrameId = -1;
+  /**
+   * Android doesn't like duplicated GetVRFrame within the same gfxVRExternal frame.
+   * Ballout forced composition calls if we are in the same VRExternal push frame index.
+   * Also discard frameId 0 because sometimes compositor is not paused yet due to channel communication delays.
+   */
+  const bool ignoreFrame = lastFrameId == frameId || frameId == 0;
+  lastFrameId = frameId;
+  if (!ignoreFrame) {
+      BeginComposition();
+      EndComposition();
+  }
+
+  if (IsContextLost()) {
+    return nullptr;
+  }
+
+  gl::GLScreenBuffer* screen = gl->Screen();
+  if (!screen) {
+    return nullptr;
+  }
+
+  RefPtr<SharedSurfaceTextureClient> sharedSurface = screen->Front();
+  if (!sharedSurface || !sharedSurface->Surf()) {
+    return nullptr;
+  }
+
+  /**
+   * Make sure that the WebGL buffer is committed to the attached SurfaceTexture on Android.
+   */
+  if (!ignoreFrame && !IsContextLost()) {
+    sharedSurface->Surf()->ProducerAcquire();
+    sharedSurface->Surf()->Commit();
+    sharedSurface->Surf()->ProducerRelease();
+  }
+
+  return sharedSurface.forget();
+}
+#else
 already_AddRefed<layers::SharedSurfaceTextureClient>
 WebGLContext::GetVRFrame()
 {
@@ -2425,6 +2367,8 @@ WebGLContext::GetVRFrame()
 
   return sharedSurface.forget();
 }
+
+#endif  // ifdefined(MOZ_WIDGET_ANDROID)
 
 ////////////////////////////////////////////////////////////////////////////////
 

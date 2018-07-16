@@ -11,8 +11,12 @@ export class _StartupOverlay extends React.PureComponent {
     this.clickSkip = this.clickSkip.bind(this);
     this.initScene = this.initScene.bind(this);
     this.removeOverlay = this.removeOverlay.bind(this);
+    this.onInputInvalid = this.onInputInvalid.bind(this);
 
-    this.state = {emailInput: ""};
+    this.state = {
+      emailInput: "",
+      overlayRemoved: false
+    };
     this.initScene();
   }
 
@@ -26,15 +30,20 @@ export class _StartupOverlay extends React.PureComponent {
 
   removeOverlay() {
     window.removeEventListener("visibilitychange", this.removeOverlay);
+    document.body.classList.remove("hide-main");
     this.setState({show: false});
     setTimeout(() => {
       // Allow scrolling and fully remove overlay after animation finishes.
       document.body.classList.remove("welcome");
+      this.setState({overlayRemoved: true});
     }, 400);
   }
 
   onInputChange(e) {
+    let error = e.target.previousSibling;
     this.setState({emailInput: e.target.value});
+    error.classList.remove("active");
+    e.target.classList.remove("invalid");
   }
 
   onSubmit() {
@@ -47,11 +56,25 @@ export class _StartupOverlay extends React.PureComponent {
     this.removeOverlay();
   }
 
+  onInputInvalid(e) {
+    let error = e.target.previousSibling;
+    error.classList.add("active");
+    e.target.classList.add("invalid");
+    e.preventDefault(); // Override built-in form validation popup
+    e.target.focus();
+  }
+
   render() {
+    // When skipping the onboarding tour we show AS but we are still on
+    // about:welcome, prop.isFirstrun is true and StartupOverlay is rendered
+    if (this.state.overlayRemoved) {
+      return null;
+    }
+
     let termsLink = (<a href="https://accounts.firefox.com/legal/terms" target="_blank" rel="noopener noreferrer"><FormattedMessage id="firstrun_terms_of_service" /></a>);
     let privacyLink = (<a href="https://accounts.firefox.com/legal/privacy" target="_blank" rel="noopener noreferrer"><FormattedMessage id="firstrun_privacy_notice" /></a>);
     return (
-      <div className={`overlay-wrapper ${this.state.show ? "show " : ""}`}>
+      <div className={`overlay-wrapper ${this.state.show ? "show" : ""}`}>
         <div className="background" />
         <div className="firstrun-scene">
           <div className="fxaccounts-container">
@@ -69,7 +92,8 @@ export class _StartupOverlay extends React.PureComponent {
                 <input name="entrypoint" type="hidden" value="activity-stream-firstrun" />
                 <input name="utm_source" type="hidden" value="activity-stream" />
                 <input name="utm_campaign" type="hidden" value="firstrun" />
-                <input className="email-input" name="email" type="email" required="true" placeholder={this.props.intl.formatMessage({id: "firstrun_email_input_placeholder"})} onChange={this.onInputChange} />
+                <span className="error">{this.props.intl.formatMessage({id: "firstrun_invalid_input"})}</span>
+                <input className="email-input" name="email" type="email" required="true" onInvalid={this.onInputInvalid} placeholder={this.props.intl.formatMessage({id: "firstrun_email_input_placeholder"})} onChange={this.onInputChange} />
                 <div className="extra-links">
                   <FormattedMessage
                     id="firstrun_extra_legal_links"

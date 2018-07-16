@@ -34,7 +34,7 @@ cfg-if = "0.1.0"
 cssparser = "0.24.0"
 new_debug_unreachable = "1.0"
 encoding_rs = {version = "0.7", optional = true}
-euclid = "0.17"
+euclid = "0.18"
 fallible = { path = "../fallible" }
 fnv = "1.0"
 hashglobe = { path = "../hashglobe" }
@@ -78,7 +78,7 @@ kernel32-sys = "0.2"
 [build-dependencies]
 lazy_static = "1"
 log = "0.4"
-bindgen = { version = "0.33.2", optional = true, default-features = false }
+bindgen = { version = "0.37", optional = true, default-features = false }
 regex = {version = "0.2", optional = true}
 walkdir = "2.1.4"
 toml = {version = "0.4.5", optional = true, default-features = false}

@@ -329,13 +329,6 @@ Wrapper::Renew(JSObject* existing, JSObject* obj, const Wrapper* handler)
     return existing;
 }
 
-const Wrapper*
-Wrapper::wrapperHandler(const JSObject* wrapper)
-{
-    MOZ_ASSERT(wrapper->is<WrapperObject>());
-    return static_cast<const Wrapper*>(wrapper->as<ProxyObject>().handler());
-}
-
 JSObject*
 Wrapper::wrappedObject(JSObject* wrapper)
 {
@@ -456,9 +449,10 @@ ErrorCopier::~ErrorCopier()
             cx->clearPendingException();
             ar.reset();
             Rooted<ErrorObject*> errObj(cx, &exc.toObject().as<ErrorObject>());
-            JSObject* copyobj = CopyErrorObject(cx, errObj);
-            if (copyobj)
-                cx->setPendingException(ObjectValue(*copyobj));
+            if (JSObject* copyobj = CopyErrorObject(cx, errObj)) {
+                RootedValue rootedCopy(cx, ObjectValue(*copyobj));
+                cx->setPendingException(rootedCopy);
+            }
         }
     }
 }

@@ -77,7 +77,6 @@ add_task(async function test_notifications_onDeleteURI() {
       onBeginUpdateBatch: function PEX_onBeginUpdateBatch() {},
       onEndUpdateBatch: function PEX_onEndUpdateBatch() {},
       onClearHistory() {},
-      onVisits() {},
       onTitleChanged() {},
       onDeleteURI(aURI, aGUID, aReason) {
         currentTest.receivedNotifications++;
@@ -87,7 +86,7 @@ add_task(async function test_notifications_onDeleteURI() {
         Assert.equal(aReason, Ci.nsINavHistoryObserver.REASON_EXPIRED);
       },
       onPageChanged() {},
-      onDeleteVisits(aURI, aTime) { },
+      onDeleteVisits() {},
     };
     hs.addObserver(historyObserver);
 

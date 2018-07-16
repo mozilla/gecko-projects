@@ -46,6 +46,13 @@ div {
   height: 100px;
   background-color: white;
 }
+body {
+  /*
+   * set overflow:hidden to avoid accidentally unthrottling animations to update
+   * the overflow region.
+   */
+  overflow: hidden;
+}
 </style>
 </head>
 <body>
@@ -133,8 +140,6 @@ function waitForWheelEvent(aTarget) {
 }
 
 const omtaEnabled = isOMTAEnabled();
-
-const isAndroid = !!navigator.userAgent.includes("Android");
 
 function add_task_if_omta_enabled(test) {
   if (!omtaEnabled) {
@@ -1723,10 +1728,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function restyling_outline_offset_animations_on_invisible_element() {
-    if (isAndroid) {
-      // FIXME: Bug 1470798: Enable this test on Android.
-      return;
-    }
     const div = addDiv(null,
                        { style: 'visibility: hidden; ' +
                                 'outline-style: solid; ' +
@@ -1747,10 +1748,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function restyling_transform_animations_on_invisible_element() {
-    if (isAndroid) {
-      // FIXME: Bug 1470798: Enable this test on Android.
-      return;
-    }
     const div = addDiv(null, { style: 'visibility: hidden;' });
 
     const animation =
@@ -1770,10 +1767,6 @@ waitForAllPaints(() => {
   });
 
   add_task(async function restyling_transform_animations_on_invisible_element() {
-    if (isAndroid) {
-      // FIXME: Bug 1470798: Enable this test on Android.
-      return;
-    }
     const div = addDiv(null, { style: 'visibility: hidden;' });
 
     const animation =
@@ -1795,10 +1788,6 @@ waitForAllPaints(() => {
 
   add_task(
     async function restyling_transform_animations_having_abs_pos_child_on_invisible_element() {
-      if (isAndroid) {
-        // FIXME: Bug 1470798: Enable this test on Android.
-        return;
-      }
       const div = addDiv(null, { style: 'visibility: hidden;' });
       const child = addDiv(null, { style: 'position: absolute; top: 100px;' });
       div.appendChild(child);
@@ -1818,6 +1807,62 @@ waitForAllPaints(() => {
          'Transform animation having an absolutely positioned child on ' +
          'visibility hidden element should be throttled');
       await ensureElementRemoval(div);
+  });
+
+  add_task(async function no_restyling_animations_in_out_of_view_iframe() {
+    const div = addDiv(null, { style: 'overflow-y: scroll; height: 100px;' });
+
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute(
+      'srcdoc',
+      '<div style="height: 100px;"></div><div id="target"></div>');
+    div.appendChild(iframe);
+
+    await new Promise(resolve => {
+      iframe.addEventListener('load', () => {
+        resolve();
+      });
+    });
+
+    const target = iframe.contentDocument.getElementById("target");
+    target.style= 'width: 100px; height: 100px;';
+
+    const animation = target.animate({ backgroundColor: [ 'blue', 'green' ] },
+                                     100 * MS_PER_SEC);
+    await waitForAnimationReadyToRestyle(animation);
+
+    const markers = await observeStylingInTargetWindow(iframe.contentWindow, 5);
+    is(markers.length, 0,
+       'Animation in out-of-view iframe should be throttled');
+
+    await ensureElementRemoval(div);
+  });
+
+  // Tests that transform animations are not able to run on the compositor due
+  // to layout restrictions (e.g. animations on a large size frame) doesn't
+  // flush layout at all.
+  add_task(async function flush_layout_for_transform_animations() {
+    // Set layout.animation.prerender.partial to disallow transform animations
+    // on large frames to be sent to the compositor.
+    await SpecialPowers.pushPrefEnv({
+      set: [['layout.animation.prerender.partial', false]] });
+    const div = addDiv(null, { style: 'width: 10000px; height: 10000px;' });
+
+    const animation = div.animate([ { transform: 'rotate(360deg)', } ],
+                                  { duration: 100 * MS_PER_SEC,
+                                    // Set step-end to skip further restyles.
+                                    easing: 'step-end' });
+
+    const FLUSH_LAYOUT = SpecialPowers.DOMWindowUtils.FLUSH_LAYOUT;
+    ok(SpecialPowers.DOMWindowUtils.needsFlush(FLUSH_LAYOUT),
+       'Flush layout is needed for the appended div');
+    await waitForAnimationReadyToRestyle(animation);
+
+    ok(!SpecialPowers.wrap(animation).isRunningOnCompositor);
+    ok(!SpecialPowers.DOMWindowUtils.needsFlush(FLUSH_LAYOUT),
+       'No further flush layout needed');
+
+    await ensureElementRemoval(div);
   });
 
 });

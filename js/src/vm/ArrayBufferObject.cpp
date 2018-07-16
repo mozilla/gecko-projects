@@ -459,10 +459,8 @@ ArrayBufferObject::class_constructor(JSContext* cx, unsigned argc, Value* vp)
 static ArrayBufferObject::BufferContents
 AllocateArrayBufferContents(JSContext* cx, uint32_t nbytes)
 {
-    uint8_t* p = cx->zone()->pod_callocCanGC<uint8_t>(nbytes);
-    if (!p)
-        ReportOutOfMemory(cx);
-
+    uint8_t* p = cx->pod_callocCanGC<uint8_t>(nbytes,
+                                                      js::ArrayBufferContentsArena);
     return ArrayBufferObject::BufferContents::create<ArrayBufferObject::PLAIN>(p);
 }
 
@@ -592,6 +590,8 @@ ArrayBufferObject::changeContents(JSContext* cx, BufferContents newContents,
 }
 
 /*
+ * [SMDOC] WASM Linear Memory structure
+ *
  * Wasm Raw Buf Linear Memory Structure
  *
  * The linear heap in Wasm is an mmaped array buffer. Several

@@ -123,10 +123,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     scriptEnvironmentPreparer(nullptr),
     ctypesActivityCallback(nullptr),
     windowProxyClass_(nullptr),
-    exclusiveAccessLock(mutexid::RuntimeExclusiveAccess),
-#ifdef DEBUG
-    activeThreadHasExclusiveAccess(false),
-#endif
     scriptDataLock(mutexid::RuntimeScriptData),
 #ifdef DEBUG
     activeThreadHasScriptDataAccess(false),
@@ -156,10 +152,10 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     beingDestroyed_(false),
     allowContentJS_(true),
     atoms_(nullptr),
-    atomsAddedWhileSweeping_(nullptr),
+    permanentAtomsDuringInit_(nullptr),
+    permanentAtoms_(nullptr),
     staticStrings(nullptr),
     commonNames(nullptr),
-    permanentAtoms(nullptr),
     wellKnownSymbols(nullptr),
     jitSupportsFloatingPoint(false),
     jitSupportsUnalignedAccesses(false),
@@ -173,7 +169,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     autoWritableJitCodeActive_(false),
     oomCallback(nullptr),
     debuggerMallocSizeOf(ReturnZeroSize),
-    lastAnimationTime(0),
     performanceMonitoring_(),
     stackFormat_(parentRuntime ? js::StackFormat::Default
                                : js::StackFormat::SpiderMonkey),
@@ -322,7 +317,7 @@ JSRuntime::destroyRuntime()
 
     js_delete(defaultFreeOp_.ref());
 
-    js_free(defaultLocale);
+    defaultLocale = nullptr;
     js_delete(jitRuntime_.ref());
 
 #ifdef DEBUG
@@ -361,16 +356,13 @@ JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::Runtim
 {
     rtSizes->object += mallocSizeOf(this);
 
-    {
-        AutoLockForExclusiveAccess lock(this);
-        rtSizes->atomsTable += atoms(lock).sizeOfIncludingThis(mallocSizeOf);
-        rtSizes->gc.marker += gc.marker.sizeOfExcludingThis(mallocSizeOf, lock);
-    }
+    rtSizes->atomsTable += atoms().sizeOfIncludingThis(mallocSizeOf);
+    rtSizes->gc.marker += gc.marker.sizeOfExcludingThis(mallocSizeOf);
 
     if (!parentRuntime) {
         rtSizes->atomsTable += mallocSizeOf(staticStrings);
         rtSizes->atomsTable += mallocSizeOf(commonNames);
-        rtSizes->atomsTable += permanentAtoms->sizeOfIncludingThis(mallocSizeOf);
+        rtSizes->atomsTable += permanentAtoms()->sizeOfIncludingThis(mallocSizeOf);
     }
 
     JSContext* cx = mainContextFromAnyThread();
@@ -382,9 +374,6 @@ JSRuntime::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::Runtim
     if (cx->traceLogger)
         rtSizes->tracelogger += cx->traceLogger->sizeOfIncludingThis(mallocSizeOf);
 #endif
-
-    if (MathCache* cache = caches().maybeGetMathCache())
-        rtSizes->mathCache += cache->sizeOfIncludingThis(mallocSizeOf);
 
     rtSizes->uncompressedSourceCache +=
         caches().uncompressedSourceCache.sizeOfExcludingThis(mallocSizeOf);
@@ -532,27 +521,25 @@ JSRuntime::setDefaultLocale(const char* locale)
     if (!locale)
         return false;
 
-    char* newLocale = DuplicateString(mainContextFromOwnThread(), locale).release();
+    UniqueChars newLocale = DuplicateString(mainContextFromOwnThread(), locale);
     if (!newLocale)
         return false;
 
-    resetDefaultLocale();
-    defaultLocale = newLocale;
+    defaultLocale.ref() = std::move(newLocale);
     return true;
 }
 
 void
 JSRuntime::resetDefaultLocale()
 {
-    js_free(defaultLocale);
     defaultLocale = nullptr;
 }
 
 const char*
 JSRuntime::getDefaultLocale()
 {
-    if (defaultLocale)
-        return defaultLocale;
+    if (defaultLocale.ref())
+        return defaultLocale.ref().get();
 
     const char* locale = setlocale(LC_ALL, nullptr);
 
@@ -560,18 +547,18 @@ JSRuntime::getDefaultLocale()
     if (!locale || !strcmp(locale, "C"))
         locale = "und";
 
-    char* lang = DuplicateString(mainContextFromOwnThread(), locale).release();
+    UniqueChars lang = DuplicateString(mainContextFromOwnThread(), locale);
     if (!lang)
         return nullptr;
 
     char* p;
-    if ((p = strchr(lang, '.')))
+    if ((p = strchr(lang.get(), '.')))
         *p = '\0';
-    while ((p = strchr(lang, '_')))
+    while ((p = strchr(lang.get(), '_')))
         *p = '-';
 
-    defaultLocale = lang;
-    return defaultLocale;
+    defaultLocale.ref() = std::move(lang);
+    return defaultLocale.ref().get();
 }
 
 void
@@ -646,8 +633,8 @@ JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job, HandleObject pro
     if (promise) {
         RootedObject unwrappedPromise(cx, promise);
         // While the job object is guaranteed to be unwrapped, the promise
-        // might be wrapped. See the comments in
-        // intrinsic_EnqueuePromiseReactionJob for details.
+        // might be wrapped. See the comments in EnqueuePromiseReactionJob in
+        // builtin/Promise.cpp for details.
         if (IsWrapper(promise))
             unwrappedPromise = UncheckedUnwrap(promise);
         if (unwrappedPromise->is<PromiseObject>())
@@ -777,34 +764,6 @@ JSRuntime::activeGCInAtomsZone()
     Zone* zone = unsafeAtomsZone();
     return (zone->needsIncrementalBarrier() && !gc.isVerifyPreBarriersEnabled()) ||
            zone->wasGCStarted();
-}
-
-bool
-JSRuntime::createAtomsAddedWhileSweepingTable()
-{
-    MOZ_ASSERT(JS::RuntimeHeapIsCollecting());
-    MOZ_ASSERT(!atomsAddedWhileSweeping_);
-
-    atomsAddedWhileSweeping_ = js_new<AtomSet>();
-    if (!atomsAddedWhileSweeping_)
-        return false;
-
-    if (!atomsAddedWhileSweeping_->init()) {
-        destroyAtomsAddedWhileSweepingTable();
-        return false;
-    }
-
-    return true;
-}
-
-void
-JSRuntime::destroyAtomsAddedWhileSweepingTable()
-{
-    MOZ_ASSERT(JS::RuntimeHeapIsCollecting());
-    MOZ_ASSERT(atomsAddedWhileSweeping_);
-
-    js_delete(atomsAddedWhileSweeping_.ref());
-    atomsAddedWhileSweeping_ = nullptr;
 }
 
 void

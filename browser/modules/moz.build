@@ -70,6 +70,9 @@ with Files("ExtensionsUI.jsm"):
 with Files("LaterRun.jsm"):
     BUG_COMPONENT = ("Firefox", "Tours")
 
+with Files("LightweightThemeChildListener.jsm"):
+    BUG_COMPONENT = ("WebExtensions", "Themes")
+
 with Files("LightWeightThemeWebInstallListener.jsm"):
     BUG_COMPONENT = ("Firefox", "Theme")
 
@@ -154,7 +157,9 @@ EXTRA_JS_MODULES += [
     'Feeds.jsm',
     'FormSubmitObserver.jsm',
     'FormValidationHandler.jsm',
+    'HomePage.jsm',
     'LaterRun.jsm',
+    'LightweightThemeChildListener.jsm',
     'LightWeightThemeWebInstallListener.jsm',
     'NetErrorContent.jsm',
     'OpenInTabsUtils.jsm',

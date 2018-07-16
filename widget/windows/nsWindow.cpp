@@ -352,9 +352,6 @@ static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 // General purpose user32.dll hook object
 static WindowsDllInterceptor sUser32Intercept;
 
-// AddHook success checks
-static mozilla::Maybe<bool> sHookedGetWindowInfo;
-
 // 2 pixel offset for eTransparencyBorderlessGlass which equals the size of
 // the default window border Windows paints. Glass will be extended inward
 // this distance to remove the border.
@@ -461,17 +458,17 @@ private:
     if (!IsWin10OrLater() && GetModuleHandle(L"tiptsf.dll") &&
         !sProcessCaretEventsStub) {
       sTipTsfInterceptor.Init("tiptsf.dll");
-      DebugOnly<bool> ok = sTipTsfInterceptor.AddHook("ProcessCaretEvents",
-          reinterpret_cast<intptr_t>(&ProcessCaretEventsHook),
-          (void**) &sProcessCaretEventsStub);
+      DebugOnly<bool> ok = sProcessCaretEventsStub.Set(sTipTsfInterceptor,
+                                                       "ProcessCaretEvents",
+                                                       &ProcessCaretEventsHook);
       MOZ_ASSERT(ok);
     }
 
     if (!sSendMessageTimeoutWStub) {
       sUser32Intercept.Init("user32.dll");
-      DebugOnly<bool> hooked = sUser32Intercept.AddHook("SendMessageTimeoutW",
-          reinterpret_cast<intptr_t>(&SendMessageTimeoutWHook),
-          (void**) &sSendMessageTimeoutWStub);
+      DebugOnly<bool> hooked = sSendMessageTimeoutWStub.Set(sUser32Intercept,
+                                                            "SendMessageTimeoutW",
+                                                            &SendMessageTimeoutWHook);
       MOZ_ASSERT(hooked);
     }
   }
@@ -556,8 +553,10 @@ private:
   }
 
   static WindowsDllInterceptor sTipTsfInterceptor;
-  static WINEVENTPROC sProcessCaretEventsStub;
-  static decltype(&SendMessageTimeoutW) sSendMessageTimeoutWStub;
+  static WindowsDllInterceptor::FuncHookType<WINEVENTPROC>
+    sProcessCaretEventsStub;
+  static WindowsDllInterceptor::FuncHookType<decltype(&SendMessageTimeoutW)>
+    sSendMessageTimeoutWStub;
   static StaticAutoPtr<TIPMessageHandler> sInstance;
 
   HHOOK                 mHook;
@@ -566,8 +565,10 @@ private:
 };
 
 WindowsDllInterceptor TIPMessageHandler::sTipTsfInterceptor;
-WINEVENTPROC TIPMessageHandler::sProcessCaretEventsStub;
-decltype(&SendMessageTimeoutW) TIPMessageHandler::sSendMessageTimeoutWStub;
+WindowsDllInterceptor::FuncHookType<WINEVENTPROC>
+  TIPMessageHandler::sProcessCaretEventsStub;
+WindowsDllInterceptor::FuncHookType<decltype(&SendMessageTimeoutW)>
+  TIPMessageHandler::sSendMessageTimeoutWStub;
 StaticAutoPtr<TIPMessageHandler> TIPMessageHandler::sInstance;
 
 } // namespace mozilla
@@ -2472,7 +2473,7 @@ nsWindow::ResetLayout()
 // margins are set.
 static const wchar_t kManageWindowInfoProperty[] = L"ManageWindowInfoProperty";
 typedef BOOL (WINAPI *GetWindowInfoPtr)(HWND hwnd, PWINDOWINFO pwi);
-static GetWindowInfoPtr sGetWindowInfoPtrStub = nullptr;
+static WindowsDllInterceptor::FuncHookType<GetWindowInfoPtr> sGetWindowInfoPtrStub;
 
 BOOL WINAPI
 GetWindowInfoHook(HWND hWnd, PWINDOWINFO pwi)
@@ -2500,18 +2501,15 @@ nsWindow::UpdateGetWindowInfoCaptionStatus(bool aActiveCaption)
   if (!mWnd)
     return;
 
-  if (sHookedGetWindowInfo.isNothing()) {
-    sUser32Intercept.Init("user32.dll");
-    sHookedGetWindowInfo =
-      Some(sUser32Intercept.AddHook("GetWindowInfo",
-                                    reinterpret_cast<intptr_t>(GetWindowInfoHook),
-                                    (void**) &sGetWindowInfoPtrStub));
-    if (!sHookedGetWindowInfo.value()) {
-      return;
-    }
+  sUser32Intercept.Init("user32.dll");
+  sGetWindowInfoPtrStub.Set(sUser32Intercept, "GetWindowInfo",
+                            &GetWindowInfoHook);
+  if (!sGetWindowInfoPtrStub) {
+    return;
   }
+
   // Update our internally tracked caption status
-  SetPropW(mWnd, kManageWindowInfoProperty, 
+  SetPropW(mWnd, kManageWindowInfoProperty,
     reinterpret_cast<HANDLE>(static_cast<INT_PTR>(aActiveCaption) + 1));
 }
 
@@ -5323,6 +5321,15 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       if (lParam) {
         auto lParamString = reinterpret_cast<const wchar_t*>(lParam);
         if (!wcscmp(lParamString, L"ImmersiveColorSet")) {
+          // This might be the Win10 dark mode setting; only way to tell
+          // is to actually force a theme change, since we don't get
+          // WM_THEMECHANGED or WM_SYSCOLORCHANGE when that happens.
+          if (IsWin10OrLater() && mWindowType == eWindowType_toplevel) {
+            nsIPresShell* presShell = mWidgetListener->GetPresShell();
+            if (presShell) {
+              presShell->ThemeChanged();
+            }
+          }
           // WM_SYSCOLORCHANGE is not dispatched for accent color changes
           OnSysColorChanged();
           break;
@@ -5905,6 +5912,9 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         if (WinUtils::LogToPhysFactor(mWnd) != mDefaultScale) {
           ChangedDPI();
           ResetLayout();
+          if (mWidgetListener) {
+            mWidgetListener->UIResolutionChanged();
+          }
         }
       }
       break;
@@ -8052,7 +8062,10 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
         nsWindow* prevWindow =
           WinUtils::GetNSWindowPtr(reinterpret_cast<HWND>(aLParam));
         if (prevWindow && prevWindow->IsPopup()) {
-          return false;
+          // Consume this message here since previous window must not have
+          // been inactivated since we've already stopped accepting the
+          // inactivation below.
+          return true;
         }
       } else if (LOWORD(aWParam) == WA_INACTIVE) {
         nsWindow* activeWindow =
@@ -8068,14 +8081,19 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
           sPendingNCACTIVATE = false;
         }
         // If focus moves from/to popup, we don't need to rollup the popup
-        // because such case is caused by strange mouse drivers.
+        // because such case is caused by strange mouse drivers.  And in
+        // such case, we should consume the message here since we need to
+        // hide this odd focus move from our content.  (If we didn't consume
+        // the message here, ProcessMessage() will notify widget listener of
+        // inactivation and that causes unnecessary reflow for supporting
+        // -moz-window-inactive pseudo class.
         if (activeWindow) {
           if (activeWindow->IsPopup()) {
-            return false;
+            return true;
           }
           nsWindow* deactiveWindow = WinUtils::GetNSWindowPtr(aWnd);
           if (deactiveWindow && deactiveWindow->IsPopup()) {
-            return false;
+            return true;
           }
         }
       } else if (LOWORD(aWParam) == WA_CLICKACTIVE) {
@@ -8092,6 +8110,24 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
     case MOZ_WM_REACTIVATE:
       // The previous active window should take back focus.
       if (::IsWindow(reinterpret_cast<HWND>(aLParam))) {
+        // FYI: Even without this API call, you see expected result (e.g., the
+        //      owner window of the popup keeps active without flickering
+        //      the non-client area).  And also this causes initializing
+        //      TSF and it causes using CPU time a lot.  However, even if we
+        //      consume WM_ACTIVE messages, native focus change has already
+        //      been occurred.  I.e., a popup window is active now.  Therefore,
+        //      you'll see some odd behavior if we don't reactivate the owner
+        //      window here.  For example, if you do:
+        //        1. Turn wheel on a bookmark panel.
+        //        2. Turn wheel on another window.
+        //      then, you'll see that the another window becomes active but the
+        //      owner window of the bookmark panel looks still active and the
+        //      bookmark panel keeps open.  The reason is that the first wheel
+        //      operation gives focus to the bookmark panel.  Therefore, when
+        //      the next operation gives focus to the another window, previous
+        //      focus window is the bookmark panel (i.e., a popup window).
+        //      So, in this case, our hack around here prevents to inactivate
+        //      the owner window and roll up the bookmark panel.
         ::SetForegroundWindow(reinterpret_cast<HWND>(aLParam));
       }
       return true;

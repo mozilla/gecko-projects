@@ -68,7 +68,8 @@ static const char* sEGLExtensionNames[] = {
     "EGL_ANGLE_stream_producer_d3d_texture",
     "EGL_ANGLE_device_creation",
     "EGL_ANGLE_device_creation_d3d11",
-    "EGL_KHR_surfaceless_context"
+    "EGL_KHR_surfaceless_context",
+    "EGL_KHR_create_context_no_error"
 };
 
 #if defined(ANDROID)
@@ -247,6 +248,7 @@ GetAndInitDisplay(GLLibraryEGL& egl, void* displayType)
 class AngleErrorReporting {
 public:
     AngleErrorReporting()
+      : mFailureId(nullptr)
     {
       // No static constructor
     }
@@ -675,6 +677,19 @@ GLLibraryEGL::DoEnsureInitialized(bool forceAccel, nsACString* const out_failure
         if (!fnLoadSymbols(nvStreamSymbols)) {
             NS_ERROR("EGL supports ANGLE_stream_producer_d3d_texture without exposing its functions!");
             MarkExtensionUnsupported(ANGLE_stream_producer_d3d_texture);
+        }
+    }
+
+    if (IsExtensionSupported(KHR_surfaceless_context)) {
+        const auto vendor = fQueryString(mEGLDisplay, LOCAL_EGL_VENDOR);
+
+        // Bug 1464610: Mali T720 (Amazon Fire 8 HD) claims to support this extension,
+        // but if you actually eglMakeCurrent() with EGL_NO_SURFACE, it fails to
+        // render anything when a real surface is provided later on. We only have the
+        // EGL vendor available here, so just avoid using this extension on all
+        // Mali devices.
+        if (strcmp((const char*)vendor, "ARM") == 0) {
+            MarkExtensionUnsupported(KHR_surfaceless_context);
         }
     }
 

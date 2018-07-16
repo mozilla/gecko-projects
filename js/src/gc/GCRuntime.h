@@ -10,6 +10,7 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/EnumSet.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/TimeStamp.h"
 
 #include "gc/ArenaList.h"
 #include "gc/AtomMarking.h"
@@ -502,6 +503,8 @@ class GCRuntime
     JSString* tryNewNurseryString(JSContext* cx, size_t thingSize, AllocKind kind);
     static TenuredCell* refillFreeListInGC(Zone* zone, AllocKind thingKind);
 
+    void setParallelAtomsAllocEnabled(bool enabled);
+
     void bufferGrayRoots();
 
     /*
@@ -531,9 +534,6 @@ class GCRuntime
     Arena* allocateArena(Chunk* chunk, Zone* zone, AllocKind kind,
                          ShouldCheckThresholds checkThresholds, const AutoLockGC& lock);
 
-
-    void arenaAllocatedDuringGC(JS::Zone* zone, Arena* arena);
-
     // Allocator internals
     MOZ_MUST_USE bool gcIfNeededAtAllocation(JSContext* cx);
     template <typename T>
@@ -553,7 +553,7 @@ class GCRuntime
 
     friend class BackgroundAllocTask;
     bool wantBackgroundAllocation(const AutoLockGC& lock) const;
-    void startBackgroundAllocTaskIfIdle();
+    bool startBackgroundAllocTaskIfIdle();
 
     void requestMajorGC(JS::gcreason::Reason reason);
     SliceBudget defaultBudget(JS::gcreason::Reason reason, int64_t millis);
@@ -600,7 +600,7 @@ class GCRuntime
     void purgeRuntime();
     MOZ_MUST_USE bool beginMarkPhase(JS::gcreason::Reason reason, AutoGCSession& session);
     bool prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOut);
-    bool shouldPreserveJITCode(JS::Realm* realm, int64_t currentTime,
+    bool shouldPreserveJITCode(JS::Realm* realm, const mozilla::TimeStamp &currentTime,
                                JS::gcreason::Reason reason, bool canAllocateMoreCode);
     void traceRuntimeForMajorGC(JSTracer* trc, AutoGCSession& session);
     void traceRuntimeAtoms(JSTracer* trc, const AutoAccessAtomsZone& atomsAccess);
@@ -711,8 +711,7 @@ class GCRuntime
     GCSchedulingTunables tunables;
     GCSchedulingState schedulingState;
 
-    // State used for managing atom mark bitmaps in each zone. Protected by the
-    // exclusive access lock.
+    // State used for managing atom mark bitmaps in each zone.
     AtomMarkingRuntime atomMarking;
 
   private:
@@ -748,7 +747,7 @@ class GCRuntime
 
   private:
     UnprotectedData<bool> chunkAllocationSinceLastGC;
-    MainThreadData<int64_t> lastGCTime;
+    MainThreadData<mozilla::TimeStamp> lastGCTime;
 
     /*
      * JSGC_MODE
@@ -870,7 +869,7 @@ class GCRuntime
     MainThreadOrGCTaskData<JS::Zone*> currentSweepGroup;
     MainThreadData<UniquePtr<SweepAction<GCRuntime*, FreeOp*, SliceBudget&>>> sweepActions;
     MainThreadOrGCTaskData<JS::Zone*> sweepZone;
-    MainThreadData<mozilla::Maybe<AtomSet::Enum>> maybeAtomsToSweep;
+    MainThreadData<mozilla::Maybe<AtomsTable::SweepIterator>> maybeAtomsToSweep;
     MainThreadOrGCTaskData<JS::detail::WeakCacheBase*> sweepCache;
     MainThreadData<bool> abortSweepAfterCurrentGroup;
 

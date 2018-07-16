@@ -395,7 +395,8 @@ function _setupDebuggerServer(breakpointFiles, callback) {
   let { OriginalLocation } = require("devtools/server/actors/common");
   DebuggerServer.init();
   DebuggerServer.registerAllActors();
-  DebuggerServer.addActors("resource://testing-common/dbg-actors.js");
+  let { createRootActor } = require("resource://testing-common/dbg-actors.js");
+  DebuggerServer.setRootActor(createRootActor);
   DebuggerServer.allowChromeProcess = true;
 
   // An observer notification that tells us when we can "resume" script
@@ -511,20 +512,10 @@ function _execute_test() {
     this[func] = Assert[func].bind(Assert);
   }
 
-  let perTestCoverageEnabled = false;
-  try {
-    ChromeUtils.import("resource://testing-common/PerTestCoverageUtils.jsm");
-    perTestCoverageEnabled = true;
-  } catch (e) {
-    // If the module doesn't exist, code coverage is disabled.
-    // Otherwise, rethrow the exception.
-    if (e.result != Cr.NS_ERROR_FILE_NOT_FOUND) {
-      throw e;
-    }
-  }
+  const {PerTestCoverageUtils} = ChromeUtils.import("resource://testing-common/PerTestCoverageUtils.jsm", {});
 
-  if (perTestCoverageEnabled) {
-    PerTestCoverageUtils.beforeTest();
+  if (runningInParent) {
+    PerTestCoverageUtils.beforeTestSync();
   }
 
   try {
@@ -546,8 +537,8 @@ function _execute_test() {
       coverageCollector.recordTestCoverage(_TEST_FILE[0]);
     }
 
-    if (perTestCoverageEnabled) {
-      PerTestCoverageUtils.afterTest();
+    if (runningInParent) {
+      PerTestCoverageUtils.afterTestSync();
     }
   } catch (e) {
     _passed = false;

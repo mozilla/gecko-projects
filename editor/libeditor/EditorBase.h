@@ -389,11 +389,21 @@ public:
   }
 
   /**
+   * Returns number of maximum undo/redo transactions.
+   */
+  int32_t NumberOfMaximumTransactions() const
+  {
+    return mTransactionManager ?
+             mTransactionManager->NumberOfMaximumTransactions() : 0;
+  }
+
+  /**
    * Returns true if this editor can store transactions for undo/redo.
    */
   bool IsUndoRedoEnabled() const
   {
-    return !!mTransactionManager;
+    return mTransactionManager &&
+           mTransactionManager->NumberOfMaximumTransactions();
   }
 
   /**
@@ -424,8 +434,6 @@ public:
     if (!mTransactionManager) {
       return true;
     }
-    // XXX Even we clear the transaction manager, IsUndoRedoEnabled() keep
-    //     returning true...
     return mTransactionManager->DisableUndoRedo();
   }
   bool ClearUndoRedo()
@@ -663,6 +671,14 @@ public:
     * spellcheck attribute value.
     */
   void SyncRealTimeSpell();
+
+ /**
+   * This method re-initializes the selection and caret state that are for
+   * current editor state. When editor session is destroyed, it always reset
+   * selection state even if this has no focus.  So if destroying editor,
+   * we have to call this method for focused editor to set selection state.
+   */
+ void ReinitializeSelection(Element& aElement);
 
 protected: // May be called by friends.
   /****************************************************************************

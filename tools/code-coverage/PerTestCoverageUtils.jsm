@@ -8,57 +8,92 @@
 
 var EXPORTED_SYMBOLS = ["PerTestCoverageUtils"];
 
-ChromeUtils.defineModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
-
-class PerTestCoverageUtilsClass {
-  constructor(tmp_gcov_dir, gcov_dir) {
-    this.tmp_gcov_dir = tmp_gcov_dir;
-    this.gcov_dir = gcov_dir;
-
-    this.codeCoverageService = Cc["@mozilla.org/tools/code-coverage;1"].getService(Ci.nsICodeCoverage);
-  }
-
-  _awaitPromise(promise) {
-    let ret;
-    let complete = false;
-    let error = null;
-    promise.catch(e => error = e).then(v => {
-      ret = v;
-      complete = true;
-    });
-    Services.tm.spinEventLoopUntil(() => complete);
-    if (error) {
-      throw new Error(error);
-    }
-    return ret;
-  }
-
-  // Resets the counters to 0.
-  beforeTest() {
-    this._awaitPromise(this.codeCoverageService.resetCounters());
-  }
-
-  // Dumps counters and moves the gcda files in the directory expected by codecoverage.py.
-  afterTest() {
-    this._awaitPromise(this.codeCoverageService.dumpCounters());
-
-    let srcDir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    srcDir.initWithPath(this.tmp_gcov_dir);
-
-    let destDir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-    destDir.initWithPath(this.gcov_dir);
-
-    let srcDirEntries = srcDir.directoryEntries;
-    while (srcDirEntries.hasMoreElements()) {
-      srcDirEntries.nextFile.moveTo(destDir, null);
-    }
-  }
-}
+ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
 // This is the directory where gcov is emitting the gcda files.
-const tmp_gcov_dir = env.get("GCOV_PREFIX");
+const gcovPrefixPath = env.get("GCOV_PREFIX");
 // This is the directory where codecoverage.py is expecting to see the gcda files.
-const gcov_dir = env.get("GCOV_RESULTS_DIR");
+const gcovResultsPath = env.get("GCOV_RESULTS_DIR");
 
-const PerTestCoverageUtils = gcov_dir ? new PerTestCoverageUtilsClass(tmp_gcov_dir, gcov_dir) : null;
+const gcovPrefixDir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+if (gcovPrefixPath) {
+  gcovPrefixDir.initWithPath(gcovPrefixPath);
+}
+
+let gcovResultsDir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+if (gcovResultsPath) {
+  gcovResultsDir.initWithPath(gcovResultsPath);
+}
+
+function awaitPromise(promise) {
+  let ret;
+  let complete = false;
+  let error = null;
+  promise.catch(e => error = e).then(v => {
+    ret = v;
+    complete = true;
+  });
+  Services.tm.spinEventLoopUntil(() => complete);
+  if (error) {
+    throw new Error(error);
+  }
+  return ret;
+}
+
+function removeDirectoryContents(dir) {
+  let entries = dir.directoryEntries;
+  while (entries.hasMoreElements()) {
+    entries.nextFile.remove(true);
+  }
+}
+
+function moveDirectoryContents(src, dst) {
+  let entries = src.directoryEntries;
+  while (entries.hasMoreElements()) {
+    entries.nextFile.moveTo(dst, null);
+  }
+}
+
+var PerTestCoverageUtils = class PerTestCoverageUtilsClass {
+  // Resets the counters to 0.
+  static async beforeTest() {
+    if (!PerTestCoverageUtils.enabled) {
+      return;
+    }
+
+    // Reset the counters.
+    let codeCoverageService = Cc["@mozilla.org/tools/code-coverage;1"].getService(Ci.nsICodeCoverage);
+    await codeCoverageService.resetCounters();
+
+    // Remove any gcda file that might have been created between the end of a previous test and the beginning of the next one (e.g. some tests can create a new content process for every sub-test).
+    removeDirectoryContents(gcovPrefixDir);
+
+    // Move gcda files from the GCOV_RESULTS_DIR directory, so we can accumulate the counters.
+    moveDirectoryContents(gcovResultsDir, gcovPrefixDir);
+  }
+
+  static beforeTestSync() {
+    awaitPromise(this.beforeTest());
+  }
+
+  // Dumps counters and moves the gcda files in the directory expected by codecoverage.py.
+  static async afterTest() {
+    if (!PerTestCoverageUtils.enabled) {
+      return;
+    }
+
+    // Dump the counters.
+    let codeCoverageService = Cc["@mozilla.org/tools/code-coverage;1"].getService(Ci.nsICodeCoverage);
+    await codeCoverageService.dumpCounters();
+
+    // Move the gcda files in the GCOV_RESULTS_DIR, so that the execution from now to shutdown (or next test) is not counted.
+    moveDirectoryContents(gcovPrefixDir, gcovResultsDir);
+  }
+
+  static afterTestSync() {
+    awaitPromise(this.afterTest());
+  }
+};
+
+PerTestCoverageUtils.enabled = !!gcovResultsPath;

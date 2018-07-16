@@ -457,6 +457,8 @@ interface GlobalProcessScriptLoader : ProcessScriptLoader
    */
   [Throws]
   readonly attribute any initialProcessData;
+
+  readonly attribute MozWritableSharedMap sharedData;
 };
 
 [ChromeOnly, Global, NeedResolve]
@@ -479,6 +481,14 @@ interface ContentFrameMessageManager : EventTarget
    * for this frame.
    */
   readonly attribute nsIEventTarget? tabEventTarget;
+
+  /**
+   * Returns the outerWindowID of the browser window hosting the frame.
+   * If, for some reason, the frameloader can't be resolved to a browser
+   * window, this will return 0.
+   */
+  readonly attribute long long chromeOuterWindowID;
+
 };
 // MessageManagerGlobal inherits from SyncMessageSender, which is a real interface, not a
 // mixin. This will need to change when we implement mixins according to the current
@@ -494,6 +504,8 @@ interface ContentProcessMessageManager
    */
   [Throws]
   readonly attribute any initialProcessData;
+
+  readonly attribute MozSharedMap sharedData;
 };
 // MessageManagerGlobal inherits from SyncMessageSender, which is a real interface, not a
 // mixin. This will need to change when we implement mixins according to the current

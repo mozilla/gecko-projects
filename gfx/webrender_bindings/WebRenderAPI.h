@@ -120,6 +120,13 @@ public:
                            wr::WrExternalImageBufferType aBufferType,
                            uint8_t aChannelIndex = 0);
 
+  void UpdateExternalImageWithDirtyRect(ImageKey aKey,
+                                        const ImageDescriptor& aDescriptor,
+                                        ExternalImageId aExtID,
+                                        wr::WrExternalImageBufferType aBufferType,
+                                        const wr::DeviceUintRect& aDirtyRect,
+                                        uint8_t aChannelIndex = 0);
+
   void DeleteImage(wr::ImageKey aKey);
 
   void AddRawFont(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes, uint32_t aIndex);
@@ -420,6 +427,9 @@ public:
                           const wr::LayoutRect& aClip,
                           bool aIsBackfaceVisible,
                           const wr::BorderWidths& aWidths,
+                          const uint32_t aWidth,
+                          const uint32_t aHeight,
+                          const wr::SideOffsets2D<uint32_t>& aSlice,
                           const wr::LayoutPoint& aStartPoint,
                           const wr::LayoutPoint& aEndPoint,
                           const nsTArray<wr::GradientStop>& aStops,

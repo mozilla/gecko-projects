@@ -133,7 +133,7 @@ nsMenuChainItem::CheckForAnchorChange()
 
 bool nsXULPopupManager::sDevtoolsDisableAutoHide = false;
 
-const char* kPrefDevtoolsDisableAutoHide =
+const char kPrefDevtoolsDisableAutoHide[] =
   "ui.popup.disable_autohide";
 
 NS_IMPL_ISUPPORTS(nsXULPopupManager,
@@ -386,7 +386,7 @@ bool nsXULPopupManager::ShouldConsumeOnMouseWheelEvent()
   if (frame->PopupType() != ePopupTypePanel)
     return true;
 
-  return frame->GetContent()->AsElement()->AttrValueIs(
+  return !frame->GetContent()->AsElement()->AttrValueIs(
       kNameSpaceID_None, nsGkAtoms::type, nsGkAtoms::arrow, eCaseMatters);
 }
 

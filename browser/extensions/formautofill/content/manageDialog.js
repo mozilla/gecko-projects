@@ -11,17 +11,19 @@ const EDIT_CREDIT_CARD_URL = "chrome://formautofill/content/editCreditCard.xhtml
 
 ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+ChromeUtils.import("resource://formautofill/FormAutofill.jsm");
 
 ChromeUtils.defineModuleGetter(this, "CreditCard",
                                "resource://gre/modules/CreditCard.jsm");
 ChromeUtils.defineModuleGetter(this, "formAutofillStorage",
                                "resource://formautofill/FormAutofillStorage.jsm");
+ChromeUtils.defineModuleGetter(this, "FormAutofillUtils",
+                               "resource://formautofill/FormAutofillUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "MasterPassword",
                                "resource://formautofill/MasterPassword.jsm");
 
 this.log = null;
-FormAutofillUtils.defineLazyLogGetter(this, "manageAddresses");
+FormAutofill.defineLazyLogGetter(this, "manageAddresses");
 
 class ManageRecords {
   constructor(subStorageName, elements) {
@@ -292,7 +294,7 @@ class ManageAddresses extends ManageRecords {
    * @param  {object} address [optional]
    */
   openEditDialog(address) {
-    this.prefWin.gSubDialog.open(EDIT_ADDRESS_URL, null, address);
+    this.prefWin.gSubDialog.open(EDIT_ADDRESS_URL, null, address, "novalidate");
   }
 
   getLabel(address) {

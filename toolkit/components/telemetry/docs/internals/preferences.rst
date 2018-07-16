@@ -142,6 +142,11 @@ Preferences
   Set the maximum number of keys per process of the :ref:`Event Summary <events.event-summary>`
   :ref:`keyed scalars <scalars.keyed-scalars>`. Default is 500. Change requires restart.
 
+``toolkit.telemetry.eventping.enabled``
+
+  Whether the :doc:`../data/event-ping` is enabled.
+  Default is true except for GeckoView where it defaults to false. Change requires restart.
+
 ``toolkit.telemetry.eventping.eventLimit``
 
   The maximum number of event records permitted in the :doc:`../data/event-ping`.
@@ -156,6 +161,11 @@ Preferences
 
   The maximum frequency at which an :doc:`../data/event-ping` will be sent.
   Default is 10 (minutes).
+
+``toolkit.telemetry.overrideUpdateChannel``
+
+  Override the ``channel`` value that is reported via Telemetry.
+  This is useful for distinguishing different types of builds that otherwise still report as the same update channel.
 
 Data-choices notification
 -------------------------

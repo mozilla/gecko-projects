@@ -681,7 +681,7 @@ HTMLEditor::DeleteTable2(Element* aTable,
   rv = AppendNodeToSelectionAsRange(aTable);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = DeleteSelectionAsAction(eNext, eStrip);
+  rv = DeleteSelectionAsSubAction(eNext, eStrip);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -980,6 +980,8 @@ HTMLEditor::DeleteTableColumn(int32_t aNumber)
   rv = GetTableSize(table, &rowCount, &colCount);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  AutoPlaceholderBatch beginBatching(this);
+
   // Shortcut the case of deleting all columns in table
   if (!startColIndex && aNumber >= colCount) {
     return DeleteTable2(table, selection);
@@ -988,7 +990,6 @@ HTMLEditor::DeleteTableColumn(int32_t aNumber)
   // Check for counts too high
   aNumber = std::min(aNumber,(colCount-startColIndex));
 
-  AutoPlaceholderBatch beginBatching(this);
   // Prevent rules testing until we're done
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
                                       *this, EditSubAction::eDeleteNode,
@@ -3168,11 +3169,7 @@ HTMLEditor::GetSelectedOrParentTableElement(nsAString& aTagName,
     // Get child of anchor node, if exists
     if (anchorNode->HasChildNodes()) {
       nsINode* selectedNode = selection->GetChildAtAnchorOffset();
-      if (!selectedNode) {
-        selectedNode = anchorNode;
-        // If anchor doesn't have a child, we can't be selecting a table element,
-        //  so don't do the following:
-      } else {
+      if (selectedNode) {
         if (selectedNode->IsHTMLElement(nsGkAtoms::td)) {
           tableOrCellElement = selectedNode->AsElement();
           aTagName = tdName;

@@ -53,6 +53,10 @@
 
       evt = await runner.moveNext("Simple",
         AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
+      runner.eventTextMatches(evt, ["many option"]);
+
+      evt = await runner.moveNext("Simple",
+        AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
       runner.eventTextMatches(evt, ["much range", "label"]);
 
       evt = await runner.moveNext("Simple",
@@ -119,7 +123,11 @@
 
       evt = await runner.movePrevious("Simple",
         AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
-      runner.eventTextMatches(evt, ["many option", "checked", "check button", "First item", "list", "1 item"]);
+      runner.eventTextMatches(evt, ["many option", "label", "First item", "list", "1 item"]);
+
+      evt = await runner.movePrevious("Simple",
+        AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
+      runner.eventTextMatches(evt, ["many option", "checked", "check button"]);
 
       evt = await runner.activateCurrent(0,
         AndroidEvents.VIEW_CLICKED,
@@ -294,7 +302,10 @@
       // Changing aria-hidden attribute twice and making sure that the event
       // is fired only once when the actual change happens.
       doc.getElementById("back").setAttribute("aria-hidden", true);
+      let onShow = waitForEventPromise(EVENT_SHOW, doc.getElementById("back"));
       doc.getElementById("back").setAttribute("aria-hidden", false);
+      await onShow;
+
       evt = await runner.movePrevious("Simple",
         AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
       runner.eventTextMatches(evt, ["Back", "button"]);
@@ -311,13 +322,14 @@
         AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
       runner.eventTextMatches(evt, ["such app", "wow", "heading level 1"]);
 
-
       evt = await runner.expectAndroidEvents(() => {
         doc.getElementById("iframe").setAttribute("aria-hidden", true);
       }, AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
-      runner.eventTextMatches(evt, ["Home", "button"]);
+      runner.eventTextMatches(evt, ["Traversal Rule test document", "Home", "button"]);
 
+      onShow = waitForEventPromise(EVENT_SHOW, doc.getElementById("iframe"));
       doc.getElementById("iframe").setAttribute("aria-hidden", false);
+      await onShow;
       await runner.clearCursor();
 
       // aria-hidden element and auto Move
@@ -330,7 +342,9 @@
         AndroidEvents.VIEW_ACCESSIBILITY_FOCUSED);
       runner.eventTextMatches(evt, ["such app", "wow", "heading level 1"]);
 
+      onShow = waitForEventPromise(EVENT_SHOW, doc.getElementById("back"));
       doc.getElementById("back").setAttribute("aria-hidden", false);
+      await onShow;
       runner.blur();
       await runner.clearCursor();
 

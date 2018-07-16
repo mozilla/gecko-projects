@@ -40,7 +40,7 @@ var PlacesDBUtils = {
       this.invalidateCaches,
       this.checkCoherence,
       this._refreshUI,
-      this.frecencyStats,
+      this.originFrecencyStats,
       this.incrementalVacuum
     ];
     let telemetryStartTime = Date.now();
@@ -72,7 +72,7 @@ var PlacesDBUtils = {
       this.invalidateCaches,
       this.checkCoherence,
       this.expire,
-      this.frecencyStats,
+      this.originFrecencyStats,
       this.vacuum,
       this.stats,
       this._refreshUI,
@@ -347,8 +347,7 @@ var PlacesDBUtils = {
       // D.4 move orphan items to unsorted folder
       { query:
         `UPDATE moz_bookmarks SET
-          parent = :unsorted_folder,
-          syncChangeCounter = syncChangeCounter + 1
+          parent = :unsorted_folder
         WHERE guid NOT IN (
           :rootGuid, :menuGuid, :toolbarGuid, :unfiledGuid, :tagsGuid  /* skip roots */
         ) AND id IN (
@@ -423,8 +422,7 @@ var PlacesDBUtils = {
       // as parent, if they have bad parent move them to unsorted bookmarks.
       { query:
         `UPDATE moz_bookmarks SET
-          parent = :unsorted_folder,
-          syncChangeCounter = syncChangeCounter + 1
+          parent = :unsorted_folder
         WHERE guid NOT IN (
           :rootGuid, :menuGuid, :toolbarGuid, :unfiledGuid, :tagsGuid  /* skip roots */
         ) AND id IN (
@@ -661,7 +659,6 @@ var PlacesDBUtils = {
       { query:
         `UPDATE moz_bookmarks
         SET guid = GENERATE_GUID(),
-            syncChangeCounter = syncChangeCounter + 1,
             syncStatus = :syncStatus
         WHERE guid IS NULL OR
               NOT IS_VALID_GUID(guid)`,
@@ -712,7 +709,7 @@ var PlacesDBUtils = {
       BEGIN
         UPDATE moz_bookmarks
         SET syncChangeCounter = syncChangeCounter + 1
-        WHERE id IN (OLD.parent, NEW.parent);
+        WHERE id IN (OLD.parent, NEW.parent, NEW.id);
       END`
     });
     cleanupStatements.unshift({
@@ -864,14 +861,14 @@ var PlacesDBUtils = {
   },
 
   /**
-   * Recalculates statistical data on the frecencies in the database.
+   * Recalculates statistical data on the origin frecencies in the database.
    *
    * @return {Promise} resolves when statistics are collected.
    */
-  frecencyStats() {
+  originFrecencyStats() {
     return new Promise(resolve => {
-      PlacesUtils.history.recalculateFrecencyStats(() => resolve([
-        "Recalculated frecency stats"
+      PlacesUtils.history.recalculateOriginFrecencyStats(() => resolve([
+        "Recalculated origin frecency stats"
       ]));
     });
   },

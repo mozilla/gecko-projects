@@ -11,6 +11,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
   Services: "resource://gre/modules/Services.jsm",
+  PerTestCoverageUtils: "resource://testing-common/PerTestCoverageUtils.jsm",
 });
 
 this.SpecialPowersError = function(aMsg) {
@@ -501,7 +502,7 @@ SpecialPowersObserverAPI.prototype = {
         Object.defineProperty(sb, "assert", {
           get() {
             let scope = Cu.createObjectIn(sb);
-            Services.scriptloader.loadSubScript("chrome://specialpowers/content/Assert.jsm",
+            Services.scriptloader.loadSubScript("resource://specialpowers/Assert.jsm",
                                                 scope);
 
             let assert = new scope.Assert(reporter);
@@ -554,16 +555,16 @@ SpecialPowersObserverAPI.prototype = {
       }
 
       case "SPRequestDumpCoverageCounters": {
-        let codeCoverage = Cc["@mozilla.org/tools/code-coverage;1"].
-                           getService(Ci.nsICodeCoverage);
-        codeCoverage.dumpCounters();
+        PerTestCoverageUtils.afterTest().then(() =>
+          this._sendReply(aMessage, "SPRequestDumpCoverageCounters", {})
+        );
         return undefined; // See comment at the beginning of this function.
       }
 
       case "SPRequestResetCoverageCounters": {
-        let codeCoverage = Cc["@mozilla.org/tools/code-coverage;1"].
-                           getService(Ci.nsICodeCoverage);
-        codeCoverage.resetCounters();
+        PerTestCoverageUtils.beforeTest().then(() =>
+          this._sendReply(aMessage, "SPRequestResetCoverageCounters", {})
+        );
         return undefined; // See comment at the beginning of this function.
       }
 

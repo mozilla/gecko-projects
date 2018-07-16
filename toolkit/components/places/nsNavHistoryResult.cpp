@@ -19,6 +19,8 @@
 #include "nsUnicharUtils.h"
 #include "prtime.h"
 #include "nsQueryObject.h"
+#include "mozilla/dom/PlacesObservers.h"
+#include "mozilla/dom/PlacesVisit.h"
 
 #include "nsCycleCollectionParticipant.h"
 
@@ -2614,7 +2616,7 @@ nsNavHistoryQueryResultNode::OnPageChanged(nsIURI* aURI,
 
 NS_IMETHODIMP
 nsNavHistoryQueryResultNode::OnDeleteVisits(nsIURI* aURI,
-                                            PRTime aVisitTime,
+                                            bool aPartialRemoval,
                                             const nsACString& aGUID,
                                             uint16_t aReason,
                                             uint32_t aTransitionType)
@@ -2622,7 +2624,7 @@ nsNavHistoryQueryResultNode::OnDeleteVisits(nsIURI* aURI,
   MOZ_ASSERT(mOptions->QueryType() == nsINavHistoryQueryOptions::QUERY_TYPE_HISTORY,
              "Bookmarks queries should not get a OnDeleteVisits notification");
 
-  if (aVisitTime == 0) {
+  if (!aPartialRemoval) {
     // All visits for this uri have been removed, but the uri won't be removed
     // from the databse, most likely because it's a bookmark.  For a history
     // query this is equivalent to a onDeleteURI notification.
@@ -3944,8 +3946,7 @@ NS_INTERFACE_MAP_END
 
 nsNavHistoryResult::nsNavHistoryResult(nsNavHistoryContainerResultNode* aRoot,
                                        const RefPtr<nsNavHistoryQuery>& aQuery,
-                                       const RefPtr<nsNavHistoryQueryOptions>& aOptions,
-                                       bool aBatchInProgress
+                                       const RefPtr<nsNavHistoryQueryOptions>& aOptions
 ) : mRootNode(aRoot)
   , mQuery(aQuery)
   , mOptions(aOptions)
@@ -3955,7 +3956,7 @@ nsNavHistoryResult::nsNavHistoryResult(nsNavHistoryContainerResultNode* aRoot,
   , mIsAllBookmarksObserver(false)
   , mIsMobilePrefObserver(false)
   , mBookmarkFolderObservers(64)
-  , mBatchInProgress(aBatchInProgress)
+  , mBatchInProgress(false)
   , mSuppressNotifications(false)
 {
   mSortingMode = aOptions->SortingMode();
@@ -3996,6 +3997,9 @@ nsNavHistoryResult::StopObserving()
     nsNavHistory* history = nsNavHistory::GetHistoryService();
     if (history) {
       history->RemoveObserver(this);
+      AutoTArray<PlacesEventType, 1> events;
+      events.AppendElement(PlacesEventType::Page_visited);
+      PlacesObservers::RemoveListener(events, this);
       mIsHistoryObserver = false;
     }
   }
@@ -4008,6 +4012,9 @@ nsNavHistoryResult::AddHistoryObserver(nsNavHistoryQueryResultNode* aNode)
       nsNavHistory* history = nsNavHistory::GetHistoryService();
       NS_ASSERTION(history, "Can't create history service");
       history->AddObserver(this, true);
+      AutoTArray<PlacesEventType, 1> events;
+      events.AppendElement(PlacesEventType::Page_visited);
+      PlacesObservers::AddListener(events, this);
       mIsHistoryObserver = true;
   }
   // Don't add duplicate observers.  In some case we don't unregister when
@@ -4591,32 +4598,27 @@ nsNavHistoryResult::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
 }
 
 
-NS_IMETHODIMP
-nsNavHistoryResult::OnVisits(nsIVisitData** aVisits,
-                             uint32_t aVisitsCount) {
-  for (uint32_t i = 0; i < aVisitsCount; ++i) {
-    nsIVisitData* place = aVisits[i];
+void
+nsNavHistoryResult::HandlePlacesEvent(const PlacesEventSequence& aEvents) {
+  for (const auto& event : aEvents) {
+    if (NS_WARN_IF(event->Type() != PlacesEventType::Page_visited)) {
+      continue;
+    }
+
+    const dom::PlacesVisit* visit = event->AsPlacesVisit();
+    if (NS_WARN_IF(!visit)) {
+      continue;
+    }
+
     nsCOMPtr<nsIURI> uri;
-    MOZ_ALWAYS_SUCCEEDS(place->GetUri(getter_AddRefs(uri)));
-    int64_t visitId;
-    MOZ_ALWAYS_SUCCEEDS(place->GetVisitId(&visitId));
-    PRTime time;
-    MOZ_ALWAYS_SUCCEEDS(place->GetTime(&time));
-    uint32_t transitionType;
-    MOZ_ALWAYS_SUCCEEDS(place->GetTransitionType(&transitionType));
-    nsCString guid;
-    MOZ_ALWAYS_SUCCEEDS(place->GetGuid(guid));
-    bool hidden;
-    MOZ_ALWAYS_SUCCEEDS(place->GetHidden(&hidden));
-    uint32_t visitCount;
-    MOZ_ALWAYS_SUCCEEDS(place->GetVisitCount(&visitCount));
-    nsString lastKnownTitle;
-    MOZ_ALWAYS_SUCCEEDS(place->GetLastKnownTitle(lastKnownTitle));
-    nsresult rv = OnVisit(uri, visitId, time, transitionType, guid, hidden,
-                          visitCount, lastKnownTitle);
-    NS_ENSURE_SUCCESS(rv, rv);
+    MOZ_ALWAYS_SUCCEEDS(NS_NewURI(getter_AddRefs(uri), visit->mUrl));
+    if (!uri) {
+      return;
+    }
+    OnVisit(uri, visit->mVisitId, visit->mVisitTime * 1000,
+            visit->mTransitionType, visit->mPageGuid,
+            visit->mHidden, visit->mVisitCount, visit->mLastKnownTitle);
   }
-  return NS_OK;
 }
 
 
@@ -4688,14 +4690,14 @@ nsNavHistoryResult::OnPageChanged(nsIURI* aURI,
  */
 NS_IMETHODIMP
 nsNavHistoryResult::OnDeleteVisits(nsIURI* aURI,
-                                   PRTime aVisitTime,
+                                   bool aPartialRemoval,
                                    const nsACString& aGUID,
                                    uint16_t aReason,
                                    uint32_t aTransitionType)
 {
   NS_ENSURE_ARG(aURI);
 
-  ENUMERATE_HISTORY_OBSERVERS(OnDeleteVisits(aURI, aVisitTime, aGUID, aReason,
+  ENUMERATE_HISTORY_OBSERVERS(OnDeleteVisits(aURI, aPartialRemoval, aGUID, aReason,
                                              aTransitionType));
   return NS_OK;
 }

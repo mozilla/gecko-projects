@@ -71,6 +71,10 @@
     overflow: hidden;
     position: relative;
 
+    [lwt-newtab-brighttext] & {
+      background-color: $grey-60;
+    }
+
     &::after {
       border-bottom: 1px solid var(--newtab-card-hairline-color);
       bottom: 0;

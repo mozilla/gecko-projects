@@ -158,7 +158,6 @@ public:
 
   virtual void StopDocumentLoad() override;
 
-  static bool IsElementAnimateEnabled(JSContext* aCx, JSObject* aObject);
   static bool IsWebAnimationsEnabled(JSContext* aCx, JSObject* aObject);
   static bool IsWebAnimationsEnabled(mozilla::dom::CallerType aCallerType);
 
@@ -194,9 +193,11 @@ public:
   nsRadioGroupStruct* GetRadioGroup(const nsAString& aName) const;
   nsRadioGroupStruct* GetOrCreateRadioGroup(const nsAString& aName);
 
-  // Check whether shadow DOM is enabled for the global of aObject.
-  static bool IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject);
+  // Check whether shadow DOM is enabled for aGlobal.
+  static bool IsShadowDOMEnabled(JSContext* aCx, JSObject* aGlobal);
   // Check whether shadow DOM is enabled for the document this node belongs to.
+  // Same as above, but also checks that the caller is either chrome or some addon.
+  static bool IsShadowDOMEnabledAndCallerIsChromeOrAddon(JSContext* aCx, JSObject* aObject);
   static bool IsShadowDOMEnabled(const nsINode* aNode);
 
 public:

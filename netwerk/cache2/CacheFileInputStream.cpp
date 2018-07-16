@@ -152,6 +152,10 @@ CacheFileInputStream::ReadSegments(nsWriteSegmentFun aWriter, void *aClosure,
     return NS_OK;
   }
 
+  if (aCount == 0) {
+    return NS_OK;
+  }
+
   EnsureCorrectChunk(false);
 
   while (true) {
@@ -163,10 +167,6 @@ CacheFileInputStream::ReadSegments(nsWriteSegmentFun aWriter, void *aClosure,
         return NS_OK;
       }
       return NS_BASE_STREAM_WOULD_BLOCK;
-    }
-
-    if (aCount == 0) {
-      break;
     }
 
     CacheFileChunkReadHandle hnd = mChunk->GetReadHandle();

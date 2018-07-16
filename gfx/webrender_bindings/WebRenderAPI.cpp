@@ -135,7 +135,7 @@ private:
 
 
 TransactionBuilder::TransactionBuilder(bool aUseSceneBuilderThread)
-  : mUseSceneBuilderThread(gfxPrefs::WebRenderAsyncSceneBuild() && aUseSceneBuilderThread)
+  : mUseSceneBuilderThread(aUseSceneBuilderThread)
 {
   mTxn = wr_transaction_new(mUseSceneBuilderThread);
 }
@@ -639,6 +639,23 @@ TransactionBuilder::UpdateExternalImage(ImageKey aKey,
 }
 
 void
+TransactionBuilder::UpdateExternalImageWithDirtyRect(ImageKey aKey,
+                                                     const ImageDescriptor& aDescriptor,
+                                                     ExternalImageId aExtID,
+                                                     wr::WrExternalImageBufferType aBufferType,
+                                                     const wr::DeviceUintRect& aDirtyRect,
+                                                     uint8_t aChannelIndex)
+{
+  wr_resource_updates_update_external_image_with_dirty_rect(mTxn,
+                                                            aKey,
+                                                            &aDescriptor,
+                                                            aExtID,
+                                                            aBufferType,
+                                                            aChannelIndex,
+                                                            aDirtyRect);
+}
+
+void
 TransactionBuilder::DeleteImage(ImageKey aKey)
 {
   wr_resource_updates_delete_image(mTxn, aKey);
@@ -1131,6 +1148,9 @@ DisplayListBuilder::PushBorderGradient(const wr::LayoutRect& aBounds,
                                        const wr::LayoutRect& aClip,
                                        bool aIsBackfaceVisible,
                                        const wr::BorderWidths& aWidths,
+                                       const uint32_t aWidth,
+                                       const uint32_t aHeight,
+                                       const wr::SideOffsets2D<uint32_t>& aSlice,
                                        const wr::LayoutPoint& aStartPoint,
                                        const wr::LayoutPoint& aEndPoint,
                                        const nsTArray<wr::GradientStop>& aStops,
@@ -1138,7 +1158,7 @@ DisplayListBuilder::PushBorderGradient(const wr::LayoutRect& aBounds,
                                        const wr::SideOffsets2D<float>& aOutset)
 {
   wr_dp_push_border_gradient(mWrState, aBounds, aClip, aIsBackfaceVisible,
-                             aWidths, aStartPoint, aEndPoint,
+                             aWidths, aWidth, aHeight, aSlice, aStartPoint, aEndPoint,
                              aStops.Elements(), aStops.Length(),
                              aExtendMode, aOutset);
 }

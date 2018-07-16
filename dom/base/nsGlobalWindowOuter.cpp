@@ -17,6 +17,7 @@
 #include "nsHistory.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/Storage.h"
@@ -33,7 +34,6 @@
 #if defined(MOZ_WIDGET_ANDROID)
 #include "mozilla/dom/WindowOrientationObserver.h"
 #endif
-#include "nsDOMOfflineResourceList.h"
 #include "nsError.h"
 #include "nsIIdleService.h"
 #include "nsISizeOfEventTarget.h"
@@ -59,6 +59,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/intl/LocaleService.h"
 #include "WindowDestroyedEvent.h"
+#include "nsDocShellLoadInfo.h"
 
 // Helper Classes
 #include "nsJSUtils.h"
@@ -106,7 +107,6 @@
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
 #include "Crypto.h"
-#include "nsIDOMOfflineResourceList.h"
 #include "nsDOMString.h"
 #include "nsIEmbeddingSiteWindow.h"
 #include "nsThreadUtils.h"
@@ -792,8 +792,9 @@ nsChromeOuterWindowProxy::singleton;
 static JSObject*
 NewOuterWindowProxy(JSContext *cx, JS::Handle<JSObject*> global, bool isChrome)
 {
+  MOZ_ASSERT(JS_IsGlobalObject(global));
+
   JSAutoRealm ar(cx, global);
-  MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(global) == global);
 
   js::WrapperOptions options;
   options.setClass(&OuterWindowProxyClass);
@@ -1858,7 +1859,7 @@ nsGlobalWindowOuter::SetNewDocument(nsIDocument* aDocument,
 
       SetWrapper(outerObject);
 
-      MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(outerObject) == newInnerGlobal);
+      MOZ_ASSERT(JS::GetNonCCWObjectGlobal(outerObject) == newInnerGlobal);
 
       // Inform the nsJSContext, which is the canonical holder of the outer.
       mContext->SetWindowProxy(outerObject);
@@ -5466,7 +5467,7 @@ nsGlobalWindowOuter::OpenOuter(const nsAString& aUrl, const nsAString& aName,
 
 nsresult
 nsGlobalWindowOuter::Open(const nsAString& aUrl, const nsAString& aName,
-                          const nsAString& aOptions, nsIDocShellLoadInfo* aLoadInfo,
+                          const nsAString& aOptions, nsDocShellLoadInfo* aLoadInfo,
                           bool aForceNoOpener, nsPIDOMWindowOuter **_retval)
 {
   return OpenInternal(aUrl, aName, aOptions,
@@ -6851,7 +6852,7 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
                                   bool aDoJSFixups, bool aNavigate,
                                   nsIArray *argv,
                                   nsISupports *aExtraArgument,
-                                  nsIDocShellLoadInfo* aLoadInfo,
+                                  nsDocShellLoadInfo* aLoadInfo,
                                   bool aForceNoOpener,
                                   nsPIDOMWindowOuter **aReturn)
 {
@@ -6896,18 +6897,22 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
     }
   }
 
+  bool windowExists = WindowExists(aName, forceNoOpener, !aCalledNoScript);
+
   // XXXbz When this gets fixed to not use LegacyIsCallerNativeCode()
   // (indirectly) maybe we can nix the AutoJSAPI usage OnLinkClickEvent::Run.
   // But note that if you change this to GetEntryGlobal(), say, then
   // OnLinkClickEvent::Run will need a full-blown AutoEntryScript.
   const bool checkForPopup = !nsContentUtils::LegacyIsCallerChromeOrNativeCode() &&
-    !aDialog && !WindowExists(aName, forceNoOpener, !aCalledNoScript);
+    !aDialog && !windowExists;
 
   // Note: the Void handling here is very important, because the window watcher
   // expects a null URL string (not an empty string) if there is no URL to load.
   nsCString url;
   url.SetIsVoid(true);
   nsresult rv = NS_OK;
+
+  nsCOMPtr<nsIURI> uri;
 
   // It's important to do this security check before determining whether this
   // window opening should be blocked, to ensure that we don't FireAbuseEvents
@@ -6922,7 +6927,7 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
     // If we're not navigating, we assume that whoever *does* navigate the
     // window will do a security check of their own.
     if (!url.IsVoid() && !aDialog && aNavigate)
-      rv = SecurityCheckURL(url.get());
+      rv = SecurityCheckURL(url.get(), getter_AddRefs(uri));
   }
 
   if (NS_FAILED(rv))
@@ -7024,6 +7029,10 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
 
   // success!
 
+  if (!aCalledNoScript && !windowExists && uri) {
+    MaybeAllowStorageForOpenedWindow(uri);
+  }
+
   NS_ENSURE_TRUE(domReturn, NS_OK);
   nsCOMPtr<nsPIDOMWindowOuter> outerReturn =
     nsPIDOMWindowOuter::From(domReturn);
@@ -7046,6 +7055,29 @@ nsGlobalWindowOuter::OpenInternal(const nsAString& aUrl, const nsAString& aName,
   }
 
   return rv;
+}
+
+void
+nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI)
+{
+  nsGlobalWindowInner *inner = GetCurrentInnerWindowInternal();
+  if (NS_WARN_IF(!inner)) {
+    return;
+  }
+
+  // No 3rd party or no tracking resource.
+  if (!nsContentUtils::IsThirdPartyWindowOrChannel(inner, nullptr, nullptr) ||
+      !nsContentUtils::IsTrackingResourceWindow(inner)) {
+    return;
+  }
+
+  nsAutoString origin;
+  nsresult rv = nsContentUtils::GetUTFOrigin(aURI, origin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin, inner);
 }
 
 //*****************************************************************************
@@ -7107,7 +7139,7 @@ nsGlobalWindowOuter::GetScrollFrame()
 }
 
 nsresult
-nsGlobalWindowOuter::SecurityCheckURL(const char *aURL)
+nsGlobalWindowOuter::SecurityCheckURL(const char *aURL, nsIURI** aURI)
 {
   nsCOMPtr<nsPIDOMWindowInner> sourceWindow = do_QueryInterface(GetEntryGlobal());
   if (!sourceWindow) {
@@ -7140,6 +7172,7 @@ nsGlobalWindowOuter::SecurityCheckURL(const char *aURL)
     return NS_ERROR_FAILURE;
   }
 
+  uri.forget(aURI);
   return NS_OK;
 }
 
@@ -7574,6 +7607,7 @@ nsGlobalWindowOuter::AbstractMainThreadFor(TaskCategory aCategory)
 
 nsGlobalWindowOuter::TemporarilyDisableDialogs::TemporarilyDisableDialogs(
   nsGlobalWindowOuter* aWindow MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
+  : mSavedDialogsEnabled(false)
 {
   MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 

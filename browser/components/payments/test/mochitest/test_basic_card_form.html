@@ -78,7 +78,7 @@ add_task(async function test_backButton() {
   await asyncElementRendered();
 
   let stateChangePromise = promiseStateChange(form.requestStore);
-  is(form.pageTitle.textContent, "Sample page title 2", "Check title");
+  is(form.pageTitleHeading.textContent, "Sample page title 2", "Check title");
   is(form.backButton.textContent, "Back", "Check label");
   synthesizeMouseAtCenter(form.backButton, {});
 
@@ -128,6 +128,7 @@ add_task(async function test_saveButton() {
       "cc-exp-year": year,
       "cc-name": "J. Smith",
       "cc-number": "4111111111111111",
+      "billingAddressGUID": "",
     },
     selectedStateKey: ["selectedPaymentCard"],
     successStateChange: {

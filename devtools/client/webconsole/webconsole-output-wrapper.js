@@ -35,7 +35,7 @@ function WebConsoleOutputWrapper(parentNode, hud, toolbox, owner, document) {
   this.queuedRequestUpdates = [];
   this.throttledDispatchPromise = null;
 
-  this._telemetry = new Telemetry();
+  this.telemetry = new Telemetry();
 
   store = configureStore(this.hud);
 }
@@ -140,7 +140,7 @@ WebConsoleOutputWrapper.prototype = {
 
         const sidebarTogglePref = store.getState().prefs.sidebarToggle;
         const openSidebar = sidebarTogglePref ? (messageId) => {
-          store.dispatch(actions.showObjectInSidebar(rootActorId, messageId));
+          store.dispatch(actions.showMessageObjectInSidebar(rootActorId, messageId));
         } : null;
 
         const menu = createContextMenu(this.hud, this.parentNode, {
@@ -163,18 +163,29 @@ WebConsoleOutputWrapper.prototype = {
       if (this.toolbox) {
         Object.assign(serviceContainer, {
           onViewSourceInDebugger: frame => {
-            this.toolbox.viewSourceInDebugger(frame.url, frame.line).then(() =>
-              this.hud.emit("source-in-debugger-opened")
-            );
+            this.toolbox.viewSourceInDebugger(frame.url, frame.line).then(() => {
+              this.telemetry.recordEvent("devtools.main", "jump_to_source", "webconsole",
+                                         null, { "session_id": this.toolbox.sessionId }
+              );
+              this.hud.emit("source-in-debugger-opened");
+            });
           },
           onViewSourceInScratchpad: frame => this.toolbox.viewSourceInScratchpad(
             frame.url,
             frame.line
-          ),
+          ).then(() => {
+            this.telemetry.recordEvent("devtools.main", "jump_to_source", "webconsole",
+                                       null, { "session_id": this.toolbox.sessionId }
+            );
+          }),
           onViewSourceInStyleEditor: frame => this.toolbox.viewSourceInStyleEditor(
             frame.url,
             frame.line
-          ),
+          ).then(() => {
+            this.telemetry.recordEvent("devtools.main", "jump_to_source", "webconsole",
+                                       null, { "session_id": this.toolbox.sessionId }
+            );
+          }),
           openNetworkPanel: (requestId) => {
             return this.toolbox.selectTool("netmonitor").then((panel) => {
               return panel.panelWin.Netmonitor.inspectRequest(requestId);
@@ -250,12 +261,12 @@ WebConsoleOutputWrapper.prototype = {
       promise = Promise.resolve();
     }
 
-    this.batchedMessagesAdd(packet);
+    this.batchedMessageAdd(packet);
     return promise;
   },
 
   dispatchMessagesAdd: function(messages) {
-    store.dispatch(actions.messagesAdd(messages));
+    this.batchedMessagesAdd(messages);
   },
 
   dispatchMessagesClear: function() {
@@ -362,8 +373,13 @@ WebConsoleOutputWrapper.prototype = {
     this.setTimeoutIfNeeded();
   },
 
-  batchedMessagesAdd: function(message) {
+  batchedMessageAdd: function(message) {
     this.queuedMessageAdds.push(message);
+    this.setTimeoutIfNeeded();
+  },
+
+  batchedMessagesAdd: function(messages) {
+    this.queuedMessageAdds = this.queuedMessageAdds.concat(messages);
     this.setTimeoutIfNeeded();
   },
 
@@ -393,7 +409,7 @@ WebConsoleOutputWrapper.prototype = {
         store.dispatch(actions.messagesAdd(this.queuedMessageAdds));
 
         const length = this.queuedMessageAdds.length;
-        this._telemetry.addEventProperty(
+        this.telemetry.addEventProperty(
           "devtools.main", "enter", "webconsole", null, "message_count", length);
 
         this.queuedMessageAdds = [];

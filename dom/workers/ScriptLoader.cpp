@@ -1226,7 +1226,8 @@ private:
       if (wcsp) {
         wcsp->LogViolationDetails(
             nsIContentSecurityPolicy::VIOLATION_TYPE_REQUIRE_SRI_FOR_SCRIPT,
-            aLoadInfo.mURL, EmptyString(), 0, EmptyString(), EmptyString());
+            nullptr, // triggering element
+            aLoadInfo.mURL, EmptyString(), 0, 0, EmptyString(), EmptyString());
       }
       return NS_ERROR_SRI_CORRUPT;
     }
@@ -1540,7 +1541,6 @@ CacheCreator::CreateCacheStorage(nsIPrincipal* aPrincipal)
     CacheStorage::CreateOnMainThread(mozilla::dom::cache::CHROME_ONLY_NAMESPACE,
                                      mSandboxGlobalObject,
                                      aPrincipal,
-                                     false, /* privateBrowsing can't be true here */
                                      true /* force trusted origin */,
                                      error);
   if (NS_WARN_IF(error.Failed())) {
@@ -2214,7 +2214,7 @@ LoadAllScripts(WorkerPrivate* aWorkerPrivate,
   aWorkerPrivate->AssertIsOnWorkerThread();
   NS_ASSERTION(!aLoadInfos.IsEmpty(), "Bad arguments!");
 
-  AutoSyncLoopHolder syncLoop(aWorkerPrivate, Terminating);
+  AutoSyncLoopHolder syncLoop(aWorkerPrivate, Canceling);
   nsCOMPtr<nsIEventTarget> syncLoopTarget = syncLoop.GetEventTarget();
   if (!syncLoopTarget) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
@@ -2298,7 +2298,7 @@ ChannelFromScriptURLWorkerThread(JSContext* aCx,
     new ChannelGetterRunnable(aParent, aScriptURL, aLoadInfo);
 
   ErrorResult rv;
-  getter->Dispatch(Terminating, rv);
+  getter->Dispatch(Canceling, rv);
   if (rv.Failed()) {
     NS_ERROR("Failed to dispatch!");
     return rv.StealNSResult();

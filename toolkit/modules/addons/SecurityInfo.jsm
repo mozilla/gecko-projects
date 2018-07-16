@@ -137,10 +137,14 @@ const SecurityInfo = {
     info.cipherSuite = SSLStatus.cipherName;
 
     // Key exchange group name.
-    info.keaGroupName = SSLStatus.keaGroupName;
+    if (SSLStatus.keaGroupName !== "none") {
+      info.keaGroupName = SSLStatus.keaGroupName;
+    }
 
     // Certificate signature scheme.
-    info.signatureSchemeName = SSLStatus.signatureSchemeName;
+    if (SSLStatus.signatureSchemeName !== "none") {
+      info.signatureSchemeName = SSLStatus.signatureSchemeName;
+    }
 
     info.isDomainMismatch = SSLStatus.isDomainMismatch;
     info.isExtendedValidation = SSLStatus.isExtendedValidation;
@@ -210,8 +214,8 @@ const SecurityInfo = {
       subject: cert.subjectName,
       issuer: cert.issuerName,
       validity: {
-        startGMT: cert.validity.notBeforeGMT,
-        endGMT: cert.validity.notAfterGMT,
+        start: cert.validity.notBefore ? Math.trunc(cert.validity.notBefore / 1000) : 0,
+        end: cert.validity.notAfter ? Math.trunc(cert.validity.notAfter / 1000) : 0,
       },
       fingerprint: {
         sha1: cert.sha1Fingerprint,
@@ -222,7 +226,6 @@ const SecurityInfo = {
       subjectPublicKeyInfoDigest: {
         sha256: cert.sha256SubjectPublicKeyInfoDigest,
       },
-      keyUsages: cert.keyUsages,
     };
     if (options.rawDER) {
       certData.rawDER = cert.getRawDER({});

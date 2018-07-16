@@ -266,9 +266,9 @@ const SQL_AUTOFILL_WITH = `
   WITH
   frecency_stats(count, sum, squares) AS (
     SELECT
-      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "frecency_count") AS REAL),
-      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "frecency_sum") AS REAL),
-      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "frecency_sum_of_squares") AS REAL)
+      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "origin_frecency_count") AS REAL),
+      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "origin_frecency_sum") AS REAL),
+      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "origin_frecency_sum_of_squares") AS REAL)
   ),
   autofill_frecency_threshold(value) AS (
     SELECT MAX(1,
@@ -288,26 +288,33 @@ const SQL_AUTOFILL_FRECENCY_THRESHOLD = `(
 function originQuery(conditions = "", bookmarkedFragment = "NULL") {
   return `${SQL_AUTOFILL_WITH}
           SELECT :query_type,
-                 host || '/',
-                 prefix || host || '/',
+                 fixed_up_host || '/',
+                 prefix || moz_origins.host || '/',
                  frecency,
-                 ${bookmarkedFragment} AS bookmarked,
+                 bookmarked,
                  id
-          FROM moz_origins
-          WHERE host BETWEEN :searchString AND :searchString || X'FFFF'
-                AND frecency >= ${SQL_AUTOFILL_FRECENCY_THRESHOLD}
-                ${conditions}
-          UNION ALL
-          SELECT :query_type,
-                 fixup_url(host) || '/',
-                 prefix || host || '/',
-                 frecency,
-                 ${bookmarkedFragment} AS bookmarked,
-                 id
-          FROM moz_origins
-          WHERE host BETWEEN 'www.' || :searchString AND 'www.' || :searchString || X'FFFF'
-                AND frecency >= ${SQL_AUTOFILL_FRECENCY_THRESHOLD}
-                ${conditions}
+          FROM (
+            SELECT host AS host,
+                   host AS fixed_up_host,
+                   TOTAL(frecency) AS host_frecency,
+                   ${bookmarkedFragment} AS bookmarked
+            FROM moz_origins
+            WHERE host BETWEEN :searchString AND :searchString || X'FFFF'
+                  ${conditions}
+            GROUP BY host
+            HAVING host_frecency >= ${SQL_AUTOFILL_FRECENCY_THRESHOLD}
+            UNION ALL
+            SELECT host AS host,
+                   fixup_url(host) AS fixed_up_host,
+                   TOTAL(frecency) AS host_frecency,
+                   ${bookmarkedFragment} AS bookmarked
+            FROM moz_origins
+            WHERE host BETWEEN 'www.' || :searchString AND 'www.' || :searchString || X'FFFF'
+                  ${conditions}
+            GROUP BY host
+            HAVING host_frecency >= ${SQL_AUTOFILL_FRECENCY_THRESHOLD}
+          ) AS grouped_hosts
+          JOIN moz_origins ON moz_origins.host = grouped_hosts.host
           ORDER BY frecency DESC, id DESC
           LIMIT 1 `;
 }

@@ -59,19 +59,21 @@ public:
 
   void
   GetPropertyChangeClosure(DeclarationBlockMutationClosure* aClosure,
-                           MutationClosureData* aClosureData) final
+                           mozilla::MutationClosureData* aClosureData) final
   {
-    aClosure->function = MutationClosureFunction;
-    aClosure->data = aClosureData;
-    aClosureData->mClosure = MutationClosureFunction;
-    aClosureData->mElement = mElement;
+    if (!mIsSMILOverride) {
+      aClosure->function = MutationClosureFunction;
+      aClosure->data = aClosureData;
+      aClosureData->mClosure = MutationClosureFunction;
+      aClosureData->mElement = mElement;
+    }
   }
 
 protected:
   ~nsDOMCSSAttributeDeclaration();
 
   virtual nsresult SetCSSDeclaration(mozilla::DeclarationBlock* aDecl,
-                                     MutationClosureData* aClosureData) override;
+                                     mozilla::MutationClosureData* aClosureData) override;
   virtual nsIDocument* DocToUpdate() override;
 
   RefPtr<Element> mElement;

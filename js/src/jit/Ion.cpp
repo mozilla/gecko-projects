@@ -213,9 +213,11 @@ JitRuntime::startTrampolineCode(MacroAssembler& masm)
 }
 
 bool
-JitRuntime::initialize(JSContext* cx, AutoLockForExclusiveAccess& lock)
+JitRuntime::initialize(JSContext* cx)
 {
-    AutoAtomsZone az(cx, lock);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
+
+    AutoAllocInAtomsZone az(cx);
 
     JitContext jctx(cx, nullptr);
 
@@ -339,8 +341,7 @@ JitRuntime::debugTrapHandler(JSContext* cx)
     if (!debugTrapHandler_) {
         // JitRuntime code stubs are shared across compartments and have to
         // be allocated in the atoms zone.
-        AutoLockForExclusiveAccess lock(cx);
-        AutoAtomsZone az(cx, lock);
+        AutoAllocInAtomsZone az(cx);
         debugTrapHandler_ = generateDebugTrapHandler(cx);
     }
     return debugTrapHandler_;
@@ -913,7 +914,7 @@ IonScript::New(JSContext* cx, IonCompilationId compilationId,
                    paddedRuntimeSize +
                    paddedSafepointSize +
                    paddedSharedStubSize;
-    IonScript* script = cx->zone()->pod_malloc_with_extra<IonScript, uint8_t>(bytes);
+    IonScript* script = cx->pod_malloc_with_extra<IonScript, uint8_t>(bytes);
     if (!script)
         return nullptr;
     new (script) IonScript(compilationId);
@@ -1318,8 +1319,7 @@ OptimizeSinCos(MIRGraph &graph)
             // Adding the MSinCos and replacing the parameters of the
             // sin(x)/cos(x) to sin(sincos(x))/cos(sincos(x)).
             MSinCos *insSinCos = MSinCos::New(graph.alloc(),
-                                              insFunc->input(),
-                                              insFunc->toMathFunction()->cache());
+                                              insFunc->input());
             insSinCos->setImplicitlyUsedUnchecked();
             block->insertBefore(insFunc, insSinCos);
             for (MUseDefIterator uses(insFunc->input()); uses; )
@@ -1872,16 +1872,14 @@ GenerateCode(MIRGenerator* mir, LIRGraph* lir)
     TraceLoggerThread* logger = TraceLoggerForCurrentThread();
     AutoTraceLog log(logger, TraceLogger_GenerateCode);
 
-    CodeGenerator* codegen = js_new<CodeGenerator>(mir, lir);
+    auto codegen = MakeUnique<CodeGenerator>(mir, lir);
     if (!codegen)
         return nullptr;
 
-    if (!codegen->generate()) {
-        js_delete(codegen);
+    if (!codegen->generate())
         return nullptr;
-    }
 
-    return codegen;
+    return codegen.release();
 }
 
 CodeGenerator*

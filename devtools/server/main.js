@@ -10,111 +10,31 @@
  */
 var { Ci, Cc } = require("chrome");
 var Services = require("Services");
-var { ActorPool, OriginalLocation, RegisteredActorFactory,
+var { ActorPool, RegisteredActorFactory,
       ObservedActorFactory } = require("devtools/server/actors/common");
-var { LocalDebuggerTransport, ChildDebuggerTransport, WorkerDebuggerTransport } =
-  require("devtools/shared/transport/transport");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { dumpn } = DevToolsUtils;
 
-DevToolsUtils.defineLazyGetter(this, "DebuggerSocket", () => {
-  // eslint-disable-next-line no-shadow
-  const { DebuggerSocket } = require("devtools/shared/security/socket");
-  return DebuggerSocket;
-});
-DevToolsUtils.defineLazyGetter(this, "Authentication", () => {
-  return require("devtools/shared/security/auth");
-});
-DevToolsUtils.defineLazyGetter(this, "generateUUID", () => {
+loader.lazyRequireGetter(this, "DebuggerSocket", "devtools/shared/security/socket", true);
+loader.lazyRequireGetter(this, "Authentication", "devtools/shared/security/auth");
+loader.lazyRequireGetter(this, "LocalDebuggerTransport", "devtools/shared/transport/local-transport", true);
+loader.lazyRequireGetter(this, "ChildDebuggerTransport", "devtools/shared/transport/child-transport", true);
+loader.lazyRequireGetter(this, "WorkerThreadWorkerDebuggerTransport", "devtools/shared/transport/worker-transport", true);
+loader.lazyRequireGetter(this, "MainThreadWorkerDebuggerTransport", "devtools/shared/transport/worker-transport", true);
+
+loader.lazyGetter(this, "generateUUID", () => {
   // eslint-disable-next-line no-shadow
   const { generateUUID } = Cc["@mozilla.org/uuid-generator;1"]
                            .getService(Ci.nsIUUIDGenerator);
   return generateUUID;
 });
 
-// Overload `Components` to prevent DevTools loader exception on Components
-// object usage
-// eslint-disable-next-line no-unused-vars
-Object.defineProperty(this, "Components", {
-  get() {
-    return require("chrome").components;
-  }
-});
-
 const CONTENT_PROCESS_SERVER_STARTUP_SCRIPT =
   "resource://devtools/server/startup/content-process.js";
-
-function loadSubScript(url) {
-  try {
-    Services.scriptloader.loadSubScript(url, this);
-  } catch (e) {
-    const errorStr = "Error loading: " + url + ":\n" +
-                   (e.fileName ? "at " + e.fileName + " : " + e.lineNumber + "\n" : "") +
-                   e + " - " + e.stack + "\n";
-    dump(errorStr);
-    reportError(errorStr);
-    throw e;
-  }
-}
 
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 var gRegisteredModules = Object.create(null);
-
-/**
- * The ModuleAPI object is passed to modules loaded using the
- * DebuggerServer.registerModule() API.  Modules can use this
- * object to register actor factories.
- * Factories registered through the module API will be removed
- * when the module is unregistered or when the server is
- * destroyed.
- */
-function ModuleAPI() {
-  let activeTargetScopedActors = new Set();
-  let activeGlobalActors = new Set();
-
-  return {
-    // See DebuggerServer.setRootActor for a description.
-    setRootActor(factory) {
-      DebuggerServer.setRootActor(factory);
-    },
-
-    // See DebuggerServer.addGlobalActor for a description.
-    addGlobalActor(factory, name) {
-      DebuggerServer.addGlobalActor(factory, name);
-      activeGlobalActors.add(factory);
-    },
-    // See DebuggerServer.removeGlobalActor for a description.
-    removeGlobalActor(factory) {
-      DebuggerServer.removeGlobalActor(factory);
-      activeGlobalActors.delete(factory);
-    },
-
-    // See DebuggerServer.addTargetScopedActor for a description.
-    addTargetScopedActor(factory, name) {
-      DebuggerServer.addTargetScopedActor(factory, name);
-      activeTargetScopedActors.add(factory);
-    },
-    // See DebuggerServer.removeTargetScopedActor for a description.
-    removeTargetScopedActor(factory) {
-      DebuggerServer.removeTargetScopedActor(factory);
-      activeTargetScopedActors.delete(factory);
-    },
-
-    // Destroy the module API object, unregistering any
-    // factories registered by the module.
-    destroy() {
-      for (const factory of activeTargetScopedActors) {
-        DebuggerServer.removeTargetScopedActor(factory);
-      }
-      activeTargetScopedActors = null;
-      for (const factory of activeGlobalActors) {
-        DebuggerServer.removeGlobalActor(factory);
-      }
-      activeGlobalActors = null;
-    }
-  };
-}
 
 /**
  * Public API
@@ -151,7 +71,7 @@ var DebuggerServer = {
    * actor registered on DebuggerServer.
    */
   get rootlessServer() {
-    return !this.isModuleRegistered("devtools/server/actors/webbrowser");
+    return !this.createRootActor;
   },
 
   /**
@@ -214,7 +134,7 @@ var DebuggerServer = {
     }
 
     if (!this.rootlessServer && !this.createRootActor) {
-      throw new Error("Use DebuggerServer.addActors() to add a root actor " +
+      throw new Error("Use DebuggerServer.setRootActor() to add a root actor " +
                       "implementation.");
     }
   },
@@ -239,7 +159,8 @@ var DebuggerServer = {
     }
 
     if (root) {
-      this.registerModule("devtools/server/actors/webbrowser");
+      const { createRootActor } = require("devtools/server/actors/webbrowser");
+      this.setRootActor(createRootActor);
     }
 
     if (target) {
@@ -255,30 +176,13 @@ var DebuggerServer = {
   },
 
   /**
-   * Load a subscript into the debugging global.
-   *
-   * @param url string A url that will be loaded as a subscript into the
-   *        debugging global.  The user must load at least one script
-   *        that implements a createRootActor() function to create the
-   *        server's root actor.
-   */
-  addActors(url) {
-    loadSubScript.call(this, url);
-  },
-
-  /**
    * Register a CommonJS module with the debugger server.
    * @param id string
-   *        The ID of a CommonJS module.  This module must export 'register'
-   *        and 'unregister' functions if no `options` argument is given.
-   *        If `options` is set, the actor is going to be registered
-   *        immediately, but loaded only when a client starts sending packets
-   *        to an actor with the same id.
+   *        The ID of a CommonJS module.
+   *        The actor is going to be registered immediately, but loaded only
+   *        when a client starts sending packets to an actor with the same id.
    *
-   * @param options object (optional)
-   *        This parameter is still optional, but not providing it is
-   *        deprecated and will result in eagerly loading the actor module
-   *        with the memory overhead that entails.
+   * @param options object
    *        An object with 3 mandatory attributes:
    *        - prefix (string):
    *          The prefix of an actor is used to compute:
@@ -306,46 +210,37 @@ var DebuggerServer = {
       return;
     }
 
-    if (options) {
-      // Lazy loaded actors
-      const {prefix, constructor, type} = options;
-      if (typeof (prefix) !== "string") {
-        throw new Error(`Lazy actor definition for '${id}' requires a string ` +
-                        `'prefix' option.`);
-      }
-      if (typeof (constructor) !== "string") {
-        throw new Error(`Lazy actor definition for '${id}' requires a string ` +
-                        `'constructor' option.`);
-      }
-      if (!("global" in type) && !("target" in type)) {
-        throw new Error(`Lazy actor definition for '${id}' requires a dictionary ` +
-                        `'type' option whose attributes can be 'global' or 'target'.`);
-      }
-      const name = prefix + "Actor";
-      const mod = {
-        id: id,
-        prefix: prefix,
-        constructorName: constructor,
-        type: type,
-        globalActor: type.global,
-        targetScopedActor: type.target
-      };
-      gRegisteredModules[id] = mod;
-      if (mod.targetScopedActor) {
-        this.addTargetScopedActor(mod, name);
-      }
-      if (mod.globalActor) {
-        this.addGlobalActor(mod, name);
-      }
-    } else {
-      // Deprecated actors being loaded at startup
-      const moduleAPI = ModuleAPI();
-      const mod = require(id);
-      mod.register(moduleAPI);
-      gRegisteredModules[id] = {
-        module: mod,
-        api: moduleAPI
-      };
+    if (!options) {
+      throw new Error("DebuggerServer.registerModule requires an options argument");
+    }
+    const {prefix, constructor, type} = options;
+    if (typeof (prefix) !== "string") {
+      throw new Error(`Lazy actor definition for '${id}' requires a string ` +
+                      `'prefix' option.`);
+    }
+    if (typeof (constructor) !== "string") {
+      throw new Error(`Lazy actor definition for '${id}' requires a string ` +
+                      `'constructor' option.`);
+    }
+    if (!("global" in type) && !("target" in type)) {
+      throw new Error(`Lazy actor definition for '${id}' requires a dictionary ` +
+                      `'type' option whose attributes can be 'global' or 'target'.`);
+    }
+    const name = prefix + "Actor";
+    const mod = {
+      id,
+      prefix,
+      constructorName: constructor,
+      type,
+      globalActor: type.global,
+      targetScopedActor: type.target
+    };
+    gRegisteredModules[id] = mod;
+    if (mod.targetScopedActor) {
+      this.addTargetScopedActor(mod, name);
+    }
+    if (mod.globalActor) {
+      this.addGlobalActor(mod, name);
     }
   },
 
@@ -371,12 +266,6 @@ var DebuggerServer = {
     }
     if (mod.globalActor) {
       this.removeGlobalActor(mod);
-    }
-
-    if (mod.module) {
-      // Deprecated non-lazy module API
-      mod.module.unregister(mod.api);
-      mod.api.destroy();
     }
 
     delete gRegisteredModules[id];
@@ -677,7 +566,7 @@ var DebuggerServer = {
     this._checkInit();
 
     const transport = isWorker ?
-                    new WorkerDebuggerTransport(scopeOrManager, prefix) :
+                    new WorkerThreadWorkerDebuggerTransport(scopeOrManager, prefix) :
                     new ChildDebuggerTransport(scopeOrManager, prefix);
 
     return this._onConnection(transport, prefix, true);
@@ -846,7 +735,7 @@ var DebuggerServer = {
           dbg.removeListener(listener);
 
           // Step 7: Create a transport for the connection to the worker.
-          const transport = new WorkerDebuggerTransport(dbg, id);
+          const transport = new MainThreadWorkerDebuggerTransport(dbg, id);
           transport.ready();
           transport.hooks = {
             onClosed: () => {
@@ -1410,25 +1299,7 @@ DevToolsUtils.defineLazyGetter(DebuggerServer, "AuthenticationResult", () => {
 
 EventEmitter.decorate(DebuggerServer);
 
-if (this.exports) {
-  exports.DebuggerServer = DebuggerServer;
-  exports.ActorPool = ActorPool;
-  exports.OriginalLocation = OriginalLocation;
-}
-
-// Needed on B2G (See header note)
-this.DebuggerServer = DebuggerServer;
-this.ActorPool = ActorPool;
-this.OriginalLocation = OriginalLocation;
-
-// When using DebuggerServer.addActors, some symbols are expected to be in
-// the scope of the added actor even before the corresponding modules are
-// loaded, so let's explicitly bind the expected symbols here.
-var includes = ["Components", "Ci", "Cu", "require", "Services", "DebuggerServer",
-                "ActorPool", "DevToolsUtils"];
-includes.forEach(name => {
-  DebuggerServer[name] = this[name];
-});
+exports.DebuggerServer = DebuggerServer;
 
 /**
  * Creates a DebuggerServerConnection.

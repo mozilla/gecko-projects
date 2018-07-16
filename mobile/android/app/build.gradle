@@ -132,6 +132,7 @@ android {
                     exclude 'org/mozilla/gecko/GeckoPresentationDisplay.java'
                     exclude 'org/mozilla/gecko/MediaPlayerManager.java'
                     exclude 'org/mozilla/gecko/RemotePresentationService.java'
+                    exclude 'org/mozilla/gecko/VirtualPresentation.java'
                 }
 
                 if (mozconfig.substs.MOZ_INSTALL_TRACKING) {
@@ -144,6 +145,7 @@ android {
                     exclude 'org/mozilla/gecko/mma/MmaStubImp.java'
                 } else {
                     exclude 'org/mozilla/gecko/mma/MmaLeanplumImp.java'
+                    exclude 'org/mozilla/gecko/mma/LeanplumVariables.java'
                 }
 
                 if (!mozconfig.substs.MOZ_ANDROID_GCM) {
@@ -220,6 +222,11 @@ dependencies {
     implementation "com.android.support:design:$support_library_version"
     implementation "com.android.support:customtabs:$support_library_version"
     implementation "com.android.support:palette-v7:$support_library_version"
+
+    // We always include support for multidexing even when we don't enable it at runtime.
+    // We could conditionally include support, but we'd need
+    // to generate the `Application` class or fork the file on disk.
+    implementation "com.android.support:multidex:1.0.3"
 
     if (mozconfig.substs.MOZ_NATIVE_DEVICES) {
         implementation "com.android.support:mediarouter-v7:$support_library_version"
@@ -504,4 +511,9 @@ android.applicationVariants.all { variant ->
     }
     def buildType = "${variant.buildType.name.capitalize()}"
     tasks["compile${productFlavor}${buildType}UnitTestSources"].dependsOn(tasks["merge${productFlavor}${buildType}Assets"])
+}
+
+apply from: "${topsrcdir}/mobile/android/gradle/jacoco_dependencies.gradle"
+if (project.hasProperty('enable_code_coverage')) {
+    apply from: "${topsrcdir}/mobile/android/gradle/jacoco_for_junit.gradle"
 }

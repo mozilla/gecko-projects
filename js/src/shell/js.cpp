@@ -479,7 +479,7 @@ struct MOZ_STACK_CLASS EnvironmentPreparer : public js::ScriptEnvironmentPrepare
     {
         js::SetScriptEnvironmentPreparer(cx, this);
     }
-    void invoke(JS::HandleObject scope, Closure& closure) override;
+    void invoke(JS::HandleObject global, Closure& closure) override;
 };
 
 // Shell state set once at startup.
@@ -796,12 +796,14 @@ SkipUTF8BOM(FILE* file)
 }
 
 void
-EnvironmentPreparer::invoke(HandleObject scope, Closure& closure)
+EnvironmentPreparer::invoke(HandleObject global, Closure& closure)
 {
+    MOZ_ASSERT(JS_IsGlobalObject(global));
+
     JSContext* cx = TlsContext.get();
     MOZ_ASSERT(!JS_IsExceptionPending(cx));
 
-    AutoRealm ar(cx, scope);
+    AutoRealm ar(cx, global);
     AutoReportException are(cx);
     if (!closure(cx))
         return;
@@ -884,7 +886,7 @@ InitModuleLoader(JSContext* cx)
     // the module loader for the current compartment.
 
     uint32_t srcLen = moduleloader::GetRawScriptsSize();
-    UniqueChars src(cx->pod_malloc<char>(srcLen));
+    auto src = cx->make_pod_array<char>(srcLen);
     if (!src || !DecompressString(moduleloader::compressedSources, moduleloader::GetCompressedSize(),
                                   reinterpret_cast<unsigned char*>(src.get()), srcLen))
     {
@@ -1840,7 +1842,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
     options.setIntroductionType("js shell evaluate")
            .setFileAndLine("@evaluate", 1);
 
-    global = JS_GetGlobalForObject(cx, &args.callee());
+    global = JS::CurrentGlobalOrNull(cx);
     MOZ_ASSERT(global);
 
     if (args.length() == 2) {
@@ -2128,7 +2130,7 @@ js::shell::FileAsString(JSContext* cx, JS::HandleString pathnameStr)
         return nullptr;
     }
 
-    UniqueChars buf(static_cast<char*>(js_malloc(len + 1)));
+    UniqueChars buf(js_pod_malloc<char>(len + 1));
     if (!buf)
         return nullptr;
 
@@ -3318,7 +3320,8 @@ Clone(JSContext* cx, unsigned argc, Value* vp)
         if (!JS_ValueToObject(cx, args[1], &env))
             return false;
     } else {
-        env = js::GetGlobalForObjectCrossCompartment(&args.callee());
+        env = JS::CurrentGlobalOrNull(cx);
+        MOZ_ASSERT(env);
     }
 
     // Should it worry us that we might be getting with wrappers
@@ -3562,25 +3565,22 @@ EnsureGeckoProfilingStackInstalled(JSContext* cx, ShellContext* sc)
 struct WorkerInput
 {
     JSRuntime* parentRuntime;
-    char16_t* chars;
+    UniqueTwoByteChars chars;
     size_t length;
 
-    WorkerInput(JSRuntime* parentRuntime, char16_t* chars, size_t length)
-      : parentRuntime(parentRuntime), chars(chars), length(length)
+    WorkerInput(JSRuntime* parentRuntime, UniqueTwoByteChars chars, size_t length)
+      : parentRuntime(parentRuntime), chars(std::move(chars)), length(length)
     {}
 
-    ~WorkerInput() {
-        js_free(chars);
-    }
+    ~WorkerInput() = default;
 };
 
 static void SetWorkerContextOptions(JSContext* cx);
 static bool ShellBuildId(JS::BuildIdCharVector* buildId);
 
 static void
-WorkerMain(void* arg)
+WorkerMain(WorkerInput* input)
 {
-    WorkerInput* input = (WorkerInput*) arg;
     MOZ_ASSERT(input->parentRuntime);
 
     JSContext* cx = JS_NewContext(8L * 1024L * 1024L, 2L * 1024L * 1024L, input->parentRuntime);
@@ -3635,7 +3635,7 @@ WorkerMain(void* arg)
 
         AutoReportException are(cx);
         RootedScript script(cx);
-        if (!JS::Compile(cx, options, input->chars, input->length, &script))
+        if (!JS::Compile(cx, options, input->chars.get(), input->length, &script))
             break;
         RootedValue result(cx);
         JS_ExecuteScript(cx, script, &result);
@@ -3694,15 +3694,16 @@ EvalInWorker(JSContext* cx, unsigned argc, Value* vp)
 
     JSLinearString* str = &args[0].toString()->asLinear();
 
-    char16_t* chars = (char16_t*) js_malloc(str->length() * sizeof(char16_t));
+    UniqueTwoByteChars chars(js_pod_malloc<char16_t>(str->length()));
     if (!chars) {
         ReportOutOfMemory(cx);
         return false;
     }
 
-    CopyChars(chars, *str);
+    CopyChars(chars.get(), *str);
 
-    WorkerInput* input = js_new<WorkerInput>(JS_GetParentRuntime(cx), chars, str->length());
+    WorkerInput* input = js_new<WorkerInput>(JS_GetParentRuntime(cx), std::move(chars),
+                                             str->length());
     if (!input) {
         ReportOutOfMemory(cx);
         return false;
@@ -5029,7 +5030,7 @@ EscapeForShell(JSContext* cx, AutoCStringVector& argv)
                 newLen++;
         }
 
-        UniqueChars escaped(cx->pod_malloc<char>(newLen));
+        auto escaped = cx->make_pod_array<char>(newLen);
         if (!escaped)
             return false;
 
@@ -5267,7 +5268,7 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
 
         if (!JS_GetProperty(cx, opts, "sameCompartmentAs", &v))
             return false;
-        if (v.isObject() && !fuzzingSafe)
+        if (v.isObject())
             creationOptions.setExistingCompartment(UncheckedUnwrap(&v.toObject()));
 
         if (!JS_GetProperty(cx, opts, "disableLazyParsing", &v))
@@ -7840,10 +7841,42 @@ dom_set_x(JSContext* cx, HandleObject obj, void* self, JSJitSetterCallArgs args)
 }
 
 static bool
+dom_get_global(JSContext* cx, HandleObject obj, void* self, JSJitGetterCallArgs args)
+{
+    MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
+    MOZ_ASSERT(self == (void*)0x1234);
+
+    // Return the current global (instead of obj->global()) to test cx->realm
+    // switching in the JIT.
+    args.rval().setObject(*ToWindowProxyIfWindow(cx->global()));
+
+    return true;
+}
+
+static bool
+dom_set_global(JSContext* cx, HandleObject obj, void* self, JSJitSetterCallArgs args)
+{
+    MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
+    MOZ_ASSERT(self == (void*)0x1234);
+
+    // Throw an exception if our argument is not the current global. This lets
+    // us test cx->realm switching.
+    if (!args[0].isObject() ||
+        ToWindowIfWindowProxy(&args[0].toObject()) != cx->global())
+    {
+        JS_ReportErrorASCII(cx, "Setter not called with matching global argument");
+        return false;
+    }
+
+    return true;
+}
+
+static bool
 dom_doFoo(JSContext* cx, HandleObject obj, void* self, const JSJitMethodCallArgs& args)
 {
     MOZ_ASSERT(JS_GetClass(obj) == GetDomClass());
     MOZ_ASSERT(self == (void*)0x1234);
+    MOZ_ASSERT(cx->realm() == args.callee().as<JSFunction>().realm());
 
     /* Just return args.length(). */
     args.rval().setInt32(args.length());
@@ -7854,8 +7887,8 @@ static const JSJitInfo dom_x_getterinfo = {
     { (JSJitGetterOp)dom_get_x },
     { 0 },    /* protoID */
     { 0 },    /* depth */
-    JSJitInfo::AliasNone, /* aliasSet */
     JSJitInfo::Getter,
+    JSJitInfo::AliasNone, /* aliasSet */
     JSVAL_TYPE_UNKNOWN, /* returnType */
     true,     /* isInfallible. False in setters. */
     true,     /* isMovable */
@@ -7868,6 +7901,41 @@ static const JSJitInfo dom_x_getterinfo = {
 
 static const JSJitInfo dom_x_setterinfo = {
     { (JSJitGetterOp)dom_set_x },
+    { 0 },    /* protoID */
+    { 0 },    /* depth */
+    JSJitInfo::Setter,
+    JSJitInfo::AliasEverything, /* aliasSet */
+    JSVAL_TYPE_UNKNOWN, /* returnType */
+    false,    /* isInfallible. False in setters. */
+    false,    /* isMovable. */
+    false,    /* isEliminatable. */
+    false,    /* isAlwaysInSlot */
+    false,    /* isLazilyCachedInSlot */
+    false,    /* isTypedMethod */
+    0         /* slotIndex */
+};
+
+// Note: this getter uses AliasEverything and is marked as fallible and
+// non-movable (1) to prevent Ion from getting too clever optimizing it and
+// (2) it's nice to have a few different kinds of getters in the shell.
+static const JSJitInfo dom_global_getterinfo = {
+    { (JSJitGetterOp)dom_get_global },
+    { 0 },    /* protoID */
+    { 0 },    /* depth */
+    JSJitInfo::Getter,
+    JSJitInfo::AliasEverything, /* aliasSet */
+    JSVAL_TYPE_OBJECT, /* returnType */
+    false,    /* isInfallible. False in setters. */
+    false,    /* isMovable */
+    false,    /* isEliminatable */
+    false,    /* isAlwaysInSlot */
+    false,    /* isLazilyCachedInSlot */
+    false,    /* isTypedMethod */
+    0         /* slotIndex */
+};
+
+static const JSJitInfo dom_global_setterinfo = {
+    { (JSJitGetterOp)dom_set_global },
     { 0 },    /* protoID */
     { 0 },    /* depth */
     JSJitInfo::Setter,
@@ -7904,6 +7972,13 @@ static const JSPropertySpec dom_props[] = {
      { {
         { { dom_genericGetter, &dom_x_getterinfo } },
         { { dom_genericSetter, &dom_x_setterinfo } }
+     } },
+    },
+    {"global",
+     JSPROP_ENUMERATE,
+     { {
+        { { dom_genericGetter, &dom_global_getterinfo } },
+        { { dom_genericSetter, &dom_global_setterinfo } }
      } },
     },
     JS_PS_END

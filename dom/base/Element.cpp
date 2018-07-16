@@ -658,32 +658,20 @@ Element::GetElementsByTagName(const nsAString& aLocalName)
   return NS_GetContentList(this, kNameSpaceID_Unknown, aLocalName);
 }
 
-nsIFrame*
-Element::GetStyledFrame()
-{
-  nsIFrame *frame = GetPrimaryFrame(FlushType::Layout);
-  return frame ? nsLayoutUtils::GetStyleFrame(frame) : nullptr;
-}
-
 nsIScrollableFrame*
-Element::GetScrollFrame(nsIFrame **aStyledFrame, FlushType aFlushType)
+Element::GetScrollFrame(nsIFrame **aFrame, FlushType aFlushType)
 {
   // it isn't clear what to return for SVG nodes, so just return nothing
   if (IsSVGElement()) {
-    if (aStyledFrame) {
-      *aStyledFrame = nullptr;
+    if (aFrame) {
+      *aFrame = nullptr;
     }
     return nullptr;
   }
 
-  // Inline version of GetStyledFrame to use the given FlushType.
   nsIFrame* frame = GetPrimaryFrame(aFlushType);
-  if (frame) {
-    frame = nsLayoutUtils::GetStyleFrame(frame);
-  }
-
-  if (aStyledFrame) {
-    *aStyledFrame = frame;
+  if (aFrame) {
+    *aFrame = frame;
   }
   if (frame) {
     // menu frames implement GetScrollTargetFrame but we don't want
@@ -707,13 +695,8 @@ Element::GetScrollFrame(nsIFrame **aStyledFrame, FlushType aFlushType)
   bool isScrollingElement = OwnerDoc()->IsScrollingElement(this);
   // Now reget *aStyledFrame if the caller asked for it, because that frame
   // flush can kill it.
-  if (aStyledFrame) {
-    nsIFrame* frame = GetPrimaryFrame(FlushType::None);
-    if (frame) {
-      *aStyledFrame = nsLayoutUtils::GetStyleFrame(frame);
-    } else {
-      *aStyledFrame = nullptr;
-    }
+  if (aFrame) {
+    *aFrame = GetPrimaryFrame(FlushType::None);
   }
 
   if (isScrollingElement) {
@@ -1014,12 +997,13 @@ Element::ScrollHeight()
   if (IsSVGElement())
     return 0;
 
-  nsIScrollableFrame* sf = GetScrollFrame();
+  nsIFrame* frame;
+  nsIScrollableFrame* sf = GetScrollFrame(&frame);
   nscoord height;
   if (sf) {
     height = sf->GetScrollRange().Height() + sf->GetScrollPortRect().Height();
   } else {
-    height = GetScrollRectSizeForOverflowVisibleFrame(GetStyledFrame()).height;
+    height = GetScrollRectSizeForOverflowVisibleFrame(frame).height;
   }
 
   return nsPresContext::AppUnitsToIntCSSPixels(height);
@@ -1031,12 +1015,13 @@ Element::ScrollWidth()
   if (IsSVGElement())
     return 0;
 
-  nsIScrollableFrame* sf = GetScrollFrame();
+  nsIFrame* frame;
+  nsIScrollableFrame* sf = GetScrollFrame(&frame);
   nscoord width;
   if (sf) {
     width = sf->GetScrollRange().Width() + sf->GetScrollPortRect().Width();
   } else {
-    width = GetScrollRectSizeForOverflowVisibleFrame(GetStyledFrame()).width;
+    width = GetScrollRectSizeForOverflowVisibleFrame(frame).width;
   }
 
   return nsPresContext::AppUnitsToIntCSSPixels(width);
@@ -1045,19 +1030,22 @@ Element::ScrollWidth()
 nsRect
 Element::GetClientAreaRect()
 {
-  nsIFrame* styledFrame;
-  nsIScrollableFrame* sf = GetScrollFrame(&styledFrame);
+  nsIFrame* frame;
+  nsIScrollableFrame* sf = GetScrollFrame(&frame);
 
   if (sf) {
     return sf->GetScrollPortRect();
   }
 
-  if (styledFrame &&
-      (styledFrame->StyleDisplay()->mDisplay != StyleDisplay::Inline ||
-       styledFrame->IsFrameOfType(nsIFrame::eReplaced))) {
+  if (frame &&
+      // The display check is OK even though we're not looking at the style
+      // frame, because the style frame only differs from "frame" for tables,
+      // and table wrappers have the same display as the table itself.
+      (frame->StyleDisplay()->mDisplay != StyleDisplay::Inline ||
+       frame->IsFrameOfType(nsIFrame::eReplaced))) {
     // Special case code to make client area work even when there isn't
     // a scroll view, see bug 180552, bug 227567.
-    return styledFrame->GetPaddingRect() - styledFrame->GetPositionIgnoringScrolling();
+    return frame->GetPaddingRect() - frame->GetPositionIgnoringScrolling();
   }
 
   // SVG nodes reach here and just return 0
@@ -1319,6 +1307,43 @@ Element::GetAttribute(const nsAString& aName, DOMString& aReturn)
       aReturn.SetNull();
     }
   }
+}
+
+bool
+Element::ToggleAttribute(const nsAString& aName,
+                         const Optional<bool>& aForce,
+                         nsIPrincipal* aTriggeringPrincipal,
+                         ErrorResult& aError)
+{
+  aError = nsContentUtils::CheckQName(aName, false);
+  if (aError.Failed()) {
+    return false;
+  }
+
+  nsAutoString nameToUse;
+  const nsAttrName* name = InternalGetAttrNameFromQName(aName, &nameToUse);
+  if (!name) {
+    if (aForce.WasPassed() && !aForce.Value()) {
+      return false;
+    }
+    RefPtr<nsAtom> nameAtom = NS_AtomizeMainThread(nameToUse);
+    if (!nameAtom) {
+      aError.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return false;
+    }
+    aError = SetAttr(kNameSpaceID_None, nameAtom, EmptyString(), aTriggeringPrincipal, true);
+    return true;
+  }
+  if (aForce.WasPassed() && aForce.Value()) {
+    return true;
+  }
+  // Hold a strong reference here so that the atom or nodeinfo doesn't go
+  // away during UnsetAttr. If it did UnsetAttr would be left with a
+  // dangling pointer as argument without knowing it.
+  nsAttrName tmp(*name);
+
+  aError = UnsetAttr(name->NamespaceID(), name->LocalName(), true);
+  return false;
 }
 
 void
@@ -1856,6 +1881,19 @@ RemoveFromBindingManagerRunnable::Run()
   return NS_OK;
 }
 
+static bool
+ShouldRemoveFromIdTableOnUnbind(const Element& aElement, bool aNullParent)
+{
+  if (aElement.IsInUncomposedDoc()) {
+    return true;
+  }
+
+  if (!aElement.IsInShadowTree()) {
+    return false;
+  }
+
+  return aNullParent || !aElement.GetParent()->IsInShadowTree();
+}
 
 void
 Element::UnbindFromTree(bool aDeep, bool aNullParent)
@@ -1864,7 +1902,11 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
                   "Shallow unbind won't clear document and binding parent on "
                   "kids!");
 
-  RemoveFromIdTable();
+  // Make sure to only remove from the ID table if our subtree root is actually
+  // changing.
+  if (ShouldRemoveFromIdTableOnUnbind(*this, aNullParent)) {
+    RemoveFromIdTable();
+  }
 
   // Make sure to unbind this node before doing the kids
   nsIDocument* document = GetComposedDoc();
@@ -1906,7 +1948,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
       }
     }
 
-    if (this->IsRootOfNativeAnonymousSubtree()) {
+    if (IsRootOfNativeAnonymousSubtree()) {
       nsNodeUtils::NativeAnonymousChildListChange(this, true);
     }
 
@@ -4283,18 +4325,19 @@ Element::ClearServoData(nsIDocument* aDoc) {
 void
 Element::SetCustomElementData(CustomElementData* aData)
 {
+  SetHasCustomElementData();
+
+  if (aData->mState != CustomElementData::State::eCustom) {
+    SetDefined(false);
+  }
+
   nsExtendedDOMSlots *slots = ExtendedDOMSlots();
   MOZ_ASSERT(!slots->mCustomElementData, "Custom element data may not be changed once set.");
   #if DEBUG
-    nsAtom* name = NodeInfo()->NameAtom();
-    nsAtom* type = aData->GetCustomElementType();
-    if (NodeInfo()->NamespaceID() == kNameSpaceID_XHTML) {
-      if (nsContentUtils::IsCustomElementName(name, kNameSpaceID_XHTML)) {
-        MOZ_ASSERT(type == name);
-      } else {
-        MOZ_ASSERT(type != name);
-      }
-    } else { // kNameSpaceID_XUL
+    // We assert only XUL usage, since web may pass whatever as 'is' value
+    if (NodeInfo()->NamespaceID() == kNameSpaceID_XUL) {
+      nsAtom* name = NodeInfo()->NameAtom();
+      nsAtom* type = aData->GetCustomElementType();
       // Check to see if the tag name is a dashed name.
       if (nsContentUtils::IsNameWithDash(name)) {
         // Assert that a tag name with dashes is always an autonomous custom

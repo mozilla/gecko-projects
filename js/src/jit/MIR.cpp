@@ -1899,7 +1899,7 @@ MSign::foldsTo(TempAllocator& alloc)
         return this;
 
     double in = input->toConstant()->numberToDouble();
-    double out = js::math_sign_uncached(in);
+    double out = js::math_sign_impl(in);
 
     if (type() == MIRType::Int32) {
         // Decline folding if this is an int32 operation, but the result type
@@ -1966,64 +1966,64 @@ MMathFunction::foldsTo(TempAllocator& alloc)
     double out;
     switch (function_) {
       case Log:
-        out = js::math_log_uncached(in);
+        out = js::math_log_impl(in);
         break;
       case Sin:
-        out = js::math_sin_uncached(in);
+        out = js::math_sin_impl(in);
         break;
       case Cos:
-        out = js::math_cos_uncached(in);
+        out = js::math_cos_impl(in);
         break;
       case Exp:
-        out = js::math_exp_uncached(in);
+        out = js::math_exp_impl(in);
         break;
       case Tan:
-        out = js::math_tan_uncached(in);
+        out = js::math_tan_impl(in);
         break;
       case ACos:
-        out = js::math_acos_uncached(in);
+        out = js::math_acos_impl(in);
         break;
       case ASin:
-        out = js::math_asin_uncached(in);
+        out = js::math_asin_impl(in);
         break;
       case ATan:
-        out = js::math_atan_uncached(in);
+        out = js::math_atan_impl(in);
         break;
       case Log10:
-        out = js::math_log10_uncached(in);
+        out = js::math_log10_impl(in);
         break;
       case Log2:
-        out = js::math_log2_uncached(in);
+        out = js::math_log2_impl(in);
         break;
       case Log1P:
-        out = js::math_log1p_uncached(in);
+        out = js::math_log1p_impl(in);
         break;
       case ExpM1:
-        out = js::math_expm1_uncached(in);
+        out = js::math_expm1_impl(in);
         break;
       case CosH:
-        out = js::math_cosh_uncached(in);
+        out = js::math_cosh_impl(in);
         break;
       case SinH:
-        out = js::math_sinh_uncached(in);
+        out = js::math_sinh_impl(in);
         break;
       case TanH:
-        out = js::math_tanh_uncached(in);
+        out = js::math_tanh_impl(in);
         break;
       case ACosH:
-        out = js::math_acosh_uncached(in);
+        out = js::math_acosh_impl(in);
         break;
       case ASinH:
-        out = js::math_asinh_uncached(in);
+        out = js::math_asinh_impl(in);
         break;
       case ATanH:
-        out = js::math_atanh_uncached(in);
+        out = js::math_atanh_impl(in);
         break;
       case Trunc:
-        out = js::math_trunc_uncached(in);
+        out = js::math_trunc_impl(in);
         break;
       case Cbrt:
-        out = js::math_cbrt_uncached(in);
+        out = js::math_cbrt_impl(in);
         break;
       case Floor:
         out = js::math_floor_impl(in);
@@ -5475,9 +5475,27 @@ MWasmLoadGlobalVar::mightAlias(const MDefinition* def) const
 {
     if (def->isWasmStoreGlobalVar()) {
         const MWasmStoreGlobalVar* store = def->toWasmStoreGlobalVar();
-        // Global variables can't alias each other or be type-reinterpreted.
-        return (store->globalDataOffset() == globalDataOffset_) ? AliasType::MayAlias :
-                                                                  AliasType::NoAlias;
+
+        // If they are both indirect, then we don't know what the
+        // indirections point at, so we must be conservative.
+        if (isIndirect_ && store->isIndirect())
+            return AliasType::MayAlias;
+
+        // If they are both direct, then we can disambiguate them by
+        // inspecting their offsets.
+        if (!isIndirect_ && !store->isIndirect())
+            return store->globalDataOffset() == globalDataOffset_
+                      ? AliasType::MayAlias : AliasType::NoAlias;
+
+        // Otherwise, one is indirect and the other isn't, so they can't
+        // alias.
+        return AliasType::NoAlias;
+
+        // We could do better here, in that: if both variables are indirect,
+        // but at least one of them is created in this module, then they
+        // can't alias.  That would require having a flag on globals to
+        // indicate which are imported.  See bug 1467415 comment 3,
+        // 4th rule.
     }
     return AliasType::MayAlias;
 }
@@ -5485,6 +5503,7 @@ MWasmLoadGlobalVar::mightAlias(const MDefinition* def) const
 HashNumber
 MWasmLoadGlobalVar::valueHash() const
 {
+    // Same comment as in MWasmLoadGlobalVar::congruentTo() applies here.
     HashNumber hash = MDefinition::valueHash();
     hash = addU32ToHash(hash, globalDataOffset_);
     return hash;
@@ -5493,6 +5512,8 @@ MWasmLoadGlobalVar::valueHash() const
 bool
 MWasmLoadGlobalVar::congruentTo(const MDefinition* ins) const
 {
+    // We don't need to consider the isIndirect_ markings here, because
+    // equivalence of offsets implies equivalence of indirectness.
     if (ins->isWasmLoadGlobalVar())
         return globalDataOffset_ == ins->toWasmLoadGlobalVar()->globalDataOffset_;
     return false;

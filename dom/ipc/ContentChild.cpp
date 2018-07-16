@@ -48,6 +48,7 @@
 #include "mozilla/dom/URLClassifierChild.h"
 #include "mozilla/dom/WorkerDebugger.h"
 #include "mozilla/dom/WorkerDebuggerManager.h"
+#include "mozilla/dom/ipc/SharedMap.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/psm/PSMContentListener.h"
@@ -71,6 +72,7 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/CookieServiceChild.h"
 #include "mozilla/net/CaptivePortalService.h"
+#include "mozilla/PerformanceMetricsCollector.h"
 #include "mozilla/PerformanceUtils.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
@@ -85,6 +87,7 @@
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
 #include "nsISimpleEnumerator.h"
+#include "nsIStringBundle.h"
 #include "nsIWorkerDebuggerManager.h"
 
 #if !defined(XP_WIN)
@@ -112,7 +115,7 @@
 
 #include "mozInlineSpellChecker.h"
 #include "nsDocShell.h"
-#include "nsIDocShellLoadInfo.h"
+#include "nsDocShellLoadInfo.h"
 #include "nsIConsoleListener.h"
 #include "nsIContentViewer.h"
 #include "nsICycleCollectorListener.h"
@@ -544,6 +547,7 @@ ContentChild::ContentChild()
  , mMainChromeTid(0)
  , mMsaaID(0)
 #endif
+ , mIsForBrowser(false)
  , mIsAlive(true)
  , mShuttingDown(false)
 {
@@ -589,7 +593,9 @@ mozilla::ipc::IPCResult
 ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
                                             const StructuredCloneData& aInitialData,
                                             nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache,
-                                            nsTArray<SystemFontListEntry>&& aFontList)
+                                            nsTArray<SystemFontListEntry>&& aFontList,
+                                            const FileDescriptor& aSharedDataMapFile,
+                                            const uint32_t& aSharedDataMapSize)
 {
   if (!sShutdownCanary) {
     return IPC_OK();
@@ -600,6 +606,9 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
   gfx::gfxVars::SetValuesForInitialize(aXPCOMInit.gfxNonDefaultVarUpdates());
   InitXPCOM(aXPCOMInit, aInitialData);
   InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
+
+  mSharedData = new SharedMap(ProcessGlobal::Get(), aSharedDataMapFile,
+                              aSharedDataMapSize);
 
   return IPC_OK();
 }
@@ -754,7 +763,7 @@ ContentChild::ProvideWindow(mozIDOMWindowProxy* aParent,
                             const nsAString& aName,
                             const nsACString& aFeatures,
                             bool aForceNoOpener,
-                            nsIDocShellLoadInfo* aLoadInfo,
+                            nsDocShellLoadInfo* aLoadInfo,
                             bool* aWindowIsNew,
                             mozIDOMWindowProxy** aReturn)
 {
@@ -766,15 +775,20 @@ ContentChild::ProvideWindow(mozIDOMWindowProxy* aParent,
 
 static nsresult
 GetCreateWindowParams(mozIDOMWindowProxy* aParent,
-                      nsIDocShellLoadInfo* aLoadInfo,
+                      nsDocShellLoadInfo* aLoadInfo,
                       nsACString& aBaseURIString, float* aFullZoom,
                       uint32_t* aReferrerPolicy,
                       nsIPrincipal** aTriggeringPrincipal)
 {
   *aFullZoom = 1.0f;
+  if (!aTriggeringPrincipal) {
+    NS_ERROR("aTriggeringPrincipal is null");
+    return NS_ERROR_FAILURE;
+  }
   auto* opener = nsPIDOMWindowOuter::From(aParent);
   if (!opener) {
-    nsCOMPtr<nsIPrincipal> nullPrincipal = NullPrincipal::CreateWithoutOriginAttributes();
+    nsCOMPtr<nsIPrincipal> nullPrincipal =
+      NullPrincipal::CreateWithoutOriginAttributes();
     NS_ADDREF(*aTriggeringPrincipal = nullPrincipal);
     return NS_OK;
   }
@@ -789,13 +803,11 @@ GetCreateWindowParams(mozIDOMWindowProxy* aParent,
 
   baseURI->GetSpec(aBaseURIString);
 
-  bool sendReferrer = true;
   if (aLoadInfo) {
-    aLoadInfo->GetSendReferrer(&sendReferrer);
-    if (!sendReferrer) {
+    if (!aLoadInfo->SendReferrer()) {
       *aReferrerPolicy = mozilla::net::RP_No_Referrer;
     } else {
-      aLoadInfo->GetReferrerPolicy(aReferrerPolicy);
+      *aReferrerPolicy = aLoadInfo->ReferrerPolicy();
     }
   }
 
@@ -826,7 +838,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
                                   const nsAString& aName,
                                   const nsACString& aFeatures,
                                   bool aForceNoOpener,
-                                  nsIDocShellLoadInfo* aLoadInfo,
+                                  nsDocShellLoadInfo* aLoadInfo,
                                   bool* aWindowIsNew,
                                   mozIDOMWindowProxy** aReturn)
 {
@@ -1386,12 +1398,12 @@ ContentChild::GetResultForRenderingInitFailure(base::ProcessId aOtherPid)
 }
 
 mozilla::ipc::IPCResult
-ContentChild::RecvRequestPerformanceMetrics()
+ContentChild::RecvRequestPerformanceMetrics(const nsID& aID)
 {
   MOZ_ASSERT(mozilla::StaticPrefs::dom_performance_enable_scheduler_timing());
   nsTArray<PerformanceInfo> info;
   CollectPerformanceInfo(info);
-  SendAddPerformanceMetrics(info);
+  SendAddPerformanceMetrics(aID, info);
   return IPC_OK();
 }
 
@@ -2260,13 +2272,11 @@ ContentChild::RecvRegisterChrome(InfallibleTArray<ChromePackage>&& packages,
   nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
   nsChromeRegistryContent* chromeRegistry =
     static_cast<nsChromeRegistryContent*>(registrySvc.get());
+  if (!chromeRegistry) {
+    return IPC_FAIL(this, "ChromeRegistryContent is null!");
+  }
   chromeRegistry->RegisterRemoteChrome(packages, resources, overrides,
                                        locale, reset);
-  static bool preloadDone = false;
-  if (!preloadDone) {
-    preloadDone = true;
-    nsContentUtils::AsyncPrecreateStringBundles();
-  }
   return IPC_OK();
 }
 
@@ -2276,6 +2286,9 @@ ContentChild::RecvRegisterChromeItem(const ChromeRegistryItem& item)
   nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
   nsChromeRegistryContent* chromeRegistry =
     static_cast<nsChromeRegistryContent*>(registrySvc.get());
+  if (!chromeRegistry) {
+    return IPC_FAIL(this, "ChromeRegistryContent is null!");
+  }
   switch (item.type()) {
     case ChromeRegistryItem::TChromePackage:
       chromeRegistry->RegisterPackage(item.get_ChromePackage());
@@ -2370,6 +2383,8 @@ ContentChild::ActorDestroy(ActorDestroyReason why)
   }
 
   BlobURLProtocolHandler::RemoveDataEntries();
+
+  mSharedData = nullptr;
 
   mAlertObservers.Clear();
 
@@ -2537,6 +2552,40 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
 }
 
 mozilla::ipc::IPCResult
+ContentChild::RecvRegisterStringBundles(nsTArray<mozilla::dom::StringBundleDescriptor>&& aDescriptors)
+{
+  nsCOMPtr<nsIStringBundleService> stringBundleService =
+    services::GetStringBundleService();
+
+  for (auto& descriptor : aDescriptors) {
+    stringBundleService->RegisterContentBundle(descriptor.bundleURL(), descriptor.mapFile(),
+                                               descriptor.mapSize());
+  }
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvUpdateSharedData(const FileDescriptor& aMapFile,
+                                   const uint32_t& aMapSize,
+                                   nsTArray<IPCBlob>&& aBlobs,
+                                   nsTArray<nsCString>&& aChangedKeys)
+{
+  if (mSharedData) {
+    nsTArray<RefPtr<BlobImpl>> blobImpls(aBlobs.Length());
+    for (auto& ipcBlob : aBlobs) {
+      blobImpls.AppendElement(IPCBlobUtils::Deserialize(ipcBlob));
+    }
+
+    mSharedData->Update(aMapFile, aMapSize,
+                        std::move(blobImpls),
+                        std::move(aChangedKeys));
+  }
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentChild::RecvGeolocationUpdate(nsIDOMGeoPosition* aPosition)
 {
   nsCOMPtr<nsIGeolocationUpdate> gs =
@@ -2638,6 +2687,20 @@ ContentChild::RecvAddPermission(const IPC::Permission& permission)
                                  nsPermissionManager::eNotify,
                                  nsPermissionManager::eNoDBOperation);
 
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvRemoveAllPermissions()
+{
+  nsCOMPtr<nsIPermissionManager> permissionManagerIface =
+    services::GetPermissionManager();
+  nsPermissionManager* permissionManager =
+    static_cast<nsPermissionManager*>(permissionManagerIface.get());
+  MOZ_ASSERT(permissionManager,
+         "We have no permissionManager in the Content process !");
+
+  permissionManager->RemoveAllFromIPC();
   return IPC_OK();
 }
 
@@ -2746,6 +2809,8 @@ ContentChild::RecvRemoteType(const nsString& aRemoteType)
     SetProcessName(NS_LITERAL_STRING("file:// Content"));
   } else if (aRemoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("WebExtensions"));
+  } else if (aRemoteType.EqualsLiteral(PRIVILEGED_REMOTE_TYPE)) {
+    SetProcessName(NS_LITERAL_STRING("Privileged Content"));
   } else if (aRemoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     SetProcessName(NS_LITERAL_STRING("Large Allocation Web Content"));
   }

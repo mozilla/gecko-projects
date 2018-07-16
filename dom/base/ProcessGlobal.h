@@ -25,6 +25,10 @@
 namespace mozilla {
 namespace dom {
 
+namespace ipc {
+  class SharedMap;
+}
+
 class ProcessGlobal :
   public nsIMessageSender,
   public nsMessageManagerScriptExecutor,
@@ -84,6 +88,8 @@ public:
     mMessageManager->GetInitialProcessData(aCx, aInitialProcessData, aError);
   }
 
+  already_AddRefed<ipc::SharedMap> SharedData();
+
   NS_FORWARD_SAFE_NSIMESSAGESENDER(mMessageManager)
 
   virtual void LoadScript(const nsAString& aURL);
@@ -93,6 +99,11 @@ public:
     return GetWrapper();
   }
   virtual nsIPrincipal* GetPrincipal() override { return mPrincipal; }
+
+  bool IsProcessScoped() const override
+  {
+    return true;
+  }
 
   void SetInitialProcessData(JS::HandleValue aInitialData);
 

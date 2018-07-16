@@ -11,19 +11,19 @@
 
 using std::wstring;
 
-static void* gOrigReturnResult;
-
 extern "C" __declspec(dllexport) int
 ReturnResult()
 {
   return 2;
 }
 
+static mozilla::CrossProcessDllInterceptor::FuncHookType<decltype(&ReturnResult)>
+  gOrigReturnResult;
+
 static int
 ReturnResultHook()
 {
-  auto origFn = reinterpret_cast<decltype(&ReturnResult)>(gOrigReturnResult);
-  if (origFn() != 2) {
+  if (gOrigReturnResult() != 2) {
     return 3;
   }
 
@@ -73,23 +73,13 @@ int ParentMain()
   mozilla::CrossProcessDllInterceptor intcpt(childProcess.get());
   intcpt.Init("TestDllInterceptorCrossProcess.exe");
 
-  if (!intcpt.AddHook("ReturnResult",
-                      reinterpret_cast<intptr_t>(&ReturnResultHook),
-                      &gOrigReturnResult)) {
+  if (!gOrigReturnResult.Set(childProcess.get(), intcpt, "ReturnResult",
+                             &ReturnResultHook)) {
     printf("TEST-UNEXPECTED-FAIL | DllInterceptorCrossProcess | Failed to add hook\n");
     return 1;
   }
 
   printf("TEST-PASS | DllInterceptorCrossProcess | Hook added\n");
-
-  // Let's save the original hook
-  SIZE_T bytesWritten;
-  if (!::WriteProcessMemory(childProcess.get(), &gOrigReturnResult,
-                            &gOrigReturnResult, sizeof(gOrigReturnResult),
-                            &bytesWritten)) {
-    printf("TEST-UNEXPECTED-FAIL | DllInterceptorCrossProcess | Failed to write original function pointer\n");
-    return 1;
-  }
 
   if (::ResumeThread(childMainThread.get()) == static_cast<DWORD>(-1)) {
     printf("TEST-UNEXPECTED-FAIL | DllInterceptorCrossProcess | Failed to resume child thread\n");

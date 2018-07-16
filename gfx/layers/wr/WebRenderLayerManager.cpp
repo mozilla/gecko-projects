@@ -168,6 +168,8 @@ WebRenderLayerManager::BeginTransaction()
     return false;
   }
 
+  mTransactionStart = TimeStamp::Now();
+
   // Increment the paint sequence number even if test logging isn't
   // enabled in this process; it may be enabled in the parent process,
   // and the parent process expects unique sequence numbers.
@@ -208,7 +210,7 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   mWebRenderCommandBuilder.EmptyTransaction();
 
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
-  TimeStamp transactionStart = mTransactionIdAllocator->GetTransactionStart();
+  TimeStamp refreshStart = mTransactionIdAllocator->GetTransactionStart();
 
   // Skip the synchronization for buffer since we also skip the painting during
   // device-reset status.
@@ -220,8 +222,10 @@ WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   }
 
   WrBridge()->EndEmptyTransaction(mFocusTarget, mPendingScrollUpdates,
-      mPaintSequenceNumber, mLatestTransactionId, transactionStart);
+      mPaintSequenceNumber, mLatestTransactionId, refreshStart, mTransactionStart);
   ClearPendingScrollInfoUpdate();
+
+  mTransactionStart = TimeStamp();
 
   MakeSnapshotIfRequired(size);
   return true;
@@ -240,16 +244,15 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 void
 WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
                                                   nsDisplayListBuilder* aDisplayListBuilder,
-                                                  const nsTArray<wr::WrFilterOp>& aFilters)
+                                                  const nsTArray<wr::WrFilterOp>& aFilters,
+                                                  WebRenderBackgroundData* aBackground)
 {
-  MOZ_ASSERT(aDisplayList && aDisplayListBuilder);
-
   AUTO_PROFILER_TRACING("Paint", "RenderLayers");
 
 #if DUMP_LISTS
   // Useful for debugging, it dumps the display list *before* we try to build
   // WR commands from it
-  if (XRE_IsContentProcess()) nsFrame::PrintDisplayList(aDisplayListBuilder, *aDisplayList);
+  if (XRE_IsContentProcess() && aDisplayList) nsFrame::PrintDisplayList(aDisplayListBuilder, *aDisplayList);
 #endif
 
 #ifdef XP_WIN
@@ -266,7 +269,9 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize, mLastDisplayListSize);
   wr::IpcResourceUpdateQueue resourceUpdates(WrBridge());
 
-  { // Record the time spent "layerizing". WR doesn't actually layerize but
+  if (aDisplayList) {
+    MOZ_ASSERT(aDisplayListBuilder && !aBackground);
+    // Record the time spent "layerizing". WR doesn't actually layerize but
     // generating the WR display list is the closest equivalent
     PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::Layerization);
 
@@ -277,6 +282,10 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
                                                     mScrollData,
                                                     contentSize,
                                                     aFilters);
+  } else {
+    // ViewToPaint does not have frame yet, then render only background clolor.
+    MOZ_ASSERT(!aDisplayListBuilder && aBackground);
+    aBackground->AddWebRenderCommands(builder);
   }
 
   DiscardCompositorAnimations();
@@ -303,7 +312,7 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   ClearPendingScrollInfoUpdate();
 
   mLatestTransactionId = mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
-  TimeStamp transactionStart = mTransactionIdAllocator->GetTransactionStart();
+  TimeStamp refreshStart = mTransactionIdAllocator->GetTransactionStart();
 
   for (const auto& key : mImageKeysToDelete) {
     resourceUpdates.DeleteImage(key);
@@ -332,8 +341,10 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   {
     AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction");
     WrBridge()->EndTransaction(contentSize, dl, resourceUpdates, size.ToUnknownSize(),
-                               mLatestTransactionId, mScrollData, transactionStart);
+                               mLatestTransactionId, mScrollData, refreshStart, mTransactionStart);
   }
+
+  mTransactionStart = TimeStamp();
 
   MakeSnapshotIfRequired(size);
   mNeedsComposite = false;

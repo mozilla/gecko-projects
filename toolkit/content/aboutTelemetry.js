@@ -10,6 +10,7 @@ ChromeUtils.import("resource://gre/modules/TelemetryTimestamps.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryController.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryArchive.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryUtils.jsm");
+ChromeUtils.import("resource://gre/modules/TelemetrySend.jsm");
 ChromeUtils.import("resource://gre/modules/Preferences.jsm");
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -206,8 +207,7 @@ var Settings = {
     }
   },
 
-  getStatusStringForSetting(setting) {
-    let enabled = Preferences.get(setting.pref, setting.defaultPrefValue);
+  getStatusString(enabled) {
     let status = bundle.GetStringFromName(enabled ? "telemetryUploadEnabled" : "telemetryUploadDisabled");
     return status;
   },
@@ -217,7 +217,7 @@ var Settings = {
    */
   render() {
     let settingsExplanation = document.getElementById("settings-explanation");
-    let uploadEnabled = this.getStatusStringForSetting(this.SETTINGS[0]);
+    let uploadEnabled = this.getStatusString(TelemetrySend.sendingEnabled());
     let extendedEnabled = Services.telemetry.canRecordExtended;
     let collectedData = bundle.GetStringFromName(extendedEnabled ? "prereleaseData" : "releaseData");
     let explanation = bundle.GetStringFromName("settingsExplanation");
@@ -379,10 +379,19 @@ var PingPicker = {
 
   _updateCurrentPingData() {
     const subsession = document.getElementById("show-subsession-data").checked;
-    const ping = TelemetryController.getCurrentPingData(subsession);
+    let ping = TelemetryController.getCurrentPingData(subsession);
     if (!ping) {
       return;
     }
+
+    // augment ping payload with event telemetry
+    let eventSnapshot = Telemetry.snapshotEvents(Telemetry.DATASET_RELEASE_CHANNEL_OPTIN, false);
+    for (let process of Object.keys(eventSnapshot)) {
+      if (process in ping.payload.processes) {
+        ping.payload.processes[process].events = eventSnapshot[process].filter(e => !e[1].startsWith("telemetry.test"));
+      }
+    }
+
     displayPingData(ping, true);
   },
 
@@ -1708,6 +1717,47 @@ var KeyedScalars = {
   },
 };
 
+var Events = {
+  /**
+   * Render the event data - if present - from the payload in a simple table.
+   * @param aPayload A payload object to render the data from.
+   */
+  render(aPayload) {
+    let eventsSection = document.getElementById("events");
+    removeAllChildNodes(eventsSection);
+
+    let processesSelect = document.getElementById("processes");
+    let selectedProcess = processesSelect.selectedOptions.item(0).getAttribute("value");
+
+    if (!aPayload.processes ||
+        !selectedProcess ||
+        !(selectedProcess in aPayload.processes)) {
+      return;
+    }
+
+    let events = aPayload.processes[selectedProcess].events || {};
+    let hasData = Array.from(processesSelect.options).some((option) => {
+      let value = option.getAttribute("value");
+      let evts = aPayload.processes[value].events;
+      return evts && Object.keys(evts).length > 0;
+    });
+    setHasData("events-section", hasData);
+    if (Object.keys(events).length > 0) {
+      const headings = [
+        "timestampHeader",
+        "categoryHeader",
+        "methodHeader",
+        "objectHeader",
+        "valuesHeader",
+        "extraHeader",
+      ].map(h => bundle.GetStringFromName(h));
+
+      const table = GenericTable.render(events, headings);
+      eventsSection.appendChild(table);
+    }
+  },
+};
+
 /**
  * Helper function for showing either the toggle element or "No data collected" message for a section
  *
@@ -2305,6 +2355,9 @@ function displayRichPingData(ping, updatePayloadList) {
 
   // Show keyed histogram data
   KeyedHistogramSection.render(payload);
+
+  // Show event data.
+  Events.render(payload);
 
   // Show captured stacks.
   CapturedStacks.render(payload);

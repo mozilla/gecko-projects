@@ -171,7 +171,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
         [["--gpu-required"], {
             "action": "store_true",
             "dest": "gpu_required",
-            "default": "False",
+            "default": False,
             "help": "Run additional verification on modified tests using gpu instances."}
          ],
     ] + copy.deepcopy(testing_config_options) + \
@@ -891,10 +891,12 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
 
                     if self.per_test_coverage:
                         gcov_dir, jsvm_dir = self.set_coverage_env(env)
-                        # Per-test reset/dump is only supported for xpcshell and
+                        # Per-test reset/dump is only supported for xpcshell/mochitest and
                         # Linux for the time being.
-                        if not is_baseline_test and suite == 'xpcshell' and self._is_linux():
-                            env['GCOV_RESULTS_DIR'] = gcov_dir = tempfile.mkdtemp()
+                        if not is_baseline_test and \
+                           suite_category in ['mochitest', 'xpcshell'] and \
+                           self._is_linux():
+                            env['GCOV_RESULTS_DIR'] = tempfile.mkdtemp()
 
                     return_code = self.run_command(final_cmd, cwd=dirs['abs_work_dir'],
                                                    output_timeout=cmd_timeout,
@@ -903,8 +905,14 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin,
 
                     if self.per_test_coverage:
                         self.add_per_test_coverage_report(
-                            gcov_dir, jsvm_dir, suite, per_test_args[-1]
+                            env['GCOV_RESULTS_DIR'] if 'GCOV_RESULTS_DIR' in env else gcov_dir,
+                            jsvm_dir,
+                            suite,
+                            per_test_args[-1]
                         )
+                        if 'GCOV_RESULTS_DIR' in env:
+                            shutil.rmtree(gcov_dir)
+                            del env['GCOV_RESULTS_DIR']
 
                     # mochitest, reftest, and xpcshell suites do not return
                     # appropriate return codes. Therefore, we must parse the output

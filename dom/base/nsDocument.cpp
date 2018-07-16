@@ -12,6 +12,7 @@
 #include "nsDocument.h"
 #include "nsIDocumentInlines.h"
 #include "mozilla/AnimationComparator.h"
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/BinarySearch.h"
@@ -23,6 +24,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Likely.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/URLExtraData.h"
 #include <algorithm>
 
@@ -255,7 +257,6 @@
 #ifdef MOZ_XUL
 #include "mozilla/dom/ListBoxObject.h"
 #include "mozilla/dom/MenuBoxObject.h"
-#include "mozilla/dom/ScrollBoxObject.h"
 #include "mozilla/dom/TreeBoxObject.h"
 #include "nsIXULWindow.h"
 #include "nsIDocShellTreeOwner.h"
@@ -1683,15 +1684,12 @@ nsDocument::~nsDocument()
   mFirstChild = nullptr;
   mCachedRootElement = nullptr;
 
-  // Let the stylesheets know we're going away
-  for (StyleSheet* sheet : mStyleSheets) {
-    sheet->ClearAssociatedDocumentOrShadowRoot();
-  }
   for (auto& sheets : mAdditionalSheets) {
     for (StyleSheet* sheet : sheets) {
       sheet->ClearAssociatedDocumentOrShadowRoot();
     }
   }
+
   if (mAttrStyleSheet) {
     mAttrStyleSheet->SetOwningDocument(nullptr);
   }
@@ -2598,14 +2596,10 @@ nsIDocument::IsSynthesized() {
 }
 
 bool
-nsDocument::IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject)
+nsDocument::IsShadowDOMEnabled(JSContext* aCx, JSObject* aGlobal)
 {
-  JS::Rooted<JSObject*> obj(aCx, aObject);
-
-  JSAutoRealm ar(aCx, obj);
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, obj));
-  nsCOMPtr<nsPIDOMWindowInner> window =
-    do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(global));
+  MOZ_DIAGNOSTIC_ASSERT(JS_IsGlobalObject(aGlobal));
+  nsCOMPtr<nsPIDOMWindowInner> window = xpc::WindowOrNull(aGlobal);
 
   nsIDocument* doc = window ? window->GetExtantDoc() : nullptr;
   if (!doc) {
@@ -2613,6 +2607,21 @@ nsDocument::IsShadowDOMEnabled(JSContext* aCx, JSObject* aObject)
   }
 
   return doc->IsShadowDOMEnabled();
+}
+
+// static
+bool
+nsDocument::IsShadowDOMEnabledAndCallerIsChromeOrAddon(JSContext* aCx,
+                                                       JSObject* aObject)
+{
+  if (IsShadowDOMEnabled(aCx, aObject)) {
+    nsIPrincipal* principal = nsContentUtils::SubjectPrincipal(aCx);
+    return principal &&
+      (nsContentUtils::IsSystemPrincipal(principal) ||
+       principal->GetIsAddonOrExpandedAddonPrincipal());
+  }
+
+  return false;
 }
 
 bool
@@ -3278,16 +3287,6 @@ nsIDocument::GetAllowPlugins()
   }
 
   return true;
-}
-
-bool
-nsDocument::IsElementAnimateEnabled(JSContext* aCx, JSObject* /*unused*/)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  return nsContentUtils::IsSystemCaller(aCx) ||
-         nsContentUtils::AnimationsAPICoreEnabled() ||
-         nsContentUtils::AnimationsAPIElementAnimateEnabled();
 }
 
 bool
@@ -4635,7 +4634,7 @@ nsIDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
       JSObject *obj = GetWrapperPreserveColor();
       if (obj) {
         JSObject *newScope = aScriptGlobalObject->GetGlobalJSObject();
-        NS_ASSERTION(js::GetGlobalForObjectCrossCompartment(obj) == newScope,
+        NS_ASSERTION(JS::GetNonCCWObjectGlobal(obj) == newScope,
                      "Wrong scope, this is really bad!");
       }
     }
@@ -4717,12 +4716,9 @@ nsIDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
   }
 
   if (!mMaybeServiceWorkerControlled && mDocumentContainer && mScriptGlobalObject && GetChannel()) {
-    nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
-    uint32_t loadType;
-    docShell->GetLoadType(&loadType);
 
     // If we are shift-reloaded, don't associate with a ServiceWorker.
-    if (IsForceReloadType(loadType)) {
+    if (mDocumentContainer->IsForceReloading()) {
       NS_WARNING("Page was shift reloaded, skipping ServiceWorker control");
       return;
     }
@@ -5549,10 +5545,6 @@ nsIDocument::CreateElement(const nsAString& aTagName,
     elem->SetPseudoElementType(pseudoType);
   }
 
-  if (is) {
-    elem->SetAttr(kNameSpaceID_None, nsGkAtoms::is, *is, true);
-  }
-
   return elem.forget();
 }
 
@@ -5586,10 +5578,6 @@ nsIDocument::CreateElementNS(const nsAString& aNamespaceURI,
                      NOT_FROM_PARSER, is);
   if (rv.Failed()) {
     return nullptr;
-  }
-
-  if (is) {
-    element->SetAttr(kNameSpaceID_None, nsGkAtoms::is, *is, true);
   }
 
   return element.forget();
@@ -6342,8 +6330,6 @@ nsIDocument::GetBoxObjectFor(Element* aElement, ErrorResult& aRv)
       boxObject = new TreeBoxObject();
     } else if (tag == nsGkAtoms::listbox) {
       boxObject = new ListBoxObject();
-    } else if (tag == nsGkAtoms::scrollbox) {
-      boxObject = new ScrollBoxObject();
     } else {
       boxObject = new BoxObject();
     }
@@ -6782,7 +6768,7 @@ nsDOMAttributeMap::BlastSubtreeToPieces(nsINode* aNode)
   if (Element* element = Element::FromNode(aNode)) {
     if (const nsDOMAttributeMap* map = element->GetAttributeMap()) {
       while (true) {
-        nsCOMPtr<nsIAttribute> attr;
+        RefPtr<Attr> attr;
         {
           // Use an iterator to get an arbitrary attribute from the
           // cache. The iterator must be destroyed before any other
@@ -6794,8 +6780,6 @@ nsDOMAttributeMap::BlastSubtreeToPieces(nsINode* aNode)
           }
           attr = iter.UserData();
         }
-        NS_ASSERTION(attr.get(),
-                     "non-nsIAttribute somehow made it into the hashmap?!");
 
         BlastSubtreeToPieces(attr);
 
@@ -7944,6 +7928,17 @@ nsIDocument::CanSavePresentation(nsIRequest *aNewRequest)
 
       nsCOMPtr<nsIRequest> request = do_QueryInterface(elem);
       if (request && request != aNewRequest && request != baseChannel) {
+        // Favicon loads don't need to block caching.
+        nsCOMPtr<nsIChannel> channel = do_QueryInterface(request);
+        if (channel) {
+          nsCOMPtr<nsILoadInfo> li;
+          channel->GetLoadInfo(getter_AddRefs(li));
+          if (li) {
+            if (li->InternalContentPolicyType() == nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON) {
+              continue;
+            }
+          }
+        }
 #ifdef DEBUG_PAGE_CACHE
         nsAutoCString requestName, docSpec;
         request->GetName(requestName);
@@ -8399,18 +8394,32 @@ DispatchFullScreenChange(nsIDocument* aTarget)
 
 static void ClearPendingFullscreenRequests(nsIDocument* aDoc);
 
+static bool
+HasHttpScheme(nsIURI* aURI)
+{
+  bool isHttpish = false;
+  return aURI &&
+         ((NS_SUCCEEDED(aURI->SchemeIs("http", &isHttpish)) && isHttpish) ||
+          (NS_SUCCEEDED(aURI->SchemeIs("https", &isHttpish)) && isHttpish));
+}
+
 void
 nsIDocument::OnPageHide(bool aPersisted, EventTarget* aDispatchStartTarget)
 {
-  if (mDocGroup && Telemetry::CanRecordExtended() &&
-      IsTopLevelContentDocument()) {
+  if (IsTopLevelContentDocument() && GetDocGroup() &&
+      Telemetry::CanRecordExtended()) {
     TabGroup* tabGroup = mDocGroup->GetTabGroup();
 
     if (tabGroup) {
-      Telemetry::Accumulate(Telemetry::ACTIVE_DOCGROUPS_PER_TABGROUP,
-                            tabGroup->Count(true /* aActiveOnly */));
-      Telemetry::Accumulate(Telemetry::TOTAL_DOCGROUPS_PER_TABGROUP,
-                            tabGroup->Count());
+      uint32_t active = tabGroup->Count(true /* aActiveOnly */);
+      uint32_t total = tabGroup->Count();
+
+      if (HasHttpScheme(GetDocumentURI())) {
+        Telemetry::Accumulate(Telemetry::ACTIVE_HTTP_DOCGROUPS_PER_TABGROUP,
+                              active);
+        Telemetry::Accumulate(Telemetry::TOTAL_HTTP_DOCGROUPS_PER_TABGROUP,
+                              total);
+      }
     }
   }
 
@@ -9576,47 +9585,15 @@ nsIDocument::SetNavigationTiming(nsDOMNavigationTiming* aTiming)
   }
 }
 
-Element*
-nsIDocument::FindImageMap(const nsAString& aUseMapValue)
+nsContentList*
+nsIDocument::ImageMapList()
 {
-  if (aUseMapValue.IsEmpty()) {
-    return nullptr;
-  }
-
-  nsAString::const_iterator start, end;
-  aUseMapValue.BeginReading(start);
-  aUseMapValue.EndReading(end);
-
-  int32_t hash = aUseMapValue.FindChar('#');
-  if (hash < 0) {
-    return nullptr;
-  }
-  // aUsemap contains a '#', set start to point right after the '#'
-  start.advance(hash + 1);
-
-  if (start == end) {
-    return nullptr; // aUsemap == "#"
-  }
-
-  const nsAString& mapName = Substring(start, end);
-
   if (!mImageMaps) {
-    mImageMaps = new nsContentList(this, kNameSpaceID_XHTML, nsGkAtoms::map, nsGkAtoms::map);
+    mImageMaps = new nsContentList(this, kNameSpaceID_XHTML,
+                                   nsGkAtoms::map, nsGkAtoms::map);
   }
 
-  uint32_t i, n = mImageMaps->Length(true);
-  nsString name;
-  for (i = 0; i < n; ++i) {
-    nsIContent* map = mImageMaps->Item(i);
-    if (map->AsElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::id, mapName,
-                                      eCaseMatters) ||
-        map->AsElement()->AttrValueIs(kNameSpaceID_None, nsGkAtoms::name, mapName,
-                                      eCaseMatters)) {
-      return map->AsElement();
-    }
-  }
-
-  return nullptr;
+  return mImageMaps;
 }
 
 #define DEPRECATED_OPERATION(_op) #_op "Warning",
@@ -11598,6 +11575,14 @@ nsIDocument::DocAddSizeOfExcludingThis(nsWindowSizes& aSizes) const
     mNodeInfoManager->AddSizeOfIncludingThis(aSizes);
   }
 
+  aSizes.mDOMMediaQueryLists +=
+    mDOMMediaQueryLists.sizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
+
+  for (const MediaQueryList* mql : mDOMMediaQueryLists) {
+    aSizes.mDOMMediaQueryLists +=
+      mql->SizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
+  }
+
   // Measurement of the following members may be added later if DMD finds it
   // is worthwhile:
   // - many!
@@ -11962,8 +11947,10 @@ nsIDocument::InlineScriptAllowedByCSP()
     nsresult rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_SCRIPT,
                                        EmptyString(), // aNonce
                                        true,          // aParserCreated
-                                       nullptr, // FIXME get script sample (bug 1314567)
+                                       nullptr,       // aTriggeringElement
+                                       EmptyString(), // FIXME get script sample (bug 1314567)
                                        0,             // aLineNumber
+                                       0,             // aColumnNumber
                                        &allowsInlineScript);
     NS_ENSURE_SUCCESS(rv, true);
   }
@@ -12426,8 +12413,62 @@ nsIDocument::NotifyUserGestureActivation()
             LogLevel::Debug,
             ("Document %p has been activated by user.", this));
     doc->mUserGestureActivated = true;
+    doc->MaybeAllowStorageForOpener();
     doc = doc->GetSameTypeParentDocument();
   }
+}
+
+void
+nsIDocument::MaybeAllowStorageForOpener()
+{
+  if (!StaticPrefs::privacy_restrict3rdpartystorage_enabled()) {
+    return;
+  }
+
+  // This will probably change for project fission, but currently this document
+  // and the opener are on the same process. In the future, we should make this
+  // part async.
+
+  nsPIDOMWindowInner* inner = GetInnerWindow();
+  if (NS_WARN_IF(!inner)) {
+    return;
+  }
+
+  nsCOMPtr<nsPIDOMWindowOuter> outer = inner->GetOuterWindow();
+  if (NS_WARN_IF(!outer)) {
+    return;
+  }
+
+  nsCOMPtr<nsPIDOMWindowOuter> outerOpener = outer->GetOpener();
+  if (NS_WARN_IF(!outerOpener)) {
+    return;
+  }
+
+  nsPIDOMWindowInner* openerInner = outerOpener->GetCurrentInnerWindow();
+  if (NS_WARN_IF(!openerInner)) {
+    return;
+  }
+
+  // No 3rd party or no tracking resource.
+  if (!nsContentUtils::IsThirdPartyWindowOrChannel(openerInner, nullptr,
+                                                   nullptr) ||
+      !nsContentUtils::IsTrackingResourceWindow(openerInner)) {
+    return;
+  }
+
+  nsCOMPtr<nsIURI> uri = GetDocumentURI();
+  if (NS_WARN_IF(!uri)) {
+    return;
+  }
+
+  nsAutoString origin;
+  nsresult rv = nsContentUtils::GetUTFOrigin(uri, origin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+
+  AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(origin,
+                                                           openerInner);
 }
 
 bool
@@ -12532,6 +12573,8 @@ namespace {
 struct PrefStore
 {
   PrefStore()
+    : mFlashBlockEnabled(false)
+    , mPluginsHttpOnly(false)
   {
     Preferences::AddBoolVarCache(&mFlashBlockEnabled,
                                  "plugins.flashBlock.enabled");

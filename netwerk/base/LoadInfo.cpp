@@ -150,6 +150,13 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
       nsCOMPtr<nsPIDOMWindowOuter> parent = contextOuter->GetScriptableParent();
       mParentOuterWindowID = parent ? parent->WindowID() : mOuterWindowID;
       mTopOuterWindowID = FindTopOuterWindowID(contextOuter);
+
+      nsGlobalWindowInner* innerWindow =
+        nsGlobalWindowInner::Cast(contextOuter->GetCurrentInnerWindow());
+      if (innerWindow) {
+        mTopLevelStorageAreaPrincipal =
+          innerWindow->GetTopLevelStorageAreaPrincipal();
+      }
     }
 
     mInnerWindowID = aLoadingContext->OwnerDoc()->InnerWindowID();
@@ -334,6 +341,13 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
   mParentOuterWindowID = parent ? parent->WindowID() : 0;
   mTopOuterWindowID = FindTopOuterWindowID(aOuterWindow);
 
+  nsGlobalWindowInner* innerWindow =
+    nsGlobalWindowInner::Cast(aOuterWindow->GetCurrentInnerWindow());
+  if (innerWindow) {
+    mTopLevelStorageAreaPrincipal =
+      innerWindow->GetTopLevelStorageAreaPrincipal();
+  }
+
   // get the docshell from the outerwindow, and then get the originattributes
   nsCOMPtr<nsIDocShell> docShell = aOuterWindow->GetDocShell();
   MOZ_ASSERT(docShell);
@@ -355,6 +369,7 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
   , mTriggeringPrincipal(rhs.mTriggeringPrincipal)
   , mPrincipalToInherit(rhs.mPrincipalToInherit)
   , mSandboxedLoadingPrincipal(rhs.mSandboxedLoadingPrincipal)
+  , mTopLevelStorageAreaPrincipal(rhs.mTopLevelStorageAreaPrincipal)
   , mResultPrincipalURI(rhs.mResultPrincipalURI)
   , mClientInfo(rhs.mClientInfo)
   // mReservedClientSource must be handled specially during redirect
@@ -405,6 +420,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
                    nsIPrincipal* aTriggeringPrincipal,
                    nsIPrincipal* aPrincipalToInherit,
                    nsIPrincipal* aSandboxedLoadingPrincipal,
+                   nsIPrincipal* aTopLevelStorageAreaPrincipal,
                    nsIURI* aResultPrincipalURI,
                    const Maybe<ClientInfo>& aClientInfo,
                    const Maybe<ClientInfo>& aReservedClientInfo,
@@ -444,6 +460,7 @@ LoadInfo::LoadInfo(nsIPrincipal* aLoadingPrincipal,
   : mLoadingPrincipal(aLoadingPrincipal)
   , mTriggeringPrincipal(aTriggeringPrincipal)
   , mPrincipalToInherit(aPrincipalToInherit)
+  , mTopLevelStorageAreaPrincipal(aTopLevelStorageAreaPrincipal)
   , mResultPrincipalURI(aResultPrincipalURI)
   , mClientInfo(aClientInfo)
   , mReservedClientInfo(aReservedClientInfo)
@@ -623,6 +640,19 @@ LoadInfo::GetSandboxedLoadingPrincipal(nsIPrincipal** aPrincipal)
   nsCOMPtr<nsIPrincipal> copy(mSandboxedLoadingPrincipal);
   copy.forget(aPrincipal);
   return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetTopLevelStorageAreaPrincipal(nsIPrincipal** aTopLevelStorageAreaPrincipal)
+{
+  NS_IF_ADDREF(*aTopLevelStorageAreaPrincipal = mTopLevelStorageAreaPrincipal);
+  return NS_OK;
+}
+
+nsIPrincipal*
+LoadInfo::TopLevelStorageAreaPrincipal()
+{
+  return mTopLevelStorageAreaPrincipal;
 }
 
 NS_IMETHODIMP

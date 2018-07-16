@@ -30,6 +30,7 @@ export let requestStore = new PaymentsStore({
     previousId: null,
     // onboardingWizard: true,
     // error: "",
+    // selectedStateKey: "",
   },
   request: {
     tabId: null,
@@ -40,6 +41,7 @@ export let requestStore = new PaymentsStore({
       id: null,
       totalItem: {label: null, amount: {currency: null, value: 0}},
       displayItems: [],
+      shippingAddressErrors: {},
       shippingOptions: [],
       modifiers: null,
       error: "",

@@ -10,7 +10,8 @@
 
 const Services = require("Services");
 const { Cc, Ci, Cu } = require("chrome");
-const { DebuggerServer, ActorPool } = require("devtools/server/main");
+const { DebuggerServer } = require("devtools/server/main");
+const { ActorPool } = require("devtools/server/actors/common");
 const { ThreadActor } = require("devtools/server/actors/thread");
 const { ObjectActor } = require("devtools/server/actors/object");
 const { LongStringActor } = require("devtools/server/actors/object/long-string");
@@ -27,6 +28,8 @@ loader.lazyRequireGetter(this, "JSPropertyProvider", "devtools/shared/webconsole
 loader.lazyRequireGetter(this, "Parser", "resource://devtools/shared/Parser.jsm", true);
 loader.lazyRequireGetter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm", true);
 loader.lazyRequireGetter(this, "addWebConsoleCommands", "devtools/server/actors/webconsole/utils", true);
+loader.lazyRequireGetter(this, "formatCommand", "devtools/server/actors/webconsole/commands", true);
+loader.lazyRequireGetter(this, "isCommand", "devtools/server/actors/webconsole/commands", true);
 loader.lazyRequireGetter(this, "CONSOLE_WORKER_IDS", "devtools/server/actors/webconsole/utils", true);
 loader.lazyRequireGetter(this, "WebConsoleUtils", "devtools/server/actors/webconsole/utils", true);
 loader.lazyRequireGetter(this, "EnvironmentActor", "devtools/server/actors/environment", true);
@@ -481,9 +484,9 @@ WebConsoleActor.prototype =
         Error("sources not yet implemented")),
       createEnvironmentActor: (env) => this.createEnvironmentActor(env),
       getGlobalDebugObject: () => this.globalDebugObject
-    });
+    }, this.conn);
     pool.addActor(actor);
-    return actor.grip();
+    return actor.form();
   },
 
   /**
@@ -875,6 +878,7 @@ WebConsoleActor.prototype =
    * JavaScript string and sends back a packet with a unique ID.
    * The result will be returned later as an unsolicited `evaluationResult`,
    * that can be associated back to this request via the `resultID` field.
+   * Cannot be async, see Comment two on Bug #1452920
    *
    * @param object request
    *        The JSON request object received from the Web Console client.
@@ -896,6 +900,39 @@ WebConsoleActor.prototype =
     // Then, execute the script that may pause.
     const response = this.evaluateJS(request);
     response.resultID = resultID;
+
+    this._waitForHelperResultAndSend(response).catch(e =>
+      DevToolsUtils.reportException(
+        "evaluateJSAsync",
+        Error(`Encountered error while waiting for Helper Result: ${e}`)
+      )
+    );
+  },
+
+  /**
+   * In order to have asynchronous commands such as screenshot, we have to be
+   * able to handle promises in the helper result. This method handles waiting
+   * for the promise, and then dispatching the result
+   *
+   *
+   * @private
+   * @param object response
+   *         The response packet to send to with the unique id in the
+   *         `resultID` field, and potentially a promise in the helperResult
+   *         field.
+   *
+   * @return object
+   *         The response packet to send to with the unique id in the
+   *         `resultID` field, with a sanitized helperResult field.
+   */
+  _waitForHelperResultAndSend: async function(response) {
+    // Wait for asynchronous command completion before sending back the response
+    if (
+      response.helperResult &&
+      typeof response.helperResult.then == "function"
+    ) {
+      response.helperResult = await response.helperResult;
+    }
 
     // Finally, send an unsolicited evaluationResult packet with
     // the normal return value
@@ -1088,8 +1125,13 @@ WebConsoleActor.prototype =
         this._webConsoleCommandsCache =
           Object.getOwnPropertyNames(helpers.sandbox);
       }
+
       matches = matches.concat(this._webConsoleCommandsCache
-          .filter(n => n.startsWith(result.matchProp)));
+          .filter(n =>
+            // filter out `screenshot` command as it is inaccessible without
+            // the `:` prefix
+            n !== "screenshot" && n.startsWith(result.matchProp)
+          ));
     }
 
     return {
@@ -1296,6 +1338,16 @@ WebConsoleActor.prototype =
       string = "help()";
     }
 
+    const isCmd = isCommand(string);
+    // we support Unix like syntax for commands if it is preceeded by `:`
+    if (isCmd) {
+      try {
+        string = formatCommand(string);
+      } catch (e) {
+        string = `throw "${e}"`;
+      }
+    }
+
     // Add easter egg for console.mihai().
     if (trimmedString == "console.mihai()" || trimmedString == "console.mihai();") {
       string = "\"http://incompleteness.me/blog/2015/02/09/console-dot-mihai/\"";
@@ -1369,19 +1421,25 @@ WebConsoleActor.prototype =
     // Check if the Debugger.Frame or Debugger.Object for the global include
     // $ or $$. We will not overwrite these functions with the Web Console
     // commands.
-    let found$ = false, found$$ = false;
-    if (frame) {
-      const env = frame.environment;
-      if (env) {
-        found$ = !!env.find("$");
-        found$$ = !!env.find("$$");
+    let found$ = false, found$$ = false, disableScreenshot = false;
+    // do not override command functions if we are using the command key `:`
+    // before the command string
+    if (!isCmd) {
+      // if we do not have the command key as a prefix, screenshot is disabled by default
+      disableScreenshot = true;
+      if (frame) {
+        const env = frame.environment;
+        if (env) {
+          found$ = !!env.find("$");
+          found$$ = !!env.find("$$");
+        }
+      } else {
+        found$ = !!dbgWindow.getOwnPropertyDescriptor("$");
+        found$$ = !!dbgWindow.getOwnPropertyDescriptor("$$");
       }
-    } else {
-      found$ = !!dbgWindow.getOwnPropertyDescriptor("$");
-      found$$ = !!dbgWindow.getOwnPropertyDescriptor("$$");
     }
 
-    let $ = null, $$ = null;
+    let $ = null, $$ = null, screenshot = null;
     if (found$) {
       $ = bindings.$;
       delete bindings.$;
@@ -1389,6 +1447,10 @@ WebConsoleActor.prototype =
     if (found$$) {
       $$ = bindings.$$;
       delete bindings.$$;
+    }
+    if (disableScreenshot) {
+      screenshot = bindings.screenshot;
+      delete bindings.screenshot;
     }
 
     // Ready to evaluate the string.
@@ -1399,12 +1461,11 @@ WebConsoleActor.prototype =
       evalOptions = { url: options.url };
     }
 
-    // If the debugger object is changed from the last evaluation,
-    // adopt this._lastConsoleInputEvaluation value in the new debugger,
-    // to prevents "Debugger.Object belongs to a different Debugger" exceptions
-    // related to the $_ bindings.
-    if (this._lastConsoleInputEvaluation &&
-        this._lastConsoleInputEvaluation.global !== dbgWindow) {
+    // Adopt this._lastConsoleInputEvaluation value in the new debugger,
+    // to prevent "Debugger.Object belongs to a different Debugger" exceptions
+    // related to the $_ bindings if the debugger object is changed from the
+    // last evaluation.
+    if (this._lastConsoleInputEvaluation) {
       this._lastConsoleInputEvaluation = dbg.adoptDebuggeeValue(
         this._lastConsoleInputEvaluation
       );
@@ -1491,6 +1552,9 @@ WebConsoleActor.prototype =
     }
     if ($$) {
       bindings.$$ = $$;
+    }
+    if (screenshot) {
+      bindings.screenshot = screenshot;
     }
 
     if (bindings._self) {

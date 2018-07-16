@@ -10,7 +10,6 @@ const Services = require("Services");
 loader.lazyServiceGetter(this, "clipboardHelper",
                          "@mozilla.org/widget/clipboardhelper;1",
                          "nsIClipboardHelper");
-loader.lazyRequireGetter(this, "defer", "devtools/shared/defer");
 loader.lazyRequireGetter(this, "Debugger", "Debugger");
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 loader.lazyRequireGetter(this, "AutocompletePopup", "devtools/client/shared/autocomplete-popup");
@@ -19,6 +18,7 @@ loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools"
 loader.lazyRequireGetter(this, "KeyCodes", "devtools/client/shared/keycodes", true);
 loader.lazyRequireGetter(this, "Editor", "devtools/client/sourceeditor/editor");
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
+loader.lazyRequireGetter(this, "processScreenshot", "devtools/shared/webconsole/screenshot-helper");
 
 const l10n = require("devtools/client/webconsole/webconsole-l10n");
 
@@ -96,7 +96,6 @@ class JSTerm extends Component {
 
     this._keyPress = this._keyPress.bind(this);
     this._inputEventHandler = this._inputEventHandler.bind(this);
-    this._focusEventHandler = this._focusEventHandler.bind(this);
     this._blurEventHandler = this._blurEventHandler.bind(this);
 
     this.SELECTED_FRAME = -1;
@@ -129,14 +128,6 @@ class JSTerm extends Component {
      * @type string
      */
     this.lastInputValue = "";
-
-    /**
-     * Tells if the input node changed since the last focus.
-     *
-     * @private
-     * @type boolean
-     */
-    this._inputChanged = false;
 
     /**
      * Tells if the autocomplete popup was navigated since the last open.
@@ -276,13 +267,16 @@ class JSTerm extends Component {
             }
           }
         });
+
         this.editor.appendToLocalElement(this.node);
+        const cm = this.editor.codeMirror;
+        cm.on("paste", (_, event) => this.props.onPaste(event));
+        cm.on("drop", (_, event) => this.props.onPaste(event));
       }
     } else if (this.inputNode) {
       this.inputNode.addEventListener("keypress", this._keyPress);
       this.inputNode.addEventListener("input", this._inputEventHandler);
       this.inputNode.addEventListener("keyup", this._inputEventHandler);
-      this.inputNode.addEventListener("focus", this._focusEventHandler);
       this.focus();
     }
 
@@ -325,19 +319,16 @@ class JSTerm extends Component {
    * The JavaScript evaluation response handler.
    *
    * @private
-   * @param function [callback]
-   *        Optional function to invoke when the evaluation result is added to
-   *        the output.
    * @param object response
    *        The message received from the server.
    */
-  _executeResultCallback(callback, response) {
+  async _executeResultCallback(response) {
     if (!this.hud) {
-      return;
+      return null;
     }
     if (response.error) {
       console.error("Evaluation error " + response.error + ": " + response.message);
-      return;
+      return null;
     }
     let errorMessage = response.exceptionMessage;
 
@@ -373,6 +364,12 @@ class JSTerm extends Component {
         case "copyValueToClipboard":
           clipboardHelper.copyString(helperResult.value);
           break;
+        case "screenshotOutput":
+          const { args, value } = helperResult;
+          const results = await processScreenshot(this.hud.window, args, value);
+          this.screenshotNotify(results);
+          // early return as screenshot notify has dispatched all necessary messages
+          return null;
       }
     }
 
@@ -380,13 +377,14 @@ class JSTerm extends Component {
     if (!errorMessage && result && typeof result == "object" &&
       result.type == "undefined" &&
       helperResult && !helperHasRawOutput) {
-      callback && callback();
-      return;
+      return null;
     }
 
     if (this.hud.consoleOutput) {
-      this.hud.consoleOutput.dispatchMessageAdd(response, true).then(callback);
+      return this.hud.consoleOutput.dispatchMessageAdd(response, true);
     }
+
+    return null;
   }
 
   inspectObjectActor(objectActor) {
@@ -399,22 +397,21 @@ class JSTerm extends Component {
     return this.hud.consoleOutput;
   }
 
+  screenshotNotify(results) {
+    const wrappedResults = results.map(message => ({ message, type: "logMessage" }));
+    this.hud.consoleOutput.dispatchMessagesAdd(wrappedResults);
+  }
+
   /**
    * Execute a string. Execution happens asynchronously in the content process.
    *
-   * @param string [executeString]
+   * @param {String} executeString
    *        The string you want to execute. If this is not provided, the current
    *        user input is used - taken from |this.getInputValue()|.
-   * @param function [callback]
-   *        Optional function to invoke when the result is displayed.
-   *        This is deprecated - please use the promise return value instead.
-   * @returns Promise
+   * @returns {Promise}
    *          Resolves with the message once the result is displayed.
    */
-  async execute(executeString, callback) {
-    const deferred = defer();
-    const resultCallback = msg => deferred.resolve(msg);
-
+  async execute(executeString) {
     // attempt to execute the content of the inputNode
     executeString = executeString || this.getInputValue();
     if (!executeString) {
@@ -435,22 +432,23 @@ class JSTerm extends Component {
     }
 
     const { ConsoleCommand } = require("devtools/client/webconsole/types");
-    const message = new ConsoleCommand({
+    const cmdMessage = new ConsoleCommand({
       messageText: executeString,
     });
-    this.hud.proxy.dispatchMessageAdd(message);
-
-    const onResult = this._executeResultCallback.bind(this, resultCallback);
+    this.hud.proxy.dispatchMessageAdd(cmdMessage);
 
     const options = {
       frame: this.SELECTED_FRAME,
-      selectedNodeActor: selectedNodeActor,
+      selectedNodeActor,
     };
 
     const mappedString = await this.hud.owner.getMappedExpression(executeString);
-    this.requestEvaluation(mappedString, options).then(onResult, onResult);
-
-    return deferred.promise;
+    // Even if requestEvaluation rejects (because of webConsoleClient.evaluateJSAsync),
+    // we still need to pass the error response to executeResultCallback.
+    const onEvaluated = this.requestEvaluation(mappedString, options)
+      .then(res => res, res => res);
+    const response = await onEvaluated;
+    return this._executeResultCallback(response);
   }
 
   /**
@@ -478,15 +476,14 @@ class JSTerm extends Component {
    *         received.
    */
   requestEvaluation(str, options = {}) {
-    const deferred = defer();
+    const toolbox = gDevTools.getToolbox(this.hud.owner.target);
 
-    function onResult(response) {
-      if (!response.error) {
-        deferred.resolve(response);
-      } else {
-        deferred.reject(response);
-      }
-    }
+    // Send telemetry event. If we are in the browser toolbox we send -1 as the
+    // toolbox session id.
+    this._telemetry.recordEvent("devtools.main", "execute_js", "webconsole", null, {
+      "lines": str.split(/\n/).length,
+      "session_id": toolbox ? toolbox.sessionId : -1
+    });
 
     let frameActor = null;
     if ("frame" in options) {
@@ -495,18 +492,12 @@ class JSTerm extends Component {
 
     const evalOptions = {
       bindObjectActor: options.bindObjectActor,
-      frameActor: frameActor,
+      frameActor,
       selectedNodeActor: options.selectedNodeActor,
       selectedObjectActor: options.selectedObjectActor,
     };
 
-    this.webConsoleClient.evaluateJSAsync(str, onResult, evalOptions);
-
-    this._telemetry.recordEvent("devtools.main", "execute_js", "webconsole", null, {
-      lines: str.split(/\n/).length
-    });
-
-    return deferred.promise;
+    return this.webConsoleClient.evaluateJSAsync(str, null, evalOptions);
   }
 
   /**
@@ -603,7 +594,6 @@ class JSTerm extends Component {
 
     this.lastInputValue = newValue;
     this.resizeInput();
-    this._inputChanged = true;
     this.emit("set-input-value");
   }
 
@@ -628,7 +618,6 @@ class JSTerm extends Component {
       this.resizeInput();
       this.complete(this.COMPLETE_HINT_ONLY);
       this.lastInputValue = this.getInputValue();
-      this._inputChanged = true;
     }
   }
 
@@ -737,7 +726,6 @@ class JSTerm extends Component {
           this.acceptProposedCompletion();
         } else {
           this.execute();
-          this._inputChanged = false;
         }
         event.preventDefault();
         break;
@@ -855,8 +843,10 @@ class JSTerm extends Component {
             this.lastCompletion &&
             this.acceptProposedCompletion()) {
           event.preventDefault();
-        } else if (this._inputChanged) {
-          this.updateCompleteNode(l10n.getStr("Autocomplete.blank"));
+        } else if (!this.hasEmptyInput()) {
+          if (!event.shiftKey) {
+            this.insertStringAtCursor("\t");
+          }
           event.preventDefault();
         }
         break;
@@ -865,14 +855,6 @@ class JSTerm extends Component {
     }
   }
   /* eslint-enable complexity */
-
-  /**
-   * The inputNode "focus" event handler.
-   * @private
-   */
-  _focusEventHandler() {
-    this._inputChanged = false;
-  }
 
   /**
    * Go up/down the history stack of input values.
@@ -904,6 +886,15 @@ class JSTerm extends Component {
     }
 
     return false;
+  }
+
+  /**
+   * Test for empty input.
+   *
+   * @return boolean
+   */
+  hasEmptyInput() {
+    return this.getInputValue() === "";
   }
 
   /**
@@ -1259,20 +1250,30 @@ class JSTerm extends Component {
 
     const currentItem = this.autocompletePopup.selectedItem;
     if (currentItem && this.lastCompletion.value) {
-      const suffix =
-        currentItem.label.substring(this.lastCompletion.matchProp.length);
-      const cursor = this.inputNode.selectionStart;
-      const value = this.getInputValue();
-      this.setInputValue(value.substr(0, cursor) +
-        suffix + value.substr(cursor));
-      const newCursor = cursor + suffix.length;
-      this.inputNode.selectionStart = this.inputNode.selectionEnd = newCursor;
+      this.insertStringAtCursor(
+        currentItem.label.substring(this.lastCompletion.matchProp.length)
+      );
       updated = true;
     }
 
     this.clearCompletion();
 
     return updated;
+  }
+
+  /**
+   * Insert a string into the console at the cursor location,
+   * moving the cursor to the end of the string.
+   *
+   * @param string str
+   */
+  insertStringAtCursor(str) {
+    const cursor = this.inputNode.selectionStart;
+    const value = this.getInputValue();
+    this.setInputValue(value.substr(0, cursor) +
+      str + value.substr(cursor));
+    const newCursor = cursor + str.length;
+    this.inputNode.selectionStart = this.inputNode.selectionEnd = newCursor;
   }
 
   /**
@@ -1339,7 +1340,6 @@ class JSTerm extends Component {
       this.inputNode.removeEventListener("keypress", this._keyPress);
       this.inputNode.removeEventListener("input", this._inputEventHandler);
       this.inputNode.removeEventListener("keyup", this._inputEventHandler);
-      this.inputNode.removeEventListener("focus", this._focusEventHandler);
       this.hud.window.removeEventListener("blur", this._blurEventHandler);
     }
 

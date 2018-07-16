@@ -6,8 +6,7 @@ window.gActivityStreamPrerenderedState = {
     "editForm": null
   },
   "App": {
-    "initialized": false,
-    "version": null
+    "initialized": false
   },
   "Snippets": {
     "initialized": false
@@ -55,8 +54,5 @@ window.gActivityStreamPrerenderedState = {
       "order": 2,
       "initialized": false
     }
-  ],
-  "Theme": {
-    "className": ""
-  }
+  ]
 };

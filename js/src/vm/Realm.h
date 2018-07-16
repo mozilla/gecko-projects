@@ -7,9 +7,11 @@
 #ifndef vm_Realm_h
 #define vm_Realm_h
 
+#include "mozilla/Atomics.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/Variant.h"
 #include "mozilla/XorShift128PlusRNG.h"
@@ -119,6 +121,8 @@ class NewProxyCache
     }
 };
 
+// [SMDOC] Object MetadataBuilder API
+//
 // We must ensure that all newly allocated JSObjects get their metadata
 // set. However, metadata builders may require the new object be in a sane
 // state (eg, have its reserved slots initialized so they can get the
@@ -420,7 +424,7 @@ class JS::Realm : public JS::shadow::Realm
     js::ReadBarrieredScriptSourceObject selfHostingScriptSource { nullptr };
 
     // Last time at which an animation was played for this realm.
-    int64_t lastAnimationTime = 0;
+    js::MainThreadData<mozilla::TimeStamp> lastAnimationTime;
 
     /*
      * For generational GC, record whether a write barrier has added this
@@ -913,18 +917,16 @@ class AutoRealm
     AutoRealm& operator=(const AutoRealm&) = delete;
 };
 
-class MOZ_RAII AutoAtomsZone
+class MOZ_RAII AutoAllocInAtomsZone
 {
     JSContext* const cx_;
     JS::Realm* const origin_;
-    const AutoLockForExclusiveAccess& lock_;
-
-    AutoAtomsZone(const AutoAtomsZone&) = delete;
-    AutoAtomsZone& operator=(const AutoAtomsZone&) = delete;
+    AutoAllocInAtomsZone(const AutoAllocInAtomsZone&) = delete;
+    AutoAllocInAtomsZone& operator=(const AutoAllocInAtomsZone&) = delete;
 
   public:
-    inline AutoAtomsZone(JSContext* cx, AutoLockForExclusiveAccess& lock);
-    inline ~AutoAtomsZone();
+    inline explicit AutoAllocInAtomsZone(JSContext* cx);
+    inline ~AutoAllocInAtomsZone();
 };
 
 // Enter a realm directly. Only use this where there's no target GC thing

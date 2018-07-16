@@ -7,6 +7,7 @@ package org.mozilla.geckoview_example;
 
 import org.mozilla.geckoview.BasicSelectionActionDelegate;
 import org.mozilla.geckoview.GeckoResponse;
+import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
@@ -114,6 +115,7 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .remoteDebuggingEnabled(true)
                     .nativeCrashReportingEnabled(true)
                     .javaCrashReportingEnabled(true)
+                    .consoleOutput(true)
                     .trackingProtectionCategories(TrackingProtectionDelegate.CATEGORY_ALL);
 
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
@@ -143,7 +145,8 @@ public class GeckoViewActivity extends AppCompatActivity {
         GeckoSession session = new GeckoSession();
         session.getSettings().setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, mUseMultiprocess);
         session.getSettings().setBoolean(GeckoSessionSettings.USE_PRIVATE_MODE, mUsePrivateBrowsing);
-        session.getSettings().setBoolean(GeckoSessionSettings.USE_TRACKING_PROTECTION, true);
+        session.getSettings().setBoolean(
+            GeckoSessionSettings.USE_TRACKING_PROTECTION, mUseTrackingProtection);
 
         connectSession(session);
 
@@ -180,11 +183,8 @@ public class GeckoViewActivity extends AppCompatActivity {
     }
 
     private void updateTrackingProtection(GeckoSession session) {
-        int categories = mUseTrackingProtection ?
-                TrackingProtectionDelegate.CATEGORY_ALL :
-                TrackingProtectionDelegate.CATEGORY_NONE;
-
-        sGeckoRuntime.getSettings().setTrackingProtectionCategories(categories);
+        session.getSettings().setBoolean(
+            GeckoSessionSettings.USE_TRACKING_PROTECTION, mUseTrackingProtection);
     }
 
     @Override
@@ -562,18 +562,16 @@ public class GeckoViewActivity extends AppCompatActivity {
         }
 
         @Override
-        public void onLoadRequest(final GeckoSession session, final String uri,
-                                  final int target, final int flags,
-                                  GeckoResponse<Boolean> response) {
+        public GeckoResult<Boolean> onLoadRequest(final GeckoSession session, final String uri,
+                                                  final int target, final int flags) {
             Log.d(LOGTAG, "onLoadRequest=" + uri + " where=" + target +
                   " flags=" + flags);
-            response.respond(false);
+            return GeckoResult.fromValue(false);
         }
 
         @Override
-        public void onNewSession(final GeckoSession session, final String uri, GeckoResponse<GeckoSession> response) {
+        public GeckoResult<GeckoSession> onNewSession(final GeckoSession session, final String uri) {
             GeckoSession newSession = new GeckoSession(session.getSettings());
-            response.respond(newSession);
 
             Intent intent = new Intent(GeckoViewActivity.this, SessionActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
@@ -582,6 +580,8 @@ public class GeckoViewActivity extends AppCompatActivity {
             intent.putExtra("session", newSession);
 
             startActivity(intent);
+
+            return GeckoResult.fromValue(newSession);
         }
     }
 

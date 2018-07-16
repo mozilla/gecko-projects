@@ -14,6 +14,7 @@
 #include "nsContainerFrame.h"
 #include "nsCSSRendering.h"
 #include "nsPresContext.h"
+#include "nsPopupSetFrame.h"
 #include "nsGkAtoms.h"
 #include "nsIFrameInlines.h"
 #include "nsIPresShell.h"
@@ -52,6 +53,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsCanvasFrame)
 NS_QUERYFRAME_HEAD(nsCanvasFrame)
   NS_QUERYFRAME_ENTRY(nsCanvasFrame)
   NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
+  NS_QUERYFRAME_ENTRY(nsIPopupContainer)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void
@@ -127,6 +129,40 @@ nsCanvasFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
     eventHub->Init();
   }
 
+  // Create a popupgroup element for chrome privileged top level non-XUL
+  // documents to support context menus and tooltips.
+  if (PresContext()->IsChrome() && PresContext()->IsRoot() &&
+      doc->AllowXULXBL() && !doc->IsXULDocument()) {
+    nsNodeInfoManager* nodeInfoManager = doc->NodeInfoManager();
+    RefPtr<NodeInfo> nodeInfo =
+      nodeInfoManager->GetNodeInfo(nsGkAtoms::popupgroup,
+                                   nullptr, kNameSpaceID_XUL,
+                                   nsINode::ELEMENT_NODE);
+
+    rv = NS_NewXULElement(getter_AddRefs(mPopupgroupContent),
+                          nodeInfo.forget(), dom::NOT_FROM_PARSER);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    aElements.AppendElement(mPopupgroupContent);
+
+    nodeInfo = nodeInfoManager->GetNodeInfo(nsGkAtoms::tooltip, nullptr,
+                                          kNameSpaceID_XUL,
+                                          nsINode::ELEMENT_NODE);
+
+    rv = NS_NewXULElement(getter_AddRefs(mTooltipContent), nodeInfo.forget(),
+                          dom::NOT_FROM_PARSER);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    mTooltipContent->SetAttr(kNameSpaceID_None, nsGkAtoms::_default,
+                             NS_LITERAL_STRING("true"), false);
+    // Set the page attribute so the XBL binding will find the text for the
+    // tooltip from the currently hovered element.
+    mTooltipContent->SetAttr(kNameSpaceID_None, nsGkAtoms::page,
+                             NS_LITERAL_STRING("true"), false);
+
+    aElements.AppendElement(mTooltipContent);
+  }
+
   return NS_OK;
 }
 
@@ -135,6 +171,12 @@ nsCanvasFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements, uint32
 {
   if (mCustomContentContainer) {
     aElements.AppendElement(mCustomContentContainer);
+  }
+  if (mPopupgroupContent) {
+    aElements.AppendElement(mPopupgroupContent);
+  }
+  if (mTooltipContent) {
+    aElements.AppendElement(mTooltipContent);
   }
 }
 
@@ -163,7 +205,16 @@ nsCanvasFrame::DestroyFrom(nsIFrame* aDestructRoot, PostDestroyData& aPostDestro
     }
   }
   aPostDestroyData.AddAnonymousContent(mCustomContentContainer.forget());
+  if (mPopupgroupContent) {
+    aPostDestroyData.AddAnonymousContent(mPopupgroupContent.forget());
+  }
+  if (mTooltipContent) {
+    aPostDestroyData.AddAnonymousContent(mTooltipContent.forget());
+  }
 
+  MOZ_ASSERT(!mPopupSetFrame ||
+             nsLayoutUtils::IsProperAncestorFrame(this, mPopupSetFrame),
+             "Someone forgot to clear popup set frame");
   nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
@@ -260,6 +311,34 @@ nsRect nsCanvasFrame::CanvasArea() const
     result.UnionRect(result, nsRect(nsPoint(0, 0), portRect.Size()));
   }
   return result;
+}
+
+nsPopupSetFrame*
+nsCanvasFrame::GetPopupSetFrame()
+{
+  return mPopupSetFrame;
+}
+
+void
+nsCanvasFrame::SetPopupSetFrame(nsPopupSetFrame* aPopupSet)
+{
+  MOZ_ASSERT(!aPopupSet || !mPopupSetFrame,
+             "Popup set is already defined! Only 1 allowed.");
+  mPopupSetFrame = aPopupSet;
+}
+
+Element*
+nsCanvasFrame::GetDefaultTooltip()
+{
+  return mTooltipContent;
+}
+
+void
+nsCanvasFrame::SetDefaultTooltip(Element* aTooltip)
+{
+  MOZ_ASSERT(!aTooltip || aTooltip == mTooltipContent,
+             "Default tooltip should be anonymous content tooltip.");
+  mTooltipContent = aTooltip;
 }
 
 void
@@ -685,7 +764,7 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
   if (mFrames.IsEmpty()) {
     // We have no child frame, so return an empty size
     aDesiredSize.Width() = aDesiredSize.Height() = 0;
-  } else {
+  } else if (mFrames.FirstChild() != mPopupSetFrame) {
     nsIFrame* kidFrame = mFrames.FirstChild();
     bool kidDirty = (kidFrame->GetStateBits() & NS_FRAME_IS_DIRTY) != 0;
 
@@ -772,6 +851,21 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
     ReflowOverflowContainerChildren(aPresContext, aReflowInput,
                                     aDesiredSize.mOverflowAreas, 0,
                                     aStatus);
+  }
+
+  if (mPopupSetFrame) {
+    MOZ_ASSERT(mFrames.ContainsFrame(mPopupSetFrame), "Only normal flow supported.");
+    nsReflowStatus popupStatus;
+    ReflowOutput popupDesiredSize(aReflowInput.GetWritingMode());
+    WritingMode wm = mPopupSetFrame->GetWritingMode();
+    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
+    ReflowInput popupReflowInput(aPresContext, aReflowInput,
+                                 mPopupSetFrame, availSize);
+    ReflowChild(mPopupSetFrame, aPresContext, popupDesiredSize,
+                popupReflowInput, 0, 0, NS_FRAME_NO_MOVE_FRAME, popupStatus);
+    FinishReflowChild(mPopupSetFrame, aPresContext, popupDesiredSize,
+                      &popupReflowInput, 0, 0, NS_FRAME_NO_MOVE_FRAME);
   }
 
   FinishReflowWithAbsoluteFrames(aPresContext, aDesiredSize, aReflowInput, aStatus);

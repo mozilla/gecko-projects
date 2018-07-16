@@ -651,7 +651,10 @@ impl<'le> GeckoElement<'le> {
     #[inline]
     fn extended_slots(&self) -> Option<&structs::FragmentOrElement_nsExtendedDOMSlots> {
         self.dom_slots().and_then(|s| unsafe {
-            (s._base.mExtendedSlots.mPtr as *const structs::FragmentOrElement_nsExtendedDOMSlots)
+            // For the bit usage, see nsContentSlots::GetExtendedSlots.
+            let e_slots = s._base.mExtendedSlots &
+                !structs::nsIContent_nsContentSlots_sNonOwningExtendedSlotsFlag;
+            (e_slots as *const structs::FragmentOrElement_nsExtendedDOMSlots)
                 .as_ref()
         })
     }
@@ -2124,6 +2127,7 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
     {
         use selectors::matching::*;
         match *pseudo_class {
+            NonTSPseudoClass::Defined |
             NonTSPseudoClass::Focus |
             NonTSPseudoClass::Enabled |
             NonTSPseudoClass::Disabled |

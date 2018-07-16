@@ -5,7 +5,9 @@
 
 package org.mozilla.geckoview.test;
 
+import org.mozilla.gecko.gfx.GeckoDisplay;
 import org.mozilla.geckoview.GeckoResponse;
+import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
@@ -14,8 +16,12 @@ import org.mozilla.geckoview.GeckoRuntimeSettings;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.SurfaceTexture;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Surface;
+
+import java.util.HashMap;
 
 public class TestRunnerActivity extends Activity {
     private static final String LOGTAG = "TestRunnerActivity";
@@ -25,6 +31,8 @@ public class TestRunnerActivity extends Activity {
     private GeckoSession mSession;
     private GeckoView mView;
     private boolean mKillProcessOnDestroy;
+
+    private HashMap<GeckoSession, GeckoDisplay> mDisplays = new HashMap<>();
 
     private GeckoSession.NavigationDelegate mNavigationDelegate = new GeckoSession.NavigationDelegate() {
         @Override
@@ -43,16 +51,15 @@ public class TestRunnerActivity extends Activity {
         }
 
         @Override
-        public void onLoadRequest(GeckoSession session, String uri, int target,
-                                  int flags,
-                                  GeckoResponse<Boolean> response) {
+        public GeckoResult<Boolean> onLoadRequest(GeckoSession session, String uri, int target,
+                                                  int flags) {
             // Allow Gecko to load all URIs
-            response.respond(false);
+            return GeckoResult.fromValue(false);
         }
 
         @Override
-        public void onNewSession(GeckoSession session, String uri, GeckoResponse<GeckoSession> response) {
-            response.respond(createSession(session.getSettings()));
+        public GeckoResult<GeckoSession> onNewSession(GeckoSession session, String uri) {
+            return GeckoResult.fromValue(createBackgroundSession(session.getSettings()));
         }
     };
 
@@ -69,7 +76,7 @@ public class TestRunnerActivity extends Activity {
 
         @Override
         public void onCloseRequest(GeckoSession session) {
-            session.close();
+            closeSession(session);
         }
 
         @Override
@@ -88,6 +95,9 @@ public class TestRunnerActivity extends Activity {
 
         @Override
         public void onCrash(GeckoSession session) {
+            if (System.getenv("MOZ_CRASHREPORTER_SHUTDOWN") != null) {
+                sRuntime.shutdown();
+            }
         }
     };
 
@@ -98,15 +108,35 @@ public class TestRunnerActivity extends Activity {
     private GeckoSession createSession(GeckoSessionSettings settings) {
         if (settings == null) {
             settings = new GeckoSessionSettings();
-
-            // We can't use e10s because we get deadlocked when quickly creating and
-            // destroying sessions. Bug 1348361.
-            settings.setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, false);
         }
 
         final GeckoSession session = new GeckoSession(settings);
         session.setNavigationDelegate(mNavigationDelegate);
+        session.setContentDelegate(mContentDelegate);
         return session;
+    }
+
+    private GeckoSession createBackgroundSession(final GeckoSessionSettings settings) {
+        final GeckoSession session = createSession(settings);
+
+        final SurfaceTexture texture  = new SurfaceTexture(0);
+        final Surface surface = new Surface(texture);
+
+        final GeckoDisplay display = session.acquireDisplay();
+        display.surfaceChanged(surface, mView.getWidth(), mView.getHeight());
+        mDisplays.put(session, display);
+
+        return session;
+    }
+
+    private void closeSession(GeckoSession session) {
+        if (mDisplays.containsKey(session)) {
+            final GeckoDisplay display = mDisplays.remove(session);
+            display.surfaceDestroyed();
+
+            session.releaseDisplay(display);
+        }
+        session.close();
     }
 
     @Override
@@ -126,7 +156,8 @@ public class TestRunnerActivity extends Activity {
 
             runtimeSettingsBuilder
                     .nativeCrashReportingEnabled(true)
-                    .javaCrashReportingEnabled(true);
+                    .javaCrashReportingEnabled(true)
+                    .consoleOutput(true);
 
             sRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
             sRuntime.setDelegate(new GeckoRuntime.Delegate() {

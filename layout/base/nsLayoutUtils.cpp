@@ -521,22 +521,6 @@ nsLayoutUtils::CSSFiltersEnabled()
 }
 
 bool
-nsLayoutUtils::UnsetValueEnabled()
-{
-  static bool sUnsetValueEnabled;
-  static bool sUnsetValuePrefCached = false;
-
-  if (!sUnsetValuePrefCached) {
-    sUnsetValuePrefCached = true;
-    Preferences::AddBoolVarCache(&sUnsetValueEnabled,
-                                 "layout.css.unset-value.enabled",
-                                 false);
-  }
-
-  return sUnsetValueEnabled;
-}
-
-bool
 nsLayoutUtils::IsInterCharacterRubyEnabled()
 {
   static bool sInterCharacterRubyEnabled;
@@ -2338,8 +2322,12 @@ nsLayoutUtils::RoundGfxRectToAppRect(const Rect &aRect, float aFactor)
   ConstrainToCoordValues(scaledRect.y, scaledRect.height);
 
   /* Now typecast everything back.  This is guaranteed to be safe. */
-  return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()),
-                nscoord(scaledRect.Width()), nscoord(scaledRect.Height()));
+  if (aRect.IsEmpty()) {
+    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()), 0, 0);
+  } else {
+    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()),
+                  nscoord(scaledRect.Width()), nscoord(scaledRect.Height()));
+  }
 }
 
 nsRect
@@ -2354,8 +2342,12 @@ nsLayoutUtils::RoundGfxRectToAppRect(const gfxRect &aRect, float aFactor)
   ConstrainToCoordValues(scaledRect.y, scaledRect.height);
 
   /* Now typecast everything back.  This is guaranteed to be safe. */
-  return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()),
-                nscoord(scaledRect.Width()), nscoord(scaledRect.Height()));
+  if (aRect.IsEmpty()) {
+    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()), 0, 0);
+  } else {
+    return nsRect(nscoord(scaledRect.X()), nscoord(scaledRect.Y()),
+                  nscoord(scaledRect.Width()), nscoord(scaledRect.Height()));
+  }
 }
 
 
@@ -4114,11 +4106,11 @@ nsLayoutUtils::GetFirstNonAnonymousFrame(nsIFrame* aFrame)
 }
 
 struct BoxToRect : public nsLayoutUtils::BoxCallback {
-  nsIFrame* mRelativeTo;
+  const nsIFrame* mRelativeTo;
   nsLayoutUtils::RectCallback* mCallback;
   uint32_t mFlags;
 
-  BoxToRect(nsIFrame* aRelativeTo, nsLayoutUtils::RectCallback* aCallback,
+  BoxToRect(const nsIFrame* aRelativeTo, nsLayoutUtils::RectCallback* aCallback,
             uint32_t aFlags)
     : mRelativeTo(aRelativeTo), mCallback(aCallback), mFlags(aFlags) {}
 
@@ -4153,7 +4145,7 @@ struct BoxToRect : public nsLayoutUtils::BoxCallback {
 struct MOZ_RAII BoxToRectAndText : public BoxToRect {
   Sequence<nsString>* mTextList;
 
-  BoxToRectAndText(nsIFrame* aRelativeTo, nsLayoutUtils::RectCallback* aCallback,
+  BoxToRectAndText(const nsIFrame* aRelativeTo, nsLayoutUtils::RectCallback* aCallback,
                    Sequence<nsString>* aTextList, uint32_t aFlags)
     : BoxToRect(aRelativeTo, aCallback, aFlags), mTextList(aTextList) {}
 
@@ -4193,7 +4185,7 @@ struct MOZ_RAII BoxToRectAndText : public BoxToRect {
 };
 
 void
-nsLayoutUtils::GetAllInFlowRects(nsIFrame* aFrame, nsIFrame* aRelativeTo,
+nsLayoutUtils::GetAllInFlowRects(nsIFrame* aFrame, const nsIFrame* aRelativeTo,
                                  RectCallback* aCallback, uint32_t aFlags)
 {
   BoxToRect converter(aRelativeTo, aCallback, aFlags);
@@ -4201,7 +4193,8 @@ nsLayoutUtils::GetAllInFlowRects(nsIFrame* aFrame, nsIFrame* aRelativeTo,
 }
 
 void
-nsLayoutUtils::GetAllInFlowRectsAndTexts(nsIFrame* aFrame, nsIFrame* aRelativeTo,
+nsLayoutUtils::GetAllInFlowRectsAndTexts(nsIFrame* aFrame,
+                                         const nsIFrame* aRelativeTo,
                                          RectCallback* aCallback,
                                          Sequence<nsString>* aTextList,
                                          uint32_t aFlags)
@@ -4238,7 +4231,7 @@ nsIFrame* nsLayoutUtils::GetContainingBlockForClientRect(nsIFrame* aFrame)
 }
 
 nsRect
-nsLayoutUtils::GetAllInFlowRectsUnion(nsIFrame* aFrame, nsIFrame* aRelativeTo,
+nsLayoutUtils::GetAllInFlowRectsUnion(nsIFrame* aFrame, const nsIFrame* aRelativeTo,
                                       uint32_t aFlags) {
   RectAccumulator accumulator;
   GetAllInFlowRects(aFrame, aRelativeTo, &accumulator, aFlags);
@@ -7179,18 +7172,13 @@ nsLayoutUtils::GetWholeImageDestination(const nsSize& aWholeImageSize,
 
 /* static */ already_AddRefed<imgIContainer>
 nsLayoutUtils::OrientImage(imgIContainer* aContainer,
-                           const nsStyleImageOrientation& aOrientation)
+                           const StyleImageOrientation& aOrientation)
 {
   MOZ_ASSERT(aContainer, "Should have an image container");
   nsCOMPtr<imgIContainer> img(aContainer);
 
-  if (aOrientation.IsFromImage()) {
+  if (aOrientation == StyleImageOrientation::FromImage) {
     img = ImageOps::Orient(img, img->GetOrientation());
-  } else if (!aOrientation.IsDefault()) {
-    Angle angle = aOrientation.Angle();
-    Flip flip  = aOrientation.IsFlipped() ? Flip::Horizontal
-                                          : Flip::Unflipped;
-    img = ImageOps::Orient(img, Orientation(angle, flip));
   }
 
   return img.forget();
@@ -8863,6 +8851,7 @@ AutoMaybeDisableFontInflation::AutoMaybeDisableFontInflation(nsIFrame *aFrame)
   } else {
     // indicate we have nothing to restore
     mPresContext = nullptr;
+    mOldValue = false;
   }
 }
 
@@ -9133,8 +9122,12 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     nsLayoutUtils::CalculateScrollableRectForFrame(scrollableFrame, aForFrame)));
 
   if (scrollableFrame) {
-    nsPoint scrollPosition = scrollableFrame->GetScrollPosition();
-    metrics.SetScrollOffset(CSSPoint::FromAppUnits(scrollPosition));
+    CSSPoint scrollPosition = CSSPoint::FromAppUnits(scrollableFrame->GetScrollPosition());
+    metrics.SetScrollOffset(scrollPosition);
+
+    CSSRect viewport = metrics.GetViewport();
+    viewport.MoveTo(scrollPosition);
+    metrics.SetViewport(viewport);
 
     nsPoint smoothScrollPosition = scrollableFrame->LastScrollDestination();
     metrics.SetSmoothScrollOffset(CSSPoint::FromAppUnits(smoothScrollPosition));
@@ -9487,6 +9480,17 @@ nsLayoutUtils::TransformToAncestorAndCombineRegions(
   }
   nsRegion* dest = isPrecise ? aPreciseTargetDest : aImpreciseTargetDest;
   dest->OrWith(transformedRegion.ToRegion());
+  // If the region becomes too complex this has a large performance impact.
+  // We limit its complexity here.
+  if (dest->GetNumRects() > 12) {
+    dest->SimplifyOutward(6);
+    if (isPrecise) {
+      aPreciseTargetDest->OrWith(*aImpreciseTargetDest);
+      *aImpreciseTargetDest = std::move(*aPreciseTargetDest);
+      aImpreciseTargetDest->SimplifyOutward(6);
+      *aPreciseTargetDest = nsRegion();
+    }
+  }
 }
 
 /* static */ bool

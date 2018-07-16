@@ -176,6 +176,8 @@
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/FocusTarget.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/WebRenderUserData.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleSheet.h"
@@ -824,6 +826,7 @@ PresShell::PresShell()
   , mScaleToResolution(false)
   , mIsLastChromeOnlyEscapeKeyConsumed(false)
   , mHasReceivedPaintMessage(false)
+  , mIsLastKeyDownCanceled(false)
   , mHasHandledUserInput(false)
 #ifdef NIGHTLY_BUILD
   , mForceDispatchKeyPressEventsForNonPrintableKeys(false)
@@ -5116,8 +5119,9 @@ PresShell::RenderNode(nsINode* aNode,
   nsTArray<UniquePtr<RangePaintInfo>> rangeItems;
 
   // nothing to draw if the node isn't in a document
-  if (!aNode->IsInUncomposedDoc())
+  if (!aNode->IsInComposedDoc()) {
     return nullptr;
+  }
 
   RefPtr<nsRange> range = new nsRange(aNode);
   IgnoredErrorResult rv;
@@ -6319,7 +6323,15 @@ PresShell::Paint(nsView*         aViewToPaint,
   }
 
   if (layerManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
-    // TODO: bug 1405465 - create a WR display list which simulates the color layer below.
+    nsPresContext* pc = GetPresContext();
+    LayoutDeviceRect bounds =
+      LayoutDeviceRect::FromAppUnits(pc->GetVisibleArea(), pc->AppUnitsPerDevPixel());
+    bgcolor = NS_ComposeColors(bgcolor, mCanvasBackgroundColor);
+    WebRenderBackgroundData data(wr::ToLayoutRect(bounds), wr::ToColorF(ToDeviceColor(bgcolor)));
+    nsTArray<wr::WrFilterOp> wrFilters;
+
+    MaybeSetupTransactionIdAllocator(layerManager, presContext);
+    layerManager->AsWebRenderLayerManager()->EndTransactionWithoutLayer(nullptr, nullptr, wrFilters, &data);
     return;
   }
 
@@ -7475,7 +7487,7 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
             //     for some reasons (not sure) but we need to detect
             //     if a chrome event handler will call PreventDefault()
             //     again and check it later.
-            aEvent->PreventDefaultBeforeDispatch();
+            aEvent->PreventDefaultBeforeDispatch(CrossProcessForwarding::eStop);
             aEvent->mFlags.mOnlyChromeDispatch = true;
 
             // The event listeners in chrome can prevent this ESC behavior by
@@ -7494,7 +7506,7 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
             // XXX See above comment to understand the reason why this needs
             //     to claim that the Escape key event is consumed by content
             //     even though it will be dispatched only into chrome.
-            aEvent->PreventDefaultBeforeDispatch();
+            aEvent->PreventDefaultBeforeDispatch(CrossProcessForwarding::eStop);
             aEvent->mFlags.mOnlyChromeDispatch = true;
             if (aEvent->mMessage == eKeyUp) {
               nsIDocument::UnlockPointer();
@@ -8562,7 +8574,7 @@ PresShell::SuppressDisplayport(bool aEnabled)
 {
   if (aEnabled) {
     mActiveSuppressDisplayport++;
-  } else {
+  } else if (mActiveSuppressDisplayport > 0) {
     bool isSuppressed = IsDisplayportSuppressed();
     mActiveSuppressDisplayport--;
     if (isSuppressed && !IsDisplayportSuppressed()) {
@@ -8572,8 +8584,6 @@ PresShell::SuppressDisplayport(bool aEnabled)
       }
     }
   }
-
-  MOZ_ASSERT(mActiveSuppressDisplayport >= 0);
 }
 
 static bool sDisplayPortSuppressionRespected = true;

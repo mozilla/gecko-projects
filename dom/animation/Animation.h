@@ -381,6 +381,21 @@ public:
   void NotifyGeometricAnimationsStartingThisFrame();
 
   /**
+   * Reschedule pending pause or pending play tasks when updating the target
+   * effect.
+   *
+   * If we are pending, we will either be registered in the pending animation
+   * tracker and have a null pending ready time, or, after our effect has been
+   * painted, we will be removed from the tracker and assigned a pending ready
+   * time.
+   *
+   * When the target effect is updated, we'll typically need to repaint so for
+   * the latter case where we already have a pending ready time, clear it and put
+   * ourselves back in the pending animation tracker.
+   */
+  void ReschedulePendingTasks();
+
+  /**
    * Used by subclasses to synchronously queue a cancel event in situations
    * where the Animation may have been cancelled.
    *
@@ -444,7 +459,8 @@ protected:
   void DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag);
   friend class AsyncFinishNotification;
   void DoFinishNotificationImmediately(MicroTaskRunnable* aAsync = nullptr);
-  void DispatchPlaybackEvent(const nsAString& aName);
+  void QueuePlaybackEvent(const nsAString& aName,
+                          TimeStamp&& aScheduledEventTime);
 
   /**
    * Remove this animation from the pending animation tracker and reset
@@ -486,7 +502,48 @@ protected:
     return GetCurrentTimeForHoldTime(Nullable<TimeDuration>());
   }
 
+  // Earlier side of the elapsed time range reported in CSS Animations and CSS
+  // Transitions events.
+  //
+  // https://drafts.csswg.org/css-animations-2/#interval-start
+  // https://drafts.csswg.org/css-transitions-2/#interval-start
+  StickyTimeDuration
+  IntervalStartTime(const StickyTimeDuration& aActiveDuration) const
+  {
+    MOZ_ASSERT(AsCSSTransition() || AsCSSAnimation(),
+               "Should be called for CSS animations or transitions");
+    static constexpr StickyTimeDuration zeroDuration = StickyTimeDuration();
+    return std::max(
+      std::min(StickyTimeDuration(-mEffect->SpecifiedTiming().Delay()),
+               aActiveDuration),
+      zeroDuration);
+  }
+
+  // Later side of the elapsed time range reported in CSS Animations and CSS
+  // Transitions events.
+  //
+  // https://drafts.csswg.org/css-animations-2/#interval-end
+  // https://drafts.csswg.org/css-transitions-2/#interval-end
+  StickyTimeDuration
+  IntervalEndTime(const StickyTimeDuration& aActiveDuration) const
+  {
+    MOZ_ASSERT(AsCSSTransition() || AsCSSAnimation(),
+               "Should be called for CSS animations or transitions");
+
+    static constexpr StickyTimeDuration zeroDuration = StickyTimeDuration();
+    return std::max(
+      std::min((EffectEnd() - mEffect->SpecifiedTiming().Delay()),
+               aActiveDuration),
+      zeroDuration);
+  }
+
+  TimeStamp GetTimelineCurrentTimeAsTimeStamp() const
+  {
+    return mTimeline ? mTimeline->GetCurrentTimeAsTimeStamp() : TimeStamp();
+  }
+
   nsIDocument* GetRenderedDocument() const;
+  nsIDocument* GetTimelineDocument() const;
 
   RefPtr<AnimationTimeline> mTimeline;
   RefPtr<AnimationEffect> mEffect;

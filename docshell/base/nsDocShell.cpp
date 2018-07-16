@@ -86,7 +86,6 @@
 #include "nsIExternalProtocolService.h"
 #include "nsIFormPOSTActionChannel.h"
 #include "nsIFrame.h"
-#include "nsIGlobalHistory2.h"
 #include "nsIGlobalObject.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
@@ -657,7 +656,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
 
 NS_IMETHODIMP
 nsDocShell::LoadURI(nsIURI* aURI,
-                    nsIDocShellLoadInfo* aLoadInfo,
+                    nsDocShellLoadInfo* aLoadInfo,
                     uint32_t aLoadFlags,
                     bool aFirstParty)
 {
@@ -706,30 +705,28 @@ nsDocShell::LoadURI(nsIURI* aURI,
 
   // Extract the info from the DocShellLoadInfo struct...
   if (aLoadInfo) {
-    aLoadInfo->GetReferrer(getter_AddRefs(referrer));
-    aLoadInfo->GetOriginalURI(getter_AddRefs(originalURI));
-    GetMaybeResultPrincipalURI(aLoadInfo, resultPrincipalURI);
-    aLoadInfo->GetLoadReplace(&loadReplace);
-    nsDocShellInfoLoadType lt = nsIDocShellLoadInfo::loadNormal;
-    aLoadInfo->GetLoadType(&lt);
+    referrer = aLoadInfo->Referrer();
+    originalURI = aLoadInfo->OriginalURI();
+    aLoadInfo->GetMaybeResultPrincipalURI(resultPrincipalURI);
+    loadReplace = aLoadInfo->LoadReplace();
     // Get the appropriate loadType from nsIDocShellLoadInfo type
-    loadType = ConvertDocShellInfoLoadTypeToLoadType(lt);
+    loadType = aLoadInfo->LoadType();
 
-    aLoadInfo->GetTriggeringPrincipal(getter_AddRefs(triggeringPrincipal));
-    aLoadInfo->GetInheritPrincipal(&inheritPrincipal);
-    aLoadInfo->GetPrincipalIsExplicit(&principalIsExplicit);
-    aLoadInfo->GetSHEntry(getter_AddRefs(shEntry));
-    aLoadInfo->GetTarget(getter_Copies(target));
-    aLoadInfo->GetPostDataStream(getter_AddRefs(postStream));
-    aLoadInfo->GetHeadersStream(getter_AddRefs(headersStream));
-    aLoadInfo->GetSendReferrer(&sendReferrer);
-    aLoadInfo->GetReferrerPolicy(&referrerPolicy);
-    aLoadInfo->GetIsSrcdocLoad(&isSrcdoc);
+    triggeringPrincipal = aLoadInfo->TriggeringPrincipal();
+    inheritPrincipal = aLoadInfo->InheritPrincipal();
+    principalIsExplicit = aLoadInfo->PrincipalIsExplicit();
+    shEntry = aLoadInfo->SHEntry();
+    aLoadInfo->GetTarget(target);
+    postStream = aLoadInfo->PostDataStream();
+    headersStream = aLoadInfo->HeadersStream();
+    sendReferrer = aLoadInfo->SendReferrer();
+    referrerPolicy = aLoadInfo->ReferrerPolicy();
+    isSrcdoc = aLoadInfo->IsSrcdocLoad();
     aLoadInfo->GetSrcdocData(srcdoc);
-    aLoadInfo->GetSourceDocShell(getter_AddRefs(sourceDocShell));
-    aLoadInfo->GetBaseURI(getter_AddRefs(baseURI));
-    aLoadInfo->GetForceAllowDataURI(&forceAllowDataURI);
-    aLoadInfo->GetOriginalFrameSrc(&originalFrameSrc);
+    sourceDocShell = aLoadInfo->SourceDocShell();
+    baseURI = aLoadInfo->BaseURI();
+    forceAllowDataURI = aLoadInfo->ForceAllowDataURI();
+    originalFrameSrc = aLoadInfo->OriginalFrameSrc();
   }
 
   MOZ_LOG(gDocShellLeakLog, LogLevel::Debug,
@@ -1023,16 +1020,6 @@ nsDocShell::LoadURI(nsIURI* aURI,
                       baseURI,
                       nullptr,  // No nsIDocShell
                       nullptr); // No nsIRequest
-}
-
-NS_IMETHODIMP
-nsDocShell::CreateLoadInfo(nsIDocShellLoadInfo** aLoadInfo)
-{
-  nsDocShellLoadInfo* loadInfo = new nsDocShellLoadInfo();
-  nsCOMPtr<nsIDocShellLoadInfo> localRef(loadInfo);
-
-  localRef.forget(aLoadInfo);
-  return NS_OK;
 }
 
 /*
@@ -3727,21 +3714,19 @@ nsDocShell::GetChildSHEntry(int32_t aChildOffset, nsISHEntry** aResult)
     /* Get the parent's Load Type so that it can be set on the child too.
      * By default give a loadHistory value
      */
-    uint32_t loadType = nsIDocShellLoadInfo::loadHistory;
+    uint32_t loadType = LOAD_HISTORY;
     mLSHE->GetLoadType(&loadType);
     // If the user did a shift-reload on this frameset page,
     // we don't want to load the subframes from history.
-    if (loadType == nsIDocShellLoadInfo::loadReloadBypassCache ||
-        loadType == nsIDocShellLoadInfo::loadReloadBypassProxy ||
-        loadType == nsIDocShellLoadInfo::loadReloadBypassProxyAndCache ||
-        loadType == nsIDocShellLoadInfo::loadRefresh) {
+    if (IsForceReloadType(loadType) ||
+        loadType == LOAD_REFRESH) {
       return rv;
     }
 
     /* If the user pressed reload and the parent frame has expired
      *  from cache, we do not want to load the child frame from history.
      */
-    if (parentExpired && (loadType == nsIDocShellLoadInfo::loadReloadNormal)) {
+    if (parentExpired && (loadType == LOAD_RELOAD_NORMAL)) {
       // The parent has expired. Return null.
       *aResult = nullptr;
       return rv;
@@ -3878,27 +3863,13 @@ nsDocShell::AddChildSHEntryToParent(nsISHEntry* aNewEntry, int32_t aChildOffset,
 NS_IMETHODIMP
 nsDocShell::SetUseGlobalHistory(bool aUseGlobalHistory)
 {
-  nsresult rv;
-
   mUseGlobalHistory = aUseGlobalHistory;
-
   if (!aUseGlobalHistory) {
-    mGlobalHistory = nullptr;
     return NS_OK;
   }
 
-  // No need to initialize mGlobalHistory if IHistory is available.
   nsCOMPtr<IHistory> history = services::GetHistoryService();
-  if (history) {
-    return NS_OK;
-  }
-
-  if (mGlobalHistory) {
-    return NS_OK;
-  }
-
-  mGlobalHistory = do_GetService(NS_GLOBALHISTORY2_CONTRACTID, &rv);
-  return rv;
+  return history ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -4243,11 +4214,7 @@ nsDocShell::LoadURIWithOptions(const char16_t* aURI,
   uint32_t extraFlags = (aLoadFlags & EXTRA_LOAD_FLAGS);
   aLoadFlags &= ~EXTRA_LOAD_FLAGS;
 
-  nsCOMPtr<nsIDocShellLoadInfo> loadInfo;
-  rv = CreateLoadInfo(getter_AddRefs(loadInfo));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  RefPtr<nsDocShellLoadInfo> loadInfo = new nsDocShellLoadInfo();
 
   /*
    * If the user "Disables Protection on This Page", we have to make sure to
@@ -4260,10 +4227,10 @@ nsDocShell::LoadURIWithOptions(const char16_t* aURI,
     loadType = MAKE_LOAD_TYPE(LOAD_NORMAL, aLoadFlags);
   }
 
-  loadInfo->SetLoadType(ConvertLoadTypeToDocShellInfoLoadType(loadType));
+  loadInfo->SetLoadType(loadType);
   loadInfo->SetPostDataStream(postStream);
   loadInfo->SetReferrer(aReferringURI);
-  loadInfo->SetReferrerPolicy(aReferrerPolicy);
+  loadInfo->SetReferrerPolicy((mozilla::net::ReferrerPolicy)aReferrerPolicy);
   loadInfo->SetHeadersStream(aHeaderStream);
   loadInfo->SetBaseURI(aBaseURI);
   loadInfo->SetTriggeringPrincipal(aTriggeringPrincipal);
@@ -6205,9 +6172,7 @@ nsDocShell::ForceRefreshURI(nsIURI* aURI, nsIPrincipal* aPrincipal, int32_t aDel
 {
   NS_ENSURE_ARG(aURI);
 
-  nsCOMPtr<nsIDocShellLoadInfo> loadInfo;
-  CreateLoadInfo(getter_AddRefs(loadInfo));
-  NS_ENSURE_TRUE(loadInfo, NS_ERROR_OUT_OF_MEMORY);
+  RefPtr<nsDocShellLoadInfo> loadInfo = new nsDocShellLoadInfo();
 
   /* We do need to pass in a referrer, but we don't want it to
    * be sent to the server.
@@ -6243,7 +6208,7 @@ nsDocShell::ForceRefreshURI(nsIURI* aURI, nsIPrincipal* aPrincipal, int32_t aDel
      * we have in mind (15000 ms as defined by REFRESH_REDIRECT_TIMER).
      * Pass a REPLACE flag to LoadURI().
      */
-    loadInfo->SetLoadType(nsIDocShellLoadInfo::loadNormalReplace);
+    loadInfo->SetLoadType(LOAD_NORMAL_REPLACE);
 
     /* for redirects we mimic HTTP, which passes the
      *  original referrer
@@ -6254,7 +6219,7 @@ nsDocShell::ForceRefreshURI(nsIURI* aURI, nsIPrincipal* aPrincipal, int32_t aDel
       loadInfo->SetReferrer(internalReferrer);
     }
   } else {
-    loadInfo->SetLoadType(nsIDocShellLoadInfo::loadRefresh);
+    loadInfo->SetLoadType(LOAD_REFRESH);
   }
 
   /*
@@ -7106,7 +7071,7 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
   // onLoadHandler tries to load something different in
   // itself or one of its children, we can deal with it appropriately.
   if (mLSHE) {
-    mLSHE->SetLoadType(nsIDocShellLoadInfo::loadHistory);
+    mLSHE->SetLoadType(LOAD_HISTORY);
 
     // Clear the mLSHE reference to indicate document loading is done one
     // way or another.
@@ -9440,20 +9405,16 @@ nsDocShell::InternalLoad(nsIURI* aURI,
         MOZ_ASSERT(!aSHEntry);
         MOZ_ASSERT(aFirstParty); // Windowwatcher will assume this.
 
-        nsCOMPtr<nsIDocShellLoadInfo> loadInfo;
-        rv = CreateLoadInfo(getter_AddRefs(loadInfo));
-        if (NS_FAILED(rv)) {
-          return rv;
-        }
+        RefPtr<nsDocShellLoadInfo> loadInfo = new nsDocShellLoadInfo();
 
         // Set up our loadinfo so it will do the load as much like we would have
         // as possible.
         loadInfo->SetReferrer(aReferrer);
-        loadInfo->SetReferrerPolicy(aReferrerPolicy);
+        loadInfo->SetReferrerPolicy((mozilla::net::ReferrerPolicy)aReferrerPolicy);
         loadInfo->SetSendReferrer(!(aFlags &
                                     INTERNAL_LOAD_FLAGS_DONT_SEND_REFERRER));
         loadInfo->SetOriginalURI(aOriginalURI);
-        SetMaybeResultPrincipalURI(loadInfo, aResultPrincipalURI);
+        loadInfo->SetMaybeResultPrincipalURI(aResultPrincipalURI);
         loadInfo->SetLoadReplace(aLoadReplace);
         loadInfo->SetTriggeringPrincipal(aTriggeringPrincipal);
         loadInfo->SetInheritPrincipal(
@@ -9461,7 +9422,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
         // Explicit principal because we do not want any guesses as to what the
         // principal to inherit is: it should be aTriggeringPrincipal.
         loadInfo->SetPrincipalIsExplicit(true);
-        loadInfo->SetLoadType(ConvertLoadTypeToDocShellInfoLoadType(LOAD_LINK));
+        loadInfo->SetLoadType(LOAD_LINK);
         loadInfo->SetForceAllowDataURI(aFlags & INTERNAL_LOAD_FLAGS_FORCE_ALLOW_DATA_URI);
 
         rv = win->Open(NS_ConvertUTF8toUTF16(spec),
@@ -10976,7 +10937,7 @@ nsDocShell::DoChannelLoad(nsIChannel* aChannel,
 
   // If the user pressed shift-reload, then do not allow ServiceWorker
   // interception to occur. See step 12.1 of the SW HandleFetch algorithm.
-  if (IsForceReloadType(mLoadType)) {
+  if (IsForceReloading()) {
     loadFlags |= nsIChannel::LOAD_BYPASS_SERVICE_WORKER;
   }
 
@@ -12534,12 +12495,6 @@ nsDocShell::AddURIVisit(nsIURI* aURI,
     }
 
     (void)history->VisitURI(aURI, aPreviousURI, visitURIFlags);
-  } else if (mGlobalHistory) {
-    // Falls back to sync global history interface.
-    (void)mGlobalHistory->AddURI(aURI,
-                                 !!aChannelRedirectFlags,
-                                 !IsFrame(),
-                                 aReferrerURI);
   }
 }
 
@@ -13853,24 +13808,15 @@ nsDocShell::SetOriginAttributes(const OriginAttributes& aAttrs)
 }
 
 NS_IMETHODIMP
-nsDocShell::SetOriginAttributesBeforeLoading(JS::Handle<JS::Value> aOriginAttributes)
+nsDocShell::SetOriginAttributesBeforeLoading(JS::Handle<JS::Value> aOriginAttributes,
+                                             JSContext* aCx)
 {
   if (!aOriginAttributes.isObject()) {
     return NS_ERROR_INVALID_ARG;
   }
 
-  AutoJSAPI jsapi;
-  if (!jsapi.Init(&aOriginAttributes.toObject())) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  JSContext* cx = jsapi.cx();
-  if (NS_WARN_IF(!cx)) {
-    return NS_ERROR_FAILURE;
-  }
-
   OriginAttributes attrs;
-  if (!aOriginAttributes.isObject() || !attrs.Init(cx, aOriginAttributes)) {
+  if (!attrs.Init(aCx, aOriginAttributes)) {
     return NS_ERROR_INVALID_ARG;
   }
 
@@ -13925,8 +13871,6 @@ nsDocShell::UpdateGlobalHistoryTitle(nsIURI* aURI)
     nsCOMPtr<IHistory> history = services::GetHistoryService();
     if (history) {
       history->SetURITitle(aURI, mTitle);
-    } else if (mGlobalHistory) {
-      mGlobalHistory->SetPageTitle(aURI, nsString(mTitle));
     }
   }
 }
@@ -14248,4 +14192,10 @@ nsDocShell::GetColorMatrix(uint32_t* aMatrixLen, float** aMatrix)
   }
 
   return NS_OK;
+}
+
+bool
+nsDocShell::IsForceReloading()
+{
+  return IsForceReloadType(mLoadType);
 }

@@ -37,7 +37,7 @@ selectNode = async function(node, inspector, reason) {
  */
 var openFontInspectorForURL = async function(url) {
   const tab = await addTab(url);
-  const {toolbox, inspector} = await openInspector();
+  const {toolbox, inspector, testActor } = await openInspector();
 
   // Call selectNode again here to force a fontinspector update since we don't
   // know if the fontinspector-updated event has been sent while the inspector
@@ -46,6 +46,7 @@ var openFontInspectorForURL = async function(url) {
 
   return {
     tab,
+    testActor,
     toolbox,
     inspector,
     view: inspector.fontinspector
@@ -101,22 +102,62 @@ function getUsedFontsEls(viewDoc) {
 }
 
 /**
- * Expand the other fonts accordion.
+ * Get the DOM element for the accordion widget that contains the fonts used to render the
+ * current element.
+ *
+ * @param  {document} viewDoc
+ * @return {DOMNode}
  */
-async function expandOtherFontsAccordion(viewDoc) {
-  info("Expanding the other fonts section");
+function getRenderedFontsAccordion(viewDoc) {
+  return viewDoc.querySelectorAll("#font-container .accordion")[0];
+}
 
-  const accordion = viewDoc.querySelector("#font-container .accordion");
+/**
+ * Get the DOM element for the accordion widget that contains the fonts used elsewhere in
+ * the document.
+ *
+ * @param  {document} viewDoc
+ * @return {DOMNode}
+ */
+function getOtherFontsAccordion(viewDoc) {
+  return viewDoc.querySelectorAll("#font-container .accordion")[1];
+}
+
+/**
+ * Expand a given accordion widget.
+ *
+ * @param  {DOMNode} accordion
+ */
+async function expandAccordion(accordion) {
   const isExpanded = () => accordion.querySelector(".fonts-list");
-
   if (isExpanded()) {
     return;
   }
 
-  const onExpanded = BrowserTestUtils.waitForCondition(isExpanded,
-                                                     "Waiting for other fonts section");
+  const onExpanded = BrowserTestUtils.waitForCondition(
+    isExpanded, "Waiting for other fonts section");
   accordion.querySelector(".theme-twisty").click();
   await onExpanded;
+}
+
+/**
+ * Expand the other fonts accordion.
+ *
+ * @param  {document} viewDoc
+ */
+async function expandOtherFontsAccordion(viewDoc) {
+  info("Expanding the other fonts section");
+  await expandAccordion(getOtherFontsAccordion(viewDoc));
+}
+
+/**
+ * Get all of the <li> elements for the fonts used to render the current element.
+ *
+ * @param  {document} viewDoc
+ * @return {Array}
+ */
+function getRenderedFontsEls(viewDoc) {
+  return getRenderedFontsAccordion(viewDoc).querySelectorAll(".fonts-list > li");
 }
 
 /**
@@ -126,7 +167,7 @@ async function expandOtherFontsAccordion(viewDoc) {
  * @return {Array}
  */
 function getOtherFontsEls(viewDoc) {
-  return viewDoc.querySelectorAll("#font-container .accordion .fonts-list > li");
+  return getOtherFontsAccordion(viewDoc).querySelectorAll(".fonts-list > li");
 }
 
 /**
@@ -163,4 +204,46 @@ function getURL(fontEl) {
  */
 function getFamilyName(fontEl) {
   return fontEl.querySelector(".font-family-name").textContent;
+}
+
+/**
+ * Get the value and unit of a CSS font property or font axis from the font editor.
+ *
+ * @param  {document} viewDoc
+ *         Host document of the font inspector panel.
+ * @param  {String} name
+ *         Font property name or axis tag
+ * @return {Object}
+ *         Object with the value and unit of the given font property or axis tag
+ *         from the corresponding input fron the font editor.
+ *         @Example:
+ *         {
+ *          value: {Number|String|null}
+ *          unit: {String|null}
+ *         }
+ */
+function getPropertyValue(viewDoc, name) {
+  const selector = `#font-editor .font-value-slider[name=${name}]`;
+  return {
+    // Ensure value input exists before querying its value
+    value: viewDoc.querySelector(selector) &&
+           parseFloat(viewDoc.querySelector(selector).value),
+    // Ensure unit dropdown exists before querying its value
+    unit: viewDoc.querySelector(selector + ` ~ .font-unit-select`) &&
+          viewDoc.querySelector(selector + ` ~ .font-unit-select`).value
+  };
+}
+
+/**
+ * Wait for a predicate to return a result.
+ *
+ * @param  {Function} condition
+ *         Invoked every 10ms for a maximum of 500 retries until it returns a truthy
+ *         value.
+ * @return {Promise}
+ *         A promise that is resolved with the result of the condition.
+ */
+async function waitFor(condition) {
+  await BrowserTestUtils.waitForCondition(condition, "waitFor", 10, 500);
+  return condition();
 }

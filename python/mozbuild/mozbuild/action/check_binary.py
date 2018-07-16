@@ -101,7 +101,7 @@ def iter_readelf_symbols(target, binary):
 def iter_readelf_dynamic(target, binary):
     for line in get_output(target['readelf'], '-d', binary):
         data = line.split(None, 2)
-        if data and data[0].startswith('0x'):
+        if data and len(data) == 3 and data[0].startswith('0x'):
             yield data[1].rstrip(')').lstrip('('), data[2]
 
 
@@ -214,8 +214,17 @@ def check_nsmodules(target, binary):
 
     symbols = sorted(symbols)
     next_addr = None
+    # MSVC linker, when doing incremental linking, adds padding when
+    # merging sections. Allow there to be more space between the NSModule
+    # symbols, as long as they are in the right order.
+    if buildconfig.substs.get('_MSC_VER') and \
+            buildconfig.substs.get('DEVELOPER_OPTIONS'):
+        sym_cmp = lambda guessed, actual: guessed <= actual
+    else:
+        sym_cmp = lambda guessed, actual: guessed == actual
+
     for addr, size, sym in symbols:
-        if next_addr is not None and next_addr != addr:
+        if next_addr is not None and not sym_cmp(next_addr, addr):
             print_symbols(symbols)
             raise RuntimeError('NSModules are not adjacent')
         next_addr = addr + size

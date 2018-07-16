@@ -16,7 +16,6 @@
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellLoadInfo.h"
 #include "nsIDocument.h"
 #include "nsIExternalProtocolHandler.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -103,10 +102,10 @@
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
-static const char *kPrefYoutubeRewrite = "plugins.rewrite_youtube_embeds";
-static const char *kPrefBlockURIs = "browser.safebrowsing.blockedURIs.enabled";
-static const char *kPrefFavorFallbackMode = "plugins.favorfallback.mode";
-static const char *kPrefFavorFallbackRules = "plugins.favorfallback.rules";
+static const char kPrefYoutubeRewrite[] = "plugins.rewrite_youtube_embeds";
+static const char kPrefBlockURIs[] = "browser.safebrowsing.blockedURIs.enabled";
+static const char kPrefFavorFallbackMode[] = "plugins.favorfallback.mode";
+static const char kPrefFavorFallbackRules[] = "plugins.favorfallback.rules";
 
 using namespace mozilla;
 using namespace mozilla::dom;

@@ -261,24 +261,12 @@ private:
   already_AddRefed<CSSValue> DoGetRight();
   already_AddRefed<CSSValue> DoGetBottom();
 
-  /* Font properties */
+  /* Color */
   already_AddRefed<CSSValue> DoGetColor();
-  already_AddRefed<CSSValue> DoGetFontFamily();
-  already_AddRefed<CSSValue> DoGetFontFeatureSettings();
-  already_AddRefed<CSSValue> DoGetFontVariationSettings();
-  already_AddRefed<CSSValue> DoGetFontLanguageOverride();
-  already_AddRefed<CSSValue> DoGetFontSize();
-  already_AddRefed<CSSValue> DoGetFontSizeAdjust();
+
+  /* Font properties */
   already_AddRefed<CSSValue> DoGetOsxFontSmoothing();
-  already_AddRefed<CSSValue> DoGetFontStretch();
-  already_AddRefed<CSSValue> DoGetFontStyle();
-  already_AddRefed<CSSValue> DoGetFontSynthesis();
   already_AddRefed<CSSValue> DoGetFontVariant();
-  already_AddRefed<CSSValue> DoGetFontVariantAlternates();
-  already_AddRefed<CSSValue> DoGetFontVariantEastAsian();
-  already_AddRefed<CSSValue> DoGetFontVariantLigatures();
-  already_AddRefed<CSSValue> DoGetFontVariantNumeric();
-  already_AddRefed<CSSValue> DoGetFontWeight();
 
   /* Grid properties */
   already_AddRefed<CSSValue> DoGetGridAutoFlow();
@@ -367,11 +355,6 @@ private:
   already_AddRefed<CSSValue> DoGetOutlineRadiusTopLeft();
   already_AddRefed<CSSValue> DoGetOutlineRadiusTopRight();
 
-  /* Content Properties */
-  already_AddRefed<CSSValue> DoGetContent();
-  already_AddRefed<CSSValue> DoGetCounterIncrement();
-  already_AddRefed<CSSValue> DoGetCounterReset();
-
   /* Quotes Properties */
   already_AddRefed<CSSValue> DoGetQuotes();
 
@@ -379,8 +362,6 @@ private:
   already_AddRefed<CSSValue> DoGetZIndex();
 
   /* List properties */
-  already_AddRefed<CSSValue> DoGetListStyleImage();
-  already_AddRefed<CSSValue> DoGetListStyleType();
   already_AddRefed<CSSValue> DoGetImageRegion();
 
   /* Text Properties */
@@ -393,7 +374,6 @@ private:
   already_AddRefed<CSSValue> DoGetTextDecorationStyle();
   already_AddRefed<CSSValue> DoGetTextEmphasisPosition();
   already_AddRefed<CSSValue> DoGetTextEmphasisStyle();
-  already_AddRefed<CSSValue> DoGetTextIndent();
   already_AddRefed<CSSValue> DoGetTextOverflow();
   already_AddRefed<CSSValue> DoGetTextShadow();
   already_AddRefed<CSSValue> DoGetLetterSpacing();
@@ -410,7 +390,6 @@ private:
   already_AddRefed<CSSValue> DoGetDisplay();
   already_AddRefed<CSSValue> DoGetContain();
   already_AddRefed<CSSValue> DoGetClip();
-  already_AddRefed<CSSValue> DoGetImageOrientation();
   already_AddRefed<CSSValue> DoGetWillChange();
   already_AddRefed<CSSValue> DoGetOverflow();
   already_AddRefed<CSSValue> DoGetOverflowY();
@@ -435,7 +414,6 @@ private:
   already_AddRefed<CSSValue> DoGetScrollSnapCoordinate();
   already_AddRefed<CSSValue> DoGetScrollbarFaceColor();
   already_AddRefed<CSSValue> DoGetScrollbarTrackColor();
-  already_AddRefed<CSSValue> DoGetShapeMargin();
   already_AddRefed<CSSValue> DoGetShapeOutside();
 
   /* User interface properties */

@@ -1711,14 +1711,6 @@ add_task(async function test_fetch() {
     folder: "taggy",
     title: "Tagged stuff",
   });
-  let smartBmk = await PlacesSyncUtils.bookmarks.insert({
-    kind: "query",
-    recordId: makeGuid(),
-    parentRecordId: "toolbar",
-    url: "place:folder=TOOLBAR",
-    query: "BookmarksToolbar",
-    title: "Bookmarks toolbar query",
-  });
 
   info("Fetch empty folder");
   {
@@ -1774,15 +1766,6 @@ add_task(async function test_fetch() {
       "Should include query-specific properties");
     equal(item.url.href, `place:tag=taggy`, "Should not rewrite outgoing tag queries");
     equal(item.folder, "taggy", "Should return tag name for tag queries");
-  }
-
-  info("Fetch smart bookmark");
-  {
-    let item = await PlacesSyncUtils.bookmarks.fetch(smartBmk.recordId);
-    deepEqual(Object.keys(item).sort(), ["recordId", "kind", "parentRecordId",
-      "url", "title", "query", "parentTitle", "dateAdded"].sort(),
-      "Should include smart bookmark-specific properties");
-    equal(item.query, "BookmarksToolbar", "Should return query name for smart bookmarks");
   }
 
   await PlacesUtils.bookmarks.eraseEverything();
@@ -2159,6 +2142,7 @@ add_task(async function test_pushChanges() {
   }
 
   info("Pull changes");
+  let totalSyncChanges = PlacesUtils.bookmarks.totalSyncChanges;
   let changes = await PlacesSyncUtils.bookmarks.pullChanges();
   {
     let actualChanges = Object.entries(changes).map(([recordId, change]) => ({
@@ -2202,6 +2186,7 @@ add_task(async function test_pushChanges() {
   }
 
   await PlacesSyncUtils.bookmarks.pushChanges(changes);
+  equal(PlacesUtils.bookmarks.totalSyncChanges, totalSyncChanges + 3);
 
   {
     let fields = await PlacesTestUtils.fetchBookmarkSyncFields(
@@ -2263,6 +2248,7 @@ add_task(async function test_changes_between_pull_and_push() {
   });
 
   info("Pull changes");
+  let totalSyncChanges = PlacesUtils.bookmarks.totalSyncChanges;
   let changes = await PlacesSyncUtils.bookmarks.pullChanges();
   Assert.equal(changes[guids.bmk].counter, 1);
   Assert.equal(changes[guids.bmk].tombstone, false);
@@ -2272,6 +2258,7 @@ add_task(async function test_changes_between_pull_and_push() {
 
   info("Push changes");
   await PlacesSyncUtils.bookmarks.pushChanges(changes);
+  equal(PlacesUtils.bookmarks.totalSyncChanges, totalSyncChanges + 2);
 
   // we should have a tombstone.
   let ts = await PlacesTestUtils.fetchSyncTombstones();

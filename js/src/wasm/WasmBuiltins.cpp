@@ -677,6 +677,12 @@ AddressOf(SymbolicAddress imm, ABIFunctionType* abiType)
       case SymbolicAddress::MemFill:
         *abiType = Args_General4;
         return FuncCast(Instance::memFill, *abiType);
+#ifdef ENABLE_WASM_GC
+      case SymbolicAddress::PostBarrier:
+        *abiType = Args_General2;
+        static_assert(sizeof(PostBarrierArg) == sizeof(uint32_t), "passed arg is a u32");
+        return FuncCast(Instance::postBarrier, *abiType);
+#endif
 #if defined(JS_CODEGEN_MIPS32)
       case SymbolicAddress::js_jit_gAtomic64Lock:
         return &js::jit::gAtomic64Lock;
@@ -755,6 +761,9 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
       case SymbolicAddress::ReportInt64JSCall:
       case SymbolicAddress::MemCopy:
       case SymbolicAddress::MemFill:
+#ifdef ENABLE_WASM_GC
+      case SymbolicAddress::PostBarrier:
+#endif
         return true;
       case SymbolicAddress::Limit:
         break;
@@ -802,8 +811,8 @@ wasm::NeedsBuiltinThunk(SymbolicAddress sym)
     _(ecmaPow, MathPow)            \
 
 #define DEFINE_UNARY_FLOAT_WRAPPER(func, _)        \
-    static float func##_uncached_f32(float x) {    \
-        return float(func##_uncached(double(x)));  \
+    static float func##_impl_f32(float x) {    \
+        return float(func##_impl(double(x)));  \
     }
 
 #define DEFINE_BINARY_FLOAT_WRAPPER(func, _)       \
@@ -851,8 +860,8 @@ PopulateTypedNatives(TypedNativeToFuncPtrMap* typedNatives)
         return false;
 
 #define ADD_UNARY_OVERLOADS(funcName, native)                                             \
-    ADD_OVERLOAD(funcName##_uncached, native, Args_Double_Double)                         \
-    ADD_OVERLOAD(funcName##_uncached_f32, native, Args_Float32_Float32)
+    ADD_OVERLOAD(funcName##_impl, native, Args_Double_Double)                         \
+    ADD_OVERLOAD(funcName##_impl_f32, native, Args_Float32_Float32)
 
 #define ADD_BINARY_OVERLOADS(funcName, native)                                            \
     ADD_OVERLOAD(funcName, native, Args_Double_DoubleDouble)                              \
@@ -1048,7 +1057,7 @@ ToBuiltinABIFunctionType(const FuncType& funcType)
     ExprType ret = funcType.ret();
 
     uint32_t abiType;
-    switch (ret) {
+    switch (ret.code()) {
       case ExprType::F32: abiType = ArgType_Float32 << RetType_Shift; break;
       case ExprType::F64: abiType = ArgType_Double << RetType_Shift; break;
       default: return Nothing();

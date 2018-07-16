@@ -90,6 +90,7 @@
 #include "nsUnicharUtils.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
+#include "nsWindowSizes.h"
 #include "mozilla/Preferences.h"
 #include "xpcpublic.h"
 #include "HTMLLegendElement.h"
@@ -282,7 +283,7 @@ nsINode::SubtreeRoot() const
   //     or mSubtreeRoot is updated in BindToTree/UnbindFromTree.
   // 2.b nsIContent nodes in a shadow tree - Are never in the document,
   //     ignore mSubtreeRoot and return the containing shadow root.
-  // 4. nsIAttribute nodes - Are never in the document, and mSubtreeRoot
+  // 4. Attr nodes - Are never in the document, and mSubtreeRoot
   //    is always 'this' (as set in nsINode's ctor).
   nsINode* node;
   if (IsInUncomposedDoc()) {
@@ -1294,7 +1295,7 @@ CheckForOutdatedParent(nsINode* aParent, nsINode* aNode, ErrorResult& aError)
     nsIGlobalObject* global = aParent->OwnerDoc()->GetScopeObject();
     MOZ_ASSERT(global);
 
-    if (js::GetGlobalForObjectCrossCompartment(existingObj) !=
+    if (JS::GetNonCCWObjectGlobal(existingObj) !=
         global->GetGlobalJSObject()) {
       JSAutoRealm ar(cx, existingObj);
       ReparentWrapper(cx, existingObj, aError);
@@ -1311,18 +1312,6 @@ ReparentWrappersInSubtree(nsIContent* aRoot)
   jsapi.Init();
 
   JSContext* cx = jsapi.cx();
-
-  nsIGlobalObject* docGlobal = aRoot->OwnerDoc()->GetScopeObject();
-  if (NS_WARN_IF(!docGlobal)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  JS::Rooted<JSObject*> rootedGlobal(cx, docGlobal->GetGlobalJSObject());
-  if (NS_WARN_IF(!rootedGlobal)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  rootedGlobal = xpc::GetXBLScope(cx, rootedGlobal);
 
   ErrorResult rv;
   JS::Rooted<JSObject*> reflector(cx);

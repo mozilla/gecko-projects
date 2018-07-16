@@ -496,10 +496,12 @@ nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(JSContext *cx)
     if (reportViolation) {
         nsAutoString fileName;
         unsigned lineNum = 0;
+        unsigned columnNum = 0;
         NS_NAMED_LITERAL_STRING(scriptSample, "call to eval() or related function blocked by CSP");
 
         JS::AutoFilename scriptFilename;
-        if (JS::DescribeScriptedCaller(cx, &scriptFilename, &lineNum)) {
+        if (JS::DescribeScriptedCaller(cx, &scriptFilename, &lineNum,
+                                       &columnNum)) {
             if (const char *file = scriptFilename.get()) {
                 CopyUTF8toUTF16(nsDependentCString(file), fileName);
             }
@@ -507,9 +509,11 @@ nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(JSContext *cx)
             MOZ_ASSERT(!JS_IsExceptionPending(cx));
         }
         csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
+                                 nullptr, // triggering element
                                  fileName,
                                  scriptSample,
                                  lineNum,
+                                 columnNum,
                                  EmptyString(),
                                  EmptyString());
     }

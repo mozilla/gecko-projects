@@ -76,6 +76,9 @@ fuzzy-if(skiaContent,1,23) == resize-reflow-001.html resize-reflow-001.ref.html
 == column-balancing-break-inside-avoid-2.html column-balancing-break-inside-avoid-2-ref.html
 fuzzy-if(Android,1,2) == combobox-page-break-inside.html combobox-page-break-inside-ref.html
 == table-nested-1308876-1.xhtml table-nested-1308876-1-ref.html
+test-pref(layout.css.contain.enabled,true) == contain-size-break-001.html contain-size-break-001-ref.html
+test-pref(layout.css.contain.enabled,true) == contain-size-break-002.html contain-size-break-002-ref.html
+test-pref(layout.css.contain.enabled,true) == contain-size-break-003.html contain-size-break-003-ref.html
 
 # Bugs
 == 272830-1.html 272830-1-ref.html
@@ -114,3 +117,5 @@ fuzzy-if(cocoaWidget,1,5000) == 745025-1.html 745025-1-ref.html
 # asserts(3) fails 1108104.html 1108104-ref.html # bug 1067755, 1135556
 == 1166147.html 1166147-ref.html
 == 1321803-1a.html 1321803-1-ref.html
+== content-url-element.html image.html
+== content-url-pseudo.html image.html

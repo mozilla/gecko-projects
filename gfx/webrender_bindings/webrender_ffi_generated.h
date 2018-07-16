@@ -93,6 +93,7 @@ enum class ImageFormat : uint32_t {
   BGRA8 = 3,
   RGBAF32 = 4,
   RG8 = 5,
+  RGBAI32 = 6,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -147,6 +148,14 @@ enum class RepeatMode : uint32_t {
   Repeat,
   Round,
   Space,
+
+  Sentinel /* this must be last for serialization purposes. */
+};
+
+enum class TelemetryProbe {
+  SceneBuildTime = 0,
+  SceneSwapTime = 1,
+  RenderTime = 2,
 
   Sentinel /* this must be last for serialization purposes. */
 };
@@ -574,18 +583,6 @@ struct BorderSide {
   }
 };
 
-using LayoutPoint = TypedPoint2D<float, LayoutPixel>;
-
-struct GradientStop {
-  float offset;
-  ColorF color;
-
-  bool operator==(const GradientStop& aOther) const {
-    return offset == aOther.offset &&
-           color == aOther.color;
-  }
-};
-
 template<typename T, typename U>
 struct TypedSideOffsets2D {
   T top;
@@ -604,6 +601,18 @@ struct TypedSideOffsets2D {
 // The default side offset type with no unit.
 template<typename T>
 using SideOffsets2D = TypedSideOffsets2D<T, UnknownUnit>;
+
+using LayoutPoint = TypedPoint2D<float, LayoutPixel>;
+
+struct GradientStop {
+  float offset;
+  ColorF color;
+
+  bool operator==(const GradientStop& aOther) const {
+    return offset == aOther.offset &&
+           color == aOther.color;
+  }
+};
 
 struct Shadow {
   LayoutVector2D offset;
@@ -879,6 +888,14 @@ struct ColorU {
   }
 };
 
+struct SyntheticItalics {
+  int16_t angle;
+
+  bool operator==(const SyntheticItalics& aOther) const {
+    return angle == aOther.angle;
+  }
+};
+
 struct FontInstanceOptions {
   FontRenderMode render_mode;
   FontInstanceFlags flags;
@@ -886,11 +903,13 @@ struct FontInstanceOptions {
   // the text will be rendered with bg_color.r/g/b as an opaque estimated
   // background color.
   ColorU bg_color;
+  SyntheticItalics synthetic_italics;
 
   bool operator==(const FontInstanceOptions& aOther) const {
     return render_mode == aOther.render_mode &&
            flags == aOther.flags &&
-           bg_color == aOther.bg_color;
+           bg_color == aOther.bg_color &&
+           synthetic_italics == aOther.synthetic_italics;
   }
 };
 
@@ -1003,6 +1022,9 @@ extern bool is_in_compositor_thread();
 extern bool is_in_main_thread();
 
 extern bool is_in_render_thread();
+
+extern void record_telemetry_time(TelemetryProbe aProbe,
+                                  uint64_t aTimeNs);
 
 WR_INLINE
 bool remove_program_binary_disk_cache(const nsAString *aProfPath)
@@ -1168,6 +1190,9 @@ void wr_dp_push_border_gradient(WrState *aState,
                                 LayoutRect aClip,
                                 bool aIsBackfaceVisible,
                                 BorderWidths aWidths,
+                                uint32_t aWidth,
+                                uint32_t aHeight,
+                                SideOffsets2D<uint32_t> aSlice,
                                 LayoutPoint aStartPoint,
                                 LayoutPoint aEndPoint,
                                 const GradientStop *aStops,
@@ -1556,6 +1581,16 @@ void wr_resource_updates_update_external_image(Transaction *aTxn,
                                                WrExternalImageId aExternalImageId,
                                                WrExternalImageBufferType aImageType,
                                                uint8_t aChannelIndex)
+WR_FUNC;
+
+WR_INLINE
+void wr_resource_updates_update_external_image_with_dirty_rect(Transaction *aTxn,
+                                                               WrImageKey aKey,
+                                                               const WrImageDescriptor *aDescriptor,
+                                                               WrExternalImageId aExternalImageId,
+                                                               WrExternalImageBufferType aImageType,
+                                                               uint8_t aChannelIndex,
+                                                               DeviceUintRect aDirtyRect)
 WR_FUNC;
 
 WR_INLINE

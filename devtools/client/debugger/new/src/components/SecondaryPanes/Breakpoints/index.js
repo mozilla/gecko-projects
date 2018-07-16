@@ -77,13 +77,13 @@ class Breakpoints extends _react.Component {
       breakpoints
     }) => [_react2.default.createElement("div", {
       className: "breakpoint-heading",
-      title: source.url,
+      title: (0, _source.getRawSourceURL)(source.url),
       key: source.url,
       onClick: () => this.props.selectSource(source.id)
     }, _react2.default.createElement(_SourceIcon2.default, {
       source: source,
       shouldHide: icon => ["file", "javascript"].includes(icon)
-    }), (0, _source.getFilename)(source)), ...breakpoints.map(breakpoint => _react2.default.createElement(_Breakpoint2.default, {
+    }), (0, _source.getTruncatedFileName)(source)), ...breakpoints.map(breakpoint => _react2.default.createElement(_Breakpoint2.default, {
       breakpoint: breakpoint,
       source: source,
       key: (0, _breakpoint.makeLocationId)(breakpoint.location)
@@ -103,4 +103,7 @@ const mapStateToProps = state => ({
   selectedSource: (0, _selectors.getSelectedSource)(state)
 });
 
-exports.default = (0, _reactRedux.connect)(mapStateToProps, _actions2.default)(Breakpoints);
+exports.default = (0, _reactRedux.connect)(mapStateToProps, {
+  pauseOnExceptions: _actions2.default.pauseOnExceptions,
+  selectSource: _actions2.default.selectSource
+})(Breakpoints);

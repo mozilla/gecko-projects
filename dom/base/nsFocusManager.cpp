@@ -48,6 +48,7 @@
 
 #include "mozilla/ContentEvents.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLSlotElement.h"
 #include "mozilla/dom/Text.h"
@@ -3276,6 +3277,8 @@ nsFocusManager::GetNextTabbableContentInScope(nsIContent* aOwner,
       if (iterContent->IsInNativeAnonymousSubtree() &&
           iterContent->GetPrimaryFrame()) {
         iterContent->GetPrimaryFrame()->IsFocusable(&tabIndex);
+      } else if (IsHostOrSlot(iterContent)) {
+        tabIndex = HostOrSlotTabIndexValue(iterContent);
       } else {
         iterContent->IsFocusable(&tabIndex);
       }
@@ -3415,7 +3418,11 @@ nsFocusManager::GetNextTabbableContentInAncestorScopes(
     MOZ_ASSERT(owner, "focus navigation scope owner not in document");
 
     int32_t tabIndex = 0;
-    startContent->IsFocusable(&tabIndex);
+    if (IsHostOrSlot(startContent)) {
+      tabIndex = HostOrSlotTabIndexValue(startContent);
+    } else {
+      startContent->IsFocusable(&tabIndex);
+    }
     nsIContent* contentToFocus =
       GetNextTabbableContentInScope(owner, startContent, aOriginalStartContent,
                                     aForward, tabIndex, aIgnoreTabIndex,
@@ -3480,7 +3487,8 @@ nsFocusManager::GetNextTabbableContent(nsIPresShell* aPresShell,
     // (i.e. aStartContent is already in shadow DOM),
     // search from scope including aStartContent
     nsIContent* rootElement = aRootContent->OwnerDoc()->GetRootElement();
-    if (rootElement != FindOwner(aStartContent)) {
+    nsIContent* owner = FindOwner(aStartContent);
+    if (owner && rootElement != owner) {
       nsIContent* contentToFocus =
         GetNextTabbableContentInAncestorScopes(&aStartContent,
                                                aOriginalStartContent,
@@ -3857,12 +3865,12 @@ nsFocusManager::GetNextTabbableMapArea(bool aForward,
                                        Element* aImageContent,
                                        nsIContent* aStartContent)
 {
-  nsAutoString useMap;
-  aImageContent->GetAttr(kNameSpaceID_None, nsGkAtoms::usemap, useMap);
+  if (aImageContent->IsInComposedDoc()) {
+    HTMLImageElement* imgElement = HTMLImageElement::FromNode(aImageContent);
+    // The caller should check the element type, so we can assert here.
+    MOZ_ASSERT(imgElement);
 
-  nsCOMPtr<nsIDocument> doc = aImageContent->GetComposedDoc();
-  if (doc) {
-    nsCOMPtr<nsIContent> mapContent = doc->FindImageMap(useMap);
+    nsCOMPtr<nsIContent> mapContent = imgElement->FindImageMap();
     if (!mapContent)
       return nullptr;
     uint32_t count = mapContent->GetChildCount();

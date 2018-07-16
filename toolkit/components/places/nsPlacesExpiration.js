@@ -536,7 +536,6 @@ nsPlacesExpiration.prototype = {
     this.status = STATUS.CLEAN;
   },
 
-  onVisits() {},
   onTitleChanged() {},
   onDeleteURI() {},
   onPageChanged() {},
@@ -603,7 +602,7 @@ nsPlacesExpiration.prototype = {
       if (wholeEntry) {
         notify(observers, "onDeleteURI", [uri, guid, reason]);
       } else {
-        notify(observers, "onDeleteVisits", [uri, visitDate, guid, reason, 0]);
+        notify(observers, "onDeleteVisits", [uri, visitDate > 0, guid, reason, 0]);
       }
     }
   },

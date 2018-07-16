@@ -9,13 +9,15 @@
 
 #include <stdint.h>
 
+#include "mozilla/ArrayUtils.h"
+
 namespace mozilla {
 
-template <typename CharType>
+template <typename StrType>
 struct DllBlockInfoT {
   // The name of the DLL -- in LOWERCASE!  It will be compared to
   // a lowercase version of the DLL name only.
-  const CharType* name;
+  StrType name;
 
   // If maxVersion is ALL_VERSIONS, we'll block all versions of this
   // dll.  Otherwise, we'll block all versions less than or equal to
@@ -53,6 +55,15 @@ struct DllBlockInfoT {
 
 // Convert the 4 (decimal) components of a DLL version number into a
 // single unsigned long long, as needed by the blocklist
+#if defined(_MSC_VER) && !defined(__clang__)
+
+// MSVC does not properly handle the constexpr MAKE_VERSION, so we use a macro
+// instead (ugh).
+#define MAKE_VERSION(a,b,c,d) \
+  ((a##ULL << 48) + (b##ULL << 32) + (c##ULL << 16) + d##ULL)
+
+#else
+
 static inline constexpr uint64_t
 MAKE_VERSION(uint16_t a, uint16_t b, uint16_t c, uint16_t d)
 {
@@ -62,22 +73,27 @@ MAKE_VERSION(uint16_t a, uint16_t b, uint16_t c, uint16_t d)
          static_cast<uint64_t>(d);
 }
 
-#if !defined(DLL_BLOCKLIST_CHAR_TYPE)
-#error "You must define DLL_BLOCKLIST_CHAR_TYPE"
-#endif // !defined(DLL_BLOCKLIST_CHAR_TYPE)
+#endif
+
+#if !defined(DLL_BLOCKLIST_STRING_TYPE)
+#error "You must define DLL_BLOCKLIST_STRING_TYPE"
+#endif // !defined(DLL_BLOCKLIST_STRING_TYPE)
 
 #define DLL_BLOCKLIST_DEFINITIONS_BEGIN \
-  using DllBlockInfo = mozilla::DllBlockInfoT<DLL_BLOCKLIST_CHAR_TYPE>; \
+  using DllBlockInfo = mozilla::DllBlockInfoT<DLL_BLOCKLIST_STRING_TYPE>; \
   static const DllBlockInfo gWindowsDllBlocklist[] = {
 
 #define ALL_VERSIONS DllBlockInfo::ALL_VERSIONS
 #define UNVERSIONED DllBlockInfo::UNVERSIONED
 
 #define DLL_BLOCKLIST_DEFINITIONS_END \
-    {nullptr, 0} \
+    {} \
   };
 
 #define DECLARE_POINTER_TO_FIRST_DLL_BLOCKLIST_ENTRY(name) \
   const DllBlockInfo* name = &gWindowsDllBlocklist[0]
+
+#define DECLARE_POINTER_TO_LAST_DLL_BLOCKLIST_ENTRY(name) \
+  const DllBlockInfo* name = &gWindowsDllBlocklist[mozilla::ArrayLength(gWindowsDllBlocklist) - 1]
 
 #endif // mozilla_WindowsDllBlocklistCommon_h

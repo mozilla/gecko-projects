@@ -486,8 +486,11 @@ class AddonInternal {
 
     // Only extensions and dictionaries can be compatible by default; themes
     // and language packs always use strict compatibility checking.
+    // Dictionaries are compatible by default unless requested by the dictinary.
     if (this.type in COMPATIBLE_BY_DEFAULT_TYPES &&
-        !AddonManager.strictCompatibility && !this.strictCompatibility) {
+        !this.strictCompatibility &&
+        (!AddonManager.strictCompatibility ||
+         this.type == "webextension-dictionary")) {
 
       // The repository can specify compatibility overrides.
       // Note: For now, only blacklisting is supported by overrides.
@@ -1602,7 +1605,7 @@ this.XPIDatabase = {
    * @param {string} aType
    *        The type of the newly enabled add-on
    */
-  addonChanged(aId, aType) {
+  async addonChanged(aId, aType) {
     // We only care about themes in this provider
     if (!isTheme(aType))
       return;
@@ -1610,7 +1613,7 @@ this.XPIDatabase = {
     let addons = this.getAddonsByType("webextension-theme");
     for (let theme of addons) {
       if (theme.visible && theme.id != aId)
-        this.updateAddonDisabledState(theme, true, undefined, true);
+        await this.updateAddonDisabledState(theme, true, undefined, true);
     }
 
     if (!aId && (!LightweightThemeManager.currentTheme ||

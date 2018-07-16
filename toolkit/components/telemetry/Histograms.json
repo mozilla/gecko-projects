@@ -205,14 +205,6 @@
     "n_values": 21,
     "description": "Maximum number of concurrent threads reached during a given download session"
   },
-  "BLOCKLIST_SYNC_FILE_LOAD": {
-    "record_in_processes": ["main", "content"],
-    "bug_numbers": [1439405],
-    "alert_emails": ["gijs@mozilla.com"],
-    "expires_in_version": "64",
-    "kind": "boolean",
-    "description": "Whether blocklist.xml was loaded synchronously. True means it was loaded synchronously, false means it was preloaded asynchronously."
-  },
   "CHECKERBOARD_DURATION": {
     "record_in_processes": ["main", "content", "gpu"],
     "alert_emails": ["kgupta@mozilla.com"],
@@ -2473,6 +2465,14 @@
     "description": "Upgrading display content Channel Disposition",
     "labels": ["cancel", "disk", "netOk", "netEarlyFail", "netLateFail"]
   },
+  "HTTP_CHANNEL_ONSTART_SUCCESS" : {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "Successfully started HTTP channels",
+    "bug_numbers": [1473333],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
+  },
   "HTTP_CONNECTION_ENTRY_CACHE_HIT_1" : {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -3255,12 +3255,24 @@
     "n_buckets": 50,
     "description": "Time for a completed native name resolution (msec)"
   },
-  "DNS_TRR_RACE": {
+  "DNS_NATIVE_QUEUING": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "releaseChannelCollection": "opt-out",
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "bug_numbers": [1470215],
+    "n_buckets": 50,
+    "description": "Time in resolve queue waiting to getaddrinfo (msec)"
+  },
+  "DNS_TRR_RACE2": {
     "record_in_processes": ["main"],
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
     "expires_in_version": "never",
     "kind": "categorical",
-    "labels": ["TRRFasterBy50", "TRRFaster", "NativeFaster", "NativeFasterBy50"],
+    "labels": ["TRRFasterBy100", "TRRFasterBy50", "TRRFaster", "NativeFaster", "NativeFasterBy50",
+               "NativeFasterBy100"],
     "bug_numbers": [1434852],
     "description": "DNS: TRR parallel resolve racing results"
   },
@@ -3272,6 +3284,23 @@
     "labels": ["BothWorked", "NativeWorked", "TRRWorked", "BothFailed"],
     "bug_numbers": [1460589],
     "description": "DNS: success distribution when both native and TRR were used"
+  },
+  "DNS_TRR_FIRST": {
+    "record_in_processes": ["main"],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": ["TRRWorked", "NativeFallback", "BothFailed"],
+    "bug_numbers": [1472659],
+    "description": "TRR-first mode distribution. 0=Worked, 1=fell back to native, 2=both failed"
+  },
+  "DNS_TRR_DISABLED": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "description": "Resolve success rate when in TRR-first and called TRR-disabled (fall-back mode)",
+    "bug_numbers": [1472659],
+    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
   },
   "DNS_TRR_BLACKLISTED": {
     "record_in_processes": ["main"],
@@ -3356,6 +3385,16 @@
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
     "description": "Time spent in building displaylists in milliseconds",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50
+  },
+  "PAINT_BUILD_LAYERS_TIME" : {
+    "record_in_processes": ["content"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com","mwoodrow@mozilla.com"],
+    "bug_numbers": [1473908],
+    "expires_in_version": "never",
+    "description": "Time spent in building layers in milliseconds",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50
@@ -4790,7 +4829,7 @@
   },
   "PLACES_DATABASE_CORRUPTION_HANDLING_STAGE": {
     "record_in_processes": ["main"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "mbanner@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 6,
@@ -4810,7 +4849,7 @@
   },
   "PLACES_MOST_RECENT_EXPIRED_VISIT_DAYS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "mbanner@mozilla.com"],
     "expires_in_version": "never",
     "kind": "linear",
     "low": 30,
@@ -6563,7 +6602,7 @@
   },
   "FX_URLBAR_SELECTED_RESULT_INDEX": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 17,
@@ -6573,7 +6612,7 @@
   },
   "FX_URLBAR_SELECTED_RESULT_TYPE": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 14,
@@ -6583,7 +6622,7 @@
   },
   "FX_URLBAR_SELECTED_RESULT_INDEX_BY_TYPE": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 14,
@@ -6594,7 +6633,7 @@
   },
   "FX_URLBAR_SELECTED_RESULT_METHOD": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["dzeber@mozilla.com"],
+    "alert_emails": ["dzeber@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "releaseChannelCollection": "opt-out",
     "kind": "categorical",
@@ -6953,26 +6992,6 @@
     "high": 300000,
     "n_buckets": 20,
     "description": "Time (ms) it takes for checking if the pending pings are over-quota"
-  },
-  "TELEMETRY_PENDING_LOAD_MS": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 2000,
-    "n_buckets": 20,
-    "bug_numbers": [1033860],
-    "description": "Time (ms) it takes for loading pending pings from disk"
-  },
-  "TELEMETRY_ARCHIVE_LOAD_MS": {
-    "record_in_processes": ["main"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com", "chutten@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 2000,
-    "n_buckets": 20,
-    "bug_numbers": [1033860],
-    "description": "Time (ms) it takes for loading archived pings from disk"
   },
   "TELEMETRY_SUCCESSFUL_SEND_PINGS_SIZE_KB": {
     "record_in_processes": ["main"],
@@ -9558,6 +9577,17 @@
     "releaseChannelCollection": "opt-out",
     "description": "How long has the platform accessibility been active (seconds) in accessibility panel."
   },
+  "DEVTOOLS_APPLICATION_TIME_ACTIVE_SECONDS": {
+    "record_in_processes": ["main", "content"],
+    "expires_in_version": "66",
+    "kind": "exponential",
+    "high": 86400,
+    "n_buckets": 100,
+    "bug_numbers": [1451734],
+    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jdescottes@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "description": "How long has the application panel been active (seconds)."
+  },
   "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
     "expires_in_version": "never",
@@ -11456,7 +11486,7 @@
   },
   "FX_SANITIZE_TOTAL": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11465,7 +11495,7 @@
   },
   "FX_SANITIZE_CACHE": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11474,7 +11504,7 @@
   },
   "FX_SANITIZE_COOKIES_2": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11483,7 +11513,7 @@
   },
   "FX_SANITIZE_HISTORY": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11492,7 +11522,7 @@
   },
   "FX_SANITIZE_FORMDATA": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11501,7 +11531,7 @@
   },
   "FX_SANITIZE_DOWNLOADS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11510,7 +11540,7 @@
   },
   "FX_SANITIZE_SESSIONS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11519,7 +11549,7 @@
   },
   "FX_SANITIZE_SITESETTINGS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -11528,7 +11558,7 @@
   },
   "FX_SANITIZE_OPENWINDOWS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["firefox-dev@mozilla.org"],
+    "alert_emails": ["mbonardo@mozilla.com", "jhofmann@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
@@ -12205,24 +12235,6 @@
     "releaseChannelCollection": "opt-out",
     "description": "Graphics Crash Reason (...)"
   },
-  "TOTAL_SCROLL_Y": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["hkirschner@mozilla.com"],
-    "bug_numbers": [1297867],
-    "expires_in_version": "58",
-    "kind": "count",
-    "description": "Count of the total number of CSS pixels scrolled up or down in the vertical axis of the root frame of all the pages visited in a subsession. This doesn't include any scrolling of nested scroll frames such as inputs, iframes, or scrollable divs."
-  },
-  "PAGE_MAX_SCROLL_Y": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["hkirschner@mozilla.com"],
-    "bug_numbers": [1312881],
-    "expires_in_version": "58",
-    "kind": "exponential",
-    "high": 100000,
-    "n_buckets": 50,
-    "description": "Maximum distance in CSS pixels a user scrolls down the vertical axis of the root frame of a page. This doesn't include any scrolling of nested scroll frames such as inputs, iframes, or scrollable divs."
-  },
   "WEB_NOTIFICATION_CLICKED": {
     "record_in_processes": ["main", "content"],
     "releaseChannelCollection": "opt-out",
@@ -12815,6 +12827,16 @@
     "high": 1000,
     "n_buckets": 50,
     "description": "Time spent in the paint pipeline for content in milliseconds."
+  },
+  "CONTENT_FRAME_TIME": {
+    "record_in_processes": ["main", "gpu"],
+    "alert_emails": ["rhunt@mozilla.com","gfx-telemetry-alerts@mozilla.com"],
+    "bug_numbers": [1470528],
+    "expires_in_version": "66",
+    "kind": "exponential",
+    "high": 5000,
+    "n_buckets": 50,
+    "description": "The time, in percentage of a vsync interval, spent from beginning a paint in the content process until that frame is presented in the compositor."
   },
   "CONTENT_LARGE_PAINT_PHASE_WEIGHT": {
     "record_in_processes": ["main", "content"],
@@ -13796,25 +13818,25 @@
     "releaseChannelCollection": "opt-out",
     "description": "Number of HTML editors whose inline table editing UI is actually used by users."
   },
-  "ACTIVE_DOCGROUPS_PER_TABGROUP": {
+  "ACTIVE_HTTP_DOCGROUPS_PER_TABGROUP": {
     "record_in_processes": ["content"],
     "alert_emails": ["farre@mozilla.com"],
-    "bug_numbers": [1441972],
+    "bug_numbers": [1441972, 1468843],
     "expires_in_version": "67",
     "kind": "exponential",
     "high": 50,
     "n_buckets": 20,
-    "description": "Number of active doc groups per tab group. Collected at the point when the top level document of the tab group is unloaded."
+    "description": "Number of active http:// and https:// doc groups per tab group. Collected at the point when the top level document of the tab group is unloaded."
   },
-  "TOTAL_DOCGROUPS_PER_TABGROUP": {
+  "TOTAL_HTTP_DOCGROUPS_PER_TABGROUP": {
     "record_in_processes": ["content"],
     "alert_emails": ["farre@mozilla.com"],
-    "bug_numbers": [1441972],
+    "bug_numbers": [1441972, 1468843],
     "expires_in_version": "67",
     "kind": "exponential",
     "high": 50,
     "n_buckets": 20,
-    "description": "Total number of doc groups per tab group, including docgroups fully in bfcache. Collected at the point when the top level document of the tab group is unloaded."
+    "description": "Total number of http:// and https:// doc groups per tab group, including docgroups fully in bfcache. Collected at the point when the top level document of the tab group is unloaded."
   },
   "HIDDEN_VIEWPORT_OVERFLOW_TYPE": {
     "record_in_processes": ["content"],
@@ -13825,5 +13847,35 @@
     "releaseChannelCollection": "opt-out",
     "labels": ["NoOverflow", "Desktop", "ButNotMinScaleSize", "MinScaleSize"],
     "description": "How common are different types of out-of-reach viewport overflow?"
+  },
+  "WR_SCENEBUILD_TIME": {
+    "record_in_processes": ["main", "gpu"],
+    "alert_emails": ["kgupta@mozilla.com"],
+    "bug_numbers": [1470901],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "description": "WebRender scene build time in milliseconds"
+  },
+  "WR_SCENESWAP_TIME": {
+    "record_in_processes": ["main", "gpu"],
+    "alert_emails": ["kgupta@mozilla.com"],
+    "bug_numbers": [1470901],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "description": "WebRender scene swap time in milliseconds"
+  },
+  "WR_RENDER_TIME": {
+    "record_in_processes": ["main", "gpu"],
+    "alert_emails": ["kgupta@mozilla.com"],
+    "bug_numbers": [1470901],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "description": "WebRender render time in milliseconds"
   }
 }

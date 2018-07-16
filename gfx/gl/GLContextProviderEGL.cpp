@@ -176,6 +176,12 @@ DestroySurface(EGLSurface oldSurface) {
 static EGLSurface
 CreateFallbackSurface(const EGLConfig& config)
 {
+    nsCString discardFailureId;
+    if (!GLLibraryEGL::EnsureInitialized(false, &discardFailureId)) {
+        gfxCriticalNote << "Failed to load EGL library 3!";
+        return EGL_NO_SURFACE;
+    }
+
     auto* egl = gl::GLLibraryEGL::Get();
 
     if (egl->IsExtensionSupported(GLLibraryEGL::KHR_surfaceless_context)) {
@@ -558,6 +564,15 @@ GLContextEGL::CreateGLContext(CreateContextFlags flags,
         required_attribs.push_back(3);
     } else {
         required_attribs.push_back(2);
+    }
+
+    const auto debugFlags = GLContext::ChooseDebugFlags(flags);
+    if (!debugFlags &&
+        flags & CreateContextFlags::NO_VALIDATION &&
+        egl->IsExtensionSupported(GLLibraryEGL::KHR_create_context_no_error))
+    {
+        required_attribs.push_back(LOCAL_EGL_CONTEXT_OPENGL_NO_ERROR_KHR);
+        required_attribs.push_back(LOCAL_EGL_TRUE);
     }
 
     std::vector<EGLint> robustness_attribs;

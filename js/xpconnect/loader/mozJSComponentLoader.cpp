@@ -534,7 +534,7 @@ mozJSComponentLoader::FindTargetObject(JSContext* aCx,
     // instead. This is needed when calling the subscript loader within a frame
     // script, since it the FrameScript NSVO will have been found.
     if (!aTargetObject ||
-        !IsLoaderGlobal(js::GetGlobalForObjectCrossCompartment(aTargetObject))) {
+        !IsLoaderGlobal(JS::GetNonCCWObjectGlobal(aTargetObject))) {
         aTargetObject.set(CurrentGlobalOrNull(aCx));
     }
 }
@@ -635,7 +635,7 @@ mozJSComponentLoader::ReuseGlobal(nsIURI* aURI)
     // which sets a per-compartment flag that disables certain
     // security wrappers, so don't use the shared global for them
     // to avoid breaking tests.
-    if (FindInReadable(NS_LITERAL_CSTRING("chrome://specialpowers/"), spec)) {
+    if (FindInReadable(NS_LITERAL_CSTRING("resource://specialpowers/"), spec)) {
         return false;
     }
 

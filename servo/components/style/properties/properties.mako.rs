@@ -178,7 +178,6 @@ pub mod shorthands {
         data.declare_shorthand(
             "all",
             logical_longhands + other_longhands,
-            gecko_pref="layout.css.all-shorthand.enabled",
             spec="https://drafts.csswg.org/css-cascade-3/#all-shorthand"
         )
     %>
@@ -411,6 +410,7 @@ pub struct NonCustomPropertyId(usize);
 
 impl NonCustomPropertyId {
     #[cfg(feature = "gecko")]
+    #[inline]
     fn to_nscsspropertyid(self) -> nsCSSPropertyID {
         static MAP: [nsCSSPropertyID; ${len(data.longhands) + len(data.shorthands) + len(data.all_aliases())}] = [
             % for property in data.longhands + data.shorthands + data.all_aliases():
@@ -946,25 +946,17 @@ impl LonghandId {
     }
 
     /// Returns whether this property is animatable.
+    #[inline]
     pub fn is_animatable(self) -> bool {
-        match self {
-            % for property in data.longhands:
-            LonghandId::${property.camel_case} => {
-                ${str(property.animatable).lower()}
-            }
-            % endfor
-        }
+        ${static_longhand_id_set("ANIMATABLE", lambda p: p.animatable)}
+        ANIMATABLE.contains(self)
     }
 
     /// Returns whether this property is animatable in a discrete way.
+    #[inline]
     pub fn is_discrete_animatable(self) -> bool {
-        match self {
-            % for property in data.longhands:
-            LonghandId::${property.camel_case} => {
-                ${str(property.animation_value_type == "discrete").lower()}
-            }
-            % endfor
-        }
+        ${static_longhand_id_set("DISCRETE_ANIMATABLE", lambda p: p.animation_value_type == "discrete")}
+        DISCRETE_ANIMATABLE.contains(self)
     }
 
     /// Converts from a LonghandId to an adequate nsCSSPropertyID.
@@ -985,20 +977,30 @@ impl LonghandId {
         }
     }
 
-    /// If this is a logical property, return the corresponding physical one in the given writing mode.
+    /// Return whether this property is logical.
+    #[inline]
+    pub fn is_logical(&self) -> bool {
+        ${static_longhand_id_set("LOGICAL", lambda p: p.logical)}
+        LOGICAL.contains(*self)
+    }
+
+    /// If this is a logical property, return the corresponding physical one in
+    /// the given writing mode.
+    ///
     /// Otherwise, return unchanged.
+    #[inline]
     pub fn to_physical(&self, wm: WritingMode) -> Self {
         match *self {
             % for property in data.longhands:
-                % if property.logical:
-                    LonghandId::${property.camel_case} => {
-                        <%helpers:logical_setter_helper name="${property.name}">
-                            <%def name="inner(physical_ident)">
-                                LonghandId::${to_camel_case(physical_ident)}
-                            </%def>
-                        </%helpers:logical_setter_helper>
-                    }
-                % endif
+            % if property.logical:
+                LonghandId::${property.camel_case} => {
+                    <%helpers:logical_setter_helper name="${property.name}">
+                    <%def name="inner(physical_ident)">
+                        LonghandId::${to_camel_case(physical_ident)}
+                    </%def>
+                    </%helpers:logical_setter_helper>
+                }
+            % endif
             % endfor
             _ => *self
         }
@@ -1488,7 +1490,7 @@ impl UnparsedValue {
             PropertyDeclaration::CSSWideKeyword(WideKeywordDeclaration {
                 id: longhand_id,
                 keyword,
-        })
+            })
         })
     }
 }
@@ -1711,6 +1713,9 @@ impl PropertyId {
     }
 
     /// Returns a property id from Gecko's nsCSSPropertyID.
+    ///
+    /// TODO(emilio): We should be able to make this a single integer cast to
+    /// `NonCustomPropertyId`.
     #[cfg(feature = "gecko")]
     #[allow(non_upper_case_globals)]
     pub fn from_nscsspropertyid(id: nsCSSPropertyID) -> Result<Self, ()> {
@@ -1934,14 +1939,15 @@ impl PropertyDeclaration {
     }
 
     /// Returns whether or not the property is set by a system font
-    #[cfg(feature = "gecko")]
     pub fn get_system(&self) -> Option<SystemFont> {
         match *self {
+            % if product == "gecko":
             % for prop in SYSTEM_FONT_LONGHANDS:
                 PropertyDeclaration::${to_camel_case(prop)}(ref prop) => {
                     prop.get_system()
                 }
             % endfor
+            % endif
             _ => None,
         }
     }
@@ -1952,12 +1958,6 @@ impl PropertyDeclaration {
             PropertyDeclaration::LineHeight(LineHeight::Normal) => true,
             _ => false
         }
-    }
-
-    #[cfg(feature = "servo")]
-    /// Dummy method to avoid cfg()s
-    pub fn get_system(&self) -> Option<()> {
-        None
     }
 
     /// Returns whether the declaration may be serialized as part of a shorthand.
@@ -2220,6 +2220,49 @@ enum AllShorthand {
     NotSet,
     CSSWideKeyword(CSSWideKeyword),
     WithVariables(Arc<UnparsedValue>)
+}
+
+impl AllShorthand {
+    /// Iterates property declarations from the given all shorthand value.
+    #[inline]
+    fn declarations(&self) -> AllShorthandDeclarationIterator {
+        AllShorthandDeclarationIterator {
+            all_shorthand: self,
+            longhands: ShorthandId::All.longhands(),
+        }
+    }
+}
+
+struct AllShorthandDeclarationIterator<'a> {
+    all_shorthand: &'a AllShorthand,
+    longhands: NonCustomPropertyIterator<LonghandId>,
+}
+
+impl<'a> Iterator for AllShorthandDeclarationIterator<'a> {
+    type Item = PropertyDeclaration;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match *self.all_shorthand {
+            AllShorthand::NotSet => None,
+            AllShorthand::CSSWideKeyword(ref keyword) => {
+                Some(PropertyDeclaration::CSSWideKeyword(
+                    WideKeywordDeclaration {
+                        id: self.longhands.next()?,
+                        keyword: *keyword
+                    }
+                ))
+            }
+            AllShorthand::WithVariables(ref unparsed) => {
+                Some(PropertyDeclaration::WithVariables(
+                    VariableDeclaration {
+                        id: self.longhands.next()?,
+                        value: unparsed.clone()
+                    }
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(feature = "gecko")]
@@ -2612,6 +2655,22 @@ impl ComputedValues {
         self.custom_properties.as_ref()
     }
 
+% for prop in data.longhands:
+    /// Gets the computed value of a given property.
+    #[inline(always)]
+    #[allow(non_snake_case)]
+    pub fn clone_${prop.ident}(
+        &self,
+    ) -> longhands::${prop.ident}::computed_value::T {
+        self.get_${prop.style_struct.ident.strip("_")}()
+        % if prop.logical:
+            .clone_${prop.ident}(self.writing_mode)
+        % else:
+            .clone_${prop.ident}()
+        % endif
+    }
+% endfor
+
     /// Writes the value of the given longhand as a string in `dest`.
     ///
     /// Note that the value will usually be the computed value, except for
@@ -2632,20 +2691,10 @@ impl ComputedValues {
         match property_id {
             % for prop in data.longhands:
             LonghandId::${prop.camel_case} => {
-                let style_struct =
-                    self.get_${prop.style_struct.ident.strip("_")}();
-                let value =
-                    style_struct
-                    % if prop.logical:
-                    .clone_${prop.ident}(self.writing_mode);
-                    % else:
-                    .clone_${prop.ident}();
-                    % endif
-
+                let value = self.clone_${prop.ident}();
                 % if prop.predefined_type == "Color":
                 let value = self.resolve_color(value);
                 % endif
-
                 value.to_css(dest)
             }
             % endfor
@@ -2671,7 +2720,6 @@ impl ComputedValues {
     /// Create a new refcounted `ComputedValues`
     pub fn new(
         _: &Device,
-        _: Option<<&ComputedValues>,
         _: Option<<&PseudoElement>,
         custom_properties: Option<Arc<::custom_properties::CustomPropertiesMap>>,
         writing_mode: WritingMode,
@@ -3079,10 +3127,6 @@ pub struct StyleBuilder<'a> {
     /// The style we're getting reset structs from.
     reset_style: &'a ComputedValues,
 
-    /// The style we're inheriting from explicitly, or none if we're the root of
-    /// a subtree.
-    parent_style: Option<<&'a ComputedValues>,
-
     /// The rule node representing the ordered list of rules matched for this
     /// node.
     pub rules: Option<StrongRuleNode>,
@@ -3150,7 +3194,6 @@ impl<'a> StyleBuilder<'a> {
 
         StyleBuilder {
             device,
-            parent_style,
             inherited_style,
             inherited_style_ignoring_first_line,
             reset_style,
@@ -3194,7 +3237,6 @@ impl<'a> StyleBuilder<'a> {
                       parent_style.unwrap().pseudo() != Some(PseudoElement::FirstLine));
         StyleBuilder {
             device,
-            parent_style,
             inherited_style,
             // None of our callers pass in ::first-line parent styles.
             inherited_style_ignoring_first_line: inherited_style,
@@ -3436,7 +3478,6 @@ impl<'a> StyleBuilder<'a> {
     pub fn build(self) -> Arc<ComputedValues> {
         ComputedValues::new(
             self.device,
-            self.parent_style,
             self.pseudo,
             self.custom_properties,
             self.writing_mode,
@@ -3762,14 +3803,6 @@ where
                 PropertyDeclarationId::Custom(..) => continue,
             };
 
-            // Only a few properties are allowed to depend on the visited state
-            // of links.  When cascading visited styles, we can save time by
-            // only processing these properties.
-            if flags.contains(CascadeFlags::VISITED_DEPENDENT_ONLY) &&
-               !longhand_id.is_visited_dependent() {
-                continue
-            }
-
             if !apply_reset && !longhand_id.inherited() {
                 continue;
             }
@@ -3786,6 +3819,14 @@ where
             <% maybe_to_physical = ".to_physical(writing_mode)" if category_to_cascade_now != "early" else "" %>
             let physical_longhand_id = longhand_id ${maybe_to_physical};
             if seen.contains(physical_longhand_id) {
+                continue
+            }
+
+            // Only a few properties are allowed to depend on the visited state
+            // of links.  When cascading visited styles, we can save time by
+            // only processing these properties.
+            if flags.contains(CascadeFlags::VISITED_DEPENDENT_ONLY) &&
+               !physical_longhand_id.is_visited_dependent() {
                 continue
             }
 

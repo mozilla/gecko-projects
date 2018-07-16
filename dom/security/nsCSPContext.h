@@ -30,6 +30,12 @@ class nsINetworkInterceptController;
 class nsIEventTarget;
 struct ConsoleMsgQueueElem;
 
+namespace mozilla {
+namespace dom {
+class Element;
+}
+}
+
 class nsCSPContext : public nsIContentSecurityPolicy
 {
   public:
@@ -76,6 +82,8 @@ class nsCSPContext : public nsIContentSecurityPolicy
      *        a sample of the violating inline script
      * @param aLineNum
      *        source line number of the violation (if available)
+     * @param aColumnNum
+     *        source column number of the violation (if available)
      * @param aViolationEventInit
      *        The output
      */
@@ -87,6 +95,7 @@ class nsCSPContext : public nsIContentSecurityPolicy
       nsAString& aSourceFile,
       nsAString& aScriptSample,
       uint32_t aLineNum,
+      uint32_t aColumnNum,
       mozilla::dom::SecurityPolicyViolationEventInit& aViolationEventInit);
 
     nsresult SendReports(
@@ -94,16 +103,19 @@ class nsCSPContext : public nsIContentSecurityPolicy
       uint32_t aViolatedPolicyIndex);
 
     nsresult FireViolationEvent(
+      mozilla::dom::Element* aTriggeringElement,
       const mozilla::dom::SecurityPolicyViolationEventInit& aViolationEventInit);
 
-    nsresult AsyncReportViolation(nsISupports* aBlockedContentSource,
+    nsresult AsyncReportViolation(mozilla::dom::Element* aTriggeringElement,
+                                  nsISupports* aBlockedContentSource,
                                   nsIURI* aOriginalURI,
                                   const nsAString& aViolatedDirective,
                                   uint32_t aViolatedPolicyIndex,
                                   const nsAString& aObserverSubject,
                                   const nsAString& aSourceFile,
                                   const nsAString& aScriptSample,
-                                  uint32_t aLineNum);
+                                  uint32_t aLineNum,
+                                  uint32_t aColumnNum);
 
     // Hands off! Don't call this method unless you know what you
     // are doing. It's only supposed to be called from within
@@ -118,6 +130,7 @@ class nsCSPContext : public nsIContentSecurityPolicy
 
   private:
     bool permitsInternal(CSPDirective aDir,
+                         mozilla::dom::Element* aTriggeringElement,
                          nsIURI* aContentLocation,
                          nsIURI* aOriginalURI,
                          const nsAString& aNonce,
@@ -130,11 +143,13 @@ class nsCSPContext : public nsIContentSecurityPolicy
 
     // helper to report inline script/style violations
     void reportInlineViolation(nsContentPolicyType aContentType,
+                               mozilla::dom::Element* aTriggeringElement,
                                const nsAString& aNonce,
                                const nsAString& aContent,
                                const nsAString& aViolatedDirective,
                                uint32_t aViolatedPolicyIndex,
-                               uint32_t aLineNumber);
+                               uint32_t aLineNumber,
+                               uint32_t aColumnNumber);
 
     static int32_t sScriptSampleMaxLength;
 
@@ -156,6 +171,7 @@ class nsCSPContext : public nsIContentSecurityPolicy
     // to avoid memory leaks. Within the destructor of the principal we explicitly
     // set mLoadingPrincipal to null.
     nsIPrincipal*                              mLoadingPrincipal;
+    nsCOMPtr<nsICSPEventListener>              mEventListener;
 
     // helper members used to queue up web console messages till
     // the windowID becomes available. see flushConsoleMessages()

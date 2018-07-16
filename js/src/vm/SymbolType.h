@@ -59,8 +59,7 @@ class Symbol : public js::gc::TenuredCell
     void operator=(const Symbol&) = delete;
 
     static Symbol*
-    newInternal(JSContext* cx, SymbolCode code, js::HashNumber hash,
-                JSAtom* description, const js::AutoAccessAtomsZone& access);
+    newInternal(JSContext* cx, SymbolCode code, js::HashNumber hash, JSAtom* description);
 
   public:
     static Symbol* new_(JSContext* cx, SymbolCode code, JSString* description);
@@ -122,6 +121,8 @@ struct HashSymbolsByDescription
 };
 
 /*
+ * [SMDOC] Symbol.for() registry (ES6 GlobalSymbolRegistry)
+ *
  * The runtime-wide symbol registry, used to implement Symbol.for().
  *
  * ES6 draft rev 25 (2014 May 22) calls this the GlobalSymbolRegistry List. In

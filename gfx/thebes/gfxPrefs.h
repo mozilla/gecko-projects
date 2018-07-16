@@ -13,6 +13,7 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/gfx/LoggingConstants.h"
 #include "nsTArray.h"
+#include "nsString.h"
 
 // First time gfxPrefs::GetSingleton() needs to be called on the main thread,
 // before any of the methods accessing the values are used, but after
@@ -241,7 +242,11 @@ private:
           this->mValue = PrefGet(aPreference, this->mValue);
           break;
         case UpdatePolicy::Live:
-          PrefAddVarCache(&this->mValue, aPreference, this->mValue);
+          {
+            nsCString pref;
+            pref.AssignLiteral(aPreference, strlen(aPreference));
+            PrefAddVarCache(&this->mValue, pref, this->mValue);
+          }
           break;
         default:
           MOZ_CRASH("Incomplete switch");
@@ -385,6 +390,7 @@ private:
   DECL_GFX_PREF(Live, "dom.vr.puppet.enabled",                 VRPuppetEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.vr.puppet.submitframe",             VRPuppetSubmitFrame, uint32_t, 0);
   DECL_GFX_PREF(Live, "dom.vr.display.rafMaxDuration",         VRDisplayRafMaxDuration, uint32_t, 50);
+  DECL_GFX_PREF(Once, "dom.vr.service.enabled",                VRServiceEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_pointer_events.enabled",        PointerEventsEnabled, bool, false);
 
   DECL_GFX_PREF(Live, "general.smoothScroll",                  SmoothScrollEnabled, bool, true);
@@ -512,7 +518,6 @@ private:
 
   DECL_GFX_PREF(Once, "gfx.webrender.all",                     WebRenderAll, bool, false);
   DECL_GFX_PREF(Once, "gfx.webrender.all.qualified",           WebRenderAllQualified, bool, false);
-  DECL_GFX_PREF(Once, "gfx.webrender.async-scene-build",       WebRenderAsyncSceneBuild, bool, true);
   DECL_GFX_PREF(Live, "gfx.webrender.blob-images",             WebRenderBlobImages, bool, true);
   DECL_GFX_PREF(Live, "gfx.webrender.blob.invalidation",       WebRenderBlobInvalidation, bool, false);
   DECL_GFX_PREF(Once, "gfx.webrender.enabled",                 WebRenderEnabledDoNotUseDirectly, bool, false);
@@ -558,7 +563,6 @@ private:
   DECL_GFX_PREF(Live, "layers.acceleration.draw-fps.print-histogram",  FPSPrintHistogram, bool, false);
   DECL_GFX_PREF(Live, "layers.acceleration.draw-fps.write-to-file", WriteFPSToFile, bool, false);
   DECL_GFX_PREF(Once, "layers.acceleration.force-enabled",     LayersAccelerationForceEnabledDoNotUseDirectly, bool, false);
-  DECL_GFX_PREF(Live, "layers.advanced.border-layers",           LayersAllowBorderLayers, bool, false);
   DECL_GFX_PREF(Live, "layers.advanced.basic-layer.enabled",          LayersAdvancedBasicLayerEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.amd-switchable-gfx.enabled",     LayersAMDSwitchableGfxEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.enabled",         AsyncPanZoomEnabledDoNotUseDirectly, bool, true);
@@ -813,14 +817,14 @@ private:
   static bool IsPrefsServiceAvailable();
   static bool IsParentProcess();
   // Creating these to avoid having to include Preferences.h in the .h
-  static void PrefAddVarCache(bool*, const char*, bool);
-  static void PrefAddVarCache(int32_t*, const char*, int32_t);
-  static void PrefAddVarCache(uint32_t*, const char*, uint32_t);
-  static void PrefAddVarCache(float*, const char*, float);
-  static void PrefAddVarCache(std::string*, const char*, std::string);
-  static void PrefAddVarCache(AtomicBool*, const char*, bool);
-  static void PrefAddVarCache(AtomicInt32*, const char*, int32_t);
-  static void PrefAddVarCache(AtomicUint32*, const char*, uint32_t);
+  static void PrefAddVarCache(bool*, const nsACString&, bool);
+  static void PrefAddVarCache(int32_t*, const nsACString&, int32_t);
+  static void PrefAddVarCache(uint32_t*, const nsACString&, uint32_t);
+  static void PrefAddVarCache(float*, const nsACString&, float);
+  static void PrefAddVarCache(std::string*, const nsCString&, std::string);
+  static void PrefAddVarCache(AtomicBool*, const nsACString&, bool);
+  static void PrefAddVarCache(AtomicInt32*, const nsACString&, int32_t);
+  static void PrefAddVarCache(AtomicUint32*, const nsACString&, uint32_t);
   static bool PrefGet(const char*, bool);
   static int32_t PrefGet(const char*, int32_t);
   static uint32_t PrefGet(const char*, uint32_t);

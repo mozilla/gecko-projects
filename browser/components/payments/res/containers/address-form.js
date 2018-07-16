@@ -4,6 +4,7 @@
 
 /* import-globals-from ../../../../../browser/extensions/formautofill/content/autofillEditForms.js*/
 import LabelledCheckbox from "../components/labelled-checkbox.js";
+import PaymentRequestPage from "../components/payment-request-page.js";
 import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
 import paymentRequest from "../paymentRequest.js";
 /* import-globals-from ../unprivileged-fallbacks.js */
@@ -11,15 +12,18 @@ import paymentRequest from "../paymentRequest.js";
 /**
  * <address-form></address-form>
  *
+ * Don't use document.getElementById or document.querySelector* to access form
+ * elements, use querySelector on `this` or `this.form` instead so that elements
+ * can be found before the element is connected.
+ *
  * XXX: Bug 1446164 - This form isn't localized when used via this custom element
  * as it will be much easier to share the logic once we switch to Fluent.
  */
 
-export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement) {
+export default class AddressForm extends PaymentStateSubscriberMixin(PaymentRequestPage) {
   constructor() {
     super();
 
-    this.pageTitle = document.createElement("h2");
     this.genericErrorText = document.createElement("div");
 
     this.cancelButton = document.createElement("button");
@@ -38,14 +42,16 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
     this.persistCheckbox.className = "persist-checkbox";
 
     this._errorFieldMap = {
-      addressLine: "#street-address-container",
-      city: "#address-level2-container",
-      country: "#country-container",
-      organization: "#organization-container",
-      phone: "#tel-container",
-      postalCode: "#postal-code-container",
-      recipient: "#name-container",
-      region: "#address-level1-container",
+      addressLine: "#street-address",
+      city: "#address-level2",
+      country: "#country",
+      organization: "#organization",
+      phone: "#tel",
+      postalCode: "#postal-code",
+      // Bug 1472283 is on file to support
+      // additional-name and family-name.
+      recipient: "#given-name",
+      region: "#address-level1",
     };
 
     // The markup is shared with form autofill preferences.
@@ -71,8 +77,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
 
   connectedCallback() {
     this.promiseReady.then(form => {
-      this.appendChild(this.pageTitle);
-      this.appendChild(form);
+      this.body.appendChild(form);
 
       let record = {};
       this.formHandler = new EditAddress({
@@ -83,11 +88,12 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
         supportedCountries: PaymentDialogUtils.supportedCountries,
       });
 
-      this.appendChild(this.persistCheckbox);
-      this.appendChild(this.genericErrorText);
-      this.appendChild(this.cancelButton);
-      this.appendChild(this.backButton);
-      this.appendChild(this.saveButton);
+      this.body.appendChild(this.persistCheckbox);
+      this.body.appendChild(this.genericErrorText);
+
+      this.footer.appendChild(this.cancelButton);
+      this.footer.appendChild(this.backButton);
+      this.footer.appendChild(this.saveButton);
       // Only call the connected super callback(s) once our markup is fully
       // connected, including the shared form fetched asynchronously.
       super.connectedCallback();
@@ -121,7 +127,7 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
       this.removeAttribute("address-fields");
     }
 
-    this.pageTitle.textContent = addressPage.title;
+    this.pageTitleHeading.textContent = addressPage.title;
     this.genericErrorText.textContent = page.error;
 
     let editing = !!addressPage.guid;
@@ -143,20 +149,59 @@ export default class AddressForm extends PaymentStateSubscriberMixin(HTMLElement
 
     this.formHandler.loadRecord(record);
 
+    // Add validation to some address fields
+    for (let formElement of this.form.elements) {
+      let container = formElement.closest(`#${formElement.id}-container`);
+      if (formElement.localName == "button" || !container) {
+        continue;
+      }
+      let required = formElement.required && !formElement.disabled;
+      if (required) {
+        container.setAttribute("required", "true");
+      } else {
+        container.removeAttribute("required");
+      }
+    }
+
     let shippingAddressErrors = request.paymentDetails.shippingAddressErrors;
     for (let [errorName, errorSelector] of Object.entries(this._errorFieldMap)) {
-      let container = document.querySelector(errorSelector);
+      let container = this.form.querySelector(errorSelector + "-container");
+      let field = this.form.querySelector(errorSelector);
+      let errorText = (shippingAddressErrors && shippingAddressErrors[errorName]) || "";
+      container.classList.toggle("error", !!errorText);
+      field.setCustomValidity(errorText);
       let span = container.querySelector(".error-text");
       if (!span) {
         span = document.createElement("span");
         span.className = "error-text";
         container.appendChild(span);
       }
-      span.textContent = shippingAddressErrors[errorName];
-      container.classList.toggle("error", !!shippingAddressErrors[errorName]);
+      span.textContent = errorText;
+    }
+
+    // Position the error messages all at once so layout flushes only once.
+    let formRect = this.form.getBoundingClientRect();
+    let errorSpanData = [...this.form.querySelectorAll(".error-text:not(:empty)")].map(span => {
+      let relatedInput = span.previousElementSibling;
+      let relatedRect = relatedInput.getBoundingClientRect();
+      return {
+        span,
+        top: relatedRect.bottom,
+        left: relatedRect.left - formRect.left,
+        right: formRect.right - relatedRect.right,
+      };
+    });
+    let isRTL = this.form.matches(":dir(rtl)");
+    for (let data of errorSpanData) {
+      // Subtract 10px for the padding-top and padding-bottom.
+      data.span.style.top = (data.top - 10) + "px";
+      if (isRTL) {
+        data.span.style.right = data.right + "px";
+      } else {
+        data.span.style.left = data.left + "px";
+      }
     }
   }
-
   handleEvent(event) {
     switch (event.type) {
       case "click": {

@@ -289,6 +289,13 @@ struct XPCOMInitData
     DynamicScalarDefinition[] dynamicScalarDefs;
 };
 
+struct StringBundleDescriptor
+{
+    nsCString bundleURL;
+    FileDescriptor mapFile;
+    uint32_t mapSize;
+};
+
 /**
  * The PContent protocol is a top-level protocol between the UI process
  * and a content process. There is exactly one PContentParent/PContentChild pair
@@ -401,7 +408,7 @@ child:
                               bool anonymize,
                               bool minimizeMemoryUsage,
                               MaybeFileDesc DMDFile);
-    async RequestPerformanceMetrics();
+    async RequestPerformanceMetrics(nsID aID);
 
     /**
      * Communication between the PuppetBidiKeyboard and the actual
@@ -457,8 +464,15 @@ child:
 
     async ClearSiteDataReloadNeeded(nsString origin);
 
+    async RegisterStringBundles(StringBundleDescriptor[] stringBundles);
+
+    async UpdateSharedData(FileDescriptor mapFile, uint32_t aSize,
+                           IPCBlob[] blobs,
+                           nsCString[] changedKeys);
+
     // nsIPermissionManager messages
     async AddPermission(Permission permission);
+    async RemoveAllPermissions();
 
     async FlushMemory(nsString reason);
 
@@ -503,7 +517,9 @@ child:
                                     StructuredCloneData initialData,
                                     LookAndFeelInt[] lookAndFeelIntCache,
                                     /* used on MacOSX and Linux only: */
-                                    SystemFontListEntry[] systemFontList);
+                                    SystemFontListEntry[] systemFontList,
+                                    FileDescriptor sharedDataMapFile,
+                                    uint32_t sharedDataMapSize);
 
     // Notify child that last-pb-context-exited notification was observed
     async LastPrivateDocShellDestroyed();
@@ -855,6 +871,9 @@ parent:
     sync GetClipboard(nsCString[] aTypes, int32_t aWhichClipboard)
         returns (IPCDataTransfer dataTransfer);
 
+    // Returns a list of formats supported by the clipboard
+    sync GetExternalClipboardFormats(int32_t aWhichClipboard, bool aPlainTextOnly) returns (nsCString[] aTypes);
+
     // Clears the clipboard.
     async EmptyClipboard(int32_t aWhichClipboard);
 
@@ -1138,7 +1157,16 @@ parent:
 
     async BHRThreadHang(HangDetails aHangDetails);
 
-    async AddPerformanceMetrics(PerformanceInfo[] aMetrics);
+    async AddPerformanceMetrics(nsID aID, PerformanceInfo[] aMetrics);
+
+    /*
+     * A 3rd party tracking origin (aTrackingOrigin) has received the permission
+     * granted to have access to aGrantedOrigin when loaded by aParentPrincipal.
+     */
+    async FirstPartyStorageAccessGrantedForOrigin(Principal aParentPrincipal,
+                                                  nsCString aTrackingOrigin,
+                                                  nsCString aGrantedOrigin);
+
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                         Principal aPrincipal, ClonedMessageData aData);

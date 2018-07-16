@@ -108,6 +108,7 @@
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/css/ImageLoader.h"
+#include "mozilla/dom/TouchEvent.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/layers/WebRenderUserData.h"
 #include "nsPrintfCString.h"
@@ -2952,6 +2953,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     aBuilder->EnterSVGEffectsContents(&hoistedScrollInfoItemsStorage);
   }
 
+
+  bool needsActiveOpacityLayer = false;
   // We build an opacity item if it's not going to be drawn by SVG content, or
   // SVG effects. SVG effects won't handle the opacity if we want an active
   // layer (for async animations), see
@@ -2959,7 +2962,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   // nsSVGIntegrationsUtils::PaintFilter.
   bool useOpacity = HasVisualOpacity(effectSet) &&
                     !nsSVGUtils::CanOptimizeOpacity(this) &&
-                    (!usingSVGEffects || nsDisplayOpacity::NeedsActiveLayer(aBuilder, this));
+                    ((needsActiveOpacityLayer = nsDisplayOpacity::NeedsActiveLayer(aBuilder, this)) || !usingSVGEffects);
   bool useBlendMode = effects->mMixBlendMode != NS_STYLE_BLEND_NORMAL;
   bool useStickyPosition = disp->mPosition == NS_STYLE_POSITION_STICKY &&
     IsScrollFrameActive(aBuilder,
@@ -3259,9 +3262,10 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     // all descendant content, but some should not be clipped.
     DisplayListClipState::AutoSaveRestore opacityClipState(aBuilder);
     resultList.AppendToTop(
-        MakeDisplayItem<nsDisplayOpacity>(aBuilder, this, &resultList,
+      MakeDisplayItem<nsDisplayOpacity>(aBuilder, this, &resultList,
                                         containerItemASR,
-                                        opacityItemForEventsAndPluginsOnly));
+                                        opacityItemForEventsAndPluginsOnly,
+                                        needsActiveOpacityLayer));
     if (aCreatedContainerItem) {
       *aCreatedContainerItem = true;
     }
@@ -7149,6 +7153,16 @@ DoesLayerOrAncestorsHaveOutOfDateFrameMetrics(Layer* aLayer)
 bool
 nsIFrame::TryUpdateTransformOnly(Layer** aLayerResult)
 {
+  // If we move a transformed layer when we have a merged display
+  // list, then it can end up intersecting other items for which
+  // we don't have a defined ordering.
+  // We could allow this if the display list is in the canonical
+  // ordering (correctly sorted for all intersections), but we
+  // don't have a way to check that yet.
+  if (nsLayoutUtils::AreRetainedDisplayListsEnabled()) {
+    return false;
+  }
+
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(
     this, DisplayItemType::TYPE_TRANSFORM);
   if (!layer || !layer->HasUserData(LayerIsPrerenderedDataKey())) {
@@ -10968,7 +10982,6 @@ IsFrameScrolledOutOfView(const nsIFrame* aTarget,
 {
   nsIScrollableFrame* scrollableFrame =
     nsLayoutUtils::GetNearestScrollableFrame(const_cast<nsIFrame*>(aParent),
-      nsLayoutUtils::SCROLLABLE_SAME_DOC |
       nsLayoutUtils::SCROLLABLE_FIXEDPOS_FINDS_ROOT |
       nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
   if (!scrollableFrame) {
@@ -11255,54 +11268,60 @@ nsIFrame::GetCompositorHitTestInfo(nsDisplayListBuilder* aBuilder)
     }
   }
 
-  // Inherit the touch-action flags from the parent, if there is one. We do this
-  // because of how the touch-action on a frame combines the touch-action from
-  // ancestor DOM elements. Refer to the documentation in TouchActionHelper.cpp
-  // for details; this code is meant to be equivalent to that code, but woven
-  // into the top-down recursive display list building process.
-  CompositorHitTestInfo inheritedTouchAction = CompositorHitTestInfo::eInvisibleToHitTest;
-  if (nsDisplayCompositorHitTestInfo* parentInfo = aBuilder->GetCompositorHitTestInfo()) {
-    inheritedTouchAction = (parentInfo->HitTestInfo() & CompositorHitTestInfo::eTouchActionMask);
+  nsIDocShell* docShell = nullptr;
+  if (PresShell()->GetDocument()) {
+    docShell = PresShell()->GetDocument()->GetDocShell();
   }
-
-  nsIFrame* touchActionFrame = this;
-  if (nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(this)) {
-    touchActionFrame = do_QueryFrame(scrollFrame);
-    // On scrollframes, stop inheriting the pan-x and pan-y flags; instead,
-    // reset them back to zero to allow panning on the scrollframe unless we
-    // encounter an element that disables it that's inside the scrollframe.
-    // This is equivalent to the |considerPanning| variable in
-    // TouchActionHelper.cpp, but for a top-down traversal.
-    CompositorHitTestInfo panMask = CompositorHitTestInfo::eTouchActionPanXDisabled
-                                  | CompositorHitTestInfo::eTouchActionPanYDisabled;
-    inheritedTouchAction &= ~panMask;
-  }
-
-  result |= inheritedTouchAction;
-
-  const uint32_t touchAction = nsLayoutUtils::GetTouchActionFromFrame(touchActionFrame);
-  // The CSS allows the syntax auto | none | [pan-x || pan-y] | manipulation
-  // so we can eliminate some combinations of things.
-  if (touchAction == NS_STYLE_TOUCH_ACTION_AUTO) {
-    // nothing to do
-  } else if (touchAction & NS_STYLE_TOUCH_ACTION_MANIPULATION) {
-    result |= CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
-  } else {
-    // This path handles the cases none | [pan-x || pan-y] and so both
-    // double-tap and pinch zoom are disabled in here.
-    result |= CompositorHitTestInfo::eTouchActionPinchZoomDisabled
-            | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
-
-    if (!(touchAction & NS_STYLE_TOUCH_ACTION_PAN_X)) {
-      result |= CompositorHitTestInfo::eTouchActionPanXDisabled;
+  if (dom::TouchEvent::PrefEnabled(docShell)) {
+    // Inherit the touch-action flags from the parent, if there is one. We do this
+    // because of how the touch-action on a frame combines the touch-action from
+    // ancestor DOM elements. Refer to the documentation in TouchActionHelper.cpp
+    // for details; this code is meant to be equivalent to that code, but woven
+    // into the top-down recursive display list building process.
+    CompositorHitTestInfo inheritedTouchAction = CompositorHitTestInfo::eInvisibleToHitTest;
+    if (nsDisplayCompositorHitTestInfo* parentInfo = aBuilder->GetCompositorHitTestInfo()) {
+      inheritedTouchAction = (parentInfo->HitTestInfo() & CompositorHitTestInfo::eTouchActionMask);
     }
-    if (!(touchAction & NS_STYLE_TOUCH_ACTION_PAN_Y)) {
-      result |= CompositorHitTestInfo::eTouchActionPanYDisabled;
+
+    nsIFrame* touchActionFrame = this;
+    if (nsIScrollableFrame* scrollFrame = nsLayoutUtils::GetScrollableFrameFor(this)) {
+      touchActionFrame = do_QueryFrame(scrollFrame);
+      // On scrollframes, stop inheriting the pan-x and pan-y flags; instead,
+      // reset them back to zero to allow panning on the scrollframe unless we
+      // encounter an element that disables it that's inside the scrollframe.
+      // This is equivalent to the |considerPanning| variable in
+      // TouchActionHelper.cpp, but for a top-down traversal.
+      CompositorHitTestInfo panMask = CompositorHitTestInfo::eTouchActionPanXDisabled
+                                    | CompositorHitTestInfo::eTouchActionPanYDisabled;
+      inheritedTouchAction &= ~panMask;
     }
-    if (touchAction & NS_STYLE_TOUCH_ACTION_NONE) {
-      // all the touch-action disabling flags will already have been set above
-      MOZ_ASSERT((result & CompositorHitTestInfo::eTouchActionMask)
-               == CompositorHitTestInfo::eTouchActionMask);
+
+    result |= inheritedTouchAction;
+
+    const uint32_t touchAction = nsLayoutUtils::GetTouchActionFromFrame(touchActionFrame);
+    // The CSS allows the syntax auto | none | [pan-x || pan-y] | manipulation
+    // so we can eliminate some combinations of things.
+    if (touchAction == NS_STYLE_TOUCH_ACTION_AUTO) {
+      // nothing to do
+    } else if (touchAction & NS_STYLE_TOUCH_ACTION_MANIPULATION) {
+      result |= CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+    } else {
+      // This path handles the cases none | [pan-x || pan-y] and so both
+      // double-tap and pinch zoom are disabled in here.
+      result |= CompositorHitTestInfo::eTouchActionPinchZoomDisabled
+              | CompositorHitTestInfo::eTouchActionDoubleTapZoomDisabled;
+
+      if (!(touchAction & NS_STYLE_TOUCH_ACTION_PAN_X)) {
+        result |= CompositorHitTestInfo::eTouchActionPanXDisabled;
+      }
+      if (!(touchAction & NS_STYLE_TOUCH_ACTION_PAN_Y)) {
+        result |= CompositorHitTestInfo::eTouchActionPanYDisabled;
+      }
+      if (touchAction & NS_STYLE_TOUCH_ACTION_NONE) {
+        // all the touch-action disabling flags will already have been set above
+        MOZ_ASSERT((result & CompositorHitTestInfo::eTouchActionMask)
+                 == CompositorHitTestInfo::eTouchActionMask);
+      }
     }
   }
 
@@ -11923,13 +11942,38 @@ void DR_State::AddRule(nsTArray<DR_Rule*>& aRules,
   aRules.AppendElement(&aRule);
 }
 
+static Maybe<bool> ShouldLogReflow(const char* processes)
+{
+  switch (processes[0]) {
+  case 'A': case 'a': return Some(true);
+  case 'P': case 'p': return Some(XRE_IsParentProcess());
+  case 'C': case 'c': return Some(XRE_IsContentProcess());
+  default: return Nothing{};
+  }
+}
+
 void DR_State::ParseRulesFile()
 {
+  char* processes = PR_GetEnv("GECKO_DISPLAY_REFLOW_PROCESSES");
+  if (processes) {
+    Maybe<bool> enableLog = ShouldLogReflow(processes);
+    if (enableLog.isNothing()) {
+      MOZ_CRASH("GECKO_DISPLAY_REFLOW_PROCESSES: [a]ll [p]arent [c]ontent");
+    } else if (enableLog.value()) {
+      DR_Rule* rule = new DR_Rule;
+      rule->AddPart(LayoutFrameType::None);
+      rule->mDisplay = true;
+      AddRule(mWildRules, *rule);
+      mActive = true;
+    }
+    return;
+  }
+
   char* path = PR_GetEnv("GECKO_DISPLAY_REFLOW_RULES_FILE");
   if (path) {
     FILE* inFile = fopen(path, "r");
     if (!inFile) {
-      MOZ_CRASH("Failed to open the specified rules file");
+      MOZ_CRASH("Failed to open the specified rules file; Try `--setpref security.sandbox.content.level=2` if the sandbox is at cause");
     }
     for (DR_Rule* rule = ParseRule(inFile); rule; rule = ParseRule(inFile)) {
       if (rule->mTarget) {

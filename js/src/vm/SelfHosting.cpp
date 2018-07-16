@@ -123,11 +123,11 @@ intrinsic_IsArray(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-intrinsic_IsWrappedArrayConstructor(JSContext* cx, unsigned argc, Value* vp)
+intrinsic_IsCrossRealmArrayConstructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     bool result = false;
-    if (!IsWrappedArrayConstructor(cx, args[0], &result))
+    if (!IsCrossRealmArrayConstructor(cx, args[0], &result))
         return false;
     args.rval().setBoolean(result);
     return true;
@@ -1557,6 +1557,7 @@ intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 3);
 
     Rooted<TypedArrayObject*> target(cx, &args[0].toObject().as<TypedArrayObject>());
+    assertSameCompartment(cx, target);
     MOZ_ASSERT(!target->hasDetachedBuffer(),
                "shouldn't set elements if underlying buffer is detached");
 
@@ -1578,7 +1579,7 @@ intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* vp)
     Scalar::Type unsafeSrcTypeCrossCompartment = unsafeSrcCrossCompartment->type();
     size_t sourceByteLen = count * TypedArrayElemSize(unsafeSrcTypeCrossCompartment);
 
-    auto copyOfSrcData = target->zone()->make_pod_array<uint8_t>(sourceByteLen);
+    auto copyOfSrcData = cx->make_pod_array<uint8_t>(sourceByteLen);
     if (!copyOfSrcData)
         return false;
 
@@ -2420,8 +2421,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("ToObject",      intrinsic_ToObject,                1,0, IntrinsicToObject),
     JS_INLINABLE_FN("IsObject",      intrinsic_IsObject,                1,0, IntrinsicIsObject),
     JS_INLINABLE_FN("IsArray",       intrinsic_IsArray,                 1,0, ArrayIsArray),
-    JS_INLINABLE_FN("IsWrappedArrayConstructor", intrinsic_IsWrappedArrayConstructor, 1,0,
-                    IntrinsicIsWrappedArrayConstructor),
+    JS_INLINABLE_FN("IsCrossRealmArrayConstructor", intrinsic_IsCrossRealmArrayConstructor, 1,0,
+                    IntrinsicIsCrossRealmArrayConstructor),
     JS_INLINABLE_FN("ToInteger",     intrinsic_ToInteger,               1,0, IntrinsicToInteger),
     JS_INLINABLE_FN("ToString",      intrinsic_ToString,                1,0, IntrinsicToString),
     JS_FN("ToSource",                intrinsic_ToSource,                1,0),
@@ -2955,7 +2956,7 @@ JSRuntime::initSelfHosting(JSContext* cx)
 
     const unsigned char* compressed = compressedSources;
     uint32_t compressedLen = GetCompressedSize();
-    UniqueChars src(selfHostingGlobal_->zone()->pod_malloc<char>(srcLen));
+    auto src = cx->make_pod_array<char>(srcLen);
     if (!src || !DecompressString(compressed, compressedLen,
                                   reinterpret_cast<unsigned char*>(src.get()), srcLen))
     {

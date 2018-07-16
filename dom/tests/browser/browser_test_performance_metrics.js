@@ -7,6 +7,7 @@
 const ROOT_URL = "http://example.com/browser/dom/tests/browser";
 const DUMMY_URL = ROOT_URL + "/dummy.html";
 const WORKER_URL = ROOT_URL + "/ping_worker.html";
+const WORKER_URL2 = ROOT_URL + "/ping_worker2.html";
 
 
 let nextId = 0;
@@ -40,57 +41,69 @@ function postMessageToWorker(tab, message) {
 }
 
 add_task(async function test() {
-  SpecialPowers.setBoolPref('dom.performance.enable_scheduler_timing', true);
+  SpecialPowers.setBoolPref("dom.performance.enable_scheduler_timing", true);
   waitForExplicitFinish();
 
   // Load 3 pages and wait. The 3rd one has a worker
   let page1 = await BrowserTestUtils.openNewForegroundTab({
-    gBrowser, opening: 'about:about', forceNewProcess: false
+    gBrowser, opening: "about:about", forceNewProcess: false
   });
 
   let page2 = await BrowserTestUtils.openNewForegroundTab({
-    gBrowser, opening: 'about:memory', forceNewProcess: false
+    gBrowser, opening: "about:memory", forceNewProcess: false
   });
 
   let page3 = await BrowserTestUtils.openNewForegroundTab({
-    gBrowser, opening: "about:performance", forceNewProcess: true
+    gBrowser, opening: WORKER_URL
   });
-
-  let parent_process_event = false;
-  let worker_event = false;
-
   // load a 4th tab with a worker
-  await BrowserTestUtils.withNewTab({ gBrowser, url: WORKER_URL },
+  await BrowserTestUtils.withNewTab({ gBrowser, url: WORKER_URL2 },
     async function(browser) {
     // grab events..
-    let worker_duration = 0;
-    let worker_total = 0;
+    let workerDuration = 0;
+    let workerTotal = 0;
     let duration = 0;
     let total = 0;
+    let isTopLevel = false;
+    let aboutMemoryFound = false;
+    let parentProcessEvent = false;
+    let workerEvent = false;
+    let subFrameIds = [];
+    let topLevelIds = [];
+    let sharedWorker = false;
 
-    function getInfoFromService(subject, topic, value) {
-      subject = subject.QueryInterface(Ci.nsIMutableArray);
-      let enumerator = subject.enumerate();
-      while (enumerator.hasMoreElements()) {
-        let entry = enumerator.getNext();
-        entry = entry.QueryInterface(Ci.nsIPerformanceMetricsData);
-        if (entry.pid == Services.appinfo.processID) {
-          parent_process_event = true;
+    function exploreResults(data) {
+      for (let entry of data) {
+        sharedWorker = entry.host.endsWith("shared_worker.js") || sharedWorker;
+
+        Assert.ok(entry.host != "" || entry.windowId !=0,
+                  "An entry should have a host or a windowId");
+        if (entry.windowId != 0 && !entry.isToplevel && !entry.isWorker && !subFrameIds.includes(entry.windowId)) {
+          subFrameIds.push(entry.windowId);
         }
-        if (entry.worker) {
-          worker_event = true;
-          worker_duration += entry.duration;
+        if (entry.isTopLevel && !topLevelIds.includes(entry.windowId)) {
+          topLevelIds.push(entry.windowId);
+        }
+        if (entry.host == "example.com" && entry.isTopLevel) {
+          isTopLevel = true;
+        }
+        if (entry.host == "about:memory") {
+          aboutMemoryFound = true;
+        }
+        if (entry.pid == Services.appinfo.processID) {
+          parentProcessEvent = true;
+        }
+        if (entry.isWorker) {
+          workerEvent = true;
+          workerDuration += entry.duration;
         } else {
           duration += entry.duration;
         }
-        // let's look at the XPCOM data we got back
-        let items = entry.items.QueryInterface(Ci.nsIMutableArray);
-        let enumerator2 = items.enumerate();
-        while (enumerator2.hasMoreElements()) {
-          let item = enumerator2.getNext();
-          item = item.QueryInterface(Ci.nsIPerformanceMetricsDispatchCategory);
-          if (entry.worker) {
-            worker_total += item.count;
+        // let's look at the data we got back
+        for (let item of entry.items) {
+          Assert.ok(item.count > 0, "Categories with an empty count are dropped");
+          if (entry.isWorker) {
+            workerTotal += item.count;
           } else {
             total += item.count;
           }
@@ -98,24 +111,41 @@ add_task(async function test() {
       }
     }
 
-    Services.obs.addObserver(getInfoFromService, "performance-metrics");
+    // get all metrics via the promise
+    let results = await ChromeUtils.requestPerformanceMetrics();
+    exploreResults(results);
 
-    // wait until we get some events back by triggering requestPerformanceMetrics
-    await BrowserTestUtils.waitForCondition(() => {
-      ChromeUtils.requestPerformanceMetrics();
-      return worker_duration > 0 && duration > 0 && parent_process_event;
-    }, "wait for events to come in", 250, 20);
-
-    BrowserTestUtils.removeTab(page1);
-    BrowserTestUtils.removeTab(page2);
-    BrowserTestUtils.removeTab(page3);
-
-    Assert.ok(worker_duration > 0, "Worker duration should be positive");
-    Assert.ok(worker_total > 0, "Worker count should be positive");
+    Assert.ok(workerDuration > 0, "Worker duration should be positive");
+    Assert.ok(workerTotal > 0, "Worker count should be positive");
     Assert.ok(duration > 0, "Duration should be positive");
     Assert.ok(total > 0, "Should get a positive count");
-    Assert.ok(parent_process_event, "parent process sent back some events");
+    Assert.ok(parentProcessEvent, "parent process sent back some events");
+    Assert.ok(isTopLevel, "example.com as a top level window");
+    Assert.ok(aboutMemoryFound, "about:memory");
+    Assert.ok(sharedWorker, "We got some info from a shared worker");
+
+    // checking that subframes are not orphans
+    for (let frameId of subFrameIds) {
+      Assert.ok(topLevelIds.includes(frameId), "subframe is not orphan ");
+    }
+
+    // Doing a second call, we shoud get bigger values
+    let previousWorkerDuration = workerDuration;
+    let previousWorkerTotal = workerTotal;
+    let previousDuration = duration;
+    let previousTotal = total;
+
+    results = await ChromeUtils.requestPerformanceMetrics();
+    exploreResults(results);
+
+    Assert.ok(workerDuration > previousWorkerDuration, "Worker duration should be positive");
+    Assert.ok(workerTotal > previousWorkerTotal, "Worker count should be positive");
+    Assert.ok(duration > previousDuration, "Duration should be positive");
+    Assert.ok(total > previousTotal, "Should get a positive count");
   });
 
-  SpecialPowers.clearUserPref('dom.performance.enable_scheduler_timing');
+  BrowserTestUtils.removeTab(page1);
+  BrowserTestUtils.removeTab(page2);
+  BrowserTestUtils.removeTab(page3);
+  SpecialPowers.clearUserPref("dom.performance.enable_scheduler_timing");
 });

@@ -29,6 +29,7 @@
 #include "mozilla/a11y/AccessibleWrap.h"
 #include "mozilla/a11y/Compatibility.h"
 #endif
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StyleSheetInlines.h"
@@ -59,7 +60,9 @@
 #include "mozilla/dom/PPresentationParent.h"
 #include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/URLClassifierParent.h"
+#include "mozilla/dom/ipc/SharedMap.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
 #include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/gfx/gfxVars.h"
@@ -146,6 +149,7 @@
 #include "nsISiteSecurityService.h"
 #include "nsISound.h"
 #include "nsISpellChecker.h"
+#include "nsIStringBundle.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITimer.h"
 #include "nsIURIFixup.h"
@@ -187,7 +191,7 @@
 #include "ContentProcessManager.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
-#include "mozilla/PerformanceUtils.h"
+#include "mozilla/PerformanceMetricsCollector.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "nsPluginHost.h"
 #include "nsPluginTags.h"
@@ -1277,6 +1281,17 @@ ContentParent::GetAllEvenIfDead(nsTArray<ContentParent*>& aArray)
   }
 }
 
+void
+ContentParent::BroadcastStringBundle(const StringBundleDescriptor& aBundle)
+{
+  AutoTArray<StringBundleDescriptor, 1> array;
+  array.AppendElement(aBundle);
+
+  for (auto* cp : AllProcesses(eLive)) {
+    Unused << cp->SendRegisterStringBundles(array);
+  }
+}
+
 const nsAString&
 ContentParent::GetRemoteType() const
 {
@@ -1857,8 +1872,8 @@ ContentParent::ShouldKeepProcessAlive() const
     return false;
   }
 
-  // We might want to keep alive some content processes alive during test runs,
-  // for performance reasons. This should never be used in production.
+  // We might want to keep some content processes alive for performance reasons.
+  // e.g. test runs and privileged content process for some about: pages.
   // We don't want to alter behavior if the pref is not set, so default to 0.
   int32_t processesToKeepAlive = 0;
 
@@ -2011,6 +2026,9 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   // Prefs information is passed via anonymous shared memory to avoid bloating
   // the command line.
 
+  size_t prefMapSize;
+  auto prefMapHandle = Preferences::EnsureSnapshot(&prefMapSize).ClonePlatformHandle();
+
   // Serialize the early prefs.
   nsAutoCStringN<1024> prefs;
   Preferences::SerializePreferences(prefs);
@@ -2031,14 +2049,22 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   // Copy the serialized prefs into the shared memory.
   memcpy(static_cast<char*>(shm.memory()), prefs.get(), prefs.Length());
 
+  // Formats a pointer or pointer-sized-integer as a string suitable for passing
+  // in an arguments list.
+  auto formatPtrArg = [] (auto arg) {
+    return nsPrintfCString("%zu", uintptr_t(arg));
+  };
+
 #if defined(XP_WIN)
   // Record the handle as to-be-shared, and pass it via a command flag. This
   // works because Windows handles are system-wide.
   HANDLE prefsHandle = shm.handle();
   mSubprocess->AddHandleToShare(prefsHandle);
+  mSubprocess->AddHandleToShare(prefMapHandle.get());
   extraArgs.push_back("-prefsHandle");
-  extraArgs.push_back(
-    nsPrintfCString("%zu", reinterpret_cast<uintptr_t>(prefsHandle)).get());
+  extraArgs.push_back(formatPtrArg(prefsHandle).get());
+  extraArgs.push_back("-prefMapHandle");
+  extraArgs.push_back(formatPtrArg(prefMapHandle.get()).get());
 #else
   // In contrast, Unix fds are per-process. So remap the fd to a fixed one that
   // will be used in the child.
@@ -2048,11 +2074,15 @@ ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PR
   // and the fixed fd isn't used. However, we still need to mark it for
   // remapping so it doesn't get closed in the child.
   mSubprocess->AddFdToRemap(shm.handle().fd, kPrefsFileDescriptor);
+  mSubprocess->AddFdToRemap(prefMapHandle.get(), kPrefMapFileDescriptor);
 #endif
 
-  // Pass the length via a command flag.
+  // Pass the lengths via command line flags.
   extraArgs.push_back("-prefsLen");
-  extraArgs.push_back(nsPrintfCString("%zu", uintptr_t(prefs.Length())).get());
+  extraArgs.push_back(formatPtrArg(prefs.Length()).get());
+
+  extraArgs.push_back("-prefMapSize");
+  extraArgs.push_back(formatPtrArg(prefMapSize).get());
 
   // Scheduler prefs need to be handled differently because the scheduler needs
   // to start up in the content process before the normal preferences service.
@@ -2309,13 +2339,21 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
   ScreenManager& screenManager = ScreenManager::GetSingleton();
   screenManager.CopyScreensToRemote(this);
 
+  ipc::WritableSharedMap* sharedData = nsFrameMessageManager::sParentProcessManager->SharedData();
+  sharedData->Flush();
+
   Unused << SendSetXPCOMProcessAttributes(xpcomInit, initialData, lnfCache,
-                                          fontList);
+                                          fontList, sharedData->CloneMapFile(),
+                                          sharedData->MapSize());
 
   nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
   nsChromeRegistryChrome* chromeRegistry =
     static_cast<nsChromeRegistryChrome*>(registrySvc.get());
   chromeRegistry->SendRegisteredChrome(this);
+
+  nsCOMPtr<nsIStringBundleService> stringBundleService =
+    services::GetStringBundleService();
+  stringBundleService->SendContentBundles(this);
 
   if (gAppData) {
     nsCString version(gAppData->version);
@@ -2451,7 +2489,7 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority)
   }
 #endif
 
-  {
+  if (!ServiceWorkerParentInterceptEnabled()) {
     RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
     MOZ_ASSERT(swr);
 
@@ -2707,6 +2745,16 @@ ContentParent::RecvClipboardHasType(nsTArray<nsCString>&& aTypes,
 }
 
 mozilla::ipc::IPCResult
+ContentParent::RecvGetExternalClipboardFormats(const int32_t& aWhichClipboard,
+                                     const bool& aPlainTextOnly,
+                                     nsTArray<nsCString>* aTypes)
+{
+  MOZ_ASSERT(aTypes);
+  DataTransfer::GetExternalClipboardFormats(aWhichClipboard, aPlainTextOnly, aTypes);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentParent::RecvPlaySound(const URIParams& aURI)
 {
   nsCOMPtr<nsIURI> soundURI = DeserializeURI(aURI);
@@ -2845,6 +2893,7 @@ ContentParent::Observe(nsISupports* aSubject,
 
     // Okay to call ShutDownProcess multiple times.
     ShutDownProcess(SEND_SHUTDOWN_MESSAGE);
+    MarkAsDead();
 
     // Wait for shutdown to complete, so that we receive any shutdown
     // data (e.g. telemetry) from the child before we quit.
@@ -2872,9 +2921,12 @@ ContentParent::Observe(nsISupports* aSubject,
       BLACKLIST_ENTRY(u"app.update.lastUpdateTime."),
       BLACKLIST_ENTRY(u"datareporting.policy."),
       BLACKLIST_ENTRY(u"browser.safebrowsing.provider."),
+      BLACKLIST_ENTRY(u"browser.shell."),
+      BLACKLIST_ENTRY(u"browser.slowstartup."),
       BLACKLIST_ENTRY(u"extensions.getAddons.cache."),
       BLACKLIST_ENTRY(u"media.gmp-manager."),
       BLACKLIST_ENTRY(u"media.gmp-gmpopenh264."),
+      BLACKLIST_ENTRY(u"privacy.sanitize."),
     };
 #undef BLACKLIST_ENTRY
 
@@ -3313,14 +3365,16 @@ ContentParent::RecvFinishMemoryReport(const uint32_t& aGeneration)
 }
 
 mozilla::ipc::IPCResult
-ContentParent::RecvAddPerformanceMetrics(nsTArray<PerformanceInfo>&& aMetrics)
+ContentParent::RecvAddPerformanceMetrics(const nsID& aID,
+                                         nsTArray<PerformanceInfo>&& aMetrics)
 {
   if (!mozilla::StaticPrefs::dom_performance_enable_scheduler_timing()) {
     // The pref is off, we should not get a performance metrics from the content
     // child
     return IPC_OK();
   }
-  Unused << NS_WARN_IF(NS_FAILED(mozilla::NotifyPerformanceInfo(aMetrics)));
+  nsresult rv = PerformanceMetricsCollector::DataReceived(aID, aMetrics);
+  Unused << NS_WARN_IF(NS_FAILED(rv));
   return IPC_OK();
 }
 
@@ -5720,5 +5774,16 @@ ContentParent::RecvBHRThreadHang(const HangDetails& aDetails)
       new nsHangDetails(HangDetails(aDetails));
     obs->NotifyObservers(hangDetails, "bhr-thread-hang", nullptr);
   }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvFirstPartyStorageAccessGrantedForOrigin(const Principal& aParentPrincipal,
+                                                           const nsCString& aTrackingOrigin,
+                                                           const nsCString& aGrantedOrigin)
+{
+  AntiTrackingCommon::SaveFirstPartyStorageAccessGrantedForOriginOnParentProcess(aParentPrincipal,
+                                                                                 aTrackingOrigin,
+                                                                                 aGrantedOrigin);
   return IPC_OK();
 }

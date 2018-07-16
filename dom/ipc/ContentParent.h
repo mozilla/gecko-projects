@@ -43,6 +43,7 @@
 #define DEFAULT_REMOTE_TYPE "web"
 #define FILE_REMOTE_TYPE "file"
 #define EXTENSION_REMOTE_TYPE "extension"
+#define PRIVILEGED_REMOTE_TYPE "privileged"
 
 // This must start with the DEFAULT_REMOTE_TYPE above.
 #define LARGE_ALLOCATION_REMOTE_TYPE "webLargeAllocation"
@@ -202,6 +203,8 @@ public:
   static void GetAll(nsTArray<ContentParent*>& aArray);
 
   static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
+
+  static void BroadcastStringBundle(const StringBundleDescriptor&);
 
   const nsAString& GetRemoteType() const;
 
@@ -853,7 +856,7 @@ private:
 
   mozilla::ipc::IPCResult RecvAddMemoryReport(const MemoryReport& aReport) override;
   mozilla::ipc::IPCResult RecvFinishMemoryReport(const uint32_t& aGeneration) override;
-  mozilla::ipc::IPCResult RecvAddPerformanceMetrics(nsTArray<PerformanceInfo>&& aMetrics) override;
+  mozilla::ipc::IPCResult RecvAddPerformanceMetrics(const nsID& aID, nsTArray<PerformanceInfo>&& aMetrics) override;
 
   virtual bool
   DeallocPJavaScriptParent(mozilla::jsipc::PJavaScriptParent*) override;
@@ -994,6 +997,10 @@ private:
   virtual mozilla::ipc::IPCResult RecvClipboardHasType(nsTArray<nsCString>&& aTypes,
                                                        const int32_t& aWhichClipboard,
                                                        bool* aHasType) override;
+
+  virtual mozilla::ipc::IPCResult RecvGetExternalClipboardFormats(const int32_t& aWhichClipboard,
+                                                                  const bool& aPlainTextOnly,
+                                                                  nsTArray<nsCString>* aTypes) override;
 
   virtual mozilla::ipc::IPCResult RecvPlaySound(const URIParams& aURI) override;
   virtual mozilla::ipc::IPCResult RecvBeep() override;
@@ -1216,6 +1223,11 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvBHRThreadHang(
     const HangDetails& aHangDetails) override;
+
+  virtual mozilla::ipc::IPCResult
+  RecvFirstPartyStorageAccessGrantedForOrigin(const Principal& aParentPrincipal,
+                                              const nsCString& aTrackingOrigin,
+                                              const nsCString& aGrantedOrigin) override;
 
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.

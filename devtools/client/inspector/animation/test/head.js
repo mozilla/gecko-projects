@@ -188,8 +188,7 @@ const clickOnRewindButton = async function(animationInspector, panel) {
  */
 const clickOnCurrentTimeScrubberController = async function(animationInspector,
                                                             panel,
-                                                            mouseDownPosition,
-                                                            mouseMovePosition) {
+                                                            mouseDownPosition) {
   const controllerEl = panel.querySelector(".current-time-scrubber-area");
   const bounds = controllerEl.getBoundingClientRect();
   const mousedonwX = bounds.width * mouseDownPosition;
@@ -478,6 +477,28 @@ const setClassAttribute = async function(animationInspector, selector, cls) {
 };
 
 /**
+ * Set a new style properties to the node for the given selector.
+ *
+ * @param {AnimationInspector} animationInspector
+ * @param {String} selector
+ * @param {Object} properties
+ *        e.g. {
+ *               animationDuration: "1000ms",
+ *               animationTimingFunction: "linear",
+ *             }
+ */
+const setEffectTimingAndPlayback = async function(animationInspector,
+                                                  selector, effectTiming, playbackRate) {
+  const options = {
+    effectTiming,
+    playbackRate,
+    selector,
+  };
+  await executeInContent("Test:SetEffectTimingAndPlayback", options);
+  await waitForSummaryAndDetail(animationInspector);
+};
+
+/**
  * Set the sidebar width by given parameter.
  *
  * @param {String} width
@@ -510,6 +531,26 @@ const setStyle = async function(animationInspector,
     selector,
   };
   await executeInContent("devtools:test:setStyle", options);
+  await waitForSummaryAndDetail(animationInspector);
+};
+
+/**
+ * Set a new style properties to the node for the given selector.
+ *
+ * @param {AnimationInspector} animationInspector
+ * @param {String} selector
+ * @param {Object} properties
+ *        e.g. {
+ *               animationDuration: "1000ms",
+ *               animationTimingFunction: "linear",
+ *             }
+ */
+const setStyles = async function(animationInspector, selector, properties) {
+  const options = {
+    properties,
+    selector,
+  };
+  await executeInContent("devtools:test:setMultipleStyles", options);
   await waitForSummaryAndDetail(animationInspector);
 };
 
@@ -820,4 +861,18 @@ async function testKeyframesGraphComputedValuePath(testData) {
       }
     }
   }
+}
+
+/**
+ * Check the adjusted current time and created time from specified two animations.
+ *
+ * @param {AnimationPlayerFront.state} animation1
+ * @param {AnimationPlayerFront.state} animation2
+ */
+function checkAdjustingTheTime(animation1, animation2) {
+  const adjustedCurrentTimeDiff = animation2.currentTime / animation2.playbackRate
+                                  - animation1.currentTime / animation1.playbackRate;
+  const createdTimeDiff = animation1.createdTime - animation2.createdTime;
+  ok(Math.abs(adjustedCurrentTimeDiff - createdTimeDiff) < 0.1,
+     "Adjusted time is correct");
 }

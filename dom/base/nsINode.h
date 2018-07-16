@@ -946,7 +946,7 @@ public:
 
   /**
    * Get the parent nsINode for this node. This can be either an nsIContent,
-   * an nsIDocument or an nsIAttribute.
+   * an nsIDocument or an Attr.
    * @return the parent node
    */
   nsINode* GetParentNode() const
@@ -1551,6 +1551,8 @@ private:
     // Set if the element might have any kind of anonymous content children,
     // which would not be found through the element's children list.
     ElementMayHaveAnonymousChildren,
+    // Set if element has CustomElementData.
+    ElementHasCustomElementData,
     // Guard value
     BooleanFlagCount
   };
@@ -1675,6 +1677,9 @@ public:
 
   void SetMayHaveAnonymousChildren() { SetBoolFlag(ElementMayHaveAnonymousChildren); }
   bool MayHaveAnonymousChildren() const { return GetBoolFlag(ElementMayHaveAnonymousChildren); }
+
+  void SetHasCustomElementData() { SetBoolFlag(ElementHasCustomElementData); }
+  bool HasCustomElementData() const { return GetBoolFlag(ElementHasCustomElementData); }
 
 protected:
   void SetParentIsContent(bool aValue) { SetBoolFlag(ParentIsContent, aValue); }

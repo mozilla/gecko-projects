@@ -230,10 +230,9 @@ struct RustSdpAttributeRemoteCandidate {
   uint32_t port;
 };
 
-// TODO: Add field indicating whether direction was specified
-// See Bug 1438536.
 struct RustSdpAttributeExtmap {
   uint16_t id;
+  bool direction_specified;
   RustDirection direction;
   StringView url;
   StringView extensionAttributes;
@@ -256,7 +255,7 @@ nsresult u8_vec_get(const U8Vec* vec, size_t index, uint8_t* ret);
 
 void sdp_free_string(char* string);
 
-nsresult parse_sdp(const char* sdp, uint32_t length, bool fail_on_warning,
+nsresult parse_sdp(StringView sdp, bool fail_on_warning,
                    RustSdpSession** ret, RustSdpError** err);
 RustSdpSession* sdp_new_reference(RustSdpSession* aSess);
 void sdp_free_session(RustSdpSession* ret);
@@ -305,6 +304,9 @@ nsresult sdp_media_add_codec(const RustMediaSection* aMediaSec,
                              uint8_t aPT, StringView aCodecName,
                              uint32_t aClockrate, uint16_t channels);
 void sdp_media_clear_codecs(const RustMediaSection* aMediaSec);
+nsresult sdp_media_add_datachannel(const RustMediaSection* aMediaSec,
+                                   StringView aName, uint16_t aPort,
+                                   uint16_t streams, uint32_t aMessageSize);
 
 nsresult sdp_get_iceufrag(const RustAttributeList* aList, StringView* ret);
 nsresult sdp_get_icepwd(const RustAttributeList* aList, StringView* ret);
@@ -330,6 +332,9 @@ size_t sdp_get_fmtp(const RustAttributeList* aList, size_t listSize,
                     RustSdpAttributeFmtp* ret);
 
 int64_t sdp_get_ptime(const RustAttributeList* aList);
+int64_t sdp_get_max_msg_size(const RustAttributeList* aList);
+int64_t sdp_get_sctp_port(const RustAttributeList* aList);
+nsresult sdp_get_maxptime(const RustAttributeList* aList, uint64_t* aMaxPtime);
 
 RustSdpAttributeFlags sdp_get_attribute_flags(const RustAttributeList* aList);
 
@@ -344,7 +349,7 @@ void sdp_get_msid_semantics(const RustAttributeList* aList, size_t listSize,
                             RustSdpAttributeMsidSemantic* ret);
 
 size_t sdp_get_group_count(const RustAttributeList* aList);
-nsresult sdp_get_groups(const RustAttributeList* aList, size_t listSize,
+void sdp_get_groups(const RustAttributeList* aList, size_t listSize,
                         RustSdpAttributeGroup* ret);
 
 nsresult sdp_get_rtcp(const RustAttributeList* aList,

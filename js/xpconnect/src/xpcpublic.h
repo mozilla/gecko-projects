@@ -12,6 +12,7 @@
 #include "js/GCAPI.h"
 #include "js/Proxy.h"
 
+#include "nsAtom.h"
 #include "nsISupports.h"
 #include "nsIURI.h"
 #include "nsIPrincipal.h"
@@ -266,6 +267,28 @@ public:
         return true;
     }
 
+    static inline bool
+    DynamicAtomToJSVal(JSContext* cx, nsDynamicAtom* atom,
+                       JS::MutableHandleValue rval)
+    {
+        bool sharedAtom;
+        JSString* str = JS_NewMaybeExternalString(cx, atom->GetUTF16String(),
+                                                  atom->GetLength(),
+                                                  &sDynamicAtomFinalizer,
+                                                  &sharedAtom);
+        if (!str)
+            return false;
+        if (sharedAtom) {
+            // We only have non-owning atoms in DOMString for now.
+            // nsDynamicAtom::AddRef is always-inline and defined in a
+            // translation unit we can't get to here.  So we need to go through
+            // nsAtom::AddRef to call it.
+            static_cast<nsAtom*>(atom)->AddRef();
+        }
+        rval.setString(str);
+        return true;
+    }
+
     static MOZ_ALWAYS_INLINE bool IsLiteral(JSString* str)
     {
         return JS_IsExternalString(str) &&
@@ -279,11 +302,15 @@ public:
     }
 
 private:
-    static const JSStringFinalizer sLiteralFinalizer, sDOMStringFinalizer;
+    static const JSStringFinalizer
+      sLiteralFinalizer, sDOMStringFinalizer, sDynamicAtomFinalizer;
 
     static void FinalizeLiteral(const JSStringFinalizer* fin, char16_t* chars);
 
     static void FinalizeDOMString(const JSStringFinalizer* fin, char16_t* chars);
+
+    static void FinalizeDynamicAtom(const JSStringFinalizer* fin,
+                                    char16_t* chars);
 
     XPCStringConvert() = delete;
 };
@@ -364,6 +391,10 @@ bool NonVoidStringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
     if (str.HasLiteral()) {
         return XPCStringConvert::StringLiteralToJSVal(cx, str.Literal(),
                                                       str.LiteralLength(), rval);
+    }
+
+    if (str.HasAtom()) {
+        return XPCStringConvert::DynamicAtomToJSVal(cx, str.Atom(), rval);
     }
 
     // It's an actual XPCOM string
@@ -453,13 +484,16 @@ UnwrapReflectorToISupports(JSObject* reflector);
 JSObject*
 UnprivilegedJunkScope();
 
+/**
+ * This will generally be the shared JSM global, but callers should not depend
+ * on that fact.
+ */
 JSObject*
 PrivilegedJunkScope();
 
 /**
  * Shared compilation scope for XUL prototype documents and XBL
- * precompilation. This compartment has a null principal. No code may run, and
- * it is invisible to the debugger.
+ * precompilation.
  */
 JSObject*
 CompilationScope();
@@ -471,6 +505,13 @@ nsIGlobalObject*
 NativeGlobal(JSObject* aObj);
 
 /**
+ * Returns the nsIGlobalObject corresponding to |cx|'s JS global. Must not be
+ * called when |cx| is not in a Realm.
+ */
+nsIGlobalObject*
+CurrentNativeGlobal(JSContext* cx);
+
+/**
  * If |aObj| is a window, returns the associated nsGlobalWindow.
  * Otherwise, returns null.
  */
@@ -479,13 +520,14 @@ WindowOrNull(JSObject* aObj);
 
 /**
  * If |aObj| has a window for a global, returns the associated nsGlobalWindow.
- * Otherwise, returns null.
+ * Otherwise, returns null. Note: aObj must not be a cross-compartment wrapper
+ * because CCWs are not associated with a single global/realm.
  */
 nsGlobalWindowInner*
 WindowGlobalOrNull(JSObject* aObj);
 
 /**
- * If |cx| is in a compartment whose global is a window, returns the associated
+ * If |cx| is in a realm whose global is a window, returns the associated
  * nsGlobalWindow. Otherwise, returns null.
  */
 nsGlobalWindowInner*
