@@ -696,8 +696,11 @@ SendMessageToUIProcess(const char* aMessage)
   ErrorResult err;
   nsAutoString message;
   message.Append(NS_ConvertUTF8toUTF16(aMessage));
-  JS::Rooted<JS::Value> undefined(cx);
-  cpmm->SendAsyncMessage(cx, message, undefined, nullptr, nullptr, undefined, err);
+  JSString* str = JS_NewStringCopyZ(cx, gRecordingFilename);
+  MOZ_RELEASE_ASSERT(str);
+  JS::Rooted<JS::Value> data(cx), undefined(cx);
+  data.setString(str);
+  cpmm->SendAsyncMessage(cx, message, data, nullptr, nullptr, undefined, err);
   MOZ_RELEASE_ASSERT(!err.Failed());
   err.SuppressException();
 }
@@ -1000,6 +1003,7 @@ Resume(bool aForward)
       // Look for a recording child we can transition into.
       MOZ_RELEASE_ASSERT(!gActiveChild->IsRecording());
       if (!gRecordingChild) {
+        Print("HitRecordingEndpoint %s\n", gRecordingFilename);
         SendMessageToUIProcess("HitRecordingEndpoint");
         HitForcedPauseBreakpoints(true);
         return;
@@ -1089,6 +1093,15 @@ ResumeForwardOrBackward()
 
   if (gResumeForwardOrBackward && (gChildExecuteForward || gChildExecuteBackward)) {
     Resume(gChildExecuteForward);
+  }
+}
+
+void
+ResumeBeforeWaitingForIPDLReply()
+{
+  if (gResumeForwardOrBackward) {
+    MOZ_RELEASE_ASSERT(gChildExecuteForward);
+    Resume(true);
   }
 }
 

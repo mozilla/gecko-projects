@@ -43,7 +43,7 @@ void
 BeginCallback(size_t aCallbackId)
 {
   MOZ_RELEASE_ASSERT(IsRecording());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
 
   Thread* thread = Thread::Current();
   if (thread->IsMainThread()) {
@@ -60,7 +60,7 @@ EndCallback()
 {
   MOZ_RELEASE_ASSERT(IsRecording());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
 
   Thread* thread = Thread::Current();
   if (thread->IsMainThread()) {
@@ -74,8 +74,8 @@ SaveOrRestoreCallbackData(void** aData)
 {
   MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
   MOZ_RELEASE_ASSERT(gCallbackData);
+  AssertThreadEventsAllowed();
 
   Thread* thread = Thread::Current();
 
@@ -108,7 +108,7 @@ void
 PassThroughThreadEventsAllowCallbacks(const std::function<void()>& aFn)
 {
   MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
 
   Thread* thread = Thread::Current();
 

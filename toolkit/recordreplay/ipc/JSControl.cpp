@@ -405,9 +405,9 @@ RecordReplayInterface_IsInternalScript(const char* aURL)
 void
 ProcessRequest(const char16_t* aRequest, size_t aRequestLength, CharBuffer* aResponse)
 {
-  AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
+  AutoDisallowThreadEvents disallow;
 
   RootedValue requestValue(cx);
   if (!JS_ParseJSON(cx, aRequest, aRequestLength, &requestValue)) {
@@ -438,9 +438,9 @@ ProcessRequest(const char16_t* aRequest, size_t aRequestLength, CharBuffer* aRes
 void
 EnsurePositionHandler(const BreakpointPosition& aPosition)
 {
-  AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
+  AutoDisallowThreadEvents disallow;
 
   RootedObject obj(cx, EncodeBreakpointPosition(cx, aPosition));
   if (!obj) {
@@ -458,9 +458,9 @@ EnsurePositionHandler(const BreakpointPosition& aPosition)
 void
 ClearPositionHandlers()
 {
-  AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
+  AutoDisallowThreadEvents disallow;
 
   RootedValue rval(cx);
   if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ClearPositionHandlers",
@@ -472,9 +472,9 @@ ClearPositionHandlers()
 void
 ClearPausedState()
 {
-  AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
+  AutoDisallowThreadEvents disallow;
 
   RootedValue rval(cx);
   if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ClearPausedState",
@@ -486,9 +486,9 @@ ClearPausedState()
 Maybe<BreakpointPosition>
 GetEntryPosition(const BreakpointPosition& aPosition)
 {
-  AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
   JSAutoRealm ac(cx, *gDevtoolsSandbox);
+  AutoDisallowThreadEvents disallow;
 
   RootedObject positionObject(cx, EncodeBreakpointPosition(cx, aPosition));
   if (!positionObject) {

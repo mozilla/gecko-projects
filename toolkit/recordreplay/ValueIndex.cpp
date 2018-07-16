@@ -39,7 +39,7 @@ ValueIndex::GetIndex(const void* aValue)
 {
   size_t index;
   if (!MaybeGetIndex(aValue, &index)) {
-    MOZ_CRASH();
+    MOZ_CRASH("ValueIndex::GetIndex");
   }
   return index;
 }

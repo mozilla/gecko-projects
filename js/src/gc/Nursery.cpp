@@ -155,6 +155,11 @@ js::Nursery::init(uint32_t maxNurseryBytes, AutoLockGCBgAlloc& lock)
     if (!freeMallocedBuffersTask || !freeMallocedBuffersTask->init())
         return false;
 
+    // The nursery is permanently disabled when recording or replaying. Nursery
+    // collections may occur at non-deterministic points in execution.
+    if (mozilla::recordreplay::IsRecordingOrReplaying())
+        maxNurseryBytes = 0;
+
     /* maxNurseryBytes parameter is rounded down to a multiple of chunk size. */
     chunkCountLimit_ = maxNurseryBytes >> ChunkShift;
 
@@ -374,13 +379,13 @@ js::Nursery::allocate(size_t size)
         if (chunkno == maxChunkCount())
             return nullptr;
         if (MOZ_UNLIKELY(chunkno == allocatedChunkCount())) {
-            mozilla::TimeStamp start = ReallyNow();
+            mozilla::TimeStamp start = TimeStamp::Now();
             {
                 AutoLockGCBgAlloc lock(runtime());
                 if (!allocateNextChunk(chunkno, lock))
                     return nullptr;
             }
-            timeInChunkAlloc_ += ReallyNow() - start;
+            timeInChunkAlloc_ += TimeStamp::Now() - start;
             MOZ_ASSERT(chunkno < allocatedChunkCount());
         }
         setCurrentChunk(chunkno);
@@ -668,13 +673,13 @@ js::Nursery::maybeClearProfileDurations()
 inline void
 js::Nursery::startProfile(ProfileKey key)
 {
-    startTimes_[key] = ReallyNow();
+    startTimes_[key] = TimeStamp::Now();
 }
 
 inline void
 js::Nursery::endProfile(ProfileKey key)
 {
-    profileDurations_[key] = ReallyNow() - startTimes_[key];
+    profileDurations_[key] = TimeStamp::Now() - startTimes_[key];
     totalDurations_[key] += profileDurations_[key];
 }
 
@@ -701,8 +706,6 @@ js::Nursery::collect(JS::gcreason::Reason reason)
 {
     JSRuntime* rt = runtime();
     MOZ_ASSERT(!rt->mainContextFromOwnThread()->suppressGC);
-
-    mozilla::recordreplay::AutoDisallowThreadEvents disallow;
 
     if (!isEnabled() || isEmpty()) {
         // Our barriers are not always exact, and there may be entries in the

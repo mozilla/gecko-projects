@@ -316,6 +316,9 @@ public:
   }
 };
 
+// Make sure that events are allowed to occur on the current thread.
+void AssertThreadEventsAllowed();
+
 } // namespace recordreplay
 } // namespace mozilla
 

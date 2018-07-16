@@ -1244,6 +1244,13 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
   mIsTransparent = aInfo.isTransparent();
 }
 
+// FIXME
+namespace mozilla {
+  namespace recordreplay {
+    bool NewCheckpoint(bool aTemporary);
+  }
+}
+
 mozilla::ipc::IPCResult
 TabChild::RecvShow(const ScreenIntSize& aSize,
                    const ShowInfo& aInfo,
@@ -1270,6 +1277,11 @@ TabChild::RecvShow(const ScreenIntSize& aSize,
   if (!res) {
     return IPC_FAIL_NO_REASON(this);
   }
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    recordreplay::NewCheckpoint(/* aTemporary = */ false);
+  }
+
   return IPC_OK();
 }
 
@@ -2291,6 +2303,16 @@ TabChild::RecvActivateFrameEvent(const nsString& aType, const bool& capture)
   return IPC_OK();
 }
 
+// When recording or replaying, return whether a script should be loaded in the
+// middleman process instead of the recording/replaying process.
+static bool
+LoadScriptInMiddleman(const nsString& aURL)
+{
+  // Middleman processes run developer tools server code.
+  //return StringBeginsWith(aURL, NS_LITERAL_STRING("resource://devtools/"));
+  return !StringBeginsWith(aURL, NS_LITERAL_STRING("data:"));
+}
+
 mozilla::ipc::IPCResult
 TabChild::RecvLoadRemoteScript(const nsString& aURL, const bool& aRunInGlobalScope)
 {
@@ -2303,6 +2325,16 @@ TabChild::RecvLoadRemoteScript(const nsString& aURL, const bool& aRunInGlobalSco
   if (!global) {
     // This can happen if we're half-destroyed.  It's not a fatal error.
     return IPC_OK();
+  }
+
+  if (recordreplay::IsRecordingOrReplaying()) {
+    //if (LoadScriptInMiddleman(aURL)) {
+    //  return IPC_OK();
+    //}
+  } else if (recordreplay::IsMiddleman()) {
+    if (!LoadScriptInMiddleman(aURL)) {
+      return IPC_OK();
+    }
   }
 
   LoadScriptInternal(global, aURL, aRunInGlobalScope);

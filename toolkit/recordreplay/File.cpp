@@ -161,7 +161,8 @@ Stream::CheckInput(size_t aValue)
   size_t oldValue = aValue;
   RecordOrReplayScalar(&oldValue);
   if (oldValue != aValue) {
-    child::ReportFatalError("Input Mismatch: Recorded: %zu Replayed %zu\n", oldValue, aValue);
+    child::ReportFatalError("Input Mismatch: Thread %zu Recorded: %zu Replayed %zu [Thread %d]\n",
+                            Thread::Current()->Id(), oldValue, aValue);
     Unreachable();
   }
 }

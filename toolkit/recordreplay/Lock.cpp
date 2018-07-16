@@ -73,7 +73,7 @@ Lock::New(void* aNativeLock)
     return;
   }
 
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
   Thread* thread = Thread::Current();
 
   RecordReplayAssert("CreateLock");
@@ -154,7 +154,7 @@ void
 Lock::Enter(const std::function<void()>& aCallback)
 {
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough() && !HasDivergedFromRecording());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
 
   RecordReplayAssert("Lock %d", (int) mId);
 

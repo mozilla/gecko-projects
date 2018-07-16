@@ -66,7 +66,7 @@ RecordReplayInterface_RegisterTrigger(void* aObj, const std::function<void()>& a
     return;
   }
 
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
 
   size_t threadId = Thread::Current()->Id();
 
@@ -161,7 +161,7 @@ RecordReplayInterface_ExecuteTriggers()
 {
   MOZ_ASSERT(IsRecordingOrReplaying());
   MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
 
   Thread* thread = Thread::Current();
 

@@ -209,7 +209,7 @@ ChildProcessInfo::OnIncomingMessage(size_t aChannelId, const Message& aMsg)
     return;
   }
 
-  mLastMessageTime = TimeStamp::Now();
+  UpdateLastMessageTime();
 
   if (IsRecovering()) {
     OnIncomingRecoveryMessage(aMsg);
@@ -321,7 +321,7 @@ void
 ChildProcessInfo::SendMessageRaw(const Message& aMsg)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  mLastMessageTime = TimeStamp::Now();
+  UpdateLastMessageTime();
   mChannel->SendMessage(aMsg);
 }
 
@@ -503,7 +503,7 @@ ChildProcessInfo::LaunchSubprocess()
     dom::ContentChild::GetSingleton()->SendCreateReplayingProcess(channelId);
   }
 
-  mLastMessageTime = TimeStamp::Now();
+  UpdateLastMessageTime();
 
   SendGraphicsMemoryToChild();
 
@@ -635,8 +635,9 @@ ChildProcessInfo::WaitUntil(const std::function<bool()>& aCallback)
   while (!aCallback()) {
     MonitorAutoLock lock(*gMonitor);
     if (!MaybeProcessPendingMessage(this)) {
-      if (gChildrenAreDebugging) {
-        // Don't watch for hangs when children are being debugged.
+      if (IsRecording() || gChildrenAreDebugging) {
+        // Don't watch for hangs when children are being debugged. Recording
+        // children can't be restarted if they hang.
         gMonitor->Wait();
       } else {
         TimeStamp deadline = mLastMessageTime + TimeDuration::FromSeconds(HangSeconds);
@@ -648,6 +649,12 @@ ChildProcessInfo::WaitUntil(const std::function<bool()>& aCallback)
       }
     }
   }
+}
+
+void
+ChildProcessInfo::UpdateLastMessageTime()
+{
+  mLastMessageTime = TimeStamp::Now();
 }
 
 // Runnable created on the main thread to handle any tasks sent by the replay

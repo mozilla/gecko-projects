@@ -79,8 +79,7 @@ ChannelMessageHandler(Message* aMsg)
   case MessageType::CreateCheckpoint: {
     MOZ_RELEASE_ASSERT(IsRecording());
 
-    // Ignore requests to create checkpoints before we have reached the first
-    // paint and finished initializing.
+    // Ignore requests to create checkpoints before we are done initializing.
     if (navigation::IsInitialized()) {
       uint8_t data = 0;
       DirectWrite(gCheckpointWriteFd, &data, 1);
@@ -285,7 +284,6 @@ InitRecordingOrReplayingProcess(int* aArgc, char*** aArgv)
   gParentArgv.append(nullptr);
 
   MOZ_RELEASE_ASSERT(*aArgc >= 1);
-  MOZ_RELEASE_ASSERT(!strcmp((*aArgv)[0], gParentArgv[0]));
   MOZ_RELEASE_ASSERT(gParentArgv.back() == nullptr);
 
   *aArgc = gParentArgv.length() - 1; // For the trailing null.
@@ -333,6 +331,12 @@ ReportFatalError(const char* aFormat, ...)
   DirectPrint("***** Fatal Record/Replay Error *****\n");
   DirectPrint(buf);
   DirectPrint("\n");
+
+  {
+    AutoEnsurePassThroughThreadEvents pt;
+    SprintfLiteral(buf, "PID: %d\n", getpid());
+    DirectPrint(buf);
+  }
 
   UnrecoverableSnapshotFailure();
 

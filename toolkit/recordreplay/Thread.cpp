@@ -235,9 +235,9 @@ Thread::SpawnThread(Thread* aThread)
 /* static */ NativeThreadId
 Thread::StartThread(Callback aStart, void* aArgument, bool aNeedsJoin)
 {
-  MOZ_ASSERT(IsRecordingOrReplaying());
-  MOZ_ASSERT(!AreThreadEventsPassedThrough());
-  MOZ_ASSERT(!AreThreadEventsDisallowed());
+  MOZ_RELEASE_ASSERT(IsRecordingOrReplaying());
+  MOZ_RELEASE_ASSERT(!AreThreadEventsPassedThrough());
+  AssertThreadEventsAllowed();
 
   EnsureNotDivergedFromRecording();
   Thread* thread = Thread::Current();
@@ -603,6 +603,16 @@ Thread::Notify(size_t aId)
 {
   uint8_t data = 0;
   DirectWrite(GetById(aId)->mNotifyfd, &data, 1);
+}
+
+void
+AssertThreadEventsAllowed()
+{
+  // Simply asserting !AreThreadEventsDisallowed() sometimes causes the process
+  // to hang rather than reporting the error.
+  if (AreThreadEventsDisallowed()) {
+    child::ReportFatalError("AssertThreadEventsAllowed()");
+  }
 }
 
 } // namespace recordreplay

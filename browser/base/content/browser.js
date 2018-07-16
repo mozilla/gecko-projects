@@ -7324,10 +7324,29 @@ function SaveRecordedExecution() {
 function BeginReplayExecution() {
   let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
   let window = gBrowser.ownerGlobal;
-  fp.init(window, null, Ci.nsIFilePicker.modeOpen);
+  fp.init(window, null, Ci.nsIFilePicker.modeOpenMultiple);
   fp.open(rv => {
-    if (rv == Ci.nsIFilePicker.returnOK || rv == Ci.nsIFilePicker.returnReplace) {
-      gBrowser.selectedTab = gBrowser.addTab(null, { replayExecution: fp.file.path });
+    if (rv == Ci.nsIFilePicker.returnOK) {
+      let files = fp.files;
+      let paths = [];
+      while (files.hasMoreElements()) {
+        paths.push(files.getNext().QueryInterface(Ci.nsIFile).path);
+      }
+      for (let path of paths) {
+        let tab = gBrowser.addTab(null, { replayExecution: path });
+        if (paths.length == 1) {
+          gBrowser.selectedTab = tab;
+        } else {
+          let mm = Services.ppmm;
+          let onMessage = (message) => {
+            if (message.data == path) {
+              gBrowser.removeTab(tab);
+              mm.removeMessageListener("HitRecordingEndpoint", onMessage);
+            }
+          };
+          mm.addMessageListener("HitRecordingEndpoint", onMessage);
+        }
+      }
     }
   });
 }

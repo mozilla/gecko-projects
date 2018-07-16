@@ -163,7 +163,7 @@ public:
       // debugger operations that have diverged from the recording to fail.
       EnsureNotDivergedFromRecording();
 
-      MOZ_ASSERT(!AreThreadEventsDisallowed());
+      AssertThreadEventsAllowed();
 
       // Pass through events in case we are calling the original function.
       mThread->SetPassThrough(true);

@@ -3726,7 +3726,7 @@ nsGlobalWindowInner::Dump(const nsAString& aStr)
     __android_log_write(ANDROID_LOG_INFO, "GeckoDump", cstr);
 #endif
     FILE *fp = gDumpFile ? gDumpFile : stdout;
-    fputs(cstr, fp);
+    fprintf(fp, "[PID %d] %s", getpid(), cstr);
     fflush(fp);
     free(cstr);
   }

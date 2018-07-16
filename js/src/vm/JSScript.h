@@ -683,7 +683,7 @@ class ScriptSource
     // Inform `this` source that it has been fully parsed.
     void recordParseEnded() {
         MOZ_ASSERT(parseEnded_.IsNull());
-        parseEnded_ = ReallyNow();
+        parseEnded_ = mozilla::TimeStamp::Now();
     }
 };
 

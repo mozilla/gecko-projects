@@ -41,6 +41,10 @@ ChildProcessInfo* ActiveRecordingChild();
 // synchronous IPDL reply from the recording child.
 bool MainThreadIsWaitingForIPDLReply();
 
+// If necessary, resume execution in the child before the main thread begins
+// to block while waiting on an IPDL reply from the child.
+void ResumeBeforeWaitingForIPDLReply();
+
 // Initialize state which handles incoming IPDL messages from the UI and
 // recording child processes.
 void InitializeForwarding();
@@ -350,6 +354,9 @@ public:
   void WaitUntil(const std::function<bool()>& aCallback);
 
   void WaitUntilPaused() { WaitUntil([=]() { return IsPaused(); }); }
+
+  // Update the last message time for this process to the current time.
+  void UpdateLastMessageTime();
 
   static bool MaybeProcessPendingMessage(ChildProcessInfo* aProcess);
 

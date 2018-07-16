@@ -2514,7 +2514,7 @@ MessageChannel::MaybeHandleError(Result code, const Message& aMsg, const char* c
     if (msgname[0] == '?') {
         SprintfLiteral(reason,"(msgtype=0x%X) %s", aMsg.type(), errorMsg);
     } else {
-        SprintfLiteral(reason,"%s %s", msgname, errorMsg);
+        SprintfLiteral(reason,"%s %s %d", msgname, errorMsg, aMsg.routing_id());
     }
 
     PrintErrorMessage(mSide, channelName, reason);

@@ -122,7 +122,7 @@ Dump(JSContext* cx, unsigned argc, Value* vp)
         OutputDebugStringW(wstr.get());
     }
 #endif
-    fputs(utf8str.ptr(), stdout);
+    fprintf(stdout, "[PID %d] %s", getpid(), utf8str.ptr());
     fflush(stdout);
     return true;
 }

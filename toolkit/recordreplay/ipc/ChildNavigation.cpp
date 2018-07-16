@@ -1099,8 +1099,6 @@ BeforeCheckpoint()
     js::SetupDevtoolsSandbox();
   }
 
-  AutoDisallowThreadEvents disallow;
-
   // Reset the debugger to a consistent state before each checkpoint.
   js::ClearPositionHandlers();
 }
@@ -1195,6 +1193,10 @@ extern "C" {
 MOZ_EXPORT uint64_t
 RecordReplayInterface_NewTimeWarpTarget()
 {
+  if (!gNavigation) {
+    return 0;
+  }
+
   uint64_t progress = ++gProgressCounter;
 
   PositionHit(BreakpointPosition(BreakpointPosition::WarpTarget));

@@ -958,7 +958,7 @@ GCRuntime::GCRuntime(JSRuntime* rt) :
     numArenasFreeCommitted(0),
     verifyPreData(nullptr),
     chunkAllocationSinceLastGC(false),
-    lastGCTime(ReallyPRMJNow()),
+    lastGCTime(PRMJ_Now()),
     mode(TuningDefaults::Mode),
     numActiveZoneIters(0),
     cleanUpEverything(false),
@@ -3329,6 +3329,35 @@ Nursery::requestMinorGC(JS::gcreason::Reason reason) const
     runtime()->mainContextFromOwnThread()->requestInterrupt(InterruptReason::GC);
 }
 
+// Return false if a pending GC may not occur because we are recording or
+// replaying. GCs must occur at deterministic points when recording/replaying
+// (though the set of collected objects is non-deterministic), so GCs cannot
+// occur for reasons associated with non-deterministic triggers.
+static bool
+RecordReplayCheckCanGC(JS::gcreason::Reason reason)
+{
+    if (!mozilla::recordreplay::IsRecordingOrReplaying())
+        return true;
+
+    switch (reason) {
+      case JS::gcreason::EAGER_ALLOC_TRIGGER:
+      case JS::gcreason::LAST_DITCH:
+      case JS::gcreason::TOO_MUCH_MALLOC:
+      case JS::gcreason::ALLOC_TRIGGER:
+      case JS::gcreason::DELAYED_ATOMS_GC:
+      case JS::gcreason::TOO_MUCH_WASM_MEMORY:
+        return false;
+
+      default:
+        break;
+    }
+
+    // If the above filter misses a non-deterministically triggered GC, this
+    // assertion will fail.
+    mozilla::recordreplay::RecordReplayAssert("RecordReplayCheckCanGC %d", (int) reason);
+    return true;
+}
+
 bool
 GCRuntime::triggerGC(JS::gcreason::Reason reason)
 {
@@ -3341,6 +3370,10 @@ GCRuntime::triggerGC(JS::gcreason::Reason reason)
 
     /* GC is already running. */
     if (JS::RuntimeHeapIsCollecting())
+        return false;
+
+    // GCs can only be triggered in certain ways when recording/replaying.
+    if (!RecordReplayCheckCanGC(reason))
         return false;
 
     JS::PrepareForFullGC(rt->mainContextFromOwnThread());
@@ -3405,6 +3438,10 @@ GCRuntime::triggerZoneGC(Zone* zone, JS::gcreason::Reason reason, size_t used, s
 
     /* GC is already running. */
     if (JS::RuntimeHeapIsBusy())
+        return false;
+
+    // GCs can only be triggered in certain ways when recording/replaying.
+    if (!RecordReplayCheckCanGC(reason))
         return false;
 
 #ifdef JS_GC_ZEAL
@@ -4247,7 +4284,7 @@ GCRuntime::prepareZonesForCollection(JS::gcreason::Reason reason, bool* isFullOu
     *isFullOut = true;
     bool any = false;
 
-    int64_t currentTime = ReallyPRMJNow();
+    int64_t currentTime = PRMJ_Now();
 
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         /* Set up which zones will be collected. */
@@ -6800,7 +6837,7 @@ GCRuntime::finishCollection()
     marker.stop();
     clearBufferedGrayRoots();
 
-    uint64_t currentTime = ReallyPRMJNow();
+    uint64_t currentTime = PRMJ_Now();
     schedulingState.updateHighFrequencyMode(lastGCTime, currentTime, tunables);
 
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
@@ -7110,6 +7147,11 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
         budget.makeUnlimited();
     }
 
+    // The exact set of cells marked and swept can vary between recording and
+    // replaying, so disallow recorded events from occurring in those phases.
+    Maybe<mozilla::recordreplay::AutoDisallowThreadEvents> disallowThreadEvents;
+    disallowThreadEvents.emplace();
+
     switch (incrementalState) {
       case State::NotActive:
         initialReason = reason;
@@ -7123,6 +7165,9 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
         MOZ_FALLTHROUGH;
 
       case State::MarkRoots:
+        // Root marking can perform recorded events.
+        disallowThreadEvents.reset();
+
         if (!beginMarkPhase(reason, session)) {
             incrementalState = State::NotActive;
             return IncrementalResult::Ok;
@@ -7130,6 +7175,8 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
 
         if (!destroyingRuntime)
             pushZealSelectedObjects();
+
+        disallowThreadEvents.emplace();
 
         incrementalState = State::Mark;
 
@@ -7210,7 +7257,9 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
         if (performSweepActions(budget) == NotFinished)
             break;
 
+        disallowThreadEvents.reset();
         endSweepPhase(destroyingRuntime);
+        disallowThreadEvents.emplace();
 
         incrementalState = State::Finalize;
 
@@ -7276,6 +7325,8 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
 
             decommitTask.join();
         }
+
+        disallowThreadEvents.reset();
 
         finishCollection();
         incrementalState = State::NotActive;
@@ -7785,9 +7836,9 @@ GCRuntime::defaultBudget(JS::gcreason::Reason reason, int64_t millis)
 void
 GCRuntime::gc(JSGCInvocationKind gckind, JS::gcreason::Reason reason)
 {
-    // Garbage collection can occur at different points between recording and
-    // replay, so disallow recorded events from occurring during the GC.
-    mozilla::recordreplay::AutoDisallowThreadEvents d;
+    // Watch out for calls to gc() that don't go through triggerGC().
+    if (!RecordReplayCheckCanGC(reason))
+        return;
 
     invocationKind = gckind;
     collect(true, SliceBudget::unlimited(), reason);

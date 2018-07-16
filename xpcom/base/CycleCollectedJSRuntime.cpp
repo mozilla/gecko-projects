@@ -572,18 +572,6 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSContext* aCx)
 #ifdef MOZ_JS_DEV_ERROR_INTERCEPTOR
   JS_SetErrorInterceptorCallback(mJSRuntime, &mErrorInterceptor);
 #endif // MOZ_JS_DEV_ERROR_INTERCEPTOR
-
-  if (recordreplay::IsRecordingOrReplaying()) {
-    // When recording or replaying, the set of deferred things needing
-    // finalization  will be consistent between executions, see
-    // DeferredFinalize.h. This callback is used with the record/replay trigger
-    // mechanism to make sure that finalization of those things also happens at
-    // a consistent point.
-    recordreplay::RegisterTrigger(this,
-                                  [=]() {
-                                    FinalizeDeferredThings(CycleCollectedJSContext::FinalizeNow);
-                                  });
-  }
 }
 
 void
@@ -604,10 +592,6 @@ CycleCollectedJSRuntime::~CycleCollectedJSRuntime()
   MOZ_COUNT_DTOR(CycleCollectedJSRuntime);
   MOZ_ASSERT(!mDeferredFinalizerTable.Count());
   MOZ_ASSERT(mShutdownCalled);
-
-  if (recordreplay::IsRecordingOrReplaying()) {
-    recordreplay::UnregisterTrigger(this);
-  }
 }
 
 void
@@ -638,6 +622,8 @@ CycleCollectedJSRuntime::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 void
 CycleCollectedJSRuntime::UnmarkSkippableJSHolders()
 {
+  recordreplay::AutoDisallowThreadEvents disallow;
+
   for (auto iter = mJSHolders.Iter(); !iter.Done(); iter.Next()) {
     void* holder = iter.Get().mHolder;
     nsScriptObjectTracer* tracer = iter.Get().mTracer;
@@ -965,17 +951,14 @@ CycleCollectedJSRuntime::GCNurseryCollectionCallback(JSContext* aContext,
   MOZ_ASSERT(CycleCollectedJSContext::Get()->Context() == aContext);
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!recordreplay::IsRecordingOrReplaying()) {
-    RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
-    if (timelines && !timelines->IsEmpty()) {
-      UniquePtr<AbstractTimelineMarker> abstractMarker(
-        MakeUnique<MinorGCMarker>(aProgress, aReason));
-      timelines->AddMarkerForAllObservedDocShells(abstractMarker);
-    }
+  RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
+  if (timelines && !timelines->IsEmpty()) {
+    UniquePtr<AbstractTimelineMarker> abstractMarker(
+      MakeUnique<MinorGCMarker>(aProgress, aReason));
+    timelines->AddMarkerForAllObservedDocShells(abstractMarker);
   }
 
   if (aProgress == JS::GCNurseryProgress::GC_NURSERY_COLLECTION_START) {
-    recordreplay::AutoPassThroughThreadEvents pt;
     self->mLatestNurseryCollectionStart = TimeStamp::Now();
   }
 #ifdef MOZ_GECKO_PROFILER
@@ -1282,7 +1265,7 @@ CycleCollectedJSRuntime::JSObjectsTenured()
   for (auto iter = mNurseryObjects.Iter(); !iter.Done(); iter.Next()) {
     nsWrapperCache* cache = iter.Get();
     JSObject* wrapper = cache->GetWrapperMaybeDead();
-    MOZ_DIAGNOSTIC_ASSERT(wrapper || recordreplay::IsReplaying());
+    MOZ_DIAGNOSTIC_ASSERT(wrapper);
     if (!JS::ObjectIsTenured(wrapper)) {
       MOZ_ASSERT(!cache->PreservingWrapper());
       const JSClass* jsClass = js::GetObjectJSClass(wrapper);
@@ -1383,12 +1366,9 @@ IncrementalFinalizeRunnable::ReleaseNow(bool aLimited)
                "We should have at least ReleaseSliceNow to run");
     MOZ_ASSERT(mFinalizeFunctionToRun < mDeferredFinalizeFunctions.Length(),
                "No more finalizers to run?");
-    if (recordreplay::IsRecordingOrReplaying()) {
-      aLimited = false;
-    }
 
     TimeDuration sliceTime = TimeDuration::FromMilliseconds(SliceMillis);
-    TimeStamp started = aLimited ? TimeStamp::Now() : TimeStamp();
+    TimeStamp started = TimeStamp::Now();
     bool timeout = false;
     do {
       const DeferredFinalizeFunctionHolder& function =
@@ -1528,16 +1508,10 @@ CycleCollectedJSRuntime::OnGC(JSContext* aContext,
       // non-incremental GC when there is a pending exception, and the finalizers
       // are not set up to handle that. In that case, just run them later, after
       // we've returned to the event loop.
-      if (recordreplay::IsRecordingOrReplaying()) {
-        // Cause deferred things to be finalized soon, at a consistent point in
-        // the recording and replay, per the earlier registered trigger.
-        recordreplay::ActivateTrigger(this);
-      } else {
-        bool finalizeIncrementally = JS::WasIncrementalGC(mJSRuntime) || JS_IsExceptionPending(aContext);
-        FinalizeDeferredThings(finalizeIncrementally
-                               ? CycleCollectedJSContext::FinalizeIncrementally
-                               : CycleCollectedJSContext::FinalizeNow);
-      }
+      bool finalizeIncrementally = JS::WasIncrementalGC(mJSRuntime) || JS_IsExceptionPending(aContext);
+      FinalizeDeferredThings(finalizeIncrementally
+                             ? CycleCollectedJSContext::FinalizeIncrementally
+                             : CycleCollectedJSContext::FinalizeNow);
 
       break;
     }

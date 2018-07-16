@@ -1297,6 +1297,12 @@ void nsBaseWidget::CreateCompositorVsyncDispatcher()
 already_AddRefed<CompositorVsyncDispatcher>
 nsBaseWidget::GetCompositorVsyncDispatcher()
 {
+  // Recording/replaying processes have their own compositor, but do not have a
+  // vsync dispatcher.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return nullptr;
+  }
+
   MOZ_ASSERT(mCompositorVsyncDispatcherLock.get());
 
   MutexAutoLock lock(*mCompositorVsyncDispatcherLock.get());

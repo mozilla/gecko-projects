@@ -109,6 +109,7 @@ HandleMessageInMiddleman(ipc::Side aSide, const IPC::Message& aMessage)
       type == dom::PBrowser::Msg_UpdateDimensions__ID ||
       // This message performs some graphics related initialization.
       type == dom::PBrowser::Msg_LoadURL__ID ||
+      type == dom::PBrowser::Msg_Show__ID ||
       // May be loading devtools code that runs in the middleman process.
       type == dom::PBrowser::Msg_LoadRemoteScript__ID ||
       // May be sending a message for receipt by devtools code.
@@ -174,6 +175,7 @@ struct MOZ_RAII AutoMarkMainThreadWaitingForIPDLReply
   AutoMarkMainThreadWaitingForIPDLReply() {
     MOZ_RELEASE_ASSERT(NS_IsMainThread());
     MOZ_RELEASE_ASSERT(!gMainThreadIsWaitingForIPDLReply);
+    ResumeBeforeWaitingForIPDLReply();
     gMainThreadIsWaitingForIPDLReply = true;
   }
 
@@ -263,6 +265,7 @@ public:
 
     if (mSide == ipc::ChildSide) {
       AutoMarkMainThreadWaitingForIPDLReply blocked;
+      ActiveRecordingChild()->UpdateLastMessageTime();
       ActiveRecordingChild()->WaitUntil([&]() { return !!aReply; });
     } else {
       MonitorAutoLock lock(*gMonitor);
@@ -300,6 +303,7 @@ public:
 
     if (mSide == ipc::ChildSide) {
       AutoMarkMainThreadWaitingForIPDLReply blocked;
+      ActiveRecordingChild()->UpdateLastMessageTime();
       ActiveRecordingChild()->WaitUntil([&]() { return !!aReply; });
     } else {
       MonitorAutoLock lock(*gMonitor);

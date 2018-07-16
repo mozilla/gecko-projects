@@ -34,7 +34,7 @@ MessageManagerGlobal::Dump(const nsAString& aStr)
     OutputDebugStringW(PromiseFlatString(aStr).get());
   }
 #endif
-  fputs(NS_ConvertUTF16toUTF8(aStr).get(), stdout);
+  fprintf(stdout, "[PID %d] %s", getpid(), NS_ConvertUTF16toUTF8(aStr).get());
   fflush(stdout);
 }
 

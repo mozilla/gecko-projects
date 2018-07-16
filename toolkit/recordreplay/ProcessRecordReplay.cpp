@@ -22,6 +22,10 @@
 #include "WeakPointer.h"
 #include "pratom.h"
 
+#include "CodeAddressService.h"
+#include "nsTHashtable.h"
+#include "nsHashKeys.h"
+
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -56,6 +60,8 @@ static int gPid;
 
 // Whether to spew record/replay messages to stderr.
 static bool gSpewEnabled;
+
+static void InitializeCodeAddressService();
 
 extern "C" {
 
@@ -151,6 +157,7 @@ RecordReplayInterface_Initialize(int aArgc, char* aArgv[])
   Thread::SpawnAllThreads();
   InitializeCountdownThread();
   SetupDirtyMemoryHandler();
+  InitializeCodeAddressService();
 
   // Don't create a stylo thread pool when recording or replaying.
   putenv((char*) "STYLO_THREADS=1");
@@ -173,7 +180,7 @@ RecordReplayInterface_InternalRecordReplayValue(size_t aValue)
   }
   EnsureNotDivergedFromRecording();
 
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
   Thread* thread = Thread::Current();
 
   RecordReplayAssert("Value");
@@ -192,7 +199,7 @@ RecordReplayInterface_InternalRecordReplayBytes(void* aData, size_t aSize)
   }
   EnsureNotDivergedFromRecording();
 
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
   Thread* thread = Thread::Current();
 
   RecordReplayAssert("Bytes %d", (int) aSize);
@@ -331,6 +338,55 @@ InternalPrint(const char* aFormat, va_list aArgs)
 // Record/Replay Assertions
 ///////////////////////////////////////////////////////////////////////////////
 
+// Goop for CodeAddressService, copy/pasted from nsTraceRefCnt.cpp. It would be
+// nice if this could be commoned up somewhere.
+class CodeAddressServiceStringTable final
+{
+public:
+  CodeAddressServiceStringTable() : mSet(32) {}
+
+  const char* Intern(const char* aString) {
+    nsCharPtrHashKey* e = mSet.PutEntry(aString);
+    return e->GetKey();
+  }
+
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  {
+    return mSet.SizeOfExcludingThis(aMallocSizeOf);
+  }
+
+private:
+  typedef nsTHashtable<nsCharPtrHashKey> StringSet;
+  StringSet mSet;
+};
+
+// More goop.
+struct CodeAddressServiceStringAlloc final
+{
+  static char* copy(const char* aStr) { return strdup(aStr); }
+  static void free(char* aPtr) { ::free(aPtr); }
+};
+
+// More goop.
+struct CodeAddressServiceLock final
+{
+  static void Unlock() {}
+  static void Lock() {}
+  static bool IsLocked() { return true; }
+};
+
+typedef CodeAddressService<CodeAddressServiceStringTable,
+                           CodeAddressServiceStringAlloc,
+                           CodeAddressServiceLock> RecordReplayCodeAddressService;
+
+static RecordReplayCodeAddressService* gCodeAddressService;
+
+static void
+InitializeCodeAddressService()
+{
+  gCodeAddressService = new RecordReplayCodeAddressService();
+}
+
 struct StackWalkData
 {
   char* mBuf;
@@ -355,11 +411,11 @@ StackWalkCallback(uint32_t aFrameNumber, void* aPC, void* aSP, void* aClosure)
 {
   StackWalkData* data = (StackWalkData*) aClosure;
 
-  MozCodeAddressDetails details;
-  MozDescribeCodeAddress(aPC, &details);
+  char buf[256];
+  gCodeAddressService->GetLocation(aFrameNumber, aPC, buf, sizeof(buf));
 
   data->append(" ### ");
-  data->append(details.function[0] ? details.function : "???");
+  data->append(buf);
 }
 
 static void
@@ -408,7 +464,7 @@ RecordReplayInterface_InternalRecordReplayAssert(const char* aFormat, va_list aA
     return;
   }
 
-  MOZ_RELEASE_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
   Thread* thread = Thread::Current();
 
   // Record an assertion string consisting of the name of the assertion and
@@ -503,7 +559,7 @@ RecordReplayInterface_InternalRecordReplayAssertBytes(const void* aData, size_t 
     return;
   }
 
-  MOZ_ASSERT(!AreThreadEventsDisallowed());
+  AssertThreadEventsAllowed();
   Thread* thread = Thread::Current();
 
   if (IsRecording()) {
@@ -660,9 +716,17 @@ RecordReplayInterface_InternalThingIndex(void* aThing)
 MOZ_EXPORT const char*
 RecordReplayInterface_InternalVirtualThingName(void* aThing)
 {
+  if (!aThing) {
+    return "null";
+  }
+
   void* vtable = *(void**)aThing;
-  const char* name = SymbolNameRaw(vtable);
-  return name ? name : "(unknown)";
+
+  char buf[256];
+  gCodeAddressService->GetLocation(0, vtable, buf, sizeof(buf));
+
+  // Leak the buffer (this function is only used for debugging).
+  return strdup(buf);
 }
 
 } // extern "C"

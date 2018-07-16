@@ -765,6 +765,11 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
 }
 
 bool Channel::ChannelImpl::Send(Message* message) {
+  mozilla::recordreplay::RecordReplayAssert("Channel::ChannelImpl::Send %s %d %d",
+                                            IPC::StringFromIPCMessageType(message->type()),
+                                            message->routing_id(),
+                                            (int) message->CurrentSize());
+
 #ifdef IPC_MESSAGE_DEBUG_EXTRA
   DLOG(INFO) << "sending message @" << message << " on channel @" << this
              << " with type " << message->type()
