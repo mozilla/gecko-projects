@@ -529,6 +529,9 @@ task_description_schema = Schema({
         Required('implementation'): 'bouncer-aliases',
         Required('entries'): object,
     }, {
+        Required('implementation'): 'bouncer-locations',
+        Required('locations'): [basestring],
+    }, {
         Required('implementation'): 'bouncer-submission',
         Required('locales'): [basestring],
         Required('entries'): object,
@@ -1115,6 +1118,17 @@ def build_bouncer_aliases_payload(config, task, task_def):
 
     task_def['payload'] = {
         'aliases_entries': worker['entries']
+    }
+
+
+@payload_builder('bouncer-locations')
+def build_bouncer_locations_payload(config, task, task_def):
+    worker = task['worker']
+    release_config = get_release_config(config)
+
+    task_def['payload'] = {
+        'locations_entries': worker['locations'],
+        'version': release_config['version'],
     }
 
 
