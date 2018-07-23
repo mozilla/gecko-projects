@@ -17,9 +17,9 @@ android-api-16/debug:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
@@ -66,9 +66,9 @@ android-x86/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
@@ -120,9 +120,9 @@ android-x86-nightly/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
@@ -170,9 +170,9 @@ android-api-16/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
@@ -220,9 +220,9 @@ android-api-16-without-google-play-services/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview_example.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview_example/outputs/apk/geckoview_example-withGeckoBinaries.apk
               type: file
@@ -272,9 +272,9 @@ android-api-16-nightly/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
@@ -322,9 +322,9 @@ android-aarch64/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
@@ -376,9 +376,9 @@ android-aarch64-nightly/opt:
             - name: public/android/R
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/app/R
               type: directory
-            - name: public/android/maven
-              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/maven/
-              type: directory
+            - name: public/build/target.maven.zip
+              path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/target.maven.zip
+              type: file
             - name: public/build/geckoview-androidTest.apk
               path: /builds/worker/workspace/build/src/obj-firefox/gradle/build/mobile/android/geckoview/outputs/apk/androidTest/officialWithGeckoBinariesNoMinApi/debug/geckoview-official-withGeckoBinaries-noMinApi-debug-androidTest.apk
               type: file
