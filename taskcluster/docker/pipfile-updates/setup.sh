@@ -17,9 +17,7 @@ apt-get update -q
 apt-get install -y --no-install-recommends \
     arcanist \
     python \
-    python-pip \
-    python3 \
-    python3-pip
+    python3
 
 apt-get clean
 
