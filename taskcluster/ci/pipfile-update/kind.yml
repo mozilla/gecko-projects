@@ -23,8 +23,6 @@ job-defaults:
       os: linux
       docker-image: {in-tree: pipfile-updates}
       max-run-time: 1200
-      env:
-         REVIEWERS: "bhearsum, aki"
       command:
          - /runme.sh
       artifacts:
@@ -42,3 +40,5 @@ jobs:
       worker:
          env:
             PIPFILE_DIRECTORY: "taskcluster/docker/funsize-update-generator"
+            PYTHON3: "1"
+            REVIEWERS: "sfraser, bhearsum"

@@ -5,10 +5,16 @@ set -xe
 # Things to be set by task definition.
 # -b branch
 # -p pipfile_directory
+# -3 use python3
 
 
 test "${BRANCH}"
 test "${PIPFILE_DIRECTORY}"
+
+PIP_ARG="-2"
+if [ -n "${PYTHON3}" ]; then
+  PIP_ARG="-3"
+fi
 
 export ARTIFACTS_DIR="/home/worker/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
@@ -48,4 +54,4 @@ END
 fi
 
 # shellcheck disable=SC2086
-/home/worker/scripts/update_pipfiles.sh -b "${BRANCH}" -p "${PIPFILE_DIRECTORY}"
+/home/worker/scripts/update_pipfiles.sh -b "${BRANCH}" -p "${PIPFILE_DIRECTORY}" ${PIP_ARG}

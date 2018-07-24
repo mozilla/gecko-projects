@@ -19,20 +19,21 @@ REPODIR=''
 HGHOST="hg.mozilla.org"
 BASEDIR="${HOME}"
 PIPFILE_DIRECTORY=""
+DIFF="$(command -v diff) -u"
+DIFF_ARTIFACT="${ARTIFACTS_DIR}/Pipfile.lock.diff"
 
 HG="$(command -v hg)"
 
 # Clones an hg repo
 function clone_repo {
-  #cd "${BASEDIR}"
-  #if [ ! -d "${REPODIR}" ]; then
-  #  CLONE_CMD="${HG} clone ${HGREPO} ${REPODIR}"
-  #  ${CLONE_CMD}
-  #fi
+  cd "${BASEDIR}"
+  if [ ! -d "${REPODIR}" ]; then
+    CLONE_CMD="${HG} clone ${HGREPO} ${REPODIR}"
+    ${CLONE_CMD}
+  fi
 
-  #${HG} -R ${REPODIR} pull
-  #${HG} -R ${REPODIR} update -C default
-  git clone ~/repos/gecko ${REPODIR}
+  ${HG} -R ${REPODIR} pull
+  ${HG} -R ${REPODIR} update -C default
 }
 
 # Push all pending commits to Phabricator
@@ -60,7 +61,7 @@ function push_repo {
     echo '{"transactions": [{"type":"abandon"}], "objectIdentifier": "'"${diff}"'"}' | arc call-conduit differential.revision.edit
   done
 
-  $ARC diff --verbatim --reviewers "${REVIEWERS}"
+  echo $ARC diff --verbatim --reviewers "${REVIEWERS}"
 }
 
 function update_pipfile {
@@ -116,12 +117,17 @@ fi
 
 clone_repo
 
+${PIP} install pipenv
+
 update_pipfile ${PIPFILE_DIRECTORY}
+echo "INFO: diffing old/new Pipfile.lock into ${DIFF_ARTIFACT}"
+hg diff "${BASEDIR}/${PIPFILE_DIRECTORY}/Pipfile.lock" | tee "${DIFF_ARTIFACT}"
 
 COMMIT_MESSAGE="No Bug, update ${PIPFILE_DIRECTORY} python dependencies."
 
 if ${HG} -R "${REPODIR}" commit -u "${COMMIT_AUTHOR}" -m "${COMMIT_MESSAGE}"
 then
+  ${HG} -R "${REPO_DIR}" out
   push_repo
 fi
 
