@@ -152,4 +152,6 @@ def craft_release_properties(config, job):
     artifact_id = _ARTIFACT_ID_PER_PLATFORM[platform].format(branch=branch)
     props['artifact-id'] = artifact_id
 
+    props['app-name'] = 'geckoview' # this beetmover job is not about pushing Fennec
+
     return props
