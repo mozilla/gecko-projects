@@ -461,6 +461,11 @@ repo-update
 Repo-Update tasks are tasks that perform some action on the project repo itself,
 in order to update its state in some way.
 
+pipfile-update
+--------------
+Repo-Update tasks are tasks that perform some action on the project repo itself,
+in order to update its state in some way.
+
 partials
 --------
 Partials takes the complete.mar files produced in previous tasks and generates partial
