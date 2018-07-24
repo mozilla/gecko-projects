@@ -107,6 +107,7 @@ def generate_upstream_artifacts(build_task_ref):
         'taskId': {'task-reference': build_task_ref},
         'taskType': 'build',
         'paths': ['public/build/target.maven.zip'],
+        'zipExtract': True,
     }]
 
 

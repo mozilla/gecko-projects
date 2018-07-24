@@ -519,6 +519,7 @@ task_description_schema = Schema({
             Required('taskId'): taskref_or_string,
             Required('taskType'): basestring,
             Required('paths'): [basestring],
+            Required('zipExtract', default=False): bool,
         }],
     }, {
         Required('implementation'): 'balrog',
