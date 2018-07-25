@@ -27,5 +27,7 @@ ENV           HOME          /home/worker
 ENV           SHELL         /bin/bash
 ENV           USER          worker
 ENV           LOGNAME       worker
+ENV           LC_ALL        C.UTF-8
+ENV           LANG          C.UTF-8
 
 CMD ["/runme.sh"]
