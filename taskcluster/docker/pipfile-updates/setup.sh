@@ -16,6 +16,7 @@ useradd -d /home/worker -s /bin/bash -m worker
 apt-get update -q
 apt-get install -y --no-install-recommends \
     arcanist \
+    curl \
     gcc \
     jq \
     libdpkg-perl \

@@ -19,7 +19,6 @@ REPODIR=''
 HGHOST="hg.mozilla.org"
 BASEDIR="${HOME}"
 PIPFILE_DIRECTORY=""
-DIFF="$(command -v diff) -u"
 DIFF_ARTIFACT="${ARTIFACTS_DIR}/Pipfile.lock.diff"
 
 HG="$(command -v hg)"
@@ -65,7 +64,7 @@ function push_repo {
 }
 
 function update_pipfile {
-  pushd ${REPODIR}/${1}
+  pushd "${REPODIR}/${1}"
   pipenv update
   popd
 }
@@ -77,7 +76,6 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -h) usage; exit 0 ;;
     -b) BRANCH="$2"; shift ;;
-    -n) DRY_RUN=true ;;
     -r) REPODIR="$2"; shift ;;
     -2) PIP="pip" ;;
     -3) PIP="pip3" ;;
@@ -119,9 +117,9 @@ clone_repo
 
 ${PIP} install pipenv
 
-update_pipfile ${PIPFILE_DIRECTORY}
+update_pipfile "${PIPFILE_DIRECTORY}"
 echo "INFO: diffing old/new Pipfile.lock into ${DIFF_ARTIFACT}"
-hg -R ${REPODIR} diff "${BASEDIR}/${BRANCH}/${PIPFILE_DIRECTORY}/Pipfile.lock" | tee "${DIFF_ARTIFACT}"
+hg -R "${REPODIR}" diff "${BASEDIR}/${BRANCH}/${PIPFILE_DIRECTORY}/Pipfile.lock" | tee "${DIFF_ARTIFACT}"
 
 COMMIT_MESSAGE="No Bug, update ${PIPFILE_DIRECTORY} python dependencies."
 
