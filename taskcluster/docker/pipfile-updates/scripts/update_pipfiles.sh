@@ -53,7 +53,7 @@ function push_repo {
   # Clean up older review requests
   # Turn  Needs Review D624: No bug, Automated HSTS ...
   # into D624
-  for diff in $($ARC list | grep "Needs Review" | grep -E "${BRANCH} repo-update" | awk 'match($0, /D[0-9]+[^: ]/) { print substr($0, RSTART, RLENGTH)  }')
+  for diff in $($ARC list | grep "Needs Review" | grep -E "${BRANCH} pipfile-update" | awk 'match($0, /D[0-9]+[^: ]/) { print substr($0, RSTART, RLENGTH)  }')
   do
     echo "Removing old request $diff"
     # There is no 'arc abandon', see bug 1452082
@@ -121,7 +121,7 @@ update_pipfile "${PIPFILE_DIRECTORY}"
 echo "INFO: diffing old/new Pipfile.lock into ${DIFF_ARTIFACT}"
 hg -R "${REPODIR}" diff "${BASEDIR}/${BRANCH}/${PIPFILE_DIRECTORY}/Pipfile.lock" | tee "${DIFF_ARTIFACT}"
 
-COMMIT_MESSAGE="No Bug, update ${PIPFILE_DIRECTORY} python dependencies."
+COMMIT_MESSAGE="No Bug, ${PIPFILE_DIRECTORY} pipfile-update."
 
 if ${HG} -R "${REPODIR}" commit -u "${COMMIT_AUTHOR}" -m "${COMMIT_MESSAGE}"
 then
