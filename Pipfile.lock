@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "49ee921675050dfcd28beebd0b35cc9564e89280fb9372faf60570c4d54bf03c"
+            "sha256": "609a35f65e9a4c07e0e1473ec982c6b5028622e9a795b6cfb8555ad8574804f3"
         },
         "pipfile-spec": 6,
         "requires": {},
@@ -45,15 +45,6 @@
             ],
             "version": "==2018.4.16"
         },
-        "enum34": {
-            "hashes": [
-                "sha256:2d81cbbe0e73112bdfe6ef8576f2238f2ba27dd0d55752a776c41d38b7da2850",
-                "sha256:644837f692e5f550741432dd3f223bbb9852018674981b1664e5dc339387588a",
-                "sha256:6bd0f6ad48ec2aa117d3d141940d484deccda84d4fcd884f5c3d93c23ecd8c79",
-                "sha256:8ad8c4783bf61ded74527bffb48ed9b54166685e4230386a9ed9b1279e2df5b1"
-            ],
-            "version": "==1.1.6"
-        },
         "funcsigs": {
             "hashes": [
                 "sha256:330cc27ccbf7f1e992e69fef78261dc7c6569012cf397db8d3de0234e6c937ca",
@@ -83,13 +74,6 @@
                 "sha256:a18d870ef2ffca2b8463c0070ad17b5978056f403fb64e3f15fe62a52db21cc0"
             ],
             "version": "==4.2.0"
-        },
-        "mozilla-version": {
-            "hashes": [
-                "sha256:83b34904899b4528168587445871bae7ebfc09e2e4a19253e23a29f6b2ed9b7f"
-            ],
-            "index": "pypi",
-            "version": "==0.1.2"
         },
         "pipenv": {
             "hashes": [
