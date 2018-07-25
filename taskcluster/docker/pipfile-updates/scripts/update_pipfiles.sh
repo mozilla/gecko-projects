@@ -60,7 +60,7 @@ function push_repo {
     echo '{"transactions": [{"type":"abandon"}], "objectIdentifier": "'"${diff}"'"}' | arc call-conduit differential.revision.edit
   done
 
-  echo $ARC diff --verbatim --reviewers "${REVIEWERS}"
+  $ARC diff --verbatim --reviewers "${REVIEWERS}"
 }
 
 function update_pipfile {
