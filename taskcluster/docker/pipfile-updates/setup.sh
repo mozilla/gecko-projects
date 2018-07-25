@@ -17,6 +17,7 @@ apt-get update -q
 apt-get install -y --no-install-recommends \
     arcanist \
     gcc \
+    jq \
     libdpkg-perl \
     liblzma-dev \
     python \
