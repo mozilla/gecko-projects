@@ -121,13 +121,13 @@ ${PIP} install pipenv
 
 update_pipfile ${PIPFILE_DIRECTORY}
 echo "INFO: diffing old/new Pipfile.lock into ${DIFF_ARTIFACT}"
-hg diff "${BASEDIR}/${PIPFILE_DIRECTORY}/Pipfile.lock" | tee "${DIFF_ARTIFACT}"
+hg -R ${REPODIR} diff "${BASEDIR}/${BRANCH}/${PIPFILE_DIRECTORY}/Pipfile.lock" | tee "${DIFF_ARTIFACT}"
 
 COMMIT_MESSAGE="No Bug, update ${PIPFILE_DIRECTORY} python dependencies."
 
 if ${HG} -R "${REPODIR}" commit -u "${COMMIT_AUTHOR}" -m "${COMMIT_MESSAGE}"
 then
-  ${HG} -R "${REPO_DIR}" out
+  ${HG} -R "${REPODIR}" out
   push_repo
 fi
 

@@ -16,8 +16,15 @@ useradd -d /home/worker -s /bin/bash -m worker
 apt-get update -q
 apt-get install -y --no-install-recommends \
     arcanist \
+    gcc \
+    libdpkg-perl \
+    liblzma-dev \
     python \
-    python3
+    python-dev \
+    python-pip \
+    python3 \
+    python3-dev \
+    python3-pip
 
 apt-get clean
 
