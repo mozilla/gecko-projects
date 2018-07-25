@@ -145,10 +145,11 @@ def craft_release_properties(config, job):
     props = beetmover_craft_release_properties(config, job)
 
     platform = props['platform']
-    update_channel = _MOZ_UPDATE_CHANNEL_PER_BRANCH.get(props['branch'], '-UNKNOWN_MOZ_UPDATE_CHANNEL')
+    update_channel = _MOZ_UPDATE_CHANNEL_PER_BRANCH.get(
+        props['branch'], '-UNKNOWN_MOZ_UPDATE_CHANNEL'
+    )
     artifact_id = _ARTIFACT_ID_PER_PLATFORM[platform].format(update_channel=update_channel)
     props['artifact-id'] = artifact_id
-
-    props['app-name'] = 'geckoview' # this beetmover job is not about pushing Fennec
+    props['app-name'] = 'geckoview'     # this beetmover job is not about pushing Fennec
 
     return props
