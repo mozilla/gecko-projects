@@ -7,8 +7,6 @@ Transform the beetmover task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from mozilla_version.firefox import FirefoxVersion
-
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import \
     craft_release_properties as beetmover_craft_release_properties
@@ -21,9 +19,16 @@ from voluptuous import Required, Optional
 
 
 _ARTIFACT_ID_PER_PLATFORM = {
-    'android-aarch64': 'geckoview{branch}-arm64-v8a',
-    'android-api-16': 'geckoview{branch}-armeabi-v7a',
-    'android-x86': 'geckoview{branch}-x86',
+    'android-aarch64': 'geckoview{update_channel}-arm64-v8a',
+    'android-api-16': 'geckoview{update_channel}-armeabi-v7a',
+    'android-x86': 'geckoview{update_channel}-x86',
+}
+
+_MOZ_UPDATE_CHANNEL_PER_BRANCH = {
+    'mozilla-release': '',
+    'mozilla-beta': '-beta',
+    'mozilla-central': '-nightly',
+    'maple': '-nightly-maple',
 }
 
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
@@ -139,18 +144,9 @@ def make_task_worker(config, jobs):
 def craft_release_properties(config, job):
     props = beetmover_craft_release_properties(config, job)
 
-    version = FirefoxVersion(props['app-version'])
-    if version.is_beta:
-        branch = '-beta'
-    elif version.is_nightly:
-        branch = '-nightly'
-    elif version.is_release:
-        branch = ''
-    else:
-        branch = '-INVALID_BRANCH'
-
     platform = props['platform']
-    artifact_id = _ARTIFACT_ID_PER_PLATFORM[platform].format(branch=branch)
+    update_channel = _MOZ_UPDATE_CHANNEL_PER_BRANCH.get(branch, '-UNKNOWN_MOZ_UPDATE_CHANNEL')
+    artifact_id = _ARTIFACT_ID_PER_PLATFORM[platform].format(update_channel=update_channel)
     props['artifact-id'] = artifact_id
 
     props['app-name'] = 'geckoview' # this beetmover job is not about pushing Fennec
