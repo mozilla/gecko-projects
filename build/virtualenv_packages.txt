@@ -17,7 +17,6 @@ mozilla.pth:third_party/python/fluent
 mozilla.pth:third_party/python/funcsigs
 mozilla.pth:third_party/python/futures
 mozilla.pth:third_party/python/more-itertools
-mozilla.pth:third_party/python/mozilla-version
 mozilla.pth:third_party/python/gyp/pylib
 mozilla.pth:third_party/python/python-hglib
 mozilla.pth:third_party/python/pluggy
