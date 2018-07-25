@@ -101,7 +101,7 @@ def make_task_description(config, jobs):
             'attributes': attributes,
             'run-on-projects': ['mozilla-central'],
             'treeherder': treeherder,
-            'shipping-phase': phase,
+            'shipping-phase': job.get('shipping-phase', phase),
         }
 
         yield task
