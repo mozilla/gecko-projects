@@ -279,6 +279,10 @@ release-snap-push
 -----------------
 Pushes Snap repackage on Snap store.
 
+release-flatpak-repackage
+----------------------
+Generate an installer using Flatpak format.
+
 release-notify-push
 -------------------
 Notify when a release has been pushed to CDNs.

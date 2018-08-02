@@ -109,3 +109,5 @@ jobs:
     symbol: I(pip)
   firefox-snap:
     symbol: I(snap)
+  firefox-flatpak:
+    symbol: I(flatpak)
